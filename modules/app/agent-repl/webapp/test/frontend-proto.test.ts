@@ -2805,3 +2805,115 @@ describe("the build-refresh queue hold", () => {
     ).toThrow(/QueueEntryBuildRefreshHold/);
   });
 });
+
+describe("MergeQueueRoster", () => {
+  const ENTRY = {
+    runId: "r1",
+    workspace: "/w",
+    workspaceName: "w",
+    sourceBranch: "feat",
+  };
+
+  it("decodes the roster off its own frame arm", () => {
+    // Arrange / Act
+    const frame = decode({
+      mergeQueueRoster: {
+        paused: true,
+        updatedAtMs: "7",
+        repos: [{ repoKey: "repo", entries: [ENTRY] }],
+      },
+    });
+
+    // Assert
+    expect(frame.frame.case === "mergeQueueRoster" && frame.frame.value.paused).toBe(true);
+  });
+
+  it("keeps delivery order as the repo's entry order", () => {
+    // Arrange / Act
+    const frame = decode({
+      mergeQueueRoster: {
+        repos: [{ repoKey: "repo", entries: [ENTRY, { ...ENTRY, runId: "r2" }] }],
+      },
+    });
+
+    // Assert
+    expect(
+      frame.frame.case === "mergeQueueRoster" &&
+        frame.frame.value.repos[0].entries.map((e) => e.runId),
+    ).toEqual(["r1", "r2"]);
+  });
+
+  it("reads the head arm as what the head is doing", () => {
+    // Arrange / Act
+    const frame = decode({
+      mergeQueueRoster: {
+        repos: [{ repoKey: "repo", entries: [{ ...ENTRY, running: {} }] }],
+      },
+    });
+
+    // Assert
+    expect(
+      frame.frame.case === "mergeQueueRoster" &&
+        frame.frame.value.repos[0].entries[0].head?.case,
+    ).toBe("running");
+  });
+
+  it("leaves head ABSENT on an entry that is not the head", () => {
+    // Arrange / Act
+    const frame = decode({
+      mergeQueueRoster: { repos: [{ repoKey: "repo", entries: [ENTRY] }] },
+    });
+
+    // Assert
+    expect(
+      frame.frame.case === "mergeQueueRoster" && "head" in frame.frame.value.repos[0].entries[0],
+    ).toBe(false);
+  });
+
+  it("refuses an entry that sets two head arms", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decode({
+        mergeQueueRoster: {
+          repos: [{ repoKey: "repo", entries: [{ ...ENTRY, running: {}, terminalOwed: {} }] }],
+        },
+      }),
+    ).toThrow(/multiple head arms/);
+  });
+
+  it("refuses an entry with no run id", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decode({
+        mergeQueueRoster: {
+          repos: [{ repoKey: "repo", entries: [{ ...ENTRY, runId: "" }] }],
+        },
+      }),
+    ).toThrow(/missing required `runId`/);
+  });
+
+  it("refuses a repo group with no repo key", () => {
+    // Arrange / Act / Assert
+    expect(() => decode({ mergeQueueRoster: { repos: [{ repoKey: "", entries: [] }] } })).toThrow(
+      /missing required `repoKey`/,
+    );
+  });
+
+  it("refuses an unknown field on the roster", () => {
+    // Arrange / Act / Assert
+    expect(() => decode({ mergeQueueRoster: { paused: false, depth: 2 } })).toThrow(
+      /MergeQueueRoster/,
+    );
+  });
+
+  it("refuses a field on a bare head marker", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decode({
+        mergeQueueRoster: {
+          repos: [{ repoKey: "repo", entries: [{ ...ENTRY, running: { since: 1 } }] }],
+        },
+      }),
+    ).toThrow(/MergeQueueEntry.running/);
+  });
+});

@@ -106,3 +106,72 @@ message MergeStatusFailed {
   // Empty is never valid on a published failed arm.
   string failed_json = 6;
 }
+
+// The WHOLE merge queue, as the daemon will actually drain it: the global
+// pause bit plus every repository's outstanding entries in delivery order.
+// Pushed complete on every queue mutation (admit, complete, evict, pause,
+// resume, terminal-mark) and included in every connect snapshot. Assembled
+// under the queue's own lock, so what it shows IS what runs next — never a
+// re-derivation from per-run MergeStatus, whose enqueued positions are
+// admission-time facts that go stale as heads complete.
+message MergeQueueRoster {
+  // The daemon-global pause bit, durable across bounces. True means the run
+  // in flight (if any) finishes and nothing new starts; admission is NOT
+  // paused — entries still queue durably behind the gate.
+  bool paused = 1;
+  // When the roster last changed, unix millis, for staleness display only.
+  int64 updated_at_ms = 2;
+  // One group per repository with outstanding entries; an empty repo does
+  // not appear.
+  repeated MergeRepoQueue repos = 3;
+}
+
+message MergeRepoQueue {
+  // The queue key: the repository identity shared by every sibling worktree.
+  // Opaque beyond display.
+  string repo_key = 1;
+  // Delivery order; entries[0] is the head. Position is index + 1 —
+  // deliberately not a field, so it can never disagree with the order.
+  repeated MergeQueueEntry entries = 2;
+}
+
+message MergeQueueEntry {
+  // The run's identity — the SAME id every MergeStatus for this merge
+  // carries, and the key EvictMergeCmd names. Stable across daemon bounces.
+  string run_id = 1;
+  // The workspace's key (project dir).
+  string workspace = 2;
+  // The workspace's display name.
+  string workspace_name = 3;
+  // The branch being merged.
+  string source_branch = 4;
+  // Set ONLY on entries[0]; WHICH message is set is what the head is doing.
+  oneof head {
+    // The drain goroutine holds this entry: lease taken or being taken.
+    // Eviction is refused for it.
+    MergeQueueHeadRunning running = 5;
+    // Delivered but parked at the pause gate: nothing has started.
+    MergeQueueHeadPausedWaiting paused_waiting = 6;
+    // A durably marked terminal word awaits re-publication; it will be
+    // answered, not re-run.
+    MergeQueueHeadTerminalOwed terminal_owed = 7;
+  }
+}
+message MergeQueueHeadRunning {}
+message MergeQueueHeadPausedWaiting {}
+message MergeQueueHeadTerminalOwed {}
+
+// Pause the merge queue: the run in flight finishes, nothing new dequeues.
+// Durable across bounces. Idempotent. Daemon-global (the command's
+// workspace is ignored).
+message PauseMergeQueueCmd {}
+// Resume the merge queue. Idempotent, daemon-global.
+message ResumeMergeQueueCmd {}
+// Evict ONE waiting entry by run id. The evicted run receives a terminal
+// failed MergeStatus with an eviction cause, so the workspace's merge axis
+// resolves immediately. REFUSED when run_id names the running head (only its
+// drain goroutine may retire it) or names nothing outstanding.
+message EvictMergeCmd {
+  // The run id the roster and every MergeStatus carry.
+  string run_id = 1;
+}

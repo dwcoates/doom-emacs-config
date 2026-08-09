@@ -738,6 +738,510 @@ func (x *MergeStatusFailed) GetFailedJson() string {
 	return ""
 }
 
+// The WHOLE merge queue, as the daemon will actually drain it: the global
+// pause bit plus every repository's outstanding entries in delivery order.
+// Pushed complete on every queue mutation (admit, complete, evict, pause,
+// resume, terminal-mark) and included in every connect snapshot. Assembled
+// under the queue's own lock, so what it shows IS what runs next — never a
+// re-derivation from per-run MergeStatus, whose enqueued positions are
+// admission-time facts that go stale as heads complete.
+type MergeQueueRoster struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The daemon-global pause bit, durable across bounces. True means the run
+	// in flight (if any) finishes and nothing new starts; admission is NOT
+	// paused — entries still queue durably behind the gate.
+	Paused bool `protobuf:"varint,1,opt,name=paused,proto3" json:"paused,omitempty"`
+	// When the roster last changed, unix millis, for staleness display only.
+	UpdatedAtMs int64 `protobuf:"varint,2,opt,name=updated_at_ms,json=updatedAtMs,proto3" json:"updated_at_ms,omitempty"`
+	// One group per repository with outstanding entries; an empty repo does
+	// not appear.
+	Repos         []*MergeRepoQueue `protobuf:"bytes,3,rep,name=repos,proto3" json:"repos,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeQueueRoster) Reset() {
+	*x = MergeQueueRoster{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeQueueRoster) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeQueueRoster) ProtoMessage() {}
+
+func (x *MergeQueueRoster) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeQueueRoster.ProtoReflect.Descriptor instead.
+func (*MergeQueueRoster) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *MergeQueueRoster) GetPaused() bool {
+	if x != nil {
+		return x.Paused
+	}
+	return false
+}
+
+func (x *MergeQueueRoster) GetUpdatedAtMs() int64 {
+	if x != nil {
+		return x.UpdatedAtMs
+	}
+	return 0
+}
+
+func (x *MergeQueueRoster) GetRepos() []*MergeRepoQueue {
+	if x != nil {
+		return x.Repos
+	}
+	return nil
+}
+
+type MergeRepoQueue struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The queue key: the repository identity shared by every sibling worktree.
+	// Opaque beyond display.
+	RepoKey string `protobuf:"bytes,1,opt,name=repo_key,json=repoKey,proto3" json:"repo_key,omitempty"`
+	// Delivery order; entries[0] is the head. Position is index + 1 —
+	// deliberately not a field, so it can never disagree with the order.
+	Entries       []*MergeQueueEntry `protobuf:"bytes,2,rep,name=entries,proto3" json:"entries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeRepoQueue) Reset() {
+	*x = MergeRepoQueue{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeRepoQueue) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeRepoQueue) ProtoMessage() {}
+
+func (x *MergeRepoQueue) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeRepoQueue.ProtoReflect.Descriptor instead.
+func (*MergeRepoQueue) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *MergeRepoQueue) GetRepoKey() string {
+	if x != nil {
+		return x.RepoKey
+	}
+	return ""
+}
+
+func (x *MergeRepoQueue) GetEntries() []*MergeQueueEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+type MergeQueueEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The run's identity — the SAME id every MergeStatus for this merge
+	// carries, and the key EvictMergeCmd names. Stable across daemon bounces.
+	RunId string `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	// The workspace's key (project dir).
+	Workspace string `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// The workspace's display name.
+	WorkspaceName string `protobuf:"bytes,3,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
+	// The branch being merged.
+	SourceBranch string `protobuf:"bytes,4,opt,name=source_branch,json=sourceBranch,proto3" json:"source_branch,omitempty"`
+	// Set ONLY on entries[0]; WHICH message is set is what the head is doing.
+	//
+	// Types that are valid to be assigned to Head:
+	//
+	//	*MergeQueueEntry_Running
+	//	*MergeQueueEntry_PausedWaiting
+	//	*MergeQueueEntry_TerminalOwed
+	Head          isMergeQueueEntry_Head `protobuf_oneof:"head"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeQueueEntry) Reset() {
+	*x = MergeQueueEntry{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeQueueEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeQueueEntry) ProtoMessage() {}
+
+func (x *MergeQueueEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeQueueEntry.ProtoReflect.Descriptor instead.
+func (*MergeQueueEntry) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *MergeQueueEntry) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *MergeQueueEntry) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
+func (x *MergeQueueEntry) GetWorkspaceName() string {
+	if x != nil {
+		return x.WorkspaceName
+	}
+	return ""
+}
+
+func (x *MergeQueueEntry) GetSourceBranch() string {
+	if x != nil {
+		return x.SourceBranch
+	}
+	return ""
+}
+
+func (x *MergeQueueEntry) GetHead() isMergeQueueEntry_Head {
+	if x != nil {
+		return x.Head
+	}
+	return nil
+}
+
+func (x *MergeQueueEntry) GetRunning() *MergeQueueHeadRunning {
+	if x != nil {
+		if x, ok := x.Head.(*MergeQueueEntry_Running); ok {
+			return x.Running
+		}
+	}
+	return nil
+}
+
+func (x *MergeQueueEntry) GetPausedWaiting() *MergeQueueHeadPausedWaiting {
+	if x != nil {
+		if x, ok := x.Head.(*MergeQueueEntry_PausedWaiting); ok {
+			return x.PausedWaiting
+		}
+	}
+	return nil
+}
+
+func (x *MergeQueueEntry) GetTerminalOwed() *MergeQueueHeadTerminalOwed {
+	if x != nil {
+		if x, ok := x.Head.(*MergeQueueEntry_TerminalOwed); ok {
+			return x.TerminalOwed
+		}
+	}
+	return nil
+}
+
+type isMergeQueueEntry_Head interface {
+	isMergeQueueEntry_Head()
+}
+
+type MergeQueueEntry_Running struct {
+	// The drain goroutine holds this entry: lease taken or being taken.
+	// Eviction is refused for it.
+	Running *MergeQueueHeadRunning `protobuf:"bytes,5,opt,name=running,proto3,oneof"`
+}
+
+type MergeQueueEntry_PausedWaiting struct {
+	// Delivered but parked at the pause gate: nothing has started.
+	PausedWaiting *MergeQueueHeadPausedWaiting `protobuf:"bytes,6,opt,name=paused_waiting,json=pausedWaiting,proto3,oneof"`
+}
+
+type MergeQueueEntry_TerminalOwed struct {
+	// A durably marked terminal word awaits re-publication; it will be
+	// answered, not re-run.
+	TerminalOwed *MergeQueueHeadTerminalOwed `protobuf:"bytes,7,opt,name=terminal_owed,json=terminalOwed,proto3,oneof"`
+}
+
+func (*MergeQueueEntry_Running) isMergeQueueEntry_Head() {}
+
+func (*MergeQueueEntry_PausedWaiting) isMergeQueueEntry_Head() {}
+
+func (*MergeQueueEntry_TerminalOwed) isMergeQueueEntry_Head() {}
+
+type MergeQueueHeadRunning struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeQueueHeadRunning) Reset() {
+	*x = MergeQueueHeadRunning{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeQueueHeadRunning) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeQueueHeadRunning) ProtoMessage() {}
+
+func (x *MergeQueueHeadRunning) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeQueueHeadRunning.ProtoReflect.Descriptor instead.
+func (*MergeQueueHeadRunning) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{12}
+}
+
+type MergeQueueHeadPausedWaiting struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeQueueHeadPausedWaiting) Reset() {
+	*x = MergeQueueHeadPausedWaiting{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeQueueHeadPausedWaiting) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeQueueHeadPausedWaiting) ProtoMessage() {}
+
+func (x *MergeQueueHeadPausedWaiting) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeQueueHeadPausedWaiting.ProtoReflect.Descriptor instead.
+func (*MergeQueueHeadPausedWaiting) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{13}
+}
+
+type MergeQueueHeadTerminalOwed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeQueueHeadTerminalOwed) Reset() {
+	*x = MergeQueueHeadTerminalOwed{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeQueueHeadTerminalOwed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeQueueHeadTerminalOwed) ProtoMessage() {}
+
+func (x *MergeQueueHeadTerminalOwed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeQueueHeadTerminalOwed.ProtoReflect.Descriptor instead.
+func (*MergeQueueHeadTerminalOwed) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{14}
+}
+
+// Pause the merge queue: the run in flight finishes, nothing new dequeues.
+// Durable across bounces. Idempotent. Daemon-global (the command's
+// workspace is ignored).
+type PauseMergeQueueCmd struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PauseMergeQueueCmd) Reset() {
+	*x = PauseMergeQueueCmd{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PauseMergeQueueCmd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PauseMergeQueueCmd) ProtoMessage() {}
+
+func (x *PauseMergeQueueCmd) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PauseMergeQueueCmd.ProtoReflect.Descriptor instead.
+func (*PauseMergeQueueCmd) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{15}
+}
+
+// Resume the merge queue. Idempotent, daemon-global.
+type ResumeMergeQueueCmd struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResumeMergeQueueCmd) Reset() {
+	*x = ResumeMergeQueueCmd{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResumeMergeQueueCmd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResumeMergeQueueCmd) ProtoMessage() {}
+
+func (x *ResumeMergeQueueCmd) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResumeMergeQueueCmd.ProtoReflect.Descriptor instead.
+func (*ResumeMergeQueueCmd) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{16}
+}
+
+// Evict ONE waiting entry by run id. The evicted run receives a terminal
+// failed MergeStatus with an eviction cause, so the workspace's merge axis
+// resolves immediately. REFUSED when run_id names the running head (only its
+// drain goroutine may retire it) or names nothing outstanding.
+type EvictMergeCmd struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The run id the roster and every MergeStatus carry.
+	RunId         string `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EvictMergeCmd) Reset() {
+	*x = EvictMergeCmd{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EvictMergeCmd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EvictMergeCmd) ProtoMessage() {}
+
+func (x *EvictMergeCmd) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EvictMergeCmd.ProtoReflect.Descriptor instead.
+func (*EvictMergeCmd) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *EvictMergeCmd) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
 var File_agentshim_frontend_v1_merge_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_merge_proto_rawDesc = "" +
@@ -792,7 +1296,30 @@ const file_agentshim_frontend_v1_merge_proto_rawDesc = "" +
 	"failingSha\x12'\n" +
 	"\x0ffailing_subject\x18\x05 \x01(\tR\x0efailingSubject\x12\x1f\n" +
 	"\vfailed_json\x18\x06 \x01(\tR\n" +
-	"failedJsonB2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
+	"failedJson\"\x8b\x01\n" +
+	"\x10MergeQueueRoster\x12\x16\n" +
+	"\x06paused\x18\x01 \x01(\bR\x06paused\x12\"\n" +
+	"\rupdated_at_ms\x18\x02 \x01(\x03R\vupdatedAtMs\x12;\n" +
+	"\x05repos\x18\x03 \x03(\v2%.agentshim.frontend.v1.MergeRepoQueueR\x05repos\"m\n" +
+	"\x0eMergeRepoQueue\x12\x19\n" +
+	"\brepo_key\x18\x01 \x01(\tR\arepoKey\x12@\n" +
+	"\aentries\x18\x02 \x03(\v2&.agentshim.frontend.v1.MergeQueueEntryR\aentries\"\x9b\x03\n" +
+	"\x0fMergeQueueEntry\x12\x15\n" +
+	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x1c\n" +
+	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x12%\n" +
+	"\x0eworkspace_name\x18\x03 \x01(\tR\rworkspaceName\x12#\n" +
+	"\rsource_branch\x18\x04 \x01(\tR\fsourceBranch\x12H\n" +
+	"\arunning\x18\x05 \x01(\v2,.agentshim.frontend.v1.MergeQueueHeadRunningH\x00R\arunning\x12[\n" +
+	"\x0epaused_waiting\x18\x06 \x01(\v22.agentshim.frontend.v1.MergeQueueHeadPausedWaitingH\x00R\rpausedWaiting\x12X\n" +
+	"\rterminal_owed\x18\a \x01(\v21.agentshim.frontend.v1.MergeQueueHeadTerminalOwedH\x00R\fterminalOwedB\x06\n" +
+	"\x04head\"\x17\n" +
+	"\x15MergeQueueHeadRunning\"\x1d\n" +
+	"\x1bMergeQueueHeadPausedWaiting\"\x1c\n" +
+	"\x1aMergeQueueHeadTerminalOwed\"\x14\n" +
+	"\x12PauseMergeQueueCmd\"\x15\n" +
+	"\x13ResumeMergeQueueCmd\"&\n" +
+	"\rEvictMergeCmd\x12\x15\n" +
+	"\x06run_id\x18\x01 \x01(\tR\x05runIdB2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_agentshim_frontend_v1_merge_proto_rawDescOnce sync.Once
@@ -806,32 +1333,46 @@ func file_agentshim_frontend_v1_merge_proto_rawDescGZIP() []byte {
 	return file_agentshim_frontend_v1_merge_proto_rawDescData
 }
 
-var file_agentshim_frontend_v1_merge_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_agentshim_frontend_v1_merge_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_agentshim_frontend_v1_merge_proto_goTypes = []any{
-	(*MergeStatus)(nil),              // 0: agentshim.frontend.v1.MergeStatus
-	(*MergeStatusEnqueued)(nil),      // 1: agentshim.frontend.v1.MergeStatusEnqueued
-	(*MergeStatusBeforeAction)(nil),  // 2: agentshim.frontend.v1.MergeStatusBeforeAction
-	(*MergeStatusCherryPicking)(nil), // 3: agentshim.frontend.v1.MergeStatusCherryPicking
-	(*MergeStatusTesting)(nil),       // 4: agentshim.frontend.v1.MergeStatusTesting
-	(*MergeStatusConflict)(nil),      // 5: agentshim.frontend.v1.MergeStatusConflict
-	(*MergeStatusAfterAction)(nil),   // 6: agentshim.frontend.v1.MergeStatusAfterAction
-	(*MergeStatusMerged)(nil),        // 7: agentshim.frontend.v1.MergeStatusMerged
-	(*MergeStatusFailed)(nil),        // 8: agentshim.frontend.v1.MergeStatusFailed
+	(*MergeStatus)(nil),                 // 0: agentshim.frontend.v1.MergeStatus
+	(*MergeStatusEnqueued)(nil),         // 1: agentshim.frontend.v1.MergeStatusEnqueued
+	(*MergeStatusBeforeAction)(nil),     // 2: agentshim.frontend.v1.MergeStatusBeforeAction
+	(*MergeStatusCherryPicking)(nil),    // 3: agentshim.frontend.v1.MergeStatusCherryPicking
+	(*MergeStatusTesting)(nil),          // 4: agentshim.frontend.v1.MergeStatusTesting
+	(*MergeStatusConflict)(nil),         // 5: agentshim.frontend.v1.MergeStatusConflict
+	(*MergeStatusAfterAction)(nil),      // 6: agentshim.frontend.v1.MergeStatusAfterAction
+	(*MergeStatusMerged)(nil),           // 7: agentshim.frontend.v1.MergeStatusMerged
+	(*MergeStatusFailed)(nil),           // 8: agentshim.frontend.v1.MergeStatusFailed
+	(*MergeQueueRoster)(nil),            // 9: agentshim.frontend.v1.MergeQueueRoster
+	(*MergeRepoQueue)(nil),              // 10: agentshim.frontend.v1.MergeRepoQueue
+	(*MergeQueueEntry)(nil),             // 11: agentshim.frontend.v1.MergeQueueEntry
+	(*MergeQueueHeadRunning)(nil),       // 12: agentshim.frontend.v1.MergeQueueHeadRunning
+	(*MergeQueueHeadPausedWaiting)(nil), // 13: agentshim.frontend.v1.MergeQueueHeadPausedWaiting
+	(*MergeQueueHeadTerminalOwed)(nil),  // 14: agentshim.frontend.v1.MergeQueueHeadTerminalOwed
+	(*PauseMergeQueueCmd)(nil),          // 15: agentshim.frontend.v1.PauseMergeQueueCmd
+	(*ResumeMergeQueueCmd)(nil),         // 16: agentshim.frontend.v1.ResumeMergeQueueCmd
+	(*EvictMergeCmd)(nil),               // 17: agentshim.frontend.v1.EvictMergeCmd
 }
 var file_agentshim_frontend_v1_merge_proto_depIdxs = []int32{
-	1, // 0: agentshim.frontend.v1.MergeStatus.enqueued:type_name -> agentshim.frontend.v1.MergeStatusEnqueued
-	2, // 1: agentshim.frontend.v1.MergeStatus.before_action:type_name -> agentshim.frontend.v1.MergeStatusBeforeAction
-	3, // 2: agentshim.frontend.v1.MergeStatus.cherry_picking:type_name -> agentshim.frontend.v1.MergeStatusCherryPicking
-	4, // 3: agentshim.frontend.v1.MergeStatus.testing:type_name -> agentshim.frontend.v1.MergeStatusTesting
-	5, // 4: agentshim.frontend.v1.MergeStatus.conflict:type_name -> agentshim.frontend.v1.MergeStatusConflict
-	6, // 5: agentshim.frontend.v1.MergeStatus.after_action:type_name -> agentshim.frontend.v1.MergeStatusAfterAction
-	7, // 6: agentshim.frontend.v1.MergeStatus.merged:type_name -> agentshim.frontend.v1.MergeStatusMerged
-	8, // 7: agentshim.frontend.v1.MergeStatus.failed:type_name -> agentshim.frontend.v1.MergeStatusFailed
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	1,  // 0: agentshim.frontend.v1.MergeStatus.enqueued:type_name -> agentshim.frontend.v1.MergeStatusEnqueued
+	2,  // 1: agentshim.frontend.v1.MergeStatus.before_action:type_name -> agentshim.frontend.v1.MergeStatusBeforeAction
+	3,  // 2: agentshim.frontend.v1.MergeStatus.cherry_picking:type_name -> agentshim.frontend.v1.MergeStatusCherryPicking
+	4,  // 3: agentshim.frontend.v1.MergeStatus.testing:type_name -> agentshim.frontend.v1.MergeStatusTesting
+	5,  // 4: agentshim.frontend.v1.MergeStatus.conflict:type_name -> agentshim.frontend.v1.MergeStatusConflict
+	6,  // 5: agentshim.frontend.v1.MergeStatus.after_action:type_name -> agentshim.frontend.v1.MergeStatusAfterAction
+	7,  // 6: agentshim.frontend.v1.MergeStatus.merged:type_name -> agentshim.frontend.v1.MergeStatusMerged
+	8,  // 7: agentshim.frontend.v1.MergeStatus.failed:type_name -> agentshim.frontend.v1.MergeStatusFailed
+	10, // 8: agentshim.frontend.v1.MergeQueueRoster.repos:type_name -> agentshim.frontend.v1.MergeRepoQueue
+	11, // 9: agentshim.frontend.v1.MergeRepoQueue.entries:type_name -> agentshim.frontend.v1.MergeQueueEntry
+	12, // 10: agentshim.frontend.v1.MergeQueueEntry.running:type_name -> agentshim.frontend.v1.MergeQueueHeadRunning
+	13, // 11: agentshim.frontend.v1.MergeQueueEntry.paused_waiting:type_name -> agentshim.frontend.v1.MergeQueueHeadPausedWaiting
+	14, // 12: agentshim.frontend.v1.MergeQueueEntry.terminal_owed:type_name -> agentshim.frontend.v1.MergeQueueHeadTerminalOwed
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_merge_proto_init() }
@@ -849,13 +1390,18 @@ func file_agentshim_frontend_v1_merge_proto_init() {
 		(*MergeStatus_Merged)(nil),
 		(*MergeStatus_Failed)(nil),
 	}
+	file_agentshim_frontend_v1_merge_proto_msgTypes[11].OneofWrappers = []any{
+		(*MergeQueueEntry_Running)(nil),
+		(*MergeQueueEntry_PausedWaiting)(nil),
+		(*MergeQueueEntry_TerminalOwed)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_merge_proto_rawDesc), len(file_agentshim_frontend_v1_merge_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
