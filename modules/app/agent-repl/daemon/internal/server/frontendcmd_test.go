@@ -60,7 +60,10 @@ type fakePrompts struct {
 	// a test can prove the frontend's own id reaches the session controller.
 	interruptRequestIDs []string
 	perms               []string
-	models              []string
+	// permRequestIDs records the command id each permission answer was carried
+	// under, which a decline needs: the stop it issues is named by it.
+	permRequestIDs []string
+	models         []string
 	err                 error
 	// turnActive is what this fake reports as the workspace's observed turn
 	// state, so one double serves as both the prompt router and the interrupt
@@ -156,8 +159,9 @@ func (f *fakePrompts) Interrupt(_ context.Context, ws, requestID string) error {
 	f.interruptRequestIDs = append(f.interruptRequestIDs, requestID)
 	return f.err
 }
-func (f *fakePrompts) AnswerPermission(_ context.Context, _, permReqID string, _ bool, _ string, _ *structpb.Struct) error {
+func (f *fakePrompts) AnswerPermission(_ context.Context, _, requestID, permReqID string, _ bool, _ string, _ *structpb.Struct) error {
 	f.perms = append(f.perms, permReqID)
+	f.permRequestIDs = append(f.permRequestIDs, requestID)
 	return f.err
 }
 func (f *fakePrompts) SetModel(_ context.Context, _ string, model string) (string, error) {
