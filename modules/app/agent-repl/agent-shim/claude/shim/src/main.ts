@@ -348,6 +348,15 @@ const probeCanUseTool: CanUseToolLike = () => {
 };
 
 /**
+ * Stand-in permission callback for the options object built solely to be
+ * FINGERPRINTED. Nothing drives a turn with it, so a call is a broken
+ * invariant rather than a permission question.
+ */
+const fingerprintCanUseTool: CanUseToolLike = () => {
+  throw new Error("shim: the runtime-identity fingerprint options were asked to permit a tool, but they run no turn");
+};
+
+/**
  * SDK options for the throwaway command probe.
  *
  * Derived from {@link realQueryOptions} rather than hand-rolled, because a
@@ -582,6 +591,13 @@ export async function runUdsMode(
     requestedModel: args.model,
     sdkVersion: packageVersion("@anthropic-ai/claude-agent-sdk/package.json"),
     shimBuildSha: process.env.SHIM_BUILD_SHA ?? "",
+    // The query's runtime-identity evidence. Both are read straight off the
+    // builders the real query uses, so the fingerprints the daemon reconciles
+    // against describe the configuration the turn actually ran under. The
+    // canUseTool passed here exists only to satisfy the builder's signature and
+    // is never invoked: fingerprinting an options object does not run a turn.
+    effectiveQueryOptions: realQueryOptions(args, fingerprintCanUseTool),
+    contextPrefix: systemPromptOption(args.cwd),
     // `--resume <uuid>` IS the vendor session id the store keys events by, so
     // a resumed session can subscribe correctly from its very first Subscribe
     // instead of waiting for the SDK to reveal the uuid.
