@@ -48,13 +48,32 @@ func newTurnLifecycle(store StateApplier, workspace, claimantSessionID string) t
 // closed names the phantom claims the reconciliation ended, and it is what the
 // caller releases its queue on: a prompt held behind one of them is waiting for
 // a boundary the process that owed it no longer exists to send.
+//
+// ---------------------------------------------------------------------------
+// THE STORE'S RECORD OUTRANKS ANY PROCESS'S MEMORY
+// ---------------------------------------------------------------------------
+//
+// This is the one place a turn is judged CUT, and the judgment may not be made
+// from the hello alone. A hello is a live process's account of what it is
+// running NOW, and by that account a turn that finished during the daemon gap
+// and a turn that died with its process are the same silence. Only the durable
+// terminal record separates them, and it is the higher authority: a `TurnEnded`
+// in the store is a recorded fact, while process memory on either side is an
+// inference about one.
+//
+// So the store is read FIRST (durableTurnEnds), and every claim it can prove a
+// terminal for is spared. A spared claim is settled COMPLETED by its own
+// replayed boundary through the ordinary turn lifecycle — accounting, result
+// item, progress edge and all — rather than replaced by a synthesized cut.
+// Only a claim the store has NO terminal evidence for is cut as interrupted.
 func (c *consumer) reconcileTurnHandshake(hello *corev1.ShimHello) (active bool, closed []string, err error) {
+	durablyEnded := c.durablySettledClaims(hello)
 	before, after, closed, err := c.ssm.ReconcileTurnHandshake(
-		c.workspace, c.sessionID, hello.GetActiveTurnIds(), hello.GetTurnInFlight(),
+		c.workspace, c.sessionID, hello.GetActiveTurnIds(), hello.GetTurnInFlight(), durablyEnded,
 	)
-	c.logf("session-controller: turn handshake plane=stream kind=shim_hello session=%s seq=none turn_ids=%s turn_in_flight=%v durable_before=%s durable_after=%s phantom_closed=%s decision=%s notify=%v error=%v",
+	c.logf("session-controller: turn handshake plane=stream kind=shim_hello session=%s seq=none turn_ids=%s turn_in_flight=%v durable_before=%s durable_after=%s durably_ended=%s phantom_closed=%s decision=%s notify=%v error=%v",
 		c.sessionID, formatTurnIDs(hello.GetActiveTurnIds()), hello.GetTurnInFlight(),
-		formatTurnIDs(before), formatTurnIDs(after), formatTurnIDs(closed),
+		formatTurnIDs(before), formatTurnIDs(after), formatTurnIDs(durablyEnded), formatTurnIDs(closed),
 		handshakeDecision(before, after, err), true, err)
 	if err != nil {
 		return false, nil, err
@@ -65,6 +84,53 @@ func (c *consumer) reconcileTurnHandshake(hello *corev1.ShimHello) (active bool,
 			formatTurnIDs(before))
 	}
 	return len(after) > 0, closed, nil
+}
+
+// durablySettledClaims names the standing turn claims the STORE already holds a
+// terminal event for, and it is consulted before any claim may be cut.
+//
+// IT RUNS ONLY ON THE HELLO THAT WOULD OTHERWISE CUT. The probe is a store
+// replay, and it can change exactly one answer: whether a claim the hello no
+// longer names was interrupted or completed. A hello that names its turns, or a
+// legacy shim positively asserting one, or a workspace holding no claim at all,
+// all reach a decision without it, so none of them pays for it.
+//
+// EVERY FAILURE RETURNS NO EVIDENCE AND IS LOUD. Absence of evidence is not
+// evidence of completion: with nothing proved, the reconciliation cuts the claim
+// exactly as it did before, and this record is what explains a completed turn
+// that was nonetheless reported interrupted.
+func (c *consumer) durablySettledClaims(hello *corev1.ShimHello) []string {
+	if len(hello.GetActiveTurnIds()) > 0 || hello.GetTurnInFlight() {
+		return nil
+	}
+	standing, err := c.ssm.ActiveTurnIDs(c.workspace, c.sessionID)
+	if err != nil {
+		c.warn("session-controller: durable turn-end evidence UNREADABLE ws=%q session=%s: reading the standing turn claims failed: %v — the handshake proceeds on the hello alone, so a turn that finished during the gap can still be reported interrupted",
+			c.workspace, c.sessionID, err)
+		return nil
+	}
+	if len(standing) == 0 {
+		return nil
+	}
+	if c.durableTurnEnds == nil {
+		c.warn("session-controller: durable turn-end evidence UNAVAILABLE ws=%q session=%s standing=%s — no durable history source is wired to this consumer, so a turn that COMPLETED during the gap cannot be told apart from one that was CUT, and these claims take the interrupted verdict",
+			c.workspace, c.sessionID, formatTurnIDs(standing))
+		return nil
+	}
+	settled, err := c.durableTurnEnds(standing)
+	if err != nil {
+		c.warn("session-controller: durable turn-end evidence UNREADABLE ws=%q session=%s standing=%s: %v — with nothing proved these claims are cut as interrupted, which is the pre-existing verdict and may misreport a turn that finished",
+			c.workspace, c.sessionID, formatTurnIDs(standing), err)
+		return nil
+	}
+	if len(settled) == 0 {
+		c.logf("session-controller: durable turn-end evidence ABSENT ws=%q session=%s standing=%s — the store holds no terminal for any standing claim, so these turns really were cut when the process behind them went away",
+			c.workspace, c.sessionID, formatTurnIDs(standing))
+		return nil
+	}
+	c.logf("session-controller: turn COMPLETED DURING THE GAP ws=%q session=%s standing=%s durably_ended=%s — the store's record outranks the hello's silence, so these claims are NOT cut; each is settled by its own replayed `TurnEnded` through the ordinary lifecycle, keeping its accounting and its result",
+		c.workspace, c.sessionID, formatTurnIDs(standing), formatTurnIDs(settled))
+	return settled
 }
 
 // resolve decides whether ev may mutate live turn state.

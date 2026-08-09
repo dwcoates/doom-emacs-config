@@ -304,6 +304,49 @@ func TestInterruptAckSuccess(t *testing.T) {
 	}
 }
 
+// A CONTROL REQUEST THAT WAS DELIVERED IS NOT ONE THAT NEVER LEFT. The shim
+// dispatches synchronously, so an Interrupt that reached its socket has already
+// run against the SDK; losing the receipt loses the answer and not the effect,
+// and the caller must be able to tell that from an undeliverable stop.
+func TestInterruptDeliveredThenDisconnectedIsNamedAsUnacked(t *testing.T) {
+	// Arrange — the shim reads the Interrupt and then drops the connection
+	// without answering it.
+	h := newHarness()
+	path := startFakeShim(t, func(conn net.Conn) {
+		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
+		if _, err := wire.ReadAny(conn); err != nil {
+			t.Errorf("read Interrupt: %v", err)
+			return
+		}
+		_ = conn.Close()
+	})
+	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
+	defer stop()
+	waitConnected(t, connected)
+
+	// Act.
+	_, err := c.Interrupt(context.Background(), "fe-1")
+
+	// Assert.
+	if !errors.Is(err, ErrDeliveredUnacked) {
+		t.Fatalf("Interrupt err = %v, want ErrDeliveredUnacked — the shim received the stop and only its answer was lost", err)
+	}
+}
+
+func TestInterruptWithNoConnectionIsNotReportedAsDelivered(t *testing.T) {
+	// Arrange — no live connection at all, so nothing left the daemon.
+	h := newHarness()
+	c := New(h.config(t, "sess-1", "/nonexistent/agent-shim/session.sock"))
+
+	// Act.
+	_, err := c.Interrupt(context.Background(), "fe-1")
+
+	// Assert.
+	if errors.Is(err, ErrDeliveredUnacked) {
+		t.Fatalf("Interrupt err = %v, want a not-connected refusal rather than a delivered-unacked claim", err)
+	}
+}
+
 func TestSubmitPromptNotConnected(t *testing.T) {
 	// Arrange: a client that never connects (dials into the void via a path
 	// that is never served).

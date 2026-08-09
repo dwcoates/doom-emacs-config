@@ -134,12 +134,12 @@ func TestTurnClaimLedgerRejectsEnvelopeAndHandshakeIdentityAmbiguity(t *testing.
 		t.Fatalf("envelope mismatch err = %v", err)
 	}
 	if _, _, _, err := m.ReconcileTurnHandshake(
-		"ws", "daemon-session", []string{"turn-1", "turn-1"}, true,
+		"ws", "daemon-session", []string{"turn-1", "turn-1"}, true, nil,
 	); err == nil || !strings.Contains(err.Error(), "duplicate identity") {
 		t.Fatalf("duplicate handshake identity err = %v", err)
 	}
 	if before, after, _, err := m.ReconcileTurnHandshake(
-		"ws", "daemon-session", nil, false,
+		"ws", "daemon-session", nil, false, nil,
 	); err != nil {
 		t.Fatalf("confirm empty ledger: %v", err)
 	} else if len(before) != 0 || len(after) != 0 {
@@ -241,7 +241,7 @@ func TestTurnClaimHandshakeAdoptsSnapshotAndRejectsContradictionBeforeMutation(t
 	path := filepath.Join(t.TempDir(), "state.db")
 	first := openTurnClaimManager(t, path)
 	before, after, _, err := first.ReconcileTurnHandshake(
-		"ws", "daemon-session", []string{"turn-live"}, true,
+		"ws", "daemon-session", []string{"turn-live"}, true, nil,
 	)
 	if err != nil {
 		t.Fatalf("adopt handshake: %v", err)
@@ -255,7 +255,7 @@ func TestTurnClaimHandshakeAdoptsSnapshotAndRejectsContradictionBeforeMutation(t
 
 	second := openTurnClaimManager(t, path)
 	before, after, _, err = second.ReconcileTurnHandshake(
-		"ws", "daemon-session", []string{"turn-other"}, true,
+		"ws", "daemon-session", []string{"turn-other"}, true, nil,
 	)
 	if err == nil || !strings.Contains(err.Error(), "disagree") {
 		t.Fatalf("contradictory handshake err = %v", err)
@@ -280,7 +280,7 @@ func TestTurnClaimHandshakeAdoptsSnapshotAndRejectsContradictionBeforeMutation(t
 
 func TestLegacyHandshakeClaimBindsToFirstOrderedStreamStart(t *testing.T) {
 	m, _, _ := openUnwiredTest(t, fakeResolver{"vendor-session": "ws"})
-	if _, after, _, err := m.ReconcileTurnHandshake("ws", "daemon-session", nil, true); err != nil {
+	if _, after, _, err := m.ReconcileTurnHandshake("ws", "daemon-session", nil, true, nil); err != nil {
 		t.Fatalf("legacy handshake: %v", err)
 	} else if !reflect.DeepEqual(after, []string{""}) {
 		t.Fatalf("legacy active claims = %v, want one anonymous claim", after)
@@ -307,7 +307,7 @@ func TestHandshakeWithNoTurnsClosesAStaleThinking(t *testing.T) {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act.
-	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false, nil); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
 	// Assert.
@@ -325,7 +325,7 @@ func TestHandshakeNamingLiveTurnsLeavesTheAxisAlone(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	claimTurn(t, m, "ws1", "s1", "s1", "turn-a", 1)
 	// Act.
-	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", []string{"turn-a"}, false); err != nil {
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", []string{"turn-a"}, false, nil); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
 	// Assert.
@@ -346,7 +346,7 @@ func TestHandshakeWithLegacyActiveLeavesTheAxisAlone(t *testing.T) {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act.
-	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, true); err != nil {
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, true, nil); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
 	// Assert.
@@ -369,7 +369,7 @@ func TestHandshakeOverASettledAxisAppendsNothing(t *testing.T) {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Act.
-	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false, nil); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
 	// Assert.
@@ -391,7 +391,7 @@ func TestHandshakeCloseFailureIsLoggedWithoutFailingTheHandshake(t *testing.T) {
 		t.Fatalf("drop workspace_state: %v", err)
 	}
 	// Act.
-	before, after, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false)
+	before, after, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false, nil)
 	// Assert.
 	if err != nil {
 		t.Fatalf("ReconcileTurnHandshake = %v, want nil — the ledger reconciliation itself succeeded", err)
@@ -419,7 +419,7 @@ func TestHandshakeCloseUnblocksTheSuppressedReadiness(t *testing.T) {
 		t.Fatalf("arrangement did not reproduce the suppression; log:\n%s", strings.Join(cl.lines, "\n"))
 	}
 	// Act — the shim comes back reporting nothing, then announces readiness.
-	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false, nil); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
 	if err := applyTest(m, evSessionStarted("s1", 3)); err != nil {
@@ -514,7 +514,7 @@ func TestHandshakeReportingNoTurnClosesThePhantomClaim(t *testing.T) {
 	claimTurn(t, m, "ws1", "s1", "s1", "daemon-prompt-1", 1)
 
 	// Act — the returning shim reports no turn in flight and no turn ids.
-	_, after, closed, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false)
+	_, after, closed, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false, nil)
 
 	// Assert.
 	if err != nil {
@@ -537,7 +537,7 @@ func TestHandshakePhantomCloseRecordsTheRestartInterruptCause(t *testing.T) {
 	claimTurn(t, m, "ws1", "s1", "s1", "daemon-prompt-1", 2)
 
 	// Act.
-	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false, nil); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
 
@@ -550,13 +550,98 @@ func TestHandshakePhantomCloseRecordsTheRestartInterruptCause(t *testing.T) {
 	}
 }
 
+func TestHandshakeSparesTheClaimTheStoreProvesCompleted(t *testing.T) {
+	// Arrange — a turn that FINISHED during the daemon gap. The hello is silent
+	// about it exactly as it is silent about a cut one, and only the durable
+	// terminal record tells the two apart.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	claimTurn(t, m, "ws1", "s1", "s1", "daemon-prompt-1", 1)
+
+	// Act.
+	_, after, closed, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false, []string{"daemon-prompt-1"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReconcileTurnHandshake: %v", err)
+	}
+	if len(closed) != 0 {
+		t.Fatalf("closed = %v, want none — the store's record outranks the hello's silence", closed)
+	}
+	if !reflect.DeepEqual(after, []string{"daemon-prompt-1"}) {
+		t.Fatalf("durable active turns = %v, want the claim held open for its own replayed TurnEnded", after)
+	}
+}
+
+func TestHandshakeCutsOnlyTheClaimTheStoreCannotProve(t *testing.T) {
+	// Arrange — one completed turn beside one genuinely cut turn.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	claimTurn(t, m, "ws1", "s1", "s1", "turn-finished", 1)
+	claimTurn(t, m, "ws1", "s1", "s1", "turn-cut", 2)
+
+	// Act.
+	_, after, closed, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false, []string{"turn-finished"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReconcileTurnHandshake: %v", err)
+	}
+	if !reflect.DeepEqual(closed, []string{"turn-cut"}) {
+		t.Fatalf("closed = %v, want only the claim with no durable terminal evidence", closed)
+	}
+	if !reflect.DeepEqual(after, []string{"turn-finished"}) {
+		t.Fatalf("durable active turns = %v, want the durably-ended claim still open", after)
+	}
+}
+
+func TestHandshakeSparingAClaimLeavesTheStatusAxisToItsOwnBoundary(t *testing.T) {
+	// Arrange — the stale-turn tidy retires `thinking` on a handshake that
+	// finds nothing running. A claim deliberately held open is still running as
+	// far as every reader is concerned until its own end replays.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+	claimTurn(t, m, "ws1", "s1", "s1", "daemon-prompt-1", 2)
+
+	// Act.
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false, []string{"daemon-prompt-1"}); err != nil {
+		t.Fatalf("ReconcileTurnHandshake: %v", err)
+	}
+
+	// Assert.
+	if !mustCurrent(t, m, "ws1").GetTurnActive() {
+		t.Fatal("turn_active = false, want the axis left standing for the spared claim's own replayed boundary")
+	}
+}
+
+func TestHandshakeSparingAnAbsentClaimStillCutsTheStandingOne(t *testing.T) {
+	// Arrange — evidence naming a turn this claimant does not hold must not
+	// spare a different claim by accident.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	claimTurn(t, m, "ws1", "s1", "s1", "turn-standing", 1)
+
+	// Act.
+	_, after, closed, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false, []string{"turn-elsewhere"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReconcileTurnHandshake: %v", err)
+	}
+	if !reflect.DeepEqual(closed, []string{"turn-standing"}) {
+		t.Fatalf("closed = %v, want the standing claim cut — nothing proved anything about it", closed)
+	}
+	if len(after) != 0 {
+		t.Fatalf("durable active turns = %v, want none", after)
+	}
+}
+
 func TestHandshakeConfirmingItsOwnClaimClosesNothing(t *testing.T) {
 	// Arrange — the shim names the very turn the ledger holds.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	claimTurn(t, m, "ws1", "s1", "s1", "turn-live", 1)
 
 	// Act.
-	_, after, closed, err := m.ReconcileTurnHandshake("ws1", "s1", []string{"turn-live"}, true)
+	_, after, closed, err := m.ReconcileTurnHandshake("ws1", "s1", []string{"turn-live"}, true, nil)
 
 	// Assert.
 	if err != nil {
@@ -577,7 +662,7 @@ func TestLegacyHandshakeClaimingATurnClosesNothing(t *testing.T) {
 	claimTurn(t, m, "ws1", "s1", "s1", "turn-live", 1)
 
 	// Act.
-	_, after, closed, err := m.ReconcileTurnHandshake("ws1", "s1", nil, true)
+	_, after, closed, err := m.ReconcileTurnHandshake("ws1", "s1", nil, true, nil)
 
 	// Assert.
 	if err != nil {
@@ -657,7 +742,7 @@ func TestGenuineTurnEndAfterASynthesizedCloseIsAdmittedAsAReplay(t *testing.T) {
 	// recorded, so it is accounted for rather than read as a contradiction.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	claimTurn(t, m, "ws1", "s1", "s1", "turn-cut", 1)
-	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false, nil); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
 	end := turnClaimEvent(false, 2, "turn-cut")
@@ -722,7 +807,7 @@ func TestTurnClaimBridgeClassifiesRefusalByWhetherTheClaimIsStillLive(t *testing
 				t.Helper()
 				claimTurn(t, m, "ws", "daemon-session", "vendor-old", "daemon-prompt-2", 5)
 				// The restart reconciliation that closed the claim with end_seq=0.
-				if _, _, closed, err := m.ReconcileTurnHandshake("ws", "daemon-session", nil, false); err != nil {
+				if _, _, closed, err := m.ReconcileTurnHandshake("ws", "daemon-session", nil, false, nil); err != nil {
 					t.Fatalf("close the phantom claim: %v", err)
 				} else if !reflect.DeepEqual(closed, []string{"daemon-prompt-2"}) {
 					t.Fatalf("closed = %v, want the seeded claim", closed)
@@ -775,7 +860,7 @@ func TestDeadClaimBridgeRefusalLeavesTheClosedClaimUntouched(t *testing.T) {
 	// Arrange — a closed claim, then the bridge that arrives too late for it.
 	m := openTurnClaimManager(t, filepath.Join(t.TempDir(), "state.db"))
 	claimTurn(t, m, "ws", "daemon-session", "vendor-old", "daemon-prompt-2", 5)
-	if _, _, _, err := m.ReconcileTurnHandshake("ws", "daemon-session", nil, false); err != nil {
+	if _, _, _, err := m.ReconcileTurnHandshake("ws", "daemon-session", nil, false, nil); err != nil {
 		t.Fatalf("close the phantom claim: %v", err)
 	}
 
@@ -787,7 +872,7 @@ func TestDeadClaimBridgeRefusalLeavesTheClosedClaimUntouched(t *testing.T) {
 	}
 
 	// Assert — the refusal recorded nothing: the claim stays closed, not active.
-	before, after, closed, err := m.ReconcileTurnHandshake("ws", "daemon-session", nil, false)
+	before, after, closed, err := m.ReconcileTurnHandshake("ws", "daemon-session", nil, false, nil)
 	if err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
