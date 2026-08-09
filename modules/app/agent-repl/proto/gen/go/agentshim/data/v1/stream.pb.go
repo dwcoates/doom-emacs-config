@@ -3293,9 +3293,39 @@ func (x *ContentBlockStopEvent) GetIndex() uint32 {
 }
 
 type MessageDeltaEvent struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Delta         *structpb.Struct       `protobuf:"bytes,1,opt,name=delta,proto3" json:"delta,omitempty"` // stop_reason/stop_sequence updates
-	Usage         *Usage                 `protobuf:"bytes,2,opt,name=usage,proto3" json:"usage,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Delta *structpb.Struct       `protobuf:"bytes,1,opt,name=delta,proto3" json:"delta,omitempty"` // stop_reason/stop_sequence updates
+	// The NARROW legacy projection of the delta's usage. Frozen exactly as it
+	// is: rows carrying it are already persisted, and a replay must decode them
+	// byte-identically. Read `vendor_usage` instead.
+	Usage *Usage `protobuf:"bytes,2,opt,name=usage,proto3" json:"usage,omitempty"`
+	// The vendor's own cumulative usage as of this delta, relayed VERBATIM.
+	//
+	// WHY IT EXISTS. A turn's token ledger is reconciled from two planes: the
+	// per-response stream evidence, and the terminal result's totals. Those two
+	// could not be made to agree on output_tokens, because the assistant message
+	// the stream plane's evidence is built from carries the `message_start`
+	// usage SNAPSHOT — which already knows the final input and cache counters,
+	// and only an interim output count. The final output_tokens exist on this
+	// frame and nowhere else the daemon can see. On one measured live turn the
+	// per-response sum was 563 against the result's 4407; the input side
+	// reconciled exactly, because input is settled at message_start.
+	//
+	// WHY THE FULL OBJECT. The narrow `usage` above cannot carry
+	// output_tokens_details (where thinking tokens are reported) or iterations,
+	// so a token-utilization record built from it would be durably unfaithful to
+	// what the vendor said. The evidence is relayed whole rather than projected:
+	// narrowing it was the defect, not the fix.
+	VendorUsage *ApiUsage `protobuf:"bytes,3,opt,name=vendor_usage,json=vendorUsage,proto3" json:"vendor_usage,omitempty"`
+	// The Anthropic message id this delta's usage belongs to.
+	//
+	// The vendor's own message_delta frame is ANONYMOUS — the identity arrives
+	// once, on the message_start that opened the message — so a producer relaying
+	// a usage correction must name what it corrects. Keyed exactly as
+	// ContentDelta and MessageLatency key their own per-message facts, never the
+	// envelope uuid. Empty on any row written before this field existed, which is
+	// an uncorrectable record rather than a correction of an unnamed one.
+	ApiMessageId  string `protobuf:"bytes,4,opt,name=api_message_id,json=apiMessageId,proto3" json:"api_message_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3342,6 +3372,20 @@ func (x *MessageDeltaEvent) GetUsage() *Usage {
 		return x.Usage
 	}
 	return nil
+}
+
+func (x *MessageDeltaEvent) GetVendorUsage() *ApiUsage {
+	if x != nil {
+		return x.VendorUsage
+	}
+	return nil
+}
+
+func (x *MessageDeltaEvent) GetApiMessageId() string {
+	if x != nil {
+		return x.ApiMessageId
+	}
+	return ""
 }
 
 type MessageStopEvent struct {
@@ -7761,10 +7805,12 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x0eSignatureDelta\x12\x1c\n" +
 	"\tsignature\x18\x01 \x01(\tR\tsignature\"-\n" +
 	"\x15ContentBlockStopEvent\x12\x14\n" +
-	"\x05index\x18\x01 \x01(\rR\x05index\"r\n" +
+	"\x05index\x18\x01 \x01(\rR\x05index\"\xd8\x01\n" +
 	"\x11MessageDeltaEvent\x12-\n" +
 	"\x05delta\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x05delta\x12.\n" +
-	"\x05usage\x18\x02 \x01(\v2\x18.agentshim.data.v1.UsageR\x05usage\"\x12\n" +
+	"\x05usage\x18\x02 \x01(\v2\x18.agentshim.data.v1.UsageR\x05usage\x12>\n" +
+	"\fvendor_usage\x18\x03 \x01(\v2\x1b.agentshim.data.v1.ApiUsageR\vvendorUsage\x12$\n" +
+	"\x0eapi_message_id\x18\x04 \x01(\tR\fapiMessageId\"\x12\n" +
 	"\x10MessageStopEvent\"\x89\x03\n" +
 	"\x0fCompactBoundary\x12;\n" +
 	"\atrigger\x18\x01 \x01(\x0e2!.agentshim.data.v1.CompactTriggerR\atrigger\x12\x1d\n" +
@@ -8303,8 +8349,9 @@ var file_agentshim_data_v1_stream_proto_goTypes = []any{
 	(*structpb.ListValue)(nil),     // 88: google.protobuf.ListValue
 	(*ApiAssistantMessage)(nil),    // 89: agentshim.data.v1.ApiAssistantMessage
 	(*structpb.Struct)(nil),        // 90: google.protobuf.Struct
-	(*PreservedSegment)(nil),       // 91: agentshim.data.v1.PreservedSegment
-	(*PreservedMessages)(nil),      // 92: agentshim.data.v1.PreservedMessages
+	(*ApiUsage)(nil),               // 91: agentshim.data.v1.ApiUsage
+	(*PreservedSegment)(nil),       // 92: agentshim.data.v1.PreservedSegment
+	(*PreservedMessages)(nil),      // 93: agentshim.data.v1.PreservedMessages
 }
 var file_agentshim_data_v1_stream_proto_depIdxs = []int32{
 	6,   // 0: agentshim.data.v1.ClaudeStreamMessage.user:type_name -> agentshim.data.v1.UserMessage
@@ -8392,34 +8439,35 @@ var file_agentshim_data_v1_stream_proto_depIdxs = []int32{
 	27,  // 82: agentshim.data.v1.ContentBlockDeltaEvent.signature_delta:type_name -> agentshim.data.v1.SignatureDelta
 	90,  // 83: agentshim.data.v1.MessageDeltaEvent.delta:type_name -> google.protobuf.Struct
 	10,  // 84: agentshim.data.v1.MessageDeltaEvent.usage:type_name -> agentshim.data.v1.Usage
-	4,   // 85: agentshim.data.v1.CompactBoundary.trigger:type_name -> agentshim.data.v1.CompactTrigger
-	91,  // 86: agentshim.data.v1.CompactBoundary.preserved_segment:type_name -> agentshim.data.v1.PreservedSegment
-	92,  // 87: agentshim.data.v1.CompactBoundary.preserved_messages:type_name -> agentshim.data.v1.PreservedMessages
-	35,  // 88: agentshim.data.v1.ToolProgress.subagent_retry:type_name -> agentshim.data.v1.SubagentRetry
-	37,  // 89: agentshim.data.v1.RateLimitEvent.rate_limit_info:type_name -> agentshim.data.v1.RateLimitInfo
-	43,  // 90: agentshim.data.v1.TaskUpdatedMsg.patch:type_name -> agentshim.data.v1.TaskPatch
-	45,  // 91: agentshim.data.v1.TaskNotificationMsg.usage:type_name -> agentshim.data.v1.TaskUsage
-	47,  // 92: agentshim.data.v1.BackgroundTasksChanged.tasks:type_name -> agentshim.data.v1.BackgroundTaskRef
-	90,  // 93: agentshim.data.v1.ControlRequest.request:type_name -> google.protobuf.Struct
-	90,  // 94: agentshim.data.v1.ControlResponse.response:type_name -> google.protobuf.Struct
-	51,  // 95: agentshim.data.v1.ControlResponse.body:type_name -> agentshim.data.v1.ControlResponseBody
-	90,  // 96: agentshim.data.v1.ControlResponseBody.response:type_name -> google.protobuf.Struct
-	90,  // 97: agentshim.data.v1.ControlResponseBody.pending_permission_requests:type_name -> google.protobuf.Struct
-	90,  // 98: agentshim.data.v1.ControlResponseBody.pending_user_dialog_requests:type_name -> google.protobuf.Struct
-	0,   // 99: agentshim.data.v1.ApiRetry.error:type_name -> agentshim.data.v1.AssistantMessageError
-	61,  // 100: agentshim.data.v1.TaskProgressMsg.usage:type_name -> agentshim.data.v1.TaskProgressUsage
-	65,  // 101: agentshim.data.v1.CommandsChanged.commands:type_name -> agentshim.data.v1.SlashCommandRef
-	67,  // 102: agentshim.data.v1.FilesPersisted.files:type_name -> agentshim.data.v1.PersistedFile
-	68,  // 103: agentshim.data.v1.FilesPersisted.failed:type_name -> agentshim.data.v1.FailedFile
-	70,  // 104: agentshim.data.v1.MemoryRecall.memories:type_name -> agentshim.data.v1.RecalledMemory
-	74,  // 105: agentshim.data.v1.MirrorError.key:type_name -> agentshim.data.v1.MirrorKey
-	80,  // 106: agentshim.data.v1.ActiveGoal.value:type_name -> agentshim.data.v1.ActiveGoalValue
-	11,  // 107: agentshim.data.v1.ResultMessage.ModelUsageEntry.value:type_name -> agentshim.data.v1.ModelUsage
-	108, // [108:108] is the sub-list for method output_type
-	108, // [108:108] is the sub-list for method input_type
-	108, // [108:108] is the sub-list for extension type_name
-	108, // [108:108] is the sub-list for extension extendee
-	0,   // [0:108] is the sub-list for field type_name
+	91,  // 85: agentshim.data.v1.MessageDeltaEvent.vendor_usage:type_name -> agentshim.data.v1.ApiUsage
+	4,   // 86: agentshim.data.v1.CompactBoundary.trigger:type_name -> agentshim.data.v1.CompactTrigger
+	92,  // 87: agentshim.data.v1.CompactBoundary.preserved_segment:type_name -> agentshim.data.v1.PreservedSegment
+	93,  // 88: agentshim.data.v1.CompactBoundary.preserved_messages:type_name -> agentshim.data.v1.PreservedMessages
+	35,  // 89: agentshim.data.v1.ToolProgress.subagent_retry:type_name -> agentshim.data.v1.SubagentRetry
+	37,  // 90: agentshim.data.v1.RateLimitEvent.rate_limit_info:type_name -> agentshim.data.v1.RateLimitInfo
+	43,  // 91: agentshim.data.v1.TaskUpdatedMsg.patch:type_name -> agentshim.data.v1.TaskPatch
+	45,  // 92: agentshim.data.v1.TaskNotificationMsg.usage:type_name -> agentshim.data.v1.TaskUsage
+	47,  // 93: agentshim.data.v1.BackgroundTasksChanged.tasks:type_name -> agentshim.data.v1.BackgroundTaskRef
+	90,  // 94: agentshim.data.v1.ControlRequest.request:type_name -> google.protobuf.Struct
+	90,  // 95: agentshim.data.v1.ControlResponse.response:type_name -> google.protobuf.Struct
+	51,  // 96: agentshim.data.v1.ControlResponse.body:type_name -> agentshim.data.v1.ControlResponseBody
+	90,  // 97: agentshim.data.v1.ControlResponseBody.response:type_name -> google.protobuf.Struct
+	90,  // 98: agentshim.data.v1.ControlResponseBody.pending_permission_requests:type_name -> google.protobuf.Struct
+	90,  // 99: agentshim.data.v1.ControlResponseBody.pending_user_dialog_requests:type_name -> google.protobuf.Struct
+	0,   // 100: agentshim.data.v1.ApiRetry.error:type_name -> agentshim.data.v1.AssistantMessageError
+	61,  // 101: agentshim.data.v1.TaskProgressMsg.usage:type_name -> agentshim.data.v1.TaskProgressUsage
+	65,  // 102: agentshim.data.v1.CommandsChanged.commands:type_name -> agentshim.data.v1.SlashCommandRef
+	67,  // 103: agentshim.data.v1.FilesPersisted.files:type_name -> agentshim.data.v1.PersistedFile
+	68,  // 104: agentshim.data.v1.FilesPersisted.failed:type_name -> agentshim.data.v1.FailedFile
+	70,  // 105: agentshim.data.v1.MemoryRecall.memories:type_name -> agentshim.data.v1.RecalledMemory
+	74,  // 106: agentshim.data.v1.MirrorError.key:type_name -> agentshim.data.v1.MirrorKey
+	80,  // 107: agentshim.data.v1.ActiveGoal.value:type_name -> agentshim.data.v1.ActiveGoalValue
+	11,  // 108: agentshim.data.v1.ResultMessage.ModelUsageEntry.value:type_name -> agentshim.data.v1.ModelUsage
+	109, // [109:109] is the sub-list for method output_type
+	109, // [109:109] is the sub-list for method input_type
+	109, // [109:109] is the sub-list for extension type_name
+	109, // [109:109] is the sub-list for extension extendee
+	0,   // [0:109] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_data_v1_stream_proto_init() }
