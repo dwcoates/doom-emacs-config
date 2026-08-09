@@ -74,6 +74,7 @@ function progress(over: Partial<ProgressInput> = {}): ProgressInput {
     rateLimitedWeekly: null,
     failure: null,
     expensiveTurn: null,
+    accounting: null,
     pendingPermissions: 0,
     queueDepth: 0,
     liveTaskCount: 0,
@@ -2089,5 +2090,92 @@ describe("expensiveTurnRowHtml: the uncached-input alert", () => {
     // Act / Assert
     expect(got).toContain("pfooter-error");
     expect(got).toContain("pfooter-expensive-turn");
+  });
+});
+
+describe("footerHtml: the accounting cell (daemon-resolved, client-derived fallback)", () => {
+  /** A minimal derived accounting the client-side path would summarize. */
+  function derivedItems(): ConversationItem[] {
+    return [
+      {
+        kind: "result",
+        subtype: "success",
+        durationMs: 0,
+        numTurns: 0,
+        totalCostUsd: 0,
+        usage: { input_tokens: 0, output_tokens: 0 },
+        isError: false,
+        context: null,
+        turnAccounting: {
+          turnId: "turn-1",
+          queryInstanceId: "query-1",
+          verdict: { kind: "complete" },
+        },
+      } as ConversationItem,
+    ];
+  }
+
+  it("renders the DAEMON's summary verbatim when it carries one", () => {
+    // Arrange
+    const i = input({
+      progress: progress({
+        accounting: { summary: "5h 10.0% · 2s", verdict: { kind: "complete" } },
+      }),
+    });
+    // Act
+    const got = footerHtml(i, CLOSED, NOW);
+    // Assert
+    expect(got).toContain(
+      `<div class="pfooter-cell pfooter-accounting" title="5h 10.0% · 2s">5h 10.0% · 2s</div>`,
+    );
+  });
+
+  it("lets the daemon's cell WIN over the client-derived line", () => {
+    // Arrange — both exist; the verbatim-render doctrine says the daemon's own
+    // reconciliation is the one on screen.
+    const i = input({
+      items: derivedItems(),
+      progress: progress({ accounting: { summary: "daemon says", verdict: { kind: "complete" } } }),
+    });
+    // Act
+    const got = footerHtml(i, CLOSED, NOW);
+    // Assert
+    expect(got).not.toContain("INCOMPLETE ACCOUNTING");
+  });
+
+  it("classes an INVALID verdict as the invalid cell", () => {
+    // Arrange
+    const i = input({
+      progress: progress({
+        accounting: { summary: "bad", verdict: { kind: "invalid", problems: ["totals disagree"] } },
+      }),
+    });
+    // Act
+    const got = footerHtml(i, CLOSED, NOW);
+    // Assert
+    expect(got).toContain(`class="pfooter-cell pfooter-accounting-invalid"`);
+  });
+
+  it("appends an INCOMPLETE verdict's phrases to the cell's tooltip", () => {
+    // Arrange — the phrases are display-ready prose the daemon composed.
+    const i = input({
+      progress: progress({
+        accounting: {
+          summary: "partial",
+          verdict: { kind: "incomplete", missing: ["turn start", "turn end"] },
+        },
+      }),
+    });
+    // Act
+    const got = footerHtml(i, CLOSED, NOW);
+    // Assert
+    expect(got).toContain(`title="partial; turn start; turn end"`);
+  });
+
+  it("falls back to the client-derived line when the daemon resolved no cell", () => {
+    // Arrange / Act — the fallback covers turns the daemon has not settled.
+    const got = footerHtml(input({ items: derivedItems() }), CLOSED, NOW);
+    // Assert
+    expect(got).toContain("INCOMPLETE ACCOUNTING");
   });
 });
