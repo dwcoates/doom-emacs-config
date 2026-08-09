@@ -175,18 +175,20 @@ func TestEverySurfaceOverrideActuallyDiverges(t *testing.T) {
 	}
 }
 
-func TestTheInFlightMergeStatesAreTheOnlyTabBarOverrides(t *testing.T) {
-	// Arrange: the Emacs tab bar spends red on the three merge states with no
-	// verdict yet, because red already means "work is in flight and you cannot
-	// act". MERGE_CONFLICT is deliberately excluded — it is waiting on the
-	// USER — and MERGED / MERGE_FAILED are terminal. Pinning the exact set
-	// here keeps a later "while we're at it" from quietly reddening a merge
-	// state that is not in flight.
+func TestTheTabBarOverridesAreTheInFlightMergesAndVendorBlocked(t *testing.T) {
+	// Arrange: the Emacs tab bar spends purple on the three merge states with
+	// no verdict yet, and moves VENDOR_BLOCKED to blue so purple carries one
+	// meaning on a surface with no glyph to tell two purples apart.
+	// MERGE_CONFLICT is deliberately excluded — it is waiting on the USER —
+	// and MERGED / MERGE_FAILED are terminal. Pinning the exact set here keeps
+	// a later "while we're at it" from quietly recoloring a merge state that
+	// is not in flight, or from stranding a second state on purple.
 	f := loadFixture(t)
 	want := map[string]string{
-		"RENDER_STATE_MERGE_ENQUEUING": "red",
-		"RENDER_STATE_MERGE_QUEUED":    "red",
-		"RENDER_STATE_MERGING":         "red",
+		"RENDER_STATE_MERGE_ENQUEUING": "purple",
+		"RENDER_STATE_MERGE_QUEUED":    "purple",
+		"RENDER_STATE_MERGING":         "purple",
+		"RENDER_STATE_VENDOR_BLOCKED":  "blue",
 	}
 	// Act + Assert.
 	got := f.SurfaceOverrides["emacs_tab_bar"]
