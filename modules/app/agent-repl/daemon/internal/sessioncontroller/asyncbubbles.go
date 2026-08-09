@@ -17,8 +17,8 @@
 package sessioncontroller
 
 import (
+	"errors"
 	"fmt"
-	"sort"
 	"sync"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -409,7 +409,11 @@ func (s *asyncBubbleStore) foldRetrievalLocked(out *datav1.TaskOutputResult, atM
 func (s *asyncBubbleStore) foldJournalLocked(b *frontendv1.AsyncBubble, text string, atMs int64) (*frontendv1.AsyncBubbleUpdate, error) {
 	through := s.journalThrough[b.GetId()]
 	if uint64(len(text)) < through {
-		return nil, fmt.Errorf("session-controller: workflow journal for bubble %q REWOUND — the retrieval restated %d bytes where the fold already stands at %d, which is a gap rather than an append and is refused", b.GetId(), len(text), through)
+		return nil, &frontend.AsyncGapError{
+			BubbleID: b.GetId(),
+			Gap:      frontend.AsyncGapJournalRewind,
+			Detail:   fmt.Sprintf("session-controller: workflow journal for bubble %q REWOUND — the retrieval restated %d bytes where the fold already stands at %d, which is a gap rather than an append and is refused", b.GetId(), len(text), through),
+		}
 	}
 	tail := text[through:]
 	if tail == "" {
@@ -559,6 +563,67 @@ func (s *asyncBubbleStore) faultLocked(taskID, detail string) *asyncFault {
 	}
 }
 
+// asyncGapFault turns one classified daemon-bug refusal into the failure card
+// that says so.
+//
+// SAME PATH, SAME SHAPE as faultLocked: a fold that refused is as invisible to
+// the user as a detachment that could not be attributed — the bubble simply
+// stops growing, which is indistinguishable from a quiet agent — so it earns a
+// card rather than a warn nobody watching the screen can see.
+//
+// The uuid is derived from the BUBBLE AND THE GAP CLASS, so a replay of the
+// same defect reconciles onto the same card instead of accumulating a twin per
+// pass, while two different defects on one bubble stay two cards.
+func asyncGapFault(gap *frontend.AsyncGapError) asyncFault {
+	detail := gap.Error()
+	return asyncFault{
+		UUID:   fmt.Sprintf("async-gap:%s:%s", gap.BubbleID, gap.Gap),
+		Card:   errclass.Card(errclass.TypeInternalUnclassified, detail),
+		Detail: detail,
+	}
+}
+
+// splitAsyncGaps separates a fold refusal into the classified daemon bugs that
+// become failure cards and whatever is left for the degraded-warn.
+//
+// It walks the JOIN rather than testing the top error: a batch fold reports
+// every bubble's failure together, and a gap buried behind a sibling error is
+// still a bubble that stopped growing. Duplicates collapse by uuid, because one
+// event folding the same defect twice is one defect.
+func splitAsyncGaps(err error) ([]asyncFault, error) {
+	if err == nil {
+		return nil, nil
+	}
+	var faults []asyncFault
+	seen := map[string]bool{}
+	residual := collectAsyncGaps(err, &faults, seen)
+	return faults, residual
+}
+
+func collectAsyncGaps(err error, faults *[]asyncFault, seen map[string]bool) error {
+	// The JOIN IS DESCENDED FIRST. errors.As stops at the first match, so
+	// asking it about a join would card one sibling and lose the others.
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var rest []error
+		for _, inner := range joined.Unwrap() {
+			if left := collectAsyncGaps(inner, faults, seen); left != nil {
+				rest = append(rest, left)
+			}
+		}
+		return errors.Join(rest...)
+	}
+	var gap *frontend.AsyncGapError
+	if !errors.As(err, &gap) {
+		return err
+	}
+	fault := asyncGapFault(gap)
+	if !seen[fault.UUID] {
+		seen[fault.UUID] = true
+		*faults = append(*faults, fault)
+	}
+	return nil
+}
+
 // --- pure helpers ----------------------------------------------------------
 
 // retrievalFacts reads the task id, the cumulative output, and the settlement
@@ -643,18 +708,12 @@ func completeJournalPrefix(text string) int {
 
 // joinAsyncErrors folds a batch of per-bubble failures into one error, so a
 // single bad fold neither aborts the rest of the batch nor disappears.
+//
+// It JOINS rather than flattening to text: the classified daemon-bug refusals
+// (frontend.AsyncGapError) each become a failure card the user sees, and a
+// batch of two would have destroyed both classifications by rendering them into
+// one string. errors.Join keeps every failure recoverable by type, and the
+// batch's order is the fold's order, so the joined record is still stable.
 func joinAsyncErrors(errs []error) error {
-	switch len(errs) {
-	case 0:
-		return nil
-	case 1:
-		return errs[0]
-	default:
-		msgs := make([]string, 0, len(errs))
-		for _, err := range errs {
-			msgs = append(msgs, err.Error())
-		}
-		sort.Strings(msgs)
-		return fmt.Errorf("session-controller: %d async bubble failures: %v", len(errs), msgs)
-	}
+	return errors.Join(errs...)
 }
