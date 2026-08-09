@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"claude-repld/internal/dlog"
@@ -55,8 +57,11 @@ type SuiteResult struct {
 	// file is what makes the failure reconstructible after the fact rather than
 	// only re-runnable.
 	//
-	// It is empty when the run passed, was skipped, or could not be archived;
-	// an archive failure is logged loudly and named in Tail, never swallowed.
+	// It is empty when the run passed on its first attempt, when the run was
+	// skipped, and when the run could not be classified at all. It is NEVER
+	// empty for a run that produced a verdict worth keeping: the file is the
+	// child's stdout, so it exists before the suite is even spawned, and a
+	// failure to create it is an unrunnable suite rather than a lost archive.
 	//
 	// A RE-RUN IS ARCHIVED WHATEVER ITS VERDICT (SuiteRun.Attempt > 1), because a
 	// flake's evidence is the PAIR: the failing run's output alone cannot show
@@ -166,26 +171,39 @@ func (r *RepoSuiteRunner) RunSuite(ctx context.Context, targetDir string, run Su
 	}
 
 	args := suiteArgs(run.Suites)
+	// THE OUTPUT FILE IS CREATED BEFORE THE SPAWN because it IS the child's
+	// stdout; see spawnSuite. A suite that has nowhere to write has not run, so
+	// this failure is an unrunnable suite — loudly, before anything is logged as
+	// RUNNING — rather than the "archive failed, keep the verdict" degradation
+	// this used to have after the fact.
+	out, err := os.CreateTemp("", suiteOutputPattern)
+	if err != nil {
+		return SuiteResult{}, fmt.Errorf("merge: create the output file for test suite %s in %s: %w", rel, top, err)
+	}
+	outPath := out.Name()
+
 	r.logf("merge: suite RUNNING {target=%s toplevel=%s entrypoint=%s attempt=%d suites=%s}",
 		targetDir, top, rel, run.Attempt, selectionLabel(run.Suites))
-	cmd := exec.CommandContext(ctx, entry, args...)
-	cmd.Dir = top
-	// The daemon may be running under a git hook, whose exported repository
-	// bindings would point the suite's own git at the WRONG repository. The
-	// same strip the daemon's git goes through applies here.
-	cmd.Env = gitexec.StripEnv(os.Environ())
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
 	started := time.Now()
-	runErr := cmd.Run()
+	runErr := r.spawnSuite(ctx, targetDir, rel, top, entry, args, out)
 	elapsed := time.Since(started)
+
+	// The child is gone; the file is complete. Everything below reads it back.
+	var outNote string
+	if err := out.Close(); err != nil {
+		r.logf("merge: suite output CLOSE FAILED {target=%s entrypoint=%s file=%s}: %v — the retained output may be short",
+			targetDir, rel, outPath, err)
+		outNote += fmt.Sprintf("\n[merge] the output file could NOT be closed cleanly: %v\n", err)
+	}
+
 	if runErr == nil {
-		res := SuiteResult{Passed: true, Duration: elapsed}
+		res := SuiteResult{Passed: true, Tail: outNote, Duration: elapsed}
 		if run.Attempt > 1 {
 			// The re-run's output is the half of a flake's evidence nothing else
 			// keeps; see SuiteResult.OutputPath.
-			res.OutputPath = r.archive(targetDir, rel, out.Bytes(), &res.Tail)
+			res.OutputPath = outPath
+		} else {
+			r.discardOutput(targetDir, rel, outPath)
 		}
 		r.logf("merge: suite PASSED {target=%s entrypoint=%s attempt=%d suites=%s duration=%s full_output=%s}",
 			targetDir, rel, run.Attempt, selectionLabel(run.Suites), elapsed.Round(time.Millisecond), res.OutputPath)
@@ -194,31 +212,145 @@ func (r *RepoSuiteRunner) RunSuite(ctx context.Context, targetDir string, run Su
 	var exitErr *exec.ExitError
 	if !errors.As(runErr, &exitErr) {
 		// The suite could not be RUN. That is not a verdict, so it is surfaced
-		// as an error rather than reported as a failing suite.
+		// as an error rather than reported as a failing suite, and the empty
+		// output it produced is not worth keeping.
+		r.discardOutput(targetDir, rel, outPath)
 		return SuiteResult{}, fmt.Errorf("merge: run test suite %s in %s: %w", rel, top, runErr)
 	}
-	tail := tailOf(out.String(), suiteTailBytes)
-	path := r.archive(targetDir, rel, out.Bytes(), &tail)
+	tail := r.tail(targetDir, rel, outPath) + outNote
 	r.logf("merge: suite FAILED {target=%s entrypoint=%s attempt=%d suites=%s exit=%d duration=%s full_output=%s} tail:\n%s",
-		targetDir, rel, run.Attempt, selectionLabel(run.Suites), exitErr.ExitCode(), elapsed.Round(time.Millisecond), path, tail)
-	return SuiteResult{Passed: false, Tail: tail, OutputPath: path, Duration: elapsed}, nil
+		targetDir, rel, run.Attempt, selectionLabel(run.Suites), exitErr.ExitCode(), elapsed.Round(time.Millisecond), outPath, tail)
+	return SuiteResult{Passed: false, Tail: tail, OutputPath: outPath, Duration: elapsed}, nil
 }
 
-// archive writes out to the run archive and returns its path, appending the
-// failure to tail when it cannot.
+// suiteWaitDelay bounds how long Wait may linger AFTER the suite process itself
+// has exited or been cancelled. See spawnSuite for why it is belt-and-braces
+// rather than the fix.
+const suiteWaitDelay = 5 * time.Second
+
+// spawnSuite runs the entrypoint with out as BOTH its stdout and its stderr,
+// and returns cmd.Run's error unchanged.
 //
-// The verdict is real and must stand; failing the gate because a diagnostic file
-// could not be written would turn a test failure into an unrunnable suite. So the
-// archive's absence is reported where the run itself is read, rather than dropped.
-func (r *RepoSuiteRunner) archive(targetDir, rel string, out []byte, tail *string) string {
-	path, err := archiveSuiteOutput(out)
-	if err == nil {
-		return path
+// WHY THE OUTPUT GOES TO AN *os.File AND NEVER TO A bytes.Buffer. This used to
+// hand os/exec an in-memory buffer. os/exec cannot give a child an arbitrary
+// io.Writer, so it manufactures an os.Pipe and a goroutine that copies the read
+// end into the buffer — and Wait does not return until that copy reaches EOF.
+// EOF requires EVERY holder of the WRITE end to close it, and the suite's own
+// children inherit that fd: one leaked background daemon or shim that outlives
+// the entrypoint keeps the pipe open forever. The observed production shape was
+// exactly that — the suite process gone from the process table, no PASSED, no
+// FAILED, no error, and the merge queue head held until the daemon was bounced.
+//
+// An *os.File has no such intermediary: os/exec dup2s the descriptor straight
+// into the child, there is no copying goroutine, and Wait returns the moment
+// the CHILD is reaped no matter what its descendants inherited. The hang is not
+// made less likely, it is made unrepresentable.
+//
+// Cancel and WaitDelay are the belt to that braces. They do nothing on this
+// path (there is no pipe to outlive the process), and they exist so that a
+// future StdoutPipe/StderrPipe reintroduced here degrades into a bounded wait
+// and a loud ErrWaitDelay instead of returning to the silent wedge.
+func (r *RepoSuiteRunner) spawnSuite(ctx context.Context, targetDir, rel, top, entry string, args []string, out *os.File) error {
+	cmd := exec.CommandContext(ctx, entry, args...)
+	cmd.Dir = top
+	// The daemon may be running under a git hook, whose exported repository
+	// bindings would point the suite's own git at the WRONG repository. The
+	// same strip the daemon's git goes through applies here.
+	cmd.Env = gitexec.StripEnv(os.Environ())
+	cmd.Stdout = out
+	cmd.Stderr = out
+	// Setpgid makes the suite the leader of a NEW process group whose id is its
+	// own pid, so the group contains the entrypoint and its descendants and
+	// NOTHING else — that is what makes reapSuiteGroup's kill(-pgid) safe.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return killSuiteGroup(cmd) }
+	cmd.WaitDelay = suiteWaitDelay
+	runErr := cmd.Run()
+	r.reapSuiteGroup(targetDir, rel, cmd)
+	return runErr
+}
+
+// killSuiteGroup SIGKILLs the suite's own process group, and only ever that
+// group: it refuses unless the command was spawned with Setpgid, which is what
+// guarantees the group id is the child's own pid rather than the daemon's.
+//
+// A vanished group is reported as os.ErrProcessDone because that is what
+// os/exec's Cancel contract expects for "there was nothing left to kill".
+func killSuiteGroup(cmd *exec.Cmd) error {
+	pgid, ok := suitePgid(cmd)
+	if !ok {
+		return os.ErrProcessDone
 	}
-	r.logf("merge: suite output ARCHIVE FAILED {target=%s entrypoint=%s}: %v — only the clamped tail survives this run",
-		targetDir, rel, err)
-	*tail += fmt.Sprintf("\n[merge] the full output could NOT be archived: %v\n", err)
-	return ""
+	if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return fmt.Errorf("merge: kill the test suite's process group %d: %w", pgid, err)
+	}
+	return nil
+}
+
+// suitePgid returns the suite's process-group id, and false when the command
+// was not spawned in a group of its own. The Setpgid check is the invariant:
+// without it the child shares the DAEMON's group and kill(-pgid) would take the
+// daemon and every one of its siblings down with it.
+func suitePgid(cmd *exec.Cmd) (int, bool) {
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid || cmd.SysProcAttr.Pgid != 0 {
+		return 0, false
+	}
+	if cmd.Process == nil || cmd.Process.Pid <= 0 {
+		return 0, false
+	}
+	return cmd.Process.Pid, true
+}
+
+// reapSuiteGroup kills whatever the finished suite left running in its own
+// process group. Nothing left is the ordinary case and says nothing; anything
+// left is a leak in the suite and is named out loud, because a background
+// process that outlives its run is how the merge gate wedged in the first
+// place.
+func (r *RepoSuiteRunner) reapSuiteGroup(targetDir, rel string, cmd *exec.Cmd) {
+	pgid, ok := suitePgid(cmd)
+	if !ok {
+		return
+	}
+	err := killSuiteGroup(cmd)
+	if errors.Is(err, os.ErrProcessDone) {
+		return
+	}
+	if err != nil {
+		r.logf("merge: suite process-group REAP FAILED {target=%s entrypoint=%s pgid=%d}: %v",
+			targetDir, rel, pgid, err)
+		return
+	}
+	r.logf("merge: suite LEAKED PROCESSES {target=%s entrypoint=%s pgid=%d} — the suite left background processes running after it exited; killed its process group",
+		targetDir, rel, pgid)
+}
+
+// tail reads the clamped tail of the run's output back off the file the suite
+// wrote it to, reporting an unreadable file where the run itself is read.
+//
+// The verdict is real and must stand; failing the gate because a diagnostic
+// file could not be read back would turn a test failure into an unrunnable
+// suite. So the tail's absence is surfaced in the tail, never dropped.
+func (r *RepoSuiteRunner) tail(targetDir, rel, path string) string {
+	tail, err := readSuiteTail(path, suiteTailBytes)
+	if err == nil {
+		return tail
+	}
+	r.logf("merge: suite output READ FAILED {target=%s entrypoint=%s file=%s}: %v — the verdict stands but its tail is lost",
+		targetDir, rel, path, err)
+	return fmt.Sprintf("\n[merge] the run's output could NOT be read back from %s: %v\n", path, err)
+}
+
+// discardOutput removes the output of a run nothing needs to reconstruct. A
+// removal that fails leaks a temp file rather than a verdict, so it is logged
+// and not returned.
+func (r *RepoSuiteRunner) discardOutput(targetDir, rel, path string) {
+	if err := os.Remove(path); err != nil {
+		r.logf("merge: suite output DISCARD FAILED {target=%s entrypoint=%s file=%s}: %v",
+			targetDir, rel, path, err)
+	}
 }
 
 // suiteArgs renders a selection as the entrypoint's arguments. An empty
@@ -240,26 +372,41 @@ func selectionLabel(suites []string) string {
 	return strings.Join(suites, ",")
 }
 
-// suiteOutputPattern names the archive of one failing suite run. It lands in
+// suiteOutputPattern names the file one suite run writes its output to, and
+// which becomes that run's archive when the run is worth keeping. It lands in
 // the process temp directory, which is where the daemon already keeps the
 // per-workspace logs a workspace's .claude/emacs symlinks point at.
 const suiteOutputPattern = "agent-repl-merge-suite-*.log"
 
-// archiveSuiteOutput writes a failing run's complete output and returns the
-// file's path.
-func archiveSuiteOutput(out []byte) (string, error) {
-	f, err := os.CreateTemp("", suiteOutputPattern)
+// readSuiteTail returns the last max bytes of the run's output file, in exactly
+// the shape tailOf gives an in-memory string. It SEEKS rather than reading the
+// whole file, because the file is the complete output of a full suite run and
+// only its end is ever wanted.
+func readSuiteTail(path string, max int) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("merge: create the suite output archive: %w", err)
+		return "", fmt.Errorf("merge: open the suite output %s: %w", path, err)
 	}
-	if _, err := f.Write(out); err != nil {
-		f.Close()
-		return "", fmt.Errorf("merge: write the suite output archive %s: %w", f.Name(), err)
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("merge: stat the suite output %s: %w", path, err)
 	}
-	if err := f.Close(); err != nil {
-		return "", fmt.Errorf("merge: close the suite output archive %s: %w", f.Name(), err)
+	if info.Size() <= int64(max) {
+		body, err := io.ReadAll(f)
+		if err != nil {
+			return "", fmt.Errorf("merge: read the suite output %s: %w", path, err)
+		}
+		return string(body), nil
 	}
-	return f.Name(), nil
+	if _, err := f.Seek(info.Size()-int64(max), io.SeekStart); err != nil {
+		return "", fmt.Errorf("merge: seek to the tail of the suite output %s: %w", path, err)
+	}
+	body := make([]byte, max)
+	if _, err := io.ReadFull(f, body); err != nil {
+		return "", fmt.Errorf("merge: read the tail of the suite output %s: %w", path, err)
+	}
+	return truncationNotice(max) + string(body), nil
 }
 
 // toplevel resolves the repository root that owns dir.
@@ -297,5 +444,12 @@ func tailOf(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	return "... (output truncated to the last " + fmt.Sprint(max) + " bytes) ...\n" + s[len(s)-max:]
+	return truncationNotice(max) + s[len(s)-max:]
+}
+
+// truncationNotice is the elision marker a clamped tail carries. It is one
+// function so that a tail read off a file and a tail taken from a string cannot
+// drift into two different shapes.
+func truncationNotice(max int) string {
+	return "... (output truncated to the last " + fmt.Sprint(max) + " bytes) ...\n"
 }
