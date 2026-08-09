@@ -545,6 +545,12 @@ async function boot(): Promise<void> {
   // just that one span rather than re-rendering the dock — and emphatically not
   // the FEED, which is what the nuked stats row's ancestor once cost. The
   // footer skips the write when no span is mounted (before the first
+  // The open-bubble registry, wired ONCE by reference. The store mutates it in
+  // place as async pushes land, so a tool card matching its classification
+  // verdict always reads the current set — there is no per-render copy to fall
+  // behind, and no second registry a stale update could land in.
+  feed.asyncBubbles = store.asyncBubbles;
+
   // ProgressView, or during a replay-only paint), and bakes the last reading
   // into every render so a fresh dock never blinks empty.
   const timer = new TaskTimer(windowHost(window), (label) => {
@@ -1196,6 +1202,23 @@ async function boot(): Promise<void> {
           void dispatcher
             .resync(resyncSnapshot.workspace, resyncSnapshot)
             .catch(consumeOwnedDispatchFailure);
+        }
+        // AN ASYNC GAP IS A RESYNC, not a warning to ride out. The push named
+        // a bubble that is not open, carried an arm mismatching its bubble's
+        // kind, or appended bytes at an offset the spool is not at — and none
+        // of it was applied, so nothing local can be repaired incrementally.
+        // Asking from zero has the daemon restate every open bubble in full,
+        // which is the only thing that makes this end current again.
+        if (result.asyncGap !== undefined) {
+          const gap = result.asyncGap;
+          clog(
+            "error",
+            `async bubble gap kind=${gap.kind} bubble=${gap.bubbleId} arm=${gap.arm} ` +
+              `bubble_kind=${gap.bubbleKind ?? "none"} through_offset=${gap.throughOffset ?? "n/a"} ` +
+              `from_offset=${gap.fromOffset ?? "n/a"} decision=resync detail=${gap.detail}`,
+          );
+          const gapResync = currentResyncSnapshot(0);
+          void dispatcher.resync(gapResync.workspace, gapResync).catch(consumeOwnedDispatchFailure);
         }
         if (result.changed) {
           // One paint per animation frame, however many effects land before
