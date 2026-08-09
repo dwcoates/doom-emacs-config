@@ -413,6 +413,25 @@ func TestPhaseStartedAtMovesOnAPhaseChange(t *testing.T) {
 	}
 }
 
+// CommitsLanded is the cursor the head gate's cause text reads: "testing the
+// rebased head abc123 after N commits" comes from the run rather than from a
+// second count kept beside it.
+func TestCommitsLandedReportsTheCursorTheGateNarrates(t *testing.T) {
+	// Arrange — a three-commit plan with two of them landed.
+	sink := &recordingSink{}
+	run := newTestRun(t, sink, testClock())
+	run.SetPlan(CommitPlan{Commits: []PlannedCommit{{SHA: "a"}, {SHA: "b"}, {SHA: "c"}}})
+
+	// Act.
+	run.CommitLanded()
+	run.CommitLanded()
+
+	// Assert.
+	if got := run.CommitsLanded(); got != 2 {
+		t.Fatalf("CommitsLanded() = %d, want 2", got)
+	}
+}
+
 // THE REGRESSION THIS PINS: cherry_picking and testing both ride PhaseMerging,
 // so a clock keyed on the merge AXIS left the testing arm claiming to have begun
 // when the pick before it did. A frontend rendering "testing for 40s" was
