@@ -25,11 +25,12 @@ import {
 import { tokensDisclosureHtml, topbarViewHtml } from "./topbar-view.js";
 import { addressLabel, pageAddress, scopedStreamUrl, type PageAddress } from "./address.js";
 import { AgentClock } from "./agent-clock.js";
-import { AGENTS_SPEC, sessionSubagents } from "./agents.js";
+import { AGENTS_SPEC } from "./agents.js";
 import { TASKS_SPEC } from "./tasks.js";
 import {
   ProgressFooter,
   alreadyCompletePhaseViolation,
+  footerAgentRows,
   footerClickAction,
 } from "./progress-footer.js";
 import {
@@ -624,7 +625,9 @@ async function boot(): Promise<void> {
       // THE structured status, on the same revisioned message as the phase
       // above and the only merge input the footer takes.
       mergeStatus: s.mergeStatus,
-      agents: sessionSubagents(s.items),
+      // The roster PLUS the two figures the expanded footer reports beside it,
+      // both projected from state this end already holds.
+      agents: footerAgentRows(s.items, s.tokenUtilization),
       tasks: store.taskRoster,
       items: s.items,
       timerLabel,
@@ -871,7 +874,7 @@ async function boot(): Promise<void> {
   // will not survive the turn. Its vocabulary is the footer's own
   // (footerClickAction), which checks the roster verbs BEFORE the strip's
   // expansion toggle — a counter chip lives INSIDE the clickable strip.
-  const setFooterMenu = (menu: "agents" | "tasks" | null): void => {
+  const setFooterMenu = (menu: "tasks" | null): void => {
     footer.setMenu(menu);
     renderChrome();
   };
@@ -885,8 +888,7 @@ async function boot(): Promise<void> {
     switch (action.kind) {
       case "toggle-menu": {
         const open = footer.disclosure();
-        const current = open.agentsOpen ? "agents" : open.tasksOpen ? "tasks" : null;
-        setFooterMenu(current === action.menu ? null : action.menu);
+        setFooterMenu(open.tasksOpen ? null : action.menu);
         return;
       }
       case "reveal-agent":
