@@ -1576,6 +1576,39 @@ call site holds MORE evidence than the error string alone."
 (defconst agent-repl--backend-output-tail-limit 400
   "Maximum characters a backend-initiation echo tail may occupy.")
 
+(defconst agent-repl--backend-output-tail-scan-limit 65536
+  "Trailing characters of OUTPUT `agent-repl--backend-output-tail' will scan.
+
+A hard bound on the work the helper can be ASKED to do, not a tuning
+preference.  `split-string' with a trim regexp indexes a multibyte
+string once per field and each index costs a scan, so splitting a
+multi-megabyte capture is effectively quadratic: a `*claude-repld*'
+capture grown to tens of megabytes pinned Emacs at 99% CPU for over ten
+minutes inside a server-filter eval, where quit is inhibited and the
+whole frame therefore froze.
+
+Bounding the INPUT is what makes that unrepresentable rather than
+unlikely.  The helper keeps at most
+`agent-repl--backend-output-tail-lines' lines capped at
+`agent-repl--backend-output-tail-limit' characters, so every character
+before this suffix was already destined to be discarded — the result is
+unchanged for any capture a caller realistically holds, and the
+pathological one now costs one bounded scan.")
+
+(defun agent-repl--backend-output-tail-suffix (text)
+  "Return the trailing `agent-repl--backend-output-tail-scan-limit' of TEXT.
+
+Returns TEXT itself when it already fits, so the common case allocates
+nothing.  The cut is deliberately NOT aligned to a line boundary:
+aligning would make the result depend on whether truncation happened,
+whereas an unaligned cut makes `agent-repl--backend-output-tail' of a
+string equal to `agent-repl--backend-output-tail' of its bounded suffix.
+A leading fragment can only ever survive when the kept lines already
+exceed the character cap, which truncates it anyway."
+  (if (<= (length text) agent-repl--backend-output-tail-scan-limit)
+      text
+    (substring text (- (length text) agent-repl--backend-output-tail-scan-limit))))
+
 (defun agent-repl--backend-output-tail (output &optional lines)
   "Return the last LINES nonblank lines of OUTPUT as one echo-safe string.
 
@@ -1583,8 +1616,13 @@ The FULL captured output always goes to the durable structured record;
 this is only the fragment a one-line minibuffer failure can carry, so it
 is deliberately lossy and never the sole record of anything.  Returns
 \"<no output>\" when OUTPUT carries nothing, so an empty capture is
-reported as an empty capture rather than as an absent field."
-  (let* ((text (if (stringp output) output ""))
+reported as an empty capture rather than as an absent field.
+
+Only the trailing `agent-repl--backend-output-tail-scan-limit'
+characters are examined — see that constant for why an unbounded input
+is a freeze rather than merely a slow call."
+  (let* ((text (agent-repl--backend-output-tail-suffix
+                (if (stringp output) output "")))
          (kept (last (split-string text "\n" t "[ \t\r]+")
                      (or lines agent-repl--backend-output-tail-lines)))
          (joined (string-join kept " / ")))
