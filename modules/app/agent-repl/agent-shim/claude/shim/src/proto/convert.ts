@@ -329,6 +329,19 @@ export interface ConvertOptions {
    */
   rootTurnId?: string;
   /**
+   * Whether the turn this terminal result closes is one the session ACKED as
+   * interrupted.
+   *
+   * The SDK has no word for it: a stopped turn comes back as an ordinary error
+   * flavor, indistinguishable from a turn that broke on its own. The session
+   * acked the stop and therefore knows, so it says so here and the result is
+   * named RESULT_SUBTYPE_ABORTED with `aborted` as its turn-end stop reason.
+   *
+   * Ignored on every message that is not a `result`, and ignored when the
+   * result closes no turn (`rootTurnId` absent).
+   */
+  interrupted?: boolean;
+  /**
    * The `SessionStarted.source` a `system:init` should carry. The stitch
    * phase (main.ts) passes SESSION_SOURCE_RESUME when the shim was spawned
    * with `--resume`, FRESH otherwise. Absent → FRESH, which is exactly the
@@ -835,8 +848,14 @@ function buildAssistant(message: Record<string, unknown>, r: Reader): Built {
 
 function buildResult(message: Record<string, unknown>, r: Reader, opts?: ConvertOptions): Built {
   const apiErrorStatusSet = r.has("api_error_status", "apiErrorStatus") && r.val("api_error_status", "apiErrorStatus") !== null;
+  // A turn this session acked as interrupted is named for the stop the user
+  // asked for, not for the error flavor the abort happened to shake out of the
+  // SDK. Only a result that CLOSES a turn can be that turn's abort, so the
+  // naming is gated on the same root-turn identity the turn-end carries.
+  const interrupted = opts?.interrupted === true
+    && opts.rootTurnId !== undefined && opts.rootTurnId !== "";
   const result = create(ResultMessageSchema, {
-    subtype: resultSubtypeEnum(r.str("subtype")),
+    subtype: interrupted ? ResultSubtype.ABORTED : resultSubtypeEnum(r.str("subtype")),
     durationMs: r.big("duration_ms", "durationMs"),
     durationApiMs: r.big("duration_api_ms", "durationApiMs"),
     isError: r.bool("is_error", "isError"),
@@ -869,7 +888,11 @@ function buildResult(message: Record<string, unknown>, r: Reader, opts?: Convert
     origin: convertOrigin(r.obj("origin")),
   });
   const turnEnded = create(TurnEndedSchema, {
-    stopReason: result.stopReason,
+    // `aborted` is the one stop reason the SSM reads as a NORMAL conclusion
+    // (ssm/resolve.go vendorBlockingStopReasons), which is exactly what a stop
+    // the user asked for is. Passing the SDK's error flavor through instead
+    // settles the workspace red for a turn nothing is wrong with.
+    stopReason: interrupted ? "aborted" : result.stopReason,
     durationMs: result.durationMs,
     isError: result.isError,
     turnId: opts?.rootTurnId ?? "",
@@ -2234,6 +2257,10 @@ function resultSubtypeEnum(s: string): ResultSubtype {
     case "error_max_turns": return ResultSubtype.ERROR_MAX_TURNS;
     case "error_max_budget_usd": return ResultSubtype.ERROR_MAX_BUDGET_USD;
     case "error_max_structured_output_retries": return ResultSubtype.ERROR_MAX_STRUCTURED_OUTPUT_RETRIES;
+    // The stdio transport's Layer-1 word for an interrupt-ended turn
+    // (session.ts mapResultMessage). It never rides a raw SDK message, but a
+    // Layer-1 result decoded here must not lose the outcome it already names.
+    case "aborted": return ResultSubtype.ABORTED;
     default: return ResultSubtype.UNSPECIFIED;
   }
 }
