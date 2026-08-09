@@ -1116,6 +1116,54 @@ a notice here would be an alarm about a startup that has not failed yet."
   ;; Act / Assert
   (should (member "taskCatalog" agent-repl--uds-ignored-frame-fields)))
 
+(ert-deftest agent-repl-test-uds-async-bubble-delta-is-a-deliberately-ignored-frame ()
+  "`asyncBubbleDelta' is a webapp bubble surface Emacs does not draw."
+  ;; Act / Assert
+  (should (member "asyncBubbleDelta" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-topbar-is-a-deliberately-ignored-frame ()
+  "`topbar' is the webapp's resolved chrome; Emacs draws its own tab bar."
+  ;; Act / Assert
+  (should (member "topbar" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-token-breakdown-is-a-deliberately-ignored-frame ()
+  "`tokenBreakdown' is the webapp's menu; Emacs has no token menu."
+  ;; Act / Assert
+  (should (member "tokenBreakdown" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-workspace-gate-is-a-deliberately-ignored-frame ()
+  "`workspaceGate' is the webapp's revival gate; Emacs offers no gate."
+  ;; Act / Assert
+  (should (member "workspaceGate" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-dispatch-topbar-does-not-signal ()
+  "A pushed `topbar' arm decodes instead of reading as an unknown wire field.
+The daemon broadcasts the resolved component views to every client, host
+included, so an unlisted arm would take the whole drain down."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act / Assert
+    (should-not (agent-repl--uds-dispatch-frame
+                 '(:topbar (:workspace "ws1" :fence "f1"))))))
+
+(ert-deftest agent-repl-test-uds-dispatch-logs-the-fence-of-a-fenced-push ()
+  "A fenced push reserves `session_id', so the trace must name its fence.
+Without this the hottest diagnostic line in the transport prints
+`session-id=nil' for every conversation, typing and progress frame on the
+wire and says nothing about which generation produced them."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (logged)
+      (agent-repl--uds-register-handler "conversationDelta" (lambda (_p) nil))
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--uds-dispatch-frame
+         '(:conversationDelta (:workspace "ws1" :fence "sess-a|gen-b")))
+        ;; Assert
+        (should (seq-find (lambda (m) (string-match-p "fence=\"sess-a|gen-b\"" m))
+                          logged))))))
+
 (ert-deftest agent-repl-test-uds-ignored-frames-are-all-known-frames ()
   "Every deliberately-ignored arm must also be a known arm, or dispatch signals."
   ;; Act / Assert
