@@ -175,16 +175,28 @@ system_stamp() {
     esac
 }
 
+# proto_paths — the proto tree as a BUILD input: the wire schemas minus the
+# review artifacts that live beside them. figma-idl-draft/ and the sketch are
+# design documents no build reads, so a commit touching only them must not
+# make any system read as behind — that state is undeployable by rebuilding,
+# because the staleness check (correctly) sees no buildable input change and
+# the stamp can never catch up to the gate.
+proto_paths() {
+    printf '%s %s %s' "$(prefix proto)" \
+        ":(exclude)$(prefix proto/figma-idl-draft)" \
+        ":(exclude)$(prefix proto/SKETCH-figma-idl.md)"
+}
+
 # system_paths NAME — repo-relative pathspec, space separated. No path in this
 # repo contains a space, and keeping them in one string is what lets bash 3.2
 # (still /bin/bash on macOS, no associative arrays) carry a per-system table.
 system_paths() {
     case "$1" in
-        daemon)              printf '%s %s %s %s' "$(prefix daemon)" "$(prefix proto)" "$(prefix agent-shim/wire)" "$(prefix agent-shim/logging)" ;;
-        shim)                printf '%s %s %s' "$(prefix agent-shim/claude/shim)" "$(prefix proto)" "$(prefix agent-shim/logging)" ;;
-        webapp)              printf '%s %s %s' "$(prefix webapp)" "$(prefix proto)" "$(prefix agent-shim/logging)" ;;
-        shim-store)          printf '%s %s %s %s' "$(prefix agent-shim/shim-store)" "$(prefix agent-shim/wire)" "$(prefix agent-shim/logging)" "$(prefix proto)" ;;
-        shim-claude-sidecar) printf '%s %s %s %s' "$(prefix agent-shim/claude/shim-sidecar)" "$(prefix agent-shim/wire)" "$(prefix agent-shim/logging)" "$(prefix proto)" ;;
+        daemon)              printf '%s %s %s %s' "$(prefix daemon)" "$(proto_paths)" "$(prefix agent-shim/wire)" "$(prefix agent-shim/logging)" ;;
+        shim)                printf '%s %s %s' "$(prefix agent-shim/claude/shim)" "$(proto_paths)" "$(prefix agent-shim/logging)" ;;
+        webapp)              printf '%s %s %s' "$(prefix webapp)" "$(proto_paths)" "$(prefix agent-shim/logging)" ;;
+        shim-store)          printf '%s %s %s %s' "$(prefix agent-shim/shim-store)" "$(prefix agent-shim/wire)" "$(prefix agent-shim/logging)" "$(proto_paths)" ;;
+        shim-claude-sidecar) printf '%s %s %s %s' "$(prefix agent-shim/claude/shim-sidecar)" "$(prefix agent-shim/wire)" "$(prefix agent-shim/logging)" "$(proto_paths)" ;;
         *) return 1 ;;
     esac
 }
