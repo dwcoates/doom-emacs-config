@@ -240,7 +240,7 @@ every vocabulary assertion built on it pass vacuously."
   "The reader recovers a multi-word arm's lowerCamelCase protojson name."
   ;; Act
   (let ((arms (agent-repl-test--generated-oneof-arms
-               "agentshim/frontend/v1/frontend.pb.go" "FrontendCommand")))
+               "agentshim/frontend/v1/frame.pb.go" "FrontendCommand")))
     ;; Assert
     (should (member "hibernateWorkspace" arms))))
 
@@ -248,7 +248,7 @@ every vocabulary assertion built on it pass vacuously."
   "A single-word arm has no `json=' half, so its `name=' half must be read."
   ;; Act
   (let ((arms (agent-repl-test--generated-oneof-arms
-               "agentshim/frontend/v1/frontend.pb.go" "FrontendFrame")))
+               "agentshim/frontend/v1/frame.pb.go" "FrontendFrame")))
     ;; Assert
     (should (member "snapshot" arms))))
 
@@ -256,7 +256,7 @@ every vocabulary assertion built on it pass vacuously."
   "Arms are read per message: a command arm is not reported as a frame arm."
   ;; Act
   (let ((arms (agent-repl-test--generated-oneof-arms
-               "agentshim/frontend/v1/frontend.pb.go" "FrontendFrame")))
+               "agentshim/frontend/v1/frame.pb.go" "FrontendFrame")))
     ;; Assert
     (should-not (member "hibernateWorkspace" arms))))
 

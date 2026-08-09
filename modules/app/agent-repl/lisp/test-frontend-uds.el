@@ -1116,6 +1116,54 @@ a notice here would be an alarm about a startup that has not failed yet."
   ;; Act / Assert
   (should (member "taskCatalog" agent-repl--uds-ignored-frame-fields)))
 
+(ert-deftest agent-repl-test-uds-async-bubble-delta-is-a-deliberately-ignored-frame ()
+  "`asyncBubbleDelta' is a webapp bubble surface Emacs does not draw."
+  ;; Act / Assert
+  (should (member "asyncBubbleDelta" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-topbar-is-a-deliberately-ignored-frame ()
+  "`topbar' is the webapp's resolved chrome; Emacs draws its own tab bar."
+  ;; Act / Assert
+  (should (member "topbar" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-token-breakdown-is-a-deliberately-ignored-frame ()
+  "`tokenBreakdown' is the webapp's menu; Emacs has no token menu."
+  ;; Act / Assert
+  (should (member "tokenBreakdown" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-workspace-gate-is-a-deliberately-ignored-frame ()
+  "`workspaceGate' is the webapp's revival gate; Emacs offers no gate."
+  ;; Act / Assert
+  (should (member "workspaceGate" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-dispatch-topbar-does-not-signal ()
+  "A pushed `topbar' arm decodes instead of reading as an unknown wire field.
+The daemon broadcasts the resolved component views to every client, host
+included, so an unlisted arm would take the whole drain down."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act / Assert
+    (should-not (agent-repl--uds-dispatch-frame
+                 '(:topbar (:workspace "ws1" :fence "f1"))))))
+
+(ert-deftest agent-repl-test-uds-dispatch-logs-the-fence-of-a-fenced-push ()
+  "A fenced push reserves `session_id', so the trace must name its fence.
+Without this the hottest diagnostic line in the transport prints
+`session-id=nil' for every conversation, typing and progress frame on the
+wire and says nothing about which generation produced them."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (logged)
+      (agent-repl--uds-register-handler "conversationDelta" (lambda (_p) nil))
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--uds-dispatch-frame
+         '(:conversationDelta (:workspace "ws1" :fence "sess-a|gen-b")))
+        ;; Assert
+        (should (seq-find (lambda (m) (string-match-p "fence=\"sess-a|gen-b\"" m))
+                          logged))))))
+
 (ert-deftest agent-repl-test-uds-ignored-frames-are-all-known-frames ()
   "Every deliberately-ignored arm must also be a known arm, or dispatch signals."
   ;; Act / Assert
@@ -1227,7 +1275,7 @@ a known arm with no handler is a logged gap rather than an error."
   (agent-repl-test--with-uds
     ;; Act / Assert
     (should-not (agent-repl--uds-dispatch-frame
-                 '(:progress (:workspace "ws1" :sessionId "s1" :liveTaskCount 0))))))
+                 '(:progress (:workspace "ws1" :fence "f1" :liveTaskCount 0))))))
 
 (ert-deftest agent-repl-test-uds-progress-has-a-registered-handler ()
   "A progress frame reaches a handler, so it never logs unfinished wiring.
@@ -1373,9 +1421,10 @@ as a user-visible malformed-frame error on every roster publish."
   (agent-repl-test--with-uds
     ;; Act / Assert
     (should-not (agent-repl--uds-dispatch-frame
-                 '(:queue (:workspace "ws1" :sessionId "s1"
+                 '(:queue (:workspace "ws1" :fence "f1"
                            :entries ((:id "q1" :text "hi"
-                                      :shutdownHold (:scheduleId "sch-1")))))))))
+                                      :pending ()
+                                      :shutdown (:scheduleId "sch-1")))))))))
 
 (ert-deftest agent-repl-test-uds-schedule-shutdown-is-a-known-command ()
   "The drain lease's `scheduleShutdown' arm is an accepted outbound command."
@@ -1478,6 +1527,40 @@ as a user-visible malformed-frame error on every roster publish."
           (should-not ret)
           (should (string-match-p "mergeWorkspace" echoed))
           (should (string-match-p "branch not found" echoed)))))))
+
+(ert-deftest agent-repl-test-uds-command-ack-classified-refusal-echoes-the-daemon-text ()
+  "A CLASSIFIED refusal surfaces through the failure path, not the raw fallback.
+`CommandAck.failure' is a bare `FailureKind' now, so the ack has to be read
+as a kind rather than as a whole card; misreading it would drop every
+refusal onto the unclassified branch."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--pend "req-1" "submitPrompt" "ws1")
+    (let (echoed)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq echoed (apply #'format fmt args))))
+                ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--uds-handle-command-ack
+         '(:requestId "req-1" :error "the workspace has no live session"
+           :failure (:workspaceNotLive ())))
+        ;; Assert
+        (should (string-match-p "the workspace has no live session" echoed))))))
+
+(ert-deftest agent-repl-test-uds-command-ack-unclassified-refusal-keeps-the-raw-path ()
+  "An ack with no classified kind still surfaces, from the raw text.
+A refusal a mixed-build daemon could not classify must never be invisible."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--pend "req-1" "submitPrompt" "ws1")
+    (let (echoed)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+        ;; Act
+        (agent-repl--uds-handle-command-ack
+         '(:requestId "req-1" :error "unexplained"))
+        ;; Assert
+        (should (string-match-p "unexplained" echoed))))))
 
 (ert-deftest agent-repl-test-uds-command-ack-failure-runs-on-failure ()
   "A failed ack runs the tracked :on-failure callback with the error string."
@@ -1841,9 +1924,7 @@ as a user-visible malformed-frame error on every roster publish."
     ;; Act / Assert
     (should-not (agent-repl--uds-handle-command-ack
                  '(:requestId "req-1" :error "nope"
-                   :failure (:errorClass "ERROR_CLASS_INTERNAL"
-                             :errorType "shim.nack"
-                             :message "the daemon refused"))))))
+                   :failure (:shimRejected ()))))))
 
 (ert-deftest agent-repl-test-uds-command-ack-challenge-cwd-does-not-signal ()
   "The interrupt-confirmation CHALLENGE branch logs with the same cwd."
@@ -2350,7 +2431,7 @@ connection state over an open socket."
   "Every declared frame arm is spelled exactly as a `FrontendFrame' oneof arm."
   ;; Arrange
   (let ((generated (agent-repl-test--generated-oneof-arms
-                    "agentshim/frontend/v1/frontend.pb.go" "FrontendFrame")))
+                    "agentshim/frontend/v1/frame.pb.go" "FrontendFrame")))
     ;; Act / Assert
     (should generated)
     (should-not (cl-remove-if (lambda (field) (member field generated))
@@ -2362,7 +2443,7 @@ The reverse containment is deliberately NOT asserted: `createWorkspace'
 exists in the proto and is deliberately absent here."
   ;; Arrange
   (let ((generated (agent-repl-test--generated-oneof-arms
-                    "agentshim/frontend/v1/frontend.pb.go" "FrontendCommand")))
+                    "agentshim/frontend/v1/frame.pb.go" "FrontendCommand")))
     ;; Act / Assert
     (should generated)
     (should-not (cl-remove-if (lambda (field) (member field generated))
@@ -2374,7 +2455,7 @@ A typo here would silently move an arm from the ignored list into the
 unfinished-wiring log, which is the opposite of what the list means."
   ;; Arrange
   (let ((generated (agent-repl-test--generated-oneof-arms
-                    "agentshim/frontend/v1/frontend.pb.go" "FrontendFrame")))
+                    "agentshim/frontend/v1/frame.pb.go" "FrontendFrame")))
     ;; Act / Assert
     (should generated)
     (should-not (cl-remove-if (lambda (field) (member field generated))
