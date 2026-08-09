@@ -601,8 +601,10 @@ export class UdsSession {
         // queue is the last thing this session does for this turn; everything
         // after it has to come back off the SDK stream, so a turn that opens
         // and then produces nothing is precisely the failure the watchdog
-        // exists to notice.
-        this.armTurnQuietWatchdog();
+        // exists to notice — unless a background task from an earlier turn is
+        // still running, in which case the reconcile leaves the watch down
+        // because this session's stream is entitled to stay silent.
+        this.reconcileTurnQuietWatch();
         const content: ContentBlock[] = [{ type: "text", text }];
         this.input.push({
           type: "user",
@@ -1392,7 +1394,7 @@ export class UdsSession {
       for (const timer of this.displacedTurnDeadlines.values()) clearTimeout(timer);
       this.displacedTurnDeadlines.clear();
       this.interruptedTurnIds.clear();
-      this.disarmTurnQuietWatchdog();
+      this.disarmTurnQuietWatchdog("session_resources_closing");
       this.resourcesClosePromise = (async (): Promise<void> => {
         try {
           await this.server.close();
@@ -2159,8 +2161,12 @@ export class UdsSession {
         // watchdog synthesized its end a full grace period later, which is how a
         // subagent turn whose Task result was consumed inline rendered as
         // `thinking` for ten minutes after the agent had already answered.
-        const taskCycleOutstanding = this.liveSdkTaskIds.size > 0
-          || this.pendingTaskNotificationQueue.size > 0;
+        //
+        // It is the SAME predicate the quiet watch stands down on
+        // (`awaitingOutOfBandTaskWork`), and sharing the one expression is what
+        // keeps them from drifting: a state that retains the turn but not the
+        // watch is a turn the watchdog closes while it is still working.
+        const taskCycleOutstanding = this.awaitingOutOfBandTaskWork();
         const retainForLiveTasks = this.liveSdkTaskIds.size > 0
           || (taskCount > 0 && !taskNotificationResult && taskCycleOutstanding);
         // THE PENDING QUEUE MAY ONLY RETAIN A TURN THIS QUERY CAN STILL ADVANCE.
@@ -2234,7 +2240,7 @@ export class UdsSession {
         // rediscover there is nothing to judge, and a session between turns is
         // SUPPOSED to be silent — which is the one reading the watchdog must
         // never make.
-        if (this.activeTurnIds.length === 0) this.disarmTurnQuietWatchdog();
+        this.reconcileTurnQuietWatch();
         turnStart = this.activeTurnStarts.get(terminalTurnId);
         this.pendingTurnEndIds.push(terminalTurnId);
         terminalBoundaryAtMs = this.now();
@@ -2488,6 +2494,10 @@ export class UdsSession {
           decision: "commit_sdk_task_lifecycle",
         }, "SDK task lifecycle is durably reflected in root-turn liveness");
       }
+      // The live task set just moved, so the window in which silence is legal
+      // moved with it: the first task of a turn stands the watch down, and the
+      // last one to end hands the turn back to it.
+      this.reconcileTurnQuietWatch();
       if (terminalTurnId !== undefined) {
         this.turnSdkTaskIds.delete(terminalTurnId);
         const index = this.pendingTurnEndIds.indexOf(terminalTurnId);
@@ -2588,6 +2598,53 @@ export class UdsSession {
   }
 
   /**
+   * Whether the open turns are waiting on work that reaches this session
+   * through NO SDK message of its own.
+   *
+   * A background SDK task streams into its own agent transcript, not into this
+   * session's iterator, and a queued `<task-notification>` is a durable
+   * file-plane fact the sidecar owns. So while either is outstanding the parent
+   * query is legitimately silent for as long as the task runs — minutes, and
+   * routinely longer than any quiet grace worth setting.
+   *
+   * This is the SAME condition `retainForLiveTasks` keeps the turn open on, and
+   * that is the point: the one state that makes a turn stay open is the one
+   * state that makes silence legal, so the watchdog and the retention can never
+   * disagree about a turn.
+   */
+  private awaitingOutOfBandTaskWork(): boolean {
+    return this.liveSdkTaskIds.size > 0 || this.pendingTaskNotificationQueue.size > 0;
+  }
+
+  /**
+   * PUT THE QUIET WATCH IN THE STATE THE SESSION IS ACTUALLY IN.
+   *
+   * The watch is armed only while a turn is open AND nothing out-of-band is
+   * owed to it, so the watchdog's premise — silence proves the query is not
+   * running — is true by construction whenever it can fire. Silence during
+   * background-task work is not evidence of anything, and judging it closed
+   * healthy turns a full grace after their last SDK message.
+   *
+   * It is a LATCH, not a longer grace: raising the grace only moves the same
+   * wrong verdict later, whereas standing the watch down for exactly the window
+   * in which silence is expected makes the wrong verdict unreachable. Every
+   * mutation of the three inputs — the open-turn queue, the live task set, the
+   * notification queue — calls this, so no state change can leave the watch
+   * out of step with the session.
+   */
+  private reconcileTurnQuietWatch(): void {
+    if (this.activeTurnIds.length === 0) {
+      this.disarmTurnQuietWatchdog("no_turn_open");
+      return;
+    }
+    if (this.awaitingOutOfBandTaskWork()) {
+      this.disarmTurnQuietWatchdog("awaiting_out_of_band_task_work");
+      return;
+    }
+    this.armTurnQuietWatchdog();
+  }
+
+  /**
    * ARM THE QUIET WATCHDOG over whatever turns are open.
    *
    * It re-arms itself rather than firing on a fixed schedule, so a turn that
@@ -2625,11 +2682,27 @@ export class UdsSession {
     this.turnQuietTimer = timer;
   }
 
-  /** Stand the quiet watchdog down because no turn is open. */
-  private disarmTurnQuietWatchdog(): void {
+  /**
+   * Stand the quiet watchdog down, naming what made silence legal.
+   *
+   * The reason goes to the canonical log on the TRANSITION only, so a reader
+   * who finds a turn open for an hour with no synthesized end can see the one
+   * fact that explains it rather than inferring the watch was never armed.
+   */
+  private disarmTurnQuietWatchdog(reason: string): void {
     if (this.turnQuietTimer === null) return;
     clearTimeout(this.turnQuietTimer);
     this.turnQuietTimer = null;
+    LOGGER.log({
+      agent_repl_session_id: this.deps.sessionId,
+      query_instance_id: this.queryInstanceId,
+      active_turn_ids: [...this.activeTurnIds],
+      live_sdk_task_count: this.liveSdkTaskIds.size,
+      live_sdk_task_ids: [...this.liveSdkTaskIds].sort(),
+      pending_task_notification_count: this.pendingTaskNotificationQueue.size,
+      disarm_reason: reason,
+      decision: "disarm_turn_quiet_watchdog",
+    }, "the quiet watch stands down; silence is no longer evidence that the query stopped");
   }
 
   /**
@@ -2654,14 +2727,14 @@ export class UdsSession {
     }
     await this.closeUnterminatedTurn(turnId, {
       decision: "synthesize_quiet_turn_end",
-      logMessage: "a turn has been open with NO SDK activity for the whole quiet grace; the query behind it is not running, so the shim writes the end itself rather than leaving the turn latched open",
-      degradedReason: (id) => `turn ${JSON.stringify(id)} has been open with no SDK activity at all for ${quietMs}ms (grace ${this.turnQuietGraceMs}ms); the query that would produce its terminal is not running, so the shim closed the turn itself`,
+      logMessage: "a turn has been open with NO SDK activity for the whole quiet grace while nothing out-of-band was owed to it; the query behind it is not running, so the shim writes the end itself rather than leaving the turn latched open",
+      degradedReason: (id) => `turn ${JSON.stringify(id)} has been open with no SDK activity for ${quietMs}ms (grace ${this.turnQuietGraceMs}ms) while no background task was running and no task notification was queued for it; nothing could still produce its terminal, so the shim closed the turn itself`,
       graceMs: this.turnQuietGraceMs,
       quietMs,
     });
-    // The remaining turns — and this one, if the close found it already gone —
-    // are still owed a verdict, so the watch continues while anything is open.
-    if (this.activeTurnIds.length > 0) this.armTurnQuietWatchdog();
+    // The close already reconciled the watch against the open-turn queue, so
+    // the remaining turns are covered without re-arming over one that is
+    // waiting on background work.
   }
 
   /** The evidence an interrupt-grace expiry closes a turn on. */
@@ -2702,6 +2775,9 @@ export class UdsSession {
         turn_id: turnId,
         decision: "displaced_turn_terminal_observed",
       }, "an unterminated-turn deadline fired on a turn that is no longer in flight; nothing is synthesized");
+      // Nothing changed, but the wake that brought us here consumed the timer,
+      // so whatever is still open has to be handed back to the watch.
+      this.reconcileTurnQuietWatch();
       return;
     }
     this.activeTurnIds.splice(index, 1);
@@ -2709,6 +2785,10 @@ export class UdsSession {
     // the synthesized TurnEnded already names `interrupted`, and a late SDK
     // result arriving afterwards closes nothing and must not be renamed.
     this.interruptedTurnIds.delete(turnId);
+    // The open-turn queue moved, so the watch is reconciled against it here
+    // rather than by each caller: an interrupt deadline and a quiet verdict
+    // both close turns, and only one of them used to stand the watch down.
+    this.reconcileTurnQuietWatch();
     this.synthesizedTurnEndIds.push(turnId);
     const boundaryAtMs = this.now();
     const turnStart = this.activeTurnStarts.get(turnId);
@@ -2991,6 +3071,10 @@ export class UdsSession {
       pending_task_notification_count: this.pendingTaskNotificationQueue.size,
       decision: "update_task_notification_queue",
     }, "observed durable task-notification queue transition");
+    // A queued notification is an internal agent cycle this session has not
+    // been given yet, so it buys the open turn the same silence a live task
+    // does — and draining the queue takes that silence back.
+    this.reconcileTurnQuietWatch();
   }
 
   /** Wrap a DegradedState as a SYNTHETIC/EPHEMERAL Event for the daemon. */
