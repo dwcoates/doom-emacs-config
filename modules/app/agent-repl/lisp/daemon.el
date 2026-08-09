@@ -48,7 +48,7 @@
 (declare-function agent-repl-frontend-shutdown-schedule "frontend-state" ())
 (declare-function agent-repl-frontend-scheduled-shutdown-id "frontend-state" ())
 (declare-function agent-repl-failure-local "failure" (type message &optional detail))
-(declare-function agent-repl-failure-surface "failure" (workspace failure))
+(declare-function agent-repl-failure-surface "failure" (workspace failure &optional verb))
 
 ;; Forward declaration: the connection lifecycle hook lives in frontend-uds.el,
 ;; which loads AFTER this file.  `add-hook' copes with an unbound symbol; this

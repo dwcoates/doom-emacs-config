@@ -256,7 +256,11 @@ never an error.  Returns non-nil when a prompt was cleared."
             (agent-repl--log log-ws
                              "permission-clear: ws=%s request=%s resolution=denied deny-message-present=t — echoing"
                              ws uuid)
-            (message "agent-repl: permission denied — %s" deny-message))
+            ;; DENY-MESSAGE is prose someone wrote for a human — the denier's
+            ;; own reason — so it is echoed verbatim rather than translated.
+            (agent-repl--user-message
+             log-ws "permission denied — %s" (list deny-message)
+             :detail (format "permission-clear ws=%s request=%s resolution=denied" ws uuid)))
           t)
       (agent-repl--log log-ws
                        "permission-clear: ws=%s uuid=%s resolution=%s — no matching active prompt (already cleared / never presented)"
@@ -334,8 +338,10 @@ current workspace."
       (agent-repl--log ws "answer-permission: request=%s allow=%s deny-message-present=%s"
                        request-id (if allow "yes" "no") (if deny-message "t" "nil"))
       (agent-repl--send-permission-answer ws request-id allow nil deny-message)
-      (message "agent-repl: %s permission for %s"
-               (if allow "allowed" "denied") (or tool-name "tool")))))
+      (agent-repl--user-message
+       ws "%s permission for %s"
+       (list (if allow "allowed" "denied") (or tool-name "tool"))
+       :detail (format "answer-permission request=%s allow=%s" request-id allow)))))
 
 ;;;; ---- Handler registration --------------------------------------------
 ;;

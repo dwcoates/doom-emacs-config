@@ -336,6 +336,44 @@ is its ONLY publisher: Emacs owns the workspace model, so the roster is
 authored here and handed to the daemon to retain and rebroadcast, which
 is what replaced the per-webview execute-script injection.")
 
+(defconst agent-repl--uds-command-verbs
+  '(("submitPrompt"            . "prompt")
+    ("interrupt"               . "interrupt")
+    ("permissionAnswer"        . "permission answer")
+    ("mergeWorkspace"          . "merge")
+    ("closeWorkspace"          . "close")
+    ("openWorkspace"           . "open")
+    ("resync"                  . "resync")
+    ("createSession"           . "session start")
+    ("deleteSession"           . "session delete")
+    ("restartSession"          . "session restart")
+    ("hibernateWorkspace"      . "hibernate")
+    ("shutdown"                . "daemon shutdown")
+    ("scheduleShutdown"        . "scheduled restart")
+    ("cancelScheduledShutdown" . "scheduled-restart cancel")
+    ("daemonHealth"            . "daemon health check")
+    ("sessionHealth"           . "session health check")
+    ("publishWorkspaceRoster"  . "sidebar publish")
+    ("workspaceMaterialized"   . "workspace materialization")
+    ("hostActionCompleted"     . "host action")
+    ("queueForce"              . "queue force")
+    ("queueAccept"             . "queue accept")
+    ("queueCancel"             . "queue cancel")
+    ("clientLog"               . "client log"))
+  "The USER-FACING verb naming each `FrontendCommand' oneof arm.
+The protojson field names are wire identifiers — `submitPrompt',
+`hibernateWorkspace' — and a user reading the echo area has no reason to
+know them.  `agent-repl--user-copy-for-error' builds its sentence around
+the verb, so this is the table that decides whether that sentence reads
+as English.")
+
+(defun agent-repl--uds-command-verb (field)
+  "Return the user-facing verb naming command FIELD.
+An unmapped FIELD degrades to nil, which
+`agent-repl--user-copy-for-error' renders as \"the command\" rather than
+leaking a wire identifier into the echo area."
+  (and (stringp field) (cdr (assoc field agent-repl--uds-command-verbs))))
+
 (defconst agent-repl--uds-republished-command-fields
   '("publishWorkspaceRoster")
   "Command fields whose loss on the wire is recovered by re-publication.
@@ -1338,11 +1376,16 @@ bytes the link already holds before it declares anything lost."
            workspace
            (agent-repl-failure-local
             "client.command_unacked"
+            ;; The USER VERB, not the protojson field: `mergeWorkspace' is a
+            ;; wire identifier and the echo area is not where it belongs.  The
+            ;; field, the request-id and the deadline are all on the detail,
+            ;; which the surfacing path files rather than echoes.
             (format "the daemon never acknowledged the %s command; the daemon link is degraded"
-                    (or field "frontend"))
-            (format "request-id=%s workspace=%s deadline=%ss"
-                    request-id (or raw-workspace "none")
-                    agent-repl-uds-command-ack-deadline))))
+                    (or (agent-repl--uds-command-verb field) "frontend"))
+            (format "request-id=%s field=%s workspace=%s deadline=%ss"
+                    request-id (or field "none") (or raw-workspace "none")
+                    agent-repl-uds-command-ack-deadline))
+           (agent-repl--uds-command-verb field)))
         request-id))))
 
 (defun agent-repl--uds-command-pending-p (request-id)
@@ -1676,8 +1719,11 @@ Emacs never sent.  Returns the `:ok' flag."
                               request-id field (car cb-err))))
         ;; No handler: the daemon deliberately did not act and nobody will
         ;; answer it.  Never a silent drop.
-        (message "agent-repl: %s command needs a confirmation this end cannot ask for"
-                 (or field "frontend"))))
+        (agent-repl--user-message
+         workspace "%s needs a confirmation this end cannot ask for"
+         (list (or (agent-repl--uds-command-verb field) "the command"))
+         :detail (format "untracked interrupt challenge request-id=%s field=%s live-tasks=%S"
+                         request-id field (plist-get challenge :liveTasks)))))
      (t
       (agent-repl--log workspace
                        "uds-command-ack: REJECTED request-id=%s field=%s ws=%s error-present=%s — surfacing"
@@ -1686,9 +1732,16 @@ Emacs never sent.  Returns the `:ok' flag."
       ;; case: it still surfaces, from the raw text, so a refusal is never
       ;; invisible while the two builds are mixed.
       (if failure
-          (agent-repl-failure-surface workspace failure)
-        (message "agent-repl: %s command failed: %s"
-                 (or field "frontend") (or err "no error detail")))
+          (agent-repl-failure-surface workspace failure
+                                      (agent-repl--uds-command-verb field))
+        ;; THE RAW CHAIN IS ROUTED, NEVER ECHOED.  `err' is an `err.Error()'
+        ;; funnel: a wrapped Go chain carrying package prefixes, workspace,
+        ;; session and request identifiers, and protobuf enum names.  The echo
+        ;; area gets the translated sentence; the chain is filed beside it.
+        (agent-repl--user-message-for-error
+         workspace (agent-repl--uds-command-verb field) err
+         :detail (format "command nacked request-id=%s field=%s error=%s"
+                         request-id field (or err "no error detail"))))
       (when-let ((on-failure (plist-get pending :on-failure)))
         (condition-case cb-err
             (progn

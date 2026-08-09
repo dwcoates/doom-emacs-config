@@ -146,12 +146,15 @@ existing."
      cwd nil 'explicit uuid
      (lambda (id)
        (agent-repl--info ws "transcript resume: ws=%s uuid=%s RESUMED session=%s" ws uuid id)
-       (message "[agent-repl] %s resumed %s" ws (substring uuid 0 8)))
+       (agent-repl--user-message ws "%s resumed %s" (list ws (substring uuid 0 8))
+                                 :detail (format "transcript resume uuid=%s session=%s" uuid id)))
      (lambda (detail)
        ;; Loud: a resume the user explicitly asked for that silently did
        ;; nothing would look like the workspace simply ignoring them.
        (agent-repl--warn ws "transcript resume: ws=%s uuid=%s FAILED: %S" ws uuid detail)
-       (message "[agent-repl] %s could NOT resume %s: %S" ws (substring uuid 0 8) detail))
+       (agent-repl--user-message-for-error
+        ws "resume" (and (stringp detail) detail)
+        :detail (format "transcript resume uuid=%s FAILED: %S" uuid detail)))
      ws)))
 
 ;;;; ---- Commands --------------------------------------------------------
@@ -204,8 +207,11 @@ names it acted on."
           (agent-repl--resume-transcript ws (car entries)))))
     (agent-repl--info nil "restore-latest-transcripts: resumed=%d skipped=%d"
                       (length acted) (length skipped))
-    (message "[agent-repl] restoring newest transcript in %d workspace%s (%d had none)"
-             (length acted) (if (= (length acted) 1) "" "s") (length skipped))
+    (agent-repl--user-message
+     nil "restoring the newest transcript in %d workspace%s (%d had none)"
+     (list (length acted) (if (= (length acted) 1) "" "s") (length skipped))
+     :detail (format "restore-latest-transcripts resumed=%S skipped=%S"
+                     (nreverse (copy-sequence acted)) (nreverse (copy-sequence skipped))))
     (nreverse acted)))
 
 (provide 'agent-repl-transcripts)
