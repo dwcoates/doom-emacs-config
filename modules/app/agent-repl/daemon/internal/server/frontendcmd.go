@@ -48,7 +48,12 @@ type PromptRouter interface {
 	// the durable transcript line is later stamped with, so a frontend
 	// reconciles the two onto one bubble.
 	SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) error
-	Interrupt(ctx context.Context, workspace string) error
+	// Interrupt carries the COMMAND'S OWN request id through to the session
+	// controller for the same reason SubmitPrompt does: it is the only id the
+	// user's client, the daemon's command log and the shim's control exchange
+	// can be reconciled on. The wire itself travels under a daemon-minted
+	// control id that appears in no caller's records.
+	Interrupt(ctx context.Context, workspace, requestID string) error
 	AnswerPermission(ctx context.Context, workspace, permissionRequestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) error
 	SetModel(ctx context.Context, workspace, model string) (string, error)
 	// ResolveMergeConflict drives the workspace's OWN session to resolve a
@@ -734,7 +739,7 @@ func (h *commandHandler) Interrupt(ctx context.Context, workspace, requestID str
 		}
 	}
 	evictErr := h.evictQueuedMerges(ctx, workspace, requestID)
-	return errors.Join(evictErr, h.prompts.Interrupt(ctx, workspace))
+	return errors.Join(evictErr, h.prompts.Interrupt(ctx, workspace, requestID))
 }
 
 // evictQueuedMerges performs the interrupt's queue half and reports its failure.

@@ -372,6 +372,10 @@ async function rig(
     replayIdleMs?: number;
     /** Grace an acked-interrupted turn gets for the SDK's own terminal. */
     interruptTerminalGraceMs?: number;
+    /** Quiet window an open turn gets before its query is judged dead. */
+    turnQuietGraceMs?: number;
+    /** Frozen or scripted clock, so a quiet window can be held open on purpose. */
+    nowMs?: () => number;
     queryInstanceId?: string;
     /** The `--permission-mode` argv the session is constructed with. */
     permissionMode?: PermissionMode;
@@ -421,6 +425,8 @@ async function rig(
     storeRelinkReportAfterMs: 0,
     ...(opts.replayIdleMs !== undefined ? { replayIdleMs: opts.replayIdleMs } : {}),
     ...(opts.interruptTerminalGraceMs !== undefined ? { interruptTerminalGraceMs: opts.interruptTerminalGraceMs } : {}),
+    ...(opts.turnQuietGraceMs !== undefined ? { turnQuietGraceMs: opts.turnQuietGraceMs } : {}),
+    ...(opts.nowMs !== undefined ? { nowMs: opts.nowMs } : {}),
     newRequestId: (() => {
       let n = 0;
       return () => `req-${++n}`;
@@ -3148,6 +3154,121 @@ describe("UdsSession displaced-turn terminal", () => {
     // Assert: the FIRST Event to arrive is the store outage provoked
     // afterwards, so nothing synthesized a terminal for a turn that never was.
     store.close();
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.component).toBe("shim-store-client");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A TURN THAT NOBODY INTERRUPTS IS STILL OWED A TERMINAL.
+//
+// The interrupt grace above only ever fires for a turn somebody thought to
+// stop. The live defect this covers is the one nobody stopped: a query died
+// without yielding another message and without throwing, so the iterator
+// simply never came back, and the shim carried the turn as live for TWO DAYS.
+// The daemon believed it, refused every hibernation for the workspace, and
+// blocked deploys on a "turn in flight" that had not existed since Tuesday.
+//
+// The evidence is the STREAM, not the turn: a working agent emits deltas, tool
+// calls and task lifecycle continuously, so total silence across a generous
+// window is a dead query rather than a slow one.
+// ---------------------------------------------------------------------------
+
+describe("UdsSession quiet-turn watchdog", () => {
+  it("synthesizes the terminal for an open turn whose SDK went silent", async () => {
+    // Arrange: an ordinary accepted turn. NOTHING interrupts it — that is the
+    // whole point — and the SDK never speaks again.
+    const { daemon, store, session } = await rig({
+      storeSessionId: "vendor-uuid",
+      turnQuietGraceMs: 5,
+    });
+
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+
+    // Assert: the same ordered boundary the interrupt arm writes, and no
+    // invented vendor result.
+    const sw = await store.peer().next(StoreWriteSchema);
+    expect(sw.batch!.events.map((event) => event.payload.case)).toEqual([
+      "accountUsageObservation",
+      "turnEnded",
+    ]);
+    const ended = sw.batch!.events[1]!;
+    if (ended.payload.case !== "turnEnded") throw new Error("case");
+    expect(ended.payload.value.turnId).toBe("p1");
+    await until(() => session.turnCount() === 0);
+  });
+
+  it("reports the quiet close as a recovered degradation naming the silence", async () => {
+    // Arrange: the same dead query. The daemon learns the turn was closed on
+    // the evidence channel it already reads, not from a log line.
+    const { daemon, store } = await rig({
+      storeSessionId: "vendor-uuid",
+      turnQuietGraceMs: 5,
+    });
+
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+
+    // Assert
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.component).toBe("claude-shim-turn-lifecycle");
+    expect(evt.payload.value.reason).toContain("\"p1\"");
+    expect(evt.payload.value.reason).toContain("no SDK activity");
+    expect(evt.payload.value.recovered).toBe(true);
+  });
+
+  it("keeps a turn open while the clock says the stream has not been silent", async () => {
+    // Arrange: a FROZEN clock, so the measured silence is permanently zero
+    // however many times the deadline wakes. A watchdog that judged on the
+    // timer firing rather than on measured silence would kill this turn, which
+    // is exactly what would happen to a long-running agent.
+    const { daemon, store } = await rig({
+      storeSessionId: "vendor-uuid",
+      turnQuietGraceMs: 1,
+      nowMs: () => 1_000_000,
+    });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+
+    // Act: give the deadline many chances to fire, then provoke an unrelated
+    // degradation whose arrival proves the ordering.
+    await tick();
+    await tick();
+    await tick();
+    store.close();
+
+    // Assert: the FIRST Event is the store outage, so nothing synthesized a
+    // terminal for a turn the clock says is still being worked on.
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.component).toBe("shim-store-client");
+  });
+
+  it("arms nothing when the quiet grace is disabled", async () => {
+    // Arrange: a zero grace turns the watch off. Any deadline wrongly armed
+    // here would fire immediately and report before the outage below.
+    const { daemon, store } = await rig({
+      storeSessionId: "vendor-uuid",
+      turnQuietGraceMs: 0,
+    });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+
+    // Act
+    await tick();
+    await tick();
+    store.close();
+
+    // Assert
     const evt = await daemon.next(EventSchema);
     if (evt.payload.case !== "degradedState") throw new Error("case");
     expect(evt.payload.value.component).toBe("shim-store-client");

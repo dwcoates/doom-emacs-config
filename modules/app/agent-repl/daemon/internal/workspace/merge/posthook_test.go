@@ -84,7 +84,7 @@ func TestPostMergeHookNeverFiresWhileAConflictIsParked(t *testing.T) {
 
 	// Act — the pick conflicts, and the shim attempt is left pending.
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234"}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 	<-h.resolver.calls
 
 	// Assert — the merge has not landed, so nothing is owed to a parent.
@@ -103,7 +103,7 @@ func TestPostMergeHookNeverFiresOnAnAbandonedConflict(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234"}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 	<-h.resolver.calls
 
 	// Act.
@@ -132,7 +132,7 @@ func TestPostMergeHookFiresOnAMergeThatLandedAfterAResume(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234"}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 	<-h.resolver.calls
 
 	// Act — the human resume drives it to merged.

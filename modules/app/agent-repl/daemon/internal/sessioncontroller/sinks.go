@@ -175,6 +175,26 @@ type StateApplier interface {
 	// It reports whether it reconciled anything. See connectivitystate.go's
 	// reconcileOrphanedTurn, which is the only caller and which owns the proof.
 	CloseOrphanedTurn(workspace, sessionID, reason string) (closed bool, err error)
+	// CloseOriginTurns ends the NAMED turns' claims because the ORIGIN that
+	// submitted them reached its own terminal. It is the closing edge for the
+	// turns the daemon opens on a machine's behalf — a keep-alive ping, a
+	// workspace-create prompt, a merge run's resolution — none of which has
+	// anybody watching for its end once the origin is done.
+	//
+	// It reports the identities it closed. A turn whose own end already retired
+	// its claim is left exactly as it was and is not among them.
+	CloseOriginTurns(workspace string, turnIDs []string, cause string) (closed []string, err error)
+	// UnansweredInterruptAgeMs reports how long a stop the shim acked as
+	// INTERRUPTED has gone without the terminal that ack owed, and whether such
+	// a stop stands at all. It is the one piece of evidence a LIVE shim
+	// produces against its own turn claim, and it is what narrows the
+	// live-controller decline (unsubstantiatedturn.go).
+	UnansweredInterruptAgeMs(workspace string) (ageMs int64, marked bool)
+	// LastActivityMs is when anything last happened on the workspace. The state
+	// log is already the activity record, so this needs no bookkeeping of its
+	// own; ok=false means the workspace has no history at all, which is UNKNOWN
+	// rather than idle.
+	LastActivityMs(workspace string) (atMs int64, ok bool, err error)
 }
 
 // ProgressResolver is the slice of the progress-footer resolver (F1) the session controller

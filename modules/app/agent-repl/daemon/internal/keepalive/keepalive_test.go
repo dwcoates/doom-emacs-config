@@ -395,3 +395,101 @@ func TestValidateRefusesALeewayThatSwallowsTheWarmCompaction(t *testing.T) {
 			cfg.Leeway, RetryFloor, WarmCompactMargin)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// THE PING DEADLINE. A ping is one model call answering a dozen tokens with a
+// single character, so its turn ends in seconds. The observed leak is a `ka_`
+// claim open for HOURS: the turn's end never arrived, the claim declined every
+// later ping, held real prompts behind it, and read as a live turn to
+// hibernation and to every restart guard.
+// ---------------------------------------------------------------------------
+
+// THE DEADLINE IS THE THRESHOLD, and a ping exactly at it has reached it. The
+// bound is a failure bound, so the edge belongs to the failure.
+func TestPingOverdueComparesAgainstTheDerivedDeadline(t *testing.T) {
+	cfg := DefaultConfig()
+	deadline := int64(cfg.PingDeadline() / time.Millisecond)
+	const submitted int64 = 1_000_000
+	tests := []struct {
+		name  string
+		nowMs int64
+		want  bool
+	}{
+		{name: "a ping that has just been submitted", nowMs: submitted, want: false},
+		{name: "a ping one millisecond short of the deadline", nowMs: submitted + deadline - 1, want: false},
+		{name: "a ping exactly at the deadline has reached it", nowMs: submitted + deadline, want: true},
+		{name: "a ping open for hours", nowMs: submitted + 4*deadline, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			_, got := cfg.PingOverdue(tc.nowMs, submitted)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("PingOverdue(now=%d submitted=%d) = %v against a %s deadline, want %v",
+					tc.nowMs, submitted, got, cfg.PingDeadline(), tc.want)
+			}
+		})
+	}
+}
+
+// EVERY UNKNOWN ANSWERS NO. A ping with no recorded submit instant is one the
+// policy knows nothing about, and closing a live turn on absent evidence is the
+// failure the whole apparatus exists to avoid.
+func TestPingOverdueLeavesAnUndatedPingAlone(t *testing.T) {
+	// Arrange, Act.
+	_, overdue := DefaultConfig().PingOverdue(1_000_000, 0)
+
+	// Assert.
+	if overdue {
+		t.Fatal("a ping with no recorded submit instant was called overdue; nothing is known about when it started")
+	}
+}
+
+// A SUBMIT INSTANT IN THE FUTURE IS A CLOCK THAT MOVED BACKWARDS, not a ping
+// open for negative time. The conservative direction is to leave the turn alone.
+func TestPingOverdueLeavesABackwardsClockAlone(t *testing.T) {
+	// Arrange, Act.
+	_, overdue := DefaultConfig().PingOverdue(1_000_000, 2_000_000)
+
+	// Assert.
+	if overdue {
+		t.Fatal("a ping submitted in the future was called overdue; the clock moved, the ping did not")
+	}
+}
+
+// THE ELAPSED IS REPORTED, not merely the verdict. It is what the loud line
+// naming a closed ping carries, and re-deriving it from a clock that has since
+// moved is the discipline every other measured figure here avoids.
+func TestPingOverdueReportsHowLongThePingHasBeenOpen(t *testing.T) {
+	// Arrange, Act.
+	open, _ := DefaultConfig().PingOverdue(1_000_000+90_000, 1_000_000)
+
+	// Assert.
+	if open != 90*time.Second {
+		t.Fatalf("PingOverdue reported the ping open for %s, want 90s", open)
+	}
+}
+
+// A DEADLINE SHORTER THAN ONE SWEEP INTERVAL IS REFUSED AT STARTUP. A ping
+// judged dead on the very next tick after its submit would kill live pings,
+// which is the opposite of what the deadline is for. The boundary case --
+// exactly one interval -- is VALID, because the deadline is measured from the
+// submit instant rather than counted in ticks.
+func TestValidateRefusesADeadlineShorterThanOneSweepInterval(t *testing.T) {
+	// Arrange — a leeway almost as wide as the TTL leaves a deadline of nearly
+	// nothing while the sweep interval stays a quarter of that wide leeway.
+	cfg := DefaultConfig()
+	cfg.CacheTTL = time.Hour
+	cfg.Leeway = time.Hour - time.Minute
+
+	// Act.
+	err := cfg.Validate()
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Validate() accepted a %s ping deadline against a %s sweep interval; a ping would be judged dead on the tick after its submit",
+			cfg.PingDeadline(), cfg.SweepInterval(0))
+	}
+}

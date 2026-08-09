@@ -282,6 +282,30 @@ t_proto_commit_stales_every_system() {
     rm -rf "$root"
 }
 
+# --- 7b. proto review artifacts are not build inputs ------------------------
+# A commit touching only proto/figma-idl-draft/ or the sketch must not advance
+# any system's source revision: no build reads them, so the staleness check
+# never rebuilds for them and a gate counting them can never be satisfied.
+t_proto_review_artifact_commit_stales_nothing() {
+    local root before; root="$(new_root)"
+    before="$(head_sha "$root")"
+    mkdir -p "$root/proto/figma-idl-draft"
+    echo "draft round" > "$root/proto/figma-idl-draft/feed.proto"
+    echo "sketch note" >> "$root/proto/SKETCH-figma-idl.md"
+    git_c "$root" add proto/figma-idl-draft proto/SKETCH-figma-idl.md
+    git_c "$root" commit -qm "draft review round"
+    run_report "$root"
+    local draft; draft="$(head_sha "$root")"
+    if [ "$draft" != "$before" ] \
+       && [ "$(jq_get "$OUT" "any(s['source_sha'] == '$draft' for s in d['systems'])")" = "False" ]; then
+        pass "a draft/sketch-only commit advances no system's source revision"
+    else
+        fail "a draft/sketch-only commit advances no system's source revision" \
+             "draft=$draft out: $(cat "$OUT")"
+    fi
+    rm -rf "$root"
+}
+
 # --- 8. a running daemon older than its binary is stale ---------------------
 t_daemon_binary_newer_than_process_is_stale() {
     local root; root="$(new_root)"
@@ -488,6 +512,7 @@ t_minutes_behind_is_timestamp_delta
 t_dirty_stamp_flagged_and_still_measured
 t_unknown_deployed_revision_errors_per_system
 t_proto_commit_stales_every_system
+t_proto_review_artifact_commit_stales_nothing
 t_daemon_binary_newer_than_process_is_stale
 t_daemon_started_after_binary_is_fresh
 t_service_fingerprint_mismatch_is_stale

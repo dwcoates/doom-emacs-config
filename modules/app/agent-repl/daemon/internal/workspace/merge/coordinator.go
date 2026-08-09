@@ -11,26 +11,34 @@ import (
 	"claude-repld/internal/dlog"
 )
 
-// Picker is the git cherry-pick layer merge.Coordinator drives. *merge.Driver
-// satisfies it; the interface exists so the coordinator's queueing, leasing and
-// conflict-parking behavior is unit-testable without a git fixture per case.
+// Picker is the git rebase-and-merge layer merge.Coordinator drives.
+// *merge.Driver satisfies it; the interface exists so the coordinator's
+// queueing, leasing and conflict-parking behavior is unit-testable without a git
+// fixture per case.
 type Picker interface {
 	Merge(ctx context.Context, req Request) (Result, error)
 	Resume(ctx context.Context, req Request) (Result, error)
 	// ContinueAfterTestFix commits what a test-failure resolution turn staged
-	// in the target worktree, re-runs the suite, and continues the per-commit
+	// in the REBASE WORKTREE, re-runs the suite, and continues the per-commit
 	// replay.
 	ContinueAfterTestFix(ctx context.Context, req Request, failingCommit string) (Result, error)
-	// Rollback resets the target worktree to head, undoing everything the merge
-	// landed. It is the tail of a merge whose test gate failed for good.
+	// Cleanup removes the temporary rebase worktree req carries, and is a no-op
+	// for a request with none.
 	//
-	// expected is the head the merge left the target on. An implementation MUST
-	// refuse the reset when the target has moved off it — see Driver.Rollback.
-	Rollback(ctx context.Context, req Request, head, expected string) error
+	// IT REPLACED Rollback, and the replacement is the point of the rebase
+	// design. Rollback reset the TARGET after a failed test gate, because the
+	// driver had been cherry-picking into it; that reset ran at the end of an
+	// unbounded agent turn and twice destroyed external commits. Nothing reaches
+	// the target now until every commit has passed, so a failed merge has
+	// nothing to undo — only a temp worktree to remove.
+	//
+	// THE COORDINATOR CALLS IT ON EVERY TERMINAL PATH, including abandonment and
+	// shutdown. A cleanup failure can never un-merge a merge; it is loud-logged.
+	Cleanup(ctx context.Context, req Request) error
 	MarkQueued(ws, cause string) error
 }
 
-// The git cherry-pick layer is the production Picker, and the coordinator is
+// The git rebase-and-merge layer is the production Picker, and the coordinator is
 // the production merge.Coordinator. Both bindings are asserted here so a
 // contract drift is a compile error rather than a wiring surprise.
 var (
@@ -62,7 +70,7 @@ type CoordinatorConfig struct {
 	Phases PhaseSource
 	// Keyer resolves the queue key from a request's target worktree.
 	Keyer RepoKeyer
-	// Picker is the git cherry-pick layer (*merge.Driver in production).
+	// Picker is the git rebase-and-merge layer (*merge.Driver in production).
 	Picker Picker
 	// Lease is the shim exclusivity claim held across each driven merge.
 	Lease Lease
@@ -855,8 +863,8 @@ func (c *QueueCoordinator) finish(repo string, req Request, release func()) bool
 // keepForTerminalReplay retires a run whose terminal STATUS did not publish,
 // WITHOUT acking its durable queue entry.
 //
-// THE MERGE OUTCOME IS NEVER ROLLED BACK HERE. A merged run's commits are on the
-// target and a failed run's rollback already ran; what did not happen is the
+// THE MERGE OUTCOME IS NEVER UNDONE HERE. A merged run's commits are on the
+// target and a failed run never touched it; what did not happen is the
 // SAYING of it. The entry is therefore kept and MARKED with the exact terminal
 // word that failed to publish, so the next boot's Drain re-publishes that word
 // instead of replaying a merge that already happened — which is what makes the
@@ -1224,8 +1232,8 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 // retires the entry once it lands.
 //
 // THE MERGE IS NOT RE-RUN. Its outcome was reached before the entry was marked —
-// the commits are on the target for a merged run, and a failed run's rollback
-// already happened — so the only thing owed is the status. No lease is taken, no
+// the commits are on the target for a merged run, and a failed run never
+// touched the target — so the only thing owed is the status. No lease is taken, no
 // session is brought up, no cherry-pick is attempted: every one of those would
 // redo work that is over.
 //
@@ -1373,7 +1381,7 @@ func (c *QueueCoordinator) refuseDeletedSession(repo string, req, driven Request
 //   - a session came up (or was already up), and the run proceeds with it;
 //   - the workspace has NO session record, and the run proceeds SESSIONLESS.
 //     A plain worktree nobody ever opened a session on is mergeable — the
-//     cherry-pick, the test gate and the rollback are git — so failing here
+//     rebase, the test gate and the merge commit are git — so failing here
 //     would make "was this ever opened in the editor?" a precondition of
 //     merging. Every step that genuinely needs a session fails loudly on its
 //     own path, which is the only place that knows whether the absence matters;
@@ -1458,12 +1466,16 @@ func (c *QueueCoordinator) runBeforeAction(repo string, req Request) *terminalFa
 // between the conflict path and the test path — is what keeps "how did this
 // merge end" answerable in one place.
 //
-// PreMergeHead is read ONCE, from the Result of the original Merge, and carried
-// across every later step. Resume and ContinueAfterTestFix each start from a
-// target that already carries landed commits, so their own view of HEAD is not
-// a rollback point.
+// THE REBASE WORKTREE IS CLEANED UP HERE, ON EVERY EXIT, through a defer. This
+// function owns the whole of a merge's life after merge.Driver.Merge returns —
+// the conflict park, the test-fix attempt, an abandonment, a shutdown, the
+// terminal — so a defer over it is the one placement that cannot miss a path,
+// including a panic unwinding through it. The request the defer reads is the
+// LIVE one: every Result the loop takes carries the worktree the step it came
+// from was working in, and `driven` is updated from it before the loop turns.
 func (c *QueueCoordinator) settle(repo string, req, driven Request, park *conflictPark, release func(), res Result) bool {
-	preHead := res.PreMergeHead
+	driven.WorkDir, driven.BaseHead = res.WorkDir, res.BaseHead
+	defer func() { c.cleanupRebase(repo, driven) }()
 	// attempted records which failing commits have already had their ONE
 	// resolution attempt, so a suite that fails again on the same commit fails
 	// the merge instead of re-prompting an agent that already tried.
@@ -1471,19 +1483,22 @@ func (c *QueueCoordinator) settle(repo string, req, driven Request, park *confli
 	for {
 		switch res.Outcome {
 		case OutcomeConflict:
-			c.logf("merge: parked on conflict {repo=%s ws=%s name=%s commit=%s}", repo, req.Workspace, req.Name, res.ConflictCommit)
+			c.logf("merge: parked on conflict {repo=%s ws=%s name=%s commit=%s work=%s} — the target is untouched and stays that way while this is parked",
+				repo, req.Workspace, req.Name, res.ConflictCommit, driven.WorkDir)
 			next, handled, cont := c.awaitResolution(repo, req, driven, park, release, res.ConflictCommit)
 			if handled {
 				return cont
 			}
 			res = next
+			driven.WorkDir, driven.BaseHead = res.WorkDir, res.BaseHead
 		case OutcomeTestFailed:
 			c.logf("merge: test gate failed {repo=%s ws=%s name=%s commit=%s}", repo, req.Workspace, req.Name, res.FailingCommit)
-			next, handled, cont := c.awaitTestFix(repo, req, driven, park, release, preHead, res, attempted)
+			next, handled, cont := c.awaitTestFix(repo, req, driven, park, release, res, attempted)
 			if handled {
 				return cont
 			}
 			res = next
+			driven.WorkDir, driven.BaseHead = res.WorkDir, res.BaseHead
 		default:
 			c.logf("merge: terminal {repo=%s ws=%s name=%s run=%s outcome=%s}", repo, req.Workspace, req.Name, driven.Run.RunID(), res.Outcome)
 			// THE AFTER-ACTION RUNS BEFORE THE MERGE IS RETIRED, because it is a
@@ -1529,7 +1544,7 @@ func (c *QueueCoordinator) settle(repo string, req, driven Request, park *confli
 // merge state, and blocking a frontend command on it would make
 // conflict_resolved_continue hang for the length of a test suite.
 func (c *QueueCoordinator) awaitResolution(repo string, req, driven Request, park *conflictPark, release func(), conflictCommit string) (Result, bool, bool) {
-	c.driveShimResolution(repo, req, park, conflictCommit)
+	c.driveShimResolution(repo, driven, park, conflictCommit)
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -1554,6 +1569,10 @@ func (c *QueueCoordinator) awaitResolution(repo string, req, driven Request, par
 			// second run id would restart the progress a user is watching.
 			resumeReq := call.req
 			resumeReq.Run = driven.Run
+			// A human's conflict_resolved_continue names no rebase worktree
+			// either — the frontend does not know there is one — and resuming
+			// without it would be a driver call with nowhere to work.
+			resumeReq.WorkDir, resumeReq.BaseHead = driven.WorkDir, driven.BaseHead
 			res, err := c.picker.Resume(c.ctx, resumeReq)
 			if err != nil {
 				c.logf("merge: resume driver FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
@@ -1579,7 +1598,7 @@ func (c *QueueCoordinator) awaitResolution(repo string, req, driven Request, par
 //
 // EXACTLY ONE ATTEMPT PER FAILING COMMIT. A second identical prompt to an agent
 // that already failed to fix the suite is a spin, not a strategy, so a repeat
-// failure on the same commit goes straight to the rollback path. A failure on a
+// failure on the same commit fails the merge outright. A failure on a
 // LATER commit is a different failure and gets its own attempt.
 //
 // THE ATTEMPT RUNS ON ITS OWN GOROUTINE even though nothing else needs to serve
@@ -1588,11 +1607,11 @@ func (c *QueueCoordinator) awaitResolution(repo string, req, driven Request, par
 // the re-run finish. The attempt's context is cancelled on that abandon, so the
 // cancelled fix cannot go on cherry-picking into a target the merge has already
 // given up.
-func (c *QueueCoordinator) awaitTestFix(repo string, req, driven Request, park *conflictPark, release func(), preHead string, res Result, attempted map[string]bool) (Result, bool, bool) {
+func (c *QueueCoordinator) awaitTestFix(repo string, req, driven Request, park *conflictPark, release func(), res Result, attempted map[string]bool) (Result, bool, bool) {
 	if attempted[res.FailingCommit] {
 		c.logf("merge: test failure NOT RE-ATTEMPTED {repo=%s ws=%s name=%s commit=%s} — its one resolution attempt already ran and the suite still fails",
 			repo, req.Workspace, req.Name, res.FailingCommit)
-		return Result{}, true, c.failTestGate(repo, req, driven, release, preHead, res)
+		return Result{}, true, c.failTestGate(repo, req, driven, release, res)
 	}
 	attempted[res.FailingCommit] = true
 
@@ -1601,15 +1620,18 @@ func (c *QueueCoordinator) awaitTestFix(repo string, req, driven Request, park *
 		RequestID:     newTestFixRequestID(),
 		FailingCommit: res.FailingCommit,
 		SourceBranch:  req.SourceBranch,
-		TargetDir:     req.TargetDir,
-		FailureTail:   res.TestFailureTail,
+		// THE AGENT IS POINTED AT THE REBASE WORKTREE, not the target. The
+		// commit that broke the suite is only there, and the target has nothing
+		// of this merge in it to fix.
+		TargetDir:   driven.WorkDir,
+		FailureTail: res.TestFailureTail,
 	}
 	if err := fix.validate(); err != nil {
 		// The facts the driver reported do not describe a fixable failure,
 		// which no valid Result produces. Prompting an agent with a half-empty
 		// instruction is worse than failing the merge with the reason.
 		c.logf("merge: test failure NOT HANDED to the shim {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
-		return Result{}, true, c.failTestGate(repo, req, driven, release, preHead, res)
+		return Result{}, true, c.failTestGate(repo, req, driven, release, res)
 	}
 
 	fixCtx, cancelFix := context.WithCancel(c.ctx)
@@ -1624,11 +1646,11 @@ func (c *QueueCoordinator) awaitTestFix(repo string, req, driven Request, park *
 	select {
 	case out := <-done:
 		if out.err != nil {
-			return Result{}, true, c.failTestGate(repo, req, driven, release, preHead, res)
+			return Result{}, true, c.failTestGate(repo, req, driven, release, res)
 		}
 		return out.res, false, false
 	case call := <-park.abandons:
-		c.logf("merge: test-fix attempt ABANDONED {repo=%s ws=%s name=%s commit=%s} — the workspace was closed mid-fix; the target keeps what landed",
+		c.logf("merge: test-fix attempt ABANDONED {repo=%s ws=%s name=%s commit=%s} — the workspace was closed mid-fix; the target was NEVER MODIFIED and the rebase worktree is discarded",
 			repo, req.Workspace, req.Name, res.FailingCommit)
 		cancelFix()
 		<-done
@@ -1651,12 +1673,13 @@ type pickResultOrError struct {
 
 // driveTestFix runs the resolution turn and then continues the replay. Every
 // failure inside it is loud-logged and returned as an error, which settle turns
-// into the rollback path.
+// into the terminal test-gate failure — a failure that leaves the target
+// untouched, because nothing of this merge has reached it.
 func (c *QueueCoordinator) driveTestFix(ctx context.Context, repo string, req Request, fix TestFailureResolution) pickResultOrError {
 	c.logf("merge: test failure HANDED TO THE SHIM {repo=%s ws=%s name=%s commit=%s branch=%s target=%s request_id=%s}",
 		repo, req.Workspace, req.Name, fix.FailingCommit, fix.SourceBranch, fix.TargetDir, fix.RequestID)
 	if err := c.testResolver.Resolve(ctx, fix); err != nil {
-		c.logf("merge: shim test-failure resolution FAILED {repo=%s ws=%s name=%s commit=%s request_id=%s}: %v — the merge is failed and the target rolled back",
+		c.logf("merge: shim test-failure resolution FAILED {repo=%s ws=%s name=%s commit=%s request_id=%s}: %v — the merge is failed and the target was NEVER MODIFIED",
 			repo, req.Workspace, req.Name, fix.FailingCommit, fix.RequestID, err)
 		return pickResultOrError{err: err}
 	}
@@ -1672,16 +1695,17 @@ func (c *QueueCoordinator) driveTestFix(ctx context.Context, repo string, req Re
 }
 
 // failTestGate is the terminal tail of a merge whose test gate failed for good:
-// roll the target back to its pre-merge HEAD, record merge_failed with the
-// failing commit and the suite's output tail, and retire the entry.
+// record merge_failed with the failing commit and the suite's output tail, and
+// retire the entry.
 //
-// THE ROLLBACK IS THE POINT. The target worktree is the tree every other
-// workspace cuts from, so leaving it carrying commits that break its suite
-// turns one workspace's failure into everyone's. Nothing is lost: the source
-// branch still holds every commit, and the merge can be retried once the work is
-// fixed there.
-func (c *QueueCoordinator) failTestGate(repo string, req, driven Request, release func(), preHead string, res Result) bool {
-	cause := fmt.Sprintf("test suite failed after cherry-picking %s and the one resolution attempt did not fix it: %s",
+// THERE IS NOTHING TO ROLL BACK, and saying so is half of what this function is
+// for. Every commit of this merge landed in a temporary rebase worktree and the
+// suite ran there, so the target checkout — the tree every other workspace cuts
+// from — never carried one line of the failed work. The predecessor of this
+// function reset the target to its pre-merge head, which is the hazard the
+// rebase design removed rather than guarded.
+func (c *QueueCoordinator) failTestGate(repo string, req, driven Request, release func(), res Result) bool {
+	cause := fmt.Sprintf("test suite failed after rebasing %s and the one resolution attempt did not fix it: %s",
 		res.FailingCommit, dlog.Clamp(res.TestFailureTail, testFailureCauseBytes))
 	// The tail is clamped twice over and, for a runner that keeps going after a
 	// suite fails, often carries no trace of the failure itself. The archive is
@@ -1690,27 +1714,25 @@ func (c *QueueCoordinator) failTestGate(repo string, req, driven Request, releas
 	if res.TestFailureOutputPath != "" {
 		cause += fmt.Sprintf(" (full suite output: %s)", res.TestFailureOutputPath)
 	}
-	switch {
-	case preHead == "":
-		// No rollback point was recorded, which no merge.Driver Merge omits.
-		// The merge still fails, and the missing point is named rather than
-		// papered over — a target left carrying broken commits is exactly what
-		// a user must be told about.
-		c.logf("merge: test-gate rollback IMPOSSIBLE {repo=%s ws=%s name=%s} — no pre-merge HEAD was recorded, so the target KEEPS the commits that failed the suite",
-			repo, req.Workspace, req.Name)
-		cause += " (NOT rolled back: no pre-merge HEAD was recorded)"
-	default:
-		if err := c.picker.Rollback(c.ctx, req, preHead, res.TestedHead); err != nil {
-			c.logf("merge: test-gate rollback FAILED {repo=%s ws=%s name=%s head=%s}: %v — the target is LEFT carrying the commits that failed the suite",
-				repo, req.Workspace, req.Name, preHead, err)
-			cause += fmt.Sprintf(" (rollback to %s FAILED: %v)", preHead, err)
-		} else {
-			c.logf("merge: test-gate rollback COMPLETE {repo=%s ws=%s name=%s head=%s} — the target is back where the merge found it; the workspace branch still holds all the work",
-				repo, req.Workspace, req.Name, preHead)
-			cause += fmt.Sprintf(" (target rolled back to %s)", preHead)
-		}
-	}
+	cause += " (the target was NEVER MODIFIED: every commit was replayed and tested in a temporary rebase worktree, and the branch still holds all the work)"
+	c.logf("merge: test gate FAILED FOR GOOD {repo=%s ws=%s name=%s commit=%s work=%s} — the TARGET WAS NEVER MODIFIED; the rebase worktree is discarded and the branch keeps every commit",
+		repo, req.Workspace, req.Name, res.FailingCommit, driven.WorkDir)
 	return c.retireFailed(repo, req, release, c.failRun(driven, cause))
+}
+
+// cleanupRebase discards the temporary rebase worktree a run was using.
+//
+// A FAILURE HERE CANNOT CHANGE AN OUTCOME. The merge either landed on the target
+// or never touched it; a directory that would not delete says nothing about
+// either, so it is loud-logged and nothing else.
+func (c *QueueCoordinator) cleanupRebase(repo string, driven Request) {
+	if driven.WorkDir == "" {
+		return
+	}
+	if err := c.picker.Cleanup(c.ctx, driven); err != nil {
+		c.logf("merge: rebase worktree cleanup FAILED {repo=%s ws=%s name=%s work=%s}: %v — the merge's outcome is unaffected; the directory is left for a human",
+			repo, driven.Workspace, driven.Name, driven.WorkDir, err)
+	}
 }
 
 // testFailureCauseBytes bounds how much of the suite's output tail travels into
@@ -1742,7 +1764,10 @@ func (c *QueueCoordinator) driveShimResolution(repo string, req Request, park *c
 		RequestID:      newResolutionRequestID(),
 		ConflictCommit: conflictCommit,
 		SourceBranch:   req.SourceBranch,
-		TargetDir:      req.TargetDir,
+		// THE AGENT IS POINTED AT THE REBASE WORKTREE, not the target. The
+		// conflict is parked there and nowhere else, and an agent sent to the
+		// target would find a clean tree and nothing to resolve.
+		TargetDir: req.WorkDir,
 	}
 	if err := res.validate(); err != nil {
 		// The conflict facts the coordinator was handed do not describe a

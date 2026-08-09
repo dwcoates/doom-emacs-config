@@ -1,0 +1,72 @@
+// tokens.proto — SHARED VOCABULARY: the one canonical token shape.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// THE ONE CANONICAL TOKEN SHAPE, and the only representation in which this
+// system states what a request cost.
+//
+// IT IS ORGANIZED BY ECONOMICS, NOT BY THE VENDOR'S FIELD NAMES. The vendor
+// reports three disjoint input counters whose names describe WHERE the tokens
+// went, not what they were charged, and reading any one of them as "the cost"
+// is the mistake this shape makes unrepresentable:
+//
+//   - `input_hits.read` (vendor `cache_read_input_tokens`) is the ONLY cheap
+//     bucket: the standing prefix presented again and served from the prompt
+//     cache.
+//   - `input_misses.written` (vendor `cache_creation_input_tokens`) was
+//     processed fresh at full price AND carries the cache-write premium (1.25x).
+//   - `input_misses.unwritten` (vendor `input_tokens`) was processed fresh at
+//     the base rate and never entered the cache at all. It carries no cache
+//     label because it was never cached, not because it was served from a cache.
+//
+// THE EXPENSIVE SUM IS STRUCTURAL HERE: it is `input_misses` — both of its
+// fields, together, because both missed the cache — rather than an addition a
+// reader has to know to perform. That is the whole reason for the nesting. The
+// CLI marks nearly all input cacheable, so a COLD prompt (a full context
+// re-ingest, the most expensive thing that can happen) surfaces almost entirely
+// as `written` while `unwritten` stays near zero; a turn with a deliberately
+// uncacheable prefix surfaces the other way round. Neither field alone is ever
+// the answer.
+//
+// RATES ARE NOT STORED. The cache-hit / cache-write / fresh-input partition is
+// three quotients over these same counters, so it is DERIVED at the point of
+// use by the daemon (`internal/tokenusage`) and never persisted as a field
+// alongside the counters it is computed from.
+//
+// THE DAEMON IS THE SOLE OWNER of every judgment taken from this shape. The
+// shim translates vendor usage into it at the boundary and stops there; the
+// webapp renders what the daemon resolved.
+message TokenUsage {
+  // What the prompt cache served: the cheap bucket.
+  TokenCacheHits input_hits = 1;
+  // What the prompt cache did not serve: the expensive buckets, together.
+  TokenCacheMisses input_misses = 2;
+  // Generated tokens, including extended thinking where the API includes it.
+  // There is no output cache, so this is a plain total with no partition.
+  uint64 output_tokens = 3;
+}
+
+// The prompt input this request did not have to process, because the prompt
+// cache already held it.
+message TokenCacheHits {
+  // Prompt-prefix tokens served from the prompt cache (vendor
+  // `cache_read_input_tokens`). Billed at the cache-read rate.
+  uint64 read = 1;
+}
+
+// The prompt input this request processed fresh, split by whether processing it
+// also placed it in the cache. BOTH FIELDS ARE EXPENSIVE and their sum is the
+// figure every cost judgment in this system reads.
+message TokenCacheMisses {
+  // Tokens processed fresh that entered the cache as they were processed
+  // (vendor `cache_creation_input_tokens`). Billed at 1.25x the base input rate
+  // — the base price plus the cache-write premium.
+  uint64 written = 1;
+  // Tokens processed fresh that never entered the cache at all (vendor
+  // `input_tokens`). Billed at the base input rate.
+  uint64 unwritten = 2;
+}

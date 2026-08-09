@@ -164,7 +164,7 @@ Two properties are load-bearing:
   channel, so a frontend is told the workspace merged before anything the
   teardown produces can arrive — a merged workspace never simply disappears.
 - A teardown failure NEVER travels back up `ApplyMergeTransition`. That error
-  would reach `merge.Driver.finalizeMerged` and report a cherry-pick that
+  would reach `merge.Driver.finalizeMerged` and report a merge that
   already landed as a failed merge. It is surfaced through the canonical log
   instead, naming the session left running, exactly as a merge lease release
   failure is.

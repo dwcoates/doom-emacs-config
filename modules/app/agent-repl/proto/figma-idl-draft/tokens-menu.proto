@@ -1,0 +1,57 @@
+// tokens-menu.proto — The token-breakdown counter menu.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// The token-breakdown menu, fully resolved. Sections and rows arrive in
+// display order; the client renders exactly this tree.
+message TokenBreakdownView {
+  // 2 was session_id. A frontend has no session vocabulary: the only question
+  // it ever asked of that field was "is this push still current", which the
+  // fence answers without naming what rotated.
+  reserved 2;
+  reserved "session_id";
+  // The workspace/session this breakdown describes.
+  string workspace = 1;
+  // Menu sections, in display order (e.g. "this turn", "session", per-model).
+  repeated TokenBreakdownSection sections = 3;
+  // The workspace's staleness FENCE at the moment the daemon produced this
+  // push: an opaque token the client compares BYTE-WISE against the fence on
+  // the workspace's current WorkspaceState, and never parses, splits or
+  // interprets. Equal means current; different means stale, and a stale push
+  // is discarded whole rather than partially adopted.
+  //
+  // The daemon mints it and is the only thing that can read meaning into it.
+  // A client that learned to decode it would be depending on a fact this
+  // contract does not offer, and the token's composition is free to change.
+  string fence = 4;
+}
+
+// One titled section of the breakdown menu.
+message TokenBreakdownSection {
+  // Section heading, verbatim.
+  string label = 1;
+  // Rows, in display order.
+  repeated TokenBreakdownRow rows = 2;
+}
+
+// One row of the breakdown menu. All numbers are resolved; the share is
+// precomputed so the client does no arithmetic.
+message TokenBreakdownRow {
+  // Row label, verbatim (e.g. "uncached input", "fresh input", "cache read").
+  string label = 1;
+  // The row's token count.
+  int64 tokens = 2;
+  // The row's share of its section's basis, in permille (0-1000), already
+  // rounded. -1 means "no share applies to this row" and the client omits
+  // the percentage; 0 is a real zero percent.
+  int32 share_permille = 3;
+  // True when the row is a headline (rendered unindented/emphasized), false
+  // for detail rows. Layout fact resolved daemon-side.
+  bool emphasized = 4;
+  // Indent depth for nested detail rows; 0 = top level.
+  int32 depth = 5;
+}
