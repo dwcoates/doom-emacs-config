@@ -455,8 +455,7 @@ func (s *asyncBubbleStore) observeTaskStarted(ts *corev1.TaskStarted, atMs int64
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if ts.GetToolUseId() == "" {
-		return asyncPush{Faults: []asyncFault{*s.faultLocked(ts.GetTaskId(),
-			fmt.Sprintf("task %q started as detached work but the announcement named no tool call, so the detachment can be attributed to nothing on screen; the contract routes this to a failure card rather than to a bubble with a blank origin", ts.GetTaskId()))}}, nil
+		return s.openAnnouncementBornLocked(ts, atMs), nil
 	}
 	if b := s.lookupLocked(ts.GetToolUseId(), ts.GetTaskId()); b != nil {
 		if b.GetLabel() == "" {
@@ -489,6 +488,62 @@ func (s *asyncBubbleStore) observeTaskStarted(ts *corev1.TaskStarted, atMs int64
 	}
 	s.adoptLocked(b, ts.GetToolUseId(), ts.GetTaskId(), "")
 	return asyncPush{Opened: []*frontendv1.AsyncBubble{b}}, nil
+}
+
+// openAnnouncementBornLocked handles the launch announcement that names NO tool
+// call.
+//
+// THIS IS THE ANNOUNCEMENT-VERSUS-UNFOUND SPLIT, and it is the whole reason
+// this function exists apart from observeTaskStarted's main body.
+//
+// An announcement that names no call is not evidence of a lost attribution: the
+// contract admits work no tool call spawned (async-bubble.proto
+// origin_tool_use_id — "Empty only for work that no tool call spawned"), and
+// the harness produces exactly that for its own background shells. Treating
+// every such announcement as a daemon fault made 16 legitimately
+// announcement-born detachments print an ASYNC DETACHMENT FAULT and a failure
+// card on every boot, for work that had never been attributable to anything and
+// was never meant to be.
+//
+// So the fault arm is narrowed to what it was written for — a detachment the
+// daemon believes a call spawned and cannot find (observeTaskStarted's
+// unresolved-kind arm above, unchanged) — and an announcement-born detachment
+// of a RECOGNIZABLE kind opens a bubble with an empty origin_tool_use_id
+// instead.
+//
+// AN UNRECOGNIZABLE KIND IS STILL A FAULT HERE. The unclassified arm requires
+// the tool's name, and the only source for one is the launching call this
+// announcement does not have: there is nothing to look the name up by. Such a
+// detachment can be neither classified nor honestly reported as unclassified,
+// which is precisely the condition the card exists for.
+func (s *asyncBubbleStore) openAnnouncementBornLocked(ts *corev1.TaskStarted, atMs int64) asyncPush {
+	kind := frontend.DetachKindFromTaskKind(ts.GetKind())
+	if kind == frontend.DetachUnresolved {
+		return asyncPush{Faults: []asyncFault{*s.faultLocked(ts.GetTaskId(),
+			fmt.Sprintf("task %q started as detached work with no kind the daemon recognizes, and the announcement named no tool call to look a tool name up by either, so the work can be neither classified nor honestly reported as unclassified", ts.GetTaskId()))}}
+	}
+	// The task id is the only handle such a detachment has — there is no call to
+	// look it up by — so a re-announcement enriches the bubble already open
+	// rather than opening a twin, exactly as the call-spawned path does.
+	if b := s.lookupLocked("", ts.GetTaskId()); b != nil {
+		if b.GetLabel() == "" {
+			b.Label = ts.GetDescription()
+		}
+		return asyncPush{}
+	}
+	b, err := frontend.OpenAsyncBubble(frontend.BubbleSpec{
+		TaskID:         ts.GetTaskId(),
+		Workspace:      s.workspace,
+		Kind:           kind,
+		NoSpawningCall: true,
+		Label:          ts.GetDescription(),
+		StartedAtMs:    atMs,
+	})
+	if err != nil {
+		return asyncPush{Faults: []asyncFault{*s.faultLocked(ts.GetTaskId(), err.Error())}}
+	}
+	s.adoptLocked(b, "", ts.GetTaskId())
+	return asyncPush{Opened: []*frontendv1.AsyncBubble{b}}
 }
 
 // --- store internals -------------------------------------------------------

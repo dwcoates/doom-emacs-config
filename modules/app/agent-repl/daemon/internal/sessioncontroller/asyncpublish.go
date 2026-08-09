@@ -80,11 +80,34 @@ func (c *consumer) observeAsyncTask(ev *corev1.Event) asyncPush {
 // delta may be an all-detached one whose items were legitimately emptied, and a
 // card is not one of that event's conversation items — it is the daemon's own
 // account of failing to handle it.
+//
+// THAT IS A STATEMENT ABOUT A LIVE FAULT. A fault carried by a replayed
+// historical event is the same account being read back out of the store, and it
+// takes the withhold arm below instead: classified, recorded in full at info,
+// and given no live card.
 func (c *consumer) pushAsync(push asyncPush, ev *corev1.Event) {
 	if push.empty() {
 		return
 	}
+	// A REPLAYED FAULT IS HISTORY, NOT NEWS, and it is classified through the
+	// same shared classifier every other replayed anomaly on this consumer uses
+	// (rejectionIsHistorical), so the async plane can never disagree with the
+	// rest of the daemon about which epoch an event belongs to.
+	historical := rejectionIsHistorical(c.accounting, ev)
 	for _, fault := range push.Faults {
+		if historical {
+			// INFO, NOT WARN, AND NO LIVE CARD — the same withhold discipline
+			// surfaceUnexpectedQueryTermination applies to a replayed query death.
+			// The anomaly was surfaced loudly at its original occurrence; this row
+			// is its durable history being replayed on backfill, and re-alarming
+			// on it every boot says a fault is happening now that is not. The
+			// record is kept whole — same channel, same identity, same sentence —
+			// and only its severity and its card are withheld. The LIVE arm below
+			// is untouched.
+			c.logf("session-controller: ASYNC DETACHMENT FAULT WITHHELD session=%s ws=%q seq=%d card_uuid=%s decision=retain_history_no_live_card — %s",
+				c.sessionID, c.workspace, ev.GetSeq(), fault.UUID, fault.Detail)
+			continue
+		}
 		c.warn("session-controller: ASYNC DETACHMENT FAULT session=%s ws=%q seq=%d card_uuid=%s — %s",
 			c.sessionID, c.workspace, ev.GetSeq(), fault.UUID, fault.Detail)
 		c.push.PushConversationDelta(&frontendv1.ConversationDelta{

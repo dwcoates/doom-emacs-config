@@ -128,9 +128,22 @@ type BubbleSpec struct {
 	// Kind is the resolved classification. DetachUnresolved is refused.
 	Kind DetachKind
 	// OriginToolUseID is the tool_use id of the call that detached the work.
-	// Required: a detachment the daemon cannot attribute to a call is a daemon
-	// fault its caller surfaces as a failure card, never a blank-id bubble.
+	// Required unless NoSpawningCall states there was no such call: a detachment
+	// the daemon cannot attribute to a call it believes exists is a daemon fault
+	// its caller surfaces as a failure card, never a blank-origin bubble.
 	OriginToolUseID string
+	// NoSpawningCall states that NO tool call spawned this work, which the
+	// contract admits by design (async-bubble.proto origin_tool_use_id: "Empty
+	// only for work that no tool call spawned"). It must be set DELIBERATELY, by
+	// a caller holding evidence that the launch announcement named no call at
+	// all — never as a way to get past a missing attribution.
+	//
+	// IT IS WHY THE BLANK-ORIGIN REFUSAL BELOW SURVIVES. Without this flag the
+	// only way to admit announcement-born work was to drop that refusal, and
+	// then every genuinely unattributable detachment — one whose spawning call
+	// exists but could not be found — would quietly open a bubble whose origin
+	// points nowhere instead of raising the fault it is.
+	NoSpawningCall bool
 	// ParentBubbleID is the bubble this one was dispatched FROM, empty at the
 	// top level. Detached agents dispatch detached agents.
 	ParentBubbleID string
@@ -166,12 +179,22 @@ func mintBubbleID(taskID string) string { return "bubble:" + taskID }
 // produce a bubble the contract calls unrepresentable (a blank id, a kindless
 // body, an "unknown" the maintainer cannot act on), and the caller's job on
 // that error is to surface a failure card.
+//
+// "MISSING ORIGINATING CALL" MEANS MISSING, NOT ABSENT BY DESIGN. Work that no
+// tool call spawned is legitimate — the contract says origin_tool_use_id is
+// "Empty only for work that no tool call spawned" — and such a caller says so
+// with BubbleSpec.NoSpawningCall. What stays refused is the case the fault arm
+// was written for: a detachment the daemon believes a call spawned, whose call
+// it could not find.
 func OpenAsyncBubble(spec BubbleSpec) (*frontendv1.AsyncBubble, error) {
 	if spec.TaskID == "" {
 		return nil, fmt.Errorf("frontend: async bubble refused — the detachment carried no task id to mint an id from, and a blank-id bubble is unrepresentable")
 	}
-	if spec.OriginToolUseID == "" {
+	if spec.OriginToolUseID == "" && !spec.NoSpawningCall {
 		return nil, fmt.Errorf("frontend: async bubble refused for task %q — the detachment could not be attributed to any tool call, which is a daemon fault surfaced as a failure card rather than an unattributed bubble", spec.TaskID)
+	}
+	if spec.OriginToolUseID != "" && spec.NoSpawningCall {
+		return nil, fmt.Errorf("frontend: async bubble refused for task %q — it claims no tool call spawned it while naming call %q as its origin, and a bubble cannot be both announcement-born and call-spawned", spec.TaskID, spec.OriginToolUseID)
 	}
 	if spec.Kind == DetachUnresolved {
 		return nil, fmt.Errorf("frontend: async bubble refused for task %q — nothing in the event stream resolved a kind for it, and a kindless bubble carries no body a renderer can draw", spec.TaskID)
