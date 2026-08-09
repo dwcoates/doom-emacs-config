@@ -956,8 +956,14 @@ func main() {
 		Lifecycle:    opener,
 		// The registry's own record of a deliberate deletion, exposed so a merge
 		// can tell a hibernated session (rehydrate) from a deleted one (refuse).
-		SessionDeaths:     server.RegistrySessionDeaths{Reg: sessionRegistry},
-		Sessions:          server.RegistrySessions{Reg: sessionRegistry, Controller: controller, ModelCatalogs: modelCatalogs, TokenUsage: tokenUtilizations, Logf: legacyLog},
+		SessionDeaths: server.RegistrySessionDeaths{Reg: sessionRegistry},
+		Sessions:      server.RegistrySessions{Reg: sessionRegistry, Controller: controller, ModelCatalogs: modelCatalogs, TokenUsage: tokenUtilizations, Logf: legacyLog},
+		// The two per-session facts the resolved-view publisher reads: the
+		// owning session's durable record and its published model menu. Both
+		// are the SAME instances every other reader here takes, so the topbar
+		// and the session view can never name different models.
+		SessionRecords:    sessionRegistry,
+		ModelCatalogs:     modelCatalogs,
 		Inits:             controller,
 		Catalogs:          controller,
 		Queues:            controller,
@@ -1033,13 +1039,17 @@ func main() {
 	srv := server.New(server.Config{
 		Logf: legacyLog,
 		// One authority with the session controller's hibernation gate.
-		Now:             nowFn,
-		DaemonVersion:   daemonVersion,
-		BinaryMTime:     binaryMTime,
-		ForceFake:       *fake,
-		Registry:        sessionRegistry,
-		ModelCatalogs:   modelCatalogs,
-		TokenUsage:      tokenUtilizations,
+		Now:           nowFn,
+		DaemonVersion: daemonVersion,
+		BinaryMTime:   binaryMTime,
+		ForceFake:     *fake,
+		Registry:      sessionRegistry,
+		ModelCatalogs: modelCatalogs,
+		TokenUsage:    tokenUtilizations,
+		// The SAME publisher the SSM's state subscription drives, so the
+		// breakdown the SessionView push resolves and the topbar the state push
+		// resolves are retained together and snapshot together.
+		WorkspaceViews:  agentShim.WorkspaceViews,
 		Logins:          logins,
 		Accounts:        accounts,
 		IdleTimeout:     *idleTimeout,

@@ -85,6 +85,18 @@ func coalesceKey(frame *frontendv1.FrontendFrame) string {
 		return "progress\x00" + f.Progress.GetWorkspace()
 	case *frontendv1.FrontendFrame_Queue:
 		return "queue\x00" + f.Queue.GetWorkspace()
+	// The three RESOLVED-VIEW families, each ABSOLUTE for its workspace: a
+	// topbar carries the whole topbar, a breakdown the whole section tree, a
+	// gate the whole gate. Every one of them is published only when the
+	// RENDERED facts change (internal/server/workspaceviews.go), so a queued
+	// pair is a consumer that fell behind two genuine changes and the newer
+	// alone is what both would have left it in.
+	case *frontendv1.FrontendFrame_Topbar:
+		return "topbar\x00" + f.Topbar.GetWorkspace()
+	case *frontendv1.FrontendFrame_TokenBreakdown:
+		return "token_breakdown\x00" + f.TokenBreakdown.GetWorkspace()
+	case *frontendv1.FrontendFrame_WorkspaceGate:
+		return "workspace_gate\x00" + f.WorkspaceGate.GetWorkspace()
 	case *frontendv1.FrontendFrame_Heartbeat:
 		return "heartbeat\x00" + f.Heartbeat.GetWorkspace() + "\x00" +
 			f.Heartbeat.GetProgress().GetToolUseId()

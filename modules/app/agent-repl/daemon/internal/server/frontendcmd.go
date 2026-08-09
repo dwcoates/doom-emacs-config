@@ -377,6 +377,15 @@ type commandHandler struct {
 	// logTargets releases a closed workspace's log descriptors, binding their
 	// lifetime to the workspace's. Nil holds them for the daemon's lifetime.
 	logTargets WorkspaceLogTargetEvictor
+	// workspaceViews retains the three resolved per-workspace views and the
+	// memoized branch behind the topbar's title. The close releases them beside
+	// the log targets, which is what binds every per-workspace retention to the
+	// same owner's death. It is bound AFTER construction (WireAgentShim builds
+	// the publisher on top of the frontend server this handler is handed to),
+	// exactly as the snapshot provider's binding is. Nil holds the retentions
+	// for the daemon's lifetime, which is what a focused harness wants and what
+	// production must never be.
+	workspaceViews *WorkspaceViews
 	// restarts backs the restartSession command. Nil is a loud unsupported
 	// capability, never a success-shaped no-op.
 	restarts SessionRestarter
@@ -1000,7 +1009,28 @@ func (h *commandHandler) CloseWorkspace(ctx context.Context, workspace, requestI
 	// them. A release failure is reported, never swallowed: descriptors that
 	// could not be closed are exactly the leak this eviction exists to end.
 	h.evictWorkspaceLogTargets(workspace, requestID)
+	// THE RESOLVED VIEWS GO WITH THE WORKSPACE TOO, and for a second reason
+	// beyond the snapshot carrying a topbar nothing runs: the publisher
+	// memoizes this workspace's branch, and a workspace re-created at the same
+	// path would inherit its dead predecessor's under a genuinely current fence.
+	h.forgetWorkspaceViews(workspace, requestID)
 	return nil
+}
+
+// forgetWorkspaceViews releases a closed workspace's retained resolved views.
+//
+// Like the log-target eviction it runs only after the close itself succeeded —
+// a refused close leaves a workspace that is still live, and dropping its
+// topbar would blank a surface still being driven — and an unwired publisher
+// says so rather than passing for a release that happened.
+func (h *commandHandler) forgetWorkspaceViews(workspace, requestID string) {
+	if h.workspaceViews == nil {
+		h.logf("frontend cmd: close_workspace resolved views RETAINED ws=%s request_id=%s — no view publisher is wired, so this workspace's topbar, breakdown, gate and memoized branch stay held for the daemon's lifetime",
+			workspace, requestID)
+		return
+	}
+	h.workspaceViews.Forget(workspace)
+	h.logf("frontend cmd: close_workspace resolved views RELEASED ws=%s request_id=%s", workspace, requestID)
 }
 
 // evictWorkspaceLogTargets releases a closed workspace's log descriptors.
@@ -1073,9 +1103,56 @@ func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, 
 	}
 	if err := h.resyncer.ResyncForGeneration(workspace, sessionID, generationID, cmd.GetFromSeq()); err != nil {
 		h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d FAILED: %v", workspace, requestID, sessionID, generationID, cmd.GetFromSeq(), err)
-		return err
+		return classifyStaleFenceResync(err)
 	}
 	return nil
+}
+
+// staleFenceResync carries the REMEDY for a resync the eligibility ladder
+// refused because the fence the client echoed is no longer the workspace's.
+//
+// THE CLASSIFICATION IS NOT CHANGED HERE, deliberately. `ErrSessionSuperseded`
+// already classifies as `reconnect_superseded`, and that arm is exactly this
+// case: the contract defines it as a view whose replay would have come from a
+// generation it never saw. It is the more specific true statement than
+// `workspace_not_live`.
+//
+// THE RESYNC IS THE ONLY FENCE-DRIVEN COMMAND REFUSAL THIS DAEMON HAS. The
+// resync is the one command that echoes a fence at all, so it is the one place
+// a stale fence can refuse anything. `workspace_not_live` is minted from
+// `ErrNotLiveSession`, whose single live producer refuses a hibernate whose
+// named SESSION is not the one controlling the workspace — a session-identity
+// mismatch, not a fence comparison. If a driving command (a submit, an
+// interrupt) ever grows a fence, its stale-fence refusal is a different
+// statement from this one and gets its own classification then; nothing here
+// anticipates it.
+//
+// What this adds is the one thing the ladder cannot know: `remedy`, the action
+// to offer. A resync is a VIEW's only recovery mechanism, so a refused one
+// leaves the client permanently behind unless it is told to remount — which is
+// the sentence below. It reaches the arm through the same door
+// SessionResumeFailureDetailer uses: the funnel classifies, and the refusing
+// site supplies the evidence only it holds.
+type staleFenceResync struct{ err error }
+
+func (e *staleFenceResync) Error() string { return e.err.Error() }
+func (e *staleFenceResync) Unwrap() error { return e.err }
+
+// FailureRemedy is the action offered to a client whose resync was refused.
+// The daemon composes it because the ladder's verdict is what decides there is
+// an action at all; the wording is host-neutral because the daemon does not
+// know which frontend is asking.
+func (e *staleFenceResync) FailureRemedy() string {
+	return "reload this view: its replay would have come from a session generation it never saw"
+}
+
+// classifyStaleFenceResync attaches that remedy, leaving every other error —
+// and the superseded sentinel's own classification — exactly as it was.
+func classifyStaleFenceResync(err error) error {
+	if err == nil || !errors.Is(err, errclass.ErrSessionSuperseded) {
+		return err
+	}
+	return &staleFenceResync{err: err}
 }
 
 // isUnwiredWorkspace reports whether err is the "this workspace has no live
@@ -1477,6 +1554,12 @@ type ssmSnapshotProvider struct {
 	// (re)connecting frontend's footer is populated before the next change
 	// pushes. Nil-safe: a nil source leaves snapshot.progress empty.
 	progress ProgressSource
+	// workspaceViews supplies the three RESOLVED per-workspace views the
+	// snapshot carries: the topbar, the token-breakdown menu and the revival
+	// gate. It is the SAME retention the pushes advance, so a client that
+	// connects between two pushes adopts exactly the view the last push
+	// delivered. Nil-safe: a nil publisher leaves the three fields empty.
+	workspaceViews *WorkspaceViews
 	// workspaceCreation supplies retained daemon-owned work for the Emacs host.
 	// frontend.Server removes these fields for all GUI client kinds; retaining
 	// them here makes a reconnecting host drain the durable queue before relying
@@ -1578,6 +1661,11 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	if p.shutdownSchedule != nil {
 		snap.ShutdownSchedule = p.shutdownSchedule.View()
 	}
+	if p.workspaceViews != nil {
+		snap.Topbars = p.workspaceViews.Topbars()
+		snap.TokenBreakdowns = p.workspaceViews.TokenBreakdowns()
+		snap.WorkspaceGates = p.workspaceViews.WorkspaceGates()
+	}
 	if p.workspaceCreation == nil {
 		panic("server: snapshot provider requires workspace creation bridge")
 	}
@@ -1592,6 +1680,9 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	snap.Catalogs = filterPublishedWorkspaceViews(snap.Catalogs, publicationAllowed, p.logf)
 	snap.Queues = filterPublishedWorkspaceViews(snap.Queues, publicationAllowed, p.logf)
 	snap.Progress = filterPublishedWorkspaceViews(snap.Progress, publicationAllowed, p.logf)
+	snap.Topbars = filterPublishedWorkspaceViews(snap.Topbars, publicationAllowed, p.logf)
+	snap.TokenBreakdowns = filterPublishedWorkspaceViews(snap.TokenBreakdowns, publicationAllowed, p.logf)
+	snap.WorkspaceGates = filterPublishedWorkspaceViews(snap.WorkspaceGates, publicationAllowed, p.logf)
 	hostWork := p.workspaceCreation.SnapshotHostWork()
 	snap.WorkspaceAvailable = hostWork.WorkspaceAvailable
 	snap.HostActions = hostWork.HostActions
