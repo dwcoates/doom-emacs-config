@@ -32,9 +32,9 @@ import {
   PROMPT_ORIGIN_UNSPECIFIED,
   PROMPT_ORIGIN_WEBAPP_CARD_ACTION,
   PROMPT_ORIGIN_WEBAPP_USER_SENT,
-  QUEUE_ENTRY_KEEP_ALIVE_HOLD,
-  QUEUE_ENTRY_REVIVAL_HOLD,
-  REVIVAL_HOLD_SESSION_ID,
+  QUEUE_CLASSIFICATION_ARM,
+  QUEUE_HOLD_ARM,
+  REVIVAL_HOLD_FIELDS,
   REVIVE_MODE,
 } from "../src/proto-names.js";
 
@@ -119,11 +119,21 @@ describe("COMMAND_ARM: the command arm keys the webapp sends", () => {
   });
 });
 
+describe("queue-entry classification arms", () => {
+  it("covers exactly the generated classification arms", () => {
+    // Arrange — the arm IS the verdict, so a missed arm is a verdict the
+    // decoder would reject as an unset oneof.
+    const generated = oneofJsonNames(QueueEntrySchema, "classification");
+    // Act / Assert
+    expect(Object.values(QUEUE_CLASSIFICATION_ARM).sort()).toEqual(generated);
+  });
+});
+
 describe("queue-entry keep-alive keys", () => {
-  it("names the queue entry's keep-alive hold field as the descriptor does", () => {
-    // Arrange / Act / Assert — the field SELECTS the keep-alive bubble over the
+  it("names the queue entry's keep-alive hold arm as the descriptor does", () => {
+    // Arrange / Act / Assert — the arm SELECTS the keep-alive bubble over the
     // classifier bubble, so a drifted key silently renders the wrong reason.
-    expect(fieldJsonNames(QueueEntrySchema)).toContain(QUEUE_ENTRY_KEEP_ALIVE_HOLD);
+    expect(oneofJsonNames(QueueEntrySchema, "hold")).toContain(QUEUE_HOLD_ARM.keepAlive);
   });
 
   it("names the hold's turn id as the descriptor does", () => {
@@ -133,15 +143,16 @@ describe("queue-entry keep-alive keys", () => {
 });
 
 describe("queue-entry revival keys", () => {
-  it("names the queue entry's revival hold field as the descriptor does", () => {
-    // Arrange / Act / Assert — the field SELECTS the revival bubble over the
+  it("names the queue entry's revival hold arm as the descriptor does", () => {
+    // Arrange / Act / Assert — the arm SELECTS the revival bubble over the
     // classifier bubble, so a drifted key silently renders the wrong reason.
-    expect(fieldJsonNames(QueueEntrySchema)).toContain(QUEUE_ENTRY_REVIVAL_HOLD);
+    expect(oneofJsonNames(QueueEntrySchema, "hold")).toContain(QUEUE_HOLD_ARM.revival);
   });
 
-  it("names the hold's session id as the descriptor does", () => {
-    // Arrange / Act / Assert
-    expect(fieldJsonNames(QueueEntryRevivalHoldSchema)).toEqual([REVIVAL_HOLD_SESSION_ID]);
+  it("carries no fields, so the arm's presence is the whole claim", () => {
+    // Arrange / Act / Assert — the retired session id was the only field; a
+    // field ADDED back must fail here rather than be silently dropped.
+    expect(fieldJsonNames(QueueEntryRevivalHoldSchema)).toEqual([...REVIVAL_HOLD_FIELDS]);
   });
 });
 

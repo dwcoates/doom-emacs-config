@@ -71,7 +71,7 @@ type WireProgress = Record<string, unknown>;
 function progressView(over: WireProgress = {}): WireProgress {
   return {
     workspace: WS,
-    sessionId: SESSION,
+    fence: SESSION,
     turnStartedAtMs: String(TURN_START_MS),
     ...over,
   };
