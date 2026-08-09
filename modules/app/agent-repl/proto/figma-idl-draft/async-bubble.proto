@@ -52,6 +52,12 @@ message AsyncBubble {
   int64 started_at_ms = 5;
   // Live or settled, and with what outcome. See AsyncLiveness.
   AsyncLiveness liveness = 6;
+  // The workspace this bubble's work runs under — the same key every
+  // workspace-scoped frame carries. It exists so a snapshot can scope
+  // bubbles to the client's workspace exactly as it scopes every other
+  // per-workspace family; deltas already carry the key on their envelope
+  // (AsyncBubbleDelta.workspace), and the two are always equal.
+  string workspace = 7;
   // WHAT KIND of work this is, carrying that kind's content as folded so far.
   // A newly opened bubble carries an empty body; a bubble arriving in a
   // reconnect snapshot carries everything the daemon has folded to date.

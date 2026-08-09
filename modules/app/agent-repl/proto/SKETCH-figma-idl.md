@@ -1172,3 +1172,14 @@ site (translate.go assistantMessageItem). The alternative — reasoning back in
 the response body — would have reopened the settled round-2 exclusivity
 decision. Approved under the orchestrator proto-change gate; the integration
 agent lands it (proto + bindings + daemon population + webapp settlement).
+
+### Part 5 addendum — amendment 2 (post-freeze, orchestrator-approved)
+
+`AsyncBubble` gains `workspace = 7`. Found by the daemon async implementation:
+StateSnapshot.async_bubbles had no routing key, so a workspace-scoped client
+would have received every workspace's bubbles — the one per-workspace family
+the snapshot could not scope. Deltas already carried the key on their envelope;
+the bubble now carries the same value, populated at the single open site from
+the same store field the delta envelope reads, so the two are equal by
+construction. Approved under the orchestrator proto-change gate; landed on
+feature-daemon-async with regenerated bindings and scoping tests.
