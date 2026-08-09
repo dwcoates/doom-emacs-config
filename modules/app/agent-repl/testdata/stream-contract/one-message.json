@@ -14,6 +14,12 @@
     "strip a renderer draws the reasoning twice, and without the emission it has",
     "to reach into a durable message's content array to find the grey block.",
     "",
+    "Because the emission is detached from the message it came out of, it also",
+    "STATES where it came from: `apiMessageId` + `blockIndex` name the message",
+    "and the pre-strip position, which is the same pair a live preview is keyed",
+    "on. Without them the settled reasoning block cannot find its own preview and",
+    "renders beside it — the third item this fixture's expectations forbid.",
+    "",
     "Note what the SDK does with `content`: it emits ONE assistant record PER",
     "BLOCK, both repeating `msg_01ABC` and each carrying a `content` array of",
     "length one. So a record's own content index is always 0 and identifies",
@@ -158,7 +164,9 @@
             "tsMs": "1700000000000",
             "agent": {
               "thinking": {
-                "body": { "thinking": "weighing it", "signature": "sig" }
+                "body": { "thinking": "weighing it", "signature": "sig" },
+                "apiMessageId": "msg_01ABC",
+                "blockIndex": 0
               }
             }
           }
