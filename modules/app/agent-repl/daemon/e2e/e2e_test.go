@@ -1001,6 +1001,10 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		t.Fatalf("open geometry: %v", err)
 	}
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
+		// The boot orphan sweep scans THIS directory and no other: a test that
+		// let it resolve the process temp dir deleted the live daemon's rebase
+		// worktrees mid-merge.
+		RebaseRoot: t.TempDir(),
 		// The real resolver over the real registry: an e2e that faked this
 		// would not exercise the daemon actually deciding what to resume.
 		Resumes:      &server.ConversationResolver{Reg: reg, Logf: t.Logf},

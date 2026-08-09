@@ -156,11 +156,27 @@ func newTestDriver(t *testing.T, sink StateSink) *Driver {
 
 func newTestDriverWithSuite(t *testing.T, sink StateSink, suite SuiteRunner) *Driver {
 	t.Helper()
-	e, err := NewDriver(Config{Logf: t.Logf, Sink: sink, Suite: suite})
+	return newRootedDriverWithSuite(t, sink, suite, t.TempDir())
+}
+
+// newRootedDriverWithSuite builds a driver whose rebase root is INJECTED. Every
+// test driver gets a t.TempDir() root, because a test sweeping the real process
+// temp dir is what deleted a live daemon's rebase worktrees.
+func newRootedDriverWithSuite(t *testing.T, sink StateSink, suite SuiteRunner, root string) *Driver {
+	t.Helper()
+	e, err := NewDriver(Config{Logf: t.Logf, Sink: sink, Suite: suite, RebaseRoot: root})
 	if err != nil {
 		t.Fatalf("NewDriver: %v", err)
 	}
 	return e
+}
+
+// newRootedDriver is newTestDriver with the rebase root the caller names — what
+// the sweep tests need, since they plant orphans in the directory the sweep
+// will scan.
+func newRootedDriver(t *testing.T, sink StateSink, root string) *Driver {
+	t.Helper()
+	return newRootedDriverWithSuite(t, sink, skippingSuite(), root)
 }
 
 // The env-shape assertions on the shared builder live in internal/gitexec.
@@ -273,15 +289,20 @@ func parkedAt(t *testing.T, e *Driver, req Request, res Result) Request {
 // --- construction -------------------------------------------------------
 
 func TestNewDriverRequiresDependencies(t *testing.T) {
+	root := t.TempDir()
 	tests := []struct {
 		name    string
 		cfg     Config
 		wantErr bool
 	}{
-		{"nil logf", Config{Sink: &recordingSink{}, Suite: skippingSuite()}, true},
-		{"nil sink", Config{Logf: func(string, ...any) {}, Suite: skippingSuite()}, true},
-		{"nil suite", Config{Logf: func(string, ...any) {}, Sink: &recordingSink{}}, true},
-		{"all present", Config{Logf: func(string, ...any) {}, Sink: &recordingSink{}, Suite: skippingSuite()}, false},
+		{"nil logf", Config{Sink: &recordingSink{}, Suite: skippingSuite(), RebaseRoot: root}, true},
+		{"nil sink", Config{Logf: func(string, ...any) {}, Suite: skippingSuite(), RebaseRoot: root}, true},
+		{"nil suite", Config{Logf: func(string, ...any) {}, Sink: &recordingSink{}, RebaseRoot: root}, true},
+		// AMENDED CASE. The rebase root is now injected, and its absence is a
+		// construction failure rather than a silent os.TempDir(): a driver that
+		// resolved the root itself let a TEST sweep the live daemon's temp dir.
+		{"empty rebase root", Config{Logf: func(string, ...any) {}, Sink: &recordingSink{}, Suite: skippingSuite()}, true},
+		{"all present", Config{Logf: func(string, ...any) {}, Sink: &recordingSink{}, Suite: skippingSuite(), RebaseRoot: root}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -138,6 +138,10 @@ func newPreMaterializationRaceHarness(t *testing.T) (*AgentShim, *progress.Manag
 	t.Cleanup(func() { _ = prog.Close() })
 	bridge := newDelayedMaterializationBridge()
 	shim, err := WireAgentShim(AgentShimConfig{
+		// The boot orphan sweep scans THIS directory and no other: a test that
+		// let it resolve the process temp dir deleted the live daemon's rebase
+		// worktrees mid-merge.
+		RebaseRoot:        t.TempDir(),
 		Resumes:           &fakeResumes{},
 		SSM:               openTestSSM(t, reg),
 		Progress:          prog,

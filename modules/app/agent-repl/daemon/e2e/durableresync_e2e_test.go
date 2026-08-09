@@ -191,6 +191,10 @@ func newBouncedHarness(t *testing.T) *bouncedHarness {
 	binding := &server.SessionCommandBinding{Logf: t.Logf}
 	mergeQueue := newTestMergeQueue(t)
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
+		// The boot orphan sweep scans THIS directory and no other: a test that
+		// let it resolve the process temp dir deleted the live daemon's rebase
+		// worktrees mid-merge.
+		RebaseRoot:        t.TempDir(),
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
 		Prompts:           controller,

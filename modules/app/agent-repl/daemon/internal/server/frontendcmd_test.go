@@ -64,7 +64,7 @@ type fakePrompts struct {
 	// under, which a decline needs: the stop it issues is named by it.
 	permRequestIDs []string
 	models         []string
-	err                 error
+	err            error
 	// turnActive is what this fake reports as the workspace's observed turn
 	// state, so one double serves as both the prompt router and the interrupt
 	// gate's turn source (the production wiring binds one controller to both).
@@ -1380,6 +1380,10 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 		t.Fatalf("put: %v", err)
 	}
 	shim, err := WireAgentShim(AgentShimConfig{
+		// The boot orphan sweep scans THIS directory and no other: a test that
+		// let it resolve the process temp dir deleted the live daemon's rebase
+		// worktrees mid-merge.
+		RebaseRoot:        t.TempDir(),
 		Resumes:           &fakeResumes{},
 		SSM:               openTestSSM(t, reg),
 		Progress:          progress.New(progress.Options{Logf: func(string, ...any) {}}),
@@ -1438,6 +1442,10 @@ func TestWireAgentShimFeedsTheSsmTransitionIntoProgressWithoutAPhaseCopy(t *test
 	reg := openTestRegistry(t)
 	prog := progress.New(progress.Options{Logf: func(string, ...any) {}})
 	shim, err := WireAgentShim(AgentShimConfig{
+		// The boot orphan sweep scans THIS directory and no other: a test that
+		// let it resolve the process temp dir deleted the live daemon's rebase
+		// worktrees mid-merge.
+		RebaseRoot:        t.TempDir(),
 		Resumes:           &fakeResumes{},
 		SSM:               openTestSSM(t, reg),
 		Progress:          prog,
@@ -1481,6 +1489,10 @@ func TestWireAgentShimRejectsNilProgress(t *testing.T) {
 	// error, not a silently progress-free daemon.
 	reg := openTestRegistry(t)
 	_, err := WireAgentShim(AgentShimConfig{
+		// The boot orphan sweep scans THIS directory and no other: a test that
+		// let it resolve the process temp dir deleted the live daemon's rebase
+		// worktrees mid-merge.
+		RebaseRoot:      t.TempDir(),
 		Resumes:         &fakeResumes{},
 		LogVerbosef:     t.Logf,
 		SSM:             openTestSSM(t, reg),
@@ -1494,6 +1506,10 @@ func TestWireAgentShimRejectsNilProgress(t *testing.T) {
 func TestWireAgentShimRejectsNilWorkspaceCreation(t *testing.T) {
 	reg := openTestRegistry(t)
 	_, err := WireAgentShim(AgentShimConfig{
+		// The boot orphan sweep scans THIS directory and no other: a test that
+		// let it resolve the process temp dir deleted the live daemon's rebase
+		// worktrees mid-merge.
+		RebaseRoot:      t.TempDir(),
 		Resumes:         &fakeResumes{},
 		LogVerbosef:     t.Logf,
 		SSM:             openTestSSM(t, reg),
@@ -1517,6 +1533,10 @@ func TestWireAgentShimRejectsAScheduleStoreWithNoQueueBackend(t *testing.T) {
 
 	// Act.
 	_, err := WireAgentShim(AgentShimConfig{
+		// The boot orphan sweep scans THIS directory and no other: a test that
+		// let it resolve the process temp dir deleted the live daemon's rebase
+		// worktrees mid-merge.
+		RebaseRoot:        t.TempDir(),
 		Resumes:           &fakeResumes{},
 		SSM:               openTestSSM(t, reg),
 		Progress:          progress.New(progress.Options{Logf: func(string, ...any) {}}),
@@ -1582,7 +1602,7 @@ func newTestMergeCoordinator(t *testing.T) *merge.QueueCoordinator {
 	if err != nil {
 		t.Fatalf("suite runner: %v", err)
 	}
-	driver, err := merge.NewDriver(merge.Config{Logf: logf, Sink: noopSink{}, Suite: suite})
+	driver, err := merge.NewDriver(merge.Config{Logf: logf, Sink: noopSink{}, Suite: suite, RebaseRoot: t.TempDir()})
 	if err != nil {
 		t.Fatalf("driver: %v", err)
 	}
@@ -1711,6 +1731,10 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 	// Arrange
 	reg := openTestRegistry(t)
 	shim, err := WireAgentShim(AgentShimConfig{
+		// The boot orphan sweep scans THIS directory and no other: a test that
+		// let it resolve the process temp dir deleted the live daemon's rebase
+		// worktrees mid-merge.
+		RebaseRoot:        t.TempDir(),
 		Resumes:           &fakeResumes{},
 		SSM:               openTestSSM(t, reg),
 		Progress:          progress.New(progress.Options{Logf: func(string, ...any) {}}),

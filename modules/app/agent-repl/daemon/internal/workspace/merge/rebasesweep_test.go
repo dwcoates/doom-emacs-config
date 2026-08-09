@@ -26,12 +26,11 @@ func arrangeOrphanDir(t *testing.T, tmp, suffix string) string {
 func TestTheSweepRemovesADirectoryNoMergeOwns(t *testing.T) {
 	// Arrange — a daemon died mid-merge and left its temp tree behind.
 	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
 	orphan := arrangeOrphanDir(t, tmp, "dead")
-	e := newTestDriver(t, &recordingSink{})
+	e := newRootedDriver(t, &recordingSink{}, tmp)
 
 	// Act
-	if err := e.SweepOrphanRebaseWorktrees(context.Background(), nil); err != nil {
+	if err := e.SweepOrphanRebaseWorktrees(context.Background(), SweepScope{}); err != nil {
 		t.Fatalf("SweepOrphanRebaseWorktrees: %v", err)
 	}
 
@@ -46,12 +45,11 @@ func TestTheSweepKeepsTheWorktreeOfAConflictParkedMerge(t *testing.T) {
 	// resolution turn is editing files in it right now, and removing it would
 	// destroy a user's half-finished merge.
 	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
 	parked := arrangeOrphanDir(t, tmp, "parked")
-	e := newTestDriver(t, &recordingSink{})
+	e := newRootedDriver(t, &recordingSink{}, tmp)
 
 	// Act
-	if err := e.SweepOrphanRebaseWorktrees(context.Background(), []string{filepath.Join(parked, rebaseWorktreeLeaf)}); err != nil {
+	if err := e.SweepOrphanRebaseWorktrees(context.Background(), SweepScope{Retained: []string{filepath.Join(parked, rebaseWorktreeLeaf)}}); err != nil {
 		t.Fatalf("SweepOrphanRebaseWorktrees: %v", err)
 	}
 
@@ -64,13 +62,12 @@ func TestTheSweepKeepsTheWorktreeOfAConflictParkedMerge(t *testing.T) {
 func TestTheSweepSeparatesTheOrphansFromTheLiveOnes(t *testing.T) {
 	// Arrange — both kinds in one temp dir, which is exactly how they sit live.
 	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
 	live := arrangeOrphanDir(t, tmp, "live")
 	dead := arrangeOrphanDir(t, tmp, "dead")
-	e := newTestDriver(t, &recordingSink{})
+	e := newRootedDriver(t, &recordingSink{}, tmp)
 
 	// Act
-	if err := e.SweepOrphanRebaseWorktrees(context.Background(), []string{filepath.Join(live, rebaseWorktreeLeaf)}); err != nil {
+	if err := e.SweepOrphanRebaseWorktrees(context.Background(), SweepScope{Retained: []string{filepath.Join(live, rebaseWorktreeLeaf)}}); err != nil {
 		t.Fatalf("SweepOrphanRebaseWorktrees: %v", err)
 	}
 
@@ -86,15 +83,14 @@ func TestTheSweepSeparatesTheOrphansFromTheLiveOnes(t *testing.T) {
 func TestTheSweepLeavesDirectoriesThatAreNotRebaseWorktreesAlone(t *testing.T) {
 	// Arrange — $TMPDIR is shared with the whole machine.
 	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
 	stranger := filepath.Join(tmp, "somebody-elses-work")
 	if err := os.Mkdir(stranger, 0o755); err != nil {
 		t.Fatalf("Mkdir: %v", err)
 	}
-	e := newTestDriver(t, &recordingSink{})
+	e := newRootedDriver(t, &recordingSink{}, tmp)
 
 	// Act
-	if err := e.SweepOrphanRebaseWorktrees(context.Background(), nil); err != nil {
+	if err := e.SweepOrphanRebaseWorktrees(context.Background(), SweepScope{}); err != nil {
 		t.Fatalf("SweepOrphanRebaseWorktrees: %v", err)
 	}
 
@@ -108,16 +104,15 @@ func TestTheSweepReportsOneSummaryLine(t *testing.T) {
 	// Arrange — three orphans and one live tree. A line per directory is what a
 	// sweep of hundreds must never produce.
 	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
 	live := arrangeOrphanDir(t, tmp, "live")
 	for _, suffix := range []string{"a", "b", "c"} {
 		arrangeOrphanDir(t, tmp, suffix)
 	}
 	log := &rebaseLog{}
-	e := newLoggingDriver(t, log)
+	e := newLoggingDriverRooted(t, log, tmp)
 
 	// Act
-	if err := e.SweepOrphanRebaseWorktrees(context.Background(), []string{filepath.Join(live, rebaseWorktreeLeaf)}); err != nil {
+	if err := e.SweepOrphanRebaseWorktrees(context.Background(), SweepScope{Retained: []string{filepath.Join(live, rebaseWorktreeLeaf)}}); err != nil {
 		t.Fatalf("SweepOrphanRebaseWorktrees: %v", err)
 	}
 
@@ -135,13 +130,12 @@ func TestTheSummaryNamesWhatItKept(t *testing.T) {
 	// Arrange — the retention is the sweep's only judgement, so it is the one
 	// thing the summary has to make checkable.
 	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
 	live := arrangeOrphanDir(t, tmp, "live")
 	log := &rebaseLog{}
-	e := newLoggingDriver(t, log)
+	e := newLoggingDriverRooted(t, log, tmp)
 
 	// Act
-	if err := e.SweepOrphanRebaseWorktrees(context.Background(), []string{filepath.Join(live, rebaseWorktreeLeaf)}); err != nil {
+	if err := e.SweepOrphanRebaseWorktrees(context.Background(), SweepScope{Retained: []string{filepath.Join(live, rebaseWorktreeLeaf)}}); err != nil {
 		t.Fatalf("SweepOrphanRebaseWorktrees: %v", err)
 	}
 
@@ -156,15 +150,15 @@ func TestTheSweepPrunesTheRepositoryTheOrphanBelongedTo(t *testing.T) {
 	// Arrange — a real registered worktree whose daemon then died: the
 	// directory is a leftover AND the repository still lists it.
 	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
 	target := initTarget(t)
 	orphan := filepath.Join(tmp, rebaseWorktreeMarker+"registered")
 	work := filepath.Join(orphan, rebaseWorktreeLeaf)
 	gitRun(t, target, "worktree", "add", "-q", "--detach", work)
-	e := newTestDriver(t, &recordingSink{})
+	e := newRootedDriver(t, &recordingSink{}, tmp)
 
-	// Act
-	if err := e.SweepOrphanRebaseWorktrees(context.Background(), nil); err != nil {
+	// Act — the target is in the daemon's repository universe, which is what
+	// permits removing a leftover that names it.
+	if err := e.SweepOrphanRebaseWorktrees(context.Background(), SweepScope{Repos: []string{target}}); err != nil {
 		t.Fatalf("SweepOrphanRebaseWorktrees: %v", err)
 	}
 
@@ -175,19 +169,95 @@ func TestTheSweepPrunesTheRepositoryTheOrphanBelongedTo(t *testing.T) {
 	}
 }
 
+func TestTheSweepNeverLooksOutsideItsInjectedRoot(t *testing.T) {
+	// Arrange — the REAL process temp dir (stood in for here, and installed as
+	// $TMPDIR so an implicit fallback would find it) holds a live daemon's
+	// rebase worktree, while this driver's root is a directory of this test's
+	// own. This is the production incident: a test's sweep read $TMPDIR and
+	// deleted the tree a merge gate was running its suite inside.
+	realTmp := t.TempDir()
+	decoy := arrangeOrphanDir(t, realTmp, "live-production-merge")
+	t.Setenv("TMPDIR", realTmp)
+	root := t.TempDir()
+	mine := arrangeOrphanDir(t, root, "mine")
+	e := newRootedDriver(t, &recordingSink{}, root)
+
+	// Act
+	if err := e.SweepOrphanRebaseWorktrees(context.Background(), SweepScope{}); err != nil {
+		t.Fatalf("SweepOrphanRebaseWorktrees: %v", err)
+	}
+
+	// Assert — the decoy outside the injected root is untouched (the orphan
+	// inside it is the proof the sweep did run).
+	if _, err := os.Lstat(decoy); err != nil {
+		t.Fatalf("Lstat(%s) = %v, want a directory outside the injected root untouched", decoy, err)
+	}
+	if _, err := os.Lstat(mine); !os.IsNotExist(err) {
+		t.Fatalf("Lstat(%s) = %v, want the orphan inside the injected root removed", mine, err)
+	}
+}
+
+func TestTheSweepKeepsALeftoverWhoseRepositoryItDoesNotManage(t *testing.T) {
+	// Arrange — a leftover in this daemon's own root whose `.git` file names a
+	// repository the daemon manages nothing for. It is another daemon's tree,
+	// and it may be a LIVE one.
+	tmp := t.TempDir()
+	stranger := initTarget(t)
+	orphan := filepath.Join(tmp, rebaseWorktreeMarker+"stranger")
+	gitRun(t, stranger, "worktree", "add", "-q", "--detach", filepath.Join(orphan, rebaseWorktreeLeaf))
+	log := &rebaseLog{}
+	e := newLoggingDriverRooted(t, log, tmp)
+
+	// Act — an empty repository universe: nothing here is ours.
+	if err := e.SweepOrphanRebaseWorktrees(context.Background(), SweepScope{}); err != nil {
+		t.Fatalf("SweepOrphanRebaseWorktrees: %v", err)
+	}
+
+	// Assert — kept, and said so.
+	if _, err := os.Lstat(orphan); err != nil {
+		t.Fatalf("Lstat(%s) = %v, want a foreign repository's tree kept", orphan, err)
+	}
+	got := log.matching("orphaned rebase worktree sweep")
+	if len(got) != 1 || !strings.Contains(got[0], "kept_unknown_repo=1") || !strings.Contains(got[0], orphan) {
+		t.Fatalf("summary = %v, want one line counting and naming the kept unknown-repo leftover %s", got, orphan)
+	}
+}
+
+func TestTheSweepRemovesALeftoverOfARepositoryARetainedTreeProvesIsOurs(t *testing.T) {
+	// Arrange — two leftovers of ONE repository: a live merge's retained tree,
+	// which is what identifies that repository as this daemon's, and a dead
+	// daemon's orphan of the same repository.
+	tmp := t.TempDir()
+	target := initTarget(t)
+	live := filepath.Join(tmp, rebaseWorktreeMarker+"live")
+	gitRun(t, target, "worktree", "add", "-q", "--detach", filepath.Join(live, rebaseWorktreeLeaf))
+	dead := filepath.Join(tmp, rebaseWorktreeMarker+"dead")
+	gitRun(t, target, "worktree", "add", "-q", "--detach", filepath.Join(dead, rebaseWorktreeLeaf))
+	e := newRootedDriver(t, &recordingSink{}, tmp)
+
+	// Act
+	if err := e.SweepOrphanRebaseWorktrees(context.Background(), SweepScope{Retained: []string{filepath.Join(live, rebaseWorktreeLeaf)}}); err != nil {
+		t.Fatalf("SweepOrphanRebaseWorktrees: %v", err)
+	}
+
+	// Assert
+	if _, err := os.Lstat(dead); !os.IsNotExist(err) {
+		t.Fatalf("Lstat(%s) = %v, want the orphan of a repository a retained tree vouches for removed", dead, err)
+	}
+}
+
 func TestTheSweepSurfacesADirectoryItCouldNotRemove(t *testing.T) {
 	// Arrange — an orphan nothing may unlink.
 	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
 	orphan := arrangeOrphanDir(t, tmp, "stuck")
 	if err := os.Chmod(orphan, 0o555); err != nil {
 		t.Fatalf("Chmod: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(orphan, 0o755) })
-	e := newTestDriver(t, &recordingSink{})
+	e := newRootedDriver(t, &recordingSink{}, tmp)
 
 	// Act
-	err := e.SweepOrphanRebaseWorktrees(context.Background(), nil)
+	err := e.SweepOrphanRebaseWorktrees(context.Background(), SweepScope{})
 
 	// Assert — a leak the sweep could not clear is REPORTED, never counted as
 	// swept.

@@ -55,6 +55,30 @@ func (c *QueueCoordinator) RetainedRebaseWorktrees() []string {
 	return out
 }
 
+// ManagedRepos names every repository this coordinator owns a queue for: the
+// repos with a merge in flight right now, plus every repo key the durable queue
+// still files requests under. It is the sweep's REPOSITORY UNIVERSE — a
+// leftover naming a repository outside it was made by a different daemon (or a
+// different checkout of the same repository), and removing it would destroy a
+// live merge that is not ours to end.
+func (c *QueueCoordinator) ManagedRepos() []string {
+	repos := map[string]struct{}{}
+	c.mu.Lock()
+	for repo := range c.rebaseWork {
+		repos[repo] = struct{}{}
+	}
+	c.mu.Unlock()
+	for repo := range c.queue.Snapshot() {
+		repos[repo] = struct{}{}
+	}
+	out := make([]string, 0, len(repos))
+	for repo := range repos {
+		out = append(out, repo)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // adoptRebaseWorktree points driven at the worktree res was produced in and
 // records it as repo's live tree. Every place settle takes a Result goes through
 // it, so "the request the terminal defer cleans up" and "the directory the sweep
@@ -77,9 +101,32 @@ func (c *QueueCoordinator) releaseRebaseWorktree(repo string) {
 	delete(c.rebaseWork, repo)
 }
 
+// SweepScope is everything the boot sweep is allowed to reason about. The ROOT
+// it scans is not in here on purpose: it is the driver's injected
+// Config.RebaseRoot, the same directory rebase worktrees are created under, so
+// no caller can point a sweep at a directory the driver does not own.
+type SweepScope struct {
+	// Retained names the rebase worktree LEAVES an in-flight merge is using
+	// right now (QueueCoordinator.RetainedRebaseWorktrees). Their parents are
+	// never removed.
+	Retained []string
+	// Repos is the repository universe this daemon manages — the repo keys the
+	// coordinator knows about. A leftover whose own `.git` file points at a
+	// repository outside this universe belongs to somebody else and is KEPT.
+	Repos []string
+}
+
 // SweepOrphanRebaseWorktrees removes every agent-repl-merge-rebase-* directory
-// in the temp dir that `retained` does not name, and prunes the repositories
-// they belonged to so the administrative record cannot outlive them.
+// UNDER THE DRIVER'S INJECTED REBASE ROOT that scope.Retained does not name, and
+// prunes the repositories they belonged to so the administrative record cannot
+// outlive them.
+//
+// IT SCANS ONE INJECTED DIRECTORY AND NOTHING ELSE. It used to resolve
+// os.TempDir() itself, which meant every test that reached it — including the
+// daemon's boot wiring under test — swept the REAL temp dir with a TEST
+// coordinator's (empty) retention set and deleted the live daemon's rebase
+// worktrees, up to and including the tree a merge gate's test run was executing
+// inside. The root is now a construction-time dependency of the driver.
 //
 // THE REPOSITORY COMES FROM THE ORPHAN ITSELF. A linked worktree carries a
 // `.git` FILE naming its repository's gitdir, so the sweep reads each orphan's
@@ -87,32 +134,45 @@ func (c *QueueCoordinator) releaseRebaseWorktree(repo string) {
 // That is what lets a boot with an empty merge queue still clear the ~190 stale
 // entries a repository's `git worktree list` accumulated.
 //
+// THAT SAME FILE IS THE SECOND GUARD. When a leftover names a repository this
+// daemon does not manage, it is another daemon's (or another checkout's) tree
+// and is KEPT, counted as kept_unknown_repo in the summary. Keeping a directory
+// too many leaks bytes; removing somebody else's live tree destroys a running
+// merge, so the asymmetry is deliberate. A leftover with no readable `.git`
+// file names no repository to be wrong about and is swept as before.
+//
 // A SWEEP FAILURE FAILS NOTHING. It is reported to the caller, which logs it;
 // there is no merge here to un-merge, and a directory that would not delete is
 // not a reason to refuse to boot.
-func (e *Driver) SweepOrphanRebaseWorktrees(ctx context.Context, retained []string) error {
-	tmp := os.TempDir()
+func (e *Driver) SweepOrphanRebaseWorktrees(ctx context.Context, scope SweepScope) error {
+	tmp := e.rebaseRoot
+	if strings.TrimSpace(tmp) == "" {
+		return fmt.Errorf("merge: the orphaned rebase worktree sweep has no injected root; refusing to guess one")
+	}
 	entries, err := os.ReadDir(tmp)
 	if err != nil {
 		return fmt.Errorf("merge: reading %s for orphaned rebase worktrees: %w", tmp, err)
 	}
 
-	keep := make(map[string]struct{}, len(retained))
-	for _, dir := range retained {
+	keep := make(map[string]struct{}, len(scope.Retained))
+	for _, dir := range scope.Retained {
 		if dir == "" {
 			continue
 		}
 		// The retained paths are the LEAVES (`.../rebase`); what sits in the
-		// temp dir is their parent, which is the unit this removes.
+		// root is their parent, which is the unit this removes.
 		keep[filepath.Clean(rebaseRemovalRoot(dir))] = struct{}{}
 	}
+	known := knownRepoUniverse(scope)
 
 	var (
 		errs             []error
 		removed, kept    int
+		unknownRepo      int
 		failed           int
 		repos            = map[string]struct{}{}
 		keptExamples     []string
+		unknownExamples  []string
 		pruned, pruneErr int
 	)
 	for _, ent := range entries {
@@ -128,7 +188,15 @@ func (e *Driver) SweepOrphanRebaseWorktrees(ctx context.Context, retained []stri
 			continue
 		}
 		// Read the repository BEFORE the removal takes the file away with it.
-		if repo, ok := rebaseWorktreeRepo(filepath.Join(dir, rebaseWorktreeLeaf)); ok {
+		repo, hasRepo := rebaseWorktreeRepo(filepath.Join(dir, rebaseWorktreeLeaf))
+		if hasRepo {
+			if _, mine := known[repoIdentity(repo)]; !mine {
+				unknownRepo++
+				if len(unknownExamples) < 3 {
+					unknownExamples = append(unknownExamples, dir+"←"+repo)
+				}
+				continue
+			}
 			repos[repo] = struct{}{}
 		}
 		if rmErr := os.RemoveAll(dir); rmErr != nil {
@@ -155,8 +223,9 @@ func (e *Driver) SweepOrphanRebaseWorktrees(ctx context.Context, retained []stri
 
 	// ONE LINE FOR THE WHOLE SWEEP, and it says why the kept ones were kept —
 	// which is the only judgement in here a reader can second-guess.
-	e.logf("merge: orphaned rebase worktree sweep {tmp=%s removed=%d kept=%d remove_failed=%d repos_pruned=%d prune_failed=%d}%s — kept directories belong to a LIVE or conflict-PARKED merge and are its workbench; everything else outlived the daemon that made it",
-		tmp, removed, kept, failed, pruned, pruneErr, keptDetail(keptExamples, kept))
+	e.logf("merge: orphaned rebase worktree sweep {tmp=%s removed=%d kept=%d kept_unknown_repo=%d remove_failed=%d repos_pruned=%d prune_failed=%d}%s%s — kept directories belong to a LIVE or conflict-PARKED merge and are its workbench; kept_unknown_repo ones name a repository this daemon does not manage and are somebody else's tree; everything else outlived the daemon that made it",
+		tmp, removed, kept, unknownRepo, failed, pruned, pruneErr,
+		keptDetail(keptExamples, kept), unknownDetail(unknownExamples, unknownRepo))
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
@@ -180,6 +249,60 @@ func keptDetail(examples []string, kept int) string {
 		detail += fmt.Sprintf(",+%d more", kept-len(examples))
 	}
 	return detail + "}"
+}
+
+// unknownDetail names the directories kept because their repository is not this
+// daemon's, capped like keptDetail. A count alone would leave the one judgement
+// that can be wrong in the direction of leaking unexplained.
+func unknownDetail(examples []string, unknown int) string {
+	if len(examples) == 0 {
+		return ""
+	}
+	detail := " {kept_unknown_repo=" + strings.Join(examples, ",")
+	if unknown > len(examples) {
+		detail += fmt.Sprintf(",+%d more", unknown-len(examples))
+	}
+	return detail + "}"
+}
+
+// knownRepoUniverse is the set of repositories the sweeping daemon manages: the
+// repo keys it was handed, plus the repositories its own retained worktrees
+// point at (a live merge's tree proves its repository is ours). Membership is
+// tested on repoIdentity, so `<repo>` and `<repo>/.git` are one entry.
+func knownRepoUniverse(scope SweepScope) map[string]struct{} {
+	known := make(map[string]struct{}, len(scope.Repos)+len(scope.Retained))
+	for _, repo := range scope.Repos {
+		if strings.TrimSpace(repo) == "" {
+			continue
+		}
+		known[repoIdentity(repo)] = struct{}{}
+	}
+	for _, leaf := range scope.Retained {
+		if leaf == "" {
+			continue
+		}
+		if repo, ok := rebaseWorktreeRepo(leaf); ok {
+			known[repoIdentity(repo)] = struct{}{}
+		}
+	}
+	return known
+}
+
+// repoIdentity normalizes the two spellings of one repository the sweep has to
+// compare: the coordinator's key is a git COMMON DIR (`<repo>/.git`), while an
+// orphan's `.git` file yields the repository directory (`<repo>`). Symlinks are
+// resolved best-effort because macOS hands out /var and /private/var for the
+// same temp directory, and two spellings of one repository would read as a
+// foreign one.
+func repoIdentity(path string) string {
+	clean := filepath.Clean(strings.TrimSpace(path))
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		clean = resolved
+	}
+	if base := filepath.Base(clean); base == ".git" {
+		clean = filepath.Dir(clean)
+	}
+	return clean
 }
 
 // rebaseWorktreeRepo resolves the repository a leftover rebase worktree belonged
