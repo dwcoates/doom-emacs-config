@@ -1247,6 +1247,17 @@ bundle this stamp exists to prevent."
     ;; Act / Assert
     (should-error (agent-repl--frontend-build-id))))
 
+(ert-deftest agent-repl-test-frontend-build-id-needs-no-built-webapp-in-batch ()
+  "The batch harness resolves a build id without a built webapp.
+`webapp/dist' is gitignored and built by hand, so reading the real stamp
+made every webview-URL test pass or fail on whether whoever ran the suite
+had built the webapp — which is why the frontend URL tests failed in a
+fresh checkout and in the merge gate's temporary rebase worktree.
+test-helpers.el redirects `agent-repl--frontend-webapp-dir' to a stamped
+temp dir for the whole batch session, and this pins that redirect."
+  ;; Act / Assert — no rebinding: the harness's own directory is the subject.
+  (should (equal (agent-repl--frontend-build-id) "test-build-id")))
+
 (ert-deftest agent-repl-test-frontend-build-id-reads-the-stamp ()
   "The build id is the stamp's content, whitespace trimmed."
   ;; Arrange
