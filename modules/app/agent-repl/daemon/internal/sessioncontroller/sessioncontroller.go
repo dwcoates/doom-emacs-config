@@ -484,6 +484,22 @@ type Manager struct {
 	// so a claim living on the retired one would evaporate exactly when the
 	// respawned session starts accepting prompts again.
 	keepAliveRewinds map[string]string
+	// keepAliveResidue names, per WORKSPACE, the keep-alive ping turns that
+	// have COMPLETED and have not yet been rewound out of the vendor
+	// transcript, oldest first.
+	//
+	// IT IS WHAT MAKES THE REWIND OWED RATHER THAN OPPORTUNISTIC. The rewind
+	// used to run in exactly one situation — a real prompt was held behind the
+	// ping when it ended — so a ping that finished with nothing waiting simply
+	// stayed in the transcript, and the NEXT user prompt, revival, restart or
+	// merge turn was submitted on top of it. That is how keep-alive text
+	// reached the model's context. This ledger is the daemon's memory of that
+	// debt, and keepaliveresidue.go is the one place that settles it.
+	//
+	// Keyed by workspace for keepAliveRewinds's reason: the rewind REPLACES the
+	// controller, so a debt recorded on the retired one would evaporate at the
+	// exact moment the replacement starts accepting prompts.
+	keepAliveResidue map[string][]string
 	lastCSID         map[string]string // session id -> last-persisted claude session uuid
 	// shimPID is the pid each session's shim announced on its ShimHello. It is
 	// the ONLY way to stop a shim this daemon did not spawn, and it is kept in
@@ -1158,6 +1174,25 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 			return promptDisposition{}, err
 		}
 	}
+	// THE KEEP-ALIVE DEBT IS SETTLED BEFORE THE SHIM IS RESOLVED, and this is
+	// the placement the gap demanded. A ping that finished with nothing waiting
+	// leaves its turns at the transcript tail; submitting on top of them puts
+	// the ping's text into the model's context for the rest of the
+	// conversation, which is what the user observed. Settling here rewinds them
+	// out, respawns the rewound session, and only then is the controller
+	// resolved — so the ensure() below adopts the replacement rather than
+	// handing this prompt a client the rewind is about to kill.
+	//
+	// THE MACHINERY SUBMITTERS ARE NOT ROUTED THROUGH HERE at all (the ping and
+	// the warm compaction call forwardPrompt directly), so nothing in this path
+	// can rewind a ping out from under itself.
+	//
+	// A DEGRADED SETTLE DOES NOT REFUSE THE PROMPT. Every failure short of the
+	// registry flip leaves the conversation exactly as it was, and a prompt
+	// withheld because the daemon could not tidy a transcript is the larger
+	// harm (rewind.go).
+	m.settleKeepAliveResidue(ctx, workspace, "prompt-submit:"+who.String())
+
 	d, err := m.ensure(ctx, workspace)
 	if err != nil {
 		return promptDisposition{}, err
