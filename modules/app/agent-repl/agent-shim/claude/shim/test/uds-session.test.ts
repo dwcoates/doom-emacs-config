@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import net from "node:net";
 import { once } from "node:events";
 import { create } from "@bufbuild/protobuf";
-import { anyPack } from "@bufbuild/protobuf/wkt";
+import { anyPack, anyUnpack } from "@bufbuild/protobuf/wkt";
 import {
   ClaudeStreamMessageSchema,
   UserMessageSchema,
@@ -3307,6 +3307,120 @@ describe("UdsSession displaced-turn terminal", () => {
       "turnEnded",
     ]);
     await until(() => session.turnCount() === 0);
+  });
+
+  // -------------------------------------------------------------------------
+  // NAMING the terminal of a turn the user stopped.
+  //
+  // The SDK has no word for an abort: the CLI cancels and emits whatever error
+  // flavor falls out, normally `error_during_execution`. Passing that through
+  // told every consumer the turn FAILED — a red `error_during_execution` badge
+  // in the feed for a stop the user asked for. The shim acked the interrupt, so
+  // the shim is the party that knows, and it says so on the terminal.
+  // -------------------------------------------------------------------------
+
+  /** The ResultMessage inside a store batch's vendor event. */
+  const resultInBatch = (sw: StoreWrite) => {
+    const vendorEvent = sw.batch!.events.find((event) => event.payload.case === "vendor");
+    if (vendorEvent?.payload.case !== "vendor") throw new Error("no vendor event");
+    const csm = anyUnpack(vendorEvent.payload.value, ClaudeStreamMessageSchema);
+    if (csm?.msg.case !== "result") throw new Error("vendor event is not a result");
+    return csm.msg.value;
+  };
+
+  /** The TurnEnded inside a store batch. */
+  const turnEndedInBatch = (sw: StoreWrite) => {
+    const ended = sw.batch!.events.find((event) => event.payload.case === "turnEnded");
+    if (ended?.payload.case !== "turnEnded") throw new Error("no turnEnded event");
+    return ended.payload.value;
+  };
+
+  /** A turn stopped mid-flight, with the abort's own SDK result delivered. */
+  async function stoppedTurn(): Promise<Awaited<ReturnType<typeof rig>> & { batch: StoreWrite }> {
+    const r = await rig({ storeSessionId: "vendor-uuid", interruptTerminalGraceMs: 10_000 });
+    r.daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await r.store.peer().next(StoreWriteSchema);
+    await r.daemon.next(AckSchema);
+    r.daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
+    expect((await r.daemon.next(AckSchema)).interruptOutcome).toBe(InterruptOutcome.INTERRUPTED);
+    r.query.emit({
+      type: "result",
+      uuid: "r1",
+      session_id: "vendor-uuid",
+      subtype: "error_during_execution",
+      is_error: true,
+      stop_reason: "error",
+    } as unknown as SdkMessageLike);
+    const batch = await r.store.peer().next(StoreWriteSchema);
+    await until(() => r.session.turnCount() === 0);
+    return { ...r, batch };
+  }
+
+  it("names the stopped turn's result ABORTED, not the SDK's error flavor", async () => {
+    // Arrange + Act.
+    const { batch } = await stoppedTurn();
+    // Assert.
+    expect(resultInBatch(batch).subtype).toBe(6 /* RESULT_SUBTYPE_ABORTED */);
+  });
+
+  it("keeps the SDK's own stop_reason on the stopped turn's result record", async () => {
+    // Arrange + Act — the vendor's account survives being named honestly.
+    const { batch } = await stoppedTurn();
+    // Assert.
+    expect(resultInBatch(batch).stopReason).toBe("error");
+  });
+
+  it("ends the stopped turn with the `aborted` stop reason", async () => {
+    // Arrange + Act — `aborted` is the one stop reason the SSM reads as a
+    // normal conclusion, which keeps the workspace out of the blocked family.
+    const { batch } = await stoppedTurn();
+    // Assert.
+    expect(turnEndedInBatch(batch).stopReason).toBe("aborted");
+  });
+
+  it("leaves a turn nobody stopped named exactly as the SDK reported it", async () => {
+    // Arrange — the same failing result, with no interrupt anywhere.
+    const { daemon, query, store } = await rig({ storeSessionId: "vendor-uuid" });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+    // Act.
+    query.emit({
+      type: "result",
+      uuid: "r1",
+      session_id: "vendor-uuid",
+      subtype: "error_during_execution",
+      is_error: true,
+    } as unknown as SdkMessageLike);
+    // Assert: a genuine execution failure still reads as one.
+    const sw = await store.peer().next(StoreWriteSchema);
+    expect(resultInBatch(sw).subtype).toBe(2 /* RESULT_SUBTYPE_ERROR_DURING_EXECUTION */);
+  });
+
+  it("spends the stop on ONE terminal, leaving the NEXT turn's result untouched", async () => {
+    // Arrange — a stopped turn that already reached its terminal, its batch
+    // durably receipted so the turn's handshake claim is retired.
+    const { daemon, query, store, batch } = await stoppedTurn();
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(batch.batch!.events.length),
+      lastSeq: 10n,
+    }));
+    // Act — a fresh turn that fails on its own.
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p2", text: "again", promptOrigin: PromptOrigin.USER_SENT }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+    query.emit({
+      type: "result",
+      uuid: "r2",
+      session_id: "vendor-uuid",
+      subtype: "error_during_execution",
+      is_error: true,
+    } as unknown as SdkMessageLike);
+    // Assert: nothing latched — the stop named the turn it displaced, and no
+    // later turn inherits it.
+    const sw = await store.peer().next(StoreWriteSchema);
+    expect(resultInBatch(sw).subtype).toBe(2 /* RESULT_SUBTYPE_ERROR_DURING_EXECUTION */);
+    expect(turnEndedInBatch(sw).stopReason).not.toBe("aborted");
   });
 
   it("synthesizes the terminal when the SDK never produces one", async () => {
