@@ -2107,7 +2107,10 @@ describe("UdsSession events: store round-trip and sad path", () => {
       terminationKind: "iterator_throw",
       cause: expect.objectContaining({ message: expect.stringContaining("latency disk full") }),
     });
-    expect(log.record("persistent SDK message latency did not receive a durable store receipt")).toMatchObject({
+    // Two structural stream frames now produce durable evidence — the latency
+    // stamp and the response usage correction — so the prose names the class
+    // and the structured evidence_kind below names WHICH one failed.
+    expect(log.record("persistent SDK structural evidence did not receive a durable store receipt")).toMatchObject({
       operation: "shim.uds-session.persistent-evidence",
       agent_repl_session_id: "test-agent-session",
       claude_session_id: "sess-1",

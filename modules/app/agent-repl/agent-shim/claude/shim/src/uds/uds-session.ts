@@ -1897,10 +1897,11 @@ export class UdsSession {
         this.store.adoptStoreKey(persistent.sessionId);
         setClaudeSessionId(persistent.sessionId);
         LOGGER.logVerbose({ agent_repl_session_id: this.deps.sessionId, sdk_type: msg.type, payload_case: persistent.payload.case, claude_session_id: persistent.sessionId }, "writing persistent SDK structural event to store");
-        // The SDK pump owns this durability boundary.  It may not consume the
-        // next SDK message until the latency stamp has a store receipt: doing
-        // so would allow the response and its usage to succeed without the
-        // timing evidence needed to compute TTFT and generation throughput.
+        // The SDK pump owns this durability boundary. It may not consume the
+        // next SDK message until this evidence has a store receipt: doing so
+        // would allow the response and its usage to succeed without the timing
+        // evidence needed to compute TTFT and generation throughput, or without
+        // the final output_tokens the turn's ledger reconciles against.
         try {
           await this.store.write([persistent]);
         } catch (cause) {
@@ -1917,12 +1918,12 @@ export class UdsSession {
               request_id: this.activeTurnIds[0],
               turn_id: this.activeTurnIds[0],
             }),
-            api_message_id: latency?.uuid ?? null,
-            evidence_kind: "message_latency",
-            failed_operation: "store.write.message_latency",
+            api_message_id: latency?.uuid ?? this.streamMessages.current(),
+            evidence_kind: latency !== undefined ? "message_latency" : "response_usage",
+            failed_operation: latency !== undefined ? "store.write.message_latency" : "store.write.response_usage",
             outcome: "fatal_missing_persistent_evidence_receipt",
             cause,
-          }, "persistent SDK message latency did not receive a durable store receipt");
+          }, "persistent SDK structural evidence did not receive a durable store receipt");
           throw cause;
         }
         return;
