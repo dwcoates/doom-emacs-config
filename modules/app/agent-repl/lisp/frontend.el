@@ -38,6 +38,7 @@
 
 (require 'cl-lib)
 (require 'url-util)
+(require 'url-parse)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
@@ -54,6 +55,8 @@
 (declare-function agent-repl--frontend-restart-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-hibernate-workspace "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-workspace-url "agent-repl-frontend-client" (workspace))
+(declare-function agent-repl--frontend-base-url "agent-repl-frontend-client" ())
+(declare-function agent-repl--read-known-workspace "agent-repl-keybindings" (prompt))
 (declare-function agent-repl--frontend-ws-command-key "agent-repl-frontend-client" (ws))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
@@ -350,6 +353,18 @@ Registered in `agent-repl--external-boundary-functions'."
       (error "agent-repl: webview reports no URI to reload (xwidget=%S)" xwidget))
     (xwidget-webkit-goto-uri xwidget uri) ;; ALLOW-EXTERNAL-BOUNDARY
     uri))
+
+(defun agent-repl--frontend-webview-uri (xwidget)
+  "External-boundary wrapper: return the URI XWIDGET is currently showing.
+READ-ONLY, and deliberately separate from
+`agent-repl--frontend-webview-reload-widget', which reads the same URI
+only to navigate back to it: the rescue command has to know WHERE a
+webview went before deciding whether to act, and asking a navigating
+wrapper would mean navigating to find out.  Body does nothing but the
+external call; tests mock via `cl-letf'.  Registered in
+`agent-repl--external-boundary-functions'."
+  (require 'xwidget)
+  (xwidget-webkit-uri xwidget)) ;; ALLOW-EXTERNAL-BOUNDARY
 
 (defun agent-repl--frontend-webview-workspace (buf)
   "Return the workspace name webview BUF belongs to.
@@ -1041,6 +1056,89 @@ the current workspace."
     (unless (agent-repl--frontend-remount-webview ws)
       (user-error "agent-repl: no webview open for workspace %s" ws))
     (agent-repl--user-message ws "webview reloaded" nil)))
+
+;;;; ---- Rescuing a webview that navigated away --------------------------------
+
+(defun agent-repl--frontend-webview-current-uri (ws)
+  "Return the URI WS's open webview is currently displaying, or nil.
+nil covers both \"no webview open\" and \"the mounted WKWebView is
+dead\": neither is a page that can be inspected, and the caller
+distinguishes them by asking for the buffer itself."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+    (when (buffer-live-p buf)
+      (when-let ((xw (agent-repl--frontend-webview-live-widget buf)))
+        (agent-repl--frontend-webview-uri xw)))))
+
+(defun agent-repl--frontend-webview-at-home-p (uri)
+  "Return non-nil when URI is served by OUR daemon.
+Home is the daemon's ORIGIN (`agent-repl--frontend-base-url'), not the
+workspace's full webview URL: the page rewrites its own query as the
+user navigates the webapp, and the build stamp in a freshly built URL
+differs from the one a still-correct mounted page carries, so comparing
+whole URLs would call a perfectly-at-home webview stray.  What the
+rescue actually detects is the page having left the daemon entirely.
+
+An unknown or empty URI is NOT home: a webview that cannot say where it
+is has no claim on being left alone."
+  (and (stringp uri)
+       (not (string-empty-p uri))
+       (let ((there (url-generic-parse-url uri))
+             (home (url-generic-parse-url (agent-repl--frontend-base-url))))
+         (and (equal (url-type there) (url-type home))
+              (equal (url-host there) (url-host home))
+              (equal (url-port there) (url-port home))))))
+
+(defun agent-repl--frontend-webview-host (uri)
+  "Return a short host label for URI, for user copy.
+Falls back to the whole URI when it parses to no host, and to
+\"an unknown page\" when there is no URI at all — the echo line names
+where the view went, and a hole in that sentence is worse than a
+coarser answer."
+  (or (and (stringp uri)
+           (not (string-empty-p uri))
+           (or (url-host (url-generic-parse-url uri)) uri))
+      "an unknown page"))
+
+;;;###autoload
+(defun agent-repl-frontend-rescue-webview (&optional ws)
+  "Bring a webview that navigated away from the webapp back home.
+Clicking an external hyperlink inside the webapp navigates the xwidget
+itself, so the workspace's panel ends up rendering some other site with
+no way back — the page is gone, and with it every control that could
+return it.  This is the way back: it reports WHERE the view went and
+remounts it against its own workspace
+\(`agent-repl--frontend-remount-webview', the same operation the bundle
+reload uses).
+
+WS defaults to the current workspace.  With a prefix argument the
+target workspace is read interactively, and non-interactive callers may
+pass a name directly.
+
+A webview that is already home is left ALONE — no remount, just a line
+saying so.  Remounting it anyway would throw away a rendered feed to
+navigate to where it already is.  Signals when the workspace has no
+webview open at all, matching `agent-repl-frontend-reload-webview'."
+  (interactive
+   (list (when current-prefix-arg
+           (agent-repl--read-known-workspace "Rescue webview for workspace: "))))
+  (let ((ws (or ws (agent-repl--ws-current-name))))
+    (unless ws
+      (user-error "agent-repl: no current workspace"))
+    (unless (buffer-live-p (agent-repl--ws-get ws :frontend-buffer))
+      (user-error "agent-repl: no webview open for workspace %s" ws))
+    (let ((uri (agent-repl--frontend-webview-current-uri ws)))
+      (if (agent-repl--frontend-webview-at-home-p uri)
+          (progn
+            (agent-repl--log ws "rescue-webview: outcome=already-home")
+            (agent-repl--user-message ws "webview is already home" nil
+                                      :detail (format "uri=%s" uri))
+            nil)
+        (agent-repl--log ws "rescue-webview: outcome=astray url=%s" uri)
+        (prog1 (agent-repl--frontend-remount-webview ws)
+          (agent-repl--user-message
+           ws "webview brought home from %s"
+           (list (agent-repl--frontend-webview-host uri))
+           :detail (format "stray-uri=%s" uri)))))))
 
 ;;;###autoload
 (defun agent-repl-restart-session ()
