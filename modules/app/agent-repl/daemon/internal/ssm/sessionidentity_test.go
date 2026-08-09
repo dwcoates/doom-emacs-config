@@ -315,7 +315,7 @@ func TestMarkPromptAcceptedSucceedsAfterNormalization(t *testing.T) {
 	m := openWedgedManager(t, path)
 
 	// Act
-	err := m.MarkPromptAccepted("ws1", "s_daemon", "req-1", func(*frontendv1.WorkspaceState) {})
+	err := m.MarkPromptAccepted("ws1", "s_daemon", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {})
 
 	// Assert
 	if err != nil {
@@ -332,7 +332,7 @@ func TestMarkPromptAcceptedStillRefusesAGenuinelyDifferentSession(t *testing.T) 
 	m := openWedgedManager(t, path)
 
 	// Act
-	err := m.MarkPromptAccepted("ws1", "s_other", "req-1", func(*frontendv1.WorkspaceState) {})
+	err := m.MarkPromptAccepted("ws1", "s_other", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {})
 
 	// Assert
 	if err == nil {

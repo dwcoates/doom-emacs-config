@@ -34,8 +34,15 @@ import (
 //
 // The later TurnStarted remains the durable lifecycle authority. It appends its
 // own seq-bearing row and is harmless over this daemon-local row.
+//
+// ADMISSION says whose prompt this is. It changes nothing for the ordinary
+// user prompt; it exists so the daemon's own idle-machinery turns — the cache
+// keep-alive ping and the pre-expiry warm compaction — may take the edge over
+// the merge phases that leave the session idle and unowned. See
+// mergepromptgate.go for why refusing them there cost a full context re-ingest.
 func (m *Manager) MarkPromptAccepted(
 	workspace, sessionID, requestID string,
+	admission PromptAdmission,
 	publish func(*frontendv1.WorkspaceState),
 ) error {
 	if workspace == "" {
@@ -67,7 +74,7 @@ func (m *Manager) MarkPromptAccepted(
 		}
 		m.logf("ssm: prompt accepted IDEMPOTENT ws=%s session=%s request_id=%q active_claimant=%q — session-status lifecycle already claims this turn",
 			workspace, sessionID, requestID, claimant)
-		return m.publishPromptAcceptedLocked(workspace, sessionID, requestID, "idempotent", publish)
+		return m.publishPromptAcceptedLocked(workspace, sessionID, requestID, "idempotent", admission, publish)
 	}
 
 	if err := appendRow(
@@ -87,7 +94,7 @@ func (m *Manager) MarkPromptAccepted(
 	if err := m.reresolveLocked(workspace, causePromptAccepted, 0); err != nil {
 		return m.retractUnpublishedAcceptLocked(workspace, sessionID, requestID, err)
 	}
-	if err := m.publishPromptAcceptedLocked(workspace, sessionID, requestID, "appended", publish); err != nil {
+	if err := m.publishPromptAcceptedLocked(workspace, sessionID, requestID, "appended", admission, publish); err != nil {
 		return m.retractUnpublishedAcceptLocked(workspace, sessionID, requestID, err)
 	}
 	return nil
@@ -174,6 +181,7 @@ func (m *Manager) retractUnpublishedAcceptLocked(workspace, sessionID, requestID
 // bubble. Caller holds m.mu; keeping it held is the ordering barrier.
 func (m *Manager) publishPromptAcceptedLocked(
 	workspace, sessionID, requestID, decision string,
+	admission PromptAdmission,
 	publish func(*frontendv1.WorkspaceState),
 ) error {
 	r, err := resolve(m.db, workspace, m.logf)
@@ -198,11 +206,27 @@ func (m *Manager) publishPromptAcceptedLocked(
 	inTurn := state.GetState() == frontendv1.RenderState_RENDER_STATE_SUBMITTING ||
 		state.GetState() == frontendv1.RenderState_RENDER_STATE_THINKING
 	if !inTurn || !state.GetTurnActive() {
-		return fmt.Errorf("ssm: synchronous prompt state invariant failed for workspace %q session %q request %q: state=%s turn_active=%t",
-			workspace, sessionID, requestID, state.GetState(), state.GetTurnActive())
+		// THE ONE EXEMPTION, and it does not weaken the invariant it sits
+		// inside. The turn claim is still required; all that is relaxed is which
+		// render state may HIDE it, and only for the two merge phases in which
+		// no coordinator owns the shim and only for the daemon's own idle
+		// machinery (mergepromptgate.go).
+		if !admitsIdleMachineryTurn(admission, state) {
+			if mergeAxisRenderState(state.GetState()) {
+				m.logf("ssm: prompt accepted REFUSED BY THE MERGE AXIS ws=%s session=%s request_id=%q admission=%s state=%s turn_active=%t — a merge owns this workspace, so the accepted edge's `submitting` premise cannot be published over it",
+					workspace, sessionID, requestID, admission, state.GetState(), state.GetTurnActive())
+				return fmt.Errorf("%w: workspace %q session %q request %q: state=%s turn_active=%t admission=%s",
+					ErrPromptRefusedByMergeState, workspace, sessionID, requestID,
+					state.GetState(), state.GetTurnActive(), admission)
+			}
+			return fmt.Errorf("ssm: synchronous prompt state invariant failed for workspace %q session %q request %q: state=%s turn_active=%t",
+				workspace, sessionID, requestID, state.GetState(), state.GetTurnActive())
+		}
+		m.logf("ssm: prompt accepted ADMITTED OVER AN IDLE MERGE STATE ws=%s session=%s request_id=%q admission=%s state=%s turn_active=true — the workspace is waiting on the merge queue rather than being driven by a merge run, so the daemon's own machinery turn is allowed to keep its prompt cache alive",
+			workspace, sessionID, requestID, admission, state.GetState())
 	}
-	m.logf("ssm: prompt accepted PUBLISH_SYNC ws=%s session=%s request_id=%q decision=%s state=%s turn_active=%t cause_kind=%s cause_seq=%d at_ms=%d",
-		workspace, sessionID, requestID, decision, state.GetState(), state.GetTurnActive(),
+	m.logf("ssm: prompt accepted PUBLISH_SYNC ws=%s session=%s request_id=%q decision=%s admission=%s state=%s turn_active=%t cause_kind=%s cause_seq=%d at_ms=%d",
+		workspace, sessionID, requestID, decision, admission, state.GetState(), state.GetTurnActive(),
 		state.GetCauseKind(), state.GetCauseSeq(), state.GetAtMs())
 	publish(state)
 	return nil

@@ -354,6 +354,10 @@ type promptAcceptCall struct {
 	workspace string
 	sessionID string
 	requestID string
+	// admission is the accepted edge's submitter class, recorded so a test can
+	// assert that the daemon's own machinery asks for the merge-state exemption
+	// and an ordinary prompt does not.
+	admission ssm.PromptAdmission
 }
 
 type alreadyCompleteCall struct {
@@ -377,11 +381,12 @@ func (f *fakeApplier) ApplyConnectionDegraded(workspace string, degraded bool, r
 
 func (f *fakeApplier) MarkPromptAccepted(
 	workspace, sessionID, requestID string,
+	admission ssm.PromptAdmission,
 	publish func(*frontendv1.WorkspaceState),
 ) error {
 	f.reconcMutex.Lock()
 	f.promptAccepts = append(f.promptAccepts, promptAcceptCall{
-		workspace: workspace, sessionID: sessionID, requestID: requestID,
+		workspace: workspace, sessionID: sessionID, requestID: requestID, admission: admission,
 	})
 	err := f.promptAcceptErr
 	f.reconcMutex.Unlock()
