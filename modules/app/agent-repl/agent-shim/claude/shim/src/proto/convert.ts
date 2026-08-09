@@ -915,7 +915,7 @@ function convertRawStreamEvent(raw: Record<string, unknown>) {
     case "content_block_stop":
       return create(RawMessageStreamEventSchema, { event: { case: "contentBlockStop", value: create(ContentBlockStopEventSchema, { index: numOf(raw["index"]) }) } });
     case "message_delta":
-      return create(RawMessageStreamEventSchema, { event: { case: "messageDelta", value: create(MessageDeltaEventSchema, { delta: asStruct(raw["delta"]), usage: convertUsage(isObject(raw["usage"]) ? raw["usage"] : undefined) }) } });
+      return create(RawMessageStreamEventSchema, { event: { case: "messageDelta", value: create(MessageDeltaEventSchema, { delta: asStruct(raw["delta"]), usage: convertUsage(isObject(raw["usage"]) ? raw["usage"] : undefined), vendorUsage: messageDeltaVendorUsage(raw["usage"]) }) } });
     case "message_stop":
     case "ping":
       return create(RawMessageStreamEventSchema, { event: { case: "messageStop", value: create(MessageStopEventSchema, {}) } });
@@ -2087,6 +2087,31 @@ function convertUsage(raw: Record<string, unknown> | undefined) {
     serverToolUse: asStructOpt(pick(raw, "server_tool_use", "serverToolUse")),
     serviceTier: strOf(pick(raw, "service_tier", "serviceTier")),
   });
+}
+
+/**
+ * The vendor's own usage object off a `message_delta` frame, whole.
+ *
+ * This is where a response's FINAL output_tokens live — the assistant message
+ * the stream plane's evidence is built from carries only the message_start
+ * snapshot — so it is the evidence the daemon's turn-accounting ledger
+ * reconciles against. It is relayed verbatim rather than through the narrow
+ * `Usage` projection beside it, which cannot carry output_tokens_details or
+ * iterations.
+ *
+ * A frame with no usage, or usage the modeled contract rejects, yields
+ * `undefined`: an absent correction leaves the ledger reporting its
+ * disagreement honestly, which is strictly better than a fabricated one.
+ */
+export function messageDeltaVendorUsage(raw: unknown) {
+  if (!isObject(raw)) return undefined;
+  try {
+    return convertApiUsage(normalizeApiUsage(raw));
+  } catch (cause) {
+    LOGGER.log({ level: "error", outcome: "message_delta_usage_unmodeled", cause },
+      "message_delta usage did not satisfy the modeled usage contract and was not relayed");
+    return undefined;
+  }
 }
 
 function convertApiUsage(raw: NormalizedApiUsage) {

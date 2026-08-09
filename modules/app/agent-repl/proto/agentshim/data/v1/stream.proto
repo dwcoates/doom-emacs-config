@@ -444,7 +444,40 @@ message ContentBlockStopEvent {
 
 message MessageDeltaEvent {
   google.protobuf.Struct delta = 1;  // stop_reason/stop_sequence updates
+
+  // The NARROW legacy projection of the delta's usage. Frozen exactly as it
+  // is: rows carrying it are already persisted, and a replay must decode them
+  // byte-identically. Read `vendor_usage` instead.
   Usage usage = 2;
+
+  // The vendor's own cumulative usage as of this delta, relayed VERBATIM.
+  //
+  // WHY IT EXISTS. A turn's token ledger is reconciled from two planes: the
+  // per-response stream evidence, and the terminal result's totals. Those two
+  // could not be made to agree on output_tokens, because the assistant message
+  // the stream plane's evidence is built from carries the `message_start`
+  // usage SNAPSHOT — which already knows the final input and cache counters,
+  // and only an interim output count. The final output_tokens exist on this
+  // frame and nowhere else the daemon can see. On one measured live turn the
+  // per-response sum was 563 against the result's 4407; the input side
+  // reconciled exactly, because input is settled at message_start.
+  //
+  // WHY THE FULL OBJECT. The narrow `usage` above cannot carry
+  // output_tokens_details (where thinking tokens are reported) or iterations,
+  // so a token-utilization record built from it would be durably unfaithful to
+  // what the vendor said. The evidence is relayed whole rather than projected:
+  // narrowing it was the defect, not the fix.
+  ApiUsage vendor_usage = 3;
+
+  // The Anthropic message id this delta's usage belongs to.
+  //
+  // The vendor's own message_delta frame is ANONYMOUS — the identity arrives
+  // once, on the message_start that opened the message — so a producer relaying
+  // a usage correction must name what it corrects. Keyed exactly as
+  // ContentDelta and MessageLatency key their own per-message facts, never the
+  // envelope uuid. Empty on any row written before this field existed, which is
+  // an uncorrectable record rather than a correction of an unnamed one.
+  string api_message_id = 4;
 }
 
 message MessageStopEvent {}
