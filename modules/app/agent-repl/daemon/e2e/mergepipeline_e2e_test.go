@@ -507,7 +507,19 @@ func assertCommitsLandedAdvances(t *testing.T, w *mergeWatch, ws string, wantTot
 		}
 		highest = done
 		landed = append(landed, done)
-		shas[sha] = true
+		// ONLY THE PICKING ARM'S COMMITS ARE COUNTED. AMENDED: the census used to
+		// pool the testing arm's commit in with them, on the assumption that the
+		// two arms share one commit as well as one cursor. They share the cursor;
+		// they do not share the commit. The testing arm names the REBASED HEAD the
+		// gate judges — a commit `cherry-pick -x` created, whose sha is by
+		// construction none of the source shas the picks named, and which after a
+		// remediation turn's fix commit is not any of them in substance either. So
+		// the pooled census counted one commit too many for every merge. The
+		// property this stanza is for — the replay is still per-commit even though
+		// the gate is not — is a property of the PICKS, and is asserted on them.
+		if statusArm(status) == armCherryPicking {
+			shas[sha] = true
+		}
 	}
 	if len(landed) == 0 {
 		t.Errorf("the merge of %s published no cherry_picking or testing status at all, so no per-commit progress was ever observable (sequence %v)",
@@ -525,7 +537,7 @@ func assertCommitsLandedAdvances(t *testing.T, w *mergeWatch, ws string, wantTot
 	// The REPLAY is still per-commit even though the gate is not, so the picking
 	// statuses must still have named every commit in the range.
 	if int32(len(shas)) != wantTotal {
-		t.Errorf("the picking/testing statuses for %s named %d distinct commits, want %d: the run did not step through the range one commit at a time",
+		t.Errorf("the cherry_picking statuses for %s named %d distinct commits, want %d: the run did not step through the range one commit at a time",
 			ws, len(shas), wantTotal)
 	}
 }

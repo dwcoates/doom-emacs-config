@@ -362,7 +362,13 @@ func TestResolveMergeTestFailureSubmitsThePromptAndCompletesOnItsTurn(t *testing
 	h.m.onTurnEvent(d, true, "t1", turnOutcome{})
 	h.m.onTurnEvent(d, false, "t1", turnOutcome{})
 
-	// Assert — the agent was told which commit broke what, under a merge origin.
+	// Assert — the agent was told what broke and where, under a merge origin.
+	//
+	// AMENDED: the prompt used to be required to name the failing SHA. It does
+	// not any more, by the ruling that no copy a user or an agent reads
+	// identifies a commit by sha — and the head's sha told the resolving agent
+	// nothing that `git log` in the worktree it is pointed at does not tell it
+	// better. The half that carries the work is asserted unchanged.
 	if err := <-done; err != nil {
 		t.Fatalf("ResolveMergeTestFailure() = %v, want nil", err)
 	}
@@ -370,8 +376,8 @@ func TestResolveMergeTestFailureSubmitsThePromptAndCompletesOnItsTurn(t *testing
 	prompts := append([]string(nil), h.client.prompts...)
 	origins := append([]string(nil), h.client.origins...)
 	h.client.mu.Unlock()
-	if len(prompts) != 1 || !strings.Contains(prompts[0], "abc1234") || !strings.Contains(prompts[0], "FAIL: agent-repl-suite") {
-		t.Fatalf("prompts = %q, want one naming the failing commit and its output", prompts)
+	if len(prompts) != 1 || !strings.Contains(prompts[0], "/target") || !strings.Contains(prompts[0], "FAIL: agent-repl-suite") {
+		t.Fatalf("prompts = %q, want one naming the worktree to fix in and the failing output", prompts)
 	}
 	if len(origins) != 1 || !strings.HasPrefix(origins[0], "merge:") {
 		t.Fatalf("origins = %q, want a merge-shaped provenance", origins)

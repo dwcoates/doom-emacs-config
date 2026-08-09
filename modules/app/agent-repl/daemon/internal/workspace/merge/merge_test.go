@@ -1796,8 +1796,12 @@ func TestContinueAfterTestFixCommitsTheStagedFixAndFinishesTheRange(t *testing.T
 	if parent := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD^2^")); parent != headAfterPick {
 		t.Errorf("HEAD^2^ = %s, want the untouched replayed commit %s (the fix must not amend it)", parent, headAfterPick)
 	}
-	if body := gitRun(t, target, "log", "-1", "--pretty=%s", "HEAD^2"); !strings.Contains(body, "fix tests after rebasing "+first.FailingCommit) {
-		t.Errorf("follow-up commit subject = %q, want it to name the failing commit", body)
+	// AMENDED: the message used to name the failing SHA. It names the workspace
+	// now, by the ruling that no copy a human reads identifies a commit by sha —
+	// and a commit message is read in `git log` right beside the commit it fixes,
+	// which is where the sha it carried was least necessary of all.
+	if body := gitRun(t, target, "log", "-1", "--pretty=%s", "HEAD^2"); !strings.Contains(body, "fix tests after rebasing fix-ws") {
+		t.Errorf("follow-up commit subject = %q, want it to name the workspace being rebased", body)
 	}
 }
 
@@ -2834,11 +2838,14 @@ func TestTheTargetMovesOnlyAfterTheReGatePasses(t *testing.T) {
 	}
 }
 
-// The identity a repeated head-gate failure reports is the FIRST failure's, even
-// though the fix commit moved the head. merge.Coordinator keys its
-// one-attempt-per-failure accounting on it, and a fresh sha per attempt would
-// hand out an unbounded sequence of resolution turns.
-func TestARepeatedHeadGateFailureKeepsTheFirstFailuresIdentity(t *testing.T) {
+// AMENDED FROM TestARepeatedHeadGateFailureKeepsTheFirstFailuresIdentity, which
+// pinned the OPPOSITE: a re-gate had to report the FIRST failure's sha so that
+// merge.Coordinator's one-attempt-per-failure map could not be fooled by a moving
+// head. That rule is abolished — the remediation loop turns until the gate passes
+// or the agent escalates — so nothing keys on a stable identity any more, and
+// reporting a tree the suite did not run on would now simply be false. The new
+// contract is asserted at the same edge and with the same strength.
+func TestAReGateAfterAFixReportsTheHeadItActuallyJudged(t *testing.T) {
 	// Arrange — a suite that never passes, and an agent that commits something
 	// anyway (so the head genuinely moves between the two gates).
 	target := initTarget(t)
@@ -2870,11 +2877,15 @@ func TestARepeatedHeadGateFailureKeepsTheFirstFailuresIdentity(t *testing.T) {
 	if res.Outcome != OutcomeTestFailed {
 		t.Fatalf("ContinueAfterTestFix() outcome = %s, want test_failed", res.Outcome)
 	}
-	if head := strings.TrimSpace(gitRun(t, req.WorkDir, "rev-parse", "--short", "HEAD")); head == headBeforeFix {
+	head := strings.TrimSpace(gitRun(t, req.WorkDir, "rev-parse", "--short", "HEAD"))
+	if head == headBeforeFix {
 		t.Fatalf("the fix did not move the rebase worktree's head off %s, so the test proves nothing", headBeforeFix)
 	}
-	if res.FailingCommit != first.FailingCommit {
-		t.Fatalf("re-gate FailingCommit = %q, want the first failure's %q", res.FailingCommit, first.FailingCommit)
+	if res.FailingCommit != head {
+		t.Fatalf("re-gate FailingCommit = %q, want the head the suite ran on %q", res.FailingCommit, head)
+	}
+	if res.FailingSubject == "" {
+		t.Fatalf("re-gate FailingSubject is empty; every sentence about this failure names it")
 	}
 }
 
@@ -2931,4 +2942,300 @@ func countStatusArm(statuses []*frontendv1.MergeStatus, arm string) int {
 		}
 	}
 	return n
+}
+
+// --- the gate's selection across a re-entry -----------------------------
+
+// commitOnMain adds a file to the TARGET's main branch before any worktree is
+// cut, so both sides of a merge inherit it as a tracked file.
+func commitOnMain(t *testing.T, target, rel, content, subject string) {
+	t.Helper()
+	writeNested(t, target, rel, content)
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", subject)
+}
+
+// containsSuite reports whether suites names one.
+func containsSuite(suites []string, one string) bool {
+	for _, s := range suites {
+		if s == one {
+			return true
+		}
+	}
+	return false
+}
+
+// A FIX IS NOT BOUND BY THE SOURCE RANGE. The branch touches only the webapp, so
+// a selection made from the range alone runs no daemon suite — and the fix the
+// remediation turn commits is a daemon change, which would then land gated by
+// nothing that covers it.
+func TestTheReGateWidensTheSelectionToTheFixsOwnComponent(t *testing.T) {
+	// Arrange — a webapp-only branch whose head gate fails.
+	target := initTarget(t)
+	commitOnMain(t, target, "modules/app/agent-repl/daemon/main.go", "package main\n", "seed the daemon")
+	featureDir := addFeatureWorktree(t, target)
+	writeNested(t, featureDir, "modules/app/agent-repl/webapp/src/App.tsx", "export const x = 1\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "webapp only")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}, {Passed: false, Tail: "boom"}, {Passed: true}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/widen-fix", Name: "widen-fix", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	first, err := e.Merge(context.Background(), req)
+	if err != nil || first.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
+	}
+	if got := suite.runs[0].Suites; containsSuite(got, "daemon") {
+		t.Fatalf("the FIRST gate already selected the daemon suite (%v), so the widening this test is about would be invisible", got)
+	}
+	req = parkedAt(t, e, req, first)
+	// The remediation turn fixes a daemon file, which no replayed commit touches.
+	writeNested(t, req.WorkDir, "modules/app/agent-repl/daemon/main.go", "package main // fixed\n")
+
+	// Act.
+	res, err := e.ContinueAfterTestFix(context.Background(), req, first.FailingCommit)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ContinueAfterTestFix() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("ContinueAfterTestFix() outcome = %s, want merged", res.Outcome)
+	}
+	if got := suite.runs[len(suite.runs)-1].Suites; !containsSuite(got, "daemon") {
+		t.Fatalf("the re-gate ran suites %v, want the fix's own daemon suite among them", got)
+	}
+}
+
+// THE REGRESSION THIS PINS: Resume re-entered the replay with an EMPTY head
+// gate, so a resolution that edited a file outside the merge's own range was
+// gated by suites that cover none of it. The widening is derived from git on
+// every re-entry now, so the paths a resolution took reach the selection whether
+// the re-entry came through a test fix or through a resume.
+func TestAResumeWidensTheSelectionToWhatTheResolutionTouched(t *testing.T) {
+	// Arrange — a webapp-only branch parked on a webapp conflict.
+	target := initTarget(t)
+	commitOnMain(t, target, "modules/app/agent-repl/daemon/main.go", "package main\n", "seed the daemon")
+	commitOnMain(t, target, "modules/app/agent-repl/webapp/src/App.tsx", "export const x = 0\n", "seed the webapp")
+	featureDir := addFeatureWorktree(t, target)
+	writeNested(t, featureDir, "modules/app/agent-repl/webapp/src/App.tsx", "export const x = 1\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "webapp edit")
+	writeNested(t, target, "modules/app/agent-repl/webapp/src/App.tsx", "export const x = 2\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "target webapp edit")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/widen-resume", Name: "widen-resume", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	parked, err := e.Merge(context.Background(), req)
+	if err != nil || parked.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", parked, err)
+	}
+	req = parkedAt(t, e, req, parked)
+	// The resolution settles the webapp collision AND edits a daemon file, which
+	// no commit of the merge's range touches.
+	writeNested(t, req.WorkDir, "modules/app/agent-repl/webapp/src/App.tsx", "export const x = 3\n")
+	writeNested(t, req.WorkDir, "modules/app/agent-repl/daemon/main.go", "package main // resolved\n")
+
+	// Act.
+	res, err := e.Resume(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Resume() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("Resume() outcome = %s, want merged", res.Outcome)
+	}
+	if len(suite.runs) == 0 {
+		t.Fatalf("the resumed replay ran no gate at all")
+	}
+	if got := suite.runs[len(suite.runs)-1].Suites; !containsSuite(got, "daemon") {
+		t.Fatalf("the resumed gate ran suites %v, want the daemon suite the resolution's own edit needs", got)
+	}
+}
+
+// NOTHING LANDED MEANS NOTHING TO TESTIFY ABOUT. Every planned commit was
+// already on the rebased line by patch-id, so the tree the gate would judge is
+// the tree the target already carries — and a full suite run for a merge that
+// changes nothing is the merge's whole cost spent on nothing.
+func TestAMergeWhoseEveryPlannedPickWentEmptyRunsNoGate(t *testing.T) {
+	// Arrange — the target already carries the branch's change, committed
+	// separately so the SHAs differ and only the patch-id probe can see it.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature adds the file")
+	writeFile(t, target, "feature.txt", "hello\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "the target adds the same file")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/empty-ws", Name: "empty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged || !res.AlreadyIncorporated {
+		t.Fatalf("Merge() res = %+v, want a merged no-op", res)
+	}
+	if suite.calls != 0 {
+		t.Fatalf("suite runs = %d, want 0: nothing landed, so there is nothing for a suite to testify about", suite.calls)
+	}
+}
+
+// --- the remediation loop's escalation exit -----------------------------
+
+// The loop's only exit that is not a passing gate: the agent's own judgement.
+func TestAnEscalationRecordEndsTheRemediationWithTheAgentsExplanation(t *testing.T) {
+	// Arrange — a failed gate the agent answers with an escalation.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "broken\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/esc-ws", Name: "esc-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	first, err := e.Merge(context.Background(), req)
+	if err != nil || first.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
+	}
+	req = parkedAt(t, e, req, first)
+	writeFile(t, req.WorkDir, mergeEscalationFile,
+		mergeEscalationMarker+"\nthe suite assumes one writer per store; fixing it means moving the lease\n")
+	runsBefore := suite.calls
+
+	// Act.
+	res, err := e.ContinueAfterTestFix(context.Background(), req, first.FailingCommit)
+
+	// Assert — the agent's words come back, and no further suite ran.
+	if err != nil {
+		t.Fatalf("ContinueAfterTestFix() err = %v", err)
+	}
+	if res.Outcome != OutcomeTestFailed {
+		t.Fatalf("ContinueAfterTestFix() outcome = %s, want test_failed", res.Outcome)
+	}
+	if res.TestFailureEscalation != "the suite assumes one writer per store; fixing it means moving the lease" {
+		t.Fatalf("escalation = %q, want the agent's own explanation", res.TestFailureEscalation)
+	}
+	if suite.calls != runsBefore {
+		t.Fatalf("suite runs = %d, want no further run after an escalation (was %d)", suite.calls, runsBefore)
+	}
+}
+
+// The record is scratch, not work: it must never reach the fix commit, and it
+// must never survive to escalate a later turn that did not write it.
+func TestAnEscalationRecordIsRemovedFromTheRebaseWorktree(t *testing.T) {
+	// Arrange.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "broken\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/esc-rm", Name: "esc-rm", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	first, err := e.Merge(context.Background(), req)
+	if err != nil || first.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
+	}
+	req = parkedAt(t, e, req, first)
+	writeFile(t, req.WorkDir, mergeEscalationFile, mergeEscalationMarker+"\nneeds a redesign\n")
+
+	// Act.
+	if _, err := e.ContinueAfterTestFix(context.Background(), req, first.FailingCommit); err != nil {
+		t.Fatalf("ContinueAfterTestFix() err = %v", err)
+	}
+
+	// Assert.
+	if _, statErr := os.Stat(filepath.Join(req.WorkDir, mergeEscalationFile)); !os.IsNotExist(statErr) {
+		t.Fatalf("the escalation record is still in the rebase worktree (stat err = %v)", statErr)
+	}
+}
+
+// A FILE WITHOUT THE MARKER IS NOT AN ESCALATION. Anything else would let a
+// scratch file an agent happened to leave behind terminate somebody's merge.
+func TestAFileWithoutTheMarkerIsNotAnEscalation(t *testing.T) {
+	// Arrange.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "broken\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}, {Passed: false, Tail: "boom"}, {Passed: true}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/esc-bad", Name: "esc-bad", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	first, err := e.Merge(context.Background(), req)
+	if err != nil || first.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
+	}
+	req = parkedAt(t, e, req, first)
+	writeFile(t, req.WorkDir, mergeEscalationFile, "I am just a note\n")
+	writeFile(t, req.WorkDir, "feature.txt", "fixed\n")
+
+	// Act.
+	res, err := e.ContinueAfterTestFix(context.Background(), req, first.FailingCommit)
+
+	// Assert — the merge went on as one more iteration.
+	if err != nil {
+		t.Fatalf("ContinueAfterTestFix() err = %v", err)
+	}
+	if res.TestFailureEscalation != "" {
+		t.Fatalf("escalation = %q, want none: the file does not open with the marker", res.TestFailureEscalation)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("ContinueAfterTestFix() outcome = %s, want merged (the re-gate passed)", res.Outcome)
+	}
+}
+
+// --- the copy a user reads ----------------------------------------------
+
+// NO SHA APPEARS IN ANY PUBLISHED CAUSE. The shas ride the status's own sha
+// fields, where a tool reads them; every sentence names the commit's subject.
+func TestNoPublishedCauseNamesASha(t *testing.T) {
+	// Arrange — a merge that picks a commit and then fails its gate, so both the
+	// picking and the testing prose are on the wire.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "broken\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/nosha-ws", Name: "nosha-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err != nil || res.Outcome != OutcomeTestFailed {
+		t.Fatalf("Merge() res=%+v err=%v, want test_failed", res, err)
+	}
+	picked := strings.TrimSpace(gitRun(t, featureDir, "rev-parse", "--short=7", "HEAD"))
+	for _, cause := range sink.causes() {
+		for _, sha := range []string{res.FailingCommit, picked} {
+			if strings.Contains(cause, sha) {
+				t.Errorf("published cause %q names the sha %s; the copy a user reads names subjects", cause, sha)
+			}
+		}
+	}
 }
