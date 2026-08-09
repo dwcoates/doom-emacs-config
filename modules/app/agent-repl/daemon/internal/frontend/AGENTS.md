@@ -50,6 +50,50 @@ A lane's queue is unbounded on purpose — every frame in it has already been
 read off the socket and owes the client an answer — and closing a connection
 DRAINS its lanes before disconnecting, for the same reason.
 
+## Acks leave on a control lane, and the alarm measures the drain
+
+A `CommandAck` used to share one FIFO with every bulk push. At connect that
+lane holds the whole snapshot — 104 workspaces in the observed case — so an ack
+the daemon produced in ~12ms reached Emacs ~15s later. The client's 10s
+deadline fired first, opening a `client.command_unacked` failure card and a
+degraded-link verdict for a command that had SUCCEEDED; the late ack then
+healed it, which is why the class read as flaky rather than as one mechanism.
+The same signature appeared on `open_workspace`, `submit_prompt` and
+`publish_workspace_roster`.
+
+Each outbox now has TWO lanes and drains the control one first. The bulk lane
+keeps every property described below verbatim — push order, compaction keeping
+the newest occurrence's position, snapshot-before-delta. The control lane
+carries ONLY correlated, request-keyed replies: a command's `CommandAck` and the
+one response frame a command may produce. Those are matched by `request_id`,
+never applied as state, and no frontend derives anything from where they sit
+relative to a push, so the FIFO's load-bearing property does not extend to them.
+Within the control lane order is still push order, which is what keeps a health
+view ahead of the ack that completes it.
+
+ONE ordering pair is preserved explicitly. A `resync`'s ack still travels the
+BULK lane, behind the snapshot the resync enqueued: the resync's answer IS the
+snapshot, an ok=true ack arriving first would report the client current while it
+still held the state it asked to replace, and the snapshot cannot join the
+control lane without overtaking the deltas queued before it. Resync is the only
+command that enqueues a bulk frame of its own.
+
+Both lanes share ONE set of bounds. Soft, hard and grace are judged over the
+combined depth, so the memory ceiling and the slow-consumer eviction are exactly
+as strict as they were, and a control frame is refused at the ceiling like any
+other. What changed is that a refused, stranded or unwritable frame now reports
+itself UNDELIVERED to whoever queued it, rather than vanishing.
+
+The daemon's slow-ack alarm was measuring the wrong interval: it stopped at the
+ack's ENQUEUE, so the dominant term — the drain — was invisible to the exact
+alarm built to catch it. A latency sample now carries both numbers. `Enqueue` is
+receipt through ack hand-off (the daemon's own share); `Delivery` is receipt
+through those bytes reaching the socket, which is what the client's deadline
+measures. `Slow()` judges `Delivery`, and the record is written by whichever of
+the two halves — dispatch finishing, ack delivery — completes second. Reading
+them together names the fault: a small `enqueue_ms` under a large `duration_ms`
+is the outbound queue, not the handler.
+
 ## A saturated queue is compacted before the connection is given up on
 
 Each connection's outbound queue is bounded. A hidden or backgrounded webview
