@@ -34,6 +34,10 @@ import {
   expandedKeys,
   sectionsIn,
 } from "./expand.js";
+import { AsyncBubbleForCall, type AsyncRenderContext } from "./async-render.js";
+import type { AsyncBubbleRegistry } from "./async-routing.js";
+import { Fold, capLabel } from "./fold.js";
+import { asyncAgentItems } from "./state-adapter.js";
 import { animatedEllipsis, escapeHtml, highlightCode, languageForPath } from "./highlight.js";
 import { partitionFeed } from "./partition.js";
 import {
@@ -843,6 +847,14 @@ export interface PanelContext {
    * ancestor's own id renders no fold (see `mayNest`).
    */
   seenSources?: ReadonlySet<string>;
+  /**
+   * The DETACHED WORK registry — every open `AsyncBubble`, keyed by id.
+   *
+   * A tool card draws the bubble its own `spawnedBubbleId` NAMES, matched
+   * here; it never derives one. Absent leaves cards drawing no bubbles at
+   * all, which is what a page that has received no async push should show.
+   */
+  asyncBubbles?: AsyncBubbleRegistry;
 }
 
 /** True when the child renders something the panel and ticker count. */
@@ -912,11 +924,6 @@ function memberCtx(panels?: PanelContext): MemberContext {
     children: (id) => (panels?.children.get(id) ?? []).filter(visibleChild),
     taskTail: (id) => panels?.taskTail?.(id),
   };
-}
-
-/** The one truncation rule every face label wears. */
-function capLabel(label: string, max: number): string {
-  return label.length > max ? `${label.slice(0, max - 1)}…` : label;
 }
 
 /**
@@ -996,37 +1003,9 @@ export function activityTicker(children: readonly ConversationItem[]): string {
  * renderItem the top level uses — exists in the HTML only while the
  * card is open, so a hundred buffered children cost nothing while
  * closed. Open state lives in the RENDERER (like question selections),
- * because the fold must survive the card's own re-renders.
+ * because the fold must survive the card's own re-renders. The fold skeleton
+ * it renders through lives in `fold.ts`, shared with the async-bubble surface.
  */
-/**
- * The shared skeleton of a click-to-open fold: a pill ticker as the
- * collapsed face and a panel body that exists in the HTML only while open,
- * with open state carried on the wrapper's class and a `data-panel-toggle`
- * the FeedRenderer's delegated handler flips. The activity fold on a
- * spawning card (ActivitySection) and the watcher fold on a final-response
- * bubble (WatcherPanel) both render through this, differing only in their
- * classes, ticker face, and body.
- *
- * BODY is a thunk, not a string: it is called only when the fold is open,
- * so a hundred buffered children (or watcher tails) cost nothing to render
- * while the fold stays closed.
- */
-function Fold(opts: {
-  id: string;
-  foldClass: string;
-  tickerClass: string;
-  ticker: string;
-  body: () => string;
-  open: boolean;
-}): string {
-  const panel = opts.open ? `<div class="agent-panel">${opts.body()}</div>` : "";
-  return `<div class="${opts.foldClass}${opts.open ? " open" : ""}" data-panel-toggle="${escapeHtml(opts.id)}">
-      <div class="${opts.tickerClass}">${opts.ticker} <span class="agent-caret" aria-hidden="true">${
-        opts.open ? "▴" : "▾"
-      }</span></div>${panel}
-    </div>`;
-}
-
 /**
  * The shared body of every fold panel: children rendered through the
  * very renderItem the top level uses, each in its .feed-child shell —
@@ -1101,7 +1080,45 @@ function ToolCard(
       ${tabBar}
       <div class="tool-head"><span class="tool-name">${escapeHtml(item.toolName)}</span>${status}${permBadge}${faceSide(member)}</div>
       ${cardContent(item, { item, member, progress, panels })}
+      ${asyncBubbleForCard(item, panels)}
     </div>`;
+}
+
+/**
+ * The `AsyncBubble` this card's call detached, drawn attached to the card that
+ * launched it.
+ *
+ * The attachment is a MATCH on the daemon's classification verdict and nothing
+ * else: `AgentToolCall.spawned_bubble_id` names the bubble, and an absent or
+ * empty verdict means the call detached nothing — never a prompt to go find a
+ * plausible candidate. A card with no registry to match against draws nothing,
+ * which is the honest state of a page that has received no async push.
+ */
+function asyncBubbleForCard(item: ToolItem, panels?: PanelContext): string {
+  const registry = panels?.asyncBubbles;
+  if (registry === undefined) return "";
+  return AsyncBubbleForCall(item.spawnedBubbleId, asyncRenderContext(registry, panels));
+}
+
+/**
+ * The async renderer's context, wired to THIS renderer's own item renderer.
+ *
+ * `renderEmissions` decomposes a detached agent's emissions with the adapter's
+ * one decomposition and draws the result with `feedChildren` — literally the
+ * function the top-level feed nests everything through. That is what makes "a
+ * renderer written for the main feed renders a detached agent unchanged" a
+ * fact about this code rather than a claim in a proto comment.
+ */
+function asyncRenderContext(registry: AsyncBubbleRegistry, panels?: PanelContext): AsyncRenderContext {
+  return {
+    registry,
+    isOpen: (id) => panels?.isOpen(id) ?? false,
+    renderEmissions: (emissions, bubbleId) => {
+      const bubble = registry.get(bubbleId);
+      const built = asyncAgentItems(emissions, bubbleId, bubble?.startedAtMs ?? 0);
+      return feedChildren(built.items, panels);
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

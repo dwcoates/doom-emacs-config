@@ -50,6 +50,7 @@
  * distinct shape name. They are never crashed on and never silently dropped.
  */
 
+import type { UnwrappedEmission } from "./agent-emission.js";
 import type { AsyncBubble, AsyncBubbleDelta } from "./async-bubble.js";
 import type { CounterEntry, CounterStatus } from "./counter-menu.js";
 import type { ContentBlock, ModelInfo, ModelUsage, ResultSubtype, Usage } from "./protocol.js";
@@ -1180,6 +1181,63 @@ function taskEntryToCounter(t: TaskEntry): CounterEntry {
 //   the typed payloads and are left unset.
 
 type Obj = Record<string, unknown>;
+
+/**
+ * A DETACHED AGENT'S emissions, decomposed into the very store items the
+ * top-level feed renders.
+ *
+ * This is the payoff of `AgentEmission` being one message rather than two. A
+ * detached agent is not a second, weaker kind of conversation — it is the same
+ * conversation happening somewhere else — so its output goes through exactly
+ * this decomposition and comes out as `TextItem`s, `ThinkingItem`s and
+ * `ToolItem`s indistinguishable from the feed's own. There is deliberately no
+ * bubble-specific decomposition beside this one to drift from it.
+ *
+ * The feed PACKAGING an emission lacks is synthesized here, and only here:
+ *
+ * - the uuid is scoped to the bubble and the emission's position in its fold,
+ *   because `AgentEmission` carries no identity of its own (by design — see
+ *   agent-emission.proto) and two bubbles' emissions must never collide on a
+ *   store or DOM key;
+ * - the timestamp is the BUBBLE's launch stamp, the only time this end
+ *   honestly knows about the work;
+ * - the source is USER, because a detached agent is work the user's turn
+ *   dispatched. It is never UNSPECIFIED, which is the malformed-frame value.
+ *
+ * An emission with no webapp visual takes the same explicit-ignore path the
+ * feed's does; the shapes are returned rather than counted here, since the
+ * counting lives on the adapter instance.
+ */
+export function asyncAgentItems(
+  emissions: readonly UnwrappedEmission[],
+  bubbleId: string,
+  startedAtMs: number,
+): { items: ConversationItem[]; ignores: string[] } {
+  const items: ConversationItem[] = [];
+  const ignores: string[] = [];
+  emissions.forEach((emission, index) => {
+    const frame: ConversationItemFrame = {
+      uuid: `${bubbleId}#${index}`,
+      tsMs: startedAtMs,
+      requestId: "",
+      source: ConversationSource.USER,
+      arm: emission.arm,
+      payload: emission.payload,
+      tokenUtilization: [],
+    };
+    if (emission.thinkingOrigin !== undefined) frame.thinkingOrigin = emission.thinkingOrigin;
+    // A detached agent dispatches detached agents, so its own tool calls carry
+    // verdicts too — carried through so a nested bubble attaches to the card
+    // inside the bubble that spawned it.
+    if (emission.spawnedBubbleId !== undefined && emission.spawnedBubbleId !== "") {
+      frame.spawnedBubbleId = emission.spawnedBubbleId;
+    }
+    const built = itemsFromFrame(frame);
+    items.push(...built.items);
+    ignores.push(...built.ignores);
+  });
+  return { items, ignores };
+}
 
 /** Decompose one decoded conversation item into store items + ignore shapes. */
 function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem[]; ignores: string[] } {
