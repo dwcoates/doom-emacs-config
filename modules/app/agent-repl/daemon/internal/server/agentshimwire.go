@@ -563,6 +563,18 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		coordinator.Close()
 		return nil, fmt.Errorf("server: drain merge queue: %w", err)
 	}
+	// THE FILESYSTEM HALF OF THE SAME BOOT RECONCILIATION. Drain sweeps merge
+	// PHASES no live run can advance; this sweeps the rebase worktree
+	// DIRECTORIES no live run owns — the temp trees a daemon killed mid-merge
+	// left in $TMPDIR, which nothing else ever looks at again. It runs AFTER
+	// Drain so the merges this boot replays are already registered as live and
+	// their trees are retained rather than swept.
+	//
+	// IT NEVER FAILS THE BOOT. A directory that would not delete is a leak, not
+	// a reason to refuse to start, so it is loud-logged and the daemon comes up.
+	if err := driver.SweepOrphanRebaseWorktrees(context.Background(), coordinator.RetainedRebaseWorktrees()); err != nil {
+		logf("server: orphaned rebase worktree sweep reported failures: %v — the leftovers it could not remove are left for a human; the daemon starts either way", err)
+	}
 
 	handler, err := newCommandHandler(
 		cfg.Prompts, coordinator,
