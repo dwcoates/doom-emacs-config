@@ -108,16 +108,35 @@ merge; it is loud-logged and nothing more.
 **AND WHAT A DEAD DAEMON LEFT IS SWEPT AT BOOT** (`rebasesweep.go`). A temp
 worktree dies with its process in every sense except the bytes, and the
 per-merge prune only ever sees what is still REGISTERED against its own target.
-`merge.Driver.SweepOrphanRebaseWorktrees` walks `$TMPDIR` once at boot, removes
-every `agent-repl-merge-rebase-*` directory the retention set does not name, and
-prunes the repositories they belonged to — read off each orphan's own linked
-worktree `.git` file, so a boot with an empty queue still clears a repository's
-accumulated registrations. It logs ONE summary line: a sweep of hundreds that
-says a line per directory is a sweep nobody reads. The retention set is
-`merge.Coordinator.RetainedRebaseWorktrees` — the trees live merges are working
-in, above all a CONFLICT-PARKED one, whose tree is the resolution's workbench.
-It is not derivable from the durable records, which deliberately carry no temp
-worktree at all. The sweep never fails the boot.
+`merge.Driver.SweepOrphanRebaseWorktrees` walks the driver's REBASE ROOT once at
+boot, removes every `agent-repl-merge-rebase-*` directory the retention set does
+not name, and prunes the repositories they belonged to — read off each orphan's
+own linked worktree `.git` file, so a boot with an empty queue still clears a
+repository's accumulated registrations. It logs ONE summary line: a sweep of
+hundreds that says a line per directory is a sweep nobody reads. The retention
+set is `merge.Coordinator.RetainedRebaseWorktrees` — the trees live merges are
+working in, above all a CONFLICT-PARKED one, whose tree is the resolution's
+workbench. It is not derivable from the durable records, which deliberately
+carry no temp worktree at all. The sweep never fails the boot.
+
+- THE ROOT IS INJECTED AND REQUIRED (`Config.RebaseRoot`, threaded from
+  `server.AgentShimConfig.RebaseRoot`, which `main` sets to the process temp
+  dir). `createRebaseWorktree` makes its parents under the SAME field, so what
+  the pipeline creates and what the sweep scans cannot diverge. It used to be
+  `os.TempDir()` resolved at sweep time, and that made a catastrophe
+  representable: any TEST that reached the sweep — the `internal/server` boot
+  wiring tests above all — swept the REAL temp dir with a TEST coordinator's
+  retention set and deleted the LIVE daemon's rebase worktrees, including the
+  tree a merge gate's own `go test ./...` was running inside (the suite lost its
+  package source mid-run, the entrypoint exited 127, the flake re-run could not
+  resolve the toplevel, and the workspace fell out `merge_failed`). An empty
+  root is a construction error at BOTH layers; every test passes `t.TempDir()`.
+- AND THE `.git` FILE IS CHECKED BEFORE THE REMOVAL, not merely read for the
+  prune: a leftover naming a repository outside `SweepScope.Repos` (the
+  coordinator's `ManagedRepos`, plus the repositories the retained trees vouch
+  for) is KEPT and counted `kept_unknown_repo` in the summary. Keeping a
+  directory too many leaks bytes; removing another daemon's live tree destroys a
+  running merge.
 
 **THE REBASE WORKTREE TRAVELS ON `Request.WorkDir` / `Request.BaseHead`**, set
 by `Merge` on the `Result` and echoed back by `merge.Coordinator` into `Resume`,
