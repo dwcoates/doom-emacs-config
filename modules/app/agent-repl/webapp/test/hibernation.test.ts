@@ -10,9 +10,11 @@ import { describe, expect, it } from "vitest";
 
 import type { HibernationDetail } from "../src/frontend-proto.js";
 import type { AdapterEffect } from "../src/state-adapter.js";
+import type { RevivalGateInput } from "../src/hibernation.js";
 import {
   HIBERNATED_BODY_CLASS,
   HIBERNATION_COMPOSER_NOTICE,
+  REVIVAL_CONTEXT_UNKNOWN_TEXT,
   REVIVAL_GATE_HEADING,
   REVIVE_ATTR,
   REVIVE_CLEAR_EXPLANATION,
@@ -31,6 +33,7 @@ import {
   hibernationNoticeHtml,
   hibernationSendTitle,
   reviveDirectWarning,
+  revivalContextSizeText,
   revivalGateHtml,
   revivePendingText,
   reviveFailedLog,
@@ -53,6 +56,20 @@ function forced(): HibernationDetail {
 /** Asleep because the cache went cold before a ping could fire. */
 function cacheExpired(elapsedMs = 4 * HOUR, ttlMs = HOUR): HibernationDetail {
   return { sinceMs: NOW - HOUR, cause: { case: "cacheExpired", value: { elapsedMs, ttlMs } } };
+}
+
+/** A standing context size the daemon has reported, for the ordinary case. */
+const CONTEXT_TOKENS = 128_500;
+
+/**
+ * The gate at a fixed clock and a known context size, so every test that is
+ * about something ELSE says only the thing it is about.
+ */
+function gate(
+  hibernation: HibernationDetail | null,
+  overrides: Partial<Omit<RevivalGateInput, "hibernation">> = {},
+): string {
+  return revivalGateHtml({ hibernation, contextTokens: CONTEXT_TOKENS, now: NOW, ...overrides });
 }
 
 /**
@@ -150,74 +167,130 @@ describe("reviveDirectWarning: what resuming as-is costs", () => {
   });
 });
 
+describe("revivalContextSizeText: how big the decision is", () => {
+  it("states the session's input tokens, so the trade has a size", () => {
+    // Arrange / Act / Assert — "the whole accumulated context" reads the same
+    // at 12k and at 400k, and those two sessions have opposite right answers.
+    expect(revivalContextSizeText(128_500)).toContain("128,500 input tokens");
+  });
+
+  it("counts cached and uncached input as one figure", () => {
+    // Arrange / Act / Assert — a resumed turn re-presents the whole standing
+    // prefix, and which bucket it bills to is a fact about the cache, not
+    // about the size of the conversation.
+    expect(revivalContextSizeText(128_500)).toContain("cached and uncached together");
+  });
+
+  it("says the tokens are re-ingested when the compaction is foregone", () => {
+    // Arrange / Act / Assert — the figure is on the card to price that choice.
+    expect(revivalContextSizeText(128_500)).toContain("re-ingests them");
+  });
+
+  it("reports an unmeasured session as unknown rather than as zero", () => {
+    // Arrange / Act / Assert — a printed `0 input tokens` would recommend a
+    // direct resume on exactly the evidence the gate does not have.
+    expect(revivalContextSizeText(null)).toBe(REVIVAL_CONTEXT_UNKNOWN_TEXT);
+  });
+
+  it("never prints a token figure it was not given", () => {
+    // Arrange / Act / Assert
+    expect(revivalContextSizeText(null)).not.toContain("input tokens of context");
+  });
+});
+
 describe("revivalGateHtml: the blocking card", () => {
   it("renders nothing for an awake session", () => {
     // Arrange / Act / Assert — an awake session pays no layout for a gate.
-    expect(revivalGateHtml(null)).toBe("");
+    expect(gate(null)).toBe("");
   });
 
   it("leads with a heading that names the state without prose", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(REVIVAL_GATE_HEADING);
+    expect(gate(forced())).toContain(REVIVAL_GATE_HEADING);
   });
 
   it("carries the idle-cutoff cause into the card", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(idleCutoff(), null, NOW)).toContain("reclaim its memory");
+    expect(gate(idleCutoff())).toContain("reclaim its memory");
   });
 
   it("carries the forced cause into the card", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), null, NOW)).toContain("You put this session to sleep.");
+    expect(gate(forced())).toContain("You put this session to sleep.");
   });
 
   it("carries the cache-expired cause into the card", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(cacheExpired(), null, NOW)).toContain("prompt cache expired");
+    expect(gate(cacheExpired())).toContain("prompt cache expired");
   });
 
   it("marks the card with its cause, so the styling can differ per reason", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(cacheExpired(), null, NOW)).toContain("cause-cacheExpired");
+    expect(gate(cacheExpired())).toContain("cause-cacheExpired");
+  });
+
+  it("states the session's token count on the card", () => {
+    // Arrange / Act / Assert — the size of what a foregone compaction
+    // re-ingests is the fact the whole decision turns on.
+    expect(gate(forced())).toContain(revivalContextSizeText(CONTEXT_TOKENS));
+  });
+
+  it("gives the token count its own row, so it is not buried in the cause", () => {
+    // Arrange / Act / Assert
+    expect(gate(forced())).toContain('class="hibernation-context"');
+  });
+
+  it("says the size is unknown when the daemon reported no total", () => {
+    // Arrange / Act / Assert — the row still renders: silence about the size
+    // would read as a session that has none.
+    expect(gate(forced(), { contextTokens: null })).toContain(REVIVAL_CONTEXT_UNKNOWN_TEXT);
+  });
+
+  it("keeps the token count visible while a decision is in flight", () => {
+    // Arrange — the buttons are replaced by the pending line, but the figure
+    // is what the user is watching the wake-up spend.
+    const got = gate(forced(), { pending: "direct" });
+    // Act / Assert
+    expect(got).toContain(revivalContextSizeText(CONTEXT_TOKENS));
   });
 
   it("offers the compact-everything action", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(`${REVIVE_ATTR}="compactAll"`);
+    expect(gate(forced())).toContain(`${REVIVE_ATTR}="compactAll"`);
   });
 
   it("offers the responses-only compaction", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(`${REVIVE_ATTR}="compactResponses"`);
+    expect(gate(forced())).toContain(`${REVIVE_ATTR}="compactResponses"`);
   });
 
   it("offers the prompts-only compaction", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(`${REVIVE_ATTR}="compactPrompts"`);
+    expect(gate(forced())).toContain(`${REVIVE_ATTR}="compactPrompts"`);
   });
 
   it("offers the prompts-and-responses compaction", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(
+    expect(gate(forced())).toContain(
       `${REVIVE_ATTR}="compactPromptsAndResponses"`,
     );
   });
 
   it("offers the resume-as-is action", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(`${REVIVE_ATTR}="direct"`);
+    expect(gate(forced())).toContain(`${REVIVE_ATTR}="direct"`);
   });
 
   it("offers the clear action", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(`${REVIVE_ATTR}="clear"`);
+    expect(gate(forced())).toContain(`${REVIVE_ATTR}="clear"`);
   });
 
   it("offers exactly the revival decisions and nothing else", () => {
     // Arrange — no dismiss: the gate is a pure function of daemon state, so a
     // dismissed gate would reappear having taught the user the block is
     // optional. And a hibernated session has nothing to cancel back to.
-    const buttons = revivalGateHtml(forced(), null, NOW).match(/<button/g) ?? [];
+    const buttons = gate(forced()).match(/<button/g) ?? [];
     // Act / Assert
     expect(buttons).toHaveLength(reviveOptions(forced()).length);
   });
@@ -225,35 +298,35 @@ describe("revivalGateHtml: the blocking card", () => {
   it("explains that clearing discards the conversation", () => {
     // Arrange / Act / Assert — it sits one click from four options that all
     // keep something, so the sentence has to say that this one does not.
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(REVIVE_CLEAR_EXPLANATION);
+    expect(gate(forced())).toContain(REVIVE_CLEAR_EXPLANATION);
   });
 
   it("explains what a responses-only compaction keeps", () => {
     // Arrange / Act / Assert — the option is a decision about what is LOST, so
     // an unexplained button would be a blind one.
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(REVIVE_COMPACT_RESPONSES_EXPLANATION);
+    expect(gate(forced())).toContain(REVIVE_COMPACT_RESPONSES_EXPLANATION);
   });
 
   it("explains what a prompts-only compaction keeps", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(REVIVE_COMPACT_PROMPTS_EXPLANATION);
+    expect(gate(forced())).toContain(REVIVE_COMPACT_PROMPTS_EXPLANATION);
   });
 
   it("explains what a prompts-and-responses compaction keeps", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(
+    expect(gate(forced())).toContain(
       REVIVE_COMPACT_PROMPTS_AND_RESPONSES_EXPLANATION,
     );
   });
 
   it("explains what compacting first buys", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(REVIVE_COMPACT_EXPLANATION);
+    expect(gate(forced())).toContain(REVIVE_COMPACT_EXPLANATION);
   });
 
   it("ages the sleep from the daemon's own since stamp", () => {
     // Arrange / Act
-    const got = revivalGateHtml(forced(), null, NOW);
+    const got = gate(forced());
     // Assert
     expect(got).toContain("asleep for 1h");
   });
@@ -261,14 +334,14 @@ describe("revivalGateHtml: the blocking card", () => {
   it("omits the age when the daemon stamped no since time", () => {
     // Arrange — a zero would render as decades, which is fabricated, not
     // missing.
-    const got = revivalGateHtml({ sinceMs: 0, cause: { case: "forced", value: {} } }, null, NOW);
+    const got = gate({ sinceMs: 0, cause: { case: "forced", value: {} } });
     // Act / Assert
     expect(got).not.toContain("asleep for");
   });
 
   it("replaces the buttons with a pending line once clear is sent", () => {
     // Arrange / Act
-    const got = revivalGateHtml(forced(), "clear", NOW);
+    const got = gate(forced(), { pending: "clear" });
     // Assert — the destructive option must not stay one click away while the
     // decision that produced it is still in flight.
     expect(got).not.toContain("<button");
@@ -277,12 +350,12 @@ describe("revivalGateHtml: the blocking card", () => {
   it("gives clear its own button class, so it is not styled as the cheap path", () => {
     // Arrange / Act / Assert — the filled `hibernation-compact` style reads as
     // the recommended option, which the one unrecoverable choice must not.
-    expect(revivalGateHtml(forced(), null, NOW)).toContain('class="hibernation-clear"');
+    expect(gate(forced())).toContain('class="hibernation-clear"');
   });
 
   it("replaces the buttons with a pending line once compact-first is sent", () => {
     // Arrange / Act
-    const got = revivalGateHtml(forced(), "compactAll", NOW);
+    const got = gate(forced(), { pending: "compactAll" });
     // Assert — greying them would leave the other mode one click away while
     // the first decision is still in flight.
     expect(got).not.toContain("<button");
@@ -290,7 +363,7 @@ describe("revivalGateHtml: the blocking card", () => {
 
   it("reports which decision is in flight", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), "direct", NOW)).toContain(revivePendingText("direct"));
+    expect(gate(forced(), { pending: "direct" })).toContain(revivePendingText("direct"));
   });
 });
 
@@ -555,28 +628,28 @@ describe("reviveFailedLog: the record of an accepted revival that did not take",
 describe("the gate's failed-revival line", () => {
   it("renders the failure above the cause when one is supplied", () => {
     // Arrange / Act
-    const got = revivalGateHtml(forced(), null, NOW, REVIVE_FAILED_TEXT);
+    const got = gate(forced(), { failure: REVIVE_FAILED_TEXT });
     // Assert
     expect(got).toContain("hibernation-failed");
   });
 
   it("keeps the buttons on offer beside the failure, since choosing again is the exit", () => {
     // Arrange / Act
-    const got = revivalGateHtml(forced(), null, NOW, REVIVE_FAILED_TEXT);
+    const got = gate(forced(), { failure: REVIVE_FAILED_TEXT });
     // Assert
     expect(got).toContain(`${REVIVE_ATTR}="compactAll"`);
   });
 
   it("draws no failure line when there is nothing to report", () => {
     // Arrange / Act
-    const got = revivalGateHtml(forced(), null, NOW);
+    const got = gate(forced());
     // Assert
     expect(got).not.toContain("hibernation-failed");
   });
 
   it("escapes the failure line rather than trusting it as markup", () => {
     // Arrange / Act
-    const got = revivalGateHtml(forced(), null, NOW, "<script>x</script>");
+    const got = gate(forced(), { failure: "<script>x</script>" });
     // Assert
     expect(got).not.toContain("<script");
   });
@@ -593,7 +666,7 @@ describe("escaping", () => {
   it("escapes the cause prose rather than trusting it as markup", () => {
     // Arrange — every figure in the prose is daemon-supplied, so the whole
     // line goes through the escaper on principle.
-    const got = revivalGateHtml(idleCutoff(HOUR), null, NOW);
+    const got = gate(idleCutoff(HOUR));
     // Act / Assert
     expect(got).not.toContain("<script");
   });
