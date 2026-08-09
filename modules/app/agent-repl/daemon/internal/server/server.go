@@ -1846,6 +1846,15 @@ func (s *Server) runIdleSweeper() {
 // shorter than the ping window that was the ordinary case, not a corner.
 func (s *Server) sweepIdle() {
 	nowMs := s.now().UnixMilli()
+	// THE PING'S FAILURE BOUND IS EVALUATED BEFORE THE POLICY THAT SUBMITS ONE,
+	// and the order is the point. A ping whose end was lost holds a claim that
+	// declines every later ping, parks real prompts behind it, and reads as a
+	// live turn to the hibernation lease this very sweep is about to ask for —
+	// so a sweep that submitted first would spend the whole walk being refused by
+	// a turn that finished hours ago. See keepalivedeadline.go.
+	if s.controller != nil {
+		s.controller.SweepOverdueKeepAlivePings()
+	}
 	for _, rec := range s.registry.All() {
 		// THE SWEEP ABANDONS ITS REMAINDER ONCE SHUTDOWN HAS BEGUN, and this is
 		// what bounds ShutdownAll's join on sweeperDone. A sweep is a serial walk

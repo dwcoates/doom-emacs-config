@@ -56,6 +56,9 @@ type fakePrompts struct {
 	promptRequestIDs []string
 	promptOrigins    []corev1.PromptOrigin
 	interrupts       []string
+	// interruptRequestIDs records the command id each stop was carried under, so
+	// a test can prove the frontend's own id reaches the session controller.
+	interruptRequestIDs []string
 	perms            []string
 	models           []string
 	err              error
@@ -148,8 +151,9 @@ func (f *fakePrompts) SubmitPrompt(_ context.Context, ws, requestID, text, _ str
 	f.promptOrigins = append(f.promptOrigins, promptOrigin)
 	return f.err
 }
-func (f *fakePrompts) Interrupt(_ context.Context, ws string) error {
+func (f *fakePrompts) Interrupt(_ context.Context, ws, requestID string) error {
 	f.interrupts = append(f.interrupts, ws)
+	f.interruptRequestIDs = append(f.interruptRequestIDs, requestID)
 	return f.err
 }
 func (f *fakePrompts) AnswerPermission(_ context.Context, _, permReqID string, _ bool, _ string, _ *structpb.Struct) error {

@@ -179,6 +179,13 @@ type fakeClient struct {
 	// INTERRUPTED, so a test that does not care about the outcome gets the
 	// ordinary successful stop.
 	interruptOutcome corev1.InterruptOutcome
+	// interruptOrigins records who ORDERED each stop, in that caller's own
+	// vocabulary, so a test can prove the correlation reaches the wire.
+	interruptOrigins []string
+	// interruptErr, when non-nil, is what the interrupt fails with — an
+	// unreachable shim, a nack, or an ack that never came. It is the fake's
+	// stand-in for every route by which a stop cannot be delivered at all.
+	interruptErr error
 	// notReady, when non-nil, blocks AwaitReady until it is closed — the
 	// fake's stand-in for a shim that has not finished handshaking yet. Nil
 	// (the default) means the connection is already usable, so tests that do
@@ -300,12 +307,19 @@ func (c *fakeClient) UnpinAccountingTurn(turnIDs ...string) {
 	c.unpinned = append(c.unpinned, turnIDs...)
 }
 
-func (c *fakeClient) Interrupt(_ context.Context) (corev1.InterruptOutcome, error) {
+func (c *fakeClient) Interrupt(_ context.Context, originRequestID string) (corev1.InterruptOutcome, error) {
+	c.mu.Lock()
+	c.interruptOrigins = append(c.interruptOrigins, originRequestID)
+	c.mu.Unlock()
 	c.mu.Lock()
 	c.interrupts++
 	outcome := c.interruptOutcome
+	failure := c.interruptErr
 	c.mu.Unlock()
 	notifyTestActivity()
+	if failure != nil {
+		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, failure
+	}
 	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED {
 		outcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED
 	}
@@ -812,7 +826,7 @@ func TestResumedSessionPromptsAreForwardedVerbatim(t *testing.T) {
 
 func TestInterruptRequiresLiveSession(t *testing.T) {
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{}}, &fakeSpawner{})
-	if err := m.Interrupt(context.Background(), "ws"); err == nil {
+	if err := m.Interrupt(context.Background(), "ws", "fe-1"); err == nil {
 		t.Fatal("interrupt with no live session must error")
 	}
 }
@@ -832,7 +846,7 @@ func TestInterruptReportsNoErrorWhenTheTurnWasStopped(t *testing.T) {
 	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED
 
 	// Act.
-	err := m.Interrupt(context.Background(), "ws")
+	err := m.Interrupt(context.Background(), "ws", "fe-1")
 
 	// Assert.
 	if err != nil {
@@ -850,7 +864,7 @@ func TestInterruptReportsNoErrorWhenTheTurnHadAlreadyEnded(t *testing.T) {
 	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE
 
 	// Act.
-	err := m.Interrupt(context.Background(), "ws")
+	err := m.Interrupt(context.Background(), "ws", "fe-1")
 
 	// Assert.
 	if err != nil {
@@ -881,7 +895,7 @@ func TestAlreadyCompleteWithholdsFooterWindowWhenStateReconciliationFails(t *tes
 	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE
 
 	// Act.
-	err := m.Interrupt(context.Background(), "ws")
+	err := m.Interrupt(context.Background(), "ws", "fe-1")
 
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "state write failed") {
@@ -901,7 +915,7 @@ func TestInterruptReportsAnUndeliverableStopAsAFailure(t *testing.T) {
 	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED
 
 	// Act.
-	err := m.Interrupt(context.Background(), "ws")
+	err := m.Interrupt(context.Background(), "ws", "fe-1")
 
 	// Assert.
 	if !errors.Is(err, errclass.ErrInterruptUndelivered) {
