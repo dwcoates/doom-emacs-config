@@ -818,6 +818,139 @@ func TestTurnAccountingReducerInvalidatesIncompleteRuntimeIdentity(t *testing.T)
 	}
 }
 
+// fullRuntimeIdentity is the identity a correctly recording shim now produces:
+// every field the daemon requires, settled. Tests below take exactly one field
+// away each, so a passing suite means each requirement is load-bearing on its
+// own rather than jointly.
+func fullRuntimeIdentity() *corev1.QueryRuntimeIdentity {
+	digest := func() *corev1.EvidenceFingerprint {
+		return &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Sha256{Sha256: "abc"}}
+	}
+	return &corev1.QueryRuntimeIdentity{
+		VendorSessionId:   "vendor",
+		EffectiveModel:    "model",
+		SdkVersion:        "0.3.220",
+		ClaudeCodeVersion: "2.0.0",
+		ShimBuildSha:      "sha",
+		AuthSource:        "none",
+		FastModeState:     "off",
+		EffectiveOptions:  digest(),
+		Settings:          digest(),
+		Tools:             digest(),
+		Mcp:               digest(),
+		ContextPrefix:     digest(),
+	}
+}
+
+// missingRuntimeIdentityPathsFor settles one turn against the given runtime
+// identity and returns the identity paths the record reported as missing.
+func missingRuntimeIdentityPathsFor(t *testing.T, runtime *corev1.QueryRuntimeIdentity) []string {
+	t.Helper()
+	r := newTurnAccountingReducer(nil)
+	r.queryID = "q"
+	r.runtime = runtime
+	r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
+	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	var paths []string
+	for _, problem := range got.GetInvalid().GetProblems() {
+		paths = append(paths, problem.GetRuntimeIdentityIncomplete().GetMissingFieldPaths()...)
+	}
+	return paths
+}
+
+// TestRuntimeIdentityRequiresEveryRecordableField pins that a complete identity
+// satisfies the validator, and that removing any ONE required field is caught.
+func TestRuntimeIdentityRequiresEveryRecordableField(t *testing.T) {
+	tests := []struct {
+		name   string
+		clear  func(*corev1.QueryRuntimeIdentity)
+		want   string
+		absent bool
+	}{
+		{name: "a fully recorded identity is complete", clear: func(*corev1.QueryRuntimeIdentity) {}, absent: true},
+		{name: "vendor_session_id", clear: func(i *corev1.QueryRuntimeIdentity) { i.VendorSessionId = "" }, want: "vendor_session_id"},
+		{name: "effective_model", clear: func(i *corev1.QueryRuntimeIdentity) { i.EffectiveModel = "" }, want: "effective_model"},
+		{name: "sdk_version", clear: func(i *corev1.QueryRuntimeIdentity) { i.SdkVersion = "" }, want: "sdk_version"},
+		{name: "claude_code_version", clear: func(i *corev1.QueryRuntimeIdentity) { i.ClaudeCodeVersion = "" }, want: "claude_code_version"},
+		{name: "shim_build_sha", clear: func(i *corev1.QueryRuntimeIdentity) { i.ShimBuildSha = "" }, want: "shim_build_sha"},
+		{name: "auth_source", clear: func(i *corev1.QueryRuntimeIdentity) { i.AuthSource = "" }, want: "auth_source"},
+		{name: "fast_mode_state", clear: func(i *corev1.QueryRuntimeIdentity) { i.FastModeState = "" }, want: "fast_mode_state"},
+		{name: "effective_options", clear: func(i *corev1.QueryRuntimeIdentity) { i.EffectiveOptions = nil }, want: "effective_options"},
+		{name: "settings", clear: func(i *corev1.QueryRuntimeIdentity) { i.Settings = nil }, want: "settings"},
+		{name: "tools", clear: func(i *corev1.QueryRuntimeIdentity) { i.Tools = nil }, want: "tools"},
+		{name: "mcp", clear: func(i *corev1.QueryRuntimeIdentity) { i.Mcp = nil }, want: "mcp"},
+		{name: "context_prefix", clear: func(i *corev1.QueryRuntimeIdentity) { i.ContextPrefix = nil }, want: "context_prefix"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			identity := fullRuntimeIdentity()
+			tc.clear(identity)
+			paths := missingRuntimeIdentityPathsFor(t, identity)
+			if tc.absent {
+				if len(paths) > 0 {
+					t.Fatalf("missing runtime identity paths = %v, want none", paths)
+				}
+				return
+			}
+			if !containsPath(paths, tc.want) {
+				t.Fatalf("missing runtime identity paths = %v, want %q", paths, tc.want)
+			}
+		})
+	}
+}
+
+// TestRuntimeIdentityDoesNotRequireNonInitEvidence pins the two expectations
+// that were ADAPTED rather than enforced, each because the init message the
+// identity is built from does not carry the fact.
+func TestRuntimeIdentityDoesNotRequireNonInitEvidence(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		// Reported by the usage service, and already carried on both of the
+		// turn's AccountUsageObservations.
+		{name: "subscription_type is not init evidence", path: "subscription_type"},
+		// The explanation for fast_mode_state, which the SDK emits only when
+		// fast mode is disabled.
+		{name: "fast_mode_reason explains a state that may need no explaining", path: "fast_mode_reason"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			paths := missingRuntimeIdentityPathsFor(t, fullRuntimeIdentity())
+			if containsPath(paths, tc.path) {
+				t.Fatalf("missing runtime identity paths = %v, want %q not required", paths, tc.path)
+			}
+		})
+	}
+}
+
+// TestEvidenceFingerprintSettlement pins that a producer which ANSWERED for a
+// fingerprint satisfies the validator whichever way it answered, and that one
+// which did not still does not. The digest-only reading made the proto's own
+// `unavailable` arm unsatisfiable, so a shim correctly reporting "I hold nothing
+// to fingerprint, and here is why" was recorded as having said nothing.
+func TestEvidenceFingerprintSettlement(t *testing.T) {
+	tests := []struct {
+		name        string
+		fingerprint *corev1.EvidenceFingerprint
+		want        bool
+	}{
+		{name: "a digest is settled", fingerprint: &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Sha256{Sha256: "abc"}}, want: true},
+		{name: "a caused unavailability is settled", fingerprint: &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Unavailable{Unavailable: &corev1.FingerprintUnavailable{Cause: "not exposed"}}}, want: true},
+		{name: "an empty digest is unsettled", fingerprint: &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Sha256{Sha256: ""}}, want: false},
+		{name: "a causeless unavailability is unsettled", fingerprint: &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Unavailable{Unavailable: &corev1.FingerprintUnavailable{}}}, want: false},
+		{name: "an armless fingerprint is unsettled", fingerprint: &corev1.EvidenceFingerprint{}, want: false},
+		{name: "an absent fingerprint is unsettled", fingerprint: nil, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := evidenceFingerprintSettled(tc.fingerprint); got != tc.want {
+				t.Fatalf("evidenceFingerprintSettled = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHydratePersistedAccountingFeedsBothReplayConsumers(t *testing.T) {
 	want := &frontendv1.TurnAccounting{TurnId: "turn", Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
 	m := &Manager{cfg: Config{TurnAccountings: replayTurnAccountingStore{accountings: []*frontendv1.TurnAccounting{want}}}, logf: t.Logf}

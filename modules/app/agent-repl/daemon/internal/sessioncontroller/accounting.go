@@ -1087,11 +1087,27 @@ func runtimeIdentityProblem(queryID string, missing []string) *frontendv1.TurnAc
 	return &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_RuntimeIdentityIncomplete{RuntimeIdentityIncomplete: &frontendv1.RuntimeIdentityIncomplete{MissingFieldPaths: paths}}}
 }
 
+// incompleteRuntimeIdentityPaths names every field of the query's runtime
+// identity that the producer did not settle. Nothing here is an OPINION about
+// whether a value is plausible — only about whether the shim answered.
+//
+// TWO FIELDS ARE DELIBERATELY NOT REQUIRED, each for a reason about the
+// evidence rather than about the convenience of passing:
+//
+//   - subscription_type is not initialization evidence at all. It is reported
+//     by the usage service, and this same TurnAccounting already carries it on
+//     both of the turn's AccountUsageObservations. Demanding the init message
+//     duplicate it condemned every turn for the absence of a fact the record
+//     holds twice over.
+//   - fast_mode_reason is the EXPLANATION for fast_mode_state, and a state that
+//     needs no explaining has none. Requiring it unconditionally made "fast
+//     mode is on and working" indistinguishable from missing evidence.
+//     fast_mode_state itself stays required, so the state is never unstated.
 func incompleteRuntimeIdentityPaths(runtime *corev1.QueryRuntimeIdentity) []string {
 	if runtime == nil {
 		return []string{""}
 	}
-	missing := make([]string, 0, 14)
+	missing := make([]string, 0, 12)
 	for _, field := range []struct {
 		path  string
 		value string
@@ -1102,9 +1118,7 @@ func incompleteRuntimeIdentityPaths(runtime *corev1.QueryRuntimeIdentity) []stri
 		{"claude_code_version", runtime.GetClaudeCodeVersion()},
 		{"shim_build_sha", runtime.GetShimBuildSha()},
 		{"auth_source", runtime.GetAuthSource()},
-		{"subscription_type", runtime.GetSubscriptionType()},
 		{"fast_mode_state", runtime.GetFastModeState()},
-		{"fast_mode_reason", runtime.GetFastModeReason()},
 	} {
 		if field.value == "" {
 			missing = append(missing, field.path)
@@ -1120,11 +1134,32 @@ func incompleteRuntimeIdentityPaths(runtime *corev1.QueryRuntimeIdentity) []stri
 		{"mcp", runtime.GetMcp()},
 		{"context_prefix", runtime.GetContextPrefix()},
 	} {
-		if fingerprint.value == nil || fingerprint.value.GetSha256() == "" {
+		if !evidenceFingerprintSettled(fingerprint.value) {
 			missing = append(missing, fingerprint.path)
 		}
 	}
 	return missing
+}
+
+// evidenceFingerprintSettled reports whether the producer ANSWERED for one
+// fingerprint — either it hashed the evidence or it stated why it could not.
+//
+// The check used to accept only a digest, which made the proto's own
+// `unavailable` arm unsatisfiable: a shim that correctly reported "I hold
+// nothing to fingerprint, and here is the cause" was recorded as having said
+// nothing at all. That is the same available/unavailable settlement
+// AccountUsageObservation already uses for its boundary samples, and it is read
+// the same way here. A fingerprint that is absent, carries no arm, or carries an
+// empty digest or a causeless unavailability is still unsettled.
+func evidenceFingerprintSettled(f *corev1.EvidenceFingerprint) bool {
+	switch evidence := f.GetEvidence().(type) {
+	case *corev1.EvidenceFingerprint_Sha256:
+		return evidence.Sha256 != ""
+	case *corev1.EvidenceFingerprint_Unavailable:
+		return strings.TrimSpace(evidence.Unavailable.GetCause()) != ""
+	default:
+		return false
+	}
 }
 func invalidTurnAccounting(turnID, queryID string, runtime *corev1.QueryRuntimeIdentity, settledAt int64, problem *frontendv1.TurnAccountingProblem) *frontendv1.TurnAccounting {
 	return &frontendv1.TurnAccounting{TurnId: turnID, QueryInstanceId: queryID, Runtime: runtime, Timing: &frontendv1.TurnAccountingTiming{AccountingSettledAtMs: settledAt}, Verdict: &frontendv1.TurnAccounting_Invalid{Invalid: &frontendv1.TurnAccountingInvalid{Problems: []*frontendv1.TurnAccountingProblem{problem}}}}
