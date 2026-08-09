@@ -67,7 +67,6 @@ function progress(over: Partial<ProgressInput> = {}): ProgressInput {
     turnStartedAtMs: 0,
     thinkingTokens: 0,
     inputTokens: 0,
-    ttftMs: 0,
     compacting: null,
     retrying: null,
     authenticating: null,
@@ -783,26 +782,16 @@ describe("rateLimitActivity: both allowances, in words the reader acts on", () =
     expect(got.tone).toBe("muted");
   });
 
-  it("carries the same wording into the expansion sheet", () => {
-    // Arrange
-    const i = input({ progress: progress({ rateLimited: limit({ resetsAt: 0 }) }) });
-    // Act
-    const got = sheetHtml(i, NOW);
-    // Assert
-    expect(got).toContain(`Session usage: <span class="pfooter-rl-high">80%</span>`);
-  });
-
-  it("puts a QUIET allowance in the sheet, which the strip's rung declines to show", () => {
-    // Arrange — nothing is newsworthy, so the strip stays on the running tool.
-    const i = input({
-      progress: progress({
-        rateLimitedWeekly: { active: false, resetsAt: 0, utilization: 0.3, status: "allowed" },
-      }),
+  it("names BOTH allowances in the strip's cell once either speaks up", () => {
+    // Arrange — the cell is the footer's ONE home for the reset and the usage.
+    const p = progress({
+      rateLimited: limit({ resetsAt: 0 }),
+      rateLimitedWeekly: { active: false, resetsAt: 0, utilization: 0.3, status: "allowed" },
     });
     // Act
-    const got = sheetHtml(i, NOW);
+    const got = rateLimitActivity(p, NOW);
     // Assert
-    expect(got).toContain(`Weekly usage: <span class="pfooter-rl-ok">30%</span>`);
+    expect(got.text).toBe("Session usage: 80%  |  Weekly usage: 30%");
   });
 
   it("leaves an unrelated activity rung's plain-text rendering untouched", () => {
@@ -1147,32 +1136,12 @@ describe("errorRowHtml: the persistent error line", () => {
 
 // --- the expansion sheet -----------------------------------------------------
 
-describe("sheetHtml: the detail the thin strip drops", () => {
+describe("sheetHtml: the roster, and no session status", () => {
   it("says so when there is nothing else in flight", () => {
     // Arrange / Act
     const got = sheetHtml(input(), NOW);
     // Assert
     expect(got).toContain("nothing else in flight");
-  });
-
-  it("gives each open window a row with its age", () => {
-    // Arrange
-    const i = input({ progress: progress({ hook: { sinceMs: NOW - 5_000, detail: "PreToolUse" } }) });
-    // Act
-    const got = sheetHtml(i, NOW);
-    // Assert
-    expect(got).toContain("hook (5s) — PreToolUse");
-  });
-
-  it("gives the blocked window its own sheet row", () => {
-    // Arrange
-    const i = input({
-      progress: progress({ blocked: { sinceMs: NOW - 9_000, detail: "waiting on you" } }),
-    });
-    // Act
-    const got = sheetHtml(i, NOW);
-    // Assert
-    expect(got).toContain("blocked (9s) — waiting on you");
   });
 
   it("reports the live task count", () => {
@@ -1184,8 +1153,78 @@ describe("sheetHtml: the detail the thin strip drops", () => {
     expect(got).toContain("2 live tasks");
   });
 
-  it("omits an unfed ttft rather than printing a zero", () => {
-    // Arrange / Act — no producer relays first-token latency yet.
+  it("keeps an open hook window out of the sheet, since the strip's cell says it", () => {
+    // Arrange
+    const i = input({ progress: progress({ hook: { sinceMs: NOW - 5_000, detail: "PreToolUse" } }) });
+    // Act
+    const got = sheetHtml(i, NOW);
+    // Assert
+    expect(got).not.toContain("PreToolUse");
+  });
+
+  it("keeps the blocked window out of the sheet", () => {
+    // Arrange
+    const i = input({
+      progress: progress({ blocked: { sinceMs: NOW - 9_000, detail: "waiting on you" } }),
+    });
+    // Act
+    const got = sheetHtml(i, NOW);
+    // Assert
+    expect(got).not.toContain("waiting on you");
+  });
+
+  it("keeps the compaction window out of the sheet", () => {
+    // Arrange
+    const i = input({
+      progress: progress({ compacting: { sinceMs: NOW - 3_000, detail: "auto" } }),
+    });
+    // Act
+    const got = sheetHtml(i, NOW);
+    // Assert
+    expect(got).not.toContain("compacting");
+  });
+
+  it("keeps the SESSION RESET countdown out of the sheet", () => {
+    // Arrange — the reset is the strip's rate-limit rung's to report, not this section's.
+    const i = input({
+      progress: progress({
+        rateLimited: { active: true, resetsAt: NOW / 1000 + 3_600, utilization: 0.8, status: "rejected" },
+      }),
+    });
+    // Act
+    const got = sheetHtml(i, NOW);
+    // Assert
+    expect(got).not.toContain("Session reset");
+  });
+
+  it("keeps the session's usage figure out of the sheet", () => {
+    // Arrange
+    const i = input({
+      progress: progress({
+        rateLimited: { active: true, resetsAt: 0, utilization: 0.8, status: "rejected" },
+      }),
+    });
+    // Act
+    const got = sheetHtml(i, NOW);
+    // Assert
+    expect(got).not.toContain("Session usage");
+  });
+
+  it("keeps a QUIET weekly allowance out of the sheet too", () => {
+    // Arrange — no allowance reading belongs here, newsworthy or not.
+    const i = input({
+      progress: progress({
+        rateLimitedWeekly: { active: false, resetsAt: 0, utilization: 0.3, status: "allowed" },
+      }),
+    });
+    // Act
+    const got = sheetHtml(i, NOW);
+    // Assert
+    expect(got).not.toContain("Weekly");
+  });
+
+  it("never prints first-token latency, which the footer no longer reports at all", () => {
+    // Arrange / Act
     const got = sheetHtml(input(), NOW);
     // Assert
     expect(got).not.toContain("first token");
@@ -2226,13 +2265,13 @@ describe("the footer's structured merge status", () => {
     expect(got).not.toContain("pfooter-merge-queue");
   });
 
-  it("puts the merge's full account in the expansion sheet", () => {
-    // Arrange — the sheet is where the detail the thin strip drops belongs.
+  it("keeps the merge's account out of the expansion sheet", () => {
+    // Arrange — the merge is session status, so the strip's cells own it alone.
     const built = input({ renderState: "merging", mergeStatus: PICKING });
     // Act
     const got = sheetHtml(built, NOW);
     // Assert
-    expect(got).toContain("merging · 1/4 · picking · abc1234 fix it");
+    expect(got).not.toContain("picking");
   });
 });
 

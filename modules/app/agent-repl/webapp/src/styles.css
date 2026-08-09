@@ -2977,7 +2977,11 @@ pre {
 .pfooter-error.addressable { cursor: pointer; }
 .pfooter-error.addressable:hover { text-decoration: underline; }
 
-/* The EXPANDED FOOTER: the detail the thin strip drops, one fact per row.
+/* The EXPANDED FOOTER: the session's agent and task roster, one row each.
+
+   NO SESSION STATUS LIVES HERE. The rate-limit allowances and their resets, the
+   open windows, and the merge's account are the strip's own cells to say, and
+   the section carries the roster the strip has no room for.
 
    IT IS EXACTLY AS TALL AS ITS ROWS, up to a hard ceiling of
    `--pfooter-sheet-rows` of them — the count the markup carries in

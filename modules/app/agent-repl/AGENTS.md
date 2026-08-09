@@ -114,6 +114,13 @@ that name in code, comments, tests and prose; "sheet", "expansion", and "detail
 panel" are the older names it replaces, and one surface answering to four is how
 a change lands on the wrong one.
 
+It carries the AGENT AND TASK ROSTER, and nothing else. Session status — the
+rate-limit allowances and when they reset, the open compaction/hook/retry/blocked
+windows, the merge's account, first-token latency — belongs in the strip's own
+center cells (`activityDetail`, the phase word, the counters cluster) and NEVER
+in the expanded footer. A fact said in both places gives the reader two homes for
+one answer, and the two wordings drift apart the first time either is reworded.
+
 It is also the ONLY surface that carries the session's subagent roster. The
 agents chip opens and closes it rather than dropping a roster of its own, and
 the per-bubble agent strips inside feed cards are a different thing entirely:
