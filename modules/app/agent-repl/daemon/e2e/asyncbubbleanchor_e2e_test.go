@@ -39,23 +39,21 @@ func TestE2EALaunchAnchorsItsBubbleInTheFeedWithLiveLiveness(t *testing.T) {
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 
-	call := spawningCall(seen.items, toolUseID)
-	if call == nil {
-		t.Fatalf("no top-level tool_call item for the launching call %q arrived: the daemon never published its classification verdict", toolUseID)
-	}
-	bubbleID := call.GetSpawnedBubbleId()
-	if bubbleID == "" {
-		t.Fatalf("the launching call %q carries an empty spawned_bubble_id: async-bubble.proto states an empty id is unrepresentable for work that detached", toolUseID)
-	}
-
-	anchors := asyncBubbleItems(seen.items)
-	anchor := openedBubble(anchors, bubbleID)
+	// gateOnAnchor IS this test's subject, not merely its gate: it asserts that
+	// exactly one anchor names the launching call and that the id it carries is
+	// non-empty — the bubble's existence in the feed and its addressability.
+	// What remains below is the one fact the lookup itself cannot establish.
+	bubbleID := gateOnAnchor(t, seen, toolUseID)
+	// Resolved across BOTH publication sites, so the liveness assertion below
+	// still runs when the anchor is missing but the async push opened the bubble
+	// — gateOnAnchor has already recorded that gap, and re-reporting it here as
+	// a self-contradicting verdict would misdescribe it.
+	anchor := openedBubble(asyncBubbleItems(seen.items), bubbleID)
 	if anchor == nil {
-		t.Fatalf("no ConversationItem.async_bubble anchored bubble %q in the feed (saw %d async_bubble items): the bubble has no place in the conversation that started it",
-			bubbleID, len(anchors))
+		anchor = openedBubble(seen.bubbles(), bubbleID)
 	}
-	if got, want := anchor.GetOriginToolUseId(), toolUseID; got != want {
-		t.Errorf("anchored bubble origin_tool_use_id = %q, want the launching call's %q: a frontend cannot attach the bubble to its originating card", got, want)
+	if anchor == nil {
+		t.Fatalf("bubble id %q was resolved for call %q but no anchor and no opened bubble carries it: the verdict contradicts itself", bubbleID, toolUseID)
 	}
 	if anchor.GetLiveness().GetLive() == nil {
 		t.Errorf("anchored bubble %q opened with liveness %v, want the live arm: a launch that opens already-settled is unrepresentable while its agent is still running",
