@@ -1242,6 +1242,442 @@ func (x *EvictMergeCmd) GetRunId() string {
 	return ""
 }
 
+// THE INTERRUPT'S QUEUE HALF, ASKED RATHER THAN PERFORMED.
+//
+// Interrupting a workspace whose merge is on the queue used to take that merge
+// off silently: the stop reached the shim, the queue entry was dropped beside
+// it, and the only record of a merge the user had been waiting on was a
+// terminal `failed` status that arrived without being asked for. A merge is
+// minutes of someone's work and the interrupt is one keystroke, so the
+// destructive half is now a QUESTION.
+//
+// The offer is PUSHED STATE, on WorkspaceState, rather than a rejection handed
+// back to whoever sent the interrupt. The interrupt's sender is frequently not
+// the surface that can draw a card — the Emacs host sends it from a keybinding
+// and renders no cards at all — so an answer carried on the ack would have
+// nowhere to be asked. Published on the workspace, the question reaches
+// whichever frontend is showing that workspace, and both frontends see the
+// same one.
+//
+// AT MOST ONE OFFER IS OUTSTANDING PER WORKSPACE. A second interrupt while an
+// offer stands re-publishes the standing on the SAME offer_id rather than
+// minting a rival question, so "which of the two cards did the user answer"
+// is unrepresentable.
+type MergeDequeueOffer struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Daemon-minted, and the ONLY thing an answer may name. It is not the run
+	// id: a run id would still resolve after the offer had been answered or
+	// superseded, so a stale card's click would dequeue a merge the user never
+	// saw the question for. This id dies with the offer.
+	OfferId string `protobuf:"bytes,1,opt,name=offer_id,json=offerId,proto3" json:"offer_id,omitempty"`
+	// The run the question is about — the same id its MergeStatus carries, so a
+	// frontend can tie the card to the merge it is already rendering.
+	RunId string `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	// When the offer was raised, unix millis.
+	RaisedAtMs int64 `protobuf:"varint,3,opt,name=raised_at_ms,json=raisedAtMs,proto3" json:"raised_at_ms,omitempty"`
+	// WHERE the merge stands, as arms, because the two standings are answered
+	// by different machinery and read as different questions. A frontend that
+	// had to ask "is position 1 the head?" would be re-deriving what the daemon
+	// already knows.
+	//
+	// Types that are valid to be assigned to Standing:
+	//
+	//	*MergeDequeueOffer_Waiting
+	//	*MergeDequeueOffer_Running
+	Standing      isMergeDequeueOffer_Standing `protobuf_oneof:"standing"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeDequeueOffer) Reset() {
+	*x = MergeDequeueOffer{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeDequeueOffer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeDequeueOffer) ProtoMessage() {}
+
+func (x *MergeDequeueOffer) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeDequeueOffer.ProtoReflect.Descriptor instead.
+func (*MergeDequeueOffer) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *MergeDequeueOffer) GetOfferId() string {
+	if x != nil {
+		return x.OfferId
+	}
+	return ""
+}
+
+func (x *MergeDequeueOffer) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *MergeDequeueOffer) GetRaisedAtMs() int64 {
+	if x != nil {
+		return x.RaisedAtMs
+	}
+	return 0
+}
+
+func (x *MergeDequeueOffer) GetStanding() isMergeDequeueOffer_Standing {
+	if x != nil {
+		return x.Standing
+	}
+	return nil
+}
+
+func (x *MergeDequeueOffer) GetWaiting() *MergeDequeueWaiting {
+	if x != nil {
+		if x, ok := x.Standing.(*MergeDequeueOffer_Waiting); ok {
+			return x.Waiting
+		}
+	}
+	return nil
+}
+
+func (x *MergeDequeueOffer) GetRunning() *MergeDequeueRunning {
+	if x != nil {
+		if x, ok := x.Standing.(*MergeDequeueOffer_Running); ok {
+			return x.Running
+		}
+	}
+	return nil
+}
+
+type isMergeDequeueOffer_Standing interface {
+	isMergeDequeueOffer_Standing()
+}
+
+type MergeDequeueOffer_Waiting struct {
+	Waiting *MergeDequeueWaiting `protobuf:"bytes,4,opt,name=waiting,proto3,oneof"`
+}
+
+type MergeDequeueOffer_Running struct {
+	Running *MergeDequeueRunning `protobuf:"bytes,5,opt,name=running,proto3,oneof"`
+}
+
+func (*MergeDequeueOffer_Waiting) isMergeDequeueOffer_Standing() {}
+
+func (*MergeDequeueOffer_Running) isMergeDequeueOffer_Standing() {}
+
+// The merge is on the queue BEHIND another one, and nothing of it has run.
+// Dequeuing it is a pure queue operation: the entry is dropped and the run
+// takes a terminal `failed` status.
+type MergeDequeueWaiting struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many merges are in front of this one. Always >= 1 — a standing with
+	// nothing ahead of it is the running arm, not this one.
+	Ahead int32 `protobuf:"varint,1,opt,name=ahead,proto3" json:"ahead,omitempty"`
+	// 1-based place in the repository's queue, and its depth, so the card can
+	// say "3rd of 5" as well as "2 ahead of it".
+	Position      int32 `protobuf:"varint,2,opt,name=position,proto3" json:"position,omitempty"`
+	Depth         int32 `protobuf:"varint,3,opt,name=depth,proto3" json:"depth,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeDequeueWaiting) Reset() {
+	*x = MergeDequeueWaiting{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeDequeueWaiting) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeDequeueWaiting) ProtoMessage() {}
+
+func (x *MergeDequeueWaiting) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeDequeueWaiting.ProtoReflect.Descriptor instead.
+func (*MergeDequeueWaiting) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *MergeDequeueWaiting) GetAhead() int32 {
+	if x != nil {
+		return x.Ahead
+	}
+	return 0
+}
+
+func (x *MergeDequeueWaiting) GetPosition() int32 {
+	if x != nil {
+		return x.Position
+	}
+	return 0
+}
+
+func (x *MergeDequeueWaiting) GetDepth() int32 {
+	if x != nil {
+		return x.Depth
+	}
+	return 0
+}
+
+// The merge IS the head and its run is in flight. Dequeuing it ABORTS that
+// run: the lease is released and the entry retires with a terminal `failed`
+// status.
+//
+// WHATEVER THE RUN ALREADY LANDED ON THE TARGET STAYS THERE, exactly as
+// abandoning a conflicted merge leaves its half-resolved tree. An abort that
+// also unwound the target would destroy work a human may be part-way through,
+// and the daemon does not make that choice on a single keystroke's behalf.
+type MergeDequeueRunning struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// WHAT the run is doing, carried whole rather than re-stated as a stage
+	// enum, so the card names the phase from the one vocabulary that defines it
+	// and cannot drift from the status the same frontend is already rendering.
+	Status        *MergeStatus `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeDequeueRunning) Reset() {
+	*x = MergeDequeueRunning{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeDequeueRunning) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeDequeueRunning) ProtoMessage() {}
+
+func (x *MergeDequeueRunning) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeDequeueRunning.ProtoReflect.Descriptor instead.
+func (*MergeDequeueRunning) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *MergeDequeueRunning) GetStatus() *MergeStatus {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
+// The user's answer to a MergeDequeueOffer. Sent by whichever frontend drew
+// the card; the daemon clears the offer on either arm, so declining is a real
+// answer and not merely the absence of one.
+type AnswerMergeDequeueCmd struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The offer being answered. An id that does not match the workspace's
+	// outstanding offer is REFUSED rather than resolved to the current one: a
+	// click on a superseded card must not dequeue the merge the card that
+	// replaced it is asking about.
+	OfferId string `protobuf:"bytes,1,opt,name=offer_id,json=offerId,proto3" json:"offer_id,omitempty"`
+	// The answer is a oneof of empty messages, not a bool, for the same reason
+	// ReviveSessionCmd's is: "no answer" must be unrepresentable on the wire.
+	//
+	// Types that are valid to be assigned to Answer:
+	//
+	//	*AnswerMergeDequeueCmd_Dequeue
+	//	*AnswerMergeDequeueCmd_Keep
+	Answer        isAnswerMergeDequeueCmd_Answer `protobuf_oneof:"answer"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerMergeDequeueCmd) Reset() {
+	*x = AnswerMergeDequeueCmd{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerMergeDequeueCmd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerMergeDequeueCmd) ProtoMessage() {}
+
+func (x *AnswerMergeDequeueCmd) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerMergeDequeueCmd.ProtoReflect.Descriptor instead.
+func (*AnswerMergeDequeueCmd) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *AnswerMergeDequeueCmd) GetOfferId() string {
+	if x != nil {
+		return x.OfferId
+	}
+	return ""
+}
+
+func (x *AnswerMergeDequeueCmd) GetAnswer() isAnswerMergeDequeueCmd_Answer {
+	if x != nil {
+		return x.Answer
+	}
+	return nil
+}
+
+func (x *AnswerMergeDequeueCmd) GetDequeue() *MergeDequeueConfirm {
+	if x != nil {
+		if x, ok := x.Answer.(*AnswerMergeDequeueCmd_Dequeue); ok {
+			return x.Dequeue
+		}
+	}
+	return nil
+}
+
+func (x *AnswerMergeDequeueCmd) GetKeep() *MergeDequeueDecline {
+	if x != nil {
+		if x, ok := x.Answer.(*AnswerMergeDequeueCmd_Keep); ok {
+			return x.Keep
+		}
+	}
+	return nil
+}
+
+type isAnswerMergeDequeueCmd_Answer interface {
+	isAnswerMergeDequeueCmd_Answer()
+}
+
+type AnswerMergeDequeueCmd_Dequeue struct {
+	Dequeue *MergeDequeueConfirm `protobuf:"bytes,2,opt,name=dequeue,proto3,oneof"`
+}
+
+type AnswerMergeDequeueCmd_Keep struct {
+	Keep *MergeDequeueDecline `protobuf:"bytes,3,opt,name=keep,proto3,oneof"`
+}
+
+func (*AnswerMergeDequeueCmd_Dequeue) isAnswerMergeDequeueCmd_Answer() {}
+
+func (*AnswerMergeDequeueCmd_Keep) isAnswerMergeDequeueCmd_Answer() {}
+
+// Take the merge off the queue — evict it while waiting, abort it while
+// running.
+type MergeDequeueConfirm struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeDequeueConfirm) Reset() {
+	*x = MergeDequeueConfirm{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeDequeueConfirm) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeDequeueConfirm) ProtoMessage() {}
+
+func (x *MergeDequeueConfirm) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeDequeueConfirm.ProtoReflect.Descriptor instead.
+func (*MergeDequeueConfirm) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{22}
+}
+
+// Leave the merge alone. The offer is cleared and the merge proceeds.
+type MergeDequeueDecline struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeDequeueDecline) Reset() {
+	*x = MergeDequeueDecline{}
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeDequeueDecline) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeDequeueDecline) ProtoMessage() {}
+
+func (x *MergeDequeueDecline) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_merge_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeDequeueDecline.ProtoReflect.Descriptor instead.
+func (*MergeDequeueDecline) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_merge_proto_rawDescGZIP(), []int{23}
+}
+
 var File_agentshim_frontend_v1_merge_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_merge_proto_rawDesc = "" +
@@ -1319,7 +1755,29 @@ const file_agentshim_frontend_v1_merge_proto_rawDesc = "" +
 	"\x12PauseMergeQueueCmd\"\x15\n" +
 	"\x13ResumeMergeQueueCmd\"&\n" +
 	"\rEvictMergeCmd\x12\x15\n" +
-	"\x06run_id\x18\x01 \x01(\tR\x05runIdB2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
+	"\x06run_id\x18\x01 \x01(\tR\x05runId\"\x83\x02\n" +
+	"\x11MergeDequeueOffer\x12\x19\n" +
+	"\boffer_id\x18\x01 \x01(\tR\aofferId\x12\x15\n" +
+	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12 \n" +
+	"\fraised_at_ms\x18\x03 \x01(\x03R\n" +
+	"raisedAtMs\x12F\n" +
+	"\awaiting\x18\x04 \x01(\v2*.agentshim.frontend.v1.MergeDequeueWaitingH\x00R\awaiting\x12F\n" +
+	"\arunning\x18\x05 \x01(\v2*.agentshim.frontend.v1.MergeDequeueRunningH\x00R\arunningB\n" +
+	"\n" +
+	"\bstanding\"]\n" +
+	"\x13MergeDequeueWaiting\x12\x14\n" +
+	"\x05ahead\x18\x01 \x01(\x05R\x05ahead\x12\x1a\n" +
+	"\bposition\x18\x02 \x01(\x05R\bposition\x12\x14\n" +
+	"\x05depth\x18\x03 \x01(\x05R\x05depth\"Q\n" +
+	"\x13MergeDequeueRunning\x12:\n" +
+	"\x06status\x18\x01 \x01(\v2\".agentshim.frontend.v1.MergeStatusR\x06status\"\xc6\x01\n" +
+	"\x15AnswerMergeDequeueCmd\x12\x19\n" +
+	"\boffer_id\x18\x01 \x01(\tR\aofferId\x12F\n" +
+	"\adequeue\x18\x02 \x01(\v2*.agentshim.frontend.v1.MergeDequeueConfirmH\x00R\adequeue\x12@\n" +
+	"\x04keep\x18\x03 \x01(\v2*.agentshim.frontend.v1.MergeDequeueDeclineH\x00R\x04keepB\b\n" +
+	"\x06answer\"\x15\n" +
+	"\x13MergeDequeueConfirm\"\x15\n" +
+	"\x13MergeDequeueDeclineB2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_agentshim_frontend_v1_merge_proto_rawDescOnce sync.Once
@@ -1333,7 +1791,7 @@ func file_agentshim_frontend_v1_merge_proto_rawDescGZIP() []byte {
 	return file_agentshim_frontend_v1_merge_proto_rawDescData
 }
 
-var file_agentshim_frontend_v1_merge_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_agentshim_frontend_v1_merge_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_agentshim_frontend_v1_merge_proto_goTypes = []any{
 	(*MergeStatus)(nil),                 // 0: agentshim.frontend.v1.MergeStatus
 	(*MergeStatusEnqueued)(nil),         // 1: agentshim.frontend.v1.MergeStatusEnqueued
@@ -1353,6 +1811,12 @@ var file_agentshim_frontend_v1_merge_proto_goTypes = []any{
 	(*PauseMergeQueueCmd)(nil),          // 15: agentshim.frontend.v1.PauseMergeQueueCmd
 	(*ResumeMergeQueueCmd)(nil),         // 16: agentshim.frontend.v1.ResumeMergeQueueCmd
 	(*EvictMergeCmd)(nil),               // 17: agentshim.frontend.v1.EvictMergeCmd
+	(*MergeDequeueOffer)(nil),           // 18: agentshim.frontend.v1.MergeDequeueOffer
+	(*MergeDequeueWaiting)(nil),         // 19: agentshim.frontend.v1.MergeDequeueWaiting
+	(*MergeDequeueRunning)(nil),         // 20: agentshim.frontend.v1.MergeDequeueRunning
+	(*AnswerMergeDequeueCmd)(nil),       // 21: agentshim.frontend.v1.AnswerMergeDequeueCmd
+	(*MergeDequeueConfirm)(nil),         // 22: agentshim.frontend.v1.MergeDequeueConfirm
+	(*MergeDequeueDecline)(nil),         // 23: agentshim.frontend.v1.MergeDequeueDecline
 }
 var file_agentshim_frontend_v1_merge_proto_depIdxs = []int32{
 	1,  // 0: agentshim.frontend.v1.MergeStatus.enqueued:type_name -> agentshim.frontend.v1.MergeStatusEnqueued
@@ -1368,11 +1832,16 @@ var file_agentshim_frontend_v1_merge_proto_depIdxs = []int32{
 	12, // 10: agentshim.frontend.v1.MergeQueueEntry.running:type_name -> agentshim.frontend.v1.MergeQueueHeadRunning
 	13, // 11: agentshim.frontend.v1.MergeQueueEntry.paused_waiting:type_name -> agentshim.frontend.v1.MergeQueueHeadPausedWaiting
 	14, // 12: agentshim.frontend.v1.MergeQueueEntry.terminal_owed:type_name -> agentshim.frontend.v1.MergeQueueHeadTerminalOwed
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	19, // 13: agentshim.frontend.v1.MergeDequeueOffer.waiting:type_name -> agentshim.frontend.v1.MergeDequeueWaiting
+	20, // 14: agentshim.frontend.v1.MergeDequeueOffer.running:type_name -> agentshim.frontend.v1.MergeDequeueRunning
+	0,  // 15: agentshim.frontend.v1.MergeDequeueRunning.status:type_name -> agentshim.frontend.v1.MergeStatus
+	22, // 16: agentshim.frontend.v1.AnswerMergeDequeueCmd.dequeue:type_name -> agentshim.frontend.v1.MergeDequeueConfirm
+	23, // 17: agentshim.frontend.v1.AnswerMergeDequeueCmd.keep:type_name -> agentshim.frontend.v1.MergeDequeueDecline
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_merge_proto_init() }
@@ -1395,13 +1864,21 @@ func file_agentshim_frontend_v1_merge_proto_init() {
 		(*MergeQueueEntry_PausedWaiting)(nil),
 		(*MergeQueueEntry_TerminalOwed)(nil),
 	}
+	file_agentshim_frontend_v1_merge_proto_msgTypes[18].OneofWrappers = []any{
+		(*MergeDequeueOffer_Waiting)(nil),
+		(*MergeDequeueOffer_Running)(nil),
+	}
+	file_agentshim_frontend_v1_merge_proto_msgTypes[21].OneofWrappers = []any{
+		(*AnswerMergeDequeueCmd_Dequeue)(nil),
+		(*AnswerMergeDequeueCmd_Keep)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_merge_proto_rawDesc), len(file_agentshim_frontend_v1_merge_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

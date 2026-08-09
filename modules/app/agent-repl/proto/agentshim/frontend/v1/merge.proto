@@ -175,3 +175,96 @@ message EvictMergeCmd {
   // The run id the roster and every MergeStatus carry.
   string run_id = 1;
 }
+
+// THE INTERRUPT'S QUEUE HALF, ASKED RATHER THAN PERFORMED.
+//
+// Interrupting a workspace whose merge is on the queue used to take that merge
+// off silently: the stop reached the shim, the queue entry was dropped beside
+// it, and the only record of a merge the user had been waiting on was a
+// terminal `failed` status that arrived without being asked for. A merge is
+// minutes of someone's work and the interrupt is one keystroke, so the
+// destructive half is now a QUESTION.
+//
+// The offer is PUSHED STATE, on WorkspaceState, rather than a rejection handed
+// back to whoever sent the interrupt. The interrupt's sender is frequently not
+// the surface that can draw a card — the Emacs host sends it from a keybinding
+// and renders no cards at all — so an answer carried on the ack would have
+// nowhere to be asked. Published on the workspace, the question reaches
+// whichever frontend is showing that workspace, and both frontends see the
+// same one.
+//
+// AT MOST ONE OFFER IS OUTSTANDING PER WORKSPACE. A second interrupt while an
+// offer stands re-publishes the standing on the SAME offer_id rather than
+// minting a rival question, so "which of the two cards did the user answer"
+// is unrepresentable.
+message MergeDequeueOffer {
+  // Daemon-minted, and the ONLY thing an answer may name. It is not the run
+  // id: a run id would still resolve after the offer had been answered or
+  // superseded, so a stale card's click would dequeue a merge the user never
+  // saw the question for. This id dies with the offer.
+  string offer_id = 1;
+  // The run the question is about — the same id its MergeStatus carries, so a
+  // frontend can tie the card to the merge it is already rendering.
+  string run_id = 2;
+  // When the offer was raised, unix millis.
+  int64 raised_at_ms = 3;
+  // WHERE the merge stands, as arms, because the two standings are answered
+  // by different machinery and read as different questions. A frontend that
+  // had to ask "is position 1 the head?" would be re-deriving what the daemon
+  // already knows.
+  oneof standing {
+    MergeDequeueWaiting waiting = 4;
+    MergeDequeueRunning running = 5;
+  }
+}
+
+// The merge is on the queue BEHIND another one, and nothing of it has run.
+// Dequeuing it is a pure queue operation: the entry is dropped and the run
+// takes a terminal `failed` status.
+message MergeDequeueWaiting {
+  // How many merges are in front of this one. Always >= 1 — a standing with
+  // nothing ahead of it is the running arm, not this one.
+  int32 ahead = 1;
+  // 1-based place in the repository's queue, and its depth, so the card can
+  // say "3rd of 5" as well as "2 ahead of it".
+  int32 position = 2;
+  int32 depth = 3;
+}
+
+// The merge IS the head and its run is in flight. Dequeuing it ABORTS that
+// run: the lease is released and the entry retires with a terminal `failed`
+// status.
+//
+// WHATEVER THE RUN ALREADY LANDED ON THE TARGET STAYS THERE, exactly as
+// abandoning a conflicted merge leaves its half-resolved tree. An abort that
+// also unwound the target would destroy work a human may be part-way through,
+// and the daemon does not make that choice on a single keystroke's behalf.
+message MergeDequeueRunning {
+  // WHAT the run is doing, carried whole rather than re-stated as a stage
+  // enum, so the card names the phase from the one vocabulary that defines it
+  // and cannot drift from the status the same frontend is already rendering.
+  MergeStatus status = 1;
+}
+
+// The user's answer to a MergeDequeueOffer. Sent by whichever frontend drew
+// the card; the daemon clears the offer on either arm, so declining is a real
+// answer and not merely the absence of one.
+message AnswerMergeDequeueCmd {
+  // The offer being answered. An id that does not match the workspace's
+  // outstanding offer is REFUSED rather than resolved to the current one: a
+  // click on a superseded card must not dequeue the merge the card that
+  // replaced it is asking about.
+  string offer_id = 1;
+  // The answer is a oneof of empty messages, not a bool, for the same reason
+  // ReviveSessionCmd's is: "no answer" must be unrepresentable on the wire.
+  oneof answer {
+    MergeDequeueConfirm dequeue = 2;
+    MergeDequeueDecline keep = 3;
+  }
+}
+
+// Take the merge off the queue — evict it while waiting, abort it while
+// running.
+message MergeDequeueConfirm {}
+// Leave the merge alone. The offer is cleared and the merge proceeds.
+message MergeDequeueDecline {}
