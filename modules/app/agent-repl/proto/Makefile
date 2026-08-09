@@ -37,7 +37,7 @@ PROTOS := \
   agentshim/frontend/v1/topbar.proto \
   agentshim/frontend/v1/user-bubble.proto
 
-.PHONY: all go ts lint test-check-generated check-generated validate coverage clean
+.PHONY: all go ts lint durable-isolation test-check-durable-isolation test-check-generated check-generated validate coverage clean
 
 all: go ts
 
@@ -52,9 +52,21 @@ ts:
 	  --plugin=protoc-gen-es=$$(npx --yes --package=@bufbuild/protoc-gen-es which protoc-gen-es 2>/dev/null || echo ./node_modules/.bin/protoc-gen-es) \
 	  --es_out=gen/ts --es_opt=target=ts $(PROTOS)
 
-# Syntax-check every proto without emitting code.
-lint:
+# Syntax-check every proto without emitting code, then enforce the structural
+# invariants the syntax check cannot see.
+lint: durable-isolation
 	protoc -I . --descriptor_set_out=/dev/null $(PROTOS)
+
+# INVARIANT I6. durable.proto is the persistence evidence layer and no other
+# component schema may import it or name a type it declares. This hangs off
+# lint, and therefore off validate, so codegen REFUSES a schema that has already
+# drifted rather than emitting bindings for the coupling and leaving the refusal
+# to review.
+durable-isolation:
+	./check-durable-isolation.sh
+
+test-check-durable-isolation:
+	./test-check-durable-isolation.sh
 
 # Regenerate and compare with the exact pre-generation bytes. Comparing with
 # HEAD rejects a correct uncommitted schema edit, which makes the pre-commit
@@ -71,7 +83,7 @@ test-check-generated:
 	./test-check-generated.sh
 
 # Validate both the source schema and the checked-in Go/TS generated artifacts.
-validate: lint test-check-generated check-generated
+validate: lint test-check-durable-isolation test-check-generated check-generated
 
 # Generated stubs are dependencies, not coverage subjects.  Each consumer's
 # own coverage configuration scopes measurement to handwritten package source.
