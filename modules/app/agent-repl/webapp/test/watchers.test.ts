@@ -1,3 +1,12 @@
+/**
+ * watchers — the async projection, on ONE identity tier: the daemon's
+ * classification verdict (`AgentToolCall.spawned_bubble_id`).
+ *
+ * The three-tier identity ladder this module used to walk is gone, so the
+ * lower rungs get tests of their own here proving they no longer establish an
+ * identity — a notification alone and result prose alone must both resolve to
+ * "detached nothing". One edge per test (AAA).
+ */
 import { describe, expect, it } from "vitest";
 import { ConversationItem, ToolItem } from "../src/store.js";
 import { asyncByBubble, isWatcher, watcherRef } from "../src/watchers.js";
@@ -37,12 +46,9 @@ function tool(id: string, name = "Bash", parent?: string): ToolItem {
   };
 }
 
-/** A backgrounded-Bash spawner announcing its id in its result text. */
-function bgSpawner(id: string, taskId: string): ToolItem {
-  return {
-    ...tool(id),
-    result: { isError: false, content: `Command running in background with ID: ${taskId}. Output is being written to: /tmp/claude-1/s/tasks/${taskId}.output` },
-  };
+/** A call the DAEMON classified as detaching work, naming the bubble it minted. */
+function spawner(id: string, bubbleId: string): ToolItem {
+  return { ...tool(id), spawnedBubbleId: bubbleId };
 }
 
 function result(subtype = "success"): ConversationItem {
@@ -50,36 +56,53 @@ function result(subtype = "success"): ConversationItem {
 }
 
 describe("watcherRef", () => {
-  it("keys off the classification first, as the most structural tier", () => {
-    // Arrange — classified AND announced: the classification wins.
-    const item: ToolItem = {
-      ...bgSpawner("t1", "bg1"),
-      asyncSource: { source_id: "src-1", kind: "shell", status: "running" },
-    };
-    // Act / Assert
-    expect(watcherRef(item)).toEqual({ id: "src-1", origin: "classified" });
+  it("reads the daemon's classification verdict, the one tier there is", () => {
+    // Arrange / Act / Assert
+    expect(watcherRef(spawner("t1", "b1"))).toBe("b1");
   });
 
-  it("falls back to a landed notification's task id", () => {
-    // Arrange — no classification, but the harness correlated a completion.
+  it("returns null for a plain call that spawned nothing", () => {
+    // Arrange / Act / Assert
+    expect(watcherRef(tool("t1"))).toBeNull();
+  });
+
+  it("reads an EMPTY verdict as 'detached nothing', never as a bubble named ''", () => {
+    // Arrange / Act / Assert
+    expect(watcherRef({ ...tool("t1"), spawnedBubbleId: "" })).toBeNull();
+  });
+
+  it("returns null for a non-tool item, which cannot detach anything", () => {
+    // Arrange / Act / Assert
+    expect(watcherRef(text("b1"))).toBeNull();
+  });
+
+  it("no longer accepts a landed notification's task id — that rung is gone", () => {
+    // Arrange — the harness correlated a completion, but the daemon published
+    // no verdict. Under the old ladder this manufactured an identity.
+    const item: ToolItem = { ...tool("t1"), notification: { taskId: "bg9", text: "<task-notification/>" } };
+
+    // Act / Assert
+    expect(watcherRef(item)).toBeNull();
+  });
+
+  it("no longer accepts a prose announcement — that rung is gone too", () => {
+    // Arrange — an id sitting next to its spool path in result text, the old
+    // last-resort tier.
     const item: ToolItem = {
       ...tool("t1"),
-      notification: { taskId: "bg9", text: "<task-notification/>" },
+      result: {
+        isError: false,
+        content: "Command running in background with ID: bg1. Output is being written to: /tmp/bg1.output",
+      },
     };
-    // Act / Assert
-    expect(watcherRef(item)).toEqual({ id: "bg9", origin: "notification" });
-  });
 
-  it("accepts a PAIRED prose announcement as the last tier", () => {
-    // Arrange — pre-structured history: id next to its spool path.
-    const item = bgSpawner("t1", "bg1");
     // Act / Assert
-    expect(watcherRef(item)).toEqual({ id: "bg1", origin: "announced" });
+    expect(watcherRef(item)).toBeNull();
   });
 
   it("refuses a sync agent's bare completion handle — the phantom-member regression", () => {
-    // Arrange — every finished foreground agent's result carries this
-    // handle, which once made the settled call an amber-forever member.
+    // Arrange — every finished foreground agent's result carries this handle,
+    // which once made the settled call an amber-forever member.
     const item: ToolItem = {
       ...tool("t1", "Agent"),
       result: {
@@ -87,20 +110,16 @@ describe("watcherRef", () => {
         content: "agentId: a36ef865012a4672a (use SendMessage with to: 'a36ef865012a4672a')",
       },
     };
+
     // Act / Assert
     expect(watcherRef(item)).toBeNull();
-  });
-
-  it("returns null for a plain call that spawned nothing", () => {
-    // Arrange / Act / Assert
-    expect(watcherRef(tool("t1"))).toBeNull();
   });
 });
 
 describe("isWatcher", () => {
-  it("is true for a tool that announced a background id", () => {
+  it("is true for a call the daemon classified as detaching work", () => {
     // Arrange / Act / Assert
-    expect(isWatcher(bgSpawner("t1", "bg1"))).toBe(true);
+    expect(isWatcher(spawner("t1", "b1"))).toBe(true);
   });
 
   it("is false for a plain tool that spawned nothing", () => {
@@ -115,35 +134,9 @@ describe("isWatcher", () => {
 });
 
 describe("asyncByBubble", () => {
-  it("maps a final bubble to a backgrounded-Bash member armed in its turn", () => {
+  it("maps a final bubble to a classified member armed in its turn", () => {
     // Arrange
-    const watcher = bgSpawner("t1", "bg1");
-    const items = [userTurn(), watcher, text("b1"), result()];
-    // Act
-    const byBubble = asyncByBubble(items);
-    // Assert
-    expect(byBubble.get("b1")).toEqual([watcher]);
-  });
-
-  it("maps a background-agent member named by agentId in its result", () => {
-    // Arrange
-    const agent: ToolItem = {
-      ...tool("t1", "Agent"),
-      result: { isError: false, content: "Async agent launched. agentId: abc1, output_file: /tmp/claude-1/s/tasks/abc1.output" },
-    };
-    const items = [userTurn(), agent, text("b1"), result()];
-    // Act
-    const byBubble = asyncByBubble(items);
-    // Assert
-    expect(byBubble.get("b1")).toEqual([agent]);
-  });
-
-  it("maps a member whose id came only from its landed notification", () => {
-    // Arrange — no id in the result text, the notification is authoritative.
-    const watcher: ToolItem = {
-      ...tool("t1", "Agent"),
-      notification: { taskId: "abc1", text: "<task-notification/>" },
-    };
+    const watcher = spawner("t1", "b-1");
     const items = [userTurn(), watcher, text("b1"), result()];
     // Act
     const byBubble = asyncByBubble(items);
@@ -160,9 +153,19 @@ describe("asyncByBubble", () => {
     expect(byBubble.size).toBe(0);
   });
 
+  it("omits a bubble whose turn only produced an unclassified notification", () => {
+    // Arrange — the ladder's middle rung would have hosted this member.
+    const noisy: ToolItem = { ...tool("t1"), notification: { taskId: "bg9", text: "<task-notification/>" } };
+    const items = [userTurn(), noisy, text("b1"), result()];
+    // Act
+    const byBubble = asyncByBubble(items);
+    // Assert
+    expect(byBubble.size).toBe(0);
+  });
+
   it("maps an interrupted turn's survivors to its last text, never orphaning them", () => {
     // Arrange — an aborted turn's background work outlives the severed turn.
-    const watcher = bgSpawner("t1", "bg1");
+    const watcher = spawner("t1", "b-1");
     const items = [userTurn(), watcher, text("b1"), result("aborted")];
     // Act
     const byBubble = asyncByBubble(items);
@@ -172,7 +175,7 @@ describe("asyncByBubble", () => {
 
   it("hosts a tools-only turn's members on its prompt bubble when no final text exists", () => {
     // Arrange — the turn armed background work but wrote no answer to host it.
-    const watcher = bgSpawner("t1", "bg1");
+    const watcher = spawner("t1", "b-1");
     const items = [userTurn("u7"), watcher, result()];
     // Act
     const byBubble = asyncByBubble(items);
@@ -182,7 +185,7 @@ describe("asyncByBubble", () => {
 
   it("keys the LAST main-chain text before the result, not an earlier one", () => {
     // Arrange — commentary then the real answer.
-    const watcher = bgSpawner("t1", "bg1");
+    const watcher = spawner("t1", "b-1");
     const items = [userTurn(), text("commentary"), watcher, text("answer"), result()];
     // Act
     const byBubble = asyncByBubble(items);
@@ -193,7 +196,7 @@ describe("asyncByBubble", () => {
 
   it("never keys a subagent's parented prose as the host bubble", () => {
     // Arrange — the parented text is commentary inside a card, not the answer.
-    const watcher = bgSpawner("t1", "bg1");
+    const watcher = spawner("t1", "b-1");
     const items = [userTurn(), watcher, text("nested", "a1"), text("answer"), result()];
     // Act
     const byBubble = asyncByBubble(items);
@@ -204,7 +207,7 @@ describe("asyncByBubble", () => {
 
   it("keys nothing for a still-streaming turn, whose frontier is not yet quiescent", () => {
     // Arrange — a live member armed but no result closing the turn yet.
-    const watcher = bgSpawner("t1", "bg1");
+    const watcher = spawner("t1", "b-1");
     const items = [userTurn(), watcher, text("b1")];
     // Act
     const byBubble = asyncByBubble(items);
@@ -214,8 +217,8 @@ describe("asyncByBubble", () => {
 
   it("scopes each bubble to its own turn's members, not a prior turn's", () => {
     // Arrange — two turns, one member each.
-    const first = bgSpawner("t1", "bg1");
-    const second = bgSpawner("t2", "bg2");
+    const first = spawner("t1", "b-1");
+    const second = spawner("t2", "b-2");
     const items = [
       userTurn("u1"),
       first,
