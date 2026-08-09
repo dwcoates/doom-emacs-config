@@ -1647,6 +1647,13 @@ function resultSubtype(name: string): ResultSubtype {
     case "RESULT_SUBTYPE_ERROR_MAX_TURNS":
     case "error_max_turns":
       return "error_max_turns";
+    // The shim's own member for a turn the user stopped. It is what the
+    // yellow `interrupted` chip is drawn from (render.ts ResultChip), and
+    // folding it into the default arm is what made a stop render as a red
+    // `error_during_execution`.
+    case "RESULT_SUBTYPE_ABORTED":
+    case "aborted":
+      return "aborted";
     default:
       // ERROR_DURING_EXECUTION / ERROR_MAX_BUDGET_USD /
       // ERROR_MAX_STRUCTURED_OUTPUT_RETRIES / UNSPECIFIED all read as a
