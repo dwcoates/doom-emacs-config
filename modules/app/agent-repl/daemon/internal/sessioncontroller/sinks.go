@@ -2052,11 +2052,11 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	// It runs BEFORE the feed push so that a bubble a frontend is about to be
 	// told about by a stamped tool card has already been opened for it.
 	//
-	// The MERGE WINDOW's opening edge rides the same push, and for the same
-	// reason: the merge Skill call's card is in this very delta, and the bubble
-	// has to exist before the stamp below resolves it (mergewindow.go).
+	// A WINDOW's opening edge rides the same push, and for the same reason: the
+	// Skill call's card is in this very delta, and the bubble has to exist
+	// before the stamp below resolves it (asyncwindows.go).
 	detached := c.observeAsync(curated, ev)
-	detached.absorb(c.observeMergeSpawn(curated, ev))
+	detached.absorb(c.observeSkillSpawn(curated, ev))
 	c.pushAsync(detached, ev)
 	// THE CLASSIFICATION VERDICT ON THE TOOL CARD, from the same store the
 	// bubbles live in — so the card names a bubble the frontend has, and both
@@ -2123,9 +2123,10 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 		delete(c.terminalAccounting, ev.GetSeq())
 	}
 	// The harness's isMeta records — a launched skill's body and the notices
-	// around it — become the skill card they belong to, or nothing at all
-	// (skillbody.go).
-	c.curateMetaRecords(cd, envs)
+	// around it — become the skill's own bubble body, the skill card they belong
+	// to, or nothing at all (skillbody.go). A body delivered to a bubble is async
+	// traffic, and rides out with the window's own push below.
+	windows := c.curateMetaRecords(cd, envs)
 	// The CLI's own slash-command bookkeeping, which it writes as unflagged
 	// "user" transcript records, goes no further than this (machinery.go).
 	// FIRST, before attribution: a machinery record claiming a real prompt's
@@ -2166,18 +2167,21 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	if live {
 		c.attributeUserTurn(cd)
 	}
-	// THE MERGE WINDOW'S DIVERSION, LAST. While a merge run owns the session,
-	// its emissions belong to the Merge bubble rather than to this delta — and
-	// running here, after every curator and every stamp, means the items it
+	// THE WINDOW DIVERSION, LAST. While a merge run or a skill invocation owns
+	// the session, its emissions belong to that bubble rather than to this delta
+	// — and running here, after every curator and every stamp, means the items it
 	// diverts are exactly the ones that would otherwise have been pushed
-	// (mergewindow.go). The delta is still pushed when the diversion empties it,
+	// (asyncwindows.go). The delta is still pushed when the diversion empties it,
 	// because it carries the frontend's replay cursor.
-	merged := c.foldMergeWindow(cd, ev)
+	//
+	// The body deliveries absorbed above go out FIRST in the same frame: a
+	// skill's body is what the bubble opens with, and its emissions follow.
+	windows.absorb(c.foldWindows(cd, ev))
 	c.push.PushConversationDelta(cd)
 	// AFTER the feed push: the bubble's new content is the content that just
 	// left this delta, and a client applies the removal before the fold that
 	// explains it.
-	c.pushAsync(merged, ev)
+	c.pushAsync(windows, ev)
 	// A DURABLE replay watches what its own store events carried, so an
 	// un-retired receipt for a prompt those events already drew is suppressed
 	// rather than drawn a second time (durablereplay.go). Nil on every live
