@@ -378,7 +378,9 @@ exist before its workspace directory is known."
 ;;      in a `agent-repl--color-*' / `--label-*' / `--tab-weight' defconst.
 ;;   2. `agent-repl--tab-default' and `agent-repl--tab-palette' — the
 ;;      two defconsts that compose those named values into per-state
-;;      appearance specs.  No palette row contains a string literal.
+;;      appearance specs.  No palette row contains a string literal,
+;;      and no palette row spells its own shape out either: every one
+;;      is built by `agent-repl--tab-palette-row'.
 ;;   3. Faces — four `defface' forms that reference the same named
 ;;      constants (Doom theming hook).
 ;;   4. Renderers — take a spec, emit a propertized string.
@@ -463,19 +465,23 @@ Shares its value with the webapp's `--async' so the async bubble border
 and this tab are literally the same color rather than two that nearly
 match.")
 
-(defconst agent-repl--color-vendor-blocked-purple "#a21caf"
-  "PURPLE: blocked on the VENDOR or the ACCOUNT.
-Auth needed, usage limit reached, a persistent 4xx/5xx, or any other
-abnormal turn-CONCLUDING error — a user-set max-turns/max-budget stop, a
-model refusal, an execution error.  Purple is a REPORT of how the last
-turn ended, the counterpart to green's \"it ended normally\", not a gate
-on anything future.  Prompting stays available throughout, and the next
-thing the agent does replaces the purple outright: an in-flight retry is
-red, and a retry that hits the same wall is purple again.
+(defconst agent-repl--color-merging-purple "#a21caf"
+  "PURPLE: a MERGE is in flight.
+About to enqueue, waiting behind a sibling, or running.  The work is the
+system\='s rather than the agent\='s, which is exactly why red is wrong for
+it: a merging workspace\='s turn ENDED before its merge began, and red
+would claim a turn was still running.  What purple shares with red is
+only the actionability claim — the user cannot act on the workspace
+until the merge resolves.
 
-A magenta-leaning purple, deliberately clear of any violet a merge or a
-retry wears: those are the system working, and confusing one with a
-session that has stopped is the misread this color exists to prevent.")
+Purple is the vendor-blocked color on every OTHER surface, and this
+renderer is the declared exception (`agent-repl--tab-bar-color-overrides\=').
+A tab bar has no glyph to tell two purples apart, so `:vendor-blocked\='
+takes blue here and purple says one thing.
+
+A magenta-leaning purple, deliberately clear of any violet: a merge is
+the system working, and confusing it with a session that has stopped is
+the misread this color exists to prevent.")
 
 (defconst agent-repl--color-done-green-bright "#2a8c2a"
   "Brighter green used for :done / :permission bracket-fg on selected
@@ -563,9 +569,10 @@ surface starts from, never what the tab bar finishes with; read
 `agent-repl--tab-bar-state-color\=' for that.")
 
 (defconst agent-repl--tab-bar-color-overrides
-  '((:merge-enqueuing . "red")
-    (:merge-queued    . "red")
-    (:merging         . "red"))
+  '((:merge-enqueuing . "purple")
+    (:merge-queued    . "purple")
+    (:merging         . "purple")
+    (:vendor-blocked  . "blue"))
   "Where the TAB BAR paints a state differently from `agent-repl--state-color\='.
 
 Emacs\='s corner of the fixture\='s \"surface_overrides.emacs_tab_bar\"
@@ -577,15 +584,24 @@ itself.
 
 The tab bar carries no badges and no glyphs — a state reaches it only as
 the [N] bracket\='s color — so \"none\" there renders a workspace whose
-merge is running identically to one nobody has touched.  Red already
-means \"work is in flight and you cannot act on this\", which is what a
-merge the daemon is carrying is.
+merge is running identically to one nobody has touched.  PURPLE is the
+tab bar\='s merge color: a merge is the system\='s own work rather than the
+agent\='s, and red would have said \"a turn is running\" about a workspace
+whose turn ended before the merge began.
 
-Only the three merge states with no verdict yet: about to enqueue,
-waiting behind a sibling in its repository\='s queue, and running.
-`:merge-conflict\=' is NOT here — a conflict is waiting on the user, which
-is the opposite of red\='s claim — and `:merge-failed\=' and `:merged\=' are
-terminal.")
+The merge rows are the three states with no verdict yet: about to
+enqueue, waiting behind a sibling in its repository\='s queue, and
+running.  `:merge-conflict\=' is NOT here — a conflict is waiting on the
+user, which is the opposite of the in-flight claim — and
+`:merge-failed\=' and `:merged\=' are terminal.
+
+`:vendor-blocked\=' is the fourth row, and it is here because purple can
+say only ONE thing on a surface with no glyph to disambiguate two.  It
+takes the blue this tab bar already spends on `:init\=', `:severed\=',
+`:dead\=' and `:degraded\=' — every way the route to a working session is
+compromised — which is exactly what an auth wall, a usage limit or a
+persistent vendor failure is.  The badge-bearing surfaces keep it purple
+on the shared assignment.")
 
 (defconst agent-repl--tab-bar-state-color
   (mapcar (lambda (row)
@@ -606,7 +622,7 @@ table remains the contract every other surface reads.")
 (defconst agent-repl--color-by-name
   `(("blue"   . ,agent-repl--color-init-blue)
     ("teal"   . ,agent-repl--color-hibernated-teal)
-    ("purple" . ,agent-repl--color-vendor-blocked-purple)
+    ("purple" . ,agent-repl--color-merging-purple)
     ("red"    . ,agent-repl--color-thinking-red)
     ("yellow" . ,agent-repl--color-idle-async-yellow)
     ("green"  . ,agent-repl--color-done-green))
@@ -629,267 +645,179 @@ rank 15 — directly below the blue band (severed 12, starting 14) and
 above purple\='s 20.  Emphatically NOT below green: hibernation makes the
 same actionability claim blue does, and only the reason is benign.")
 
+(defun agent-repl--tab-palette-row (face color fg)
+  "Build one `agent-repl--tab-palette' row from the parts that VARY.
+
+Every row in that palette says the same three things, so the shape is
+built here once rather than written out twenty times:
+
+  FACE  — the `defface' the unselected name region takes.
+  COLOR — the state's color, painted across the WHOLE unselected entry
+          and on the SELECTED row's [N] bracket (selection dims the name
+          to the shared grey, so the bracket is where a selected tab
+          still carries its state).
+  FG    — the unselected foreground legible against COLOR: light for the
+          dark backgrounds, dark for the light ones.  Not derived from
+          COLOR, because the six are not separable by a luminance rule
+          that lands on the right answer for each.
+
+An entry is ONE color end to end, so no row may paint the [N] bracket
+differently from the name region: the bracket carries the tab's number
+and the state's color, and a second color inside one entry would be a
+second vocabulary saying what the state color already says.
+
+The invariant parts are the ones no row has ever varied: an unselected
+bracket numeral in `agent-repl--color-default-bracket', a selected row
+backed by `agent-repl--color-selected-bg' with a dark separator and a
+light bracket numeral, and `agent-repl--tab-weight' throughout."
+  `(:face       ,face
+    :unselected (:bg ,color
+                 :fg ,fg
+                 :bracket-fg ,agent-repl--color-default-bracket
+                 :weight ,agent-repl--tab-weight)
+    :selected   (:bg ,agent-repl--color-selected-bg
+                 :fg ,agent-repl--color-dark
+                 :bracket-bg ,color
+                 :bracket-fg ,agent-repl--color-light
+                 :weight ,agent-repl--tab-weight)))
+
 (defconst agent-repl--tab-palette
-  `((:init
-     :face       agent-repl-tab-init
-     :unselected (:bg ,agent-repl--color-init-blue
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-init-blue
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
+  `((:init . ,(agent-repl--tab-palette-row
+               'agent-repl-tab-init
+               agent-repl--color-init-blue
+               agent-repl--color-light))
     ;; SEVERED borrows init's blue: the claim about what the user can do is
     ;; identical — this workspace has no live session and something on our side
     ;; broke — and only the word and the glyph distinguish "coming up" from
     ;; "the substrate is gone".
-    (:severed
-     :face       agent-repl-tab-init
-     :unselected (:bg ,agent-repl--color-init-blue
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-init-blue
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
+    (:severed . ,(agent-repl--tab-palette-row
+                  'agent-repl-tab-init
+                  agent-repl--color-init-blue
+                  agent-repl--color-light))
     ;; HIBERNATED takes a color of its OWN, which is the one place in this
     ;; palette where a borrowed shade was not enough.  Every other borrow above
     ;; shares a hue because the two states share a claim; these two shared a
     ;; claim about ACTIONABILITY and disagreed completely about FAULT, and
     ;; painting them alike is what made blue unreadable.
-    (:hibernated
-     :face       agent-repl-tab-hibernated
-     :unselected (:bg ,agent-repl--color-hibernated-teal
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-hibernated-teal
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    (:thinking
-     :face       agent-repl-tab-thinking
-     :unselected (:bg ,agent-repl--color-thinking-red
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-thinking-red
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
+    (:hibernated . ,(agent-repl--tab-palette-row
+                     'agent-repl-tab-hibernated
+                     agent-repl--color-hibernated-teal
+                     agent-repl--color-light))
+    (:thinking . ,(agent-repl--tab-palette-row
+                   'agent-repl-tab-thinking
+                   agent-repl--color-thinking-red
+                   agent-repl--color-light))
     ;; :submitting borrows thinking's red for the same reason the context cuts
     ;; below do: the claim about what the user cannot do is identical, and only
     ;; the phase word says the shim has not taken the prompt yet.
-    (:submitting
-     :face       agent-repl-tab-thinking
-     :unselected (:bg ,agent-repl--color-thinking-red
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-thinking-red
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
+    (:submitting . ,(agent-repl--tab-palette-row
+                     'agent-repl-tab-thinking
+                     agent-repl--color-thinking-red
+                     agent-repl--color-light))
     ;; The two context cuts borrow thinking's red rather than taking a shade
     ;; of their own: they make the SAME claim about what the user cannot do,
     ;; and only the phase word in the footer distinguishes them.
-    (:clearing
-     :face       agent-repl-tab-thinking
-     :unselected (:bg ,agent-repl--color-thinking-red
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-thinking-red
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    (:compacting
-     :face       agent-repl-tab-thinking
-     :unselected (:bg ,agent-repl--color-thinking-red
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-thinking-red
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    (:done
-     :face       agent-repl-tab-done
-     :unselected (:bg ,agent-repl--color-done-green
-                  :fg ,agent-repl--color-dark
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-done-green
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
+    (:clearing . ,(agent-repl--tab-palette-row
+                   'agent-repl-tab-thinking
+                   agent-repl--color-thinking-red
+                   agent-repl--color-light))
+    (:compacting . ,(agent-repl--tab-palette-row
+                     'agent-repl-tab-thinking
+                     agent-repl--color-thinking-red
+                     agent-repl--color-light))
+    (:done . ,(agent-repl--tab-palette-row
+               'agent-repl-tab-done
+               agent-repl--color-done-green
+               agent-repl--color-dark))
     ;; INTERRUPTED takes done's green, and had NO palette row at all until
     ;; now: the state resolved, the shared color table assigned it green, and
     ;; the tab bar fell through to `agent-repl--tab-default' and painted it
     ;; uncolored.  An assignment with no row is an assignment nothing honors.
-    (:interrupted
-     :face       agent-repl-tab-done
-     :unselected (:bg ,agent-repl--color-done-green
-                  :fg ,agent-repl--color-dark
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-done-green
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    (:permission
-     :face       agent-repl-tab-permission
-     :unselected (:bg ,agent-repl--color-done-green
-                  :fg ,agent-repl--color-dark
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-done-green
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    (:idle
-     :face       agent-repl-tab-ready
-     :unselected (:bg ,agent-repl--color-done-green
-                  :fg ,agent-repl--color-dark
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-done-green
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    (:ready
-     :face       agent-repl-tab-ready
-     :unselected (:bg ,agent-repl--color-done-green
-                  :fg ,agent-repl--color-dark
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-done-green
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    (:idle-async
-     :face       agent-repl-tab-idle-async
-     :unselected (:bg ,agent-repl--color-idle-async-yellow
-                  :fg ,agent-repl--color-dark
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-idle-async-yellow
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    (:vendor-blocked
-     :face       agent-repl-tab-vendor-blocked
-     :unselected (:bg ,agent-repl--color-vendor-blocked-purple
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-vendor-blocked-purple
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
+    (:interrupted . ,(agent-repl--tab-palette-row
+                      'agent-repl-tab-done
+                      agent-repl--color-done-green
+                      agent-repl--color-dark))
+    (:permission . ,(agent-repl--tab-palette-row
+                     'agent-repl-tab-permission
+                     agent-repl--color-done-green
+                     agent-repl--color-dark))
+    (:idle . ,(agent-repl--tab-palette-row
+               'agent-repl-tab-ready
+               agent-repl--color-done-green
+               agent-repl--color-dark))
+    (:ready . ,(agent-repl--tab-palette-row
+                'agent-repl-tab-ready
+                agent-repl--color-done-green
+                agent-repl--color-dark))
+    (:idle-async . ,(agent-repl--tab-palette-row
+                     'agent-repl-tab-idle-async
+                     agent-repl--color-idle-async-yellow
+                     agent-repl--color-dark))
+    ;; VENDOR-BLOCKED is BLUE on the tab bar and purple everywhere else, which
+    ;; is the one row here that reads its color from the override table rather
+    ;; than the shared assignment.  An auth wall, a usage limit or a persistent
+    ;; vendor failure is a compromised route to a working session, exactly like
+    ;; the three blues below it; purple stays spent on the merge pipeline,
+    ;; which a tab bar with no glyph could not otherwise tell apart from it.
+    (:vendor-blocked . ,(agent-repl--tab-palette-row
+                         'agent-repl-tab-init
+                         agent-repl--color-init-blue
+                         agent-repl--color-light))
     ;; `:start-failed', `:dead' and `:degraded' are BLUE, not colors of
     ;; their own: a shim that never came up, one that has gone away, and a
     ;; store outage are the same compromised route.  Which way the route is
     ;; broken is the sidebar's to report, not the tab's.
-    (:start-failed
-     :face       agent-repl-tab-init
-     :unselected (:bg ,agent-repl--color-init-blue
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-init-blue
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    (:dead
-     :face       agent-repl-tab-init
-     :unselected (:bg ,agent-repl--color-init-blue
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-init-blue
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    (:degraded
-     :face       agent-repl-tab-init
-     :unselected (:bg ,agent-repl--color-init-blue
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-init-blue
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    ;; The three IN-FLIGHT merge states borrow thinking's red, exactly as
-    ;; `:submitting' and the context cuts do, and for the same reason: the
-    ;; claim about what the user can do is identical.  Work is running that
-    ;; they neither drive nor can interrupt from the tab.  Which kind of work
-    ;; it is stays the sidebar's to say — the tab bar has no glyph to say it
-    ;; with, which is why these took no color at all until now and a merging
-    ;; workspace looked untouched.
-    (:merge-enqueuing
-     :face       agent-repl-tab-thinking
-     :unselected (:bg ,agent-repl--color-thinking-red
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-thinking-red
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    (:merge-queued
-     :face       agent-repl-tab-thinking
-     :unselected (:bg ,agent-repl--color-thinking-red
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-thinking-red
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    (:merging
-     :face       agent-repl-tab-thinking
-     :unselected (:bg ,agent-repl--color-thinking-red
-                  :fg ,agent-repl--color-light
-                  :bracket-fg ,agent-repl--color-default-bracket
-                  :weight ,agent-repl--tab-weight)
-     :selected   (:bg ,agent-repl--color-selected-bg
-                  :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-thinking-red
-                  :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight)))
+    (:start-failed . ,(agent-repl--tab-palette-row
+                       'agent-repl-tab-init
+                       agent-repl--color-init-blue
+                       agent-repl--color-light))
+    (:dead . ,(agent-repl--tab-palette-row
+               'agent-repl-tab-init
+               agent-repl--color-init-blue
+               agent-repl--color-light))
+    (:degraded . ,(agent-repl--tab-palette-row
+                   'agent-repl-tab-init
+                   agent-repl--color-init-blue
+                   agent-repl--color-light))
+    ;; The three IN-FLIGHT merge states take PURPLE, and it is theirs alone on
+    ;; this surface.  They took no color at all until recently, which rendered
+    ;; a workspace whose merge was running identically to one nobody had
+    ;; touched; they then borrowed thinking's red, which said "a turn is
+    ;; running" about a workspace whose turn ended before the merge began.
+    ;; Purple says what is true: work is in flight, it is the SYSTEM's rather
+    ;; than the agent's, and the user cannot act on the workspace while it
+    ;; runs.  `:vendor-blocked' moved to blue above so purple means this and
+    ;; nothing else here.
+    (:merge-enqueuing . ,(agent-repl--tab-palette-row
+                          'agent-repl-tab-merging
+                          agent-repl--color-merging-purple
+                          agent-repl--color-light))
+    (:merge-queued . ,(agent-repl--tab-palette-row
+                       'agent-repl-tab-merging
+                       agent-repl--color-merging-purple
+                       agent-repl--color-light))
+    (:merging . ,(agent-repl--tab-palette-row
+                  'agent-repl-tab-merging
+                  agent-repl--color-merging-purple
+                  agent-repl--color-light)))
   "Per-state tab-appearance palette.
 Each entry fully describes both selected and unselected looks for a
 agent-state keyword via nested `:unselected' and `:selected' plists.
 `:repl-state :inactive' does not contribute to color (it is bookkeeping
 only).
 
-The three IN-FLIGHT merge states have rows because the tab bar overrides
-them to red (`agent-repl--tab-bar-color-overrides'), which is the one
-place this palette answers to `agent-repl--tab-bar-state-color' rather
-than to the shared `agent-repl--state-color'.
+Every row is built by `agent-repl--tab-palette-row', so a row states
+ONLY what it does not share with the others: its face, its color, and
+its unselected foreground.  The shape itself lives in that one function,
+where a change to what a row means reaches all twenty at once, and an
+entry is always ONE color end to end.
+
+Two kinds of row answer to `agent-repl--tab-bar-state-color' rather than
+to the shared `agent-repl--state-color', and both divergences are
+declared in `agent-repl--tab-bar-color-overrides'.  The three IN-FLIGHT
+merge states have rows at all because of the override that gives them
+purple; `:vendor-blocked' has a row whose color is BLUE here and purple
+on every badge-bearing surface.
 
 `:merge-conflict' and `:merge-failed' still have NO entry: they take none
 of the six, and with no badge on the tab the merge pipeline says what it
@@ -974,13 +902,18 @@ never prompted, or went quiet after a clean conclusion.")
   "Face for workspace tabs with no foreground turn but live detached
 background work (yellow).")
 
-(defface agent-repl-tab-vendor-blocked
-  `((t :background ,agent-repl--color-vendor-blocked-purple
+(defface agent-repl-tab-merging
+  `((t :background ,agent-repl--color-merging-purple
        :foreground ,agent-repl--color-light
        :weight ,agent-repl--tab-weight))
-  "Face for workspace tabs blocked on the vendor or the account
-\(purple + ⛔): auth, usage limit, a persistent API failure, or an
-abnormal turn conclusion.")
+  "Face for workspace tabs with a merge in flight (purple): about to
+enqueue, waiting behind a sibling, or running.
+
+There is no `agent-repl-tab-vendor-blocked' face beside this one any
+more.  A vendor-blocked workspace paints BLUE on the tab bar, so it
+takes `agent-repl-tab-init' exactly as `:severed', `:dead' and
+`:degraded' do — every one of them a compromised route to a working
+session.")
 
 ;;; The daemon-link indicator
 ;;

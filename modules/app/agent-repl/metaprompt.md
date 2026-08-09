@@ -14,11 +14,34 @@
 ### Before committing
 
 - Review the new or changed code for any similar pattern elsewhere in the codebase eligible for consolidation via helper extraction.
-  - Surface any candidate to me as a possibility (do not auto-apply the extraction).
   - If nothing comes up, simply proceed with the commit.
 - Prefer extraction whenever patterns genuinely repeat, even when it would require extra work.
   - Code reuse and DRY are first-class concerns.
   - The work to extract a helper is almost always cheaper than the long-term cost of two near-duplicate sites drifting out of sync.
+
+### Resolving consolidation candidates
+
+- APPLY every consolidation candidate I find; do not merely surface it and wait for permission.
+  - The default is extraction, and asking first is the exception rather than the rule.
+  - Report what was extracted afterwards, so the extraction is visible without having been gated on a reply.
+- Land the extraction as its own commit, separate from the functional change that revealed it.
+  - The functional commit stays reviewable on its own terms.
+  - The extraction commit is behavior-preserving and says so, with the existing suite passing unchanged as the evidence.
+- Every extracted helper gets unit tests of its own, exactly as any other new function does.
+  - Cover the invariant parts the helper now guarantees for all its callers.
+  - Add a test asserting the call sites actually share the extracted shape, so a hand-rolled divergent site fails rather than passing silently.
+- STOP and ask ONLY when the extraction cannot be made behavior-preserving, or when it forces a design decision that is mine to make.
+  - A merely large or tedious extraction is never a reason to ask, per the cost model in the design-expedience rule.
+  - When I do stop, I state the candidate and the specific decision it turns on, rather than presenting the extraction as optional.
+
+### Before fully resolving a workspace
+
+- A workspace is FULLY RESOLVED by the merge, close, or PR action that ends it, and no such action may run with an unresolved consolidation candidate outstanding.
+  - Every candidate found during the workspace's work is either applied and committed, or surfaced as a blocking question I have answered.
+  - A candidate mentioned in a response and left unapplied is an unresolved candidate, and it blocks the merge exactly as an unfinished implementation would.
+- Sweep for candidates one last time immediately before dispatching the resolving action.
+  - The sweep covers the workspace's whole diff against its source, not only the most recent change.
+  - Applying what the sweep finds happens BEFORE the dispatch, so the merged branch never carries a known duplication forward.
 
 ### Allowed with discretion
 

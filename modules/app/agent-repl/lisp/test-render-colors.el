@@ -157,13 +157,31 @@ the contract exists to catch, whichever direction it runs in."
     ;; ...and Emacs overrides nothing the fixture did not declare.
     (should (equal (length declared) (length agent-repl--tab-bar-color-overrides)))))
 
-(ert-deftest agent-repl-test-colors-tab-bar-overrides-the-in-flight-merges-to-red ()
-  "The three verdict-less merge states read red on the tab bar.
-A merge the daemon is carrying makes red's claim exactly: work is in
-flight and the user cannot act on the workspace."
+(ert-deftest agent-repl-test-colors-tab-bar-overrides-the-in-flight-merges-to-purple ()
+  "The three verdict-less merge states read purple on the tab bar.
+Work is in flight and the user cannot act on the workspace, but the work
+is the SYSTEM's rather than the agent's — red would have claimed a turn
+was running, and a merging workspace's turn ended before its merge began."
   ;; Act / Assert
   (dolist (keyword '(:merge-enqueuing :merge-queued :merging))
-    (should (equal (alist-get keyword agent-repl--tab-bar-state-color) "red"))))
+    (should (equal (alist-get keyword agent-repl--tab-bar-state-color) "purple"))))
+
+(ert-deftest agent-repl-test-colors-tab-bar-overrides-vendor-blocked-to-blue ()
+  "`:vendor-blocked' reads blue on the tab bar and purple everywhere else.
+The two overrides are one decision: purple can carry only one meaning on
+a surface with no glyph to tell two purples apart."
+  ;; Act / Assert
+  (should (equal (alist-get :vendor-blocked agent-repl--tab-bar-state-color) "blue"))
+  (should (equal (alist-get :vendor-blocked agent-repl--state-color) "purple")))
+
+(ert-deftest agent-repl-test-colors-the-tab-bar-spends-purple-on-nothing-else ()
+  "The merge states are the ONLY states purple on the tab bar.
+A second purple there would be unreadable, which is the whole reason
+`:vendor-blocked' moved to blue."
+  ;; Act / Assert
+  (dolist (entry agent-repl--tab-bar-state-color)
+    (when (equal (cdr entry) "purple")
+      (should (memq (car entry) '(:merge-enqueuing :merge-queued :merging))))))
 
 (ert-deftest agent-repl-test-colors-tab-bar-leaves-the-settled-merges-colorless ()
   "A conflict and the two terminal merge states take no tab-bar color.
