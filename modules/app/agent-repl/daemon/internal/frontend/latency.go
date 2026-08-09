@@ -25,6 +25,35 @@ const CommandAckDeadline = 10 * time.Second
 // trip, and four more like it in front of the next one would blow the budget.
 const DefaultAckWarnThreshold = 2 * time.Second
 
+// HostAckWarnThreshold is the delivery threshold for HOST-kind clients, half
+// the client's deadline rather than a fifth.
+//
+// The host is Emacs, whose socket reader shares one main thread with
+// everything else the editor does: a workspace materialization or a large
+// state apply legitimately holds that thread for seconds, and while it does,
+// the daemon's write blocks ON THE SOCKET (writeFrameWatched names exactly
+// this) — a delay the reader caused and the reader's own 10s deadline already
+// bounds. Observed steady-state host drains under those pauses run 3-4.5s; a
+// 2s threshold converts every one of them into a warning about daemon
+// latency that is really editor scheduling. Five seconds still warns while
+// the client waits (the warning's whole purpose) but only when the delay has
+// outgrown ordinary editor pauses and become worth a human's attention.
+// GUI-kind clients keep the tighter default: a webview's reader never
+// legitimately stalls.
+const HostAckWarnThreshold = 5 * time.Second
+
+// AckWarnThresholdFor resolves the per-client-kind delivery threshold. The
+// built-in host widening applies ONLY to the shipped default: an operator who
+// set AGENT_REPL_FRONTEND_ACK_WARN_MS stated one bound and gets it verbatim on
+// every kind — the accommodation is ours to make on our default, never a
+// silent edit of theirs.
+func AckWarnThresholdFor(kind string, base time.Duration) time.Duration {
+	if kind == "host" && base == DefaultAckWarnThreshold {
+		return HostAckWarnThreshold
+	}
+	return base
+}
+
 // AckWarnFromEnv resolves the warning threshold from the process environment.
 //
 // A malformed or non-positive value is an ERROR, never a silent fall back to
