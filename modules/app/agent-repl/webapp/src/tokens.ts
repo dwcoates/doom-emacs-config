@@ -149,6 +149,32 @@ export function expensiveInput(tokens: CanonicalTokenUsage): number {
 }
 
 /**
+ * ONE SUBAGENT'S uncached input, as the daemon attributed it, or null when it
+ * attributed none to that invocation.
+ *
+ * The figure is the same `expensiveInput` measure every other surface reads,
+ * taken off the daemon-resolved `AgentTokenUtilization.tokens` — never summed
+ * here from the vendor buckets, which would put a second owner of the
+ * session's economics in a renderer.
+ *
+ * PARENT-TOOL-USE-ID is the key because that is the identity the roster row
+ * already carries (the `Agent` call's tool-use id). NULL IS ABSENCE: an agent
+ * the daemon has not yet attributed usage to reports no figure rather than a
+ * zero, which would read as a subagent that cost nothing.
+ */
+export function agentUncachedInput(
+  utilization: SessionTokenUtilization | null | undefined,
+  parentToolUseId: string,
+): number | null {
+  if (utilization === undefined || utilization === null) return null;
+  const attributed = utilization.subagents.find(
+    (subagent) => subagent.agent?.parentToolUseId === parentToolUseId,
+  );
+  if (attributed === undefined || attributed.tokens === undefined) return null;
+  return expensiveInput(attributed.tokens);
+}
+
+/**
  * The heat ramp's anchors: `[tokens, hue]` pairs the ramp passes through
  * exactly, interpolated linearly between and clamped outside.
  *

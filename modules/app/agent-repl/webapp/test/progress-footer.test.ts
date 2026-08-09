@@ -10,9 +10,13 @@ import { CounterEntry } from "../src/counter-menu.js";
 import {
   alreadyCompletePhaseViolation,
   Activity,
+  EXPANDED_FOOTER_MAX_ROWS,
+  FooterAgentRow,
   FooterDisclosure,
   FooterInput,
   ProgressFooter,
+  expandedFooterScrolls,
+  footerAgentRows,
   activityBody,
   activityDetail,
   countersHtml,
@@ -130,7 +134,17 @@ function counterEntry(over: Partial<CounterEntry> = {}): CounterEntry {
   return { id: "a1", summary: "verify", detail: "", status: "running", nested: false, ...over };
 }
 
-const CLOSED: FooterDisclosure = { agentsOpen: false, tasksOpen: false, expanded: false };
+/** An active subagent as the expanded footer receives it. */
+function agentRow(over: Partial<FooterAgentRow> = {}): FooterAgentRow {
+  return {
+    ...counterEntry(),
+    item: tool({ toolUseId: "a1", toolName: "Agent" }),
+    uncachedInput: null,
+    ...over,
+  };
+}
+
+const CLOSED: FooterDisclosure = { tasksOpen: false, expanded: false };
 
 /** A click target standing in for a DOM element, matched by selector list. */
 function target(selectors: Record<string, Record<string, string>>) {
@@ -980,11 +994,29 @@ describe("tokenCellHtml: the turn's input tokens, and never its output", () => {
 describe("countersHtml: the relocated rosters and the badges", () => {
   it("renders the subagent roster through the shared counter facade", () => {
     // Arrange
-    const i = input({ agents: [counterEntry()] });
+    const i = input({ agents: [agentRow()] });
     // Act
     const got = countersHtml(i, CLOSED);
     // Assert — the facade's own chip markup, not a footer-local reimplementation.
     expect(got).toContain("data-agents-toggle");
+  });
+
+  it("drops no agents overlay while the expanded footer is open", () => {
+    // Arrange — the roster lives in the expanded footer, and only there.
+    const i = input({ agents: [agentRow()] });
+    // Act
+    const got = countersHtml(i, { ...CLOSED, expanded: true });
+    // Assert
+    expect(got).not.toContain("agents-overlay");
+  });
+
+  it("reports the expanded footer's state on the agents chip", () => {
+    // Arrange
+    const i = input({ agents: [agentRow()] });
+    // Act
+    const got = countersHtml(i, { ...CLOSED, expanded: true });
+    // Assert
+    expect(got).toContain('aria-expanded="true"');
   });
 
   it("renders the task roster through the same facade", () => {
@@ -1023,7 +1055,7 @@ describe("countersHtml: the relocated rosters and the badges", () => {
 
   it("drops a roster whose entries have all settled", () => {
     // Arrange
-    const i = input({ agents: [counterEntry({ status: "done" })] });
+    const i = input({ agents: [agentRow({ status: "done" })] });
     // Act
     const got = countersHtml(i, CLOSED);
     // Assert
@@ -1034,7 +1066,7 @@ describe("countersHtml: the relocated rosters and the badges", () => {
 describe("hasLiveCounters", () => {
   it("is false when every roster entry has settled", () => {
     // Arrange
-    const i = input({ agents: [counterEntry({ status: "done" })] });
+    const i = input({ agents: [agentRow({ status: "done" })] });
     // Act / Assert
     expect(hasLiveCounters(i)).toBe(false);
   });
@@ -1157,6 +1189,162 @@ describe("sheetHtml: the detail the thin strip drops", () => {
     const got = sheetHtml(input(), NOW);
     // Assert
     expect(got).not.toContain("first token");
+  });
+});
+
+// --- the expanded footer's roster and its ceiling ----------------------------
+
+describe("sheetHtml: the subagent roster", () => {
+  it("renders no roster row when the session has no subagents", () => {
+    // Arrange / Act — an absent roster announces nothing.
+    const got = sheetHtml(input(), NOW);
+    // Assert
+    expect(got).not.toContain("pfooter-agent-row");
+  });
+
+  it("puts the agent's type chip on the left of its row", () => {
+    // Arrange
+    const i = input({ agents: [agentRow({ detail: "explore" })] });
+    // Act
+    const got = sheetHtml(i, NOW);
+    // Assert
+    expect(got).toContain('<span class="agent-type">explore</span>');
+  });
+
+  it("puts the agent's summary on the left of its row", () => {
+    // Arrange
+    const i = input({ agents: [agentRow({ summary: "verify the fix" })] });
+    // Act
+    const got = sheetHtml(i, NOW);
+    // Assert
+    expect(got).toContain('<span class="agent-desc">verify the fix</span>');
+  });
+
+  it("names a summary-less agent by the roster's own placeholder", () => {
+    // Arrange
+    const i = input({ agents: [agentRow({ summary: "" })] });
+    // Act
+    const got = sheetHtml(i, NOW);
+    // Assert
+    expect(got).toContain('<span class="agent-desc">starting…</span>');
+  });
+
+  it("puts the agent's wallclock on the right of its row", () => {
+    // Arrange — the call opened 12s before NOW (see `tool`).
+    const i = input({ agents: [agentRow()] });
+    // Act
+    const got = sheetHtml(i, NOW);
+    // Assert
+    expect(got).toContain('<span class="pfooter-agent-runtime">12s</span>');
+  });
+
+  it("reports a settled agent's total span rather than a running clock", () => {
+    // Arrange
+    const settled = agentRow({
+      status: "done",
+      item: tool({
+        toolUseId: "a1",
+        toolName: "Agent",
+        resultTs: new Date(NOW - 2_000).toISOString(),
+      }),
+    });
+    // Act
+    const got = sheetHtml(input({ agents: [settled] }), NOW);
+    // Assert
+    expect(got).toContain('<span class="pfooter-agent-runtime">10s</span>');
+  });
+
+  it("puts the agent's uncached input on the right of its row", () => {
+    // Arrange
+    const i = input({ agents: [agentRow({ uncachedInput: 4_200 })] });
+    // Act
+    const got = sheetHtml(i, NOW);
+    // Assert — the compact form every footer figure wears.
+    expect(got).toContain('<span class="pfooter-agent-tokens">4.2k in</span>');
+  });
+
+  it("shows no token figure for an agent the daemon has not attributed", () => {
+    // Arrange / Act — a zero would claim the agent cost nothing.
+    const got = sheetHtml(input({ agents: [agentRow({ uncachedInput: null })] }), NOW);
+    // Assert
+    expect(got).not.toContain("pfooter-agent-tokens");
+  });
+
+  it("addresses each row with the agent it names", () => {
+    // Arrange / Act — the reveal verb reads this back off the click.
+    const got = sheetHtml(input({ agents: [agentRow({ id: "tu9" })] }), NOW);
+    // Assert
+    expect(got).toContain('data-agent-id="tu9"');
+  });
+});
+
+describe("the expanded footer's row ceiling", () => {
+  it("does not scroll a section that fits the ceiling exactly", () => {
+    // Arrange / Act
+    const got = expandedFooterScrolls(EXPANDED_FOOTER_MAX_ROWS);
+    // Assert
+    expect(got).toBe(false);
+  });
+
+  it("scrolls a section with one row more than the ceiling", () => {
+    // Arrange / Act
+    const got = expandedFooterScrolls(EXPANDED_FOOTER_MAX_ROWS + 1);
+    // Assert
+    expect(got).toBe(true);
+  });
+
+  it("marks the section as scrolling once its rows pass the ceiling", () => {
+    // Arrange — five agents against a four-row ceiling.
+    const agents = [1, 2, 3, 4, 5].map((n) => agentRow({ id: `a${n}` }));
+    // Act
+    const got = sheetHtml(input({ agents }), NOW);
+    // Assert
+    expect(got).toContain('class="pfooter-sheet scrolls"');
+  });
+
+  it("leaves a section that fits unmarked", () => {
+    // Arrange
+    const agents = [1, 2].map((n) => agentRow({ id: `a${n}` }));
+    // Act
+    const got = sheetHtml(input({ agents }), NOW);
+    // Assert
+    expect(got).toContain('class="pfooter-sheet"');
+  });
+
+  it("carries the ceiling into the markup for the stylesheet to size on", () => {
+    // Arrange / Act — one owner of the figure, not two.
+    const got = sheetHtml(input(), NOW);
+    // Assert
+    expect(got).toContain(`--pfooter-sheet-rows:${EXPANDED_FOOTER_MAX_ROWS}`);
+  });
+});
+
+describe("footerAgentRows", () => {
+  /** An `Agent` call in the feed, with ITS OWN tool-use id. */
+  const agentCall = (id: string): ToolItem =>
+    tool({ toolUseId: id, toolName: "Agent", input: { description: "verify" }, inputDone: true });
+
+  it("carries the call each roster entry names", () => {
+    // Arrange
+    const call = agentCall("tu1");
+    // Act
+    const [row] = footerAgentRows([call], null);
+    // Assert
+    expect(row.item).toBe(call);
+  });
+
+  it("reports no token figure without a session attribution", () => {
+    // Arrange / Act
+    const [row] = footerAgentRows([agentCall("tu1")], null);
+    // Assert
+    expect(row.uncachedInput).toBeNull();
+  });
+
+  it("projects no rows for a session that spawned no subagent", () => {
+    // Arrange / Act
+    const got = footerAgentRows([tool()], null);
+    // Assert
+    expect(got).toEqual([]);
   });
 });
 
@@ -1547,11 +1735,11 @@ describe("footerHtml: the V4 segmented dock", () => {
 // --- click delegation --------------------------------------------------------
 
 describe("footerClickAction", () => {
-  it("flips the agents overlay from its chip", () => {
-    // Arrange / Act
+  it("flips the expanded footer from the agents chip", () => {
+    // Arrange / Act — the chip is that section's toggle, not a menu of its own.
     const got = footerClickAction(target({ "[data-agents-toggle]": {} }));
     // Assert
-    expect(got).toEqual({ kind: "toggle-menu", menu: "agents" });
+    expect(got).toEqual({ kind: "toggle-expand" });
   });
 
   it("flips the tasks overlay from its chip", () => {
@@ -1594,10 +1782,10 @@ describe("footerClickAction", () => {
   it("lets a roster chip inside the strip win over the expansion toggle", () => {
     // Arrange — the chip lives INSIDE the clickable strip.
     const got = footerClickAction(
-      target({ "[data-agents-toggle]": {}, "[data-pfooter-strip]": {} }),
+      target({ "[data-tasks-toggle]": {}, "[data-pfooter-strip]": {} }),
     );
     // Assert
-    expect(got).toEqual({ kind: "toggle-menu", menu: "agents" });
+    expect(got).toEqual({ kind: "toggle-menu", menu: "tasks" });
   });
 
   it("is null for a click on nothing actionable", () => {
@@ -1711,30 +1899,28 @@ describe("ProgressFooter", () => {
     expect(el.querySelector(".pfooter-interrupt")).toBeNull();
   });
 
-  it("opens one overlay at a time", () => {
+  it("opens the tasks overlay on demand", () => {
     // Arrange
     const footer = new ProgressFooter(document.createElement("div"), () => NOW);
-    footer.setMenu("agents");
     // Act
     footer.setMenu("tasks");
     // Assert
-    expect(footer.disclosure()).toMatchObject({ agentsOpen: false, tasksOpen: true });
+    expect(footer.disclosure()).toMatchObject({ tasksOpen: true });
   });
 
   it("closes every overlay on a click-away", () => {
     // Arrange
     const footer = new ProgressFooter(document.createElement("div"), () => NOW);
-    footer.setMenu("agents");
+    footer.setMenu("tasks");
     // Act
     footer.closeMenus();
     // Assert
-    expect(footer.disclosure().agentsOpen).toBe(false);
+    expect(footer.disclosure().tasksOpen).toBe(false);
   });
 
-  it("keeps the sheet open across a menu close", () => {
+  it("keeps the expanded footer open across a menu close", () => {
     // Arrange — the two disclosures are independent.
     const footer = new ProgressFooter(document.createElement("div"), () => NOW);
-    footer.toggleExpanded();
     // Act
     footer.closeMenus();
     // Assert
@@ -1745,11 +1931,37 @@ describe("ProgressFooter", () => {
     // Arrange
     const el = document.createElement("div");
     const footer = new ProgressFooter(el, () => NOW);
-    footer.setMenu("agents");
+    footer.setMenu("tasks");
     // Act
-    footer.render(input({ agents: [counterEntry()] }));
+    footer.render(input({ tasks: [counterEntry({ id: "t1" })] }));
     // Assert — disclosure is renderer-owned, so the overlay outlives the frame.
-    expect(el.querySelector(".agents-overlay")).not.toBeNull();
+    expect(el.querySelector(".tasks-overlay")).not.toBeNull();
+  });
+
+  it("starts with the expanded footer open", () => {
+    // Arrange
+    const footer = new ProgressFooter(document.createElement("div"), () => NOW);
+    // Act / Assert — the standing detail is shown before any click.
+    expect(footer.disclosure().expanded).toBe(true);
+  });
+
+  it("closes the expanded footer on the first toggle", () => {
+    // Arrange
+    const footer = new ProgressFooter(document.createElement("div"), () => NOW);
+    // Act
+    footer.toggleExpanded();
+    // Assert
+    expect(footer.disclosure().expanded).toBe(false);
+  });
+
+  it("re-opens the expanded footer on the next toggle", () => {
+    // Arrange
+    const footer = new ProgressFooter(document.createElement("div"), () => NOW);
+    footer.toggleExpanded();
+    // Act
+    footer.toggleExpanded();
+    // Assert
+    expect(footer.disclosure().expanded).toBe(true);
   });
 });
 

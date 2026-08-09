@@ -25,7 +25,7 @@
  * `TaskTimer` slot discipline (`paintTurnTimer`) — one span rewritten per
  * second, never a re-render of the footer, and never of the feed.
  */
-import { AGENTS_SPEC, agentsMenuHtml } from "./agents.js";
+import { AGENTS_SPEC, agentsToggleHtml, sessionSubagents } from "./agents.js";
 import { BreathState, BreathingTicker, breathColor } from "./breathing.js";
 import { CounterEntry, CounterSpec, isActive } from "./counter-menu.js";
 import { formatCountdown, formatElapsed } from "./duration.js";
@@ -41,15 +41,70 @@ import type {
 import { ConversationItem, ToolItem } from "./store.js";
 import { TASKS_SPEC, tasksMenuHtml } from "./tasks.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
-import { compactTokens, TOKEN_HEAT_CLASS, tokenHeatStyle } from "./tokens.js";
+import { agentElapsedLabel } from "./topbar.js";
+import { agentUncachedInput, compactTokens, TOKEN_HEAT_CLASS, tokenHeatStyle } from "./tokens.js";
+import type { SessionTokenUtilization } from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
 import { accountingSummary, latestTurnAccounting } from "./turn-accounting.js";
 
-/** Which of the footer's counter overlays is open, and whether it is expanded. */
+/**
+ * Which of the footer's counter overlays is open, and whether the EXPANDED
+ * FOOTER (the dock's expandable detail section) is showing.
+ *
+ * There is no agents overlay to track: the subagent roster lives in the
+ * expanded footer, and the agents chip is that section's toggle rather than a
+ * dropdown of its own (see `agentsToggleHtml`).
+ */
 export interface FooterDisclosure {
-  agentsOpen: boolean;
   tasksOpen: boolean;
-  /** Whether the detail sheet is showing. */
+  /** Whether the expanded footer is showing. */
   expanded: boolean;
+}
+
+/**
+ * One subagent as the EXPANDED FOOTER draws it: the roster entry every counter
+ * shares, plus the two figures only this surface reports.
+ *
+ * It is a WEBAPP-SIDE projection over data this end already holds — the call's
+ * own item for the wallclock, and the daemon's per-subagent attribution for the
+ * uncached input. Nothing about it reaches the wire.
+ */
+export interface FooterAgentRow extends CounterEntry {
+  /**
+   * The `Agent` call the row reports. The runtime is read off it at RENDER
+   * time (`agentElapsedLabel`), so a running agent's figure is the render's own
+   * reading rather than one baked in when the projection was built.
+   */
+  item: ToolItem;
+  /**
+   * The uncached input the daemon attributed to this subagent, or null when it
+   * has attributed none. NULL RENDERS NOTHING — a zero would claim the agent
+   * cost nothing (see `agentUncachedInput`).
+   */
+  uncachedInput: number | null;
+}
+
+/**
+ * The session's subagents as expanded-footer rows.
+ *
+ * The roster itself is `sessionSubagents`' — this adds only the two figures the
+ * expanded footer shows beside it, so the chip's count and these rows can never
+ * disagree about which agents exist.
+ */
+export function footerAgentRows(
+  items: readonly ConversationItem[],
+  utilization: SessionTokenUtilization | null | undefined,
+): FooterAgentRow[] {
+  const calls = new Map<string, ToolItem>();
+  for (const item of items) {
+    if (item.kind === "tool") calls.set(item.toolUseId, item);
+  }
+  return sessionSubagents(items).map((entry) => {
+    const item = calls.get(entry.id);
+    if (item === undefined) {
+      throw new Error(`progress-footer: roster entry ${entry.id} names no tool call in the feed`);
+    }
+    return { ...entry, item, uncachedInput: agentUncachedInput(utilization, entry.id) };
+  });
 }
 
 /** Everything one footer render needs. */
@@ -77,8 +132,12 @@ export interface FooterInput {
    * sit here was exactly that second copy, and it is retired.
    */
   mergeStatus: MergeStatus | null;
-  /** The session's subagent roster, relocated from the topbar. */
-  agents: readonly CounterEntry[];
+  /**
+   * The session's subagent roster, relocated from the topbar. It carries the
+   * expanded footer's two extra figures (see `FooterAgentRow`); the counters
+   * cluster reads only the `CounterEntry` half.
+   */
+  agents: readonly FooterAgentRow[];
   /** The session's task roster, relocated from the topbar. */
   tasks: readonly CounterEntry[];
   /**
@@ -673,14 +732,17 @@ export function tokenCellHtml(p: ProgressInput): string {
  * The counters cluster: the two rosters relocated from the topbar, plus the
  * queue-depth and pending-permission badges.
  *
- * The rosters go through the SHARED `counter-menu` facade (`agentsMenuHtml` /
+ * The rosters go through the SHARED `counter-menu` facade (`agentsToggleHtml` /
  * `tasksMenuHtml`) rather than a footer-local reimplementation, so the chips
  * look and behave exactly as they did in the topbar and cannot drift from it.
  * Every element hides at zero: a badge over nothing is chrome with no news.
+ *
+ * The AGENTS chip drops no overlay: it is the expanded footer's toggle, and
+ * the roster it would have listed is the expanded footer's own rows.
  */
 export function countersHtml(input: FooterInput, open: FooterDisclosure): string {
   const parts: string[] = [];
-  const agents = agentsMenuHtml(input.agents, open.agentsOpen);
+  const agents = agentsToggleHtml(input.agents, open.expanded);
   if (agents !== "") parts.push(agents);
   const tasks = tasksMenuHtml(input.tasks, open.tasksOpen);
   if (tasks !== "") parts.push(tasks);
@@ -699,12 +761,62 @@ export function countersHtml(input: FooterInput, open: FooterDisclosure): string
 }
 
 /**
- * The expansion sheet: one row per fact the collapsed strip had no cell for.
+ * How many rows the EXPANDED FOOTER shows before it scrolls its own content.
+ *
+ * The cap governs the section as a whole, not the roster alone: the page must
+ * never grow to fit a busy session. It is emitted into the markup as a custom
+ * property so the stylesheet's height arithmetic and this classifier read ONE
+ * figure rather than two that could drift.
+ */
+export const EXPANDED_FOOTER_MAX_ROWS = 4;
+
+/** Whether ROWS overflows the cap, and so scrolls inside the section. */
+export function expandedFooterScrolls(rows: number): boolean {
+  return rows > EXPANDED_FOOTER_MAX_ROWS;
+}
+
+/**
+ * One subagent's expanded-footer row: what it is on the left, what it has cost
+ * on the right.
+ *
+ * LEFT is the roster's own account — the type chip and the description the
+ * spawn carried. RIGHT is the pair only this surface reports: the call's
+ * wallclock (elapsed while running, total once settled) and the uncached input
+ * the daemon attributed to it. An unattributed figure renders NOTHING rather
+ * than a zero.
+ *
+ * The row wears the shared `.agent-row` identity and its `data-agent-id`, so a
+ * click reveals the agent's bubble through the classifier's existing verb.
+ */
+function agentRowHtml(row: FooterAgentRow, nowMs: number): string {
+  const type = row.detail === ""
+    ? ""
+    : `<span class="agent-type">${escapeHtml(row.detail)}</span>`;
+  const headline = row.summary === "" ? AGENTS_SPEC.placeholder : row.summary;
+  const tokens = row.uncachedInput === null
+    ? ""
+    : `<span class="pfooter-agent-tokens">${escapeHtml(`${compactTokens(row.uncachedInput)} in`)}</span>`;
+  return (
+    `<div class="agent-row pfooter-agent-row" data-agent-id="${escapeHtml(row.id)}">` +
+    `<span class="pfooter-agent-name">${type}` +
+    `<span class="agent-desc">${escapeHtml(headline)}</span></span>` +
+    `<span class="pfooter-agent-figures">` +
+    `<span class="pfooter-agent-runtime">${escapeHtml(agentElapsedLabel(row.item, nowMs))}</span>` +
+    tokens +
+    `</span></div>`
+  );
+}
+
+/**
+ * The EXPANDED FOOTER: one row per fact the collapsed strip had no cell for.
  *
  * It is the home for the detail the thin strip drops — every OPEN window with
- * its age, and the counts the cluster shows only as bare numbers. The task
- * roster and the per-model token breakdown join it when their deferred work
- * lands.
+ * its age, the counts the cluster shows only as bare numbers, and the session's
+ * subagent roster, which no other chrome surface carries.
+ *
+ * It never grows the page: past `EXPANDED_FOOTER_MAX_ROWS` the section scrolls
+ * its own content, and the `scrolls` marker is what the stylesheet hangs that
+ * on so a section that fits shows no scroller.
  */
 export function sheetHtml(input: FooterInput, nowMs: number): string {
   const p = input.progress;
@@ -748,10 +860,20 @@ export function sheetHtml(input: FooterInput, nowMs: number): string {
   if (p.ttftMs > 0) {
     rows.push(`<span>first token in ${escapeHtml(formatElapsed(p.ttftMs))}</span>`);
   }
+  // THE ROSTER, and only here: the footer is the one surface that carries the
+  // session's subagents, so an absent roster renders no rows rather than an
+  // empty section announcing itself.
+  for (const agent of input.agents) {
+    rows.push(agentRowHtml(agent, nowMs));
+  }
   if (rows.length === 0) {
     rows.push(`<span class="pfooter-sheet-empty">nothing else in flight</span>`);
   }
-  return `<div class="pfooter-sheet">${rows.join("")}</div>`;
+  const classes = `pfooter-sheet${expandedFooterScrolls(rows.length) ? " scrolls" : ""}`;
+  return (
+    `<div class="${classes}" style="--pfooter-sheet-rows:${EXPANDED_FOOTER_MAX_ROWS}">` +
+    `${rows.join("")}</div>`
+  );
 }
 
 /**
@@ -980,7 +1102,7 @@ export interface FooterClickTarget {
 
 /** One footer click's meaning. */
 export type FooterClick =
-  | { kind: "toggle-menu"; menu: "agents" | "tasks" }
+  | { kind: "toggle-menu"; menu: "tasks" }
   | { kind: "reveal-agent"; agentId: string }
   | { kind: "reveal-task"; taskId: string }
   | { kind: "reveal-error"; uuid: string }
@@ -994,9 +1116,13 @@ export type FooterClick =
  * chip and its rows live inside the strip, so testing the strip first would
  * swallow every roster click into an expansion. The error row is likewise its
  * own verb, since it sits outside the strip entirely.
+ *
+ * THE AGENTS CHIP IS THE EXPANDED FOOTER'S TOGGLE, the same verb the strip
+ * drives: the roster it once dropped as an overlay is that section's own rows,
+ * so the chip opens the place they are rather than a second copy of them.
  */
 export function footerClickAction(target: FooterClickTarget): FooterClick | null {
-  if (target.closest("[data-agents-toggle]")) return { kind: "toggle-menu", menu: "agents" };
+  if (target.closest("[data-agents-toggle]")) return { kind: "toggle-expand" };
   if (target.closest("[data-tasks-toggle]")) return { kind: "toggle-menu", menu: "tasks" };
   const agentId = target.closest(".agent-row")?.getAttribute("data-agent-id");
   if (agentId) return { kind: "reveal-agent", agentId };
@@ -1028,7 +1154,12 @@ export const FOOTER_COUNTER_SPECS: Readonly<Record<"agents" | "tasks", CounterSp
  * the once-a-second clock tick going through `paintTurnTimer` instead.
  */
 export class ProgressFooter {
-  private open: FooterDisclosure = { agentsOpen: false, tasksOpen: false, expanded: false };
+  /**
+   * The EXPANDED FOOTER STARTS OPEN. Its rows — the live windows and the
+   * subagent roster — are the session's standing detail, and a reader who has
+   * to discover a click before seeing them is a reader who does not see them.
+   */
+  private open: FooterDisclosure = { tasksOpen: false, expanded: true };
   /**
    * The breathing phase word's bookkeeping. It lives on the OWNER rather than
    * in the markup for the same reason the disclosure does: `render` rewrites
@@ -1065,23 +1196,19 @@ export class ProgressFooter {
     if (slot) slot.textContent = label;
   }
 
-  /** Which overlay is open, or null. Flipping one closes any other. */
-  setMenu(menu: "agents" | "tasks" | null): void {
-    this.open = {
-      ...this.open,
-      agentsOpen: menu === "agents",
-      tasksOpen: menu === "tasks",
-    };
+  /** Which overlay is open, or null. The agents chip has none (it expands). */
+  setMenu(menu: "tasks" | null): void {
+    this.open = { ...this.open, tasksOpen: menu === "tasks" };
   }
 
-  /** Flip the detail sheet. */
+  /** Flip the expanded footer. */
   toggleExpanded(): void {
     this.open = { ...this.open, expanded: !this.open.expanded };
   }
 
   /** Close every overlay (a click-away, or the feed taking focus). */
   closeMenus(): void {
-    this.open = { ...this.open, agentsOpen: false, tasksOpen: false };
+    this.open = { ...this.open, tasksOpen: false };
   }
 
   /** The current disclosure, for the caller's own bookkeeping. */

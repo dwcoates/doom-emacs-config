@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { SUBAGENT_TOOLS, agentSubagents, agentsMenuHtml, sessionSubagents } from "../src/agents.js";
+import {
+  SUBAGENT_TOOLS,
+  agentSubagents,
+  agentsMenuHtml,
+  agentsToggleHtml,
+  sessionSubagents,
+} from "../src/agents.js";
 import { CounterEntry } from "../src/counter-menu.js";
 import { ConversationItem, ToolItem } from "../src/store.js";
 
@@ -269,5 +275,33 @@ describe("agentsMenuHtml", () => {
     const agents = [entry({ id: "t1", status: "running" }), entry({ id: "t2", status: "done" })];
     // Act + Assert
     expect(agentsMenuHtml(agents, false)).toContain("1 agent");
+  });
+});
+
+describe("agentsToggleHtml", () => {
+  it("renders nothing when the session spawned no subagents", () => {
+    // Arrange + Act + Assert
+    expect(agentsToggleHtml([], false)).toBe("");
+  });
+
+  it("labels the chip with the running-subagent count", () => {
+    // Arrange + Act
+    const html = agentsToggleHtml([entry(), entry({ id: "t2" })], false);
+    // Assert
+    expect(html).toContain("2 agents");
+  });
+
+  it("drops no overlay of its own while the section it toggles is open", () => {
+    // Arrange + Act — the roster it would list is the expanded footer's rows.
+    const html = agentsToggleHtml([entry()], true);
+    // Assert
+    expect(html).not.toContain("agents-overlay");
+  });
+
+  it("reports the expanded footer's state as the chip's own", () => {
+    // Arrange + Act
+    const html = agentsToggleHtml([entry()], true);
+    // Assert
+    expect(html).toContain('aria-expanded="true"');
   });
 });

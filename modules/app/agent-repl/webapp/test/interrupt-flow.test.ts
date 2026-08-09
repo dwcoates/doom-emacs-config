@@ -33,10 +33,10 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 
-import { sessionSubagents } from "../src/agents.js";
+
 import { CommandDispatcher, InterruptConfirmRequiredError } from "../src/command-dispatch.js";
 import { decodeFrontendFrame } from "../src/frontend-proto.js";
-import { ProgressFooter } from "../src/progress-footer.js";
+import { ProgressFooter, footerAgentRows } from "../src/progress-footer.js";
 import { WorkspaceSidebar } from "../src/sidebar.js";
 import { StateAdapter } from "../src/state-adapter.js";
 import { ConversationStore } from "../src/store.js";
@@ -145,7 +145,7 @@ function flow(): Flow {
         progress: store.progress,
         renderState: s.renderState,
         mergeStatus: s.mergeStatus,
-        agents: sessionSubagents(s.items),
+        agents: footerAgentRows(s.items, s.tokenUtilization),
         tasks: store.taskRoster,
         items: s.items,
         timerLabel: TIMER_LABEL,
