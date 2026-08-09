@@ -560,6 +560,19 @@ func frameSessionIdentity(frame *frontendv1.FrontendFrame) (workspace, sessionID
 		return f.Queue.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_Progress:
 		return f.Progress.GetWorkspace(), "", true
+	// THE THREE RESOLVED VIEWS are fenced-family frames like the ones above and
+	// are latched for the same reason. They were missing here while the SNAPSHOT
+	// side latched them (the snapshot provider runs all three through
+	// filterPublishedWorkspaceViews), so a workspace the latch was holding back
+	// had its topbar, its breakdown menu and its gate PUSHED to a client the
+	// snapshot would then refuse to tell about that workspace at all. Push and
+	// snapshot must answer the same question the same way.
+	case *frontendv1.FrontendFrame_Topbar:
+		return f.Topbar.GetWorkspace(), "", true
+	case *frontendv1.FrontendFrame_TokenBreakdown:
+		return f.TokenBreakdown.GetWorkspace(), "", true
+	case *frontendv1.FrontendFrame_WorkspaceGate:
+		return f.WorkspaceGate.GetWorkspace(), "", true
 	default:
 		return "", "", false
 	}

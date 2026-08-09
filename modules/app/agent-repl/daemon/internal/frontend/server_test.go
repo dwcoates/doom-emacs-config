@@ -1182,3 +1182,53 @@ func TestHostStalledEvictionRecordsItsStallDuration(t *testing.T) {
 		t.Fatalf("warn record = %q, want the stall duration reported", (*warn)[0])
 	}
 }
+
+// --- the session-publication latch's frame coverage -------------------------
+//
+// frameSessionIdentity decides which frames the materialization latch may hold
+// back. The SNAPSHOT side already latches the three resolved views, so a family
+// missing from that switch is a place where the push and the snapshot disagree
+// about whether a workspace exists yet. One test per family, because each is its
+// own arm and its own way to be forgotten.
+
+func TestFrameSessionIdentityScopesTheTopbarToItsWorkspace(t *testing.T) {
+	// Arrange
+	frame := TopbarViewFrame(&frontendv1.TopbarView{Workspace: "/ws"})
+
+	// Act
+	workspace, sessionID, scoped := frameSessionIdentity(frame)
+
+	// Assert
+	if !scoped || workspace != "/ws" || sessionID != "" {
+		t.Fatalf("frameSessionIdentity(topbar) = (%q, %q, %t), want (\"/ws\", \"\", true): the snapshot latches topbars, so an unlatched push tells a client about a workspace the snapshot then refuses to name",
+			workspace, sessionID, scoped)
+	}
+}
+
+func TestFrameSessionIdentityScopesTheTokenBreakdownToItsWorkspace(t *testing.T) {
+	// Arrange
+	frame := TokenBreakdownViewFrame(&frontendv1.TokenBreakdownView{Workspace: "/ws"})
+
+	// Act
+	workspace, sessionID, scoped := frameSessionIdentity(frame)
+
+	// Assert
+	if !scoped || workspace != "/ws" || sessionID != "" {
+		t.Fatalf("frameSessionIdentity(token_breakdown) = (%q, %q, %t), want (\"/ws\", \"\", true)",
+			workspace, sessionID, scoped)
+	}
+}
+
+func TestFrameSessionIdentityScopesTheWorkspaceGateToItsWorkspace(t *testing.T) {
+	// Arrange
+	frame := WorkspaceGateViewFrame(&frontendv1.WorkspaceGateView{Workspace: "/ws"})
+
+	// Act
+	workspace, sessionID, scoped := frameSessionIdentity(frame)
+
+	// Assert
+	if !scoped || workspace != "/ws" || sessionID != "" {
+		t.Fatalf("frameSessionIdentity(workspace_gate) = (%q, %q, %t), want (\"/ws\", \"\", true)",
+			workspace, sessionID, scoped)
+	}
+}
