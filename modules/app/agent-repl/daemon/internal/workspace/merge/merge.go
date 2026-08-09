@@ -535,12 +535,6 @@ func (e *Driver) rebaseOnto(ctx context.Context, req Request, cycle int) (res Re
 	return res, nil
 }
 
-// rebaseWorktreeMarker is the path component every rebase worktree carries. It
-// is what makes an abandoned one RECOGNIZABLE to the next merge, which is the
-// only way a process-local temp tree gets cleaned up after the process that
-// made it died.
-const rebaseWorktreeMarker = "agent-repl-merge-rebase-"
-
 // pruneStaleRebaseWorktrees removes every rebase worktree the target's
 // repository still has registered before this merge makes its own.
 //
@@ -593,7 +587,7 @@ func (e *Driver) createRebaseWorktree(ctx context.Context, req Request, baseHead
 	}
 	// git refuses to add a worktree at an existing non-empty path, and it
 	// creates the leaf itself. The parent is what this owns and removes.
-	dir := filepath.Join(parent, "rebase")
+	dir := filepath.Join(parent, rebaseWorktreeLeaf)
 	exit, out, err := e.gitExit(ctx, req.TargetDir, "worktree", "add", "--detach", dir, baseHead)
 	if err != nil {
 		_ = os.RemoveAll(parent)
@@ -607,45 +601,8 @@ func (e *Driver) createRebaseWorktree(ctx context.Context, req Request, baseHead
 	return dir, nil
 }
 
-// Cleanup removes the rebase worktree req carries, and is a no-op for a request
-// that has none.
-//
-// IT RUNS ON EVERY TERMINAL PATH — merged, failed, abandoned, shut down — because
-// the worktree is the one piece of a merge that outlives the call that made it.
-// A failure to remove it is REPORTED, never swallowed: the caller logs it, and a
-// merge that landed is not un-landed by a leftover directory.
-//
-// THE FILESYSTEM REMOVAL RUNS EVEN WHEN `git worktree remove` FAILS, and the
-// prune that follows is what stops the repository's administrative record from
-// outliving the directory. A tree parked on a conflict is precisely the case
-// `remove` needs `--force` for.
-func (e *Driver) Cleanup(ctx context.Context, req Request) error {
-	if req.WorkDir == "" {
-		return nil
-	}
-	var errs []error
-	exit, out, err := e.gitExit(ctx, req.TargetDir, "worktree", "remove", "--force", req.WorkDir)
-	switch {
-	case err != nil:
-		errs = append(errs, err)
-	case exit != 0:
-		errs = append(errs, fmt.Errorf("merge: `git worktree remove --force %s` exited %d in %s: %s",
-			req.WorkDir, exit, req.TargetDir, dlog.Clamp(out, 400)))
-	}
-	if rmErr := os.RemoveAll(filepath.Dir(req.WorkDir)); rmErr != nil {
-		errs = append(errs, fmt.Errorf("merge: removing the rebase worktree directory %s: %w", req.WorkDir, rmErr))
-	}
-	if pexit, pout, perr := e.gitExit(ctx, req.TargetDir, "worktree", "prune"); perr != nil {
-		errs = append(errs, perr)
-	} else if pexit != 0 {
-		errs = append(errs, fmt.Errorf("merge: `git worktree prune` exited %d in %s: %s", pexit, req.TargetDir, dlog.Clamp(pout, 400)))
-	}
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
-	e.logf("merge: rebase worktree REMOVED {ws=%s work=%s}", req.Name, req.WorkDir)
-	return nil
-}
+// Cleanup lives in rebasecleanup.go, beside the one funnel every teardown in
+// this package routes through.
 
 // rebaseLoop replays base..SourceBranch onto the rebase worktree's head ONE
 // COMMIT AT A TIME and then runs the repository's test suite ONCE, on the head
