@@ -35,6 +35,7 @@
 (declare-function agent-repl--backend-phase "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--backend-output-tail "agent-repl-core" (output &optional lines))
 (declare-function agent-repl--logfile-path "agent-repl-core" ())
+(declare-function agent-repl--global-state-file "agent-repl-core" (relative))
 (declare-function agent-repl--doctor-log "agent-repl-doctor" (fmt &rest args))
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
 (declare-function agent-repl-runtime-restart "services" (&optional stop-shims initiator))
@@ -295,6 +296,19 @@ alongside the install and codex checks."
 (defconst agent-repl--frontend-daemon-buffer "*claude-repld*"
   "Buffer capturing the daemon process's stdout/stderr.")
 
+(defconst agent-repl--frontend-daemon-buffer-max-chars (* 512 1024)
+  "Characters of daemon output `*claude-repld*' retains before trimming.
+
+The buffer is a CRASH TAIL, never an archive.  Everything structured the
+daemon prints it has already written durably to
+`agent-repl--frontend-daemon-log-path', so an unbounded buffer is
+duplication that only grows: across one long-lived daemon it reached
+tens of megabytes, and at exit that string was formatted whole into a
+log line and split line-by-line, freezing Emacs for over ten minutes.
+
+512KB is far more than any panic, goroutine dump or flag error needs and
+small enough that consuming the whole of it stays cheap.")
+
 (defvar agent-repl--frontend-daemon-line-accumulator ""
   "Trailing PARTIAL line of daemon output, held until its newline arrives.
 
@@ -544,6 +558,49 @@ compares against."
   (format "personal=,work=%s"
           (expand-file-name agent-repl-multi-repo-config-dir)))
 
+(defun agent-repl--frontend-daemon-log-path ()
+  "Return the daemon's own durable structured log, `claude-repld.log'.
+The daemon writes it itself under the shared state root; every record
+the capture buffer trims away is still there, which is what makes
+trimming the buffer a loss of duplication rather than a loss of
+evidence."
+  (agent-repl--global-state-file "claude-repld.log"))
+
+(defun agent-repl--frontend-daemon-trim-capture (proc)
+  "Trim the current buffer to the newest daemon output, keeping PROC's mark sane.
+
+Retains at most `agent-repl--frontend-daemon-buffer-max-chars', cut
+FORWARD to a line boundary so the surviving region starts on a whole
+line rather than mid-record."
+  (let ((cap agent-repl--frontend-daemon-buffer-max-chars))
+    (when (> (- (point-max) (point-min)) cap)
+      ;; Undo would re-accumulate everything the cap just discarded, so the
+      ;; buffer would stay bounded while its undo list did not.  A process
+      ;; capture buffer is never edited by hand; there is nothing to undo.
+      (unless (eq buffer-undo-list t)
+        (setq buffer-undo-list t))
+      (let ((inhibit-read-only t))
+        (save-excursion
+          (goto-char (- (point-max) cap))
+          (let ((cut (if (bolp) (point) (line-beginning-position 2))))
+            ;; `line-beginning-position' 2 answers `point-max' when no newline
+            ;; lies ahead — one line longer than the whole cap.  Keeping a
+            ;; WHOLE line would then mean keeping nothing, so cut mid-line
+            ;; instead: the newest output outranks the alignment.
+            (when (>= cut (point-max))
+              (setq cut (- (point-max) cap)))
+            (delete-region (point-min) cut))))
+      ;; `delete-region' relocates any marker inside the deleted span to its
+      ;; start, so a process mark that had fallen behind the retained region
+      ;; now sits at `point-min' instead of at the insertion point the next
+      ;; chunk must extend.  Re-anchor it at the end of what survived.
+      (when (processp proc)
+        (let ((mark (process-mark proc)))
+          (when (and (markerp mark)
+                     (marker-position mark)
+                     (< (marker-position mark) (point-max)))
+            (set-marker mark (point-max))))))))
+
 (defun agent-repl--frontend-daemon-filter (proc chunk)
   "Capture CHUNK from PROC into its buffer AND the durable structured log.
 
@@ -577,7 +634,12 @@ So:
   relayed `sidecar' and `webapp' records, whose ONLY durable home is
   this mirror, and every unstructured line — panics, goroutine dumps,
   flag errors, Go runtime output — which is the failure evidence this
-  filter was built for."
+  filter was built for.
+
+The capture buffer is trimmed to
+`agent-repl--frontend-daemon-buffer-max-chars' after every chunk, so a
+daemon that runs for days cannot turn it into the tens-of-megabytes
+string that froze Emacs at exit."
   (when (buffer-live-p (process-buffer proc))
     (with-current-buffer (process-buffer proc)
       (let ((moving (= (point) (process-mark proc))))
@@ -585,7 +647,8 @@ So:
           (goto-char (process-mark proc))
           (insert chunk)
           (set-marker (process-mark proc) (point)))
-        (when moving (goto-char (process-mark proc))))))
+        (when moving (goto-char (process-mark proc))))
+      (agent-repl--frontend-daemon-trim-capture proc)))
   (let* ((pending (concat agent-repl--frontend-daemon-line-accumulator
                           (or chunk "")))
          (parts (split-string pending "\n"))
