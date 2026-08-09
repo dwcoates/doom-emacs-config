@@ -759,6 +759,22 @@ Returns nil for a nil KEY, and KEY itself for the
    (t (when-let ((parent (file-name-directory key)))
         (file-name-nondirectory (directory-file-name parent))))))
 
+(defun agent-repl--main-worktree-dir (dir)
+  "Return the main worktree root of the git repository containing DIR.
+Derives from DIR's repo key (`agent-repl--repo-key-for-dir', the
+canonical git common-dir): the common-dir is conventionally
+`<main-worktree>/.git', so its parent IS the main checkout, no matter
+which linked worktree DIR itself is.
+
+Returns nil when DIR resolves to no repo, and nil when the parent is
+not an existing directory — the latter is the bare-repository case,
+where every worktree is linked and there is no main checkout to switch
+to.  Both are expected lookup outcomes rather than invariant
+violations, so callers own the \"no such workspace\" message."
+  (when-let* ((key (agent-repl--repo-key-for-dir dir))
+              (parent (file-name-directory (directory-file-name key))))
+    (and (file-directory-p parent) (directory-file-name parent))))
+
 (defvar agent-repl--folded-repos (make-hash-table :test 'equal)
   "Set of repo keys (see `agent-repl--ws-repo-group') currently folded.
 Keys are repo keys, values are `t' — presence is the signal.  Global
