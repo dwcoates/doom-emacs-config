@@ -606,10 +606,14 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 			// The SAME sink the coordinator and merge.Driver write through, so
 			// the handler's merge_enqueuing lands on one merge axis with every
 			// later phase rather than on a parallel record.
-			MergeStates:  mergeSink{mgr},
-			Restarts:     cfg.Restarts,
-			Hibernations: cfg.Hibernations,
-			Health:       HealthConfig{Router: cfg.Health, Daemon: cfg.DaemonHealth},
+			MergeStates: mergeSink{mgr},
+			// The SSM holds the interrupt's dequeue question for the same
+			// reason it holds merge_status: both are WorkspaceState fields, and
+			// this is the one funnel every field of that message is stamped in.
+			MergeDequeueOffers: mgr,
+			Restarts:           cfg.Restarts,
+			Hibernations:       cfg.Hibernations,
+			Health:             HealthConfig{Router: cfg.Health, Daemon: cfg.DaemonHealth},
 			// The gate reads each fact from the authority that owns it: the
 			// controller observes the turn boundary, and the progress resolver
 			// already carries the live-task count to the footer.

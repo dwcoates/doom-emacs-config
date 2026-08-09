@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"claude-repld/internal/dlog"
@@ -217,6 +218,25 @@ type conflictPark struct {
 	// ended closes when the merge leaves the coordinator, which is what tells
 	// a waiting resume that there is no longer anything to continue.
 	ended chan struct{}
+
+	// abort cancels the run's own context, and it is the ABORT rendezvous's
+	// whole mechanism — deliberately a cancel rather than a channel like
+	// abandons above.
+	//
+	// The two give-up paths differ in what they have to reach. An abandon
+	// answers a PARKED merge, where nothing is running and a rendezvous the
+	// park serves is exactly right. A dequeue answers the merge WHEREVER it
+	// is: mid-cherry-pick, inside a test suite, waiting on a before-action's
+	// turn. None of those are serving a channel, and all of them are running
+	// under this context, so cancelling it is the one signal that reaches
+	// every stage rather than only the parked one.
+	abort context.CancelFunc
+	// aborted records that the cancel above was the USER'S DEQUEUE and not the
+	// daemon shutting down. Both cancel the same context, and they retire the
+	// run in opposite directions — a shutdown keeps the durable entry for the
+	// next boot to replay, a dequeue drops it — so the run has to be able to
+	// tell them apart at the point it unwinds.
+	aborted atomic.Bool
 }
 
 type resumeCall struct {
@@ -1157,7 +1177,21 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 	// conflict_resolved_continue that arrives while the cherry-pick is still
 	// running waits for the conflict rather than racing the park that will
 	// accept it.
-	park := &conflictPark{req: req, calls: make(chan resumeCall), abandons: make(chan abandonCall), ended: make(chan struct{})}
+	// THE RUN'S OWN CONTEXT, and every step of the merge below runs under it
+	// rather than under the coordinator's. It is what makes a dequeue reach a
+	// merge that is not parked: a cherry-pick, a test suite and a before-action
+	// turn are all ctx-bound work, so one cancel stops whichever of them is
+	// actually happening. Cancelled unconditionally on the way out, so a run
+	// that ends on its own leaks neither the context nor its timer.
+	runCtx, abortRun := context.WithCancel(c.ctx)
+	defer abortRun()
+	park := &conflictPark{
+		req:      req,
+		calls:    make(chan resumeCall),
+		abandons: make(chan abandonCall),
+		ended:    make(chan struct{}),
+		abort:    abortRun,
+	}
 	c.mu.Lock()
 	c.parks[repo] = park
 	c.mu.Unlock()
@@ -1201,11 +1235,11 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 	// (the before-action, a conflict resolution, a test fix), and a bring-up can
 	// be slow — holding the exclusivity lease across it would lock the user out
 	// of their session for the whole of it.
-	if fail := c.bringUpSession(repo, req, driven); fail != nil {
+	if fail := c.bringUpSession(runCtx, repo, req, driven); fail != nil {
 		return c.retireFailed(repo, req, nil, *fail)
 	}
 
-	release, err := c.lease.Acquire(c.ctx, req.Workspace)
+	release, err := c.lease.Acquire(runCtx, req.Workspace)
 	if err != nil {
 		c.logf("merge: lease acquire FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
 		fail := c.failRun(driven, "shim lease unavailable: "+err.Error())
@@ -1223,11 +1257,11 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 	// commits, so computing the cherry-pick plan first would replay a range that
 	// does not include the work the action was asked to produce. The plan is
 	// computed inside picker.Merge, which is why this sits above it.
-	if fail := c.runBeforeAction(repo, driven); fail != nil {
+	if fail := c.runBeforeAction(runCtx, repo, driven); fail != nil {
 		return c.retireFailed(repo, req, release, *fail)
 	}
 
-	res, err := c.picker.Merge(c.ctx, driven)
+	res, err := c.picker.Merge(runCtx, driven)
 	if err != nil {
 		// merge.Driver rejects a bad precondition BEFORE emitting anything, so
 		// without this the workspace would sit at merge_queued with no terminal
@@ -1238,7 +1272,7 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 		return c.retireFailed(repo, req, release, fail)
 	}
 
-	return c.settle(repo, req, driven, park, release, res)
+	return c.settle(runCtx, repo, req, driven, park, release, res)
 }
 
 // replayTerminal says the terminal word a previous daemon could not publish, and
@@ -1401,8 +1435,8 @@ func (c *QueueCoordinator) refuseDeletedSession(repo string, req, driven Request
 //   - a bring-up for a workspace that HAS a session failed, and the run FAILS.
 //     That stays loud and terminal: the merge is about to submit turns into
 //     that session, and there is no session to submit them to.
-func (c *QueueCoordinator) bringUpSession(repo string, req, driven Request) *terminalFailure {
-	err := c.sessions.EnsureLive(c.ctx, req.Workspace)
+func (c *QueueCoordinator) bringUpSession(ctx context.Context, repo string, req, driven Request) *terminalFailure {
+	err := c.sessions.EnsureLive(ctx, req.Workspace)
 	switch {
 	case err == nil:
 		return nil
@@ -1427,7 +1461,7 @@ func (c *QueueCoordinator) bringUpSession(repo string, req, driven Request) *ter
 // FAIL the run: the whole point of the action is to change what gets
 // cherry-picked, so proceeding after it did not happen would land a plan the
 // user did not ask for.
-func (c *QueueCoordinator) runBeforeAction(repo string, req Request) *terminalFailure {
+func (c *QueueCoordinator) runBeforeAction(ctx context.Context, repo string, req Request) *terminalFailure {
 	prompt, err := c.beforeActions.BeforeAction(req.Workspace)
 	if err != nil {
 		c.logf("merge: before-action lookup FAILED {repo=%s ws=%s name=%s run=%s}: %v — the merge is failed rather than run without an action the workspace may have been created with",
@@ -1458,7 +1492,7 @@ func (c *QueueCoordinator) runBeforeAction(repo string, req Request) *terminalFa
 
 	c.logf("merge: before-action HANDED TO THE SHIM {repo=%s ws=%s name=%s run=%s request_id=%s}",
 		repo, req.Workspace, req.Name, req.Run.RunID(), act.RequestID)
-	if err := c.beforeActionFn.Run(c.ctx, act); err != nil {
+	if err := c.beforeActionFn.Run(ctx, act); err != nil {
 		c.logf("merge: before-action FAILED {repo=%s ws=%s name=%s run=%s request_id=%s}: %v — the merge is failed; cherry-picking a plan the action was meant to change would land the wrong commits",
 			repo, req.Workspace, req.Name, req.Run.RunID(), act.RequestID, err)
 		fail := c.failRun(req, "the workspace's before-merge action did not complete: "+err.Error())
@@ -1486,13 +1520,19 @@ func (c *QueueCoordinator) runBeforeAction(repo string, req Request) *terminalFa
 // including a panic unwinding through it. The request the defer reads is the
 // LIVE one: every Result the loop takes carries the worktree the step it came
 // from was working in, and `driven` is updated from it before the loop turns.
-func (c *QueueCoordinator) settle(repo string, req, driven Request, park *conflictPark, release func(), res Result) bool {
+func (c *QueueCoordinator) settle(ctx context.Context, repo string, req, driven Request, park *conflictPark, release func(), res Result) bool {
 	c.adoptRebaseWorktree(repo, &driven, res)
 	defer func() {
 		// TEARDOWN FIRST, DE-REGISTRATION SECOND. While the funnel is running,
 		// the directory is still this merge's, so a sweep racing the terminal
 		// must not be told it is free.
-		c.cleanupRebase(repo, driven)
+		//
+		// THE TEARDOWN RUNS UNDER THE COORDINATOR'S CONTEXT, NOT THE RUN'S. A
+		// dequeue cancels the run's context, and the rebase worktree it left
+		// behind is exactly what still has to be removed afterwards; handing
+		// the removal a context that is already cancelled would leak the
+		// worktree on the one path that most needs it gone.
+		c.cleanupRebase(c.ctx, repo, driven)
 		c.releaseRebaseWorktree(repo)
 	}()
 	for {
@@ -1500,7 +1540,7 @@ func (c *QueueCoordinator) settle(repo string, req, driven Request, park *confli
 		case OutcomeConflict:
 			c.logf("merge: parked on conflict {repo=%s ws=%s name=%s commit=%s work=%s} — the target is untouched and stays that way while this is parked",
 				repo, req.Workspace, req.Name, res.ConflictCommit, driven.WorkDir)
-			next, handled, cont := c.awaitResolution(repo, req, driven, park, release, res.ConflictCommit)
+			next, handled, cont := c.awaitResolution(ctx, repo, req, driven, park, release, res.ConflictCommit)
 			if handled {
 				return cont
 			}
@@ -1508,7 +1548,7 @@ func (c *QueueCoordinator) settle(repo string, req, driven Request, park *confli
 			c.adoptRebaseWorktree(repo, &driven, res)
 		case OutcomeTestFailed:
 			c.logf("merge: test gate failed {repo=%s ws=%s name=%s commit=%s}", repo, req.Workspace, req.Name, res.FailingCommit)
-			next, handled, cont := c.awaitTestFix(repo, req, driven, park, release, res)
+			next, handled, cont := c.awaitTestFix(ctx, repo, req, driven, park, release, res)
 			if handled {
 				return cont
 			}
@@ -1558,11 +1598,23 @@ func (c *QueueCoordinator) settle(repo string, req, driven Request, park *confli
 // (a suite run, a resolution turn, more picks) is reported through the pushed
 // merge state, and blocking a frontend command on it would make
 // conflict_resolved_continue hang for the length of a test suite.
-func (c *QueueCoordinator) awaitResolution(repo string, req, driven Request, park *conflictPark, release func(), conflictCommit string) (Result, bool, bool) {
-	c.driveShimResolution(repo, driven, park, conflictCommit)
+func (c *QueueCoordinator) awaitResolution(ctx context.Context, repo string, req, driven Request, park *conflictPark, release func(), conflictCommit string) (Result, bool, bool) {
+	c.driveShimResolution(ctx, repo, driven, park, conflictCommit)
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-ctx.Done():
+			// TWO CANCELLATIONS ARRIVE HERE AND THEY RETIRE IN OPPOSITE
+			// DIRECTIONS, which is what park.aborted exists to tell apart.
+			if park.aborted.Load() {
+				// The user answered the dequeue offer. The merge is over: its
+				// terminal `failed` word is published and its durable entry is
+				// dropped, so no boot replays it. The conflicted cherry-pick
+				// stays in the target tree for exactly the reason an abandon
+				// leaves it there.
+				c.logf("merge: conflict park DEQUEUED {repo=%s ws=%s name=%s} — the conflicted cherry-pick is left in the target tree for hand cleanup",
+					repo, req.Workspace, req.Name)
+				return Result{}, true, c.retireDequeued(repo, req, driven, release)
+			}
 			// Shutdown with the conflict still in the tree. The lease goes
 			// back (it must never outlive its holder), and the entry stays
 			// durable so the next daemon's Drain re-parks it.
@@ -1588,7 +1640,7 @@ func (c *QueueCoordinator) awaitResolution(repo string, req, driven Request, par
 			// either — the frontend does not know there is one — and resuming
 			// without it would be a driver call with nowhere to work.
 			resumeReq.WorkDir, resumeReq.BaseHead = driven.WorkDir, driven.BaseHead
-			res, err := c.picker.Resume(c.ctx, resumeReq)
+			res, err := c.picker.Resume(ctx, resumeReq)
 			if err != nil {
 				c.logf("merge: resume driver FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
 				// The conflict is still in the tree, so the park survives and
@@ -1631,7 +1683,7 @@ func (c *QueueCoordinator) awaitResolution(repo string, req, driven Request, par
 // the re-run finish. The attempt's context is cancelled on that abandon, so the
 // cancelled fix cannot go on cherry-picking into a target the merge has already
 // given up.
-func (c *QueueCoordinator) awaitTestFix(repo string, req, driven Request, park *conflictPark, release func(), res Result) (Result, bool, bool) {
+func (c *QueueCoordinator) awaitTestFix(ctx context.Context, repo string, req, driven Request, park *conflictPark, release func(), res Result) (Result, bool, bool) {
 	if res.TestFailureEscalation != "" {
 		c.logf("merge: test failure ESCALATED {repo=%s ws=%s name=%s} — the resolving agent judges a correct fix to need non-trivial architectural work, so the loop stops on its judgement rather than on a counter: %s",
 			repo, req.Workspace, req.Name, dlog.Clamp(res.TestFailureEscalation, testFailureCauseBytes))
@@ -1657,7 +1709,7 @@ func (c *QueueCoordinator) awaitTestFix(repo string, req, driven Request, park *
 		return Result{}, true, c.failTestGate(repo, req, driven, release, res)
 	}
 
-	fixCtx, cancelFix := context.WithCancel(c.ctx)
+	fixCtx, cancelFix := context.WithCancel(ctx)
 	defer cancelFix()
 	done := make(chan pickResultOrError, 1)
 	c.wg.Add(1)
@@ -1680,9 +1732,18 @@ func (c *QueueCoordinator) awaitTestFix(repo string, req, driven Request, park *
 		ok := c.finish(repo, req, release)
 		call.reply <- nil
 		return Result{}, true, ok
-	case <-c.ctx.Done():
-		c.logf("merge: test-fix attempt abandoned on shutdown {repo=%s ws=%s name=%s}", repo, req.Workspace, req.Name)
+	case <-ctx.Done():
 		<-done
+		if park.aborted.Load() {
+			// The user answered the dequeue offer while the agent was fixing
+			// tests. Nothing of this merge ever reached the target — every
+			// commit and every suite ran in the rebase worktree — so the
+			// dequeue costs the target nothing at all.
+			c.logf("merge: test-fix attempt DEQUEUED {repo=%s ws=%s name=%s commit=%s} — the target was NEVER MODIFIED and the rebase worktree is discarded",
+				repo, req.Workspace, req.Name, res.FailingCommit)
+			return Result{}, true, c.retireDequeued(repo, req, driven, release)
+		}
+		c.logf("merge: test-fix attempt abandoned on shutdown {repo=%s ws=%s name=%s}", repo, req.Workspace, req.Name)
 		release()
 		return Result{}, true, false
 	}
@@ -1763,11 +1824,11 @@ func (c *QueueCoordinator) failTestGate(repo string, req, driven Request, releas
 // A FAILURE HERE CANNOT CHANGE AN OUTCOME. The merge either landed on the target
 // or never touched it; a directory that would not delete says nothing about
 // either, so it is loud-logged and nothing else.
-func (c *QueueCoordinator) cleanupRebase(repo string, driven Request) {
+func (c *QueueCoordinator) cleanupRebase(ctx context.Context, repo string, driven Request) {
 	if driven.WorkDir == "" {
 		return
 	}
-	if err := c.picker.Cleanup(c.ctx, driven); err != nil {
+	if err := c.picker.Cleanup(ctx, driven); err != nil {
 		c.logf("merge: rebase worktree cleanup FAILED {repo=%s ws=%s name=%s work=%s}: %v — the merge's outcome is unaffected; the directory is left for a human",
 			repo, driven.Workspace, driven.Name, driven.WorkDir, err)
 	}
@@ -1796,7 +1857,7 @@ const testFailureCauseBytes = 1200
 // It runs on its own goroutine because the drain goroutine is the one that
 // serves park.calls: driving the resolution inline would mean waiting for a
 // resolution turn from inside the loop that has to accept its resume.
-func (c *QueueCoordinator) driveShimResolution(repo string, req Request, park *conflictPark, conflictCommit string) {
+func (c *QueueCoordinator) driveShimResolution(ctx context.Context, repo string, req Request, park *conflictPark, conflictCommit string) {
 	res := ConflictResolution{
 		Workspace:      req.Workspace,
 		RequestID:      newResolutionRequestID(),
@@ -1822,7 +1883,7 @@ func (c *QueueCoordinator) driveShimResolution(repo string, req Request, park *c
 		defer c.wg.Done()
 		c.logf("merge: conflict resolution HANDED TO THE SHIM {repo=%s ws=%s name=%s commit=%s branch=%s target=%s request_id=%s}",
 			repo, req.Workspace, req.Name, res.ConflictCommit, res.SourceBranch, res.TargetDir, res.RequestID)
-		if err := c.resolver.Resolve(c.ctx, res); err != nil {
+		if err := c.resolver.Resolve(ctx, res); err != nil {
 			c.logf("merge: shim conflict resolution FAILED {repo=%s ws=%s name=%s commit=%s request_id=%s}: %v — NOTHING was resumed and nothing is marked merged; the conflict stays parked for a human (conflict_resolved_continue or workspace close)",
 				repo, req.Workspace, req.Name, res.ConflictCommit, res.RequestID, err)
 			return
@@ -1839,8 +1900,8 @@ func (c *QueueCoordinator) driveShimResolution(repo string, req Request, park *c
 			// nothing lost.
 			c.logf("merge: shim resolution resume DROPPED, the merge already ended {repo=%s ws=%s name=%s}", repo, req.Workspace, req.Name)
 			return
-		case <-c.ctx.Done():
-			c.logf("merge: shim resolution resume DROPPED, coordinator shutting down {repo=%s ws=%s name=%s}", repo, req.Workspace, req.Name)
+		case <-ctx.Done():
+			c.logf("merge: shim resolution resume DROPPED, the run's context is cancelled {repo=%s ws=%s name=%s} — the daemon is shutting down or the user dequeued this merge", repo, req.Workspace, req.Name)
 			return
 		}
 		select {
@@ -1850,7 +1911,7 @@ func (c *QueueCoordinator) driveShimResolution(repo string, req Request, park *c
 					repo, req.Workspace, req.Name, err)
 			}
 		case <-park.ended:
-		case <-c.ctx.Done():
+		case <-ctx.Done():
 		}
 	}()
 }
@@ -1876,6 +1937,9 @@ func (c *QueueCoordinator) failed(req Request, cause string) {
 // a diagnostic: it is what decides whether the durable queue entry is acked or
 // kept for the next boot to re-publish.
 func (c *QueueCoordinator) failRun(req Request, cause string) terminalFailure {
+	// A run the user dequeued dies of the dequeue, whatever the step it was on
+	// reported. See dequeuedCauseFor for why the substitution lives here.
+	cause = c.dequeuedCauseFor(req.Workspace, cause)
 	err := req.Run.Failed(cause)
 	if err != nil {
 		c.logf("merge: merge_failed status FAILED {ws=%s name=%s run=%s cause=%s}: %v — the durable queue entry is KEPT so the next boot re-publishes this terminal status",

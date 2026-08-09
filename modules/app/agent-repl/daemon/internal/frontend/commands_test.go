@@ -126,6 +126,11 @@ func (m *mockHandler) ReviveSession(_ context.Context, ws, rid string, _ *fronte
 	return m.err
 }
 
+func (m *mockHandler) AnswerMergeDequeue(_ context.Context, ws, rid string, _ *frontendv1.AnswerMergeDequeueCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "answer_merge_dequeue", ws, rid
+	return m.err
+}
+
 // TestDispatchRefusesWireWorkspaceCreation pins the single-producer rule: a
 // workspace is created by writing a workspace_commands_<uuid>.json file into
 // the daemon's inbox, and by nothing else. The arm still exists on the wire,
