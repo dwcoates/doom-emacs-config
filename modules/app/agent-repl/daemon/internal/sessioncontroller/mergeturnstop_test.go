@@ -1,6 +1,7 @@
 package sessioncontroller
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -129,5 +130,51 @@ func TestAnAbandonedMergeStopWithNoBoundTurnInterruptsNothing(t *testing.T) {
 	// Assert.
 	if got := client.interruptCount(); got != 0 {
 		t.Fatalf("interrupts sent = %d, want 0; the waiter bound no turn, so this run owns none to stop", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE LAST HOP OF THE CORRELATION. The wire carries a daemon-minted control id
+// that appears in no caller's records, so whoever ORDERED the stop has to
+// travel beside it or the exchange is unfindable from either end.
+// ---------------------------------------------------------------------------
+
+// A user-commanded stop names the frontend command that asked for it.
+func TestAUserInterruptNamesItsFrontendRequestOnTheWire(t *testing.T) {
+	// Arrange.
+	m, _, _ := keepAliveRig(t)
+	client := fakeClientFor(t, m, "ws")
+
+	// Act.
+	if err := m.Interrupt(context.Background(), "ws", "fe-276-1074"); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	// Assert.
+	client.mu.Lock()
+	origins := append([]string(nil), client.interruptOrigins...)
+	client.mu.Unlock()
+	if len(origins) != 1 || origins[0] != "fe-276-1074" {
+		t.Fatalf("interrupt origins = %v, want the frontend command's own id on the wire", origins)
+	}
+}
+
+// AN ABANDONED MERGE TURN NAMES THE MERGE REQUEST, not a frontend command. The
+// two stops are different acts and a reader must be able to tell them apart in
+// the record.
+func TestAnAbandonedMergeStopNamesTheMergeRequestOnTheWire(t *testing.T) {
+	// Arrange.
+	m, _, d := abandonedMergeRig(t, "merge-resume:q_8ddc6f0f")
+	client := fakeClientFor(t, m, "ws")
+
+	// Act.
+	m.stopAbandonedMergeTurn(d, "ws", "r-merge-keepalive", "merge-resume:q_8ddc6f0f")
+
+	// Assert.
+	client.mu.Lock()
+	origins := append([]string(nil), client.interruptOrigins...)
+	client.mu.Unlock()
+	if len(origins) != 1 || origins[0] != "r-merge-keepalive" {
+		t.Fatalf("interrupt origins = %v, want the merge run's own request id", origins)
 	}
 }

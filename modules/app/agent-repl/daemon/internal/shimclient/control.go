@@ -78,7 +78,7 @@ func (c *Client) SubmitPrompt(ctx context.Context, requestID, text, origin, perm
 		Origin:         origin,
 		PermissionMode: permissionMode,
 		PromptOrigin:   promptOrigin,
-	})
+	}, reqID)
 	return err
 }
 
@@ -89,12 +89,21 @@ func (c *Client) SubmitPrompt(ctx context.Context, requestID, text, origin, perm
 // only obtainable here: from outside, a stop that failed and a turn that had
 // already ended arrive as the same silence, which is how a no-op stop came to
 // be painted as a failed one. A Nack or timeout is still an error, unchanged.
-func (c *Client) Interrupt(ctx context.Context) (corev1.InterruptOutcome, error) {
+//
+// originRequestID NAMES WHO ORDERED THE STOP, and it is carried purely so the
+// log can say. A stop travels under a DAEMON-MINTED control id, which is the
+// only id the wire exchange can be correlated by — and which appears nowhere in
+// the vocabulary of whoever asked for it. A frontend interrupt was therefore
+// unfindable: a search for the frontend's own request id turned up the command
+// arriving and nothing else, so an interrupt that WAS delivered and acked read
+// exactly like one the daemon had swallowed. Observed while diagnosing a stop
+// that had in fact been answered INTERRUPTED within two milliseconds.
+func (c *Client) Interrupt(ctx context.Context, originRequestID string) (corev1.InterruptOutcome, error) {
 	reqID, err := c.newRequestID("interrupt")
 	if err != nil {
 		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, err
 	}
-	ack, err := c.sendAwait(ctx, &corev1.Interrupt{RequestId: reqID})
+	ack, err := c.sendAwait(ctx, &corev1.Interrupt{RequestId: reqID}, originRequestID)
 	if err != nil {
 		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, err
 	}
@@ -112,7 +121,7 @@ func (c *Client) SetModel(ctx context.Context, model string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ack, nack, err := c.sendAwaitReceipt(ctx, &corev1.SetModel{RequestId: reqID, Model: requested})
+	ack, nack, err := c.sendAwaitReceipt(ctx, &corev1.SetModel{RequestId: reqID, Model: requested}, reqID)
 	if err != nil {
 		return "", err
 	}
@@ -163,8 +172,8 @@ func (c *Client) currentConn() *activeConn {
 // some commands (an interrupt's outcome) and discarding it here would put the
 // only process that can see that verdict in the position of having to guess
 // at it later.
-func (c *Client) sendAwait(ctx context.Context, msg protoControl) (*corev1.Ack, error) {
-	ack, nack, err := c.sendAwaitReceipt(ctx, msg)
+func (c *Client) sendAwait(ctx context.Context, msg protoControl, originRequestID string) (*corev1.Ack, error) {
+	ack, nack, err := c.sendAwaitReceipt(ctx, msg, originRequestID)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +186,13 @@ func (c *Client) sendAwait(ctx context.Context, msg protoControl) (*corev1.Ack, 
 // sendAwaitReceipt is the shared correlated-control exchange.  SetModel needs
 // a rejected receipt's shim-confirmed selected_model; legacy controls retain
 // sendAwait's simpler Ack-or-error contract above.
-func (c *Client) sendAwaitReceipt(ctx context.Context, msg protoControl) (*corev1.Ack, *corev1.Nack, error) {
+//
+// originRequestID is the id of whatever ORDERED this exchange, in its own
+// vocabulary, and it is logged beside the daemon-minted control id on both the
+// send and the ack. The two ids are the only bridge between a caller's record
+// and the wire, and a caller with no id of its own passes "" — which the log
+// then renders as an exchange nothing outside this package named.
+func (c *Client) sendAwaitReceipt(ctx context.Context, msg protoControl, originRequestID string) (*corev1.Ack, *corev1.Nack, error) {
 	reqID := msg.GetRequestId()
 	ac := c.currentConn()
 	if ac == nil {
@@ -197,7 +212,7 @@ func (c *Client) sendAwaitReceipt(ctx context.Context, msg protoControl) (*corev
 	if err := ac.writeMsg(msg); err != nil {
 		return nil, nil, fmt.Errorf("sending control request (request_id=%s): %w", reqID, err)
 	}
-	c.logf("sent control request request_id=%s, awaiting ack (timeout=%s)", reqID, c.cfg.AckTimeout)
+	c.logf("sent control request request_id=%s origin_request_id=%q, awaiting ack (timeout=%s)", reqID, originRequestID, c.cfg.AckTimeout)
 
 	timer := time.NewTimer(c.cfg.AckTimeout)
 	defer timer.Stop()
@@ -213,7 +228,7 @@ func (c *Client) sendAwaitReceipt(ctx context.Context, msg protoControl) (*corev
 		if res.nack != nil {
 			return nil, res.nack, nil
 		}
-		c.logf("control request request_id=%s acked outcome=%s", reqID, res.ack.GetInterruptOutcome())
+		c.logf("control request request_id=%s origin_request_id=%q acked outcome=%s", reqID, originRequestID, res.ack.GetInterruptOutcome())
 		return res.ack, nil, nil
 	}
 }

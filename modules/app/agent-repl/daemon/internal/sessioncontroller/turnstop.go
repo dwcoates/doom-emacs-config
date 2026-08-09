@@ -125,7 +125,7 @@ func (m *Manager) drainTimeout() time.Duration {
 // is an interface rather than *sessionController so the timeout and the already-dead-shim
 // branches are exercisable deterministically.
 type turnInterrupter interface {
-	Interrupt(ctx context.Context) (corev1.InterruptOutcome, error)
+	Interrupt(ctx context.Context, originRequestID string) (corev1.InterruptOutcome, error)
 }
 
 // drainLiveTurnForStop asks a shim about to be stopped to interrupt the turn it
@@ -177,7 +177,9 @@ func (m *Manager) drainLiveTurnForStop(workspace, sessionID, path string, cl tur
 	bound := m.drainTimeout()
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
-	outcome, err := cl.Interrupt(ctx)
+	// The teardown has no request id of its own, so the stop is named by the
+	// cause that ordered it, which is the vocabulary the whole funnel logs in.
+	outcome, err := cl.Interrupt(ctx, "teardown:"+path)
 	if err != nil {
 		m.logf("session-controller: teardown turn drain interrupt FAILED ws=%q session=%s path=%s outcome=%s timeout=%s: %v — the shim will not report this turn's end, so the teardown closes the session-status lifecycle itself",
 			workspace, sessionID, path, outcome, bound, err)

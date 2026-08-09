@@ -206,7 +206,12 @@ type sessionClient interface {
 	SubmitPrompt(ctx context.Context, requestID, text, origin, permissionMode string, promptOrigin corev1.PromptOrigin) error
 	// Interrupt returns the shim's own verdict on what the stop did, which is
 	// the only place that verdict is observable.
-	Interrupt(ctx context.Context) (corev1.InterruptOutcome, error)
+	//
+	// originRequestID names WHO ORDERED the stop, in that caller's own
+	// vocabulary, and travels only so the log can correlate the exchange back
+	// to it: the wire carries a daemon-minted control id that appears nowhere
+	// in any caller's records.
+	Interrupt(ctx context.Context, originRequestID string) (corev1.InterruptOutcome, error)
 	// UnpinAccountingTurn releases the durable-cursor hold a turn's start took,
 	// for a turn the daemon closed WITHOUT a TurnEnded. Only a stream TurnEnded
 	// releases a pin otherwise, so a synthesized close would freeze the cursor
@@ -1343,7 +1348,14 @@ func (m *Manager) noteProgressCounts(workspace string, queueDepth int64) {
 // queue pause. The queue's own interject calls d.client.Interrupt DIRECTLY
 // (see beginInterject) and therefore reaches none of them structurally,
 // rather than by remembering to pass a flag.
-func (m *Manager) Interrupt(ctx context.Context, workspace string) error {
+// requestID is the FRONTEND COMMAND'S OWN id, carried through for the same
+// reason SubmitPrompt's is: it is the only id the user's client, the daemon's
+// command log and the shim exchange can be reconciled on. Without it a stop was
+// unfindable end to end — the command arrived under `fe-276-1074`, the wire
+// exchange went out under a daemon-minted `daemon-interrupt-3-…`, and nothing
+// joined them — so an interrupt that WAS delivered and acked INTERRUPTED within
+// two milliseconds read exactly like one the daemon had silently swallowed.
+func (m *Manager) Interrupt(ctx context.Context, workspace, requestID string) error {
 	d, err := m.existing(workspace)
 	if err != nil {
 		d, err = m.recoverSessionControllerForInterrupt(ctx, workspace, err)
@@ -1351,7 +1363,7 @@ func (m *Manager) Interrupt(ctx context.Context, workspace string) error {
 			return err
 		}
 	}
-	outcome, err := d.client.Interrupt(ctx)
+	outcome, err := d.client.Interrupt(ctx, requestID)
 	if err != nil {
 		return err
 	}
@@ -1359,10 +1371,10 @@ func (m *Manager) Interrupt(ctx context.Context, workspace string) error {
 		return err
 	}
 	if failed := errclass.InterruptError(outcome); failed != nil {
-		m.logf("session-controller: interrupt undeliverable ws=%s session=%s outcome=%s", workspace, d.sessionID, outcome)
+		m.logf("session-controller: interrupt undeliverable ws=%s session=%s request_id=%s outcome=%s", workspace, d.sessionID, requestID, outcome)
 		return failed
 	}
-	m.logf("session-controller: interrupt ws=%s session=%s outcome=%s", workspace, d.sessionID, outcome)
+	m.logf("session-controller: interrupt ws=%s session=%s request_id=%s outcome=%s", workspace, d.sessionID, requestID, outcome)
 	return nil
 }
 
