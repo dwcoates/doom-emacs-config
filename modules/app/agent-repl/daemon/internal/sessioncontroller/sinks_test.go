@@ -1182,6 +1182,35 @@ func newProgressConsumer(prog ProgressResolver) *consumer {
 	return c
 }
 
+func TestASettledTurnsAccountingReachesTheProgressResolver(t *testing.T) {
+	// Arrange — the footer's accounting cell is resolved from this record, and
+	// this is the single settlement path that holds one.
+	prog := &fakeProgress{}
+	c := newProgressConsumer(prog)
+	accounting := &frontendv1.TurnAccounting{TurnId: "t1"}
+	// Act
+	c.publishHeldTerminalResult("t1", accounting)
+	// Assert
+	notes := prog.accountingNotes()
+	if len(notes) != 1 || notes[0].GetTurnId() != "t1" {
+		t.Fatalf("accounting notes = %v, want the settled turn", notes)
+	}
+}
+
+func TestASettlementWithNoHeldResultStillFeedsTheAccountingCell(t *testing.T) {
+	// Arrange — a turn whose held result was already discharged still SETTLED,
+	// and its accounting is still the newest the footer has.
+	prog := &fakeProgress{}
+	c := newProgressConsumer(prog)
+	// Act — nothing was ever held for this turn, so the discharge below is a
+	// no-op and the early return used to be reached before the cell was fed.
+	c.publishHeldTerminalResult("t-never-held", &frontendv1.TurnAccounting{TurnId: "t-never-held"})
+	// Assert
+	if len(prog.accountingNotes()) != 1 {
+		t.Fatalf("accounting notes = %v, want the settlement fed despite no held result", prog.accountingNotes())
+	}
+}
+
 func TestLifecycleEventsReachTheProgressResolver(t *testing.T) {
 	// Arrange
 	prog := &fakeProgress{}

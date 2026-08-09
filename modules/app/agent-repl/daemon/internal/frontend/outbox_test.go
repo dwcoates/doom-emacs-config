@@ -38,6 +38,24 @@ func TestCoalesceKeyClassifiesFrames(t *testing.T) {
 			wantSubstr: "queue",
 		},
 		{
+			name:       "topbar is absolute per workspace",
+			frame:      TopbarViewFrame(&frontendv1.TopbarView{Workspace: "/w", Fence: "s1"}),
+			wantKeyed:  true,
+			wantSubstr: "topbar",
+		},
+		{
+			name:       "token breakdown is absolute per workspace",
+			frame:      TokenBreakdownViewFrame(&frontendv1.TokenBreakdownView{Workspace: "/w", Fence: "s1"}),
+			wantKeyed:  true,
+			wantSubstr: "token_breakdown",
+		},
+		{
+			name:       "workspace gate is absolute per workspace",
+			frame:      WorkspaceGateViewFrame(&frontendv1.WorkspaceGateView{Workspace: "/w", Fence: "s1"}),
+			wantKeyed:  true,
+			wantSubstr: "workspace_gate",
+		},
+		{
 			name: "heartbeat is absolute per running tool",
 			frame: HeartbeatViewFrame(&frontendv1.HeartbeatView{
 				Workspace: "/w", Fence: "s1",
