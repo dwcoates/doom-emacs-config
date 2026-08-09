@@ -116,34 +116,43 @@ the two halves — dispatch finishing, ack delivery — completes second. Readin
 them together names the fault: a small `enqueue_ms` under a large `duration_ms`
 is the outbound queue, not the handler.
 
-## The connect-snapshot drain is a named window, not a raised threshold
+## The bring-up drain is a named window, not a raised threshold
 
 The alarm above fires once per boot on the host connection, and correctly: the
 connect snapshot carries every workspace the daemon knows about (104 in the
-observed case), and an ack answered while that snapshot is still going out is
-delivered behind one in-flight write nothing can preempt. The cost is real and
-it is EXPECTED — the client's own 10s deadline is the meaningful bound during
-bring-up, and it is comfortably met.
+observed case), the retained roster and catalogs and views follow it
+immediately, and an ack answered while that traffic is going out is delivered
+behind a write nothing can preempt. The cost is real and it is EXPECTED — the
+client's own 10s deadline is the meaningful bound during bring-up, and it is
+comfortably met.
 
 So the window is CLASSIFIED rather than muted or thresholded away
 (`bootdrain.go`). Each connection carries a `snapshotDrain` whose two edges are
-the two events that define it: the instant its connect `StateSnapshot` was
-handed to the outbound queue, and that same frame's terminal disposition
-reported by the writer. It is derived from the outbox's existing notify hook,
-not from a timer, so it cannot be open while the snapshot is already delivered
-nor closed while it is still draining, and it never drifts with the snapshot's
-size or the host's speed.
+events the transport already performs: the instant its connect `StateSnapshot`
+was handed to the outbound queue, and the first moment the writer's drain loop
+finds that outbox EMPTY. Neither is estimated, so the window cannot be open
+while the connection is idle nor closed while frames are still owed, and it does
+not drift with the storm's size or the host's speed the way a duration guess
+would.
+
+The closing edge was the snapshot's own write completion first, and the evidence
+refuted it: a `publish_workspace_roster` ack still took 4343ms and warned
+unclassified, because it drained behind the frames the snapshot was merely the
+first of. The snapshot's write is the first frame of the storm; the outbox
+running dry is the end of it.
 
 A sample whose delivery interval (receipt → ack on the socket) OVERLAPS that
 window carries `Decision = boot_snapshot_drain`, and the recorder logs it at
 `info` with `decision=boot_snapshot_drain` and every figure intact, at normal
 verbosity. Outside the window the record is byte-identical to what it always
 was: `warn`, no `decision` key. The closing edge is exclusive, so the first
-command received after the write completion warns again. Three things stay loud
-inside the window too — an ack that never reached the socket, a command still
-in flight past the deadline, and a connection that somehow never enqueued a
-snapshot at all (which reports no overlap rather than inheriting an explanation
-nothing established). The client-side deadline path is untouched.
+command received after the backlog cleared warns again, and a later quiet period
+does not slide the window forward. A connection whose outbox never runs dry
+keeps its window open, which is honest rather than lenient — the storm never
+ended. Three things stay loud inside the window too: an ack that never reached
+the socket, a command still in flight past the deadline, and a connection that
+somehow never enqueued a snapshot at all (no overlap, so no explanation it did
+not earn). The client-side deadline path is untouched.
 
 ## A saturated queue is compacted before the connection is given up on
 
