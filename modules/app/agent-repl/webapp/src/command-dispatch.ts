@@ -261,11 +261,10 @@ export interface PermissionAnswerArgs {
   denyMessage: string;
 }
 
-/** The revisioned WorkspaceState identity that authorizes a history replay. */
+/** The revisioned WorkspaceState fence that authorizes a history replay. */
 export interface ResyncArgs {
   fromSeq: number;
-  sessionId: string;
-  controllerGenerationId: string;
+  fence: string;
 }
 
 export interface DispatchOptions {
@@ -423,12 +422,11 @@ export class CommandDispatcher {
       context: {
         workspace,
         from_seq: args.fromSeq,
-        agent_repl_session_id: args.sessionId,
-        controller_generation_id: args.controllerGenerationId,
+        fence: args.fence,
         decision: "dispatch",
       },
     });
-    return this.dispatch(workspace, { case: "resync", ...args });
+    return this.dispatch(workspace, { case: "resync", fromSeq: args.fromSeq, fence: args.fence });
   }
 
   deleteSession(sessionId: string): Promise<void> {
