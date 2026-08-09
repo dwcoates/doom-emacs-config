@@ -586,3 +586,186 @@ func TestNewElasticOutboxClampsAHardBoundBelowItsSoft(t *testing.T) {
 		t.Fatalf("bounds = (soft %d, hard %d), want (8, 8)", o.capacity(), o.ceiling())
 	}
 }
+
+// --- the control lane -------------------------------------------------------
+//
+// The lane exists because an ack sharing one FIFO with a connect snapshot was
+// delivered ~15s after the daemon produced it in ~12ms. These cover the three
+// things that had to stay true while fixing that: the ack gets out, the bulk
+// lane's own order does not move, and the pairs that DO have an ordering
+// obligation keep it.
+
+// pushLane arranges one frame on a named lane, failing the test if the queue
+// refuses it while the case is still being set up.
+func pushLane(t *testing.T, o *outbox, l lane, payload string) {
+	t.Helper()
+	if res := o.push(outFrame{control: l == controlLane, data: []byte(payload)}); !res.queued {
+		t.Fatalf("push %q refused while arranging the queue: %+v", payload, res)
+	}
+}
+
+func TestOutboxControlFrameOvertakesAQueuedBulkBacklog(t *testing.T) {
+	// Arrange: the incident's shape — a deep bulk backlog already queued.
+	o := newOutbox(8)
+	fill(t, o, "snapshot", "conv1", "conv2", "conv3")
+
+	// Act: the ack for a command the daemon just finished.
+	pushLane(t, o, controlLane, "ack")
+
+	// Assert: the ack leaves FIRST, so its wait is bounded by write throughput
+	// rather than by how much bulk was queued in front of it.
+	if got, want := drain(o), []string{"ack", "snapshot", "conv1", "conv2", "conv3"}; !equalStrings(got, want) {
+		t.Fatalf("drain order = %v, want %v", got, want)
+	}
+}
+
+func TestOutboxBulkFramesKeepTheirOrderAmongThemselves(t *testing.T) {
+	// Arrange: bulk frames interleaved with control frames, which is what a
+	// busy connection actually queues.
+	o := newOutbox(8)
+	pushLane(t, o, bulkLane, "snapshot")
+	pushLane(t, o, controlLane, "ack-1")
+	pushLane(t, o, bulkLane, "delta-1")
+	pushLane(t, o, controlLane, "ack-2")
+	pushLane(t, o, bulkLane, "delta-2")
+
+	// Act.
+	var bulk []string
+	for _, payload := range drain(o) {
+		if !strings.HasPrefix(payload, "ack-") {
+			bulk = append(bulk, payload)
+		}
+	}
+
+	// Assert: snapshot-before-delta and every other state ordering is
+	// untouched — the control lane reorders nothing within the bulk one.
+	if want := []string{"snapshot", "delta-1", "delta-2"}; !equalStrings(bulk, want) {
+		t.Fatalf("bulk order = %v, want %v", bulk, want)
+	}
+}
+
+func TestOutboxControlFramesKeepTheirOwnPushOrder(t *testing.T) {
+	// Arrange: a command's correlated response frame and the ack that
+	// completes it — the ordering pair the control lane itself must hold.
+	o := newOutbox(8)
+	pushLane(t, o, controlLane, "health-view")
+	pushLane(t, o, controlLane, "ack")
+
+	// Act / Assert: the reply still precedes the ack that answers for it.
+	if got, want := drain(o), []string{"health-view", "ack"}; !equalStrings(got, want) {
+		t.Fatalf("control order = %v, want %v", got, want)
+	}
+}
+
+func TestOutboxCompactionNeverTouchesTheControlLane(t *testing.T) {
+	// Arrange: a queue at its bound whose bulk lane is fully supersedable.
+	o := newOutbox(3)
+	pushLane(t, o, controlLane, "ack")
+	fill(t, o, "progress:p1", "progress:p2")
+
+	// Act: a third progress revision forces a compaction.
+	if res := o.push(outFrame{key: "progress", data: []byte("progress:p3")}); !res.queued {
+		t.Fatalf("push = %+v, want the frame queued after compaction", res)
+	}
+
+	// Assert: the ack survived. Compaction runs over the bulk lane only —
+	// dropping a correlated reply would strand its sender forever.
+	if got, want := drain(o), []string{"ack", "progress:p2", "progress:p3"}; !equalStrings(got, want) {
+		t.Fatalf("drain = %v, want %v", got, want)
+	}
+}
+
+func TestOutboxBoundsCountBothLanes(t *testing.T) {
+	// Arrange: a queue filled to its ceiling entirely from the control lane.
+	o := newOutbox(2)
+	pushLane(t, o, controlLane, "ack-1")
+	pushLane(t, o, controlLane, "ack-2")
+
+	// Act.
+	res := o.push(outFrame{data: []byte("conv1")})
+
+	// Assert: the memory bound is over the WHOLE queue, so a control lane can
+	// never be a way around the ceiling.
+	if res.queued {
+		t.Fatalf("push = %+v, want refusal at the shared ceiling", res)
+	}
+	if res.depth != 2 {
+		t.Fatalf("depth = %d, want both lanes counted", res.depth)
+	}
+}
+
+func TestOutboxRefusesAControlFrameAtTheCeiling(t *testing.T) {
+	// Arrange: an irreplaceable bulk backlog filled to the ceiling.
+	o := newOutbox(2)
+	fill(t, o, "conv1", "conv2")
+
+	// Act.
+	res := o.push(outFrame{control: true, data: []byte("ack")})
+
+	// Assert: an ack is refused like anything else. The memory bound is not
+	// negotiable, and the refusal is what tells its sender the ack is lost.
+	if res.queued {
+		t.Fatalf("push = %+v, want a control frame refused at the ceiling too", res)
+	}
+	if res.reason != overflowCeiling {
+		t.Fatalf("reason = %q, want %q", res.reason, overflowCeiling)
+	}
+}
+
+// --- dispositions -----------------------------------------------------------
+
+func TestOutboxCloseHandsBackEveryStrandedFrame(t *testing.T) {
+	// Arrange: both lanes occupied when the connection dies.
+	o := newOutbox(8)
+	pushLane(t, o, controlLane, "ack")
+	pushLane(t, o, bulkLane, "delta")
+
+	// Act.
+	stranded := o.close()
+
+	// Assert: nothing is dropped silently — every waiting frame comes back so
+	// its sender can be told it will never be written.
+	var payloads []string
+	for _, f := range stranded {
+		payloads = append(payloads, string(f.data))
+	}
+	if want := []string{"ack", "delta"}; !equalStrings(payloads, want) {
+		t.Fatalf("stranded = %v, want %v", payloads, want)
+	}
+}
+
+func TestOutboxCloseIsIdempotent(t *testing.T) {
+	// Arrange: a queue already closed once, with its frames handed back.
+	o := newOutbox(8)
+	pushLane(t, o, controlLane, "ack")
+	if got := len(o.close()); got != 1 {
+		t.Fatalf("first close returned %d frames, want 1", got)
+	}
+
+	// Act.
+	second := o.close()
+
+	// Assert: a second teardown cannot report the same frame undelivered
+	// twice, which is what keeps one disposition per frame exact.
+	if len(second) != 0 {
+		t.Fatalf("second close returned %d frames, want none", len(second))
+	}
+}
+
+func TestOutboxPushOntoAClosedQueueIsRefusedRatherThanQueued(t *testing.T) {
+	// Arrange.
+	o := newOutbox(8)
+	o.close()
+
+	// Act.
+	res := o.push(outFrame{control: true, data: []byte("ack")})
+
+	// Assert: accepting it would put the frame in a queue no writer will ever
+	// drain, and its sender would wait on a delivery that cannot happen.
+	if res.queued {
+		t.Fatal("push onto a closed queue = queued, want refusal")
+	}
+	if !res.closed {
+		t.Fatalf("res = %+v, want the closed disposition", res)
+	}
+}

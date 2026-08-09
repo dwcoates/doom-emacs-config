@@ -367,3 +367,176 @@ func TestAckWarnFromEnvRefusesZeroRatherThanDefaulting(t *testing.T) {
 		t.Fatal("AckWarnFromEnv() with zero = nil error, want a loud refusal")
 	}
 }
+
+// --- the delivery measurement -----------------------------------------------
+//
+// The alarm used to stop at the ack ENQUEUE, so it saw a 12ms command and
+// stayed silent while that command's ack sat 15 seconds deep in the outbound
+// queue. These pin the measurement to the socket write instead.
+
+func TestCommandLatencySampleSlowJudgesTheDeliveryNotTheEnqueue(t *testing.T) {
+	tests := []struct {
+		name      string
+		enqueue   time.Duration
+		delivery  time.Duration
+		threshold time.Duration
+		wantSlow  bool
+	}{
+		{
+			// The incident exactly: the daemon's own share was trivial and the
+			// drain was the whole round trip. Judging the enqueue called this
+			// fast while the client's deadline was expiring.
+			name:      "a fast enqueue behind a slow drain is slow",
+			enqueue:   12 * time.Millisecond,
+			delivery:  15 * time.Second,
+			threshold: 2 * time.Second,
+			wantSlow:  true,
+		},
+		{
+			name:      "a fast enqueue with a fast drain is not slow",
+			enqueue:   12 * time.Millisecond,
+			delivery:  20 * time.Millisecond,
+			threshold: 2 * time.Second,
+			wantSlow:  false,
+		},
+		{
+			// The pre-existing case, still caught: a slow HANDLER shows up as a
+			// delivery that is almost entirely its own enqueue.
+			name:      "a slow handler is still slow",
+			enqueue:   3 * time.Second,
+			delivery:  3 * time.Second,
+			threshold: 2 * time.Second,
+			wantSlow:  true,
+		},
+		{
+			name:      "no threshold configured never warns",
+			enqueue:   time.Millisecond,
+			delivery:  time.Hour,
+			threshold: 0,
+			wantSlow:  false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			sample := CommandLatencySample{
+				Enqueue: tc.enqueue, Delivery: tc.delivery,
+				Delivered: true, Threshold: tc.threshold,
+			}
+
+			// Act.
+			got := sample.Slow()
+
+			// Assert.
+			if got != tc.wantSlow {
+				t.Fatalf("Slow() with enqueue=%s delivery=%s threshold=%s = %v, want %v",
+					tc.enqueue, tc.delivery, tc.threshold, got, tc.wantSlow)
+			}
+		})
+	}
+}
+
+// gatedConn holds every write until the test releases it, so a slow DRAIN can
+// be arranged without a clock: the frame is queued, the writer is inside
+// writeFrame, and nothing but the test can let it finish.
+type gatedConn struct {
+	entered chan []byte
+	release chan error
+	closed  chan struct{}
+	once    sync.Once
+}
+
+func newGatedConn() *gatedConn {
+	return &gatedConn{
+		entered: make(chan []byte, 8),
+		release: make(chan error, 8),
+		closed:  make(chan struct{}),
+	}
+}
+
+func (c *gatedConn) readCommand() (*frontendv1.FrontendCommand, error) {
+	<-c.closed
+	return nil, errors.New("frontend test: gated connection has no command script")
+}
+
+func (c *gatedConn) writeFrame(data []byte) error {
+	c.entered <- append([]byte(nil), data...)
+	return <-c.release
+}
+
+func (c *gatedConn) close() error {
+	c.once.Do(func() { close(c.closed) })
+	return nil
+}
+
+// awaitWrite rendezvouses with the writer entering writeFrame, so a test knows
+// the writer is parked rather than assuming it.
+func (c *gatedConn) awaitWrite(t *testing.T) {
+	t.Helper()
+	select {
+	case <-c.entered:
+	case <-time.After(ticketTestDeadline):
+		t.Fatal("the writer never reached writeFrame before the failure deadline")
+	}
+}
+
+func TestCommandLatencyIsRecordedOnlyOnceTheAckReachesTheSocket(t *testing.T) {
+	// Arrange: a writer parked inside writeFrame on a bulk frame, which is the
+	// backlog an ack used to queue behind.
+	latency := &recordingLatency{notify: make(chan CommandLatencySample, 4)}
+	s := newTicketServer(t, latency, time.Hour)
+	cl := newClient(defaultClientBuffer, nil, ClientKindHost)
+	c := newGatedConn()
+	go s.writeLoop(c, cl)
+	s.enqueue(cl, outFrame{data: []byte(`{"bulk":true}`)})
+	c.awaitWrite(t)
+
+	// Act: the command runs to completion and its ack is queued behind that
+	// held write. processCommand has RETURNED, so the dispatch is done.
+	ticket := s.newCommandTicket(cl, openCmd("held", "/ws/a"), time.Now(), s.inflight.Add(1))
+	s.processCommand(ticket)
+
+	// Assert: no record yet. The daemon is finished with the command, but the
+	// client has not seen a byte of the answer, and the record that used to be
+	// written here is what made a 15s wait look like a 12ms one.
+	if samples := latency.all(); len(samples) != 0 {
+		t.Fatalf("samples while the ack is still queued = %+v, want none until it is written", samples)
+	}
+
+	// Act: let the writer through.
+	c.release <- nil
+	c.awaitWrite(t)
+	c.release <- nil
+
+	// Assert.
+	sample := awaitSample(t, latency.notify)
+	if !sample.Delivered || sample.DeliveryError != "" {
+		t.Fatalf("sample = %+v, want a delivered ack", sample)
+	}
+	if sample.Delivery < sample.Enqueue {
+		t.Fatalf("delivery %s < enqueue %s, want the drain counted on top of the daemon's own share",
+			sample.Delivery, sample.Enqueue)
+	}
+}
+
+func TestCommandLatencyReportsAnAckThatNeverReachedTheClient(t *testing.T) {
+	// Arrange: a command whose ack is queued for a connection that then dies.
+	latency := &recordingLatency{notify: make(chan CommandLatencySample, 4)}
+	s := newTicketServer(t, latency, time.Hour)
+	cl := newClient(defaultClientBuffer, nil, ClientKindHost)
+	ticket := s.newCommandTicket(cl, openCmd("lost", "/ws/a"), time.Now(), s.inflight.Add(1))
+	s.processCommand(ticket)
+
+	// Act: the connection goes before any writer drained it.
+	s.disconnect(cl)
+
+	// Assert: the record still happens, and it says the client never saw the
+	// ack rather than reporting a delivery that did not occur.
+	sample := awaitSample(t, latency.notify)
+	if sample.Delivered {
+		t.Fatalf("sample = %+v, want the ack reported undelivered", sample)
+	}
+	if sample.DeliveryError == "" {
+		t.Fatal("sample carries no delivery error, want the reason the ack never landed")
+	}
+}
