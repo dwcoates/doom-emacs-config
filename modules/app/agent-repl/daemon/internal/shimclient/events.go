@@ -432,7 +432,14 @@ func (c *Client) dispatchPermission(ctx context.Context, ac *activeConn, req *co
 	go func() {
 		resp := c.cfg.Permissions.HandlePermission(c.cfg.SessionID, req)
 		if resp == nil {
-			c.logf("permission handler returned nil for request_id=%s; no response sent (shim stays blocked)",
+			// The handler released this request WITHOUT answering the shim.
+			// Two paths do that and neither is a lost answer: a teardown
+			// abandonment (the shim stays blocked and re-asks on reattach), and
+			// a user's DECLINE, whose accompanying stop force-denies this
+			// round-trip on the shim's own side and ends the turn
+			// (sessioncontroller/permdecline.go). Which one it was is stated by
+			// the handler at the layer that knows, not guessed at here.
+			c.logf("permission handler returned nil for request_id=%s; no response sent",
 				req.GetRequestId())
 			return
 		}

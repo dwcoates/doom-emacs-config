@@ -362,6 +362,14 @@ func (c *fakeClient) interruptCount() int {
 	return c.interrupts
 }
 
+// interruptOriginIDs returns a copy of the ids each stop was ordered under,
+// safe to read while the session controller's own goroutines are running.
+func (c *fakeClient) interruptOriginIDs() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.interruptOrigins...)
+}
+
 // newTestManager builds a Manager whose clients are fakes, capturing the last
 // built fake so a test can inspect what the session controller sent it.
 func newTestManager(t *testing.T, locator SessionLocator, spawner Spawner) (*Manager, func() *fakeClient) {
@@ -930,7 +938,7 @@ func TestAnswerPermissionRoutesToRegistry(t *testing.T) {
 	defer release()
 
 	// Act.
-	if err := m.AnswerPermission(context.Background(), "ws", "r1", true, "", nil); err != nil {
+	if err := m.AnswerPermission(context.Background(), "ws", "fe-1", "r1", true, "", nil); err != nil {
 		t.Fatalf("AnswerPermission: %v", err)
 	}
 
@@ -1009,7 +1017,7 @@ func TestHandlePermissionPushesPendingThenAllowed(t *testing.T) {
 	done := make(chan *corev1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r1")
-	if err := reg.answer("r1", true, "", nil); err != nil {
+	if err := reg.answerAllow("r1", nil); err != nil {
 		t.Fatalf("answer: %v", err)
 	}
 	<-done
@@ -1036,7 +1044,7 @@ func TestHandlePermissionPushesNoHandBuiltWorkspaceState(t *testing.T) {
 	done := make(chan *corev1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r1")
-	if err := reg.answer("r1", true, "", nil); err != nil {
+	if err := reg.answerAllow("r1", nil); err != nil {
 		t.Fatalf("answer: %v", err)
 	}
 	<-done
@@ -1056,7 +1064,7 @@ func TestHandlePermissionPushesDeniedWithMessage(t *testing.T) {
 	done := make(chan *corev1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r2")
-	if err := reg.answer("r2", false, "not allowed", nil); err != nil {
+	if err := reg.answerDecline("r2", "not allowed"); err != nil {
 		t.Fatalf("answer: %v", err)
 	}
 	<-done
@@ -1114,7 +1122,7 @@ func TestHandlePermissionReplaysTheRecordedAnswerToAResend(t *testing.T) {
 	done := make(chan *corev1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r-resend")
-	if err := reg.answer("r-resend", true, "", nil); err != nil {
+	if err := reg.answerAllow("r-resend", nil); err != nil {
 		t.Fatalf("answer: %v", err)
 	}
 	<-done
@@ -1136,7 +1144,7 @@ func TestHandlePermissionResendOfAnAnsweredRequestPushesNothing(t *testing.T) {
 	done := make(chan *corev1.PermissionResponse, 1)
 	go func() { done <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r-resend-push")
-	if err := reg.answer("r-resend-push", true, "", nil); err != nil {
+	if err := reg.answerAllow("r-resend-push", nil); err != nil {
 		t.Fatalf("answer: %v", err)
 	}
 	<-done
@@ -1166,14 +1174,17 @@ func TestHandlePermissionResendAfterAbandonmentReAsks(t *testing.T) {
 	resent := make(chan *corev1.PermissionResponse, 1)
 	go func() { resent <- ph.HandlePermission("s1", req) }()
 	waitForPermWaiter(reg, "ws", "r-reask")
-	if err := reg.answer("r-reask", false, "no", nil); err != nil {
+	if err := reg.answerDecline("r-reask", "no"); err != nil {
 		t.Fatalf("answer: %v", err)
 	}
 	resp := <-resent
 
-	// Assert: the question was genuinely re-asked and this time answered.
-	if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_DENY {
-		t.Fatalf("decision: got %v, want DENY", resp.GetDecision())
+	// Assert: the question was genuinely re-asked and this time answered. The
+	// answer was a DECLINE, so nothing goes back to the shim — the stop that
+	// accompanies it releases the round-trip (permdecline.go) — and the
+	// resolution is recorded for the frontends.
+	if resp != nil {
+		t.Fatalf("HandlePermission returned %v for a decline, want nil", resp)
 	}
 	got := push.permissionResolutions("r-reask")
 	want := []corev1.PermissionItem_Resolution{
@@ -1185,6 +1196,43 @@ func TestHandlePermissionResendAfterAbandonmentReAsks(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolutions = %v, want %v", got, want)
 	}
+}
+
+func TestHandlePermissionResendOfADeclinedRequestReAsks(t *testing.T) {
+	// Arrange — a declined request whose canUseTool outlived the stop, so the
+	// shim re-sends it. Serving the recorded denial would unblock the tool call
+	// and let the agent carry on past a stop the user commanded, which is the
+	// behavior the decline exists to end (permdecline.go).
+	ph, reg, push := newTestPermHandler()
+	req := &corev1.PermissionRequest{RequestId: "r-declined-resend", ToolName: "Bash"}
+	done := make(chan *corev1.PermissionResponse, 1)
+	go func() { done <- ph.HandlePermission("s1", req) }()
+	waitForPermWaiter(reg, "ws", "r-declined-resend")
+	if err := reg.answerDecline("r-declined-resend", "no"); err != nil {
+		t.Fatalf("answerDecline: %v", err)
+	}
+	<-done
+
+	// Act — the shim asks again.
+	resent := make(chan *corev1.PermissionResponse, 1)
+	go func() { resent <- ph.HandlePermission("s1", req) }()
+	waitForPermWaiter(reg, "ws", "r-declined-resend")
+
+	// Assert — a live question again, put back to the user rather than served
+	// the decline.
+	got := push.permissionResolutions("r-declined-resend")
+	want := []corev1.PermissionItem_Resolution{
+		corev1.PermissionItem_RESOLUTION_PENDING,
+		corev1.PermissionItem_RESOLUTION_DENIED,
+		corev1.PermissionItem_RESOLUTION_PENDING,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolutions = %v, want %v", got, want)
+	}
+	if err := reg.answerDecline("r-declined-resend", "still no"); err != nil {
+		t.Fatalf("answering the re-asked question: %v", err)
+	}
+	<-resent
 }
 
 func TestHandlePermissionDuplicateResendsShareOneAnswer(t *testing.T) {
@@ -1200,7 +1248,7 @@ func TestHandlePermissionDuplicateResendsShareOneAnswer(t *testing.T) {
 	waitForPermWaiterCount(reg, "r-dup", 2)
 
 	// Act.
-	if err := reg.answer("r-dup", true, "", nil); err != nil {
+	if err := reg.answerAllow("r-dup", nil); err != nil {
 		t.Fatalf("answer: %v", err)
 	}
 
