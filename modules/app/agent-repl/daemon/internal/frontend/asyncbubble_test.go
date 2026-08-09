@@ -288,28 +288,72 @@ func TestAsyncBubbleKindReadsTheMergeArmBack(t *testing.T) {
 	}
 }
 
-func TestAppendMergeEmissionsReturnsTheWholeBubbleForRedelivery(t *testing.T) {
+// AMENDED: these tests pinned whole-bubble RE-DELIVERY, which was the interim
+// shape a merge window advanced by while AsyncBubbleUpdate carried no arm it
+// could use. The contract's update oneof says of itself "Never a re-send of the
+// whole bubble", and its `merge = 15` arm now exists precisely so a merge run's
+// progress is an APPEND. So what these assert is the arm, not the copy.
+
+func TestAppendWindowEmissionsDeliversAMergeFoldOnTheMergeArm(t *testing.T) {
 	// Arrange
 	b := openKind(t, DetachMerge)
 
 	// Act
-	got, err := AppendMergeEmissions(b, []*frontendv1.AgentEmission{responseEmission("m1")}, 7)
+	up, err := AppendWindowEmissions(b, []*frontendv1.AgentEmission{responseEmission("m1")}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: AMENDED from "returns the whole bubble for re-delivery" — the
+	// update oneof forbids re-sending the whole bubble, and the merge arm is
+	// what the contract added to replace that route.
+	if up.GetMerge() == nil {
+		t.Fatalf("a merge fold arrived on arm %T, want the merge arm the contract added for it", up.GetUpdate())
+	}
+}
+
+func TestAppendWindowEmissionsCarriesOnlyTheNewEmissions(t *testing.T) {
+	// Arrange: a bubble that has already folded once.
+	b := openKind(t, DetachMerge)
+	if _, err := AppendWindowEmissions(b, []*frontendv1.AgentEmission{responseEmission("m1")}, 7); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	up, err := AppendWindowEmissions(b, []*frontendv1.AgentEmission{responseEmission("m2")}, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: AMENDED — the whole point of the arm is that a window running for
+	// an hour does not re-transmit its transcript on every new line.
+	if got := len(up.GetMerge().GetEmissions()); got != 1 {
+		t.Fatalf("the update carried %d emissions, want only the one appended: an update is a delta, never the fold to date", got)
+	}
+}
+
+func TestAppendWindowEmissionsAddressesTheUpdateToItsBubble(t *testing.T) {
+	// Arrange
+	b := openKind(t, DetachMerge)
+
+	// Act
+	up, err := AppendWindowEmissions(b, []*frontendv1.AgentEmission{responseEmission("m1")}, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Assert
-	if got != b {
-		t.Fatalf("a merge fold advances by whole-bubble re-delivery, so it must return the bubble itself; got %v", got)
+	if got := up.GetBubbleId(); got != b.GetId() {
+		t.Fatalf("the update is addressed to %q, want the bubble %q it folded into: the id is the only routing handle it carries", got, b.GetId())
 	}
 }
 
-func TestAppendMergeEmissionsFoldsIntoTheMergeArm(t *testing.T) {
+func TestAppendWindowEmissionsFoldsIntoTheMergeArm(t *testing.T) {
 	// Arrange
 	b := openKind(t, DetachMerge)
 
 	// Act
-	if _, err := AppendMergeEmissions(b, []*frontendv1.AgentEmission{responseEmission("m1")}, 7); err != nil {
+	if _, err := AppendWindowEmissions(b, []*frontendv1.AgentEmission{responseEmission("m1")}, 7); err != nil {
 		t.Fatal(err)
 	}
 
@@ -319,7 +363,7 @@ func TestAppendMergeEmissionsFoldsIntoTheMergeArm(t *testing.T) {
 	}
 }
 
-func TestAppendMergeEmissionsKeepsTheTailAtTheCap(t *testing.T) {
+func TestAppendWindowEmissionsKeepsTheTailAtTheCap(t *testing.T) {
 	// Arrange
 	b := openKind(t, DetachMerge)
 	var ems []*frontendv1.AgentEmission
@@ -328,17 +372,17 @@ func TestAppendMergeEmissionsKeepsTheTailAtTheCap(t *testing.T) {
 	}
 
 	// Act
-	if _, err := AppendMergeEmissions(b, ems, 7); err != nil {
+	if _, err := AppendWindowEmissions(b, ems, 7); err != nil {
 		t.Fatal(err)
 	}
 
 	// Assert
 	if got := len(b.GetMerge().GetEmissions()); got != StreamItemCap {
-		t.Fatalf("want the merge fold capped at %d, got %d: the cap is what keeps whole-bubble re-delivery O(cap) rather than O(history)", StreamItemCap, got)
+		t.Fatalf("want the merge fold capped at %d, got %d", StreamItemCap, got)
 	}
 }
 
-func TestAppendMergeEmissionsReportsWhatTheCapDropped(t *testing.T) {
+func TestAppendWindowEmissionsReportsWhatTheCapDropped(t *testing.T) {
 	// Arrange
 	b := openKind(t, DetachMerge)
 	var ems []*frontendv1.AgentEmission
@@ -347,7 +391,7 @@ func TestAppendMergeEmissionsReportsWhatTheCapDropped(t *testing.T) {
 	}
 
 	// Act
-	if _, err := AppendMergeEmissions(b, ems, 7); err != nil {
+	if _, err := AppendWindowEmissions(b, ems, 7); err != nil {
 		t.Fatal(err)
 	}
 
@@ -357,22 +401,38 @@ func TestAppendMergeEmissionsReportsWhatTheCapDropped(t *testing.T) {
 	}
 }
 
-func TestAppendMergeEmissionsProducesNothingForAnEmptyBatch(t *testing.T) {
+func TestAppendWindowEmissionsDoesNotAliasTheBubblesFoldOntoTheUpdate(t *testing.T) {
+	// Arrange
+	b := openKind(t, DetachMerge)
+
+	// Act
+	up, err := AppendWindowEmissions(b, []*frontendv1.AgentEmission{responseEmission("m1")}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if up.GetMerge().GetFold() == b.GetMerge().GetFold() {
+		t.Fatal("a queued frame's fold must not be rewritten by later folding")
+	}
+}
+
+func TestAppendWindowEmissionsProducesNothingForAnEmptyBatch(t *testing.T) {
 	// Arrange, Act
-	got, err := AppendMergeEmissions(openKind(t, DetachMerge), nil, 7)
+	got, err := AppendWindowEmissions(openKind(t, DetachMerge), nil, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Assert
 	if got != nil {
-		t.Fatal("an empty batch changed nothing and must produce no re-delivery")
+		t.Fatal("an empty batch changed nothing and must produce no wire traffic")
 	}
 }
 
-func TestAppendMergeEmissionsRefusesANonMergeBubble(t *testing.T) {
+func TestAppendWindowEmissionsRefusesANonWindowBubble(t *testing.T) {
 	// Arrange, Act
-	_, err := AppendMergeEmissions(openKind(t, DetachAgent), []*frontendv1.AgentEmission{responseEmission("m1")}, 7)
+	_, err := AppendWindowEmissions(openKind(t, DetachAgent), []*frontendv1.AgentEmission{responseEmission("m1")}, 7)
 
 	// Assert
 	if err == nil {
@@ -386,7 +446,12 @@ func TestAppendAsyncEmissionsRefusesAnAgentUpdateAddressedToAMergeBubble(t *test
 
 	// Assert
 	if err == nil {
-		t.Fatal("AsyncBubbleUpdate has no merge arm, so an agent update aimed at a merge bubble is the kind mismatch a receiver rejects and must never be produced")
+		// AMENDED REASON: the merge arm now exists, so the old sentence ("there
+		// is no merge arm") is no longer why this is refused. The refusal stands
+		// on the arm rule the update oneof states — "The arm MUST match the
+		// bubble's kind" — and `agent` and `merge` remain distinct kinds on the
+		// wire even though they carry the same message.
+		t.Fatal("an agent update aimed at a merge bubble is the kind mismatch a receiver rejects and must never be produced: the merge kind has an arm of its own")
 	}
 }
 

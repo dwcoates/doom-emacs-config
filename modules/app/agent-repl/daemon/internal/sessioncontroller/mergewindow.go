@@ -26,11 +26,12 @@
 //     hangs under.
 //   - SETTLE, on the user's own next prompt or on an interrupt.
 //
-// WHY THE FOLD RE-DELIVERS THE WHOLE BUBBLE. The contract has no merge update
-// arm; AsyncBubbleDelta.opened is the merge kind's only route for new content,
-// and it is defined as replacing the copy the receiver holds. The tail cap
-// (frontend.StreamItemCap) bounds what that costs. See
-// frontend.AppendMergeEmissions.
+// HOW THE FOLD REACHES THE CLIENT. By APPEND, on the contract's own `merge`
+// update arm — AsyncAgentUpdate carried under AsyncBubbleUpdate.merge, whose
+// semantics are the agent arm's exactly. An earlier shape re-delivered the whole
+// bubble through AsyncBubbleDelta.opened, which existed only because no merge
+// update arm did; the update oneof's own rule ("Never a re-send of the whole
+// bubble") is what retires it. See frontend.AppendWindowEmissions.
 package sessioncontroller
 
 import (
@@ -115,14 +116,14 @@ func (s *asyncBubbleStore) openMergeWindow(originToolUseID, label string, atMs i
 }
 
 // foldMergeEmissions folds one batch of the session's emissions into the open
-// Merge bubble and returns the bubble for re-delivery.
+// Merge bubble and returns the incremental update that carries them.
 //
 // It also INDEXES the calls the batch made, which is what gives a subagent
 // dispatched inside the merge its parent pointer: a nested detachment's bubble
 // resolves its parent through parentByToolUse exactly as a detached agent's
 // nested dispatch does, so the tree reads truthfully rather than hanging the
 // child at the top level beside the merge that started it.
-func (s *asyncBubbleStore) foldMergeEmissions(ems []*frontendv1.AgentEmission, atMs int64) (*frontendv1.AsyncBubble, error) {
+func (s *asyncBubbleStore) foldMergeEmissions(ems []*frontendv1.AgentEmission, atMs int64) (*frontendv1.AsyncBubbleUpdate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.mergeWindow == "" {
@@ -133,14 +134,14 @@ func (s *asyncBubbleStore) foldMergeEmissions(ems []*frontendv1.AgentEmission, a
 		return nil, fmt.Errorf("session-controller: merge fold REFUSED — the window names bubble %q, which the store does not hold; the emissions are not folded rather than being attributed to a bubble nobody can route to", s.mergeWindow)
 	}
 	s.indexCallsLocked(ems, b.GetId())
-	redelivered, err := frontend.AppendMergeEmissions(b, ems, atMs)
-	if err != nil || redelivered == nil {
+	up, err := frontend.AppendWindowEmissions(b, ems, atMs)
+	if err != nil || up == nil {
 		return nil, err
 	}
-	s.logf("session-controller: merge fold append bubble=%s kind=%s ws=%s appended_emissions=%d folded_emissions=%d dropped_before=%d delivery=whole_bubble",
+	s.logf("session-controller: merge fold append bubble=%s kind=%s ws=%s appended_emissions=%d folded_emissions=%d dropped_before=%d delivery=merge_update_arm",
 		b.GetId(), frontend.AsyncBubbleKind(b), s.workspace,
 		len(ems), len(b.GetMerge().GetEmissions()), b.GetMerge().GetFold().GetDroppedBefore())
-	return redelivered, nil
+	return up, nil
 }
 
 // settleMergeWindow settles the open Merge bubble and closes the window,
@@ -264,7 +265,7 @@ func (c *consumer) foldMergeBatch(ems []*frontendv1.AgentEmission, ev *corev1.Ev
 	if len(ems) == 0 {
 		return asyncPush{}
 	}
-	b, err := c.bubbles.foldMergeEmissions(ems, c.asyncInstant(ev))
+	up, err := c.bubbles.foldMergeEmissions(ems, c.asyncInstant(ev))
 	push := asyncPush{}
 	gaps, residual := splitAsyncGaps(err)
 	push.Faults = append(push.Faults, gaps...)
@@ -272,8 +273,8 @@ func (c *consumer) foldMergeBatch(ems []*frontendv1.AgentEmission, ev *corev1.Ev
 		c.warn("session-controller: MERGE BUBBLE FOLD DEGRADED session=%s ws=%q seq=%d — %d emission(s) of the merge run will not appear in its bubble, and they have already left the top-level feed: %v",
 			c.sessionID, c.workspace, ev.GetSeq(), len(ems), residual)
 	}
-	if b != nil {
-		push.Redelivered = append(push.Redelivered, b)
+	if up != nil {
+		push.Updates = append(push.Updates, up)
 	}
 	return push
 }
@@ -347,14 +348,13 @@ func (c *consumer) publishMergeSettle(push asyncPush, throughSeq uint64) {
 		c.warn("session-controller: MERGE SETTLE FAULT session=%s ws=%q card_uuid=%s — %s",
 			c.sessionID, c.workspace, fault.UUID, fault.Detail)
 	}
-	if len(push.Updates) == 0 && len(push.Redelivered) == 0 {
+	if len(push.Updates) == 0 {
 		return
 	}
 	c.logf("session-controller: merge settle push session=%s ws=%q through_seq=%d updates=%s",
 		c.sessionID, c.workspace, throughSeq, updatedBubbleIDs(push.Updates))
 	c.push.PushAsyncBubbleDelta(&frontendv1.AsyncBubbleDelta{
 		Workspace:  c.workspace,
-		Opened:     push.Redelivered,
 		Updates:    push.Updates,
 		ThroughSeq: throughSeq,
 		Fence:      c.fence(),
