@@ -18,17 +18,30 @@
 //
 // HOW THE GAP IS ARRANGED. The turn is held open on a real parked canUseTool
 // (the only way a fake-mode turn is catchable mid-flight — see
-// interrupt_e2e_test.go's header), the question is ANSWERED, and the daemon is
-// bounced in the same breath. The answer releases the shim's turn, which then
-// runs its tail — tool result, closing message, result, TurnEnded — as several
-// store round-trips, while the daemon it was talking to is being torn down.
+// interrupt_e2e_test.go's header) and the question is ANSWERED. The bounce is
+// then fired on the daemon's OWN record that the response has left it for the
+// shim (`sent permission response`, watchLog), and on nothing after that. The
+// answer releases the shim's turn, which runs its tail — tool result, closing
+// message, result, TurnEnded — as several store round-trips while the daemon it
+// was talking to is being torn down, so the store keeps the end and the dying
+// daemon never delivers it.
+//
+// WHY THE RELEASE NEEDS ITS OWN RENDEZVOUS. The daemon dispatches a permission
+// response from a goroutine parked inside HandlePermission, and that goroutine
+// DROPS the response when the connection's context is already cancelled
+// ("connection gone before permission response", shimclient/events.go). A test
+// that answered and bounced in the same breath lost that race every time: the
+// shim stayed parked on a question nobody answered, and the turn these tests are
+// about never ran at all.
 //
 // THE ARRANGEMENT IS CHECKED, NOT ASSUMED. Before asserting anything about the
 // reattach, each test reads the STORE and requires a durable TurnEnded to
 // exist: that is the premise ("the shim finished") stated as a fact about the
-// shared record rather than as a hope about scheduling. A run in which the
-// shim did not finish fails there, naming the arrangement, instead of passing
-// vacuously.
+// shared record rather than as a hope about scheduling. The read is a bounded
+// WAIT, because the tail is still being written while the daemon comes down, and
+// a single sample would report a shim that finishes a millisecond later as one
+// that never finished. A run in which the shim did not finish fails there,
+// naming the arrangement, instead of passing vacuously.
 package e2e
 
 import (
@@ -52,13 +65,24 @@ func TestE2EATurnCompletedDuringTheGapSettlesCompletedNotInterrupted(t *testing.
 	permID := askQuestion(t, conn, cwd, "r-ask", "sleep e2e-completed-in-gap")
 
 	// Act — release the turn and take the daemon away while its tail runs.
+	//
+	// THE BOUNCE IS SEQUENCED ON THE ANSWER LEAVING THE DAEMON, and on nothing
+	// after it. A bounce fired straight after the write raced the daemon's own
+	// dispatch of the answer and won every time — the response was dropped
+	// ("connection gone before permission response"), the shim stayed parked,
+	// and the turn this test is about never ran. Waiting for the daemon's own
+	// record that the response was sent makes the RELEASE a fact while leaving
+	// the whole tail — tool result, closing message, result, TurnEnded — to race
+	// the teardown, which is the gap.
+	sent := first.watchLog("sent permission response")
 	answerPermission(t, conn, cwd, "r-answer", permID, true)
+	awaitLogged(t, sent, "the permission response leaving the daemon for the shim, which is what releases the parked turn")
 	first.bounce()
 	second := world.boot(t)
 
 	// The premise, read from the shared durable record: the shim genuinely
 	// finished the turn with no daemon there to see it.
-	if !storeTurnEndedFor(t, vendorID, "") {
+	if !awaitStoreTurnEndedFor(t, vendorID, "") {
 		t.Fatalf("the store holds no durable TurnEnded for conversation %s, so the shim did not finish its turn during the gap and this run never reproduced the completed-during-the-gap arrangement", vendorID)
 	}
 
@@ -85,11 +109,16 @@ func TestE2EATurnEndedDuringTheGapReachesTheFrontendAfterReattach(t *testing.T) 
 	_, conn, vendorID, _ := liveSession(t, first.harness(), cwd)
 	permID := askQuestion(t, conn, cwd, "r-ask", "sleep e2e-terminal-in-gap")
 
-	// Act
+	// Act — same arrangement as the settlement test above, sequenced on the same
+	// record and for the same reason: an answer that never left the daemon
+	// leaves the shim parked, and a turn that never ran has no terminal item to
+	// deliver.
+	sent := first.watchLog("sent permission response")
 	answerPermission(t, conn, cwd, "r-answer", permID, true)
+	awaitLogged(t, sent, "the permission response leaving the daemon for the shim, which is what releases the parked turn")
 	first.bounce()
 	second := world.boot(t)
-	if !storeTurnEndedFor(t, vendorID, "") {
+	if !awaitStoreTurnEndedFor(t, vendorID, "") {
 		t.Fatalf("the store holds no durable TurnEnded for conversation %s, so this run never reproduced the ended-during-the-gap arrangement", vendorID)
 	}
 
