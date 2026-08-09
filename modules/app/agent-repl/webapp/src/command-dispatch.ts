@@ -99,7 +99,20 @@ function asError(value: unknown): Error {
  *   classify the refusal rather than picking a kind on the daemon's behalf.
  */
 export type CommandRefusal =
-  | { kind: "reveal"; cardUuid: string; failure: FailureKind }
+  | {
+      kind: "reveal";
+      cardUuid: string;
+      failure: FailureKind;
+      /**
+       * The refusal's own words, carried so a reveal that FINDS NOTHING can
+       * still state the refusal rather than dropping it. A reveal is not
+       * guaranteed to land — the feed this page holds may never have received
+       * the card the daemon filed — and the fallback card must be as faithful
+       * as the one the `card` arm files.
+       */
+      command: string;
+      error: string;
+    }
   | { kind: "card"; card: FailureCardItem };
 
 /**
@@ -113,7 +126,7 @@ export type CommandRefusal =
 export function commandRefusal(command: string, ack: CommandAck): CommandRefusal {
   const cardUuid = ack.failureCard?.cardUuid ?? "";
   if (cardUuid !== "" && ack.failure !== undefined) {
-    return { kind: "reveal", cardUuid, failure: ack.failure };
+    return { kind: "reveal", cardUuid, failure: ack.failure, command, error: ack.error };
   }
   if (ack.failure === undefined) {
     return { kind: "card", card: commandRejectionUnclassifiedFailure(command, ack.error) };
@@ -131,6 +144,59 @@ export function commandRefusal(command: string, ack: CommandAck): CommandRefusal
         detail: `command=${command}`,
         lifecycle: { case: "terminal" },
       },
+    },
+  };
+}
+
+/** Where a refusal can land: the feed's reveal, the feed's store, the log. */
+export interface RefusalSurfaces {
+  /** Scroll to the already-filed card. FALSE means this feed does not hold it. */
+  reveal(cardUuid: string): boolean;
+  /** File a card in the feed. */
+  file(card: FailureCardItem): void;
+  /** The single record a missed reveal leaves. */
+  log(message: string): void;
+}
+
+/**
+ * Put one refusal in front of the user, whichever way is available.
+ *
+ * EVERY branch terminates in a card the user can see — revealed or filed.
+ * A reveal that finds nothing used to log and return, which meant a nacked
+ * command whose card this client never received reached the user through
+ * nothing at all: exactly the silence the `card` arm exists to prevent, hidden
+ * behind an address that turned out to be unreachable.
+ *
+ * The miss still leaves its ONE log record — the reveal contract was broken and
+ * that is worth knowing — and then files the refusal beside it.
+ */
+export function surfaceRefusal(refusal: CommandRefusal, out: RefusalSurfaces): void {
+  if (refusal.kind === "card") {
+    out.file(refusal.card);
+    return;
+  }
+  if (out.reveal(refusal.cardUuid)) return;
+  out.log(`refusal card ${refusal.cardUuid} is not in this feed`);
+  out.file(unrevealedRefusalCard(refusal));
+}
+
+/**
+ * The card for a refusal whose filed card this feed never received.
+ *
+ * Carries the DAEMON'S kind verbatim, exactly as the `card` arm does, and takes
+ * the daemon's OWN uuid as its identity: should the card the reveal missed
+ * arrive later on a delta, it reconciles onto this one rather than standing
+ * beside it as a second account of one refusal.
+ */
+function unrevealedRefusalCard(refusal: Extract<CommandRefusal, { kind: "reveal" }>): FailureCardItem {
+  return {
+    kind: "failure",
+    uuid: refusal.cardUuid,
+    view: {
+      kind: refusal.failure,
+      message: refusal.error === "" ? `${refusal.command} was refused` : refusal.error,
+      detail: `command=${refusal.command}`,
+      lifecycle: { case: "terminal" },
     },
   };
 }
