@@ -321,10 +321,26 @@ conflicting commits, and the one whose shim the coordinator already holds the
   the workspace's shim lease for a window sized for an agent that is working.
   A busy workspace's parked prompt is taken back off the queue with the failure,
   so it cannot be delivered after the merge has already failed.
-- EXACTLY ONE attempt. A resolver error, a refused submit, a turn that never
-  starts, a turn that never ends, or a resume that is still conflicted all leave
-  the park STANDING for the human path (`conflict_resolved_continue`, or abandonment by closing the
-  workspace). Nothing is ever marked merged on a failed attempt.
+- EVERY conflict that parks a run is dispatched through ONE FUNNEL,
+  `handOffConflict`. There are three ways into a parked conflict — the first
+  conflict of a cherry-pick, a conflict a successful in-process resolution
+  uncovered further down the same range, and a conflict a boot `Drain` replays
+  into — and all three take that call. The middle one used to have no dispatch
+  at all: it parked, logged `still conflicted after resume`, and waited on a
+  human who had no reason to know it was waiting, holding the lease and the
+  queue head for as long as that took. "A parked conflict is a conflict some
+  agent has been asked about" is a property of that funnel, not of remembering
+  to dispatch at each site.
+- EXACTLY ONE attempt PER CONFLICT COMMIT, deduplicated by
+  `conflictPark.handed`. A resolver error, a refused submit, a turn that never
+  starts, a turn that never ends, or a resume still conflicted ON THE SAME
+  COMMIT all leave the park STANDING for the human path
+  (`conflict_resolved_continue`, or abandonment by closing the workspace):
+  re-prompting an agent with the conflict it just failed is a spin, not a
+  strategy. A resume conflicted on a DIFFERENT commit is the opposite case — the
+  agent SUCCEEDED and the replay walked on to a commit nobody has been asked
+  about — so it is dispatched like any other new conflict. Nothing is ever
+  marked merged on a failed attempt.
 - The attempt's resume rides the same `park.calls` rendezvous a human's resume
   does, so a human resume or an abandon arriving mid-attempt is serialized
   against it rather than racing it.
