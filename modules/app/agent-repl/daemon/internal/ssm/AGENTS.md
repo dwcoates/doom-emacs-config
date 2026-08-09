@@ -145,6 +145,16 @@ for leaves `merge_status` UNSET — the same rule
 The retained status is dropped when the axis is cleared (`merge_none`): the run
 is over and nothing it reported is still true.
 
+It is also WITHHELD — retained, but left off this one frame — whenever the frame
+resolves into the session-status band (`isSessionStatusRenderState`). The merge
+axis is not the last word on the render state: `compositeRenderState` hands a
+live turn the win over `merge_failed` on purpose, and a stopped merge's row
+stands on the axis forever, so stamping off the axis alone published
+`state=THINKING` beside `merge_status=failed` — which every frontend surface
+renders in preference to the phase word. Only that band withholds: a merge with
+no live session behind it resolves HIBERNATED or SEVERED, which say nothing about
+the merge and must keep carrying the run.
+
 The older `merge_phase` / `merge_queue_position` / `merge_queue_depth` trio is
 still stamped beside it, and it is what reports a phase no run published a
 status for. Both forms coexist until the cutover wave retires the trio.
