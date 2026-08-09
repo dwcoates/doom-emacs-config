@@ -3429,6 +3429,49 @@ survives into the rest of the batch run."
       (should (= (length tail) (1+ agent-repl--backend-output-tail-limit)))
       (should (string-prefix-p "…" tail)))))
 
+(ert-deftest agent-repl-test-backend-output-tail-suffix-keeps-a-short-string-whole ()
+  "A capture already inside the scan bound is passed through untouched."
+  ;; Arrange
+  (let ((output "one\ntwo\n"))
+    ;; Act
+    (let ((suffix (agent-repl--backend-output-tail-suffix output)))
+      ;; Assert
+      (should (eq suffix output)))))
+
+(ert-deftest agent-repl-test-backend-output-tail-suffix-bounds-a-huge-string ()
+  "An oversized capture is cut down to exactly the scan bound."
+  ;; Arrange
+  (let ((output (make-string (* 4 agent-repl--backend-output-tail-scan-limit) ?x)))
+    ;; Act
+    (let ((suffix (agent-repl--backend-output-tail-suffix output)))
+      ;; Assert
+      (should (= (length suffix) agent-repl--backend-output-tail-scan-limit)))))
+
+(ert-deftest agent-repl-test-backend-output-tail-matches-its-bounded-suffix ()
+  "A multi-megabyte multiline capture yields the same tail as its suffix.
+The bound is what keeps the helper off the quadratic `split-string' path
+that froze Emacs; this pins the equivalence the bound relies on."
+  ;; Arrange — multibyte content, since char-to-byte indexing is the cost.
+  (let* ((filler (mapconcat (lambda (i) (format "récord %d ————" i))
+                            (number-sequence 1 120000) "\n"))
+         (output (concat filler "\nlast-one\nlast-two")))
+    (should (> (length output) (* 2 1024 1024)))
+    ;; Act
+    (let ((tail (agent-repl--backend-output-tail output))
+          (suffix-tail (agent-repl--backend-output-tail
+                        (agent-repl--backend-output-tail-suffix output))))
+      ;; Assert
+      (should (equal tail suffix-tail)))))
+
+(ert-deftest agent-repl-test-backend-output-tail-keeps-the-final-lines-of-a-huge-capture ()
+  "The trailing lines of a multi-megabyte capture still reach the echo tail."
+  ;; Arrange
+  (let ((output (concat (make-string (* 3 1024 1024) ?x) "\nfinal-line")))
+    ;; Act
+    (let ((tail (agent-repl--backend-output-tail output 1)))
+      ;; Assert
+      (should (equal tail "final-line")))))
+
 (ert-deftest agent-repl-test-backend-phase-persists-a-structured-record ()
   "A phase transition reaches the durable sink at the info rung."
   ;; Arrange
