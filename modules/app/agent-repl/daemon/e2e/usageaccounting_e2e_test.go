@@ -397,8 +397,11 @@ func rawUsageFixture(t *testing.T, actor string) *datav1.ApiUsage {
 		"web_search_requests": 51 + actorOffset,
 		"web_fetch_requests":  52 + actorOffset,
 	}
+	// `message` is the vendor's own discriminator for an ordinary sampling
+	// iteration (BetaMessageIterationUsage). The schema's arm is named
+	// `sampling`; the wire value is not.
 	iterationFields := map[string]any{
-		"type":                        "sampling",
+		"type":                        "message",
 		"model":                       actor + "-reasoning-model",
 		"input_tokens":                61 + actorOffset,
 		"output_tokens":               62 + actorOffset,

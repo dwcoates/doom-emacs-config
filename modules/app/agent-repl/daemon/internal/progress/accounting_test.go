@@ -328,3 +328,77 @@ func TestAnAbsentCacheRateReportsTheHitAsUnavailable(t *testing.T) {
 		t.Fatalf("summary = %q, want the hit rate reported as unavailable", got.GetSummary())
 	}
 }
+
+// TestARepeatedUnmodeledPathIsFoldedIntoOneCountedPhrase covers the live shape
+// of the problem: one unmodeled usage path reported once per response, which
+// printed "iterations.0" 113 times in a single cell.
+func TestARepeatedUnmodeledPathIsFoldedIntoOneCountedPhrase(t *testing.T) {
+	// Arrange.
+	paths := make([]string, 113)
+	for i := range paths {
+		paths[i] = "iterations.0"
+	}
+	a := invalidWith(&frontendv1.TurnAccountingProblem{
+		Problem: &frontendv1.TurnAccountingProblem_UnmodeledUsageFields{
+			UnmodeledUsageFields: &frontendv1.UnmodeledUsageFields{SourceFieldPaths: paths},
+		},
+	})
+	// Act.
+	got := AccountingCell(a)
+	// Assert.
+	if !strings.HasSuffix(got.GetInvalid().GetProblems()[0], "iterations.0 ×113") {
+		t.Fatalf("problem = %q, want one counted phrase for the repeated path", got.GetInvalid().GetProblems()[0])
+	}
+}
+
+// TestADistinctPathIsNamedWithoutACount keeps the ordinary single-occurrence
+// phrase unchanged: a count of one states nothing the path did not.
+func TestADistinctPathIsNamedWithoutACount(t *testing.T) {
+	// Arrange.
+	a := invalidWith(&frontendv1.TurnAccountingProblem{
+		Problem: &frontendv1.TurnAccountingProblem_UnmodeledUsageFields{
+			UnmodeledUsageFields: &frontendv1.UnmodeledUsageFields{SourceFieldPaths: []string{"iterations.0"}},
+		},
+	})
+	// Act.
+	got := AccountingCell(a)
+	// Assert.
+	if !strings.HasSuffix(got.GetInvalid().GetProblems()[0], "iterations.0") || strings.Contains(got.GetInvalid().GetProblems()[0], "×") {
+		t.Fatalf("problem = %q, want the bare path with no count", got.GetInvalid().GetProblems()[0])
+	}
+}
+
+// TestFoldedPathsKeepFirstAppearanceOrder proves the fold does not reorder the
+// phrase into a map's iteration order.
+func TestFoldedPathsKeepFirstAppearanceOrder(t *testing.T) {
+	// Arrange.
+	a := invalidWith(&frontendv1.TurnAccountingProblem{
+		Problem: &frontendv1.TurnAccountingProblem_TokenLedgerMismatch{
+			TokenLedgerMismatch: &frontendv1.TokenLedgerMismatch{DifferingFieldPaths: []string{"zeta", "alpha", "zeta"}},
+		},
+	})
+	// Act.
+	got := AccountingCell(a)
+	// Assert.
+	if !strings.HasSuffix(got.GetInvalid().GetProblems()[0], "zeta ×2, alpha") {
+		t.Fatalf("problem = %q, want first-appearance order preserved", got.GetInvalid().GetProblems()[0])
+	}
+}
+
+// TestTheRecordsOwnPathListIsNotDeduplicated is the other half of the display
+// rule: the fold is the CELL's, and the evidence behind it stays complete.
+func TestTheRecordsOwnPathListIsNotDeduplicated(t *testing.T) {
+	// Arrange.
+	problem := &frontendv1.TurnAccountingProblem{
+		Problem: &frontendv1.TurnAccountingProblem_UnmodeledUsageFields{
+			UnmodeledUsageFields: &frontendv1.UnmodeledUsageFields{SourceFieldPaths: []string{"iterations.0", "iterations.0"}},
+		},
+	}
+	a := invalidWith(problem)
+	// Act.
+	AccountingCell(a)
+	// Assert.
+	if got := len(problem.GetUnmodeledUsageFields().GetSourceFieldPaths()); got != 2 {
+		t.Fatalf("record path count = %d, want the evidence list left intact", got)
+	}
+}
