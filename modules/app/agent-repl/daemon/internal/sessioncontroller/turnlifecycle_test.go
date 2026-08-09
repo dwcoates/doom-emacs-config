@@ -1,6 +1,10 @@
 package sessioncontroller
 
 import (
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -210,10 +214,175 @@ func TestTurnLifecycleReplayDoesNotPaintIdleWhileQueuedTurnRemains(t *testing.T)
 	}
 }
 
+// evidenceConsumer is a consumer wired to a fakeApplier and a stub durable
+// probe, for the ONE judgment durablySettledClaims makes: which standing claims
+// the store proves completed.
+func evidenceConsumer(applier *fakeApplier, probe durableTurnEndProbe, logf func(string, ...any)) *consumer {
+	cons := newConsumer("ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(),
+		emptyTurnAccountingStore{}, logf, nil, nil, nil, nil, nil)
+	cons.durableTurnEnds = probe
+	return cons
+}
+
+func TestDurablySettledClaimsNamesTheProvenCompletion(t *testing.T) {
+	// Arrange — the shim is silent and the store holds the turn's terminal.
+	applier := &fakeApplier{turns: []string{"turn-finished"}}
+	cons := evidenceConsumer(applier, func([]string) ([]string, error) {
+		return []string{"turn-finished"}, nil
+	}, func(string, ...any) {})
+
+	// Act.
+	got := cons.durablySettledClaims(&corev1.ShimHello{})
+
+	// Assert.
+	if !reflect.DeepEqual(got, []string{"turn-finished"}) {
+		t.Fatalf("durablySettledClaims = %v, want the durably-ended claim spared", got)
+	}
+}
+
+func TestDurablySettledClaimsSkipsTheProbeWhenTheHelloNamesATurn(t *testing.T) {
+	// Arrange — a hello that names its turns reaches a decision without the
+	// store, so it must not pay for a replay.
+	applier := &fakeApplier{turns: []string{"turn-live"}}
+	probed := false
+	cons := evidenceConsumer(applier, func([]string) ([]string, error) {
+		probed = true
+		return nil, nil
+	}, func(string, ...any) {})
+
+	// Act.
+	got := cons.durablySettledClaims(&corev1.ShimHello{TurnInFlight: true, ActiveTurnIds: []string{"turn-live"}})
+
+	// Assert.
+	if got != nil || probed {
+		t.Fatalf("durablySettledClaims = %v probed = %v, want no store read for a hello that names its turns", got, probed)
+	}
+}
+
+func TestDurablySettledClaimsSkipsTheProbeWithNoStandingClaim(t *testing.T) {
+	// Arrange — nothing is claimed, so there is nothing that could be cut.
+	probed := false
+	cons := evidenceConsumer(&fakeApplier{}, func([]string) ([]string, error) {
+		probed = true
+		return nil, nil
+	}, func(string, ...any) {})
+
+	// Act.
+	got := cons.durablySettledClaims(&corev1.ShimHello{})
+
+	// Assert.
+	if got != nil || probed {
+		t.Fatalf("durablySettledClaims = %v probed = %v, want no store read with no claim to judge", got, probed)
+	}
+}
+
+func TestDurablySettledClaimsProvesNothingWhenTheProbeFails(t *testing.T) {
+	// Arrange — an unreadable store is not evidence of completion, so the
+	// pre-existing interrupted verdict must stand.
+	applier := &fakeApplier{turns: []string{"turn-standing"}}
+	var logged []string
+	cons := evidenceConsumer(applier, func([]string) ([]string, error) {
+		return nil, errors.New("store socket refused")
+	}, func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) })
+
+	// Act.
+	got := cons.durablySettledClaims(&corev1.ShimHello{})
+
+	// Assert.
+	if got != nil {
+		t.Fatalf("durablySettledClaims = %v, want nothing proved by a failed read", got)
+	}
+	if !strings.Contains(strings.Join(logged, "\n"), "durable turn-end evidence UNREADABLE") {
+		t.Fatalf("missing the loud unreadable-evidence record; log:\n%s", strings.Join(logged, "\n"))
+	}
+}
+
+func TestDurablySettledClaimsProvesNothingWithNoProbeBound(t *testing.T) {
+	// Arrange — a consumer with no durable history source cannot tell a
+	// completed turn from a cut one, and says so.
+	applier := &fakeApplier{turns: []string{"turn-standing"}}
+	var logged []string
+	cons := evidenceConsumer(applier, nil, func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) })
+
+	// Act.
+	got := cons.durablySettledClaims(&corev1.ShimHello{})
+
+	// Assert.
+	if got != nil {
+		t.Fatalf("durablySettledClaims = %v, want nothing proved without a probe", got)
+	}
+	if !strings.Contains(strings.Join(logged, "\n"), "durable turn-end evidence UNAVAILABLE") {
+		t.Fatalf("missing the loud unavailable-evidence record; log:\n%s", strings.Join(logged, "\n"))
+	}
+}
+
+func TestDurablySettledClaimsProvesNothingWhenTheClaimReadFails(t *testing.T) {
+	// Arrange — the standing claims cannot be read, so there is no candidate
+	// list to prove anything about.
+	applier := &fakeApplier{activeTurnIDsErr: errors.New("ledger unreadable")}
+	probed := false
+	cons := evidenceConsumer(applier, func([]string) ([]string, error) {
+		probed = true
+		return nil, nil
+	}, func(string, ...any) {})
+
+	// Act.
+	got := cons.durablySettledClaims(&corev1.ShimHello{})
+
+	// Assert.
+	if got != nil || probed {
+		t.Fatalf("durablySettledClaims = %v probed = %v, want no evidence and no store read", got, probed)
+	}
+}
+
+func TestReconcileTurnHandshakeKeepsTheDurablyEndedClaimOpen(t *testing.T) {
+	// Arrange — the whole gap, end to end at the judgment site: a claim stands,
+	// the returning shim contradicts it, and the store proves it completed.
+	applier := &fakeApplier{turns: []string{"turn-finished"}}
+	cons := evidenceConsumer(applier, func([]string) ([]string, error) {
+		return []string{"turn-finished"}, nil
+	}, func(string, ...any) {})
+
+	// Act.
+	active, closed, err := cons.reconcileTurnHandshake(&corev1.ShimHello{})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("reconcileTurnHandshake: %v", err)
+	}
+	if len(closed) != 0 {
+		t.Fatalf("closed = %v, want none — a completed turn is never cut as interrupted", closed)
+	}
+	if !active {
+		t.Fatal("active = false, want the spared claim still standing for its own replayed TurnEnded")
+	}
+}
+
+func TestReconcileTurnHandshakeCutsTheClaimTheStoreCannotProve(t *testing.T) {
+	// Arrange — the same shape with NO durable terminal: this turn really was
+	// cut when the process behind it went away.
+	applier := &fakeApplier{turns: []string{"turn-cut"}}
+	cons := evidenceConsumer(applier, func([]string) ([]string, error) { return nil, nil }, func(string, ...any) {})
+
+	// Act.
+	active, closed, err := cons.reconcileTurnHandshake(&corev1.ShimHello{})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("reconcileTurnHandshake: %v", err)
+	}
+	if !reflect.DeepEqual(closed, []string{"turn-cut"}) {
+		t.Fatalf("closed = %v, want the unprovable claim cut", closed)
+	}
+	if active {
+		t.Fatal("active = true, want the workspace idle after the cut")
+	}
+}
+
 func TestContradictoryTurnHandshakeAbortsBeforeHandshakeSideEffects(t *testing.T) {
 	h := newQueueHarness(t, nil)
 	if _, _, _, err := h.applier.ReconcileTurnHandshake(
-		"ws", "s1", []string{"turn-current"}, true,
+		"ws", "s1", []string{"turn-current"}, true, nil,
 	); err != nil {
 		t.Fatalf("seed durable turn: %v", err)
 	}
