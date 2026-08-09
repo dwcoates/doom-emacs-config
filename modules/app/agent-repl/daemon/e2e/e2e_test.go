@@ -49,6 +49,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/progress"
+	"claude-repld/internal/prompts"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
 	"claude-repld/internal/sessioncontroller"
@@ -314,6 +315,10 @@ func isolatedShimSocket(t *testing.T, sockDir string) string {
 	// the real $HOME in; requireIsolatedHome turns that omission into a failure
 	// at the offending line rather than an unlinked live socket.
 	requireIsolatedHome(t, sockDir)
+	// Same reasoning applies to the prompts directory: it is state the daemon
+	// under test resolves for itself, and this funnel is the only place that
+	// can arrange it once for every harness.
+	usePrompts(t)
 	sock := filepath.Join(sockDir, ".cache", "agent-repl", "sock", "daemon-shim.sock")
 	// Production daemon boot creates the shared sock dir (frontend.ServeUDS
 	// MkdirAll for daemon-frontend.sock) before any shim spawn; the harness
@@ -334,6 +339,25 @@ func isolatedShimSocket(t *testing.T, sockDir string) string {
 		t.Fatalf("shimlisten resolved %q while this test isolated %q: the daemon under test would bind a socket the test does not own", resolved, sock)
 	}
 	return resolved
+}
+
+// usePrompts points the prompt loader at this checkout's real prompts/
+// directory for the duration of one test.
+//
+// prompts.Dir walks up from the running executable to the checkout holding
+// bin/deploy-all.sh. This test binary lives in the go build cache, so there is
+// no checkout above it and every prompt the daemon composes — merge-lease
+// resolution turns, most visibly — fails to load. Resolving from the prompts
+// package's own source and going through the ordinary DirEnv override means
+// the e2e stack reads the SAME files a deployed daemon would, never a copy
+// that could drift from them.
+func usePrompts(t *testing.T) {
+	t.Helper()
+	dir, err := prompts.SourceDir()
+	if err != nil {
+		t.Fatalf("resolve the checkout's prompts directory: %v", err)
+	}
+	t.Setenv(prompts.DirEnv, dir)
 }
 
 type testLogWriter struct {

@@ -243,6 +243,45 @@ export interface UdsSessionDeps {
    * terminal never coming. Default 15000ms; tests compress it.
    */
   interruptTerminalGraceMs?: number;
+  /**
+   * How long an OPEN turn may go with NO SDK activity of any kind before this
+   * session decides the query behind it died without producing a terminal.
+   *
+   * IT IS THE INTERRUPT GRACE, GENERALIZED, and it exists because the interrupt
+   * grace can only ever fire for a turn somebody thought to interrupt. A query
+   * that dies quietly — the iterator neither yields another message nor throws —
+   * leaves its turn latched open for the life of the process, and the daemon
+   * carries the phantom `turn_active` behind it for as long as the shim lives.
+   * That was observed as a turn whose "live" start was two days old.
+   *
+   * A FAILURE bound, not a pace, and deliberately generous: a working agent
+   * emits stream deltas, tool calls and task lifecycle continuously, so a turn
+   * that has produced NOTHING for this long is not a slow turn — it is a dead
+   * query. Default 600000ms (ten minutes); tests compress it.
+   */
+  turnQuietGraceMs?: number;
+}
+
+/**
+ * WHY a turn's terminal is being synthesized rather than observed.
+ *
+ * It exists so the two watchdogs share one writer without sharing one story:
+ * both produce the identical durable boundary, and the reader of a log line or
+ * a DegradedState can still tell an interrupt this session acked from a stream
+ * that simply stopped speaking. A close that could not name its observation is
+ * the shape this type exists to make unrepresentable.
+ */
+interface UnterminatedTurnEvidence {
+  /** The `decision` token the canonical log line carries. */
+  decision: string;
+  /** The canonical log line's human sentence. */
+  logMessage: string;
+  /** The DegradedState reason, built around the turn being closed. */
+  degradedReason: (turnId: string) => string;
+  /** The bound that expired. */
+  graceMs: number;
+  /** How long the SDK stream had actually been silent, on the quiet arm only. */
+  quietMs?: number;
 }
 
 /**
@@ -390,9 +429,28 @@ export class UdsSession {
    * restart turn-guard — waits on a turn that will never end.
    *
    * So the claim is BACKED: whichever terminal arrives first wins, and if none
-   * arrives within the grace this session writes it (`closeDisplacedTurn`).
+   * arrives within the grace this session writes it (`closeUnterminatedTurn`).
    */
   private readonly displacedTurnDeadlines = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * When the SDK last produced ANYTHING for this session.
+   *
+   * It is the evidence the quiet watchdog reads, and it is stamped at the ONE
+   * funnel every SDK message passes through (`routeSdkMessage`), so no message
+   * kind has to remember to refresh it. A turn open while this has not moved
+   * for `turnQuietGraceMs` is a turn whose query is not running.
+   */
+  private lastSdkActivityMs: number;
+  /**
+   * The single re-arming watchdog over open turns that have gone quiet.
+   *
+   * ONE TIMER, NOT ONE PER TURN, because the evidence it reads is
+   * session-wide: the SDK stream is one stream, and a session with several
+   * turns open has them all behind the same iterator. It is armed when a turn
+   * opens and disarmed the moment no turn is open, so an idle session holds no
+   * timer at all.
+   */
+  private turnQuietTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * Turns whose terminal this session synthesized, oldest first.
    *
@@ -413,6 +471,8 @@ export class UdsSession {
   private readonly replayIdleMs: number;
   /** Grace an acked-interrupted turn gets to receive its SDK terminal (see deps). */
   private readonly interruptTerminalGraceMs: number;
+  /** Quiet window an open turn gets before its query is judged dead (see deps). */
+  private readonly turnQuietGraceMs: number;
   /**
    * Which assistant message the SDK is currently streaming. Deltas carry no
    * message identity of their own, so this supplies the one consumers
@@ -461,6 +521,8 @@ export class UdsSession {
     }
     this.replayIdleMs = deps.replayIdleMs ?? 5000;
     this.interruptTerminalGraceMs = deps.interruptTerminalGraceMs ?? 15000;
+    this.turnQuietGraceMs = deps.turnQuietGraceMs ?? 600000;
+    this.lastSdkActivityMs = this.now();
     this.effectivePermissionMode = deps.permissionMode ?? "default";
     LOGGER.log({ agent_repl_session_id: deps.sessionId, uds_socket: deps.udsSocketPath, store_socket: deps.storeSocketPath, session_source: deps.sessionSource, store_key_known: deps.storeSessionId !== undefined && deps.storeSessionId !== "", permission_mode: this.effectivePermissionMode }, "constructed UDS shim session");
     const target: SdkControlTarget = {
@@ -490,6 +552,13 @@ export class UdsSession {
         this.activeTurnStarts.set(requestId, turnStart);
         this.turnStartUsage.set(requestId, usage);
         this.activeTurnIds.push(requestId);
+        // THE TURN IS WATCHED FROM THE INSTANT IT OPENS, not from the instant
+        // somebody interrupts it. The prompt about to be pushed onto the input
+        // queue is the last thing this session does for this turn; everything
+        // after it has to come back off the SDK stream, so a turn that opens
+        // and then produces nothing is precisely the failure the watchdog
+        // exists to notice.
+        this.armTurnQuietWatchdog();
         const content: ContentBlock[] = [{ type: "text", text }];
         this.input.push({
           type: "user",
@@ -1148,6 +1217,7 @@ export class UdsSession {
       // itself closes every open claim (the daemon's own stop reconciliation).
       for (const timer of this.displacedTurnDeadlines.values()) clearTimeout(timer);
       this.displacedTurnDeadlines.clear();
+      this.disarmTurnQuietWatchdog();
       this.resourcesClosePromise = (async (): Promise<void> => {
         try {
           await this.server.close();
@@ -1807,6 +1877,11 @@ export class UdsSession {
    * daemon).
    */
   private async routeSdkMessage(msg: SdkMessageLike): Promise<void> {
+    // THE ONE FUNNEL, so the quiet watchdog's evidence cannot be stamped by
+    // some message kinds and missed by others. Every SDK message — a stream
+    // delta, an assistant message, a task lifecycle fact, a result — proves the
+    // query is alive, and each one refreshes the window before it is routed.
+    this.lastSdkActivityMs = this.now();
     if (msg.type === "stream_event") {
       // Observe BEFORE converting: a message_start must make its own id
       // current for the deltas that follow it.
@@ -1979,6 +2054,12 @@ export class UdsSession {
         // The SDK supplied the terminal an interrupt ack was owed, so the
         // watchdog has nothing left to cover.
         this.disarmDisplacedTurn(terminalTurnId);
+        // AND THE QUIET WATCH STANDS DOWN WITH THE LAST OPEN TURN. Leaving it
+        // armed over an idle session would burn a wake every grace period to
+        // rediscover there is nothing to judge, and a session between turns is
+        // SUPPOSED to be silent — which is the one reading the watchdog must
+        // never make.
+        if (this.activeTurnIds.length === 0) this.disarmTurnQuietWatchdog();
         turnStart = this.activeTurnStarts.get(terminalTurnId);
         this.pendingTurnEndIds.push(terminalTurnId);
         terminalBoundaryAtMs = this.now();
@@ -2278,7 +2359,7 @@ export class UdsSession {
       if (this.displacedTurnDeadlines.has(turnId)) continue;
       const timer = setTimeout(() => {
         this.displacedTurnDeadlines.delete(turnId);
-        void this.closeDisplacedTurn(turnId);
+        void this.closeUnterminatedTurn(turnId, this.interruptedTurnEvidence());
       }, this.interruptTerminalGraceMs);
       // The deadline must never be the reason this process stays alive; it is
       // a watchdog over work the process is already doing.
@@ -2311,7 +2392,94 @@ export class UdsSession {
   }
 
   /**
-   * Write the terminal an acked-interrupted turn never received from the SDK.
+   * ARM THE QUIET WATCHDOG over whatever turns are open.
+   *
+   * It re-arms itself rather than firing on a fixed schedule, so a turn that
+   * keeps producing output keeps pushing its own deadline out: each wake
+   * computes how long the stream has actually been silent and, when that is
+   * short of the grace, sleeps only for the remainder. A session with nothing
+   * open holds no timer at all.
+   *
+   * Arming is IDEMPOTENT. One timer covers every open turn because the evidence
+   * is one stream, so a second prompt admitted mid-turn joins the watch rather
+   * than starting a rival one.
+   */
+  private armTurnQuietWatchdog(): void {
+    if (this.turnQuietTimer !== null) return;
+    if (this.turnQuietGraceMs <= 0) return;
+    this.scheduleTurnQuietCheck(this.turnQuietGraceMs);
+    LOGGER.log({
+      agent_repl_session_id: this.deps.sessionId,
+      query_instance_id: this.queryInstanceId,
+      active_turn_ids: [...this.activeTurnIds],
+      quiet_grace_ms: this.turnQuietGraceMs,
+      decision: "arm_turn_quiet_watchdog",
+    }, "a turn is open; the SDK owes it activity within the quiet grace");
+  }
+
+  /** Sleep `delayMs` and then take the quiet verdict. */
+  private scheduleTurnQuietCheck(delayMs: number): void {
+    const timer = setTimeout(() => {
+      this.turnQuietTimer = null;
+      void this.checkTurnQuiet();
+    }, delayMs);
+    // The watch must never be the reason this process stays alive; it is a
+    // watchdog over work the process is already doing.
+    timer.unref?.();
+    this.turnQuietTimer = timer;
+  }
+
+  /** Stand the quiet watchdog down because no turn is open. */
+  private disarmTurnQuietWatchdog(): void {
+    if (this.turnQuietTimer === null) return;
+    clearTimeout(this.turnQuietTimer);
+    this.turnQuietTimer = null;
+  }
+
+  /**
+   * Decide whether the open turns' query is still alive, and close the oldest
+   * turn when it provably is not.
+   *
+   * THE CLOSE IS ONE TURN PER WAKE, deliberately. Closing the whole queue at
+   * once would spend the same single piece of evidence — one silent stream — on
+   * several independent claims; taking the oldest and re-arming lets the very
+   * next wake reconsider, and a genuinely revived stream stops the rest.
+   */
+  private async checkTurnQuiet(): Promise<void> {
+    const turnId = this.activeTurnIds[0];
+    if (turnId === undefined) return;
+    const quietMs = this.now() - this.lastSdkActivityMs;
+    if (quietMs < this.turnQuietGraceMs) {
+      // The stream spoke since the timer was set, so the deadline it was armed
+      // against has moved. Sleep out the remainder rather than judging on a
+      // window the SDK already refreshed.
+      this.scheduleTurnQuietCheck(this.turnQuietGraceMs - quietMs);
+      return;
+    }
+    await this.closeUnterminatedTurn(turnId, {
+      decision: "synthesize_quiet_turn_end",
+      logMessage: "a turn has been open with NO SDK activity for the whole quiet grace; the query behind it is not running, so the shim writes the end itself rather than leaving the turn latched open",
+      degradedReason: (id) => `turn ${JSON.stringify(id)} has been open with no SDK activity at all for ${quietMs}ms (grace ${this.turnQuietGraceMs}ms); the query that would produce its terminal is not running, so the shim closed the turn itself`,
+      graceMs: this.turnQuietGraceMs,
+      quietMs,
+    });
+    // The remaining turns — and this one, if the close found it already gone —
+    // are still owed a verdict, so the watch continues while anything is open.
+    if (this.activeTurnIds.length > 0) this.armTurnQuietWatchdog();
+  }
+
+  /** The evidence an interrupt-grace expiry closes a turn on. */
+  private interruptedTurnEvidence(): UnterminatedTurnEvidence {
+    return {
+      decision: "synthesize_interrupted_turn_end",
+      logMessage: "the SDK never produced a terminal for a turn acked as interrupted; the shim writes the end itself rather than leaving the turn latched open",
+      degradedReason: (id) => `turn ${JSON.stringify(id)} was acknowledged as interrupted but the SDK produced no terminal result within ${this.interruptTerminalGraceMs}ms; the shim closed the turn itself so it cannot stay open forever`,
+      graceMs: this.interruptTerminalGraceMs,
+    };
+  }
+
+  /**
+   * Write the terminal a turn never received from the SDK.
    *
    * It converges on the SAME shape the ordinary result path produces — the
    * ordered turn-end boundary (`AccountUsageObservation` then `TurnEnded`) in
@@ -2321,11 +2489,14 @@ export class UdsSession {
    * result, and manufacturing one would put evidence on the wire that never
    * existed. The end is a lifecycle fact this session owns; the result is not.
    *
-   * It is LOUD. A synthesized terminal means the SDK broke the contract the ack
-   * relied on, so it goes out as a warn line AND a recovered DegradedState
-   * naming the turn, rather than quietly papering the gap over.
+   * It is LOUD on every arm. A synthesized terminal means the SDK broke a
+   * contract this session relied on, so it goes out as a warn line AND a
+   * recovered DegradedState naming the turn, rather than quietly papering the
+   * gap over. `evidence` is what distinguishes the two arms — an interrupt this
+   * session acked, or a stream that went silent — so a reader never has to
+   * guess which observation produced the close.
    */
-  private async closeDisplacedTurn(turnId: string): Promise<void> {
+  private async closeUnterminatedTurn(turnId: string, evidence: UnterminatedTurnEvidence): Promise<void> {
     const index = this.activeTurnIds.indexOf(turnId);
     if (index < 0) {
       // Belt to the disarm's braces: the turn already reached its terminal.
@@ -2334,7 +2505,7 @@ export class UdsSession {
         request_id: turnId,
         turn_id: turnId,
         decision: "displaced_turn_terminal_observed",
-      }, "displaced-turn deadline fired on a turn that is no longer in flight; nothing is synthesized");
+      }, "an unterminated-turn deadline fired on a turn that is no longer in flight; nothing is synthesized");
       return;
     }
     this.activeTurnIds.splice(index, 1);
@@ -2350,16 +2521,17 @@ export class UdsSession {
       query_instance_id: this.queryInstanceId,
       request_id: turnId,
       turn_id: turnId,
-      grace_ms: this.interruptTerminalGraceMs,
+      grace_ms: evidence.graceMs,
+      quiet_ms: evidence.quietMs,
       live_sdk_task_count: this.liveSdkTaskIds.size,
       pending_task_notification_count: this.pendingTaskNotificationQueue.size,
       turns_in_flight: this.activeTurnIds.length,
       store_key: storeKey,
-      decision: "synthesize_interrupted_turn_end",
-    }, "the SDK never produced a terminal for a turn acked as interrupted; the shim writes the end itself rather than leaving the turn latched open");
+      decision: evidence.decision,
+    }, evidence.logMessage);
     this.reportDegraded(
       "claude-shim-turn-lifecycle",
-      `turn ${JSON.stringify(turnId)} was acknowledged as interrupted but the SDK produced no terminal result within ${this.interruptTerminalGraceMs}ms; the shim closed the turn itself so it cannot stay open forever`,
+      evidence.degradedReason(turnId),
       { recovered: true, level: "warn" },
     );
     const usage = await this.captureFiveHourUsage("turn_end", turnId, this.turnStartUsage.get(turnId));
@@ -2417,11 +2589,12 @@ export class UdsSession {
         evidence_kind: "synthesized_terminal_turn_batch",
         failed_operation: "store.write.synthesized_terminal_turn_batch",
         outcome: "fatal_missing_persistent_evidence_receipt",
+        synthesis_decision: evidence.decision,
         cause,
-      }, "synthesized interrupted-turn terminal did not receive a durable store receipt");
+      }, "synthesized unterminated-turn terminal did not receive a durable store receipt");
       this.reportDegraded(
         "claude-shim-turn-lifecycle",
-        `the synthesized terminal for interrupted turn ${JSON.stringify(turnId)} was not durably stored: ${errMsg(cause)}`,
+        `the synthesized terminal for unterminated turn ${JSON.stringify(turnId)} was not durably stored: ${errMsg(cause)}`,
       );
     }
   }
