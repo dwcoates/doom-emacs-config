@@ -1183,3 +1183,18 @@ the bubble now carries the same value, populated at the single open site from
 the same store field the delta envelope reads, so the two are equal by
 construction. Approved under the orchestrator proto-change gate; landed on
 feature-daemon-async with regenerated bindings and scoping tests.
+
+### Part 5 addendum — amendment 3 (post-loop, orchestrator-approved)
+
+`data.v1 MessageDeltaEvent` gains `ApiUsage vendor_usage = 3` and
+`string api_message_id = 4`, both additive; the narrow legacy `usage = 2` is
+untouched so persisted rows replay byte-identically. Found by the
+turn-accounting investigation: the stream-plane assistant message carries the
+message_start usage SNAPSHOT (input/cache settled, output interim — live
+evidence: responses summed 563 output tokens against the result's 4407), and
+the final per-message usage exists only on message_delta, which the shim
+dropped and whose frame is anonymous. The shim now relays the vendor's full
+usage with the id its tracker holds; the daemon files corrections by API
+message id before duplicate comparison and retires them with the turn. Old
+rows without the fields still decode and still report their disagreement
+honestly.
