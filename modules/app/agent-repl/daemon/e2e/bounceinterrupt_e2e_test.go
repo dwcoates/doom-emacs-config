@@ -45,8 +45,12 @@ func TestE2EAnInterruptLostToTheUDSDeathLeavesTheSessionDriveable(t *testing.T) 
 
 	// Act — the stop goes out and the daemon dies underneath it. The ack is
 	// deliberately NOT awaited: an interrupt whose verdict was already read is
-	// not an interrupt in flight.
+	// not an interrupt in flight. What IS awaited is the shim's own record of
+	// having received it, which is the request's delivery and nothing more —
+	// the verdict is still racing the teardown below.
 	writeCmd(t, conn, `{"requestId":"r-interrupt","interrupt":{}}`)
+	world.awaitShimLog(t, shimSawInterrupt,
+		"the stop must reach the shim before the daemon dies, or the scenario is a session parked on a permission nobody cancelled rather than an interrupt lost in flight")
 	first.bounce()
 	second := world.boot(t)
 
@@ -71,6 +75,8 @@ func TestE2EAnInterruptLostToTheUDSDeathEndsItsTurnExactlyOnce(t *testing.T) {
 
 	// Act
 	writeCmd(t, conn, `{"requestId":"r-interrupt","interrupt":{}}`)
+	world.awaitShimLog(t, shimSawInterrupt,
+		"the stop must reach the shim before the daemon dies: a turn nobody ever interrupted has no end to fire twice")
 	first.bounce()
 	second := world.boot(t)
 	_, afterConn, _ := reattached(t, second, cwd)
@@ -104,6 +110,8 @@ func TestE2EAnInterruptLostToTheUDSDeathReconcilesItsOutcome(t *testing.T) {
 
 	// Act
 	writeCmd(t, conn, `{"requestId":"r-interrupt","interrupt":{}}`)
+	world.awaitShimLog(t, shimSawInterrupt,
+		"the stop must reach the shim before the daemon dies, or there is no locally-completed stop for the successor to reconcile")
 	first.bounce()
 	second := world.boot(t)
 
@@ -133,8 +141,14 @@ func TestE2EAMidTurnShimKeepsStreamingToTheStoreWithNoDaemonAttached(t *testing.
 	_, conn, vendorID, _ := liveSession(t, first.harness(), cwd)
 	before := storeEventCount(t, vendorID)
 
-	// Act — start a turn and take the daemon away.
+	// Act — start a turn and take the daemon away. The turn is established
+	// through the SHIM's own record of taking it up, which is emitted before it
+	// streams anything: a prompt merely written to the daemon's socket is not a
+	// turn, and when the teardown beats the daemon's read loop the command is
+	// nacked outright and no turn ever exists to outlive anything.
 	submitPrompt(t, conn, "r-gap-turn", "a turn that outlives its daemon")
+	world.awaitShimLog(t, shimTookTheTurn,
+		"the prompt must reach the shim before the daemon dies, or nothing was ever mid-turn")
 	first.bounce()
 
 	// Assert — the conversation's durable record grows with no daemon attached.

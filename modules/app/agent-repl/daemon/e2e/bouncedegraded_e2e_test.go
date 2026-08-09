@@ -125,6 +125,12 @@ func TestE2EAConversationConvergesWithoutTheContentDeltasLostToTheGap(t *testing
 	// Act — a turn that runs across the daemon's death.
 	const prompt = "a turn whose typing nobody watched"
 	submitPrompt(t, conn, "r-gap-turn", prompt)
+	// The turn has to EXIST before the daemon dies. A prompt written to the
+	// daemon's socket is not one: when the teardown beats the daemon's read
+	// loop the command is nacked ("session-controller: manager closed") and
+	// there is no reply for anything to converge on.
+	world.awaitShimLog(t, shimTookTheTurn,
+		"the prompt must reach the shim before the daemon dies, or the turn whose deltas are dropped never ran")
 	first.bounce()
 	second := world.boot(t)
 	_, afterConn, _ := reattached(t, second, cwd)

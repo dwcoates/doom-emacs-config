@@ -280,6 +280,33 @@ func rejectRestartInterrupted(workspace, why string) func(*frontendv1.FrontendFr
 	}
 }
 
+// --- the edge of a bounce ----------------------------------------------------
+//
+// A test whose ACT is "this work is in flight and THEN the daemon dies" has to
+// establish the first half before it performs the second. `writeCmd` cannot do
+// that on its own — it returns when the websocket write completes, which is
+// before the daemon has read the frame — and the daemon-side ack that would
+// settle it is exactly what these tests arrange to lose. So the rendezvous is
+// with the SHIM, on a line it writes synchronously as it takes the work up,
+// through the world's stderr tap.
+
+// shimSawInterrupt is the shim's own record that a daemon interrupt request
+// reached it (uds-session.ts, logged synchronously at the top of the interrupt
+// handler, before the verdict is computed and before anything is written back).
+//
+// Waiting for it establishes DELIVERY without establishing the answer: the
+// verdict is still racing the bounce, which is the condition under test.
+// Without it the bounce frequently wins the earlier race instead, the daemon
+// nacks the interrupt as "no live session for workspace", and the shim's
+// interrupt handler never runs at all — a session left parked on a permission
+// nobody cancelled, which is not the scenario any of these tests describe.
+const shimSawInterrupt = "processing daemon interrupt request"
+
+// shimTookTheTurn is the fake's record that a submitted prompt reached it and
+// it has chosen the turn to run (fake-query.ts, logged before the turn emits
+// anything). It is how "a turn is under way" is established before a bounce.
+const shimTookTheTurn = "selected fake turn branch"
+
 // --- reattach ---------------------------------------------------------------
 
 // reattached brings a scoped frontend up against the SUCCESSOR daemon for a
