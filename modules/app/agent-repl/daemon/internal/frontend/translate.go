@@ -156,6 +156,24 @@ func ProgressViewFrame(p *frontendv1.ProgressView) *frontendv1.FrontendFrame {
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_Progress{Progress: p}}
 }
 
+// TopbarViewFrame wraps a TopbarView: one workspace's fully resolved topbar,
+// pushed whenever any fact the topbar renders changes.
+func TopbarViewFrame(v *frontendv1.TopbarView) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_Topbar{Topbar: v}}
+}
+
+// TokenBreakdownViewFrame wraps a TokenBreakdownView: the counter menu's
+// resolved section/row tree.
+func TokenBreakdownViewFrame(v *frontendv1.TokenBreakdownView) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_TokenBreakdown{TokenBreakdown: v}}
+}
+
+// WorkspaceGateViewFrame wraps a WorkspaceGateView: whether prompts may be
+// sent to the workspace, and the account behind a closed gate.
+func WorkspaceGateViewFrame(v *frontendv1.WorkspaceGateView) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_WorkspaceGate{WorkspaceGate: v}}
+}
+
 // WorkspaceAvailableFrame wraps the durable, host-only workspace lifecycle
 // notification.  Server routes it only to ClientKindHost connections.
 func WorkspaceAvailableFrame(v *frontendv1.WorkspaceAvailable) *frontendv1.FrontendFrame {

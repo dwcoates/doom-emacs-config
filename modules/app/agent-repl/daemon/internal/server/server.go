@@ -196,6 +196,8 @@ type Server struct {
 	registry      *registry.Registry
 	modelCatalogs *SessionModelCatalogs
 	tokenUsage    SessionTokenUsageSource
+	// workspaceViews is the resolved-view publisher; see Config.WorkspaceViews.
+	workspaceViews *WorkspaceViews
 	// logins owns the interactive Claude login terminals, at most one per
 	// account; nil makes the login routes report the capability unconfigured.
 	logins *login.Manager
@@ -273,6 +275,13 @@ type Config struct {
 	Registry      *registry.Registry
 	ModelCatalogs *SessionModelCatalogs
 	TokenUsage    SessionTokenUsageSource
+	// WorkspaceViews publishes the three RESOLVED per-workspace views. The
+	// SessionView push hands it the durable token aggregate it has already
+	// read, which is what the token-breakdown menu is resolved from; the
+	// topbar and the gate are published from the SSM's own state subscription.
+	// Nil-safe: an unwired publisher publishes nothing, which only a focused
+	// harness does.
+	WorkspaceViews *WorkspaceViews
 	// Logins owns the interactive Claude login terminals; nil disables the
 	// login routes.
 	Logins *login.Manager
@@ -339,6 +348,7 @@ func New(cfg Config) *Server {
 		registry:        cfg.Registry,
 		modelCatalogs:   cfg.ModelCatalogs,
 		tokenUsage:      cfg.TokenUsage,
+		workspaceViews:  cfg.WorkspaceViews,
 		idleTimeout:     cfg.IdleTimeout,
 		idleSweepTicks:  cfg.IdleSweepTicks,
 		keepAlive:       cfg.KeepAlive,
@@ -1446,6 +1456,16 @@ func SessionViewFromRecordWithModels(logf dlog.Logf, rec registry.Record, pendin
 // SessionViewFromRecordWithModelsAndUsage is the complete canonical SessionView
 // shaper, including the durable completed-response aggregate.
 //
+// `usage` IS NOT SHAPED ONTO THE SessionView, and that is deliberate rather
+// than an oversight. It reaches this function because this is where the durable
+// read happens, and it LANDS on the TokenBreakdownView — the resolved menu that
+// is the aggregate's only rendering surface (internal/frontend/tokenbreakdown.go,
+// published from pushSessionView). The parameter stayed on this signature
+// through the period when the breakdown did not exist yet, carrying a fact with
+// nowhere to put it; the fact now has somewhere, and the parameter is what
+// forces every caller of this shaper to have read the aggregate the breakdown
+// beside it is resolved from.
+//
 // reg is the registry the record was read from, and it is read for exactly one
 // question: whether a superseded predecessor's workspace still has a successor
 // claiming it, in which case the handover is in flight and its death card is
@@ -1627,7 +1647,46 @@ func (s *Server) pushSessionView(id string) {
 		panic(fmt.Sprintf("server: session %s: pushSessionView requires ModelCatalogs", id))
 	}
 	modelOptions := s.modelCatalogs.Get(id)
-	s.frontend.PushSessionView(SessionViewFromRecordWithModelsAndUsage(s.logf, s.registry, rec, pending, live, modelOptions, sessionTokenUtilization(s.logf, s.tokenUsage, id)))
+	usage := sessionTokenUtilization(s.logf, s.tokenUsage, id)
+	s.frontend.PushSessionView(SessionViewFromRecordWithModelsAndUsage(s.logf, s.registry, rec, pending, live, modelOptions, usage))
+	// THE TOKEN-BREAKDOWN MENU is resolved from the SAME aggregate, here,
+	// because this is where the durable read already happens: resolving it on
+	// its own trigger would put a second durable read of the token ledger on a
+	// second clock, and the two could then disagree about what the session
+	// spent. The fence comes off the workspace's current state and is carried,
+	// never composed.
+	//
+	// THE REVIVAL GATE RIDES THE SAME PUSH. Its facts come off the session
+	// RECORD, and this is the funnel every record mutation ends in — the
+	// registry's hibernation write re-pushes the session view as its last step.
+	// A hibernation flip that records no SSM state transition would otherwise
+	// leave the gate stale until something unrelated moved the state.
+	s.publishSessionDerivedViews(rec.CWD, id, usage)
+}
+
+// publishSessionDerivedViews hands the resolved-view publisher the workspace's
+// fence, its token aggregate and its session identity — the breakdown menu and
+// the revival gate, resolved off ONE read of the workspace's current state.
+//
+// A workspace with no current SSM state has no fence, and both views are
+// withheld rather than published unfenced — an unfenced push cannot be told
+// from a stale one, which is the whole job of the token. The withholding is
+// recorded; it is never silent.
+func (s *Server) publishSessionDerivedViews(workspace, sessionID string, usage *frontendv1.SessionTokenUtilization) {
+	if s.workspaceViews == nil || s.ssm == nil || workspace == "" {
+		return
+	}
+	state, found, err := s.ssm.Current(workspace)
+	if err != nil {
+		s.logf("server: token breakdown and revival gate NOT PUBLISHED ws=%q session=%q — the workspace's current state could not be read for its fence: %v", workspace, sessionID, err)
+		return
+	}
+	if !found {
+		s.logf("server: token breakdown and revival gate NOT PUBLISHED ws=%q session=%q — the workspace has no resolved state yet, so there is no fence to stamp them with", workspace, sessionID)
+		return
+	}
+	s.workspaceViews.PublishTokenBreakdown(workspace, state.GetFence(), usage)
+	s.workspaceViews.PublishSession(workspace, state.GetFence(), sessionID)
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
