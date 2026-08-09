@@ -37,6 +37,7 @@ package e2e
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -122,6 +123,14 @@ type trackedShim struct {
 type shutdownBoot struct {
 	ts    *httptest.Server
 	world *shutdownWorld
+
+	// stateDB is the durable state database THIS boot opened over the world's
+	// state directory — the same file every other boot opens. It is carried so
+	// harness() can hand it to the shared e2eHarness helpers that read the
+	// daemon's durable ledgers (durableTurnAccountings and friends): a fact the
+	// daemon persisted is read back through its production statedb owner rather
+	// than inferred from a frame.
+	stateDB *sql.DB
 
 	// executed carries the stop_shims of every shutdown this daemon EXECUTED,
 	// published only after server.ShutdownAll has returned — so a test that has
@@ -219,6 +228,7 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 	if err != nil {
 		t.Fatalf("open state store: %v", err)
 	}
+	b.stateDB = stateStore
 	reg := registry.OpenWith(registry.Options{DB: stateStore, Logf: t.Logf})
 	ssmMgr, err := ssm.Open(ssm.Options{
 		DB:       stateStore,
@@ -302,6 +312,15 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 	if err != nil {
 		t.Fatalf("open keep-alive window store: %v", err)
 	}
+	// THE DURABLE ACCOUNTING LEDGER main.go wires, not a per-boot in-memory
+	// stand-in. A turn's accounting is the evidence a drain test reads back
+	// AFTER the daemon that produced it is gone, so the ledger has to be the one
+	// that lives in the world's state file rather than one that dies with the
+	// process being bounced.
+	turnAccountings, err := statedb.NewTurnAccountings(stateStore)
+	if err != nil {
+		t.Fatalf("open turn accounting ledger: %v", err)
+	}
 	kaCfg, err := keepalive.FromEnv()
 	if err != nil {
 		t.Fatalf("keep-alive config: %v", err)
@@ -316,7 +335,7 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		FileDiagnostics:   fileDiagnostics,
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
-		TurnAccountings:   newTestTurnAccountingStore(),
+		TurnAccountings:   turnAccountings,
 		Hibernations:      registrar,
 		VendorSessions:    registrar,
 		KeepAliveWindows:  server.KeepAliveWindowStore{Windows: keepAliveWindows},
@@ -526,9 +545,10 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 func (b *shutdownBoot) bounce() { b.stopOnce.Do(b.stop) }
 
 // harness adapts this boot to the shape e2e_test.go's session helpers take.
-// createSession, dial and liveSession read nothing but the httptest server, so
-// this is an adapter rather than a second harness.
-func (b *shutdownBoot) harness() *e2eHarness { return &e2eHarness{ts: b.ts} }
+// createSession, dial and liveSession read nothing but the httptest server, and
+// the durable-ledger readers (durableTurnAccountings) read nothing but the state
+// database, so this is an adapter rather than a second harness.
+func (b *shutdownBoot) harness() *e2eHarness { return &e2eHarness{ts: b.ts, stateDB: b.stateDB} }
 
 // dialFrontend opens the UNFILTERED /frontend socket — the surface the
 // daemon-global schedule commands and the ShutdownScheduleView broadcast ride.
