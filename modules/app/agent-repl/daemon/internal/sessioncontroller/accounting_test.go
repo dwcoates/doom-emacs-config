@@ -85,6 +85,152 @@ func TestTurnAccountingReducerCompletesWithBoundaryAndMatchingLedger(t *testing.
 	}
 }
 
+// messageDeltaUsageEvent is the vendor's relayed message_delta correction: the
+// FINAL cumulative usage for one API message, reported after the assistant
+// message that carried only the message_start snapshot.
+func messageDeltaUsageEvent(t *testing.T, apiMessageID string, usage *datav1.ApiUsage) *corev1.Event {
+	t.Helper()
+	return accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_StreamEvent{StreamEvent: &datav1.StreamEvent{
+		Event: &datav1.RawMessageStreamEvent{Event: &datav1.RawMessageStreamEvent_MessageDelta{MessageDelta: &datav1.MessageDeltaEvent{
+			ApiMessageId: apiMessageID,
+			VendorUsage:  usage,
+		}}},
+	}}})
+}
+
+// snapshotAssistantEvent is one assistant message as the stream plane delivers
+// it: settled input and cache counters, and only the INTERIM output count the
+// message_start snapshot knew.
+func snapshotAssistantEvent(t *testing.T, apiMessageID string, snapshotOutput int64) *corev1.Event {
+	t.Helper()
+	return accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
+		Message: &datav1.ApiAssistantMessage{Id: apiMessageID, Model: "claude-opus-5", Usage: &datav1.ApiUsage{InputTokens: 33, OutputTokens: snapshotOutput}},
+	}}})
+}
+
+// TestResponseUsageCorrectionReconcilesTheOutputLedger reproduces the shape
+// measured on the live stack: the stream plane's per-response output summed to
+// 563 while the terminal result reported 4407, with input reconciling exactly
+// because input is settled at message_start. The correction relayed from
+// message_delta is what closes it.
+//
+// Each case fixes the arrival ORDER of the two facts, because the SDK emits one
+// assistant message per content block and whether those land before or after the
+// frame's message_delta is the vendor's business, not a guarantee.
+func TestResponseUsageCorrectionReconcilesTheOutputLedger(t *testing.T) {
+	tests := []struct {
+		name  string
+		order []string
+	}{
+		{name: "correction after the response", order: []string{"assistant", "delta"}},
+		{name: "correction before the response", order: []string{"delta", "assistant"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newTurnAccountingReducer(t.Logf)
+			r.observe(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+				QueryInstanceId: "q",
+				Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{
+					Identity: completeRuntimeIdentity(),
+				}},
+			}}}, "s")
+			r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
+			r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
+			for _, step := range tc.order {
+				switch step {
+				case "assistant":
+					if err := r.observe(snapshotAssistantEvent(t, "msg_live", 563), "s"); err != nil {
+						t.Fatalf("observe assistant: %v", err)
+					}
+				case "delta":
+					if err := r.observe(messageDeltaUsageEvent(t, "msg_live", &datav1.ApiUsage{InputTokens: 33, OutputTokens: 4407}), "s"); err != nil {
+						t.Fatalf("observe message_delta: %v", err)
+					}
+				}
+			}
+			r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{
+				Usage:      &datav1.Usage{InputTokens: 33, OutputTokens: 4407},
+				ModelUsage: map[string]*datav1.ModelUsage{"claude-opus-5": {InputTokens: 33, OutputTokens: 4407}},
+			}}}), "s")
+			r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
+			got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+			if got.GetComplete() == nil {
+				t.Fatalf("accounting = %+v, want complete", got.GetInvalid().GetProblems())
+			}
+			if out := got.GetReconciliation().GetResponseMainAgent().GetOutputTokens(); out != 4407 {
+				t.Fatalf("response output_tokens = %d, want 4407", out)
+			}
+		})
+	}
+}
+
+// TestUncorrectedResponseStillReportsTheLedgerDisagreement pins the
+// pre-amendment world as REPRESENTABLE: a turn whose message_delta correction
+// never arrived — a replayed row written before the field existed is the
+// standing case — is reconciled against the snapshot it actually has, and says
+// so, rather than being quietly reconciled against evidence nobody sent.
+func TestUncorrectedResponseStillReportsTheLedgerDisagreement(t *testing.T) {
+	r := newTurnAccountingReducer(t.Logf)
+	r.observe(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "q",
+		Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{
+			Identity: completeRuntimeIdentity(),
+		}},
+	}}}, "s")
+	r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
+	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
+	r.observe(snapshotAssistantEvent(t, "msg_old", 563), "s")
+	// An old row: the relayed frame carries the legacy narrow usage only, with
+	// neither of the fields the amendment added.
+	if err := r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_StreamEvent{StreamEvent: &datav1.StreamEvent{
+		Event: &datav1.RawMessageStreamEvent{Event: &datav1.RawMessageStreamEvent_MessageDelta{MessageDelta: &datav1.MessageDeltaEvent{
+			Usage: &datav1.Usage{OutputTokens: 4407},
+		}}},
+	}}}), "s"); err != nil {
+		t.Fatalf("observe legacy message_delta: %v", err)
+	}
+	r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{
+		Usage:      &datav1.Usage{InputTokens: 33, OutputTokens: 4407},
+		ModelUsage: map[string]*datav1.ModelUsage{"claude-opus-5": {InputTokens: 33, OutputTokens: 4407}},
+	}}}), "s")
+	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
+	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	var mismatch []string
+	for _, problem := range got.GetInvalid().GetProblems() {
+		mismatch = append(mismatch, problem.GetTokenLedgerMismatch().GetDifferingFieldPaths()...)
+	}
+	if !containsPath(mismatch, "output_tokens") {
+		t.Fatalf("differing field paths = %v, want output_tokens still reported", mismatch)
+	}
+	if got.GetReconciliation().GetResponseMainAgent().GetOutputTokens() != 563 {
+		t.Fatalf("response output_tokens = %d, want the uncorrected 563", got.GetReconciliation().GetResponseMainAgent().GetOutputTokens())
+	}
+}
+
+// TestPerContentBlockDuplicatesDoNotConflictAfterCorrection covers the live
+// shape where the SDK emits one assistant message PER CONTENT BLOCK, all sharing
+// one API message id. Correcting one copy and not the other would manufacture a
+// ledger conflict out of two records the vendor sent as equals.
+func TestPerContentBlockDuplicatesDoNotConflictAfterCorrection(t *testing.T) {
+	r := newTurnAccountingReducer(t.Logf)
+	r.queryID = "q"
+	r.runtime = completeRuntimeIdentity()
+	r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
+	r.observe(snapshotAssistantEvent(t, "msg_dup", 5), "s")
+	r.observe(messageDeltaUsageEvent(t, "msg_dup", &datav1.ApiUsage{InputTokens: 33, OutputTokens: 4407}), "s")
+	r.observe(snapshotAssistantEvent(t, "msg_dup", 5), "s")
+	turn := r.turns["t"]
+	if len(turn.responses) != 1 {
+		t.Fatalf("responses = %d, want the duplicates deduped to 1", len(turn.responses))
+	}
+	if len(turn.responseConflicts) != 0 {
+		t.Fatalf("response conflicts = %v, want none", turn.responseConflicts)
+	}
+	if out := turn.responses[0].GetUsage().GetOutputTokens(); out != 4407 {
+		t.Fatalf("response output_tokens = %d, want 4407", out)
+	}
+}
+
 func TestReconcileTokenUsageNamesEveryResponseInStableOrderWithoutResult(t *testing.T) {
 	records := []*frontendv1.TokenUtilization{
 		{ApiMessageId: "message-b"},
