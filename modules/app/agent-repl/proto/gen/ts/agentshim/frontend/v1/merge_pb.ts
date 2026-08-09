@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/merge.proto.
  */
 export const file_agentshim_frontend_v1_merge: GenFile = /*@__PURE__*/
-  fileDesc("CiFhZ2VudHNoaW0vZnJvbnRlbmQvdjEvbWVyZ2UucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSLrBAoLTWVyZ2VTdGF0dXMSDgoGcnVuX2lkGAEgASgJEhsKE3BoYXNlX3N0YXJ0ZWRfYXRfbXMYAiABKAMSFQoNdXBkYXRlZF9hdF9tcxgDIAEoAxI+CghlbnF1ZXVlZBgEIAEoCzIqLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVN0YXR1c0VucXVldWVkSAASRwoNYmVmb3JlX2FjdGlvbhgFIAEoCzIuLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVN0YXR1c0JlZm9yZUFjdGlvbkgAEkkKDmNoZXJyeV9waWNraW5nGAYgASgLMi8uYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzQ2hlcnJ5UGlja2luZ0gAEjwKB3Rlc3RpbmcYByABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VTdGF0dXNUZXN0aW5nSAASPgoIY29uZmxpY3QYCCABKAsyKi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VTdGF0dXNDb25mbGljdEgAEkUKDGFmdGVyX2FjdGlvbhgJIAEoCzItLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVN0YXR1c0FmdGVyQWN0aW9uSAASOgoGbWVyZ2VkGAogASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzTWVyZ2VkSAASOgoGZmFpbGVkGAsgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzRmFpbGVkSABCBwoFcGhhc2UiNgoTTWVyZ2VTdGF0dXNFbnF1ZXVlZBIQCghwb3NpdGlvbhgBIAEoBRINCgVkZXB0aBgCIAEoBSIpChdNZXJnZVN0YXR1c0JlZm9yZUFjdGlvbhIOCgZwcm9tcHQYASABKAkidwoYTWVyZ2VTdGF0dXNDaGVycnlQaWNraW5nEhUKDWNvbW1pdHNfdG90YWwYASABKAUSFgoOY29tbWl0c19sYW5kZWQYAiABKAUSEwoLY3VycmVudF9zaGEYAyABKAkSFwoPY3VycmVudF9zdWJqZWN0GAQgASgJInEKEk1lcmdlU3RhdHVzVGVzdGluZxIVCg1jb21taXRzX3RvdGFsGAEgASgFEhYKDmNvbW1pdHNfbGFuZGVkGAIgASgFEhMKC2N1cnJlbnRfc2hhGAMgASgJEhcKD2N1cnJlbnRfc3ViamVjdBgEIAEoCSJ4ChNNZXJnZVN0YXR1c0NvbmZsaWN0EhYKDmNvbmZsaWN0ZWRfc2hhGAEgASgJEhoKEmNvbmZsaWN0ZWRfc3ViamVjdBgCIAEoCRIVCg1jb21taXRzX3RvdGFsGAMgASgFEhYKDmNvbW1pdHNfbGFuZGVkGAQgASgFIigKFk1lcmdlU3RhdHVzQWZ0ZXJBY3Rpb24SDgoGcHJvbXB0GAEgASgJIkYKEU1lcmdlU3RhdHVzTWVyZ2VkEhUKDWNvbW1pdHNfdG90YWwYASABKAUSGgoSYWZ0ZXJfYWN0aW9uX2Vycm9yGAIgASgJIpQBChFNZXJnZVN0YXR1c0ZhaWxlZBINCgVjYXVzZRgBIAEoCRIVCg1jb21taXRzX3RvdGFsGAIgASgFEhYKDmNvbW1pdHNfbGFuZGVkGAMgASgFEhMKC2ZhaWxpbmdfc2hhGAQgASgJEhcKD2ZhaWxpbmdfc3ViamVjdBgFIAEoCRITCgtmYWlsZWRfanNvbhgGIAEoCSJvChBNZXJnZVF1ZXVlUm9zdGVyEg4KBnBhdXNlZBgBIAEoCBIVCg11cGRhdGVkX2F0X21zGAIgASgDEjQKBXJlcG9zGAMgAygLMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlUmVwb1F1ZXVlIlsKDk1lcmdlUmVwb1F1ZXVlEhAKCHJlcG9fa2V5GAEgASgJEjcKB2VudHJpZXMYAiADKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VRdWV1ZUVudHJ5IsYCCg9NZXJnZVF1ZXVlRW50cnkSDgoGcnVuX2lkGAEgASgJEhEKCXdvcmtzcGFjZRgCIAEoCRIWCg53b3Jrc3BhY2VfbmFtZRgDIAEoCRIVCg1zb3VyY2VfYnJhbmNoGAQgASgJEj8KB3J1bm5pbmcYBSABKAsyLC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VRdWV1ZUhlYWRSdW5uaW5nSAASTAoOcGF1c2VkX3dhaXRpbmcYBiABKAsyMi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VRdWV1ZUhlYWRQYXVzZWRXYWl0aW5nSAASSgoNdGVybWluYWxfb3dlZBgHIAEoCzIxLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVF1ZXVlSGVhZFRlcm1pbmFsT3dlZEgAQgYKBGhlYWQiFwoVTWVyZ2VRdWV1ZUhlYWRSdW5uaW5nIh0KG01lcmdlUXVldWVIZWFkUGF1c2VkV2FpdGluZyIcChpNZXJnZVF1ZXVlSGVhZFRlcm1pbmFsT3dlZCIUChJQYXVzZU1lcmdlUXVldWVDbWQiFQoTUmVzdW1lTWVyZ2VRdWV1ZUNtZCIfCg1FdmljdE1lcmdlQ21kEg4KBnJ1bl9pZBgBIAEoCUIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw");
+  fileDesc("CiFhZ2VudHNoaW0vZnJvbnRlbmQvdjEvbWVyZ2UucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSLrBAoLTWVyZ2VTdGF0dXMSDgoGcnVuX2lkGAEgASgJEhsKE3BoYXNlX3N0YXJ0ZWRfYXRfbXMYAiABKAMSFQoNdXBkYXRlZF9hdF9tcxgDIAEoAxI+CghlbnF1ZXVlZBgEIAEoCzIqLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVN0YXR1c0VucXVldWVkSAASRwoNYmVmb3JlX2FjdGlvbhgFIAEoCzIuLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVN0YXR1c0JlZm9yZUFjdGlvbkgAEkkKDmNoZXJyeV9waWNraW5nGAYgASgLMi8uYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzQ2hlcnJ5UGlja2luZ0gAEjwKB3Rlc3RpbmcYByABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VTdGF0dXNUZXN0aW5nSAASPgoIY29uZmxpY3QYCCABKAsyKi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VTdGF0dXNDb25mbGljdEgAEkUKDGFmdGVyX2FjdGlvbhgJIAEoCzItLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVN0YXR1c0FmdGVyQWN0aW9uSAASOgoGbWVyZ2VkGAogASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzTWVyZ2VkSAASOgoGZmFpbGVkGAsgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzRmFpbGVkSABCBwoFcGhhc2UiNgoTTWVyZ2VTdGF0dXNFbnF1ZXVlZBIQCghwb3NpdGlvbhgBIAEoBRINCgVkZXB0aBgCIAEoBSIpChdNZXJnZVN0YXR1c0JlZm9yZUFjdGlvbhIOCgZwcm9tcHQYASABKAkidwoYTWVyZ2VTdGF0dXNDaGVycnlQaWNraW5nEhUKDWNvbW1pdHNfdG90YWwYASABKAUSFgoOY29tbWl0c19sYW5kZWQYAiABKAUSEwoLY3VycmVudF9zaGEYAyABKAkSFwoPY3VycmVudF9zdWJqZWN0GAQgASgJInEKEk1lcmdlU3RhdHVzVGVzdGluZxIVCg1jb21taXRzX3RvdGFsGAEgASgFEhYKDmNvbW1pdHNfbGFuZGVkGAIgASgFEhMKC2N1cnJlbnRfc2hhGAMgASgJEhcKD2N1cnJlbnRfc3ViamVjdBgEIAEoCSJ4ChNNZXJnZVN0YXR1c0NvbmZsaWN0EhYKDmNvbmZsaWN0ZWRfc2hhGAEgASgJEhoKEmNvbmZsaWN0ZWRfc3ViamVjdBgCIAEoCRIVCg1jb21taXRzX3RvdGFsGAMgASgFEhYKDmNvbW1pdHNfbGFuZGVkGAQgASgFIigKFk1lcmdlU3RhdHVzQWZ0ZXJBY3Rpb24SDgoGcHJvbXB0GAEgASgJIkYKEU1lcmdlU3RhdHVzTWVyZ2VkEhUKDWNvbW1pdHNfdG90YWwYASABKAUSGgoSYWZ0ZXJfYWN0aW9uX2Vycm9yGAIgASgJIpQBChFNZXJnZVN0YXR1c0ZhaWxlZBINCgVjYXVzZRgBIAEoCRIVCg1jb21taXRzX3RvdGFsGAIgASgFEhYKDmNvbW1pdHNfbGFuZGVkGAMgASgFEhMKC2ZhaWxpbmdfc2hhGAQgASgJEhcKD2ZhaWxpbmdfc3ViamVjdBgFIAEoCRITCgtmYWlsZWRfanNvbhgGIAEoCSJvChBNZXJnZVF1ZXVlUm9zdGVyEg4KBnBhdXNlZBgBIAEoCBIVCg11cGRhdGVkX2F0X21zGAIgASgDEjQKBXJlcG9zGAMgAygLMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlUmVwb1F1ZXVlIlsKDk1lcmdlUmVwb1F1ZXVlEhAKCHJlcG9fa2V5GAEgASgJEjcKB2VudHJpZXMYAiADKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VRdWV1ZUVudHJ5IsYCCg9NZXJnZVF1ZXVlRW50cnkSDgoGcnVuX2lkGAEgASgJEhEKCXdvcmtzcGFjZRgCIAEoCRIWCg53b3Jrc3BhY2VfbmFtZRgDIAEoCRIVCg1zb3VyY2VfYnJhbmNoGAQgASgJEj8KB3J1bm5pbmcYBSABKAsyLC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VRdWV1ZUhlYWRSdW5uaW5nSAASTAoOcGF1c2VkX3dhaXRpbmcYBiABKAsyMi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VRdWV1ZUhlYWRQYXVzZWRXYWl0aW5nSAASSgoNdGVybWluYWxfb3dlZBgHIAEoCzIxLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVF1ZXVlSGVhZFRlcm1pbmFsT3dlZEgAQgYKBGhlYWQiFwoVTWVyZ2VRdWV1ZUhlYWRSdW5uaW5nIh0KG01lcmdlUXVldWVIZWFkUGF1c2VkV2FpdGluZyIcChpNZXJnZVF1ZXVlSGVhZFRlcm1pbmFsT3dlZCIUChJQYXVzZU1lcmdlUXVldWVDbWQiFQoTUmVzdW1lTWVyZ2VRdWV1ZUNtZCIfCg1FdmljdE1lcmdlQ21kEg4KBnJ1bl9pZBgBIAEoCSLVAQoRTWVyZ2VEZXF1ZXVlT2ZmZXISEAoIb2ZmZXJfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEhQKDHJhaXNlZF9hdF9tcxgDIAEoAxI9Cgd3YWl0aW5nGAQgASgLMiouYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlRGVxdWV1ZVdhaXRpbmdIABI9CgdydW5uaW5nGAUgASgLMiouYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlRGVxdWV1ZVJ1bm5pbmdIAEIKCghzdGFuZGluZyJFChNNZXJnZURlcXVldWVXYWl0aW5nEg0KBWFoZWFkGAEgASgFEhAKCHBvc2l0aW9uGAIgASgFEg0KBWRlcHRoGAMgASgFIkkKE01lcmdlRGVxdWV1ZVJ1bm5pbmcSMgoGc3RhdHVzGAEgASgLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzIq4BChVBbnN3ZXJNZXJnZURlcXVldWVDbWQSEAoIb2ZmZXJfaWQYASABKAkSPQoHZGVxdWV1ZRgCIAEoCzIqLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZURlcXVldWVDb25maXJtSAASOgoEa2VlcBgDIAEoCzIqLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZURlcXVldWVEZWNsaW5lSABCCAoGYW5zd2VyIhUKE01lcmdlRGVxdWV1ZUNvbmZpcm0iFQoTTWVyZ2VEZXF1ZXVlRGVjbGluZUIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw");
 
 /**
  * Live progress of the workspace's current (or most recent) merge run.
@@ -601,4 +601,229 @@ export type EvictMergeCmd = Message<"agentshim.frontend.v1.EvictMergeCmd"> & {
  */
 export const EvictMergeCmdSchema: GenMessage<EvictMergeCmd> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_merge, 17);
+
+/**
+ * THE INTERRUPT'S QUEUE HALF, ASKED RATHER THAN PERFORMED.
+ *
+ * Interrupting a workspace whose merge is on the queue used to take that merge
+ * off silently: the stop reached the shim, the queue entry was dropped beside
+ * it, and the only record of a merge the user had been waiting on was a
+ * terminal `failed` status that arrived without being asked for. A merge is
+ * minutes of someone's work and the interrupt is one keystroke, so the
+ * destructive half is now a QUESTION.
+ *
+ * The offer is PUSHED STATE, on WorkspaceState, rather than a rejection handed
+ * back to whoever sent the interrupt. The interrupt's sender is frequently not
+ * the surface that can draw a card — the Emacs host sends it from a keybinding
+ * and renders no cards at all — so an answer carried on the ack would have
+ * nowhere to be asked. Published on the workspace, the question reaches
+ * whichever frontend is showing that workspace, and both frontends see the
+ * same one.
+ *
+ * AT MOST ONE OFFER IS OUTSTANDING PER WORKSPACE. A second interrupt while an
+ * offer stands re-publishes the standing on the SAME offer_id rather than
+ * minting a rival question, so "which of the two cards did the user answer"
+ * is unrepresentable.
+ *
+ * @generated from message agentshim.frontend.v1.MergeDequeueOffer
+ */
+export type MergeDequeueOffer = Message<"agentshim.frontend.v1.MergeDequeueOffer"> & {
+  /**
+   * Daemon-minted, and the ONLY thing an answer may name. It is not the run
+   * id: a run id would still resolve after the offer had been answered or
+   * superseded, so a stale card's click would dequeue a merge the user never
+   * saw the question for. This id dies with the offer.
+   *
+   * @generated from field: string offer_id = 1;
+   */
+  offerId: string;
+
+  /**
+   * The run the question is about — the same id its MergeStatus carries, so a
+   * frontend can tie the card to the merge it is already rendering.
+   *
+   * @generated from field: string run_id = 2;
+   */
+  runId: string;
+
+  /**
+   * When the offer was raised, unix millis.
+   *
+   * @generated from field: int64 raised_at_ms = 3;
+   */
+  raisedAtMs: bigint;
+
+  /**
+   * WHERE the merge stands, as arms, because the two standings are answered
+   * by different machinery and read as different questions. A frontend that
+   * had to ask "is position 1 the head?" would be re-deriving what the daemon
+   * already knows.
+   *
+   * @generated from oneof agentshim.frontend.v1.MergeDequeueOffer.standing
+   */
+  standing: {
+    /**
+     * @generated from field: agentshim.frontend.v1.MergeDequeueWaiting waiting = 4;
+     */
+    value: MergeDequeueWaiting;
+    case: "waiting";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.MergeDequeueRunning running = 5;
+     */
+    value: MergeDequeueRunning;
+    case: "running";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MergeDequeueOffer.
+ * Use `create(MergeDequeueOfferSchema)` to create a new message.
+ */
+export const MergeDequeueOfferSchema: GenMessage<MergeDequeueOffer> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 18);
+
+/**
+ * The merge is on the queue BEHIND another one, and nothing of it has run.
+ * Dequeuing it is a pure queue operation: the entry is dropped and the run
+ * takes a terminal `failed` status.
+ *
+ * @generated from message agentshim.frontend.v1.MergeDequeueWaiting
+ */
+export type MergeDequeueWaiting = Message<"agentshim.frontend.v1.MergeDequeueWaiting"> & {
+  /**
+   * How many merges are in front of this one. Always >= 1 — a standing with
+   * nothing ahead of it is the running arm, not this one.
+   *
+   * @generated from field: int32 ahead = 1;
+   */
+  ahead: number;
+
+  /**
+   * 1-based place in the repository's queue, and its depth, so the card can
+   * say "3rd of 5" as well as "2 ahead of it".
+   *
+   * @generated from field: int32 position = 2;
+   */
+  position: number;
+
+  /**
+   * @generated from field: int32 depth = 3;
+   */
+  depth: number;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MergeDequeueWaiting.
+ * Use `create(MergeDequeueWaitingSchema)` to create a new message.
+ */
+export const MergeDequeueWaitingSchema: GenMessage<MergeDequeueWaiting> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 19);
+
+/**
+ * The merge IS the head and its run is in flight. Dequeuing it ABORTS that
+ * run: the lease is released and the entry retires with a terminal `failed`
+ * status.
+ *
+ * WHATEVER THE RUN ALREADY LANDED ON THE TARGET STAYS THERE, exactly as
+ * abandoning a conflicted merge leaves its half-resolved tree. An abort that
+ * also unwound the target would destroy work a human may be part-way through,
+ * and the daemon does not make that choice on a single keystroke's behalf.
+ *
+ * @generated from message agentshim.frontend.v1.MergeDequeueRunning
+ */
+export type MergeDequeueRunning = Message<"agentshim.frontend.v1.MergeDequeueRunning"> & {
+  /**
+   * WHAT the run is doing, carried whole rather than re-stated as a stage
+   * enum, so the card names the phase from the one vocabulary that defines it
+   * and cannot drift from the status the same frontend is already rendering.
+   *
+   * @generated from field: agentshim.frontend.v1.MergeStatus status = 1;
+   */
+  status?: MergeStatus | undefined;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MergeDequeueRunning.
+ * Use `create(MergeDequeueRunningSchema)` to create a new message.
+ */
+export const MergeDequeueRunningSchema: GenMessage<MergeDequeueRunning> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 20);
+
+/**
+ * The user's answer to a MergeDequeueOffer. Sent by whichever frontend drew
+ * the card; the daemon clears the offer on either arm, so declining is a real
+ * answer and not merely the absence of one.
+ *
+ * @generated from message agentshim.frontend.v1.AnswerMergeDequeueCmd
+ */
+export type AnswerMergeDequeueCmd = Message<"agentshim.frontend.v1.AnswerMergeDequeueCmd"> & {
+  /**
+   * The offer being answered. An id that does not match the workspace's
+   * outstanding offer is REFUSED rather than resolved to the current one: a
+   * click on a superseded card must not dequeue the merge the card that
+   * replaced it is asking about.
+   *
+   * @generated from field: string offer_id = 1;
+   */
+  offerId: string;
+
+  /**
+   * The answer is a oneof of empty messages, not a bool, for the same reason
+   * ReviveSessionCmd's is: "no answer" must be unrepresentable on the wire.
+   *
+   * @generated from oneof agentshim.frontend.v1.AnswerMergeDequeueCmd.answer
+   */
+  answer: {
+    /**
+     * @generated from field: agentshim.frontend.v1.MergeDequeueConfirm dequeue = 2;
+     */
+    value: MergeDequeueConfirm;
+    case: "dequeue";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.MergeDequeueDecline keep = 3;
+     */
+    value: MergeDequeueDecline;
+    case: "keep";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.AnswerMergeDequeueCmd.
+ * Use `create(AnswerMergeDequeueCmdSchema)` to create a new message.
+ */
+export const AnswerMergeDequeueCmdSchema: GenMessage<AnswerMergeDequeueCmd> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 21);
+
+/**
+ * Take the merge off the queue — evict it while waiting, abort it while
+ * running.
+ *
+ * @generated from message agentshim.frontend.v1.MergeDequeueConfirm
+ */
+export type MergeDequeueConfirm = Message<"agentshim.frontend.v1.MergeDequeueConfirm"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MergeDequeueConfirm.
+ * Use `create(MergeDequeueConfirmSchema)` to create a new message.
+ */
+export const MergeDequeueConfirmSchema: GenMessage<MergeDequeueConfirm> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 22);
+
+/**
+ * Leave the merge alone. The offer is cleared and the merge proceeds.
+ *
+ * @generated from message agentshim.frontend.v1.MergeDequeueDecline
+ */
+export type MergeDequeueDecline = Message<"agentshim.frontend.v1.MergeDequeueDecline"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MergeDequeueDecline.
+ * Use `create(MergeDequeueDeclineSchema)` to create a new message.
+ */
+export const MergeDequeueDeclineSchema: GenMessage<MergeDequeueDecline> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 23);
 
