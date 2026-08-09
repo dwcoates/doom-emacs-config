@@ -86,7 +86,7 @@ func TestHibernationLeaseExcludesNewPromptAndTurnStarts(t *testing.T) {
 	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", "", start); err == nil || !strings.Contains(err.Error(), "hibernation owns turn admission") {
 		t.Fatalf("ResolveTurnLifecycle during lease = %v, want refusal", err)
 	}
-	if err := m.MarkPromptAccepted("ws", "daemon-session", "request", func(*frontendv1.WorkspaceState) {}); err == nil || !strings.Contains(err.Error(), "hibernation owns turn admission") {
+	if err := m.MarkPromptAccepted("ws", "daemon-session", "request", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}); err == nil || !strings.Contains(err.Error(), "hibernation owns turn admission") {
 		t.Fatalf("MarkPromptAccepted during lease = %v, want refusal", err)
 	}
 
