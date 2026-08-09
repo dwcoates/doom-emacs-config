@@ -1537,7 +1537,7 @@ export type FrameCase = FrontendFrame["frame"]["case"];
 // --- vocabularies -----------------------------------------------------------
 
 /** The kinds a `TaskEntry.kind` may name. */
-export const TASK_KINDS = ["agent", "shell", "workflow"] as const;
+export const TASK_KINDS = ["agent", "shell", "workflow", "unclassified"] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
 
 /** The statuses a `TaskEntry.status` may name. */
@@ -3038,43 +3038,58 @@ function decodeSessionInitView(v: unknown): SessionInitView {
   return siv;
 }
 
-const TASK_ENTRY_KEYS = new Set([
+const TASK_ENTRY_KEYS = new Set<string>([
   "taskId",
-  "kind",
   "description",
-  "status",
   "outputPath",
   "startedAtMs",
   "endedAtMs",
+  // The kind and the status are ARMS since the figma-idl reshape, so every one
+  // of them is a field name a well-formed entry may carry.
+  ...TASK_KINDS,
+  ...TASK_STATUSES,
 ]);
+/**
+ * The single set arm of one of `TaskEntry`'s two oneofs, as its keyword.
+ *
+ * Both were closed enums before the figma-idl reshape and are arms now, so the
+ * same three failures the enum decoders raised are raised here: an unset oneof,
+ * more than one arm, and an arm this build does not know. None of them is
+ * defaulted — a task drawn under a guessed kind or status is a claim nothing
+ * made.
+ */
+function taskArm(o: JsonObject, arms: readonly string[], taskId: string, what: string): string {
+  const set = arms.filter((arm) => o[arm] !== undefined && o[arm] !== null);
+  if (set.length === 0) {
+    throw new Error(
+      `frontend-proto: TaskEntry '${taskId}' sets no ${what} arm ` +
+        `(expected one of ${arms.join(", ")})`,
+    );
+  }
+  if (set.length > 1) {
+    throw new Error(
+      `frontend-proto: TaskEntry '${taskId}' sets multiple ${what} arms: ${set.join(", ")}`,
+    );
+  }
+  return set[0];
+}
+
 function decodeTaskEntry(v: unknown, i: number): TaskEntry {
   const o = ensureObject(v, `TaskEntry[${i}]`);
   rejectUnknown(o, TASK_ENTRY_KEYS, `TaskEntry[${i}]`);
-  const t: TaskEntry = {
-    taskId: str(o, "taskId", "TaskEntry"),
-    kind: str(o, "kind", "TaskEntry"),
+  const taskId = str(o, "taskId", "TaskEntry");
+  if (taskId === "") {
+    throw new Error("frontend-proto: TaskEntry missing required `task_id`");
+  }
+  return {
+    taskId,
+    kind: taskArm(o, TASK_KINDS, taskId, "kind"),
     description: str(o, "description", "TaskEntry"),
-    status: str(o, "status", "TaskEntry"),
+    status: taskArm(o, TASK_STATUSES, taskId, "status"),
     outputPath: str(o, "outputPath", "TaskEntry"),
     startedAtMs: num(o, "startedAtMs", "TaskEntry"),
     endedAtMs: num(o, "endedAtMs", "TaskEntry"),
   };
-  if (t.taskId === "") {
-    throw new Error("frontend-proto: TaskEntry missing required `task_id`");
-  }
-  if (!(TASK_KINDS as readonly string[]).includes(t.kind)) {
-    throw new Error(
-      `frontend-proto: TaskEntry '${t.taskId}' has unknown kind '${t.kind}' ` +
-        `(expected one of ${TASK_KINDS.join(", ")})`,
-    );
-  }
-  if (!(TASK_STATUSES as readonly string[]).includes(t.status)) {
-    throw new Error(
-      `frontend-proto: TaskEntry '${t.taskId}' has unknown status '${t.status}' ` +
-        `(expected one of ${TASK_STATUSES.join(", ")})`,
-    );
-  }
-  return t;
 }
 
 const TASK_CATALOG_KEYS = new Set(["workspace", "fence", "tasks"]);

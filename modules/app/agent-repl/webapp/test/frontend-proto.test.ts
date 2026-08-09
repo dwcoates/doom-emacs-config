@@ -39,7 +39,7 @@ const TYPING = { workspace: "ws", fence: "s1", delta: { uuid: "u1", blockIndex: 
 const TASK_CATALOG = {
   workspace: "ws",
   fence: "s1",
-  tasks: [{ taskId: "t1", kind: "agent", description: "d", status: "running" }],
+  tasks: [{ taskId: "t1", agent: {}, description: "d", running: {} }],
 };
 const CONV_DELTA = {
   workspace: "ws",
@@ -739,16 +739,37 @@ describe("decodeFrontendFrame — required-field validation is loud", () => {
     );
   });
 
-  it("rejects a TaskEntry with an unknown kind", () => {
+  it("rejects a TaskEntry with no kind arm", () => {
+    // The kind is a oneof since the figma-idl reshape; an unset arm is the only
+    // spelling of "no kind", and drawing the task under a guessed one would be
+    // a claim nothing made.
     expect(() =>
-      decode({ taskCatalog: { fence: "s1", tasks: [{ taskId: "t1", kind: "wat", status: "running" }] } }),
-    ).toThrow(/unknown kind 'wat'/);
+      decode({ taskCatalog: { fence: "s1", tasks: [{ taskId: "t1", running: {} }] } }),
+    ).toThrow(/sets no kind arm/);
   });
 
-  it("rejects a TaskEntry with an unknown status", () => {
+  it("rejects a TaskEntry with an unrecognized kind arm", () => {
     expect(() =>
-      decode({ taskCatalog: { fence: "s1", tasks: [{ taskId: "t1", kind: "agent", status: "wat" }] } }),
-    ).toThrow(/unknown status 'wat'/);
+      decode({ taskCatalog: { fence: "s1", tasks: [{ taskId: "t1", wat: {}, running: {} }] } }),
+    ).toThrow(/unrecognized field\(s\): wat/);
+  });
+
+  it("rejects a TaskEntry with two kind arms, which have no single detail", () => {
+    expect(() =>
+      decode({ taskCatalog: { fence: "s1", tasks: [{ taskId: "t1", agent: {}, shell: {}, running: {} }] } }),
+    ).toThrow(/sets multiple kind arms/);
+  });
+
+  it("rejects a TaskEntry with no status arm", () => {
+    expect(() =>
+      decode({ taskCatalog: { fence: "s1", tasks: [{ taskId: "t1", agent: {} }] } }),
+    ).toThrow(/sets no status arm/);
+  });
+
+  it("rejects a TaskEntry with two status arms, which have no single verdict", () => {
+    expect(() =>
+      decode({ taskCatalog: { fence: "s1", tasks: [{ taskId: "t1", agent: {}, running: {}, done: {} }] } }),
+    ).toThrow(/sets multiple status arms/);
   });
 
   it("rejects a CommandAck without a request id", () => {
