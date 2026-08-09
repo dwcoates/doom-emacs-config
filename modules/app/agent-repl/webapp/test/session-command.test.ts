@@ -19,7 +19,7 @@ function applyOne(obj: unknown): AdapterEffect[] {
 function itemsFrom(item: Record<string, unknown>): ConversationItem[] {
   const effects = applyOne({
     conversationDelta: {
-      sessionId: "s1",
+      fence: "s1",
       workspace: "ws",
       throughSeq: "9",
       items: [{ source: "CONVERSATION_SOURCE_USER", ...item }],

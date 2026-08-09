@@ -108,9 +108,9 @@ import {
   PROMPT_ORIGIN_CACHE_KEEP_ALIVE,
   PROMPT_ORIGIN_PREFIX,
   PROMPT_ORIGIN_UNSPECIFIED,
-  QUEUE_ENTRY_KEEP_ALIVE_HOLD,
-  QUEUE_ENTRY_REVIVAL_HOLD,
-  REVIVAL_HOLD_SESSION_ID,
+  QUEUE_CLASSIFICATION_ARM,
+  QUEUE_HOLD_ARM,
+  REVIVAL_HOLD_FIELDS,
 } from "./proto-names.js";
 import { ApiUsageSchema } from "../../proto/gen/ts/agentshim/data/v1/tools_pb";
 import {
@@ -889,7 +889,14 @@ export interface ResponseTokenUsage {
 
 export interface ConversationDelta {
   workspace: string;
-  sessionId: string;
+  /**
+   * The workspace's staleness FENCE at the moment the daemon produced this
+   * push: an opaque token compared BYTE-WISE against `WorkspaceState.fence`
+   * and never parsed, split or interpreted. It REPLACED this push's
+   * `session_id` in the figma-idl reshape — the authoritative session id now
+   * arrives only on `WorkspaceState`.
+   */
+  fence: string;
   items: ConversationItemFrame[];
   throughSeq: number;
 }
@@ -905,7 +912,14 @@ export type ContentDeltaKind = (typeof CONTENT_DELTA_KINDS)[number];
  */
 export interface TypingDelta {
   workspace: string;
-  sessionId: string;
+  /**
+   * The workspace's staleness FENCE at the moment the daemon produced this
+   * push: an opaque token compared BYTE-WISE against `WorkspaceState.fence`
+   * and never parsed, split or interpreted. It REPLACED this push's
+   * `session_id` in the figma-idl reshape — the authoritative session id now
+   * arrives only on `WorkspaceState`.
+   */
+  fence: string;
   uuid: string;
   blockIndex: number;
   kind: ContentDeltaKind;
@@ -925,7 +939,14 @@ export interface TypingDelta {
  */
 export interface HeartbeatView {
   workspace: string;
-  sessionId: string;
+  /**
+   * The workspace's staleness FENCE at the moment the daemon produced this
+   * push: an opaque token compared BYTE-WISE against `WorkspaceState.fence`
+   * and never parsed, split or interpreted. It REPLACED this push's
+   * `session_id` in the figma-idl reshape — the authoritative session id now
+   * arrives only on `WorkspaceState`.
+   */
+  fence: string;
   toolUseId: string;
   toolName: string;
   parentToolUseId: string;
@@ -941,7 +962,14 @@ export interface HeartbeatView {
  */
 export interface SessionInitView {
   workspace: string;
-  sessionId: string;
+  /**
+   * The workspace's staleness FENCE at the moment the daemon produced this
+   * push: an opaque token compared BYTE-WISE against `WorkspaceState.fence`
+   * and never parsed, split or interpreted. It REPLACED this push's
+   * `session_id` in the figma-idl reshape — the authoritative session id now
+   * arrives only on `WorkspaceState`.
+   */
+  fence: string;
   init: JsonObject;
 }
 
@@ -957,7 +985,14 @@ export interface TaskEntry {
 
 export interface TaskCatalog {
   workspace: string;
-  sessionId: string;
+  /**
+   * The workspace's staleness FENCE at the moment the daemon produced this
+   * push: an opaque token compared BYTE-WISE against `WorkspaceState.fence`
+   * and never parsed, split or interpreted. It REPLACED this push's
+   * `session_id` in the figma-idl reshape — the authoritative session id now
+   * arrives only on `WorkspaceState`.
+   */
+  fence: string;
   tasks: TaskEntry[];
 }
 
@@ -1060,7 +1095,14 @@ export interface InterruptWindow {
  */
 export interface ProgressView {
   workspace: string;
-  sessionId: string;
+  /**
+   * The workspace's staleness FENCE at the moment the daemon produced this
+   * push: an opaque token compared BYTE-WISE against `WorkspaceState.fence`
+   * and never parsed, split or interpreted. It REPLACED this push's
+   * `session_id` in the figma-idl reshape — the authoritative session id now
+   * arrives only on `WorkspaceState`.
+   */
+  fence: string;
   // NO PHASE (F5). The daemon used to mirror the SSM's verdict here so the
   // footer had one self-sufficient frame, and the copy went stale exactly as a
   // second copy of an authoritative fact always does — it refreshed on the
@@ -1323,14 +1365,6 @@ export type HostAction = {
 export const QUEUE_CLASSIFICATIONS = ["pending", "interject", "hold", "error"] as const;
 export type QueueClassification = (typeof QUEUE_CLASSIFICATIONS)[number];
 
-/** protojson enum name -> the webapp's keyword. */
-const QUEUE_CLASSIFICATION_BY_NAME: Readonly<Record<string, QueueClassification>> = {
-  QUEUE_CLASSIFICATION_PENDING: "pending",
-  QUEUE_CLASSIFICATION_INTERJECT: "interject",
-  QUEUE_CLASSIFICATION_HOLD: "hold",
-  QUEUE_CLASSIFICATION_ERROR: "error",
-};
-
 /**
  * Present when this entry is held by a scheduled shutdown's DRAIN LEASE rather
  * than by a running turn. The classifier never ran on it, so its
@@ -1363,10 +1397,7 @@ export interface QueueEntryKeepAliveHold {
  * compaction lands and the gate opens, a loud drop if the revival fails, and
  * cancel.
  */
-export interface QueueEntryRevivalHold {
-  /** The session being revived, whose completed compaction releases this. */
-  sessionId: string;
-}
+export type QueueEntryRevivalHold = Record<string, never>;
 
 /** One prompt the daemon is holding (E4). */
 export interface QueueEntry {
@@ -1454,7 +1485,14 @@ export type ShutdownScheduleView = {
  */
 export interface QueueView {
   workspace: string;
-  sessionId: string;
+  /**
+   * The workspace's staleness FENCE at the moment the daemon produced this
+   * push: an opaque token compared BYTE-WISE against `WorkspaceState.fence`
+   * and never parsed, split or interpreted. It REPLACED this push's
+   * `session_id` in the figma-idl reshape — the authoritative session id now
+   * arrives only on `WorkspaceState`.
+   */
+  fence: string;
   entries: QueueEntry[];
 }
 
@@ -2076,21 +2114,21 @@ function decodeModelOption(v: unknown, i: number): ModelOption {
   return model;
 }
 
-const CONVERSATION_DELTA_KEYS = new Set(["workspace", "sessionId", "items", "throughSeq"]);
+const CONVERSATION_DELTA_KEYS = new Set(["workspace", "fence", "items", "throughSeq"]);
 function decodeConversationDelta(v: unknown): ConversationDelta {
   const o = ensureObject(v, "ConversationDelta");
   rejectUnknown(o, CONVERSATION_DELTA_KEYS, "ConversationDelta");
   const cd: ConversationDelta = {
     workspace: str(o, "workspace", "ConversationDelta"),
-    sessionId: str(o, "sessionId", "ConversationDelta"),
+    fence: str(o, "fence", "ConversationDelta"),
     items: (o.items === undefined || o.items === null
       ? []
       : ensureArray(o.items, "ConversationDelta.items")
     ).map((item, i) => decodeConversationItem(item, i)),
     throughSeq: num(o, "throughSeq", "ConversationDelta"),
   };
-  if (cd.sessionId === "") {
-    throw new Error("frontend-proto: ConversationDelta missing required `session_id`");
+  if (cd.fence === "") {
+    throw new Error("frontend-proto: ConversationDelta missing required `fence`");
   }
   return cd;
 }
@@ -2483,7 +2521,7 @@ function decodeTokenUtilization(v: unknown, where: string): TokenUtilization {
   return result;
 }
 
-const HEARTBEAT_VIEW_KEYS = new Set(["workspace", "sessionId", "progress"]);
+const HEARTBEAT_VIEW_KEYS = new Set(["workspace", "fence", "progress"]);
 const HEARTBEAT_PROGRESS_KEYS = new Set([
   "toolUseId",
   "toolName",
@@ -2501,7 +2539,7 @@ function decodeHeartbeatView(v: unknown): HeartbeatView {
   rejectUnknown(p, HEARTBEAT_PROGRESS_KEYS, "HeartbeatView.progress");
   const hv: HeartbeatView = {
     workspace: str(o, "workspace", "HeartbeatView"),
-    sessionId: str(o, "sessionId", "HeartbeatView"),
+    fence: str(o, "fence", "HeartbeatView"),
     toolUseId: str(p, "toolUseId", "HeartbeatView.progress"),
     toolName: str(p, "toolName", "HeartbeatView.progress"),
     parentToolUseId: str(p, "parentToolUseId", "HeartbeatView.progress"),
@@ -2515,92 +2553,99 @@ function decodeHeartbeatView(v: unknown): HeartbeatView {
   return hv;
 }
 
-const QUEUE_VIEW_KEYS = new Set(["workspace", "sessionId", "entries"]);
+const QUEUE_VIEW_KEYS = new Set(["workspace", "fence", "entries"]);
 const QUEUE_ENTRY_KEYS = new Set([
   "id",
   "text",
   "queuedAtMs",
-  "classification",
-  "rationale",
-  "accepted",
-  "shutdownHold",
-  QUEUE_ENTRY_KEEP_ALIVE_HOLD,
-  QUEUE_ENTRY_REVIVAL_HOLD,
+  ...Object.values(QUEUE_CLASSIFICATION_ARM),
+  ...Object.values(QUEUE_HOLD_ARM),
 ]);
 const QUEUE_ENTRY_SHUTDOWN_HOLD_KEYS = new Set(["scheduleId"]);
 const QUEUE_ENTRY_KEEP_ALIVE_HOLD_KEYS = new Set([KEEP_ALIVE_HOLD_TURN_ID]);
-const QUEUE_ENTRY_REVIVAL_HOLD_KEYS = new Set([REVIVAL_HOLD_SESSION_ID]);
+const QUEUE_ENTRY_REVIVAL_HOLD_KEYS = new Set(REVIVAL_HOLD_FIELDS);
+const QUEUE_CLASSIFICATION_PENDING_KEYS = new Set<string>();
+const QUEUE_CLASSIFICATION_INTERJECT_KEYS = new Set(["rationale"]);
+const QUEUE_CLASSIFICATION_HOLD_KEYS = new Set(["rationale", "accepted"]);
+const QUEUE_CLASSIFICATION_ERROR_KEYS = new Set(["detail"]);
 
 function decodeQueueView(v: unknown): QueueView {
   const o = ensureObject(v, "QueueView");
   rejectUnknown(o, QUEUE_VIEW_KEYS, "QueueView");
   const qv: QueueView = {
     workspace: str(o, "workspace", "QueueView"),
-    sessionId: str(o, "sessionId", "QueueView"),
+    fence: str(o, "fence", "QueueView"),
     entries: (o.entries === undefined || o.entries === null
       ? []
       : ensureArray(o.entries, "QueueView.entries")
     ).map(decodeQueueEntry),
   };
-  if (qv.sessionId === "") {
-    throw new Error("frontend-proto: QueueView missing required `session_id`");
+  if (qv.fence === "") {
+    throw new Error("frontend-proto: QueueView missing required `fence`");
   }
   return qv;
 }
 
+/**
+ * Decode one `QueueEntry` off the ONEOF wire.
+ *
+ * The verdict is the `classification` ARM, not an enum, and the thing holding
+ * the entry is the `hold` ARM. Both were flat fields before the figma-idl
+ * reshape; as arms, an entry cannot claim two verdicts or two holders at once,
+ * and each verdict carries only the evidence that belongs to it.
+ *
+ * A classification arm is REQUIRED. Absence is the protojson image of the
+ * retired UNSPECIFIED zero, and it throws for the same reason it always did:
+ * defaulting to `pending` would tell the user their prompt is being judged
+ * when the daemon said nothing of the kind.
+ */
 function decodeQueueEntry(v: unknown): QueueEntry {
   const o = ensureObject(v, "QueueView.entries[]");
   rejectUnknown(o, QUEUE_ENTRY_KEYS, "QueueView.entries[]");
+  const verdict = decodeQueueClassification(o);
   const e: QueueEntry = {
     id: str(o, "id", "QueueView.entries[]"),
     text: str(o, "text", "QueueView.entries[]"),
     queuedAtMs: num(o, "queuedAtMs", "QueueView.entries[]"),
-    classification: decodeQueueClassification(o.classification),
-    rationale: str(o, "rationale", "QueueView.entries[]"),
-    accepted: bool(o, "accepted", "QueueView.entries[]"),
+    classification: verdict.classification,
+    rationale: verdict.rationale,
+    accepted: verdict.accepted,
   };
   // Without an id nothing can force, accept or cancel this entry, so the
   // controls it renders would all be dead.
   if (e.id === "") {
     throw new Error("frontend-proto: QueueView entry missing required `id`");
   }
-  // ABSENCE IS THE ABSENCE OF A LEASE HOLD, and that is its only reading: an
-  // ordinary classifier-held entry simply does not carry the field. Decoded
-  // when present rather than defaulted away, so the lease bubble is drawn from
-  // the daemon's own claim and never from an inference about the classifier.
-  if (o.shutdownHold !== undefined && o.shutdownHold !== null) {
-    e.shutdownHold = decodeQueueEntryShutdownHold(o.shutdownHold);
+  // AN UNSET HOLD ARM IS THE ABSENCE OF A HOLD, and that is its only reading:
+  // an ordinary classifier-held entry is held by the running turn and sets no
+  // arm here. Each bubble is drawn from the daemon's own claim, never from an
+  // inference about the classification the classifier deliberately never made.
+  const holds = Object.values(QUEUE_HOLD_ARM).filter(
+    (arm) => o[arm] !== undefined && o[arm] !== null,
+  );
+  if (holds.length > 1) {
+    throw new Error(
+      `frontend-proto: QueueView entry '${e.id}' sets multiple holds: ${holds.join(", ")}`,
+    );
   }
-  // Same reading as the lease hold above: absence is the absence of a
-  // keep-alive hold. Decoded from the daemon's own claim, never inferred from
-  // the classification the classifier deliberately never produced.
-  if (
-    o[QUEUE_ENTRY_KEEP_ALIVE_HOLD] !== undefined &&
-    o[QUEUE_ENTRY_KEEP_ALIVE_HOLD] !== null
-  ) {
-    e.keepAliveHold = decodeQueueEntryKeepAliveHold(o[QUEUE_ENTRY_KEEP_ALIVE_HOLD]);
-  }
-  // Same reading again: absence is the absence of a revival hold. The daemon's
-  // own claim is what puts the "waiting on the revival's compaction" bubble on
-  // screen — the classifier never ran on this entry either.
-  if (o[QUEUE_ENTRY_REVIVAL_HOLD] !== undefined && o[QUEUE_ENTRY_REVIVAL_HOLD] !== null) {
-    e.revivalHold = decodeQueueEntryRevivalHold(o[QUEUE_ENTRY_REVIVAL_HOLD]);
+  if (holds[0] === QUEUE_HOLD_ARM.shutdown) {
+    e.shutdownHold = decodeQueueEntryShutdownHold(o[QUEUE_HOLD_ARM.shutdown]);
+  } else if (holds[0] === QUEUE_HOLD_ARM.keepAlive) {
+    e.keepAliveHold = decodeQueueEntryKeepAliveHold(o[QUEUE_HOLD_ARM.keepAlive]);
+  } else if (holds[0] === QUEUE_HOLD_ARM.revival) {
+    e.revivalHold = decodeQueueEntryRevivalHold(o[QUEUE_HOLD_ARM.revival]);
   }
   return e;
 }
 
 function decodeQueueEntryRevivalHold(v: unknown): QueueEntryRevivalHold {
   const o = ensureObject(v, "QueueEntryRevivalHold");
+  // The message is a BARE MARKER after the figma-idl reshape: the arm being set
+  // is the whole claim. `rejectUnknown` against an empty key set is therefore
+  // the entire validation, and it is not vestigial — it is what makes a field
+  // the daemon starts sending here fail loudly instead of being dropped.
   rejectUnknown(o, QUEUE_ENTRY_REVIVAL_HOLD_KEYS, "QueueEntryRevivalHold");
-  const sessionId = str(o, REVIVAL_HOLD_SESSION_ID, "QueueEntryRevivalHold");
-  // The session id is the whole content of the message: it names the revival
-  // whose completed compaction releases this entry. A hold naming no session
-  // would claim the prompt waits on something nothing else on screen can
-  // corroborate.
-  if (sessionId === "") {
-    throw new Error("frontend-proto: QueueEntryRevivalHold missing required `sessionId`");
-  }
-  return { sessionId };
+  return {};
 }
 
 function decodeQueueEntryKeepAliveHold(v: unknown): QueueEntryKeepAliveHold {
@@ -2776,41 +2821,76 @@ function decodeShutdownHold(v: unknown): ShutdownHold {
 }
 
 /**
- * Decode the classification enum. An UNRECOGNIZED name throws rather than
- * falling back: silently rendering an unknown verdict as `pending` would tell
- * the user their prompt is being judged when the daemon said something else
- * entirely.
+ * Decode the classification ARM, and the evidence that rides on it.
  *
- * ABSENT / UNSPECIFIED also throws. `QUEUE_CLASSIFICATION_UNSPECIFIED` is the
- * proto3 zero, so protojson OMITS the field when it holds that value — absent
- * and UNSPECIFIED are the same wire fact, and both are handled here the same
- * way. The daemon sets one of the four real states on every entry it builds
- * (PENDING at enqueue, then the verdict), so neither can occur against a
- * correct daemon; seeing one means the frame is malformed. Defaulting it to
- * `pending` would invent the very claim the wire declined to make, which is
- * the same failure the unrecognized-name branch exists to prevent.
+ * An entry with NO arm throws. `QueueClassification` was an enum whose proto3
+ * zero protojson omitted, so absence and UNSPECIFIED were the same wire fact;
+ * as a oneof, absence is the only spelling left, and it throws for the reason
+ * it always did — defaulting to `pending` would invent the very claim the wire
+ * declined to make. An entry with MORE THAN ONE arm throws too: a prompt with
+ * two verdicts has no single badge to render.
+ *
+ * `rationale` and `accepted` are FLATTENED out of the arm that owns them. Only
+ * a hold can be accepted (QueueAcceptCmd confirms a hold and nothing else), so
+ * every other arm reports `accepted: false` because that is what the contract
+ * says, not as a default standing in for a missing field.
  */
-function decodeQueueClassification(v: unknown): QueueClassification {
-  if (v === undefined || v === null) {
+function decodeQueueClassification(o: JsonObject): {
+  classification: QueueClassification;
+  rationale: string;
+  accepted: boolean;
+} {
+  const arms = Object.values(QUEUE_CLASSIFICATION_ARM).filter(
+    (arm) => o[arm] !== undefined && o[arm] !== null,
+  );
+  if (arms.length === 0) {
     throw new Error(
-      "frontend-proto: QueueView entry has no classification " +
-        "(absent === QUEUE_CLASSIFICATION_UNSPECIFIED, which the daemon never sends)",
+      "frontend-proto: QueueView entry has no classification arm " +
+        "(an unset oneof, which the daemon never sends)",
     );
   }
-  if (typeof v !== "string") {
-    throw new Error(`frontend-proto: QueueView entry classification must be a string (got ${typeof v})`);
+  if (arms.length > 1) {
+    throw new Error(
+      `frontend-proto: QueueView entry sets multiple classifications: ${arms.join(", ")}`,
+    );
   }
-  if (v === "QUEUE_CLASSIFICATION_UNSPECIFIED") {
-    throw new Error("frontend-proto: QueueView entry classification is UNSPECIFIED, which the daemon never sends");
+  const arm = arms[0];
+  if (arm === QUEUE_CLASSIFICATION_ARM.pending) {
+    const value = ensureObject(o[arm], "QueueView.entries[].pending");
+    rejectUnknown(value, QUEUE_CLASSIFICATION_PENDING_KEYS, "QueueView.entries[].pending");
+    return { classification: "pending", rationale: "", accepted: false };
   }
-  const known = QUEUE_CLASSIFICATION_BY_NAME[v];
-  if (known === undefined) {
-    throw new Error(`frontend-proto: QueueView entry has unrecognized classification '${v}'`);
+  if (arm === QUEUE_CLASSIFICATION_ARM.interject) {
+    const value = ensureObject(o[arm], "QueueView.entries[].interject");
+    rejectUnknown(value, QUEUE_CLASSIFICATION_INTERJECT_KEYS, "QueueView.entries[].interject");
+    return {
+      classification: "interject",
+      rationale: str(value, "rationale", "QueueView.entries[].interject"),
+      accepted: false,
+    };
   }
-  return known;
+  if (arm === QUEUE_CLASSIFICATION_ARM.holdForTurnEnd) {
+    const value = ensureObject(o[arm], "QueueView.entries[].holdForTurnEnd");
+    rejectUnknown(value, QUEUE_CLASSIFICATION_HOLD_KEYS, "QueueView.entries[].holdForTurnEnd");
+    return {
+      classification: "hold",
+      rationale: str(value, "rationale", "QueueView.entries[].holdForTurnEnd"),
+      accepted: bool(value, "accepted", "QueueView.entries[].holdForTurnEnd"),
+    };
+  }
+  const value = ensureObject(o[arm], "QueueView.entries[].error");
+  rejectUnknown(value, QUEUE_CLASSIFICATION_ERROR_KEYS, "QueueView.entries[].error");
+  // The error arm's `detail` IS this entry's displayed reason: it says what
+  // went wrong instead of what was decided, and the badge already tells the
+  // reader which of the two it is looking at.
+  return {
+    classification: "error",
+    rationale: str(value, "detail", "QueueView.entries[].error"),
+    accepted: false,
+  };
 }
 
-const TYPING_DELTA_KEYS = new Set(["workspace", "sessionId", "delta"]);
+const TYPING_DELTA_KEYS = new Set(["workspace", "fence", "delta"]);
 const CONTENT_DELTA_KEYS = new Set([
   "uuid",
   "blockIndex",
@@ -2848,7 +2928,7 @@ function decodeTypingDelta(v: unknown): TypingDelta {
   const armKey = armKeys[0];
   const td: TypingDelta = {
     workspace: str(o, "workspace", "TypingDelta"),
-    sessionId: str(o, "sessionId", "TypingDelta"),
+    fence: str(o, "fence", "TypingDelta"),
     uuid: str(d, "uuid", "TypingDelta.delta"),
     blockIndex: num(d, "blockIndex", "TypingDelta.delta"),
     kind: CONTENT_DELTA_ARM_KIND[armKey],
@@ -2870,18 +2950,18 @@ function decodeTypingDelta(v: unknown): TypingDelta {
   return td;
 }
 
-const SESSION_INIT_VIEW_KEYS = new Set(["workspace", "sessionId", "init"]);
+const SESSION_INIT_VIEW_KEYS = new Set(["workspace", "fence", "init"]);
 function decodeSessionInitView(v: unknown): SessionInitView {
   const o = ensureObject(v, "SessionInitView");
   rejectUnknown(o, SESSION_INIT_VIEW_KEYS, "SessionInitView");
   const siv: SessionInitView = {
     workspace: str(o, "workspace", "SessionInitView"),
-    sessionId: str(o, "sessionId", "SessionInitView"),
+    fence: str(o, "fence", "SessionInitView"),
     // The SystemInit is adopted by shape (large, additive); an absent init is {}.
     init: o.init === undefined || o.init === null ? {} : ensureObject(o.init, "SessionInitView.init"),
   };
-  if (siv.sessionId === "") {
-    throw new Error("frontend-proto: SessionInitView missing required `session_id`");
+  if (siv.fence === "") {
+    throw new Error("frontend-proto: SessionInitView missing required `fence`");
   }
   return siv;
 }
@@ -2925,19 +3005,19 @@ function decodeTaskEntry(v: unknown, i: number): TaskEntry {
   return t;
 }
 
-const TASK_CATALOG_KEYS = new Set(["workspace", "sessionId", "tasks"]);
+const TASK_CATALOG_KEYS = new Set(["workspace", "fence", "tasks"]);
 function decodeTaskCatalog(v: unknown): TaskCatalog {
   const o = ensureObject(v, "TaskCatalog");
   rejectUnknown(o, TASK_CATALOG_KEYS, "TaskCatalog");
   const tc: TaskCatalog = {
     workspace: str(o, "workspace", "TaskCatalog"),
-    sessionId: str(o, "sessionId", "TaskCatalog"),
+    fence: str(o, "fence", "TaskCatalog"),
     tasks: (o.tasks === undefined || o.tasks === null ? [] : ensureArray(o.tasks, "TaskCatalog.tasks")).map(
       (t, i) => decodeTaskEntry(t, i),
     ),
   };
-  if (tc.sessionId === "") {
-    throw new Error("frontend-proto: TaskCatalog missing required `session_id`");
+  if (tc.fence === "") {
+    throw new Error("frontend-proto: TaskCatalog missing required `fence`");
   }
   return tc;
 }
@@ -3163,7 +3243,7 @@ function decodeBackfillState(v: unknown): BackfillState {
 
 const PROGRESS_VIEW_KEYS = new Set([
   "workspace",
-  "sessionId",
+  "fence",
   "state",
   "turnStartedAtMs",
   "thinkingTokens",
@@ -3199,7 +3279,7 @@ function decodeProgressView(v: unknown): ProgressView {
   rejectUnknown(o, PROGRESS_VIEW_KEYS, "ProgressView");
   const pv: ProgressView = {
     workspace: str(o, "workspace", "ProgressView"),
-    sessionId: str(o, "sessionId", "ProgressView"),
+    fence: str(o, "fence", "ProgressView"),
     turnStartedAtMs: num(o, "turnStartedAtMs", "ProgressView"),
     thinkingTokens: num(o, "thinkingTokens", "ProgressView"),
     inputTokens: num(o, "inputTokens", "ProgressView"),
