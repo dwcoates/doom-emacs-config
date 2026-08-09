@@ -192,8 +192,15 @@ func (c Config) Validate() error {
 		return fmt.Errorf("keepalive: leeway %s must be shorter than the retry floor %s plus the warm-compaction margin %s; otherwise the warm compaction is due at or after the ping window opens and the ping arm swallows it, leaving the compaction silently inert",
 			c.Leeway, RetryFloor, WarmCompactMargin)
 	}
-	if c.PingDeadline() <= c.SweepInterval(0) {
-		return fmt.Errorf("keepalive: the ping deadline %s must exceed the sweep interval %s; otherwise a ping can be judged overdue before the sweep that would have observed its end ever runs",
+	// THE COMPARISON IS STRICT-LESS-THAN, AND THE BOUNDARY BELONGS TO THE VALID
+	// SIDE. The deadline is measured from the ping's own submit instant rather
+	// than counted in ticks, so a deadline EQUAL to the sweep interval still
+	// guarantees a full interval passes before any ping can be judged overdue.
+	// Only a deadline SHORTER than one interval admits the failure this refuses:
+	// a ping judged dead on the very next tick after its submit, before any real
+	// ping could have finished.
+	if c.PingDeadline() < c.SweepInterval(0) {
+		return fmt.Errorf("keepalive: the ping deadline %s must be at least the sweep interval %s; otherwise a ping can be judged overdue on the very next tick after its submit, before any real ping could have finished",
 			c.PingDeadline(), c.SweepInterval(0))
 	}
 	if c.IdleCutoff <= 0 {
