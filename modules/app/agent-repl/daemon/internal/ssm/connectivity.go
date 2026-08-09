@@ -428,6 +428,28 @@ func compositeWorkspaceState(workspace string, projection resolved, composite Co
 			msg.AtMs = fault.OpenedAtMs
 			msg.TurnActive = false
 		}
+	case composite.Connectivity == SessionConnectivityHibernated:
+		// THE BOOT SWEEP'S VERDICT OUTRANKS THE HIBERNATION'S OWN CAUSE, and
+		// only here. Every hibernated row a daemon restart writes carries the
+		// anonymous cause `daemon_restart`, which says nothing about the
+		// session: it is what EVERY surviving session's row says. When the
+		// sweep has since reached a conclusion about THIS one — the shim is
+		// gone, a live holder never dialled in, a probe could not tell — that
+		// conclusion is the cause the frame should name, so a reader is told
+		// which of them happened rather than only that the daemon restarted.
+		// resolveComposite reads no other fault while hibernated, so nothing
+		// but a boot-sweep verdict can win this branch.
+		if fault, ok := newestConnectivityFault(composite.ActiveFaults); ok {
+			msg.CauseKind = fault.CauseKind
+			msg.CauseSeq = 0
+			msg.AtMs = fault.OpenedAtMs
+			msg.TurnActive = false
+			break
+		}
+		msg.CauseKind = compositeConnectivityCause(composite)
+		msg.CauseSeq = 0
+		msg.AtMs = compositeConnectivityAt(composite)
+		msg.TurnActive = false
 	default:
 		msg.CauseKind = compositeConnectivityCause(composite)
 		msg.CauseSeq = 0
@@ -672,7 +694,7 @@ func resolveComposite(q stateQueryer, workspace string) (CompositeState, bool, e
 		state.Connectivity = lifecycle.state
 		if lifecycle.state != SessionConnectivityHibernated {
 			state.ControllerGenerationID = lifecycle.generationID
-			faults, err := activeFaults(q, workspace, lifecycle.sessionID, lifecycle.generationID)
+			faults, err := activeFaults(q, workspace, lifecycle.sessionID, lifecycle.generationID, "")
 			if err != nil {
 				return CompositeState{}, false, err
 			}
@@ -680,6 +702,24 @@ func resolveComposite(q stateQueryer, workspace string) (CompositeState, bool, e
 			if lifecycle.state == SessionConnectivityOperational && hasConnectivityFault(faults) {
 				state.Connectivity = SessionConnectivityDegraded
 			}
+		} else {
+			// A HIBERNATED WORKSPACE HAS NO CURRENT GENERATION, so no
+			// generation-scoped fault is implied — with exactly ONE exception,
+			// read here and nowhere else: the boot sweep's verdict about this
+			// very session (bootsweepverdict.go). It is the only fault that
+			// predates every generation by construction, so it is the only one
+			// entitled to be read while none is current, and the read is
+			// narrowed to its component so a dead generation's ordinary open
+			// windows stay retired.
+			//
+			// ControllerGenerationID stays EMPTY regardless: hibernated means
+			// no generation is current, and publishing the retired one would
+			// contradict the axis the frame also carries.
+			faults, err := activeFaults(q, workspace, lifecycle.sessionID, lifecycle.generationID, BootSweepFaultComponent)
+			if err != nil {
+				return CompositeState{}, false, err
+			}
+			state.ActiveFaults = faults
 		}
 	} else {
 		state.AgentReplSessionID = statusResolution.sessionID
@@ -902,11 +942,25 @@ func sessionStatusOf(token string, liveTasks int64) (SessionStatus, error) {
 	}
 }
 
+// activeFaults reads the open fault windows for one (session, generation).
+//
+// component NARROWS the read to a single component and is not a convenience:
+// it is what lets a HIBERNATED workspace resolve the boot-sweep verdict alone
+// (bootsweepverdict.go) without also resurrecting whatever ordinary faults the
+// dead generation happened to leave open. Empty means every component, which
+// is what a workspace with a current generation reads.
 func activeFaults(
 	q stateQueryer,
 	workspace, sessionID string,
 	generationID ControllerGenerationID,
+	component string,
 ) ([]RuntimeFault, error) {
+	componentFilter := ""
+	args := []any{workspace, sessionID, generationID}
+	if component != "" {
+		componentFilter = " AND component = ?"
+		args = append(args, component)
+	}
 	rows, err := q.Query(
 		`WITH latest AS (
 			SELECT
@@ -926,7 +980,7 @@ func activeFaults(
 			FROM session_fault
 			WHERE workspace = ?
 			  AND agent_repl_session_id = ?
-			  AND controller_generation_id = ?
+			  AND controller_generation_id = ?`+componentFilter+`
 		)
 		SELECT
 			workspace,
@@ -940,7 +994,7 @@ func activeFaults(
 		FROM latest
 		WHERE row_number = 1 AND open = 1
 		ORDER BY component, fault_type`,
-		workspace, sessionID, generationID,
+		args...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("read active runtime faults for workspace %q session %q generation %q: %w",

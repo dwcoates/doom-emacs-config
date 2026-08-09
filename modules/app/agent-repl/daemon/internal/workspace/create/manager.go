@@ -858,6 +858,61 @@ func (m *Manager) transition(id string, state JobState, lastError string) (Job, 
 	})
 }
 
+// SurfaceBootSweepVerdict hands ONE boot-sweep verdict to the host as a
+// retained action.  It is the jobless sibling of surfaceFailure: no creation
+// job produced it, so it carries no source file and no job id, but it rides the
+// identical envelope — persisted before delivery, replayed on reconnect, and
+// released only by the host's acknowledgement.
+//
+// THE ID IS THE DEDUPLICATOR AND IT IS DELIBERATELY STABLE.  Keying on the
+// session and the verdict means a daemon restarted twice over an unchanged
+// situation does not nag twice about the same conclusion, while a DIFFERENT
+// conclusion about the same session — the probe that failed last boot now says
+// the shim is simply gone — is a different action and is delivered.  This
+// matches the SSM half exactly, which no-ops on an already-standing verdict for
+// the same reason.
+func (m *Manager) SurfaceBootSweepVerdict(ctx context.Context, workspace, sessionID, verdict, reason string) error {
+	switch {
+	case workspace == "":
+		return fmt.Errorf("workspace create: boot-sweep verdict %q needs a workspace", verdict)
+	case sessionID == "":
+		return fmt.Errorf("workspace create: boot-sweep verdict %q for workspace %q needs a session id", verdict, workspace)
+	case verdict == "":
+		return fmt.Errorf("workspace create: boot-sweep verdict for workspace %q session %q is empty", workspace, sessionID)
+	case reason == "":
+		return fmt.Errorf("workspace create: boot-sweep verdict %q for workspace %q session %q has no display reason; the host renders it verbatim and has nothing to render",
+			verdict, workspace, sessionID)
+	}
+	payload, err := json.Marshal(BootSweepSessionUnwired{Workspace: workspace, SessionID: sessionID, Verdict: verdict, Reason: reason})
+	if err != nil {
+		return fmt.Errorf("workspace create: marshal boot-sweep verdict %q for workspace %q session %q: %w", verdict, workspace, sessionID, err)
+	}
+	notice := HostAction{
+		ID:      fmt.Sprintf("boot-sweep:%s:%s", sessionID, verdict),
+		Type:    HostActionTypeBootSweepSessionUnwired,
+		Payload: payload,
+	}
+	_, inserted, err := m.cfg.Store.EnqueueHostAction(notice)
+	if err != nil {
+		return fmt.Errorf("workspace create: enqueue boot-sweep verdict host action %s: %w", notice.ID, err)
+	}
+	if !inserted {
+		m.cfg.Logf("workspace-create: BOOT-SWEEP VERDICT ALREADY RECORDED host_action=%s ws=%s session=%s verdict=%s — the same conclusion is already standing against this session, so it is not re-announced",
+			notice.ID, workspace, sessionID, verdict)
+		return nil
+	}
+	m.cfg.Logf("workspace-create: BOOT-SWEEP VERDICT SURFACED host_action=%s ws=%s session=%s verdict=%s reason=%q", notice.ID, workspace, sessionID, verdict, reason)
+	if err := m.DrainHostActions(ctx); err != nil {
+		// NOT LOST, and not an error to the caller: the action is persisted and
+		// the next drain or reconnect snapshot delivers it. The undelivered
+		// attempt is still recorded, because a host that never comes back is a
+		// verdict nobody reads and the log is the only place that shows it.
+		m.cfg.Logf("workspace-create: boot-sweep verdict not delivered yet host_action=%s ws=%s session=%s verdict=%s error=%v retained=yes",
+			notice.ID, workspace, sessionID, verdict, err)
+	}
+	return nil
+}
+
 // fail records one job's terminal failure durably, logs it loudly, and hands
 // it to the host as a retained HostAction.  The returned error wraps
 // ErrJobFailed so callers can step over a contained job failure without

@@ -1203,12 +1203,23 @@ func main() {
 	// dependency, so it must never sit in front of /healthz.
 	sweepCtx, cancelSweep := context.WithCancel(context.Background())
 	defer cancelSweep()
+	// EVERY VERDICT THE SWEEP REACHES GOES SOMEWHERE (bootsweepverdict.go).
+	// Without this the sweep's conclusions about sessions the user owns were
+	// log lines and nothing else, while the connectivity the previous daemon
+	// wrote went on presenting a shimless workspace as operational.
+	bootSweepVerdicts := &server.BootSweepVerdictRouter{
+		State: ssmMgr,
+		Host:  workspaceAssembly.Manager,
+		Ctx:   workspaceCreateCtx,
+		Logf:  legacyLog,
+	}
 	go (&server.BootSweeper{
 		Reg:       sessionRegistry,
 		Connected: shimListener.Connected,
 		Held:      sessionlock.Held,
 		Ensurer:   controller,
 		Logf:      legacyLog,
+		Unwired:   bootSweepVerdicts.Route,
 	}).Run(sweepCtx)
 	daemonLog.With("operation", "serve-http", "version", daemonVersion, "address", *addr,
 		"shim", *shimScript, "workspace_create_inbox", workspaceAssembly.Inbox.Dir).
