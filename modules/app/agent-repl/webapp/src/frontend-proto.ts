@@ -93,15 +93,7 @@ import {
 } from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
 import {
   FailureKindSchema,
-  QueryTerminationFailureSchema,
-  SessionResumeFailureAutomaticRestoreSchema,
-  SessionResumeFailureBringUpFailureSchema,
-  SessionResumeFailureCreateSchema,
-  SessionResumeFailureIdentityMismatchSchema,
-  SessionResumeFailureSchema,
-  SessionResumeFailureTranscriptUnavailableSchema,
   type FailureKind as GeneratedFailureKind,
-  type QueryTerminationFailure as GeneratedQueryTerminationFailure,
 } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
 import {
   FailureCardRefSchema,
@@ -578,9 +570,9 @@ export interface SessionView {
    * death), absent while the session lives. Emacs surfaces it as a failure
    * card (frontend-state.el); the webapp decodes it so a terminal push never
    * breaks the strict decoder, and card rendering rides the feed's own
-   * SystemFailureItem.
+   * resolved failure card.
    */
-  death?: SystemFailure;
+  death?: FailureCardView;
   tokenUtilization?: SessionTokenUtilization;
   /**
    * Present IFF the session is hibernated — the typed account behind the
@@ -762,69 +754,19 @@ export function sessionCommandOf(name: string, where: string): SessionCommand {
   return known;
 }
 
-/**
- * `frontend.v1.ErrorClass` — the SEMANTIC class of a system failure.
- *
- * It says what KIND of thing failed, never what color to draw: INTERNAL is
- * agent-repl's own machinery (shim down, store outage, a refused command) and
- * API is the vendor or the account stopping the work. Each frontend maps class
- * to color from the shared table, so a wire that spoke in colors would make
- * every future frontend inherit this one's palette.
- */
-export const ERROR_CLASSES = ["INTERNAL", "API"] as const;
-export type ErrorClass = (typeof ERROR_CLASSES)[number];
-
-/**
- * A daemon-classified failure (`frontend.v1.SystemFailureItem`).
- *
- * Every render-bound error in the tree arrives as one of these. Nothing here
- * is re-interpreted frontend-side: the class, the type and the prose are the
- * daemon's verdict, and this end renders them.
- */
-export interface SystemFailure {
-  errorClass: ErrorClass;
-  /** The specific failure within the class ("shim.rejected", "api.rate_limit"). */
-  errorType: string;
-  /** The plain-language explanation the card renders. */
-  message: string;
-  /** The raw structured account, shown beside the prose rather than replacing it. */
-  sourceDetail: string;
-  /**
-   * Wall-clock ms a WINDOW-shaped failure closed; 0 means still open. The card
-   * is re-sent under the SAME uuid with this set, so the feed reconciles it in
-   * place and shows a settled card rather than a standing alarm.
-   */
-  resolvedAtMs: number;
-  /**
-   * The conversation item this failure was filed under. It is how a failure
-   * reached OUTSIDE the feed (a footer row, an ack) addresses its card.
-   */
-  itemUuid: string;
-  detail: SystemFailureDetail;
-}
-
-/** The only structured evidence a system failure can carry. */
-export type SystemFailureDetail =
-  | { kind: "none" }
-  | { kind: "sessionResume"; value: SessionResumeFailure }
-  | { kind: "queryTermination"; value: QueryTerminationFailure };
-
-/** Typed evidence for a failed authoritative-conversation resume. */
-export interface SessionResumeFailure {
-  claudeSessionId: string;
-  cwd: string;
-  configDir: string;
-  resolvedConfigDir: string;
-  attempt: "create" | "automaticRestore";
-  cause:
-    | { case: "transcriptUnavailable"; searchedPaths: string[] }
-    | { case: "identityMismatch"; replacementClaudeSessionId: string }
-    | { case: "queryTermination"; value: QueryTerminationFailure }
-    | { case: "bringUpFailure"; cause: string };
-}
-
-/** Exact generated evidence for an SDK query that ended unexpectedly. */
-export type QueryTerminationFailure = GeneratedQueryTerminationFailure;
+// RETIRED: `ErrorClass`, `SystemFailure`, `SystemFailureDetail` and the
+// hand-written `SessionResumeFailure` mirror stood here.
+//
+// They described `SystemFailureItem`: an `error_class` enum beside a free-text
+// `error_type`, from which this end derived a color and a severity by rules the
+// daemon did not share. A free-text type is a vocabulary with no members, so a
+// consumer meeting an unfamiliar one silently rendered it as something else.
+//
+// `FailureKind` replaced all of it — one closed oneof, each arm carrying the
+// evidence that arm actually has — and `FailureCardView` carries it. See
+// `decodeFailureKind` below and `failure-card.ts` for the arm-to-side-to-tone
+// reading. Deleted rather than deprecated, following this repo's style for
+// retired frontend surface: no live frontend commitment survives the change.
 
 /** Exact generated cumulative usage for an agent-repl session. */
 export type SessionTokenUtilization = GeneratedSessionTokenUtilization;
@@ -2359,11 +2301,11 @@ function decodeSessionView(v: unknown): SessionView {
     // `unspecified` — the same "nothing to backfill" a fresh workspace has.
     backfill: decodeBackfillState(o.backfill),
   };
-  // F4 terminal-session classification: optional, present only once the
-  // session died. Decoded strictly (an unknown class still throws) rather
+  // Terminal-session classification: optional, present only once the session
+  // died. Decoded STRICTLY (an unset or double-set kind still throws) rather
   // than skipped, so a malformed death is loud while an absent one is normal.
   if (o.death !== undefined) {
-    sv.death = decodeSystemFailure(o.death, "SessionView.death");
+    sv.death = decodeFailureCardView(o.death, "SessionView.death");
   }
   if (o.tokenUtilization !== undefined) sv.tokenUtilization = decodeSessionTokenUtilization(o.tokenUtilization);
   // ABSENCE IS "THE SESSION IS AWAKE", and that is its only reading. Decoded
@@ -3412,29 +3354,6 @@ function decodeTaskCatalog(v: unknown): TaskCatalog {
   return tc;
 }
 
-/**
- * UNANCHORED, DELIBERATELY — and the only key set here that is.
- *
- * Every other set in this file is checked against a generated message's field
- * manifest, so a renamed daemon field fails this build. `SystemFailureItem`
- * has no manifest left to check against: the figma-idl reshape retired the
- * message, replacing `error_class` + free-text `error_type` with the
- * `FailureKind` arm vocabulary carried by `FailureCardView`, which the daemon
- * resolves and the webapp does not yet read.
- *
- * So this set is a plain literal until the FailureCardView decoder lands. The
- * RUNTIME guarantee is unchanged — `rejectUnknown` still refuses an
- * unrecognized key loudly — but the compile-time one is gone, which is exactly
- * why this comment is here rather than a silent `new Set`.
- */
-const SYSTEM_FAILURE_KEYS: ReadonlySet<string> = new Set(["errorClass", "errorType", "message", "sourceDetail", "resolvedAtMs", "itemUuid", "sessionResume", "queryTermination"]);
-const SESSION_RESUME_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureSchema.field>()("claudeSessionId","cwd", "configDir", "resolvedConfigDir", "create", "automaticRestore", "transcriptUnavailable", "identityMismatch", "queryTermination", "bringUpFailure");
-const SESSION_RESUME_CREATE_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureCreateSchema.field>()();
-const SESSION_RESUME_AUTOMATIC_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureAutomaticRestoreSchema.field>()();
-const SESSION_RESUME_TRANSCRIPT_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureTranscriptUnavailableSchema.field>()("searchedPaths");
-const SESSION_RESUME_IDENTITY_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureIdentityMismatchSchema.field>()("replacementClaudeSessionId");
-const SESSION_RESUME_BRING_UP_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureBringUpFailureSchema.field>()("cause");
-
 function decodeSessionTokenUtilization(v: unknown): SessionTokenUtilization {
   let generated: SessionTokenUtilization;
   try {
@@ -3473,95 +3392,6 @@ function requireModelTokenUtilization(model: GeneratedModelTokenUtilization, whe
   if (model.model.trim() === "" || model.totals === undefined) {
     throw new Error(`frontend-proto: ${where} requires model identity and totals`);
   }
-}
-
-function decodeSessionResumeFailure(v: unknown, where: string): SessionResumeFailure {
-  const o = ensureObject(v, where);
-  rejectUnknown(o, SESSION_RESUME_KEYS, where);
-  const attempts = ["create", "automaticRestore"].filter((key) => o[key] !== undefined);
-  const causes = ["transcriptUnavailable", "identityMismatch", "queryTermination", "bringUpFailure"].filter((key) => o[key] !== undefined);
-  if (attempts.length !== 1 || causes.length !== 1) throw new Error(`frontend-proto: ${where} requires exactly one attempt and cause`);
-  const attemptValue = ensureObject(o[attempts[0]], `${where}.${attempts[0]}`);
-  rejectUnknown(attemptValue, attempts[0] === "create" ? SESSION_RESUME_CREATE_KEYS : SESSION_RESUME_AUTOMATIC_KEYS, `${where}.${attempts[0]}`);
-  const base = { claudeSessionId: str(o, "claudeSessionId", where), cwd: str(o, "cwd", where), configDir: str(o, "configDir", where), resolvedConfigDir: str(o, "resolvedConfigDir", where), attempt: attempts[0] as "create" | "automaticRestore" };
-  if (causes[0] === "identityMismatch") {
-    const cause = ensureObject(o.identityMismatch, `${where}.identityMismatch`);
-    rejectUnknown(cause, SESSION_RESUME_IDENTITY_KEYS, `${where}.identityMismatch`);
-    return { ...base, cause: { case: "identityMismatch", replacementClaudeSessionId: str(cause, "replacementClaudeSessionId", `${where}.identityMismatch`) } };
-  }
-  if (causes[0] === "queryTermination") {
-    return { ...base, cause: { case: "queryTermination", value: decodeQueryTerminationFailure(o.queryTermination, `${where}.queryTermination`) } };
-  }
-  if (causes[0] === "bringUpFailure") {
-    const cause = ensureObject(o.bringUpFailure, `${where}.bringUpFailure`);
-    rejectUnknown(cause, SESSION_RESUME_BRING_UP_KEYS, `${where}.bringUpFailure`);
-    const message = str(cause, "cause", `${where}.bringUpFailure`);
-    if (message.trim() === "") throw new Error(`frontend-proto: ${where}.bringUpFailure.cause must be nonblank`);
-    return { ...base, cause: { case: "bringUpFailure", cause: message } };
-  }
-  const cause = ensureObject(o.transcriptUnavailable, `${where}.transcriptUnavailable`);
-  rejectUnknown(cause, SESSION_RESUME_TRANSCRIPT_KEYS, `${where}.transcriptUnavailable`);
-  return { ...base, cause: { case: "transcriptUnavailable", searchedPaths: ensureArray(cause.searchedPaths, `${where}.transcriptUnavailable.searchedPaths`).map((path, i) => { if (typeof path !== "string") throw new Error(`frontend-proto: ${where}.transcriptUnavailable.searchedPaths[${i}] must be a string`); return path; }) } };
-}
-
-function decodeQueryTerminationFailure(v: unknown, where: string): QueryTerminationFailure {
-  let generated: QueryTerminationFailure;
-  try {
-    generated = fromJson(QueryTerminationFailureSchema, ensureObject(v, where) as JsonValue);
-  } catch (error) {
-    throw new Error(`frontend-proto: ${where} violates the generated QueryTerminationFailure contract: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  // The agent-repl session id left this message in the figma-idl reshape: the
-  // push that carries the failure is fenced, so the session is the fence's,
-  // and a second copy here could disagree with it. Query and observed-time
-  // identity are still required — an evidence record that names neither the
-  // query() invocation nor when it died corroborates nothing.
-  if (generated.queryInstanceId === "" || generated.observedAtMs <= 0n) {
-    throw new Error(`frontend-proto: ${where} requires query and observed-time identity`);
-  }
-  if (generated.vendorIdentity.case === undefined) throw new Error(`frontend-proto: ${where} requires explicit vendor identity evidence`);
-  if (generated.vendorIdentity.case === "vendorSessionId" && generated.vendorIdentity.value === "") {
-    throw new Error(`frontend-proto: ${where}.vendorSessionId must be nonblank`);
-  }
-  if (generated.reason.case === undefined) {
-    throw new Error(`frontend-proto: ${where} requires an unexpected termination reason`);
-  }
-  if ((generated.reason.case === "iteratorFailure" || generated.reason.case === "startupFailure") && generated.reason.value.cause.trim() === "") {
-    throw new Error(`frontend-proto: ${where}.${generated.reason.case}.cause must be nonblank`);
-  }
-  return generated;
-}
-
-/**
- * Decode a `SystemFailureItem`.
- *
- * An UNSPECIFIED or unrecognized class THROWS rather than defaulting: the
- * class decides the card's color, so guessing one would paint a failure the
- * wrong color — quietly, and in a way that contradicts the workspace beside
- * it. A frame that cannot say what kind of failure it carries is malformed.
- */
-export function decodeSystemFailure(v: unknown, where: string): SystemFailure {
-  const o = ensureObject(v, where);
-  rejectUnknown(o, SYSTEM_FAILURE_KEYS, where);
-  const cls = str(o, "errorClass", where);
-  const known = ERROR_CLASSES.find((c) => cls === c || cls === `ERROR_CLASS_${c}`);
-  if (known === undefined) {
-    throw new Error(`frontend-proto: ${where}.error_class has unrecognized value '${cls}'`);
-  }
-  const failure: SystemFailure = {
-    errorClass: known,
-    errorType: str(o, "errorType", where),
-    message: str(o, "message", where),
-    sourceDetail: str(o, "sourceDetail", where),
-    resolvedAtMs: num(o, "resolvedAtMs", where),
-    itemUuid: str(o, "itemUuid", where),
-    detail: { kind: "none" },
-  };
-  const structured = ["sessionResume", "queryTermination"].filter((key) => o[key] !== undefined);
-  if (structured.length > 1) throw new Error(`frontend-proto: ${where} requires at most one structured detail`);
-  if (o.sessionResume !== undefined) failure.detail = { kind: "sessionResume", value: decodeSessionResumeFailure(o.sessionResume, `${where}.sessionResume`) };
-  if (o.queryTermination !== undefined) failure.detail = { kind: "queryTermination", value: decodeQueryTerminationFailure(o.queryTermination, `${where}.queryTermination`) };
-  return failure;
 }
 
 const COMMAND_ACK_KEYS = new Set([

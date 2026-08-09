@@ -11,7 +11,8 @@
  * may never differ is which color a state gets.
  */
 import { describe, expect, it } from "vitest";
-import { ERROR_CLASSES, RenderState } from "../src/frontend-proto.js";
+import { RenderState } from "../src/frontend-proto.js";
+import { FAILURE_SIDE_TONE, type FailureTone } from "../src/failure-card.js";
 import { WORKSPACE_STATUSES } from "../src/sidebar.js";
 // The fixture and the stylesheet are read as SOURCE, the same way the other
 // contract tests read the CSS: the assertion is about what is checked in, not
@@ -57,13 +58,14 @@ describe("the shared color fixture", () => {
     expect(missing).toEqual([]);
   });
 
-  it("covers every ErrorClass this frontend can decode", () => {
-    // Arrange / Act
-    const missing = ERROR_CLASSES.filter(
-      (c) => fixture.error_classes[`ERROR_CLASS_${c}`] === undefined,
-    );
+  it("colors every SIDE of the failure vocabulary this frontend can decode", () => {
+    // Arrange / Act — the free-text ErrorClass pair became the two SIDES of
+    // FailureKind, and the fixture's `error_classes` rows are still the one
+    // place that says which color each takes.
+    const tones: FailureTone[] = Object.values(FAILURE_SIDE_TONE);
+    const unassigned = tones.filter((tone) => !fixture.colors.includes(tone));
     // Assert
-    expect(missing).toEqual([]);
+    expect(unassigned).toEqual([]);
   });
 
   it("names a token this stylesheet actually defines for each of the six", () => {
