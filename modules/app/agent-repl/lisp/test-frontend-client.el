@@ -1366,7 +1366,10 @@ bundle this stamp exists to prevent."
       (should-not asked)
       (should (equal (length uds-commands) 1))
       (should (string-match-p "interrupt" echoed))
-      (should (string-match-p "no live session to drive" echoed)))))
+      ;; The refusal is still loud, but the daemon's own text does not reach
+      ;; the echo area — it is translated into the not-live sentence.
+      (should-not (string-match-p "no live session to drive" echoed))
+      (should (string-match-p "this workspace is not live" echoed)))))
 
 (ert-deftest agent-repl-test-gui-interrupt-confirmed-resend-is-not-rechallenged ()
   "The confirmed resend carries no challenge handler — a re-challenge cannot loop."
@@ -1525,11 +1528,68 @@ the person who pressed the key learns the memory was never freed."
               ((symbol-function 'message)
                (lambda (fmt &rest args) (push (apply #'format fmt args) echoed))))
       (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+        ;; Act — the daemon's own `ErrNotSettled' text, verbatim.
+        (agent-repl--frontend-hibernate-workspace "ws1")
+        (funcall (plist-get call :on-failure)
+                 "session-controller: the workspace has not settled; refusing to hibernate it")
+        ;; Assert
+        (should (cl-some (lambda (l) (string-match-p "hibernate refused" l)) echoed))))))
+
+(ert-deftest agent-repl-test-frontend-hibernate-rejection-keeps-the-chain-out-of-the-echo ()
+  "The daemon's wrapped text is filed, not echoed: the user reads one sentence."
+  ;; Arrange
+  (let (echoed call)
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+               (agent-repl-test--send-command-stub
+                "req-1" (lambda (c) (setq call c))))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args) (push (apply #'format fmt args) echoed))))
+      (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
         ;; Act
         (agent-repl--frontend-hibernate-workspace "ws1")
-        (funcall (plist-get call :on-failure) "a turn is live")
+        (funcall (plist-get call :on-failure)
+                 "session-controller: the workspace has not settled; refusing to hibernate it")
         ;; Assert
-        (should (cl-some (lambda (l) (string-match-p "refused" l)) echoed))))))
+        (should-not (cl-some (lambda (l) (string-match-p "session-controller" l)) echoed))))))
+
+(ert-deftest agent-repl-test-frontend-hibernate-rejection-files-the-chain ()
+  "The wrapped text the echo dropped still reaches the canonical log."
+  ;; Arrange
+  (let (logged call)
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+               (agent-repl-test--send-command-stub
+                "req-1" (lambda (c) (setq call c))))
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+              ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+        ;; Act
+        (agent-repl--frontend-hibernate-workspace "ws1")
+        (funcall (plist-get call :on-failure)
+                 "session-controller: the workspace has not settled; refusing to hibernate it")
+        ;; Assert
+        (should (cl-some (lambda (l) (string-match-p "session-controller" l)) logged))))))
+
+;;;; ---- Async operation verbs ----
+
+(ert-deftest agent-repl-test-frontend-operation-verb-maps-a-known-label ()
+  "An async operation label becomes the English verb the echo line is built on."
+  ;; Act / Assert
+  (should (equal (agent-repl--frontend-operation-verb "openWorkspace") "open")))
+
+(ert-deftest agent-repl-test-frontend-operation-verb-strips-session-health-identifiers ()
+  "The session health label carries a workspace and a session id; neither is copy."
+  ;; Act / Assert
+  (should (equal (agent-repl--frontend-operation-verb "session ws=ws1 id=s_1")
+                 "session health check")))
+
+(ert-deftest agent-repl-test-frontend-operation-verb-degrades-an-unknown-label ()
+  "An unmapped label yields nil rather than being printed as a verb."
+  ;; Act / Assert
+  (should-not (agent-repl--frontend-operation-verb "somethingElse")))
 
 ;;;; ---- ensure-workspace skip-record routing ----
 

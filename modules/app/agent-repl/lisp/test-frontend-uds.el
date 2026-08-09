@@ -1334,6 +1334,27 @@ as a user-visible malformed-frame error on every roster publish."
   (dolist (field '("queueForce" "queueAccept" "queueCancel"))
     (should (member field agent-repl--uds-known-command-fields))))
 
+(ert-deftest agent-repl-test-uds-every-known-command-has-a-user-verb ()
+  "No sendable command can nack into an echo line with a hole where its name goes."
+  ;; Act / Assert
+  (dolist (field agent-repl--uds-known-command-fields)
+    (should (agent-repl--uds-command-verb field))))
+
+(ert-deftest agent-repl-test-uds-command-verb-translates-a-wire-field ()
+  "The verb is English, not the protojson identifier."
+  ;; Act / Assert
+  (should (equal (agent-repl--uds-command-verb "submitPrompt") "prompt")))
+
+(ert-deftest agent-repl-test-uds-command-verb-degrades-an-unknown-field ()
+  "An unmapped field yields nil rather than leaking the identifier as copy."
+  ;; Act / Assert
+  (should-not (agent-repl--uds-command-verb "notACommand")))
+
+(ert-deftest agent-repl-test-uds-command-verb-degrades-a-nil-field ()
+  "A nil field is not a verb, and asking is not an error."
+  ;; Act / Assert
+  (should-not (agent-repl--uds-command-verb nil)))
+
 (ert-deftest agent-repl-test-uds-client-log-is-a-known-command ()
   "The E4 `clientLog' arm is in the command mirror, though Emacs never sends it."
   ;; Act / Assert
@@ -1513,7 +1534,9 @@ as a user-visible malformed-frame error on every roster publish."
     (should-not (gethash "req-1" agent-repl--uds-pending-commands))))
 
 (ert-deftest agent-repl-test-uds-command-ack-failure-surfaces-loudly ()
-  "A failed ack (ok omitted) surfaces an echo-area message and returns nil."
+  "A failed ack (ok omitted) surfaces echo-area USER COPY and returns nil.
+The refusal is still loud; only its presentation changed — the echo names
+the command in English rather than reprinting the daemon's error text."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
@@ -1525,14 +1548,45 @@ as a user-visible malformed-frame error on every roster publish."
                     '(:requestId "req-1" :error "branch not found"))))
           ;; Assert
           (should-not ret)
-          (should (string-match-p "mergeWorkspace" echoed))
-          (should (string-match-p "branch not found" echoed)))))))
+          (should (equal echoed
+                         "agent-repl: merge failed — see the workspace log for detail")))))))
 
-(ert-deftest agent-repl-test-uds-command-ack-classified-refusal-echoes-the-daemon-text ()
+(ert-deftest agent-repl-test-uds-command-ack-failure-keeps-the-error-out-of-the-echo ()
+  "The daemon's error text never reaches the minibuffer from an unclassified nack."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
+    (let (echoed)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+        ;; Act
+        (agent-repl--uds-handle-command-ack
+         '(:requestId "req-1" :error "branch not found"))
+        ;; Assert
+        (should-not (string-match-p "branch not found" echoed))))))
+
+(ert-deftest agent-repl-test-uds-command-ack-failure-files-the-error-text ()
+  "The error text the echo dropped is still on the canonical log."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
+    (let (logged)
+      (cl-letf (((symbol-function 'message) #'ignore)
+                ((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--uds-handle-command-ack
+         '(:requestId "req-1" :error "branch not found"))
+        ;; Assert
+        (should (cl-find-if (lambda (line) (string-match-p "branch not found" line))
+                            logged))))))
+
+(ert-deftest agent-repl-test-uds-command-ack-classified-refusal-uses-the-failure-path ()
   "A CLASSIFIED refusal surfaces through the failure path, not the raw fallback.
 `CommandAck.failure' is a bare `FailureKind' now, so the ack has to be read
 as a kind rather than as a whole card; misreading it would drop every
-refusal onto the unclassified branch."
+refusal onto the unclassified branch.  An ack carries no daemon-composed
+sentence, so the raw error it does carry is TRANSLATED into user copy."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--pend "req-1" "submitPrompt" "ws1")
@@ -1545,11 +1599,14 @@ refusal onto the unclassified branch."
          '(:requestId "req-1" :error "the workspace has no live session"
            :failure (:workspaceNotLive ())))
         ;; Assert
-        (should (string-match-p "the workspace has no live session" echoed))))))
+        (should (equal echoed
+                       (concat "agent-repl: prompt refused — this workspace is not "
+                               "live; start or wake it first")))))))
 
-(ert-deftest agent-repl-test-uds-command-ack-unclassified-refusal-keeps-the-raw-path ()
-  "An ack with no classified kind still surfaces, from the raw text.
-A refusal a mixed-build daemon could not classify must never be invisible."
+(ert-deftest agent-repl-test-uds-command-ack-unclassified-refusal-still-surfaces ()
+  "An ack with no classified kind still surfaces, as the generic sentence.
+A refusal a mixed-build daemon could not classify must never be invisible;
+what it must also never be is a Go error chain in the echo area."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--pend "req-1" "submitPrompt" "ws1")
@@ -1560,7 +1617,25 @@ A refusal a mixed-build daemon could not classify must never be invisible."
         (agent-repl--uds-handle-command-ack
          '(:requestId "req-1" :error "unexplained"))
         ;; Assert
-        (should (string-match-p "unexplained" echoed))))))
+        (should (equal echoed
+                       "agent-repl: prompt failed — see the workspace log for detail"))))))
+
+(ert-deftest agent-repl-test-uds-command-ack-merge-queued-nack-reads-as-a-refusal ()
+  "The observed merge-queued refusal reads as by-design, not as a broken workspace."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--pend "req-1" "submitPrompt" "ws1")
+    (let (echoed)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+        ;; Act
+        (agent-repl--uds-handle-command-ack
+         '(:requestId "req-1"
+           :error "ssm: prompt state invariant failed: state=RENDER_STATE_MERGE_QUEUED turn_active=true"))
+        ;; Assert
+        (should (equal echoed
+                       (concat "agent-repl: prompt refused — this workspace is queued "
+                               "for a merge; wait for the merge to finish or interrupt it")))))))
 
 (ert-deftest agent-repl-test-uds-command-ack-failure-runs-on-failure ()
   "A failed ack runs the tracked :on-failure callback with the error string."
@@ -1979,11 +2054,11 @@ A refusal a mixed-build daemon could not classify must never be invisible."
           ;; Act
           (funcall expire)
           ;; Assert
-          (should (string-match-p "mergeWorkspace" echoed))
+          (should (string-match-p "merge" echoed))
           (should (string-match-p "never acknowledged" echoed)))))))
 
-(ert-deftest agent-repl-test-uds-deadline-expiry-names-request-id ()
-  "The deadline warning carries the request-id so the log can be correlated."
+(ert-deftest agent-repl-test-uds-deadline-expiry-keeps-the-wire-field-out-of-the-echo ()
+  "The echo names the command in English; `mergeWorkspace' is a wire identifier."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
@@ -1994,7 +2069,36 @@ A refusal a mixed-build daemon could not classify must never be invisible."
           ;; Act
           (funcall expire)
           ;; Assert
-          (should (string-match-p "req-1" echoed)))))))
+          (should-not (string-match-p "mergeWorkspace" echoed)))))))
+
+(ert-deftest agent-repl-test-uds-deadline-expiry-files-the-request-id ()
+  "The request-id reaches the LOG, where correlation happens — not the echo area."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
+      (let (logged)
+        (cl-letf (((symbol-function 'message) #'ignore)
+                  ((symbol-function 'agent-repl--log)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should (cl-find-if (lambda (line) (string-match-p "req-1" line)) logged)))))))
+
+(ert-deftest agent-repl-test-uds-deadline-expiry-omits-the-request-id-from-the-echo ()
+  "An identifier the user cannot act on stays off the one line they read."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
+      (let (echoed)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should-not (string-match-p "req-1" echoed)))))))
 
 (ert-deftest agent-repl-test-uds-deadline-expiry-logs-field-and-workspace ()
   "The canonical log line names the request-id, field, and wire workspace."
@@ -2724,7 +2828,7 @@ caught three vanished `mergeWorkspace' commands."
                    (lambda () "req-lost"))
                   ((symbol-function 'process-send-string) (lambda (&rest _) nil))
                   ((symbol-function 'agent-repl-failure-surface)
-                   (lambda (_ws failure) (push failure surfaced))))
+                   (lambda (_ws failure &optional _verb) (push failure surfaced))))
           (let ((agent-repl--uds-connection-state 'open)
                 (agent-repl--uds-outbound-queue nil))
             (agent-repl--uds-send-command
@@ -2776,7 +2880,7 @@ caught three vanished `mergeWorkspace' commands."
     (let (surfaced)
       (agent-repl-test--with-captured-deadline expire
         (cl-letf (((symbol-function 'agent-repl-failure-surface)
-                   (lambda (_ws failure) (push failure surfaced)))
+                   (lambda (_ws failure &optional _verb) (push failure surfaced)))
                   ((symbol-function 'agent-repl--uds-drain-input)
                    (lambda ()
                      (agent-repl--uds-handle-command-ack
@@ -2833,7 +2937,7 @@ abandoned one strands the mount until its own separate timeout."
     (let (surfaced)
       (agent-repl-test--with-captured-deadline expire
         (cl-letf (((symbol-function 'agent-repl-failure-surface)
-                   (lambda (_ws failure) (push failure surfaced)))
+                   (lambda (_ws failure &optional _verb) (push failure surfaced)))
                   ((symbol-function 'agent-repl--uds-drain-input) (lambda () nil)))
           (agent-repl-test--pend "req-really-lost" "mergeWorkspace" "ws1")
           ;; Act
@@ -2849,7 +2953,7 @@ abandoned one strands the mount until its own separate timeout."
     (let (surfaced)
       (agent-repl-test--with-captured-deadline expire
         (cl-letf (((symbol-function 'agent-repl-failure-surface)
-                   (lambda (_ws failure) (push failure surfaced)))
+                   (lambda (_ws failure &optional _verb) (push failure surfaced)))
                   ((symbol-function 'agent-repl--uds-drain-input)
                    (lambda () (error "filter handler blew up"))))
           (agent-repl-test--pend "req-drain-err" "mergeWorkspace" "ws1")
