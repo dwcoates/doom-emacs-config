@@ -74,6 +74,14 @@ type ProgressCellSource interface {
 // title unbranded, which is a complete title rather than a missing fact.
 type WorkspaceBranchSource = MergeGeometrySource
 
+// WorkspaceStateSource reads a workspace's current resolved WorkspaceState.
+// Satisfied by *ssm.Manager. It is what lets a fact that moved on ANOTHER
+// clock — the settled turn's accounting cell — be re-rendered against the
+// authoritative state rather than against a remembered copy of it.
+type WorkspaceStateSource interface {
+	Current(workspace string) (*frontendv1.WorkspaceState, bool, error)
+}
+
 // WorkspaceViews resolves and publishes the three views, and retains the last
 // published one per workspace so the connect snapshot carries them.
 //
@@ -87,6 +95,10 @@ type WorkspaceViews struct {
 	catalogs *SessionModelCatalogs
 	progress ProgressCellSource
 	branches WorkspaceBranchSource
+	// states re-reads a workspace's authoritative state when a fact the topbar
+	// renders moved without the state moving. A nil source disables the
+	// accounting republication and says so once, at the seam.
+	states WorkspaceStateSource
 
 	mu sync.Mutex
 	// retained is the last published view per workspace, per family. It is
@@ -113,7 +125,7 @@ type retainedWorkspaceViews struct {
 // it is a silent one. Every other source is optional and its absence is a
 // resolved fact rather than a gap: no catalogs is an empty model menu, no
 // progress is an empty accounting line, no branches is an unbranded title.
-func NewWorkspaceViews(logf dlog.Logf, push WorkspaceViewPush, records SessionRecordSource, catalogs *SessionModelCatalogs, progress ProgressCellSource, branches WorkspaceBranchSource) *WorkspaceViews {
+func NewWorkspaceViews(logf dlog.Logf, push WorkspaceViewPush, records SessionRecordSource, catalogs *SessionModelCatalogs, progress ProgressCellSource, branches WorkspaceBranchSource, states WorkspaceStateSource) *WorkspaceViews {
 	if logf == nil {
 		panic("server: WorkspaceViews requires a log channel")
 	}
@@ -127,6 +139,7 @@ func NewWorkspaceViews(logf dlog.Logf, push WorkspaceViewPush, records SessionRe
 		catalogs: catalogs,
 		progress: progress,
 		branches: branches,
+		states:   states,
 		retained: map[string]*retainedWorkspaceViews{},
 		branchOf: map[string]string{},
 	}
@@ -179,6 +192,51 @@ func (v *WorkspaceViews) PublishState(state *frontendv1.WorkspaceState) {
 		}
 	}
 	v.publishGateLocked(workspace, state.GetSessionId(), gate, gateErr)
+}
+
+// RepublishAccounting re-renders the workspace's TOPBAR after its settled
+// turn's accounting cell has resolved.
+//
+// WHY IT EXISTS. The accounting line is a TOPBAR fact, but it is not a
+// WorkspaceState fact: the progress resolver composes it on its own clock,
+// downstream of the very state transition that triggers PublishState. So the
+// topbar published on a transition renders the accounting the resolver had
+// BEFORE that transition, and a client connecting after the last transition was
+// served a topbar whose accounting line would never settle — the retention the
+// snapshot serves from was itself stale.
+//
+// It is fed from the progress resolver's own subscription, which is where the
+// resolved cell arrives, so the republication happens exactly when the fact it
+// is about has moved.
+//
+// THE STATE IS RE-READ, NEVER REMEMBERED. Everything else on the topbar — the
+// fence above all — belongs to the state machine, and re-rendering them from a
+// copy this file kept would be a second answer to what the workspace's current
+// state is. Re-reading and then running the ONE publication path is what keeps
+// this a re-render rather than a second resolver.
+//
+// IT IS CHEAP BY CONSTRUCTION. PublishState compares the RENDERED view, so a
+// republication whose accounting line did not actually change is dropped
+// without reaching a client.
+func (v *WorkspaceViews) RepublishAccounting(workspace string) {
+	if workspace == "" {
+		v.logf("server: topbar accounting republication DECLINED — a progress view arrived with no workspace, so there is no topbar to key")
+		return
+	}
+	if v.states == nil {
+		v.logf("server: topbar accounting republication UNAVAILABLE ws=%q — no workspace-state source is wired, so the settled accounting line will not reach a client that connects after the last state transition", workspace)
+		return
+	}
+	state, found, err := v.states.Current(workspace)
+	if err != nil {
+		v.logf("server: topbar accounting republication FAILED ws=%q — the workspace's current state could not be read, so the topbar keeps the accounting line it was last published with: %v", workspace, err)
+		return
+	}
+	if !found {
+		v.logf("server: topbar accounting republication SKIPPED ws=%q — the workspace has no resolved state yet, so there is no fence to stamp a topbar with", workspace)
+		return
+	}
+	v.PublishState(state)
 }
 
 // PublishSession republishes the views whose facts are read off the SESSION

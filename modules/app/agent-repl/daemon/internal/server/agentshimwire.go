@@ -646,7 +646,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		CommandLatency:            cfg.CommandLatency,
 		AckWarnThreshold:          cfg.AckWarnThreshold,
 	})
-	workspaceViews := NewWorkspaceViews(logf, srv, cfg.SessionRecords, cfg.ModelCatalogs, cfg.Progress, cfg.MergeGeometry)
+	workspaceViews := NewWorkspaceViews(logf, srv, cfg.SessionRecords, cfg.ModelCatalogs, cfg.Progress, cfg.MergeGeometry, mgr)
 	snapshots.workspaceViews = workspaceViews
 	// THE CLOSE RELEASES THESE RETENTIONS, so the command handler is bound to
 	// the same publisher the snapshot serves from. The binding is here rather
@@ -763,6 +763,16 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	go func() {
 		for v := range views {
 			srv.PushProgressView(v)
+			// THE TOPBAR RIDES THIS SUBSCRIPTION TOO, because the accounting
+			// line is a topbar fact that moves on the PROGRESS resolver's clock
+			// rather than the SSM's. PublishState above runs before
+			// ObserveWorkspaceState has absorbed the transition, so the topbar
+			// it published carries the accounting the resolver had beforehand;
+			// nothing else would ever refresh it, and a client connecting after
+			// the last transition would be served — from the retention — a
+			// topbar whose accounting line never settles. proto.Equal keeps a
+			// republication that changed nothing off the wire.
+			workspaceViews.RepublishAccounting(v.GetWorkspace())
 		}
 	}()
 

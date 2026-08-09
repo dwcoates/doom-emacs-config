@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -88,7 +89,29 @@ func (c *countingGeometry) count() int {
 func newViewPublisher(t *testing.T, records SessionRecordSource, progress ProgressCellSource, branches WorkspaceBranchSource) (*WorkspaceViews, *recordingViewPush) {
 	t.Helper()
 	push := &recordingViewPush{}
-	return NewWorkspaceViews(func(string, ...any) {}, push, records, nil, progress, branches), push
+	return NewWorkspaceViews(func(string, ...any) {}, push, records, nil, progress, branches, nil), push
+}
+
+// fixedStates is a WorkspaceStateSource answering with one state, so a test can
+// drive the accounting republication without an SSM.
+type fixedStates struct {
+	state *frontendv1.WorkspaceState
+	found bool
+	err   error
+}
+
+func (f fixedStates) Current(string) (*frontendv1.WorkspaceState, bool, error) {
+	return f.state, f.found, f.err
+}
+
+// newRepublishingPublisher is newViewPublisher with a state source wired, plus
+// the log capture the republication's refusals are asserted through.
+func newRepublishingPublisher(t *testing.T, progress ProgressCellSource, states WorkspaceStateSource) (*WorkspaceViews, *recordingViewPush, *[]string) {
+	t.Helper()
+	push := &recordingViewPush{}
+	var lines []string
+	logf := func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+	return NewWorkspaceViews(logf, push, nil, nil, progress, nil, states), push, &lines
 }
 
 func liveState() *frontendv1.WorkspaceState {
@@ -508,7 +531,7 @@ func (p *lockProbePush) PushWorkspaceGateView(*frontendv1.WorkspaceGateView) {
 // newLockProbePublisher builds a publisher whose push probes the mutex.
 func newLockProbePublisher(records SessionRecordSource) (*WorkspaceViews, *lockProbePush) {
 	probe := &lockProbePush{}
-	v := NewWorkspaceViews(func(string, ...any) {}, probe, records, nil, nil, nil)
+	v := NewWorkspaceViews(func(string, ...any) {}, probe, records, nil, nil, nil, nil)
 	probe.v = v
 	return v, probe
 }
@@ -556,5 +579,141 @@ func TestForgettingAWorkspaceDropsItFromTheSnapshot(t *testing.T) {
 	// Assert.
 	if got := v.Topbars(); len(got) != 0 {
 		t.Fatalf("snapshot topbars after Forget = %v, want none", got)
+	}
+}
+
+// --- the accounting republication -----------------------------------------
+//
+// The accounting line is a TOPBAR fact that moves on the PROGRESS resolver's
+// clock, downstream of the state transition that publishes the topbar. Without
+// a republication from that clock, the settled sentence never reaches a client
+// that connects after the last transition — and never reaches the retention the
+// snapshot serves from either.
+
+// settledProgress is a progress source that starts empty and then reports a
+// settled accounting sentence, so a test can move the accounting WITHOUT moving
+// the workspace state — which is the situation the republication exists for.
+type settledProgress struct{ summary string }
+
+func (s *settledProgress) Current(string) (*frontendv1.ProgressView, bool) {
+	return &frontendv1.ProgressView{
+		Accounting: &frontendv1.FooterAccountingCell{Summary: s.summary},
+	}, true
+}
+
+func TestASettledAccountingLineRepublishesTheTopbar(t *testing.T) {
+	// Arrange — a topbar published while the accounting was still empty.
+	progress := &settledProgress{}
+	v, push, _ := newRepublishingPublisher(t, progress, fixedStates{state: liveState(), found: true})
+	v.PublishState(liveState())
+
+	// Act — the resolver settles the cell and the progress subscription reports it.
+	progress.summary = "5h 1.0%→2.0% (1.0pp)"
+	v.RepublishAccounting("/home/u/ws")
+
+	// Assert
+	if len(push.topbars) != 2 {
+		t.Fatalf("published %d topbars, want the settled accounting line republished: a client connecting after the last state transition otherwise holds a topbar whose accounting never settles", len(push.topbars))
+	}
+}
+
+func TestTheRepublishedTopbarCarriesTheSettledSentence(t *testing.T) {
+	// Arrange
+	progress := &settledProgress{}
+	v, push, _ := newRepublishingPublisher(t, progress, fixedStates{state: liveState(), found: true})
+	v.PublishState(liveState())
+
+	// Act
+	progress.summary = "5h 1.0%→2.0% (1.0pp)"
+	v.RepublishAccounting("/home/u/ws")
+
+	// Assert
+	if got := push.topbars[1].GetAccountingLine(); got != "5h 1.0%→2.0% (1.0pp)" {
+		t.Fatalf("republished accounting line = %q, want the settled sentence", got)
+	}
+}
+
+func TestTheRepublishedTopbarReachesTheConnectSnapshot(t *testing.T) {
+	// Arrange
+	progress := &settledProgress{}
+	v, _, _ := newRepublishingPublisher(t, progress, fixedStates{state: liveState(), found: true})
+	v.PublishState(liveState())
+
+	// Act
+	progress.summary = "5h 1.0%→2.0% (1.0pp)"
+	v.RepublishAccounting("/home/u/ws")
+
+	// Assert
+	topbars := v.Topbars()
+	if len(topbars) != 1 || topbars[0].GetAccountingLine() != "5h 1.0%→2.0% (1.0pp)" {
+		t.Fatalf("snapshot topbars = %v, want the retention advanced to the settled sentence", topbars)
+	}
+}
+
+func TestAnUnchangedAccountingLineRepublishesNothing(t *testing.T) {
+	// Arrange — change is judged on the rendered view, so a republication that
+	// moved nothing must stay off the wire.
+	progress := &settledProgress{summary: "5h 1.0%→2.0% (1.0pp)"}
+	v, push, _ := newRepublishingPublisher(t, progress, fixedStates{state: liveState(), found: true})
+	v.PublishState(liveState())
+
+	// Act
+	v.RepublishAccounting("/home/u/ws")
+
+	// Assert
+	if len(push.topbars) != 1 {
+		t.Fatalf("published %d topbars, want 1: an identical re-render is not a new view", len(push.topbars))
+	}
+}
+
+func TestARepublicationForAWorkspaceWithNoStateIsRecorded(t *testing.T) {
+	// Arrange
+	v, push, lines := newRepublishingPublisher(t, &settledProgress{}, fixedStates{})
+
+	// Act
+	v.RepublishAccounting("/home/u/ws")
+
+	// Assert
+	if len(push.topbars) != 0 || len(*lines) != 1 {
+		t.Fatalf("published %d topbars and recorded %v, want an unfenced topbar withheld and the withholding recorded", len(push.topbars), *lines)
+	}
+}
+
+func TestARepublicationOverAFailedStateReadIsRecorded(t *testing.T) {
+	// Arrange
+	v, push, lines := newRepublishingPublisher(t, &settledProgress{}, fixedStates{err: errors.New("store closed")})
+
+	// Act
+	v.RepublishAccounting("/home/u/ws")
+
+	// Assert
+	if len(push.topbars) != 0 || len(*lines) != 1 {
+		t.Fatalf("published %d topbars and recorded %v, want the read failure surfaced rather than absorbed", len(push.topbars), *lines)
+	}
+}
+
+func TestARepublicationWithNoStateSourceIsRecorded(t *testing.T) {
+	// Arrange — an unwired state source must say so rather than return silently.
+	v, push, lines := newRepublishingPublisher(t, &settledProgress{}, nil)
+
+	// Act
+	v.RepublishAccounting("/home/u/ws")
+
+	// Assert
+	if len(push.topbars) != 0 || len(*lines) != 1 {
+		t.Fatalf("published %d topbars and recorded %v, want the unwired source named", len(push.topbars), *lines)
+	}
+}
+
+func TestAKeylessRepublicationIsRecorded(t *testing.T) {
+	// Arrange
+	v, push, lines := newRepublishingPublisher(t, &settledProgress{}, fixedStates{state: liveState(), found: true})
+
+	// Act
+	v.RepublishAccounting("")
+
+	// Assert
+	if len(push.topbars) != 0 || len(*lines) != 1 {
+		t.Fatalf("published %d topbars and recorded %v, want the keyless republication declined loudly", len(push.topbars), *lines)
 	}
 }
