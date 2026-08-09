@@ -306,6 +306,69 @@ creates a second question."
 (add-hook 'agent-repl-ws-state-transition-functions
           #'agent-repl--merge-echo-pushed-state)
 
+(defun agent-repl--merge-dequeue-offer-sentence (offer)
+  "Return the echoed sentence for dequeue OFFER, a decoded offer plist.
+Names the STANDING, because that is what the question turns on: a merge
+waiting its turn is dropped at no cost, and a merge in flight is aborted.
+The two counts a waiting offer carries are both said — the place answers
+\"where is it\" and the number ahead answers \"how much longer\", which is
+the one that made the user press the key."
+  (if (eq (plist-get offer :standing) :running)
+      "its merge is RUNNING — answer in the gui panel to abort it, or leave it"
+    (let ((ahead (plist-get offer :ahead))
+          (position (plist-get offer :position))
+          (depth (plist-get offer :depth)))
+      (format "its merge is queued %s of %s with %s ahead — answer in the gui panel"
+              position depth ahead))))
+
+(defun agent-repl--merge-echo-dequeue-offer (ws _new _previous)
+  "Echo the arrival of WS's merge dequeue offer, once per question.
+Subscriber for `agent-repl-ws-state-transition-functions'.
+
+EMACS NARRATES, THE WEBAPP ASKS.  The card with the two buttons is the
+gui panel's — the host draws no cards — but the INTERRUPT is routinely
+sent from here, with `SPC o x', by someone looking at Emacs.  Without
+this line that keystroke produces no visible effect at all on this side
+while a question quietly goes up somewhere else, which is
+indistinguishable from an interrupt that was swallowed.
+
+Keyed on the OFFER ID, recorded on `:merge-dequeue-echo-last', so the
+re-pushes that carry an unchanged question are silent and a second
+question after the first was answered is announced again.  The daemon
+refreshes the standing on the same id rather than minting a new one, so
+a card whose queue place advances does not re-narrate either."
+  (let* ((offer (agent-repl--ws-get ws :pushed-merge-dequeue-offer))
+         (offer-id (plist-get offer :offer-id))
+         (last (agent-repl--ws-get ws :merge-dequeue-echo-last)))
+    (cond
+     ;; The question came down (answered, superseded, or made moot by the
+     ;; merge ending). Nothing is echoed — the merge's own terminal narration
+     ;; already says what became of it — but the mark is dropped so a later
+     ;; question announces itself.
+     ((null offer)
+      (when last
+        (agent-repl--log ws "merge-dequeue-echo: ws=%s offer=%s cleared" ws last)
+        (agent-repl--ws-put ws :merge-dequeue-echo-last nil)))
+     ((equal offer-id last) nil)
+     (t
+      (agent-repl--ws-put ws :merge-dequeue-echo-last offer-id)
+      (agent-repl--log ws
+                       "merge-dequeue-echo: ws=%s offer=%s run=%s standing=%s position=%s depth=%s ahead=%s — announcing"
+                       ws offer-id (plist-get offer :run-id)
+                       (plist-get offer :standing)
+                       (plist-get offer :position)
+                       (plist-get offer :depth)
+                       (plist-get offer :ahead))
+      (agent-repl--user-message
+       ws "%s interrupted — %s"
+       (list ws (agent-repl--merge-dequeue-offer-sentence offer))
+       :detail (format "merge dequeue offer ws=%s offer=%s run=%s standing=%s"
+                       ws offer-id (plist-get offer :run-id)
+                       (plist-get offer :standing)))))))
+
+(add-hook 'agent-repl-ws-state-transition-functions
+          #'agent-repl--merge-echo-dequeue-offer)
+
 (defun agent-repl--merge-kill-on-merged (ws new _previous)
   "Kill WS's editor workspace when its merge lands.
 Subscriber for `agent-repl-ws-state-transition-functions'.  A merged
