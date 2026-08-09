@@ -854,19 +854,18 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		// delta can slip ahead of this first FIFO frame after validation.
 		s.nextClientID++
 		cl.id = s.nextClientID
-		// THE BOOT-DRAIN WINDOW OPENS HERE and closes on this frame's own
-		// disposition (bootdrain.go). Opening before the push is what keeps the
-		// window from ever being closed before it was open: the writer may take
-		// this frame on another goroutine the instant it is queued.
+		// THE BOOT-DRAIN WINDOW OPENS HERE and closes when the writer first
+		// finds this outbox empty (bootdrain.go). Opening before the push is
+		// what keeps the window from ever being closed before it was open: the
+		// writer starts below and may drain this frame the instant it is
+		// queued.
 		cl.drain.open(time.Now())
 		// A fresh outbox is empty, so this first FIFO frame always fits; a
 		// refusal here would be a programmer error, not a slow consumer.
-		if res := enqueueLocked(cl, outFrame{data: snap, notify: cl.drain.snapshotDisposed}); !res.queued {
-			// The window opened and no write will ever close it, so close it
-			// here: a drain left open would classify a connection that never
-			// drained anything. enqueueLocked already notified a frame refused
-			// by a CLOSED queue, and closeAt is idempotent, so both paths end
-			// the window exactly once.
+		if res := enqueueLocked(cl, outFrame{data: snap}); !res.queued {
+			// The window opened and no writer will ever start on this
+			// connection to close it, so close it here rather than leave a
+			// window open on a connection that is being abandoned.
 			cl.drain.closeAt(time.Now())
 			s.mu.Unlock()
 			s.warn("frontend: connect snapshot rejected by an empty outbox kind=%s scope_workspace=%q scope_session=%q",
@@ -1091,6 +1090,38 @@ func laneName(control bool) string {
 	return "bulk"
 }
 
+// drainOutbox writes every frame currently queued for cl, in lane order, and
+// returns the first write error. It is one wake of the writer, factored out of
+// the loop so the drain is a callable step rather than a shape only a goroutine
+// can reach.
+//
+// A failed write is reported to its frame's sender BEFORE it is returned, so a
+// frame that never reached the socket is never mistaken for a delivery that
+// simply had not been timed yet. The caller owns the teardown.
+func (s *Server) drainOutbox(c conn, cl *client) error {
+	for {
+		f, ok := cl.out.pop()
+		if !ok {
+			// THE OUTBOX RAN DRY. The first time that happens, this
+			// connection's bring-up backlog — its connect snapshot and every
+			// retained push that followed it — is fully written, which is the
+			// closing edge of the boot-drain window (bootdrain.go). closeAt
+			// keeps the first such moment and ignores every later one, so an
+			// ordinary quiet period is never mistaken for a bring-up.
+			cl.drain.closeAt(time.Now())
+			return nil
+		}
+		if err := s.writeFrameWatched(c, cl, f); err != nil {
+			wrapped := fmt.Errorf("frontend: write frame: %w", err)
+			notifyFrame(f, wrapped)
+			return wrapped
+		}
+		// The bytes are on the socket. This is the moment a correlated reply's
+		// wait actually ends, and the only place that can say so.
+		notifyFrame(f, nil)
+	}
+}
+
 func (s *Server) writeLoop(c conn, cl *client) {
 	defer func() {
 		if err := c.close(); err != nil {
@@ -1104,24 +1135,10 @@ func (s *Server) writeLoop(c conn, cl *client) {
 		case <-cl.out.ready:
 			// ready is a wakeup, not the queue: drain everything each wake, so
 			// a signal coalesced with an earlier one strands no frame.
-			for {
-				f, ok := cl.out.pop()
-				if !ok {
-					break
-				}
-				if err := s.writeFrameWatched(c, cl, f); err != nil {
-					// The frame never reached the socket. Its sender is told
-					// so before the teardown, so a failed write is never
-					// mistaken for a delivery that simply had not been timed
-					// yet; disconnect then strands and reports the rest.
-					notifyFrame(f, fmt.Errorf("frontend: write frame: %w", err))
-					s.logf("frontend: write failed, disconnecting: %v", err)
-					s.disconnect(cl)
-					return
-				}
-				// The bytes are on the socket. This is the moment a correlated
-				// reply's wait actually ends, and the only place that can say so.
-				notifyFrame(f, nil)
+			if err := s.drainOutbox(c, cl); err != nil {
+				s.logf("frontend: write failed, disconnecting: %v", err)
+				s.disconnect(cl)
+				return
 			}
 		}
 	}
