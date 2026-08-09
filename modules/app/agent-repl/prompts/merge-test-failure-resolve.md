@@ -1,5 +1,5 @@
 <!-- used by: daemon internal/workspace/merge/testfailureresolver.go (TestFailureResolution.Prompt); placeholders: {{failing_commit}}, {{source_branch}}, {{target_dir}}, {{failure_tail}} -->
-Commit {{failing_commit}} from branch {{source_branch}} was just rebased onto the merge target in the worktree at {{target_dir}}, and the repository's test suite now FAILS there.
+Every commit of branch {{source_branch}} was just rebased onto the merge target in the worktree at {{target_dir}}, and the repository's test suite FAILS on the resulting head {{failing_commit}}. The suite runs once per merge, on that head, so the failure is a fact about the whole rebased line rather than about any one commit of it.
 
 That worktree is a TEMPORARY REBASE WORKTREE, not the merge target and not your own workspace. The merge target has not been modified at all and will not be until the whole rebase passes, so the failing state exists only in that worktree.
 

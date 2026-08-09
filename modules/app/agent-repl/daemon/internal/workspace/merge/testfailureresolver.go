@@ -29,7 +29,7 @@ import (
 const testFailureTailPromptBytes = 4000
 
 // TestFailureResolution is the fact set merge.Coordinator hands the resolver
-// when a cherry-picked commit leaves the target's test suite failing.
+// when the fully rebased line leaves the target's test suite failing.
 type TestFailureResolution struct {
 	// Workspace is the daemon's WORKSPACE KEY (Request.Workspace) — the session
 	// whose shim is asked to fix the suite, and the key the merge lease is held
@@ -38,13 +38,14 @@ type TestFailureResolution struct {
 	// RequestID is the id the resolution prompt is submitted under, minted per
 	// attempt.
 	RequestID string
-	// FailingCommit is the short SHA of the commit whose cherry-pick left the
-	// suite failing.
+	// FailingCommit is the short SHA the failing gate is attributed to — the
+	// rebased head the suite was run on, held STABLE across a re-gate so one
+	// failure earns one attempt. See merge.Result.FailingCommit.
 	FailingCommit string
-	// SourceBranch is the branch that commit is being replayed from.
+	// SourceBranch is the branch the rebased line is being replayed from.
 	SourceBranch string
 	// TargetDir is the worktree the agent fixes IN, which is the temporary
-	// REBASE WORKTREE rather than the merge target: the failing commit was
+	// REBASE WORKTREE rather than the merge target: the failing line was
 	// replayed there and the target carries nothing of this merge yet. The name
 	// is kept because the prompt's {{target_dir}} placeholder is user-editable
 	// text this field fills.

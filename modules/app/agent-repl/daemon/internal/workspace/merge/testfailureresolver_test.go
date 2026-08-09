@@ -129,10 +129,16 @@ func TestTestFixRequestIDsAreDistinctFromConflictResolutionIDs(t *testing.T) {
 // true now — the commit is in a temporary rebase worktree and the target was
 // never modified — so the golden would have been pinning a false statement to an
 // agent. Exact equality against one literal, unchanged.
+//
+// AMENDED AGAIN for the single head gate. The opening line said one COMMIT had
+// been rebased and broke the suite; the suite now runs once, on the head of the
+// whole rebased line, so the sha the agent is given names that head. Telling it
+// otherwise would send it hunting through one commit for a failure the merge
+// attributes to the range.
 func TestTestFailurePromptMatchesTheGolden(t *testing.T) {
 	// Arrange.
 	usePrompts(t)
-	want := "Commit abc1234 from branch feature/a was just rebased onto the merge target in the worktree at /target, and the repository's test suite now FAILS there.\n" +
+	want := "Every commit of branch feature/a was just rebased onto the merge target in the worktree at /target, and the repository's test suite FAILS on the resulting head abc1234. The suite runs once per merge, on that head, so the failure is a fact about the whole rebased line rather than about any one commit of it.\n" +
 		"\n" +
 		"That worktree is a TEMPORARY REBASE WORKTREE, not the merge target and not your own workspace. The merge target has not been modified at all and will not be until the whole rebase passes, so the failing state exists only in that worktree.\n" +
 		"\n" +
