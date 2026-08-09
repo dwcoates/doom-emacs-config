@@ -99,6 +99,19 @@ func TestE2EAGatedStaleRefreshRunsAtTheTurnBoundary(t *testing.T) {
 	first.bounce()
 	second := world.boot(t, withBootShimBuild("sha-new"))
 	_, afterConn, _ := reattached(t, second, cwd)
+	// THE REATTACH IS OBSERVED BEFORE THE STOP IS SENT, exactly as the
+	// non-interruption sibling above observes it. `reattached` fires the boot
+	// sweep's re-check pass; the pass that CLAIMS the surviving shim runs behind
+	// it, and until it has, the successor drives no session controller for this
+	// workspace and a stop has nothing to travel over. Sending one into that
+	// window measures the reattach's timing rather than the lease, and the
+	// boundary this test is about would never be reported at all.
+	awaitAll(t, afterConn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+		"a WorkspaceState from the successor reporting the turn ACTIVE — the reattach the stop below must be delivered through": func(frame *frontendv1.FrontendFrame) bool {
+			state := workspaceStateFor(frame, cwd)
+			return state != nil && state.GetTurnActive()
+		},
+	})
 	if got := second.spawnedShims(); got != 0 {
 		t.Fatalf("the successor exec'd %d shim(s) BEFORE the turn boundary, want 0: the deferral this test is about never happened, so what follows would be measuring an ungated restart", got)
 	}
