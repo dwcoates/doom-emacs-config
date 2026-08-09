@@ -253,8 +253,15 @@ func newHarnessWith(t testing.TB, extra Config) *harness {
 	cfg.Logf = logf
 	cfg.Registry = reg
 	cfg.Controller = controller
-	cfg.SSM = mgr
-	cfg.Frontend = fe
+	// The frontend surface WHOLE, exactly as production hands it over: the
+	// resolved-view publisher travels with the fan-out it pushes through, so
+	// this harness cannot be the half-wired server that made the token
+	// breakdown unreachable.
+	cfg.AgentShim = &AgentShim{
+		SSM:            mgr,
+		Server:         fe,
+		WorkspaceViews: NewWorkspaceViews(logf, fe, reg, NewSessionModelCatalogs(), nil, nil, mgr),
+	}
 	if cfg.ModelCatalogs == nil {
 		cfg.ModelCatalogs = NewSessionModelCatalogs()
 	}
@@ -1464,5 +1471,70 @@ func TestKnownReportsNonTerminalPresence(t *testing.T) {
 	}
 	if h.srv.known("s_absent") {
 		t.Fatal("known should be false for an absent record")
+	}
+}
+
+// --- the frontend surface is taken whole ----------------------------------
+//
+// Config.AgentShim replaced three separately-forgettable fields. The
+// publication funnel behind them (publishSessionDerivedViews) holds the only
+// call site of PublishTokenBreakdown, so a half-wired server used to make the
+// breakdown menu unreachable in perfect silence.
+
+func TestNewTakesTheResolvedViewPublisherWithTheFrameFanOut(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	wired := h.srv.workspaceViews != nil
+
+	// Assert
+	if !wired {
+		t.Fatal("a server handed a frontend surface has no resolved-view publisher: PublishTokenBreakdown's only call site sits behind a guard that can then never open")
+	}
+}
+
+func TestNewTakesTheStateMachineWithTheFrameFanOut(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	wired := h.srv.ssm != nil
+
+	// Assert
+	if !wired {
+		t.Fatal("a server handed a frontend surface has no state machine: there is nothing to read the fence the resolved views are stamped with")
+	}
+}
+
+func TestAServerWithNoFrontendSurfaceRecordsTheViewsItCannotPublish(t *testing.T) {
+	// Arrange
+	var lines []string
+	srv := New(Config{
+		Logf:          func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) },
+		ModelCatalogs: NewSessionModelCatalogs(),
+	})
+
+	// Act
+	srv.publishSessionDerivedViews("/ws", "s1", nil)
+
+	// Assert
+	if len(lines) != 1 || !strings.Contains(lines[0], "NOT PUBLISHED") {
+		t.Fatalf("log = %v, want one NOT PUBLISHED record: an unwired frontend surface returning in silence is exactly how the breakdown menu went missing with nothing to say so", lines)
+	}
+}
+
+func TestAWorkspacelessSessionRecordsTheViewsItCannotKey(t *testing.T) {
+	// Arrange
+	var lines []string
+	h := newHarness(t)
+	h.srv.logf = func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+
+	// Act
+	h.srv.publishSessionDerivedViews("", "s1", nil)
+
+	// Assert
+	if len(lines) != 1 || !strings.Contains(lines[0], "names no workspace") {
+		t.Fatalf("log = %v, want one record naming the missing routing key", lines)
 	}
 }

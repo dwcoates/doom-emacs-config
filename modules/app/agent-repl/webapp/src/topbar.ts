@@ -31,11 +31,10 @@ import { agentSubagents, agentsMenuHtml, SUBAGENT_TOOLS } from "./agents.js";
 import { CounterEntry } from "./counter-menu.js";
 import { formatElapsed } from "./duration.js";
 import { escapeHtml } from "./highlight.js";
-import { ConversationItem, StoreState, ToolItem, topLevelUsage } from "./store.js";
+import { ConversationItem, ToolItem } from "./store.js";
 import { agentTasks, tasksMenuHtml } from "./tasks.js";
 import { TIMER_SLOT } from "./timer.js";
 import { TokenMenuData, formatTokens, tokensMenuHtml } from "./tokens.js";
-import { accountingSummary, latestTurnAccounting } from "./turn-accounting.js";
 
 /**
  * One scope's values for every datapoint the strip renders. Both builders
@@ -133,51 +132,26 @@ export function topbarInfoHtml(d: TopbarDatapoints, open: TopbarDisclosure): str
   return parts.join(" · ");
 }
 
-/**
- * The session's datapoints for the header strip: the parent workspace and the
- * session-scoped tokens dropdown, and nothing else.
- *
- * Three datapoints deliberately are NOT here:
- * - the turn clock, which moved into the progress footer's clock cell;
- * - the idle-with-live-async signal, which breathes as the sidebar's amber dot
- *   on the session's own row (see `WorkspaceSidebar.setMonitoring`);
- * - the subagent and task ROSTERS, which relocated into the progress footer's
- *   counters cluster. Tasks and subagents live and die within a session, so
- *   they are ephemeral state and belong beside the rest of it; the topbar keeps
- *   only the SESSION-scoped tokens figure. The AGENT-scoped strip
- *   (`agentTopbarDatapoints`) still carries its own rosters — a bubble's
- *   direct children are about that bubble, not about the session.
- */
-export function sessionTopbarDatapoints(
-  state: StoreState,
-  parentWs: string | null,
-): TopbarDatapoints {
-  return {
-    parentWs,
-    timerLabel: null,
-    // The session's tokens datapoint is the dropdown: the chip reads the
-    // session's CURRENT context size (`state.contextTokens`, the same
-    // figure the response bubble shows) and the overlay carries the
-    // cumulative input-side spend plus the whole-tree resolution.
-    contextTokens: null,
-    tokenMenu: {
-      contextSize: state.contextTokens,
-      topLevel: topLevelUsage(state),
-      models: state.modelUsage,
-      ...(state.tokenUtilization === null || state.tokenUtilization === undefined
-        ? {}
-        : { sessionUtilization: state.tokenUtilization }),
-    },
-    agents: [],
-    tasks: [],
-  };
-}
-
-/** Latest terminal-turn accounting projection for the session chrome. */
-export function sessionAccountingLabel(state: StoreState): string | null {
-  const accounting = latestTurnAccounting(state.items);
-  return accounting === null ? null : accountingSummary(accounting);
-}
+// RETIRED: `sessionTopbarDatapoints` and `sessionAccountingLabel`.
+//
+// Both existed to project store state into the SESSION header strip, and the
+// session header is no longer composed here: it renders the daemon's resolved
+// `TopbarView` through `topbar-view.ts` (title, session line, model selector,
+// connectivity, accounting line) and its resolved `TokenBreakdownView` through
+// `token-breakdown-view.ts`. Their only caller was main.ts's `renderChrome`,
+// which now calls those renderers instead.
+//
+// They are DELETED rather than kept as a fallback for a workspace whose views
+// have not been published: a client-composed stand-in is indistinguishable on
+// screen from a real resolution, which is the confusion the resolved views
+// exist to end (invariant I3, absence renders absence). The daemon and this
+// webapp deploy together, so there is no window in which the views are missing
+// and the strip would have had to cover for them.
+//
+// Everything else in this module STAYS: `topbarInfoHtml`, `topbarClickAction`
+// and `agentTopbarDatapoints` still draw and route the per-AGENT bubble strips
+// (see `agentTopbarHtml` below and render.ts), which are a different surface
+// with no resolved daemon view of their own.
 
 /**
  * How long the agent's call has run: from its `tool-use-start` stamp to

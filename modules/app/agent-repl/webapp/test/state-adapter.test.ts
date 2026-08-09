@@ -4,6 +4,7 @@
  * explicit-ignore path for unsupported shapes. One edge per test (AAA).
  */
 import { describe, expect, it } from "vitest";
+import { failureSide } from "../src/failure-card.js";
 import { create } from "@bufbuild/protobuf";
 import {
   QueryTerminationFailureSchema,
@@ -12,7 +13,7 @@ import { QueryStartupFailureSchema } from "../../proto/gen/ts/agentshim/core/v1/
 import { decodeFrontendFrame } from "../src/frontend-proto.js";
 import {
   StateAdapter,
-  systemFailureFrom,
+  asyncAgentItems,
   userTurnReceipt,
   type AdapterEffect,
   type AdapterLogLevel,
@@ -23,7 +24,7 @@ import type {
   ConversationItem,
   PermissionItem,
   ResultItem,
-  SystemFailureCard,
+  FailureCardItem,
   TextItem,
   ThinkingItem,
   ToolItem,
@@ -91,6 +92,7 @@ describe("WorkspaceState mapping", () => {
         value: {
           workspace: "ws-a",
           sessionId: "s1",
+          fence: "",
           state: "thinking",
           turnActive: true,
           liveTaskCount: 2,
@@ -271,11 +273,9 @@ describe("SessionView mapping", () => {
           configDir: "/home/u/.claude",
           models: [{ value: "claude-opus", displayName: "Opus", description: "highest capability" }],
           tokenUtilization: undefined,
-          // An awake session carries no hibernation detail, and the adapter
-          // normalizes that absence to an explicit null rather than leaving the
-          // key off: the store adopts this field WHOLESALE, so "awake" has to
-          // be a value it can write, not a key it never sees.
-          hibernation: null,
+          // NO HIBERNATION. The gate is the fenced, per-workspace
+          // WorkspaceGateView; this per-session catalog entry no longer feeds
+          // it, so the key is gone rather than normalized to null.
         },
       },
     ]);
@@ -399,7 +399,21 @@ describe("StateSnapshot mapping", () => {
         inits: [{ workspace: "w", fence: "s", init: { model: "m" } }],
       },
     });
-    expect(effects.map((e) => e.kind)).toEqual(["workspace-state", "session-view", "task-catalog", "session-init"]);
+    // The async-bubbles snapshot rides EVERY snapshot, including this one that
+    // carries none: an empty list is the daemon stating that no detached work
+    // is open, which is what retires bubbles a reconnecting client still holds.
+    expect(effects.map((e) => e.kind)).toEqual([
+      "workspace-state",
+      "session-view",
+      "task-catalog",
+      "session-init",
+      "async-bubbles-snapshot",
+    ]);
+  });
+
+  it("carries an empty bubble list when the snapshot names no detached work", () => {
+    const effects = applyOne({ snapshot: {} });
+    expect(effects).toEqual([{ kind: "async-bubbles-snapshot", bubbles: [] }]);
   });
 });
 
@@ -855,120 +869,143 @@ describe("apiError arm: RETIRED (step 11)", () => {
   });
 });
 
-describe("systemFailure arm", () => {
-  it("adopts the daemon's classified failure as a card", () => {
+describe("failureCard arm", () => {
+  it("adopts the daemon's resolved card, kind arm and all", () => {
     // Arrange / Act
     const items = itemsFrom({
       uuid: "failure:e9",
-      systemFailure: {
-        errorClass: "ERROR_CLASS_API",
-        errorType: "api.overloaded",
+      failureCard: {
+        kind: { apiOverloaded: { httpStatus: 529, attempts: 10 } },
         message: "the API is overloaded",
-        sourceDetail: "status=529",
+        detail: "status=529",
+        open: {},
       },
     });
     // Assert
-    const expected: SystemFailureCard = {
-      kind: "failure",
-      errorClass: "API",
-      errorType: "api.overloaded",
-      message: "the API is overloaded",
-      sourceDetail: "status=529",
-      resolvedAtMs: 0,
-      uuid: "failure:e9",
-      detail: { kind: "none" },
-    };
-    expect(items).toEqual([expected]);
+    const card = items[0] as FailureCardItem;
+    expect(card.view.message).toBe("the API is overloaded");
   });
 
-  it("adopts an INTERNAL class unchanged", () => {
+  it("puts a vendor arm on the vendor side", () => {
+    // Arrange / Act — the side decides the card's color, and it comes from the
+    // arm rather than from a class field that could disagree with it.
+    const items = itemsFrom({
+      uuid: "failure:e9",
+      failureCard: {
+        kind: { apiOverloaded: {} },
+        message: "the API is overloaded",
+        terminal: {},
+      },
+    });
+    // Assert
+    expect(failureSide((items[0] as FailureCardItem).view.kind)).toBe("vendor");
+  });
+
+  it("puts a machinery arm on the machinery side", () => {
     // Arrange / Act
     const items = itemsFrom({
       uuid: "degraded:s1:shim-connection",
-      systemFailure: {
-        errorClass: "ERROR_CLASS_INTERNAL",
-        errorType: "shim.degraded",
+      failureCard: {
+        kind: { shimDegraded: { component: "connection" } },
         message: "no traffic",
+        open: {},
       },
     });
     // Assert
-    expect((items[0] as SystemFailureCard).errorClass).toBe("INTERNAL");
+    expect(failureSide((items[0] as FailureCardItem).view.kind)).toBe("machinery");
   });
 
-  it("preserves query-termination evidence through the conversation-item path", () => {
+  it("preserves query-termination evidence on the arm that carries it", () => {
+    // Arrange / Act
     const items = itemsFrom({
       uuid: "failure:termination",
-      systemFailure: {
-        errorClass: "ERROR_CLASS_INTERNAL",
-        errorType: "unexpected_query_termination",
+      failureCard: {
+        kind: {
+          queryTermination: {
+            detail: {
+              queryInstanceId: "query-1",
+              vendorSessionId: "claude-1",
+              observedAtMs: "1700000000000",
+              unexpectedEof: {},
+            },
+          },
+        },
         message: "query ended",
-        queryTermination: { queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} },
+        terminal: {},
       },
     });
-    const detail = (items[0] as SystemFailureCard).detail;
-    expect(detail.kind).toBe("queryTermination");
-    if (detail.kind !== "queryTermination") throw new Error("wrong detail");
-    expect(detail.value.queryInstanceId).toBe("query-1");
-    expect(detail.value.vendorIdentity).toEqual({ case: "vendorSessionId", value: "claude-1" });
-    expect(detail.value.observedAtMs).toBe(1700000000000n);
-    expect(detail.value.reason.case).toBe("unexpectedEof");
-  });
-
-  it("preserves query-termination evidence through the decoded failure path", () => {
-    const card = systemFailureFrom({
-      errorClass: "INTERNAL",
-      errorType: "unexpected_query_termination",
-      message: "query ended",
-      sourceDetail: "iterator stopped",
-      resolvedAtMs: 0,
-      itemUuid: "failure:termination",
-      detail: { kind: "queryTermination", value: create(QueryTerminationFailureSchema, { queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) },
-    });
-    expect(card.detail).toEqual({ kind: "queryTermination", value: create(QueryTerminationFailureSchema, { queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) });
+    // Assert
+    const kind = (items[0] as FailureCardItem).view.kind.kind;
+    if (kind.case !== "queryTermination") throw new Error("wrong arm");
+    expect(kind.value.detail?.queryInstanceId).toBe("query-1");
   });
 
   it("carries the resolution stamp that settles a window", () => {
     // Arrange / Act — the closing edge of a degraded window.
     const items = itemsFrom({
       uuid: "degraded:s1:shim-connection",
-      systemFailure: {
-        errorClass: "ERROR_CLASS_INTERNAL",
-        errorType: "shim.degraded",
+      failureCard: {
+        kind: { shimDegraded: { component: "connection" } },
         message: "no traffic",
-        resolvedAtMs: "1700000000000",
+        resolved: { resolvedAtMs: "1700000000000" },
       },
     });
     // Assert
-    expect((items[0] as SystemFailureCard).resolvedAtMs).toBe(1700000000000);
+    expect((items[0] as FailureCardItem).view.lifecycle).toEqual({
+      case: "resolved",
+      resolvedAtMs: 1700000000000,
+    });
   });
 
-  it("carries the item uuid so the footer's error row can address it", () => {
+  it("carries the item uuid so the footer's failure row can reveal it", () => {
     // Arrange / Act
     const items = itemsFrom({
       uuid: "failure:e9",
-      systemFailure: {
-        errorClass: "ERROR_CLASS_API",
-        errorType: "api.overloaded",
-        message: "boom",
-      },
+      failureCard: { kind: { apiOverloaded: {} }, message: "boom", terminal: {} },
     });
     // Assert
-    expect((items[0] as SystemFailureCard).uuid).toBe("failure:e9");
+    expect((items[0] as FailureCardItem).uuid).toBe("failure:e9");
   });
 
-  it("throws on an unrecognized class rather than guessing a color", () => {
-    // Arrange / Act / Assert — the class decides the card's color, so a
-    // default would paint a failure the wrong color, quietly.
+  it("throws on an UNSET kind rather than rendering a generic error", () => {
+    // Arrange / Act / Assert — a card that cannot say what failed is malformed,
+    // and a generic error card is worse than a loud refusal because it looks
+    // like an answer.
+    expect(() =>
+      itemsFrom({ uuid: "f1", failureCard: { kind: {}, message: "y", terminal: {} } }),
+    ).toThrow(/sets no failure kind/);
+  });
+
+  it("throws on a DOUBLE-SET kind rather than picking one", () => {
+    // Arrange / Act / Assert
     expect(() =>
       itemsFrom({
         uuid: "f1",
-        systemFailure: {
-          errorClass: "ERROR_CLASS_SOMETHING_NEW",
-          errorType: "x",
+        failureCard: {
+          kind: { apiOverloaded: {}, shimDegraded: {} },
           message: "y",
+          terminal: {},
         },
       }),
-    ).toThrow(/error_class has unrecognized value/);
+    ).toThrow(/FailureKind contract/);
+  });
+
+  it("throws when the lifecycle arm is missing", () => {
+    // Arrange / Act / Assert — an open alarm and a settled one are different
+    // news, and neither may be assumed.
+    expect(() =>
+      itemsFrom({ uuid: "f1", failureCard: { kind: { apiOverloaded: {} }, message: "y" } }),
+    ).toThrow(/exactly one lifecycle arm/);
+  });
+
+  it("throws when TWO lifecycle arms are set", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      itemsFrom({
+        uuid: "f1",
+        failureCard: { kind: { apiOverloaded: {} }, message: "y", open: {}, terminal: {} },
+      }),
+    ).toThrow(/exactly one lifecycle arm/);
   });
 });
 
@@ -1775,5 +1812,258 @@ describe("shutdown schedule", () => {
     adapter.apply(frame({ shutdownSchedule: { draining: DRAINING } }));
     // Assert
     expect(lines.join("\n")).toContain("shutdown schedule state=draining schedule=sched-1 holds=1");
+  });
+});
+
+// --- the resolved component views route through ONE effect kind -------------
+//
+// The three views share one `fenced-view` effect ON PURPOSE: the store has one
+// ingestion case for that kind and that case calls the fence gate, so a view
+// cannot reach a slice by any other route. These tests pin the routing, which
+// is the half of the invariant the store's own suite cannot see.
+
+describe("the fenced-view routing", () => {
+  const TOPBAR = {
+    workspace: "/ws",
+    title: "t",
+    sessionLine: "",
+    modelDisplay: "",
+    modelOptions: [],
+    accountingLine: "",
+    fence: "f1",
+  };
+  const BREAKDOWN = { workspace: "/ws", fence: "f1", sections: [] };
+  const GATE = { workspace: "/ws", fence: "f1", open: {} };
+
+  function effectsFor(frame: Record<string, unknown>) {
+    return new StateAdapter().apply(decodeFrontendFrame(JSON.stringify(frame)));
+  }
+
+  it("routes a topbar frame to the one fenced-view effect kind", () => {
+    // Arrange / Act
+    const effects = effectsFor({ topbar: TOPBAR });
+    // Assert
+    expect(effects).toEqual([
+      { kind: "fenced-view", value: { case: "topbar", value: expect.anything() } },
+    ]);
+  });
+
+  it("routes a token-breakdown frame to the SAME effect kind", () => {
+    // Arrange / Act
+    const effects = effectsFor({ tokenBreakdown: BREAKDOWN });
+    // Assert
+    expect(effects).toEqual([
+      { kind: "fenced-view", value: { case: "tokenBreakdown", value: expect.anything() } },
+    ]);
+  });
+
+  it("routes a workspace-gate frame to the SAME effect kind", () => {
+    // Arrange / Act
+    const effects = effectsFor({ workspaceGate: GATE });
+    // Assert
+    expect(effects).toEqual([
+      { kind: "fenced-view", value: { case: "workspaceGate", value: expect.anything() } },
+    ]);
+  });
+
+  it("never emits a per-view effect kind that would bypass the gate", () => {
+    // Arrange / Act — a second kind is a second store case and a second chance
+    // to skip the comparison.
+    const kinds = new Set(
+      [{ topbar: TOPBAR }, { tokenBreakdown: BREAKDOWN }, { workspaceGate: GATE }].flatMap(
+        (frame) => effectsFor(frame).map((effect) => effect.kind),
+      ),
+    );
+    // Assert
+    expect([...kinds]).toEqual(["fenced-view"]);
+  });
+
+  it("fans the snapshot's views out through the same kind", () => {
+    // Arrange / Act
+    const effects = effectsFor({
+      snapshot: { topbars: [TOPBAR], tokenBreakdowns: [BREAKDOWN], workspaceGates: [GATE] },
+    });
+    // Assert
+    expect(effects.filter((effect) => effect.kind === "fenced-view")).toHaveLength(3);
+  });
+
+  it("puts the snapshot's WORKSPACES before its views", () => {
+    // Arrange — the gate measures a view against the store's current fence, so
+    // a view folded before the ruling that establishes it would be discarded
+    // as stale on the very snapshot that carries both.
+    const effects = effectsFor({
+      snapshot: {
+        workspaces: [
+          {
+            workspace: "/ws",
+            sessionId: "s1",
+            fence: "f1",
+            state: "RENDER_STATE_IDLE",
+            connectivity: "SESSION_CONNECTIVITY_OPERATIONAL",
+            status: "SESSION_STATUS_READY",
+            controllerGenerationId: "g1",
+            activeFaults: [],
+          },
+        ],
+        topbars: [TOPBAR],
+      },
+    });
+    // Act
+    const kinds = effects.map((effect) => effect.kind);
+    // Assert
+    expect(kinds.indexOf("workspace-state")).toBeLessThan(kinds.indexOf("fenced-view"));
+  });
+
+  it("counts none of the three as an unsupported shape", () => {
+    // Arrange / Act — they are rendered, not ignored.
+    const adapter = new StateAdapter();
+    adapter.apply(decodeFrontendFrame(JSON.stringify({ topbar: TOPBAR })));
+    // Assert
+    expect(adapter.ignoredCounts().size).toBe(0);
+  });
+});
+
+// --- detached work: the seam and the shared decomposition -------------------
+
+describe("async bubble effects", () => {
+  const BUBBLE = { id: "b1", liveness: { live: {} }, agent: {} };
+
+  it("forwards an async push WHOLE, unprojected and unsplit", () => {
+    // Arrange / Act
+    const effects = applyOne({
+      asyncBubbleDelta: { workspace: "/w", fence: "f1", opened: [BUBBLE], throughSeq: "7" },
+    });
+
+    // Assert
+    expect(effects).toEqual([
+      {
+        kind: "async-bubble-delta",
+        value: {
+          workspace: "/w",
+          fence: "f1",
+          opened: [expect.objectContaining({ id: "b1" })],
+          updates: [],
+          throughSeq: 7,
+        },
+      },
+    ]);
+  });
+
+  it("lifts a feed-anchored bubble onto the async seam instead of the item list", () => {
+    // Arrange / Act
+    const effects = applyOne({
+      conversationDelta: {
+        workspace: "ws",
+        fence: "s1",
+        throughSeq: "3",
+        items: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
+      },
+    });
+
+    // Assert — the conversation effect carries NO item for it.
+    const items = effects.find((e) => e.kind === "conversation-items");
+    expect(items?.kind === "conversation-items" && items.items).toEqual([]);
+  });
+
+  it("shapes the anchored bubbles as a push carrying the delta's own fence", () => {
+    // Arrange / Act
+    const effects = applyOne({
+      conversationDelta: {
+        workspace: "ws",
+        fence: "s1",
+        throughSeq: "3",
+        items: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
+      },
+    });
+
+    // Assert
+    const anchored = effects.find((e) => e.kind === "async-bubble-anchored");
+    expect(anchored?.kind === "async-bubble-anchored" && anchored.value.fence).toBe("s1");
+  });
+
+  it("emits NO anchored effect for a delta that anchored nothing", () => {
+    // Arrange / Act
+    const effects = applyOne({
+      conversationDelta: { workspace: "ws", fence: "s1", throughSeq: "3", items: [] },
+    });
+
+    // Assert
+    expect(effects.some((e) => e.kind === "async-bubble-anchored")).toBe(false);
+  });
+});
+
+describe("asyncAgentItems — a detached agent decomposed by the FEED's own path", () => {
+  it("produces the same store item a top-level assistant message would", () => {
+    // Arrange
+    const emissions = [
+      {
+        emission: "response" as const,
+        arm: "assistantMessage" as const,
+        payload: { id: "m1", content: [{ text: { text: "hello" } }] },
+      },
+    ];
+
+    // Act
+    const built = asyncAgentItems(emissions, "b1", 1700000000000);
+
+    // Assert
+    expect(built.items.map((i) => i.kind)).toEqual(["text"]);
+  });
+
+  it("scopes the synthesized uuid to the bubble and the emission's position", () => {
+    // Arrange
+    const emissions = [
+      { emission: "toolCall" as const, arm: "toolUse" as const, payload: { id: "tu1", name: "Read" } },
+    ];
+
+    // Act
+    const built = asyncAgentItems(emissions, "b1", 0);
+
+    // Assert — two bubbles' emissions can never collide on a store key.
+    expect(built.items[0].kind === "tool" && built.items[0].messageId).toBe("b1#0");
+  });
+
+  it("carries a NESTED spawn's verdict through, so a child bubble attaches inside", () => {
+    // Arrange
+    const emissions = [
+      {
+        emission: "toolCall" as const,
+        arm: "toolUse" as const,
+        payload: { id: "tu1", name: "Task" },
+        spawnedBubbleId: "b2",
+      },
+    ];
+
+    // Act
+    const built = asyncAgentItems(emissions, "b1", 0);
+
+    // Assert
+    expect(built.items[0].kind === "tool" && built.items[0].spawnedBubbleId).toBe("b2");
+  });
+
+  it("takes the emission's timestamp from the BUBBLE's launch stamp", () => {
+    // Arrange
+    const emissions = [
+      { emission: "toolCall" as const, arm: "toolUse" as const, payload: { id: "tu1", name: "Read" } },
+    ];
+
+    // Act
+    const built = asyncAgentItems(emissions, "b1", 1700000000000);
+
+    // Assert
+    expect(built.items[0].kind === "tool" && built.items[0].ts).toBe(new Date(1700000000000).toISOString());
+  });
+
+  it("routes an emission with no webapp visual down the explicit-ignore path", () => {
+    // Arrange — a typed outcome has no correlation key on the arm.
+    const emissions = [
+      { emission: "toolOutcome" as const, arm: "toolUseResult" as const, payload: {} },
+    ];
+
+    // Act
+    const built = asyncAgentItems(emissions, "b1", 0);
+
+    // Assert
+    expect(built).toEqual({ items: [], ignores: ["conversation-item:toolUseResult"] });
   });
 });

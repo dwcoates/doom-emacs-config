@@ -52,7 +52,7 @@ func mustStructT(t *testing.T, m map[string]any) *structpb.Struct {
 	return s
 }
 
-// --- ConversationDeltaFromEvent: the typed ConversationItem contract --------
+// --- conversationDeltaFromEvent: the typed ConversationItem contract --------
 
 func TestConversationDeltaFromEvent(t *testing.T) {
 	// Reusable typed payloads so want/event share the exact same sub-message.
@@ -220,7 +220,7 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got, _, err := ConversationDeltaFromEvent("ws", "s1", tc.event)
+			got, _, err := conversationDeltaFromEvent("ws", "s1", tc.event)
 			// Assert.
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -243,7 +243,7 @@ func TestConversationDeltaFromEventCorruptVendorErrors(t *testing.T) {
 	}
 
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", "s1", ev)
+	got, _, err := conversationDeltaFromEvent("ws", "s1", ev)
 
 	// Assert: hard error, never a silent nil.
 	if err == nil {
@@ -282,7 +282,7 @@ func TestConversationDeltaFromEventTranscriptAssistantUsesEnvelopeTs(t *testing.
 	}
 
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", "s1", ev)
+	got, _, err := conversationDeltaFromEvent("ws", "s1", ev)
 
 	// Assert.
 	if err != nil {
@@ -310,9 +310,9 @@ func thinkingEmissions(t *testing.T, msg *datav1.ApiAssistantMessage) []*fronten
 			Uuid: "env-1", Message: msg,
 		})},
 	}
-	got, _, err := ConversationDeltaFromEvent("ws", "s1", ev)
+	got, _, err := conversationDeltaFromEvent("ws", "s1", ev)
 	if err != nil {
-		t.Fatalf("ConversationDeltaFromEvent: %v", err)
+		t.Fatalf("conversationDeltaFromEvent: %v", err)
 	}
 	var out []*frontendv1.AgentThinking
 	for _, item := range got.GetItems() {
@@ -399,9 +399,9 @@ func TestTheStrippedBodyKeepsTheBlocksTheEmissionsLeftBehind(t *testing.T) {
 	}
 
 	// Act
-	got, _, err := ConversationDeltaFromEvent("ws", "s1", ev)
+	got, _, err := conversationDeltaFromEvent("ws", "s1", ev)
 	if err != nil {
-		t.Fatalf("ConversationDeltaFromEvent: %v", err)
+		t.Fatalf("conversationDeltaFromEvent: %v", err)
 	}
 
 	// Assert
@@ -438,7 +438,7 @@ func TestConversationDeltaFromEventTranscriptApiErrorMidBackoffCuratesToNothing(
 		})},
 	}
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", "s1", ev)
+	got, _, err := conversationDeltaFromEvent("ws", "s1", ev)
 
 	// Assert.
 	if err != nil {
@@ -529,7 +529,7 @@ func TestQueryTerminationFailureRejectsMissingIdentity(t *testing.T) {
 func TestATerminalApiErrorGetsAFailureCard(t *testing.T) {
 	// Arrange: retries exhausted.
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 10, 10))
+	got, _, err := conversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 10, 10))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -542,7 +542,7 @@ func TestATerminalApiErrorGetsAFailureCard(t *testing.T) {
 func TestAMidBackoffApiErrorGetsNoFailureCard(t *testing.T) {
 	// Arrange: the SDK will try again.
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 2, 10))
+	got, _, err := conversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 2, 10))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -558,7 +558,7 @@ func TestTheFailureCardIsTheOnlyItem(t *testing.T) {
 	// to ride beside the card is gone, so a terminal failure curates to
 	// exactly the card and nothing else.
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 10, 10))
+	got, _, err := conversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 10, 10))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -572,7 +572,7 @@ func TestTheFailureCardUuidIsDerivedFromTheLine(t *testing.T) {
 	// Arrange: a derived uuid cannot collide with the legacy item's and stays
 	// stable across a resync, which a freshly minted one would not.
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 10, 10))
+	got, _, err := conversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 10, 10))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -585,7 +585,7 @@ func TestTheFailureCardUuidIsDerivedFromTheLine(t *testing.T) {
 func TestTheFailureCardClassifiesTheStatus(t *testing.T) {
 	// Arrange: a 529 is overload, which the raw line never said in words.
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 10, 10))
+	got, _, err := conversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 10, 10))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
