@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { METAPROMPT_REL_PATH } from "../src/metaprompt.js";
+import { metapromptPath } from "../src/metaprompt.js";
 
 // runUdsMode's own dependencies (the session lock and the owned SDK session)
 // are mocked so its exit-trace test below exercises only the signal/exit
@@ -60,10 +60,33 @@ import {
   validateUdsLoggingArgs,
 } from "../src/main.js";
 
-const metapromptRoots: string[] = [];
-afterEach(() => {
-  metapromptRoots.splice(0).forEach((r) => fs.rmSync(r, { recursive: true, force: true }));
+// The metaprompt is resolved from the canonical doom checkout under HOME, so
+// every test in this file runs against a throwaway home. Without the swap the
+// options builders would read the developer's real metaprompt and the
+// assertions below would depend on a file outside the repository.
+const metapromptHomes: string[] = [];
+let realHome: string | undefined;
+beforeEach(() => {
+  realHome = process.env.HOME;
+  process.env.HOME = makeMetapromptHome();
 });
+afterEach(() => {
+  if (realHome === undefined) delete process.env.HOME;
+  else process.env.HOME = realHome;
+  metapromptHomes.splice(0).forEach((r) => fs.rmSync(r, { recursive: true, force: true }));
+});
+
+/** A throwaway HOME, optionally carrying a doom checkout holding BODY. */
+function makeMetapromptHome(body?: string): string {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "shim-main-metaprompt-"));
+  metapromptHomes.push(home);
+  if (body !== undefined) {
+    const file = metapromptPath(home);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, body, "utf8");
+  }
+  return home;
+}
 
 describe("parseArgs", () => {
   it("defaults to real SDK mode with a generated session id and default mode", () => {
@@ -243,15 +266,13 @@ describe("realQueryOptions", () => {
     expect(opts.includePartialMessages).toBe(true);
   });
 
-  it("appends the cwd's metaprompt to the system prompt", () => {
-    // Arrange: a checkout carrying a metaprompt at the in-repo path.
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "shim-main-metaprompt-"));
-    metapromptRoots.push(root);
-    const file = path.join(root, METAPROMPT_REL_PATH);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, "Answer as a TLDR tree.\n", "utf8");
+  it("appends the canonical metaprompt to the system prompt", () => {
+    // Arrange: a home carrying the doom checkout's metaprompt, and a session
+    // rooted somewhere else entirely.
+    process.env.HOME = makeMetapromptHome("Answer as a TLDR tree.\n");
+    const cwd = makeMetapromptHome();
     // Act
-    const opts = realQueryOptions(parseArgs(["--session-id", "s1", "--cwd", root]), noopCanUse);
+    const opts = realQueryOptions(parseArgs(["--session-id", "s1", "--cwd", cwd]), noopCanUse);
     // Assert — the guidelines reach the agent as system prompt rather than
     // as a read-directive injected into the conversation, so they survive
     // `/clear`, `/compact`, and resume without anything re-firing them.
