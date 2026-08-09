@@ -6231,6 +6231,7 @@ describe("a tool card's detached work", () => {
   function agentBubble(id: string, emissions: UnwrappedEmission[] = []): AsyncBubble {
     return {
       id,
+      workspace: "/w",
       originToolUseId: "w1",
       parentBubbleId: "",
       label: "detached work",
