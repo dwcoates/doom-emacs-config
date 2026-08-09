@@ -661,7 +661,16 @@ func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1
 			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 			Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
 				Emission: &frontendv1.AgentEmission_Thinking{
-					Thinking: &frontendv1.AgentThinking{Body: t},
+					// The daemon did the stripping, so the daemon states where the
+					// block came from: the message's own id and the block's position
+					// in the pre-strip content array. A live preview is keyed by that
+					// pair, so this is what lets a settled block replace its preview
+					// instead of appending beside it.
+					Thinking: &frontendv1.AgentThinking{
+						Body:         t.block,
+						ApiMessageId: msg.GetId(),
+						BlockIndex:   int32(t.index),
+					},
 				},
 			}},
 		})
@@ -683,16 +692,25 @@ func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1
 	})
 }
 
+// strippedThinking is a reasoning block together with the position it occupied
+// in its message's original content array. The index is captured at the strip
+// because it is unrecoverable afterwards: the body the frontend receives has
+// the reasoning removed, so nothing downstream can count back to it.
+type strippedThinking struct {
+	block *datav1.ThinkingBlock
+	index int
+}
+
 // splitThinking separates an assistant message's reasoning blocks from the rest
 // of its body. The returned message is a copy: the durable original is evidence
 // and is never mutated to make a rendering decision.
-func splitThinking(msg *datav1.ApiAssistantMessage) ([]*datav1.ThinkingBlock, *datav1.ApiAssistantMessage) {
-	var thinking []*datav1.ThinkingBlock
+func splitThinking(msg *datav1.ApiAssistantMessage) ([]strippedThinking, *datav1.ApiAssistantMessage) {
+	var thinking []strippedThinking
 	body := proto.Clone(msg).(*datav1.ApiAssistantMessage)
 	kept := body.GetContent()[:0]
-	for _, block := range body.GetContent() {
+	for i, block := range body.GetContent() {
 		if t := block.GetThinking(); t != nil {
-			thinking = append(thinking, t)
+			thinking = append(thinking, strippedThinking{block: t, index: i})
 			continue
 		}
 		kept = append(kept, block)
