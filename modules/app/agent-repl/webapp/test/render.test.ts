@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { QueryTerminationFailureSchema } from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
+import {
+  QueryTerminationFailureSchema,
+} from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
 import {
   QueryIteratorFailureSchema,
   QueryStartupFailureSchema,
@@ -5570,7 +5572,6 @@ function queryTerminationFailure(kind: "unexpectedEof" | "iteratorFailure" | "st
       ? { case: "iteratorFailure" as const, value: create(QueryIteratorFailureSchema, { cause: "child exited 137" }) }
       : { case: "startupFailure" as const, value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) };
   return create(QueryTerminationFailureSchema, {
-    agentReplSessionId: "session-1",
     queryInstanceId: "query-1",
     vendorIdentity: { case: "vendorSessionId", value: "claude-1" },
     observedAtMs: 1700000000000n,
@@ -5671,7 +5672,6 @@ describe("the system-failure card", () => {
   ])("renders every query-termination identity and the %s cause", (kind, causeText) => {
     const html = renderItem(failure({ detail: { kind: "queryTermination", value: queryTerminationFailure(kind) } }));
     expect(html).toContain(causeText);
-    expect(html).toContain("agent-repl session: session-1");
     expect(html).toContain("query instance: query-1");
     expect(html).toContain("vendor session: claude-1");
     expect(html).toContain("observed_at_ms: 1700000000000");
@@ -5679,7 +5679,7 @@ describe("the system-failure card", () => {
 
   it("renders exact query evidence nested inside an automatic-resume failure", () => {
     const html = renderItem(failure({ detail: { kind: "sessionResume", value: {
-      agentReplSessionId: "session-1", claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", attempt: "automaticRestore",
+      claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", attempt: "automaticRestore",
       cause: { case: "queryTermination", value: queryTerminationFailure("startupFailure") },
     } } }));
     expect(html).toContain("resume blocked during automatic restoration");
@@ -5689,7 +5689,7 @@ describe("the system-failure card", () => {
 
   it("renders a non-query exact-resume bring-up cause", () => {
     const html = renderItem(failure({ detail: { kind: "sessionResume", value: {
-      agentReplSessionId: "session-1", claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", attempt: "automaticRestore",
+      claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", attempt: "automaticRestore",
       cause: { case: "bringUpFailure", cause: "readiness timed out" },
     } } }));
     expect(html).toContain("bring-up failure: readiness timed out");

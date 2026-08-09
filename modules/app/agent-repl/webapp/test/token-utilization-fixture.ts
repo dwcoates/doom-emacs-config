@@ -2,13 +2,13 @@ import type { TokenUtilization } from "../src/frontend-proto.js";
 import { create } from "@bufbuild/protobuf";
 import {
   SessionTokenUtilizationSchema,
-  VendorTokenUsageSchema,
   TokenUsageTotalsSchema,
   TokenUtilizationSchema,
   TokenUtilizationSubagentSchema,
+  VendorTokenUsageSchema,
   type SessionTokenUtilization,
   type TokenUtilization as GeneratedTokenUtilization,
-} from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
+} from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
 import { ApiUsageSchema } from "../../proto/gen/ts/agentshim/data/v1/tools_pb";
 
 /** One ungrouped response, defaulted with complete identity and lineage. */
