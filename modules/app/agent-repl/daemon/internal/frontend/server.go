@@ -619,6 +619,11 @@ func (s *Server) deliverLocked(frame *frontendv1.FrontendFrame, want func(*clien
 			continue
 		}
 		res := enqueueLocked(cl, outFrame{key: coalesceKey(sent), data: data})
+		if res.closed {
+			// Already disconnected: not a slow consumer, and there is nothing
+			// left to tear down a second time.
+			continue
+		}
 		if !res.queued {
 			s.recordOverflow(cl, res, "broadcast")
 			slow = append(slow, cl)
@@ -640,11 +645,23 @@ func (s *Server) deliverLocked(frame *frontendv1.FrontendFrame, want func(*clien
 func enqueueLocked(cl *client, f outFrame) pushResult {
 	select {
 	case <-cl.done:
-		return pushResult{queued: true, soft: cl.out.capacity(), hard: cl.out.ceiling()}
+		notifyFrame(f, errClientGone)
+		return pushResult{closed: true, soft: cl.out.capacity(), hard: cl.out.ceiling()}
 	default:
 	}
-	return cl.out.push(f)
+	res := cl.out.push(f)
+	if res.closed {
+		// The teardown won the race with this push. Same disposition as the
+		// branch above; the queue's own closed flag is what makes it a race
+		// nothing can slip through rather than one the check above can miss.
+		notifyFrame(f, errClientGone)
+	}
+	return res
 }
+
+// errClientGone is the disposition of a frame that will never be written
+// because its connection is already gone.
+var errClientGone = errors.New("frontend: connection closed before the frame was written")
 
 // disconnectAll tears down every client in the list. Called after mu is
 // released, since disconnect takes it.
@@ -1024,15 +1041,23 @@ func (s *Server) writeLoop(c conn, cl *client) {
 			// ready is a wakeup, not the queue: drain everything each wake, so
 			// a signal coalesced with an earlier one strands no frame.
 			for {
-				data, ok := cl.out.pop()
+				f, ok := cl.out.pop()
 				if !ok {
 					break
 				}
-				if err := c.writeFrame(data); err != nil {
+				if err := c.writeFrame(f.data); err != nil {
+					// The frame never reached the socket. Its sender is told
+					// so before the teardown, so a failed write is never
+					// mistaken for a delivery that simply had not been timed
+					// yet; disconnect then strands and reports the rest.
+					notifyFrame(f, fmt.Errorf("frontend: write frame: %w", err))
 					s.logf("frontend: write failed, disconnecting: %v", err)
 					s.disconnect(cl)
 					return
 				}
+				// The bytes are on the socket. This is the moment a correlated
+				// reply's wait actually ends, and the only place that can say so.
+				notifyFrame(f, nil)
 			}
 		}
 	}
@@ -1094,11 +1119,28 @@ func (s *Server) processCommand(t *commandTicket) {
 	// without settling used to inflate every later command's queue_depth for
 	// the rest of the daemon's life.
 	defer func() { t.finish(ack, processing) }()
+	// THE ONE ORDERING PAIR THE CONTROL LANE MUST NOT BREAK.
+	//
+	// A resync's ANSWER is the snapshot, not the ack: the client asked to be
+	// made current, and an ok=true ack that arrived first would report it
+	// current while it still held the state it asked to replace. The snapshot
+	// cannot join the ack on the control lane either — it is a bulk state frame,
+	// and a snapshot that overtook the deltas queued before it would have the
+	// client adopt fresh state and then apply stale deltas onto it, which is
+	// exactly the snapshot-before-delta ordering the bulk FIFO exists to hold.
+	//
+	// So the resync's ack follows its snapshot down the BULK lane instead. This
+	// is the only command with a bulk frame of its own, and it is not one of the
+	// commands the head-of-line class was observed on (open_workspace,
+	// publish_workspace_roster, submit_prompt) — its ack is tied to a snapshot
+	// that has to be drained regardless.
+	ackLane := controlLane
 	// A resync re-sends a fresh StateSnapshot to THIS client (§5.4),
 	// scope-filtered for a scoped connection. The handler covers the
 	// conversation-delta replay the snapshot omits.
 	if cmd.GetResync() != nil {
 		s.enqueueResyncSnapshot(cl, cmd, "before_dispatch")
+		ackLane = bulkLane
 	}
 	dispatchStart := time.Now()
 	var response *frontendv1.FrontendFrame
@@ -1119,18 +1161,34 @@ func (s *Server) processCommand(t *commandTicket) {
 		if data, err := marshalFrame(response); err != nil {
 			s.logf("frontend: marshal command response request_id=%s: %v", ack.GetRequestId(), err)
 		} else {
-			s.enqueue(cl, outFrame{key: coalesceKey(response), data: data})
+			// The correlated reply rides the SAME lane as the ack it precedes.
+			// Both are request-keyed answers to this one command, and a lane
+			// preserves push order within itself, so a health view still
+			// reaches the client ahead of the ack that completes it.
+			s.enqueue(cl, outFrame{control: ackLane == controlLane, data: data})
 		}
 	}
+	// NO COALESCE KEY. This frame used to be pushed under coalesceKey(response)
+	// — the OTHER frame's key — so a command whose response was supersedable
+	// could have its ack compacted away as though a later frame replaced it.
+	// An ack supersedes nothing and is superseded by nothing.
 	if data, err := marshalFrame(CommandAckFrame(ack)); err != nil {
 		s.logf("frontend: marshal command ack: %v", err)
+		// No ack frame will ever exist, so no write can ever report on one.
+		// The ticket is told here, or its record would never be written.
+		t.ackUndeliverable(fmt.Errorf("frontend: marshal command ack: %w", err))
 	} else {
-		s.enqueue(cl, outFrame{key: coalesceKey(response), data: data})
+		// Declared BEFORE the push: the writer may deliver these bytes on
+		// another goroutine the instant they are queued, and a disposition the
+		// ticket was not yet expecting would be a record written without the
+		// delivery number it exists to carry.
+		t.expectAckDelivery()
+		s.enqueue(cl, outFrame{control: ackLane == controlLane, data: data, notify: t.ackDisposed})
 	}
-	// The ack is on the wire's queue; that is the moment the client's wait
-	// ends. The deferred settle above releases the gauge and writes the record
-	// from here, in that order, so the telemetry never inflates the depth it
-	// reports.
+	// The ack is on the CONTROL lane; the client's wait ends when the writer
+	// puts those bytes on the socket, and t.ackDisposed is what observes that
+	// moment. The deferred settle above releases the in-flight gauge; whichever
+	// of the two happens second writes this command's one latency record.
 }
 
 // recordCommandLatency persists one command lifecycle sample — a completion, or
@@ -1152,15 +1210,24 @@ func (s *Server) recordCommandLatency(rec commandLatencyRecord) {
 		Command:    CommandFieldName(t.cmd),
 		ClientKind: t.cl.kind.String(),
 		QueueDepth: t.depth,
-		Ack:        rec.elapsed,
+		Enqueue:    rec.enqueue,
+		Delivery:   rec.delivery,
+		// An overdue observation reports a delivery still PENDING, which is
+		// neither a success nor a failure yet; only a settled record can say
+		// the ack reached the socket.
+		Delivered:  !rec.overdue && rec.deliveryErr == nil,
 		Processing: rec.processing,
 		Threshold:  s.ackWarn,
 		Ok:         rec.ack.GetOk(),
 		Overdue:    rec.overdue,
 	}
+	if rec.deliveryErr != nil {
+		sample.DeliveryError = rec.deliveryErr.Error()
+	}
 	if err := s.latency.RecordCommandLatency(sample); err != nil {
-		s.logf("frontend: record command latency FAILED request_id=%q command=%s ws=%q overdue=%v ack_ms=%d: %v",
-			sample.RequestID, sample.Command, sample.Workspace, sample.Overdue, sample.Ack.Milliseconds(), err)
+		s.logf("frontend: record command latency FAILED request_id=%q command=%s ws=%q overdue=%v enqueue_ms=%d delivery_ms=%d: %v",
+			sample.RequestID, sample.Command, sample.Workspace, sample.Overdue,
+			sample.Enqueue.Milliseconds(), sample.Delivery.Milliseconds(), err)
 	}
 }
 
@@ -1190,6 +1257,16 @@ func (s *Server) enqueue(cl *client, f outFrame) {
 		s.notePressure(cl, res, "delivery")
 		return
 	}
+	if res.closed {
+		// enqueueLocked already reported the frame undelivered; a client that
+		// is already gone is not a slow one and needs no second teardown.
+		return
+	}
+	// The refused frame never reaches the socket, and its sender is told that
+	// before the connection goes: an unreported refusal is exactly how a
+	// command's ack goes missing with nothing in the log naming it.
+	notifyFrame(f, fmt.Errorf("frontend: outbound queue refused the frame (%s, depth %d, soft %d, hard %d)",
+		res.reason, res.depth, res.soft, res.hard))
 	s.recordOverflow(cl, res, "delivery")
 	s.disconnect(cl)
 }
@@ -1239,8 +1316,15 @@ func (s *Server) disconnect(cl *client) {
 	s.mu.Unlock()
 	cl.closeOnce.Do(func() {
 		close(cl.done)
-		s.logf("frontend: client disconnected client_id=%d kind=%s scope_workspace=%q scope_session=%q",
-			cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope))
+		// Every frame still queued is now undeliverable. Reporting each one is
+		// what keeps a command whose ack died with the connection from simply
+		// never producing its record: the sender learns the ack never landed.
+		stranded := cl.out.close()
+		for _, f := range stranded {
+			notifyFrame(f, errClientGone)
+		}
+		s.logf("frontend: client disconnected client_id=%d kind=%s scope_workspace=%q scope_session=%q stranded_frames=%d",
+			cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), len(stranded))
 	})
 }
 
