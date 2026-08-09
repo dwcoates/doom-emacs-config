@@ -2350,7 +2350,7 @@ connection state over an open socket."
   "Every declared frame arm is spelled exactly as a `FrontendFrame' oneof arm."
   ;; Arrange
   (let ((generated (agent-repl-test--generated-oneof-arms
-                    "agentshim/frontend/v1/frontend.pb.go" "FrontendFrame")))
+                    "agentshim/frontend/v1/frame.pb.go" "FrontendFrame")))
     ;; Act / Assert
     (should generated)
     (should-not (cl-remove-if (lambda (field) (member field generated))
@@ -2362,7 +2362,7 @@ The reverse containment is deliberately NOT asserted: `createWorkspace'
 exists in the proto and is deliberately absent here."
   ;; Arrange
   (let ((generated (agent-repl-test--generated-oneof-arms
-                    "agentshim/frontend/v1/frontend.pb.go" "FrontendCommand")))
+                    "agentshim/frontend/v1/frame.pb.go" "FrontendCommand")))
     ;; Act / Assert
     (should generated)
     (should-not (cl-remove-if (lambda (field) (member field generated))
@@ -2374,7 +2374,7 @@ A typo here would silently move an arm from the ignored list into the
 unfinished-wiring log, which is the opposite of what the list means."
   ;; Arrange
   (let ((generated (agent-repl-test--generated-oneof-arms
-                    "agentshim/frontend/v1/frontend.pb.go" "FrontendFrame")))
+                    "agentshim/frontend/v1/frame.pb.go" "FrontendFrame")))
     ;; Act / Assert
     (should generated)
     (should-not (cl-remove-if (lambda (field) (member field generated))
