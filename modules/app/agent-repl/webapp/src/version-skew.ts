@@ -42,6 +42,12 @@
  * a loud error card. Reaching that refusal is itself the diagnosis.
  */
 
+// The snapshot LEASE is the clock every trigger-2 decision runs on, so the
+// cooldown below is derived from it rather than from a second number that
+// would drift out of relation with it. `ws.ts` imports nothing from here, so
+// this direction carries no cycle.
+import { DEFAULT_SNAPSHOT_TIMEOUT_MS } from "./ws.js";
+
 /** How this module reports itself; mirrors the app's client-log levels. */
 export type VersionSkewLogLevel = "info" | "warn" | "error";
 
@@ -57,8 +63,23 @@ export type VersionSkewLogLevel = "info" | "warn" | "error";
  */
 export const STALE_BUNDLE_EXPIRY_CYCLES = 2;
 
-/** Minimum wall-clock interval between two FORCED (trigger 2) reloads. */
-export const FORCED_RELOAD_COOLDOWN_MS = 60_000;
+/**
+ * Minimum wall-clock interval between two FORCED (trigger 2) reloads.
+ *
+ * DERIVED, never restated as a literal. A full run of expiry cycles takes
+ * `STALE_BUNDLE_EXPIRY_CYCLES * DEFAULT_SNAPSHOT_TIMEOUT_MS` of wall clock —
+ * 90s at today's values — so a cooldown shorter than that can never be reached:
+ * the second forced reload always arrives after it has lapsed, the refusal
+ * never fires, and the wedged page reloads forever instead of producing the
+ * loud error card that IS the diagnosis. The invariant is therefore that the
+ * cooldown must EXCEED one full expiry-cycle run, so a second forced reload
+ * inside it is provably futile rather than merely impatient. The +1 buys that
+ * strict margin by deriving it from the same two constants, so a change to
+ * either the cycle count or the lease keeps the relation rather than silently
+ * unreachable-ing the refusal again.
+ */
+export const FORCED_RELOAD_COOLDOWN_MS =
+  (STALE_BUNDLE_EXPIRY_CYCLES + 1) * DEFAULT_SNAPSHOT_TIMEOUT_MS;
 
 /** `sessionStorage` key holding the epoch-ms stamp of the last forced reload. */
 export const FORCED_RELOAD_AT_KEY = "agent-repl.forced-reload-at-ms";

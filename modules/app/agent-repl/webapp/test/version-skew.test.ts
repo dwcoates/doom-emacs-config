@@ -7,6 +7,7 @@ import {
   VersionSkewGuard,
   type VersionSkewLogLevel,
 } from "../src/version-skew.js";
+import { DEFAULT_SNAPSHOT_TIMEOUT_MS } from "../src/ws.js";
 
 /** A `Storage` backed by a Map, so a test never touches the runner's own. */
 class FakeStorage implements Storage {
@@ -289,6 +290,31 @@ describe("the forced-reload cooldown", () => {
     // Assert
     expect(next).toBe("none");
     expect(h.refusals).toHaveLength(1);
+  });
+
+  it("refuses a second forced reload one full expiry-cycle RUN after the first", () => {
+    // Arrange — the reachability regression. A wedged page takes
+    // STALE_BUNDLE_EXPIRY_CYCLES leases to force its next reload, so a cooldown
+    // shorter than that run could never be met and the refusal card, which is
+    // the diagnosis, never fired.
+    const h = harness();
+    const runMs = STALE_BUNDLE_EXPIRY_CYCLES * DEFAULT_SNAPSHOT_TIMEOUT_MS;
+    h.storage.setItem(FORCED_RELOAD_AT_KEY, String(h.now - runMs));
+    // Act
+    let outcome: string = "none";
+    for (let i = 0; i < STALE_BUNDLE_EXPIRY_CYCLES; i++) outcome = h.guard.observeLeaseExpiry();
+    h.settle();
+    // Assert
+    expect(outcome).toBe("refused");
+    expect(h.reloads).toBe(0);
+  });
+
+  it("keeps the cooldown strictly longer than one full expiry-cycle run", () => {
+    // Arrange / Act / Assert — the derived constant's whole invariant, asserted
+    // on the relation rather than on the 135_000 it happens to evaluate to.
+    expect(FORCED_RELOAD_COOLDOWN_MS).toBeGreaterThan(
+      STALE_BUNDLE_EXPIRY_CYCLES * DEFAULT_SNAPSHOT_TIMEOUT_MS,
+    );
   });
 
   it("allows the reload once the window has elapsed", () => {
