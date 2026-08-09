@@ -163,6 +163,157 @@ describe("FailureKind: the closed failure vocabulary", () => {
   });
 });
 
+// --- the invariants the two evidence-carrying arms are held to --------------
+//
+// `queryTermination` and `sessionResumeFailed` carry whole machine-readable
+// lifecycle records that renderers read field by field. The generated
+// descriptor accepts an absent detail, an empty oneof and a blank string
+// alike, so the record's own invariants are enforced in the decoder and each
+// violation is refused LOUDLY — never rendered as "missing …" prose describing
+// evidence nobody supplied.
+
+describe("FailureKind: query-termination evidence invariants", () => {
+  /** A complete, valid query-termination record, with one field overridden. */
+  function queryTermination(over: Record<string, unknown> = {}): unknown {
+    return {
+      queryTermination: {
+        detail: {
+          queryInstanceId: "query-1",
+          vendorSessionId: "claude-1",
+          observedAtMs: "1700000000000",
+          iteratorFailure: { cause: "child exited 137" },
+          ...over,
+        },
+      },
+    };
+  }
+
+  it("THROWS when the arm carries no detail record at all", () => {
+    // Arrange / Act / Assert — the arm exists to carry exact evidence, so an
+    // empty one claims a query death it can say nothing about.
+    expect(() => decodeFailureKind({ queryTermination: {} }, "k")).toThrow(
+      /requires query-termination evidence/,
+    );
+  });
+
+  it("THROWS on a blank query_instance_id", () => {
+    // Arrange / Act / Assert — a record naming no query() invocation
+    // corroborates nothing.
+    expect(() => decodeFailureKind(queryTermination({ queryInstanceId: "  " }), "k")).toThrow(
+      /nonblank `query_instance_id`/,
+    );
+  });
+
+  it("THROWS on a non-positive observed_at_ms", () => {
+    // Arrange / Act / Assert — an unset instant is not "the epoch", it is a
+    // record that cannot say when the query died.
+    expect(() => decodeFailureKind(queryTermination({ observedAtMs: "0" }), "k")).toThrow(
+      /positive `observed_at_ms`/,
+    );
+  });
+
+  it("THROWS when neither vendor-identity arm is set", () => {
+    // Arrange / Act / Assert — the proto offers an explicit "identity was never
+    // exposed" arm, so silence is a malformed frame rather than that statement.
+    const noVendor = {
+      queryTermination: {
+        detail: {
+          queryInstanceId: "query-1",
+          observedAtMs: "1700000000000",
+          iteratorFailure: { cause: "child exited 137" },
+        },
+      },
+    };
+    expect(() => decodeFailureKind(noVendor, "k")).toThrow(/explicit vendor identity evidence/);
+  });
+
+  it("THROWS on a blank vendor_session_id", () => {
+    // Arrange / Act / Assert — the arm asserts an authoritative conversation
+    // UUID; blank asserts one and supplies none.
+    expect(() => decodeFailureKind(queryTermination({ vendorSessionId: "" }), "k")).toThrow(
+      /vendorSessionId must be nonblank/,
+    );
+  });
+
+  it("THROWS when no termination reason is set", () => {
+    // Arrange / Act / Assert — the reason is the whole point of the record;
+    // without it the card would read "missing termination reason".
+    const noReason = {
+      queryTermination: {
+        detail: {
+          queryInstanceId: "query-1",
+          vendorSessionId: "claude-1",
+          observedAtMs: "1700000000000",
+        },
+      },
+    };
+    expect(() => decodeFailureKind(noReason, "k")).toThrow(/unexpected termination reason/);
+  });
+});
+
+describe("FailureKind: resume-continuity evidence invariants", () => {
+  it("THROWS when the arm carries no detail record at all", () => {
+    // Arrange / Act / Assert
+    expect(() => decodeFailureKind({ sessionResumeFailed: {} }, "k")).toThrow(
+      /requires resume-continuity evidence/,
+    );
+  });
+
+  it("THROWS when no attempt arm is set", () => {
+    // Arrange / Act / Assert — the attempt names WHICH operation's continuity
+    // requirement could not be met.
+    const noAttempt = {
+      sessionResumeFailed: {
+        detail: {
+          claudeSessionId: "claude-1",
+          cwd: "/repo",
+          resolvedConfigDir: "/config",
+          bringUpFailure: { cause: "shim readiness timed out" },
+        },
+      },
+    };
+    expect(() => decodeFailureKind(noAttempt, "k")).toThrow(/requires exactly one attempt/);
+  });
+
+  it("THROWS when no cause arm is set", () => {
+    // Arrange / Act / Assert — this is exactly the frame that rendered as
+    // "missing resume-continuity cause" prose instead of being refused.
+    const noCause = {
+      sessionResumeFailed: {
+        detail: {
+          claudeSessionId: "claude-1",
+          cwd: "/repo",
+          resolvedConfigDir: "/config",
+          automaticRestore: {},
+        },
+      },
+    };
+    expect(() => decodeFailureKind(noCause, "k")).toThrow(/requires exactly one cause/);
+  });
+
+  it("THROWS on a query-death cause that violates the query record's invariants", () => {
+    // Arrange / Act / Assert — a nested record is held to the same evidence
+    // rules as a top-level one; the card renders it with the same code.
+    const badNested = {
+      sessionResumeFailed: {
+        detail: {
+          claudeSessionId: "claude-1",
+          cwd: "/repo",
+          resolvedConfigDir: "/config",
+          automaticRestore: {},
+          queryTermination: {
+            queryInstanceId: "",
+            vendorSessionId: "claude-1",
+            observedAtMs: "1700000000000",
+            unexpectedEof: {},
+          },
+        },
+      },
+    };
+    expect(() => decodeFailureKind(badNested, "k")).toThrow(/nonblank `query_instance_id`/);
+  });
+});
+
 describe("FailureCardView: the feed's resolved failure card", () => {
   const KIND = { apiOverloaded: { httpStatus: 529, attempts: 10 } };
 
