@@ -10,6 +10,8 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/ssm"
+
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -167,6 +169,133 @@ func TestStreamContractRecordKeepsEnvelopeUUID(t *testing.T) {
 	}
 	if len(uuids) != seen {
 		t.Errorf("got %d distinct record identities for %d records; they must not collide", len(uuids), seen)
+	}
+}
+
+// TestStreamContractThinkingNamesThePreviewItSettlesOnto pins the daemon half
+// of the settle: a reasoning emission states the message it was stripped from
+// and the slot it held, which is the very pair the fixture's typing deltas key
+// their preview on. Drift here leaves the settled block rendering beside its
+// own preview instead of replacing it.
+func TestStreamContractThinkingNamesThePreviewItSettlesOnto(t *testing.T) {
+	// Arrange
+	fx, frames := loadStreamContract(t)
+	seen := 0
+
+	for _, frame := range frames {
+		cd := frame.GetConversationDelta()
+		if cd == nil {
+			continue
+		}
+		for _, item := range cd.GetItems() {
+			want := item.GetAgent().GetThinking()
+			if want == nil {
+				continue
+			}
+			seen++
+			envelopeUUID, _, _ := strings.Cut(item.GetUuid(), "#")
+			ev := &corev1.Event{
+				SessionId:    fx.SessionID,
+				ProducedAtMs: producedMs,
+				Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.AssistantMessage{
+					Uuid:    envelopeUUID,
+					Message: recordBodyFor(t, item, fx.MessageID),
+				})},
+			}
+
+			// Act
+			got, _, err := ConversationDeltaFromEvent(fx.Workspace, fx.SessionID, ev)
+			if err != nil {
+				t.Fatalf("ConversationDeltaFromEvent: %v", err)
+			}
+
+			// Assert
+			th := got.GetItems()[0].GetAgent().GetThinking()
+			if th.GetApiMessageId() != want.GetApiMessageId() || th.GetBlockIndex() != want.GetBlockIndex() {
+				t.Errorf("stated origin = (%q, %d), want (%q, %d)",
+					th.GetApiMessageId(), th.GetBlockIndex(), want.GetApiMessageId(), want.GetBlockIndex())
+			}
+		}
+	}
+
+	if seen == 0 {
+		t.Fatal("fixture declared no thinking emissions; the contract would assert nothing")
+	}
+}
+
+// TestStreamContractOneStreamCarriesOneFence pins FENCE CONTINUITY across the
+// two frame kinds one streamed message produces.
+//
+// The fence is a workspace's staleness token, compared byte-wise and never
+// parsed. A preview and the record that settles onto it are two frames of ONE
+// stream, so they must carry the SAME token: if the typing frames and the
+// conversation frames ever disagreed, a client gating on the fence would drop
+// exactly one half of a message and render the other half forever.
+//
+// This is asserted at the DAEMON because the daemon composes the fence — the
+// shim never sees one, and the webapp only decodes what it is handed.
+func TestStreamContractOneStreamCarriesOneFence(t *testing.T) {
+	// Arrange: one workspace's identities, minted into one token exactly as the
+	// session controller mints the token it stamps on every push.
+	fx, frames := loadStreamContract(t)
+	fence := ssm.Fence(fx.SessionID, "gen_01")
+	seenTyping, seenConversation := 0, 0
+
+	for _, frame := range frames {
+		// Act / Assert: the typing hop.
+		if td := frame.GetTypingDelta(); td != nil {
+			seenTyping++
+			got := TypingDeltaFromContentDelta(fx.Workspace, fence, td.GetDelta())
+			if got.GetFence() != fence {
+				t.Errorf("typing frame fence = %q, want %q", got.GetFence(), fence)
+			}
+		}
+		// Act / Assert: the durable hop, from the record the same message produced.
+		cd := frame.GetConversationDelta()
+		if cd == nil {
+			continue
+		}
+		for _, item := range cd.GetItems() {
+			seenConversation++
+			envelopeUUID, _, _ := strings.Cut(item.GetUuid(), "#")
+			ev := &corev1.Event{
+				SessionId:    fx.SessionID,
+				ProducedAtMs: producedMs,
+				Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.AssistantMessage{
+					Uuid:    envelopeUUID,
+					Message: recordBodyFor(t, item, fx.MessageID),
+				})},
+			}
+			got, _, err := ConversationDeltaFromEvent(fx.Workspace, fence, ev)
+			if err != nil {
+				t.Fatalf("ConversationDeltaFromEvent: %v", err)
+			}
+			if got.GetFence() != fence {
+				t.Errorf("conversation frame fence = %q, want %q", got.GetFence(), fence)
+			}
+		}
+	}
+
+	if seenTyping == 0 || seenConversation == 0 {
+		t.Fatalf("fixture declared %d typing and %d conversation frames; continuity needs both", seenTyping, seenConversation)
+	}
+}
+
+// TestStreamContractTheStreamFenceResolvesToItsOwnIdentities pins the other end
+// of the continuity: the token both hops carry is the one this daemon minted,
+// so it resolves back to the identities it was composed from rather than being
+// an opaque string that merely happens to match itself.
+func TestStreamContractTheStreamFenceResolvesToItsOwnIdentities(t *testing.T) {
+	// Arrange
+	fx, _ := loadStreamContract(t)
+	fence := ssm.Fence(fx.SessionID, "gen_01")
+
+	// Act
+	sessionID, generationID := ssm.SplitFence(fence)
+
+	// Assert
+	if sessionID != fx.SessionID || generationID != "gen_01" {
+		t.Errorf("SplitFence(%q) = (%q, %q), want (%q, %q)", fence, sessionID, generationID, fx.SessionID, "gen_01")
 	}
 }
 
