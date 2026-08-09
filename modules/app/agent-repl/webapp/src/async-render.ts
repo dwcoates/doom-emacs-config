@@ -151,9 +151,12 @@ function spoolBody(header: string, spool: AsyncOutputSpool): string {
 /** The kind-specific body of one bubble. */
 function bubbleBody(bubble: AsyncBubble, ctx: AsyncRenderContext): string {
   switch (bubble.kind.case) {
-    case "agent": {
+    case "agent":
+    case "merge": {
+      // A merge run is a conversation with the same shape as a detached
+      // agent's, so it goes through the same body — the feed's renderer, not a
+      // second one. See renderEmissions.
       const { emissions, fold } = bubble.kind.value;
-      // The feed's renderer, not a second one. See renderEmissions.
       return `${earlierEntriesNotice(fold, bubble.id)}${ctx.renderEmissions(emissions, bubble.id)}`;
     }
     case "journal": {
