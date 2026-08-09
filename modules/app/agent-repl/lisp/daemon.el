@@ -1474,10 +1474,16 @@ the TERM below stays the fallback rather than a competing request.  Nil --
 the default -- PRESERVES the shims: they redial this same socket and are
 parked by the replacement daemon\='s listener, which is what makes a bounce
 a reattach instead of a rebuild.
-Refuses while any daemon session reports an in-flight turn — stopping
-then would kill a live conversation mid-generation (the repeated
-daemon-bounce incidents) — unless FORCE is non-nil.  An unreachable
-daemon has nothing to protect, so the turn probe treats it as idle.
+Refuses while any daemon session reports an in-flight turn ONLY when
+STOP-SHIMS is requested, and unless FORCE is non-nil.  Stopping the shims
+is what killed live conversations mid-generation in the repeated
+daemon-bounce incidents: the process running the turn is the shim, so
+ending it ends the turn.  A PRESERVING stop does not touch that process —
+the turn keeps running, its events keep landing in the store, and the next
+daemon replays them from its durable floor on reattach — so refusing one
+protected nothing and blocked every daemon-only deploy behind whatever
+happened to be thinking at the time.  An unreachable daemon has nothing to
+protect, so the turn probe treats it as idle.
 
 The stop itself signals SIGTERM so the daemon runs its shutdown path
 \(draining its sessions and flushing the session registry), then checks
@@ -1496,10 +1502,12 @@ inherited-pipe EOF."
           (agent-repl--log nil "frontend stop: no tracked live daemon; clearing process slot")
           (setq agent-repl--frontend-daemon-process nil)
           (when on-stopped (funcall on-stopped)))
-      (unless force
+      (when (and stop-shims (not force))
         (when-let ((busy (agent-repl--frontend-turn-active-sessions)))
-          (agent-repl--log nil "frontend stop: refused force=nil active-workspaces=%S" busy)
-          (error "agent-repl: refusing daemon stop — turn in flight in %s; retry when idle or pass FORCE"
+          (agent-repl--log nil
+                           "frontend stop: refused force=nil stop-shims=t active-workspaces=%S"
+                           busy)
+          (error "agent-repl: refusing daemon stop — stop-shims would kill the turn in flight in %s; retry when idle or pass FORCE"
                  busy)))
     (when stop-shims
       (condition-case err
@@ -1550,8 +1558,10 @@ so a user can force initialization on demand."
 
 ;;;###autoload
 (defun agent-repl-frontend-daemon-stop (&optional force)
-  "Stop the running frontend daemon.
-Refuses while a turn is in flight; with prefix arg FORCE, stops anyway.
+  "Stop the running frontend daemon, PRESERVING its session shims.
+The shims outlive the stop and reattach to whatever daemon comes next, so
+a turn in flight survives it and this does not refuse for one; FORCE is
+retained for the underlying stop\='s own guards.
 Completion is reported only after the asynchronous stop continuation runs."
   (interactive "P")
   (let ((forced (and force t)))
@@ -1576,8 +1586,12 @@ listener -- so the default bounce PRESERVES them and the new daemon
 reattaches instead of rebuilding, leaving every conversation running.
 
 STOP-SHIMS (the interactive prefix argument) restores the old behavior for
-the one caller that needs it: a deploy that changed the shim BUNDLE, whose
-survivors would otherwise keep running the previous build\=' code."
+an OPERATOR who explicitly wants every survivor replaced.  The DEPLOY no
+longer asks for it, even when the shim bundle moved: the replacement
+daemon rolls each stale shim at its own session\='s turn boundary, which
+costs no conversation, whereas stopping them all at shutdown kills every
+turn that happens to be running.  It is the one mode that refuses while a
+turn is in flight."
   (interactive "P")
   (agent-repl-runtime-restart (and stop-shims t)))
 

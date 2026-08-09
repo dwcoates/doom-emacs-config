@@ -35,13 +35,25 @@
 #                       is reachable, any restart failure still fails this
 #                       script loudly (exit 3).
 #
-#                       The bounce PRESERVES the session shims — they outlive
-#                       their daemon and the replacement reattaches — EXCEPT
-#                       when step 2 moved the shim bundle, in which case the
-#                       restart is asked to stop them (STOP-SHIMS) so no
-#                       survivor keeps running the previous build's code. That
-#                       is belt-and-braces beside the daemon's own version-
-#                       driven stale-shim refresh, not the only guard
+#                       The bounce ALWAYS PRESERVES the session shims — they
+#                       outlive their daemon and the replacement reattaches —
+#                       INCLUDING when step 2 moved the shim bundle. A survivor
+#                       on the previous bundle is rolled onto the new one by the
+#                       NEW daemon's per-session turn-boundary refresh, at that
+#                       session's own quiet moment. The deploy therefore never
+#                       passes STOP-SHIMS: stopping every shim at shutdown
+#                       killed whatever turns were running to buy a refresh that
+#                       arrives anyway, moments later, for free. The elisp
+#                       command keeps the parameter for explicit operator use.
+#
+#                       The bounce is likewise NOT routed through the scheduled
+#                       drain lease (agent-repl-frontend-daemon-restart-
+#                       scheduled). That lease exists to reach quiescence before
+#                       an operation that NEEDS it; a preserving daemon bounce
+#                       does not — the shims keep serving their turns across it
+#                       and the store replays whatever the gap swallowed — so
+#                       waiting for every workspace to fall idle would delay
+#                       every deploy for nothing.
 #  5b. webview refresh  `(agent-repl-refresh-webviews)` via emacsclient, right
 #                       after the bounce: the pages mounted in Emacs outlive
 #                       the daemon they loaded against, so each one is
@@ -154,15 +166,18 @@ make -C "$ROOT/proto" all
 log "proto: done"
 
 # ---- 2. build-frontend (shim bundle, webapp, daemon) -----------------------
-# Whether the SHIM BUNDLE moved decides the daemon bounce's stop-shims mode
-# below. Two signals, because neither alone is sufficient:
+# Whether the SHIM BUNDLE moved is REPORTED, not acted on: it tells the reader
+# of this log whether surviving shims are about to be rolled onto a new bundle
+# by the replacement daemon's turn-boundary refresh. It no longer selects a
+# stop-shims bounce — see step 5's header. Two signals, because neither alone
+# is sufficient:
 #
 #   - the built-sha stamp, which moves whenever the source revision does; and
 #   - the bundle's own content fingerprint, which is the only signal that moves
 #     within one revision — the common case of a DIRTY tree, where the stamp
 #     reads "<sha>-dirty" both before and after a rebuild that changed the code.
 #
-# Either differing means a surviving shim would now be running superseded code.
+# Either differing means a surviving shim is now running superseded code.
 SHIM_BUNDLE="$ROOT/agent-shim/claude/shim/dist/main.js"
 SHIM_STAMP="$ROOT/agent-shim/claude/shim/dist/.built-sha"
 
@@ -183,9 +198,9 @@ SHIM_AFTER="$(shim_identity)"
 SHIM_CHANGED=0
 if [ "$SHIM_BEFORE" != "$SHIM_AFTER" ]; then
     SHIM_CHANGED=1
-    log "shim: bundle moved since the last deploy — the daemon bounce will STOP surviving shims"
+    log "shim: bundle moved since the last deploy — surviving shims keep running until the new daemon rolls each one at its own turn boundary"
 else
-    log "shim: bundle unchanged — the daemon bounce will preserve surviving shims"
+    log "shim: bundle unchanged — surviving shims need no refresh"
 fi
 
 # ---- 3. daemon, forced (staleness cannot see proto regen) ------------------
@@ -327,9 +342,10 @@ else
     # Encode ROOT rather than interpolating it into an elisp string literal:
     # valid filesystem paths may contain quotes or backslashes. The returned
     # sentinel also reports whether the runtime artifact root moved; a moved
-    # root necessarily means surviving shims execute a different bundle and
-    # must be stopped even when this checkout's own before/after fingerprint is
-    # unchanged.
+    # root necessarily means surviving shims execute a different bundle even
+    # when this checkout's own before/after fingerprint is unchanged, so it
+    # folds into the same REPORTED shim-changed signal (nothing is stopped —
+    # the new daemon rolls each shim at its own turn boundary).
     ROOT_B64="$(printf '%s' "$ROOT" | base64 | tr -d '\n')"
     PRELOAD_FORM="(let* ((root (file-name-as-directory (decode-coding-string (base64-decode-string \"$ROOT_B64\") 'utf-8))) (before (and (boundp 'agent-repl--frontend-root) agent-repl--frontend-root))) (load (expand-file-name \"lisp/daemon.el\" root) nil t) (load (expand-file-name \"lisp/frontend-client.el\" root) nil t) (load (expand-file-name \"lisp/services.el\" root) nil t) (unless (equal agent-repl--frontend-root root) (error \"agent-repl deploy root mismatch: expected %S got %S\" root agent-repl--frontend-root)) (if (equal before root) \"artifact-root-same\" \"artifact-root-changed\"))"
     PRELOAD_OUT="$("$EMACSCLIENT" --eval "$PRELOAD_FORM" 2>&1)" || {
@@ -342,7 +358,7 @@ else
             ;;
         *artifact-root-changed*)
             SHIM_CHANGED=1
-            log "daemon: control plane loaded from $ROOT (artifact root changed — surviving shims will stop)"
+            log "daemon: control plane loaded from $ROOT (artifact root changed — surviving shims will be rolled at their turn boundaries)"
             ;;
         *)
             echo "[deploy-all] daemon control-plane preload returned an unrecognized result: $PRELOAD_OUT" >&2
@@ -350,11 +366,12 @@ else
             ;;
     esac
 
+    # ALWAYS the preserving form. The deploy has no stop-shims mode any more:
+    # the restart never takes an argument here, whatever SHIM_CHANGED reported.
+    RESTART_FORM='(agent-repl-frontend-daemon-restart-await)'
     if [ "$SHIM_CHANGED" -eq 1 ]; then
-        RESTART_FORM='(agent-repl-frontend-daemon-restart-await t)'
-        log "daemon: restarting and awaiting completion via emacsclient (stop-shims: the bundle changed)..."
+        log "daemon: restarting and awaiting completion via emacsclient (shims PRESERVED; the new daemon rolls each stale shim at its turn boundary)..."
     else
-        RESTART_FORM='(agent-repl-frontend-daemon-restart-await)'
         log "daemon: restarting and awaiting completion via emacsclient..."
     fi
     RESTART_OUT="$("$EMACSCLIENT" --eval "$RESTART_FORM" 2>&1)" || {
@@ -364,8 +381,11 @@ else
     case "$RESTART_OUT" in
         *refusing*)
             # emacsclient exits 0 even when the elisp signals; the refusal text
-            # is the only tell. A refused bounce means the deploy is NOT complete.
-            echo "[deploy-all] daemon restart refused (turn in flight): $RESTART_OUT" >&2
+            # is the only tell. A refused bounce means the deploy is NOT
+            # complete. A turn in flight is no longer among the reasons — this
+            # restart preserves the shims — so a refusal reaching here is one of
+            # the coordinator's other guards and is surfaced verbatim.
+            echo "[deploy-all] daemon restart refused: $RESTART_OUT" >&2
             exit 3
             ;;
         *runtime-restart-complete*)

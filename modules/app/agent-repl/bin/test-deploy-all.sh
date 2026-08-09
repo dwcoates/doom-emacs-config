@@ -268,17 +268,18 @@ else
 fi
 
 # --- 1b. a linked-worktree deploy binds its artifact root before restart ----
-# The running Emacs may have loaded daemon.el from another checkout. The
-# deploy must move the runtime root before restarting and must stop every shim
-# that could otherwise survive on the other checkout's bundle.
+# The running Emacs may have loaded daemon.el from another checkout. The deploy
+# must move the runtime root before restarting; the surviving shims are then
+# rolled onto the new bundle by the replacement daemon, not stopped here.
 d="$TMP/t1b"; mkdir -p "$d"
 RUN_ENV="EC_STUB_ARTIFACT_ROOT_RESULT=artifact-root-changed" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
-   && log_before "load .*daemon.el" "daemon-restart-await t" \
-   && grep -q "artifact root changed — surviving shims will stop" "$d/stdout"; then
-    pass "a moved runtime artifact root is bound before restart and stops surviving shims"
+   && log_before "load .*daemon.el" "daemon-restart-await)" \
+   && ! log_has "daemon-restart-await t" \
+   && grep -q "artifact root changed — surviving shims will be rolled at their turn boundaries" "$d/stdout"; then
+    pass "a moved runtime artifact root is bound before restart and still preserves surviving shims"
 else
-    fail "a moved runtime artifact root is bound before restart and stops surviving shims" \
+    fail "a moved runtime artifact root is bound before restart and still preserves surviving shims" \
          "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
 fi
 
@@ -527,16 +528,21 @@ else
          "rc=$RC stamp=$(cat "$d/h/.cache/agent-repl/bin/.shim-store.built-sha" 2>/dev/null)"
 fi
 
-# --- 13. a moved shim bundle makes the bounce STOP surviving shims ----------
-# A survivor from before the deploy would keep running the previous bundle's
-# code, so this is the one case that must not preserve.
+# --- 13. a moved shim bundle STILL preserves surviving shims ----------------
+# A survivor keeps running the previous bundle's code only until the NEW daemon
+# rolls it at that session's own turn boundary. Stopping them all at shutdown
+# killed every turn in flight to buy a refresh that arrives moments later
+# anyway, so the deploy never asks for it.
 d="$TMP/t13"; mkdir -p "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v2" run_deploy "$d"
-if [ "$RC" -eq 0 ] && log_has "daemon-restart-await t"; then
-    pass "a changed shim bundle bounces the daemon in stop-shims mode"
+if [ "$RC" -eq 0 ] \
+   && log_has "daemon-restart-await)" \
+   && ! log_has "daemon-restart-await t" \
+   && grep -q "rolls each stale shim at its turn boundary" "$d/stdout"; then
+    pass "a changed shim bundle bounces the daemon WITHOUT stopping the surviving shims"
 else
-    fail "a changed shim bundle bounces the daemon in stop-shims mode" \
-         "rc=$RC restart=$(grep -o 'daemon-restart[^)]*' "$STUB_LOG" | tail -1)"
+    fail "a changed shim bundle bounces the daemon WITHOUT stopping the surviving shims" \
+         "rc=$RC stdout: $(cat "$d/stdout") restart=$(grep -o 'daemon-restart[^)]*' "$STUB_LOG" | tail -1)"
 fi
 
 # --- 14. an unchanged shim bundle PRESERVES surviving shims -----------------
@@ -552,17 +558,20 @@ else
          "rc=$RC restart=$(grep -o 'daemon-restart[^)]*' "$STUB_LOG" | tail -1)"
 fi
 
-# --- 15. a bundle changed WITHIN one revision still stops the shims ---------
+# --- 15. a bundle changed WITHIN one revision is still DETECTED -------------
 # The dirty-tree case: the built-sha stamp reads the same "<sha>-dirty" before
-# and after, so only the bundle's own content can report the change.
+# and after, so only the bundle's own content can report the change. The signal
+# is reported rather than acted on, so what this asserts is the detection.
 d="$TMP/t15"; mkdir -p "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1 GIT_STUB_DIRTY=M__x" run_deploy "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v2 GIT_STUB_DIRTY=M__x" run_deploy "$d"
-if [ "$RC" -eq 0 ] && log_has "daemon-restart-await t"; then
-    pass "a bundle that moved within one revision still stops the shims"
+if [ "$RC" -eq 0 ] \
+   && grep -q "shim: bundle moved since the last deploy" "$d/stdout" \
+   && ! log_has "daemon-restart-await t"; then
+    pass "a bundle that moved within one revision is detected without stopping the shims"
 else
-    fail "a bundle that moved within one revision still stops the shims" \
-         "rc=$RC restart=$(grep -o 'daemon-restart[^)]*' "$STUB_LOG" | tail -1)"
+    fail "a bundle that moved within one revision is detected without stopping the shims" \
+         "rc=$RC stdout: $(cat "$d/stdout") restart=$(grep -o 'daemon-restart[^)]*' "$STUB_LOG" | tail -1)"
 fi
 
 # --- 16. the webview refresh runs after a successful daemon restart ---------

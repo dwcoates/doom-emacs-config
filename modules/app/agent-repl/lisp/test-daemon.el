@@ -573,8 +573,10 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
          (should built)
          (should (eq result :pending)))))))
 
-(ert-deftest agent-repl-test-daemon-stop-refuses-during-turn ()
-  "Stopping is refused while any daemon session has a turn in flight."
+(ert-deftest agent-repl-test-daemon-stop-refuses-stop-shims-during-turn ()
+  "A STOP-SHIMS stop is refused while any daemon session has a turn in flight.
+Stopping the shims kills the process running the turn; that is the harm the
+guard exists for, and the mode it is now scoped to."
   ;; Arrange
   (agent-repl-test--with-daemon-env
    (let ((live (agent-repl-test--make-live-daemon)))
@@ -582,11 +584,31 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
      (cl-letf (((symbol-function 'agent-repl--frontend-turn-active-sessions)
                 (lambda () '("s_busy"))))
        ;; Act / Assert
-       (let ((err (should-error (agent-repl--frontend-stop-daemon))))
+       (let ((err (should-error (agent-repl--frontend-stop-daemon nil t))))
          (should (string-match-p "turn in flight" (error-message-string err))))
        ;; The daemon survives the refusal.
        (should (agent-repl-test--fake-daemon-live live))
        (should (eq agent-repl--frontend-daemon-process live))))))
+
+(ert-deftest agent-repl-test-daemon-preserving-stop-proceeds-during-turn ()
+  "A shim-PRESERVING stop is not refused for a turn in flight.
+The shim outlives the stop and keeps serving its turn, so the conversation
+survives and a daemon-only deploy is never blocked behind it."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((live (agent-repl-test--make-live-daemon))
+         (signalled nil))
+     (setq agent-repl--frontend-daemon-process live)
+     (cl-letf (((symbol-function 'agent-repl--frontend-turn-active-sessions)
+                (lambda () '("s_busy")))
+               ((symbol-function 'signal-process)
+                (lambda (_proc _sig) (setq signalled t)))
+               ((symbol-function 'agent-repl--frontend-await-async)
+                (lambda (&rest _) :pending)))
+       ;; Act
+       (should (eq :pending (agent-repl--frontend-stop-daemon)))
+       ;; Assert
+       (should signalled)))))
 
 (ert-deftest agent-repl-test-daemon-stop-force-bypasses-turn-guard ()
   "FORCE stops the daemon without consulting the turn probe."
