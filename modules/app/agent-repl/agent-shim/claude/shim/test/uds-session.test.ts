@@ -2250,6 +2250,113 @@ describe("UdsSession events: store round-trip and sad path", () => {
     expect(reannounced.payload.value.recovered).toBe(false);
   });
 
+  it("re-announces a SESSION-OWNED degradation to a REATTACHING daemon", async () => {
+    // Arrange — the store link is perfectly healthy; what is degraded is the
+    // session's own posture. A non-switchable permission mode is the shim's own
+    // report, and it used to be announced exactly once and retained nowhere, so
+    // the daemon that replaced the one that heard it never learned the session
+    // was running under a mode the user did not choose.
+    const { store, daemon, daemonListener } = await rig({ storeSessionId: "vendor-uuid" });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT, permissionMode: "bypassPermissions",
+    }));
+    // The turn-start batch is ACKED so the session is left quiescent rather
+    // than retrying a write across the reattach this test is about.
+    const started = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(started.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    let opened = await daemon.next(EventSchema);
+    while (opened.payload.case !== "degradedState") opened = await daemon.next(EventSchema);
+    expect(opened.payload.value.component).toBe("claude-shim-permission-mode");
+
+    // Act — the daemon goes away and a replacement re-runs the bring-up gate.
+    daemon.destroy();
+    const next = await daemonListener.next();
+    await next.next(ShimHelloSchema);
+    next.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", protocolVersion: "1", fromSeq: 0n }));
+    await next.next(ShimReadySchema);
+
+    // Assert — the successor is told what the first daemon was told.
+    let reannounced = await next.next(EventSchema);
+    while (reannounced.payload.case !== "degradedState") reannounced = await next.next(EventSchema);
+    expect(reannounced.payload.value.component).toBe("claude-shim-permission-mode");
+    expect(reannounced.payload.value.recovered).toBe(false);
+  });
+
+  it("re-announces a session-owned degradation BEFORE the ShimReady that closes the gate", async () => {
+    // Arrange — order is the guarantee, not an incidental. Both frames travel
+    // one ordered connection and ShimReady is what drives the daemon's session
+    // to OPERATIONAL, so a re-announce sent after it leaves a window in which
+    // the session reads as up and healthy when it is up and degraded.
+    const { store, daemon, daemonListener } = await rig({ storeSessionId: "vendor-uuid" });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT, permissionMode: "bypassPermissions",
+    }));
+    const started = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(started.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    let opened = await daemon.next(EventSchema);
+    while (opened.payload.case !== "degradedState") opened = await daemon.next(EventSchema);
+
+    // Act
+    daemon.destroy();
+    const next = await daemonListener.next();
+    await next.next(ShimHelloSchema);
+    next.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", protocolVersion: "1", fromSeq: 0n }));
+    await until(() => next.inbox.some((frame) => unpackAs(frame, ShimReadySchema) !== undefined));
+
+    // Assert — read off the UNCONSUMED inbox, which is arrival order itself.
+    const readyIndex = next.inbox.findIndex((frame) => unpackAs(frame, ShimReadySchema) !== undefined);
+    const degradedIndex = next.inbox.findIndex((frame) => unpackAs(frame, EventSchema)?.payload.case === "degradedState");
+    expect(degradedIndex).toBeGreaterThanOrEqual(0);
+    expect(degradedIndex).toBeLessThan(readyIndex);
+  });
+
+  it("does not re-announce a CONTAINED degradation the session recovered from", async () => {
+    // Arrange — a `recovered: true` report is a notice about an anomaly the
+    // shim absorbed, not a standing fault. Re-announcing one would manufacture
+    // an open fault on every reattach for a session that is serving fine.
+    const { query, store, daemon, daemonListener } = await rig();
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1", text: "carry on", promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    const start = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
+    query.emit({
+      type: "system",
+      subtype: "task_notification",
+      uuid: "orphan-end",
+      session_id: "sess-1",
+      task_id: "a4699ecc217adfa70",
+      status: "completed",
+    } as unknown as SdkMessageLike);
+    let contained = await daemon.next(EventSchema);
+    while (contained.payload.case !== "degradedState") contained = await daemon.next(EventSchema);
+    expect(contained.payload.value.recovered).toBe(true);
+
+    // Act
+    daemon.destroy();
+    const next = await daemonListener.next();
+    await next.next(ShimHelloSchema);
+    next.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", protocolVersion: "1", fromSeq: 0n }));
+    await next.next(ShimReadySchema);
+    await tick();
+
+    // Assert
+    const events = next.inbox
+      .map((frame) => unpackAs(frame, EventSchema))
+      .filter((evt): evt is Event => evt !== undefined);
+    expect(events.filter((evt) => evt.payload.case === "degradedState")).toHaveLength(0);
+  });
+
   it("announces no degraded state to a reattaching daemon when the session is healthy", async () => {
     // Arrange — the re-report must never manufacture a fault for a session
     // that is not in one.
