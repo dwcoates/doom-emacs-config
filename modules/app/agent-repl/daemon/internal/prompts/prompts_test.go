@@ -2,6 +2,7 @@ package prompts
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -231,5 +232,128 @@ func TestRenderCarriesBracedTextInsideASubstitutedValue(t *testing.T) {
 	}
 	if got != "say: what does {{foo}} mean?" {
 		t.Fatalf("Render = %q, want the braced user text carried through verbatim", got)
+	}
+}
+
+// git runs one git command in dir with every inherited git environment variable
+// stripped. A parent process's GIT_DIR — a hook, an outer test harness — would
+// otherwise point these commands at some other repository entirely.
+func git(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	// An exported-but-EMPTY GIT_DIR is still a set GIT_DIR to git ("the empty
+	// string is not a valid path"), so the variables are dropped from the
+	// environment rather than blanked.
+	env := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "GIT_") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	cmd.Env = append(env,
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
+	}
+}
+
+// rebaseWorktree builds the shape the merge gate runs its suite in: an
+// agent-repl checkout, plus a LINKED GIT WORKTREE of it under a temp directory
+// at the leaf name `rebase`. A linked worktree carries a `.git` FILE rather than
+// a directory, which is precisely the shape a resolution that assumes the
+// primary checkout gets wrong. It returns the primary checkout and the worktree.
+func rebaseWorktree(t *testing.T) (primary, worktree string) {
+	t.Helper()
+	primary = filepath.Join(t.TempDir(), "checkout")
+	if err := os.MkdirAll(filepath.Join(primary, filepath.FromSlash("modules/app/agent-repl/bin")), 0o700); err != nil {
+		t.Fatalf("stage primary checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(primary, filepath.FromSlash(markerRelPath)), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("stage checkout marker: %v", err)
+	}
+	git(t, primary, "init", "--initial-branch=master")
+	git(t, primary, "add", ".")
+	git(t, primary, "commit", "-m", "checkout")
+	worktree = filepath.Join(t.TempDir(), "rebase")
+	git(t, primary, "worktree", "add", "--detach", worktree, "master")
+	return primary, worktree
+}
+
+func TestCheckoutContainingResolvesTheRunningWorktreeNotThePrimaryCheckout(t *testing.T) {
+	// Arrange: the gate compiles and runs the suite inside the linked worktree,
+	// so resolution must answer with THAT tree even though the primary checkout
+	// carries the same marker.
+	primary, worktree := rebaseWorktree(t)
+	probe := filepath.Join(worktree, filepath.FromSlash("daemon/internal/prompts"))
+
+	// Act.
+	got, ok := checkoutContaining(probe)
+
+	// Assert.
+	if !ok {
+		t.Fatalf("checkoutContaining(%q) found no checkout, want the worktree %q", probe, worktree)
+	}
+	if got != worktree {
+		t.Fatalf("checkoutContaining(%q) = %q, want the running worktree %q (primary checkout is %q)", probe, got, worktree, primary)
+	}
+}
+
+func TestCheckoutContainingKeepsThePathSpellingItWasGiven(t *testing.T) {
+	// Arrange: on macOS the gate's temp path is /var/folders/... while its
+	// canonical form is /private/var/folders/... . Resolution must not silently
+	// hand back one spelling when it was asked about the other, or every path
+	// comparison downstream compares two names for the same directory.
+	_, worktree := rebaseWorktree(t)
+	canonical, err := filepath.EvalSymlinks(worktree)
+	if err != nil {
+		t.Fatalf("canonicalize worktree: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(canonical, link); err != nil {
+		t.Fatalf("stage symlinked spelling: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		root string
+	}{
+		{name: "canonical spelling", root: canonical},
+		{name: "symlinked spelling", root: link},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got, ok := checkoutContaining(filepath.Join(tc.root, filepath.FromSlash("daemon/internal/prompts")))
+
+			// Assert.
+			if !ok {
+				t.Fatalf("checkoutContaining under %q found no checkout", tc.root)
+			}
+			if got != tc.root {
+				t.Fatalf("checkoutContaining under %q = %q, want %q", tc.root, got, tc.root)
+			}
+		})
+	}
+}
+
+func TestCheckoutContainingReportsNoCheckoutWhenTheWorktreeIsGone(t *testing.T) {
+	// Arrange: the gate's worktree can be removed out from under a running
+	// suite. That must stay a LOUD not-found rather than resolving to whatever
+	// unrelated checkout happens to sit above the temp directory.
+	_, worktree := rebaseWorktree(t)
+	if err := os.RemoveAll(worktree); err != nil {
+		t.Fatalf("remove worktree: %v", err)
+	}
+
+	// Act.
+	got, ok := checkoutContaining(filepath.Join(worktree, filepath.FromSlash("daemon/internal/prompts")))
+
+	// Assert.
+	if ok {
+		t.Fatalf("checkoutContaining of a removed worktree = %q, true; want not found", got)
 	}
 }
