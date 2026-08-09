@@ -299,6 +299,38 @@ session, which is a visibly broken workspace rather than a quiet one."
         (should (eq (agent-repl--ws-get "drained" :pending-initial-buffers)
                     t))))))
 
+(ert-deftest agent-repl-test-available-arms-the-panel-show ()
+  "A materialized workspace is born wanting its panels SHOWN, so it comes
+up open rather than running-but-headless and its tab paints the full
+state color without the user pressing `SPC o c'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (cl-letf (((symbol-function 'agent-repl--eager-open-panels)
+                 (lambda (&rest _) nil)))
+        (agent-repl-test--materialize-available
+         '(:jobId "workspace_commands_show:0" :finalName "shown"
+           :worktreePath "/tmp/wt/shown" :sessionId "session-shown"))
+        (should (eq (agent-repl--ws-get "shown" :pending-show-panels) t))))))
+
+(ert-deftest agent-repl-test-available-replay-does-not-rearm-the-panel-show ()
+  "A reconnect replay of an already-drained workspace must not re-arm the
+show: its panels are already built, and re-arming would mount them a
+second time on the next switch."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (cl-letf (((symbol-function 'agent-repl--eager-open-panels)
+                 (lambda (&rest _) nil)))
+        (let ((available
+               '(:jobId "workspace_commands_replay:0" :finalName "replayed"
+                 :worktreePath "/tmp/wt/replayed"
+                 :sessionId "session-replayed")))
+          (agent-repl-test--materialize-available available)
+          ;; The drain that a real switch would run.
+          (agent-repl--ws-put "replayed" :pending-show-panels nil)
+          (should (eq (agent-repl-test--materialize-available available)
+                      'existing))
+          (should-not (agent-repl--ws-get "replayed" :pending-show-panels)))))))
+
 (ert-deftest agent-repl-test-available-background-workspace-opens-panels ()
   "A workspace nobody is switched to still gets its panels built eagerly."
   (agent-repl-test--with-clean-state
