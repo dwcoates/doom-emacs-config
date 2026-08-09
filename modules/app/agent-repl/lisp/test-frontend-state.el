@@ -1871,9 +1871,10 @@ first."
       ;; Act
       (agent-repl-test--apply-snapshot
        '(:workspaces ((:workspace "ws1" :state "RENDER_STATE_IDLE"))
-         :queues ((:workspace "ws1" :sessionId "s1"
+         :queues ((:workspace "ws1" :fence "f1"
                    :entries ((:id "q1" :text "held"
-                              :shutdownHold (:scheduleId "sch-8")))))))
+                              :pending ()
+                              :shutdown (:scheduleId "sch-8")))))))
       ;; Assert
       (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :idle)))))
 
