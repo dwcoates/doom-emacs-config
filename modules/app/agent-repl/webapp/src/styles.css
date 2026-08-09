@@ -2937,18 +2937,62 @@ pre {
 .pfooter-error.addressable { cursor: pointer; }
 .pfooter-error.addressable:hover { text-decoration: underline; }
 
-/* The expansion sheet: the detail the thin strip drops, shown while the dock
-   is open. Wraps, since it is the one part of the footer allowed to be tall. */
+/* The EXPANDED FOOTER: the detail the thin strip drops, one fact per row.
+
+   IT IS EXACTLY AS TALL AS ITS ROWS, up to a hard ceiling of
+   `--pfooter-sheet-rows` of them — the count the markup carries in
+   (EXPANDED_FOOTER_MAX_ROWS), so the cap has ONE owner rather than a figure
+   restated here. Past the ceiling the section scrolls its own content: the
+   page never grows to fit a busy session.
+
+   The vertical padding is deliberately zero. A row-count ceiling that has to
+   allow for padding is a ceiling expressed in pixels again, so the rows carry
+   their own spacing through the row height instead. */
 .pfooter-sheet {
+  --pfooter-row-h: 1.45rem;
   border-top: 1px solid var(--border);
-  padding: 6px 10px 8px;
+  padding: 0 10px;
   color: var(--muted);
   font-size: 0.74rem;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 18px;
+  flex-direction: column;
+  max-height: calc(var(--pfooter-row-h) * var(--pfooter-sheet-rows));
 }
+.pfooter-sheet > * {
+  min-height: var(--pfooter-row-h);
+  line-height: var(--pfooter-row-h);
+}
+/* Only a section that overflows its ceiling shows a scroller. */
+.pfooter-sheet.scrolls { overflow-y: auto; }
 .pfooter-sheet-empty { font-style: italic; }
+
+/* One subagent's row: what it is on the left, what it has cost on the right.
+   It keeps the shared `.agent-row` press affordance and drops that rule's
+   padding, which would put every row over the row height the ceiling counts. */
+.pfooter-agent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+}
+.pfooter-agent-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.pfooter-agent-name .agent-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pfooter-agent-figures {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 
 /* The relocated counter chips sit in the last cell, where the topbar's
    overlays would drop DOWNWARD off the bottom of the window. Flipping them
