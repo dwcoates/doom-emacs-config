@@ -1799,3 +1799,112 @@ describe("shutdown schedule", () => {
     expect(lines.join("\n")).toContain("shutdown schedule state=draining schedule=sched-1 holds=1");
   });
 });
+
+
+// --- the resolved component views route through ONE effect kind -------------
+//
+// The three views share one `fenced-view` effect ON PURPOSE: the store has one
+// ingestion case for that kind and that case calls the fence gate, so a view
+// cannot reach a slice by any other route. These tests pin the routing, which
+// is the half of the invariant the store's own suite cannot see.
+
+describe("the fenced-view routing", () => {
+  const TOPBAR = {
+    workspace: "/ws",
+    title: "t",
+    sessionLine: "",
+    modelDisplay: "",
+    modelOptions: [],
+    accountingLine: "",
+    fence: "f1",
+  };
+  const BREAKDOWN = { workspace: "/ws", fence: "f1", sections: [] };
+  const GATE = { workspace: "/ws", fence: "f1", open: {} };
+
+  function effectsFor(frame: Record<string, unknown>) {
+    return new StateAdapter().apply(decodeFrontendFrame(JSON.stringify(frame)));
+  }
+
+  it("routes a topbar frame to the one fenced-view effect kind", () => {
+    // Arrange / Act
+    const effects = effectsFor({ topbar: TOPBAR });
+    // Assert
+    expect(effects).toEqual([
+      { kind: "fenced-view", value: { case: "topbar", value: expect.anything() } },
+    ]);
+  });
+
+  it("routes a token-breakdown frame to the SAME effect kind", () => {
+    // Arrange / Act
+    const effects = effectsFor({ tokenBreakdown: BREAKDOWN });
+    // Assert
+    expect(effects).toEqual([
+      { kind: "fenced-view", value: { case: "tokenBreakdown", value: expect.anything() } },
+    ]);
+  });
+
+  it("routes a workspace-gate frame to the SAME effect kind", () => {
+    // Arrange / Act
+    const effects = effectsFor({ workspaceGate: GATE });
+    // Assert
+    expect(effects).toEqual([
+      { kind: "fenced-view", value: { case: "workspaceGate", value: expect.anything() } },
+    ]);
+  });
+
+  it("never emits a per-view effect kind that would bypass the gate", () => {
+    // Arrange / Act — a second kind is a second store case and a second chance
+    // to skip the comparison.
+    const kinds = new Set(
+      [{ topbar: TOPBAR }, { tokenBreakdown: BREAKDOWN }, { workspaceGate: GATE }].flatMap(
+        (frame) => effectsFor(frame).map((effect) => effect.kind),
+      ),
+    );
+    // Assert
+    expect([...kinds]).toEqual(["fenced-view"]);
+  });
+
+  it("fans the snapshot's views out through the same kind", () => {
+    // Arrange / Act
+    const effects = effectsFor({
+      snapshot: { topbars: [TOPBAR], tokenBreakdowns: [BREAKDOWN], workspaceGates: [GATE] },
+    });
+    // Assert
+    expect(effects.filter((effect) => effect.kind === "fenced-view")).toHaveLength(3);
+  });
+
+  it("puts the snapshot's WORKSPACES before its views", () => {
+    // Arrange — the gate measures a view against the store's current fence, so
+    // a view folded before the ruling that establishes it would be discarded
+    // as stale on the very snapshot that carries both.
+    const effects = effectsFor({
+      snapshot: {
+        workspaces: [
+          {
+            workspace: "/ws",
+            sessionId: "s1",
+            fence: "f1",
+            state: "RENDER_STATE_IDLE",
+            connectivity: "SESSION_CONNECTIVITY_OPERATIONAL",
+            status: "SESSION_STATUS_READY",
+            controllerGenerationId: "g1",
+            activeFaults: [],
+          },
+        ],
+        topbars: [TOPBAR],
+      },
+    });
+    // Act
+    const kinds = effects.map((effect) => effect.kind);
+    // Assert
+    expect(kinds.indexOf("workspace-state")).toBeLessThan(kinds.indexOf("fenced-view"));
+  });
+
+  it("counts none of the three as an unsupported shape", () => {
+    // Arrange / Act — they are rendered, not ignored.
+    const adapter = new StateAdapter();
+    adapter.apply(decodeFrontendFrame(JSON.stringify({ topbar: TOPBAR })));
+    // Assert
+    expect(adapter.ignoredCounts().size).toBe(0);
+  });
+});
