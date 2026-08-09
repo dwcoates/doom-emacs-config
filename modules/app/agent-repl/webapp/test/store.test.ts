@@ -2529,9 +2529,23 @@ describe("async bubble ingestion", () => {
     return { workspace: "/w", opened, updates, throughSeq: 1, fence: "f1" };
   }
 
+  /**
+   * A store that has already adopted `/w`'s current fence.
+   *
+   * An async push is FENCED like every other resolved push, so a store holding
+   * no fence for the workspace admits none of them. These tests are about
+   * routing, not staleness, so they establish what current means first; the
+   * stale path has its own tests below.
+   */
+  function storeAtFence(fence = "f1", log?: ConstructorParameters<typeof ConversationStore>[0]) {
+    const store = new ConversationStore(log);
+    store.ingest([workspaceEffect({ workspace: "/w", fence })]);
+    return store;
+  }
+
   it("opens a pushed bubble into the store's registry", () => {
     // Arrange
-    const store = new ConversationStore();
+    const store = storeAtFence();
 
     // Act
     store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
@@ -2543,7 +2557,7 @@ describe("async bubble ingestion", () => {
   it("opens a FEED-ANCHORED bubble through the very same seam", () => {
     // Arrange — the anchored arm carries a push whose `opened` list is the
     // bubbles the conversation delta anchored.
-    const store = new ConversationStore();
+    const store = storeAtFence();
 
     // Act
     store.ingest([{ kind: "async-bubble-anchored", value: delta([agentBubble("b1")]) }]);
@@ -2554,7 +2568,7 @@ describe("async bubble ingestion", () => {
 
   it("reports a gap when a push names a bubble that is not open", () => {
     // Arrange
-    const store = new ConversationStore();
+    const store = storeAtFence();
 
     // Act
     const result = store.ingest([
@@ -2567,7 +2581,7 @@ describe("async bubble ingestion", () => {
 
   it("reports no gap for a push that lands cleanly", () => {
     // Arrange
-    const store = new ConversationStore();
+    const store = storeAtFence();
 
     // Act
     const result = store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
@@ -2578,7 +2592,7 @@ describe("async bubble ingestion", () => {
 
   it("REPLACES the registry from a snapshot rather than merging into it", () => {
     // Arrange
-    const store = new ConversationStore();
+    const store = storeAtFence();
     store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
 
     // Act
@@ -2590,7 +2604,7 @@ describe("async bubble ingestion", () => {
 
   it("retires every bubble on an empty snapshot, which is a real daemon statement", () => {
     // Arrange
-    const store = new ConversationStore();
+    const store = storeAtFence();
     store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
 
     // Act
@@ -2602,7 +2616,7 @@ describe("async bubble ingestion", () => {
 
   it("empties the registry on reset", () => {
     // Arrange
-    const store = new ConversationStore();
+    const store = storeAtFence();
     store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
 
     // Act
@@ -2614,7 +2628,7 @@ describe("async bubble ingestion", () => {
 
   it("KEEPS bubbles across a seq-space rebase, which retires a conversation, not a process", () => {
     // Arrange
-    const store = new ConversationStore();
+    const store = storeAtFence();
     store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
 
     // Act
@@ -2622,5 +2636,74 @@ describe("async bubble ingestion", () => {
 
     // Assert
     expect(store.asyncBubbles.get("b1")?.id).toBe("b1");
+  });
+});
+
+// --- the async push is FENCED, by the same gate and the same rule -----------
+//
+// A detached-work push describes a session's work. One stamped with a fence the
+// workspace has moved past describes a session that is gone, so it gets the
+// component views' treatment exactly: discarded whole, reported once.
+
+describe("a stale async push", () => {
+  const LIVE = { case: "live", value: { lastActivityMs: 0 } } as const;
+
+  function bubble(id: string): AsyncBubble {
+    return {
+      id,
+      workspace: "/w",
+      originToolUseId: "",
+      parentBubbleId: "",
+      label: "",
+      startedAtMs: 0,
+      liveness: LIVE,
+      kind: { case: "agent", value: { emissions: [], fold: { droppedBefore: 0, tailCap: 0 } } },
+    };
+  }
+
+  function stalePush(): AdapterEffect {
+    return {
+      kind: "async-bubble-delta",
+      value: { workspace: "/w", opened: [bubble("b1")], updates: [], throughSeq: 1, fence: "f1" },
+    };
+  }
+
+  it("is discarded WHOLE, opening none of the bubbles it carried", () => {
+    // Arrange — the workspace has rotated past the fence the push carries.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ workspace: "/w", fence: "f2" })]);
+
+    // Act
+    store.ingest([stalePush()]);
+
+    // Assert
+    expect(store.asyncBubbles.size).toBe(0);
+  });
+
+  it("is reported EXACTLY ONCE, so a discard is never silent nor doubled", () => {
+    // Arrange
+    const lines: string[] = [];
+    const store = new ConversationStore((_level, message) => lines.push(message));
+    store.ingest([workspaceEffect({ workspace: "/w", fence: "f2" })]);
+
+    // Act
+    store.ingest([stalePush()]);
+
+    // Assert
+    expect(
+      lines.filter((line) => line.includes("stale fenced view discarded whole: asyncBubbleDelta")),
+    ).toHaveLength(1);
+  });
+
+  it("raises no gap, so a retired session's seq space never triggers a resync", () => {
+    // Arrange — `throughSeq` counts a sequence the gone session owned.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ workspace: "/w", fence: "f2" })]);
+
+    // Act
+    const result = store.ingest([stalePush()]);
+
+    // Assert
+    expect("asyncGap" in result).toBe(false);
   });
 });
