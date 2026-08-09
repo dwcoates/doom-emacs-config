@@ -14,6 +14,7 @@ import {
   type ThinkingItem,
   type ToolItem,
 } from "../src/store.js";
+import type { AsyncBubble, AsyncBubbleDelta, AsyncBubbleUpdate } from "../src/async-bubble.js";
 import type {
   AdapterEffect,
   MergeStatus,
@@ -2502,5 +2503,123 @@ describe("revival hold adoption (the queue bubble's source of truth)", () => {
     store.ingest([queueEffect([queueEntry()])]);
     // Assert
     expect(store.state.queued[0].revivalHold).toBeUndefined();
+  });
+});
+
+// --- the async-bubble ingest seam -------------------------------------------
+
+describe("async bubble ingestion", () => {
+  const LIVE = { case: "live", value: { lastActivityMs: 0 } } as const;
+
+  function agentBubble(id: string, over: Partial<AsyncBubble> = {}): AsyncBubble {
+    return {
+      id,
+      originToolUseId: "",
+      parentBubbleId: "",
+      label: "",
+      startedAtMs: 0,
+      liveness: LIVE,
+      kind: { case: "agent", value: { emissions: [], fold: { droppedBefore: 0, tailCap: 0 } } },
+      ...over,
+    };
+  }
+
+  function delta(opened: AsyncBubble[], updates: AsyncBubbleUpdate[] = []): AsyncBubbleDelta {
+    return { workspace: "/w", opened, updates, throughSeq: 1, fence: "f1" };
+  }
+
+  it("opens a pushed bubble into the store's registry", () => {
+    // Arrange
+    const store = new ConversationStore();
+
+    // Act
+    store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
+
+    // Assert
+    expect(store.asyncBubbles.get("b1")?.id).toBe("b1");
+  });
+
+  it("opens a FEED-ANCHORED bubble through the very same seam", () => {
+    // Arrange — the anchored arm carries a push whose `opened` list is the
+    // bubbles the conversation delta anchored.
+    const store = new ConversationStore();
+
+    // Act
+    store.ingest([{ kind: "async-bubble-anchored", value: delta([agentBubble("b1")]) }]);
+
+    // Assert
+    expect(store.asyncBubbles.get("b1")?.id).toBe("b1");
+  });
+
+  it("reports a gap when a push names a bubble that is not open", () => {
+    // Arrange
+    const store = new ConversationStore();
+
+    // Act
+    const result = store.ingest([
+      { kind: "async-bubble-delta", value: delta([], [{ bubbleId: "ghost", update: { case: "liveness", value: LIVE } }]) },
+    ]);
+
+    // Assert
+    expect(result.asyncGap?.kind).toBe("unknown-bubble");
+  });
+
+  it("reports no gap for a push that lands cleanly", () => {
+    // Arrange
+    const store = new ConversationStore();
+
+    // Act
+    const result = store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
+
+    // Assert
+    expect("asyncGap" in result).toBe(false);
+  });
+
+  it("REPLACES the registry from a snapshot rather than merging into it", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
+
+    // Act
+    store.ingest([{ kind: "async-bubbles-snapshot", bubbles: [agentBubble("b2")] }]);
+
+    // Assert
+    expect(store.asyncBubbles.all().map((b) => b.id)).toEqual(["b2"]);
+  });
+
+  it("retires every bubble on an empty snapshot, which is a real daemon statement", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
+
+    // Act
+    store.ingest([{ kind: "async-bubbles-snapshot", bubbles: [] }]);
+
+    // Assert
+    expect(store.asyncBubbles.size).toBe(0);
+  });
+
+  it("empties the registry on reset", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
+
+    // Act
+    store.reset();
+
+    // Assert
+    expect(store.asyncBubbles.size).toBe(0);
+  });
+
+  it("KEEPS bubbles across a seq-space rebase, which retires a conversation, not a process", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
+
+    // Act
+    store.rebaseSeqSpace();
+
+    // Assert
+    expect(store.asyncBubbles.get("b1")?.id).toBe("b1");
   });
 });
