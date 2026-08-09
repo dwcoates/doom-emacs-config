@@ -77,9 +77,17 @@ carried by the pushed `WorkspaceState', not by these.")
 (defun agent-repl--permission-item-p (item)
   "Return non-nil when ITEM (a `ConversationItem' plist) is a permission arm.
 protojson emits ONLY the set oneof arm, so a `permission' key present
-means this item is a `PermissionItem'; every other conversation item
-type (assistant/user message, tool use/result, …) is for the webapp feed
-and carries a different arm key, which Emacs ignores."
+means this item is a `PermissionItem'; every other conversation item type
+is for the webapp feed and carries a different arm key, which Emacs
+ignores.
+
+`permission' survived the component reshape unmoved, and deliberately so:
+every arm the AGENT emitted (assistant message, tool use, tool result,
+result, skill body) folded onto the single `agent' arm, and a permission
+request is not an utterance — it is a question addressed to the user and
+answered by a command — so it stayed an arm of its own.  Which is exactly
+why this reader still asks for one key: the arm Emacs consumes is the one
+arm the fold did not touch."
   (and (plist-member item :permission) t))
 
 (defun agent-repl--frontend-apply-conversation-delta (delta)
