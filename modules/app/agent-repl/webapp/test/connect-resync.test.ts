@@ -4,8 +4,7 @@ import { ConnectResync, type ConnectResyncLogLevel } from "../src/connect-resync
 interface Sent {
   workspace: string;
   fromSeq: number;
-  sessionId: string;
-  controllerGenerationId: string;
+  fence: string;
 }
 
 interface Harness {
@@ -15,13 +14,8 @@ interface Harness {
 }
 
 /** A trigger whose resync always succeeds, recording what it was asked to send. */
-function snapshot(
-  workspace: string,
-  fromSeq: number,
-  sessionId = "s-current",
-  controllerGenerationId = "g-current",
-) {
-  return { workspace, fromSeq, sessionId, controllerGenerationId };
+function snapshot(workspace: string, fromSeq: number, fence = "f-current") {
+  return { workspace, fromSeq, fence };
 }
 
 function harness(resync?: (sent: Sent) => Promise<void>): Harness {
@@ -147,17 +141,17 @@ describe("ConnectResync", () => {
     expect(h.logs.filter(([level]) => level === "error")).toHaveLength(1);
   });
 
-  it("keeps a delayed old client's exact controller identity", () => {
-    // Arrange — the client snapshot names the controller that was current when
-    // this webview rendered. A replacement can publish a newer generation
-    // before the old webview's request reaches the daemon.
+  it("keeps a delayed old client's exact fence", () => {
+    // Arrange — the client snapshot carries the fence that was current when
+    // this webview rendered. A replacement can publish a newer fence before the
+    // old webview's request reaches the daemon.
     const h = harness();
     h.trigger.onConnect();
     // Act
-    h.trigger.observe(true, snapshot("/ws", 13, "s-old", "g-old"));
-    h.trigger.observe(true, snapshot("/ws", 0, "s-new", "g-new"));
+    h.trigger.observe(true, snapshot("/ws", 13, "f-old"));
+    h.trigger.observe(true, snapshot("/ws", 0, "f-new"));
     // Assert — the server can now classify the delayed request as superseded;
     // it is never silently rebound to the newer controller.
-    expect(h.sent).toEqual([snapshot("/ws", 13, "s-old", "g-old")]);
+    expect(h.sent).toEqual([snapshot("/ws", 13, "f-old")]);
   });
 });
