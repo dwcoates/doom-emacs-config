@@ -8,14 +8,18 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
-// fakeAsyncBubbles is an AsyncBubbleSource returning a fixed list.
+// fakeAsyncBubbles is a TaskCatalogSource whose bubble half returns a fixed
+// list and whose roster half is empty — these tests are about the bubbles, and
+// the one interface carries both because a source of one is always a source of
+// the other.
 type fakeAsyncBubbles struct{ bubbles []*frontendv1.AsyncBubble }
 
 func (f fakeAsyncBubbles) AsyncBubbles() []*frontendv1.AsyncBubble { return f.bubbles }
+func (f fakeAsyncBubbles) TaskCatalogs() []*frontendv1.TaskCatalog { return nil }
 
 func TestSnapshotCarriesEveryOpenBubble(t *testing.T) {
 	provider := &ssmSnapshotProvider{
-		bubbles:           fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1", Workspace: "/ws"}}},
+		catalogs:          fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1", Workspace: "/ws"}}},
 		workspaceCreation: newFakeWorkspaceCreation(),
 	}
 	if got := len(provider.Snapshot().GetAsyncBubbles()); got != 1 {
@@ -25,7 +29,7 @@ func TestSnapshotCarriesEveryOpenBubble(t *testing.T) {
 
 func TestSnapshotRefusesABubbleThatNamesNoWorkspace(t *testing.T) {
 	provider := &ssmSnapshotProvider{
-		bubbles:           fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1"}}},
+		catalogs:          fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1"}}},
 		workspaceCreation: newFakeWorkspaceCreation(),
 	}
 	if got := len(provider.Snapshot().GetAsyncBubbles()); got != 0 {
@@ -36,7 +40,7 @@ func TestSnapshotRefusesABubbleThatNamesNoWorkspace(t *testing.T) {
 func TestSnapshotRecordsWhyItRefusedAWorkspacelessBubble(t *testing.T) {
 	var lines []string
 	provider := &ssmSnapshotProvider{
-		bubbles:           fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1"}}},
+		catalogs:          fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1"}}},
 		workspaceCreation: newFakeWorkspaceCreation(),
 		logf:              func(format string, args ...any) { lines = append(lines, format) },
 	}
@@ -54,7 +58,7 @@ func TestSnapshotRecordsWhyItRefusedAWorkspacelessBubble(t *testing.T) {
 
 func TestSnapshotKeepsAWellFormedBubbleBesideARefusedOne(t *testing.T) {
 	provider := &ssmSnapshotProvider{
-		bubbles: fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{
+		catalogs: fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{
 			{Id: "bubble:bad"},
 			{Id: "bubble:good", Workspace: "/ws"},
 		}},
@@ -80,7 +84,7 @@ func heldWorkspaceCreation(workspace, jobID string) *fakeWorkspaceCreation {
 
 func TestSnapshotWithholdsABubbleOfAPublicationHeldWorkspace(t *testing.T) {
 	provider := &ssmSnapshotProvider{
-		bubbles:           fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1", Workspace: "/held"}}},
+		catalogs:          fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1", Workspace: "/held"}}},
 		workspaceCreation: heldWorkspaceCreation("/held", "job-held"),
 	}
 	if got := len(provider.Snapshot().GetAsyncBubbles()); got != 0 {
@@ -91,7 +95,7 @@ func TestSnapshotWithholdsABubbleOfAPublicationHeldWorkspace(t *testing.T) {
 func TestSnapshotRecordsTheLatchHoldingABubbleBack(t *testing.T) {
 	var lines []string
 	provider := &ssmSnapshotProvider{
-		bubbles:           fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1", Workspace: "/held"}}},
+		catalogs:          fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1", Workspace: "/held"}}},
 		workspaceCreation: heldWorkspaceCreation("/held", "job-held"),
 		logf:              func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) },
 	}
@@ -109,7 +113,7 @@ func TestSnapshotRecordsTheLatchHoldingABubbleBack(t *testing.T) {
 
 func TestSnapshotKeepsABubbleOfAMaterializedWorkspaceBesideAHeldOne(t *testing.T) {
 	provider := &ssmSnapshotProvider{
-		bubbles: fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{
+		catalogs: fakeAsyncBubbles{bubbles: []*frontendv1.AsyncBubble{
 			{Id: "bubble:held", Workspace: "/held"},
 			{Id: "bubble:open", Workspace: "/open"},
 		}},
@@ -125,5 +129,48 @@ func TestSnapshotHasNoBubblesWithoutASource(t *testing.T) {
 	provider := &ssmSnapshotProvider{workspaceCreation: newFakeWorkspaceCreation()}
 	if got := len(provider.Snapshot().GetAsyncBubbles()); got != 0 {
 		t.Fatalf("a nil source leaves the field empty rather than nil-derefing, got %d", got)
+	}
+}
+
+// bothHalvesSource answers for a session's DETACHED WORK whole: the roster and
+// the bubbles. It is what *sessioncontroller.Manager is, and what the one
+// TaskCatalogSource interface now requires.
+type bothHalvesSource struct{}
+
+func (bothHalvesSource) TaskCatalogs() []*frontendv1.TaskCatalog {
+	return []*frontendv1.TaskCatalog{{Workspace: "/ws"}}
+}
+func (bothHalvesSource) AsyncBubbles() []*frontendv1.AsyncBubble {
+	return []*frontendv1.AsyncBubble{{Id: "bubble:t1", Workspace: "/ws"}}
+}
+
+// The defect this collapse repairs: the roster and the bubbles were two sources
+// and two config fields, and a caller could wire one and forget the other — as
+// the daemon's own e2e harness did, serving zero bubbles on every reconnect
+// with a live bubble outstanding. Wiring the ONE source must now produce both.
+
+func TestOneDetachedWorkSourceServesTheRosterHalf(t *testing.T) {
+	// Arrange
+	provider := &ssmSnapshotProvider{catalogs: bothHalvesSource{}, workspaceCreation: newFakeWorkspaceCreation()}
+
+	// Act
+	got := len(provider.Snapshot().GetCatalogs())
+
+	// Assert
+	if got != 1 {
+		t.Fatalf("catalogs = %d, want 1 from the one wired detached-work source", got)
+	}
+}
+
+func TestOneDetachedWorkSourceServesTheBubbleHalf(t *testing.T) {
+	// Arrange
+	provider := &ssmSnapshotProvider{catalogs: bothHalvesSource{}, workspaceCreation: newFakeWorkspaceCreation()}
+
+	// Act
+	got := len(provider.Snapshot().GetAsyncBubbles())
+
+	// Assert
+	if got != 1 {
+		t.Fatalf("async_bubbles = %d, want 1: wiring the roster and getting no bubbles is the reconnect defect this source collapse removes", got)
 	}
 }

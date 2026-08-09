@@ -1534,14 +1534,10 @@ type ssmSnapshotProvider struct {
 	// so a (re)connecting frontend sources its slash-command/tools/model menus
 	// from the snapshot. Nil-safe: a nil source leaves snapshot.inits empty.
 	inits SessionInitSource
-	// catalogs supplies every live session's complete detached-task roster, so
-	// reconnect restores or clears the webapp's roster before later deltas.
+	// catalogs supplies every live session's DETACHED WORK — the complete task
+	// roster and the open bubbles folded to date — so reconnect restores or
+	// clears both before later deltas.
 	catalogs TaskCatalogSource
-	// bubbles supplies every live session's open async bubbles, folded to date,
-	// so a reconnecting frontend restores detached work it can no longer be
-	// sent the opening delta for. Nil-safe: a nil source leaves
-	// snapshot.async_bubbles empty.
-	bubbles AsyncBubbleSource
 	// queues supplies each live session's held-prompt queue (E4). Nil-safe: a
 	// nil source leaves snapshot.queues empty.
 	queues QueueSource
@@ -1591,18 +1587,24 @@ type SessionInitSource interface {
 	SessionInits() []*frontendv1.SessionInitView
 }
 
-// TaskCatalogSource supplies the authoritative detached-task roster for every
-// live session on connect/resync. Empty per-session catalogs are significant:
-// they clear stale frontend roster state.
+// TaskCatalogSource supplies every live session's DETACHED WORK for the
+// connect/resync snapshot: the authoritative task roster, and the open bubbles
+// folded to date. Satisfied by *sessioncontroller.Manager.
+//
+// BOTH HALVES ON ONE INTERFACE because they are two views of one thing — the
+// roster names the detached work, the bubbles are what that work produced —
+// and the same object has always answered for both. They were two interfaces
+// and two config fields, and the daemon's own e2e harness supplied the roster
+// and forgot the bubbles for the whole life of the feature: the snapshot side
+// is nil-safe by design, so every reconnect served zero bubbles with a live
+// bubble outstanding and nothing said so. One source makes supplying half of it
+// unrepresentable.
+//
+// Empty results are significant on both halves: an empty catalog clears stale
+// frontend roster state, and contributing no bubbles is how a frontend learns
+// its previous ones are gone.
 type TaskCatalogSource interface {
 	TaskCatalogs() []*frontendv1.TaskCatalog
-}
-
-// AsyncBubbleSource supplies every live session's open async bubbles, folded to
-// date, for the connect/resync snapshot. Satisfied by
-// *sessioncontroller.Manager. A session with no detached work contributes
-// nothing, which is how a frontend learns its previous bubbles are gone.
-type AsyncBubbleSource interface {
 	AsyncBubbles() []*frontendv1.AsyncBubble
 }
 
@@ -1661,9 +1663,7 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	}
 	if p.catalogs != nil {
 		snap.Catalogs = p.catalogs.TaskCatalogs()
-	}
-	if p.bubbles != nil {
-		snap.AsyncBubbles = refuseWorkspacelessBubbles(p.bubbles.AsyncBubbles(), p.logf)
+		snap.AsyncBubbles = refuseWorkspacelessBubbles(p.catalogs.AsyncBubbles(), p.logf)
 	}
 	if p.queues != nil {
 		snap.Queues = p.queues.QueueViews()

@@ -1320,6 +1320,11 @@ type fakeCatalogs struct{ catalogs []*frontendv1.TaskCatalog }
 
 func (f fakeCatalogs) TaskCatalogs() []*frontendv1.TaskCatalog { return f.catalogs }
 
+// The roster half's counterpart. One interface carries both halves of a
+// session's detached work; these tests are about the roster, so the bubble half
+// is empty rather than absent.
+func (f fakeCatalogs) AsyncBubbles() []*frontendv1.AsyncBubble { return nil }
+
 func TestSnapshotProviderIncludesSessionInits(t *testing.T) {
 	// Arrange — a snapshot provider with a SessionInitSource (S9).
 	provider := &ssmSnapshotProvider{

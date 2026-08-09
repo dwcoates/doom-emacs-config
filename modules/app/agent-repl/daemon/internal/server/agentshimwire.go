@@ -86,13 +86,12 @@ type AgentShimConfig struct {
 	// SessionInitViews for the connect snapshot (S9). Nil-safe: a nil source
 	// leaves snapshot.inits empty. Satisfied by *sessioncontroller.Manager.
 	Inits SessionInitSource
-	// Catalogs supplies every live session's complete detached-task roster for
-	// connect/resync snapshots. Satisfied by *sessioncontroller.Manager.
+	// Catalogs supplies every live session's DETACHED WORK for connect/resync
+	// snapshots: the complete task roster AND the open bubbles folded to date.
+	// Satisfied by *sessioncontroller.Manager. It used to be two fields, and a
+	// caller that wired the roster and forgot the bubbles got a reconnect
+	// snapshot that silently served none — see TaskCatalogSource.
 	Catalogs TaskCatalogSource
-	// AsyncBubbles supplies every live session's open detached-work bubbles,
-	// folded to date, for connect/resync snapshots. Satisfied by
-	// *sessioncontroller.Manager.
-	AsyncBubbles AsyncBubbleSource
 	// Queues is the prompt-queue backend (E4): the force/accept/cancel command
 	// half and the snapshot half. Nil makes each queue command a loud failing
 	// ack and leaves snapshot.queues empty.
@@ -630,7 +629,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 
 	snapshots := &ssmSnapshotProvider{
 		ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits,
-		catalogs: cfg.Catalogs, bubbles: cfg.AsyncBubbles, queues: cfg.Queues, daemon: cfg.SessionCommands,
+		catalogs: cfg.Catalogs, queues: cfg.Queues, daemon: cfg.SessionCommands,
 		progress: cfg.Progress, workspaceCreation: cfg.WorkspaceCreation, logf: logf,
 	}
 	// THE RESOLVED-VIEW PUBLISHER, constructed before the frontend server it
