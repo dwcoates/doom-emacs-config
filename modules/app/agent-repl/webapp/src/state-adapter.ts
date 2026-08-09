@@ -58,7 +58,6 @@ import { mergeStatusLogValue } from "./merge-status.js";
 import { previewBlockId, recordBlockIdentity } from "./streaming.js";
 import type { FencedComponentView } from "./fence.js";
 import type {
-  ContextClearedItem,
   ContextCompactedItem,
   ConversationItem,
   FailureCardItem,
@@ -394,7 +393,9 @@ export interface ProgressInput {
    * the live cell converges on the stamp it becomes.
    */
   inputTokens: number;
-  ttftMs: number;
+  // NO TTFT. The wire's `ProgressView.ttft_ms` is deliberately not projected:
+  // the footer's expanded section was its only reader, and first-token latency
+  // is not something the strip reports, so nothing renders it any more.
   compacting: ProgressWindowInput | null;
   retrying: ProgressWindowInput | null;
   authenticating: ProgressWindowInput | null;
@@ -890,7 +891,6 @@ export class StateAdapter {
         turnStartedAtMs: pv.turnStartedAtMs,
         thinkingTokens: pv.thinkingTokens,
         inputTokens: pv.inputTokens,
-        ttftMs: pv.ttftMs,
         compacting: openWindow(pv.compacting),
         retrying: openWindow(pv.retrying),
         authenticating: openWindow(pv.authenticating),
