@@ -70,7 +70,7 @@ func TestAMatchingShimBuildIsLeftAlone(t *testing.T) {
 	waitForWirings(applier, 1)
 
 	// Act.
-	if bounced := m.refreshStaleShim("ws", "s1", "sha-1"); bounced {
+	if bounced := m.refreshStaleShim("ws", "s1", "sha-1", false, nil); bounced {
 		t.Fatal("a shim already on the current bundle was bounced")
 	}
 
@@ -96,7 +96,7 @@ func TestAMismatchedShimBuildIsBounced(t *testing.T) {
 	m.mu.Unlock()
 
 	// Act.
-	if bounced := m.refreshStaleShim("ws", "s1", "sha-1"); !bounced {
+	if bounced := m.refreshStaleShim("ws", "s1", "sha-1", false, nil); !bounced {
 		t.Fatal("a shim running a superseded bundle was not bounced")
 	}
 	by := waitForStop(t, spawner)
@@ -127,10 +127,10 @@ func TestAStaleShimIsBouncedOnlyOnce(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.refreshStaleShim("ws", "s1", "sha-1")
+	m.refreshStaleShim("ws", "s1", "sha-1", false, nil)
 
 	// Act — the replacement reports the same stale identity.
-	second := m.refreshStaleShim("ws", "s1", "sha-1")
+	second := m.refreshStaleShim("ws", "s1", "sha-1", false, nil)
 
 	// Assert.
 	if second {
@@ -149,14 +149,14 @@ func TestASuccessfulStaleRefreshLatchesTheSessionOnce(t *testing.T) {
 	waitForWirings(applier, 1)
 
 	// Act.
-	if bounced := m.refreshStaleShim("ws", "s1", "sha-1"); !bounced {
+	if bounced := m.refreshStaleShim("ws", "s1", "sha-1", false, nil); !bounced {
 		t.Fatal("a shim running a superseded bundle was not bounced")
 	}
 	waitForBuildLatch(m, "s1", true)
 
 	// Assert — latched once, and a later mismatch is loud rather than a second
 	// bounce.
-	if second := m.refreshStaleShim("ws", "s1", "sha-1"); second {
+	if second := m.refreshStaleShim("ws", "s1", "sha-1", false, nil); second {
 		t.Fatal("a second bounce was started against an already-refreshed session")
 	}
 	if stops := len(spawner.stoppedSessions()); stops != 1 {
@@ -181,7 +181,7 @@ func TestAFailedStaleRefreshLeavesTheLatchUnsetAndSurfacesTheFault(t *testing.T)
 	spawner.mu.Unlock()
 
 	// Act.
-	if bounced := m.refreshStaleShim("ws", "s1", "sha-1"); !bounced {
+	if bounced := m.refreshStaleShim("ws", "s1", "sha-1", false, nil); !bounced {
 		t.Fatal("a shim running a superseded bundle was not bounced")
 	}
 	edge := waitForConnectivityCause(applier, staleShimRefreshFailedCause)
@@ -313,7 +313,7 @@ func TestAShimWithNoBuildIdentityIsNeverBounced(t *testing.T) {
 	waitForWirings(applier, 1)
 
 	// Act.
-	if bounced := m.refreshStaleShim("ws", "s1", ""); bounced {
+	if bounced := m.refreshStaleShim("ws", "s1", "", false, nil); bounced {
 		t.Fatal("a shim with no build identity was bounced; an unknown identity is not a difference")
 	}
 
@@ -336,7 +336,7 @@ func TestAnAbsentBuildStampNeverBounces(t *testing.T) {
 	waitForWirings(applier, 1)
 
 	// Act.
-	if bounced := m.refreshStaleShim("ws", "s1", "sha-1"); bounced {
+	if bounced := m.refreshStaleShim("ws", "s1", "sha-1", false, nil); bounced {
 		t.Fatal("a daemon with no build stamp bounced a shim it could not judge")
 	}
 

@@ -68,6 +68,10 @@ type queueHarness struct {
 	reg         *fakeRegistrar
 	applier     *fakeApplier
 	prog        *fakeProgress
+	// spawner is the shim spawner behind the harness, retained so a test that
+	// drives a RESTART can prove which sessions were stopped and how often
+	// (turnboundaryrefresh_test.go).
+	spawner     *fakeSpawner
 	nextRequest int
 	// newestClient reports the most recently constructed fake shim client, so a
 	// harness wired after construction can bind to the one its bring-up made.
@@ -132,13 +136,14 @@ func buildQueueHarness(t *testing.T, cls *fakeClassifier, wrap func(*fakePusher)
 	reg := &fakeRegistrar{}
 	applier := &fakeApplier{}
 	prog := &fakeProgress{}
+	spawner := &fakeSpawner{}
 	var mu sync.Mutex
 	var last *fakeClient
 	cfg := Config{
 		Push:              push,
 		Progress:          prog,
 		SSM:               applier,
-		Spawner:           &fakeSpawner{},
+		Spawner:           spawner,
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
 		ClearCompactStore: newFakeClearCompactStore(),
@@ -166,7 +171,7 @@ func buildQueueHarness(t *testing.T, cls *fakeClassifier, wrap func(*fakePusher)
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(m.Close)
-	h := &queueHarness{t: t, m: m, push: rec, cls: cls, reg: reg, applier: applier, prog: prog}
+	h := &queueHarness{t: t, m: m, push: rec, cls: cls, reg: reg, applier: applier, prog: prog, spawner: spawner}
 	h.newestClient = func() *fakeClient {
 		mu.Lock()
 		defer mu.Unlock()

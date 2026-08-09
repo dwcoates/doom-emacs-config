@@ -508,6 +508,12 @@ type Manager struct {
 	// generation-specific rendezvous to follow the intentional replacement;
 	// arbitrary transport failures never acquire retry semantics.
 	buildRefresh map[string]*buildRefreshState
+	// staleRefreshArms holds, per WORKSPACE, the turn-boundary lease a stale
+	// shim that reattached MID-TURN is waiting on: the refresh does not fire
+	// while the turn it found running is still running, and the arm is what
+	// carries that decision from the ShimReady that made it to the boundary
+	// that acts on it (turnboundaryrefresh.go).
+	staleRefreshArms map[string]*staleRefreshArm
 	// interruptDrain overrides the teardown drain's interrupt bound. Zero means
 	// the production constant; only a test assigns one, so the timeout branch
 	// can be driven without a ten-second wait (see turnstop.go).
@@ -846,6 +852,7 @@ func New(cfg Config) (*Manager, error) {
 		bringUpFailures:           make(map[string]*bringUpStreak),
 		buildBounced:              make(map[string]bool),
 		buildRefresh:              make(map[string]*buildRefreshState),
+		staleRefreshArms:          make(map[string]*staleRefreshArm),
 		rootCtx:                   rootCtx,
 		rootStop:                  rootStop,
 	}, nil
@@ -2633,6 +2640,12 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		// What no edge can reach is a result the shim never managed to send
 		// before the stop, because it is not evidence this daemon ever held.
 		m.releaseHeldTerminalResults(d, StopCauseControllerExit())
+		// AN ARMED TURN-BOUNDARY REFRESH DIES WITH THE CONNECTION THAT WOULD
+		// HAVE REPORTED ITS BOUNDARY. Dropped here rather than left standing,
+		// because an arm nobody can ever fire would park every later prompt on
+		// this workspace forever. A lease that is already FIRING is left alone —
+		// its own restart is what retired this controller (turnboundaryrefresh.go).
+		m.disarmStaleRefreshOnControllerExit(workspace, sessionID, generationID)
 		if !migrating {
 			m.publish(sessionID, view, nil)
 		}
@@ -2995,7 +3008,11 @@ func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID st
 	// release AwaitReady, and it never paints operational or releases queued
 	// work on the generation being retired.
 	m.noteShimPID(sessionID, hello.GetPid())
-	if m.refreshStaleShim(workspace, sessionID, hello.GetBuildSha()) {
+	// A shim that reattached MID-TURN arms a turn-boundary lease instead of
+	// bouncing, and therefore does NOT retire this generation: it is still
+	// serving that turn and keeps its readiness until the boundary
+	// (turnboundaryrefresh.go).
+	if m.refreshStaleShim(workspace, sessionID, hello.GetBuildSha(), hello.GetTurnInFlight(), hello.GetActiveTurnIds()) {
 		return true
 	}
 	// THE BRING-UP GATE CLOSED. This hook fires from the shim's ShimReady, the
