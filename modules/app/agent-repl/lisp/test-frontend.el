@@ -298,6 +298,110 @@ never be refetched."
           (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer)))
           (should (= (length agent-repl-test--urls) 2)))))))
 
+;;;; ---- rescue-webview (navigated away) ----------------------------------------
+
+(defmacro agent-repl-test--with-rescue-webview (uri remounted messages &rest body)
+  "Run BODY with a mounted webview reporting URI, capturing rescue effects.
+REMOUNTED collects the workspaces `agent-repl--frontend-remount-webview'
+was asked to remount; MESSAGES collects the echoed user copy.  The
+remount itself is mocked because the rescue's own contract is that it
+DELEGATES navigation rather than implementing a second one."
+  (declare (indent 3))
+  `(let ((,remounted nil)
+         (,messages nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                (lambda (_buf) 'fake-xwidget))
+               ((symbol-function 'agent-repl--frontend-webview-uri)
+                (lambda (_xw) ,uri))
+               ((symbol-function 'agent-repl--frontend-remount-webview)
+                (lambda (ws) (push ws ,remounted) :pending))
+               ((symbol-function 'agent-repl--emit-message)
+                (lambda (text &rest _) (push text ,messages))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-frontend-rescue-webview-remounts-when-astray ()
+  "A webview showing another site is remounted against its workspace."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (agent-repl--ws-put "ws1" :frontend-buffer (get-buffer-create "*agent-frontend-ws1*"))
+    (agent-repl-test--with-rescue-webview "https://www.google.com/" remounted messages
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
+        ;; Act
+        (agent-repl-frontend-rescue-webview)
+        ;; Assert
+        (ignore messages)
+        (should (equal remounted '("ws1")))))))
+
+(ert-deftest agent-repl-test-frontend-rescue-webview-names-the-stray-host ()
+  "The echoed line says which host the webview was brought home from."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (agent-repl--ws-put "ws1" :frontend-buffer (get-buffer-create "*agent-frontend-ws1*"))
+    (agent-repl-test--with-rescue-webview "https://www.google.com/" remounted messages
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
+        ;; Act
+        (agent-repl-frontend-rescue-webview)
+        ;; Assert
+        (ignore remounted)
+        (should (equal messages
+                       (list "agent-repl: webview brought home from www.google.com")))))))
+
+(ert-deftest agent-repl-test-frontend-rescue-webview-noop-when-already-home ()
+  "A webview still on the daemon's own origin is reported and left alone.
+Remounting it would throw away a rendered feed to navigate to where the
+page already is."
+  ;; Arrange
+  (let ((agent-repl-frontend-daemon-addr "127.0.0.1:9999"))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (agent-repl--ws-put "ws1" :frontend-buffer (get-buffer-create "*agent-frontend-ws1*"))
+      (agent-repl-test--with-rescue-webview "http://127.0.0.1:9999/?workspace=%2Fw&build=abc"
+          remounted messages
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
+          ;; Act
+          (agent-repl-frontend-rescue-webview)
+          ;; Assert
+          (should (null remounted))
+          (should (equal messages '("agent-repl: webview is already home"))))))))
+
+(ert-deftest agent-repl-test-frontend-rescue-webview-targets-a-named-workspace ()
+  "A workspace name argument targets THAT workspace, not the current one."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws2" '(:project-dir "/w2")
+    (agent-repl--ws-put "ws2" :frontend-buffer (get-buffer-create "*agent-frontend-ws2*"))
+    (agent-repl-test--with-rescue-webview "https://www.google.com/" remounted messages
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
+        ;; Act
+        (agent-repl-frontend-rescue-webview "ws2")
+        ;; Assert
+        (ignore messages)
+        (should (equal remounted '("ws2")))))))
+
+(ert-deftest agent-repl-test-frontend-rescue-webview-errors-without-webview ()
+  "The rescue signals when the workspace has no webview open at all."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
+      ;; Act / Assert
+      (should-error (agent-repl-frontend-rescue-webview) :type 'user-error))))
+
+(ert-deftest agent-repl-test-frontend-rescue-webview-treats-unknown-uri-as-astray ()
+  "A webview that cannot say where it is gets remounted rather than trusted."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (agent-repl--ws-put "ws1" :frontend-buffer (get-buffer-create "*agent-frontend-ws1*"))
+    (agent-repl-test--with-rescue-webview nil remounted messages
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
+        ;; Act
+        (agent-repl-frontend-rescue-webview)
+        ;; Assert
+        (ignore messages)
+        (should (equal remounted '("ws1")))))))
+
+(ert-deftest agent-repl-test-frontend-rescue-webview-uri-probe-is-a-registered-boundary ()
+  "The read-only URI probe is registered as an external boundary wrapper."
+  (should (memq 'agent-repl--frontend-webview-uri
+                agent-repl--external-boundary-functions)))
+
 ;;;; ---- Copy chords ------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-webview-arms-copy-chords ()
