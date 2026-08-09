@@ -917,7 +917,7 @@ func TestUserInterruptDoesNotDropQueuedEntries(t *testing.T) {
 	_ = h.submit("later")
 
 	// Act.
-	if err := h.m.Interrupt(context.Background(), "ws"); err != nil {
+	if err := h.m.Interrupt(context.Background(), "ws", "fe-1"); err != nil {
 		t.Fatalf("interrupt: %v", err)
 	}
 

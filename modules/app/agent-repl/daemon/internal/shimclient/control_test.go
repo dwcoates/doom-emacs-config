@@ -3,8 +3,10 @@ package shimclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -288,7 +290,7 @@ func TestInterruptAckSuccess(t *testing.T) {
 	waitConnected(t, connected)
 
 	// Act
-	outcome, err := c.Interrupt(context.Background())
+	outcome, err := c.Interrupt(context.Background(), "fe-1")
 
 	// Assert
 	if err != nil {
@@ -439,5 +441,120 @@ func TestRequestIDCounterAloneIsNotAnIdentity(t *testing.T) {
 	}
 	if ids[0] == ids[1] {
 		t.Fatalf("both boots minted %q — the counter position alone decided the identity", ids[0])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE ORIGIN CORRELATION. A stop travels under a DAEMON-MINTED control id,
+// which is the only id the wire exchange can be correlated by and which appears
+// nowhere in the vocabulary of whoever asked for it. A frontend interrupt was
+// therefore unfindable end to end: the command arrived under `fe-276-1074`, the
+// exchange went out under `daemon-interrupt-3-3b5adc2becd0`, and nothing joined
+// them — so a stop that WAS delivered and answered INTERRUPTED within two
+// milliseconds read exactly like one the daemon had silently swallowed.
+// ---------------------------------------------------------------------------
+
+// capturingLogf collects log lines so a test can assert what the record says.
+type capturingLogf struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (c *capturingLogf) logf(format string, args ...any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lines = append(c.lines, fmt.Sprintf(format, args...))
+}
+
+// linesContaining returns every captured line mentioning needle.
+func (c *capturingLogf) linesContaining(needle string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []string
+	for _, line := range c.lines {
+		if strings.Contains(line, needle) {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// interruptWithCapturedLog runs one acked interrupt under a capturing logger.
+func interruptWithCapturedLog(t *testing.T, originRequestID string) *capturingLogf {
+	t.Helper()
+	h := newHarness()
+	path := startFakeShim(t, func(conn net.Conn) {
+		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
+		m, err := wire.ReadAny(conn)
+		if err != nil {
+			t.Errorf("read Interrupt: %v", err)
+			return
+		}
+		iv, ok := m.(*corev1.Interrupt)
+		if !ok {
+			t.Errorf("expected Interrupt, got %T", m)
+			return
+		}
+		mustWriteMsg(t, conn, &corev1.Ack{
+			RequestId:        iv.GetRequestId(),
+			InterruptOutcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED,
+		})
+		_, _ = wire.ReadAny(conn)
+	})
+	log := &capturingLogf{}
+	cfg := h.config(t, "sess-1", path)
+	cfg.Logf = log.logf
+	c, connected, stop := runConnectedClient(t, cfg)
+	defer stop()
+	waitConnected(t, connected)
+
+	if _, err := c.Interrupt(context.Background(), originRequestID); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	return log
+}
+
+// THE SEND NAMES WHO ORDERED IT. Without this, a search for the frontend's own
+// id finds the command arriving and nothing after it.
+func TestInterruptSendLogNamesTheOriginRequest(t *testing.T) {
+	// Arrange, Act.
+	log := interruptWithCapturedLog(t, "fe-276-1074")
+
+	// Assert.
+	sent := log.linesContaining("sent control request")
+	if len(sent) != 1 {
+		t.Fatalf("send lines = %d, want exactly 1", len(sent))
+	}
+	if !strings.Contains(sent[0], `origin_request_id="fe-276-1074"`) {
+		t.Fatalf("send line = %q, want it to name the frontend request that ordered the stop", sent[0])
+	}
+}
+
+// THE ACK NAMES IT TOO, which is the half that answers "was it delivered". The
+// send alone cannot distinguish a stop the shim answered from one it ignored.
+func TestInterruptAckLogNamesTheOriginRequest(t *testing.T) {
+	// Arrange, Act.
+	log := interruptWithCapturedLog(t, "fe-276-1074")
+
+	// Assert.
+	acked := log.linesContaining("acked outcome=")
+	if len(acked) != 1 {
+		t.Fatalf("ack lines = %d, want exactly 1", len(acked))
+	}
+	if !strings.Contains(acked[0], `origin_request_id="fe-276-1074"`) {
+		t.Fatalf("ack line = %q, want it to name the frontend request that ordered the stop", acked[0])
+	}
+}
+
+// A CALLER WITH NO ID OF ITS OWN IS RENDERED AS ONE, rather than the field
+// vanishing: an exchange nothing outside this package named is itself a fact.
+func TestInterruptLogRendersAnUnnamedOrigin(t *testing.T) {
+	// Arrange, Act.
+	log := interruptWithCapturedLog(t, "")
+
+	// Assert.
+	sent := log.linesContaining("sent control request")
+	if len(sent) != 1 || !strings.Contains(sent[0], `origin_request_id=""`) {
+		t.Fatalf("send lines = %q, want one naming an empty origin rather than omitting the field", sent)
 	}
 }

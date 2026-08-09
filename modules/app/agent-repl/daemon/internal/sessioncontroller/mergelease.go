@@ -205,7 +205,9 @@ func (m *Manager) InterruptForMerge(ctx context.Context, workspace string) (*ssm
 	// running one, so anything read afterwards describes a session that has
 	// already been taken away.
 	displaced := m.runningTurn(d)
-	outcome, err := d.client.Interrupt(ctx)
+	// The lease acquisition has no request id of its own; the workspace it is
+	// being taken over names the stop as precisely as anything here can.
+	outcome, err := d.client.Interrupt(ctx, "merge-lease:"+workspace)
 	if err != nil {
 		m.logf("session-controller: merge interrupt FAILED ws=%q session=%s: %v — the user's turn is still running and the merge lease must not stand over it",
 			workspace, d.sessionID, err)

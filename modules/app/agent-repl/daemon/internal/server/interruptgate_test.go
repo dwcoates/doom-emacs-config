@@ -254,3 +254,38 @@ func TestAnInterruptReportsBothHalvesFailures(t *testing.T) {
 		t.Fatalf("Interrupt() error = %v, want both the eviction and the shim failure", err)
 	}
 }
+
+// THE FRONTEND'S OWN ID SURVIVES THE HOP TO THE SESSION CONTROLLER. It is the
+// only id the user's client, the daemon's command log and the shim exchange can
+// be reconciled on, and dropping it here is what made a stop that WAS delivered
+// and acked INTERRUPTED read exactly like one the daemon had swallowed.
+func TestInterruptCarriesTheCommandRequestIDToTheSessionController(t *testing.T) {
+	// Arrange.
+	h, p := newGatedHandler(t, true, fakeLiveTasks{count: 0})
+
+	// Act.
+	if err := h.Interrupt(context.Background(), "/ws1", "fe-276-1074", &frontendv1.InterruptCmd{}); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	// Assert.
+	got := p.interruptRequestIDs
+	if len(got) != 1 || got[0] != "fe-276-1074" {
+		t.Fatalf("interrupt request ids = %v, want the frontend command's own id carried through", got)
+	}
+}
+
+// A CHALLENGED STOP CARRIES NOTHING THROUGH, because it performs nothing. The
+// correlation must not appear for a command the daemon deliberately did not do.
+func TestAChallengedInterruptCarriesNoRequestIDThrough(t *testing.T) {
+	// Arrange.
+	h, p := newGatedHandler(t, false, fakeLiveTasks{count: 2})
+
+	// Act.
+	_ = h.Interrupt(context.Background(), "/ws1", "fe-276-1074", &frontendv1.InterruptCmd{})
+
+	// Assert.
+	if len(p.interruptRequestIDs) != 0 {
+		t.Fatalf("interrupt request ids = %v, want none behind a challenge", p.interruptRequestIDs)
+	}
+}
