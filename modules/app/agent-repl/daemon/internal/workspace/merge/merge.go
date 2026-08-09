@@ -270,14 +270,32 @@ type Result struct {
 	// outcome. It is the guard the single target-mutating step checks — see
 	// Request.BaseHead.
 	BaseHead string
-	// FailingCommit is the short SHA the broken test gate is ATTRIBUTED to, set
-	// when Outcome is OutcomeTestFailed. The gate runs once, on the fully rebased
-	// head, so it is that head's sha — and it is deliberately STABLE across the
-	// one resolution attempt: a re-gate after a committed fix reports the same
-	// sha the first failure did, which is what keeps merge.Coordinator's
-	// one-attempt-per-failure accounting from handing out a fresh attempt every
-	// time a fix moves the head.
+	// FailingCommit is the short SHA of the rebased head the broken test gate
+	// judged, set when Outcome is OutcomeTestFailed.
+	//
+	// IT IS AN INTERNAL CORRELATION HANDLE AND NEVER USER-FACING COPY. It moves
+	// with the head — a re-gate after a committed fix reports the fix's head,
+	// because that is the tree the suite actually ran on — and it used to be held
+	// artificially STABLE so a one-attempt-per-failure map could key on it. That
+	// rule is abolished, so the honest sha is the reportable one. Every sentence a
+	// user or the resolving agent reads names FailingSubject instead.
 	FailingCommit string
+	// FailingSubject is the subject line of the rebased head the gate judged, set
+	// beside FailingCommit. It is what the merge's prose names: a sha identifies
+	// nothing to the person reading a merge failure, and the subject is the only
+	// handle on that commit they wrote themselves.
+	FailingSubject string
+	// TestFailureEscalation is the resolving agent's OWN explanation that the
+	// failure cannot be fixed without non-trivial architectural work, set when a
+	// remediation turn wrote the escalation record (see mergeEscalationFile).
+	//
+	// IT IS THE REMEDIATION LOOP'S ONLY EXIT THAT IS NOT A PASSING GATE. The loop
+	// turns until the suite goes green, so the thing that ends an unfixable merge
+	// is the agent's judgement rather than a counter — a counter denies a second
+	// honest attempt and grants a hundredth pointless one with equal confidence.
+	// merge.Coordinator terminates the run merge_failed with this prose as the
+	// cause.
+	TestFailureEscalation string
 	// TestFailureTail is the clamped tail of the failing suite's output, set
 	// when Outcome is OutcomeTestFailed. It travels into the resolution prompt
 	// and into the merge_failed cause.
@@ -322,19 +340,27 @@ const rebaseAttempts = 2
 // headGate is what the merge's ONE test gate needs beyond the Request. It
 // travels with a re-entered replay so the gate at the end of it judges the same
 // merge the gate before it judged.
+//
+// IT CARRIES NO FAILURE IDENTITY, and its absence is the contract rather than an
+// omission. A pinned first-failure sha used to ride here so that
+// merge.Coordinator could hand each failure EXACTLY ONE remediation attempt. That
+// rule is gone: the remediation loop now turns until the gate passes or until the
+// resolving agent itself escalates (Result.TestFailureEscalation), so nothing
+// keys on a stable failure identity any more and there is no fact for a re-entry
+// to lose. Each gate run reports the head it actually judged.
 type headGate struct {
-	// failingCommit PINS the identity a head-gate failure is attributed to,
-	// empty on the first pass through a merge (where the rebased head's own sha
-	// is used). It is set only by ContinueAfterTestFix, which re-gates a head the
-	// resolution turn has moved: reporting the new head would look to
-	// merge.Coordinator like a brand-new failure and earn a second resolution
-	// attempt, and then a third, for as long as the agent keeps committing
-	// something that does not fix the suite.
-	failingCommit string
 	// extraPaths widens the suite selection beyond the merge's own range. A
 	// resolution turn may have edited a file no replayed commit touched, and a
 	// selection made from the range alone would then run nothing that covers the
 	// fix. The selection can only widen.
+	//
+	// IT IS DERIVED FROM GIT ON EVERY RE-ENTRY (continueRange), never carried
+	// across one. The rebased line beyond the target head this rebase based itself
+	// on IS the merge's own additions — the replayed picks plus whatever a
+	// resolution turn committed — so the paths are reconstructible from the
+	// worktree itself, exactly as the replay reconstructs its remaining work and
+	// its cherry-pick base. A field a caller has to remember to refill is the same
+	// shape of bug the failure identity above just stopped being.
 	extraPaths []string
 }
 
@@ -708,8 +734,11 @@ func (e *Driver) rebaseLoop(ctx context.Context, req Request, base string, lande
 
 		// The phase is published BEFORE the replay, not after: the replay is the
 		// slow part, and a user watching a merge should see which commit is
-		// landing while it lands rather than only once it has.
-		if err := req.Run.CherryPicking(commit, "rebasing "+progress+": "+short); err != nil {
+		// landing while it lands rather than only once it has. It names the
+		// commit's SUBJECT: the sha rides the status's own current_sha field for a
+		// tool to correlate on, and the sentence a user reads says which of their
+		// commits is in flight in the words they wrote for it.
+		if err := req.Run.CherryPicking(commit, "rebasing "+progress+": "+commit.Subject); err != nil {
 			return Result{}, err
 		}
 
@@ -764,7 +793,7 @@ func (e *Driver) rebaseLoop(ctx context.Context, req Request, base string, lande
 				return e.finalizeMerged(ctx, req, true)
 			}
 			return e.markFailed(ctx, req,
-				fmt.Sprintf("rebase replay of %s (%s) exited %d with no conflict to resolve", short, progress, exit))
+				fmt.Sprintf("rebase replay of %s (%s) exited %d with no conflict to resolve", commit.Subject, progress, exit))
 		}
 		landed++
 		req.Run.CommitLanded()
@@ -817,7 +846,7 @@ func (e *Driver) rebaseLoop(ctx context.Context, req Request, base string, lande
 // the runner AND here, because a merge landing untested is precisely the fact a
 // user later needs to find in the log.
 func (e *Driver) gateHead(ctx context.Context, req Request, gate headGate) (*Result, error) {
-	head, err := e.gitString(ctx, req.WorkDir, "rev-parse", "--short", "HEAD")
+	head, err := e.headCommit(ctx, req.WorkDir)
 	if err != nil {
 		return nil, err
 	}
@@ -825,32 +854,37 @@ func (e *Driver) gateHead(ctx context.Context, req Request, gate headGate) (*Res
 	if err != nil {
 		return nil, err
 	}
-	progress := fmt.Sprintf("the rebased head %s after %d commits", head, req.Run.CommitsLanded())
-	// The testing phase carries the SAME commit context the cherry_picking phases
-	// did — the run holds it, so the two cannot disagree — which is what lets a
-	// frontend render one progress figure across both. It also carries the
-	// SELECTION, which is the merge's own record of which suites were asked to
-	// testify about it.
-	if err := req.Run.Testing("testing " + progress + " [" + selectionLabel(sel.Suites) + "]"); err != nil {
+	// THE PROSE NAMES THE SUBJECT, NOT THE SHA. A sha is an internal correlation
+	// handle; the sentence a user reads has to name the commit in the words they
+	// wrote for it. The sha stays in the log line below and on the status's own
+	// sha field, where a tool — not a person — reads it.
+	progress := fmt.Sprintf("the rebased head (%s) after %d commits", head.Subject, req.Run.CommitsLanded())
+	// The testing phase carries the head THIS GATE JUDGES as its commit context.
+	// It used to carry the last planned pick, which after a resolution turn's fix
+	// commit is not the tree under test at all — the fix moved the head — so a
+	// frontend rendered a testing phase pointing at a commit the suite was not run
+	// on. It also carries the SELECTION, which is the merge's own record of which
+	// suites were asked to testify about it.
+	if err := req.Run.Testing(head, "testing "+progress+" ["+selectionLabel(sel.Suites)+"]"); err != nil {
 		return nil, err
 	}
 	sr, err := e.suite.RunSuite(ctx, req.WorkDir, SuiteRun{Suites: sel.Suites, Attempt: 1})
 	if err != nil {
-		e.logf("merge: test gate UNRUNNABLE at the rebased head %s {ws=%s work=%s}: %v", head, req.Name, req.WorkDir, err)
-		return nil, fmt.Errorf("merge: test gate for %q at the rebased head %s: %w", req.Name, head, err)
+		e.logf("merge: test gate UNRUNNABLE at the rebased head %s {ws=%s work=%s}: %v", head.Short, req.Name, req.WorkDir, err)
+		return nil, fmt.Errorf("merge: test gate for %q at %s: %w", req.Name, progress, err)
 	}
 	if sr.Skipped {
 		e.logf("merge: test gate SKIPPED at the rebased head %s {ws=%s work=%s}: %s — this merge lands UNTESTED",
-			head, req.Name, req.WorkDir, sr.Reason)
+			head.Short, req.Name, req.WorkDir, sr.Reason)
 		return nil, nil
 	}
 	if sr.Passed {
 		e.logf("merge: test gate PASSED at the rebased head %s (%s) {ws=%s suites=%s duration=%s}",
-			head, progress, req.Name, selectionLabel(sel.Suites), sr.Duration.Round(time.Millisecond))
+			head.Short, progress, req.Name, selectionLabel(sel.Suites), sr.Duration.Round(time.Millisecond))
 		return nil, nil
 	}
 	e.logf("merge: test gate FAILED at the rebased head %s (%s) {ws=%s work=%s suites=%s duration=%s full_output=%s} tail:\n%s",
-		head, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
+		head.Short, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
 		sr.Duration.Round(time.Millisecond), sr.OutputPath, sr.Tail)
 
 	rerun, err := e.rerunAfterFailure(ctx, req, sel, progress, head, sr)
@@ -862,21 +896,41 @@ func (e *Driver) gateHead(ctx context.Context, req Request, gate headGate) (*Res
 		return nil, nil
 	}
 	sr = *rerun
-	// A RE-GATE AFTER A RESOLUTION TURN KEEPS THE ORIGINAL IDENTITY. See headGate:
-	// the head has moved by the fix commit, and reporting the new sha would earn
-	// the merge a second resolution attempt it is not entitled to.
-	failing := gate.failingCommit
-	if failing == "" {
-		failing = head
-	}
+	// EVERY GATE RUN REPORTS THE HEAD IT ACTUALLY JUDGED. A re-gate after a
+	// resolution turn used to report the FIRST failure's sha, held stable so a
+	// one-attempt-per-failure map could not be fooled into granting a second turn
+	// by a moving head. That rule is abolished — the loop turns until the suite
+	// passes or the agent escalates — so the pipeline no longer has any reason to
+	// report a tree the suite did not run on.
 	return &Result{
 		Outcome:               OutcomeTestFailed,
-		FailingCommit:         failing,
+		FailingCommit:         head.Short,
+		FailingSubject:        head.Subject,
 		TestFailureTail:       sr.Tail,
 		TestFailureOutputPath: sr.OutputPath,
 		WorkDir:               req.WorkDir,
 		BaseHead:              req.BaseHead,
 	}, nil
+}
+
+// headCommit reads the rebase worktree's HEAD as a commit: the sha a tool
+// correlates on, the short form the logs carry, and the SUBJECT every sentence
+// about that commit names. One `git log` rather than a rev-parse plus a second
+// call, so the sha and the subject can never describe two different commits.
+func (e *Driver) headCommit(ctx context.Context, dir string) (PlannedCommit, error) {
+	out, err := e.gitString(ctx, dir, "log", "-1", "--pretty=%H"+planFieldSep+"%h"+planFieldSep+"%s", "HEAD")
+	if err != nil {
+		return PlannedCommit{}, err
+	}
+	sha, rest, found := strings.Cut(strings.TrimSpace(out), planFieldSep)
+	if !found {
+		return PlannedCommit{}, fmt.Errorf("merge: head commit line %q in %s has no %q separator", out, dir, planFieldSep)
+	}
+	short, subject, found := strings.Cut(rest, planFieldSep)
+	if !found {
+		return PlannedCommit{}, fmt.Errorf("merge: head commit line %q in %s has no second %q separator", out, dir, planFieldSep)
+	}
+	return PlannedCommit{SHA: sha, Short: short, Subject: subject}, nil
 }
 
 // rerunAfterFailure runs the same suites over the same tree exactly ONCE more
@@ -897,33 +951,33 @@ func (e *Driver) gateHead(ctx context.Context, req Request, gate headGate) (*Res
 //
 // It returns (nil, nil) for a flake — the gate proceeds — and the SECOND run's
 // result for a genuine failure.
-func (e *Driver) rerunAfterFailure(ctx context.Context, req Request, sel SuiteSelection, progress, head string, first SuiteResult) (*SuiteResult, error) {
+func (e *Driver) rerunAfterFailure(ctx context.Context, req Request, sel SuiteSelection, progress string, head PlannedCommit, first SuiteResult) (*SuiteResult, error) {
 	e.logf("merge: test gate RE-RUNNING once on the SAME tree to separate a flake from a genuine failure {ws=%s work=%s suites=%s head=%s}",
-		req.Name, req.WorkDir, selectionLabel(sel.Suites), head)
-	if err := req.Run.Testing("re-testing " + progress + " [" + selectionLabel(sel.Suites) + "] after a failure"); err != nil {
+		req.Name, req.WorkDir, selectionLabel(sel.Suites), head.Short)
+	if err := req.Run.Testing(head, "re-testing "+progress+" ["+selectionLabel(sel.Suites)+"] after a failure"); err != nil {
 		return nil, err
 	}
 	second, err := e.suite.RunSuite(ctx, req.WorkDir, SuiteRun{Suites: sel.Suites, Attempt: 2})
 	if err != nil {
-		e.logf("merge: test gate RE-RUN UNRUNNABLE at the rebased head %s {ws=%s work=%s}: %v", head, req.Name, req.WorkDir, err)
-		return nil, fmt.Errorf("merge: test gate re-run for %q at the rebased head %s: %w", req.Name, head, err)
+		e.logf("merge: test gate RE-RUN UNRUNNABLE at the rebased head %s {ws=%s work=%s}: %v", head.Short, req.Name, req.WorkDir, err)
+		return nil, fmt.Errorf("merge: test gate re-run for %q at %s: %w", req.Name, progress, err)
 	}
 	if second.Skipped {
 		// The first run produced a verdict, so the entrypoint was there. Its
 		// disappearance between the two runs is a contradiction, not a skip to
 		// wave through.
-		return nil, fmt.Errorf("merge: test gate re-run for %q at the rebased head %s reported the suite SKIPPED (%s) when the first run had a verdict",
-			req.Name, head, second.Reason)
+		return nil, fmt.Errorf("merge: test gate re-run for %q at %s reported the suite SKIPPED (%s) when the first run had a verdict",
+			req.Name, progress, second.Reason)
 	}
 	if second.Passed {
 		e.logf("merge: test gate FLAKE at the rebased head %s (%s) {ws=%s work=%s suites=%s} — FAILED in %s then PASSED in %s on the UNCHANGED tree; the merge proceeds. first_output=%s rerun_output=%s",
-			head, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
+			head.Short, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
 			first.Duration.Round(time.Millisecond), second.Duration.Round(time.Millisecond),
 			first.OutputPath, second.OutputPath)
 		return nil, nil
 	}
 	e.logf("merge: test gate FAILED TWICE at the rebased head %s (%s) {ws=%s work=%s suites=%s} — %s then %s, a genuine failure. first_output=%s rerun_output=%s",
-		head, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
+		head.Short, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
 		first.Duration.Round(time.Millisecond), second.Duration.Round(time.Millisecond),
 		first.OutputPath, second.OutputPath)
 	// The re-run's tail is the freshest evidence and is what the resolution turn
@@ -1061,7 +1115,7 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 			return Result{}, err
 		}
 		req.Run.CommitLanded()
-		return e.continueRange(ctx, req, headGate{})
+		return e.continueRange(ctx, req)
 	}
 
 	// -c core.editor=true + --no-edit keep the original commit message
@@ -1096,7 +1150,7 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 	}
 	e.logf("merge: rebase replay RESOLVED and committed {ws=%s work=%s head=%s} — re-entering the replay; the suite runs once, at the head it reaches",
 		req.Name, req.WorkDir, resumed)
-	return e.continueRange(ctx, req, headGate{})
+	return e.continueRange(ctx, req)
 }
 
 // ContinueAfterTestFix commits whatever the resolution turn staged in the
@@ -1105,9 +1159,18 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 //
 // THIS IS THE REMEDIATION LOOP'S RETURN EDGE. The gate that failed judged the
 // head; the fix commit moves the head; the re-entered loop replays anything the
-// range still owes and gates the NEW head. The loop turns until the gate passes
-// or merge.Coordinator's one-attempt accounting fails the merge, and the
-// identity that accounting keys on is carried across (see headGate).
+// range still owes and gates the NEW head. THE LOOP TURNS UNTIL THE GATE PASSES
+// OR THE AGENT ESCALATES. It used to stop after ONE attempt, which is a counter
+// standing in for a judgement: it refused a second honest try at a failure the
+// agent had half-fixed, and it would have granted a hundredth try at one it
+// cannot fix at all with the same confidence. The party that knows which of the
+// two this is, is the agent doing the work — so the exit is its own, written as
+// the escalation record this function reads BEFORE it commits anything.
+//
+// THE ESCALATION IS READ FIRST, and reading it removes it. It must never reach
+// the `git add -A` below (the record is a scratch file, not part of the
+// workspace's work), and it must never survive into the next turn, where it
+// would escalate a merge whose agent has moved on.
 //
 // THE FIX LANDS AS A FOLLOW-UP COMMIT, NOT AN AMEND. Both would work, and the
 // follow-up is the mechanically simpler of the two:
@@ -1133,20 +1196,92 @@ func (e *Driver) ContinueAfterTestFix(ctx context.Context, req Request, failingC
 	}
 	e.logf("merge: ContinueAfterTestFix start {ws=%s key=%s failing=%s work=%s}", req.Name, req.Workspace, failingCommit, req.WorkDir)
 
-	if err := e.commitTestFix(ctx, req, failingCommit); err != nil {
-		return Result{}, err
-	}
-	// A FIX IS NOT BOUND BY THE SOURCE RANGE. The resolution turn may have edited
-	// a file no replayed commit touched, and a gate narrowed to the range's
-	// suites alone would then run nothing that covers the fix. The rebased line's
-	// HEAD is read here — the fix commit when there was one, the replayed commit
-	// when the turn staged nothing, and in-range either way — so the selection can
-	// only widen.
-	fixPaths, err := e.changedPaths(ctx, req.WorkDir, "HEAD", "-1")
+	escalation, escalated, err := e.readEscalation(ctx, req)
 	if err != nil {
 		return Result{}, err
 	}
-	return e.continueRange(ctx, req, headGate{failingCommit: failingCommit, extraPaths: fixPaths})
+	if escalated {
+		head, err := e.headCommit(ctx, req.WorkDir)
+		if err != nil {
+			return Result{}, err
+		}
+		e.logf("merge: test fix ESCALATED by the resolving agent {ws=%s failing=%s work=%s} — it judges the failure unfixable without non-trivial architectural work; the merge is failed and the target was NEVER MODIFIED: %s",
+			req.Name, failingCommit, req.WorkDir, dlog.Clamp(escalation, 400))
+		return Result{
+			Outcome:               OutcomeTestFailed,
+			FailingCommit:         head.Short,
+			FailingSubject:        head.Subject,
+			TestFailureEscalation: escalation,
+			WorkDir:               req.WorkDir,
+			BaseHead:              req.BaseHead,
+		}, nil
+	}
+
+	if err := e.commitTestFix(ctx, req, failingCommit); err != nil {
+		return Result{}, err
+	}
+	return e.continueRange(ctx, req)
+}
+
+// mergeEscalationFile is the path, relative to the REBASE WORKTREE, a
+// remediation turn writes when it judges the test failure unfixable without
+// non-trivial architectural work.
+//
+// A FILE IN THE WORKTREE IS THE CHANNEL BECAUSE THE WORKTREE IS ALREADY THE
+// CHANNEL. Everything this pipeline reads back from a resolution turn it reads
+// out of that tree — the staged resolution, the staged fix, the emptiness of a
+// turn that did nothing — and the turn's prose reaches the daemon nowhere else:
+// merge.TestFailureResolver reports whether the turn ended, not what it said.
+// Adding a second, transcript-shaped channel for one sentence would put the
+// escalation on a path nothing else in the merge uses.
+const mergeEscalationFile = ".agent-repl-merge-escalation"
+
+// mergeEscalationMarker is the first line the escalation record must carry. It
+// is required, and required to be FIRST, so that a file an agent left lying
+// around for some other reason cannot terminate a merge by accident.
+const mergeEscalationMarker = "MERGE ESCALATION: ARCHITECTURAL CHANGE REQUIRED"
+
+// readEscalation reads and REMOVES the remediation turn's escalation record,
+// reporting the agent's own explanation.
+//
+// THE REMOVAL IS UNCONDITIONAL, and it is what keeps the record out of the fix
+// commit `git add -A` is about to make and out of the next turn's reading of it.
+// A file that is present but does not open with the marker is NOT an escalation:
+// it is loud-logged and the merge takes it as a turn that neither fixed nor
+// escalated, which is one more iteration of the loop.
+//
+// A read or remove failure is returned. The record decides whether this merge
+// ends, so a record this cannot resolve is not something to proceed past.
+func (e *Driver) readEscalation(_ context.Context, req Request) (string, bool, error) {
+	path := filepath.Join(req.WorkDir, mergeEscalationFile)
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("merge: reading the escalation record %s for %q: %w", path, req.Name, err)
+	}
+	if rmErr := os.Remove(path); rmErr != nil {
+		return "", false, fmt.Errorf("merge: removing the escalation record %s for %q: %w", path, req.Name, rmErr)
+	}
+	body := strings.TrimLeft(string(raw), "\r\n \t")
+	marker, rest, _ := strings.Cut(body, "\n")
+	if strings.TrimSpace(marker) != mergeEscalationMarker {
+		e.logf("merge: escalation record IGNORED {ws=%s work=%s} — it does not open with %q, so it is not an escalation; the merge takes this turn as one more iteration: %s",
+			req.Name, req.WorkDir, mergeEscalationMarker, dlog.Clamp(body, 200))
+		return "", false, nil
+	}
+	explanation := strings.TrimSpace(rest)
+	if explanation == "" {
+		// The marker alone terminates the merge, and a terminal status whose
+		// cause says only "the agent escalated" tells the user nothing they can
+		// act on. The record is still an escalation — refusing it would spin the
+		// loop against an agent that has already said it is done — so the cause
+		// says exactly that much and says it plainly.
+		e.logf("merge: escalation record carries NO explanation {ws=%s work=%s} — the merge fails on the marker alone", req.Name, req.WorkDir)
+		explanation = "the resolving agent escalated without explaining why"
+	}
+	return explanation, true, nil
 }
 
 // commitTestFix stages everything the resolution turn touched and commits it as
@@ -1166,7 +1301,10 @@ func (e *Driver) commitTestFix(ctx context.Context, req Request, failingCommit s
 			req.Name, failingCommit, req.WorkDir)
 		return nil
 	}
-	msg := fmt.Sprintf("fix tests after rebasing %s (%s)", failingCommit, req.Name)
+	// THE MESSAGE NAMES THE WORKSPACE, NOT A SHA. It is a commit message a human
+	// reads in `git log` beside the commit it fixes, and the sha it used to carry
+	// named the head this fix is the child of — which git already says, better.
+	msg := fmt.Sprintf("fix tests after rebasing %s onto the merge target", req.Name)
 	exit, out, err := e.gitExit(ctx, req.WorkDir, "-c", "core.editor=true", "commit", "-m", msg)
 	if err != nil {
 		return err
@@ -1184,12 +1322,32 @@ func (e *Driver) commitTestFix(ctx context.Context, req Request, failingCommit s
 // merge still owes even when nothing is left. The base is recomputed rather than
 // carried, which is what lets the resumed loop skip every commit that already
 // landed.
-func (e *Driver) continueRange(ctx context.Context, req Request, gate headGate) (Result, error) {
+//
+// THE GATE'S EXTRA PATHS ARE RECOMPUTED HERE, ON EVERY RE-ENTRY, AND FOR THE
+// SAME REASON THE BASE IS. A fix is not bound by the source range: a remediation
+// turn (or a conflict resolution) may have edited a file no replayed commit
+// touches, and a selection made from the range alone would then run nothing that
+// covers it. BaseHead..HEAD is precisely what this rebase has added on top of the
+// target head it based itself on — the replayed picks plus everything an agent
+// committed beside them — so the whole widening is reconstructible from the
+// worktree.
+//
+// IT USED TO BE CARRIED INSTEAD, and that is the bug: only ContinueAfterTestFix
+// filled the field, so a conflict that arrived after a test fix re-entered
+// through Resume with an EMPTY gate and re-gated the fixed head on the RANGE's
+// suites alone — the fix's own component untested at the very moment the merge
+// decided to land it. The picks' own paths are already in the range selection, so
+// this can only widen the selection, never narrow it.
+func (e *Driver) continueRange(ctx context.Context, req Request) (Result, error) {
 	base, err := e.cherryPickBase(ctx, req.WorkDir, req.SourceBranch)
 	if err != nil {
 		return Result{}, err
 	}
-	return e.rebaseLoop(ctx, req, base, true, gate)
+	extra, err := e.changedPaths(ctx, req.WorkDir, req.BaseHead+"..HEAD")
+	if err != nil {
+		return Result{}, err
+	}
+	return e.rebaseLoop(ctx, req, base, true, headGate{extraPaths: extra})
 }
 
 // remainingPlan is what the replay still has to land: the range from the
@@ -1596,6 +1754,10 @@ func (e *Driver) markConflict(ctx context.Context, req Request) (Result, error) 
 	if err != nil {
 		return Result{}, err
 	}
+	subject, err := e.gitString(ctx, req.WorkDir, "log", "-1", "--pretty=%s", "CHERRY_PICK_HEAD")
+	if err != nil {
+		return Result{}, err
+	}
 	// THE STATUS CARRIES THE FULL SHA, the logs and the Result carry the short
 	// one. A conflict's entire purpose is to hand work to a human, and an
 	// abbreviated sha is ambiguous by construction: it is the prefix git happened
@@ -1607,7 +1769,10 @@ func (e *Driver) markConflict(ctx context.Context, req Request) (Result, error) 
 	if err != nil {
 		return Result{}, err
 	}
-	if err := req.Run.Conflict(full, "conflict rebasing "+short+" (left in the rebase worktree for resolve)"); err != nil {
+	// The CAUSE names the subject and the STATUS names the sha, for the reason
+	// the two fields exist separately: the sentence is for the person deciding
+	// whether to go and resolve it, the sha is for the tool that addresses it.
+	if err := req.Run.Conflict(full, "conflict rebasing "+subject+" (left in the rebase worktree for resolve)"); err != nil {
 		return Result{}, err
 	}
 	return Result{Outcome: OutcomeConflict, ConflictCommit: short, WorkDir: req.WorkDir, BaseHead: req.BaseHead}, nil

@@ -38,9 +38,14 @@ type TestFailureResolution struct {
 	// RequestID is the id the resolution prompt is submitted under, minted per
 	// attempt.
 	RequestID string
-	// FailingCommit is the short SHA the failing gate is attributed to — the
-	// rebased head the suite was run on, held STABLE across a re-gate so one
-	// failure earns one attempt. See merge.Result.FailingCommit.
+	// FailingCommit is the short SHA of the rebased head the suite was run on.
+	//
+	// IT IS CORRELATION ONLY AND REACHES NO PROMPT. It is what ties this dispatch
+	// to the gate run in the daemon's log, and it used to be rendered into the
+	// agent's brief as the head to go and look at. It is not there any more: a sha
+	// says nothing a person or an agent can use that `git log` in the worktree
+	// does not say better, and the merge's copy names commits by subject. See
+	// merge.Result.FailingCommit.
 	FailingCommit string
 	// SourceBranch is the branch the rebased line is being replayed from.
 	SourceBranch string
@@ -89,14 +94,21 @@ const TestFailurePromptFile = "merge-test-failure-resolve.md"
 //
 // An error means no prompt could be composed and the caller fails the fix
 // attempt. It never degrades to a partial prompt: the failing output is the
-// whole reason the agent can act at all, so a brief missing it would spend the
-// single permitted attempt on a guess.
+// whole reason the agent can act at all, so a brief missing it would send the
+// agent off to guess.
+//
+// THE ESCALATION FILE AND ITS MARKER ARE SUBSTITUTED, NOT SPELLED OUT IN THE
+// PROMPT TEXT. They are the wire format of the loop's only non-passing exit, and
+// the driver parses exactly these two constants — a prompt file a user has edited
+// must not be able to drift into instructing an agent to write a record nothing
+// reads.
 func (r TestFailureResolution) Prompt() (string, error) {
 	return prompts.Render(TestFailurePromptFile, map[string]string{
-		"failing_commit": r.FailingCommit,
-		"source_branch":  r.SourceBranch,
-		"target_dir":     r.TargetDir,
-		"failure_tail":   dlog.Clamp(r.FailureTail, testFailureTailPromptBytes),
+		"source_branch":     r.SourceBranch,
+		"target_dir":        r.TargetDir,
+		"failure_tail":      dlog.Clamp(r.FailureTail, testFailureTailPromptBytes),
+		"escalation_file":   mergeEscalationFile,
+		"escalation_marker": mergeEscalationMarker,
 	})
 }
 

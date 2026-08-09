@@ -1796,8 +1796,12 @@ func TestContinueAfterTestFixCommitsTheStagedFixAndFinishesTheRange(t *testing.T
 	if parent := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD^2^")); parent != headAfterPick {
 		t.Errorf("HEAD^2^ = %s, want the untouched replayed commit %s (the fix must not amend it)", parent, headAfterPick)
 	}
-	if body := gitRun(t, target, "log", "-1", "--pretty=%s", "HEAD^2"); !strings.Contains(body, "fix tests after rebasing "+first.FailingCommit) {
-		t.Errorf("follow-up commit subject = %q, want it to name the failing commit", body)
+	// AMENDED: the message used to name the failing SHA. It names the workspace
+	// now, by the ruling that no copy a human reads identifies a commit by sha —
+	// and a commit message is read in `git log` right beside the commit it fixes,
+	// which is where the sha it carried was least necessary of all.
+	if body := gitRun(t, target, "log", "-1", "--pretty=%s", "HEAD^2"); !strings.Contains(body, "fix tests after rebasing fix-ws") {
+		t.Errorf("follow-up commit subject = %q, want it to name the workspace being rebased", body)
 	}
 }
 
@@ -2834,11 +2838,14 @@ func TestTheTargetMovesOnlyAfterTheReGatePasses(t *testing.T) {
 	}
 }
 
-// The identity a repeated head-gate failure reports is the FIRST failure's, even
-// though the fix commit moved the head. merge.Coordinator keys its
-// one-attempt-per-failure accounting on it, and a fresh sha per attempt would
-// hand out an unbounded sequence of resolution turns.
-func TestARepeatedHeadGateFailureKeepsTheFirstFailuresIdentity(t *testing.T) {
+// AMENDED FROM TestARepeatedHeadGateFailureKeepsTheFirstFailuresIdentity, which
+// pinned the OPPOSITE: a re-gate had to report the FIRST failure's sha so that
+// merge.Coordinator's one-attempt-per-failure map could not be fooled by a moving
+// head. That rule is abolished — the remediation loop turns until the gate passes
+// or the agent escalates — so nothing keys on a stable identity any more, and
+// reporting a tree the suite did not run on would now simply be false. The new
+// contract is asserted at the same edge and with the same strength.
+func TestAReGateAfterAFixReportsTheHeadItActuallyJudged(t *testing.T) {
 	// Arrange — a suite that never passes, and an agent that commits something
 	// anyway (so the head genuinely moves between the two gates).
 	target := initTarget(t)
@@ -2870,11 +2877,15 @@ func TestARepeatedHeadGateFailureKeepsTheFirstFailuresIdentity(t *testing.T) {
 	if res.Outcome != OutcomeTestFailed {
 		t.Fatalf("ContinueAfterTestFix() outcome = %s, want test_failed", res.Outcome)
 	}
-	if head := strings.TrimSpace(gitRun(t, req.WorkDir, "rev-parse", "--short", "HEAD")); head == headBeforeFix {
+	head := strings.TrimSpace(gitRun(t, req.WorkDir, "rev-parse", "--short", "HEAD"))
+	if head == headBeforeFix {
 		t.Fatalf("the fix did not move the rebase worktree's head off %s, so the test proves nothing", headBeforeFix)
 	}
-	if res.FailingCommit != first.FailingCommit {
-		t.Fatalf("re-gate FailingCommit = %q, want the first failure's %q", res.FailingCommit, first.FailingCommit)
+	if res.FailingCommit != head {
+		t.Fatalf("re-gate FailingCommit = %q, want the head the suite ran on %q", res.FailingCommit, head)
+	}
+	if res.FailingSubject == "" {
+		t.Fatalf("re-gate FailingSubject is empty; every sentence about this failure names it")
 	}
 }
 
