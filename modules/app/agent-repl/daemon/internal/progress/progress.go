@@ -353,6 +353,56 @@ func (m *Manager) NoteInterrupt(workspace, sessionID string, outcome corev1.Inte
 	m.pushLocked(workspace, wp)
 }
 
+// NoteTurnAccounting adopts one SETTLED turn's reconciliation onto the footer's
+// accounting cell.
+//
+// It is fed from the single settlement path in internal/sessioncontroller, the
+// only place that holds a turn's resolved TurnAccounting, and the cell it
+// produces is the daemon's whole answer about that reconciliation: the verdict
+// as arms and the sentence beside it, resolved by AccountingCell.
+//
+// A nil record is REFUSED rather than absorbed as "no accounting". The caller
+// reached here because a turn settled, so a settlement with no record is a
+// defect at the call site and the previously published cell — which describes a
+// turn that really did settle — is kept rather than being cleared by it.
+//
+// STRUCTURAL: a turn's accounting is the last thing that happens in a turn and
+// the figure the user waits for, so it goes out at once rather than riding the
+// ticker window.
+func (m *Manager) NoteTurnAccounting(workspace, sessionID string, accounting *frontendv1.TurnAccounting) error {
+	if workspace == "" {
+		return fmt.Errorf("progress: NoteTurnAccounting for session %q got an empty workspace", sessionID)
+	}
+	if accounting == nil {
+		return fmt.Errorf("progress: NoteTurnAccounting for workspace %q session %q got a nil turn accounting record", workspace, sessionID)
+	}
+	cell := AccountingCell(accounting)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	wp := m.forLocked(workspace)
+	wp.view.Accounting = cell
+	m.logf("progress: turn accounting cell RESOLVED ws=%s session=%s turn_id=%s verdict=%s summary=%q",
+		workspace, sessionID, accounting.GetTurnId(), accountingVerdictName(cell), cell.GetSummary())
+	m.pushLocked(workspace, wp)
+	return nil
+}
+
+// accountingVerdictName names a resolved cell's verdict arm for the record.
+// A cell with no arm cannot be produced by AccountingCell, so the fallback is
+// reported as the defect it would be rather than printed as a blank.
+func accountingVerdictName(cell *frontendv1.FooterAccountingCell) string {
+	switch {
+	case cell.GetComplete() != nil:
+		return "complete"
+	case cell.GetIncomplete() != nil:
+		return "incomplete"
+	case cell.GetInvalid() != nil:
+		return "invalid"
+	default:
+		return "UNSET"
+	}
+}
+
 // LiveTasks returns the workspace's live subagent-task count as this resolver
 // last adopted it from the SSM's WorkspaceState, and whether the workspace has
 // a view at all.

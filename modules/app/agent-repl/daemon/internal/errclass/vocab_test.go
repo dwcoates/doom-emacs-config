@@ -367,7 +367,7 @@ func TestNoConstructionPathEmitsAnUnkindedCard(t *testing.T) {
 		Command(logf, errUnknownForVocabTest{}),
 		Death(logf, "s_1", "some ancient reason", 0),
 		Degraded("shim-store", "boom", 0),
-		ConnectionDegraded("no traffic"),
+		ConnectionDegraded("shim-connection", "no traffic"),
 	} {
 		if _, ok := TypeOf(item.GetKind()); !ok {
 			t.Errorf("a construction path emitted a card whose kind arm names no daemon failure type: %v", item.GetKind())
