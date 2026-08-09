@@ -368,3 +368,166 @@ func TestARunningMergeKeepsItsStatusOnAHibernatedFrame(t *testing.T) {
 		t.Fatalf("run_id = %q on a frame outside the session-status band, want run-asleep", got.GetMergeStatus().GetRunId())
 	}
 }
+
+// --- retirement of a retained run --------------------------------------------
+//
+// THE MERGED-FOREVER LOG FLOOD. A retained status is retained for as long as the
+// merge AXIS behind it stands, and it must go the moment the axis is cleared.
+// Two writers clear the axis: the pipeline's own `merge_none` transition, and
+// the bring-up that retires a sticky `merged` when a merged workspace is
+// reopened. Only the first swept the retention, so every workspace that ever
+// merged went on holding its landed run in memory — and stampMergeStatusLocked's
+// invariant guard fired on every resolve of it from then on, several times a
+// second, indefinitely. Observed live on three workspaces after they merged.
+
+// mergedPipelineStatus is a landed run's own terminal account of itself.
+func mergedPipelineStatus(runID string, total int32) *frontendv1.MergeStatus {
+	return &frontendv1.MergeStatus{
+		RunId:            runID,
+		PhaseStartedAtMs: 3000,
+		UpdatedAtMs:      3001,
+		Phase: &frontendv1.MergeStatus_Merged{Merged: &frontendv1.MergeStatusMerged{
+			CommitsTotal: total,
+		}},
+	}
+}
+
+// openMergedRun arranges a settled workspace resting on a landed `merged` run.
+func openMergedRun(t *testing.T, runID string) (*Manager, *capLog) {
+	t.Helper()
+	m, cl, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
+	settledSession(t, m, "ws1", "s1")
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerging), "cherry-picking 1/1",
+		pipelineStatus(runID, 1, 0, "deadbeef1234", "the only commit")); err != nil {
+		t.Fatalf("ApplyMergeStatus(merging): %v", err)
+	}
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerged), "cherry-pick landed on target",
+		mergedPipelineStatus(runID, 1)); err != nil {
+		t.Fatalf("ApplyMergeStatus(merged): %v", err)
+	}
+	return m, cl
+}
+
+func TestALandedRunKeepsItsStatusWhileTheMergedAxisStands(t *testing.T) {
+	// RETIREMENT IS THE AXIS'S EDGE, NOT THE RUN'S. `merged` is a merge-axis row
+	// like any other, and the frame it resolves is exactly the frame that must
+	// report how the merge ended. Retiring the status at MERGED itself would blank
+	// the landing from the wire.
+	// Arrange.
+	m, _ := openMergedRun(t, "run-landed")
+
+	// Act.
+	got := mustCurrent(t, m, "ws1")
+
+	// Assert.
+	if got.GetMergeStatus().GetRunId() != "run-landed" {
+		t.Fatalf("run_id = %q on the merged frame, want run-landed", got.GetMergeStatus().GetRunId())
+	}
+}
+
+func TestReopeningAMergedWorkspaceRetiresItsRetainedRun(t *testing.T) {
+	// Arrange.
+	m, _ := openMergedRun(t, "run-reopened")
+
+	// Act — the workspace is brought up again, which retires the `merged` axis.
+	connectOperational(t, m, "ws1", "s1", "gen-1")
+
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").GetMergeStatus(); got != nil {
+		t.Fatalf("merge_status = %v after the merge axis was retired on reopen, want none", got)
+	}
+}
+
+func TestReopeningAMergedWorkspaceTripsNoInvariantGuard(t *testing.T) {
+	// THE FLOOD ITSELF. The retained run outliving its axis is what the guard
+	// reports, so a reopen that leaves it behind fires on this resolve and every
+	// resolve after it.
+	// Arrange.
+	m, cl := openMergedRun(t, "run-quiet")
+
+	// Act.
+	connectOperational(t, m, "ws1", "s1", "gen-1")
+	mustCurrent(t, m, "ws1")
+
+	// Assert.
+	if cl.contains("has a retained pipeline merge_status") {
+		t.Fatalf("the invariant guard fired after a reopen retired the merge axis:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestRetiringARetainedRunOnReopenNamesTheRun(t *testing.T) {
+	// A status that silently stops reaching the wire is indistinguishable from a
+	// pipeline that stopped publishing one, so the drop names the run it ended.
+	// Arrange.
+	m, cl := openMergedRun(t, "run-logged-retire")
+
+	// Act.
+	connectOperational(t, m, "ws1", "s1", "gen-1")
+
+	// Assert.
+	if !cl.contains("ssm: pipeline merge_status RETIRED ws=ws1 run=run-logged-retire cause=" + causeMergeReopened) {
+		t.Fatalf("missing retirement log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestClearingTheMergeAxisRetiresTheRetainedRun(t *testing.T) {
+	// The OTHER writer of `merge_none`, through the same funnel: the pipeline's
+	// own axis clear.
+	// Arrange.
+	m, cl, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerging), "cherry-picking 1/1",
+		pipelineStatus("run-cleared", 1, 0, "deadbeef1234", "the only commit")); err != nil {
+		t.Fatalf("ApplyMergeStatus(merging): %v", err)
+	}
+
+	// Act.
+	if err := m.ApplyMergeTransition("ws1", sigMergeNone, "test arrangement"); err != nil {
+		t.Fatalf("ApplyMergeTransition(merge_none): %v", err)
+	}
+
+	// Assert.
+	if !cl.contains("ssm: pipeline merge_status RETIRED ws=ws1 run=run-cleared") {
+		t.Fatalf("missing retirement log for a pipeline axis clear:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestAReopenOverAStoppedMergeKeepsItsRetainedRun(t *testing.T) {
+	// THE TERMINAL-BUT-NOT-MERGED PATH. A failed run never leaves the axis on its
+	// own and a bring-up does not retire it (a stopped merge is exactly what the
+	// user was brought back to act on), so its retained account stands with it.
+	// Arrange.
+	m, _ := openStoppedMerge(t, "run-stopped-reopen")
+
+	// Act.
+	if err := m.ApplySessionConnectivity("ws1", "s1", "g2", SessionConnectivityConnecting, "bring_up"); err != nil {
+		t.Fatalf("ApplySessionConnectivity(connecting): %v", err)
+	}
+
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").GetMergeStatus().GetRunId(); got != "run-stopped-reopen" {
+		t.Fatalf("run_id = %q after a bring-up over a stopped merge, want the retained run-stopped-reopen", got)
+	}
+}
+
+func TestTheInvariantGuardStillFiresForAnOrphanedRetainedRun(t *testing.T) {
+	// THE DEFECT CLASS THE GUARD EXISTS FOR. Retirement removes the ONE producer
+	// of orphans we know of; the guard is what reports the next one, so it must
+	// still fire for a retained run with no merge axis behind it at all.
+	// Arrange — a retained run on a workspace whose axis never spoke.
+	m, cl, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
+	settledSession(t, m, "ws1", "s1")
+	m.mu.Lock()
+	m.recordPipelineStatusLocked("ws1", pipelineStatus("run-orphan", 1, 0, "deadbeef1234", "the only commit"))
+	m.mu.Unlock()
+
+	// Act.
+	got := mustCurrent(t, m, "ws1")
+
+	// Assert.
+	if got.GetMergeStatus() != nil {
+		t.Fatalf("merge_status = %v for an orphaned retained run, want none", got.GetMergeStatus())
+	}
+	if !cl.contains("ssm: INVARIANT VIOLATION ws=ws1 has a retained pipeline merge_status (run=run-orphan)") {
+		t.Fatalf("the invariant guard did not fire for an orphaned retained run:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}

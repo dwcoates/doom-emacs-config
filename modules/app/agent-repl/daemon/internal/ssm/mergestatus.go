@@ -39,11 +39,32 @@ func (m *Manager) recordPipelineStatusLocked(workspace string, status *frontendv
 	m.pipelineStatus[workspace] = status
 }
 
-// clearPipelineStatusLocked drops a workspace's retained run status. It is called
-// when the merge axis is cleared: the run is over and nothing about it is true
-// any more. Caller holds mu.
-func (m *Manager) clearPipelineStatusLocked(workspace string) {
+// retirePipelineStatusLocked drops a workspace's retained run status. It is the
+// ONE way a retained status ever leaves, and every writer that clears the merge
+// AXIS calls it. Caller holds mu.
+//
+// THE AXIS AND THE RETENTION ARE ONE FACT, and they were two writers apart. A
+// `merge_none` row says "no merge is what this workspace is doing"; the retained
+// status says "this run is what this workspace is doing". The pipeline's own
+// `merge_none` transition swept both, and the OTHER writer of `merge_none` — the
+// bring-up that retires a sticky `merged` when a merged workspace is reopened
+// (mergereopen.go) — swept only the row. The in-memory status then outlived the
+// axis behind it, and stampMergeStatusLocked's invariant guard fired on every
+// resolve of that workspace from then on, forever, for every workspace that ever
+// merged. Routing both writers through here is what makes the pair inseparable
+// rather than merely paired at each call site.
+//
+// The drop is LOGGED with the run it ends, because a status that silently stops
+// reaching the wire is indistinguishable from a pipeline that stopped publishing
+// one — the same reason the withholding branch below names its run.
+func (m *Manager) retirePipelineStatusLocked(workspace, cause string) {
+	status, ok := m.pipelineStatus[workspace]
+	if !ok {
+		return
+	}
 	delete(m.pipelineStatus, workspace)
+	m.logf("ssm: pipeline merge_status RETIRED ws=%s run=%s cause=%s — the merge axis was cleared, so the run's retained account of itself goes with it",
+		workspace, status.GetRunId(), cause)
 }
 
 // stampMergeStatusLocked writes merge_status onto a WorkspaceState about to be
