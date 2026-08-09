@@ -3,6 +3,15 @@
 // never as a prompt bubble, and every other isMeta record the harness writes
 // must reach it not at all.
 //
+// THIS FILE DRIVES THE CARD PATH, which is the path for an invocation that
+// opened no SKILL bubble. An invocation that did opens one gets its body as the
+// bubble's own body instead and emits no card at all — async-bubble.proto puts
+// the contents on AsyncSkillBubble.body and retires their old rendering — and
+// that path is covered in asyncwindows_test.go. Two invocations still reach the
+// card: the MERGE run, whose bubble has no body field (covered below), and a
+// Skill call whose input names no skill, which is what the bare-`Skill` fixtures
+// here are.
+//
 // THE RECORD SHAPES ARE VERBATIM from a real transcript (a
 // /create-or-update-workspace launch): the Skill tool_use, a tool_result whose
 // tool_use_id names it, and an isMeta "user" record parented on that
@@ -155,6 +164,26 @@ func TestASkillBodyAttachesToItsOwnCall(t *testing.T) {
 	}
 	if got := bodies[0].GetBodyMarkdown(); got != skillBody {
 		t.Errorf("skill_body body_markdown = %q, want the SKILL.md verbatim", got)
+	}
+}
+
+func TestTheMergeRunsBodyStillAttachesToItsCard(t *testing.T) {
+	// Arrange: AsyncMergeBubble has no body field, so the merge invocation is the
+	// one live skill whose contents still belong on its card.
+	h := newQueueHarness(t, nil)
+	h.controller().consumer.Consume(skillCallEvent(t, 10, "a-merge", mergeOriginCall, "create-or-update-workspace", "merge"))
+	h.controller().consumer.Consume(transcriptToolResultEvent(t, 11, "u-merge-result", mergeOriginCall))
+
+	// Act
+	h.controller().consumer.Consume(transcriptMetaUserEvent(t, 12, "u-merge-body", "u-merge-result", skillBody))
+
+	// Assert
+	bodies := h.skillBodies()
+	if len(bodies) != 1 {
+		t.Fatalf("pushed %d skill_body item(s) for the merge invocation, want the one its card carries", len(bodies))
+	}
+	if got := bodies[0].GetToolUseId(); got != mergeOriginCall {
+		t.Errorf("skill_body tool_use_id = %q, want the merge call's %q", got, mergeOriginCall)
 	}
 }
 

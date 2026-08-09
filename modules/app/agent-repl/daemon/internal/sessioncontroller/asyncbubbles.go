@@ -62,17 +62,16 @@ type asyncBubbleStore struct {
 	// toolNames maps a tool_use id to the tool the agent named. It is the only
 	// source for AsyncUnclassifiedBubble.tool_name.
 	toolNames map[string]string
-	// mergeWindow is the id of the OPEN Merge bubble, empty when no merge run
-	// is in flight. It is the whole of the merge window's state: membership in
-	// a Merge bubble is TEMPORAL — the span between the merge skill's
-	// invocation and the user taking the session back — so "which bubble does
-	// this emission belong to" is answered by whether this field is set rather
-	// than by a join key. See mergewindow.go.
-	mergeWindow string
-	// mergeOrigin is the tool_use id of the Skill call that opened the window.
-	// It is held beside the bubble id because the window has to let that ONE
-	// call's own card settle on the feed while everything else folds away.
-	mergeOrigin string
+	// windows is the OPEN WINDOW STACK, outermost first. It is the whole of the
+	// window apparatus's state: membership in a Merge or Skill bubble is
+	// TEMPORAL — the span between the invocation and the user taking the session
+	// back — so "which bubble does this emission belong to" is answered by which
+	// window is innermost rather than by a join key.
+	//
+	// A STACK RATHER THAN A FIELD because skills chain: a skill invoked inside a
+	// skill is a genuine child, the innermost window captures, and both settle
+	// together when the user takes the session back. See asyncwindows.go.
+	windows []asyncWindow
 	// journalThrough is a workflow bubble's byte cursor over its journal text.
 	// The contract gives a journal no output spool — it carries rows — so this
 	// cursor has no wire home and lives here, still exactly one number per
@@ -111,20 +110,14 @@ func newAsyncBubbleStore(workspace string, logf dlog.Logf) *asyncBubbleStore {
 // be turned into either.
 type asyncPush struct {
 	// Opened are bubbles opening for the first time.
+	//
+	// NOTHING ELSE RIDES AsyncBubbleDelta.opened. A bubble already open advances
+	// by its own update arm — including the window kinds, whose `merge` arm the
+	// contract added precisely so that new content is an APPEND rather than the
+	// whole-bubble re-send AsyncBubbleUpdate forbids. That keeps "every opened
+	// bubble gets exactly one anchor" (pushAnchors) a property of this one list
+	// rather than of a dedup kept beside it.
 	Opened []*frontendv1.AsyncBubble
-	// Redelivered are bubbles already open being re-sent WHOLE, which
-	// AsyncBubbleDelta.opened defines as replacing the copy the receiver holds.
-	//
-	// IT IS A SEPARATE LIST FROM Opened ON PURPOSE. Both ride the delta's
-	// `opened` field, but only a FIRST-TIME open earns a feed anchor — "every
-	// opened bubble gets exactly one anchor" is a property of the Opened list
-	// (pushAnchors), and folding re-delivery into it would re-anchor the same
-	// bubble on every batch.
-	//
-	// Only the merge kind travels this way, and only because the contract gave
-	// AsyncMergeBubble no update arm to advance by. See
-	// frontend.AppendMergeEmissions.
-	Redelivered []*frontendv1.AsyncBubble
 	// Updates are incremental pushes to bubbles already open, in order.
 	Updates []*frontendv1.AsyncBubbleUpdate
 	// Faults are detachments the daemon could not attribute or classify. They
@@ -148,15 +141,14 @@ type asyncFault struct {
 }
 
 func (p *asyncPush) empty() bool {
-	return len(p.Opened) == 0 && len(p.Redelivered) == 0 && len(p.Updates) == 0 && len(p.Faults) == 0
+	return len(p.Opened) == 0 && len(p.Updates) == 0 && len(p.Faults) == 0
 }
 
 // absorb folds another event-half's async effect into this one, preserving each
 // list's order. It exists so one event still produces ONE async frame when two
-// classifiers contribute to it — the detached-work half and the merge window's.
+// classifiers contribute to it — the detached-work half and the window half.
 func (p *asyncPush) absorb(other asyncPush) {
 	p.Opened = append(p.Opened, other.Opened...)
-	p.Redelivered = append(p.Redelivered, other.Redelivered...)
 	p.Updates = append(p.Updates, other.Updates...)
 	p.Faults = append(p.Faults, other.Faults...)
 }
