@@ -130,6 +130,7 @@ export const BUBBLE_KIND_WORD: Readonly<Record<AsyncBubbleKindCase, string>> = {
   shell: "shell",
   unclassified: "unclassified",
   merge: "merge",
+  skill: "skill",
 };
 
 /**
@@ -190,10 +191,12 @@ function spoolBody(header: string, spool: AsyncOutputSpool): string {
 function bubbleBody(bubble: AsyncBubble, ctx: AsyncRenderContext): string {
   switch (bubble.kind.case) {
     case "agent":
-    case "merge": {
-      // A merge run is a conversation with the same shape as a detached
-      // agent's, so it goes through the same body — the feed's renderer, not a
-      // second one. See renderEmissions.
+    case "merge":
+    case "skill": {
+      // A merge run and a skill window are conversations with the same emission
+      // shape as a detached agent's, so they go through the same body — the
+      // feed's renderer, not a second one. See renderEmissions. (A skill
+      // bubble's own `body` is not drawn here yet; this foundation carries it.)
       const { emissions, fold } = bubble.kind.value;
       return `${earlierEntriesNotice(fold, bubble.id)}${ctx.renderEmissions(emissions, bubble.id)}`;
     }

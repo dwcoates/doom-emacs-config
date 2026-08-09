@@ -56,19 +56,18 @@ message AsyncBubble {
   // A newly opened bubble carries an empty body; a bubble arriving in a
   // reconnect snapshot carries everything the daemon has folded to date.
   //
-  // Skill invocations are synchronous cards (AgentEmission.skill_body), not
-  // detached work — with one exception, `merge`: the daemon intercepts the
-  // merge skill's invocation and opens it as a bubble, because what follows is
-  // a whole conversation rather than a card. Should any other skill detach, it
-  // arrives as its own new arm here. Nothing is pre-declared for that, because
-  // a speculative arm is a shape no producer has to honour and no consumer can
-  // test against.
+  // Skill invocations are bubble-forming: the daemon intercepts the Skill
+  // call and opens a bubble, because what follows a skill is a whole
+  // conversation rather than a card. `merge` is the one skill with an arm of
+  // its own, because the merge run is a distinct thing to render; every other
+  // skill arrives as `skill`.
   oneof kind {
     AsyncAgentBubble agent = 10;
     AsyncWorkflowJournal journal = 11;
     AsyncShellBubble shell = 12;
     AsyncUnclassifiedBubble unclassified = 13;
     AsyncMergeBubble merge = 14;
+    AsyncSkillBubble skill = 15;
   }
   // The workspace this bubble's work runs under — the same key every
   // workspace-scoped frame carries. It exists so a snapshot can scope
@@ -105,6 +104,31 @@ message AsyncMergeBubble {
   repeated AgentEmission emissions = 1;
   // Tail-cap accounting for `emissions`. See AsyncFold.
   AsyncFold fold = 2;
+}
+
+// A skill invocation as detached-style work: the invocation card the feed
+// used to render flat, now a bubble that owns its window. The daemon opens it
+// when it classifies the Skill tool call, resolves the skill file's contents
+// as the bubble's own body (they are the SKILL's content, not a response of
+// the conversation — the response-bubble rendering of the file contents is
+// retired by this arm), and folds the session's subsequent emissions here
+// until the user's own next prompt or an interrupt settles it — the same
+// temporal membership the merge arm uses.
+message AsyncSkillBubble {
+  // The skill's name as invoked, verbatim (e.g. "create-or-update-workspace").
+  string skill_name = 1;
+  // The invocation's arguments, verbatim; empty when none were given.
+  string args = 2;
+  // The skill file's contents, resolved daemon-side, rendered verbatim as the
+  // bubble's own body. Empty until resolution delivers it (see
+  // AsyncSkillUpdate.body); a skill whose file cannot be read keeps an empty
+  // body and the failure surfaces through the ordinary failure channel.
+  string body = 3;
+  // The window's conversation so far, in emission order, in EXACTLY the
+  // vocabulary the top-level feed uses.
+  repeated AgentEmission emissions = 4;
+  // Tail-cap accounting for `emissions`. See AsyncFold.
+  AsyncFold fold = 5;
 }
 
 // A Workflow run's journal: the step log a Workflow launch writes.
@@ -303,12 +327,18 @@ message AsyncBubbleUpdate {
   // not in how their output arrives, so there is no axis along which a
   // duplicated pair of append messages could evolve apart — only a
   // gap-detection rule that would have to be kept identical in two places.
+  //
+  // `merge` carries the SAME message as `agent` for exactly that reason: a
+  // merge run's emissions arrive precisely as a detached agent's do, so the
+  // arm names the kind while the payload has no axis to evolve apart on.
   oneof update {
     AsyncAgentUpdate agent = 10;
     AsyncWorkflowJournalUpdate journal = 11;
     AsyncOutputAppend shell = 12;
     AsyncOutputAppend unclassified = 13;
     AsyncLivenessUpdate liveness = 14;
+    AsyncAgentUpdate merge = 15;
+    AsyncSkillUpdate skill = 16;
   }
 }
 
@@ -323,6 +353,27 @@ message AsyncAgentUpdate {
   // than deltaed: it is small, and a dropped-count that drifts is worse than
   // one that is re-sent.
   AsyncFold fold = 2;
+}
+
+// One incremental push to a skill bubble. Body resolution and emission
+// appends are different events with different lifetimes, so they are arms
+// rather than co-set fields.
+message AsyncSkillUpdate {
+  oneof update {
+    // The skill file's contents, resolved. Replaces the bubble's `body`
+    // whole; delivered once in the ordinary case.
+    AsyncSkillBodyResolved body = 1;
+    // Emissions appended to the window, exactly as a detached agent's.
+    AsyncAgentUpdate emissions = 2;
+  }
+}
+
+// The resolved skill file contents, whole. A message rather than a bare
+// string so the arm can carry resolution-adjacent facts if the contract ever
+// needs them without renumbering.
+message AsyncSkillBodyResolved {
+  // The contents, verbatim.
+  string contents = 1;
 }
 
 // New steps in a Workflow run's journal.
