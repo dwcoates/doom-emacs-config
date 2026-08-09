@@ -12,6 +12,7 @@ import {
   tokensMenuHtml,
   tokensOverlayHtml,
   canonicalTokens,
+  agentUncachedInput,
   expensiveInput,
 } from "../src/tokens.js";
 import { generatedSessionUtilization, generatedUngroupedResponse, ungroupedResponse } from "./token-utilization-fixture.js";
@@ -26,6 +27,7 @@ import {
   TokenTimingTotalsSchema,
   TokenUsageTotalsSchema,
   TokenUtilizationSubagentSchema,
+  type SessionTokenUtilization,
 } from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
 
 function timing(over: Partial<TokenTimingTotals> = {}): TokenTimingTotals {
@@ -494,6 +496,52 @@ describe("expensiveInput: the NEW input a turn fed the model", () => {
     u.inputMisses = undefined;
     // Act + Assert
     expect(expensiveInput(u)).toBe(0);
+  });
+});
+
+describe("agentUncachedInput: one subagent's own expensive input", () => {
+  /** A session attribution carrying ONE subagent, keyed by its Agent call. */
+  function attributed(parentToolUseId: string, tokens: number): SessionTokenUtilization {
+    return create(SessionTokenUtilizationSchema, {
+      subagents: [
+        create(AgentTokenUtilizationSchema, {
+          agent: create(TokenUtilizationSubagentSchema, { parentToolUseId }),
+          tokens: canonicalTokens({ input: tokens, cacheCreation: 0, cacheRead: 900_000, output: 7 }),
+        }),
+      ],
+    });
+  }
+
+  it("reads the figure the daemon attributed to the named call", () => {
+    // Arrange
+    const utilization = attributed("tu1", 4_200);
+    // Act + Assert — the cache hit and the output stay out, as everywhere else.
+    expect(agentUncachedInput(utilization, "tu1")).toBe(4_200);
+  });
+
+  it("reports absence for a call the attribution does not name", () => {
+    // Arrange
+    const utilization = attributed("tu1", 4_200);
+    // Act + Assert
+    expect(agentUncachedInput(utilization, "tu2")).toBeNull();
+  });
+
+  it("reports absence for a subagent the daemon resolved no canonical tokens for", () => {
+    // Arrange
+    const utilization = create(SessionTokenUtilizationSchema, {
+      subagents: [
+        create(AgentTokenUtilizationSchema, {
+          agent: create(TokenUtilizationSubagentSchema, { parentToolUseId: "tu1" }),
+        }),
+      ],
+    });
+    // Act + Assert — a zero would claim the subagent cost nothing.
+    expect(agentUncachedInput(utilization, "tu1")).toBeNull();
+  });
+
+  it("reports absence before any attribution has landed", () => {
+    // Arrange / Act + Assert
+    expect(agentUncachedInput(null, "tu1")).toBeNull();
   });
 });
 
