@@ -12,8 +12,9 @@
 # replay, so a renderer that starts depending on one freezes the RENDERER too.
 #
 # So the coupling is refused at CODEGEN time rather than at review time: this
-# check runs inside `make lint`, which `make validate` runs, so generated
-# bindings cannot be produced from a schema that has already drifted.
+# check is the `codegen-gate` target, which `make go`, `make ts`, and `make
+# lint` all require, so generated bindings cannot be produced from a schema that
+# has already drifted by ANY Makefile route — not merely by the linting one.
 #
 # WHAT IT REFUSES, for every frontend/v1 file except durable.proto itself:
 #
