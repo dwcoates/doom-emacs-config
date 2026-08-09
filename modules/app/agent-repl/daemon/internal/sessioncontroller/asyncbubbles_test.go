@@ -1,6 +1,7 @@
 package sessioncontroller
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -66,7 +67,7 @@ func exitCode(v int32) *int32 { return &v }
 // --- opening from a detached agent's own records ---------------------------
 
 func TestObserveCurationOpensABubbleForANewDetachedAgent(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +78,7 @@ func TestObserveCurationOpensABubbleForANewDetachedAgent(t *testing.T) {
 }
 
 func TestObserveCurationFoldsASecondRecordIntoTheSameBubble(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "one")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +92,7 @@ func TestObserveCurationFoldsASecondRecordIntoTheSameBubble(t *testing.T) {
 }
 
 func TestObserveCurationAddressesTheUpdateToTheOpenedBubble(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +103,7 @@ func TestObserveCurationAddressesTheUpdateToTheOpenedBubble(t *testing.T) {
 }
 
 func TestObserveCurationRefusesADetachedRecordItCannotAttributeToACall(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	_, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("", "agent_1", "hi")}}, 10)
 	if err == nil {
 		t.Fatal("a record naming neither a source call nor an open bubble has nothing to attribute the detachment to")
@@ -110,7 +111,7 @@ func TestObserveCurationRefusesADetachedRecordItCannotAttributeToACall(t *testin
 }
 
 func TestObserveCurationLabelsABubbleFromTheToolThatLaunchedIt(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{
 		ToolNames: map[string]string{"tu_1": "Agent"},
 		Detached:  []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")},
@@ -126,7 +127,7 @@ func TestObserveCurationLabelsABubbleFromTheToolThatLaunchedIt(t *testing.T) {
 // --- the classification verdict on the tool card ---------------------------
 
 func TestSpawnedBubbleIDNamesTheBubbleACallDetached(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +138,7 @@ func TestSpawnedBubbleIDNamesTheBubbleACallDetached(t *testing.T) {
 }
 
 func TestSpawnedBubbleIDIsEmptyForACallThatDetachedNothing(t *testing.T) {
-	if got := newAsyncBubbleStore("/ws").spawnedBubbleID("tu_other"); got != "" {
+	if got := newAsyncBubbleStore("/ws", nil).spawnedBubbleID("tu_other"); got != "" {
 		t.Fatalf("empty is the only reading of a call that detached nothing, got %q", got)
 	}
 }
@@ -145,7 +146,7 @@ func TestSpawnedBubbleIDIsEmptyForACallThatDetachedNothing(t *testing.T) {
 // --- nested dispatch -------------------------------------------------------
 
 func TestANestedDispatchPointsAtTheBubbleItWasLaunchedFrom(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	outer, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{callingFold("tu_1", "agent_1", "tu_inner", "Agent")}}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +161,7 @@ func TestANestedDispatchPointsAtTheBubbleItWasLaunchedFrom(t *testing.T) {
 }
 
 func TestATopLevelDispatchHasNoParentPointer(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +174,7 @@ func TestATopLevelDispatchHasNoParentPointer(t *testing.T) {
 // --- shell launches --------------------------------------------------------
 
 func TestABackgroundShellLaunchOpensAShellBubble(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")}}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +185,7 @@ func TestABackgroundShellLaunchOpensAShellBubble(t *testing.T) {
 }
 
 func TestAForegroundShellDetachesNothing(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		{ToolUseID: "tu_1", Result: &datav1.ToolUseResult{Result: &datav1.ToolUseResult_Bash{Bash: &datav1.BashResult{}}}},
 	}}, 10)
@@ -197,7 +198,7 @@ func TestAForegroundShellDetachesNothing(t *testing.T) {
 }
 
 func TestAnAsyncAgentLaunchOpensAnAgentBubble(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{{
 		ToolUseID: "tu_1",
 		Result: &datav1.ToolUseResult{Result: &datav1.ToolUseResult_AgentAsyncLaunch{
@@ -213,7 +214,7 @@ func TestAnAsyncAgentLaunchOpensAnAgentBubble(t *testing.T) {
 }
 
 func TestAWorkflowLaunchOpensAJournalBubble(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{{
 		ToolUseID: "tu_1",
 		Result: &datav1.ToolUseResult{Result: &datav1.ToolUseResult_WorkflowLaunch{
@@ -231,7 +232,7 @@ func TestAWorkflowLaunchOpensAJournalBubble(t *testing.T) {
 // --- shell folds -----------------------------------------------------------
 
 func TestARetrievalAppendsOnlyTheNewBytes(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +249,7 @@ func TestARetrievalAppendsOnlyTheNewBytes(t *testing.T) {
 }
 
 func TestARunningShellIsNotSettledByItsAbsentExitCode(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +262,7 @@ func TestARunningShellIsNotSettledByItsAbsentExitCode(t *testing.T) {
 }
 
 func TestAShellSettlesOnItsExitCodeWithANonRunningStatus(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +277,7 @@ func TestAShellSettlesOnItsExitCodeWithANonRunningStatus(t *testing.T) {
 }
 
 func TestARetrievalForWorkNoLaunchAnnouncedOpensNothing(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		retrieval("task_unknown", "abc", datav1.RawTaskStatus_RAW_TASK_STATUS_RUNNING, nil),
 	}}, 10)
@@ -291,7 +292,7 @@ func TestARetrievalForWorkNoLaunchAnnouncedOpensNothing(t *testing.T) {
 // --- task lifecycle --------------------------------------------------------
 
 func TestTaskStartedOpensABubbleForARecognizedKind(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	push, err := s.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL, ToolUseId: "tu_1", Description: "sleep 9",
 	}, 10)
@@ -312,7 +313,7 @@ func TestTaskStartedOpensABubbleForARecognizedKind(t *testing.T) {
 
 func TestAnAnnouncementBornDetachmentOpensABubble(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 
 	// Act
 	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
@@ -328,7 +329,7 @@ func TestAnAnnouncementBornDetachmentOpensABubble(t *testing.T) {
 
 func TestAnAnnouncementBornDetachmentCarriesAnEmptyOrigin(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 
 	// Act
 	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
@@ -341,7 +342,7 @@ func TestAnAnnouncementBornDetachmentCarriesAnEmptyOrigin(t *testing.T) {
 
 func TestAnAnnouncementBornDetachmentRaisesNoFault(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 
 	// Act
 	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
@@ -354,7 +355,7 @@ func TestAnAnnouncementBornDetachmentRaisesNoFault(t *testing.T) {
 
 func TestAnAnnouncementBornDetachmentTakesItsKindFromItsEvidence(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 
 	// Act
 	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
@@ -367,7 +368,7 @@ func TestAnAnnouncementBornDetachmentTakesItsKindFromItsEvidence(t *testing.T) {
 
 func TestAReAnnouncedAnnouncementBornDetachmentOpensNoTwin(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	if _, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +384,7 @@ func TestAReAnnouncedAnnouncementBornDetachmentOpensNoTwin(t *testing.T) {
 
 func TestAnAnnouncementBornDetachmentOfNoRecognizableKindStillFaults(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 
 	// Act
 	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1"}, 10)
@@ -399,7 +400,7 @@ func TestAnAnnouncementBornDetachmentOfNoRecognizableKindStillFaults(t *testing.
 }
 
 func TestAnUnrecognizedToolOpensTheExplicitUnclassifiedArm(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{ToolNames: map[string]string{"tu_1": "Frobnicate"}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -413,7 +414,7 @@ func TestAnUnrecognizedToolOpensTheExplicitUnclassifiedArm(t *testing.T) {
 }
 
 func TestAnUnrecognizedToolWithNoNameBecomesAFailureCard(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", ToolUseId: "tu_1"}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -424,7 +425,7 @@ func TestAnUnrecognizedToolWithNoNameBecomesAFailureCard(t *testing.T) {
 }
 
 func TestAFaultCardIsStableAcrossAReplay(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	first, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1"}, 10)
 	second, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1"}, 10)
 	if first.Faults[0].UUID != second.Faults[0].UUID {
@@ -433,7 +434,7 @@ func TestAFaultCardIsStableAcrossAReplay(t *testing.T) {
 }
 
 func TestTaskStartedEnrichesABubbleAlreadyOpenedByItsFirstRecord(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +450,7 @@ func TestTaskStartedEnrichesABubbleAlreadyOpenedByItsFirstRecord(t *testing.T) {
 }
 
 func TestTaskStartedSuppliesTheLabelABubbleOpenedWithout(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +465,7 @@ func TestTaskStartedSuppliesTheLabelABubbleOpenedWithout(t *testing.T) {
 }
 
 func TestTaskEndedSettlesTheDetachmentsBubble(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
 	}, 10); err != nil {
@@ -480,7 +481,7 @@ func TestTaskEndedSettlesTheDetachmentsBubble(t *testing.T) {
 }
 
 func TestTaskEndedForATaskThatOpenedNoBubbleIsNotAFailure(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	push, err := s.observeTaskEnded(&corev1.TaskEnded{TaskId: "task_x", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}, 11)
 	if err != nil {
 		t.Fatal(err)
@@ -512,7 +513,7 @@ func openWorkflow(t *testing.T, s *asyncBubbleStore) {
 }
 
 func TestAWorkflowsRetrievalFoldsAsJournalRowsNotBytes(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	openWorkflow(t, s)
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		journalRetrieval("task_1", `{"label":"a","result":"ok"}`+"\n"),
@@ -526,7 +527,7 @@ func TestAWorkflowsRetrievalFoldsAsJournalRowsNotBytes(t *testing.T) {
 }
 
 func TestAWorkflowsSecondRetrievalAppendsOnlyItsNewRows(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	openWorkflow(t, s)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		journalRetrieval("task_1", `{"label":"a"}`+"\n"),
@@ -546,7 +547,7 @@ func TestAWorkflowsSecondRetrievalAppendsOnlyItsNewRows(t *testing.T) {
 }
 
 func TestAWorkflowsPartialTrailingRecordIsLeftForTheNextRead(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	openWorkflow(t, s)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		journalRetrieval("task_1", `{"label":"a"}`+"\n"+`{"label":"b`),
@@ -566,7 +567,7 @@ func TestAWorkflowsPartialTrailingRecordIsLeftForTheNextRead(t *testing.T) {
 }
 
 func TestAWorkflowsRewoundJournalIsRefusedAsAGap(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	openWorkflow(t, s)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		journalRetrieval("task_1", `{"label":"a"}`+"\n"+`{"label":"b"}`+"\n"),
@@ -584,7 +585,7 @@ func TestAWorkflowsRewoundJournalIsRefusedAsAGap(t *testing.T) {
 // --- snapshot --------------------------------------------------------------
 
 func TestSnapshotServesTheSameFoldTheDeltasWereProducedFrom(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +595,7 @@ func TestSnapshotServesTheSameFoldTheDeltasWereProducedFrom(t *testing.T) {
 }
 
 func TestSnapshotListsBubblesInLaunchOrder(t *testing.T) {
-	s := newAsyncBubbleStore("/ws")
+	s := newAsyncBubbleStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_a", "agent_a", "x")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -608,7 +609,7 @@ func TestSnapshotListsBubblesInLaunchOrder(t *testing.T) {
 }
 
 func TestSnapshotIsEmptyForASessionWithNoDetachedWork(t *testing.T) {
-	if got := newAsyncBubbleStore("/ws").snapshot(); len(got) != 0 {
+	if got := newAsyncBubbleStore("/ws", nil).snapshot(); len(got) != 0 {
 		t.Fatalf("want no bubbles, got %d", len(got))
 	}
 }
@@ -646,5 +647,352 @@ func TestCompleteJournalPrefixStopsAtTheLastRecordBoundary(t *testing.T) {
 func TestCompleteJournalPrefixConsumesNothingFromASoleFragment(t *testing.T) {
 	if got := completeJournalPrefix("abc"); got != 0 {
 		t.Fatalf("a fragment with no boundary is entirely unconsumed, got %d", got)
+	}
+}
+
+// --- fold-engine observability ---------------------------------------------
+//
+// The fold engine carried NO log calls at all, so a session whose detached work
+// folded and settled perfectly left exactly the same evidence as one whose
+// bubbles silently stopped growing. These assert the two records that close
+// that hole, and — just as importantly — their DENSITY: one per state change,
+// never one per item inside a batch.
+
+// asyncLogRecorder captures the store's records for assertion.
+type asyncLogRecorder struct{ lines []string }
+
+func (r *asyncLogRecorder) logf(format string, args ...any) {
+	r.lines = append(r.lines, fmt.Sprintf(format, args...))
+}
+
+// matching returns every captured line containing needle.
+func (r *asyncLogRecorder) matching(needle string) []string {
+	var out []string
+	for _, line := range r.lines {
+		if strings.Contains(line, needle) {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+const (
+	asyncAppendRecord = "async fold append"
+	asyncSettleRecord = "async bubble settled"
+)
+
+func TestFoldAppendRecordsAnAgentEmissionFold(t *testing.T) {
+	// Arrange
+	rec := &asyncLogRecorder{}
+	s := newAsyncBubbleStore("/ws", rec.logf)
+
+	// Act
+	push, err := s.observeCuration(frontend.Curation{
+		Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")},
+	}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	lines := rec.matching(asyncAppendRecord)
+	if len(lines) != 1 {
+		t.Fatalf("one append is one record, got %d: %v", len(lines), lines)
+	}
+	for _, want := range []string{
+		"bubble=" + push.Opened[0].GetId(),
+		"kind=agent",
+		"ws=/ws",
+		"appended_emissions=1",
+		"folded_emissions=1",
+	} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("append record must carry %q, got %q", want, lines[0])
+		}
+	}
+}
+
+func TestFoldAppendWritesOneRecordPerBatchNotPerEmission(t *testing.T) {
+	// Arrange
+	rec := &asyncLogRecorder{}
+	s := newAsyncBubbleStore("/ws", rec.logf)
+	fold := detachedFold("tu_1", "agent_1", "one")
+	fold.Emissions = append(fold.Emissions, detachedFold("tu_1", "agent_1", "two").Emissions...)
+
+	// Act
+	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{fold}}, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	lines := rec.matching(asyncAppendRecord)
+	if len(lines) != 1 {
+		t.Fatalf("a two-emission batch is ONE state change, got %d records: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "appended_emissions=2") {
+		t.Errorf("the record must report the whole batch, got %q", lines[0])
+	}
+}
+
+func TestFoldAppendIsSilentForAnEmptyEmissionBatch(t *testing.T) {
+	// Arrange
+	rec := &asyncLogRecorder{}
+	s := newAsyncBubbleStore("/ws", rec.logf)
+	fold := detachedFold("tu_1", "agent_1", "hi")
+	fold.Emissions = nil
+
+	// Act
+	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{fold}}, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if lines := rec.matching(asyncAppendRecord); len(lines) != 0 {
+		t.Fatalf("nothing folded is not a state change, got %v", lines)
+	}
+}
+
+func TestFoldAppendRecordsAShellSpoolAdvance(t *testing.T) {
+	// Arrange
+	rec := &asyncLogRecorder{}
+	s := newAsyncBubbleStore("/ws", rec.logf)
+	if _, err := s.observeCuration(frontend.Curation{
+		Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")},
+	}, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
+		retrieval("task_1", "hello", datav1.RawTaskStatus_RAW_TASK_STATUS_RUNNING, nil),
+	}}, 11); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	lines := rec.matching(asyncAppendRecord)
+	if len(lines) != 1 {
+		t.Fatalf("one spool advance is one record, got %d: %v", len(lines), lines)
+	}
+	for _, want := range []string{"kind=shell", "appended_bytes=5", "from_offset=0", "through_offset=5"} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("spool record must carry %q, got %q", want, lines[0])
+		}
+	}
+}
+
+func TestFoldAppendReportsTheSpoolCursorItAdvancedFrom(t *testing.T) {
+	// Arrange
+	rec := &asyncLogRecorder{}
+	s := newAsyncBubbleStore("/ws", rec.logf)
+	if _, err := s.observeCuration(frontend.Curation{
+		Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")},
+	}, 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
+		retrieval("task_1", "hello", datav1.RawTaskStatus_RAW_TASK_STATUS_RUNNING, nil),
+	}}, 11); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act — a restatement carrying five more bytes
+	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
+		retrieval("task_1", "helloworld", datav1.RawTaskStatus_RAW_TASK_STATUS_RUNNING, nil),
+	}}, 12); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	lines := rec.matching(asyncAppendRecord)
+	if len(lines) != 2 {
+		t.Fatalf("want one record per advance, got %d: %v", len(lines), lines)
+	}
+	for _, want := range []string{"appended_bytes=5", "from_offset=5", "through_offset=10", "restated_bytes=10"} {
+		if !strings.Contains(lines[1], want) {
+			t.Errorf("the second advance must carry %q, got %q", want, lines[1])
+		}
+	}
+}
+
+func TestFoldAppendRecordsAJournalRowFold(t *testing.T) {
+	// Arrange
+	rec := &asyncLogRecorder{}
+	s := newAsyncBubbleStore("/ws", rec.logf)
+	openWorkflow(t, s)
+
+	// Act
+	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
+		journalRetrieval("task_1", `{"label":"a"}`+"\n"+`{"label":"b"}`+"\n"),
+	}}, 11); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	lines := rec.matching(asyncAppendRecord)
+	if len(lines) != 1 {
+		t.Fatalf("a two-row batch is ONE state change, got %d records: %v", len(lines), lines)
+	}
+	for _, want := range []string{"kind=workflow", "appended_rows=2", "folded_rows=2"} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("journal record must carry %q, got %q", want, lines[0])
+		}
+	}
+}
+
+func TestFoldAppendReportsTheJournalBytesHeldBackAsPartial(t *testing.T) {
+	// Arrange
+	rec := &asyncLogRecorder{}
+	s := newAsyncBubbleStore("/ws", rec.logf)
+	openWorkflow(t, s)
+
+	// Act — a complete row plus a trailing fragment the cursor must not consume
+	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
+		journalRetrieval("task_1", `{"label":"a"}`+"\n"+`{"lab`),
+	}}, 11); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	lines := rec.matching(asyncAppendRecord)
+	if len(lines) != 1 {
+		t.Fatalf("want one journal record, got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "held_bytes=5") {
+		t.Errorf("the unconsumed partial record must be reported, got %q", lines[0])
+	}
+}
+
+func TestSettleRecordNamesTheResolvedOutcomeArm(t *testing.T) {
+	tests := []struct {
+		name   string
+		status corev1.TerminalStatus
+		want   string
+	}{
+		{name: "completed work settles done", status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, want: "outcome=done"},
+		{name: "failed work settles error", status: corev1.TerminalStatus_TERMINAL_STATUS_ERROR, want: "outcome=error"},
+		{name: "killed work settles killed", status: corev1.TerminalStatus_TERMINAL_STATUS_KILLED, want: "outcome=killed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			rec := &asyncLogRecorder{}
+			s := newAsyncBubbleStore("/ws", rec.logf)
+			if _, err := s.observeCuration(frontend.Curation{
+				Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")},
+			}, 10); err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			if _, err := s.observeTaskEnded(&corev1.TaskEnded{TaskId: "task_1", Status: tc.status}, 20); err != nil {
+				t.Fatal(err)
+			}
+
+			// Assert
+			lines := rec.matching(asyncSettleRecord)
+			if len(lines) != 1 {
+				t.Fatalf("one settlement is one record, got %d: %v", len(lines), lines)
+			}
+			if !strings.Contains(lines[0], tc.want) {
+				t.Errorf("settle record must carry %q, got %q", tc.want, lines[0])
+			}
+		})
+	}
+}
+
+func TestSettleRecordCarriesTheShellExitCode(t *testing.T) {
+	// Arrange
+	rec := &asyncLogRecorder{}
+	s := newAsyncBubbleStore("/ws", rec.logf)
+	if _, err := s.observeCuration(frontend.Curation{
+		Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")},
+	}, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
+		retrieval("task_1", "boom", datav1.RawTaskStatus_RAW_TASK_STATUS_FAILED, exitCode(137)),
+	}}, 11); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	lines := rec.matching(asyncSettleRecord)
+	if len(lines) != 1 {
+		t.Fatalf("want one settle record, got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "shell_exit=137") {
+		t.Errorf("a process settlement must report its exit status, got %q", lines[0])
+	}
+}
+
+func TestSettleRecordReportsNoExitForWorkThatNeverExited(t *testing.T) {
+	// Arrange
+	rec := &asyncLogRecorder{}
+	s := newAsyncBubbleStore("/ws", rec.logf)
+	if _, err := s.observeCuration(frontend.Curation{
+		Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")},
+	}, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	if _, err := s.observeTaskEnded(&corev1.TaskEnded{
+		TaskId: "agent_1", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE,
+	}, 20); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	lines := rec.matching(asyncSettleRecord)
+	if len(lines) != 1 {
+		t.Fatalf("want one settle record, got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "shell_exit=none") {
+		t.Errorf("an agent concluded rather than exited, got %q", lines[0])
+	}
+}
+
+func TestARefusedSettlementWritesNoSettleRecord(t *testing.T) {
+	// Arrange
+	rec := &asyncLogRecorder{}
+	s := newAsyncBubbleStore("/ws", rec.logf)
+	if _, err := s.observeCuration(frontend.Curation{
+		Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")},
+	}, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act — an unspecified terminal status resolves no outcome
+	_, err := s.observeTaskEnded(&corev1.TaskEnded{
+		TaskId: "task_1", Status: corev1.TerminalStatus_TERMINAL_STATUS_UNSPECIFIED,
+	}, 20)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a settlement with no resolvable outcome must be refused")
+	}
+	if lines := rec.matching(asyncSettleRecord); len(lines) != 0 {
+		t.Fatalf("a refused settlement must not read as settled, got %v", lines)
+	}
+}
+
+func TestASettlementForATaskThatOpenedNoBubbleWritesNoRecord(t *testing.T) {
+	// Arrange
+	rec := &asyncLogRecorder{}
+	s := newAsyncBubbleStore("/ws", rec.logf)
+
+	// Act
+	if _, err := s.observeTaskEnded(&corev1.TaskEnded{
+		TaskId: "task_unknown", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE,
+	}, 20); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if lines := rec.matching(asyncSettleRecord); len(lines) != 0 {
+		t.Fatalf("a task that detached nothing has no bubble to settle, got %v", lines)
 	}
 }

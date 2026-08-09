@@ -4784,3 +4784,75 @@ waiting for instructions that never arrive."
                        "RAW" "PREFIXED" "/git" "abc123" nil)
                       :type 'error)
       (delete-directory agent-repl-prompts-dir t))))
+
+;;;; ---- Tests: switch target identity ----
+;;
+;; A workspace has two identities: the daemon's KEY (its absolute project
+;; directory) and the editor's display NAME.  persp-mode and the logging
+;; ladder are both keyed by NAME, so a directory handed to the switch
+;; primitive named no perspective and mis-keyed the log — a live smoke run
+;; recorded `unroutable log workspace "/…/hello-world-subagent-tib"' for
+;; exactly that.
+
+(ert-deftest agent-repl-test-switch-target-passes-a-workspace-name-through ()
+  "A name is already the switch's own identity and is not rewritten."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "named-ws" :project-dir "/tmp/named-ws")
+    ;; Act / Assert
+    (should (equal (agent-repl--switch-target-name "named-ws") "named-ws"))))
+
+(ert-deftest agent-repl-test-switch-target-resolves-a-project-dir-to-its-owner ()
+  "The daemon's cwd key resolves to the editor's display name."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-switch-owner-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "owner-ws" :project-dir project)
+            ;; Act / Assert
+            (should (equal (agent-repl--switch-target-name project) "owner-ws")))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-switch-target-returns-an-unowned-string-unchanged ()
+  "A string owning no workspace is not rewritten, so its anomaly still shows."
+  (agent-repl-test--with-clean-state
+    ;; Act / Assert
+    (should (equal (agent-repl--switch-target-name "no-such-thing")
+                   "no-such-thing"))))
+
+(ert-deftest agent-repl-test-switch-to-workspace-switches-a-dir-by-its-owner-name ()
+  "The perspective switched is the owner's, never the raw directory."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-switch-dir-" t))
+          (switched nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-switch)
+                     (lambda (ws) (setq switched ws))))
+            (agent-repl--ws-put "jump-ws" :project-dir project)
+            ;; Act
+            (agent-repl--switch-to-workspace project)
+            ;; Assert
+            (should (equal switched "jump-ws")))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-switch-to-workspace-routes-its-records-by-owner-name ()
+  "A directory-driven switch attributes its records to the owning workspace.
+Attributing them to the directory string asked the ladder to route to a
+sink keyed by something that is not a workspace name, which is what made
+the switch emit `unroutable log workspace'."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-switch-route-" t))
+          (attributions nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-switch) #'ignore)
+                    ((symbol-function 'agent-repl--log)
+                     (lambda (ws &rest _) (push ws attributions))))
+            (agent-repl--ws-put "route-ws" :project-dir project)
+            ;; Act
+            (agent-repl--switch-to-workspace project)
+            ;; Assert
+            (should (equal (delete-dups attributions) '("route-ws"))))
+        (delete-directory project t)))))

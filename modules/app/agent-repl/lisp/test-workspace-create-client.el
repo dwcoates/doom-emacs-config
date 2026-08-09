@@ -483,12 +483,48 @@ to leave nothing on this side to say it ever came."
         (dolist (ack acks)
           (should (equal (car ack) "workspaceMaterialized"))
           (should (equal (plist-get (cadr ack) :jobId) "job-1"))
-          (should (equal (caddr ack) "new")))
+          ;; The envelope key is the cwd the daemon routes by, not the
+          ;; display name; see the dedicated regression test below.
+          (should (equal (caddr ack) "/tmp/new")))
         (should (equal (agent-repl--ws-get "new" :config-dir-override)
                        "/tmp/account"))
         (should (equal (agent-repl--ws-get "new" :permission-mode) "auto"))
         (should (eq (agent-repl--ws-get "new" :allow-ungated) t))
         (should (eq (agent-repl--ws-get "new" :initial-prompt-queued) t))))))
+
+(ert-deftest agent-repl-test-materialized-ack-keys-the-envelope-by-cwd ()
+  "The `workspaceMaterialized' envelope carries WS's cwd, never its name.
+The daemon canonicalizes the envelope's `workspace' field as a DIRECTORY
+to attribute the command's own latency record, so a display name there
+made every materialization ack's telemetry fail to route with
+`canonicalize workspace directory: lstat <name>: no such file or
+directory'."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((wire-workspace 'unsent))
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (_field _payload &optional workspace &rest _)
+                   (setq wire-workspace workspace)
+                   "ack-1")))
+        (agent-repl--ws-put "keyed" :project-dir "/tmp/wt/keyed")
+        ;; Act
+        (agent-repl--workspace-create-ack-materialized
+         "keyed" "job-keyed" 'created)
+        ;; Assert
+        (should (equal wire-workspace "/tmp/wt/keyed"))))))
+
+(ert-deftest agent-repl-test-materialized-ack-refuses-an-unregistered-workspace ()
+  "An unroutable workspace fails loudly instead of putting a name on the wire."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (&rest _) (setq sent t) "ack-1")))
+        ;; Act / Assert
+        (should-error
+         (agent-repl--workspace-create-ack-materialized
+          "never-registered" "job-x" 'created))
+        (should-not sent)))))
 
 (ert-deftest agent-repl-test-workspace-available-never-creates-git-session-or-shim ()
   "Materialization touches only perspective/bookkeeping and its ACK."
@@ -1084,3 +1120,62 @@ must not find a live entry and settle an action already answered."
       (agent-repl--host-action-settle "tok-1" t nil)
       ;; Assert
       (should (= completions 0)))))
+
+;;;; ---- Tests: the creation handler declares its registration window ----
+
+(ert-deftest agent-repl-test-available-handler-opens-the-registration-window ()
+  "The handler's prologue runs with WS's registration window declared.
+Every record it emits before `--ws-materialize-daemon-workspace' commits
+the bookkeeping names a workspace that owns no sink yet, which is what
+made a normal creation warn `unroutable log workspace' about its own
+normal prologue."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((window 'unset))
+      (cl-letf (((symbol-function 'file-directory-p) (lambda (_path) t))
+                ((symbol-function 'agent-repl--log)
+                 (lambda (&rest _)
+                   (when (eq window 'unset)
+                     (setq window agent-repl--log-preregistration-workspace))))
+                ((symbol-function 'agent-repl--ws-materialize-daemon-workspace)
+                 (lambda (ws metadata)
+                   (agent-repl--ws-put ws :project-dir
+                                       (plist-get metadata :project-dir))
+                   'created))
+                ((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (&rest _) "ack")))
+        ;; Act
+        (agent-repl--workspace-create-handle-available
+         '(:jobId "job-1" :finalName "windowed" :worktreePath "/tmp/windowed"
+           :sessionId "session-1"))
+        ;; Assert
+        (should (equal window "windowed"))))))
+
+(ert-deftest agent-repl-test-available-handler-closes-the-window-on-return ()
+  "The window is the handler's own dynamic extent and does not outlive it."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (cl-letf (((symbol-function 'file-directory-p) (lambda (_path) t))
+              ((symbol-function 'agent-repl--ws-materialize-daemon-workspace)
+               (lambda (ws metadata)
+                 (agent-repl--ws-put ws :project-dir
+                                     (plist-get metadata :project-dir))
+                 'created))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) "ack")))
+      ;; Act
+      (agent-repl--workspace-create-handle-available
+       '(:jobId "job-1" :finalName "windowed" :worktreePath "/tmp/windowed"
+         :sessionId "session-1"))
+      ;; Assert
+      (should-not agent-repl--log-preregistration-workspace))))
+
+(ert-deftest agent-repl-test-available-handler-closes-the-window-on-signal ()
+  "A validation failure closes the window too — it is not left latched open."
+  (agent-repl-test--with-clean-state
+    ;; Act
+    (should-error
+     (agent-repl--workspace-create-handle-available
+      '(:jobId "job-1" :finalName "windowed" :worktreePath "/tmp/windowed")))
+    ;; Assert
+    (should-not agent-repl--log-preregistration-workspace)))

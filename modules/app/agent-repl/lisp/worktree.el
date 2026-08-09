@@ -345,17 +345,49 @@ it had been on a sibling branch before the merge."
   "Extract bare workspace name from WS (e.g. \"DWC/foo\" -> \"foo\")."
   (file-name-nondirectory (directory-file-name ws)))
 
+(defun agent-repl--switch-target-name (ws)
+  "Return the workspace NAME a switch to WS means.
+
+WS is normally already a name.  A caller holding a project DIRECTORY —
+an out-of-band `emacsclient --eval', a path-keyed integration, anything
+that has the daemon's cwd key rather than the editor's display name — is
+resolved here to the workspace that owns that directory.
+
+THIS IS THE SAME IDENTITY DISCIPLINE the wire commands keep in the other
+direction.  A workspace has two identities: the daemon's key (its
+absolute cwd) and the editor's display name.  persp-mode is keyed by
+NAME, and so is the logging ladder, so a directory in this slot names no
+perspective and mis-keys the ladder: a live smoke run logged
+`unroutable log workspace \"/…/doom-worktrees/hello-world-subagent-tib\"'
+for exactly this, one warning per path handed in.
+
+A WS that resolves to neither is returned UNCHANGED rather than refused.
+Not every switchable perspective is an agent-repl workspace, and a real
+agent-repl workspace whose registration is missing is precisely the
+anomaly `agent-repl--note-unroutable-log-workspace' exists to shout
+about — swallowing it here would silence the one signal that says so."
+  (or (and (stringp ws)
+           (not (agent-repl--ws-known-p ws))
+           (agent-repl--ws-dir-owner ws))
+      ws))
+
 (defun agent-repl--switch-to-workspace (ws)
   "Switch to workspace WS via the workspace.el navigation boundary.
 Signals an error if the switch fails — downstream code assumes the
 switch succeeded, so silent failure would operate on the wrong
 workspace.
 
+WS is resolved through `agent-repl--switch-target-name' first, so a
+caller holding the workspace's project DIRECTORY switches the same
+perspective a caller holding its name does, and both attribute their
+records to the same log sink.
+
 Routes through `agent-repl--ws-switch' (workspace.el integration
 boundary); callers must not call `+workspace-switch' directly."
-  (agent-repl--log ws "switch-to-workspace: ws=%s" ws)
-  (agent-repl--ws-switch ws)
-  (agent-repl--log ws "switch-to-workspace: switched ws=%s" ws))
+  (let ((name (agent-repl--switch-target-name ws)))
+    (agent-repl--log name "switch-to-workspace: ws=%s requested=%s" name ws)
+    (agent-repl--ws-switch name)
+    (agent-repl--log name "switch-to-workspace: switched ws=%s" name)))
 
 (defun agent-repl--restore-focus (orig-persp orig-window orig-buffer)
   "Restore perspective to ORIG-PERSP and select ORIG-WINDOW / ORIG-BUFFER.
