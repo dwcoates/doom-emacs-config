@@ -91,6 +91,7 @@ export const HIBERNATION_CAUSE = {
 export const REVIVE_MODE = {
   compactFirst: "compactFirst",
   direct: "direct",
+  clear: "clear",
 } as const satisfies Record<
   ArmKeys<GeneratedReviveSessionCmd["mode"]>,
   ArmKeys<GeneratedReviveSessionCmd["mode"]>
