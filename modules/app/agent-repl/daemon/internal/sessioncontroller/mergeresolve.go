@@ -247,8 +247,15 @@ func (m *Manager) SubmitMergePromptAwaitingTurn(ctx context.Context, workspace, 
 	case <-ctx.Done():
 		err := fmt.Errorf("session-controller: the merge resolution turn for workspace %q (request %s) never reported its end: %w",
 			workspace, requestID, ctx.Err())
+		boundTurnID := m.turnWaiterID(w)
 		m.logf("session-controller: merge resolution turn UNFINISHED ws=%q session=%s request_id=%s bound_turn_id=%q: %v — the cherry-pick is NOT resumed",
-			workspace, d.sessionID, requestID, m.turnWaiterID(w), err)
+			workspace, d.sessionID, requestID, boundTurnID, err)
+		// THE ONLY EXIT THAT LEAVES A RUNNING TURN BEHIND, and therefore the one
+		// that has to stop it. The run is about to reach a terminal and release
+		// the lease, so this turn's output has no consumer and the workspace is
+		// handed back to a user who would be fighting it for their own shim.
+		// See mergeturnstop.go for why the stop is aimed at this ONE turn id.
+		m.stopAbandonedMergeTurn(d, workspace, requestID, boundTurnID)
 		return err
 	}
 }

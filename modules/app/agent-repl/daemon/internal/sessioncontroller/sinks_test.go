@@ -241,6 +241,22 @@ type fakeApplier struct {
 	orphanedTurnClosed    bool
 	orphanedTurnErr       error
 	orphanedTurnCloseHook func(workspace string)
+	// originTurnCloses records one entry per CloseOriginTurns call — a turn
+	// retired because the ORIGIN that submitted it terminated, which is a
+	// different proof again from either close above.
+	originTurnCloses []originTurnCloseCall
+	originTurnErr    error
+	// unansweredInterrupt is the standing INTERRUPTED ack the shim never
+	// honoured, in millis of age. A zero age with marked unset is the ordinary
+	// case: no stop is outstanding.
+	unansweredInterruptMs int64
+	unansweredInterrupt   bool
+	// lastActivity is when anything last happened on the workspace.
+	// lastActivityKnown unset models a workspace with no history at all, which
+	// is UNKNOWN rather than idle.
+	lastActivityMs    int64
+	lastActivityKnown bool
+	lastActivityErr   error
 	// mergeLeases names the workspaces merge.Coordinator holds the exclusivity
 	// lease on. Empty is the ordinary case: no merge is running.
 	mergeLeases map[string]bool
@@ -685,6 +701,50 @@ type orphanedTurnCloseCall struct {
 	workspace string
 	sessionID string
 	reason    string
+}
+
+// originTurnCloseCall is one origin-terminal turn close the session controller
+// asked the SSM for.
+type originTurnCloseCall struct {
+	workspace string
+	turnIDs   []string
+	cause     string
+}
+
+// CloseOriginTurns records the origin-terminal close. The zero value answers
+// "every one of those turns had already ended", which is the ordinary outcome;
+// a test exercising the close sets originTurnErr or reads the recorded call.
+func (f *fakeApplier) CloseOriginTurns(workspace string, turnIDs []string, cause string) ([]string, error) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.originTurnCloses = append(f.originTurnCloses, originTurnCloseCall{
+		workspace: workspace, turnIDs: append([]string(nil), turnIDs...), cause: cause,
+	})
+	if f.originTurnErr != nil {
+		return nil, f.originTurnErr
+	}
+	return append([]string(nil), turnIDs...), nil
+}
+
+// recordedOriginTurnCloses copies what CloseOriginTurns has been asked for.
+func (f *fakeApplier) recordedOriginTurnCloses() []originTurnCloseCall {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return append([]originTurnCloseCall(nil), f.originTurnCloses...)
+}
+
+// UnansweredInterruptAgeMs answers with whatever standing stop the test set.
+func (f *fakeApplier) UnansweredInterruptAgeMs(string) (int64, bool) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return f.unansweredInterruptMs, f.unansweredInterrupt
+}
+
+// LastActivityMs answers with whatever activity record the test set.
+func (f *fakeApplier) LastActivityMs(string) (int64, bool, error) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return f.lastActivityMs, f.lastActivityKnown, f.lastActivityErr
 }
 
 // CloseOrphanedTurn records the orphan reconciliation. The zero value answers

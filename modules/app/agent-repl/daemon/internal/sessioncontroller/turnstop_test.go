@@ -30,10 +30,14 @@ type stubInterrupter struct {
 	// answering, which is exactly what a wedged shim does.
 	block bool
 	calls int
+	// origins records who ORDERED each stop, so a test can prove the teardown
+	// names itself on the wire rather than sending an unattributed interrupt.
+	origins []string
 }
 
-func (s *stubInterrupter) Interrupt(ctx context.Context) (corev1.InterruptOutcome, error) {
+func (s *stubInterrupter) Interrupt(ctx context.Context, originRequestID string) (corev1.InterruptOutcome, error) {
 	s.calls++
+	s.origins = append(s.origins, originRequestID)
 	if s.block {
 		<-ctx.Done()
 		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, ctx.Err()

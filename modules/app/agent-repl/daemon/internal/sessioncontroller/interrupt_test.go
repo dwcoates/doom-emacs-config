@@ -19,7 +19,7 @@ import (
 // marks the turn, or pauses the queue.
 func (h *queueHarness) interrupt() error {
 	h.t.Helper()
-	return h.m.Interrupt(context.Background(), "ws")
+	return h.m.Interrupt(context.Background(), "ws", "fe-1")
 }
 
 // ackWith arms the fake shim's interrupt ack with a specific outcome.

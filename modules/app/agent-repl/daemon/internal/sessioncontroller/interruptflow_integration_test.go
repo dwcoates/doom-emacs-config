@@ -226,7 +226,7 @@ func (r *interruptFlowRig) ackWith(outcome corev1.InterruptOutcome) {
 // interrupt command handler makes.
 func (r *interruptFlowRig) interrupt() error {
 	r.t.Helper()
-	return r.m.Interrupt(context.Background(), interruptFlowWorkspace)
+	return r.m.Interrupt(context.Background(), interruptFlowWorkspace, "fe-1")
 }
 
 // submit submits a prompt for the workspace.
