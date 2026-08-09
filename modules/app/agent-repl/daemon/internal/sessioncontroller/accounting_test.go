@@ -85,6 +85,81 @@ func TestTurnAccountingReducerCompletesWithBoundaryAndMatchingLedger(t *testing.
 	}
 }
 
+// oneHourCacheTurnReducer builds a reducer holding a turn shaped like the one
+// measured live on 2026-08-09: a run of responses on the extended 1h cache TTL,
+// each delivered as a message_start snapshot and then CORRECTED by a
+// message_delta whose usage shape carries no `cache_creation` member at all and
+// states the TTL split only inside its own `iterations`.
+func oneHourCacheTurnReducer(t *testing.T, responses int, perResponseCacheCreation int64) *turnAccountingReducer {
+	t.Helper()
+	r := newTurnAccountingReducer(nil)
+	r.observe(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "q",
+		Event:           &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: completeRuntimeIdentity()}},
+	}}}, "s")
+	r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
+	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
+	snapshotCreation, err := structpb.NewStruct(map[string]any{"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": float64(perResponseCacheCreation)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deltaIterations, err := structpb.NewList([]any{map[string]any{
+		"type":                        "message",
+		"cache_creation_input_tokens": float64(perResponseCacheCreation),
+		"cache_creation":              map[string]any{"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": float64(perResponseCacheCreation)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < responses; i++ {
+		id := fmt.Sprintf("msg-%d", i)
+		r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
+			Message: &datav1.ApiAssistantMessage{Id: id, Model: "claude-opus-5", Usage: &datav1.ApiUsage{CacheCreationInputTokens: perResponseCacheCreation, CacheCreation: snapshotCreation}},
+		}}}), "s")
+		r.observe(messageDeltaUsageEvent(t, id, &datav1.ApiUsage{CacheCreationInputTokens: perResponseCacheCreation, Iterations: deltaIterations}), "s")
+	}
+	total := perResponseCacheCreation * int64(responses)
+	resultCreation, err := structpb.NewStruct(map[string]any{"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": float64(total)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{
+		Usage:      &datav1.Usage{CacheCreationInputTokens: total, CacheCreation: resultCreation},
+		ModelUsage: map[string]*datav1.ModelUsage{"claude-opus-5": {CacheCreationInputTokens: total}},
+	}}}), "s")
+	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
+	return r
+}
+
+// TestAOneHourCacheTurnReconcilesItsEphemeral1hBucket is the measured live
+// failure, end to end: 113 responses on the 1h TTL settled invalid at
+// cache_creation.ephemeral_1h_input_tokens, 0 on the response plane against
+// 193,050 on the result plane.
+func TestAOneHourCacheTurnReconcilesItsEphemeral1hBucket(t *testing.T) {
+	// Arrange.
+	r := oneHourCacheTurnReducer(t, 113, 1710)
+	// Act.
+	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	// Assert.
+	if got.GetReconciliation().GetResponseMainAgent().GetCacheCreation().GetEphemeral_1HInputTokens() != 193230 {
+		t.Fatalf("response 1h bucket = %d, want the responses to account for the whole result total", got.GetReconciliation().GetResponseMainAgent().GetCacheCreation().GetEphemeral_1HInputTokens())
+	}
+}
+
+// TestAOneHourCacheTurnSettlesComplete is the verdict that follows: with the
+// iterations modeled and the TTL split recovered, the turn has nothing left to
+// report.
+func TestAOneHourCacheTurnSettlesComplete(t *testing.T) {
+	// Arrange.
+	r := oneHourCacheTurnReducer(t, 113, 1710)
+	// Act.
+	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	// Assert.
+	if got.GetComplete() == nil {
+		t.Fatalf("verdict = %+v, want a complete turn", got.GetInvalid().GetProblems())
+	}
+}
+
 // messageDeltaUsageEvent is the vendor's relayed message_delta correction: the
 // FINAL cumulative usage for one API message, reported after the assistant
 // message that carried only the message_start snapshot.
@@ -508,7 +583,7 @@ func TestVendorTokenUsageFromAPIPreservesEveryRawUsageField(t *testing.T) {
 	output, _ := structpb.NewStruct(map[string]any{"thinking_tokens": 9})
 	unmodeled, _ := structpb.NewStruct(map[string]any{"future_counter": 4})
 	diagnostic, _ := structpb.NewStruct(map[string]any{"cache_miss_reason": "tools_changed", "cache_missed_input_tokens": 17})
-	iterations, _ := structpb.NewList([]any{map[string]any{"type": "fallback", "model": "fallback-model", "input_tokens": 1, "output_tokens": 2, "cache_read_input_tokens": 3, "cache_creation_input_tokens": 4, "cache_creation": map[string]any{"ephemeral_5m_input_tokens": 4}}})
+	iterations, _ := structpb.NewList([]any{map[string]any{"type": "fallback_message", "model": "fallback-model", "input_tokens": 1, "output_tokens": 2, "cache_read_input_tokens": 3, "cache_creation_input_tokens": 4, "cache_creation": map[string]any{"ephemeral_5m_input_tokens": 4}}})
 	want := &datav1.ApiUsage{InputTokens: 1, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4, CacheCreation: cache, ServerToolUse: tools, ServiceTier: "priority", Iterations: iterations, Speed: "fast", InferenceGeo: "us", FallbackCredit: fallback, OutputTokensDetails: output, UnmodeledUsage: unmodeled, CacheDiagnostic: diagnostic}
 	got := vendorTokenUsageFromAPI(want)
 	if got.GetCacheCreation().GetEphemeral_5MInputTokens() != 11 || got.GetCacheCreation().GetEphemeral_1HInputTokens() != 12 || got.GetServerToolUse().GetWebFetchRequests() != 3 || got.GetOutputDetails().GetThinkingTokens() != 9 || got.GetFallbackCredit().GetFields()["accepted"].GetBoolValue() != true || got.GetUnmodeledUsage().GetFields()["future_counter"].GetNumberValue() != 4 || got.GetCacheDiagnostic().GetToolsChanged().GetCacheMissedInputTokens() != 17 || got.GetIterations()[0].GetFallback().GetModel() != "fallback-model" || !proto.Equal(got.GetRawUsage(), want) {
@@ -521,6 +596,186 @@ func TestVendorTokenUsageFromAPIPreservesEveryRawUsageField(t *testing.T) {
 	// reason the field survives at all.
 	if got.GetCacheRates().GetTotalPromptInputTokens() != 8 || got.GetCacheRates().GetCacheHitRate() != 0.375 || got.GetCacheRates().GetCacheWriteRate() != 0.5 || got.GetCacheRates().GetUncachedInputRate() != 0.125 {
 		t.Fatalf("cache rates = %+v, want the daemon-derived partition of this response's own counters", got.GetCacheRates())
+	}
+}
+
+// TestVendorIterationKindReadsTheVendorsOwnDiscriminators pins the wire values
+// the SDK actually emits against the schema arms they belong in. Reading the
+// ARM names off the wire instead is what dropped every live iteration.
+func TestVendorIterationKindReadsTheVendorsOwnDiscriminators(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		typ  any
+		want iterationKind
+	}{
+		{"an ordinary sampling hop", "message", iterationSampling},
+		{"a compaction hop", "compaction", iterationCompaction},
+		{"an advisor hop", "advisor_message", iterationAdvisor},
+		{"a fallback hop", "fallback_message", iterationFallback},
+		{"an unlabeled hop", "", iterationSampling},
+		{"a kind this build has never seen", "quantum_message", iterationUnmodeled},
+		{"the schema arm name, which the vendor never sends", "sampling", iterationUnmodeled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			value, err := structpb.NewValue(map[string]any{"type": tc.typ})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Act.
+			got := vendorIterationKind(value)
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("kind = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestANonStructIterationEntryStaysUnmodeled keeps the entry that is not even
+// an object flagged rather than silently filed as a sampling hop.
+func TestANonStructIterationEntryStaysUnmodeled(t *testing.T) {
+	// Arrange.
+	value := structpb.NewStringValue("iterations-were-a-string")
+	// Act.
+	got := vendorIterationKind(value)
+	// Assert.
+	if got != iterationUnmodeled {
+		t.Fatalf("kind = %d, want an entry with no object shape to stay unmodeled", got)
+	}
+}
+
+// TestAVendorMessageIterationIsNoLongerUnmodeled is the reported defect in one
+// assertion: the live turn's every response carried a `message` iteration and
+// every one of them condemned the turn.
+func TestAVendorMessageIterationIsNoLongerUnmodeled(t *testing.T) {
+	// Arrange.
+	iterations, err := structpb.NewList([]any{map[string]any{"type": "message", "input_tokens": 2, "output_tokens": 178, "cache_read_input_tokens": 16992, "cache_creation_input_tokens": 29669, "cache_creation": map[string]any{"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 29669}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Act.
+	got := vendorTokenUsageFromAPI(&datav1.ApiUsage{InputTokens: 2, OutputTokens: 178, CacheReadInputTokens: 16992, CacheCreationInputTokens: 29669, Iterations: iterations})
+	// Assert.
+	if got.GetUnmodeledUsage().GetFields()["iterations.0"] != nil {
+		t.Fatalf("unmodeled usage = %v, want the vendor's sampling iteration modeled", got.GetUnmodeledUsage())
+	}
+}
+
+// TestAVendorMessageIterationIsFiledInTheSamplingArm is the other half: not
+// flagged AND actually recorded, with its own counters.
+func TestAVendorMessageIterationIsFiledInTheSamplingArm(t *testing.T) {
+	// Arrange.
+	iterations, err := structpb.NewList([]any{map[string]any{"type": "message", "model": "claude-opus", "input_tokens": 2, "output_tokens": 178}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Act.
+	got := vendorTokenUsageFromAPI(&datav1.ApiUsage{InputTokens: 2, OutputTokens: 178, Iterations: iterations})
+	// Assert.
+	if len(got.GetIterations()) != 1 || got.GetIterations()[0].GetSampling().GetOutputTokens() != 178 || got.GetIterations()[0].GetSampling().GetModel() != "claude-opus" {
+		t.Fatalf("iterations = %v, want one sampling iteration carrying its own counters", got.GetIterations())
+	}
+}
+
+// TestAnUnrecognizedIterationKindIsStillFlagged proves the detector did not
+// become permissive along with the mapper.
+func TestAnUnrecognizedIterationKindIsStillFlagged(t *testing.T) {
+	// Arrange.
+	iterations, err := structpb.NewList([]any{map[string]any{"type": "quantum_message", "input_tokens": 5}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Act.
+	got := vendorTokenUsageFromAPI(&datav1.ApiUsage{InputTokens: 5, Iterations: iterations})
+	// Assert.
+	if got.GetUnmodeledUsage().GetFields()["iterations.0"] == nil {
+		t.Fatalf("unmodeled usage = %v, want an unrecognized iteration kind still reported", got.GetUnmodeledUsage())
+	}
+}
+
+// TestAnUnrecognizedIterationKindIsNotFiled keeps the record free of a usage
+// entry whose kind this build cannot name.
+func TestAnUnrecognizedIterationKindIsNotFiled(t *testing.T) {
+	// Arrange.
+	iterations, err := structpb.NewList([]any{map[string]any{"type": "quantum_message", "input_tokens": 5}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Act.
+	got := vendorTokenUsageFromAPI(&datav1.ApiUsage{InputTokens: 5, Iterations: iterations})
+	// Assert.
+	if len(got.GetIterations()) != 0 {
+		t.Fatalf("iterations = %v, want an unnameable kind left unfiled", got.GetIterations())
+	}
+}
+
+// TestADeltaUsageRecoversItsTTLSplitFromItsIterations is the live
+// ephemeral_1h defect: the vendor's message_delta usage shape carries no
+// cache_creation member, and the response plane reported a zero 1h bucket
+// against a result plane reporting the full amount.
+func TestADeltaUsageRecoversItsTTLSplitFromItsIterations(t *testing.T) {
+	// Arrange.
+	iterations, err := structpb.NewList([]any{map[string]any{"type": "message", "cache_creation_input_tokens": 29669, "cache_creation": map[string]any{"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 29669}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Act.
+	got := vendorTokenUsageFromAPI(&datav1.ApiUsage{CacheCreationInputTokens: 29669, Iterations: iterations})
+	// Assert.
+	if got.GetCacheCreation().GetEphemeral_1HInputTokens() != 29669 {
+		t.Fatalf("cache creation = %v, want the 1h bucket recovered from the iteration", got.GetCacheCreation())
+	}
+}
+
+// TestAReportedTTLSplitIsTakenVerbatimOverTheIterations keeps the vendor's own
+// top-level breakdown authoritative wherever it sends one.
+func TestAReportedTTLSplitIsTakenVerbatimOverTheIterations(t *testing.T) {
+	// Arrange.
+	creation, err := structpb.NewStruct(map[string]any{"ephemeral_5m_input_tokens": 100, "ephemeral_1h_input_tokens": 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	iterations, err := structpb.NewList([]any{map[string]any{"type": "message", "cache_creation_input_tokens": 100, "cache_creation": map[string]any{"ephemeral_1h_input_tokens": 100}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Act.
+	got := vendorTokenUsageFromAPI(&datav1.ApiUsage{CacheCreationInputTokens: 100, CacheCreation: creation, Iterations: iterations})
+	// Assert.
+	if got.GetCacheCreation().GetEphemeral_5MInputTokens() != 100 || got.GetCacheCreation().GetEphemeral_1HInputTokens() != 0 {
+		t.Fatalf("cache creation = %v, want the reported breakdown taken verbatim", got.GetCacheCreation())
+	}
+}
+
+// TestATTLSplitThatDoesNotPartitionTheTotalIsRefused is the guard against
+// inventing a multi-hop aggregation this evidence never demonstrated: the
+// buckets must add up to a total already held independently, or nothing is
+// filled in and the ledger keeps stating its disagreement.
+func TestATTLSplitThatDoesNotPartitionTheTotalIsRefused(t *testing.T) {
+	// Arrange.
+	iterations, err := structpb.NewList([]any{map[string]any{"type": "message", "cache_creation": map[string]any{"ephemeral_1h_input_tokens": 7}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Act.
+	got := vendorTokenUsageFromAPI(&datav1.ApiUsage{CacheCreationInputTokens: 29669, Iterations: iterations})
+	// Assert.
+	if got.GetCacheCreation().GetEphemeral_1HInputTokens() != 0 {
+		t.Fatalf("cache creation = %v, want a non-partitioning split refused", got.GetCacheCreation())
+	}
+}
+
+// TestAResponseWithNoIterationsKeepsAnAbsentTTLSplit covers the response the
+// vendor described with neither source of the breakdown.
+func TestAResponseWithNoIterationsKeepsAnAbsentTTLSplit(t *testing.T) {
+	// Arrange.
+	usage := &datav1.ApiUsage{CacheCreationInputTokens: 500}
+	// Act.
+	got := vendorTokenUsageFromAPI(usage)
+	// Assert.
+	if got.GetCacheCreation().GetEphemeral_5MInputTokens() != 0 || got.GetCacheCreation().GetEphemeral_1HInputTokens() != 0 {
+		t.Fatalf("cache creation = %v, want no breakdown invented", got.GetCacheCreation())
 	}
 }
 

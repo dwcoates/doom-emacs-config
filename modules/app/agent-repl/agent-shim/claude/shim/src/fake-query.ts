@@ -230,7 +230,9 @@ export function createFakeQuery(
     speed: "fast",
     inference_geo: "us-east-1",
     iterations: [{
-      type: "sampling",
+      // The vendor's discriminator for an ordinary sampling iteration is
+      // `message` (BetaMessageIterationUsage), not the schema's arm name.
+      type: "message",
       model: `${actor}-reasoning-model`,
       input_tokens: 61 + offset,
       output_tokens: 62 + offset,
