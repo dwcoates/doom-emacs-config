@@ -1441,6 +1441,135 @@ state.  Returns non-nil exactly when a record was emitted."
       (apply #'agent-repl--log-verbose ws fmt args)
       t)))
 
+;;;; ---- User-facing copy: the one thing the minibuffer is allowed to say ----
+;;
+;; THE MINIBUFFER CARRIES USER COPY, NEVER EVIDENCE.  A wrapped Go error
+;; chain reaching the echo area verbatim — package prefixes, workspace and
+;; session and request identifiers, a protobuf enum name — is unreadable, and
+;; worse, it makes a BY-DESIGN refusal (a prompt sent to a workspace queued
+;; for a merge) look like a broken workspace.
+;;
+;; So the split is mechanical rather than per-call-site judgment:
+;;
+;;   `agent-repl--user-message'    ONE short present-tense sentence to the
+;;                                 echo area, plus BOTH that sentence and its
+;;                                 verbose counterpart to the canonical
+;;                                 per-workspace log through `agent-repl--log'.
+;;   `agent-repl--user-copy-for-error'  turns a daemon nack / error string
+;;                                 into that sentence.
+;;
+;; The verbose text is never dropped — it is routed.  The log file carries the
+;; user line AND the chain, adjacent, so correlating what the user read with
+;; what actually failed needs no second source.
+
+(defconst agent-repl--user-message-prefix "agent-repl: "
+  "Prefix every echo-area line from `agent-repl--user-message' carries.
+Matches the convention the module's existing minibuffer messages already
+use, so a routed line is indistinguishable from the ones it replaces.")
+
+(defconst agent-repl--user-copy-patterns
+  '(("RENDER_STATE_MERGE_QUEUED"
+     . "%s refused — this workspace is queued for a merge; wait for the merge to finish or interrupt it")
+    ("RENDER_STATE_MERGE_RUNNING"
+     . "%s refused — a merge is running in this workspace; wait for it to finish or interrupt it")
+    ("RENDER_STATE_MERGE_CONFLICTED"
+     . "%s refused — this workspace has a merge conflict to resolve first")
+    ("merge exclusivity lease"
+     . "%s refused — a merge run owns this session; wait for the merge to finish or interrupt it")
+    ("merge lease"
+     . "%s refused — a merge run owns this session; wait for the merge to finish or interrupt it")
+    ("superseded by the current workspace generation"
+     . "%s superseded — a newer connection owns this workspace; the view will resync")
+    ("reconnect_superseded"
+     . "%s superseded — the reconnect was overtaken; the view will resync")
+    ("has no live session controller"
+     . "%s refused — this workspace is not live; start or wake it first")
+    ("no live session"
+     . "%s refused — this workspace is not live; start or wake it first")
+    ("has no transcript"
+     . "%s refused — the conversation being resumed has no transcript on disk")
+    ("not settled"
+     . "%s refused — a turn is still in flight; wait for it to finish or interrupt it"))
+  "Ordered (SUBSTRING . COPY) table `agent-repl--user-copy-for-error' consults.
+SUBSTRING is matched literally and case-insensitively against the daemon's
+error text.  COPY is a format string taking exactly one `%s', the verb
+naming the command that was attempted, so one entry serves every command
+that can earn the same refusal.
+
+ORDER IS LOAD-BEARING: the first match wins, so a more specific substring
+must precede any substring it contains.")
+
+(defun agent-repl--user-copy-for-error (error-text verb)
+  "Return one short user-facing sentence for ERROR-TEXT about VERB.
+
+ERROR-TEXT is the daemon's raw account — a wrapped Go error chain, a nack
+string, anything.  It is READ here and never returned: the sentence this
+produces is the only thing a caller may put in the echo area, and the raw
+text belongs in the `:detail' of `agent-repl--user-message'.
+
+VERB names the command that was attempted (\"prompt\", \"hibernate\",
+\"merge\").  A nil or empty VERB degrades to \"the command\" rather than
+producing a sentence with a hole in it.
+
+An UNRECOGNIZED error yields the generic sentence, which still names the
+verb and points at the log.  It never quotes ERROR-TEXT: an error nobody
+has written copy for is exactly the one whose raw form is least readable."
+  (let* ((verb (if (and (stringp verb) (not (string-empty-p verb)))
+                   verb
+                 "the command"))
+         (copy (and (stringp error-text)
+                    (not (string-empty-p error-text))
+                    (let ((case-fold-search t))
+                      (cl-loop for (pattern . template) in agent-repl--user-copy-patterns
+                               when (string-match-p (regexp-quote pattern) error-text)
+                               return template)))))
+    (format (or copy "%s failed — see the workspace log for detail") verb)))
+
+(cl-defun agent-repl--user-message (ws fmt args &key detail)
+  "Echo one line of user-facing copy for WS and file it, with DETAIL, in the log.
+
+FMT and ARGS are the USER COPY: one short present-tense sentence saying
+what happened and, when it is knowable, what to do about it.  ARGS is a
+LIST of format arguments (nil when FMT needs none), matching the
+`(ws fmt args)' shape the internal logging helpers already use.
+
+DETAIL is the verbose counterpart — the raw error chain, the identifiers,
+the state names.  It NEVER reaches the echo area; it is written to the
+same canonical log the user line goes to, so the file carries both and
+correlation is trivial.  nil DETAIL files only the user line.
+
+Routing follows `agent-repl--log': workspace-owned when WS names a
+workspace, global otherwise.  Returns the echoed text."
+  (let* ((copy (cond
+                ((not (stringp fmt))
+                 ;; A non-string FMT is a caller bug.  Capture it the way the
+                 ;; logging ladder does rather than signalling from a
+                 ;; presentation helper, and still say something.
+                 (agent-repl--log-format-capture-bug fmt)
+                 (format "%S" fmt))
+                (args (apply #'format fmt args))
+                (t fmt)))
+         (text (if (string-prefix-p agent-repl--user-message-prefix copy)
+                   copy
+                 (concat agent-repl--user-message-prefix copy))))
+    (agent-repl--log ws "user-message: %s" text)
+    (when (and (stringp detail) (not (string-empty-p detail)))
+      (agent-repl--log ws "user-message-detail: %s" detail))
+    (agent-repl--emit-message text t)
+    text))
+
+(cl-defun agent-repl--user-message-for-error (ws verb error-text &key detail)
+  "Echo translated user copy for ERROR-TEXT about VERB in WS, filing the raw text.
+
+The composition of `agent-repl--user-copy-for-error' and
+`agent-repl--user-message' that nearly every daemon-refusal call site
+wants: the echo area gets the sentence, the log gets the sentence AND the
+chain.  DETAIL defaults to ERROR-TEXT, and is given explicitly only when a
+call site holds MORE evidence than the error string alone."
+  (agent-repl--user-message
+   ws (agent-repl--user-copy-for-error error-text verb) nil
+   :detail (or detail (and (stringp error-text) error-text))))
+
 (defconst agent-repl--backend-output-tail-lines 5
   "Nonblank captured lines a backend-initiation echo line may carry.")
 
