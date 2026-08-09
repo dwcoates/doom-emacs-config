@@ -59,9 +59,9 @@ type fakePrompts struct {
 	// interruptRequestIDs records the command id each stop was carried under, so
 	// a test can prove the frontend's own id reaches the session controller.
 	interruptRequestIDs []string
-	perms            []string
-	models           []string
-	err              error
+	perms               []string
+	models              []string
+	err                 error
 	// turnActive is what this fake reports as the workspace's observed turn
 	// state, so one double serves as both the prompt router and the interrupt
 	// gate's turn source (the production wiring binds one controller to both).
@@ -858,6 +858,56 @@ func newCloseHandler(t *testing.T, lifecycle *fakeLifecycle, targets *fakeLogTar
 	return h
 }
 
+// THE RESOLVED VIEWS GO WITH THE WORKSPACE. A closed workspace's topbar,
+// breakdown and gate stop riding the connect snapshot instead of being retained
+// for the daemon's lifetime.
+func TestCommandHandlerCloseForgetsTheWorkspacesResolvedViews(t *testing.T) {
+	// Arrange — the workspace has a published topbar to lose.
+	workspace := t.TempDir()
+	views, _ := newViewPublisher(t, nil, nil, nil)
+	views.PublishState(&frontendv1.WorkspaceState{
+		Workspace: workspace, SessionId: "s1", Fence: "s1|g1",
+		Connectivity: frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_OPERATIONAL,
+	})
+	h := newCloseHandler(t, &fakeLifecycle{}, &fakeLogTargets{})
+	h.workspaceViews = views
+
+	// Act.
+	if err := h.CloseWorkspace(context.Background(), workspace, "r1", &frontendv1.CloseWorkspaceCmd{}); err != nil {
+		t.Fatalf("CloseWorkspace: %v", err)
+	}
+
+	// Assert.
+	if got := views.Topbars(); len(got) != 0 {
+		t.Fatalf("snapshot topbars after the close = %v, want none", got)
+	}
+}
+
+// A REFUSED CLOSE KEEPS ITS VIEWS. The workspace is still live, and blanking
+// its topbar would strip a surface something is still driving.
+func TestCommandHandlerARefusedCloseRetainsTheResolvedViews(t *testing.T) {
+	// Arrange.
+	workspace := t.TempDir()
+	views, _ := newViewPublisher(t, nil, nil, nil)
+	views.PublishState(&frontendv1.WorkspaceState{
+		Workspace: workspace, SessionId: "s1", Fence: "s1|g1",
+		Connectivity: frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_OPERATIONAL,
+	})
+	h := newCloseHandler(t, &fakeLifecycle{closeErr: errors.New("the workspace is still merging")}, &fakeLogTargets{})
+	h.workspaceViews = views
+
+	// Act.
+	err := h.CloseWorkspace(context.Background(), workspace, "r1", &frontendv1.CloseWorkspaceCmd{})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a refused close reported success")
+	}
+	if got := views.Topbars(); len(got) != 1 {
+		t.Fatalf("snapshot topbars after a refused close = %v, want the workspace's own retained", got)
+	}
+}
+
 // THE LOG TARGETS GO WITH THE WORKSPACE. A closed workspace's descriptors are
 // released rather than held for the daemon's lifetime.
 func TestCommandHandlerCloseReleasesTheWorkspacesLogTargets(t *testing.T) {
@@ -1269,6 +1319,11 @@ func (f fakeInits) SessionInits() []*frontendv1.SessionInitView { return f.inits
 type fakeCatalogs struct{ catalogs []*frontendv1.TaskCatalog }
 
 func (f fakeCatalogs) TaskCatalogs() []*frontendv1.TaskCatalog { return f.catalogs }
+
+// The roster half's counterpart. One interface carries both halves of a
+// session's detached work; these tests are about the roster, so the bubble half
+// is empty rather than absent.
+func (f fakeCatalogs) AsyncBubbles() []*frontendv1.AsyncBubble { return nil }
 
 func TestSnapshotProviderIncludesSessionInits(t *testing.T) {
 	// Arrange — a snapshot provider with a SessionInitSource (S9).

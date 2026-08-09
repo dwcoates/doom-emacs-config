@@ -7,7 +7,8 @@ import { describe, expect, it } from "vitest";
 import {
   UNSUPPORTED_SHAPES,
   decodeFrontendFrame,
-  decodeSystemFailure,
+  decodeFailureCardView,
+  decodeFailureKind,
   isVisuallySupportedFrame,
 } from "../src/frontend-proto.js";
 
@@ -86,54 +87,303 @@ const TOKEN_UTILIZATION = {
   responseTiming: { timeToFirstTokenMs: "50", outputGenerationDurationMs: "100" },
 };
 
-describe("SystemFailure typed query termination", () => {
-  const base = { errorClass: "ERROR_CLASS_INTERNAL", errorType: "unexpected_query_termination", message: "query ended", sourceDetail: "sdk iterator ended", resolvedAtMs: "0", itemUuid: "failure-1" };
-
-  it("preserves every identity field and typed iterator cause", () => {
-    const got = decodeSystemFailure({ ...base, queryTermination: { queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", iteratorFailure: { cause: "child exited 137" } } }, "failure");
-    expect(got.detail.kind).toBe("queryTermination");
-    if (got.detail.kind !== "queryTermination") throw new Error("wrong detail");
-    expect(got.detail.value.queryInstanceId).toBe("query-1");
-    expect(got.detail.value.vendorIdentity).toEqual({ case: "vendorSessionId", value: "claude-1" });
-    expect(got.detail.value.observedAtMs).toBe(1700000000000n);
-    expect(got.detail.value.reason.case).toBe("iteratorFailure");
-    if (got.detail.value.reason.case !== "iteratorFailure") throw new Error("wrong reason");
-    expect(got.detail.value.reason.value.cause).toBe("child exited 137");
+describe("FailureKind: the closed failure vocabulary", () => {
+  it("adopts an arm with its own typed evidence", () => {
+    // Arrange / Act — each arm carries the evidence that arm actually has,
+    // rather than a shared free-text field every producer packs differently.
+    const got = decodeFailureKind({ shimRejected: { requestId: "r1", reason: "busy" } }, "k");
+    // Assert
+    expect(got.kind).toEqual({
+      case: "shimRejected",
+      value: expect.objectContaining({ requestId: "r1", reason: "busy" }),
+    });
   });
 
-  it("rejects missing termination identity", () => {
-    expect(() => decodeSystemFailure({ ...base, queryTermination: { queryInstanceId: "", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} } }, "failure")).toThrow(/requires query and observed-time identity/);
+  it("THROWS on an unset kind rather than rendering a generic error", () => {
+    // Arrange / Act / Assert — errors.proto says so outright: an unset
+    // FailureKind is a malformed frame.
+    expect(() => decodeFailureKind({}, "k")).toThrow(/sets no failure kind/);
   });
 
-  it("rejects a query termination that still carries the retired agent-repl session id", () => {
-    // Arrange - the figma-idl reshape moved session identity onto the carrying
-    // push's fence, so a producer still stamping it here is out of contract.
-    const queryTermination = { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} };
-    // Act / Assert
-    expect(() => decodeSystemFailure({ ...base, queryTermination }, "failure")).toThrow(/agentReplSessionId/);
+  it("THROWS on a double-set kind rather than picking an arm", () => {
+    // Arrange / Act / Assert
+    expect(() => decodeFailureKind({ shimRejected: {}, apiOverloaded: {} }, "k")).toThrow(
+      /FailureKind contract/,
+    );
   });
 
-  it("rejects competing structured failure details", () => {
-    const sessionResume = { claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", create: {}, transcriptUnavailable: { searchedPaths: [] } };
-    const queryTermination = { queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} };
-    expect(() => decodeSystemFailure({ ...base, sessionResume, queryTermination }, "failure")).toThrow(/at most one structured detail/);
+  it("THROWS on an arm the wire does not have", () => {
+    // Arrange / Act / Assert — a consumer meeting an unfamiliar failure fails
+    // to match it instead of silently rendering it as something else.
+    expect(() => decodeFailureKind({ shimExploded: {} }, "k")).toThrow(/FailureKind contract/);
   });
 
-  it("preserves exact query termination inside session-resume evidence", () => {
-    const sessionResume = { claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", automaticRestore: {}, queryTermination: { queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", startupFailure: { cause: "resume rejected" } } };
-    const got = decodeSystemFailure({ ...base, sessionResume }, "failure");
-    expect(got.detail.kind).toBe("sessionResume");
-    if (got.detail.kind !== "sessionResume" || got.detail.value.cause.case !== "queryTermination") throw new Error("wrong detail");
-    expect(got.detail.value.cause.value.reason.case).toBe("startupFailure");
+  it("preserves exact query-termination evidence on its arm", () => {
+    // Arrange / Act
+    const got = decodeFailureKind(
+      {
+        queryTermination: {
+          detail: {
+            queryInstanceId: "query-1",
+            vendorSessionId: "claude-1",
+            observedAtMs: "1700000000000",
+            iteratorFailure: { cause: "child exited 137" },
+          },
+        },
+      },
+      "k",
+    );
+    // Assert
+    if (got.kind.case !== "queryTermination") throw new Error("wrong arm");
+    expect(got.kind.value.detail?.reason.case).toBe("iteratorFailure");
   });
 
-  it("preserves a non-query bring-up cause and rejects present blank", () => {
-    const sessionResume = { claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", automaticRestore: {}, bringUpFailure: { cause: "shim readiness timed out" } };
-    const got = decodeSystemFailure({ ...base, sessionResume }, "failure");
-    expect(got.detail.kind).toBe("sessionResume");
-    if (got.detail.kind !== "sessionResume") throw new Error("wrong detail");
-    expect(got.detail.value.cause).toEqual({ case: "bringUpFailure", cause: "shim readiness timed out" });
-    expect(() => decodeSystemFailure({ ...base, sessionResume: { ...sessionResume, bringUpFailure: { cause: "" } } }, "failure")).toThrow(/must be nonblank/);
+  it("preserves exact resume-continuity evidence on its arm", () => {
+    // Arrange / Act
+    const got = decodeFailureKind(
+      {
+        sessionResumeFailed: {
+          detail: {
+            claudeSessionId: "claude-1",
+            cwd: "/repo",
+            resolvedConfigDir: "/config",
+            automaticRestore: {},
+            bringUpFailure: { cause: "shim readiness timed out" },
+          },
+        },
+      },
+      "k",
+    );
+    // Assert
+    if (got.kind.case !== "sessionResumeFailed") throw new Error("wrong arm");
+    expect(got.kind.value.detail?.cause).toEqual({
+      case: "bringUpFailure",
+      value: expect.objectContaining({ cause: "shim readiness timed out" }),
+    });
+  });
+});
+
+// --- the invariants the two evidence-carrying arms are held to --------------
+//
+// `queryTermination` and `sessionResumeFailed` carry whole machine-readable
+// lifecycle records that renderers read field by field. The generated
+// descriptor accepts an absent detail, an empty oneof and a blank string
+// alike, so the record's own invariants are enforced in the decoder and each
+// violation is refused LOUDLY — never rendered as "missing …" prose describing
+// evidence nobody supplied.
+
+describe("FailureKind: query-termination evidence invariants", () => {
+  /** A complete, valid query-termination record, with one field overridden. */
+  function queryTermination(over: Record<string, unknown> = {}): unknown {
+    return {
+      queryTermination: {
+        detail: {
+          queryInstanceId: "query-1",
+          vendorSessionId: "claude-1",
+          observedAtMs: "1700000000000",
+          iteratorFailure: { cause: "child exited 137" },
+          ...over,
+        },
+      },
+    };
+  }
+
+  it("THROWS when the arm carries no detail record at all", () => {
+    // Arrange / Act / Assert — the arm exists to carry exact evidence, so an
+    // empty one claims a query death it can say nothing about.
+    expect(() => decodeFailureKind({ queryTermination: {} }, "k")).toThrow(
+      /requires query-termination evidence/,
+    );
+  });
+
+  it("THROWS on a blank query_instance_id", () => {
+    // Arrange / Act / Assert — a record naming no query() invocation
+    // corroborates nothing.
+    expect(() => decodeFailureKind(queryTermination({ queryInstanceId: "  " }), "k")).toThrow(
+      /nonblank `query_instance_id`/,
+    );
+  });
+
+  it("THROWS on a non-positive observed_at_ms", () => {
+    // Arrange / Act / Assert — an unset instant is not "the epoch", it is a
+    // record that cannot say when the query died.
+    expect(() => decodeFailureKind(queryTermination({ observedAtMs: "0" }), "k")).toThrow(
+      /positive `observed_at_ms`/,
+    );
+  });
+
+  it("THROWS when neither vendor-identity arm is set", () => {
+    // Arrange / Act / Assert — the proto offers an explicit "identity was never
+    // exposed" arm, so silence is a malformed frame rather than that statement.
+    const noVendor = {
+      queryTermination: {
+        detail: {
+          queryInstanceId: "query-1",
+          observedAtMs: "1700000000000",
+          iteratorFailure: { cause: "child exited 137" },
+        },
+      },
+    };
+    expect(() => decodeFailureKind(noVendor, "k")).toThrow(/explicit vendor identity evidence/);
+  });
+
+  it("THROWS on a blank vendor_session_id", () => {
+    // Arrange / Act / Assert — the arm asserts an authoritative conversation
+    // UUID; blank asserts one and supplies none.
+    expect(() => decodeFailureKind(queryTermination({ vendorSessionId: "" }), "k")).toThrow(
+      /vendorSessionId must be nonblank/,
+    );
+  });
+
+  it("THROWS when no termination reason is set", () => {
+    // Arrange / Act / Assert — the reason is the whole point of the record;
+    // without it the card would read "missing termination reason".
+    const noReason = {
+      queryTermination: {
+        detail: {
+          queryInstanceId: "query-1",
+          vendorSessionId: "claude-1",
+          observedAtMs: "1700000000000",
+        },
+      },
+    };
+    expect(() => decodeFailureKind(noReason, "k")).toThrow(/unexpected termination reason/);
+  });
+});
+
+describe("FailureKind: resume-continuity evidence invariants", () => {
+  it("THROWS when the arm carries no detail record at all", () => {
+    // Arrange / Act / Assert
+    expect(() => decodeFailureKind({ sessionResumeFailed: {} }, "k")).toThrow(
+      /requires resume-continuity evidence/,
+    );
+  });
+
+  it("THROWS when no attempt arm is set", () => {
+    // Arrange / Act / Assert — the attempt names WHICH operation's continuity
+    // requirement could not be met.
+    const noAttempt = {
+      sessionResumeFailed: {
+        detail: {
+          claudeSessionId: "claude-1",
+          cwd: "/repo",
+          resolvedConfigDir: "/config",
+          bringUpFailure: { cause: "shim readiness timed out" },
+        },
+      },
+    };
+    expect(() => decodeFailureKind(noAttempt, "k")).toThrow(/requires exactly one attempt/);
+  });
+
+  it("THROWS when no cause arm is set", () => {
+    // Arrange / Act / Assert — this is exactly the frame that rendered as
+    // "missing resume-continuity cause" prose instead of being refused.
+    const noCause = {
+      sessionResumeFailed: {
+        detail: {
+          claudeSessionId: "claude-1",
+          cwd: "/repo",
+          resolvedConfigDir: "/config",
+          automaticRestore: {},
+        },
+      },
+    };
+    expect(() => decodeFailureKind(noCause, "k")).toThrow(/requires exactly one cause/);
+  });
+
+  it("THROWS on a query-death cause that violates the query record's invariants", () => {
+    // Arrange / Act / Assert — a nested record is held to the same evidence
+    // rules as a top-level one; the card renders it with the same code.
+    const badNested = {
+      sessionResumeFailed: {
+        detail: {
+          claudeSessionId: "claude-1",
+          cwd: "/repo",
+          resolvedConfigDir: "/config",
+          automaticRestore: {},
+          queryTermination: {
+            queryInstanceId: "",
+            vendorSessionId: "claude-1",
+            observedAtMs: "1700000000000",
+            unexpectedEof: {},
+          },
+        },
+      },
+    };
+    expect(() => decodeFailureKind(badNested, "k")).toThrow(/nonblank `query_instance_id`/);
+  });
+});
+
+describe("FailureCardView: the feed's resolved failure card", () => {
+  const KIND = { apiOverloaded: { httpStatus: 529, attempts: 10 } };
+
+  it("carries the daemon's sentence verbatim", () => {
+    // Arrange / Act
+    const got = decodeFailureCardView(
+      { kind: KIND, message: "the API is overloaded", detail: "status=529", open: {} },
+      "card",
+    );
+    // Assert
+    expect(got.message).toBe("the API is overloaded");
+  });
+
+  it("accepts an EMPTY detail, which the proto allows deliberately", () => {
+    // Arrange / Act
+    const got = decodeFailureCardView({ kind: KIND, message: "m", terminal: {} }, "card");
+    // Assert
+    expect(got.detail).toBe("");
+  });
+
+  it("reads the OPEN lifecycle arm", () => {
+    // Arrange / Act
+    const got = decodeFailureCardView({ kind: KIND, message: "m", open: {} }, "card");
+    // Assert
+    expect(got.lifecycle).toEqual({ case: "open" });
+  });
+
+  it("reads the RESOLVED arm with its closing stamp", () => {
+    // Arrange / Act
+    const got = decodeFailureCardView(
+      { kind: KIND, message: "m", resolved: { resolvedAtMs: "1700000000000" } },
+      "card",
+    );
+    // Assert
+    expect(got.lifecycle).toEqual({ case: "resolved", resolvedAtMs: 1700000000000 });
+  });
+
+  it("reads the TERMINAL arm, which is distinct from open", () => {
+    // Arrange / Act — an open card invites waiting and this one does not.
+    const got = decodeFailureCardView({ kind: KIND, message: "m", terminal: {} }, "card");
+    // Assert
+    expect(got.lifecycle).toEqual({ case: "terminal" });
+  });
+
+  it("THROWS when no lifecycle arm is set", () => {
+    // Arrange / Act / Assert
+    expect(() => decodeFailureCardView({ kind: KIND, message: "m" }, "card")).toThrow(
+      /exactly one lifecycle arm/,
+    );
+  });
+
+  it("THROWS when two lifecycle arms are set", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decodeFailureCardView({ kind: KIND, message: "m", open: {}, terminal: {} }, "card"),
+    ).toThrow(/exactly one lifecycle arm/);
+  });
+
+  it("THROWS when the kind is missing entirely", () => {
+    // Arrange / Act / Assert
+    expect(() => decodeFailureCardView({ message: "m", open: {} }, "card")).toThrow(
+      /requires `kind`/,
+    );
+  });
+
+  it("rejects an unrecognized field on the card", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decodeFailureCardView({ kind: KIND, message: "m", open: {}, errorType: "x" }, "card"),
+    ).toThrow(/unrecognized field\(s\): errorType/);
   });
 });
 
@@ -1122,29 +1372,27 @@ describe("SessionView.death decoding (F4)", () => {
     expect(deathOf(sv())).toBeUndefined();
   });
 
-  it("decodes a terminal push's classified death instead of throwing", () => {
+  it("decodes a terminal push's resolved death card instead of throwing", () => {
     // Arrange — the strict decoder once lacked this key, so every terminal
     // SessionView (delete, supersede, shim death) threw in the live frame
-    // path; this pins the fix.
+    // path; this pins the fix, now against the resolved card shape.
     const death = {
-      errorClass: "ERROR_CLASS_INTERNAL",
-      errorType: "internal.shim_died",
+      kind: { sessionShimDied: {} },
       message: "shim process exited",
+      terminal: {},
     };
     // Act
     const got = deathOf(sv({ death }));
     // Assert
-    expect(got).toEqual(
-      expect.objectContaining({ errorClass: "INTERNAL", errorType: "internal.shim_died" }),
-    );
+    expect(got?.kind.kind.case).toBe("sessionShimDied");
   });
 
-  it("rejects a death with an unrecognized class rather than guessing", () => {
-    // Arrange / Act / Assert — the class decides the card color; guessing one
-    // would paint the failure the wrong color quietly.
-    expect(() =>
-      deathOf(sv({ death: { errorClass: "ERROR_CLASS_MYSTERY", errorType: "x", message: "y" } })),
-    ).toThrow(/unrecognized value/);
+  it("rejects a death whose kind names no arm rather than guessing", () => {
+    // Arrange / Act / Assert — the arm decides the card's side and therefore
+    // its color; guessing one would paint the failure wrong, quietly.
+    expect(() => deathOf(sv({ death: { kind: {}, message: "y", terminal: {} } }))).toThrow(
+      /sets no failure kind/,
+    );
   });
 });
 
@@ -2018,5 +2266,367 @@ describe("decodeFrontendFrame — ProgressView.expensiveTurn", () => {
     expect(() => pvWith({ ...ALERT, modelName: "opus" })).toThrow(
       /ProgressView.expensiveTurn has unrecognized field\(s\): modelName/,
     );
+  });
+});
+
+
+// --- the resolved component views (frames 21/22/23, snapshot 12/13/14) -------
+
+describe("TopbarView decoding", () => {
+  const TOPBAR = {
+    workspace: "/ws",
+    title: "agent-repl · main",
+    sessionLine: "session since 09:00",
+    modelDisplay: "opus-5",
+    modelOptions: [{ value: "opus-5", displayName: "Opus 5", description: "top" }],
+    accountingLine: "12s · 4k in",
+    fence: "f1",
+  };
+
+  function topbarOf(over: Record<string, unknown> = {}) {
+    const got = decode({ topbar: { ...TOPBAR, ...over } });
+    if (got.frame.case !== "topbar") throw new Error("wrong variant");
+    return got.frame.value;
+  }
+
+  it("decodes the composed title verbatim", () => {
+    // Arrange / Act / Assert — the client never re-composes it.
+    expect(topbarOf().title).toBe("agent-repl · main");
+  });
+
+  it("keeps the daemon's model-option order", () => {
+    // Arrange / Act
+    const got = topbarOf({
+      modelOptions: [
+        { value: "a", displayName: "A", description: "" },
+        { value: "b", displayName: "B", description: "" },
+      ],
+    });
+    // Assert
+    expect(got.modelOptions.map((m) => m.value)).toEqual(["a", "b"]);
+  });
+
+  it("leaves an unpublished connectivity ABSENT rather than defaulting one", () => {
+    // Arrange / Act / Assert — a placeholder glyph would be a claim the daemon
+    // did not make.
+    expect(topbarOf().connectivity).toBeUndefined();
+  });
+
+  it("carries a published connectivity's resolved tone", () => {
+    // Arrange / Act
+    const got = topbarOf({ connectivity: { tone: "ok", glyph: "●", title: "connected" } });
+    // Assert
+    expect(got.connectivity?.tone).toBe("ok");
+  });
+
+  it("REJECTS a view with no fence, which nothing could be compared against", () => {
+    // Arrange / Act / Assert
+    expect(() => topbarOf({ fence: "" })).toThrow(/TopbarView missing required `fence`/);
+  });
+
+  it("rejects an unrecognized field", () => {
+    // Arrange / Act / Assert — the key set is anchored to the generated
+    // manifest, so drift fails the build; this is its runtime half.
+    expect(() => topbarOf({ sessionId: "s1" })).toThrow(/unrecognized field\(s\): sessionId/);
+  });
+});
+
+describe("TokenBreakdownView decoding", () => {
+  const ROW = {
+    label: "cache read",
+    tokens: "12000",
+    sharePermille: 812,
+    emphasized: true,
+    depth: 0,
+  };
+  const VIEW = {
+    workspace: "/ws",
+    fence: "f1",
+    sections: [{ label: "this turn", rows: [ROW] }],
+  };
+
+  function breakdownOf(over: Record<string, unknown> = {}) {
+    const got = decode({ tokenBreakdown: { ...VIEW, ...over } });
+    if (got.frame.case !== "tokenBreakdown") throw new Error("wrong variant");
+    return got.frame.value;
+  }
+
+  it("carries the row's count as the daemon resolved it", () => {
+    // Arrange / Act / Assert
+    expect(breakdownOf().sections[0].rows[0].tokens).toBe(12000);
+  });
+
+  it("carries the precomputed share without recomputing it", () => {
+    // Arrange / Act / Assert
+    expect(breakdownOf().sections[0].rows[0].sharePermille).toBe(812);
+  });
+
+  it("preserves the -1 sentinel that means no share applies", () => {
+    // Arrange / Act — collapsing it to 0 would print a false zero percent.
+    const got = breakdownOf({
+      sections: [{ label: "s", rows: [{ ...ROW, sharePermille: -1 }] }],
+    });
+    // Assert
+    expect(got.sections[0].rows[0].sharePermille).toBe(-1);
+  });
+
+  it("carries the daemon's layout facts", () => {
+    // Arrange / Act / Assert
+    expect(breakdownOf().sections[0].rows[0].emphasized).toBe(true);
+  });
+
+  it("REJECTS a view with no fence", () => {
+    // Arrange / Act / Assert
+    expect(() => breakdownOf({ fence: "" })).toThrow(
+      /TokenBreakdownView missing required `fence`/,
+    );
+  });
+
+  it("rejects the retired sessionId, which the fence replaced", () => {
+    // Arrange / Act / Assert
+    expect(() => breakdownOf({ sessionId: "s1" })).toThrow(
+      /unrecognized field\(s\): sessionId/,
+    );
+  });
+});
+
+describe("WorkspaceGateView decoding", () => {
+  function gateOf(over: Record<string, unknown>) {
+    const got = decode({ workspaceGate: { workspace: "/ws", fence: "f1", ...over } });
+    if (got.frame.case !== "workspaceGate") throw new Error("wrong variant");
+    return got.frame.value;
+  }
+
+  it("reads the OPEN arm", () => {
+    // Arrange / Act / Assert
+    expect(gateOf({ open: {} }).gate).toEqual({ case: "open" });
+  });
+
+  it("reads the HIBERNATED arm with the cause the card renders", () => {
+    // Arrange / Act
+    const got = gateOf({ hibernated: { detail: { sinceMs: "1700000000000", forced: {} } } });
+    // Assert
+    expect(got.gate).toEqual({
+      case: "hibernated",
+      detail: { sinceMs: 1700000000000, cause: { case: "forced", value: {} } },
+    });
+  });
+
+  it("THROWS when no gate arm is set rather than assuming open", () => {
+    // Arrange / Act / Assert — defaulting open would let a prompt go to a
+    // sleeping session; defaulting closed would lock a live composer.
+    expect(() => gateOf({})).toThrow(/requires exactly one gate arm/);
+  });
+
+  it("THROWS when BOTH gate arms are set", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      gateOf({ open: {}, hibernated: { detail: { sinceMs: "1", forced: {} } } }),
+    ).toThrow(/requires exactly one gate arm/);
+  });
+
+  it("THROWS when a hibernated gate carries no detail to render", () => {
+    // Arrange / Act / Assert — a closed gate always arrives with its account.
+    expect(() => gateOf({ hibernated: {} })).toThrow(/requires `detail`/);
+  });
+
+  it("REJECTS a view with no fence", () => {
+    // Arrange / Act / Assert — adopting half of a stale gate is how a composer
+    // ends up locked against a workspace that is already awake.
+    expect(() => decode({ workspaceGate: { workspace: "/ws", fence: "", open: {} } })).toThrow(
+      /WorkspaceGateView missing required `fence`/,
+    );
+  });
+});
+
+describe("the connect snapshot's resolved views", () => {
+  it("carries the topbars the snapshot seeds", () => {
+    // Arrange / Act — a connecting client draws its chrome without waiting for
+    // each view's first push.
+    const got = decode({
+      snapshot: {
+        topbars: [
+          {
+            workspace: "/ws",
+            title: "t",
+            sessionLine: "",
+            modelDisplay: "",
+            modelOptions: [],
+            accountingLine: "",
+            fence: "f1",
+          },
+        ],
+      },
+    });
+    if (got.frame.case !== "snapshot") throw new Error("wrong variant");
+    // Assert
+    expect(got.frame.value.topbars).toHaveLength(1);
+  });
+
+  it("reads an absent view list as EMPTY, never as a stand-in", () => {
+    // Arrange / Act — a workspace with no entry has nothing published, and the
+    // client renders that absence.
+    const got = decode({ snapshot: {} });
+    if (got.frame.case !== "snapshot") throw new Error("wrong variant");
+    // Assert
+    expect(got.frame.value.workspaceGates).toEqual([]);
+  });
+});
+
+describe("WorkspaceState.fence", () => {
+  it("decodes the fence every fenced push is measured against", () => {
+    // Arrange / Act — the decoder REJECTED this field outright before, which
+    // took down every frame from a daemon that sends it.
+    const got = decode({ workspaceState: { ...WS_STATE, fence: "f1" } });
+    if (got.frame.case !== "workspaceState") throw new Error("wrong variant");
+    // Assert
+    expect(got.frame.value.fence).toBe("f1");
+  });
+});
+
+describe("AgentResponse.usage_stamp", () => {
+  function itemWith(response: Record<string, unknown>) {
+    const got = decode({
+      conversationDelta: {
+        workspace: "/ws",
+        fence: "f1",
+        throughSeq: "1",
+        items: [{ uuid: "m1", source: "CONVERSATION_SOURCE_USER", agent: { response } }],
+      },
+    });
+    if (got.frame.case !== "conversationDelta") throw new Error("wrong variant");
+    return got.frame.value.items[0];
+  }
+
+  it("carries the resolved stamp beside the response body", () => {
+    // Arrange / Act — the body is verbatim durable evidence and must not grow a
+    // field the vendor never sent.
+    const item = itemWith({
+      body: { id: "msg-1", content: [] },
+      usageStamp: {
+        expensiveInputTokens: "4200",
+        cacheReadTokens: "118000",
+        outputTokens: "900",
+        model: "claude-opus-5",
+      },
+    });
+    // Assert
+    expect(item.usageStamp?.expensiveInputTokens).toBe(4200);
+  });
+
+  it("leaves an ABSENT stamp absent rather than synthesizing zeros", () => {
+    // Arrange / Act — zeros would read as a response that cost nothing.
+    const item = itemWith({ body: { id: "msg-1", content: [] } });
+    // Assert
+    expect(item.usageStamp).toBeUndefined();
+  });
+
+  it("rejects an unrecognized field on the stamp", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      itemWith({ body: { id: "m", content: [] }, usageStamp: { totalTokens: "1" } }),
+    ).toThrow(/unrecognized field\(s\): totalTokens/);
+  });
+});
+
+// --- async bubbles: the three places the wire carries detached work ---------
+
+describe("async-bubble decode entry points", () => {
+  const BUBBLE = { id: "b1", liveness: { live: {} }, agent: {} };
+
+  it("decodes the asyncBubbleDelta frame variant", () => {
+    // Arrange / Act
+    const frame = decode({ asyncBubbleDelta: { workspace: "/w", fence: "f1", opened: [BUBBLE] } });
+
+    // Assert
+    expect(frame.frame.case === "asyncBubbleDelta" && frame.frame.value.opened[0].id).toBe("b1");
+  });
+
+  it("decodes StateSnapshot.asyncBubbles, the reconnect resume set", () => {
+    // Arrange / Act
+    const frame = decode({ snapshot: { asyncBubbles: [BUBBLE] } });
+
+    // Assert
+    expect(frame.frame.case === "snapshot" && frame.frame.value.asyncBubbles.map((b) => b.id)).toEqual(["b1"]);
+  });
+
+  it("decodes ConversationItem.asyncBubble, the feed-anchored opening state", () => {
+    // Arrange / Act
+    const frame = decode({
+      conversationDelta: {
+        workspace: "ws",
+        fence: "s1",
+        throughSeq: "1",
+        items: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
+      },
+    });
+
+    // Assert
+    expect(frame.frame.case === "conversationDelta" && frame.frame.value.items[0].asyncBubble?.id).toBe("b1");
+  });
+
+  it("rejects a feed-anchored bubble with no kind arm, loudly, at decode", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decode({
+        conversationDelta: {
+          workspace: "ws",
+          fence: "s1",
+          throughSeq: "1",
+          items: [
+            {
+              uuid: "u1",
+              tsMs: "1",
+              source: "CONVERSATION_SOURCE_USER",
+              asyncBubble: { id: "b1", liveness: { live: {} } },
+            },
+          ],
+        },
+      }),
+    ).toThrow(/requires exactly one of agent, journal, shell, unclassified/);
+  });
+
+  it("carries a tool call's spawned_bubble_id through as the classification verdict", () => {
+    // Arrange / Act
+    const frame = decode({
+      conversationDelta: {
+        workspace: "ws",
+        fence: "s1",
+        throughSeq: "1",
+        items: [
+          {
+            uuid: "u1",
+            tsMs: "1",
+            source: "CONVERSATION_SOURCE_USER",
+            agent: { toolCall: { call: { id: "tu1", name: "Task" }, spawnedBubbleId: "b1" } },
+          },
+        ],
+      },
+    });
+
+    // Assert
+    expect(frame.frame.case === "conversationDelta" && frame.frame.value.items[0].spawnedBubbleId).toBe("b1");
+  });
+
+  it("leaves spawnedBubbleId ABSENT when the call detached nothing", () => {
+    // Arrange / Act
+    const frame = decode({
+      conversationDelta: {
+        workspace: "ws",
+        fence: "s1",
+        throughSeq: "1",
+        items: [
+          {
+            uuid: "u1",
+            tsMs: "1",
+            source: "CONVERSATION_SOURCE_USER",
+            agent: { toolCall: { call: { id: "tu1", name: "Read" } } },
+          },
+        ],
+      },
+    });
+
+    // Assert
+    expect(frame.frame.case === "conversationDelta" && "spawnedBubbleId" in frame.frame.value.items[0]).toBe(false);
   });
 });

@@ -312,6 +312,99 @@ func TestScopeFrameDropsNonMatchingProgressView(t *testing.T) {
 	}
 }
 
+func TestScopeFrameDropsATopbarForAnotherWorkspace(t *testing.T) {
+	// Arrange — the fenced views carry no session id, so the workspace is the
+	// only routing key there is. Without its own case a topbar would fall to
+	// the default and put another workspace's title on this connection.
+	sc := Scope{SessionID: "s1", Workspace: "/w1"}
+	frame := TopbarViewFrame(&frontendv1.TopbarView{Workspace: "/w2", Fence: "f"})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if keep {
+		t.Fatal("a topbar for another workspace must be dropped")
+	}
+}
+
+func TestScopeFramePassesATopbarForThisWorkspace(t *testing.T) {
+	// Arrange
+	sc := Scope{SessionID: "s1", Workspace: "/w1"}
+	frame := TopbarViewFrame(&frontendv1.TopbarView{Workspace: "/w1", Fence: "f"})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if !keep {
+		t.Fatal("a topbar for this connection's own workspace must pass")
+	}
+}
+
+func TestScopeFrameDropsATokenBreakdownForAnotherWorkspace(t *testing.T) {
+	// Arrange
+	sc := Scope{SessionID: "s1", Workspace: "/w1"}
+	frame := TokenBreakdownViewFrame(&frontendv1.TokenBreakdownView{Workspace: "/w2", Fence: "f"})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if keep {
+		t.Fatal("a token breakdown for another workspace must be dropped")
+	}
+}
+
+func TestScopeFramePassesATokenBreakdownForThisWorkspace(t *testing.T) {
+	// Arrange
+	sc := Scope{SessionID: "s1", Workspace: "/w1"}
+	frame := TokenBreakdownViewFrame(&frontendv1.TokenBreakdownView{Workspace: "/w1", Fence: "f"})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if !keep {
+		t.Fatal("a token breakdown for this connection's own workspace must pass")
+	}
+}
+
+func TestScopeFrameDropsAWorkspaceGateForAnotherWorkspace(t *testing.T) {
+	// Arrange — a gate that leaked would lock a composer against a workspace
+	// the connection is not even addressed to.
+	sc := Scope{SessionID: "s1", Workspace: "/w1"}
+	frame := WorkspaceGateViewFrame(&frontendv1.WorkspaceGateView{Workspace: "/w2", Fence: "f"})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if keep {
+		t.Fatal("a workspace gate for another workspace must be dropped")
+	}
+}
+
+func TestScopeFramePassesAWorkspaceGateForThisWorkspace(t *testing.T) {
+	// Arrange
+	sc := Scope{SessionID: "s1", Workspace: "/w1"}
+	frame := WorkspaceGateViewFrame(&frontendv1.WorkspaceGateView{Workspace: "/w1", Fence: "f"})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if !keep {
+		t.Fatal("a workspace gate for this connection's own workspace must pass")
+	}
+}
+
+func TestFilterSnapshotKeepsOnlyThisWorkspacesResolvedViews(t *testing.T) {
+	// Arrange — the three resolved-view families filter by workspace exactly as
+	// the fenced views above them do.
+	sc := Scope{Workspace: "/w1"}
+	snap := &frontendv1.StateSnapshot{
+		Topbars:         []*frontendv1.TopbarView{{Workspace: "/w1"}, {Workspace: "/w2"}},
+		TokenBreakdowns: []*frontendv1.TokenBreakdownView{{Workspace: "/w1"}, {Workspace: "/w2"}},
+		WorkspaceGates:  []*frontendv1.WorkspaceGateView{{Workspace: "/w1"}, {Workspace: "/w2"}},
+	}
+	// Act
+	got := filterSnapshot(snap, sc)
+	// Assert
+	if len(got.GetTopbars()) != 1 || len(got.GetTokenBreakdowns()) != 1 || len(got.GetWorkspaceGates()) != 1 {
+		t.Fatalf("filtered snapshot carries %d topbars, %d breakdowns, %d gates; want 1 of each",
+			len(got.GetTopbars()), len(got.GetTokenBreakdowns()), len(got.GetWorkspaceGates()))
+	}
+}
+
 func TestScopeFramePassesMatchingProgressView(t *testing.T) {
 	// Arrange
 	sc := Scope{SessionID: "s1", Workspace: "/w1"}

@@ -120,15 +120,58 @@ func (supersededResyncer) ResyncForGeneration(string, string, string, uint64) er
 	return errclass.ErrSessionSuperseded
 }
 
+// TestStaleResyncCommandAckIsClassifiedSuperseded pins the ack a stale-fence
+// resync carries.
+//
+// reconnect_superseded is the MORE SPECIFIC TRUE STATEMENT and the one the
+// contract defines for exactly this case: a view whose replay would have come
+// from a generation it never saw. The resync is also the only command that
+// echoes a fence at all, so it is the only place a stale fence refuses
+// anything; workspace_not_live is minted from ErrNotLiveSession, which is a
+// session-identity mismatch rather than a fence comparison.
 func TestStaleResyncCommandAckIsClassifiedSuperseded(t *testing.T) {
+	// Arrange.
 	var logged []string
 	h := newResyncHandler(t, supersededResyncer{}, &logged)
+	// Act.
 	ack := frontend.Dispatch(context.Background(), func(string, ...any) {}, h, nil, &frontendv1.FrontendCommand{
 		RequestId: "r-stale", Workspace: "/w",
 		Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{Fence: ssm.Fence("retired", "old")}},
 	})
+	// Assert.
+	if ack.GetOk() {
+		t.Fatalf("a stale-fence resync acked ok")
+	}
 	if errclass.KindName(ack.GetFailure()) != string(errclass.TypeSessionReconnectSuperseded) {
 		t.Fatalf("failure type = %q, want %q", errclass.KindName(ack.GetFailure()), errclass.TypeSessionReconnectSuperseded)
+	}
+}
+
+func TestAStaleResyncOffersTheRemedyItsViewNeeds(t *testing.T) {
+	// Arrange — a resync is a view's ONLY recovery mechanism, so a refused one
+	// strands the view unless the card tells it to remount.
+	var logged []string
+	h := newResyncHandler(t, supersededResyncer{}, &logged)
+	// Act.
+	ack := frontend.Dispatch(context.Background(), func(string, ...any) {}, h, nil, &frontendv1.FrontendCommand{
+		RequestId: "r-stale", Workspace: "/w",
+		Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{Fence: ssm.Fence("retired", "old")}},
+	})
+	// Assert.
+	if ack.GetFailure().GetReconnectSuperseded().GetRemedy() == "" {
+		t.Fatalf("a refused resync offered no remedy")
+	}
+}
+
+func TestASupersededErrorWithNoRemedyOffersNone(t *testing.T) {
+	// Arrange — the same sentinel from a caller that is not a resync has no
+	// action to offer, and an invented one would send the user somewhere
+	// arbitrary to look useful.
+	// Act.
+	card := errclass.Command(func(string, ...any) {}, errclass.ErrSessionSuperseded)
+	// Assert.
+	if got := card.GetKind().GetReconnectSuperseded().GetRemedy(); got != "" {
+		t.Fatalf("remedy = %q, want none", got)
 	}
 }
 

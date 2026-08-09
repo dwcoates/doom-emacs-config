@@ -29,6 +29,9 @@ import (
 // a recording fake.
 type Pusher interface {
 	PushConversationDelta(*frontendv1.ConversationDelta)
+	// PushAsyncBubbleDelta publishes one event's whole async effect: the
+	// bubbles it opened and the updates it folded, in one fenced frame.
+	PushAsyncBubbleDelta(*frontendv1.AsyncBubbleDelta)
 	PushTypingDelta(*frontendv1.TypingDelta)
 	PushTaskCatalog(*frontendv1.TaskCatalog)
 	PushWorkspaceState(*frontendv1.WorkspaceState)
@@ -232,6 +235,12 @@ type ProgressResolver interface {
 	// action, and opening a window for it would report a stop nobody asked
 	// for.
 	NoteInterrupt(workspace, sessionID string, outcome corev1.InterruptOutcome)
+	// NoteTurnAccounting hands the resolver one SETTLED turn's reconciliation,
+	// from which it resolves the footer's accounting cell. It is fed from the
+	// single settlement path below, which is the only place that holds a
+	// turn's resolved record, so the cell cannot be produced from a
+	// half-settled turn.
+	NoteTurnAccounting(workspace, sessionID string, accounting *frontendv1.TurnAccounting) error
 }
 
 // ClearCompactStore persists the newest CLEAR-OR-COMPACTION seq per
@@ -309,6 +318,9 @@ func (noopProgress) SetCounts(string, int64, int64)                           {}
 func (noopProgress) NoteTurnAccepted(string, string) *frontendv1.ProgressView { return nil }
 func (noopProgress) NoteTurnRejected(string, string)                          {}
 func (noopProgress) NoteInterrupt(string, string, corev1.InterruptOutcome)    {}
+func (noopProgress) NoteTurnAccounting(string, string, *frontendv1.TurnAccounting) error {
+	return nil
+}
 
 // ringCap bounds the per-session retained event ring the daemon keeps for the
 // live TaskCatalog rebuild and for resync replay. It is a bounded window: older
@@ -539,6 +551,10 @@ type consumer struct {
 	// call that launched it (skillbody.go). Locked internally, so it sits
 	// outside the ring's mutex rather than under it.
 	skills *skillCorrelator
+	// bubbles is this consumer's detached-work apparatus: every async bubble
+	// the session has opened, and the routing that folds each work kind's
+	// output into the right one (asyncbubbles.go).
+	bubbles *asyncBubbleStore
 	// turns is the single lifecycle authority gate. Every turn boundary passes
 	// it before the queue, SSM, or progress resolver can mutate.
 	turns turnLifecycle
@@ -649,6 +665,7 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		onSystemInit:           onSystemInit,
 		onSessionEnded:         onSessionEnded,
 		skills:                 newSkillCorrelator(),
+		bubbles:                newAsyncBubbleStore(workspace),
 		turns:                  newTurnLifecycle(applier, workspace, sessionID),
 		accounting:             newTurnAccountingReducer(dlog.Tag(dlog.Logf(logf), "session", sessionID, "ws", workspace)),
 		resumeIdentity:         newResumeIdentityTracker(),
@@ -979,6 +996,11 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	}
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_TaskStarted, *corev1.Event_TaskEnded:
+		// The SAME lifecycle event that moves the task catalog opens and settles
+		// the detachment's bubble. One event, both surfaces, so a task the
+		// footer shows as running and a bubble that says it settled cannot come
+		// from two different readings of the stream.
+		c.pushAsync(c.observeAsyncTask(ev), ev)
 		catalog := frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.fence(), c.snapshotRing(), c.logf)
 		c.logf("session-controller: task catalog push session=%s ws=%s seq=%d event=%s tasks=%d",
 			c.sessionID, c.workspace, ev.GetSeq(), stateKind(ev), len(catalog.GetTasks()))
@@ -1220,6 +1242,16 @@ func (c *consumer) serveRetiredTurnAccounting(turnID string) error {
 // publication are one step so two settlements naming the same turn cannot both
 // push its result.
 func (c *consumer) publishHeldTerminalResult(turnID string, accounting *frontendv1.TurnAccounting) {
+	// THE FOOTER'S ACCOUNTING CELL IS RESOLVED FROM THIS RECORD, and it is fed
+	// BEFORE the terminal-result discharge below returns early: a turn whose
+	// held result was already discharged still settled, and its accounting is
+	// still the newest the footer has. A failure to feed it is reported, never
+	// swallowed — a cell left one turn stale is a figure the user reads as
+	// current.
+	if err := c.prog.NoteTurnAccounting(c.workspace, c.sessionID, accounting); err != nil {
+		c.warn("session-controller: turn accounting cell NOT RESOLVED session=%s ws=%s turn_id=%s — the footer keeps the previous turn's cell: %v",
+			c.sessionID, c.workspace, turnID, err)
+	}
 	terminal := c.takeHeldTerminalResult(turnID)
 	if terminal == nil {
 		return
@@ -2003,14 +2035,27 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	if observation != nil && observation.historical {
 		historicalUsage = observation.record
 	}
-	cd, envs, err := frontend.ConversationDeltaFromEvent(c.workspace, c.fence(), ev)
+	// THE ONE CURATION POINT. CurateEvent decides, for this event and every
+	// route that replays it, which content is the top-level conversation and
+	// which belongs inside a detached agent's bubble. Nothing below re-asks
+	// that question: a detached agent's emissions are already gone from cd.
+	curated, err := frontend.CurateEvent(c.workspace, c.fence(), ev)
 	if err != nil {
 		c.logf("session-controller: conversation translate failed session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
 		return
 	}
+	cd, envs := curated.Feed, curated.Envelopes
 	if cd == nil {
 		return // known-but-non-conversational vendor payload
 	}
+	// The detached half, folded into its bubbles and pushed on the async plane.
+	// It runs BEFORE the feed push so that a bubble a frontend is about to be
+	// told about by a stamped tool card has already been opened for it.
+	c.pushAsync(c.observeAsync(curated, ev), ev)
+	// THE CLASSIFICATION VERDICT ON THE TOOL CARD, from the same store the
+	// bubbles live in — so the card names a bubble the frontend has, and both
+	// spawned_bubble_id fields carry the one string that store resolved.
+	frontend.StampSpawnedBubbleIDs(cd.GetItems(), c.bubbles.spawnedBubbleID)
 	for _, item := range cd.GetItems() {
 		response := item.GetAgent().GetResponse()
 		assistant := response.GetBody()
@@ -2323,7 +2368,7 @@ func faultCauseKind(ds *corev1.DegradedState) string {
 // and the matching failure card.
 func (c *consumer) ConnectionDegraded(_ string, reason string) {
 	c.applyRuntimeFault(connectionComponent, faultClassifications[connectionComponent], true, reason)
-	c.pushFailure(c.degradedUUID(connectionComponent), errclass.ConnectionDegraded(reason))
+	c.pushFailure(c.degradedUUID(connectionComponent), errclass.ConnectionDegraded(connectionComponent, reason))
 }
 
 // ConnectionRecovered closes exactly that heartbeat fault window and re-sends
@@ -2334,7 +2379,7 @@ func (c *consumer) ConnectionDegraded(_ string, reason string) {
 // carry neither a reason nor any correlation to what it was recovering from.
 func (c *consumer) ConnectionRecovered(_ string) {
 	c.applyRuntimeFault(connectionComponent, faultClassifications[connectionComponent], false, "heartbeat_resumed")
-	item := errclass.ConnectionDegraded("")
+	item := errclass.ConnectionDegraded(connectionComponent, "")
 	errclass.Resolve(item, c.now())
 	c.pushFailure(c.degradedUUID(connectionComponent), item)
 }

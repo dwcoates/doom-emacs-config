@@ -8,11 +8,17 @@ import {
   InterruptConfirmRequiredError,
   ModelSelectionRejectedError,
   type CreateSessionArgs,
+  commandRefusal,
+  surfaceRefusal,
+  type CommandRefusal,
 } from "../src/command-dispatch.js";
+import { create } from "@bufbuild/protobuf";
+import { FailureKindSchema } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
+import { failureKindName } from "../src/failure-card.js";
+import type { FailureCardItem } from "../src/store.js";
 import {
   decodeFrontendFrame,
   type FrontendFrame,
-  type SystemFailure,
 } from "../src/frontend-proto.js";
 import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
 import { PromptOrigin } from "../src/frontend-command.js";
@@ -51,7 +57,7 @@ function newDispatcher(sendReturns = true) {
 
 /** A dispatcher whose classified-refusal sink is captured, ids `r1`, `r2`, … */
 function newFailureDispatcher(sendReturns = true) {
-  const failures: SystemFailure[] = [];
+  const failures: CommandRefusal[] = [];
   const { records } = installLogging();
   let n = 0;
   const dispatcher = new CommandDispatcher({
@@ -61,6 +67,20 @@ function newFailureDispatcher(sendReturns = true) {
     onFailure: (f) => failures.push(f),
   });
   return { dispatcher, failures };
+}
+
+/**
+ * The card arm of a refusal.
+ *
+ * Asserting through it rather than casting keeps a test that expected a card
+ * and got a REVEAL failing loudly: the two are genuinely different dispositions
+ * and a test that silently accepted either would assert nothing.
+ */
+function cardOf(refusal: CommandRefusal | undefined): FailureCardItem {
+  if (refusal === undefined || refusal.kind !== "card") {
+    throw new Error(`expected a card refusal, got ${JSON.stringify(refusal)}`);
+  }
+  return refusal.card;
 }
 
 function ackFrame(requestId: string, ok: boolean, error = "", selectedModel = ""): FrontendFrame {
@@ -641,11 +661,7 @@ describe("hibernate and revive dispatch", () => {
             requestId: "r1",
             ok: false,
             error: "workspace is not settled",
-            failure: {
-              errorClass: "ERROR_CLASS_INTERNAL",
-              errorType: "hibernate.not_settled",
-              message: "a turn is in flight",
-            },
+            failure: { sessionHibernated: { sinceMs: "1700000000000" } },
           },
         }),
       ),
@@ -707,18 +723,20 @@ describe("hibernate and revive dispatch", () => {
     dispatcher.observe(ackFrame("r1", false, "session is not hibernated"));
     await p.catch(() => {});
     // Assert
-    expect(failures[0]?.message).toBe("session is not hibernated");
+    expect(cardOf(failures[0]).view.message).toBe("session is not hibernated");
   });
 
-  it("names an unclassified nack in the frontend's reserved namespace", async () => {
-    // Arrange — the classification is this end's, so the type says so.
+  it("names an unclassified nack with the frontend's own arm", async () => {
+    // Arrange — the classification is this end's, so the arm says so.
     const { dispatcher, failures } = newFailureDispatcher();
     const p = dispatcher.hibernateWorkspace("/w");
     // Act
     dispatcher.observe(ackFrame("r1", false, "merge lease held"));
     await p.catch(() => {});
     // Assert
-    expect(failures[0]?.errorType).toBe("client.command_rejection_unclassified");
+    expect(failureKindName(cardOf(failures[0]).view.kind)).toBe(
+      "commandRejectionUnclassified",
+    );
   });
 
   it("reconciles repeated refusals of one command onto a single card", async () => {
@@ -732,7 +750,7 @@ describe("hibernate and revive dispatch", () => {
     dispatcher.observe(ackFrame("r2", false, "merge lease held"));
     await second.catch(() => {});
     // Assert
-    expect(failures[0]?.itemUuid).toBe(failures[1]?.itemUuid);
+    expect(cardOf(failures[0]).uuid).toBe(cardOf(failures[1]).uuid);
   });
 
   it("keeps two different refused commands as two cards", async () => {
@@ -746,7 +764,7 @@ describe("hibernate and revive dispatch", () => {
     dispatcher.observe(ackFrame("r2", false, "not hibernated"));
     await revive.catch(() => {});
     // Assert
-    expect(failures[0]?.itemUuid).not.toBe(failures[1]?.itemUuid);
+    expect(cardOf(failures[0]).uuid).not.toBe(cardOf(failures[1]).uuid);
   });
 
   it("prefers the daemon's classified failure over the locally-named one", async () => {
@@ -761,18 +779,14 @@ describe("hibernate and revive dispatch", () => {
             requestId: "r1",
             ok: false,
             error: "workspace is not settled",
-            failure: {
-              errorClass: "ERROR_CLASS_INTERNAL",
-              errorType: "hibernate.not_settled",
-              message: "a turn is in flight",
-            },
+            failure: { sessionHibernated: { sinceMs: "1700000000000" } },
           },
         }),
       ),
     );
     await p.catch(() => {});
     // Assert
-    expect(failures[0]?.errorType).toBe("hibernate.not_settled");
+    expect(failureKindName(cardOf(failures[0]).view.kind)).toBe("sessionHibernated");
   });
 
   it("surfaces a revive the socket refused to send", async () => {
@@ -782,7 +796,7 @@ describe("hibernate and revive dispatch", () => {
     // Act
     await dispatcher.reviveSession("/w", "compactFirst").catch(() => {});
     // Assert
-    expect(failures[0]?.errorType).toBe("client.command_unsent");
+    expect(failureKindName(cardOf(failures[0]).view.kind)).toBe("commandUnsent");
   });
 
   it("says the connection is down on a refused send, not that the daemon refused", async () => {
@@ -791,7 +805,7 @@ describe("hibernate and revive dispatch", () => {
     // Act
     await dispatcher.hibernateWorkspace("/w").catch(() => {});
     // Assert
-    expect(failures[0]?.message).toContain("connection to the daemon is down");
+    expect(cardOf(failures[0]).view.message).toContain("connection to the daemon is down");
   });
 
   it("rejects a revive the daemon refused, so the gate can offer the choice again", async () => {
@@ -819,7 +833,7 @@ describe("dispatch dial-on-demand", () => {
    */
   function newDeferringDispatcher(opts: { dialOpens: boolean }) {
     const sent: string[] = [];
-    const failures: SystemFailure[] = [];
+    const failures: CommandRefusal[] = [];
     const { records } = installLogging();
     let open = false;
     let dials = 0;
@@ -892,7 +906,7 @@ describe("dispatch dial-on-demand", () => {
     const h = newDeferringDispatcher({ dialOpens: false });
     // Act / Assert — exactly today's refusal.
     await expect(h.dispatcher.reviveSession("/w", "compactFirst")).rejects.toThrow(/socket not open/);
-    expect(h.failures[0]?.errorType).toBe("client.command_unsent");
+    expect(failureKindName(cardOf(h.failures[0]).view.kind)).toBe("commandUnsent");
   });
 
   it("logs the original rejection record when the dial does not help", async () => {
@@ -958,5 +972,227 @@ describe("dispatch dial-on-demand", () => {
     expect(records).not.toContainEqual(expect.objectContaining({
       operation: "command-dispatch.dispatch-deferred",
     }));
+  });
+});
+
+
+// --- the refusal disposition: reveal a filed card, or file one --------------
+//
+// `CommandAck.failure_card` exists so a refusal that ALREADY produced a feed
+// card is pointed at rather than restated. Getting this wrong puts one failure
+// on screen twice, worded two different ways.
+
+describe("commandRefusal", () => {
+  function ack(over: Record<string, unknown> = {}) {
+    const frame = decodeFrontendFrame(
+      JSON.stringify({ commandAck: { requestId: "r1", ok: false, ...over } }),
+    );
+    if (frame.frame.case !== "commandAck") throw new Error("wrong variant");
+    return frame.frame.value;
+  }
+
+  it("reveals the card the daemon filed the refusal under", () => {
+    // Arrange / Act
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failure: { sessionHibernated: { sinceMs: "1" } },
+      failureCard: { cardUuid: "failure:e9" },
+    }));
+    // Assert
+    expect(refusal).toEqual({
+      kind: "reveal",
+      cardUuid: "failure:e9",
+      failure: expect.anything(),
+      // The refusal's own words ride along, so a reveal that finds nothing can
+      // still state the refusal instead of dropping it.
+      command: "hibernateWorkspace",
+      error: "",
+    });
+  });
+
+  it("files a card when the ref is EMPTY, which means no card was produced", () => {
+    // Arrange / Act — an empty ref is why the field is a message wrapping a
+    // string rather than a bare string that would make "" ambiguous.
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failure: { sessionHibernated: { sinceMs: "1" } },
+      failureCard: { cardUuid: "" },
+      error: "already asleep",
+    }));
+    // Assert
+    expect(refusal.kind).toBe("card");
+  });
+
+  it("carries the DAEMON's kind verbatim onto a filed card", () => {
+    // Arrange / Act — this end adds the sentence and nothing else.
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failure: { sessionHibernated: { sinceMs: "1" } },
+    }));
+    // Assert
+    expect(failureKindName(cardOf(refusal).view.kind)).toBe("sessionHibernated");
+  });
+
+  it("classifies a refusal the daemon carried no kind for", () => {
+    // Arrange / Act — somebody has to name it, or the refusal reaches the user
+    // through nothing at all.
+    const refusal = commandRefusal("hibernateWorkspace", ack({ error: "merge lease held" }));
+    // Assert
+    expect(failureKindName(cardOf(refusal).view.kind)).toBe("commandRejectionUnclassified");
+  });
+
+  it("files a card when a card ref arrives with NO classified failure beside it", () => {
+    // Arrange / Act — a ref alone names a card whose account this end never
+    // received; restating the refusal is better than revealing on faith.
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failureCard: { cardUuid: "failure:e9" },
+      error: "merge lease held",
+    }));
+    // Assert
+    expect(refusal.kind).toBe("card");
+  });
+
+  it("leads a filed card with the daemon's error text", () => {
+    // Arrange / Act
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failure: { sessionHibernated: { sinceMs: "1" } },
+      error: "already asleep",
+    }));
+    // Assert
+    expect(cardOf(refusal).view.message).toBe("already asleep");
+  });
+
+  it("names the command when the daemon sent no error text at all", () => {
+    // Arrange / Act
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failure: { sessionHibernated: { sinceMs: "1" } },
+    }));
+    // Assert
+    expect(cardOf(refusal).view.message).toBe("hibernateWorkspace was refused");
+  });
+
+  it("makes a filed refusal card TERMINAL, since a refusal has no closing edge", () => {
+    // Arrange / Act
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failure: { sessionHibernated: { sinceMs: "1" } },
+    }));
+    // Assert
+    expect(cardOf(refusal).view.lifecycle).toEqual({ case: "terminal" });
+  });
+});
+
+// --- surfacing: every branch ends in a card the user can see -----------------
+//
+// A reveal is an ADDRESS, and an address can be unreachable: the feed this page
+// holds may never have received the card the daemon filed. Logging that and
+// returning left a nacked command reaching the user through nothing at all.
+
+describe("surfaceRefusal", () => {
+  /** The three surfaces, recording what each was asked to do. */
+  function surfaces(revealFinds: boolean) {
+    const revealed: string[] = [];
+    const filed: FailureCardItem[] = [];
+    const logs: string[] = [];
+    return {
+      revealed,
+      filed,
+      logs,
+      out: {
+        reveal: (uuid: string) => {
+          revealed.push(uuid);
+          return revealFinds;
+        },
+        file: (card: FailureCardItem) => filed.push(card),
+        log: (message: string) => logs.push(message),
+      },
+    };
+  }
+
+  function revealRefusal(): CommandRefusal {
+    const frame = decodeFrontendFrame(
+      JSON.stringify({
+        commandAck: {
+          requestId: "r1",
+          ok: false,
+          error: "already asleep",
+          failure: { sessionHibernated: { sinceMs: "1" } },
+          failureCard: { cardUuid: "failure:e9" },
+        },
+      }),
+    );
+    if (frame.frame.case !== "commandAck") throw new Error("wrong variant");
+    return commandRefusal("hibernateWorkspace", frame.frame.value);
+  }
+
+  it("reveals the daemon's card and files NOTHING beside it", () => {
+    // Arrange
+    const s = surfaces(true);
+    // Act
+    surfaceRefusal(revealRefusal(), s.out);
+    // Assert — restating the account inline would put one failure on screen
+    // twice, worded two different ways.
+    expect([s.revealed, s.filed]).toEqual([["failure:e9"], []]);
+  });
+
+  it("FILES the refusal when the reveal finds nothing", () => {
+    // Arrange
+    const s = surfaces(false);
+    // Act
+    surfaceRefusal(revealRefusal(), s.out);
+    // Assert
+    expect(s.filed).toHaveLength(1);
+  });
+
+  it("leaves exactly ONE log record for a missed reveal", () => {
+    // Arrange
+    const s = surfaces(false);
+    // Act
+    surfaceRefusal(revealRefusal(), s.out);
+    // Assert — the broken reveal contract is worth knowing once, not twice.
+    expect(s.logs).toEqual(["refusal card failure:e9 is not in this feed"]);
+  });
+
+  it("carries the DAEMON's kind verbatim onto the fallback card", () => {
+    // Arrange
+    const s = surfaces(false);
+    // Act
+    surfaceRefusal(revealRefusal(), s.out);
+    // Assert
+    expect(failureKindName(s.filed[0].view.kind)).toBe("sessionHibernated");
+  });
+
+  it("gives the fallback card the DAEMON's uuid, so a late delivery reconciles", () => {
+    // Arrange
+    const s = surfaces(false);
+    // Act
+    surfaceRefusal(revealRefusal(), s.out);
+    // Assert — the missed card arriving later must land on this one rather
+    // than stand beside it as a second account of one refusal.
+    expect(s.filed[0].uuid).toBe("failure:e9");
+  });
+
+  it("leads the fallback card with the daemon's own refusal text", () => {
+    // Arrange
+    const s = surfaces(false);
+    // Act
+    surfaceRefusal(revealRefusal(), s.out);
+    // Assert
+    expect(s.filed[0].view.message).toBe("already asleep");
+  });
+
+  it("files a `card` refusal without attempting any reveal", () => {
+    // Arrange
+    const s = surfaces(true);
+    const card: FailureCardItem = {
+      kind: "failure",
+      uuid: "local:x",
+      view: {
+        kind: create(FailureKindSchema, { kind: { case: "shimNotSpawned", value: {} } }),
+        message: "m",
+        detail: "",
+        lifecycle: { case: "terminal" },
+      },
+    };
+    // Act
+    surfaceRefusal({ kind: "card", card }, s.out);
+    // Assert
+    expect([s.revealed, s.filed]).toEqual([[], [card]]);
   });
 });

@@ -142,6 +142,7 @@ type orderingPusher struct {
 	trace *[]string
 }
 
+func (p *orderingPusher) PushAsyncBubbleDelta(*frontendv1.AsyncBubbleDelta) {}
 func (p *orderingPusher) PushConversationDelta(cd *frontendv1.ConversationDelta) {
 	p.mu.Lock()
 	*p.trace = append(*p.trace, "push:"+cd.GetItems()[0].GetRequestId())

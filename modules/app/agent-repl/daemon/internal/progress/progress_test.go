@@ -1,6 +1,7 @@
 package progress
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -1656,6 +1657,109 @@ func TestNonProgressPayloadIsQuiet(t *testing.T) {
 	// Assert
 	if pushes := h.drain(); len(pushes) != 0 {
 		t.Fatalf("wanted no push for a non-progress payload, got %d", len(pushes))
+	}
+}
+
+// settledTurn is one reconciled turn's accounting, enough for the cell's
+// complete arm.
+func settledTurn(turnID string, durationMs int64) *frontendv1.TurnAccounting {
+	return &frontendv1.TurnAccounting{
+		TurnId:       turnID,
+		Runtime:      &corev1.QueryRuntimeIdentity{},
+		Timing:       &frontendv1.TurnAccountingTiming{PromptToResultMs: durationMs},
+		UsageAtStart: availableUsage(1),
+		UsageAtEnd:   availableUsage(2),
+		Reconciliation: &frontendv1.TokenUsageReconciliation{
+			ResponseAllAgents: &frontendv1.TokenUsageTotals{OutputTokens: 100},
+		},
+		Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+	}
+}
+
+func TestNoteTurnAccountingRefusesAnEmptyWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	err := h.m.NoteTurnAccounting("", testSID, settledTurn("t1", 1000))
+	// Assert
+	if err == nil {
+		t.Fatal("a turn accounting with no workspace was accepted")
+	}
+}
+
+func TestNoteTurnAccountingRefusesANilRecord(t *testing.T) {
+	// Arrange — a settlement with no record is a defect at the call site, and
+	// clearing the previous cell with it would erase a turn that really settled.
+	h := newHarness(t)
+	// Act
+	err := h.m.NoteTurnAccounting(testWS, testSID, nil)
+	// Assert
+	if err == nil {
+		t.Fatal("a nil turn accounting was accepted")
+	}
+}
+
+func TestNoteTurnAccountingKeepsThePreviousCellWhenItRefuses(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	if err := h.m.NoteTurnAccounting(testWS, testSID, settledTurn("t1", 1000)); err != nil {
+		t.Fatalf("NoteTurnAccounting: %v", err)
+	}
+	before := h.last()
+	// Act
+	_ = h.m.NoteTurnAccounting(testWS, testSID, nil)
+	// Assert
+	view, ok := h.m.Current(testWS)
+	if !ok {
+		t.Fatal("wanted a retained view")
+	}
+	if view.GetAccounting().GetSummary() != before.GetAccounting().GetSummary() {
+		t.Fatalf("accounting summary = %q, want the previous turn's %q kept",
+			view.GetAccounting().GetSummary(), before.GetAccounting().GetSummary())
+	}
+}
+
+func TestNoteTurnAccountingSetsTheResolvedCellOnTheView(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	if err := h.m.NoteTurnAccounting(testWS, testSID, settledTurn("t1", 1000)); err != nil {
+		t.Fatalf("NoteTurnAccounting: %v", err)
+	}
+	// Assert
+	if h.last().GetAccounting().GetComplete() == nil {
+		t.Fatal("wanted the reconciled turn's complete arm on the pushed view")
+	}
+}
+
+func TestNoteTurnAccountingPushesStructurallyRatherThanCoalescing(t *testing.T) {
+	// Arrange — a coalescing window that nothing fires, so only a structural
+	// push can reach the subscriber.
+	h := newHarnessWindow(t, time.Second)
+	// Act
+	if err := h.m.NoteTurnAccounting(testWS, testSID, settledTurn("t1", 1000)); err != nil {
+		t.Fatalf("NoteTurnAccounting: %v", err)
+	}
+	// Assert
+	if len(h.drain()) == 0 {
+		t.Fatal("wanted the settled accounting pushed at once, got it held behind the window")
+	}
+}
+
+func TestNoteTurnAccountingReplacesThePreviousTurnsCell(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	if err := h.m.NoteTurnAccounting(testWS, testSID, settledTurn("t1", 1000)); err != nil {
+		t.Fatalf("NoteTurnAccounting: %v", err)
+	}
+	h.drain()
+	// Act — a second, slower turn.
+	if err := h.m.NoteTurnAccounting(testWS, testSID, settledTurn("t2", 4000)); err != nil {
+		t.Fatalf("NoteTurnAccounting: %v", err)
+	}
+	// Assert
+	if !strings.Contains(h.last().GetAccounting().GetSummary(), " · 4s · ") {
+		t.Fatalf("accounting summary = %q, want the newest turn's duration", h.last().GetAccounting().GetSummary())
 	}
 }
 

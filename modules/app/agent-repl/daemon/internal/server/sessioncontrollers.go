@@ -1396,6 +1396,14 @@ func (f *PushForwarder) PushConversationDelta(c *frontendv1.ConversationDelta) {
 	f.logMiss("conversation-delta")
 }
 
+func (f *PushForwarder) PushAsyncBubbleDelta(d *frontendv1.AsyncBubbleDelta) {
+	if s := f.target.Load(); s != nil {
+		s.PushAsyncBubbleDelta(d)
+		return
+	}
+	f.logMiss("async-bubble-delta")
+}
+
 func (f *PushForwarder) PushTypingDelta(t *frontendv1.TypingDelta) {
 	if s := f.target.Load(); s != nil {
 		s.PushTypingDelta(t)
