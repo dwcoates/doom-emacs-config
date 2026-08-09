@@ -78,6 +78,13 @@ const (
 	// classifies the merge skill's invocation (see MergeSkillCall) — and its
 	// content is the same emission vocabulary a detached agent's is.
 	DetachMerge
+	// DetachSkill is a skill invocation: the card the feed used to render flat,
+	// now a bubble that owns its window. It is the merge kind's sibling and not
+	// its special case — async-bubble.proto says "`merge` is the one skill with
+	// an arm of its own … every other skill arrives as `skill`" — and it carries
+	// two facts a merge run has no room for: the skill file's body, and the
+	// name and arguments the call was made with.
+	DetachSkill
 )
 
 // String names the kind for log records and for the error a mismatched update
@@ -94,6 +101,8 @@ func (k DetachKind) String() string {
 		return "unclassified"
 	case DetachMerge:
 		return "merge"
+	case DetachSkill:
+		return "skill"
 	default:
 		return "unresolved"
 	}
@@ -164,6 +173,15 @@ type BubbleSpec struct {
 	// Command is the backgrounded command line, for DetachShell only. Empty
 	// means the daemon has no reconstructible command line.
 	Command string
+	// SkillName is the skill as the call named it, verbatim, REQUIRED for
+	// DetachSkill and ignored otherwise. It is refused when empty for the same
+	// reason DetachUnrecognized refuses an anonymous tool: the name is the whole
+	// of what identifies the invocation, and a nameless skill bubble is a fold
+	// nobody can say anything about.
+	SkillName string
+	// Args are the invocation's arguments, verbatim, for DetachSkill. Empty is
+	// legitimate and means the call carried none.
+	Args string
 	// StartedAtMs is when the work was launched, unix millis.
 	StartedAtMs int64
 }
@@ -209,6 +227,9 @@ func OpenAsyncBubble(spec BubbleSpec) (*frontendv1.AsyncBubble, error) {
 	if spec.Kind == DetachUnrecognized && spec.ToolName == "" {
 		return nil, fmt.Errorf("frontend: async bubble refused for task %q — an unclassified spawn must name the tool it could not classify, and an anonymous one tells a maintainer nothing", spec.TaskID)
 	}
+	if spec.Kind == DetachSkill && spec.SkillName == "" {
+		return nil, fmt.Errorf("frontend: async bubble refused for task %q — a skill invocation must name the skill it invoked, and a nameless skill bubble carries neither a label nor anything a reader could act on", spec.TaskID)
+	}
 	if spec.Workspace == "" {
 		return nil, fmt.Errorf("frontend: async bubble refused for task %q — it named no workspace, which is the only routing key a snapshot has for a bubble; a workspace-less bubble would be delivered to every scoped client", spec.TaskID)
 	}
@@ -249,6 +270,15 @@ func OpenAsyncBubble(spec BubbleSpec) (*frontendv1.AsyncBubble, error) {
 		b.Kind = &frontendv1.AsyncBubble_Merge{Merge: &frontendv1.AsyncMergeBubble{
 			Fold: &frontendv1.AsyncFold{TailCap: StreamItemCap},
 		}}
+	case DetachSkill:
+		// The body opens EMPTY and stays empty until resolution delivers it —
+		// async-bubble.proto: "Empty until resolution delivers it (see
+		// AsyncSkillUpdate.body)". Nothing is guessed at here from the call.
+		b.Kind = &frontendv1.AsyncBubble_Skill{Skill: &frontendv1.AsyncSkillBubble{
+			SkillName: spec.SkillName,
+			Args:      spec.Args,
+			Fold:      &frontendv1.AsyncFold{TailCap: StreamItemCap},
+		}}
 	}
 	return b, nil
 }
@@ -268,6 +298,8 @@ func AsyncBubbleKind(b *frontendv1.AsyncBubble) DetachKind {
 		return DetachUnrecognized
 	case *frontendv1.AsyncBubble_Merge:
 		return DetachMerge
+	case *frontendv1.AsyncBubble_Skill:
+		return DetachSkill
 	default:
 		return DetachUnresolved
 	}
@@ -314,22 +346,27 @@ func AppendAsyncEmissions(b *frontendv1.AsyncBubble, ems []*frontendv1.AgentEmis
 // re-sending the whole bubble ("Never a re-send of the whole bubble — an agent
 // running for an hour would otherwise re-transmit its entire transcript on every
 // new line"), and the contract carries the arm that makes an incremental push
-// representable for a merge run: `merge = 15`, an AsyncAgentUpdate because a
-// merge run's emissions arrive precisely as a detached agent's do, so the arm
-// names the kind while the payload has no axis to evolve apart on. An earlier
-// shape advanced the window through AsyncBubbleDelta.opened because no such arm
-// existed yet; it does now, so the window advances by APPEND like every other
-// conversation-shaped kind.
+// representable for both window kinds: `merge = 15`, an AsyncAgentUpdate
+// because a merge run's emissions arrive precisely as a detached agent's do,
+// and `skill = 16`, whose emissions arm carries that same AsyncAgentUpdate. So
+// the arm names the kind while the payload has no axis to evolve apart on. An
+// earlier shape advanced the window through AsyncBubbleDelta.opened because no
+// such arm existed yet; it does now, so the window advances by APPEND like
+// every other conversation-shaped kind.
 //
 // THE ARM IS STILL NOT A PARAMETER. It is selected from the bubble's own kind
-// in the switch below, so a merge bubble can only ever receive a merge update,
-// and a bubble of any other kind is refused by name rather than coerced.
+// in the switch below, so a merge bubble can only ever receive a merge update
+// and a skill bubble a skill update, and a bubble of any other kind is refused
+// by name rather than coerced.
 //
 // The fold itself is the SAME operation a detached agent's is — same cap, same
 // drop accounting, same emission vocabulary (foldEmissions) — because
-// AsyncMergeBubble carries the identical emissions/fold pair by design.
+// AsyncMergeBubble and AsyncSkillBubble carry the identical emissions/fold pair
+// by design.
 func AppendWindowEmissions(b *frontendv1.AsyncBubble, ems []*frontendv1.AgentEmission, atMs int64) (*frontendv1.AsyncBubbleUpdate, error) {
-	if b.GetMerge() == nil {
+	switch AsyncBubbleKind(b) {
+	case DetachMerge, DetachSkill:
+	default:
 		return nil, kindMismatch(b, DetachMerge)
 	}
 	fold, err := foldEmissions(b, ems, atMs)
@@ -343,8 +380,38 @@ func AppendWindowEmissions(b *frontendv1.AsyncBubble, ems []*frontendv1.AgentEmi
 	switch b.GetKind().(type) {
 	case *frontendv1.AsyncBubble_Merge:
 		up.Update = &frontendv1.AsyncBubbleUpdate_Merge{Merge: appended}
+	case *frontendv1.AsyncBubble_Skill:
+		up.Update = &frontendv1.AsyncBubbleUpdate_Skill{Skill: &frontendv1.AsyncSkillUpdate{
+			Update: &frontendv1.AsyncSkillUpdate_Emissions{Emissions: appended},
+		}}
 	}
 	return up, nil
+}
+
+// ResolveSkillBody delivers a skill file's resolved contents as the SKILL
+// bubble's own body, and returns the update that carries them.
+//
+// THE BODY HAS EXACTLY ONE HOME. async-bubble.proto puts the skill file's
+// contents on AsyncSkillBubble.body and retires their old rendering in the same
+// breath — "they are the SKILL's content, not a response of the conversation".
+// Writing the bubble's field and producing the update happen HERE, in one call,
+// so a snapshot and a delta cannot disagree about what the body is.
+//
+// It replaces the body WHOLE rather than appending, which is what the arm says:
+// resolution delivers the file once, and a replayed resolution overwrites with
+// the same bytes instead of doubling them.
+func ResolveSkillBody(b *frontendv1.AsyncBubble, contents string) (*frontendv1.AsyncBubbleUpdate, error) {
+	sb := b.GetSkill()
+	if sb == nil {
+		return nil, kindMismatch(b, DetachSkill)
+	}
+	sb.Body = contents
+	return &frontendv1.AsyncBubbleUpdate{
+		BubbleId: b.GetId(),
+		Update: &frontendv1.AsyncBubbleUpdate_Skill{Skill: &frontendv1.AsyncSkillUpdate{
+			Update: &frontendv1.AsyncSkillUpdate_Body{Body: &frontendv1.AsyncSkillBodyResolved{Contents: contents}},
+		}},
+	}, nil
 }
 
 // foldEmissions is the ONE fold both conversation-shaped kinds go through: it
@@ -384,6 +451,11 @@ func emissionFold(b *frontendv1.AsyncBubble) ([]*frontendv1.AgentEmission, *fron
 			return nil, nil, kindMismatch(b, DetachMerge)
 		}
 		return k.Merge.GetEmissions(), k.Merge.GetFold(), nil
+	case *frontendv1.AsyncBubble_Skill:
+		if k.Skill == nil {
+			return nil, nil, kindMismatch(b, DetachSkill)
+		}
+		return k.Skill.GetEmissions(), k.Skill.GetFold(), nil
 	default:
 		return nil, nil, kindMismatch(b, DetachAgent)
 	}
@@ -398,6 +470,8 @@ func setEmissionFold(b *frontendv1.AsyncBubble, ems []*frontendv1.AgentEmission)
 		k.Agent.Emissions = ems
 	case *frontendv1.AsyncBubble_Merge:
 		k.Merge.Emissions = ems
+	case *frontendv1.AsyncBubble_Skill:
+		k.Skill.Emissions = ems
 	}
 }
 

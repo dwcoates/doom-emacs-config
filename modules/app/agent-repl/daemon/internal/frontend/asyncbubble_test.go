@@ -17,6 +17,9 @@ func openKind(t *testing.T, kind DetachKind) *frontendv1.AsyncBubble {
 	if kind == DetachUnrecognized {
 		spec.ToolName = "Frobnicate"
 	}
+	if kind == DetachSkill {
+		spec.SkillName, spec.Args = "demo", "run it"
+	}
 	b, err := OpenAsyncBubble(spec)
 	if err != nil {
 		t.Fatalf("OpenAsyncBubble(%s): %v", kind, err)
@@ -437,6 +440,184 @@ func TestAppendWindowEmissionsRefusesANonWindowBubble(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("a merge fold addressed to an agent bubble is a daemon bug and must be refused rather than coerced")
+	}
+}
+
+// --- skill fold ------------------------------------------------------------
+
+func TestOpenAsyncBubbleGivesASkillInvocationTheSkillArm(t *testing.T) {
+	// Arrange, Act
+	b := openKind(t, DetachSkill)
+
+	// Assert
+	if b.GetSkill() == nil {
+		t.Fatalf("a skill invocation opened on arm %T, want the skill arm", b.GetKind())
+	}
+}
+
+func TestOpenAsyncBubbleCarriesTheSkillNameVerbatim(t *testing.T) {
+	// Arrange, Act
+	b := openKind(t, DetachSkill)
+
+	// Assert
+	if got := b.GetSkill().GetSkillName(); got != "demo" {
+		t.Fatalf("skill_name = %q, want the name as invoked, verbatim", got)
+	}
+}
+
+func TestOpenAsyncBubbleCarriesTheSkillArgsVerbatim(t *testing.T) {
+	// Arrange, Act
+	b := openKind(t, DetachSkill)
+
+	// Assert
+	if got := b.GetSkill().GetArgs(); got != "run it" {
+		t.Fatalf("args = %q, want the invocation's arguments, verbatim", got)
+	}
+}
+
+func TestOpenAsyncBubbleOpensASkillBodyEmpty(t *testing.T) {
+	// Arrange, Act
+	b := openKind(t, DetachSkill)
+
+	// Assert: the contract says the body is empty until resolution delivers it.
+	if got := b.GetSkill().GetBody(); got != "" {
+		t.Fatalf("a freshly opened skill bubble carried body %q, want it empty until resolution delivers one", got)
+	}
+}
+
+func TestOpenAsyncBubbleRefusesANamelessSkillInvocation(t *testing.T) {
+	// Arrange, Act
+	_, err := OpenAsyncBubble(BubbleSpec{TaskID: "t1", Workspace: "/ws", Kind: DetachSkill, OriginToolUseID: "tu1"})
+
+	// Assert
+	if err == nil {
+		t.Fatal("a skill bubble that names no skill has nothing a reader could act on and must be refused rather than opened blank")
+	}
+}
+
+func TestAsyncBubbleKindReadsTheSkillArmBack(t *testing.T) {
+	// Arrange, Act, Assert
+	if got := AsyncBubbleKind(openKind(t, DetachSkill)); got != DetachSkill {
+		t.Fatalf("AsyncBubbleKind = %s, want skill: a bubble's kind must survive a round trip through its arm", got)
+	}
+}
+
+func TestAppendWindowEmissionsDeliversASkillFoldOnTheSkillArm(t *testing.T) {
+	// Arrange
+	b := openKind(t, DetachSkill)
+
+	// Act
+	up, err := AppendWindowEmissions(b, []*frontendv1.AgentEmission{responseEmission("s1")}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if up.GetSkill().GetEmissions() == nil {
+		t.Fatalf("a skill fold arrived on arm %T, want the skill arm's emissions", up.GetUpdate())
+	}
+}
+
+func TestAppendWindowEmissionsFoldsIntoTheSkillArm(t *testing.T) {
+	// Arrange
+	b := openKind(t, DetachSkill)
+
+	// Act
+	if _, err := AppendWindowEmissions(b, []*frontendv1.AgentEmission{responseEmission("s1")}, 7); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if got := len(b.GetSkill().GetEmissions()); got != 1 {
+		t.Fatalf("the skill bubble folded %d emissions, want 1", got)
+	}
+}
+
+func TestAppendWindowEmissionsKeepsTheSkillTailAtTheCap(t *testing.T) {
+	// Arrange
+	b := openKind(t, DetachSkill)
+	var ems []*frontendv1.AgentEmission
+	for i := 0; i < StreamItemCap+5; i++ {
+		ems = append(ems, responseEmission("s"))
+	}
+
+	// Act
+	if _, err := AppendWindowEmissions(b, ems, 7); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if got := len(b.GetSkill().GetEmissions()); got != StreamItemCap {
+		t.Fatalf("want the skill fold capped at %d, got %d", StreamItemCap, got)
+	}
+}
+
+func TestResolveSkillBodyPutsTheContentsOnTheBubble(t *testing.T) {
+	// Arrange
+	b := openKind(t, DetachSkill)
+
+	// Act
+	if _, err := ResolveSkillBody(b, "# Demo skill"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: the snapshot the bubble IS must carry what the update said.
+	if got := b.GetSkill().GetBody(); got != "# Demo skill" {
+		t.Fatalf("the bubble's body = %q, want the resolved contents verbatim", got)
+	}
+}
+
+func TestResolveSkillBodyDeliversTheContentsOnTheBodyArm(t *testing.T) {
+	// Arrange
+	b := openKind(t, DetachSkill)
+
+	// Act
+	up, err := ResolveSkillBody(b, "# Demo skill")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if got := up.GetSkill().GetBody().GetContents(); got != "# Demo skill" {
+		t.Fatalf("the body update carried %q, want the resolved contents verbatim", got)
+	}
+}
+
+func TestResolveSkillBodyReplacesRatherThanAccumulates(t *testing.T) {
+	// Arrange: a replayed resolution delivers the same file a second time.
+	b := openKind(t, DetachSkill)
+	if _, err := ResolveSkillBody(b, "# Demo skill"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	if _, err := ResolveSkillBody(b, "# Demo skill"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if got := b.GetSkill().GetBody(); got != "# Demo skill" {
+		t.Fatalf("the body = %q, want the file once: the arm replaces the body whole", got)
+	}
+}
+
+func TestResolveSkillBodyRefusesANonSkillBubble(t *testing.T) {
+	// Arrange, Act
+	_, err := ResolveSkillBody(openKind(t, DetachMerge), "# Demo skill")
+
+	// Assert
+	if err == nil {
+		t.Fatal("only a skill bubble has a body to resolve, so a body addressed to a merge bubble is a daemon bug and must be refused rather than coerced")
+	}
+}
+
+func TestAppendAsyncEmissionsRefusesAnAgentUpdateAddressedToASkillBubble(t *testing.T) {
+	// Arrange, Act
+	_, err := AppendAsyncEmissions(openKind(t, DetachSkill), []*frontendv1.AgentEmission{responseEmission("s1")}, 7)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a skill bubble advances by its own arm, so an agent update aimed at one is the kind mismatch a receiver rejects and must never be produced")
 	}
 }
 
