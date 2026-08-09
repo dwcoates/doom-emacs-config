@@ -1238,3 +1238,80 @@ normal prologue."
       '(:jobId "job-1" :finalName "windowed" :worktreePath "/tmp/windowed")))
     ;; Assert
     (should-not agent-repl--log-preregistration-workspace)))
+
+;;;; ---- boot-sweep verdict host action -----------------------------------
+;;
+;; The daemon's boot sweep concludes about sessions that outlived the previous
+;; daemon and were NOT wired by the new one.  Each conclusion arrives as a
+;; retained `bootSweepSessionUnwired' HostAction; Emacs' whole job is to make
+;; sure the user finds out.
+
+(ert-deftest agent-repl-test-boot-sweep-unwired-has-a-host-action-arm ()
+  "The verdict arm is dispatched by the arm table, not the legacy fallback."
+  ;; Arrange / Act
+  (let ((entry (assq :bootSweepSessionUnwired agent-repl--host-action-arms)))
+    ;; Assert
+    (should (eq (cadr entry)
+                'agent-repl--handle-boot-sweep-session-unwired-command))))
+
+(ert-deftest agent-repl-test-boot-sweep-unwired-maps-every-wire-field ()
+  "Every field the daemon sends reaches the handler's alist."
+  ;; Arrange
+  (let ((mapping (caddr (assq :bootSweepSessionUnwired
+                              agent-repl--host-action-arms))))
+    ;; Act / Assert
+    (should (equal mapping
+                   '((workspace . :workspace) (session_id . :sessionId)
+                     (reason . :reason))))))
+
+(ert-deftest agent-repl-test-boot-sweep-unwired-is-announced-to-the-user ()
+  "The verdict reaches the user-message chokepoint, not just the log."
+  ;; Arrange
+  (let (echoed)
+    (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--emit-message)
+               (lambda (text &optional _echo) (setq echoed text))))
+      ;; Act
+      (agent-repl--handle-boot-sweep-session-unwired-command
+       '((workspace . "/tmp/ws") (session_id . "s_1")
+         (reason . "its agent process is gone (boot-sweep verdict boot_sweep_no_live_shim)")))
+      ;; Assert
+      (should (string-match-p "/tmp/ws" echoed)))))
+
+(ert-deftest agent-repl-test-boot-sweep-unwired-renders-the-reason-verbatim ()
+  "The daemon composed the sentence for a person, so it is shown, not summarized."
+  ;; Arrange
+  (let (echoed)
+    (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--emit-message)
+               (lambda (text &optional _echo) (setq echoed text))))
+      ;; Act
+      (agent-repl--handle-boot-sweep-session-unwired-command
+       '((workspace . "/tmp/ws") (session_id . "s_1")
+         (reason . "a live agent process still holds its session lock")))
+      ;; Assert
+      (should (string-match-p "still holds its session lock" echoed)))))
+
+(ert-deftest agent-repl-test-boot-sweep-unwired-files-the-session-id ()
+  "The session id is evidence for the log rather than copy for the echo area."
+  ;; Arrange
+  (let (warned)
+    (cl-letf (((symbol-function 'agent-repl--warn)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned)))
+              ((symbol-function 'agent-repl--emit-message) #'ignore))
+      ;; Act
+      (agent-repl--handle-boot-sweep-session-unwired-command
+       '((workspace . "/tmp/ws") (session_id . "s_evidence")
+         (reason . "the daemon could not tell")))
+      ;; Assert
+      (should (cl-find-if (lambda (line) (string-match-p "s_evidence" line))
+                          warned)))))
+
+(ert-deftest agent-repl-test-boot-sweep-unwired-never-signals ()
+  "A notice that signalled would be NACKed and redelivered forever."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--emit-message) #'ignore))
+    ;; Act / Assert
+    (should (eq t (agent-repl--handle-boot-sweep-session-unwired-command
+                   '((workspace . "/tmp/ws")))))))
