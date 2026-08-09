@@ -273,6 +273,45 @@ describe("ingest workspace-state", () => {
     expect(store.state.mergeStatus).toBeNull();
   });
 
+  it("drops a settled merge's status when the next revision reports the agent", () => {
+    // THE STALE FAILURE. A merge that stopped keeps its row on the daemon's
+    // merge axis forever, and the daemon withholds its status from any frame
+    // that reports the live agent instead. The store must take that absence as
+    // the answer rather than keeping the last status it was given: the footer
+    // and the rail both read this field, and a retained failure would stand over
+    // a session that is already working on the next prompt.
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([
+      workspaceEffect({ state: "merge_failed", turnActive: false, mergeStatus: failedStatus() }),
+    ]);
+    // Act — the same workspace, one revision later, thinking.
+    store.ingest([workspaceEffect({ state: "thinking", atMs: 1001 })]);
+    // Assert
+    expect(store.state.mergeStatus).toBeNull();
+    expect(store.state.renderState).toBe("thinking");
+  });
+
+  /** A stopped merge run's own account of itself. */
+  function failedStatus(): MergeStatus {
+    return {
+      runId: "run-failed",
+      phaseStartedAtMs: 900,
+      updatedAtMs: 1000,
+      phase: {
+        case: "failed",
+        value: {
+          cause: "cherry-pick refused",
+          commitsTotal: 3,
+          commitsLanded: 1,
+          failingSha: "fee1234",
+          failingSubject: "the commit that stopped the run",
+          failedJson: "",
+        },
+      },
+    };
+  }
+
   /** An enqueued merge status at a given place on its repository's queue. */
   function enqueuedStatus(position: number, depth: number): MergeStatus {
     return {
