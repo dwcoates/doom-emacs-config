@@ -3646,6 +3646,10 @@ describe("UdsSession quiet-turn watchdog", () => {
     expect(evt.payload.value.component).toBe("claude-shim-turn-lifecycle");
     expect(evt.payload.value.reason).toContain("\"p1\"");
     expect(evt.payload.value.reason).toContain("no SDK activity");
+    // The reason has to say what was NOT outstanding, because that is the only
+    // thing separating a dead query from a turn waiting on a background agent.
+    expect(evt.payload.value.reason).toContain("no background task was running");
+    expect(evt.payload.value.reason).toContain("no task notification was queued");
     expect(evt.payload.value.recovered).toBe(true);
   });
 
@@ -3691,6 +3695,160 @@ describe("UdsSession quiet-turn watchdog", () => {
     // Act
     await tick();
     await tick();
+    store.close();
+
+    // Assert
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.component).toBe("shim-store-client");
+  });
+
+  // -------------------------------------------------------------------------
+  // MONITORING: an open turn whose only outstanding work is a background task.
+  //
+  // The watchdog's premise is that silence proves the query stopped. That is
+  // false for exactly one state, and it is a state the shim puts itself in:
+  // `retainForLiveTasks` holds a turn open past its own SDK result because a
+  // background task may still drive another agent cycle through it. The task
+  // reports into its own transcript, so the parent stream says NOTHING for as
+  // long as the agent runs — routinely longer than the grace. A live workspace
+  // had a healthy turn closed under it ten minutes after the last message,
+  // which is what flipped it to `monitoring` in the first place.
+  // -------------------------------------------------------------------------
+
+  /**
+   * A turn retained for ONE live background task, with the SDK then silent.
+   *
+   * The clock is scripted rather than real: `advancePastGrace` is what makes
+   * the silence long enough to judge, so no test here depends on how long its
+   * own setup happened to take.
+   */
+  async function monitoringTurn(): Promise<Rig & { advancePastGrace: () => void }> {
+    let nowMs = 1_000_000;
+    const rigged = await rig({
+      storeSessionId: "vendor-uuid",
+      turnQuietGraceMs: 5,
+      nowMs: () => nowMs,
+    });
+    const { daemon, store, query } = rigged;
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1", text: "fan out", promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+    query.emit({
+      type: "system",
+      subtype: "task_started",
+      uuid: "task-start-1",
+      session_id: "vendor-uuid",
+      task_id: "agent-1",
+      task_type: "local_agent",
+      tool_use_id: "tool-agent-1",
+      description: "background work",
+    } as unknown as SdkMessageLike);
+    const taskStart = await store.peer().next(StoreWriteSchema);
+    expect(taskStart.batch!.events.map((event) => event.payload.case)).toEqual(["vendor", "taskStarted"]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(taskStart.batch!.events.length), lastSeq: 10n,
+    }));
+    // The parent result the shim RETAINS: the turn stays open on the task.
+    query.emit({
+      type: "result",
+      uuid: "parent-result",
+      session_id: "vendor-uuid",
+      subtype: "success",
+      duration_ms: 100,
+    } as unknown as SdkMessageLike);
+    const parentResult = await store.peer().next(StoreWriteSchema);
+    expect(parentResult.batch!.events.map((event) => event.payload.case)).toEqual(["vendor"]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 11n }));
+    return { ...rigged, advancePastGrace: () => { nowMs += 60_000; } };
+  }
+
+  /** End the one background task the monitoring turn is waiting on. */
+  async function endBackgroundTask(store: FakeStore, query: FakeQuery, lastSeq: bigint): Promise<void> {
+    query.emit({
+      type: "system",
+      subtype: "task_notification",
+      uuid: "task-end-1",
+      session_id: "vendor-uuid",
+      task_id: "agent-1",
+      tool_use_id: "tool-agent-1",
+      status: "completed",
+      output_file: "/tmp/agent-1.output",
+      summary: "done",
+    } as unknown as SdkMessageLike);
+    const taskEnd = await store.peer().next(StoreWriteSchema);
+    expect(taskEnd.batch!.events.map((event) => event.payload.case)).toEqual(["vendor", "taskEnded"]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(taskEnd.batch!.events.length), lastSeq,
+    }));
+  }
+
+  it("keeps an open turn alive while a background SDK task runs past the quiet grace", async () => {
+    // Arrange
+    const { daemon, store, session, advancePastGrace } = await monitoringTurn();
+
+    // Act: the stream has now been silent for twelve graces, and the only
+    // reason for that silence is the agent still working in its own transcript.
+    advancePastGrace();
+    await tick();
+    await tick();
+    await tick();
+    expect(session.turnCount()).toBe(1);
+    store.close();
+
+    // Assert: the FIRST Event is the store outage, so nothing synthesized a
+    // terminal for a turn whose background task is still running.
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.component).toBe("shim-store-client");
+  });
+
+  it("hands the turn back to the watch once its last background task ends", async () => {
+    // Arrange: the same retained turn. The latch must be a WINDOW, not an off
+    // switch — a turn left open after its tasks drain is the stuck turn the
+    // watchdog exists for, and no further SDK result is coming to close it.
+    const { store, session, query, advancePastGrace } = await monitoringTurn();
+
+    // Act: the task end is the LAST thing the SDK says, and the silence after
+    // it is the silence the re-armed watch measures.
+    await endBackgroundTask(store, query, 12n);
+    advancePastGrace();
+
+    // Assert: the re-armed watch writes the ordered terminal it owes.
+    const synthesized = await store.peer().next(StoreWriteSchema);
+    expect(synthesized.batch!.events.map((event) => event.payload.case)).toEqual([
+      "accountUsageObservation",
+      "turnEnded",
+    ]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 13n }));
+    await until(() => session.turnCount() === 0);
+  });
+
+  it("keeps an open turn alive while a task notification is queued for it", async () => {
+    // Arrange: the task is done, but a `<task-notification>` sits in the
+    // durable queue. That entry IS another agent cycle the SDK has not been
+    // given yet, so the stream is entitled to the same silence a live task buys.
+    const { daemon, store, session, query, advancePastGrace } = await monitoringTurn();
+    store.latest().send(EventSchema, transcriptEvent(18n, create(TranscriptLineSchema, {
+      line: {
+        case: "queueOperation",
+        value: create(QueueOperationLineSchema, {
+          operation: QueueOp.ENQUEUE,
+          content: "<task-notification>agent-1</task-notification>",
+        }),
+      },
+    }), "vendor-uuid"));
+    await daemon.next(EventSchema);
+    await endBackgroundTask(store, query, 19n);
+
+    // Act
+    advancePastGrace();
+    await tick();
+    await tick();
+    await tick();
+    expect(session.turnCount()).toBe(1);
     store.close();
 
     // Assert

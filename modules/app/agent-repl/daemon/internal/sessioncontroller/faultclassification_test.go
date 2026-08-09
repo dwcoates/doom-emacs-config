@@ -21,6 +21,7 @@ func TestEveryDegradedProducerHasAnExplicitFaultImpact(t *testing.T) {
 		"daemon-model-catalog":           ssm.FaultImpactFeature,
 		"shim-claude-sidecar-store-link": ssm.FaultImpactFeature,
 		"claude-shim-sdk":                ssm.FaultImpactTurnTerminal,
+		"claude-shim-turn-lifecycle":     ssm.FaultImpactTurnTerminal,
 		"claude-shim-interrupt":          ssm.FaultImpactCommand,
 		"claude-shim-permission-mode":    ssm.FaultImpactCommand,
 		"claude-shim":                    ssm.FaultImpactFeature,
@@ -65,5 +66,42 @@ func TestUnknownDegradedProducerFailsLoudlyWithoutStateMutation(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("unknown producer rejection missing identity-complete log: %v", logs)
+	}
+}
+
+// A shim-synthesized turn terminal is the shim telling the daemon it could not
+// trust the turn's own ending. That was reaching the log as
+// branch=unknown_component and applying nothing, so the workspace's health said
+// the turn ended normally.
+func TestTurnLifecycleDegradationAppliesATurnTerminalFault(t *testing.T) {
+	applier := &fakeApplier{}
+	var logs []string
+	c := newConsumer(
+		"ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{},
+		func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
+		nil, nil, nil, nil, nil,
+	)
+	c.generationID = "g1"
+
+	c.Degraded("s1", nil, &corev1.DegradedState{
+		Component: "claude-shim-turn-lifecycle",
+		Reason:    "the shim closed the turn itself",
+		Recovered: true,
+	})
+
+	if len(applier.faultEdges) != 1 {
+		t.Fatalf("turn-lifecycle degradation wrote %d fault edges, want 1: %+v", len(applier.faultEdges), applier.faultEdges)
+	}
+	edge := applier.faultEdges[0]
+	if edge.component != "claude-shim-turn-lifecycle" || edge.impact != ssm.FaultImpactTurnTerminal {
+		t.Fatalf("fault edge = %+v, want claude-shim-turn-lifecycle at turn-terminal impact", edge)
+	}
+	if edge.open {
+		t.Fatalf("recovered degradation opened a fault: %+v", edge)
+	}
+	for _, line := range logs {
+		if strings.Contains(line, "branch=unknown_component") {
+			t.Fatalf("classified producer still took the unknown-component branch: %v", logs)
+		}
 	}
 }
