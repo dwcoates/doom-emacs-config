@@ -2514,6 +2514,7 @@ describe("async bubble ingestion", () => {
   function agentBubble(id: string, over: Partial<AsyncBubble> = {}): AsyncBubble {
     return {
       id,
+      workspace: "/w",
       originToolUseId: "",
       parentBubbleId: "",
       label: "",

@@ -21,6 +21,7 @@ const NO_FOLD = { droppedBefore: 0, tailCap: 0 };
 
 function bubble(over: Partial<AsyncBubble> & Pick<AsyncBubble, "id" | "kind">): AsyncBubble {
   return {
+    workspace: "/w",
     originToolUseId: "",
     parentBubbleId: "",
     label: "",

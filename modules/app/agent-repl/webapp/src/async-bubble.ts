@@ -197,6 +197,17 @@ export type AsyncBubbleKindCase = AsyncBubbleKind["case"];
 export interface AsyncBubble {
   /** THE ROUTING HANDLE. Never empty; matched, never derived. */
   id: string;
+  /**
+   * The workspace this detached work belongs to (contract amendment 2).
+   *
+   * It is the bubble's SCOPING key, not its routing key: the daemon filters a
+   * connect snapshot's bubbles by it, and refuses to publish one that names no
+   * workspace, because the snapshot has no other key to route a bubble by. On
+   * this end the registry still routes strictly by `id` (invariant I2), so the
+   * field is carried rather than dispatched on — it exists so a bubble restated
+   * in a snapshot and a bubble pushed in a delta are scoped by one rule.
+   */
+  workspace: string;
   /** The tool_use id of the call that spawned this work; empty when none did. */
   originToolUseId: string;
   /** The bubble this one was spawned FROM; empty at the top level. */
@@ -288,18 +299,13 @@ export const UPDATE_ARM_KIND: Readonly<Record<Exclude<AsyncBubbleUpdateCase, "li
 // --- anchored key sets ------------------------------------------------------
 
 /**
- * PENDING CONTRACT AMENDMENT 2 adds `AsyncBubble.workspace = 7`. This worktree's
- * generated stub predates it, so the field is deliberately NOT hand-declared
- * here: spelling a key the stub does not have would be exactly the un-anchored
- * decode table invariant I5 forbids, and would go on "working" if the amendment
- * were later dropped or renamed.
- *
- * The anchor is what makes that safe to defer. Regenerating the stubs turns
- * this line into a BUILD FAILURE naming the missing field, so integration
- * cannot forget to add it — a decoder that silently ignored the new field is
- * the one outcome this cannot produce.
+ * CONTRACT AMENDMENT 2 landed `AsyncBubble.workspace = 7`, and regenerating the
+ * stubs turned this line into the build failure it was designed to produce —
+ * the anchor named the missing key rather than letting a decoder silently drop
+ * a field the daemon had started sending. `workspace` is spelled here now that
+ * the generated stub actually has it, which is what invariant I5 requires.
  */
-const BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncBubbleSchema.field>()("id", "originToolUseId", "parentBubbleId", "label", "startedAtMs", "liveness", "agent", "journal", "shell", "unclassified");
+const BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncBubbleSchema.field>()("id", "workspace", "originToolUseId", "parentBubbleId", "label", "startedAtMs", "liveness", "agent", "journal", "shell", "unclassified");
 const AGENT_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncAgentBubbleSchema.field>()("emissions", "fold");
 const JOURNAL_KEYS = generatedFieldSet<keyof typeof AsyncWorkflowJournalSchema.field>()("rows", "fold");
 const SHELL_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncShellBubbleSchema.field>()("command", "output");
@@ -526,6 +532,7 @@ export function decodeAsyncBubble(v: unknown, ctx: string): AsyncBubble {
   }
   return {
     id,
+    workspace: str(o, "workspace", ctx),
     originToolUseId: str(o, "originToolUseId", ctx),
     parentBubbleId: str(o, "parentBubbleId", ctx),
     label: str(o, "label", ctx),
