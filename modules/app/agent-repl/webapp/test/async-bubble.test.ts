@@ -143,6 +143,23 @@ describe("decodeAsyncBubble — kind", () => {
     });
   });
 
+  it("decodes a merge bubble's emissions in the feed's own vocabulary", () => {
+    const bubble = decodeAsyncBubble(
+      openedAgent({ agent: undefined, merge: { emissions: [{ response: { body: { role: "assistant" } } }] } }),
+      "b",
+    );
+
+    expect(bubble.kind.case === "merge" && bubble.kind.value.emissions).toEqual([
+      { emission: "response", arm: "assistantMessage", payload: { role: "assistant" } },
+    ]);
+  });
+
+  it("rejects an unrecognized field on a merge bubble rather than dropping it", () => {
+    expect(() =>
+      decodeAsyncBubble(openedAgent({ agent: undefined, merge: { emissions: [], branch: "x" } }), "b"),
+    ).toThrow(/unrecognized field/);
+  });
+
   it("rejects a negative spool offset, which no byte count can be", () => {
     expect(() =>
       decodeAsyncBubble(openedAgent({ agent: undefined, shell: { output: { throughOffset: -1 } } }), "b"),
