@@ -286,6 +286,12 @@ type shutdownBoot struct {
 	// than on where it happens to sit in the test.
 	shimConnected func(sessionID string) (bool, error)
 
+	// hostVerdicts records the boot-sweep verdicts routed to the HOST half. The
+	// frontend half is asserted through the socket like every other pushed
+	// fact; this is the only place the host-action half is observable in a
+	// harness that runs no workspace-create assembly.
+	hostVerdicts *recordingBootSweepHost
+
 	// sweepIdle fires this boot's IDLE SWEEPER (server.Config.IdleSweepTicks),
 	// and clock is the wall clock that sweep measures elapsed idleness with.
 	// Both are nil/zero unless the boot was given withBootIdleSweeper: a test
@@ -327,6 +333,31 @@ func withBootIdleSweeper(cutoff time.Duration) bootOption {
 // sweep fires this boot's boot-sweeper re-check pass. The channel is
 // buffered(1), so the send is safe even when the sweeper is not waiting on it.
 func (b *shutdownBoot) sweepRecheck() { b.recheck <- time.Now() }
+
+// recordingBootSweepHost stands in for the workspace-create manager's retained
+// host-action envelope. It is a recorder rather than a no-op so a test can
+// assert the host half was reached at all, and so a routing failure surfaces as
+// a missing record instead of as nothing.
+type recordingBootSweepHost struct {
+	mu    sync.Mutex
+	notes []bootSweepHostNote
+}
+
+type bootSweepHostNote struct{ workspace, sessionID, verdict, reason string }
+
+func (r *recordingBootSweepHost) SurfaceBootSweepVerdict(_ context.Context, workspace, sessionID, verdict, reason string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.notes = append(r.notes, bootSweepHostNote{workspace, sessionID, verdict, reason})
+	return nil
+}
+
+// bootSweepHostNotes returns a copy of what the host half received.
+func (r *recordingBootSweepHost) bootSweepHostNotes() []bootSweepHostNote {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]bootSweepHostNote(nil), r.notes...)
+}
 
 // sweepRecheckWhenParked fires the re-check pass only once the session's shim
 // is OBSERVED parked on this boot's listener.
@@ -684,6 +715,12 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 	// nothing ever claims them. The re-check is an INJECTED channel, so a test
 	// fires the second pass as an event instead of waiting out a timer.
 	sweepCtx, cancelSweep := context.WithCancel(context.Background())
+	// AND ITS VERDICTS GO SOMEWHERE, as main.go routes them: the pushed
+	// workspace state through the SSM's controller-less entry point, and the
+	// host through the retained-action envelope. The host half is a recording
+	// stub rather than a whole workspace-create assembly — this harness has no
+	// creation subsystem, and what the e2e reads is the frontend surface.
+	b.hostVerdicts = &recordingBootSweepHost{}
 	go (&server.BootSweeper{
 		Reg:       reg,
 		Connected: shimListener.Connected,
@@ -691,6 +728,11 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		Ensurer:   controller,
 		Logf:      b.logf,
 		Recheck:   b.recheck,
+		Unwired: (&server.BootSweepVerdictRouter{
+			State: ssmMgr,
+			Host:  b.hostVerdicts,
+			Logf:  b.logf,
+		}).Route,
 	}).Run(sweepCtx)
 
 	// Teardown in reverse construction order, so nothing writes to a closed

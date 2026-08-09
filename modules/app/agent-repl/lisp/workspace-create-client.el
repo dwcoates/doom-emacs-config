@@ -488,12 +488,45 @@ and redelivered forever, replacing a visible failure with a loop."
                      job-id name text))
     t))
 
+(defun agent-repl--handle-boot-sweep-session-unwired-command (cmd)
+  "Announce a session the daemon's boot sweep left unwired, carried by CMD.
+CMD is the decoded `bootSweepSessionUnwired' HostAction payload.  The
+daemon has already reached and recorded its verdict; Emacs' whole job is
+to make sure the user finds out that a session which survived the
+previous daemon did NOT come back on its own.
+
+The session is NOT gone: the record stays revivable and opening the
+workspace still brings it up.  So this announces and does nothing else —
+it must not close, revive, or otherwise act on the user's session.
+
+Like the creation-failure handler it never signals: a notice that fails
+to display would be NACKed and redelivered forever, replacing a visible
+verdict with a loop."
+  (let* ((workspace (or (alist-get 'workspace cmd) "unknown"))
+         (session-id (or (alist-get 'session_id cmd) "unknown"))
+         (reason (or (alist-get 'reason cmd) "no reason supplied")))
+    (agent-repl--warn
+     workspace
+     "boot-sweep: SESSION LEFT UNWIRED workspace=%s session=%s reason=%s"
+     workspace session-id reason)
+    ;; The workspace path and the reason are what the user acts on: the
+    ;; session is still there, it simply is not being driven.
+    (agent-repl--user-message
+     workspace "session for '%s' did not come back after the daemon restarted: %s"
+     (list workspace reason)
+     :detail (format "bootSweepSessionUnwired workspace=%s session=%s reason=%s"
+                     workspace session-id reason))
+    t))
+
 (defconst agent-repl--host-action-arms
   '((:switchWorkspace agent-repl--handle-switch-command
      ((dir . :dir)))
     (:workspaceCreateFailed agent-repl--handle-workspace-create-failed-command
      ((job_id . :jobId) (requested_name . :requestedName)
       (error . :error)))
+    (:bootSweepSessionUnwired agent-repl--handle-boot-sweep-session-unwired-command
+     ((workspace . :workspace) (session_id . :sessionId)
+      (reason . :reason)))
     (:setRepositoryFold agent-repl--handle-fold-command
      ((repo_key . :repoKey) (folded . :folded)))
     (:setSidebarView agent-repl--handle-set-view-command
