@@ -864,25 +864,57 @@ func containsPath(paths []string, suffix string) bool {
 	return false
 }
 
-func TestTurnAccountingReducerInvalidatesUsageWindowReset(t *testing.T) {
+// resolveWithWindowResets settles one turn whose two five-hour-window samples
+// report the given resets_at values, and reports whether the settled record
+// carries the window-reset finding.
+func resolveWithWindowResets(t *testing.T, startResetsAtMs, endResetsAtMs int64) bool {
+	t.Helper()
 	r := newTurnAccountingReducer(nil)
 	r.runtime = &corev1.QueryRuntimeIdentity{EffectiveModel: "model"}
 	r.queryID = "q"
 	r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
 	start := usageObservation("t", true)
 	end := usageObservation("t", false)
-	end.GetAvailable().FiveHour.ResetsAtMs = 200
+	start.GetAvailable().FiveHour.ResetsAtMs = startResetsAtMs
+	end.GetAvailable().FiveHour.ResetsAtMs = endResetsAtMs
 	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: start}}, "s")
 	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: end}}, "s")
 	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
-	found := false
 	for _, problem := range got.GetInvalid().GetProblems() {
 		if problem.GetWindowReset() != nil {
-			found = true
+			return true
 		}
 	}
-	if !found {
-		t.Fatalf("accounting = %+v", got)
+	return false
+}
+
+// TestTurnAccountingReducerClassifiesUsageWindowMovement pins the discriminator
+// between a five-hour window that ROLLED OVER mid-turn and one the vendor
+// merely re-projected. The raw-inequality version condemned every live turn in
+// the stack on sub-second BACKWARD jitter, which no rollover can produce.
+func TestTurnAccountingReducerClassifiesUsageWindowMovement(t *testing.T) {
+	const base = 1786273199884
+	tests := []struct {
+		name  string
+		start int64
+		end   int64
+		want  bool
+	}{
+		{name: "identical boundaries are one window", start: base, end: base, want: false},
+		{name: "sub-second backward jitter is not a reset", start: base, end: base - 693, want: false},
+		{name: "sub-second forward jitter is not a reset", start: base, end: base + 693, want: false},
+		{name: "movement just under the floor is not a reset", start: base, end: base + usageWindowRolloverFloorMs - 1, want: false},
+		{name: "movement at the floor is a reset", start: base, end: base + usageWindowRolloverFloorMs, want: true},
+		{name: "a real five-hour rollover is a reset", start: base, end: base + 5*60*60*1000, want: true},
+		{name: "a large backward move is a reset", start: base, end: base - 5*60*60*1000, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveWithWindowResets(t, tc.start, tc.end)
+			if got != tc.want {
+				t.Fatalf("window reset flagged = %t, want %t (start=%d end=%d)", got, tc.want, tc.start, tc.end)
+			}
+		})
 	}
 }
 
