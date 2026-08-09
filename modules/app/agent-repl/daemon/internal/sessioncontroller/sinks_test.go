@@ -30,12 +30,20 @@ type fakePusher struct {
 	heartbeats []*frontendv1.HeartbeatView
 	queues     []*frontendv1.QueueView
 	progress   []*frontendv1.ProgressView
+	bubbles    []*frontendv1.AsyncBubbleDelta
 }
 
 func (p *fakePusher) PushConversationDelta(c *frontendv1.ConversationDelta) {
 	p.mu.Lock()
 	p.trace = append(p.trace, "conversation")
 	p.convo = append(p.convo, c)
+	p.mu.Unlock()
+	notifyTestActivity()
+}
+func (p *fakePusher) PushAsyncBubbleDelta(d *frontendv1.AsyncBubbleDelta) {
+	p.mu.Lock()
+	p.trace = append(p.trace, "async-bubble")
+	p.bubbles = append(p.bubbles, d)
 	p.mu.Unlock()
 	notifyTestActivity()
 }

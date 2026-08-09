@@ -358,7 +358,13 @@ func FailureCardFromQueryTermination(sessionID string, lifecycle *corev1.QueryLi
 // deliberately does not acquire one: a curator that re-derived provenance from
 // live state would produce a different answer on a resync than it did on the
 // original push, which is the exact failure the persisted ledger prevents.
-func ConversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*frontendv1.ConversationDelta, map[string]RecordEnvelope, error) {
+//
+// IT IS UNEXPORTED ON PURPOSE. Its result is the UNSPLIT curation: it still
+// contains the records a detached agent wrote, which do not belong in the
+// top-level feed. CurateEvent (asyncsplit.go) is the only exported route from
+// an event to conversation content, so no caller outside this package can
+// obtain an unsplit delta and no push site can forget to partition one.
+func conversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*frontendv1.ConversationDelta, map[string]RecordEnvelope, error) {
 	if ev == nil {
 		return nil, nil, nil
 	}
@@ -417,6 +423,20 @@ type RecordEnvelope struct {
 	// other respect, so without this flag it renders as a prompt bubble the
 	// user never wrote.
 	IsMeta bool
+	// IsSidechain marks a record written by a DETACHED AGENT rather than by the
+	// session's own conversation. It is the transcript's own structured,
+	// durable statement of that fact — not an inference from prose — and it is
+	// what CurateEvent partitions on.
+	IsSidechain bool
+	// SourceToolUseID is the tool_use id of the call that launched the detached
+	// agent this record belongs to. It is the same id the launching tool call
+	// carries, which is what lets a record be routed to its bubble by matching
+	// rather than by deriving.
+	SourceToolUseID string
+	// AgentID is the harness's own id for the agent that wrote the record, the
+	// routing handle for a sidechain record whose envelope names no source
+	// call.
+	AgentID string
 }
 
 // conversationItemsFromVendor unwraps the vendor Any (a data.v1 message) into
@@ -556,7 +576,13 @@ func recordEnvelopes(items []*frontendv1.ConversationItem, env *datav1.LineEnvel
 	if len(items) == 0 {
 		return nil
 	}
-	re := RecordEnvelope{ParentUUID: env.GetParentUuid(), IsMeta: env.GetIsMeta()}
+	re := RecordEnvelope{
+		ParentUUID:      env.GetParentUuid(),
+		IsMeta:          env.GetIsMeta(),
+		IsSidechain:     env.GetIsSidechain(),
+		SourceToolUseID: env.GetSourceToolUseId(),
+		AgentID:         env.GetAgentId(),
+	}
 	out := make(map[string]RecordEnvelope, len(items))
 	for _, it := range items {
 		out[it.GetUuid()] = re
