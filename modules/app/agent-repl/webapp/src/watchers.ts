@@ -24,30 +24,53 @@
  * picks wrong it does so silently, and the wrong answer is an IDENTITY, so
  * every later update addressed to it lands on the wrong work.
  *
- * `AgentToolCall.spawned_bubble_id` replaced all of it. The daemon owns the
- * classification, mints the bubble's id, and stamps the same string on the
- * call and on its structured outcome, so a frontend MATCHES an id and never
- * derives one. Empty means "this call detached nothing" — the ONLY reading of
- * empty, and specifically not an invitation to go looking elsewhere.
+ * THE DAEMON'S CLASSIFICATION replaced all of it. The daemon links one tool
+ * call to one piece of detached work and publishes that link from both ends —
+ * `AsyncBubble.origin_tool_use_id` on the bubble, `AgentToolCall`/
+ * `AgentToolOutcome.spawned_bubble_id` on the call — so a frontend MATCHES a
+ * daemon-minted id by exact string equality and never derives one.
+ *
+ * Consulting both ends is not a two-rung ladder. They are the same fact
+ * written twice: `AsyncBubbleRegistry.bubbleForCall` CHECKS that they agree
+ * and refuses both when they do not, rather than preferring whichever is
+ * listed first. What differs between them is only WHEN each is on the wire.
+ * Absent or empty on either end means "this call detached nothing", which is
+ * the only reading of empty and specifically not an invitation to go looking
+ * elsewhere.
  */
+import type { AsyncBubbleRegistry } from "./async-routing.js";
 import { ConversationItem, ToolItem } from "./store.js";
+
+/**
+ * The registry surface this projection needs: one lookup, nothing more.
+ *
+ * Narrowed to the single method so a membership question can never reach for
+ * the registry's mutating side, and so a test can answer it without standing
+ * up a whole push pipeline.
+ */
+export type AsyncClassification = Pick<AsyncBubbleRegistry, "bubbleForCall">;
 
 /**
  * The bubble ITEM's call detached, or null when it detached nothing.
  *
- * This is the membership verdict every async surface keys off, and it has
- * exactly one input: the daemon's verdict as the store recorded it. There is
- * deliberately no second source to consult when the first says nothing.
+ * This is the membership verdict every async surface keys off, and its inputs
+ * are exactly the daemon's two statements of one classification. BUBBLES is
+ * what resolves `origin_tool_use_id`; without it only a call carrying its own
+ * `spawned_bubble_id` can be recognized, which is the honest answer for a page
+ * that holds no async plane rather than a reason to guess.
  */
-export function watcherRef(item: ConversationItem): string | null {
+export function watcherRef(item: ConversationItem, bubbles?: AsyncClassification): string | null {
   if (item.kind !== "tool") return null;
-  const verdict = item.spawnedBubbleId;
-  return verdict === undefined || verdict === "" ? null : verdict;
+  if (bubbles === undefined) {
+    const verdict = item.spawnedBubbleId;
+    return verdict === undefined || verdict === "" ? null : verdict;
+  }
+  return bubbles.bubbleForCall(item.toolUseId, item.spawnedBubbleId)?.id ?? null;
 }
 
 /** A tool call is an async member exactly when the daemon says it detached work. */
-export function isWatcher(item: ConversationItem): item is ToolItem {
-  return watcherRef(item) !== null;
+export function isWatcher(item: ConversationItem, bubbles?: AsyncClassification): item is ToolItem {
+  return watcherRef(item, bubbles) !== null;
 }
 
 /**
@@ -72,6 +95,7 @@ export function isWatcher(item: ConversationItem): item is ToolItem {
  */
 export function asyncByBubble(
   items: readonly ConversationItem[],
+  bubbles?: AsyncClassification,
 ): Map<string, ToolItem[]> {
   const byBubble = new Map<string, ToolItem[]>();
   let members: ToolItem[] = [];
@@ -97,7 +121,7 @@ export function asyncByBubble(
       // that turn's survivors on its own bubble before the new turn opens.
       flush();
       promptId = item.requestId;
-    } else if (isWatcher(item)) {
+    } else if (isWatcher(item, bubbles)) {
       members.push(item);
     } else if (item.kind === "text" && item.parentToolUseId === undefined) {
       lastText = item.blockId;

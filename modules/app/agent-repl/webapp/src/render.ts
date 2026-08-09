@@ -82,7 +82,7 @@ import { freezeOnScroll, freezeOnToggle, isPinnedToBottom, parkAtTail, revealNod
 import { blocksToText, userTurnText } from "./turn.js";
 import { clearOrCompactKey, itemsFromClearOrCompact } from "./clear-compact.js";
 import { gnsFolds } from "./gns.js";
-import { asyncByBubble, isWatcher, watcherRef } from "./watchers.js";
+import { asyncByBubble, isWatcher, watcherRef, type AsyncClassification } from "./watchers.js";
 import { TaskTail, WatcherPoller } from "./watcher-poll.js";
 import {
   ContextClearedItem,
@@ -1088,16 +1088,18 @@ function ToolCard(
  * The `AsyncBubble` this card's call detached, drawn attached to the card that
  * launched it.
  *
- * The attachment is a MATCH on the daemon's classification verdict and nothing
- * else: `AgentToolCall.spawned_bubble_id` names the bubble, and an absent or
- * empty verdict means the call detached nothing — never a prompt to go find a
- * plausible candidate. A card with no registry to match against draws nothing,
- * which is the honest state of a page that has received no async push.
+ * The attachment is a MATCH on the daemon's classification and nothing else,
+ * from whichever end of it the wire carries: `AsyncBubble.origin_tool_use_id`
+ * against this card's tool_use id, and `AgentToolCall.spawned_bubble_id`
+ * against the bubble's id. Empty on both ends means the call detached nothing
+ * — never a prompt to go find a plausible candidate. A card with no registry
+ * to match against draws nothing, which is the honest state of a page that has
+ * received no async push.
  */
 function asyncBubbleForCard(item: ToolItem, panels?: PanelContext): string {
   const registry = panels?.asyncBubbles;
   if (registry === undefined) return "";
-  return AsyncBubbleForCall(item.spawnedBubbleId, asyncRenderContext(registry, panels));
+  return AsyncBubbleForCall(item.toolUseId, item.spawnedBubbleId, asyncRenderContext(registry, panels));
 }
 
 /**
@@ -1418,8 +1420,8 @@ function statusDot(status: MemberStatus): "running" | "done" | "error" {
 }
 
 /** A member's badge label: its tool name and its one bubble id, capped. */
-function asyncBadgeLabel(item: ToolItem): string {
-  const bubbleId = watcherRef(item);
+function asyncBadgeLabel(item: ToolItem, panels?: PanelContext): string {
+  const bubbleId = watcherRef(item, panels?.asyncBubbles);
   const label = bubbleId !== null ? `${item.toolName} · ${bubbleId}` : item.toolName;
   return capLabel(label, 24);
 }
@@ -1453,7 +1455,7 @@ function AsyncBadge(hostId: string, item: ToolItem, panels?: PanelContext): stri
       : "";
   return `<div class="async-badge${settled ? " settled" : ""}${
     open ? " active" : ""
-  }" data-panel-toggle="${escapeHtml(id)}"><span class="agent-dot agent-${dot}" aria-hidden="true">●</span> ${escapeHtml(asyncBadgeLabel(item))}${tokens}</div>`;
+  }" data-panel-toggle="${escapeHtml(id)}"><span class="agent-dot agent-${dot}" aria-hidden="true">●</span> ${escapeHtml(asyncBadgeLabel(item, panels))}${tokens}</div>`;
 }
 
 /**
@@ -2784,10 +2786,11 @@ export function panelSeedsOnOpen(id: string): string[] {
 export function asyncMembersByBubble(
   visible: readonly ConversationItem[],
   gnsByBubble: ReadonlyMap<string, readonly ConversationItem[]>,
+  bubbles?: AsyncClassification,
 ): Map<string, ToolItem[]> {
-  const byBubble = asyncByBubble(visible);
+  const byBubble = asyncByBubble(visible, bubbles);
   for (const [host, folded] of gnsByBubble) {
-    const members = folded.filter(isWatcher);
+    const members = folded.filter((item) => isWatcher(item, bubbles));
     if (members.length === 0) continue;
     const list = byBubble.get(host) ?? [];
     list.push(...members);
@@ -2828,7 +2831,7 @@ export function anyLiveAsync(
   items: readonly ConversationItem[],
   panels?: PanelContext,
 ): boolean {
-  return items.some((i) => isWatcher(i) && memberLive(i, panels));
+  return items.some((i) => isWatcher(i, panels?.asyncBubbles) && memberLive(i, panels));
 }
 
 /**
@@ -3580,7 +3583,7 @@ export class FeedRenderer {
     const visible = items.filter((i) => !gns.folded.has(i));
     const part = partitionFeed(items);
     const top = part.top.filter((i) => !gns.folded.has(i));
-    const watchers = asyncMembersByBubble(visible, gns.byBubble);
+    const watchers = asyncMembersByBubble(visible, gns.byBubble, this.asyncBubbles ?? undefined);
     const panels = this.panelContext(part.children, watchers, gns.byBubble);
     this.syncWatcherPolls(watchers, panels);
     const finals = finalResponses(visible);
@@ -3781,7 +3784,7 @@ export class FeedRenderer {
     const visible = items.filter((i) => !gns.folded.has(i));
     const part = partitionFeed(items);
     const top = part.top.filter((i) => !gns.folded.has(i));
-    const watchers = asyncMembersByBubble(visible, gns.byBubble);
+    const watchers = asyncMembersByBubble(visible, gns.byBubble, this.asyncBubbles ?? undefined);
     const panels = this.panelContext(part.children, watchers, gns.byBubble);
     this.syncWatcherPolls(watchers, panels);
     const finals = finalResponses(visible);
