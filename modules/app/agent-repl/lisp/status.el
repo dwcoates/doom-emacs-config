@@ -847,10 +847,18 @@ same actionability claim blue does, and only the reason is benign.")
     ;; it is stays the sidebar's to say — the tab bar has no glyph to say it
     ;; with, which is why these took no color at all until now and a merging
     ;; workspace looked untouched.
+    ;;
+    ;; They are the ONLY rows that split the entry in two: the red stays on
+    ;; the NAME region and the [N] bracket goes green.  A merge is the one
+    ;; in-flight state whose destination is a finished workspace, and the
+    ;; split says both halves at once — red for the work still running, green
+    ;; on the bracket for where it is headed — instead of an entry painted
+    ;; edge to edge in a red indistinguishable from a thinking turn.
     (:merge-enqueuing
      :face       agent-repl-tab-thinking
      :unselected (:bg ,agent-repl--color-thinking-red
                   :fg ,agent-repl--color-light
+                  :bracket-bg ,agent-repl--color-done-green
                   :bracket-fg ,agent-repl--color-default-bracket
                   :weight ,agent-repl--tab-weight)
      :selected   (:bg ,agent-repl--color-selected-bg
@@ -862,6 +870,7 @@ same actionability claim blue does, and only the reason is benign.")
      :face       agent-repl-tab-thinking
      :unselected (:bg ,agent-repl--color-thinking-red
                   :fg ,agent-repl--color-light
+                  :bracket-bg ,agent-repl--color-done-green
                   :bracket-fg ,agent-repl--color-default-bracket
                   :weight ,agent-repl--tab-weight)
      :selected   (:bg ,agent-repl--color-selected-bg
@@ -873,6 +882,7 @@ same actionability claim blue does, and only the reason is benign.")
      :face       agent-repl-tab-thinking
      :unselected (:bg ,agent-repl--color-thinking-red
                   :fg ,agent-repl--color-light
+                  :bracket-bg ,agent-repl--color-done-green
                   :bracket-fg ,agent-repl--color-default-bracket
                   :weight ,agent-repl--tab-weight)
      :selected   (:bg ,agent-repl--color-selected-bg
@@ -889,7 +899,11 @@ only).
 The three IN-FLIGHT merge states have rows because the tab bar overrides
 them to red (`agent-repl--tab-bar-color-overrides'), which is the one
 place this palette answers to `agent-repl--tab-bar-state-color' rather
-than to the shared `agent-repl--state-color'.
+than to the shared `agent-repl--state-color'.  They are also the only
+rows whose unselected look sets `:bracket-bg' to a DIFFERENT color from
+`:bg': red on the name region, green on the [N] bracket.  Everywhere
+else `:bracket-bg' is absent from the unselected look and the bracket
+inherits `:bg', so the entry paints one color end to end.
 
 `:merge-conflict' and `:merge-failed' still have NO entry: they take none
 of the six, and with no badge on the tab the merge pipeline says what it
@@ -913,10 +927,22 @@ region inherit defaults.  Used wherever `agent-repl--ws-display-state'
 suppresses the full-tab color — panels dismissed, or a `:ready'
 workspace the user has already viewed — so the bracket retains the
 state's color and the workspace's state stays visible while the rest
-of the tab falls back to the default appearance."
+of the tab falls back to the default appearance.
+
+The bracket takes the STATE's own color, never the bracket decoration a
+full entry may carry beside it.  For an UNSELECTED look that color is
+`:bg' (the state color by construction for every palette row), and only
+the in-flight merge states have a `:bracket-bg' that differs from it —
+green, which reads as \"done\" and would misreport a merge that is still
+running when the bracket is the only colored region left.  For a
+SELECTED look `:bg' is the shared grey, so the state color is the
+`:bracket-bg' the row already puts there."
   (let* ((full (agent-repl--tab-spec state selected))
-         (bracket-bg (or (plist-get full :bracket-bg)
-                         (plist-get full :bg))))
+         (bracket-bg (if selected
+                         (or (plist-get full :bracket-bg)
+                             (plist-get full :bg))
+                       (or (plist-get full :bg)
+                           (plist-get full :bracket-bg)))))
     `(:bg unspecified
       :fg unspecified
       :bracket-bg ,bracket-bg
