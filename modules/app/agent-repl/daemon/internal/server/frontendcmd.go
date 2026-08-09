@@ -1608,6 +1608,12 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	snap.Catalogs = filterPublishedWorkspaceViews(snap.Catalogs, publicationAllowed, p.logf)
 	snap.Queues = filterPublishedWorkspaceViews(snap.Queues, publicationAllowed, p.logf)
 	snap.Progress = filterPublishedWorkspaceViews(snap.Progress, publicationAllowed, p.logf)
+	// A bubble is a per-workspace family like any other, and the latch holds it
+	// back for the same reason: its label, its command line and its spooled
+	// output are the contents of work running in a workspace the client has not
+	// been told exists yet. It carries no session id of its own — the workspace
+	// IS its routing key — so it asks the gate the fenced question.
+	snap.AsyncBubbles = filterPublishedWorkspaceViews(snap.AsyncBubbles, publicationAllowed, p.logf)
 	hostWork := p.workspaceCreation.SnapshotHostWork()
 	snap.WorkspaceAvailable = hostWork.WorkspaceAvailable
 	snap.HostActions = hostWork.HostActions
@@ -1634,9 +1640,6 @@ type workspacePublicationView interface {
 	GetWorkspace() string
 }
 
-// filterPublishedWorkspaceViews is filterPublishedSessionViews for the fenced
-// views, asking the same gate the same per-workspace question with no session
-// to name.
 // refuseWorkspacelessBubbles drops any async bubble that names no workspace,
 // loudly.
 //
@@ -1665,6 +1668,9 @@ func refuseWorkspacelessBubbles(bubbles []*frontendv1.AsyncBubble, logf func(str
 	return filtered
 }
 
+// filterPublishedWorkspaceViews is filterPublishedSessionViews for the fenced
+// views, asking the same gate the same per-workspace question with no session
+// to name.
 func filterPublishedWorkspaceViews[T workspacePublicationView](views []T, allow func(workspace, sessionID string) (bool, error), logf func(string, ...any)) []T {
 	filtered := make([]T, 0, len(views))
 	for _, view := range views {
