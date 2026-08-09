@@ -161,6 +161,20 @@ export const REVIVE_COMPACT_PROMPTS_AND_RESPONSES_EXPLANATION =
   "tool calls and their results word for word. The work survives; the talking about it " +
   "does not.";
 
+/**
+ * What "clear" does, said the same way on every cause.
+ *
+ * IT SAYS "DISCARDED", NOT "COMPACTED". Every other option on this card keeps
+ * something — that is what the scopes are for — and this one keeps nothing.
+ * They are one click apart, so the sentence has to make the difference
+ * impossible to miss rather than describing it as one more way of making the
+ * conversation smaller.
+ */
+export const REVIVE_CLEAR_EXPLANATION =
+  "Clear: discard the conversation entirely — a plain /clear on the workspace. Nothing is " +
+  "summarized and nothing is carried forward, so the woken session starts empty and costs " +
+  "nothing to resume.";
+
 /** The heading, so the gate is recognizable without parsing the prose below it. */
 export const REVIVAL_GATE_HEADING = "This session is asleep";
 
@@ -248,8 +262,21 @@ export interface ReviveOption {
   decision: ReviveDecision;
   label: string;
   explanation: string;
-  /** Rendered as the warning variant — the option that keeps the whole bill. */
+  /**
+   * Rendered as the warning variant — an option whose consequence a scoped
+   * compaction does not carry (`direct` keeps the whole bill on every later
+   * turn, `clear` keeps nothing at all).
+   */
   warn: boolean;
+  /**
+   * The button's class.
+   *
+   * IT IS A FIELD RATHER THAN A CONDITION AT THE RENDER SITE. It used to be an
+   * inline `decision === "direct" ? … : "hibernation-compact"`, which silently
+   * gave every future non-compaction the filled cheap-path style — so `clear`
+   * would have rendered as the recommended option. The table decides.
+   */
+  className: string;
 }
 
 /**
@@ -271,30 +298,47 @@ export function reviveOptions(hibernation: HibernationDetail): ReviveOption[] {
       label: "Compact everything",
       explanation: REVIVE_COMPACT_EXPLANATION,
       warn: false,
+      className: "hibernation-compact",
     },
     {
       decision: "compactPromptsAndResponses",
       label: "Compact prompts + responses",
       explanation: REVIVE_COMPACT_PROMPTS_AND_RESPONSES_EXPLANATION,
       warn: false,
+      className: "hibernation-compact",
     },
     {
       decision: "compactResponses",
       label: "Compact responses only",
       explanation: REVIVE_COMPACT_RESPONSES_EXPLANATION,
       warn: false,
+      className: "hibernation-compact",
     },
     {
       decision: "compactPrompts",
       label: "Compact prompts only",
       explanation: REVIVE_COMPACT_PROMPTS_EXPLANATION,
       warn: false,
+      className: "hibernation-compact",
     },
     {
       decision: "direct",
       label: "Resume as-is",
       explanation: reviveDirectWarning(hibernation),
       warn: true,
+      className: "hibernation-direct",
+    },
+    // CLEAR SITS AT THE END, off the axis rather than at its cheap end. The
+    // four compactions and the direct resume are one question — how much of
+    // this conversation is worth carrying — and clear answers a different one:
+    // none of it. Putting it beside "compact everything", where the axis would
+    // otherwise place it, would invite it as the cheapest compaction.
+    {
+      decision: "clear",
+      label: "Clear",
+      explanation: REVIVE_CLEAR_EXPLANATION,
+      warn: true,
+      className: "hibernation-clear",
     },
   ];
 }
@@ -327,6 +371,7 @@ const REVIVE_DECISIONS = [
   "compactResponses",
   "compactPrompts",
   "direct",
+  "clear",
 ] as const satisfies readonly ReviveDecision[];
 
 /**
@@ -348,6 +393,8 @@ export function revivePendingText(pending: Exclude<RevivePending, null>): string
       return "Waking the session and compacting its prompts…";
     case "direct":
       return "Waking the session with its full context…";
+    case "clear":
+      return "Waking the session and clearing the conversation…";
     default: {
       const unhandled: never = pending;
       throw new Error(`hibernation: unhandled revival decision ${JSON.stringify(unhandled)}`);
@@ -487,7 +534,7 @@ export function reviveFailedLog(
 /**
  * The revival gate card, or "" when the session is awake.
  *
- * FIVE actions and no sixth. There is no "dismiss": the gate is a pure function
+ * THE ACTIONS ARE THE REVIVAL DECISIONS AND NOTHING ELSE. There is no "dismiss": the gate is a pure function
  * of the daemon's live state, so a dismissed gate would reappear on the next
  * frame while having taught the user that the block is optional. And there is
  * no "cancel" — a hibernated session has nothing to cancel back to.
@@ -523,9 +570,9 @@ export function revivalGateHtml(
         .map(
           (option) => `
         <div class="hibernation-option${option.warn ? " warn" : ""}">
-          <button ${REVIVE_ATTR}="${escapeHtml(option.decision)}" class="${
-            option.decision === "direct" ? "hibernation-direct" : "hibernation-compact"
-          }">${escapeHtml(option.label)}</button>
+          <button ${REVIVE_ATTR}="${escapeHtml(option.decision)}" class="${escapeHtml(
+            option.className,
+          )}">${escapeHtml(option.label)}</button>
           <span class="hibernation-option-text">${escapeHtml(option.explanation)}</span>
         </div>`,
         )
