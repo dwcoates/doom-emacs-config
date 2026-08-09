@@ -40,6 +40,22 @@ type turnAccountingReducer struct {
 	// conversation's own history rather than rejected as evidence about some
 	// other conversation entirely — see isKnownVendorSession.
 	knownVendorSessionIDs map[string]struct{}
+	// responseUsageCorrections holds each response's FINAL vendor usage, keyed
+	// by API message id, as relayed from the vendor's message_delta frame.
+	//
+	// It exists because the assistant message a response record is built from
+	// carries the `message_start` usage SNAPSHOT: settled input and cache
+	// counters, interim output. The final output_tokens are reported only on
+	// message_delta, so without this the per-response ledger could never agree
+	// with the terminal result's totals — 563 against 4407 on one measured live
+	// turn, with input reconciling exactly.
+	//
+	// IT IS A MAP RATHER THAN AN IN-PLACE PATCH because neither arrival order is
+	// guaranteed: the SDK emits one assistant message per content block, and
+	// whether those land before or after the frame's message_delta is the
+	// vendor's business. A correction is recorded here on arrival and applied to
+	// its response whichever of the two comes second.
+	responseUsageCorrections map[string]*frontendv1.VendorTokenUsage
 	// logf is the consumer's session-tagged logging channel. It is never nil;
 	// newTurnAccountingReducer substitutes a discard when a caller has none.
 	logf dlog.Logf
@@ -103,7 +119,7 @@ func newTurnAccountingReducer(logf dlog.Logf) *turnAccountingReducer {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &turnAccountingReducer{turns: map[string]*accountingTurn{}, latencies: map[string]responseLatency{}, knownVendorSessionIDs: map[string]struct{}{}, logf: logf}
+	return &turnAccountingReducer{turns: map[string]*accountingTurn{}, latencies: map[string]responseLatency{}, knownVendorSessionIDs: map[string]struct{}{}, responseUsageCorrections: map[string]*frontendv1.VendorTokenUsage{}, logf: logf}
 }
 
 // recordKnownVendorSession admits id into the conversation's proven vendor
@@ -336,6 +352,11 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 	if latency := ev.GetMessageLatency(); latency != nil && latency.GetUuid() != "" {
 		r.latencies[latency.GetUuid()] = responseLatency{ttftMs: latency.GetTtftMs(), messageStartedAtMs: ev.GetProducedAtMs()}
 	}
+	if delta := messageDeltaFromVendor(ev.GetVendor()); delta != nil && delta.GetApiMessageId() != "" && delta.GetVendorUsage() != nil {
+		if _, historical := r.liveEvidenceFor(ev); !historical {
+			r.recordResponseUsageCorrection(delta.GetApiMessageId(), delta.GetVendorUsage())
+		}
+	}
 	observation, err := tokenUtilizationObservationFromEvent(ev, daemonSessionID, r.isKnownVendorSession)
 	if err != nil {
 		return err
@@ -370,6 +391,12 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 			return claim
 		}
 		usage.RootTurnId = r.activeTurnID
+		// BEFORE validation and before the duplicate compare below. The SDK
+		// emits one assistant message per content block, all carrying the same
+		// API message id and the same snapshot usage, and the compare treats any
+		// difference between two such records as a ledger conflict. Correcting
+		// one copy and not the other would manufacture exactly that conflict.
+		r.applyResponseUsageCorrection(usage)
 		if err := tokenutilization.Validate(usage, tokenutilization.Identity{
 			AgentReplSessionID: daemonSessionID,
 			ClaudeSessionID:    ev.GetSessionId(),
@@ -534,8 +561,8 @@ func (r *turnAccountingReducer) resolveTurn(turnID string, settledAt int64) *fro
 	if turn.endUsage == nil || turn.endUsage.GetAvailable() == nil {
 		problems = append(problems, missingUsageProblem(false))
 	}
-	if turn.startUsage != nil && turn.endUsage != nil && turn.startUsage.GetAvailable() != nil && turn.endUsage.GetAvailable() != nil && turn.startUsage.GetAvailable().GetFiveHour().GetResetsAtMs() != turn.endUsage.GetAvailable().GetFiveHour().GetResetsAtMs() {
-		problems = append(problems, &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_WindowReset{WindowReset: &frontendv1.UsageWindowReset{StartResetsAtMs: turn.startUsage.GetAvailable().GetFiveHour().GetResetsAtMs(), EndResetsAtMs: turn.endUsage.GetAvailable().GetFiveHour().GetResetsAtMs()}}})
+	if startWindow, endWindow := turn.startUsage.GetAvailable().GetFiveHour(), turn.endUsage.GetAvailable().GetFiveHour(); startWindow != nil && endWindow != nil && usageWindowRolledOver(startWindow.GetResetsAtMs(), endWindow.GetResetsAtMs()) {
+		problems = append(problems, &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_WindowReset{WindowReset: &frontendv1.UsageWindowReset{StartResetsAtMs: startWindow.GetResetsAtMs(), EndResetsAtMs: endWindow.GetResetsAtMs()}}})
 	}
 	if missing := incompleteRuntimeIdentityPaths(r.runtime); len(missing) > 0 {
 		problems = append(problems, runtimeIdentityProblem(r.queryID, missing))
@@ -609,6 +636,9 @@ func (r *turnAccountingReducer) commitResolved(turnID string) error {
 	if r.activeTurnID == turnID {
 		r.activeTurnID = ""
 	}
+	// The corrections belong to the responses of the turn just settled, so they
+	// are retired with it rather than accumulating for the life of the session.
+	clear(r.responseUsageCorrections)
 	return nil
 }
 
@@ -623,6 +653,53 @@ func (r *turnAccountingReducer) response(apiMessageID string) *frontendv1.TokenU
 		}
 	}
 	return nil
+}
+
+// recordResponseUsageCorrection files one response's FINAL vendor usage and
+// applies it to that response if the reducer already holds it.
+//
+// The correction is authoritative over the snapshot it replaces: it is the
+// vendor's own cumulative usage for the same API message, reported later.
+func (r *turnAccountingReducer) recordResponseUsageCorrection(apiMessageID string, usage *datav1.ApiUsage) {
+	corrected := vendorTokenUsageFromAPI(usage)
+	r.responseUsageCorrections[apiMessageID] = corrected
+	if existing := r.response(apiMessageID); existing != nil {
+		existing.Usage = proto.Clone(corrected).(*frontendv1.VendorTokenUsage)
+		r.logf("session-controller: corrected a response's token usage from its message_delta (api_message_id=%s output_tokens=%d)", apiMessageID, corrected.GetOutputTokens())
+	}
+}
+
+// applyResponseUsageCorrection gives a response record the final usage its
+// message_delta already reported, when the delta arrived first.
+//
+// A response with no correction on file is left EXACTLY as the vendor's
+// assistant message described it. That is the pre-amendment world, and it stays
+// representable: the ledger reports its disagreement honestly rather than being
+// quietly reconciled against evidence nobody sent.
+func (r *turnAccountingReducer) applyResponseUsageCorrection(usage *frontendv1.TokenUtilization) {
+	corrected := r.responseUsageCorrections[usage.GetApiMessageId()]
+	if corrected == nil {
+		return
+	}
+	usage.Usage = proto.Clone(corrected).(*frontendv1.VendorTokenUsage)
+	r.logf("session-controller: applied a filed message_delta token-usage correction to its response (api_message_id=%s output_tokens=%d)", usage.GetApiMessageId(), corrected.GetOutputTokens())
+}
+
+// messageDeltaFromVendor extracts a relayed `message_delta` frame from an
+// event's vendor payload, or nil when the payload is anything else.
+func messageDeltaFromVendor(a *anypb.Any) *datav1.MessageDeltaEvent {
+	if a == nil {
+		return nil
+	}
+	msg, err := a.UnmarshalNew()
+	if err != nil {
+		return nil
+	}
+	stream, ok := msg.(*datav1.ClaudeStreamMessage)
+	if !ok {
+		return nil
+	}
+	return stream.GetStreamEvent().GetEvent().GetMessageDelta()
 }
 
 func resultFromVendor(a *anypb.Any) *datav1.ResultMessage {
@@ -1031,6 +1108,44 @@ func cloneOptional[T any](value *T) *T {
 	return &cloned
 }
 
+// usageWindowRolloverFloorMs is the smallest movement of the five-hour window's
+// resets_at that can mean the window ROLLED OVER rather than that the vendor
+// re-projected the same boundary slightly differently between two samples.
+//
+// WHY A FLOOR AT ALL. The check used to be raw inequality, and raw inequality
+// is self-refuting on live evidence: every settled turn in the stack was
+// condemned for a "reset" where the END boundary landed 693ms EARLIER than the
+// start's. A window that has rolled over resets LATER, never sooner, and never
+// by a fraction of a second. What the two samples actually disagreed about was
+// the projection of one unchanged boundary — the vendor recomputes resets_at
+// per request from its own clock, so two samples of the SAME window differ by
+// request-to-request skew, on the order of milliseconds.
+//
+// WHY FIVE MINUTES. A genuine rollover advances the boundary by a full window,
+// five hours (18,000,000ms). The jitter this must ignore is sub-second. Any
+// floor strictly between those discriminates; five minutes sits three orders of
+// magnitude above the noise and two orders below the signal, so neither a
+// pathologically skewed projection nor a rollover shortened by vendor-side
+// window accounting can cross into the wrong answer.
+//
+// IT IS A MAGNITUDE, NOT A DIRECTION. A forward move past the floor is the
+// rollover the design already flagged. A BACKWARD move past the floor is not a
+// rollover, but it is the same thing the finding exists to state: the turn's two
+// boundaries were measured against windows that are not the same window, so the
+// quota delta between them is not a delta. It stays a stated invalidity rather
+// than being filtered out with the jitter.
+const usageWindowRolloverFloorMs = 5 * 60 * 1000
+
+// usageWindowRolledOver reports whether a turn's two five-hour-window samples
+// name different windows, as opposed to the same window projected twice.
+func usageWindowRolledOver(startResetsAtMs, endResetsAtMs int64) bool {
+	delta := endResetsAtMs - startResetsAtMs
+	if delta < 0 {
+		delta = -delta
+	}
+	return delta >= usageWindowRolloverFloorMs
+}
+
 func missingUsageProblem(start bool) *frontendv1.TurnAccountingProblem {
 	if start {
 		return &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_MissingUsageBoundary{MissingUsageBoundary: &frontendv1.MissingUsageBoundary{Boundary: &frontendv1.MissingUsageBoundary_TurnStart{TurnStart: &frontendv1.MissingUsageBoundaryTurnStart{}}}}}
@@ -1049,11 +1164,27 @@ func runtimeIdentityProblem(queryID string, missing []string) *frontendv1.TurnAc
 	return &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_RuntimeIdentityIncomplete{RuntimeIdentityIncomplete: &frontendv1.RuntimeIdentityIncomplete{MissingFieldPaths: paths}}}
 }
 
+// incompleteRuntimeIdentityPaths names every field of the query's runtime
+// identity that the producer did not settle. Nothing here is an OPINION about
+// whether a value is plausible — only about whether the shim answered.
+//
+// TWO FIELDS ARE DELIBERATELY NOT REQUIRED, each for a reason about the
+// evidence rather than about the convenience of passing:
+//
+//   - subscription_type is not initialization evidence at all. It is reported
+//     by the usage service, and this same TurnAccounting already carries it on
+//     both of the turn's AccountUsageObservations. Demanding the init message
+//     duplicate it condemned every turn for the absence of a fact the record
+//     holds twice over.
+//   - fast_mode_reason is the EXPLANATION for fast_mode_state, and a state that
+//     needs no explaining has none. Requiring it unconditionally made "fast
+//     mode is on and working" indistinguishable from missing evidence.
+//     fast_mode_state itself stays required, so the state is never unstated.
 func incompleteRuntimeIdentityPaths(runtime *corev1.QueryRuntimeIdentity) []string {
 	if runtime == nil {
 		return []string{""}
 	}
-	missing := make([]string, 0, 14)
+	missing := make([]string, 0, 12)
 	for _, field := range []struct {
 		path  string
 		value string
@@ -1064,9 +1195,7 @@ func incompleteRuntimeIdentityPaths(runtime *corev1.QueryRuntimeIdentity) []stri
 		{"claude_code_version", runtime.GetClaudeCodeVersion()},
 		{"shim_build_sha", runtime.GetShimBuildSha()},
 		{"auth_source", runtime.GetAuthSource()},
-		{"subscription_type", runtime.GetSubscriptionType()},
 		{"fast_mode_state", runtime.GetFastModeState()},
-		{"fast_mode_reason", runtime.GetFastModeReason()},
 	} {
 		if field.value == "" {
 			missing = append(missing, field.path)
@@ -1082,11 +1211,32 @@ func incompleteRuntimeIdentityPaths(runtime *corev1.QueryRuntimeIdentity) []stri
 		{"mcp", runtime.GetMcp()},
 		{"context_prefix", runtime.GetContextPrefix()},
 	} {
-		if fingerprint.value == nil || fingerprint.value.GetSha256() == "" {
+		if !evidenceFingerprintSettled(fingerprint.value) {
 			missing = append(missing, fingerprint.path)
 		}
 	}
 	return missing
+}
+
+// evidenceFingerprintSettled reports whether the producer ANSWERED for one
+// fingerprint — either it hashed the evidence or it stated why it could not.
+//
+// The check used to accept only a digest, which made the proto's own
+// `unavailable` arm unsatisfiable: a shim that correctly reported "I hold
+// nothing to fingerprint, and here is the cause" was recorded as having said
+// nothing at all. That is the same available/unavailable settlement
+// AccountUsageObservation already uses for its boundary samples, and it is read
+// the same way here. A fingerprint that is absent, carries no arm, or carries an
+// empty digest or a causeless unavailability is still unsettled.
+func evidenceFingerprintSettled(f *corev1.EvidenceFingerprint) bool {
+	switch evidence := f.GetEvidence().(type) {
+	case *corev1.EvidenceFingerprint_Sha256:
+		return evidence.Sha256 != ""
+	case *corev1.EvidenceFingerprint_Unavailable:
+		return strings.TrimSpace(evidence.Unavailable.GetCause()) != ""
+	default:
+		return false
+	}
 }
 func invalidTurnAccounting(turnID, queryID string, runtime *corev1.QueryRuntimeIdentity, settledAt int64, problem *frontendv1.TurnAccountingProblem) *frontendv1.TurnAccounting {
 	return &frontendv1.TurnAccounting{TurnId: turnID, QueryInstanceId: queryID, Runtime: runtime, Timing: &frontendv1.TurnAccountingTiming{AccountingSettledAtMs: settledAt}, Verdict: &frontendv1.TurnAccounting_Invalid{Invalid: &frontendv1.TurnAccountingInvalid{Problems: []*frontendv1.TurnAccountingProblem{problem}}}}
