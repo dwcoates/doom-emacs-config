@@ -94,6 +94,8 @@ import {
 import {
   FailureKindSchema,
   type FailureKind as GeneratedFailureKind,
+  type QueryTerminationFailure as GeneratedQueryTerminationFailure,
+  type SessionResumeFailure as GeneratedSessionResumeFailure,
 } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
 import {
   FailureCardRefSchema,
@@ -4232,7 +4234,80 @@ export function decodeFailureKind(v: unknown, where: string): FailureKind {
       `frontend-proto: ${where} names failure kind '${generated.kind.case}', which has no side`,
     );
   }
+  // The two arms that carry a whole machine-readable lifecycle record are held
+  // to that record's OWN invariants, the ones the retired
+  // decodeQueryTerminationFailure/decodeSessionResumeFailure enforced. The
+  // generated descriptor cannot state them: it accepts an absent detail
+  // message, an empty oneof and a blank string alike. Renderers read these
+  // records field by field, so an evidence record that names no query, no
+  // instant, no vendor conversation or no cause is refused HERE rather than
+  // reaching the card as "missing …" prose describing evidence nobody supplied.
+  if (generated.kind.case === "queryTermination") {
+    requireQueryTerminationEvidence(generated.kind.value.detail, `${where}.queryTermination.detail`);
+  }
+  if (generated.kind.case === "sessionResumeFailed") {
+    requireSessionResumeEvidence(generated.kind.value.detail, `${where}.sessionResumeFailed.detail`);
+  }
   return generated;
+}
+
+/**
+ * Hold a `QueryTerminationFailure` to the evidence it claims to be.
+ *
+ * The agent-repl session id left this message in the figma-idl reshape — the
+ * push that carries the failure is fenced, so the session is the fence's, and a
+ * second copy here could disagree with it. Query and observed-time identity are
+ * still required: an evidence record that names neither the query() invocation
+ * nor when it died corroborates nothing.
+ */
+function requireQueryTerminationEvidence(
+  detail: GeneratedQueryTerminationFailure | undefined,
+  where: string,
+): void {
+  if (detail === undefined) {
+    throw new Error(`frontend-proto: ${where} requires query-termination evidence`);
+  }
+  if (detail.queryInstanceId.trim() === "") {
+    throw new Error(`frontend-proto: ${where} requires a nonblank \`query_instance_id\``);
+  }
+  if (detail.observedAtMs <= 0n) {
+    throw new Error(`frontend-proto: ${where} requires a positive \`observed_at_ms\``);
+  }
+  if (detail.vendorIdentity.case === undefined) {
+    throw new Error(`frontend-proto: ${where} requires explicit vendor identity evidence`);
+  }
+  if (detail.vendorIdentity.case === "vendorSessionId" && detail.vendorIdentity.value.trim() === "") {
+    throw new Error(`frontend-proto: ${where}.vendorSessionId must be nonblank`);
+  }
+  if (detail.reason.case === undefined) {
+    throw new Error(`frontend-proto: ${where} requires an unexpected termination reason`);
+  }
+}
+
+/**
+ * Hold a `SessionResumeFailure` to the evidence it claims to be.
+ *
+ * Both oneofs are required: the attempt says WHICH operation's continuity
+ * requirement could not be met and the cause says WHY, and a card that renders
+ * one without the other states a refusal nobody accounted for. A cause that is
+ * itself a query death carries the query record's own invariants with it.
+ */
+function requireSessionResumeEvidence(
+  detail: GeneratedSessionResumeFailure | undefined,
+  where: string,
+): void {
+  if (detail === undefined) {
+    throw new Error(`frontend-proto: ${where} requires resume-continuity evidence`);
+  }
+  if (detail.attempt.case === undefined) {
+    throw new Error(`frontend-proto: ${where} requires exactly one attempt`);
+  }
+  if (detail.cause.case === undefined) {
+    throw new Error(`frontend-proto: ${where} requires exactly one cause`);
+  }
+  if (detail.cause.case === "queryTermination") {
+    requireQueryTerminationEvidence(detail.cause.value, `${where}.queryTermination`);
+  }
 }
 
 const FAILURE_CARD_VIEW_KEYS = generatedFieldSet<keyof typeof FailureCardViewSchema.field>()(
