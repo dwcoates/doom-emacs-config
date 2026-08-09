@@ -154,14 +154,11 @@ func filterSnapshot(snap *frontendv1.StateSnapshot, sc Scope) *frontendv1.StateS
 		Inits:      filterWorkspaceViews(snap.GetInits(), sc),
 		Queues:     filterWorkspaceViews(snap.GetQueues(), sc),
 		Progress:   filterWorkspaceViews(snap.GetProgress(), sc),
-		// ASYNC BUBBLES PASS WHOLE. AsyncBubble carries no workspace and no
-		// session field — the contract addresses a bubble by its id alone —
-		// so there is no routing key here to filter on, and inventing one from
-		// the id's composition would depend on a fact the contract does not
-		// offer. The DELTAS that carry bubble content are workspace-routed
-		// above, which is where the scoping actually happens; this list is the
-		// reconnect restatement of what those deltas already delivered.
-		AsyncBubbles: snap.GetAsyncBubbles(),
+		// Async bubbles scope by workspace exactly as every other per-workspace
+		// family does. AsyncBubble.workspace is the same key its delta carries
+		// on the envelope, so a client's reconnect restatement and the pushes
+		// it then receives are filtered by one rule rather than two.
+		AsyncBubbles: filterWorkspaceViews(snap.GetAsyncBubbles(), sc),
 		// Daemon identity is connection-global, not workspace-scoped. Dropping
 		// it here handed every scoped client a snapshot with an empty boot id,
 		// which the webapp's version-skew gate rejects on EVERY adoption —

@@ -66,7 +66,7 @@ func exitCode(v int32) *int32 { return &v }
 // --- opening from a detached agent's own records ---------------------------
 
 func TestObserveCurationOpensABubbleForANewDetachedAgent(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestObserveCurationOpensABubbleForANewDetachedAgent(t *testing.T) {
 }
 
 func TestObserveCurationFoldsASecondRecordIntoTheSameBubble(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "one")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestObserveCurationFoldsASecondRecordIntoTheSameBubble(t *testing.T) {
 }
 
 func TestObserveCurationAddressesTheUpdateToTheOpenedBubble(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestObserveCurationAddressesTheUpdateToTheOpenedBubble(t *testing.T) {
 }
 
 func TestObserveCurationRefusesADetachedRecordItCannotAttributeToACall(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	_, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("", "agent_1", "hi")}}, 10)
 	if err == nil {
 		t.Fatal("a record naming neither a source call nor an open bubble has nothing to attribute the detachment to")
@@ -110,7 +110,7 @@ func TestObserveCurationRefusesADetachedRecordItCannotAttributeToACall(t *testin
 }
 
 func TestObserveCurationLabelsABubbleFromTheToolThatLaunchedIt(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeCuration(frontend.Curation{
 		ToolNames: map[string]string{"tu_1": "Agent"},
 		Detached:  []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")},
@@ -126,7 +126,7 @@ func TestObserveCurationLabelsABubbleFromTheToolThatLaunchedIt(t *testing.T) {
 // --- the classification verdict on the tool card ---------------------------
 
 func TestSpawnedBubbleIDNamesTheBubbleACallDetached(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestSpawnedBubbleIDNamesTheBubbleACallDetached(t *testing.T) {
 }
 
 func TestSpawnedBubbleIDIsEmptyForACallThatDetachedNothing(t *testing.T) {
-	if got := newAsyncBubbleStore().spawnedBubbleID("tu_other"); got != "" {
+	if got := newAsyncBubbleStore("/ws").spawnedBubbleID("tu_other"); got != "" {
 		t.Fatalf("empty is the only reading of a call that detached nothing, got %q", got)
 	}
 }
@@ -145,7 +145,7 @@ func TestSpawnedBubbleIDIsEmptyForACallThatDetachedNothing(t *testing.T) {
 // --- nested dispatch -------------------------------------------------------
 
 func TestANestedDispatchPointsAtTheBubbleItWasLaunchedFrom(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	outer, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{callingFold("tu_1", "agent_1", "tu_inner", "Agent")}}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +160,7 @@ func TestANestedDispatchPointsAtTheBubbleItWasLaunchedFrom(t *testing.T) {
 }
 
 func TestATopLevelDispatchHasNoParentPointer(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +173,7 @@ func TestATopLevelDispatchHasNoParentPointer(t *testing.T) {
 // --- shell launches --------------------------------------------------------
 
 func TestABackgroundShellLaunchOpensAShellBubble(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")}}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +184,7 @@ func TestABackgroundShellLaunchOpensAShellBubble(t *testing.T) {
 }
 
 func TestAForegroundShellDetachesNothing(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		{ToolUseID: "tu_1", Result: &datav1.ToolUseResult{Result: &datav1.ToolUseResult_Bash{Bash: &datav1.BashResult{}}}},
 	}}, 10)
@@ -197,7 +197,7 @@ func TestAForegroundShellDetachesNothing(t *testing.T) {
 }
 
 func TestAnAsyncAgentLaunchOpensAnAgentBubble(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{{
 		ToolUseID: "tu_1",
 		Result: &datav1.ToolUseResult{Result: &datav1.ToolUseResult_AgentAsyncLaunch{
@@ -213,7 +213,7 @@ func TestAnAsyncAgentLaunchOpensAnAgentBubble(t *testing.T) {
 }
 
 func TestAWorkflowLaunchOpensAJournalBubble(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{{
 		ToolUseID: "tu_1",
 		Result: &datav1.ToolUseResult{Result: &datav1.ToolUseResult_WorkflowLaunch{
@@ -231,7 +231,7 @@ func TestAWorkflowLaunchOpensAJournalBubble(t *testing.T) {
 // --- shell folds -----------------------------------------------------------
 
 func TestARetrievalAppendsOnlyTheNewBytes(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestARetrievalAppendsOnlyTheNewBytes(t *testing.T) {
 }
 
 func TestARunningShellIsNotSettledByItsAbsentExitCode(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestARunningShellIsNotSettledByItsAbsentExitCode(t *testing.T) {
 }
 
 func TestAShellSettlesOnItsExitCodeWithANonRunningStatus(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestAShellSettlesOnItsExitCodeWithANonRunningStatus(t *testing.T) {
 }
 
 func TestARetrievalForWorkNoLaunchAnnouncedOpensNothing(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		retrieval("task_unknown", "abc", datav1.RawTaskStatus_RAW_TASK_STATUS_RUNNING, nil),
 	}}, 10)
@@ -291,7 +291,7 @@ func TestARetrievalForWorkNoLaunchAnnouncedOpensNothing(t *testing.T) {
 // --- task lifecycle --------------------------------------------------------
 
 func TestTaskStartedOpensABubbleForARecognizedKind(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL, ToolUseId: "tu_1", Description: "sleep 9",
 	}, 10)
@@ -304,7 +304,7 @@ func TestTaskStartedOpensABubbleForARecognizedKind(t *testing.T) {
 }
 
 func TestTaskStartedWithNoCallBecomesAFailureCardRatherThanABlankOriginBubble(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -315,7 +315,7 @@ func TestTaskStartedWithNoCallBecomesAFailureCardRatherThanABlankOriginBubble(t 
 }
 
 func TestAnUnrecognizedToolOpensTheExplicitUnclassifiedArm(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	if _, err := s.observeCuration(frontend.Curation{ToolNames: map[string]string{"tu_1": "Frobnicate"}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestAnUnrecognizedToolOpensTheExplicitUnclassifiedArm(t *testing.T) {
 }
 
 func TestAnUnrecognizedToolWithNoNameBecomesAFailureCard(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", ToolUseId: "tu_1"}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -340,7 +340,7 @@ func TestAnUnrecognizedToolWithNoNameBecomesAFailureCard(t *testing.T) {
 }
 
 func TestAFaultCardIsStableAcrossAReplay(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	first, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1"}, 10)
 	second, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1"}, 10)
 	if first.Faults[0].UUID != second.Faults[0].UUID {
@@ -349,7 +349,7 @@ func TestAFaultCardIsStableAcrossAReplay(t *testing.T) {
 }
 
 func TestTaskStartedEnrichesABubbleAlreadyOpenedByItsFirstRecord(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestTaskStartedEnrichesABubbleAlreadyOpenedByItsFirstRecord(t *testing.T) {
 }
 
 func TestTaskStartedSuppliesTheLabelABubbleOpenedWithout(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +380,7 @@ func TestTaskStartedSuppliesTheLabelABubbleOpenedWithout(t *testing.T) {
 }
 
 func TestTaskEndedSettlesTheDetachmentsBubble(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
 	}, 10); err != nil {
@@ -396,7 +396,7 @@ func TestTaskEndedSettlesTheDetachmentsBubble(t *testing.T) {
 }
 
 func TestTaskEndedForATaskThatOpenedNoBubbleIsNotAFailure(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	push, err := s.observeTaskEnded(&corev1.TaskEnded{TaskId: "task_x", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}, 11)
 	if err != nil {
 		t.Fatal(err)
@@ -428,7 +428,7 @@ func openWorkflow(t *testing.T, s *asyncBubbleStore) {
 }
 
 func TestAWorkflowsRetrievalFoldsAsJournalRowsNotBytes(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	openWorkflow(t, s)
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		journalRetrieval("task_1", `{"label":"a","result":"ok"}`+"\n"),
@@ -442,7 +442,7 @@ func TestAWorkflowsRetrievalFoldsAsJournalRowsNotBytes(t *testing.T) {
 }
 
 func TestAWorkflowsSecondRetrievalAppendsOnlyItsNewRows(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	openWorkflow(t, s)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		journalRetrieval("task_1", `{"label":"a"}`+"\n"),
@@ -462,7 +462,7 @@ func TestAWorkflowsSecondRetrievalAppendsOnlyItsNewRows(t *testing.T) {
 }
 
 func TestAWorkflowsPartialTrailingRecordIsLeftForTheNextRead(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	openWorkflow(t, s)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		journalRetrieval("task_1", `{"label":"a"}`+"\n"+`{"label":"b`),
@@ -482,7 +482,7 @@ func TestAWorkflowsPartialTrailingRecordIsLeftForTheNextRead(t *testing.T) {
 }
 
 func TestAWorkflowsRewoundJournalIsRefusedAsAGap(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	openWorkflow(t, s)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		journalRetrieval("task_1", `{"label":"a"}`+"\n"+`{"label":"b"}`+"\n"),
@@ -500,7 +500,7 @@ func TestAWorkflowsRewoundJournalIsRefusedAsAGap(t *testing.T) {
 // --- snapshot --------------------------------------------------------------
 
 func TestSnapshotServesTheSameFoldTheDeltasWereProducedFrom(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -510,7 +510,7 @@ func TestSnapshotServesTheSameFoldTheDeltasWereProducedFrom(t *testing.T) {
 }
 
 func TestSnapshotListsBubblesInLaunchOrder(t *testing.T) {
-	s := newAsyncBubbleStore()
+	s := newAsyncBubbleStore("/ws")
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_a", "agent_a", "x")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +524,7 @@ func TestSnapshotListsBubblesInLaunchOrder(t *testing.T) {
 }
 
 func TestSnapshotIsEmptyForASessionWithNoDetachedWork(t *testing.T) {
-	if got := newAsyncBubbleStore().snapshot(); len(got) != 0 {
+	if got := newAsyncBubbleStore("/ws").snapshot(); len(got) != 0 {
 		t.Fatalf("want no bubbles, got %d", len(got))
 	}
 }
