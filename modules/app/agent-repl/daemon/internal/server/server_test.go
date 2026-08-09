@@ -260,7 +260,7 @@ func newHarnessWith(t testing.TB, extra Config) *harness {
 	cfg.AgentShim = &AgentShim{
 		SSM:            mgr,
 		Server:         fe,
-		WorkspaceViews: NewWorkspaceViews(logf, fe, reg, NewSessionModelCatalogs(), nil, nil),
+		WorkspaceViews: NewWorkspaceViews(logf, fe, reg, NewSessionModelCatalogs(), nil, nil, mgr),
 	}
 	if cfg.ModelCatalogs == nil {
 		cfg.ModelCatalogs = NewSessionModelCatalogs()
