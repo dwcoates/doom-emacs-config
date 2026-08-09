@@ -5,7 +5,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { QueryTerminationFailureSchema } from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
+import {
+  QueryTerminationFailureSchema,
+} from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
 import { QueryStartupFailureSchema } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
 import { decodeFrontendFrame } from "../src/frontend-proto.js";
 import {

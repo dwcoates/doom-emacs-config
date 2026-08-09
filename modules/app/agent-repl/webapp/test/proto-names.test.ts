@@ -12,13 +12,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  FrontendCommandSchema,
+} from "../../proto/gen/ts/agentshim/frontend/v1/frame_pb";
+import {
   HibernationDetailSchema,
+  ReviveSessionCmdSchema,
+} from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
+import {
   QueueEntryKeepAliveHoldSchema,
   QueueEntryRevivalHoldSchema,
   QueueEntrySchema,
-  ReviveSessionCmdSchema,
-  FrontendCommandSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
+} from "../../proto/gen/ts/agentshim/frontend/v1/prompt-queue_pb";
 import { PromptOriginSchema } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
 import {
   COMMAND_ARM,
