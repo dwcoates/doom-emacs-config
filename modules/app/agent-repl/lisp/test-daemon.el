@@ -1584,6 +1584,101 @@ duplication argument that skips complete daemon records does not apply."
                          "refusing to start\n")))
       (kill-buffer buffer))))
 
+;;;; ---- the bounded capture buffer -------------------------------------------
+
+(defmacro agent-repl-test--with-daemon-capture (buffer &rest body)
+  "Run BODY with BUFFER bound to a fresh capture buffer wired to `proc'.
+The log mirror is silenced and the line accumulator starts empty, so
+only the buffer side of the filter is under test."
+  (declare (indent 1) (debug (symbolp body)))
+  `(let ((,buffer (generate-new-buffer " *agent-repl-test-daemon-capture*"))
+         (agent-repl--frontend-daemon-line-accumulator ""))
+     (unwind-protect
+         (cl-letf (((symbol-function 'agent-repl--persist-log-record) #'ignore)
+                   ((symbol-function 'process-buffer) (lambda (_proc) ,buffer))
+                   ((symbol-function 'process-mark)
+                    (lambda (_proc)
+                      (with-current-buffer ,buffer (point-max-marker)))))
+           ,@body)
+       (kill-buffer ,buffer))))
+
+(defun agent-repl-test--daemon-feed-past-cap (chunk)
+  "Feed CHUNK to the daemon filter until well past the capture cap."
+  (dotimes (_ (1+ (/ (* 3 agent-repl--frontend-daemon-buffer-max-chars)
+                     (length chunk))))
+    (agent-repl--frontend-daemon-filter 'proc chunk)))
+
+(ert-deftest agent-repl-test-daemon-filter-caps-the-capture-buffer ()
+  "Output past the cap is trimmed away instead of accumulating forever."
+  ;; Arrange
+  (agent-repl-test--with-daemon-capture buffer
+    ;; Act — three times the cap, delivered as whole lines.
+    (agent-repl-test--daemon-feed-past-cap (concat (make-string 8000 ?x) "\n"))
+    ;; Assert
+    (should (<= (buffer-size buffer)
+                agent-repl--frontend-daemon-buffer-max-chars))))
+
+(ert-deftest agent-repl-test-daemon-filter-trim-starts-on-a-whole-line ()
+  "The retained region begins at a line boundary, never mid-record."
+  ;; Arrange
+  (agent-repl-test--with-daemon-capture buffer
+    ;; Act
+    (agent-repl-test--daemon-feed-past-cap (concat (make-string 8000 ?x) "\n"))
+    ;; Assert — a fragment would be shorter than a whole record.
+    (should (equal (with-current-buffer buffer
+                     (save-excursion
+                       (goto-char (point-min))
+                       (buffer-substring-no-properties
+                        (point-min) (line-end-position))))
+                   (make-string 8000 ?x)))))
+
+(ert-deftest agent-repl-test-daemon-filter-trim-keeps-the-newest-output ()
+  "Trimming discards the OLDEST output, so the dying words always survive."
+  ;; Arrange
+  (agent-repl-test--with-daemon-capture buffer
+    (agent-repl-test--daemon-feed-past-cap (concat (make-string 8000 ?x) "\n"))
+    ;; Act
+    (agent-repl--frontend-daemon-filter 'proc "panic: the last words\n")
+    ;; Assert
+    (should (string-suffix-p "panic: the last words\n"
+                             (with-current-buffer buffer (buffer-string))))))
+
+(ert-deftest agent-repl-test-daemon-filter-trim-keeps-a-single-overlong-line ()
+  "A line longer than the whole cap is cut mid-line rather than erased."
+  ;; Arrange — no newline anywhere, so no line boundary exists to cut at.
+  (agent-repl-test--with-daemon-capture buffer
+    ;; Act
+    (agent-repl-test--daemon-feed-past-cap (make-string 100000 ?y))
+    ;; Assert
+    (should (= (buffer-size buffer)
+               agent-repl--frontend-daemon-buffer-max-chars))))
+
+(ert-deftest agent-repl-test-daemon-trim-reanchors-a-stranded-process-mark ()
+  "A process mark left inside the trimmed span is moved back to the tail."
+  ;; Arrange
+  (let ((buffer (generate-new-buffer " *agent-repl-test-daemon-mark*")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (insert (make-string (* 2 agent-repl--frontend-daemon-buffer-max-chars) ?z))
+          (let ((mark (copy-marker (point-min))))
+            (cl-letf (((symbol-function 'processp) (lambda (_proc) t))
+                      ((symbol-function 'process-mark) (lambda (_proc) mark)))
+              ;; Act
+              (agent-repl--frontend-daemon-trim-capture 'proc)
+              ;; Assert
+              (should (= (marker-position mark) (point-max))))))
+      (kill-buffer buffer))))
+
+(ert-deftest agent-repl-test-daemon-trim-leaves-a-small-capture-alone ()
+  "A capture inside the cap keeps every byte, trimming nothing."
+  ;; Arrange
+  (agent-repl-test--with-daemon-capture buffer
+    ;; Act
+    (agent-repl--frontend-daemon-filter 'proc "refusing to start\n")
+    ;; Assert
+    (should (equal (with-current-buffer buffer (buffer-string))
+                   "refusing to start\n"))))
+
 (ert-deftest agent-repl-test-daemon-exit-carries-the-captured-output ()
   "The daemon's dying words ride its failure card, not only its exit event."
   ;; Arrange
