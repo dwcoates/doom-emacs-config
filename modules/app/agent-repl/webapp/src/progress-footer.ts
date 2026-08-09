@@ -936,10 +936,27 @@ export function footerHtml(
   if (tokens !== "") cells.push(`<div class="pfooter-cell pfooter-tokens">${tokens}</div>`);
   const counters = countersHtml(input, open);
   if (counters !== "") cells.push(`<div class="pfooter-cell pfooter-counters">${counters}</div>`);
-  const accounting = latestTurnAccounting(input.items);
-  if (accounting !== null) {
-    const summary = accountingSummary(accounting);
-    cells.push(`<div class="pfooter-cell ${accounting.verdict.kind === "invalid" ? "pfooter-accounting-invalid" : "pfooter-accounting"}" title="${escapeHtml(summary)}">${escapeHtml(summary)}</div>`);
+  // The DAEMON-resolved cell wins whenever it is present: the reconciliation,
+  // the verdict and the prose are all its own, and the verbatim-render doctrine
+  // says this side draws them rather than recomputing a second opinion beside
+  // them. The client-derived line below is kept ONLY as the absence fallback —
+  // it covers turns the daemon has not resolved yet.
+  const daemonAccounting = p.accounting;
+  if (daemonAccounting !== null) {
+    const phrases =
+      daemonAccounting.verdict.kind === "incomplete"
+        ? daemonAccounting.verdict.missing
+        : daemonAccounting.verdict.kind === "invalid"
+          ? daemonAccounting.verdict.problems
+          : [];
+    const title = [daemonAccounting.summary, ...phrases].join("; ");
+    cells.push(`<div class="pfooter-cell ${daemonAccounting.verdict.kind === "invalid" ? "pfooter-accounting-invalid" : "pfooter-accounting"}" title="${escapeHtml(title)}">${escapeHtml(daemonAccounting.summary)}</div>`);
+  } else {
+    const accounting = latestTurnAccounting(input.items);
+    if (accounting !== null) {
+      const summary = accountingSummary(accounting);
+      cells.push(`<div class="pfooter-cell ${accounting.verdict.kind === "invalid" ? "pfooter-accounting-invalid" : "pfooter-accounting"}" title="${escapeHtml(summary)}">${escapeHtml(summary)}</div>`);
+    }
   }
 
   return (

@@ -81,6 +81,7 @@ import {
   type ConversationDelta,
   type ConversationItemArm,
   type ConversationItemFrame,
+  type FooterAccountingCell,
   type FooterFailureRow,
   type MergeStatus,
   type FrontendFrame,
@@ -376,6 +377,11 @@ export interface ProgressInput {
   // state off `StoreState.renderState`, which is the same message the tab bar
   // and the sidebar dot read. The copy that used to live here refreshed on the
   // progress resolver's triggers and went stale.
+  //
+  // The wire's `phase` and `mergeChip` cells decode STRICTLY (see
+  // `frontend-proto.ts`) but are deliberately not projected here: the daemon
+  // does not populate either yet, and WorkspaceState/MergeStatus remain the
+  // phase and merge authorities per the F5 note above.
   /** 0 = no turn in flight. */
   turnStartedAtMs: number;
   thinkingTokens: number;
@@ -421,6 +427,13 @@ export interface ProgressInput {
    * expensive turn and only the origin separates them.
    */
   expensiveTurn: import("./frontend-proto.js").ContextCostAlert | null;
+  /**
+   * The turn-accounting cell, resolved DAEMON-SIDE: the composed summary and
+   * the verdict that classes it. Carried VERBATIM — the reconciliation, the
+   * verdict and the prose are all the daemon's, and nothing here re-derives
+   * any of them. `null` = no turn has settled yet.
+   */
+  accounting: FooterAccountingCell | null;
   pendingPermissions: number;
   queueDepth: number;
   liveTaskCount: number;
@@ -884,6 +897,9 @@ export class StateAdapter {
         // ref — so there is nothing here to classify or recolor.
         failure: pv.failure ?? null,
         expensiveTurn: pv.expensiveTurn ?? null,
+        // Also VERBATIM: the daemon reconciled the turn and composed the prose,
+        // so the footer renders a string and picks a class from the arm.
+        accounting: pv.accounting ?? null,
         pendingPermissions: pv.pendingPermissions,
         queueDepth: pv.queueDepth,
         liveTaskCount: pv.liveTaskCount,

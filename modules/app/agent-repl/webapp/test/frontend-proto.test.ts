@@ -1551,6 +1551,124 @@ describe("ProgressView decoding (F1)", () => {
     ).toThrow(/unrecognized value 'INTERRUPT_OUTCOME_WAT'/);
   });
 
+  it("decodes a populated accounting cell rather than rejecting it as unknown", () => {
+    // Arrange / Act — THE REGRESSION. The daemon populates `accounting`, and
+    // an allowlist without it threw on every connect snapshot, so the page
+    // never adopted and looped reconnect/reload forever.
+    const got = decodeFrontendFrame(
+      pv({ accounting: { summary: "12.3s · 41.2k in", complete: {} } }),
+    );
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.accounting).toEqual({
+      summary: "12.3s · 41.2k in",
+      verdict: { kind: "complete" },
+    });
+  });
+
+  it("decodes the INCOMPLETE verdict with the phrases it names", () => {
+    // Arrange / Act
+    const got = decodeFrontendFrame(
+      pv({ accounting: { summary: "partial", incomplete: { missing: ["turn start was never sampled"] } } }),
+    );
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.accounting?.verdict).toEqual({
+      kind: "incomplete",
+      missing: ["turn start was never sampled"],
+    });
+  });
+
+  it("decodes the INVALID verdict with the contradictions it names", () => {
+    // Arrange / Act
+    const got = decodeFrontendFrame(
+      pv({ accounting: { summary: "bad", invalid: { problems: ["per-model totals disagree"] } } }),
+    );
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.accounting?.verdict).toEqual({
+      kind: "invalid",
+      problems: ["per-model totals disagree"],
+    });
+  });
+
+  it("rejects an accounting cell with no summary", () => {
+    // Arrange / Act / Assert — the summary IS the cell's text; an empty one
+    // would draw a blank cell the daemon never asked for.
+    expect(() => decodeFrontendFrame(pv({ accounting: { complete: {} } }))).toThrow(
+      /ProgressView\.accounting requires a non-empty `summary`/,
+    );
+  });
+
+  it("rejects an INCOMPLETE verdict naming nothing", () => {
+    // Arrange / Act / Assert — an incompleteness with nothing to name is a
+    // daemon fault, not a renderable state.
+    expect(() =>
+      decodeFrontendFrame(pv({ accounting: { summary: "s", incomplete: { missing: [] } } })),
+    ).toThrow(/ProgressView\.accounting\.incomplete\.missing must not be empty/);
+  });
+
+  it("rejects an INVALID verdict naming nothing", () => {
+    // Arrange / Act / Assert — the arm exists precisely because the evidence
+    // is present; an empty list contradicts the arm.
+    expect(() =>
+      decodeFrontendFrame(pv({ accounting: { summary: "s", invalid: { problems: [] } } })),
+    ).toThrow(/ProgressView\.accounting\.invalid\.problems must not be empty/);
+  });
+
+  it("rejects an accounting cell carrying no verdict arm", () => {
+    // Arrange / Act / Assert — the arm decides the cell's class, so a cell
+    // without one would be drawn as reconciled on this side's own authority.
+    expect(() => decodeFrontendFrame(pv({ accounting: { summary: "s" } }))).toThrow(
+      /ProgressView\.accounting requires a verdict oneof/,
+    );
+  });
+
+  it("rejects an unrecognized field inside the accounting cell", () => {
+    // Arrange / Act / Assert — strict decoding all the way down.
+    expect(() =>
+      decodeFrontendFrame(pv({ accounting: { summary: "s", complete: {}, bogus: 1 } })),
+    ).toThrow(/ProgressView\.accounting has unrecognized field\(s\): bogus/);
+  });
+
+  it("decodes the footer phase cell's word, tone and breathing together", () => {
+    // Arrange / Act — resolved display props, rendered verbatim.
+    const got = decodeFrontendFrame(
+      pv({ phase: { word: "thinking", tone: "purple", breathing: true } }),
+    );
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.phase).toEqual({ word: "thinking", tone: "purple", breathing: true });
+  });
+
+  it("rejects a PRESENT phase cell with no word", () => {
+    // Arrange / Act / Assert — absence of the message is "no phase cell", so a
+    // present cell with nothing to say is a daemon fault.
+    expect(() => decodeFrontendFrame(pv({ phase: { tone: "purple" } }))).toThrow(
+      /ProgressView\.phase requires a non-empty `word`/,
+    );
+  });
+
+  it("decodes the merge chip's text and tooltip", () => {
+    // Arrange / Act
+    const got = decodeFrontendFrame(
+      pv({ mergeChip: { text: "merge queued 2/3", title: "2 of 3 published" } }),
+    );
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.mergeChip).toEqual({
+      text: "merge queued 2/3",
+      title: "2 of 3 published",
+    });
+  });
+
+  it("rejects a PRESENT merge chip with no text", () => {
+    // Arrange / Act / Assert — absence of the message is "no chip".
+    expect(() => decodeFrontendFrame(pv({ mergeChip: { title: "t" } }))).toThrow(
+      /ProgressView\.mergeChip requires a non-empty `text`/,
+    );
+  });
+
   it("decodes a snapshot's progress list", () => {
     // Arrange / Act
     const got = decodeFrontendFrame(
