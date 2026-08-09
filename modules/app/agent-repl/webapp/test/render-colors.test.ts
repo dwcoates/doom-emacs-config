@@ -100,9 +100,10 @@ describe("the shared color fixture", () => {
 
   it("grants this renderer no surface override", () => {
     // Arrange / Act — the Emacs tab bar overrides the in-flight merge states
-    // to red because it has neither a badge nor a glyph, so "none" renders
-    // there as no state at all. This rail does have both, and a red merge dot
-    // would collide with the thinking dot sitting beside it in the same list.
+    // to purple because it has neither a badge nor a glyph, so "none" renders
+    // there as no state at all, and it moves vendor-blocked to blue so purple
+    // means one thing. This rail has both a glyph and a status word, so it
+    // spends no color on the merge pipeline and keeps purple on vendor-blocked.
     // Assert
     expect(fixture.surface_overrides?.webapp).toBeUndefined();
   });

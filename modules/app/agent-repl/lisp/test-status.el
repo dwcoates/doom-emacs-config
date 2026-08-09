@@ -160,28 +160,21 @@ picks the right one for all six colors."
     (should (equal agent-repl--color-default-bracket
                    (plist-get (plist-get row :unselected) :bracket-fg)))))
 
-(ert-deftest agent-repl-test-tab-palette-row-omitted-bracket-bg-is-absent ()
-  "With no bracket background the unselected look has NO `:bracket-bg\='.
-The renderer falls back to `:bg\=' only when the key is absent, so an
-explicit nil would paint an entry that is not one color end to end."
+(ert-deftest agent-repl-test-tab-palette-row-unselected-has-no-bracket-bg ()
+  "The unselected look carries NO `:bracket-bg\=', so the entry is one color.
+The renderer falls back to `:bg\=' only when the key is absent, and a row
+that set it would paint a two-color entry."
   ;; Arrange
   (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
     ;; Act / Assert
     (should-not (plist-member (plist-get row :unselected) :bracket-bg))))
 
-(ert-deftest agent-repl-test-tab-palette-row-bracket-bg-lands-on-the-unselected-look ()
-  "A supplied bracket background colors the unselected [N] alone."
-  ;; Arrange
-  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white" "#abcdef")))
-    ;; Act / Assert
-    (should (equal "#abcdef" (plist-get (plist-get row :unselected) :bracket-bg)))))
-
-(ert-deftest agent-repl-test-tab-palette-row-bracket-bg-leaves-the-selected-look-alone ()
-  "A supplied bracket background never reaches the SELECTED look.
+(ert-deftest agent-repl-test-tab-palette-row-selected-brackets-the-state-color ()
+  "The selected look puts the state color on the [N] bracket.
 Selection dims the name to the shared grey, so the bracket there is the
 only place the state color can still be read."
   ;; Arrange
-  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white" "#abcdef")))
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
     ;; Act / Assert
     (should (equal "#123456" (plist-get (plist-get row :selected) :bracket-bg)))))
 
@@ -214,97 +207,98 @@ hand-written row could silently drop."
       (should (equal (plist-get (plist-get row :unselected) :bg)
                      (plist-get (plist-get row :selected) :bracket-bg))))))
 
+(ert-deftest agent-repl-test-tab-palette-no-row-splits-its-entry ()
+  "No palette row paints its [N] bracket differently from its name region.
+An entry is one color end to end, and a second color inside one entry
+would be a second vocabulary saying what the state color already says."
+  ;; Act / Assert
+  (dolist (entry agent-repl--tab-palette)
+    (should-not (plist-member (plist-get (cdr entry) :unselected) :bracket-bg))))
+
 (ert-deftest agent-repl-test-tab-palette-has-no-merge-conflict-entry ()
   "`:merge-conflict' has no palette row: a conflict is waiting on the USER,
-which is the opposite of the in-flight claim the merging states' red makes."
+which is the opposite of the in-flight claim the merging states' purple makes."
   (should-not (alist-get :merge-conflict agent-repl--tab-palette)))
 
 (ert-deftest agent-repl-test-tab-palette-has-no-merge-failed-entry ()
   "`:merge-failed' likewise has no palette row: nothing is in flight."
   (should-not (alist-get :merge-failed agent-repl--tab-palette)))
 
-(ert-deftest agent-repl-test-tab-spec-merging-is-red ()
-  "A merge the daemon is RUNNING paints the tab thinking-red.
-Before the override this state had no palette row at all, so a merging
-workspace fell through to the default appearance and read as untouched."
+(ert-deftest agent-repl-test-tab-spec-merging-is-purple ()
+  "A merge the daemon is RUNNING paints the tab purple.
+Purple is the tab bar\='s merge color: the work in flight is the SYSTEM\='s
+rather than the agent\='s, and red would have claimed a turn was running."
   ;; Act / Assert
-  (should (equal agent-repl--color-thinking-red
+  (should (equal agent-repl--color-merging-purple
                  (plist-get (agent-repl--tab-spec :merging nil) :bg))))
 
-(ert-deftest agent-repl-test-tab-spec-merge-enqueuing-is-red ()
-  "A merge on its way into the queue is already in flight, so it is red."
+(ert-deftest agent-repl-test-tab-spec-merge-enqueuing-is-purple ()
+  "A merge on its way into the queue is already in flight, so it is purple."
   ;; Act / Assert
-  (should (equal agent-repl--color-thinking-red
+  (should (equal agent-repl--color-merging-purple
                  (plist-get (agent-repl--tab-spec :merge-enqueuing nil) :bg))))
 
-(ert-deftest agent-repl-test-tab-spec-merge-queued-is-red ()
-  "A merge waiting behind a sibling is in flight from the user's side.
+(ert-deftest agent-repl-test-tab-spec-merge-queued-is-purple ()
+  "A merge waiting behind a sibling is in flight from the user\='s side.
 They can no more act on the workspace than during the merge itself."
   ;; Act / Assert
-  (should (equal agent-repl--color-thinking-red
+  (should (equal agent-repl--color-merging-purple
                  (plist-get (agent-repl--tab-spec :merge-queued nil) :bg))))
 
-(ert-deftest agent-repl-test-tab-spec-merging-brackets-green ()
-  "A merge the daemon is RUNNING paints the [N] bracket green.
-The red belongs to the name region alone: an entry painted red edge to
-edge read as a thinking turn, and the green bracket says where the work
-in flight is headed."
+(ert-deftest agent-repl-test-tab-spec-vendor-blocked-is-blue ()
+  "A vendor-blocked tab paints BLUE, not the purple every other surface gives it.
+Purple is spent on the merge pipeline here, and a tab bar carries no
+glyph to tell two purples apart."
   ;; Act / Assert
-  (should (equal agent-repl--color-done-green
-                 (plist-get (agent-repl--tab-spec :merging nil) :bracket-bg))))
+  (should (equal agent-repl--color-init-blue
+                 (plist-get (agent-repl--tab-spec :vendor-blocked nil) :bg))))
 
-(ert-deftest agent-repl-test-tab-spec-merge-enqueuing-brackets-green ()
-  "A merge on its way into the queue takes the same green bracket."
+(ert-deftest agent-repl-test-tab-spec-vendor-blocked-is-not-purple ()
+  "Nothing but the merge states may paint purple on this surface.
+The collision is the whole reason vendor-blocked moved, so it is pinned
+directly rather than left implied by the blue assertion."
   ;; Act / Assert
-  (should (equal agent-repl--color-done-green
-                 (plist-get (agent-repl--tab-spec :merge-enqueuing nil) :bracket-bg))))
+  (should-not (equal agent-repl--color-merging-purple
+                     (plist-get (agent-repl--tab-spec :vendor-blocked nil) :bg))))
 
-(ert-deftest agent-repl-test-tab-spec-merge-queued-brackets-green ()
-  "A merge waiting behind a sibling takes the same green bracket."
+(ert-deftest agent-repl-test-tab-spec-merging-bracket-inherits-the-name-color ()
+  "A merging entry is ONE color end to end.
+The [N] bracket takes no color of its own, so the tab reads as a single
+purple region rather than a two-color entry."
   ;; Act / Assert
-  (should (equal agent-repl--color-done-green
-                 (plist-get (agent-repl--tab-spec :merge-queued nil) :bracket-bg))))
+  (should-not (plist-get (agent-repl--tab-spec :merging nil) :bracket-bg)))
 
-(ert-deftest agent-repl-test-tab-spec-thinking-bracket-inherits-the-name-color ()
-  "A THINKING tab still paints one color end to end.
-The split is the merge states\=' alone, so nothing else may grow a
-bracket color of its own without saying so."
-  ;; Act / Assert
-  (should-not (plist-get (agent-repl--tab-spec :thinking nil) :bracket-bg)))
-
-(ert-deftest agent-repl-test-tab-spec-merging-selected-brackets-red ()
-  "A SELECTED merging tab keeps red on the [N] bracket.
+(ert-deftest agent-repl-test-tab-spec-merging-selected-brackets-purple ()
+  "A SELECTED merging tab keeps purple on the [N] bracket.
 Selection dims the name region to the shared grey for every state, so the
 bracket is the only place the merge can still be read."
   ;; Arrange
   (let ((spec (agent-repl--tab-spec :merging t)))
     ;; Act / Assert
     (should (equal agent-repl--color-selected-bg (plist-get spec :bg)))
-    (should (equal agent-repl--color-thinking-red (plist-get spec :bracket-bg)))))
+    (should (equal agent-repl--color-merging-purple (plist-get spec :bracket-bg)))))
 
-(ert-deftest agent-repl-test-tab-spec-bracket-only-merging-is-red ()
-  "A merging tab whose panels are dismissed keeps red on the bracket.
+(ert-deftest agent-repl-test-tab-spec-bracket-only-merging-is-purple ()
+  "A merging tab whose panels are dismissed keeps purple on the bracket.
 The bracket-only path is what a workspace the user closed the panels on
 renders with, and a merge must stay visible through it."
   ;; Arrange
   (let ((spec (agent-repl--tab-spec-bracket-only :merging nil)))
     ;; Act / Assert
     (should (equal 'unspecified (plist-get spec :bg)))
-    (should (equal agent-repl--color-thinking-red (plist-get spec :bracket-bg)))))
+    (should (equal agent-repl--color-merging-purple (plist-get spec :bracket-bg)))))
 
-(ert-deftest agent-repl-test-tab-spec-bracket-only-selected-merging-is-red ()
-  "A SELECTED merging tab with panels dismissed also keeps red on the bracket.
-The selected row dims the name region to the shared grey, so the state
-color has to come from that row\='s own `:bracket-bg\='."
+(ert-deftest agent-repl-test-tab-spec-bracket-only-vendor-blocked-is-blue ()
+  "A vendor-blocked tab with panels dismissed keeps BLUE on the bracket.
+The bracket is the only colored region left there, so it has to carry
+the color this surface actually assigns the state."
   ;; Arrange
-  (let ((spec (agent-repl--tab-spec-bracket-only :merging t)))
+  (let ((spec (agent-repl--tab-spec-bracket-only :vendor-blocked nil)))
     ;; Act / Assert
-    (should (equal agent-repl--color-thinking-red (plist-get spec :bracket-bg)))))
+    (should (equal agent-repl--color-init-blue (plist-get spec :bracket-bg)))))
 
 (ert-deftest agent-repl-test-tab-spec-bracket-only-ready-stays-green ()
-  "A `:ready\=' tab with panels dismissed keeps green on the bracket.
-The unselected row has no `:bracket-bg\=', so the bracket-only path has to
-read the state color out of `:bg\='."
+  "A `:ready\=' tab with panels dismissed keeps green on the bracket."
   ;; Arrange
   (let ((spec (agent-repl--tab-spec-bracket-only :ready nil)))
     ;; Act / Assert
@@ -611,8 +605,8 @@ reads distinctly from :idle orange and :thinking red."
                                   :background)
                        agent-repl--color-done-green))))))
 
-(ert-deftest agent-repl-test-render-tab-entry-merging-bracket-is-green ()
-  "The [9] bracket of a merging workspace renders with the green background."
+(ert-deftest agent-repl-test-render-tab-entry-merging-bracket-is-purple ()
+  "The [9] bracket of a merging workspace renders with the purple background."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :pushed-render-state :merging)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
@@ -621,10 +615,10 @@ reads distinctly from :idle orange and :thinking red."
              (bracket-pos (string-match "\\[9\\]" entry)))
         (should (equal (plist-get (get-text-property bracket-pos 'face entry)
                                   :background)
-                       agent-repl--color-done-green))))))
+                       agent-repl--color-merging-purple))))))
 
-(ert-deftest agent-repl-test-render-tab-entry-merging-name-keeps-the-red-face ()
-  "The NAME region of a merging workspace still renders with the red face."
+(ert-deftest agent-repl-test-render-tab-entry-merging-name-takes-the-merging-face ()
+  "The NAME region of a merging workspace renders with the purple merging face."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :pushed-render-state :merging)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
@@ -632,7 +626,20 @@ reads distinctly from :idle orange and :thinking red."
       (let* ((entry (agent-repl--render-tab-entry "ws1" "other" 9))
              (name-pos (string-match "ws1" entry)))
         (should (eq (get-text-property name-pos 'face entry)
-                    'agent-repl-tab-thinking))))))
+                    'agent-repl-tab-merging))))))
+
+(ert-deftest agent-repl-test-render-tab-entry-vendor-blocked-name-takes-the-blue-face ()
+  "The NAME region of a vendor-blocked workspace renders with the blue face.
+It shares `agent-repl-tab-init\=' with the other compromised routes, and
+carries no purple face of its own on this surface any more."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :vendor-blocked)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
+               (lambda (_ws) t)))
+      (let* ((entry (agent-repl--render-tab-entry "ws1" "other" 9))
+             (name-pos (string-match "ws1" entry)))
+        (should (eq (get-text-property name-pos 'face entry)
+                    'agent-repl-tab-init))))))
 
 ;;;; ---- Tests: Legacy wrappers still populate both axes ----
 
@@ -2929,17 +2936,17 @@ can still have a merge-completed parent."
 ;;;; ---- Tests: :vendor-blocked palette resolution ----
 
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-unselected ()
-  "tab-spec for :vendor-blocked unselected returns the purple plist."
+  "tab-spec for :vendor-blocked unselected returns the blue plist."
   (let ((spec (agent-repl--tab-spec :vendor-blocked nil)))
-    (should (equal (plist-get spec :bg) agent-repl--color-vendor-blocked-purple))
+    (should (equal (plist-get spec :bg) agent-repl--color-init-blue))
     (should (equal (plist-get spec :fg) agent-repl--color-light))))
 
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-selected ()
-  "tab-spec for :vendor-blocked selected keeps the purple on the bracket."
+  "tab-spec for :vendor-blocked selected keeps the blue on the bracket."
   (let ((spec (agent-repl--tab-spec :vendor-blocked t)))
     (should (equal (plist-get spec :bg) agent-repl--color-selected-bg))
     (should (equal (plist-get spec :bracket-bg)
-                   agent-repl--color-vendor-blocked-purple))))
+                   agent-repl--color-init-blue))))
 
 (ert-deftest agent-repl-test-tabline-renders-a-closed-workspace ()
   "A workspace closed via `SPC o C' stays on the tab-bar as inactive.
