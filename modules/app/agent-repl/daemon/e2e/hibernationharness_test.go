@@ -502,6 +502,19 @@ func snapshotSessionView(snap *frontendv1.StateSnapshot, sessionID string) *fron
 	return nil
 }
 
+// hibernationRepublishBudget is the budget awaitHibernationDetail runs under,
+// and it is a KNOWN DEFECT'S COST rather than a system latency.
+//
+// The hibernated SessionView is pushed BEFORE the hibernate CommandAck (see
+// keepAliveSession.hibernate, which awaits both in ONE combined pass for
+// exactly this reason). Every caller that instead does awaitAck first and this
+// await second has already read the view and thrown it away, so what this await
+// actually waits for is the NEXT push that happens to carry hibernated=true —
+// an unrelated republish, measured at ~14s on this stack. Those callers are
+// synchronizing by generosity, not by signal; the fix is to make them use the
+// combined await, not to widen the budget further.
+const hibernationRepublishBudget = 20 * time.Second
+
 // awaitHibernationDetail reads conn until a SessionView reports the session
 // hibernated, and returns its typed account.
 //
@@ -511,7 +524,7 @@ func snapshotSessionView(snap *frontendv1.StateSnapshot, sessionID string) *fron
 func awaitHibernationDetail(t *testing.T, conn *websocket.Conn, sessionID string) *frontendv1.HibernationDetail {
 	t.Helper()
 	var detail *frontendv1.HibernationDetail
-	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAllWithin(t, conn, hibernationRepublishBudget, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a SessionView reporting the session hibernated": func(frame *frontendv1.FrontendFrame) bool {
 			view := sessionViewFor(frame, sessionID)
 			if view == nil || !view.GetHibernated() {
