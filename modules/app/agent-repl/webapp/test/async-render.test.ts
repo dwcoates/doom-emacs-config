@@ -189,6 +189,30 @@ describe("the agent kind", () => {
   });
 });
 
+describe("the merge kind", () => {
+  it("hands a merge run's emissions to the same FEED renderer an agent's go to", () => {
+    const registry = seeded(
+      bubble({
+        id: "b1",
+        kind: {
+          case: "merge",
+          value: {
+            emissions: [
+              { emission: "response", arm: "assistantMessage", payload: {} },
+              { emission: "thinking", arm: "thinking", payload: {} },
+            ],
+            fold: NO_FOLD,
+          },
+        },
+      }),
+    );
+
+    const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
+
+    expect(html).toContain('<div class="stub-emissions" data-bubble="b1">2</div>');
+  });
+});
+
 describe("the workflow journal kind", () => {
   const journal = (rows: { label: string; detail: string; status: "running" | "done" | "failed" }[]) =>
     seeded(bubble({ id: "b1", kind: { case: "journal", value: { rows, fold: NO_FOLD } } }));
