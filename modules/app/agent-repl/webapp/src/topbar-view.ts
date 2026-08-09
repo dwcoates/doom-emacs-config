@@ -24,7 +24,13 @@
  */
 
 import { escapeHtml } from "./highlight.js";
-import type { TopbarConnectivity, TopbarView } from "./frontend-proto.js";
+import { dropdownChipHtml } from "./counter-menu.js";
+import { tokenBreakdownViewHtml } from "./token-breakdown-view.js";
+import type {
+  TokenBreakdownView,
+  TopbarConnectivity,
+  TopbarView,
+} from "./frontend-proto.js";
 
 /** The attribute the model selector's change handler reads its choice from. */
 export const MODEL_OPTION_ATTR = "data-model-value";
@@ -92,4 +98,33 @@ export function topbarViewHtml(view: TopbarView | null): string {
     parts.push(`<span class="topbar-accounting">${escapeHtml(view.accountingLine)}</span>`);
   }
   return `<div class="topbar-view">${parts.join("")}</div>`;
+}
+
+/**
+ * The tokens disclosure: the chip that opens the breakdown, and the resolved
+ * breakdown itself when it is open.
+ *
+ * ABSENCE RENDERS ABSENCE, chip included. A workspace whose breakdown has not
+ * been published has no chip at all — not a chip reading "—", not one that
+ * opens an empty menu. A control over a breakdown that does not exist invites
+ * the click that proves it does not exist.
+ *
+ * The chip's label is the WORD, not a figure. The retired strip put a context
+ * count on it that this renderer would have to source from somewhere else, and
+ * every candidate source is a client-side recomposition of a number the
+ * breakdown itself already resolves. The figures live in the menu, where the
+ * daemon put them.
+ *
+ * OPEN is renderer-owned disclosure state, held by the caller across the
+ * per-frame chrome re-render, exactly as the footer's rosters are.
+ */
+export function tokensDisclosureHtml(view: TokenBreakdownView | null, open: boolean): string {
+  if (view === null) return "";
+  return dropdownChipHtml(
+    "tokens",
+    "tokens",
+    "the daemon's resolved token breakdown for this workspace",
+    open,
+    () => tokenBreakdownViewHtml(view),
+  );
 }
