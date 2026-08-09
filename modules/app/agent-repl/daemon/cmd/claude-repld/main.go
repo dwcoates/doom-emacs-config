@@ -966,7 +966,6 @@ func main() {
 		ModelCatalogs:     modelCatalogs,
 		Inits:             controller,
 		Catalogs:          controller,
-		AsyncBubbles:      controller,
 		Queues:            controller,
 		SessionCommands:   sessionCommands,
 		Resyncer:          controller,
