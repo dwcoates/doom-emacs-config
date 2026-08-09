@@ -52,6 +52,7 @@ const compactRule = blockAfter(css, "\n.compact-rule {");
 const compactSummary = blockAfter(css, ".bubble.assistant.compact-summary");
 const scrollZone = blockAfter(css, ".scroll-zone {");
 const scrollZoneBox = blockAfter(css, ".scroll-zone-box");
+const revivalGate = blockAfter(css, "\n#revival-gate {");
 
 /** The red, green and blue channels of a `#rrggbb` literal, each 0-255. */
 function channels(hex: string): [number, number, number] {
@@ -3566,5 +3567,71 @@ describe("stylesheet: feed virtualization", () => {
   it("wraps a placeholder's raw text rather than letting it collapse", () => {
     // Arrange / Act / Assert — the text is unrendered markdown, newlines and all.
     expect(placeholder).toContain("white-space: pre-wrap");
+  });
+});
+
+describe("revival gate", () => {
+  it("fills the compaction offer with a SOLID color rather than a wash of the feed", () => {
+    // Arrange / Act — the #revival-gate rule.
+    // Assert — a color-mix against --bg would let the conversation show through.
+    expect(revivalGate).toMatch(/background:\s*var\(--revival-gate-bg\)/);
+  });
+
+  it("frames the compaction offer with its own solid border token", () => {
+    // Arrange / Act
+    // Assert
+    expect(revivalGate).toMatch(/border:\s*1px solid var\(--revival-gate-border\)/);
+  });
+
+  it("leaves the compaction offer fully opaque", () => {
+    // Arrange / Act — no opacity below 1 anywhere on the gate's own rule.
+    // Assert
+    expect(revivalGate).not.toMatch(/opacity/);
+  });
+
+  it("defines a yellow fill token for the light theme", () => {
+    // Arrange / Act
+    const yellow = isYellow(token(lightTheme, "--revival-gate-bg"));
+    // Assert
+    expect(yellow).toBe(true);
+  });
+
+  it("defines a yellow fill token for the dark theme", () => {
+    // Arrange / Act
+    const yellow = isYellow(token(darkTheme, "--revival-gate-bg"));
+    // Assert
+    expect(yellow).toBe(true);
+  });
+
+  it("defines an orange frame token for the light theme", () => {
+    // Arrange / Act
+    const orange = isOrange(token(lightTheme, "--revival-gate-border"));
+    // Assert
+    expect(orange).toBe(true);
+  });
+
+  it("defines an orange frame token for the dark theme", () => {
+    // Arrange / Act
+    const orange = isOrange(token(darkTheme, "--revival-gate-border"));
+    // Assert
+    expect(orange).toBe(true);
+  });
+
+  it("keeps the dark-theme fill dark enough for the dark theme's foreground", () => {
+    // Arrange
+    const [fill, fg] = [token(darkTheme, "--revival-gate-bg"), token(darkTheme, "--fg")];
+    // Act
+    const readable = luminance(fill) < luminance(fg);
+    // Assert
+    expect(readable).toBe(true);
+  });
+
+  it("keeps the light-theme fill light enough for the light theme's foreground", () => {
+    // Arrange
+    const [fill, fg] = [token(lightTheme, "--revival-gate-bg"), token(lightTheme, "--fg")];
+    // Act
+    const readable = luminance(fill) > luminance(fg);
+    // Assert
+    expect(readable).toBe(true);
   });
 });
