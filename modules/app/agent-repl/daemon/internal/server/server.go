@@ -196,6 +196,8 @@ type Server struct {
 	registry      *registry.Registry
 	modelCatalogs *SessionModelCatalogs
 	tokenUsage    SessionTokenUsageSource
+	// workspaceViews is the resolved-view publisher; see Config.WorkspaceViews.
+	workspaceViews *WorkspaceViews
 	// logins owns the interactive Claude login terminals, at most one per
 	// account; nil makes the login routes report the capability unconfigured.
 	logins *login.Manager
@@ -273,6 +275,13 @@ type Config struct {
 	Registry      *registry.Registry
 	ModelCatalogs *SessionModelCatalogs
 	TokenUsage    SessionTokenUsageSource
+	// WorkspaceViews publishes the three RESOLVED per-workspace views. The
+	// SessionView push hands it the durable token aggregate it has already
+	// read, which is what the token-breakdown menu is resolved from; the
+	// topbar and the gate are published from the SSM's own state subscription.
+	// Nil-safe: an unwired publisher publishes nothing, which only a focused
+	// harness does.
+	WorkspaceViews *WorkspaceViews
 	// Logins owns the interactive Claude login terminals; nil disables the
 	// login routes.
 	Logins *login.Manager
@@ -339,6 +348,7 @@ func New(cfg Config) *Server {
 		registry:        cfg.Registry,
 		modelCatalogs:   cfg.ModelCatalogs,
 		tokenUsage:      cfg.TokenUsage,
+		workspaceViews:  cfg.WorkspaceViews,
 		idleTimeout:     cfg.IdleTimeout,
 		idleSweepTicks:  cfg.IdleSweepTicks,
 		keepAlive:       cfg.KeepAlive,
@@ -1627,7 +1637,38 @@ func (s *Server) pushSessionView(id string) {
 		panic(fmt.Sprintf("server: session %s: pushSessionView requires ModelCatalogs", id))
 	}
 	modelOptions := s.modelCatalogs.Get(id)
-	s.frontend.PushSessionView(SessionViewFromRecordWithModelsAndUsage(s.logf, s.registry, rec, pending, live, modelOptions, sessionTokenUtilization(s.logf, s.tokenUsage, id)))
+	usage := sessionTokenUtilization(s.logf, s.tokenUsage, id)
+	s.frontend.PushSessionView(SessionViewFromRecordWithModelsAndUsage(s.logf, s.registry, rec, pending, live, modelOptions, usage))
+	// THE TOKEN-BREAKDOWN MENU is resolved from the SAME aggregate, here,
+	// because this is where the durable read already happens: resolving it on
+	// its own trigger would put a second durable read of the token ledger on a
+	// second clock, and the two could then disagree about what the session
+	// spent. The fence comes off the workspace's current state and is carried,
+	// never composed.
+	s.publishTokenBreakdown(rec.CWD, usage)
+}
+
+// publishTokenBreakdown hands the resolved-view publisher the workspace's
+// fence and its token aggregate.
+//
+// A workspace with no current SSM state has no fence, and the menu is withheld
+// rather than published unfenced — an unfenced push cannot be told from a stale
+// one, which is the whole job of the token. The withholding is recorded; it is
+// never silent.
+func (s *Server) publishTokenBreakdown(workspace string, usage *frontendv1.SessionTokenUtilization) {
+	if s.workspaceViews == nil || s.ssm == nil || workspace == "" {
+		return
+	}
+	state, found, err := s.ssm.Current(workspace)
+	if err != nil {
+		s.logf("server: token breakdown NOT PUBLISHED ws=%q — the workspace's current state could not be read for its fence: %v", workspace, err)
+		return
+	}
+	if !found {
+		s.logf("server: token breakdown NOT PUBLISHED ws=%q — the workspace has no resolved state yet, so there is no fence to stamp the menu with", workspace)
+		return
+	}
+	s.workspaceViews.PublishTokenBreakdown(workspace, state.GetFence(), usage)
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {

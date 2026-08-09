@@ -510,23 +510,41 @@ type SessionResumeFailureDetailer interface {
 // becomes internal.unclassified carrying the raw text, and logf fires. The
 // fallthrough being loud is the whole reason it is safe to have one.
 func Command(logf dlog.Logf, err error) *frontendv1.FailureCardView {
+	return CommandWithFacts(logf, err, Facts{})
+}
+
+// CommandWithFacts is Command for a handler that holds the occurrence's typed
+// evidence — the request the failure answers, the deadline it blew — beyond the
+// error's own text.
+//
+// The error text still fills the arm's prose fields when the caller supplies
+// none, which is what keeps the plain Command path from regressing to empty
+// typed fields: an error that reached this funnel IS the reason and IS the
+// cause, and stating it in both places is lossless where the arm carries one.
+func CommandWithFacts(logf dlog.Logf, err error, f Facts) *frontendv1.FailureCardView {
 	if err == nil {
 		return nil
 	}
+	if f.Reason == "" {
+		f.Reason = err.Error()
+	}
+	if f.Cause == "" {
+		f.Cause = err.Error()
+	}
 	var resume SessionResumeFailureDetailer
 	if errors.As(err, &resume) {
-		c := Card(TypeSessionResumeFailed, err.Error())
+		c := CardWithFacts(TypeSessionResumeFailed, err.Error(), f)
 		c.GetKind().GetSessionResumeFailed().Detail = resume.SessionResumeFailureDetail()
 		return c
 	}
 	if t, ok := Sentinel(err); ok {
-		return Card(t, err.Error())
+		return CardWithFacts(t, err.Error(), f)
 	}
 	if logf != nil {
 		logf("errclass: unclassified command error — no sentinel matched, falling through to %s: %v",
 			TypeInternalUnclassified, err)
 	}
-	return Card(TypeInternalUnclassified, err.Error())
+	return CardWithFacts(TypeInternalUnclassified, err.Error(), f)
 }
 
 // InterruptError converts an interrupt's ACK outcome into the daemon's error
@@ -592,7 +610,16 @@ func APIError(ae *datav1.ApiErrorLine) *frontendv1.FailureCardView {
 	if n := ae.GetMaxRetries(); n > 0 {
 		msg = fmt.Sprintf("%s (after %d attempts)", msg, n)
 	}
-	c := Card(t, apiErrorDetail(ae))
+	c := CardWithFacts(t, apiErrorDetail(ae), Facts{
+		// The line's own evidence, onto the arm: the vendor's request
+		// correlation id (the one thing a support report needs quoted), the
+		// status it returned, and how many attempts were spent before the
+		// retries ran out. All three already rode `detail` as text and keep
+		// doing so; this is the same evidence a renderer can act on.
+		Vendor:     vendorContext("", ae.GetError().GetRequestId(), ""),
+		HTTPStatus: int32(ae.GetError().GetStatus()),
+		Attempts:   int32(ae.GetMaxRetries()),
+	})
 	c.Message = msg
 	return c
 }
@@ -654,7 +681,11 @@ func TurnEnd(te *corev1.TurnEnded) *frontendv1.FailureCardView {
 	if reason != "" {
 		detail = "stop_reason=" + reason
 	}
-	return Card(t, detail)
+	// The stop reason rides the arm as well as the detail, and it matters most
+	// on exactly the unnamed case: api.turn_failed IS "the vendor stopped for a
+	// reason with no kind of its own", so the raw reason is the whole content
+	// of that card.
+	return CardWithFacts(t, detail, Facts{StopReason: reason})
 }
 
 // The persisted death-reason literals. They live beside their classification
@@ -707,7 +738,7 @@ func Death(logf dlog.Logf, sessionID, reason string, resolvedAtMs int64) *fronte
 				reason, t)
 		}
 	}
-	c := Card(t, reason)
+	c := CardWithFacts(t, reason, Facts{RawReason: reason})
 	if resolvedAtMs != 0 {
 		Resolve(c, resolvedAtMs)
 	}
@@ -730,7 +761,7 @@ func DeathItemUUID(sessionID string) string {
 // and it rides source_detail verbatim so the card names the failure rather than
 // merely announcing one.
 func StartFailed(reason string) *frontendv1.FailureCardView {
-	return Card(TypeSessionStartFailed, reason)
+	return CardWithFacts(TypeSessionStartFailed, reason, Facts{Cause: reason})
 }
 
 // KeepAliveWindowUnclosed classifies a failure to stamp a keep-alive window's
@@ -741,7 +772,7 @@ func StartFailed(reason string) *frontendv1.FailureCardView {
 // forever, from every rendering. The user's next prompt would appear to vanish.
 // The card is the only thing that tells them why.
 func KeepAliveWindowUnclosed(reason string) *frontendv1.FailureCardView {
-	return Card(TypeKeepAliveWindowUnclosed, reason)
+	return CardWithFacts(TypeKeepAliveWindowUnclosed, reason, Facts{Reason: reason})
 }
 
 // KeepAliveWindowInverted classifies a keep-alive window close the ledger
@@ -754,7 +785,7 @@ func KeepAliveWindowUnclosed(reason string) *frontendv1.FailureCardView {
 // to the start rather than writing an interval that covers nothing — so this
 // reports a clock disagreement, never a rendering blackout.
 func KeepAliveWindowInverted(reason string) *frontendv1.FailureCardView {
-	return Card(TypeKeepAliveWindowInverted, reason)
+	return CardWithFacts(TypeKeepAliveWindowInverted, reason, Facts{Reason: reason})
 }
 
 // ColdCompaction classifies a daemon-initiated compaction that read the
@@ -768,8 +799,10 @@ func KeepAliveWindowInverted(reason string) *frontendv1.FailureCardView {
 //
 // reason carries the raw usage breakdown, so the card a human opens shows the
 // arithmetic that tripped it rather than only the verdict.
-func ColdCompaction(reason string) *frontendv1.FailureCardView {
-	return Card(TypeCompactionColdRead, reason)
+// uncachedInputTokens is what it cost, onto the arm, so the card states the
+// waste as a figure rather than only alluding to it inside the breakdown prose.
+func ColdCompaction(reason string, uncachedInputTokens int64) *frontendv1.FailureCardView {
+	return CardWithFacts(TypeCompactionColdRead, reason, Facts{UncachedInputTokens: uncachedInputTokens})
 }
 
 // Degraded classifies a shim-reported DegradedState — the store-write
@@ -789,7 +822,7 @@ func Degraded(component, reason string, droppedCount int64) *frontendv1.FailureC
 	if droppedCount > 0 {
 		parts = append(parts, fmt.Sprintf("dropped=%d", droppedCount))
 	}
-	return Card(TypeShimStoreWriteRejected, strings.Join(parts, " "))
+	return CardWithFacts(TypeShimStoreWriteRejected, strings.Join(parts, " "), Facts{Component: component, Reason: reason, DroppedCount: droppedCount})
 }
 
 // UnexpectedQueryTermination classifies the reliable DegradedState emitted
@@ -804,8 +837,11 @@ func UnexpectedQueryTermination(component, reason string) *frontendv1.FailureCar
 // caller re-sends it under the same uuid with resolved_at_ms set when traffic
 // resumes, which is what makes the card settle instead of standing as a
 // permanent alarm about something that ended.
-func ConnectionDegraded(reason string) *frontendv1.FailureCardView {
-	return Card(TypeShimDegraded, reason)
+// component names the part of the connection that went quiet, and it is a
+// parameter rather than a constant here because the observing site is the only
+// thing that knows which one it was watching.
+func ConnectionDegraded(component, reason string) *frontendv1.FailureCardView {
+	return CardWithFacts(TypeShimDegraded, reason, Facts{Component: component})
 }
 
 // IsDaemonType reports whether a type is one the daemon may emit — i.e. that

@@ -645,7 +645,7 @@ func TestDegradedIsTheLocalSide(t *testing.T) {
 func TestConnectionDegradedCarriesTheHeartbeatReason(t *testing.T) {
 	// Arrange.
 	// Act.
-	got := ConnectionDegraded("no shim traffic for 30s (>20s window)")
+	got := ConnectionDegraded("shim-connection", "no shim traffic for 30s (>20s window)")
 	// Assert.
 	if got.GetDetail() != "no shim traffic for 30s (>20s window)" {
 		t.Fatalf("source_detail = %q, want the raw window reason", got.GetDetail())
@@ -655,7 +655,7 @@ func TestConnectionDegradedCarriesTheHeartbeatReason(t *testing.T) {
 func TestConnectionDegradedIsTheShimDegradedType(t *testing.T) {
 	// Arrange.
 	// Act.
-	got := ConnectionDegraded("no traffic")
+	got := ConnectionDegraded("shim-connection", "no traffic")
 	// Assert.
 	if TypeName(got) != string(TypeShimDegraded) {
 		t.Fatalf("error_type = %q, want %q", TypeName(got), TypeShimDegraded)

@@ -1109,6 +1109,9 @@ type fakeProgress struct {
 	// turnRejections records one entry per NoteTurnRejected call — the turn
 	// clocks closed because the submit that opened them never landed.
 	turnRejections []interruptNote
+	// accountings records one entry per NoteTurnAccounting call — the settled
+	// turns whose reconciliation reached the footer's accounting cell.
+	accountings []*frontendv1.TurnAccounting
 }
 
 // interruptNote is one opened interrupt window.
@@ -1156,6 +1159,21 @@ func (p *fakeProgress) interruptNotes() []interruptNote {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]interruptNote(nil), p.interrupts...)
+}
+
+// NoteTurnAccounting records the settled reconciliations handed to the resolver.
+func (p *fakeProgress) NoteTurnAccounting(_, _ string, accounting *frontendv1.TurnAccounting) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.accountings = append(p.accountings, accounting)
+	return nil
+}
+
+// accountingNotes returns the recorded reconciliations, taken under the lock.
+func (p *fakeProgress) accountingNotes() []*frontendv1.TurnAccounting {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]*frontendv1.TurnAccounting(nil), p.accountings...)
 }
 
 func newProgressConsumer(prog ProgressResolver) *consumer {

@@ -82,6 +82,12 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 		return frame, sc.matchesWorkspace(f.Queue.GetWorkspace())
 	case *frontendv1.FrontendFrame_Progress:
 		return frame, sc.matchesWorkspace(f.Progress.GetWorkspace())
+	case *frontendv1.FrontendFrame_Topbar:
+		return frame, sc.matchesWorkspace(f.Topbar.GetWorkspace())
+	case *frontendv1.FrontendFrame_TokenBreakdown:
+		return frame, sc.matchesWorkspace(f.TokenBreakdown.GetWorkspace())
+	case *frontendv1.FrontendFrame_WorkspaceGate:
+		return frame, sc.matchesWorkspace(f.WorkspaceGate.GetWorkspace())
 	case *frontendv1.FrontendFrame_ShutdownSchedule:
 		// DAEMON-GLOBAL, listed explicitly rather than left to the default arm.
 		// There is exactly one drain lease for the whole daemon, it carries no
@@ -152,6 +158,11 @@ func filterSnapshot(snap *frontendv1.StateSnapshot, sc Scope) *frontendv1.StateS
 		Inits:      filterWorkspaceViews(snap.GetInits(), sc),
 		Queues:     filterWorkspaceViews(snap.GetQueues(), sc),
 		Progress:   filterWorkspaceViews(snap.GetProgress(), sc),
+		// The three RESOLVED-VIEW families are fenced and workspace-keyed like
+		// the four above them, so they filter by workspace and nothing else.
+		Topbars:         filterWorkspaceViews(snap.GetTopbars(), sc),
+		TokenBreakdowns: filterWorkspaceViews(snap.GetTokenBreakdowns(), sc),
+		WorkspaceGates:  filterWorkspaceViews(snap.GetWorkspaceGates(), sc),
 		// Daemon identity is connection-global, not workspace-scoped. Dropping
 		// it here handed every scoped client a snapshot with an empty boot id,
 		// which the webapp's version-skew gate rejects on EVERY adoption —

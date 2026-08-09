@@ -656,6 +656,13 @@ func (s *Server) PushQueueView(q *frontendv1.QueueView) { s.Broadcast(QueueViewF
 func (s *Server) PushProgressView(p *frontendv1.ProgressView) {
 	s.Broadcast(ProgressViewFrame(p))
 }
+func (s *Server) PushTopbarView(v *frontendv1.TopbarView) { s.Broadcast(TopbarViewFrame(v)) }
+func (s *Server) PushTokenBreakdownView(v *frontendv1.TokenBreakdownView) {
+	s.Broadcast(TokenBreakdownViewFrame(v))
+}
+func (s *Server) PushWorkspaceGateView(v *frontendv1.WorkspaceGateView) {
+	s.Broadcast(WorkspaceGateViewFrame(v))
+}
 
 // PushWorkspaceAvailable and PushHostAction carry HOST-ONLY work, and both
 // report the number of host clients the frame reached. Zero means the frame was

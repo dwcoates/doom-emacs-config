@@ -1073,9 +1073,32 @@ func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, 
 	}
 	if err := h.resyncer.ResyncForGeneration(workspace, sessionID, generationID, cmd.GetFromSeq()); err != nil {
 		h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d FAILED: %v", workspace, requestID, sessionID, generationID, cmd.GetFromSeq(), err)
-		return err
+		return classifyStaleFenceResync(err)
 	}
 	return nil
+}
+
+// classifyStaleFenceResync names a resync the eligibility ladder refused
+// because the fence the client echoed is no longer the workspace's.
+//
+// THE ACK MUST CARRY A KIND, and the right kind here is `workspace_not_live`:
+// the command addressed something this workspace no longer runs, and the arm's
+// own contract says the staleness IS the whole fact because the fence already
+// told the client it was behind. Left unwrapped the refusal classified as
+// `reconnect_superseded`, which asserts more than the ladder proved — a
+// mismatch equally means a new controller generation for the SAME conversation,
+// which is the ordinary shape after any bring-up.
+//
+// BOTH SENTINELS ARE WRAPPED, so nothing is lost: the superseded anchor stays
+// in the chain for every caller that already reads it, and the ladder resolves
+// the pair to the not-live type because it is the earlier rung. Every other
+// error passes through untouched.
+func classifyStaleFenceResync(err error) error {
+	if err == nil || !errors.Is(err, errclass.ErrSessionSuperseded) {
+		return err
+	}
+	return fmt.Errorf("%w: the resync echoed a fence this workspace no longer runs: %w",
+		errclass.ErrNotLiveSession, err)
 }
 
 // isUnwiredWorkspace reports whether err is the "this workspace has no live
@@ -1477,6 +1500,12 @@ type ssmSnapshotProvider struct {
 	// (re)connecting frontend's footer is populated before the next change
 	// pushes. Nil-safe: a nil source leaves snapshot.progress empty.
 	progress ProgressSource
+	// workspaceViews supplies the three RESOLVED per-workspace views the
+	// snapshot carries: the topbar, the token-breakdown menu and the revival
+	// gate. It is the SAME retention the pushes advance, so a client that
+	// connects between two pushes adopts exactly the view the last push
+	// delivered. Nil-safe: a nil publisher leaves the three fields empty.
+	workspaceViews *WorkspaceViews
 	// workspaceCreation supplies retained daemon-owned work for the Emacs host.
 	// frontend.Server removes these fields for all GUI client kinds; retaining
 	// them here makes a reconnecting host drain the durable queue before relying
@@ -1578,6 +1607,11 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	if p.shutdownSchedule != nil {
 		snap.ShutdownSchedule = p.shutdownSchedule.View()
 	}
+	if p.workspaceViews != nil {
+		snap.Topbars = p.workspaceViews.Topbars()
+		snap.TokenBreakdowns = p.workspaceViews.TokenBreakdowns()
+		snap.WorkspaceGates = p.workspaceViews.WorkspaceGates()
+	}
 	if p.workspaceCreation == nil {
 		panic("server: snapshot provider requires workspace creation bridge")
 	}
@@ -1592,6 +1626,9 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	snap.Catalogs = filterPublishedWorkspaceViews(snap.Catalogs, publicationAllowed, p.logf)
 	snap.Queues = filterPublishedWorkspaceViews(snap.Queues, publicationAllowed, p.logf)
 	snap.Progress = filterPublishedWorkspaceViews(snap.Progress, publicationAllowed, p.logf)
+	snap.Topbars = filterPublishedWorkspaceViews(snap.Topbars, publicationAllowed, p.logf)
+	snap.TokenBreakdowns = filterPublishedWorkspaceViews(snap.TokenBreakdowns, publicationAllowed, p.logf)
+	snap.WorkspaceGates = filterPublishedWorkspaceViews(snap.WorkspaceGates, publicationAllowed, p.logf)
 	hostWork := p.workspaceCreation.SnapshotHostWork()
 	snap.WorkspaceAvailable = hostWork.WorkspaceAvailable
 	snap.HostActions = hostWork.HostActions
