@@ -73,6 +73,11 @@ const (
 	// An explicit arm on the contract, never a fallback: the daemon states that
 	// it could not classify the tool, names it, and streams the output anyway.
 	DetachUnrecognized
+	// DetachMerge is a merge run: the conversation a merge drives through the
+	// workspace's OWN session. No tool spawns it — the daemon opens it when it
+	// classifies the merge skill's invocation (see MergeSkillCall) — and its
+	// content is the same emission vocabulary a detached agent's is.
+	DetachMerge
 )
 
 // String names the kind for log records and for the error a mismatched update
@@ -87,6 +92,8 @@ func (k DetachKind) String() string {
 		return "workflow"
 	case DetachUnrecognized:
 		return "unclassified"
+	case DetachMerge:
+		return "merge"
 	default:
 		return "unresolved"
 	}
@@ -238,6 +245,10 @@ func OpenAsyncBubble(spec BubbleSpec) (*frontendv1.AsyncBubble, error) {
 			ToolName: spec.ToolName,
 			Output:   &frontendv1.AsyncOutputSpool{},
 		}}
+	case DetachMerge:
+		b.Kind = &frontendv1.AsyncBubble_Merge{Merge: &frontendv1.AsyncMergeBubble{
+			Fold: &frontendv1.AsyncFold{TailCap: StreamItemCap},
+		}}
 	}
 	return b, nil
 }
@@ -255,6 +266,8 @@ func AsyncBubbleKind(b *frontendv1.AsyncBubble) DetachKind {
 		return DetachWorkflow
 	case *frontendv1.AsyncBubble_Unclassified:
 		return DetachUnrecognized
+	case *frontendv1.AsyncBubble_Merge:
+		return DetachMerge
 	default:
 		return DetachUnresolved
 	}
@@ -264,30 +277,116 @@ func AsyncBubbleKind(b *frontendv1.AsyncBubble) DetachKind {
 // matching incremental update.
 //
 // The arm is not a parameter: it is selected from the bubble's own kind, so a
-// caller holding a shell bubble gets an error naming both kinds rather than a
-// coerced agent update. The emissions are the SAME AgentEmission the top-level
-// feed carries — they come from translate.go's curation, not from a second
-// parse — which is the wire-level guarantee that a detached agent renders
-// through a frontend's ordinary feed renderers.
+// caller holding a shell bubble — or a MERGE bubble, which has no update arm of
+// its own (see AppendMergeEmissions) — gets an error naming both kinds rather
+// than a coerced agent update. The emissions are the SAME AgentEmission the
+// top-level feed carries — they come from translate.go's curation, not from a
+// second parse — which is the wire-level guarantee that a detached agent
+// renders through a frontend's ordinary feed renderers.
 func AppendAsyncEmissions(b *frontendv1.AsyncBubble, ems []*frontendv1.AgentEmission, atMs int64) (*frontendv1.AsyncBubbleUpdate, error) {
 	ab := b.GetAgent()
 	if ab == nil {
 		return nil, kindMismatch(b, DetachAgent)
 	}
-	if len(ems) == 0 {
-		return nil, nil
+	fold, err := foldEmissions(b, ems, atMs)
+	if err != nil || fold == nil {
+		return nil, err
 	}
-	ab.Emissions = capTail(append(ab.GetEmissions(), ems...), ab.GetFold())
-	touchAsyncActivity(b, atMs)
 	return &frontendv1.AsyncBubbleUpdate{
 		BubbleId: b.GetId(),
 		Update: &frontendv1.AsyncBubbleUpdate_Agent{Agent: &frontendv1.AsyncAgentUpdate{
 			Emissions: ems,
 			// RESTATED, not deltaed: a dropped-count that drifts is worse than
 			// one that is re-sent, and the fold is small.
-			Fold: cloneFold(ab.GetFold()),
+			Fold: cloneFold(fold),
 		}},
 	}, nil
+}
+
+// AppendMergeEmissions folds new emissions into a MERGE bubble and returns the
+// bubble itself, for RE-DELIVERY, or nil when nothing folded.
+//
+// WHY RE-DELIVERY AND NOT AN UPDATE. AsyncBubbleUpdate's oneof carries no merge
+// arm: the contract gained AsyncMergeBubble as a kind without gaining an update
+// arm for it, and the two arms that carry emissions (`agent`) or bytes
+// (`shell`/`unclassified`) each name the kind they are for — an agent update
+// addressed to a merge bubble is exactly the kind mismatch this file's
+// kindMismatch exists to refuse, and a receiver rejects it. What the contract
+// DOES offer for a merge bubble's progress is AsyncBubbleDelta.opened, whose
+// documented semantics are "a bubble the receiver already knows is REPLACED by
+// this copy", plus the kind-independent liveness arm for its ending.
+//
+// RE-DELIVERY IS BOUNDED, which is what makes it tenable rather than the
+// transcript re-transmission AsyncBubbleUpdate was written to prevent: the fold
+// is tail-capped at StreamItemCap, so a re-delivered merge bubble is O(cap) and
+// not O(history) however long the merge runs.
+//
+// The fold itself is the SAME operation a detached agent's is — same cap, same
+// drop accounting, same emission vocabulary (foldEmissions) — because
+// AsyncMergeBubble carries the identical emissions/fold pair by design.
+func AppendMergeEmissions(b *frontendv1.AsyncBubble, ems []*frontendv1.AgentEmission, atMs int64) (*frontendv1.AsyncBubble, error) {
+	if b.GetMerge() == nil {
+		return nil, kindMismatch(b, DetachMerge)
+	}
+	fold, err := foldEmissions(b, ems, atMs)
+	if err != nil || fold == nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// foldEmissions is the ONE fold both conversation-shaped kinds go through: it
+// appends, applies the tail cap, records the drop and stamps the activity
+// clock. It reports a nil fold when there was nothing to append, so a caller
+// produces no wire traffic for an empty batch.
+func foldEmissions(b *frontendv1.AsyncBubble, ems []*frontendv1.AgentEmission, atMs int64) (*frontendv1.AsyncFold, error) {
+	emissions, fold, err := emissionFold(b)
+	if err != nil {
+		return nil, err
+	}
+	if len(ems) == 0 {
+		return nil, nil
+	}
+	setEmissionFold(b, capTail(append(emissions, ems...), fold))
+	touchAsyncActivity(b, atMs)
+	return fold, nil
+}
+
+// emissionFold finds the emission list and fold accounting of a
+// conversation-shaped bubble, and refuses a bubble of any other kind. It is the
+// ONE lookup AppendAsyncEmissions goes through, exactly as outputSpool is for
+// the byte-spool kinds.
+func emissionFold(b *frontendv1.AsyncBubble) ([]*frontendv1.AgentEmission, *frontendv1.AsyncFold, error) {
+	switch k := b.GetKind().(type) {
+	// The nil checks are the same refusal an absent arm earns, not a
+	// convenience: a kind arm present but carrying no body has no emission list
+	// to append to, and writing one back would be a nil dereference rather than
+	// a fold.
+	case *frontendv1.AsyncBubble_Agent:
+		if k.Agent == nil {
+			return nil, nil, kindMismatch(b, DetachAgent)
+		}
+		return k.Agent.GetEmissions(), k.Agent.GetFold(), nil
+	case *frontendv1.AsyncBubble_Merge:
+		if k.Merge == nil {
+			return nil, nil, kindMismatch(b, DetachMerge)
+		}
+		return k.Merge.GetEmissions(), k.Merge.GetFold(), nil
+	default:
+		return nil, nil, kindMismatch(b, DetachAgent)
+	}
+}
+
+// setEmissionFold writes the capped emission list back onto whichever
+// conversation-shaped arm the bubble carries. Only emissionFold's own kinds
+// reach it, so an unhandled arm here is unreachable rather than silent.
+func setEmissionFold(b *frontendv1.AsyncBubble, ems []*frontendv1.AgentEmission) {
+	switch k := b.GetKind().(type) {
+	case *frontendv1.AsyncBubble_Agent:
+		k.Agent.Emissions = ems
+	case *frontendv1.AsyncBubble_Merge:
+		k.Merge.Emissions = ems
+	}
 }
 
 // AppendAsyncJournalRows folds new journal rows into a WORKFLOW bubble and

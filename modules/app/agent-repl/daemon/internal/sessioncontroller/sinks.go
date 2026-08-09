@@ -2051,7 +2051,13 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	// The detached half, folded into its bubbles and pushed on the async plane.
 	// It runs BEFORE the feed push so that a bubble a frontend is about to be
 	// told about by a stamped tool card has already been opened for it.
-	c.pushAsync(c.observeAsync(curated, ev), ev)
+	//
+	// The MERGE WINDOW's opening edge rides the same push, and for the same
+	// reason: the merge Skill call's card is in this very delta, and the bubble
+	// has to exist before the stamp below resolves it (mergewindow.go).
+	detached := c.observeAsync(curated, ev)
+	detached.absorb(c.observeMergeSpawn(curated, ev))
+	c.pushAsync(detached, ev)
 	// THE CLASSIFICATION VERDICT ON THE TOOL CARD, from the same store the
 	// bubbles live in — so the card names a bubble the frontend has, and both
 	// spawned_bubble_id fields carry the one string that store resolved.
@@ -2160,7 +2166,18 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	if live {
 		c.attributeUserTurn(cd)
 	}
+	// THE MERGE WINDOW'S DIVERSION, LAST. While a merge run owns the session,
+	// its emissions belong to the Merge bubble rather than to this delta — and
+	// running here, after every curator and every stamp, means the items it
+	// diverts are exactly the ones that would otherwise have been pushed
+	// (mergewindow.go). The delta is still pushed when the diversion empties it,
+	// because it carries the frontend's replay cursor.
+	merged := c.foldMergeWindow(cd, ev)
 	c.push.PushConversationDelta(cd)
+	// AFTER the feed push: the bubble's new content is the content that just
+	// left this delta, and a client applies the removal before the fold that
+	// explains it.
+	c.pushAsync(merged, ev)
 	// A DURABLE replay watches what its own store events carried, so an
 	// un-retired receipt for a prompt those events already drew is suppressed
 	// rather than drawn a second time (durablereplay.go). Nil on every live

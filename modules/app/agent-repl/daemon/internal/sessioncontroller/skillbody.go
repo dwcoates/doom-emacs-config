@@ -87,8 +87,12 @@ func newSkillCorrelator() *skillCorrelator {
 	return &skillCorrelator{calls: map[string]struct{}{}, chain: map[string]string{}}
 }
 
-// skillToolName is the harness's tool for launching a skill.
-const skillToolName = "Skill"
+// skillToolName is the harness's tool for launching a skill. It is the
+// frontend apparatus's own constant rather than a second spelling of the same
+// string: the merge classifier (frontend/mergeskill.go) has to find its
+// invocation among exactly the calls this correlator files, and two literals
+// could drift apart.
+const skillToolName = frontend.SkillToolName
 
 // observe records whatever skill linkage one curated item establishes: a Skill
 // call, or a record answering one.

@@ -269,6 +269,143 @@ func TestAppendAsyncEmissionsDoesNotAliasTheBubblesFoldOntoTheUpdate(t *testing.
 	}
 }
 
+// --- merge fold ------------------------------------------------------------
+
+func TestOpenAsyncBubbleGivesAMergeRunTheMergeArm(t *testing.T) {
+	// Arrange, Act
+	b := openKind(t, DetachMerge)
+
+	// Assert
+	if b.GetMerge() == nil {
+		t.Fatalf("a merge run opened on arm %T, want the merge arm", b.GetKind())
+	}
+}
+
+func TestAsyncBubbleKindReadsTheMergeArmBack(t *testing.T) {
+	// Arrange, Act, Assert
+	if got := AsyncBubbleKind(openKind(t, DetachMerge)); got != DetachMerge {
+		t.Fatalf("AsyncBubbleKind = %s, want merge: a bubble's kind must survive a round trip through its arm", got)
+	}
+}
+
+func TestAppendMergeEmissionsReturnsTheWholeBubbleForRedelivery(t *testing.T) {
+	// Arrange
+	b := openKind(t, DetachMerge)
+
+	// Act
+	got, err := AppendMergeEmissions(b, []*frontendv1.AgentEmission{responseEmission("m1")}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if got != b {
+		t.Fatalf("a merge fold advances by whole-bubble re-delivery, so it must return the bubble itself; got %v", got)
+	}
+}
+
+func TestAppendMergeEmissionsFoldsIntoTheMergeArm(t *testing.T) {
+	// Arrange
+	b := openKind(t, DetachMerge)
+
+	// Act
+	if _, err := AppendMergeEmissions(b, []*frontendv1.AgentEmission{responseEmission("m1")}, 7); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if got := len(b.GetMerge().GetEmissions()); got != 1 {
+		t.Fatalf("the merge bubble folded %d emissions, want 1", got)
+	}
+}
+
+func TestAppendMergeEmissionsKeepsTheTailAtTheCap(t *testing.T) {
+	// Arrange
+	b := openKind(t, DetachMerge)
+	var ems []*frontendv1.AgentEmission
+	for i := 0; i < StreamItemCap+5; i++ {
+		ems = append(ems, responseEmission("m"))
+	}
+
+	// Act
+	if _, err := AppendMergeEmissions(b, ems, 7); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if got := len(b.GetMerge().GetEmissions()); got != StreamItemCap {
+		t.Fatalf("want the merge fold capped at %d, got %d: the cap is what keeps whole-bubble re-delivery O(cap) rather than O(history)", StreamItemCap, got)
+	}
+}
+
+func TestAppendMergeEmissionsReportsWhatTheCapDropped(t *testing.T) {
+	// Arrange
+	b := openKind(t, DetachMerge)
+	var ems []*frontendv1.AgentEmission
+	for i := 0; i < StreamItemCap+5; i++ {
+		ems = append(ems, responseEmission("m"))
+	}
+
+	// Act
+	if _, err := AppendMergeEmissions(b, ems, 7); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if got := b.GetMerge().GetFold().GetDroppedBefore(); got != 5 {
+		t.Fatalf("a capped merge fold that says nothing is indistinguishable from a complete one: want dropped_before=5, got %d", got)
+	}
+}
+
+func TestAppendMergeEmissionsProducesNothingForAnEmptyBatch(t *testing.T) {
+	// Arrange, Act
+	got, err := AppendMergeEmissions(openKind(t, DetachMerge), nil, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if got != nil {
+		t.Fatal("an empty batch changed nothing and must produce no re-delivery")
+	}
+}
+
+func TestAppendMergeEmissionsRefusesANonMergeBubble(t *testing.T) {
+	// Arrange, Act
+	_, err := AppendMergeEmissions(openKind(t, DetachAgent), []*frontendv1.AgentEmission{responseEmission("m1")}, 7)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a merge fold addressed to an agent bubble is a daemon bug and must be refused rather than coerced")
+	}
+}
+
+func TestAppendAsyncEmissionsRefusesAnAgentUpdateAddressedToAMergeBubble(t *testing.T) {
+	// Arrange, Act
+	_, err := AppendAsyncEmissions(openKind(t, DetachMerge), []*frontendv1.AgentEmission{responseEmission("m1")}, 7)
+
+	// Assert
+	if err == nil {
+		t.Fatal("AsyncBubbleUpdate has no merge arm, so an agent update aimed at a merge bubble is the kind mismatch a receiver rejects and must never be produced")
+	}
+}
+
+func TestSettleAsyncBubbleSettlesAMergeRunThroughTheOneLivenessArm(t *testing.T) {
+	// Arrange
+	b := openKind(t, DetachMerge)
+
+	// Act
+	up, err := SettleAsyncBubble(b, AsyncVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if up.GetLiveness().GetLiveness().GetSettled().GetDone() == nil {
+		t.Fatalf("a merge run settles through the kind-independent liveness arm; got %v", up.GetUpdate())
+	}
+}
+
 // --- journal fold ----------------------------------------------------------
 
 func TestAppendAsyncJournalRowsProducesTheJournalArm(t *testing.T) {
