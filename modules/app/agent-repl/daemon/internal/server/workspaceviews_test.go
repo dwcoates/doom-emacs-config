@@ -383,6 +383,42 @@ func TestTheSnapshotServesTheLastPublishedTokenBreakdown(t *testing.T) {
 	}
 }
 
+// movingGeometry answers each lookup with the branch it currently holds, so a
+// case can re-create a workspace on a different branch between publications.
+type movingGeometry struct {
+	mu     sync.Mutex
+	branch string
+}
+
+func (m *movingGeometry) set(branch string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.branch = branch
+}
+
+func (m *movingGeometry) Lookup(context.Context, string) (geometry.Record, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return geometry.Record{SourceBranch: m.branch}, true, nil
+}
+
+func TestARecreatedWorkspaceResolvesAFreshBranch(t *testing.T) {
+	// Arrange — the workspace is re-created at the same path on another branch,
+	// and the memo of its dead predecessor's branch died with the close.
+	branches := &movingGeometry{branch: "old-branch"}
+	v, push := newViewPublisher(t, nil, nil, branches)
+	v.PublishState(liveState())
+	v.Forget("/home/u/ws")
+	branches.set("new-branch")
+	// Act.
+	v.PublishState(liveState())
+	// Assert.
+	last := push.topbars[len(push.topbars)-1]
+	if last.GetTitle() != "ws (new-branch)" {
+		t.Fatalf("title = %q, want the re-created workspace's own branch", last.GetTitle())
+	}
+}
+
 func TestForgettingAWorkspaceDropsItFromTheSnapshot(t *testing.T) {
 	// Arrange — the snapshot must stop carrying a topbar for a workspace
 	// nothing runs.
