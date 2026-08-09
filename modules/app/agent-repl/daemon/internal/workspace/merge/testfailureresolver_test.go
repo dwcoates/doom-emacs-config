@@ -91,12 +91,16 @@ func TestTestFailurePromptWarnsThatTheAttemptIsTheOnlyOne(t *testing.T) {
 	usePrompts(t)
 	got := mustPrompt(t)(completeTestFailureResolution().Prompt())
 
-	// Assert — the agent is told the stakes, including the rollback.
+	// Assert — the agent is told the stakes. AMENDED: the second half used to
+	// require the words "rolled back", which the pipeline no longer does and
+	// which would now be a lie told to an agent. The consequence it stands for
+	// is unchanged in strength — what happens to the merge target when the one
+	// attempt fails — so the assertion names the new truth instead.
 	if !strings.Contains(got, "EXACTLY ONE attempt") {
 		t.Errorf("prompt does not say the attempt is the only one:\n%s", got)
 	}
-	if !strings.Contains(got, "rolled back") {
-		t.Errorf("prompt does not name the rollback consequence:\n%s", got)
+	if !strings.Contains(got, "never modified") {
+		t.Errorf("prompt does not name what becomes of the merge target:\n%s", got)
 	}
 }
 
@@ -117,12 +121,20 @@ func TestTestFixRequestIDsAreDistinctFromConflictResolutionIDs(t *testing.T) {
 	}
 }
 
-// TestTestFailurePromptMatchesTheGolden pins prompts/merge-test-failure-resolve.md
-// against the wording that lived in testfailureresolver.go before the move.
+// TestTestFailurePromptMatchesTheGolden pins prompts/merge-test-failure-resolve.md.
+//
+// AMENDED for the rebase pipeline, for the same reason its conflict sibling was:
+// the previous golden told the agent its commit had been cherry-picked into the
+// merge target and that a second failure would ROLL THE TARGET BACK. Neither is
+// true now — the commit is in a temporary rebase worktree and the target was
+// never modified — so the golden would have been pinning a false statement to an
+// agent. Exact equality against one literal, unchanged.
 func TestTestFailurePromptMatchesTheGolden(t *testing.T) {
 	// Arrange.
 	usePrompts(t)
-	want := "Commit abc1234 from branch feature/a was just cherry-picked into the worktree at /target, and the repository's test suite now FAILS there.\n" +
+	want := "Commit abc1234 from branch feature/a was just rebased onto the merge target in the worktree at /target, and the repository's test suite now FAILS there.\n" +
+		"\n" +
+		"That worktree is a TEMPORARY REBASE WORKTREE, not the merge target and not your own workspace. The merge target has not been modified at all and will not be until the whole rebase passes, so the failing state exists only in that worktree.\n" +
 		"\n" +
 		"Failing output (tail):\n" +
 		"---\n" +
@@ -133,14 +145,14 @@ func TestTestFailurePromptMatchesTheGolden(t *testing.T) {
 		"\n" +
 		"Then STOP. Do NOT commit, do NOT amend, do NOT run `git reset`, `git rebase`, `git cherry-pick`, or any other history-rewriting command. The daemon commits your staged fix as a follow-up commit and re-runs the suite as soon as your turn ends.\n" +
 		"\n" +
-		"You get EXACTLY ONE attempt. If the suite still fails after it, the merge is failed and the target is rolled back to where it was before the merge started — your branch keeps all of its work either way. If you cannot fix it, say so plainly."
+		"You get EXACTLY ONE attempt. If the suite still fails after it, the merge is failed, the rebase worktree is discarded, and the merge target is left exactly as it was — it was never modified. Your branch keeps all of its work either way. If you cannot fix it, say so plainly."
 
 	// Act.
 	got := mustPrompt(t)(completeTestFailureResolution().Prompt())
 
 	// Assert.
 	if got != want {
-		t.Fatalf("prompt drifted from the pre-extraction text.\n got: %q\nwant: %q", got, want)
+		t.Fatalf("prompt drifted from its golden.\n got: %q\nwant: %q", got, want)
 	}
 }
 

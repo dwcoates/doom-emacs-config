@@ -132,6 +132,37 @@ type Request struct {
 	// value the entry was HYDRATED with rather than a live figure. The live one
 	// belongs to the RunStatus, which is the sole writer of the durable field.
 	StatusWatermarkMs int64
+	// WorkDir is the REBASE WORKTREE: a temporary linked worktree of the
+	// target's repository, created by merge.Driver.Merge, in which the branch's
+	// commits are replayed onto the target's head and gated by the suite. It is
+	// NEITHER the user's workspace worktree (whose uncommitted state must stay
+	// untouched) NOR the target checkout (which this pipeline modifies exactly
+	// once, at the very end).
+	//
+	// IT IS DELIBERATELY NOT PART OF THE DURABLE QUEUE PAYLOAD. A temp worktree
+	// does not survive the process that made it, so a boot replay starts a fresh
+	// rebase rather than resuming into a directory that is gone.
+	//
+	// merge.Driver.Merge SETS it (on the Result it returns); merge.Coordinator
+	// echoes it back into the Resume / ContinueAfterTestFix / Cleanup calls that
+	// follow, which is how a resolution turn and its resume address the same tree.
+	WorkDir string
+	// BaseHead is the target's HEAD as it stood when the rebase based itself on
+	// it, and it is THE GUARD ON THE ONE TARGET-MUTATING STEP: before the merge
+	// commit is made, the target must still be exactly here.
+	//
+	// The window between reading it and using it is unbounded (a conflict
+	// resolution and a test fix are both agent turns), and nothing this pipeline
+	// holds keeps the target still meanwhile: the merge lease claims the
+	// merging workspace's SESSION (internal/ssm/mergelease.go), and the
+	// per-repository queue only serializes merges against each other, so a human
+	// or another agent committing straight into the target checkout is a write
+	// this subsystem neither excludes nor sees. Recording the head the rebase
+	// based itself on, and refusing the merge unless the target is still on it,
+	// is what turns "no one else should be writing here" into something the
+	// pipeline can actually verify. A refusal is recoverable rather than fatal:
+	// merge.Driver.Merge re-rebases ONCE onto the new head.
+	BaseHead string
 }
 
 // runIdentity is the id this request's run publishes under: the live publisher's
@@ -156,6 +187,25 @@ func (r Request) validate() error {
 		return fmt.Errorf("merge: request SourceDir is required")
 	case r.TargetDir == "":
 		return fmt.Errorf("merge: request TargetDir is required")
+	}
+	return nil
+}
+
+// validateRebase is the precondition of every driver entry point that works
+// INSIDE an existing rebase worktree (Resume, ContinueAfterTestFix, the landing
+// step). Such a call cannot make one: the tree it must address is the one a
+// previous call parked a conflict or a test failure in, and a missing WorkDir
+// means the caller lost track of it. Guessing at the target instead is exactly
+// the target-mutating behavior this design removed, so it is a loud error.
+func (r Request) validateRebase() error {
+	if err := r.validateRun(); err != nil {
+		return err
+	}
+	if r.WorkDir == "" {
+		return fmt.Errorf("merge: request %q carries no rebase worktree; this step works in the temporary worktree a previous step created, and there is nothing to fall back to that would not modify the target", r.Name)
+	}
+	if r.BaseHead == "" {
+		return fmt.Errorf("merge: request %q carries no BaseHead; the target head this rebase based itself on is what guards the one target-mutating step, and a merge that cannot check it must not make it", r.Name)
 	}
 	return nil
 }
@@ -186,10 +236,11 @@ const (
 	OutcomeConflict Outcome = "conflict"
 	// OutcomeFailed: git aborted the pick with no conflict to resolve.
 	OutcomeFailed Outcome = "failed"
-	// OutcomeTestFailed: a commit landed on the target and the repository's
-	// test suite then failed. It is NOT terminal at the driver level — the
-	// coordinator drives one resolution attempt through the workspace's own
-	// session and continues, or fails the merge and rolls the target back.
+	// OutcomeTestFailed: a commit landed on the REBASE WORKTREE's line and the
+	// repository's test suite then failed there. It is NOT terminal at the
+	// driver level — the coordinator drives one resolution attempt through the
+	// workspace's own session and continues, or fails the merge. Either way the
+	// target is never modified: nothing has reached it yet.
 	OutcomeTestFailed Outcome = "test_failed"
 )
 
@@ -207,17 +258,16 @@ type Result struct {
 	AlreadyIncorporated bool
 	// Tag is the merge/<ws> tag written on a merged outcome.
 	Tag string
-	// PreMergeHead is the target's HEAD as it stood BEFORE this Merge landed
-	// anything. It is the rollback point the coordinator resets to when the
-	// test gate fails for good, and it is set by Merge on EVERY outcome so the
-	// coordinator holds it no matter how the merge later develops.
-	//
-	// A Merge that is itself a boot-time REPLAY records the head it finds,
-	// which already carries whatever the previous daemon landed before it died.
-	// That is the honest rollback point for the attempt being made now: the
-	// replay is a fresh merge from the target's current state, not a resumption
-	// of the dead process's transaction.
-	PreMergeHead string
+	// WorkDir is the REBASE WORKTREE this call worked in, set on EVERY outcome
+	// so merge.Coordinator holds it no matter how the merge later develops. It
+	// is the tree a conflict is parked in, the tree a test fix is staged in, and
+	// the tree the coordinator must clean up when the run ends — see
+	// Request.WorkDir.
+	WorkDir string
+	// BaseHead is the target head the rebase based itself on, set on EVERY
+	// outcome. It is the guard the single target-mutating step checks — see
+	// Request.BaseHead.
+	BaseHead string
 	// FailingCommit is the short SHA of the commit whose landing broke the test
 	// suite, set when Outcome is OutcomeTestFailed.
 	FailingCommit string
@@ -231,22 +281,6 @@ type Result struct {
 	// runner, frequently does not contain the failure at all — so the path is
 	// what makes the failure diagnosable after the merge is over.
 	TestFailureOutputPath string
-	// TestedHead is the target's HEAD as it stood when the failing suite ran,
-	// set when Outcome is OutcomeTestFailed.
-	//
-	// IT IS THE ROLLBACK'S PROOF OF OWNERSHIP, not a diagnostic. The rollback
-	// resets the target to PreMergeHead, and between the failing suite and that
-	// reset the merge does not touch the target at all — it hands the failure to
-	// an agent and waits, which can take many minutes. A `git reset --hard`
-	// fired blind at the end of that window destroys ANY commit that reached the
-	// target meanwhile, including one no part of this merge produced: the merge
-	// lease is a claim on the WORKSPACE'S SESSION (internal/ssm/mergelease.go),
-	// and the per-repository queue serializes merges against each other, so
-	// neither excludes a human or another agent committing straight into the
-	// target checkout. Recording the head the merge left, and refusing the reset
-	// unless the target is still on it, is what turns "no one else should be
-	// writing here" into something the rollback can actually verify.
-	TestedHead string
 }
 
 // cherryPickAnnotationRE matches the "(cherry picked from commit <sha>)"
@@ -254,10 +288,50 @@ type Result struct {
 // agent-repl--extract-cherry-pick-shas.
 var cherryPickAnnotationRE = regexp.MustCompile(`\(cherry picked from commit ([0-9a-f]{40})\)`)
 
-// Merge runs the cherry-pick driver for req against a clean precondition and
-// returns the Result. It emits an opening `merging`, then one further
-// `merging` per landed commit (naming the commit and its position in the
-// range), then exactly one of merged / merge_conflict / merge_failed — or
+// errTargetMoved reports that the target's HEAD is no longer the head this
+// rebase based itself on, so the merge commit would incorporate a line that was
+// never tested against what the target now carries.
+//
+// IT IS A RECOVERABLE REFUSAL, not a failure, which is why it is a sentinel
+// rather than a plain error: Merge answers it by re-rebasing ONCE onto the new
+// head. A second occurrence is a target being written to faster than a gated
+// merge can keep up with, and that fails loudly rather than spinning.
+var errTargetMoved = errors.New("merge: the target moved off the head this rebase based itself on")
+
+// errMergeRefused reports that git would not make the merge commit. It cannot
+// be a conflict — the target is on the head the rebased line descends from — so
+// it is always the target holding work of its own that the merge would
+// overwrite: an uncommitted edit, or an untracked file. It is a classified
+// merge OUTCOME (merge_failed) rather than a pipeline error, and the target
+// keeps whatever it was holding.
+var errMergeRefused = errors.New("merge: git refused the merge commit")
+
+// rebaseAttempts bounds Merge's re-rebase loop. TWO: the first rebase, plus
+// exactly ONE automatic re-rebase for a target that moved underneath it while
+// the gate ran. The bound is what keeps a repository with a busy target from
+// turning one merge into an unbounded sequence of full test-suite runs.
+const rebaseAttempts = 2
+
+// Merge REBASES the branch's commits onto the target's head IN A TEMPORARY
+// WORKTREE, gates every landing on the repository's test suite there, and then
+// moves the target exactly ONCE — a `git merge --no-ff` of the rebased branch.
+//
+// THE TARGET IS NOT THE WORKBENCH. The driver this replaced cherry-picked
+// commit by commit INTO the target checkout and reset it back on failure, so
+// every merge opened a window in which the tree every other workspace cuts from
+// carried untested commits, and a `reset --hard` at the end of an unbounded
+// agent turn could destroy an external commit that arrived meanwhile (twice
+// observed live). Rebasing off-target closes the window structurally: nothing
+// reaches the target until every commit has landed and passed, and a failure at
+// any earlier stage leaves the target BYTE-FOR-BYTE as it was found.
+//
+// THE MERGE COMMIT IS THE POINT, not an artifact. `--no-ff` records the branch
+// as the merge commit's SECOND PARENT, so the workspace's topology is visible in
+// git porcelain rather than being flattened into a run of cherry-picks nothing
+// links back to the branch.
+//
+// It emits one `merging` per landed commit (naming the commit and its position
+// in the range), then exactly one of merged / merge_conflict / merge_failed — or
 // nothing further when the run ends on OutcomeTestFailed, which is the
 // coordinator's to classify.
 //
@@ -265,8 +339,10 @@ var cherryPickAnnotationRE = regexp.MustCompile(`\(cherry picked from commit ([0
 // aborts BEFORE any transition is emitted, so a rejected merge leaves the
 // workspace's state exactly as it was — no half-transition.
 //
-// A conflict is LEFT IN THE TARGET TREE (never aborted); the caller resumes
-// it via Resume once the conflict has been resolved.
+// A conflict is LEFT IN THE REBASE WORKTREE (never aborted); the caller resumes
+// it via Resume once the conflict has been resolved. The rebase worktree
+// therefore OUTLIVES this call on a parked outcome, and the caller cleans it up
+// through Cleanup when the run reaches its terminal.
 func (e *Driver) Merge(ctx context.Context, req Request) (Result, error) {
 	if err := req.validateRun(); err != nil {
 		return Result{}, err
@@ -274,39 +350,105 @@ func (e *Driver) Merge(ctx context.Context, req Request) (Result, error) {
 	e.logf("merge: Merge start {ws=%s key=%s branch=%s source=%s target=%s}",
 		req.Name, req.Workspace, req.SourceBranch, req.SourceDir, req.TargetDir)
 
-	// Preconditions run before the first transition so a rejection leaves
-	// state intact. Uncommitted changes in the source worktree would be
-	// silently lost by the merge (they belong to no commit), so they abort it.
+	if err := e.assertMergeable(ctx, req); err != nil {
+		return Result{}, err
+	}
+	if err := e.pruneStaleRebaseWorktrees(ctx, req); err != nil {
+		return Result{}, err
+	}
+
+	var moved error
+	for attempt := 1; attempt <= rebaseAttempts; attempt++ {
+		res, err := e.rebaseOnto(ctx, req, attempt)
+		if err == nil {
+			return res, nil
+		}
+		if !errors.Is(err, errTargetMoved) {
+			return Result{}, err
+		}
+		moved = err
+		if attempt < rebaseAttempts {
+			e.logf("merge: target MOVED under the rebase, RE-REBASING once {ws=%s target=%s attempt=%d/%d}: %v",
+				req.Name, req.TargetDir, attempt, rebaseAttempts, err)
+		}
+	}
+	return Result{}, fmt.Errorf("merge: %q rebased onto the target %d times and the target moved every time — the target is being written to faster than a gated merge can land; the target was NEVER MODIFIED: %w",
+		req.Name, rebaseAttempts, moved)
+}
+
+// assertMergeable runs every precondition of a rebase merge, before the first
+// transition is emitted, so a rejection leaves the workspace's state exactly as
+// it was.
+func (e *Driver) assertMergeable(ctx context.Context, req Request) error {
+	// Uncommitted changes in the source worktree would be silently lost by the
+	// merge (they belong to no commit), and the branch ref move at the end would
+	// leave that worktree's HEAD disagreeing with its own index.
 	if err := e.assertCleanWorktree(ctx, req.SourceDir); err != nil {
-		return Result{}, fmt.Errorf("merge: precondition for %q: %w", req.Name, err)
+		return fmt.Errorf("merge: precondition for %q: %w", req.Name, err)
 	}
 	exists, err := e.branchExists(ctx, req.TargetDir, req.SourceBranch)
 	if err != nil {
-		return Result{}, err
+		return err
 	}
 	if !exists {
-		return Result{}, fmt.Errorf("merge: branch %q not found in %s", req.SourceBranch, req.TargetDir)
+		return fmt.Errorf("merge: branch %q not found in %s", req.SourceBranch, req.TargetDir)
 	}
-	// Stale sequencer residue (no parked commit) refuses every new pick with
-	// an opaque exit 128 and can never be resumed, so it is rejected here as
-	// a NAMED precondition — before any transition — with the operator's way
-	// out in the message. A target parked on a REAL conflict is deliberately
-	// not refused: the bounce-replay path re-enters it to re-park.
+	// Sequencer residue in the TARGET is now always somebody else's: this
+	// pipeline never cherry-picks there. It still refuses every new operation
+	// with an opaque exit 128, so it is rejected as a NAMED precondition with
+	// the operator's way out in the message.
 	stale, err := e.staleSequencerState(ctx, req.TargetDir)
 	if err != nil {
-		return Result{}, err
+		return err
 	}
 	if stale {
-		return Result{}, fmt.Errorf("merge: target %s has an unfinished cherry-pick (stale sequencer state, no conflicted commit) — run `git -C %s cherry-pick --quit` before merging %q",
+		return fmt.Errorf("merge: target %s has an unfinished cherry-pick (stale sequencer state, no conflicted commit) — run `git -C %s cherry-pick --quit` before merging %q",
 			req.TargetDir, req.TargetDir, req.Name)
 	}
+	// An unfinished merge in the target would make the final `git merge --no-ff`
+	// refuse, and it would do so AFTER a full rebase and every suite run. It is
+	// cheaper and far clearer to say so first.
+	merging, err := e.mergeInProgress(ctx, req.TargetDir)
+	if err != nil {
+		return err
+	}
+	if merging {
+		return fmt.Errorf("merge: target %s has an unfinished merge (MERGE_HEAD present) — finish or `git -C %s merge --abort` it before merging %q",
+			req.TargetDir, req.TargetDir, req.Name)
+	}
+	return nil
+}
 
-	// The rollback point. It is read BEFORE the first transition so it reflects
-	// the target exactly as the merge found it.
-	preHead, err := e.gitString(ctx, req.TargetDir, "rev-parse", "HEAD")
+// rebaseOnto runs ONE rebase attempt: a fresh temporary worktree based on the
+// target's current head, the gated per-commit replay in it, and — when the
+// replay reaches the end — the single target move.
+//
+// THE TEMP WORKTREE IS CLEANED UP ON EVERY PATH THIS CALL OWNS. It survives
+// exactly one way: a parked outcome (conflict or test failure), which hands it
+// to merge.Coordinator along with the responsibility to Cleanup it.
+func (e *Driver) rebaseOnto(ctx context.Context, req Request, attempt int) (res Result, err error) {
+	baseHead, err := e.gitString(ctx, req.TargetDir, "rev-parse", "HEAD")
 	if err != nil {
 		return Result{}, err
 	}
+	work, err := e.createRebaseWorktree(ctx, req, baseHead)
+	if err != nil {
+		return Result{}, err
+	}
+	req.WorkDir, req.BaseHead = work, baseHead
+	e.logf("merge: REBASE WORKTREE created {ws=%s attempt=%d/%d work=%s base=%s target=%s} — the target is NOT touched until every commit has landed and passed",
+		req.Name, attempt, rebaseAttempts, work, shortSHA(baseHead), req.TargetDir)
+
+	defer func() {
+		// A parked outcome keeps the tree; anything else has no further use for
+		// it, and a temp worktree left behind accumulates one per failed merge.
+		if err == nil && (res.Outcome == OutcomeConflict || res.Outcome == OutcomeTestFailed) {
+			return
+		}
+		if cerr := e.Cleanup(ctx, req); cerr != nil {
+			e.logf("merge: rebase worktree cleanup FAILED {ws=%s work=%s}: %v", req.Name, work, cerr)
+		}
+	}()
 
 	// NOTHING IS PUBLISHED HERE. The opening used to publish a cherry_picking
 	// status before the plan was computed, which put commits_total=0 and an empty
@@ -316,48 +458,162 @@ func (e *Driver) Merge(ctx context.Context, req Request) (Result, error) {
 	// one replaced it. A cherry_picking status exists to say which commit of how
 	// many is landing, so it is published from inside the loop, once the plan is
 	// the run's denominator and a commit is genuinely in flight.
-	base, err := e.cherryPickBase(ctx, req.TargetDir, req.SourceBranch)
+	base, err := e.cherryPickBase(ctx, work, req.SourceBranch)
 	if err != nil {
 		return Result{}, err
 	}
-	res, err := e.pickLoop(ctx, req, base, false)
+	res, err = e.rebaseLoop(ctx, req, base, false)
 	if err != nil {
 		return Result{}, err
 	}
-	res.PreMergeHead = preHead
+	res.WorkDir, res.BaseHead = work, baseHead
 	return res, nil
 }
 
-// pickLoop replays base..SourceBranch onto the target ONE COMMIT AT A TIME,
-// running the repository's test suite after each commit lands.
+// rebaseWorktreeMarker is the path component every rebase worktree carries. It
+// is what makes an abandoned one RECOGNIZABLE to the next merge, which is the
+// only way a process-local temp tree gets cleaned up after the process that
+// made it died.
+const rebaseWorktreeMarker = "agent-repl-merge-rebase-"
+
+// pruneStaleRebaseWorktrees removes every rebase worktree the target's
+// repository still has registered before this merge makes its own.
 //
-// COMMIT BY COMMIT IS THE WHOLE POINT. A single `cherry-pick -x base..branch`
-// can only be tested once, at the end, which tells a user that "the merge broke
-// the suite" without saying which commit did it and leaves a resolution attempt
-// nothing narrower than the whole range to reason about. Picking individually
-// makes each landing testable, names the culprit, and gives the conflict path
-// exactly the same shape it always had (a conflict on commit N parks with
-// commits 1..N-1 already on the target).
+// ANY REBASE WORKTREE FOUND HERE IS ABANDONED, and that is a fact about the
+// pipeline rather than an assumption: merges are serialized per REPOSITORY by
+// merge.Coordinator's queue, so at the moment one starts there can be no other
+// merge of this repository holding a tree open. What there CAN be is the tree of
+// a daemon that was killed mid-merge — a bounce, a crash, a kill during a parked
+// conflict — whose directory is gone or soon will be but whose registration
+// outlives it and accumulates one entry per interrupted merge.
+//
+// A REMOVAL THAT FAILS DOES NOT FAIL THE MERGE. The new tree gets a fresh path
+// either way, so a stale registration this could not clear is loud-logged and
+// left for a human. A failure to LIST is different and is an error: this is
+// `git -C target`, and a target whose worktrees cannot be enumerated is a target
+// no part of the merge that follows should be trusted against.
+func (e *Driver) pruneStaleRebaseWorktrees(ctx context.Context, req Request) error {
+	out, err := e.gitString(ctx, req.TargetDir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return err
+	}
+	for _, line := range splitLines(out) {
+		path, ok := strings.CutPrefix(strings.TrimSpace(line), "worktree ")
+		if !ok || !strings.Contains(path, rebaseWorktreeMarker) {
+			continue
+		}
+		e.logf("merge: ABANDONED rebase worktree found, removing it {ws=%s target=%s stale=%s} — merges are serialized per repository, so this belongs to a daemon that died mid-merge",
+			req.Name, req.TargetDir, path)
+		stale := req
+		stale.WorkDir = path
+		if cerr := e.Cleanup(ctx, stale); cerr != nil {
+			e.logf("merge: abandoned rebase worktree could NOT be removed {ws=%s target=%s stale=%s}: %v — the merge proceeds with a fresh tree; this one is left for a human",
+				req.Name, req.TargetDir, path, cerr)
+		}
+	}
+	return nil
+}
+
+// createRebaseWorktree adds a detached temporary worktree of the target's
+// repository at baseHead. It is the tree every commit is replayed and tested in.
+//
+// IT IS A LINKED WORKTREE OF THE TARGET'S OWN REPOSITORY, so it shares the
+// object store and the refs — which is what lets it resolve SourceBranch by
+// name, and what makes the resulting commits already present in the target's
+// repository when the merge commit finally references them.
+func (e *Driver) createRebaseWorktree(ctx context.Context, req Request, baseHead string) (string, error) {
+	parent, err := os.MkdirTemp("", rebaseWorktreeMarker)
+	if err != nil {
+		return "", fmt.Errorf("merge: creating the rebase worktree's parent directory for %q: %w", req.Name, err)
+	}
+	// git refuses to add a worktree at an existing non-empty path, and it
+	// creates the leaf itself. The parent is what this owns and removes.
+	dir := filepath.Join(parent, "rebase")
+	exit, out, err := e.gitExit(ctx, req.TargetDir, "worktree", "add", "--detach", dir, baseHead)
+	if err != nil {
+		_ = os.RemoveAll(parent)
+		return "", err
+	}
+	if exit != 0 {
+		_ = os.RemoveAll(parent)
+		return "", fmt.Errorf("merge: `git worktree add --detach %s %s` for %q exited %d in %s: %s",
+			dir, shortSHA(baseHead), req.Name, exit, req.TargetDir, dlog.Clamp(out, 400))
+	}
+	return dir, nil
+}
+
+// Cleanup removes the rebase worktree req carries, and is a no-op for a request
+// that has none.
+//
+// IT RUNS ON EVERY TERMINAL PATH — merged, failed, abandoned, shut down — because
+// the worktree is the one piece of a merge that outlives the call that made it.
+// A failure to remove it is REPORTED, never swallowed: the caller logs it, and a
+// merge that landed is not un-landed by a leftover directory.
+//
+// THE FILESYSTEM REMOVAL RUNS EVEN WHEN `git worktree remove` FAILS, and the
+// prune that follows is what stops the repository's administrative record from
+// outliving the directory. A tree parked on a conflict is precisely the case
+// `remove` needs `--force` for.
+func (e *Driver) Cleanup(ctx context.Context, req Request) error {
+	if req.WorkDir == "" {
+		return nil
+	}
+	var errs []error
+	exit, out, err := e.gitExit(ctx, req.TargetDir, "worktree", "remove", "--force", req.WorkDir)
+	switch {
+	case err != nil:
+		errs = append(errs, err)
+	case exit != 0:
+		errs = append(errs, fmt.Errorf("merge: `git worktree remove --force %s` exited %d in %s: %s",
+			req.WorkDir, exit, req.TargetDir, dlog.Clamp(out, 400)))
+	}
+	if rmErr := os.RemoveAll(filepath.Dir(req.WorkDir)); rmErr != nil {
+		errs = append(errs, fmt.Errorf("merge: removing the rebase worktree directory %s: %w", req.WorkDir, rmErr))
+	}
+	if pexit, pout, perr := e.gitExit(ctx, req.TargetDir, "worktree", "prune"); perr != nil {
+		errs = append(errs, perr)
+	} else if pexit != 0 {
+		errs = append(errs, fmt.Errorf("merge: `git worktree prune` exited %d in %s: %s", pexit, req.TargetDir, dlog.Clamp(pout, 400)))
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	e.logf("merge: rebase worktree REMOVED {ws=%s work=%s}", req.Name, req.WorkDir)
+	return nil
+}
+
+// rebaseLoop replays base..SourceBranch onto the rebase worktree's head ONE
+// COMMIT AT A TIME, running the repository's test suite after each commit lands.
+//
+// IT IS A REBASE, and `cherry-pick -x` is how it is spelled. `git rebase` is
+// itself a sequence of picks, and driving them individually is what makes the
+// gate, the conflict park and the resume possible at all: `git rebase` offers no
+// point between two commits at which this pipeline could run a suite, hand a
+// conflict to an agent, and come back. The `-x` annotation is retained because
+// the loop's own restartability reads it (see below) and because it records
+// which commit of the workspace's branch each rebased commit came from.
+//
+// COMMIT BY COMMIT IS THE WHOLE POINT. Replaying the range in one step could
+// only be tested once, at the end, which tells a user that "the merge broke the
+// suite" without saying which commit did it and leaves a resolution attempt
+// nothing narrower than the whole range to reason about.
 //
 // IT IS RESTARTABLE BY CONSTRUCTION. The loop derives its work from git alone —
-// the cherry-pick base (which advances past every `-x` annotation already on the
-// target) plus a per-commit patch-id probe — so re-entering it after a resume, a
-// test fix, or a whole daemon bounce skips what already landed rather than
-// replaying it. That is what makes the durable queue's boot replay a no-op for
-// the commits the previous daemon got through.
+// the rebase base (which advances past every `-x` annotation already on the
+// rebased line) plus a per-commit patch-id probe — so re-entering it after a
+// resume or a test fix skips what already landed rather than replaying it.
 //
 // MERGE COMMITS ARE FLATTENED. `--no-merges` drops them: a merge commit carries
 // no patch of its own, and every commit on both of its sides is already in the
-// range and picked individually. The pre-per-commit driver instead handed the
-// whole range to git, which refuses a range containing a merge outright, so a
-// branch with an internal merge used to fail the whole attempt.
-// landedEarlier tells the loop whether work has ALREADY landed on the target
-// during this merge (a resolved conflict, a committed test fix). It is what
+// range and picked individually.
+//
+// landedEarlier tells the loop whether work has ALREADY landed on the rebased
+// line during this merge (a resolved conflict, a committed test fix). It is what
 // keeps a re-entered loop that finds nothing left to do from reporting the
 // merge as a no-op when it plainly was not one.
-func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedEarlier bool) (Result, error) {
+func (e *Driver) rebaseLoop(ctx context.Context, req Request, base string, landedEarlier bool) (Result, error) {
 	rng := base + ".." + req.SourceBranch
-	plan, err := e.plan(ctx, req.TargetDir, rng)
+	plan, err := e.plan(ctx, req.WorkDir, rng)
 	if err != nil {
 		return Result{}, err
 	}
@@ -366,10 +622,10 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 	// executed rather than whatever each call site happened to count.
 	//
 	// A RE-ENTERED loop reconciles instead of replacing. Its base has advanced
-	// past everything already on the target, so `plan` here is only the REMAINDER
-	// of the run's range — recording it as the plan would make commits_total
-	// shrink as the run progressed, and a re-entry that finds nothing left would
-	// report a merge of zero commits.
+	// past everything already on the rebased line, so `plan` here is only the
+	// REMAINDER of the run's range — recording it as the plan would make
+	// commits_total shrink as the run progressed, and a re-entry that finds
+	// nothing left would report a merge of zero commits.
 	if landedEarlier {
 		if err := e.resumeRunPlan(ctx, req, plan); err != nil {
 			return Result{}, err
@@ -381,7 +637,7 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 	if len(commits) == 0 {
 		// The workspace's contribution is already on the target by ancestry —
 		// a successful no-op merge.
-		e.logf("merge: range %s empty — nothing left to pick {ws=%s}", rng, req.Name)
+		e.logf("merge: range %s empty — nothing left to replay {ws=%s}", rng, req.Name)
 		return e.finalizeMerged(ctx, req, !landedEarlier)
 	}
 
@@ -390,52 +646,50 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 		progress := fmt.Sprintf("%d/%d", i+1, len(commits))
 		sha, short := commit.SHA, commit.Short
 
-		already, err := e.commitAlreadyIncorporated(ctx, req.TargetDir, sha)
+		already, err := e.commitAlreadyIncorporated(ctx, req.WorkDir, sha)
 		if err != nil {
 			return Result{}, err
 		}
 		if already {
-			// Picking it would go empty, which wedges git's sequencer on a
+			// Replaying it would go empty, which wedges git's sequencer on a
 			// state only `--skip` or `--quit` clears. Skipping it here keeps
 			// that state unrepresentable rather than recoverable.
-			e.logf("merge: SKIPPING %s (%s), already on the target by patch-id {ws=%s}", short, progress, req.Name)
-			// IT COUNTS AS LANDED. The commit is on the target — by this run or by
-			// the one the previous daemon died in the middle of — and a progress
-			// figure that skipped it would count down toward a total it could
-			// never reach.
+			e.logf("merge: SKIPPING %s (%s), already on the rebased line by patch-id {ws=%s}", short, progress, req.Name)
+			// IT COUNTS AS LANDED. The commit is on the rebased line — and a
+			// progress figure that skipped it would count down toward a total it
+			// could never reach.
 			req.Run.CommitLanded()
 			continue
 		}
 
-		// The phase is published BEFORE the pick, not after: the pick is the slow
-		// part, and a user watching a merge should see which commit is landing
-		// while it lands rather than only once it has.
-		if err := req.Run.CherryPicking(commit, "cherry-picking "+progress+": "+short); err != nil {
+		// The phase is published BEFORE the replay, not after: the replay is the
+		// slow part, and a user watching a merge should see which commit is
+		// landing while it lands rather than only once it has.
+		if err := req.Run.CherryPicking(commit, "rebasing "+progress+": "+short); err != nil {
 			return Result{}, err
 		}
 
 		// A non-zero exit is not a spawn error; the exit code and the presence
 		// of CHERRY_PICK_HEAD classify the outcome.
-		exit, out, err := e.gitExit(ctx, req.TargetDir, "cherry-pick", "-x", sha)
+		exit, out, err := e.gitExit(ctx, req.WorkDir, "cherry-pick", "-x", sha)
 		if err != nil {
 			return Result{}, err
 		}
-		e.logf("merge: cherry-pick -x %s (%s) exit=%d {ws=%s} %s", short, progress, exit, req.Name, dlog.Clamp(out, 400))
+		e.logf("merge: rebase replay of %s (%s) exit=%d {ws=%s work=%s} %s", short, progress, exit, req.Name, req.WorkDir, dlog.Clamp(out, 400))
 
-		inProgress, err := e.cherryPickInProgress(ctx, req.TargetDir)
+		inProgress, err := e.cherryPickInProgress(ctx, req.WorkDir)
 		if err != nil {
 			return Result{}, err
 		}
 		if inProgress {
 			// CHERRY_PICK_HEAD ALONE DOES NOT MEAN CONFLICT. git parks the same
-			// marker for a pick that went EMPTY — the commit's change is already
-			// in the target's tree, so there is nothing to apply and nothing to
-			// resolve — and only `--skip` or `--quit` clears that state.
+			// marker for a replay that went EMPTY — the commit's change is already
+			// in the rebased line's tree, so there is nothing to apply and nothing
+			// to resolve — and only `--skip` or `--quit` clears that state.
 			// Classifying it as a conflict parks a merge on work no resolver can
 			// do, and the resume that follows can only fail: `--continue`
-			// refuses an empty pick, re-parks the same marker, and the target
-			// worktree stays held against every later merge in its repository.
-			empty, err := e.pickWentEmpty(ctx, req.TargetDir)
+			// refuses an empty pick and re-parks the same marker.
+			empty, err := e.pickWentEmpty(ctx, req.WorkDir)
 			if err != nil {
 				return Result{}, err
 			}
@@ -444,8 +698,9 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 					return Result{}, err
 				}
 				// IT COUNTS AS LANDED, for the same reason the patch-id skip
-				// above does: the change is on the target, and a progress figure
-				// that skipped it would count toward a total it could never reach.
+				// above does: the change is on the rebased line, and a progress
+				// figure that skipped it would count toward a total it could never
+				// reach.
 				req.Run.CommitLanded()
 				continue
 			}
@@ -456,7 +711,7 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 			// `cherry-pick -x` rewrote our commits under new SHAs, so the
 			// SHA-keyed probes missed them) from a genuine failure via
 			// `git cherry` (patch-id comparison) over the whole range.
-			incorporated, err := e.rangeAlreadyIncorporated(ctx, req.TargetDir, base, req.SourceBranch)
+			incorporated, err := e.rangeAlreadyIncorporated(ctx, req.WorkDir, base, req.SourceBranch)
 			if err != nil {
 				return Result{}, err
 			}
@@ -465,12 +720,12 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 				return e.finalizeMerged(ctx, req, true)
 			}
 			return e.markFailed(ctx, req,
-				fmt.Sprintf("cherry-pick of %s (%s) exited %d with no conflict to resolve", short, progress, exit))
+				fmt.Sprintf("rebase replay of %s (%s) exited %d with no conflict to resolve", short, progress, exit))
 		}
 		landed++
 		req.Run.CommitLanded()
 
-		failure, err := e.gateOnSuite(ctx, req, progress+" after cherry-pick of "+short, short, nil)
+		failure, err := e.gateOnSuite(ctx, req, progress+" after rebasing "+short, short, nil)
 		if err != nil {
 			return Result{}, err
 		}
@@ -482,8 +737,13 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 }
 
 // gateOnSuite runs the target repository's test suite for the commit that just
-// landed and reports a test failure as a Result, or nil when the merge may
-// continue.
+// landed ON THE REBASED LINE and reports a test failure as a Result, or nil when
+// the merge may continue.
+//
+// IT RUNS IN THE REBASE WORKTREE, which is a full checkout of the repository at
+// exactly the tree the merge proposes to make. Running it there rather than in
+// the target is what keeps the target's own checkout unmodified — and untested
+// code out of it — for the whole of the merge.
 //
 // The `merging` transition is emitted BEFORE the run, not after, because the
 // run is the slow part: a user watching a merge should see "testing 3/7 after
@@ -507,23 +767,23 @@ func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short s
 	if err := req.Run.Testing("testing " + progress + " [" + selectionLabel(sel.Suites) + "]"); err != nil {
 		return nil, err
 	}
-	sr, err := e.suite.RunSuite(ctx, req.TargetDir, SuiteRun{Suites: sel.Suites, Attempt: 1})
+	sr, err := e.suite.RunSuite(ctx, req.WorkDir, SuiteRun{Suites: sel.Suites, Attempt: 1})
 	if err != nil {
-		e.logf("merge: test gate UNRUNNABLE after cherry-pick of %s {ws=%s target=%s}: %v", short, req.Name, req.TargetDir, err)
-		return nil, fmt.Errorf("merge: test gate for %q after cherry-picking %s: %w", req.Name, short, err)
+		e.logf("merge: test gate UNRUNNABLE after rebasing %s {ws=%s work=%s}: %v", short, req.Name, req.WorkDir, err)
+		return nil, fmt.Errorf("merge: test gate for %q after rebasing %s: %w", req.Name, short, err)
 	}
 	if sr.Skipped {
-		e.logf("merge: test gate SKIPPED after cherry-pick of %s {ws=%s target=%s}: %s — this merge lands UNTESTED",
-			short, req.Name, req.TargetDir, sr.Reason)
+		e.logf("merge: test gate SKIPPED after rebasing %s {ws=%s work=%s}: %s — this merge lands UNTESTED",
+			short, req.Name, req.WorkDir, sr.Reason)
 		return nil, nil
 	}
 	if sr.Passed {
-		e.logf("merge: test gate PASSED after cherry-pick of %s (%s) {ws=%s suites=%s duration=%s}",
+		e.logf("merge: test gate PASSED after rebasing %s (%s) {ws=%s suites=%s duration=%s}",
 			short, progress, req.Name, selectionLabel(sel.Suites), sr.Duration.Round(time.Millisecond))
 		return nil, nil
 	}
-	e.logf("merge: test gate FAILED after cherry-pick of %s (%s) {ws=%s target=%s suites=%s duration=%s full_output=%s} tail:\n%s",
-		short, progress, req.Name, req.TargetDir, selectionLabel(sel.Suites),
+	e.logf("merge: test gate FAILED after rebasing %s (%s) {ws=%s work=%s suites=%s duration=%s full_output=%s} tail:\n%s",
+		short, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
 		sr.Duration.Round(time.Millisecond), sr.OutputPath, sr.Tail)
 
 	rerun, err := e.rerunAfterFailure(ctx, req, sel, progress, short, sr)
@@ -535,20 +795,13 @@ func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short s
 		return nil, nil
 	}
 	sr = *rerun
-	// The head the suite just judged. It is read here rather than recomputed at
-	// rollback time because the rollback happens after an unbounded resolution
-	// window, and the whole point is to compare against the target as this merge
-	// left it — see Result.TestedHead.
-	tested, err := e.gitString(ctx, req.TargetDir, "rev-parse", "HEAD")
-	if err != nil {
-		return nil, err
-	}
 	return &Result{
 		Outcome:               OutcomeTestFailed,
 		FailingCommit:         short,
 		TestFailureTail:       sr.Tail,
 		TestFailureOutputPath: sr.OutputPath,
-		TestedHead:            tested,
+		WorkDir:               req.WorkDir,
+		BaseHead:              req.BaseHead,
 	}, nil
 }
 
@@ -571,32 +824,32 @@ func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short s
 // It returns (nil, nil) for a flake — the gate proceeds — and the SECOND run's
 // result for a genuine failure.
 func (e *Driver) rerunAfterFailure(ctx context.Context, req Request, sel SuiteSelection, progress, short string, first SuiteResult) (*SuiteResult, error) {
-	e.logf("merge: test gate RE-RUNNING once on the SAME tree to separate a flake from a genuine failure {ws=%s target=%s suites=%s commit=%s}",
-		req.Name, req.TargetDir, selectionLabel(sel.Suites), short)
+	e.logf("merge: test gate RE-RUNNING once on the SAME tree to separate a flake from a genuine failure {ws=%s work=%s suites=%s commit=%s}",
+		req.Name, req.WorkDir, selectionLabel(sel.Suites), short)
 	if err := req.Run.Testing("re-testing " + progress + " [" + selectionLabel(sel.Suites) + "] after a failure"); err != nil {
 		return nil, err
 	}
-	second, err := e.suite.RunSuite(ctx, req.TargetDir, SuiteRun{Suites: sel.Suites, Attempt: 2})
+	second, err := e.suite.RunSuite(ctx, req.WorkDir, SuiteRun{Suites: sel.Suites, Attempt: 2})
 	if err != nil {
-		e.logf("merge: test gate RE-RUN UNRUNNABLE after cherry-pick of %s {ws=%s target=%s}: %v", short, req.Name, req.TargetDir, err)
-		return nil, fmt.Errorf("merge: test gate re-run for %q after cherry-picking %s: %w", req.Name, short, err)
+		e.logf("merge: test gate RE-RUN UNRUNNABLE after rebasing %s {ws=%s work=%s}: %v", short, req.Name, req.WorkDir, err)
+		return nil, fmt.Errorf("merge: test gate re-run for %q after rebasing %s: %w", req.Name, short, err)
 	}
 	if second.Skipped {
 		// The first run produced a verdict, so the entrypoint was there. Its
 		// disappearance between the two runs is a contradiction, not a skip to
 		// wave through.
-		return nil, fmt.Errorf("merge: test gate re-run for %q after cherry-picking %s reported the suite SKIPPED (%s) when the first run had a verdict",
+		return nil, fmt.Errorf("merge: test gate re-run for %q after rebasing %s reported the suite SKIPPED (%s) when the first run had a verdict",
 			req.Name, short, second.Reason)
 	}
 	if second.Passed {
-		e.logf("merge: test gate FLAKE after cherry-pick of %s (%s) {ws=%s target=%s suites=%s} — FAILED in %s then PASSED in %s on the UNCHANGED tree; the merge proceeds. first_output=%s rerun_output=%s",
-			short, progress, req.Name, req.TargetDir, selectionLabel(sel.Suites),
+		e.logf("merge: test gate FLAKE after rebasing %s (%s) {ws=%s work=%s suites=%s} — FAILED in %s then PASSED in %s on the UNCHANGED tree; the merge proceeds. first_output=%s rerun_output=%s",
+			short, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
 			first.Duration.Round(time.Millisecond), second.Duration.Round(time.Millisecond),
 			first.OutputPath, second.OutputPath)
 		return nil, nil
 	}
-	e.logf("merge: test gate FAILED TWICE after cherry-pick of %s (%s) {ws=%s target=%s suites=%s} — %s then %s, a genuine failure. first_output=%s rerun_output=%s",
-		short, progress, req.Name, req.TargetDir, selectionLabel(sel.Suites),
+	e.logf("merge: test gate FAILED TWICE after rebasing %s (%s) {ws=%s work=%s suites=%s} — %s then %s, a genuine failure. first_output=%s rerun_output=%s",
+		short, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
 		first.Duration.Round(time.Millisecond), second.Duration.Round(time.Millisecond),
 		first.OutputPath, second.OutputPath)
 	// The re-run's tail is the freshest evidence and is what the resolution turn
@@ -620,18 +873,18 @@ func (e *Driver) rerunAfterFailure(ctx context.Context, req Request, sel SuiteSe
 // which is what lets a re-entered replay reach the same answer as the run that
 // started it.
 func (e *Driver) selectSuites(ctx context.Context, req Request, extraPaths []string) (SuiteSelection, error) {
-	base, err := e.gitString(ctx, req.TargetDir, "merge-base", "HEAD", req.SourceBranch)
+	base, err := e.gitString(ctx, req.WorkDir, "merge-base", "HEAD", req.SourceBranch)
 	if err != nil {
 		return SuiteSelection{}, err
 	}
-	paths, err := e.changedPaths(ctx, req.TargetDir, base+".."+req.SourceBranch)
+	paths, err := e.changedPaths(ctx, req.WorkDir, base+".."+req.SourceBranch)
 	if err != nil {
 		return SuiteSelection{}, err
 	}
 	paths = append(paths, extraPaths...)
 	sel := SelectSuites(paths)
-	e.logf("merge: suite SELECTION {ws=%s target=%s range=%s..%s paths=%d full=%t suites=%s}: %s",
-		req.Name, req.TargetDir, shortSHA(base), req.SourceBranch, len(paths), sel.Full,
+	e.logf("merge: suite SELECTION {ws=%s work=%s range=%s..%s paths=%d full=%t suites=%s}: %s",
+		req.Name, req.WorkDir, shortSHA(base), req.SourceBranch, len(paths), sel.Full,
 		selectionLabel(sel.Suites), sel.Reason)
 	return sel, nil
 }
@@ -662,33 +915,36 @@ func (e *Driver) changedPaths(ctx context.Context, dir string, revArgs ...string
 	return paths, nil
 }
 
-// Resume continues a cherry-pick that a human (or the workspace's own agent)
-// has resolved in the target
-// worktree (the resolve-and-continue handoff arrives as a FrontendCommand
-// with conflict_resolved_continue at stitch). It stages the resolved files
-// (`git add -u`) and runs `git cherry-pick --continue`, mirroring
-// agent-repl--continue-cherry-pick-after-resolve.
+// Resume continues a rebase replay that a human (or the workspace's own agent)
+// has resolved IN THE REBASE WORKTREE (the resolve-and-continue handoff arrives
+// as a FrontendCommand with conflict_resolved_continue at stitch). It stages the
+// resolved files (`git add -u`) and runs `git cherry-pick --continue`.
+//
+// IT NEVER TOUCHES THE TARGET. The conflict was parked in the temporary rebase
+// worktree, which is where the resolution happened and where the continue lands;
+// the target is still exactly as the merge found it and stays that way until the
+// whole rebase has passed its gates.
 //
 // It emits merging (the conflict is clearing), runs the test gate on the
 // commit the continue landed, and then RE-ENTERS the per-commit replay for
 // whatever is left of the range — so a resume is not the end of a merge, it is
 // the middle of one.
 func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
-	if err := req.validateRun(); err != nil {
+	if err := req.validateRebase(); err != nil {
 		return Result{}, err
 	}
-	e.logf("merge: Resume start {ws=%s key=%s target=%s}", req.Name, req.Workspace, req.TargetDir)
+	e.logf("merge: Resume start {ws=%s key=%s work=%s target=%s}", req.Name, req.Workspace, req.WorkDir, req.TargetDir)
 
-	inProgress, err := e.cherryPickInProgress(ctx, req.TargetDir)
+	inProgress, err := e.cherryPickInProgress(ctx, req.WorkDir)
 	if err != nil {
 		return Result{}, err
 	}
 	if !inProgress {
-		// No paused cherry-pick to continue: the caller's premise (a resolved
+		// No paused replay to continue: the caller's premise (a resolved
 		// conflict awaiting continue) is false. Fail loudly rather than
 		// silently report success.
-		return Result{}, fmt.Errorf("merge: no cherry-pick in progress in %s — nothing to resume for %q",
-			req.TargetDir, req.Name)
+		return Result{}, fmt.Errorf("merge: no rebase replay in progress in %s — nothing to resume for %q",
+			req.WorkDir, req.Name)
 	}
 
 	// THE CURSOR IS REBUILT BEFORE THE FIRST PUBLICATION. A resume may be driven
@@ -703,28 +959,27 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 
-	if err := req.Run.PickingCurrent("resuming cherry-pick after resolve"); err != nil {
+	if err := req.Run.PickingCurrent("resuming the rebase after resolve"); err != nil {
 		return Result{}, err
 	}
 
-	if exit, out, err := e.gitExit(ctx, req.TargetDir, "add", "-u"); err != nil {
+	if exit, out, err := e.gitExit(ctx, req.WorkDir, "add", "-u"); err != nil {
 		return Result{}, err
 	} else if exit != 0 {
-		return Result{}, fmt.Errorf("merge: `git add -u` exited %d in %s: %s", exit, req.TargetDir, dlog.Clamp(out, 400))
+		return Result{}, fmt.Errorf("merge: `git add -u` exited %d in %s: %s", exit, req.WorkDir, dlog.Clamp(out, 400))
 	}
 
-	// A RESOLUTION CAN EMPTY A PICK, and `--continue` cannot commit one. Both
-	// the resolution that discards the whole change and the pick that was empty
+	// A RESOLUTION CAN EMPTY A REPLAY, and `--continue` cannot commit one. Both
+	// the resolution that discards the whole change and the replay that was empty
 	// the moment it parked leave the staged tree identical to HEAD, where
 	// `--continue` exits non-zero and leaves CHERRY_PICK_HEAD exactly where it
-	// was — a fixpoint that re-parks the merge on every resume and holds the
-	// target worktree forever.
-	empty, err := e.pickWentEmpty(ctx, req.TargetDir)
+	// was — a fixpoint that re-parks the merge on every resume.
+	empty, err := e.pickWentEmpty(ctx, req.WorkDir)
 	if err != nil {
 		return Result{}, err
 	}
 	if empty {
-		emptied, err := e.gitString(ctx, req.TargetDir, "rev-parse", "--short", "CHERRY_PICK_HEAD")
+		emptied, err := e.gitString(ctx, req.WorkDir, "rev-parse", "--short", "CHERRY_PICK_HEAD")
 		if err != nil {
 			return Result{}, err
 		}
@@ -737,14 +992,14 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 
 	// -c core.editor=true + --no-edit keep the original commit message
 	// (including the -x annotation) without opening $EDITOR in a headless run.
-	exit, out, err := e.gitExit(ctx, req.TargetDir,
+	exit, out, err := e.gitExit(ctx, req.WorkDir,
 		"-c", "core.editor=true", "cherry-pick", "--continue", "--no-edit")
 	if err != nil {
 		return Result{}, err
 	}
-	e.logf("merge: cherry-pick --continue exit=%d {ws=%s} %s", exit, req.Name, dlog.Clamp(out, 400))
+	e.logf("merge: rebase replay --continue exit=%d {ws=%s work=%s} %s", exit, req.Name, req.WorkDir, dlog.Clamp(out, 400))
 
-	stillInProgress, err := e.cherryPickInProgress(ctx, req.TargetDir)
+	stillInProgress, err := e.cherryPickInProgress(ctx, req.WorkDir)
 	if err != nil {
 		return Result{}, err
 	}
@@ -752,17 +1007,17 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 		return e.markConflict(ctx, req)
 	}
 	if exit != 0 {
-		return e.markFailed(ctx, req, fmt.Sprintf("cherry-pick --continue exited %d with no conflict to resolve", exit))
+		return e.markFailed(ctx, req, fmt.Sprintf("rebase replay --continue exited %d with no conflict to resolve", exit))
 	}
 
-	// The resolved commit is now the target's HEAD, and it is subject to the
-	// same gate every other landing is: a conflict a human (or an agent) hand
+	// The resolved commit is now the rebased line's HEAD, and it is subject to
+	// the same gate every other landing is: a conflict a human (or an agent) hand
 	// resolved is exactly the kind of landing that breaks a suite.
-	resumed, err := e.gitString(ctx, req.TargetDir, "rev-parse", "--short", "HEAD")
+	resumed, err := e.gitString(ctx, req.WorkDir, "rev-parse", "--short", "HEAD")
 	if err != nil {
 		return Result{}, err
 	}
-	failure, err := e.gateOnSuite(ctx, req, "the resumed cherry-pick of "+resumed, resumed, nil)
+	failure, err := e.gateOnSuite(ctx, req, "the resumed rebase of "+resumed, resumed, nil)
 	if err != nil {
 		return Result{}, err
 	}
@@ -773,42 +1028,42 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 }
 
 // ContinueAfterTestFix commits whatever the resolution turn staged in the
-// target worktree and re-runs the suite, then continues the per-commit replay.
+// REBASE WORKTREE and re-runs the suite, then continues the per-commit replay.
 //
 // THE FIX LANDS AS A FOLLOW-UP COMMIT, NOT AN AMEND. Both would work, and the
 // follow-up is the mechanically simpler of the two:
-//   - It leaves the cherry-picked commit's SHA and its `-x` annotation exactly
+//   - It leaves the replayed commit's SHA and its `-x` annotation exactly
 //     as `cherry-pick -x` wrote them. Those annotations are what
 //     cherryPickBase reads to know what already landed, so an amend would
 //     rewrite the one record the replay's restartability depends on.
 //   - It needs no interaction with the sequencer or with the commit message of
 //     a commit the driver did not author.
-//   - It keeps the target's history honest: the pick and the fix the pick
+//   - It keeps the rebased line honest: the replayed commit and the fix it
 //     required are two different pieces of work by two different authors.
 //
 // A resolution turn that staged NOTHING is not an error here. It is reported
-// loudly and the suite is re-run anyway, which will fail again and take the
-// merge down the rollback path — the honest outcome for an agent that did not
-// fix anything.
+// loudly and the suite is re-run anyway, which will fail again and fail the
+// merge — the honest outcome for an agent that did not fix anything. The target
+// is untouched throughout, so there is nothing to undo.
 func (e *Driver) ContinueAfterTestFix(ctx context.Context, req Request, failingCommit string) (Result, error) {
-	if err := req.validateRun(); err != nil {
+	if err := req.validateRebase(); err != nil {
 		return Result{}, err
 	}
 	if failingCommit == "" {
 		return Result{}, fmt.Errorf("merge: ContinueAfterTestFix for %q needs the failing commit", req.Name)
 	}
-	e.logf("merge: ContinueAfterTestFix start {ws=%s key=%s failing=%s target=%s}", req.Name, req.Workspace, failingCommit, req.TargetDir)
+	e.logf("merge: ContinueAfterTestFix start {ws=%s key=%s failing=%s work=%s}", req.Name, req.Workspace, failingCommit, req.WorkDir)
 
 	if err := e.commitTestFix(ctx, req, failingCommit); err != nil {
 		return Result{}, err
 	}
 	// A FIX IS NOT BOUND BY THE SOURCE RANGE. The resolution turn may have edited
-	// a file no cherry-picked commit touched, and a gate narrowed to the range's
-	// suites alone would then run nothing that covers the fix. The target's HEAD
-	// is read here — the fix commit when there was one, the cherry-picked commit
+	// a file no replayed commit touched, and a gate narrowed to the range's
+	// suites alone would then run nothing that covers the fix. The rebased line's
+	// HEAD is read here — the fix commit when there was one, the replayed commit
 	// when the turn staged nothing, and in-range either way — so the selection can
 	// only widen.
-	fixPaths, err := e.changedPaths(ctx, req.TargetDir, "HEAD", "-1")
+	fixPaths, err := e.changedPaths(ctx, req.WorkDir, "HEAD", "-1")
 	if err != nil {
 		return Result{}, err
 	}
@@ -825,30 +1080,30 @@ func (e *Driver) ContinueAfterTestFix(ctx context.Context, req Request, failingC
 // commitTestFix stages everything the resolution turn touched and commits it as
 // a follow-up commit. A clean tree is loud-logged and left alone.
 func (e *Driver) commitTestFix(ctx context.Context, req Request, failingCommit string) error {
-	if exit, out, err := e.gitExit(ctx, req.TargetDir, "add", "-A"); err != nil {
+	if exit, out, err := e.gitExit(ctx, req.WorkDir, "add", "-A"); err != nil {
 		return err
 	} else if exit != 0 {
-		return fmt.Errorf("merge: `git add -A` exited %d in %s: %s", exit, req.TargetDir, dlog.Clamp(out, 400))
+		return fmt.Errorf("merge: `git add -A` exited %d in %s: %s", exit, req.WorkDir, dlog.Clamp(out, 400))
 	}
-	staged, _, err := e.gitExit(ctx, req.TargetDir, "diff", "--cached", "--quiet")
+	staged, _, err := e.gitExit(ctx, req.WorkDir, "diff", "--cached", "--quiet")
 	if err != nil {
 		return err
 	}
 	if staged == 0 {
-		e.logf("merge: test fix staged NOTHING {ws=%s failing=%s target=%s} — the resolution turn changed no files; the suite is re-run as-is",
-			req.Name, failingCommit, req.TargetDir)
+		e.logf("merge: test fix staged NOTHING {ws=%s failing=%s work=%s} — the resolution turn changed no files; the suite is re-run as-is",
+			req.Name, failingCommit, req.WorkDir)
 		return nil
 	}
-	msg := fmt.Sprintf("fix tests after cherry-pick of %s (%s)", failingCommit, req.Name)
-	exit, out, err := e.gitExit(ctx, req.TargetDir, "-c", "core.editor=true", "commit", "-m", msg)
+	msg := fmt.Sprintf("fix tests after rebasing %s (%s)", failingCommit, req.Name)
+	exit, out, err := e.gitExit(ctx, req.WorkDir, "-c", "core.editor=true", "commit", "-m", msg)
 	if err != nil {
 		return err
 	}
 	if exit != 0 {
 		return fmt.Errorf("merge: committing the test fix for %q exited %d in %s: %s",
-			req.Name, exit, req.TargetDir, dlog.Clamp(out, 400))
+			req.Name, exit, req.WorkDir, dlog.Clamp(out, 400))
 	}
-	e.logf("merge: test fix COMMITTED {ws=%s failing=%s target=%s} %s", req.Name, failingCommit, req.TargetDir, dlog.Clamp(out, 200))
+	e.logf("merge: test fix COMMITTED {ws=%s failing=%s work=%s} %s", req.Name, failingCommit, req.WorkDir, dlog.Clamp(out, 200))
 	return nil
 }
 
@@ -856,22 +1111,22 @@ func (e *Driver) commitTestFix(ctx context.Context, req Request, failingCommit s
 // range. The base is recomputed rather than carried, which is what lets the
 // resumed loop skip every commit that already landed.
 func (e *Driver) continueRange(ctx context.Context, req Request) (Result, error) {
-	base, err := e.cherryPickBase(ctx, req.TargetDir, req.SourceBranch)
+	base, err := e.cherryPickBase(ctx, req.WorkDir, req.SourceBranch)
 	if err != nil {
 		return Result{}, err
 	}
-	return e.pickLoop(ctx, req, base, true)
+	return e.rebaseLoop(ctx, req, base, true)
 }
 
-// remainingPlan is what the replay still has to pick: the range from the
-// recomputed cherry-pick base, which has advanced past every `-x` annotation
-// already on the target.
+// remainingPlan is what the replay still has to land: the range from the
+// recomputed rebase base, which has advanced past every `-x` annotation already
+// on the rebased line.
 func (e *Driver) remainingPlan(ctx context.Context, req Request) (CommitPlan, error) {
-	base, err := e.cherryPickBase(ctx, req.TargetDir, req.SourceBranch)
+	base, err := e.cherryPickBase(ctx, req.WorkDir, req.SourceBranch)
 	if err != nil {
 		return CommitPlan{}, err
 	}
-	return e.plan(ctx, req.TargetDir, base+".."+req.SourceBranch)
+	return e.plan(ctx, req.WorkDir, base+".."+req.SourceBranch)
 }
 
 // resumeRunPlan re-establishes a RE-ENTERED run's commit cursor from git.
@@ -889,11 +1144,11 @@ func (e *Driver) remainingPlan(ctx context.Context, req Request) (CommitPlan, er
 // over what already landed, and skipping forward is precisely what makes the
 // remainder unable to count it.
 func (e *Driver) resumeRunPlan(ctx context.Context, req Request, remaining CommitPlan) error {
-	mergeBase, err := e.gitString(ctx, req.TargetDir, "merge-base", "HEAD", req.SourceBranch)
+	mergeBase, err := e.gitString(ctx, req.WorkDir, "merge-base", "HEAD", req.SourceBranch)
 	if err != nil {
 		return err
 	}
-	full, err := e.plan(ctx, req.TargetDir, mergeBase+".."+req.SourceBranch)
+	full, err := e.plan(ctx, req.WorkDir, mergeBase+".."+req.SourceBranch)
 	if err != nil {
 		return err
 	}
@@ -905,62 +1160,32 @@ func (e *Driver) resumeRunPlan(ctx context.Context, req Request, remaining Commi
 	return nil
 }
 
-// Rollback resets the target worktree to head, undoing every commit this merge
-// landed.
+// THERE IS NO ROLLBACK, AND ITS ABSENCE IS THE POINT OF THIS DESIGN.
 //
-// WHY A MERGE THAT FAILS ITS TEST GATE ROLLS BACK. The target worktree is what
-// every other workspace cuts from and merges into, so leaving it carrying
-// commits that break its suite converts one workspace's failure into everyone
-// else's. Nothing is lost by resetting: the source branch still holds every
-// commit, and the merge can be retried once the work is fixed on that branch.
-// The alternative — leaving the broken state in tree for a human to look at —
-// buys a diagnostic convenience the daemon's log already provides (the failing
-// commit and the suite's output tail are both recorded) at the price of a
-// poisoned shared trunk.
+// merge.Driver.Rollback used to reset the TARGET back to its pre-merge head
+// after a test gate failed for good, because the driver had been cherry-picking
+// into the target all along. That reset fired at the end of an agent turn — an
+// unbounded window in which nothing this subsystem holds keeps the target
+// still — and it twice destroyed commits that reached the target meanwhile. It
+// was subsequently guarded by the head the merge had left the target on
+// (Result.TestedHead), which converted the hazard into a refusal but left the
+// structure intact: a merge in progress still meant a shared trunk carrying
+// untested commits.
 //
-// It deliberately does NOT `git clean`: untracked files in the target may be a
-// human's own work, and a merge failure is no license to delete them.
+// THE REBASE REMOVES THE THING ROLLBACK UNDID. Every commit lands and is gated
+// in a temporary worktree, and the target moves exactly once, at the end, when
+// the whole line has already passed. A failure at any earlier stage — a
+// conflict nobody resolved, a suite that failed twice, an abandoned merge, a
+// daemon bounce — leaves the target BYTE-FOR-BYTE as the merge found it, so
+// there is nothing to reset and no window in which resetting could destroy
+// somebody else's work.
 //
-// IT IS GUARDED BY expected, the head this merge left the target on. A rollback
-// is a `reset --hard` over a window the merge spends waiting on an agent, and a
-// blind one destroys whatever reached the target meanwhile — an external commit
-// or merge is unreachable afterwards from any ref, which is the one outcome a
-// merge failure must never produce. Nothing the pipeline holds prevents that
-// write: the merge lease claims the workspace's SESSION, and the per-repository
-// queue only serializes merges against each other. So the reset is conditional
-// on the target still being where the merge left it, and a target that moved is
-// a REFUSAL — surfaced to the coordinator, which records it on the merge_failed
-// cause. The commits this merge landed stay on the target in that case, which is
-// worse than a clean rollback and far better than deleting someone else's work;
-// the named refusal is what tells a human which it is.
-func (e *Driver) Rollback(ctx context.Context, req Request, head, expected string) error {
-	if err := req.validate(); err != nil {
-		return err
-	}
-	if head == "" {
-		return fmt.Errorf("merge: rollback of %q needs the pre-merge HEAD", req.Name)
-	}
-	if expected == "" {
-		return fmt.Errorf("merge: rollback of %q needs the head this merge left the target on, so it can verify nothing else has written there", req.Name)
-	}
-	current, err := e.gitString(ctx, req.TargetDir, "rev-parse", "HEAD")
-	if err != nil {
-		return err
-	}
-	if current != expected {
-		return fmt.Errorf("merge: target %s moved from %s to %s while %q waited on its test-failure resolution — something outside this merge committed there, and resetting to %s would destroy it, so the rollback is REFUSED and the target KEEPS the commits that failed the suite",
-			req.TargetDir, expected, current, req.Name, head)
-	}
-	exit, out, err := e.gitExit(ctx, req.TargetDir, "reset", "--hard", head)
-	if err != nil {
-		return err
-	}
-	if exit != 0 {
-		return fmt.Errorf("merge: rolling %s back to %s exited %d: %s", req.TargetDir, head, exit, dlog.Clamp(out, 400))
-	}
-	e.logf("merge: ROLLED BACK {ws=%s target=%s head=%s} %s", req.Name, req.TargetDir, head, dlog.Clamp(out, 200))
-	return nil
-}
+// THE GUARD MIGRATED RATHER THAN BEING DROPPED. Its refusal logic — "the target
+// must still be exactly where this merge last observed it" — now protects the
+// one target-mutating step: landOnTarget compares the target's HEAD against
+// Request.BaseHead and refuses the merge commit when they differ. What was a
+// last-resort protection against a destructive reset is now a precondition of a
+// purely additive one.
 
 // commitAlreadyIncorporated reports whether sha's patch is already on dir's
 // HEAD, probed over the single-commit range sha^..sha.
@@ -1025,13 +1250,33 @@ func shortSHA(sha string) string {
 	return sha[:12]
 }
 
-// finalizeMerged is the shared "the target now carries this work" tail:
-// tag the completion (merge/<ws>) and emit merged. Ported from
-// agent-repl--tag-merge-completion + the :merged tail of
-// agent-repl--workspace-merge-do. A tag-write failure is non-fatal (warned,
-// not signaled) exactly as in the elisp: the cherry-pick already landed, so a
-// tag failure must not undo it.
+// finalizeMerged is the shared "the rebase is complete" tail: land the rebased
+// line on the target (the ONE target-mutating step of the whole pipeline), tag
+// the completion (merge/<ws>), and leave the terminal `merged` status to
+// merge.Coordinator.
+//
+// A tag-write failure is non-fatal (warned, not signaled): the merge commit is
+// already on the target, so a tag failure must not undo it.
 func (e *Driver) finalizeMerged(ctx context.Context, req Request, alreadyIncorporated bool) (Result, error) {
+	landed, err := e.landOnTarget(ctx, req)
+	if errors.Is(err, errMergeRefused) {
+		// GIT REFUSED THE MERGE COMMIT, which by construction cannot be a
+		// conflict: the target is on the head this line descends from. It is a
+		// target-side obstruction — an uncommitted edit or an untracked file the
+		// merge would overwrite — and the target is left holding it, untouched.
+		// That is a terminal merge_failed, not a driver error, because it is a
+		// classified outcome of the merge rather than a broken pipeline.
+		return e.markFailed(ctx, req, err.Error())
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	if !landed {
+		// The branch contributed nothing over the target's head. Marking it
+		// merged is the pre-existing no-op path, and an empty merge commit would
+		// record a topology that says work arrived when none did.
+		alreadyIncorporated = true
+	}
 	tag := "merge/" + req.Name
 	exit, out, err := e.gitExit(ctx, req.TargetDir, "tag", "-f", tag, "HEAD")
 	if err != nil {
@@ -1052,14 +1297,228 @@ func (e *Driver) finalizeMerged(ctx context.Context, req Request, alreadyIncorpo
 	// begin after it — and the after-action's error reached a SECOND merged
 	// status nothing was still reading. merge.Coordinator publishes it once, with
 	// the action's outcome already on it (coordinator.go completeMergedRun).
-	return Result{Outcome: OutcomeMerged, AlreadyIncorporated: alreadyIncorporated, Tag: tag}, nil
+	return Result{
+		Outcome:             OutcomeMerged,
+		AlreadyIncorporated: alreadyIncorporated,
+		Tag:                 tag,
+		WorkDir:             req.WorkDir,
+		BaseHead:            req.BaseHead,
+	}, nil
 }
 
-// markConflict emits merge_conflict for a pick left paused in the target
-// tree. It never aborts the cherry-pick: the conflict stays in-tree so a
-// human can resolve it and Resume can continue it.
+// landOnTarget is THE ONE STEP OF THIS PIPELINE THAT MODIFIES THE TARGET, and
+// everything before it exists to make this step safe. It reports whether a merge
+// commit was made (false means the branch contributed nothing).
+//
+// Three acts, in this order and no other:
+//
+//  1. THE GUARD. The target must still be on Request.BaseHead, the head this
+//     rebase based itself on. Everything the gate certified was certified
+//     against that head, so a target that moved has never been tested against
+//     this line at all. A moved target is errTargetMoved — recoverable, and
+//     merge.Driver.Merge answers it by re-rebasing once.
+//
+//  2. THE BRANCH REF MOVES TO THE REBASED LINE, compare-and-swap against the
+//     value it is expected to hold, and logged with both SHAs. This is what
+//     makes the merge commit's second parent the workspace's BRANCH rather than
+//     an anonymous commit: after it, `git log --graph` on the target shows the
+//     workspace by name. The source worktree is re-synced to the moved ref, and
+//     a source worktree that has become dirty since the precondition FAILS the
+//     merge before the target is touched — a checkout whose HEAD disagrees with
+//     its own index is a worse outcome than a refused merge.
+//
+//  3. `git merge --no-ff`. It cannot conflict: the target is on BaseHead and the
+//     rebased line descends from BaseHead, so this is a fast-forward that
+//     --no-ff renders as a merge commit. A non-zero exit is therefore a genuine
+//     surprise (an untracked file in the way, a hook refusing) and is reported
+//     after aborting the half-made merge.
+func (e *Driver) landOnTarget(ctx context.Context, req Request) (bool, error) {
+	if err := req.validateRebase(); err != nil {
+		return false, err
+	}
+	rebased, err := e.gitString(ctx, req.WorkDir, "rev-parse", "HEAD")
+	if err != nil {
+		return false, err
+	}
+	if rebased == req.BaseHead {
+		e.logf("merge: rebase produced NO commits over the target head {ws=%s base=%s} — the branch is fully incorporated; no merge commit is made",
+			req.Name, shortSHA(req.BaseHead))
+		return false, nil
+	}
+
+	current, err := e.gitString(ctx, req.TargetDir, "rev-parse", "HEAD")
+	if err != nil {
+		return false, err
+	}
+	if current != req.BaseHead {
+		return false, fmt.Errorf("%w: target %s moved from %s to %s while %q rebased and tested onto it, so nothing this merge tested was tested against what the target now carries; the target was NOT MODIFIED",
+			errTargetMoved, req.TargetDir, shortSHA(req.BaseHead), shortSHA(current), req.Name)
+	}
+
+	moved, err := e.moveBranchRef(ctx, req, rebased)
+	if err != nil {
+		return false, err
+	}
+
+	msg := fmt.Sprintf("merge workspace %s (branch %s, merge run %s)", req.Name, req.SourceBranch, req.runIdentity())
+	exit, out, err := e.gitExit(ctx, req.TargetDir,
+		"-c", "core.editor=true", "merge", "--no-ff", "--no-edit", "-m", msg, req.SourceBranch)
+	if err != nil {
+		return false, err
+	}
+	if exit != 0 {
+		// The merge cannot conflict by construction, so a non-zero exit left
+		// something half-done that must not be inherited by the next merge, and
+		// the branch must go back to where this merge found it.
+		if aexit, aout, aerr := e.gitExit(ctx, req.TargetDir, "merge", "--abort"); aerr != nil {
+			e.logf("merge: `git merge --abort` after a refused merge commit could not run {ws=%s target=%s}: %v", req.Name, req.TargetDir, aerr)
+		} else if aexit != 0 {
+			e.logf("merge: `git merge --abort` after a refused merge commit exited %d {ws=%s target=%s}: %s", aexit, req.Name, req.TargetDir, dlog.Clamp(aout, 200))
+		}
+		if rerr := e.restoreBranchRef(ctx, req, moved); rerr != nil {
+			return false, rerr
+		}
+		return false, fmt.Errorf("%w: `git merge --no-ff %s` for %q exited %d in %s — the target is holding work of its own that the merge would overwrite, and it was NOT MODIFIED: %s",
+			errMergeRefused, req.SourceBranch, req.Name, exit, req.TargetDir, dlog.Clamp(out, 400))
+	}
+	head, err := e.gitString(ctx, req.TargetDir, "rev-parse", "HEAD")
+	if err != nil {
+		return false, err
+	}
+	e.logf("merge: TARGET MOVED ONCE {ws=%s target=%s from=%s to=%s second_parent=%s branch=%s} — a --no-ff merge commit; the branch is the second parent",
+		req.Name, req.TargetDir, shortSHA(req.BaseHead), shortSHA(head), shortSHA(rebased), req.SourceBranch)
+	return true, nil
+}
+
+// moveBranchRef force-moves the workspace's branch to the rebased line and
+// re-syncs the source worktree onto it.
+//
+// THE MOVE IS A COMPARE-AND-SWAP. `git update-ref <ref> <new> <old>` fails when
+// the ref is not where this merge last read it, which is the same class of
+// protection the target head guard gives: a branch somebody committed to while
+// the gate ran holds work this rebase never replayed, and force-moving over it
+// would make that work unreachable.
+//
+// THE SOURCE WORKTREE IS RE-SYNCED, and its cleanliness is re-checked first.
+// That worktree has the branch checked out, so moving the ref moves its HEAD;
+// leaving its index and files on the old line would show the user a worktree
+// full of phantom reverse-diffs. A worktree that has become dirty since the
+// precondition fails the merge here, BEFORE the target is touched, because the
+// alternative is either destroying uncommitted work or leaving that worktree
+// inconsistent with its own HEAD.
+func (e *Driver) moveBranchRef(ctx context.Context, req Request, rebased string) (branchMove, error) {
+	old, err := e.gitString(ctx, req.TargetDir, "rev-parse", "refs/heads/"+req.SourceBranch)
+	if err != nil {
+		return branchMove{}, err
+	}
+	if old == rebased {
+		e.logf("merge: branch ref already ON the rebased line {ws=%s branch=%s sha=%s} — nothing to move",
+			req.Name, req.SourceBranch, shortSHA(rebased))
+		return branchMove{}, nil
+	}
+	checkedOut, err := e.sourceIsOnBranch(ctx, req)
+	if err != nil {
+		return branchMove{}, err
+	}
+	if checkedOut {
+		if err := e.assertCleanWorktree(ctx, req.SourceDir); err != nil {
+			return branchMove{}, fmt.Errorf("merge: the source worktree %s became dirty while %q was rebasing, and moving its branch to the rebased line would leave its checkout disagreeing with its own HEAD — the target was NOT MODIFIED: %w",
+				req.SourceDir, req.Name, err)
+		}
+	}
+	exit, out, err := e.gitExit(ctx, req.TargetDir, "update-ref", "refs/heads/"+req.SourceBranch, rebased, old)
+	if err != nil {
+		return branchMove{}, err
+	}
+	if exit != 0 {
+		return branchMove{}, fmt.Errorf("merge: force-moving branch %s from %s to the rebased %s for %q exited %d in %s (the ref is not where this merge read it, so something committed to the branch meanwhile); the target was NOT MODIFIED: %s",
+			req.SourceBranch, shortSHA(old), shortSHA(rebased), req.Name, exit, req.TargetDir, dlog.Clamp(out, 400))
+	}
+	e.logf("merge: branch ref FORCE-MOVED to the rebased line {ws=%s branch=%s old=%s new=%s}",
+		req.Name, req.SourceBranch, shortSHA(old), shortSHA(rebased))
+	move := branchMove{from: old, to: rebased, resync: checkedOut}
+
+	if !checkedOut {
+		return move, nil
+	}
+	if err := e.syncSourceWorktree(ctx, req, rebased); err != nil {
+		return move, err
+	}
+	return move, nil
+}
+
+// branchMove records a completed branch ref move so a refused merge commit can
+// put the ref back exactly where it was. A zero value means nothing moved.
+type branchMove struct {
+	from   string
+	to     string
+	resync bool
+}
+
+// restoreBranchRef undoes a branch move whose merge commit git then refused.
+//
+// LEAVING THE MOVE STANDING WOULD BE A SILENT REWRITE. The user asked for a
+// merge, the merge did not happen, and their branch would nonetheless have been
+// rewritten onto a base it was never merged into — with the source worktree
+// re-synced to match. The restore is compare-and-swap for the same reason the
+// move is, and a restore that itself fails is an ERROR: the state it leaves is
+// one only a human can reconcile.
+func (e *Driver) restoreBranchRef(ctx context.Context, req Request, move branchMove) error {
+	if move.from == "" {
+		return nil
+	}
+	exit, out, err := e.gitExit(ctx, req.TargetDir, "update-ref", "refs/heads/"+req.SourceBranch, move.from, move.to)
+	if err != nil {
+		return err
+	}
+	if exit != 0 {
+		return fmt.Errorf("merge: restoring branch %s to %s after the merge commit for %q was refused exited %d in %s: %s",
+			req.SourceBranch, shortSHA(move.from), req.Name, exit, req.TargetDir, dlog.Clamp(out, 400))
+	}
+	e.logf("merge: branch ref RESTORED after a refused merge commit {ws=%s branch=%s back_to=%s}", req.Name, req.SourceBranch, shortSHA(move.from))
+	if !move.resync {
+		return nil
+	}
+	return e.syncSourceWorktree(ctx, req, move.from)
+}
+
+// syncSourceWorktree points the source worktree's checkout at sha. It runs only
+// on a worktree that has the branch checked out and was verified clean, so the
+// hard reset can discard nothing.
+func (e *Driver) syncSourceWorktree(ctx context.Context, req Request, sha string) error {
+	exit, out, err := e.gitExit(ctx, req.SourceDir, "reset", "--hard", sha)
+	if err != nil {
+		return err
+	}
+	if exit != 0 {
+		return fmt.Errorf("merge: re-syncing the source worktree %s onto %s for %q exited %d: %s",
+			req.SourceDir, shortSHA(sha), req.Name, exit, dlog.Clamp(out, 400))
+	}
+	e.logf("merge: source worktree RE-SYNCED {ws=%s source=%s sha=%s}", req.Name, req.SourceDir, shortSHA(sha))
+	return nil
+}
+
+// sourceIsOnBranch reports whether the source worktree actually has
+// SourceBranch checked out. A source directory that is detached, or on some
+// other branch, is not re-synced: this pipeline moves one ref and owns nothing
+// else about that checkout.
+func (e *Driver) sourceIsOnBranch(ctx context.Context, req Request) (bool, error) {
+	exit, out, err := e.gitExit(ctx, req.SourceDir, "symbolic-ref", "--quiet", "HEAD")
+	if err != nil {
+		return false, err
+	}
+	if exit != 0 {
+		return false, nil
+	}
+	return strings.TrimSpace(out) == "refs/heads/"+req.SourceBranch, nil
+}
+
+// markConflict emits merge_conflict for a replay left paused in the REBASE
+// WORKTREE. It never aborts the replay: the conflict stays in that tree so the
+// workspace's agent (or a human) can resolve it and Resume can continue it. The
+// target is untouched and stays that way while the conflict is parked.
 func (e *Driver) markConflict(ctx context.Context, req Request) (Result, error) {
-	short, err := e.gitString(ctx, req.TargetDir, "rev-parse", "--short", "CHERRY_PICK_HEAD")
+	short, err := e.gitString(ctx, req.WorkDir, "rev-parse", "--short", "CHERRY_PICK_HEAD")
 	if err != nil {
 		return Result{}, err
 	}
@@ -1070,35 +1529,35 @@ func (e *Driver) markConflict(ctx context.Context, req Request) (Result, error) 
 	// use it to address the commit anywhere else. The short form stays where it
 	// has always been — the cause text a human reads, and ConflictCommit, which
 	// the resume path matches on.
-	full, err := e.gitString(ctx, req.TargetDir, "rev-parse", "CHERRY_PICK_HEAD")
+	full, err := e.gitString(ctx, req.WorkDir, "rev-parse", "CHERRY_PICK_HEAD")
 	if err != nil {
 		return Result{}, err
 	}
-	if err := req.Run.Conflict(full, "conflict cherry-picking "+short+" (left in tree for resolve)"); err != nil {
+	if err := req.Run.Conflict(full, "conflict rebasing "+short+" (left in the rebase worktree for resolve)"); err != nil {
 		return Result{}, err
 	}
-	return Result{Outcome: OutcomeConflict, ConflictCommit: short}, nil
+	return Result{Outcome: OutcomeConflict, ConflictCommit: short, WorkDir: req.WorkDir, BaseHead: req.BaseHead}, nil
 }
 
 // markFailed emits merge_failed for a pick git aborted with no conflict to
 // resolve (the elisp silent-failure sentinel).
 func (e *Driver) markFailed(_ context.Context, req Request, cause string) (Result, error) {
-	if err := req.Run.Failed(cause); err != nil {
+	if err := req.Run.Failed(cause + " — the target was NEVER MODIFIED"); err != nil {
 		return Result{}, err
 	}
-	return Result{Outcome: OutcomeFailed}, nil
+	return Result{Outcome: OutcomeFailed, WorkDir: req.WorkDir, BaseHead: req.BaseHead}, nil
 }
 
 // MarkQueued emits merge_queued for a merge the stitch orchestrator defers
-// because another cherry-pick is already in flight against the same target
+// because another merge is already in flight against the same target
 // worktree. The queue and its drain live at stitch; this method only records
 // the transition so it is never invisible.
 func (e *Driver) MarkQueued(ws, cause string) error {
 	return e.emit.emit(ws, PhaseMergeQueued, cause)
 }
 
-// cherryPickBase computes the cherry-pick start point for incorporating
-// targetBranch into TargetDir's HEAD, mirroring agent-repl--cherry-pick-base:
+// cherryPickBase computes the replay start point for incorporating
+// targetBranch into dir's HEAD, mirroring agent-repl--cherry-pick-base:
 // scan HEAD's unique commits for -x annotations and return the most recent
 // targetBranch commit already incorporated; otherwise fall back to the
 // merge-base. Unlike the elisp (which swallows git failures into an empty
@@ -1211,38 +1670,38 @@ func (e *Driver) pickWentEmpty(ctx context.Context, dir string) (bool, error) {
 //
 // THE COMMIT IS WHAT MAKES THE ACCOUNTING DURABLE, and it is why `--skip` is
 // wrong here. The replay derives its remaining work from git alone, by advancing
-// cherryPickBase past every `-x` annotation on the target, so a skipped commit
-// leaves no trace and the very next re-entry — a resume, a test fix, a daemon
-// bounce — plans it again. For a pick that went empty because the change is
-// already present that replay is merely wasted; for one emptied by a resolution
-// that dropped the change it re-picks a commit that then conflicts for real,
-// which is an endless loop rather than a merge. The empty commit records
-// "accounted for, carried no change" in the only place the replay reads.
+// cherryPickBase past every `-x` annotation on the rebased line, so a skipped
+// commit leaves no trace and the very next re-entry — a resume, a test fix —
+// plans it again. For a replay that went empty because the change is already
+// present that is merely wasted; for one emptied by a resolution that dropped
+// the change it re-plays a commit that then conflicts for real, which is an
+// endless loop rather than a merge. The empty commit records "accounted for,
+// carried no change" in the only place the replay reads.
 //
 // A FAILING FINISH IS A HARD ERROR. It is the sole exit from a state no resolve
-// and no resume can clear, so a finish that did not take leaves the target
-// worktree wedged against every later merge in its repository — the failure must
-// reach the caller loudly rather than fall through to a conflict park that
-// cannot be honored.
+// and no resume can clear, so a finish that did not take leaves the rebase
+// worktree wedged with nothing able to advance it — the failure must reach the
+// caller loudly rather than fall through to a conflict park that cannot be
+// honored.
 func (e *Driver) finishEmptyPick(ctx context.Context, req Request, short, progress string) error {
-	e.logf("merge: cherry-pick of %s (%s) went EMPTY — it carries no change against the target, recording it as an empty commit {ws=%s target=%s}",
-		short, progress, req.Name, req.TargetDir)
-	exit, out, err := e.gitExit(ctx, req.TargetDir,
+	e.logf("merge: rebase replay of %s (%s) went EMPTY — it carries no change against the rebased line, recording it as an empty commit {ws=%s work=%s}",
+		short, progress, req.Name, req.WorkDir)
+	exit, out, err := e.gitExit(ctx, req.WorkDir,
 		"-c", "core.editor=true", "commit", "--allow-empty", "--no-edit")
 	if err != nil {
 		return err
 	}
 	if exit != 0 {
-		return fmt.Errorf("merge: `git commit --allow-empty` for the empty pick of %s exited %d in %s: %s",
-			short, exit, req.TargetDir, dlog.Clamp(out, 400))
+		return fmt.Errorf("merge: `git commit --allow-empty` for the empty replay of %s exited %d in %s: %s",
+			short, exit, req.WorkDir, dlog.Clamp(out, 400))
 	}
-	stillParked, err := e.cherryPickInProgress(ctx, req.TargetDir)
+	stillParked, err := e.cherryPickInProgress(ctx, req.WorkDir)
 	if err != nil {
 		return err
 	}
 	if stillParked {
-		return fmt.Errorf("merge: `git commit --allow-empty` for the empty pick of %s left CHERRY_PICK_HEAD parked in %s",
-			short, req.TargetDir)
+		return fmt.Errorf("merge: `git commit --allow-empty` for the empty replay of %s left CHERRY_PICK_HEAD parked in %s",
+			short, req.WorkDir)
 	}
 	return nil
 }
@@ -1277,6 +1736,19 @@ func (e *Driver) staleSequencerState(ctx context.Context, dir string) (bool, err
 		return false, fmt.Errorf("merge: probe sequencer state %s: %w", seqDir, statErr)
 	}
 	return false, nil
+}
+
+// mergeInProgress reports whether dir has an unfinished merge (MERGE_HEAD).
+// `git merge` refuses to start another one, and this pipeline's whole target
+// interaction is a single `git merge --no-ff` at the very end, so an unfinished
+// merge there is a precondition failure rather than something to discover after
+// a full rebase and every suite run.
+func (e *Driver) mergeInProgress(ctx context.Context, dir string) (bool, error) {
+	exit, _, err := e.gitExit(ctx, dir, "rev-parse", "--verify", "--quiet", "MERGE_HEAD")
+	if err != nil {
+		return false, err
+	}
+	return exit == 0, nil
 }
 
 // branchExists mirrors agent-repl--git-branch-exists-p.

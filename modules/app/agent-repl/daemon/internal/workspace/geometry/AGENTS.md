@@ -1,7 +1,7 @@
 # daemon/internal/workspace/geometry/
 
 THE daemon's workspace -> merge-geometry map: which branch a workspace's
-commits are cherry-picked from (`SourceBranch`), which worktree they live in
+commits are rebased from (`SourceBranch`), which worktree they live in
 (`SourceDir`), and which worktree they land in (`TargetDir`).
 
 Three components:
@@ -23,7 +23,7 @@ a target the daemon had never heard of, so the command is now a bare request
 keyed by workspace and this package is the only answer.
 
 A workspace with NO record is never guessed at. The merge is refused on the
-ack with an explanation naming the workspace. A cherry-pick against a
+ack with an explanation naming the workspace. A merge against a
 synthesized target writes commits into a repository nobody asked for, which is
 strictly worse than a refused merge.
 
