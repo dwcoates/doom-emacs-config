@@ -16,7 +16,10 @@
 // before stopping the turn. The interrupt itself releases it: the shim cancels
 // every blocked permission wait (uds-session.ts interrupt → control.cancelAll,
 // resolving them as denials), the fake sees `interrupted` and emits
-// `error_during_execution`, and the turn ends.
+// `error_during_execution`, and the turn ends. That error flavor is the SDK's
+// only word for an abort; the shim, which acked the stop, renames the terminal
+// it closes to RESULT_SUBTYPE_ABORTED (see
+// TestE2EAStoppedTurnsResultIsNamedAborted).
 //
 // WHY THE OUTCOMES ARE THE FAKE'S HONESTLY. The verdict is decided by the shim,
 // synchronously, off its own turn counter (uds-session.ts interrupt: `const
@@ -56,6 +59,7 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"github.com/gorilla/websocket"
@@ -337,6 +341,49 @@ func TestE2EInterruptOfALiveTurnResolvesInterrupted(t *testing.T) {
 	}
 	if obs.state.GetState() != frontendv1.RenderState_RENDER_STATE_INTERRUPTED {
 		t.Errorf("workspace state = %s, want RENDER_STATE_INTERRUPTED", obs.state.GetState())
+	}
+}
+
+// TestE2EAStoppedTurnsResultIsNamedAborted covers THE FEED'S OWN VERDICT on a
+// stop, which is a different record from the footer's interrupt window: the
+// terminal ResultMessage the conversation carries.
+//
+// The fake aborts and emits `error_during_execution` (the SDK's word for the
+// error an abort shakes out — see the file header), and passing that through
+// put a red `error_during_execution` badge in the response output for a stop
+// the user asked for. The shim acked the interrupt, so the shim names the
+// terminal: RESULT_SUBTYPE_ABORTED, which the webapp draws as the yellow
+// `interrupted` chip.
+//
+// It reads the record back through a RESYNC rather than off the live delta,
+// because the stop's setup already consumed frames — and a replay is the
+// harder claim anyway: the naming is DURABLE, not a live-push decoration.
+func TestE2EAStoppedTurnsResultIsNamedAborted(t *testing.T) {
+	// Arrange
+	// The workspace tempdir is created BEFORE the harness on purpose: cleanups
+	// run LIFO, so this ordering tears the harness (and its shim processes)
+	// down before the tempdir is removed.
+	cwd := t.TempDir()
+	h := newUDSHarness(t)
+	_, conn, _, _ := liveSession(t, h, cwd)
+
+	// Act
+	obs := stopLiveTurn(t, conn, cwd)
+	items := replayItems(t, conn, obs.state, cwd, "r-replay-aborted")
+
+	// Assert
+	var subtypes []string
+	for _, item := range items {
+		if r := item.GetAgent().GetTurnResult(); r != nil {
+			subtypes = append(subtypes, r.GetSubtype().String())
+		}
+	}
+	if len(subtypes) == 0 {
+		t.Fatalf("the replayed conversation carries no terminal result at all (items=%d)", len(items))
+	}
+	want := datav1.ResultSubtype_RESULT_SUBTYPE_ABORTED.String()
+	if subtypes[len(subtypes)-1] != want {
+		t.Errorf("stopped turn's terminal subtype = %s, want %s: a stop the user asked for is not an execution failure", subtypes[len(subtypes)-1], want)
 	}
 }
 
