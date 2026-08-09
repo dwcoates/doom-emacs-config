@@ -82,10 +82,22 @@ func (m *Manager) currentShimBuild() string {
 // gate-closed hook, where the connection is live and the announced pid is
 // therefore trustworthy.
 //
-// It reports whether a bounce was started. The bounce runs on its own goroutine
-// because the caller is the shimclient's read loop: tearing that connection
-// down from inside its own dispatch would be stopping the thing calling us.
-func (m *Manager) refreshStaleShim(workspace, sessionID, reported string) bool {
+// It reports whether the SOURCE GENERATION IS RETIRING — whether this ShimReady
+// must withhold readiness because a replacement is taking over. A bounce
+// deferred to a turn boundary reports FALSE: the shim it found is still serving
+// a live turn and must stay fully ready for it, which is the whole point of
+// deferring.
+//
+// An immediate bounce runs on its own goroutine because the caller is the
+// shimclient's read loop: tearing that connection down from inside its own
+// dispatch would be stopping the thing calling us.
+//
+// activeTurnIDs and turnInFlight are the shim's OWN account of what it was
+// doing when it reattached, straight off the hello. They are what separates the
+// two paths, and they are read from the hello rather than from the daemon's
+// turn latch on purpose: the latch describes what this daemon has observed, and
+// a daemon that has just come back has observed nothing yet.
+func (m *Manager) refreshStaleShim(workspace, sessionID, reported string, turnInFlight bool, activeTurnIDs []string) bool {
 	want := m.currentShimBuild()
 	if want == "" || reported == "" {
 		m.noteUnknownBuild(workspace, sessionID, reported, want)
@@ -104,21 +116,12 @@ func (m *Manager) refreshStaleShim(workspace, sessionID, reported string) bool {
 			inFlight = true
 		}
 	}
+	armed := m.staleRefreshArms[workspace] != nil
 	source := m.byWS[workspace]
-	if !bounced && !inFlight && (source == nil || source.sessionID != sessionID) {
+	if !bounced && !inFlight && !armed && (source == nil || source.sessionID != sessionID) {
 		m.mu.Unlock()
 		m.logf("session-controller: stale-shim refresh refused because its source controller is no longer live session=%s ws=%q", sessionID, workspace)
 		return false
-	}
-	var refresh *buildRefreshState
-	if !bounced && !inFlight {
-		refresh = &buildRefreshState{source: source, done: make(chan struct{})}
-		m.buildRefresh[sessionID] = refresh
-		select {
-		case <-source.buildRefreshStarted:
-		default:
-			close(source.buildRefreshStarted)
-		}
 	}
 	m.mu.Unlock()
 	switch {
@@ -130,38 +133,77 @@ func (m *Manager) refreshStaleShim(workspace, sessionID, reported string) bool {
 		m.logf("session-controller: session %s (ws %q) reports shim build %s against current %s while a refresh is already IN FLIGHT; NOT starting a second bounce",
 			sessionID, workspace, reported, want)
 		return false
+	case armed:
+		m.logf("session-controller: session %s (ws %q) reports shim build %s against current %s while a turn-boundary lease is already ARMED for it; NOT starting a second bounce — the armed lease owns this refresh and fires at the turn's own boundary",
+			sessionID, workspace, reported, want)
+		return false
 	}
 	generationID := m.currentControllerGeneration(workspace, sessionID)
-	m.logf("session-controller: STALE SHIM session=%s ws=%q build=%s current=%s — this shim survived a deploy and is running superseded code; bouncing it onto the current bundle",
+	// THE MID-TURN FORK, and it is the whole reason this file is no longer the
+	// only author of a stale-shim bounce.
+	//
+	// A shim that survived the daemon bounce is very often STILL WORKING on the
+	// turn the user submitted before it — that is exactly what surviving means —
+	// and an AUTOMATIC stop firing here would SIGTERM live work moments after
+	// reattaching to it. The refresh is deferred to the turn's own boundary
+	// instead (turnboundaryrefresh.go); nothing about the mismatch is forgotten,
+	// and the at-most-once latch is untouched because no refresh has happened
+	// yet.
+	if turnInFlight || len(activeTurnIDs) > 0 {
+		m.armStaleRefreshAtBoundary(workspace, sessionID, generationID, reported, want, activeTurnIDs)
+		// FALSE, deliberately, whether or not an arm was taken: the source
+		// generation is NOT retiring. This shim keeps its readiness because it
+		// is still serving the turn the lease is waiting on, and withholding
+		// readiness from a session that is actively driving a turn would strand
+		// every caller of it.
+		return false
+	}
+	m.logf("session-controller: STALE SHIM session=%s ws=%q build=%s current=%s — this shim survived a deploy and is running superseded code, and it reattached SETTLED; bouncing it onto the current bundle now",
 		sessionID, workspace, reported, want)
-	go func() {
-		// THE LATCH FOLLOWS THE OUTCOME, and that order is the whole point.
-		//
-		// It used to be set BEFORE the restart, on a goroutine whose error was
-		// logged and dropped. A stop→respawn that failed therefore latched the
-		// session as "already bounced" and returned to the ordinary path: the
-		// second spawn never happened, no state edge said so, and every later
-		// hello was answered with the "not bouncing again" line. The failure was
-		// invisible to everything except a log nobody reads during a hang.
-		//
-		// Now the at-most-once latch records a refresh that ACTUALLY happened.
-		// A failed one clears the in-flight marker without latching — so a later
-		// hello may try again — and reports the failure as a real state edge.
-		err := m.RestartSession(m.rootCtx, workspace)
-		m.mu.Lock()
-		refresh.err = err
-		if err == nil {
-			m.buildBounced[sessionID] = true
-		}
-		close(refresh.done)
-		m.mu.Unlock()
-		if err != nil {
-			m.resolveStaleRefreshFailed(workspace, sessionID, generationID, reported, want, err)
-			return
-		}
-		m.logf("session-controller: session %s (ws %q) refreshed onto shim build %s", sessionID, workspace, want)
-	}()
+	refresh := m.registerBuildRefresh(source, sessionID)
+	// The error is not dropped here: runStaleRefresh reports it three ways
+	// before it returns — the in-flight rendezvous (refresh.err, which
+	// followBuildRefresh returns to a waiting health probe), the failure card,
+	// and the connectivity edge. There is no caller left on this goroutine to
+	// return it to.
+	go func() { _ = m.runStaleRefresh(workspace, sessionID, generationID, reported, want, refresh) }()
 	return true
+}
+
+// runStaleRefresh is the restart itself, shared by the IMMEDIATE path above and
+// the TURN-BOUNDARY path (turnboundaryrefresh.go) so the two cannot disagree
+// about the at-most-once latch, the in-flight rendezvous, or the failure card.
+//
+// THE LATCH FOLLOWS THE OUTCOME, and that order is the whole point.
+//
+// It used to be set BEFORE the restart, on a goroutine whose error was logged
+// and dropped. A stop→respawn that failed therefore latched the session as
+// "already bounced" and returned to the ordinary path: the second spawn never
+// happened, no state edge said so, and every later hello was answered with the
+// "not bouncing again" line. The failure was invisible to everything except a
+// log nobody reads during a hang.
+//
+// Now the at-most-once latch records a refresh that ACTUALLY happened. A failed
+// one clears the in-flight marker without latching — so a later hello may try
+// again — and reports the failure as a real state edge.
+//
+// It must NOT run on the shim read-loop goroutine: it stops and respawns the
+// shim, and the bring-up waits on a handshake only that loop can deliver.
+func (m *Manager) runStaleRefresh(workspace, sessionID, generationID, reported, want string, refresh *buildRefreshState) error {
+	err := m.RestartSession(m.rootCtx, workspace)
+	m.mu.Lock()
+	refresh.err = err
+	if err == nil {
+		m.buildBounced[sessionID] = true
+	}
+	close(refresh.done)
+	m.mu.Unlock()
+	if err != nil {
+		m.resolveStaleRefreshFailed(workspace, sessionID, generationID, reported, want, err)
+		return err
+	}
+	m.logf("session-controller: session %s (ws %q) refreshed onto shim build %s", sessionID, workspace, want)
+	return nil
 }
 
 // resolveStaleRefreshFailed is the close edge a dropped refresh error never
