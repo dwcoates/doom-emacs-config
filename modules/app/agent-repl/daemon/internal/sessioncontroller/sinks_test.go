@@ -960,7 +960,7 @@ func (a *fakeApplier) ResolveTurnClaimBridge(_ string, _ string, ev *corev1.Even
 	return false, nil
 }
 
-func (a *fakeApplier) ReconcileTurnHandshake(_ string, _ string, ids []string, legacyActive bool) (before, after, closed []string, err error) {
+func (a *fakeApplier) ReconcileTurnHandshake(_ string, _ string, ids []string, legacyActive bool, durablyEnded []string) (before, after, closed []string, err error) {
 	a.reconcMutex.Lock()
 	defer a.reconcMutex.Unlock()
 	before = append([]string(nil), a.turns...)
@@ -973,9 +973,22 @@ func (a *fakeApplier) ReconcileTurnHandshake(_ string, _ string, ids []string, l
 		a.turns = []string{""}
 	case len(ids) == 0 && !legacyActive && len(a.turns) > 0:
 		// The PHANTOM claim: the shim says no turn, the ledger says otherwise,
-		// so the ledger's claims are ended and named to the caller.
-		closed = append([]string(nil), a.turns...)
-		a.turns = nil
+		// so the ledger's claims are ended and named to the caller — EXCEPT any
+		// the caller proved a durable terminal for, which stay open for their
+		// own replayed boundary to settle.
+		spared := map[string]struct{}{}
+		for _, id := range durablyEnded {
+			spared[id] = struct{}{}
+		}
+		var remaining []string
+		for _, id := range a.turns {
+			if _, ok := spared[id]; ok {
+				remaining = append(remaining, id)
+				continue
+			}
+			closed = append(closed, id)
+		}
+		a.turns = remaining
 	}
 	return before, append([]string(nil), a.turns...), closed, nil
 }

@@ -702,6 +702,13 @@ type sessionController struct {
 	// Empty whenever nothing is owed.
 	phantomTurnClosed []string
 
+	// unackedInterrupt is a user-commanded stop this daemon DELIVERED to the
+	// shim and whose Ack was lost with the connection (interruptunacked.go).
+	// It is carried to the next handshake, which resolves it from the reattach
+	// hello and the durable record — never by asking for the stop again.
+	// Guarded by the manager mutex; nil whenever nothing is outstanding.
+	unackedInterrupt *unackedInterrupt
+
 	// turnWaiters are the waits for a SPECIFIC turn to end (mergeresolve.go),
 	// guarded by the manager mutex. Only merge.Coordinator's conflict-resolution
 	// prompt arms one today: it is the one caller whose next action depends on
@@ -1426,6 +1433,15 @@ func (m *Manager) Interrupt(ctx context.Context, workspace, requestID string) er
 	}
 	outcome, err := d.client.Interrupt(ctx, requestID)
 	if err != nil {
+		// A DELIVERED STOP WHOSE ANSWER WAS LOST IS NOT AN UNDELIVERED ONE. The
+		// shim ran it; only its receipt died with the socket. The error is still
+		// returned — the frontend must not be told a stop was confirmed when it
+		// was not — but the consequence that follows from delivery alone is
+		// applied, and the outcome is recovered at the reattach rather than by
+		// asking the shim to stop something a second time (interruptunacked.go).
+		if errors.Is(err, shimclient.ErrDeliveredUnacked) {
+			m.noteUnackedInterrupt(d, requestID, err)
+		}
 		return err
 	}
 	if err := m.noteUserInterrupt(d, outcome); err != nil {
@@ -2491,6 +2507,10 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		m.noteBringUpTermination(d, detail)
 	}
 	cons.onDegraded = func(ds *corev1.DegradedState) { m.noteBringUpFault(d, ds) }
+	// Bound BEFORE Run, because the first thing a reattaching shim does is say
+	// hello — and that hello is where a turn is judged cut or completed. A probe
+	// bound any later would be nil at the one moment it decides anything.
+	m.bindDurableTurnEndProbe(cons, workspace, sessionID)
 	d.consumer = cons
 	// Settle the backfill for a REOPENED session before any event flows.
 	//
@@ -2882,6 +2902,9 @@ func (m *Manager) onHandshakeForGeneration(workspace, sessionID, generationID st
 		return fmt.Errorf("%s", reason)
 	}
 	m.reconcileTurnSnapshot(d, active, hello)
+	// A user's stop whose Ack died with the previous connection is answered
+	// HERE, off the reconciliation that just ran, and never by re-sending it.
+	m.resolveUnackedInterrupt(d, hello.GetActiveTurnIds())
 	// A claim the returning shim contradicted has just been ended durably, so
 	// the queue is owed the boundary that ending stands for. It is released at
 	// ShimReady rather than here — see notePhantomTurnClosed.
