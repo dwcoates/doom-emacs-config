@@ -1948,6 +1948,60 @@ JSON, so it eagerly resolves at entry-point time."
         (agent-repl-fork-worktree-workspace "fork-source")
         (should (equal captured-git-root "/tmp/fork-source-repo/"))))))
 
+;;;; ---- Tests: the background-workspace anchor ----
+
+(ert-deftest agent-repl-test-background-anchor-runs-fn-in-the-target ()
+  "The anchor activates WS before calling FN, so FN's window work lands
+in WS's own perspective rather than the caller's."
+  (agent-repl-test--with-clean-state
+    (let ((current "caller") (ran-in nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () current))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq current ws)))
+                ((symbol-function 'agent-repl--restore-focus)
+                 (lambda (persp &rest _) (setq current persp))))
+        (agent-repl--call-in-background-workspace
+         "gen-ws" (lambda () (setq ran-in current)))
+        (should (equal ran-in "gen-ws"))
+        (should (equal current "caller"))))))
+
+(ert-deftest agent-repl-test-background-anchor-skips-a-redundant-switch ()
+  "A WS that is ALREADY current is not switched to — the foreground
+`SPC o c' path must not pay a persp round trip to reach itself."
+  (agent-repl-test--with-clean-state
+    (let ((switches 0))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "here"))
+                ((symbol-function 'agent-repl--restore-focus) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (&rest _) (cl-incf switches))))
+        (agent-repl--call-in-background-workspace "here" #'ignore)
+        (should (= switches 0))))))
+
+(ert-deftest agent-repl-test-background-anchor-binds-the-guard-for-fn ()
+  "`agent-repl--eager-open-in-progress' is bound while FN runs, so the
+activation-reactive hooks stay suppressed across the transient switch."
+  (agent-repl-test--with-clean-state
+    (let ((guard-seen :unset))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "caller"))
+                ((symbol-function 'agent-repl--restore-focus) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-switch) #'ignore))
+        (agent-repl--call-in-background-workspace
+         "gen-ws" (lambda () (setq guard-seen agent-repl--eager-open-in-progress)))
+        (should (eq guard-seen t))
+        (should-not agent-repl--eager-open-in-progress)))))
+
+(ert-deftest agent-repl-test-background-anchor-restores-focus-on-error ()
+  "A signaling FN still returns the caller to its own workspace."
+  (agent-repl-test--with-clean-state
+    (let ((restored nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "caller"))
+                ((symbol-function 'agent-repl--ws-switch) #'ignore)
+                ((symbol-function 'agent-repl--restore-focus)
+                 (lambda (&rest _) (setq restored t))))
+        (should-error (agent-repl--call-in-background-workspace
+                       "gen-ws" (lambda () (error "boom"))))
+        (should restored)))))
+
 ;;;; ---- Tests: eager-open of a generated workspace's REPL ----
 
 (ert-deftest agent-repl-test-eager-open-panels-drains-target-under-guard ()

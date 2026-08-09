@@ -62,6 +62,7 @@
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
 (declare-function agent-repl-window--harden "agent-repl-window" (win &rest recipe))
 (declare-function agent-repl--panels-visible-p "agent-repl-panels" ())
+(declare-function agent-repl--call-in-background-workspace "agent-repl-worktree" (ws fn))
 (declare-function agent-repl--hide-panels "agent-repl-panels" ())
 (declare-function agent-repl--ensure-input-buffer "agent-repl-panels" (ws))
 (declare-function agent-repl--clear-main-area-for-panels "agent-repl-panels" ())
@@ -921,17 +922,32 @@ The lazy end-to-end trigger: validates the backend/env capability and
 xwidget support, ensures the daemon (built if stale, launched if
 absent), ensures WS's daemon session (rooted at its worktree), mounts
 the webview attached to that session, and places it over the input
-panel."
+panel.
+
+The mount runs through `agent-repl--call-in-background-workspace', which
+activates WS for the duration of the display and restores the caller's
+focus afterward.  Establishment is ASYNCHRONOUS, so the continuation
+below fires outside its caller's dynamic extent — with no anchor it
+mounts into whatever perspective is current when the daemon answers,
+which for a background workspace (the generated-workspace panel build)
+is the user's own frame, and even for `SPC o c' is the wrong frame the
+moment the user switches tabs while establishment is in flight.
+`--display-webview' deletes and re-lays the frame's main-area windows,
+so a mis-anchored mount evicts the looked-at workspace's layout.  The
+anchor is inert when WS is already current."
   (agent-repl--log ws "gui-open: begin")
   (agent-repl--frontend-require-xwidget ws)
   (agent-repl--frontend-validate-for-ws 'gui ws)
   (agent-repl--frontend-after-ensure-session
    ws
    (lambda ()
-     (let* ((url (agent-repl--frontend-webview-url ws))
-            (buf (agent-repl--frontend-ensure-webview-buffer ws url)))
-       (agent-repl--frontend-display-webview ws buf)
-       (agent-repl--log ws "gui-open: outcome=displayed buf=%s" buf)))
+     (agent-repl--call-in-background-workspace
+      ws
+      (lambda ()
+        (let* ((url (agent-repl--frontend-webview-url ws))
+               (buf (agent-repl--frontend-ensure-webview-buffer ws url)))
+          (agent-repl--frontend-display-webview ws buf)
+          (agent-repl--log ws "gui-open: outcome=displayed buf=%s" buf)))))
    (lambda (detail) (agent-repl--warn ws "gui-open: FAILED detail=%s" detail)))
   :pending)
 
