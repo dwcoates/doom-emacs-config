@@ -610,6 +610,164 @@ func TestAnUnclassifiedFoldRefusalStillTakesTheDegradedWarn(t *testing.T) {
 	}
 }
 
+// --- a REPLAYED fault is history, not news ---------------------------------
+//
+// The 16 async detachment faults observed on one boot were every one of them a
+// replayed historical record, re-warning and re-carding on every subsequent
+// boot about detachments that had happened once. A replayed fault is classified
+// through the same shared classifier every other replayed anomaly uses: the
+// record is kept whole at info, and no live card goes up. The LIVE arm is
+// untouched.
+
+// faultLevelConsumer is a consumer bound to the live query with its info and
+// warn channels split and its pusher visible, which is the shape a resuming
+// daemon has while the store replays rows at it.
+func faultLevelConsumer(t *testing.T, push Pusher) (*consumer, *levelSplitLogs) {
+	t.Helper()
+	logs := &levelSplitLogs{}
+	c := newConsumer("ws", "s1", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{},
+		logs.logf, nil, nil, nil, nil, nil)
+	c.warnf = logs.warnf
+	c.now = func() int64 { return 1000 }
+	if err := c.accounting.bindHandshakeIdentity(&corev1.ShimHello{
+		QueryInstanceId: "live-query", QueryCreatedSeq: 100, VendorSessionId: "vendor-session",
+	}); err != nil {
+		t.Fatalf("bind handshake: %v", err)
+	}
+	return c, logs
+}
+
+// unclassifiableFault is the push one genuinely unattributable detachment
+// produces: a task announced with neither a recognizable kind nor a call to
+// look a tool name up by.
+func unclassifiableFault(t *testing.T, c *consumer) asyncPush {
+	t.Helper()
+	push, err := c.bubbles.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_x"}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(push.Faults) != 1 {
+		t.Fatalf("the arrange step must produce exactly one fault, got %d", len(push.Faults))
+	}
+	return push
+}
+
+// faultEvent is a detachment-fault-bearing event stamped as produced by
+// ENVELOPEQUERY, which is the only fact the historical classification reads.
+func faultEvent(seq uint64, envelopeQuery string) *corev1.Event {
+	return &corev1.Event{SessionId: "s1", Seq: seq, ProducedAtMs: 1700000000000, QueryInstanceId: envelopeQuery}
+}
+
+func TestAReplayedDetachmentFaultTakesTheInfoChannel(t *testing.T) {
+	// Arrange
+	pusher := &fakePusher{}
+	c, logs := faultLevelConsumer(t, pusher)
+	push := unclassifiableFault(t, c)
+
+	// Act
+	c.pushAsync(push, faultEvent(1, "retired-query"))
+
+	// Assert
+	if got := countLinesWith(logs.info, "ASYNC DETACHMENT FAULT WITHHELD"); got != 1 {
+		t.Fatalf("info records = %d, want 1: a durable row replayed on every boot must be classified, not re-alarmed on; got info=%v warn=%v", got, logs.info, logs.warn)
+	}
+}
+
+func TestAReplayedDetachmentFaultRaisesNoWarn(t *testing.T) {
+	// Arrange
+	pusher := &fakePusher{}
+	c, logs := faultLevelConsumer(t, pusher)
+	push := unclassifiableFault(t, c)
+
+	// Act
+	c.pushAsync(push, faultEvent(1, "retired-query"))
+
+	// Assert
+	if got := countLinesWith(logs.warn, "ASYNC DETACHMENT FAULT"); got != 0 {
+		t.Fatalf("warn records = %d, want 0: the anomaly was surfaced loudly at its original occurrence; got %v", got, logs.warn)
+	}
+}
+
+func TestAReplayedDetachmentFaultPushesNoLiveCard(t *testing.T) {
+	// Arrange
+	pusher := &fakePusher{}
+	c, _ := faultLevelConsumer(t, pusher)
+	push := unclassifiableFault(t, c)
+
+	// Act
+	c.pushAsync(push, faultEvent(1, "retired-query"))
+
+	// Assert
+	if got := len(failureCards(pusher)); got != 0 {
+		t.Fatalf("failure cards = %d, want 0: a replayed fault re-carded on every boot claims a failure is happening now that is not", got)
+	}
+}
+
+func TestAReplayedDetachmentFaultStillNamesTheDetachmentItWithheld(t *testing.T) {
+	// Arrange
+	pusher := &fakePusher{}
+	c, logs := faultLevelConsumer(t, pusher)
+	push := unclassifiableFault(t, c)
+
+	// Act
+	c.pushAsync(push, faultEvent(1, "retired-query"))
+
+	// Assert
+	if got := countLinesWith(logs.info, push.Faults[0].UUID); got != 1 {
+		t.Fatalf("the withheld record must carry the same identity the card would have: got %v", logs.info)
+	}
+}
+
+func TestALiveDetachmentFaultStillTakesTheWarnChannel(t *testing.T) {
+	// Arrange
+	pusher := &fakePusher{}
+	c, logs := faultLevelConsumer(t, pusher)
+	push := unclassifiableFault(t, c)
+
+	// Act
+	c.pushAsync(push, faultEvent(1, "live-query"))
+
+	// Assert
+	if got := countLinesWith(logs.warn, "ASYNC DETACHMENT FAULT"); got != 1 {
+		t.Fatalf("warn records = %d, want 1: a live detachment the daemon cannot show IS new news; got %v", got, logs.warn)
+	}
+}
+
+func TestALiveDetachmentFaultStillPushesItsCard(t *testing.T) {
+	// Arrange
+	pusher := &fakePusher{}
+	c, _ := faultLevelConsumer(t, pusher)
+	push := unclassifiableFault(t, c)
+
+	// Act
+	c.pushAsync(push, faultEvent(1, "live-query"))
+
+	// Assert
+	if _, ok := failureCards(pusher)[push.Faults[0].UUID]; !ok {
+		t.Fatalf("the card is the only place a user learns work is running the daemon cannot show them, got %v", failureCards(pusher))
+	}
+}
+
+func TestAnAnnouncementBornDetachmentReplaysWithoutAnyFaultRecord(t *testing.T) {
+	// Arrange
+	pusher := &fakePusher{}
+	c, logs := faultLevelConsumer(t, pusher)
+	push, err := c.bubbles.observeTaskStarted(&corev1.TaskStarted{
+		TaskId: "bgbjlnfrv", Kind: corev1.TaskKind_TASK_KIND_SHELL,
+	}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	c.pushAsync(push, faultEvent(1, "retired-query"))
+
+	// Assert
+	if got := countLinesWith(logs.info, "ASYNC DETACHMENT FAULT") + countLinesWith(logs.warn, "ASYNC DETACHMENT FAULT"); got != 0 {
+		t.Fatalf("fault records = %d, want 0: a replayed harness background shell was never a fault at either severity; info=%v warn=%v", got, logs.info, logs.warn)
+	}
+}
+
 // gapCardUUID is the address a gap card is expected under: the store's own
 // bubble id and the gap class, so the test names the same key the production
 // derivation does rather than a hand-copied string.

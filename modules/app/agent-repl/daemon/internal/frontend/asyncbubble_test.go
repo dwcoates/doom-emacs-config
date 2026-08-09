@@ -62,6 +62,29 @@ func TestOpenAsyncBubbleRefusesADetachmentItCannotAttributeToACall(t *testing.T)
 	}
 }
 
+func TestOpenAsyncBubbleAdmitsWorkNoToolCallSpawned(t *testing.T) {
+	// Arrange / Act
+	b, err := OpenAsyncBubble(BubbleSpec{TaskID: "t1", Workspace: "/ws", Kind: DetachShell, NoSpawningCall: true})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenAsyncBubble error = %v, want a bubble: the contract admits an empty origin_tool_use_id for work no tool call spawned", err)
+	}
+	if got := b.GetOriginToolUseId(); got != "" {
+		t.Fatalf("origin_tool_use_id = %q, want empty", got)
+	}
+}
+
+func TestOpenAsyncBubbleRefusesASpecThatIsBothSpawnedAndUnspawned(t *testing.T) {
+	// Arrange / Act
+	_, err := OpenAsyncBubble(BubbleSpec{TaskID: "t1", Workspace: "/ws", Kind: DetachShell, OriginToolUseID: "tu1", NoSpawningCall: true})
+
+	// Assert
+	if err == nil {
+		t.Fatal("a bubble cannot be both announcement-born and call-spawned; the contradiction must be refused rather than silently resolved one way")
+	}
+}
+
 func TestOpenAsyncBubbleRefusesAnUnresolvedKind(t *testing.T) {
 	_, err := OpenAsyncBubble(BubbleSpec{TaskID: "t1", Workspace: "/ws", Kind: DetachUnresolved, OriginToolUseID: "tu1"})
 	if err == nil {
