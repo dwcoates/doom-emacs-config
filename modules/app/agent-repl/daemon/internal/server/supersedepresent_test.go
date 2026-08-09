@@ -56,8 +56,8 @@ func TestDeathForViewPresentsSupersedeWithNoSuccessor(t *testing.T) {
 	if item == nil {
 		t.Fatal("death item = nil for a supersede with no successor; an orphaned handover is exactly the case the card exists for")
 	}
-	if item.GetErrorType() != string(errclass.TypeSessionSuperseded) {
-		t.Fatalf("error_type = %q, want %s", item.GetErrorType(), errclass.TypeSessionSuperseded)
+	if errclass.TypeName(item) != string(errclass.TypeSessionSuperseded) {
+		t.Fatalf("error_type = %q, want %s", errclass.TypeName(item), errclass.TypeSessionSuperseded)
 	}
 }
 
@@ -128,8 +128,8 @@ func TestDeathForViewPresentsAlreadyResolvedSupersede(t *testing.T) {
 	if item == nil {
 		t.Fatal("death item = nil for an already-resolved supersede; the settling re-push must still carry the item that closes the card")
 	}
-	if item.GetResolvedAtMs() != 1234 {
-		t.Fatalf("resolved_at_ms = %d, want 1234", item.GetResolvedAtMs())
+	if errclass.ResolvedAtMs(item) != 1234 {
+		t.Fatalf("resolved_at_ms = %d, want 1234", errclass.ResolvedAtMs(item))
 	}
 }
 
@@ -150,8 +150,8 @@ func TestDeathForViewPresentsNonSupersedeDeathsDespiteASuccessor(t *testing.T) {
 	if item == nil {
 		t.Fatal("death item = nil for a deleted session; only the superseded window is withheld")
 	}
-	if item.GetErrorType() != string(errclass.TypeSessionDeleted) {
-		t.Fatalf("error_type = %q, want %s", item.GetErrorType(), errclass.TypeSessionDeleted)
+	if errclass.TypeName(item) != string(errclass.TypeSessionDeleted) {
+		t.Fatalf("error_type = %q, want %s", errclass.TypeName(item), errclass.TypeSessionDeleted)
 	}
 }
 

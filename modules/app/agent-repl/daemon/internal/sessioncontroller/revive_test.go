@@ -9,7 +9,6 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/registry"
 )
@@ -765,7 +764,7 @@ func TestARevivalParkedPromptIsStampedHold(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("%d queue entries, want the one parked prompt", len(entries))
 	}
-	if entries[0].classification != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD {
+	if entries[0].classification != VerdictHold {
 		t.Fatalf("classification = %s, want HOLD", entries[0].classification)
 	}
 }

@@ -136,7 +136,7 @@ func TestColdKeepAlivePingHibernatesWithCacheExpired(t *testing.T) {
 	hib.writeSeen = make(chan registry.HibernationDetail, 4)
 	turnID := submitPingUnderTurn(t, m)
 	d := controllerFor(t, m)
-	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold + 1), 0, 0))
+	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
 
 	// Act.
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
@@ -155,7 +155,7 @@ func TestWarmKeepAlivePingTakesNoHibernation(t *testing.T) {
 	m, _, hib, _, _ := coldPingRig(t)
 	turnID := submitPingUnderTurn(t, m)
 	d := controllerFor(t, m)
-	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold - 1), 0, 0))
+	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold-1), 0, 0))
 
 	// Act.
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
@@ -178,7 +178,7 @@ func TestExpensiveNonPingTurnTakesNoHibernation(t *testing.T) {
 	m.mu.Lock()
 	d.turn = turnRecord{phase: turnPhaseNamed, turnID: "req_user"}
 	m.mu.Unlock()
-	m.noteKeepAlivePingCost(d, costOf("req_user", uint64(coldPingThreshold * 10), 0, 0))
+	m.noteKeepAlivePingCost(d, costOf("req_user", uint64(coldPingThreshold*10), 0, 0))
 
 	// Act.
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
@@ -198,7 +198,7 @@ func TestForeignTurnCostDoesNotFillThePingsMeasurement(t *testing.T) {
 	m, _, hib, _, _ := coldPingRig(t)
 	turnID := submitPingUnderTurn(t, m)
 	d := controllerFor(t, m)
-	m.noteKeepAlivePingCost(d, costOf(turnID + "_not_the_ping", uint64(coldPingThreshold * 10), 0, 0))
+	m.noteKeepAlivePingCost(d, costOf(turnID+"_not_the_ping", uint64(coldPingThreshold*10), 0, 0))
 
 	// Act.
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
@@ -221,10 +221,10 @@ func TestColdKeepAlivePingWithPromptsWaitingTakesNoHibernation(t *testing.T) {
 	m.mu.Lock()
 	d.queue.add(&queueEntry{
 		id: "q1", keepAliveHoldTurnID: turnID,
-		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+		classification: VerdictHold,
 	})
 	m.mu.Unlock()
-	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold + 1), 0, 0))
+	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
 
 	// Act.
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
@@ -249,7 +249,7 @@ func TestColdKeepAliveHibernationCarriesTheMeasuredElapsedAndTTL(t *testing.T) {
 	hib.writeSeen = make(chan registry.HibernationDetail, 4)
 	turnID := submitPingUnderTurn(t, m)
 	d := controllerFor(t, m)
-	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold + 1), 0, 0))
+	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
 	// The ping's turn ending moves the durable instant, exactly as production's
 	// TurnEndObserved does — which is what a re-derived figure would then read.
 	hib.TurnEndObserved("s1", coldPingLastTurnEnd+coldPingElapsedMs)
@@ -287,7 +287,7 @@ func TestColdKeepAliveHibernationIsOrderedAfterThePingsTurnEnd(t *testing.T) {
 		_, closed := windows.closed[turnID]
 		windowOpenAtWrite = !closed
 	}
-	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold + 1), 0, 0))
+	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
 
 	// Act.
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
@@ -318,7 +318,7 @@ func TestColdKeepAliveHibernationFailureLogsItsFullContext(t *testing.T) {
 	hib.writeErr = errors.New("state store is unavailable")
 	turnID := submitPingUnderTurn(t, m)
 	d := controllerFor(t, m)
-	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold + 1), 0, 0))
+	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
 
 	// Act.
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
@@ -351,7 +351,7 @@ func TestColdKeepAliveHibernationFailureLeavesNoPartialState(t *testing.T) {
 	hib.writeErr = errors.New("state store is unavailable")
 	turnID := submitPingUnderTurn(t, m)
 	d := controllerFor(t, m)
-	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold + 1), 0, 0))
+	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
 
 	// Act.
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)

@@ -34,7 +34,7 @@ function applyOne(obj: unknown): AdapterEffect[] {
 function itemsFrom(item: Record<string, unknown>): ConversationItem[] {
   const effects = applyOne({
     conversationDelta: {
-      sessionId: "s1",
+      fence: "s1",
       workspace: "ws",
       throughSeq: "9",
       // The daemon stamps a provenance on every item it builds; an envelope
@@ -74,7 +74,7 @@ function feed(
     {
       kind: "conversation-items",
       workspace: "ws",
-      sessionId: "s1",
+      fence: "s1",
       throughSeq,
       items,
     },

@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
-
 	"claude-repld/internal/prompts"
 	"claude-repld/internal/vendorguard"
 )
@@ -123,11 +121,11 @@ func (c *CLIClassifier) logf(format string, args ...any) {
 // classifier is asked for a token and NOTHING else, so there is no model prose
 // to quote — a free-text reason would be a second thing to get wrong, and the
 // token already carries the entire decision.
-func rationaleFor(cls frontendv1.QueueClassification) string {
-	switch cls {
-	case frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT:
+func rationaleFor(v Verdict) string {
+	switch v {
+	case VerdictInterject:
 		return "bears on the turn already running"
-	case frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD:
+	case VerdictHold:
 		return "independent of the turn already running"
 	default:
 		return ""
@@ -153,7 +151,7 @@ func rationaleFor(cls frontendv1.QueueClassification) string {
 //
 // Both cases return an error, which the queue surfaces as the ERROR
 // classification. Nothing here guesses.
-func ExtractVerdict(out string) (frontendv1.QueueClassification, error) {
+func ExtractVerdict(out string) (Verdict, error) {
 	var hasJump, hasHold bool
 	for _, line := range strings.Split(out, "\n") {
 		switch strings.TrimSpace(line) {
@@ -165,14 +163,14 @@ func ExtractVerdict(out string) (frontendv1.QueueClassification, error) {
 	}
 	switch {
 	case hasJump && hasHold:
-		return frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR,
+		return VerdictError,
 			fmt.Errorf("classifier answered with BOTH tokens, so neither can be believed: %q", clampString(out, 400))
 	case hasJump:
-		return frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT, nil
+		return VerdictInterject, nil
 	case hasHold:
-		return frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD, nil
+		return VerdictHold, nil
 	default:
-		return frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR,
+		return VerdictError,
 			fmt.Errorf("classifier answered with neither %s nor %s: %q", tokenJump, tokenHold, clampString(out, 400))
 	}
 }
@@ -190,6 +188,7 @@ func ExtractVerdict(out string) (frontendv1.QueueClassification, error) {
 //   - It asks for ONE token and nothing else. The extraction is an exact match
 //     on a static string, so there is no format to parse, no JSON to be
 //     malformed, and no prose to interpret.
+//
 // It reads prompts/ClassifierPromptFile at every use, so an edit takes effect
 // on the next classification. An error means no brief could be composed, and
 // Classify surfaces it as a classification FAILURE rather than a verdict — a

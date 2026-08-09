@@ -77,13 +77,17 @@ func coalesceKey(frame *frontendv1.FrontendFrame) string {
 	switch f := frame.GetFrame().(type) {
 	case *frontendv1.FrontendFrame_WorkspaceState:
 		return "workspace_state\x00" + f.WorkspaceState.GetWorkspace()
+	// Keyed by WORKSPACE alone. These pushes carry a fence rather than a session
+	// id now, and two queued absolute views of one workspace are redundant with
+	// each other whether or not the fence rotated between them — the newer is
+	// the current truth either way, which is the whole premise of coalescing.
 	case *frontendv1.FrontendFrame_Progress:
-		return "progress\x00" + f.Progress.GetWorkspace() + "\x00" + f.Progress.GetSessionId()
+		return "progress\x00" + f.Progress.GetWorkspace()
 	case *frontendv1.FrontendFrame_Queue:
-		return "queue\x00" + f.Queue.GetWorkspace() + "\x00" + f.Queue.GetSessionId()
+		return "queue\x00" + f.Queue.GetWorkspace()
 	case *frontendv1.FrontendFrame_Heartbeat:
 		return "heartbeat\x00" + f.Heartbeat.GetWorkspace() + "\x00" +
-			f.Heartbeat.GetSessionId() + "\x00" + f.Heartbeat.GetProgress().GetToolUseId()
+			f.Heartbeat.GetProgress().GetToolUseId()
 	case *frontendv1.FrontendFrame_WorkspaceRoster:
 		return "workspace_roster"
 	case *frontendv1.FrontendFrame_ShutdownSchedule:

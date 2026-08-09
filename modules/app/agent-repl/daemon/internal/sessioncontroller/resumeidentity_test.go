@@ -97,8 +97,8 @@ func TestConsumerTerminatesOnTypedResumeIdentityMismatchBeforeMutation(t *testin
 	if len(push.convo) != 1 || len(push.convo[0].GetItems()) != 1 {
 		t.Fatalf("conversation pushes = %+v, want one typed identity failure", push.convo)
 	}
-	failure := push.convo[0].GetItems()[0].GetSystemFailure()
-	if failure == nil || failure.GetSessionResume().GetIdentityMismatch().GetReplacementClaudeSessionId() != "replacement" || failure.GetSessionResume().GetClaudeSessionId() != "requested" {
+	failure := push.convo[0].GetItems()[0].GetFailureCard()
+	if failure == nil || failure.GetKind().GetSessionResumeFailed().GetDetail().GetIdentityMismatch().GetReplacementClaudeSessionId() != "replacement" || failure.GetKind().GetSessionResumeFailed().GetDetail().GetClaudeSessionId() != "requested" {
 		t.Fatalf("identity failure = %+v", failure)
 	}
 }

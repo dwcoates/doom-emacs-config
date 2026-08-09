@@ -26,10 +26,10 @@ import (
 // ---------------------------------------------------------------------------
 
 // resolvedFailureCards returns every pushed card carrying resolved_at_ms.
-func resolvedFailureCards(h *escapeHarness) []*frontendv1.SystemFailureItem {
-	var out []*frontendv1.SystemFailureItem
+func resolvedFailureCards(h *escapeHarness) []*frontendv1.FailureCardView {
+	var out []*frontendv1.FailureCardView
 	for _, c := range h.failureCards() {
-		if c.GetResolvedAtMs() != 0 {
+		if errclass.ResolvedAtMs(c) != 0 {
 			out = append(out, c)
 		}
 	}
@@ -90,8 +90,11 @@ func TestAResolvedWithheldCardKeepsItsIdentityAndDetail(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("resolved cards = %v, want exactly one", got)
 	}
-	if got[0].GetItemUuid() != want.GetItemUuid() || got[0].GetErrorType() != want.GetErrorType() || got[0].GetSourceDetail() != want.GetSourceDetail() {
-		t.Fatalf("the settled card lost the opening card's account: got %+v, want the identity and detail of %+v", got[0], want)
+	// The card's ADDRESS is its envelope's and is asserted by the retention key
+	// the resolver settles under; what the card itself must not lose is its
+	// classification and its whole raw account.
+	if errclass.TypeName(got[0]) != errclass.TypeName(want) || got[0].GetDetail() != want.GetDetail() {
+		t.Fatalf("the settled card lost the opening card's account: got %+v, want the kind and detail of %+v", got[0], want)
 	}
 }
 
@@ -106,7 +109,7 @@ func TestAResolvedWithheldCardIsStillTheUnexpectedTerminationCard(t *testing.T) 
 
 	// Assert.
 	got := resolvedFailureCards(h)
-	if len(got) != 1 || got[0].GetErrorType() != string(errclass.TypeUnexpectedQueryTermination) {
+	if len(got) != 1 || errclass.TypeName(got[0]) != string(errclass.TypeUnexpectedQueryTermination) {
 		t.Fatalf("resolved cards = %v, want the unexpected-termination card settled", got)
 	}
 }

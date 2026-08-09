@@ -33,7 +33,7 @@ type queueEntry struct {
 	promptOrigin   corev1.PromptOrigin
 	queuedAtMs     int64
 
-	classification frontendv1.QueueClassification
+	classification Verdict
 	rationale      string
 	accepted       bool
 
@@ -53,7 +53,7 @@ type queueEntry struct {
 	// parking this entry, and is empty for every ordinary entry.
 	//
 	// It is a different KIND of hold from a classification, which is why it is
-	// a field of its own rather than a fifth QueueClassification: a classified
+	// a field of its own rather than a fifth verdict: a classified
 	// entry is waiting on the turn in front of it, and a drain-held entry is
 	// waiting on the whole daemon. The classifier NEVER runs on one of these —
 	// there is nothing to interject into and nothing to decide — so the entry
@@ -229,7 +229,7 @@ func (q *promptQueue) releaseKeepAliveHold(turnID string) int {
 			// ran. With the hold gone the entry is an ordinary queued prompt
 			// about to be delivered, and leaving it stamped HOLD would render a
 			// chip claiming it is still waiting on something.
-			e.classification = frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING
+			e.classification = VerdictPending
 			n++
 		}
 	}
@@ -248,7 +248,7 @@ func (q *promptQueue) releaseRevivalHold(sessionID string) int {
 	for _, e := range q.entries {
 		if e.revivalHoldSessionID == sessionID {
 			e.revivalHoldSessionID = ""
-			e.classification = frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING
+			e.classification = VerdictPending
 			n++
 		}
 	}
@@ -370,26 +370,32 @@ func (q *promptQueue) pushFrontAll(entries []*queueEntry) {
 // view renders the queue as the pushed frontend frame, front to back. An empty
 // queue renders as a QueueView with no entries rather than as no frame at all:
 // "the queue is now empty" is exactly the state a frontend needs told.
-func (q *promptQueue) view(workspace, sessionID string) *frontendv1.QueueView {
-	v := &frontendv1.QueueView{Workspace: workspace, SessionId: sessionID}
+func (q *promptQueue) view(workspace, fence string) *frontendv1.QueueView {
+	v := &frontendv1.QueueView{Workspace: workspace, Fence: fence}
 	for _, e := range q.entries {
 		entry := &frontendv1.QueueEntry{
-			Id:             e.id,
-			Text:           e.text,
-			QueuedAtMs:     e.queuedAtMs,
-			Classification: e.classification,
-			Rationale:      e.rationale,
-			Accepted:       e.accepted,
+			Id:         e.id,
+			Text:       e.text,
+			QueuedAtMs: e.queuedAtMs,
 		}
+		// The entry holds ONE free-text account, which the wire files under the
+		// field its verdict owns: a rationale on interject/hold, a detail on
+		// error. Passing it for both is what keeps the daemon from carrying two
+		// strings that can disagree about the same thing.
+		setClassification(entry, e.classification, e.rationale, e.rationale, e.accepted)
 		if e.drainHeld() {
-			entry.ShutdownHold = &frontendv1.QueueEntryShutdownHold{ScheduleId: e.shutdownHoldScheduleID}
+			entry.Hold = &frontendv1.QueueEntry_Shutdown{
+				Shutdown: &frontendv1.QueueEntryShutdownHold{ScheduleId: e.shutdownHoldScheduleID},
+			}
 		}
 		// The keep-alive hold is projected beside the drain hold and never
 		// instead of a classification: the webapp renders a dedicated "waiting
 		// on a keep-alive response" bubble from this field, which is the honest
 		// account of a prompt waiting on a turn nobody asked for.
 		if e.keepAliveHeld() {
-			entry.KeepAliveHold = &frontendv1.QueueEntryKeepAliveHold{TurnId: e.keepAliveHoldTurnID}
+			entry.Hold = &frontendv1.QueueEntry_KeepAlive{
+				KeepAlive: &frontendv1.QueueEntryKeepAliveHold{TurnId: e.keepAliveHoldTurnID},
+			}
 		}
 		// The revival hold is projected the same way, and for the sharper reason:
 		// without this field a compact-first-parked entry reaches the frontend as
@@ -397,7 +403,13 @@ func (q *promptQueue) view(workspace, sessionID string) *frontendv1.QueueView {
 		// cannot tell the user that their prompt is queued behind the daemon's own
 		// `/compact` rather than behind a classifier that will never run on it.
 		if e.revivalHeld() {
-			entry.RevivalHold = &frontendv1.QueueEntryRevivalHold{SessionId: e.revivalHoldSessionID}
+			// The arm's PRESENCE is the whole fact. It used to name the session
+			// being revived; a revival is a workspace-level event and the entry
+			// already rides its workspace's queue, so the id joined the bubble to
+			// nothing the client could not already reach.
+			entry.Hold = &frontendv1.QueueEntry_Revival{
+				Revival: &frontendv1.QueueEntryRevivalHold{},
+			}
 		}
 		v.Entries = append(v.Entries, entry)
 	}
@@ -448,7 +460,7 @@ type ClassifyRequest struct {
 // returns an error instead of guessing; the caller surfaces that as the ERROR
 // classification rather than resolving it to a real verdict.
 type ClassifyResult struct {
-	Classification frontendv1.QueueClassification
+	Classification Verdict
 	Rationale      string
 }
 
@@ -523,7 +535,7 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 			permissionMode:       permissionMode,
 			promptOrigin:         promptOrigin,
 			queuedAtMs:           m.now(),
-			classification:       frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+			classification:       VerdictHold,
 			revivalHoldSessionID: revivalSessionID,
 		}
 		// Appended at the BACK even against a paused queue, exactly as the other
@@ -560,7 +572,7 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 			permissionMode:      permissionMode,
 			promptOrigin:        promptOrigin,
 			queuedAtMs:          m.now(),
-			classification:      frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+			classification:      VerdictHold,
 			keepAliveHoldTurnID: holdTurnID,
 		}
 		// Appended at the BACK even against a paused queue, exactly as a
@@ -589,7 +601,7 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 		permissionMode: permissionMode,
 		promptOrigin:   promptOrigin,
 		queuedAtMs:     m.now(),
-		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING,
+		classification: VerdictPending,
 	}
 	if d.paused {
 		d.queue.addHeadJump(e)
@@ -930,7 +942,7 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 
 	m.mu.Lock()
 	e.interjecting = false
-	e.classification = frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR
+	e.classification = VerdictError
 	e.rationale = fmt.Sprintf("delivery failed: %v", err)
 	// No turn started, so nothing is running alone against the paused queue.
 	// Leaving the flag set would make the pause wait on a turn end that can
@@ -962,7 +974,7 @@ func (m *Manager) classify(d *sessionController, entryID, runningPrompt, queuedP
 		// NEVER silently defaulted to a real verdict: a frontend has to be able
 		// to see that nothing decided this. The entry stays queued and the
 		// ordinary turn-end drain delivers it.
-		e.classification = frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR
+		e.classification = VerdictError
 		e.rationale = err.Error()
 		m.logf("session-controller: queue classify FAILED entry=%s session=%s: %v", entryID, d.sessionID, err)
 	} else {
@@ -971,7 +983,7 @@ func (m *Manager) classify(d *sessionController, entryID, runningPrompt, queuedP
 		m.logf("session-controller: queue classified entry=%s session=%s verdict=%s",
 			entryID, d.sessionID, res.Classification)
 	}
-	interject := e.classification == frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT
+	interject := e.classification == VerdictInterject
 	m.mu.Unlock()
 
 	if interject {
@@ -1066,7 +1078,7 @@ func (m *Manager) beginInterject(d *sessionController, entryID, source string) {
 		return
 	}
 	e.interjecting = true
-	e.classification = frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT
+	e.classification = VerdictInterject
 	if source == "user" {
 		e.rationale = "run now, requested by the user"
 	}
@@ -1111,7 +1123,7 @@ func (m *Manager) beginInterject(d *sessionController, entryID, source string) {
 			m.mu.Lock()
 			if cur := d.queue.get(entryID); cur != nil {
 				cur.interjecting = false
-				cur.classification = frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR
+				cur.classification = VerdictError
 				cur.rationale = fmt.Sprintf("interrupt failed: %v", err)
 			}
 			view, recs := m.publishQueueLocked(d)

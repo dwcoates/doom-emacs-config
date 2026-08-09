@@ -98,9 +98,12 @@ func (e *resumeIdentityMismatchError) SessionResumeFailureDetail() *frontendv1.S
 }
 
 func newResumeIdentityMismatchError(sessionID string, mismatch *resumeIdentityMismatch) *resumeIdentityMismatchError {
+	// sessionID still names the record in the wrapped error's own text; it no
+	// longer rides the evidence, because a rendering frontend has no session
+	// vocabulary to read it with. What the card shows is the VENDOR
+	// conversation, which is content, and that is carried unchanged.
 	detail := &frontendv1.SessionResumeFailure{
-		AgentReplSessionId: sessionID,
-		ClaudeSessionId:    mismatch.requestedVendorSessionID,
+		ClaudeSessionId: mismatch.requestedVendorSessionID,
 		Attempt: &frontendv1.SessionResumeFailure_AutomaticRestore{
 			AutomaticRestore: &frontendv1.SessionResumeFailureAutomaticRestore{},
 		},

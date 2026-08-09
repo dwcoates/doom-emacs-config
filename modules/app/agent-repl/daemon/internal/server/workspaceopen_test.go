@@ -335,7 +335,7 @@ func TestOpenPreservesTypedAutomaticRestoreEvidence(t *testing.T) {
 
 	// Act.
 	err := o.Open(context.Background(), "/w", WorkspaceOpenOpts{})
-	failure := errclass.Command(nil, err).GetSessionResume()
+	failure := errclass.Command(nil, err).GetKind().GetSessionResumeFailed().GetDetail()
 
 	// Assert.
 	if !errors.Is(err, missing) {
@@ -344,7 +344,7 @@ func TestOpenPreservesTypedAutomaticRestoreEvidence(t *testing.T) {
 	if failure == nil || failure.GetAutomaticRestore() == nil || failure.GetTranscriptUnavailable() == nil {
 		t.Fatalf("failure = %v, want automatic_restore + transcript_unavailable", errclass.Command(nil, err))
 	}
-	if failure.GetAgentReplSessionId() != "s_1" || failure.GetClaudeSessionId() != "claude-lost" || failure.GetCwd() != "/w" {
+	if failure.GetClaudeSessionId() != "claude-lost" || failure.GetCwd() != "/w" {
 		t.Fatalf("failure evidence = %v", failure)
 	}
 }
@@ -364,16 +364,16 @@ func TestOpenDriveablePreservesAutomaticRestoreEvidence(t *testing.T) {
 	// Act.
 	err := o.OpenDriveable(context.Background(), "/w")
 	failure := errclass.Command(nil, err)
-	detail := failure.GetSessionResume()
+	detail := failure.GetKind().GetSessionResumeFailed().GetDetail()
 
 	// Assert.
 	if !errors.Is(err, errBringUp) {
 		t.Fatalf("OpenDriveable error = %v, want original bring-up chain preserved", err)
 	}
-	if failure.GetErrorType() != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetAutomaticRestore() == nil {
+	if errclass.TypeName(failure) != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetAutomaticRestore() == nil {
 		t.Fatalf("failure = %v, want typed automatic restore", failure)
 	}
-	if detail.GetAgentReplSessionId() != "s_1" || detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != cfg || detail.GetResolvedConfigDir() != cfg {
+	if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != cfg || detail.GetResolvedConfigDir() != cfg {
 		t.Fatalf("failure evidence = %v", detail)
 	}
 	if got := detail.GetBringUpFailure(); got == nil || got.GetCause() != errBringUp.Error() {

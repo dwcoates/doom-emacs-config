@@ -1,0 +1,121 @@
+// slash-menu.proto — Slash commands: the closed session-command set, its feed record, and the
+// skill body a launched skill contributes.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// A slash command the CLI answers ITSELF, rather than a prompt for the agent.
+//
+// THE CLOSED SET IS THE POINT. The daemon recognizes a submitted prompt as one
+// of these before it forwards it (sessioncontroller/sessioncommand.go), and a
+// recognized command earns NO prompt bubble — so the set of things that can
+// suppress a bubble is exactly the set of names below, fixed on the wire and
+// reviewable in one place. A command that is not here is a prompt, and a
+// prompt is always drawn.
+//
+// A custom command (a skill, a project command) is deliberately absent and
+// always will be: those EXPAND into a prompt for the agent, so the text the
+// user typed really is the turn's opening and really does belong in the feed.
+enum SessionCommand {
+  // Never set by the daemon. A receiver seeing UNSPECIFIED is looking at a
+  // malformed frame and must reject it loudly rather than pick a command.
+  SESSION_COMMAND_UNSPECIFIED = 0;
+  SESSION_COMMAND_CLEAR = 1;
+  SESSION_COMMAND_COMPACT = 2;
+  SESSION_COMMAND_MODEL = 3;
+  SESSION_COMMAND_COST = 4;
+  SESSION_COMMAND_USAGE = 5;
+  SESSION_COMMAND_STATUS = 6;
+  SESSION_COMMAND_CONTEXT = 7;
+  SESSION_COMMAND_CONFIG = 8;
+  SESSION_COMMAND_HELP = 9;
+  SESSION_COMMAND_DOCTOR = 10;
+  SESSION_COMMAND_LOGIN = 11;
+  SESSION_COMMAND_LOGOUT = 12;
+  SESSION_COMMAND_MEMORY = 13;
+  SESSION_COMMAND_PERMISSIONS = 14;
+  SESSION_COMMAND_AGENTS = 15;
+  SESSION_COMMAND_MCP = 16;
+  SESSION_COMMAND_HOOKS = 17;
+  SESSION_COMMAND_OUTPUT_STYLE = 18;
+  SESSION_COMMAND_RELEASE_NOTES = 19;
+  SESSION_COMMAND_TODOS = 20;
+  SESSION_COMMAND_EXPORT = 21;
+  SESSION_COMMAND_ADD_DIR = 22;
+  SESSION_COMMAND_RESUME = 23;
+  SESSION_COMMAND_EXIT = 24;
+  SESSION_COMMAND_PRIVACY_SETTINGS = 25;
+  SESSION_COMMAND_STATUSLINE = 26;
+  SESSION_COMMAND_TERMINAL_SETUP = 27;
+  SESSION_COMMAND_VIM = 28;
+  SESSION_COMMAND_REWIND = 29;
+  SESSION_COMMAND_BUG = 30;
+}
+
+// Additive: ONE session command the user invoked, as the feed's record that
+// they invoked it.
+//
+// WHY IT CARRIES NO TEXT, AND NEVER WILL. `/model` is not something the user
+// SAID to the agent; it is something they DID to the session. Drawing it as a
+// purple prompt bubble claims the agent was asked a question it never
+// received, and every one of these commands the CLI answers locally — the
+// model is not in the loop at all.
+//
+// The absence of a text field is the ENFORCEMENT of that, not a note about it.
+// A frontend cannot render the submitted prompt from this item because the
+// prompt is not in it: there is no field to put it in, so no future consumer
+// can reintroduce the bubble by reading one, and no future producer can leak
+// an argument the user typed (`/model opus`, `/compact focus on the parser`)
+// onto a surface that has no business showing it. The command's IDENTITY is
+// the whole fact, and an enum is the only shape that can carry an identity
+// without also being able to carry a message.
+//
+// THIS IS THE INVOCATION, NOT THE OUTCOME. `core.v1.ContextCleared` and
+// `core.v1.ContextCompacted` report that a cut FINISHED, minutes later and
+// from the file plane; this reports that the user asked, at the instant they
+// asked. The two coexist by design, and a frontend that truncates its feed at
+// a cut drops the matching invocation along with the history it belonged to.
+message SessionCommandItem {
+  // The recognized command. Never UNSPECIFIED.
+  SessionCommand command = 1;
+}
+
+// Additive: the launched skill's own SKILL.md body, addressed to the Skill
+// tool card that launched it.
+//
+// WHY THIS IS ITS OWN ARM RATHER THAN A FIELD ON tool_use (12). The daemon
+// never populates arm 12: a tool call rides as a ToolUseBlock INSIDE its
+// carrying assistant_message (see internal/frontend/translate.go), and its
+// result as a tool_result block inside the following user_message. There is
+// therefore no tool item on this wire to hang a body field on, and inventing
+// one would mean emitting a second, half-populated representation of a call
+// the frontend already assembled.
+//
+// WHAT IT CORRESPONDS TO ON DISK. The harness writes a skill's body as a
+// SEPARATE transcript record — type "user", flagged isMeta, whose text is
+// "Base directory for this skill: <dir>" followed by the whole SKILL.md. It
+// is bookkeeping addressed to the model, not a prompt the person typed, so
+// rendering it as a user turn is a defect (it draws a prompt bubble nobody
+// wrote). The daemon correlates that record back to the Skill call that
+// caused it and pushes THIS instead; the user record itself reaches no
+// frontend at all.
+//
+// HOW A FRONTEND CONSUMES IT. tool_use_id is the reconciliation identity, and
+// it is deliberately the SAME identity the frontend already files the Skill
+// call under — so this item MERGES INTO the existing card rather than adding
+// one beside it. One invocation is one card, updated in place as the call,
+// the result and the body land, in whatever order they land. Replays are
+// idempotent for the same reason: re-sending it replaces the body it already
+// merged.
+message SkillBodyItem {
+  // The Skill call's tool_use id. Never empty: the daemon emits this item
+  // only once it has resolved the body to a specific call.
+  string tool_use_id = 1;
+  // The SKILL.md body VERBATIM, markdown, including the leading "Base
+  // directory for this skill:" line the harness prepends. A skill IS a
+  // markdown document, so it is carried as markdown and rendered as markdown.
+  string body_markdown = 2;
+}

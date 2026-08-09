@@ -182,9 +182,11 @@ func (c *consumer) curateMetaRecords(cd *frontendv1.ConversationDelta, envs map[
 				Uuid:      it.GetUuid(),
 				TsMs:      it.GetTsMs(),
 				RequestId: it.GetRequestId(),
-				Item: &frontendv1.ConversationItem_SkillBody{SkillBody: &frontendv1.SkillBodyItem{
-					ToolUseId:    toolUseID,
-					BodyMarkdown: text,
+				Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
+					Emission: &frontendv1.AgentEmission_SkillBody{SkillBody: &frontendv1.SkillBodyItem{
+						ToolUseId:    toolUseID,
+						BodyMarkdown: text,
+					}},
 				}},
 			})
 			continue

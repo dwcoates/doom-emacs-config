@@ -540,20 +540,24 @@ func frameSessionIdentity(frame *frontendv1.FrontendFrame) (workspace, sessionID
 		return f.WorkspaceState.GetWorkspace(), f.WorkspaceState.GetSessionId(), true
 	case *frontendv1.FrontendFrame_SessionView:
 		return f.SessionView.GetWorkspace(), f.SessionView.GetSessionId(), true
+	// The FENCED pushes carry no session id. They are still SCOPED — the
+	// materialization latch is a per-WORKSPACE decision and must hold them back
+	// exactly as before — so they report their workspace and an empty session,
+	// which the gate already accepts and logs as such.
 	case *frontendv1.FrontendFrame_ConversationDelta:
-		return f.ConversationDelta.GetWorkspace(), f.ConversationDelta.GetSessionId(), true
+		return f.ConversationDelta.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_TypingDelta:
-		return f.TypingDelta.GetWorkspace(), f.TypingDelta.GetSessionId(), true
+		return f.TypingDelta.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_TaskCatalog:
-		return f.TaskCatalog.GetWorkspace(), f.TaskCatalog.GetSessionId(), true
+		return f.TaskCatalog.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_SessionInit:
-		return f.SessionInit.GetWorkspace(), f.SessionInit.GetSessionId(), true
+		return f.SessionInit.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_Heartbeat:
-		return f.Heartbeat.GetWorkspace(), f.Heartbeat.GetSessionId(), true
+		return f.Heartbeat.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_Queue:
-		return f.Queue.GetWorkspace(), f.Queue.GetSessionId(), true
+		return f.Queue.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_Progress:
-		return f.Progress.GetWorkspace(), f.Progress.GetSessionId(), true
+		return f.Progress.GetWorkspace(), "", true
 	default:
 		return "", "", false
 	}
@@ -1079,7 +1083,8 @@ func (s *Server) processCommand(t *commandTicket) {
 	// history failure. Capture again AFTER the daemon made that decision so
 	// a transition crossing the pre-dispatch capture cannot leave the client
 	// holding the very identity the command just proved was retired.
-	if cmd.GetResync() != nil && ack.GetFailure().GetErrorType() == string(errclass.TypeSessionReconnectSuperseded) {
+	ackType, _ := errclass.TypeOf(ack.GetFailure())
+	if cmd.GetResync() != nil && ackType == errclass.TypeSessionReconnectSuperseded {
 		s.enqueueResyncSnapshot(cl, cmd, "after_superseded")
 	}
 	if !ack.GetOk() {

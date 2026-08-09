@@ -106,7 +106,7 @@ func TestSessionViewCarriesTheResolvedSupersede(t *testing.T) {
 	view := SessionViewFromRecord(t.Logf, rec, nil, false)
 
 	// Assert.
-	if view.GetDeath().GetResolvedAtMs() != 4242 {
-		t.Fatalf("view death resolved_at_ms = %d, want 4242", view.GetDeath().GetResolvedAtMs())
+	if errclass.ResolvedAtMs(view.GetDeath()) != 4242 {
+		t.Fatalf("view death resolved_at_ms = %d, want 4242", errclass.ResolvedAtMs(view.GetDeath()))
 	}
 }

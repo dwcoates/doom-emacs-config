@@ -103,11 +103,11 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				})},
 			},
 			want: &frontendv1.ConversationDelta{
-				Workspace: "ws", SessionId: "s1", ThroughSeq: 7,
+				Workspace: "ws", Fence: "s1", ThroughSeq: 7,
 				Items: []*frontendv1.ConversationItem{{
 					Uuid: "u1", TsMs: producedMs,
 					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Item:   &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: assistantMsg},
+					Item:   &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: assistantMsg}}}},
 				}},
 			},
 		},
@@ -120,11 +120,11 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				})},
 			},
 			want: &frontendv1.ConversationDelta{
-				Workspace: "ws", SessionId: "s1", ThroughSeq: 9,
+				Workspace: "ws", Fence: "s1", ThroughSeq: 9,
 				Items: []*frontendv1.ConversationItem{{
 					Uuid: "u3", TsMs: producedMs,
 					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Item:   &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: toolUseMsg},
+					Item:   &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: toolUseMsg}}}},
 				}},
 			},
 		},
@@ -137,7 +137,7 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				})},
 			},
 			want: &frontendv1.ConversationDelta{
-				Workspace: "ws", SessionId: "s1", ThroughSeq: 10,
+				Workspace: "ws", Fence: "s1", ThroughSeq: 10,
 				Items: []*frontendv1.ConversationItem{{
 					Uuid: "u4", TsMs: producedMs,
 					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
@@ -154,7 +154,7 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				})},
 			},
 			want: &frontendv1.ConversationDelta{
-				Workspace: "ws", SessionId: "s1", ThroughSeq: 2,
+				Workspace: "ws", Fence: "s1", ThroughSeq: 2,
 				Items: []*frontendv1.ConversationItem{{
 					Uuid: "u5", TsMs: producedMs, RequestId: "req-5",
 					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
@@ -169,11 +169,11 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, resultMsg)},
 			},
 			want: &frontendv1.ConversationDelta{
-				Workspace: "ws", SessionId: "s1", ThroughSeq: 12,
+				Workspace: "ws", Fence: "s1", ThroughSeq: 12,
 				Items: []*frontendv1.ConversationItem{{
 					TsMs:   producedMs,
 					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Item:   &frontendv1.ConversationItem_Result{Result: resultMsg},
+					Item:   &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: resultMsg}}},
 				}},
 			},
 		},
@@ -220,7 +220,7 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got, _, err := ConversationDeltaFromEvent("ws", tc.event)
+			got, _, err := ConversationDeltaFromEvent("ws", "s1", tc.event)
 			// Assert.
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -243,7 +243,7 @@ func TestConversationDeltaFromEventCorruptVendorErrors(t *testing.T) {
 	}
 
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", ev)
+	got, _, err := ConversationDeltaFromEvent("ws", "s1", ev)
 
 	// Assert: hard error, never a silent nil.
 	if err == nil {
@@ -273,16 +273,16 @@ func TestConversationDeltaFromEventTranscriptAssistantUsesEnvelopeTs(t *testing.
 	// 2026-01-02T03:04:05Z in unix millis.
 	const wantTsMs int64 = 1767323045000
 	want := &frontendv1.ConversationDelta{
-		Workspace: "ws", SessionId: "s1", ThroughSeq: 20,
+		Workspace: "ws", Fence: "s1", ThroughSeq: 20,
 		Items: []*frontendv1.ConversationItem{{
 			Uuid: "au1", TsMs: wantTsMs,
 			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-			Item:   &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: msg},
+			Item:   &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: msg}}}},
 		}},
 	}
 
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", ev)
+	got, _, err := ConversationDeltaFromEvent("ws", "s1", ev)
 
 	// Assert.
 	if err != nil {
@@ -290,6 +290,132 @@ func TestConversationDeltaFromEventTranscriptAssistantUsesEnvelopeTs(t *testing.
 	}
 	if !proto.Equal(got, want) {
 		t.Errorf("mismatch\n got: %v\nwant: %v", got, want)
+	}
+}
+
+// --- the strip site states where each reasoning block came from -------------
+//
+// The daemon does the stripping, so the daemon is the only hop that still knows
+// which message a reasoning block left and which slot it held there. A client
+// that re-derived either would be matching by resemblance, which is exactly the
+// derivation `AgentThinking.api_message_id`/`.block_index` exist to remove.
+
+// thinkingEmissions translates one assistant message and returns the reasoning
+// emissions it curated to, in order.
+func thinkingEmissions(t *testing.T, msg *datav1.ApiAssistantMessage) []*frontendv1.AgentThinking {
+	t.Helper()
+	ev := &corev1.Event{
+		SessionId: "s1", Seq: 20, ProducedAtMs: producedMs,
+		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
+			Uuid: "env-1", Message: msg,
+		})},
+	}
+	got, _, err := ConversationDeltaFromEvent("ws", "s1", ev)
+	if err != nil {
+		t.Fatalf("ConversationDeltaFromEvent: %v", err)
+	}
+	var out []*frontendv1.AgentThinking
+	for _, item := range got.GetItems() {
+		if th := item.GetAgent().GetThinking(); th != nil {
+			out = append(out, th)
+		}
+	}
+	return out
+}
+
+// twoThinkingBlocks is a message whose reasoning sits at content indices 0 and
+// 2, so a stated index that merely counted the reasoning blocks (0 and 1) is
+// distinguishable from one that names the real content slot.
+func twoThinkingBlocks() *datav1.ApiAssistantMessage {
+	return &datav1.ApiAssistantMessage{
+		Id: "msg_01ABC",
+		Content: []*datav1.ContentBlock{
+			{Block: &datav1.ContentBlock_Thinking{Thinking: &datav1.ThinkingBlock{Thinking: "first"}}},
+			{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "prose"}}},
+			{Block: &datav1.ContentBlock_Thinking{Thinking: &datav1.ThinkingBlock{Thinking: "second"}}},
+		},
+	}
+}
+
+func TestAThinkingEmissionStatesTheMessageItWasStrippedFrom(t *testing.T) {
+	// Arrange / Act
+	got := thinkingEmissions(t, twoThinkingBlocks())
+
+	// Assert
+	if len(got) != 2 {
+		t.Fatalf("got %d thinking emissions, want 2", len(got))
+	}
+	for i, th := range got {
+		if th.GetApiMessageId() != "msg_01ABC" {
+			t.Errorf("emission %d api_message_id = %q, want %q", i, th.GetApiMessageId(), "msg_01ABC")
+		}
+	}
+}
+
+func TestAThinkingEmissionStatesItsPreStripContentIndex(t *testing.T) {
+	// Arrange / Act
+	got := thinkingEmissions(t, twoThinkingBlocks())
+
+	// Assert: the CONTENT slots, not the ordinal among reasoning blocks.
+	if len(got) != 2 {
+		t.Fatalf("got %d thinking emissions, want 2", len(got))
+	}
+	if want := []int32{0, 2}; got[0].GetBlockIndex() != want[0] || got[1].GetBlockIndex() != want[1] {
+		t.Errorf("block indices = [%d %d], want %v", got[0].GetBlockIndex(), got[1].GetBlockIndex(), want)
+	}
+}
+
+func TestAThinkingEmissionStatesAnEmptyMessageIdWhenTheRecordCarriesNone(t *testing.T) {
+	// A record without an id cannot be given one here; fabricating one would key
+	// every id-less reasoning block in the session onto the same preview.
+	// Arrange
+	msg := &datav1.ApiAssistantMessage{
+		Content: []*datav1.ContentBlock{
+			{Block: &datav1.ContentBlock_Thinking{Thinking: &datav1.ThinkingBlock{Thinking: "hmm"}}},
+		},
+	}
+
+	// Act
+	got := thinkingEmissions(t, msg)
+
+	// Assert
+	if len(got) != 1 {
+		t.Fatalf("got %d thinking emissions, want 1", len(got))
+	}
+	if got[0].GetApiMessageId() != "" {
+		t.Errorf("api_message_id = %q, want empty", got[0].GetApiMessageId())
+	}
+}
+
+func TestTheStrippedBodyKeepsTheBlocksTheEmissionsLeftBehind(t *testing.T) {
+	// The strip is the other half of the exclusivity invariant: what the
+	// emissions state about their origin must not change what the body keeps.
+	// Arrange
+	ev := &corev1.Event{
+		SessionId: "s1", Seq: 20, ProducedAtMs: producedMs,
+		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
+			Uuid: "env-1", Message: twoThinkingBlocks(),
+		})},
+	}
+
+	// Act
+	got, _, err := ConversationDeltaFromEvent("ws", "s1", ev)
+	if err != nil {
+		t.Fatalf("ConversationDeltaFromEvent: %v", err)
+	}
+
+	// Assert
+	var body *datav1.ApiAssistantMessage
+	for _, item := range got.GetItems() {
+		if r := item.GetAgent().GetResponse(); r != nil {
+			body = r.GetBody()
+		}
+	}
+	if body == nil {
+		t.Fatal("no response emission; the text block must still be drawn")
+	}
+	if len(body.GetContent()) != 1 || body.GetContent()[0].GetText().GetText() != "prose" {
+		t.Errorf("stripped body = %v, want the single text block", body.GetContent())
 	}
 }
 
@@ -312,7 +438,7 @@ func TestConversationDeltaFromEventTranscriptApiErrorMidBackoffCuratesToNothing(
 		})},
 	}
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", ev)
+	got, _, err := ConversationDeltaFromEvent("ws", "s1", ev)
 
 	// Assert.
 	if err != nil {
@@ -348,9 +474,9 @@ func apiErrorEvent(t *testing.T, uuid string, attempt, max int64) *corev1.Event 
 }
 
 // failureOf returns the single system-failure item in a delta, or nil.
-func failureOf(cd *frontendv1.ConversationDelta) *frontendv1.SystemFailureItem {
+func failureOf(cd *frontendv1.ConversationDelta) *frontendv1.FailureCardView {
 	for _, it := range cd.GetItems() {
-		if f := it.GetSystemFailure(); f != nil {
+		if f := it.GetFailureCard(); f != nil {
 			return f
 		}
 	}
@@ -377,12 +503,15 @@ func TestQueryTerminationFailurePreservesTypedLifecycleEvidence(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			lifecycle := &corev1.QueryLifecycle{QueryInstanceId: "query", Event: &corev1.QueryLifecycle_Terminated{Terminated: tc.terminated}}
-			item, err := SystemFailureItemFromQueryTermination("session", lifecycle, 1234)
+			item, err := FailureCardFromQueryTermination("session", lifecycle, 1234)
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := item.GetQueryTermination()
-			if got.GetAgentReplSessionId() != "session" || got.GetQueryInstanceId() != "query" || got.GetObservedAtMs() != 1234 || !tc.check(got) {
+			// The evidence no longer repeats the agent-repl session id — a
+			// rendering frontend has no vocabulary for it — so what is asserted
+			// is the query identity and the vendor evidence, which is content.
+			got := item.GetKind().GetQueryTermination().GetDetail()
+			if got.GetQueryInstanceId() != "query" || got.GetObservedAtMs() != 1234 || !tc.check(got) {
 				t.Fatalf("query termination = %+v", got)
 			}
 		})
@@ -391,7 +520,7 @@ func TestQueryTerminationFailurePreservesTypedLifecycleEvidence(t *testing.T) {
 
 func TestQueryTerminationFailureRejectsMissingIdentity(t *testing.T) {
 	lifecycle := &corev1.QueryLifecycle{QueryInstanceId: "query", Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{Reason: &corev1.QueryTerminated_UnexpectedEof{UnexpectedEof: &corev1.UnexpectedQueryEof{}}}}}
-	item, err := SystemFailureItemFromQueryTermination("session", lifecycle, 1234)
+	item, err := FailureCardFromQueryTermination("session", lifecycle, 1234)
 	if err == nil || item != nil || !strings.Contains(err.Error(), "no vendor identity") {
 		t.Fatalf("item=%+v err=%v, want missing-vendor-identity rejection", item, err)
 	}
@@ -400,7 +529,7 @@ func TestQueryTerminationFailureRejectsMissingIdentity(t *testing.T) {
 func TestATerminalApiErrorGetsAFailureCard(t *testing.T) {
 	// Arrange: retries exhausted.
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", apiErrorEvent(t, "sy2", 10, 10))
+	got, _, err := ConversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 10, 10))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -413,7 +542,7 @@ func TestATerminalApiErrorGetsAFailureCard(t *testing.T) {
 func TestAMidBackoffApiErrorGetsNoFailureCard(t *testing.T) {
 	// Arrange: the SDK will try again.
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", apiErrorEvent(t, "sy2", 2, 10))
+	got, _, err := ConversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 2, 10))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -429,12 +558,12 @@ func TestTheFailureCardIsTheOnlyItem(t *testing.T) {
 	// to ride beside the card is gone, so a terminal failure curates to
 	// exactly the card and nothing else.
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", apiErrorEvent(t, "sy2", 10, 10))
+	got, _, err := ConversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 10, 10))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Assert.
-	if len(got.GetItems()) != 1 || got.GetItems()[0].GetSystemFailure() == nil {
+	if len(got.GetItems()) != 1 || got.GetItems()[0].GetFailureCard() == nil {
 		t.Fatalf("items = %v, want exactly one system_failure item", got.GetItems())
 	}
 }
@@ -443,7 +572,7 @@ func TestTheFailureCardUuidIsDerivedFromTheLine(t *testing.T) {
 	// Arrange: a derived uuid cannot collide with the legacy item's and stays
 	// stable across a resync, which a freshly minted one would not.
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", apiErrorEvent(t, "sy2", 10, 10))
+	got, _, err := ConversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 10, 10))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -456,13 +585,13 @@ func TestTheFailureCardUuidIsDerivedFromTheLine(t *testing.T) {
 func TestTheFailureCardClassifiesTheStatus(t *testing.T) {
 	// Arrange: a 529 is overload, which the raw line never said in words.
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", apiErrorEvent(t, "sy2", 10, 10))
+	got, _, err := ConversationDeltaFromEvent("ws", "s1", apiErrorEvent(t, "sy2", 10, 10))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Assert.
-	if f := failureOf(got); f.GetErrorType() != string(errclass.TypeAPIOverloaded) {
-		t.Fatalf("error_type = %q, want %q", f.GetErrorType(), errclass.TypeAPIOverloaded)
+	if f := failureOf(got); errclass.TypeName(f) != string(errclass.TypeAPIOverloaded) {
+		t.Fatalf("error_type = %q, want %q", errclass.TypeName(f), errclass.TypeAPIOverloaded)
 	}
 }
 
@@ -473,15 +602,15 @@ func TestMarshalConversationDeltaLowerCamelCase(t *testing.T) {
 	// holds a tool_use block, so both the item arm key and the nested block
 	// oneof arm key are exercised.
 	frame := ConversationDeltaFrame(&frontendv1.ConversationDelta{
-		Workspace: "ws", SessionId: "s1", ThroughSeq: 5,
+		Workspace: "ws", Fence: "s1", ThroughSeq: 5,
 		Items: []*frontendv1.ConversationItem{{
 			Uuid: "u1", TsMs: producedMs,
 			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-			Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: &datav1.ApiAssistantMessage{
+			Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{
 				Content: []*datav1.ContentBlock{
 					{Block: &datav1.ContentBlock_ToolUse{ToolUse: &datav1.ToolUseBlock{Id: "tu_1", Name: "Bash"}}},
 				},
-			}},
+			}}}}},
 		}},
 	})
 
@@ -494,14 +623,14 @@ func TestMarshalConversationDeltaLowerCamelCase(t *testing.T) {
 
 	// Assert: the frame arm, item arm, and nested block arm are lowerCamelCase.
 	for _, want := range []string{
-		`"conversationDelta"`, `"sessionId"`, `"throughSeq"`,
-		`"assistantMessage"`, `"toolUse"`, `"tsMs"`,
+		`"conversationDelta"`, `"fence"`, `"throughSeq"`,
+		`"agent"`, `"toolUse"`, `"tsMs"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("serialized frame missing %s\n%s", want, out)
 		}
 	}
-	for _, notWant := range []string{`"session_id"`, `"through_seq"`, `"assistant_message"`, `"tool_use"`} {
+	for _, notWant := range []string{`"session_id"`, `"through_seq"`, `"tool_use"`} {
 		if strings.Contains(out, notWant) {
 			t.Errorf("serialized frame has snake_case %s (want lowerCamelCase)\n%s", notWant, out)
 		}
@@ -513,7 +642,7 @@ func TestMarshalTypingDeltaLowerCamelCase(t *testing.T) {
 	// block_index and tool_use_id serialize as delta.blockIndex and
 	// delta.toolUseId.
 	frame := TypingDeltaFrame(&frontendv1.TypingDelta{
-		Workspace: "ws", SessionId: "s1",
+		Workspace: "ws", Fence: "s1",
 		Delta: &corev1.ContentDelta{Uuid: "u1", BlockIndex: 2, ToolUseId: proto.String("toolu_01"), Delta: &corev1.ContentDelta_InputJson{InputJson: `{"command":"pwd"}`}},
 	})
 
@@ -669,12 +798,12 @@ func TestTypingDeltaFromContentDelta(t *testing.T) {
 		{
 			name: "text delta embedded unchanged",
 			cd:   &corev1.ContentDelta{Uuid: "u1", BlockIndex: 2, Delta: &corev1.ContentDelta_Text{Text: "abc"}},
-			want: &frontendv1.TypingDelta{Workspace: "ws", SessionId: "s1", Delta: &corev1.ContentDelta{Uuid: "u1", BlockIndex: 2, Delta: &corev1.ContentDelta_Text{Text: "abc"}}},
+			want: &frontendv1.TypingDelta{Workspace: "ws", Fence: "s1", Delta: &corev1.ContentDelta{Uuid: "u1", BlockIndex: 2, Delta: &corev1.ContentDelta_Text{Text: "abc"}}},
 		},
 		{
 			name: "signature delta forwarded as-is (no daemon curation of arms)",
 			cd:   &corev1.ContentDelta{Uuid: "u1", Delta: &corev1.ContentDelta_Signature{Signature: "sig"}},
-			want: &frontendv1.TypingDelta{Workspace: "ws", SessionId: "s1", Delta: &corev1.ContentDelta{Uuid: "u1", Delta: &corev1.ContentDelta_Signature{Signature: "sig"}}},
+			want: &frontendv1.TypingDelta{Workspace: "ws", Fence: "s1", Delta: &corev1.ContentDelta{Uuid: "u1", Delta: &corev1.ContentDelta_Signature{Signature: "sig"}}},
 		},
 		{
 			name: "nil content delta yields nil",
@@ -703,14 +832,14 @@ func TestBuildTaskCatalog(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+	got := BuildTaskCatalog("ws", "s1", "s1", events, discardLogf)
 
 	// Assert.
 	want := &frontendv1.TaskCatalog{
-		Workspace: "ws", SessionId: "s1",
+		Workspace: "ws", Fence: "s1",
 		Tasks: []*frontendv1.TaskEntry{
-			{TaskId: "a1", Kind: "agent", Description: "d1", Status: "done", StartedAtMs: 100, EndedAtMs: 200},
-			{TaskId: "b1", Kind: "shell", Status: "running", StartedAtMs: 150},
+			{TaskId: "a1", Kind: &frontendv1.TaskEntry_Agent{Agent: &frontendv1.TaskKindAgent{}}, Description: "d1", Status: &frontendv1.TaskEntry_Done{Done: &frontendv1.TaskStatusDone{}}, StartedAtMs: 100, EndedAtMs: 200},
+			{TaskId: "b1", Kind: &frontendv1.TaskEntry_Shell{Shell: &frontendv1.TaskKindShell{}}, Status: &frontendv1.TaskEntry_Running{Running: &frontendv1.TaskStatusRunning{}}, StartedAtMs: 150},
 		},
 	}
 	if !proto.Equal(got, want) {
@@ -728,7 +857,7 @@ func TestBuildTaskCatalogFoldsADuplicateTaskEndedOntoOneEntry(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+	got := BuildTaskCatalog("ws", "s1", "s1", events, discardLogf)
 
 	// Assert — one entry, not two.
 	if len(got.GetTasks()) != 1 {
@@ -745,11 +874,11 @@ func TestBuildTaskCatalogKeepsTheTaskEndedOnADuplicate(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+	got := BuildTaskCatalog("ws", "s1", "s1", events, discardLogf)
 
 	// Assert.
-	if s := got.GetTasks()[0].GetStatus(); s != "error" {
-		t.Fatalf("status after a duplicate end = %q, want error", s)
+	if got.GetTasks()[0].GetError() == nil {
+		t.Fatalf("status after a duplicate end = %T, want the error arm", got.GetTasks()[0].GetStatus())
 	}
 }
 
@@ -837,10 +966,10 @@ func TestBuildTaskCatalogSweepsAGhostAbsentFromTheLiveSet(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+	got := BuildTaskCatalog("ws", "s1", "s1", events, discardLogf)
 
 	// Assert.
-	if len(got.GetTasks()) != 1 || got.GetTasks()[0].GetStatus() != "lost" {
+	if len(got.GetTasks()) != 1 || got.GetTasks()[0].GetLost() == nil {
 		t.Fatalf("catalog = %v, want the ghost swept to lost", got.GetTasks())
 	}
 }
@@ -853,7 +982,7 @@ func TestBuildTaskCatalogStampsTheSweepAtTheSnapshotTime(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+	got := BuildTaskCatalog("ws", "s1", "s1", events, discardLogf)
 
 	// Assert.
 	if got.GetTasks()[0].GetEndedAtMs() != 300 {
@@ -871,11 +1000,11 @@ func TestBuildTaskCatalogLeavesASettledTaskAlone(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+	got := BuildTaskCatalog("ws", "s1", "s1", events, discardLogf)
 
 	// Assert.
-	if got.GetTasks()[0].GetStatus() != "done" {
-		t.Fatalf("settled task status = %q, want done", got.GetTasks()[0].GetStatus())
+	if got.GetTasks()[0].GetDone() == nil {
+		t.Fatalf("settled task status = %T, want the done arm", got.GetTasks()[0].GetStatus())
 	}
 }
 
@@ -886,10 +1015,10 @@ func TestBuildTaskCatalogAdoptsATaskItNeverSawStart(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+	got := BuildTaskCatalog("ws", "s1", "s1", events, discardLogf)
 
 	// Assert.
-	want := &frontendv1.TaskEntry{TaskId: "unseen", Kind: "shell", Description: "npm test", Status: "running", StartedAtMs: 300}
+	want := &frontendv1.TaskEntry{TaskId: "unseen", Kind: &frontendv1.TaskEntry_Shell{Shell: &frontendv1.TaskKindShell{}}, Description: "npm test", Status: &frontendv1.TaskEntry_Running{Running: &frontendv1.TaskStatusRunning{}}, StartedAtMs: 300}
 	if len(got.GetTasks()) != 1 || !proto.Equal(got.GetTasks()[0], want) {
 		t.Fatalf("catalog = %v, want one adopted running entry %v", got.GetTasks(), want)
 	}
@@ -903,10 +1032,10 @@ func TestBuildTaskCatalogKeepsALiveTaskRunning(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+	got := BuildTaskCatalog("ws", "s1", "s1", events, discardLogf)
 
 	// Assert — its own start time and description survive the reconciliation.
-	want := &frontendv1.TaskEntry{TaskId: "a1", Kind: "agent", Description: "d", Status: "running", StartedAtMs: 100}
+	want := &frontendv1.TaskEntry{TaskId: "a1", Kind: &frontendv1.TaskEntry_Agent{Agent: &frontendv1.TaskKindAgent{}}, Description: "d", Status: &frontendv1.TaskEntry_Running{Running: &frontendv1.TaskStatusRunning{}}, StartedAtMs: 100}
 	if !proto.Equal(got.GetTasks()[0], want) {
 		t.Fatalf("live entry = %v, want %v", got.GetTasks()[0], want)
 	}
@@ -921,11 +1050,11 @@ func TestBuildTaskCatalogLetsALaterTaskEndedCloseAnAdoptedTask(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+	got := BuildTaskCatalog("ws", "s1", "s1", events, discardLogf)
 
 	// Assert.
-	if got.GetTasks()[0].GetStatus() != "done" {
-		t.Fatalf("status = %q, want done", got.GetTasks()[0].GetStatus())
+	if got.GetTasks()[0].GetDone() == nil {
+		t.Fatalf("status = %T, want the done arm", got.GetTasks()[0].GetStatus())
 	}
 }
 
@@ -950,10 +1079,10 @@ func TestBuildTaskCatalogTranslatesTheShimTaskTypeOnTheRefPath(t *testing.T) {
 			}
 
 			// Act.
-			got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+			got := BuildTaskCatalog("ws", "s1", "s1", events, discardLogf)
 
 			// Assert.
-			if len(got.GetTasks()) != 1 || got.GetTasks()[0].GetKind() != tc.want {
+			if len(got.GetTasks()) != 1 || taskKindName(got.GetTasks()[0]) != tc.want {
 				t.Fatalf("catalog = %v, want one entry of kind %q", got.GetTasks(), tc.want)
 			}
 		})
@@ -968,7 +1097,7 @@ func TestBuildTaskCatalogRefusesAnUnrecognizedShimTaskType(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+	got := BuildTaskCatalog("ws", "s1", "s1", events, discardLogf)
 
 	// Assert — the entry never reaches the contract, in any form.
 	if len(got.GetTasks()) != 0 {
@@ -984,7 +1113,7 @@ func TestBuildTaskCatalogRecordsTheUnrecognizedShimTaskType(t *testing.T) {
 	}
 
 	// Act.
-	BuildTaskCatalog("ws", "s1", events, recordingLogf(&lines))
+	BuildTaskCatalog("ws", "s1", "s1", events, recordingLogf(&lines))
 
 	// Assert.
 	var found bool
@@ -1007,11 +1136,15 @@ func TestBuildTaskCatalogNeverPassesARawShimTaskTypeThroughAsAKind(t *testing.T)
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+	got := BuildTaskCatalog("ws", "s1", "s1", events, discardLogf)
 
 	// Assert.
-	if got.GetTasks()[0].GetKind() == "local_agent" {
-		t.Fatalf("kind = %q, want the frontend vocabulary rather than the shim's", got.GetTasks()[0].GetKind())
+	// The kind is an ARM now, so the shim's raw word is not even expressible
+	// here — which is the stronger form of the guarantee this test was written
+	// for. What it asserts is that the translation happened and named an arm in
+	// the frontend's own vocabulary.
+	if got := taskKindName(got.GetTasks()[0]); got != "agent" {
+		t.Fatalf("kind = %q, want the frontend vocabulary rather than the shim's", got)
 	}
 }
 
@@ -1024,7 +1157,7 @@ func TestBuildTaskCatalogRefusesAnUnspecifiedTaskKind(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+	got := BuildTaskCatalog("ws", "s1", "s1", events, discardLogf)
 
 	// Assert.
 	if len(got.GetTasks()) != 0 {
@@ -1040,7 +1173,7 @@ func TestBuildTaskCatalogRecordsARefusedEntryByTaskID(t *testing.T) {
 	}
 
 	// Act.
-	BuildTaskCatalog("ws", "s1", events, recordingLogf(&lines))
+	BuildTaskCatalog("ws", "s1", "s1", events, recordingLogf(&lines))
 
 	// Assert.
 	var found bool
@@ -1065,7 +1198,7 @@ func TestBuildTaskCatalogRequiresALogger(t *testing.T) {
 	}()
 
 	// Act.
-	BuildTaskCatalog("ws", "s1", nil, nil)
+	BuildTaskCatalog("ws", "s1", "s1", nil, nil)
 }
 
 func TestBackgroundTasksFromVendorIgnoresAnotherStreamArm(t *testing.T) {

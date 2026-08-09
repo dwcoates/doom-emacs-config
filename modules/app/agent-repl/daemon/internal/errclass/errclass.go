@@ -1,5 +1,5 @@
 // Package errclass is the daemon's SINGLE classifier: the one place a raw
-// failure becomes a frontend.v1.SystemFailureItem.
+// failure becomes a frontend.v1.FailureCardView.
 //
 // The rule it exists to enforce: a fact is classified by the process that is
 // the first to hold both the failure and its cause, exactly once, and every
@@ -56,7 +56,7 @@ const (
 	// connection to it.
 	TypeShimNotConnected Type = "shim.not_connected"
 	// TypeShimRejected — the shim NACKed the request. Its raw reason rides
-	// source_detail; the Nack itself never becomes a SystemFailureItem on the
+	// the card's detail; the Nack itself never becomes a failure card on the
 	// wire, because it is machinery and stops being machinery here.
 	TypeShimRejected Type = "shim.rejected"
 	// TypeShimAckTimeout — the shim never acked within the control deadline.
@@ -509,40 +509,24 @@ type SessionResumeFailureDetailer interface {
 // An unmatched error is NOT dropped and NOT silently passed through: it
 // becomes internal.unclassified carrying the raw text, and logf fires. The
 // fallthrough being loud is the whole reason it is safe to have one.
-func Command(logf dlog.Logf, err error) *frontendv1.SystemFailureItem {
+func Command(logf dlog.Logf, err error) *frontendv1.FailureCardView {
 	if err == nil {
 		return nil
 	}
 	var resume SessionResumeFailureDetailer
 	if errors.As(err, &resume) {
-		return &frontendv1.SystemFailureItem{
-			ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
-			ErrorType:    string(TypeSessionResumeFailed),
-			Message:      prose[TypeSessionResumeFailed],
-			SourceDetail: err.Error(),
-			StructuredDetail: &frontendv1.SystemFailureItem_SessionResume{
-				SessionResume: resume.SessionResumeFailureDetail(),
-			},
-		}
+		c := Card(TypeSessionResumeFailed, err.Error())
+		c.GetKind().GetSessionResumeFailed().Detail = resume.SessionResumeFailureDetail()
+		return c
 	}
 	if t, ok := Sentinel(err); ok {
-		return &frontendv1.SystemFailureItem{
-			ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
-			ErrorType:    string(t),
-			Message:      prose[t],
-			SourceDetail: err.Error(),
-		}
+		return Card(t, err.Error())
 	}
 	if logf != nil {
 		logf("errclass: unclassified command error — no sentinel matched, falling through to %s: %v",
 			TypeInternalUnclassified, err)
 	}
-	return &frontendv1.SystemFailureItem{
-		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
-		ErrorType:    string(TypeInternalUnclassified),
-		Message:      prose[TypeInternalUnclassified],
-		SourceDetail: err.Error(),
-	}
+	return Card(TypeInternalUnclassified, err.Error())
 }
 
 // InterruptError converts an interrupt's ACK outcome into the daemon's error
@@ -599,7 +583,7 @@ func Retrying(ae *datav1.ApiErrorLine) bool {
 //
 // itemUUID is the conversation item the line arrived as, carried on the
 // failure so a footer row can address the card.
-func APIError(ae *datav1.ApiErrorLine, itemUUID string) *frontendv1.SystemFailureItem {
+func APIError(ae *datav1.ApiErrorLine) *frontendv1.FailureCardView {
 	t := apiErrorType(ae)
 	msg := ae.GetError().GetMessage()
 	if msg == "" {
@@ -608,13 +592,9 @@ func APIError(ae *datav1.ApiErrorLine, itemUUID string) *frontendv1.SystemFailur
 	if n := ae.GetMaxRetries(); n > 0 {
 		msg = fmt.Sprintf("%s (after %d attempts)", msg, n)
 	}
-	return &frontendv1.SystemFailureItem{
-		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_API,
-		ErrorType:    string(t),
-		Message:      msg,
-		SourceDetail: apiErrorDetail(ae),
-		ItemUuid:     itemUUID,
-	}
+	c := Card(t, apiErrorDetail(ae))
+	c.Message = msg
+	return c
 }
 
 // apiErrorType names an ApiErrorLine from the evidence it carries: an exact
@@ -661,7 +641,7 @@ func apiErrorDetail(ae *datav1.ApiErrorLine) string {
 // this only names the block it found. Keeping the predicate there and the
 // naming here means a stop reason cannot come to block without also having a
 // name, or gain a name without blocking.
-func TurnEnd(te *corev1.TurnEnded) *frontendv1.SystemFailureItem {
+func TurnEnd(te *corev1.TurnEnded) *frontendv1.FailureCardView {
 	reason := te.GetStopReason()
 	if !ssm.VendorBlockingTurnEnd(reason, te.GetIsError()) {
 		return nil
@@ -674,12 +654,7 @@ func TurnEnd(te *corev1.TurnEnded) *frontendv1.SystemFailureItem {
 	if reason != "" {
 		detail = "stop_reason=" + reason
 	}
-	return &frontendv1.SystemFailureItem{
-		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_API,
-		ErrorType:    string(t),
-		Message:      prose[t],
-		SourceDetail: detail,
-	}
+	return Card(t, detail)
 }
 
 // The persisted death-reason literals. They live beside their classification
@@ -720,7 +695,7 @@ var deathReasonTypes = map[string]Type{
 // The item also carries a stable item_uuid keyed on the session, so a resolved
 // re-push SETTLES the card the open one opened instead of landing beside it as
 // a second card.
-func Death(logf dlog.Logf, sessionID, reason string, resolvedAtMs int64) *frontendv1.SystemFailureItem {
+func Death(logf dlog.Logf, sessionID, reason string, resolvedAtMs int64) *frontendv1.FailureCardView {
 	if reason == "" {
 		return nil
 	}
@@ -732,14 +707,11 @@ func Death(logf dlog.Logf, sessionID, reason string, resolvedAtMs int64) *fronte
 				reason, t)
 		}
 	}
-	return &frontendv1.SystemFailureItem{
-		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
-		ErrorType:    string(t),
-		Message:      prose[t],
-		SourceDetail: reason,
-		ItemUuid:     DeathItemUUID(sessionID),
-		ResolvedAtMs: resolvedAtMs,
+	c := Card(t, reason)
+	if resolvedAtMs != 0 {
+		Resolve(c, resolvedAtMs)
 	}
+	return c
 }
 
 // DeathItemUUID is the stable card identity of a session's death item. One
@@ -757,13 +729,8 @@ func DeathItemUUID(sessionID string) string {
 // own degraded report where there is one, the wait's error where there is not —
 // and it rides source_detail verbatim so the card names the failure rather than
 // merely announcing one.
-func StartFailed(reason string) *frontendv1.SystemFailureItem {
-	return &frontendv1.SystemFailureItem{
-		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
-		ErrorType:    string(TypeSessionStartFailed),
-		Message:      prose[TypeSessionStartFailed],
-		SourceDetail: reason,
-	}
+func StartFailed(reason string) *frontendv1.FailureCardView {
+	return Card(TypeSessionStartFailed, reason)
 }
 
 // KeepAliveWindowUnclosed classifies a failure to stamp a keep-alive window's
@@ -773,13 +740,8 @@ func StartFailed(reason string) *frontendv1.SystemFailureItem {
 // window means: it excludes every later conversation item on the workspace,
 // forever, from every rendering. The user's next prompt would appear to vanish.
 // The card is the only thing that tells them why.
-func KeepAliveWindowUnclosed(reason string) *frontendv1.SystemFailureItem {
-	return &frontendv1.SystemFailureItem{
-		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
-		ErrorType:    string(TypeKeepAliveWindowUnclosed),
-		Message:      prose[TypeKeepAliveWindowUnclosed],
-		SourceDetail: reason,
-	}
+func KeepAliveWindowUnclosed(reason string) *frontendv1.FailureCardView {
+	return Card(TypeKeepAliveWindowUnclosed, reason)
 }
 
 // KeepAliveWindowInverted classifies a keep-alive window close the ledger
@@ -791,13 +753,8 @@ func KeepAliveWindowUnclosed(reason string) *frontendv1.SystemFailureItem {
 // where it came from. The window itself is bounded — the ledger clamps the end
 // to the start rather than writing an interval that covers nothing — so this
 // reports a clock disagreement, never a rendering blackout.
-func KeepAliveWindowInverted(reason string) *frontendv1.SystemFailureItem {
-	return &frontendv1.SystemFailureItem{
-		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
-		ErrorType:    string(TypeKeepAliveWindowInverted),
-		Message:      prose[TypeKeepAliveWindowInverted],
-		SourceDetail: reason,
-	}
+func KeepAliveWindowInverted(reason string) *frontendv1.FailureCardView {
+	return Card(TypeKeepAliveWindowInverted, reason)
 }
 
 // ColdCompaction classifies a daemon-initiated compaction that read the
@@ -811,13 +768,8 @@ func KeepAliveWindowInverted(reason string) *frontendv1.SystemFailureItem {
 //
 // reason carries the raw usage breakdown, so the card a human opens shows the
 // arithmetic that tripped it rather than only the verdict.
-func ColdCompaction(reason string) *frontendv1.SystemFailureItem {
-	return &frontendv1.SystemFailureItem{
-		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
-		ErrorType:    string(TypeCompactionColdRead),
-		Message:      prose[TypeCompactionColdRead],
-		SourceDetail: reason,
-	}
+func ColdCompaction(reason string) *frontendv1.FailureCardView {
+	return Card(TypeCompactionColdRead, reason)
 }
 
 // Degraded classifies a shim-reported DegradedState — the store-write
@@ -826,7 +778,7 @@ func ColdCompaction(reason string) *frontendv1.SystemFailureItem {
 // droppedCount rides source_detail rather than being discarded: how much
 // conversation was lost is the single most useful thing about a store outage,
 // and the passthrough translation threw it away.
-func Degraded(component, reason string, droppedCount int64) *frontendv1.SystemFailureItem {
+func Degraded(component, reason string, droppedCount int64) *frontendv1.FailureCardView {
 	parts := make([]string, 0, 3)
 	if component != "" {
 		parts = append(parts, "component="+component)
@@ -837,24 +789,14 @@ func Degraded(component, reason string, droppedCount int64) *frontendv1.SystemFa
 	if droppedCount > 0 {
 		parts = append(parts, fmt.Sprintf("dropped=%d", droppedCount))
 	}
-	return &frontendv1.SystemFailureItem{
-		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
-		ErrorType:    string(TypeShimStoreWriteRejected),
-		Message:      prose[TypeShimStoreWriteRejected],
-		SourceDetail: strings.Join(parts, " "),
-	}
+	return Card(TypeShimStoreWriteRejected, strings.Join(parts, " "))
 }
 
 // UnexpectedQueryTermination classifies the reliable DegradedState emitted
 // after the standing SDK iterator ends without an intentional shim shutdown.
-func UnexpectedQueryTermination(component, reason string) *frontendv1.SystemFailureItem {
+func UnexpectedQueryTermination(component, reason string) *frontendv1.FailureCardView {
 	detail := strings.TrimSpace(strings.Join([]string{"component=" + component, "reason=" + reason}, " "))
-	return &frontendv1.SystemFailureItem{
-		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
-		ErrorType:    string(TypeUnexpectedQueryTermination),
-		Message:      prose[TypeUnexpectedQueryTermination],
-		SourceDetail: detail,
-	}
+	return Card(TypeUnexpectedQueryTermination, detail)
 }
 
 // ConnectionDegraded classifies the daemon's OWN observation that the
@@ -862,13 +804,8 @@ func UnexpectedQueryTermination(component, reason string) *frontendv1.SystemFail
 // caller re-sends it under the same uuid with resolved_at_ms set when traffic
 // resumes, which is what makes the card settle instead of standing as a
 // permanent alarm about something that ended.
-func ConnectionDegraded(reason string) *frontendv1.SystemFailureItem {
-	return &frontendv1.SystemFailureItem{
-		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
-		ErrorType:    string(TypeShimDegraded),
-		Message:      prose[TypeShimDegraded],
-		SourceDetail: reason,
-	}
+func ConnectionDegraded(reason string) *frontendv1.FailureCardView {
+	return Card(TypeShimDegraded, reason)
 }
 
 // IsDaemonType reports whether a type is one the daemon may emit — i.e. that

@@ -128,8 +128,16 @@ func TestRegistrySessionViewsCarriesDurableCompletedUsage(t *testing.T) {
 		{ApiMessageId: "m1", Model: "fable", Actor: &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}}, Usage: &frontendv1.VendorTokenUsage{InputTokens: 3}},
 		{ApiMessageId: "m2", Model: "opus", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent"}}, Usage: &frontendv1.VendorTokenUsage{CacheReadInputTokens: 7}},
 	}
+	// The aggregate LEFT SessionView with the rest of the durable evidence
+	// layer; economics reach a rendering frontend as TokenBreakdownView. What
+	// this test still owns is that the roster path READS the durable source and
+	// aggregates it correctly, which is asserted against the same aggregation
+	// the view path calls.
 	views := RegistrySessions{Reg: reg, TokenUsage: fixedSessionTokenUsageSource{records: records}}.SessionViews()
-	usage := views[0].GetTokenUtilization()
+	if len(views) != 1 {
+		t.Fatalf("session views = %d, want 1", len(views))
+	}
+	usage := sessionTokenUtilization(nil, fixedSessionTokenUsageSource{records: records}, "s_usage")
 	if usage.GetAllAgents().GetInputTokens() != 3 || usage.GetAllAgents().GetCacheReadInputTokens() != 7 || len(usage.GetSubagents()) != 1 || len(usage.GetSubagents()[0].GetModels()) != 1 {
 		t.Fatalf("token utilization = %+v", usage)
 	}
@@ -157,7 +165,7 @@ func TestRegistrySessionViewsIncludesTerminalRecords(t *testing.T) {
 	if !v.GetTerminal() {
 		t.Errorf("terminal: got false, want true")
 	}
-	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionDeleted) {
+	if got := errclass.TypeName(v.GetDeath()); got != string(errclass.TypeSessionDeleted) {
 		t.Errorf("death.error_type: got %q, want %q", got, errclass.TypeSessionDeleted)
 	}
 }

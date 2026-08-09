@@ -1237,7 +1237,7 @@ func TestE2EUDSTextTurnRendersFrontendFrames(t *testing.T) {
 		case *frontendv1.FrontendFrame_WorkspaceState:
 			attached = f.WorkspaceState.GetSessionId() == id || f.WorkspaceState.GetWorkspace() == cwd
 		case *frontendv1.FrontendFrame_SessionInit:
-			attached = f.SessionInit.GetSessionId() == id
+			attached = f.SessionInit.GetFence() == id
 		case *frontendv1.FrontendFrame_SessionView:
 			attached = f.SessionView.GetSessionId() == id && f.SessionView.GetShimAttached()
 		}
@@ -1257,7 +1257,7 @@ func TestE2EUDSTextTurnRendersFrontendFrames(t *testing.T) {
 		frame := readFrame(t, conn)
 		switch f := frame.GetFrame().(type) {
 		case *frontendv1.FrontendFrame_ConversationDelta:
-			if f.ConversationDelta.GetSessionId() == id || f.ConversationDelta.GetWorkspace() == cwd {
+			if f.ConversationDelta.GetFence() == id || f.ConversationDelta.GetWorkspace() == cwd {
 				return // success: the turn rendered as frontend.v1
 			}
 		case *frontendv1.FrontendFrame_WorkspaceState:

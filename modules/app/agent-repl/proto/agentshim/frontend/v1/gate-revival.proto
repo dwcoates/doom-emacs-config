@@ -1,0 +1,152 @@
+// gate-revival.proto — The hibernation gate and the user's revival decision.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// Why and since when a session is hibernated. Exists so the revival gate can
+// tell the user what put the session to sleep, and so forced and automatic
+// hibernation remain distinguishable facts in every snapshot.
+message HibernationDetail {
+  // When the session entered hibernation, unix millis.
+  int64 since_ms = 1;
+  oneof cause {
+    // The keep-alive loop reached its configured maximum: idle time crossed
+    // the cutoff, so the daemon stopped pinging and hibernated in the same
+    // transition (the two are one act by construction).
+    HibernationIdleCutoff idle_cutoff = 10;
+    // The user forced it via HibernateWorkspaceCmd.
+    HibernationForced forced = 11;
+    // The keep-alive loop discovered, at a time-since check against the
+    // durably recorded last turn end, that the expected cache TTL had
+    // already elapsed before a ping could fire (laptop sleep, daemon
+    // downtime). Pinging a cold cache would pay full re-ingest cost for
+    // nothing, so the discovery IS the hibernate transition — reported
+    // loudly to the user rather than silently absorbed.
+    HibernationCacheExpired cache_expired = 12;
+  }
+}
+
+// Automatic hibernation at the idle cutoff.
+message HibernationIdleCutoff {
+  // The configured cutoff that tripped, millis — carried so the gate can say
+  // "asleep after Nh idle" without the frontend knowing daemon config.
+  int64 cutoff_ms = 1;
+}
+
+// User-forced hibernation. Empty: the cause IS the arm.
+message HibernationForced {}
+
+// Hibernation because the cache went cold before a ping could fire.
+message HibernationCacheExpired {
+  // How long the session had actually been idle when the check ran, millis.
+  int64 elapsed_ms = 1;
+  // The expected cache TTL the elapsed time exceeded, millis.
+  int64 ttl_ms = 2;
+}
+
+// The user's revival decision for a hibernated workspace. Revival is LAZY and
+// GATED: the daemon nacks SubmitPromptCmd on a hibernated session, so no
+// model use can precede this choice — a rendering frontend draws the gate
+// from WorkspaceGateView (the host draws it from its session catalog) and
+// sends exactly one of these. The daemon brings
+// the session up along the ordinary create/resume path and, under
+// compact_first, drives compaction to completion before accepting any prompt.
+message ReviveSessionCmd {
+  // The choice is a oneof of empty messages, not a bool: "no decision" must
+  // be unrepresentable on the wire, and a third revival mode later is a new
+  // arm rather than a second flag.
+  oneof mode {
+    // Compact the conversation as the first order of business; prompts are
+    // accepted only after compaction lands. This pays the full-context cost
+    // ONCE (compaction is a model call over the whole history) instead of on
+    // every subsequent turn. Its own CompactionScope says how much of the
+    // conversation the compaction may summarize away.
+    ReviveCompactFirst compact_first = 1;
+    // Resume the conversation as-is, full accumulated context and all. The
+    // deliberate "I know it's big" path.
+    ReviveDirect direct = 2;
+  }
+}
+
+// The compact-first revival choice, and WHAT of the conversation the
+// compaction is allowed to summarize away.
+//
+// The arm is no longer empty because "compact" turned out not to be one
+// decision. A conversation's bulk is not evenly distributed: the assistant's
+// own responses are usually the largest part of it, the user's prompts are
+// usually the part they most want back verbatim, and the tool calls and their
+// results are the part an agent needs intact to keep working. So the scope is
+// the user's to state, and stating it is what the four arms of CompactionScope
+// are for.
+message ReviveCompactFirst {
+  // Required; an unspecified scope is a loud nack rather than a default. The
+  // daemon does not choose what to throw away.
+  CompactionScope scope = 1;
+}
+
+// What a revival compaction is allowed to summarize away.
+//
+// EVERY ARM BUT ALL IS A STEERED COMPACTION, carried to the CLI as
+// `/compact <instructions>` — the same session command the unsteered one uses,
+// with the parts to preserve named in the instructions. There is no second
+// compaction mechanism and no local transcript surgery: the harness owns the
+// summary, and the scope is how the user aims it.
+enum CompactionScope {
+  // The refused zero. "No decision" must be unrepresentable, exactly as it is
+  // for the mode oneof above.
+  COMPACTION_SCOPE_UNSPECIFIED = 0;
+  // Summarize the whole conversation, sparing nothing. The original
+  // compact-first behavior, and the cheapest result.
+  COMPACTION_SCOPE_ALL = 1;
+  // Summarize only the assistant's own responses — the purple bubbles — and
+  // keep the user's prompts, the tool calls, and the tool results verbatim.
+  COMPACTION_SCOPE_RESPONSES = 2;
+  // Summarize only the user's prompts and keep everything the agent produced
+  // verbatim. For a conversation whose value is in what was DONE rather than
+  // in how it was asked for.
+  COMPACTION_SCOPE_PROMPTS = 3;
+  // Summarize the user's prompts and the assistant's responses together,
+  // keeping the tool calls and their results verbatim — the conversation's
+  // prose goes, its work survives.
+  COMPACTION_SCOPE_PROMPTS_AND_RESPONSES = 4;
+}
+
+// Marks the resume-verbatim revival choice. Empty: the choice IS the arm.
+message ReviveDirect {}
+
+// The workspace's revival gate, resolved and fenced: whether prompts may be
+// sent right now, and if not, what the user must decide first.
+//
+// A rendering frontend reads its gate from here rather than from a session
+// catalog. The catalog answers "what is true of session X", which forces the
+// reader to first work out which X is current; this answers "what is true of
+// this workspace now", which is the only question a gate has.
+message WorkspaceGateView {
+  string workspace = 1;
+  // The workspace's staleness fence at the moment the daemon produced this
+  // view: an opaque token compared byte-wise against the fence on the
+  // workspace's current WorkspaceState, never parsed. A stale gate view is
+  // discarded whole — adopting half of one is how a composer ends up locked
+  // against a workspace that is already awake.
+  string fence = 2;
+  // WHETHER the gate is open, as arms, so that a closed gate always arrives
+  // with the account the revival card needs to render.
+  oneof gate {
+    WorkspaceGateOpen open = 10;
+    WorkspaceGateHibernated hibernated = 11;
+  }
+}
+
+// Prompts may be sent. The composer is live and no revival decision is
+// pending.
+message WorkspaceGateOpen {}
+
+// The workspace's session is asleep and will not take a prompt until the user
+// chooses how to wake it.
+message WorkspaceGateHibernated {
+  // Why and since when, so the card can say what put it to sleep.
+  HibernationDetail detail = 1;
+}

@@ -279,6 +279,10 @@ func failAck(logf dlog.Logf, requestID string, err error) *frontendv1.CommandAck
 		RequestId: requestID,
 		Ok:        false,
 		Error:     err.Error(),
-		Failure:   errclass.Command(logf, err),
+		// The ack carries the failure's KIND, not the whole card: a refusal is
+		// classified here and rendered as chrome, while the card itself belongs
+		// to the feed. `error` stays populated beside it for the frontends that
+		// still echo the raw sentence.
+		Failure: errclass.Command(logf, err).GetKind(),
 	}
 }

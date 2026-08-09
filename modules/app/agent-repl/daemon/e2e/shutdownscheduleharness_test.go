@@ -657,7 +657,7 @@ func awaitHeldEntry(t *testing.T, conn *websocket.Conn, workspace, what string) 
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		what: func(frame *frontendv1.FrontendFrame) bool {
 			for _, entry := range queueViewFor(frame, workspace).GetEntries() {
-				if entry.GetShutdownHold() != nil {
+				if entry.GetShutdown() != nil {
 					held = entry
 					return true
 				}

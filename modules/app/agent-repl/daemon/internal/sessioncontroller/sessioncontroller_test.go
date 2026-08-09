@@ -1385,8 +1385,12 @@ func TestTaskCatalogsSnapshotsEveryLiveSessionIncludingAnEmptyRoster(t *testing.
 	populated := h.m.TaskCatalogs()
 
 	// Assert.
-	if len(empty) != 1 || empty[0].GetWorkspace() != "ws" || empty[0].GetSessionId() != "s1" {
-		t.Fatalf("empty catalogs = %v, want one catalog for ws/s1", empty)
+	// The catalog is FENCED rather than session-stamped. Its workspace is what
+	// routes it, and its fence is what a client compares against the
+	// workspace's current one — an empty fence would leave a stale catalog
+	// indistinguishable from a current one.
+	if len(empty) != 1 || empty[0].GetWorkspace() != "ws" || empty[0].GetFence() == "" {
+		t.Fatalf("empty catalogs = %v, want one fenced catalog for ws", empty)
 	}
 	if len(empty[0].GetTasks()) != 0 {
 		t.Fatalf("empty catalog tasks = %v, want none", empty[0].GetTasks())

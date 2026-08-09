@@ -231,7 +231,7 @@ func TestAReplayedTerminationPairPushesOneFailureCard(t *testing.T) {
 	// Assert.
 	cards := 0
 	for _, c := range h.failureCards() {
-		if c.GetErrorType() == string(errclass.TypeUnexpectedQueryTermination) {
+		if errclass.TypeName(c) == string(errclass.TypeUnexpectedQueryTermination) {
 			cards++
 		}
 	}
@@ -252,7 +252,7 @@ func TestAReplayedTerminationPairKeepsTheTypedDetail(t *testing.T) {
 
 	// Assert.
 	cards := h.failureCards()
-	if len(cards) == 0 || cards[len(cards)-1].GetQueryTermination().GetQueryInstanceId() != "retired-query" {
+	if len(cards) == 0 || cards[len(cards)-1].GetKind().GetQueryTermination().GetDetail().GetQueryInstanceId() != "retired-query" {
 		t.Fatalf("the replayed pair's card lost its typed query-termination detail: %v", cards)
 	}
 }

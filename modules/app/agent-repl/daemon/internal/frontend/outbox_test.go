@@ -27,20 +27,20 @@ func TestCoalesceKeyClassifiesFrames(t *testing.T) {
 		},
 		{
 			name:       "progress is absolute per workspace and session",
-			frame:      ProgressViewFrame(&frontendv1.ProgressView{Workspace: "/w", SessionId: "s1"}),
+			frame:      ProgressViewFrame(&frontendv1.ProgressView{Workspace: "/w", Fence: "s1"}),
 			wantKeyed:  true,
 			wantSubstr: "progress",
 		},
 		{
 			name:       "queue is absolute per workspace and session",
-			frame:      QueueViewFrame(&frontendv1.QueueView{Workspace: "/w", SessionId: "s1"}),
+			frame:      QueueViewFrame(&frontendv1.QueueView{Workspace: "/w", Fence: "s1"}),
 			wantKeyed:  true,
 			wantSubstr: "queue",
 		},
 		{
 			name: "heartbeat is absolute per running tool",
 			frame: HeartbeatViewFrame(&frontendv1.HeartbeatView{
-				Workspace: "/w", SessionId: "s1",
+				Workspace: "/w", Fence: "s1",
 				Progress: &corev1.HeartbeatProgress{ToolUseId: "t1"},
 			}),
 			wantKeyed:  true,
@@ -49,19 +49,19 @@ func TestCoalesceKeyClassifiesFrames(t *testing.T) {
 		{
 			name: "typing delta grows a block and is never coalescable",
 			frame: TypingDeltaFrame(&frontendv1.TypingDelta{
-				Workspace: "/w", SessionId: "s1",
+				Workspace: "/w", Fence: "s1",
 				Delta: &corev1.ContentDelta{Uuid: "u1", Delta: &corev1.ContentDelta_Text{Text: "hi"}},
 			}),
 			wantKeyed: false,
 		},
 		{
 			name:      "conversation delta appends items and is never coalescable",
-			frame:     ConversationDeltaFrame(&frontendv1.ConversationDelta{Workspace: "/w", SessionId: "s1"}),
+			frame:     ConversationDeltaFrame(&frontendv1.ConversationDelta{Workspace: "/w", Fence: "s1"}),
 			wantKeyed: false,
 		},
 		{
 			name:      "session init is a one-shot catalog and is never coalescable",
-			frame:     SessionInitViewFrame(&frontendv1.SessionInitView{Workspace: "/w", SessionId: "s1"}),
+			frame:     SessionInitViewFrame(&frontendv1.SessionInitView{Workspace: "/w", Fence: "s1"}),
 			wantKeyed: false,
 		},
 		{
@@ -155,10 +155,10 @@ func TestOutboxCompactionKeepsOnlyTheNewestRoster(t *testing.T) {
 func TestCoalesceKeySeparatesConcurrentTools(t *testing.T) {
 	// Arrange: two heartbeats for the same session but different tools.
 	first := HeartbeatViewFrame(&frontendv1.HeartbeatView{
-		Workspace: "/w", SessionId: "s1", Progress: &corev1.HeartbeatProgress{ToolUseId: "t1"},
+		Workspace: "/w", Fence: "s1", Progress: &corev1.HeartbeatProgress{ToolUseId: "t1"},
 	})
 	second := HeartbeatViewFrame(&frontendv1.HeartbeatView{
-		Workspace: "/w", SessionId: "s1", Progress: &corev1.HeartbeatProgress{ToolUseId: "t2"},
+		Workspace: "/w", Fence: "s1", Progress: &corev1.HeartbeatProgress{ToolUseId: "t2"},
 	})
 
 	// Act.

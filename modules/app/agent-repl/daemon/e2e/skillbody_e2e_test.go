@@ -100,12 +100,12 @@ func TestE2ESkillBodyReachesTheFrontendAsItsOwnArm(t *testing.T) {
 
 	// Assert
 	item, _ := awaitItem(t, conn, cwd, "the skill body item", func(it *frontendv1.ConversationItem) bool {
-		return it.GetSkillBody() != nil
+		return it.GetAgent().GetSkillBody() != nil
 	})
-	if got, want := item.GetSkillBody().GetToolUseId(), toolUseID; got != want {
+	if got, want := item.GetAgent().GetSkillBody().GetToolUseId(), toolUseID; got != want {
 		t.Errorf("skill_body tool_use_id = %q, want the Skill call's %q", got, want)
 	}
-	if got := item.GetSkillBody().GetBodyMarkdown(); got != e2eSkillBody {
+	if got := item.GetAgent().GetSkillBody().GetBodyMarkdown(); got != e2eSkillBody {
 		t.Errorf("skill_body body_markdown = %q, want the SKILL.md verbatim", got)
 	}
 }
@@ -165,8 +165,8 @@ func TestE2EANonSkillMetaRecordIsWithheldEntirely(t *testing.T) {
 		if it.GetUuid() == "e2e-nudge-3" {
 			t.Errorf("a harness meta record reached the frontend as item uuid=%q", it.GetUuid())
 		}
-		if it.GetSkillBody() != nil {
-			t.Errorf("a non-body meta record was attached to card %q", it.GetSkillBody().GetToolUseId())
+		if it.GetAgent().GetSkillBody() != nil {
+			t.Errorf("a non-body meta record was attached to card %q", it.GetAgent().GetSkillBody().GetToolUseId())
 		}
 	}
 }

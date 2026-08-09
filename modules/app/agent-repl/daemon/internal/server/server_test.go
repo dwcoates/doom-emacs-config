@@ -811,8 +811,8 @@ func TestSessionViewFromRecordShapesParityFields(t *testing.T) {
 	// Act
 	v := SessionViewFromRecord(nil, rec, []string{"p1", "p2"}, false)
 	// Assert — the S7 parity fields plus the pending-permission COUNT.
-	if !v.GetTerminal() || v.GetDeath().GetErrorType() != string(errclass.TypeSessionDeleted) {
-		t.Errorf("terminal/death = %v/%q", v.GetTerminal(), v.GetDeath().GetErrorType())
+	if !v.GetTerminal() || errclass.TypeName(v.GetDeath()) != string(errclass.TypeSessionDeleted) {
+		t.Errorf("terminal/death = %v/%q", v.GetTerminal(), errclass.TypeName(v.GetDeath()))
 	}
 	if v.GetPendingPermissions() != 2 {
 		t.Errorf("pending_permissions = %d, want 2", v.GetPendingPermissions())
@@ -839,7 +839,7 @@ func TestSessionViewClassifiesADeletedSession(t *testing.T) {
 	v := SessionViewFromRecord(nil, rec, nil, false)
 
 	// Assert.
-	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionDeleted) {
+	if got := errclass.TypeName(v.GetDeath()); got != string(errclass.TypeSessionDeleted) {
 		t.Fatalf("death error_type = %q, want %q", got, errclass.TypeSessionDeleted)
 	}
 }
@@ -852,7 +852,7 @@ func TestSessionViewClassifiesASupersededSession(t *testing.T) {
 	v := SessionViewFromRecord(nil, rec, nil, false)
 
 	// Assert.
-	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionSuperseded) {
+	if got := errclass.TypeName(v.GetDeath()); got != string(errclass.TypeSessionSuperseded) {
 		t.Fatalf("death error_type = %q, want %q", got, errclass.TypeSessionSuperseded)
 	}
 }
@@ -866,7 +866,7 @@ func TestSessionViewClassifiesAShimDeath(t *testing.T) {
 	v := SessionViewFromRecord(nil, rec, nil, false)
 
 	// Assert.
-	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionShimDied) {
+	if got := errclass.TypeName(v.GetDeath()); got != string(errclass.TypeSessionShimDied) {
 		t.Fatalf("death error_type = %q, want %q", got, errclass.TypeSessionShimDied)
 	}
 }
@@ -881,7 +881,7 @@ func TestSessionViewClassifiesALegacyDeathReasonLoudly(t *testing.T) {
 	v := SessionViewFromRecord(logf, rec, nil, false)
 
 	// Assert.
-	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionEndedUnclassified) {
+	if got := errclass.TypeName(v.GetDeath()); got != string(errclass.TypeSessionEndedUnclassified) {
 		t.Fatalf("death error_type = %q, want %q", got, errclass.TypeSessionEndedUnclassified)
 	}
 	if len(logged) == 0 {
@@ -1090,7 +1090,7 @@ func TestDeleteSessionRepushesAnAlreadyTerminalRecord(t *testing.T) {
 	if view.GetSessionId() != rec.SessionID {
 		t.Fatalf("pushed SessionView id = %q, want %q", view.GetSessionId(), rec.SessionID)
 	}
-	if !view.GetTerminal() || view.GetDeath().GetErrorType() != string(errclass.TypeSessionSuperseded) {
+	if !view.GetTerminal() || errclass.TypeName(view.GetDeath()) != string(errclass.TypeSessionSuperseded) {
 		t.Fatalf("pushed view = %+v, want terminal superseded", view)
 	}
 	got, _ := h.reg.Get(rec.SessionID)

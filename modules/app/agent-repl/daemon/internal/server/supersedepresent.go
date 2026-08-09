@@ -84,7 +84,7 @@ func supersedeClaimed(reg *registry.Registry, workspace, sessionID string) bool 
 // successor is claiming the workspace, and the safe direction for an unknown is
 // to report the failure rather than hide it — an unshaped harness or a caller
 // without registry context gets the recorded death verbatim, exactly as before.
-func deathForView(logf dlog.Logf, reg *registry.Registry, rec registry.Record) *frontendv1.SystemFailureItem {
+func deathForView(logf dlog.Logf, reg *registry.Registry, rec registry.Record) *frontendv1.FailureCardView {
 	if resolvableSupersede(rec) && supersedeClaimed(reg, rec.CWD, rec.SessionID) {
 		if logf != nil {
 			logf("session %s: superseded death WITHHELD from its SessionView (ws %s) — a successor still claims the workspace, so the handover is in flight rather than failed; it is presented again if that claim goes away, and resolved durably when the successor reaches operational",

@@ -7,6 +7,19 @@
     "identity bugs hides in. A single-block message reconciles even when the two",
     "sides disagree about what a block index means, so it proves nothing.",
     "",
+    "Reasoning is its OWN emission on the frontend surface (AgentThinking) and",
+    "is stripped from the response body, so the thinking record below curates to",
+    "an `agent.thinking` item under a derived uuid while the text record curates",
+    "to `agent.response`. Both halves of that rule are load bearing: without the",
+    "strip a renderer draws the reasoning twice, and without the emission it has",
+    "to reach into a durable message's content array to find the grey block.",
+    "",
+    "Because the emission is detached from the message it came out of, it also",
+    "STATES where it came from: `apiMessageId` + `blockIndex` name the message",
+    "and the pre-strip position, which is the same pair a live preview is keyed",
+    "on. Without them the settled reasoning block cannot find its own preview and",
+    "renders beside it — the third item this fixture's expectations forbid.",
+    "",
     "Note what the SDK does with `content`: it emits ONE assistant record PER",
     "BLOCK, both repeating `msg_01ABC` and each carrying a `content` array of",
     "length one. So a record's own content index is always 0 and identifies",
@@ -115,43 +128,46 @@
     {
       "typingDelta": {
         "workspace": "ws",
-        "sessionId": "s1",
+        "fence": "s1",
         "delta": { "uuid": "msg_01ABC", "blockIndex": 0, "thinking": "weigh" }
       }
     },
     {
       "typingDelta": {
         "workspace": "ws",
-        "sessionId": "s1",
+        "fence": "s1",
         "delta": { "uuid": "msg_01ABC", "blockIndex": 0, "thinking": "ing it" }
       }
     },
     {
       "typingDelta": {
         "workspace": "ws",
-        "sessionId": "s1",
+        "fence": "s1",
         "delta": { "uuid": "msg_01ABC", "blockIndex": 1, "text": "Hel" }
       }
     },
     {
       "typingDelta": {
         "workspace": "ws",
-        "sessionId": "s1",
+        "fence": "s1",
         "delta": { "uuid": "msg_01ABC", "blockIndex": 1, "text": "lo" }
       }
     },
     {
       "conversationDelta": {
         "workspace": "ws",
-        "sessionId": "s1",
+        "fence": "s1",
         "throughSeq": "1",
         "items": [
           {
-            "uuid": "env-1",
+            "uuid": "env-1#thinking:0",
             "tsMs": "1700000000000",
-            "assistantMessage": {
-              "id": "msg_01ABC",
-              "content": [{ "thinking": { "thinking": "weighing it", "signature": "sig" } }]
+            "agent": {
+              "thinking": {
+                "body": { "thinking": "weighing it", "signature": "sig" },
+                "apiMessageId": "msg_01ABC",
+                "blockIndex": 0
+              }
             }
           }
         ]
@@ -160,15 +176,19 @@
     {
       "conversationDelta": {
         "workspace": "ws",
-        "sessionId": "s1",
+        "fence": "s1",
         "throughSeq": "2",
         "items": [
           {
             "uuid": "env-2",
             "tsMs": "1700000000000",
-            "assistantMessage": {
-              "id": "msg_01ABC",
-              "content": [{ "text": { "text": "Hello" } }]
+            "agent": {
+              "response": {
+                "body": {
+                  "id": "msg_01ABC",
+                  "content": [{ "text": { "text": "Hello" } }]
+                }
+              }
             }
           }
         ]

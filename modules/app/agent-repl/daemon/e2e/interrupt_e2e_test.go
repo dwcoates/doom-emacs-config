@@ -48,6 +48,7 @@
 package e2e
 
 import (
+	"claude-repld/internal/errclass"
 	"fmt"
 	"sort"
 	"strings"
@@ -119,7 +120,7 @@ func isPendingPermission(item *frontendv1.ConversationItem) bool {
 // a fake turn is identified: the fake's reply is `echo: <prompt> [mode=<mode>]`
 // (fake-query.ts runTextTurn), so the prompt text rides its own answer.
 func assistantText(item *frontendv1.ConversationItem) string {
-	msg := item.GetAssistantMessage()
+	msg := item.GetAgent().GetResponse().GetBody()
 	if msg == nil {
 		return ""
 	}
@@ -481,7 +482,7 @@ func TestE2EFreshConnectCarriesTheInterruptedResolution(t *testing.T) {
 	// stop leaking into the conversation would show up as one of those cards.
 	state := workspaceStateInSnapshot(t, snapshotFrame, cwd)
 	for _, item := range replayItems(t, fresh, state, cwd, "r-replay") {
-		if got := item.GetSystemFailure().GetErrorType(); got == "interrupt" {
+		if got := errclass.TypeName(item.GetFailureCard()); got == "interrupt" {
 			t.Errorf("replay carried a system_failure card of error_type %q (uuid=%q): a user-commanded stop is footer state, not feed content",
 				got, item.GetUuid())
 		}

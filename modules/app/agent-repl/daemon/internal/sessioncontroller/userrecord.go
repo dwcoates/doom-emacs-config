@@ -57,7 +57,7 @@ func toolResultIDs(it *frontendv1.ConversationItem) []string {
 
 // toolUseCalls are the (id, name) tool calls an assistant record makes.
 func toolUseCalls(it *frontendv1.ConversationItem) map[string]string {
-	am := it.GetAssistantMessage()
+	am := it.GetAgent().GetResponse().GetBody()
 	if am == nil {
 		return nil
 	}

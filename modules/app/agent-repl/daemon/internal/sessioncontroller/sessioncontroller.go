@@ -926,7 +926,7 @@ func (m *Manager) SessionInits() []*frontendv1.SessionInitView {
 		if si := d.consumer.latestSystemInit(); si != nil {
 			out = append(out, &frontendv1.SessionInitView{
 				Workspace: d.workspace,
-				SessionId: d.sessionID,
+				Fence:     d.consumer.fence(),
 				Init:      si,
 			})
 		}
@@ -938,7 +938,7 @@ func (m *Manager) SessionInits() []*frontendv1.SessionInitView {
 // taskCatalogForSessionController rebuilds one live session controller's complete detached-task roster
 // from its retained event ring.
 func taskCatalogForSessionController(d *sessionController) *frontendv1.TaskCatalog {
-	return frontend.BuildTaskCatalog(d.workspace, d.sessionID, d.consumer.snapshotRing(), d.consumer.logf)
+	return frontend.BuildTaskCatalog(d.workspace, d.sessionID, d.consumer.fence(), d.consumer.snapshotRing(), d.consumer.logf)
 }
 
 // TaskCatalogs returns the complete detached-task roster for every live

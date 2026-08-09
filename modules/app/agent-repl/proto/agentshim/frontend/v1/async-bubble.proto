@@ -1,0 +1,358 @@
+// async-bubble.proto — Detached work: the bubble, its typed per-kind updates,
+// and the delta that pushes them.
+//
+// Detached work is not a notice that something is happening elsewhere. A
+// detached agent is a live, growing, recursively spawning conversation; a
+// workflow is a live table of journal rows; a backgrounded shell command is a
+// live byte spool. Each is modeled as what it is.
+//
+// The daemon owns the whole apparatus: it classifies a detaching tool call,
+// mints the bubble's id, reads and folds the work's output, and pushes typed
+// updates addressed to that id. Frontends render what arrives; they parse no
+// transcripts, poll no files and derive no identities.
+//
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+import "agentshim/frontend/v1/agent-emission.proto";
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// One piece of detached work, and the unit every later update is addressed to.
+message AsyncBubble {
+  // THE ROUTING HANDLE. Stable for the bubble's whole life, unique within a
+  // session, and the only thing an update carries to say where it lands. The
+  // daemon mints it when it classifies the spawning tool call, and stamps the
+  // same string on that call's AgentToolCall.spawned_bubble_id — so a
+  // frontend never derives an id, it only ever matches one.
+  //
+  // Never empty. A detachment the daemon cannot attribute to a tool call at
+  // all is a daemon fault surfaced as a failure card, not a bubble with
+  // a blank id. (Work whose TOOL is unrecognized is a different thing and has
+  // its own kind arm — see `unclassified` below.)
+  string id = 1;
+  // The tool_use id of the call that spawned this work, for a frontend that
+  // draws the bubble attached to its originating card rather than
+  // free-standing. Empty only for work that no tool call spawned.
+  string origin_tool_use_id = 2;
+  // The id of the AsyncBubble this one was spawned FROM, empty at the top
+  // level. Detached agents dispatch detached agents, so bubbles form a tree —
+  // but the tree is expressed by parent POINTERS, not by nesting bubbles
+  // inside each other, so an update addressed to a bubble deep in the tree is
+  // routed by one map lookup rather than a recursive walk. Nothing here needs
+  // a depth bound to terminate.
+  string parent_bubble_id = 3;
+  // The face the collapsed fold shows: the agent's task description, the
+  // workflow's name, or the shell's command line. Empty means the daemon had
+  // no label for the work, and the client shows the id.
+  string label = 4;
+  // When the work was launched, unix millis.
+  int64 started_at_ms = 5;
+  // Live or settled, and with what outcome. See AsyncLiveness.
+  AsyncLiveness liveness = 6;
+  // WHAT KIND of work this is, carrying that kind's content as folded so far.
+  // A newly opened bubble carries an empty body; a bubble arriving in a
+  // reconnect snapshot carries everything the daemon has folded to date.
+  //
+  // A skill invocation is deliberately absent: it is a synchronous card
+  // (AgentEmission.skill_body), never detached work. Should skills ever
+  // detach, they arrive as a new arm here. Nothing is pre-declared for that,
+  // because a speculative arm is a shape no producer has to honour and no
+  // consumer can test against.
+  oneof kind {
+    AsyncAgentBubble agent = 10;
+    AsyncWorkflowJournal journal = 11;
+    AsyncShellBubble shell = 12;
+    AsyncUnclassifiedBubble unclassified = 13;
+  }
+}
+
+// A detached agent: a whole conversation happening elsewhere.
+message AsyncAgentBubble {
+  // The agent's conversation so far, in emission order, in EXACTLY the
+  // vocabulary the top-level feed uses. A frontend's renderer for a response
+  // bubble, a thinking block or a tool card is the same code in both places.
+  repeated AgentEmission emissions = 1;
+  // Tail-cap accounting for `emissions`. See AsyncFold.
+  AsyncFold fold = 2;
+}
+
+// A Workflow run's journal: the step log a Workflow launch writes.
+//
+// ONE PRODUCER. This kind exists for the Workflow tool and nothing else — its
+// rows are the entries of that run's journal.jsonl step log, one row per
+// logged step. It is not a general-purpose progress table, and work of any
+// other kind never arrives here.
+message AsyncWorkflowJournal {
+  // The steps logged so far, in order.
+  repeated AsyncWorkflowJournalRow rows = 1;
+  // Tail-cap accounting for `rows`. See AsyncFold.
+  AsyncFold fold = 2;
+}
+
+// A backgrounded shell command: an opaque byte spool with a command line.
+message AsyncShellBubble {
+  // The command line that was backgrounded, verbatim, for the bubble's header.
+  // Empty only when the daemon launched the process without a reconstructible
+  // command line.
+  string command = 1;
+  // Everything the command has written so far. See AsyncOutputSpool.
+  AsyncOutputSpool output = 2;
+}
+
+// A spawn whose tool the daemon does not recognize.
+//
+// AN EXPLICIT ARM, NOT A FALLBACK. Unrecognized work is a first-class kind on
+// this contract: the daemon states that it could not classify the tool, names
+// the tool it could not classify, and streams the work's output anyway. A
+// renderer must draw this bubble — it is real work the user started, and
+// dropping it would make a running process invisible. The one thing a
+// renderer may not do is guess: an unrecognized tool is not silently treated
+// as a shell, an agent or a workflow.
+message AsyncUnclassifiedBubble {
+  // The tool that spawned the work, verbatim as the agent named it. This is
+  // the fact that makes the arm useful rather than merely honest: it is what
+  // tells a maintainer which tool needs a classification, and what lets a
+  // frontend label the bubble with something truer than "unknown".
+  string tool_name = 1;
+  // Everything the work has written so far. See AsyncOutputSpool.
+  AsyncOutputSpool output = 2;
+}
+
+// A verbatim byte spool and its delivery cursor.
+//
+// Deliberately unparsed and unstructured — this output is bytes, and
+// pretending otherwise is how a renderer starts guessing at ANSI, line framing
+// and JSON.
+message AsyncOutputSpool {
+  // Everything spooled so far, verbatim.
+  string text = 1;
+  // Bytes delivered so far, so a reconnecting client resumes rather than
+  // re-fetches. Also the sequencing check on AsyncOutputAppend: an append
+  // whose from_offset does not equal this value is a gap and must be rejected
+  // loudly, not applied.
+  uint64 through_offset = 2;
+}
+
+// One logged step of a Workflow run: a dot, a name and a detail line.
+message AsyncWorkflowJournalRow {
+  // The step's name — the phase or agent it reports on — verbatim.
+  string label = 1;
+  // The step's detail line, verbatim: the result on success, the error text on
+  // failure, the prompt while running.
+  string detail = 2;
+  // The step's state, as arms rather than an enum, so that a state added later
+  // is an arm a reader must handle rather than an integer it silently renders
+  // as something else.
+  oneof status {
+    AsyncWorkflowStepRunning running = 10;
+    AsyncWorkflowStepDone done = 11;
+    AsyncWorkflowStepFailed failed = 12;
+  }
+}
+
+// The step is still executing.
+message AsyncWorkflowStepRunning {}
+
+// The step completed successfully.
+message AsyncWorkflowStepDone {}
+
+// The step failed. The failure text is the row's `detail`; this arm carries no
+// second copy of it.
+message AsyncWorkflowStepFailed {}
+
+// Live-or-settled, expressed as arms so that "settled" and "settled with what
+// outcome" are one indivisible fact. A settled bubble with no outcome is
+// unrepresentable.
+message AsyncLiveness {
+  oneof state {
+    AsyncLive live = 1;
+    AsyncSettled settled = 2;
+  }
+}
+
+// The work is still running.
+message AsyncLive {
+  // When the daemon last saw this work produce anything, unix millis. 0 means
+  // it has produced nothing since launch. It supports a "quiet for a while"
+  // affordance and is NOT a liveness verdict: a silent agent is still a live
+  // agent.
+  int64 last_activity_ms = 1;
+}
+
+// The work has finished, one way or another.
+message AsyncSettled {
+  // When it finished, unix millis.
+  int64 settled_at_ms = 1;
+  // The process exit status, for work that IS a process — a shell bubble, and
+  // an unclassified bubble the daemon ran as one. Absent for work with no exit
+  // status of its own (an agent, a workflow), and absence is the only reading
+  // of "this work did not exit, it concluded".
+  //
+  // It sits BESIDE the outcome rather than inside an outcome arm because the
+  // exit status and the verdict are two different facts about one ending. The
+  // daemon resolves `outcome` FROM this code — that mapping is not a client's
+  // to make — while the code itself stays on the wire so a shell's card can
+  // show "exited 137" rather than an unexplained red dot. Putting the code
+  // inside `done` and `error` would force every reader to check two arms for
+  // one field; putting the verdict inside the exit status would leave work
+  // with no exit status unable to say how it ended.
+  AsyncShellExit shell_exit = 2;
+  // HOW it finished. Exactly one arm is always set.
+  oneof outcome {
+    AsyncOutcomeDone done = 10;
+    AsyncOutcomeError error = 11;
+    AsyncOutcomeKilled killed = 12;
+  }
+}
+
+// A process's exit status.
+message AsyncShellExit {
+  // The exit code, as the shell reports it. A signal-terminated process
+  // reports the conventional 128+N form, because that is what its exit status
+  // literally is. 0 is a real zero and always means clean exit.
+  int32 code = 1;
+}
+
+// Finished successfully. For a process, the daemon resolved this from an exit
+// code of 0 (see AsyncSettled.shell_exit).
+message AsyncOutcomeDone {}
+
+// Finished by failing. For a process, the daemon resolved this from a nonzero
+// exit code (see AsyncSettled.shell_exit).
+message AsyncOutcomeError {
+  // The failure, resolved for display. Empty when the source reported failure
+  // without a reason — never filled with a manufactured one. A process's exit
+  // code is NOT restated here; it rides AsyncSettled.shell_exit.
+  string message = 1;
+}
+
+// Stopped from outside before it finished: an explicit stop, a cancellation,
+// a session teardown. Distinct from error because the work did not fail — it
+// was not allowed to conclude. A killed process still carries its exit status
+// on AsyncSettled.shell_exit.
+message AsyncOutcomeKilled {
+  // Who or what stopped it, resolved for display. Empty when unattributed.
+  string reason = 1;
+}
+
+// Tail-cap accounting for a bubble whose folded content is capped.
+//
+// The cap is a resolved daemon fact rather than per-frontend policy, so that
+// two frontends cannot silently disagree about what the user is being shown:
+// a fold that drops its oldest entries and says nothing is indistinguishable
+// from a complete one.
+//
+// It applies to the item-counted kinds (an agent's emissions, a workflow's
+// rows). A byte spool has no items to count and carries its delivery cursor
+// instead — see AsyncOutputSpool.
+message AsyncFold {
+  // How many entries were dropped off the FRONT to honour the cap. 0 means
+  // the fold is complete and no "earlier entries" notice is drawn.
+  int64 dropped_before = 1;
+  // The cap the daemon applied, so a notice can name it and so a complete
+  // fold is distinguishable from one capped at exactly the limit.
+  int32 tail_cap = 2;
+}
+
+// One incremental push to one bubble: the id routes it, the arm types it.
+// Never a re-send of the whole bubble — an agent running for an hour would
+// otherwise re-transmit its entire transcript on every new line.
+message AsyncBubbleUpdate {
+  // Which bubble this lands on. Must name a bubble the receiver has already
+  // opened; an update for an unknown id is a gap and must be rejected loudly
+  // and resynced, never buffered in the hope its bubble shows up.
+  string bubble_id = 1;
+  // WHAT changed. The arm MUST match the bubble's kind — a journal update
+  // addressed to a shell bubble is a daemon bug and is rejected, not
+  // coerced. Only `liveness` is kind-independent.
+  //
+  // `shell` and `unclassified` are distinct arms carrying the SAME message:
+  // the arm names which kind the update is for, while the payload is one byte
+  // append at one offset in both cases. The two kinds differ in what they ARE,
+  // not in how their output arrives, so there is no axis along which a
+  // duplicated pair of append messages could evolve apart — only a
+  // gap-detection rule that would have to be kept identical in two places.
+  oneof update {
+    AsyncAgentUpdate agent = 10;
+    AsyncWorkflowJournalUpdate journal = 11;
+    AsyncOutputAppend shell = 12;
+    AsyncOutputAppend unclassified = 13;
+    AsyncLivenessUpdate liveness = 14;
+  }
+}
+
+// New output from a detached agent.
+message AsyncAgentUpdate {
+  // The emissions produced since the last update, in order. THE SAME message
+  // the top-level feed carries — see AgentEmission. A frontend appends these
+  // to the bubble's emission list and renders them with its ordinary feed
+  // renderers.
+  repeated AgentEmission emissions = 1;
+  // The bubble's fold accounting AFTER applying this update. Restated rather
+  // than deltaed: it is small, and a dropped-count that drifts is worse than
+  // one that is re-sent.
+  AsyncFold fold = 2;
+}
+
+// New steps in a Workflow run's journal.
+message AsyncWorkflowJournalUpdate {
+  // Rows logged since the last update, in order.
+  //
+  // Rows are APPEND-ONLY and are never revised in place: a step that starts
+  // running and later completes emits a running row and then a done row, and
+  // the daemon does not rewrite history. A frontend that wants one row per
+  // step collapses them by label; a frontend that wants the log renders them
+  // all. Neither reading is imposed here.
+  repeated AsyncWorkflowJournalRow rows = 1;
+  // The bubble's fold accounting after applying this update.
+  AsyncFold fold = 2;
+}
+
+// New bytes on a spool.
+message AsyncOutputAppend {
+  // The bytes, verbatim, to append.
+  string text = 1;
+  // The spool offset these bytes START at. MUST equal the bubble's current
+  // AsyncOutputSpool.through_offset; anything else is a gap. Carried
+  // explicitly so a gap is detectable at all — a bare append cannot tell a
+  // lost chunk from a quiet one.
+  uint64 from_offset = 2;
+}
+
+// A liveness transition: live to settled, or a settled outcome changing (a
+// running agent that is then killed).
+message AsyncLivenessUpdate {
+  // The bubble's liveness after the transition.
+  AsyncLiveness liveness = 1;
+}
+
+// The async push frame: bubbles that opened, and updates to bubbles already
+// open.
+message AsyncBubbleDelta {
+  // 2 was session_id. A frontend has no session vocabulary: the only question
+  // it ever asked of that field was "is this push still current", which the
+  // fence answers without naming what rotated.
+  reserved 2;
+  reserved "session_id";
+  string workspace = 1;
+  // Bubbles opening for the first time, or re-delivered in full after a
+  // resync. A bubble the receiver already knows is REPLACED by this copy.
+  repeated AsyncBubble opened = 3;
+  // Incremental pushes to bubbles already open, in order.
+  repeated AsyncBubbleUpdate updates = 4;
+  // Frontends persist this for reconnect resync.
+  uint64 through_seq = 5;
+  // The workspace's staleness FENCE at the moment the daemon produced this
+  // push: an opaque token the client compares BYTE-WISE against the fence on
+  // the workspace's current WorkspaceState, and never parses, splits or
+  // interprets. Equal means current; different means stale, and a stale push
+  // is discarded whole rather than partially adopted.
+  //
+  // The daemon mints it and is the only thing that can read meaning into it.
+  // A client that learned to decode it would be depending on a fact this
+  // contract does not offer, and the token's composition is free to change.
+  string fence = 6;
+}

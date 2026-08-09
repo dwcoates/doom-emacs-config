@@ -98,7 +98,7 @@ func TestAMaterializedViewCarriesTheSessionItsDurableRowNamed(t *testing.T) {
 
 	// Assert.
 	views := h.m.QueueViews()
-	if len(views) != 1 || views[0].GetSessionId() != "s1" {
+	if len(views) != 1 || views[0].GetFence() != "s1" {
 		t.Fatalf("materialized view session = %+v, want s1", views)
 	}
 }
@@ -113,7 +113,7 @@ func TestAMaterializedEntryStillHeldByTheLiveScheduleCarriesItsHold(t *testing.T
 	h.materialize()
 
 	// Assert.
-	got := h.m.QueueViews()[0].GetEntries()[0].GetShutdownHold().GetScheduleId()
+	got := h.m.QueueViews()[0].GetEntries()[0].GetShutdown().GetScheduleId()
 	if got != "sd_live" {
 		t.Fatalf("materialized entry hold = %q, want sd_live", got)
 	}
@@ -131,7 +131,7 @@ func TestAMaterializedEntryOfADeadScheduleComesBackUnheld(t *testing.T) {
 	h.materialize()
 
 	// Assert.
-	if hold := h.m.QueueViews()[0].GetEntries()[0].GetShutdownHold(); hold != nil {
+	if hold := h.m.QueueViews()[0].GetEntries()[0].GetShutdown(); hold != nil {
 		t.Fatalf("materialized entry hold = %+v, want none — its schedule is gone", hold)
 	}
 }
@@ -428,7 +428,7 @@ func TestAcceptingAMaterializedEntryPublishesItAsAccepted(t *testing.T) {
 
 	// Assert.
 	view := h.push.lastQueue()
-	if view == nil || len(view.GetEntries()) != 1 || !view.GetEntries()[0].GetAccepted() {
+	if view == nil || len(view.GetEntries()) != 1 || !view.GetEntries()[0].GetHoldForTurnEnd().GetAccepted() {
 		t.Fatalf("last pushed queue view = %+v, want the materialized entry marked accepted", view)
 	}
 }
@@ -735,7 +735,7 @@ func TestCancellingTheScheduleShedsTheHoldFromMaterializedEntries(t *testing.T) 
 	h.m.ReleaseShutdownHolds("sd_live")
 
 	// Assert.
-	if hold := h.m.QueueViews()[0].GetEntries()[0].GetShutdownHold(); hold != nil {
+	if hold := h.m.QueueViews()[0].GetEntries()[0].GetShutdown(); hold != nil {
 		t.Fatalf("materialized entry hold = %+v after the schedule was cancelled, want none", hold)
 	}
 }
