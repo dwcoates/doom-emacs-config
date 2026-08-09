@@ -587,7 +587,7 @@ func (e *Driver) createRebaseWorktree(ctx context.Context, req Request, baseHead
 	}
 	// git refuses to add a worktree at an existing non-empty path, and it
 	// creates the leaf itself. The parent is what this owns and removes.
-	dir := filepath.Join(parent, "rebase")
+	dir := filepath.Join(parent, rebaseWorktreeLeaf)
 	exit, out, err := e.gitExit(ctx, req.TargetDir, "worktree", "add", "--detach", dir, baseHead)
 	if err != nil {
 		_ = os.RemoveAll(parent)
