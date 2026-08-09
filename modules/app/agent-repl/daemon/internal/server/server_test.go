@@ -138,6 +138,12 @@ func (stubMerge) Abandon(context.Context, string) (bool, error) {
 func (stubMerge) Evict(context.Context, string) (int, error) {
 	return 0, nil
 }
+func (stubMerge) Standing(string) (merge.Standing, bool) {
+	return merge.Standing{}, false
+}
+func (stubMerge) Dequeue(context.Context, string) (int, error) {
+	return 0, nil
+}
 
 type stubLifecycle struct{}
 

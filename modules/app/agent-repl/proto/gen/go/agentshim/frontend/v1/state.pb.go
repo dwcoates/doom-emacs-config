@@ -679,9 +679,19 @@ type WorkspaceState struct {
 	// UNSET means this workspace has no merge to report — the merge axis has
 	// never spoken for it, or its axis is cleared. It is never a zero-valued
 	// status standing in for absence.
-	MergeStatus   *MergeStatus `protobuf:"bytes,18,opt,name=merge_status,json=mergeStatus,proto3" json:"merge_status,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	MergeStatus *MergeStatus `protobuf:"bytes,18,opt,name=merge_status,json=mergeStatus,proto3" json:"merge_status,omitempty"`
+	// THE OUTSTANDING QUESTION about taking this workspace's merge off the
+	// queue. See MergeDequeueOffer: an interrupt no longer performs the queue
+	// half, it asks, and this is where the asking lives.
+	//
+	// UNSET means there is nothing to answer — no offer was ever raised, or the
+	// one that was has been answered, superseded by the merge reaching its own
+	// terminal, or dropped because the merge left the queue on its own. A
+	// frontend draws the card if and only if this field is set, so clearing it
+	// IS how the card comes down; there is no second dismissal channel.
+	MergeDequeueOffer *MergeDequeueOffer `protobuf:"bytes,20,opt,name=merge_dequeue_offer,json=mergeDequeueOffer,proto3" json:"merge_dequeue_offer,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *WorkspaceState) Reset() {
@@ -822,6 +832,13 @@ func (x *WorkspaceState) GetMergedAtMs() int64 {
 func (x *WorkspaceState) GetMergeStatus() *MergeStatus {
 	if x != nil {
 		return x.MergeStatus
+	}
+	return nil
+}
+
+func (x *WorkspaceState) GetMergeDequeueOffer() *MergeDequeueOffer {
+	if x != nil {
+		return x.MergeDequeueOffer
 	}
 	return nil
 }
@@ -1245,7 +1262,7 @@ const file_agentshim_frontend_v1_state_proto_rawDesc = "" +
 	"\n" +
 	"cause_kind\x18\x04 \x01(\tR\tcauseKind\x12 \n" +
 	"\fopened_at_ms\x18\x05 \x01(\x03R\n" +
-	"openedAtMs\"\xa4\x06\n" +
+	"openedAtMs\"\xfe\x06\n" +
 	"\x0eWorkspaceState\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -1267,7 +1284,8 @@ const file_agentshim_frontend_v1_state_proto_rawDesc = "" +
 	"\x10merge_lease_held\x18\x10 \x01(\bR\x0emergeLeaseHeld\x12 \n" +
 	"\fmerged_at_ms\x18\x11 \x01(\x03R\n" +
 	"mergedAtMs\x12E\n" +
-	"\fmerge_status\x18\x12 \x01(\v2\".agentshim.frontend.v1.MergeStatusR\vmergeStatusJ\x04\b\x06\x10\aJ\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10R\vmerge_phaseR\x14merge_queue_positionR\x11merge_queue_depth\"\xf8\x06\n" +
+	"\fmerge_status\x18\x12 \x01(\v2\".agentshim.frontend.v1.MergeStatusR\vmergeStatus\x12X\n" +
+	"\x13merge_dequeue_offer\x18\x14 \x01(\v2(.agentshim.frontend.v1.MergeDequeueOfferR\x11mergeDequeueOfferJ\x04\b\x06\x10\aJ\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10R\vmerge_phaseR\x14merge_queue_positionR\x11merge_queue_depth\"\xf8\x06\n" +
 	"\vSessionView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -1380,10 +1398,11 @@ var file_agentshim_frontend_v1_state_proto_goTypes = []any{
 	(*DaemonView)(nil),           // 7: agentshim.frontend.v1.DaemonView
 	(*HeartbeatView)(nil),        // 8: agentshim.frontend.v1.HeartbeatView
 	(*MergeStatus)(nil),          // 9: agentshim.frontend.v1.MergeStatus
-	(*FailureCardView)(nil),      // 10: agentshim.frontend.v1.FailureCardView
-	(*ModelOption)(nil),          // 11: agentshim.frontend.v1.ModelOption
-	(*HibernationDetail)(nil),    // 12: agentshim.frontend.v1.HibernationDetail
-	(*v1.HeartbeatProgress)(nil), // 13: agentshim.core.v1.HeartbeatProgress
+	(*MergeDequeueOffer)(nil),    // 10: agentshim.frontend.v1.MergeDequeueOffer
+	(*FailureCardView)(nil),      // 11: agentshim.frontend.v1.FailureCardView
+	(*ModelOption)(nil),          // 12: agentshim.frontend.v1.ModelOption
+	(*HibernationDetail)(nil),    // 13: agentshim.frontend.v1.HibernationDetail
+	(*v1.HeartbeatProgress)(nil), // 14: agentshim.core.v1.HeartbeatProgress
 }
 var file_agentshim_frontend_v1_state_proto_depIdxs = []int32{
 	0,  // 0: agentshim.frontend.v1.WorkspaceState.state:type_name -> agentshim.frontend.v1.RenderState
@@ -1391,16 +1410,17 @@ var file_agentshim_frontend_v1_state_proto_depIdxs = []int32{
 	2,  // 2: agentshim.frontend.v1.WorkspaceState.status:type_name -> agentshim.frontend.v1.SessionStatus
 	4,  // 3: agentshim.frontend.v1.WorkspaceState.active_faults:type_name -> agentshim.frontend.v1.RuntimeFault
 	9,  // 4: agentshim.frontend.v1.WorkspaceState.merge_status:type_name -> agentshim.frontend.v1.MergeStatus
-	3,  // 5: agentshim.frontend.v1.SessionView.backfill:type_name -> agentshim.frontend.v1.BackfillState
-	10, // 6: agentshim.frontend.v1.SessionView.death:type_name -> agentshim.frontend.v1.FailureCardView
-	11, // 7: agentshim.frontend.v1.SessionView.model_options:type_name -> agentshim.frontend.v1.ModelOption
-	12, // 8: agentshim.frontend.v1.SessionView.hibernation:type_name -> agentshim.frontend.v1.HibernationDetail
-	13, // 9: agentshim.frontend.v1.HeartbeatView.progress:type_name -> agentshim.core.v1.HeartbeatProgress
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	10, // 5: agentshim.frontend.v1.WorkspaceState.merge_dequeue_offer:type_name -> agentshim.frontend.v1.MergeDequeueOffer
+	3,  // 6: agentshim.frontend.v1.SessionView.backfill:type_name -> agentshim.frontend.v1.BackfillState
+	11, // 7: agentshim.frontend.v1.SessionView.death:type_name -> agentshim.frontend.v1.FailureCardView
+	12, // 8: agentshim.frontend.v1.SessionView.model_options:type_name -> agentshim.frontend.v1.ModelOption
+	13, // 9: agentshim.frontend.v1.SessionView.hibernation:type_name -> agentshim.frontend.v1.HibernationDetail
+	14, // 10: agentshim.frontend.v1.HeartbeatView.progress:type_name -> agentshim.core.v1.HeartbeatProgress
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_state_proto_init() }

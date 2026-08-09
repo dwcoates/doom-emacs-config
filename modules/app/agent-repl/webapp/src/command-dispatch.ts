@@ -536,6 +536,22 @@ export class CommandDispatcher {
     return this.dispatch(workspace, { case: "reviveSession", decision });
   }
 
+  /**
+   * Answer the merge dequeue offer an interrupt raised.
+   *
+   * It names the OFFER rather than the run, and `keep` is sent rather than
+   * assumed: declining is a real answer, and the daemon clearing the offer is
+   * what takes the card down. A dismissal that only hid it locally would leave
+   * the question outstanding on a daemon that still holds it.
+   */
+  answerMergeDequeue(
+    workspace: string,
+    offerId: string,
+    answer: "dequeue" | "keep",
+  ): Promise<void> {
+    return this.dispatch(workspace, { case: "answerMergeDequeue", offerId, answer });
+  }
+
   private dispatch(workspace: string, body: FrontendCommandBody): Promise<void> {
     return this.dispatchIdentified(workspace, body).ack;
   }

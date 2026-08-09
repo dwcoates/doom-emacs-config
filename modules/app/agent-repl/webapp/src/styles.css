@@ -3235,6 +3235,64 @@ pre {
   color: var(--err);
   font-weight: 600;
 }
+/* --- The merge dequeue offer (merge-dequeue.ts) ---------------------------
+   The card an interrupt raises over a workspace whose merge is on the queue,
+   asking whether to take that merge off.
+
+   RED FRAME, NOT THE PICKER'S YELLOW. Every other card that puts a question to
+   the user wears --q-border, and this one deliberately does not: those choose
+   between answers that can be given again, and the confirm button on this one
+   aborts or discards minutes of someone's work. The frame is the alarm --err,
+   the same red every failure surface uses, so the difference registers before
+   the sentence is read.
+
+   The FILL is a wash rather than a solid, unlike the revival gate above. That
+   gate blocks the composer and nothing else is available until it is answered,
+   so it hides the feed on purpose; this card sits over a workspace the user can
+   still read and still prompt, and blanking the conversation behind a question
+   about the merge queue would overstate it. */
+#merge-dequeue {
+  border: 1px solid var(--err);
+  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+  margin: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--err) 8%, transparent);
+}
+/* No outstanding question pays no layout. */
+#merge-dequeue:empty { display: none; }
+.merge-dequeue-head {
+  font-weight: 700;
+  color: var(--err);
+}
+/* WHERE the merge stands, in one sentence. It leads because it is the fact
+   that decides whether the confirm button costs anything. */
+.merge-dequeue-text { margin-top: 0.25rem; }
+.merge-dequeue-actions {
+  margin-top: 0.55rem;
+  display: flex;
+  gap: 0.5rem;
+}
+.merge-dequeue-actions button {
+  font: inherit;
+  padding: 0.25rem 0.7rem;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+}
+/* THE DESTRUCTIVE BUTTON IS THE FILLED ONE, and it is filled in the alarm red
+   rather than in an affirmative color. It is not the safe default and must not
+   look like one; keeping the merge queued stays plainly outlined beside it. */
+.merge-dequeue-actions button.merge-dequeue-confirm {
+  background: var(--err);
+  border-color: var(--err);
+  color: var(--bg);
+  font-weight: 700;
+}
+
 /* The composer's own one-line reason, sharing the merge gate's slot and its
    muted, non-alarming tone: a hibernated session is deliberate and benign. */
 #merge-gate-notice .hibernation-gate-text { display: block; }
