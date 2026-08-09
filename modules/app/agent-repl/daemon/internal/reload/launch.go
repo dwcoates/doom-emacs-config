@@ -29,8 +29,17 @@ type Plan struct {
 // It is an interface for one reason: the production implementation spawns a
 // script that KILLS THIS DAEMON, and no unit test may ever come close to
 // running it. Every test in this package injects a recording fake here.
+//
+// onExitWithoutBounce is the launcher's report that the deploy it started ENDED
+// while this daemon was still alive — success or failure, it did not bounce us.
+// It is a parameter rather than a construction-time field because the only
+// caller that has anything to do with it is the one holding the reload latch,
+// and a latch released by something the launcher was configured with once at
+// boot would be a second, invisible owner of that state. A deploy that DID
+// bounce the daemon never calls it: the process it would have called from is
+// gone, and the replacement boots with a fresh latch.
 type Launcher interface {
-	Launch(ctx context.Context, plan Plan) error
+	Launch(ctx context.Context, plan Plan, onExitWithoutBounce func()) error
 }
 
 // ScriptConfig constructs a DetachedScript.
@@ -143,10 +152,18 @@ func (s *DetachedScript) command(plan Plan, out *os.File) *exec.Cmd {
 // Launch starts the redeploy and returns as soon as it is running.
 //
 // It does NOT wait for the deploy: the deploy's final act is to kill this
-// process. A goroutine reaps the child purely for observability, so a deploy
-// that FAILS without bouncing the daemon still gets its exit status into the
-// canonical log rather than vanishing.
-func (s *DetachedScript) Launch(ctx context.Context, plan Plan) error {
+// process. A goroutine reaps the child, both for observability — a deploy that
+// FAILS without bouncing the daemon gets its exit status into the canonical log
+// rather than vanishing — and to fire onExitWithoutBounce, which is how the
+// caller learns its launch did not end this process's lifetime after all.
+func (s *DetachedScript) Launch(ctx context.Context, plan Plan, onExitWithoutBounce func()) error {
+	if onExitWithoutBounce == nil {
+		// A launcher with no way to report a deploy that came back is how the
+		// self-redeploy path silently disabled itself for a daemon's whole
+		// lifetime. Refused at the call rather than defaulted to a no-op.
+		s.logf("reload: self-redeploy LAUNCH REFUSED {ws=%s}: no exit callback supplied", plan.Workspace)
+		return fmt.Errorf("reload: Launch needs an onExitWithoutBounce callback (workspace %s)", plan.Workspace)
+	}
 	if err := os.MkdirAll(s.logDir, 0o755); err != nil {
 		s.logf("reload: redeploy log dir FAILED {ws=%s dir=%s}: %v", plan.Workspace, s.logDir, err)
 		return fmt.Errorf("reload: create redeploy log dir %s: %w", s.logDir, err)
@@ -171,21 +188,29 @@ func (s *DetachedScript) Launch(ctx context.Context, plan Plan) error {
 	}
 	pid := cmd.Process.Pid
 	s.logf("reload: self-redeploy running {ws=%s pid=%d log=%s}", plan.Workspace, pid, path)
-	go s.reap(cmd, out, plan, pid, path)
+	go s.reap(cmd, out, plan, pid, path, onExitWithoutBounce)
 	return nil
 }
 
-// reap waits for a deploy that did not manage to bounce the daemon and records
-// how it ended. When the deploy succeeds this goroutine simply dies with the
-// process, which is the expected outcome.
-func (s *DetachedScript) reap(cmd *exec.Cmd, out *os.File, plan Plan, pid int, path string) {
+// reap waits for a deploy that did not manage to bounce the daemon, records how
+// it ended, and reports that fact to the caller. When the deploy succeeds this
+// goroutine simply dies with the process, which is the expected outcome — and
+// is precisely why reaching the end of this function MEANS the bounce did not
+// happen, whatever exit status the deploy carried.
+//
+// onExitWithoutBounce fires on BOTH outcomes. A non-zero exit is a broken
+// deploy; a zero exit that left this process running means the script decided
+// there was nothing to bounce (an Emacs-deferred run, --no-bounce). Neither has
+// ended this daemon's lifetime, so neither may leave the reload latch held.
+func (s *DetachedScript) reap(cmd *exec.Cmd, out *os.File, plan Plan, pid int, path string, onExitWithoutBounce func()) {
 	waitErr := cmd.Wait()
 	closeErr := out.Close()
 	if waitErr != nil {
 		s.logf("reload: self-redeploy EXITED NON-ZERO without bouncing the daemon {ws=%s pid=%d log=%s close_err=%v}: %v",
 			plan.Workspace, pid, path, closeErr, waitErr)
-		return
+	} else {
+		s.logf("reload: self-redeploy exited 0 without bouncing the daemon {ws=%s pid=%d log=%s close_err=%v}",
+			plan.Workspace, pid, path, closeErr)
 	}
-	s.logf("reload: self-redeploy exited 0 without bouncing the daemon {ws=%s pid=%d log=%s close_err=%v}",
-		plan.Workspace, pid, path, closeErr)
+	onExitWithoutBounce()
 }

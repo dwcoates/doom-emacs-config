@@ -130,6 +130,26 @@ func (r *replayRegistry) failAll(reason string) {
 //
 // The standing subscription is likewise untouched: this sends a ReplayRequest,
 // never a Subscribe, and last_seen_seq is never advanced from a replayed event.
+//
+// A REPLAY'S LIFETIME IS ITS CONNECTION'S, and that is what makes an
+// interrupted replay terminate deterministically rather than hang:
+//
+//   - RETIRED on teardown. replayRegistry.failAll resolves every in-flight
+//     replay's `lost` channel when the connection closes, so this call returns
+//     ErrReplayLinkLost instead of waiting for a ReplayDone that can no longer
+//     be written. The shim cooperates from its end: it drops the remaining
+//     frames of a replay whose originating connection is gone rather than
+//     writing them onto whichever connection is up next (uds/server.ts
+//     replayConns), where they could only be dropped as an unknown request id.
+//   - RE-ISSUED after ShimReady, not retried on a timer. The one caller that
+//     still wants the range re-arms it (sessioncontroller
+//     rearmResyncAfterReattach) and the reattach handshake serves it again
+//     (runPendingResync, driven from the ShimReady edge). The daemon's own
+//     durable floor supplies the bounds, so the re-issued request asks from
+//     where it actually stands rather than from where the dead one had reached.
+//
+// There is therefore no state in which a ReplayRequest stays in flight across a
+// disconnect, and no timer anywhere in the recovery.
 func (c *Client) Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (ReplayResult, error) {
 	if onEvent == nil {
 		return ReplayResult{}, fmt.Errorf("shimclient: Replay needs an onEvent sink")

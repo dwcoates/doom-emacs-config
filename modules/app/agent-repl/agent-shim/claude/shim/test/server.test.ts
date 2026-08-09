@@ -373,20 +373,20 @@ describe("SessionServer outbound", () => {
     expect(dropped[0].level).toBe("error");
   });
 
-  it("warns when a replay event is lost, since the daemon reads the short replay as complete", async () => {
-    // Arrange
+  it("drops a replay event with no daemon attached, naming the daemon-side retirement", async () => {
+    // Arrange — the daemon retires the request on its own teardown and
+    // re-issues it after the next ShimReady, so this is expected, not a hole.
     const { server } = harness();
     track(server);
     const records = persistedRecords();
     // Act
     server.sendReplayEvent("req-1", create(EventSchema, { sessionId: "sess-1", seq: 7n }));
     // Assert
-    const dropped = records().filter((r) => String(r.message).includes("replay event not forwarded"));
+    const dropped = records().filter((r) => String(r.message).includes("re-issues it after the next ShimReady"));
     expect(dropped).toHaveLength(1);
-    expect(dropped[0].level).toBe("warn");
   });
 
-  it("warns when a replay completion is lost, since the daemon's request never terminates", async () => {
+  it("drops a replay completion with no daemon attached rather than leaving it unwritten and unaccounted", async () => {
     // Arrange
     const { server } = harness();
     track(server);
@@ -394,9 +394,8 @@ describe("SessionServer outbound", () => {
     // Act
     server.sendReplayDone(create(ReplayDoneSchema, { requestId: "req-1" }));
     // Assert
-    const dropped = records().filter((r) => String(r.message).includes("replay completion not forwarded"));
+    const dropped = records().filter((r) => String(r.message).includes("re-issues it after the next ShimReady"));
     expect(dropped).toHaveLength(1);
-    expect(dropped[0].level).toBe("warn");
   });
 
   it("forwards a PermissionRequest to the daemon", async () => {
@@ -515,6 +514,85 @@ describe("SessionServer disconnect tolerance", () => {
   // shim owns ONE outbound connection, so it cannot be connected twice.
   // Superseding a stale connection is now the daemon listener's job and is
   // covered there (shimlisten: reconnect supersedes the parked connection).
+});
+
+describe("SessionServer replay lifetime is its connection's", () => {
+  // A ReplayRequest is a question ONE daemon connection asked. When that
+  // connection dies the question dies with it — the daemon retires it on
+  // teardown and re-issues it after the next ShimReady — so the shim must not
+  // finish answering it to whoever happens to be attached later.
+
+  /** Handshake, deliver a ReplayRequest, and return that connection's peer. */
+  async function requestReplay(
+    server: SessionServer,
+    socketPath: string,
+    requestId: string,
+  ): Promise<FramedPeer> {
+    const peer = await handshake(server, socketPath);
+    await until(() => server.isConnected());
+    peer.send(ReplayRequestSchema, create(ReplayRequestSchema, { requestId, fromSeq: 0n }));
+    return peer;
+  }
+
+  it("answers a replay on the connection that asked for it", async () => {
+    // Arrange
+    const { server, socketPath, calls } = harness();
+    track(server);
+    const peer = await requestReplay(server, socketPath, "req-live");
+    await until(() => calls.replays.length === 1, "the replay request to arrive");
+
+    // Act
+    server.sendReplayEvent("req-live", create(EventSchema, { sessionId: "sess-1", seq: 7n }));
+
+    // Assert
+    expect((await peer.next(ReplayEventSchema)).requestId).toBe("req-live");
+  });
+
+  it("never writes a superseded connection's replay event to the new connection", async () => {
+    // Arrange — the request arrives, its connection dies, a new one handshakes.
+    const { server, socketPath, calls } = harness({}, { reconnectMinMs: 1 });
+    track(server);
+    const daemon = acceptShim(socketPath);
+    listeners.push(daemon.close);
+    await server.connect();
+    const peer1 = await daemon.next();
+    await peer1.next(ShimHelloSchema);
+    peer1.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
+    await until(() => server.isConnected());
+    peer1.send(ReplayRequestSchema, create(ReplayRequestSchema, { requestId: "req-stale", fromSeq: 0n }));
+    await until(() => calls.replays.length === 1, "the replay request to arrive");
+    peer1.destroy();
+    const peer2 = await daemon.next();
+    await peer2.next(ShimHelloSchema);
+    peer2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
+    await until(() => calls.connected === 2, "the reattach handshake");
+    const records = persistedRecords();
+
+    // Act — the shim's replay loop, still running, emits into the new link.
+    server.sendReplayEvent("req-stale", create(EventSchema, { sessionId: "sess-1", seq: 7n }));
+
+    // Assert — dropped as belonging to a superseded connection.
+    const dropped = records().filter((r) => String(r.message).includes("SUPERSEDED daemon connection"));
+    expect(dropped).toHaveLength(1);
+  });
+
+  it("records every replay stranded by a connection teardown", async () => {
+    // Arrange
+    const { server, socketPath, calls } = harness({}, { reconnectMinMs: 1 });
+    track(server);
+    const peer = await requestReplay(server, socketPath, "req-stranded");
+    await until(() => calls.replays.length === 1, "the replay request to arrive");
+    const records = persistedRecords();
+
+    // Act
+    peer.destroy();
+    await until(() => calls.disconnected === 1, "the teardown");
+
+    // Assert
+    const stranded = records().filter((r) => String(r.message).includes("in-flight replay request(s)"));
+    expect(stranded).toHaveLength(1);
+    expect((stranded[0].context as Record<string, unknown>).request_ids).toEqual(["req-stranded"]);
+  });
 });
 
 describe("SessionServer vendor session rotation bounce", () => {
