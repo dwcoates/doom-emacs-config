@@ -118,6 +118,9 @@ export const COMMAND_ARM = {
   queueCancel: "queueCancel",
   hibernateWorkspace: "hibernateWorkspace",
   reviveSession: "reviveSession",
+  pauseMergeQueue: "pauseMergeQueue",
+  resumeMergeQueue: "resumeMergeQueue",
+  evictMerge: "evictMerge",
 } as const satisfies Record<string, ArmKeys<GeneratedFrontendCommand["command"]>>;
 
 /**

@@ -97,6 +97,7 @@ import {
   type SessionInitView,
   type SessionView,
   type ShutdownScheduleView,
+  type MergeQueueRoster,
   type TaskCatalog,
   type TaskEntry,
   type TypingDelta,
@@ -497,6 +498,7 @@ export type AdapterEffect =
    * one layer further down.
    */
   | { kind: "shutdown-schedule"; value: ShutdownScheduleView }
+  | { kind: "merge-queue-roster"; value: MergeQueueRoster }
   /**
    * ONE resolved, FENCED component view — the topbar, the token breakdown or
    * the revival gate.
@@ -654,6 +656,9 @@ export class StateAdapter {
           // know the lease at all sends no field, and that is the absence of
           // information — synthesizing an `idle` effect here would let a
           // pre-feature snapshot silently clear a banner nothing retracted.
+          ...(s.mergeQueueRoster === undefined
+            ? []
+            : [this.mergeQueueRosterEffect(s.mergeQueueRoster)]),
           ...(s.shutdownSchedule === undefined
             ? []
             : [this.shutdownScheduleEffect(s.shutdownSchedule)]),
@@ -719,6 +724,11 @@ export class StateAdapter {
         return [fencedEffect({ case: "tokenBreakdown", value: frame.frame.value })];
       case "workspaceGate":
         return [fencedEffect({ case: "workspaceGate", value: frame.frame.value })];
+      // DAEMON-GLOBAL, so it is NOT fenced: the fence gate measures a view
+      // against one workspace's current state, and the merge queue belongs to
+      // no workspace.
+      case "mergeQueueRoster":
+        return [this.mergeQueueRosterEffect(frame.frame.value)];
       default: {
         // Exhaustiveness guard: a new frame variant is a compile error here,
         // never a silent skip.
@@ -1078,6 +1088,22 @@ export class StateAdapter {
         `cause=${draining?.cause ?? "none"}`,
     );
     return { kind: "shutdown-schedule", value: view };
+  }
+
+  /**
+   * The merge queue, passed through structurally. The daemon assembled the
+   * drain order under the queue's own lock; the adapter re-derives none of it
+   * and never reconstructs a position from a run's `MergeStatus`.
+   */
+  private mergeQueueRosterEffect(roster: MergeQueueRoster): AdapterEffect {
+    this.log(
+      "debug",
+      `state-adapter: merge queue roster paused=${roster.paused} ` +
+        `repos=${roster.repos.length} ` +
+        `entries=${roster.repos.reduce((n, r) => n + r.entries.length, 0)} ` +
+        `updated_at_ms=${roster.updatedAtMs}`,
+    );
+    return { kind: "merge-queue-roster", value: roster };
   }
 
   // --- explicit ignore path -------------------------------------------------

@@ -548,6 +548,49 @@ export interface MergeStatusFailed {
   failedJson: string;
 }
 
+/**
+ * The WHOLE merge queue, as the daemon will actually drain it.
+ *
+ * Pushed COMPLETE on every queue mutation and carried in every connect
+ * snapshot, never as a delta and never re-derived from per-run `MergeStatus`:
+ * an enqueued arm's position is an admission-time fact that goes stale as
+ * heads complete, and this is assembled under the queue's own lock.
+ */
+export interface MergeQueueRoster {
+  /** Daemon-global and durable. The run in flight finishes; nothing starts. */
+  paused: boolean;
+  /** When the roster last changed, unix millis — staleness display only. */
+  updatedAtMs: number;
+  /** One group per repository with outstanding entries; empty repos are absent. */
+  repos: MergeRepoQueue[];
+}
+
+export interface MergeRepoQueue {
+  /** The queue key shared by every sibling worktree. Opaque beyond display. */
+  repoKey: string;
+  /** Delivery order; `entries[0]` is the head, and position is index + 1. */
+  entries: MergeQueueEntry[];
+}
+
+export interface MergeQueueEntry {
+  /** The same run id every `MergeStatus` for this merge carries. */
+  runId: string;
+  workspace: string;
+  workspaceName: string;
+  sourceBranch: string;
+  /**
+   * Set ONLY on `entries[0]`: WHICH arm is set is what the head is doing.
+   * Absent on every other entry, and absence there is the real answer.
+   */
+  head?: MergeQueueHead;
+}
+
+/** What the head is doing — the arm is the whole fact; none carries a payload. */
+export type MergeQueueHead =
+  | { case: "running"; value: Record<string, never> }
+  | { case: "pausedWaiting"; value: Record<string, never> }
+  | { case: "terminalOwed"; value: Record<string, never> };
+
 export interface SessionView {
   workspace: string;
   sessionId: string;
@@ -1357,6 +1400,12 @@ export interface StateSnapshot {
   topbars: TopbarView[];
   tokenBreakdowns: TokenBreakdownView[];
   workspaceGates: WorkspaceGateView[];
+  /**
+   * The merge queue as of this connect, so a client joining mid-drain has the
+   * drain order without waiting for the next mutation. Absent when the daemon
+   * published no roster, and the absence is the real answer.
+   */
+  mergeQueueRoster?: MergeQueueRoster;
 }
 
 /** The daemon's authoritative, shim-ready workspace descriptor for the Emacs host. */
@@ -1867,7 +1916,8 @@ export type FrontendFrame = {
     | { case: "shutdownSchedule"; value: ShutdownScheduleView }
     | { case: "topbar"; value: TopbarView }
     | { case: "tokenBreakdown"; value: TokenBreakdownView }
-    | { case: "workspaceGate"; value: WorkspaceGateView };
+    | { case: "workspaceGate"; value: WorkspaceGateView }
+    | { case: "mergeQueueRoster"; value: MergeQueueRoster };
 };
 
 /** The frame-variant discriminators FrontendFrame.frame.case may hold. */
@@ -1998,6 +2048,10 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
   [
     "workspaceGate",
     (v: unknown) => ({ case: "workspaceGate" as const, value: decodeWorkspaceGateView(v) }),
+  ],
+  [
+    "mergeQueueRoster",
+    (v: unknown) => ({ case: "mergeQueueRoster" as const, value: decodeMergeQueueRoster(v) }),
   ],
 ]);
 
@@ -2279,6 +2333,85 @@ function decodeMergeStatus(v: unknown): MergeStatus {
     throw new Error("frontend-proto: MergeStatus missing required `runId`");
   }
   return status;
+}
+
+const MERGE_QUEUE_ROSTER_KEYS = new Set(["paused", "updatedAtMs", "repos"]);
+const MERGE_REPO_QUEUE_KEYS = new Set(["repoKey", "entries"]);
+const MERGE_QUEUE_HEAD_ARMS = ["running", "pausedWaiting", "terminalOwed"] as const;
+const MERGE_QUEUE_ENTRY_KEYS = new Set([
+  "runId",
+  "workspace",
+  "workspaceName",
+  "sourceBranch",
+  ...MERGE_QUEUE_HEAD_ARMS,
+]);
+
+/**
+ * Decode the merge queue roster.
+ *
+ * The head arms are BARE MARKERS, so each is validated against an empty key
+ * set: a field the daemon starts sending on one fails loudly here rather than
+ * being dropped. Two arms at once is refused rather than resolved by order —
+ * a head cannot be both running and parked at the pause gate.
+ */
+export function decodeMergeQueueRoster(v: unknown): MergeQueueRoster {
+  const o = ensureObject(v, "MergeQueueRoster");
+  rejectUnknown(o, MERGE_QUEUE_ROSTER_KEYS, "MergeQueueRoster");
+  return {
+    paused: bool(o, "paused", "MergeQueueRoster"),
+    updatedAtMs: num(o, "updatedAtMs", "MergeQueueRoster"),
+    repos: (o.repos === undefined || o.repos === null
+      ? []
+      : ensureArray(o.repos, "MergeQueueRoster.repos")
+    ).map(decodeMergeRepoQueue),
+  };
+}
+
+function decodeMergeRepoQueue(v: unknown): MergeRepoQueue {
+  const o = ensureObject(v, "MergeRepoQueue");
+  rejectUnknown(o, MERGE_REPO_QUEUE_KEYS, "MergeRepoQueue");
+  const q: MergeRepoQueue = {
+    repoKey: str(o, "repoKey", "MergeRepoQueue"),
+    entries: (o.entries === undefined || o.entries === null
+      ? []
+      : ensureArray(o.entries, "MergeRepoQueue.entries")
+    ).map(decodeMergeQueueEntry),
+  };
+  // Without a repo key the group names no queue, so nothing it holds can be
+  // attributed to the repository whose drain order it claims to be.
+  if (q.repoKey === "") {
+    throw new Error("frontend-proto: MergeRepoQueue missing required `repoKey`");
+  }
+  return q;
+}
+
+function decodeMergeQueueEntry(v: unknown): MergeQueueEntry {
+  const o = ensureObject(v, "MergeRepoQueue.entries[]");
+  rejectUnknown(o, MERGE_QUEUE_ENTRY_KEYS, "MergeRepoQueue.entries[]");
+  const e: MergeQueueEntry = {
+    runId: str(o, "runId", "MergeRepoQueue.entries[]"),
+    workspace: str(o, "workspace", "MergeRepoQueue.entries[]"),
+    workspaceName: str(o, "workspaceName", "MergeRepoQueue.entries[]"),
+    sourceBranch: str(o, "sourceBranch", "MergeRepoQueue.entries[]"),
+  };
+  // Without a run id nothing can evict this entry and no MergeStatus can be
+  // joined to it, so the row it renders would be inert.
+  if (e.runId === "") {
+    throw new Error("frontend-proto: MergeQueueEntry missing required `runId`");
+  }
+  const heads = MERGE_QUEUE_HEAD_ARMS.filter((arm) => o[arm] !== undefined && o[arm] !== null);
+  if (heads.length > 1) {
+    throw new Error(
+      `frontend-proto: MergeQueueEntry '${e.runId}' sets multiple head arms: ${heads.join(", ")}`,
+    );
+  }
+  if (heads.length === 1) {
+    const arm = heads[0];
+    const payload = ensureObject(o[arm], `MergeQueueEntry.${arm}`);
+    rejectUnknown(payload, new Set<string>(), `MergeQueueEntry.${arm}`);
+    e.head = { case: arm, value: {} };
+  }
+  return e;
 }
 
 const RUNTIME_FAULT_KEYS = new Set([
@@ -3773,6 +3906,7 @@ const STATE_SNAPSHOT_KEYS = new Set([
   "topbars",
   "tokenBreakdowns",
   "workspaceGates",
+  "mergeQueueRoster",
 ]);
 function decodeStateSnapshot(v: unknown): StateSnapshot {
   const o = ensureObject(v, "StateSnapshot");
@@ -3837,6 +3971,11 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
   // the daemon's behalf.
   if (o.shutdownSchedule !== undefined && o.shutdownSchedule !== null) {
     snap.shutdownSchedule = decodeShutdownScheduleView(o.shutdownSchedule);
+  }
+  // Same reading again: absent is a daemon that has published no roster, so
+  // the snapshot seeds nothing rather than asserting an empty queue.
+  if (o.mergeQueueRoster !== undefined && o.mergeQueueRoster !== null) {
+    snap.mergeQueueRoster = decodeMergeQueueRoster(o.mergeQueueRoster);
   }
   return snap;
 }

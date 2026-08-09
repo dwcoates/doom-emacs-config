@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/merge.proto.
  */
 export const file_agentshim_frontend_v1_merge: GenFile = /*@__PURE__*/
-  fileDesc("CiFhZ2VudHNoaW0vZnJvbnRlbmQvdjEvbWVyZ2UucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSLrBAoLTWVyZ2VTdGF0dXMSDgoGcnVuX2lkGAEgASgJEhsKE3BoYXNlX3N0YXJ0ZWRfYXRfbXMYAiABKAMSFQoNdXBkYXRlZF9hdF9tcxgDIAEoAxI+CghlbnF1ZXVlZBgEIAEoCzIqLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVN0YXR1c0VucXVldWVkSAASRwoNYmVmb3JlX2FjdGlvbhgFIAEoCzIuLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVN0YXR1c0JlZm9yZUFjdGlvbkgAEkkKDmNoZXJyeV9waWNraW5nGAYgASgLMi8uYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzQ2hlcnJ5UGlja2luZ0gAEjwKB3Rlc3RpbmcYByABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VTdGF0dXNUZXN0aW5nSAASPgoIY29uZmxpY3QYCCABKAsyKi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VTdGF0dXNDb25mbGljdEgAEkUKDGFmdGVyX2FjdGlvbhgJIAEoCzItLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVN0YXR1c0FmdGVyQWN0aW9uSAASOgoGbWVyZ2VkGAogASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzTWVyZ2VkSAASOgoGZmFpbGVkGAsgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzRmFpbGVkSABCBwoFcGhhc2UiNgoTTWVyZ2VTdGF0dXNFbnF1ZXVlZBIQCghwb3NpdGlvbhgBIAEoBRINCgVkZXB0aBgCIAEoBSIpChdNZXJnZVN0YXR1c0JlZm9yZUFjdGlvbhIOCgZwcm9tcHQYASABKAkidwoYTWVyZ2VTdGF0dXNDaGVycnlQaWNraW5nEhUKDWNvbW1pdHNfdG90YWwYASABKAUSFgoOY29tbWl0c19sYW5kZWQYAiABKAUSEwoLY3VycmVudF9zaGEYAyABKAkSFwoPY3VycmVudF9zdWJqZWN0GAQgASgJInEKEk1lcmdlU3RhdHVzVGVzdGluZxIVCg1jb21taXRzX3RvdGFsGAEgASgFEhYKDmNvbW1pdHNfbGFuZGVkGAIgASgFEhMKC2N1cnJlbnRfc2hhGAMgASgJEhcKD2N1cnJlbnRfc3ViamVjdBgEIAEoCSJ4ChNNZXJnZVN0YXR1c0NvbmZsaWN0EhYKDmNvbmZsaWN0ZWRfc2hhGAEgASgJEhoKEmNvbmZsaWN0ZWRfc3ViamVjdBgCIAEoCRIVCg1jb21taXRzX3RvdGFsGAMgASgFEhYKDmNvbW1pdHNfbGFuZGVkGAQgASgFIigKFk1lcmdlU3RhdHVzQWZ0ZXJBY3Rpb24SDgoGcHJvbXB0GAEgASgJIkYKEU1lcmdlU3RhdHVzTWVyZ2VkEhUKDWNvbW1pdHNfdG90YWwYASABKAUSGgoSYWZ0ZXJfYWN0aW9uX2Vycm9yGAIgASgJIpQBChFNZXJnZVN0YXR1c0ZhaWxlZBINCgVjYXVzZRgBIAEoCRIVCg1jb21taXRzX3RvdGFsGAIgASgFEhYKDmNvbW1pdHNfbGFuZGVkGAMgASgFEhMKC2ZhaWxpbmdfc2hhGAQgASgJEhcKD2ZhaWxpbmdfc3ViamVjdBgFIAEoCRITCgtmYWlsZWRfanNvbhgGIAEoCUIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw");
+  fileDesc("CiFhZ2VudHNoaW0vZnJvbnRlbmQvdjEvbWVyZ2UucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSLrBAoLTWVyZ2VTdGF0dXMSDgoGcnVuX2lkGAEgASgJEhsKE3BoYXNlX3N0YXJ0ZWRfYXRfbXMYAiABKAMSFQoNdXBkYXRlZF9hdF9tcxgDIAEoAxI+CghlbnF1ZXVlZBgEIAEoCzIqLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVN0YXR1c0VucXVldWVkSAASRwoNYmVmb3JlX2FjdGlvbhgFIAEoCzIuLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVN0YXR1c0JlZm9yZUFjdGlvbkgAEkkKDmNoZXJyeV9waWNraW5nGAYgASgLMi8uYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzQ2hlcnJ5UGlja2luZ0gAEjwKB3Rlc3RpbmcYByABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VTdGF0dXNUZXN0aW5nSAASPgoIY29uZmxpY3QYCCABKAsyKi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VTdGF0dXNDb25mbGljdEgAEkUKDGFmdGVyX2FjdGlvbhgJIAEoCzItLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVN0YXR1c0FmdGVyQWN0aW9uSAASOgoGbWVyZ2VkGAogASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzTWVyZ2VkSAASOgoGZmFpbGVkGAsgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlU3RhdHVzRmFpbGVkSABCBwoFcGhhc2UiNgoTTWVyZ2VTdGF0dXNFbnF1ZXVlZBIQCghwb3NpdGlvbhgBIAEoBRINCgVkZXB0aBgCIAEoBSIpChdNZXJnZVN0YXR1c0JlZm9yZUFjdGlvbhIOCgZwcm9tcHQYASABKAkidwoYTWVyZ2VTdGF0dXNDaGVycnlQaWNraW5nEhUKDWNvbW1pdHNfdG90YWwYASABKAUSFgoOY29tbWl0c19sYW5kZWQYAiABKAUSEwoLY3VycmVudF9zaGEYAyABKAkSFwoPY3VycmVudF9zdWJqZWN0GAQgASgJInEKEk1lcmdlU3RhdHVzVGVzdGluZxIVCg1jb21taXRzX3RvdGFsGAEgASgFEhYKDmNvbW1pdHNfbGFuZGVkGAIgASgFEhMKC2N1cnJlbnRfc2hhGAMgASgJEhcKD2N1cnJlbnRfc3ViamVjdBgEIAEoCSJ4ChNNZXJnZVN0YXR1c0NvbmZsaWN0EhYKDmNvbmZsaWN0ZWRfc2hhGAEgASgJEhoKEmNvbmZsaWN0ZWRfc3ViamVjdBgCIAEoCRIVCg1jb21taXRzX3RvdGFsGAMgASgFEhYKDmNvbW1pdHNfbGFuZGVkGAQgASgFIigKFk1lcmdlU3RhdHVzQWZ0ZXJBY3Rpb24SDgoGcHJvbXB0GAEgASgJIkYKEU1lcmdlU3RhdHVzTWVyZ2VkEhUKDWNvbW1pdHNfdG90YWwYASABKAUSGgoSYWZ0ZXJfYWN0aW9uX2Vycm9yGAIgASgJIpQBChFNZXJnZVN0YXR1c0ZhaWxlZBINCgVjYXVzZRgBIAEoCRIVCg1jb21taXRzX3RvdGFsGAIgASgFEhYKDmNvbW1pdHNfbGFuZGVkGAMgASgFEhMKC2ZhaWxpbmdfc2hhGAQgASgJEhcKD2ZhaWxpbmdfc3ViamVjdBgFIAEoCRITCgtmYWlsZWRfanNvbhgGIAEoCSJvChBNZXJnZVF1ZXVlUm9zdGVyEg4KBnBhdXNlZBgBIAEoCBIVCg11cGRhdGVkX2F0X21zGAIgASgDEjQKBXJlcG9zGAMgAygLMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lcmdlUmVwb1F1ZXVlIlsKDk1lcmdlUmVwb1F1ZXVlEhAKCHJlcG9fa2V5GAEgASgJEjcKB2VudHJpZXMYAiADKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VRdWV1ZUVudHJ5IsYCCg9NZXJnZVF1ZXVlRW50cnkSDgoGcnVuX2lkGAEgASgJEhEKCXdvcmtzcGFjZRgCIAEoCRIWCg53b3Jrc3BhY2VfbmFtZRgDIAEoCRIVCg1zb3VyY2VfYnJhbmNoGAQgASgJEj8KB3J1bm5pbmcYBSABKAsyLC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VRdWV1ZUhlYWRSdW5uaW5nSAASTAoOcGF1c2VkX3dhaXRpbmcYBiABKAsyMi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VRdWV1ZUhlYWRQYXVzZWRXYWl0aW5nSAASSgoNdGVybWluYWxfb3dlZBgHIAEoCzIxLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXJnZVF1ZXVlSGVhZFRlcm1pbmFsT3dlZEgAQgYKBGhlYWQiFwoVTWVyZ2VRdWV1ZUhlYWRSdW5uaW5nIh0KG01lcmdlUXVldWVIZWFkUGF1c2VkV2FpdGluZyIcChpNZXJnZVF1ZXVlSGVhZFRlcm1pbmFsT3dlZCIUChJQYXVzZU1lcmdlUXVldWVDbWQiFQoTUmVzdW1lTWVyZ2VRdWV1ZUNtZCIfCg1FdmljdE1lcmdlQ21kEg4KBnJ1bl9pZBgBIAEoCUIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw");
 
 /**
  * Live progress of the workspace's current (or most recent) merge run.
@@ -360,4 +360,245 @@ export type MergeStatusFailed = Message<"agentshim.frontend.v1.MergeStatusFailed
  */
 export const MergeStatusFailedSchema: GenMessage<MergeStatusFailed> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_merge, 8);
+
+/**
+ * The WHOLE merge queue, as the daemon will actually drain it: the global
+ * pause bit plus every repository's outstanding entries in delivery order.
+ * Pushed complete on every queue mutation (admit, complete, evict, pause,
+ * resume, terminal-mark) and included in every connect snapshot. Assembled
+ * under the queue's own lock, so what it shows IS what runs next — never a
+ * re-derivation from per-run MergeStatus, whose enqueued positions are
+ * admission-time facts that go stale as heads complete.
+ *
+ * @generated from message agentshim.frontend.v1.MergeQueueRoster
+ */
+export type MergeQueueRoster = Message<"agentshim.frontend.v1.MergeQueueRoster"> & {
+  /**
+   * The daemon-global pause bit, durable across bounces. True means the run
+   * in flight (if any) finishes and nothing new starts; admission is NOT
+   * paused — entries still queue durably behind the gate.
+   *
+   * @generated from field: bool paused = 1;
+   */
+  paused: boolean;
+
+  /**
+   * When the roster last changed, unix millis, for staleness display only.
+   *
+   * @generated from field: int64 updated_at_ms = 2;
+   */
+  updatedAtMs: bigint;
+
+  /**
+   * One group per repository with outstanding entries; an empty repo does
+   * not appear.
+   *
+   * @generated from field: repeated agentshim.frontend.v1.MergeRepoQueue repos = 3;
+   */
+  repos: MergeRepoQueue[];
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MergeQueueRoster.
+ * Use `create(MergeQueueRosterSchema)` to create a new message.
+ */
+export const MergeQueueRosterSchema: GenMessage<MergeQueueRoster> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 9);
+
+/**
+ * @generated from message agentshim.frontend.v1.MergeRepoQueue
+ */
+export type MergeRepoQueue = Message<"agentshim.frontend.v1.MergeRepoQueue"> & {
+  /**
+   * The queue key: the repository identity shared by every sibling worktree.
+   * Opaque beyond display.
+   *
+   * @generated from field: string repo_key = 1;
+   */
+  repoKey: string;
+
+  /**
+   * Delivery order; entries[0] is the head. Position is index + 1 —
+   * deliberately not a field, so it can never disagree with the order.
+   *
+   * @generated from field: repeated agentshim.frontend.v1.MergeQueueEntry entries = 2;
+   */
+  entries: MergeQueueEntry[];
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MergeRepoQueue.
+ * Use `create(MergeRepoQueueSchema)` to create a new message.
+ */
+export const MergeRepoQueueSchema: GenMessage<MergeRepoQueue> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 10);
+
+/**
+ * @generated from message agentshim.frontend.v1.MergeQueueEntry
+ */
+export type MergeQueueEntry = Message<"agentshim.frontend.v1.MergeQueueEntry"> & {
+  /**
+   * The run's identity — the SAME id every MergeStatus for this merge
+   * carries, and the key EvictMergeCmd names. Stable across daemon bounces.
+   *
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * The workspace's key (project dir).
+   *
+   * @generated from field: string workspace = 2;
+   */
+  workspace: string;
+
+  /**
+   * The workspace's display name.
+   *
+   * @generated from field: string workspace_name = 3;
+   */
+  workspaceName: string;
+
+  /**
+   * The branch being merged.
+   *
+   * @generated from field: string source_branch = 4;
+   */
+  sourceBranch: string;
+
+  /**
+   * Set ONLY on entries[0]; WHICH message is set is what the head is doing.
+   *
+   * @generated from oneof agentshim.frontend.v1.MergeQueueEntry.head
+   */
+  head: {
+    /**
+     * The drain goroutine holds this entry: lease taken or being taken.
+     * Eviction is refused for it.
+     *
+     * @generated from field: agentshim.frontend.v1.MergeQueueHeadRunning running = 5;
+     */
+    value: MergeQueueHeadRunning;
+    case: "running";
+  } | {
+    /**
+     * Delivered but parked at the pause gate: nothing has started.
+     *
+     * @generated from field: agentshim.frontend.v1.MergeQueueHeadPausedWaiting paused_waiting = 6;
+     */
+    value: MergeQueueHeadPausedWaiting;
+    case: "pausedWaiting";
+  } | {
+    /**
+     * A durably marked terminal word awaits re-publication; it will be
+     * answered, not re-run.
+     *
+     * @generated from field: agentshim.frontend.v1.MergeQueueHeadTerminalOwed terminal_owed = 7;
+     */
+    value: MergeQueueHeadTerminalOwed;
+    case: "terminalOwed";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MergeQueueEntry.
+ * Use `create(MergeQueueEntrySchema)` to create a new message.
+ */
+export const MergeQueueEntrySchema: GenMessage<MergeQueueEntry> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 11);
+
+/**
+ * @generated from message agentshim.frontend.v1.MergeQueueHeadRunning
+ */
+export type MergeQueueHeadRunning = Message<"agentshim.frontend.v1.MergeQueueHeadRunning"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MergeQueueHeadRunning.
+ * Use `create(MergeQueueHeadRunningSchema)` to create a new message.
+ */
+export const MergeQueueHeadRunningSchema: GenMessage<MergeQueueHeadRunning> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 12);
+
+/**
+ * @generated from message agentshim.frontend.v1.MergeQueueHeadPausedWaiting
+ */
+export type MergeQueueHeadPausedWaiting = Message<"agentshim.frontend.v1.MergeQueueHeadPausedWaiting"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MergeQueueHeadPausedWaiting.
+ * Use `create(MergeQueueHeadPausedWaitingSchema)` to create a new message.
+ */
+export const MergeQueueHeadPausedWaitingSchema: GenMessage<MergeQueueHeadPausedWaiting> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 13);
+
+/**
+ * @generated from message agentshim.frontend.v1.MergeQueueHeadTerminalOwed
+ */
+export type MergeQueueHeadTerminalOwed = Message<"agentshim.frontend.v1.MergeQueueHeadTerminalOwed"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MergeQueueHeadTerminalOwed.
+ * Use `create(MergeQueueHeadTerminalOwedSchema)` to create a new message.
+ */
+export const MergeQueueHeadTerminalOwedSchema: GenMessage<MergeQueueHeadTerminalOwed> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 14);
+
+/**
+ * Pause the merge queue: the run in flight finishes, nothing new dequeues.
+ * Durable across bounces. Idempotent. Daemon-global (the command's
+ * workspace is ignored).
+ *
+ * @generated from message agentshim.frontend.v1.PauseMergeQueueCmd
+ */
+export type PauseMergeQueueCmd = Message<"agentshim.frontend.v1.PauseMergeQueueCmd"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.PauseMergeQueueCmd.
+ * Use `create(PauseMergeQueueCmdSchema)` to create a new message.
+ */
+export const PauseMergeQueueCmdSchema: GenMessage<PauseMergeQueueCmd> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 15);
+
+/**
+ * Resume the merge queue. Idempotent, daemon-global.
+ *
+ * @generated from message agentshim.frontend.v1.ResumeMergeQueueCmd
+ */
+export type ResumeMergeQueueCmd = Message<"agentshim.frontend.v1.ResumeMergeQueueCmd"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.ResumeMergeQueueCmd.
+ * Use `create(ResumeMergeQueueCmdSchema)` to create a new message.
+ */
+export const ResumeMergeQueueCmdSchema: GenMessage<ResumeMergeQueueCmd> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 16);
+
+/**
+ * Evict ONE waiting entry by run id. The evicted run receives a terminal
+ * failed MergeStatus with an eviction cause, so the workspace's merge axis
+ * resolves immediately. REFUSED when run_id names the running head (only its
+ * drain goroutine may retire it) or names nothing outstanding.
+ *
+ * @generated from message agentshim.frontend.v1.EvictMergeCmd
+ */
+export type EvictMergeCmd = Message<"agentshim.frontend.v1.EvictMergeCmd"> & {
+  /**
+   * The run id the roster and every MergeStatus carry.
+   *
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.EvictMergeCmd.
+ * Use `create(EvictMergeCmdSchema)` to create a new message.
+ */
+export const EvictMergeCmdSchema: GenMessage<EvictMergeCmd> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_merge, 17);
 
