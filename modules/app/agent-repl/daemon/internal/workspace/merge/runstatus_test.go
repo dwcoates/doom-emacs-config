@@ -19,6 +19,11 @@ var errWatermarkStore = errors.New("watermark store unavailable")
 // the "two ticks in the same millisecond" edge deterministically.
 func pinnedClock(at int64) func() int64 { return func() int64 { return at } }
 
+// gatedHead is the rebased head a test's gate judges. RunStatus.Testing takes
+// it explicitly because the head — not the last planned pick — is the tree the
+// suite runs on.
+var gatedHead = PlannedCommit{SHA: "h", Short: "h00000000000", Subject: "the rebased head"}
+
 func newTestRun(t *testing.T, sink StatusSink, now func() int64) *RunStatus {
 	t.Helper()
 	run, err := NewRunStatus(sink, t.Logf, "/ws/a", now)
@@ -445,7 +450,7 @@ func TestPhaseStartedAtMovesWhenTheArmChangesWithinOneAxisPhase(t *testing.T) {
 	}
 
 	// Act — the testing arm, on that SAME axis phase.
-	if err := run.Testing("testing"); err != nil {
+	if err := run.Testing(gatedHead, "testing"); err != nil {
 		t.Fatalf("Testing: %v", err)
 	}
 
@@ -471,7 +476,7 @@ func TestPhaseStartedAtAdvancesOnAnArmChangeUnderAStoppedClock(t *testing.T) {
 	}
 
 	// Act.
-	if err := run.Testing("testing"); err != nil {
+	if err := run.Testing(gatedHead, "testing"); err != nil {
 		t.Fatalf("Testing: %v", err)
 	}
 
@@ -682,22 +687,33 @@ func TestEachPhasePublishesItsOwnPayload(t *testing.T) {
 			},
 		},
 		{
-			name: "testing carries the same commit context cherry_picking did",
+			// AMENDED from "testing carries the same commit context cherry_picking
+			// did". That meaning is superseded: the gate does not run on the last
+			// planned pick, it runs on the rebased HEAD, and after a remediation
+			// turn's fix commit those are different commits — so the old contract
+			// had the testing arm pointing at a tree the suite was demonstrably not
+			// run on. The COUNTS are still shared with cherry_picking, and this case
+			// still pins that; the commit is now the head the caller gated.
+			name: "testing carries the head the gate judged and cherry_picking's counts",
 			publish: func(r *RunStatus) error {
 				r.SetPlan(plan)
 				if err := r.CherryPicking(plan.Commits[0], "picking"); err != nil {
 					return err
 				}
 				r.CommitLanded()
-				return r.Testing("testing 1/2")
+				return r.Testing(gatedHead, "testing 1/2")
 			},
 			check: func(t *testing.T, s *frontendv1.MergeStatus) {
 				got := s.GetTesting()
 				if got == nil {
 					t.Fatalf("phase = %T, want testing", s.GetPhase())
 				}
-				if got.GetCommitsLanded() != 1 || got.GetCurrentSha() != "a00000000000" {
-					t.Fatalf("landed/current = %d/%q, want 1/a00000000000", got.GetCommitsLanded(), got.GetCurrentSha())
+				if got.GetCommitsLanded() != 1 {
+					t.Fatalf("landed = %d, want cherry_picking's 1", got.GetCommitsLanded())
+				}
+				if got.GetCurrentSha() != gatedHead.Short || got.GetCurrentSubject() != gatedHead.Subject {
+					t.Fatalf("current = %q %q, want the gated head %q %q",
+						got.GetCurrentSha(), got.GetCurrentSubject(), gatedHead.Short, gatedHead.Subject)
 				}
 			},
 		},

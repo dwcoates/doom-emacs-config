@@ -1756,12 +1756,25 @@ func TestCloseRetainsAParkedConflictForTheNextBoot(t *testing.T) {
 // is parked in, which is the only thing this merge has modified anywhere.
 func testFailure(commit, tail, workDir string) Result {
 	return Result{
-		Outcome:         OutcomeTestFailed,
-		FailingCommit:   commit,
+		Outcome:       OutcomeTestFailed,
+		FailingCommit: commit,
+		// The SUBJECT is what every sentence about this failure names; the sha
+		// beside it is correlation only. The fixture carries both so a test can
+		// assert which of the two reached the user's copy.
+		FailingSubject:  "subject of " + commit,
 		TestFailureTail: tail,
 		WorkDir:         workDir,
 		BaseHead:        baseHeadOfFailure,
 	}
+}
+
+// escalatedTestFailure is what merge.Driver returns when the remediation turn
+// wrote the escalation record instead of a fix: the same failed gate, plus the
+// agent's own statement that no local fix is correct.
+func escalatedTestFailure(commit, escalation, workDir string) Result {
+	res := testFailure(commit, "FAIL: suite", workDir)
+	res.TestFailureEscalation = escalation
+	return res
 }
 
 // baseHeadOfFailure is the target head every testFailure claims its rebase based
@@ -1830,14 +1843,15 @@ func TestTestFailureFixedByTheShimContinuesTheMerge(t *testing.T) {
 	}
 }
 
-// AMENDED FROM TestTestFailureThatSurvivesTheFixRollsTheTargetBack. The
-// rollback it asserted no longer exists: nothing of a merge reaches the target
-// until the whole rebase has passed, so a failed gate has nothing to undo. The
-// assertion is equal in strength — it pins the SAME guarantee ("the target does
-// not keep the broken work") at its new, stronger location: the target was never
-// written to at all, and the only thing this merge touched is discarded.
-func TestTestFailureThatSurvivesTheFixLeavesTheTargetUntouched(t *testing.T) {
-	// Arrange — the fix turn runs and the suite still fails on the same commit.
+// AMENDED FROM TestTestFailureThatSurvivesTheFixRollsTheTargetBack, twice over.
+// The rollback it asserted no longer exists: nothing of a merge reaches the
+// target until the whole rebase has passed. And a repeat failure no longer ENDS
+// the merge — the one-attempt rule is abolished — so the terminal it needs is now
+// the agent's escalation. The guarantee it pins is unchanged in strength: the
+// target was never written to at all, and the only tree this merge touched is
+// discarded.
+func TestAnEscalatedTestFailureLeavesTheTargetUntouched(t *testing.T) {
+	// Arrange — the fix turn runs and comes back escalating.
 	h := newHarness(t)
 	req := testRequest("a")
 	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
@@ -1850,7 +1864,7 @@ func TestTestFailureThatSurvivesTheFixLeavesTheTargetUntouched(t *testing.T) {
 	// Act.
 	h.testResolver.results <- nil
 	<-h.picker.continues
-	h.picker.continueResults <- pickResult{res: testFailure("abc1234", "FAIL: still", testRebaseWorkDir)}
+	h.picker.continueResults <- pickResult{res: escalatedTestFailure("abc1234", "the suite assumes a single writer", testRebaseWorkDir)}
 
 	// Assert — the rebase worktree is discarded and the cause says the target
 	// was never modified.
@@ -1863,7 +1877,11 @@ func TestTestFailureThatSurvivesTheFixLeavesTheTargetUntouched(t *testing.T) {
 	}
 }
 
-func TestTestFailureThatSurvivesTheFixRecordsMergeFailedWithTheTail(t *testing.T) {
+// AMENDED: the terminal is reached by escalation rather than by a spent attempt
+// budget, and the cause is asserted to name the failing commit's SUBJECT. The
+// contract reason for both is the same ruling: the loop is bounded by the agent's
+// judgement, and no sentence a user reads names a sha.
+func TestAnEscalatedTestFailureRecordsMergeFailedWithTheTail(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	req := testRequest("a")
@@ -1877,17 +1895,53 @@ func TestTestFailureThatSurvivesTheFixRecordsMergeFailedWithTheTail(t *testing.T
 	// Act.
 	h.testResolver.results <- nil
 	<-h.picker.continues
-	h.picker.continueResults <- pickResult{res: testFailure("abc1234", "FAIL: still", testRebaseWorkDir)}
+	h.picker.continueResults <- pickResult{res: escalatedTestFailure("abc1234", "the fix needs a new scheduler", testRebaseWorkDir)}
 
-	// Assert — the failure the user sees names the commit and carries the tail.
+	// Assert — the failure the user sees names the commit by subject.
 	got := h.sink.awaitPhase(t, PhaseMergeFailed)
-	if !strings.Contains(got.cause, "abc1234") || !strings.Contains(got.cause, "FAIL: still") {
-		t.Fatalf("merge_failed cause = %q, want the failing commit and the suite tail", got.cause)
+	if !strings.Contains(got.cause, "subject of abc1234") {
+		t.Fatalf("merge_failed cause = %q, want the failing commit's subject", got.cause)
 	}
 }
 
-func TestTestFailureIsAttemptedExactlyOncePerCommit(t *testing.T) {
-	// Arrange — the same commit fails again after its one attempt.
+// THE LOOP TURNS UNTIL THE GATE PASSES. Two failed gates earn two remediation
+// dispatches — no budget refuses the second — and the merge lands when the third
+// gate is green.
+func TestTheRemediationLoopTurnsUntilTheGatePasses(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+
+	// Act — fail, fix, fail again, fix again, pass.
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: one", testRebaseWorkDir)}
+	<-h.testResolver.calls
+	h.testResolver.results <- nil
+	<-h.picker.continues
+	h.picker.continueResults <- pickResult{res: testFailure("abc1234", "FAIL: two", testRebaseWorkDir)}
+	<-h.testResolver.calls
+	h.testResolver.results <- nil
+	<-h.picker.continues
+	h.picker.continueResults <- pickResult{res: Result{Outcome: OutcomeMerged, WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+
+	// Assert — it landed, so the second failure was remediated rather than
+	// refused as a spent attempt.
+	<-h.lease.releases
+	if got := h.sink.awaitPhase(t, PhaseMerged); got.ws != req.Workspace {
+		t.Fatalf("merged recorded for %q, want %q", got.ws, req.Workspace)
+	}
+	if got := len(h.queue.Snapshot()[testRepoKey]); got != 0 {
+		t.Fatalf("queue depth = %d, want 0", got)
+	}
+}
+
+// The escalation is the loop's ONLY non-passing exit, and the agent's own words
+// are what the user reads.
+func TestAnEscalatedTestFailureCarriesTheAgentsExplanationAsTheCause(t *testing.T) {
+	// Arrange.
 	h := newHarness(t)
 	req := testRequest("a")
 	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
@@ -1900,37 +1954,67 @@ func TestTestFailureIsAttemptedExactlyOncePerCommit(t *testing.T) {
 	// Act.
 	h.testResolver.results <- nil
 	<-h.picker.continues
-	h.picker.continueResults <- pickResult{res: testFailure("abc1234", "FAIL: still", testRebaseWorkDir)}
-	<-h.picker.cleanups
-	<-h.lease.releases
+	h.picker.continueResults <- pickResult{
+		res: escalatedTestFailure("abc1234", "the store and the daemon disagree about ownership; fixing it means moving the lease", testRebaseWorkDir)}
 
-	// Assert — no second prompt for a commit whose attempt already ran.
-	if got := len(h.testResolver.calls); got != 0 {
-		t.Fatalf("test-fix resolver calls still pending = %d, want 0 (exactly one attempt)", got)
+	// Assert.
+	got := h.sink.awaitPhase(t, PhaseMergeFailed)
+	if !strings.Contains(got.cause, "the store and the daemon disagree about ownership") {
+		t.Fatalf("merge_failed cause = %q, want the agent's own explanation", got.cause)
 	}
 }
 
-func TestATestFailureOnALaterCommitGetsItsOwnAttempt(t *testing.T) {
-	// Arrange — the first commit's failure is fixed, and a LATER commit fails.
-	// That is a different failure, so it earns its own attempt.
+// An escalation stops the loop DEAD: the escalating turn is not answered with
+// another prompt.
+func TestAnEscalatedTestFailureIsNotRePrompted(t *testing.T) {
+	// Arrange.
 	h := newHarness(t)
 	req := testRequest("a")
 	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: one", testRebaseWorkDir)}
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", testRebaseWorkDir)}
 	<-h.testResolver.calls
-	h.testResolver.results <- nil
-	<-h.picker.continues
 
 	// Act.
-	h.picker.continueResults <- pickResult{res: testFailure("def5678", "FAIL: two", testRebaseWorkDir)}
+	h.testResolver.results <- nil
+	<-h.picker.continues
+	h.picker.continueResults <- pickResult{res: escalatedTestFailure("abc1234", "needs a redesign", testRebaseWorkDir)}
+	<-h.picker.cleanups
+	<-h.lease.releases
 
 	// Assert.
-	got := <-h.testResolver.calls
-	if got.FailingCommit != "def5678" {
-		t.Fatalf("second resolution commit = %q, want def5678", got.FailingCommit)
+	if got := len(h.testResolver.calls); got != 0 {
+		t.Fatalf("test-fix resolver calls still pending = %d, want 0: an escalation is the agent's own last word", got)
+	}
+}
+
+// NO SHA REACHES THE USER'S COPY. The failing sha is correlation only, and a
+// merge_failed cause that pasted it in would be naming a commit in the one
+// vocabulary the person reading it cannot use.
+func TestAMergeFailedCauseNamesTheSubjectAndNotTheSha(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", testRebaseWorkDir)}
+	<-h.testResolver.calls
+
+	// Act.
+	h.testResolver.results <- nil
+	<-h.picker.continues
+	h.picker.continueResults <- pickResult{res: escalatedTestFailure("abc1234", "needs a redesign", testRebaseWorkDir)}
+
+	// Assert — the subject names the commit; the bare sha appears nowhere. The
+	// fixture's subject deliberately embeds the sha, so the check is for the sha
+	// standing on its own.
+	got := h.sink.awaitPhase(t, PhaseMergeFailed)
+	if strings.Contains(strings.ReplaceAll(got.cause, "subject of abc1234", ""), "abc1234") {
+		t.Fatalf("merge_failed cause = %q, want no bare sha in the copy a user reads", got.cause)
 	}
 }
 
@@ -2047,7 +2131,8 @@ func TestATestFailureWithNoRebaseWorktreeCleansUpNothing(t *testing.T) {
 
 func TestAConflictResolvedIntoATestFailureIsStillGated(t *testing.T) {
 	// The two parking outcomes feed each other: a resume that finishes the pick
-	// can leave the suite broken, and that failure gets the same one attempt.
+	// can leave the suite broken, and that failure enters the same remediation
+	// loop every other gate failure does.
 	// Arrange — a conflict, resolved by the shim.
 	h := newHarness(t)
 	req := testRequest("a")
