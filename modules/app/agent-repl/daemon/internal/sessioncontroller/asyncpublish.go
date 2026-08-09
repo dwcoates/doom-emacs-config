@@ -10,6 +10,9 @@
 package sessioncontroller
 
 import (
+	"fmt"
+	"strings"
+
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
@@ -33,6 +36,16 @@ import (
 // detachment takes, carrying the very sentence this warn would have carried.
 // What is left over is still warned about here.
 func (c *consumer) observeAsync(curated frontend.Curation, ev *corev1.Event) asyncPush {
+	// THE CURATION VERDICT, RECORDED. Which records left the feed for a bubble
+	// and which stayed is the single decision this whole plane turns on, and it
+	// was previously unobservable: a subagent rendering at the top level and a
+	// subagent rendering inside its bubble produced byte-identical logs. One
+	// record per event states the split it made, so the verdict can be read back
+	// rather than inferred from what appeared on screen.
+	for _, fold := range curated.Detached {
+		c.logf("session-controller: async fold CLASSIFIED session=%s ws=%q seq=%d source_tool_use_id=%q agent_id=%q emissions=%d — these records left the top-level feed for the bubble of the detachment that produced them",
+			c.sessionID, c.workspace, ev.GetSeq(), fold.SourceToolUseID, fold.AgentID, len(fold.Emissions))
+	}
 	push, err := c.bubbles.observeCuration(curated, c.asyncInstant(ev))
 	gaps, residual := splitAsyncGaps(err)
 	push.Faults = append(push.Faults, gaps...)
@@ -125,8 +138,12 @@ func (c *consumer) pushAsync(push asyncPush, ev *corev1.Event) {
 	if len(push.Opened) == 0 && len(push.Updates) == 0 {
 		return
 	}
-	c.logf("session-controller: async bubble push session=%s ws=%q seq=%d opened=%d updates=%d",
-		c.sessionID, c.workspace, ev.GetSeq(), len(push.Opened), len(push.Updates))
+	// THE BUBBLE IDS, NOT JUST THEIR COUNT. An update is addressed to a bubble
+	// by id, so a push reporting only "updates=1" cannot be matched to the
+	// bubble it filled — which is precisely the question asked of this record.
+	c.logf("session-controller: async bubble push session=%s ws=%q seq=%d opened=%d updates=%d opened_bubbles=%s updated_bubbles=%s",
+		c.sessionID, c.workspace, ev.GetSeq(), len(push.Opened), len(push.Updates),
+		openedBubbleIDs(push.Opened), updatedBubbleIDs(push.Updates))
 	c.pushAnchors(push.Opened, ev)
 	c.push.PushAsyncBubbleDelta(&frontendv1.AsyncBubbleDelta{
 		Workspace:  c.workspace,
@@ -175,14 +192,38 @@ func (c *consumer) pushAnchors(opened []*frontendv1.AsyncBubble, ev *corev1.Even
 			Item:   &frontendv1.ConversationItem_AsyncBubble{AsyncBubble: b},
 		})
 	}
-	c.logf("session-controller: async bubble ANCHORED session=%s ws=%q seq=%d anchors=%d",
-		c.sessionID, c.workspace, ev.GetSeq(), len(items))
+	c.logf("session-controller: async bubble ANCHORED session=%s ws=%q seq=%d anchors=%d bubbles=%s",
+		c.sessionID, c.workspace, ev.GetSeq(), len(items), openedBubbleIDs(opened))
 	c.push.PushConversationDelta(&frontendv1.ConversationDelta{
 		Workspace:  c.workspace,
 		Fence:      c.fence(),
 		ThroughSeq: ev.GetSeq(),
 		Items:      items,
 	})
+}
+
+// openedBubbleIDs renders an opened list as "id(origin_tool_use_id)" pairs.
+//
+// The ORIGIN IS RENDERED BESIDE THE ID because they answer different halves of
+// the same question: the id is what every later update is addressed to, and the
+// origin is the launching call that ties the bubble to the tool card it hangs
+// under. A record carrying one without the other leaves the correlation to
+// guesswork.
+func openedBubbleIDs(opened []*frontendv1.AsyncBubble) string {
+	ids := make([]string, 0, len(opened))
+	for _, b := range opened {
+		ids = append(ids, fmt.Sprintf("%s(origin_tool_use_id=%s)", b.GetId(), b.GetOriginToolUseId()))
+	}
+	return "[" + strings.Join(ids, " ") + "]"
+}
+
+// updatedBubbleIDs renders the bubble each update in a push is addressed to.
+func updatedBubbleIDs(updates []*frontendv1.AsyncBubbleUpdate) string {
+	ids := make([]string, 0, len(updates))
+	for _, u := range updates {
+		ids = append(ids, u.GetBubbleId())
+	}
+	return "[" + strings.Join(ids, " ") + "]"
 }
 
 // asyncInstant is the moment a bubble's fold records for an event: the

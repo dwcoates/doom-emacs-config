@@ -401,6 +401,95 @@ func TestAnEventThatOpensNoBubbleAnchorsNothing(t *testing.T) {
 	}
 }
 
+// --- the same criterion, through the STREAM plane --------------------------
+//
+// A Task dispatch's subagent is observed on the stream plane, where the
+// detachment is stated by parent_tool_use_id rather than by a transcript
+// envelope. The consumer must route it exactly as it routes the file plane's.
+
+// streamSubagentEvent is the store event carrying one detached agent's spoken
+// turn as the SDK streams it: no transcript envelope, parent_tool_use_id naming
+// the call that launched it.
+func streamSubagentEvent(t *testing.T, seq uint64, uuid, parentToolUseID, text string) *corev1.Event {
+	t.Helper()
+	a, err := anypb.New(&datav1.ClaudeStreamMessage{
+		Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
+			Uuid:            uuid,
+			ParentToolUseId: parentToolUseID,
+			Message: &datav1.ApiAssistantMessage{Id: "msg_" + uuid, Content: []*datav1.ContentBlock{
+				{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: text}}},
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("anypb.New: %v", err)
+	}
+	return &corev1.Event{
+		SessionId:    "s1",
+		Seq:          seq,
+		ProducedAtMs: 1700000000000,
+		Plane:        corev1.Plane_PLANE_STREAM,
+		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Payload:      &corev1.Event_Vendor{Vendor: a},
+	}
+}
+
+func TestAStreamedSubagentsResponseAppearsInItsBubbleDelta(t *testing.T) {
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	c.pushConversation(streamSubagentEvent(t, 1, "u1", "toolu_launch", "subagent speaking"), true)
+	if !containsText(bubbleTexts(push), "subagent speaking") {
+		t.Fatalf("a subagent observed on the stream plane must reach frontends inside its bubble, got %v", bubbleTexts(push))
+	}
+}
+
+func TestAStreamedSubagentsResponseDoesNotAppearAsAFeedItem(t *testing.T) {
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	c.pushConversation(streamSubagentEvent(t, 1, "u1", "toolu_launch", "subagent speaking"), true)
+	if containsText(feedTexts(push), "subagent speaking") {
+		t.Fatalf("a subagent's streamed response mis-landing in the top-level feed is the defect this repairs, got %v", feedTexts(push))
+	}
+}
+
+func TestAStreamedMainAgentResponseStillAppearsAsAFeedItem(t *testing.T) {
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	c.pushConversation(streamSubagentEvent(t, 1, "u1", "", "main agent speaking"), true)
+	if !containsText(feedTexts(push), "main agent speaking") {
+		t.Fatalf("an empty parent_tool_use_id is not a detachment, got %v", feedTexts(push))
+	}
+}
+
+// --- the curation verdict is observable ------------------------------------
+
+func TestTheCurationVerdictNamesTheCallItRoutedTheRecordsTo(t *testing.T) {
+	push := &fakePusher{}
+	c, lines := gapConsumer(t, push)
+	c.pushConversation(streamSubagentEvent(t, 1, "u1", "toolu_launch", "subagent speaking"), true)
+	if countLinesWith(*lines, "async fold CLASSIFIED") != 1 {
+		t.Fatalf("the split's verdict must be readable from the log, got %v", *lines)
+	}
+}
+
+func TestTheCurationVerdictIsSilentForTheMainConversation(t *testing.T) {
+	push := &fakePusher{}
+	c, lines := gapConsumer(t, push)
+	c.pushConversation(streamSubagentEvent(t, 1, "u1", "", "main agent speaking"), true)
+	if got := countLinesWith(*lines, "async fold CLASSIFIED"); got != 0 {
+		t.Fatalf("records = %d, want 0: the main conversation detaches nothing, and a record per ordinary turn would bury the ones that matter", got)
+	}
+}
+
+func TestTheAsyncPushNamesTheBubbleItOpened(t *testing.T) {
+	push := &fakePusher{}
+	c, lines := gapConsumer(t, push)
+	c.pushConversation(streamSubagentEvent(t, 1, "u1", "toolu_launch", "subagent speaking"), true)
+	if countLinesWith(*lines, "origin_tool_use_id=toolu_launch") == 0 {
+		t.Fatalf("an opened bubble must be recorded with the launching call it hangs under, got %v", *lines)
+	}
+}
+
 // --- daemon-bug fold gaps become failure cards -----------------------------
 
 // gapConsumer is a consumer whose whole log is captured, so a test can assert
