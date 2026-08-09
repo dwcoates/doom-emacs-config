@@ -1097,7 +1097,11 @@ func (m *Manager) beginInterject(d *sessionController, entryID, source string) {
 		// An interject's stop is only a failure if the shim says it could not
 		// deliver it. ALREADY_COMPLETE means the turn we were racing had
 		// already ended, which is the outcome the interject wanted.
-		outcome, err := d.client.Interrupt(m.rootCtx)
+		// THE INTERJECT'S OWN ENTRY, not a user request. This stop is pure
+		// machinery -- the user asked for a prompt to run sooner, not for the
+		// turn to end -- and naming the entry is what keeps it distinguishable
+		// in the log from the user-commanded stop.
+		outcome, err := d.client.Interrupt(m.rootCtx, "interject:"+entryID)
 		if err == nil {
 			err = errclass.InterruptError(outcome)
 		}
