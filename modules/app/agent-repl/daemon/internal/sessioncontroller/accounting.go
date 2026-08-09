@@ -40,6 +40,22 @@ type turnAccountingReducer struct {
 	// conversation's own history rather than rejected as evidence about some
 	// other conversation entirely — see isKnownVendorSession.
 	knownVendorSessionIDs map[string]struct{}
+	// responseUsageCorrections holds each response's FINAL vendor usage, keyed
+	// by API message id, as relayed from the vendor's message_delta frame.
+	//
+	// It exists because the assistant message a response record is built from
+	// carries the `message_start` usage SNAPSHOT: settled input and cache
+	// counters, interim output. The final output_tokens are reported only on
+	// message_delta, so without this the per-response ledger could never agree
+	// with the terminal result's totals — 563 against 4407 on one measured live
+	// turn, with input reconciling exactly.
+	//
+	// IT IS A MAP RATHER THAN AN IN-PLACE PATCH because neither arrival order is
+	// guaranteed: the SDK emits one assistant message per content block, and
+	// whether those land before or after the frame's message_delta is the
+	// vendor's business. A correction is recorded here on arrival and applied to
+	// its response whichever of the two comes second.
+	responseUsageCorrections map[string]*frontendv1.VendorTokenUsage
 	// logf is the consumer's session-tagged logging channel. It is never nil;
 	// newTurnAccountingReducer substitutes a discard when a caller has none.
 	logf dlog.Logf
@@ -103,7 +119,7 @@ func newTurnAccountingReducer(logf dlog.Logf) *turnAccountingReducer {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &turnAccountingReducer{turns: map[string]*accountingTurn{}, latencies: map[string]responseLatency{}, knownVendorSessionIDs: map[string]struct{}{}, logf: logf}
+	return &turnAccountingReducer{turns: map[string]*accountingTurn{}, latencies: map[string]responseLatency{}, knownVendorSessionIDs: map[string]struct{}{}, responseUsageCorrections: map[string]*frontendv1.VendorTokenUsage{}, logf: logf}
 }
 
 // recordKnownVendorSession admits id into the conversation's proven vendor
@@ -336,6 +352,11 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 	if latency := ev.GetMessageLatency(); latency != nil && latency.GetUuid() != "" {
 		r.latencies[latency.GetUuid()] = responseLatency{ttftMs: latency.GetTtftMs(), messageStartedAtMs: ev.GetProducedAtMs()}
 	}
+	if delta := messageDeltaFromVendor(ev.GetVendor()); delta != nil && delta.GetApiMessageId() != "" && delta.GetVendorUsage() != nil {
+		if _, historical := r.liveEvidenceFor(ev); !historical {
+			r.recordResponseUsageCorrection(delta.GetApiMessageId(), delta.GetVendorUsage())
+		}
+	}
 	observation, err := tokenUtilizationObservationFromEvent(ev, daemonSessionID, r.isKnownVendorSession)
 	if err != nil {
 		return err
@@ -370,6 +391,12 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 			return claim
 		}
 		usage.RootTurnId = r.activeTurnID
+		// BEFORE validation and before the duplicate compare below. The SDK
+		// emits one assistant message per content block, all carrying the same
+		// API message id and the same snapshot usage, and the compare treats any
+		// difference between two such records as a ledger conflict. Correcting
+		// one copy and not the other would manufacture exactly that conflict.
+		r.applyResponseUsageCorrection(usage)
 		if err := tokenutilization.Validate(usage, tokenutilization.Identity{
 			AgentReplSessionID: daemonSessionID,
 			ClaudeSessionID:    ev.GetSessionId(),
@@ -609,6 +636,9 @@ func (r *turnAccountingReducer) commitResolved(turnID string) error {
 	if r.activeTurnID == turnID {
 		r.activeTurnID = ""
 	}
+	// The corrections belong to the responses of the turn just settled, so they
+	// are retired with it rather than accumulating for the life of the session.
+	clear(r.responseUsageCorrections)
 	return nil
 }
 
@@ -623,6 +653,53 @@ func (r *turnAccountingReducer) response(apiMessageID string) *frontendv1.TokenU
 		}
 	}
 	return nil
+}
+
+// recordResponseUsageCorrection files one response's FINAL vendor usage and
+// applies it to that response if the reducer already holds it.
+//
+// The correction is authoritative over the snapshot it replaces: it is the
+// vendor's own cumulative usage for the same API message, reported later.
+func (r *turnAccountingReducer) recordResponseUsageCorrection(apiMessageID string, usage *datav1.ApiUsage) {
+	corrected := vendorTokenUsageFromAPI(usage)
+	r.responseUsageCorrections[apiMessageID] = corrected
+	if existing := r.response(apiMessageID); existing != nil {
+		existing.Usage = proto.Clone(corrected).(*frontendv1.VendorTokenUsage)
+		r.logf("session-controller: corrected a response's token usage from its message_delta (api_message_id=%s output_tokens=%d)", apiMessageID, corrected.GetOutputTokens())
+	}
+}
+
+// applyResponseUsageCorrection gives a response record the final usage its
+// message_delta already reported, when the delta arrived first.
+//
+// A response with no correction on file is left EXACTLY as the vendor's
+// assistant message described it. That is the pre-amendment world, and it stays
+// representable: the ledger reports its disagreement honestly rather than being
+// quietly reconciled against evidence nobody sent.
+func (r *turnAccountingReducer) applyResponseUsageCorrection(usage *frontendv1.TokenUtilization) {
+	corrected := r.responseUsageCorrections[usage.GetApiMessageId()]
+	if corrected == nil {
+		return
+	}
+	usage.Usage = proto.Clone(corrected).(*frontendv1.VendorTokenUsage)
+	r.logf("session-controller: applied a filed message_delta token-usage correction to its response (api_message_id=%s output_tokens=%d)", usage.GetApiMessageId(), corrected.GetOutputTokens())
+}
+
+// messageDeltaFromVendor extracts a relayed `message_delta` frame from an
+// event's vendor payload, or nil when the payload is anything else.
+func messageDeltaFromVendor(a *anypb.Any) *datav1.MessageDeltaEvent {
+	if a == nil {
+		return nil
+	}
+	msg, err := a.UnmarshalNew()
+	if err != nil {
+		return nil
+	}
+	stream, ok := msg.(*datav1.ClaudeStreamMessage)
+	if !ok {
+		return nil
+	}
+	return stream.GetStreamEvent().GetEvent().GetMessageDelta()
 }
 
 func resultFromVendor(a *anypb.Any) *datav1.ResultMessage {
