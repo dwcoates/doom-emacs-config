@@ -303,14 +303,98 @@ func TestTaskStartedOpensABubbleForARecognizedKind(t *testing.T) {
 	}
 }
 
-func TestTaskStartedWithNoCallBecomesAFailureCardRatherThanABlankOriginBubble(t *testing.T) {
+// --- the announcement-versus-unfound split ---------------------------------
+//
+// An announcement that names NO tool call is legitimate: the contract says
+// origin_tool_use_id is "Empty only for work that no tool call spawned", and the
+// harness's own background shells arrive exactly that way. What stays a fault is
+// a detachment the daemon cannot classify at all.
+
+func TestAnAnnouncementBornDetachmentOpensABubble(t *testing.T) {
+	// Arrange
 	s := newAsyncBubbleStore("/ws")
+
+	// Act
 	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(push.Opened) != 1 {
+		t.Fatalf("opened = %d, want 1: work no tool call spawned exists by design and must be shown, not carded", len(push.Opened))
+	}
+}
+
+func TestAnAnnouncementBornDetachmentCarriesAnEmptyOrigin(t *testing.T) {
+	// Arrange
+	s := newAsyncBubbleStore("/ws")
+
+	// Act
+	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
+
+	// Assert
+	if got := push.Opened[0].GetOriginToolUseId(); got != "" {
+		t.Fatalf("origin_tool_use_id = %q, want empty: naming a call that never existed would attach the bubble to the wrong card", got)
+	}
+}
+
+func TestAnAnnouncementBornDetachmentRaisesNoFault(t *testing.T) {
+	// Arrange
+	s := newAsyncBubbleStore("/ws")
+
+	// Act
+	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
+
+	// Assert
+	if len(push.Faults) != 0 {
+		t.Fatalf("faults = %d, want 0: the fault arm is for work a call spawned that the daemon could not find, not for work nothing spawned", len(push.Faults))
+	}
+}
+
+func TestAnAnnouncementBornDetachmentTakesItsKindFromItsEvidence(t *testing.T) {
+	// Arrange
+	s := newAsyncBubbleStore("/ws")
+
+	// Act
+	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
+
+	// Assert
+	if push.Opened[0].GetShell() == nil {
+		t.Fatalf("kind arm = %T, want the shell arm the announcement's own kind names", push.Opened[0].GetKind())
+	}
+}
+
+func TestAReAnnouncedAnnouncementBornDetachmentOpensNoTwin(t *testing.T) {
+	// Arrange
+	s := newAsyncBubbleStore("/ws")
+	if _, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 20)
+
+	// Assert
+	if len(push.Opened) != 0 {
+		t.Fatalf("opened = %d, want 0: the task id is the only handle such a detachment has, and a replay must land on the bubble it already opened", len(push.Opened))
+	}
+}
+
+func TestAnAnnouncementBornDetachmentOfNoRecognizableKindStillFaults(t *testing.T) {
+	// Arrange
+	s := newAsyncBubbleStore("/ws")
+
+	// Act
+	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1"}, 10)
+
+	// Assert
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(push.Faults) != 1 || len(push.Opened) != 0 {
-		t.Fatalf("an unattributable detachment is a daemon fault, never a bubble; got %d faults %d opened", len(push.Faults), len(push.Opened))
+		t.Fatalf("faults = %d opened = %d, want 1 and 0: with neither a kind nor a call to name a tool by, the work can be neither classified nor honestly reported as unclassified",
+			len(push.Faults), len(push.Opened))
 	}
 }
 
