@@ -109,6 +109,22 @@ export interface UserTurnItem extends FeedOrderedItem {
    * user's own prompt.
    */
   origin?: string;
+  /**
+   * Set ONLY on a bubble this webapp minted for its own submit, and only until
+   * the daemon's receipt for that submit lands (`addLocalPrompt`).
+   *
+   * It is what makes the prompt appear the instant the user hits send while
+   * the BREATH still waits on the daemon: an unacked bubble renders without
+   * the breath, so the animation starting is the acknowledgement, not a
+   * decoration on it.
+   *
+   * It can never survive the acknowledgement, and that is structural rather
+   * than bookkeeping: the daemon's receipt carries the SAME request id this
+   * bubble was minted under, so `userTurnKey` gives the two one key and
+   * `mergeItem` whole-item replaces the local bubble with the daemon's — which
+   * has no such flag — at the rank the local one already holds.
+   */
+  unacked?: true;
 }
 export interface TextItem extends FeedOrderedItem {
   kind: "text";
@@ -770,8 +786,20 @@ function mergeToolItem(existing: ToolItem, incoming: ToolItem): ToolItem {
  * With neither id there is nothing to reconcile on, and appending is right:
  * a turn with no identity can only ever be its own bubble.
  */
+/**
+ * The key a prompt with a request id reconciles on, spelled once.
+ *
+ * Two places need it and they must agree exactly: `userTurnKey` below derives
+ * it from an item, and `Store.dropUnackedPrompt` derives it from a bare
+ * request id it has no item for. A second spelling of the format is a bubble
+ * one of them cannot find.
+ */
+export function userTurnRequestKey(requestId: string): string {
+  return `user-turn:req:${requestId}`;
+}
+
 export function userTurnKey(item: UserTurnItem): string | null {
-  if (item.requestId !== "") return `user-turn:req:${item.requestId}`;
+  if (item.requestId !== "") return userTurnRequestKey(item.requestId);
   if (item.uuid !== undefined && item.uuid !== "") return `user-turn:uuid:${item.uuid}`;
   return null;
 }
@@ -1457,6 +1485,62 @@ export class ConversationStore {
     // A locally-minted card has no delta seq; the high-water mark ranks it at
     // the feed's live tail, where a fault report belongs.
     this.mergeItem(failure, this.state.lastSeq);
+    return true;
+  }
+
+  /**
+   * File the bubble for a prompt this webapp has just submitted, BEFORE the
+   * daemon has said anything about it.
+   *
+   * The daemon already answers an accepted submit with a receipt bubble of its
+   * own (`sessioncontroller/promptecho.go`), and that receipt is what used to
+   * put the user's words on screen — one round trip after they hit send. This
+   * closes that window from the near end: the words appear immediately, and
+   * the receipt's arrival is left to say the one thing only the daemon can,
+   * which is that the prompt was accepted (the breath — see `unacked`).
+   *
+   * REQUESTID is the id the dispatcher minted for this very `SubmitPromptCmd`,
+   * so the receipt reconciles onto this bubble by key rather than by matching
+   * its text. A submit with no id to key on must not call here at all: the
+   * bubble it filed could never be superseded, and would sit unacked beside
+   * the daemon's own copy of the same prompt.
+   *
+   * Ranked at the high-water mark like every other locally-minted item, which
+   * is the feed's live tail — where a prompt just sent belongs.
+   */
+  addLocalPrompt(requestId: string, text: string): boolean {
+    if (requestId === "") {
+      throw new Error("store: a local prompt bubble needs the request id its receipt will carry");
+    }
+    const item: UserTurnItem = {
+      kind: "user-turn",
+      requestId,
+      content: [{ type: "text", text }],
+      ts: new Date(this.now()).toISOString(),
+      unacked: true,
+    };
+    this.mergeItem(item, this.state.lastSeq);
+    return true;
+  }
+
+  /**
+   * Take down the local bubble for a submit the daemon REFUSED, reporting
+   * whether one was standing.
+   *
+   * A refused prompt started no turn, and leaving its bubble in the feed would
+   * assert that it did — the refusal's own failure card would then read as an
+   * error about a prompt that visibly went through. The removal is confined to
+   * the unacked bubble by construction: a turn the daemon has since spoken for
+   * carries no `unacked` flag, so no acknowledged prompt can be taken down
+   * here however late the refusal arrives.
+   */
+  dropUnackedPrompt(requestId: string): boolean {
+    const key = userTurnRequestKey(requestId);
+    const idx = this.state.items.findIndex(
+      (i) => i.kind === "user-turn" && i.unacked === true && userTurnKey(i) === key,
+    );
+    if (idx === -1) return false;
+    this.state.items.splice(idx, 1);
     return true;
   }
 

@@ -317,11 +317,28 @@ async function boot(): Promise<void> {
    * mode. The pending mode is NOT spent on send: it clears when a pushed
    * SessionView reports it in force, so a failed submit does not silently
    * drop the user's choice.
+   *
+   * THE BUBBLE IS FILED HERE, not on the daemon's answer. The words appear in
+   * the feed on this frame; the daemon's receipt for the same request id then
+   * replaces this bubble with its own, and THAT is what starts the breath (see
+   * `Store.addLocalPrompt`). A refused submit takes the bubble back down,
+   * because the refusal's failure card is the only honest record of a prompt
+   * that never ran.
    */
   const submitPrompt = (text: string, promptOrigin: PromptOrigin): void => {
-    void dispatcher
-      .submitPrompt(cmdWorkspace(), text, promptOrigin, pendingMode.outbound)
-      .catch(consumeOwnedDispatchFailure);
+    const { requestId, ack } = dispatcher.submitPrompt(
+      cmdWorkspace(),
+      text,
+      promptOrigin,
+      pendingMode.outbound,
+    );
+    // No id means no command left the page — there is no submit to draw, and
+    // the rejection below is the whole story.
+    if (requestId !== "" && store.addLocalPrompt(requestId, text)) frames.schedule();
+    void ack.catch((err) => {
+      if (store.dropUnackedPrompt(requestId)) frames.schedule();
+      consumeOwnedDispatchFailure(err);
+    });
   };
   const feedEl = must("feed");
   // RETIRED (F4): the degraded-state banner. It was chrome that scrolled

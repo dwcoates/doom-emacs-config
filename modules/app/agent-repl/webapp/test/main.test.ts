@@ -215,6 +215,50 @@ describe("the composer's hibernation gate", () => {
   });
 });
 
+// The prompt bubble is drawn by the webapp on the frame the user hits send,
+// and the daemon's receipt only starts its breath — so the filing, the id it
+// is filed under, and the take-down on a refusal are boot-scope closure state
+// with no importable seam, pinned here against the source.
+const submitPrompt = blocksAfter(main, "const submitPrompt = (text: string, promptOrigin: PromptOrigin): void => {")[0]!;
+
+describe("the local prompt bubble", () => {
+  it("files the bubble on the one submit path every prompt goes through", () => {
+    // Assert — a second sending path would be a prompt with no bubble.
+    expect(blocksAfter(main, "const submitPrompt = (text: string, promptOrigin: PromptOrigin): void => {")).toHaveLength(1);
+    expect(submitPrompt).toContain("store.addLocalPrompt(requestId, text)");
+  });
+
+  it("files it BEFORE waiting on the daemon's answer", () => {
+    // Assert — the whole point: the words are on screen this frame, and the
+    // acknowledgement only starts the breath.
+    const filed = submitPrompt.indexOf("store.addLocalPrompt(");
+    const awaited = submitPrompt.indexOf("void ack");
+    expect(filed).toBeLessThan(awaited);
+  });
+
+  it("paints the newly filed bubble rather than waiting for the next frame's cause", () => {
+    // Assert — nothing else would schedule a render until the daemon speaks.
+    expect(submitPrompt).toContain("store.addLocalPrompt(requestId, text)) frames.schedule()");
+  });
+
+  it("files it under the request id the daemon's receipt will carry", () => {
+    // Assert — the id is what reconciles the two onto one bubble; matching on
+    // the prompt's text would be a second, drift-prone identity.
+    expect(submitPrompt).toContain("const { requestId, ack } = dispatcher.submitPrompt(");
+  });
+
+  it("takes the bubble down when the daemon refuses the submit", () => {
+    // Assert — a refused prompt started no turn, and a bubble left standing
+    // would assert that it had.
+    expect(submitPrompt).toContain("store.dropUnackedPrompt(requestId)");
+  });
+
+  it("still surfaces the refusal through the dispatcher's owned failure path", () => {
+    // Assert — taking the bubble down is not a substitute for the failure card.
+    expect(submitPrompt).toContain("consumeOwnedDispatchFailure(err)");
+  });
+});
+
 describe("the revival gate's chrome wiring", () => {
   /** The chrome render, which repaints every state-derived surface. */
   const chrome = blocksAfter(main, "const renderChrome = (): void => {")[0]!;
