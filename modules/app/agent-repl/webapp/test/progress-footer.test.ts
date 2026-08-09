@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 import { BREATH_SHADES, breathColor } from "../src/breathing.js";
 import { CounterEntry } from "../src/counter-menu.js";
 import {
+  ACCOUNTING_PEEK_MS,
+  accountingPeekHtml,
   alreadyCompletePhaseViolation,
   Activity,
   EXPANDED_FOOTER_MAX_ROWS,
@@ -143,7 +145,7 @@ function agentRow(over: Partial<FooterAgentRow> = {}): FooterAgentRow {
   };
 }
 
-const CLOSED: FooterDisclosure = { tasksOpen: false, expanded: false };
+const CLOSED: FooterDisclosure = { tasksOpen: false, expanded: false, accountingPeek: false };
 
 /** A click target standing in for a DOM element, matched by selector list. */
 function target(selectors: Record<string, Record<string, string>>) {
@@ -1758,7 +1760,8 @@ describe("footerHtml: the V4 segmented dock", () => {
     // vanishing, so the strip's geometry does not jump at a turn boundary.
     const got = footerHtml(input(), CLOSED, NOW);
     // Assert
-    expect(got).toContain('<div class="pfooter-cell pfooter-tokens"><span class="info-tokens">--</span></div>');
+    expect(got).toContain('class="pfooter-cell pfooter-tokens"');
+    expect(got).toContain('<span class="info-tokens">--</span></div>');
   });
 
   it("escapes the activity detail", () => {
@@ -2376,8 +2379,8 @@ describe("expensiveTurnRowHtml: the uncached-input alert", () => {
   });
 });
 
-describe("footerHtml: the accounting cell (daemon-resolved, client-derived fallback)", () => {
-  /** A minimal derived accounting the client-side path would summarize. */
+describe("the accounting metadata: off the strip, behind the token cell", () => {
+  /** A settled turn the client-side projection can draw fields off. */
   function derivedItems(): ConversationItem[] {
     return [
       {
@@ -2398,8 +2401,8 @@ describe("footerHtml: the accounting cell (daemon-resolved, client-derived fallb
     ];
   }
 
-  it("renders the DAEMON's summary verbatim when it carries one", () => {
-    // Arrange
+  it("keeps the DAEMON's accounting summary out of the strip entirely", () => {
+    // Arrange — the very cell the strip used to end in.
     const i = input({
       progress: progress({
         accounting: { summary: "5h 10.0% · 2s", verdict: { kind: "complete" } },
@@ -2408,39 +2411,51 @@ describe("footerHtml: the accounting cell (daemon-resolved, client-derived fallb
     // Act
     const got = footerHtml(i, CLOSED, NOW);
     // Assert
-    expect(got).toContain(
-      `<div class="pfooter-cell pfooter-accounting" title="5h 10.0% · 2s">5h 10.0% · 2s</div>`,
-    );
+    expect(got).not.toContain("pfooter-accounting\"");
+    expect(got).not.toContain("5h 10.0% · 2s");
   });
 
-  it("lets the daemon's cell WIN over the client-derived line", () => {
-    // Arrange — both exist; the verbatim-render doctrine says the daemon's own
-    // reconciliation is the one on screen.
-    const i = input({
-      items: derivedItems(),
-      progress: progress({ accounting: { summary: "daemon says", verdict: { kind: "complete" } } }),
-    });
-    // Act
-    const got = footerHtml(i, CLOSED, NOW);
+  it("keeps the CLIENT-DERIVED accounting line out of the strip too", () => {
+    // Arrange / Act — the fallback cell is gone with the cell it backed.
+    const got = footerHtml(input({ items: derivedItems() }), CLOSED, NOW);
     // Assert
     expect(got).not.toContain("INCOMPLETE ACCOUNTING");
   });
 
-  it("classes an INVALID verdict as the invalid cell", () => {
-    // Arrange
-    const i = input({
-      progress: progress({
-        accounting: { summary: "bad", verdict: { kind: "invalid", problems: ["totals disagree"] } },
-      }),
-    });
-    // Act
-    const got = footerHtml(i, CLOSED, NOW);
+  it("keeps the token cell's own figure on the strip", () => {
+    // Arrange / Act — the yellow cell is the strip's ONE token surface, and it
+    // is untouched by the accounting cell's removal.
+    const got = footerHtml(input({ progress: progress({ inputTokens: 1234 }) }), CLOSED, NOW);
     // Assert
-    expect(got).toContain(`class="pfooter-cell pfooter-accounting-invalid"`);
+    expect(got).toContain("1.2k in");
   });
 
-  it("appends an INCOMPLETE verdict's phrases to the cell's tooltip", () => {
-    // Arrange — the phrases are display-ready prose the daemon composed.
+  it("leaves the token cell's idle dash unchanged when nothing is spent", () => {
+    // Arrange / Act — the cell that renders `--` between turns.
+    const got = footerHtml(input(), CLOSED, NOW);
+    // Assert
+    expect(got).toContain(`<span class="info-tokens">${IDLE_LABEL}</span>`);
+  });
+
+  it("marks the token cell as the peek's trigger", () => {
+    // Arrange / Act
+    const got = footerHtml(input({ progress: progress({ inputTokens: 10 }) }), CLOSED, NOW);
+    // Assert
+    expect(got).toContain(`class="pfooter-cell pfooter-tokens" data-pfooter-tokens`);
+  });
+
+  it("draws the settled turn's figures as labelled pairs when the peek stands", () => {
+    // Arrange
+    const i = input({ items: derivedItems() });
+    // Act
+    const got = accountingPeekHtml(i);
+    // Assert
+    expect(got).toContain(`<span class="pfooter-peek-label">verdict</span>`);
+    expect(got).toContain(`<span class="pfooter-peek-value">INCOMPLETE ACCOUNTING</span>`);
+  });
+
+  it("falls back to the daemon's composed sentence when no turn has settled", () => {
+    // Arrange — the daemon ships prose, not fields, so it is rendered verbatim.
     const i = input({
       progress: progress({
         accounting: {
@@ -2450,15 +2465,162 @@ describe("footerHtml: the accounting cell (daemon-resolved, client-derived fallb
       }),
     });
     // Act
-    const got = footerHtml(i, CLOSED, NOW);
+    const got = accountingPeekHtml(i);
     // Assert
-    expect(got).toContain(`title="partial; turn start; turn end"`);
+    expect(got).toContain(`<div class="pfooter-peek-line">partial</div>`);
+    expect(got).toContain(`<div class="pfooter-peek-line">turn start</div>`);
   });
 
-  it("falls back to the client-derived line when the daemon resolved no cell", () => {
-    // Arrange / Act — the fallback covers turns the daemon has not settled.
-    const got = footerHtml(input({ items: derivedItems() }), CLOSED, NOW);
+  it("answers a click on a session with no accounting at all", () => {
+    // Arrange / Act — the click was deliberate and gets a sentence, not a void.
+    const got = accountingPeekHtml(input());
     // Assert
-    expect(got).toContain("INCOMPLETE ACCOUNTING");
+    expect(got).toContain("no turn has settled its accounting yet");
+  });
+
+  it("scrolls the peek when its figures outrun the section's row ceiling", () => {
+    // Arrange — the complete shape's nine facts sit in three grid rows, so the
+    // marker tracks the ROW COUNT the section counts, not the fact count.
+    const got = accountingPeekHtml(input({ items: derivedItems() }));
+    // Assert
+    expect(got).toContain(`--pfooter-sheet-rows:${EXPANDED_FOOTER_MAX_ROWS}`);
+  });
+
+  it("shows the peek INSTEAD of the expanded footer's ordinary rows", () => {
+    // Arrange — the section was open on its own detail.
+    const i = input({ items: derivedItems() });
+    // Act
+    const got = footerHtml(i, { ...CLOSED, expanded: true, accountingPeek: true }, NOW);
+    // Assert
+    expect(got).toContain("pfooter-accounting-peek");
+    expect(got).not.toContain("pfooter-sheet-empty");
+  });
+
+  it("shows the peek even when the expanded footer is closed", () => {
+    // Arrange / Act — the click asked for the accounting; the section's own
+    // disclosure has no say in whether the answer arrives.
+    const got = footerHtml(input({ items: derivedItems() }), { ...CLOSED, accountingPeek: true }, NOW);
+    // Assert
+    expect(got).toContain("pfooter-accounting-peek");
+  });
+
+  it("classifies a click on the token cell as the peek, not an expansion", () => {
+    // Arrange — the cell lives INSIDE the clickable strip.
+    const t = target({ "[data-pfooter-tokens]": {}, "[data-pfooter-strip]": {} });
+    // Act / Assert
+    expect(footerClickAction(t)).toEqual({ kind: "peek-accounting" });
+  });
+});
+
+describe("ProgressFooter: the peek's ten-second window", () => {
+  /** A footer mounted with a hand-driven timer, so no wall clock is involved. */
+  function mounted() {
+    const el = document.createElement("div");
+    let pending: (() => void) | null = null;
+    let delay = 0;
+    let cleared = 0;
+    const footer = new ProgressFooter(
+      el,
+      () => NOW,
+      (fn, ms) => {
+        pending = fn;
+        delay = ms;
+        return 1;
+      },
+      () => {
+        cleared += 1;
+      },
+    );
+    return {
+      el,
+      footer,
+      fire: () => {
+        const fn = pending;
+        pending = null;
+        if (fn === null) throw new Error("no timer pending");
+        fn();
+      },
+      delay: () => delay,
+      cleared: () => cleared,
+    };
+  }
+
+  it("opens the peek on the token cell's verb", () => {
+    // Arrange
+    const m = mounted();
+    m.footer.render(input());
+    // Act
+    m.footer.peekAccounting();
+    m.footer.render(input());
+    // Assert
+    expect(m.el.innerHTML).toContain("pfooter-accounting-peek");
+  });
+
+  it("holds the peek for exactly the specified window", () => {
+    // Arrange
+    const m = mounted();
+    m.footer.render(input());
+    // Act
+    m.footer.peekAccounting();
+    // Assert
+    expect(m.delay()).toBe(ACCOUNTING_PEEK_MS);
+  });
+
+  it("repaints itself when the window lapses, with no frame arriving", () => {
+    // Arrange
+    const m = mounted();
+    m.footer.render(input());
+    m.footer.peekAccounting();
+    m.footer.render(input());
+    // Act
+    m.fire();
+    // Assert
+    expect(m.el.innerHTML).not.toContain("pfooter-accounting-peek");
+  });
+
+  it("reverts to the expanded footer's PREVIOUS state, whatever it was", () => {
+    // Arrange — the section was deliberately closed before the peek.
+    const m = mounted();
+    m.footer.toggleExpanded();
+    m.footer.render(input());
+    m.footer.peekAccounting();
+    // Act
+    m.fire();
+    // Assert
+    expect(m.footer.disclosure()).toEqual({ tasksOpen: false, expanded: false, accountingPeek: false });
+    expect(m.el.innerHTML).not.toContain("pfooter-sheet");
+  });
+
+  it("restarts the window rather than stacking timers on a re-click", () => {
+    // Arrange
+    const m = mounted();
+    m.footer.render(input());
+    m.footer.peekAccounting();
+    // Act
+    m.footer.peekAccounting();
+    // Assert — the first click's timer is cancelled, so it cannot fire under
+    // the second click's peek and close it early.
+    expect(m.cleared()).toBe(1);
+  });
+
+  it("ends a standing peek when the reader works the disclosure itself", () => {
+    // Arrange
+    const m = mounted();
+    m.footer.render(input());
+    m.footer.peekAccounting();
+    // Act
+    m.footer.toggleExpanded();
+    // Assert
+    expect(m.footer.disclosure().accountingPeek).toBe(false);
+    expect(m.cleared()).toBe(1);
+  });
+
+  it("raises rather than repaints when the window lapses before any render", () => {
+    // Arrange — impossible from the UI (the trigger is markup a render makes),
+    // so it is a bug in this class rather than a state to cope with.
+    const m = mounted();
+    m.footer.peekAccounting();
+    // Act / Assert
+    expect(() => m.fire()).toThrow(/repaint before the dock has ever rendered/);
   });
 });

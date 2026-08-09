@@ -44,7 +44,7 @@ import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
 import { agentElapsedLabel } from "./topbar.js";
 import { agentUncachedInput, compactTokens, TOKEN_HEAT_CLASS, tokenHeatStyle } from "./tokens.js";
 import type { SessionTokenUtilization } from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
-import { accountingSummary, latestTurnAccounting } from "./turn-accounting.js";
+import { AccountingFact, accountingFacts, latestTurnAccounting } from "./turn-accounting.js";
 
 /**
  * Which of the footer's counter overlays is open, and whether the EXPANDED
@@ -58,6 +58,19 @@ export interface FooterDisclosure {
   tasksOpen: boolean;
   /** Whether the expanded footer is showing. */
   expanded: boolean;
+  /**
+   * Whether the TOKEN PEEK is standing: the expanded footer showing the turn's
+   * accounting metadata instead of whatever it was showing.
+   *
+   * It is a boolean rather than a deadline because the peek has exactly one
+   * owner — `ProgressFooter`'s timer — and a deadline here would be a second
+   * account of when it ends that a stalled render could disagree with.
+   *
+   * It does NOT disturb `expanded`. The peek OVERRIDES the section for its
+   * window and then stops overriding it, so whatever the section was showing
+   * before the click is what it shows after, including nothing at all.
+   */
+  accountingPeek: boolean;
 }
 
 /**
@@ -707,6 +720,13 @@ export function toolElapsed(tool: ToolItem, nowMs: number): string {
  * could disagree. The zero is a display of the absence of a figure, not a
  * fabricated one: the daemon sends no count until the first assistant usage
  * lands, and that real figure then overwrites this.
+ *
+ * IT IS THE FOOTER'S ONLY TOKEN SURFACE. The strip used to end in a cell that
+ * spelled out the whole of the turn's accounting — quota movement, cache
+ * figures, subagent count, tokens per second — in a line nothing could read at
+ * a glance and everything else had to make room for. That metadata now lives
+ * behind a click on THIS cell (see `accountingPeekHtml`), so the strip carries
+ * one token figure and the detail is a gesture away.
  */
 export function tokenCellHtml(p: ProgressInput): string {
   const parts: string[] = [];
@@ -846,6 +866,70 @@ export function sheetHtml(input: FooterInput, nowMs: number): string {
     `<div class="${classes}" style="--pfooter-sheet-rows:${EXPANDED_FOOTER_MAX_ROWS}">` +
     `${rows.join("")}</div>`
   );
+}
+
+/** Marks the token cell, so a click on it opens the accounting peek. */
+export const TOKEN_CELL_ATTR = "data-pfooter-tokens";
+
+/** How long the token peek holds the expanded footer before it lets go. */
+export const ACCOUNTING_PEEK_MS = 10_000;
+
+/**
+ * The TOKEN PEEK: the turn's accounting metadata, as a grid of labelled figures
+ * filling the expanded footer for `ACCOUNTING_PEEK_MS`.
+ *
+ * This is where the strip's old far-right accounting cell went. As a cell it
+ * was one unreadable run-on line competing with the phase, the activity and the
+ * clock for the strip's width; as a grid it is nine figures a reader can
+ * actually find one of.
+ *
+ * SOURCE. The pairs come from the feed's own settled accounting, which is the
+ * only form that carries FIELDS — the daemon resolves the same reconciliation
+ * but ships it as one composed sentence, and prettifying a composed sentence
+ * means parsing it, which this side does not do to daemon prose. When the feed
+ * has no settled turn the daemon's sentence is rendered VERBATIM instead, with
+ * its verdict phrases beneath it, which is exactly how the retired cell drew
+ * it.
+ */
+export function accountingPeekHtml(input: FooterInput): string {
+  const rows = accountingPeekRows(input);
+  const classes = `pfooter-sheet pfooter-accounting-peek${expandedFooterScrolls(rows.length) ? " scrolls" : ""}`;
+  return (
+    `<div class="${classes}" style="--pfooter-sheet-rows:${EXPANDED_FOOTER_MAX_ROWS}">` +
+    `${rows.join("")}</div>`
+  );
+}
+
+/** One labelled figure as the peek's grid cell. */
+function accountingFactHtml(fact: AccountingFact): string {
+  return (
+    `<div class="pfooter-peek-fact">` +
+    `<span class="pfooter-peek-label">${escapeHtml(fact.label)}</span>` +
+    `<span class="pfooter-peek-value">${escapeHtml(fact.value)}</span></div>`
+  );
+}
+
+/**
+ * The peek's rows, in the source order the doc above states. A session with no
+ * accounting at all says so rather than opening an empty section: the click was
+ * deliberate and deserves an answer.
+ */
+function accountingPeekRows(input: FooterInput): string[] {
+  const settled = latestTurnAccounting(input.items);
+  if (settled !== null) return accountingFacts(settled).map(accountingFactHtml);
+  const daemon = input.progress?.accounting ?? null;
+  if (daemon !== null) {
+    const phrases =
+      daemon.verdict.kind === "incomplete"
+        ? daemon.verdict.missing
+        : daemon.verdict.kind === "invalid"
+          ? daemon.verdict.problems
+          : [];
+    return [daemon.summary, ...phrases].map(
+      (line) => `<div class="pfooter-peek-line">${escapeHtml(line)}</div>`,
+    );
+  }
+  return [`<div class="pfooter-peek-line">no turn has settled its accounting yet</div>`];
 }
 
 /**
@@ -1026,33 +1110,33 @@ export function footerHtml(
     `<div class="pfooter-cell pfooter-clock">` +
       `<span class="info-time" ${TIMER_SLOT}>${escapeHtml(label)}</span></div>`,
   );
+  // THE ONE TOKEN CELL, and the strip's only account of tokens. It is a button:
+  // the turn's full accounting metadata is a click away in the expanded footer
+  // rather than spelled out in a cell of its own at the strip's right end.
   const tokens = tokenCellHtml(p);
-  if (tokens !== "") cells.push(`<div class="pfooter-cell pfooter-tokens">${tokens}</div>`);
+  if (tokens !== "") {
+    cells.push(
+      `<div class="pfooter-cell pfooter-tokens" ${TOKEN_CELL_ATTR} role="button" tabindex="0" ` +
+        `title="click for this turn's accounting">${tokens}</div>`,
+    );
+  }
   const counters = countersHtml(input, open);
   if (counters !== "") cells.push(`<div class="pfooter-cell pfooter-counters">${counters}</div>`);
-  // The DAEMON-resolved cell wins whenever it is present: the reconciliation,
-  // the verdict and the prose are all its own, and the verbatim-render doctrine
-  // says this side draws them rather than recomputing a second opinion beside
-  // them. The client-derived line below is kept ONLY as the absence fallback —
-  // it covers turns the daemon has not resolved yet.
-  const daemonAccounting = p.accounting;
-  if (daemonAccounting !== null) {
-    const phrases =
-      daemonAccounting.verdict.kind === "incomplete"
-        ? daemonAccounting.verdict.missing
-        : daemonAccounting.verdict.kind === "invalid"
-          ? daemonAccounting.verdict.problems
-          : [];
-    const title = [daemonAccounting.summary, ...phrases].join("; ");
-    cells.push(`<div class="pfooter-cell ${daemonAccounting.verdict.kind === "invalid" ? "pfooter-accounting-invalid" : "pfooter-accounting"}" title="${escapeHtml(title)}">${escapeHtml(daemonAccounting.summary)}</div>`);
-  } else {
-    const accounting = latestTurnAccounting(input.items);
-    if (accounting !== null) {
-      const summary = accountingSummary(accounting);
-      cells.push(`<div class="pfooter-cell ${accounting.verdict.kind === "invalid" ? "pfooter-accounting-invalid" : "pfooter-accounting"}" title="${escapeHtml(summary)}">${escapeHtml(summary)}</div>`);
-    }
-  }
+  // NO ACCOUNTING CELL. The strip used to end in the turn's whole
+  // reconciliation — quota movement, cache figures, subagent count, tokens per
+  // second — as one run-on line. It is the token cell's peek now
+  // (`accountingPeekHtml`), which is the surface that can lay it out legibly.
 
+  // The PEEK OUTRANKS the expanded footer's ordinary rows for its window, and
+  // shows even when the section is closed: the click asked for the accounting,
+  // and honoring it only when the section happened to be open would make the
+  // gesture do nothing half the time. Nothing about `expanded` changes, so the
+  // section returns to exactly what it was when the peek lets go.
+  const expansion = open.accountingPeek
+    ? accountingPeekHtml(input)
+    : open.expanded
+      ? sheetHtml(input, nowMs)
+      : "";
   return (
     `<div class="pfooter" role="status" aria-live="polite">` +
     `<div class="pfooter-cells" ${FOOTER_STRIP_ATTR} role="button" tabindex="0" ` +
@@ -1060,7 +1144,7 @@ export function footerHtml(
     mergeNoteRowHtml(input.mergeStatus) +
     errorRowHtml(p) +
     expensiveTurnRowHtml(p) +
-    (open.expanded ? sheetHtml(input, nowMs) : "") +
+    expansion +
     `</div>`
   );
 }
@@ -1078,6 +1162,7 @@ export type FooterClick =
   | { kind: "reveal-agent"; agentId: string }
   | { kind: "reveal-task"; taskId: string }
   | { kind: "reveal-error"; uuid: string }
+  | { kind: "peek-accounting" }
   | { kind: "toggle-expand" };
 
 /**
@@ -1104,6 +1189,10 @@ export function footerClickAction(target: FooterClickTarget): FooterClick | null
     .closest("[data-pfooter-error-uuid]")
     ?.getAttribute("data-pfooter-error-uuid");
   if (uuid) return { kind: "reveal-error", uuid };
+  // BEFORE the strip toggle, for the reason the roster verbs are: the token
+  // cell lives inside the clickable strip, so testing the strip first would
+  // swallow every peek into an expansion toggle.
+  if (target.closest(`[${TOKEN_CELL_ATTR}]`)) return { kind: "peek-accounting" };
   if (target.closest(`[${FOOTER_STRIP_ATTR}]`)) return { kind: "toggle-expand" };
   return null;
 }
@@ -1131,7 +1220,7 @@ export class ProgressFooter {
    * subagent roster — are the session's standing detail, and a reader who has
    * to discover a click before seeing them is a reader who does not see them.
    */
-  private open: FooterDisclosure = { tasksOpen: false, expanded: true };
+  private open: FooterDisclosure = { tasksOpen: false, expanded: true, accountingPeek: false };
   /**
    * The breathing phase word's bookkeeping. It lives on the OWNER rather than
    * in the markup for the same reason the disclosure does: `render` rewrites
@@ -1139,10 +1228,22 @@ export class ProgressFooter {
    * for the breath that loss is precisely the reset the design forbids.
    */
   private readonly breath = new BreathingTicker();
+  /** The peek's live timer, or null when no peek stands. */
+  private peekTimer: number | null = null;
+  /**
+   * The last input rendered, so the peek's own expiry can repaint the dock
+   * without a frame arriving. It is the SAME input the peek was opened over,
+   * which is what makes the revert a redraw of the section as it was.
+   */
+  private lastInput: FooterInput | null = null;
 
   constructor(
     private readonly el: HTMLElement,
     private readonly now: () => number = () => Date.now(),
+    private readonly setTimer: (fn: () => void, ms: number) => number = (fn, ms) =>
+      window.setTimeout(fn, ms),
+    private readonly clearTimer: (handle: number) => void = (handle) =>
+      window.clearTimeout(handle),
   ) {}
 
   /** Rewrite the dock. Every value it interpolates is escaped in the builders. */
@@ -1151,6 +1252,7 @@ export class ProgressFooter {
     // the view it is rendering rather than the previous one's.
     this.breath.observe(input.progress);
     const now = this.now();
+    this.lastInput = input;
     this.el.innerHTML = footerHtml(input, this.open, now, this.breath.state(now));
   }
 
@@ -1173,9 +1275,58 @@ export class ProgressFooter {
     this.open = { ...this.open, tasksOpen: menu === "tasks" };
   }
 
-  /** Flip the expanded footer. */
+  /**
+   * Flip the expanded footer.
+   *
+   * It ENDS any standing peek: an explicit disclosure gesture is the reader
+   * saying what the section should show, and leaving a timed override sitting
+   * on top of that would answer the gesture with the accounting for another few
+   * seconds.
+   */
   toggleExpanded(): void {
+    this.endPeek();
     this.open = { ...this.open, expanded: !this.open.expanded };
+  }
+
+  /**
+   * Open the TOKEN PEEK for `ACCOUNTING_PEEK_MS`, then put the expanded footer
+   * back to whatever it was showing.
+   *
+   * The window is the FOOTER's to keep, not the caller's: a caller holding the
+   * timeout would have to remember to cancel the previous one, and a forgotten
+   * cancel is a peek that closes early because an older click's timer fired
+   * under it. Re-clicking during a peek restarts the window here, where the
+   * only handle lives.
+   */
+  peekAccounting(): void {
+    this.endPeek();
+    this.open = { ...this.open, accountingPeek: true };
+    this.peekTimer = this.setTimer(() => {
+      this.peekTimer = null;
+      this.open = { ...this.open, accountingPeek: false };
+      this.repaint();
+    }, ACCOUNTING_PEEK_MS);
+  }
+
+  /** Drop a standing peek and its timer, leaving `expanded` alone. */
+  private endPeek(): void {
+    if (this.peekTimer !== null) this.clearTimer(this.peekTimer);
+    this.peekTimer = null;
+    this.open = { ...this.open, accountingPeek: false };
+  }
+
+  /**
+   * Redraw the dock from the last input, for a change that no frame carries.
+   *
+   * A repaint before the first render is impossible — every path into it starts
+   * at a click on markup only a render produces — so an absent input is a bug
+   * in this class and is raised as one rather than quietly skipped.
+   */
+  private repaint(): void {
+    if (this.lastInput === null) {
+      throw new Error("progress-footer: repaint before the dock has ever rendered");
+    }
+    this.render(this.lastInput);
   }
 
   /** Close every overlay (a click-away, or the feed taking focus). */

@@ -3010,6 +3010,52 @@ pre {
 .pfooter-sheet.scrolls { overflow-y: auto; }
 .pfooter-sheet-empty { font-style: italic; }
 
+/* The TOKEN PEEK: the turn's accounting metadata, filling the expanded footer
+   for its ten seconds.
+
+   It is WHITE — the foreground, not the section's usual muted grey — because
+   it is not standing detail the eye should skim past. It is there because the
+   reader just asked for it, and it goes away on its own.
+
+   THREE COLUMNS, so the nine figures land in three rows and stay inside the
+   section's row ceiling instead of scrolling a reader past half of what they
+   clicked for. */
+.pfooter-accounting-peek {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 22px;
+  color: var(--fg);
+}
+.pfooter-peek-fact {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  justify-content: space-between;
+  overflow: hidden;
+}
+/* The label is the same white, held apart from the figure by weight and case
+   rather than by a second color. */
+.pfooter-peek-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.pfooter-peek-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The verbatim fallback (the daemon's composed sentence) is prose, not a pair,
+   so it spans the whole grid rather than sitting in one column. */
+.pfooter-peek-line { grid-column: 1 / -1; }
+
+/* The token cell is the peek's trigger, so it says so on hover. */
+.pfooter-tokens { cursor: pointer; }
+.pfooter-tokens:hover { text-decoration: underline; }
+
 /* One subagent's row: what it is on the left, what it has cost on the right.
    It keeps the shared `.agent-row` press affordance and drops that rule's
    padding, which would put every row over the row height the ceiling counts. */

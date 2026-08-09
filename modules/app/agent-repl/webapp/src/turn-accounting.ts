@@ -12,30 +12,77 @@ export function latestTurnAccounting(items: readonly ConversationItem[]): TurnAc
   return null;
 }
 
-export function accountingSummary(accounting: TurnAccounting): string {
+/**
+ * One labelled figure out of a turn's accounting.
+ *
+ * The pairs are the SINGLE owner of what a turn's accounting says. Every
+ * surface that reports the accounting reads these — the footer's token peek
+ * draws them as a grid, and the degraded-verdict warning joins them into its
+ * log line — so a figure can never read one way on screen and another in the
+ * log.
+ */
+export interface AccountingFact {
+  /** What the figure is, in the reader's words. */
+  label: string;
+  /** The figure itself, already formatted. */
+  value: string;
+}
+
+/**
+ * A turn's accounting as labelled figures, and the one place a degraded verdict
+ * is recorded.
+ *
+ * The three verdicts return DIFFERENT pairs rather than a complete shape with
+ * holes in it: an invalid turn's problems and an incomplete turn's absent
+ * evidence are the only facts those turns have, and padding them out with
+ * zeroed token figures would report costs nothing measured.
+ */
+export function accountingFacts(accounting: TurnAccounting): readonly AccountingFact[] {
   if (isInvalidAccounting(accounting)) {
-    const summary = `INVALID ACCOUNTING: ${accounting.verdict.problems.map((problem) => problem.kind).join(", ")}${invalidEvidenceSummary(accounting)}`;
-    reportDegradedAccounting(accounting, "invalid", summary, {
+    const facts: AccountingFact[] = [
+      { label: "verdict", value: "INVALID ACCOUNTING" },
+      { label: "problems", value: accounting.verdict.problems.map((problem) => problem.kind).join(", ") },
+    ];
+    const absent = missingEvidence(accounting, invalidEvidencePresence);
+    if (absent.length > 0) facts.push({ label: "missing evidence", value: absent.join(", ") });
+    reportDegradedAccounting(accounting, "invalid", accountingFactsLine(facts), {
       problems: accounting.verdict.problems.map((problem) => problem.kind),
-      missing_evidence: missingEvidence(accounting, invalidEvidencePresence),
+      missing_evidence: absent,
     });
-    return summary;
+    return facts;
   }
   if (accounting.reconciliation === undefined || accounting.reconciliation.responseAllAgents === undefined || accounting.timing === undefined || accounting.usageAtStart?.outcome === undefined || accounting.usageAtEnd?.outcome === undefined) {
-    const summary = `INCOMPLETE ACCOUNTING${completeEvidenceSummary(accounting)}`;
-    reportDegradedAccounting(accounting, "incomplete", summary, {
-      missing_evidence: missingEvidence(accounting, completeEvidencePresence),
+    const facts: AccountingFact[] = [{ label: "verdict", value: "INCOMPLETE ACCOUNTING" }];
+    const absent = missingEvidence(accounting, completeEvidencePresence);
+    if (absent.length > 0) facts.push({ label: "missing evidence", value: absent.join(", ") });
+    reportDegradedAccounting(accounting, "incomplete", accountingFactsLine(facts), {
+      missing_evidence: absent,
     });
-    return summary;
+    return facts;
   }
   const total = accounting.reconciliation.responseAllAgents;
   const duration = accounting.timing.promptToResultMs;
   const tps = duration > 0 ? (1000 * total.outputTokens) / duration : null;
   const quota = accounting.usageAtStart.outcome.kind === "available" && accounting.usageAtEnd.outcome.kind === "available"
-    ? `${accounting.usageAtStart.outcome.utilizationPercent.toFixed(1)}%→${accounting.usageAtEnd.outcome.utilizationPercent.toFixed(1)}% (${(accounting.usageAtEnd.outcome.utilizationPercent - accounting.usageAtStart.outcome.utilizationPercent).toFixed(1)}pp)`
+    ? `${accounting.usageAtStart.outcome.utilizationPercent.toFixed(1)}% → ${accounting.usageAtEnd.outcome.utilizationPercent.toFixed(1)}% (${(accounting.usageAtEnd.outcome.utilizationPercent - accounting.usageAtStart.outcome.utilizationPercent).toFixed(1)}pp)`
     : "unavailable";
   const subagents = accounting.responses.filter((response) => response.actor === "subagent").length;
-  return `5h ${quota} · ${Math.round(duration / 1000)}s · in ${formatTokens(total.inputTokens)} · out ${formatTokens(total.outputTokens)} · read ${formatTokens(total.cacheReadInputTokens)} · write ${formatTokens(total.cacheCreationInputTokens)} · ${total.cacheRates === undefined ? "hit unavailable" : rate(total.cacheRates.cacheHitRate)} · ${subagents} subagent${subagents === 1 ? "" : "s"} · ${tps === null ? "generation unavailable" : `${tps.toFixed(1)} tok/s`}`;
+  return [
+    { label: "5h quota", value: quota },
+    { label: "duration", value: `${Math.round(duration / 1000)}s` },
+    { label: "input", value: formatTokens(total.inputTokens) },
+    { label: "output", value: formatTokens(total.outputTokens) },
+    { label: "cache read", value: formatTokens(total.cacheReadInputTokens) },
+    { label: "cache write", value: formatTokens(total.cacheCreationInputTokens) },
+    { label: "cache hit", value: total.cacheRates === undefined ? "unavailable" : rate(total.cacheRates.cacheHitRate) },
+    { label: "subagents", value: String(subagents) },
+    { label: "generation", value: tps === null ? "unavailable" : `${tps.toFixed(1)} tok/s` },
+  ];
+}
+
+/** The facts as ONE line, for a log record that cannot carry a grid. */
+export function accountingFactsLine(facts: readonly AccountingFact[]): string {
+  return facts.map((fact) => `${fact.label} ${fact.value}`).join(" · ");
 }
 
 function isInvalidAccounting(accounting: TurnAccounting): accounting is InvalidTurnAccounting {
@@ -43,7 +90,7 @@ function isInvalidAccounting(accounting: TurnAccounting): accounting is InvalidT
 }
 
 function rate(cacheHitRate: number): string {
-  return `hit ${(100 * cacheHitRate).toFixed(1)}%`;
+  return `${(100 * cacheHitRate).toFixed(1)}%`;
 }
 
 /**
@@ -78,23 +125,10 @@ function missingEvidence(accounting: TurnAccounting, presence: EvidencePresence)
   return presence(accounting).filter(([, present]) => !present).map(([name]) => name);
 }
 
-function evidenceSummary(accounting: TurnAccounting, presence: EvidencePresence): string {
-  const evidence = missingEvidence(accounting, presence).map((name) => `${name} absent`);
-  return evidence.length === 0 ? "" : ` · ${evidence.join(", ")}`;
-}
-
-function invalidEvidenceSummary(accounting: InvalidTurnAccounting): string {
-  return evidenceSummary(accounting, invalidEvidencePresence);
-}
-
-function completeEvidenceSummary(accounting: TurnAccounting): string {
-  return evidenceSummary(accounting, completeEvidencePresence);
-}
-
 /**
  * A degraded accounting verdict is DRAWN — the user reads "INVALID ACCOUNTING"
- * or "INCOMPLETE ACCOUNTING" in the footer and the topbar — so it must also
- * leave a record a warning sweep can find. Both chrome surfaces re-render the
+ * or "INCOMPLETE ACCOUNTING" in the footer's token peek — so it must also
+ * leave a record a warning sweep can find. The chrome re-renders the
  * latest turn on every frame, so the record is deduped per turn on `turnId`:
  * wslog suppresses a repeat of the SAME message under the key, and a verdict
  * that CHANGES for that turn (evidence landing late, incomplete hardening into
