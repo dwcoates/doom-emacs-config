@@ -2221,8 +2221,9 @@ function phaseObject(v: unknown, ctx: string, allowed: readonly string[]): Obj {
 
 /**
  * cherry_picking and testing carry the identical four fields, and deliberately
- * so: testing is the same commit walk with the suite gating each landing, so a
- * renderer draws one progress bar for both.
+ * so: testing is the tail of the same commit walk — the suite gates the head the
+ * walk reached, carrying the cursor the walk left — so a renderer draws one
+ * progress bar for both.
  */
 function decodeMergeCommitProgress(
   v: unknown,
