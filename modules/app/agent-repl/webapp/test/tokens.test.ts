@@ -26,7 +26,7 @@ import {
   TokenTimingTotalsSchema,
   TokenUsageTotalsSchema,
   TokenUtilizationSubagentSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
+} from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
 
 function timing(over: Partial<TokenTimingTotals> = {}): TokenTimingTotals {
   return {
