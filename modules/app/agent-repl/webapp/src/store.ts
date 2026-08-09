@@ -28,7 +28,7 @@ import type {
   TopbarView,
   WorkspaceGateView,
 } from "./frontend-proto.js";
-import { admitFenced, type FencedView } from "./fence.js";
+import { admitFenced, type FencedComponentView, type FencedView } from "./fence.js";
 import { CONNECTIVITY_WINDOW_KINDS, failureKindName, failureResolvedAtMs } from "./failure-card.js";
 import type {
   AdapterEffect,
@@ -947,12 +947,18 @@ export class ConversationStore {
           break;
         case "async-bubble-delta":
         case "async-bubble-anchored": {
-          // THE FENCE CHOKE POINT connects here: a push whose fence does not
-          // match the workspace's current one is stale and must be discarded
-          // whole BEFORE this line, never partially adopted. The routing below
-          // is deliberately separate from that question — it decides WHERE an
-          // update lands, not whether the push is current.
-          const routed = this.applyAsyncBubbleDelta(effect.value);
+          // THE FENCE CHOKE POINT, connected. A push whose fence does not match
+          // the workspace's current one describes a session that is gone, so it
+          // is discarded WHOLE here — before the registry sees one bubble of it
+          // — and reported once. Routing below is deliberately a separate
+          // question: it decides WHERE an update lands, not whether the push is
+          // current, and it never runs for a push the gate refused.
+          const admitted = this.gateFenced({ case: "asyncBubbleDelta" as const, value: effect.value });
+          if (admitted === null) break;
+          // A STALE PUSH RAISES NO GAP. `throughSeq` counts a sequence the
+          // retired session owned, so measuring the live registry against it
+          // would report a hole that does not exist and trigger a resync for it.
+          const routed = this.applyAsyncBubbleDelta(admitted.value);
           if (routed.ok) changed = changed || routed.opened > 0 || routed.updated > 0;
           // The FIRST gap wins and the rest of the batch is still walked: a
           // resync re-delivers everything anyway, and a second gap report
@@ -1345,13 +1351,30 @@ export class ConversationStore {
    * once through the store's canonical log channel with the two fences side by
    * side.
    */
-  private applyFencedView(view: FencedView): boolean {
+  /**
+   * THE ONE PLACE this store asks {@link admitFenced} anything.
+   *
+   * Every fenced push — the three resolved component views and the detached-work
+   * delta alike — reaches the gate through here, so "what does stale mean" has
+   * one answer and one discard record. Returns `null` for a stale push, having
+   * already reported it ONCE through the canonical log channel; the caller then
+   * has no admitted value to act on, which is how discard-whole is enforced
+   * rather than merely intended.
+   */
+  private gateFenced<T extends FencedView>(view: T): T | null {
     const verdict = admitFenced(view, this.state.fences.get(view.value.workspace) ?? "");
     if (verdict.kind === "discard") {
       this.log("warn", verdict.report.message, verdict.report.context);
-      return false;
+      return null;
     }
-    const admitted = verdict.view;
+    // `admitFenced` hands back the very view it admitted, so this narrows to
+    // the caller's arm without widening the union it may then act on.
+    return verdict.view as T;
+  }
+
+  private applyFencedView(view: FencedComponentView): boolean {
+    const admitted = this.gateFenced(view);
+    if (admitted === null) return false;
     switch (admitted.case) {
       case "topbar":
         this.state.topbars.set(admitted.value.workspace, admitted.value);
