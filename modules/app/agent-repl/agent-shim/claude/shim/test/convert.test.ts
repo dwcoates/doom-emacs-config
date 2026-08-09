@@ -370,6 +370,90 @@ describe("result_success", () => {
   it("api_error_status null → apiErrorStatusSet false", () => expect(csm().apiErrorStatusSet).toBe(false));
 });
 
+// ---------------------------------------------------------------------------
+// A TURN THE USER STOPPED is named for the stop, not for the error flavor the
+// abort shook out of the SDK. The session acked the interrupt and says so
+// through `ConvertOptions.interrupted`; everything below is what that word
+// changes and what it deliberately leaves alone.
+// ---------------------------------------------------------------------------
+describe("result on an interrupted turn", () => {
+  /** The abort's own result as the SDK actually reports one: an error. */
+  const abortedResult = (): Record<string, unknown> => ({
+    ...loadStream("result_success"),
+    subtype: "error_during_execution",
+    is_error: true,
+    stop_reason: "error",
+  });
+
+  const convertAborted = (opts: Record<string, unknown> = {}) =>
+    convert(abortedResult(), { rootTurnId: "turn-1", interrupted: true, ...opts });
+
+  const resultOf = (r: ReturnType<typeof convert>) => {
+    const m = vendor(r);
+    if (m.msg.case !== "result") throw new Error("case");
+    return m.msg.value;
+  };
+
+  const turnEndedOf = (r: ReturnType<typeof convert>) => {
+    const twin = r.lifecycle.find((e) => e.payload.case === "turnEnded");
+    if (twin?.payload.case !== "turnEnded") throw new Error("no turnEnded twin");
+    return twin.payload.value;
+  };
+
+  it("names the subtype ABORTED instead of the SDK's error flavor", () => {
+    // Arrange + Act.
+    const result = resultOf(convertAborted());
+    // Assert.
+    expect(result.subtype).toBe(6 /* RESULT_SUBTYPE_ABORTED */);
+  });
+
+  it("keeps the vendor's own stop_reason on the record", () => {
+    // Arrange + Act — the SDK's word survives so the record loses nothing.
+    const result = resultOf(convertAborted());
+    // Assert.
+    expect(result.stopReason).toBe("error");
+  });
+
+  it("ends the turn with the `aborted` stop reason the SSM reads as normal", () => {
+    // Arrange + Act.
+    const turnEnded = turnEndedOf(convertAborted());
+    // Assert.
+    expect(turnEnded.stopReason).toBe("aborted");
+  });
+
+  it("leaves is_error exactly as the SDK reported it", () => {
+    // Arrange + Act — the abort's tone is the subtype's business, not a
+    // rewrite of what the vendor claimed about the request.
+    const result = resultOf(convertAborted());
+    // Assert.
+    expect(result.isError).toBe(true);
+  });
+
+  it("does not name a result that closes no turn", () => {
+    // Arrange + Act — no rootTurnId: this result is not that turn's terminal.
+    const converted = convert(abortedResult(), { interrupted: true });
+    // Assert.
+    expect(resultOf(converted).subtype).toBe(2 /* RESULT_SUBTYPE_ERROR_DURING_EXECUTION */);
+    expect(turnEndedOf(converted).stopReason).toBe("error");
+  });
+
+  it("leaves an ordinary terminal on the same turn untouched", () => {
+    // Arrange + Act — no interrupt was acked, so nothing is renamed.
+    const converted = convert(abortedResult(), { rootTurnId: "turn-1" });
+    // Assert.
+    expect(resultOf(converted).subtype).toBe(2 /* RESULT_SUBTYPE_ERROR_DURING_EXECUTION */);
+  });
+
+  it("decodes the stdio transport's own `aborted` subtype to the same member", () => {
+    // Arrange — a Layer-1 result, which already names the outcome itself.
+    const raw = { ...loadStream("result_success"), subtype: "aborted" };
+    // Act.
+    const converted = convert(raw);
+    // Assert.
+    expect(resultOf(converted).subtype).toBe(6 /* RESULT_SUBTYPE_ABORTED */);
+  });
+});
+
 describe("system_init", () => {
   const csm = () => {
     const m = vendor(convert(loadStream("system_init")));

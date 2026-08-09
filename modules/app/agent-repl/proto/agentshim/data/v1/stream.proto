@@ -193,6 +193,22 @@ enum ResultSubtype {
   RESULT_SUBTYPE_ERROR_MAX_TURNS = 3;
   RESULT_SUBTYPE_ERROR_MAX_BUDGET_USD = 4;
   RESULT_SUBTYPE_ERROR_MAX_STRUCTURED_OUTPUT_RETRIES = 5;
+  // THE SHIM'S OWN MEMBER, not one the SDK ever sends. A turn the user
+  // stopped comes back from the SDK wearing whatever error flavor the abort
+  // happened to produce — usually `error_during_execution` — which reads as a
+  // failure the session must recover from. It is not: the user asked for the
+  // stop, and the shim is the party that acked it, so the shim names the
+  // outcome here rather than letting a downstream renderer infer an interrupt
+  // from an error it cannot distinguish from a real one.
+  //
+  // It is the same word the stdio transport's Layer-1 protocol has always
+  // used for an interrupt-ended turn (`ResultSubtype = "aborted"` in
+  // shim/src/protocol.ts), so both transports state the outcome identically.
+  //
+  // The VENDOR'S own account is not overwritten to make room for it:
+  // ResultMessage.stop_reason still carries the SDK's verbatim word, so the
+  // record loses nothing by being named honestly.
+  RESULT_SUBTYPE_ABORTED = 6;
 }
 
 message ResultMessage {

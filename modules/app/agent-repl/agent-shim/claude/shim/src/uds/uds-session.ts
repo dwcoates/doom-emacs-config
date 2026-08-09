@@ -465,6 +465,18 @@ export class UdsSession {
    */
   private readonly displacedTurnDeadlines = new Map<string, ReturnType<typeof setTimeout>>();
   /**
+   * The turns this session ACKED as interrupted, as a fact about the OUTCOME
+   * rather than about the deadline.
+   *
+   * It is deliberately not the deadline map above, which is disarmed the
+   * instant the terminal arrives — and the terminal is precisely the message
+   * that needs to know. So the fact outlives the watchdog by a hair: it is
+   * added when the ack claims the turn displaced, and spent by whichever
+   * terminal closes that turn (the SDK's result, or the one this session
+   * synthesizes).
+   */
+  private readonly interruptedTurnIds = new Set<string>();
+  /**
    * When the SDK last produced ANYTHING for this session.
    *
    * It is the evidence the quiet watchdog reads, and it is stamped at the ONE
@@ -1379,6 +1391,7 @@ export class UdsSession {
       // itself closes every open claim (the daemon's own stop reconciliation).
       for (const timer of this.displacedTurnDeadlines.values()) clearTimeout(timer);
       this.displacedTurnDeadlines.clear();
+      this.interruptedTurnIds.clear();
       this.disarmTurnQuietWatchdog();
       this.resourcesClosePromise = (async (): Promise<void> => {
         try {
@@ -2252,10 +2265,27 @@ export class UdsSession {
       LOGGER.log({ agent_repl_session_id: this.deps.sessionId, model, raw_model: msg.model },
         model === "" ? "system-init model normalized to empty" : "model observed from SDK system-init");
     }
+    // SPEND the interrupt outcome on the terminal that closes the turn. Only a
+    // CLOSING result can be the abort's own terminal: a result retained for
+    // background-task cycles leaves the turn open, and the stop it was acked
+    // for is still owed a terminal after it.
+    const terminalIsInterrupted = terminalTurnId !== undefined
+      && this.interruptedTurnIds.delete(terminalTurnId);
+    if (terminalIsInterrupted) {
+      LOGGER.log({
+        agent_repl_session_id: this.deps.sessionId,
+        query_instance_id: this.queryInstanceId,
+        request_id: terminalTurnId,
+        turn_id: terminalTurnId,
+        decision: "name_terminal_result_aborted",
+        sdk_subtype: typeof msg.subtype === "string" ? msg.subtype : "",
+      }, "the SDK terminal closes a turn this session acked as interrupted; the result is named aborted rather than by the SDK's error flavor");
+    }
     const { vendor, lifecycle, assistantApiUsage } = convert(msg, {
       sessionSource: this.deps.sessionSource,
       sessionGate: this.sessionGate,
       ...(rootTurnId !== undefined ? { rootTurnId } : {}),
+      ...(terminalIsInterrupted ? { interrupted: true } : {}),
       ...this.convertOpts(),
     });
     // Root-turn correlation belongs to this routing owner, not the raw SDK
@@ -2518,6 +2548,10 @@ export class UdsSession {
   private armDisplacedTurnTerminals(turnIds: string[]): void {
     const armed: string[] = [];
     for (const turnId of turnIds) {
+      // The OUTCOME is recorded for every turn the ack names, even one already
+      // carrying a deadline: a second stop on the same turn is still a stop,
+      // and the terminal must be named for it.
+      this.interruptedTurnIds.add(turnId);
       if (this.displacedTurnDeadlines.has(turnId)) continue;
       const timer = setTimeout(() => {
         this.displacedTurnDeadlines.delete(turnId);
@@ -2671,6 +2705,10 @@ export class UdsSession {
       return;
     }
     this.activeTurnIds.splice(index, 1);
+    // This IS the turn's terminal, so the interrupt outcome is spent here too:
+    // the synthesized TurnEnded already names `interrupted`, and a late SDK
+    // result arriving afterwards closes nothing and must not be renamed.
+    this.interruptedTurnIds.delete(turnId);
     this.synthesizedTurnEndIds.push(turnId);
     const boundaryAtMs = this.now();
     const turnStart = this.activeTurnStarts.get(turnId);
