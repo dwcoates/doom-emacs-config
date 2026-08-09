@@ -331,7 +331,7 @@ describe("TaskCatalog mapping", () => {
       taskCatalog: {
         workspace: "ws",
         fence: "s1",
-        tasks: [{ taskId: "t1", kind: "agent", description: "explore", status: "running", startedAtMs: "1000" }],
+        tasks: [{ taskId: "t1", agent: {}, description: "explore", running: {}, startedAtMs: "1000" }],
       },
     });
     expect(effects).toEqual([
@@ -357,7 +357,7 @@ describe("TaskCatalog mapping", () => {
   for (const [proto, counter] of statusCases) {
     it(`maps task status '${proto}' to counter status '${counter}'`, () => {
       const effects = applyOne({
-        taskCatalog: { fence: "s1", tasks: [{ taskId: "t1", kind: "shell", status: proto }] },
+        taskCatalog: { fence: "s1", tasks: [{ taskId: "t1", shell: {}, [proto]: {} }] },
       });
       expect(effects[0]).toMatchObject({ kind: "task-catalog", value: { entries: [{ status: counter }] } });
     });
