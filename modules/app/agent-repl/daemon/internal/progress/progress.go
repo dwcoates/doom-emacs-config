@@ -238,8 +238,11 @@ func (m *Manager) ObserveWorkspaceState(ws *frontendv1.WorkspaceState) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	wp := m.forLocked(name)
-	if sid := ws.GetSessionId(); sid != "" {
-		wp.view.SessionId = sid
+	// The FENCE, not the session id. WorkspaceState is the authority on both;
+	// the view carries the fence because that is the only staleness question a
+	// renderer of this footer ever asks.
+	if fence := ws.GetFence(); fence != "" {
+		wp.view.Fence = fence
 	}
 	wp.view.LiveTaskCount = ws.GetLiveTaskCount()
 	m.pushLocked(name, wp)
@@ -268,9 +271,6 @@ func (m *Manager) NoteTurnAccepted(workspace, sessionID string) *frontendv1.Prog
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	wp := m.forLocked(workspace)
-	if sessionID != "" {
-		wp.view.SessionId = sessionID
-	}
 	if !m.openTurnLocked(wp, m.clock()) {
 		m.logf("progress: turn accepted IDEMPOTENT ws=%s session=%s turn_open=true interrupt_outcome=%s",
 			workspace, sessionID, wp.view.GetInterrupt().GetOutcome())
@@ -341,9 +341,6 @@ func (m *Manager) NoteInterrupt(workspace, sessionID string, outcome corev1.Inte
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	wp := m.forLocked(workspace)
-	if sessionID != "" {
-		wp.view.SessionId = sessionID
-	}
 	wp.view.Interrupt = &frontendv1.InterruptWindow{
 		Active:  true,
 		SinceMs: m.clock(),
@@ -441,8 +438,6 @@ func (m *Manager) Apply(workspace, sessionID string, ev *corev1.Event) error {
 		m.logf("progress: event identity canonicalized ws=%s event_session=%s owner_session=%s seq=%d — the store files this conversation under its vendor uuid; the view is stamped with the daemon session so scoped frontends receive it",
 			workspace, evSID, sessionID, ev.GetSeq())
 	}
-	wp.view.SessionId = sessionID
-
 	at := ev.GetProducedAtMs()
 	if at == 0 {
 		at = m.clock()
@@ -726,11 +721,14 @@ func (m *Manager) applyApiErrorLocked(workspace string, wp *workspaceProgress, u
 	}
 	m.setWindowLocked(workspace, wp, &wp.view.Retrying, false, atMs, "")
 	wp.retryDetailRich = false
-	failure := errclass.APIError(ae, frontend.FailureUUID(uuid))
-	if proto.Equal(wp.view.Failure, failure) {
+	// The footer shows the ROW, not the card: one sentence, its tone, and the
+	// address of the card to reveal. The card itself is the feed's, and the
+	// address is the same derived uuid the feed files it under.
+	row := errclass.FooterRow(errclass.APIError(ae), frontend.FailureUUID(uuid))
+	if proto.Equal(wp.view.Failure, row) {
 		return
 	}
-	wp.view.Failure = failure
+	wp.view.Failure = row
 	m.pushLocked(workspace, wp)
 }
 
@@ -963,7 +961,11 @@ func (m *Manager) closeTurnLocked(wp *workspaceProgress, te *corev1.TurnEnded, a
 			// TurnEnd returns nil for a conclusion the SSM does not treat as
 			// blocking, so the footer and the workspace color agree on what
 			// "the turn failed" means instead of each deciding for itself.
-			wp.view.Failure = errclass.TurnEnd(te)
+			//
+			// The row carries NO card address: a turn-end account produces no
+			// item of its own, so there is nothing for the row to reveal and it
+			// says so by leaving the ref empty rather than pointing anywhere.
+			wp.view.Failure = errclass.FooterRow(errclass.TurnEnd(te), "")
 		}
 	}
 }

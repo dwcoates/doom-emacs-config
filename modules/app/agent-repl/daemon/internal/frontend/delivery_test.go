@@ -7,6 +7,7 @@ import (
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/ssm"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -240,8 +241,12 @@ func TestSupersededResyncReceivesSnapshotCapturedAfterClassification(t *testing.
 
 	cmd := &frontendv1.FrontendCommand{
 		RequestId: "r-stale", Workspace: "w1",
+		// ONE token where the client used to copy, hold and send back two
+		// identities in agreement. It is minted by the same function the daemon
+		// projects onto WorkspaceState, so a stale fence is stale for exactly
+		// the reasons a stale (session, generation) pair used to be.
 		Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{
-			SessionId: "s1", ControllerGenerationId: "g-old",
+			Fence: ssm.Fence("s1", "g-old"),
 		}},
 	}
 	data, err := protojson.Marshal(cmd)
@@ -260,7 +265,7 @@ func TestSupersededResyncReceivesSnapshotCapturedAfterClassification(t *testing.
 		t.Fatalf("post-supersession identity = (%q, %q), want (s2, g-new)", post.GetSessionId(), post.GetControllerGenerationId())
 	}
 	ack := readWSFrame(t, conn).GetCommandAck()
-	if ack.GetFailure().GetErrorType() != string(errclass.TypeSessionReconnectSuperseded) {
-		t.Fatalf("failure type = %q, want %q", ack.GetFailure().GetErrorType(), errclass.TypeSessionReconnectSuperseded)
+	if errclass.KindName(ack.GetFailure()) != string(errclass.TypeSessionReconnectSuperseded) {
+		t.Fatalf("failure type = %q, want %q", errclass.KindName(ack.GetFailure()), errclass.TypeSessionReconnectSuperseded)
 	}
 }

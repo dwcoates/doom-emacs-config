@@ -4,7 +4,7 @@
 
 ;; Emacs's end of the ONE render-bound error vocabulary (F4).
 ;;
-;; Every failure that reaches a human eye is a `frontend.v1.SystemFailureItem'
+;; Every failure that reaches a human eye is a `frontend.v1.FailureCardView'
 ;; produced by exactly one classifier, and its color comes from exactly one
 ;; table.  Two rules follow, and this file is where they live:
 ;;
@@ -16,10 +16,21 @@
 ;;    unreachability and Emacs's own subprocess/worktree operations — those,
 ;;    and only those, are classified locally.
 ;;
-;; 2. `Error.type' values are NAMESPACED by owner, so a violation is
-;;    detectable by string inspection rather than by review.  Daemon-owned
-;;    types are unprefixed (`shim.rejected', `api.rate_limit'); everything
-;;    minted here carries the reserved `client.' prefix.
+;; 2. Failure TYPES are NAMESPACED by owner, so a violation is detectable by
+;;    string inspection rather than by review.  Daemon-owned types are the
+;;    `FailureKind' oneof's own arm names, unprefixed (`shimRejected',
+;;    `apiRateLimit'); everything minted here carries the reserved `client.'
+;;    prefix.
+;;
+;; WHAT THE COMPONENT RESHAPE CHANGED.  The wire used to carry a class enum
+;; plus a free type string on one `SystemFailureItem'.  It now carries a
+;; `FailureKind' — a closed oneof with one arm per failure — on a
+;; `FailureCardView' that also holds the sentence, the evidence and a
+;; lifecycle oneof.  The CLASS did not become unknowable, it became implicit
+;; in the arm: each arm belongs to exactly one side of the vocabulary, so the
+;; side is read off the arm here (`agent-repl-failure-kind-class') instead of
+;; off a second field that could disagree with it.  The two class keywords and
+;; the color contract they answer to are unchanged.
 ;;
 ;; Before this, a refused command reached the echo area as raw Go text
 ;; (`err.Error()' verbatim), a degraded component reached it as a
@@ -78,7 +89,7 @@ own (see `agent-repl--uds-command-deadline-expired').")
 ;;;; ---- Classes ---------------------------------------------------------
 
 (defconst agent-repl-failure-classes '(:internal :api)
-  "The `ErrorClass' vocabulary, as render keywords.
+  "The two SIDES of the failure vocabulary, as render keywords.
 
 SEMANTIC, never chromatic: the class says what KIND of thing failed and
 each frontend decides what that looks like.  `:internal' is agent-repl's
@@ -88,7 +99,14 @@ command); `:api' is the SDK or the vendor refusing or concluding the work.")
 (defconst agent-repl-failure-class-wire
   '(("ERROR_CLASS_INTERNAL" . :internal)
     ("ERROR_CLASS_API"      . :api))
-  "Map each `ErrorClass' enum NAME (protojson string) to its keyword.
+  "Map each COLOR-CONTRACT class name to its keyword.
+
+The names are the rows of `error_classes' in proto/vocab/render-colors.json,
+which is what binds a class to one of the six colors across Go, TypeScript
+and here.  The `ErrorClass' ENUM that used to carry these names on the wire
+is retired — a card now states its side by which `FailureKind' arm is set —
+but the assignment did not move, so this stays the join between a failure's
+side and its color and `test-render-colors.el' still asserts it row for row.
 
 `ERROR_CLASS_UNSPECIFIED' is deliberately absent.  The class decides the
 failure's color, so accepting an unset one would mean painting a failure
@@ -96,7 +114,7 @@ some default color — quietly, and in a way that could contradict the
 workspace colored beside it.  See `agent-repl-failure-class'.")
 
 (defun agent-repl-failure-class (name)
-  "Return the class keyword for `ErrorClass' enum NAME.
+  "Return the class keyword for color-contract class NAME.
 
 Signals on anything outside `agent-repl-failure-class-wire' — there is no
 fallback class (AGENTS.md No-Silent-Fallbacks), because a guessed class is
@@ -113,56 +131,207 @@ a mis-colored failure rather than a missing one."
                        name)
       (error "agent-repl failure: unrecognized error_class %S" name))))
 
+;;;; ---- The FailureKind arms --------------------------------------------
+;;
+;; The wire names a failure by WHICH ARM of the `FailureKind' oneof is set.
+;; Each arm belongs to exactly one side of the vocabulary, and the proto says
+;; so arm by arm ("Resolves the workspace BLUE" / "PURPLE"), so the side is a
+;; property of the arm rather than a second field beside it.  These three
+;; lists are that partition, spelled in protojson (lowerCamelCase) exactly as
+;; the arm arrives.
+;;
+;; They are the one place Emacs restates the oneof, so `test-failure.el'
+;; asserts them against the checked-in generated bindings: an arm added to the
+;; proto and forgotten here fails the suite instead of arriving at runtime as
+;; a failure with no side and therefore no color.
+
+(defconst agent-repl-failure-machinery-kinds
+  '("shimNotConnected" "shimRejected" "shimAckTimeout" "shimVersionMismatch"
+    "shimSeqRegression" "shimDegraded" "shimStoreWriteRejected"
+    "queryTermination" "shimNotSpawned" "shimHandshakeIncomplete"
+    "shimUnhealthy" "sessionNotEstablished" "workspaceNotLive"
+    "sessionDeleted" "sessionSuperseded" "reconnectSuperseded"
+    "sessionShimDied" "sessionStartFailed" "sessionResumeFailed"
+    "conversationUnresumable" "resumeModeRetired" "sessionEndedUnclassified"
+    "historyRepullInFlight" "historyReplayTruncated" "interruptUndelivered"
+    "queueEntryUnwired" "queueEntryKeepAliveHeld" "sessionHibernated"
+    "keepAliveWindowUnclosed" "keepAliveWindowInverted" "compactionColdRead"
+    "clientLogIdentityStale" "internalUnclassified")
+  "The `FailureKind' arms naming agent-repl's OWN machinery failing.
+Nothing about the account is implicated and no amount of waiting or
+re-authenticating helps, so they classify `:internal' and the shared color
+table resolves them blue.")
+
+(defconst agent-repl-failure-vendor-kinds
+  '("apiAuthenticationFailed" "apiBillingError" "apiRateLimit"
+    "apiInvalidRequest" "apiServerError" "apiOverloaded"
+    "apiOauthOrgNotAllowed" "apiModelNotFound" "apiNetworkDown"
+    "apiRequestFailed" "apiUnknown" "apiMaxOutputTokens" "apiMaxTurns"
+    "apiMaxBudget" "apiExecutionError" "apiRefusal" "apiTurnFailed")
+  "The `FailureKind' arms naming the SDK or the vendor refusing the work.
+Releasing one needs a human or the vendor, never a retry, so they classify
+`:api' and the shared color table resolves them purple.")
+
+(defconst agent-repl-failure-client-kinds
+  '("daemonUnreachable" "workspaceGone" "bootFailed" "controlPlaneFailed"
+    "frameUndecodable" "staleBundle" "commandUnsent"
+    "commandRejectionUnclassified")
+  "The `FailureKind' arms a FRONTEND mints for itself; the daemon never sets one.
+
+They classify `:internal' with the machinery arms: a frontend can only ever
+observe its own machinery failing, never the account.
+
+Emacs does not currently mint any of them — its local vocabulary is
+`agent-repl-failure-local-types', which never leaves this process — but the
+arms are listed because Emacs can RECEIVE one: the daemon rebroadcasts a
+webapp-authored card, and a card whose arm this end could not place would
+have no side and therefore no color.")
+
+(defun agent-repl-failure-kind-class (arm)
+  "Return the class keyword for `FailureKind' ARM (a protojson arm name).
+
+Signals on an arm outside the three partition lists, for the same reason
+`agent-repl-failure-class' signals on an unrecognized class: a failure whose
+side cannot be read is a failure that would be painted some default color."
+  (let ((class (cond
+                ((member arm agent-repl-failure-vendor-kinds) :api)
+                ((or (member arm agent-repl-failure-machinery-kinds)
+                     (member arm agent-repl-failure-client-kinds))
+                 :internal))))
+    (if class
+        (progn
+          (agent-repl--log nil "failure-kind-class: arm=%S class=%S" arm class)
+          class)
+      (agent-repl--log nil "failure-kind-class: REJECTED unrecognized-arm=%S" arm)
+      (error "agent-repl failure: unrecognized FailureKind arm %S" arm))))
+
+(defun agent-repl-failure-kind-arm (kind)
+  "Return the single set arm of decoded `FailureKind' KIND, as a plist pair.
+
+The value is a cons of the protojson arm NAME (a string) and the arm's own
+decoded payload.  protojson emits only the set arm, so a well-formed kind
+decodes to a one-key plist.
+
+Signals when KIND is absent, empty, or carries more than one arm.  A kind is
+the whole classification, so an unset one is a failure nobody named and a
+double-set one is two failures claiming to be the same card; neither may be
+resolved by picking whichever arm happens to come first."
+  (unless (and kind (listp kind) (keywordp (car kind)) (null (cddr kind)))
+    (agent-repl--log nil
+                     "failure-kind-arm: MALFORMED arm-count=%S — no fallback"
+                     (and (listp kind) (/ (length kind) 2)))
+    (error "agent-repl failure: FailureKind must carry exactly one arm"))
+  (cons (substring (symbol-name (car kind)) 1) (plist-get kind (car kind))))
+
 ;;;; ---- Construction ----------------------------------------------------
 
-(defun agent-repl-failure--resolved-at (item)
-  "Return decoded `SystemFailureItem' ITEM's `resolved_at_ms' as a NUMBER.
+(defun agent-repl-failure--resolved-at (card)
+  "Return decoded `FailureCardView' CARD's resolution instant as a NUMBER.
 
-protojson encodes int64 as a JSON STRING, so a daemon-sent resolution
-instant arrives here as \"1786127506030\" while a hand-built test frame
-carries 1786127506030.  Both are the same fact, and every consumer of
-`:resolved-at' does arithmetic on it (`agent-repl-failure-surface' asks
-whether it is positive), so the coercion belongs at this decode boundary
-rather than at each crash site.
+The instant lives on the `resolved' arm of the card's `lifecycle' oneof
+\(`FailureCardResolved.resolved_at_ms').  An `open' or `terminal' card has
+no instant and reads 0.
 
-Absence is 0 — protojson omits a zero-valued int64, so \"unresolved\" and
-\"field absent\" are the same wire fact.  A PRESENT but uncoercible value
-is not defaulted away: it signals, because a resolution instant that
-cannot be read would silently downgrade a settled failure into a
-permanent alarm."
-  (let ((raw (plist-get item :resolvedAtMs)))
+protojson encodes int64 as a JSON STRING, so a daemon-sent instant arrives
+here as \"1786127506030\" while a hand-built test frame carries
+1786127506030.  Both are the same fact, so the coercion belongs at this
+decode boundary rather than at each crash site.
+
+Absence inside a `resolved' arm is 0 — protojson omits a zero-valued int64,
+and a card resolved at instant zero is representable.  Which is exactly why
+the ARM, never this number, is what `agent-repl-failure--resolved-p'
+answers.  A PRESENT but uncoercible value is not defaulted away: it signals,
+because a resolution instant that cannot be read would misreport when a
+settled failure ended."
+  (let ((raw (plist-get (plist-get card :resolved) :resolvedAtMs)))
     (if (null raw)
         0
       (or (agent-repl--frontend-int64 raw)
           (error "agent-repl failure: unreadable resolved_at_ms %S" raw)))))
 
-(defun agent-repl-failure-from-wire (item)
-  "Normalize a decoded `SystemFailureItem' ITEM plist into a failure plist.
+(defun agent-repl-failure--resolved-p (card)
+  "Return non-nil when decoded `FailureCardView' CARD holds the `resolved' arm.
 
-ITEM is the protojson-decoded arm; the result is the plist every surfacing
-site here consumes: `:class' `:type' `:message' `:detail' `:resolved-at'
-`:item-uuid' and `:session-resume'.
+The ARM is the question, never the instant: a card resolved at instant zero
+is representable, and reading the number as the verdict is the conflation
+the lifecycle oneof removed."
+  (and (plist-member card :resolved) t))
 
-This is an ADOPTION, not a derivation.  Nothing is re-decided: the class,
-the type and the prose are the daemon's verdict."
-  (let* ((error-class (plist-get item :errorClass))
-         (type (or (plist-get item :errorType) ""))
-         (message (or (plist-get item :message) ""))
-         (detail (or (plist-get item :sourceDetail) ""))
-         (resolved-at (agent-repl-failure--resolved-at item))
-         (item-uuid (or (plist-get item :itemUuid) ""))
-         (session-resume (plist-get item :sessionResume)))
+(defun agent-repl-failure-from-wire (card &optional item-uuid)
+  "Normalize a decoded `FailureCardView' CARD plist into a failure plist.
+
+ITEM-UUID is the `ConversationItem.uuid' the card was filed under, when the
+caller has one.  It is NOT on the card — a card carried outside the feed
+\(a `SessionView.death') was never filed at all — so it is passed in rather
+than guessed at.
+
+The result is the plist every surfacing site here consumes: `:class'
+`:type' `:message' `:detail' `:resolved' `:resolved-at' `:item-uuid' and
+`:session-resume'.
+
+This is an ADOPTION, not a derivation.  Nothing is re-decided: the kind, the
+sentence and the evidence are the daemon's verdict, and the class is read
+off the kind's own arm rather than re-classified here."
+  (let* ((arm (agent-repl-failure-kind-arm (plist-get card :kind)))
+         (type (car arm))
+         (message (or (plist-get card :message) ""))
+         (detail (or (plist-get card :detail) ""))
+         (resolved (agent-repl-failure--resolved-p card))
+         (resolved-at (agent-repl-failure--resolved-at card))
+         (item-uuid (or item-uuid ""))
+         ;; The typed resume evidence moved onto its own kind arm: it used to
+         ;; be a oneof member beside the class on the failure item, and it is
+         ;; now `FailureSessionResumeFailed.detail'.
+         (session-resume (and (equal type "sessionResumeFailed")
+                              (plist-get (cdr arm) :detail))))
     (agent-repl--log nil
-                     "failure-from-wire: adopting error-class=%S type=%S message=%S detail=%S resolved-at=%S item-uuid=%S session-resume=%S"
-                     error-class type message detail resolved-at item-uuid
+                     "failure-from-wire: adopting kind=%S message=%S detail=%S resolved=%S resolved-at=%S item-uuid=%S session-resume=%S"
+                     type message detail resolved resolved-at item-uuid
                      (and session-resume t))
-    (list :class (agent-repl-failure-class error-class)
+    (list :class (agent-repl-failure-kind-class type)
           :type type
           :message message
           :detail detail
+          :resolved resolved
           :resolved-at resolved-at
           :item-uuid item-uuid
           :session-resume session-resume)))
+
+(defun agent-repl-failure-from-ack (ack)
+  "Normalize a refused `CommandAck' ACK plist into a failure plist, or nil.
+
+A refusal carries the classification WITHOUT the card: `failure' is a bare
+`FailureKind', `failure_card' is the address of the card the daemon filed
+the refusal under (when it filed one), and the legacy `error' string is the
+raw Go text this end used to print verbatim.
+
+Returns nil when the ack carries no classified kind, so the caller can keep
+its own unclassified-refusal path rather than being handed a failure with
+no side.
+
+The kind names the failure and the ack has no daemon-composed sentence of
+its own, so the arm name IS the message when the daemon supplied no text.
+That is naming what was refused, not composing prose for it."
+  (when-let ((kind (plist-get ack :failure)))
+    (let* ((arm (agent-repl-failure-kind-arm kind))
+           (type (car arm))
+           (err (plist-get ack :error))
+           (message (if (and (stringp err) (not (string-empty-p err))) err type))
+           (item-uuid (or (plist-get (plist-get ack :failureCard) :cardUuid) "")))
+      (agent-repl--log nil
+                       "failure-from-ack: adopting kind=%S error-present=%s card-uuid=%S"
+                       type
+                       (if (and (stringp err) (not (string-empty-p err))) "yes" "no")
+                       item-uuid)
+      (list :class (agent-repl-failure-kind-class type)
+            :type type
+            :message message
+            :detail ""
+            ;; A refusal is a decision, not a window: nothing closes it.
+            :resolved nil
+            :resolved-at 0
+            :item-uuid item-uuid
+            :session-resume nil))))
 
 (defun agent-repl-failure--session-resume-text (resume workspace)
   "Return actionable prose for typed `SessionResumeFailure' RESUME.
@@ -312,6 +481,7 @@ call site."
                          :type type
                          :message message
                          :detail (or detail "")
+                         :resolved nil
                          :resolved-at 0
                          :item-uuid "")))
       (agent-repl--log nil
@@ -360,9 +530,14 @@ window closed) is logged and NOT echoed: the echo area is for what is
 happening now, and announcing the end of something the user may never have
 seen the start of is noise.
 
-Returns the text echoed, or nil when the failure was resolved."
+Returns the text echoed, or nil when the failure was resolved.
+
+Resolution is read from `:resolved', the lifecycle ARM the card carried,
+never from `:resolved-at' being positive.  A card settled at instant zero is
+representable on the wire, and treating the number as the verdict would
+re-announce a closed window as a live alarm."
   (let ((text (agent-repl-failure-text failure workspace))
-        (resolved (> (or (plist-get failure :resolved-at) 0) 0)))
+        (resolved (plist-get failure :resolved)))
     (if resolved
         (progn
           (agent-repl--log workspace

@@ -379,7 +379,9 @@ a wire shape; clearing on it would erase a restored merge."
           (should (string-match-p "frame=WorkspaceState" (cadr entry)))
           (should (string-match-p "job-id=unannounced" (cadr entry)))
           (should (string-match-p "path=\\\"/pending/new\\\"" (cadr entry)))
-          (should (string-match-p "session-id=\\\"s_pending\\\"" (cadr entry))))
+          ;; A HOST frame still names itself by its session id, which is what
+          ;; reaches the rejection as its identity.
+          (should (string-match-p "identity=\\\"s_pending\\\"" (cadr entry))))
         (should (zerop (hash-table-count agent-repl--frontend-workspace-state-views)))
         (should-not (agent-repl--ws-known-p "/pending/new"))))))
 
@@ -1039,7 +1041,7 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
     (clrhash agent-repl--frontend-session-inits)
     ;; Act
     (agent-repl--frontend-apply-session-init
-     '(:sessionId "s_1" :workspace "/w" :init (:slashCommands ("commit" "review"))))
+     '(:fence "f_1" :workspace "/w" :init (:slashCommands ("commit" "review"))))
     ;; Assert
     (should (equal (plist-get (agent-repl--frontend-session-init "/w") :slashCommands)
                    '("commit" "review")))))
@@ -1048,7 +1050,7 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
   "A SessionInitView with no workspace fails loudly (No-Silent-Fallbacks)."
   ;; Arrange / Act / Assert
   (should-error (agent-repl--frontend-store-session-init
-                 '(:sessionId "s_1" :init (:slashCommands ())))))
+                 '(:fence "f_1" :init (:slashCommands ())))))
 
 (ert-deftest agent-repl-test-session-init-nil-for-unknown ()
   "The session-init accessor returns nil for a session with no pushed init."
@@ -1110,9 +1112,9 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
        ;; Act
        (agent-repl--frontend-apply-session-view
         '(:sessionId "s1" :workspace "/w" :terminal t
-          :death (:errorClass "ERROR_CLASS_INTERNAL"
-                  :errorType "session.shim_died"
-                  :message "the agent process exited")))
+          :death (:kind (:sessionShimDied ())
+                  :message "the agent process exited"
+                  :terminal ())))
        ;; Assert
        (should (string-match-p "the agent process exited" echoed))))))
 
@@ -1124,9 +1126,9 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
    (clrhash agent-repl--frontend-surfaced-deaths)
    (let ((count 0)
          (view '(:sessionId "s1" :workspace "/w" :terminal t
-                 :death (:errorClass "ERROR_CLASS_INTERNAL"
-                         :errorType "session.shim_died"
-                         :message "the agent process exited"))))
+                 :death (:kind (:sessionShimDied ())
+                         :message "the agent process exited"
+                         :terminal ()))))
      ;; Only echo-area announcements count.  The quiet log rung the failure
      ;; record rides (`agent-repl--warn') also goes through `message', with
      ;; `inhibit-message' bound — that is the durable record, not an
@@ -1163,10 +1165,10 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
        ;; Act
        (agent-repl--frontend-apply-session-view
         '(:sessionId "s1" :workspace "/w" :terminal t
-          :death (:errorClass "ERROR_CLASS_INTERNAL"
-                  :errorType "session.ended_unclassified"
+          :death (:kind (:sessionEndedUnclassified ())
                   :message "the session ended"
-                  :sourceDetail "some ancient reason")))
+                  :detail "some ancient reason"
+                  :terminal ())))
        ;; Assert
        (should (string-match-p "some ancient reason" echoed))))))
 
@@ -1183,10 +1185,9 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
        ;; Act
        (agent-repl--frontend-apply-session-view
         '(:sessionId "s1" :workspace "/w" :terminal t
-          :death (:errorClass "ERROR_CLASS_INTERNAL"
-                  :errorType "session.superseded"
+          :death (:kind (:sessionSuperseded ())
                   :message "a new Claude session was started for this workspace"
-                  :itemUuid "death:s1" :resolvedAtMs 0)))
+                  :open ())))
        ;; Assert
        (should (string-match-p "a new Claude session was started" echoed))))))
 
@@ -1203,10 +1204,9 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
        ;; Act
        (agent-repl--frontend-apply-session-view
         '(:sessionId "s1" :workspace "/w" :terminal t
-          :death (:errorClass "ERROR_CLASS_INTERNAL"
-                  :errorType "session.superseded"
+          :death (:kind (:sessionSuperseded ())
                   :message "a new Claude session was started for this workspace"
-                  :itemUuid "death:s1" :resolvedAtMs 1700000000000)))
+                  :resolved (:resolvedAtMs 1700000000000))))
        ;; Assert
        (should (null echoed))))))
 
@@ -1224,10 +1224,9 @@ session-view item fail to apply at boot."
        ;; Act
        (agent-repl--frontend-apply-session-view
         '(:sessionId "s1" :workspace "/w" :terminal t
-          :death (:errorClass "ERROR_CLASS_INTERNAL"
-                  :errorType "session.superseded"
+          :death (:kind (:sessionSuperseded ())
                   :message "a new Claude session was started for this workspace"
-                  :itemUuid "death:s1" :resolvedAtMs "1786127506030")))
+                  :resolved (:resolvedAtMs "1786127506030"))))
        ;; Assert
        (should (null echoed))))))
 
@@ -1409,7 +1408,7 @@ first."
       (clrhash agent-repl--frontend-session-inits)
       ;; Act / Assert
       (should (agent-repl--frontend-apply-session-init
-               '(:sessionId "s_init_unowned" :workspace "/nowhere/unowned"
+               '(:fence "f_init_unowned" :workspace "/nowhere/unowned"
                  :init (:slashCommands nil :skills nil)))))))
 
 (provide 'test-frontend-state)
@@ -1872,9 +1871,10 @@ first."
       ;; Act
       (agent-repl-test--apply-snapshot
        '(:workspaces ((:workspace "ws1" :state "RENDER_STATE_IDLE"))
-         :queues ((:workspace "ws1" :sessionId "s1"
+         :queues ((:workspace "ws1" :fence "f1"
                    :entries ((:id "q1" :text "held"
-                              :shutdownHold (:scheduleId "sch-8")))))))
+                              :pending ()
+                              :shutdown (:scheduleId "sch-8")))))))
       ;; Assert
       (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :idle)))))
 

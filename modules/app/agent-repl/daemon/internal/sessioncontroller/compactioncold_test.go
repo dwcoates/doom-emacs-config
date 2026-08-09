@@ -60,9 +60,9 @@ func usageOf(input, cacheCreation, cacheRead int64) *datav1.Usage {
 }
 
 // retainedCard reads the failure card the consumer retained under uuid, or nil.
-func retainedCard(d *sessionController, uuid string) *frontendv1.SystemFailureItem {
+func retainedCard(d *sessionController, uuid string) *frontendv1.FailureCardView {
 	item := d.consumer.retainedFailure(uuid)
-	return item.GetSystemFailure()
+	return item.GetFailureCard()
 }
 
 // A DAEMON COMPACTION THAT READ THE CONVERSATION COLD RAISES A CARD. The
@@ -74,18 +74,18 @@ func TestColdCompactionPushesAFailureCard(t *testing.T) {
 	m, d, _ := coldCompactionRig(t, compactionWarm, turnID)
 
 	// Act.
-	m.noteDaemonCompactionCost(d, costOf(turnID, uint64(keepalive.ColdCompactionUncachedTokens + 1), 0, 0))
+	m.noteDaemonCompactionCost(d, costOf(turnID, uint64(keepalive.ColdCompactionUncachedTokens+1), 0, 0))
 
 	// Assert.
 	card := retainedCard(d, d.consumer.coldCompactionUUID(turnID))
 	if card == nil {
 		t.Fatal("a cold compaction pushed no failure card; the cost defect reaches no surface the user has")
 	}
-	if card.GetErrorType() != string(errclass.TypeCompactionColdRead) {
-		t.Fatalf("card error_type = %q, want %q", card.GetErrorType(), errclass.TypeCompactionColdRead)
+	if errclass.TypeName(card) != string(errclass.TypeCompactionColdRead) {
+		t.Fatalf("card error_type = %q, want %q", errclass.TypeName(card), errclass.TypeCompactionColdRead)
 	}
-	if card.GetErrorClass() != frontendv1.ErrorClass_ERROR_CLASS_INTERNAL {
-		t.Fatalf("card error_class = %s, want INTERNAL; nothing the vendor did was wrong, the daemon's scheduling was", card.GetErrorClass())
+	if errclass.CardTone(card) != errclass.ToneLocal {
+		t.Fatalf("card error_class = %s, want INTERNAL; nothing the vendor did was wrong, the daemon's scheduling was", errclass.CardTone(card))
 	}
 }
 
@@ -101,7 +101,7 @@ func TestColdCompactionCardCarriesTheUsageBreakdown(t *testing.T) {
 	m.noteDaemonCompactionCost(d, mustTurnResultCost(t, turnID, usageOf(11, 1_500_000, 40)))
 
 	// Assert.
-	detail := retainedCard(d, d.consumer.coldCompactionUUID(turnID)).GetSourceDetail()
+	detail := retainedCard(d, d.consumer.coldCompactionUUID(turnID)).GetDetail()
 	for _, want := range []string{
 		"input_tokens=11",
 		"cache_creation_input_tokens=1500000",
@@ -124,7 +124,7 @@ func TestColdCompactionRecordsTheSessionAndWorkspaceIdentity(t *testing.T) {
 	m, d, capture := coldCompactionRig(t, compactionWarm, turnID)
 
 	// Act.
-	m.noteDaemonCompactionCost(d, costOf(turnID, uint64(keepalive.ColdCompactionUncachedTokens + 1), 0, 0))
+	m.noteDaemonCompactionCost(d, costOf(turnID, uint64(keepalive.ColdCompactionUncachedTokens+1), 0, 0))
 
 	// Assert.
 	if !capture.contains("DAEMON COMPACTION READ COLD") {
@@ -204,7 +204,7 @@ func TestColdReadAlarmIgnoresAResultForAnotherTurn(t *testing.T) {
 	m, d, capture := coldCompactionRig(t, compactionWarm, turnID)
 
 	// Act: an expensive USER turn while the compaction is claimed.
-	m.noteDaemonCompactionCost(d, costOf("req_user", uint64(keepalive.ColdCompactionUncachedTokens * 100), 0, 0))
+	m.noteDaemonCompactionCost(d, costOf("req_user", uint64(keepalive.ColdCompactionUncachedTokens*100), 0, 0))
 
 	// Assert.
 	if capture.contains("DAEMON COMPACTION READ COLD") {
@@ -220,7 +220,7 @@ func TestColdReadAlarmIgnoresAResultWithNoCompactionClaimed(t *testing.T) {
 	d := controllerFor(t, m)
 
 	// Act.
-	m.noteDaemonCompactionCost(d, costOf("some-turn", uint64(keepalive.ColdCompactionUncachedTokens * 100), 0, 0))
+	m.noteDaemonCompactionCost(d, costOf("some-turn", uint64(keepalive.ColdCompactionUncachedTokens*100), 0, 0))
 
 	// Assert.
 	if capture.contains("DAEMON COMPACTION READ COLD") {

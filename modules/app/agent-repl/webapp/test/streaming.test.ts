@@ -358,3 +358,78 @@ describe("settleStreamedBlock", () => {
     expect(items).toHaveLength(1);
   });
 });
+
+// --- settle onto a NAMED preview ---------------------------------------------
+
+// `AgentThinking` states the message its block was stripped from and the index
+// it held there, so a settled reasoning block names its preview outright. These
+// pin that the name is honoured and that it is honoured EXACTLY.
+
+function thinkingPreview(over: Partial<ThinkingItem> = {}): ThinkingItem {
+  return { kind: "thinking", blockId: "msg_1:0", messageId: "msg_1", text: "we", done: false, ...over };
+}
+
+function settledThinking(over: Partial<ThinkingItem> = {}): ThinkingItem {
+  return {
+    kind: "thinking",
+    blockId: "env1#thinking:0:1",
+    uuid: "env1#thinking:0:1",
+    messageId: "msg_1",
+    text: "weighing it",
+    done: true,
+    ...over,
+  };
+}
+
+describe("settleStreamedBlock onto a preview the record names", () => {
+  it("settles onto the exact preview the record named", () => {
+    // Arrange
+    const items: ConversationItem[] = [thinkingPreview({ blockId: "msg_1:1" })];
+    // Act
+    settleStreamedBlock(items, settledThinking({ previewBlockId: "msg_1:1" }), 0);
+    // Assert
+    expect(items).toHaveLength(1);
+  });
+
+  it("keeps the named preview's feed place", () => {
+    // Arrange
+    const items: ConversationItem[] = [thinkingPreview({ blockId: "msg_1:1" })];
+    // Act
+    settleStreamedBlock(items, settledThinking({ previewBlockId: "msg_1:1" }), 0);
+    // Assert
+    expect((items[0] as ThinkingItem).blockId).toBe("msg_1:1");
+  });
+
+  it("passes over an earlier preview the record did not name", () => {
+    // The un-named path takes the EARLIEST same-message preview. A named record
+    // must take the one it named, or two reasoning blocks of one message settle
+    // onto the wrong halves of each other.
+    // Arrange
+    const items: ConversationItem[] = [
+      thinkingPreview({ blockId: "msg_1:0", text: "first" }),
+      thinkingPreview({ blockId: "msg_1:1", text: "second" }),
+    ];
+    // Act
+    settleStreamedBlock(items, settledThinking({ previewBlockId: "msg_1:1" }), 0);
+    // Assert
+    expect((items[0] as ThinkingItem).text).toBe("first");
+  });
+
+  it("appends rather than guessing when the named preview is absent", () => {
+    // Arrange
+    const items: ConversationItem[] = [thinkingPreview({ blockId: "msg_1:0" })];
+    // Act
+    settleStreamedBlock(items, settledThinking({ previewBlockId: "msg_1:7" }), 0);
+    // Assert
+    expect(items).toHaveLength(2);
+  });
+
+  it("refuses a named preview an earlier record already claimed", () => {
+    // Arrange
+    const items: ConversationItem[] = [settledThinking({ blockId: "msg_1:1", done: false })];
+    // Act
+    settleStreamedBlock(items, settledThinking({ uuid: "env2:0", previewBlockId: "msg_1:1" }), 0);
+    // Assert
+    expect(items).toHaveLength(2);
+  });
+});

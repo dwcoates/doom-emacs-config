@@ -8,8 +8,6 @@ import (
 	"sync"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
-
 	"claude-repld/internal/statedb"
 )
 
@@ -302,7 +300,7 @@ func TestAPromptSubmittedToAnIdleSessionUnderTheLeaseIsParked(t *testing.T) {
 
 func TestAParkedPromptIsNeverClassified(t *testing.T) {
 	// Arrange.
-	cls := &fakeClassifier{res: ClassifyResult{Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT}}
+	cls := &fakeClassifier{res: ClassifyResult{Classification: VerdictInterject}}
 	store := newFakeHoldStore()
 	qh := newQueueHarnessWithHolds(t, cls, store, nil)
 	lease := &fakeLease{}
@@ -392,7 +390,7 @@ func TestAParkedPromptIsStampedHoldWithNoRationale(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("queue = %d entries, want the prompt parked", len(entries))
 	}
-	if got := entries[0].classification; got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD {
+	if got := entries[0].classification; got != VerdictHold {
 		t.Fatalf("parked entry classification = %v, want HOLD", got)
 	}
 	if got := entries[0].rationale; got != "" {
@@ -418,7 +416,7 @@ func TestARestoredParkedPromptIsStampedHoldWithNoRationale(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("queue = %d entries, want the parked prompt restored", len(entries))
 	}
-	if got := entries[0].classification; got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD {
+	if got := entries[0].classification; got != VerdictHold {
 		t.Fatalf("restored parked entry classification = %v, want HOLD", got)
 	}
 	if got := entries[0].rationale; got != "" {
@@ -457,7 +455,7 @@ func TestAParkedEntryCarriesItsScheduleOnTheWire(t *testing.T) {
 	if len(view.GetEntries()) != 1 {
 		t.Fatalf("view = %d entries, want 1", len(view.GetEntries()))
 	}
-	if got := view.GetEntries()[0].GetShutdownHold().GetScheduleId(); got != "sd_1" {
+	if got := view.GetEntries()[0].GetShutdown().GetScheduleId(); got != "sd_1" {
 		t.Fatalf("entry shutdown_hold schedule_id = %q, want sd_1", got)
 	}
 }
@@ -477,7 +475,7 @@ func TestAnOrdinaryEntryCarriesNoShutdownHoldOnTheWire(t *testing.T) {
 	if len(view.GetEntries()) != 1 {
 		t.Fatalf("view = %d entries, want 1", len(view.GetEntries()))
 	}
-	if view.GetEntries()[0].GetShutdownHold() != nil {
+	if view.GetEntries()[0].GetShutdown() != nil {
 		t.Fatal("an ordinary queue entry carried a shutdown_hold, want none")
 	}
 }

@@ -53,7 +53,7 @@
 import type { CounterEntry, CounterStatus } from "./counter-menu.js";
 import type { ContentBlock, ModelInfo, ModelUsage, ResultSubtype, Usage } from "./protocol.js";
 import { mergeStatusLogValue } from "./merge-status.js";
-import { recordBlockIdentity } from "./streaming.js";
+import { previewBlockId, recordBlockIdentity } from "./streaming.js";
 import type {
   ContextClearedItem,
   ContextCompactedItem,
@@ -241,7 +241,12 @@ export interface SessionViewInput {
  */
 interface TypingRevealBase {
   workspace: string;
-  sessionId: string;
+  /**
+   * The carrying push's opaque staleness FENCE, compared BYTE-WISE against
+   * `WorkspaceState.fence` and never parsed. It replaced this push's
+   * `session_id` in the figma-idl reshape.
+   */
+  fence: string;
   /**
    * The ANTHROPIC message id every delta of one message shares, stamped at the
    * source (the shim's `message_start` tracker) and carried opaquely since.
@@ -273,7 +278,12 @@ export type UnidentifiedToolInputReveal = TypingRevealBase & {
  */
 export interface ToolProgressInput {
   workspace: string;
-  sessionId: string;
+  /**
+   * The carrying push's opaque staleness FENCE, compared BYTE-WISE against
+   * `WorkspaceState.fence` and never parsed. It replaced this push's
+   * `session_id` in the figma-idl reshape.
+   */
+  fence: string;
   toolUseId: string;
   toolName: string;
   parentToolUseId: string;
@@ -287,7 +297,12 @@ export interface ToolProgressInput {
  */
 export interface QueueInput {
   workspace: string;
-  sessionId: string;
+  /**
+   * The carrying push's opaque staleness FENCE, compared BYTE-WISE against
+   * `WorkspaceState.fence` and never parsed. It replaced this push's
+   * `session_id` in the figma-idl reshape.
+   */
+  fence: string;
   entries: QueueEntry[];
 }
 
@@ -344,7 +359,12 @@ export interface RateLimitInput {
  */
 export interface ProgressInput {
   workspace: string;
-  sessionId: string;
+  /**
+   * The carrying push's opaque staleness FENCE, compared BYTE-WISE against
+   * `WorkspaceState.fence` and never parsed. It replaced this push's
+   * `session_id` in the figma-idl reshape.
+   */
+  fence: string;
   // NO PHASE (F5): the footer reads the workspace's one authoritative render
   // state off `StoreState.renderState`, which is the same message the tab bar
   // and the sidebar dot read. The copy that used to live here refreshed on the
@@ -400,14 +420,24 @@ export interface ProgressInput {
 /** TaskCatalog → the async/task roster input (topbar counter vocabulary). */
 export interface TaskCatalogInput {
   workspace: string;
-  sessionId: string;
+  /**
+   * The carrying push's opaque staleness FENCE, compared BYTE-WISE against
+   * `WorkspaceState.fence` and never parsed. It replaced this push's
+   * `session_id` in the figma-idl reshape.
+   */
+  fence: string;
   entries: CounterEntry[];
 }
 
 /** SessionInitView → the /status panel's SystemInit snapshot source. */
 export interface SessionInitInput {
   workspace: string;
-  sessionId: string;
+  /**
+   * The carrying push's opaque staleness FENCE, compared BYTE-WISE against
+   * `WorkspaceState.fence` and never parsed. It replaced this push's
+   * `session_id` in the figma-idl reshape.
+   */
+  fence: string;
   /** The data.v1.SystemInit payload, adopted by shape (read leniently). */
   init: Record<string, unknown>;
 }
@@ -419,7 +449,8 @@ export type AdapterEffect =
   | {
       kind: "conversation-items";
       workspace: string;
-      sessionId: string;
+      /** The carrying push's opaque staleness fence (never parsed). */
+      fence: string;
       throughSeq: number;
       items: ConversationItem[];
     }
@@ -663,7 +694,7 @@ export class StateAdapter {
       kind: "task-catalog",
       value: {
         workspace: tc.workspace,
-        sessionId: tc.sessionId,
+        fence: tc.fence,
         entries: tc.tasks.map(taskEntryToCounter),
       },
     };
@@ -672,7 +703,7 @@ export class StateAdapter {
   private sessionInitEffect(si: SessionInitView): AdapterEffect {
     return {
       kind: "session-init",
-      value: { workspace: si.workspace, sessionId: si.sessionId, init: si.init },
+      value: { workspace: si.workspace, fence: si.fence, init: si.init },
     };
   }
 
@@ -693,7 +724,7 @@ export class StateAdapter {
       kind: "tool-progress",
       value: {
         workspace: hv.workspace,
-        sessionId: hv.sessionId,
+        fence: hv.fence,
         toolUseId: hv.toolUseId,
         toolName: hv.toolName,
         parentToolUseId: hv.parentToolUseId,
@@ -710,7 +741,7 @@ export class StateAdapter {
   private queueEffect(qv: QueueView): AdapterEffect {
     return {
       kind: "queue",
-      value: { workspace: qv.workspace, sessionId: qv.sessionId, entries: qv.entries },
+      value: { workspace: qv.workspace, fence: qv.fence, entries: qv.entries },
     };
   }
 
@@ -723,7 +754,7 @@ export class StateAdapter {
     if (pv.interrupt !== undefined && pv.interrupt.active) {
       this.log(
         "info",
-        `state-adapter: interrupt window workspace=${pv.workspace} session=${pv.sessionId} ` +
+        `state-adapter: interrupt window workspace=${pv.workspace} fence=${pv.fence} ` +
           `outcome=${pv.interrupt.outcome} since_ms=${String(pv.interrupt.sinceMs)} ` +
           `turn_started_at_ms=${String(pv.turnStartedAtMs)}`,
       );
@@ -732,7 +763,7 @@ export class StateAdapter {
       kind: "progress",
       value: {
         workspace: pv.workspace,
-        sessionId: pv.sessionId,
+        fence: pv.fence,
         turnStartedAtMs: pv.turnStartedAtMs,
         thinkingTokens: pv.thinkingTokens,
         inputTokens: pv.inputTokens,
@@ -762,7 +793,7 @@ export class StateAdapter {
     if (td.kind === "signature") return [this.ignore("content-delta:signature")];
     const base = {
       workspace: td.workspace,
-      sessionId: td.sessionId,
+      fence: td.fence,
       messageId: td.uuid,
       blockIndex: td.blockIndex,
       delta: td.delta,
@@ -815,7 +846,7 @@ export class StateAdapter {
           "error",
           `state-adapter: conversation item has UNSPECIFIED source — the daemon ` +
             `never emits it, so the frame is malformed and the item is DROPPED ` +
-            `(never defaulted to user) workspace=${cd.workspace} session=${cd.sessionId} ` +
+            `(never defaulted to user) workspace=${cd.workspace} fence=${cd.fence} ` +
             `uuid=${frame.uuid} arm=${frame.arm} request_id=${frame.requestId || "none"} ` +
             `through_seq=${String(cd.throughSeq)}`,
         );
@@ -834,7 +865,7 @@ export class StateAdapter {
       {
         kind: "conversation-items",
         workspace: cd.workspace,
-        sessionId: cd.sessionId,
+        fence: cd.fence,
         throughSeq: Number(cd.throughSeq),
         items,
       },
@@ -1057,6 +1088,8 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
   switch (arm) {
     case "assistantMessage":
       return assistantMessageItems(frame);
+    case "thinking":
+      return { items: [thinkingItemFrom(frame)], ignores: [] };
     case "userMessage":
       return userMessageItems(frame);
     case "toolUse":
@@ -1111,6 +1144,42 @@ function contentBlockArm(block: Obj): { arm: string; value: Obj } {
     }
   }
   return { arm: "unknown", value: {} };
+}
+
+/**
+ * The standalone reasoning emission (`AgentEmission.thinking`).
+ *
+ * Reasoning left the response body in the figma-idl reshape and became its own
+ * item, so it is built here rather than off a content block.
+ *
+ * IT STATES WHERE IT CAME FROM. `AgentThinking` carries `api_message_id` and
+ * `block_index` — the message the daemon stripped the block from and the
+ * position it held in that message's content array. That pair is exactly the
+ * key a live preview is opened under, so this item can NAME its preview
+ * (`previewBlockId`) instead of being matched to one by resemblance. The daemon
+ * states it because the daemon did the stripping; deriving it here is the
+ * re-derivation `streaming.ts` exists to prevent.
+ *
+ * A record that states no message id — the shape this emission had before the
+ * contract carried one — keeps its envelope uuid as `messageId` and names no
+ * preview. It then stands on its own rather than claiming some other block's:
+ * an unnamed preview is not matched by resemblance instead.
+ */
+function thinkingItemFrom(frame: ConversationItemFrame): ThinkingItem {
+  const origin = frame.thinkingOrigin;
+  const stated = origin !== undefined && origin.apiMessageId !== "";
+  const messageId = stated ? origin.apiMessageId : frame.uuid;
+  const item: ThinkingItem = {
+    kind: "thinking",
+    ...recordBlockIdentity(frame.uuid, messageId, stated ? origin.blockIndex : 0),
+    messageId,
+    text: pstr(frame.payload, "thinking"),
+    done: true,
+  };
+  if (stated) item.previewBlockId = previewBlockId(origin.apiMessageId, origin.blockIndex);
+  const sig = pstr(frame.payload, "signature");
+  if (sig !== "") item.signature = sig;
+  return item;
 }
 
 function assistantMessageItems(frame: ConversationItemFrame): {

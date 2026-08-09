@@ -1,0 +1,66 @@
+// response-bubble.proto — The assistant (purple) response bubble and the grey
+// thinking block that precedes it.
+//
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+import "agentshim/data/v1/tools.proto";
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// The purple bubble: one assistant turn, with the figures its corner renders.
+message AgentResponse {
+  // The assistant API message, verbatim durable evidence, with ONE carve-out
+  // stated below.
+  //
+  // EXCLUSIVITY INVARIANT: thinking blocks are NOT carried here. The daemon
+  // emits them as their own AgentThinking emissions, immediately before this
+  // one, and strips them from `content`. Both halves of the rule are load
+  // bearing — without the strip, a frontend that renders both emissions draws
+  // the agent's reasoning twice; without the separate emission, a frontend
+  // must reach into a durable message's content array to find the grey block.
+  //
+  // The carve-out applies UNIFORMLY: top-level feed and detached-agent fold
+  // alike. There is no path on which this field carries thinking.
+  agentshim.data.v1.ApiAssistantMessage body = 1;
+  // The resolved figures the bubble's corner renders. Absent when the
+  // response carried no usage record — never fabricated as zeros.
+  ResponseUsageStamp usage_stamp = 2;
+}
+
+// The collapsed grey reasoning block. See the exclusivity invariant on
+// AgentResponse.body for why reasoning is its own emission rather than a
+// content block of the response it precedes.
+message AgentThinking {
+  // The reasoning block, verbatim durable evidence (text + signature).
+  agentshim.data.v1.ThinkingBlock body = 1;
+  // The API message this block was stripped from, verbatim. A live preview is
+  // keyed by the message id its typing deltas carried; this is the resolved
+  // fact that lets the settled block replace its preview instead of appending
+  // beside it. The daemon states it because the daemon did the stripping — a
+  // client that inferred it would be matching "the earliest same-kind
+  // preview", which is exactly the derivation this contract removes.
+  string api_message_id = 2;
+  // The block's position in that message's original content array, so two
+  // reasoning blocks from one message settle onto their own previews rather
+  // than both onto the first.
+  int32 block_index = 3;
+}
+
+// The per-response usage stamp rendered on an assistant bubble's corner.
+// Every figure is daemon-resolved via the canonical TokenUsage derivation
+// (internal/tokenusage); the client renders verbatim and computes nothing.
+message ResponseUsageStamp {
+  // The response's expensive input: canonical input_misses total
+  // (written + unwritten). The headline figure.
+  int64 expensive_input_tokens = 1;
+  // Cache-served input, for the expanded stamp's breakdown row.
+  int64 cache_read_tokens = 2;
+  // Output tokens, as billed.
+  int64 output_tokens = 3;
+  // The model that produced the response, display form. Empty for synthetic
+  // records (never fabricated).
+  string model = 4;
+}

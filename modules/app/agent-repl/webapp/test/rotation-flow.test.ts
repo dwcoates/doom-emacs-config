@@ -90,7 +90,7 @@ function client(): Client {
         JSON.stringify({
           conversationDelta: {
             workspace: "/ws",
-            sessionId: "s1",
+            fence: "s1",
             throughSeq: String(throughSeq),
             // The daemon stamps a provenance on every item it builds; the
             // adapter's provenance gate refuses an envelope without one.

@@ -203,7 +203,7 @@ func waitAttachedSession(t *testing.T, snapshot *frontendv1.StateSnapshot, conn 
 		case *frontendv1.FrontendFrame_WorkspaceState:
 			attached = f.WorkspaceState.GetSessionId() == sessionID || f.WorkspaceState.GetWorkspace() == cwd
 		case *frontendv1.FrontendFrame_SessionInit:
-			attached = f.SessionInit.GetSessionId() == sessionID
+			attached = f.SessionInit.GetFence() == sessionID
 		case *frontendv1.FrontendFrame_SessionView:
 			sv := f.SessionView
 			if sv.GetSessionId() == sessionID {
@@ -295,8 +295,8 @@ func collectItems(t *testing.T, conn *websocket.Conn, workspace string, n int) [
 // without a store re-pull when the ring covers the request).
 func replayItems(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string) []*frontendv1.ConversationItem {
 	t.Helper()
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"resync":{"fromSeq":0,"sessionId":%q,"controllerGenerationId":%q}}`,
-		requestID, state.GetSessionId(), state.GetControllerGenerationId()))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"resync":{"fromSeq":0,"fence":%q}}`,
+		requestID, state.GetFence()))
 	var out []*frontendv1.ConversationItem
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
@@ -329,7 +329,7 @@ func isCompact(item *frontendv1.ConversationItem) bool { return item.GetContextC
 // isResult identifies a turn's ResultMessage item — the LAST conversation item
 // a turn produces. Awaiting it is how a test quiesces a turn before doing
 // anything that races the turn's own tail.
-func isResult(item *frontendv1.ConversationItem) bool { return item.GetResult() != nil }
+func isResult(item *frontendv1.ConversationItem) bool { return item.GetAgent().GetTurnResult() != nil }
 
 // seqItems drops the items a replay serves REGARDLESS of seq — the retained
 // permission items (arm 30), failure cards (arm 31), and prompt receipts
@@ -340,7 +340,7 @@ func isResult(item *frontendv1.ConversationItem) bool { return item.GetResult() 
 func seqItems(items []*frontendv1.ConversationItem) []*frontendv1.ConversationItem {
 	var out []*frontendv1.ConversationItem
 	for _, item := range items {
-		if item.GetPermission() != nil || item.GetSystemFailure() != nil {
+		if item.GetPermission() != nil || item.GetFailureCard() != nil {
 			continue
 		}
 		if strings.HasPrefix(item.GetUuid(), "prompt-echo:") {

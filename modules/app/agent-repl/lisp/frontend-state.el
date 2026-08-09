@@ -312,20 +312,24 @@ An unregistered live push is an impossible pre-WorkspaceAvailable frame and
 must reject loudly.")
 
 (defun agent-repl--frontend-reject-unmaterialized-session-frame
-    (frame job-id path session-id)
+    (frame job-id path identity)
   "Reject a session FRAME that arrived before host materialization.
 JOB-ID is the creation job identity when the frame protocol carries one;
 the current session-state frames do not, so callers must pass the explicit
-wire-contract marker `unavailable'.  PATH and SESSION-ID identify the
+wire-contract marker `unavailable'.  PATH and IDENTITY identify the
 impossible frame in the canonical global log.  This function never mutates
-workspace or frontend state."
+workspace or frontend state.
+
+IDENTITY is whatever the arm names itself by: a HOST frame passes its
+`session_id', a FENCED push its opaque `fence' (`session_id' is reserved on
+every one of those).  It is a diagnostic here — logged, never parsed."
   (agent-repl--log
    nil
-   "frontend-session-frame: REJECTED pre-materialization frame=%s job-id=%s path=%S session-id=%S"
-   frame job-id path session-id)
+   "frontend-session-frame: REJECTED pre-materialization frame=%s job-id=%s path=%S identity=%S"
+   frame job-id path identity)
   (user-error
-   "agent-repl frontend: %s arrived before WorkspaceAvailable materialized path %s (job %s session %s)"
-   frame path job-id session-id))
+   "agent-repl frontend: %s arrived before WorkspaceAvailable materialized path %s (job %s identity %s)"
+   frame path job-id identity))
 
 (defun agent-repl--frontend-tombstoned-dir-owner (path)
   "Return PATH's tombstoned workspace owner, or nil for live and unknown paths."
@@ -1032,11 +1036,14 @@ same fact classified, so it can finally be shown."
     ;; a name.  The raw wire value stays in the message text, since that is the
     ;; field an operator correlates against the daemon.
     (agent-repl--log (agent-repl--frontend-ws-name workspace)
-                     "frontend-apply-session-view: ws=%s terminal=%S claude-id=%s pending=%s token-utilization=%S"
+                     ;; `token_utilization' left SessionView with the component
+                     ;; reshape — it was a persistence record carried verbatim
+                     ;; to a renderer that had to digest it — so the trace no
+                     ;; longer claims to report a field the wire cannot carry.
+                     "frontend-apply-session-view: ws=%s terminal=%S claude-id=%s pending=%s"
                      workspace (plist-get view :terminal)
                      (or (plist-get view :claudeSessionId) "nil")
-                     (or (plist-get view :pendingPermissions) "0")
-                     (and (plist-get view :tokenUtilization) t))
+                     (or (plist-get view :pendingPermissions) "0"))
     (agent-repl--frontend-surface-session-death workspace view)
     workspace))
 
@@ -1067,10 +1074,13 @@ classified death, or has already been reported."
       nil)
      (t
       (puthash key item agent-repl--frontend-surfaced-deaths)
-      (agent-repl--log workspace
-                       "frontend-surface-session-death: ws=%s outcome=surface error-class=%s error-type=%s"
-                       key (plist-get item :errorClass) (plist-get item :errorType))
-      (agent-repl-failure-surface workspace (agent-repl-failure-from-wire item))))))
+      ;; `death' is a `FailureCardView' carried OUTSIDE the feed, so it was
+      ;; never filed under a ConversationItem and has no uuid to pass on.
+      (let ((failure (agent-repl-failure-from-wire item)))
+        (agent-repl--log workspace
+                         "frontend-surface-session-death: ws=%s outcome=surface class=%s kind=%s"
+                         key (plist-get failure :class) (plist-get failure :type))
+        (agent-repl-failure-surface workspace failure))))))
 
 ;;;; ---- SessionInit store (slash-command menu source) -------------------
 ;;

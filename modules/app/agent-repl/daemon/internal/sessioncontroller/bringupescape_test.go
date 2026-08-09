@@ -111,14 +111,14 @@ func (h *escapeHarness) sdkDied(t *testing.T, reason string) {
 }
 
 // failureCards returns every SystemFailureItem pushed into the feed.
-func (h *escapeHarness) failureCards() []*frontendv1.SystemFailureItem {
-	var out []*frontendv1.SystemFailureItem
+func (h *escapeHarness) failureCards() []*frontendv1.FailureCardView {
+	var out []*frontendv1.FailureCardView
 	h.pusher.mu.Lock()
 	deltas := append([]*frontendv1.ConversationDelta(nil), h.pusher.convo...)
 	h.pusher.mu.Unlock()
 	for _, delta := range deltas {
 		for _, item := range delta.GetItems() {
-			if f := item.GetSystemFailure(); f != nil {
+			if f := item.GetFailureCard(); f != nil {
 				out = append(out, f)
 			}
 		}
@@ -128,7 +128,7 @@ func (h *escapeHarness) failureCards() []*frontendv1.SystemFailureItem {
 
 func (h *escapeHarness) hasCard(errType errclass.Type) bool {
 	for _, c := range h.failureCards() {
-		if c.GetErrorType() == string(errType) {
+		if errclass.TypeName(c) == string(errType) {
 			return true
 		}
 	}
@@ -232,7 +232,7 @@ func TestResumedQueryStartupFailureRetainsTypedTerminationThroughDriveabilityFai
 		t.Fatalf("ensure error %v carries no typed query-termination detail", err)
 	}
 	detail := detailer.QueryTerminationFailureDetail()
-	if detail == nil || detail.GetAgentReplSessionId() != "s1" || detail.GetQueryInstanceId() != "resumed-query" || detail.GetVendorSessionId() != "vendor-resume" || detail.GetStartupFailure() == nil || detail.GetStartupFailure().GetCause() != "resume rejected" {
+	if detail == nil || detail.GetQueryInstanceId() != "resumed-query" || detail.GetVendorSessionId() != "vendor-resume" || detail.GetStartupFailure() == nil || detail.GetStartupFailure().GetCause() != "resume rejected" {
 		t.Fatalf("typed bring-up termination = %v", detail)
 	}
 	if !h.log.contains("BRING-UP QUERY TERMINATION retained") {
@@ -449,9 +449,9 @@ func TestStartFailedNamesTheError(t *testing.T) {
 
 	// Assert.
 	for _, c := range h.failureCards() {
-		if c.GetErrorType() == string(errclass.TypeSessionStartFailed) {
-			if !strings.Contains(c.GetSourceDetail(), "no such model") {
-				t.Fatalf("start-failed detail = %q, want the shim's own reason", c.GetSourceDetail())
+		if errclass.TypeName(c) == string(errclass.TypeSessionStartFailed) {
+			if !strings.Contains(c.GetDetail(), "no such model") {
+				t.Fatalf("start-failed detail = %q, want the shim's own reason", c.GetDetail())
 			}
 			return
 		}

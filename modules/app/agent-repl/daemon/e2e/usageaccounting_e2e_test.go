@@ -17,10 +17,12 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"agentrepl/wire"
+
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/statedb"
 )
 
@@ -34,8 +36,8 @@ func TestE2ETurnAccountingIsDurableAndUsesOneLongLivedQuery(t *testing.T) {
 	cwd := t.TempDir()
 	id, conn, vendorID, _ := liveSession(t, h, cwd)
 
-	first := submitAndAwaitAccounting(t, conn, cwd, "e2e-accounting-first", "first accounting turn")
-	second := submitAndAwaitAccounting(t, conn, cwd, "e2e-accounting-second", "second accounting turn")
+	first := submitAndAwaitAccounting(t, h, conn, id, cwd, "e2e-accounting-first", "first accounting turn")
+	second := submitAndAwaitAccounting(t, h, conn, id, cwd, "e2e-accounting-second", "second accounting turn")
 	assertInvalidAccountingForRuntimeIdentityAndUnmodeledUsage(t, first, id, []string{
 		"cache_diagnostic.reason", "cache_diagnostic.status", "fake_extension_tokens",
 	})
@@ -49,19 +51,36 @@ func TestE2ETurnAccountingIsDurableAndUsesOneLongLivedQuery(t *testing.T) {
 	assertDurableQueryLifecycle(t, replayStoreEvents(t, vendorID), first.GetQueryInstanceId())
 	assertStateDBResponseLedger(t, h, id, first, second)
 
-	var replayed *frontendv1.TurnAccounting
+	// The replay must still reach the turn's terminal result, and the accounting
+	// the durable ledger holds for that turn must be byte-identical to the one
+	// the live turn produced. The accounting itself no longer rides the item, so
+	// the two halves are asserted where each of them lives.
 	fresh, state := dialForReplay(t, h, id, cwd)
+	replayedResult := false
 	for _, item := range replayItems(t, fresh, state, cwd, "e2e-accounting-replay") {
-		if item.GetTurnAccounting() != nil && item.GetTurnAccounting().GetTurnId() == second.GetTurnId() {
-			replayed = item.GetTurnAccounting()
+		if item.GetAgent().GetTurnResult() != nil {
+			replayedResult = true
+		}
+	}
+	if !replayedResult {
+		t.Fatalf("replay omitted the terminal result for turn %q", second.GetTurnId())
+	}
+	durable, err := durableTurnAccountings(h, id)
+	if err != nil {
+		t.Fatalf("read durable turn accounting: %v", err)
+	}
+	var replayed *frontendv1.TurnAccounting
+	for _, accounting := range durable {
+		if accounting.GetTurnId() == second.GetTurnId() {
+			replayed = accounting
 			break
 		}
 	}
 	if replayed == nil {
-		t.Fatalf("replay omitted terminal accounting for turn %q", second.GetTurnId())
+		t.Fatalf("the durable ledger holds no accounting for turn %q", second.GetTurnId())
 	}
 	if !proto.Equal(replayed, second) {
-		t.Fatalf("replayed terminal accounting differs from the live terminal accounting\nreplay=%v\nlive=%v", replayed, second)
+		t.Fatalf("durable terminal accounting differs from the live terminal accounting\ndurable=%v\nlive=%v", replayed, second)
 	}
 }
 
@@ -75,7 +94,7 @@ func TestE2ETurnAccountingIncludesMainAndSubagentRawUsage(t *testing.T) {
 	cwd := t.TempDir()
 	id, conn, _, _ := liveSession(t, h, cwd)
 
-	accounting := submitAndAwaitAccounting(t, conn, cwd, "e2e-accounting-subagent", "!usage-subagent")
+	accounting := submitAndAwaitAccounting(t, h, conn, id, cwd, "e2e-accounting-subagent", "!usage-subagent")
 	assertInvalidAccountingForUnmodeledUsage(t, accounting, id)
 	if got, want := len(accounting.GetResponses()), 2; got != want {
 		t.Fatalf("accounting response records = %d, want main-agent and subagent records", got)
@@ -153,27 +172,50 @@ func TestE2EUnexpectedQueryTerminationReachesTypedFailure(t *testing.T) {
 
 	writeCmd(t, conn, `{"requestId":"e2e-query-eof","submitPrompt":{"text":"!query-eof","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	item, _ := awaitItem(t, conn, cwd, "the typed unexpected-query-termination failure", func(item *frontendv1.ConversationItem) bool {
-		failure := item.GetSystemFailure()
-		return failure != nil && failure.GetErrorClass() == frontendv1.ErrorClass_ERROR_CLASS_INTERNAL && failure.GetErrorType() == "unexpected_query_termination"
+		failure := item.GetFailureCard()
+		return failure != nil && errclass.CardTone(failure) == errclass.ToneLocal && errclass.TypeName(failure) == "unexpected_query_termination"
 	})
-	failure := item.GetSystemFailure()
-	if failure.GetMessage() == "" || failure.GetSourceDetail() == "" {
+	failure := item.GetFailureCard()
+	if failure.GetMessage() == "" || failure.GetDetail() == "" {
 		t.Errorf("unexpected query termination failure lacks diagnostic evidence: %v", failure)
 	}
-	detail := failure.GetQueryTermination()
-	if detail == nil || detail.GetAgentReplSessionId() == "" || detail.GetQueryInstanceId() == "" || detail.GetVendorSessionId() == "" || detail.GetObservedAtMs() <= 0 || detail.GetUnexpectedEof() == nil {
+	detail := failure.GetKind().GetQueryTermination().GetDetail()
+	if detail == nil || detail.GetQueryInstanceId() == "" || detail.GetVendorSessionId() == "" || detail.GetObservedAtMs() <= 0 || detail.GetUnexpectedEof() == nil {
 		t.Fatalf("unexpected query termination omitted exact typed identity or reason: %v", detail)
 	}
 }
 
-func submitAndAwaitAccounting(t *testing.T, conn *websocket.Conn, workspace, requestID, text string) *frontendv1.TurnAccounting {
+// submitAndAwaitAccounting submits one prompt, waits for the turn's terminal
+// result to reach the feed, and reads that turn's accounting out of the DURABLE
+// LEDGER.
+//
+// The accounting no longer rides the terminal feed item: a turn's verdict is
+// the session's ledger rather than the agent's utterance, and it reaches a
+// frontend resolved on FooterAccountingCell. The terminal result's arrival is
+// still the ordering signal — the row is written before the item is pushed — so
+// this reads the same fact through the layer that owns it.
+func submitAndAwaitAccounting(t *testing.T, h *e2eHarness, conn *websocket.Conn, sessionID, workspace, requestID, text string) *frontendv1.TurnAccounting {
 	t.Helper()
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":%q,"promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, requestID, text))
 	item, _ := awaitItem(t, conn, workspace, "the terminal result carrying turn accounting", isResult)
-	if item.GetTurnAccounting() == nil {
+	accountings, err := durableTurnAccountings(h, sessionID)
+	if err != nil {
+		t.Fatalf("read durable turn accounting after terminal result %q: %v", item.GetUuid(), err)
+	}
+	if len(accountings) == 0 {
 		t.Fatalf("terminal result %q arrived before durable turn accounting", item.GetUuid())
 	}
-	return item.GetTurnAccounting()
+	return accountings[len(accountings)-1]
+}
+
+// durableTurnAccountings lists a session's persisted turn accountings, newest
+// last.
+func durableTurnAccountings(h *e2eHarness, sessionID string) ([]*frontendv1.TurnAccounting, error) {
+	ledger, err := statedb.NewTurnAccountings(h.stateDB)
+	if err != nil {
+		return nil, err
+	}
+	return ledger.List(sessionID)
 }
 
 func assertInvalidAccountingForUnmodeledUsage(t *testing.T, accounting *frontendv1.TurnAccounting, sessionID string) {

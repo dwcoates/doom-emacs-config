@@ -300,8 +300,7 @@ func TestExplicitResumeCreateClassifiesPostCreateEstablishmentFailures(t *testin
 	queryFailure := &queryTerminationTestError{
 		err: errors.New("resumed query terminated during readiness"),
 		detail: &frontendv1.QueryTerminationFailure{
-			AgentReplSessionId: "s_test",
-			QueryInstanceId:    "query-resume",
+			QueryInstanceId: "query-resume",
 			VendorIdentity: &frontendv1.QueryTerminationFailure_VendorSessionId{
 				VendorSessionId: "claude-resume",
 			},
@@ -350,16 +349,16 @@ func TestExplicitResumeCreateClassifiesPostCreateEstablishmentFailures(t *testin
 				ExplicitClaudeSessionId: "claude-resume",
 			})
 			failure := errclass.Command(nil, err)
-			detail := failure.GetSessionResume()
+			detail := failure.GetKind().GetSessionResumeFailed().GetDetail()
 
 			// Assert.
 			if !errors.Is(err, tc.cause) {
 				t.Fatalf("CreateSession error = %v, want original chain to contain %v", err, tc.cause)
 			}
-			if failure.GetErrorType() != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil {
+			if errclass.TypeName(failure) != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil {
 				t.Fatalf("failure = %v, want typed create resume failure", failure)
 			}
-			if detail.GetAgentReplSessionId() != "s_test" || detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" || detail.GetResolvedConfigDir() != "/cfg" {
+			if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" || detail.GetResolvedConfigDir() != "/cfg" {
 				t.Fatalf("failure evidence = %v", detail)
 			}
 			tc.check(t, detail)
@@ -382,16 +381,16 @@ func TestExplicitResumeCreateClassifiesCreateCoreBringUpFailure(t *testing.T) {
 		ExplicitClaudeSessionId: "claude-resume",
 	})
 	failure := errclass.Command(nil, err)
-	detail := failure.GetSessionResume()
+	detail := failure.GetKind().GetSessionResumeFailed().GetDetail()
 
 	// Assert.
 	if !errors.Is(err, cause) {
 		t.Fatalf("CreateSession error = %v, want original core failure", err)
 	}
-	if failure.GetErrorType() != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil || detail.GetBringUpFailure() == nil {
+	if errclass.TypeName(failure) != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil || detail.GetBringUpFailure() == nil {
 		t.Fatalf("failure = %v, want typed create bring-up failure", failure)
 	}
-	if detail.GetAgentReplSessionId() != "s_test" || detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" || detail.GetResolvedConfigDir() != "/cfg" {
+	if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" || detail.GetResolvedConfigDir() != "/cfg" {
 		t.Fatalf("failure evidence = %v", detail)
 	}
 	if !strings.Contains(detail.GetBringUpFailure().GetCause(), cause.Error()) {
@@ -477,7 +476,7 @@ func TestCreateSessionStillNacksANonHibernationBringUpFailure(t *testing.T) {
 		ResumeMode:              frontendv1.ResumeMode_RESUME_MODE_EXPLICIT,
 		ExplicitClaudeSessionId: "claude-resume",
 	})
-	detail := errclass.Command(nil, err).GetSessionResume()
+	detail := errclass.Command(nil, err).GetKind().GetSessionResumeFailed().GetDetail()
 
 	// Assert.
 	if !errors.Is(err, errclass.ErrShimNotConnected) {
@@ -561,8 +560,8 @@ func TestExplicitResumeCallerDeadlineCarriesTypedContinuityEvidence(t *testing.T
 
 	// Assert.
 	failure := errclass.Command(nil, err)
-	detail := failure.GetSessionResume()
-	if !errors.Is(err, errclass.ErrSessionNotEstablished) || failure.GetErrorType() != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil || detail.GetBringUpFailure() == nil {
+	detail := failure.GetKind().GetSessionResumeFailed().GetDetail()
+	if !errors.Is(err, errclass.ErrSessionNotEstablished) || errclass.TypeName(failure) != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil || detail.GetBringUpFailure() == nil {
 		t.Fatalf("failure = %v err=%v, want typed explicit-resume caller cancellation", failure, err)
 	}
 	if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" {
@@ -599,8 +598,8 @@ func TestExplicitResumeEnrollmentCancellationCarriesTypedContinuityEvidence(t *t
 
 	// Assert.
 	failure := errclass.Command(nil, err)
-	detail := failure.GetSessionResume()
-	if !errors.Is(err, errclass.ErrSessionNotEstablished) || failure.GetErrorType() != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil || detail.GetBringUpFailure() == nil {
+	detail := failure.GetKind().GetSessionResumeFailed().GetDetail()
+	if !errors.Is(err, errclass.ErrSessionNotEstablished) || errclass.TypeName(failure) != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil || detail.GetBringUpFailure() == nil {
 		t.Fatalf("failure = %v err=%v, want typed explicit-resume enrollment cancellation", failure, err)
 	}
 	if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" {
