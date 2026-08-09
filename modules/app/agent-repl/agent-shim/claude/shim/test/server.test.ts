@@ -406,10 +406,34 @@ describe("SessionServer outbound", () => {
     const peer = await handshake(server, socketPath);
     await until(() => server.isConnected());
     // Act
-    server.sendPermissionRequest(create(PermissionRequestSchema, { requestId: "pr-1", toolName: "Bash" }));
+    const delivered = server.sendPermissionRequest(create(PermissionRequestSchema, { requestId: "pr-1", toolName: "Bash" }));
     const req = await peer.next(PermissionRequestSchema);
     // Assert
     expect(req.toolName).toBe("Bash");
+    expect(delivered).toBe(true);
+  });
+
+  it("reports a PermissionRequest undelivered when no daemon is attached", () => {
+    // Arrange: never connected, so there is nobody to answer.
+    const { server } = harness();
+    track(server);
+    // Act
+    const delivered = server.sendPermissionRequest(create(PermissionRequestSchema, { requestId: "pr-2", toolName: "Bash" }));
+    // Assert
+    expect(delivered).toBe(false);
+  });
+
+  it("logs an undelivered PermissionRequest as an error naming the re-send", () => {
+    // Arrange
+    const { server } = harness();
+    track(server);
+    const records = persistedRecords();
+    // Act
+    server.sendPermissionRequest(create(PermissionRequestSchema, { requestId: "pr-3", toolName: "Bash" }));
+    // Assert
+    const dropped = records().filter((r) => String(r.message).includes("permission request cannot be delivered"));
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0].level).toBe("error");
   });
 });
 
