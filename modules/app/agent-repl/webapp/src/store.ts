@@ -24,6 +24,7 @@ import type {
   SessionTokenUtilization,
   ShutdownScheduleDraining,
   ShutdownScheduleView,
+  MergeQueueRoster,
   TokenBreakdownView,
   TopbarView,
   WorkspaceGateView,
@@ -856,6 +857,17 @@ export class ConversationStore {
   progress: ProgressInput | null = null;
 
   /**
+   * The daemon-global merge queue, adopted whole from `MergeQueueRoster`.
+   * `null` before the first one lands, which is "no daemon has said yet"
+   * rather than a fabricated empty queue.
+   *
+   * DAEMON-GLOBAL, so it is kept beside `state` rather than in `StoreState`:
+   * it is not a fact about this workspace and must not be retracted by the
+   * per-workspace invalidation that clears the workspace's own claims.
+   */
+  mergeQueueRoster: MergeQueueRoster | null = null;
+
+  /**
    * IDENTITY AUTHORITY. True once a `WorkspaceState` has named this
    * workspace's owning session, which is the daemon's session-state machine
    * ruling on WHICH agent-repl session owns the workspace right now.
@@ -902,6 +914,7 @@ export class ConversationStore {
     // that could drift from it.
     this.asyncBubbles.adoptSnapshot([]);
     this.progress = null;
+    this.mergeQueueRoster = null;
     this.sessionIdAuthoritative = false;
   }
 
@@ -986,6 +999,13 @@ export class ConversationStore {
           break;
         case "shutdown-schedule":
           changed = this.applyShutdownSchedule(effect.value) || changed;
+          break;
+        case "merge-queue-roster":
+          // Adopted WHOLE: the daemon pushes the complete queue on every
+          // mutation, so there is nothing here to merge and nothing to
+          // re-derive from per-run MergeStatus.
+          this.mergeQueueRoster = effect.value;
+          changed = true;
           break;
         case "task-catalog":
           this.taskRoster = effect.value.entries;

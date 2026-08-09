@@ -58,6 +58,7 @@ import type {
   QueueEntry as GeneratedQueueEntry,
   QueueEntryKeepAliveHold as GeneratedQueueEntryKeepAliveHold,
   QueueEntryRevivalHold as GeneratedQueueEntryRevivalHold,
+  QueueEntryBuildRefreshHold as GeneratedQueueEntryBuildRefreshHold,
 } from "../../proto/gen/ts/agentshim/frontend/v1/prompt-queue_pb";
 import { PromptOrigin as GeneratedPromptOrigin } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
 
@@ -117,6 +118,9 @@ export const COMMAND_ARM = {
   queueCancel: "queueCancel",
   hibernateWorkspace: "hibernateWorkspace",
   reviveSession: "reviveSession",
+  pauseMergeQueue: "pauseMergeQueue",
+  resumeMergeQueue: "resumeMergeQueue",
+  evictMerge: "evictMerge",
 } as const satisfies Record<string, ArmKeys<GeneratedFrontendCommand["command"]>>;
 
 /**
@@ -145,6 +149,7 @@ export const QUEUE_HOLD_ARM = {
   shutdown: "shutdown",
   keepAlive: "keepAlive",
   revival: "revival",
+  buildRefresh: "buildRefresh",
 } as const satisfies Record<string, ArmKeys<GeneratedQueueEntry["hold"]>>;
 
 /**
@@ -176,6 +181,16 @@ export const KEEP_ALIVE_HOLD_TURN_ID: FieldKeys<GeneratedQueueEntryKeepAliveHold
  * message fails this build rather than being silently ignored.
  */
 export const REVIVAL_HOLD_FIELDS: readonly FieldKeys<GeneratedQueueEntryRevivalHold>[] = [];
+
+/**
+ * The build-refresh hold carries NOTHING either: the arm being set is the whole
+ * claim — the entry waits for its session's shim to restart onto the current
+ * build, and the workspace it rides already names the session. Spelled as an
+ * empty tuple for the same reason as above: a field ADDED to the message fails
+ * this build rather than being silently ignored.
+ */
+export const BUILD_REFRESH_HOLD_FIELDS: readonly FieldKeys<GeneratedQueueEntryBuildRefreshHold>[] =
+  [];
 
 /** The compact-first arm's only field: how much the compaction may swallow. */
 export const REVIVE_COMPACT_SCOPE: FieldKeys<GeneratedReviveCompactFirst> = "scope";
@@ -317,6 +332,7 @@ export const FAILURE_KIND_SIDE = {
   keepAliveWindowInverted: "machinery",
   compactionColdRead: "machinery",
   clientLogIdentityStale: "machinery",
+  promptRefusedByMergeState: "machinery",
   internalUnclassified: "machinery",
 
   // ---- VENDOR (purple): the SDK or the vendor refused or concluded it. ----

@@ -332,3 +332,32 @@ describe("the hibernation command arms", () => {
     expect(Object.keys(w.reviveSession as Record<string, unknown>)).toEqual(["direct"]);
   });
 });
+
+describe("the merge-queue runtime controls", () => {
+  it("encodes a pause as an empty daemon-global arm", () => {
+    // Arrange / Act
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "pauseMergeQueue" } });
+    // Assert — the verb IS the arm; the queue is global, so there is nothing
+    // for the body to name.
+    expect(w.pauseMergeQueue).toEqual({});
+  });
+
+  it("encodes a resume as an empty daemon-global arm", () => {
+    // Arrange / Act
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "resumeMergeQueue" } });
+    // Assert
+    expect(w.resumeMergeQueue).toEqual({});
+  });
+
+  it("names the run an eviction targets", () => {
+    // Arrange / Act
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "evictMerge", runId: "run-7" },
+    });
+    // Assert — the run id is the only key the roster and every MergeStatus
+    // share, so it is the whole address of the entry being evicted.
+    expect(w.evictMerge).toEqual({ runId: "run-7" });
+  });
+});

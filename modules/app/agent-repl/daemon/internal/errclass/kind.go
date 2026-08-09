@@ -93,6 +93,8 @@ func kindFor(t Type) *frontendv1.FailureKind {
 		return &frontendv1.FailureKind{Kind: &frontendv1.FailureKind_CompactionColdRead{CompactionColdRead: &frontendv1.FailureCompactionColdRead{}}}
 	case TypeClientLogIdentityStale:
 		return &frontendv1.FailureKind{Kind: &frontendv1.FailureKind_ClientLogIdentityStale{ClientLogIdentityStale: &frontendv1.FailureClientLogIdentityStale{}}}
+	case TypePromptRefusedByMergeState:
+		return &frontendv1.FailureKind{Kind: &frontendv1.FailureKind_PromptRefusedByMergeState{PromptRefusedByMergeState: &frontendv1.FailurePromptRefusedByMergeState{}}}
 	case TypeInternalUnclassified:
 		return &frontendv1.FailureKind{Kind: &frontendv1.FailureKind_InternalUnclassified{InternalUnclassified: &frontendv1.FailureInternalUnclassified{}}}
 	case TypeAPIAuthenticationFailed:
@@ -203,6 +205,8 @@ func TypeOf(kind *frontendv1.FailureKind) (Type, bool) {
 		return TypeCompactionColdRead, true
 	case *frontendv1.FailureKind_ClientLogIdentityStale:
 		return TypeClientLogIdentityStale, true
+	case *frontendv1.FailureKind_PromptRefusedByMergeState:
+		return TypePromptRefusedByMergeState, true
 	case *frontendv1.FailureKind_InternalUnclassified:
 		return TypeInternalUnclassified, true
 	case *frontendv1.FailureKind_ApiAuthenticationFailed:

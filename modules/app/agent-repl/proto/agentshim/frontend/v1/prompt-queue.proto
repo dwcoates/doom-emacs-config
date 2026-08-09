@@ -133,6 +133,11 @@ message QueueEntry {
     // "waiting on the revival's compaction" bubble from this arm instead of
     // the classifier bubble.
     QueueEntryRevivalHold revival = 9;
+    // Held because the session's shim is being restarted onto the current
+    // build at the turn boundary (automatic stale-shim refresh). Like the
+    // other holds, the classifier never runs on such an entry; the exit is
+    // delivery the moment the restarted shim reports ready.
+    QueueEntryBuildRefreshHold build_refresh = 14;
   }
 }
 
@@ -159,6 +164,11 @@ message QueueEntryRevivalHold {
   reserved 1;
   reserved "session_id";
 }
+
+// The entry waits for its session's shim to restart onto the current build
+// at the turn boundary (automatic stale-shim refresh). Delivered in order
+// the moment the restarted shim reports ready.
+message QueueEntryBuildRefreshHold {}
 
 // The session's queue, pushed on EVERY change and carried in StateSnapshot.
 // An empty entries list is a meaningful value (the queue drained, or the

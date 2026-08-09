@@ -215,6 +215,14 @@ const (
 	// internal.unclassified logged a routine staleness as a daemon fault on
 	// every single rejected record.
 	TypeClientLogIdentityStale Type = "client_log.identity_stale"
+	// TypePromptRefusedByMergeState — a USER prompt refused because the
+	// workspace's merge machinery holds the session: it is queued for, running,
+	// or resolving a merge. It is a NAMED refusal rather than an internal fault
+	// because nothing is broken — the prompt was not lost, and the session
+	// answers again when the merge resolves or the user interrupts it. Reaching
+	// a human as internal.unclassified reported an ordinary merge hold as a
+	// daemon defect.
+	TypePromptRefusedByMergeState Type = "prompt.refused_by_merge_state"
 	// TypeInternalUnclassified — the loud fallthrough. It carries the raw
 	// error text and is always logged; a silent fallthrough would let the
 	// vocabulary rot without anyone noticing.
@@ -333,6 +341,7 @@ var prose = map[Type]string{
 	TypeKeepAliveWindowInverted:        "a cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation",
 	TypeCompactionColdRead:             "a compaction the daemon ran re-read the whole conversation at the uncached rate instead of from the prompt cache, which is the cost it exists to avoid",
 	TypeClientLogIdentityStale:         "a browser log record named a session this workspace no longer runs, so it was not recorded",
+	TypePromptRefusedByMergeState:      "prompt refused — a merge owns this workspace; wait for it to resolve or interrupt it",
 	TypeInternalUnclassified:           "the command failed",
 
 	// API — the SDK or the vendor refusing or concluding the work.
@@ -473,6 +482,10 @@ var sentinelTypes = []struct {
 	{ErrQueueEntryKeepAliveHeld, TypeQueueEntryKeepAliveHeld},
 	{ErrSessionHibernated, TypeSessionHibernated},
 	{ErrClientLogIdentityStale, TypeClientLogIdentityStale},
+	// The one sentinel this ladder does not own: it is ssm's, because only the
+	// state machine can tell a merge-axis refusal from the invariant's generic
+	// one, and errclass already imports ssm.
+	{ssm.ErrPromptRefusedByMergeState, TypePromptRefusedByMergeState},
 	{ErrConversationUnresumable, TypeSessionConversationUnresumable},
 	{ErrResumeModeRetired, TypeResumeModeRetired},
 }
@@ -913,6 +926,7 @@ func AllTypes() []Type {
 		TypeKeepAliveWindowInverted,
 		TypeCompactionColdRead,
 		TypeClientLogIdentityStale,
+		TypePromptRefusedByMergeState,
 		TypeInternalUnclassified,
 		TypeAPIAuthenticationFailed,
 		TypeAPIBillingError,
