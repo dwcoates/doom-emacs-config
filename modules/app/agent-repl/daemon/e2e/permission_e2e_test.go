@@ -36,6 +36,7 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"github.com/gorilla/websocket"
@@ -91,6 +92,112 @@ func TestE2EPendingPermissionResolvesThePermissionState(t *testing.T) {
 	// Act / Assert — a turn that stops to ask, with both its item and
 	// authoritative state observed regardless of arrival order.
 	askQuestion(t, conn, cwd, "r-ask", "ls e2e-permission")
+}
+
+// isDeniedPermission identifies a permission item the daemon resolved as a
+// DECLINE (sessioncontroller HandlePermission pushes RESOLUTION_DENIED and then
+// answers the shim with nothing — the stop is the delivery).
+func isDeniedPermission(item *frontendv1.ConversationItem) bool {
+	perm := item.GetPermission()
+	return perm != nil && perm.GetResolution() == corev1.PermissionItem_RESOLUTION_DENIED
+}
+
+// declineObservation is what a declined permission produced on the frontend.
+type declineObservation struct {
+	denied *corev1.PermissionItem
+	window *frontendv1.InterruptWindow
+	state  *frontendv1.WorkspaceState
+}
+
+// awaitDecline waits for all three consequences a decline owes: the DENIED
+// resolution on the question's own uuid, the footer's interrupt window, and the
+// workspace resolving to INTERRUPTED. All three rather than whichever lands
+// first, because the claim under test is that a decline means what an interrupt
+// means, and any one of them alone is consistent with it meaning less.
+func awaitDecline(t *testing.T, conn *websocket.Conn, workspace, permID string) declineObservation {
+	t.Helper()
+	var obs declineObservation
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+		"the DENIED resolution of the declined question": func(frame *frontendv1.FrontendFrame) bool {
+			for _, item := range deltaItems(frame, workspace) {
+				if item.GetUuid() == permID && isDeniedPermission(item) {
+					obs.denied = item.GetPermission()
+					return true
+				}
+			}
+			return false
+		},
+		"a ProgressView carrying an OPEN interrupt window": func(frame *frontendv1.FrontendFrame) bool {
+			view := progressFor(frame, workspace)
+			if !view.GetInterrupt().GetActive() {
+				return false
+			}
+			obs.window = view.GetInterrupt()
+			return true
+		},
+		"a WorkspaceState resolving the declined turn to INTERRUPTED": func(frame *frontendv1.FrontendFrame) bool {
+			state := workspaceStateFor(frame, workspace)
+			if state.GetState() != frontendv1.RenderState_RENDER_STATE_INTERRUPTED {
+				return false
+			}
+			obs.state = state
+			return true
+		},
+	})
+	return obs
+}
+
+// TestE2EDeclinedPermissionStopsTheTurn covers THE DECLINE: answering no is the
+// user taking the session back, so the turn that asked ENDS — with the footer's
+// interrupt window open and the workspace resolved to INTERRUPTED, exactly as a
+// typed stop leaves it — rather than the agent reading the denial as a tool
+// result and carrying on.
+func TestE2EDeclinedPermissionStopsTheTurn(t *testing.T) {
+	// Arrange — a real parked question.
+	// The workspace tempdir is created BEFORE the harness on purpose: cleanups
+	// run LIFO, so this ordering tears the harness (and its shim processes)
+	// down before the tempdir is removed.
+	cwd := t.TempDir()
+	h := newUDSHarness(t)
+	_, conn, _, _ := liveSession(t, h, cwd)
+	permID := askQuestion(t, conn, cwd, "r-ask", "ls e2e-decline")
+
+	// Act — the human declines it.
+	writeCmd(t, conn, fmt.Sprintf(
+		`{"requestId":"r-decline","workspace":%q,"permissionAnswer":{"permissionRequestId":%q,"allow":false,"denyMessage":"not that one"}}`,
+		cwd, permID))
+
+	// Assert.
+	obs := awaitDecline(t, conn, cwd, permID)
+	if got := obs.window.GetOutcome(); got != corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+		t.Errorf("interrupt window outcome = %s, want INTERRUPTED: a decline stops the turn that asked", got)
+	}
+	if msg := obs.denied.GetDenyMessage(); msg != "not that one" {
+		t.Errorf("recorded deny message = %q, want the reason the user gave", msg)
+	}
+}
+
+// TestE2EPromptOverAParkedPermissionDeclinesIt covers THE IMPLIED DECLINE: a
+// prompt typed while a question is parked IS the answer, so it declines and
+// stops before it is submitted — the same three consequences, provoked by a
+// submitPrompt rather than by a permissionAnswer.
+func TestE2EPromptOverAParkedPermissionDeclinesIt(t *testing.T) {
+	// Arrange — a real parked question.
+	cwd := t.TempDir()
+	h := newUDSHarness(t)
+	_, conn, _, _ := liveSession(t, h, cwd)
+	permID := askQuestion(t, conn, cwd, "r-ask", "ls e2e-superseded")
+
+	// Act — the user types instead of answering.
+	writeCmd(t, conn, `{"requestId":"r-next","submitPrompt":{"text":"never mind, do this","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
+
+	// Assert — the question was declined and the turn stopped; the prompt then
+	// runs as the paused queue's one deliverable (covered by the interrupted-
+	// queue test in interrupt_e2e_test.go, whose path this joins).
+	obs := awaitDecline(t, conn, cwd, permID)
+	if got := obs.window.GetOutcome(); got != corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+		t.Errorf("interrupt window outcome = %s, want INTERRUPTED: the prompt declined the parked question and stopped its turn", got)
+	}
 }
 
 // TestE2EAnsweredPermissionReturnsToThinking covers THE CLOSING EDGE: answering

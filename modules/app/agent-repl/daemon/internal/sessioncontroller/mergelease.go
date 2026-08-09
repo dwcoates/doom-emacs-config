@@ -190,7 +190,7 @@ func (m *Manager) submitMergePrompt(ctx context.Context, workspace, requestID, t
 	if requestID == "" {
 		return promptDisposition{}, fmt.Errorf("session-controller: a merge prompt for workspace %q needs a request id; it is what the prompt receipt and the durable transcript line reconcile on", workspace)
 	}
-	return m.submitPromptAs(ctx, workspace, requestID, text, permissionMode, "merge:"+requestID, promptOrigin, submitterMergeLeaseHolder)
+	return m.submitPromptAs(ctx, workspace, requestID, text, permissionMode, "merge:"+requestID, promptOrigin, submitterMergeLeaseHolder, leavesParkedPermissions)
 }
 
 // InterruptForMerge stops the workspace's in-flight turn so merge.Coordinator
@@ -287,6 +287,6 @@ func (m *Manager) ResumeDisplacedTurn(ctx context.Context, workspace string, tur
 	m.logf("session-controller: resuming the turn the merge lease displaced ws=%q request_id=%s permission_mode=%q",
 		workspace, requestID, turn.PermissionMode)
 	_, err := m.submitPromptAs(ctx, workspace, requestID, turn.Prompt, turn.PermissionMode,
-		"merge-resume:"+requestID, corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME, submitterUser)
+		"merge-resume:"+requestID, corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME, submitterUser, leavesParkedPermissions)
 	return err
 }

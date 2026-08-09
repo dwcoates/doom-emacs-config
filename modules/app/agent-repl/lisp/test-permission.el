@@ -433,6 +433,24 @@ name matches nothing and the answer is NACKed as \"no live session\"."
         ;; Assert
         (should (equal sent '("ws1" "r1" nil "too risky")))))))
 
+(ert-deftest agent-repl-test-answer-permission-deny-prompts-for-a-recorded-reason ()
+  "The deny prompt asks for a RECORDED reason, not a message to the agent.
+A decline stops the turn that asked (daemon permdecline.go), so the text
+typed here reaches no agent, and a prompt that implied otherwise would be
+asking the user to write for a reader that no longer exists."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :permission-prompt-active '(:request-id "r1" :tool-name "Bash"))
+    (let (asked)
+      (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) nil))
+                ((symbol-function 'read-string) (lambda (prompt &rest _) (setq asked prompt) ""))
+                ((symbol-function 'message) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--send-permission-answer) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl-answer-permission "ws1")
+        ;; Assert
+        (should (string-match-p "recorded" (or asked "")))))))
+
 ;;;; ---- Wire CWD routing into the workspace log sink --------------------
 ;;
 ;; A `ConversationDelta' names its workspace by session CWD.  Dispatch keeps
