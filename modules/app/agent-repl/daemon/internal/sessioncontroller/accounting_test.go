@@ -85,6 +85,152 @@ func TestTurnAccountingReducerCompletesWithBoundaryAndMatchingLedger(t *testing.
 	}
 }
 
+// messageDeltaUsageEvent is the vendor's relayed message_delta correction: the
+// FINAL cumulative usage for one API message, reported after the assistant
+// message that carried only the message_start snapshot.
+func messageDeltaUsageEvent(t *testing.T, apiMessageID string, usage *datav1.ApiUsage) *corev1.Event {
+	t.Helper()
+	return accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_StreamEvent{StreamEvent: &datav1.StreamEvent{
+		Event: &datav1.RawMessageStreamEvent{Event: &datav1.RawMessageStreamEvent_MessageDelta{MessageDelta: &datav1.MessageDeltaEvent{
+			ApiMessageId: apiMessageID,
+			VendorUsage:  usage,
+		}}},
+	}}})
+}
+
+// snapshotAssistantEvent is one assistant message as the stream plane delivers
+// it: settled input and cache counters, and only the INTERIM output count the
+// message_start snapshot knew.
+func snapshotAssistantEvent(t *testing.T, apiMessageID string, snapshotOutput int64) *corev1.Event {
+	t.Helper()
+	return accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
+		Message: &datav1.ApiAssistantMessage{Id: apiMessageID, Model: "claude-opus-5", Usage: &datav1.ApiUsage{InputTokens: 33, OutputTokens: snapshotOutput}},
+	}}})
+}
+
+// TestResponseUsageCorrectionReconcilesTheOutputLedger reproduces the shape
+// measured on the live stack: the stream plane's per-response output summed to
+// 563 while the terminal result reported 4407, with input reconciling exactly
+// because input is settled at message_start. The correction relayed from
+// message_delta is what closes it.
+//
+// Each case fixes the arrival ORDER of the two facts, because the SDK emits one
+// assistant message per content block and whether those land before or after the
+// frame's message_delta is the vendor's business, not a guarantee.
+func TestResponseUsageCorrectionReconcilesTheOutputLedger(t *testing.T) {
+	tests := []struct {
+		name  string
+		order []string
+	}{
+		{name: "correction after the response", order: []string{"assistant", "delta"}},
+		{name: "correction before the response", order: []string{"delta", "assistant"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newTurnAccountingReducer(t.Logf)
+			r.observe(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+				QueryInstanceId: "q",
+				Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{
+					Identity: completeRuntimeIdentity(),
+				}},
+			}}}, "s")
+			r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
+			r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
+			for _, step := range tc.order {
+				switch step {
+				case "assistant":
+					if err := r.observe(snapshotAssistantEvent(t, "msg_live", 563), "s"); err != nil {
+						t.Fatalf("observe assistant: %v", err)
+					}
+				case "delta":
+					if err := r.observe(messageDeltaUsageEvent(t, "msg_live", &datav1.ApiUsage{InputTokens: 33, OutputTokens: 4407}), "s"); err != nil {
+						t.Fatalf("observe message_delta: %v", err)
+					}
+				}
+			}
+			r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{
+				Usage:      &datav1.Usage{InputTokens: 33, OutputTokens: 4407},
+				ModelUsage: map[string]*datav1.ModelUsage{"claude-opus-5": {InputTokens: 33, OutputTokens: 4407}},
+			}}}), "s")
+			r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
+			got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+			if got.GetComplete() == nil {
+				t.Fatalf("accounting = %+v, want complete", got.GetInvalid().GetProblems())
+			}
+			if out := got.GetReconciliation().GetResponseMainAgent().GetOutputTokens(); out != 4407 {
+				t.Fatalf("response output_tokens = %d, want 4407", out)
+			}
+		})
+	}
+}
+
+// TestUncorrectedResponseStillReportsTheLedgerDisagreement pins the
+// pre-amendment world as REPRESENTABLE: a turn whose message_delta correction
+// never arrived — a replayed row written before the field existed is the
+// standing case — is reconciled against the snapshot it actually has, and says
+// so, rather than being quietly reconciled against evidence nobody sent.
+func TestUncorrectedResponseStillReportsTheLedgerDisagreement(t *testing.T) {
+	r := newTurnAccountingReducer(t.Logf)
+	r.observe(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "q",
+		Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{
+			Identity: completeRuntimeIdentity(),
+		}},
+	}}}, "s")
+	r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
+	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
+	r.observe(snapshotAssistantEvent(t, "msg_old", 563), "s")
+	// An old row: the relayed frame carries the legacy narrow usage only, with
+	// neither of the fields the amendment added.
+	if err := r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_StreamEvent{StreamEvent: &datav1.StreamEvent{
+		Event: &datav1.RawMessageStreamEvent{Event: &datav1.RawMessageStreamEvent_MessageDelta{MessageDelta: &datav1.MessageDeltaEvent{
+			Usage: &datav1.Usage{OutputTokens: 4407},
+		}}},
+	}}}), "s"); err != nil {
+		t.Fatalf("observe legacy message_delta: %v", err)
+	}
+	r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{
+		Usage:      &datav1.Usage{InputTokens: 33, OutputTokens: 4407},
+		ModelUsage: map[string]*datav1.ModelUsage{"claude-opus-5": {InputTokens: 33, OutputTokens: 4407}},
+	}}}), "s")
+	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
+	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	var mismatch []string
+	for _, problem := range got.GetInvalid().GetProblems() {
+		mismatch = append(mismatch, problem.GetTokenLedgerMismatch().GetDifferingFieldPaths()...)
+	}
+	if !containsPath(mismatch, "output_tokens") {
+		t.Fatalf("differing field paths = %v, want output_tokens still reported", mismatch)
+	}
+	if got.GetReconciliation().GetResponseMainAgent().GetOutputTokens() != 563 {
+		t.Fatalf("response output_tokens = %d, want the uncorrected 563", got.GetReconciliation().GetResponseMainAgent().GetOutputTokens())
+	}
+}
+
+// TestPerContentBlockDuplicatesDoNotConflictAfterCorrection covers the live
+// shape where the SDK emits one assistant message PER CONTENT BLOCK, all sharing
+// one API message id. Correcting one copy and not the other would manufacture a
+// ledger conflict out of two records the vendor sent as equals.
+func TestPerContentBlockDuplicatesDoNotConflictAfterCorrection(t *testing.T) {
+	r := newTurnAccountingReducer(t.Logf)
+	r.queryID = "q"
+	r.runtime = completeRuntimeIdentity()
+	r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
+	r.observe(snapshotAssistantEvent(t, "msg_dup", 5), "s")
+	r.observe(messageDeltaUsageEvent(t, "msg_dup", &datav1.ApiUsage{InputTokens: 33, OutputTokens: 4407}), "s")
+	r.observe(snapshotAssistantEvent(t, "msg_dup", 5), "s")
+	turn := r.turns["t"]
+	if len(turn.responses) != 1 {
+		t.Fatalf("responses = %d, want the duplicates deduped to 1", len(turn.responses))
+	}
+	if len(turn.responseConflicts) != 0 {
+		t.Fatalf("response conflicts = %v, want none", turn.responseConflicts)
+	}
+	if out := turn.responses[0].GetUsage().GetOutputTokens(); out != 4407 {
+		t.Fatalf("response output_tokens = %d, want 4407", out)
+	}
+}
+
 func TestReconcileTokenUsageNamesEveryResponseInStableOrderWithoutResult(t *testing.T) {
 	records := []*frontendv1.TokenUtilization{
 		{ApiMessageId: "message-b"},
@@ -818,6 +964,139 @@ func TestTurnAccountingReducerInvalidatesIncompleteRuntimeIdentity(t *testing.T)
 	}
 }
 
+// fullRuntimeIdentity is the identity a correctly recording shim now produces:
+// every field the daemon requires, settled. Tests below take exactly one field
+// away each, so a passing suite means each requirement is load-bearing on its
+// own rather than jointly.
+func fullRuntimeIdentity() *corev1.QueryRuntimeIdentity {
+	digest := func() *corev1.EvidenceFingerprint {
+		return &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Sha256{Sha256: "abc"}}
+	}
+	return &corev1.QueryRuntimeIdentity{
+		VendorSessionId:   "vendor",
+		EffectiveModel:    "model",
+		SdkVersion:        "0.3.220",
+		ClaudeCodeVersion: "2.0.0",
+		ShimBuildSha:      "sha",
+		AuthSource:        "none",
+		FastModeState:     "off",
+		EffectiveOptions:  digest(),
+		Settings:          digest(),
+		Tools:             digest(),
+		Mcp:               digest(),
+		ContextPrefix:     digest(),
+	}
+}
+
+// missingRuntimeIdentityPathsFor settles one turn against the given runtime
+// identity and returns the identity paths the record reported as missing.
+func missingRuntimeIdentityPathsFor(t *testing.T, runtime *corev1.QueryRuntimeIdentity) []string {
+	t.Helper()
+	r := newTurnAccountingReducer(nil)
+	r.queryID = "q"
+	r.runtime = runtime
+	r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
+	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+	var paths []string
+	for _, problem := range got.GetInvalid().GetProblems() {
+		paths = append(paths, problem.GetRuntimeIdentityIncomplete().GetMissingFieldPaths()...)
+	}
+	return paths
+}
+
+// TestRuntimeIdentityRequiresEveryRecordableField pins that a complete identity
+// satisfies the validator, and that removing any ONE required field is caught.
+func TestRuntimeIdentityRequiresEveryRecordableField(t *testing.T) {
+	tests := []struct {
+		name   string
+		clear  func(*corev1.QueryRuntimeIdentity)
+		want   string
+		absent bool
+	}{
+		{name: "a fully recorded identity is complete", clear: func(*corev1.QueryRuntimeIdentity) {}, absent: true},
+		{name: "vendor_session_id", clear: func(i *corev1.QueryRuntimeIdentity) { i.VendorSessionId = "" }, want: "vendor_session_id"},
+		{name: "effective_model", clear: func(i *corev1.QueryRuntimeIdentity) { i.EffectiveModel = "" }, want: "effective_model"},
+		{name: "sdk_version", clear: func(i *corev1.QueryRuntimeIdentity) { i.SdkVersion = "" }, want: "sdk_version"},
+		{name: "claude_code_version", clear: func(i *corev1.QueryRuntimeIdentity) { i.ClaudeCodeVersion = "" }, want: "claude_code_version"},
+		{name: "shim_build_sha", clear: func(i *corev1.QueryRuntimeIdentity) { i.ShimBuildSha = "" }, want: "shim_build_sha"},
+		{name: "auth_source", clear: func(i *corev1.QueryRuntimeIdentity) { i.AuthSource = "" }, want: "auth_source"},
+		{name: "fast_mode_state", clear: func(i *corev1.QueryRuntimeIdentity) { i.FastModeState = "" }, want: "fast_mode_state"},
+		{name: "effective_options", clear: func(i *corev1.QueryRuntimeIdentity) { i.EffectiveOptions = nil }, want: "effective_options"},
+		{name: "settings", clear: func(i *corev1.QueryRuntimeIdentity) { i.Settings = nil }, want: "settings"},
+		{name: "tools", clear: func(i *corev1.QueryRuntimeIdentity) { i.Tools = nil }, want: "tools"},
+		{name: "mcp", clear: func(i *corev1.QueryRuntimeIdentity) { i.Mcp = nil }, want: "mcp"},
+		{name: "context_prefix", clear: func(i *corev1.QueryRuntimeIdentity) { i.ContextPrefix = nil }, want: "context_prefix"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			identity := fullRuntimeIdentity()
+			tc.clear(identity)
+			paths := missingRuntimeIdentityPathsFor(t, identity)
+			if tc.absent {
+				if len(paths) > 0 {
+					t.Fatalf("missing runtime identity paths = %v, want none", paths)
+				}
+				return
+			}
+			if !containsPath(paths, tc.want) {
+				t.Fatalf("missing runtime identity paths = %v, want %q", paths, tc.want)
+			}
+		})
+	}
+}
+
+// TestRuntimeIdentityDoesNotRequireNonInitEvidence pins the two expectations
+// that were ADAPTED rather than enforced, each because the init message the
+// identity is built from does not carry the fact.
+func TestRuntimeIdentityDoesNotRequireNonInitEvidence(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		// Reported by the usage service, and already carried on both of the
+		// turn's AccountUsageObservations.
+		{name: "subscription_type is not init evidence", path: "subscription_type"},
+		// The explanation for fast_mode_state, which the SDK emits only when
+		// fast mode is disabled.
+		{name: "fast_mode_reason explains a state that may need no explaining", path: "fast_mode_reason"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			paths := missingRuntimeIdentityPathsFor(t, fullRuntimeIdentity())
+			if containsPath(paths, tc.path) {
+				t.Fatalf("missing runtime identity paths = %v, want %q not required", paths, tc.path)
+			}
+		})
+	}
+}
+
+// TestEvidenceFingerprintSettlement pins that a producer which ANSWERED for a
+// fingerprint satisfies the validator whichever way it answered, and that one
+// which did not still does not. The digest-only reading made the proto's own
+// `unavailable` arm unsatisfiable, so a shim correctly reporting "I hold nothing
+// to fingerprint, and here is why" was recorded as having said nothing.
+func TestEvidenceFingerprintSettlement(t *testing.T) {
+	tests := []struct {
+		name        string
+		fingerprint *corev1.EvidenceFingerprint
+		want        bool
+	}{
+		{name: "a digest is settled", fingerprint: &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Sha256{Sha256: "abc"}}, want: true},
+		{name: "a caused unavailability is settled", fingerprint: &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Unavailable{Unavailable: &corev1.FingerprintUnavailable{Cause: "not exposed"}}}, want: true},
+		{name: "an empty digest is unsettled", fingerprint: &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Sha256{Sha256: ""}}, want: false},
+		{name: "a causeless unavailability is unsettled", fingerprint: &corev1.EvidenceFingerprint{Evidence: &corev1.EvidenceFingerprint_Unavailable{Unavailable: &corev1.FingerprintUnavailable{}}}, want: false},
+		{name: "an armless fingerprint is unsettled", fingerprint: &corev1.EvidenceFingerprint{}, want: false},
+		{name: "an absent fingerprint is unsettled", fingerprint: nil, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := evidenceFingerprintSettled(tc.fingerprint); got != tc.want {
+				t.Fatalf("evidenceFingerprintSettled = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHydratePersistedAccountingFeedsBothReplayConsumers(t *testing.T) {
 	want := &frontendv1.TurnAccounting{TurnId: "turn", Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
 	m := &Manager{cfg: Config{TurnAccountings: replayTurnAccountingStore{accountings: []*frontendv1.TurnAccounting{want}}}, logf: t.Logf}
@@ -864,25 +1143,57 @@ func containsPath(paths []string, suffix string) bool {
 	return false
 }
 
-func TestTurnAccountingReducerInvalidatesUsageWindowReset(t *testing.T) {
+// resolveWithWindowResets settles one turn whose two five-hour-window samples
+// report the given resets_at values, and reports whether the settled record
+// carries the window-reset finding.
+func resolveWithWindowResets(t *testing.T, startResetsAtMs, endResetsAtMs int64) bool {
+	t.Helper()
 	r := newTurnAccountingReducer(nil)
 	r.runtime = &corev1.QueryRuntimeIdentity{EffectiveModel: "model"}
 	r.queryID = "q"
 	r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
 	start := usageObservation("t", true)
 	end := usageObservation("t", false)
-	end.GetAvailable().FiveHour.ResetsAtMs = 200
+	start.GetAvailable().FiveHour.ResetsAtMs = startResetsAtMs
+	end.GetAvailable().FiveHour.ResetsAtMs = endResetsAtMs
 	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: start}}, "s")
 	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: end}}, "s")
 	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
-	found := false
 	for _, problem := range got.GetInvalid().GetProblems() {
 		if problem.GetWindowReset() != nil {
-			found = true
+			return true
 		}
 	}
-	if !found {
-		t.Fatalf("accounting = %+v", got)
+	return false
+}
+
+// TestTurnAccountingReducerClassifiesUsageWindowMovement pins the discriminator
+// between a five-hour window that ROLLED OVER mid-turn and one the vendor
+// merely re-projected. The raw-inequality version condemned every live turn in
+// the stack on sub-second BACKWARD jitter, which no rollover can produce.
+func TestTurnAccountingReducerClassifiesUsageWindowMovement(t *testing.T) {
+	const base = 1786273199884
+	tests := []struct {
+		name  string
+		start int64
+		end   int64
+		want  bool
+	}{
+		{name: "identical boundaries are one window", start: base, end: base, want: false},
+		{name: "sub-second backward jitter is not a reset", start: base, end: base - 693, want: false},
+		{name: "sub-second forward jitter is not a reset", start: base, end: base + 693, want: false},
+		{name: "movement just under the floor is not a reset", start: base, end: base + usageWindowRolloverFloorMs - 1, want: false},
+		{name: "movement at the floor is a reset", start: base, end: base + usageWindowRolloverFloorMs, want: true},
+		{name: "a real five-hour rollover is a reset", start: base, end: base + 5*60*60*1000, want: true},
+		{name: "a large backward move is a reset", start: base, end: base - 5*60*60*1000, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveWithWindowResets(t, tc.start, tc.end)
+			if got != tc.want {
+				t.Fatalf("window reset flagged = %t, want %t (start=%d end=%d)", got, tc.want, tc.start, tc.end)
+			}
+		})
 	}
 }
 

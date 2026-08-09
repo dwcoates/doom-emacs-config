@@ -38,6 +38,7 @@
  * G4 report for the exact wiring.
  */
 import { create } from "@bufbuild/protobuf";
+import { anyPack } from "@bufbuild/protobuf/wkt";
 import {
   ContentDeltaSchema,
   EventClass,
@@ -47,6 +48,13 @@ import {
   Plane,
   type Event,
 } from "../uds/proto.js";
+import { ClaudeStreamMessageSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+import {
+  MessageDeltaEventSchema,
+  RawMessageStreamEventSchema,
+  StreamEventSchema,
+} from "../../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+import { messageDeltaVendorUsage } from "./convert.js";
 import { bindLog } from "../uds/log.js";
 
 const LOGGER = bindLog({ component: "claude-shim-delta", operation: "shim.delta.convert" });
@@ -454,7 +462,73 @@ export function toEphemeralEvent(msg: unknown, opts?: DeltaOptions): Event | nul
  */
 export function toPersistentEvent(msg: unknown, opts?: DeltaOptions): Event | null {
   if (!isObject(msg) || msg["type"] !== "stream_event") return null;
-  return streamEventToMessageLatency(msg, opts);
+  return streamEventToMessageLatency(msg, opts) ?? streamEventToResponseUsage(msg, opts);
+}
+
+/**
+ * Map a `message_delta` frame to a PERSISTENT relay of the vendor's own usage.
+ *
+ * WHY THIS FRAME IS NO LONGER DROPPED. A turn's token ledger reconciles the
+ * per-response stream evidence against the terminal result's totals, and the
+ * two could not agree on output_tokens: the assistant message that evidence is
+ * built from carries the `message_start` usage SNAPSHOT — final input and cache
+ * counters, interim output. The final output_tokens are reported here and
+ * nowhere else the daemon can see. One measured live turn summed 563 against
+ * the result's 4407, with input reconciling exactly.
+ *
+ * It is PERSISTENT, like MessageLatency and unlike the typing deltas around it,
+ * because a daemon that restarted mid-turn must rebuild the same ledger from
+ * replay rather than a differently-reconciled one.
+ *
+ * Never throws: a frame it cannot read, or one whose usage the modeled contract
+ * rejects, yields `null`. An absent correction leaves the ledger reporting its
+ * disagreement honestly, which is what a missing correction should look like.
+ */
+export function streamEventToResponseUsage(
+  msg: Record<string, unknown>,
+  opts?: DeltaOptions,
+): Event | null {
+  const frame = frameOfType(msg, "message_delta");
+  if (frame === null) return null;
+  const vendorUsage = messageDeltaVendorUsage(frame["usage"]);
+  if (vendorUsage === undefined) return null;
+  // A correction that cannot name the message it corrects is not evidence: the
+  // vendor's message_delta frame is anonymous, and the identity arrives only on
+  // the message_start that opened it (see StreamMessageTracker).
+  const apiMessageId = opts?.messageId ?? "";
+  if (apiMessageId === "") {
+    LOGGER.log({ level: "error", claude_session_id: sessionOf(msg), outcome: "message_delta_usage_unattributed" },
+      "message_delta usage arrived with no in-flight message id and was not relayed");
+    return null;
+  }
+  const event = create(EventSchema, {
+    sessionId: sessionOf(msg),
+    seq: 0n,
+    plane: Plane.STREAM,
+    class: EventClass.PERSISTENT,
+    queryInstanceId: opts?.queryInstanceId ?? "",
+    producedAtMs: producedAt(opts),
+    payload: {
+      case: "vendor",
+      value: anyPack(ClaudeStreamMessageSchema, create(ClaudeStreamMessageSchema, {
+        msg: {
+          case: "streamEvent",
+          value: create(StreamEventSchema, {
+            sessionId: sessionOf(msg),
+            event: create(RawMessageStreamEventSchema, {
+              event: {
+                case: "messageDelta",
+                value: create(MessageDeltaEventSchema, { vendorUsage, apiMessageId }),
+              },
+            }),
+          }),
+        },
+      })),
+    },
+  });
+  LOGGER.logVerbose({ claude_session_id: sessionOf(msg), message_id: apiMessageId, output_tokens: String(vendorUsage.outputTokens) },
+    "converted persistent response usage correction");
+  return event;
 }
 
 /** True iff the delta bypass — not the persistent converter — owns `msg`. */

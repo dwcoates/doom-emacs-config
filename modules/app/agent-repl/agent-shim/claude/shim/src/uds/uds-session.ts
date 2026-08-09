@@ -58,6 +58,7 @@ import { QueueOp, TranscriptLineSchema } from "../../../../../proto/gen/ts/agent
 import type { ApiUserMessage } from "../../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 import { bindLog, setClaudeSessionId } from "./log.js";
 import { normalizeModel } from "../model.js";
+import { queryRuntimeIdentity } from "../runtime-identity.js";
 import { logAssistantApiResponseUsage } from "../usage-log.js";
 import {
   compareFiveHourResetWindows,
@@ -96,7 +97,6 @@ import {
   QueryCreatedSchema,
   QueryIteratorFailureSchema,
   QueryLifecycleSchema,
-  QueryRuntimeIdentitySchema,
   QueryRuntimeObservedSchema,
   QueryStartupFailureSchema,
   QueryTerminatedSchema,
@@ -112,8 +112,6 @@ import {
   UtilizationUnavailableSchema,
   FreshQuerySchema,
   IntentionalQueryTerminationSchema,
-  EvidenceFingerprintSchema,
-  FingerprintUnavailableSchema,
   VendorSessionIdentityUnavailableSchema,
 } from "./proto.js";
 import type { QueryLifecycle, QueryRuntimeIdentity } from "./proto.js";
@@ -228,6 +226,21 @@ export interface UdsSessionDeps {
   sdkVersion?: string;
   /** Shim build identity embedded in the running bundle. */
   shimBuildSha?: string;
+  /**
+   * The exact options object this shim passed to the SDK's query().
+   *
+   * It is carried rather than re-derived because the runtime identity's
+   * `effective_options` fingerprint is only evidence if it hashes what the
+   * query actually ran under; a second derivation would drift from the first
+   * the moment an option is added in one place and not the other.
+   */
+  effectiveQueryOptions?: Record<string, unknown>;
+  /**
+   * The system prompt this shim passed to the SDK's query() — the cacheable
+   * instruction prefix every request re-sends, and so the thing the runtime
+   * identity's `context_prefix` fingerprint is about.
+   */
+  contextPrefix?: unknown;
   /**
    * How long a bounded replay waits for the next store frame before deciding
    * its subscription drained. A FAILURE bound, not a pace: a store mid-replay
@@ -1633,26 +1646,13 @@ export class UdsSession {
     vendorSessionId: string,
     eventSessionId = vendorSessionId,
   ): Promise<void> {
-    const raw = message as unknown as Record<string, unknown>;
-    const text = (field: string): string => typeof raw[field] === "string" ? raw[field] : "";
-    const unavailable = (cause: string) => create(EvidenceFingerprintSchema, {
-      evidence: { case: "unavailable", value: create(FingerprintUnavailableSchema, { cause }) },
-    });
-    const identity = create(QueryRuntimeIdentitySchema, {
+    const identity = queryRuntimeIdentity(message as unknown as Record<string, unknown>, {
       vendorSessionId,
       effectiveModel: this.effectiveModel,
       sdkVersion: this.deps.sdkVersion ?? "",
-      claudeCodeVersion: text("claude_code_version"),
       shimBuildSha: this.deps.shimBuildSha ?? "",
-      authSource: text("api_key_source"),
-      subscriptionType: "",
-      fastModeState: text("fast_mode_state"),
-      fastModeReason: text("fast_mode_reason"),
-      effectiveOptions: unavailable("effective SDK options are not exposed by the Agent SDK initialization message"),
-      settings: unavailable("effective settings are not exposed by the Agent SDK initialization message"),
-      tools: unavailable("ordered tool definitions are not exposed by the Agent SDK initialization message"),
-      mcp: unavailable("ordered MCP configuration is not exposed by the Agent SDK initialization message"),
-      contextPrefix: unavailable("cacheable context prefix is not exposed by the Agent SDK initialization message"),
+      effectiveQueryOptions: this.deps.effectiveQueryOptions,
+      contextPrefix: this.deps.contextPrefix,
     });
     // This cache is assigned before the store receipt so a daemon reconnect
     // cannot observe a query whose durable lifecycle event has arrived while
@@ -1897,10 +1897,11 @@ export class UdsSession {
         this.store.adoptStoreKey(persistent.sessionId);
         setClaudeSessionId(persistent.sessionId);
         LOGGER.logVerbose({ agent_repl_session_id: this.deps.sessionId, sdk_type: msg.type, payload_case: persistent.payload.case, claude_session_id: persistent.sessionId }, "writing persistent SDK structural event to store");
-        // The SDK pump owns this durability boundary.  It may not consume the
-        // next SDK message until the latency stamp has a store receipt: doing
-        // so would allow the response and its usage to succeed without the
-        // timing evidence needed to compute TTFT and generation throughput.
+        // The SDK pump owns this durability boundary. It may not consume the
+        // next SDK message until this evidence has a store receipt: doing so
+        // would allow the response and its usage to succeed without the timing
+        // evidence needed to compute TTFT and generation throughput, or without
+        // the final output_tokens the turn's ledger reconciles against.
         try {
           await this.store.write([persistent]);
         } catch (cause) {
@@ -1917,12 +1918,12 @@ export class UdsSession {
               request_id: this.activeTurnIds[0],
               turn_id: this.activeTurnIds[0],
             }),
-            api_message_id: latency?.uuid ?? null,
-            evidence_kind: "message_latency",
-            failed_operation: "store.write.message_latency",
+            api_message_id: latency?.uuid ?? this.streamMessages.current(),
+            evidence_kind: latency !== undefined ? "message_latency" : "response_usage",
+            failed_operation: latency !== undefined ? "store.write.message_latency" : "store.write.response_usage",
             outcome: "fatal_missing_persistent_evidence_receipt",
             cause,
-          }, "persistent SDK message latency did not receive a durable store receipt");
+          }, "persistent SDK structural evidence did not receive a durable store receipt");
           throw cause;
         }
         return;
