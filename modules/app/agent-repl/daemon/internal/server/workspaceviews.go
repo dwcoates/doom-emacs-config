@@ -139,7 +139,8 @@ func NewWorkspaceViews(logf dlog.Logf, push WorkspaceViewPush, records SessionRe
 // fact both views turn on: the fence, the connectivity verdict, and which
 // session owns the workspace. A gate transition is a session-record fact rather
 // than a state fact, so the gate is republished from PublishSession too — both
-// paths funnel here so the two cannot resolve the gate differently.
+// paths resolve it through resolveGate and retain-and-push it through
+// publishGateLocked, so the two cannot resolve the gate differently.
 func (v *WorkspaceViews) PublishState(state *frontendv1.WorkspaceState) {
 	workspace := state.GetWorkspace()
 	if workspace == "" {
@@ -162,32 +163,74 @@ func (v *WorkspaceViews) PublishState(state *frontendv1.WorkspaceState) {
 		v.logf("server: topbar view WITHHELD ws=%q session=%q — the client keeps its last complete topbar rather than one it would have to finish: %v",
 			workspace, state.GetSessionId(), topbarErr)
 	}
-	gate, gateErr := frontend.WorkspaceGateView(workspace, state.GetFence(), haveRecord && rec.Hibernated,
-		hibernationDetail(v.logf, rec.SessionID, rec.Hibernation))
-	if gateErr != nil {
-		v.logf("server: workspace gate view WITHHELD ws=%q session=%q — the composer keeps its last complete gate: %v",
-			workspace, state.GetSessionId(), gateErr)
-	}
+	gate, gateErr := v.resolveGate(workspace, state.GetFence(), state.GetSessionId(), rec, haveRecord)
 
+	// RETAINED AND PUSHED UNDER ONE HOLD of the mutex. Pushing after the
+	// release would let two concurrent resolutions retain the newer view and
+	// broadcast the older one — the client would then hold a view the snapshot
+	// disagrees with until something else moved.
 	v.mu.Lock()
-	retained := v.forLocked(workspace)
-	publishTopbar := topbarErr == nil && !proto.Equal(retained.topbar, topbar)
-	if publishTopbar {
-		retained.topbar = topbar
+	defer v.mu.Unlock()
+	if topbarErr == nil {
+		retained := v.forLocked(workspace)
+		if !proto.Equal(retained.topbar, topbar) {
+			retained.topbar = topbar
+			v.push.PushTopbarView(topbar)
+		}
 	}
-	publishGate := gateErr == nil && !proto.Equal(retained.gate, gate)
-	if publishGate {
-		retained.gate = gate
-	}
-	v.mu.Unlock()
+	v.publishGateLocked(workspace, state.GetSessionId(), gate, gateErr)
+}
 
-	if publishTopbar {
-		v.push.PushTopbarView(topbar)
+// PublishSession republishes the views whose facts are read off the SESSION
+// RECORD rather than off the workspace state — today that is the gate alone.
+//
+// It is fed from the SessionView push, which is the funnel EVERY session-record
+// mutation already runs through: the registry's hibernation write re-pushes the
+// session view as its last step. Without this trigger a hibernation flip that
+// records no SSM transition would leave the gate stale indefinitely, because
+// PublishState is the only other trigger and nothing would fire it.
+//
+// fence comes from the workspace's current state and is carried, never
+// composed — same as PublishTokenBreakdown's.
+func (v *WorkspaceViews) PublishSession(workspace, fence, sessionID string) {
+	if workspace == "" {
+		v.logf("server: workspace gate PUBLICATION DECLINED — a session publication arrived with no workspace, so there is no view to key")
+		return
 	}
-	if publishGate {
-		v.logf("server: workspace gate TRANSITION ws=%q session=%q gate=%s", workspace, state.GetSessionId(), gateArmName(gate))
-		v.push.PushWorkspaceGateView(gate)
+	rec, haveRecord := v.recordFor(sessionID)
+	gate, gateErr := v.resolveGate(workspace, fence, sessionID, rec, haveRecord)
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.publishGateLocked(workspace, sessionID, gate, gateErr)
+}
+
+// resolveGate is the ONE gate resolution both triggers run through, so a
+// state-driven publication and a record-driven one cannot disagree about the
+// arm. A refusal is recorded here and returned; it is never absorbed.
+func (v *WorkspaceViews) resolveGate(workspace, fence, sessionID string, rec registry.Record, haveRecord bool) (*frontendv1.WorkspaceGateView, error) {
+	gate, err := frontend.WorkspaceGateView(workspace, fence, haveRecord && rec.Hibernated,
+		hibernationDetail(v.logf, rec.SessionID, rec.Hibernation))
+	if err != nil {
+		v.logf("server: workspace gate view WITHHELD ws=%q session=%q — the composer keeps its last complete gate: %v",
+			workspace, sessionID, err)
 	}
+	return gate, err
+}
+
+// publishGateLocked retains a resolved gate and pushes it in ONE step. The
+// caller holds v.mu, which is what keeps the retention and the broadcast from
+// being reordered against another resolution's.
+func (v *WorkspaceViews) publishGateLocked(workspace, sessionID string, gate *frontendv1.WorkspaceGateView, resolveErr error) {
+	if resolveErr != nil {
+		return
+	}
+	retained := v.forLocked(workspace)
+	if proto.Equal(retained.gate, gate) {
+		return
+	}
+	retained.gate = gate
+	v.logf("server: workspace gate TRANSITION ws=%q session=%q gate=%s", workspace, sessionID, gateArmName(gate))
+	v.push.PushWorkspaceGateView(gate)
 }
 
 // PublishTokenBreakdown resolves and publishes the breakdown menu from the
@@ -207,16 +250,17 @@ func (v *WorkspaceViews) PublishTokenBreakdown(workspace, fence string, usage *f
 		v.logf("server: token breakdown view WITHHELD ws=%q — the menu keeps its last complete resolution: %v", workspace, err)
 		return
 	}
+	// One hold for the retention AND the push, for the reason PublishState
+	// gives: a broadcast outside the mutex can be overtaken by a newer
+	// resolution's, leaving the wire older than the retention.
 	v.mu.Lock()
+	defer v.mu.Unlock()
 	retained := v.forLocked(workspace)
-	publish := !proto.Equal(retained.breakdown, view)
-	if publish {
-		retained.breakdown = view
+	if proto.Equal(retained.breakdown, view) {
+		return
 	}
-	v.mu.Unlock()
-	if publish {
-		v.push.PushTokenBreakdownView(view)
-	}
+	retained.breakdown = view
+	v.push.PushTokenBreakdownView(view)
 }
 
 // Forget drops a closed workspace's retained views AND its memoized branch, so
