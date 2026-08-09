@@ -316,12 +316,21 @@ request id of the sent command."
 (defun agent-repl-answer-permission (&optional ws)
   "Answer the active permission prompt for workspace WS over the UDS.
 Reads WS's `:permission-prompt-active' (set from the pushed pending
-`PermissionItem'), prompts allow/deny (deny optionally with a message),
+`PermissionItem'), prompts allow/deny (deny optionally with a reason),
 and sends the answer as a `PermissionAnswerCmd'.  The prompt is NOT
 cleared optimistically — the daemon pushes a resolution update that
 clears it, keeping pushed state the single source of truth.  Signals
 `user-error' when WS has no active permission prompt.  Defaults to the
-current workspace."
+current workspace.
+
+A DENIAL IS A STOP.  The daemon treats a declined permission exactly as
+it treats an interrupt: the turn that asked ends, and nothing further
+reaches the agent until the user sends a prompt themselves (daemon
+sessioncontroller/permdecline.go).  The reason typed here is therefore
+RECORDED on the denied item — it is what the echo below shows — and is
+deliberately not delivered to the agent, whose turn is over.  Typing a
+prompt instead of answering does the same thing: the prompt declines the
+question, stops the turn, and runs after it."
   (interactive)
   (let* ((ws (or ws (agent-repl--ws-current-name)))
          (prompt (and ws (agent-repl--ws-get ws :permission-prompt-active))))
@@ -332,8 +341,11 @@ current workspace."
            (tool-name (plist-get prompt :tool-name))
            (allow (y-or-n-p (format "Allow permission for %s in '%s'? "
                                     (or tool-name "tool") ws)))
+           ;; Named for what it IS: the record of why this was declined. It is
+           ;; not a message to the agent (see the docstring) — the decline
+           ;; stops the turn that would have read it.
            (deny-message (unless allow
-                           (let ((m (read-string "Deny message (optional): ")))
+                           (let ((m (read-string "Decline reason (recorded, optional): ")))
                              (unless (string-empty-p m) m)))))
       (agent-repl--log ws "answer-permission: request=%s allow=%s deny-message-present=%s"
                        request-id (if allow "yes" "no") (if deny-message "t" "nil"))
