@@ -631,10 +631,17 @@ type sessionController struct {
 	// queue's posture (see publishQueueLocked). A daemon restart therefore
 	// resumes draining, which is the same answer it gives for turnActive.
 	paused bool
-	// interruptedTurn marks the turn now in flight as one a user-commanded
-	// stop was delivered to. Consumed at that turn's boundary, where it
-	// decides whether a lone paused runner resumes the drain.
-	interruptedTurn bool
+	// stoppedTurn marks the turn now in flight as one a user-commanded stop was
+	// DELIVERED to, whichever outcome the shim answered with. Consumed at that
+	// turn's boundary, where it decides whether a lone paused runner resumes
+	// the drain.
+	//
+	// It covers ALREADY_COMPLETE as well as INTERRUPTED because both are stops
+	// the user gets credit for: the boundary an ALREADY_COMPLETE synthesizes is
+	// delivered by the stop path itself, and reading only INTERRUPTED there
+	// would let that synthesized boundary resume the very drain the stop just
+	// paused.
+	stoppedTurn bool
 	// pausedRunner marks the turn now in flight as the prompt that jumped the
 	// paused queue and is running ALONE. Its clean end resumes the drain; its
 	// interrupted end leaves the queue paused.
@@ -1435,14 +1442,17 @@ func (m *Manager) noteProgressCounts(workspace string, queueDepth int64) {
 // Those two used to be indistinguishable from here, and the second was
 // reported as the first.
 //
-// THIS IS THE USER-COMMANDED STOP, and the only one. It is reached from
-// exactly one place — the frontend interrupt command handler, via
-// PromptRouter — which is what makes it the right and sufficient place to
-// route the three consequences a user's stop has and an interject's stop must
-// not have: the interrupt window, the `interrupted` turn outcome, and the
-// queue pause. The queue's own interject calls d.client.Interrupt DIRECTLY
-// (see beginInterject) and therefore reaches none of them structurally,
-// rather than by remembering to pass a flag.
+// THIS IS THE WORKSPACE-ADDRESSED FORM OF THE USER-COMMANDED STOP: it resolves
+// the workspace's session controller (recovering one behind a turn still in
+// flight) and hands it to stopTurn, which is the stop itself.
+//
+// EVERY stop the user asks for goes through stopTurn, whether they asked for it
+// by pressing stop or by submitting a prompt the classifier judged INTERJECT.
+// The two used to be different operations — the queue's interject called
+// d.client.Interrupt directly and reached none of a stop's consequences — and
+// the difference was visible: an interject against a paused queue refused to
+// interrupt at all, so an automatic stop did nothing until the user pressed
+// stop themselves.
 // requestID is the FRONTEND COMMAND'S OWN id, carried through for the same
 // reason SubmitPrompt's is: it is the only id the user's client, the daemon's
 // command log and the shim exchange can be reconciled on. Without it a stop was
@@ -1458,6 +1468,34 @@ func (m *Manager) Interrupt(ctx context.Context, workspace, requestID string) er
 			return err
 		}
 	}
+	_, err = m.stopTurn(ctx, d, requestID)
+	return err
+}
+
+// stopTurn IS the user-commanded stop: it delivers the Interrupt to the shim and
+// routes every consequence a stop has — the released parked permissions, the
+// interrupt window, the `interrupted` turn outcome, the queue pause, and the
+// synthesized boundary an ALREADY_COMPLETE owes the queue.
+//
+// IT IS THE ONLY STOP IN THE DAEMON, and that is the invariant this function
+// exists to hold. Two callers reach it: the frontend interrupt command
+// (Interrupt, above) and the queue's interject (beginInterject), which is the
+// user asking for the same thing by submitting a prompt the classifier judged
+// INTERJECT rather than by pressing stop. Neither can produce a stop the other
+// cannot, because there is no second path to produce one on.
+//
+// The interject used to call d.client.Interrupt directly, on the reasoning that
+// its stop was MACHINERY the user had not asked for. It reached none of the
+// consequences above, and the gap was not academic: a queue paused by an
+// earlier stop refused to interrupt for an interject at all, so a classified
+// interrupt did nothing at all until the user pressed stop by hand.
+//
+// It returns the shim's OUTCOME as well as the error, because the two say
+// different things: a stop that arrived after the turn had already finished is
+// a success (ALREADY_COMPLETE) that still moves the session, and an
+// undeliverable one is a failure that moves nothing.
+func (m *Manager) stopTurn(ctx context.Context, d *sessionController, requestID string) (corev1.InterruptOutcome, error) {
+	workspace := d.workspace
 	outcome, err := d.client.Interrupt(ctx, requestID)
 	if err != nil {
 		// A DELIVERED STOP WHOSE ANSWER WAS LOST IS NOT AN UNDELIVERED ONE. The
@@ -1469,7 +1507,7 @@ func (m *Manager) Interrupt(ctx context.Context, workspace, requestID string) er
 		if errors.Is(err, shimclient.ErrDeliveredUnacked) {
 			m.noteUnackedInterrupt(d, requestID, err)
 		}
-		return err
+		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, err
 	}
 	// The shim acknowledged the stop, which means it has already force-denied
 	// every canUseTool it had parked. The daemon's own rendezvous follows it
@@ -1477,14 +1515,14 @@ func (m *Manager) Interrupt(ctx context.Context, workspace, requestID string) er
 	// (permdecline.go).
 	m.releaseParkedPermissionsOnStop(workspace, requestID)
 	if err := m.noteUserInterrupt(d, outcome); err != nil {
-		return err
+		return outcome, err
 	}
 	if failed := errclass.InterruptError(outcome); failed != nil {
 		m.logf("session-controller: interrupt undeliverable ws=%s session=%s request_id=%s outcome=%s", workspace, d.sessionID, requestID, outcome)
-		return failed
+		return outcome, failed
 	}
 	m.logf("session-controller: interrupt ws=%s session=%s request_id=%s outcome=%s", workspace, d.sessionID, requestID, outcome)
-	return nil
+	return outcome, nil
 }
 
 // recoverSessionControllerForInterrupt brings a workspace up so a user's stop can reach a
@@ -1563,6 +1601,15 @@ func (m *Manager) recoverSessionControllerForInterrupt(ctx context.Context, work
 // the queue would otherwise deliver the next held prompt into the silence they
 // just asked for. FAILED changes nothing — no stop was delivered, so nothing
 // about the session moved.
+//
+// The SYNTHESIZED BOUNDARY is delivered last, on ALREADY_COMPLETE only. The
+// shim has just said no foreground turn exists, so the `TurnEnded` the queue is
+// holding prompts behind is never coming and the daemon has to stand in for it.
+// Delivering it here is what lets an interject's stop submit the prompt that
+// caused it; for a bare stop it delivers nothing at all, because the pause set
+// two statements earlier leaves a head jump as the queue's only deliverable and
+// a bare stop has none. That is the whole reason it is safe to run on BOTH
+// paths, which is what makes them one path.
 func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.InterruptOutcome) error {
 	// ALREADY_COMPLETE is a shim-side assertion that no foreground turn
 	// exists. Its durable TurnEnded can still be traversing the store while
@@ -1595,9 +1642,9 @@ func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.Interru
 
 	// A USER-COMMANDED STOP CLOSES EVERY OPEN WINDOW. It is one of the two
 	// boundaries async-bubble.proto names for a Merge or Skill bubble, and this
-	// is the one place a user's stop is known — an interject's machinery stop
-	// calls d.client.Interrupt directly and therefore cannot reach it, which is
-	// exactly right: machinery did not take the session back from the work.
+	// is the one place a user's stop is known — every stop, whether the user
+	// pressed it or submitted a prompt the classifier judged INTERJECT, since
+	// both reach here through stopTurn.
 	//
 	// A FAILED stop delivered nothing and moves no window; the other two both
 	// mean the user has the session again.
@@ -1619,13 +1666,21 @@ func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.Interru
 
 	m.mu.Lock()
 	d.paused = true
-	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
-		d.interruptedTurn = true
-	}
+	d.stoppedTurn = true
 	held := len(d.queue.entries)
 	m.mu.Unlock()
 	m.logf("session-controller: queue PAUSED by a user interrupt ws=%s session=%s outcome=%s held=%d (every entry retained; a newly submitted prompt runs alone and its clean end resumes the drain)",
 		d.workspace, d.sessionID, outcome, held)
+
+	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
+		// Synthesized, exactly as releasePhantomTurn's is: the Ack says the turn
+		// is over but names no instant, so now is the only one the daemon can
+		// honestly claim. It runs AFTER the pause above, which is what stops it
+		// draining retained prompts into the silence the user asked for.
+		m.logf("session-controller: already-complete stop DELIVERING a synthesized boundary ws=%s session=%s — the shim reports no foreground turn, so the `TurnEnded` the queue is waiting on is never coming and is stood in for here",
+			d.workspace, d.sessionID)
+		m.onTurnBoundary(d, false, m.now())
+	}
 	return nil
 }
 
@@ -3078,8 +3133,8 @@ func (m *Manager) clearTurnOnRotation(workspace, sessionID, previous, next strin
 	if !ok || d.sessionID != sessionID {
 		return
 	}
-	if d.interruptedTurn {
-		d.interruptedTurn = false
+	if d.stoppedTurn {
+		d.stoppedTurn = false
 		m.logf("session-controller: interrupt mark DROPPED as stale ws=%q session=%s (vendor session rotated %s -> %s) — the stopped turn's end belongs to the retired identity",
 			workspace, sessionID, previous, next)
 	}

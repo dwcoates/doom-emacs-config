@@ -130,7 +130,7 @@ func TestRotationDropsAStandingInterruptMark(t *testing.T) {
 	h.turn(true)
 	mark := h.controller()
 	h.m.mu.Lock()
-	mark.interruptedTurn = true
+	mark.stoppedTurn = true
 	h.m.mu.Unlock()
 
 	// Act.
@@ -139,7 +139,7 @@ func TestRotationDropsAStandingInterruptMark(t *testing.T) {
 	// Assert.
 	d := h.controller()
 	h.m.mu.Lock()
-	marked := d.interruptedTurn
+	marked := d.stoppedTurn
 	h.m.mu.Unlock()
 	if marked {
 		t.Fatal("the interrupt mark survived the rotation")

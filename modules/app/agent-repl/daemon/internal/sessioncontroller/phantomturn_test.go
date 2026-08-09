@@ -380,7 +380,9 @@ func TestInterjectAlreadyCompleteReleasesTheQueueDespiteALedgerFailure(t *testin
 	waitFor(t, "the held prompt to be delivered anyway", func() bool {
 		return len(h.client.promptTexts()) == 1
 	})
-	if !log.contains("interject already-complete turn-claim close FAILED ws=ws session=s1") {
+	// The record is the USER-STOP one, because an interject's stop IS the user's
+	// stop: there is one already-complete settle, not one per gesture.
+	if !log.contains("user-stop already-complete turn-claim close FAILED ws=ws session=s1") {
 		t.Fatalf("missing the canonical ledger-failure record; log:\n%s", log.dump())
 	}
 }
