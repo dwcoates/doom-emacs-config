@@ -156,6 +156,42 @@ type MergeRunner interface {
 	// the shim lease and may be mid-cherry-pick — so zero is the ordinary
 	// answer and never an error.
 	Evict(ctx context.Context, workspace string) (int, error)
+	// Standing reports where the workspace's merge sits on its repository's
+	// queue, and whether it has one at all. It is what the interrupt's dequeue
+	// OFFER is composed from: how many merges are ahead of it, or that it is
+	// the run in flight.
+	Standing(workspace string) (merge.Standing, bool)
+	// Dequeue takes every merge the workspace has off the queue — the waiting
+	// ones and the one in flight — and reports how many left. It is what an
+	// ANSWERED dequeue offer performs, and it is strictly more than Evict:
+	// Evict cannot touch a running head, and this is the only path that can.
+	Dequeue(ctx context.Context, workspace string) (int, error)
+}
+
+// MergeDequeueOfferStore holds the outstanding dequeue QUESTION per workspace
+// and publishes it on WorkspaceState. Satisfied by *ssm.Manager.
+//
+// It is a port of its own rather than a method on MergeRunner because the two
+// own different halves and both halves are needed for one round trip: the
+// coordinator knows where a merge STANDS and can take it off, and the SSM is
+// the single construction funnel every WorkspaceState field is stamped in. An
+// offer held by the coordinator would have to be stamped onto frames from
+// outside that funnel, which is how a field goes missing from a push.
+//
+// A NIL STORE IS A LOUD REFUSAL, never a silent revert to the old behavior. The
+// interrupt used to evict a queued merge without asking; an unwired offer store
+// that quietly fell back to that would destroy a user's queued merge on a
+// keystroke because a dependency was not injected.
+type MergeDequeueOfferStore interface {
+	// RaiseMergeDequeueOffer publishes (or refreshes) the question and returns
+	// the offer as it now stands.
+	RaiseMergeDequeueOffer(workspace string, standing merge.Standing) (*frontendv1.MergeDequeueOffer, error)
+	// ClearMergeDequeueOffer takes the question down, reporting whether one was
+	// outstanding. why names what took it down, for the log.
+	ClearMergeDequeueOffer(workspace, why string) (bool, error)
+	// MergeDequeueOfferID reports the id of the outstanding offer, which is
+	// what an answer is checked against.
+	MergeDequeueOfferID(workspace string) (string, bool)
 }
 
 // MergeGeometrySource answers a workspace's recorded merge geometry: its source
@@ -357,7 +393,11 @@ type commandHandler struct {
 	// a loud failing ack: an unmarked merge attempt is invisible until the
 	// coordinator gets to it, which is the hole merge_enqueuing closes.
 	mergeStates merge.StateSink
-	lifecycle   WorkspaceLifecycle
+	// dequeueOffers holds the interrupt's dequeue question. Nil makes an
+	// interrupt over a queued merge a loud failing ack rather than a silent
+	// return to evicting it unasked.
+	dequeueOffers MergeDequeueOfferStore
+	lifecycle     WorkspaceLifecycle
 	// resyncer replays conversation deltas on a resync; nil-safe (Resync then
 	// documents the snapshot-only behavior rather than swallowing).
 	resyncer Resyncer
@@ -469,8 +509,12 @@ type CommandHandlerConfig struct {
 	// first mark — a merge attempt nothing can see is precisely the state
 	// merge_enqueuing exists to end.
 	MergeStates merge.StateSink
-	Health      HealthConfig
-	Interrupt   InterruptGateConfig
+	// MergeDequeueOffers holds the interrupt's dequeue question and publishes
+	// it on WorkspaceState. Nil is a loud failing ack for an interrupt over a
+	// queued merge — never a quiet return to evicting it unasked.
+	MergeDequeueOffers MergeDequeueOfferStore
+	Health             HealthConfig
+	Interrupt          InterruptGateConfig
 	// Restarts backs the restartSession command. Nil is a loud unsupported
 	// capability.
 	Restarts SessionRestarter
@@ -588,6 +632,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 		workspaceCreation: config.WorkspaceCreation,
 		mergeGeometry:     config.MergeGeometry,
 		mergeStates:       config.MergeStates,
+		dequeueOffers:     config.MergeDequeueOffers,
 		health:            config.Health.Router, daemonHealth: config.Health.Daemon,
 		turns: config.Interrupt.Turns, liveTasks: config.Interrupt.LiveTasks, logf: logf,
 		restarts:         config.Restarts,
@@ -720,23 +765,30 @@ func validatePromptOrigin(origin corev1.PromptOrigin) error {
 // the daemon's view of "no turn" is an observation, not a ruling, and refusing
 // on it would let a stale observation swallow a stop.
 //
-// IT ALSO EVICTS THE WORKSPACE'S WAITING MERGES, and that is the second half of
-// what a stop means here. A merge queued behind another one is work this
-// workspace is doing that the user can see, cannot prompt past (the composer is
-// gated on the merge lease), and had no way to call off: the stop went to a shim
-// with no turn to end, and the merge ran anyway when its turn came. Nothing else
-// on the wire reaches a queued merge, so the interrupt reaches it.
+// IT ALSO RAISES THE WORKSPACE'S DEQUEUE OFFER, and that is the second half of
+// what a stop means here. A merge on the queue is work this workspace is doing
+// that the user can see, cannot prompt past (the composer is gated on the merge
+// lease), and had no way to call off: the stop went to a shim with no turn to
+// end, and the merge ran anyway when its turn came. Nothing else on the wire
+// reaches a queued merge, so the interrupt reaches it.
 //
-// EVICTION HAPPENS AFTER THE GATE AND BEFORE THE SHIM. After the gate because a
-// challenged interrupt performs NOTHING — the whole point of the challenge is
-// that the user has not decided yet — and before the shim because the queue is
-// the part that can still be stopped cleanly, where the shim's verdict is its
-// own to make.
+// IT ASKS RATHER THAN PERFORMS, and that is a deliberate change from what this
+// used to do. The interrupt USED to evict the waiting merges outright. A merge
+// is minutes of someone's work and an interrupt is one keystroke, and the only
+// trace an unasked eviction left was a terminal `failed` status nobody
+// requested — so the queue half is now a published question
+// (MergeDequeueOffer) that a frontend draws and the user answers. Nothing
+// leaves the queue until they do.
 //
-// NEITHER HALF SWALLOWS THE OTHER'S FAILURE. A queue that could not be evicted
-// must not cancel the stop the user asked for, and a shim that refused the stop
-// must not hide an eviction that did happen, so both run and both errors travel
-// back joined on the one ack.
+// THE OFFER IS RAISED AFTER THE GATE AND BEFORE THE SHIM. After the gate
+// because a challenged interrupt performs NOTHING — the whole point of the
+// challenge is that the user has not decided yet — and before the shim so the
+// question is already on the workspace by the time the stop lands on it.
+//
+// NEITHER HALF SWALLOWS THE OTHER'S FAILURE. A question that could not be
+// raised must not cancel the stop the user asked for, and a shim that refused
+// the stop must not hide a question that did go up, so both run and both errors
+// travel back joined on the one ack.
 func (h *commandHandler) Interrupt(ctx context.Context, workspace, requestID string, cmd *frontendv1.InterruptCmd) error {
 	h.logf("frontend cmd: interrupt ws=%s request_id=%s confirm_agents=%v", workspace, requestID, cmd.GetConfirmAgents())
 	if err := checkWorkspaceKey("interrupt", workspace); err != nil {
@@ -751,27 +803,121 @@ func (h *commandHandler) Interrupt(ctx context.Context, workspace, requestID str
 			return challenge
 		}
 	}
-	evictErr := h.evictQueuedMerges(ctx, workspace, requestID)
-	return errors.Join(evictErr, h.prompts.Interrupt(ctx, workspace, requestID))
+	offerErr := h.offerMergeDequeue(workspace, requestID)
+	return errors.Join(offerErr, h.prompts.Interrupt(ctx, workspace, requestID))
 }
 
-// evictQueuedMerges performs the interrupt's queue half and reports its failure.
+// offerMergeDequeue performs the interrupt's queue half — raising the question,
+// not answering it — and reports its failure.
 //
-// The count is logged rather than returned because it is not the command's
-// answer: an interrupt acks the stop, not the number of merges that came off a
-// queue. What the number IS for is the record — a merge that vanished from a
-// user's queue has to be findable in the log — so both the eviction and the
-// ordinary nothing-was-queued case are written down.
-func (h *commandHandler) evictQueuedMerges(ctx context.Context, workspace, requestID string) error {
-	evicted, err := h.merges.Evict(ctx, workspace)
+// A WORKSPACE WITH NOTHING ON THE QUEUE RAISES NOTHING, which is the ordinary
+// case and never an error. It is written down all the same: an interrupt that
+// produced no card has to be distinguishable in the log from one whose card
+// failed to go up.
+//
+// AN UNWIRED OFFER STORE IS A LOUD REFUSAL. The alternative reading — carry on
+// silently — would leave the destructive half of the interrupt unreachable
+// while reporting the interrupt as complete, and the reading before that, going
+// back to evicting unasked, would destroy a queued merge because a dependency
+// was not injected.
+func (h *commandHandler) offerMergeDequeue(workspace, requestID string) error {
+	standing, queued := h.merges.Standing(workspace)
+	if !queued {
+		h.logf("frontend cmd: interrupt ws=%s request_id=%s has NO merge on the queue — no dequeue offer is raised", workspace, requestID)
+		return nil
+	}
+	if h.dequeueOffers == nil {
+		h.logf("frontend cmd: interrupt merge dequeue offer UNWIRED ws=%s request_id=%s run=%s position=%d depth=%d — the merge stays on the queue and the user is not asked",
+			workspace, requestID, standing.RunID, standing.Position, standing.Depth)
+		return fmt.Errorf("frontend cmd: interrupt ws=%s: no merge dequeue offer store wired; the workspace's queued merge cannot be offered for dequeue", workspace)
+	}
+	offer, err := h.dequeueOffers.RaiseMergeDequeueOffer(workspace, standing)
 	if err != nil {
-		h.logf("frontend cmd: interrupt merge eviction FAILED ws=%s request_id=%s evicted=%d: %v — the merges it could not drop are still queued and still run when their turn comes",
-			workspace, requestID, evicted, err)
-		return fmt.Errorf("frontend cmd: interrupt ws=%s: evict queued merges: %w", workspace, err)
+		h.logf("frontend cmd: interrupt merge dequeue offer FAILED ws=%s request_id=%s run=%s: %v — the merge stays on the queue and the user is not asked",
+			workspace, requestID, standing.RunID, err)
+		return fmt.Errorf("frontend cmd: interrupt ws=%s: raise merge dequeue offer: %w", workspace, err)
 	}
-	if evicted > 0 {
-		h.logf("frontend cmd: interrupt EVICTED %d queued merge(s) ws=%s request_id=%s", evicted, workspace, requestID)
+	h.logf("frontend cmd: interrupt RAISED a merge dequeue offer ws=%s request_id=%s offer=%s run=%s head=%t position=%d depth=%d",
+		workspace, requestID, offer.GetOfferId(), standing.RunID, standing.Head, standing.Position, standing.Depth)
+	return nil
+}
+
+// AnswerMergeDequeue resolves the workspace's outstanding dequeue question.
+//
+// THE OFFER ID IS CHECKED, NOT RESOLVED. An answer naming an id that is not the
+// outstanding one is refused rather than applied to whatever question happens
+// to be up: a click on a card the queue has already superseded must not dequeue
+// the merge its replacement is asking about.
+//
+// THE CARD COMES DOWN ON EITHER ANSWER. Declining is a real answer, and the
+// clear is what makes it one — there is no separate dismissal channel, so a
+// `keep` that did not clear would leave the question standing forever.
+//
+// THE CLEAR HAPPENS FIRST, BEFORE THE DEQUEUE. The dequeue is the slow half (it
+// waits for a running merge to unwind) and the answered question is already
+// answered; leaving the card up across it would invite a second click on a
+// decision that has been made. A dequeue that then fails is reported on the
+// ack, which is the honest place for it — the merge is still there, and the
+// user is told so rather than left looking at a card that never came down.
+func (h *commandHandler) AnswerMergeDequeue(ctx context.Context, workspace, requestID string, cmd *frontendv1.AnswerMergeDequeueCmd) error {
+	h.logf("frontend cmd: answer_merge_dequeue ws=%s request_id=%s offer=%s answer=%T",
+		workspace, requestID, cmd.GetOfferId(), cmd.GetAnswer())
+	if err := checkWorkspaceKey("answer_merge_dequeue", workspace); err != nil {
+		return err
 	}
+	if h.dequeueOffers == nil {
+		return fmt.Errorf("frontend cmd: answer_merge_dequeue ws=%s request_id=%s: no merge dequeue offer store wired", workspace, requestID)
+	}
+	offerID := cmd.GetOfferId()
+	if offerID == "" {
+		return fmt.Errorf("frontend cmd: answer_merge_dequeue ws=%s request_id=%s carries no offer_id", workspace, requestID)
+	}
+	outstanding, ok := h.dequeueOffers.MergeDequeueOfferID(workspace)
+	if !ok {
+		h.logf("frontend cmd: answer_merge_dequeue ws=%s request_id=%s offer=%s has NO outstanding offer — refusing rather than dequeuing on a question that is already gone",
+			workspace, requestID, offerID)
+		return fmt.Errorf("frontend cmd: answer_merge_dequeue ws=%s: no dequeue offer is outstanding for this workspace", workspace)
+	}
+	if outstanding != offerID {
+		h.logf("frontend cmd: answer_merge_dequeue ws=%s request_id=%s offer=%s STALE (outstanding=%s) — refusing rather than answering a question the user was not shown",
+			workspace, requestID, offerID, outstanding)
+		return fmt.Errorf("frontend cmd: answer_merge_dequeue ws=%s: offer %q is stale; the outstanding offer is %q", workspace, offerID, outstanding)
+	}
+
+	// WHICH arm is set IS the answer; an empty oneof is a command that decided
+	// nothing and is refused rather than defaulted to either side. Defaulting to
+	// keep would swallow a dequeue, and defaulting to dequeue would perform one
+	// nobody asked for.
+	var dequeue bool
+	switch cmd.GetAnswer().(type) {
+	case *frontendv1.AnswerMergeDequeueCmd_Dequeue:
+		dequeue = true
+	case *frontendv1.AnswerMergeDequeueCmd_Keep:
+		dequeue = false
+	default:
+		return fmt.Errorf("frontend cmd: answer_merge_dequeue ws=%s request_id=%s offer=%s carries no answer arm", workspace, requestID, offerID)
+	}
+
+	why := "answered:keep"
+	if dequeue {
+		why = "answered:dequeue"
+	}
+	if _, err := h.dequeueOffers.ClearMergeDequeueOffer(workspace, why); err != nil {
+		h.logf("frontend cmd: answer_merge_dequeue CLEAR FAILED ws=%s request_id=%s offer=%s: %v — the card may still be up; nothing is dequeued on an answer that could not be recorded",
+			workspace, requestID, offerID, err)
+		return fmt.Errorf("frontend cmd: answer_merge_dequeue ws=%s: clear offer %q: %w", workspace, offerID, err)
+	}
+	if !dequeue {
+		h.logf("frontend cmd: answer_merge_dequeue KEPT ws=%s request_id=%s offer=%s — the merge stays on the queue", workspace, requestID, offerID)
+		return nil
+	}
+	removed, err := h.merges.Dequeue(ctx, workspace)
+	if err != nil {
+		h.logf("frontend cmd: answer_merge_dequeue DEQUEUE FAILED ws=%s request_id=%s offer=%s removed=%d: %v — whatever did not come off is still queued and still merges when its turn comes",
+			workspace, requestID, offerID, removed, err)
+		return fmt.Errorf("frontend cmd: answer_merge_dequeue ws=%s: dequeue: %w", workspace, err)
+	}
+	h.logf("frontend cmd: answer_merge_dequeue DEQUEUED %d merge(s) ws=%s request_id=%s offer=%s", removed, workspace, requestID, offerID)
 	return nil
 }
 
