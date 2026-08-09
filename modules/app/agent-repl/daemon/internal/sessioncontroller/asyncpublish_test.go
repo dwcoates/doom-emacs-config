@@ -180,14 +180,24 @@ func TestTheAsyncPushCarriesTheEventsReplayCursor(t *testing.T) {
 	}
 }
 
+// The subject is the EVENT'S OWN delta, which is counted apart from the launch
+// anchor's: a detaching event now pushes both, and a bare count of the
+// conversation deltas would no longer be a statement about the one this test is
+// named for.
 func TestAnAllDetachedEventStillPushesItsFeedDelta(t *testing.T) {
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 	c.pushConversation(sidechainAssistantEvent(t, 7, "u1", "tu_task", "x"), true)
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	if len(push.convo) != 1 || push.convo[0].GetThroughSeq() != 7 {
-		t.Fatal("swallowing the delta would strand every client's replay cursor behind this event")
+	own := 0
+	for _, cd := range push.convo {
+		if len(cd.GetItems()) == 0 && cd.GetThroughSeq() == 7 {
+			own++
+		}
+	}
+	if own != 1 {
+		t.Fatalf("the event's own feed delta was pushed %d times, want 1: swallowing it would strand every client's replay cursor behind this event", own)
 	}
 }
 
@@ -223,6 +233,171 @@ func TestABubbleTheSessionOpenedReachesTheReconnectSnapshot(t *testing.T) {
 	snap := c.bubbles.snapshot()
 	if len(snap) != 1 || len(snap[0].GetAgent().GetEmissions()) != 1 {
 		t.Fatalf("a reconnecting client must be handed the fold the pushes had been building, got %v", snap)
+	}
+}
+
+// --- the launch's ANCHOR in the feed (arm 38) ------------------------------
+//
+// The anchor is the bubble's place in the conversation it was launched from.
+// Without it a frontend has a live agent and nowhere to draw it.
+
+// feedAnchors collects every arm-38 ConversationItem the consumer pushed onto
+// the top-level feed, paired with the item so a test can read the item's own
+// identity stamps as well as the bubble it carries.
+func feedAnchors(push *fakePusher) []*frontendv1.ConversationItem {
+	var out []*frontendv1.ConversationItem
+	push.mu.Lock()
+	defer push.mu.Unlock()
+	for _, cd := range push.convo {
+		for _, item := range cd.GetItems() {
+			if item.GetAsyncBubble() != nil {
+				out = append(out, item)
+			}
+		}
+	}
+	return out
+}
+
+func TestALaunchAnchorsItsBubbleInTheTopLevelFeed(t *testing.T) {
+	// Arrange
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act
+	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
+
+	// Assert
+	if got := len(feedAnchors(push)); got != 1 {
+		t.Fatalf("feed anchors = %d, want 1: a bubble with no ConversationItem.async_bubble has no place in the conversation that started it", got)
+	}
+}
+
+func TestTheAnchorNamesTheCallThatLaunchedIt(t *testing.T) {
+	// Arrange
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act
+	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
+
+	// Assert
+	anchors := feedAnchors(push)
+	if len(anchors) != 1 || anchors[0].GetAsyncBubble().GetOriginToolUseId() != "tu_task" {
+		t.Fatalf("anchor origin_tool_use_id = %q, want %q: the reader cannot tell which call started the work otherwise",
+			anchors[0].GetAsyncBubble().GetOriginToolUseId(), "tu_task")
+	}
+}
+
+func TestTheAnchorCarriesTheSameBubbleIdTheAsyncPushOpened(t *testing.T) {
+	// Arrange
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act
+	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
+
+	// Assert
+	anchors := feedAnchors(push)
+	push.mu.Lock()
+	opened := push.bubbles[0].GetOpened()[0].GetId()
+	push.mu.Unlock()
+	if got := anchors[0].GetAsyncBubble().GetId(); got != opened {
+		t.Fatalf("anchor bubble id = %q, async push opened %q: every later update is addressed to one id, and two answers means half the updates are unroutable", got, opened)
+	}
+}
+
+func TestTheAnchorCarriesTheBubblesOpeningLiveness(t *testing.T) {
+	// Arrange
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act
+	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
+
+	// Assert
+	if feedAnchors(push)[0].GetAsyncBubble().GetLiveness().GetLive() == nil {
+		t.Fatal("a launch that anchors already-settled is unrepresentable while its agent is still running")
+	}
+}
+
+func TestTheAnchorDeclaresItsProvenance(t *testing.T) {
+	// Arrange
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act
+	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
+
+	// Assert
+	if got := feedAnchors(push)[0].GetSource(); got != frontendv1.ConversationSource_CONVERSATION_SOURCE_USER {
+		t.Fatalf("anchor source = %s, want CONVERSATION_SOURCE_USER: proto3's zero is the malformed-frame value a receiver must reject", got)
+	}
+}
+
+func TestTheAnchorsUuidIsDerivedFromItsBubble(t *testing.T) {
+	// Arrange
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act
+	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
+
+	// Assert
+	anchor := feedAnchors(push)[0]
+	if want := "async-anchor:" + anchor.GetAsyncBubble().GetId(); anchor.GetUuid() != want {
+		t.Fatalf("anchor uuid = %q, want %q: a minted uuid would anchor the same bubble again on every resync pass", anchor.GetUuid(), want)
+	}
+}
+
+func TestASecondDetachedRecordDoesNotAnchorItsBubbleTwice(t *testing.T) {
+	// Arrange
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act
+	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "one"), true)
+	c.pushConversation(sidechainAssistantEvent(t, 2, "u2", "tu_task", "two"), true)
+
+	// Assert
+	if got := len(feedAnchors(push)); got != 1 {
+		t.Fatalf("feed anchors = %d, want 1: a second anchor makes a frontend draw the same bubble twice", got)
+	}
+}
+
+func TestTheAnchorsDeltaCarriesTheWorkspacesFence(t *testing.T) {
+	// Arrange
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act
+	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
+
+	// Assert
+	push.mu.Lock()
+	defer push.mu.Unlock()
+	for _, cd := range push.convo {
+		for _, item := range cd.GetItems() {
+			if item.GetAsyncBubble() == nil {
+				continue
+			}
+			if cd.GetFence() != c.fence() {
+				t.Fatalf("the anchor's delta carries fence %q, want %q: a stale push must be discardable whole", cd.GetFence(), c.fence())
+			}
+		}
+	}
+}
+
+func TestAnEventThatOpensNoBubbleAnchorsNothing(t *testing.T) {
+	// Arrange
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act
+	c.pushConversation(mainAssistantEvent(t, 1, "u1", "main agent speaking"), true)
+
+	// Assert
+	if got := len(feedAnchors(push)); got != 0 {
+		t.Fatalf("feed anchors = %d, want 0: nothing the main agent said detached any work", got)
 	}
 }
 
