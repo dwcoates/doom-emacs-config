@@ -981,6 +981,25 @@ func waitForPermWaiter(reg *permRegistry, ws, id string) {
 	}
 }
 
+// waitForPermWaiterCount blocks until want handlers are parked on id, yielding
+// the scheduler between checks. Like waitForPermWaiter it is a deterministic
+// rendezvous against state the registry publishes synchronously, not a sleep.
+func waitForPermWaiterCount(reg *permRegistry, id string, want int) {
+	for {
+		reg.mu.Lock()
+		w, ok := reg.waiters[id]
+		parked := 0
+		if ok {
+			parked = len(w.chans)
+		}
+		reg.mu.Unlock()
+		if parked >= want {
+			return
+		}
+		runtime.Gosched()
+	}
+}
+
 func TestHandlePermissionPushesPendingThenAllowed(t *testing.T) {
 	// Arrange.
 	ph, reg, push := newTestPermHandler()
@@ -1078,6 +1097,123 @@ func TestHandlePermissionAbandonedOnTeardown(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolutions = %v, want %v", got, want)
+	}
+}
+
+// --- re-sent permission requests (shim reattach) ----------------------------
+//
+// The shim re-sends every unanswered PermissionRequest on every reattach, so
+// the handler must re-arm idempotently: a request it has no waiter for
+// re-establishes the wait, and one it already answered is served that answer.
+
+func TestHandlePermissionReplaysTheRecordedAnswerToAResend(t *testing.T) {
+	// Arrange: the request was answered, but its response never reached the
+	// shim, so the shim re-sends it after reattaching.
+	ph, reg, _ := newTestPermHandler()
+	req := &corev1.PermissionRequest{RequestId: "r-resend", ToolName: "Bash"}
+	done := make(chan *corev1.PermissionResponse, 1)
+	go func() { done <- ph.HandlePermission("s1", req) }()
+	waitForPermWaiter(reg, "ws", "r-resend")
+	if err := reg.answer("r-resend", true, "", nil); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	<-done
+
+	// Act.
+	resp := ph.HandlePermission("s1", req)
+
+	// Assert: the recorded decision comes straight back, so the shim's blocked
+	// canUseTool resolves without the human answering twice.
+	if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+		t.Fatalf("decision: got %v, want the recorded ALLOW", resp.GetDecision())
+	}
+}
+
+func TestHandlePermissionResendOfAnAnsweredRequestPushesNothing(t *testing.T) {
+	// Arrange: as above, answered and then re-sent.
+	ph, reg, push := newTestPermHandler()
+	req := &corev1.PermissionRequest{RequestId: "r-resend-push", ToolName: "Bash"}
+	done := make(chan *corev1.PermissionResponse, 1)
+	go func() { done <- ph.HandlePermission("s1", req) }()
+	waitForPermWaiter(reg, "ws", "r-resend-push")
+	if err := reg.answer("r-resend-push", true, "", nil); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	<-done
+	before := len(push.permissionResolutions("r-resend-push"))
+
+	// Act.
+	ph.HandlePermission("s1", req)
+
+	// Assert: the frontend already shows this request resolved; a re-send must
+	// not walk it back through PENDING.
+	if got := len(push.permissionResolutions("r-resend-push")); got != before {
+		t.Fatalf("permission pushes = %d, want the %d already there", got, before)
+	}
+}
+
+func TestHandlePermissionResendAfterAbandonmentReAsks(t *testing.T) {
+	// Arrange: the request was abandoned by a teardown, never answered.
+	ph, reg, push := newTestPermHandler()
+	req := &corev1.PermissionRequest{RequestId: "r-reask", ToolName: "Bash"}
+	done := make(chan *corev1.PermissionResponse, 1)
+	go func() { done <- ph.HandlePermission("s1", req) }()
+	waitForPermWaiter(reg, "ws", "r-reask")
+	reg.fail("connection teardown")
+	<-done
+
+	// Act: the shim reattaches and re-sends.
+	resent := make(chan *corev1.PermissionResponse, 1)
+	go func() { resent <- ph.HandlePermission("s1", req) }()
+	waitForPermWaiter(reg, "ws", "r-reask")
+	if err := reg.answer("r-reask", false, "no", nil); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	resp := <-resent
+
+	// Assert: the question was genuinely re-asked and this time answered.
+	if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_DENY {
+		t.Fatalf("decision: got %v, want DENY", resp.GetDecision())
+	}
+	got := push.permissionResolutions("r-reask")
+	want := []corev1.PermissionItem_Resolution{
+		corev1.PermissionItem_RESOLUTION_PENDING,
+		corev1.PermissionItem_RESOLUTION_ABANDONED,
+		corev1.PermissionItem_RESOLUTION_PENDING,
+		corev1.PermissionItem_RESOLUTION_DENIED,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolutions = %v, want %v", got, want)
+	}
+}
+
+func TestHandlePermissionDuplicateResendsShareOneAnswer(t *testing.T) {
+	// Arrange: two quick reconnects put two handlers on the same request_id
+	// before anyone answers.
+	ph, reg, _ := newTestPermHandler()
+	req := &corev1.PermissionRequest{RequestId: "r-dup", ToolName: "Bash"}
+	first := make(chan *corev1.PermissionResponse, 1)
+	go func() { first <- ph.HandlePermission("s1", req) }()
+	waitForPermWaiter(reg, "ws", "r-dup")
+	second := make(chan *corev1.PermissionResponse, 1)
+	go func() { second <- ph.HandlePermission("s1", req) }()
+	waitForPermWaiterCount(reg, "r-dup", 2)
+
+	// Act.
+	if err := reg.answer("r-dup", true, "", nil); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+
+	// Assert: neither handler goroutine is stranded.
+	for name, ch := range map[string]chan *corev1.PermissionResponse{"first": first, "second": second} {
+		select {
+		case resp := <-ch:
+			if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+				t.Errorf("%s decision: got %v, want ALLOW", name, resp.GetDecision())
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s handler was never released by the shared answer", name)
+		}
 	}
 }
 
