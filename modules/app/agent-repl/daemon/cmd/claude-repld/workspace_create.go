@@ -825,6 +825,17 @@ func toProtoAction(a workspacecreate.HostAction) *frontendv1.HostAction {
 		}
 		return &frontendv1.HostAction{ActionId: a.ID, Action: &frontendv1.HostAction_WorkspaceCreateFailed{WorkspaceCreateFailed: &frontendv1.HostWorkspaceCreateFailed{JobId: failure.JobID, RequestedName: failure.RequestedName, Error: failure.Error}}}
 	}
+	// The boot sweep's verdict has its own arm for the same reason the failure
+	// notice does: falling through to HostLegacyCommand would post a type
+	// Emacs' eight-verb legacy contract does not name, which is refused and
+	// then redelivered forever.
+	if a.Type == workspacecreate.HostActionTypeBootSweepSessionUnwired {
+		var unwired workspacecreate.BootSweepSessionUnwired
+		if err := json.Unmarshal(a.Payload, &unwired); err != nil {
+			panic(fmt.Sprintf("workspace create: boot-sweep verdict action %s payload: %v", a.ID, err))
+		}
+		return &frontendv1.HostAction{ActionId: a.ID, Action: &frontendv1.HostAction_BootSweepSessionUnwired{BootSweepSessionUnwired: &frontendv1.HostBootSweepSessionUnwired{Workspace: unwired.Workspace, SessionId: unwired.SessionID, Reason: unwired.Reason}}}
+	}
 	// The sidebar's own gestures each have a typed arm, and the host accepts
 	// them ONLY there: HostLegacyCommand's contract names exactly eight verbs,
 	// so posting a sidebar gesture down the legacy arm is refused by Emacs and

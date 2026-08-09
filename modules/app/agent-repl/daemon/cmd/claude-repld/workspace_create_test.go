@@ -542,3 +542,39 @@ func TestToProtoActionKeepsTheLegacyVerbsOnTheLegacyArm(t *testing.T) {
 		})
 	}
 }
+
+// A boot-sweep verdict reaches Emacs on its OWN typed arm.  Falling through to
+// HostLegacyCommand would post a type the host's eight-verb legacy contract
+// does not name, which Emacs refuses and the daemon then redelivers forever.
+func TestToProtoActionMapsTheBootSweepVerdict(t *testing.T) {
+	// Arrange
+	payload, err := json.Marshal(workspacecreate.BootSweepSessionUnwired{
+		Workspace: "/ws", SessionID: "s_1",
+		Verdict: "boot_sweep_no_live_shim",
+		Reason:  "its agent process is gone (boot-sweep verdict boot_sweep_no_live_shim)",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := workspacecreate.HostAction{
+		ID:      "boot-sweep:s_1:boot_sweep_no_live_shim",
+		Type:    workspacecreate.HostActionTypeBootSweepSessionUnwired,
+		Payload: payload,
+	}
+
+	// Act
+	got := toProtoAction(action)
+
+	// Assert
+	unwired := got.GetBootSweepSessionUnwired()
+	if unwired == nil {
+		t.Fatalf("action = %#v, want the boot_sweep_session_unwired arm", got)
+	}
+	if got.GetActionId() != "boot-sweep:s_1:boot_sweep_no_live_shim" ||
+		unwired.GetWorkspace() != "/ws" || unwired.GetSessionId() != "s_1" {
+		t.Fatalf("verdict arm = %#v (action id %q)", unwired, got.GetActionId())
+	}
+	if unwired.GetReason() != "its agent process is gone (boot-sweep verdict boot_sweep_no_live_shim)" {
+		t.Fatalf("verdict reason = %q, want the sweep's sentence verbatim", unwired.GetReason())
+	}
+}
