@@ -13,10 +13,15 @@
  * A per-view check would be three checks, then four, then five — each one an
  * opportunity to forget, and each one a second place where "what does stale
  * mean" is decided. So there is exactly ONE function here, {@link admitFenced},
- * and the store has exactly one ingestion case for fenced views that calls it.
- * A new resolved view joins the {@link FencedView} union and is gated by
- * construction; it cannot reach the store any other way, because the store
- * exposes no other entry that writes a view slice.
+ * and the store reaches it through exactly one private helper. A new fenced
+ * push joins the {@link FencedView} union and is gated by construction; it
+ * cannot reach the store any other way, because the store exposes no other
+ * entry that writes a view slice or hands a delta to the bubble registry.
+ *
+ * The detached-work push (`asyncBubbleDelta`) is one of those arms. It arrives
+ * on its own frame and lands in the registry rather than a slice, but it
+ * carries the same workspace fence and gets the same verdict from the same
+ * function — see {@link FencedView}.
  *
  * THE RULE, in full:
  *
@@ -42,20 +47,45 @@ import type {
   TopbarView,
   WorkspaceGateView,
 } from "./frontend-proto.js";
+import type { AsyncBubbleDelta } from "./async-bubble.js";
 import type { ClientLogContext } from "./protocol.js";
 
 /**
- * ONE fenced resolved view, as the union the choke point accepts.
+ * The RESOLVED COMPONENT VIEWS, which share one store slice-writing method.
  *
- * Adding an arm here is what makes a new view fenced. It is deliberately a
- * closed union rather than a structural `{ fence: string }` constraint: the arm
- * name is what the discard record reports, and a structural constraint would
- * let any object with a `fence` field slip through unnamed.
+ * They are a named sub-union rather than three loose arms because the store's
+ * `applyFencedView` handles exactly these and its exhaustiveness check is what
+ * makes a fourth component view a compile error there.
  */
-export type FencedView =
+export type FencedComponentView =
   | { case: "topbar"; value: TopbarView }
   | { case: "tokenBreakdown"; value: TokenBreakdownView }
   | { case: "workspaceGate"; value: WorkspaceGateView };
+
+/**
+ * ONE fenced push, as the union the choke point accepts.
+ *
+ * Adding an arm here is what makes a new push fenced. It is deliberately a
+ * closed union rather than a structural `{ fence: string }` constraint: the arm
+ * name is what the discard record reports, and a structural constraint would
+ * let any object with a `fence` field slip through unnamed.
+ *
+ * THE ASYNC PUSH IS AN ARM OF THIS UNION, not a second gate beside it. A
+ * detached-work delta carries the same workspace `fence` the component views do
+ * — the daemon mints every one of them from the same composer (`ssm.Fence`
+ * over the session and its generation) — so "is this push current" has exactly
+ * one answer, computed in exactly one place. Gating it anywhere else would be a
+ * second definition of stale that could drift from this one, which is the whole
+ * failure this module exists to prevent.
+ *
+ * It differs from the component arms only in WHERE an admitted push then goes:
+ * a component view is written to a store slice, an async delta is handed to the
+ * bubble registry to route by id. That is a question about destination, not
+ * about staleness, so it is settled after the gate rather than inside it.
+ */
+export type FencedView =
+  | FencedComponentView
+  | { case: "asyncBubbleDelta"; value: AsyncBubbleDelta };
 
 /** The workspace a fenced view describes, whichever arm it is. */
 export function fencedWorkspace(view: FencedView): string {

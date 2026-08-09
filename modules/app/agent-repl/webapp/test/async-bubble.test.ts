@@ -25,8 +25,13 @@ describe("decodeAsyncBubble — identity", () => {
   it("decodes a newly-opened agent bubble with an empty body", () => {
     const bubble = decodeAsyncBubble(openedAgent(), "b");
 
+    // Contract amendment 2 added `AsyncBubble.workspace`, so the whole-shape
+    // assertion names it: this test exists to pin EVERY field the decoder
+    // produces, and a shape check that omitted the newest one would stop
+    // being that.
     expect(bubble).toEqual({
       id: "b1",
+      workspace: "",
       originToolUseId: "",
       parentBubbleId: "",
       label: "",
@@ -46,6 +51,12 @@ describe("decodeAsyncBubble — identity", () => {
     const bubble = decodeAsyncBubble(openedAgent({ parentBubbleId: "b0" }), "b");
 
     expect(bubble.parentBubbleId).toBe("b0");
+  });
+
+  it("carries the workspace a snapshot scopes the bubble by", () => {
+    const bubble = decodeAsyncBubble(openedAgent({ workspace: "/ws" }), "b");
+
+    expect(bubble.workspace).toBe("/ws");
   });
 
   it("carries the originating tool_use id the card attaches by", () => {

@@ -56,7 +56,7 @@ import type { CounterEntry, CounterStatus } from "./counter-menu.js";
 import type { ContentBlock, ModelInfo, ModelUsage, ResultSubtype, Usage } from "./protocol.js";
 import { mergeStatusLogValue } from "./merge-status.js";
 import { previewBlockId, recordBlockIdentity } from "./streaming.js";
-import type { FencedView } from "./fence.js";
+import type { FencedComponentView } from "./fence.js";
 import type {
   ContextClearedItem,
   ContextCompactedItem,
@@ -495,7 +495,7 @@ export type AdapterEffect =
    * `admitFenced` (fence.ts) before it touches a slice. See fence.ts for the
    * whole rule.
    */
-  | { kind: "fenced-view"; value: FencedView }
+  | { kind: "fenced-view"; value: FencedComponentView }
   /**
    * THE ASYNC-BUBBLE SEAM. One push of detached work, carried whole to
    * `AsyncBubbleRegistry.applyDelta`, which is the ONLY thing allowed to route
@@ -599,7 +599,7 @@ export function userTurnReceipt(effects: AdapterEffect[], lastSeq: number): User
  * one thing and none of them can invent a second effect kind that bypasses the
  * gate.
  */
-function fencedEffect(view: FencedView): AdapterEffect {
+function fencedEffect(view: FencedComponentView): AdapterEffect {
   return { kind: "fenced-view", value: view };
 }
 
