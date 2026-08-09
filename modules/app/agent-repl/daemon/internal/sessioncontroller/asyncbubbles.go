@@ -37,8 +37,13 @@ import (
 // lifecycle event, a tool outcome, the reconnect snapshot — reaches the SAME
 // object, which is why a snapshot and a delta cannot describe different folds.
 type asyncBubbleStore struct {
-	mu   sync.Mutex
-	byID map[string]*frontendv1.AsyncBubble
+	// workspace is stamped on every bubble this store opens. It is held here
+	// rather than passed per call so that a bubble and the AsyncBubbleDelta
+	// that carries it cannot name different workspaces: both read this one
+	// value, which the consumer set once.
+	workspace string
+	mu        sync.Mutex
+	byID      map[string]*frontendv1.AsyncBubble
 	// order preserves launch order, so a snapshot lists bubbles as they opened
 	// rather than in map order.
 	order []string
@@ -63,8 +68,9 @@ type asyncBubbleStore struct {
 	journalThrough map[string]uint64
 }
 
-func newAsyncBubbleStore() *asyncBubbleStore {
+func newAsyncBubbleStore(workspace string) *asyncBubbleStore {
 	return &asyncBubbleStore{
+		workspace:       workspace,
 		byID:            map[string]*frontendv1.AsyncBubble{},
 		idByToolUse:     map[string]string{},
 		idByTask:        map[string]string{},
@@ -224,6 +230,7 @@ func (s *asyncBubbleStore) resolveAgentBubbleLocked(fold frontend.DetachedFold, 
 	}
 	b, err := frontend.OpenAsyncBubble(frontend.BubbleSpec{
 		TaskID:          taskID,
+		Workspace:       s.workspace,
 		Kind:            frontend.DetachAgent,
 		OriginToolUseID: fold.SourceToolUseID,
 		ParentBubbleID:  s.parentByToolUse[fold.SourceToolUseID],
@@ -309,6 +316,7 @@ func (s *asyncBubbleStore) openFromOutcomeLocked(o frontend.ToolOutcome, spec fr
 		return nil, nil, nil, nil
 	}
 	spec.OriginToolUseID = o.ToolUseID
+	spec.Workspace = s.workspace
 	if o.FromDetachedAgent {
 		if parent := s.lookupLocked(o.SourceToolUseID, o.AgentID); parent != nil {
 			spec.ParentBubbleID = parent.GetId()
@@ -455,6 +463,7 @@ func (s *asyncBubbleStore) observeTaskStarted(ts *corev1.TaskStarted, atMs int64
 	}
 	spec := frontend.BubbleSpec{
 		TaskID:          ts.GetTaskId(),
+		Workspace:       s.workspace,
 		Kind:            frontend.DetachKindFromTaskKind(ts.GetKind()),
 		OriginToolUseID: ts.GetToolUseId(),
 		ParentBubbleID:  s.parentByToolUse[ts.GetToolUseId()],
