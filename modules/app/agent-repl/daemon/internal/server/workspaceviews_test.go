@@ -419,6 +419,133 @@ func TestARecreatedWorkspaceResolvesAFreshBranch(t *testing.T) {
 	}
 }
 
+func TestARecordOnlyHibernationFlipRepublishesTheGate(t *testing.T) {
+	// Arrange — the record went to sleep with no SSM state transition behind
+	// it, so PublishState will never fire again on its own.
+	records := &mutableRecords{}
+	v, push := newViewPublisher(t, records, nil, nil)
+	v.PublishState(liveState())
+	records.set(registry.Record{
+		SessionID: "s1", Hibernated: true,
+		Hibernation: registry.HibernationDetail{Cause: registry.HibernationCauseForced, SinceMs: 1},
+	}, true)
+	// Act.
+	v.PublishSession("/home/u/ws", "s1|g1", "s1")
+	// Assert.
+	if len(push.gates) != 2 || push.gates[1].GetHibernated() == nil {
+		t.Fatalf("gates = %v, want the record-only flip republished as hibernated", push.gates)
+	}
+}
+
+func TestASessionPublicationWithNoWorkspacePublishesNothing(t *testing.T) {
+	// Arrange — there is no key to route the gate on.
+	v, push := newViewPublisher(t, fixedRecords{}, nil, nil)
+	// Act.
+	v.PublishSession("", "s1|g1", "s1")
+	// Assert.
+	if len(push.gates) != 0 {
+		t.Fatalf("published %d gates for a keyless session publication", len(push.gates))
+	}
+}
+
+func TestAnUnchangedGateFromASessionPublicationIsPublishedOnlyOnce(t *testing.T) {
+	// Arrange — change is judged on the rendered gate, not on the trigger.
+	v, push := newViewPublisher(t, fixedRecords{}, nil, nil)
+	v.PublishState(liveState())
+	// Act.
+	v.PublishSession("/home/u/ws", "s1|g1", "s1")
+	// Assert.
+	if len(push.gates) != 1 {
+		t.Fatalf("published %d gates for an unchanged gate, want 1", len(push.gates))
+	}
+}
+
+func TestAnUnfencedSessionPublicationWithholdsTheGate(t *testing.T) {
+	// Arrange — an unfenced gate cannot be told from a stale one.
+	v, push := newViewPublisher(t, fixedRecords{}, nil, nil)
+	// Act.
+	v.PublishSession("/home/u/ws", "", "s1")
+	// Assert.
+	if len(push.gates) != 0 {
+		t.Fatalf("published an unfenced gate: %v", push.gates)
+	}
+}
+
+// lockProbePush answers, at push time, whether the publisher's own mutex was
+// held. That is the whole of "retention and publication are one step": a push
+// that reaches the wire with the lock free is a push a concurrent resolution
+// can overtake, retaining the newer view and broadcasting the older one.
+//
+// TryLock is the probe rather than a second goroutine because it needs no
+// timing at all — the answer is a fact about this instant, not a race whose
+// outcome a test would have to wait on.
+type lockProbePush struct {
+	v                                   *WorkspaceViews
+	topbarHeld, gateHeld, breakdownHeld []bool
+}
+
+// probe reports whether v.mu was held at this instant.
+func (p *lockProbePush) probe() bool {
+	if p.v.mu.TryLock() {
+		p.v.mu.Unlock()
+		return false
+	}
+	return true
+}
+
+func (p *lockProbePush) PushTopbarView(*frontendv1.TopbarView) {
+	p.topbarHeld = append(p.topbarHeld, p.probe())
+}
+
+func (p *lockProbePush) PushTokenBreakdownView(*frontendv1.TokenBreakdownView) {
+	p.breakdownHeld = append(p.breakdownHeld, p.probe())
+}
+
+func (p *lockProbePush) PushWorkspaceGateView(*frontendv1.WorkspaceGateView) {
+	p.gateHeld = append(p.gateHeld, p.probe())
+}
+
+// newLockProbePublisher builds a publisher whose push probes the mutex.
+func newLockProbePublisher(records SessionRecordSource) (*WorkspaceViews, *lockProbePush) {
+	probe := &lockProbePush{}
+	v := NewWorkspaceViews(func(string, ...any) {}, probe, records, nil, nil, nil)
+	probe.v = v
+	return v, probe
+}
+
+func TestTheTopbarIsBroadcastUnderTheSameHoldThatRetainedIt(t *testing.T) {
+	// Arrange.
+	v, probe := newLockProbePublisher(nil)
+	// Act.
+	v.PublishState(liveState())
+	// Assert.
+	if len(probe.topbarHeld) != 1 || !probe.topbarHeld[0] {
+		t.Fatalf("topbar push observed the lock held = %v, want one push with the lock held", probe.topbarHeld)
+	}
+}
+
+func TestTheGateIsBroadcastUnderTheSameHoldThatRetainedIt(t *testing.T) {
+	// Arrange — the gate alone, published off the session record.
+	v, probe := newLockProbePublisher(fixedRecords{})
+	// Act.
+	v.PublishSession("/home/u/ws", "s1|g1", "s1")
+	// Assert.
+	if len(probe.gateHeld) != 1 || !probe.gateHeld[0] {
+		t.Fatalf("gate push observed the lock held = %v, want one push with the lock held", probe.gateHeld)
+	}
+}
+
+func TestTheTokenBreakdownIsBroadcastUnderTheSameHoldThatRetainedIt(t *testing.T) {
+	// Arrange.
+	v, probe := newLockProbePublisher(nil)
+	// Act.
+	v.PublishTokenBreakdown("/home/u/ws", "s1|g1", nil)
+	// Assert.
+	if len(probe.breakdownHeld) != 1 || !probe.breakdownHeld[0] {
+		t.Fatalf("breakdown push observed the lock held = %v, want one push with the lock held", probe.breakdownHeld)
+	}
+}
+
 func TestForgettingAWorkspaceDropsItFromTheSnapshot(t *testing.T) {
 	// Arrange — the snapshot must stop carrying a topbar for a workspace
 	// nothing runs.

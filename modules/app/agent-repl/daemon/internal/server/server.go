@@ -1655,30 +1655,38 @@ func (s *Server) pushSessionView(id string) {
 	// second clock, and the two could then disagree about what the session
 	// spent. The fence comes off the workspace's current state and is carried,
 	// never composed.
-	s.publishTokenBreakdown(rec.CWD, usage)
+	//
+	// THE REVIVAL GATE RIDES THE SAME PUSH. Its facts come off the session
+	// RECORD, and this is the funnel every record mutation ends in — the
+	// registry's hibernation write re-pushes the session view as its last step.
+	// A hibernation flip that records no SSM state transition would otherwise
+	// leave the gate stale until something unrelated moved the state.
+	s.publishSessionDerivedViews(rec.CWD, id, usage)
 }
 
-// publishTokenBreakdown hands the resolved-view publisher the workspace's
-// fence and its token aggregate.
+// publishSessionDerivedViews hands the resolved-view publisher the workspace's
+// fence, its token aggregate and its session identity — the breakdown menu and
+// the revival gate, resolved off ONE read of the workspace's current state.
 //
-// A workspace with no current SSM state has no fence, and the menu is withheld
-// rather than published unfenced — an unfenced push cannot be told from a stale
-// one, which is the whole job of the token. The withholding is recorded; it is
-// never silent.
-func (s *Server) publishTokenBreakdown(workspace string, usage *frontendv1.SessionTokenUtilization) {
+// A workspace with no current SSM state has no fence, and both views are
+// withheld rather than published unfenced — an unfenced push cannot be told
+// from a stale one, which is the whole job of the token. The withholding is
+// recorded; it is never silent.
+func (s *Server) publishSessionDerivedViews(workspace, sessionID string, usage *frontendv1.SessionTokenUtilization) {
 	if s.workspaceViews == nil || s.ssm == nil || workspace == "" {
 		return
 	}
 	state, found, err := s.ssm.Current(workspace)
 	if err != nil {
-		s.logf("server: token breakdown NOT PUBLISHED ws=%q — the workspace's current state could not be read for its fence: %v", workspace, err)
+		s.logf("server: token breakdown and revival gate NOT PUBLISHED ws=%q session=%q — the workspace's current state could not be read for its fence: %v", workspace, sessionID, err)
 		return
 	}
 	if !found {
-		s.logf("server: token breakdown NOT PUBLISHED ws=%q — the workspace has no resolved state yet, so there is no fence to stamp the menu with", workspace)
+		s.logf("server: token breakdown and revival gate NOT PUBLISHED ws=%q session=%q — the workspace has no resolved state yet, so there is no fence to stamp them with", workspace, sessionID)
 		return
 	}
 	s.workspaceViews.PublishTokenBreakdown(workspace, state.GetFence(), usage)
+	s.workspaceViews.PublishSession(workspace, state.GetFence(), sessionID)
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
