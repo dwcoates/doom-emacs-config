@@ -49,8 +49,10 @@ would be modelling a frame the daemon never sends.  Pass the symbol
                 (t (list :promptOrigin (or origin "PROMPT_ORIGIN_USER_SENT"))))))
 
 (defun agent-repl-test--cost-progress (workspace &optional alert)
-  "Return a `ProgressView' plist for WORKSPACE carrying ALERT, or none."
-  (append (list :workspace workspace :sessionId "s_1")
+  "Return a `ProgressView' plist for WORKSPACE carrying ALERT, or none.
+`ProgressView' reserved `session_id' with the component reshape; the
+workspace FENCE is what a fenced push names itself by now."
+  (append (list :workspace workspace :fence "f_1")
           (when alert (list :expensiveTurn alert))))
 
 ;;;; ---- The wire arm is dispatched, not ignored ---------------------------
@@ -109,7 +111,7 @@ presence IS the alarm's lifetime — there is no local timer to expire it."
           (should (string-match-p "frame=ProgressView" (cadr entry)))
           (should (string-match-p "job-id=unavailable" (cadr entry)))
           (should (string-match-p "path=\\\"/pending/new\\\"" (cadr entry)))
-          (should (string-match-p "session-id=\\\"s_1\\\"" (cadr entry))))
+          (should (string-match-p "identity=\\\"f_1\\\"" (cadr entry))))
         (should (zerop (hash-table-count agent-repl--context-cost-alerts)))))))
 
 (ert-deftest agent-repl-test-context-cost-skips-a-tombstoned-workspace ()

@@ -2119,9 +2119,10 @@ Both read the one minibuffer, so the guard is shared rather than per-action."
 ;; vocabulary in the test would be a fourth list to drift.
 
 (defconst agent-repl-test--frontend-proto-file
-  (expand-file-name "../proto/agentshim/frontend/v1/frontend.proto"
+  (expand-file-name "../proto/agentshim/frontend/v1/sidebar.proto"
                     (file-name-directory (or load-file-name buffer-file-name)))
-  "Absolute path to frontend.proto, resolved at LOAD time.
+  "Absolute path to the component proto that declares `RosterRow', resolved at
+LOAD time.
 `load-file-name' is nil once loading finishes, so a helper that reads it
 when CALLED would resolve nothing under `emacs -batch -l'.")
 
@@ -2137,7 +2138,7 @@ beside it are declarations, not vocabulary."
       (insert-file-contents proto)
       (goto-char (point-min))
       (unless (re-search-forward "^ *oneof status *{" nil t)
-        (error "frontend.proto declares no RosterRow.status oneof"))
+        (error "sidebar.proto declares no RosterRow.status oneof"))
       (let ((end (save-excursion
                    (goto-char (match-beginning 0))
                    (forward-list)

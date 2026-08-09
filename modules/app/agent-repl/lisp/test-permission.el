@@ -51,10 +51,13 @@
            (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))
 
 (ert-deftest agent-repl-test-permission-item-p-false-for-other-arm ()
-  "A non-permission conversation item (assistant message) is not a permission arm."
+  "An agent-emitted conversation item is not a permission arm.
+Everything the agent produced folded onto the single `agent' arm with the
+component reshape; the permission arm stayed its own, which is the whole
+reason this reader can ask for one key."
   ;; Arrange / Act / Assert
   (should-not (agent-repl--permission-item-p
-               '(:uuid "m1" :assistantMessage (:content "hi")))))
+               '(:uuid "m1" :agent (:assistantMessage (:content "hi"))))))
 
 ;;;; ---- present: bookkeeping + notification -----------------------------
 
@@ -210,8 +213,8 @@
       ;; Act — a delta mixing a text item, a tool item, and one permission
       (let ((n (agent-repl--frontend-apply-conversation-delta
                 (list :workspace "ws1"
-                      :items (list '(:uuid "m1" :assistantMessage (:content "hi"))
-                                   '(:uuid "t1" :toolUse (:name "Bash"))
+                      :items (list '(:uuid "m1" :agent (:assistantMessage (:content "hi")))
+                                   '(:uuid "t1" :agent (:toolUse (:name "Bash")))
                                    (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))))
         ;; Assert
         (should (= n 1))))))
@@ -223,7 +226,7 @@
     ;; Act
     (let ((n (agent-repl--frontend-apply-conversation-delta
               (list :workspace "ws1"
-                    :items (list '(:uuid "m1" :assistantMessage (:content "hi")))))))
+                    :items (list '(:uuid "m1" :agent (:assistantMessage (:content "hi"))))))))
       ;; Assert
       (should (= n 0))
       (should-not (agent-repl--ws-get "ws1" :permission-prompt-active)))))
@@ -240,7 +243,7 @@
         ;; Act
         (agent-repl--frontend-apply-conversation-delta
          (list :workspace "ws1"
-               :items (list '(:uuid "m1" :assistantMessage (:content "private message")))))
+               :items (list '(:uuid "m1" :agent (:assistantMessage (:content "private message"))))))
         ;; Assert
         (should-not ordinary)
         (should (seq-some (lambda (line) (string-match-p "item-count=1" line)) verbose))
