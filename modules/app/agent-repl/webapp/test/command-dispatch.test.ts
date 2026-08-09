@@ -704,6 +704,17 @@ describe("hibernate and revive dispatch", () => {
     expect(JSON.parse(sent[0]).reviveSession).toEqual({ compactFirst: { scope: "COMPACTION_SCOPE_ALL" } });
   });
 
+  it("sends the clear revival decision", async () => {
+    // Arrange
+    const { dispatcher, sent } = newDispatcher();
+    // Act
+    const p = dispatcher.reviveSession("/w", "clear");
+    dispatcher.observe(ackFrame("r1", true));
+    await p;
+    // Assert
+    expect(JSON.parse(sent[0]).reviveSession).toEqual({ clear: {} });
+  });
+
   it("sends the direct revival decision", async () => {
     // Arrange
     const { dispatcher, sent } = newDispatcher();
