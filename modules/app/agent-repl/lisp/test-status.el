@@ -158,6 +158,34 @@ They can no more act on the workspace than during the merge itself."
   (should (equal agent-repl--color-thinking-red
                  (plist-get (agent-repl--tab-spec :merge-queued nil) :bg))))
 
+(ert-deftest agent-repl-test-tab-spec-merging-brackets-green ()
+  "A merge the daemon is RUNNING paints the [N] bracket green.
+The red belongs to the name region alone: an entry painted red edge to
+edge read as a thinking turn, and the green bracket says where the work
+in flight is headed."
+  ;; Act / Assert
+  (should (equal agent-repl--color-done-green
+                 (plist-get (agent-repl--tab-spec :merging nil) :bracket-bg))))
+
+(ert-deftest agent-repl-test-tab-spec-merge-enqueuing-brackets-green ()
+  "A merge on its way into the queue takes the same green bracket."
+  ;; Act / Assert
+  (should (equal agent-repl--color-done-green
+                 (plist-get (agent-repl--tab-spec :merge-enqueuing nil) :bracket-bg))))
+
+(ert-deftest agent-repl-test-tab-spec-merge-queued-brackets-green ()
+  "A merge waiting behind a sibling takes the same green bracket."
+  ;; Act / Assert
+  (should (equal agent-repl--color-done-green
+                 (plist-get (agent-repl--tab-spec :merge-queued nil) :bracket-bg))))
+
+(ert-deftest agent-repl-test-tab-spec-thinking-bracket-inherits-the-name-color ()
+  "A THINKING tab still paints one color end to end.
+The split is the merge states\=' alone, so nothing else may grow a
+bracket color of its own without saying so."
+  ;; Act / Assert
+  (should-not (plist-get (agent-repl--tab-spec :thinking nil) :bracket-bg)))
+
 (ert-deftest agent-repl-test-tab-spec-merging-selected-brackets-red ()
   "A SELECTED merging tab keeps red on the [N] bracket.
 Selection dims the name region to the shared grey for every state, so the
@@ -177,6 +205,24 @@ renders with, and a merge must stay visible through it."
     ;; Act / Assert
     (should (equal 'unspecified (plist-get spec :bg)))
     (should (equal agent-repl--color-thinking-red (plist-get spec :bracket-bg)))))
+
+(ert-deftest agent-repl-test-tab-spec-bracket-only-selected-merging-is-red ()
+  "A SELECTED merging tab with panels dismissed also keeps red on the bracket.
+The selected row dims the name region to the shared grey, so the state
+color has to come from that row\='s own `:bracket-bg\='."
+  ;; Arrange
+  (let ((spec (agent-repl--tab-spec-bracket-only :merging t)))
+    ;; Act / Assert
+    (should (equal agent-repl--color-thinking-red (plist-get spec :bracket-bg)))))
+
+(ert-deftest agent-repl-test-tab-spec-bracket-only-ready-stays-green ()
+  "A `:ready\=' tab with panels dismissed keeps green on the bracket.
+The unselected row has no `:bracket-bg\=', so the bracket-only path has to
+read the state color out of `:bg\='."
+  ;; Arrange
+  (let ((spec (agent-repl--tab-spec-bracket-only :ready nil)))
+    ;; Act / Assert
+    (should (equal agent-repl--color-done-green (plist-get spec :bracket-bg)))))
 
 (ert-deftest agent-repl-test-tab-spec-merge-conflict-falls-back-to-default ()
   "`:merge-conflict' takes no tab color, so its spec is the default."
@@ -478,6 +524,29 @@ reads distinctly from :idle orange and :thinking red."
         (should (equal (plist-get (get-text-property bracket-pos 'face entry)
                                   :background)
                        agent-repl--color-done-green))))))
+
+(ert-deftest agent-repl-test-render-tab-entry-merging-bracket-is-green ()
+  "The [9] bracket of a merging workspace renders with the green background."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :merging)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
+               (lambda (_ws) t)))
+      (let* ((entry (agent-repl--render-tab-entry "ws1" "other" 9))
+             (bracket-pos (string-match "\\[9\\]" entry)))
+        (should (equal (plist-get (get-text-property bracket-pos 'face entry)
+                                  :background)
+                       agent-repl--color-done-green))))))
+
+(ert-deftest agent-repl-test-render-tab-entry-merging-name-keeps-the-red-face ()
+  "The NAME region of a merging workspace still renders with the red face."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :merging)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
+               (lambda (_ws) t)))
+      (let* ((entry (agent-repl--render-tab-entry "ws1" "other" 9))
+             (name-pos (string-match "ws1" entry)))
+        (should (eq (get-text-property name-pos 'face entry)
+                    'agent-repl-tab-thinking))))))
 
 ;;;; ---- Tests: Legacy wrappers still populate both axes ----
 
