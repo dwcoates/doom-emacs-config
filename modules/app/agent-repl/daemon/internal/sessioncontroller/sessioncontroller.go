@@ -3106,6 +3106,22 @@ func (h permHandler) permsChanged() {
 }
 
 func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRequest) *corev1.PermissionResponse {
+	// A RE-SENT REQUEST THIS DAEMON ALREADY ANSWERED. The shim re-sends every
+	// unanswered ask on reattach, so a request_id whose decision is still in
+	// the registry's memory means the answer was recorded here but its
+	// PermissionResponse never reached the shim. Replaying the recorded answer
+	// is exact — the id is the shim's per-canUseTool uuid — and asking the
+	// human the same question again instead would be asking them to answer a
+	// question they already answered.
+	//
+	// Nothing is pushed to the frontend: the resolved ConversationItem for this
+	// uuid is already there from the answer, and the render-state count never
+	// moved because no waiter parks on this path.
+	if resp, ok := h.reg.recall(req.GetRequestId()); ok {
+		h.logf("session-controller: permission request_id=%s re-sent by the shim after this daemon already answered it ws=%s session=%s tool=%s; replaying the recorded decision=%v",
+			req.GetRequestId(), h.cons.workspace, sessionID, req.GetToolName(), resp.GetDecision())
+		return resp
+	}
 	h.logf("session-controller: permission prompt ws=%s session=%s request_id=%s tool=%s (awaiting frontend answer)",
 		h.cons.workspace, sessionID, req.GetRequestId(), req.GetToolName())
 	// Push the pending permission ConversationItem (uuid = request_id) through
