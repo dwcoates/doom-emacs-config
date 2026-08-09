@@ -640,6 +640,11 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	})
 	workspaceViews := NewWorkspaceViews(logf, srv, cfg.SessionRecords, cfg.ModelCatalogs, cfg.Progress, cfg.MergeGeometry)
 	snapshots.workspaceViews = workspaceViews
+	// THE CLOSE RELEASES THESE RETENTIONS, so the command handler is bound to
+	// the same publisher the snapshot serves from. The binding is here rather
+	// than in CommandHandlerConfig because the publisher is built on top of the
+	// frontend server, which is built on top of the handler.
+	handler.workspaceViews = workspaceViews
 
 	// THE DRAIN LEASE, constructed last because it needs the frontend server to
 	// broadcast through and the fleet to bind to, and bound into the handler and

@@ -377,6 +377,15 @@ type commandHandler struct {
 	// logTargets releases a closed workspace's log descriptors, binding their
 	// lifetime to the workspace's. Nil holds them for the daemon's lifetime.
 	logTargets WorkspaceLogTargetEvictor
+	// workspaceViews retains the three resolved per-workspace views and the
+	// memoized branch behind the topbar's title. The close releases them beside
+	// the log targets, which is what binds every per-workspace retention to the
+	// same owner's death. It is bound AFTER construction (WireAgentShim builds
+	// the publisher on top of the frontend server this handler is handed to),
+	// exactly as the snapshot provider's binding is. Nil holds the retentions
+	// for the daemon's lifetime, which is what a focused harness wants and what
+	// production must never be.
+	workspaceViews *WorkspaceViews
 	// restarts backs the restartSession command. Nil is a loud unsupported
 	// capability, never a success-shaped no-op.
 	restarts SessionRestarter
@@ -1000,7 +1009,28 @@ func (h *commandHandler) CloseWorkspace(ctx context.Context, workspace, requestI
 	// them. A release failure is reported, never swallowed: descriptors that
 	// could not be closed are exactly the leak this eviction exists to end.
 	h.evictWorkspaceLogTargets(workspace, requestID)
+	// THE RESOLVED VIEWS GO WITH THE WORKSPACE TOO, and for a second reason
+	// beyond the snapshot carrying a topbar nothing runs: the publisher
+	// memoizes this workspace's branch, and a workspace re-created at the same
+	// path would inherit its dead predecessor's under a genuinely current fence.
+	h.forgetWorkspaceViews(workspace, requestID)
 	return nil
+}
+
+// forgetWorkspaceViews releases a closed workspace's retained resolved views.
+//
+// Like the log-target eviction it runs only after the close itself succeeded —
+// a refused close leaves a workspace that is still live, and dropping its
+// topbar would blank a surface still being driven — and an unwired publisher
+// says so rather than passing for a release that happened.
+func (h *commandHandler) forgetWorkspaceViews(workspace, requestID string) {
+	if h.workspaceViews == nil {
+		h.logf("frontend cmd: close_workspace resolved views RETAINED ws=%s request_id=%s — no view publisher is wired, so this workspace's topbar, breakdown, gate and memoized branch stay held for the daemon's lifetime",
+			workspace, requestID)
+		return
+	}
+	h.workspaceViews.Forget(workspace)
+	h.logf("frontend cmd: close_workspace resolved views RELEASED ws=%s request_id=%s", workspace, requestID)
 }
 
 // evictWorkspaceLogTargets releases a closed workspace's log descriptors.
