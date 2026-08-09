@@ -806,6 +806,16 @@ export interface ConversationItemFrame {
   tokenUtilization: TokenUtilization[];
   /** Complete terminal-turn evidence, present only on result items. */
   turnAccounting?: TurnAccounting;
+  /**
+   * WHERE a `thinking` item's block stood before the daemon stripped it, stated
+   * by the daemon that did the stripping (`AgentThinking.api_message_id` +
+   * `.block_index`). Present only on the `thinking` arm.
+   *
+   * It is carried beside the payload rather than inside it because the payload
+   * is the `ThinkingBlock` itself — verbatim durable evidence — and these two
+   * fields are the emission's statement ABOUT that block, not part of it.
+   */
+  thinkingOrigin?: { apiMessageId: string; blockIndex: number };
 }
 
 /** Durable evidence used to compare one completed turn with another client. */
@@ -2179,7 +2189,10 @@ const AGENT_EMISSION_ARMS: Readonly<Record<string, { arm: ConversationItemArm; b
  * unrecognized arm throws — because it is a `frontend.v1`-owned message. Only
  * the payload BELOW it is adopted by shape.
  */
-function unwrapAgentEmission(v: unknown, ctx: string): { arm: ConversationItemArm; payload: JsonObject } {
+function unwrapAgentEmission(
+  v: unknown,
+  ctx: string,
+): { arm: ConversationItemArm; payload: JsonObject; thinkingOrigin?: { apiMessageId: string; blockIndex: number } } {
   const emission = ensureObject(v, `${ctx}.agent`);
   const keys = Object.keys(emission);
   if (keys.length === 0) {
@@ -2196,6 +2209,19 @@ function unwrapAgentEmission(v: unknown, ctx: string): { arm: ConversationItemAr
   // An emission whose whole content IS the payload (skillBody, turnResult)
   // names no inner field; the others wrap theirs one level down.
   const payload = mapped.body === "" ? value : ensureObject(value[mapped.body], `${ctx}.agent.${keys[0]}.${mapped.body}`);
+  if (mapped.arm === "thinking") {
+    // The emission's statement about the block it carries: the message it was
+    // stripped from and the position it held there. Carried up beside the
+    // payload; see `ConversationItemFrame.thinkingOrigin`.
+    return {
+      arm: mapped.arm,
+      payload,
+      thinkingOrigin: {
+        apiMessageId: str(value, "apiMessageId", `${ctx}.agent.thinking`),
+        blockIndex: num(value, "blockIndex", `${ctx}.agent.thinking`),
+      },
+    };
+  }
   return { arm: mapped.arm, payload };
 }
 
@@ -2235,6 +2261,7 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
     payload: selected.payload,
     tokenUtilization: o.tokenUtilization === undefined ? [] : ensureArray(o.tokenUtilization, `${ctx}.tokenUtilization`).map((entry, index) => decodeTokenUtilization(entry, `${ctx}.tokenUtilization[${index}]`)),
   };
+  if (selected.thinkingOrigin !== undefined) frame.thinkingOrigin = selected.thinkingOrigin;
   if (o.turnAccounting !== undefined) {
     if (arm !== "result") throw new Error(`frontend-proto: ${ctx}.turnAccounting is valid only on result`);
     frame.turnAccounting = decodeTurnAccounting(o.turnAccounting, `${ctx}.turnAccounting`);

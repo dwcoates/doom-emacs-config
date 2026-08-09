@@ -267,8 +267,13 @@ export function settleStreamedBlock(
 /**
  * The index of the still-streaming preview `block` settles onto, or -1.
  *
- * The pair share no key, so they are matched on what they genuinely do share:
- * the same message, the same kind, and the same owning agent.
+ * WHEN THE RECORD NAMES ITS PREVIEW, that name is the answer. `AgentThinking`
+ * states the message the block was stripped from and the index it held there —
+ * the very pair a preview is keyed on — so a settled reasoning block claims the
+ * exact feed place its own deltas opened. Nothing is resembled or ranked.
+ *
+ * Otherwise the pair share no key, so they are matched on what they genuinely
+ * do share: the same message, the same kind, and the same owning agent.
  *
  * The match is deliberately narrow. Only a block that has actually FINISHED (it
  * carries a record identity) may claim a preview, and only a preview still in
@@ -282,6 +287,17 @@ export function settleStreamedBlock(
  */
 function previewIndexFor(items: readonly ConversationItem[], block: StreamedBlock): number {
   if (phaseOf(block) !== "final" || !block.done) return -1;
+  const named = block.kind === "thinking" ? block.previewBlockId : undefined;
+  if (named !== undefined && named !== "") {
+    return items.findIndex(
+      (i) =>
+        (i.kind === "text" || i.kind === "thinking") &&
+        i.kind === block.kind &&
+        phaseOf(i) === "previewing" &&
+        !i.done &&
+        i.blockId === named,
+    );
+  }
   return items.findIndex(
     (i) =>
       (i.kind === "text" || i.kind === "thinking") &&

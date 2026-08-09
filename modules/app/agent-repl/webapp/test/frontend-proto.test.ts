@@ -188,6 +188,62 @@ describe("ConversationItem token utilization", () => {
     }
   });
 
+  it("carries the reasoning emission's stated origin beside its block", () => {
+    // Arrange: `AgentThinking` states the message it was stripped from and the
+    // index it held there, alongside the `ThinkingBlock` payload itself.
+    const item = {
+      uuid: "env-1#thinking:0",
+      tsMs: "1700000000000",
+      agent: { thinking: { body: { thinking: "hmm", signature: "sig" }, apiMessageId: "msg_01ABC", blockIndex: 2 } },
+    };
+    // Act
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [item] } });
+    // Assert
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
+    expect(frame.frame.value.items[0].thinkingOrigin).toEqual({ apiMessageId: "msg_01ABC", blockIndex: 2 });
+  });
+
+  it("keeps the reasoning emission's payload the block alone", () => {
+    // The origin is a statement ABOUT the block, not part of the verbatim
+    // durable evidence, so it must not leak into the payload.
+    // Arrange
+    const item = {
+      uuid: "env-1#thinking:0",
+      tsMs: "1700000000000",
+      agent: { thinking: { body: { thinking: "hmm" }, apiMessageId: "msg_01ABC", blockIndex: 2 } },
+    };
+    // Act
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [item] } });
+    // Assert
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
+    expect(frame.frame.value.items[0].payload).toEqual({ thinking: "hmm" });
+  });
+
+  it("states a proto3-default origin for a reasoning emission that omits it", () => {
+    // Arrange
+    const item = {
+      uuid: "env-1#thinking:0",
+      tsMs: "1700000000000",
+      agent: { thinking: { body: { thinking: "hmm" } } },
+    };
+    // Act
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [item] } });
+    // Assert
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
+    expect(frame.frame.value.items[0].thinkingOrigin).toEqual({ apiMessageId: "", blockIndex: 0 });
+  });
+
+  it("rejects a reasoning emission whose stated origin is not a string", () => {
+    // Arrange
+    const item = {
+      uuid: "env-1#thinking:0",
+      tsMs: "1700000000000",
+      agent: { thinking: { body: { thinking: "hmm" }, apiMessageId: 7 } },
+    };
+    // Act / Assert
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [item] } })).toThrow(/apiMessageId must be a string/);
+  });
+
   it("rejects malformed response actor and unknown usage fields", () => {
     const item = { ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, subagent: {} }] };
     expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [item] } })).toThrow(/oneof .*actor.*set multiple times/);

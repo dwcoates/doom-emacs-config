@@ -509,6 +509,58 @@ describe("assistantMessage arm", () => {
     expect((items[0] as ThinkingItem).uuid).toBe("env1:0");
   });
 
+  it("takes the standalone reasoning item's messageId from the stated origin", () => {
+    // Arrange / Act: the emission states the message it was stripped from.
+    const items = itemsFrom({
+      uuid: "env1#thinking:0",
+      agent: { thinking: { body: { thinking: "hmm" }, apiMessageId: "msg_01ABC", blockIndex: 1 } },
+    });
+    // Assert
+    expect((items[0] as ThinkingItem).messageId).toBe("msg_01ABC");
+  });
+
+  it("names the reasoning item's preview from the stated origin", () => {
+    // Arrange / Act
+    const items = itemsFrom({
+      uuid: "env1#thinking:0",
+      agent: { thinking: { body: { thinking: "hmm" }, apiMessageId: "msg_01ABC", blockIndex: 1 } },
+    });
+    // Assert: previews are keyed messageId:blockIndex, which is that pair.
+    expect((items[0] as ThinkingItem).previewBlockId).toBe("msg_01ABC:1");
+  });
+
+  it("keeps the reasoning item's record identity on its own envelope", () => {
+    // The stated origin names the PREVIEW; it must not become the record's own
+    // identity, or two blocks of one message would collide on it.
+    // Arrange / Act
+    const items = itemsFrom({
+      uuid: "env1#thinking:0",
+      agent: { thinking: { body: { thinking: "hmm" }, apiMessageId: "msg_01ABC", blockIndex: 1 } },
+    });
+    // Assert
+    expect((items[0] as ThinkingItem).uuid).toBe("env1#thinking:0:1");
+  });
+
+  it("names no preview for a reasoning item that states no origin", () => {
+    // Arrange / Act: the shape the emission had before it carried an origin.
+    const items = itemsFrom({
+      uuid: "env1#thinking:0",
+      agent: { thinking: { body: { thinking: "hmm" } } },
+    });
+    // Assert: it stands on its own rather than claiming a preview by resemblance.
+    expect((items[0] as ThinkingItem).previewBlockId).toBeUndefined();
+  });
+
+  it("falls back to the envelope uuid as messageId when no origin is stated", () => {
+    // Arrange / Act
+    const items = itemsFrom({
+      uuid: "env1#thinking:0",
+      agent: { thinking: { body: { thinking: "hmm" } } },
+    });
+    // Assert
+    expect((items[0] as ThinkingItem).messageId).toBe("env1#thinking:0");
+  });
+
   it("derives the block ts from the envelope tsMs", () => {
     const items = itemsFrom({ uuid: "m1", tsMs: "1700000000000", assistantMessage: { content: [{ text: { text: "x" } }] } });
     expect((items[0] as TextItem).ts).toBe(new Date(1700000000000).toISOString());

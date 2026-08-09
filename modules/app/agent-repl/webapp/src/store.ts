@@ -143,6 +143,16 @@ export interface ThinkingItem extends FeedOrderedItem {
   text: string;
   done: boolean;
   signature?: string;
+  /**
+   * The feed place this block's own live preview occupies, as the producer of
+   * the record STATED it — not as this end guessed it.
+   *
+   * `AgentThinking` names the message the block was stripped from and the index
+   * it held there, which is exactly the pair a preview is keyed on, so a settled
+   * reasoning block can claim its preview by name instead of by resemblance.
+   * See {@link previewIndexFor}.
+   */
+  previewBlockId?: string;
 }
 export interface ToolItem extends FeedOrderedItem {
   kind: "tool";
