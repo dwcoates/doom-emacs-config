@@ -104,7 +104,9 @@ Within a hue the shade still carries meaning:
 The merge lifecycle is outside the split by design: merge states wear glyphs
 rather than colors so they never spend one of the six, and the Recently Merged
 disc borrows the `--info-agents` violet as a section tint, not as a claim about
-the vendor.
+the vendor. Rows inside Recently Merged render glyphless whatever status they
+carry: the section is settled history, and a question mark or a recycle mark
+there reads as an alarm about work that is already done.
 
 ## The "expanded footer" is what the progress footer's detail section is called
 
