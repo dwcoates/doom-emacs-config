@@ -581,14 +581,58 @@ export class SessionServer {
     }, status.healthy ? "health PASS" : "health FAIL");
   }
 
+  /**
+   * Send one control receipt back to the daemon.
+   *
+   * A RECEIPT FOR A REQUEST THIS SESSION ALREADY RAN IS NOT DISCARDABLE
+   * SILENCE. The handler that produced it has already had its effect — an
+   * interrupt's SDK abort above all — so a connection that died in between
+   * leaves the daemon holding the request's fate without its outcome. That is a
+   * real divergence and it is recorded here rather than absorbed by the
+   * optional chain, because the daemon's own account of it
+   * (`shimclient.ErrDeliveredUnacked`) is only legible beside this line.
+   *
+   * It is not retried or buffered. The effect is already in the store, and the
+   * daemon resolves the outcome from the reattach handshake and the durable
+   * record — never by asking for the same control a second time.
+   */
   private sendReceipt(receipt: Receipt): void {
+    if (this.conn === null) {
+      LOGGER.log({
+        level: "error",
+        agent_repl_session_id: this.opts.sessionId,
+        request_id: receipt.requestId,
+        receipt_kind: receipt.$typeName === AckSchema.typeName ? "ack" : "nack",
+      }, "no daemon attached; control receipt DROPPED for a request this session already ran (the daemon resolves its outcome from the reattach and the durable record, never by re-sending)");
+      return;
+    }
     if (receipt.$typeName === AckSchema.typeName) {
-      this.conn?.send(AckSchema, receipt as Ack);
+      this.conn.send(AckSchema, receipt as Ack);
     } else {
-      this.conn?.send(NackSchema, receipt as Nack);
+      this.conn.send(NackSchema, receipt as Nack);
     }
   }
 
+  /**
+   * DESIGN DEPENDENCE — THE SHIM MUST KEEP WORKING WHEN THIS CONNECTION CLOSES
+   * OR IS LOST.
+   *
+   * A closed daemon connection is a routine condition, not a fault: it is what
+   * every daemon restart, deploy and reload looks like from here. So the close
+   * tears nothing down. The SDK query keeps running, an interrupt already
+   * dispatched completes locally, pending permission waits stay open, and every
+   * persistent event keeps being written to the store with nothing listening on
+   * this socket.
+   *
+   * THAT IS LICENSED BY THE STORE BEING WHAT RESOLVES THE DIVERGENCE WHEN THE
+   * CONNECTION IS REESTABLISHED. The two sides diverge for exactly as long as
+   * the link is down, and the reconnect does not reconstruct the gap from
+   * either side's memory: the daemon replays from its own durable cursor and
+   * reads the durable record, which is what settles a turn that finished in the
+   * gap and answers a control whose receipt was lost. A shim that stopped,
+   * cancelled work, or buffered frames on close would destroy the very evidence
+   * that reconciliation reads.
+   */
   private onConnClose(conn: MessageConn, err: Error | null): void {
     if (this.conn !== conn) return; // a superseded connection closing late
     this.conn = null;
