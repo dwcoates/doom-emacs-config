@@ -5,9 +5,10 @@ responsibilities:
 
 - `merge.Driver` — the git rebase-and-merge layer (`git -C <dir>`): rebase the
   branch's commits onto the target's head IN A TEMPORARY WORKTREE, commit by
-  commit, run the target repository's test suite after each landing, detect
-  conflicts, and then move the target EXACTLY ONCE with a `--no-ff` merge
-  commit. Stateless per call, and the ONLY component that shells out to git.
+  commit, detect conflicts, run the target repository's test suite ONCE on the
+  head that replay produced, and then move the target EXACTLY ONCE with a
+  `--no-ff` merge commit. Stateless per call, and the ONLY component that shells
+  out to git.
 - `merge.Coordinator` — the per-repository singleton that owns the merge
   QUEUE, the shim exclusivity lease, and conflict resolution. It is the only
   caller of `merge.Driver`.
@@ -31,9 +32,9 @@ consequences followed, and both were structural rather than incidental:
 
 THE REBASE REMOVES BOTH. `merge.Driver.Merge` creates a TEMPORARY WORKTREE of
 the target's repository at the target's current head (`git worktree add
---detach`), replays `merge-base..branch` into it commit by commit, and gates
-each landing there. Nothing reaches the target until every commit has landed and
-passed. The choreography:
+--detach`), replays `merge-base..branch` into it commit by commit, and gates the
+resulting HEAD there. Nothing reaches the target until every commit has landed
+and the head has passed. The choreography:
 
 1. PRECONDITIONS, before any transition: the source worktree is clean, the
    branch exists, and the target carries neither sequencer residue nor an
@@ -42,8 +43,10 @@ passed. The choreography:
    worktree still registered when one starts belongs to a daemon that died
    mid-merge. It is removed and loud-logged — otherwise a bounce leaks one
    registration per interrupted merge.
-3. THE REBASE, in the temp worktree, gated per commit (below).
-4. THE ONE TARGET MOVE (`landOnTarget`), and only if the rebase reached the end:
+3. THE REBASE, in the temp worktree, and THE ONE TEST GATE on the head it
+   reaches (below).
+4. THE ONE TARGET MOVE (`landOnTarget`), and only if the rebase reached the end
+   and its head passed:
    - THE GUARD. The target must still be on `Request.BaseHead`, the head the
      rebase based itself on. Everything the gate certified was certified against
      that head. A target that moved is `errTargetMoved`, and `Merge` answers it
@@ -100,19 +103,31 @@ replaying the same planned commits the picks did. Only the human-readable cause
 text changed (`rebasing 3/7: abc123`). Renaming the arm would have been a
 schema change every frontend had to land in lockstep for no new information.
 
-## The replay is per-commit, and every landing is tested
+## The replay is per-commit; the gate is ONE run at the head
 
 `merge.Driver` replays the range one commit at a time (`rev-list --reverse
---no-merges`, then `cherry-pick -x <sha>` each) IN THE REBASE WORKTREE and runs
-the target repository's test suite after each commit lands there. A single
-whole-range replay could only be tested once, at the end, which names no culprit
-and gives a resolution attempt nothing narrower than the whole range to reason
-about.
+--no-merges`, then `cherry-pick -x <sha>` each) IN THE REBASE WORKTREE, and then
+runs the target repository's test suite ONCE, on the head that replay produced,
+immediately before the target move.
+
+THE TWO HALVES HAVE DIFFERENT REASONS, and neither implies the other:
+
+- THE REPLAY IS PER-COMMIT because a conflict has to be PARKED on the commit
+  that caused it — that is what a resolver is handed and what `Resume`
+  continues — and because the loop's restartability is derived from the `-x`
+  annotation each pick leaves behind.
+- THE GATE IS ONE RUN AT THE HEAD because the user chose one suite run per merge
+  over per-commit attribution. A full suite per replayed commit is the merge's
+  whole cost multiplied by the range's length, and the head is the only tree
+  `git merge --no-ff` puts on the target: an intermediate commit that would have
+  failed on its own is not a fact about what the target receives. The price is
+  that a failure names the merge rather than a culprit commit, and that is the
+  trade that was made deliberately.
 
 `cherry-pick -x` is HOW A REBASE IS SPELLED here, not a leftover. `git rebase`
 is itself a sequence of picks and offers no point between two commits at which
-this pipeline could run a suite, hand a conflict to an agent, and come back. The
-`-x` annotation is retained because the loop's own restartability reads it and
+this pipeline could hand a conflict to an agent and come back. The `-x`
+annotation is retained because the loop's own restartability reads it and
 because it records which branch commit each rebased commit came from.
 
 - THE SUITE IS A PORT, AND IT RUNS IN THE REBASE WORKTREE.
@@ -122,12 +137,21 @@ because it records which branch commit each rebased commit came from.
   content the merge proposes to land. A target that declares none SKIPS the gate with a
   loud log naming the absence; this machinery serves repositories that have no
   agent-repl suite, and a skip is never reported as a pass.
-- THE LOOP IS RESTARTABLE BY CONSTRUCTION. It derives its work from git alone
-  (the rebase base, which advances past every `-x` annotation, plus a per-commit
-  patch-id probe), so re-entering it after a resume or a test fix skips what
-  already landed. A whole daemon BOUNCE is different now: the temp worktree died
-  with the process and the target kept nothing, so the boot replay re-rebases the
-  range from scratch onto a target that is exactly where it was.
+- THE LOOP IS RESTARTABLE BY CONSTRUCTION, GATE INCLUDED. It derives its work
+  from git alone (the rebase base, which advances past every `-x` annotation,
+  plus a per-commit patch-id probe), so re-entering it after a resume or a test
+  fix skips what already landed. THE GATE IS THE LOOP'S TAIL rather than a step
+  inside it, so a re-entry whose replay is already complete runs the gate and
+  replays nothing — "the range is landed but the head never passed" needs not one
+  byte of side-channel state to re-enter correctly. A whole daemon BOUNCE is
+  different again: the temp worktree died with the process and the target kept
+  nothing, so the boot replay re-rebases the range from scratch onto a target
+  that is exactly where it was.
+- A MERGE THAT CHANGES NOTHING RUNS NO SUITE. An empty range, a range every
+  commit of which is already incorporated, and a range whose every replay went
+  empty all short-circuit to the no-op merged path: the tree the merge proposes
+  is the tree the target already has, so there is nothing for a suite to
+  testify about.
 - MERGE COMMITS ARE FLATTENED. `--no-merges` drops them: a merge commit carries
   no patch of its own and both of its sides are already in the range. The
   whole-range driver this replaced failed outright on such a branch, because
@@ -146,9 +170,11 @@ because it records which branch commit each rebased commit came from.
   - AN EMPTY SELECTION IS "EVERYTHING", and it reaches the entrypoint as NO
     ARGUMENTS — which is both that script's own default and the only shape a
     foreign repository's entrypoint is guaranteed to accept.
-  - THE RANGE, NOT THE COMMIT. The gate runs per landing, but selects from the
-    whole `merge-base..branch` range, so every gate in one merge asks the same
-    question and a re-entered replay reaches the same answer.
+  - THE RANGE, NOT THE HEAD COMMIT. The gate runs once, but selects from the
+    whole `merge-base..branch` range, so a branch whose last commit touches the
+    webapp is not gated on the webapp suite alone while the daemon change it
+    also carries goes untested. A re-gate after a resolution turn reaches the
+    same answer, widened by the fix commit's own paths.
   - `merge.allSuites` and `bin/test-all.sh`'s `ALL_SUITES` are two lists that
     can disagree, and a name the script does not declare is rejected at run
     time. `TestRosterMatchesTheEntrypointScript` reads the script and holds them
@@ -169,19 +195,22 @@ because it records which branch commit each rebased commit came from.
 
 ## A test failure gets ONE agent attempt, and the target never sees it
 
-A suite that fails after a landing parks exactly the way a conflict does, and
-the merging workspace's OWN session is asked to fix it through
-`merge.TestFailureResolver` (`testfailureresolver.go`), IN THE REBASE WORKTREE.
-`merge.Coordinator` then commits whatever that turn staged as a FOLLOW-UP commit
-(never an amend: an amend would rewrite the `-x` annotation the replay's
-restartability keys on) and re-runs the suite.
+A head gate that fails parks exactly the way a conflict does, and the merging
+workspace's OWN session is asked to fix it through `merge.TestFailureResolver`
+(`testfailureresolver.go`), IN THE REBASE WORKTREE. `merge.Coordinator` then
+commits whatever that turn staged as a FOLLOW-UP commit (never an amend: an
+amend would rewrite the `-x` annotation the replay's restartability keys on) and
+re-enters the replay, which re-gates the head the fix produced.
 
-- EXACTLY ONE ATTEMPT PER FAILING COMMIT. A repeat failure on the same commit, a
-  resolver error, and a driver error all fail the merge. A failure on a LATER
-  commit is a different failure and earns its own attempt.
-- **THE TARGET IS NEVER MODIFIED.** The failing commit exists only on the
+- EXACTLY ONE ATTEMPT PER FAILURE. `merge.Coordinator` keys that accounting on
+  `Result.FailingCommit`, and the driver PINS that identity across the re-gate:
+  the fix commit moves the head, so reporting the new head's sha would read as a
+  brand-new failure and hand out another attempt, and another, for as long as the
+  agent keeps committing something that does not fix the suite. A repeat failure,
+  a resolver error, and a driver error all fail the merge.
+- **THE TARGET IS NEVER MODIFIED.** The failing head exists only on the
   rebased line in the temp worktree; the target carries not one line of it. The
-  run emits `merge_failed` carrying the failing commit and the suite's output
+  run emits `merge_failed` carrying that head and the suite's output
   tail, says so in the cause, discards the temp worktree, and releases
   everything per the ordinary terminal path. Nothing is lost — the source branch
   still holds every commit and the merge can be retried once the work is fixed
@@ -308,10 +337,10 @@ names the deletion.
 
 Every merge-state transition (`merge_enqueuing`, `merging`, `merge_queued`,
 `merge_conflict`, `merge_failed`, `merged`) is written to the SSM. The
-per-commit loop reuses `merging` rather than adding vocabulary: its cause
-strings carry the progress (`testing 3/7 after rebasing abc123def456`), so
-a user watching a merge sees where it is without a new phase or a new proto
-enum value. Transitions are written to the SSM — never to
+replay loop and its gate both reuse `merging` rather than adding vocabulary:
+their cause strings carry the progress (`rebasing 2/3: abc123def456`, then
+`testing the rebased head abc123d after 3 commits [daemon,webapp]`), so a user
+watching a merge sees where it is without a new phase or a new proto enum value. Transitions are written to the SSM — never to
 the shim-store, which is agent-interaction-only.
 
 `merge_enqueuing` is the ONE phase this package does not emit itself. The

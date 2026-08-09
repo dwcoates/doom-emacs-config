@@ -744,7 +744,9 @@ func TestMergeFlattensAMergeCommitInTheRange(t *testing.T) {
 			t.Errorf("%s did not land on the target: %v", name, statErr)
 		}
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerging)
+	// Two picks and ONE gate: the suite runs once, at the head the replay
+	// reached.
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging)
 }
 
 // --- preconditions abort with state intact ------------------------------
@@ -1035,9 +1037,9 @@ func TestMergeUntrackedCollisionFails(t *testing.T) {
 	if tags := strings.TrimSpace(gitRun(t, target, "tag", "-l", "merge/untracked-ws")); tags != "" {
 		t.Errorf("merge/untracked-ws tagged on a failed merge; git tag -l = %q", tags)
 	}
-	// Both commits replayed and were gated in the rebase worktree (two phases
-	// each); the target then refused to take them and kept its own head.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMergeFailed)
+	// Both commits replayed (one phase each) and the head was gated once; the
+	// target then refused to take them and kept its own head.
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMergeFailed)
 }
 
 // --- the resumed run's commit cursor ------------------------------------
@@ -1211,7 +1213,10 @@ func TestResumeSecondConflictReEmitsConflict(t *testing.T) {
 	if tags := strings.TrimSpace(gitRun(t, target, "tag", "-l", "merge/rz2-ws")); tags != "" {
 		t.Errorf("merge/rz2-ws tagged while still conflicted; git tag -l = %q", tags)
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMergeConflict)
+	// pick 1 -> conflict -> resume -> pick 2 -> conflict. No `testing` phase
+	// anywhere: the merge's one gate runs at the head, and this replay never
+	// reached one.
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging, PhaseMergeConflict)
 }
 
 // --- sink-error propagation ---------------------------------------------
@@ -1514,9 +1519,14 @@ func TestMergeRefusesATargetWithStaleSequencerState(t *testing.T) {
 	}
 }
 
-// --- the per-commit test gate -------------------------------------------
+// --- the single head test gate ------------------------------------------
 
-func TestMergeRunsTheSuiteOncePerLandedCommit(t *testing.T) {
+// AMENDED FROM TestMergeRunsTheSuiteOncePerLandedCommit. The gate moved out of
+// the replay loop to the rebased head, so the guarantee inverted: a three-commit
+// merge now costs ONE suite run, not three. The rest of the assertion (every run
+// happens in the rebase worktree, never in the target) is unchanged, because
+// that part of the design did not move.
+func TestMergeRunsTheSuiteOnceForTheWholeMerge(t *testing.T) {
 	// Arrange: three orthogonal commits on the source branch.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
@@ -1534,17 +1544,17 @@ func TestMergeRunsTheSuiteOncePerLandedCommit(t *testing.T) {
 	// Act.
 	res, err := e.Merge(context.Background(), req)
 
-	// Assert — one run per commit, all against the REBASE WORKTREE. That is the
-	// tree the proposed merge exists in; running the gate in the target would
-	// mean the target already carried the untested work.
+	// Assert — exactly one run, against the REBASE WORKTREE. That is the tree the
+	// proposed merge exists in; running the gate in the target would mean the
+	// target already carried the untested work.
 	if err != nil {
 		t.Fatalf("Merge() err = %v", err)
 	}
 	if res.Outcome != OutcomeMerged {
 		t.Fatalf("Merge() outcome = %s, want merged", res.Outcome)
 	}
-	if suite.calls != 3 {
-		t.Fatalf("suite runs = %d, want 3 (one per landed commit)", suite.calls)
+	if suite.calls != 1 {
+		t.Fatalf("suite runs = %d, want 1 (the whole merge is gated once, at the rebased head)", suite.calls)
 	}
 	if res.WorkDir == "" {
 		t.Fatalf("merged Result names no rebase worktree")
@@ -1559,10 +1569,12 @@ func TestMergeRunsTheSuiteOncePerLandedCommit(t *testing.T) {
 	}
 }
 
-func TestMergeOrdersEachSuiteRunAfterItsOwnCommit(t *testing.T) {
-	// The gate is only a gate if it runs on the tree the pick produced, so the
-	// interleaving (pick, test, pick, test) is pinned rather than merely the
-	// count.
+// AMENDED FROM TestMergeOrdersEachSuiteRunAfterItsOwnCommit, which pinned the
+// (pick, test, pick, test) interleaving. The interleaving is gone; what replaces
+// it is the property that made it worth pinning — the suite judges the tree that
+// is about to reach the target — expressed as "the one run sees the WHOLE range
+// already replayed", not a prefix of it.
+func TestTheGateRunsOnlyOnceTheWholeRangeHasReplayed(t *testing.T) {
 	// Arrange.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
@@ -1597,9 +1609,9 @@ func TestMergeOrdersEachSuiteRunAfterItsOwnCommit(t *testing.T) {
 		t.Fatalf("Merge() err = %v", err)
 	}
 
-	// Assert — the first run saw one commit's file, the second saw both.
-	if len(seen) != 2 || seen[0] != "1" || seen[1] != "2" {
-		t.Fatalf("files present at each suite run = %v, want [1 2]", seen)
+	// Assert — one run, and it saw both commits' files.
+	if len(seen) != 1 || seen[0] != "2" {
+		t.Fatalf("files present at each suite run = %v, want [2] (one run, on the fully replayed head)", seen)
 	}
 }
 
@@ -1686,8 +1698,12 @@ func TestMergeReportsATestFailureWithTheFailingCommitAndTail(t *testing.T) {
 	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging)
 }
 
-func TestMergeStopsPickingAfterATestFailure(t *testing.T) {
-	// Arrange — two commits, the suite fails after the first.
+// AMENDED FROM TestMergeStopsPickingAfterATestFailure, whose premise (a failing
+// gate stops the replay part-way) cannot occur now that the gate is the replay's
+// tail. What it asserted about the TARGET is what survives, and it is asserted
+// here about the whole range rather than about one commit.
+func TestAFailedHeadGateLandsNoneOfTheRangeOnTheTarget(t *testing.T) {
+	// Arrange — two commits, and a suite that fails at the head.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
 	for _, name := range []string{"one.txt", "two.txt"} {
@@ -1706,9 +1722,11 @@ func TestMergeStopsPickingAfterATestFailure(t *testing.T) {
 		t.Fatalf("Merge() err = %v", err)
 	}
 
-	// Assert — the second commit never landed.
-	if _, statErr := os.Stat(filepath.Join(target, "two.txt")); statErr == nil {
-		t.Errorf("the second commit landed after the first broke the suite")
+	// Assert — neither commit reached the target.
+	for _, name := range []string{"one.txt", "two.txt"} {
+		if _, statErr := os.Stat(filepath.Join(target, name)); statErr == nil {
+			t.Errorf("%s reached the target though the head gate failed", name)
+		}
 	}
 }
 
@@ -1814,9 +1832,12 @@ func TestContinueAfterTestFixReportsAStillFailingSuite(t *testing.T) {
 	}
 }
 
-func TestResumeGatesTheResolvedCommitOnTheSuite(t *testing.T) {
-	// A conflict a human resolved is exactly the kind of landing that breaks a
-	// suite, so the resumed commit is gated like every other one.
+// AMENDED FROM TestResumeGatesTheResolvedCommitOnTheSuite. The resume no longer
+// gates the commit it just continued; it re-enters the replay, and the merge's
+// one gate runs at the head that replay reaches. Here the resolved commit IS the
+// whole range, so the head gate judges it — which is the guarantee that mattered:
+// a hand-resolved conflict never reaches the target ungated.
+func TestResumeGatesTheHeadItsReplayReaches(t *testing.T) {
 	// Arrange.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
@@ -1851,10 +1872,10 @@ func TestResumeGatesTheResolvedCommitOnTheSuite(t *testing.T) {
 	if res.Outcome != OutcomeTestFailed {
 		t.Fatalf("Resume() outcome = %s, want test_failed on the resumed commit", res.Outcome)
 	}
-	// Two runs, one commit: the gate re-runs a failing suite once on the same
-	// tree before it believes the failure.
+	// Two runs, one gate: the gate re-runs a failing suite once on the same tree
+	// before it believes the failure.
 	if suite.calls != 2 {
-		t.Errorf("suite runs = %d, want 2 (the resumed commit, gated and re-run)", suite.calls)
+		t.Errorf("suite runs = %d, want 2 (the resumed head, gated and re-run)", suite.calls)
 	}
 }
 
@@ -2302,8 +2323,8 @@ func TestMergeReplayedAfterABounceRebasesAfreshOntoAnUntouchedTarget(t *testing.
 	if res.Outcome != OutcomeMerged {
 		t.Fatalf("replay Merge() outcome = %s, want merged", res.Outcome)
 	}
-	if replaySuite.calls != 2 {
-		t.Fatalf("replay suite runs = %d, want 2 (both commits, replayed onto a target that kept nothing)", replaySuite.calls)
+	if replaySuite.calls != 1 {
+		t.Fatalf("replay suite runs = %d, want 1 (both commits replayed onto a target that kept nothing, then one gate at the head)", replaySuite.calls)
 	}
 	if parent := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD^")); parent != beforeReplay {
 		t.Errorf("HEAD^ = %s, want the untouched pre-replay head %s", parent, beforeReplay)
@@ -2417,10 +2438,11 @@ func TestGateRecordsTheSelectionOnTheWorkspaceStatus(t *testing.T) {
 	}
 }
 
-// The gate runs after each landing, but the suites it picks are the ones the
-// WHOLE merge can affect — otherwise the commit that breaks the daemon is
-// judged by a selection made for the webapp commit before it.
-func TestGateSelectsFromTheWholeRangeNotOneCommit(t *testing.T) {
+// The gate runs once, at the head, but it does NOT select from the head commit:
+// the suites are the ones the WHOLE merge can affect — otherwise a branch whose
+// last commit touches the webapp would be gated on the webapp suite alone while
+// the daemon change it also carries goes untested.
+func TestGateSelectsFromTheWholeRangeNotTheHeadCommit(t *testing.T) {
 	// Arrange — commit one touches the webapp, commit two the daemon.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
@@ -2441,13 +2463,14 @@ func TestGateSelectsFromTheWholeRangeNotOneCommit(t *testing.T) {
 		t.Fatalf("Merge() err = %v", err)
 	}
 
-	// Assert — the FIRST gate already carries the daemon suite.
+	// Assert — the one gate carries the webapp suite as well as the daemon one,
+	// though only the daemon commit is at the head.
 	want := []string{"build-frontend-harness", "daemon", "webapp"}
-	if len(suite.runs) != 2 {
-		t.Fatalf("suite runs = %d, want 2", len(suite.runs))
+	if len(suite.runs) != 1 {
+		t.Fatalf("suite runs = %d, want 1", len(suite.runs))
 	}
 	if !reflect.DeepEqual(suite.runs[0].Suites, want) {
-		t.Fatalf("first gate ran suites %v, want the whole range's %v", suite.runs[0].Suites, want)
+		t.Fatalf("the head gate ran suites %v, want the whole range's %v", suite.runs[0].Suites, want)
 	}
 }
 
@@ -2611,4 +2634,301 @@ func TestGateRefusesARerunThatReportsTheSuiteSkipped(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "SKIPPED") {
 		t.Fatalf("Merge() err = %v, want the contradiction refused", err)
 	}
+}
+
+// --- the gate is the replay's tail --------------------------------------
+
+// A no-op merge runs NO suite. There is no tree the merge proposes to make that
+// the target is not already on, so a suite run could only spend the merge's
+// whole cost to re-certify what is already there.
+func TestANoOpMergeRunsNoSuiteAtAll(t *testing.T) {
+	// Arrange — a source branch that never committed anything.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	sink := &recordingSink{}
+	suite := &fakeSuite{}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/noop-gate-ws", Name: "noop-gate-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged || !res.AlreadyIncorporated {
+		t.Fatalf("Merge() res = %+v, want a merged no-op", res)
+	}
+	if suite.calls != 0 {
+		t.Fatalf("suite runs = %d, want 0 (a no-op merge proposes no new tree)", suite.calls)
+	}
+}
+
+// A conflict parks BEFORE the gate, because the gate is the replay's tail and
+// this replay never reached it.
+func TestAConflictMidReplayParksWithoutRunningTheSuite(t *testing.T) {
+	// Arrange — the first of two commits collides with a target edit.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edit")
+	writeFile(t, featureDir, "two.txt", "two\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add two.txt")
+	writeFile(t, target, "base.txt", "target\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "target edit")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/park-gate-ws", Name: "park-gate-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeConflict {
+		t.Fatalf("Merge() outcome = %s, want conflict", res.Outcome)
+	}
+	parkedAt(t, e, req, res)
+	if suite.calls != 0 {
+		t.Fatalf("suite runs = %d, want 0 (the replay never reached its tail)", suite.calls)
+	}
+}
+
+// The resume finishes the range and THEN the merge's one gate runs — once, on
+// the head that carries the resolution and every commit after it.
+func TestTheGateRunsOnceAtTheHeadAResumeReaches(t *testing.T) {
+	// Arrange — a parked conflict on the first of two commits, resolved in the
+	// rebase worktree.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edit")
+	writeFile(t, featureDir, "two.txt", "two\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add two.txt")
+	writeFile(t, target, "base.txt", "target\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "target edit")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/resume-gate-ws", Name: "resume-gate-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	parked, err := e.Merge(context.Background(), req)
+	if err != nil || parked.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", parked, err)
+	}
+	req = parkedAt(t, e, req, parked)
+	writeFile(t, req.WorkDir, "base.txt", "resolved\n")
+	gitRun(t, req.WorkDir, "add", "base.txt")
+
+	// Act.
+	res, err := e.Resume(context.Background(), req)
+
+	// Assert — one gate for the whole merge, run after the last commit replayed.
+	if err != nil {
+		t.Fatalf("Resume() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("Resume() outcome = %s, want merged", res.Outcome)
+	}
+	if suite.calls != 1 {
+		t.Fatalf("suite runs = %d, want 1 (the head the resumed replay reached)", suite.calls)
+	}
+}
+
+// The remediation loop's return edge: the re-gate judges the head the FIX
+// produced, not the head that failed.
+func TestTheReGateAfterATestFixJudgesTheHeadTheFixProduced(t *testing.T) {
+	// Arrange — the head gate fails twice, an agent stages a fix, the re-gate
+	// passes. Each run records the tree it saw.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "broken\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	var seen []string
+	calls := 0
+	runner := suiteFunc(func(_ context.Context, dir string, _ SuiteRun) (SuiteResult, error) {
+		calls++
+		seen = append(seen, readFile(t, dir, "feature.txt"))
+		if calls <= 2 {
+			return SuiteResult{Passed: false, Tail: "boom"}, nil
+		}
+		return SuiteResult{Passed: true}, nil
+	})
+	sink := &recordingSink{}
+	e := newTestDriverWithSuite(t, sink, runner)
+	req := withRun(t, sink, Request{Workspace: "/ws/regate-ws", Name: "regate-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	first, err := e.Merge(context.Background(), req)
+	if err != nil || first.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
+	}
+	req = parkedAt(t, e, req, first)
+	writeFile(t, req.WorkDir, "feature.txt", "fixed\n")
+	gitRun(t, req.WorkDir, "add", "feature.txt")
+
+	// Act.
+	res, err := e.ContinueAfterTestFix(context.Background(), req, first.FailingCommit)
+
+	// Assert — three runs (gate, flake re-run, re-gate) and the third saw the fix.
+	if err != nil {
+		t.Fatalf("ContinueAfterTestFix() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("ContinueAfterTestFix() outcome = %s, want merged", res.Outcome)
+	}
+	want := []string{"broken\n", "broken\n", "fixed\n"}
+	if !reflect.DeepEqual(seen, want) {
+		t.Fatalf("the suite saw feature.txt as %v, want %v (the re-gate judges the fixed head)", seen, want)
+	}
+}
+
+// The target moves only once the head gate has PASSED, and the move is the
+// `--no-ff` merge commit over the head the merge found.
+func TestTheTargetMovesOnlyAfterTheReGatePasses(t *testing.T) {
+	// Arrange — as above, with the fix landing between the two gates.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "broken\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+	before := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}, {Passed: false, Tail: "boom"}, {Passed: true}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/move-ws", Name: "move-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	first, err := e.Merge(context.Background(), req)
+	if err != nil || first.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
+	}
+	if head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD")); head != before {
+		t.Fatalf("target HEAD = %s before the gate passed, want it still at %s", head, before)
+	}
+	req = parkedAt(t, e, req, first)
+	writeFile(t, req.WorkDir, "feature.txt", "fixed\n")
+	gitRun(t, req.WorkDir, "add", "feature.txt")
+
+	// Act.
+	if _, err := e.ContinueAfterTestFix(context.Background(), req, first.FailingCommit); err != nil {
+		t.Fatalf("ContinueAfterTestFix() err = %v", err)
+	}
+
+	// Assert — one merge commit, first parent the untouched pre-merge head.
+	if parent := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD^")); parent != before {
+		t.Errorf("HEAD^ = %s, want the pre-merge head %s (the target moved exactly once)", parent, before)
+	}
+	if got := readFile(t, target, "feature.txt"); got != "fixed\n" {
+		t.Errorf("target feature.txt = %q, want the fixed content the passing gate certified", got)
+	}
+}
+
+// The identity a repeated head-gate failure reports is the FIRST failure's, even
+// though the fix commit moved the head. merge.Coordinator keys its
+// one-attempt-per-failure accounting on it, and a fresh sha per attempt would
+// hand out an unbounded sequence of resolution turns.
+func TestARepeatedHeadGateFailureKeepsTheFirstFailuresIdentity(t *testing.T) {
+	// Arrange — a suite that never passes, and an agent that commits something
+	// anyway (so the head genuinely moves between the two gates).
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "broken\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/identity-ws", Name: "identity-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	first, err := e.Merge(context.Background(), req)
+	if err != nil || first.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
+	}
+	req = parkedAt(t, e, req, first)
+	writeFile(t, req.WorkDir, "feature.txt", "still broken, but different\n")
+	gitRun(t, req.WorkDir, "add", "feature.txt")
+	headBeforeFix := strings.TrimSpace(gitRun(t, req.WorkDir, "rev-parse", "--short", "HEAD"))
+
+	// Act.
+	res, err := e.ContinueAfterTestFix(context.Background(), req, first.FailingCommit)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ContinueAfterTestFix() err = %v", err)
+	}
+	if res.Outcome != OutcomeTestFailed {
+		t.Fatalf("ContinueAfterTestFix() outcome = %s, want test_failed", res.Outcome)
+	}
+	if head := strings.TrimSpace(gitRun(t, req.WorkDir, "rev-parse", "--short", "HEAD")); head == headBeforeFix {
+		t.Fatalf("the fix did not move the rebase worktree's head off %s, so the test proves nothing", headBeforeFix)
+	}
+	if res.FailingCommit != first.FailingCommit {
+		t.Fatalf("re-gate FailingCommit = %q, want the first failure's %q", res.FailingCommit, first.FailingCommit)
+	}
+}
+
+// RESTARTABILITY: a run whose replay is COMPLETE but whose gate never passed
+// re-enters at the GATE. The re-entry replays nothing (there is nothing left)
+// and publishes no further cherry_picking status — it derives that from git,
+// exactly as the replay derives its remaining work.
+func TestAReEntryWithTheReplayCompleteRunsTheGateAndNoPicks(t *testing.T) {
+	// Arrange — a two-commit range fully replayed, whose head gate failed.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	for _, name := range []string{"one.txt", "two.txt"} {
+		writeFile(t, featureDir, name, name+"\n")
+		gitRun(t, featureDir, "add", ".")
+		gitRun(t, featureDir, "commit", "-q", "-m", "add "+name)
+	}
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}, {Passed: false, Tail: "boom"}, {Passed: true}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/reentry-ws", Name: "reentry-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	first, err := e.Merge(context.Background(), req)
+	if err != nil || first.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
+	}
+	req = parkedAt(t, e, req, first)
+	picksBefore := countStatusArm(sink.statuses, armCherryPicking)
+	writeFile(t, req.WorkDir, "one.txt", "fixed\n")
+	gitRun(t, req.WorkDir, "add", "one.txt")
+
+	// Act.
+	res, err := e.ContinueAfterTestFix(context.Background(), req, first.FailingCommit)
+
+	// Assert — the gate ran again and not one commit was replayed.
+	if err != nil {
+		t.Fatalf("ContinueAfterTestFix() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("ContinueAfterTestFix() outcome = %s, want merged", res.Outcome)
+	}
+	if suite.calls != 3 {
+		t.Fatalf("suite runs = %d, want 3 (gate, flake re-run, re-gate at the new head)", suite.calls)
+	}
+	if got := countStatusArm(sink.statuses, armCherryPicking); got != picksBefore {
+		t.Fatalf("the re-entry published %d cherry_picking statuses, want none: the replay was already complete", got-picksBefore)
+	}
+}
+
+// countStatusArm counts the statuses carrying arm.
+func countStatusArm(statuses []*frontendv1.MergeStatus, arm string) int {
+	n := 0
+	for _, s := range statuses {
+		if statusArm(s) == arm {
+			n++
+		}
+	}
+	return n
 }
