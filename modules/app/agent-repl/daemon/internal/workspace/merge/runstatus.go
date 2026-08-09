@@ -358,9 +358,22 @@ func (r *RunStatus) CommitLanded() {
 	r.commitsLanded++
 }
 
-// Testing publishes the testing phase for the commit that just landed. It
-// carries the SAME commit context cherry_picking did, which is what lets a
-// frontend render one progress figure across both.
+// CommitsLanded is how many of the run's commits are on the rebased line.
+//
+// IT EXISTS FOR THE HEAD GATE'S CAUSE TEXT. The gate runs once, after the whole
+// range has replayed, and "testing the rebased head abc123 after 3 commits" is
+// only sayable by whoever holds the cursor. The run does, so the figure in the
+// cause and the figure in the status arm are one value rather than two that can
+// drift.
+func (r *RunStatus) CommitsLanded() int32 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.commitsLanded
+}
+
+// Testing publishes the testing phase for the run's landed commits, gated as one
+// tree at the rebased head. It carries the SAME commit context cherry_picking
+// did, which is what lets a frontend render one progress figure across both.
 func (r *RunStatus) Testing(cause string) error {
 	return r.publish(PhaseMerging, cause, func(s *frontendv1.MergeStatus) {
 		s.Phase = &frontendv1.MergeStatus_Testing{Testing: &frontendv1.MergeStatusTesting{
