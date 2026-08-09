@@ -52,8 +52,9 @@ message HibernationCacheExpired {
 // model use can precede this choice — a rendering frontend draws the gate
 // from WorkspaceGateView (the host draws it from its session catalog) and
 // sends exactly one of these. The daemon brings
-// the session up along the ordinary create/resume path and, under
-// compact_first, drives compaction to completion before accepting any prompt.
+// the session up along the ordinary create/resume path and, under either
+// gated mode — compact_first or clear — drives that context cut to completion
+// before accepting any prompt.
 message ReviveSessionCmd {
   // The choice is a oneof of empty messages, not a bool: "no decision" must
   // be unrepresentable on the wire, and a third revival mode later is a new
@@ -68,6 +69,12 @@ message ReviveSessionCmd {
     // Resume the conversation as-is, full accumulated context and all. The
     // deliberate "I know it's big" path.
     ReviveDirect direct = 2;
+    // Discard the conversation outright as the first order of business:
+    // `/clear`, and nothing else. Prompts are accepted only after the clear
+    // lands, on the same gate compact_first stays behind — a prompt answered
+    // ahead of it would pay for the whole context the clear is about to throw
+    // away.
+    ReviveClear clear = 3;
   }
 }
 
@@ -116,6 +123,12 @@ enum CompactionScope {
 
 // Marks the resume-verbatim revival choice. Empty: the choice IS the arm.
 message ReviveDirect {}
+
+// The discard-the-conversation revival choice. Empty, and deliberately WITHOUT
+// a CompactionScope: a clear keeps nothing, so there is nothing to scope. A
+// revival that wants to keep part of the conversation is a compact_first with
+// the scope that says which part.
+message ReviveClear {}
 
 // The workspace's revival gate, resolved and fenced: whether prompts may be
 // sent right now, and if not, what the user must decide first.
