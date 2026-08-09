@@ -82,15 +82,42 @@ was a last-resort protection against a destructive reset is now a precondition
 of a purely additive one. Every terminal failure cause says "the target was
 NEVER MODIFIED", because that is the fact a user needs.
 
-**THE TEMPORARY WORKTREE IS CLEANED UP ON EVERY PATH.** `merge.Driver` removes
-its own on any outcome it does not park (`Cleanup` — `git worktree remove
---force`, then the directory, then `git worktree prune`, with every failure
-reported and none swallowed). A PARKED outcome hands the tree to
-`merge.Coordinator` along with the responsibility, which discharges it from a
-`defer` over `settle` — the one function that owns the whole of a merge's life
-after `Merge` returns, so no exit path (terminal, abandon, shutdown, panic
-unwinding) can miss it. A cleanup failure can never un-merge a merge; it is
-loud-logged and nothing more.
+**THE TEMPORARY WORKTREE IS CLEANED UP ON EVERY PATH, THROUGH ONE IDEMPOTENT
+FUNNEL** (`rebasecleanup.go`). `merge.Driver` removes its own on any outcome it
+does not park — a landed merge, a failure for good, an escalation, and the
+SUPERSEDED cycle of every `errTargetMoved` restart. A PARKED outcome hands the
+tree to `merge.Coordinator` along with the responsibility, which discharges it
+from a `defer` over `settle` — the one function that owns the whole of a merge's
+life after `Merge` returns, so no exit path (terminal, abandon, shutdown, panic
+unwinding) can miss it. Eviction needs none: `EvictWaiting` only ever removes
+entries that never reached a driver call. A cleanup failure can never un-merge a
+merge; it is loud-logged and nothing more.
+
+- BOTH CALL SITES ARE CORRECT, and neither can be deleted, so removing an
+  ALREADY-REMOVED worktree is a SILENT NO-OP. It used to be exit 128 from
+  `git worktree remove --force` against a path git had already forgotten, and a
+  loud FAILED line for a directory that was already gone — pure noise following
+  the REMOVED line the first call had just logged.
+- SUCCESS IS JUDGED ON THE POSTCONDITION, not on any one step: the tree is gone,
+  the TEMP PARENT `os.MkdirTemp` made is gone with it, and `git worktree prune`
+  has run. A `remove` that refused a tree the filesystem removal then took away
+  is administrative noise; a tree that is STILL THERE is a real failure and stays
+  loud. Removing only the `rebase` leaf and leaving the parent is what filled
+  `$TMPDIR` with 893 `agent-repl-merge-rebase-*` directories.
+
+**AND WHAT A DEAD DAEMON LEFT IS SWEPT AT BOOT** (`rebasesweep.go`). A temp
+worktree dies with its process in every sense except the bytes, and the
+per-merge prune only ever sees what is still REGISTERED against its own target.
+`merge.Driver.SweepOrphanRebaseWorktrees` walks `$TMPDIR` once at boot, removes
+every `agent-repl-merge-rebase-*` directory the retention set does not name, and
+prunes the repositories they belonged to — read off each orphan's own linked
+worktree `.git` file, so a boot with an empty queue still clears a repository's
+accumulated registrations. It logs ONE summary line: a sweep of hundreds that
+says a line per directory is a sweep nobody reads. The retention set is
+`merge.Coordinator.RetainedRebaseWorktrees` — the trees live merges are working
+in, above all a CONFLICT-PARKED one, whose tree is the resolution's workbench.
+It is not derivable from the durable records, which deliberately carry no temp
+worktree at all. The sweep never fails the boot.
 
 **THE REBASE WORKTREE TRAVELS ON `Request.WorkDir` / `Request.BaseHead`**, set
 by `Merge` on the `Result` and echoed back by `merge.Coordinator` into `Resume`,

@@ -224,6 +224,60 @@ func TestRebaseRemovalRootRefusesAParentThisPipelineDoesNotOwn(t *testing.T) {
 	}
 }
 
+// movingTargetSuite moves the TARGET's head the first time the gate runs, which
+// is what an external writer landing mid-merge looks like from inside the
+// rebase. It records the rebase worktree each gate ran in, so a test can name
+// the cycle that was superseded.
+type movingTargetSuite struct {
+	t      *testing.T
+	target string
+	moved  bool
+	seen   []string
+}
+
+func (s *movingTargetSuite) RunSuite(_ context.Context, dir string, _ SuiteRun) (SuiteResult, error) {
+	s.seen = append(s.seen, dir)
+	if !s.moved {
+		s.moved = true
+		writeFile(s.t, s.target, "external.txt", "somebody else landed first\n")
+		gitRun(s.t, s.target, "add", ".")
+		gitRun(s.t, s.target, "commit", "-q", "-m", "external commit")
+	}
+	return SuiteResult{Skipped: true, Reason: "fixture repo declares no test entrypoint"}, nil
+}
+
+func TestATargetMovedRestartTearsDownTheSupersededCyclesWorktree(t *testing.T) {
+	// Arrange — the re-rebase loop is UNBOUNDED, so a busy target can supersede
+	// cycle after cycle. Each one made a temp worktree.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+	sink := &recordingSink{}
+	suite := &movingTargetSuite{t: t, target: target}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/moved", Name: "moved", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("outcome = %s, want merged", res.Outcome)
+	}
+	if len(suite.seen) < 2 {
+		t.Fatalf("gate ran in %v, want a superseded cycle and a restarted one", suite.seen)
+	}
+	superseded := filepath.Dir(suite.seen[0])
+	if _, err := os.Lstat(superseded); !os.IsNotExist(err) {
+		t.Fatalf("Lstat(%s) = %v, want the superseded cycle's temp directory gone", superseded, err)
+	}
+}
+
 func TestASuccessfulMergeLeavesNoTempDirectoryBehind(t *testing.T) {
 	// Arrange — a whole real merge, which is the path that ran 893 times and
 	// left 893 directories.
