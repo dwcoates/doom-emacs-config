@@ -121,6 +121,40 @@ type queueEntry struct {
 	// a prompt past the compaction would spend the whole uncompacted history on
 	// it, which is the one cost compact-first exists to avoid.
 	revivalHoldSessionID string
+
+	// buildRefreshHoldSessionID names the session whose ARMED OR RUNNING
+	// stale-build refresh is parking this entry, and is empty for every
+	// ordinary entry.
+	//
+	// It is the fourth hold of the same shape and it covers the window a
+	// deferred shim bounce opens: a shim running superseded code reattached
+	// mid-turn, so the refresh waits for that turn's boundary and then restarts
+	// the process (turnboundaryrefresh.go). A prompt typed anywhere in that
+	// window — while the lease waits, and while the restart runs — must not be
+	// submitted to a shim that is about to be SIGTERMed, and must not be
+	// refused either: the contract is DELAYED-NEVER-DROPPED, exactly as it is
+	// for the revival hold.
+	//
+	// The classifier NEVER runs on one of these. The turn in front of it is the
+	// turn the lease is waiting on, and a verdict of INTERJECT could only
+	// interrupt the very turn the deferral exists to protect — so the entry
+	// carries the HOLD stamp for its whole held life rather than claiming a
+	// classifier is running that never will.
+	//
+	// THE EXITS ARE DELIVERY AND CANCEL, and there is no third. The restart
+	// releases the hold and delivers in order; a lease that is disarmed without
+	// restarting (an unknown settledness verdict, a controller exit) releases
+	// the hold in place so the entry becomes an ordinary queued prompt. Nothing
+	// drops one: unlike a revival, the session is not left asleep, so an
+	// un-held entry always has a boundary that can deliver it.
+	//
+	// A FORCE IS NOT REFUSED, which is what distinguishes it from the
+	// keep-alive and revival holds. Forcing one cannot do the harm those
+	// refusals exist to prevent — the entry is still held, so every delivery
+	// path still refuses to submit it — and the interrupt a force sends ENDS
+	// the turn the lease is waiting on, which is the user bringing the refresh
+	// forward rather than defeating it.
+	buildRefreshHoldSessionID string
 }
 
 // drainHeld reports whether a scheduled shutdown's lease is parking this entry.
@@ -134,10 +168,16 @@ func (e *queueEntry) keepAliveHeld() bool { return e.keepAliveHoldTurnID != "" }
 // this entry.
 func (e *queueEntry) revivalHeld() bool { return e.revivalHoldSessionID != "" }
 
+// buildRefreshHeld reports whether an armed or running stale-build refresh is
+// parking this entry.
+func (e *queueEntry) buildRefreshHeld() bool { return e.buildRefreshHoldSessionID != "" }
+
 // held reports whether ANY hold is parking this entry, whatever its kind. It is
 // the predicate every delivery-selection path asks, so a hold added later is
 // honored by all of them without each having to learn its name.
-func (e *queueEntry) held() bool { return e.drainHeld() || e.keepAliveHeld() || e.revivalHeld() }
+func (e *queueEntry) held() bool {
+	return e.drainHeld() || e.keepAliveHeld() || e.revivalHeld() || e.buildRefreshHeld()
+}
 
 // promptQueue is one session's ordered FIFO of held prompts. It is not
 // goroutine-safe; the Manager serializes every access under its own mutex.
@@ -249,6 +289,28 @@ func (q *promptQueue) releaseRevivalHold(sessionID string) int {
 		if e.revivalHoldSessionID == sessionID {
 			e.revivalHoldSessionID = ""
 			e.classification = VerdictPending
+			n++
+		}
+	}
+	return n
+}
+
+// releaseBuildRefreshHold clears sessionID's stale-build refresh hold from
+// every entry carrying it and reports how many were released.
+//
+// It is releaseRevivalHold's shape and re-stamps for the same reason: the HOLD
+// stamp was standing in for a classification that never ran, and an entry about
+// to be delivered must not render a chip claiming it is still waiting on a
+// restart that has already happened. The rationale goes with it, because the
+// account it carried — "waiting for the shim to restart" — stops being true in
+// the same instant.
+func (q *promptQueue) releaseBuildRefreshHold(sessionID string) int {
+	n := 0
+	for _, e := range q.entries {
+		if e.buildRefreshHoldSessionID == sessionID {
+			e.buildRefreshHoldSessionID = ""
+			e.classification = VerdictPending
+			e.rationale = ""
 			n++
 		}
 	}
@@ -584,6 +646,41 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 			e.id, d.workspace, d.sessionID, holdTurnID, d.turn.active())
 		return e, true, nil
 	}
+	// A PROMPT ARRIVING BEHIND AN ARMED OR RUNNING STALE-BUILD REFRESH IS
+	// PARKED, not forwarded and not refused. The shim serving this session is
+	// running superseded code and is going to be restarted the moment its turn
+	// resolves, so submitting into it would either be thrown away by the
+	// SIGTERM or answered by the very bundle the refresh exists to retire.
+	//
+	// It is checked BEFORE the turn-active test for the reason the other holds
+	// are: while the lease is ARMED a turn is normally running, so the ordinary
+	// queueing path would catch the prompt anyway — but it would stamp it
+	// PENDING and spend a model call asking whether it should INTERJECT, whose
+	// only possible effect is to interrupt the turn the deferral exists to
+	// protect. And while the RESTART runs no turn is active at all, which is
+	// exactly the window in which the ordinary path would forward it straight
+	// into a dying shim.
+	if refreshSessionID := m.buildRefreshHoldSessionLocked(d); refreshSessionID != "" {
+		e := &queueEntry{
+			id:                        newQueueEntryID(),
+			requestID:                 requestID,
+			text:                      text,
+			permissionMode:            permissionMode,
+			promptOrigin:              promptOrigin,
+			queuedAtMs:                m.now(),
+			classification:            VerdictHold,
+			rationale:                 staleRefreshArmParkRationale(refreshSessionID),
+			buildRefreshHoldSessionID: refreshSessionID,
+		}
+		// Appended at the BACK even against a paused queue, exactly as the other
+		// three holds are: a head jump is the paused queue's one deliverable, and
+		// a held entry is by definition not deliverable, so claiming that
+		// position would be a lie about when it runs.
+		d.queue.add(e)
+		m.logf("session-controller: prompt PARKED behind a stale-build refresh entry=%s ws=%q session=%s turn_active=%v — the shim serving this session is running superseded code and is restarted at the turn's boundary; this prompt is DELAYED until the replacement is ready, and is delivered in the order it was typed",
+			e.id, d.workspace, d.sessionID, d.turn.active())
+		return e, true, nil
+	}
 	if !d.turn.active() {
 		d.runningText = text
 		d.runningPermissionMode = permissionMode
@@ -805,6 +902,34 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs in
 			d.sessionID, d.workspace, len(d.queue.entries))
 	}
 
+	// THE ARMED STALE-BUILD REFRESH CLAIMS THIS BOUNDARY, and it claims it
+	// BEFORE any delivery is selected.
+	//
+	// This is the event the lease has been waiting for: the turn a stale shim
+	// was mid-way through when it reattached has resolved — ended, interrupted,
+	// or cut, all of which arrive here as the same inactive edge — so the
+	// refresh may finally stop that shim without throwing work away.
+	//
+	// NOTHING IS DELIVERED ON THIS BOUNDARY. The prompts the lease parked are
+	// held and no selection path would take them anyway, but an entry that
+	// PREDATES the lease (one a previous daemon parked and this session
+	// restored) is not held, and submitting it here would start a turn into a
+	// shim that is about to be SIGTERMed. The restart delivers everything in
+	// order once the replacement is ready.
+	//
+	// A KEEP-ALIVE PING'S END NEVER REACHES HERE — that branch returns above —
+	// and it should not: the ping's aftermath bounces the shim on its own terms,
+	// and the lease simply stays armed for the next boundary.
+	if arm := m.claimStaleRefreshAtBoundaryLocked(d); arm != nil {
+		queued := len(d.queue.entries)
+		m.mu.Unlock()
+		m.logf("session-controller: turn boundary CLAIMED by an armed stale-build refresh ws=%q session=%s generation=%s queued=%d — the turn the stale shim was running has resolved, so the deferred restart runs now and nothing is delivered into the shim it is about to replace",
+			d.workspace, d.sessionID, d.generationID, queued)
+		m.noteDrainActivity()
+		go m.runStaleRefreshAtBoundary(d, arm)
+		return
+	}
+
 	var e *queueEntry
 	var reason string
 	switch {
@@ -919,6 +1044,21 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 		m.mu.Unlock()
 		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q revival_session=%s — the entry is parked by an in-flight compact-first revival and a delivery path selected it anyway; requeued at the head, nothing was submitted",
 			e.id, d.sessionID, d.workspace, e.revivalHoldSessionID)
+		m.publish(d.sessionID, view, recs)
+		return
+	}
+	// THE STALE-BUILD REFRESH HOLD'S BACKSTOP, at the same funnel and for the
+	// same reason. Delivering one would submit the prompt into a shim the daemon
+	// is about to SIGTERM onto a new bundle: the turn it started would be cut,
+	// and the prompt would be lost in the very restart that was supposed to
+	// deliver it. Requeued at the head, loudly.
+	if e.buildRefreshHeld() {
+		m.mu.Lock()
+		d.queue.pushFront(e)
+		view, recs := m.publishQueueLocked(d)
+		m.mu.Unlock()
+		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q build_refresh_session=%s — the entry is parked behind an armed or running stale-build refresh and a delivery path selected it anyway; requeued at the head, nothing was submitted",
+			e.id, d.sessionID, d.workspace, e.buildRefreshHoldSessionID)
 		m.publish(d.sessionID, view, recs)
 		return
 	}
