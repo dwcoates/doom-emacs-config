@@ -212,9 +212,10 @@ func (w *mergeWatch) awaitStatusArm(ws, arm string) *frontendv1.MergeStatus {
 // collapsed: the PHASE ORDER, with within-phase ticks folded away.
 //
 // Collapsing is what makes the order assertable at all. cherry_picking is
-// republished once per commit and testing once per gate, so the raw sequence's
-// length is a property of the fixture's commit count rather than of the
-// pipeline. What the spec constrains is which phase follows which.
+// republished once per commit (and testing once for the merge, plus once more
+// per flake re-run), so the raw sequence's length is a property of the fixture's
+// commit count rather than of the pipeline. What the spec constrains is which
+// phase follows which.
 func (w *mergeWatch) statusArmSequence(ws string) []string {
 	var seq []string
 	for _, status := range w.mergeStatuses(ws) {
@@ -369,8 +370,8 @@ func (r *mergeRepo) multiCommitWorktree(branch string, n int) string {
 }
 
 // declareTestSuite gives the TARGET repository a real test entrypoint at the
-// path RepoSuiteRunner looks for, so the pipeline's per-commit gate genuinely
-// RUNS rather than reporting SuiteResult{Skipped: true}.
+// path RepoSuiteRunner looks for, so the pipeline's head gate genuinely RUNS
+// rather than reporting SuiteResult{Skipped: true}.
 //
 // It matters that the suite is real. `testing` is a phase of the spec's
 // sequence, and a fixture with no entrypoint cannot distinguish "the producer
@@ -407,12 +408,13 @@ func (r *mergeRepo) declareTestSuite(exitCode int) {
 // claim. The other half (they appear when configured) is
 // mergeactions_e2e_test.go's, because one test asserts one edge.
 //
-// WHY THE FIXTURE HAS THREE COMMITS AND A REAL SUITE. The properties under
-// test are per-commit: commits_total must be the range's real size,
-// commits_landed must ADVANCE, and testing must be entered for the picks
-// rather than once for the run. A one-commit fixture with no suite would pass
-// against a producer that hardcoded a single 1/1 tick and never tested
-// anything.
+// WHY THE FIXTURE HAS THREE COMMITS AND A REAL SUITE. commits_total must be the
+// range's real size and commits_landed must ADVANCE across the picks, and the
+// testing arm must be entered at all — the suite runs ONCE, on the head the
+// replay reaches, so a fixture with no entrypoint could not tell "the producer
+// publishes the testing phase" from "there was nothing to test". A one-commit
+// fixture with no suite would pass against a producer that hardcoded a single
+// 1/1 tick and never tested anything.
 func TestE2EMergePipelinePublishesItsPhasesInOrder(t *testing.T) {
 	acceptanceGate(t)
 
@@ -520,6 +522,8 @@ func assertCommitsLandedAdvances(t *testing.T, w *mergeWatch, ws string, wantTot
 		t.Errorf("commits_landed for %s never moved off %d across %d picking/testing ticks: the cursor is not tracking the picks",
 			ws, highest, len(landed))
 	}
+	// The REPLAY is still per-commit even though the gate is not, so the picking
+	// statuses must still have named every commit in the range.
 	if int32(len(shas)) != wantTotal {
 		t.Errorf("the picking/testing statuses for %s named %d distinct commits, want %d: the run did not step through the range one commit at a time",
 			ws, len(shas), wantTotal)
