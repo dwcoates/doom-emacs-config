@@ -1456,6 +1456,16 @@ func SessionViewFromRecordWithModels(logf dlog.Logf, rec registry.Record, pendin
 // SessionViewFromRecordWithModelsAndUsage is the complete canonical SessionView
 // shaper, including the durable completed-response aggregate.
 //
+// `usage` IS NOT SHAPED ONTO THE SessionView, and that is deliberate rather
+// than an oversight. It reaches this function because this is where the durable
+// read happens, and it LANDS on the TokenBreakdownView — the resolved menu that
+// is the aggregate's only rendering surface (internal/frontend/tokenbreakdown.go,
+// published from pushSessionView). The parameter stayed on this signature
+// through the period when the breakdown did not exist yet, carrying a fact with
+// nowhere to put it; the fact now has somewhere, and the parameter is what
+// forces every caller of this shaper to have read the aggregate the breakdown
+// beside it is resolved from.
+//
 // reg is the registry the record was read from, and it is read for exactly one
 // question: whether a superseded predecessor's workspace still has a successor
 // claiming it, in which case the handover is in flight and its death card is
