@@ -72,6 +72,8 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 	// of them routes by workspace exactly as ConversationDelta already did.
 	case *frontendv1.FrontendFrame_TypingDelta:
 		return frame, sc.matchesWorkspace(f.TypingDelta.GetWorkspace())
+	case *frontendv1.FrontendFrame_AsyncBubbleDelta:
+		return frame, sc.matchesWorkspace(f.AsyncBubbleDelta.GetWorkspace())
 	case *frontendv1.FrontendFrame_TaskCatalog:
 		return frame, sc.matchesWorkspace(f.TaskCatalog.GetWorkspace())
 	case *frontendv1.FrontendFrame_SessionInit:
@@ -152,6 +154,14 @@ func filterSnapshot(snap *frontendv1.StateSnapshot, sc Scope) *frontendv1.StateS
 		Inits:      filterWorkspaceViews(snap.GetInits(), sc),
 		Queues:     filterWorkspaceViews(snap.GetQueues(), sc),
 		Progress:   filterWorkspaceViews(snap.GetProgress(), sc),
+		// ASYNC BUBBLES PASS WHOLE. AsyncBubble carries no workspace and no
+		// session field — the contract addresses a bubble by its id alone —
+		// so there is no routing key here to filter on, and inventing one from
+		// the id's composition would depend on a fact the contract does not
+		// offer. The DELTAS that carry bubble content are workspace-routed
+		// above, which is where the scoping actually happens; this list is the
+		// reconnect restatement of what those deltas already delivered.
+		AsyncBubbles: snap.GetAsyncBubbles(),
 		// Daemon identity is connection-global, not workspace-scoped. Dropping
 		// it here handed every scoped client a snapshot with an empty boot id,
 		// which the webapp's version-skew gate rejects on EVERY adoption —

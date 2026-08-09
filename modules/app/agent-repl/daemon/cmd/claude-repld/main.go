@@ -960,6 +960,7 @@ func main() {
 		Sessions:          server.RegistrySessions{Reg: sessionRegistry, Controller: controller, ModelCatalogs: modelCatalogs, TokenUsage: tokenUtilizations, Logf: legacyLog},
 		Inits:             controller,
 		Catalogs:          controller,
+		AsyncBubbles:      controller,
 		Queues:            controller,
 		SessionCommands:   sessionCommands,
 		Resyncer:          controller,
