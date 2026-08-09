@@ -2232,6 +2232,16 @@ type faultClassification struct {
 	impact    ssm.FaultImpact
 }
 
+// faultClassifications is the CLOSED set of components whose degradations move
+// workspace health. A component missing from it is not silently tolerated — it
+// takes the unknown_component branch in Degraded and applies nothing at all —
+// so every producer of a DegradedState has to appear here to be believed.
+//
+// claude-shim-turn-lifecycle is the shim reporting that a turn reached its
+// terminal by some route other than the SDK's own result: a synthesized end, a
+// late result for a turn already closed, a result correlating to no open turn.
+// Each is a statement about whether the turn terminal can be trusted, which is
+// the impact the SDK stream itself carries.
 var faultClassifications = map[string]faultClassification{
 	"shim-store-client":              {faultType: "store-link", impact: ssm.FaultImpactConnectivity},
 	"shim-store":                     {faultType: "store-link", impact: ssm.FaultImpactConnectivity},
@@ -2242,6 +2252,7 @@ var faultClassifications = map[string]faultClassification{
 	"daemon-model-catalog":           {faultType: "model-catalog", impact: ssm.FaultImpactFeature},
 	"shim-claude-sidecar-store-link": {faultType: "transcript-file-plane", impact: ssm.FaultImpactFeature},
 	"claude-shim-sdk":                {faultType: "sdk-stream", impact: ssm.FaultImpactTurnTerminal},
+	"claude-shim-turn-lifecycle":     {faultType: "turn-lifecycle", impact: ssm.FaultImpactTurnTerminal},
 	"claude-shim-interrupt":          {faultType: "interrupt", impact: ssm.FaultImpactCommand},
 	"claude-shim-permission-mode":    {faultType: "permission-mode", impact: ssm.FaultImpactCommand},
 	"claude-shim":                    {faultType: "shim-capability", impact: ssm.FaultImpactFeature},
