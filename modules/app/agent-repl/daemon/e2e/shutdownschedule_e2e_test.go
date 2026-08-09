@@ -191,8 +191,8 @@ func TestE2EScheduleWithALiveTurnBroadcastsATurnHold(t *testing.T) {
 	if hold == nil {
 		t.Fatalf("the drain lists no hold for workspace %s, whose turn is in flight; holds=%s", cwd, describeHolds(draining))
 	}
-	if hold.String() != id {
-		t.Errorf("hold session_id = %q, want %q: a hold must name the OWNING session so it cannot be attributed to a successor", hold.String(), id)
+	if got := hold.GetSessionId(); got != id {
+		t.Errorf("hold session_id = %q, want %q: a hold must name the OWNING session so it cannot be attributed to a successor", got, id)
 	}
 	if hold.GetTurn() == nil {
 		t.Fatalf("the hold on %s carries no turn, but its turn is in flight; hold=%v", cwd, hold)
@@ -261,8 +261,8 @@ func TestE2EScheduleWithLiveTasksBroadcastsATasksHold(t *testing.T) {
 	if hold == nil {
 		t.Fatalf("the drain lists no hold for %s, which has a live task; holds=%s", cwd, describeHolds(draining))
 	}
-	if hold.String() != id {
-		t.Errorf("hold session_id = %q, want %q", hold.String(), id)
+	if got := hold.GetSessionId(); got != id {
+		t.Errorf("hold session_id = %q, want %q", got, id)
 	}
 	// The tasks arm and the ABSENCE of a turn arm are independent facts about
 	// the same hold, so a missing tasks arm is reported rather than fatal. The
