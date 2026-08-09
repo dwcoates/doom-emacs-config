@@ -98,7 +98,7 @@ import {
   staleBundleFailure,
 } from "./local-failure.js";
 import { StateAdapter, userTurnReceipt } from "./state-adapter.js";
-import { CommandDispatcher, ModelSelectionRejectedError } from "./command-dispatch.js";
+import { CommandDispatcher, ModelSelectionRejectedError, surfaceRefusal } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
 import { captureResyncSnapshot } from "./resync-snapshot.js";
 import type { CommandStruct } from "./frontend-command.js";
@@ -256,17 +256,16 @@ async function boot(): Promise<void> {
     // scroll to that card; restating the account inline would put one failure
     // on screen twice, worded two different ways. A reveal that finds nothing
     // falls back to filing the refusal, so a card the feed never received
-    // cannot leave the refusal invisible.
-    onFailure: (refusal) => {
-      if (refusal.kind === "reveal") {
-        if (feed.revealError(refusal.cardUuid)) return;
-        clog("warn", `refusal card ${refusal.cardUuid} is not in this feed`, {
-          operation: "command-dispatch.reveal-missing",
-        });
-        return;
-      }
-      if (store.addFailure(refusal.card)) frames.schedule();
-    },
+    // cannot leave the refusal invisible. `surfaceRefusal` owns that rule, so
+    // every branch here ends in a card the user can see.
+    onFailure: (refusal) =>
+      surfaceRefusal(refusal, {
+        reveal: (cardUuid) => feed.revealError(cardUuid),
+        file: (card) => {
+          if (store.addFailure(card)) frames.schedule();
+        },
+        log: (message) => clog("warn", message, { operation: "command-dispatch.reveal-missing" }),
+      }),
   });
   // The workspace a runtime command names — the live session's cwd, as the
   // pushed `SessionView` reports it. The daemon stamps the URL-scoped

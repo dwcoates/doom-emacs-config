@@ -9,8 +9,11 @@ import {
   ModelSelectionRejectedError,
   type CreateSessionArgs,
   commandRefusal,
+  surfaceRefusal,
   type CommandRefusal,
 } from "../src/command-dispatch.js";
+import { create } from "@bufbuild/protobuf";
+import { FailureKindSchema } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
 import { failureKindName } from "../src/failure-card.js";
 import type { FailureCardItem } from "../src/store.js";
 import {
@@ -999,6 +1002,10 @@ describe("commandRefusal", () => {
       kind: "reveal",
       cardUuid: "failure:e9",
       failure: expect.anything(),
+      // The refusal's own words ride along, so a reveal that finds nothing can
+      // still state the refusal instead of dropping it.
+      command: "hibernateWorkspace",
+      error: "",
     });
   });
 
@@ -1068,5 +1075,124 @@ describe("commandRefusal", () => {
     }));
     // Assert
     expect(cardOf(refusal).view.lifecycle).toEqual({ case: "terminal" });
+  });
+});
+
+// --- surfacing: every branch ends in a card the user can see -----------------
+//
+// A reveal is an ADDRESS, and an address can be unreachable: the feed this page
+// holds may never have received the card the daemon filed. Logging that and
+// returning left a nacked command reaching the user through nothing at all.
+
+describe("surfaceRefusal", () => {
+  /** The three surfaces, recording what each was asked to do. */
+  function surfaces(revealFinds: boolean) {
+    const revealed: string[] = [];
+    const filed: FailureCardItem[] = [];
+    const logs: string[] = [];
+    return {
+      revealed,
+      filed,
+      logs,
+      out: {
+        reveal: (uuid: string) => {
+          revealed.push(uuid);
+          return revealFinds;
+        },
+        file: (card: FailureCardItem) => filed.push(card),
+        log: (message: string) => logs.push(message),
+      },
+    };
+  }
+
+  function revealRefusal(): CommandRefusal {
+    const frame = decodeFrontendFrame(
+      JSON.stringify({
+        commandAck: {
+          requestId: "r1",
+          ok: false,
+          error: "already asleep",
+          failure: { sessionHibernated: { sinceMs: "1" } },
+          failureCard: { cardUuid: "failure:e9" },
+        },
+      }),
+    );
+    if (frame.frame.case !== "commandAck") throw new Error("wrong variant");
+    return commandRefusal("hibernateWorkspace", frame.frame.value);
+  }
+
+  it("reveals the daemon's card and files NOTHING beside it", () => {
+    // Arrange
+    const s = surfaces(true);
+    // Act
+    surfaceRefusal(revealRefusal(), s.out);
+    // Assert — restating the account inline would put one failure on screen
+    // twice, worded two different ways.
+    expect([s.revealed, s.filed]).toEqual([["failure:e9"], []]);
+  });
+
+  it("FILES the refusal when the reveal finds nothing", () => {
+    // Arrange
+    const s = surfaces(false);
+    // Act
+    surfaceRefusal(revealRefusal(), s.out);
+    // Assert
+    expect(s.filed).toHaveLength(1);
+  });
+
+  it("leaves exactly ONE log record for a missed reveal", () => {
+    // Arrange
+    const s = surfaces(false);
+    // Act
+    surfaceRefusal(revealRefusal(), s.out);
+    // Assert — the broken reveal contract is worth knowing once, not twice.
+    expect(s.logs).toEqual(["refusal card failure:e9 is not in this feed"]);
+  });
+
+  it("carries the DAEMON's kind verbatim onto the fallback card", () => {
+    // Arrange
+    const s = surfaces(false);
+    // Act
+    surfaceRefusal(revealRefusal(), s.out);
+    // Assert
+    expect(failureKindName(s.filed[0].view.kind)).toBe("sessionHibernated");
+  });
+
+  it("gives the fallback card the DAEMON's uuid, so a late delivery reconciles", () => {
+    // Arrange
+    const s = surfaces(false);
+    // Act
+    surfaceRefusal(revealRefusal(), s.out);
+    // Assert — the missed card arriving later must land on this one rather
+    // than stand beside it as a second account of one refusal.
+    expect(s.filed[0].uuid).toBe("failure:e9");
+  });
+
+  it("leads the fallback card with the daemon's own refusal text", () => {
+    // Arrange
+    const s = surfaces(false);
+    // Act
+    surfaceRefusal(revealRefusal(), s.out);
+    // Assert
+    expect(s.filed[0].view.message).toBe("already asleep");
+  });
+
+  it("files a `card` refusal without attempting any reveal", () => {
+    // Arrange
+    const s = surfaces(true);
+    const card: FailureCardItem = {
+      kind: "failure",
+      uuid: "local:x",
+      view: {
+        kind: create(FailureKindSchema, { kind: { case: "shimNotSpawned", value: {} } }),
+        message: "m",
+        detail: "",
+        lifecycle: { case: "terminal" },
+      },
+    };
+    // Act
+    surfaceRefusal({ kind: "card", card }, s.out);
+    // Assert
+    expect([s.revealed, s.filed]).toEqual([[], [card]]);
   });
 });
