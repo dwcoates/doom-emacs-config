@@ -1298,7 +1298,7 @@ func (s *Server) recordCommandLatency(rec commandLatencyRecord) {
 		// the ack reached the socket.
 		Delivered:  !rec.overdue && rec.deliveryErr == nil,
 		Processing: rec.processing,
-		Threshold:  s.ackWarn,
+		Threshold:  AckWarnThresholdFor(t.cl.kind.String(), s.ackWarn),
 		Ok:         rec.ack.GetOk(),
 		Overdue:    rec.overdue,
 	}
