@@ -1,8 +1,6 @@
 package sessioncontroller
 
 import (
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
-
 	"claude-repld/internal/ssm"
 )
 
@@ -82,62 +80,19 @@ func (m *Manager) releasePhantomTurn(d *sessionController) {
 	m.onTurnBoundary(d, false, m.now())
 }
 
-// settleInterjectAlreadyComplete reconciles BOTH axes to an interject's
-// ALREADY_COMPLETE Ack and then releases the queue.
-//
-// The Ack is a live shim statement that no foreground turn exists. The interject
-// that sent the Interrupt is, by construction, waiting for a TurnEnded before it
-// submits — so if the daemon believes the Ack and does nothing else, the entry
-// waits forever on a turn the shim has just said is not there. That is the
-// wedge, and this is its edge:
-//
-//   - the STATUS axis is reconciled by ReconcileAlreadyComplete, which retires a
-//     `submitting`/`thinking`/`permission` row this session owns;
-//   - the TURN LIFECYCLE is reconciled by SynthesizeTurnClose, which ends the
-//     durable claim the queue is holding prompts behind;
-//   - the QUEUE is then released with the same synthesized boundary, which is
-//     what actually submits the prompt the user typed.
-//
-// A FAILURE OF EITHER RECONCILIATION IS LOUD AND DOES NOT STOP THE RELEASE. The
-// shim's statement stands whether or not the daemon managed to record it, and
-// stranding the user's prompt is a strictly worse outcome than a state row this
-// log line accounts for.
-func (m *Manager) settleInterjectAlreadyComplete(d *sessionController, entryID string) {
-	publish := func(state *frontendv1.WorkspaceState) {
-		d.consumer.push.PushWorkspaceState(state)
-	}
-	closedState, err := m.cfg.SSM.ReconcileAlreadyComplete(d.workspace, d.sessionID, publish)
-	if err != nil {
-		m.logf("session-controller: interject already-complete status reconciliation FAILED ws=%s session=%s entry=%s: %v — the workspace may hold `thinking` for a turn the shim says is over; releasing the queue regardless so the held prompt is not stranded",
-			d.workspace, d.sessionID, entryID, err)
-	}
-	closedClaims, err := m.cfg.SSM.SynthesizeTurnClose(d.workspace, d.sessionID, ssm.TurnCloseAlreadyComplete)
-	if err != nil {
-		m.logf("session-controller: interject already-complete turn-claim close FAILED ws=%s session=%s entry=%s: %v — the durable claim may outlive the turn it names; releasing the queue regardless so the held prompt is not stranded",
-			d.workspace, d.sessionID, entryID, err)
-	}
-	// A synthesized close is the ONLY end these turns will ever get, so it owns
-	// both releases: the terminal result they left retained, and the durable
-	// cursor hold their start took.
-	d.consumer.ReleaseSynthesizedTurnClose(closedClaims, ssm.TurnCloseAlreadyComplete)
-	d.client.UnpinAccountingTurn(closedClaims...)
-	m.logf("session-controller: interject already-complete SETTLED ws=%s session=%s entry=%s status_closed=%v claims_closed=%s — the shim reports no foreground turn, so the boundary this interject is waiting for is delivered here rather than awaited forever",
-		d.workspace, d.sessionID, entryID, closedState, formatTurnIDs(closedClaims))
-	// Synthesized, exactly as releasePhantomTurn's is: the shim's
-	// ALREADY_COMPLETE Ack says the turn is over but names no instant, so now
-	// is the only one the daemon can honestly claim.
-	m.onTurnBoundary(d, false, m.now())
-}
-
-// closeTurnClaimsOnAlreadyComplete ends the durable claim behind a USER-commanded
+// closeTurnClaimsOnAlreadyComplete ends the durable claim behind a user-commanded
 // stop the shim acked ALREADY_COMPLETE.
 //
 // It is the ledger half of what noteUserInterrupt already does to the status
-// axis, and it deliberately does NOT release the queue: the user asked for work
-// to stop, the same Ack pauses the queue, and delivering the next held prompt
-// would start exactly the work they just stopped. The claim still has to go —
-// nothing else can ever close it — or the next prompt queues behind a turn that
-// does not exist.
+// axis. The claim has to go — nothing else can ever close it — or the next
+// prompt queues behind a turn that does not exist.
+//
+// IT DOES NOT RELEASE THE QUEUE, and it is not the thing that decides whether
+// the queue moves. noteUserInterrupt delivers the synthesized boundary itself,
+// after pausing, so what a paused queue will accept is the only gate: a head
+// jump goes (which is how an interject's own prompt is submitted) and every
+// retained entry stays retained. There is no second policy here to disagree
+// with that one.
 //
 // A failure is loud and swallowed: the caller's own outcome is the interrupt's,
 // and a ledger row it failed to tidy must not replace that answer.
