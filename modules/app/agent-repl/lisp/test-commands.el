@@ -6288,6 +6288,89 @@ With ws-list (a b c d) and current=c, the result should be (a c b d)."
         (should-not switched)
         (should-not agent-repl--opened-recent-workspaces)))))
 
+;;;; ---- Tests: agent-repl-switch-to-main-worktree-workspace (SPC o m) ----
+
+(ert-deftest agent-repl-cmd-test-main-worktree-source-dir/prefers-ws-project-dir ()
+  "The lookup starts from the current workspace's recorded `:project-dir'."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "cur" :project-dir "/tmp/linked/")
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "cur")))
+      (let ((default-directory "/tmp/somewhere-else/"))
+        (should (equal (agent-repl--main-worktree-source-dir) "/tmp/linked/"))))))
+
+(ert-deftest agent-repl-cmd-test-main-worktree-source-dir/falls-back-to-default-directory ()
+  "The lookup starts from `default-directory' when no workspace is current."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
+      (let ((default-directory "/tmp/plain-persp/"))
+        (should (equal (agent-repl--main-worktree-source-dir) "/tmp/plain-persp/"))))))
+
+(ert-deftest agent-repl-cmd-test-main-worktree-switch/live-owner-switches-by-name ()
+  "A live workspace owning the main worktree is switched to by name."
+  (agent-repl-test--with-clean-state
+    (let (switched projected)
+      (cl-letf (((symbol-function 'agent-repl--main-worktree-source-dir)
+                 (lambda () "/tmp/linked/"))
+                ((symbol-function 'agent-repl--main-worktree-dir)
+                 (lambda (_dir) "/repos/doom"))
+                ((symbol-function 'agent-repl--ws-dir-owner)
+                 (lambda (dir &rest _) (and (equal dir "/repos/doom") "doom")))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws)))
+                ((symbol-function 'agent-repl-switch-to-project)
+                 (lambda (&rest _) (setq projected t))))
+        (agent-repl-switch-to-main-worktree-workspace)
+        (should (equal switched "doom"))
+        (should-not projected)))))
+
+(ert-deftest agent-repl-cmd-test-main-worktree-switch/no-owner-routes-to-switch-to-project ()
+  "With no live owner, the main worktree dir is opened via switch-to-project."
+  (agent-repl-test--with-clean-state
+    (let (switched projected)
+      (cl-letf (((symbol-function 'agent-repl--main-worktree-source-dir)
+                 (lambda () "/tmp/linked/"))
+                ((symbol-function 'agent-repl--main-worktree-dir)
+                 (lambda (_dir) "/repos/doom"))
+                ((symbol-function 'agent-repl--ws-dir-owner) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws)))
+                ((symbol-function 'agent-repl-switch-to-project)
+                 (lambda (dir) (setq projected dir))))
+        (agent-repl-switch-to-main-worktree-workspace)
+        (should (equal projected "/repos/doom"))
+        (should-not switched)))))
+
+(ert-deftest agent-repl-cmd-test-main-worktree-switch/unresolvable-signals-user-error ()
+  "An unresolvable main worktree signals `user-error' and switches nothing."
+  (agent-repl-test--with-clean-state
+    (let (switched projected)
+      (cl-letf (((symbol-function 'agent-repl--main-worktree-source-dir)
+                 (lambda () "/tmp/not-a-repo/"))
+                ((symbol-function 'agent-repl--main-worktree-dir) (lambda (_dir) nil))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws)))
+                ((symbol-function 'agent-repl-switch-to-project)
+                 (lambda (&rest _) (setq projected t))))
+        (should-error (agent-repl-switch-to-main-worktree-workspace) :type 'user-error)
+        (should-not switched)
+        (should-not projected)))))
+
+(ert-deftest agent-repl-cmd-test-main-worktree-switch/logs-the-rejection ()
+  "The unresolvable case is recorded through the canonical logging helper."
+  (agent-repl-test--with-clean-state
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--main-worktree-source-dir)
+                 (lambda () "/tmp/not-a-repo/"))
+                ((symbol-function 'agent-repl--main-worktree-dir) (lambda (_dir) nil))
+                ((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        (should-error (agent-repl-switch-to-main-worktree-workspace) :type 'user-error)
+        (should (cl-find-if (lambda (line)
+                              (and (string-match-p "switch-to-main-worktree: REJECT" line)
+                                   (string-match-p "/tmp/not-a-repo/" line)
+                                   (string-match-p "reason=no-main-worktree" line)))
+                            logged))))))
+
 (provide 'test-commands)
 
 ;;; test-commands.el ends here
