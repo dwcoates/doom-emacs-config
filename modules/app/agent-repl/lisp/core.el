@@ -761,6 +761,57 @@ the global-sink path and cannot re-enter this branch."
              ((file-directory-p dir) dir)
              (t (format "%s [MISSING]" dir)))))))
 
+(defvar agent-repl--log-preregistration-workspace nil
+  "Name of the workspace currently inside its own registration window.
+
+A workspace is CREATED before it is REGISTERED, and the code doing the
+creating legitimately logs throughout: the announcement arriving, the
+payload validating, the conflict checks that must all pass BEFORE the
+single `puthash' that commits the bookkeeping.  Every one of those
+records is correctly attributed to a workspace that does not own a sink
+yet, so every one of them reached
+`agent-repl--note-unroutable-log-workspace' and made a normal creation
+warn about its own normal prologue.
+
+Registering earlier is not the fix here — unlike
+`agent-repl--establish-workspace', which genuinely did register too late
+and now registers first, the creation path's `puthash' IS the commit
+point, and moving it ahead of the conflict checks would publish a
+half-materialized workspace to every observer.
+
+So the window is DECLARED instead, by the one function that knows it is
+open, and only for the one name it is opening.  Anything else — a
+different workspace, a record after the window closes, a workspace whose
+registration is genuinely missing — is untouched and still warns.")
+
+(defvar agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)
+  "Workspace names already noted as logging inside their registration window.")
+
+(defun agent-repl--preregistration-log-workspace-p (ws)
+  "Return non-nil when WS is the workspace whose registration window is open."
+  (and (stringp ws)
+       (stringp agent-repl--log-preregistration-workspace)
+       (equal ws agent-repl--log-preregistration-workspace)))
+
+(defun agent-repl--note-preregistration-log-workspace (ws)
+  "Note once that WS's records precede its registration.
+
+INFO, not WARNING: the global sink is where these records belong — the
+workspace's own sink does not exist yet — so this is a classification,
+not a degradation.  It is still recorded rather than silent, because
+\"where did the first records of this workspace go\" is a real question
+and this line is its answer.
+
+Marked BEFORE the record is emitted, for the same reason the unroutable
+warning is: the record re-enters the logging ladder, and the mark is what
+stops the re-entry from recurring."
+  (unless (gethash ws agent-repl--preregistration-log-workspaces)
+    (puthash ws t agent-repl--preregistration-log-workspaces)
+    (agent-repl--info
+     nil
+     "pre-registration log workspace %S — its records precede its registration and go to the global sink"
+     ws)))
+
 (defun agent-repl--log-sink-workspace (ws)
   "Return the workspace WS's records may be routed to, or nil for global.
 A log line must never be able to abort its caller.  Logging is a diagnostic
@@ -796,6 +847,16 @@ ladder puts it on the record as `pseudo_workspace'."
    ((null ws) nil)
    ((agent-repl--ws-log-routable-p ws) ws)
    ((agent-repl--pseudo-workspace-name-p ws) nil)
+   ;; A FOURTH condition that is a classification rather than a degradation:
+   ;; WS is being created RIGHT NOW and its registration has not committed
+   ;; yet (`agent-repl--log-preregistration-workspace').  Its records
+   ;; correctly belong to the global sink because its own sink does not exist
+   ;; yet, and a normal creation must not warn about its own normal prologue.
+   ;; The window is narrow and explicitly declared: it covers one name, only
+   ;; while its creator holds the binding, so a workspace whose registration
+   ;; is genuinely missing still falls through to the warning below.
+   ((agent-repl--preregistration-log-workspace-p ws)
+    (agent-repl--note-preregistration-log-workspace ws) nil)
    (t (agent-repl--note-unroutable-log-workspace ws) nil)))
 
 (defun agent-repl--workspace-log-identity (ws)

@@ -23,6 +23,15 @@
 (require 'subr-x)
 (require 'json)
 
+;; Resolved at call time from sibling modules in the same feature.
+(declare-function agent-repl--frontend-ws-command-key "frontend-client" (ws))
+
+;; Owned by core.el.  Declared here so the `let' below binds it DYNAMICALLY:
+;; under `lexical-binding' a `let' over a symbol the compiler does not know is
+;; special would create a lexical binding instead, and the logging ladder would
+;; never see the window this file opens.
+(defvar agent-repl--log-preregistration-workspace)
+
 (defun agent-repl--workspace-create-log-payload-shape (payload)
   "Return a value-free structural summary of wire PAYLOAD for diagnostics."
   (cond
@@ -337,13 +346,25 @@ switch they did not initiate."
              (and (plist-get available :initialPromptQueued) t))))))
 
 (defun agent-repl--workspace-create-ack-materialized (ws job-id result)
-  "ACK daemon JOB-ID after WS materialization produced RESULT."
+  "ACK daemon JOB-ID after WS materialization produced RESULT.
+
+The envelope's `workspace' field is WS's COMMAND KEY — its cwd, via
+`agent-repl--frontend-ws-command-key' — never WS's display name.  That
+field is the daemon's routing key: it canonicalizes it as a directory to
+attribute the command's own telemetry to the workspace's log, so a name
+in that slot made every `workspaceMaterialized' latency record fail to
+route (`canonicalize workspace directory: lstat <name>: no such file or
+directory').  The ACK is sent only AFTER
+`agent-repl--ws-materialize-daemon-workspace' committed WS's bookkeeping,
+so the `:project-dir' the key resolves through is always registered by
+the time this runs."
   (let (request-id)
     (condition-case err
         (progn
           (setq request-id
                 (agent-repl--uds-send-command
-                 "workspaceMaterialized" (list :jobId job-id) ws))
+                 "workspaceMaterialized" (list :jobId job-id)
+                 (agent-repl--frontend-ws-command-key ws)))
           (agent-repl--log
            ws
            "workspace-available: ACK SENT request-id=%s job-id=%s materialization=%s"
@@ -370,7 +391,25 @@ it and failed — and until this line existed the Emacs log could not tell
 them apart: every other line here is emitted after validation, so a
 malformed or unreachable request left no trace at all.  It pairs with the
 daemon's own `MATERIALIZATION REQUESTED'/`UNDELIVERED' lines, and the two
-logs together locate the break on one side or the other."
+logs together locate the break on one side or the other.
+
+EVERY RECORD BELOW THE MATERIALIZATION IS ATTRIBUTED TO A WORKSPACE THAT
+DOES NOT EXIST YET.  That is correct — the records are about that
+workspace — but it is also exactly the shape
+`agent-repl--note-unroutable-log-workspace' shouts about, so a perfectly
+normal creation warned about its own prologue once per workspace.  The
+window is DECLARED here, around the whole handler, so the ladder can
+classify those records instead of degrading them; it closes on its own
+when `agent-repl--ws-materialize-daemon-workspace' commits the
+registration and the workspace starts routing to its own sink."
+  (let ((agent-repl--log-preregistration-workspace
+         (plist-get available :finalName)))
+    (agent-repl--workspace-create-handle-available-1 available)))
+
+(defun agent-repl--workspace-create-handle-available-1 (available)
+  "Body of `agent-repl--workspace-create-handle-available'.
+Split out so the registration-window binding wraps the ENTIRE handler,
+including the validation that can signal before any workspace exists."
   (agent-repl--log
    (plist-get available :finalName)
    "workspace-available: MATERIALIZATION REQUEST RECEIVED job-id=%s final-name=%s worktree=%s session=%s"
