@@ -187,7 +187,8 @@ that the daemon or session is healthy.")
     "sessionInit" "heartbeat" "queue" "progress"
     "workspaceAvailable" "hostAction" "daemonHealth" "sessionHealth"
     "workspaceRoster" "shutdownSchedule"
-    "asyncBubbleDelta" "topbar" "tokenBreakdown" "workspaceGate")
+    "asyncBubbleDelta" "topbar" "tokenBreakdown" "workspaceGate"
+    "mergeQueueRoster")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frame.proto.
 A decoded frame whose sole top-level key is NOT one of these is
@@ -219,7 +220,8 @@ component views (`asyncBubbleDelta', `topbar', `tokenBreakdown',
 
 (defconst agent-repl--uds-ignored-frame-fields
   '("taskCatalog" "heartbeat" "queue" "workspaceRoster"
-    "asyncBubbleDelta" "topbar" "tokenBreakdown" "workspaceGate")
+    "asyncBubbleDelta" "topbar" "tokenBreakdown" "workspaceGate"
+    "mergeQueueRoster")
   "Frame arms Emacs decodes for wire parity but DELIBERATELY renders nothing for.
 These are a subset of `agent-repl--uds-known-frame-fields'.
 
@@ -274,7 +276,13 @@ alarm `context-cost.el' reads off `ProgressView', and it has no bubble or
 menu at all.  They are broadcast to every client rather than stripped for
 the host, so they must DECODE here or the arm signals; listing them makes
 that a stated decision instead of an unfinished-wiring log line on every
-push.")
+push.
+
+`mergeQueueRoster': the daemon-global merge queue and its pause bit,
+broadcast to every client on every queue mutation.  The queue's runtime
+controls (pause, resume, evict) are webapp surfaces, so rendering the
+roster here would show state the user could not act on — the same
+reasoning that keeps `queue' on this list.")
 
 (defconst agent-repl--uds-known-command-fields
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"

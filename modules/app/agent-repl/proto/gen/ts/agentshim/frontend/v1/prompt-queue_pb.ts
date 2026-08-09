@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/prompt-queue.proto.
  */
 export const file_agentshim_frontend_v1_prompt_queue: GenFile = /*@__PURE__*/
-  fileDesc("CihhZ2VudHNoaW0vZnJvbnRlbmQvdjEvcHJvbXB0LXF1ZXVlLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEicAoPU3VibWl0UHJvbXB0Q21kEgwKBHRleHQYASABKAkSFwoPcGVybWlzc2lvbl9tb2RlGAIgASgJEjYKDXByb21wdF9vcmlnaW4YAyABKA4yHy5hZ2VudHNoaW0uY29yZS52MS5Qcm9tcHRPcmlnaW4iJgoMSW50ZXJydXB0Q21kEhYKDmNvbmZpcm1fYWdlbnRzGAEgASgIIhwKGlF1ZXVlQ2xhc3NpZmljYXRpb25QZW5kaW5nIjEKHFF1ZXVlQ2xhc3NpZmljYXRpb25JbnRlcmplY3QSEQoJcmF0aW9uYWxlGAEgASgJIj4KF1F1ZXVlQ2xhc3NpZmljYXRpb25Ib2xkEhEKCXJhdGlvbmFsZRgBIAEoCRIQCghhY2NlcHRlZBgCIAEoCCIqChhRdWV1ZUNsYXNzaWZpY2F0aW9uRXJyb3ISDgoGZGV0YWlsGAEgASgJIvYECgpRdWV1ZUVudHJ5EgoKAmlkGAEgASgJEgwKBHRleHQYAiABKAkSFAoMcXVldWVkX2F0X21zGAMgASgDEkQKB3BlbmRpbmcYCiABKAsyMS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvblBlbmRpbmdIABJICglpbnRlcmplY3QYCyABKAsyMy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbkludGVyamVjdEgAEksKEWhvbGRfZm9yX3R1cm5fZW5kGAwgASgLMi4uYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlQ2xhc3NpZmljYXRpb25Ib2xkSAASQAoFZXJyb3IYDSABKAsyLy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbkVycm9ySAASQQoIc2h1dGRvd24YByABKAsyLS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeVNodXRkb3duSG9sZEgBEkQKCmtlZXBfYWxpdmUYCCABKAsyLi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeUtlZXBBbGl2ZUhvbGRIARI/CgdyZXZpdmFsGAkgASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlRW50cnlSZXZpdmFsSG9sZEgBQhAKDmNsYXNzaWZpY2F0aW9uQgYKBGhvbGRKBAgEEAVKBAgFEAZKBAgGEAdSDmNsYXNzaWZpY2F0aW9uUglyYXRpb25hbGVSCGFjY2VwdGVkIi0KFlF1ZXVlRW50cnlTaHV0ZG93bkhvbGQSEwoLc2NoZWR1bGVfaWQYASABKAkiKgoXUXVldWVFbnRyeUtlZXBBbGl2ZUhvbGQSDwoHdHVybl9pZBgBIAEoCSIpChVRdWV1ZUVudHJ5UmV2aXZhbEhvbGRKBAgBEAJSCnNlc3Npb25faWQicwoJUXVldWVWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRIyCgdlbnRyaWVzGAMgAygLMiEuYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlRW50cnkSDQoFZmVuY2UYBCABKAlKBAgCEANSCnNlc3Npb25faWQiIQoNUXVldWVGb3JjZUNtZBIQCghlbnRyeV9pZBgBIAEoCSIiCg5RdWV1ZUFjY2VwdENtZBIQCghlbnRyeV9pZBgBIAEoCSIiCg5RdWV1ZUNhbmNlbENtZBIQCghlbnRyeV9pZBgBIAEoCUIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_core_v1_core]);
+  fileDesc("CihhZ2VudHNoaW0vZnJvbnRlbmQvdjEvcHJvbXB0LXF1ZXVlLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEicAoPU3VibWl0UHJvbXB0Q21kEgwKBHRleHQYASABKAkSFwoPcGVybWlzc2lvbl9tb2RlGAIgASgJEjYKDXByb21wdF9vcmlnaW4YAyABKA4yHy5hZ2VudHNoaW0uY29yZS52MS5Qcm9tcHRPcmlnaW4iJgoMSW50ZXJydXB0Q21kEhYKDmNvbmZpcm1fYWdlbnRzGAEgASgIIhwKGlF1ZXVlQ2xhc3NpZmljYXRpb25QZW5kaW5nIjEKHFF1ZXVlQ2xhc3NpZmljYXRpb25JbnRlcmplY3QSEQoJcmF0aW9uYWxlGAEgASgJIj4KF1F1ZXVlQ2xhc3NpZmljYXRpb25Ib2xkEhEKCXJhdGlvbmFsZRgBIAEoCRIQCghhY2NlcHRlZBgCIAEoCCIqChhRdWV1ZUNsYXNzaWZpY2F0aW9uRXJyb3ISDgoGZGV0YWlsGAEgASgJIsIFCgpRdWV1ZUVudHJ5EgoKAmlkGAEgASgJEgwKBHRleHQYAiABKAkSFAoMcXVldWVkX2F0X21zGAMgASgDEkQKB3BlbmRpbmcYCiABKAsyMS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvblBlbmRpbmdIABJICglpbnRlcmplY3QYCyABKAsyMy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbkludGVyamVjdEgAEksKEWhvbGRfZm9yX3R1cm5fZW5kGAwgASgLMi4uYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlQ2xhc3NpZmljYXRpb25Ib2xkSAASQAoFZXJyb3IYDSABKAsyLy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbkVycm9ySAASQQoIc2h1dGRvd24YByABKAsyLS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeVNodXRkb3duSG9sZEgBEkQKCmtlZXBfYWxpdmUYCCABKAsyLi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeUtlZXBBbGl2ZUhvbGRIARI/CgdyZXZpdmFsGAkgASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlRW50cnlSZXZpdmFsSG9sZEgBEkoKDWJ1aWxkX3JlZnJlc2gYDiABKAsyMS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeUJ1aWxkUmVmcmVzaEhvbGRIAUIQCg5jbGFzc2lmaWNhdGlvbkIGCgRob2xkSgQIBBAFSgQIBRAGSgQIBhAHUg5jbGFzc2lmaWNhdGlvblIJcmF0aW9uYWxlUghhY2NlcHRlZCItChZRdWV1ZUVudHJ5U2h1dGRvd25Ib2xkEhMKC3NjaGVkdWxlX2lkGAEgASgJIioKF1F1ZXVlRW50cnlLZWVwQWxpdmVIb2xkEg8KB3R1cm5faWQYASABKAkiKQoVUXVldWVFbnRyeVJldml2YWxIb2xkSgQIARACUgpzZXNzaW9uX2lkIhwKGlF1ZXVlRW50cnlCdWlsZFJlZnJlc2hIb2xkInMKCVF1ZXVlVmlldxIRCgl3b3Jrc3BhY2UYASABKAkSMgoHZW50cmllcxgDIAMoCzIhLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUVudHJ5Eg0KBWZlbmNlGAQgASgJSgQIAhADUgpzZXNzaW9uX2lkIiEKDVF1ZXVlRm9yY2VDbWQSEAoIZW50cnlfaWQYASABKAkiIgoOUXVldWVBY2NlcHRDbWQSEAoIZW50cnlfaWQYASABKAkiIgoOUXVldWVDYW5jZWxDbWQSEAoIZW50cnlfaWQYASABKAlCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_agentshim_core_v1_core]);
 
 /**
  * @generated from message agentshim.frontend.v1.SubmitPromptCmd
@@ -276,6 +276,17 @@ export type QueueEntry = Message<"agentshim.frontend.v1.QueueEntry"> & {
      */
     value: QueueEntryRevivalHold;
     case: "revival";
+  } | {
+    /**
+     * Held because the session's shim is being restarted onto the current
+     * build at the turn boundary (automatic stale-shim refresh). Like the
+     * other holds, the classifier never runs on such an entry; the exit is
+     * delivery the moment the restarted shim reports ready.
+     *
+     * @generated from field: agentshim.frontend.v1.QueueEntryBuildRefreshHold build_refresh = 14;
+     */
+    value: QueueEntryBuildRefreshHold;
+    case: "buildRefresh";
   } | { case: undefined; value?: undefined };
 };
 
@@ -346,6 +357,23 @@ export const QueueEntryRevivalHoldSchema: GenMessage<QueueEntryRevivalHold> = /*
   messageDesc(file_agentshim_frontend_v1_prompt_queue, 9);
 
 /**
+ * The entry waits for its session's shim to restart onto the current build
+ * at the turn boundary (automatic stale-shim refresh). Delivered in order
+ * the moment the restarted shim reports ready.
+ *
+ * @generated from message agentshim.frontend.v1.QueueEntryBuildRefreshHold
+ */
+export type QueueEntryBuildRefreshHold = Message<"agentshim.frontend.v1.QueueEntryBuildRefreshHold"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.QueueEntryBuildRefreshHold.
+ * Use `create(QueueEntryBuildRefreshHoldSchema)` to create a new message.
+ */
+export const QueueEntryBuildRefreshHoldSchema: GenMessage<QueueEntryBuildRefreshHold> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 10);
+
+/**
  * The session's queue, pushed on EVERY change and carried in StateSnapshot.
  * An empty entries list is a meaningful value (the queue drained, or the
  * session died), not an absent one.
@@ -384,7 +412,7 @@ export type QueueView = Message<"agentshim.frontend.v1.QueueView"> & {
  * Use `create(QueueViewSchema)` to create a new message.
  */
 export const QueueViewSchema: GenMessage<QueueView> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 10);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 11);
 
 /**
  * Deliver this entry NOW — the user overriding the classifier, or not waiting
@@ -404,7 +432,7 @@ export type QueueForceCmd = Message<"agentshim.frontend.v1.QueueForceCmd"> & {
  * Use `create(QueueForceCmdSchema)` to create a new message.
  */
 export const QueueForceCmdSchema: GenMessage<QueueForceCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 11);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 12);
 
 /**
  * Confirm a HOLD entry. View state only: the entry is still delivered by the
@@ -424,7 +452,7 @@ export type QueueAcceptCmd = Message<"agentshim.frontend.v1.QueueAcceptCmd"> & {
  * Use `create(QueueAcceptCmdSchema)` to create a new message.
  */
 export const QueueAcceptCmdSchema: GenMessage<QueueAcceptCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 12);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 13);
 
 /**
  * Drop an entry. It is never delivered.
@@ -443,5 +471,5 @@ export type QueueCancelCmd = Message<"agentshim.frontend.v1.QueueCancelCmd"> & {
  * Use `create(QueueCancelCmdSchema)` to create a new message.
  */
 export const QueueCancelCmdSchema: GenMessage<QueueCancelCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 13);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 14);
 

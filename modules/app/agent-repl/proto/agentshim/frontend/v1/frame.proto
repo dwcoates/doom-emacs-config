@@ -13,6 +13,7 @@ import "agentshim/frontend/v1/footer.proto";
 import "agentshim/frontend/v1/gate-revival.proto";
 import "agentshim/frontend/v1/host.proto";
 import "agentshim/frontend/v1/lifecycle.proto";
+import "agentshim/frontend/v1/merge.proto";
 import "agentshim/frontend/v1/permission-card.proto";
 import "agentshim/frontend/v1/prompt-queue.proto";
 import "agentshim/frontend/v1/sidebar.proto";
@@ -75,6 +76,9 @@ message FrontendFrame {
     // One workspace's revival gate, resolved and fenced. Pushed on every gate
     // transition (hibernate, revival start, revival settle).
     WorkspaceGateView workspace_gate = 23;
+    // The WHOLE merge queue, pushed complete on every queue mutation. Never a
+    // delta: the roster IS the drain order.
+    MergeQueueRoster merge_queue_roster = 24;
   }
 }
 
@@ -117,6 +121,9 @@ message StateSnapshot {
   repeated TopbarView topbars = 12;
   repeated TokenBreakdownView token_breakdowns = 13;
   repeated WorkspaceGateView workspace_gates = 14;
+  // The merge queue as of this connect, so a client joining mid-drain renders
+  // the queue without waiting for the next mutation.
+  MergeQueueRoster merge_queue_roster = 15;
 }
 
 // Frontend→daemon commands (the ONLY inbound frame).
@@ -150,6 +157,9 @@ message FrontendCommand {
     CancelScheduledShutdownCmd cancel_scheduled_shutdown = 27;
     HibernateWorkspaceCmd hibernate_workspace = 28;
     ReviveSessionCmd revive_session = 29;
+    PauseMergeQueueCmd pause_merge_queue = 30;
+    ResumeMergeQueueCmd resume_merge_queue = 31;
+    EvictMergeCmd evict_merge = 32;
   }
 }
 
