@@ -92,7 +92,11 @@ type StateApplier interface {
 	// Acks it, so the status does not wait on a shim round-trip — and
 	// synchronously publishes that state through PUBLISH. The durable
 	// TurnStarted follows over the store stream.
-	MarkPromptAccepted(workspace, sessionID, requestID string, publish func(*frontendv1.WorkspaceState)) error
+	// ADMISSION says whose prompt it is, and is the ONE thing that changes
+	// which resolved states the edge may be published over: the daemon's own
+	// idle machinery is admitted over the merge phases that leave the session
+	// unowned (ssm/mergepromptgate.go), and a user prompt is not.
+	MarkPromptAccepted(workspace, sessionID, requestID string, admission ssm.PromptAdmission, publish func(*frontendv1.WorkspaceState)) error
 	// MarkPromptDelivered advances that edge from `submitting` to `thinking`
 	// when the shim ACKS the prompt, which is the first moment the agent
 	// genuinely holds it. Reports whether it wrote the row.

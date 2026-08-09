@@ -7,6 +7,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
 )
 
@@ -182,7 +183,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	var turnBefore turnRecord
 	var acceptedAtMs int64
 	if claimsTurn {
-		before, err := m.notePromptAccepted(d, requestID)
+		before, err := m.notePromptAccepted(d, requestID, who.admission())
 		if err != nil {
 			// NOTHING EXTERNAL HAS HAPPENED YET, which is the whole advantage
 			// of failing here rather than after the submit: the prompt is not
@@ -293,7 +294,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 // the footer clock. The session controller's queue latch moves on the same
 // edge. Waiting for the durable TurnStarted would let a second prompt bypass
 // the queue while every frontend already reported an active turn.
-func (m *Manager) notePromptAccepted(d *sessionController, requestID string) (turnBefore turnRecord, err error) {
+func (m *Manager) notePromptAccepted(d *sessionController, requestID string, admission ssm.PromptAdmission) (turnBefore turnRecord, err error) {
 	// The accepted edge is authoritative for BOTH user-visible state and queue
 	// ordering. If the SSM says turn_active while the queue manager still says
 	// idle, a second prompt can bypass the queue before the durable TurnStarted
@@ -313,7 +314,7 @@ func (m *Manager) notePromptAccepted(d *sessionController, requestID string) (tu
 		}
 		d.consumer.push.PushWorkspaceState(state)
 	}
-	if err := m.cfg.SSM.MarkPromptAccepted(d.workspace, d.sessionID, requestID, publish); err != nil {
+	if err := m.cfg.SSM.MarkPromptAccepted(d.workspace, d.sessionID, requestID, admission, publish); err != nil {
 		// The prompt has NOT been submitted yet, so the latch is put back where
 		// it was found: a session left claiming a turn that was never started
 		// would queue every subsequent prompt behind a turn end that can never
