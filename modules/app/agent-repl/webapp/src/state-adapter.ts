@@ -1088,6 +1088,8 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
   switch (arm) {
     case "assistantMessage":
       return assistantMessageItems(frame);
+    case "thinking":
+      return { items: [thinkingItemFrom(frame)], ignores: [] };
     case "userMessage":
       return userMessageItems(frame);
     case "toolUse":
@@ -1142,6 +1144,34 @@ function contentBlockArm(block: Obj): { arm: string; value: Obj } {
     }
   }
   return { arm: "unknown", value: {} };
+}
+
+/**
+ * The standalone reasoning emission (`AgentEmission.thinking`).
+ *
+ * Reasoning left the response body in the figma-idl reshape and became its own
+ * item, so it is built here rather than off a content block.
+ *
+ * IT STATES NO MESSAGE ID. `AgentThinking` carries a `ThinkingBlock` and
+ * nothing else — no API message id, no block index — so this item cannot name
+ * the message its live preview was keyed on, and `messageId` falls back to the
+ * emission's own envelope uuid. That is what the contract says, not a guess:
+ * inventing a message id here is exactly the re-derivation `streaming.ts`
+ * exists to prevent. The consequence is that a reasoning block does not settle
+ * onto its own preview; see the report accompanying this adaptation.
+ */
+function thinkingItemFrom(frame: ConversationItemFrame): ThinkingItem {
+  const messageId = frame.uuid;
+  const item: ThinkingItem = {
+    kind: "thinking",
+    ...recordBlockIdentity(frame.uuid, messageId, 0),
+    messageId,
+    text: pstr(frame.payload, "thinking"),
+    done: true,
+  };
+  const sig = pstr(frame.payload, "signature");
+  if (sig !== "") item.signature = sig;
+  return item;
 }
 
 function assistantMessageItems(frame: ConversationItemFrame): {
