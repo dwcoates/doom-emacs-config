@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"claude-repld/internal/dlog"
@@ -184,7 +185,7 @@ func (r *RepoSuiteRunner) RunSuite(ctx context.Context, targetDir string, run Su
 	r.logf("merge: suite RUNNING {target=%s toplevel=%s entrypoint=%s attempt=%d suites=%s}",
 		targetDir, top, rel, run.Attempt, selectionLabel(run.Suites))
 	started := time.Now()
-	runErr := spawnSuite(ctx, top, entry, args, out)
+	runErr := r.spawnSuite(ctx, targetDir, rel, top, entry, args, out)
 	elapsed := time.Since(started)
 
 	// The child is gone; the file is complete. Everything below reads it back.
@@ -245,11 +246,11 @@ const suiteWaitDelay = 5 * time.Second
 // the CHILD is reaped no matter what its descendants inherited. The hang is not
 // made less likely, it is made unrepresentable.
 //
-// WaitDelay is the belt to that braces. It does nothing on this path (there is
-// no pipe to outlive the process), and it exists so that a future
-// StdoutPipe/StderrPipe reintroduced here degrades into a bounded wait and a
-// loud ErrWaitDelay instead of returning to the silent wedge.
-func spawnSuite(ctx context.Context, top, entry string, args []string, out *os.File) error {
+// Cancel and WaitDelay are the belt to that braces. They do nothing on this
+// path (there is no pipe to outlive the process), and they exist so that a
+// future StdoutPipe/StderrPipe reintroduced here degrades into a bounded wait
+// and a loud ErrWaitDelay instead of returning to the silent wedge.
+func (r *RepoSuiteRunner) spawnSuite(ctx context.Context, targetDir, rel, top, entry string, args []string, out *os.File) error {
 	cmd := exec.CommandContext(ctx, entry, args...)
 	cmd.Dir = top
 	// The daemon may be running under a git hook, whose exported repository
@@ -258,8 +259,72 @@ func spawnSuite(ctx context.Context, top, entry string, args []string, out *os.F
 	cmd.Env = gitexec.StripEnv(os.Environ())
 	cmd.Stdout = out
 	cmd.Stderr = out
+	// Setpgid makes the suite the leader of a NEW process group whose id is its
+	// own pid, so the group contains the entrypoint and its descendants and
+	// NOTHING else — that is what makes reapSuiteGroup's kill(-pgid) safe.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return killSuiteGroup(cmd) }
 	cmd.WaitDelay = suiteWaitDelay
-	return cmd.Run()
+	runErr := cmd.Run()
+	r.reapSuiteGroup(targetDir, rel, cmd)
+	return runErr
+}
+
+// killSuiteGroup SIGKILLs the suite's own process group, and only ever that
+// group: it refuses unless the command was spawned with Setpgid, which is what
+// guarantees the group id is the child's own pid rather than the daemon's.
+//
+// A vanished group is reported as os.ErrProcessDone because that is what
+// os/exec's Cancel contract expects for "there was nothing left to kill".
+func killSuiteGroup(cmd *exec.Cmd) error {
+	pgid, ok := suitePgid(cmd)
+	if !ok {
+		return os.ErrProcessDone
+	}
+	if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return fmt.Errorf("merge: kill the test suite's process group %d: %w", pgid, err)
+	}
+	return nil
+}
+
+// suitePgid returns the suite's process-group id, and false when the command
+// was not spawned in a group of its own. The Setpgid check is the invariant:
+// without it the child shares the DAEMON's group and kill(-pgid) would take the
+// daemon and every one of its siblings down with it.
+func suitePgid(cmd *exec.Cmd) (int, bool) {
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid || cmd.SysProcAttr.Pgid != 0 {
+		return 0, false
+	}
+	if cmd.Process == nil || cmd.Process.Pid <= 0 {
+		return 0, false
+	}
+	return cmd.Process.Pid, true
+}
+
+// reapSuiteGroup kills whatever the finished suite left running in its own
+// process group. Nothing left is the ordinary case and says nothing; anything
+// left is a leak in the suite and is named out loud, because a background
+// process that outlives its run is how the merge gate wedged in the first
+// place.
+func (r *RepoSuiteRunner) reapSuiteGroup(targetDir, rel string, cmd *exec.Cmd) {
+	pgid, ok := suitePgid(cmd)
+	if !ok {
+		return
+	}
+	err := killSuiteGroup(cmd)
+	if errors.Is(err, os.ErrProcessDone) {
+		return
+	}
+	if err != nil {
+		r.logf("merge: suite process-group REAP FAILED {target=%s entrypoint=%s pgid=%d}: %v",
+			targetDir, rel, pgid, err)
+		return
+	}
+	r.logf("merge: suite LEAKED PROCESSES {target=%s entrypoint=%s pgid=%d} — the suite left background processes running after it exited; killed its process group",
+		targetDir, rel, pgid)
 }
 
 // tail reads the clamped tail of the run's output back off the file the suite

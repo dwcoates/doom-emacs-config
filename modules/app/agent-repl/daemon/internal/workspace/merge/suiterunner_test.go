@@ -3,9 +3,11 @@ package merge
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -486,6 +488,57 @@ func TestRunSuiteFailsWithTheTailWhenALeakingSuiteExitsNonZero(t *testing.T) {
 	}
 	if !strings.Contains(got.Tail, "FAIL: the leaking suite") {
 		t.Errorf("Tail = %q, want the suite's own output read back from the file", got.Tail)
+	}
+}
+
+func TestRunSuiteKillsTheProcessGroupTheSuiteLeavesBehind(t *testing.T) {
+	// Arrange — the entrypoint opens a fifo the test is reading, hands the
+	// descriptor to a background process by forking after the open, and drops
+	// its own copy before exiting. The fifo reaches EOF exactly when the LAST
+	// holder of that descriptor dies, so the read below is a synchronization
+	// primitive for "the leaked process is gone" and never a timer.
+	repo := initTarget(t)
+	fifo := filepath.Join(t.TempDir(), "held")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\n"+
+		"exec 3>"+fifo+"\n"+ // blocks until the reader below opens it
+		"( sleep 300 ) &\n"+ // the background process inherits descriptor 3
+		"exec 3>&-\n"+ // the entrypoint itself lets go
+		"exit 0\n")
+	r, _ := newTestSuiteRunner(t)
+	eof := make(chan error, 1)
+	go func() {
+		f, err := os.OpenFile(fifo, os.O_RDONLY, 0)
+		if err != nil {
+			eof <- err
+			return
+		}
+		defer f.Close()
+		_, err = io.ReadAll(f)
+		eof <- err
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), suiteDeadline)
+	defer cancel()
+
+	// Act.
+	got, err := boundedRunSuite(ctx, t, r, repo, SuiteRun{Attempt: 1})
+	if err != nil {
+		t.Fatalf("RunSuite() err = %v", err)
+	}
+	if !got.Passed {
+		t.Fatalf("RunSuite() = %+v, want a passing verdict", got)
+	}
+
+	// Assert — the leaked process died with the suite's process group.
+	select {
+	case readErr := <-eof:
+		if readErr != nil {
+			t.Fatalf("read the held descriptor: %v", readErr)
+		}
+	case <-ctx.Done():
+		t.Fatalf("the process the suite leaked is still holding its descriptor after RunSuite returned (%v)", ctx.Err())
 	}
 }
 
