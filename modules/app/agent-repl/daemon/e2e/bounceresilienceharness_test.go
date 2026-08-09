@@ -344,6 +344,31 @@ func storeTurnEndedFor(t *testing.T, vendorSessionID, turnID string) bool {
 	return false
 }
 
+// awaitStoreTurnEndedFor waits, bounded by the suite's frame budget, for the
+// store to hold a durable TurnEnded under the vendor conversation.
+//
+// WHY A WAIT AND NOT A READ. The shim's turn tail is several store round-trips
+// (tool result, closing message, result, TurnEnded) and it is running while the
+// daemon that started it is being torn down — nothing sequences the test's read
+// after the last of those writes. A single read therefore samples a record that
+// is still being written and reports "the shim never finished" for a shim that
+// finishes a millisecond later, which is a false report about the ARRANGEMENT
+// rather than about the contract. Each poll is one store subscribe-and-drain
+// with its own read deadline, so the loop paces itself on the store's answers
+// and never sleeps.
+func awaitStoreTurnEndedFor(t *testing.T, vendorSessionID, turnID string) bool {
+	t.Helper()
+	deadline := time.Now().Add(frameTimeout)
+	for {
+		if storeTurnEndedFor(t, vendorSessionID, turnID) {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+	}
+}
+
 // storeTurnIDs returns every turn id the store has a start for, in seq order.
 func storeTurnIDs(t *testing.T, vendorSessionID string) []string {
 	t.Helper()
