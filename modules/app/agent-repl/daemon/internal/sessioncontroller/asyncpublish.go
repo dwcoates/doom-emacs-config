@@ -104,12 +104,61 @@ func (c *consumer) pushAsync(push asyncPush, ev *corev1.Event) {
 	}
 	c.logf("session-controller: async bubble push session=%s ws=%q seq=%d opened=%d updates=%d",
 		c.sessionID, c.workspace, ev.GetSeq(), len(push.Opened), len(push.Updates))
+	c.pushAnchors(push.Opened, ev)
 	c.push.PushAsyncBubbleDelta(&frontendv1.AsyncBubbleDelta{
 		Workspace:  c.workspace,
 		Opened:     push.Opened,
 		Updates:    push.Updates,
 		ThroughSeq: ev.GetSeq(),
 		Fence:      c.fence(),
+	})
+}
+
+// pushAnchors publishes the FEED ANCHOR of every bubble this event opened: one
+// top-level ConversationItem on arm 38, carrying the bubble's OPENING state, at
+// the point in the conversation the work was launched from.
+//
+// WHY IT IS HERE AND NOWHERE ELSE. This is the one site where a bubble becomes
+// wire traffic, so the anchor and the AsyncBubbleDelta.opened that carries the
+// same bubble are emitted from a single producer off a single list. A second
+// producer somewhere else would be a second opinion about which launches got an
+// anchor, and the two would disagree exactly on the bubbles one of them missed.
+//
+// THE ANCHOR PRECEDES THE ASYNC PUSH. The anchor is what gives the bubble a
+// place in the conversation; the push is what starts filling it. Sending the
+// fill first would momentarily describe a bubble the reader has nowhere to draw.
+//
+// EVERY OPENED BUBBLE GETS EXACTLY ONE. asyncPush.Opened lists first-time opens
+// only — a re-observed detachment folds as an update — so the "exactly one
+// anchor per launching call" the contract requires is a property of that list
+// rather than of a dedup kept here.
+//
+// The item's uuid is DERIVED from the bubble id for the reason every synthesized
+// uuid on this path is: a resync replays the same records, and a minted uuid
+// would anchor the same bubble a second time on every pass.
+func (c *consumer) pushAnchors(opened []*frontendv1.AsyncBubble, ev *corev1.Event) {
+	if len(opened) == 0 {
+		return
+	}
+	items := make([]*frontendv1.ConversationItem, 0, len(opened))
+	for _, b := range opened {
+		items = append(items, &frontendv1.ConversationItem{
+			Uuid: "async-anchor:" + b.GetId(),
+			TsMs: c.asyncInstant(ev),
+			// The launch FOLLOWED FROM a user turn, which is what
+			// CONVERSATION_SOURCE_USER states (feed.proto ConversationSource);
+			// UNSPECIFIED is a malformed frame a receiver must reject.
+			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+			Item:   &frontendv1.ConversationItem_AsyncBubble{AsyncBubble: b},
+		})
+	}
+	c.logf("session-controller: async bubble ANCHORED session=%s ws=%q seq=%d anchors=%d",
+		c.sessionID, c.workspace, ev.GetSeq(), len(items))
+	c.push.PushConversationDelta(&frontendv1.ConversationDelta{
+		Workspace:  c.workspace,
+		Fence:      c.fence(),
+		ThroughSeq: ev.GetSeq(),
+		Items:      items,
 	})
 }
 
