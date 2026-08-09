@@ -723,3 +723,159 @@ func TestProseHasNoRowsOutsideTheVocabulary(t *testing.T) {
 		}
 	}
 }
+
+// --- per-kind typed evidence at the construction sites ---------------------
+
+func TestAnApiErrorCarriesTheVendorsRequestCorrelationId(t *testing.T) {
+	// Arrange — the one thing a support report needs quoted.
+	line := &datav1.ApiErrorLine{Error: &datav1.ApiErrorDetail{Status: 429, RequestId: "req_9"}}
+	// Act.
+	card := APIError(line)
+	// Assert.
+	if card.GetKind().GetApiRateLimit().GetVendor().GetApiRequestId() != "req_9" {
+		t.Fatalf("vendor context = %v", card.GetKind().GetApiRateLimit().GetVendor())
+	}
+}
+
+func TestAnApiErrorCarriesTheStatusTheVendorReturned(t *testing.T) {
+	// Arrange.
+	line := &datav1.ApiErrorLine{Error: &datav1.ApiErrorDetail{Status: 401}}
+	// Act.
+	card := APIError(line)
+	// Assert.
+	if card.GetKind().GetApiAuthenticationFailed().GetHttpStatus() != 401 {
+		t.Fatalf("http status = %d, want 401", card.GetKind().GetApiAuthenticationFailed().GetHttpStatus())
+	}
+}
+
+func TestAnApiErrorCarriesHowManyAttemptsWereSpent(t *testing.T) {
+	// Arrange.
+	line := &datav1.ApiErrorLine{Error: &datav1.ApiErrorDetail{Status: 529}, MaxRetries: 5}
+	// Act.
+	card := APIError(line)
+	// Assert.
+	if card.GetKind().GetApiOverloaded().GetAttempts() != 5 {
+		t.Fatalf("attempts = %d, want 5", card.GetKind().GetApiOverloaded().GetAttempts())
+	}
+}
+
+func TestAnApiErrorWithNoRequestIdCarriesNoVendorContext(t *testing.T) {
+	// Arrange — an empty context would claim a conversation the line never named.
+	line := &datav1.ApiErrorLine{Error: &datav1.ApiErrorDetail{Status: 429}}
+	// Act.
+	card := APIError(line)
+	// Assert.
+	if card.GetKind().GetApiRateLimit().GetVendor() != nil {
+		t.Fatalf("vendor context = %v, want none", card.GetKind().GetApiRateLimit().GetVendor())
+	}
+}
+
+func TestAnUnnamedTurnEndCarriesTheVendorsStopReason(t *testing.T) {
+	// Arrange.
+	te := &corev1.TurnEnded{StopReason: "something_new", IsError: true}
+	// Act.
+	card := TurnEnd(te)
+	// Assert.
+	if card == nil || card.GetKind().GetApiTurnFailed().GetStopReason() != "something_new" {
+		t.Fatalf("turn end card = %v, want the raw stop reason on the arm", card)
+	}
+}
+
+func TestAnUnclassifiedDeathCarriesTheRawReasonItCouldNotName(t *testing.T) {
+	// Arrange — the account is not lost just because it was not understood.
+	logf, _ := capture()
+	// Act.
+	card := Death(logf, "s1", "a reason from a later build", 0)
+	// Assert.
+	if card.GetKind().GetSessionEndedUnclassified().GetRawReason() != "a reason from a later build" {
+		t.Fatalf("raw reason = %q", card.GetKind().GetSessionEndedUnclassified().GetRawReason())
+	}
+}
+
+func TestAFailedStartCarriesItsCause(t *testing.T) {
+	// Arrange + Act.
+	card := StartFailed("the shim never handshaked")
+	// Assert.
+	if card.GetKind().GetSessionStartFailed().GetCause() != "the shim never handshaked" {
+		t.Fatalf("cause = %q", card.GetKind().GetSessionStartFailed().GetCause())
+	}
+}
+
+func TestAnUnclosedKeepAliveWindowCarriesItsRepairReason(t *testing.T) {
+	// Arrange + Act.
+	card := KeepAliveWindowUnclosed("the ledger refused the close")
+	// Assert.
+	if card.GetKind().GetKeepAliveWindowUnclosed().GetReason() != "the ledger refused the close" {
+		t.Fatalf("reason = %q", card.GetKind().GetKeepAliveWindowUnclosed().GetReason())
+	}
+}
+
+func TestAnInvertedKeepAliveWindowCarriesItsReason(t *testing.T) {
+	// Arrange + Act.
+	card := KeepAliveWindowInverted("end precedes start")
+	// Assert.
+	if card.GetKind().GetKeepAliveWindowInverted().GetReason() != "end precedes start" {
+		t.Fatalf("reason = %q", card.GetKind().GetKeepAliveWindowInverted().GetReason())
+	}
+}
+
+func TestAColdCompactionStatesWhatItCost(t *testing.T) {
+	// Arrange — the card states the waste as a figure rather than alluding to it.
+	// Act.
+	card := ColdCompaction("breakdown", 187_000)
+	// Assert.
+	if card.GetKind().GetCompactionColdRead().GetUncachedInputTokens() != 187_000 {
+		t.Fatalf("uncached input = %d", card.GetKind().GetCompactionColdRead().GetUncachedInputTokens())
+	}
+}
+
+func TestADegradedStoreWriteCarriesItsComponentOnTheArm(t *testing.T) {
+	// Arrange + Act.
+	card := Degraded("store-writer", "rejected", 7)
+	// Assert.
+	if card.GetKind().GetShimStoreWriteRejected().GetComponent() != "store-writer" {
+		t.Fatalf("component = %q", card.GetKind().GetShimStoreWriteRejected().GetComponent())
+	}
+}
+
+func TestADegradedConnectionNamesTheComponentThatWentQuiet(t *testing.T) {
+	// Arrange + Act.
+	card := ConnectionDegraded("shim-connection", "no traffic for 30s")
+	// Assert.
+	if card.GetKind().GetShimDegraded().GetComponent() != "shim-connection" {
+		t.Fatalf("component = %q", card.GetKind().GetShimDegraded().GetComponent())
+	}
+}
+
+func TestAnUnclassifiedCommandErrorCarriesItsTextOnTheArm(t *testing.T) {
+	// Arrange — the fallthrough's whole content is the text it could not name.
+	logf, _ := capture()
+	// Act.
+	card := Command(logf, errors.New("something nobody classified"))
+	// Assert.
+	if card.GetKind().GetInternalUnclassified().GetCause() != "something nobody classified" {
+		t.Fatalf("cause = %q", card.GetKind().GetInternalUnclassified().GetCause())
+	}
+}
+
+func TestCommandWithFactsKeepsTheCallersRequestId(t *testing.T) {
+	// Arrange — a handler that holds the request the failure answers.
+	logf, _ := capture()
+	// Act.
+	card := CommandWithFacts(logf, fmt.Errorf("wrapped: %w", ErrShimAckTimeout), Facts{RequestID: "r-12", WaitedMs: 3000})
+	// Assert.
+	if card.GetKind().GetShimAckTimeout().GetRequestId() != "r-12" {
+		t.Fatalf("request id = %q", card.GetKind().GetShimAckTimeout().GetRequestId())
+	}
+}
+
+func TestCommandWithFactsFallsBackToTheErrorTextForAnUnsuppliedCause(t *testing.T) {
+	// Arrange — an error that reached the funnel IS the cause.
+	logf, _ := capture()
+	// Act.
+	card := CommandWithFacts(logf, fmt.Errorf("deadline blown: %w", ErrSessionNotEstablished), Facts{RequestID: "r-1"})
+	// Assert.
+	if !strings.Contains(card.GetKind().GetSessionNotEstablished().GetCause(), "deadline blown") {
+		t.Fatalf("cause = %q, want the error text", card.GetKind().GetSessionNotEstablished().GetCause())
+	}
+}
