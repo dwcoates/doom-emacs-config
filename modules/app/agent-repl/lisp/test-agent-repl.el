@@ -47,6 +47,7 @@
   (load (expand-file-name "test-daemon.el" dir) nil t)
   (load (expand-file-name "test-emoji.el" dir) nil t)
   (load (expand-file-name "test-explain-config.el" dir) nil t)
+  (load (expand-file-name "test-external-browser.el" dir) nil t)
   (load (expand-file-name "test-failure.el" dir) nil t)
   (load (expand-file-name "test-render-colors.el" dir) nil t)
   (load (expand-file-name "test-frontend-client.el" dir) nil t)
