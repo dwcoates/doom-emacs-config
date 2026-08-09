@@ -86,7 +86,48 @@ type BootSweeper struct {
 	Recheck <-chan time.Time
 	// Parallelism bounds concurrent reattaches. Zero uses the default.
 	Parallelism int
+	// Unwired receives every session this sweep FINISHED WITH AND DID NOT WIRE,
+	// named by the verdict that left it that way (the BootSweepUnwired*
+	// constants).
+	//
+	// It exists because a verdict this sweeper reached is a conclusion about a
+	// session the USER owns, and until it has somewhere to go the only account
+	// of it is a log line at boot — while the durable connectivity the previous
+	// daemon wrote is still standing, so the workspace goes on presenting as
+	// operational with no shim behind it.
+	//
+	// A nil hook is the pre-classification behavior: the verdict is logged and
+	// nothing else happens. It is OPTIONAL rather than required because the
+	// user-visible record it feeds is not landed yet (see the note on
+	// classifyUnwired), and a required field would be a promise this daemon
+	// cannot yet keep.
+	//
+	// An error from it is NEVER swallowed: it is logged against the session and
+	// the verdict it belonged to, since a classification that failed to reach
+	// the user is exactly the silence this hook exists to end.
+	Unwired func(workspace, sessionID, verdict string) error
 }
+
+// The verdicts that leave a session unwired. Each is one branch of reconcile,
+// named so a classified record can say WHICH conclusion the sweep reached
+// rather than only that it reached one.
+const (
+	// BootSweepUnwiredNoLiveShim — neither probe found anything: the shim is
+	// genuinely gone and the session waits for the on-demand bring-up.
+	BootSweepUnwiredNoLiveShim = "boot_sweep_no_live_shim"
+	// BootSweepUnwiredLockHeldWithoutConnection — a live process still holds
+	// the session lock and never dialled in within the redial window.
+	BootSweepUnwiredLockHeldWithoutConnection = "boot_sweep_lock_held_without_connection"
+	// BootSweepUnwiredProbeFailed — the parked-connection probe failed twice,
+	// so whether a shim is connected remains unknown.
+	BootSweepUnwiredProbeFailed = "boot_sweep_probe_failed"
+	// BootSweepUnwiredLockProbeFailed — the session-lock probe could not say
+	// whether a shim is alive. It is the fourth branch that leaves a session
+	// unwired, and it is classified for the same reason the other three are:
+	// the sweep reached a conclusion and the user owns the session it reached
+	// it about.
+	BootSweepUnwiredLockProbeFailed = "boot_sweep_lock_probe_failed"
+)
 
 // Run performs the first pass, waits for the re-check, then performs the
 // second pass over whatever the first left unclaimed. It returns when the
@@ -173,6 +214,7 @@ func (s *BootSweeper) reconcile(label string, rec registry.Record) (registry.Rec
 		}
 		s.Logf("server: %s sweep: session %s (ws %s) parked-connection probe FAILED again, so whether the shim is connected remains UNKNOWN; leaving it unwired: %v",
 			label, rec.SessionID, rec.CWD, err)
+		s.classifyUnwired(label, rec, BootSweepUnwiredProbeFailed)
 		return registry.Record{}, false
 	}
 	if connected {
@@ -202,6 +244,7 @@ func (s *BootSweeper) reconcile(label string, rec registry.Record) (registry.Rec
 		// would be a claim the probe did not make.
 		s.Logf("server: %s sweep: session %s (ws %s) lock probe FAILED, so whether a shim is alive is UNKNOWN; leaving it unwired: %v",
 			label, rec.SessionID, rec.CWD, err)
+		s.classifyUnwired(label, rec, BootSweepUnwiredLockProbeFailed)
 		return registry.Record{}, false
 	}
 	if held {
@@ -215,9 +258,51 @@ func (s *BootSweeper) reconcile(label string, rec registry.Record) (registry.Rec
 		// said plainly instead of being retried forever.
 		s.Logf("server: %s sweep: session %s (ws %s) STILL holds its lock without connecting after the redial window; NOT spawning a duplicate — the holder is alive and may be mid-turn",
 			label, rec.SessionID, rec.CWD)
+		s.classifyUnwired(label, rec, BootSweepUnwiredLockHeldWithoutConnection)
 		return registry.Record{}, false
 	}
 	s.Logf("server: %s sweep: session %s (ws %s) has no live shim; leaving it UNWIRED for the on-demand bring-up",
 		label, rec.SessionID, rec.CWD)
+	s.classifyUnwired(label, rec, BootSweepUnwiredNoLiveShim)
 	return registry.Record{}, false
+}
+
+// classifyUnwired hands one finished-with, unwired session to the classifier.
+//
+// THE VERDICT IS THE PAYLOAD. All four branches leave the same situation — a
+// session the user owns with no shim this daemon drives — and they are NOT the
+// same conclusion: "the shim is gone", "a live holder never dialled in" and "I
+// could not tell" call for different things from the person reading that
+// workspace. So the branch travels with the session rather than being flattened
+// into one anonymous "unwired".
+//
+// THE RESIDUE, stated where it is felt. What this hook must ultimately produce
+// is a USER-VISIBLE classified record: a connectivity verdict that stops the
+// row the PREVIOUS daemon wrote from going on presenting a shimless workspace
+// as operational, and a host-side account naming the verdict. Neither is
+// expressible yet:
+//
+//   - the connectivity axis refuses any edge for the retired generation these
+//     sessions are left on (ssm/connectivity.go, validateConnectivityTransition
+//     — a hibernated generation cannot become current again, and a replacement
+//     session/generation must enter `connecting` first, which would be a
+//     bring-up claim this sweep deliberately did not make); and
+//   - the host action that would carry the verdict has no arm for it.
+//
+// Until both exist the hook is wired and unclaimed, and every verdict is still
+// LOGGED exactly as it was — so nothing regressed, and closing the gap is one
+// implementation rather than a search.
+func (s *BootSweeper) classifyUnwired(label string, rec registry.Record, verdict string) {
+	if s.Unwired == nil {
+		s.Logf("server: %s sweep: session %s (ws %s) verdict=%s is NOT CLASSIFIED — no classifier is wired, so this conclusion reaches the user nowhere but this line and the connectivity its predecessor wrote still stands",
+			label, rec.SessionID, rec.CWD, verdict)
+		return
+	}
+	if err := s.Unwired(rec.CWD, rec.SessionID, verdict); err != nil {
+		s.Logf("server: %s sweep: session %s (ws %s) verdict=%s could NOT be classified: %v — the conclusion stays a log line, which is the silence the classification exists to end",
+			label, rec.SessionID, rec.CWD, verdict, err)
+		return
+	}
+	s.Logf("server: %s sweep: session %s (ws %s) verdict=%s CLASSIFIED — the session this sweep did not wire has a user-visible record rather than only this log",
+		label, rec.SessionID, rec.CWD, verdict)
 }
