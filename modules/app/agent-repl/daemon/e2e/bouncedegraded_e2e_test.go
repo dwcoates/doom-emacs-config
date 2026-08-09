@@ -94,7 +94,17 @@ func TestE2EADegradationRaisedWhileUnattachedSurfacesAfterReattach(t *testing.T)
 	_, conn, _, _ := liveSession(t, first.harness(), cwd)
 
 	// Act — provoke the degradation and take the listener away underneath it.
+	//
+	// THE ACK IS WAITED FOR, AND IT IS PART OF THE ARRANGEMENT, NOT OF WHAT IS
+	// ASSERTED. Bouncing on the line after the write raced the prompt against
+	// the daemon's own teardown, and the prompt lost every time: the command was
+	// NACKED with `session-controller: manager closed`, so it never reached the
+	// shim, no mode was ever applied, and nothing degraded. A test that provokes
+	// nothing cannot observe the loss of it. Waiting for the ack pins the prompt
+	// as ACCEPTED and handed to the shim, which is what puts the shim's report
+	// on the intended edge — against a daemon connection that is going or gone.
 	submitPromptInMode(t, conn, "r-degrade", "a prompt in a mode this session cannot adopt", unswitchableMode)
+	awaitAck(t, conn, "r-degrade", "the prompt whose non-switchable mode is what degrades this session")
 	first.bounce()
 	second := world.boot(t)
 
