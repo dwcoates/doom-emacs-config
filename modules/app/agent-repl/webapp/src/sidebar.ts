@@ -443,17 +443,23 @@ export function formatRecency(lastViewedAt: number | null, nowMs: number): strin
  * visual contract, with the stylesheet mapping each stem to its color,
  * breath, or spin. The merge family carries the recycle glyph as content;
  * every disc status renders an empty span the stylesheet shapes.
+ *
+ * GLYPHS is the one lever a section has over the dot: Recently Merged sets
+ * it false so no glyph character (the inactive question mark, the merge
+ * recycle mark) can reach a settled row, whatever status it carries. The
+ * span itself still renders, so the name column stays aligned with the live
+ * sections above it.
  */
-export function statusDotHtml(status: WorkspaceStatus, monitoring = false): string {
+export function statusDotHtml(status: WorkspaceStatus, monitoring = false, glyphs = true): string {
   if (monitoring && MONITORABLE_STATUSES.has(status)) {
     return `<span class="st st-monitoring" title="monitoring"></span>`;
   }
   // A perspective-less workspace (in the sidebar, not the tab-bar) has no live
   // session whose status a disc could report, so it shows a question mark.
   if (status === "inactive") {
-    return `<span class="st st-inactive" title="inactive">❓</span>`;
+    return `<span class="st st-inactive" title="inactive">${glyphs ? "❓" : ""}</span>`;
   }
-  const glyph = MERGE_GLYPH_STATUSES.has(status) ? "⟳" : "";
+  const glyph = glyphs && MERGE_GLYPH_STATUSES.has(status) ? "⟳" : "";
   return `<span class="st st-${status}" title="${status}">${glyph}</span>`;
 }
 
@@ -500,6 +506,22 @@ function detailHtml(row: WorkspaceRow): string {
 }
 
 /**
+ * Everything a row's render needs beyond the row itself, carried as one value
+ * so a section decides it ONCE for its whole subtree rather than each nested
+ * generation re-passing a widening list of positional arguments.
+ */
+interface RowContext {
+  navDir: string | null;
+  open: ReadonlySet<string>;
+  nowMs: number;
+  monitoring: boolean;
+  mergeStatus: MergeStatus | null;
+  /** False in Recently Merged: settled rows carry no glyph (see
+   * `statusDotHtml`). Every live section leaves it true. */
+  glyphs: boolean;
+}
+
+/**
  * One workspace and, nested under it, its family. The wrapper's class
  * list carries the row states the stylesheet draws: `current` (accent
  * left edge + wash), `gone` (closed OR merged — both recede), `navsel`
@@ -507,14 +529,8 @@ function detailHtml(row: WorkspaceRow): string {
  * Children nest inside `.kids`, whose left guide line and margin compound
  * per generation.
  */
-function workspaceHtml(
-  row: WorkspaceRow,
-  navDir: string | null,
-  open: ReadonlySet<string>,
-  nowMs: number,
-  monitoring: boolean,
-  mergeStatus: MergeStatus | null = null,
-): string {
+function workspaceHtml(row: WorkspaceRow, ctx: RowContext): string {
+  const { navDir, open, nowMs, monitoring, mergeStatus, glyphs } = ctx;
   const cls = ["ws"];
   if (row.current) cls.push("current");
   if (row.closed || row.status === "merged") cls.push("gone");
@@ -523,16 +539,14 @@ function workspaceHtml(
   const kids =
     row.children.length === 0
       ? ""
-      : `<div class="kids">${row.children
-          .map((c) => workspaceHtml(c, navDir, open, nowMs, monitoring, mergeStatus))
-          .join("")}</div>`;
+      : `<div class="kids">${row.children.map((c) => workspaceHtml(c, ctx)).join("")}</div>`;
   // The dir addresses the row for the mount's delegated click handler:
   // a body click switches to it, the chevron click toggles its panel.
   // The monitoring overlay touches only THIS session's row: the roster's
   // other rows keep exactly the status Emacs asserted.
   return `<div class="${cls.join(" ")}">
     <div class="row" data-row-dir="${escapeHtml(row.dir)}">
-      ${statusDotHtml(row.status, monitoring && row.current)}<span class="name">${escapeHtml(row.name)}</span>
+      ${statusDotHtml(row.status, monitoring && row.current, glyphs)}<span class="name">${escapeHtml(row.name)}</span>
       <span class="when">${formatRecency(row.mergedAt ?? row.lastViewedAt, nowMs)}</span>
       <span class="chev" data-chev>▸</span>
     </div>
@@ -545,18 +559,8 @@ function workspaceHtml(
 /** A repo section: fold-toggling header plus its workspace family trees.
  * A folded section keeps its rows in the DOM — the stylesheet hides them
  * — so unfolding is a class flip, not a rebuild. */
-function repoSectionHtml(
-  group: RepoGroup,
-  navDir: string | null,
-  open: ReadonlySet<string>,
-  nowMs: number,
-  extraClass = "",
-  monitoring = false,
-  mergeStatus: MergeStatus | null = null,
-): string {
-  const rows = group.rows
-    .map((r) => workspaceHtml(r, navDir, open, nowMs, monitoring, mergeStatus))
-    .join("");
+function repoSectionHtml(group: RepoGroup, ctx: RowContext, extraClass = ""): string {
+  const rows = group.rows.map((r) => workspaceHtml(r, ctx)).join("");
   return `<section class="repo${group.folded ? " folded" : ""}${
     extraClass === "" ? "" : ` ${extraClass}`
   }">
@@ -586,7 +590,7 @@ export function taskSectionHtml(
   mergeStatus: MergeStatus | null = null,
 ): string {
   const rows = group.rows
-    .map((r) => workspaceHtml(r, navDir, open, nowMs, monitoring, mergeStatus))
+    .map((r) => workspaceHtml(r, { navDir, open, nowMs, monitoring, mergeStatus, glyphs: true }))
     .join("");
   const isNoTask = group.key === NO_TASK_KEY;
   const doneCls = group.done ? " done" : "";
@@ -652,19 +656,28 @@ export function sidebarHtml(
   const total = groups.reduce((n, g) => n + countRows(g.rows), 0);
   const err =
     errorNote === null ? "" : `<div class="sb-err" role="alert">${escapeHtml(errorNote)}</div>`;
+  const liveCtx: RowContext = {
+    navDir: roster.navDir,
+    open,
+    nowMs,
+    monitoring,
+    mergeStatus,
+    glyphs: true,
+  };
   const sections = taskView
     ? roster.tasks
         .map((g) => taskSectionHtml(g, roster.navDir, open, nowMs, monitoring, mergeStatus))
         .join("")
-    : roster.repos
-        .map((g) => repoSectionHtml(g, roster.navDir, open, nowMs, "", monitoring, mergeStatus))
-        .join("");
+    : roster.repos.map((g) => repoSectionHtml(g, liveCtx, "")).join("");
   // Settled merges render last, in their own section, so they read as
   // history rather than as live work sitting in the repo they came from.
+  // Glyphless: a settled row's underlying status is not news, and the
+  // question mark a perspective-less row would otherwise draw reads as an
+  // alarm about work that is already finished.
   const merged =
     roster.recentlyMerged === null
       ? ""
-      : repoSectionHtml(roster.recentlyMerged, roster.navDir, open, nowMs, "merged-section");
+      : repoSectionHtml(roster.recentlyMerged, { ...liveCtx, glyphs: false }, "merged-section");
   return `<div class="sb-head">
       <span class="sb-title">${taskView ? "Tasks" : "Workspaces"}</span>
       <span class="sb-count">${total}</span>

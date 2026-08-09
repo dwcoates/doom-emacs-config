@@ -272,6 +272,21 @@ describe("statusDotHtml", () => {
     expect(statusDotHtml("inactive")).toContain(">❓<");
   });
 
+  it("drops the question-mark glyph from an inactive dot when glyphs are off", () => {
+    // Arrange + Act + Assert — Recently Merged renders glyphless rows.
+    expect(statusDotHtml("inactive", false, false)).not.toContain("❓");
+  });
+
+  it("keeps the inactive dot's span when glyphs are off", () => {
+    // Arrange + Act + Assert — the span holds the name column's alignment.
+    expect(statusDotHtml("inactive", false, false)).toContain(`class="st st-inactive"`);
+  });
+
+  it("drops the recycle glyph from a merging dot when glyphs are off", () => {
+    // Arrange + Act + Assert
+    expect(statusDotHtml("merging", false, false)).not.toContain("⟳");
+  });
+
   it("carries the recycle glyph on a merge-enqueuing dot", () => {
     // Arrange + Act + Assert — the first mark of the pipeline the glyph denotes.
     expect(statusDotHtml("merge-enqueuing")).toContain(">⟳<");
@@ -466,6 +481,41 @@ describe("sidebarHtml", () => {
     const out = html(roster({ recentlyMerged: recent }));
     // Assert
     expect(out).toContain("merged-section");
+  });
+
+  it("renders no question mark on an inactive row in the recently-merged section", () => {
+    // Arrange
+    const recent = group({
+      key: "__recently_merged__",
+      label: "Recently Merged",
+      rows: [row({ status: "inactive", dir: "/w/m" })],
+    });
+    // Act
+    const out = html(roster({ repos: [], recentlyMerged: recent }));
+    // Assert
+    expect(out).not.toContain("❓");
+  });
+
+  it("renders no recycle glyph on a merging row in the recently-merged section", () => {
+    // Arrange — whatever status a settled row carries, no glyph reaches it.
+    const recent = group({
+      key: "__recently_merged__",
+      label: "Recently Merged",
+      rows: [row({ status: "merging", dir: "/w/m" })],
+    });
+    // Act
+    const out = html(roster({ repos: [], recentlyMerged: recent }));
+    // Assert
+    expect(out).not.toContain("⟳");
+  });
+
+  it("keeps the question mark on an inactive row in a repo section", () => {
+    // Arrange — only Recently Merged goes glyphless.
+    const repo = group({ rows: [row({ status: "inactive" })] });
+    // Act
+    const out = html(roster({ repos: [repo] }));
+    // Assert
+    expect(out).toContain("❓");
   });
 
   it("orders the recently-merged section after the repo sections", () => {
