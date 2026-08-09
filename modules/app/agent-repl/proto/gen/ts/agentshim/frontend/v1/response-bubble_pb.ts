@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/response-bubble.proto.
  */
 export const file_agentshim_frontend_v1_response_bubble: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHNoaW0vZnJvbnRlbmQvdjEvcmVzcG9uc2UtYnViYmxlLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEihQEKDUFnZW50UmVzcG9uc2USNAoEYm9keRgBIAEoCzImLmFnZW50c2hpbS5kYXRhLnYxLkFwaUFzc2lzdGFudE1lc3NhZ2USPgoLdXNhZ2Vfc3RhbXAYAiABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUmVzcG9uc2VVc2FnZVN0YW1wIj8KDUFnZW50VGhpbmtpbmcSLgoEYm9keRgBIAEoCzIgLmFnZW50c2hpbS5kYXRhLnYxLlRoaW5raW5nQmxvY2sidQoSUmVzcG9uc2VVc2FnZVN0YW1wEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYASABKAMSGQoRY2FjaGVfcmVhZF90b2tlbnMYAiABKAMSFQoNb3V0cHV0X3Rva2VucxgDIAEoAxINCgVtb2RlbBgEIAEoCUIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_data_v1_tools]);
+  fileDesc("CithZ2VudHNoaW0vZnJvbnRlbmQvdjEvcmVzcG9uc2UtYnViYmxlLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEihQEKDUFnZW50UmVzcG9uc2USNAoEYm9keRgBIAEoCzImLmFnZW50c2hpbS5kYXRhLnYxLkFwaUFzc2lzdGFudE1lc3NhZ2USPgoLdXNhZ2Vfc3RhbXAYAiABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUmVzcG9uc2VVc2FnZVN0YW1wImwKDUFnZW50VGhpbmtpbmcSLgoEYm9keRgBIAEoCzIgLmFnZW50c2hpbS5kYXRhLnYxLlRoaW5raW5nQmxvY2sSFgoOYXBpX21lc3NhZ2VfaWQYAiABKAkSEwoLYmxvY2tfaW5kZXgYAyABKAUidQoSUmVzcG9uc2VVc2FnZVN0YW1wEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYASABKAMSGQoRY2FjaGVfcmVhZF90b2tlbnMYAiABKAMSFQoNb3V0cHV0X3Rva2VucxgDIAEoAxINCgVtb2RlbBgEIAEoCUIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_data_v1_tools]);
 
 /**
  * The purple bubble: one assistant turn, with the figures its corner renders.
@@ -72,6 +72,27 @@ export type AgentThinking = Message<"agentshim.frontend.v1.AgentThinking"> & {
    * @generated from field: agentshim.data.v1.ThinkingBlock body = 1;
    */
   body?: ThinkingBlock | undefined;
+
+  /**
+   * The API message this block was stripped from, verbatim. A live preview is
+   * keyed by the message id its typing deltas carried; this is the resolved
+   * fact that lets the settled block replace its preview instead of appending
+   * beside it. The daemon states it because the daemon did the stripping — a
+   * client that inferred it would be matching "the earliest same-kind
+   * preview", which is exactly the derivation this contract removes.
+   *
+   * @generated from field: string api_message_id = 2;
+   */
+  apiMessageId: string;
+
+  /**
+   * The block's position in that message's original content array, so two
+   * reasoning blocks from one message settle onto their own previews rather
+   * than both onto the first.
+   *
+   * @generated from field: int32 block_index = 3;
+   */
+  blockIndex: number;
 };
 
 /**
