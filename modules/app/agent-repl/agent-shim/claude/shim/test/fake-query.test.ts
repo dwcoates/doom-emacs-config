@@ -457,6 +457,71 @@ describe("!bg background turns", () => {
   });
 });
 
+describe("!hold turns", () => {
+  // The permission-free way to hold a turn open. It exists because the OTHER
+  // hold — `!tool`, which parks a canUseTool — is answerable by typing: a
+  // prompt submitted over a parked question declines it and stops the turn
+  // (daemon sessioncontroller/permdecline.go), so a caller that needs a live
+  // turn to submit prompts behind cannot hold one open with a question.
+  //
+  // The rendezvous is the hold's OWN first frame, never a timer: the resolver
+  // is in place before that frame can be observed, so a stop sent on seeing it
+  // always has something to release.
+  async function holdParked(h: FakeHarness): Promise<AsyncIterator<SdkMessageLike>> {
+    const iterator = h.query[Symbol.asyncIterator]() as AsyncIterator<SdkMessageLike>;
+    h.input.push(userMsg("!hold"));
+    for (let step = await iterator.next(); !step.done; step = await iterator.next()) {
+      if (step.value.type === "stream_event") return iterator;
+    }
+    throw new Error("the hold turn never started");
+  }
+
+  /** Everything the query emits after the hold parked. */
+  async function drain(iterator: AsyncIterator<SdkMessageLike>): Promise<SdkMessageLike[]> {
+    const out: SdkMessageLike[] = [];
+    for (let step = await iterator.next(); !step.done; step = await iterator.next()) {
+      out.push(step.value);
+    }
+    return out;
+  }
+
+  it("emits no terminal result while it holds", async () => {
+    // Arrange / Act — parked, with nothing asked of the user.
+    const h = makeFake();
+    const iterator = await holdParked(h);
+    // Assert — the turn is live: no result has been produced.
+    h.input.end();
+    await h.query.interrupt();
+    const after = await drain(iterator);
+    expect(after.filter((m) => m.type === "result")).toHaveLength(1);
+  });
+
+  it("ends the held turn the way an interrupted turn ends", async () => {
+    // Arrange
+    const h = makeFake();
+    const iterator = await holdParked(h);
+    // Act
+    await h.query.interrupt();
+    h.input.end();
+    // Assert
+    const after = await drain(iterator);
+    const result = after.find((m) => m.type === "result")!;
+    expect(result).toMatchObject({ subtype: "error_during_execution", is_error: true });
+  });
+
+  it("asks the user nothing while it holds", async () => {
+    // Arrange
+    const h = makeFake();
+    const iterator = await holdParked(h);
+    // Act
+    await h.query.interrupt();
+    h.input.end();
+    await drain(iterator);
+    // Assert
+    expect(h.permissionRequests).toEqual([]);
+  });
+});
+
 describe("fake query interrupt receipt", () => {
   it("resolves the receipt shape the real SDK returns, not undefined", async () => {
     // The shim depends on SDK 0.3.220, whose interrupt() always answers with

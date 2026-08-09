@@ -54,7 +54,11 @@ type PromptRouter interface {
 	// can be reconciled on. The wire itself travels under a daemon-minted
 	// control id that appears in no caller's records.
 	Interrupt(ctx context.Context, workspace, requestID string) error
-	AnswerPermission(ctx context.Context, workspace, permissionRequestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) error
+	// AnswerPermission carries the COMMAND'S OWN request id alongside the
+	// permission request id it answers, for the same reason Interrupt does: a
+	// DECLINE stops the workspace's turn (sessioncontroller/permdecline.go),
+	// and a stop with no command id behind it is unfindable end to end.
+	AnswerPermission(ctx context.Context, workspace, requestID, permissionRequestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) error
 	SetModel(ctx context.Context, workspace, model string) (string, error)
 	// ResolveMergeConflict drives the workspace's OWN session to resolve a
 	// cherry-pick merge.Coordinator parked on a conflict, returning once that
@@ -839,7 +843,7 @@ func (h *commandHandler) AnswerPermission(ctx context.Context, workspace, reques
 	if err := checkWorkspaceKey("answer_permission", workspace); err != nil {
 		return err
 	}
-	return h.prompts.AnswerPermission(ctx, workspace, cmd.GetPermissionRequestId(), cmd.GetAllow(), cmd.GetDenyMessage(), cmd.GetUpdatedInput())
+	return h.prompts.AnswerPermission(ctx, workspace, requestID, cmd.GetPermissionRequestId(), cmd.GetAllow(), cmd.GetDenyMessage(), cmd.GetUpdatedInput())
 }
 
 // SetModel relays the user's explicit request to the live shim.  It returns

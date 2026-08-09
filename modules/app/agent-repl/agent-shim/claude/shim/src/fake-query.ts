@@ -6,6 +6,8 @@
  * Behavior per user turn:
  * - text starting with "!tool <command>" → one Bash tool round guarded by
  *   a `canUseTool` permission request, then a closing text block.
+ * - "!hold" → a turn that stays in flight, asking nothing, until the session
+ *   is interrupted (the permission-free way to hold a turn open).
  * - "!md" → a streamed markdown showcase reply (webapp render demo).
  * - "!rotate" → a VENDOR SESSION UUID ROTATION mid-turn, then an ordinary
  *   text turn under the NEW identity (see runRotateTurn).
@@ -133,6 +135,16 @@ export function createFakeQuery(
   });
   opts.abortSignal?.addEventListener("abort", () => out.end(), { once: true });
   let interrupted = false;
+  // THE HOLD'S RELEASE. A `!hold` turn parks on this and nothing else moves it:
+  // the fake's own `interrupt()` resolves it, so the turn ends exactly when the
+  // stop arrives rather than on a timer nobody can observe.
+  //
+  // It exists because the fake's OTHER way of holding a turn open — `!tool`,
+  // which awaits a canUseTool — is no longer inert: a prompt typed while a
+  // question is parked DECLINES that question and stops the turn
+  // (daemon sessioncontroller/permdecline.go), so a test that needs a live turn
+  // to submit prompts behind cannot hold one open with a question.
+  let releaseHold: (() => void) | null = null;
   let permissionMode: PermissionMode = "default";
   // Mutable, and reported by init AND by every assistant message, so a
   // fake session exercises the real thing the topbar depends on: the
@@ -396,6 +408,32 @@ export function createFakeQuery(
     emitResult("error_during_execution");
   };
 
+  /**
+   * A turn that stays IN FLIGHT until the session is interrupted, asking
+   * nothing of the user on the way.
+   *
+   * It emits the assistant message frame so the turn looks like any other
+   * running turn to everything downstream, then parks. The stop is its only
+   * exit, and it ends the way an interrupted turn does — no assistant content
+   * and an error result — which is what the `!tool` hold produced too once its
+   * permission was cancelled.
+   */
+  const runHoldTurn = async (messageId: string): Promise<void> => {
+    LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId }, "running fake HOLD turn; it ends only when the session is interrupted");
+    emitStream({
+      type: "message_start",
+      message: { id: messageId, role: "assistant", model, usage },
+    });
+    // THE PARK IS ASSIGNED IN THE SAME SYNCHRONOUS RUN as the frame above, so
+    // there is no window in which the turn is live and the stop has nothing to
+    // resolve: a consumer only sees the frame after the resolver is in place.
+    await new Promise<void>((resolve) => {
+      releaseHold = resolve;
+    });
+    LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId }, "fake HOLD turn released by an interrupt");
+    emitResult("error_during_execution");
+  };
+
   const runToolTurn = async (messageId: string, command: string): Promise<void> => {
     const toolUseId = `toolu_fake_${turn}`;
     emitStream({
@@ -598,6 +636,9 @@ export function createFakeQuery(
       if (text.startsWith("!tool ")) {
         LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "tool" }, "selected fake turn branch");
         await runToolTurn(messageId, text.slice("!tool ".length));
+      } else if (text.trim() === "!hold") {
+        LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "hold" }, "selected fake turn branch");
+        await runHoldTurn(messageId);
       } else if (text.trim() === "!rotate") {
         LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "rotate" }, "selected fake turn branch");
         runRotateTurn(messageId, text);
@@ -641,6 +682,10 @@ export function createFakeQuery(
     // so nothing can survive an interrupt here.
     interrupt: async (): Promise<InterruptReceipt | undefined> => {
       interrupted = true;
+      // A parked `!hold` turn ends HERE and nowhere else (see releaseHold).
+      const release = releaseHold;
+      releaseHold = null;
+      release?.();
       LOGGER.log({ agent_repl_session_id: opts.sessionId, turns: turn }, "fake SDK interrupt accepted");
       return { still_queued: [] };
     },
