@@ -2211,6 +2211,91 @@ callers see a fresh state."
       (should-not (agent-repl--update-in-flight-p))
       (should-not agent-repl--update-in-flight))))
 
+;;;; ---- Tests: a stale flag against a still-scheduled continuation ----
+
+(defmacro agent-repl-test--with-starved-chain (warned informed &rest body)
+  "Run BODY with a 10s-old in-flight flag and a live scheduled next hop.
+This is the shape a chain has when a long main-thread operation starved
+its `run-at-time' hops: the flag is well past the stale threshold, yet
+the continuation is still sitting in `timer-list' waiting to run.  WARNED
+and INFORMED are bound to the messages each level received."
+  (declare (indent 2))
+  `(agent-repl-test--with-clean-state
+     (let ((agent-repl-state-stale-threshold 5.0)
+           (agent-repl--frontend-expected-restart nil)
+           (agent-repl--frontend-expected-restart-last-close nil)
+           (,warned nil)
+           (,informed nil))
+       (setq agent-repl--update-in-flight (- (float-time) 10.0))
+       (setq agent-repl--update-chain-timer
+             (run-at-time 3600 nil #'ignore))
+       (unwind-protect
+           (cl-letf (((symbol-function 'agent-repl--warn)
+                      (lambda (_ws fmt &rest args) (push (apply #'format fmt args) ,warned)))
+                     ((symbol-function 'agent-repl--info)
+                      (lambda (_ws fmt &rest args) (push (apply #'format fmt args) ,informed))))
+             ,@body)
+         (when (timerp agent-repl--update-chain-timer)
+           (cancel-timer agent-repl--update-chain-timer))
+         (setq agent-repl--update-chain-timer nil)))))
+
+(ert-deftest agent-repl-test-update-in-flight-p-starved-chain-reports-in-flight ()
+  "A stale flag whose next hop is still scheduled keeps the reentry guard up.
+Clearing here would start a second chain on top of one still walking the
+workspace list."
+  ;; Arrange / Act / Assert
+  (agent-repl-test--with-starved-chain warned informed
+    (should (agent-repl--update-in-flight-p))
+    (ignore warned informed)))
+
+(ert-deftest agent-repl-test-update-in-flight-p-starved-chain-keeps-the-flag ()
+  "A starved chain's flag is not force-cleared — its finalize still owns it."
+  ;; Arrange / Act
+  (agent-repl-test--with-starved-chain warned informed
+    (agent-repl--update-in-flight-p)
+    ;; Assert
+    (should agent-repl--update-in-flight)
+    (ignore warned informed)))
+
+(ert-deftest agent-repl-test-update-in-flight-p-starved-chain-emits-no-warn ()
+  "Being slow is not a leak, so a starved chain does not spend the leak alarm."
+  ;; Arrange / Act
+  (agent-repl-test--with-starved-chain warned informed
+    (agent-repl--update-in-flight-p)
+    ;; Assert
+    (should-not warned)
+    (ignore informed)))
+
+(ert-deftest agent-repl-test-update-in-flight-p-starved-chain-logs-info ()
+  "The starved chain stays observable: it is recorded at info with its age."
+  ;; Arrange / Act
+  (agent-repl-test--with-starved-chain warned informed
+    (agent-repl--update-in-flight-p)
+    ;; Assert
+    (should (string-match-p "chain age=10.00s over threshold=5.00s.*starved, not wedged"
+                            (car informed)))
+    (ignore warned)))
+
+(ert-deftest agent-repl-test-update-in-flight-p-cancelled-continuation-is-wedged ()
+  "A timer cancelled out from under the variable is a wedge, not a starve.
+It is off `timer-list' and will never fire, so nothing remains to finalize."
+  ;; Arrange
+  (agent-repl-test--with-starved-chain warned informed
+    (cancel-timer agent-repl--update-chain-timer)
+    ;; Act
+    (should-not (agent-repl--update-in-flight-p))
+    ;; Assert
+    (should (string-match-p "stale flag (10.00s old), force-clearing" (car warned)))
+    (ignore informed)))
+
+(ert-deftest agent-repl-test-update-chain-continuation-pending-p-nil-timer ()
+  "With no continuation held, nothing is pending."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--update-chain-timer nil)
+    ;; Act / Assert
+    (should-not (agent-repl--update-chain-continuation-pending-p))))
+
 ;;;; ---- Tests: a stale flag against the expected-restart window ----
 
 (defmacro agent-repl-test--with-stale-flag (warned informed &rest body)
