@@ -482,6 +482,28 @@ type harness struct {
 	beforeRunner *fakeBeforeActionRunner
 	afterRunner  *fakeAfterActionRunner
 	dir          string
+
+	// shutdown stops every fake and Closes the coordinator. Close WAITS on the
+	// coordinator's WaitGroup, so it joins every goroutine the coordinator ever
+	// spawned — the shim resolution goroutines included.
+	//
+	// A test asserting that some handoff was NOT dispatched calls quiesce
+	// first: once it returns, "the resolver was never called again" is a
+	// settled fact rather than a race against a goroutine that simply had not
+	// got there yet.
+	shutdown func()
+	// once is what lets a test quiesce early and leaves the t.Cleanup that
+	// always runs a no-op afterwards, rather than closing a closed channel.
+	once sync.Once
+}
+
+// quiesce joins every coordinator goroutine, so whatever the fakes have
+// recorded by the time it returns is everything they will ever record. It is
+// the synchronization point for NEGATIVE assertions about dispatches, in place
+// of sampling a channel's length and hoping.
+func (h *harness) quiesce(t *testing.T) {
+	t.Helper()
+	h.once.Do(h.shutdown)
 }
 
 // harnessOpts varies the one dependency a given test cares about. Everything
@@ -691,15 +713,16 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 	if err != nil {
 		t.Fatalf("NewCoordinator: %v", err)
 	}
-	t.Cleanup(func() {
+	h := &harness{coord: coord, queue: q, picker: picker, lease: lease, resolver: resolver, testResolver: testResolver, sink: sink, dir: dir}
+	h.shutdown = func() {
 		close(picker.stop)
 		close(resolver.stop)
 		close(testResolver.stop)
 		if err := coord.Close(); err != nil {
-			t.Fatalf("Close: %v", err)
+			t.Errorf("Close: %v", err)
 		}
-	})
-	h := &harness{coord: coord, queue: q, picker: picker, lease: lease, resolver: resolver, testResolver: testResolver, sink: sink, dir: dir}
+	}
+	t.Cleanup(func() { h.quiesce(t) })
 	if b, ok := sessions.(*fakeSessionBringUp); ok {
 		h.sessions = b
 	}
@@ -1319,8 +1342,9 @@ func TestConflictHandsTheResolutionToTheWorkspacesOwnShim(t *testing.T) {
 	}
 }
 
-func TestConflictDrivesTheShimExactlyOnce(t *testing.T) {
-	// Arrange — a conflict whose shim-driven resume conflicts again.
+func TestConflictDrivesTheShimExactlyOncePerConflictCommit(t *testing.T) {
+	// Arrange — a conflict whose shim-driven resume comes back conflicted on
+	// THE SAME COMMIT, which is the agent failing at what it was given.
 	h := newHarness(t)
 	req := testRequest("a")
 	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
@@ -1330,13 +1354,13 @@ func TestConflictDrivesTheShimExactlyOnce(t *testing.T) {
 	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 	<-h.resolver.calls
 
-	// Act — the resolution turn ends, the resume still conflicts.
+	// Act — the resolution turn ends, the resume is still on abc1234.
 	h.resolver.results <- nil
 	<-h.picker.resumes
-	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "def5678", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 
-	// Assert — a HUMAN resume is served, and no second shim attempt was made
-	// (the human's resume is the next thing the park sees).
+	// Assert — a HUMAN resume is served, and the same conflict is never
+	// re-prompted: a second identical attempt is a spin, not a strategy.
 	done := make(chan error, 1)
 	go func() { done <- h.coord.Resume(context.Background(), req) }()
 	<-h.picker.resumes
@@ -1344,8 +1368,162 @@ func TestConflictDrivesTheShimExactlyOnce(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("Resume() error = %v, want nil", err)
 	}
+	h.quiesce(t)
 	if got := len(h.resolver.calls); got != 0 {
-		t.Fatalf("resolver calls still pending = %d, want 0 (exactly one attempt)", got)
+		t.Fatalf("further resolver calls = %d, want 0 (one attempt per conflict commit)", got)
+	}
+}
+
+func TestResumeUncoveringANewConflictHandsThatConflictToTheShim(t *testing.T) {
+	// Arrange — the run's FIRST conflict, handed to the shim.
+	//
+	// This is the production miss: conflict A was resolved, the pick replayed
+	// on and stopped at conflict B, and B was never handed to anybody. The run
+	// sat conflict-parked and silent, holding the lease and the queue head,
+	// until a daemon bounce replayed it.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "f9ddc28", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+	first := <-h.resolver.calls
+
+	// Act — the agent resolves A, and the resumed pick stops on a NEW commit B.
+	h.resolver.results <- nil
+	<-h.picker.resumes
+	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "b269cb2", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+
+	// Assert — B goes to the shim too, under its own request id, pointed at the
+	// rebase worktree where B is parked.
+	second := <-h.resolver.calls
+	if second.ConflictCommit != "b269cb2" {
+		t.Fatalf("second resolution commit = %q, want b269cb2", second.ConflictCommit)
+	}
+	if second.RequestID == first.RequestID {
+		t.Fatalf("second resolution reused request id %q, want a distinct one", second.RequestID)
+	}
+	if second.Workspace != req.Workspace || second.SourceBranch != req.SourceBranch || second.TargetDir != testRebaseWorkDir {
+		t.Fatalf("second resolution = %+v, want workspace/branch of %+v and the rebase worktree %s", second, req, testRebaseWorkDir)
+	}
+}
+
+func TestResolvedSecondConflictResumesTheCherryPickToTerminal(t *testing.T) {
+	// Arrange — conflict A resolved, conflict B uncovered and handed on.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "f9ddc28", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+	<-h.resolver.calls
+	h.resolver.results <- nil
+	<-h.picker.resumes
+	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "b269cb2", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+	<-h.resolver.calls
+
+	// Act — the agent resolves B as well, and the second resume lands.
+	h.resolver.results <- nil
+	<-h.picker.resumes
+	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeMerged}}
+
+	// Assert — the merge retires on its own: the lease goes back and the queue
+	// head is released, with no human ever touching it.
+	<-h.lease.releases
+	if got := len(h.queue.Snapshot()[testRepoKey]); got != 0 {
+		t.Fatalf("queue depth = %d, want 0 after the shim resolved both conflicts", got)
+	}
+}
+
+func TestConflictReturningToAnAlreadyHandedCommitIsNotReHanded(t *testing.T) {
+	// Arrange — A is handed and resolved, B is uncovered and handed, and B's
+	// resume lands back on A. A has already had its one attempt.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+	<-h.resolver.calls
+	h.resolver.results <- nil
+	<-h.picker.resumes
+	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "def5678", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+	<-h.resolver.calls
+
+	// Act — the second turn ends and the pick falls back onto abc1234.
+	h.resolver.results <- nil
+	<-h.picker.resumes
+	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+
+	// Assert — the park stands for the human, and abc1234 is not prompted twice.
+	done := make(chan error, 1)
+	go func() { done <- h.coord.Resume(context.Background(), req) }()
+	<-h.picker.resumes
+	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeMerged}}
+	if err := <-done; err != nil {
+		t.Fatalf("Resume() error = %v, want nil", err)
+	}
+	h.quiesce(t)
+	if got := len(h.resolver.calls); got != 0 {
+		t.Fatalf("further resolver calls = %d, want 0 for a commit already handed once", got)
+	}
+}
+
+func TestHumanResumeUncoveringANewConflictHandsThatConflictToTheShim(t *testing.T) {
+	// Arrange — a conflict the shim could not be driven for, resolved by a
+	// human's conflict_resolved_continue instead.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+	<-h.resolver.calls
+	h.resolver.results <- sentinelError("no live session to drive")
+
+	// Act — the human resumes, and the pick stops on a commit nobody has been
+	// asked about.
+	done := make(chan error, 1)
+	go func() { done <- h.coord.Resume(context.Background(), req) }()
+	<-h.picker.resumes
+	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "def5678", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+	if err := <-done; err != nil {
+		t.Fatalf("Resume() error = %v, want nil", err)
+	}
+
+	// Assert — the new conflict reaches the shim through the same funnel: the
+	// human is not left owning every conflict after the first.
+	got := <-h.resolver.calls
+	if got.ConflictCommit != "def5678" {
+		t.Fatalf("resolution commit = %q, want def5678", got.ConflictCommit)
+	}
+}
+
+func TestResumeConflictAdoptsTheWorktreeTheResumeReports(t *testing.T) {
+	// Arrange — a conflict handed to the shim from the first rebase worktree.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+	<-h.resolver.calls
+
+	// Act — the resume reports the next conflict in a DIFFERENT worktree.
+	h.resolver.results <- nil
+	<-h.picker.resumes
+	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "def5678", WorkDir: "/tmp/rebase-a-second", BaseHead: baseHeadOfFailure}}
+
+	// Assert — the agent is sent to the tree the conflict is actually parked
+	// in, not the one the park was entered with.
+	got := <-h.resolver.calls
+	if got.TargetDir != "/tmp/rebase-a-second" {
+		t.Fatalf("resolution target dir = %q, want /tmp/rebase-a-second", got.TargetDir)
 	}
 }
 
@@ -1403,7 +1581,8 @@ func TestResumeWaitsForTheResolutionTurnToComplete(t *testing.T) {
 }
 
 func TestShimResolutionThatIsStillConflictedLeavesTheParkStanding(t *testing.T) {
-	// Arrange — the shim resolves, and the resume conflicts again.
+	// Arrange — the shim resolves, and the resume conflicts again on the SAME
+	// commit, so nothing is re-prompted and the human path is all that is left.
 	h := newHarness(t)
 	req := testRequest("a")
 	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
@@ -1416,7 +1595,7 @@ func TestShimResolutionThatIsStillConflictedLeavesTheParkStanding(t *testing.T) 
 	// Act.
 	h.resolver.results <- nil
 	<-h.picker.resumes
-	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "def5678", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 
 	// Assert — the lease and the queue head are still held, and a human resume
 	// still drives the merge to its terminal outcome.
@@ -1755,6 +1934,35 @@ func TestCloseRetainsAParkedConflictForTheNextBoot(t *testing.T) {
 	}
 	if got := len(next.Snapshot()[testRepoKey]); got != 1 {
 		t.Fatalf("surviving depth = %d, want 1", got)
+	}
+}
+
+func TestBootReplayOfAParkedConflictHandsItToTheShim(t *testing.T) {
+	// Arrange — an entry that survived a bounce with its conflict standing.
+	// This is the third way into a parked conflict, and it goes through the
+	// same funnel as the other two: a bounce is not what unwedges a run.
+	q, dir := newTestQueue(t)
+	req := testRequest("a")
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+	h := newHarnessWith(t, harnessOpts{queue: next, dir: dir})
+
+	// Act — the boot drain replays the entry and the pick conflicts again.
+	if err := h.coord.Drain(context.Background()); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+
+	// Assert.
+	got := <-h.resolver.calls
+	if got.ConflictCommit != "abc1234" {
+		t.Fatalf("resolution commit = %q, want abc1234", got.ConflictCommit)
 	}
 }
 
