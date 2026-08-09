@@ -2871,6 +2871,16 @@ export class FeedRenderer {
   private msgDrafts = new Map<string, string>();
   private lastState: StoreState | null = null;
   /**
+   * The store's open-bubble registry, so a tool card can MATCH its
+   * classification verdict against the detached work the daemon pushed.
+   *
+   * Wired once at mount and held by reference — the registry is a live object
+   * the store mutates in place, so there is nothing per-render to re-read and
+   * no second copy to fall behind. Null until wired, which leaves cards
+   * drawing no bubbles: the honest state of a page with no async plane.
+   */
+  asyncBubbles: AsyncBubbleRegistry | null = null;
+  /**
    * Whether the session is IDLE yet live async continues somewhere in the
    * feed — the amber monitoring signal, now the sidebar's breathing dot on
    * the session's own row (see `WorkspaceSidebar.setMonitoring`) rather than
@@ -3181,6 +3191,7 @@ export class FeedRenderer {
       drafts: this.msgDrafts,
       watchers,
       gnsFolds: gnsFoldsByBubble,
+      ...(this.asyncBubbles === null ? {} : { asyncBubbles: this.asyncBubbles }),
       taskTail: (id) => this.watcherPoller?.tail(id),
       supportPhases: this.supportPhases,
       canAddSupport: this.actions.addSupport !== undefined,
