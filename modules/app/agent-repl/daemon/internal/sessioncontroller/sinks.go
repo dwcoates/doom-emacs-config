@@ -531,16 +531,18 @@ type consumer struct {
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
 	onTurnResultCost func(cost turnResultCost)
-	// onContextCompacted reports that a compaction COMPLETED — the compacting
+	// compactedWaiter reports that a compaction COMPLETED — the compacting
 	// axis closing, which is the only first-class report the vendor gives.
 	// A compact-first revival waits on it before it will accept prompts.
 	// Assigned after construction, like onVendorSessionID.
-	onContextCompacted func()
-	// contextCompactedToken identifies WHICH revival installed the waiter
-	// above. Funcs are not comparable, so a disarm has no other way to tell
-	// its own waiter from a later one, and clearing whatever it happens to
-	// find would retire a revival that is still waiting.
-	contextCompactedToken *struct{}
+	compactedWaiter cutWaiter
+	// clearedWaiter is compactedWaiter's counterpart for the OTHER context
+	// cut: the clearing axis closing, which is the only first-class report
+	// that a `/clear` actually discarded the conversation. A clear revival
+	// waits on it on exactly the terms a compact-first revival waits on the
+	// compaction, and it is a SEPARATE field so a cut of one kind can never
+	// release a revival that asked for the other.
+	clearedWaiter cutWaiter
 	// keepAliveWindows is the durable ledger the keep-alive exclusion reads
 	// (keepaliveexclude.go). Nil is the exclusion OFF.
 	keepAliveWindows KeepAliveWindowLedger
@@ -1816,6 +1818,12 @@ func (c *consumer) noteCutCompleted(ev *corev1.Event) {
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_ContextCleared:
 		err = c.ssm.ApplyClearing(c.workspace, false, "context_cleared")
+		// A CLEAR revival is waiting on exactly this event, on the compaction's
+		// terms below: the clearing axis closing is the only first-class report
+		// that the conversation was actually discarded, so the gate is released
+		// from here rather than from a turn end that would also fire for a
+		// `/clear` the CLI never carried out.
+		c.fireCutWaiter(&c.clearedWaiter)
 	case *corev1.Event_ContextCompacted:
 		err = c.ssm.ApplyCompacting(c.workspace, false, "context_compacted")
 		// A compact-first revival is waiting on exactly this event. The
@@ -1823,9 +1831,7 @@ func (c *consumer) noteCutCompleted(ev *corev1.Event) {
 		// first-class report that a compaction finished — so the revival's gate
 		// is released from here rather than from a turn end, which would also
 		// fire for a compaction that failed.
-		if c.onContextCompacted != nil {
-			c.onContextCompacted()
-		}
+		c.fireCutWaiter(&c.compactedWaiter)
 	}
 	if err != nil {
 		c.logf("session-controller: closing the context-cut axis FAILED session=%s ws=%s seq=%d kind=%s: %v (the workspace may hold its phase word until the next bounding edge)",
