@@ -137,11 +137,40 @@ func quoted(s string) string {
 	return strconv.Quote(s)
 }
 
+// joinPaths writes one problem's field paths as a phrase, folding repeats into
+// a single entry carrying its count.
+//
+// EVERY ONE OF THESE LISTS IS PER-RESPONSE EVIDENCE, and a turn has as many
+// responses as it has. One settled turn reported the same unmodeled path once
+// per response and the cell read "iterations.0, iterations.0, …" 113 times, a
+// sentence long enough to bury the OTHER problem beside it. The count says
+// strictly more than the repetition did, in one entry.
+//
+// THIS IS DISPLAY ONLY. The record's own path list stays complete and
+// un-deduplicated: it is the evidence, and folding it there would lose which
+// responses were involved. First-appearance order is preserved so the phrase
+// still reads in the order the reducer detected the paths.
 func joinPaths(paths []string) string {
 	if len(paths) == 0 {
 		return "field paths the record did not name"
 	}
-	return strings.Join(paths, ", ")
+	counts := make(map[string]int, len(paths))
+	order := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if counts[path] == 0 {
+			order = append(order, path)
+		}
+		counts[path]++
+	}
+	phrases := make([]string, 0, len(order))
+	for _, path := range order {
+		if counts[path] == 1 {
+			phrases = append(phrases, path)
+			continue
+		}
+		phrases = append(phrases, fmt.Sprintf("%s ×%d", path, counts[path]))
+	}
+	return strings.Join(phrases, ", ")
 }
 
 // missingCompleteEvidence names every evidence fragment the full summary needs
