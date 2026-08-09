@@ -429,8 +429,19 @@ func conversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*fro
 // exactly why the slash-command curator (sessioncontroller/machinery.go) has to
 // string-match record bodies instead of reading a flag.
 //
-// Only file-plane records have one. The stream plane's messages carry no
-// transcript envelope at all, so a stream item simply has no entry.
+// A file-plane record's envelope is the transcript's own. A STREAM-plane
+// message carries no transcript envelope, but it does carry the one fact this
+// struct exists to partition on: parent_tool_use_id, the launching call of the
+// detached agent that produced it. Such a message therefore gets an entry too
+// (streamDetachmentEnvelopes); only a record with no detachment evidence at
+// all has none.
+//
+// WHY THE STREAM PLANE MUST HAVE ONE. Both planes carry the same subagent
+// conversation, and a subagent's output reaches the daemon on the STREAM plane
+// first — for a Task dispatch, only there. Leaving those items envelope-less
+// made CurateEvent read them as main-conversation records and push them to the
+// top-level feed: the exact defect asyncsplit.go exists to repair, reached
+// through the other plane.
 type RecordEnvelope struct {
 	// ParentUUID is the uuid of the record this one replies to, the linkage
 	// the harness threads its synthetic records onto. Empty at a chain root.
@@ -464,8 +475,9 @@ type RecordEnvelope struct {
 // lines prefer their own on-disk envelope timestamp. requestID is the Event's
 // control-request correlation, carried onto every item's envelope.
 //
-// The second return carries the file plane's RecordEnvelopes; the stream plane
-// has no transcript envelope at all and returns nil.
+// The second return carries each item's RecordEnvelope: the file plane's own
+// transcript envelope, or — on the stream plane, which has none — the
+// detachment envelope synthesized from parent_tool_use_id.
 func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID string) ([]*frontendv1.ConversationItem, map[string]RecordEnvelope, error) {
 	if a == nil {
 		return nil, nil, nil
@@ -478,18 +490,22 @@ func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID str
 	case *datav1.ClaudeStreamMessage:
 		switch inner := m.GetMsg().(type) {
 		case *datav1.ClaudeStreamMessage_Assistant:
-			return assistantItems(inner.Assistant, producedAtMs, requestID), nil, nil
+			items := assistantItems(inner.Assistant, producedAtMs, requestID)
+			return items, streamDetachmentEnvelopes(items, inner.Assistant.GetParentToolUseId()), nil
 		case *datav1.ClaudeStreamMessage_User:
-			return userItems(inner.User, producedAtMs, requestID), nil, nil
+			items := userItems(inner.User, producedAtMs, requestID)
+			return items, streamDetachmentEnvelopes(items, inner.User.GetParentToolUseId()), nil
 		case *datav1.ClaudeStreamMessage_Result:
 			return resultItems(inner.Result, producedAtMs, requestID), nil, nil
 		default:
 			return nil, nil, nil // known envelope, non-conversational arm
 		}
 	case *datav1.AssistantMessage:
-		return assistantItems(m, producedAtMs, requestID), nil, nil
+		items := assistantItems(m, producedAtMs, requestID)
+		return items, streamDetachmentEnvelopes(items, m.GetParentToolUseId()), nil
 	case *datav1.UserMessage:
-		return userItems(m, producedAtMs, requestID), nil, nil
+		items := userItems(m, producedAtMs, requestID)
+		return items, streamDetachmentEnvelopes(items, m.GetParentToolUseId()), nil
 	case *datav1.ResultMessage:
 		return resultItems(m, producedAtMs, requestID), nil, nil
 	case *datav1.TranscriptLine:
@@ -601,6 +617,34 @@ func recordEnvelopes(items []*frontendv1.ConversationItem, env *datav1.LineEnvel
 		SourceToolUseID: env.GetSourceToolUseId(),
 		AgentID:         env.GetAgentId(),
 	}
+	out := make(map[string]RecordEnvelope, len(items))
+	for _, it := range items {
+		out[it.GetUuid()] = re
+	}
+	return out
+}
+
+// streamDetachmentEnvelopes is the STREAM plane's answer to recordEnvelopes:
+// it states, for each item a stream message curated to, that the message came
+// from a detached agent and names the call that launched it.
+//
+// parentToolUseID IS THE WHOLE EVIDENCE, and it is the transcript's own
+// structured statement rather than an inference from prose — the same standard
+// LineEnvelope.is_sidechain meets on the file plane. The SDK sets it on every
+// message a subagent produces and leaves it empty on every message the main
+// agent produces, so an empty id is not a detachment whose launch is unknown:
+// it is not a detachment. Nil is returned then, and the item keeps the
+// no-envelope shape a main-conversation record has always had.
+//
+// The id doubles as SourceToolUseID because it IS the launching tool_use id —
+// the handle asyncsplit keys a fold by and the bubble store addresses a bubble
+// by. AgentID stays empty: the stream plane never names one, and the launching
+// call is the stronger handle anyway.
+func streamDetachmentEnvelopes(items []*frontendv1.ConversationItem, parentToolUseID string) map[string]RecordEnvelope {
+	if len(items) == 0 || parentToolUseID == "" {
+		return nil
+	}
+	re := RecordEnvelope{IsSidechain: true, SourceToolUseID: parentToolUseID}
 	out := make(map[string]RecordEnvelope, len(items))
 	for _, it := range items {
 		out[it.GetUuid()] = re
