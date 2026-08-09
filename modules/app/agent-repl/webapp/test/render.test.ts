@@ -4551,6 +4551,9 @@ function watcher(taskId = "bg1", over: Partial<ToolItem> = {}): ToolItem {
     inputJson: "{}",
     input: { command: "poll.sh" },
     inputDone: true,
+    // THE CLASSIFICATION VERDICT is what makes this a member now — the result
+    // prose below is spool evidence the card renders, never an identity.
+    spawnedBubbleId: taskId,
     result: { isError: false, content: `Command running in background with ID: ${taskId}. Output is being written to: /tmp/claude-1/s/tasks/${taskId}.output` },
     ...over,
   };

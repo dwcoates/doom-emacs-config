@@ -10,45 +10,42 @@
  * to the spawning tool items so the renderer can border it, catalog it, and
  * fold each member's live tail into it.
  *
- * DERIVE-DON'T-TRACK, like agents.ts and partition.ts: the spawn ids are
- * already in the store (a spawning call's result / notification, read by
- * `spawnedTaskIds`), so this is a projection of `items` rather than a
- * second copy. Turn-SCOPED on purpose: it lists every member a bubble's
- * turn spawned, because matching the prose wording ("the pickup watcher")
- * back to a raw id is not reliable, whereas the turn's spawn set is exact.
+ * # ONE TIER. THE DAEMON'S.
+ *
+ * This module used to walk a THREE-TIER IDENTITY LADDER: a classification
+ * first, then a landed notification's task id, then an announcement parsed out
+ * of paired result prose. It is gone, and it is not kept as a fallback.
+ *
+ * A ladder is a staged-probabilistic identity. Each rung is individually
+ * plausible and the whole is usually right, but "usually right" is the property
+ * the architecture forbids here: the lower rungs read evidence — completion
+ * notifications, free-text prose — that two frontends parse differently and
+ * that the same frontend parses differently as prose changes. When a ladder
+ * picks wrong it does so silently, and the wrong answer is an IDENTITY, so
+ * every later update addressed to it lands on the wrong work.
+ *
+ * `AgentToolCall.spawned_bubble_id` replaced all of it. The daemon owns the
+ * classification, mints the bubble's id, and stamps the same string on the
+ * call and on its structured outcome, so a frontend MATCHES an id and never
+ * derives one. Empty means "this call detached nothing" — the ONLY reading of
+ * empty, and specifically not an invitation to go looking elsewhere.
  */
-import { spawnedTaskIds } from "./partition.js";
 import { ConversationItem, ToolItem } from "./store.js";
 
-/** Which evidence tier established a watcher's identity, for bookkeeping. */
-export type WatcherOrigin = "classified" | "notification" | "announced";
-
-/** A watcher's single authoritative task id, plus the tier that proved it. */
-export interface WatcherRef {
-  id: string;
-  origin: WatcherOrigin;
-}
-
 /**
- * The detached work ITEM owns, as ONE id with its evidence tier — or null
- * when the call spawned nothing detached, which is the membership verdict
- * every async surface keys off. The ladder is most-structural-first: the
- * classification (a live card's async-source frame, a parsed card's
- * toolUseResult sidecar), then a landed notification's id, then the
- * paired-prose announcement tier that survives only for pre-structured
- * history (see spawnedTaskIds). A bare id-like token in result prose sits
- * on NO tier, so a finished sync agent's `agentId:` completion handle can
- * no longer manufacture a live-forever member.
+ * The bubble ITEM's call detached, or null when it detached nothing.
+ *
+ * This is the membership verdict every async surface keys off, and it has
+ * exactly one input: the daemon's verdict as the store recorded it. There is
+ * deliberately no second source to consult when the first says nothing.
  */
-export function watcherRef(item: ConversationItem): WatcherRef | null {
+export function watcherRef(item: ConversationItem): string | null {
   if (item.kind !== "tool") return null;
-  if (item.asyncSource) return { id: item.asyncSource.source_id, origin: "classified" };
-  if (item.notification?.taskId) return { id: item.notification.taskId, origin: "notification" };
-  const ids = spawnedTaskIds(item);
-  return ids.length > 0 ? { id: ids[0], origin: "announced" } : null;
+  const verdict = item.spawnedBubbleId;
+  return verdict === undefined || verdict === "" ? null : verdict;
 }
 
-/** A tool call is an async member when some evidence tier proved detached work. */
+/** A tool call is an async member exactly when the daemon says it detached work. */
 export function isWatcher(item: ConversationItem): item is ToolItem {
   return watcherRef(item) !== null;
 }

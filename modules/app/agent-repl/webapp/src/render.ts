@@ -1400,10 +1400,10 @@ function statusDot(status: MemberStatus): "running" | "done" | "error" {
   return status === "running" ? "running" : status === "done" ? "done" : "error";
 }
 
-/** A member's badge label: its tool name and its one watcher id, capped. */
+/** A member's badge label: its tool name and its one bubble id, capped. */
 function asyncBadgeLabel(item: ToolItem): string {
-  const ref = watcherRef(item);
-  const label = ref !== null ? `${item.toolName} · ${ref.id}` : item.toolName;
+  const bubbleId = watcherRef(item);
+  const label = bubbleId !== null ? `${item.toolName} · ${bubbleId}` : item.toolName;
   return capLabel(label, 24);
 }
 

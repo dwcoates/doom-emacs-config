@@ -1192,7 +1192,13 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
     case "userMessage":
       return userMessageItems(frame);
     case "toolUse":
-      return { items: [toolItemFromUse(frame.payload, frame.uuid, tsFromMs(frame.tsMs))], ignores: [] };
+      return {
+        // The card's CLASSIFICATION VERDICT rides the emission envelope, one
+        // level above the verbatim ToolUseBlock, so it is passed in rather
+        // than read off the payload.
+        items: [toolItemFromUse(frame.payload, frame.uuid, tsFromMs(frame.tsMs), frame.spawnedBubbleId)],
+        ignores: [],
+      };
     case "toolResult":
       return { items: [toolItemFromResult(frame.payload, frame.uuid, tsFromMs(frame.tsMs))], ignores: [] };
     case "toolUseResult":
@@ -1402,7 +1408,7 @@ function userTurn(
 }
 
 /** ToolUseBlock {id, name, input, caller} → the tool CALL item (no result). */
-function toolItemFromUse(use: Obj, messageUuid: string, ts: string): ToolItem {
+function toolItemFromUse(use: Obj, messageUuid: string, ts: string, spawnedBubbleId?: string): ToolItem {
   const item: ToolItem = {
     kind: "tool",
     toolUseId: pstr(use, "id"),
@@ -1414,6 +1420,9 @@ function toolItemFromUse(use: Obj, messageUuid: string, ts: string): ToolItem {
   };
   const input = pobj(use, "input");
   if (input !== undefined) item.input = input;
+  // Stamped only when the daemon set it. Empty means "detached nothing", which
+  // is the ABSENCE of a bubble rather than a bubble named "".
+  if (spawnedBubbleId !== undefined && spawnedBubbleId !== "") item.spawnedBubbleId = spawnedBubbleId;
   return item;
 }
 
