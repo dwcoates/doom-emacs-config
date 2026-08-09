@@ -116,6 +116,35 @@ the two halves — dispatch finishing, ack delivery — completes second. Readin
 them together names the fault: a small `enqueue_ms` under a large `duration_ms`
 is the outbound queue, not the handler.
 
+## The connect-snapshot drain is a named window, not a raised threshold
+
+The alarm above fires once per boot on the host connection, and correctly: the
+connect snapshot carries every workspace the daemon knows about (104 in the
+observed case), and an ack answered while that snapshot is still going out is
+delivered behind one in-flight write nothing can preempt. The cost is real and
+it is EXPECTED — the client's own 10s deadline is the meaningful bound during
+bring-up, and it is comfortably met.
+
+So the window is CLASSIFIED rather than muted or thresholded away
+(`bootdrain.go`). Each connection carries a `snapshotDrain` whose two edges are
+the two events that define it: the instant its connect `StateSnapshot` was
+handed to the outbound queue, and that same frame's terminal disposition
+reported by the writer. It is derived from the outbox's existing notify hook,
+not from a timer, so it cannot be open while the snapshot is already delivered
+nor closed while it is still draining, and it never drifts with the snapshot's
+size or the host's speed.
+
+A sample whose delivery interval (receipt → ack on the socket) OVERLAPS that
+window carries `Decision = boot_snapshot_drain`, and the recorder logs it at
+`info` with `decision=boot_snapshot_drain` and every figure intact, at normal
+verbosity. Outside the window the record is byte-identical to what it always
+was: `warn`, no `decision` key. The closing edge is exclusive, so the first
+command received after the write completion warns again. Three things stay loud
+inside the window too — an ack that never reached the socket, a command still
+in flight past the deadline, and a connection that somehow never enqueued a
+snapshot at all (which reports no overlap rather than inheriting an explanation
+nothing established). The client-side deadline path is untouched.
+
 ## A saturated queue is compacted before the connection is given up on
 
 Each connection's outbound queue is bounded. A hidden or backgrounded webview
