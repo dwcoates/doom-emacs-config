@@ -273,9 +273,23 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 			workspace, sessionID, mode, err)
 		return err
 	}
+	if _, err := m.ensure(ctx, workspace); err != nil {
+		return fmt.Errorf("session-controller: reviving session %s (ws %q) for compaction: bringing it up: %w", sessionID, workspace, err)
+	}
+	// THE KEEP-ALIVE DEBT IS SETTLED BEFORE THE COMPACTION READS THE HISTORY,
+	// and this path is the one where getting it wrong is permanent. A hibernated
+	// session's transcript tail is very often keep-alive turns — pings are the
+	// last thing that ran before the cache expired and the sleep was taken — and
+	// a `/compact` submitted on top of them SUMMARIZES them into the
+	// conversation, where no later rewind can reach them.
+	//
+	// It runs AFTER the bring-up because the rewind needs a session to stop and
+	// a transcript identity to truncate, and the controller is resolved AFTER it
+	// because a successful settle replaces the one the bring-up produced.
+	m.settleKeepAliveResidue(ctx, workspace, "revive:compact-first")
 	d, err := m.ensure(ctx, workspace)
 	if err != nil {
-		return fmt.Errorf("session-controller: reviving session %s (ws %q) for compaction: bringing it up: %w", sessionID, workspace, err)
+		return fmt.Errorf("session-controller: reviving session %s (ws %q) for compaction: bringing the rewound conversation up: %w", sessionID, workspace, err)
 	}
 	compacted, disarm, err := m.armCompactionWait(d)
 	if err != nil {
