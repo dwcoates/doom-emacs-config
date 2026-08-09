@@ -255,8 +255,23 @@ re-enters the replay, which re-gates the head the fix produced.
   The tail is clamped, and the repository's entrypoint keeps running suites
   after one fails, so the retained bytes are routinely the LAST suites'
   coverage tables rather than the failure. `merge.SuiteRunner` writes the whole
-  run to a file and reports its path on `SuiteResult.OutputPath`; an archive
-  that cannot be written is logged loudly and named in the tail, never dropped.
+  run to a file and reports its path on `SuiteResult.OutputPath`.
+
+  THAT FILE IS THE CHILD'S STDOUT, NOT A COPY OF IT, and that is load-bearing
+  rather than incidental. Capturing into a `bytes.Buffer` makes `os/exec`
+  manufacture an `os.Pipe` whose write end EVERY descendant of the suite
+  inherits, and `Wait` blocks until the last of them closes it — so one
+  background daemon an e2e suite leaks holds the merge queue head forever, with
+  `suite RUNNING` logged and no verdict ever. An `*os.File` is dup2'd straight
+  into the child: no pipe, no copying goroutine, and `Wait` returns when the
+  CHILD is reaped. `WaitDelay` and `Cancel` are set so a future `StdoutPipe`
+  degrades into a bounded wait rather than back into the wedge, and the suite is
+  spawned `Setpgid` so whatever it leaks is SIGKILLed with its own process group
+  — only ever that group — and loud-logged when there was anything to kill.
+
+  Because the file must exist before the spawn, a file that cannot be created
+  is an UNRUNNABLE SUITE surfaced as an error, not a lost archive; a tail that
+  cannot be read back is logged loudly and named in the tail, never dropped.
 
 ## Conflict resolution is shim-driven first, human second
 

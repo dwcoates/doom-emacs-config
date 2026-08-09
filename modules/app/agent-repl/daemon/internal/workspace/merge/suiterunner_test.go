@@ -2,10 +2,14 @@ package merge
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // writeEntrypoint plants an executable test entrypoint at the repository's
@@ -395,5 +399,245 @@ func TestRunSuiteReportsTheRunsDuration(t *testing.T) {
 	// be zero-valued.
 	if got.Duration <= 0 {
 		t.Fatalf("Duration = %v, want the measured run time", got.Duration)
+	}
+}
+
+// --- a suite that leaks a background process must not wedge the gate ---------
+//
+// THE PRODUCTION FAILURE THESE COVER. The runner used to capture the suite's
+// output into a bytes.Buffer, which makes os/exec manufacture an os.Pipe and
+// wait for it to reach EOF. Every descendant of the suite inherits the pipe's
+// write end, so one leaked background daemon kept Wait blocked forever: the
+// merge queue head logged "suite RUNNING" and then nothing at all, with the
+// suite process already gone from the process table. Writing straight to an
+// *os.File removes the pipe, and with it the wait.
+
+// boundedRunSuite runs RunSuite off the test goroutine and fails the test the
+// moment ctx expires.
+//
+// A plain call cannot express this: the regression it guards blocks inside
+// cmd.Wait with no cancellation path at all (cancelling the context kills the
+// suite process, which is already dead — it is the GRANDCHILD holding the
+// pipe), so a regressed runner would hang the whole package until the go test
+// binary's own timeout fired.
+func boundedRunSuite(ctx context.Context, t *testing.T, r *RepoSuiteRunner, dir string, run SuiteRun) (SuiteResult, error) {
+	t.Helper()
+	type outcome struct {
+		res SuiteResult
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		res, err := r.RunSuite(ctx, dir, run)
+		done <- outcome{res: res, err: err}
+	}()
+	select {
+	case got := <-done:
+		return got.res, got.err
+	case <-ctx.Done():
+		t.Fatalf("RunSuite did not return before the deadline (%v): a background process the suite leaked is holding the run open", ctx.Err())
+		return SuiteResult{}, nil
+	}
+}
+
+// suiteDeadline bounds every leak test. It is generous against a loaded
+// machine and still orders of magnitude below the wedge it guards, which held
+// the production queue head for twenty minutes.
+const suiteDeadline = 30 * time.Second
+
+func TestRunSuitePassesWhenTheSuiteLeavesABackgroundProcessRunning(t *testing.T) {
+	// Arrange — an entrypoint that spawns a background process inheriting its
+	// stdout and stderr and then exits cleanly, which is what the daemon e2e
+	// suites do whenever one of the daemons or shims they start outlives them.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\nsleep 300 &\necho all good\nexit 0\n")
+	r, _ := newTestSuiteRunner(t)
+	ctx, cancel := context.WithTimeout(context.Background(), suiteDeadline)
+	defer cancel()
+
+	// Act.
+	got, err := boundedRunSuite(ctx, t, r, repo, SuiteRun{Attempt: 1})
+
+	// Assert — the verdict is the child's, not its descendants'.
+	if err != nil {
+		t.Fatalf("RunSuite() err = %v", err)
+	}
+	if got.Skipped || !got.Passed {
+		t.Fatalf("RunSuite() = %+v, want a passing verdict", got)
+	}
+}
+
+func TestRunSuiteFailsWithTheTailWhenALeakingSuiteExitsNonZero(t *testing.T) {
+	// Arrange — the same leak, on the path where the output actually matters.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\nsleep 300 &\necho 'FAIL: the leaking suite'\nexit 1\n")
+	r, _ := newTestSuiteRunner(t)
+	ctx, cancel := context.WithTimeout(context.Background(), suiteDeadline)
+	defer cancel()
+
+	// Act.
+	got, err := boundedRunSuite(ctx, t, r, repo, SuiteRun{Attempt: 1})
+	if err != nil {
+		t.Fatalf("RunSuite() err = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(got.OutputPath) })
+
+	// Assert — the tail read back off the file still carries what failed.
+	if got.Passed {
+		t.Fatalf("RunSuite() = %+v, want a failing verdict", got)
+	}
+	if !strings.Contains(got.Tail, "FAIL: the leaking suite") {
+		t.Errorf("Tail = %q, want the suite's own output read back from the file", got.Tail)
+	}
+}
+
+func TestRunSuiteKillsTheProcessGroupTheSuiteLeavesBehind(t *testing.T) {
+	// Arrange — the entrypoint opens a fifo the test is reading, hands the
+	// descriptor to a background process by forking after the open, and drops
+	// its own copy before exiting. The fifo reaches EOF exactly when the LAST
+	// holder of that descriptor dies, so the read below is a synchronization
+	// primitive for "the leaked process is gone" and never a timer.
+	repo := initTarget(t)
+	fifo := filepath.Join(t.TempDir(), "held")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\n"+
+		"exec 3>"+fifo+"\n"+ // blocks until the reader below opens it
+		"( sleep 300 ) &\n"+ // the background process inherits descriptor 3
+		"exec 3>&-\n"+ // the entrypoint itself lets go
+		"exit 0\n")
+	r, _ := newTestSuiteRunner(t)
+	eof := make(chan error, 1)
+	go func() {
+		f, err := os.OpenFile(fifo, os.O_RDONLY, 0)
+		if err != nil {
+			eof <- err
+			return
+		}
+		defer f.Close()
+		_, err = io.ReadAll(f)
+		eof <- err
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), suiteDeadline)
+	defer cancel()
+
+	// Act.
+	got, err := boundedRunSuite(ctx, t, r, repo, SuiteRun{Attempt: 1})
+	if err != nil {
+		t.Fatalf("RunSuite() err = %v", err)
+	}
+	if !got.Passed {
+		t.Fatalf("RunSuite() = %+v, want a passing verdict", got)
+	}
+
+	// Assert — the leaked process died with the suite's process group.
+	select {
+	case readErr := <-eof:
+		if readErr != nil {
+			t.Fatalf("read the held descriptor: %v", readErr)
+		}
+	case <-ctx.Done():
+		t.Fatalf("the process the suite leaked is still holding its descriptor after RunSuite returned (%v)", ctx.Err())
+	}
+}
+
+// --- the tail now comes off the file -----------------------------------------
+
+func TestRunSuiteClampsTheTailToTheLastSuiteTailBytes(t *testing.T) {
+	// Arrange — far more output than the clamp, with the verdict at the very
+	// end where a test runner puts it.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\n"+
+		fmt.Sprintf("head -c %d /dev/zero | tr '\\0' 'x'\n", suiteTailBytes*2)+
+		"echo\necho VERDICT-END\nexit 1\n")
+	r, _ := newTestSuiteRunner(t)
+
+	// Act.
+	got, err := r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 1})
+	if err != nil {
+		t.Fatalf("RunSuite() err = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(got.OutputPath) })
+
+	// Assert — exactly the last suiteTailBytes, behind the elision marker.
+	notice := truncationNotice(suiteTailBytes)
+	if !strings.HasPrefix(got.Tail, notice) {
+		t.Fatalf("Tail = %q..., want it to open with the elision marker", got.Tail[:min(len(got.Tail), 80)])
+	}
+	if len(got.Tail) != len(notice)+suiteTailBytes {
+		t.Errorf("len(Tail) = %d, want %d", len(got.Tail), len(notice)+suiteTailBytes)
+	}
+	if !strings.HasSuffix(got.Tail, "VERDICT-END\n") {
+		t.Errorf("Tail does not end on the verdict; got %q", got.Tail[max(0, len(got.Tail)-40):])
+	}
+}
+
+// --- the output file is a precondition of the run, not a diagnostic after it -
+
+func TestRunSuiteRefusesTheRunWhenTheOutputFileCannotBeCreated(t *testing.T) {
+	// Arrange — a temp directory that does not exist, so the file the suite
+	// would write its output to cannot be created.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\nexit 0\n")
+	r, _ := newTestSuiteRunner(t)
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "does-not-exist"))
+
+	// Act.
+	_, err := r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 1})
+
+	// Assert — an unrunnable suite, never a verdict: the run never happened.
+	if err == nil {
+		t.Fatalf("RunSuite() err = nil, want the missing output file surfaced")
+	}
+	if !strings.Contains(err.Error(), "output file") {
+		t.Errorf("err = %v, want it to name the output file", err)
+	}
+}
+
+func TestRunSuiteDoesNotReportRunningWhenTheOutputFileCannotBeCreated(t *testing.T) {
+	// Arrange — the same failure, checked at the log.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\nexit 0\n")
+	r, logged := newTestSuiteRunner(t)
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "does-not-exist"))
+
+	// Act.
+	_, _ = r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 1})
+
+	// Assert — the refusal precedes the spawn, so nothing may claim a run began.
+	for _, line := range *logged {
+		if strings.Contains(line, "suite RUNNING") {
+			t.Fatalf("logged %q, want no RUNNING line for a suite that was never spawned", line)
+		}
+	}
+}
+
+func TestRunSuiteRemovesTheOutputOfAPassingFirstAttempt(t *testing.T) {
+	// Arrange — a private temp directory, so what the run leaves behind in it
+	// is exactly what this run wrote.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\necho ok\n")
+	r, _ := newTestSuiteRunner(t)
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+
+	// Act.
+	got, err := r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 1})
+	if err != nil {
+		t.Fatalf("RunSuite() err = %v", err)
+	}
+
+	// Assert — nothing to diagnose, nothing kept: the output file that carried
+	// the run is gone rather than leaked into the temp directory.
+	if got.OutputPath != "" {
+		t.Fatalf("OutputPath = %q, want none for a passing first attempt", got.OutputPath)
+	}
+	left, globErr := filepath.Glob(filepath.Join(tmp, suiteOutputPattern))
+	if globErr != nil {
+		t.Fatalf("glob: %v", globErr)
+	}
+	if len(left) != 0 {
+		t.Errorf("temp directory holds %v, want the passing run's output removed", left)
 	}
 }
