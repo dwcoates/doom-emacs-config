@@ -23,26 +23,20 @@
 package e2e
 
 import (
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/server"
 	"claude-repld/internal/shim"
+	"claude-repld/internal/ssm"
 )
 
 // TestE2EASessionLeftUnwiredByTheBootSweepIsClassifiedNotSilent covers THE
 // NEVER-REDIALLED VERDICT: the shim is genuinely gone, both probes agree, and
 // the sweep is finished with the session.
 func TestE2EASessionLeftUnwiredByTheBootSweepIsClassifiedNotSilent(t *testing.T) {
-	// DESIGN-BLOCKED, deliberately skipped rather than red: the emission this
-	// asserts has no legal route yet. The classifier hook and the
-	// HostBootSweepSessionUnwired arm are landed, but the SSM's connectivity
-	// model refuses every transition out of a predecessor-generation
-	// hibernated state without a bring-up claim, so a sweep that wires
-	// nothing cannot paint the verdict. The skip comes out with the SSM
-	// entry point for controller-less sessions (in flight); a merge gate must
-	// not stay red on a test of deliberately unimplemented behavior.
-	t.Skip("boot-sweep verdict emission awaits the SSM controller-less connectivity entry point")
 	// Arrange — a session whose shim will NOT survive the bounce.
 	// Tempdirs before the world: cleanups run LIFO, so this tears the daemons
 	// and their shims down before the directories are removed.
@@ -73,16 +67,84 @@ func TestE2EASessionLeftUnwiredByTheBootSweepIsClassifiedNotSilent(t *testing.T)
 
 	// Assert — the successor publishes a classified account of the session it
 	// decided not to wire.
+	//
+	// TWO AMENDMENTS TO WHAT THIS USED TO ASSERT, both because the original
+	// pair of conditions was not a witness of the behavior:
+	//
+	//  1. IT READS THE CONNECT SNAPSHOT, not only a pushed WorkspaceState. The
+	//     sweep concludes during boot, before this test can dial, so the push
+	//     it makes has no subscriber and the ONLY delivery is the snapshot the
+	//     frontend sends on connect. Waiting for a per-workspace push here was
+	//     waiting for a frame that had already gone out to nobody. The
+	//     snapshot's `workspaces` field is the authoritative per-workspace
+	//     ruling (frame.proto), so this is the same observable, delivered the
+	//     way a client that connects after a boot actually receives it.
+	//
+	//  2. IT NAMES THE VERDICT. `connectivity != operational` and
+	//     `cause_kind != ""` were BOTH already true before any of this existed:
+	//     a bounced daemon hibernates every surviving session with the cause
+	//     `daemon_restart`, which is what EVERY survivor's row says and
+	//     therefore says nothing about this one. The contract in this file's
+	//     header is that the record says WHICH VERDICT IT WAS, so that is what
+	//     is asserted — the frame's cause is the verdict, and the classified
+	//     fault row carrying it is on the frame.
+	//
+	// The connectivity assertion is kept and sharpened to `hibernated`: the
+	// sweep made no bring-up claim, so hibernated is the true state, and what
+	// had to stop being silent is the CAUSE rather than the axis.
 	frontend := second.dialFrontend(t)
 	awaitAll(t, frontend, nil, map[string]func(*frontendv1.FrontendFrame) bool{
-		"a WorkspaceState classifying the session the boot sweep left UNWIRED — a conclusion the daemon reached about a session the user owns cannot be a log line only, and the stale connectivity its predecessor wrote must not go on presenting a shimless workspace as OPERATIONAL": func(frame *frontendv1.FrontendFrame) bool {
-			state := workspaceStateFor(frame, cwd)
+		"a WorkspaceState naming the verdict the boot sweep reached about the session it left UNWIRED — a conclusion the daemon reached about a session the user owns cannot be a log line only, and the anonymous restart cause its predecessor wrote says nothing about THIS session": func(frame *frontendv1.FrontendFrame) bool {
+			state := snapshotWorkspaceStateFor(frame, cwd)
 			if state == nil {
 				return false
 			}
-			classified := state.GetConnectivity() != frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_UNSPECIFIED &&
-				state.GetConnectivity() != frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_OPERATIONAL
-			return classified && state.GetCauseKind() != ""
+			if state.GetConnectivity() != frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_HIBERNATED {
+				return false
+			}
+			if state.GetCauseKind() != server.BootSweepUnwiredNoLiveShim {
+				return false
+			}
+			for _, fault := range state.GetActiveFaults() {
+				if fault.GetComponent() == ssm.BootSweepFaultComponent &&
+					fault.GetFaultType() == server.BootSweepUnwiredNoLiveShim &&
+					fault.GetImpact() == string(ssm.FaultImpactConnectivity) {
+					return true
+				}
+			}
+			return false
 		},
 	})
+
+	// And the host is told in words. The pushed state is a classification; the
+	// retained host action is the only surface that puts a sentence in front of
+	// the person whose session did not come back.
+	notes := second.hostVerdicts.bootSweepHostNotes()
+	if len(notes) != 1 {
+		t.Fatalf("host verdicts = %#v, want exactly one account of the unwired session", notes)
+	}
+	if notes[0].verdict != server.BootSweepUnwiredNoLiveShim || notes[0].sessionID == "" {
+		t.Fatalf("host verdict = %#v, want the never-redialled verdict named against its session", notes[0])
+	}
+	if !strings.Contains(notes[0].reason, server.BootSweepUnwiredNoLiveShim) {
+		t.Fatalf("host reason = %q, want the verdict token in the sentence the host renders", notes[0].reason)
+	}
+}
+
+// snapshotWorkspaceStateFor returns the WorkspaceState a CONNECT SNAPSHOT
+// carries for workspace, or nil when the frame is not a snapshot or does not
+// mention it. It is the snapshot-arm counterpart of workspaceStateFor: a client
+// that connects after an edge has already been pushed learns the fact here and
+// nowhere else.
+func snapshotWorkspaceStateFor(frame *frontendv1.FrontendFrame, workspace string) *frontendv1.WorkspaceState {
+	snapshot, ok := frame.GetFrame().(*frontendv1.FrontendFrame_Snapshot)
+	if !ok {
+		return nil
+	}
+	for _, state := range snapshot.Snapshot.GetWorkspaces() {
+		if state.GetWorkspace() == workspace {
+			return state
+		}
+	}
+	return nil
 }

@@ -25,6 +25,27 @@ var ErrJobFailed = errors.New("workspace create: job failed")
 // be produced by the manager's own failure path.
 const HostActionTypeWorkspaceCreateFailed = "workspace-create-failed"
 
+// HostActionTypeBootSweepSessionUnwired is the daemon-minted host action that
+// carries ONE boot-sweep verdict to the Emacs host.  Like the failure notice
+// above it never originates from a command file: the inbox rejects unknown
+// command types, so only the daemon's own boot reconciliation can produce it.
+//
+// It lives in this package because this package owns the retained-until-
+// completed host-action envelope — the durable store, the delivery drain, the
+// reconnect snapshot and the acknowledgement — and a second, parallel envelope
+// for one more daemon-minted notice would be a second owner of one mechanism.
+const HostActionTypeBootSweepSessionUnwired = "boot-sweep-session-unwired"
+
+// BootSweepSessionUnwired is the payload of a
+// HostActionTypeBootSweepSessionUnwired action.  Reason is a display-ready
+// sentence composed by the sweep and rendered verbatim by the host.
+type BootSweepSessionUnwired struct {
+	Workspace string `json:"workspace"`
+	SessionID string `json:"session_id"`
+	Verdict   string `json:"verdict"`
+	Reason    string `json:"reason"`
+}
+
 // WorkspaceCreateFailure is the payload of a HostActionTypeWorkspaceCreateFailed
 // action.  It names the job and the error so the host can say exactly which
 // creation died and why.
