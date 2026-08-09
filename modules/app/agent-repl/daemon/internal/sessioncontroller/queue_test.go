@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -289,6 +290,25 @@ func (s *activitySignal) notify() {
 // notifyTestActivity is what a fake calls, after recording, to say that
 // something a test may be waiting on has moved.
 func notifyTestActivity() { testActivity.notify() }
+
+// waitForSettled waits until cond holds over daemon state that NO fake reports
+// on, so there is nothing to be woken by: the queue's pause is applied after the
+// last fake in the stop path has already recorded its call, so a waitFor on it
+// would sleep past the very assignment it is waiting for.
+//
+// It yields rather than sleeps, and the bound is a DEADLINE for exactly
+// waitFor's reason: a condition that never becomes true must fail the test
+// instead of hanging it.
+func waitForSettled(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		runtime.Gosched()
+	}
+}
 
 // waitFor waits until cond holds, woken by the fakes rather than by a timer.
 // The bound that remains is a DEADLINE, not a poll interval: it exists so a
@@ -781,6 +801,92 @@ func TestInterjectVerdictAfterTheTurnEndedDeliversWithoutInterrupting(t *testing
 	waitFor(t, "the delivery", func() bool { return len(h.client.promptTexts()) == 1 })
 	if h.client.interruptCount() != 0 {
 		t.Fatal("nothing was running; there was nothing to interrupt")
+	}
+}
+
+// THE REPORTED DEFECT, on the path that reported it. A queue already paused by
+// an earlier stop used to swallow a classified INTERJECT's interrupt entirely,
+// so an automatic stop did nothing and the running turn only ended once the
+// user pressed stop by hand.
+func TestInterjectVerdictInterruptsEvenWhenTheQueueIsAlreadyPaused(t *testing.T) {
+	// Arrange — the user stops the session, then a turn runs against the still
+	// paused queue and a new prompt is classified INTERJECT against it.
+	cls := &fakeClassifier{res: ClassifyResult{Classification: VerdictInterject}}
+	h := newQueueHarness(t, cls)
+	h.turn(true)
+	if err := h.interrupt(); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	h.turn(false)
+	if !h.paused() {
+		t.Fatal("arrange: the user's stop must have paused the queue")
+	}
+	h.turn(true)
+	before := h.client.interruptCount()
+
+	// Act.
+	_ = h.submit("stop, wrong file")
+
+	// Assert.
+	waitFor(t, "the interject's interrupt", func() bool {
+		return h.client.interruptCount() == before+1
+	})
+}
+
+// The prompt that caused the stop is what the paused queue then runs, ahead of
+// everything the pause retained: an interject is a stop plus a head jump, and
+// the head jump is the half that delivers.
+func TestInterjectAgainstAPausedQueueDeliversItsOwnPromptFirst(t *testing.T) {
+	// Arrange — one prompt is retained by an earlier stop, and a later one is
+	// classified INTERJECT against the turn running alone.
+	cls := &fakeClassifier{res: ClassifyResult{Classification: VerdictHold}}
+	h := newQueueHarness(t, cls)
+	h.turn(true)
+	_ = h.submit("retained")
+	h.waitEntryClass(VerdictHold)
+	if err := h.interrupt(); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	h.turn(false)
+	h.turn(true)
+	cls.mu.Lock()
+	cls.res = ClassifyResult{Classification: VerdictInterject}
+	cls.mu.Unlock()
+	_ = h.submit("urgent")
+	waitFor(t, "the interject's interrupt", func() bool { return h.client.interruptCount() == 2 })
+
+	// Act — the stopped turn ends.
+	h.turn(false)
+
+	// Assert.
+	waitFor(t, "the delivery", func() bool { return len(h.client.promptTexts()) == 1 })
+	if got := h.client.promptTexts()[0]; got != "urgent" {
+		t.Fatalf("delivered %q, want the interjecting entry ahead of the retained one", got)
+	}
+}
+
+// A stop that never landed earns nothing. The entry keeps its place but drops
+// the head-jump claim, so it cannot jump the retained prompts at the next
+// boundary on the strength of an interrupt that failed.
+func TestAFailedInterjectStopDropsTheHeadJumpClaim(t *testing.T) {
+	// Arrange.
+	cls := &fakeClassifier{res: ClassifyResult{Classification: VerdictInterject}}
+	h := newQueueHarness(t, cls)
+	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
+	h.turn(true)
+
+	// Act.
+	_ = h.submit("stop, wrong file")
+	waitFor(t, "the interject's interrupt", func() bool { return h.client.interruptCount() == 1 })
+	h.waitEntryClass(VerdictError)
+
+	// Assert.
+	e := h.entries()[0]
+	if e.headJump || e.interjecting {
+		t.Fatalf("entry kept head_jump=%v interjecting=%v after an undeliverable stop", e.headJump, e.interjecting)
+	}
+	if h.paused() {
+		t.Fatal("a FAILED stop delivered nothing; the queue must keep draining")
 	}
 }
 
