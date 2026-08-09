@@ -30,6 +30,7 @@ import {
   COMMAND_ARM,
   PROMPT_ORIGIN_WEBAPP_CARD_ACTION,
   PROMPT_ORIGIN_WEBAPP_USER_SENT,
+  RESYNC_FIELD,
   REVIVE_MODE,
 } from "./proto-names.js";
 
@@ -123,16 +124,21 @@ export interface DeleteSessionBody {
 /**
  * ResyncCmd — request a replay from a store seq watermark (uint64).
  *
- * The identity is copied from the revisioned WorkspaceState that authorized
- * this request.  It binds an old webview to the exact controller generation
- * it observed, so the daemon can refuse the request before replaying a newer
- * or retired controller's history.
+ * The FENCE is copied from the revisioned WorkspaceState that authorized this
+ * request.  It binds an old webview to the exact controller generation it
+ * observed, so the daemon can refuse the request before replaying a newer or
+ * retired controller's history.
+ *
+ * It is one token, not the `session_id` + `controller_generation_id` pair this
+ * carried before: those two are reserved in the message, and canonical
+ * protojson decoding rejects an unknown field, so emitting them costs the whole
+ * command.  The spellings are bound to the generated message via
+ * {@link RESYNC_FIELD}.
  */
 export interface ResyncBody {
   case: "resync";
   fromSeq: number;
-  sessionId: string;
-  controllerGenerationId: string;
+  fence: string;
 }
 
 /** The `ClientLogLevel` enum values, as their canonical protojson names. */
@@ -278,9 +284,8 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
     case "resync":
       // uint64 renders as a JSON string in protojson.
       return {
-        fromSeq: String(b.fromSeq),
-        sessionId: b.sessionId,
-        controllerGenerationId: b.controllerGenerationId,
+        [RESYNC_FIELD.fromSeq]: String(b.fromSeq),
+        [RESYNC_FIELD.fence]: b.fence,
       };
     case "clientLog": {
       // An enum renders as its proto NAME in canonical protojson.

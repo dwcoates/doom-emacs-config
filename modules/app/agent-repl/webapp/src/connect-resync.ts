@@ -45,8 +45,7 @@ export type ConnectResyncLogLevel = "info" | "warn" | "error";
 export interface ResyncSnapshot {
   workspace: string;
   fromSeq: number;
-  sessionId: string;
-  controllerGenerationId: string;
+  fence: string;
 }
 
 export interface ConnectResyncOptions {
@@ -95,17 +94,15 @@ export class ConnectResync {
     this.opts.log?.(
       "info",
       `resync: requesting snapshot-bound conversation history ws=${snapshot.workspace} ` +
-        `session=${snapshot.sessionId || "none"} generation=${snapshot.controllerGenerationId || "none"} ` +
-        `from_seq=${snapshot.fromSeq} decision=dispatch`,
+        `fence=${snapshot.fence || "none"} from_seq=${snapshot.fromSeq} decision=dispatch`,
     );
     this.opts.resync(snapshot).catch((err: unknown) => {
       // A refused resync means this mount keeps whatever history it already
       // had — say so loudly rather than leaving an empty feed unexplained.
       this.opts.log?.(
         "error",
-        `resync request failed ws=${snapshot.workspace} session=${snapshot.sessionId || "none"} ` +
-          `generation=${snapshot.controllerGenerationId || "none"} from_seq=${snapshot.fromSeq} ` +
-          `decision=rejected cause=${String(err)}`,
+        `resync request failed ws=${snapshot.workspace} fence=${snapshot.fence || "none"} ` +
+          `from_seq=${snapshot.fromSeq} decision=rejected cause=${String(err)}`,
       );
     });
     return true;
