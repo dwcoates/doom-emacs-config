@@ -429,6 +429,25 @@ export class UdsSession {
   /** File-plane task notifications queued for an internal SDK result cycle. */
   private readonly pendingTaskNotificationQueue = new Set<string>();
   /**
+   * The SESSION-OWNED degraded windows that are still open, keyed by component.
+   *
+   * A DegradedState is a STATE, not an instant, and it travels to the daemon on
+   * the EPHEMERAL path — never stored, never replayed. Without this map the
+   * only degradation a reattaching daemon could be re-told about was the store
+   * client's own (StoreClient.openDegradedReport), because that is the only
+   * producer that kept its current state; every degradation the session itself
+   * raised — a permission mode a running session could not adopt, a model
+   * catalog that never published, an interrupt anomaly — was announced once and
+   * then existed nowhere. One daemon bounce and the session came back looking
+   * healthy while still running under the posture the user was warned about.
+   *
+   * Keyed by component because that is the daemon's own granularity: it holds
+   * one fault row per component and closes it on the `recovered: true` edge of
+   * the same component's report, so this mirrors that ledger rather than
+   * inventing a second one.
+   */
+  private readonly openDegradedWindows = new Map<string, DegradedState>();
+  /**
    * Deadlines for the turns this session ACKED as interrupted.
    *
    * An `INTERRUPT_OUTCOME_INTERRUPTED` ack is a claim that a turn was stopped,
@@ -1131,12 +1150,23 @@ export class UdsSession {
     // daemon has this session's SessionStarted in hand before the gate that
     // releases its callers closes.
     this.emitSessionStarted();
+    // THE RE-ANNOUNCE PRECEDES THE ACK, and that order is the whole guarantee.
+    // Both frames travel this one ordered connection, so a daemon that has read
+    // ShimReady has necessarily already read every DegradedState re-announced
+    // ahead of it — and ShimReady is what drives the session to OPERATIONAL.
+    // "The session is up" therefore cannot be observed before "and here is what
+    // is wrong with it". Sent after the ack instead, the two facts were merely
+    // adjacent, and every reader in between saw a session that had just come
+    // back perfectly healthy. Nothing here can abort the gate: a bring-up is
+    // only failed by a claude-shim-sdk fault (bringupescape.go
+    // noteBringUpFault), and the gate is explicitly open to a DegradedState
+    // before readiness (uds/server.ts onMessage).
+    this.reannounceDegradedState();
     this.server.sendReady(create(ShimReadySchema, {
       sessionId: this.deps.sessionId,
       fromSeq,
       vendorSessionId: this.store.storeSessionId(),
     }));
-    this.reannounceDegradedState();
     // THE OPEN QUESTION IS RE-ASKED, LAST, ONCE THE GATE IS CLOSED. A pending
     // canUseTool is the one piece of session state no daemon can reconstruct:
     // the first daemon may never have received it, or may have died holding it,
@@ -1170,17 +1200,27 @@ export class UdsSession {
    * than making ephemerals replayable, the shim re-reports the state it is IN,
    * read fresh at the moment the link is proven usable. A healthy session
    * reports nothing, which is what keeps this from manufacturing faults.
+   *
+   * TWO LEDGERS, ONE ANSWER. The store client owns the current state of the
+   * store link; this session owns the current state of everything it reported
+   * itself (openDegradedWindows). Both are asked, because a daemon that is
+   * re-told about only one of them is still being told a session is healthier
+   * than it is.
    */
   private reannounceDegradedState(): void {
-    const open = this.store.openDegradedReport();
-    if (open === null) return;
-    LOGGER.log({
-      level: "warn",
-      agent_repl_session_id: this.deps.sessionId,
-      component: open.component,
-      reason: open.reason,
-    }, "re-announcing this session's OPEN degraded window to the reattached daemon: a DegradedState is ephemeral, so one raised while no daemon was attached reaches this one only by being re-reported");
-    this.server.sendEvent(this.degradedEvent(open));
+    const open: DegradedState[] = [...this.openDegradedWindows.values()];
+    const storeOpen = this.store.openDegradedReport();
+    if (storeOpen !== null) open.push(storeOpen);
+    if (open.length === 0) return;
+    for (const report of open) {
+      LOGGER.log({
+        level: "warn",
+        agent_repl_session_id: this.deps.sessionId,
+        component: report.component,
+        reason: report.reason,
+      }, "re-announcing this session's OPEN degraded window to the reattached daemon: a DegradedState is ephemeral, so one raised while no daemon was attached reaches this one only by being re-reported");
+      this.server.sendEvent(this.degradedEvent(report));
+    }
   }
 
   /** Publish the query-owned selectable-model menu after the daemon gate closes. */
@@ -1206,12 +1246,12 @@ export class UdsSession {
       .catch((err: unknown) => {
         const reason = `supportedModels failed: ${errMsg(err)}`;
         LOGGER.log({ level: "error", agent_repl_session_id: this.deps.sessionId }, reason);
-        this.server.sendEvent(this.degradedEvent(create(DegradedStateSchema, {
+        this.emitDegraded(create(DegradedStateSchema, {
           component: "claude-shim-model-catalog",
           reason,
           droppedCount: 0n,
           recovered: false,
-        })));
+        }));
       });
   }
 
@@ -2790,12 +2830,35 @@ export class UdsSession {
     opts: { recovered?: boolean; level?: "warn" | "error" } = {},
   ): void {
     LOGGER.log({ level: opts.level ?? "error", agent_repl_session_id: this.deps.sessionId }, reason);
-    this.server.sendEvent(this.degradedEvent(create(DegradedStateSchema, {
+    this.emitDegraded(create(DegradedStateSchema, {
       component,
       reason,
       droppedCount: 0n,
       recovered: opts.recovered ?? false,
-    })));
+    }));
+  }
+
+  /**
+   * Record a SESSION-OWNED degraded report against its component and send it.
+   *
+   * Recording is what makes the report survivable across a daemon bounce: the
+   * event itself is ephemeral, so the state it describes has to live here to be
+   * re-announceable. An UNCONTAINED report (`recovered: false`) opens the
+   * component's window; the `recovered: true` edge closes it, exactly as the
+   * daemon closes its fault row, so a recovery is never re-announced as a
+   * standing fault and a component that recovered stops being re-reported.
+   *
+   * The store client is deliberately NOT routed through here: it keeps its own
+   * current window (openDegradedReport) and is the authority on it, and two
+   * ledgers for one component could disagree.
+   */
+  private emitDegraded(report: DegradedState): void {
+    if (report.recovered) {
+      this.openDegradedWindows.delete(report.component);
+    } else {
+      this.openDegradedWindows.set(report.component, report);
+    }
+    this.server.sendEvent(this.degradedEvent(report));
   }
 
   /**

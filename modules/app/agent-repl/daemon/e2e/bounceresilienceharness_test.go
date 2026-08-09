@@ -340,10 +340,31 @@ func reattached(t *testing.T, b *shutdownBoot, workspace string) (string, *webso
 // SNAPSHOT taken after the successor has claimed the surviving shim: it drives
 // the re-check first and then dials, because what it asserts is what a client
 // joining a settled successor is told, not an edge.
+// SETTLED IS WAITED FOR, NEVER ASSUMED. Firing the re-check only ENQUEUES the
+// sweep; the reattach it starts — handshake, re-announce, ShimReady — completes
+// on the daemon's own goroutines afterwards. A snapshot taken on the next line
+// is a snapshot of a successor mid-bring-up, and every fact the reattach is
+// supposed to re-establish would read as absent for the same reason: it has not
+// happened YET. So this waits for the workspace to reach OPERATIONAL first,
+// which the daemon reaches from the ShimReady hook (sessioncontroller
+// noteConnectivity, cause "shim_ready") and therefore only after everything the
+// shim sent ahead of that ack has been ingested.
+//
+// The watch is attached BEFORE the re-check is fired, because the edge it waits
+// on is published by the very pass it triggers.
 func reattachedSnapshot(t *testing.T, b *shutdownBoot, workspace string) (string, *frontendv1.StateSnapshot) {
 	t.Helper()
 	sessionID := snapshotSessionID(t, connectSnapshot(t, b), workspace)
+	watch := b.dialFrontend(t)
+	if first := readFrame(t, watch); first.GetSnapshot() == nil {
+		t.Fatalf("first /frontend frame on the settle watch = %T, want a StateSnapshot", first.GetFrame())
+	}
 	b.sweepRecheckWhenParked(t, sessionID)
+	awaitAll(t, watch, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+		"the successor painting " + workspace + " OPERATIONAL, which is the reattach handshake having completed": func(frame *frontendv1.FrontendFrame) bool {
+			return workspaceStateFor(frame, workspace).GetConnectivity() == frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_OPERATIONAL
+		},
+	})
 	return sessionID, connectSnapshot(t, b)
 }
 
