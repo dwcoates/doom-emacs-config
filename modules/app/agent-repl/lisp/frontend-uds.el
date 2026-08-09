@@ -186,9 +186,10 @@ that the daemon or session is healthy.")
     "typingDelta" "taskCatalog" "commandAck" "daemonView"
     "sessionInit" "heartbeat" "queue" "progress"
     "workspaceAvailable" "hostAction" "daemonHealth" "sessionHealth"
-    "workspaceRoster" "shutdownSchedule")
+    "workspaceRoster" "shutdownSchedule"
+    "asyncBubbleDelta" "topbar" "tokenBreakdown" "workspaceGate")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
-Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frontend.proto.
+Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frame.proto.
 A decoded frame whose sole top-level key is NOT one of these is
 malformed (unknown wire field) and signals loudly.
 
@@ -211,12 +212,14 @@ records the lease and logs the edge.
 `context-cost.el' registers a handler that reads `expensive_turn' and
 nothing else.  The consolidated progress footer remains webapp-only.
 
-`taskCatalog', `heartbeat' (E4), and `workspaceRoster' are decoded for
-wire parity and rendered by nothing here — see
-`agent-repl--uds-ignored-frame-fields'.")
+`taskCatalog', `heartbeat' (E4), `workspaceRoster', and the four resolved
+component views (`asyncBubbleDelta', `topbar', `tokenBreakdown',
+`workspaceGate') are decoded for wire parity and rendered by nothing here
+— see `agent-repl--uds-ignored-frame-fields'.")
 
 (defconst agent-repl--uds-ignored-frame-fields
-  '("taskCatalog" "heartbeat" "queue" "workspaceRoster")
+  '("taskCatalog" "heartbeat" "queue" "workspaceRoster"
+    "asyncBubbleDelta" "topbar" "tokenBreakdown" "workspaceGate")
   "Frame arms Emacs decodes for wire parity but DELIBERATELY renders nothing for.
 These are a subset of `agent-repl--uds-known-frame-fields'.
 
@@ -260,7 +263,18 @@ Emacs is the roster's single author — it publishes through the
 `publishWorkspaceRoster' command — so applying the echo would be Emacs
 telling itself what it just said.  The arm is decoded for wire parity
 and deliberately renders nothing.  This is a settled design decision,
-not unfinished wiring.")
+not unfinished wiring.
+
+`asyncBubbleDelta', `topbar', `tokenBreakdown', `workspaceGate': the
+resolved component views the daemon composes for a RENDERING frontend —
+a detached agent's bubble, the topbar, the token-breakdown menu, and the
+revival gate.  Emacs draws none of those chromes: its topbar is the Emacs
+tab bar fed from `WorkspaceState', its cost surfacing is the mode-line
+alarm `context-cost.el' reads off `ProgressView', and it has no bubble or
+menu at all.  They are broadcast to every client rather than stripped for
+the host, so they must DECODE here or the arm signals; listing them makes
+that a stated decision instead of an unfinished-wiring log line on every
+push.")
 
 (defconst agent-repl--uds-known-command-fields
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"
@@ -272,8 +286,13 @@ not unfinished wiring.")
     "scheduleShutdown" "cancelScheduledShutdown"
     "hibernateWorkspace")
   "The protojson names of every SENDABLE `FrontendCommand' oneof arm.
-Mirrors the `command' oneof in frontend.proto.  Sending an unknown
+Mirrors the `command' oneof in frame.proto.  Sending an unknown
 command field is a programming error and fails loudly.
+
+`setModel' and `reviveSession' are absent for the same reason
+`createWorkspace' is: they exist on the wire and Emacs has no send site
+for either.  The model picker and the revival gate are webapp surfaces,
+so listing them here would advertise a command this end cannot compose.
 
 `createWorkspace' is deliberately ABSENT even though the proto arm still
 exists.  Workspace creation has exactly one ingestion point — a
@@ -878,7 +897,15 @@ length of a drain batch and re-signals it afterwards."
          ;; Every frame arm carries the wire CWD here, so this is the
          ;; single hottest place a path could reach the log sink.
          (log-workspace (agent-repl--frontend-ws-name workspace))
+         ;; A HOST frame still names its session (`WorkspaceState',
+         ;; `SessionView', `WorkspaceAvailable', the health views).  A FENCED
+         ;; push does not: `session_id' is reserved on every one of them and
+         ;; the workspace's staleness `fence' took its place.  Both are read
+         ;; and both are logged, so a trace names whichever the arm actually
+         ;; carried instead of printing nil for half the wire.  The fence is
+         ;; logged VERBATIM and never parsed — it is opaque by contract.
          (session-id (and (listp payload) (plist-get payload :sessionId)))
+         (fence (and (listp payload) (plist-get payload :fence)))
          (revision (and (listp payload)
                         (or (plist-get payload :revision)
                             (plist-get payload :revisionId))))
@@ -886,8 +913,9 @@ length of a drain batch and re-signals it afterwards."
     (cond
      ((not (member field agent-repl--uds-known-frame-fields))
       (agent-repl--log log-workspace
-                       "uds-dispatch: MALFORMED unknown oneof field=%s workspace=%S session-id=%S known=%S"
-                       field workspace session-id agent-repl--uds-known-frame-fields)
+                       "uds-dispatch: MALFORMED unknown oneof field=%s workspace=%S session-id=%S fence=%S known=%S"
+                       field workspace session-id fence
+                       agent-repl--uds-known-frame-fields)
       (signal 'agent-repl-uds-malformed-frame
               (list (format "unknown oneof field: %s" field) frame)))
      (t
@@ -895,8 +923,8 @@ length of a drain batch and re-signals it afterwards."
         (cond
          (handler
           (agent-repl--log log-workspace
-                           "uds-dispatch: field=%s workspace=%S session-id=%S revision=%S state=%S -> handler=%s"
-                           field workspace session-id revision state handler)
+                           "uds-dispatch: field=%s workspace=%S session-id=%S fence=%S revision=%S state=%S -> handler=%s"
+                           field workspace session-id fence revision state handler)
           (agent-repl--uds-call-frame-handler
            field log-workspace workspace handler payload))
          ((member field agent-repl--uds-ignored-frame-fields)
@@ -904,13 +932,13 @@ length of a drain batch and re-signals it afterwards."
                                  (length (plist-get payload :tasks)))))
             (agent-repl--log-verbose
              log-workspace
-             "uds-dispatch: field=%s deliberately ignored workspace=%s session=%s revision=%S state=%S task-count=%S"
-             field workspace session-id revision state task-count))
+             "uds-dispatch: field=%s deliberately ignored workspace=%s session=%s fence=%S revision=%S state=%S task-count=%S"
+             field workspace session-id fence revision state task-count))
           nil)
          (t
           (agent-repl--log log-workspace
-                           "uds-dispatch: field=%s workspace=%S session-id=%S revision=%S state=%S KNOWN but no handler registered — not dispatched (register one at stitch)"
-                           field workspace session-id revision state)
+                           "uds-dispatch: field=%s workspace=%S session-id=%S fence=%S revision=%S state=%S KNOWN but no handler registered — not dispatched (register one at stitch)"
+                           field workspace session-id fence revision state)
           nil)))))))
 
 ;;;; ---- Outbound commands -----------------------------------------------
