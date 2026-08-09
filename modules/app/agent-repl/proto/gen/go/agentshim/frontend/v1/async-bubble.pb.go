@@ -84,7 +84,13 @@ type AsyncBubble struct {
 	//	*AsyncBubble_Journal
 	//	*AsyncBubble_Shell
 	//	*AsyncBubble_Unclassified
-	Kind          isAsyncBubble_Kind `protobuf_oneof:"kind"`
+	Kind isAsyncBubble_Kind `protobuf_oneof:"kind"`
+	// The workspace this bubble's work runs under — the same key every
+	// workspace-scoped frame carries. It exists so a snapshot can scope
+	// bubbles to the client's workspace exactly as it scopes every other
+	// per-workspace family; deltas already carry the key on their envelope
+	// (AsyncBubbleDelta.workspace), and the two are always equal.
+	Workspace     string `protobuf:"bytes,7,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -202,6 +208,13 @@ func (x *AsyncBubble) GetUnclassified() *AsyncUnclassifiedBubble {
 		}
 	}
 	return nil
+}
+
+func (x *AsyncBubble) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
 }
 
 type isAsyncBubble_Kind interface {
@@ -1759,7 +1772,7 @@ var File_agentshim_frontend_v1_async_bubble_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_async_bubble_proto_rawDesc = "" +
 	"\n" +
-	"(agentshim/frontend/v1/async-bubble.proto\x12\x15agentshim.frontend.v1\x1a*agentshim/frontend/v1/agent-emission.proto\"\x99\x04\n" +
+	"(agentshim/frontend/v1/async-bubble.proto\x12\x15agentshim.frontend.v1\x1a*agentshim/frontend/v1/agent-emission.proto\"\xb7\x04\n" +
 	"\vAsyncBubble\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12+\n" +
 	"\x12origin_tool_use_id\x18\x02 \x01(\tR\x0foriginToolUseId\x12(\n" +
@@ -1771,7 +1784,8 @@ const file_agentshim_frontend_v1_async_bubble_proto_rawDesc = "" +
 	" \x01(\v2'.agentshim.frontend.v1.AsyncAgentBubbleH\x00R\x05agent\x12G\n" +
 	"\ajournal\x18\v \x01(\v2+.agentshim.frontend.v1.AsyncWorkflowJournalH\x00R\ajournal\x12?\n" +
 	"\x05shell\x18\f \x01(\v2'.agentshim.frontend.v1.AsyncShellBubbleH\x00R\x05shell\x12T\n" +
-	"\funclassified\x18\r \x01(\v2..agentshim.frontend.v1.AsyncUnclassifiedBubbleH\x00R\funclassifiedB\x06\n" +
+	"\funclassified\x18\r \x01(\v2..agentshim.frontend.v1.AsyncUnclassifiedBubbleH\x00R\funclassified\x12\x1c\n" +
+	"\tworkspace\x18\a \x01(\tR\tworkspaceB\x06\n" +
 	"\x04kind\"\x8c\x01\n" +
 	"\x10AsyncAgentBubble\x12B\n" +
 	"\temissions\x18\x01 \x03(\v2$.agentshim.frontend.v1.AgentEmissionR\temissions\x124\n" +
