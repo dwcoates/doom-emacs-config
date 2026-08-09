@@ -113,14 +113,31 @@ const CREATE_ARGS: CreateSessionArgs = {
 describe("ack-correlated commands", () => {
   it("submitPrompt sends a FrontendCommand frame and resolves on an ok ack", async () => {
     const { dispatcher, sent } = newDispatcher();
-    const p = dispatcher.submitPrompt("/w", "hi", PromptOrigin.WEBAPP_USER_SENT, "plan");
+    const { ack } = dispatcher.submitPrompt("/w", "hi", PromptOrigin.WEBAPP_USER_SENT, "plan");
     expect(JSON.parse(sent[0])).toEqual({
       requestId: "r1",
       workspace: "/w",
       submitPrompt: { text: "hi", permissionMode: "plan", promptOrigin: "PROMPT_ORIGIN_WEBAPP_USER_SENT" },
     });
     dispatcher.observe(ackFrame("r1", true));
-    await expect(p).resolves.toBeUndefined();
+    await expect(ack).resolves.toBeUndefined();
+  });
+
+  // The id is what the local prompt bubble is filed under, and the daemon's
+  // receipt comes back carrying it — so a submit that reported a DIFFERENT id
+  // than the frame it sent would file a bubble nothing could ever supersede.
+  it("submitPrompt reports the request id its frame went out under", () => {
+    const { dispatcher, sent } = newDispatcher();
+    const { requestId } = dispatcher.submitPrompt("/w", "hi", PromptOrigin.WEBAPP_USER_SENT);
+    expect(requestId).toBe(JSON.parse(sent[0]).requestId);
+  });
+
+  it("submitPrompt reports no request id when the origin is unstated", async () => {
+    const { dispatcher, sent } = newDispatcher();
+    const { requestId, ack } = dispatcher.submitPrompt("/w", "hi", "" as PromptOrigin);
+    expect(requestId).toBe("");
+    expect(sent).toEqual([]);
+    await expect(ack).rejects.toThrow(/explicit prompt origin/);
   });
 
   it("rejects a model switch with the shim-confirmed selected model", async () => {
