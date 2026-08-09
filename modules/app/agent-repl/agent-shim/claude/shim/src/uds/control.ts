@@ -9,6 +9,10 @@
  *    emits a `PermissionRequest` to the daemon and BLOCKS (returns a Promise)
  *    on a pending-request map keyed by `request_id` until the matching
  *    `PermissionResponse` arrives via {@link handlePermissionResponse}.
+ *    The shim is the DURABLE OWNER of that open question: while an answer is
+ *    outstanding the request is re-sent on every reattach
+ *    ({@link resendPending}), so neither an unattached daemon nor a daemon that
+ *    died holding the ask can strand the turn.
  *
  * This deliberately does NOT import src/session.ts. {@link SdkControlTarget}
  * is the minimal seam the stitch phase binds to the real ShimSession.
@@ -77,17 +81,40 @@ export type ToolPermissionResult =
   | { behavior: "allow"; updatedInput: JsonObject }
   | { behavior: "deny"; message: string };
 
-/** Sends a PermissionRequest to the daemon (bound to SessionServer). */
-export type PermissionRequestSender = (req: PermissionRequest) => void;
+/**
+ * Sends a PermissionRequest to the daemon (bound to SessionServer).
+ *
+ * Returns whether the frame reached a live daemon connection. `false` is NOT a
+ * failure to be swallowed: the request stays pending here and is re-sent by
+ * {@link ControlDispatch.resendPending} on the next reattach.
+ */
+export type PermissionRequestSender = (req: PermissionRequest) => boolean;
 
 export interface ControlDispatchOptions {
   /** Request-id minter; defaults to randomUUID. Injectable for tests. */
   newRequestId?: () => string;
+  /**
+   * Whether an SDK turn is currently in flight. A pending permission belongs to
+   * the turn whose tool call raised it, so a re-send with no live turn would be
+   * re-asking a dead turn's question — {@link ControlDispatch.resendPending}
+   * cancels those waits instead of putting them back in front of the user.
+   *
+   * Omitted, liveness is unknown and re-sends are unconditional (the old
+   * behavior, and the right default for a dispatch with no turn owner bound).
+   */
+  isTurnLive?: () => boolean;
 }
 
 interface PendingPermission {
   resolve: (result: ToolPermissionResult) => void;
   input: JsonObject;
+  /**
+   * The EXACT frame first sent for this request. A re-send replays this value
+   * rather than rebuilding one, so the identity the daemon rendezvouses on
+   * (request_id) and everything it renders (tool name, input) are bit-identical
+   * across every attempt.
+   */
+  request: PermissionRequest;
 }
 
 const COMPONENT = "shim-control";
@@ -95,6 +122,12 @@ const LOGGER = bindLog({ component: COMPONENT, operation: "shim.control.dispatch
 
 export class ControlDispatch {
   private readonly newRequestId: () => string;
+  private readonly isTurnLive: (() => boolean) | undefined;
+  /**
+   * Insertion-ordered by construction (Map iteration order), which is what
+   * makes a multi-request re-send arrive in the order the user was originally
+   * asked.
+   */
   private readonly pending = new Map<string, PendingPermission>();
 
   constructor(
@@ -103,6 +136,7 @@ export class ControlDispatch {
     opts: ControlDispatchOptions = {},
   ) {
     this.newRequestId = opts.newRequestId ?? randomUUID;
+    this.isTurnLive = opts.isTurnLive;
   }
 
   /** Handle a SubmitPrompt; push into the SDK turn and Ack (Nack on rejection). */
@@ -193,21 +227,79 @@ export class ControlDispatch {
    */
   requestPermission(toolName: string, input: JsonObject): Promise<ToolPermissionResult> {
     const requestId = this.newRequestId();
+    const request = create(PermissionRequestSchema, { requestId, toolName, input });
     return new Promise<ToolPermissionResult>((resolve, reject) => {
-      this.pending.set(requestId, { resolve, input });
+      this.pending.set(requestId, { resolve, input, request });
       LOGGER.log({ request_id: requestId, tool_name: toolName, pending_count: this.pending.size, input_keys: Object.keys(input) }, "permission request opened for daemon decision");
       try {
-        this.sendPermissionRequest(create(PermissionRequestSchema, {
-          requestId,
-          toolName,
-          input,
-        }));
+        if (!this.sendPermissionRequest(request)) {
+          // UNDELIVERED, NOT LOST. There is no daemon attached to answer, so
+          // the ask is retained here and re-sent by resendPending the moment
+          // one reattaches. Rejecting instead would fail the tool call for a
+          // transport gap the user never chose.
+          LOGGER.log({ level: "error", request_id: requestId, tool_name: toolName, pending_count: this.pending.size },
+            "permission request could not be delivered (no daemon attached); it stays pending and is re-sent on reattach");
+        }
       } catch (err) {
         this.pending.delete(requestId);
         LOGGER.log({ level: "error", request_id: requestId, tool_name: toolName, input_keys: Object.keys(input), pending_count: this.pending.size, cause: err }, `permission request send failed: ${errMsg(err)}`);
         reject(err);
       }
     });
+  }
+
+  /**
+   * Re-send every still-unanswered permission request to the daemon.
+   *
+   * Called once per completed reattach (after ShimReady closes the bring-up
+   * gate). It closes BOTH halves of the rendezvous gap: a request raised while
+   * no daemon was attached was never delivered, and a request the previous
+   * daemon received died with that daemon's in-memory rendezvous. Neither the
+   * daemon nor the frontend can recover the question — only the side still
+   * holding the blocked `canUseTool` promise can, and that is this map.
+   *
+   * WHY THE SAME FRAME AND THE SAME request_id. The re-send is not a new ask;
+   * it is the same one, restated. Identity is what lets the daemon re-arm
+   * idempotently: an id it has no waiter for re-establishes the wait, an id it
+   * already answered replays the recorded answer instead of asking a human the
+   * same question twice.
+   *
+   * NO INTERLEAVING WITH AN ANSWER. This is synchronous over the map on a
+   * single-threaded event loop, so an answer that arrives just before it runs
+   * has already removed its entry, and one that arrives just after resolves a
+   * request whose re-send is merely redundant. Either way exactly one answer
+   * resolves the wait.
+   *
+   * A DEAD TURN IS CANCELLED, NOT RE-ASKED. If no SDK turn is in flight the
+   * tool call these requests block no longer exists, so re-asking would put a
+   * question in front of the user that nothing is waiting on. Those waits are
+   * force-denied through the same path an interrupt uses.
+   */
+  resendPending(reason: string): void {
+    if (this.pending.size === 0) return;
+    if (this.isTurnLive !== undefined && !this.isTurnLive()) {
+      this.cancelAll(`${reason}: no turn is in flight to receive the answer`);
+      return;
+    }
+    LOGGER.log({
+      pending_count: this.pending.size,
+      reason,
+      request_ids: [...this.pending.keys()],
+    }, "re-sending every unanswered permission request to the reattached daemon");
+    for (const [requestId, pending] of this.pending) {
+      try {
+        if (!this.sendPermissionRequest(pending.request)) {
+          LOGGER.log({ level: "error", request_id: requestId, tool_name: pending.request.toolName, reason },
+            "permission request re-send found no daemon attached; it stays pending for the next reattach");
+        }
+      } catch (err) {
+        // A throwing send is a transport fault, not an answer. The request
+        // stays pending so the next reattach re-sends it; failing the tool
+        // call here would decide on the user's behalf.
+        LOGGER.log({ level: "error", request_id: requestId, tool_name: pending.request.toolName, reason, cause: err },
+          `permission request re-send failed: ${errMsg(err)}`);
+      }
+    }
   }
 
   /** Resolve the blocked canUseTool round-trip a PermissionResponse targets. */
