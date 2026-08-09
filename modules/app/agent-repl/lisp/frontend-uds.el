@@ -1515,8 +1515,11 @@ Emacs never sent.  Returns the `:ok' flag."
   (let* ((request-id (plist-get ack :requestId))
          (ok (plist-get ack :ok))
          (err (plist-get ack :error))
-         (failure (when-let ((item (plist-get ack :failure)))
-                    (agent-repl-failure-from-wire item)))
+         ;; `failure' is a bare `FailureKind' on an ack, not a whole card: the
+         ;; refusal's classification without the card it may have been filed
+         ;; under.  `agent-repl-failure-from-ack' reads the kind, the optional
+         ;; `failure_card' address, and the legacy `error' text together.
+         (failure (agent-repl-failure-from-ack ack))
          (challenge (plist-get ack :interruptConfirmRequired))
          (pending (and request-id
                        (gethash request-id agent-repl--uds-pending-commands)))

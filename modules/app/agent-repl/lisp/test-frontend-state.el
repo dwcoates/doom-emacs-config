@@ -1110,9 +1110,9 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
        ;; Act
        (agent-repl--frontend-apply-session-view
         '(:sessionId "s1" :workspace "/w" :terminal t
-          :death (:errorClass "ERROR_CLASS_INTERNAL"
-                  :errorType "session.shim_died"
-                  :message "the agent process exited")))
+          :death (:kind (:sessionShimDied ())
+                  :message "the agent process exited"
+                  :terminal ())))
        ;; Assert
        (should (string-match-p "the agent process exited" echoed))))))
 
@@ -1124,9 +1124,9 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
    (clrhash agent-repl--frontend-surfaced-deaths)
    (let ((count 0)
          (view '(:sessionId "s1" :workspace "/w" :terminal t
-                 :death (:errorClass "ERROR_CLASS_INTERNAL"
-                         :errorType "session.shim_died"
-                         :message "the agent process exited"))))
+                 :death (:kind (:sessionShimDied ())
+                         :message "the agent process exited"
+                         :terminal ()))))
      ;; Only echo-area announcements count.  The quiet log rung the failure
      ;; record rides (`agent-repl--warn') also goes through `message', with
      ;; `inhibit-message' bound — that is the durable record, not an
@@ -1163,10 +1163,10 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
        ;; Act
        (agent-repl--frontend-apply-session-view
         '(:sessionId "s1" :workspace "/w" :terminal t
-          :death (:errorClass "ERROR_CLASS_INTERNAL"
-                  :errorType "session.ended_unclassified"
+          :death (:kind (:sessionEndedUnclassified ())
                   :message "the session ended"
-                  :sourceDetail "some ancient reason")))
+                  :detail "some ancient reason"
+                  :terminal ())))
        ;; Assert
        (should (string-match-p "some ancient reason" echoed))))))
 
@@ -1183,10 +1183,9 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
        ;; Act
        (agent-repl--frontend-apply-session-view
         '(:sessionId "s1" :workspace "/w" :terminal t
-          :death (:errorClass "ERROR_CLASS_INTERNAL"
-                  :errorType "session.superseded"
+          :death (:kind (:sessionSuperseded ())
                   :message "a new Claude session was started for this workspace"
-                  :itemUuid "death:s1" :resolvedAtMs 0)))
+                  :open ())))
        ;; Assert
        (should (string-match-p "a new Claude session was started" echoed))))))
 
@@ -1203,10 +1202,9 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
        ;; Act
        (agent-repl--frontend-apply-session-view
         '(:sessionId "s1" :workspace "/w" :terminal t
-          :death (:errorClass "ERROR_CLASS_INTERNAL"
-                  :errorType "session.superseded"
+          :death (:kind (:sessionSuperseded ())
                   :message "a new Claude session was started for this workspace"
-                  :itemUuid "death:s1" :resolvedAtMs 1700000000000)))
+                  :resolved (:resolvedAtMs 1700000000000))))
        ;; Assert
        (should (null echoed))))))
 
@@ -1224,10 +1222,9 @@ session-view item fail to apply at boot."
        ;; Act
        (agent-repl--frontend-apply-session-view
         '(:sessionId "s1" :workspace "/w" :terminal t
-          :death (:errorClass "ERROR_CLASS_INTERNAL"
-                  :errorType "session.superseded"
+          :death (:kind (:sessionSuperseded ())
                   :message "a new Claude session was started for this workspace"
-                  :itemUuid "death:s1" :resolvedAtMs "1786127506030")))
+                  :resolved (:resolvedAtMs "1786127506030"))))
        ;; Assert
        (should (null echoed))))))
 

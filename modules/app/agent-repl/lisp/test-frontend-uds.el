@@ -1527,6 +1527,40 @@ as a user-visible malformed-frame error on every roster publish."
           (should (string-match-p "mergeWorkspace" echoed))
           (should (string-match-p "branch not found" echoed)))))))
 
+(ert-deftest agent-repl-test-uds-command-ack-classified-refusal-echoes-the-daemon-text ()
+  "A CLASSIFIED refusal surfaces through the failure path, not the raw fallback.
+`CommandAck.failure' is a bare `FailureKind' now, so the ack has to be read
+as a kind rather than as a whole card; misreading it would drop every
+refusal onto the unclassified branch."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--pend "req-1" "submitPrompt" "ws1")
+    (let (echoed)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq echoed (apply #'format fmt args))))
+                ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--uds-handle-command-ack
+         '(:requestId "req-1" :error "the workspace has no live session"
+           :failure (:workspaceNotLive ())))
+        ;; Assert
+        (should (string-match-p "the workspace has no live session" echoed))))))
+
+(ert-deftest agent-repl-test-uds-command-ack-unclassified-refusal-keeps-the-raw-path ()
+  "An ack with no classified kind still surfaces, from the raw text.
+A refusal a mixed-build daemon could not classify must never be invisible."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--pend "req-1" "submitPrompt" "ws1")
+    (let (echoed)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+        ;; Act
+        (agent-repl--uds-handle-command-ack
+         '(:requestId "req-1" :error "unexplained"))
+        ;; Assert
+        (should (string-match-p "unexplained" echoed))))))
+
 (ert-deftest agent-repl-test-uds-command-ack-failure-runs-on-failure ()
   "A failed ack runs the tracked :on-failure callback with the error string."
   ;; Arrange
@@ -1889,9 +1923,7 @@ as a user-visible malformed-frame error on every roster publish."
     ;; Act / Assert
     (should-not (agent-repl--uds-handle-command-ack
                  '(:requestId "req-1" :error "nope"
-                   :failure (:errorClass "ERROR_CLASS_INTERNAL"
-                             :errorType "shim.nack"
-                             :message "the daemon refused"))))))
+                   :failure (:shimRejected ()))))))
 
 (ert-deftest agent-repl-test-uds-command-ack-challenge-cwd-does-not-signal ()
   "The interrupt-confirmation CHALLENGE branch logs with the same cwd."
