@@ -2221,6 +2221,55 @@ describe("UdsSession events: store round-trip and sad path", () => {
     expect(forwarded.payload.case === "filePlaneDiagnostic" && forwarded.payload.value).toEqual(diagnostic);
   });
 
+  it("re-announces an OPEN degraded window to a REATTACHING daemon", async () => {
+    // Arrange — a DegradedState is EPHEMERAL: it is never written to the store
+    // and never replayed, so a session that degraded while the daemon was down
+    // would come back looking perfectly healthy to its replacement. Here the
+    // store rejects a write, opening a window on the FIRST daemon link.
+    // holdTurnStartAck leaves the ordered turn-start batch un-acked, so this
+    // test owns its receipt and can refuse it.
+    const { daemon, store, daemonListener } = await rig({ storeSessionId: "vendor-uuid", holdTurnStartAck: true });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { error: "disk full" }));
+    let opened = await daemon.next(EventSchema);
+    while (opened.payload.case !== "degradedState") opened = await daemon.next(EventSchema);
+    expect(opened.payload.value.component).toBe("shim-store-client");
+
+    // Act — the daemon goes away and a replacement re-runs the bring-up gate.
+    daemon.destroy();
+    const next = await daemonListener.next();
+    await next.next(ShimHelloSchema);
+    next.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", protocolVersion: "1", fromSeq: 0n }));
+    await next.next(ShimReadySchema);
+
+    // Assert — the same open window reaches the daemon that never heard it.
+    let reannounced = await next.next(EventSchema);
+    while (reannounced.payload.case !== "degradedState") reannounced = await next.next(EventSchema);
+    expect(reannounced.payload.value.component).toBe("shim-store-client");
+    expect(reannounced.payload.value.recovered).toBe(false);
+  });
+
+  it("announces no degraded state to a reattaching daemon when the session is healthy", async () => {
+    // Arrange — the re-report must never manufacture a fault for a session
+    // that is not in one.
+    const { daemon, daemonListener } = await rig({ storeSessionId: "vendor-uuid" });
+
+    // Act
+    daemon.destroy();
+    const next = await daemonListener.next();
+    await next.next(ShimHelloSchema);
+    next.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", protocolVersion: "1", fromSeq: 0n }));
+    await next.next(ShimReadySchema);
+    await tick();
+
+    // Assert
+    const events = next.inbox
+      .map((frame) => unpackAs(frame, EventSchema))
+      .filter((evt): evt is Event => evt !== undefined);
+    expect(events.filter((evt) => evt.payload.case === "degradedState")).toHaveLength(0);
+  });
+
   it("forwards a store outage to the daemon as an Event(DegradedState)", async () => {
     // Arrange
     const { store, daemon } = await rig();
