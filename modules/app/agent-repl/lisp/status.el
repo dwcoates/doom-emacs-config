@@ -78,7 +78,15 @@ entrypoint) skips its tick when the previous chain has not finished.
 If the in-flight marker is older than this threshold, the chain is
 treated as stuck (likely due to an error in a per-step body that
 escaped the `condition-case' net) and the flag is force-cleared so a
-new chain can start.  Belt-and-braces against permanent wedging."
+new chain can start.  Belt-and-braces against permanent wedging.
+
+Age is only half the test.  Crossing this threshold means a chain is
+suspect, not that it is dead: a chain whose next hop is still scheduled
+is starved rather than wedged (see
+`agent-repl--update-chain-continuation-pending-p'), which is routine when
+a long main-thread operation such as a full snapshot resync holds the
+thread past this many seconds.  Only a chain that is both this old AND
+has no successor left is force-cleared."
   :type 'number
   :group 'agent-repl)
 
@@ -2446,6 +2454,28 @@ to `t' so multi-workspace dispatch assertions can read state
 immediately after the call, without having to advance time to let
 `run-at-time'-scheduled steps fire.")
 
+(defun agent-repl--update-chain-continuation-pending-p ()
+  "Return non-nil when the update chain still has a scheduled next hop.
+This is the structural difference between a chain that is WEDGED and one
+that is merely SLOW, and it is the reason age alone must not be trusted.
+
+`agent-repl--update-all-workspace-states--step' nils
+`agent-repl--update-chain-timer' the instant it is entered, and before it
+returns it either finalizes (clearing the in-flight flag) or installs the
+next hop's timer.  So `agent-repl--update-in-flight' non-nil together with
+a live timer here means the chain has a successor that Emacs will run and
+that will reach a finalize; the flag is not orphaned, and no amount of
+elapsed wall-clock makes it so.  `agent-repl--update-chain-teardown' is
+the only path that drops a hop, and it nils both the timer and the flag
+together, so it cannot leave a false positive behind.
+
+The `timer-list' membership check is belt-and-braces against any future
+path that cancels the timer without nilling the variable: a cancelled
+timer is off the list and will never fire, which is a wedge."
+  (and (timerp agent-repl--update-chain-timer)
+       (memq agent-repl--update-chain-timer timer-list)
+       t))
+
 (defun agent-repl--update-in-flight-p ()
   "Return non-nil when an update chain is in flight and not stale.
 A non-nil `agent-repl--update-in-flight' set within the last
@@ -2453,7 +2483,9 @@ A non-nil `agent-repl--update-in-flight' set within the last
 running and a new tick should skip.  An older stamp is treated as a
 wedged chain (the per-step `condition-case' didn't catch some error
 path or the finalize never ran), force-cleared in place, and the
-caller is told to proceed."
+caller is told to proceed — but only once
+`agent-repl--update-chain-continuation-pending-p' has ruled out the chain
+simply being slow."
   (cond
    ((null agent-repl--update-in-flight)
     (agent-repl--log-verbose nil "update-in-flight-p: result=nil reason=no-chain")
@@ -2479,17 +2511,39 @@ caller is told to proceed."
     ;; stamped inside an expected-restart window is recorded at info naming
     ;; the initiator, and a stale flag with no window covering it keeps the
     ;; warn verbatim.
-    (let ((initiator (agent-repl--frontend-expected-restart-covering-initiator
-                      agent-repl--update-in-flight))
-          (age (- (float-time) agent-repl--update-in-flight)))
-      (setq agent-repl--update-in-flight nil)
-      (if initiator
-          (agent-repl--info nil
-                            "update-in-flight-p: stale flag (%.2fs old) from the %s restart, force-clearing"
-                            age initiator)
-        (agent-repl--warn nil "update-in-flight-p: stale flag (%.2fs old), force-clearing"
-                          age)))
-    nil)))
+    ;;
+    ;; None of that applies while the chain still has a scheduled hop.  The
+    ;; chain advances by `run-at-time', and an Emacs timer cannot preempt the
+    ;; main thread: any single main-thread operation longer than the threshold
+    ;; starves every pending hop for its whole duration.  A full snapshot
+    ;; resync is exactly such an operation at this installation's scale (~100
+    ;; workspaces / ~200 sessions applied in one pass), and it is triggered by
+    ;; ordinary interactions like creating a workspace.  The chain's own
+    ;; designed duration pushes the same way: the per-step gap floors at
+    ;; `agent-repl-state-spread-min-gap', so a pass over N workspaces takes at
+    ;; least N * that floor, which reaches the threshold on its own around 100
+    ;; workspaces.  Force-clearing there would be actively wrong — it drops the
+    ;; reentry guard while the previous chain is still walking the list, so a
+    ;; second chain starts on top of it — and warning there is worse, because
+    ;; it spends the leak alarm on healthy behavior.
+    (if (agent-repl--update-chain-continuation-pending-p)
+        (let ((age (- (float-time) agent-repl--update-in-flight)))
+          (agent-repl--info
+           nil
+           "update-in-flight-p: chain age=%.2fs over threshold=%.2fs but its next hop is still scheduled — starved, not wedged; skipping this tick"
+           age agent-repl-state-stale-threshold)
+          t)
+      (let ((initiator (agent-repl--frontend-expected-restart-covering-initiator
+                        agent-repl--update-in-flight))
+            (age (- (float-time) agent-repl--update-in-flight)))
+        (setq agent-repl--update-in-flight nil)
+        (if initiator
+            (agent-repl--info nil
+                              "update-in-flight-p: stale flag (%.2fs old) from the %s restart, force-clearing"
+                              age initiator)
+          (agent-repl--warn nil "update-in-flight-p: stale flag (%.2fs old), force-clearing"
+                            age)))
+      nil))))
 
 (defun agent-repl--update-one-workspace-state (ws do-git-p)
   "Run the per-workspace state-update body for WS.
