@@ -440,6 +440,53 @@ describe("SessionServer disconnect tolerance", () => {
     expect(server.isConnected()).toBe(true);
   });
 
+  it("completes an in-flight interrupt locally when the connection dies before its receipt", async () => {
+    // Arrange: an interrupt whose handler runs to completion — the SDK abort —
+    // against a connection that is gone by the time the Ack is due.
+    const { server, socketPath, calls } = harness({
+      onInterrupt: (m): Receipt => {
+        calls.interrupts.push(m);
+        void server.close();
+        return create(AckSchema, { requestId: m.requestId });
+      },
+    });
+    track(server);
+    const peer = await handshake(server, socketPath);
+    const records = persistedRecords();
+
+    // Act.
+    peer.send(InterruptSchema, create(InterruptSchema, { requestId: "int-1" }));
+    await until(() => calls.interrupts.length === 1);
+
+    // Assert: the interrupt happened; only its answer was lost.
+    expect(calls.interrupts[0]?.requestId).toBe("int-1");
+    await until(() => records().some((r) => String(r.message ?? "").includes("control receipt DROPPED")));
+  });
+
+  it("records a dropped receipt at error level so the lost outcome is not silent", async () => {
+    // Arrange: the same window, asserted on the record's severity — a lost
+    // outcome for work that already happened is a divergence, not a nicety.
+    const { server, socketPath, calls } = harness({
+      onInterrupt: (m): Receipt => {
+        calls.interrupts.push(m);
+        void server.close();
+        return create(AckSchema, { requestId: m.requestId });
+      },
+    });
+    track(server);
+    const peer = await handshake(server, socketPath);
+    const records = persistedRecords();
+
+    // Act.
+    peer.send(InterruptSchema, create(InterruptSchema, { requestId: "int-1" }));
+    await until(() => records().some((r) => String(r.message ?? "").includes("control receipt DROPPED")));
+
+    // Assert.
+    const dropped = records().find((r) => String(r.message ?? "").includes("control receipt DROPPED"));
+    expect(dropped?.level).toBe("error");
+    expect(dropped?.request_id).toBe("int-1");
+  });
+
   // The "two daemons connect, newest wins" case is gone from this side: the
   // shim owns ONE outbound connection, so it cannot be connected twice.
   // Superseding a stale connection is now the daemon listener's job and is

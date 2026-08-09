@@ -2,6 +2,7 @@ package shimclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -28,6 +29,22 @@ var ErrNack = errclass.ErrShimNack
 
 // ErrAckTimeout is returned when no Ack/Nack arrives within the AckTimeout.
 var ErrAckTimeout = errclass.ErrShimAckTimeout
+
+// ErrDeliveredUnacked marks a control request that WAS WRITTEN to a live shim
+// and whose connection then died before its receipt came back.
+//
+// IT IS A DIFFERENT FACT FROM EVERY OTHER CONTROL FAILURE, and the difference
+// decides what the caller may conclude. ErrNotConnected means nothing left the
+// daemon; a write error means the frame did not land; a Nack is the shim's own
+// refusal. This one says the shim RECEIVED the request — the shim's dispatch is
+// synchronous, so an interrupt that reached it has already run against the SDK —
+// and only the answer was lost with the socket.
+//
+// So a caller must not treat it as "the command did not happen", and must not
+// re-send to find out: re-sending an interrupt would stop a second, unrelated
+// turn. What the outcome was is recovered from the reattach handshake and the
+// durable store, never from this exchange.
+var ErrDeliveredUnacked = errors.New("shimclient: control request was delivered but its receipt was lost with the connection")
 
 // protoControl is a proto control message carrying a request_id.
 type protoControl interface {
@@ -223,7 +240,13 @@ func (c *Client) sendAwaitReceipt(ctx context.Context, msg protoControl, originR
 		return nil, nil, fmt.Errorf("%w: request_id=%s after %s", ErrAckTimeout, reqID, c.cfg.AckTimeout)
 	case res := <-ch:
 		if res.err != nil {
-			return nil, nil, res.err
+			// The write above SUCCEEDED and the connection then died, so the
+			// shim has the request and the daemon has lost only its answer.
+			// Named as such, because the caller's next move depends entirely on
+			// which of those two it was (see ErrDeliveredUnacked).
+			c.logf("control request request_id=%s origin_request_id=%q DELIVERED but its receipt was lost with the connection: %v — the shim ran it; the outcome is recovered from the reattach, never by re-sending",
+				reqID, originRequestID, res.err)
+			return nil, nil, fmt.Errorf("%w: request_id=%s: %w", ErrDeliveredUnacked, reqID, res.err)
 		}
 		if res.nack != nil {
 			return nil, res.nack, nil
