@@ -374,6 +374,8 @@ describe("UPDATE_ARM_KIND", () => {
       journal: "journal",
       shell: "shell",
       unclassified: "unclassified",
+      merge: "merge",
+      skill: "skill",
     });
   });
 });
