@@ -59,6 +59,15 @@
      is why this is a hue of its own and not a shade of --init: the two states
      WERE one, and a teal that reads as bluish re-merges them at a glance. */
   --hibernated: #0d9488;
+  /* The revival gate's own fill and frame (#revival-gate): a SOLID yellow
+     card inside a solid orange frame. Solid rather than a color-mix wash of
+     the feed, because the gate is the only interaction available while it
+     stands — a card the conversation shows through reads as one more notice
+     to scroll past. The yellow/orange pair is the palette's "you must decide
+     something" band, and the orange frame is the same hue a compaction's rule
+     draws (--compact-rule), which is what every button on the card offers. */
+  --revival-gate-bg: #fcd34d;
+  --revival-gate-border: #ea580c;
   /* Tool card titles: matches the Emacs modeline "Agent Input" ai-title
      purple (X11 medium purple); mid-lightness, so one shade reads fine
      in both themes. */
@@ -252,6 +261,12 @@
     --async: #fbbf24;
     /* Brighter teal for the dark theme, for the same reason --async lifts. */
     --hibernated: #2dd4bf;
+    /* The gate stays a SOLID yellow card in the dark theme too, but a deep
+       yellow rather than the light theme's bright one, so --fg still reads on
+       it. The frame lifts to the brighter orange the dark theme already gives
+       --compact-rule. */
+    --revival-gate-bg: #5c4a10;
+    --revival-gate-border: #f97316;
     --blocked: #e879f9;
     --q-border: #facc15;
     --async-card: #09433b;
@@ -3045,18 +3060,19 @@ pre {
 #drain-banner:empty { display: none; }
 
 /* --- The revival gate (hibernation.ts) -----------------------------------
-   The blocking card a hibernated session shows instead of a live composer.
-   TEAL, per the module color contract: a hibernated session is the canonical
-   "nothing is wired, and nothing is wrong" — we SIGTERMed it on purpose. Red
-   would say the session died and blue would say the local substrate broke;
-   both are the conflation teal exists to correct.
+   The blocking card a hibernated session shows instead of a live composer,
+   offering the compaction modes a revival can take.
 
-   It is a filled card rather than an outlined banner because, unlike the two
-   banners above it, it is not an announcement to read past — it is the only
-   interaction available until it is answered. */
+   YELLOW fill inside an ORANGE frame, and both are SOLID colors rather than a
+   wash mixed with the feed: this card is not an announcement to read past, it
+   is the only interaction available until it is answered, so nothing of the
+   conversation shows through it. The hibernation TEAL still names the state
+   inside the card — the heading, the badges and the buttons all keep it, per
+   the module color contract — while the frame carries the decision the card
+   is asking for rather than the state it reports. */
 #revival-gate {
-  background: color-mix(in srgb, var(--hibernated) 12%, var(--bg));
-  border: 1px solid var(--hibernated);
+  background: var(--revival-gate-bg);
+  border: 1px solid var(--revival-gate-border);
   border-radius: 8px;
   padding: 0.6rem 0.85rem;
   margin: 0.35rem 0.75rem;
