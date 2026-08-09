@@ -389,11 +389,26 @@ a restart phase rather than as the daemon dying.  See
                (progn
                  (let ((busy (agent-repl--frontend-all-turn-active-workspaces)))
                    (agent-repl--log nil
-                                    "runtime-restart preflight: daemon-state=%S busy=%S store=%s sidecar=%s"
-                                    daemon-state busy agent-repl--shim-store-label
+                                    "runtime-restart preflight: daemon-state=%S busy=%S stop-shims=%s store=%s sidecar=%s"
+                                    daemon-state busy (if stop-shims "t" "nil")
+                                    agent-repl--shim-store-label
                                     agent-repl--shim-sidecar-label)
-                   (when busy
-                     (error "runtime restart refused: turn in flight in %s" busy)))
+                   ;; A PRESERVING bounce (the default, and the only mode the
+                   ;; deploy uses) is loss-free with a turn in flight: the shim
+                   ;; outlives its daemon, the SDK turn keeps running, every
+                   ;; event it produces is durable in the store, and the
+                   ;; replacement daemon replays from its persisted floor on
+                   ;; reattach.  Refusing it meant a daemon-only change could
+                   ;; not be deployed at all for as long as anything anywhere
+                   ;; was thinking, which on a busy fleet is always.
+                   ;;
+                   ;; STOP-SHIMS is the mode that genuinely destroys a live
+                   ;; conversation — it kills the process running the turn — so
+                   ;; that one still refuses.  See
+                   ;; `agent-repl--frontend-stop-daemon'.
+                   (when (and busy stop-shims)
+                     (error "runtime restart refused: stop-shims would kill the turn in flight in %s"
+                            busy)))
                  (agent-repl--shim-services-assert-launchd-loaded)
                  (let ((build-result (agent-repl--frontend-build-if-stale nil)))
                    (agent-repl--log nil
@@ -432,13 +447,12 @@ a restart phase rather than as the daemon dying.  See
       :pending)))
 (defun agent-repl-runtime-restart (&optional stop-shims initiator)
   "Rebuild, bounce, verify, then rebind the complete agent-repl runtime.
-Refuses before any build or bounce when any daemon workspace reports an
-active turn.
 
 STOP-SHIMS (the interactive prefix argument) asks the outgoing daemon to
 stop its session shims rather than leave them running for the replacement
 to reattach to.  The default PRESERVES them; see
-`agent-repl--runtime-prepare'.
+`agent-repl--runtime-prepare'.  Only the STOP-SHIMS mode refuses while a
+turn is in flight: a preserving bounce cannot lose one.
 
 INITIATOR, when supplied, names the surface that ordered this restart on the
 expected-restart window; interactive callers leave it nil."
