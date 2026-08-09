@@ -808,11 +808,15 @@ function agentRowHtml(row: FooterAgentRow, nowMs: number): string {
 }
 
 /**
- * The EXPANDED FOOTER: one row per fact the collapsed strip had no cell for.
+ * The EXPANDED FOOTER: the session's AGENT AND TASK ROSTER, and nothing else.
  *
- * It is the home for the detail the thin strip drops — every OPEN window with
- * its age, the counts the cluster shows only as bare numbers, and the session's
- * subagent roster, which no other chrome surface carries.
+ * STATUS DOES NOT LIVE HERE. Every live fact about the session — the open
+ * windows, the rate-limit allowances and when they reset, the merge's account —
+ * is said ONCE, in the strip's own cells (`activityDetail`, the phase word, the
+ * counters cluster). The sheet used to restate all of it, so the same fact read
+ * two ways in one footer and the reader had two places to look for one answer.
+ * The strip is the single home for status; this section is the single home for
+ * the roster, which no other chrome surface carries.
  *
  * It never grows the page: past `EXPANDED_FOOTER_MAX_ROWS` the section scrolls
  * its own content, and the `scrolls` marker is what the stylesheet hangs that
@@ -822,43 +826,11 @@ export function sheetHtml(input: FooterInput, nowMs: number): string {
   const p = input.progress;
   if (p === null) return "";
   const rows: string[] = [];
-  const windows: ReadonlyArray<[string, ProgressInput["compacting"]]> = [
-    ["compacting", p.compacting],
-    ["retrying", p.retrying],
-    ["authenticating", p.authenticating],
-    ["hook", p.hook],
-    ["blocked", p.blocked],
-  ];
-  for (const [name, w] of windows) {
-    if (w === null) continue;
-    const age = w.sinceMs > 0 ? ` (${formatElapsed(nowMs - w.sinceMs)})` : "";
-    const detail = w.detail === "" ? "" : ` — ${w.detail}`;
-    rows.push(`<span>${escapeHtml(`${name}${age}${detail}`)}</span>`);
-  }
-  // The sheet says the rate limit in the SAME words and the same accents as the
-  // strip's rung: one fact reading two ways in one footer is how the old
-  // "rate-limited" line survived a rewording of the cell above it.
-  //
-  // It shows BOTH allowances whenever either has been reported, including the
-  // quiet case the strip's rung declines to displace a running tool for — the
-  // sheet is where the detail the thin strip drops belongs, and "how much of my
-  // week is left" is exactly what a reader opens it to find out.
-  if (p.rateLimited !== null || p.rateLimitedWeekly !== null) {
-    rows.push(`<span>${activityBody(rateLimitActivity(p, nowMs))}</span>`);
-  }
-  // The merge's full account, including the parts the thin strip drops: the
-  // run's arithmetic when the chip had no room, and the commit or prompt in
-  // hand when a louder rung displaced it from the activity cell.
-  const merge = mergeFacts(input.mergeStatus);
-  if (merge !== null) {
-    const parts = [merge.word, merge.count, merge.activity].filter((part) => part !== "");
-    rows.push(`<span>${escapeHtml(parts.join(" · "))}</span>`);
-  }
+  // The TASK count, which is roster arithmetic rather than session status: it
+  // says how many entries the tasks roster is carrying, and it is the one
+  // reading the daemon reports that the agent rows below cannot.
   if (p.liveTaskCount > 0) {
     rows.push(`<span>${p.liveTaskCount} live task${p.liveTaskCount === 1 ? "" : "s"}</span>`);
-  }
-  if (p.ttftMs > 0) {
-    rows.push(`<span>first token in ${escapeHtml(formatElapsed(p.ttftMs))}</span>`);
   }
   // THE ROSTER, and only here: the footer is the one surface that carries the
   // session's subagents, so an absent roster renders no rows rather than an
