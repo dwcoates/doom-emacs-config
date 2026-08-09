@@ -276,11 +276,34 @@ func assertRuntimeIdentityUnavailable(t *testing.T, accounting *frontendv1.TurnA
 		got = append(got, suffix)
 	}
 	slices.Sort(got)
-	want := []string{
-		"auth_source", "claude_code_version", "context_prefix", "effective_options",
-		"fast_mode_reason", "fast_mode_state", "mcp", "settings", "shim_build_sha",
-		"subscription_type", "tools",
-	}
+	// ONLY THE FIELDS THE PRODUCER LEFT UNSTATED. The fake SDK's system:init
+	// carries no api key source, claude code version or fast mode state, and the
+	// e2e shim build carries no sha, so these four are genuinely unanswered and
+	// the turn is correctly condemned for them.
+	//
+	// SEVEN FIELDS ARE DELIBERATELY NOT HERE, and each left this list by a
+	// documented decision rather than by going missing:
+	//
+	//   - effective_options, tools, mcp and context_prefix are DERIVABLE and are
+	//     now fingerprinted (agent-shim/claude/shim/src/runtime-identity.ts):
+	//     init exposes the ordered tools and mcp_servers, and the shim itself
+	//     owns the options object and system prompt it passed to query().
+	//   - settings answers with an explicit, caused `unavailable`, which
+	//     evidenceFingerprintSettled accepts as SETTLED — a producer saying "I
+	//     hold nothing to fingerprint, and here is why" has answered. The
+	//     digest-only reading made the proto's own `unavailable` arm
+	//     unsatisfiable.
+	//   - subscription_type is not initialization evidence at all; this same
+	//     TurnAccounting already carries it on both AccountUsageObservations.
+	//   - fast_mode_reason EXPLAINS fast_mode_state, and a state that needs no
+	//     explaining has none.
+	//
+	// Those four rules live in incompleteRuntimeIdentityPaths and
+	// evidenceFingerprintSettled and are pinned by
+	// TestRuntimeIdentityDoesNotRequireNonInitEvidence and
+	// TestEvidenceFingerprintSettlement. This expectation was the last place
+	// still asserting the superseded contract.
+	want := []string{"auth_source", "claude_code_version", "fast_mode_state", "shim_build_sha"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("turn %q unavailable runtime identity fields = %v, want %v", accounting.GetTurnId(), got, want)
 	}
