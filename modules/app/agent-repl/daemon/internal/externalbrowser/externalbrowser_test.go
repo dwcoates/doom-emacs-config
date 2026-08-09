@@ -87,16 +87,20 @@ func TestOpenHandsTheURLToChromeWithTheProfile(t *testing.T) {
 	}
 
 	// Assert.
-	if len(calls) == 0 {
-		t.Fatal("Open() ran no command")
+	if len(calls) != 2 {
+		t.Fatalf("Open() ran %d commands, want 2", len(calls))
 	}
 	want := call{name: Binary, args: []string{"--profile-directory=Profile 6", "https://example.com/x"}}
-	if !reflect.DeepEqual(calls[0], want) {
-		t.Errorf("Open() first call = %+v, want %+v", calls[0], want)
+	if !reflect.DeepEqual(calls[1], want) {
+		t.Errorf("Open() second call = %+v, want %+v", calls[1], want)
 	}
 }
 
-func TestOpenRaisesTheBrowserAfterHandingTheURLOver(t *testing.T) {
+// TestOpenRaisesTheBrowserBeforeHandingTheURLOver pins the ORDER, which is what
+// puts focus on the right window: Chrome raises the profile window it puts the
+// tab in but never fronts itself, so an activation that came second would
+// restore whichever window was frontmost before — routinely the other profile's.
+func TestOpenRaisesTheBrowserBeforeHandingTheURLOver(t *testing.T) {
 	// Arrange.
 	var calls []call
 
@@ -106,12 +110,12 @@ func TestOpenRaisesTheBrowserAfterHandingTheURLOver(t *testing.T) {
 	}
 
 	// Assert.
-	if len(calls) != 2 {
-		t.Fatalf("Open() ran %d commands, want 2", len(calls))
+	if len(calls) == 0 {
+		t.Fatal("Open() ran no command")
 	}
 	want := call{name: "osascript", args: ActivateArgv()}
-	if !reflect.DeepEqual(calls[1], want) {
-		t.Errorf("Open() second call = %+v, want %+v", calls[1], want)
+	if !reflect.DeepEqual(calls[0], want) {
+		t.Errorf("Open() first call = %+v, want %+v", calls[0], want)
 	}
 }
 
@@ -137,7 +141,7 @@ func TestOpenSurfacesAFailedHandOff(t *testing.T) {
 	boom := errors.New("chrome exploded")
 
 	// Act.
-	err := Open("https://example.com/x", recorder(&calls, boom))
+	err := Open("https://example.com/x", recorder(&calls, nil, boom))
 
 	// Assert.
 	if !errors.Is(err, boom) {
@@ -148,7 +152,21 @@ func TestOpenSurfacesAFailedHandOff(t *testing.T) {
 	}
 }
 
-func TestOpenDoesNotRaiseTheBrowserAfterAFailedHandOff(t *testing.T) {
+func TestOpenSurfacesAFailedRaise(t *testing.T) {
+	// Arrange.
+	var calls []call
+	boom := errors.New("osascript exploded")
+
+	// Act.
+	err := Open("https://example.com/x", recorder(&calls, boom))
+
+	// Assert.
+	if !errors.Is(err, boom) {
+		t.Fatalf("Open() error = %v, want it to wrap %v", err, boom)
+	}
+}
+
+func TestOpenDoesNotHandTheURLOverAfterAFailedRaise(t *testing.T) {
 	// Arrange.
 	var calls []call
 
@@ -159,20 +177,6 @@ func TestOpenDoesNotRaiseTheBrowserAfterAFailedHandOff(t *testing.T) {
 
 	// Assert.
 	if len(calls) != 1 {
-		t.Errorf("Open() ran %d commands after a failed hand-off, want 1", len(calls))
-	}
-}
-
-func TestOpenSurfacesAFailedRaise(t *testing.T) {
-	// Arrange.
-	var calls []call
-	boom := errors.New("osascript exploded")
-
-	// Act.
-	err := Open("https://example.com/x", recorder(&calls, nil, boom))
-
-	// Assert.
-	if !errors.Is(err, boom) {
-		t.Fatalf("Open() error = %v, want it to wrap %v", err, boom)
+		t.Errorf("Open() ran %d commands after a failed raise, want 1", len(calls))
 	}
 }

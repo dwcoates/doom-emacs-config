@@ -64,10 +64,10 @@ on-disk directory name under Chrome's user-data dir, which is what
   :group 'agent-repl)
 
 (defcustom agent-repl-external-browser-app "Google Chrome"
-  "Application name used to raise the browser after a link is handed to it.
-Handing Chrome a URL creates the tab but leaves window activation to the
-window server, so the browser is activated explicitly and the user lands
-on the page they clicked."
+  "Application name used to raise the browser before a link is handed to it.
+Chrome raises the profile window it puts a new tab in, but it never
+brings itself to the front, so the browser is activated explicitly --
+BEFORE the hand-off, per `agent-repl-open-external-url'."
   :type 'string
   :group 'agent-repl)
 
@@ -101,11 +101,20 @@ tests stub it via `cl-letf' rather than launching a real browser."
 ;;;; ---- Opening --------------------------------------------------------------
 
 (defun agent-repl-open-external-url (url)
-  "Open URL in the pinned Chrome profile window and focus the browser.
-Returns URL.  Signals when URL is not an http/https string, when Chrome
-refuses the URL, or when the browser could not be raised: a link the user
-clicked that silently went nowhere is worse than a loud failure, and each
-of the three is a distinct diagnosis the canonical log records."
+  "Open URL in the pinned Chrome profile window and focus the page.
+Returns URL.  Signals when URL is not an http/https string, when the
+browser could not be raised, or when Chrome refuses the URL: a link the
+user clicked that silently went nowhere is worse than a loud failure,
+and each of the three is a distinct diagnosis the canonical log records.
+
+ORDER MATTERS, and it is the reason focus lands on the right WINDOW.
+Chrome raises the profile window it puts the new tab in, but it does not
+bring itself to the front; activating afterwards would instead restore
+whichever window was frontmost before, which is routinely a window of
+the other profile.  Activating FIRST and handing the URL over second
+makes the outcome independent of how long Chrome takes to process the
+hand-off: the app is already frontmost, so the window Chrome raises for
+the tab is the window the user ends up looking at."
   (unless (and (stringp url)
                (string-match-p agent-repl--external-browser-url-regexp url))
     (agent-repl--error nil
@@ -114,6 +123,14 @@ of the three is a distinct diagnosis the canonical log records."
   (agent-repl--log nil "external-browser: opening url=%S profile=%s binary=%s"
                    url agent-repl-external-browser-profile
                    agent-repl-external-browser-binary)
+  (let ((activate-exit (apply #'agent-repl--external-browser-call-process
+                              "osascript"
+                              (agent-repl--external-browser-activate-args))))
+    (unless (eq activate-exit 0)
+      (agent-repl--error
+       nil
+       "external-browser: activate FAILED url=%S app=%s exit=%S"
+       url agent-repl-external-browser-app activate-exit)))
   (let ((launch-exit (apply #'agent-repl--external-browser-call-process
                             agent-repl-external-browser-binary
                             (agent-repl--external-browser-launch-args url))))
@@ -123,14 +140,6 @@ of the three is a distinct diagnosis the canonical log records."
        "external-browser: launch FAILED url=%S profile=%s binary=%s exit=%S"
        url agent-repl-external-browser-profile
        agent-repl-external-browser-binary launch-exit)))
-  (let ((activate-exit (apply #'agent-repl--external-browser-call-process
-                              "osascript"
-                              (agent-repl--external-browser-activate-args))))
-    (unless (eq activate-exit 0)
-      (agent-repl--error
-       nil
-       "external-browser: activate FAILED url=%S app=%s exit=%S"
-       url agent-repl-external-browser-app activate-exit)))
   (agent-repl--log nil "external-browser: opened url=%S profile=%s"
                    url agent-repl-external-browser-profile)
   url)
