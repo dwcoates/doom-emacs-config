@@ -25,6 +25,7 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 )
@@ -66,11 +67,25 @@ type asyncBubbleStore struct {
 	// cursor has no wire home and lives here, still exactly one number per
 	// bubble with exactly one owner.
 	journalThrough map[string]uint64
+	// logf is the fold engine's own diagnostic channel, workspace-tagged by the
+	// consumer that built the store.
+	//
+	// THE FOLD ENGINE USED TO BE ENTIRELY SILENT. Every append and every settle
+	// happened without a record, so a session whose detached work rendered
+	// perfectly and one whose bubbles silently stopped growing produced exactly
+	// the same log — there was no evidence to compare. The two records below
+	// are what make the happy path provable, and they are per STATE CHANGE (one
+	// per fold, one per settlement) rather than per item inside a batch.
+	logf dlog.Logf
 }
 
-func newAsyncBubbleStore(workspace string) *asyncBubbleStore {
+func newAsyncBubbleStore(workspace string, logf dlog.Logf) *asyncBubbleStore {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
 	return &asyncBubbleStore{
 		workspace:       workspace,
+		logf:            logf,
 		byID:            map[string]*frontendv1.AsyncBubble{},
 		idByToolUse:     map[string]string{},
 		idByTask:        map[string]string{},
@@ -184,6 +199,13 @@ func (s *asyncBubbleStore) observeCuration(c frontend.Curation, atMs int64) (asy
 			continue
 		}
 		if up != nil {
+			// ONE record for the whole emission batch, not one per emission: a
+			// detached agent's transcript arrives in bursts and per-item lines
+			// would bury the state change they describe.
+			s.logf("session-controller: async fold append bubble=%s kind=%s ws=%s appended_emissions=%d folded_emissions=%d dropped_before=%d",
+				b.GetId(), frontend.AsyncBubbleKind(b), s.workspace,
+				len(fold.Emissions), len(b.GetAgent().GetEmissions()),
+				b.GetAgent().GetFold().GetDroppedBefore())
 			push.Updates = append(push.Updates, up)
 		}
 	}
@@ -373,6 +395,14 @@ func (s *asyncBubbleStore) foldRetrievalLocked(out *datav1.TaskOutputResult, atM
 			return nil, err
 		}
 		if up != nil {
+			// The chunk is read off the UPDATE rather than off the spool: the
+			// update is what the client applies, so a record taken from it
+			// cannot describe a different append than the one that shipped.
+			chunk := asyncOutputChunk(up)
+			s.logf("session-controller: async fold append bubble=%s kind=%s ws=%s appended_bytes=%d from_offset=%d through_offset=%d restated_bytes=%d",
+				b.GetId(), frontend.AsyncBubbleKind(b), s.workspace,
+				len(chunk.GetText()), chunk.GetFromOffset(),
+				chunk.GetFromOffset()+uint64(len(chunk.GetText())), len(text))
 			updates = append(updates, up)
 		}
 	case frontend.DetachWorkflow:
@@ -390,7 +420,7 @@ func (s *asyncBubbleStore) foldRetrievalLocked(out *datav1.TaskOutputResult, atM
 		// interleave the same conversation with itself.
 	}
 	if verdict != nil {
-		up, err := frontend.SettleAsyncBubble(b, *verdict)
+		up, err := s.settleLocked(b, *verdict)
 		if err != nil {
 			return updates, err
 		}
@@ -425,7 +455,20 @@ func (s *asyncBubbleStore) foldJournalLocked(b *frontendv1.AsyncBubble, text str
 	consumed := completeJournalPrefix(tail)
 	rows, _ := frontend.ParseJournalRows(tail[:consumed])
 	s.journalThrough[b.GetId()] = through + uint64(consumed)
-	return frontend.AppendAsyncJournalRows(b, rows, atMs)
+	up, err := frontend.AppendAsyncJournalRows(b, rows, atMs)
+	if err != nil || up == nil {
+		return up, err
+	}
+	// The journal's cursor has no wire home, so this record is the ONLY place
+	// its advance is observable. `held_bytes` is the trailing partial record
+	// deliberately left unconsumed for the next retrieval — a nonzero value
+	// that never falls is how a wedged journal writer shows up.
+	s.logf("session-controller: async fold append bubble=%s kind=%s ws=%s appended_rows=%d folded_rows=%d dropped_before=%d consumed_bytes=%d through_offset=%d held_bytes=%d",
+		b.GetId(), frontend.AsyncBubbleKind(b), s.workspace,
+		len(rows), len(b.GetJournal().GetRows()),
+		b.GetJournal().GetFold().GetDroppedBefore(),
+		consumed, s.journalThrough[b.GetId()], len(tail)-consumed)
+	return up, nil
 }
 
 // observeTaskEnded settles the bubble a finished detachment belongs to.
@@ -589,7 +632,61 @@ func (s *asyncBubbleStore) settleByTaskLocked(taskID string, v frontend.AsyncVer
 	if b == nil {
 		return nil, nil
 	}
-	return frontend.SettleAsyncBubble(b, v)
+	return s.settleLocked(b, v)
+}
+
+// settleLocked is the ONE settlement site, so the record below cannot be
+// bypassed by a route that settles a bubble some other way.
+//
+// It records the RESOLVED outcome arm rather than the verdict's terminal
+// status: the daemon's own mapping (a killed process exits nonzero yet settles
+// `killed`, an exit code outranks the status) is exactly the step an
+// investigation needs to see, and re-reading the status would hide it. A
+// refused settlement writes no record here — the error is returned and becomes
+// the caller's failure card, so a settled-looking log line can never stand for a
+// bubble that did not settle.
+func (s *asyncBubbleStore) settleLocked(b *frontendv1.AsyncBubble, v frontend.AsyncVerdict) (*frontendv1.AsyncBubbleUpdate, error) {
+	up, err := frontend.SettleAsyncBubble(b, v)
+	if err != nil {
+		return nil, err
+	}
+	settled := b.GetLiveness().GetSettled()
+	exit := "none"
+	if e := settled.GetShellExit(); e != nil {
+		exit = fmt.Sprintf("%d", e.GetCode())
+	}
+	s.logf("session-controller: async bubble settled bubble=%s kind=%s ws=%s outcome=%s status=%s shell_exit=%s settled_at_ms=%d reason=%q",
+		b.GetId(), frontend.AsyncBubbleKind(b), s.workspace,
+		asyncSettledOutcomeArm(settled), v.Status, exit,
+		settled.GetSettledAtMs(), v.Reason)
+	return up, nil
+}
+
+// asyncSettledOutcomeArm names the settlement arm the daemon resolved. The
+// default is reachable only for a settlement that carried no arm at all, which
+// SettleAsyncBubble refuses to produce — naming it keeps the record honest if
+// that ever changes rather than printing a confident "done".
+func asyncSettledOutcomeArm(settled *frontendv1.AsyncSettled) string {
+	switch settled.GetOutcome().(type) {
+	case *frontendv1.AsyncSettled_Done:
+		return "done"
+	case *frontendv1.AsyncSettled_Error:
+		return "error"
+	case *frontendv1.AsyncSettled_Killed:
+		return "killed"
+	default:
+		return "unset"
+	}
+}
+
+// asyncOutputChunk reads the byte-spool append off whichever spool-shaped arm
+// the update carries. The two arms are distinct wire types carrying the same
+// message, so one reader serves both rather than each log site re-deciding.
+func asyncOutputChunk(up *frontendv1.AsyncBubbleUpdate) *frontendv1.AsyncOutputAppend {
+	if c := up.GetShell(); c != nil {
+		return c
+	}
+	return up.GetUnclassified()
 }
 
 // indexCallsLocked records every tool call a detached agent made, so a
