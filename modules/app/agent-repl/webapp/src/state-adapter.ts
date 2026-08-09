@@ -50,6 +50,7 @@
  * distinct shape name. They are never crashed on and never silently dropped.
  */
 
+import type { AsyncBubble, AsyncBubbleDelta } from "./async-bubble.js";
 import type { CounterEntry, CounterStatus } from "./counter-menu.js";
 import type { ContentBlock, ModelInfo, ModelUsage, ResultSubtype, Usage } from "./protocol.js";
 import { mergeStatusLogValue } from "./merge-status.js";
@@ -475,6 +476,45 @@ export type AdapterEffect =
    * one layer further down.
    */
   | { kind: "shutdown-schedule"; value: ShutdownScheduleView }
+  /**
+   * THE ASYNC-BUBBLE SEAM. One push of detached work, carried whole to
+   * `AsyncBubbleRegistry.applyDelta`, which is the ONLY thing allowed to route
+   * it (invariant I2: strictly by `bubble_id`).
+   *
+   * The delta is forwarded UNPROJECTED and unsplit, for two reasons. First,
+   * `applyDelta` validates the whole push before it mutates anything, so
+   * fanning it into per-update effects here would hand the store a batch it
+   * could apply halfway — the exact partial mutation the invariant forbids.
+   * Second, the push's `fence` has to reach the fence comparator attached to
+   * the pushed bytes it gates; splitting the delta would leave each fragment
+   * re-asserting a fence nobody could tie back to a single arrival.
+   *
+   * FENCE GATING happens at the choke point that owns `WorkspaceState.fence`,
+   * not here: the adapter is a pure producer with no store to compare against.
+   * This effect is the seam that gate connects to.
+   */
+  | { kind: "async-bubble-delta"; value: AsyncBubbleDelta }
+  /**
+   * Detached work ANCHORED IN THE FEED at the point it was launched
+   * (`ConversationItem.async_bubble`), lifted onto the same seam as a push
+   * whose `opened` list is those bubbles.
+   *
+   * It is deliberately NOT a store feed item. The bubble's identity is its id
+   * and everything it produces afterwards is addressed to that id, so it lives
+   * in the registry with every other bubble — one home, one router. A second
+   * copy pinned in the item list would be a second place an update could have
+   * been meant to land, which is how id-only routing stops being id-only.
+   */
+  | { kind: "async-bubble-anchored"; value: AsyncBubbleDelta }
+  /**
+   * The reconnect snapshot's complete set of still-open bubbles
+   * (`StateSnapshot.async_bubbles`), for `AsyncBubbleRegistry.adoptSnapshot`.
+   *
+   * Separate from the push seam because the semantics differ in kind: a push
+   * ADDS and UPDATES, a snapshot REPLACES. Folding them together would make
+   * "the daemon no longer holds this bubble" unrepresentable.
+   */
+  | { kind: "async-bubbles-snapshot"; bubbles: AsyncBubble[] }
   | { kind: "ignored"; shape: string };
 
 export type AdapterLogLevel = "debug" | "info" | "warn" | "error";
@@ -558,6 +598,11 @@ export class StateAdapter {
           ...s.sessions.map((sv) => this.sessionEffect(sv)),
           ...s.catalogs.map((tc) => this.catalogEffect(tc)),
           ...s.inits.map((si) => this.sessionInitEffect(si)),
+          // Emitted UNCONDITIONALLY, including when empty: an empty list is
+          // the daemon stating that no detached work is open, which is what
+          // retires bubbles a reconnecting client still holds. Skipping it
+          // when empty would make a reaped bubble immortal.
+          this.asyncBubblesSnapshotEffect(s.asyncBubbles),
           ...s.queues.map((q) => this.queueEffect(q)),
           ...s.progress.map((p) => this.progressEffect(p)),
           // SEEDED ONLY WHEN THE SNAPSHOT CARRIES IT. A daemon that does not
@@ -575,6 +620,8 @@ export class StateAdapter {
         return [this.sessionEffect(frame.frame.value)];
       case "conversationDelta":
         return this.conversationEffects(frame.frame.value);
+      case "asyncBubbleDelta":
+        return [this.asyncBubbleDeltaEffect(frame.frame.value)];
       case "typingDelta":
         return this.typingEffects(frame.frame.value);
       case "heartbeat":
@@ -840,6 +887,8 @@ export class StateAdapter {
   private conversationEffects(cd: ConversationDelta): AdapterEffect[] {
     const items: ConversationItem[] = [];
     const ignored: AdapterEffect[] = [];
+    /** Bubbles this delta anchored; they go to the registry, not the feed. */
+    const anchored: AsyncBubble[] = [];
     for (const frame of cd.items) {
       if (frame.source === ConversationSource.UNSPECIFIED) {
         this.log(
@@ -857,6 +906,10 @@ export class StateAdapter {
         ignored.push(this.ignore("conversation-item-source:merge"));
         continue;
       }
+      if (frame.asyncBubble !== undefined) {
+        anchored.push(frame.asyncBubble);
+        continue;
+      }
       const built = itemsFromFrame(frame);
       items.push(...built.items);
       for (const shape of built.ignores) ignored.push(this.ignore(shape));
@@ -869,8 +922,54 @@ export class StateAdapter {
         throughSeq: Number(cd.throughSeq),
         items,
       },
+      // Feed-anchored bubbles ride the SAME seam a push does, shaped as a push
+      // whose `opened` list is them, so the registry has exactly one entry
+      // point and one fence to gate on. Emitted only when the delta actually
+      // carried one — an empty push would assert an arrival that never
+      // happened.
+      ...(anchored.length === 0
+        ? []
+        : [
+            {
+              kind: "async-bubble-anchored" as const,
+              value: {
+                workspace: cd.workspace,
+                opened: anchored,
+                updates: [],
+                throughSeq: cd.throughSeq,
+                fence: cd.fence,
+              },
+            },
+          ]),
       ...ignored,
     ];
+  }
+
+  /**
+   * One async push, forwarded WHOLE to the seam the registry connects to.
+   *
+   * Nothing is projected, split or reordered here. The adapter cannot route
+   * this push: routing needs the set of open bubbles, which is registry state,
+   * and a pure producer holds none. What it CAN do is make the arrival typed
+   * and say so in the log, so a push that later turns out to have carried a
+   * gap has a record of having arrived at all.
+   */
+  private asyncBubbleDeltaEffect(delta: AsyncBubbleDelta): AdapterEffect {
+    this.log(
+      "debug",
+      `state-adapter: async bubble delta workspace=${delta.workspace} fence=${delta.fence} ` +
+        `opened=${delta.opened.length} updates=${delta.updates.length} ` +
+        `through_seq=${String(delta.throughSeq)}`,
+    );
+    return { kind: "async-bubble-delta", value: delta };
+  }
+
+  /**
+   * The reconnect snapshot's open bubbles, forwarded for a REPLACING adopt.
+   */
+  private asyncBubblesSnapshotEffect(bubbles: AsyncBubble[]): AdapterEffect {
+    this.log("debug", `state-adapter: snapshot carries ${bubbles.length} open async bubble(s)`);
+    return { kind: "async-bubbles-snapshot", bubbles };
   }
 
   /**
@@ -1117,6 +1216,16 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
       // The command enum is the ENTIRE payload — there is no text field on
       // the wire message — so this is everything there is to read.
       return { items: [sessionCommandItem(frame.payload, frame.uuid)], ignores: [] };
+    case "asyncBubble":
+      // UNREACHABLE by construction: `conversationEffects` lifts every frame
+      // carrying a decoded bubble onto the async seam before it gets here, and
+      // the decoder sets this arm and that field together. Reaching this line
+      // means the two came apart, so it fails loudly instead of returning an
+      // empty item list that would make a live detached process invisible.
+      throw new Error(
+        `state-adapter: asyncBubble item ${frame.uuid} reached the feed decomposition ` +
+          `without a decoded bubble — the arm and \`asyncBubble\` must be set together`,
+      );
     default: {
       const never: never = arm;
       throw new Error(`state-adapter: unhandled conversation item arm ${JSON.stringify(never)}`);
