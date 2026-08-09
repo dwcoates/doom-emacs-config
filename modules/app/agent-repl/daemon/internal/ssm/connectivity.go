@@ -174,6 +174,7 @@ func (m *Manager) ApplySessionConnectivity(
 	// finished — `merged` outranks the whole color ladder and nothing but another
 	// merge row supersedes it. See mergereopen.go; the durable merged-at fact is
 	// untouched.
+	mergeAxisRetired := false
 	if state == SessionConnectivityConnecting {
 		retired, err := supersedeMergedAxisOnReopen(tx, workspace, m.nextAt())
 		if err != nil {
@@ -182,6 +183,7 @@ func (m *Manager) ApplySessionConnectivity(
 			return err
 		}
 		if retired {
+			mergeAxisRetired = true
 			m.logf("ssm: merge axis RETIRED ON REOPEN ws=%q session=%q generation=%q cause=%q — the workspace rested on `merged` and is being brought up again, so the axis is cleared and its live session resolves its own state (merged_at_ms is untouched)",
 				workspace, sessionID, generationID, causeKind)
 		}
@@ -195,6 +197,16 @@ func (m *Manager) ApplySessionConnectivity(
 	}
 	m.logf("ssm: session connectivity ws=%q session=%q generation=%q prior=%q next=%q cause=%q at=%d branch=applied",
 		workspace, sessionID, generationID, prior.state, state, causeKind, at)
+	// THE RETAINED RUN GOES WITH THE AXIS IT DESCRIBED, and it goes AFTER the
+	// commit and BEFORE the push. After the commit because the retirement is not a
+	// fact until the `merge_none` row is durable — a rolled-back transaction that
+	// had already dropped the status in memory would leave the axis still reading
+	// `merged` with nothing to report about the run behind it. Before the push
+	// because the very frame this edge publishes is the first one that must not
+	// carry the retired run.
+	if mergeAxisRetired {
+		m.retirePipelineStatusLocked(workspace, causeMergeReopened)
+	}
 	if err := m.publishCompositeLocked(workspace, causeKind); err != nil {
 		return err
 	}
