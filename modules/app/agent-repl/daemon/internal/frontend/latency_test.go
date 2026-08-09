@@ -540,3 +540,25 @@ func TestCommandLatencyReportsAnAckThatNeverReachedTheClient(t *testing.T) {
 		t.Fatal("sample carries no delivery error, want the reason the ack never landed")
 	}
 }
+
+func TestHostKindWidensTheDefaultAckThreshold(t *testing.T) {
+	got := AckWarnThresholdFor("host", DefaultAckWarnThreshold)
+	if got != HostAckWarnThreshold {
+		t.Fatalf("host default threshold = %v, want %v", got, HostAckWarnThreshold)
+	}
+}
+
+func TestGuiKindKeepsTheDefaultAckThreshold(t *testing.T) {
+	got := AckWarnThresholdFor("gui", DefaultAckWarnThreshold)
+	if got != DefaultAckWarnThreshold {
+		t.Fatalf("gui default threshold = %v, want %v", got, DefaultAckWarnThreshold)
+	}
+}
+
+func TestAnOperatorAckThresholdAppliesVerbatimToTheHost(t *testing.T) {
+	operator := 1 * time.Second
+	got := AckWarnThresholdFor("host", operator)
+	if got != operator {
+		t.Fatalf("host operator threshold = %v, want the operator's own %v", got, operator)
+	}
+}
