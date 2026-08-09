@@ -934,6 +934,12 @@ async function boot(): Promise<void> {
           notify("the error's line is not in the current feed");
         }
         return;
+      // The token cell's peek. The footer owns the window and repaints itself
+      // when it lapses, so there is nothing to schedule or cancel here.
+      case "peek-accounting":
+        footer.peekAccounting();
+        renderChrome();
+        return;
       case "toggle-expand":
         footer.toggleExpanded();
         renderChrome();
