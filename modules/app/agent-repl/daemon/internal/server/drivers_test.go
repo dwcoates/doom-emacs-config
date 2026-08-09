@@ -304,6 +304,9 @@ func (nopHandler) HibernateWorkspace(context.Context, string, string, *frontendv
 func (nopHandler) ReviveSession(context.Context, string, string, *frontendv1.ReviveSessionCmd) error {
 	return nil
 }
+func (nopHandler) AnswerMergeDequeue(context.Context, string, string, *frontendv1.AnswerMergeDequeueCmd) error {
+	return nil
+}
 func (nopHandler) ClientLog(context.Context, string, string, *frontendv1.ClientLogCmd) error {
 	return nil
 }

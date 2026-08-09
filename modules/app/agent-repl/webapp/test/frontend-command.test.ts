@@ -369,3 +369,29 @@ describe("the merge-queue runtime controls", () => {
     expect(w.evictMerge).toEqual({ runId: "run-7" });
   });
 });
+
+describe("the merge dequeue answer", () => {
+  it("names the offer, never the run", () => {
+    // Arrange / Act — a run id still resolves after its offer was answered or
+    // superseded, so a stale card's click must not be able to name one.
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "answerMergeDequeue", offerId: "offer-1", answer: "dequeue" },
+    });
+    // Assert
+    expect(w.answerMergeDequeue).toEqual({ offerId: "offer-1", dequeue: {} });
+  });
+
+  it("sends keep as its own arm rather than as an absent dequeue", () => {
+    // Arrange / Act — "no answer" is unrepresentable on the wire, so declining
+    // is a message and not the omission of one.
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "answerMergeDequeue", offerId: "offer-1", answer: "keep" },
+    });
+    // Assert
+    expect(w.answerMergeDequeue).toEqual({ offerId: "offer-1", keep: {} });
+  });
+});

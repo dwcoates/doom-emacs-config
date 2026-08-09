@@ -52,6 +52,7 @@ import type {
   WorkspaceGateView as GeneratedWorkspaceGateView,
 } from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
 import { CompactionScope as GeneratedCompactionScope } from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
+import type { AnswerMergeDequeueCmd as GeneratedAnswerMergeDequeueCmd } from "../../proto/gen/ts/agentshim/frontend/v1/merge_pb";
 import type { FailureKind as GeneratedFailureKind } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
 import type { FailureCardView as GeneratedFailureCardView } from "../../proto/gen/ts/agentshim/frontend/v1/failure-card_pb";
 import type {
@@ -98,6 +99,18 @@ export const REVIVE_MODE = {
 >;
 
 /**
+ * `AnswerMergeDequeueCmd.answer` arm keys — the decision IS the arm, so both
+ * carry empty messages and "no answer" is unrepresentable on the wire.
+ */
+export const MERGE_DEQUEUE_ANSWER = {
+  dequeue: "dequeue",
+  keep: "keep",
+} as const satisfies Record<
+  ArmKeys<GeneratedAnswerMergeDequeueCmd["answer"]>,
+  ArmKeys<GeneratedAnswerMergeDequeueCmd["answer"]>
+>;
+
+/**
  * The `FrontendCommand.command` arm keys the WEBAPP sends.
  *
  * Deliberately a SUBSET: the workspace-lifecycle commands are the Emacs
@@ -122,6 +135,7 @@ export const COMMAND_ARM = {
   pauseMergeQueue: "pauseMergeQueue",
   resumeMergeQueue: "resumeMergeQueue",
   evictMerge: "evictMerge",
+  answerMergeDequeue: "answerMergeDequeue",
 } as const satisfies Record<string, ArmKeys<GeneratedFrontendCommand["command"]>>;
 
 /**

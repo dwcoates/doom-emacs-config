@@ -685,6 +685,7 @@ type FrontendCommand struct {
 	//	*FrontendCommand_PauseMergeQueue
 	//	*FrontendCommand_ResumeMergeQueue
 	//	*FrontendCommand_EvictMerge
+	//	*FrontendCommand_AnswerMergeDequeue
 	Command       isFrontendCommand_Command `protobuf_oneof:"command"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1002,6 +1003,15 @@ func (x *FrontendCommand) GetEvictMerge() *EvictMergeCmd {
 	return nil
 }
 
+func (x *FrontendCommand) GetAnswerMergeDequeue() *AnswerMergeDequeueCmd {
+	if x != nil {
+		if x, ok := x.Command.(*FrontendCommand_AnswerMergeDequeue); ok {
+			return x.AnswerMergeDequeue
+		}
+	}
+	return nil
+}
+
 type isFrontendCommand_Command interface {
 	isFrontendCommand_Command()
 }
@@ -1122,6 +1132,10 @@ type FrontendCommand_EvictMerge struct {
 	EvictMerge *EvictMergeCmd `protobuf:"bytes,32,opt,name=evict_merge,json=evictMerge,proto3,oneof"`
 }
 
+type FrontendCommand_AnswerMergeDequeue struct {
+	AnswerMergeDequeue *AnswerMergeDequeueCmd `protobuf:"bytes,33,opt,name=answer_merge_dequeue,json=answerMergeDequeue,proto3,oneof"`
+}
+
 func (*FrontendCommand_SubmitPrompt) isFrontendCommand_Command() {}
 
 func (*FrontendCommand_Interrupt) isFrontendCommand_Command() {}
@@ -1179,6 +1193,8 @@ func (*FrontendCommand_PauseMergeQueue) isFrontendCommand_Command() {}
 func (*FrontendCommand_ResumeMergeQueue) isFrontendCommand_Command() {}
 
 func (*FrontendCommand_EvictMerge) isFrontendCommand_Command() {}
+
+func (*FrontendCommand_AnswerMergeDequeue) isFrontendCommand_Command() {}
 
 type CommandAck struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
@@ -1475,7 +1491,7 @@ const file_agentshim_frontend_v1_frame_proto_rawDesc = "" +
 	"\atopbars\x18\f \x03(\v2!.agentshim.frontend.v1.TopbarViewR\atopbars\x12T\n" +
 	"\x10token_breakdowns\x18\r \x03(\v2).agentshim.frontend.v1.TokenBreakdownViewR\x0ftokenBreakdowns\x12Q\n" +
 	"\x0fworkspace_gates\x18\x0e \x03(\v2(.agentshim.frontend.v1.WorkspaceGateViewR\x0eworkspaceGates\x12U\n" +
-	"\x12merge_queue_roster\x18\x0f \x01(\v2'.agentshim.frontend.v1.MergeQueueRosterR\x10mergeQueueRoster\"\xd8\x13\n" +
+	"\x12merge_queue_roster\x18\x0f \x01(\v2'.agentshim.frontend.v1.MergeQueueRosterR\x10mergeQueueRoster\"\xba\x14\n" +
 	"\x0fFrontendCommand\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
@@ -1512,7 +1528,8 @@ const file_agentshim_frontend_v1_frame_proto_rawDesc = "" +
 	"\x11pause_merge_queue\x18\x1e \x01(\v2).agentshim.frontend.v1.PauseMergeQueueCmdH\x00R\x0fpauseMergeQueue\x12Z\n" +
 	"\x12resume_merge_queue\x18\x1f \x01(\v2*.agentshim.frontend.v1.ResumeMergeQueueCmdH\x00R\x10resumeMergeQueue\x12G\n" +
 	"\vevict_merge\x18  \x01(\v2$.agentshim.frontend.v1.EvictMergeCmdH\x00R\n" +
-	"evictMergeB\t\n" +
+	"evictMerge\x12`\n" +
+	"\x14answer_merge_dequeue\x18! \x01(\v2,.agentshim.frontend.v1.AnswerMergeDequeueCmdH\x00R\x12answerMergeDequeueB\t\n" +
 	"\acommand\"\xac\x03\n" +
 	"\n" +
 	"CommandAck\x12\x1d\n" +
@@ -1603,8 +1620,9 @@ var file_agentshim_frontend_v1_frame_proto_goTypes = []any{
 	(*PauseMergeQueueCmd)(nil),         // 53: agentshim.frontend.v1.PauseMergeQueueCmd
 	(*ResumeMergeQueueCmd)(nil),        // 54: agentshim.frontend.v1.ResumeMergeQueueCmd
 	(*EvictMergeCmd)(nil),              // 55: agentshim.frontend.v1.EvictMergeCmd
-	(*FailureKind)(nil),                // 56: agentshim.frontend.v1.FailureKind
-	(*FailureCardRef)(nil),             // 57: agentshim.frontend.v1.FailureCardRef
+	(*AnswerMergeDequeueCmd)(nil),      // 56: agentshim.frontend.v1.AnswerMergeDequeueCmd
+	(*FailureKind)(nil),                // 57: agentshim.frontend.v1.FailureKind
+	(*FailureCardRef)(nil),             // 58: agentshim.frontend.v1.FailureCardRef
 }
 var file_agentshim_frontend_v1_frame_proto_depIdxs = []int32{
 	1,  // 0: agentshim.frontend.v1.FrontendFrame.snapshot:type_name -> agentshim.frontend.v1.StateSnapshot
@@ -1674,14 +1692,15 @@ var file_agentshim_frontend_v1_frame_proto_depIdxs = []int32{
 	53, // 64: agentshim.frontend.v1.FrontendCommand.pause_merge_queue:type_name -> agentshim.frontend.v1.PauseMergeQueueCmd
 	54, // 65: agentshim.frontend.v1.FrontendCommand.resume_merge_queue:type_name -> agentshim.frontend.v1.ResumeMergeQueueCmd
 	55, // 66: agentshim.frontend.v1.FrontendCommand.evict_merge:type_name -> agentshim.frontend.v1.EvictMergeCmd
-	56, // 67: agentshim.frontend.v1.CommandAck.failure:type_name -> agentshim.frontend.v1.FailureKind
-	57, // 68: agentshim.frontend.v1.CommandAck.failure_card:type_name -> agentshim.frontend.v1.FailureCardRef
-	4,  // 69: agentshim.frontend.v1.CommandAck.interrupt_confirm_required:type_name -> agentshim.frontend.v1.InterruptConfirmRequired
-	70, // [70:70] is the sub-list for method output_type
-	70, // [70:70] is the sub-list for method input_type
-	70, // [70:70] is the sub-list for extension type_name
-	70, // [70:70] is the sub-list for extension extendee
-	0,  // [0:70] is the sub-list for field type_name
+	56, // 67: agentshim.frontend.v1.FrontendCommand.answer_merge_dequeue:type_name -> agentshim.frontend.v1.AnswerMergeDequeueCmd
+	57, // 68: agentshim.frontend.v1.CommandAck.failure:type_name -> agentshim.frontend.v1.FailureKind
+	58, // 69: agentshim.frontend.v1.CommandAck.failure_card:type_name -> agentshim.frontend.v1.FailureCardRef
+	4,  // 70: agentshim.frontend.v1.CommandAck.interrupt_confirm_required:type_name -> agentshim.frontend.v1.InterruptConfirmRequired
+	71, // [71:71] is the sub-list for method output_type
+	71, // [71:71] is the sub-list for method input_type
+	71, // [71:71] is the sub-list for extension type_name
+	71, // [71:71] is the sub-list for extension extendee
+	0,  // [0:71] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_frame_proto_init() }
@@ -1760,6 +1779,7 @@ func file_agentshim_frontend_v1_frame_proto_init() {
 		(*FrontendCommand_PauseMergeQueue)(nil),
 		(*FrontendCommand_ResumeMergeQueue)(nil),
 		(*FrontendCommand_EvictMerge)(nil),
+		(*FrontendCommand_AnswerMergeDequeue)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

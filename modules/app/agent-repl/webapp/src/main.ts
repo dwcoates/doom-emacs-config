@@ -61,6 +61,12 @@ import {
   type RevivePending,
 } from "./hibernation.js";
 import { mergeStatusLogValue } from "./merge-status.js";
+import {
+  DEQUEUE_ATTR,
+  dequeueAnswerFromAttr,
+  dequeueRefusedNotice,
+  mergeDequeueCardHtml,
+} from "./merge-dequeue.js";
 import { PromptOrigin } from "./frontend-command.js";
 import { configureChessGames, installChessNavHook } from "./chess-game.js";
 import { RenderCoalescer, windowEagerHost, windowFrameHost } from "./coalesce.js";
@@ -521,6 +527,7 @@ async function boot(): Promise<void> {
   const ungatedBannerEl = must("ungated-banner");
   const drainBannerEl = must("drain-banner");
   const revivalGateEl = must("revival-gate");
+  const mergeDequeueEl = must("merge-dequeue");
   const hibernateEl = must<HTMLButtonElement>("hibernate-btn");
   /**
    * The revival decision this page has SENT and the daemon has not yet
@@ -773,6 +780,11 @@ async function boot(): Promise<void> {
       Date.now(),
       reviveFailure,
     );
+    // THE CARD IS THE PUSHED OFFER, redrawn every frame. Nothing here decides
+    // whether it should be up: the daemon clears the offer when the question is
+    // answered, superseded, or made moot by the merge ending on its own, and
+    // each of those arrives as the same field going away.
+    mergeDequeueEl.innerHTML = mergeDequeueCardHtml(s.mergeDequeueOffer);
     document.body.classList.toggle(HIBERNATED_BODY_CLASS, s.hibernation !== null);
     // The sleep verb is offered only on an awake session: there is nothing to
     // hibernate on one already asleep, and the gate above is what that session
@@ -860,6 +872,28 @@ async function boot(): Promise<void> {
       clog("error", reviveRefusedLog(mode, err));
     });
   };
+  // The dequeue card's answer. It is SENT for both arms — declining is a real
+  // answer, and the daemon clearing the offer is what takes the card down, so a
+  // keep that only hid it here would leave the question outstanding.
+  mergeDequeueEl.addEventListener("click", (e) => {
+    const el = (e.target as HTMLElement).closest(`[${DEQUEUE_ATTR}]`);
+    if (el === null) return;
+    const offer = store.state.mergeDequeueOffer;
+    if (offer === null) {
+      // The card outlived its offer by a frame. Answering with an id read off
+      // nothing would be a command the daemon refuses anyway; saying so here is
+      // how the click stops being invisible.
+      clog("warn", "merge dequeue answered with no offer outstanding; the card is stale");
+      return;
+    }
+    const answer = dequeueAnswerFromAttr(el.getAttribute(DEQUEUE_ATTR));
+    void dispatcher
+      .answerMergeDequeue(cmdWorkspace(), offer.offerId, answer)
+      .catch((err: unknown) => {
+        notify(dequeueRefusedNotice(answer, err));
+      });
+  });
+
   revivalGateEl.addEventListener("click", (e) => {
     const el = (e.target as HTMLElement).closest(`[${REVIVE_ATTR}]`);
     if (el === null) return;

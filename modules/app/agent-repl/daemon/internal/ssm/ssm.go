@@ -151,6 +151,11 @@ type Manager struct {
 	// process's; see mergestatus.go for why it is in memory and why the log
 	// projection only ever answers for a previous daemon's rows.
 	pipelineStatus map[string]*frontendv1.MergeStatus
+	// mergeDequeueOffers is the outstanding dequeue QUESTION per workspace —
+	// the one an interrupt raises instead of silently taking the workspace's
+	// merge off the queue. See mergedequeue.go for why it is in memory and why
+	// at most one may stand per workspace.
+	mergeDequeueOffers map[string]*frontendv1.MergeDequeueOffer
 	// interruptedTurn names the workspaces whose IN-FLIGHT turn was stopped by
 	// a user-commanded interrupt the shim acknowledged as INTERRUPTED. The
 	// mark is consumed by that turn's own TurnEnded, which then reports
@@ -281,6 +286,7 @@ func Open(opts Options) (*Manager, error) {
 		last:                    make(map[string]frontendv1.RenderState),
 		lastTasks:               make(map[string]int64),
 		lastMergeStatus:         make(map[string]*frontendv1.MergeStatus),
+		mergeDequeueOffers:      make(map[string]*frontendv1.MergeDequeueOffer),
 		pushedAtMs:              make(map[string]int64),
 		interruptedTurn:         make(map[string]*interruptMark),
 		mergeLeases:             make(map[string][]leaseWindow),
@@ -1080,6 +1086,19 @@ func (m *Manager) appendMergeTransition(workspace, token, causeKind string, stat
 		// any more, so the retained status goes with it rather than describing a
 		// run no frontend should still be rendering.
 		m.retirePipelineStatusLocked(workspace, causeKind)
+	}
+	// A MERGE THAT REACHED ITS OWN END ANSWERS THE QUESTION BY ENDING. Whether
+	// it merged, failed, or had its axis cleared, there is no longer a merge on
+	// the queue to take off — so the card comes down here rather than standing
+	// over a workspace whose merge is already gone, offering to dequeue it.
+	//
+	// This is also the path a CONFIRMED dequeue comes down: the abort or the
+	// eviction publishes the run's terminal `failed` status, which lands right
+	// here. The answer handler clears the offer too, and deliberately: the two
+	// are independent, so an eviction that failed to publish still takes the
+	// card down, and a merge that terminated on its own never leaves one up.
+	if token == sigMerged || token == sigMergeFailed || token == sigMergeNone {
+		m.clearMergeDequeueOfferLocked(workspace, "merge_transition:"+token)
 	}
 
 	at := m.nextAt()
