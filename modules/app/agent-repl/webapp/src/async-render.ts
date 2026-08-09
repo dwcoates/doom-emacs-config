@@ -221,28 +221,48 @@ export function AsyncBubbleCard(
 }
 
 /**
- * The bubble a tool card owns, or "" when it owns none.
+ * The bubble(s) a tool card owns, or "" when it owns none.
  *
- * SPAWNEDBUBBLEID is the daemon's CLASSIFICATION VERDICT, matched against the
- * registry and never derived from anything else. Absent or empty means "this
- * call detached nothing" and ONLY that, so it draws nothing rather than
- * searching for a plausible bubble.
+ * BOTH ENDS OF ONE DAEMON FACT are matched, by exact string equality and
+ * nothing else: `AsyncBubble.origin_tool_use_id` against the card's
+ * TOOLUSEID, and the card's own `spawned_bubble_id` verdict against the
+ * bubble's id. Neither is derived, neither is preferred, and a disagreement
+ * between them is reported by `bubbleForCall` rather than resolved — see
+ * `async-routing.ts` for why that is not a two-rung identity ladder.
+ *
+ * Empty on both ends means "this call detached nothing" and ONLY that, so the
+ * card draws nothing rather than searching for a plausible bubble.
+ *
+ * All matching bubbles are drawn. The wire permits several to name one call,
+ * and silently drawing the first would hide live work the user started.
  */
-export function AsyncBubbleForCall(spawnedBubbleId: string | undefined, ctx: AsyncRenderContext): string {
+export function AsyncBubbleForCall(
+  toolUseId: string,
+  spawnedBubbleId: string | undefined,
+  ctx: AsyncRenderContext,
+): string {
+  const byOrigin = ctx.registry.bubblesForToolUse(toolUseId);
+  if (byOrigin.length > 0) {
+    // `bubbleForCall` is what rules on agreement; a contradiction returns null
+    // there and nothing is drawn here.
+    return ctx.registry.bubbleForCall(toolUseId, spawnedBubbleId) === null
+      ? ""
+      : byOrigin.map((bubble) => AsyncBubbleCard(bubble, ctx)).join("");
+  }
   if (spawnedBubbleId === undefined || spawnedBubbleId === "") return "";
-  const bubble = ctx.registry.bubbleForSpawn(spawnedBubbleId);
-  if (bubble === null) {
+  const named = ctx.registry.bubbleForSpawn(spawnedBubbleId);
+  if (named === null) {
     // The verdict named a bubble the registry does not hold — the open has not
     // arrived, or a resync dropped it. Said plainly rather than papered over
     // with an invented placeholder bubble.
     log("warn", `async-render: tool card names bubble ${spawnedBubbleId}, which is not open — nothing is drawn for it`, {
       operation: "async-render.unmatched-verdict",
       dedupKey: `async-unmatched-verdict:${spawnedBubbleId}`,
-      context: { spawned_bubble_id: spawnedBubbleId },
+      context: { tool_use_id: toolUseId, spawned_bubble_id: spawnedBubbleId },
     });
     return "";
   }
-  return AsyncBubbleCard(bubble, ctx);
+  return AsyncBubbleCard(named, ctx);
 }
 
 /**

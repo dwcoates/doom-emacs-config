@@ -423,6 +423,58 @@ describe("tool-card attachment", () => {
 
     expect(registry.bubbleForSpawn("b9")).toBeNull();
   });
+
+  it("matches the OTHER end of the classification: origin_tool_use_id", () => {
+    const registry = seeded(agentBubble("b1", { originToolUseId: "tu1" }));
+
+    expect(registry.bubblesForToolUse("tu1").map((b) => b.id)).toEqual(["b1"]);
+  });
+
+  it("never matches an EMPTY tool_use id, which no bubble can have come from", () => {
+    const registry = seeded(agentBubble("b1"));
+
+    expect(registry.bubblesForToolUse("")).toEqual([]);
+  });
+
+  it("lists every bubble one call spawned rather than keeping the first", () => {
+    const registry = seeded(
+      agentBubble("b1", { originToolUseId: "tu1" }),
+      agentBubble("b2", { originToolUseId: "tu1" }),
+    );
+
+    expect(registry.bubblesForToolUse("tu1").map((b) => b.id)).toEqual(["b1", "b2"]);
+  });
+
+  it("resolves a call from its origin end when no verdict rides the wire yet", () => {
+    const registry = seeded(agentBubble("b1", { originToolUseId: "tu1" }));
+
+    expect(registry.bubbleForCall("tu1", undefined)?.id).toBe("b1");
+  });
+
+  it("resolves a call from its verdict when no bubble names the call", () => {
+    const registry = seeded(agentBubble("b1"));
+
+    expect(registry.bubbleForCall("tu1", "b1")?.id).toBe("b1");
+  });
+
+  it("resolves a call once when both ends agree", () => {
+    const registry = seeded(agentBubble("b1", { originToolUseId: "tu1" }));
+
+    expect(registry.bubbleForCall("tu1", "b1")?.id).toBe("b1");
+  });
+
+  it("REFUSES BOTH ends when they disagree, never preferring one", () => {
+    // Arrange — b1 says it came from tu1; the call's verdict names b2.
+    const registry = seeded(agentBubble("b1", { originToolUseId: "tu1" }), agentBubble("b2"));
+
+    expect(registry.bubbleForCall("tu1", "b2")).toBeNull();
+  });
+
+  it("resolves nothing for a call neither end links to any bubble", () => {
+    const registry = seeded(agentBubble("b1", { originToolUseId: "other" }));
+
+    expect(registry.bubbleForCall("tu1", undefined)).toBeNull();
+  });
 });
 
 describe("the spawn tree", () => {

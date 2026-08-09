@@ -6189,10 +6189,23 @@ describe("a tool card's detached work", () => {
     expect(html).toContain("detached work");
   });
 
-  it("draws no bubble for a card whose call detached nothing", () => {
-    // Arrange — no verdict on the card, which is the only reading of absent.
+  it("attaches by origin_tool_use_id, the other end of the same daemon fact", () => {
+    // Arrange — no verdict on the card; the BUBBLE names the call instead.
     const item = { ...watcher("bg1"), spawnedBubbleId: undefined };
     const registry = registryOf(agentBubble("b1"));
+
+    // Act
+    const html = renderItem(item, undefined, undefined, panelsWith(registry));
+
+    // Assert — w1 is the card's toolUseId and the bubble's originToolUseId.
+    expect(html).toContain("detached work");
+  });
+
+  it("draws no bubble for a card whose call detached nothing", () => {
+    // Arrange — no verdict on the card AND no bubble naming it, which together
+    // are the only reading of "detached nothing".
+    const item = { ...watcher("bg1"), spawnedBubbleId: undefined };
+    const registry = registryOf({ ...agentBubble("b1"), originToolUseId: "someone-else" });
 
     // Act
     const html = renderItem(item, undefined, undefined, panelsWith(registry));

@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { ConversationItem, ToolItem } from "../src/store.js";
-import { asyncByBubble, isWatcher, watcherRef } from "../src/watchers.js";
+import { asyncByBubble, isWatcher, watcherRef, type AsyncClassification } from "../src/watchers.js";
 
 function userTurn(requestId = "u1"): ConversationItem {
   return {
@@ -113,6 +113,29 @@ describe("watcherRef", () => {
 
     // Act / Assert
     expect(watcherRef(item)).toBeNull();
+  });
+});
+
+describe("watcherRef against the registry", () => {
+  /** A minimal classification surface: the registry's one lookup. */
+  function classification(links: Record<string, string>): AsyncClassification {
+    return {
+      bubbleForCall: (toolUseId) =>
+        links[toolUseId] === undefined ? null : ({ id: links[toolUseId] } as never),
+    };
+  }
+
+  it("recognizes a member the daemon linked by origin_tool_use_id alone", () => {
+    // Arrange — no verdict on the call; the bubble names the call instead.
+    const item = tool("t1");
+
+    // Act / Assert
+    expect(watcherRef(item, classification({ t1: "b1" }))).toBe("b1");
+  });
+
+  it("returns null for a call the registry links to nothing", () => {
+    // Arrange / Act / Assert
+    expect(watcherRef(tool("t1"), classification({}))).toBeNull();
   });
 });
 

@@ -201,6 +201,64 @@ export class AsyncBubbleRegistry {
     return this.get(spawnedBubbleId);
   }
 
+  /**
+   * The bubbles the daemon attributed to the tool call TOOLUSEID, by matching
+   * `AsyncBubble.origin_tool_use_id`.
+   *
+   * THE OTHER END OF THE SAME DAEMON FACT. The classification links one tool
+   * call to one piece of detached work, and the daemon publishes that link
+   * from both ends: `origin_tool_use_id` on the bubble, `spawned_bubble_id` on
+   * the call's emission. Matching either is matching a daemon-published id by
+   * exact string equality — nothing here is parsed, scored or inferred, so
+   * this is not a rung of an identity ladder.
+   *
+   * Empty means "no tool call spawned this work", so it never matches: a card
+   * with no id cannot own a bubble that names no card.
+   *
+   * Returns a LIST because the wire permits several bubbles to name one call
+   * and silently keeping the first would hide the rest. Callers that need a
+   * single answer say so through {@link bubbleForCall}.
+   */
+  bubblesForToolUse(toolUseId: string): AsyncBubble[] {
+    if (toolUseId === "") return [];
+    return this.all().filter((b) => b.originToolUseId === toolUseId);
+  }
+
+  /**
+   * The bubble a tool card owns, resolved from BOTH ends of the daemon's
+   * classification — and the check that they agree.
+   *
+   * This is deliberately not a preference order. A ladder consults a weaker
+   * tier when a stronger one is silent and lets the two disagree in silence;
+   * here the two are the same fact written twice, so a DISAGREEMENT is a
+   * daemon bug and is reported as one rather than resolved by whichever tier
+   * is listed first. What each end supplies is only WHEN it is available:
+   * `spawned_bubble_id` rides a tool emission and `origin_tool_use_id` rides
+   * the bubble, and a wire that carries one but not the other still answers
+   * the question exactly once.
+   */
+  bubbleForCall(toolUseId: string, spawnedBubbleId?: string): AsyncBubble | null {
+    const named = spawnedBubbleId === undefined ? null : this.bubbleForSpawn(spawnedBubbleId);
+    const byOrigin = this.bubblesForToolUse(toolUseId);
+    if (named !== null && byOrigin.length > 0 && !byOrigin.some((b) => b.id === named.id)) {
+      log("error", `async-routing: call ${toolUseId} names bubble ${named.id} while bubble(s) ${byOrigin.map((b) => b.id).join(", ")} name that call — the daemon's two statements of one classification disagree`, {
+        operation: "async-routing.classification-disagreement",
+        dedupKey: `async-classification-disagreement:${toolUseId}`,
+        context: {
+          tool_use_id: toolUseId,
+          spawned_bubble_id: named.id,
+          origin_bubble_ids: byOrigin.map((b) => b.id),
+          decision: "reject-both",
+        },
+      });
+      // Neither statement is preferred, because preferring one would be the
+      // staged-probabilistic choice this module exists to refuse. The card
+      // draws nothing and the contradiction is on the record.
+      return null;
+    }
+    return named ?? byOrigin[0] ?? null;
+  }
+
   /** Bubbles at the top of the tree: those with no parent pointer. */
   roots(): AsyncBubble[] {
     return this.all().filter((b) => b.parentBubbleId === "");
