@@ -380,8 +380,10 @@ Interactive recovery for the reload-accumulated duplicate-watcher case."
     (agent-repl--log nil "reset-sentinel-watchers: removed=%d dir=%s events=%S descriptor=%S"
                       removed agent-repl--sentinel-dir agent-repl-sentinel-watch-events
                       agent-repl--sentinel-watch-descriptor)
-    (message "agent-repl: removed %d stale watcher(s); new descriptor=%S"
-             removed agent-repl--sentinel-watch-descriptor)))
+    (agent-repl--user-message
+     nil "removed %d stale watcher(s) and registered a fresh one" (list removed)
+     :detail (format "reset-sentinel-watchers dir=%s descriptor=%S"
+                     agent-repl--sentinel-dir agent-repl--sentinel-watch-descriptor))))
 
 (defun agent-repl-nuke-sentinel-watchers ()
   "Remove every file-notify watcher on the sentinel dir WITHOUT re-registering.
@@ -393,8 +395,9 @@ Useful to verify the init-time reap logic works without restarting Emacs."
     (setq agent-repl--sentinel-watch-descriptor nil)
     (agent-repl--log nil "nuke-sentinel-watchers: removed=%d dir=%s descriptor-cleared=t"
                       removed agent-repl--sentinel-dir)
-    (message "agent-repl: nuked %d sentinel watcher(s) — no replacement registered"
-             removed)))
+    (agent-repl--user-message
+     nil "nuked %d sentinel watcher(s) — no replacement registered" (list removed)
+     :detail (format "nuke-sentinel-watchers dir=%s" agent-repl--sentinel-dir))))
 
 (agent-repl--log nil "sentinel-init: ensure-directory dir=%s" agent-repl--sentinel-dir)
 (make-directory agent-repl--sentinel-dir t)

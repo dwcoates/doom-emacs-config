@@ -397,15 +397,39 @@ turn the next reconnect replay into a false conflict."
            (= (hash-table-count agent-repl--workspace-create-requests) 0)))))))
 
 (ert-deftest agent-repl-test-create-failure-is-always-announced ()
-  "A failure Emacs did not request is still surfaced loudly."
+  "A failure Emacs did not request is still surfaced loudly, as user copy."
   (let (echoed)
-    (cl-letf (((symbol-function 'message)
-               (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+    (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--emit-message)
+               (lambda (text &optional _echo) (setq echoed text))))
       (agent-repl--handle-workspace-create-failed-command
        '((job_id . "workspace_commands_x:0") (requested_name . "orphan")
          (error . "git_root has no .git")))
-      (should (string-match-p "orphan" echoed))
-      (should (string-match-p "git_root has no .git" echoed)))))
+      (should (string-match-p "orphan" echoed)))))
+
+(ert-deftest agent-repl-test-create-failure-keeps-the-daemon-text-off-the-echo ()
+  "The daemon's error text is evidence for the log, not copy for the echo area."
+  (let (echoed)
+    (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--emit-message)
+               (lambda (text &optional _echo) (setq echoed text))))
+      (agent-repl--handle-workspace-create-failed-command
+       '((job_id . "workspace_commands_x:0") (requested_name . "orphan")
+         (error . "git_root has no .git")))
+      (should-not (string-match-p "git_root has no .git" echoed)))))
+
+(ert-deftest agent-repl-test-create-failure-files-the-daemon-text ()
+  "The error text the echo dropped still reaches the canonical log."
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--emit-message) #'ignore)
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      (agent-repl--handle-workspace-create-failed-command
+       '((job_id . "workspace_commands_x:0") (requested_name . "orphan")
+         (error . "git_root has no .git")))
+      (should (cl-find-if (lambda (line) (string-match-p "git_root has no .git" line))
+                          logged)))))
 
 (ert-deftest agent-repl-test-create-workspace-has-no-wire-command ()
   "Emacs cannot send `createWorkspace': the inbox is the only ingress."
@@ -793,7 +817,10 @@ is globally bound, so this is the first time the guard actually holds."
           (:jobId "job-1" :requestedName "DWC/feature"
            :error "plan worktree: exit=128"))))
       (should (string-match-p "DWC/feature" echoed))
-      (should (string-match-p "plan worktree: exit=128" echoed))
+      ;; The daemon's text stays on the log, which the ECHO now points at.
+      (should (cl-some (lambda (line)
+                         (string-match-p "plan worktree: exit=128" line))
+                       logged))
       (should (cl-some (lambda (line)
                          (string-match-p "JOB FAILED job-id=job-1" line))
                        logged))
