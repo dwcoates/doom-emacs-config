@@ -615,6 +615,7 @@ type HostAction struct {
 	//	*HostAction_TaskAddWorkspace
 	//	*HostAction_LegacyCommand
 	//	*HostAction_WorkspaceCreateFailed
+	//	*HostAction_BootSweepSessionUnwired
 	Action        isHostAction_Action `protobuf_oneof:"action"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -745,6 +746,15 @@ func (x *HostAction) GetWorkspaceCreateFailed() *HostWorkspaceCreateFailed {
 	return nil
 }
 
+func (x *HostAction) GetBootSweepSessionUnwired() *HostBootSweepSessionUnwired {
+	if x != nil {
+		if x, ok := x.Action.(*HostAction_BootSweepSessionUnwired); ok {
+			return x.BootSweepSessionUnwired
+		}
+	}
+	return nil
+}
+
 type isHostAction_Action interface {
 	isHostAction_Action()
 }
@@ -785,6 +795,10 @@ type HostAction_WorkspaceCreateFailed struct {
 	WorkspaceCreateFailed *HostWorkspaceCreateFailed `protobuf:"bytes,10,opt,name=workspace_create_failed,json=workspaceCreateFailed,proto3,oneof"`
 }
 
+type HostAction_BootSweepSessionUnwired struct {
+	BootSweepSessionUnwired *HostBootSweepSessionUnwired `protobuf:"bytes,11,opt,name=boot_sweep_session_unwired,json=bootSweepSessionUnwired,proto3,oneof"`
+}
+
 func (*HostAction_SwitchWorkspace) isHostAction_Action() {}
 
 func (*HostAction_SetRepositoryFold) isHostAction_Action() {}
@@ -803,6 +817,81 @@ func (*HostAction_LegacyCommand) isHostAction_Action() {}
 
 func (*HostAction_WorkspaceCreateFailed) isHostAction_Action() {}
 
+func (*HostAction_BootSweepSessionUnwired) isHostAction_Action() {}
+
+// The boot sweep finished with this session left UNWIRED: its shim never
+// redialed inside the recheck window, its liveness probe failed twice, or it
+// was neither connected nor lock-held. The session is not torn down — the
+// record stays revivable and an on-demand open still brings it up — but a
+// human should know the survivor did not come back on its own. It rides the
+// same retained-until-completed HostAction envelope every other host action
+// uses, exactly as HostWorkspaceCreateFailed does: the daemon job it reports
+// is already over, and the record is delivered, replayed across reconnects,
+// and acknowledged.
+type HostBootSweepSessionUnwired struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The workspace the session belongs to (project dir).
+	Workspace string `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// The session left unwired.
+	SessionId string `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// WHY it was left, as one display-ready sentence composed by the sweep
+	// (which verdict fired, with its evidence). Rendered verbatim.
+	Reason        string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostBootSweepSessionUnwired) Reset() {
+	*x = HostBootSweepSessionUnwired{}
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostBootSweepSessionUnwired) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostBootSweepSessionUnwired) ProtoMessage() {}
+
+func (x *HostBootSweepSessionUnwired) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostBootSweepSessionUnwired.ProtoReflect.Descriptor instead.
+func (*HostBootSweepSessionUnwired) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *HostBootSweepSessionUnwired) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
+func (x *HostBootSweepSessionUnwired) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *HostBootSweepSessionUnwired) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 // A durably-failed workspace-creation job. It rides the same
 // retained-until-completed HostAction envelope every other host action uses,
 // so a creation that died is delivered, replayed across reconnects, and
@@ -819,7 +908,7 @@ type HostWorkspaceCreateFailed struct {
 
 func (x *HostWorkspaceCreateFailed) Reset() {
 	*x = HostWorkspaceCreateFailed{}
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -831,7 +920,7 @@ func (x *HostWorkspaceCreateFailed) String() string {
 func (*HostWorkspaceCreateFailed) ProtoMessage() {}
 
 func (x *HostWorkspaceCreateFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -844,7 +933,7 @@ func (x *HostWorkspaceCreateFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostWorkspaceCreateFailed.ProtoReflect.Descriptor instead.
 func (*HostWorkspaceCreateFailed) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{7}
+	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *HostWorkspaceCreateFailed) GetJobId() string {
@@ -877,7 +966,7 @@ type HostSwitchWorkspace struct {
 
 func (x *HostSwitchWorkspace) Reset() {
 	*x = HostSwitchWorkspace{}
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[8]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -889,7 +978,7 @@ func (x *HostSwitchWorkspace) String() string {
 func (*HostSwitchWorkspace) ProtoMessage() {}
 
 func (x *HostSwitchWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[8]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -902,7 +991,7 @@ func (x *HostSwitchWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSwitchWorkspace.ProtoReflect.Descriptor instead.
 func (*HostSwitchWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{8}
+	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *HostSwitchWorkspace) GetDir() string {
@@ -922,7 +1011,7 @@ type HostSetRepositoryFold struct {
 
 func (x *HostSetRepositoryFold) Reset() {
 	*x = HostSetRepositoryFold{}
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[9]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -934,7 +1023,7 @@ func (x *HostSetRepositoryFold) String() string {
 func (*HostSetRepositoryFold) ProtoMessage() {}
 
 func (x *HostSetRepositoryFold) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[9]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -947,7 +1036,7 @@ func (x *HostSetRepositoryFold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSetRepositoryFold.ProtoReflect.Descriptor instead.
 func (*HostSetRepositoryFold) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{9}
+	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *HostSetRepositoryFold) GetRepoKey() string {
@@ -973,7 +1062,7 @@ type HostSetSidebarView struct {
 
 func (x *HostSetSidebarView) Reset() {
 	*x = HostSetSidebarView{}
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[10]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -985,7 +1074,7 @@ func (x *HostSetSidebarView) String() string {
 func (*HostSetSidebarView) ProtoMessage() {}
 
 func (x *HostSetSidebarView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[10]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -998,7 +1087,7 @@ func (x *HostSetSidebarView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostSetSidebarView.ProtoReflect.Descriptor instead.
 func (*HostSetSidebarView) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{10}
+	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *HostSetSidebarView) GetView() string {
@@ -1016,7 +1105,7 @@ type HostTaskCreate struct {
 
 func (x *HostTaskCreate) Reset() {
 	*x = HostTaskCreate{}
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[11]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1028,7 +1117,7 @@ func (x *HostTaskCreate) String() string {
 func (*HostTaskCreate) ProtoMessage() {}
 
 func (x *HostTaskCreate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[11]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1041,7 +1130,7 @@ func (x *HostTaskCreate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostTaskCreate.ProtoReflect.Descriptor instead.
 func (*HostTaskCreate) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{11}
+	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{12}
 }
 
 type HostTaskById struct {
@@ -1053,7 +1142,7 @@ type HostTaskById struct {
 
 func (x *HostTaskById) Reset() {
 	*x = HostTaskById{}
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[12]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1065,7 +1154,7 @@ func (x *HostTaskById) String() string {
 func (*HostTaskById) ProtoMessage() {}
 
 func (x *HostTaskById) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[12]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1078,7 +1167,7 @@ func (x *HostTaskById) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostTaskById.ProtoReflect.Descriptor instead.
 func (*HostTaskById) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{12}
+	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *HostTaskById) GetId() string {
@@ -1106,7 +1195,7 @@ type HostLegacyCommand struct {
 
 func (x *HostLegacyCommand) Reset() {
 	*x = HostLegacyCommand{}
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[13]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1118,7 +1207,7 @@ func (x *HostLegacyCommand) String() string {
 func (*HostLegacyCommand) ProtoMessage() {}
 
 func (x *HostLegacyCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[13]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1131,7 +1220,7 @@ func (x *HostLegacyCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostLegacyCommand.ProtoReflect.Descriptor instead.
 func (*HostLegacyCommand) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{13}
+	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *HostLegacyCommand) GetType() string {
@@ -1162,7 +1251,7 @@ type HostActionCompletedCmd struct {
 
 func (x *HostActionCompletedCmd) Reset() {
 	*x = HostActionCompletedCmd{}
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[14]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1174,7 +1263,7 @@ func (x *HostActionCompletedCmd) String() string {
 func (*HostActionCompletedCmd) ProtoMessage() {}
 
 func (x *HostActionCompletedCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[14]
+	mi := &file_agentshim_frontend_v1_host_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1187,7 +1276,7 @@ func (x *HostActionCompletedCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostActionCompletedCmd.ProtoReflect.Descriptor instead.
 func (*HostActionCompletedCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{14}
+	return file_agentshim_frontend_v1_host_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *HostActionCompletedCmd) GetActionId() string {
@@ -1274,7 +1363,7 @@ const file_agentshim_frontend_v1_host_proto_rawDesc = "" +
 	"\x1aconflict_resolved_continue\x18\x02 \x01(\bR\x18conflictResolvedContinue\x12%\n" +
 	"\x0eworkspace_name\x18\x06 \x01(\tR\rworkspaceNameJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\ahandlerR\rsource_branchR\n" +
 	"source_dirR\n" +
-	"target_dir\"\xb6\x06\n" +
+	"target_dir\"\xa9\a\n" +
 	"\n" +
 	"HostAction\x12\x1b\n" +
 	"\taction_id\x18\x01 \x01(\tR\bactionId\x12W\n" +
@@ -1288,8 +1377,14 @@ const file_agentshim_frontend_v1_host_proto_rawDesc = "" +
 	"\x12task_add_workspace\x18\b \x01(\v2#.agentshim.frontend.v1.HostTaskByIdH\x00R\x10taskAddWorkspace\x12Q\n" +
 	"\x0elegacy_command\x18\t \x01(\v2(.agentshim.frontend.v1.HostLegacyCommandH\x00R\rlegacyCommand\x12j\n" +
 	"\x17workspace_create_failed\x18\n" +
-	" \x01(\v20.agentshim.frontend.v1.HostWorkspaceCreateFailedH\x00R\x15workspaceCreateFailedB\b\n" +
-	"\x06action\"o\n" +
+	" \x01(\v20.agentshim.frontend.v1.HostWorkspaceCreateFailedH\x00R\x15workspaceCreateFailed\x12q\n" +
+	"\x1aboot_sweep_session_unwired\x18\v \x01(\v22.agentshim.frontend.v1.HostBootSweepSessionUnwiredH\x00R\x17bootSweepSessionUnwiredB\b\n" +
+	"\x06action\"r\n" +
+	"\x1bHostBootSweepSessionUnwired\x12\x1c\n" +
+	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"o\n" +
 	"\x19HostWorkspaceCreateFailed\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12%\n" +
 	"\x0erequested_name\x18\x02 \x01(\tR\rrequestedName\x12\x14\n" +
@@ -1324,41 +1419,43 @@ func file_agentshim_frontend_v1_host_proto_rawDescGZIP() []byte {
 	return file_agentshim_frontend_v1_host_proto_rawDescData
 }
 
-var file_agentshim_frontend_v1_host_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_agentshim_frontend_v1_host_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_agentshim_frontend_v1_host_proto_goTypes = []any{
-	(*CreateWorkspaceCmd)(nil),        // 0: agentshim.frontend.v1.CreateWorkspaceCmd
-	(*WorkspaceAvailable)(nil),        // 1: agentshim.frontend.v1.WorkspaceAvailable
-	(*WorkspaceMaterializedCmd)(nil),  // 2: agentshim.frontend.v1.WorkspaceMaterializedCmd
-	(*OpenWorkspaceCmd)(nil),          // 3: agentshim.frontend.v1.OpenWorkspaceCmd
-	(*CloseWorkspaceCmd)(nil),         // 4: agentshim.frontend.v1.CloseWorkspaceCmd
-	(*MergeWorkspaceCmd)(nil),         // 5: agentshim.frontend.v1.MergeWorkspaceCmd
-	(*HostAction)(nil),                // 6: agentshim.frontend.v1.HostAction
-	(*HostWorkspaceCreateFailed)(nil), // 7: agentshim.frontend.v1.HostWorkspaceCreateFailed
-	(*HostSwitchWorkspace)(nil),       // 8: agentshim.frontend.v1.HostSwitchWorkspace
-	(*HostSetRepositoryFold)(nil),     // 9: agentshim.frontend.v1.HostSetRepositoryFold
-	(*HostSetSidebarView)(nil),        // 10: agentshim.frontend.v1.HostSetSidebarView
-	(*HostTaskCreate)(nil),            // 11: agentshim.frontend.v1.HostTaskCreate
-	(*HostTaskById)(nil),              // 12: agentshim.frontend.v1.HostTaskById
-	(*HostLegacyCommand)(nil),         // 13: agentshim.frontend.v1.HostLegacyCommand
-	(*HostActionCompletedCmd)(nil),    // 14: agentshim.frontend.v1.HostActionCompletedCmd
-	(*structpb.Struct)(nil),           // 15: google.protobuf.Struct
+	(*CreateWorkspaceCmd)(nil),          // 0: agentshim.frontend.v1.CreateWorkspaceCmd
+	(*WorkspaceAvailable)(nil),          // 1: agentshim.frontend.v1.WorkspaceAvailable
+	(*WorkspaceMaterializedCmd)(nil),    // 2: agentshim.frontend.v1.WorkspaceMaterializedCmd
+	(*OpenWorkspaceCmd)(nil),            // 3: agentshim.frontend.v1.OpenWorkspaceCmd
+	(*CloseWorkspaceCmd)(nil),           // 4: agentshim.frontend.v1.CloseWorkspaceCmd
+	(*MergeWorkspaceCmd)(nil),           // 5: agentshim.frontend.v1.MergeWorkspaceCmd
+	(*HostAction)(nil),                  // 6: agentshim.frontend.v1.HostAction
+	(*HostBootSweepSessionUnwired)(nil), // 7: agentshim.frontend.v1.HostBootSweepSessionUnwired
+	(*HostWorkspaceCreateFailed)(nil),   // 8: agentshim.frontend.v1.HostWorkspaceCreateFailed
+	(*HostSwitchWorkspace)(nil),         // 9: agentshim.frontend.v1.HostSwitchWorkspace
+	(*HostSetRepositoryFold)(nil),       // 10: agentshim.frontend.v1.HostSetRepositoryFold
+	(*HostSetSidebarView)(nil),          // 11: agentshim.frontend.v1.HostSetSidebarView
+	(*HostTaskCreate)(nil),              // 12: agentshim.frontend.v1.HostTaskCreate
+	(*HostTaskById)(nil),                // 13: agentshim.frontend.v1.HostTaskById
+	(*HostLegacyCommand)(nil),           // 14: agentshim.frontend.v1.HostLegacyCommand
+	(*HostActionCompletedCmd)(nil),      // 15: agentshim.frontend.v1.HostActionCompletedCmd
+	(*structpb.Struct)(nil),             // 16: google.protobuf.Struct
 }
 var file_agentshim_frontend_v1_host_proto_depIdxs = []int32{
-	8,  // 0: agentshim.frontend.v1.HostAction.switch_workspace:type_name -> agentshim.frontend.v1.HostSwitchWorkspace
-	9,  // 1: agentshim.frontend.v1.HostAction.set_repository_fold:type_name -> agentshim.frontend.v1.HostSetRepositoryFold
-	10, // 2: agentshim.frontend.v1.HostAction.set_sidebar_view:type_name -> agentshim.frontend.v1.HostSetSidebarView
-	11, // 3: agentshim.frontend.v1.HostAction.task_create:type_name -> agentshim.frontend.v1.HostTaskCreate
-	12, // 4: agentshim.frontend.v1.HostAction.task_toggle_done:type_name -> agentshim.frontend.v1.HostTaskById
-	12, // 5: agentshim.frontend.v1.HostAction.task_open:type_name -> agentshim.frontend.v1.HostTaskById
-	12, // 6: agentshim.frontend.v1.HostAction.task_add_workspace:type_name -> agentshim.frontend.v1.HostTaskById
-	13, // 7: agentshim.frontend.v1.HostAction.legacy_command:type_name -> agentshim.frontend.v1.HostLegacyCommand
-	7,  // 8: agentshim.frontend.v1.HostAction.workspace_create_failed:type_name -> agentshim.frontend.v1.HostWorkspaceCreateFailed
-	15, // 9: agentshim.frontend.v1.HostLegacyCommand.payload:type_name -> google.protobuf.Struct
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	9,  // 0: agentshim.frontend.v1.HostAction.switch_workspace:type_name -> agentshim.frontend.v1.HostSwitchWorkspace
+	10, // 1: agentshim.frontend.v1.HostAction.set_repository_fold:type_name -> agentshim.frontend.v1.HostSetRepositoryFold
+	11, // 2: agentshim.frontend.v1.HostAction.set_sidebar_view:type_name -> agentshim.frontend.v1.HostSetSidebarView
+	12, // 3: agentshim.frontend.v1.HostAction.task_create:type_name -> agentshim.frontend.v1.HostTaskCreate
+	13, // 4: agentshim.frontend.v1.HostAction.task_toggle_done:type_name -> agentshim.frontend.v1.HostTaskById
+	13, // 5: agentshim.frontend.v1.HostAction.task_open:type_name -> agentshim.frontend.v1.HostTaskById
+	13, // 6: agentshim.frontend.v1.HostAction.task_add_workspace:type_name -> agentshim.frontend.v1.HostTaskById
+	14, // 7: agentshim.frontend.v1.HostAction.legacy_command:type_name -> agentshim.frontend.v1.HostLegacyCommand
+	8,  // 8: agentshim.frontend.v1.HostAction.workspace_create_failed:type_name -> agentshim.frontend.v1.HostWorkspaceCreateFailed
+	7,  // 9: agentshim.frontend.v1.HostAction.boot_sweep_session_unwired:type_name -> agentshim.frontend.v1.HostBootSweepSessionUnwired
+	16, // 10: agentshim.frontend.v1.HostLegacyCommand.payload:type_name -> google.protobuf.Struct
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_host_proto_init() }
@@ -1377,6 +1474,7 @@ func file_agentshim_frontend_v1_host_proto_init() {
 		(*HostAction_TaskAddWorkspace)(nil),
 		(*HostAction_LegacyCommand)(nil),
 		(*HostAction_WorkspaceCreateFailed)(nil),
+		(*HostAction_BootSweepSessionUnwired)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1384,7 +1482,7 @@ func file_agentshim_frontend_v1_host_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_host_proto_rawDesc), len(file_agentshim_frontend_v1_host_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

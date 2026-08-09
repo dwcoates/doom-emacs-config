@@ -13,7 +13,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/host.proto.
  */
 export const file_agentshim_frontend_v1_host: GenFile = /*@__PURE__*/
-  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvaG9zdC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIvoCChJDcmVhdGVXb3Jrc3BhY2VDbWQSFgoOcmVxdWVzdGVkX25hbWUYASABKAkSEAoIZ2l0X3Jvb3QYAiABKAkSEwoLYmFzZV9jb21taXQYAyABKAkSGAoQc291cmNlX3dvcmtzcGFjZRgEIAEoCRISCgpzb3VyY2VfZGlyGAUgASgJEhsKDmluaXRpYWxfcHJvbXB0GAYgASgJSACIAQESEAoIcHJpb3JpdHkYByABKAkSDQoFbW9kZWwYCCABKAkSEQoJZm9ya19mcm9tGAkgASgJEhcKD2Zvcmtfc2Vzc2lvbl9pZBgKIAEoCRIdChVwb3N0cHJvY2Vzc2luZ19wcm9tcHQYCyABKAkSFwoPYmVmb3JlX3dzX21lcmdlGAwgASgJEhIKCmNvbmZpZ19kaXIYDSABKAkSFwoPcGVybWlzc2lvbl9tb2RlGA4gASgJEhUKDWFsbG93X3VuZ2F0ZWQYDyABKAhCEQoPX2luaXRpYWxfcHJvbXB0IvgCChJXb3Jrc3BhY2VBdmFpbGFibGUSDgoGam9iX2lkGAEgASgJEhIKCmZpbmFsX25hbWUYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCRIOCgZicmFuY2gYBCABKAkSEAoIZ2l0X3Jvb3QYBSABKAkSEwoLYmFzZV9jb21taXQYBiABKAkSGAoQc291cmNlX3dvcmtzcGFjZRgHIAEoCRISCgpzb3VyY2VfZGlyGAggASgJEhEKCWZvcmtfZnJvbRgJIAEoCRIXCg9mb3JrX3Nlc3Npb25faWQYCiABKAkSEgoKc2Vzc2lvbl9pZBgLIAEoCRIQCghwcmlvcml0eRgMIAEoCRINCgVtb2RlbBgNIAEoCRIdChVpbml0aWFsX3Byb21wdF9xdWV1ZWQYDiABKAgSEgoKY29uZmlnX2RpchgPIAEoCRIXCg9wZXJtaXNzaW9uX21vZGUYECABKAkSFQoNYWxsb3dfdW5nYXRlZBgRIAEoCCIqChhXb3Jrc3BhY2VNYXRlcmlhbGl6ZWRDbWQSDgoGam9iX2lkGAEgASgJImQKEE9wZW5Xb3Jrc3BhY2VDbWQSFwoPcGVybWlzc2lvbl9tb2RlGAEgASgJEhIKCmNvbmZpZ19kaXIYAiABKAkSDAoEZmFrZRgDIAEoCBIVCg1hbGxvd191bmdhdGVkGAQgASgIIhMKEUNsb3NlV29ya3NwYWNlQ21kIpcBChFNZXJnZVdvcmtzcGFjZUNtZBIiChpjb25mbGljdF9yZXNvbHZlZF9jb250aW51ZRgCIAEoCBIWCg53b3Jrc3BhY2VfbmFtZRgGIAEoCUoECAEQAkoECAMQBEoECAQQBUoECAUQBlIHaGFuZGxlclINc291cmNlX2JyYW5jaFIKc291cmNlX2RpclIKdGFyZ2V0X2RpciKaBQoKSG9zdEFjdGlvbhIRCglhY3Rpb25faWQYASABKAkSRgoQc3dpdGNoX3dvcmtzcGFjZRgCIAEoCzIqLmFnZW50c2hpbS5mcm9udGVuZC52MS5Ib3N0U3dpdGNoV29ya3NwYWNlSAASSwoTc2V0X3JlcG9zaXRvcnlfZm9sZBgDIAEoCzIsLmFnZW50c2hpbS5mcm9udGVuZC52MS5Ib3N0U2V0UmVwb3NpdG9yeUZvbGRIABJFChBzZXRfc2lkZWJhcl92aWV3GAQgASgLMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RTZXRTaWRlYmFyVmlld0gAEjwKC3Rhc2tfY3JlYXRlGAUgASgLMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RUYXNrQ3JlYXRlSAASPwoQdGFza190b2dnbGVfZG9uZRgGIAEoCzIjLmFnZW50c2hpbS5mcm9udGVuZC52MS5Ib3N0VGFza0J5SWRIABI4Cgl0YXNrX29wZW4YByABKAsyIy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuSG9zdFRhc2tCeUlkSAASQQoSdGFza19hZGRfd29ya3NwYWNlGAggASgLMiMuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RUYXNrQnlJZEgAEkIKDmxlZ2FjeV9jb21tYW5kGAkgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RMZWdhY3lDb21tYW5kSAASUwoXd29ya3NwYWNlX2NyZWF0ZV9mYWlsZWQYCiABKAsyMC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuSG9zdFdvcmtzcGFjZUNyZWF0ZUZhaWxlZEgAQggKBmFjdGlvbiJSChlIb3N0V29ya3NwYWNlQ3JlYXRlRmFpbGVkEg4KBmpvYl9pZBgBIAEoCRIWCg5yZXF1ZXN0ZWRfbmFtZRgCIAEoCRINCgVlcnJvchgDIAEoCSIiChNIb3N0U3dpdGNoV29ya3NwYWNlEgsKA2RpchgBIAEoCSI5ChVIb3N0U2V0UmVwb3NpdG9yeUZvbGQSEAoIcmVwb19rZXkYASABKAkSDgoGZm9sZGVkGAIgASgIIiIKEkhvc3RTZXRTaWRlYmFyVmlldxIMCgR2aWV3GAEgASgJIhAKDkhvc3RUYXNrQ3JlYXRlIhoKDEhvc3RUYXNrQnlJZBIKCgJpZBgBIAEoCSJLChFIb3N0TGVnYWN5Q29tbWFuZBIMCgR0eXBlGAEgASgJEigKB3BheWxvYWQYAiABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IkYKFkhvc3RBY3Rpb25Db21wbGV0ZWRDbWQSEQoJYWN0aW9uX2lkGAEgASgJEgoKAm9rGAIgASgIEg0KBWVycm9yGAMgASgJQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_google_protobuf_struct]);
+  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvaG9zdC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIvoCChJDcmVhdGVXb3Jrc3BhY2VDbWQSFgoOcmVxdWVzdGVkX25hbWUYASABKAkSEAoIZ2l0X3Jvb3QYAiABKAkSEwoLYmFzZV9jb21taXQYAyABKAkSGAoQc291cmNlX3dvcmtzcGFjZRgEIAEoCRISCgpzb3VyY2VfZGlyGAUgASgJEhsKDmluaXRpYWxfcHJvbXB0GAYgASgJSACIAQESEAoIcHJpb3JpdHkYByABKAkSDQoFbW9kZWwYCCABKAkSEQoJZm9ya19mcm9tGAkgASgJEhcKD2Zvcmtfc2Vzc2lvbl9pZBgKIAEoCRIdChVwb3N0cHJvY2Vzc2luZ19wcm9tcHQYCyABKAkSFwoPYmVmb3JlX3dzX21lcmdlGAwgASgJEhIKCmNvbmZpZ19kaXIYDSABKAkSFwoPcGVybWlzc2lvbl9tb2RlGA4gASgJEhUKDWFsbG93X3VuZ2F0ZWQYDyABKAhCEQoPX2luaXRpYWxfcHJvbXB0IvgCChJXb3Jrc3BhY2VBdmFpbGFibGUSDgoGam9iX2lkGAEgASgJEhIKCmZpbmFsX25hbWUYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCRIOCgZicmFuY2gYBCABKAkSEAoIZ2l0X3Jvb3QYBSABKAkSEwoLYmFzZV9jb21taXQYBiABKAkSGAoQc291cmNlX3dvcmtzcGFjZRgHIAEoCRISCgpzb3VyY2VfZGlyGAggASgJEhEKCWZvcmtfZnJvbRgJIAEoCRIXCg9mb3JrX3Nlc3Npb25faWQYCiABKAkSEgoKc2Vzc2lvbl9pZBgLIAEoCRIQCghwcmlvcml0eRgMIAEoCRINCgVtb2RlbBgNIAEoCRIdChVpbml0aWFsX3Byb21wdF9xdWV1ZWQYDiABKAgSEgoKY29uZmlnX2RpchgPIAEoCRIXCg9wZXJtaXNzaW9uX21vZGUYECABKAkSFQoNYWxsb3dfdW5nYXRlZBgRIAEoCCIqChhXb3Jrc3BhY2VNYXRlcmlhbGl6ZWRDbWQSDgoGam9iX2lkGAEgASgJImQKEE9wZW5Xb3Jrc3BhY2VDbWQSFwoPcGVybWlzc2lvbl9tb2RlGAEgASgJEhIKCmNvbmZpZ19kaXIYAiABKAkSDAoEZmFrZRgDIAEoCBIVCg1hbGxvd191bmdhdGVkGAQgASgIIhMKEUNsb3NlV29ya3NwYWNlQ21kIpcBChFNZXJnZVdvcmtzcGFjZUNtZBIiChpjb25mbGljdF9yZXNvbHZlZF9jb250aW51ZRgCIAEoCBIWCg53b3Jrc3BhY2VfbmFtZRgGIAEoCUoECAEQAkoECAMQBEoECAQQBUoECAUQBlIHaGFuZGxlclINc291cmNlX2JyYW5jaFIKc291cmNlX2RpclIKdGFyZ2V0X2RpciL0BQoKSG9zdEFjdGlvbhIRCglhY3Rpb25faWQYASABKAkSRgoQc3dpdGNoX3dvcmtzcGFjZRgCIAEoCzIqLmFnZW50c2hpbS5mcm9udGVuZC52MS5Ib3N0U3dpdGNoV29ya3NwYWNlSAASSwoTc2V0X3JlcG9zaXRvcnlfZm9sZBgDIAEoCzIsLmFnZW50c2hpbS5mcm9udGVuZC52MS5Ib3N0U2V0UmVwb3NpdG9yeUZvbGRIABJFChBzZXRfc2lkZWJhcl92aWV3GAQgASgLMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RTZXRTaWRlYmFyVmlld0gAEjwKC3Rhc2tfY3JlYXRlGAUgASgLMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RUYXNrQ3JlYXRlSAASPwoQdGFza190b2dnbGVfZG9uZRgGIAEoCzIjLmFnZW50c2hpbS5mcm9udGVuZC52MS5Ib3N0VGFza0J5SWRIABI4Cgl0YXNrX29wZW4YByABKAsyIy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuSG9zdFRhc2tCeUlkSAASQQoSdGFza19hZGRfd29ya3NwYWNlGAggASgLMiMuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RUYXNrQnlJZEgAEkIKDmxlZ2FjeV9jb21tYW5kGAkgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RMZWdhY3lDb21tYW5kSAASUwoXd29ya3NwYWNlX2NyZWF0ZV9mYWlsZWQYCiABKAsyMC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuSG9zdFdvcmtzcGFjZUNyZWF0ZUZhaWxlZEgAElgKGmJvb3Rfc3dlZXBfc2Vzc2lvbl91bndpcmVkGAsgASgLMjIuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RCb290U3dlZXBTZXNzaW9uVW53aXJlZEgAQggKBmFjdGlvbiJUChtIb3N0Qm9vdFN3ZWVwU2Vzc2lvblVud2lyZWQSEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGcmVhc29uGAMgASgJIlIKGUhvc3RXb3Jrc3BhY2VDcmVhdGVGYWlsZWQSDgoGam9iX2lkGAEgASgJEhYKDnJlcXVlc3RlZF9uYW1lGAIgASgJEg0KBWVycm9yGAMgASgJIiIKE0hvc3RTd2l0Y2hXb3Jrc3BhY2USCwoDZGlyGAEgASgJIjkKFUhvc3RTZXRSZXBvc2l0b3J5Rm9sZBIQCghyZXBvX2tleRgBIAEoCRIOCgZmb2xkZWQYAiABKAgiIgoSSG9zdFNldFNpZGViYXJWaWV3EgwKBHZpZXcYASABKAkiEAoOSG9zdFRhc2tDcmVhdGUiGgoMSG9zdFRhc2tCeUlkEgoKAmlkGAEgASgJIksKEUhvc3RMZWdhY3lDb21tYW5kEgwKBHR5cGUYASABKAkSKAoHcGF5bG9hZBgCIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QiRgoWSG9zdEFjdGlvbkNvbXBsZXRlZENtZBIRCglhY3Rpb25faWQYASABKAkSCgoCb2sYAiABKAgSDQoFZXJyb3IYAyABKAlCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_google_protobuf_struct]);
 
 /**
  * Request one agent-repl workspace.  This is the sole creation ingress for
@@ -411,6 +411,12 @@ export type HostAction = Message<"agentshim.frontend.v1.HostAction"> & {
      */
     value: HostWorkspaceCreateFailed;
     case: "workspaceCreateFailed";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.HostBootSweepSessionUnwired boot_sweep_session_unwired = 11;
+     */
+    value: HostBootSweepSessionUnwired;
+    case: "bootSweepSessionUnwired";
   } | { case: undefined; value?: undefined };
 };
 
@@ -420,6 +426,50 @@ export type HostAction = Message<"agentshim.frontend.v1.HostAction"> & {
  */
 export const HostActionSchema: GenMessage<HostAction> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_host, 6);
+
+/**
+ * The boot sweep finished with this session left UNWIRED: its shim never
+ * redialed inside the recheck window, its liveness probe failed twice, or it
+ * was neither connected nor lock-held. The session is not torn down — the
+ * record stays revivable and an on-demand open still brings it up — but a
+ * human should know the survivor did not come back on its own. It rides the
+ * same retained-until-completed HostAction envelope every other host action
+ * uses, exactly as HostWorkspaceCreateFailed does: the daemon job it reports
+ * is already over, and the record is delivered, replayed across reconnects,
+ * and acknowledged.
+ *
+ * @generated from message agentshim.frontend.v1.HostBootSweepSessionUnwired
+ */
+export type HostBootSweepSessionUnwired = Message<"agentshim.frontend.v1.HostBootSweepSessionUnwired"> & {
+  /**
+   * The workspace the session belongs to (project dir).
+   *
+   * @generated from field: string workspace = 1;
+   */
+  workspace: string;
+
+  /**
+   * The session left unwired.
+   *
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * WHY it was left, as one display-ready sentence composed by the sweep
+   * (which verdict fired, with its evidence). Rendered verbatim.
+   *
+   * @generated from field: string reason = 3;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.HostBootSweepSessionUnwired.
+ * Use `create(HostBootSweepSessionUnwiredSchema)` to create a new message.
+ */
+export const HostBootSweepSessionUnwiredSchema: GenMessage<HostBootSweepSessionUnwired> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_host, 7);
 
 /**
  * A durably-failed workspace-creation job. It rides the same
@@ -452,7 +502,7 @@ export type HostWorkspaceCreateFailed = Message<"agentshim.frontend.v1.HostWorks
  * Use `create(HostWorkspaceCreateFailedSchema)` to create a new message.
  */
 export const HostWorkspaceCreateFailedSchema: GenMessage<HostWorkspaceCreateFailed> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_host, 7);
+  messageDesc(file_agentshim_frontend_v1_host, 8);
 
 /**
  * @generated from message agentshim.frontend.v1.HostSwitchWorkspace
@@ -469,7 +519,7 @@ export type HostSwitchWorkspace = Message<"agentshim.frontend.v1.HostSwitchWorks
  * Use `create(HostSwitchWorkspaceSchema)` to create a new message.
  */
 export const HostSwitchWorkspaceSchema: GenMessage<HostSwitchWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_host, 8);
+  messageDesc(file_agentshim_frontend_v1_host, 9);
 
 /**
  * @generated from message agentshim.frontend.v1.HostSetRepositoryFold
@@ -491,7 +541,7 @@ export type HostSetRepositoryFold = Message<"agentshim.frontend.v1.HostSetReposi
  * Use `create(HostSetRepositoryFoldSchema)` to create a new message.
  */
 export const HostSetRepositoryFoldSchema: GenMessage<HostSetRepositoryFold> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_host, 9);
+  messageDesc(file_agentshim_frontend_v1_host, 10);
 
 /**
  * @generated from message agentshim.frontend.v1.HostSetSidebarView
@@ -508,7 +558,7 @@ export type HostSetSidebarView = Message<"agentshim.frontend.v1.HostSetSidebarVi
  * Use `create(HostSetSidebarViewSchema)` to create a new message.
  */
 export const HostSetSidebarViewSchema: GenMessage<HostSetSidebarView> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_host, 10);
+  messageDesc(file_agentshim_frontend_v1_host, 11);
 
 /**
  * @generated from message agentshim.frontend.v1.HostTaskCreate
@@ -521,7 +571,7 @@ export type HostTaskCreate = Message<"agentshim.frontend.v1.HostTaskCreate"> & {
  * Use `create(HostTaskCreateSchema)` to create a new message.
  */
 export const HostTaskCreateSchema: GenMessage<HostTaskCreate> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_host, 11);
+  messageDesc(file_agentshim_frontend_v1_host, 12);
 
 /**
  * @generated from message agentshim.frontend.v1.HostTaskById
@@ -538,7 +588,7 @@ export type HostTaskById = Message<"agentshim.frontend.v1.HostTaskById"> & {
  * Use `create(HostTaskByIdSchema)` to create a new message.
  */
 export const HostTaskByIdSchema: GenMessage<HostTaskById> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_host, 12);
+  messageDesc(file_agentshim_frontend_v1_host, 13);
 
 /**
  * Deliberate structured handoff for the established workspace-command verbs
@@ -569,7 +619,7 @@ export type HostLegacyCommand = Message<"agentshim.frontend.v1.HostLegacyCommand
  * Use `create(HostLegacyCommandSchema)` to create a new message.
  */
 export const HostLegacyCommandSchema: GenMessage<HostLegacyCommand> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_host, 13);
+  messageDesc(file_agentshim_frontend_v1_host, 14);
 
 /**
  * Completion is host-only.  `ok=false` preserves the action and records the
@@ -600,5 +650,5 @@ export type HostActionCompletedCmd = Message<"agentshim.frontend.v1.HostActionCo
  * Use `create(HostActionCompletedCmdSchema)` to create a new message.
  */
 export const HostActionCompletedCmdSchema: GenMessage<HostActionCompletedCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_host, 14);
+  messageDesc(file_agentshim_frontend_v1_host, 15);
 
