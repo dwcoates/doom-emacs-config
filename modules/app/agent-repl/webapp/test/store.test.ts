@@ -98,7 +98,7 @@ function typingEffect(over: Partial<TextReveal> = {}): AdapterEffect {
     kind: "typing",
     value: {
       workspace: "ws",
-      sessionId: "s1",
+      fence: "s1",
       messageId: "u1",
       blockIndex: 0,
       kind: "text",
@@ -113,7 +113,7 @@ function inputTypingEffect(over: Partial<InputReveal> = {}): AdapterEffect {
     kind: "typing",
     value: {
       workspace: "ws",
-      sessionId: "s1",
+      fence: "s1",
       messageId: "u1",
       blockIndex: 0,
       kind: "input_json",
@@ -127,23 +127,23 @@ function inputTypingEffect(over: Partial<InputReveal> = {}): AdapterEffect {
 function thinkingTypingEffect(over: Partial<ThinkingReveal> = {}): AdapterEffect {
   return {
     kind: "typing",
-    value: { workspace: "ws", sessionId: "s1", messageId: "u1", blockIndex: 0, kind: "thinking", delta: "hmm", ...over },
+    value: { workspace: "ws", fence: "s1", messageId: "u1", blockIndex: 0, kind: "thinking", delta: "hmm", ...over },
   };
 }
 
 function unidentifiedInputTypingEffect(over: Partial<UnidentifiedToolInputReveal> = {}): AdapterEffect {
   return {
     kind: "typing",
-    value: { workspace: "ws", sessionId: "s1", messageId: "u1", blockIndex: 0, kind: "input_json", delta: "{", ...over },
+    value: { workspace: "ws", fence: "s1", messageId: "u1", blockIndex: 0, kind: "input_json", delta: "{", ...over },
   };
 }
 
 function itemsEffect(items: ConversationItem[], throughSeq = 0): AdapterEffect {
-  return { kind: "conversation-items", workspace: "ws", sessionId: "s1", throughSeq, items };
+  return { kind: "conversation-items", workspace: "ws", fence: "s1", throughSeq, items };
 }
 
 function catalogEffect(entries: CounterEntry[]): AdapterEffect {
-  return { kind: "task-catalog", value: { workspace: "ws", sessionId: "s1", entries } };
+  return { kind: "task-catalog", value: { workspace: "ws", fence: "s1", entries } };
 }
 
 // --- item builders ----------------------------------------------------------
@@ -762,7 +762,7 @@ describe("session identity authority", () => {
     store.ingest([workspaceEffect({ sessionId: "s_live" })]);
     const progress: ProgressInput = {
       workspace: "ws",
-      sessionId: "s_retired",
+      fence: "s_retired",
       turnStartedAtMs: 0,
       thinkingTokens: 0,
       inputTokens: 0,
@@ -1218,7 +1218,7 @@ describe("ingest session-init", () => {
     const store = new ConversationStore();
     // Act
     store.ingest([
-      { kind: "session-init", value: { workspace: "ws", sessionId: "s1", init: { model: "claude", cwd: "/w" } } },
+      { kind: "session-init", value: { workspace: "ws", fence: "s1", init: { model: "claude", cwd: "/w" } } },
     ]);
     // Assert
     expect(store.state.systemInit).toEqual({ model: "claude", cwd: "/w" });
@@ -1227,9 +1227,9 @@ describe("ingest session-init", () => {
   it("replaces the retained init wholesale on the next push", () => {
     // Arrange
     const store = new ConversationStore();
-    store.ingest([{ kind: "session-init", value: { workspace: "ws", sessionId: "s1", init: { fastModeState: "off" } } }]);
+    store.ingest([{ kind: "session-init", value: { workspace: "ws", fence: "s1", init: { fastModeState: "off" } } }]);
     // Act
-    store.ingest([{ kind: "session-init", value: { workspace: "ws", sessionId: "s1", init: { fastModeState: "on" } } }]);
+    store.ingest([{ kind: "session-init", value: { workspace: "ws", fence: "s1", init: { fastModeState: "on" } } }]);
     // Assert
     expect(store.state.systemInit).toEqual({ fastModeState: "on" });
   });
@@ -1415,7 +1415,7 @@ function progressEffect(over: Partial<ToolProgressInput> = {}): AdapterEffect {
     kind: "tool-progress",
     value: {
       workspace: "ws",
-      sessionId: "s1",
+      fence: "s1",
       toolUseId: "tu1",
       toolName: "Bash",
       parentToolUseId: "",
@@ -1505,7 +1505,7 @@ describe("ingest tool-progress", () => {
 // --- queue (E4 held prompts) -------------------------------------------------
 
 function queueEffect(entries: QueueInput["entries"]): AdapterEffect {
-  return { kind: "queue", value: { workspace: "ws", sessionId: "s1", entries } };
+  return { kind: "queue", value: { workspace: "ws", fence: "s1", entries } };
 }
 
 function queueEntry(over: Partial<QueueInput["entries"][number]> = {}) {
@@ -1818,7 +1818,7 @@ describe("the progress footer's input (F1)", () => {
   function progressValue(over: Partial<ProgressInput> = {}): ProgressInput {
     return {
       workspace: "/w",
-      sessionId: "s1",
+      fence: "s1",
       turnStartedAtMs: 0,
       thinkingTokens: 0,
       inputTokens: 0,
@@ -2334,9 +2334,10 @@ describe("revival hold adoption (the queue bubble's source of truth)", () => {
     // Arrange
     const store = new ConversationStore();
     // Act
-    store.ingest([queueEffect([queueEntry({ revivalHold: { sessionId: "sess-4" } })])]);
-    // Assert
-    expect(store.state.queued[0].revivalHold).toEqual({ sessionId: "sess-4" });
+    store.ingest([queueEffect([queueEntry({ revivalHold: {} })])]);
+    // Assert — the hold is a bare marker after the figma-idl reshape: its
+    // PRESENCE is the whole claim, which is what selects the revival bubble.
+    expect(store.state.queued[0].revivalHold).toEqual({});
   });
 
   it("leaves the hold absent on an ordinary classifier-held entry", () => {

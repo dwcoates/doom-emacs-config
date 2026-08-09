@@ -166,13 +166,18 @@ state is mutated."
      ((null ws)
       (if (agent-repl--frontend-tombstoned-dir-owner wire)
           (progn
+            ;; `ProgressView' reserved `session_id' with the component
+            ;; reshape: the only question this end ever asked of it was "is
+            ;; this push still current", and the workspace FENCE answers that
+            ;; without naming a session.  It is carried into the diagnostic
+            ;; verbatim and never parsed — it is opaque by contract.
             (agent-repl--log-verbose
              nil
-             "context-cost-apply: skipped tombstoned workspace path=%S session-id=%S"
-             wire (plist-get progress :sessionId))
+             "context-cost-apply: skipped tombstoned workspace path=%S fence=%S"
+             wire (plist-get progress :fence))
             nil)
         (agent-repl--frontend-reject-unmaterialized-session-frame
-         "ProgressView" "unavailable" wire (plist-get progress :sessionId))))
+         "ProgressView" "unavailable" wire (plist-get progress :fence))))
      (alert
       (let ((normalized (agent-repl--context-cost-normalize ws alert)))
         (puthash ws normalized agent-repl--context-cost-alerts)

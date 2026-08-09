@@ -660,11 +660,11 @@ func TestDeliverNeverCompactsConversationDeltasForASlowConsumer(t *testing.T) {
 	s.mu.Lock()
 	s.clients[cl] = struct{}{}
 	s.mu.Unlock()
-	s.PushConversationDelta(&frontendv1.ConversationDelta{Workspace: "w1", SessionId: "s1", ThroughSeq: 1})
-	s.PushConversationDelta(&frontendv1.ConversationDelta{Workspace: "w1", SessionId: "s1", ThroughSeq: 2})
+	s.PushConversationDelta(&frontendv1.ConversationDelta{Workspace: "w1", Fence: "s1", ThroughSeq: 1})
+	s.PushConversationDelta(&frontendv1.ConversationDelta{Workspace: "w1", Fence: "s1", ThroughSeq: 2})
 
 	// Act: a third append-semantic frame with no room and nothing to compact.
-	s.PushConversationDelta(&frontendv1.ConversationDelta{Workspace: "w1", SessionId: "s1", ThroughSeq: 3})
+	s.PushConversationDelta(&frontendv1.ConversationDelta{Workspace: "w1", Fence: "s1", ThroughSeq: 3})
 
 	// Assert: the disconnect path still fires rather than dropping content.
 	if s.clientCount() != 0 {
@@ -719,14 +719,14 @@ func TestProtojsonRoundTripStability(t *testing.T) {
 		{"workspace_state", WorkspaceStateFrame(&frontendv1.WorkspaceState{Workspace: "w", State: frontendv1.RenderState_RENDER_STATE_MERGE_CONFLICT, CauseSeq: 12})},
 		{"session_view", SessionViewFrame(&frontendv1.SessionView{Workspace: "w", Model: "m", TotalTokens: 9, TotalCostUsd: 1.5})},
 		{"conversation_delta", ConversationDeltaFrame(&frontendv1.ConversationDelta{
-			Workspace: "w", SessionId: "s", ThroughSeq: 4,
+			Workspace: "w", Fence: "s", ThroughSeq: 4,
 			Items: []*frontendv1.ConversationItem{{
 				Uuid: "u1", TsMs: 5,
-				Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: &datav1.ApiAssistantMessage{
+				Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{
 					Content: []*datav1.ContentBlock{
 						{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "hi"}}},
 					},
-				}},
+				}}}}},
 			}},
 		})},
 		{"typing_delta", TypingDeltaFrame(&frontendv1.TypingDelta{
@@ -734,10 +734,10 @@ func TestProtojsonRoundTripStability(t *testing.T) {
 			Delta:     &corev1.ContentDelta{Uuid: "u", BlockIndex: 0, Delta: &corev1.ContentDelta_Text{Text: "ab"}},
 		})},
 		{"session_init", SessionInitViewFrame(&frontendv1.SessionInitView{
-			Workspace: "w", SessionId: "s",
+			Workspace: "w", Fence: "s",
 			Init: &datav1.SystemInit{Model: "claude-x"},
 		})},
-		{"task_catalog", TaskCatalogFrame(&frontendv1.TaskCatalog{Workspace: "w", Tasks: []*frontendv1.TaskEntry{{TaskId: "t", Kind: "agent", Status: "running"}}})},
+		{"task_catalog", TaskCatalogFrame(&frontendv1.TaskCatalog{Workspace: "w", Tasks: []*frontendv1.TaskEntry{{TaskId: "t", Kind: &frontendv1.TaskEntry_Agent{Agent: &frontendv1.TaskKindAgent{}}, Status: &frontendv1.TaskEntry_Running{Running: &frontendv1.TaskStatusRunning{}}}}})},
 		{"command_ack", CommandAckFrame(&frontendv1.CommandAck{RequestId: "r", Ok: true})},
 	}
 	for _, tc := range tests {
@@ -859,21 +859,25 @@ func waitClientCount(t *testing.T, s *Server, want int) {
 // because that ambiguity is now gone.
 func TestQueueClassificationWireNames(t *testing.T) {
 	tests := []struct {
-		name string
-		cls  frontendv1.QueueClassification
-		want string
+		name  string
+		entry *frontendv1.QueueEntry
+		want  string
 	}{
-		{"pending", frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING, "QUEUE_CLASSIFICATION_PENDING"},
-		{"interject", frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT, "QUEUE_CLASSIFICATION_INTERJECT"},
-		{"hold", frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD, "QUEUE_CLASSIFICATION_HOLD"},
-		{"error", frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR, "QUEUE_CLASSIFICATION_ERROR"},
+		{"pending", &frontendv1.QueueEntry{Id: "q1", Classification: &frontendv1.QueueEntry_Pending{
+			Pending: &frontendv1.QueueClassificationPending{}}}, "pending"},
+		{"interject", &frontendv1.QueueEntry{Id: "q1", Classification: &frontendv1.QueueEntry_Interject{
+			Interject: &frontendv1.QueueClassificationInterject{}}}, "interject"},
+		{"hold", &frontendv1.QueueEntry{Id: "q1", Classification: &frontendv1.QueueEntry_HoldForTurnEnd{
+			HoldForTurnEnd: &frontendv1.QueueClassificationHold{}}}, "holdForTurnEnd"},
+		{"error", &frontendv1.QueueEntry{Id: "q1", Classification: &frontendv1.QueueEntry_Error{
+			Error: &frontendv1.QueueClassificationError{}}}, "error"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			frame := QueueViewFrame(&frontendv1.QueueView{
-				Workspace: "w", SessionId: "s",
-				Entries: []*frontendv1.QueueEntry{{Id: "q1", Classification: tc.cls}},
+				Workspace: "w", Fence: "s",
+				Entries: []*frontendv1.QueueEntry{tc.entry},
 			})
 			// Act
 			data, err := marshalFrame(frame)
@@ -970,20 +974,18 @@ func TestHostOnlyCommandRefusalStillRecordsWithNoWarnChannelWired(t *testing.T) 
 	}
 }
 
-// TestQueueClassificationUnspecifiedIsOmittedOnTheWire pins the fact the
-// webapp's strict decoder rests on: UNSPECIFIED is the proto3 zero, so
-// protojson drops the field entirely. Absent and UNSPECIFIED are therefore the
-// SAME wire fact, and the decoder is right to reject both identically. The
-// daemon never produces this frame; the test exists so the equivalence cannot
-// silently stop holding.
-func TestQueueClassificationUnspecifiedIsOmittedOnTheWire(t *testing.T) {
+// TestAnUnclassifiedEntryCarriesNoVerdictOnTheWire pins the fact the webapp's
+// strict decoder rests on: an entry with no classification arm serializes
+// NONE of the four verdict names, so "nothing decided this" is detectable
+// rather than indistinguishable from a real verdict. It is the guarantee the
+// oneof replaced the enum's UNSPECIFIED-vs-absent equivalence with. The daemon
+// never produces this frame; the test exists so the property cannot silently
+// stop holding.
+func TestAnUnclassifiedEntryCarriesNoVerdictOnTheWire(t *testing.T) {
 	// Arrange
 	frame := QueueViewFrame(&frontendv1.QueueView{
-		Workspace: "w", SessionId: "s",
-		Entries: []*frontendv1.QueueEntry{{
-			Id:             "q1",
-			Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_UNSPECIFIED,
-		}},
+		Workspace: "w", Fence: "s",
+		Entries: []*frontendv1.QueueEntry{{Id: "q1"}},
 	})
 	// Act
 	data, err := marshalFrame(frame)
@@ -991,8 +993,10 @@ func TestQueueClassificationUnspecifiedIsOmittedOnTheWire(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	// Assert
-	if strings.Contains(string(data), "classification") {
-		t.Fatalf("UNSPECIFIED must be omitted by protojson, but the wire form carries it: %s", data)
+	for _, verdict := range []string{"pending", "interject", "holdForTurnEnd", `"error"`} {
+		if strings.Contains(string(data), verdict) {
+			t.Fatalf("an entry with no classification arm serialized %s: %s", verdict, data)
+		}
 	}
 }
 

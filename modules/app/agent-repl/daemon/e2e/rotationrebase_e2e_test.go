@@ -22,6 +22,7 @@
 package e2e
 
 import (
+	"claude-repld/internal/errclass"
 	"strings"
 	"testing"
 
@@ -39,9 +40,9 @@ const rebasedMark = 0
 // handed an alarm instead of its history.
 func failureCard(frame *frontendv1.FrontendFrame, workspace string) string {
 	for _, item := range deltaItems(frame, workspace) {
-		if f := item.GetSystemFailure(); f != nil {
+		if f := item.GetFailureCard(); f != nil {
 			return "a system-failure card was pushed across the rotation: type=" +
-				f.GetErrorType() + " detail=" + f.GetSourceDetail()
+				errclass.TypeName(f) + " detail=" + f.GetDetail()
 		}
 	}
 	return ""

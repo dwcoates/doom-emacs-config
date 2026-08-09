@@ -68,18 +68,15 @@ func TestScopeFrameDropsHistoricalSameWorkspaceSessionView(t *testing.T) {
 	}
 }
 
-func TestScopeFrameDropsAgentSessionViewFromAnotherSameWorkspaceSession(t *testing.T) {
+func TestScopeFrameDropsASessionBearingViewFromAnotherSameWorkspaceSession(t *testing.T) {
 	// Arrange — workspace equality is deliberately irrelevant once a frame
-	// names its owning session.
+	// names its owning session. Only the two SESSION-BEARING frames still do;
+	// the rest of this group became fenced pushes with no session id at all,
+	// and they are covered by the workspace-routing test below.
 	sc := Scope{SessionID: "s_current", Workspace: "/w"}
 	cases := map[string]*frontendv1.FrontendFrame{
 		"workspace-state": WorkspaceStateFrame(&frontendv1.WorkspaceState{SessionId: "s_retired", Workspace: "/w"}),
-		"typing-delta":    TypingDeltaFrame(&frontendv1.TypingDelta{SessionId: "s_retired", Workspace: "/w"}),
-		"task-catalog":    TaskCatalogFrame(&frontendv1.TaskCatalog{SessionId: "s_retired", Workspace: "/w"}),
-		"session-init":    SessionInitViewFrame(&frontendv1.SessionInitView{SessionId: "s_retired", Workspace: "/w"}),
-		"heartbeat":       HeartbeatViewFrame(&frontendv1.HeartbeatView{SessionId: "s_retired", Workspace: "/w"}),
-		"queue":           QueueViewFrame(&frontendv1.QueueView{SessionId: "s_retired", Workspace: "/w"}),
-		"progress":        ProgressViewFrame(&frontendv1.ProgressView{SessionId: "s_retired", Workspace: "/w"}),
+		"session-view":    SessionViewFrame(&frontendv1.SessionView{SessionId: "s_retired", Workspace: "/w"}),
 	}
 
 	for name, frame := range cases {
@@ -91,12 +88,37 @@ func TestScopeFrameDropsAgentSessionViewFromAnotherSameWorkspaceSession(t *testi
 	}
 }
 
+// The fenced pushes route by WORKSPACE, so a retired session's fence is not
+// what keeps them out — another workspace is. Nothing in this group can carry a
+// session id to match on any more, and a rotated fence is the CLIENT's discard.
+func TestScopeFrameDropsAFencedPushForAnotherWorkspace(t *testing.T) {
+	// Arrange.
+	sc := Scope{SessionID: "s_current", Workspace: "/w"}
+	cases := map[string]*frontendv1.FrontendFrame{
+		"conversation-delta": ConversationDeltaFrame(&frontendv1.ConversationDelta{Fence: "f", Workspace: "/other"}),
+		"typing-delta":       TypingDeltaFrame(&frontendv1.TypingDelta{Fence: "f", Workspace: "/other"}),
+		"task-catalog":       TaskCatalogFrame(&frontendv1.TaskCatalog{Fence: "f", Workspace: "/other"}),
+		"session-init":       SessionInitViewFrame(&frontendv1.SessionInitView{Fence: "f", Workspace: "/other"}),
+		"heartbeat":          HeartbeatViewFrame(&frontendv1.HeartbeatView{Fence: "f", Workspace: "/other"}),
+		"queue":              QueueViewFrame(&frontendv1.QueueView{Fence: "f", Workspace: "/other"}),
+		"progress":           ProgressViewFrame(&frontendv1.ProgressView{Fence: "f", Workspace: "/other"}),
+	}
+
+	for name, frame := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, keep := scopeFrame(frame, sc); keep {
+				t.Fatalf("%s crossed a connection scoped to another workspace", name)
+			}
+		})
+	}
+}
+
 func TestScopeFrameRoutesRotatedConversationByWorkspace(t *testing.T) {
 	// ConversationDelta.session_id is a vendor conversation id, not the stable
 	// agent-repl session id in Scope. Vendor rotation must not sever the feed.
 	sc := Scope{SessionID: "s_agent", Workspace: "/w"}
 	frame := ConversationDeltaFrame(&frontendv1.ConversationDelta{
-		SessionId: "550053ca-53a6-456b-97ff-0c73269ce253",
+		Fence:     "550053ca-53a6-456b-97ff-0c73269ce253",
 		Workspace: "/w",
 	})
 
@@ -123,7 +145,7 @@ func TestScopeFrameDropsNonMatchingConversationDelta(t *testing.T) {
 	// Arrange — a delta for a different workspace. Its vendor session id is not
 	// comparable to the agent-repl session id in Scope.
 	sc := Scope{SessionID: "s1", Workspace: "/w1"}
-	frame := ConversationDeltaFrame(&frontendv1.ConversationDelta{SessionId: "s2", Workspace: "/w2"})
+	frame := ConversationDeltaFrame(&frontendv1.ConversationDelta{Fence: "s2", Workspace: "/w2"})
 	// Act
 	_, keep := scopeFrame(frame, sc)
 	// Assert
@@ -136,7 +158,7 @@ func TestScopeFrameDropsNonMatchingHeartbeat(t *testing.T) {
 	// Arrange — a heartbeat for a different session. Without its own scope
 	// case a HeartbeatView would fall to the default and leak connection-wide.
 	sc := Scope{SessionID: "s1"}
-	frame := HeartbeatViewFrame(&frontendv1.HeartbeatView{SessionId: "s2", Workspace: "/w2"})
+	frame := HeartbeatViewFrame(&frontendv1.HeartbeatView{Fence: "s2", Workspace: "/w2"})
 	// Act
 	_, keep := scopeFrame(frame, sc)
 	// Assert
@@ -146,22 +168,24 @@ func TestScopeFrameDropsNonMatchingHeartbeat(t *testing.T) {
 }
 
 func TestScopeFramePassesMatchingHeartbeat(t *testing.T) {
-	// Arrange — a heartbeat for this connection's own session.
-	sc := Scope{SessionID: "s1"}
-	frame := HeartbeatViewFrame(&frontendv1.HeartbeatView{SessionId: "s1", Workspace: "/w1"})
+	// Arrange — a heartbeat for this connection's own workspace.
+	sc := Scope{SessionID: "s1", Workspace: "/w1"}
+	frame := HeartbeatViewFrame(&frontendv1.HeartbeatView{Fence: "s1", Workspace: "/w1"})
 	// Act
 	_, keep := scopeFrame(frame, sc)
 	// Assert
 	if !keep {
-		t.Fatal("a heartbeat for this session must pass")
+		t.Fatal("a heartbeat for this workspace must pass")
 	}
 }
 
 func TestScopeFrameDropsNonMatchingQueue(t *testing.T) {
-	// Arrange — another session's queue must not leak into this connection:
-	// its entries are prompts the user typed somewhere else.
-	sc := Scope{SessionID: "s1"}
-	frame := QueueViewFrame(&frontendv1.QueueView{SessionId: "s2", Workspace: "/w2"})
+	// Arrange — another WORKSPACE's queue must not leak into this connection:
+	// its entries are prompts the user typed somewhere else. The queue is a
+	// fenced push and carries no session id, so its workspace is the only
+	// routing key there is.
+	sc := Scope{SessionID: "s1", Workspace: "/w1"}
+	frame := QueueViewFrame(&frontendv1.QueueView{Fence: "s2", Workspace: "/w2"})
 	// Act
 	_, keep := scopeFrame(frame, sc)
 	// Assert
@@ -172,27 +196,43 @@ func TestScopeFrameDropsNonMatchingQueue(t *testing.T) {
 
 func TestScopeFramePassesMatchingQueue(t *testing.T) {
 	// Arrange
-	sc := Scope{SessionID: "s1"}
-	frame := QueueViewFrame(&frontendv1.QueueView{SessionId: "s1", Workspace: "/w1"})
+	sc := Scope{SessionID: "s1", Workspace: "/w1"}
+	frame := QueueViewFrame(&frontendv1.QueueView{Fence: "s1", Workspace: "/w1"})
 	// Act
 	_, keep := scopeFrame(frame, sc)
 	// Assert
 	if !keep {
-		t.Fatal("a queue for this session must pass")
+		t.Fatal("a queue for this workspace must pass")
+	}
+}
+
+// A fenced push routes by WORKSPACE and by nothing else. Its fence is a
+// staleness token the CLIENT compares against the workspace's current one; the
+// daemon's scope filter has no counterpart to match it against, so a fence that
+// has rotated is a client-side discard rather than a routing decision here.
+func TestScopeFramePassesAQueueWhoseFenceRotated(t *testing.T) {
+	// Arrange
+	sc := Scope{SessionID: "s1", Workspace: "/w1"}
+	frame := QueueViewFrame(&frontendv1.QueueView{Fence: "rotated", Workspace: "/w1"})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if !keep {
+		t.Fatal("a fenced push for this workspace must pass regardless of its fence")
 	}
 }
 
 func TestFilterSnapshotKeepsOnlyThisScopesQueue(t *testing.T) {
-	// Arrange — the connect snapshot carries every session's queue.
-	sc := Scope{SessionID: "s1"}
+	// Arrange — the connect snapshot carries every workspace's queue.
+	sc := Scope{SessionID: "s1", Workspace: "/w1"}
 	snap := &frontendv1.StateSnapshot{Queues: []*frontendv1.QueueView{
-		{SessionId: "s1", Workspace: "/w1"},
-		{SessionId: "s2", Workspace: "/w2"},
+		{Fence: "s1", Workspace: "/w1"},
+		{Fence: "s2", Workspace: "/w2"},
 	}}
 	// Act
 	out := filterSnapshot(snap, sc)
 	// Assert
-	if len(out.GetQueues()) != 1 || out.GetQueues()[0].GetSessionId() != "s1" {
+	if len(out.GetQueues()) != 1 || out.GetQueues()[0].GetFence() != "s1" {
 		t.Fatalf("filtered queues = %+v", out.GetQueues())
 	}
 }
@@ -263,7 +303,7 @@ func TestScopeFrameDropsNonMatchingProgressView(t *testing.T) {
 	// case a ProgressView would fall to the default and leak connection-wide,
 	// putting another workspace's footer on this connection.
 	sc := Scope{SessionID: "s1"}
-	frame := ProgressViewFrame(&frontendv1.ProgressView{SessionId: "s2", Workspace: "/w2"})
+	frame := ProgressViewFrame(&frontendv1.ProgressView{Fence: "s2", Workspace: "/w2"})
 	// Act
 	_, keep := scopeFrame(frame, sc)
 	// Assert
@@ -274,8 +314,8 @@ func TestScopeFrameDropsNonMatchingProgressView(t *testing.T) {
 
 func TestScopeFramePassesMatchingProgressView(t *testing.T) {
 	// Arrange
-	sc := Scope{SessionID: "s1"}
-	frame := ProgressViewFrame(&frontendv1.ProgressView{SessionId: "s1", Workspace: "/w1"})
+	sc := Scope{SessionID: "s1", Workspace: "/w1"}
+	frame := ProgressViewFrame(&frontendv1.ProgressView{Fence: "s1", Workspace: "/w1"})
 	// Act
 	_, keep := scopeFrame(frame, sc)
 	// Assert
@@ -284,16 +324,17 @@ func TestScopeFramePassesMatchingProgressView(t *testing.T) {
 	}
 }
 
-// The round trip the live footer defect broke: a workspace-scoped client is
-// scoped to the DAEMON session id, so a token-bearing progress view stamped
-// with that id reaches it. It used to be stamped with the vendor conversation
-// uuid the store files events under, and this filter — correctly — dropped
-// every one of them, which is why the footer's input-token count never moved.
-func TestScopeFrameKeepsATokenBearingProgressViewStampedWithTheDaemonSession(t *testing.T) {
+// The round trip the live footer defect broke. The view used to be stamped
+// with the vendor conversation uuid the store files events under, and this
+// filter — correctly — dropped every one of them, which is why the footer's
+// input-token count never moved. The view carries no session identity at all
+// now, so the whole class of mis-stamping is unreachable: it routes by its
+// workspace, and there is nothing on it a vendor id can reach.
+func TestScopeFrameKeepsATokenBearingProgressViewForItsWorkspace(t *testing.T) {
 	// Arrange
 	sc := Scope{SessionID: "s_f564d136dad4f25c", Workspace: "/w1"}
 	frame := ProgressViewFrame(&frontendv1.ProgressView{
-		SessionId: "s_f564d136dad4f25c", Workspace: "/w1", InputTokens: 46000,
+		Fence: "s_f564d136dad4f25c", Workspace: "/w1", InputTokens: 46000,
 	})
 	// Act
 	got, keep := scopeFrame(frame, sc)
@@ -306,19 +347,21 @@ func TestScopeFrameKeepsATokenBearingProgressViewStampedWithTheDaemonSession(t *
 	}
 }
 
-// The vendor-stamped frame the resolver used to emit stays dropped: the filter
-// is right and the stamp was wrong, so loosening this was never the fix.
-func TestScopeFrameDropsAVendorStampedProgressView(t *testing.T) {
+// The other half of that defect: a progress view for ANOTHER workspace stays
+// dropped. Routing by workspace is what makes the leak impossible, and it is
+// the guarantee the session-id match used to provide before the identity it
+// matched on left the message.
+func TestScopeFrameDropsAProgressViewForAnotherWorkspace(t *testing.T) {
 	// Arrange
 	sc := Scope{SessionID: "s_f564d136dad4f25c", Workspace: "/w1"}
 	frame := ProgressViewFrame(&frontendv1.ProgressView{
-		SessionId: "f59e9d4b-a7c1-4b5f-baec-981de8aa872c", Workspace: "/w1", InputTokens: 46000,
+		Fence: "s_f564d136dad4f25c", Workspace: "/w2", InputTokens: 46000,
 	})
 	// Act
 	_, keep := scopeFrame(frame, sc)
 	// Assert
 	if keep {
-		t.Fatal("a progress view stamped with the vendor conversation uuid must still be dropped")
+		t.Fatal("a progress view for another workspace must be dropped")
 	}
 }
 
@@ -326,8 +369,8 @@ func TestFilterSnapshotKeepsOnlyTheScopedProgressView(t *testing.T) {
 	// Arrange
 	sc := Scope{SessionID: "s1", Workspace: "/w1"}
 	snap := &frontendv1.StateSnapshot{Progress: []*frontendv1.ProgressView{
-		{Workspace: "/w1", SessionId: "s1"},
-		{Workspace: "/w2", SessionId: "s2"},
+		{Workspace: "/w1", Fence: "s1"},
+		{Workspace: "/w2", Fence: "s2"},
 	}}
 	// Act
 	got := filterSnapshot(snap, sc)
@@ -341,8 +384,8 @@ func TestFilterSnapshotKeepsOnlyTheScopedTaskCatalog(t *testing.T) {
 	// Arrange.
 	sc := Scope{SessionID: "s1", Workspace: "/w1"}
 	snap := &frontendv1.StateSnapshot{Catalogs: []*frontendv1.TaskCatalog{
-		{Workspace: "/w1", SessionId: "s1", Tasks: []*frontendv1.TaskEntry{{TaskId: "mine"}}},
-		{Workspace: "/w2", SessionId: "s2", Tasks: []*frontendv1.TaskEntry{{TaskId: "theirs"}}},
+		{Workspace: "/w1", Fence: "s1", Tasks: []*frontendv1.TaskEntry{{TaskId: "mine"}}},
+		{Workspace: "/w2", Fence: "s2", Tasks: []*frontendv1.TaskEntry{{TaskId: "theirs"}}},
 	}}
 
 	// Act.

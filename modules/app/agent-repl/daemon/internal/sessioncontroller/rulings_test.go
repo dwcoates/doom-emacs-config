@@ -62,8 +62,14 @@ func TestConsumeVendorSystemInitPushesSessionInitView(t *testing.T) {
 		t.Fatalf("expected 1 SessionInitView push, got %d", len(push.inits))
 	}
 	got := push.inits[0]
-	if got.GetWorkspace() != "ws" || got.GetSessionId() != "s1" || got.GetInit().GetModel() != "haiku" {
-		t.Fatalf("SessionInitView = ws=%q session=%q model=%q", got.GetWorkspace(), got.GetSessionId(), got.GetInit().GetModel())
+	// The push is FENCED, not session-stamped: what it carries is the token a
+	// client compares byte-wise against the workspace's current one, which the
+	// consumer mints from its own identities.
+	if got.GetWorkspace() != "ws" || got.GetFence() != c.fence() || got.GetInit().GetModel() != "haiku" {
+		t.Fatalf("SessionInitView = ws=%q fence=%q model=%q", got.GetWorkspace(), got.GetFence(), got.GetInit().GetModel())
+	}
+	if got.GetFence() == "" {
+		t.Fatal("the pushed SessionInitView carries no fence, so a client cannot tell it from a stale one")
 	}
 }
 

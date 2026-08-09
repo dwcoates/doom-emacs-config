@@ -5,7 +5,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { QueryTerminationFailureSchema } from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
+import {
+  QueryTerminationFailureSchema,
+} from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
 import { QueryStartupFailureSchema } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
 import { decodeFrontendFrame } from "../src/frontend-proto.js";
 import {
@@ -61,7 +63,7 @@ function userItem(item: Record<string, unknown>): Record<string, unknown> {
 /** The store items a single conversation item decomposes into. */
 function itemsFrom(item: Record<string, unknown>): ConversationItem[] {
   const effects = applyOne({
-    conversationDelta: { sessionId: "s1", workspace: "ws", throughSeq: "9", items: [userItem(item)] },
+    conversationDelta: { fence: "s1", workspace: "ws", throughSeq: "9", items: [userItem(item)] },
   });
   const conv = effects.find((e) => e.kind === "conversation-items");
   if (conv?.kind !== "conversation-items") throw new Error("no conversation-items effect");
@@ -289,14 +291,14 @@ describe("TypingDelta mapping", () => {
     // one place (streaming.ts). Re-deriving one here is what let the preview's
     // key and the finished record's key drift apart.
     const effects = applyOne({
-      typingDelta: { workspace: "ws", sessionId: "s1", delta: { uuid: "msg-7", blockIndex: 2, thinking: "..." } },
+      typingDelta: { workspace: "ws", fence: "s1", delta: { uuid: "msg-7", blockIndex: 2, thinking: "..." } },
     });
     expect(effects).toEqual([
       {
         kind: "typing",
         value: {
           workspace: "ws",
-          sessionId: "s1",
+          fence: "s1",
           messageId: "msg-7",
           blockIndex: 2,
           kind: "thinking",
@@ -308,15 +310,15 @@ describe("TypingDelta mapping", () => {
 
   it("carries an input delta's stable tool-use identity unchanged", () => {
     const effects = applyOne({
-      typingDelta: { workspace: "ws", sessionId: "s1", delta: { uuid: "msg-7", blockIndex: 2, inputJson: "{", toolUseId: "toolu_1" } },
+      typingDelta: { workspace: "ws", fence: "s1", delta: { uuid: "msg-7", blockIndex: 2, inputJson: "{", toolUseId: "toolu_1" } },
     });
     expect(effects).toEqual([
-      { kind: "typing", value: { workspace: "ws", sessionId: "s1", messageId: "msg-7", blockIndex: 2, kind: "input_json", toolUseId: "toolu_1", delta: "{" } },
+      { kind: "typing", value: { workspace: "ws", fence: "s1", messageId: "msg-7", blockIndex: 2, kind: "input_json", toolUseId: "toolu_1", delta: "{" } },
     ]);
   });
 
   it("ignores a signature content delta (no live preview)", () => {
-    const effects = applyOne({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", signature: "sig" } } });
+    const effects = applyOne({ typingDelta: { fence: "s1", delta: { uuid: "u1", signature: "sig" } } });
     expect(effects).toEqual([{ kind: "ignored", shape: "content-delta:signature" }]);
   });
 });
@@ -328,8 +330,8 @@ describe("TaskCatalog mapping", () => {
     const effects = applyOne({
       taskCatalog: {
         workspace: "ws",
-        sessionId: "s1",
-        tasks: [{ taskId: "t1", kind: "agent", description: "explore", status: "running", startedAtMs: "1000" }],
+        fence: "s1",
+        tasks: [{ taskId: "t1", agent: {}, description: "explore", running: {}, startedAtMs: "1000" }],
       },
     });
     expect(effects).toEqual([
@@ -337,7 +339,7 @@ describe("TaskCatalog mapping", () => {
         kind: "task-catalog",
         value: {
           workspace: "ws",
-          sessionId: "s1",
+          fence: "s1",
           entries: [{ id: "t1", summary: "explore", detail: "agent", status: "running", nested: false }],
         },
       },
@@ -355,7 +357,7 @@ describe("TaskCatalog mapping", () => {
   for (const [proto, counter] of statusCases) {
     it(`maps task status '${proto}' to counter status '${counter}'`, () => {
       const effects = applyOne({
-        taskCatalog: { sessionId: "s1", tasks: [{ taskId: "t1", kind: "shell", status: proto }] },
+        taskCatalog: { fence: "s1", tasks: [{ taskId: "t1", shell: {}, [proto]: {} }] },
       });
       expect(effects[0]).toMatchObject({ kind: "task-catalog", value: { entries: [{ status: counter }] } });
     });
@@ -366,9 +368,9 @@ describe("TaskCatalog mapping", () => {
 
 describe("SessionInit mapping", () => {
   it("produces a session-init effect carrying the SystemInit payload", () => {
-    const effects = applyOne({ sessionInit: { workspace: "ws", sessionId: "s1", init: { model: "claude", cwd: "/w" } } });
+    const effects = applyOne({ sessionInit: { workspace: "ws", fence: "s1", init: { model: "claude", cwd: "/w" } } });
     expect(effects).toEqual([
-      { kind: "session-init", value: { workspace: "ws", sessionId: "s1", init: { model: "claude", cwd: "/w" } } },
+      { kind: "session-init", value: { workspace: "ws", fence: "s1", init: { model: "claude", cwd: "/w" } } },
     ]);
   });
 });
@@ -393,8 +395,8 @@ describe("StateSnapshot mapping", () => {
       snapshot: {
         workspaces: [workspaceState({ workspace: "w", sessionId: "s", state: "RENDER_STATE_IDLE" })],
         sessions: [{ workspace: "w", sessionId: "s", model: "m", modelOptions: [] }],
-        catalogs: [{ workspace: "w", sessionId: "s", tasks: [] }],
-        inits: [{ workspace: "w", sessionId: "s", init: { model: "m" } }],
+        catalogs: [{ workspace: "w", fence: "s", tasks: [] }],
+        inits: [{ workspace: "w", fence: "s", init: { model: "m" } }],
       },
     });
     expect(effects.map((e) => e.kind)).toEqual(["workspace-state", "session-view", "task-catalog", "session-init"]);
@@ -404,11 +406,11 @@ describe("StateSnapshot mapping", () => {
 // --- ConversationItem arms → the store's bubble/card vocabulary -------------
 
 describe("ConversationDelta envelope", () => {
-  it("carries workspace / session / throughSeq through", () => {
+  it("carries workspace / fence / throughSeq through", () => {
     const effects = applyOne({
-      conversationDelta: { sessionId: "s1", workspace: "ws", throughSeq: "42", items: [] },
+      conversationDelta: { fence: "s1", workspace: "ws", throughSeq: "42", items: [] },
     });
-    expect(effects[0]).toMatchObject({ kind: "conversation-items", workspace: "ws", sessionId: "s1", throughSeq: 42 });
+    expect(effects[0]).toMatchObject({ kind: "conversation-items", workspace: "ws", fence: "s1", throughSeq: 42 });
   });
 });
 
@@ -505,6 +507,58 @@ describe("assistantMessage arm", () => {
       assistantMessage: { id: "msg_01ABC", content: [{ thinking: { thinking: "hmm" } }] },
     });
     expect((items[0] as ThinkingItem).uuid).toBe("env1:0");
+  });
+
+  it("takes the standalone reasoning item's messageId from the stated origin", () => {
+    // Arrange / Act: the emission states the message it was stripped from.
+    const items = itemsFrom({
+      uuid: "env1#thinking:0",
+      agent: { thinking: { body: { thinking: "hmm" }, apiMessageId: "msg_01ABC", blockIndex: 1 } },
+    });
+    // Assert
+    expect((items[0] as ThinkingItem).messageId).toBe("msg_01ABC");
+  });
+
+  it("names the reasoning item's preview from the stated origin", () => {
+    // Arrange / Act
+    const items = itemsFrom({
+      uuid: "env1#thinking:0",
+      agent: { thinking: { body: { thinking: "hmm" }, apiMessageId: "msg_01ABC", blockIndex: 1 } },
+    });
+    // Assert: previews are keyed messageId:blockIndex, which is that pair.
+    expect((items[0] as ThinkingItem).previewBlockId).toBe("msg_01ABC:1");
+  });
+
+  it("keeps the reasoning item's record identity on its own envelope", () => {
+    // The stated origin names the PREVIEW; it must not become the record's own
+    // identity, or two blocks of one message would collide on it.
+    // Arrange / Act
+    const items = itemsFrom({
+      uuid: "env1#thinking:0",
+      agent: { thinking: { body: { thinking: "hmm" }, apiMessageId: "msg_01ABC", blockIndex: 1 } },
+    });
+    // Assert
+    expect((items[0] as ThinkingItem).uuid).toBe("env1#thinking:0:1");
+  });
+
+  it("names no preview for a reasoning item that states no origin", () => {
+    // Arrange / Act: the shape the emission had before it carried an origin.
+    const items = itemsFrom({
+      uuid: "env1#thinking:0",
+      agent: { thinking: { body: { thinking: "hmm" } } },
+    });
+    // Assert: it stands on its own rather than claiming a preview by resemblance.
+    expect((items[0] as ThinkingItem).previewBlockId).toBeUndefined();
+  });
+
+  it("falls back to the envelope uuid as messageId when no origin is stated", () => {
+    // Arrange / Act
+    const items = itemsFrom({
+      uuid: "env1#thinking:0",
+      agent: { thinking: { body: { thinking: "hmm" } } },
+    });
+    // Assert
+    expect((items[0] as ThinkingItem).messageId).toBe("env1#thinking:0");
   });
 
   it("derives the block ts from the envelope tsMs", () => {
@@ -848,13 +902,12 @@ describe("systemFailure arm", () => {
         errorClass: "ERROR_CLASS_INTERNAL",
         errorType: "unexpected_query_termination",
         message: "query ended",
-        queryTermination: { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} },
+        queryTermination: { queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} },
       },
     });
     const detail = (items[0] as SystemFailureCard).detail;
     expect(detail.kind).toBe("queryTermination");
     if (detail.kind !== "queryTermination") throw new Error("wrong detail");
-    expect(detail.value.agentReplSessionId).toBe("session-1");
     expect(detail.value.queryInstanceId).toBe("query-1");
     expect(detail.value.vendorIdentity).toEqual({ case: "vendorSessionId", value: "claude-1" });
     expect(detail.value.observedAtMs).toBe(1700000000000n);
@@ -869,9 +922,9 @@ describe("systemFailure arm", () => {
       sourceDetail: "iterator stopped",
       resolvedAtMs: 0,
       itemUuid: "failure:termination",
-      detail: { kind: "queryTermination", value: create(QueryTerminationFailureSchema, { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) },
+      detail: { kind: "queryTermination", value: create(QueryTerminationFailureSchema, { queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) },
     });
-    expect(card.detail).toEqual({ kind: "queryTermination", value: create(QueryTerminationFailureSchema, { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) });
+    expect(card.detail).toEqual({ kind: "queryTermination", value: create(QueryTerminationFailureSchema, { queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) });
   });
 
   it("carries the resolution stamp that settles a window", () => {
@@ -963,7 +1016,7 @@ function deltaOf(
   const adapter = new StateAdapter(log);
   return adapter.apply(
     frame({
-      conversationDelta: { sessionId: "s1", workspace: "/ws", throughSeq: "9", items: [item] },
+      conversationDelta: { fence: "s1", workspace: "/ws", throughSeq: "9", items: [item] },
     }),
   );
 }
@@ -1039,13 +1092,14 @@ describe("conversation provenance gate", () => {
     expect(logs.find((m) => m.includes("UNSPECIFIED source"))).toContain("uuid=m1");
   });
 
-  it("names the session in that error, so the record is correlatable", () => {
-    // Arrange
+  it("names the carrying push fence in that error, so the record is correlatable", () => {
+    // Arrange — the push is fenced since the figma-idl reshape; the fence is
+    // what identifies which push the dropped item came from.
     const logs: string[] = [];
     // Act
     deltaOf(PROSE, (_lvl, msg) => logs.push(msg));
     // Assert
-    expect(logs.find((m) => m.includes("UNSPECIFIED source"))).toContain("session=s1");
+    expect(logs.find((m) => m.includes("UNSPECIFIED source"))).toContain("fence=s1");
   });
 
   it("DROPS the UNSPECIFIED item rather than defaulting it to a user turn", () => {
@@ -1071,7 +1125,7 @@ describe("conversation provenance gate", () => {
     const effects = new StateAdapter().apply(
       frame({
         conversationDelta: {
-          sessionId: "s1",
+          fence: "s1",
           workspace: "/ws",
           throughSeq: "9",
           items: [
@@ -1185,7 +1239,7 @@ describe("explicit-ignore path", () => {
     adapter.apply(
       frame({
         conversationDelta: {
-          sessionId: "s1",
+          fence: "s1",
           items: [userItem({ uuid: "m1", toolUseResult: { rawString: "x" } })],
         },
       }),
@@ -1207,13 +1261,13 @@ describe("explicit-ignore path", () => {
     const effects = adapter.apply(
       frame({
         conversationDelta: {
-          sessionId: "s1",
+          fence: "s1",
           items: [userItem({ uuid: "m1", toolUseResult: { rawString: "x" } })],
         },
       }),
     );
     expect(effects).toEqual([
-      { kind: "conversation-items", workspace: "", sessionId: "s1", throughSeq: 0, items: [] },
+      { kind: "conversation-items", workspace: "", fence: "s1", throughSeq: 0, items: [] },
       { kind: "ignored", shape: "conversation-item:toolUseResult" },
     ]);
     expect(adapter.ignoredCounts().get("conversation-item:toolUseResult")).toBe(1);
@@ -1225,7 +1279,7 @@ describe("explicit-ignore path", () => {
     const mk = () =>
       frame({
         conversationDelta: {
-          sessionId: "s1",
+          fence: "s1",
           items: [
             userItem({
               uuid: "m1",
@@ -1251,7 +1305,7 @@ describe("heartbeat -> tool-progress (E4)", () => {
     const effects = applyOne({
       heartbeat: {
         workspace: "ws",
-        sessionId: "s1",
+        fence: "s1",
         progress: { toolUseId: "tu1", toolName: "Bash", elapsedSeconds: 12.5 },
       },
     });
@@ -1262,7 +1316,7 @@ describe("heartbeat -> tool-progress (E4)", () => {
         kind: "tool-progress",
         value: {
           workspace: "ws",
-          sessionId: "s1",
+          fence: "s1",
           toolUseId: "tu1",
           toolName: "Bash",
           parentToolUseId: "",
@@ -1279,7 +1333,7 @@ describe("heartbeat -> tool-progress (E4)", () => {
     // Act
     adapter.apply(
       frame({
-        heartbeat: { sessionId: "s1", progress: { toolUseId: "tu1", elapsedSeconds: 1 } },
+        heartbeat: { fence: "s1", progress: { toolUseId: "tu1", elapsedSeconds: 1 } },
       }),
     );
 
@@ -1294,8 +1348,8 @@ describe("queue -> queue effect (E4)", () => {
     const effects = applyOne({
       queue: {
         workspace: "ws",
-        sessionId: "s1",
-        entries: [{ id: "q1", text: "later", classification: "QUEUE_CLASSIFICATION_HOLD" }],
+        fence: "s1",
+        entries: [{ id: "q1", text: "later", holdForTurnEnd: {} }],
       },
     });
 
@@ -1305,7 +1359,7 @@ describe("queue -> queue effect (E4)", () => {
         kind: "queue",
         value: {
           workspace: "ws",
-          sessionId: "s1",
+          fence: "s1",
           entries: [
             {
               id: "q1",
@@ -1323,11 +1377,11 @@ describe("queue -> queue effect (E4)", () => {
 
   it("passes an empty queue through as an empty entries list", () => {
     // Arrange / Act — the store needs this to CLEAR its chips.
-    const effects = applyOne({ queue: { workspace: "ws", sessionId: "s1" } });
+    const effects = applyOne({ queue: { workspace: "ws", fence: "s1" } });
     // Assert
     expect(effects[0]).toEqual({
       kind: "queue",
-      value: { workspace: "ws", sessionId: "s1", entries: [] },
+      value: { workspace: "ws", fence: "s1", entries: [] },
     });
   });
 
@@ -1342,8 +1396,8 @@ describe("queue -> queue effect (E4)", () => {
         queues: [
           {
             workspace: "ws",
-            sessionId: "s1",
-            entries: [{ id: "q1", text: "later", classification: "QUEUE_CLASSIFICATION_HOLD" }],
+            fence: "s1",
+            entries: [{ id: "q1", text: "later", holdForTurnEnd: {} }],
           },
         ],
       },
@@ -1356,7 +1410,7 @@ describe("queue -> queue effect (E4)", () => {
     // Arrange
     const adapter = new StateAdapter();
     // Act
-    adapter.apply(frame({ queue: { sessionId: "s1", entries: [] } }));
+    adapter.apply(frame({ queue: { fence: "s1", entries: [] } }));
     // Assert
     expect(adapter.ignoredCounts().get("queue")).toBeUndefined();
   });
@@ -1365,7 +1419,7 @@ describe("queue -> queue effect (E4)", () => {
 describe("progress (F1): the consolidated footer's whole input", () => {
   /** The minimum a ProgressView frame must carry to decode. */
   function progressFrame(over: Record<string, unknown> = {}): Record<string, unknown> {
-    return { progress: { workspace: "ws", sessionId: "s1", state: "RENDER_STATE_INIT", ...over } };
+    return { progress: { workspace: "ws", fence: "s1", state: "RENDER_STATE_INIT", ...over } };
   }
 
   /** The single progress effect a frame produced. */
@@ -1556,7 +1610,7 @@ describe("progress (F1): the consolidated footer's whole input", () => {
         catalogs: [],
         inits: [],
         queues: [],
-        progress: [{ workspace: "ws", sessionId: "s1", state: "RENDER_STATE_INIT" }],
+        progress: [{ workspace: "ws", fence: "s1", state: "RENDER_STATE_INIT" }],
       },
     });
     // Assert
@@ -1576,7 +1630,7 @@ describe("progress (F1): the consolidated footer's whole input", () => {
 describe("userTurnReceipt (ingest-time arrival receipt)", () => {
   /** A conversation-items effect carrying ITEMS at THROUGHSEQ. */
   function delta(throughSeq: number, items: ConversationItem[]): AdapterEffect {
-    return { kind: "conversation-items", workspace: "ws", sessionId: "s1", throughSeq, items };
+    return { kind: "conversation-items", workspace: "ws", fence: "s1", throughSeq, items };
   }
 
   function turn(requestId: string, text: string): UserTurnItem {

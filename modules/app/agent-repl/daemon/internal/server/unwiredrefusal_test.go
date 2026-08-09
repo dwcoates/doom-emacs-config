@@ -11,6 +11,7 @@ import (
 
 	"claude-repld/internal/errclass"
 	frontend "claude-repld/internal/frontend"
+	"claude-repld/internal/ssm"
 )
 
 // ---------------------------------------------------------------------------
@@ -124,10 +125,10 @@ func TestStaleResyncCommandAckIsClassifiedSuperseded(t *testing.T) {
 	h := newResyncHandler(t, supersededResyncer{}, &logged)
 	ack := frontend.Dispatch(context.Background(), func(string, ...any) {}, h, nil, &frontendv1.FrontendCommand{
 		RequestId: "r-stale", Workspace: "/w",
-		Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{SessionId: "retired", ControllerGenerationId: "old"}},
+		Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{Fence: ssm.Fence("retired", "old")}},
 	})
-	if ack.GetFailure().GetErrorType() != string(errclass.TypeSessionReconnectSuperseded) {
-		t.Fatalf("failure type = %q, want %q", ack.GetFailure().GetErrorType(), errclass.TypeSessionReconnectSuperseded)
+	if errclass.KindName(ack.GetFailure()) != string(errclass.TypeSessionReconnectSuperseded) {
+		t.Fatalf("failure type = %q, want %q", errclass.KindName(ack.GetFailure()), errclass.TypeSessionReconnectSuperseded)
 	}
 }
 

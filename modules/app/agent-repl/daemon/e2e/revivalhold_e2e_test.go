@@ -10,8 +10,13 @@
 // nothing true to draw: it would run the classifier bubble on an entry no
 // classifier ever touched, or render "waiting on a keep-alive response" for a
 // wait that has nothing to do with a ping. So the projection is its own
-// contract — QueueEntry.revival_hold, naming the session whose revival holds
-// the entry — and it is asserted here on the wire, separately from the gate.
+// contract — QueueEntry's `revival` hold arm — and it is asserted here on the
+// wire, separately from the gate.
+//
+// The arm names no session. It used to, and the id is now reserved: a revival is
+// a WORKSPACE-level event and the entry rides its workspace's QueueView, so the
+// attribution lives on the queue rather than inside the arm. The arm's presence
+// is the whole fact it carries.
 package e2e
 
 import (
@@ -29,6 +34,10 @@ type revivalHold struct {
 	entry   *frontendv1.QueueEntry
 	// text is the held prompt's own text, so a test can recognize its reply.
 	text string
+	// workspace is the QueueView the entry was actually found on. It is the
+	// join the retired session id used to carry: a revival is a workspace-level
+	// event, so the queue the entry rides IS its attribution.
+	workspace string
 }
 
 // heldByPendingCompaction drives the whole setup: a hibernated session is
@@ -53,11 +62,14 @@ func heldByPendingCompaction(t *testing.T, s *keepAliveSession, text string) rev
 		`{"requestId":"r-held","submitPrompt":{"text":%q,"promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, text))
 
 	var entry *frontendv1.QueueEntry
+	var workspace string
 	awaitAll(t, s.conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a QueueEntry for the prompt typed during the revival": func(frame *frontendv1.FrontendFrame) bool {
-			for _, e := range queueViewFor(frame, s.cwd).GetEntries() {
+			view := queueViewFor(frame, s.cwd)
+			for _, e := range view.GetEntries() {
 				if strings.Contains(e.GetText(), text) {
 					entry = e
+					workspace = view.GetWorkspace()
 					return true
 				}
 			}
@@ -72,28 +84,48 @@ func heldByPendingCompaction(t *testing.T, s *keepAliveSession, text string) rev
 			return false
 		},
 	})
-	return revivalHold{session: s, entry: entry, text: text}
+	return revivalHold{session: s, entry: entry, text: text, workspace: workspace}
 }
 
 // --- the hold ----------------------------------------------------------------
 
-// TestE2EAPromptHeldByARevivalNamesTheSessionBeingRevived covers the JOIN: the
-// hold carries the id of the session whose revival is holding the entry, so the
-// bubble the webapp renders ("waiting on the revival's compaction") is joined to
-// the revival whose completed compaction releases it rather than being an
-// unattributable "please wait".
-func TestE2EAPromptHeldByARevivalNamesTheSessionBeingRevived(t *testing.T) {
+// TestE2EAPromptHeldByARevivalCarriesTheRevivalHold covers the DISTINGUISHER:
+// the entry selects the `revival` arm of its hold oneof, which is the whole
+// fact the arm carries. That presence is what tells the webapp to draw "waiting
+// on the revival's compaction" instead of the classifier bubble no classifier
+// ever ran.
+//
+// The arm's PRESENCE is the assertion because the contract deliberately left it
+// with nothing else to state; see the workspace test below for where the
+// attribution went.
+func TestE2EAPromptHeldByARevivalCarriesTheRevivalHold(t *testing.T) {
 	// Arrange + Act
 	s := newKeepAliveSession(t, testKeepAlivePolicy())
 	held := heldByPendingCompaction(t, s, "held-by-the-revival")
 
 	// Assert
-	hold := held.entry.GetRevivalHold()
-	if hold == nil {
+	if hold := held.entry.GetRevival(); hold == nil {
 		t.Fatalf("the entry for a prompt typed during a pending compact-first revival carries no revival_hold: the webapp has nothing to draw but the classifier bubble, and no classifier ran on it")
 	}
-	if got := hold.GetSessionId(); got != s.sessionID {
-		t.Errorf("revival_hold session_id = %q, want the session being revived %q", got, s.sessionID)
+}
+
+// TestE2EAPromptHeldByARevivalRidesItsOwnWorkspacesQueue covers the JOIN, which
+// is now the QUEUE the entry rides rather than an id the hold carries.
+//
+// QueueEntryRevivalHold used to name the session being revived. That field is
+// reserved: a revival is a WORKSPACE-level event and the entry already rides its
+// workspace's QueueView, so the id joined the bubble to nothing a client could
+// not already reach. The guarantee the old assertion existed for — a held prompt
+// is attributable, never an unattributable "please wait" — is unchanged, so it
+// is asserted here against the surface that actually carries it.
+func TestE2EAPromptHeldByARevivalRidesItsOwnWorkspacesQueue(t *testing.T) {
+	// Arrange + Act
+	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	held := heldByPendingCompaction(t, s, "held-on-its-own-queue")
+
+	// Assert
+	if held.workspace != s.cwd {
+		t.Errorf("the revival-held entry rode the QueueView for workspace %q, want %q: the queue is what attributes the hold now that the arm names no session", held.workspace, s.cwd)
 	}
 }
 
@@ -109,7 +141,7 @@ func TestE2EAPromptHeldByARevivalIsNotHeldByAKeepAlivePing(t *testing.T) {
 	held := heldByPendingCompaction(t, s, "held-and-not-by-a-ping")
 
 	// Assert
-	if hold := held.entry.GetKeepAliveHold(); hold != nil {
+	if hold := held.entry.GetKeepAlive(); hold != nil {
 		t.Errorf("the revival-held entry carries keep_alive_hold (turn %q): nothing pinged this session, and the revival's compaction is what holds the entry", hold.GetTurnId())
 	}
 }
@@ -145,7 +177,7 @@ func TestE2EALandedCompactionReleasesTheRevivalHold(t *testing.T) {
 			}
 			for _, e := range view.GetEntries() {
 				if e.GetId() == held.entry.GetId() {
-					return e.GetRevivalHold() == nil
+					return e.GetRevival() == nil
 				}
 			}
 			return true

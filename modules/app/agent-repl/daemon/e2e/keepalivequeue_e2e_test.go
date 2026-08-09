@@ -55,7 +55,7 @@ func heldByKeepAlivePing(t *testing.T, s *keepAliveSession, text string) keepAli
 	awaitAll(t, s.conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a QueueEntry bearing keep_alive_hold": func(frame *frontendv1.FrontendFrame) bool {
 			for _, e := range queueViewFor(frame, s.cwd).GetEntries() {
-				if e.GetKeepAliveHold() != nil {
+				if e.GetKeepAlive() != nil {
 					entry = e
 					return true
 				}
@@ -81,7 +81,7 @@ func TestE2EAPromptHeldByAPingNamesTheTurnHoldingIt(t *testing.T) {
 	held := heldByKeepAlivePing(t, s, "held-by-the-ping")
 
 	// Assert
-	if got := held.entry.GetKeepAliveHold().GetTurnId(); got != held.pingTurnID {
+	if got := held.entry.GetKeepAlive().GetTurnId(); got != held.pingTurnID {
 		t.Errorf("keep_alive_hold turn_id = %q, want the in-flight ping's turn %q", got, held.pingTurnID)
 	}
 }
@@ -97,13 +97,10 @@ func TestE2EAPromptHeldByAPingIsNeverClassified(t *testing.T) {
 	held := heldByKeepAlivePing(t, s, "held-and-unclassified")
 
 	// Assert
-	switch got := held.entry.GetClassification(); got {
-	case frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING,
-		frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT,
-		frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR:
-		t.Errorf("the keep-alive-held entry's classification is %s: that state is only reachable by running the classifier, which never runs on such an entry", got)
+	if arm := held.entry.GetClassification(); held.entry.GetPending() != nil || held.entry.GetInterject() != nil || held.entry.GetError() != nil {
+		t.Errorf("the keep-alive-held entry's classification is %T: that state is only reachable by running the classifier, which never runs on such an entry", arm)
 	}
-	if got := held.entry.GetRationale(); got != "" {
+	if got := held.entry.GetHoldForTurnEnd().GetRationale(); got != "" {
 		t.Errorf("the keep-alive-held entry carries a classifier rationale %q: nothing classified it", got)
 	}
 }

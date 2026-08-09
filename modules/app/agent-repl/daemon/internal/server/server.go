@@ -1484,9 +1484,8 @@ func SessionViewFromRecordWithModelsAndUsage(logf dlog.Logf, reg *registry.Regis
 		// webapp-initiated, daemon-executed, and reflected in pushed state.
 		ConfigDir: rec.ConfigDir,
 		// The never-blue backfill signal (F2), mapped off the durable record.
-		Backfill:         backfillState(rec.BackfillState),
-		ModelOptions:     modelOptions,
-		TokenUtilization: usage,
+		Backfill:     backfillState(rec.BackfillState),
+		ModelOptions: modelOptions,
 		// THE HIBERNATION PAIR, from the durable record and from nowhere else.
 		// `hibernated` is the compatibility projection of `hibernation`, so
 		// both are shaped from the SAME field here rather than one being a live

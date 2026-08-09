@@ -21,13 +21,15 @@ import { ModelUsage, TokenTimingTotals, Usage } from "./protocol.js";
 import type { ResponseTokenUsage, TokenUtilization } from "./frontend-proto.js";
 import { create, toJson } from "@bufbuild/protobuf";
 import {
-  TokenUsageSchema,
   TokenUtilizationSchema,
   type SessionTokenUtilization,
   type TokenUsageTotals,
-  type TokenUsage as CanonicalTokenUsage,
   type TokenUtilization as GeneratedTokenUtilization,
-} from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
+} from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
+import {
+  TokenUsageSchema,
+  type TokenUsage as CanonicalTokenUsage,
+} from "../../proto/gen/ts/agentshim/frontend/v1/tokens_pb";
 
 /** Everything the dropdown knows how to break down. */
 export interface TokenMenuData {

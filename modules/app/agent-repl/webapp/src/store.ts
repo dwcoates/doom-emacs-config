@@ -143,6 +143,16 @@ export interface ThinkingItem extends FeedOrderedItem {
   text: string;
   done: boolean;
   signature?: string;
+  /**
+   * The feed place this block's own live preview occupies, as the producer of
+   * the record STATED it — not as this end guessed it.
+   *
+   * `AgentThinking` names the message the block was stripped from and the index
+   * it held there, which is exactly the pair a preview is keyed on, so a settled
+   * reasoning block can claim its preview by name instead of by resemblance.
+   * See {@link previewIndexFor}.
+   */
+  previewBlockId?: string;
 }
 export interface ToolItem extends FeedOrderedItem {
   kind: "tool";
@@ -1003,12 +1013,13 @@ export class ConversationStore {
       ) {
         const reveal = effect.value;
         this.failIngestInvariant(
-          `input_json delta missing stable tool identity workspace=${reveal.workspace} session=${reveal.sessionId} ` +
+          `input_json delta missing stable tool identity workspace=${reveal.workspace} ` +
+            `session=${this.state.sessionId || "none"} fence=${reveal.fence} ` +
             `message=${reveal.messageId} block_index=${reveal.blockIndex} chunk_length=${reveal.delta.length}`,
           {
             operation: "conversation-store.tool-input",
             workspace: reveal.workspace,
-            agent_repl_session_id: reveal.sessionId,
+            agent_repl_session_id: this.state.sessionId,
             ...(this.state.claudeSessionId === "" ? {} : { claude_session_id: this.state.claudeSessionId }),
             api_message_id: reveal.messageId,
             block_index: reveal.blockIndex,
@@ -1144,7 +1155,7 @@ export class ConversationStore {
     if (previousInterrupt !== nextInterrupt) {
       this.log(
         "info",
-        `progress interrupt adopted workspace=${p.workspace} session=${p.sessionId} ` +
+        `progress interrupt adopted workspace=${p.workspace} fence=${p.fence} ` +
           `outcome=${previousInterrupt ?? "none"}->${nextInterrupt ?? "none"} ` +
           `since_ms=${p.interrupt?.sinceMs ?? 0} turn_started_at_ms=${p.turnStartedAtMs}`,
       );
@@ -1465,7 +1476,7 @@ export class ConversationStore {
     const outcomeContext: ClientLogContext = {
       operation: "conversation-store.tool-input",
       workspace: reveal.workspace,
-      agent_repl_session_id: reveal.sessionId,
+      agent_repl_session_id: this.state.sessionId,
       ...(this.state.claudeSessionId === "" ? {} : { claude_session_id: this.state.claudeSessionId }),
       api_message_id: reveal.messageId,
       block_index: reveal.blockIndex,

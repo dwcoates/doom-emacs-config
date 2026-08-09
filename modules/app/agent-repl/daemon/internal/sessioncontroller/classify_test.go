@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
-
 	"claude-repld/internal/prompts"
 )
 
@@ -17,7 +15,7 @@ func TestExtractVerdictReadsJump(t *testing.T) {
 	// Arrange / Act
 	got, err := ExtractVerdict(tokenJump)
 	// Assert
-	if err != nil || got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT {
+	if err != nil || got != VerdictInterject {
 		t.Fatalf("got %v, %v; want INTERJECT", got, err)
 	}
 }
@@ -26,7 +24,7 @@ func TestExtractVerdictReadsHold(t *testing.T) {
 	// Arrange / Act
 	got, err := ExtractVerdict(tokenHold)
 	// Assert
-	if err != nil || got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD {
+	if err != nil || got != VerdictHold {
 		t.Fatalf("got %v, %v; want HOLD", got, err)
 	}
 }
@@ -35,7 +33,7 @@ func TestExtractVerdictToleratesSurroundingWhitespace(t *testing.T) {
 	// Arrange / Act — a trailing newline is the normal shape of CLI output.
 	got, err := ExtractVerdict("\n  " + tokenHold + "  \n")
 	// Assert
-	if err != nil || got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD {
+	if err != nil || got != VerdictHold {
 		t.Fatalf("got %v, %v; want HOLD", got, err)
 	}
 }
@@ -57,7 +55,7 @@ func TestExtractVerdictRejectsBothTokens(t *testing.T) {
 	if err == nil {
 		t.Fatal("both tokens must be an error")
 	}
-	if got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR {
+	if got != VerdictError {
 		t.Fatalf("classification = %v, want ERROR", got)
 	}
 }
@@ -80,7 +78,7 @@ func TestExtractVerdictRejectsQuotedBackBothTokens(t *testing.T) {
 	if err == nil {
 		t.Fatal("a quoted-back answer menu must be an error, not a verdict")
 	}
-	if got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR {
+	if got != VerdictError {
 		t.Fatalf("classification = %v, want ERROR", got)
 	}
 }
@@ -105,7 +103,7 @@ func TestExtractVerdictIgnoresATokenEmbeddedInProse(t *testing.T) {
 			if err == nil {
 				t.Fatalf("a token embedded in prose must not be a verdict, got %v", got)
 			}
-			if got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR {
+			if got != VerdictError {
 				t.Fatalf("classification = %v, want ERROR", got)
 			}
 		})
@@ -126,7 +124,7 @@ func TestExtractVerdictReportsTheErrorClassification(t *testing.T) {
 	// caller that ignores the error still cannot mistake it for a verdict.
 	got, _ := ExtractVerdict("nonsense")
 	// Assert
-	if got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR {
+	if got != VerdictError {
 		t.Fatalf("got %v, want ERROR", got)
 	}
 }
@@ -351,7 +349,7 @@ func TestCLIClassifierReturnsTheVerdict(t *testing.T) {
 	// Act
 	got, err := c.Classify(context.Background(), ClassifyRequest{QueuedPrompt: "stop"})
 	// Assert
-	if err != nil || got.Classification != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT {
+	if err != nil || got.Classification != VerdictInterject {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 }
