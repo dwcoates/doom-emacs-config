@@ -4,11 +4,19 @@
 // is what the frontend contract carries. The two tables below are each other's
 // inverse, and the round-trip test in errclass_test.go is what keeps them so.
 //
-// A kind arm's own typed fields are left at their zero values here. Everything
-// the classifier holds about a failure rides `FailureCardView.detail`
-// verbatim, exactly as it rode `source_detail` before; resolving the typed
-// fields is per-kind work that belongs with the call sites that hold the facts,
-// not with the vocabulary bridge.
+// A kind arm's own typed fields are left at their zero values HERE, and filled
+// in facts.go by the occurrence's own evidence. The split is the point: this
+// file answers "which failure is this", which is a question about the TYPE, and
+// the arm's fields answer "what happened this time", which only the
+// construction site that observed it can answer. populate never chooses an arm
+// and never sets a second one — it fills the one this table already picked — so
+// the exactly-one property is structural on both sides of the seam.
+//
+// Everything the classifier holds about a failure ALSO rides
+// `FailureCardView.detail` verbatim, exactly as it rode `source_detail` before.
+// The typed fields are what a renderer can act on; the detail is what a human
+// reads when they turn out not to have been enough, and it is never dropped for
+// being redundant with them.
 
 package errclass
 
