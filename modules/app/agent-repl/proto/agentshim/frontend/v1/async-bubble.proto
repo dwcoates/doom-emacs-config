@@ -67,6 +67,12 @@ message AsyncBubble {
     AsyncShellBubble shell = 12;
     AsyncUnclassifiedBubble unclassified = 13;
   }
+  // The workspace this bubble's work runs under — the same key every
+  // workspace-scoped frame carries. It exists so a snapshot can scope
+  // bubbles to the client's workspace exactly as it scopes every other
+  // per-workspace family; deltas already carry the key on their envelope
+  // (AsyncBubbleDelta.workspace), and the two are always equal.
+  string workspace = 7;
 }
 
 // A detached agent: a whole conversation happening elsewhere.
