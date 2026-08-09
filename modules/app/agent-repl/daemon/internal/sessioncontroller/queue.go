@@ -760,6 +760,13 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs in
 		// leaves no instant in which a fresh prompt is admitted, starts a real
 		// turn, and is then SIGTERMed and truncated out by the rewind that was
 		// already on its way.
+		// THE DEBT IS RECORDED IN THE SAME ACQUISITION THAT CLEARS THE CLAIM.
+		// The ping's turns are now standing in the vendor transcript, and they
+		// stay there until something rewinds them out — which, when nothing was
+		// waiting on this ping, is some LATER path's job. Recording it here is
+		// what makes that job exist at all; without it, the pings simply became
+		// permanent context (keepaliveresidue.go).
+		m.noteKeepAliveResidueLocked(d.workspace, pingTurn)
 		rewinding := len(heldIDs) > 0
 		if rewinding {
 			m.claimKeepAliveRewindLocked(d.workspace, pingTurn)
@@ -789,9 +796,13 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs in
 			go m.releaseKeepAliveHolds(d, pingTurn, heldIDs)
 			return
 		}
-		// Nothing was waiting on the ping, so nothing is owed a rewind right
-		// now: the pings stay in the transcript until a real prompt needs them
-		// gone, which is exactly when the rewind runs.
+		// Nothing was waiting on the ping, so no rewind runs HERE: there is no
+		// prompt to deliver behind it, and bouncing the shim for nobody would
+		// pay a bring-up to tidy a transcript nothing is about to read. The
+		// turns stay in the transcript and the debt recorded above says so; the
+		// next user-facing submission or session resume settles it BEFORE
+		// putting anything on top of them (keepaliveresidue.go). This is the
+		// case that used to leave the pings as permanent model context.
 		return
 	}
 

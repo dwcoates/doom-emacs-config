@@ -82,7 +82,7 @@ func TestASupersededTurnsReplayLeavesTheColourAndTheQueueWithOneAnswer(t *testin
 	rig, current := newSupersedeRig(t)
 	const turnID = "workspace-create:workspace_commands:0"
 	if err := rig.m.MarkPromptAccepted(rig.workspace, "s_original", "req-create",
-		func(*frontendv1.WorkspaceState) {}); err != nil {
+		PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}); err != nil {
 		t.Fatalf("MarkPromptAccepted: %v", err)
 	}
 	if _, err := rig.m.ApplyTurnBoundary(rig.workspace, "s_original", "", rig.turnStarted(3, turnID)); err != nil {

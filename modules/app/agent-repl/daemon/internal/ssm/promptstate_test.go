@@ -14,7 +14,7 @@ func TestMarkPromptAcceptedIsIdempotentWhenTurnStartedWonTheRace(t *testing.T) {
 		t.Fatalf("turn started: %v", err)
 	}
 
-	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}); err != nil {
 		t.Fatalf("MarkPromptAccepted: %v", err)
 	}
 
@@ -33,7 +33,7 @@ func TestMarkPromptAcceptedRejectsAnotherSessionsTurn(t *testing.T) {
 		t.Fatalf("turn started: %v", err)
 	}
 
-	err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {})
+	err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {})
 
 	if err == nil || !strings.Contains(err.Error(), `session "s2" owns the active turn`) {
 		t.Fatalf("err = %v, want active-owner rejection", err)
@@ -57,7 +57,7 @@ func TestMarkPromptAcceptedLandsOnSubmitting(t *testing.T) {
 	}
 
 	var published *frontendv1.WorkspaceState
-	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(state *frontendv1.WorkspaceState) {
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(state *frontendv1.WorkspaceState) {
 		published = state
 	}); err != nil {
 		t.Fatalf("MarkPromptAccepted: %v", err)
@@ -80,7 +80,7 @@ func TestMarkPromptAcceptedLandsOnSubmitting(t *testing.T) {
 
 func TestMarkPromptDeliveredAdvancesSubmittingToThinking(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}); err != nil {
 		t.Fatalf("MarkPromptAccepted: %v", err)
 	}
 
@@ -108,7 +108,7 @@ func TestMarkPromptDeliveredKeepsTheTurnActiveAcrossTheEdge(t *testing.T) {
 	// A turn that reported inactive between the ack and the durable TurnStarted
 	// would let a second prompt bypass the queue mid-turn.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}); err != nil {
 		t.Fatalf("MarkPromptAccepted: %v", err)
 	}
 	if _, err := m.MarkPromptDelivered("ws1", "s1", "req-1"); err != nil {
@@ -129,7 +129,7 @@ func TestSubmittingAloneClaimsTheTurn(t *testing.T) {
 	// The claim must cover the FIRST half too, or a second prompt submitted
 	// during it would be forwarded straight into a turn that is already starting.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}); err != nil {
 		t.Fatalf("MarkPromptAccepted: %v", err)
 	}
 
@@ -195,7 +195,7 @@ func TestMarkPromptRejectedRetractsItsOwnAcceptedRow(t *testing.T) {
 	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
-	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}); err != nil {
 		t.Fatalf("MarkPromptAccepted: %v", err)
 	}
 
@@ -229,7 +229,7 @@ func TestMarkPromptRejectedPreservesADurableTurnStarted(t *testing.T) {
 	// A real turn began in the window between the accept and the submit
 	// failure. Closing it would report an idle workspace over a working session.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}); err != nil {
 		t.Fatalf("MarkPromptAccepted: %v", err)
 	}
 	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
@@ -350,7 +350,7 @@ func TestReconcileAlreadyCompleteClosesThinkingBeforeFooterWindow(t *testing.T) 
 
 func TestReconcileAlreadyCompleteClosesSubmittingBeforeFooterWindow(t *testing.T) {
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}); err != nil {
 		t.Fatalf("MarkPromptAccepted: %v", err)
 	}
 
@@ -444,9 +444,9 @@ func TestPromptStateMethodsRejectMissingIdentity(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"prompt workspace", func() error { return m.MarkPromptAccepted("", "s1", "r", func(*frontendv1.WorkspaceState) {}) }},
-		{"prompt session", func() error { return m.MarkPromptAccepted("ws1", "", "r", func(*frontendv1.WorkspaceState) {}) }},
-		{"prompt publisher", func() error { return m.MarkPromptAccepted("ws1", "s1", "r", nil) }},
+		{"prompt workspace", func() error { return m.MarkPromptAccepted("", "s1", "r", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}) }},
+		{"prompt session", func() error { return m.MarkPromptAccepted("ws1", "", "r", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}) }},
+		{"prompt publisher", func() error { return m.MarkPromptAccepted("ws1", "s1", "r", PromptAdmissionUser, nil) }},
 		{"retraction workspace", func() error {
 			_, err := m.MarkPromptRejected("", "s1", "r", func(*frontendv1.WorkspaceState) {})
 			return err
@@ -496,7 +496,7 @@ func TestMarkPromptAcceptedRetractsItsRowWhenThePublishInvariantFails(t *testing
 		t.Fatalf("ApplyMergeTransition(merge_conflict): %v", err)
 	}
 
-	err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {})
+	err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {})
 
 	if err == nil {
 		t.Fatal("err = nil, want the publish invariant to refuse a conflicted workspace")
@@ -521,14 +521,14 @@ func TestMarkPromptAcceptedAfterAFailedAcceptIsNotIdempotent(t *testing.T) {
 	if err := m.ApplyMergeTransition("ws1", sigMergeConflict, "test arrangement"); err != nil {
 		t.Fatalf("ApplyMergeTransition(merge_conflict): %v", err)
 	}
-	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err == nil {
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}); err == nil {
 		t.Fatal("arranging accept err = nil, want the conflicted workspace to refuse it")
 	}
 	if err := m.ApplyMergeTransition("ws1", sigMergeNone, "conflict resolved"); err != nil {
 		t.Fatalf("ApplyMergeTransition(merge_none): %v", err)
 	}
 
-	err := m.MarkPromptAccepted("ws1", "s1", "req-2", func(*frontendv1.WorkspaceState) {})
+	err := m.MarkPromptAccepted("ws1", "s1", "req-2", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {})
 
 	if err != nil {
 		t.Fatalf("MarkPromptAccepted: %v", err)
@@ -548,7 +548,7 @@ func TestMarkPromptAcceptedSucceedsOnAMergeFailedWorkspace(t *testing.T) {
 	}
 
 	var published *frontendv1.WorkspaceState
-	err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(state *frontendv1.WorkspaceState) {
+	err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(state *frontendv1.WorkspaceState) {
 		published = state
 	})
 
@@ -570,7 +570,7 @@ func TestMarkPromptAcceptedRefusesAMergeConflictWorkspace(t *testing.T) {
 		t.Fatalf("ApplyMergeTransition(merge_conflict): %v", err)
 	}
 
-	err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {})
+	err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {})
 
 	if err == nil || !strings.Contains(err.Error(), "state=RENDER_STATE_MERGE_CONFLICT") {
 		t.Fatalf("err = %v, want the conflicted workspace to refuse the submitting premise", err)
@@ -624,7 +624,7 @@ func TestMarkPromptAcceptedSucceedsWhileTheBringUpEdgeIsStillConnecting(t *testi
 	}
 
 	var published *frontendv1.WorkspaceState
-	err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(state *frontendv1.WorkspaceState) {
+	err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(state *frontendv1.WorkspaceState) {
 		published = state
 	})
 

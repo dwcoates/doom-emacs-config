@@ -75,6 +75,30 @@ func (s submitter) String() string {
 	}
 }
 
+// admission maps a submitter onto the SSM's accepted-edge admission class.
+//
+// THE TWO IDLE-MACHINERY SUBMITTERS ARE THE KEEP-ALIVE PING AND THE WARM
+// COMPACTION, and they are exactly the two whose whole purpose is to keep a
+// prompt cache alive on a session nobody is using. A workspace resting in
+// `merge_queued` is such a session — it is waiting for a merge lock nothing has
+// taken yet — and refusing them there let its cache expire, hibernated it on the
+// cache-cold arm, and made the conflict resolution that eventually ran pay a
+// full uncached re-ingest.
+//
+// EVERY OTHER SUBMITTER IS A USER, INCLUDING THE MERGE LEASE HOLDER AND THE
+// REVIVAL. The merge holder takes no accepted edge at all (promptdispatch.go), a
+// revival's `/compact` runs against a workspace the user is actively reviving,
+// and both would be claiming an exemption whose premise — an idle, unowned
+// session — is not theirs to claim.
+func (s submitter) admission() ssm.PromptAdmission {
+	switch s {
+	case submitterKeepAlive, submitterWarmCompaction:
+		return ssm.PromptAdmissionIdleMachinery
+	default:
+		return ssm.PromptAdmissionUser
+	}
+}
+
 // guardMergeLease decides whether who may submit to workspace right now.
 //
 // IT IS CHECKED TWICE ON PURPOSE, at the top of submitPrompt and again in
