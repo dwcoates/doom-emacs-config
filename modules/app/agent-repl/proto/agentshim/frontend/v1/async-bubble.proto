@@ -56,16 +56,19 @@ message AsyncBubble {
   // A newly opened bubble carries an empty body; a bubble arriving in a
   // reconnect snapshot carries everything the daemon has folded to date.
   //
-  // A skill invocation is deliberately absent: it is a synchronous card
-  // (AgentEmission.skill_body), never detached work. Should skills ever
-  // detach, they arrive as a new arm here. Nothing is pre-declared for that,
-  // because a speculative arm is a shape no producer has to honour and no
-  // consumer can test against.
+  // Skill invocations are synchronous cards (AgentEmission.skill_body), not
+  // detached work — with one exception, `merge`: the daemon intercepts the
+  // merge skill's invocation and opens it as a bubble, because what follows is
+  // a whole conversation rather than a card. Should any other skill detach, it
+  // arrives as its own new arm here. Nothing is pre-declared for that, because
+  // a speculative arm is a shape no producer has to honour and no consumer can
+  // test against.
   oneof kind {
     AsyncAgentBubble agent = 10;
     AsyncWorkflowJournal journal = 11;
     AsyncShellBubble shell = 12;
     AsyncUnclassifiedBubble unclassified = 13;
+    AsyncMergeBubble merge = 14;
   }
   // The workspace this bubble's work runs under — the same key every
   // workspace-scoped frame carries. It exists so a snapshot can scope
@@ -80,6 +83,25 @@ message AsyncAgentBubble {
   // The agent's conversation so far, in emission order, in EXACTLY the
   // vocabulary the top-level feed uses. A frontend's renderer for a response
   // bubble, a thinking block or a tool card is the same code in both places.
+  repeated AgentEmission emissions = 1;
+  // Tail-cap accounting for `emissions`. See AsyncFold.
+  AsyncFold fold = 2;
+}
+
+// A merge run: the conversation a merge drives through this workspace's own
+// session, folded exactly like a detached agent's.
+//
+// DAEMON-AUTHORED. No tool spawns it: the daemon opens it when it classifies
+// the Skill invocation `/create-or-update-workspace merge`, and every
+// subsequent emission of the session folds here as a child until the user's
+// own next prompt or an interrupt settles it. Membership is TEMPORAL — the
+// window between that classification and the user taking the session back —
+// not a join key.
+message AsyncMergeBubble {
+  // The merge conversation so far, in emission order, in EXACTLY the
+  // vocabulary the top-level feed uses (the same shape as
+  // AsyncAgentBubble.emissions, deliberately: a frontend's renderer for a
+  // response bubble, a thinking block or a tool card is the same code here).
   repeated AgentEmission emissions = 1;
   // Tail-cap accounting for `emissions`. See AsyncFold.
   AsyncFold fold = 2;

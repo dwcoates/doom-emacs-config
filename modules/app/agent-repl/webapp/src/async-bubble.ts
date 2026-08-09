@@ -44,6 +44,7 @@ import {
   AsyncLiveSchema,
   AsyncLivenessSchema,
   AsyncLivenessUpdateSchema,
+  AsyncMergeBubbleSchema,
   AsyncOutcomeDoneSchema,
   AsyncOutcomeErrorSchema,
   AsyncOutcomeKilledSchema,
@@ -176,6 +177,20 @@ export interface AsyncShellBubble {
   output: AsyncOutputSpool;
 }
 
+/**
+ * A merge run: the conversation a merge drives through this workspace's own
+ * session, folded exactly like a detached agent's.
+ *
+ * DAEMON-AUTHORED — no tool spawns it. It carries the SAME shape as
+ * {@link AsyncAgentBubble} deliberately, so a frontend's renderer for a
+ * response bubble, a thinking block or a tool card is the same code here.
+ */
+export interface AsyncMergeBubble {
+  /** The merge conversation so far, in the top-level feed's vocabulary. */
+  emissions: UnwrappedEmission[];
+  fold: AsyncFold;
+}
+
 /** A spawn whose tool the daemon does not recognize — an ARM, not a fallback. */
 export interface AsyncUnclassifiedBubble {
   /** The tool that spawned the work, verbatim as the agent named it. */
@@ -188,7 +203,8 @@ export type AsyncBubbleKind =
   | { case: "agent"; value: AsyncAgentBubble }
   | { case: "journal"; value: AsyncWorkflowJournal }
   | { case: "shell"; value: AsyncShellBubble }
-  | { case: "unclassified"; value: AsyncUnclassifiedBubble };
+  | { case: "unclassified"; value: AsyncUnclassifiedBubble }
+  | { case: "merge"; value: AsyncMergeBubble };
 
 /** The kind discriminators a bubble may carry. */
 export type AsyncBubbleKindCase = AsyncBubbleKind["case"];
@@ -305,11 +321,12 @@ export const UPDATE_ARM_KIND: Readonly<Record<Exclude<AsyncBubbleUpdateCase, "li
  * a field the daemon had started sending. `workspace` is spelled here now that
  * the generated stub actually has it, which is what invariant I5 requires.
  */
-const BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncBubbleSchema.field>()("id", "workspace", "originToolUseId", "parentBubbleId", "label", "startedAtMs", "liveness", "agent", "journal", "shell", "unclassified");
+const BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncBubbleSchema.field>()("id", "workspace", "originToolUseId", "parentBubbleId", "label", "startedAtMs", "liveness", "agent", "journal", "shell", "unclassified", "merge");
 const AGENT_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncAgentBubbleSchema.field>()("emissions", "fold");
 const JOURNAL_KEYS = generatedFieldSet<keyof typeof AsyncWorkflowJournalSchema.field>()("rows", "fold");
 const SHELL_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncShellBubbleSchema.field>()("command", "output");
 const UNCLASSIFIED_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncUnclassifiedBubbleSchema.field>()("toolName", "output");
+const MERGE_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncMergeBubbleSchema.field>()("emissions", "fold");
 const SPOOL_KEYS = generatedFieldSet<keyof typeof AsyncOutputSpoolSchema.field>()("text", "throughOffset");
 const JOURNAL_ROW_KEYS = generatedFieldSet<keyof typeof AsyncWorkflowJournalRowSchema.field>()("label", "detail", "running", "done", "failed");
 const LIVENESS_KEYS = generatedFieldSet<keyof typeof AsyncLivenessSchema.field>()("live", "settled");
@@ -349,7 +366,7 @@ const JOURNAL_STATUS_KEYS: Readonly<Record<AsyncWorkflowJournalRow["status"], Re
 };
 
 /** The bubble `kind` arm keys, typed against the generated oneof. */
-const BUBBLE_KIND_ARMS = ["agent", "journal", "shell", "unclassified"] as const satisfies readonly ArmKeys<GeneratedAsyncBubble["kind"]>[];
+const BUBBLE_KIND_ARMS = ["agent", "journal", "shell", "unclassified", "merge"] as const satisfies readonly ArmKeys<GeneratedAsyncBubble["kind"]>[];
 /** The update arm keys, typed against the generated oneof. */
 const UPDATE_ARMS = ["agent", "journal", "shell", "unclassified", "liveness"] as const satisfies readonly ArmKeys<GeneratedAsyncBubbleUpdate["update"]>[];
 /** The liveness state arms, typed against the generated oneof. */
@@ -499,6 +516,19 @@ function decodeBubbleKind(o: Obj, ctx: string): AsyncBubbleKind {
         value: {
           command: str(s, "command", `${ctx}.shell`),
           output: decodeSpool(s.output, `${ctx}.shell.output`),
+        },
+      };
+    }
+    case "merge": {
+      // The SAME shape as `agent`, decoded by the same rules: a merge run is a
+      // conversation, and its emissions are the feed's own vocabulary.
+      const m = ensureObject(o.merge, `${ctx}.merge`);
+      rejectUnknown(m, MERGE_BUBBLE_KEYS, `${ctx}.merge`);
+      return {
+        case: "merge",
+        value: {
+          emissions: decodeEmissions(m.emissions, `${ctx}.merge.emissions`),
+          fold: decodeFold(m.fold, `${ctx}.merge.fold`),
         },
       };
     }
