@@ -867,6 +867,14 @@ func vendorTokenUsageFromAPI(u *datav1.ApiUsage) *frontendv1.VendorTokenUsage {
 	usage := &frontendv1.VendorTokenUsage{InputTokens: u.GetInputTokens(), OutputTokens: u.GetOutputTokens(), CacheReadInputTokens: u.GetCacheReadInputTokens(), CacheCreationInputTokens: u.GetCacheCreationInputTokens(), ServiceTier: u.GetServiceTier(), Speed: u.GetSpeed(), InferenceGeo: u.GetInferenceGeo(), RawUsage: proto.Clone(u).(*datav1.ApiUsage), CacheCreation: &frontendv1.TokenCacheCreation{Ephemeral_5MInputTokens: structInt(u.GetCacheCreation(), "ephemeral_5m_input_tokens"), Ephemeral_1HInputTokens: structInt(u.GetCacheCreation(), "ephemeral_1h_input_tokens")}, ServerToolUse: &frontendv1.TokenServerToolUse{WebSearchRequests: structInt(u.GetServerToolUse(), "web_search_requests"), WebFetchRequests: structInt(u.GetServerToolUse(), "web_fetch_requests")}}
 	usage.CacheRates = frontend.CacheRatesFromCounters(u.GetInputTokens(), u.GetCacheReadInputTokens(), u.GetCacheCreationInputTokens())
 	usage.Iterations = tokenIterations(u.GetIterations())
+	if u.GetCacheCreation() == nil {
+		// The vendor did not report the TTL breakdown at this level at all —
+		// see cacheCreationFromIterations. A breakdown that IS reported is
+		// taken verbatim above, zeros included.
+		if recovered := cacheCreationFromIterations(usage.GetIterations(), u.GetCacheCreationInputTokens()); recovered != nil {
+			usage.CacheCreation = recovered
+		}
+	}
 	thinkingTokens := structInt(u.GetOutputTokensDetails(), "thinking_tokens")
 	if u.GetOutputTokensDetails().GetFields()["thinking_tokens"] == nil {
 		thinkingTokens = structInt(u.GetOutputTokensDetails(), "reasoning_tokens")
@@ -906,13 +914,7 @@ func collectUnmodeledUsage(u *datav1.ApiUsage) *structpb.Struct {
 	copyUnknown("output_tokens_details", u.GetOutputTokensDetails(), "thinking_tokens", "reasoning_tokens")
 	copyUnknown("cache_diagnostic", u.GetCacheDiagnostic(), "cache_miss_reason", "cache_missed_input_tokens")
 	for index, value := range u.GetIterations().GetValues() {
-		s := value.GetStructValue()
-		if s == nil {
-			out.Fields[fmt.Sprintf("iterations.%d", index)] = proto.Clone(value).(*structpb.Value)
-			continue
-		}
-		kind := s.GetFields()["type"].GetStringValue()
-		if kind != "" && kind != "sampling" && kind != "compaction" && kind != "advisor" && kind != "fallback" {
+		if vendorIterationKind(value) == iterationUnmodeled {
 			out.Fields[fmt.Sprintf("iterations.%d", index)] = proto.Clone(value).(*structpb.Value)
 		}
 	}
@@ -957,32 +959,141 @@ func structInt(s *structpb.Struct, key string) int64 {
 	return int64(s.GetFields()[key].GetNumberValue())
 }
 
+// iterationKind is the schema arm one vendor usage iteration belongs in, or
+// iterationUnmodeled when the vendor named a kind this build cannot file.
+type iterationKind int
+
+const (
+	iterationUnmodeled iterationKind = iota
+	iterationSampling
+	iterationCompaction
+	iterationAdvisor
+	iterationFallback
+)
+
+// vendorIterationKind reads the vendor's own discriminator off one entry of
+// `usage.iterations`.
+//
+// THE DISCRIMINATOR VALUES ARE THE VENDOR'S, NOT THE SCHEMA'S ARM NAMES. The
+// SDK's iteration union (`@anthropic-ai/sdk`
+// `resources/beta/messages/messages.d.ts`, BetaIterationsUsage) is
+// BetaMessageIterationUsage `message`, BetaCompactionIterationUsage
+// `compaction`, BetaAdvisorMessageIterationUsage `advisor_message`, and
+// BetaFallbackMessageIterationUsage `fallback_message`. Matching on the arm
+// names instead — `sampling`, `advisor`, `fallback` — meant every real
+// iteration fell through to unmodeled: on one measured live turn all 113
+// responses carried a `message` iteration, each dropped from the record, each
+// filed as an unmodeled `iterations.0`, and the turn condemned for it.
+//
+// ONE FUNCTION ANSWERS FOR BOTH READERS — the mapper that files an iteration
+// and the detector that flags an unmodeled one — so the modeled set cannot
+// drift between them.
+//
+// An entry with no `type` at all is an ordinary sampling hop: absence is the
+// unlabeled default, not an unknown kind.
+func vendorIterationKind(value *structpb.Value) iterationKind {
+	s := value.GetStructValue()
+	if s == nil {
+		return iterationUnmodeled
+	}
+	switch s.GetFields()["type"].GetStringValue() {
+	case "", "message":
+		return iterationSampling
+	case "compaction":
+		return iterationCompaction
+	case "advisor_message":
+		return iterationAdvisor
+	case "fallback_message":
+		return iterationFallback
+	default:
+		return iterationUnmodeled
+	}
+}
+
 func tokenIterations(values *structpb.ListValue) []*frontendv1.TokenUsageIteration {
 	if values == nil {
 		return nil
 	}
 	out := make([]*frontendv1.TokenUsageIteration, 0, len(values.GetValues()))
 	for _, value := range values.GetValues() {
+		kind := vendorIterationKind(value)
+		if kind == iterationUnmodeled {
+			continue
+		}
 		s := value.GetStructValue()
-		if s == nil {
-			continue
-		}
-		base := func() (int64, int64, int64, int64, *frontendv1.TokenCacheCreation) {
-			return structInt(s, "input_tokens"), structInt(s, "output_tokens"), structInt(s, "cache_read_input_tokens"), structInt(s, "cache_creation_input_tokens"), &frontendv1.TokenCacheCreation{Ephemeral_5MInputTokens: structInt(s.GetFields()["cache_creation"].GetStructValue(), "ephemeral_5m_input_tokens"), Ephemeral_1HInputTokens: structInt(s.GetFields()["cache_creation"].GetStructValue(), "ephemeral_1h_input_tokens")}
-		}
-		i, o, r, c, creation := base()
-		switch s.GetFields()["type"].GetStringValue() {
-		case "compaction":
+		i, o := structInt(s, "input_tokens"), structInt(s, "output_tokens")
+		r, c := structInt(s, "cache_read_input_tokens"), structInt(s, "cache_creation_input_tokens")
+		creation := &frontendv1.TokenCacheCreation{Ephemeral_5MInputTokens: structInt(s.GetFields()["cache_creation"].GetStructValue(), "ephemeral_5m_input_tokens"), Ephemeral_1HInputTokens: structInt(s.GetFields()["cache_creation"].GetStructValue(), "ephemeral_1h_input_tokens")}
+		model := s.GetFields()["model"].GetStringValue()
+		switch kind {
+		case iterationCompaction:
 			out = append(out, &frontendv1.TokenUsageIteration{Iteration: &frontendv1.TokenUsageIteration_Compaction{Compaction: &frontendv1.TokenUsageIterationCompaction{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation}}})
-		case "advisor":
-			out = append(out, &frontendv1.TokenUsageIteration{Iteration: &frontendv1.TokenUsageIteration_Advisor{Advisor: &frontendv1.TokenUsageIterationAdvisor{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation, Model: s.GetFields()["model"].GetStringValue()}}})
-		case "fallback":
-			out = append(out, &frontendv1.TokenUsageIteration{Iteration: &frontendv1.TokenUsageIteration_Fallback{Fallback: &frontendv1.TokenUsageIterationFallback{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation, Model: s.GetFields()["model"].GetStringValue()}}})
-		case "", "sampling":
-			out = append(out, &frontendv1.TokenUsageIteration{Iteration: &frontendv1.TokenUsageIteration_Sampling{Sampling: &frontendv1.TokenUsageIterationSampling{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation, Model: s.GetFields()["model"].GetStringValue()}}})
+		case iterationAdvisor:
+			out = append(out, &frontendv1.TokenUsageIteration{Iteration: &frontendv1.TokenUsageIteration_Advisor{Advisor: &frontendv1.TokenUsageIterationAdvisor{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation, Model: model}}})
+		case iterationFallback:
+			out = append(out, &frontendv1.TokenUsageIteration{Iteration: &frontendv1.TokenUsageIteration_Fallback{Fallback: &frontendv1.TokenUsageIterationFallback{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation, Model: model}}})
 		default:
-			continue
+			out = append(out, &frontendv1.TokenUsageIteration{Iteration: &frontendv1.TokenUsageIteration_Sampling{Sampling: &frontendv1.TokenUsageIterationSampling{InputTokens: i, OutputTokens: o, CacheReadInputTokens: r, CacheCreationInputTokens: c, CacheCreation: creation, Model: model}}})
 		}
+	}
+	return out
+}
+
+// iterationCacheCreation reads one filed iteration's TTL split, whichever arm
+// it took.
+func iterationCacheCreation(iteration *frontendv1.TokenUsageIteration) *frontendv1.TokenCacheCreation {
+	switch {
+	case iteration.GetSampling() != nil:
+		return iteration.GetSampling().GetCacheCreation()
+	case iteration.GetCompaction() != nil:
+		return iteration.GetCompaction().GetCacheCreation()
+	case iteration.GetAdvisor() != nil:
+		return iteration.GetAdvisor().GetCacheCreation()
+	case iteration.GetFallback() != nil:
+		return iteration.GetFallback().GetCacheCreation()
+	default:
+		return nil
+	}
+}
+
+// cacheCreationFromIterations recovers a response's cache-creation TTL split
+// from its own iterations, for the one case where the vendor's usage object
+// carries no `cache_creation` member at all.
+//
+// WHY THE SPLIT GOES MISSING. A response's FINAL usage is the one relayed on
+// `message_delta`, and the vendor's delta usage shape has no `cache_creation`
+// member to relay: `@anthropic-ai/sdk` BetaMessageDeltaUsage carries
+// `cache_creation_input_tokens` but not the per-TTL breakdown, while BetaUsage
+// on the assistant message carries both. Replacing the message_start snapshot
+// with the authoritative delta therefore erased the breakdown, and every
+// session running the 1h cache TTL settled invalid at
+// `cache_creation.ephemeral_1h_input_tokens` — 0 on the response plane against
+// 193,050 on the result plane, on one measured 113-response turn.
+//
+// WHY THE ITERATIONS ARE THE RIGHT SOURCE. The same delta carries the same
+// response's `iterations`, and each entry states its own TTL split. Across all
+// 181 usage-bearing responses in that session's transcript, every response
+// carried exactly one `message` iteration whose counters were IDENTICAL to the
+// response's own, and the iteration aggregate equalled the response aggregate
+// in every dimension.
+//
+// NO MULTI-HOP AGGREGATION IS ASSUMED. The recovered split is accepted only
+// when the two TTL buckets summed over the iterations equal the response's own
+// `cache_creation_input_tokens`, a total already held independently. Anything
+// else returns nothing, so the ledger keeps reporting its disagreement rather
+// than being reconciled against a relation this evidence does not demonstrate.
+func cacheCreationFromIterations(iterations []*frontendv1.TokenUsageIteration, cacheCreationInputTokens int64) *frontendv1.TokenCacheCreation {
+	if len(iterations) == 0 {
+		return nil
+	}
+	out := &frontendv1.TokenCacheCreation{}
+	for _, iteration := range iterations {
+		creation := iterationCacheCreation(iteration)
+		out.Ephemeral_5MInputTokens += creation.GetEphemeral_5MInputTokens()
+		out.Ephemeral_1HInputTokens += creation.GetEphemeral_1HInputTokens()
+	}
+	if out.GetEphemeral_5MInputTokens()+out.GetEphemeral_1HInputTokens() != cacheCreationInputTokens {
+		return nil
 	}
 	return out
 }
