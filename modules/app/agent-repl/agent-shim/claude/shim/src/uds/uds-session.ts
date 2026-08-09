@@ -734,9 +734,34 @@ export class UdsSession {
       // wired to it exactly as the first one was.
       onDaemonConnected: (hello) => void this.completeWiring(hello),
       onDaemonDisconnected: () => {
-        // Reattach (§4.4): the turn keeps running and nothing is torn down.
-        // Pending permission waits are NOT cancelled — a reattaching daemon can
-        // still answer them; cancelAll fires only on interrupt/shutdown.
+        // DESIGN DEPENDENCE — THE SHIM MUST KEEP WORKING WITH NO DAEMON
+        // ATTACHED.
+        //
+        // A closed or lost UDS connection is a routine condition, not a fault:
+        // it is what every daemon restart, deploy and reload looks like from
+        // here. The constraints this session holds across it:
+        //
+        //  - The SDK query keeps running and its turn keeps producing. Nothing
+        //    is torn down and no turn is cancelled by the loss.
+        //  - An IN-FLIGHT INTERRUPT COMPLETES LOCALLY. The control dispatch is
+        //    synchronous (uds/server.ts dispatch -> control.ts
+        //    handleInterrupt), so a stop that reached this process has already
+        //    run against the SDK. Losing the socket may lose the Ack; it may
+        //    never abandon the abort, and the abort's own terminal is written to
+        //    the store like any other.
+        //  - Pending permission waits are NOT cancelled — a reattaching daemon
+        //    can still answer them; cancelAll fires only on interrupt/shutdown.
+        //  - Every persistent event continues to be written to the store,
+        //    whether or not anything is listening on this socket.
+        //
+        // ALL OF IT IS LICENSED BY THE STORE BEING WHAT RESOLVES THE DIVERGENCE
+        // ON REATTACH. The two sides diverge for exactly as long as the
+        // connection is down, and the reconnect does not have to reconstruct
+        // what happened from either side's memory: the daemon replays from its
+        // own cursor and reads the durable record, which is what settles a turn
+        // that finished in the gap and what answers a stop whose Ack was lost.
+        // A shim that instead stopped, cancelled, or buffered on disconnect
+        // would destroy the very evidence that reconciliation reads.
         LOGGER.log({
           agent_repl_session_id: this.deps.sessionId,
           turn_in_flight: this.handshakeTurnIds().length > 0,
@@ -865,6 +890,38 @@ export class UdsSession {
       }
       this.query = this.deps.createQuery(this.input, this.canUseTool);
       // The store round-trip feed: merged, seq-stamped events go to the daemon.
+      //
+      // DESIGN DEPENDENCE — ORDINARY TERMINAL TURN EVENTS ARE DELIVERED BY
+      // DURABLE REPLAY, NOT BY THIS SEND.
+      //
+      // `sendEvent` is fire-and-forget and drops when no daemon is attached
+      // (uds/server.ts). For a PERSISTENT event, including the `TurnEnded` that
+      // closes a turn, that drop loses nothing, and this is the chain it depends
+      // on. Each link is a structural property of code in this file or the
+      // daemon's, not a timing assumption, and a change to any of them breaks
+      // the guarantee:
+      //
+      //  1. The terminal batch is written to the store with an AWAITED receipt
+      //     (`await this.store.write(persistentBatch)` in routeSdkMessage), and
+      //     a write that does not receipt THROWS. A `TurnEnded` therefore never
+      //     reaches this callback without already being durable.
+      //  2. Its turn id stays in `pendingTurnEndIds` — and so in EVERY
+      //     `ShimHello.active_turn_ids` (`handshakeTurnIds`) — until that
+      //     receipt lands. No hello can report idle for a turn whose end is not
+      //     yet in the store.
+      //  3. What arrives here is the store's own merged echo of an
+      //     already-persisted event, so dropping it discards a copy, never the
+      //     record.
+      //  4. The daemon advances `last_seen_seq` ONLY for an event it received
+      //     AND accepted (daemon internal/shimclient/events.go). A dropped
+      //     event's seq therefore stays above the daemon's cursor.
+      //  5. The reattach's `DaemonHello.from_seq` IS that cursor, and
+      //     `completeWiring` opens the standing subscription at it — which
+      //     replays every event dropped here, the terminal one included.
+      //
+      // The flushed path below is NOT durability. It exists for the
+      // unexpected-termination pair's ORDERING latch, which waits on the frame
+      // reaching a handshaked daemon; a durable event needs no such wait.
       this.store.onMerged((evt) => {
         this.observeTaskNotificationQueue(evt);
         this.logUserPromptForward(evt);
