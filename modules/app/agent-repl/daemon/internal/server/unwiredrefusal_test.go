@@ -120,15 +120,33 @@ func (supersededResyncer) ResyncForGeneration(string, string, string, uint64) er
 	return errclass.ErrSessionSuperseded
 }
 
-func TestStaleResyncCommandAckIsClassifiedSuperseded(t *testing.T) {
+// TestStaleResyncCommandAckIsClassifiedNotLive pins the ack a stale-fence
+// resync carries.
+//
+// IT USED TO EXPECT reconnect_superseded, and the expectation changed with the
+// contract rather than with the code: `workspace_not_live` is the arm whose own
+// comment says the staleness IS the whole fact because the fence already told
+// the client it was behind, which is exactly what the eligibility ladder
+// proved. `reconnect_superseded` asserts more than the ladder can — a fence
+// mismatch equally means a NEW controller generation for the same conversation,
+// the ordinary shape after any bring-up. The superseded sentinel is still in
+// the error chain (frontendcmd.classifyStaleFenceResync wraps both), so nothing
+// that reads it lost its evidence.
+func TestStaleResyncCommandAckIsClassifiedNotLive(t *testing.T) {
+	// Arrange.
 	var logged []string
 	h := newResyncHandler(t, supersededResyncer{}, &logged)
+	// Act.
 	ack := frontend.Dispatch(context.Background(), func(string, ...any) {}, h, nil, &frontendv1.FrontendCommand{
 		RequestId: "r-stale", Workspace: "/w",
 		Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{Fence: ssm.Fence("retired", "old")}},
 	})
-	if errclass.KindName(ack.GetFailure()) != string(errclass.TypeSessionReconnectSuperseded) {
-		t.Fatalf("failure type = %q, want %q", errclass.KindName(ack.GetFailure()), errclass.TypeSessionReconnectSuperseded)
+	// Assert.
+	if ack.GetOk() {
+		t.Fatalf("a stale-fence resync acked ok")
+	}
+	if errclass.KindName(ack.GetFailure()) != string(errclass.TypeSessionNotLive) {
+		t.Fatalf("failure type = %q, want %q", errclass.KindName(ack.GetFailure()), errclass.TypeSessionNotLive)
 	}
 }
 

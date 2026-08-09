@@ -5,6 +5,7 @@ import (
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/keepalive"
+	"claude-repld/internal/tokenusage"
 )
 
 // compactioncold.go — THE COMPACTION THAT READ THE CONVERSATION COLD.
@@ -145,5 +146,5 @@ func (m *Manager) noteDaemonCompactionCost(d *sessionController, cost turnResult
 	}
 	detail := fmt.Sprintf("turn_id=%s kind=%s threshold_uncached_input_tokens=%d %s",
 		cost.turnID, kind, keepalive.ColdCompactionUncachedTokens, cost.breakdown())
-	d.consumer.pushFailure(d.consumer.coldCompactionUUID(cost.turnID), errclass.ColdCompaction(detail))
+	d.consumer.pushFailure(d.consumer.coldCompactionUUID(cost.turnID), errclass.ColdCompaction(detail, tokenusage.ExpensiveInput(cost.usage)))
 }

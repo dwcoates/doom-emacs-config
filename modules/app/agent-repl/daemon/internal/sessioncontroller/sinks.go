@@ -232,6 +232,12 @@ type ProgressResolver interface {
 	// action, and opening a window for it would report a stop nobody asked
 	// for.
 	NoteInterrupt(workspace, sessionID string, outcome corev1.InterruptOutcome)
+	// NoteTurnAccounting hands the resolver one SETTLED turn's reconciliation,
+	// from which it resolves the footer's accounting cell. It is fed from the
+	// single settlement path below, which is the only place that holds a
+	// turn's resolved record, so the cell cannot be produced from a
+	// half-settled turn.
+	NoteTurnAccounting(workspace, sessionID string, accounting *frontendv1.TurnAccounting) error
 }
 
 // ClearCompactStore persists the newest CLEAR-OR-COMPACTION seq per
@@ -309,6 +315,9 @@ func (noopProgress) SetCounts(string, int64, int64)                           {}
 func (noopProgress) NoteTurnAccepted(string, string) *frontendv1.ProgressView { return nil }
 func (noopProgress) NoteTurnRejected(string, string)                          {}
 func (noopProgress) NoteInterrupt(string, string, corev1.InterruptOutcome)    {}
+func (noopProgress) NoteTurnAccounting(string, string, *frontendv1.TurnAccounting) error {
+	return nil
+}
 
 // ringCap bounds the per-session retained event ring the daemon keeps for the
 // live TaskCatalog rebuild and for resync replay. It is a bounded window: older
@@ -1220,6 +1229,16 @@ func (c *consumer) serveRetiredTurnAccounting(turnID string) error {
 // publication are one step so two settlements naming the same turn cannot both
 // push its result.
 func (c *consumer) publishHeldTerminalResult(turnID string, accounting *frontendv1.TurnAccounting) {
+	// THE FOOTER'S ACCOUNTING CELL IS RESOLVED FROM THIS RECORD, and it is fed
+	// BEFORE the terminal-result discharge below returns early: a turn whose
+	// held result was already discharged still settled, and its accounting is
+	// still the newest the footer has. A failure to feed it is reported, never
+	// swallowed — a cell left one turn stale is a figure the user reads as
+	// current.
+	if err := c.prog.NoteTurnAccounting(c.workspace, c.sessionID, accounting); err != nil {
+		c.warn("session-controller: turn accounting cell NOT RESOLVED session=%s ws=%s turn_id=%s — the footer keeps the previous turn's cell: %v",
+			c.sessionID, c.workspace, turnID, err)
+	}
 	terminal := c.takeHeldTerminalResult(turnID)
 	if terminal == nil {
 		return
@@ -2323,7 +2342,7 @@ func faultCauseKind(ds *corev1.DegradedState) string {
 // and the matching failure card.
 func (c *consumer) ConnectionDegraded(_ string, reason string) {
 	c.applyRuntimeFault(connectionComponent, faultClassifications[connectionComponent], true, reason)
-	c.pushFailure(c.degradedUUID(connectionComponent), errclass.ConnectionDegraded(reason))
+	c.pushFailure(c.degradedUUID(connectionComponent), errclass.ConnectionDegraded(connectionComponent, reason))
 }
 
 // ConnectionRecovered closes exactly that heartbeat fault window and re-sends
@@ -2334,7 +2353,7 @@ func (c *consumer) ConnectionDegraded(_ string, reason string) {
 // carry neither a reason nor any correlation to what it was recovering from.
 func (c *consumer) ConnectionRecovered(_ string) {
 	c.applyRuntimeFault(connectionComponent, faultClassifications[connectionComponent], false, "heartbeat_resumed")
-	item := errclass.ConnectionDegraded("")
+	item := errclass.ConnectionDegraded(connectionComponent, "")
 	errclass.Resolve(item, c.now())
 	c.pushFailure(c.degradedUUID(connectionComponent), item)
 }
