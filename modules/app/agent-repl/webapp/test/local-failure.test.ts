@@ -1,283 +1,238 @@
 /**
  * local-failure — the webapp's OWN classifier, covering the one category it is
- * allowed to classify (the daemon's unreachability) and the namespace
- * partition that keeps it from classifying anything else. One edge per test.
+ * allowed to classify (its own machinery, the daemon's unreachability chief
+ * among it) and the arm-band partition that keeps it from classifying anything
+ * else. One edge per test.
  */
 import { describe, expect, it } from "vitest";
 import {
-  CLIENT_FAILURE_TYPES,
-  CLIENT_PREFIX,
-  clientFailure,
+  CLIENT_FAILURE_ARMS,
+  bootFailedFailure,
+  clientFailureUuid,
+  commandRejectionUnclassifiedFailure,
+  commandUnsentFailure,
   controlPlaneFailure,
   daemonReachableFailure,
   daemonUnreachableFailure,
   frameUndecodableFailure,
-  isClientType,
-  sessionGoneFailure,
+  isClientArm,
   staleBundleFailure,
+  workspaceGoneFailure,
 } from "../src/local-failure.js";
+import { failureKindName, failureSide } from "../src/failure-card.js";
 
-describe("the namespace partition", () => {
-  it.each(CLIENT_FAILURE_TYPES)("gives %s the reserved client prefix", (type) => {
-    // Arrange / Act — a bare type from this side would mean the frontend
-    // re-classified something the daemon already decided.
+describe("the arm-band partition", () => {
+  it.each(CLIENT_FAILURE_ARMS)("counts %s as an arm this frontend may mint", (arm) => {
+    // Arrange / Act — a daemon arm minted from this side would mean the
+    // frontend re-classified something the daemon already decided.
     // Assert
-    expect(isClientType(type)).toBe(true);
+    expect(isClientArm(arm)).toBe(true);
   });
 
-  it("rejects a daemon type as one of its own", () => {
-    // Arrange / Act — the other direction: a `client.` type on the wire would
-    // mean a frontend's failure was laundered through the daemon.
+  it("rejects a daemon arm as one of its own", () => {
+    // Arrange / Act — the other direction: `errors.proto` splits the vocabulary
+    // by field number, and neither producer may set the other's arms.
     // Assert
-    expect(isClientType("shim.rejected")).toBe(false);
-  });
-
-  it("names the prefix the daemon reserves for it", () => {
-    // Arrange / Act / Assert
-    expect(CLIENT_PREFIX).toBe("client.");
+    expect(isClientArm("shimRejected")).toBe(false);
   });
 });
 
 describe("locally-classified failures", () => {
-  it("are always INTERNAL class", () => {
-    // Arrange / Act — a transport fault implicates nothing about the account,
-    // so an API-class local failure would be this end guessing at something
-    // only the daemon can see.
-    const f = clientFailure("client.daemon_unreachable", "gone");
+  it.each(CLIENT_FAILURE_ARMS)("puts %s on the machinery side", (arm) => {
+    // Arrange — a transport fault implicates nothing about the account, so a
+    // vendor-side local failure would be this end guessing at something only
+    // the daemon can see.
+    const byArm: Record<string, () => { view: { kind: import("../src/frontend-proto.js").FailureKind } }> = {
+      daemonUnreachable: () => daemonUnreachableFailure(1006, ""),
+      workspaceGone: () => workspaceGoneFailure("/ws"),
+      bootFailed: () => bootFailedFailure(new Error("boom")),
+      controlPlaneFailed: () => controlPlaneFailure("the login request", new Error("boom")),
+      frameUndecodable: () => frameUndecodableFailure(new Error("bad"), "{"),
+      staleBundle: () => staleBundleFailure("lease mismatch"),
+      commandUnsent: () => commandUnsentFailure("submitPrompt"),
+      commandRejectionUnclassified: () =>
+        commandRejectionUnclassifiedFailure("hibernateWorkspace", "no"),
+    };
+    // Act
+    const card = byArm[arm]();
     // Assert
-    expect(f.errorClass).toBe("INTERNAL");
+    expect(failureSide(card.view.kind)).toBe("machinery");
   });
 
-  it("derive their uuid from the type, so a repeat reconciles in place", () => {
-    // Arrange / Act — a reconnect loop appending a card per attempt would
-    // bury the feed under its own alarm.
-    const first = clientFailure("client.daemon_unreachable", "gone");
-    const second = clientFailure("client.daemon_unreachable", "gone again");
+  it("derives its uuid from the arm, so a repeat reconciles in place", () => {
+    // Arrange / Act — a reconnect loop appending a card per attempt would bury
+    // the feed under its own alarm.
+    const first = daemonUnreachableFailure(1006, "");
+    const second = daemonUnreachableFailure(1006, "again");
     // Assert
     expect(first.uuid).toBe(second.uuid);
   });
 
-  it("give two DIFFERENT conditions different uuids", () => {
+  it("gives two DIFFERENT conditions different uuids", () => {
     // Arrange / Act
-    const a = clientFailure("client.daemon_unreachable", "x");
-    const b = clientFailure("client.session_gone", "y");
     // Assert
-    expect(a.uuid).not.toBe(b.uuid);
+    expect(daemonUnreachableFailure(1006, "").uuid).not.toBe(staleBundleFailure("x").uuid);
   });
 });
 
-describe("daemonUnreachableFailure", () => {
-  it("reads the close code, which the handler used to discard", () => {
-    // Arrange / Act — the code is the only evidence separating a daemon
-    // restart from a network drop.
-    const f = daemonUnreachableFailure(1006, "");
+describe("the daemon-unreachable window", () => {
+  it("names a clean close as the daemon closing the connection", () => {
+    // Arrange / Act — a 1000 is a shutting-down server, not a network drop, and
+    // reporting both as one thing is what made "reconnecting…" the answer to
+    // every transport fault.
+    const card = daemonUnreachableFailure(1000, "bye");
     // Assert
-    expect(f.sourceDetail).toContain("close=1006");
+    expect(card.view.message).toBe("the daemon closed the connection; reconnecting");
   });
 
-  it("carries the close reason when the server gave one", () => {
+  it("names an abnormal close as a lost connection", () => {
     // Arrange / Act
-    const f = daemonUnreachableFailure(1001, "server shutting down");
+    const card = daemonUnreachableFailure(1006, "");
     // Assert
-    expect(f.sourceDetail).toContain("server shutting down");
+    expect(card.view.message).toBe("lost the connection to the daemon; reconnecting");
   });
 
-  it("says the daemon closed the connection on a clean shutdown code", () => {
+  it("carries the close code as the arm's own typed evidence", () => {
+    // Arrange / Act — the code is the only thing distinguishing the two, so it
+    // rides the arm rather than being flattened into prose alone.
+    const card = daemonUnreachableFailure(1006, "");
+    // Assert
+    expect(card.view.kind.kind).toEqual({
+      case: "daemonUnreachable",
+      value: expect.objectContaining({ closeCode: 1006 }),
+    });
+  });
+
+  it("opens while the link is down", () => {
     // Arrange / Act
-    const f = daemonUnreachableFailure(1001, "");
+    const card = daemonUnreachableFailure(1006, "");
     // Assert
-    expect(f.message).toContain("the daemon closed the connection");
+    expect(card.view.lifecycle).toEqual({ case: "open" });
   });
 
-  it("says the connection was lost on an abnormal close", () => {
-    // Arrange / Act — 1006 is the browser's synthesized "no close frame",
-    // which is a network drop rather than a daemon that said goodbye.
-    const f = daemonUnreachableFailure(1006, "");
+  it("resolves with the stamp when the socket comes back", () => {
+    // Arrange / Act — a retraction, not a card: the store takes the open one
+    // down rather than settling it in place.
+    const card = daemonReachableFailure(1700000000000);
     // Assert
-    expect(f.message).toContain("lost the connection");
+    expect(card.view.lifecycle).toEqual({ case: "resolved", resolvedAtMs: 1700000000000 });
   });
 
-  it("opens the window unresolved", () => {
+  it("retracts onto the SAME uuid the open card holds", () => {
     // Arrange / Act
-    const f = daemonUnreachableFailure(1006, "");
     // Assert
-    expect(f.resolvedAtMs).toBe(0);
+    expect(daemonReachableFailure(1).uuid).toBe(daemonUnreachableFailure(1006, "").uuid);
   });
 });
 
-describe("daemonReachableFailure", () => {
-  it("closes the SAME card the unreachable edge opened", () => {
-    // Arrange / Act — one card that settles, not two that accumulate.
-    const opened = daemonUnreachableFailure(1006, "");
-    const closed = daemonReachableFailure(1700000000000);
+describe("the terminal client failures", () => {
+  it("never offers a workspace-gone card a resolution", () => {
+    // Arrange / Act — unlike a dropped connection, there is nothing to come
+    // back, so an "open" card would invite a wait that never ends.
+    const card = workspaceGoneFailure("/ws");
     // Assert
-    expect(closed.uuid).toBe(opened.uuid);
+    expect(card.view.lifecycle).toEqual({ case: "terminal" });
   });
 
-  it("stamps the resolution", () => {
-    // Arrange / Act
-    const f = daemonReachableFailure(1700000000000);
+  it("never offers a stale-bundle card a resolution", () => {
+    // Arrange / Act — deliberately unresolvable: a self-clearing version would
+    // hide a page that is silently wrong.
+    const card = staleBundleFailure("lease mismatch");
     // Assert
-    expect(f.resolvedAtMs).toBe(1700000000000);
+    expect(card.view.lifecycle).toEqual({ case: "terminal" });
   });
 });
 
-describe("controlPlaneFailure", () => {
-  it("names the action in the user's terms, not the endpoint's", () => {
+describe("the control-plane failure", () => {
+  it("names the action in the user's terms", () => {
     // Arrange / Act — "POST /accounts/switch failed" explains nothing to the
     // person who clicked a menu item.
-    const f = controlPlaneFailure("the account switch", new Error("503"));
+    const card = controlPlaneFailure("the account switch", new Error("boom"));
     // Assert
-    expect(f.message).toBe("the account switch failed");
+    expect(card.view.message).toBe("the account switch failed");
   });
 
-  it("carries a thrown Error's message as the cause", () => {
-    // Arrange / Act — the raw cause is what the transient notice line has no
-    // room for, and it used to reach `clog` and stop there.
-    const f = controlPlaneFailure("the login request", new Error("connection refused"));
+  it("carries the thrown cause as the evidence", () => {
+    // Arrange / Act
+    const card = controlPlaneFailure("the login request", new Error("boom"));
     // Assert
-    expect(f.sourceDetail).toBe("connection refused");
+    expect(card.view.detail).toBe("boom");
   });
 
-  it("stringifies a non-Error throw rather than dropping it", () => {
-    // Arrange / Act — a rejected fetch is not obliged to throw an Error, and
-    // an empty detail would lose the only evidence there is.
-    const f = controlPlaneFailure("the remediation request", "gateway timeout");
-    // Assert
-    expect(f.sourceDetail).toBe("gateway timeout");
-  });
-
-  it("gives two different actions two different cards", () => {
+  it("keys two DIFFERENT actions onto two cards", () => {
     // Arrange / Act — keying every control-plane failure alike would let a
     // failed login overwrite a failed remediation.
-    const login = controlPlaneFailure("the login request", new Error("x"));
-    const account = controlPlaneFailure("the account switch", new Error("x"));
+    const login = controlPlaneFailure("the login request", new Error("a"));
+    const account = controlPlaneFailure("the account switch", new Error("b"));
     // Assert
     expect(login.uuid).not.toBe(account.uuid);
   });
+});
 
-  it("reconciles a retried action onto its own card", () => {
-    // Arrange / Act — pressing the same button twice is one condition.
-    const first = controlPlaneFailure("the account switch", new Error("503"));
-    const second = controlPlaneFailure("the account switch", new Error("504"));
+describe("the undecodable-frame failure", () => {
+  it("leads with the consequence rather than the decoder's complaint", () => {
+    // Arrange / Act — the decoder's words are evidence, not prose.
+    const card = frameUndecodableFailure(new Error("bad json"), "");
     // Assert
-    expect(first.uuid).toBe(second.uuid);
+    expect(card.view.message).toBe(
+      "a message from the daemon could not be read and was skipped",
+    );
   });
 
-  it("classifies in the frontend's own namespace", () => {
-    // Arrange / Act — the daemon never sees these calls fail, so the type
-    // must be one the daemon can never emit.
-    const f = controlPlaneFailure("the login request", new Error("x"));
-    // Assert
-    expect(f.errorType).toBe("client.control_plane_failed");
-  });
-
-  it("opens unresolved, because nothing retries it on the user's behalf", () => {
+  it("puts the frame head beside the cause in the evidence", () => {
     // Arrange / Act
-    const f = controlPlaneFailure("the login request", new Error("x"));
+    const card = frameUndecodableFailure(new Error("bad json"), '{"snap');
     // Assert
-    expect(f.resolvedAtMs).toBe(0);
+    expect(card.view.detail).toBe('bad json — frame head: {"snap');
+  });
+
+  it("carries the frame head on the arm as typed evidence", () => {
+    // Arrange / Act
+    const card = frameUndecodableFailure(new Error("bad json"), '{"snap');
+    // Assert
+    expect(card.view.kind.kind).toEqual({
+      case: "frameUndecodable",
+      value: expect.objectContaining({ frameHead: '{"snap' }),
+    });
   });
 });
 
-describe("frameUndecodableFailure", () => {
-  it("says a message was skipped, without quoting the decoder at the user", () => {
-    // Arrange / Act — the prose is generic on purpose; the decoder's complaint
-    // is evidence, and evidence belongs beside the sentence, not in place of it.
-    const f = frameUndecodableFailure(new Error("unknown oneof arm"), "{}");
+describe("the refusal failures", () => {
+  it("says outright that it could not classify a bare refusal", () => {
+    // Arrange / Act — this end names the refusal rather than picking a kind on
+    // the daemon's behalf.
+    const card = commandRejectionUnclassifiedFailure("hibernateWorkspace", "no lease");
     // Assert
-    expect(f.message).toBe("a message from the daemon could not be read and was skipped");
+    expect(failureKindName(card.view.kind)).toBe("commandRejectionUnclassified");
   });
 
-  it("keeps the decoder's complaint as the raw account", () => {
+  it("leads with the daemon's own words verbatim", () => {
+    // Arrange / Act — it decided the refusal, and its sentence is the closest
+    // thing to an account there is.
+    const card = commandRejectionUnclassifiedFailure("hibernateWorkspace", "no lease");
+    // Assert
+    expect(card.view.message).toBe("no lease");
+  });
+
+  it("falls back to naming the command when the daemon gave no words", () => {
     // Arrange / Act
-    const f = frameUndecodableFailure(new Error("unknown oneof arm"), "{}");
+    const card = commandRejectionUnclassifiedFailure("hibernateWorkspace", "");
     // Assert
-    expect(f.sourceDetail).toContain("unknown oneof arm");
+    expect(card.view.message).toBe("hibernateWorkspace was refused");
   });
 
-  it("keeps the frame head, which is the only thing naming WHICH frame", () => {
+  it("distinguishes a command that never left the page from a refusal", () => {
+    // Arrange / Act — nothing was decided, so the operation can be retried.
+    const card = commandUnsentFailure("submitPrompt");
+    // Assert
+    expect(failureKindName(card.view.kind)).toBe("commandUnsent");
+  });
+
+  it("keys an unsent command by the command, so two stay two cards", () => {
     // Arrange / Act
-    const f = frameUndecodableFailure(new Error("boom"), '{"frame":"snapshot"');
     // Assert
-    expect(f.sourceDetail).toContain('{"frame":"snapshot"');
-  });
-
-  it("reads a non-Error throw rather than discarding it", () => {
-    // Arrange / Act — a decoder that throws a string still has to be quoted.
-    const f = frameUndecodableFailure("plain string", "{}");
-    // Assert
-    expect(f.sourceDetail).toContain("plain string");
-  });
-
-  it("omits the separator when there is no frame head to show", () => {
-    // Arrange / Act — an empty frame yields no bytes worth a dash.
-    const f = frameUndecodableFailure(new Error("boom"), "");
-    // Assert
-    expect(f.sourceDetail).toBe("boom");
-  });
-
-  it("classifies in the frontend's own namespace", () => {
-    // Arrange / Act — the daemon believes the frame it sent is well-formed, so
-    // only the receiver can observe that it could not read it.
-    const f = frameUndecodableFailure(new Error("boom"), "{}");
-    // Assert
-    expect(f.errorType).toBe("client.frame_undecodable");
-  });
-
-  it("reconciles every occurrence onto one card", () => {
-    // Arrange / Act — a daemon emitting a shape this build cannot read emits it
-    // repeatedly, and a card per frame would bury the feed under one fact.
-    const first = frameUndecodableFailure(new Error("a"), "{}");
-    const second = frameUndecodableFailure(new Error("b"), "{}");
-    // Assert
-    expect(first.uuid).toBe(second.uuid);
-  });
-
-  it("opens unresolved, because the skipped state never arrives late", () => {
-    // Arrange / Act
-    const f = frameUndecodableFailure(new Error("boom"), "{}");
-    // Assert
-    expect(f.resolvedAtMs).toBe(0);
-  });
-});
-
-describe("sessionGoneFailure", () => {
-  it("names the session that vanished", () => {
-    // Arrange / Act
-    const f = sessionGoneFailure("s_abc");
-    // Assert
-    expect(f.sourceDetail).toContain("s_abc");
-  });
-
-  it("never resolves, because no amount of waiting brings it back", () => {
-    // Arrange / Act
-    const f = sessionGoneFailure("s_abc");
-    // Assert
-    expect(f.resolvedAtMs).toBe(0);
-  });
-});
-
-describe("staleBundleFailure", () => {
-  it("carries the refusal detail as the raw account", () => {
-    // Arrange / Act
-    const f = staleBundleFailure("reloaded 12s ago and still cannot ingest");
-    // Assert
-    expect(f.sourceDetail).toBe("reloaded 12s ago and still cannot ingest");
-  });
-
-  it("never resolves, because the running bundle cannot repair itself", () => {
-    // Arrange / Act
-    const f = staleBundleFailure("detail");
-    // Assert
-    expect(f.resolvedAtMs).toBe(0);
-  });
-
-  it("reconciles onto one card, so repeated refusals cannot stack", () => {
-    // Arrange / Act
-    const first = staleBundleFailure("a");
-    const second = staleBundleFailure("b");
-    // Assert
-    expect(first.uuid).toBe(second.uuid);
+    expect(commandUnsentFailure("interrupt").uuid).toBe(
+      clientFailureUuid("commandUnsent", "interrupt"),
+    );
   });
 });

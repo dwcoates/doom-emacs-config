@@ -22,7 +22,7 @@
  * That makes the whole plane testable against a mocked WS.
  */
 
-import type { CommandAck, FrontendFrame, SessionView, SystemFailure } from "./frontend-proto.js";
+import type { CommandAck, FailureKind, FrontendFrame, SessionView } from "./frontend-proto.js";
 import {
   encodeFrontendCommand,
   type ClientLogBody,
@@ -31,7 +31,12 @@ import {
   type FrontendCommandBody,
   PromptOrigin,
 } from "./frontend-command.js";
-import type { ClientFailureType } from "./local-failure.js";
+import {
+  clientFailureUuid,
+  commandRejectionUnclassifiedFailure,
+  commandUnsentFailure,
+} from "./local-failure.js";
+import type { FailureCardItem } from "./store.js";
 import { log, logVerbose } from "./wslog.js";
 
 /**
@@ -79,59 +84,55 @@ function asError(value: unknown): Error {
 }
 
 /**
- * Mint the wire-shaped failure the ack sink takes.
+ * What a REFUSED command hands the sink.
  *
- * The sink's parameter is a decoded `SystemFailure` because its usual source
- * IS one (`CommandAck.failure`), so a locally-classified refusal is minted in
- * that shape rather than teaching the sink a second one. `itemUuid` follows
- * `local-failure.ts`'s convention — derived from the type and the command, so
- * a repeated refusal of the same command reconciles onto one card instead of
- * stacking, while two different commands stay two cards.
+ * Two arms and not one, because the daemon answers this question two different
+ * ways and collapsing them is how a refusal ends up stated twice on screen:
  *
- * INTERNAL class always, for the same reason `clientFailure` is: nothing this
- * end can classify implicates the account.
+ * - `reveal` — the daemon already FILED the refusal as a failure card in the
+ *   feed and told us its address (`CommandAck.failure_card`). The right
+ *   affordance is to reveal that card, not to restate the account inline
+ *   beside it.
+ * - `card` — no card was filed, so this end surfaces one. The daemon's own
+ *   `FailureKind` is carried VERBATIM when it sent one; only when it sent none
+ *   does this end classify, and then it says outright that it could not
+ *   classify the refusal rather than picking a kind on the daemon's behalf.
  */
-function localCommandFailure(
-  type: ClientFailureType,
-  command: string,
-  message: string,
-  sourceDetail: string,
-): SystemFailure {
-  return {
-    errorClass: "INTERNAL",
-    errorType: type,
-    message,
-    sourceDetail,
-    resolvedAtMs: 0,
-    itemUuid: `local:${type}:${command}`,
-    detail: { kind: "none" },
-  };
-}
+export type CommandRefusal =
+  | { kind: "reveal"; cardUuid: string; failure: FailureKind }
+  | { kind: "card"; card: FailureCardItem };
 
 /**
- * The daemon refused a command and classified nothing.
+ * The refusal for one nacked ack.
  *
- * Its prose is carried VERBATIM: the daemon decided this refusal, and the only
- * thing this end adds is a name for it, because an unnamed refusal reached the
- * user through nothing at all.
+ * A `failure_card` ref with a NON-EMPTY uuid is a reveal; everything else is a
+ * card. An empty ref is the daemon saying the failure produced no card, which
+ * is exactly why the field is a message wrapping a string rather than a bare
+ * string that would make "" ambiguous with "not sent".
  */
-export function unclassifiedRejectionFailure(command: string, error: string): SystemFailure {
-  return localCommandFailure(
-    "client.command_rejection_unclassified",
-    command,
-    error === "" ? `${command} was refused` : error,
-    `command=${command}`,
-  );
-}
-
-/** The command never left this page: the socket was not open. */
-export function commandUnsentFailure(command: string): SystemFailure {
-  return localCommandFailure(
-    "client.command_unsent",
-    command,
-    `${command} was not sent: the connection to the daemon is down`,
-    `command=${command} cause=socket not open`,
-  );
+export function commandRefusal(command: string, ack: CommandAck): CommandRefusal {
+  const cardUuid = ack.failureCard?.cardUuid ?? "";
+  if (cardUuid !== "" && ack.failure !== undefined) {
+    return { kind: "reveal", cardUuid, failure: ack.failure };
+  }
+  if (ack.failure === undefined) {
+    return { kind: "card", card: commandRejectionUnclassifiedFailure(command, ack.error) };
+  }
+  return {
+    kind: "card",
+    card: {
+      kind: "failure",
+      uuid: clientFailureUuid("commandRejectionUnclassified", command),
+      view: {
+        // The DAEMON'S kind, unexamined. This end adds the sentence the ack did
+        // not carry a card for, and nothing else.
+        kind: ack.failure,
+        message: ack.error === "" ? `${command} was refused` : ack.error,
+        detail: `command=${command}`,
+        lifecycle: { case: "terminal" },
+      },
+    },
+  };
 }
 
 function requiredSelectedModel(ack: CommandAck, disposition: "ack" | "nack"): string {
@@ -221,7 +222,7 @@ export interface DispatchOptions {
    * daemon's classified failure to whoever can show it, so "invisible" stops
    * being an acceptable disposition for a rejected prompt.
    */
-  onFailure?: (failure: SystemFailure) => void;
+  onFailure?: (refusal: CommandRefusal) => void;
   /**
    * Dial the daemon NOW because a user action needs the transport (WsClient's
    * `ensureConnected`). Optional: a dispatcher bound to a socket with a
@@ -501,7 +502,7 @@ export class CommandDispatcher {
     // arrive for. Surfaced through the same sink so a command that never
     // left the page is as visible as one the daemon turned down — log once
     // (above), render once (here).
-    this.opts.onFailure?.(commandUnsentFailure(command));
+    this.opts.onFailure?.({ kind: "card", card: commandUnsentFailure(command) });
     reject(new Error(`${command}: socket not open`));
   }
 
@@ -636,9 +637,7 @@ export class CommandDispatcher {
     // merge lease is held") is the ONLY thing that tells the user why the
     // workspace they asked to sleep is still awake. The daemon's prose is
     // carried verbatim; naming it is all this end adds.
-    this.opts.onFailure?.(
-      ack.failure ?? unclassifiedRejectionFailure(p.command, ack.error),
-    );
+    this.opts.onFailure?.(commandRefusal(p.command, ack));
     // CreateSession has its own two-phase waiter. Its rejection flows through
     // failCreate, which owns the one canonical failure record.
     if (p.command !== "createSession") {
