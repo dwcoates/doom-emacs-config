@@ -63,6 +63,7 @@ import (
 	"claude-repld/internal/shimlisten"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
+	"claude-repld/internal/storehistory"
 	"claude-repld/internal/workspace/geometry"
 	"claude-repld/internal/workspace/merge"
 )
@@ -352,10 +353,37 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
 		TurnAccountings:   turnAccountings,
-		Hibernations:      registrar,
-		VendorSessions:    registrar,
-		KeepAliveWindows:  server.KeepAliveWindowStore{Windows: keepAliveWindows},
-		KeepAlive:         kaCfg,
+		// THE DURABLE ROUTE TO THE CONVERSATION, wired exactly as main.go wires
+		// it and keyed by the vendor uuid the store files the seq space under.
+		//
+		// A bounce world is the one place where a daemon routinely faces a
+		// workspace whose history exists ONLY in the store: the shim outlived
+		// the process that was reading it, and the successor's frontends resync
+		// against a workspace nothing has re-wired yet. Without this the
+		// successor refuses every such resync ("no durable history source is
+		// wired") and the handshake reconciliation has no way to tell a turn
+		// that FINISHED during the gap from one the restart cut — both of which
+		// are production capabilities, not test conveniences, so leaving it
+		// unset made this world a strictly weaker daemon than the shipped one.
+		DurableHistory: &storehistory.Reader{
+			Socket: w.storeSock,
+			Vendor: func(sessionID string) (string, bool) {
+				rec, ok := reg.Get(sessionID)
+				if !ok {
+					return "", false
+				}
+				return rec.ClaudeSessionID, rec.ClaudeSessionID != ""
+			},
+			// The suite's short drain window: the production default waits
+			// five seconds of quiet, which is the whole frame budget every
+			// wait in this suite is bounded by.
+			Idle: durableReplayIdle,
+			Logf: t.Logf,
+		},
+		Hibernations:     registrar,
+		VendorSessions:   registrar,
+		KeepAliveWindows: server.KeepAliveWindowStore{Windows: keepAliveWindows},
+		KeepAlive:        kaCfg,
 		VendorSessionOf: func(sessionID string) (string, bool) {
 			rec, ok := reg.Get(sessionID)
 			if !ok || rec.ClaudeSessionID == "" {
