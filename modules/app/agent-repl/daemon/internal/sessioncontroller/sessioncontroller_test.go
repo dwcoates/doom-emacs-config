@@ -253,6 +253,37 @@ type fakeClient struct {
 	// must surface as a failure rather than leaving the record holding a model
 	// nobody verified.
 	queryModelErr error
+	// liveTasks is the background-task set the fake shim reports as running.
+	// Nil is a session running nothing, which is a real answer.
+	liveTasks []string
+	// liveTaskQueries counts the live-task reads the daemon asked for, so a
+	// test can prove the phantom sweep ASKED rather than acted on silence.
+	liveTaskQueries int
+	// liveTasksErr, when non-nil, is a shim that CANNOT answer the read. It
+	// must close nothing: a peer that did not answer is not a session with no
+	// tasks.
+	liveTasksErr error
+}
+
+// QueryLiveTasks answers which background tasks the fake session is running,
+// and records that it was asked.
+func (c *fakeClient) QueryLiveTasks(_ context.Context) ([]string, error) {
+	c.mu.Lock()
+	c.liveTaskQueries++
+	live, err := append([]string(nil), c.liveTasks...), c.liveTasksErr
+	c.mu.Unlock()
+	notifyTestActivity()
+	if err != nil {
+		return nil, err
+	}
+	return live, nil
+}
+
+// liveTaskQueryCount is how many live-task reads the daemon asked for.
+func (c *fakeClient) liveTaskQueryCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.liveTaskQueries
 }
 
 // QuerySelectedModel answers which model the fake session is running, and

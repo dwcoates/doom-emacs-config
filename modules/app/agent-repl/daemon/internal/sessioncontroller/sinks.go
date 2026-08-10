@@ -682,6 +682,11 @@ type consumer struct {
 
 	mu   sync.Mutex
 	ring []*corev1.Event
+	// openTasks names every task the catalog currently holds `running`, mapped
+	// to the instant its start was observed. It is the set the phantom sweep
+	// asks the shim about and the gate that makes a close idempotent
+	// (phantomtask.go). Guarded by c.mu, beside the ring it mirrors.
+	openTasks map[string]int64
 	// systemInit is the last SDK system:init snapshot seen on this session's
 	// stream (a data.v1 SystemInit inside a vendor event). It backs the daemon's
 	// HTTP /status and /commands routes now that the L2 translator that used to
@@ -896,6 +901,11 @@ func (c *consumer) purgeRetained() (dropped int, ceiling uint64) {
 		}
 	}
 	c.ring = nil
+	// THE OPEN-TASK SET GOES WITH THE RING IT MIRRORS. Its ids name tasks of the
+	// retired conversation, which the new seq space refers to nowhere; left
+	// standing, the phantom sweep would ask a shim about tasks no catalog holds
+	// (phantomtask.go).
+	c.openTasks = nil
 	// The correlator names records in the RETIRED conversation's uuid space,
 	// which nothing in the new one refers to. Left standing it could only
 	// answer a new-space parent uuid by coincidence.
@@ -1198,6 +1208,10 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 		// footer shows as running and a bubble that says it settled cannot come
 		// from two different readings of the stream.
 		c.pushAsync(c.observeAsyncTask(ev), ev)
+		// The SAME event moves the open-task set the phantom sweep asks about,
+		// so that set and the catalog below are two readings of one fold rather
+		// than two independent derivations (phantomtask.go).
+		c.observeTaskLifecycle(ev)
 		catalog := frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.fence(), c.snapshotRing(), c.logf)
 		c.logf("session-controller: task catalog push session=%s ws=%s seq=%d event=%s tasks=%d",
 			c.sessionID, c.workspace, ev.GetSeq(), stateKind(ev), len(catalog.GetTasks()))
@@ -1213,6 +1227,15 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 		if c.onSessionEnded != nil {
 			c.onSessionEnded()
 		}
+	}
+	if ended := ev.GetTurnEnded(); ended != nil && turnResult != nil {
+		// THE EDGE THAT RETIRES A TURN'S TASKS, taken after the durable ledger
+		// and the SSM have accepted the boundary, exactly like the turn claims
+		// closed on this same edge. It does not close them by itself: detached
+		// work outliving its turn is the first-class idle-async state, so the
+		// boundary only makes each entry eligible for the sweep, whose question
+		// to the shim is what actually decides (phantomtask.go).
+		c.noteTurnEndTaskEligibility(ended.GetTurnId())
 	}
 	if ended := ev.GetTurnEnded(); ended != nil && ended.GetTurnId() != "" {
 		// A settlement failure DEGRADES this turn's accounting only. The turn
@@ -2157,6 +2180,10 @@ func (c *consumer) reconcileTasks(ev *corev1.Event, btc *datav1.BackgroundTasksC
 	}
 	c.logf("session-controller: authoritative live-task set session=%s ws=%s seq=%d tasks=%d",
 		c.sessionID, c.workspace, ev.GetSeq(), len(ids))
+	// THE OPEN-TASK SET ADOPTS THE SAME SNAPSHOT, so the set the phantom sweep
+	// asks about and the catalog this rebuild produces say the same thing about
+	// what is running (phantomtask.go).
+	c.adoptLiveTaskSet(ids, c.instantOf(ev))
 	// Keyed by the EVENT's session id: the SSM resolves a workspace from
 	// whichever identity the event carries, and a store event carries the
 	// vendor uuid rather than the daemon's s_ id.
