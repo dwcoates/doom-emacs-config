@@ -57,7 +57,9 @@ func TestRecordOpenFailureNamesTheCause(t *testing.T) {
 // resumeDetailedError is a bring-up failure that carries the typed continuity
 // evidence an exact resume holds — the evidence the command nack used to hand
 // the client before the open acked on acceptance.
-type resumeDetailedError struct{ detail *frontendv1.SessionResumeFailure }
+type resumeDetailedError struct {
+	detail *frontendv1.SessionResumeFailure
+}
 
 func (e *resumeDetailedError) Error() string { return "the named conversation has no transcript" }
 

@@ -238,76 +238,18 @@ type pageSegment struct {
 func (m *Manager) ConversationPage(ctx context.Context, workspace, expectedSessionID, expectedGenerationID string, anchor PageAnchor) (*frontendv1.ConversationPage, error) {
 	limit := clampPageLimit(anchor.Limit)
 	m.mu.Lock()
-	d, live := m.byWS[workspace]
-	if m.hibernating[workspace] {
-		liveSessionID, liveGenerationID := "", ""
-		if live {
-			liveSessionID, liveGenerationID = d.sessionID, d.generationID
-		}
-		m.mu.Unlock()
-		return nil, m.rejectSupersededPage(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, "hibernation_transition", "eligibility_revoked")
-	}
-	if live {
-		liveSessionID, liveGenerationID := d.sessionID, d.generationID
-		m.mu.Unlock()
-		// The SAME admission rule the resync ladder applies: a non-empty
-		// controller generation uniquely identifies this live controller, so a
-		// client carrying it is current even when its session field names a
-		// session that has since rotated. A generation mismatch still refuses.
-		if expectedGenerationID != liveGenerationID {
-			return nil, m.rejectSupersededPage(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, "live_controller", "identity_mismatch")
-		}
-		if expectedSessionID != liveSessionID && expectedGenerationID == "" {
-			return nil, m.rejectSupersededPage(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, "live_controller", "identity_mismatch")
-		}
-		return m.pageFromController(ctx, d, anchor, limit)
-	}
-
-	reader, ok := m.cfg.SSM.(WorkspaceStateReader)
-	if !ok {
-		m.mu.Unlock()
-		err := fmt.Errorf("session-controller: conversation page ws=%q has no workspace-state reader for durable-history identity validation", workspace)
-		m.logf("session-controller: conversation page eligibility REJECTED ws=%q request_session=%q request_generation=%q replay_source=%q decision=missing_workspace_state_reader error=%v",
-			workspace, expectedSessionID, expectedGenerationID, "durable_history", err)
-		return nil, err
-	}
-	state, found, err := reader.Current(workspace)
+	admission, release, err := m.admitHistoryRequest("conversation page", fmt.Sprintf("anchor=%s limit=%d", pageAnchorName(anchor), limit), workspace, expectedSessionID, expectedGenerationID)
+	// The DURABLE route keeps the manager lock through the read, and the live
+	// route has already released it; deferring the ladder's own release is what
+	// makes that difference impossible to get wrong here (historyadmission.go).
+	defer release()
 	if err != nil {
-		m.mu.Unlock()
-		m.logf("session-controller: conversation page eligibility FAILED ws=%q request_session=%q request_generation=%q replay_source=%q decision=workspace_state_read_failed error=%v",
-			workspace, expectedSessionID, expectedGenerationID, "durable_history", err)
-		return nil, fmt.Errorf("session-controller: read authoritative workspace state for durable conversation page ws %q: %w", workspace, err)
-	}
-	if !found || state == nil {
-		m.mu.Unlock()
-		err := fmt.Errorf("session-controller: no authoritative workspace state for durable conversation page ws %q", workspace)
-		m.logf("session-controller: conversation page eligibility REJECTED ws=%q request_session=%q request_generation=%q replay_source=%q decision=missing_workspace_state error=%v",
-			workspace, expectedSessionID, expectedGenerationID, "durable_history", err)
 		return nil, err
 	}
-	liveSessionID, liveGenerationID := state.GetSessionId(), state.GetControllerGenerationId()
-	if expectedSessionID != liveSessionID || expectedGenerationID != liveGenerationID {
-		m.mu.Unlock()
-		return nil, m.rejectSupersededPage(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, "durable_history", "identity_mismatch")
+	if admission.route == historyRouteLiveController {
+		return m.pageFromController(ctx, admission.controller, anchor, limit)
 	}
-	// The lock is held across the durable read for the reason resync holds it:
-	// bringUp installs the next controller under this same mutex, so no
-	// controller generation can appear between the no-controller check above
-	// and the read below. pageFromDurableHistory never re-enters m.mu.
-	page, err := m.pageFromDurableHistory(ctx, workspace, liveGenerationID, anchor, limit)
-	m.mu.Unlock()
-	return page, err
-}
-
-// rejectSupersededPage refuses a page whose echoed fence does not name the
-// live generation, in the resync refusal's own vocabulary so one log grep
-// finds both.
-func (m *Manager) rejectSupersededPage(workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, replaySource, rejectionCause string) error {
-	err := fmt.Errorf("%w: conversation page ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q replay_source=%q rejection_cause=%q",
-		errclass.ErrSessionSuperseded, workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, replaySource, rejectionCause)
-	m.logf("session-controller: conversation page eligibility REJECTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q replay_source=%q decision=superseded rejection_cause=%q error=%v",
-		workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, replaySource, rejectionCause, err)
-	return err
+	return m.pageFromDurableHistory(ctx, workspace, admission.generationID, anchor, limit)
 }
 
 // pageFromController serves a page for a workspace with a live session
