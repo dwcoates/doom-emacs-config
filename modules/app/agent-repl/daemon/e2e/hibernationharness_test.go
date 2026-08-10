@@ -580,17 +580,36 @@ func sendReviveCompactNoScope(t *testing.T, conn *websocket.Conn, requestID stri
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"reviveSession":{"compactFirst":{}}}`, requestID))
 }
 
-// awaitAck reads conn until the CommandAck for requestID arrives.
+// awaitAck reads conn until the CommandAck for requestID arrives, DISCARDING
+// everything it reads past. Use it when nothing the command provokes is awaited
+// afterwards; when something is, use awaitAckKeeping and seed that await with
+// what this one would have thrown away.
 func awaitAck(t *testing.T, conn *websocket.Conn, requestID, what string) *frontendv1.CommandAck {
 	t.Helper()
+	ack, _ := awaitAckKeeping(t, conn, requestID, what)
+	return ack
+}
+
+// awaitAckKeeping reads conn until the CommandAck for requestID arrives and
+// hands back every frame it read past, in arrival order.
+//
+// The frames belong to the caller's NEXT await: see awaitAllSeeded for why an
+// ack is not a barrier and why dropping them turns a contract test into a race
+// against machine load.
+func awaitAckKeeping(t *testing.T, conn *websocket.Conn, requestID, what string) (*frontendv1.CommandAck, []*frontendv1.FrontendFrame) {
+	t.Helper()
 	var ack *frontendv1.CommandAck
+	var read []*frontendv1.FrontendFrame
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"the CommandAck for " + what: func(frame *frontendv1.FrontendFrame) bool {
-			ack = ackFor(frame, requestID)
-			return ack != nil
+			if ack = ackFor(frame, requestID); ack != nil {
+				return true
+			}
+			read = append(read, frame)
+			return false
 		},
 	})
-	return ack
+	return ack, read
 }
 
 // --- the daemon's durable record of the conversation identity -------------------
