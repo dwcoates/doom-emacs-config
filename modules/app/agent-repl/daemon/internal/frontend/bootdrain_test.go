@@ -106,7 +106,7 @@ func (c *stormConn) readCommand() (*frontendv1.FrontendCommand, error) {
 	return nil, errors.New("frontend test: storm connection has no command script")
 }
 
-func (c *stormConn) writeFrame(data []byte) error {
+func (c *stormConn) writeFrame(data []byte, _ func()) error {
 	now := time.Now()
 	c.openWhile = append(c.openWhile, c.cl.drain.overlaps(now, now))
 	c.wrote = append(c.wrote, append([]byte(nil), data...))

@@ -459,7 +459,7 @@ func (c *gatedConn) readCommand() (*frontendv1.FrontendCommand, error) {
 	return nil, errors.New("frontend test: gated connection has no command script")
 }
 
-func (c *gatedConn) writeFrame(data []byte) error {
+func (c *gatedConn) writeFrame(data []byte, _ func()) error {
 	c.entered <- append([]byte(nil), data...)
 	return <-c.release
 }

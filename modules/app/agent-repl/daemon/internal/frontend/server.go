@@ -1236,7 +1236,11 @@ func (s *Server) writeFrameWatched(c conn, cl *client, f outFrame) error {
 		s.logf("frontend: OUTBOUND WRITER BLOCKED client_kind=%s lane=%s blocked_ms=%d — the consumer is not reading; every queued reply, including acks, waits behind this one write",
 			cl.kind, laneName(f.control), s.ackDeadline.Milliseconds())
 	})
-	err := c.writeFrame(f.data)
+	// Every chunk the socket accepts is drain progress. THIS is what stops the
+	// stall accounting from calling a host that is steadily consuming a 31s
+	// snapshot "wedged": the frame count does not move for the whole write, and
+	// the byte count moves constantly.
+	err := c.writeFrame(f.data, cl.out.noteWriteProgress)
 	alarm.Stop()
 	if reported.Load() {
 		// The stall is over one way or the other, and the record that announced
@@ -1650,12 +1654,27 @@ func sessionViewModelOptions(sessionView map[string]any) any {
 type conn interface {
 	// writeFrame writes one protojson frame (UDS appends the newline delimiter;
 	// WS sends it as one text message).
-	writeFrame(data []byte) error
+	//
+	// progress, when non-nil, is called every time the socket ACCEPTS A CHUNK of
+	// this frame's bytes. That callback is the drain-progress evidence the
+	// slow-consumer accounting runs on, and it exists because frame counts are
+	// not evidence: a 162-workspace connect snapshot is ONE frame, the observed
+	// host spent 31s consuming it, and for all 31 of those seconds a
+	// frame-counting stall detector saw a consumer that had drained nothing —
+	// and evicted a client that completed the write 391ms later. See outbox's
+	// progress field.
+	writeFrame(data []byte, progress func()) error
 	// readCommand reads one inbound FrontendCommand (UDS: one newline-delimited
 	// line; WS: one message). Returns io.EOF on clean close.
 	readCommand() (*frontendv1.FrontendCommand, error)
 	close() error
 }
+
+// writeChunkBytes is how much of one frame is offered to the socket per write.
+// It is the resolution of the byte-level drain-progress signal above: small
+// enough that a consumer reading steadily reports progress many times inside a
+// single large snapshot, large enough that a normal frame is one or two writes.
+const writeChunkBytes = 32 << 10
 
 // udsConn frames protojson newline-delimited over a net.Conn.
 type udsConn struct {
@@ -1667,12 +1686,33 @@ func newUDSConn(nc net.Conn) *udsConn {
 	return &udsConn{nc: nc, r: bufio.NewReader(nc)}
 }
 
-func (u *udsConn) writeFrame(data []byte) error {
-	if _, err := u.nc.Write(data); err != nil {
+// writeFrame writes the frame in bounded chunks, reporting each chunk the
+// socket accepted. Chunking changes nothing about the bytes on the wire — a UDS
+// stream has no message boundaries and the delimiter is still the trailing
+// newline — and it is what turns "this consumer is alive and reading" from an
+// unobservable fact into a signal the stall accounting can use.
+func (u *udsConn) writeFrame(data []byte, progress func()) error {
+	for off := 0; off < len(data); {
+		end := off + writeChunkBytes
+		if end > len(data) {
+			end = len(data)
+		}
+		n, err := u.nc.Write(data[off:end])
+		off += n
+		if n > 0 && progress != nil {
+			progress()
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if _, err := u.nc.Write([]byte{'\n'}); err != nil {
 		return err
 	}
-	_, err := u.nc.Write([]byte{'\n'})
-	return err
+	if progress != nil {
+		progress()
+	}
+	return nil
 }
 
 func (u *udsConn) readCommand() (*frontendv1.FrontendCommand, error) {
@@ -1704,8 +1744,35 @@ type wsConn struct {
 
 func newWSConn(ws *websocket.Conn) *wsConn { return &wsConn{ws: ws} }
 
-func (w *wsConn) writeFrame(data []byte) error {
-	return w.ws.WriteMessage(websocket.TextMessage, data)
+// writeFrame streams the frame as ONE text message, reporting each chunk the
+// message writer accepted. NextWriter rather than WriteMessage is what makes
+// that reporting possible; the message framing on the wire is identical.
+func (w *wsConn) writeFrame(data []byte, progress func()) error {
+	mw, err := w.ws.NextWriter(websocket.TextMessage)
+	if err != nil {
+		return err
+	}
+	for off := 0; off < len(data); {
+		end := off + writeChunkBytes
+		if end > len(data) {
+			end = len(data)
+		}
+		n, werr := mw.Write(data[off:end])
+		off += n
+		if n > 0 && progress != nil {
+			progress()
+		}
+		if werr != nil {
+			// The partial message is abandoned, and the abandonment's own
+			// failure is surfaced rather than dropped: a Close error here means
+			// the connection is in a state the caller must still hear about.
+			if cerr := mw.Close(); cerr != nil {
+				return fmt.Errorf("%w (abandoning partial message: %v)", werr, cerr)
+			}
+			return werr
+		}
+	}
+	return mw.Close()
 }
 
 func (w *wsConn) readCommand() (*frontendv1.FrontendCommand, error) {
