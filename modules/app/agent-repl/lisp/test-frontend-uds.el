@@ -60,6 +60,25 @@ alarm.  Tests that assert ON the seam shadow it again with their own
                 (lambda (&rest _) 'fake-timer)))
        ,@body)))
 
+(defmacro agent-repl-test--with-connected-link (&rest body)
+  "Run BODY with the command link ARRANGED as connected on `fake-proc'.
+
+`agent-repl-uds-link-health' reports `:degraded' over a link whose process
+is not connected, so an assertion about the ACK latch is only about the
+latch when a live link is arranged first — without this the latch
+assertions would pass on the link-down verdict instead.
+
+`fake-proc' is the same stub the send/connect tests already use, so a test
+that shadows `process-live-p' again for `fake-proc' stays consistent with
+this arrangement rather than undoing it.  Link-DOWN tests simply omit this
+wrapper."
+  (declare (indent 0))
+  `(let ((agent-repl--uds-process 'fake-proc)
+         (agent-repl--uds-connection-state 'open))
+     (cl-letf (((symbol-function 'process-live-p)
+                (lambda (proc) (eq proc 'fake-proc))))
+       ,@body)))
+
 (defun agent-repl-test--pend (request-id field workspace
                                          &optional on-failure on-success
                                          on-challenge on-timeout)
@@ -2014,10 +2033,132 @@ what it must also never be is a Go error chain in the echo area."
 ;;;; ---- Ack aging + command-link health ---------------------------------
 
 (ert-deftest agent-repl-test-uds-link-health-starts-healthy ()
-  "The command link's initial state is `:healthy'."
+  "A connected link with nothing lost reports `:healthy'."
   ;; Arrange / Act / Assert
   (agent-repl-test--with-uds
-    (should (eq (agent-repl-uds-link-health) :healthy))))
+    (agent-repl-test--with-connected-link
+      (should (eq (agent-repl-uds-link-health) :healthy)))))
+
+(ert-deftest agent-repl-test-uds-link-health-down-link-is-degraded ()
+  "A link whose process is not connected reports `:degraded'.
+Nothing is in flight to go unacknowledged, which is exactly how a total
+link loss used to report itself healthy."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act / Assert — no connected link is arranged: the link is DOWN.
+    (should (eq (agent-repl-uds-link-health) :degraded))))
+
+(ert-deftest agent-repl-test-uds-link-health-reconnect-pending-is-degraded ()
+  "A down link with a reconnect scheduled is still `:degraded'."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act
+    (agent-repl--uds-schedule-reconnect)
+    ;; Assert
+    (should (eq (agent-repl-uds-link-health) :degraded))))
+
+(ert-deftest agent-repl-test-uds-link-health-dialing-is-degraded ()
+  "A link still dialing has not carried anything yet, so it is `:degraded'."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((agent-repl--uds-process 'fake-proc)
+          (agent-repl--uds-connection-state 'dialing))
+      (cl-letf (((symbol-function 'process-live-p)
+                 (lambda (proc) (eq proc 'fake-proc))))
+        ;; Act / Assert
+        (should (eq (agent-repl-uds-link-health) :degraded))))))
+
+(ert-deftest agent-repl-test-uds-link-health-open-sentinel-restores-healthy ()
+  "The sentinel's `open' transition brings the reader back to `:healthy'."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((agent-repl--uds-process 'fake-proc)
+          (agent-repl--uds-connection-state 'dialing)
+          (agent-repl--uds-connect-started-at (float-time)))
+      (cl-letf (((symbol-function 'process-live-p)
+                 (lambda (proc) (eq proc 'fake-proc)))
+                ((symbol-function 'process-name) (lambda (_p) "fake"))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw)
+                 (lambda () nil)))
+        ;; Act
+        (agent-repl--uds-sentinel-transition 'fake-proc "open\n")
+        ;; Assert
+        (should (eq (agent-repl-uds-link-health) :healthy))))))
+
+(ert-deftest agent-repl-test-uds-link-down-repaints-the-tab-bar ()
+  "The link's DOWN edge drives the shared tab-bar repaint."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((agent-repl--uds-process 'fake-proc)
+          (agent-repl--uds-connection-state 'open)
+          (repainted 0))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'process-name) (lambda (_p) "fake"))
+                ((symbol-function 'agent-repl--frontend-expected-restart-initiator)
+                 (lambda () nil))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw)
+                 (lambda () (setq repainted (1+ repainted)))))
+        ;; Act
+        (agent-repl--uds-sentinel-transition 'fake-proc "connection broken\n")
+        ;; Assert
+        (should (= repainted 1))))))
+
+(ert-deftest agent-repl-test-uds-link-up-repaints-the-tab-bar ()
+  "The link's UP edge drives the same shared tab-bar repaint."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((agent-repl--uds-process 'fake-proc)
+          (agent-repl--uds-connection-state 'dialing)
+          (agent-repl--uds-connect-started-at (float-time))
+          (repainted 0))
+      (cl-letf (((symbol-function 'process-live-p)
+                 (lambda (proc) (eq proc 'fake-proc)))
+                ((symbol-function 'process-name) (lambda (_p) "fake"))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw)
+                 (lambda () (setq repainted (1+ repainted)))))
+        ;; Act
+        (agent-repl--uds-sentinel-transition 'fake-proc "open\n")
+        ;; Assert
+        (should (= repainted 1))))))
+
+(ert-deftest agent-repl-test-uds-link-down-logs-the-health-transition ()
+  "The down edge logs the health transition where it is DECIDED."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((agent-repl--uds-process 'fake-proc)
+          (agent-repl--uds-connection-state 'open)
+          logged)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'process-name) (lambda (_p) "fake"))
+                ((symbol-function 'agent-repl--frontend-expected-restart-initiator)
+                 (lambda () nil))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) (lambda () nil))
+                ((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--uds-sentinel-transition 'fake-proc "connection broken\n")
+        ;; Assert
+        (should (cl-find-if
+                 (lambda (line)
+                   (string-match-p
+                    "uds-link-health: -> :degraded cause=link-down" line))
+                 logged))))))
+
+(ert-deftest agent-repl-test-uds-link-health-unacked-degrades-a-live-link ()
+  "The unacked-deadline condition still degrades a link that is CONNECTED."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-connected-link
+      (agent-repl-test--with-captured-deadline expire
+        (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
+        (cl-letf (((symbol-function 'message) (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl--force-tab-bar-redraw)
+                   (lambda () nil)))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should (eq (agent-repl-uds-link-health) :degraded)))))))
 
 (ert-deftest agent-repl-test-uds-link-health-reports-degraded ()
   "The health reader reports `:degraded' once the link has been degraded."
@@ -2184,6 +2325,7 @@ what it must also never be is a Go error chain in the echo area."
   "A superseded loss leaves the command link healthy: nothing diverged."
   ;; Arrange
   (agent-repl-test--with-uds
+   (agent-repl-test--with-connected-link
     (agent-repl-test--with-captured-deadline expire
       (agent-repl-test--pend "req-1" "publishWorkspaceRoster" nil
                              nil nil nil (lambda (_id) t))
@@ -2191,7 +2333,7 @@ what it must also never be is a Go error chain in the echo area."
         ;; Act
         (funcall expire)
         ;; Assert
-        (should (eq (agent-repl-uds-link-health) :healthy))))))
+        (should (eq (agent-repl-uds-link-health) :healthy)))))))
 
 (ert-deftest agent-repl-test-uds-deadline-superseded-is-still-marked ()
   "A superseded loss is still recorded, so a late ack is never unexplained."
@@ -2297,6 +2439,7 @@ what it must also never be is a Go error chain in the echo area."
   "A deadline thunk that runs after its ack landed reports nothing."
   ;; Arrange
   (agent-repl-test--with-uds
+   (agent-repl-test--with-connected-link
     (agent-repl-test--with-captured-deadline expire
       (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
       (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
@@ -2307,7 +2450,7 @@ what it must also never be is a Go error chain in the echo area."
           (funcall expire)
           ;; Assert
           (should-not echoed)
-          (should (eq (agent-repl-uds-link-health) :healthy)))))))
+          (should (eq (agent-repl-uds-link-health) :healthy))))))))
 
 (ert-deftest agent-repl-test-uds-ack-before-deadline-cancels-alarm ()
   "An ack inside the deadline disarms the alarm rather than leaving it live."
@@ -2329,11 +2472,12 @@ what it must also never be is a Go error chain in the echo area."
   "An ack inside the deadline leaves the command link healthy."
   ;; Arrange
   (agent-repl-test--with-uds
+   (agent-repl-test--with-connected-link
     (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
     ;; Act
     (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
     ;; Assert
-    (should (eq (agent-repl-uds-link-health) :healthy))))
+    (should (eq (agent-repl-uds-link-health) :healthy)))))
 
 (ert-deftest agent-repl-test-uds-untrack-command-cancels-alarm ()
   "Untracking a command after a local wait aborts also disarms its alarm."
@@ -2415,30 +2559,36 @@ what it must also never be is a Go error chain in the echo area."
   "The next in-deadline ack after a timeout restores the link to healthy."
   ;; Arrange
   (agent-repl-test--with-uds
+   (agent-repl-test--with-connected-link
     (agent-repl-test--with-captured-deadline expire
       (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
-      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
-        (funcall expire))
-      (agent-repl-test--pend "req-2" "mergeWorkspace" "ws1")
-      ;; Act
-      (agent-repl--uds-handle-command-ack '(:requestId "req-2" :ok t))
-      ;; Assert
-      (should (eq (agent-repl-uds-link-health) :healthy)))))
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw)
+                 (lambda () nil)))
+        (funcall expire)
+        (agent-repl-test--pend "req-2" "mergeWorkspace" "ws1")
+        ;; Act
+        (agent-repl--uds-handle-command-ack '(:requestId "req-2" :ok t))
+        ;; Assert
+        (should (eq (agent-repl-uds-link-health) :healthy)))))))
 
 (ert-deftest agent-repl-test-uds-rejected-ack-restores-health ()
   "A REJECTED ack still proves the link carried traffic, so health returns."
   ;; Arrange
   (agent-repl-test--with-uds
+   (agent-repl-test--with-connected-link
     (agent-repl-test--with-captured-deadline expire
       (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
-      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw)
+                 (lambda () nil)))
         (funcall expire)
         (agent-repl-test--pend "req-2" "mergeWorkspace" "ws1")
         ;; Act
         (agent-repl--uds-handle-command-ack
          '(:requestId "req-2" :error "branch not found"))
         ;; Assert
-        (should (eq (agent-repl-uds-link-health) :healthy))))))
+        (should (eq (agent-repl-uds-link-health) :healthy)))))))
 
 (ert-deftest agent-repl-test-uds-untracked-ack-leaves-link-degraded ()
   "An ack for a request nobody tracked is no proof about the command plane."
@@ -2450,19 +2600,37 @@ what it must also never be is a Go error chain in the echo area."
     ;; Assert
     (should (eq (agent-repl-uds-link-health) :degraded))))
 
-(ert-deftest agent-repl-test-uds-reconnect-restores-health ()
-  "A successful reconnect restores the command link to healthy."
+(ert-deftest agent-repl-test-uds-reconnect-clears-the-ack-latch ()
+  "A fresh dial clears the ack latch: the lost command belonged to the old link."
   ;; Arrange
   (agent-repl-test--with-uds
-    (agent-repl--uds-link-degrade "req-1" "mergeWorkspace" "ws1")
+    (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw) (lambda () nil)))
+      (agent-repl--uds-link-degrade "req-1" "mergeWorkspace" "ws1"))
     (cl-letf (((symbol-function 'agent-repl--uds-connect)
                (lambda (&rest _) 'fake-proc))
               ((symbol-function 'process-name) (lambda (_p) "fake"))
+              ((symbol-function 'agent-repl--force-tab-bar-redraw) (lambda () nil))
               ((symbol-function 'process-status) (lambda (_p) 'open)))
       ;; Act
       (agent-repl-uds-connect)
       ;; Assert
-      (should (eq (agent-repl-uds-link-health) :healthy)))))
+      (should (eq agent-repl--uds-link-health :healthy)))))
+
+(ert-deftest agent-repl-test-uds-dial-alone-does-not-report-healthy ()
+  "A dial in progress is not a carried command: the reader stays `:degraded'.
+The latch is cleared by the dial, so only the reader's connectedness half
+keeps this honest until the sentinel reports `open'."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (cl-letf (((symbol-function 'agent-repl--uds-connect)
+               (lambda (&rest _) 'fake-proc))
+              ((symbol-function 'process-name) (lambda (_p) "fake"))
+              ((symbol-function 'agent-repl--force-tab-bar-redraw) (lambda () nil))
+              ((symbol-function 'process-status) (lambda (_p) 'open)))
+      ;; Act
+      (agent-repl-uds-connect)
+      ;; Assert
+      (should (eq (agent-repl-uds-link-health) :degraded)))))
 
 (ert-deftest agent-repl-test-uds-command-unacked-is-a-local-failure-type ()
   "The timeout's failure type belongs to the closed local vocabulary."
@@ -2635,12 +2803,13 @@ filter runs the daemon's answer while the send is still on the stack."
   "A command answered inside its own write never degrades the link."
   ;; Arrange
   (agent-repl-test--with-uds
+   (agent-repl-test--with-connected-link
     (agent-repl-test--with-reentrant-ack '(:requestId "req-reentrant" :ok t)
       ;; Act
       (agent-repl--uds-send-command
        "publishWorkspaceRoster" '(:roster nil) nil 'fake-proc))
     ;; Assert
-    (should (eq (agent-repl-uds-link-health) :healthy))))
+    (should (eq (agent-repl-uds-link-health) :healthy)))))
 
 (ert-deftest agent-repl-test-uds-reentrant-ack-surfaces-no-failure ()
   "No failure is surfaced for a command the daemon demonstrably answered."
@@ -2896,6 +3065,7 @@ caught three vanished `mergeWorkspace' commands."
   "A command settled by the pre-verdict drain never degrades the link."
   ;; Arrange
   (agent-repl-test--with-uds
+   (agent-repl-test--with-connected-link
     (agent-repl-test--with-captured-deadline expire
       (cl-letf (((symbol-function 'agent-repl-failure-surface) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--uds-drain-input)
@@ -2907,7 +3077,7 @@ caught three vanished `mergeWorkspace' commands."
         ;; Act
         (funcall expire)))
     ;; Assert
-    (should (eq (agent-repl-uds-link-health) :healthy))))
+    (should (eq (agent-repl-uds-link-health) :healthy)))))
 
 (ert-deftest agent-repl-test-uds-deadline-drain-runs-the-success-callback ()
   "The drained ack runs `:on-success' rather than abandoning it.
@@ -3036,6 +3206,10 @@ abandoned one strands the mount until its own separate timeout."
                  (lambda () "req-abandoned"))
                 ((symbol-function 'process-send-string) (lambda (&rest _) nil)))
         (let ((agent-repl--uds-connection-state 'open)
+              ;; The link the command goes out on is LIVE: the reader
+              ;; reports a disconnected link as degraded, and this test is
+              ;; about the abandoned registration, not about link loss.
+              (agent-repl--uds-process 'fake-proc)
               (agent-repl--uds-outbound-queue nil))
           (agent-repl--uds-send-command "interrupt" nil "ws1" 'fake-proc)
           ;; Act
