@@ -498,6 +498,17 @@ this module's landing report) so the test guard installs for it."
    :filter filter
    :sentinel sentinel))
 
+(defun agent-repl--uds-socket-file-present-p (path)
+  "External boundary: non-nil when the UDS socket FILE at PATH exists.
+
+Existence of the file is NOT proof of a listener (a dead daemon can leave
+a stale socket behind) — it is only proof that a dial is not guaranteed
+to be born dead.  Absence, by contrast, IS proof: `make-network-process'
+against a missing local socket comes back `status=failed' every time.
+Split out as its own boundary so tests decide the answer without touching
+the filesystem."
+  (file-exists-p path))
+
 (defun agent-repl--uds-probe-async (path sentinel)
   "External boundary: asynchronously probe UDS PATH with SENTINEL.
 Returns a process in `dialing' state.  The caller owns interpretation,
@@ -608,6 +619,27 @@ Returns the process on success, nil on a failed dial."
                      (process-name agent-repl--uds-process))
     (cl-return-from agent-repl-uds-connect agent-repl--uds-process))
   (let ((sock (or path agent-repl-uds-socket-path)))
+    ;; A dial against a socket path that does not EXIST is doomed before it
+    ;; is made: `make-network-process' returns an already-`failed' process
+    ;; and the born-dead path below warns about it.  Across a daemon
+    ;; restart that is a guaranteed pair of warnings per bounce describing
+    ;; nothing but a daemon that has not finished coming up.  Skip the
+    ;; doomed spawn, note the link down, and let the SAME ladder carry the
+    ;; retry — no second retry mechanism, and the ladder's backoff and its
+    ;; eventual escalation are untouched, so a daemon whose socket never
+    ;; appears still ends up reported.
+    (unless (agent-repl--uds-socket-file-present-p sock)
+      (agent-repl--log nil
+                       (concat "uds-connect: socket absent socket=%s "
+                               "readiness=%s action=%s")
+                       sock readiness-p
+                       (if readiness-p
+                           "readiness-loop-retains-control"
+                         "await-socket-via-reconnect-ladder"))
+      (agent-repl--uds-link-note-down "socket-absent")
+      (unless readiness-p
+        (agent-repl--uds-schedule-reconnect "socket-absent"))
+      (cl-return-from agent-repl-uds-connect nil))
     ;; A connected socket is not a ready daemon until THIS connection's
     ;; snapshot lands. Retaining the previous DaemonView let wait-ready return
     ;; immediately and made restart preflight read stale state stores.
