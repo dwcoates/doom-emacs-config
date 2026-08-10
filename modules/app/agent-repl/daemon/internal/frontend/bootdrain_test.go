@@ -113,7 +113,7 @@ func (c *stormConn) writeFrame(data []byte, _ func()) error {
 	return nil
 }
 
-func (c *stormConn) close() error { return nil }
+func (c *stormConn) close(closeCause) error { return nil }
 
 // newBringUpStorm arranges a connection mid bring-up: the window is open and
 // the connect snapshot plus the retained pushes that follow it — the roster,

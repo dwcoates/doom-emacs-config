@@ -53,7 +53,7 @@ func (c *scriptedConn) writeFrame(data []byte, _ func()) error {
 	return nil
 }
 
-func (c *scriptedConn) close() error {
+func (c *scriptedConn) close(closeCause) error {
 	c.closeOnce.Do(func() { close(c.closed) })
 	return nil
 }
