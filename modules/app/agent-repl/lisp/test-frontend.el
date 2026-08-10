@@ -1473,16 +1473,21 @@ The webapp status bar renders it in its topbar."
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((ensured nil))
        (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                  (lambda (ws ok _fail) (setq ensured ws) (funcall ok) :ready)))
+                  (lambda (ws ok _fail) (setq ensured ws) (funcall ok) :ready))
+                 ;; The establishment continuation now pre-creates the page;
+                 ;; that boundary is covered by its own tests below.
+                 ((symbol-function 'agent-repl--frontend-precreate-webview) #'ignore))
         ;; Act
         (agent-repl--gui-boot "ws1" "/w" :bare-metal)
         ;; Assert
         (should (equal ensured "ws1"))))))
 
 (ert-deftest agent-repl-test-frontend-gui-boot-mounts-no-webview ()
-  "The gui boot is HEADLESS: no webview buffer, no window touched.
-A generated workspace is not the current one, so mounting its view here
-would evict the caller's windows."
+  "The gui boot mounts nothing SYNCHRONOUSLY and touches no window.
+A generated workspace is not the current one, so displaying its view
+here would evict the caller's windows.  The page itself is now
+pre-created, but only from the establishment continuation and only
+without display (`agent-repl--frontend-precreate-webview')."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((displayed nil)
@@ -2601,3 +2606,126 @@ warned about against the workspace."
           ;; Assert
           (should (eq :failed (plist-get (agent-repl--open-progress-entry "ws1")
                                          :phase))))))))
+
+;;;; ---- Non-displaying pre-creation -------------------------------------------
+
+(defvar agent-repl-test--precreate-urls nil
+  "URLs the mocked webview factory was asked to mount, in call order.")
+
+(defmacro agent-repl-test--with-precreate-boundaries (displayed &rest body)
+  "Run BODY with the mount wired to a fake webview and display recorded.
+DISPLAYED is bound to the flag the display path would set — a
+pre-creation that ever reaches it is the defect these tests cover."
+  (declare (indent 1))
+  `(let ((,displayed nil)
+         (agent-repl-test--precreate-urls nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () t))
+               ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                (lambda (_ws ok _fail &rest _) (funcall ok) :pending))
+               ((symbol-function 'agent-repl--call-in-background-workspace)
+                (lambda (_ws fn) (funcall fn)))
+               ((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                (agent-repl-test--fake-webview-factory 'agent-repl-test--precreate-urls))
+               ((symbol-function 'agent-repl--frontend-display-webview)
+                (lambda (_ws _buf) (setq ,displayed t))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-frontend-precreate-mounts-a-webview-buffer ()
+  "Pre-creation records a live `:frontend-buffer' for the workspace."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui)
+    (agent-repl-test--with-precreate-boundaries _displayed
+      ;; Act
+      (agent-repl--frontend-precreate-webview "ws1")
+      ;; Assert
+      (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer))))))
+
+(ert-deftest agent-repl-test-frontend-precreate-never-displays ()
+  "Pre-creation never reaches the display path."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui)
+    (agent-repl-test--with-precreate-boundaries displayed
+      ;; Act
+      (agent-repl--frontend-precreate-webview "ws1")
+      ;; Assert
+      (should-not displayed))))
+
+(ert-deftest agent-repl-test-frontend-precreate-leaves-the-window-configuration ()
+  "Pre-creation leaves the frame's window configuration untouched."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui)
+    (agent-repl-test--with-precreate-boundaries _displayed
+      (let ((before (current-window-configuration)))
+        ;; Act
+        (agent-repl--frontend-precreate-webview "ws1")
+        ;; Assert
+        (should (compare-window-configurations before (current-window-configuration)))))))
+
+(ert-deftest agent-repl-test-frontend-precreate-addresses-the-workspace-url ()
+  "The pre-created page is mounted at the workspace's own build-stamped URL."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui)
+    (agent-repl-test--with-precreate-boundaries _displayed
+      ;; Act
+      (agent-repl--frontend-precreate-webview "ws1")
+      ;; Assert
+      (should (equal (list (agent-repl--frontend-webview-url "ws1"))
+                     agent-repl-test--precreate-urls)))))
+
+(ert-deftest agent-repl-test-frontend-precreate-skips-an-already-mounted-workspace ()
+  "A workspace already holding a live webview mounts nothing further."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui)
+    (agent-repl-test--with-precreate-boundaries _displayed
+      (agent-repl--ws-put "ws1" :frontend-buffer (generate-new-buffer "*pre-ws1*"))
+      ;; Act
+      (agent-repl--frontend-precreate-webview "ws1")
+      ;; Assert
+      (should (null agent-repl-test--precreate-urls)))))
+
+(ert-deftest agent-repl-test-frontend-precreate-skips-a-fenced-workspace ()
+  "A terminally fenced workspace is not given a page."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui :open-fenced t)
+    (agent-repl-test--with-precreate-boundaries _displayed
+      ;; Act
+      (agent-repl--frontend-precreate-webview "ws1")
+      ;; Assert
+      (should (null agent-repl-test--precreate-urls)))))
+
+(ert-deftest agent-repl-test-frontend-precreate-skips-a-nuked-workspace ()
+  "A tombstoned workspace is not given a page."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui :nuked-at 1)
+    (agent-repl-test--with-precreate-boundaries _displayed
+      ;; Act
+      (agent-repl--frontend-precreate-webview "ws1")
+      ;; Assert
+      (should (null agent-repl-test--precreate-urls)))))
+
+(ert-deftest agent-repl-test-frontend-precreate-skips-without-xwidget-support ()
+  "An Emacs with no xwidget support is refused quietly rather than erroring."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui)
+    (agent-repl-test--with-precreate-boundaries _displayed
+      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () nil)))
+        ;; Act + Assert
+        (should (null (agent-repl--frontend-precreate-webview "ws1")))))))
+
+(ert-deftest agent-repl-test-frontend-boot-precreates-on-establishment ()
+  "gui-boot pre-creates the workspace's page once the session establishes."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend gui)
+    (let (continuation precreated)
+      (cl-letf (((symbol-function 'agent-repl--frontend-validate-for-ws) (lambda (&rest _) t))
+                ((symbol-function 'agent-repl--ws-set-agent-state) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                 (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
+                ((symbol-function 'agent-repl--frontend-precreate-webview)
+                 (lambda (ws) (setq precreated ws) :pending)))
+        (agent-repl--gui-boot "ws1")
+        (should-not precreated)
+        ;; Act
+        (funcall continuation)
+        ;; Assert
+        (should (equal "ws1" precreated))))))
