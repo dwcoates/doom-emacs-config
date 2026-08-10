@@ -2084,6 +2084,13 @@ func (s *Server) sweepIdle() {
 	// a turn that finished hours ago. See keepalivedeadline.go.
 	if s.controller != nil {
 		s.controller.SweepOverdueKeepAlivePings()
+		// THE SAME ARGUMENT, ONE LEVEL UP (undriventurn.go). A turn bound with
+		// no driver reads as a live turn to this very sweep's hibernation lease
+		// and to every restart guard, and unlike an overdue ping it has no
+		// in-memory owner to be judged by — so it is resolved here, before the
+		// walk that would otherwise be refused by it for as long as the daemon
+		// runs.
+		s.controller.SweepUndrivenTurns()
 	}
 	for _, rec := range s.registry.All() {
 		// THE SWEEP ABANDONS ITS REMAINDER ONCE SHUTDOWN HAS BEGUN, and this is

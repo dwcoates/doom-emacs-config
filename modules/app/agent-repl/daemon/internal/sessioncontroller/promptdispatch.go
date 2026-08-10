@@ -321,7 +321,14 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// client used to mint its own id here, so the ping's end boundary named a
 	// turn nothing was keyed by: the match at the boundary never fired, the
 	// window never closed, and the pings rendered as the user's own prompts.
+	// THE DRIVE RECORD, TAKEN BEFORE THE SUBMIT (undriventurn.go). The shim
+	// adopts requestID as the turn_id, so this is the identity the ledger claim
+	// will carry — and it must be on record BEFORE the submit that produces it,
+	// or a TurnStarted racing this return would bind a record the watchdog reads
+	// as having no driver. A submit the shim refuses retracts it below.
+	m.noteTurnDriven(d, requestID)
 	if err := d.client.SubmitPrompt(ctx, requestID, text, origin, permissionMode, promptOrigin); err != nil {
+		m.forgetTurnDriven(d, requestID)
 		if accepted {
 			// The `thinking` every frontend was just shown described a turn
 			// that is not going to happen, and nothing else will ever close it:
