@@ -105,17 +105,26 @@ func (p *Priority) UnmarshalJSON(data []byte) error {
 // create-or-update-workspace JSON contract; Extra retains new skill metadata
 // until a dedicated daemon consumer is introduced rather than dropping it.
 type Request struct {
-	Name                 string          `json:"name"`
-	GitRoot              string          `json:"git_root"`
-	Prompt               string          `json:"prompt,omitempty"`
-	Priority             Priority        `json:"priority,omitempty"`
-	ForkFrom             string          `json:"fork_from,omitempty"`
-	ForkSessionID        string          `json:"fork_session_id,omitempty"`
-	SourceWorkspace      string          `json:"source_workspace,omitempty"`
-	SourceDir            string          `json:"source_dir,omitempty"`
-	BaseCommit           string          `json:"base_commit,omitempty"`
-	Model                string          `json:"model,omitempty"`
-	ConfigDir            string          `json:"config_dir,omitempty"`
+	Name            string   `json:"name"`
+	GitRoot         string   `json:"git_root"`
+	Prompt          string   `json:"prompt,omitempty"`
+	Priority        Priority `json:"priority,omitempty"`
+	ForkFrom        string   `json:"fork_from,omitempty"`
+	ForkSessionID   string   `json:"fork_session_id,omitempty"`
+	SourceWorkspace string   `json:"source_workspace,omitempty"`
+	SourceDir       string   `json:"source_dir,omitempty"`
+	BaseCommit      string   `json:"base_commit,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	// ConfigDir is the account this workspace RESOLVED to — a derived value the
+	// daemon computes, never something an emitter may choose. Anything a
+	// command file puts here is overwritten.
+	ConfigDir string `json:"config_dir,omitempty"`
+	// ConfigDirOverride is an account SELECTION this workspace inherited from
+	// the source workspace it was created from, empty when it inherited none.
+	// It is persisted so a restart resumes the create with the same selection,
+	// and it travels onto the new session's record so the choice keeps
+	// following that workspace's own children.
+	ConfigDirOverride    string          `json:"config_dir_override,omitempty"`
 	PermissionMode       string          `json:"permission_mode,omitempty"`
 	AllowUngated         bool            `json:"allow_ungated,omitempty"`
 	PostprocessingPrompt string          `json:"postprocessing_prompt,omitempty"`
@@ -180,6 +189,16 @@ type Job struct {
 // session-scoped frontend frame may be emitted.  A matching job is the sole
 // authority for a newly-created workspace, so a session cannot publish before
 // its WorkspaceMaterialized acknowledgement has been checkpointed.
+// SessionID IS THE JOB'S OWN SESSION, never the session id the asking frame
+// carried. The distinction is the whole reason a workspace once held its
+// frames forever: the gate's caller is any frame for the worktree, including
+// frames that arrive before the creation job has a session at all (session
+// id ""), and a decision that echoed the ASKING frame's id got memoized under
+// that empty value. The release then compared the job's real session against
+// the memoized "" , found them unequal, refused to open the gate, and left a
+// permanently-closed hold in front of a workspace the durable store had
+// already marked materialized. Sourcing the field from the matched job makes
+// that mismatch unrepresentable rather than merely unlikely.
 type PublicationDecision struct {
 	JobID        string
 	WorktreePath string
@@ -230,7 +249,7 @@ func SessionPublicationDecision(store JobStore, worktreePath, sessionID string) 
 		}
 		switch len(unmaterialized) {
 		case 0:
-			return PublicationDecision{WorktreePath: worktreePath, SessionID: sessionID, Materialized: true}, nil
+			return PublicationDecision{WorktreePath: worktreePath, Materialized: true}, nil
 		case 1:
 			match = unmaterialized[0]
 		default:
@@ -242,9 +261,9 @@ func SessionPublicationDecision(store JobStore, worktreePath, sessionID string) 
 		}
 	}
 	if match == nil {
-		return PublicationDecision{WorktreePath: worktreePath, SessionID: sessionID, Materialized: true}, nil
+		return PublicationDecision{WorktreePath: worktreePath, Materialized: true}, nil
 	}
-	return PublicationDecision{JobID: match.ID, WorktreePath: worktreePath, SessionID: sessionID, Materialized: match.Materialized}, nil
+	return PublicationDecision{JobID: match.ID, WorktreePath: worktreePath, SessionID: match.SessionID, Materialized: match.Materialized}, nil
 }
 
 func (j Job) validate() error {

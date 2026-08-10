@@ -44,6 +44,34 @@ import (
 	"claude-repld/internal/registry"
 )
 
+// waiveHandshakeOnlyResume answers, for a resume target whose transcript the
+// gate has just found missing, whether that target is a system:init handshake
+// nothing was ever said in — in which case the create proceeds with NO resume
+// and the structural gate at the spawn decides whether a blank conversation is
+// permitted, exactly as the respawn path already does.
+//
+// IT IS THE SAME RUNG AS EnsureShim's, AND IT IS HERE BECAUSE THE TWO GATES
+// MUST AGREE. The respawn path has waived a handshake-only target since it
+// existed; Server.CreateSession's gate had no such rung, so one daemon refused
+// at bring-up what the other would have waived, and which answer a workspace
+// got depended only on which path happened to reach the gate first.
+//
+// The evidence is the WORKSPACE's, not one record's: gatherConversationEvidence
+// asks whether any conversation at this (configDir, cwd) has ever run a turn.
+// That is deliberately the stronger question — a handshake uuid sitting beside
+// a week-old conversation is not a blank slate, and this must not say it is.
+// A CALLER-NAMED TARGET IS NEVER WAIVED. The waiver answers "the daemon
+// resolved this workspace's conversation and it turned out to be a handshake";
+// applying it to a uuid somebody asked for by name would answer a question
+// nobody put, so an explicit resume still fails loudly when it cannot be met.
+func waiveHandshakeOnlyResume(reg *registry.Registry, opts CreateOpts) bool {
+	if opts.Resume == "" || !opts.ResumeDaemonResolved {
+		return false
+	}
+	ev := gatherConversationEvidence(reg, opts.ConfigDir, opts.CWD)
+	return ev.available && !ev.everRan
+}
+
 // freshEligibility is PROOF that a workspace may be brought up with no
 // conversation to resume. It carries no data — its existence IS the fact — and
 // its unexported empty-struct field means no package outside this one can

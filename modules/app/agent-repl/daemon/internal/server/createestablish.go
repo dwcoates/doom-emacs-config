@@ -95,7 +95,11 @@ const resumeModeFreshRetired = frontendv1.ResumeMode(2)
 // frontend has to remember a vendor uuid across restarts — which is the entire
 // point of ResumeMode. See ConversationResolver for why the frontend's copy
 // was the wrong authority.
-func (h *commandHandler) resolveResume(cmd *frontendv1.CreateSessionCmd) (string, error) {
+// The second return reports whether the DAEMON resolved the target from its
+// own records rather than the caller naming it; see
+// CreateOpts.ResumeDaemonResolved for why the resume ladder must tell the two
+// apart.
+func (h *commandHandler) resolveResume(cmd *frontendv1.CreateSessionCmd) (string, bool, error) {
 	mode := cmd.GetResumeMode()
 	explicit := cmd.GetExplicitClaudeSessionId()
 
@@ -103,7 +107,7 @@ func (h *commandHandler) resolveResume(cmd *frontendv1.CreateSessionCmd) (string
 	// is steering. Ignoring it quietly would land the session somewhere the
 	// caller did not ask for and say nothing, so it fails the create instead.
 	if mode != frontendv1.ResumeMode_RESUME_MODE_EXPLICIT && explicit != "" {
-		return "", fmt.Errorf("create_session carries explicit_claude_session_id=%q under resume_mode=%s: a conversation may only be named under RESUME_MODE_EXPLICIT", explicit, mode)
+		return "", false, fmt.Errorf("create_session carries explicit_claude_session_id=%q under resume_mode=%s: a conversation may only be named under RESUME_MODE_EXPLICIT", explicit, mode)
 	}
 
 	switch mode {
@@ -117,16 +121,16 @@ func (h *commandHandler) resolveResume(cmd *frontendv1.CreateSessionCmd) (string
 		// merely old. It is named, refused, and the remedy is stated.
 		h.logf("frontend cmd: create_session cwd=%s resume_mode=2 REFUSED — RESUME_MODE_FRESH is retired and this daemon will not start a conversation over an existing one",
 			cmd.GetCwd())
-		return "", fmt.Errorf("%w: resume_mode=2 (RESUME_MODE_FRESH) was retired because a workspace's conversation is not caller-replaceable; update the client to send RESUME_MODE_CONTINUE",
+		return "", false, fmt.Errorf("%w: resume_mode=2 (RESUME_MODE_FRESH) was retired because a workspace's conversation is not caller-replaceable; update the client to send RESUME_MODE_CONTINUE",
 			errclass.ErrResumeModeRetired)
 
 	case frontendv1.ResumeMode_RESUME_MODE_EXPLICIT:
 		if explicit == "" {
-			return "", fmt.Errorf("create_session resume_mode=EXPLICIT requires explicit_claude_session_id")
+			return "", false, fmt.Errorf("create_session resume_mode=EXPLICIT requires explicit_claude_session_id")
 		}
 		h.logf("frontend cmd: create_session cwd=%s resume_mode=EXPLICIT uuid=%s — a caller named this conversation, so no resolution is attempted",
 			cmd.GetCwd(), explicit)
-		return explicit, nil
+		return explicit, false, nil
 
 	case frontendv1.ResumeMode_RESUME_MODE_UNSPECIFIED, frontendv1.ResumeMode_RESUME_MODE_CONTINUE:
 		// Unwired resolver is a LOUD refusal, never a quiet fresh start:
@@ -134,11 +138,11 @@ func (h *commandHandler) resolveResume(cmd *frontendv1.CreateSessionCmd) (string
 		// data-loss this whole mechanism exists to prevent, and it must not be
 		// reachable by forgetting to wire a dependency.
 		if h.resumes == nil {
-			return "", fmt.Errorf("create_session resume_mode=%s needs a conversation resolver and none is wired; refusing rather than silently starting a fresh conversation over an existing one", mode)
+			return "", false, fmt.Errorf("create_session resume_mode=%s needs a conversation resolver and none is wired; refusing rather than silently starting a fresh conversation over an existing one", mode)
 		}
 		resume, ok := h.resumes.ResolveResume(cmd.GetConfigDir(), cmd.GetCwd())
 		if ok {
-			return resume, nil
+			return resume, true, nil
 		}
 		// NOTHING RESOLVED. That used to end here with `return "", nil` — a
 		// blank conversation, indistinguishable on the wire and in the log from
@@ -159,14 +163,14 @@ func (h *commandHandler) resolveResume(cmd *frontendv1.CreateSessionCmd) (string
 		if proof == nil {
 			h.logf("frontend cmd: create_session cwd=%s config_dir=%s REFUSED — the resolver named no resumable conversation and %s",
 				cmd.GetCwd(), cmd.GetConfigDir(), reason)
-			return "", unresumableConversation(cmd.GetCwd(), cmd.GetConfigDir(), reason)
+			return "", false, unresumableConversation(cmd.GetCwd(), cmd.GetConfigDir(), reason)
 		}
 		h.logf("frontend cmd: create_session cwd=%s config_dir=%s starts a FRESH conversation — the registry proves this workspace has never run one",
 			cmd.GetCwd(), cmd.GetConfigDir())
-		return "", nil
+		return "", false, nil
 
 	default:
-		return "", fmt.Errorf("create_session carries unknown resume_mode=%d", int32(mode))
+		return "", false, fmt.Errorf("create_session carries unknown resume_mode=%d", int32(mode))
 	}
 }
 
@@ -174,17 +178,35 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 	h.logf("frontend cmd: create_session ws=%s request_id=%s config_dir=%s resume_mode=%s fake=%v permission_mode=%q allow_ungated=%v model=%q",
 		workspace, requestID, cmd.GetConfigDir(), cmd.GetResumeMode(), cmd.GetFake(),
 		cmd.GetPermissionMode(), cmd.GetAllowUngated(), cmd.GetModel())
-	resume, err := h.resolveResume(cmd)
+	resume, daemonResolved, err := h.resolveResume(cmd)
 	if err != nil {
 		return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w", workspace, requestID, err)
 	}
+	// THE ACCOUNT IS DECIDED HERE, not taken from the frame. The editor
+	// computes the same path rule the daemon does, and the one thing it cannot
+	// know is whether a human SELECTED an account for this workspace in the
+	// webapp — that lives on the daemon's records. Trusting the frame's
+	// config_dir would let the editor's path answer overwrite the selection on
+	// the very next create, which is exactly how a deliberate switch used to
+	// evaporate.
+	selection := h.accounts.SelectionFor(cmd.GetCwd())
+	configDir, err := h.accounts.Resolve(cmd.GetCwd(), cmd.GetCwd())
+	if err != nil {
+		return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s resolve the account for cwd %q: %w", workspace, requestID, cmd.GetCwd(), err)
+	}
+	if frame := cmd.GetConfigDir(); frame != configDir {
+		h.logf("frontend cmd: create_session cwd=%s account RESOLVED frame_config_dir=%q resolved_config_dir=%q selected=%t — the account follows the selection, else the path",
+			cmd.GetCwd(), frame, configDir, selection != "")
+	}
 	opts := CreateOpts{
-		CWD:            cmd.GetCwd(),
-		PermissionMode: cmd.GetPermissionMode(),
-		ConfigDir:      cmd.GetConfigDir(),
-		Resume:         resume,
-		Fake:           cmd.GetFake(),
-		AllowUngated:   cmd.GetAllowUngated(),
+		CWD:                  cmd.GetCwd(),
+		PermissionMode:       cmd.GetPermissionMode(),
+		ConfigDir:            configDir,
+		ConfigDirOverride:    selection,
+		Resume:               resume,
+		ResumeDaemonResolved: daemonResolved,
+		Fake:                 cmd.GetFake(),
+		AllowUngated:         cmd.GetAllowUngated(),
 	}
 	// A create is keyed by its cwd, and the frame's workspace field is optional
 	// on this command — so diagnostics fall back to the cwd rather than naming

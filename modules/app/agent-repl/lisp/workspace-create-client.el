@@ -342,12 +342,6 @@ switch they did not initiate."
              :fork-session-id (plist-get available :forkSessionId)
              :priority (plist-get available :priority)
              :model (plist-get available :model)
-             :config-dir-override
-             (let ((config-dir (plist-get available :configDir)))
-               (if (and (stringp config-dir)
-                        (not (string-empty-p config-dir)))
-                   config-dir
-                 :default))
              :permission-mode (plist-get available :permissionMode)
              :allow-ungated (and (plist-get available :allowUngated) t)
              :initial-prompt-queued

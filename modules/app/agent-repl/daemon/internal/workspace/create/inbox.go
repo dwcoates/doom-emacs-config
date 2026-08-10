@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"claude-repld/internal/session"
 )
 
 const commandPrefix = "workspace_commands_"
@@ -433,15 +435,12 @@ func parseCommands(payload []byte) ([]parsedCommand, error) {
 // in '/', whereas registry CWD records are clean paths; accepting both without
 // canonicalization would make a valid child-from-child create look unknown.
 func canonicalSourceDir(path string) (string, error) {
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w", err)
-		}
-		path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+	expanded, err := session.ExpandHome(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
 	}
-	if !filepath.IsAbs(path) {
+	if !filepath.IsAbs(expanded) {
 		return "", fmt.Errorf("must be absolute or begin with ~/")
 	}
-	return filepath.Clean(path), nil
+	return expanded, nil
 }

@@ -406,6 +406,14 @@ type commandHandler struct {
 	// resumes resolves which conversation a CONTINUE create lands on. Nil is a
 	// loud failing ack for that mode; see CommandHandlerConfig.Resumes.
 	resumes ConversationResumeResolver
+	// accounts resolves WHICH ACCOUNT a create runs under, from the human's
+	// selection for that workspace and otherwise its path (accountresolve.go).
+	// This is one of the two intent boundaries where an account is decided —
+	// the other is the workspace creation pipeline — and it is decided HERE
+	// rather than trusted from the frame because the editor computes the same
+	// path rule the daemon does and has no better information about a
+	// selection, which lives only in the daemon's registry.
+	accounts AccountResolver
 	// shutdown begins the daemon's graceful teardown, told whether to stop the
 	// session shims on the way out (false PRESERVES them, which is the
 	// default; see server.ShutdownAll). Nil makes the shutdown command a loud
@@ -534,6 +542,12 @@ type CommandHandlerConfig struct {
 	// exact failure this resolver was introduced to end, and an unwired
 	// resolver must not be able to reproduce it.
 	Resumes ConversationResumeResolver
+	// Registry backs the account rule: a workspace's account SELECTION lives on
+	// its session records and nowhere else. Nil leaves the resolver with no
+	// selection to find, so every create falls to the path — the correct
+	// degradation, since a selection that cannot be read must never be guessed
+	// at.
+	Registry *registry.Registry
 	// LogTargets releases a closed workspace's log descriptors. Nil leaves them
 	// held for the daemon's lifetime, which is what a harness with no target
 	// manager wants and what production must never be.
@@ -639,6 +653,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 		hibernations:     config.Hibernations,
 		establishTimeout: config.EstablishTimeout,
 		resumes:          config.Resumes,
+		accounts:         AccountResolver{Reg: config.Registry, Logf: logf},
 		schedules:        config.Schedules,
 		logTargets:       config.LogTargets,
 	}, nil

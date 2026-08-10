@@ -50,14 +50,11 @@ import (
 // one root and reporting a workspace as having no conversations at all.
 const listTranscriptsSubcommand = "list-transcripts"
 
-// multiRepoRootEnv and multiRepoConfigDirEnv mirror the Emacs customization
-// pair `agent-repl-multi-repo-root-env` / `agent-repl-multi-repo-config-dir`.
-const (
-	multiRepoRootEnv         = "MULTI_REPO_ROOT"
-	multiRepoConfigDirEnv    = "AGENT_REPL_MULTI_REPO_CONFIG_DIR"
-	defaultMultiRepoConfig   = "~/.claude-chesscom"
-	transcriptExcerptRuneCap = 120
-)
+// The path-to-account rule this command applies lives in
+// session.AccountConfigDirFor and its neighbours, shared with workspace
+// creation.  It used to be a private copy here, and the copy was the only Go
+// evaluation of the rule in existence — so creation had none.
+const transcriptExcerptRuneCap = 120
 
 // transcript status values. A transcript with no user prompt in it at all is a
 // handshake — the CLI opened a conversation nobody said anything in — and
@@ -96,29 +93,6 @@ func parseListTranscriptsArgs(args []string, stderr io.Writer) (listTranscriptsO
 	return opts, nil
 }
 
-// multiRepoConfigDir returns the multi-repo account's config root, honoring the
-// AGENT_REPL_MULTI_REPO_CONFIG_DIR override the tests use.
-func multiRepoConfigDir() (string, error) {
-	dir := os.Getenv(multiRepoConfigDirEnv)
-	if dir == "" {
-		dir = defaultMultiRepoConfig
-	}
-	return normalizeWorkspacePath(dir)
-}
-
-// underDir reports whether path lies inside root (or is root itself), on
-// cleaned paths so "/a/b" and "/a//b/." are one answer.
-func underDir(root, path string) bool {
-	if root == "" || path == "" {
-		return false
-	}
-	root, path = filepath.Clean(root), filepath.Clean(path)
-	if root == path {
-		return true
-	}
-	return strings.HasPrefix(path, root+string(filepath.Separator))
-}
-
 // configDirsFor returns the config roots to read for a workspace: the primary
 // one the account rule computes first, then every other known root, deduped.
 //
@@ -132,7 +106,7 @@ func configDirsFor(workspace, override string) (primary string, others []string,
 		}
 		return primary, nil, nil
 	}
-	multi, err := multiRepoConfigDir()
+	multi, err := session.MultiRepoConfigDir()
 	if err != nil {
 		return "", nil, fmt.Errorf("resolve the multi-repo config dir: %w", err)
 	}
@@ -144,9 +118,17 @@ func configDirsFor(workspace, override string) (primary string, others []string,
 	if err != nil {
 		return "", nil, fmt.Errorf("default Claude config dir %q: %w", fallbackRoot, err)
 	}
+	// The primary root comes from the SHARED account rule rather than a second
+	// evaluation of it here. That rule spells the default account "" (the way
+	// every record spells it), which this command renders as the absolute root
+	// it must actually stat.
+	routed, err := session.AccountConfigDirFor(workspace)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve the account for %q: %w", workspace, err)
+	}
 	primary, other := fallback, multi
-	if underDir(os.Getenv(multiRepoRootEnv), workspace) {
-		primary, other = multi, fallback
+	if routed != "" {
+		primary, other = routed, fallback
 	}
 	if other != primary {
 		others = []string{other}
@@ -200,7 +182,7 @@ func runListTranscripts(_ context.Context, args []string, stdout, stderr io.Writ
 		return err
 	}
 	logf("list-transcripts: workspace=%s primary_config_dir=%s other_config_dirs=%v multi_repo_root=%q",
-		workspace, primary, others, os.Getenv(multiRepoRootEnv))
+		workspace, primary, others, os.Getenv(session.MultiRepoRootEnv))
 
 	var rows []transcriptListing
 	for _, dir := range append([]string{primary}, others...) {

@@ -542,8 +542,6 @@ to leave nothing on this side to say it ever came."
           ;; The envelope key is the cwd the daemon routes by, not the
           ;; display name; see the dedicated regression test below.
           (should (equal (caddr ack) "/tmp/new")))
-        (should (equal (agent-repl--ws-get "new" :config-dir-override)
-                       "/tmp/account"))
         (should (equal (agent-repl--ws-get "new" :permission-mode) "auto"))
         (should (eq (agent-repl--ws-get "new" :allow-ungated) t))
         (should (eq (agent-repl--ws-get "new" :initial-prompt-queued) t))))))
@@ -1315,3 +1313,21 @@ normal prologue."
     ;; Act / Assert
     (should (eq t (agent-repl--handle-boot-sweep-session-unwired-command
                    '((workspace . "/tmp/ws")))))))
+
+(ert-deftest agent-repl-test-available-records-no-account-key-at-all ()
+  "A creation announcement records NO per-workspace account key.
+`:config-dir-override' is retired: the account is a function of the
+workspace path (`agent-repl--compute-config-dir'), so an announcement
+carrying `configDir' has nothing to override and one carrying none has
+nothing to default.  Recording the key at all is what let a creation
+that named no account silently pin its workspace to ~/.claude."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((available (list :jobId "job-1" :finalName "new"
+                           :worktreePath temporary-file-directory
+                           :configDir "/tmp/account")))
+      ;; Act
+      (let ((metadata (cdr (agent-repl--workspace-create-available-metadata
+                            available))))
+        ;; Assert
+        (should-not (plist-member metadata :config-dir-override))))))

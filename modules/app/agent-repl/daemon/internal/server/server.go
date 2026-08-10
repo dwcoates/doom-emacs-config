@@ -88,6 +88,29 @@ type CreateOpts struct {
 	RewoundFrom        string `json:"rewound_from,omitempty"`
 	RewindRetainedLeaf string `json:"rewind_retained_leaf,omitempty"`
 	RewindDroppedTurns string `json:"rewind_dropped_turns,omitempty"`
+	// ConfigDirOverride carries an account SELECTION into the create — the one
+	// a human made in the webapp, inherited by a workspace created from one
+	// that carries it. Empty means no selection, and then the account is
+	// resolved from this workspace's own prior selection or from its path
+	// (AccountResolver). It is persisted onto the new record so the selection
+	// keeps travelling to that workspace's own children.
+	ConfigDirOverride string `json:"config_dir_override,omitempty"`
+	// ResumeDaemonResolved marks a Resume the DAEMON chose from its own records
+	// (RESUME_MODE_CONTINUE) rather than one a caller NAMED.
+	//
+	// The two are different promises and the resume ladder must not treat them
+	// alike. A caller that names a uuid has made a continuity commitment: if
+	// that conversation is unavailable, the honest answer is to fail, because
+	// anything else lands the caller somewhere it did not ask for. A uuid the
+	// daemon resolved carries no such commitment — the caller asked for "this
+	// workspace's conversation", and when the only candidate turns out to be a
+	// bring-up handshake nothing was ever said in, continuing with none is the
+	// answer to the question actually asked.
+	//
+	// NOT PERSISTED and not part of the session's identity: it describes how
+	// THIS create was phrased, and CreateOpts is compared with == on the
+	// establish path, so it must stay a comparable scalar.
+	ResumeDaemonResolved bool `json:"resume_daemon_resolved,omitempty"`
 }
 
 // RewindLineageComplete reports whether the three rewind fields describe a real
@@ -1143,8 +1166,24 @@ func (s *Server) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 	// Persist the new root (and freshest claude_session_id) BEFORE the
 	// relaunch: if the bring-up fails, the record still rehydrates under the
 	// target root on the next access instead of the old one.
+	//
+	// THE SELECTION IS RECORDED SEPARATELY from the account it resolves to.
+	// ConfigDir alone cannot say whether a human chose it, and every later
+	// bring-up needs that distinction: without it, the next create would
+	// recompute the account from the workspace path and quietly undo this
+	// switch. The override is what makes the choice stick, and what a child
+	// workspace inherits.
+	//
+	// An explicit selection of the DEFAULT account is stored as that root's
+	// absolute path, never as "", so "nobody chose" stays distinguishable from
+	// "the default was chosen".
+	override := target.ConfigDir
+	if override == "" {
+		override = session.DefaultClaudeConfigDir()
+	}
 	s.updateRegistry(id, "account switch", func(rec *registry.Record) {
 		rec.ConfigDir = target.ConfigDir
+		rec.ConfigDirOverride = override
 		if csid != "" {
 			rec.ClaudeSessionID = csid
 		}
@@ -1343,6 +1382,19 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 		if restored {
 			missing = validateResumeTarget(opts, opts.Fake || s.forceFake)
 		}
+		// THE HANDSHAKE RUNG, below the restore and above the refusal — the same
+		// rung, in the same order, as the respawn path's (sessioncontrollers.go).
+		// A target with no transcript in a workspace that has never run a turn is
+		// the uuid the vendor minted at system:init and nothing was ever said in;
+		// refusing it destroys nothing and merely leaves the workspace
+		// permanently unstartable, because every later create resolves the same
+		// dead uuid and fails the same way.
+		if missing != nil && waiveHandshakeOnlyResume(s.registry, opts) {
+			s.logf("server: session create: resume viability gate WAIVED resume=%q reason=handshake_only_no_turn_ever_ran cwd=%q config_dir=%q — no conversation at this workspace has ever run a turn, so this uuid is a bring-up handshake rather than something to lose; the spawn's own gate decides whether a fresh conversation may start",
+				opts.Resume, opts.CWD, opts.ConfigDir)
+			opts.Resume = ""
+			missing = nil
+		}
 		if missing != nil {
 			logResumeContinuityFailure(s.logf, "session_create", "", opts, missing)
 			return "", missing
@@ -1371,13 +1423,17 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 	// doomed --resume; it is simply the session controller's handle on a transient session.
 	if s.registry != nil {
 		if err := s.registry.Put(registry.Record{
-			SessionID:       id,
-			CWD:             opts.CWD,
-			Model:           opts.Model,
-			PermissionMode:  opts.PermissionMode,
-			ConfigDir:       opts.ConfigDir,
-			ClaudeSessionID: opts.Resume,
-			CreatedAt:       s.now().UTC().Format(time.RFC3339),
+			SessionID:      id,
+			CWD:            opts.CWD,
+			Model:          opts.Model,
+			PermissionMode: opts.PermissionMode,
+			ConfigDir:      opts.ConfigDir,
+			// The SELECTION rides onto the record so it outlives this session
+			// and keeps travelling to this workspace's children. A resolved
+			// account is not a selection and is deliberately not copied here.
+			ConfigDirOverride: opts.ConfigDirOverride,
+			ClaudeSessionID:   opts.Resume,
+			CreatedAt:         s.now().UTC().Format(time.RFC3339),
 		}); err != nil {
 			s.logf("session %s: registry write on create FAILED — the session will not survive a daemon restart: %v", id, err)
 		}
@@ -2087,6 +2143,7 @@ func (s *Server) stampLegacyTurnEnd(rec registry.Record) registry.Record {
 		return rec
 	}
 	rec.LastTurnEndMs = atMs
+	rec.LastTurnEndBackfilled = true
 	return rec
 }
 
@@ -2142,6 +2199,13 @@ func (s LegacyTurnEndStamps) StampLegacyTurnEnd(sessionID, workspace string) (in
 	found, err := s.Reg.Update(sessionID, func(r *registry.Record) {
 		if r.LastTurnEndMs == 0 {
 			r.LastTurnEndMs = atMs
+			// MARKED AS BACKFILLED, because that is what it is. The instant is
+			// a true dated fact about the WORKSPACE and the keep-alive policy
+			// is right to measure from it; it is not evidence that a turn ran
+			// under this record's conversation, and the resume ladder must be
+			// able to tell the two apart. See Record.LastTurnEndBackfilled for
+			// the workspace this conflation made permanently unstartable.
+			r.LastTurnEndBackfilled = true
 		}
 	})
 	if err != nil {
