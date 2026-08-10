@@ -2091,6 +2091,12 @@ func (s *Server) sweepIdle() {
 		// walk that would otherwise be refused by it for as long as the daemon
 		// runs.
 		s.controller.SweepUndrivenTurns()
+		// THE SAME ARGUMENT ONE PLANE OVER (phantomtask.go). A catalog entry
+		// left `running` by an end this daemon never saw reports work in the
+		// footer forever, and — unlike a wedged turn — nothing in the event
+		// stream is ever going to revisit it. The sweep asks the shim, which
+		// owns the live set, and closes only what the shim says is not running.
+		s.controller.SweepPhantomTasks()
 	}
 	for _, rec := range s.registry.All() {
 		// THE SWEEP ABANDONS ITS REMAINDER ONCE SHUTDOWN HAS BEGUN, and this is
