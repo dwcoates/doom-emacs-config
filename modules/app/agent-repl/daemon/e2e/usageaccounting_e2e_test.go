@@ -191,13 +191,21 @@ func TestE2EUnexpectedQueryTerminationReachesTypedFailure(t *testing.T) {
 //
 // The accounting no longer rides the terminal feed item: a turn's verdict is
 // the session's ledger rather than the agent's utterance, and it reaches a
-// frontend resolved on FooterAccountingCell. The terminal result's arrival is
-// still the ordering signal — the row is written before the item is pushed — so
-// this reads the same fact through the layer that owns it.
+// frontend resolved on FooterAccountingCell.
+//
+// THE ORDERING SIGNAL IS THE CELL, NOT THE ITEM. The terminal result settles
+// its turn and reaches the feed immediately; the stamp is enriched afterwards
+// and may wait on a response's final usage (terminalsettlement.go). So the
+// event that says "this turn's accounting is durable" is the ProgressView
+// carrying its settled cell, and that is what this waits on.
 func submitAndAwaitAccounting(t *testing.T, h *e2eHarness, conn *websocket.Conn, sessionID, workspace, requestID, text string) *frontendv1.TurnAccounting {
 	t.Helper()
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":%q,"promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, requestID, text))
 	item, _ := awaitItem(t, conn, workspace, "the terminal result carrying turn accounting", isResult)
+	awaitFrame(t, conn, "the ProgressView carrying this turn's settled accounting cell", func(f *frontendv1.FrontendFrame) bool {
+		pv := f.GetProgress()
+		return pv.GetWorkspace() == workspace && pv.GetAccounting() != nil
+	})
 	accountings, err := durableTurnAccountings(h, sessionID)
 	if err != nil {
 		t.Fatalf("read durable turn accounting after terminal result %q: %v", item.GetUuid(), err)

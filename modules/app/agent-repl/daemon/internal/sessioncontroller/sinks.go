@@ -119,6 +119,12 @@ type StateApplier interface {
 	// settled WorkspaceState must be offered before the progress resolver may
 	// publish the mutually exclusive ALREADY_COMPLETE window.
 	ReconcileAlreadyComplete(workspace, sessionID string, publish func(*frontendv1.WorkspaceState)) (closed bool, err error)
+	// SettleTurnFromTerminalResult reconciles the SAME two halves from the
+	// vendor's own `result` message, which is the turn's end rather than a
+	// report of it. It retires this session's claims, paints the axis settled
+	// and publishes the re-derived state, all attributed to the terminal
+	// result. See terminalsettlement.go.
+	SettleTurnFromTerminalResult(workspace, sessionID string, publish func(*frontendv1.WorkspaceState)) (settled bool, err error)
 	// MarkTurnInterrupted records that a USER-COMMANDED stop was delivered to
 	// the workspace's running turn, so that turn's own TurnEnded reports
 	// `interrupted` instead of `done` or `vendor_blocked` (I1). Fed ONLY from
@@ -650,15 +656,43 @@ type consumer struct {
 	accounting           *turnAccountingReducer
 	accountingStore      TurnAccountingStore
 	historicalUsageStore HistoricalTokenUtilizationStore
-	// pendingTerminal parks a turn's terminal result under its accounting turn
-	// id until that turn's end boundary is known. Reached ONLY through
-	// holdTerminalResult, heldTerminalResult, takeHeldTerminalResult and
-	// heldTerminalTurnIDs, all of which take mu: the stream writes it from the
-	// consumer's own event path while teardowns and interrupt acks read and
-	// drain it from their goroutines, and an unguarded range over a map another
-	// goroutine is writing kills the process outright.
-	pendingTerminal        map[string]*corev1.Event
-	terminalAccounting     map[uint64]*frontendv1.TurnAccounting
+	// pendingTerminal names each turn whose ACCOUNTING STAMP is still
+	// outstanding, under the terminal result that turn produced. It is no longer
+	// a parking lot: the result it records was published on arrival, and what is
+	// outstanding is the token ledger alone (terminalsettlement.go). Reached
+	// ONLY through noteTerminalResult, heldTerminalResult,
+	// takeHeldTerminalResult and heldTerminalTurnIDs, all of which take mu: the
+	// stream writes it from the consumer's own event path while teardowns and
+	// interrupt acks read and drain it from their goroutines, and an unguarded
+	// range over a map another goroutine is writing kills the process outright.
+	pendingTerminal map[string]*corev1.Event
+	// terminalSeqByTurn is the PERMANENT receipt of which stream coordinate
+	// carried each turn's terminal result. It outlives pendingTerminal's
+	// discharge because a LATE correction revises a stamp long after it
+	// settled, and the revision has to reach the same seq the first settlement
+	// indexed. Guarded by mu, beside pendingTerminal.
+	terminalSeqByTurn map[string]uint64
+	// settledStamps names every turn whose accounting stamp has been published
+	// at least once. It is what makes a second settlement authority — the
+	// shim's `TurnEnded` arriving after the enrichment already settled the
+	// stamp — the quiet no-op it should be, without weakening the loud
+	// retired-turn report that a genuine collision still takes. Guarded by mu.
+	settledStamps          map[string]struct{}
+	// announcedTurnEnds names every turn whose END this consumer has already
+	// announced to the daemon's own turn machinery — the queue's drain, the
+	// keep-alive claim, the idle clock. The vendor's terminal result and the
+	// shim's later `TurnEnded` are two statements of ONE end, so announcing
+	// both would fire that machinery twice for one turn; the second edge then
+	// lands after the NEXT turn has taken the record and retires a claim it
+	// does not own. A turnLatch, so the test-and-set is one step.
+	announcedTurnEnds *turnLatch
+	// stoppedTurns names every turn a TEARDOWN STOP is in flight for. A turn
+	// interrupted so the daemon can take its shim away was DISPLACED, not
+	// finished, and the successor daemon owes it (turnresumption.go); settling
+	// it from the vendor's result would record it as a turn that ended of its
+	// own accord. The stop's own path closes it instead, so the ledger keeps
+	// saying the shim was stopped over a live turn.
+	stoppedTurns *turnLatch
 	replayedAccounting     map[string]*frontendv1.TurnAccounting
 	replayedResponses      map[string]*frontendv1.TokenUtilization
 	completedTerminalBySeq map[uint64]*frontendv1.TurnAccounting
@@ -714,7 +748,10 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		accounting:             newTurnAccountingReducer(dlog.Tag(dlog.Logf(logf), "session", sessionID, "ws", workspace)),
 		resumeIdentity:         newResumeIdentityTracker(),
 		pendingTerminal:        map[string]*corev1.Event{},
-		terminalAccounting:     map[uint64]*frontendv1.TurnAccounting{},
+		terminalSeqByTurn:      map[string]uint64{},
+		settledStamps:          map[string]struct{}{},
+		announcedTurnEnds:      newTurnLatch(),
+		stoppedTurns:           newTurnLatch(),
 		replayedAccounting:     map[string]*frontendv1.TurnAccounting{},
 		replayedResponses:      map[string]*frontendv1.TokenUtilization{},
 		completedTerminalBySeq: map[uint64]*frontendv1.TurnAccounting{},
@@ -1016,7 +1053,14 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	if ss := ev.GetSessionStarted(); ss != nil && c.onSessionStarted != nil {
 		c.onSessionStarted(ss)
 	}
-	if turnResult != nil && turnResult.notify && c.onTurn != nil {
+	// A turn END is announced ONCE. The vendor's terminal result already made
+	// this announcement for a turn it settled (terminalsettlement.go), and the
+	// shim's `TurnEnded` for that same turn is a replay of it.
+	announce := turnResult != nil && turnResult.notify
+	if announce && ev.GetTurnEnded() != nil {
+		announce = c.claimTurnEndAnnouncement(ev.GetTurnEnded().GetTurnId())
+	}
+	if announce && c.onTurn != nil {
 		c.onTurn(turnResult.active, c.boundaryInstant(ev))
 	}
 	// THE KEEP-ALIVE POLICY'S ONE INPUT, persisted on the accepted turn END and
@@ -1027,7 +1071,7 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	// A turn ending STARTS the clock; nothing arms a timer. See
 	// registry.Record.LastTurnEndMs for why the timestamp rather than a timer
 	// is what survives a laptop sleep and a daemon bounce.
-	if te := ev.GetTurnEnded(); te != nil && c.onTurnEnded != nil {
+	if te := ev.GetTurnEnded(); te != nil && c.onTurnEnded != nil && announce {
 		c.onTurnEnded(c.boundaryInstant(ev))
 	}
 	// THE KEEP-ALIVE WINDOW'S LOWER BOUND, taken from the START boundary for the
@@ -1139,12 +1183,53 @@ func (c *consumer) degradeAccountingObservation(ev *corev1.Event, cause error) e
 	return nil
 }
 
-// holdTerminalResult parks a turn's terminal result until its end boundary is
-// known. See pendingTerminal for why the map is only ever reached under mu.
-func (c *consumer) holdTerminalResult(turnID string, ev *corev1.Event) {
+// noteTerminalResult records the terminal result a turn produced, so its
+// accounting stamp can be attributed to the emission it belongs to and so the
+// release authorities can name the turns whose stamps are still outstanding.
+//
+// IT WITHHOLDS NOTHING. The event it records is published by the caller in the
+// same breath; this map used to be a parking lot and is now a receipt. See
+// pendingTerminal for why it is only ever reached under mu.
+func (c *consumer) noteTerminalResult(turnID string, ev *corev1.Event) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.pendingTerminal[turnID] = ev
+	c.terminalSeqByTurn[turnID] = ev.GetSeq()
+}
+
+// noteTurnStopInFlight records that a teardown is about to interrupt this turn
+// so the daemon can stop its shim. It is called BEFORE the interrupt, for the
+// same reason the owed-resumption row is written before it: the result the
+// interrupt provokes can be back before the call that sent it returns.
+func (c *consumer) noteTurnStopInFlight(turnID string) {
+	c.stoppedTurns.mark(turnID)
+}
+
+// turnStopInFlight reports whether a teardown stop is outstanding for a turn.
+func (c *consumer) turnStopInFlight(turnID string) bool {
+	return c.stoppedTurns.marked(turnID)
+}
+
+// claimTurnEndAnnouncement records that this turn's end is being announced and
+// reports whether THIS caller is the one making the announcement. The second
+// authority for the same turn gets false and announces nothing.
+func (c *consumer) claimTurnEndAnnouncement(turnID string) bool {
+	if turnID == "" {
+		// An END NOBODY ATTRIBUTED cannot be matched against a prior claim, so
+		// it announces rather than be silently dropped by a latch it can never
+		// be a member of.
+		return true
+	}
+	return c.announcedTurnEnds.claim(turnID)
+}
+
+// stampAlreadySettled reports whether this turn's accounting stamp has already
+// been published once.
+func (c *consumer) stampAlreadySettled(turnID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, settled := c.settledStamps[turnID]
+	return settled
 }
 
 // heldTerminalResult reports the terminal result parked for a turn without
@@ -1215,6 +1300,18 @@ func (c *consumer) heldTerminalTurnIDs() []string {
 // serveRetiredTurnAccounting rather than recomputed — the recompute would be
 // evidence-free, and it used to kill the daemon outright.
 func (c *consumer) settleTurnAccounting(turnID string) error {
+	// THE SECOND AUTHORITY IS NOW THE ORDINARY CASE, not a collision. A turn's
+	// stamp settles as soon as its corrections are on file
+	// (terminalsettlement.go), and the shim's `TurnEnded` arrives afterwards
+	// naming the same turn on every healthy turn there is. Answering it through
+	// serveRetiredTurnAccounting would file a WARN about a settled turn once per
+	// turn, which is noise that would bury the real collisions that path exists
+	// to report. The already-settled answer is stated once, at info.
+	if c.stampAlreadySettled(turnID) {
+		c.logf("session-controller: turn accounting stamp ALREADY SETTLED session=%s turn_id=%s decision=skip_second_settlement — this turn's stamp settled when its corrections came in, and this later authority names the same turn rather than a different outcome",
+			c.sessionID, turnID)
+		return nil
+	}
 	if !c.accounting.hasTurn(turnID) {
 		return c.serveRetiredTurnAccounting(turnID)
 	}
@@ -1260,7 +1357,7 @@ func (c *consumer) settleTurnAccounting(turnID string) error {
 		c.warn("session-controller: ACCOUNTING LEDGER RETIRED UNDER SETTLEMENT session=%s ws=%s turn_id=%s decision=publish_persisted_record — the turn's accounting record persisted, but its reducer entry was already retired when the commit ran: %v",
 			c.sessionID, c.workspace, turnID, err)
 	}
-	c.publishHeldTerminalResult(turnID, accounting)
+	c.publishTurnAccountingStamp(turnID, accounting)
 	return nil
 }
 
@@ -1295,37 +1392,45 @@ func (c *consumer) serveRetiredTurnAccounting(turnID string) error {
 	}
 	c.warn("session-controller: ACCOUNTING SETTLEMENT NAMES RETIRED TURN session=%s ws=%s turn_id=%s seq=%d decision=served_persisted_settlement held_terminal=%v — an earlier release authority already settled and retired this turn, so its already-persisted settlement is authoritative and is served rather than recomputed",
 		c.sessionID, c.workspace, turnID, seq, held != nil)
-	c.publishHeldTerminalResult(turnID, persisted)
+	c.publishTurnAccountingStamp(turnID, persisted)
 	return nil
 }
 
-// publishHeldTerminalResult discharges a turn's hold, if it still has one, and
-// publishes what it held against the settled accounting record. Discharge and
-// publication are one step so two settlements naming the same turn cannot both
-// push its result.
-func (c *consumer) publishHeldTerminalResult(turnID string, accounting *frontendv1.TurnAccounting) {
+// publishTurnAccountingStamp discharges a turn's outstanding stamp and publishes
+// the settled accounting record.
+//
+// IT PUBLISHES AN ACCOUNTING STAMP AND NOTHING ELSE. It used to also push the
+// turn's terminal result, which is what made the conversation wait on the token
+// ledger; the result is published on arrival now (terminalsettlement.go) and
+// this feeds the footer cell and the indexes a resync replays response stamps
+// from. Discharge and publication remain one step so two settlements naming the
+// same turn cannot both claim to be the first.
+func (c *consumer) publishTurnAccountingStamp(turnID string, accounting *frontendv1.TurnAccounting) {
 	// THE FOOTER'S ACCOUNTING CELL IS RESOLVED FROM THIS RECORD, and it is fed
-	// BEFORE the terminal-result discharge below returns early: a turn whose
-	// held result was already discharged still settled, and its accounting is
-	// still the newest the footer has. A failure to feed it is reported, never
-	// swallowed — a cell left one turn stale is a figure the user reads as
-	// current.
+	// FIRST: a turn whose stamp was already discharged still settled, and its
+	// accounting is still the newest the footer has. A failure to feed it is
+	// reported, never swallowed — a cell left one turn stale is a figure the
+	// user reads as current.
 	if err := c.prog.NoteTurnAccounting(c.workspace, c.sessionID, accounting); err != nil {
 		c.warn("session-controller: turn accounting cell NOT RESOLVED session=%s ws=%s turn_id=%s — the footer keeps the previous turn's cell: %v",
 			c.sessionID, c.workspace, turnID, err)
 	}
-	terminal := c.takeHeldTerminalResult(turnID)
-	if terminal == nil {
-		return
-	}
-	c.terminalAccounting[terminal.GetSeq()] = accounting
+	c.takeHeldTerminalResult(turnID)
 	c.mu.Lock()
-	c.completedTerminalBySeq[terminal.GetSeq()] = accounting
+	c.settledStamps[turnID] = struct{}{}
+	// THE RESPONSE-STAMP INDEXES ARE FED ON EVERY SETTLEMENT, including a LATE
+	// REVISION, so a resync replaying this conversation renders the vendor's
+	// final figures rather than the ones that happened to be on file when the
+	// turn first settled. A turn that produced no terminal result of its own —
+	// an interrupted turn settled by a synthesized close — has no seq to index
+	// and only feeds the footer above.
+	if seq, produced := c.terminalSeqByTurn[turnID]; produced {
+		c.completedTerminalBySeq[seq] = accounting
+	}
 	for _, response := range accounting.GetResponses() {
 		c.completedResponses[response.GetApiMessageId()] = response
 	}
 	c.mu.Unlock()
-	c.pushConversation(terminal, true)
 }
 
 // persistedTurnAccounting reports the settlement the store already holds for
@@ -1633,12 +1738,14 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 		// window and nothing else, so the SSM had no way to know the agent was
 		// folding the context rather than answering.
 		c.noteCompactingStatus(ev, p.Vendor)
-		// A terminal result is retained until TurnEnded has supplied the end
-		// boundary and its accounting record has committed. The same path is
-		// used for replay because replay also drives this consumer.
+		// A terminal result SETTLES ITS TURN, here, on arrival. It is published
+		// unconditionally and the turn's durable claim is closed from it; only
+		// the accounting stamp is enriched afterwards. See terminalsettlement.go
+		// for the ten-minute wedge the old retain-until-accounting-settles
+		// behaviour produced. The same path is used for replay because replay
+		// also drives this consumer.
 		if resultFromVendor(p.Vendor) != nil && c.accounting.activeTurnID != "" {
-			c.holdTerminalResult(c.accounting.activeTurnID, ev)
-			c.logf("session-controller: terminal result held for accounting session=%s turn_id=%s seq=%d", c.sessionID, c.accounting.activeTurnID, ev.GetSeq())
+			c.settleTurnOnTerminalResult(c.accounting.activeTurnID, ev)
 			return nil
 		}
 		c.pushConversation(ev, true)
@@ -2088,6 +2195,20 @@ func userTurnReceipt(cd *frontendv1.ConversationDelta) (requestID string, textLe
 // pushConversation converts a vendor event to a ConversationDelta and pushes it,
 // loud-logging (never swallowing) a translation failure.
 func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
+	c.pushConversationAttributed(ev, live, "")
+}
+
+// pushConversationAttributed is pushConversation for the one caller that has
+// ATTRIBUTED this very event to a turn's terminal result.
+//
+// The attribution is carried as an argument rather than looked up from a
+// stream coordinate. A seq index would answer "was some event with this seq a
+// terminal result", and a session that outlives a shim generation renumbers
+// from one, so seq 10 of the second generation would inherit the verdict of
+// seq 10 of the first. Passing the turn id along the one call that makes the
+// attribution makes that confusion unrepresentable: the assertion below can
+// only ever be asked of the event it was made about.
+func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, terminalTurnID string) {
 	observation, err := tokenUtilizationObservationFromEvent(ev, c.sessionID, c.accounting.isKnownVendorSession)
 	if err != nil {
 		historical := rejectionIsHistorical(c.accounting, ev)
@@ -2182,15 +2303,16 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	// produces that cell is not wired yet, so the accounting is consumed here
 	// and rendered nowhere.
 	//
-	// The PRESENCE CHECK stays, unchanged and still fatal. It never asserted
-	// anything about the wire — it asserts that a terminal accounting record
-	// found the turn-result emission it belongs to, which is the invariant that
-	// catches an accounting attributed to the wrong turn.
-	if accounting := c.terminalAccounting[ev.GetSeq()]; accounting != nil {
-		if !hasTurnResult(cd) {
-			panic(fmt.Sprintf("session-controller: accounting terminal seq=%d had no result item", ev.GetSeq()))
-		}
-		delete(c.terminalAccounting, ev.GetSeq())
+	// The PRESENCE CHECK stays, still fatal, and now runs at the moment the
+	// attribution is MADE rather than at the moment its stamp settles. It never
+	// asserted anything about the wire — it asserts that a turn the daemon has
+	// attributed a terminal result to really did emit one, which is the
+	// invariant that catches an accounting attributed to the wrong turn. Since
+	// a terminal result is published on arrival now, this is the one push where
+	// that question can be asked, and every terminal reaches it rather than
+	// only the ones whose accounting settled.
+	if terminalTurnID != "" && !hasTurnResult(cd) {
+		panic(fmt.Sprintf("session-controller: accounting terminal seq=%d turn_id=%s had no result item", ev.GetSeq(), terminalTurnID))
 	}
 	// The harness's isMeta records — a launched skill's body and the notices
 	// around it — become the skill's own bubble body, the skill card they belong

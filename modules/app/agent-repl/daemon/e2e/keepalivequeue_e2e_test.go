@@ -50,6 +50,9 @@ func heldByKeepAlivePing(t *testing.T, s *keepAliveSession, text string) keepAli
 	s.syncSweep(t)
 	writeCmd(t, s.conn, fmt.Sprintf(
 		`{"requestId":"r-held","submitPrompt":{"text":%q,"promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, text))
+	// The ping is parked on its gate, so the hold below is the daemon's
+	// decision rather than the outcome of a race with the fake.
+	defer s.h.releasePingGate(t)
 
 	var entry *frontendv1.QueueEntry
 	awaitAll(t, s.conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
@@ -77,7 +80,7 @@ func heldByKeepAlivePing(t *testing.T, s *keepAliveSession, text string) keepAli
 // rather than being an unattributable "please wait".
 func TestE2EAPromptHeldByAPingNamesTheTurnHoldingIt(t *testing.T) {
 	// Arrange + Act
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	held := heldByKeepAlivePing(t, s, "held-by-the-ping")
 
 	// Assert
@@ -93,7 +96,7 @@ func TestE2EAPromptHeldByAPingNamesTheTurnHoldingIt(t *testing.T) {
 // classifier can produce.
 func TestE2EAPromptHeldByAPingIsNeverClassified(t *testing.T) {
 	// Arrange + Act
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	held := heldByKeepAlivePing(t, s, "held-and-unclassified")
 
 	// Assert
@@ -111,7 +114,7 @@ func TestE2EAPromptHeldByAPingIsNeverClassified(t *testing.T) {
 // rather than honored into a corrupted conversation.
 func TestE2EAPromptHeldByAPingCannotBeForcedThrough(t *testing.T) {
 	// Arrange
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	held := heldByKeepAlivePing(t, s, "held-and-forced")
 
 	// Act
@@ -132,7 +135,7 @@ func TestE2EAPromptHeldByAPingCannotBeForcedThrough(t *testing.T) {
 // would be a prompt they can neither run nor discard.
 func TestE2EAPromptHeldByAPingCanStillBeCancelled(t *testing.T) {
 	// Arrange
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	held := heldByKeepAlivePing(t, s, "held-and-cancelled")
 
 	// Act
@@ -172,7 +175,7 @@ func TestE2EAPromptHeldByAPingCanStillBeCancelled(t *testing.T) {
 // later, which is worse than not offering a cancel at all.
 func TestE2EACancelledHoldRunsNoTurnForIt(t *testing.T) {
 	// Arrange
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	held := heldByKeepAlivePing(t, s, "cancelled-never-runs")
 	writeCmd(t, s.conn, fmt.Sprintf(`{"requestId":"r-cancel","queueCancel":{"entryId":%q}}`, held.entry.GetId()))
 	if ack := awaitAck(t, s.conn, "r-cancel", "the cancel"); !ack.GetOk() {
@@ -209,7 +212,7 @@ func TestE2EACancelledHoldRunsNoTurnForIt(t *testing.T) {
 // has been rewound, the prompt the user typed is submitted and answered.
 func TestE2EAHeldPromptIsDeliveredWhenThePingEnds(t *testing.T) {
 	// Arrange + Act
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	held := heldByKeepAlivePing(t, s, "delivered-after-the-ping")
 
 	// Assert
@@ -232,7 +235,7 @@ func TestE2EAHeldPromptIsDeliveredWhenThePingEnds(t *testing.T) {
 // ping the rewind existed to erase.
 func TestE2EAHeldPromptIsDeliveredOnTheRewoundConversation(t *testing.T) {
 	// Arrange
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	before := s.vendorID
 	// Without a transcript on disk the rewind degrades to un-rewound delivery
 	// and no new identity ever exists to assert on.
