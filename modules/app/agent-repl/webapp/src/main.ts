@@ -133,7 +133,7 @@ import {
 } from "./sidebar.js";
 import { ConversationStore } from "./store.js";
 import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
-import { VersionSkewGuard } from "./version-skew.js";
+import { type DaemonBuild, VersionSkewGuard } from "./version-skew.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe, type WsStateFreshness } from "./ws.js";
 import {
   bindLogContext,
@@ -1151,14 +1151,21 @@ async function boot(): Promise<void> {
         // Whether THIS frame was the connect StateSnapshot — the signal the
         // history request waits for (it carries no conversation of its own).
         let isSnapshot = false;
-        // The daemon PROCESS identity this snapshot came from, which the
-        // version-skew guard compares against the one this page pinned.
-        let daemonBootId = "";
+        // The daemon BUILD this snapshot came from, which the version-skew
+        // guard compares against the one this page pinned. Deliberately NOT the
+        // boot id: that changes on every restart, so an ordinary bounce
+        // reloaded every page and threw away the applied conversation store
+        // each one was holding (version-skew.ts).
+        let daemonBuild: DaemonBuild | null = null;
         try {
           const decoded = decodeFrontendFrame(data);
           isSnapshot = decoded.frame.case === "snapshot";
           if (decoded.frame.case === "snapshot") {
-            daemonBootId = decoded.frame.value.daemon?.bootId ?? "";
+            const daemon = decoded.frame.value.daemon;
+            daemonBuild = {
+              version: daemon?.daemonVersion ?? "",
+              binaryMtimeMs: Number(daemon?.daemonBinaryMtimeMs ?? 0),
+            };
           }
           dispatcher.observe(decoded);
           effects = adapter.apply(decoded);
@@ -1251,11 +1258,12 @@ async function boot(): Promise<void> {
           });
           // AFTER adoption, never before: a snapshot this page failed to ingest
           // proves nothing about which daemon build this bundle can talk to,
-          // and pinning its boot id would let a wedged page believe it is
-          // current. A CHANGED boot id means the daemon restarted (possibly
-          // redeployed) under a page that cannot be redeployed in place, so the
-          // page fetches itself again.
-          versionSkew.observeSnapshotAdoption(daemonBootId);
+          // and pinning its build would let a wedged page believe it is
+          // current. A CHANGED build means a redeploy happened under a page
+          // that cannot be redeployed in place, so the page fetches itself
+          // again. An unchanged one — the ordinary bounce — leaves the page and
+          // its applied history alone.
+          if (daemonBuild !== null) versionSkew.observeSnapshotAdoption(daemonBuild);
         }
         // The rail, painted from the SAME burst the feed and the footer are
         // ingesting: on a connect snapshot the roster frame rides in with the
