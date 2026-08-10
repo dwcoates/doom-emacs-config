@@ -385,5 +385,64 @@ placement is recorded rather than performed."
   (should (memq #'agent-repl--open-progress-react-to-pushed-state
                 agent-repl-ws-state-transition-functions)))
 
+;;;; ---- Teardown when the workspace itself goes away ----------------------
+
+(ert-deftest agent-repl-test-open-progress-abandon-cancels-the-escalation ()
+  "Closing a workspace mid-open disarms its escalation timer.
+Regression: the timer outlived the workspace and later emitted a record
+against a name the registry no longer resolved."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (agent-repl--open-progress-start "alpha-ws")
+    (let ((timer (plist-get (agent-repl--open-progress-entry "alpha-ws") :timer)))
+      ;; Act
+      (agent-repl--open-progress-abandon "alpha-ws")
+      ;; Assert
+      (should-not (memq timer timer-list)))))
+
+(ert-deftest agent-repl-test-open-progress-abandon-drops-the-entry ()
+  "An abandoned placeholder leaves no registry entry behind."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (agent-repl--open-progress-start "alpha-ws")
+    ;; Act
+    (agent-repl--open-progress-abandon "alpha-ws")
+    ;; Assert
+    (should-not (agent-repl--open-progress-active-p "alpha-ws"))))
+
+(ert-deftest agent-repl-test-open-progress-abandon-kills-the-buffer ()
+  "An abandoned placeholder leaves no standing buffer: there is no workspace
+left for the user to read a verdict about."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (agent-repl--open-progress-start "alpha-ws")
+    (let ((buf (plist-get (agent-repl--open-progress-entry "alpha-ws") :buffer)))
+      ;; Act
+      (agent-repl--open-progress-abandon "alpha-ws")
+      ;; Assert
+      (should-not (buffer-live-p buf)))))
+
+(ert-deftest agent-repl-test-open-progress-abandon-without-a-placeholder-is-nil ()
+  "A workspace closed with no open in flight tears nothing down."
+  ;; Arrange / Act / Assert
+  (agent-repl-test--with-open-progress
+    (should-not (agent-repl--open-progress-abandon "alpha-ws"))))
+
+(ert-deftest agent-repl-test-open-progress-abandon-leaves-peers-alone ()
+  "Closing one workspace must not tear down another workspace's placeholder."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (agent-repl--open-progress-start "alpha-ws")
+    (agent-repl--open-progress-start "beta-ws")
+    ;; Act
+    (agent-repl--open-progress-abandon "alpha-ws")
+    ;; Assert
+    (should (agent-repl--open-progress-active-p "beta-ws"))))
+
+(ert-deftest agent-repl-test-open-progress-subscribes-to-ws-del ()
+  "The teardown is wired to workspace deletion, not merely available."
+  ;; Arrange / Act / Assert
+  (should (memq #'agent-repl--open-progress-abandon agent-repl-ws-del-hook)))
+
 (provide 'test-open-progress)
 ;;; test-open-progress.el ends here
