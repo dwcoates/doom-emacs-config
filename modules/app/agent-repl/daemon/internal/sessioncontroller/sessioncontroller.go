@@ -489,6 +489,12 @@ type Manager struct {
 	// dependency, so it cannot be a Config field.
 	shutdownLease shutdownLeaseBinding
 
+	// restart is the planned-bounce grace window every failure bound in this
+	// package consults before it fires (restartepoch.go). It has its own mutex
+	// and is deliberately NOT under mu: the choke points that read it are on
+	// the sweep and teardown paths, which already hold mu at different depths.
+	restart restartEpoch
+
 	mu   sync.Mutex
 	byWS map[string]*sessionController // workspace -> live session controller
 	// parked is the boot-materialized drain-park ledger: workspace -> the
@@ -1437,40 +1443,36 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
 
-	// THE CLASSIFIER NEVER RUNS ON A DRAIN-HELD ENTRY. It answers exactly one
-	// question — should this prompt interrupt the turn in front of it — and a
-	// prompt parked by a scheduled bounce has no turn in front of it to
-	// interrupt. Asking anyway would spend a model call to produce a verdict
-	// that could only be wrong: an INTERJECT would demand an interrupt on
-	// behalf of a prompt the lease exists to hold back.
-	if entry.drainHeld() {
-		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q schedule=%s classifier=SKIPPED (parked by the drain lease)",
-			entry.id, d.sessionID, workspace, origin, entry.shutdownHoldScheduleID)
-		m.publish(d.sessionID, view, recs)
-		return parked, nil
-	}
-	// THE CLASSIFIER NEVER RUNS ON A KEEP-ALIVE-HELD ENTRY EITHER, and the
-	// reason is sharper than the drain lease's. The classifier answers exactly
-	// one question — should this prompt interrupt the turn in front of it —
-	// and the turn in front of this one is a machine-generated ping. Spending a
-	// model call to judge whether the user's prompt should interrupt the
-	// daemon's own cache refresh would produce a verdict that could only be
-	// wrong: INTERJECT would demand an interrupt whose whole effect is to leave
-	// a half-finished ping in the transcript the rewind is about to clean up.
-	if entry.keepAliveHeld() {
-		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q keep_alive_turn=%s classifier=SKIPPED (held behind a cache keep-alive turn)",
-			entry.id, d.sessionID, workspace, origin, entry.keepAliveHoldTurnID)
-		m.publish(d.sessionID, view, recs)
-		return parked, nil
-	}
-	// THE CLASSIFIER NEVER RUNS ON A REVIVAL-PARKED ENTRY EITHER. The turn in
-	// front of it is the revival's own `/compact`, and the only verdict the
-	// classifier could return that changes anything — INTERJECT — would demand
-	// an interrupt of the compaction the user chose to pay for. Spending a model
-	// call to ask for that is spending it to be wrong.
-	if entry.revivalHeld() {
-		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q revival_session=%s classifier=SKIPPED (parked by an in-flight compact-first revival)",
-			entry.id, d.sessionID, workspace, origin, entry.revivalHoldSessionID)
+	// THE CLASSIFIER NEVER RUNS ON A HELD ENTRY, WHATEVER HOLDS IT, and it is
+	// ONE test rather than one per hold.
+	//
+	// The classifier answers exactly one question — should this prompt
+	// interrupt the turn in front of it — and every hold is a statement that
+	// the turn in front of this entry is not one an interrupt may reach:
+	//
+	//   - the DRAIN LEASE parks a prompt that has no turn in front of it at all;
+	//   - a KEEP-ALIVE ping is machine-generated, and interrupting it would
+	//     leave a half-finished ping in the transcript the rewind is about to
+	//     clean up;
+	//   - a REVIVAL's compaction is the cut the user chose to pay for;
+	//   - a STALE-BUILD REFRESH's turn is the one the deferral exists to
+	//     protect, and interrupting it is the refresh's only possible effect.
+	//
+	// So the only verdict that could change anything, INTERJECT, is one this
+	// call could only be wrong to return, and the model call is not spent.
+	//
+	// IT USED TO BE FOUR SEPARATE TESTS, and the fourth was never written. A
+	// prompt parked behind a stale-build refresh was created HOLD by the queue
+	// and then re-stamped ERROR by a classifier that should never have run on
+	// it, so an entry the user could see said nothing had decided it. queueEntry
+	// already answers "is anything holding this" in one place for every delivery
+	// path (queue.go, held); asking the same predicate here is what stops the
+	// next hold from needing a fifth test nobody remembers to add.
+	if entry.held() {
+		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q classifier=SKIPPED (held) schedule=%q keep_alive_turn=%q revival_session=%q build_refresh_session=%q",
+			entry.id, d.sessionID, workspace, origin,
+			entry.shutdownHoldScheduleID, entry.keepAliveHoldTurnID,
+			entry.revivalHoldSessionID, entry.buildRefreshHoldSessionID)
 		m.publish(d.sessionID, view, recs)
 		return parked, nil
 	}
