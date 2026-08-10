@@ -599,6 +599,15 @@ type Manager struct {
 	// stands on does not heal with time — and it is cleared only by an explicit
 	// user action.
 	vanishedResume map[string]*vanishedResumeFence
+	// openFenceRefusals tracks, per workspace, whether an open attempt refused
+	// by the vanished-resume fence (openfailure.go) has already been reported
+	// at WARN this boot. It is the loudness dedup for the OPEN CALLER's own
+	// wrapper line, distinct from vanishedResume itself: the fence's own
+	// bring-up-time warnf already reports the terminal fact once, and this map
+	// keeps the open path from repeating it at ERROR on every retry. Starting
+	// empty in New is what makes it "per boot" — a restarted daemon warns once
+	// again for the new boot.
+	openFenceRefusals map[string]bool
 	// buildBounced remembers the sessions already bounced for a stale bundle,
 	// so a shim that comes back still reporting a mismatched build (a bundle
 	// whose identity cannot move, a stamp that is wrong) is loud ONCE instead
@@ -1025,6 +1034,7 @@ func New(cfg Config) (*Manager, error) {
 		shimBuild:                 make(map[string]string),
 		bringUpFailures:           make(map[string]*bringUpStreak),
 		vanishedResume:            make(map[string]*vanishedResumeFence),
+		openFenceRefusals:         make(map[string]bool),
 		buildBounced:              make(map[string]bool),
 		buildRefresh:              make(map[string]*buildRefreshState),
 		staleRefreshArms:          make(map[string]*staleRefreshArm),
