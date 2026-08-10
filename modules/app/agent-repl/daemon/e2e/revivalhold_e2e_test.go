@@ -81,15 +81,13 @@ func heldByPendingCompaction(t *testing.T, s *keepAliveSession, text string) rev
 			}
 			return false
 		},
-		"the compaction turn's own reply": func(frame *frontendv1.FrontendFrame) bool {
-			for _, item := range deltaItems(frame, s.cwd) {
-				if strings.Contains(assistantText(item), echoOf(compactCommand)) {
-					return true
-				}
-			}
-			return false
-		},
 	})
+	// The compaction turn is awaited on the DURABLE RECORD, not the feed: a
+	// context cut the daemon submitted leaves no residue in any rendering
+	// (sessioncontroller/contextcutexclude.go), so its reply is not on this
+	// socket at all. Waiting for it here is what leaves the caller at a defined
+	// point — the compaction turn has run, and only its LANDING is outstanding.
+	awaitDaemonCompactRan(t, s)
 	return revivalHold{session: s, entry: entry, text: text, workspace: workspace}
 }
 
