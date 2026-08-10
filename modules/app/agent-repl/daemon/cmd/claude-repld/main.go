@@ -1219,6 +1219,14 @@ func main() {
 			daemonLog.With("operation", "shutdown", "source", "frontend", "stop_shims", req.stopShims, "cause", req.cause.String()).Log("claude-repld: shutdown command received")
 		}
 		ready.ready.Store(false)
+		// STEP ZERO OF EVERY INTENTIONAL SHUTDOWN: tell the clients. This runs
+		// before any listener is torn down, because the announcement travels
+		// over the very sockets the teardown is about to close — announcing
+		// afterwards is announcing to nobody. A client that hears it opens its
+		// own BOUNDED quiet window instead of alarming; a client that does not
+		// alarms exactly as it does today, which is why a failed announcement
+		// is logged loudly rather than shrugged off.
+		announceIntentionalRestart(daemonLog, req)
 		daemonLog.With("operation", "shutdown-stop-workspace-creation").Log("claude-repld: shutdown step: stopping workspace creation workers")
 		cancelWorkspaceCreate()
 		daemonLog.With("operation", "shutdown-all-sessions").Log("claude-repld: shutdown step: stopping session work (idle sweeper drain, shim stop decisions)")
