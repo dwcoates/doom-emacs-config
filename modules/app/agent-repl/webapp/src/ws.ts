@@ -63,6 +63,17 @@ export class WsClient {
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
   private freshness: WsStateFreshness = "disconnected";
   private pendingReachable = false;
+
+  /**
+   * This socket's current freshness, for a caller that must decide between
+   * dialling and asking a live connection for something.
+   *
+   * Read-only on purpose: the transitions are this class's, and a caller that
+   * could write this could claim currentness no snapshot had established.
+   */
+  get state(): WsStateFreshness {
+    return this.freshness;
+  }
   /**
    * Callers parked in `whenCurrent`, resolved by the transition INTO "current"
    * (never by polling). Each entry owns its own timeout, and settling either

@@ -155,3 +155,127 @@ describe("ConnectResync", () => {
     expect(h.sent).toEqual([snapshot("/ws", 13, "f-old")]);
   });
 });
+
+/**
+ * ADOPT-AND-RETRY ON A CHANGED DAEMON IDENTITY — the zombie-page repair.
+ *
+ * Every trigger used to be a SOCKET event, so a page whose socket never cycled
+ * was never told to catch up: a hidden webview whose timers WebKit froze, a
+ * close that was never dispatched, or a reconnect whose snapshot landed after
+ * this connection's one resync had already fired. The page then held a store
+ * belonging to a daemon that no longer existed, with nothing in its own
+ * lifecycle left to ask again.
+ */
+describe("ConnectResync daemon identity", () => {
+  it("pins the first daemon boot id it is told about", () => {
+    // Arrange
+    const h = harness();
+    // Act
+    const rearmed = h.trigger.observeDaemonIdentity("boot-1");
+    // Assert
+    expect(rearmed).toBe(false);
+    expect(h.trigger.bootId).toBe("boot-1");
+  });
+
+  it("re-arms a resync when the daemon identity changes", () => {
+    // Arrange — this connection has already spent its one resync.
+    const h = harness();
+    h.trigger.onConnect();
+    h.trigger.observeDaemonIdentity("boot-1");
+    h.trigger.observe(true, snapshot("/ws", 40));
+    h.sent.length = 0;
+    // Act — the same socket is served a snapshot from a DIFFERENT daemon.
+    h.trigger.observeDaemonIdentity("boot-2");
+    h.trigger.observe(false, snapshot("/ws", 40));
+    // Assert
+    expect(h.sent).toEqual([snapshot("/ws", 40)]);
+  });
+
+  it("asks from the applied high-water mark rather than replaying everything", () => {
+    // Arrange
+    const h = harness();
+    h.trigger.observeDaemonIdentity("boot-1");
+    // Act
+    h.trigger.observeDaemonIdentity("boot-2");
+    h.trigger.observe(false, snapshot("/ws", 7117));
+    // Assert — a bounce that changed no build left every applied item valid.
+    expect(h.sent[0]?.fromSeq).toBe(7117);
+  });
+
+  it("adopts the live identity so the resync it provokes is an ordinary match", () => {
+    // Arrange
+    const h = harness();
+    h.trigger.observeDaemonIdentity("boot-1");
+    h.trigger.observeDaemonIdentity("boot-2");
+    // Act — the fresh snapshot the resync provokes carries the adopted id.
+    const rearmedAgain = h.trigger.observeDaemonIdentity("boot-2");
+    // Assert
+    expect(rearmedAgain).toBe(false);
+    expect(h.trigger.bootId).toBe("boot-2");
+  });
+
+  it("does not re-arm when the daemon identity is unchanged", () => {
+    // Arrange — the ordinary case: every snapshot of one daemon's lifetime.
+    const h = harness();
+    h.trigger.onConnect();
+    h.trigger.observeDaemonIdentity("boot-1");
+    h.trigger.observe(true, snapshot("/ws", 40));
+    h.sent.length = 0;
+    // Act
+    h.trigger.observeDaemonIdentity("boot-1");
+    h.trigger.observe(false, snapshot("/ws", 40));
+    // Assert
+    expect(h.sent).toEqual([]);
+  });
+
+  it("refuses a snapshot that carried no daemon boot id", () => {
+    // Arrange — the daemon stamps a DaemonView on every connect snapshot, so
+    // an absent one is a malformed frame rather than a tolerated gap.
+    const h = harness();
+    // Act, Assert
+    expect(() => h.trigger.observeDaemonIdentity("")).toThrow(/empty daemon boot id/);
+  });
+});
+
+/**
+ * THE VISIBILITY TRIGGER's half of the repair. Becoming visible is itself
+ * evidence a throttled page may be behind, and the forced check takes the same
+ * single dispatch path every other resync does.
+ */
+describe("ConnectResync forceResync", () => {
+  it("re-arms a connection that has already spent its resync", () => {
+    // Arrange
+    const h = harness();
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    h.sent.length = 0;
+    // Act
+    h.trigger.forceResync("visibilitychange_visible");
+    h.trigger.observe(false, snapshot("/ws", 12));
+    // Assert
+    expect(h.sent).toEqual([snapshot("/ws", 12)]);
+  });
+
+  it("still refuses to ask before a workspace is known", () => {
+    // Arrange — Manager.Resync looks the workspace up by exact key, so an
+    // empty one is a loud nack rather than a defaulted match.
+    const h = harness();
+    // Act
+    h.trigger.forceResync("webview_focus");
+    h.trigger.observe(false, snapshot("", 0));
+    // Assert
+    expect(h.sent).toEqual([]);
+  });
+
+  it("asks once per force rather than on every later frame", () => {
+    // Arrange
+    const h = harness();
+    h.trigger.forceResync("webview_focus");
+    h.trigger.observe(false, snapshot("/ws", 3));
+    h.sent.length = 0;
+    // Act
+    h.trigger.observe(false, snapshot("/ws", 3));
+    // Assert
+    expect(h.sent).toEqual([]);
+  });
+});
