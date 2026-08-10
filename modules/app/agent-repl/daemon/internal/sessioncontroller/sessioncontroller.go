@@ -3372,6 +3372,12 @@ func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID st
 	// forever. Resolution, not deletion — the card keeps its identity and its
 	// detail and is re-sent with resolved_at_ms stamped (sinks.go).
 	d.consumer.resolveWithheldDegradations("shim_ready")
+	// AND THE CARDS A BOUNCE PUT UP. Same edge, same reasoning, different
+	// source: those cards were minted while the daemon was going away or coming
+	// back, and a live wired shim is the recovery event that disproves them.
+	// Left alone they carried resolved_at_ms=0 forever and resurfaced hours
+	// later on every reconnect (sinks.go, resolveBounceWindowCards).
+	d.consumer.resolveBounceWindowCards("shim_ready")
 	// The pid and the build identity are BOTH only trustworthy on a live
 	// connection, and this is the moment the connection is proven usable. A
 	// shim running a superseded bundle is bounced from here onto the current

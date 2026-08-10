@@ -2842,15 +2842,98 @@ func (c *consumer) resolveWithheldDegradations(reason string) {
 				c.sessionID, uuid, reason)
 			continue
 		}
-		if errclass.IsResolved(failure) {
+		c.settleRetainedCard(uuid, failure, reason, "withheld degradation", "live_successor_healthy")
+	}
+}
+
+// settleRetainedCard stamps ONE retained card resolved and re-publishes it.
+//
+// IT IS THE ONLY WAY A CARD IS SETTLED IN THIS PACKAGE, because every
+// resolution edge owes the same four things and a second copy of them would
+// drift: the card keeps its uuid, its type and its whole source detail; it is
+// re-sent with resolved_at_ms stamped rather than deleted, so the history stays
+// queryable and a resync replays the SETTLED card instead of re-opening the
+// alarm; the retention is updated so a later snapshot carries the settled copy;
+// and the settlement is logged with the reason that closed it.
+//
+// An ALREADY-RESOLVED card is a no-op. Two recovery events can legitimately
+// race for one card, and the loser must not re-stamp a later instant onto a
+// settlement that already happened.
+func (c *consumer) settleRetainedCard(uuid string, failure *frontendv1.FailureCardView, reason, label, decision string) {
+	if errclass.IsResolved(failure) {
+		return
+	}
+	resolved := proto.Clone(failure).(*frontendv1.FailureCardView)
+	errclass.Resolve(resolved, c.now())
+	c.retainFailure(uuid, resolved)
+	c.logf("session-controller: %s card RESOLVED session=%s uuid=%s type=%s resolved_at_ms=%d reason=%s decision=%s",
+		label, c.sessionID, uuid, failureType(resolved), errclass.ResolvedAtMs(resolved), reason, decision)
+	c.pushLocalItem(c.retainedFailure(uuid))
+}
+
+// bounceWindowCardTypes are the card classes a planned bounce mints and a
+// successful bring-up disproves.
+//
+// EACH ONE IS WINDOW-SHAPED AND WAS RECORDED AS IF IT WERE EVENT-SHAPED. "The
+// conversation could not be resumed" and "the session controller was
+// unreachable" are true accounts of something that happened during a bounce,
+// and they stop describing this session the moment a live shim wires. Left
+// unresolved they lingered with resolved_at_ms=0 and resurfaced hours later on
+// every reconnect, because a durable card with no closing edge never acquires
+// one.
+//
+// It is a CLOSED list rather than "resolve everything". A card that a healthy
+// bring-up does not disprove — a tool failure, a permission denial, a vendor
+// error inside a turn — is still true afterwards, and settling it because the
+// shim came up would be the daemon claiming something it did not verify.
+var bounceWindowCardTypes = []errclass.Type{
+	// "the Claude conversation could not be resumed" — the bring-up this card
+	// describes is the one that has now succeeded.
+	errclass.TypeSessionResumeFailed,
+	// "a bring-up ended without wiring, and the fresh retry ended the same
+	// way" — disproved by a wire, which is the event this resolution runs on.
+	errclass.TypeSessionStartFailed,
+	// "the establishment deadline elapsed with no verdict at all" — a wait that
+	// ran out, whose verdict has now arrived.
+	errclass.TypeSessionNotEstablished,
+}
+
+// resolveBounceWindowCards settles the cards a bounce put up, now that this
+// session has a live shim behind it.
+//
+// THE EDGE IS THE RECOVERY EVENT, which is the whole point of goal E: a card
+// minted because the daemon was going away is closed by the daemon having come
+// back, rather than by a timer or by the user dismissing it.
+func (c *consumer) resolveBounceWindowCards(reason string) {
+	wanted := make(map[errclass.Type]struct{}, len(bounceWindowCardTypes))
+	for _, t := range bounceWindowCardTypes {
+		wanted[t] = struct{}{}
+	}
+	c.mu.Lock()
+	// Snapshot in FIRST-SEEN order, so a session holding several settles them
+	// in the order they were raised rather than in Go's map order.
+	type candidate struct {
+		uuid    string
+		failure *frontendv1.FailureCardView
+	}
+	var candidates []candidate
+	for _, uuid := range c.failOrder {
+		failure := c.failItems[uuid].GetFailureCard()
+		if failure == nil {
 			continue
 		}
-		resolved := proto.Clone(failure).(*frontendv1.FailureCardView)
-		errclass.Resolve(resolved, c.now())
-		c.retainFailure(uuid, resolved)
-		c.logf("session-controller: withheld degradation card RESOLVED session=%s uuid=%s type=%s resolved_at_ms=%d reason=%s decision=live_successor_healthy",
-			c.sessionID, uuid, failureType(resolved), errclass.ResolvedAtMs(resolved), reason)
-		c.pushLocalItem(c.retainedFailure(uuid))
+		kind, ok := errclass.TypeOf(failure.GetKind())
+		if !ok {
+			continue
+		}
+		if _, want := wanted[kind]; !want {
+			continue
+		}
+		candidates = append(candidates, candidate{uuid: uuid, failure: failure})
+	}
+	c.mu.Unlock()
+	for _, item := range candidates {
+		c.settleRetainedCard(item.uuid, item.failure, reason, "bounce window", "live_shim_wired")
 	}
 }
 
