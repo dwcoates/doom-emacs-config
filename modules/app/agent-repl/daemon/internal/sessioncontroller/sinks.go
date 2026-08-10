@@ -314,13 +314,21 @@ type PromptReceiptStore interface {
 	// interrupt, so the successor daemon can re-drive it. It runs BEFORE the
 	// interrupt is delivered.
 	RecordPendingResumption(r statedb.PendingResumption) error
-	// PendingResumptions lists what a workspace is still owed, oldest
-	// interruption first. It is the LEVEL the re-drive is triggered off, which
-	// is what makes the resumption survive a bounce mid-resumption.
+	// PendingResumptions lists what a workspace is still owed AND UNCLAIMED,
+	// oldest interruption first. It is the LEVEL the re-drive is triggered off,
+	// which is what makes the resumption survive a bounce mid-resumption.
 	PendingResumptions(workspace string) ([]statedb.PendingResumption, error)
-	// DischargeResumption discards one owed resumption, reporting whether one
-	// was owed. Both the re-drive's acceptance and the user preempting it
-	// discharge through here.
+	// UndischargedResumptions lists every resumption row a workspace carries,
+	// claimed or not. It is the PREEMPTION's reading: a user who moved on
+	// abandons the turn whether or not a re-drive already claimed it.
+	UndischargedResumptions(workspace string) ([]statedb.PendingResumption, error)
+	// ClaimResumptionForDelivery takes one owed resumption for a re-drive about
+	// to submit, reporting whether this caller got it. It is the fence that
+	// makes one interrupted turn re-driven once (turnresumption.go).
+	ClaimResumptionForDelivery(requestID string, atMs int64) (bool, error)
+	// DischargeResumption discards one resumption, claimed or not, reporting
+	// whether one was there. The re-drive's instruction reaching the vendor
+	// conversation and the user preempting it both discharge through here.
 	DischargeResumption(requestID string) (bool, error)
 }
 
@@ -2263,6 +2271,16 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 		c.logf("session-controller: conversation translate failed session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
 		return
 	}
+	// THE RE-DRIVE'S DELIVERY IS CONFIRMED BY ITS OWN SUPPRESSION. The curator
+	// just removed the daemon's internal instruction from this event, which is
+	// the evidence — and the only evidence — that the re-drive carrying it
+	// reached the vendor conversation (turnresumption.go).
+	//
+	// It runs BEFORE the nil-feed return, because an event carrying only the
+	// instruction curates to no feed at all and is exactly the ordinary case.
+	// It runs on replayed events too: a replay re-establishes the same fact,
+	// and the discharge is idempotent.
+	c.dischargeDeliveredResumptions(curated.SuppressedInternalResumes)
 	cd, envs := curated.Feed, curated.Envelopes
 	if cd == nil {
 		return // known-but-non-conversational vendor payload
