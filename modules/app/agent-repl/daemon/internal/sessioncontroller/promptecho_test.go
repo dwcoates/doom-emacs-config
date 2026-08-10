@@ -10,8 +10,6 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
-
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // --- helpers ----------------------------------------------------------------
@@ -48,18 +46,7 @@ func (h *queueHarness) userTurns() []pushedTurn {
 // own (that field is empty on every line the file plane produces).
 func transcriptUserEvent(t *testing.T, seq uint64, uuid, text string) *corev1.Event {
 	t.Helper()
-	a, err := anypb.New(&datav1.TranscriptLine{
-		Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
-			Envelope: &datav1.LineEnvelope{Uuid: uuid},
-			Message: &datav1.ApiUserMessage{
-				Content: &datav1.ApiUserMessage_ContentString{ContentString: text},
-			},
-		}},
-	})
-	if err != nil {
-		t.Fatalf("anypb.New: %v", err)
-	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return userLineEvent(t, seq, uuid, text, datav1.OriginKind_ORIGIN_KIND_UNSPECIFIED)
 }
 
 // --- the receipt ------------------------------------------------------------
