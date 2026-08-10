@@ -10,6 +10,8 @@ import {
   decodeFailureCardView,
   decodeFailureKind,
   isVisuallySupportedFrame,
+  resetUnknownFrameArmTally,
+  unknownFrameArmTally,
 } from "../src/frontend-proto.js";
 
 /** Wrap a plain object as a protojson string and decode it. */
@@ -986,9 +988,56 @@ describe("decodeFrontendFrame — DaemonView", () => {
   });
 });
 
-describe("decodeFrontendFrame — unknown / empty variants hard-error", () => {
-  it("throws on an unknown frame variant key", () => {
-    expect(() => decode({ bogusVariant: {} })).toThrow(/unrecognized field/);
+describe("decodeFrontendFrame — unknown / empty variants", () => {
+  /**
+   * AMENDED DELIBERATELY. This case used to assert a throw, and that throw was
+   * a defect rather than a guarantee: the daemon and this bundle deploy
+   * separately, `FrontendFrame` grows by ADDING oneof arms, and hard-failing on
+   * an arm the bundle predates makes every additive daemon change wedge ingest
+   * — no adoption, an expiring snapshot lease, and a force-reloaded page that
+   * cannot read the frame either. The frame is now tolerated, counted, and
+   * ignored; the strictness that mattered (unknown fields beside a KNOWN arm)
+   * is asserted immediately below and is unchanged.
+   */
+  it("tolerates a frame that carries only an arm this bundle predates", () => {
+    // Arrange / Act
+    const frame = decode({ bogusVariant: {} });
+    // Assert
+    expect(frame.frame.case).toBe("unknownArm");
+  });
+
+  it("names the unknown arm it ignored", () => {
+    // Arrange / Act
+    const frame = decode({ bogusVariant: {} });
+    // Assert
+    if (frame.frame.case !== "unknownArm") throw new Error("wrong frame");
+    expect(frame.frame.value.field).toBe("bogusVariant");
+  });
+
+  it("counts each frame carrying that arm, which is what the one-line report reads", () => {
+    // Arrange
+    resetUnknownFrameArmTally();
+    // Act
+    decode({ bogusVariant: {} });
+    decode({ bogusVariant: {} });
+    // Assert
+    expect(unknownFrameArmTally().get("bogusVariant")).toBe(2);
+  });
+
+  it("counts unknown arms separately, so one arm's flood cannot mask another", () => {
+    // Arrange
+    resetUnknownFrameArmTally();
+    // Act
+    decode({ bogusVariant: {} });
+    decode({ otherVariant: {} });
+    // Assert
+    expect(unknownFrameArmTally().get("otherVariant")).toBe(1);
+  });
+
+  it("still throws on an unknown field beside a known arm, which is corruption", () => {
+    // Arrange — a frame this page is about to ingest that is NOT the frame the
+    // daemon sent; adopting part of it is how a store goes quietly wrong.
+    expect(() => decode({ workspaceState: WS_STATE, bogusVariant: {} })).toThrow(/unrecognized field/);
   });
 
   it("throws on an empty oneof", () => {
@@ -1101,10 +1150,20 @@ describe("decodeFrontendFrame — required-field validation is loud", () => {
     expect(got.frame.value.interruptConfirmRequired).toBeUndefined();
   });
 
-  it("rejects the retired degradedNotice frame arm (step 11)", () => {
-    expect(() => decode({ degradedNotice: { component: "shim-store", reason: "down" } })).toThrow(
-      /unrecognized field/,
-    );
+  /**
+   * AMENDED DELIBERATELY, for the same reason as the unknown-arm group above:
+   * an arm this bundle does not know is now ignored and counted rather than
+   * thrown on. A RETIRED arm can only reach this page from an OLDER daemon, and
+   * the disposition it deserves is identical — nothing here can render it, and
+   * refusing the frame would wedge ingest instead of skipping one frame. What
+   * must not happen is that it lands in the store unnoticed, which is what the
+   * arm identity asserted here proves it does not.
+   */
+  it("ingests no state from the retired degradedNotice frame arm (step 11)", () => {
+    // Arrange / Act
+    const got = decode({ degradedNotice: { component: "shim-store", reason: "down" } });
+    // Assert
+    expect(got.frame.case).toBe("unknownArm");
   });
 
   it("validates nested snapshot members", () => {
@@ -1319,6 +1378,11 @@ describe("UNSUPPORTED_SHAPES registry", () => {
       "daemonView",
       "workspaceAvailable",
       "hostAction",
+      // Registered so the adapter's ignore path reports it as a DELIBERATE
+      // non-visual (debug) rather than as conversation content the user is
+      // silently missing (warn) — an arm this bundle predates has no visual by
+      // definition.
+      "unknownArm",
     ]);
   });
 
