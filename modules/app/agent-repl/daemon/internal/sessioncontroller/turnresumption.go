@@ -1,7 +1,11 @@
 package sessioncontroller
 
 import (
+	"context"
 	"fmt"
+	"time"
+
+	corev1 "agentrepl/proto/agentshim/core/v1"
 
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/statedb"
@@ -106,6 +110,121 @@ func (m *Manager) recordInterruptedTurnResumption(workspace, sessionID string, c
 	m.logf("session-controller: teardown turn resumption RECORDED ws=%q session=%s path=%s turn_id=%q request_id=%q interrupted_at_ms=%d — the successor daemon re-drives this turn once the session is wired again",
 		workspace, sessionID, cause.path(), turnID, rec.RequestID, rec.InterruptedAtMs)
 }
+
+// driveOwedResumptions re-drives every turn this workspace is still owed.
+//
+// IT IS LEVEL-TRIGGERED, and that is the whole of the exactly-once story. It
+// asks the STORE what is owed rather than remembering what it queued, so:
+//
+//   - a daemon that died between recording and re-driving is indistinguishable
+//     from one that never got round to it — both leave the row, and the next
+//     daemon to wire the session finds it;
+//   - a SECOND bounce landing during the resumption re-drives the same row
+//     rather than a second one, because the row is only discharged when the
+//     re-driven turn is accepted; and
+//   - two wire events for one session (a reattach followed by a respawn) find
+//     an empty set the second time, because the first discharged it.
+//
+// It runs on its own goroutine because the caller is the wire hook, which holds
+// the manager mutex and must not block a bring-up on a submit.
+func (m *Manager) driveOwedResumptions(workspace, sessionID string) {
+	if m.cfg.PromptReceipts == nil {
+		return
+	}
+	owed, err := m.cfg.PromptReceipts.PendingResumptions(workspace)
+	if err != nil {
+		// NEVER read as "nothing is owed". An unreadable store means the answer
+		// is unknown, and the honest report of an unknown is a loud line rather
+		// than a silent no.
+		m.logf("session-controller: turn resumption READ FAILED ws=%q session=%s: %v — whether this session owes a re-drive is UNKNOWN, so none is issued and the record stands for the next wire",
+			workspace, sessionID, err)
+		return
+	}
+	if len(owed) == 0 {
+		return
+	}
+	m.logf("session-controller: turn resumption OWED ws=%q session=%s count=%d — the session is wired again, so the turns the last bounce interrupted are re-driven",
+		workspace, sessionID, len(owed))
+	for _, r := range owed {
+		m.driveOneResumption(workspace, sessionID, r)
+	}
+}
+
+// driveOneResumption submits one owed re-drive and discharges it on acceptance.
+//
+// THE DISCHARGE IS ON ACCEPTANCE, NOT ON ISSUE. A re-drive the shim refused is
+// still owed: discharging it when the submit was merely attempted would lose
+// exactly the work in the case where the successor daemon is itself unhealthy,
+// which is the case this whole path exists for.
+func (m *Manager) driveOneResumption(workspace, sessionID string, r statedb.PendingResumption) {
+	ctx, cancel := context.WithTimeout(m.rootCtx, resumptionSubmitTimeout)
+	defer cancel()
+	_, err := m.submitPromptAs(
+		ctx, workspace, r.RequestID, r.Text, "",
+		"turn-resumption", corev1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART,
+		submitterTurnResumption, leavesParkedPermissions,
+	)
+	if err != nil {
+		m.logf("session-controller: turn resumption SUBMIT FAILED ws=%q session=%s request_id=%q turn_id=%q: %v — the record STANDS, so the next wire tries again rather than the turn being lost",
+			workspace, sessionID, r.RequestID, r.TurnID, err)
+		return
+	}
+	discharged, err := m.cfg.PromptReceipts.DischargeResumption(r.RequestID)
+	if err != nil {
+		// The submit LANDED and the row did not clear. Saying so matters more
+		// than usual: the next wire will re-drive the same turn, which is a
+		// duplicate rather than a loss, and a duplicate nobody was told about
+		// is indistinguishable from the model deciding to repeat itself.
+		m.logf("session-controller: turn resumption DISCHARGE FAILED ws=%q session=%s request_id=%q: %v — the re-drive was ACCEPTED but its record stands, so a later wire may re-drive the same turn",
+			workspace, sessionID, r.RequestID, err)
+		return
+	}
+	m.logf("session-controller: turn resumption RE-DRIVEN ws=%q session=%s request_id=%q turn_id=%q discharged=%v interrupted_at_ms=%d — the work the bounce interrupted continues, with no prompt shown to the user",
+		workspace, sessionID, r.RequestID, r.TurnID, discharged, r.InterruptedAtMs)
+}
+
+// cancelOwedResumptions discards what a workspace is owed because the USER got
+// there first.
+//
+// THE PREEMPTION IS REAL AND IT IS LOUD. Someone who submits a new prompt, or
+// interrupts, after a bounce has moved on: they did not ask for the old turn to
+// resume, and re-driving it behind their back would start work they had
+// implicitly abandoned. But a silent drop is the failure this whole feature
+// exists to end, so the cancellation is recorded against the turn it abandons
+// rather than the row merely disappearing.
+//
+// It is a no-op — and silent — when nothing is owed, which is almost every
+// prompt: a workspace with no interrupted turn behind it must not pay a log
+// line per submit.
+func (m *Manager) cancelOwedResumptions(workspace, cause string) {
+	if m.cfg.PromptReceipts == nil {
+		return
+	}
+	owed, err := m.cfg.PromptReceipts.PendingResumptions(workspace)
+	if err != nil {
+		m.logf("session-controller: turn resumption PREEMPTION READ FAILED ws=%q cause=%s: %v — whether anything was owed is UNKNOWN, so nothing is cancelled and the next wire decides",
+			workspace, cause, err)
+		return
+	}
+	for _, r := range owed {
+		discharged, err := m.cfg.PromptReceipts.DischargeResumption(r.RequestID)
+		if err != nil {
+			m.logf("session-controller: turn resumption PREEMPTION FAILED ws=%q request_id=%q turn_id=%q cause=%s: %v — the record stands, so a later wire may re-drive a turn the user has moved on from",
+				workspace, r.RequestID, r.TurnID, cause, err)
+			continue
+		}
+		m.logf("session-controller: turn resumption CANCELLED ws=%q request_id=%q turn_id=%q cause=%s discharged=%v — the user acted first, so the turn the last bounce interrupted is NOT re-driven",
+			workspace, r.RequestID, r.TurnID, cause, discharged)
+	}
+}
+
+// resumptionSubmitTimeout bounds one re-drive's submit.
+//
+// It is a FAILURE bound rather than a tuned delay: the submit returns as soon
+// as the shim accepts, and this only decides how long a re-drive waits on a
+// session that has stopped answering before leaving the record for the next
+// wire to retry.
+const resumptionSubmitTimeout = 30 * time.Second
 
 // resumptionRequestID mints the re-drive's identity.
 //

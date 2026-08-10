@@ -1284,6 +1284,17 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	if err := m.guardMergeLease(workspace, who, requestID, origin); err != nil {
 		return promptDisposition{}, err
 	}
+	// THE USER GOT THERE FIRST (turnresumption.go). Someone submitting after a
+	// bounce did not ask for the old turn to resume, and re-driving it behind
+	// them would start work they had implicitly abandoned. It is cancelled here
+	// — before the submit, so a resumption cannot slip in alongside — and the
+	// cancellation is recorded rather than the row silently disappearing.
+	//
+	// Only the USER preempts. The daemon's own producers (the keep-alive ping,
+	// a warm compaction, the re-drive itself) are not somebody moving on.
+	if who == submitterUser {
+		m.cancelOwedResumptions(workspace, "user_prompt")
+	}
 	// THE REVIVAL GATE, ahead of ensure() on purpose: ensure() brings a stopped
 	// shim back up, so asking after it would have already paid the bring-up and
 	// silently un-slept the session the gate exists to hold (hibernation.go).
@@ -1598,6 +1609,11 @@ func (m *Manager) noteProgressCounts(workspace string, queueDepth int64) {
 // joined them — so an interrupt that WAS delivered and acked INTERRUPTED within
 // two milliseconds read exactly like one the daemon had silently swallowed.
 func (m *Manager) Interrupt(ctx context.Context, workspace, requestID string) error {
+	// THE USER GOT THERE FIRST (turnresumption.go). Someone pressing stop after
+	// a bounce is telling the session to stop working, which an owed re-drive
+	// would immediately contradict. Cancelled ahead of the stop itself, so a
+	// wire landing mid-interrupt cannot start the very turn being stopped.
+	m.cancelOwedResumptions(workspace, "user_interrupt")
 	d, err := m.existing(workspace)
 	if err != nil {
 		d, err = m.recoverSessionControllerForInterrupt(ctx, workspace, err)

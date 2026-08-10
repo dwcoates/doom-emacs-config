@@ -161,6 +161,28 @@ enum PromptOrigin {
   // via rewind (SessionRewound) before the next real prompt is submitted, so
   // they can never contaminate the model's context either.
   PROMPT_ORIGIN_CACHE_KEEP_ALIVE = 29;
+
+  // Daemon-generated re-drive of a turn a planned bounce interrupted.
+  //
+  // A restart that has to take the shim with it (the shim bundle changed, or
+  // the shim is dead) interrupts whatever turn was running. The vendor SDK has
+  // no resume-the-interrupted-turn primitive — `resume`, `continue` and
+  // `resumeSessionAt` all restore CONTEXT and none restarts an aborted turn —
+  // so the successor daemon has to submit an instruction to continue the work.
+  //
+  // THE SUBMIT IS INVISIBLE AND THE TURN IS NOT. Unlike CACHE_KEEP_ALIVE, whose
+  // whole turn is conversation-plumbing that every consumer excludes, this
+  // turn's OUTPUT is the continuation of work the user asked for and belongs in
+  // the conversation at the interrupted turn's position. Only the daemon's own
+  // instruction is hidden, and it is hidden at the curator rather than by
+  // origin (the daemon drops the `user_message` whose request id carries the
+  // internal re-drive marker), so this value never has to be consulted to
+  // decide what renders.
+  //
+  // What it IS for: saying WHY a turn is running. A status surface reads this
+  // to report "resumed after restart" instead of presenting work the user did
+  // not just ask for as though they had.
+  PROMPT_ORIGIN_RESUME_AFTER_RESTART = 30;
 }
 
 // ---------------------------------------------------------------------------
