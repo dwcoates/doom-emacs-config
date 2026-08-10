@@ -182,4 +182,43 @@ describe("shim runtime logging", () => {
     });
     expect(configuredTerminal).toHaveLength(1);
   });
+
+  it("survives a broken stderr pipe instead of dying with the daemon that owned it", async () => {
+    const log = await configured();
+    vi.spyOn(process.stderr, "write").mockImplementation(() => { throw Object.assign(new Error("write EPIPE"), { code: "EPIPE" }); });
+    expect(() => log.bindLog({ operation: "shim.test.epipe" }).log({}, "after the daemon exited")).not.toThrow();
+  });
+
+  it("records the retirement of the stderr mirror on the durable sink", async () => {
+    const log = await configured();
+    vi.spyOn(process.stderr, "write").mockImplementation(() => { throw new Error("write EPIPE"); });
+    log.bindLog({ operation: "shim.test.epipe" }).log({}, "after the daemon exited");
+    expect(persisted().map((record) => record.operation)).toContain("shim.logging.stderr-mirror");
+  });
+
+  it("keeps logging durably after the stderr mirror is retired", async () => {
+    const log = await configured();
+    const terminal = vi.spyOn(process.stderr, "write").mockImplementation(() => { throw new Error("write EPIPE"); });
+    log.bindLog({ operation: "shim.test.epipe" }).log({}, "first");
+    terminal.mockClear();
+    log.bindLog({ operation: "shim.test.epipe" }).log({}, "second");
+    expect(terminal).not.toHaveBeenCalled();
+    expect(persisted().at(-1)).toMatchObject({ message: "second" });
+  });
+
+  it("retires the mirror on an asynchronous stderr error rather than letting it go uncaught", async () => {
+    const log = await configured();
+    process.stderr.emit("error", new Error("write EPIPE"));
+    const terminal = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    log.bindLog({ operation: "shim.test.epipe" }).log({}, "after the async error");
+    expect(terminal).not.toHaveBeenCalled();
+  });
+
+  it("still surfaces a durable-sink failure after the stderr mirror is retired", async () => {
+    const log = await configured();
+    vi.spyOn(process.stderr, "write").mockImplementation(() => { throw new Error("write EPIPE"); });
+    log.bindLog({ operation: "shim.test.epipe" }).log({}, "retire the mirror");
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }) as typeof writeSync);
+    expect(() => log.bindLog({ operation: "shim.test.epipe" }).log({}, "durable failure")).toThrow("bad fd");
+  });
 });
