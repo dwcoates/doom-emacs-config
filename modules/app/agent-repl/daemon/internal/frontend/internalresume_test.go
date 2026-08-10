@@ -57,7 +57,7 @@ func TestTheInternalResumePromptIsDroppedFromTheConversation(t *testing.T) {
 	items := []*frontendv1.ConversationItem{resumeUserItem("u-1", resumeRequest)}
 
 	// Act.
-	got := dropInternalResumePrompt(items)
+	got, _ := dropInternalResumePrompt(items)
 
 	// Assert.
 	if len(got) != 0 {
@@ -74,7 +74,7 @@ func TestTheReDrivenTurnsOutputSurvivesTheDrop(t *testing.T) {
 	}
 
 	// Act.
-	got := dropInternalResumePrompt(items)
+	got, _ := dropInternalResumePrompt(items)
 
 	// Assert.
 	if len(got) != 1 || got[0].GetUuid() != "a-1" {
@@ -87,7 +87,7 @@ func TestAnOrdinaryUserMessageIsUntouched(t *testing.T) {
 	items := []*frontendv1.ConversationItem{resumeUserItem("u-1", "req-7")}
 
 	// Act.
-	got := dropInternalResumePrompt(items)
+	got, _ := dropInternalResumePrompt(items)
 
 	// Assert.
 	if len(got) != 1 || got[0].GetUuid() != "u-1" {
@@ -101,7 +101,7 @@ func TestAUserMessageWithNoRequestIDIsUntouched(t *testing.T) {
 	items := []*frontendv1.ConversationItem{resumeUserItem("u-1", "")}
 
 	// Act.
-	got := dropInternalResumePrompt(items)
+	got, _ := dropInternalResumePrompt(items)
 
 	// Assert.
 	if len(got) != 1 {
@@ -117,7 +117,7 @@ func TestARequestIDMerelyContainingThePrefixIsUntouched(t *testing.T) {
 	}
 
 	// Act.
-	got := dropInternalResumePrompt(items)
+	got, _ := dropInternalResumePrompt(items)
 
 	// Assert.
 	if len(got) != 1 {

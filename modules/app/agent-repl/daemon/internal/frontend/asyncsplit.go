@@ -62,6 +62,19 @@ type Curation struct {
 	// the caller logs it, because a bubble quietly missing records looks exactly
 	// like a quiet agent.
 	WithheldDetached []string
+	// SuppressedInternalResumes names the re-drive request ids whose internal
+	// instruction this curation removed from the conversation
+	// (internalresume.go).
+	//
+	// It is the ONLY confirmation the daemon has that a re-drive reached the
+	// vendor conversation: the instruction is in the transcript, so the submit
+	// that carried it landed. The session controller discharges the owed
+	// resumption off exactly this, which is why the fact is reported by the
+	// curator rather than re-derived from the event somewhere else.
+	//
+	// It is populated even when the curation feeds nothing — an event carrying
+	// only the instruction is precisely the ordinary case.
+	SuppressedInternalResumes []string
 }
 
 // DetachedFold is one detached agent's contribution from a single event, in
@@ -123,7 +136,20 @@ func CurateEvent(workspace, fence string, ev *corev1.Event) (Curation, error) {
 	if err != nil || cd == nil {
 		return Curation{}, err
 	}
-	c := Curation{Feed: cd, Outcomes: toolOutcomes(ev)}
+	// THE DAEMON'S OWN RE-DRIVE HAS NO PROMPT (internalresume.go), and this is
+	// the choke point every route from a store event to conversation content
+	// passes through — the live push, a connect snapshot's backfill, a resync
+	// replay and a store re-pull alike.
+	//
+	// It runs BEFORE the sidechain partition and before the empty check, so an
+	// event carrying ONLY the internal instruction curates to nothing at all
+	// rather than to an empty delta a client would still be handed.
+	items, suppressed := dropInternalResumePrompt(cd.GetItems())
+	cd.Items = items
+	if len(items) == 0 {
+		return Curation{SuppressedInternalResumes: suppressed}, nil
+	}
+	c := Curation{Feed: cd, Outcomes: toolOutcomes(ev), SuppressedInternalResumes: suppressed}
 	var feed []*frontendv1.ConversationItem
 	folds := map[string]*DetachedFold{}
 	var order []string
