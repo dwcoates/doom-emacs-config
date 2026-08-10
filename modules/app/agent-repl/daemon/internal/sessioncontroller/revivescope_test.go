@@ -77,7 +77,7 @@ func TestScopedCompactCommandsAreRecognizedAsSessionCommands(t *testing.T) {
 			}
 
 			// Act
-			got := lookupSessionCommand(cut.text)
+			got, _ := lookupSessionCommand(cut.text)
 
 			// Assert
 			if got.String() != "SESSION_COMMAND_COMPACT" {
@@ -256,7 +256,7 @@ func TestClearCutSubmitsTheBareClearSessionCommand(t *testing.T) {
 	if cut.text != clearCommandText {
 		t.Fatalf("cut text for clear = %q, want exactly %q", cut.text, clearCommandText)
 	}
-	if got := lookupSessionCommand(cut.text); got.String() != "SESSION_COMMAND_CLEAR" {
+	if got, _ := lookupSessionCommand(cut.text); got.String() != "SESSION_COMMAND_CLEAR" {
 		t.Fatalf("lookupSessionCommand(%q) = %s, want SESSION_COMMAND_CLEAR", cut.text, got)
 	}
 }

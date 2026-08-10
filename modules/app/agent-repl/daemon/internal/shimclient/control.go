@@ -158,6 +158,41 @@ func (c *Client) SetModel(ctx context.Context, model string) (string, error) {
 	return selected, nil
 }
 
+// QuerySelectedModel asks the live shim which model it is CURRENTLY running
+// and returns the shim's own answer.
+//
+// A READ, NOT A CHANGE, and the only reason it exists is the bare
+// argument-less `/model`: that form opens the CLI's own picker, which the
+// daemon cannot stand in for, so without asking it would learn the resulting
+// model only when some later submit re-announced a SystemInit. The picker
+// would name the old model until then, and a hibernation before that would
+// respawn the session on it.
+//
+// A SHIM THAT CANNOT ANSWER IS A HARD FAILURE, never an empty success. The
+// caller's whole reason for asking is to commit a VERIFIED selection, so an
+// empty answer is refused here rather than being written to a record as though
+// somebody had confirmed it.
+func (c *Client) QuerySelectedModel(ctx context.Context) (string, error) {
+	reqID, err := c.newRequestID("query-selected-model")
+	if err != nil {
+		return "", err
+	}
+	ack, nack, err := c.sendAwaitReceipt(ctx, &corev1.QuerySelectedModel{RequestId: reqID}, reqID)
+	if err != nil {
+		return "", err
+	}
+	if nack != nil {
+		c.logf("query-selected-model REFUSED request_id=%s reason=%q", reqID, nack.GetReason())
+		return "", fmt.Errorf("%w: request_id=%s reason=%q", ErrNack, reqID, nack.GetReason())
+	}
+	selected := registry.NormalizeModel(ack.GetSelectedModel())
+	if selected == "" {
+		return "", fmt.Errorf("query selected model: shim ack request_id=%s omitted selected_model", reqID)
+	}
+	c.logf("query-selected-model request_id=%s selected=%q", reqID, selected)
+	return selected, nil
+}
+
 // PermissionResponse sends the answer to an inbound PermissionRequest,
 // correlated by the SAME request_id the shim used. It is fire-and-forget on
 // the control plane (the shim uses it to unblock canUseTool); it is NOT

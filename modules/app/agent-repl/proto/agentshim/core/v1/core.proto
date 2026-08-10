@@ -48,6 +48,7 @@ syntax = "proto3";
 package agentshim.core.v1;
 
 import "google/protobuf/any.proto";
+import "google/protobuf/descriptor.proto";
 import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/agentshim/core/v1;corev1";
@@ -987,6 +988,38 @@ message SubmitPrompt {
   PromptOrigin prompt_origin = 5;
 }
 
+// Carries a model marker's on-the-wire spelling on the enum value that names
+// it.  An EXTENSION rather than a constant because protobuf has no constants:
+// an enum value's option is the only construct that puts a literal into the
+// SCHEMA itself, where every generated runtime — Go, TypeScript, anything
+// added later — reads the same bytes back by reflection instead of restating
+// them.
+extend google.protobuf.EnumValueOptions {
+  string model_marker_literal = 60001;
+}
+
+// The closed set of model names the CLI reports that are NOT model ids.
+//
+// The CLI answers `<synthetic>` whenever it is not running a real nameable
+// model.  Treated as an id it is corrosive twice over: it poisons the live
+// registry record with a value nothing can ever be spawned under, and it
+// reaches the webapp picker as a selectable option that cannot be selected.
+// So a marker must be RECOGNIZED before a reported model is committed, and
+// recognizing it requires the literal.
+//
+// That literal was re-declared SIX times — in Go, in the shim, and in three
+// inline webapp comparisons — kept aligned by review alone, which is exactly
+// the arrangement where one corrected spelling leaves five stale ones and the
+// marker silently becomes an id again on the surfaces that missed the change.
+// This enum is now the one definition, and the option below is how the other
+// five sites read it instead of writing it.
+enum ModelMarker {
+  MODEL_MARKER_UNSPECIFIED = 0;
+  // Not a model: the CLI's own stand-in for "no real nameable model is in
+  // play".  Never a spawnable id, never an offerable picker entry.
+  MODEL_MARKER_SYNTHETIC = 1 [(model_marker_literal) = "<synthetic>"];
+}
+
 // Request a deliberate mid-session model change.  Model selection is a shim
 // operation because only the shim owns the live SDK query.  The daemon forwards
 // this request and commits the model the shim reports in its Ack; frontends
@@ -994,6 +1027,26 @@ message SubmitPrompt {
 message SetModel {
   string request_id = 1;
   string model = 2;
+}
+
+// Ask the shim which model the live query is CURRENTLY on.  A read, not a
+// change: nothing about the session moves as a result of this message.
+//
+// WHY A READ IS NEEDED AT ALL.  The argument-less `/model` opens the CLI's own
+// interactive picker, which the daemon cannot intercept — the selection is
+// made inside the CLI and announced nowhere the daemon is listening.  Without
+// this request the daemon learns the outcome only when some later submit
+// re-announces a SystemInit, so until the user happens to send a prompt the
+// topbar picker names the OLD model, and a hibernation landing in that window
+// respawns the session on the stale one.
+//
+// The answer rides Ack.selected_model, and deliberately not a new field: that
+// value is defined as the SHIM's own post-operation state rather than an echo
+// the daemon assembled, which is exactly what is being asked for here.  A shim
+// that cannot answer NACKs — a guessed model is the failure this whole path
+// exists to remove.
+message QuerySelectedModel {
+  string request_id = 1;
 }
 
 // The shim's SDK-provided model menu.  This is published rather than inferred
@@ -1050,8 +1103,11 @@ message Ack {
   // Set only on an Interrupt's ack; UNSPECIFIED on every other command,
   // whose success is unqualified.
   InterruptOutcome interrupt_outcome = 2;
-  // Set only on a SetModel receipt.  This is the shim's own post-operation
-  // selected model, not an echo assembled by the daemon.
+  // Set on the receipt of EITHER model command — a SetModel (the model after
+  // the change) or a QuerySelectedModel (the model with nothing changed).  One
+  // field for both because both answer the same question and both answer it
+  // with the same authority: the shim's own post-operation selected model, not
+  // an echo assembled by the daemon.  UNSET on every other command's ack.
   string selected_model = 3;
 }
 

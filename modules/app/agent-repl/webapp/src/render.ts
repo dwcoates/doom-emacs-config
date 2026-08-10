@@ -6,6 +6,8 @@
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
 import { bubbleBreathStyle } from "./breathing.js";
+import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/agentshim/frontend/v1/slash-menu_pb";
+import { sessionCommandSpecs } from "../../proto/ts/schema-literals.js";
 import { STREAM_ITEM_CAP, parseJournal } from "./async-stream.js";
 import { clearLogDedup, log } from "./wslog.js";
 import {
@@ -2347,48 +2349,39 @@ function SystemNote(item: SystemItem): string {
 /**
  * The slash form a `SessionCommand` is written as.
  *
- * DERIVED, NEVER RECEIVED. The wire item carries only the enum, so this table
- * is where the text a reader sees comes from — which is precisely why the
- * submitted prompt cannot leak onto this surface: `/model opus` and `/model`
- * both arrive as MODEL and both draw `/model`. The argument the user typed is
- * not on the wire and has nowhere to come from.
+ * DERIVED, NEVER RECEIVED. The wire item carries only the enum, so the text a
+ * reader sees comes from the schema rather than from the frame — which is
+ * precisely why the submitted prompt cannot leak onto this surface: `/model
+ * opus` and `/model` both arrive as MODEL and both draw `/model`. The argument
+ * the user typed is not on the wire and has nowhere to come from.
+ *
+ * READ OFF THE SCHEMA, NOT RE-SPELLED. This used to be a hand-written table
+ * repeating all thirty slash literals a second time, beside the daemon's own
+ * copy of the same facts, with nothing comparing them: a literal corrected in
+ * the daemon left this chip rendering the old spelling, and both sides' tests
+ * passed. The literal now has ONE definition — the enum value's
+ * `session_command_spec` option — and this reads it back.
+ *
+ * Resolved once, on first use: the map is a descriptor walk whose answer is
+ * fixed when the stubs are generated.
  */
-const SESSION_COMMAND_LABELS: Record<SessionCommand, string> = {
-  CLEAR: "/clear",
-  COMPACT: "/compact",
-  MODEL: "/model",
-  COST: "/cost",
-  USAGE: "/usage",
-  STATUS: "/status",
-  CONTEXT: "/context",
-  CONFIG: "/config",
-  HELP: "/help",
-  DOCTOR: "/doctor",
-  LOGIN: "/login",
-  LOGOUT: "/logout",
-  MEMORY: "/memory",
-  PERMISSIONS: "/permissions",
-  AGENTS: "/agents",
-  MCP: "/mcp",
-  HOOKS: "/hooks",
-  OUTPUT_STYLE: "/output-style",
-  RELEASE_NOTES: "/release-notes",
-  TODOS: "/todos",
-  EXPORT: "/export",
-  ADD_DIR: "/add-dir",
-  RESUME: "/resume",
-  EXIT: "/exit",
-  PRIVACY_SETTINGS: "/privacy-settings",
-  STATUSLINE: "/statusline",
-  TERMINAL_SETUP: "/terminal-setup",
-  VIM: "/vim",
-  REWIND: "/rewind",
-  BUG: "/bug",
-};
+let sessionCommandLiterals: ReadonlyMap<number, string> | undefined;
 
 /** The slash form of one session command, for display. */
 export function sessionCommandLabel(command: SessionCommand): string {
-  return SESSION_COMMAND_LABELS[command];
+  if (sessionCommandLiterals === undefined) {
+    sessionCommandLiterals = new Map(
+      [...sessionCommandSpecs()].map(([number, spec]) => [number as number, spec.literal]),
+    );
+  }
+  const literal = sessionCommandLiterals.get(GeneratedSessionCommand[command]);
+  if (literal === undefined) {
+    // The schema names every command this union can hold, so an absent literal
+    // means the stubs and this bundle disagree. Drawing an empty chip would
+    // tell the user they ran a command with no name.
+    throw new Error(`render: session command ${command} carries no literal in the schema`);
+  }
+  return literal;
 }
 
 /**

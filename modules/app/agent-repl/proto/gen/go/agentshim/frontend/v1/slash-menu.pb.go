@@ -12,6 +12,7 @@ package frontendv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	descriptorpb "google.golang.org/protobuf/types/descriptorpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -24,23 +25,14 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// A slash command the CLI answers ITSELF, rather than a prompt for the agent.
-//
-// THE CLOSED SET IS THE POINT. The daemon recognizes a submitted prompt as one
-// of these before it forwards it (sessioncontroller/sessioncommand.go), and a
-// recognized command earns NO prompt bubble — so the set of things that can
-// suppress a bubble is exactly the set of names below, fixed on the wire and
-// reviewable in one place. A command that is not here is a prompt, and a
-// prompt is always drawn.
-//
-// A custom command (a skill, a project command) is deliberately absent and
-// always will be: those EXPAND into a prompt for the agent, so the text the
-// user typed really is the turn's opening and really does belong in the feed.
 type SessionCommand int32
 
 const (
 	// Never set by the daemon. A receiver seeing UNSPECIFIED is looking at a
 	// malformed frame and must reject it loudly rather than pick a command.
+	//
+	// It carries NO spec, deliberately: it names no command, so there is no
+	// literal to spell and nothing a recognizer could ever match it against.
 	SessionCommand_SESSION_COMMAND_UNSPECIFIED      SessionCommand = 0
 	SessionCommand_SESSION_COMMAND_CLEAR            SessionCommand = 1
 	SessionCommand_SESSION_COMMAND_COMPACT          SessionCommand = 2
@@ -171,6 +163,92 @@ func (SessionCommand) EnumDescriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_slash_menu_proto_rawDescGZIP(), []int{0}
 }
 
+// A slash command the CLI answers ITSELF, rather than a prompt for the agent.
+//
+// THE CLOSED SET IS THE POINT. The daemon recognizes a submitted prompt as one
+// of these before it forwards it (sessioncontroller/sessioncommand.go), and a
+// recognized command earns NO prompt bubble — so the set of things that can
+// suppress a bubble is exactly the set of names below, fixed on the wire and
+// reviewable in one place. A command that is not here is a prompt, and a
+// prompt is always drawn.
+//
+// A custom command (a skill, a project command) is deliberately absent and
+// always will be: those EXPAND into a prompt for the agent, so the text the
+// user typed really is the turn's opening and really does belong in the feed.
+// Everything about a session command that is a FACT rather than an event: how
+// it is spelled, and whether text after the name belongs to it.
+//
+// Carried as an enum-value OPTION below rather than as traffic, because no
+// frame carries these facts and every process needs the same answer to them —
+// the daemon to recognize a submitted prompt, the webapp to complete and to
+// label one. The three hand-written copies this replaces (the daemon's
+// recognition table, the webapp's SESSION_COMMANDS list, the webapp's
+// SESSION_COMMAND_LABELS table) had nothing comparing them, so they drifted:
+// each was correct on its own and none of them agreed.
+type SessionCommandSpec struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The command as the user TYPES it, leading slash included — and also the
+	// form a reader is shown. One field for both so a corrected spelling cannot
+	// land in the recognizer while the webapp chip keeps rendering the old one.
+	Literal string `protobuf:"bytes,1,opt,name=literal,proto3" json:"literal,omitempty"`
+	// Whether text following the name is an ARGUMENT to this command rather
+	// than prose the user wrote.
+	//
+	// FALSE IS THE DEFAULT AND FALSE IS THE SAFE SIDE. A command that takes no
+	// argument is recognized only as an ENTIRE prompt, so "/status of the build"
+	// stays a prompt and keeps its bubble. Marking a command that takes none as
+	// taking some is the one way this table can swallow something a user
+	// genuinely meant to say to the agent — an unrecoverable loss, since a
+	// suppressed bubble is never drawn later.
+	TakesArgs     bool `protobuf:"varint,2,opt,name=takes_args,json=takesArgs,proto3" json:"takes_args,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionCommandSpec) Reset() {
+	*x = SessionCommandSpec{}
+	mi := &file_agentshim_frontend_v1_slash_menu_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionCommandSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionCommandSpec) ProtoMessage() {}
+
+func (x *SessionCommandSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_slash_menu_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionCommandSpec.ProtoReflect.Descriptor instead.
+func (*SessionCommandSpec) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_slash_menu_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *SessionCommandSpec) GetLiteral() string {
+	if x != nil {
+		return x.Literal
+	}
+	return ""
+}
+
+func (x *SessionCommandSpec) GetTakesArgs() bool {
+	if x != nil {
+		return x.TakesArgs
+	}
+	return false
+}
+
 // Additive: ONE session command the user invoked, as the feed's record that
 // they invoked it.
 //
@@ -204,7 +282,7 @@ type SessionCommandItem struct {
 
 func (x *SessionCommandItem) Reset() {
 	*x = SessionCommandItem{}
-	mi := &file_agentshim_frontend_v1_slash_menu_proto_msgTypes[0]
+	mi := &file_agentshim_frontend_v1_slash_menu_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -216,7 +294,7 @@ func (x *SessionCommandItem) String() string {
 func (*SessionCommandItem) ProtoMessage() {}
 
 func (x *SessionCommandItem) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_slash_menu_proto_msgTypes[0]
+	mi := &file_agentshim_frontend_v1_slash_menu_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -229,7 +307,7 @@ func (x *SessionCommandItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionCommandItem.ProtoReflect.Descriptor instead.
 func (*SessionCommandItem) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_slash_menu_proto_rawDescGZIP(), []int{0}
+	return file_agentshim_frontend_v1_slash_menu_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *SessionCommandItem) GetCommand() SessionCommand {
@@ -281,7 +359,7 @@ type SkillBodyItem struct {
 
 func (x *SkillBodyItem) Reset() {
 	*x = SkillBodyItem{}
-	mi := &file_agentshim_frontend_v1_slash_menu_proto_msgTypes[1]
+	mi := &file_agentshim_frontend_v1_slash_menu_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -293,7 +371,7 @@ func (x *SkillBodyItem) String() string {
 func (*SkillBodyItem) ProtoMessage() {}
 
 func (x *SkillBodyItem) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_slash_menu_proto_msgTypes[1]
+	mi := &file_agentshim_frontend_v1_slash_menu_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -306,7 +384,7 @@ func (x *SkillBodyItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SkillBodyItem.ProtoReflect.Descriptor instead.
 func (*SkillBodyItem) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_slash_menu_proto_rawDescGZIP(), []int{1}
+	return file_agentshim_frontend_v1_slash_menu_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SkillBodyItem) GetToolUseId() string {
@@ -323,49 +401,107 @@ func (x *SkillBodyItem) GetBodyMarkdown() string {
 	return ""
 }
 
+var file_agentshim_frontend_v1_slash_menu_proto_extTypes = []protoimpl.ExtensionInfo{
+	{
+		ExtendedType:  (*descriptorpb.EnumValueOptions)(nil),
+		ExtensionType: (*SessionCommandSpec)(nil),
+		Field:         60002,
+		Name:          "agentshim.frontend.v1.session_command_spec",
+		Tag:           "bytes,60002,opt,name=session_command_spec",
+		Filename:      "agentshim/frontend/v1/slash-menu.proto",
+	},
+}
+
+// Extension fields to descriptorpb.EnumValueOptions.
+var (
+	// optional agentshim.frontend.v1.SessionCommandSpec session_command_spec = 60002;
+	E_SessionCommandSpec = &file_agentshim_frontend_v1_slash_menu_proto_extTypes[0]
+)
+
 var File_agentshim_frontend_v1_slash_menu_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_slash_menu_proto_rawDesc = "" +
 	"\n" +
-	"&agentshim/frontend/v1/slash-menu.proto\x12\x15agentshim.frontend.v1\"U\n" +
+	"&agentshim/frontend/v1/slash-menu.proto\x12\x15agentshim.frontend.v1\x1a google/protobuf/descriptor.proto\"M\n" +
+	"\x12SessionCommandSpec\x12\x18\n" +
+	"\aliteral\x18\x01 \x01(\tR\aliteral\x12\x1d\n" +
+	"\n" +
+	"takes_args\x18\x02 \x01(\bR\ttakesArgs\"U\n" +
 	"\x12SessionCommandItem\x12?\n" +
 	"\acommand\x18\x01 \x01(\x0e2%.agentshim.frontend.v1.SessionCommandR\acommand\"T\n" +
 	"\rSkillBodyItem\x12\x1e\n" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12#\n" +
-	"\rbody_markdown\x18\x02 \x01(\tR\fbodyMarkdown*\x8f\a\n" +
+	"\rbody_markdown\x18\x02 \x01(\tR\fbodyMarkdown*\xf3\n" +
+	"\n" +
 	"\x0eSessionCommand\x12\x1f\n" +
-	"\x1bSESSION_COMMAND_UNSPECIFIED\x10\x00\x12\x19\n" +
-	"\x15SESSION_COMMAND_CLEAR\x10\x01\x12\x1b\n" +
-	"\x17SESSION_COMMAND_COMPACT\x10\x02\x12\x19\n" +
-	"\x15SESSION_COMMAND_MODEL\x10\x03\x12\x18\n" +
-	"\x14SESSION_COMMAND_COST\x10\x04\x12\x19\n" +
-	"\x15SESSION_COMMAND_USAGE\x10\x05\x12\x1a\n" +
-	"\x16SESSION_COMMAND_STATUS\x10\x06\x12\x1b\n" +
-	"\x17SESSION_COMMAND_CONTEXT\x10\a\x12\x1a\n" +
-	"\x16SESSION_COMMAND_CONFIG\x10\b\x12\x18\n" +
-	"\x14SESSION_COMMAND_HELP\x10\t\x12\x1a\n" +
+	"\x1bSESSION_COMMAND_UNSPECIFIED\x10\x00\x12'\n" +
+	"\x15SESSION_COMMAND_CLEAR\x10\x01\x1a\f\x92\xa6\x1d\b\n" +
+	"\x06/clear\x12-\n" +
+	"\x17SESSION_COMMAND_COMPACT\x10\x02\x1a\x10\x92\xa6\x1d\f\n" +
+	"\b/compact\x10\x01\x12)\n" +
+	"\x15SESSION_COMMAND_MODEL\x10\x03\x1a\x0e\x92\xa6\x1d\n" +
+	"\n" +
+	"\x06/model\x10\x01\x12%\n" +
+	"\x14SESSION_COMMAND_COST\x10\x04\x1a\v\x92\xa6\x1d\a\n" +
+	"\x05/cost\x12'\n" +
+	"\x15SESSION_COMMAND_USAGE\x10\x05\x1a\f\x92\xa6\x1d\b\n" +
+	"\x06/usage\x12)\n" +
+	"\x16SESSION_COMMAND_STATUS\x10\x06\x1a\r\x92\xa6\x1d\t\n" +
+	"\a/status\x12+\n" +
+	"\x17SESSION_COMMAND_CONTEXT\x10\a\x1a\x0e\x92\xa6\x1d\n" +
+	"\n" +
+	"\b/context\x12)\n" +
+	"\x16SESSION_COMMAND_CONFIG\x10\b\x1a\r\x92\xa6\x1d\t\n" +
+	"\a/config\x12%\n" +
+	"\x14SESSION_COMMAND_HELP\x10\t\x1a\v\x92\xa6\x1d\a\n" +
+	"\x05/help\x12)\n" +
 	"\x16SESSION_COMMAND_DOCTOR\x10\n" +
-	"\x12\x19\n" +
-	"\x15SESSION_COMMAND_LOGIN\x10\v\x12\x1a\n" +
-	"\x16SESSION_COMMAND_LOGOUT\x10\f\x12\x1a\n" +
-	"\x16SESSION_COMMAND_MEMORY\x10\r\x12\x1f\n" +
-	"\x1bSESSION_COMMAND_PERMISSIONS\x10\x0e\x12\x1a\n" +
-	"\x16SESSION_COMMAND_AGENTS\x10\x0f\x12\x17\n" +
-	"\x13SESSION_COMMAND_MCP\x10\x10\x12\x19\n" +
-	"\x15SESSION_COMMAND_HOOKS\x10\x11\x12 \n" +
-	"\x1cSESSION_COMMAND_OUTPUT_STYLE\x10\x12\x12!\n" +
-	"\x1dSESSION_COMMAND_RELEASE_NOTES\x10\x13\x12\x19\n" +
-	"\x15SESSION_COMMAND_TODOS\x10\x14\x12\x1a\n" +
-	"\x16SESSION_COMMAND_EXPORT\x10\x15\x12\x1b\n" +
-	"\x17SESSION_COMMAND_ADD_DIR\x10\x16\x12\x1a\n" +
-	"\x16SESSION_COMMAND_RESUME\x10\x17\x12\x18\n" +
-	"\x14SESSION_COMMAND_EXIT\x10\x18\x12$\n" +
-	" SESSION_COMMAND_PRIVACY_SETTINGS\x10\x19\x12\x1e\n" +
-	"\x1aSESSION_COMMAND_STATUSLINE\x10\x1a\x12\"\n" +
-	"\x1eSESSION_COMMAND_TERMINAL_SETUP\x10\x1b\x12\x17\n" +
-	"\x13SESSION_COMMAND_VIM\x10\x1c\x12\x1a\n" +
-	"\x16SESSION_COMMAND_REWIND\x10\x1d\x12\x17\n" +
-	"\x13SESSION_COMMAND_BUG\x10\x1eB2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
+	"\x1a\r\x92\xa6\x1d\t\n" +
+	"\a/doctor\x12'\n" +
+	"\x15SESSION_COMMAND_LOGIN\x10\v\x1a\f\x92\xa6\x1d\b\n" +
+	"\x06/login\x12)\n" +
+	"\x16SESSION_COMMAND_LOGOUT\x10\f\x1a\r\x92\xa6\x1d\t\n" +
+	"\a/logout\x12)\n" +
+	"\x16SESSION_COMMAND_MEMORY\x10\r\x1a\r\x92\xa6\x1d\t\n" +
+	"\a/memory\x123\n" +
+	"\x1bSESSION_COMMAND_PERMISSIONS\x10\x0e\x1a\x12\x92\xa6\x1d\x0e\n" +
+	"\f/permissions\x12)\n" +
+	"\x16SESSION_COMMAND_AGENTS\x10\x0f\x1a\r\x92\xa6\x1d\t\n" +
+	"\a/agents\x12#\n" +
+	"\x13SESSION_COMMAND_MCP\x10\x10\x1a\n" +
+	"\x92\xa6\x1d\x06\n" +
+	"\x04/mcp\x12'\n" +
+	"\x15SESSION_COMMAND_HOOKS\x10\x11\x1a\f\x92\xa6\x1d\b\n" +
+	"\x06/hooks\x127\n" +
+	"\x1cSESSION_COMMAND_OUTPUT_STYLE\x10\x12\x1a\x15\x92\xa6\x1d\x11\n" +
+	"\r/output-style\x10\x01\x127\n" +
+	"\x1dSESSION_COMMAND_RELEASE_NOTES\x10\x13\x1a\x14\x92\xa6\x1d\x10\n" +
+	"\x0e/release-notes\x12'\n" +
+	"\x15SESSION_COMMAND_TODOS\x10\x14\x1a\f\x92\xa6\x1d\b\n" +
+	"\x06/todos\x12+\n" +
+	"\x16SESSION_COMMAND_EXPORT\x10\x15\x1a\x0f\x92\xa6\x1d\v\n" +
+	"\a/export\x10\x01\x12-\n" +
+	"\x17SESSION_COMMAND_ADD_DIR\x10\x16\x1a\x10\x92\xa6\x1d\f\n" +
+	"\b/add-dir\x10\x01\x12+\n" +
+	"\x16SESSION_COMMAND_RESUME\x10\x17\x1a\x0f\x92\xa6\x1d\v\n" +
+	"\a/resume\x10\x01\x12%\n" +
+	"\x14SESSION_COMMAND_EXIT\x10\x18\x1a\v\x92\xa6\x1d\a\n" +
+	"\x05/exit\x12=\n" +
+	" SESSION_COMMAND_PRIVACY_SETTINGS\x10\x19\x1a\x17\x92\xa6\x1d\x13\n" +
+	"\x11/privacy-settings\x121\n" +
+	"\x1aSESSION_COMMAND_STATUSLINE\x10\x1a\x1a\x11\x92\xa6\x1d\r\n" +
+	"\v/statusline\x129\n" +
+	"\x1eSESSION_COMMAND_TERMINAL_SETUP\x10\x1b\x1a\x15\x92\xa6\x1d\x11\n" +
+	"\x0f/terminal-setup\x12#\n" +
+	"\x13SESSION_COMMAND_VIM\x10\x1c\x1a\n" +
+	"\x92\xa6\x1d\x06\n" +
+	"\x04/vim\x12)\n" +
+	"\x16SESSION_COMMAND_REWIND\x10\x1d\x1a\r\x92\xa6\x1d\t\n" +
+	"\a/rewind\x12#\n" +
+	"\x13SESSION_COMMAND_BUG\x10\x1e\x1a\n" +
+	"\x92\xa6\x1d\x06\n" +
+	"\x04/bug:\x80\x01\n" +
+	"\x14session_command_spec\x12!.google.protobuf.EnumValueOptions\x18\xe2\xd4\x03 \x01(\v2).agentshim.frontend.v1.SessionCommandSpecR\x12sessionCommandSpecB2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_agentshim_frontend_v1_slash_menu_proto_rawDescOnce sync.Once
@@ -380,18 +516,22 @@ func file_agentshim_frontend_v1_slash_menu_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_frontend_v1_slash_menu_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentshim_frontend_v1_slash_menu_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_agentshim_frontend_v1_slash_menu_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_agentshim_frontend_v1_slash_menu_proto_goTypes = []any{
-	(SessionCommand)(0),        // 0: agentshim.frontend.v1.SessionCommand
-	(*SessionCommandItem)(nil), // 1: agentshim.frontend.v1.SessionCommandItem
-	(*SkillBodyItem)(nil),      // 2: agentshim.frontend.v1.SkillBodyItem
+	(SessionCommand)(0),                   // 0: agentshim.frontend.v1.SessionCommand
+	(*SessionCommandSpec)(nil),            // 1: agentshim.frontend.v1.SessionCommandSpec
+	(*SessionCommandItem)(nil),            // 2: agentshim.frontend.v1.SessionCommandItem
+	(*SkillBodyItem)(nil),                 // 3: agentshim.frontend.v1.SkillBodyItem
+	(*descriptorpb.EnumValueOptions)(nil), // 4: google.protobuf.EnumValueOptions
 }
 var file_agentshim_frontend_v1_slash_menu_proto_depIdxs = []int32{
 	0, // 0: agentshim.frontend.v1.SessionCommandItem.command:type_name -> agentshim.frontend.v1.SessionCommand
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
+	4, // 1: agentshim.frontend.v1.session_command_spec:extendee -> google.protobuf.EnumValueOptions
+	1, // 2: agentshim.frontend.v1.session_command_spec:type_name -> agentshim.frontend.v1.SessionCommandSpec
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	2, // [2:3] is the sub-list for extension type_name
+	1, // [1:2] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
 }
 
@@ -406,14 +546,15 @@ func file_agentshim_frontend_v1_slash_menu_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_slash_menu_proto_rawDesc), len(file_agentshim_frontend_v1_slash_menu_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   2,
-			NumExtensions: 0,
+			NumMessages:   3,
+			NumExtensions: 1,
 			NumServices:   0,
 		},
 		GoTypes:           file_agentshim_frontend_v1_slash_menu_proto_goTypes,
 		DependencyIndexes: file_agentshim_frontend_v1_slash_menu_proto_depIdxs,
 		EnumInfos:         file_agentshim_frontend_v1_slash_menu_proto_enumTypes,
 		MessageInfos:      file_agentshim_frontend_v1_slash_menu_proto_msgTypes,
+		ExtensionInfos:    file_agentshim_frontend_v1_slash_menu_proto_extTypes,
 	}.Build()
 	File_agentshim_frontend_v1_slash_menu_proto = out.File
 	file_agentshim_frontend_v1_slash_menu_proto_goTypes = nil

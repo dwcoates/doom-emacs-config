@@ -42,12 +42,22 @@ type sessionCommand struct {
 	// sessioncommand.go, which is also where the wire enum they map to is
 	// documented.
 	command frontendv1.SessionCommand
+	// arg is the text that followed the command's literal, empty for the bare
+	// form and for an ordinary prompt.
+	//
+	// It exists for exactly one reason: `/model <name>` names an operation the
+	// daemon PERFORMS rather than forwards, and the name is that operation's
+	// only input. It is read by performsLocally/modelArgument below and by
+	// nothing else, and it is never handed to anything that reaches a
+	// frontend — the invocation item has no field for it.
+	arg string
 }
 
 // classifyPrompt reads a submitted prompt's text for meaning. THE ONLY PLACE
 // the daemon does so.
 func classifyPrompt(text string) sessionCommand {
-	return sessionCommand{command: lookupSessionCommand(text)}
+	command, arg := lookupSessionCommand(text)
+	return sessionCommand{command: command, arg: arg}
 }
 
 // recognized reports whether the daemon found a command it handles itself.
@@ -74,6 +84,49 @@ func (c sessionCommand) clear() bool {
 // which carries the command's identity and no text at all.
 func (c sessionCommand) echoes() bool { return !c.recognized() }
 
+// performsLocally reports whether the daemon PERFORMS this command itself
+// instead of handing its text to the shim as a prompt.
+//
+// EXACTLY ONE COMMAND DOES: `/model <name>`. Forwarding that text let the CLI
+// change its own model behind the daemon's back — `rec.Model`, the pushed
+// `SessionView`, and therefore the topbar picker went on naming the PREVIOUS
+// model until some later submit's `SystemInit` happened to correct them, and a
+// hibernation before that respawned the session on the stale model outright.
+// Routing it into Manager.SetModel — the picker's own operation — makes that
+// divergence unrepresentable rather than rare: there is no longer a second
+// codepath that can change a session's model.
+//
+// THE BARE `/model` IS NOT LOCAL. It opens the CLI's own interactive picker,
+// which the daemon cannot stand in for, so the text is still forwarded and the
+// live model is read back afterwards instead (readBackObservedModel).
+func (c sessionCommand) performsLocally() bool {
+	return c.command == frontendv1.SessionCommand_SESSION_COMMAND_MODEL && c.arg != ""
+}
+
+// awaitsModelReadback reports whether this submit is the BARE `/model` — the
+// one model change the daemon can neither perform nor observe, because the CLI
+// opens its own picker and the user chooses inside it.
+//
+// The daemon reads the result back from the shim when the command's turn ends
+// (modelreadback.go). Every other classification answers false: `/model <name>`
+// is performed rather than forwarded, and nothing else touches the model.
+func (c sessionCommand) awaitsModelReadback() bool {
+	return c.command == frontendv1.SessionCommand_SESSION_COMMAND_MODEL && c.arg == ""
+}
+
+// modelArgument is the model id a `/model <name>` names, empty for every other
+// classification.
+//
+// Guarded on performsLocally rather than on the command alone, so the bare
+// `/model` — whose argument is the user's answer to a picker the daemon never
+// sees — cannot be mistaken for a named selection.
+func (c sessionCommand) modelArgument() string {
+	if !c.performsLocally() {
+		return ""
+	}
+	return c.arg
+}
+
 // claimsTurn reports whether the submit takes the accepted-prompt state edge —
 // the `submitting`/`thinking` claim, its durable turn latch, and the footer
 // clock.
@@ -85,7 +138,12 @@ func (c sessionCommand) echoes() bool { return !c.recognized() }
 // runs no turn — it cuts the conversation and re-inits — and its truthful
 // status premise is the SSM's clearing axis (noteClearDispatched), which is why
 // claiming a turn for it would be the false statement instead.
-func (c sessionCommand) claimsTurn() bool { return !c.clear() }
+// A command the daemon PERFORMS ITSELF claims none either, and for a stricter
+// reason than `/clear`'s: no prompt is submitted at all, so the shim runs no
+// turn and no TurnEnded is ever coming. Claiming the edge would leave the
+// workspace `thinking` against a turn that cannot end, queueing every later
+// prompt behind it.
+func (c sessionCommand) claimsTurn() bool { return !c.clear() && !c.performsLocally() }
 
 // forwardPrompt hands one submitted prompt to its shim.
 //
@@ -127,6 +185,24 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 		return err
 	}
 	cmd := classifyPrompt(text)
+
+	// THE ONE CODEPATH THAT CHANGES A SESSION'S MODEL, reached from the slash
+	// form as well as from the picker.
+	//
+	// `/model <name>` used to be forwarded verbatim, so the CLI changed its own
+	// model and the daemon never learned of it: `rec.Model` — and therefore the
+	// pushed SessionView and therefore the topbar picker — kept naming the
+	// PREVIOUS model, and a hibernation before the next submit's SystemInit
+	// respawned the session on it. Performing the change here instead means the
+	// shim's confirmation writes the record through the SAME writer the
+	// picker's SetModel does, at the moment of the command. There is no second
+	// authority left to disagree with.
+	//
+	// It returns BEFORE the accepted edge on purpose: no prompt is submitted,
+	// so no turn is claimed and none needs retracting.
+	if cmd.performsLocally() {
+		return m.applyLocalSessionCommand(ctx, d, requestID, cmd)
+	}
 
 	// THE ACCEPTED EDGE AND ITS SYNCHRONOUS PUBLICATION, BEFORE THE SUBMIT.
 	//
@@ -276,7 +352,17 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// the command is withheld as machinery (machinery.go), so without this the
 	// user's `/model` would vanish from the conversation entirely and the
 	// session's model would appear to change for no reason.
-	m.noteSessionCommand(d, requestID, cmd)
+	// The forwarded path resolves nothing itself — the CLI does — so the item's
+	// log line carries no outcome. For the bare `/model` the read-back logs the
+	// selection it confirms (modelreadback.go).
+	m.noteSessionCommand(d, requestID, cmd, "")
+
+	// THE BARE `/model`'s READ-BACK, armed only after the submit: a turn that
+	// never started will never end, so arming ahead of it would leave a
+	// read-back pending forever on a command no session took.
+	if cmd.awaitsModelReadback() {
+		m.noteModelReadbackPending(d, requestID)
+	}
 
 	// AFTER THE ACCEPT, never before: an axis opened for a prompt that never
 	// reached the shim would be waiting on a cut that is not coming, and would
@@ -472,11 +558,53 @@ func (m *Manager) notePromptDelivered(d *sessionController, requestID string) {
 // reconcile or replace.
 //
 // Must be called with m.mu RELEASED: the push reaches the frontend server.
-func (m *Manager) noteSessionCommand(d *sessionController, requestID string, cmd sessionCommand) {
+func (m *Manager) noteSessionCommand(d *sessionController, requestID string, cmd sessionCommand, outcome string) {
 	if !cmd.recognized() || requestID == "" {
 		return
 	}
-	d.consumer.pushSessionCommand(requestID, cmd.command)
+	d.consumer.pushSessionCommand(requestID, cmd.command, outcome)
+}
+
+// applyLocalSessionCommand performs a session command the daemon owns rather
+// than forwards, and pushes its invocation item.
+//
+// TODAY THAT IS `/model <name>` AND NOTHING ELSE (performsLocally), and the
+// whole point of the function is that the operation it performs is the SAME one
+// the topbar picker performs. The picker and the slash form are two spellings
+// of one call now, so they cannot disagree about what the session is running.
+//
+// THE ITEM IS PUSHED ONLY AFTER THE MODEL ACTUALLY CHANGED, on the same terms
+// the forwarded path pushes it after the submit: a chip reading `/model` above
+// a session whose model did not change would be the one thing in the feed
+// claiming the command took effect.
+//
+// A FAILURE IS RETURNED, NOT SWALLOWED. The frontend command fails loudly with
+// the shim's own reason, and no invocation item is drawn for a change that did
+// not happen.
+//
+// Must be called with m.mu RELEASED: the push reaches the frontend server.
+func (m *Manager) applyLocalSessionCommand(ctx context.Context, d *sessionController, requestID string, cmd sessionCommand) error {
+	requested := cmd.modelArgument()
+	if requested == "" {
+		// An invariant, not an input error: performsLocally is the only gate
+		// into this function and it is false for an empty argument.
+		err := fmt.Errorf("session-controller: local session command %s reached the model route with no argument", cmd.command)
+		m.logf("session-controller: local session command INVARIANT VIOLATED ws=%q session=%s request_id=%q command=%s: %v",
+			d.workspace, d.sessionID, requestID, cmd.command, err)
+		return err
+	}
+	change, err := m.setModelOn(ctx, d, requested, "session_command")
+	if err != nil {
+		return err
+	}
+	// THE COMMAND'S OWN RECORD IN THE LOG, naming the transition rather than
+	// just the fact that a command ran. Without the resolved argument and the
+	// value it replaced, an operator reading this line after the picker and the
+	// session disagreed could not tell what the session was switched to, or
+	// that a switch was the reason.
+	m.noteSessionCommand(d, requestID, cmd, fmt.Sprintf(" resolved_model=%q shim_selected=%q record_previous=%q",
+		change.requested, change.selected, change.previous))
+	return nil
 }
 
 // noteClearDispatched opens the SSM's clearing axis for a `/clear` the daemon

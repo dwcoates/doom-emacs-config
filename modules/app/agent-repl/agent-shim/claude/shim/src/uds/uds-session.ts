@@ -735,6 +735,11 @@ export class UdsSession {
           "model change confirmed by SDK");
         return this.effectiveModel;
       },
+      // The ONE model this shim has observed or confirmed, handed back
+      // verbatim. It already follows both authorities — every SDK
+      // `system:init` and every confirmed setModel write it — so this read
+      // needs no SDK round-trip and cannot race one.
+      selectedModel: (): string => this.effectiveModel,
     };
     this.control = new ControlDispatch(
       target,
@@ -763,6 +768,7 @@ export class UdsSession {
       onSubmitPrompt: (m) => this.control.handleSubmitPrompt(m),
       onInterrupt: (m) => this.control.handleInterrupt(m),
       onSetModel: (m) => this.control.handleSetModel(m),
+      onQuerySelectedModel: (m) => this.control.handleQuerySelectedModel(m),
       onPermissionResponse: (m) => this.control.handlePermissionResponse(m),
       onReplayRequest: (m) => void this.serveReplay(m),
       onHealthCheck: (m) => this.health(m),
