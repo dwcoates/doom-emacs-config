@@ -1575,6 +1575,163 @@ func TestPingTurnEndWithNothingHeldTakesNoRewindClaim(t *testing.T) {
 	}
 }
 
+// --- the bounded delivery retry ---------------------------------------------
+
+// A failed delivery used to wait for whatever external edge came next, and an
+// interject whose stop had already ended the turn had no boundary left to wait
+// for at all.
+
+func TestTheDeliveryRetryBackoffIsBoundedAndJitteredUpward(t *testing.T) {
+	tests := []struct {
+		name     string
+		attempt  int
+		fraction float64
+		want     time.Duration
+	}{
+		{name: "the first attempt takes the base", attempt: 1, fraction: 0, want: 2 * time.Second},
+		{name: "the backoff doubles", attempt: 3, fraction: 0, want: 8 * time.Second},
+		{name: "the backoff is capped", attempt: 9, fraction: 0, want: 15 * time.Second},
+		{name: "the jitter only ever adds", attempt: 1, fraction: 0.5, want: 2500 * time.Millisecond},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act.
+			got := deliveryRetryDelay(tc.attempt, tc.fraction)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("deliveryRetryDelay(%d, %v) = %s, want %s", tc.attempt, tc.fraction, got, tc.want)
+			}
+		})
+	}
+}
+
+// retryClock captures the armed retries instead of waiting them out.
+type retryClock struct {
+	mu     sync.Mutex
+	delays []time.Duration
+	fire   []func()
+}
+
+func (c *retryClock) afterFunc(d time.Duration, f func()) *time.Timer {
+	c.mu.Lock()
+	c.delays = append(c.delays, d)
+	c.fire = append(c.fire, f)
+	c.mu.Unlock()
+	notifyTestActivity()
+	return time.NewTimer(time.Hour)
+}
+
+// armed reports how many retries have been scheduled.
+func (c *retryClock) armed() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.delays)
+}
+
+// fireNext runs the nth armed retry.
+func (c *retryClock) fireNext(n int) {
+	c.mu.Lock()
+	f := c.fire[n]
+	c.mu.Unlock()
+	f()
+}
+
+// newRetryHarness is the queue harness with the retry timer captured.
+func newRetryHarness(t *testing.T) (*queueHarness, *retryClock) {
+	t.Helper()
+	clock := &retryClock{}
+	h := newQueueHarness(t, nil)
+	// Bound before anything can fail a delivery: the manager is single-threaded
+	// until the first submit, so nothing is reading this yet.
+	h.m.afterFunc = clock.afterFunc
+	return h, clock
+}
+
+func TestAFailedDeliveryArmsARetryWithinSeconds(t *testing.T) {
+	// Arrange.
+	h, clock := newRetryHarness(t)
+	queueOneBehindATurn(t, h, "queued")
+	h.client.mu.Lock()
+	h.client.submitErrOnce = errors.New("shim gone")
+	h.client.mu.Unlock()
+
+	// Act.
+	h.turn(false)
+
+	// Assert: the prompt no longer waits on an edge that may never come.
+	waitFor(t, "the retry to be armed", func() bool { return clock.armed() == 1 })
+	clock.mu.Lock()
+	defer clock.mu.Unlock()
+	if got := clock.delays[0]; got < deliveryRetryBase || got > deliveryRetryCeiling*2 {
+		t.Fatalf("first retry delay = %s, want it inside the bounded seconds-scale window", got)
+	}
+}
+
+func TestAnArmedRetryRedeliversTheEntry(t *testing.T) {
+	// Arrange: one delivery failed and its retry is armed.
+	h, clock := newRetryHarness(t)
+	queueOneBehindATurn(t, h, "queued")
+	h.client.mu.Lock()
+	h.client.submitErrOnce = errors.New("shim gone")
+	h.client.mu.Unlock()
+	h.turn(false)
+	waitFor(t, "the retry to be armed", func() bool { return clock.armed() == 1 })
+
+	// Act.
+	clock.fireNext(0)
+
+	// Assert.
+	waitFor(t, "the retried delivery", func() bool {
+		return reflect.DeepEqual(h.client.promptTexts(), []string{"queued"})
+	})
+}
+
+func TestTheDeliveryRetryStandsDownWhileATurnIsRunning(t *testing.T) {
+	// Arrange: a delivery failed, and a new turn started before the retry fired.
+	h, clock := newRetryHarness(t)
+	queueOneBehindATurn(t, h, "queued")
+	h.client.mu.Lock()
+	h.client.submitErrOnce = errors.New("shim gone")
+	h.client.mu.Unlock()
+	h.turn(false)
+	waitFor(t, "the retry to be armed", func() bool { return clock.armed() == 1 })
+	h.turn(true)
+
+	// Act.
+	clock.fireNext(0)
+
+	// Assert: the turn boundary owns the next delivery, so nothing races it.
+	if got := h.client.promptTexts(); len(got) != 0 {
+		t.Fatalf("submitted prompts = %v, want none while a turn is in flight", got)
+	}
+	if got := len(h.entries()); got != 1 {
+		t.Fatalf("queued entries = %d, want the prompt still held", got)
+	}
+}
+
+func TestTheDeliveryRetryIsBounded(t *testing.T) {
+	// Arrange: every delivery fails.
+	h, clock := newRetryHarness(t)
+	queueOneBehindATurn(t, h, "queued")
+	h.controller().client = &failingClient{err: errors.New("shim gone")}
+
+	// Act: the boundary delivers, and every armed retry is fired.
+	h.turn(false)
+	for n := 0; n < deliveryRetryAttempts; n++ {
+		waitFor(t, "the next retry to be armed", func() bool { return clock.armed() == n+1 })
+		clock.fireNext(n)
+	}
+
+	// Assert: the attempts stop, and the prompt is still queued and visible.
+	if got := clock.armed(); got != deliveryRetryAttempts {
+		t.Fatalf("armed retries = %d, want exactly %d", got, deliveryRetryAttempts)
+	}
+	if got := h.texts(); len(got) != 1 || got[0] != "queued" {
+		t.Fatalf("queued entries = %v, want the undelivered prompt retained", got)
+	}
+}
+
 // --- the explicit-interrupt bypass ------------------------------------------
 
 // A message-style stop used to ride the queue through the classifier's model
