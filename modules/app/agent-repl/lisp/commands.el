@@ -1066,24 +1066,30 @@ best-effort and must never block the live save)."
         (setq agent-repl--snapshot-archived-this-run t)
         (agent-repl--prune-snapshot-archives)))))
 
-(defcustom agent-repl-snapshot-tombstone-max-age (* 14 24 60 60)
+(defcustom agent-repl-snapshot-tombstone-max-age 0
   "Seconds a tombstoned workspace is kept in the live roster snapshot.
 A tombstone is an identity-only record for a nuked workspace, retained so
 a reopen/revival can still resolve its `:project-dir' and worktree source.
-That value decays: after a couple of weeks the entry is essentially never
-reopened, yet it is re-collected, re-swept and re-serialized on EVERY
-roster write, which is the dominant cost of a write once tombstones
-outnumber live workspaces several times over.
+Tombstones are re-collected, re-swept and re-serialized on EVERY roster
+write, which is the dominant cost of a write once tombstones outnumber
+live workspaces several times over — and the on-disk roster file is
+meant to name only open, live workspaces, not a graveyard.
 
-Tombstones older than this are evicted from the live roster by
+Tombstones past their age are evicted from the live roster by
 `agent-repl--snapshot-evict-expired-tombstones' — but only AFTER being
 written to a loadable snapshot file in the archive dir, so they remain
 reachable through `agent-repl-load-workspace-snapshot-from-archive'.
 Nothing is deleted, only moved out of the hot path.
 
-Set to 0 to disable eviction entirely (tombstones accumulate forever, the
-pre-eviction behavior)."
-  :type 'integer
+Nil or 0 (the default) means LIVE-ONLY: every tombstone — any age,
+stamped or not — is archived on every eviction pass, so the main roster
+file never carries a dead entry.  A positive number of seconds instead
+ages tombstones out gradually, retaining unstamped ones (their age is
+unprovable) — the escape hatch for anyone who wants the old grace
+period back."
+  :type '(choice (const :tag "Live-only (archive every tombstone)" nil)
+                  (const :tag "Live-only (archive every tombstone)" 0)
+                  (integer :tag "Max age in seconds"))
   :group 'agent-repl)
 
 (defcustom agent-repl-snapshot-save-idle-delay 3.0
@@ -1110,74 +1116,92 @@ cancels any existing timer before scheduling, so the delay measures idle
 time since the LAST request rather than the first.")
 
 (defun agent-repl--snapshot-evict-expired-tombstones ()
-  "Move tombstones older than `agent-repl-snapshot-tombstone-max-age' to archive.
-Returns the list of evicted workspace names (nil when nothing expired).
+  "Move tombstones past their age out of the live roster, into the archive.
+Returns the list of evicted workspace names (nil when nothing qualifies).
 
-Order matters and is load-bearing: the expired entries are serialized to
-a timestamped file in the snapshot archive dir FIRST, and only once that
-write has succeeded are they dropped from `agent-repl--workspaces' via
-`agent-repl--ws-forget'.  A failed archive write therefore evicts
+When `agent-repl-snapshot-tombstone-max-age' is nil or 0 (the default),
+this is LIVE-ONLY mode: every tombstone qualifies, any age, stamped or
+not — the main roster file is meant to name only live workspaces, so
+nothing tombstoned survives a write.  With a positive value, only
+tombstones older than that many seconds qualify, and an unstamped
+tombstone is never evicted (its age is unprovable, and guessing would
+discard a record the user may still reopen).
+
+Order matters and is load-bearing: the qualifying entries are serialized
+to a timestamped file in the snapshot archive dir FIRST, and only once
+that write has succeeded are they dropped from `agent-repl--workspaces'
+via `agent-repl--ws-forget'.  A failed archive write therefore evicts
 nothing — the tombstones stay in the roster and the next save retries.
 
 The archive file uses the ordinary snapshot plist format, so it appears
 in `agent-repl--snapshot-archive-candidates' and loads through
 `agent-repl-load-workspace-snapshot-from-archive' like any other archive.
-Its name carries an `-expired-tombstones' suffix after the sortable
-timestamp so it interleaves chronologically with the per-session
-archives and is subject to the same `--prune-snapshot-archives' cap.
-
-No-op when the cap is 0 (eviction disabled) or nothing has expired."
-  (when (> agent-repl-snapshot-tombstone-max-age 0)
-    (let* ((cutoff (time-subtract (current-time)
+Its name carries a `-tombstones' suffix after the sortable timestamp so
+it interleaves chronologically with the per-session archives, is
+unambiguously labeled as a tombstone dump, and is subject to the same
+`--prune-snapshot-archives' cap."
+  (let* ((live-only (or (null agent-repl-snapshot-tombstone-max-age)
+                         (<= agent-repl-snapshot-tombstone-max-age 0)))
+         (cutoff (unless live-only
+                   (time-subtract (current-time)
                                   (seconds-to-time
-                                   agent-repl-snapshot-tombstone-max-age)))
-           (expired
-            (cl-remove-if-not
-             (lambda (ws)
+                                   agent-repl-snapshot-tombstone-max-age))))
+         (expired
+          (cl-remove-if-not
+           (lambda (ws)
+             (if live-only
+                 ;; Live-only: every tombstone qualifies, stamped or not.
+                 t
                (let ((nuked-at (agent-repl--ws-get ws :nuked-at)))
-                 ;; A tombstone with no usable stamp is NOT evicted: we
-                 ;; cannot show it is old, and guessing would discard a
-                 ;; record the user may still reopen.
-                 (and nuked-at (time-less-p nuked-at cutoff))))
-             (agent-repl--ws-tombstoned-names))))
-      (when expired
-        (agent-repl--with-error-logging "snapshot-evict-expired-tombstones"
-          (let* ((entries
-                  (mapcar
-                   (lambda (ws)
-                     (cons ws (append
-                               (list :project-dir (agent-repl--ws-get ws :project-dir)
-                                     :nuked-at (agent-repl--ws-get ws :nuked-at))
-                               (when (agent-repl--ws-get ws :hidden-project-dir)
-                                 (list :hidden-project-dir t))
-                               (agent-repl--worktree-snapshot-fields ws))))
-                   expired))
-                 (dir (agent-repl--workspace-snapshot-archive-dir))
-                 (dest (expand-file-name
-                        (format-time-string "%Y%m%dT%H%M%S-expired-tombstones.el")
-                        dir)))
-            (unless (file-directory-p dir) (make-directory dir t))
-            (with-temp-file dest
-              (insert "(:workspaces (")
-              (let ((first t))
-                (dolist (entry entries)
-                  (unless first (insert "\n               "))
-                  (setq first nil)
-                  (prin1 entry (current-buffer))))
-              (insert "))"))
-            ;; Archive is durable on disk — only now drop the live entries.
-            (dolist (ws expired)
-              (agent-repl--ws-forget ws))
+                 (and nuked-at (time-less-p nuked-at cutoff)))))
+           (agent-repl--ws-tombstoned-names))))
+    (when expired
+      (agent-repl--with-error-logging "snapshot-evict-expired-tombstones"
+        (let* ((entries
+                (mapcar
+                 (lambda (ws)
+                   (cons ws (append
+                             (list :project-dir (agent-repl--ws-get ws :project-dir)
+                                   :nuked-at (agent-repl--ws-get ws :nuked-at))
+                             (when (agent-repl--ws-get ws :hidden-project-dir)
+                               (list :hidden-project-dir t))
+                             (agent-repl--worktree-snapshot-fields ws))))
+                 expired))
+               (dir (agent-repl--workspace-snapshot-archive-dir))
+               (dest (expand-file-name
+                      (format-time-string
+                       (if live-only
+                           "%Y%m%dT%H%M%S-live-only-tombstones.el"
+                         "%Y%m%dT%H%M%S-expired-tombstones.el"))
+                      dir)))
+          (unless (file-directory-p dir) (make-directory dir t))
+          (with-temp-file dest
+            (insert "(:workspaces (")
+            (let ((first t))
+              (dolist (entry entries)
+                (unless first (insert "\n               "))
+                (setq first nil)
+                (prin1 entry (current-buffer))))
+            (insert "))"))
+          ;; Archive is durable on disk — only now drop the live entries.
+          (dolist (ws expired)
+            (agent-repl--ws-forget ws))
+          (if live-only
+              (agent-repl--info
+               nil
+               "snapshot: archived %d tombstone(s) to %s (live-only roster policy)"
+               (length expired)
+               dest)
             (agent-repl--info
              nil
              "snapshot: archived %d tombstone(s) older than %d day(s) to %s"
              (length expired)
              (/ agent-repl-snapshot-tombstone-max-age 86400)
-             dest)
-            (agent-repl--log-verbose
-             nil "snapshot-evict-expired-tombstones: evicted=%S" expired)
-            (agent-repl--prune-snapshot-archives)
-            expired))))))
+             dest))
+          (agent-repl--log-verbose
+           nil "snapshot-evict-expired-tombstones: evicted=%S" expired)
+          (agent-repl--prune-snapshot-archives)
+          expired)))))
 
 (defun agent-repl--snapshot-save-cancel-pending ()
   "Cancel any pending debounced roster-snapshot write.
