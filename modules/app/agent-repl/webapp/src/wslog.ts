@@ -170,6 +170,44 @@ export function bindLogContext(context: RuntimeLogContext): void {
   boundContext = { ...boundContext, ...context };
 }
 
+/**
+ * Restamp one forwarded record's SOURCE SESSION IDENTITY with the identity
+ * bound RIGHT NOW, immediately before it is handed to the socket.
+ *
+ * WHY THE STAMP CANNOT BE THE EMISSION'S. A record is built when it is emitted
+ * and forwarded when a transport exists, and a daemon bounce puts a long
+ * interval between the two: the socket is down, so records pile up in the
+ * throttle's window and the forwarding logger's queue, and the session the
+ * workspace owns rotates while they wait. Flushing them as-built sends the
+ * retired session id, which the daemon refuses per record — 2,606 refusals in
+ * three minutes in production, all of them for records whose only fault was
+ * being older than the rotation.
+ *
+ * WHY RESTAMPING IS CORRECT RATHER THAN A LIE. These fields are the record's
+ * SOURCE ATTRIBUTION — which conversation this page belongs to — not evidence
+ * about the event, which lives in the message and the context fields and is
+ * untouched here. The daemon files every accepted record under the identity its
+ * own registry holds regardless of what the record said, and reads the record's
+ * copy for exactly one purpose: to refuse a record that would otherwise be
+ * filed under a conversation it does not describe. A page that has adopted the
+ * new identity IS the new conversation's page, so the stamp it should carry is
+ * the one it holds at send time.
+ *
+ * An unbound identity removes the field rather than sending an empty one:
+ * absence is a legitimate state (a workspace-addressed page before the daemon
+ * has ruled), and the daemon reads an absent identity as "attributed to the
+ * workspace alone".
+ */
+export function restampRecordIdentity(context: ClientLogContext): ClientLogContext {
+  const stamped: Record<string, unknown> = { ...context };
+  for (const identity of ["agent_repl_session_id", "claude_session_id"] as const) {
+    const value = boundContext[identity];
+    if (value === undefined || value === "") delete stamped[identity];
+    else stamped[identity] = value;
+  }
+  return stamped as ClientLogContext;
+}
+
 function verboseConsoleEnabled(): boolean {
   return typeof localStorage !== "undefined" && localStorage.getItem(VERBOSE_STORAGE_KEY) === "true";
 }
