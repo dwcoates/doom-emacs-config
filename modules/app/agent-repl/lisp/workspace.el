@@ -75,7 +75,7 @@
 (declare-function magit-status "ext:magit" (&optional directory cache))
 (declare-function agent-repl--magit-status-same-window "agent-repl-magit" (dir))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
-(declare-function agent-repl--sidebar-push "sidebar" ())
+(declare-function agent-repl--sidebar-push "sidebar" (&optional force))
 (declare-function doom-real-buffer-list "ext:doom" (&optional buffer-list))
 (defvar persp-nil-name)
 (defvar persp-names-cache)
@@ -1506,7 +1506,10 @@ never turn a teardown into an error."
       (agent-repl--log ws "ws-repaint-sidebar: skip ws=%s reason=%s (sidebar not loaded)" ws reason)
     (agent-repl--log ws "ws-repaint-sidebar: pushing ws=%s reason=%s" ws reason)
     (condition-case err
-        (agent-repl--sidebar-push)
+        ;; Forced past the sidebar's signature gate: the removal this repaint
+        ;; exists for is a perspective membership change, and the membership
+        ;; cache the signature reads may not have caught up with the kill yet.
+        (agent-repl--sidebar-push t)
       (error (agent-repl--warn ws "ws-repaint-sidebar: push error ws=%s reason=%s err=%S"
                                ws reason err)))))
 
