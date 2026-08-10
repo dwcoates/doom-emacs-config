@@ -214,6 +214,27 @@ const SPECIAL_TOOLS = new Set([
 ]);
 
 /**
+ * Tool names whose cards wear the ASYNC TEAL wash — the one list behind both
+ * the `.tool-card.tool-skill, .tool-card.tool-agent, .tool-card.tool-task`
+ * rule in the stylesheet and the fixed-panel decision below (`MemberFold`).
+ *
+ * A teal card is a whole conversation of its own, and its nested output is not
+ * an aside to be opened: it is the card's content. So a teal card's own folds
+ * do not fold. They render as fixed panels the reader scrolls, capped at half
+ * the viewport by `.fold-fixed > .agent-panel` and shrinking to fit a body too
+ * short to fill that. A grey card (a Workflow's child feed, a generic tool's
+ * stream) is unchanged and still folds.
+ *
+ * `styles.test.ts` holds this list to the stylesheet's selector list, so a
+ * kind that gains the wash there and not here cannot drift into a card that
+ * looks teal and still folds.
+ */
+export const ASYNC_TEAL_TOOLS: ReadonlySet<string> = new Set([
+  "Skill",
+  ...SUBAGENT_TOOLS,
+]);
+
+/**
  * Tool names whose cards are suppressed entirely: AskUserQuestion's UI
  * IS the permission picker card and ToolSearch is deferred-tool schema
  * plumbing — both feed noise. TaskUpdate is NOT here: the partition
@@ -1036,6 +1057,7 @@ function ActivitySection(
   id: string,
   children: readonly ConversationItem[],
   panels: PanelContext,
+  fixed: boolean,
 ): string {
   return Fold({
     id,
@@ -1044,6 +1066,7 @@ function ActivitySection(
     ticker: escapeHtml(activityTicker(children)),
     body: () => feedChildren(children, panels),
     open: panels.isOpen(id),
+    fixed,
   });
 }
 
@@ -1401,12 +1424,18 @@ function asyncFace(source: AsyncSource): string {
  * depth cap and on a cycle (a nested spawn announcing an ancestor's own
  * id). A source-less raw body (an announcement-less tail) wears the SAME
  * dress with an `output` face, so no stream renders zero-click inline.
+ *
+ * On a TEAL card (ASYNC_TEAL_TOOLS) neither fold folds: both render fixed,
+ * always laid out, and scrolled in place. The card's own tool name is the
+ * whole decision, so the tealness never has to be threaded down through the
+ * content presenters — it is read off the same member the fold belongs to.
  */
 function MemberFold(member: StreamMember, spec: BodySpec, panels?: PanelContext): string {
   if (!panels) return "";
   const item = member.item;
+  const fixed = ASYNC_TEAL_TOOLS.has(item.toolName);
   if (spec.kind === "child-feed") {
-    return ActivitySection(item.toolUseId, spec.items, panels);
+    return ActivitySection(item.toolUseId, spec.items, panels, fixed);
   }
   const source = member.source;
   if (source && !mayNest(panels.depth ?? 0, panels.seenSources, source.source_id)) return "";
@@ -1422,6 +1451,7 @@ function MemberFold(member: StreamMember, spec: BodySpec, panels?: PanelContext)
     ticker: `${arc}${escapeHtml(face)}`,
     body: () => streamBodyHtml(spec, source?.source_id ?? item.toolUseId, panels),
     open: panels.isOpen(id),
+    fixed,
   });
 }
 
