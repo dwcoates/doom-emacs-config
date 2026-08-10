@@ -1056,7 +1056,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		// would go on to submit its action's turn into a session that is not
 		// there. The bring-up must be the same one an open_workspace command
 		// performs, which is exactly what WorkspaceOpener is.
-		Lifecycle:         &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Logf: t.Logf},
+		Lifecycle:         &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Failures: controller, Logf: t.Logf},
 		SessionDeaths:     server.RegistrySessionDeaths{Reg: reg},
 		Sessions:          server.RegistrySessions{Reg: reg, Controller: controller, ModelCatalogs: modelCatalogs, TokenUsage: tokenUtilizations, Logf: t.Logf},
 		Inits:             controller,
@@ -1251,6 +1251,26 @@ func readFrameWithin(t *testing.T, conn *websocket.Conn, within time.Duration) *
 		t.Fatalf("protojson unmarshal %s: %v", data, err)
 	}
 	return frame
+}
+
+// tryReadFrameWithin is readFrameWithin that HANDS BACK the read error instead
+// of failing the test on it. It exists so an await that runs out of time can
+// name the frames it was still waiting for: a bare "read: i/o timeout" says
+// only that the socket went quiet, which is the least useful half of the fact.
+func tryReadFrameWithin(t *testing.T, conn *websocket.Conn, within time.Duration) (*frontendv1.FrontendFrame, error) {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(within)); err != nil {
+		t.Fatalf("deadline: %v", err)
+	}
+	_, data, err := conn.ReadMessage()
+	if err != nil {
+		return nil, err
+	}
+	frame := &frontendv1.FrontendFrame{}
+	if err := protojson.Unmarshal(data, frame); err != nil {
+		t.Fatalf("protojson unmarshal %s: %v", data, err)
+	}
+	return frame, nil
 }
 
 func writeCmd(t *testing.T, conn *websocket.Conn, cmd string) {

@@ -41,10 +41,31 @@ func Fence(sessionID, controllerGenerationID string) string {
 // A token with no separator is one this daemon did not mint — an out-of-date
 // client, or a value invented somewhere. It yields two empty identities, which
 // the ladder rejects loudly, rather than being guessed at.
+//
+// THE EMPTY PAIR IS AMBIGUOUS ON ITS OWN, which is what ParseFence exists for:
+// a caller that must tell "this client holds NO fence" from "this client holds
+// a fence this daemon did not mint" cannot do it from the pair, because both
+// arrive here as ("", ""). Every caller that acts differently on those two must
+// use ParseFence.
 func SplitFence(fence string) (sessionID, controllerGenerationID string) {
+	sessionID, controllerGenerationID, _ = ParseFence(fence)
+	return sessionID, controllerGenerationID
+}
+
+// ParseFence is SplitFence with the one fact SplitFence's return shape cannot
+// carry: whether the token was a fence AT ALL.
+//
+// ok is false for a token this daemon did not mint — anything without the
+// separator — and that includes the EMPTY string, because an absent fence is
+// not a malformed one and no caller may treat them alike. The resync
+// eligibility ladder is the case in point: a request carrying no fence predates
+// fenced chrome and is served under whatever identity is current, while a
+// request carrying an unmintable token is a stale echo and is refused. Both
+// split to ("", "").
+func ParseFence(fence string) (sessionID, controllerGenerationID string, ok bool) {
 	sep := strings.IndexByte(fence, fenceSeparator)
 	if sep < 0 {
-		return "", ""
+		return "", "", false
 	}
-	return fence[:sep], fence[sep+1:]
+	return fence[:sep], fence[sep+1:], true
 }

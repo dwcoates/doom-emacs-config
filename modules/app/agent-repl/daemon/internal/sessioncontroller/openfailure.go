@@ -74,12 +74,29 @@ func (m *Manager) RecordOpenFailure(workspace string, err error) {
 			m.recordFencedOpenRefusal(workspace, err)
 			return
 		}
-		// LOUD, not silent: the failure is real and the user will not see this
-		// one. It happens when the bring-up tore its own controller down, in
-		// which case the ladder's own card already stands — but the daemon
-		// cannot prove that from here, so it says what it could not publish.
-		m.errorf("session-controller: open bring-up FAILED ws=%q with no live controller to publish a failure card onto; the cause is recorded here only: %v",
-			workspace, err)
+		// NO CONTROLLER IS NOT NO SURFACE. This is the ORDINARY shape of a
+		// bring-up failure, not an edge: the ladder tears its own controller
+		// down as it resolves, so by the time the opener has classified the
+		// outcome there is nothing left to publish through. The ladder's own
+		// card does stand — but it is the UNTYPED one, because the ladder never
+		// sees the resume evidence the opener holds (which conversation, which
+		// config root, which transcript was searched for), and that evidence is
+		// the whole of what a continuity error is drawn from.
+		//
+		// So the card is published through the same throwaway consumer a durable
+		// resync serves an unwired workspace through, under the SAME stable
+		// per-session uuid the ladder used: the second write UPDATES one card
+		// rather than drawing a second account of one failure.
+		sessionID, located := m.cfg.Locator.Locate(workspace)
+		if !located {
+			m.errorf("session-controller: open bring-up FAILED ws=%q with no live controller and no session record to publish a failure card against; the cause is recorded here only: %v",
+				workspace, err)
+			return
+		}
+		m.logf("session-controller: open bring-up FAILED ws=%q session=%s after the open was acked, with no live controller; publishing the failure card through an unwired push: %v",
+			workspace, sessionID, err)
+		cons := m.durableConsumer(workspace, sessionID)
+		cons.pushFailure(cons.startFailedUUID(), openFailureCard(m.logf, err))
 		return
 	}
 	m.logf("session-controller: open bring-up FAILED ws=%q session=%s generation=%s after the open was acked; publishing a failure card: %v",
