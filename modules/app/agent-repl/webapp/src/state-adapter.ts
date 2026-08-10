@@ -752,6 +752,14 @@ export class StateAdapter {
       // record instead of an omission.
       case "restartPending":
         return [];
+      // A NEWER DAEMON'S ARM THIS BUNDLE PREDATES (frontend-proto.ts,
+      // UnknownFrameArm). It moves no state by definition — nothing here can
+      // know what it means — so it is tallied like every other shape this
+      // adapter has no mapping for, and the page ingests on. Listed rather
+      // than left to the guard below, which is for arms this build DOES know
+      // and forgot to handle.
+      case "unknownArm":
+        return [this.ignore("unknownArm")];
       default: {
         // Exhaustiveness guard: a new frame variant is a compile error here,
         // never a silent skip.
