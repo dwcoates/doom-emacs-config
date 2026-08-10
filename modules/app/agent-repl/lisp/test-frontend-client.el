@@ -108,6 +108,24 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
         (funcall tick))
       (should (equal events '(ready))))))
 
+(ert-deftest agent-repl-test-frontend-ready-budget-derives-from-timeout-seconds ()
+  "With no explicit attempt count the budget comes from the seconds defcustom."
+  (let ((agent-repl-frontend-ready-attempts nil)
+        (agent-repl-frontend-ready-timeout 90.0))
+    (should (= 450 (agent-repl--frontend-ready-attempt-budget)))))
+
+(ert-deftest agent-repl-test-frontend-ready-budget-honors-explicit-attempts ()
+  "An explicitly set attempt count overrides the derived budget."
+  (let ((agent-repl-frontend-ready-attempts 7)
+        (agent-repl-frontend-ready-timeout 90.0))
+    (should (= 7 (agent-repl--frontend-ready-attempt-budget)))))
+
+(ert-deftest agent-repl-test-frontend-ready-budget-rejects-invalid-timeout ()
+  "A non-positive readiness timeout is a loud error, not a silent default."
+  (let ((agent-repl-frontend-ready-attempts nil)
+        (agent-repl-frontend-ready-timeout 0))
+    (should-error (agent-repl--frontend-ready-attempt-budget))))
+
 (ert-deftest agent-repl-test-frontend-after-ready-times-out-on-its-owned-timer ()
   "Readiness invokes only failure after its bounded dial budget is exhausted."
   (let ((agent-repl-frontend-ready-attempts 1) ticks events)
