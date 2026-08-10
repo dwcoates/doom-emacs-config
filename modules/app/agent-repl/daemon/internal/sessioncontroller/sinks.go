@@ -2925,7 +2925,7 @@ func (c *consumer) pushWithheldFailure(uuid string, failure *frontendv1.FailureC
 // now that the LIVE query for this session has reached ShimReady and wired.
 //
 // THIS IS THE SAME SHAPE AS THE SUPERSEDED-DEATH RESOLUTION (server/
-// supersederesolve.go), and for the same reason. Both cards are WINDOW-shaped
+// deathresolve.go), and for the same reason. Both cards are WINDOW-shaped
 // and were recorded as if they were EVENT-shaped: a retired query's death is a
 // true account of something that happened, and it stops describing this session
 // the moment a live query genuinely has it — not one edge before. The supersede
