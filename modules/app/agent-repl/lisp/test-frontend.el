@@ -130,6 +130,52 @@ establishment, so a probe here would be a question already answered."
         ;; Assert
         (should-not probed)))))
 
+(ert-deftest agent-repl-test-frontend-webview-stamped-with-its-owner ()
+  "A fresh webview records the workspace that owns it.
+The stamp is what `agent-repl--foreign-owned-buffer-p' reads, so an
+unstamped webview would be invisible to every owner-keyed window sweep
+and a background panel build could mount its page over it."
+  ;; Arrange
+  (defvar agent-repl-test--urls)
+  (let ((agent-repl-test--urls '()))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
+        ;; Act
+        (let ((buf (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
+          ;; Assert
+          (should (equal (agent-repl--buffer-owner buf) "ws1")))))))
+
+(ert-deftest agent-repl-test-frontend-webview-is-foreign-to-another-workspace ()
+  "A webview stamped for one workspace reads as foreign to another.
+The end the stamp exists for: the sweep a background build runs must
+classify another workspace's live page as untouchable."
+  ;; Arrange
+  (defvar agent-repl-test--urls)
+  (let ((agent-repl-test--urls '()))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
+        ;; Act
+        (let ((buf (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
+          ;; Assert
+          (should (agent-repl--foreign-owned-buffer-p buf "ws2"))
+          (should-not (agent-repl--foreign-owned-buffer-p buf "ws1")))))))
+
+(ert-deftest agent-repl-test-frontend-webview-adopted-with-nil-owner-is-foreign-to-nobody ()
+  "A webview adopted with no owner (the explain-config popup) stays
+eligible for no workspace's window sweep."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *agent-repl-test-popup-webview*")))
+    (unwind-protect
+        (progn
+          ;; Act
+          (agent-repl--frontend-adopt-webview-buffer buf "*agent-explain-config*" nil)
+          ;; Assert
+          (should-not (agent-repl--buffer-owner buf))
+          (should-not (agent-repl--foreign-owned-buffer-p buf "ws1")))
+      (kill-buffer buf))))
+
 (ert-deftest agent-repl-test-frontend-webview-header-line-cleared ()
   "The mount clears `xwidget-webkit-mode's \"WebKit: <title>\" header-line."
   ;; Arrange
