@@ -719,7 +719,22 @@ stops containing failures."
   "Process sentinel: on any non-live transition, schedule a reconnect.
 EVENT is the raw sentinel string.  A closed/failed/deleted link clears
 the accumulator (a partial frame across a disconnect is unrecoverable)
-and reconnects (design §4.4)."
+and reconnects (design §4.4).
+
+Runs its whole transition under `agent-repl--with-deferred-quit'.  The
+body rewrites the connection state, drains the outbound queue into acks
+and re-arms the reconnect ladder; a `C-g' landing between those steps
+would leave the link recorded as neither up nor down, with queued
+commands neither sent nor settled.  A quit arriving here is therefore
+deferred to the command loop rather than taken mid-transition."
+  (agent-repl--with-deferred-quit "uds-sentinel"
+    (agent-repl--uds-sentinel-transition proc event)))
+
+(defun agent-repl--uds-sentinel-transition (proc event)
+  "Apply PROC's EVENT transition; the quit-inhibited body of the sentinel.
+Separated from `agent-repl--uds-sentinel' only so the critical section
+has a name of its own, both for the wrapper to guard and for tests to
+drive directly."
   (agent-repl--log nil "uds-sentinel: proc=%s event=%s"
                    (process-name proc) (string-trim event))
   (cond
@@ -825,7 +840,24 @@ already sitting in the accumulator behind it — an unrelated workspace's
 `sessionView', a `commandAck' someone is blocking on — waited for the
 next chunk to arrive, which may be seconds away or never.  The batch now
 always drains, and the first failure is re-signalled at the end, so the
-error still reaches the caller exactly once and exactly as loudly."
+error still reaches the caller exactly once and exactly as loudly.
+
+The drain runs under `agent-repl--with-deferred-quit'.  A `C-g' pressed
+while frames are being dispatched used to land INSIDE the loop as the
+`error in process filter: Quit' seen in *Messages*, abandoning the frames
+still buffered behind it along with whatever bookkeeping the running
+handler was halfway through writing.  Quitting is inhibited for the
+drain and the request is left in `quit-flag', so the user's quit happens
+at the command loop instead of between two frames."
+  (agent-repl--with-deferred-quit "uds-filter"
+    (agent-repl--uds-filter-drain chunk)))
+
+(defun agent-repl--uds-filter-drain (chunk)
+  "Accumulate CHUNK and dispatch every frame it completes.
+The quit-inhibited critical section of `agent-repl--uds-filter', named
+separately so the guard has a body to wrap and tests can drive a drain
+without a process.  Re-signals the drain's first handler failure once the
+batch is done, exactly as before."
   ;; A filter may receive a high rate of small chunks; retain only framing
   ;; metrics, never wire contents, in the verbose trace.
   (agent-repl--log-verbose
