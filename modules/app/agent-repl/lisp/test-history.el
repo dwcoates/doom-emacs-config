@@ -916,7 +916,10 @@ survives a crash that beats kill-emacs-hook.  Roster carries only
     (let ((tmpdir (make-temp-file "test-state-" t))
           (snapshot-file (make-temp-file "agent-snap-")))
       (unwind-protect
-          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+          ;; Delay 0 makes the debounced roster request write synchronously,
+          ;; so the piggyback is asserted without waiting on an idle timer.
+          (let ((agent-repl-workspace-snapshot-file snapshot-file)
+                (agent-repl-snapshot-save-idle-delay 0))
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :priority "p3")
@@ -935,7 +938,7 @@ write is the primary obligation; snapshot is the piggyback)."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-" t)))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl-save-workspace-snapshot)
+          (cl-letf (((symbol-function 'agent-repl--snapshot-save-request)
                      (lambda () (error "boom"))))
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
