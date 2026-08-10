@@ -930,6 +930,7 @@ session.")
 (declare-function agent-repl-uds-link-health "frontend-uds" ())
 (declare-function agent-repl--frontend-expected-restart-covering-initiator
                   "daemon" (&optional as-of))
+(declare-function agent-repl--frontend-expected-restart-window-live-p "daemon" ())
 
 (defface agent-repl-daemon-link-degraded
   `((t :background ,agent-repl--color-thinking-red
@@ -958,8 +959,19 @@ deadline AND the link is connected again.
 
 Runs inside redisplay, so it deliberately performs no logging: the health
 transitions themselves are logged where they are decided, in
-frontend-uds.el."
-  (if (eq (agent-repl-uds-link-health) :degraded)
+frontend-uds.el.  For the same reason the restart window is read through
+its side-effect-free predicate, never through the reader that expires an
+elapsed window as it answers.
+
+A DELIBERATE BOUNCE IS NOT A DEGRADED LINK.  While an expected-restart
+window is open — armed by the restart coordinator, or by the daemon's own
+restart announcement — the link being down is a PHASE of a restart
+somebody ordered, and painting an alarm for it is exactly the noise the
+window exists to remove.  The suppression is bounded by the window: a
+daemon that goes away and stays away has its window elapse, and this
+segment lights up as it always did."
+  (if (and (eq (agent-repl-uds-link-health) :degraded)
+           (not (agent-repl--frontend-expected-restart-window-live-p)))
       (propertize agent-repl-daemon-link-degraded-label
                   'face 'agent-repl-daemon-link-degraded)
     ""))

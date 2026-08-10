@@ -1367,12 +1367,26 @@ suppression can delay that card but can never cancel it."
   :type 'number
   :group 'agent-repl)
 
+(defcustom agent-repl-frontend-restart-announcement-max-seconds 300.0
+  "Ceiling on a window bound the DAEMON asked for.
+The daemon's announced expected-outage hint is an input from another
+process, so it is clamped rather than trusted: \"stay quiet for an hour\"
+must not be expressible even by accident."
+  :type 'number
+  :group 'agent-repl)
+
 (defvar agent-repl--frontend-expected-restart nil
   "State of the armed expected-restart window, or nil when none is armed.
 A plist: `:initiator' (who ordered the restart), `:armed-at' (`float-time'),
-`:timer' (the expiry timer), and — once an exit has been observed inside the
-window — `:exit' (the withheld failure), `:event' and `:tail' (its echo
-material).")
+`:window-seconds' (THIS window's bound), `:timer' (the expiry timer), and —
+once an exit has been observed inside the window — `:exit' (the withheld
+failure), `:event' and `:tail' (its echo material).
+
+The bound is per-window rather than global because a window may now be
+opened by the DAEMON's own restart announcement, which states how long it
+expects to be gone.  A bound that ignored the announcement would either
+under-cover an announced bounce (alarming mid-restart) or over-cover an
+Emacs-ordered one.")
 
 (defvar agent-repl--frontend-expected-restart-last-close nil
   "The last window CLOSED by its replacement daemon reconnecting, or nil.
@@ -1426,8 +1440,13 @@ closes quietly: there is nothing to report."
                                      (agent-repl--logfile-path))
           (agent-repl-failure-surface nil exit))))))
 
-(defun agent-repl--frontend-arm-expected-restart (initiator)
+(defun agent-repl--frontend-arm-expected-restart (initiator &optional window-seconds)
   "Arm the expected-restart window on behalf of INITIATOR.
+
+WINDOW-SECONDS is THIS window's bound; nil takes
+`agent-repl-frontend-expected-restart-window-seconds'.  It is clamped to
+`agent-repl-frontend-restart-announcement-max-seconds', because the only
+caller that passes one is relaying a figure another process chose.
 INITIATOR names the control-plane caller that ordered the restart and rides
 every record the window produces; a blank one is refused, because a window
 that cannot say who opened it is indistinguishable from one opened by
@@ -1440,11 +1459,13 @@ the first window withheld is still owed to the user if nothing ever comes back."
   (unless (and (stringp initiator) (not (string-empty-p (string-trim initiator))))
     (agent-repl--log nil "expected-restart: REFUSING blank initiator=%S" initiator)
     (error "agent-repl: an expected-restart window needs an initiator"))
-  (let ((prior agent-repl--frontend-expected-restart))
+  (let ((prior agent-repl--frontend-expected-restart)
+        (bound (agent-repl--frontend-expected-restart-bound window-seconds)))
     (agent-repl--frontend-expected-restart-cancel-timer)
     (setq agent-repl--frontend-expected-restart
           (list :initiator initiator
                 :armed-at (float-time)
+                :window-seconds bound
                 :timer nil
                 :exit (plist-get prior :exit)
                 :event (plist-get prior :event)
@@ -1453,13 +1474,54 @@ the first window withheld is still owed to the user if nothing ever comes back."
           (plist-put agent-repl--frontend-expected-restart
                      :timer
                      (agent-repl--uds-run-timer
-                      agent-repl-frontend-expected-restart-window-seconds
+                      bound
                       #'agent-repl--frontend-expected-restart-expire)))
     (agent-repl--log nil
                      "expected-restart: ARMED initiator=%s window=%.1fs carried-exit=%s"
-                     initiator agent-repl-frontend-expected-restart-window-seconds
+                     initiator bound
                      (if (plist-get prior :exit) "t" "nil"))
     initiator))
+
+(defun agent-repl--frontend-expected-restart-bound (window-seconds)
+  "Return the bound to arm a window with, given a requested WINDOW-SECONDS.
+Nil, non-numeric or non-positive requests take the configured default: a
+window opened on a value nobody stated is a window nobody can reason
+about, and defaulting is recoverable where trusting garbage is not."
+  (cond
+   ((not (and (numberp window-seconds) (> window-seconds 0)))
+    agent-repl-frontend-expected-restart-window-seconds)
+   ((> window-seconds agent-repl-frontend-restart-announcement-max-seconds)
+    (agent-repl--warn nil
+                      "expected-restart: CLAMPING requested window %.1fs to the %.1fs ceiling"
+                      window-seconds
+                      agent-repl-frontend-restart-announcement-max-seconds)
+    agent-repl-frontend-restart-announcement-max-seconds)
+   (t window-seconds)))
+
+(defun agent-repl-frontend-note-restart-announcement (cause expected-outage-seconds)
+  "Open the quiet window because THE DAEMON announced an intentional restart.
+
+CAUSE names what the daemon said it was bouncing for and becomes the
+window's initiator; EXPECTED-OUTAGE-SECONDS is its hint at how long it
+expects to be gone.
+
+This is the injectable entry point for the daemon-side announcement: the
+frontend frame handler that will carry it is a two-line adapter onto this
+function.  Everything downstream — the withheld exit, the suppressed
+link-down warn, the suppressed tab-bar segment — is exactly the machinery
+an Emacs-ordered restart already opens, because an announced bounce and an
+ordered one are the same event seen from the two ends.
+
+A hint is a PREDICTION, not a promise.  The window is bounded and clamped,
+so a daemon that announces a bounce and never comes back surfaces every
+alarm it delayed."
+  (let ((initiator (if (and (stringp cause) (not (string-empty-p (string-trim cause))))
+                       (format "daemon-announced:%s" (string-trim cause))
+                     "daemon-announced")))
+    (agent-repl--log nil
+                     "expected-restart: daemon ANNOUNCED a restart cause=%S expected-outage=%S"
+                     cause expected-outage-seconds)
+    (agent-repl--frontend-arm-expected-restart initiator expected-outage-seconds)))
 
 (defun agent-repl--frontend-expected-restart-initiator ()
   "Return the initiator of the LIVE expected-restart window, or nil.
@@ -1472,11 +1534,26 @@ withheld rather than dropping it."
   (let ((state agent-repl--frontend-expected-restart))
     (when state
       (if (>= (- (float-time) (plist-get state :armed-at))
-              agent-repl-frontend-expected-restart-window-seconds)
+              (or (plist-get state :window-seconds)
+                  agent-repl-frontend-expected-restart-window-seconds))
           (progn
             (agent-repl--frontend-expected-restart-expire)
             nil)
         (plist-get state :initiator)))))
+
+(defun agent-repl--frontend-expected-restart-window-live-p ()
+  "Return non-nil when a restart window is armed AND still inside its bound.
+
+SIDE-EFFECT FREE, unlike `agent-repl--frontend-expected-restart-initiator',
+which expires an elapsed window as it reads it.  Redisplay calls this: a
+tab-bar segment must not surface a withheld failure card or write a log
+line from inside a repaint, and an elapsed window read here simply reports
+nil until the next non-redisplay reader expires it properly."
+  (let ((state agent-repl--frontend-expected-restart))
+    (and state
+         (< (- (float-time) (plist-get state :armed-at))
+            (or (plist-get state :window-seconds)
+                agent-repl-frontend-expected-restart-window-seconds)))))
 
 (defun agent-repl--frontend-expected-restart-covering-initiator (&optional as-of)
   "Return the initiator of the restart window covering AS-OF, or nil.
