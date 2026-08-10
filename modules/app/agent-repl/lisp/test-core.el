@@ -3974,3 +3974,65 @@ entry per tick for the whole bring-up."
 (ert-deftest agent-repl-test-latch-claim-rejects-a-non-latch ()
   "Claiming something that is not a latch signals."
   (should-error (agent-repl--latch-claim 'not-a-latch)))
+;;;; ---- Tests: deferred quit around asynchronous critical sections ----
+
+(ert-deftest agent-repl-test-deferred-quit-inhibits-quitting-inside-the-body ()
+  "The guarded body observes `inhibit-quit' bound, so a C-g cannot land in it."
+  ;; Arrange
+  (let ((observed 'unset))
+    ;; Act
+    (agent-repl--with-deferred-quit "test"
+      (setq observed inhibit-quit))
+    ;; Assert
+    (should (eq observed t))))
+
+(ert-deftest agent-repl-test-deferred-quit-returns-the-body-value ()
+  "The guard is transparent to the body's value."
+  ;; Act
+  (let ((value (agent-repl--with-deferred-quit "test" 41 (1+ 41))))
+    ;; Assert
+    (should (equal value 42))))
+
+(ert-deftest agent-repl-test-deferred-quit-re-arms-a-quit-for-the-command-loop ()
+  "A C-g raised inside the body survives in `quit-flag' after the guard exits."
+  ;; Act / Assert -- the helper makes the observation the command loop would.
+  (should (agent-repl-test--quit-deferred-p
+            (agent-repl--with-deferred-quit "test"
+              ;; What Emacs itself does when C-g arrives under `inhibit-quit'.
+              (setq quit-flag t)))))
+
+(ert-deftest agent-repl-test-deferred-quit-records-the-deferral ()
+  "A deferred quit is explainable from the canonical log alone."
+  ;; Arrange
+  (let ((logged nil))
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      ;; Act
+      (agent-repl-test--quit-deferred-p
+        (agent-repl--with-deferred-quit "uds-filter"
+          (setq quit-flag t))))
+    ;; Assert
+    (should (seq-find (lambda (line)
+                        (and (string-match-p "deferred-quit" line)
+                             (string-match-p "uds-filter" line)))
+                      logged))))
+
+(ert-deftest agent-repl-test-deferred-quit-stays-silent-without-a-quit ()
+  "No quit means no deferral record — the guard is quiet on the ordinary path."
+  ;; Arrange
+  (let ((quit-flag nil)
+        (logged nil))
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      ;; Act
+      (agent-repl--with-deferred-quit "uds-filter" t))
+    ;; Assert
+    (should-not (seq-find (lambda (line) (string-match-p "deferred-quit" line))
+                          logged))))
+
+(ert-deftest agent-repl-test-deferred-quit-propagates-an-error-from-the-body ()
+  "The guard defers quits only; a signalled error still reaches the caller."
+  ;; Act / Assert
+  (should-error (agent-repl--with-deferred-quit "test"
+                  (error "boom"))
+                :type 'error))
