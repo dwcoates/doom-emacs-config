@@ -686,6 +686,13 @@ type consumer struct {
 	// lands after the NEXT turn has taken the record and retires a claim it
 	// does not own. Guarded by mu.
 	announcedTurnEnds map[string]struct{}
+	// stoppedTurns names every turn a TEARDOWN STOP is in flight for. A turn
+	// interrupted so the daemon can take its shim away was DISPLACED, not
+	// finished, and the successor daemon owes it (turnresumption.go); settling
+	// it from the vendor's result would record it as a turn that ended of its
+	// own accord. The stop's own path closes it instead, so the ledger keeps
+	// saying the shim was stopped over a live turn. Guarded by mu.
+	stoppedTurns map[string]struct{}
 	replayedAccounting     map[string]*frontendv1.TurnAccounting
 	replayedResponses      map[string]*frontendv1.TokenUtilization
 	completedTerminalBySeq map[uint64]*frontendv1.TurnAccounting
@@ -744,6 +751,7 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		terminalSeqByTurn:      map[string]uint64{},
 		settledStamps:          map[string]struct{}{},
 		announcedTurnEnds:      map[string]struct{}{},
+		stoppedTurns:           map[string]struct{}{},
 		replayedAccounting:     map[string]*frontendv1.TurnAccounting{},
 		replayedResponses:      map[string]*frontendv1.TokenUtilization{},
 		completedTerminalBySeq: map[uint64]*frontendv1.TurnAccounting{},
@@ -1187,6 +1195,27 @@ func (c *consumer) noteTerminalResult(turnID string, ev *corev1.Event) {
 	defer c.mu.Unlock()
 	c.pendingTerminal[turnID] = ev
 	c.terminalSeqByTurn[turnID] = ev.GetSeq()
+}
+
+// noteTurnStopInFlight records that a teardown is about to interrupt this turn
+// so the daemon can stop its shim. It is called BEFORE the interrupt, for the
+// same reason the owed-resumption row is written before it: the result the
+// interrupt provokes can be back before the call that sent it returns.
+func (c *consumer) noteTurnStopInFlight(turnID string) {
+	if turnID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stoppedTurns[turnID] = struct{}{}
+}
+
+// turnStopInFlight reports whether a teardown stop is outstanding for a turn.
+func (c *consumer) turnStopInFlight(turnID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, stopped := c.stoppedTurns[turnID]
+	return stopped
 }
 
 // claimTurnEndAnnouncement records that this turn's end is being announced and

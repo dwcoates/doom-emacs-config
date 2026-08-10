@@ -33,6 +33,9 @@ const productionAPIMessageID = "msg_011CdswkkMZyUqE6amdCWSjJ"
 // consumer paths, with the correction placed on whichever side of the result
 // the case is about.
 type settledTurnRig struct {
+	// turnID is the turn this rig drives. It is a field rather than a constant
+	// because a re-driven turn is named by the resumption that owed it.
+	turnID   string
 	consumer *consumer
 	applier  *fakeApplier
 	push     *fakePusher
@@ -47,6 +50,7 @@ type settledTurnRig struct {
 func newSettledTurnRig(t *testing.T) *settledTurnRig {
 	t.Helper()
 	rig := &settledTurnRig{
+		turnID:  "t",
 		applier: &fakeApplier{},
 		push:    &fakePusher{},
 		prog:    &fakeProgress{},
@@ -92,21 +96,58 @@ func (r *settledTurnRig) correct(t *testing.T, outputTokens int64) {
 func (r *settledTurnRig) endBoundary(t *testing.T) {
 	t.Helper()
 	if err := r.consumer.Apply(&corev1.Event{
-		Seq: 3, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t",
-		Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)},
+		Seq: 3, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: r.turnID,
+		Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation(r.turnID, false)},
 	}); err != nil {
 		t.Fatalf("deliver the turn-end usage observation: %v", err)
 	}
 }
 
+// reDriveRequestID is a re-drive's request id, minted exactly as
+// turnresumption.go mints one. The turn it names is invisible to the user and
+// entirely ordinary to the accounting ledger.
+var reDriveRequestID = resumptionRequestID("ws", "t-interrupted", 1786320000000)
+
+// newReDrivenTurnRig is the same rig over a turn the daemon re-drove after a
+// bounce rather than one the user typed.
+func newReDrivenTurnRig(t *testing.T) *settledTurnRig {
+	t.Helper()
+	rig := &settledTurnRig{
+		turnID:  reDriveRequestID,
+		applier: &fakeApplier{},
+		push:    &fakePusher{},
+		prog:    &fakeProgress{},
+		store:   newSettlingTurnAccountingStore(),
+		logs:    &levelSplitLogs{},
+	}
+	rig.consumer = newConsumer("ws", "s1", rig.push, rig.applier, rig.prog, newFakeClearCompactStore(),
+		rig.store, rig.logs.logf, nil, nil, nil, nil, nil)
+	rig.consumer.warnf = rig.logs.warnf
+	if err := rig.consumer.Apply(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "q",
+		Event:           &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{}},
+	}}}); err != nil {
+		t.Fatalf("admit the query: %v", err)
+	}
+	if err := rig.consumer.Apply(&corev1.Event{
+		Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: reDriveRequestID,
+		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: reDriveRequestID}},
+	}); err != nil {
+		t.Fatalf("admit the re-driven turn: %v", err)
+	}
+	return rig
+}
+
 // result delivers the vendor's terminal result, which is the turn's own end.
 func (r *settledTurnRig) result(t *testing.T) {
 	t.Helper()
-	if err := r.consumer.Consume(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{
+	ev := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{
 		Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{
 			Usage: &datav1.Usage{InputTokens: 33, OutputTokens: 720},
 		}},
-	})); err != nil {
+	})
+	ev.RequestId = r.turnID
+	if err := r.consumer.Consume(ev); err != nil {
 		t.Fatalf("deliver the terminal result: %v", err)
 	}
 }
@@ -437,4 +478,107 @@ func lastResponseOutputTokens(t *testing.T, store *settlingTurnAccountingStore, 
 		t.Fatalf("responses = %d, want the turn's single response", len(responses))
 	}
 	return responses[0].GetUsage().GetOutputTokens()
+}
+
+// ---------------------------------------------------------------------------
+// THE COMPOSITION: a displaced turn and a finished one settle differently.
+//
+// Two orthogonal mechanisms meet on one event. A bounce interrupts the turn in
+// flight and records what the successor daemon owes (turnresumption.go); the
+// SDK unwinds and emits a `result`. That result is not the turn arriving at its
+// own end, and settling from it would record a turn the daemon stopped as one
+// that finished.
+// ---------------------------------------------------------------------------
+
+// A turn a teardown is stopping is NOT settled from the result its own
+// interrupt provoked. The stop's close is what attributes it.
+func TestATerminalResultDuringATeardownStopDoesNotSettleTheTurn(t *testing.T) {
+	// Arrange — the teardown's pre-interrupt latch, set exactly where the
+	// teardown sets it: before the interrupt goes out.
+	rig := newSettledTurnRig(t)
+	rig.consumer.noteTurnStopInFlight("t")
+	rig.correct(t, 720)
+
+	// Act — the interrupt's result arrives.
+	rig.result(t)
+
+	// Assert.
+	if got := rig.applier.synthesizedTurnCloses(); len(got) != 0 {
+		t.Fatalf("synthesized closes = %v, want none — this turn was displaced by a stop, not finished", got)
+	}
+}
+
+// THE ANSWER IS STILL PUBLISHED. Whatever the turn produced before the bounce
+// landed on it is the user's, and withholding it would be the wedge again in a
+// different coat.
+func TestATerminalResultDuringATeardownStopStillReachesTheConversation(t *testing.T) {
+	// Arrange.
+	rig := newSettledTurnRig(t)
+	rig.consumer.noteTurnStopInFlight("t")
+	before := len(rig.push.conversationDeltas())
+
+	// Act.
+	rig.result(t)
+
+	// Assert.
+	if got := len(rig.push.conversationDeltas()); got != before+1 {
+		t.Fatalf("conversation deltas = %d, want %d — a stopped turn's output is still the user's", got, before+1)
+	}
+}
+
+// The turn-end announcement is withheld too, so the queue's drain and the idle
+// clock hear the stop's own boundary rather than one that would tell them the
+// turn ended of its own accord.
+func TestATerminalResultDuringATeardownStopAnnouncesNoTurnEnd(t *testing.T) {
+	// Arrange.
+	rig := newSettledTurnRig(t)
+	ends := 0
+	rig.consumer.onTurn = func(active bool, _ int64) {
+		if !active {
+			ends++
+		}
+	}
+	rig.consumer.noteTurnStopInFlight("t")
+
+	// Act.
+	rig.result(t)
+
+	// Assert.
+	if ends != 0 {
+		t.Fatalf("turn-end announcements = %d, want none for a turn a teardown is stopping", ends)
+	}
+}
+
+// A DIFFERENT TURN'S STOP IS NOT THIS TURN'S. The latch is per turn, so a stop
+// recorded for an earlier turn cannot keep a later one from settling.
+func TestATerminalResultForAnUnstoppedTurnStillSettles(t *testing.T) {
+	// Arrange.
+	rig := newSettledTurnRig(t)
+	rig.consumer.noteTurnStopInFlight("t-some-other-turn")
+	rig.correct(t, 720)
+
+	// Act.
+	rig.result(t)
+
+	// Assert.
+	if got := rig.applier.synthesizedTurnCloses(); len(got) != 1 {
+		t.Fatalf("synthesized closes = %v, want the turn settled from its own terminal result", got)
+	}
+}
+
+// THE RE-DRIVEN TURN IS A REAL TURN. Its prompt is daemon-hidden, but nothing
+// about the accounting ledger is: the turn a resumption re-drives settles a
+// stamp on exactly the terms any other turn does.
+func TestAReDrivenTurnSettlesItsAccountingLikeAnyOther(t *testing.T) {
+	// Arrange — a turn whose request id is a re-drive's.
+	rig := newReDrivenTurnRig(t)
+
+	// Act.
+	rig.result(t)
+	rig.endBoundary(t)
+
+	// Assert.
+	if got := rig.store.turnsRecorded(); len(got) != 1 || got[0] != reDriveRequestID {
+		t.Fatalf("settlements = %v, want the re-driven turn's own stamp settled", got)
+	}
 }
