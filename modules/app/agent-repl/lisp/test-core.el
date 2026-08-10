@@ -4036,3 +4036,82 @@ entry per tick for the whole bring-up."
   (should-error (agent-repl--with-deferred-quit "test"
                   (error "boom"))
                 :type 'error))
+
+;;;; ---- Tests: a workspace's directory is canonicalized to its registry key ----
+
+(ert-deftest agent-repl-test-log-workspace-dir-routes-to-its-registered-name ()
+  "A record naming a live workspace by its DIRECTORY routes to that workspace.
+Regression: a caller holding the worktree path rather than the workspace
+name made a live, registered workspace look unroutable."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((project (make-temp-file "agent-repl-dirkey-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "dirkey-ws" :project-dir project)
+            ;; Act / Assert
+            (should (equal "dirkey-ws" (agent-repl--log-sink-workspace project))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-workspace-dir-does-not-warn-as-unroutable ()
+  "Routing by directory must not emit the unroutable-workspace warning."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((project (make-temp-file "agent-repl-dirkey-quiet-" t))
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put "dirkey-quiet-ws" :project-dir project)
+              ;; Act
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log project "probe by directory"))
+              ;; Assert
+              (with-temp-buffer
+                (insert-file-contents path)
+                (should-not (string-match-p "unroutable log workspace"
+                                            (buffer-string)))))
+          (delete-directory project t))))))
+
+(ert-deftest agent-repl-test-log-workspace-dir-with-trailing-slash-resolves ()
+  "The registry key is reached through the shared path canonicalizer.
+A trailing slash is the same directory, so it must resolve to the same
+workspace name rather than to a second, unroutable spelling."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((project (make-temp-file "agent-repl-dirkey-slash-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "dirkey-slash-ws" :project-dir project)
+            ;; Act / Assert
+            (should (equal "dirkey-slash-ws"
+                           (agent-repl--log-sink-workspace
+                            (file-name-as-directory project)))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-unknown-directory-still-warns-as-unroutable ()
+  "Canonicalization must not silence a genuinely unknown name."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "/no/such/worktree/anywhere" "probe"))
+        ;; Assert
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (string-match-p "unroutable log workspace" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-tombstoned-workspace-dir-is-not-adopted ()
+  "A dead workspace's preserved directory must not claim the record.
+`agent-repl--ws-log-routable-p' is the gate, so an entry whose worktree is
+gone cannot silently swallow a directory-spelled record."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((project (make-temp-file "agent-repl-dirkey-tomb-" t)))
+      (agent-repl--ws-put "dirkey-tomb-ws" :project-dir project)
+      (delete-directory project t)
+      ;; Act / Assert
+      (should-not (equal "dirkey-tomb-ws"
+                         (agent-repl--log-sink-workspace project))))))
