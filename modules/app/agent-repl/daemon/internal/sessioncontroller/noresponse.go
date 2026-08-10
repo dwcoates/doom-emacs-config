@@ -1,6 +1,7 @@
 package sessioncontroller
 
 import (
+	"fmt"
 	"strings"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
@@ -80,15 +81,11 @@ func isNoResponsePlaceholder(it *frontendv1.ConversationItem) bool {
 // only the assistant_message arm, so it cannot interact with prompt attribution
 // the way the user-record curators do.
 func (c *consumer) withholdNoResponsePlaceholders(cd *frontendv1.ConversationDelta) {
-	items := cd.GetItems()
-	kept := items[:0]
-	for _, it := range items {
+	c.withholdItems(cd, func(it *frontendv1.ConversationItem) withholdVerdict {
 		if !isNoResponsePlaceholder(it) {
-			kept = append(kept, it)
-			continue
+			return keepItem
 		}
-		c.logf("session-controller: assistant turn WITHHELD as the vendor's no-response placeholder ws=%q session=%s seq=%d uuid=%s model=%q — the CLI writes this synthetic assistant record to close a turn nothing was asked of; no model produced it and it says nothing; the store keeps it, the conversation feed does not",
-			c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), syntheticModel)
-	}
-	cd.Items = kept
+		return withholdItem(fmt.Sprintf("session-controller: assistant turn WITHHELD as the vendor's no-response placeholder ws=%q session=%s seq=%d uuid=%s model=%q — the CLI writes this synthetic assistant record to close a turn nothing was asked of; no model produced it and it says nothing; the store keeps it, the conversation feed does not",
+			c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), syntheticModel))
+	})
 }
