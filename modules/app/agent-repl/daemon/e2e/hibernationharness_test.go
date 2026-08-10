@@ -315,9 +315,15 @@ func (s *keepAliveSession) hibernate(t *testing.T, requestID string) *frontendv1
 
 // awaitAwake blocks until the session reports a live, attached shim again —
 // the ordinary bring-up a revival performs.
-func (s *keepAliveSession) awaitAwake(t *testing.T) {
+//
+// seed is what a PRIOR await on this connection read past, and passing it is
+// mandatory whenever one ran: the awake SessionView is pushed on the BULK lane
+// while the revival's ack rides the CONTROL lane, so the two race and the view
+// legitimately arrives FIRST. An awaitAck that swallowed it leaves this await
+// waiting out its whole budget for a frame already delivered.
+func (s *keepAliveSession) awaitAwake(t *testing.T, seed ...*frontendv1.FrontendFrame) {
 	t.Helper()
-	awaitAll(t, s.conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAllSeeded(t, s.conn, frameTimeout, seed, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a SessionView reporting the revived session attached and awake": func(frame *frontendv1.FrontendFrame) bool {
 			view := sessionViewFor(frame, s.sessionID)
 			return view != nil && view.GetShimAttached() && !view.GetHibernated()
