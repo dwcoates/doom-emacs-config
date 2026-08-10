@@ -1613,6 +1613,14 @@ wire would be exactly the no-op this command replaces."
     (should (equal (agent-repl--frontend-ws-command-key "doom")
                    "/Users/x/.config/doom"))))
 
+(ert-deftest agent-repl-test-frontend-ws-command-key-strips-a-trailing-slash ()
+  "A recorded `:project-dir' with a trailing slash yields the canonical key."
+  ;; Arrange
+  (agent-repl-test--with-ws "doom" '(:project-dir "/Users/x/.config/doom/")
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-ws-command-key "doom")
+                   "/Users/x/.config/doom"))))
+
 (ert-deftest agent-repl-test-frontend-ws-command-key-signals-without-project-dir ()
   "A workspace with no `:project-dir' fails loudly rather than sending its name."
   ;; Arrange
@@ -1638,6 +1646,17 @@ wire would be exactly the no-op this command replaces."
       (pcase-let ((`(,field ,payload ,ws) (car uds-commands)))
         (should (equal field "restartSession"))
         (should (null payload))
+        (should (equal ws "/w"))))))
+
+(ert-deftest agent-repl-test-frontend-restart-session-key-has-no-trailing-slash ()
+  "The restart never mints a phantom workspace off a trailing-slash cwd."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w/")
+    (agent-repl-test--with-uds
+      ;; Act
+      (agent-repl--frontend-restart-session "ws1")
+      ;; Assert
+      (pcase-let ((`(,_field ,_payload ,ws) (car uds-commands)))
         (should (equal ws "/w"))))))
 
 (ert-deftest agent-repl-test-frontend-restart-session-is-a-known-command ()
