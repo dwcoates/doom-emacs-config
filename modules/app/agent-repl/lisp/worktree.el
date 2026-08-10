@@ -24,6 +24,7 @@
 (declare-function agent-repl--ws-frontend-name "frontends" (ws))
 (declare-function agent-repl--ws-frontend "frontends" (ws))
 (declare-function agent-repl-frontend-kill-fn "frontends" (frontend))
+(declare-function agent-repl--clean-frame-foreign-windows "commands" (ws))
 (declare-function agent-repl--drain-pending-magit "panels" (ws))
 (declare-function agent-repl--drain-pending-initial-buffers "panels" (ws))
 (declare-function agent-repl--drain-pending-show-panels "panels" (ws))
@@ -1118,11 +1119,27 @@ the activation-reactive hooks that must not fire for a background
 workspace are suppressed — see that variable's docstring for why the
 async `--on-workspace-switch' schedule and the workspace-history record
 would misfire here.  Those hooks only run on a real persp activation, so
-the binding is inert when WS is already current."
+the binding is inert when WS is already current.
+
+Activating WS is NOT by itself enough to give FN a frame of WS's own.
+`persp-reset-windows-on-nil-window-conf' is nil under Doom, so
+activating a perspective that has never saved a window configuration —
+which is exactly a just-materialized workspace — leaves the frame
+showing the PREVIOUS workspace's windows.  FN then builds into them:
+`agent-repl--frontend-display-webview' takes the first undedicated
+main-area window as its host, which was the window the user was
+watching another workspace's webview in, and swaps that workspace's
+page out for WS's.  `agent-repl--clean-frame-foreign-windows' evicts
+every window whose buffer another workspace owns before FN runs, so a
+background build has nothing of anyone else's left to reuse or tear
+down.  It runs even when WS was already current, since the invariant FN
+depends on is about the FRAME's contents, not about whether a switch
+happened."
   (let ((agent-repl--eager-open-in-progress t))
     (agent-repl--with-preserved-focus
       (unless (equal ws (agent-repl--ws-current-name))
         (agent-repl--ws-switch ws))
+      (agent-repl--clean-frame-foreign-windows ws)
       (funcall fn))))
 
 (defun agent-repl--eager-open-panels (ws)
