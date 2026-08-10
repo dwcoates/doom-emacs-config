@@ -65,22 +65,27 @@ func (s *settlingTurnAccountingStore) turnsRecorded() []string {
 	return append([]string(nil), s.recorded...)
 }
 
-// newRetiredTurnRig builds a consumer whose turn has already been settled once:
-// the reducer entry is retired, the hold is discharged, and the store holds the
-// settlement. That is the exact state the second release authority arrives in.
+// newRetiredTurnRig builds a consumer arriving at a turn some OTHER generation
+// already settled: the store holds the settlement, this reducer holds no entry
+// for the turn, and this consumer has published no stamp for it.
+//
+// That is the surviving shape of the collision. An in-process second
+// settlement — the enrichment settling a stamp and the shim's `TurnEnded`
+// naming the same turn afterwards — is the ordinary path now and is latched
+// quiet by settleTurnAccounting; what still has to be served from the store
+// and recorded loudly is a settlement this process cannot account for.
 func newRetiredTurnRig(t *testing.T, turnID string) (*consumer, *settlingTurnAccountingStore, *fakePusher, *levelSplitLogs) {
 	t.Helper()
 	push := &fakePusher{}
 	logs := &levelSplitLogs{}
 	store := newSettlingTurnAccountingStore()
+	store.mu.Lock()
+	store.byTurn[turnID] = &frontendv1.TurnAccounting{TurnId: turnID}
+	store.mu.Unlock()
 	c := newConsumer("ws", "s1", push, &fakeApplier{}, &fakeProgress{}, newFakeClearCompactStore(), store,
 		logs.logf, nil, nil, nil, nil, nil)
 	c.warnf = logs.warnf
-	c.accounting.turns[turnID] = &accountingTurn{}
-	c.holdTerminalResult(turnID, terminalResultEvent(t, 3481))
-	if err := c.settleTurnAccounting(turnID); err != nil {
-		t.Fatalf("first settlement: %v", err)
-	}
+	c.noteTerminalResult(turnID, terminalResultEvent(t, 3481))
 	return c, store, push, logs
 }
 
@@ -160,8 +165,8 @@ func TestSecondSettlementOfARetiredTurnDoesNotRecordAgain(t *testing.T) {
 	}
 
 	// Assert.
-	if got := len(store.turnsRecorded()); got != 1 {
-		t.Fatalf("Record calls = %d (%v), want 1 — the second settlement must serve the persisted row, not overwrite it", got, store.turnsRecorded())
+	if got := len(store.turnsRecorded()); got != 0 {
+		t.Fatalf("Record calls = %d (%v), want 0 — the second settlement must serve the persisted row, not overwrite it", got, store.turnsRecorded())
 	}
 }
 
@@ -263,7 +268,7 @@ func TestSettlementOfATurnWithNoPersistedRecordLeavesItsResultHeld(t *testing.T)
 	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, &fakeProgress{}, newFakeClearCompactStore(),
 		newSettlingTurnAccountingStore(), logs.logf, nil, nil, nil, nil, nil)
 	c.warnf = logs.warnf
-	c.holdTerminalResult(turnID, terminalResultEvent(t, 7))
+	c.noteTerminalResult(turnID, terminalResultEvent(t, 7))
 
 	// Act.
 	if err := c.settleTurnAccounting(turnID); err == nil {
@@ -295,18 +300,19 @@ func TestSettlementOfARetiredTurnSurfacesAPersistedLookupFailure(t *testing.T) {
 	}
 }
 
-// THE TWO-AUTHORITY COLLISION AS THE DAEMON SAW IT: the same held turn released
-// twice, which used to be an exit code 2.
-func TestReleasingOneHeldTurnTwiceDoesNotKillTheDaemon(t *testing.T) {
+// THE TWO-AUTHORITY COLLISION AS THE DAEMON SAW IT: the same outstanding turn
+// released twice, which used to be an exit code 2.
+func TestReleasingOneOutstandingTurnTwiceDoesNotKillTheDaemon(t *testing.T) {
 	// Arrange.
 	const turnID = "fe-1266-4cf1"
 	push := &fakePusher{}
 	logs := &levelSplitLogs{}
+	store := newSettlingTurnAccountingStore()
 	c := newConsumer("ws", "s1", push, &fakeApplier{}, &fakeProgress{}, newFakeClearCompactStore(),
-		newSettlingTurnAccountingStore(), logs.logf, nil, nil, nil, nil, nil)
+		store, logs.logf, nil, nil, nil, nil, nil)
 	c.warnf = logs.warnf
 	c.accounting.turns[turnID] = &accountingTurn{}
-	c.holdTerminalResult(turnID, terminalResultEvent(t, 3481))
+	c.noteTerminalResult(turnID, terminalResultEvent(t, 3481))
 
 	// Act -- a synthesized close and a teardown, each having snapshotted the
 	// held set before the other discharged it.
@@ -315,9 +321,12 @@ func TestReleasingOneHeldTurnTwiceDoesNotKillTheDaemon(t *testing.T) {
 
 	// Assert.
 	if c.heldTerminalResult(turnID) != nil {
-		t.Fatal("the terminal result is still held after both releases")
+		t.Fatal("the turn's stamp is still outstanding after both releases")
 	}
-	if got := len(push.conversationDeltas()); got != 1 {
-		t.Fatalf("conversation deltas = %d, want exactly 1 — the answer is published once, by whichever authority ran first", got)
+	if got := len(store.turnsRecorded()); got != 1 {
+		t.Fatalf("Record calls = %d (%v), want exactly 1 — the stamp settles once, by whichever authority ran first", got, store.turnsRecorded())
+	}
+	if got := len(push.conversationDeltas()); got != 0 {
+		t.Fatalf("conversation deltas = %d, want 0 — a stamp settlement publishes accounting, never the turn's answer a second time", got)
 	}
 }

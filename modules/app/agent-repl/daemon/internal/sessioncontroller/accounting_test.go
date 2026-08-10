@@ -1457,8 +1457,14 @@ func TestTurnAccountingReducerClassifiesUsageWindowMovement(t *testing.T) {
 // failure is bookkeeping, not a protocol violation, so it must not deny the
 // turn boundary itself or the session's establishment — Apply succeeds, the
 // turn's own lifecycle state is unaffected, and only its accounting (and the
-// terminal conversation delivery that accounting gates) stays withheld,
-// loudly logged.
+// turn's accounting stays unresolved, loudly logged.
+//
+// THE TERMINAL CONVERSATION IS NO LONGER GATED ON IT. Accounting used to hold
+// the turn's result back until its record persisted, which is the coupling
+// terminalsettlement.go removed: the result is the turn's end and reaches the
+// user whatever the token ledger does. The blast-radius requirement this test
+// covers is therefore now strictly wider — the boundary, the establishment AND
+// the answer all survive the failure.
 func TestTerminalAccountingPersistenceFailureDegradesAccountingWithoutDenyingEstablishment(t *testing.T) {
 	push := &fakePusher{}
 	var logs []string
@@ -1472,8 +1478,8 @@ func TestTerminalAccountingPersistenceFailureDegradesAccountingWithoutDenyingEst
 	if err != nil {
 		t.Fatalf("Apply error = %v, want the turn boundary accepted despite the persistence failure", err)
 	}
-	if len(push.convo) != 0 {
-		t.Fatalf("terminal conversation delivered before persistence: %+v", push.convo)
+	if len(push.convo) != 1 {
+		t.Fatalf("terminal conversation deltas = %d, want the turn's answer delivered despite the accounting persistence failure", len(push.convo))
 	}
 	if c.accounting.turns["t"] == nil || c.accounting.activeTurnID != "t" {
 		t.Fatalf("failed terminal persistence retired reducer state: turns=%+v active=%q", c.accounting.turns, c.accounting.activeTurnID)
@@ -1506,9 +1512,25 @@ func TestTerminalAccountingRepublishesSessionViewAfterTerminalConversation(t *te
 	}
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	if len(push.trace) < 2 || push.trace[len(push.trace)-2] != "conversation" || push.trace[len(push.trace)-1] != "session_view" {
-		t.Fatalf("terminal delivery order = %v", push.trace)
+	// THE GUARANTEE IS ORDER, NOT ADJACENCY. The republished SessionView must
+	// follow the answer it accounts for; what may sit between them is the
+	// turn's own settled render state, published by the terminal result on its
+	// way through (terminalsettlement.go).
+	answer, republish := indexOfTrace(push.trace, "conversation"), indexOfTrace(push.trace, "session_view")
+	if answer < 0 || republish < 0 || answer > republish {
+		t.Fatalf("terminal delivery order = %v, want the SessionView republished after the answer it accounts for", push.trace)
 	}
+}
+
+// indexOfTrace reports where a push kind first appears in the recorded order,
+// or -1 when it never did.
+func indexOfTrace(trace []string, kind string) int {
+	for i, got := range trace {
+		if got == kind {
+			return i
+		}
+	}
+	return -1
 }
 
 func TestUnexpectedQueryTerminationUsesOneAuthoritativeDegradedState(t *testing.T) {
