@@ -222,3 +222,49 @@ func kindArmName(kind *frontendv1.FailureKind) string {
 		kind.ProtoReflect().Descriptor().Oneofs().ByName("kind"),
 	).Name())
 }
+
+// TestTerminalStampsTheTerminalArm: a card with no closing edge says so through
+// its lifecycle arm rather than through its prose.
+func TestTerminalStampsTheTerminalArm(t *testing.T) {
+	// Arrange.
+	card := Card(TypeSessionStartFailed, "gone")
+
+	// Act.
+	Terminal(card)
+
+	// Assert.
+	if !IsTerminal(card) {
+		t.Fatalf("lifecycle = %T, want the terminal arm", card.GetLifecycle())
+	}
+}
+
+// TestTerminalRefusesToUnsettleAResolvedCard: a failure that already stopped
+// being true must never be restated as one that never ends.
+func TestTerminalRefusesToUnsettleAResolvedCard(t *testing.T) {
+	// Arrange.
+	card := Card(TypeShimDegraded, "quiet")
+	Resolve(card, 1234)
+
+	// Act.
+	Terminal(card)
+
+	// Assert.
+	if IsTerminal(card) {
+		t.Fatal("a resolved card was overwritten with the terminal arm")
+	}
+	if ResolvedAtMs(card) != 1234 {
+		t.Fatalf("resolved_at_ms = %d, want the original 1234", ResolvedAtMs(card))
+	}
+}
+
+// TestIsTerminalIsFalseForAFreshCard: a fresh card is OPEN, and an open card
+// invites the retry a terminal one forbids.
+func TestIsTerminalIsFalseForAFreshCard(t *testing.T) {
+	// Arrange / Act.
+	card := Card(TypeSessionStartFailed, "gone")
+
+	// Assert.
+	if IsTerminal(card) {
+		t.Fatal("a fresh card reported itself terminal")
+	}
+}

@@ -188,3 +188,26 @@ func TestAnOrdinarySpawnFailureIsNotFenced(t *testing.T) {
 		t.Fatalf("EnsureShim calls = %d, want both attempts to have reached the spawner", len(h.spawner.calls))
 	}
 }
+
+// TestTheFenceCardIsTerminal: the card must state that its failure has no
+// closing edge, because that is the only thing on the wire a client can read to
+// stop its own automatic re-open loop.
+func TestTheFenceCardIsTerminal(t *testing.T) {
+	// Arrange.
+	h := newEscapeHarness(t)
+	h.spawner.err = errVanishedTarget
+
+	// Act.
+	if _, err := h.m.ensure(context.Background(), "ws"); err == nil {
+		t.Fatal("the ensure succeeded; the harness must refuse it terminally")
+	}
+
+	// Assert.
+	cards := h.failureCards()
+	if len(cards) != 1 {
+		t.Fatalf("failure cards = %d, want exactly one standing card", len(cards))
+	}
+	if !errclass.IsTerminal(cards[0]) {
+		t.Fatalf("fence card lifecycle = %T, want the terminal arm", cards[0].GetLifecycle())
+	}
+}
