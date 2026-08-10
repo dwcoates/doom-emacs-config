@@ -1053,7 +1053,6 @@ describe("the token heat ramp is a single owner", () => {
 
 
 describe("framed column: tool cards center, prompt right-flushes, response left-flushes", () => {
-  const feed = blockAfter(css, "#feed {");
   const userBubble = blockAfter(css, ".bubble.user {");
   const assistantBubble = blockAfter(css, ".bubble.assistant {");
   // The top-level async tool cards keep the centering rule; the response
