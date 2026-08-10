@@ -320,8 +320,16 @@ func (m *Manager) noteTurnLiveness(d *sessionController, l ssm.TurnLiveness) {
 	}
 	m.mu.Lock()
 	p := d.noteTurnLivenessLocked(l)
+	// THE WATCHDOG'S ARMING EDGE (undriventurn.go), taken in the SAME
+	// acquisition that moved the record: a bind that could be observed before
+	// its watch exists is a bind the watchdog could miss forever.
+	armed := d.noteUndrivenWatchLocked(p, m.now())
 	m.mu.Unlock()
 
+	if armed != nil {
+		m.logf("session-controller: turn record BOUND WITH NO DRIVER ws=%q session=%s turn_id=%s bound_at_ms=%d deadline_ms=%d — this daemon never submitted this turn and no shim announced it in flight, so nothing here is waiting on it; if no driver is recorded within the deadline the claim is retired and reported rather than left pinning the workspace",
+			d.workspace, d.sessionID, armed.turnID, armed.boundAtMs, undrivenTurnDeadlineMs)
+	}
 	if p.unnamed {
 		// LOUD, NEVER AN EMPTY STRING IN A NAMED RECORD. A legacy start carries
 		// no turn id, so the derivation holds a live turn nothing can name. The

@@ -155,7 +155,7 @@ a mis-colored failure rather than a missing one."
     "conversationUnresumable" "resumeModeRetired" "sessionEndedUnclassified"
     "historyRepullInFlight" "historyReplayTruncated" "interruptUndelivered"
     "queueEntryUnwired" "queueEntryKeepAliveHeld"
-    "queueEntryUninterruptibleTurn" "sessionHibernated"
+    "queueEntryUninterruptibleTurn" "sessionHibernated" "turnUndriven"
     "keepAliveWindowUnclosed" "keepAliveWindowInverted" "compactionColdRead"
     "clientLogIdentityStale" "promptRefusedByMergeState"
     "internalUnclassified")

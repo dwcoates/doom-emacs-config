@@ -388,6 +388,7 @@ export const FAILURE_KIND_SIDE = {
   queueEntryUnwired: "machinery",
   queueEntryKeepAliveHeld: "machinery",
   queueEntryUninterruptibleTurn: "machinery",
+  turnUndriven: "machinery",
   sessionHibernated: "machinery",
   keepAliveWindowUnclosed: "machinery",
   keepAliveWindowInverted: "machinery",
