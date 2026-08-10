@@ -2158,6 +2158,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-webview-reload-widget
     agent-repl--frontend-webview-uri
     agent-repl--uds-connect
+    agent-repl--uds-socket-file-present-p
     agent-repl--uds-probe
     agent-repl--image-call-process
     agent-repl--external-browser-call-process
