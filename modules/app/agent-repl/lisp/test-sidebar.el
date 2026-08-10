@@ -1621,10 +1621,10 @@ a live workspace does not belong in a list of work that has receded."
         (should (eq (plist-get roster :recentlyMerged) :null))
         (should (member "revived" (agent-repl-test--roster-repo-names roster)))))))
 
-(ert-deftest agent-repl-test-sidebar-merged-keeps-every-merge-past-ten ()
-  "Recently Merged carries every in-window merge, well past ten rows.
-The rail bounds the section by height (the webapp scrolls it at ten rows),
-so the roster must not drop the merges that scrolling exists to reach."
+(ert-deftest agent-repl-test-sidebar-merged-caps-the-row-count-at-ten ()
+  "Recently Merged carries at most ten rows, however many merges landed.
+The row count IS the section's height, so an unbounded roster stood the
+section at its full height off merges the user could not see."
   (agent-repl-test--with-clean-state
     (let ((now (float-time)))
       (dotimes (i 25)
@@ -1633,10 +1633,10 @@ so the roster must not drop the merges that scrolling exists to reach."
                                      :merge-completed-at (+ now i)))
       (let* ((roster (car (agent-repl--sidebar-build)))
              (rows (append (plist-get (plist-get roster :recentlyMerged) :rows) nil)))
-        (should (= (length rows) 25))))))
+        (should (= (length rows) agent-repl-sidebar-merged-max-rows))))))
 
-(ert-deftest agent-repl-test-sidebar-merged-past-ten-stays-newest-first ()
-  "The uncapped section still orders newest merge first."
+(ert-deftest agent-repl-test-sidebar-merged-cap-keeps-the-newest-ten ()
+  "The cap drops the OLDEST merges, keeping the ten newest in order."
   (agent-repl-test--with-clean-state
     (let ((now (float-time)))
       (dotimes (i 12)
@@ -1646,8 +1646,48 @@ so the roster must not drop the merges that scrolling exists to reach."
       (let* ((roster (car (agent-repl--sidebar-build)))
              (rows (append (plist-get (plist-get roster :recentlyMerged) :rows) nil)))
         (should (equal (mapcar (lambda (r) (plist-get r :name)) rows)
-                       '("m11" "m10" "m09" "m08" "m07" "m06"
-                         "m05" "m04" "m03" "m02" "m01" "m00")))))))
+                       '("m11" "m10" "m09" "m08" "m07"
+                         "m06" "m05" "m04" "m03" "m02")))))))
+
+(ert-deftest agent-repl-test-sidebar-merged-under-the-cap-keeps-every-row ()
+  "A section under the cap is exactly as tall as the merges it holds."
+  (agent-repl-test--with-clean-state
+    (let ((now (float-time)))
+      (dotimes (i 3)
+        (agent-repl-test--sidebar-ws (format "m%02d" i) (format "/tmp/m%02d" i)
+                                     :pushed-render-state :merged
+                                     :merge-completed-at (+ now i)))
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (rows (append (plist-get (plist-get roster :recentlyMerged) :rows) nil)))
+        (should (= (length rows) 3))))))
+
+(ert-deftest agent-repl-test-sidebar-merged-cap-logs-what-it-drops ()
+  "Dropping a merge off the rail is logged, never silent."
+  (agent-repl-test--with-clean-state
+    (let ((now (float-time))
+          (logged nil))
+      (dotimes (i 12)
+        (agent-repl-test--sidebar-ws (format "m%02d" i) (format "/tmp/m%02d" i)
+                                     :pushed-render-state :merged
+                                     :merge-completed-at (+ now i)))
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        (agent-repl--sidebar-merged-sorted (agent-repl--sidebar-entries)))
+      (should (cl-find-if (lambda (m) (string-match-p "exceed the 10-row cap" m)) logged)))))
+
+(ert-deftest agent-repl-test-sidebar-merged-under-the-cap-logs-nothing ()
+  "A section under the cap drops nothing, so it reports nothing."
+  (agent-repl-test--with-clean-state
+    (let ((now (float-time))
+          (logged nil))
+      (dotimes (i 3)
+        (agent-repl-test--sidebar-ws (format "m%02d" i) (format "/tmp/m%02d" i)
+                                     :pushed-render-state :merged
+                                     :merge-completed-at (+ now i)))
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        (agent-repl--sidebar-merged-sorted (agent-repl--sidebar-entries)))
+      (should-not (cl-find-if (lambda (m) (string-match-p "cap" m)) logged)))))
 
 (ert-deftest agent-repl-test-sidebar-merged-listed-newest-first ()
   "Recently merged rows sort by merge time, newest first."
