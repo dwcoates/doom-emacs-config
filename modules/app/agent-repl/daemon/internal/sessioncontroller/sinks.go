@@ -684,15 +684,15 @@ type consumer struct {
 	// shim's later `TurnEnded` are two statements of ONE end, so announcing
 	// both would fire that machinery twice for one turn; the second edge then
 	// lands after the NEXT turn has taken the record and retires a claim it
-	// does not own. Guarded by mu.
-	announcedTurnEnds map[string]struct{}
+	// does not own. A turnLatch, so the test-and-set is one step.
+	announcedTurnEnds *turnLatch
 	// stoppedTurns names every turn a TEARDOWN STOP is in flight for. A turn
 	// interrupted so the daemon can take its shim away was DISPLACED, not
 	// finished, and the successor daemon owes it (turnresumption.go); settling
 	// it from the vendor's result would record it as a turn that ended of its
 	// own accord. The stop's own path closes it instead, so the ledger keeps
-	// saying the shim was stopped over a live turn. Guarded by mu.
-	stoppedTurns map[string]struct{}
+	// saying the shim was stopped over a live turn.
+	stoppedTurns *turnLatch
 	replayedAccounting     map[string]*frontendv1.TurnAccounting
 	replayedResponses      map[string]*frontendv1.TokenUtilization
 	completedTerminalBySeq map[uint64]*frontendv1.TurnAccounting
@@ -750,8 +750,8 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		pendingTerminal:        map[string]*corev1.Event{},
 		terminalSeqByTurn:      map[string]uint64{},
 		settledStamps:          map[string]struct{}{},
-		announcedTurnEnds:      map[string]struct{}{},
-		stoppedTurns:           map[string]struct{}{},
+		announcedTurnEnds:      newTurnLatch(),
+		stoppedTurns:           newTurnLatch(),
 		replayedAccounting:     map[string]*frontendv1.TurnAccounting{},
 		replayedResponses:      map[string]*frontendv1.TokenUtilization{},
 		completedTerminalBySeq: map[uint64]*frontendv1.TurnAccounting{},
@@ -1202,20 +1202,12 @@ func (c *consumer) noteTerminalResult(turnID string, ev *corev1.Event) {
 // same reason the owed-resumption row is written before it: the result the
 // interrupt provokes can be back before the call that sent it returns.
 func (c *consumer) noteTurnStopInFlight(turnID string) {
-	if turnID == "" {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.stoppedTurns[turnID] = struct{}{}
+	c.stoppedTurns.mark(turnID)
 }
 
 // turnStopInFlight reports whether a teardown stop is outstanding for a turn.
 func (c *consumer) turnStopInFlight(turnID string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	_, stopped := c.stoppedTurns[turnID]
-	return stopped
+	return c.stoppedTurns.marked(turnID)
 }
 
 // claimTurnEndAnnouncement records that this turn's end is being announced and
@@ -1223,15 +1215,12 @@ func (c *consumer) turnStopInFlight(turnID string) bool {
 // authority for the same turn gets false and announces nothing.
 func (c *consumer) claimTurnEndAnnouncement(turnID string) bool {
 	if turnID == "" {
+		// An END NOBODY ATTRIBUTED cannot be matched against a prior claim, so
+		// it announces rather than be silently dropped by a latch it can never
+		// be a member of.
 		return true
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if _, announced := c.announcedTurnEnds[turnID]; announced {
-		return false
-	}
-	c.announcedTurnEnds[turnID] = struct{}{}
-	return true
+	return c.announcedTurnEnds.claim(turnID)
 }
 
 // stampAlreadySettled reports whether this turn's accounting stamp has already
