@@ -1760,6 +1760,10 @@ export class ConversationStore {
       // And again: the revival hold is WHY this entry is parked, so it is
       // carried through untouched and the renderer picks its bubble off it.
       revivalHold: e.revivalHold,
+      // The context cut running in front of the entry, carried for the same
+      // reason: it is WHY no classifier judged this prompt, and the card names
+      // the cut off the daemon's own claim rather than inferring one.
+      uninterruptibleCommand: e.uninterruptibleCommand,
     }));
     return true;
   }

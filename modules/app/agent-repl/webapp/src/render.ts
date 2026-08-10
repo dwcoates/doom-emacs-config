@@ -502,6 +502,20 @@ function queuedBadge(item: QueuedItem): { label: string; cls: string } {
       return { label: "queued — unclassified", cls: "error" };
     case "pending":
       return { label: "queued — classifying…", cls: "pending" };
+    case "uninterruptible":
+      // The COMMAND is the badge. Without it the card would say a prompt is
+      // waiting behind something it cannot name, and the arm exists precisely
+      // so it can be named — so an entry that arrived without one is a
+      // contradiction to report, not a card to draw vaguely.
+      if (item.uninterruptibleCommand === undefined) {
+        throw new Error(
+          "render: an uninterruptible queue entry names no command",
+        );
+      }
+      return {
+        label: `queued — ${sessionCommandLabel(item.uninterruptibleCommand)} is never interrupted`,
+        cls: "uninterruptible",
+      };
     default: {
       // EXHAUSTIVE by construction: a new QueueClassification arm fails to
       // COMPILE here. The old `case "pending": default:` fallthrough would
@@ -633,6 +647,13 @@ export const REVIVAL_HELD_REASON =
   "for it. It is delivered as soon as the compaction lands and the session wakes — it has " +
   "not been judged by the classifier, and it cannot be forced through ahead of the revival.";
 
+/** Why an uninterruptible entry waits, said plainly — assertable without parsing markup. */
+export const UNINTERRUPTIBLE_TURN_REASON =
+  "A context cut is running, and it is never interrupted for a queued prompt: stopping a " +
+  "compaction pays for reading the whole conversation and lands no summary. This prompt was " +
+  "not judged by a classifier and cannot be forced ahead of the cut. It is delivered in the " +
+  "order it was typed the moment that turn ends.";
+
 export function QueuedCard(item: QueuedItem): string {
   // THE LEASE HOLD OUTRANKS THE CLASSIFICATION, and there is nothing to weigh:
   // the classifier never ran on a lease-held entry, so its classification
@@ -655,16 +676,28 @@ export function QueuedCard(item: QueuedItem): string {
   }
   const badge = queuedBadge(item);
   const qid = escapeHtml(item.id);
-  const reason = item.rationale
-    ? `<div class="queued-reason">${escapeHtml(item.rationale)}</div>`
-    : "";
+  // AN UNINTERRUPTIBLE ENTRY IS THE ONE VERDICT WITH NO CLASSIFIER BEHIND IT,
+  // so it draws neither of the two controls that only make sense against one:
+  // there is no verdict to Accept, and Run now is REFUSED by the daemon —
+  // its mechanism is an interrupt, and interrupting the running cut is exactly
+  // what must not happen. Drawing a button the daemon nacks would be a control
+  // that acknowledges and achieves nothing.
+  const uninterruptible = item.classification === "uninterruptible";
+  const reason = uninterruptible
+    ? `<div class="queued-reason">${escapeHtml(UNINTERRUPTIBLE_TURN_REASON)}</div>`
+    : item.rationale
+      ? `<div class="queued-reason">${escapeHtml(item.rationale)}</div>`
+      : "";
   // Accept is offered only where it means something: confirming a verdict that
   // has actually landed. There is nothing to confirm about a pending entry, and
   // an already-accepted one says so instead of offering the button again.
   const accept =
-    item.classification === "pending" || item.accepted
+    item.classification === "pending" || uninterruptible || item.accepted
       ? ""
       : `<button data-queue-accept="${qid}">Accept</button>`;
+  const runNow = uninterruptible
+    ? ""
+    : `<button data-queue-run-now="${qid}">Run now</button>`;
   const acceptedMark = item.accepted ? `<span class="queued-accepted">accepted</span>` : "";
   return `
     <div class="queued-card">
@@ -677,7 +710,7 @@ export function QueuedCard(item: QueuedItem): string {
       <div class="queued-actions">
         <button data-queue-cancel="${qid}">Cancel</button>
         ${accept}
-        <button data-queue-run-now="${qid}">Run now</button>
+        ${runNow}
       </div>
     </div>`;
 }
