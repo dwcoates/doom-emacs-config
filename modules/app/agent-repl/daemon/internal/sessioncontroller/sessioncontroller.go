@@ -1662,7 +1662,31 @@ func (m *Manager) Interrupt(ctx context.Context, workspace, requestID string) er
 // different things: a stop that arrived after the turn had already finished is
 // a success (ALREADY_COMPLETE) that still moves the session, and an
 // undeliverable one is a failure that moves nothing.
+// A STOP THAT LANDED ON A TURN BOUNDARY IS RE-AIMED, ONCE.
+//
+// The shim answers ALREADY_COMPLETE for the turn the user aimed at, and by the
+// time the daemon reconciles that answer a NEWER turn has started. The
+// reconciliation rightly refuses to publish "already finished" over a live
+// `thinking`, and the stop used to die there: the command failed, no interrupt
+// window opened, and the user — who had pressed stop three milliseconds
+// earlier — saw nothing happen at all.
+//
+// The honest resolution is the one the user asked for. They wanted the session
+// to stop working, so the stop is delivered again, now aimed at the turn that
+// is actually running. It is bounded at one re-aim: a session that supersedes
+// its own turns faster than a stop can be delivered has a different problem,
+// and the second failure is reported rather than chased.
 func (m *Manager) stopTurn(ctx context.Context, d *sessionController, requestID string) (corev1.InterruptOutcome, error) {
+	outcome, err := m.stopTurnOnce(ctx, d, requestID)
+	if !errors.Is(err, ssm.ErrSettledTurnSuperseded) {
+		return outcome, err
+	}
+	m.logf("session-controller: interrupt RE-AIMED ws=%s session=%s request_id=%s first_outcome=%s — the shim reported the aimed-at turn already complete and a newer turn was running by the time that answer was reconciled, so the stop is delivered again against the turn that is actually in flight rather than being dropped: %v",
+		d.workspace, d.sessionID, requestID, outcome, err)
+	return m.stopTurnOnce(ctx, d, requestID)
+}
+
+func (m *Manager) stopTurnOnce(ctx context.Context, d *sessionController, requestID string) (corev1.InterruptOutcome, error) {
 	workspace := d.workspace
 	outcome, err := d.client.Interrupt(ctx, requestID)
 	if err != nil {
@@ -1790,6 +1814,16 @@ func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.Interru
 		}
 		closed, err := m.cfg.SSM.ReconcileAlreadyComplete(d.workspace, d.sessionID, publish)
 		if err != nil {
+			if errors.Is(err, ssm.ErrSettledTurnSuperseded) {
+				// NOT A FAILURE, AND NOT A DROP EITHER. The window is still
+				// withheld — "already finished" cannot be published over a live
+				// `thinking` — but the caller re-aims the stop at the turn that
+				// is now running, so the user's press produces a visible outcome
+				// instead of silence (stopTurn).
+				m.logf("session-controller: already-complete reconciliation SUPERSEDED ws=%s session=%s outcome=%s: %v — a newer turn is in flight, so this verdict is about a turn that is already over and the stop is re-aimed rather than discarded",
+					d.workspace, d.sessionID, outcome, err)
+				return err
+			}
 			m.logf("session-controller: already-complete reconciliation FAILED ws=%s session=%s outcome=%s: %v — withholding the interrupt window so mutually exclusive footer/state claims cannot be published",
 				d.workspace, d.sessionID, outcome, err)
 			return err
