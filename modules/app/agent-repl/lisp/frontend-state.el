@@ -1435,6 +1435,13 @@ presence is tested with `plist-member' rather than `plist-get'."
                                   #'agent-repl--frontend-apply-session-init)
 (agent-repl--uds-register-handler "shutdownSchedule"
                                   #'agent-repl--frontend-apply-shutdown-schedule)
+;; The handler itself lives in `daemon.el', alongside the expected-restart
+;; window it opens, but it is REGISTERED here: `daemon.el' loads before
+;; `frontend-uds.el' and cannot call `agent-repl--uds-register-handler' at its
+;; own load time.  Registering it here keeps every UDS handler registration in
+;; the one module that runs after the dispatcher exists.
+(agent-repl--uds-register-handler "restartPending"
+                                  #'agent-repl--frontend-apply-restart-pending)
 
 ;;;; ---- Module init: registration only ---------------------------------
 ;;
