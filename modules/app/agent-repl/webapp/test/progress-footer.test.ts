@@ -1285,8 +1285,10 @@ describe("sheetHtml: the subagent roster", () => {
     const i = input({ agents: [agentRow({ uncachedInput: 4_200 })] });
     // Act
     const got = sheetHtml(i, NOW);
-    // Assert — the compact form every footer figure wears.
-    expect(got).toContain('<span class="pfooter-agent-tokens">4.2k in</span>');
+    // Assert — the compact, heated form every uncached-input figure wears.
+    expect(got).toContain(
+      '<span class="pfooter-agent-tokens token-heat" style="--token-heat-hue:120">4.2k in</span>',
+    );
   });
 
   it("shows no token figure for an agent the daemon has not attributed", () => {
