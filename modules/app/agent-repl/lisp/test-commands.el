@@ -4949,11 +4949,9 @@ so a failing sweep can't strand the persp in the tabline."
         (agent-repl--snapshot-load-close-main)
         (should (equal killed "main"))))))
 
-;;;; ---- agent-repl-switch-to-project ----
-
 ;; Helper: mock run-at-time to execute the deferred thunk immediately so
-;; switch-to-project tests can assert on find-file / load-display-state
-;; effects without firing a real idle timer.
+;; add-project-workspace / switch-to-project tests can assert on find-file /
+;; load-display-state effects without firing a real idle timer.
 (defmacro agent-repl-test--with-sync-run-at-time (&rest body)
   "Execute BODY with `run-at-time' replaced by an immediate-call shim.
 The shim invokes (funcall FN) for every (run-at-time TIME REPEAT FN)
@@ -4961,6 +4959,43 @@ call, making deferred closures synchronous in tests."
   `(cl-letf (((symbol-function 'run-at-time)
                (lambda (_time _repeat fn &rest _args) (funcall fn))))
      ,@body))
+
+;;;; ---- agent-repl-add-project-workspace ----
+
+(ert-deftest agent-repl-cmd-test-add-project-workspace/registers-then-switches ()
+  "add-project-workspace registers DIR with projectile, then switches to it."
+  (agent-repl-test--with-clean-state
+    (let ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-add-project-" t)))
+          registered-with
+          switched-with)
+      (unwind-protect
+          (agent-repl-test--with-sync-run-at-time
+            (cl-letf (((symbol-function 'agent-repl--ws-register-project)
+                       (lambda (dir) (setq registered-with dir)))
+                      ((symbol-function 'projectile-switch-project-by-name)
+                       (lambda (project) (setq switched-with project)))
+                      ((symbol-function 'agent-repl--most-recent-project-file)
+                       (lambda (_d) nil))
+                      ((symbol-function '+workspace-current-name)
+                       (lambda () "switched-ws"))
+                      ((symbol-function 'force-mode-line-update)
+                       (lambda (&optional _all) nil)))
+              (agent-repl-add-project-workspace tmp-dir)
+              (should (equal registered-with tmp-dir))
+              (should (equal switched-with tmp-dir))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest agent-repl-cmd-test-add-project-workspace/rejects-non-directory ()
+  "add-project-workspace signals a user-error for a non-directory path."
+  (agent-repl-test--with-clean-state
+    (let ((bogus (make-temp-name "/tmp/agent-repl-add-project-missing-")))
+      (should-error (agent-repl-add-project-workspace bogus) :type 'user-error))))
+
+(ert-deftest agent-repl-cmd-test-add-project-workspace/is-command ()
+  "add-project-workspace is registered as an interactive command."
+  (should (commandp 'agent-repl-add-project-workspace)))
+
+;;;; ---- agent-repl-switch-to-project ----
 
 (ert-deftest agent-repl-cmd-test-switch-to-project/switches-then-hydrates ()
   "switch-to-project switches via projectile, then hydrates priority."
