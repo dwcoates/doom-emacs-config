@@ -41,6 +41,18 @@ max(bring-up) rather than sum(bring-ups). Every workspace-less command (the
 roster publish, the daemon-global controls) shares one global lane, which is
 never behind any workspace's bring-up.
 
+`client_log` is the one command that reaches NO lane. It is evidence — nothing
+waits on its outcome and no user-visible state changes when it lands — so it is
+acked at ingress and handed to the connection's telemetry writer
+(`telemetry.go`): a bounded queue plus one writer goroutine, whose overflow
+drops the OLDEST record and reports the workspace and count at warn under a
+rate limit. A webview flooding it built a 6,142-deep lane backlog and blew 3,696
+ack deadlines while it rode a lane; it cannot occupy an executor an interactive
+command shares any more. Its write still passes through daemon-global logging
+stages (`dlog`'s `TargetManager` mutex and the single `TerminalSink` mirror,
+whose `Write` back-pressures every emitter at once), so the writer times each
+write and names that stage when one runs long.
+
 Concurrency across workspaces is not a new demand on `CommandHandler`: the
 Emacs UDS connection and every webview connection already ran their read loops
 in parallel. What is new is that ONE connection may have several commands in
