@@ -3,6 +3,7 @@ package sessioncontroller
 import (
 	"fmt"
 
+	"claude-repld/internal/frontend"
 	"claude-repld/internal/statedb"
 )
 
@@ -57,9 +58,13 @@ const resumptionInstruction = "Your previous turn was interrupted by a planned r
 //
 // The id is minted at TEARDOWN, before the submit it names exists, which is
 // what makes the re-drive recognizable as this record's discharge rather than
-// as a fresh prompt that happens to look similar. The prefix is what every
-// later layer keys "this submit is internal" on.
-const resumptionRequestIDPrefix = "resume-after-restart:"
+// as a fresh prompt that happens to look similar.
+//
+// IT IS THE CURATOR'S CONSTANT, not a second copy of it. The one place the
+// re-drive is made invisible is frontend.CurateEvent, which keys on exactly
+// this prefix; a private duplicate here would be two strings that have to be
+// kept equal for the invisibility to hold.
+const resumptionRequestIDPrefix = frontend.InternalResumeRequestIDPrefix
 
 // recordInterruptedTurnResumption durably records that this teardown is about
 // to interrupt a turn the successor daemon owes the user.

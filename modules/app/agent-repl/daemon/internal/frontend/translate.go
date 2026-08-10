@@ -405,6 +405,10 @@ func conversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*fro
 		// via TaskCatalog (the webapp has no `task` conversation kind).
 		return nil, nil, nil
 	}
+	// THE DAEMON'S OWN RE-DRIVE HAS NO PROMPT (internalresume.go). This runs
+	// before the empty check, so an event carrying ONLY the internal
+	// instruction curates to nothing at all rather than to an empty delta.
+	items = dropInternalResumePrompt(items)
 	if len(items) == 0 {
 		return nil, nil, nil
 	}
