@@ -203,6 +203,26 @@ Registered in `agent-repl--external-boundary-functions'."
   (with-current-buffer buf
     (xwidget-webkit-execute-script (xwidget-webkit-current-session) script))) ;; ALLOW-EXTERNAL-BOUNDARY
 
+(defun agent-repl--frontend-webview-execute-script-value (buf script callback)
+  "External-boundary wrapper: evaluate SCRIPT in BUF, handing its value to CALLBACK.
+The ONLY read channel Emacs has into a mounted webview.
+`agent-repl--frontend-webview-execute-script-1' is a write — it discards
+whatever the page evaluated to — so a host that must ASK the page a
+question (the recovery SLO's page-side evidence, lisp/recovery-slo.el)
+needs this second wrapper rather than a flag on that one: the two differ
+in whether the caller is owed an answer at all.
+
+CALLBACK receives the marshalled value, which is nil for a webview that
+has gone away between the call and the reply.  No keyboard-release
+epilogue rides along, deliberately: this evaluation is a read that
+touches neither the DOM nor its focus, so there is nothing to hand back.
+Body does nothing but the external calls; tests mock via `cl-letf'.
+Registered in `agent-repl--external-boundary-functions'."
+  (require 'xwidget)
+  (with-current-buffer buf
+    (xwidget-webkit-execute-script ;; ALLOW-EXTERNAL-BOUNDARY
+     (xwidget-webkit-current-session) script callback)))
+
 ;;;; ---- Returning the keyboard to Emacs after a script evaluation -------------
 
 ;; Symptom: after a prompt send, keys stop reaching Emacs — RET draws the
