@@ -748,6 +748,27 @@ export interface IngestResult {
    * as it was, and only a fresh snapshot makes it current again.
    */
   asyncGap?: AsyncGap;
+  /**
+   * THE WORKSPACE'S FENCE ROTATED in this batch: the answer every fenced push
+   * is measured against is not the one this page was reading a moment ago.
+   *
+   * Reported UP for the same reason `asyncGap` is, and it is the same kind of
+   * fact: everything this page asked for under the previous fence was asked
+   * under an identity the daemon no longer serves. The observed failure is a
+   * daemon bounce that publishes a workspace hibernated with no controller
+   * generation, a page that adopts that fence and resyncs with it, a daemon
+   * that refuses the request (`rejection_cause=identity_mismatch`), and the
+   * real generation arriving a fraction of a second AFTER the refusal. Nothing
+   * in the page's own lifecycle then asks again — the socket never cycled and
+   * the daemon boot id never changed — so its status chrome stays frozen on a
+   * generation that is gone.
+   *
+   * The rotation IS the edge that says otherwise, and carrying it to the
+   * resync trigger is what makes the recovery a push rather than a poll. Only
+   * a rotation is reported: the FIRST fence a page ever adopts is the connect
+   * path, which already owes exactly one resync.
+   */
+  fenceRotated?: boolean;
 }
 
 /**
@@ -950,6 +971,15 @@ export class ConversationStore {
   private sessionIdAuthoritative = false;
 
   /**
+   * Whether the workspace's fence rotated during the ingest currently running.
+   *
+   * Batch-scoped state rather than a store fact: it is set by
+   * `applyWorkspaceState` and read once by `ingest`, which clears it at the
+   * start of every batch. See `IngestResult.fenceRotated`.
+   */
+  private fenceRotatedThisBatch = false;
+
+  /**
    * Diagnostic sink and clock. LOG surfaces ingestion anomalies (a typing
    * delta with nowhere to land); NOW stamps a turn's start (the effect carries
    * no timestamp). Both injected so the store stays transport- and clock-
@@ -1011,6 +1041,10 @@ export class ConversationStore {
     this.validateIngest(effects);
     let changed = false;
     let asyncGap: AsyncGap | undefined;
+    // Cleared per batch so the flag can only ever describe THIS ingest. A
+    // rotation the caller already acted on must not be re-reported by the next
+    // frame, which would re-arm a resync per push forever.
+    this.fenceRotatedThisBatch = false;
     for (const effect of effects) {
       switch (effect.kind) {
         case "async-bubbles-snapshot":
@@ -1094,7 +1128,9 @@ export class ConversationStore {
           break;
       }
     }
-    return asyncGap === undefined ? { changed } : { changed, asyncGap };
+    const result: IngestResult = asyncGap === undefined ? { changed } : { changed, asyncGap };
+    if (this.fenceRotatedThisBatch) result.fenceRotated = true;
+    return result;
   }
 
   /**
@@ -1296,7 +1332,14 @@ export class ConversationStore {
       s.topbars.delete(ws.workspace);
       s.tokenBreakdowns.delete(ws.workspace);
       s.gates.delete(ws.workspace);
-      if (previousFence !== undefined) s.hibernation = null;
+      if (previousFence !== undefined) {
+        s.hibernation = null;
+        // REPORTED UP, not acted on here. A rotation retires every request
+        // this page has outstanding under the old fence; only the resync
+        // trigger can re-ask, and it lives with the socket. See
+        // `IngestResult.fenceRotated`.
+        this.fenceRotatedThisBatch = true;
+      }
     }
     s.fences.set(ws.workspace, ws.fence);
     // THE workspace's phase, kept so the footer reads the same authority the

@@ -779,3 +779,50 @@ describe("ConnectResync reconnect", () => {
     expect(h.sent).toEqual([snapshot("/ws", 12)]);
   });
 });
+
+// A fence rotation is PROOF the refusals this page collected were earned under
+// an identity the daemon has since retired — not a guess that it might be
+// behind. The observed failure: a bounce republishes a workspace with no
+// controller generation, this page resyncs with that fence and is refused
+// (identity_mismatch) a fraction of a second before the real generation is
+// published. The socket never cycles and the boot id never changes, so without
+// this edge nothing ever asks again and the status chrome stays frozen.
+describe("ConnectResync fence rotation", () => {
+  it("asks again after a rotation on a connection that never cycled", async () => {
+    // Arrange — one resync already went out under the retired fence.
+    const h = harness();
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12, "s1|"));
+    await flush();
+    h.sent.length = 0;
+    // Act
+    h.trigger.observeFenceRotation("WorkspaceState adopted a new fence");
+    h.trigger.observe(false, snapshot("/ws", 12, "s1|g1"));
+    // Assert — the new request carries the fence this page now holds.
+    expect(h.sent).toEqual([snapshot("/ws", 12, "s1|g1")]);
+  });
+
+  it("discharges a page held at its give-up ceiling by the retired fence", async () => {
+    // Arrange
+    const h = harness(() => Promise.reject(new Error("identity_mismatch")));
+    h.trigger.onConnect();
+    await exhaust(h);
+    // Act
+    h.trigger.observeFenceRotation("WorkspaceState adopted a new fence");
+    // Assert
+    expect(h.trigger.isGivenUp).toBe(false);
+  });
+
+  it("leaves an in-flight request in flight, so the single-in-flight bound holds", async () => {
+    // Arrange — a resync that has neither acked nor failed.
+    const h = harness(() => new Promise<void>(() => {}));
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12, "s1|"));
+    h.sent.length = 0;
+    // Act
+    h.trigger.observeFenceRotation("WorkspaceState adopted a new fence");
+    h.trigger.observe(false, snapshot("/ws", 12, "s1|g1"));
+    // Assert — coalesced into the dirty flag rather than sent beside it.
+    expect(h.sent).toEqual([]);
+  });
+});
