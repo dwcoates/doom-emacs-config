@@ -635,3 +635,105 @@ func TestMarkPromptAcceptedSucceedsWhileTheBringUpEdgeIsStillConnecting(t *testi
 		t.Fatalf("published = %s turn_active=%v, want SUBMITTING/true", published.GetState(), published.GetTurnActive())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// SettleTurnFromTerminalResult — the vendor's own result ends the turn.
+// ---------------------------------------------------------------------------
+
+// The terminal result settles BOTH halves: the axis it paints and the claim
+// ledger behind it. Settling either alone is the wedge in one of its two forms.
+func TestSettleTurnFromTerminalResultSettlesTheAxisAndTheClaim(t *testing.T) {
+	// Arrange.
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+
+	// Act.
+	var published *frontendv1.WorkspaceState
+	settled, err := m.SettleTurnFromTerminalResult("ws1", "s1", func(state *frontendv1.WorkspaceState) { published = state })
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SettleTurnFromTerminalResult: %v", err)
+	}
+	if !settled {
+		t.Fatal("settled = false, want the standing turn settled from its own terminal result")
+	}
+	got := mustCurrent(t, m, "ws1")
+	if got.GetState() != frontendv1.RenderState_RENDER_STATE_IDLE || got.GetTurnActive() {
+		t.Fatalf("state = %s turn_active=%v, want IDLE/false", got.GetState(), got.GetTurnActive())
+	}
+	if published == nil || published.GetTurnActive() {
+		t.Fatalf("published = %+v, want the re-derived settled state handed to the frontends", published)
+	}
+	if !cl.contains(causeTerminalResult) {
+		t.Fatalf("log = %s, want the settlement attributed to the terminal result", strings.Join(cl.lines, "\n"))
+	}
+}
+
+// THE ATTRIBUTION IS THE TERMINAL RESULT'S OWN. Borrowing the already-complete
+// cause would say a shim answered a question nobody asked it.
+func TestSettleTurnFromTerminalResultNamesItsOwnCause(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+
+	// Act.
+	if _, err := m.SettleTurnFromTerminalResult("ws1", "s1", func(*frontendv1.WorkspaceState) {}); err != nil {
+		t.Fatalf("SettleTurnFromTerminalResult: %v", err)
+	}
+
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").GetCauseKind(); got != causeTerminalResult {
+		t.Fatalf("cause = %q, want %q", got, causeTerminalResult)
+	}
+}
+
+// A STOPPED TURN'S OUTCOME BELONGS TO THE STOP. With an interrupt outstanding,
+// the turn's own `TurnEnded` is the only evidence that can report `interrupted`,
+// so this settlement declines rather than painting the turn `done` beneath it.
+func TestSettleTurnFromTerminalResultDeclinesWhileAnInterruptStands(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+	if err := m.MarkTurnInterrupted("ws1"); err != nil {
+		t.Fatalf("MarkTurnInterrupted: %v", err)
+	}
+
+	// Act.
+	settled, err := m.SettleTurnFromTerminalResult("ws1", "s1", func(*frontendv1.WorkspaceState) {})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SettleTurnFromTerminalResult: %v", err)
+	}
+	if settled {
+		t.Fatal("settled = true, want the stopped turn left to the end that knows it was stopped")
+	}
+	if got := mustCurrent(t, m, "ws1"); !got.GetTurnActive() {
+		t.Fatalf("state = %+v, want the turn still standing for its own end to close", got)
+	}
+}
+
+// A workspace with nothing active settles nothing and reports so: the turn's
+// own end got there first, which is the ordinary path rather than an error.
+func TestSettleTurnFromTerminalResultOverASettledAxisSettlesNothing(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+
+	// Act.
+	settled, err := m.SettleTurnFromTerminalResult("ws1", "s1", func(*frontendv1.WorkspaceState) {})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SettleTurnFromTerminalResult: %v", err)
+	}
+	if settled {
+		t.Fatal("settled = true over an axis that holds no turn")
+	}
+}

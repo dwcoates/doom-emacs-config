@@ -132,6 +132,12 @@ const (
 	// so the submitter writes the closing row itself. See promptstate.go.
 	causePromptRejected           = "prompt_rejected"
 	causeInterruptAlreadyComplete = "interrupt_already_complete"
+	// The VENDOR'S OWN `result` message ended the turn. It is its own cause
+	// rather than a turn_ended because no `TurnEnded` produced it: the daemon
+	// read the end off the query's terminal result and settled both the claim
+	// ledger and this axis from that evidence. See
+	// Manager.SettleTurnFromTerminalResult.
+	causeTerminalResult = "terminal_result"
 	// The vendor retired one session uuid mid-stream and minted another, so
 	// the turn the old identity was running can never report its own end. The
 	// row is daemon-local and carries no store seq, exactly as a merge

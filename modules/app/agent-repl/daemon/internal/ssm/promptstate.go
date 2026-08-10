@@ -461,6 +461,45 @@ func (m *Manager) ReconcileAlreadyComplete(
 	workspace, sessionID string,
 	publish func(*frontendv1.WorkspaceState),
 ) (bool, error) {
+	return m.reconcileSettledTurn(workspace, sessionID, TurnCloseAlreadyComplete, causeInterruptAlreadyComplete, false, publish)
+}
+
+// SettleTurnFromTerminalResult reconciles the same two halves as
+// ReconcileAlreadyComplete — the durable claim ledger and the session-status
+// axis — from a different observation: the VENDOR'S OWN `result` message.
+//
+// The result IS the end of the turn. Nothing further is coming from the query
+// that produced it, so both halves may settle from it directly rather than
+// waiting for the shim's `TurnEnded`, which is a second announcement of the
+// same fact and, in session s_f223cd698d687299, arrived ten minutes late.
+//
+// IT IS ONE CALL BECAUSE THE TWO HALVES ARE ONE FACT. Closing the claim alone
+// leaves the axis rendering `thinking` over a ledger that holds no turn, which
+// is the wedge itself wearing different clothes; painting the axis alone leaves
+// the prompt queue holding submissions behind a claim nothing will close.
+//
+// The attribution differs from an already-complete reconciliation and that
+// difference is kept: the claim's end_cause and the state row's cause name the
+// terminal result, so the ledger says WHICH observation ended the turn.
+func (m *Manager) SettleTurnFromTerminalResult(
+	workspace, sessionID string,
+	publish func(*frontendv1.WorkspaceState),
+) (bool, error) {
+	return m.reconcileSettledTurn(workspace, sessionID, TurnCloseTerminalResult, causeTerminalResult, true, publish)
+}
+
+// reconcileSettledTurn is the shared body of every "this turn is over, and the
+// evidence is not a `TurnEnded`" reconciliation.
+//
+// turnCause attributes the claims it retires; rowCause attributes the
+// session-status row it appends and the re-resolution that follows. Both are
+// parameters rather than constants precisely so a caller cannot borrow another
+// observation's attribution for its own.
+func (m *Manager) reconcileSettledTurn(
+	workspace, sessionID, turnCause, rowCause string,
+	deferToInterrupt bool,
+	publish func(*frontendv1.WorkspaceState),
+) (bool, error) {
 	if workspace == "" {
 		return false, fmt.Errorf("ssm: ReconcileAlreadyComplete got an empty workspace")
 	}
@@ -473,6 +512,18 @@ func (m *Manager) ReconcileAlreadyComplete(
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// A STOPPED TURN'S OUTCOME BELONGS TO THE STOP. The interrupt mark is spent
+	// by the `TurnEnded` boundary, which is the only evidence that knows the
+	// turn ended BECAUSE the user stopped it; settling from the vendor's result
+	// instead would paint the same turn `done` and leave the interrupt window
+	// with no outcome to report. So a workspace holding a standing mark settles
+	// on its own end, not on this one.
+	if deferToInterrupt && m.interruptedTurn[workspace] != nil {
+		m.logf("ssm: settled-turn reconciliation DECLINED ws=%s session=%s cause=%s decision=interrupt_pending — a user-commanded stop is outstanding, so the turn's own end reports the outcome",
+			workspace, sessionID, rowCause)
+		return false, nil
+	}
 
 	var (
 		topState string
@@ -530,12 +581,12 @@ func (m *Manager) ReconcileAlreadyComplete(
 			return false, fmt.Errorf("ssm: begin already-complete reconciliation for workspace %q: %w", workspace, txErr)
 		}
 		defer tx.Rollback()
-		retired, liveness, retireErr := m.retireTurnsLocked(tx, workspace, sessionID, TurnCloseAlreadyComplete)
+		retired, liveness, retireErr := m.retireTurnsLocked(tx, workspace, sessionID, turnCause)
 		if retireErr != nil {
 			return false, retireErr
 		}
 		if err := appendRow(
-			tx, workspace, sessionID, sigIdle, causeInterruptAlreadyComplete,
+			tx, workspace, sessionID, sigIdle, rowCause,
 			sql.NullInt64{}, m.nextAt(), "",
 		); err != nil {
 			return false, fmt.Errorf("ssm: reconcile already-complete verdict for workspace %q session %q: %w",
@@ -547,11 +598,11 @@ func (m *Manager) ReconcileAlreadyComplete(
 		}
 		if len(retired) > 0 {
 			m.logf("ssm: turn claims RETIRED BY AN ALREADY-COMPLETE ACK ws=%s session=%s closed=%s cause=%s liveness=%s — the shim answered live that no foreground turn exists, so these claims name turns whose ends can never arrive",
-				workspace, sessionID, formatClosedTurnIDs(retired), TurnCloseAlreadyComplete, liveness)
+				workspace, sessionID, formatClosedTurnIDs(retired), turnCause, liveness)
 		}
 		m.logf("ssm: already-complete reconciliation CLOSED ws=%s session=%s previous=%s active_claimant=%q — shim reports no foreground turn, so the footer cannot coexist with an active state",
 			workspace, sessionID, topState, claimant)
-		if err := m.reresolveLocked(workspace, causeInterruptAlreadyComplete, 0); err != nil {
+		if err := m.reresolveLocked(workspace, rowCause, 0); err != nil {
 			return false, err
 		}
 		closed = true
