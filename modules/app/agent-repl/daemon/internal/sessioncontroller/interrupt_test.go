@@ -10,6 +10,8 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/ssm"
 )
 
 // --- helpers ----------------------------------------------------------------
@@ -672,5 +674,83 @@ func TestTheInterjectStopDoesNotRouteThroughTheRecovery(t *testing.T) {
 	}
 	if _, existsErr := h.m.existing("ws"); existsErr == nil {
 		t.Fatal("the interject stop spawned a shim; only the user-commanded path may")
+	}
+}
+
+// --- the stop that landed on a turn boundary --------------------------------
+//
+// The shim answers ALREADY_COMPLETE for the turn the user aimed at, and a newer
+// turn is running by the time that answer is reconciled. The stop used to die
+// there, so a user who pressed stop saw nothing happen at all.
+
+// armSupersededStop arms an ALREADY_COMPLETE ack whose reconciliation reports a
+// newer turn already active, and answers the NEXT stop with `then`.
+func armSupersededStop(h *queueHarness, then corev1.InterruptOutcome) {
+	h.client.mu.Lock()
+	h.client.interruptOutcomeQueue = []corev1.InterruptOutcome{
+		corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE, then,
+	}
+	h.client.mu.Unlock()
+	h.applier.reconcMutex.Lock()
+	h.applier.alreadyCompleteErr = fmt.Errorf("%w: a newer turn is active", ssm.ErrSettledTurnSuperseded)
+	h.applier.reconcMutex.Unlock()
+}
+
+func TestAStopSupersededAtATurnBoundaryIsReAimed(t *testing.T) {
+	// Arrange.
+	h := newQueueHarness(t, nil)
+	armSupersededStop(h, corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+
+	// Act.
+	err := h.interrupt()
+
+	// Assert: the user's press produced a real stop instead of silence.
+	if err != nil {
+		t.Fatalf("interrupt err = %v, want the re-aimed stop to succeed", err)
+	}
+	if got := h.client.interruptCount(); got != 2 {
+		t.Fatalf("stops delivered = %d, want 2 (the aimed-at turn and the re-aim)", got)
+	}
+	notes := h.prog.interruptNotes()
+	if len(notes) != 1 || notes[0].outcome != corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+		t.Fatalf("interrupt windows = %+v, want one INTERRUPTED window", notes)
+	}
+}
+
+func TestAReAimedStopIsNotRetriedForever(t *testing.T) {
+	// Arrange: every stop lands on a boundary.
+	h := newQueueHarness(t, nil)
+	armSupersededStop(h, corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+
+	// Act.
+	err := h.interrupt()
+
+	// Assert: the second failure is reported rather than chased.
+	if !errors.Is(err, ssm.ErrSettledTurnSuperseded) {
+		t.Fatalf("interrupt err = %v, want the superseded verdict surfaced", err)
+	}
+	if got := h.client.interruptCount(); got != 2 {
+		t.Fatalf("stops delivered = %d, want exactly one re-aim", got)
+	}
+}
+
+func TestAnOrdinaryAlreadyCompleteFailureIsNotReAimed(t *testing.T) {
+	// Arrange: the reconciliation failed for a reason that is not a boundary
+	// race, so delivering a second stop would be delivering it into a fault.
+	h := newQueueHarness(t, nil)
+	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	h.applier.reconcMutex.Lock()
+	h.applier.alreadyCompleteErr = errors.New("state database unreadable")
+	h.applier.reconcMutex.Unlock()
+
+	// Act.
+	err := h.interrupt()
+
+	// Assert.
+	if err == nil {
+		t.Fatal("interrupt err = nil, want the reconciliation failure surfaced")
+	}
+	if got := h.client.interruptCount(); got != 1 {
+		t.Fatalf("stops delivered = %d, want 1", got)
 	}
 }
