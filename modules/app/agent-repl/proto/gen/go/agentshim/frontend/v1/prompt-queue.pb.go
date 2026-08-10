@@ -139,6 +139,309 @@ func (x *InterruptCmd) GetConfirmAgents() bool {
 	return false
 }
 
+// Cancel the workspace session's DETACHED background agents: the subagent,
+// shell and workflow tasks still working after the turn that launched them
+// has ended.
+//
+// WHY IT IS ITS OWN COMMAND RATHER THAN A FLAG ON InterruptCmd. An interrupt
+// stops the TURN. The state this command exists for — main turn over,
+// detached agents still running — is precisely the state in which there is no
+// turn to stop, so an interrupt sent into it is a guaranteed no-op that the
+// shim answers ALREADY_COMPLETE. The one state that raised the interrupt's
+// "cancel the running subagents?" question was the one state its answer could
+// not act on; this command is what that yes now sends.
+//
+// IT CARRIES NO CONFIRMATION ECHO, unlike InterruptCmd.confirm_agents. There
+// is nothing here to confirm: the command's ONLY effect is stopping detached
+// agents, so sending it IS the deliberate second keystroke that flag exists to
+// require. A frontend asks its user before it sends, never after.
+//
+// The session is the command envelope's `workspace`; the command has no
+// fields of its own.
+type CancelDetachedAgentsCmd struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CancelDetachedAgentsCmd) Reset() {
+	*x = CancelDetachedAgentsCmd{}
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelDetachedAgentsCmd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelDetachedAgentsCmd) ProtoMessage() {}
+
+func (x *CancelDetachedAgentsCmd) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelDetachedAgentsCmd.ProtoReflect.Descriptor instead.
+func (*CancelDetachedAgentsCmd) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{2}
+}
+
+// What a CancelDetachedAgentsCmd did, carried on the command's ack.
+//
+// It is the SHIM's verdict relayed, not a daemon re-derivation — see
+// agentshim.core.v1.DetachedCancelOutcome for why only the shim can answer
+// "what was running when this landed?" without racing task end.
+//
+// A ONEOF OF MESSAGES, never a bool: "did it work" cannot distinguish a stop
+// that reached three agents from a session that had nothing to stop from a
+// session that could not be asked, and a frontend renders those three
+// differently.
+type DetachedCancelOutcome struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Outcome:
+	//
+	//	*DetachedCancelOutcome_Cancelled
+	//	*DetachedCancelOutcome_NothingRunning
+	//	*DetachedCancelOutcome_Unsupported
+	Outcome       isDetachedCancelOutcome_Outcome `protobuf_oneof:"outcome"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DetachedCancelOutcome) Reset() {
+	*x = DetachedCancelOutcome{}
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DetachedCancelOutcome) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DetachedCancelOutcome) ProtoMessage() {}
+
+func (x *DetachedCancelOutcome) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DetachedCancelOutcome.ProtoReflect.Descriptor instead.
+func (*DetachedCancelOutcome) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *DetachedCancelOutcome) GetOutcome() isDetachedCancelOutcome_Outcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return nil
+}
+
+func (x *DetachedCancelOutcome) GetCancelled() *DetachedAgentsCancelled {
+	if x != nil {
+		if x, ok := x.Outcome.(*DetachedCancelOutcome_Cancelled); ok {
+			return x.Cancelled
+		}
+	}
+	return nil
+}
+
+func (x *DetachedCancelOutcome) GetNothingRunning() *NoDetachedAgentsRunning {
+	if x != nil {
+		if x, ok := x.Outcome.(*DetachedCancelOutcome_NothingRunning); ok {
+			return x.NothingRunning
+		}
+	}
+	return nil
+}
+
+func (x *DetachedCancelOutcome) GetUnsupported() *DetachedCancelUnsupported {
+	if x != nil {
+		if x, ok := x.Outcome.(*DetachedCancelOutcome_Unsupported); ok {
+			return x.Unsupported
+		}
+	}
+	return nil
+}
+
+type isDetachedCancelOutcome_Outcome interface {
+	isDetachedCancelOutcome_Outcome()
+}
+
+type DetachedCancelOutcome_Cancelled struct {
+	Cancelled *DetachedAgentsCancelled `protobuf:"bytes,1,opt,name=cancelled,proto3,oneof"`
+}
+
+type DetachedCancelOutcome_NothingRunning struct {
+	NothingRunning *NoDetachedAgentsRunning `protobuf:"bytes,2,opt,name=nothing_running,json=nothingRunning,proto3,oneof"`
+}
+
+type DetachedCancelOutcome_Unsupported struct {
+	Unsupported *DetachedCancelUnsupported `protobuf:"bytes,3,opt,name=unsupported,proto3,oneof"`
+}
+
+func (*DetachedCancelOutcome_Cancelled) isDetachedCancelOutcome_Outcome() {}
+
+func (*DetachedCancelOutcome_NothingRunning) isDetachedCancelOutcome_Outcome() {}
+
+func (*DetachedCancelOutcome_Unsupported) isDetachedCancelOutcome_Outcome() {}
+
+// Detached work was running and the stop reached every agent counted here.
+type DetachedAgentsCancelled struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many detached agents were stopped. A COUNT rather than the shim's
+	// task ids: a task id is daemon-internal bookkeeping a frontend has no
+	// vocabulary for, and what a frontend renders is "cancelled 3 agents". The
+	// ids stay on the shim-wire arm, where the daemon uses them to settle
+	// exactly those agents' bubbles.
+	Count         int64 `protobuf:"varint,1,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DetachedAgentsCancelled) Reset() {
+	*x = DetachedAgentsCancelled{}
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DetachedAgentsCancelled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DetachedAgentsCancelled) ProtoMessage() {}
+
+func (x *DetachedAgentsCancelled) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DetachedAgentsCancelled.ProtoReflect.Descriptor instead.
+func (*DetachedAgentsCancelled) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *DetachedAgentsCancelled) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+// Nothing detached was running, so the command stopped nothing.
+//
+// THE DAEMON REFUSES ON THIS ARM (the ack carries ok=false alongside it). A
+// cancel that stopped nothing is a keystroke that did nothing, and reporting
+// it as success is how a stop control comes to look like it works when it
+// does not reach anything. The typed arm is what lets a frontend say "nothing
+// was running" instead of showing a bare transport failure.
+type NoDetachedAgentsRunning struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NoDetachedAgentsRunning) Reset() {
+	*x = NoDetachedAgentsRunning{}
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NoDetachedAgentsRunning) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NoDetachedAgentsRunning) ProtoMessage() {}
+
+func (x *NoDetachedAgentsRunning) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NoDetachedAgentsRunning.ProtoReflect.Descriptor instead.
+func (*NoDetachedAgentsRunning) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{5}
+}
+
+// The stop could not be attempted at all: no live session behind the
+// workspace, or a vendor CLI with no task-stop control.
+type DetachedCancelUnsupported struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Why, in one sentence, for display.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DetachedCancelUnsupported) Reset() {
+	*x = DetachedCancelUnsupported{}
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DetachedCancelUnsupported) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DetachedCancelUnsupported) ProtoMessage() {}
+
+func (x *DetachedCancelUnsupported) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DetachedCancelUnsupported.ProtoReflect.Descriptor instead.
+func (*DetachedCancelUnsupported) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *DetachedCancelUnsupported) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 // The classifier is still running: the entry is queued and undecided.
 type QueueClassificationPending struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -148,7 +451,7 @@ type QueueClassificationPending struct {
 
 func (x *QueueClassificationPending) Reset() {
 	*x = QueueClassificationPending{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[2]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -160,7 +463,7 @@ func (x *QueueClassificationPending) String() string {
 func (*QueueClassificationPending) ProtoMessage() {}
 
 func (x *QueueClassificationPending) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[2]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -173,7 +476,7 @@ func (x *QueueClassificationPending) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueClassificationPending.ProtoReflect.Descriptor instead.
 func (*QueueClassificationPending) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{2}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{7}
 }
 
 // Deliver NOW: interrupt the running turn and submit once it has ended.
@@ -187,7 +490,7 @@ type QueueClassificationInterject struct {
 
 func (x *QueueClassificationInterject) Reset() {
 	*x = QueueClassificationInterject{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[3]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -199,7 +502,7 @@ func (x *QueueClassificationInterject) String() string {
 func (*QueueClassificationInterject) ProtoMessage() {}
 
 func (x *QueueClassificationInterject) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[3]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -212,7 +515,7 @@ func (x *QueueClassificationInterject) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueClassificationInterject.ProtoReflect.Descriptor instead.
 func (*QueueClassificationInterject) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{3}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *QueueClassificationInterject) GetRationale() string {
@@ -238,7 +541,7 @@ type QueueClassificationHold struct {
 
 func (x *QueueClassificationHold) Reset() {
 	*x = QueueClassificationHold{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -250,7 +553,7 @@ func (x *QueueClassificationHold) String() string {
 func (*QueueClassificationHold) ProtoMessage() {}
 
 func (x *QueueClassificationHold) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -263,7 +566,7 @@ func (x *QueueClassificationHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueClassificationHold.ProtoReflect.Descriptor instead.
 func (*QueueClassificationHold) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{4}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *QueueClassificationHold) GetRationale() string {
@@ -309,7 +612,7 @@ type QueueClassificationUninterruptibleTurn struct {
 
 func (x *QueueClassificationUninterruptibleTurn) Reset() {
 	*x = QueueClassificationUninterruptibleTurn{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -321,7 +624,7 @@ func (x *QueueClassificationUninterruptibleTurn) String() string {
 func (*QueueClassificationUninterruptibleTurn) ProtoMessage() {}
 
 func (x *QueueClassificationUninterruptibleTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -334,7 +637,7 @@ func (x *QueueClassificationUninterruptibleTurn) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use QueueClassificationUninterruptibleTurn.ProtoReflect.Descriptor instead.
 func (*QueueClassificationUninterruptibleTurn) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{5}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *QueueClassificationUninterruptibleTurn) GetCommand() SessionCommand {
@@ -359,7 +662,7 @@ type QueueClassificationError struct {
 
 func (x *QueueClassificationError) Reset() {
 	*x = QueueClassificationError{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[6]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -371,7 +674,7 @@ func (x *QueueClassificationError) String() string {
 func (*QueueClassificationError) ProtoMessage() {}
 
 func (x *QueueClassificationError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[6]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -384,7 +687,7 @@ func (x *QueueClassificationError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueClassificationError.ProtoReflect.Descriptor instead.
 func (*QueueClassificationError) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{6}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *QueueClassificationError) GetDetail() string {
@@ -436,7 +739,7 @@ type QueueEntry struct {
 
 func (x *QueueEntry) Reset() {
 	*x = QueueEntry{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -448,7 +751,7 @@ func (x *QueueEntry) String() string {
 func (*QueueEntry) ProtoMessage() {}
 
 func (x *QueueEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -461,7 +764,7 @@ func (x *QueueEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntry.ProtoReflect.Descriptor instead.
 func (*QueueEntry) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{7}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *QueueEntry) GetId() string {
@@ -684,7 +987,7 @@ type QueueEntryShutdownHold struct {
 
 func (x *QueueEntryShutdownHold) Reset() {
 	*x = QueueEntryShutdownHold{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[8]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -696,7 +999,7 @@ func (x *QueueEntryShutdownHold) String() string {
 func (*QueueEntryShutdownHold) ProtoMessage() {}
 
 func (x *QueueEntryShutdownHold) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[8]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -709,7 +1012,7 @@ func (x *QueueEntryShutdownHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntryShutdownHold.ProtoReflect.Descriptor instead.
 func (*QueueEntryShutdownHold) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{8}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *QueueEntryShutdownHold) GetScheduleId() string {
@@ -731,7 +1034,7 @@ type QueueEntryKeepAliveHold struct {
 
 func (x *QueueEntryKeepAliveHold) Reset() {
 	*x = QueueEntryKeepAliveHold{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[9]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -743,7 +1046,7 @@ func (x *QueueEntryKeepAliveHold) String() string {
 func (*QueueEntryKeepAliveHold) ProtoMessage() {}
 
 func (x *QueueEntryKeepAliveHold) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[9]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -756,7 +1059,7 @@ func (x *QueueEntryKeepAliveHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntryKeepAliveHold.ProtoReflect.Descriptor instead.
 func (*QueueEntryKeepAliveHold) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{9}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *QueueEntryKeepAliveHold) GetTurnId() string {
@@ -775,7 +1078,7 @@ type QueueEntryRevivalHold struct {
 
 func (x *QueueEntryRevivalHold) Reset() {
 	*x = QueueEntryRevivalHold{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[10]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -787,7 +1090,7 @@ func (x *QueueEntryRevivalHold) String() string {
 func (*QueueEntryRevivalHold) ProtoMessage() {}
 
 func (x *QueueEntryRevivalHold) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[10]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -800,7 +1103,7 @@ func (x *QueueEntryRevivalHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntryRevivalHold.ProtoReflect.Descriptor instead.
 func (*QueueEntryRevivalHold) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{10}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{15}
 }
 
 // The entry waits for its session's shim to restart onto the current build
@@ -814,7 +1117,7 @@ type QueueEntryBuildRefreshHold struct {
 
 func (x *QueueEntryBuildRefreshHold) Reset() {
 	*x = QueueEntryBuildRefreshHold{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[11]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -826,7 +1129,7 @@ func (x *QueueEntryBuildRefreshHold) String() string {
 func (*QueueEntryBuildRefreshHold) ProtoMessage() {}
 
 func (x *QueueEntryBuildRefreshHold) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[11]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -839,7 +1142,7 @@ func (x *QueueEntryBuildRefreshHold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueEntryBuildRefreshHold.ProtoReflect.Descriptor instead.
 func (*QueueEntryBuildRefreshHold) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{11}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{16}
 }
 
 // The session's queue, pushed on EVERY change and carried in StateSnapshot.
@@ -865,7 +1168,7 @@ type QueueView struct {
 
 func (x *QueueView) Reset() {
 	*x = QueueView{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[12]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -877,7 +1180,7 @@ func (x *QueueView) String() string {
 func (*QueueView) ProtoMessage() {}
 
 func (x *QueueView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[12]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -890,7 +1193,7 @@ func (x *QueueView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueView.ProtoReflect.Descriptor instead.
 func (*QueueView) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{12}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *QueueView) GetWorkspace() string {
@@ -925,7 +1228,7 @@ type QueueForceCmd struct {
 
 func (x *QueueForceCmd) Reset() {
 	*x = QueueForceCmd{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[13]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -937,7 +1240,7 @@ func (x *QueueForceCmd) String() string {
 func (*QueueForceCmd) ProtoMessage() {}
 
 func (x *QueueForceCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[13]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -950,7 +1253,7 @@ func (x *QueueForceCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueForceCmd.ProtoReflect.Descriptor instead.
 func (*QueueForceCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{13}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *QueueForceCmd) GetEntryId() string {
@@ -971,7 +1274,7 @@ type QueueAcceptCmd struct {
 
 func (x *QueueAcceptCmd) Reset() {
 	*x = QueueAcceptCmd{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[14]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -983,7 +1286,7 @@ func (x *QueueAcceptCmd) String() string {
 func (*QueueAcceptCmd) ProtoMessage() {}
 
 func (x *QueueAcceptCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[14]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -996,7 +1299,7 @@ func (x *QueueAcceptCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueAcceptCmd.ProtoReflect.Descriptor instead.
 func (*QueueAcceptCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{14}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *QueueAcceptCmd) GetEntryId() string {
@@ -1016,7 +1319,7 @@ type QueueCancelCmd struct {
 
 func (x *QueueCancelCmd) Reset() {
 	*x = QueueCancelCmd{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[15]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1028,7 +1331,7 @@ func (x *QueueCancelCmd) String() string {
 func (*QueueCancelCmd) ProtoMessage() {}
 
 func (x *QueueCancelCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[15]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1041,7 +1344,7 @@ func (x *QueueCancelCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueCancelCmd.ProtoReflect.Descriptor instead.
 func (*QueueCancelCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{15}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *QueueCancelCmd) GetEntryId() string {
@@ -1061,7 +1364,18 @@ const file_agentshim_frontend_v1_prompt_queue_proto_rawDesc = "" +
 	"\x0fpermission_mode\x18\x02 \x01(\tR\x0epermissionMode\x12D\n" +
 	"\rprompt_origin\x18\x03 \x01(\x0e2\x1f.agentshim.core.v1.PromptOriginR\fpromptOrigin\"5\n" +
 	"\fInterruptCmd\x12%\n" +
-	"\x0econfirm_agents\x18\x01 \x01(\bR\rconfirmAgents\"\x1c\n" +
+	"\x0econfirm_agents\x18\x01 \x01(\bR\rconfirmAgents\"\x19\n" +
+	"\x17CancelDetachedAgentsCmd\"\xa3\x02\n" +
+	"\x15DetachedCancelOutcome\x12N\n" +
+	"\tcancelled\x18\x01 \x01(\v2..agentshim.frontend.v1.DetachedAgentsCancelledH\x00R\tcancelled\x12Y\n" +
+	"\x0fnothing_running\x18\x02 \x01(\v2..agentshim.frontend.v1.NoDetachedAgentsRunningH\x00R\x0enothingRunning\x12T\n" +
+	"\vunsupported\x18\x03 \x01(\v20.agentshim.frontend.v1.DetachedCancelUnsupportedH\x00R\vunsupportedB\t\n" +
+	"\aoutcome\"/\n" +
+	"\x17DetachedAgentsCancelled\x12\x14\n" +
+	"\x05count\x18\x01 \x01(\x03R\x05count\"\x19\n" +
+	"\x17NoDetachedAgentsRunning\"3\n" +
+	"\x19DetachedCancelUnsupported\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"\x1c\n" +
 	"\x1aQueueClassificationPending\"<\n" +
 	"\x1cQueueClassificationInterject\x12\x1c\n" +
 	"\trationale\x18\x01 \x01(\tR\trationale\"S\n" +
@@ -1123,45 +1437,53 @@ func file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP() []byte {
 	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescData
 }
 
-var file_agentshim_frontend_v1_prompt_queue_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_agentshim_frontend_v1_prompt_queue_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_agentshim_frontend_v1_prompt_queue_proto_goTypes = []any{
 	(*SubmitPromptCmd)(nil),                        // 0: agentshim.frontend.v1.SubmitPromptCmd
 	(*InterruptCmd)(nil),                           // 1: agentshim.frontend.v1.InterruptCmd
-	(*QueueClassificationPending)(nil),             // 2: agentshim.frontend.v1.QueueClassificationPending
-	(*QueueClassificationInterject)(nil),           // 3: agentshim.frontend.v1.QueueClassificationInterject
-	(*QueueClassificationHold)(nil),                // 4: agentshim.frontend.v1.QueueClassificationHold
-	(*QueueClassificationUninterruptibleTurn)(nil), // 5: agentshim.frontend.v1.QueueClassificationUninterruptibleTurn
-	(*QueueClassificationError)(nil),               // 6: agentshim.frontend.v1.QueueClassificationError
-	(*QueueEntry)(nil),                             // 7: agentshim.frontend.v1.QueueEntry
-	(*QueueEntryShutdownHold)(nil),                 // 8: agentshim.frontend.v1.QueueEntryShutdownHold
-	(*QueueEntryKeepAliveHold)(nil),                // 9: agentshim.frontend.v1.QueueEntryKeepAliveHold
-	(*QueueEntryRevivalHold)(nil),                  // 10: agentshim.frontend.v1.QueueEntryRevivalHold
-	(*QueueEntryBuildRefreshHold)(nil),             // 11: agentshim.frontend.v1.QueueEntryBuildRefreshHold
-	(*QueueView)(nil),                              // 12: agentshim.frontend.v1.QueueView
-	(*QueueForceCmd)(nil),                          // 13: agentshim.frontend.v1.QueueForceCmd
-	(*QueueAcceptCmd)(nil),                         // 14: agentshim.frontend.v1.QueueAcceptCmd
-	(*QueueCancelCmd)(nil),                         // 15: agentshim.frontend.v1.QueueCancelCmd
-	(v1.PromptOrigin)(0),                           // 16: agentshim.core.v1.PromptOrigin
-	(SessionCommand)(0),                            // 17: agentshim.frontend.v1.SessionCommand
+	(*CancelDetachedAgentsCmd)(nil),                // 2: agentshim.frontend.v1.CancelDetachedAgentsCmd
+	(*DetachedCancelOutcome)(nil),                  // 3: agentshim.frontend.v1.DetachedCancelOutcome
+	(*DetachedAgentsCancelled)(nil),                // 4: agentshim.frontend.v1.DetachedAgentsCancelled
+	(*NoDetachedAgentsRunning)(nil),                // 5: agentshim.frontend.v1.NoDetachedAgentsRunning
+	(*DetachedCancelUnsupported)(nil),              // 6: agentshim.frontend.v1.DetachedCancelUnsupported
+	(*QueueClassificationPending)(nil),             // 7: agentshim.frontend.v1.QueueClassificationPending
+	(*QueueClassificationInterject)(nil),           // 8: agentshim.frontend.v1.QueueClassificationInterject
+	(*QueueClassificationHold)(nil),                // 9: agentshim.frontend.v1.QueueClassificationHold
+	(*QueueClassificationUninterruptibleTurn)(nil), // 10: agentshim.frontend.v1.QueueClassificationUninterruptibleTurn
+	(*QueueClassificationError)(nil),               // 11: agentshim.frontend.v1.QueueClassificationError
+	(*QueueEntry)(nil),                             // 12: agentshim.frontend.v1.QueueEntry
+	(*QueueEntryShutdownHold)(nil),                 // 13: agentshim.frontend.v1.QueueEntryShutdownHold
+	(*QueueEntryKeepAliveHold)(nil),                // 14: agentshim.frontend.v1.QueueEntryKeepAliveHold
+	(*QueueEntryRevivalHold)(nil),                  // 15: agentshim.frontend.v1.QueueEntryRevivalHold
+	(*QueueEntryBuildRefreshHold)(nil),             // 16: agentshim.frontend.v1.QueueEntryBuildRefreshHold
+	(*QueueView)(nil),                              // 17: agentshim.frontend.v1.QueueView
+	(*QueueForceCmd)(nil),                          // 18: agentshim.frontend.v1.QueueForceCmd
+	(*QueueAcceptCmd)(nil),                         // 19: agentshim.frontend.v1.QueueAcceptCmd
+	(*QueueCancelCmd)(nil),                         // 20: agentshim.frontend.v1.QueueCancelCmd
+	(v1.PromptOrigin)(0),                           // 21: agentshim.core.v1.PromptOrigin
+	(SessionCommand)(0),                            // 22: agentshim.frontend.v1.SessionCommand
 }
 var file_agentshim_frontend_v1_prompt_queue_proto_depIdxs = []int32{
-	16, // 0: agentshim.frontend.v1.SubmitPromptCmd.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
-	17, // 1: agentshim.frontend.v1.QueueClassificationUninterruptibleTurn.command:type_name -> agentshim.frontend.v1.SessionCommand
-	2,  // 2: agentshim.frontend.v1.QueueEntry.pending:type_name -> agentshim.frontend.v1.QueueClassificationPending
-	3,  // 3: agentshim.frontend.v1.QueueEntry.interject:type_name -> agentshim.frontend.v1.QueueClassificationInterject
-	4,  // 4: agentshim.frontend.v1.QueueEntry.hold_for_turn_end:type_name -> agentshim.frontend.v1.QueueClassificationHold
-	6,  // 5: agentshim.frontend.v1.QueueEntry.error:type_name -> agentshim.frontend.v1.QueueClassificationError
-	5,  // 6: agentshim.frontend.v1.QueueEntry.uninterruptible_turn:type_name -> agentshim.frontend.v1.QueueClassificationUninterruptibleTurn
-	8,  // 7: agentshim.frontend.v1.QueueEntry.shutdown:type_name -> agentshim.frontend.v1.QueueEntryShutdownHold
-	9,  // 8: agentshim.frontend.v1.QueueEntry.keep_alive:type_name -> agentshim.frontend.v1.QueueEntryKeepAliveHold
-	10, // 9: agentshim.frontend.v1.QueueEntry.revival:type_name -> agentshim.frontend.v1.QueueEntryRevivalHold
-	11, // 10: agentshim.frontend.v1.QueueEntry.build_refresh:type_name -> agentshim.frontend.v1.QueueEntryBuildRefreshHold
-	7,  // 11: agentshim.frontend.v1.QueueView.entries:type_name -> agentshim.frontend.v1.QueueEntry
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	21, // 0: agentshim.frontend.v1.SubmitPromptCmd.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
+	4,  // 1: agentshim.frontend.v1.DetachedCancelOutcome.cancelled:type_name -> agentshim.frontend.v1.DetachedAgentsCancelled
+	5,  // 2: agentshim.frontend.v1.DetachedCancelOutcome.nothing_running:type_name -> agentshim.frontend.v1.NoDetachedAgentsRunning
+	6,  // 3: agentshim.frontend.v1.DetachedCancelOutcome.unsupported:type_name -> agentshim.frontend.v1.DetachedCancelUnsupported
+	22, // 4: agentshim.frontend.v1.QueueClassificationUninterruptibleTurn.command:type_name -> agentshim.frontend.v1.SessionCommand
+	7,  // 5: agentshim.frontend.v1.QueueEntry.pending:type_name -> agentshim.frontend.v1.QueueClassificationPending
+	8,  // 6: agentshim.frontend.v1.QueueEntry.interject:type_name -> agentshim.frontend.v1.QueueClassificationInterject
+	9,  // 7: agentshim.frontend.v1.QueueEntry.hold_for_turn_end:type_name -> agentshim.frontend.v1.QueueClassificationHold
+	11, // 8: agentshim.frontend.v1.QueueEntry.error:type_name -> agentshim.frontend.v1.QueueClassificationError
+	10, // 9: agentshim.frontend.v1.QueueEntry.uninterruptible_turn:type_name -> agentshim.frontend.v1.QueueClassificationUninterruptibleTurn
+	13, // 10: agentshim.frontend.v1.QueueEntry.shutdown:type_name -> agentshim.frontend.v1.QueueEntryShutdownHold
+	14, // 11: agentshim.frontend.v1.QueueEntry.keep_alive:type_name -> agentshim.frontend.v1.QueueEntryKeepAliveHold
+	15, // 12: agentshim.frontend.v1.QueueEntry.revival:type_name -> agentshim.frontend.v1.QueueEntryRevivalHold
+	16, // 13: agentshim.frontend.v1.QueueEntry.build_refresh:type_name -> agentshim.frontend.v1.QueueEntryBuildRefreshHold
+	12, // 14: agentshim.frontend.v1.QueueView.entries:type_name -> agentshim.frontend.v1.QueueEntry
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_prompt_queue_proto_init() }
@@ -1170,7 +1492,12 @@ func file_agentshim_frontend_v1_prompt_queue_proto_init() {
 		return
 	}
 	file_agentshim_frontend_v1_slash_menu_proto_init()
-	file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[7].OneofWrappers = []any{
+	file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[3].OneofWrappers = []any{
+		(*DetachedCancelOutcome_Cancelled)(nil),
+		(*DetachedCancelOutcome_NothingRunning)(nil),
+		(*DetachedCancelOutcome_Unsupported)(nil),
+	}
+	file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[12].OneofWrappers = []any{
 		(*QueueEntry_Pending)(nil),
 		(*QueueEntry_Interject)(nil),
 		(*QueueEntry_HoldForTurnEnd)(nil),
@@ -1187,7 +1514,7 @@ func file_agentshim_frontend_v1_prompt_queue_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_prompt_queue_proto_rawDesc), len(file_agentshim_frontend_v1_prompt_queue_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
