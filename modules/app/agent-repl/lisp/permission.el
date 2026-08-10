@@ -52,6 +52,7 @@
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "workspace" (ws key))
+(declare-function agent-repl--open-fence-note-delta "agent-repl-open-fence" (delta))
 (declare-function agent-repl--ws-put "workspace" (ws key val))
 (declare-function agent-repl--frontend-ws-name "frontend-state" (workspace))
 (declare-function agent-repl--ws-current-name "workspace" ())
@@ -92,11 +93,19 @@ arm the fold did not touch."
 
 (defun agent-repl--frontend-apply-conversation-delta (delta)
   "Apply a `ConversationDelta' frame DELTA (a plist).  Handler for `conversationDelta'.
-Emacs is state-centric: of the delta's typed items it consumes ONLY the
+Emacs is state-centric: of the delta's typed items it RENDERS only the
 `permission' arm (the daemon-composed `PermissionItem'); every other item
-type is the webapp's to render and is skipped here.  Each permission item
-is dispatched to `agent-repl--permission-handle-item' with the delta's
-workspace.  Returns the count of permission items handled."
+type is the webapp's to render and is not rendered here.  Each permission
+item is dispatched to `agent-repl--permission-handle-item' with the
+delta's workspace.  Returns the count of permission items handled.
+
+ONE OTHER ARM IS READ WITHOUT BEING RENDERED.  `open-fence.el' inspects
+the delta's failure cards for a TERMINAL continuity failure, which is the
+only evidence this end ever gets that a workspace's opens are being
+refused with no retry that could help — the `open_workspace' ack is early
+and says only ACCEPTED.  It is read here because this is the single
+`conversationDelta' handler the transport allows; it changes no card and
+suppresses no item."
   ;; The frame names its workspace by the session CWD; Emacs keys workspaces
   ;; by persp NAME. Handing the path straight on would key the permission
   ;; prompt to a stub the renderer never reads (see
@@ -122,6 +131,15 @@ workspace.  Returns the count of permission items handled."
      raw-workspace
      (if resolved "resolved" "raw")
      (length items))
+    ;; BEFORE the permission loop, and never gated on it: a delta carrying a
+    ;; terminal open failure carries no permission item, so ordering the fence
+    ;; read behind that loop would only make it easier to lose later.  A
+    ;; defect in the fence reader must not cost the user their permission
+    ;; prompt, so it is reported and the render walks on.
+    (condition-case err
+        (agent-repl--open-fence-note-delta delta)
+      (error (agent-repl--warn log-workspace
+                               "permission-delta: open-fence reader failed err=%S" err)))
     (dolist (item items)
       (when (agent-repl--permission-item-p item)
         (agent-repl--permission-handle-item workspace item)
