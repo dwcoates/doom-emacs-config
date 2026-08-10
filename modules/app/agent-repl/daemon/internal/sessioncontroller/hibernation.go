@@ -89,6 +89,16 @@ var ErrHibernationMergeLeaseHeld = errors.New("session-controller: the workspace
 // here and the user's own decision is not a stale clock reading.
 var ErrHibernationMergeQueued = errors.New("session-controller: the workspace is waiting in the merge queue and cannot be hibernated by an automatic cause")
 
+// ErrHibernationConversationCut reports an AUTOMATIC hibernation refused
+// because the workspace's conversation was compacted or cleared and nothing has
+// been said to it since.
+//
+// It is a sentinel of its own rather than a reuse of the queued one because the
+// two refusals are about different things — pending work versus a conversation
+// the daemon itself just cut — and a caller that wants to tell them apart (a
+// sweeper deciding whether to try again, a test) must be able to.
+var ErrHibernationConversationCut = errors.New("session-controller: the workspace's conversation was compacted or cleared with nothing said since, so it is not hibernated by an automatic cause")
+
 // ErrHibernated reports an operation refused because the session is
 // hibernated and the user has not made a revival choice. Every prompt path
 // funnels into the gate that returns it (promptdispatch.go).
@@ -207,6 +217,11 @@ func (m *Manager) hibernateWithCause(workspace string, account registry.Hibernat
 	if err := m.refuseAutomaticHibernationWhileQueued(workspace, account); err != nil {
 		return err
 	}
+	// A CUT CONVERSATION IS NOT SLEPT ON, and this is asked here for the two
+	// gates above's reason: one place every route into a sleep funnels through.
+	if err := m.refuseAutomaticHibernationAfterCut(workspace, account); err != nil {
+		return err
+	}
 	sessionID, ok := m.cfg.Locator.Locate(workspace)
 	if !ok {
 		return fmt.Errorf("session-controller: workspace %q has no session to hibernate", workspace)
@@ -288,6 +303,47 @@ func (m *Manager) refuseAutomaticHibernationWhileQueued(workspace string, accoun
 	m.logf("session-controller: hibernation transition REFUSED ws=%q cause=%s state=%s — the workspace is WAITING IN THE MERGE QUEUE, which is pending work rather than quiet; hibernating it here is what made a later conflict resolution re-ingest the whole conversation at the uncached rate. Nothing was stopped and nothing was persisted",
 		workspace, account.Cause, state.GetState())
 	return fmt.Errorf("%w: workspace %q, cause %s", ErrHibernationMergeQueued, workspace, account.Cause)
+}
+
+// refuseAutomaticHibernationAfterCut refuses the two clock-driven causes for a
+// workspace whose conversation was COMPACTED OR CLEARED with nothing said to it
+// since (ssm/compactiongate.go).
+//
+// THE CUT IS THE DAEMON'S OWN LAST ACT ON THAT CONVERSATION. Both automatic
+// causes read nothing but elapsed quiet, and the quiet that follows a cut is
+// not a workspace nobody wants — it is a workspace the daemon itself just
+// emptied or summarized. Sleeping on top of it stands the session down behind a
+// revival gate whose compacting choices this same gate already declines, so the
+// sleep buys a revival that has nothing to do.
+//
+// ONLY THE AUTOMATIC CAUSES ARE GATED, exactly as with the merge queue. A
+// forced sleep is the user looking at a workspace and deciding about it, and no
+// fact about its conversation outranks that.
+//
+// A READ FAILURE REFUSES THE TRANSITION and is never absorbed into a permissive
+// "not cut", which is the rule compactionRedundant's other callers already
+// follow: a daemon that cannot read the gate does not know whether it is about
+// to sleep on a cut conversation, and guessing in the transition's favor is
+// exactly how the sleep this prevents gets taken anyway.
+func (m *Manager) refuseAutomaticHibernationAfterCut(workspace string, account registry.HibernationDetail) error {
+	switch account.Cause {
+	case registry.HibernationCauseIdleCutoff, registry.HibernationCauseCacheExpired:
+	default:
+		return nil
+	}
+	cut, gate, err := m.conversationCutSinceLastPrompt(workspace)
+	if err != nil {
+		m.logf("session-controller: REFUSING to hibernate ws=%q cause=%s error=%v — the compaction gate could not be read, so whether this conversation was compacted or cleared with nothing said since is unknown; nothing was stopped and nothing was persisted",
+			workspace, account.Cause, err)
+		return fmt.Errorf("session-controller: reading the compaction gate of workspace %q before an automatic %s hibernation: %w",
+			workspace, account.Cause, err)
+	}
+	if !cut {
+		return nil
+	}
+	m.logf("session-controller: REFUSING to hibernate ws=%q cause=%s cut=%s %s — the conversation was %s and nothing has been said to it since, so the quiet this cause measured is the daemon's own last act on it rather than a workspace nobody wants. Nothing was stopped and nothing was persisted",
+		workspace, account.Cause, cutKind(gate), compactionRedundantDetail(gate), cutKind(gate))
+	return fmt.Errorf("%w: workspace %q, cause %s, cut %s", ErrHibernationConversationCut, workspace, account.Cause, cutKind(gate))
 }
 
 // hibernationStopCause maps a hibernation cause onto the shim-stop vocabulary,

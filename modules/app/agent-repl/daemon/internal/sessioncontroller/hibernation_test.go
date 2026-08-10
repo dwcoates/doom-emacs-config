@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/registry"
+	"claude-repld/internal/ssm"
 )
 
 // fakeHibernations is an in-memory HibernationRegistrar. It records every
@@ -806,5 +808,122 @@ func TestEnsureDischargesTheRevivalGate(t *testing.T) {
 	// Assert.
 	if detail, asleep := hib.HibernationOf("s1"); asleep && detail.Cause != "" {
 		t.Fatalf("hibernation detail = %+v after a bring-up reached driveable, want the sleep retired", detail)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A CUT CONVERSATION IS NOT SLEPT ON. A compaction or a `/clear` with nothing
+// said since is the daemon's own last act on the conversation, and the two
+// clock-driven causes cannot tell that quiet from a workspace nobody wants.
+// ---------------------------------------------------------------------------
+
+// cutHibernationRig is newHibernationRig with the log captured, so a decline
+// can be asserted in the voice every other hibernation refusal speaks in.
+func cutHibernationRig(t *testing.T) (*Manager, *fakeApplier, *fakeHibernations, *logCapture) {
+	t.Helper()
+	capture := &logCapture{}
+	m, applier, hib := newHibernationRig(t, func(cfg *Config) { cfg.Logf = capture.logf })
+	return m, applier, hib, capture
+}
+
+func TestHibernateWithCauseRefusesACompactedConversation(t *testing.T) {
+	// Arrange — compacted, nothing said since.
+	m, applier, hib, capture := cutHibernationRig(t)
+	applier.setCompactionGate("ws", ssm.CompactionGate{CompactedAtMs: 200, PromptAtMs: 100})
+
+	// Act.
+	err := m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseIdleCutoff, CutoffMs: 21_600_000,
+	})
+
+	// Assert.
+	if !errors.Is(err, ErrHibernationConversationCut) {
+		t.Fatalf("HibernateWithCause over a compacted conversation = %v, want ErrHibernationConversationCut", err)
+	}
+	if got := hib.writeCount(); got != 0 {
+		t.Fatalf("hibernation writes = %d, want nothing persisted for a refused transition", got)
+	}
+	if !capture.contains("REFUSING to hibernate ws=\"ws\" cause=idle_cutoff cut=compacted") {
+		t.Fatal("the decline did not name the gate fact in the refusal voice the other arms use")
+	}
+}
+
+func TestHibernateWithCauseRefusesAClearedConversation(t *testing.T) {
+	// Arrange — cleared, nothing said since. The cache-cold arm's own cause,
+	// which reaches the same one transition.
+	m, applier, hib, capture := cutHibernationRig(t)
+	applier.setCompactionGate("ws", ssm.CompactionGate{ClearedAtMs: 200, PromptAtMs: 100})
+
+	// Act.
+	err := m.hibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseCacheExpired, TTLMs: 3_600_000,
+	}, evidenceObserved)
+
+	// Assert.
+	if !errors.Is(err, ErrHibernationConversationCut) {
+		t.Fatalf("HibernateWithCause over a cleared conversation = %v, want ErrHibernationConversationCut", err)
+	}
+	if got := hib.writeCount(); got != 0 {
+		t.Fatalf("hibernation writes = %d, want nothing persisted for a refused transition", got)
+	}
+	if !capture.contains("cut=cleared") {
+		t.Fatal("the decline reported the wrong cut; a cleared conversation named as compacted misreports the workspace")
+	}
+}
+
+func TestHibernateWithCauseProceedsWhenAPromptFollowedTheCut(t *testing.T) {
+	// Arrange — the user spoke after the clear, so the conversation holds
+	// material again and the ordinary sleep is owed.
+	m, applier, _, _ := cutHibernationRig(t)
+	applier.setCompactionGate("ws", ssm.CompactionGate{ClearedAtMs: 200, PromptAtMs: 300})
+
+	// Act.
+	err := m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseIdleCutoff, CutoffMs: 21_600_000,
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("HibernateWithCause after a prompt following the cut = %v, want the sleep taken", err)
+	}
+}
+
+func TestHibernateWithCauseStillHonorsAForcedSleepOverACutConversation(t *testing.T) {
+	// Arrange — a forced sleep is the user looking at the workspace and
+	// deciding, not a clock reading, exactly as with the merge queue.
+	m, applier, _, _ := cutHibernationRig(t)
+	applier.setCompactionGate("ws", ssm.CompactionGate{ClearedAtMs: 200, PromptAtMs: 100})
+
+	// Act.
+	err := m.HibernateWithCause("ws", registry.HibernationDetail{Cause: registry.HibernationCauseForced})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("forced hibernation over a cut conversation = %v, want the sleep the user asked for", err)
+	}
+}
+
+func TestHibernateWithCauseRefusesOnAnUnreadableGate(t *testing.T) {
+	// Arrange — the gate cannot be read, so whether the conversation was cut is
+	// unknown. An unknown must never resolve into the transition's favor.
+	m, applier, hib, capture := cutHibernationRig(t)
+	applier.reconcMutex.Lock()
+	applier.compactionGateErr = errors.New("the state store is gone")
+	applier.reconcMutex.Unlock()
+
+	// Act.
+	err := m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseIdleCutoff, CutoffMs: 21_600_000,
+	})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the state store is gone") {
+		t.Fatalf("HibernateWithCause on an unreadable gate = %v, want the read failure carried through rather than swallowed", err)
+	}
+	if got := hib.writeCount(); got != 0 {
+		t.Fatalf("hibernation writes = %d, want nothing persisted when the gate could not be read", got)
+	}
+	if !capture.contains("REFUSING to hibernate ws=\"ws\" cause=idle_cutoff error=") {
+		t.Fatal("the unreadable gate was not reported as the refusal it caused")
 	}
 }
