@@ -103,11 +103,14 @@ func (f *fakeHibernations) lastTurnEnd(sessionID string) int64 {
 
 // newHibernationRig is newWiredRig plus a hibernation registrar and a session
 // settled enough for the teardown's own gate to admit.
-func newHibernationRig(t *testing.T) (*Manager, *fakeApplier, *fakeHibernations) {
+func newHibernationRig(t *testing.T, opts ...func(*Config)) (*Manager, *fakeApplier, *fakeHibernations) {
 	t.Helper()
-	m, applier, _ := newWiredRig(t)
 	hib := newFakeHibernations()
-	m.cfg.Hibernations = hib
+	// THE REGISTRAR IS INSTALLED BEFORE New, not assigned onto a running
+	// manager: the bring-up below launches goroutines that read Config without
+	// a lock, so a post-construction assignment is a data race on every field
+	// they touch.
+	m, applier, _ := newWiredRig(t, append([]func(*Config){func(cfg *Config) { cfg.Hibernations = hib }}, opts...)...)
 	if err := m.Ensure("ws"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}

@@ -29,9 +29,9 @@ var errApplyWired = errors.New("the state log rejected the wired row")
 
 // newWiredRig builds a manager over a fake shim and returns it with the applier
 // its edges land in.
-func newWiredRig(t *testing.T) (*Manager, *fakeApplier, func() *fakeClient) {
+func newWiredRig(t *testing.T, opts ...func(*Config)) (*Manager, *fakeApplier, func() *fakeClient) {
 	t.Helper()
-	m, last := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
+	m, last := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{}, opts...)
 	return m, m.cfg.SSM.(*fakeApplier), last
 }
 

@@ -128,11 +128,10 @@ func (f *fakeKeepAliveWindows) lastOpened(turnID string) (KeepAliveWindowRecord,
 }
 
 // keepAliveRig is a settled, awake, brought-up session with a window ledger.
-func keepAliveRig(t *testing.T) (*Manager, *fakeApplier, *fakeKeepAliveWindows) {
+func keepAliveRig(t *testing.T, opts ...func(*Config)) (*Manager, *fakeApplier, *fakeKeepAliveWindows) {
 	t.Helper()
-	m, applier, _ := newHibernationRig(t)
 	windows := newFakeKeepAliveWindows()
-	m.cfg.KeepAliveWindows = windows
+	m, applier, _ := newHibernationRig(t, append([]func(*Config){func(cfg *Config) { cfg.KeepAliveWindows = windows }}, opts...)...)
 	return m, applier, windows
 }
 
@@ -328,9 +327,8 @@ func TestKeepAlivePingAbandonedWhenItsWindowCannotBeRecorded(t *testing.T) {
 // would replay that bubble across every reconnect.
 func TestKeepAlivePingMintsNoPromptReceipt(t *testing.T) {
 	// Arrange.
-	m, _, _ := keepAliveRig(t)
 	receipts := &countingReceipts{}
-	m.cfg.PromptReceipts = receipts
+	m, _, _ := keepAliveRig(t, func(cfg *Config) { cfg.PromptReceipts = receipts })
 	m.mu.Lock()
 	m.byWS["ws"].consumer.receipts = receipts
 	m.mu.Unlock()
@@ -341,8 +339,8 @@ func TestKeepAlivePingMintsNoPromptReceipt(t *testing.T) {
 	}
 
 	// Assert.
-	if receipts.recorded != 0 {
-		t.Fatalf("%d prompt receipt(s) recorded for a keep-alive ping, want none", receipts.recorded)
+	if got := receipts.count(); got != 0 {
+		t.Fatalf("%d prompt receipt(s) recorded for a keep-alive ping, want none", got)
 	}
 }
 
@@ -735,13 +733,29 @@ func pushedFailureType(m *Manager, errorType string) bool {
 	return false
 }
 
-// countingReceipts counts durable prompt-receipt writes.
-type countingReceipts struct{ recorded int }
+// countingReceipts counts the durable receipts recorded through it. The count
+// is MUTEX-GUARDED because the store is reached from the session controller's
+// own goroutines as readily as from the test's.
+type countingReceipts struct {
+	mu       sync.Mutex
+	recorded int
+}
 
 func (c *countingReceipts) Record(statedb.PromptReceipt) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.recorded++
 	return nil
 }
+
+// count reports how many receipts were recorded, safe to read while the
+// session controller is running.
+func (c *countingReceipts) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.recorded
+}
+
 func (c *countingReceipts) Retire(string) (bool, error)                             { return false, nil }
 func (c *countingReceipts) RecordPendingResumption(statedb.PendingResumption) error { return nil }
 func (c *countingReceipts) PendingResumptions(string) ([]statedb.PendingResumption, error) {
