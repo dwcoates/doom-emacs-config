@@ -376,7 +376,28 @@ export function isQueryTerminationCleanupError(err: unknown): err is QueryTermin
 type QueryIdentityState =
   | { case: "fresh-unconfirmed" }
   | { case: "resume-unconfirmed"; requestedVendorSessionId: string }
+  /**
+   * A resumed query that has been handed `/clear` before it ever reported an
+   * identity. The resume commitment is DISCHARGED: the command discards the
+   * conversation and the vendor answers by rotating the session uuid, so the
+   * next identity is expected to differ from the requested one and is adopted
+   * rather than refused.
+   *
+   * It is its own case, not a mutation of `resume-unconfirmed` back to
+   * `fresh-unconfirmed`, because the requested id is still what this query's
+   * evidence is filed under until the rotation lands, and losing it would make
+   * the adoption unreportable.
+   */
+  | { case: "resume-discharged"; requestedVendorSessionId: string }
   | { case: "confirmed"; vendorSessionId: string };
+
+/**
+ * `/clear` as the ENTIRE prompt, which is the only shape that clears: the
+ * daemon's own classifier (sessioncommand.go) recognizes it on exactly those
+ * terms, and matching it here rather than on a prefix is what keeps a prompt
+ * that merely mentions the command from discharging a resume commitment.
+ */
+const CLEAR_COMMAND_TEXT = "/clear";
 
 /** A resumed query reported a conversation other than the one it was asked to resume. */
 export class ResumeIdentityMismatchError extends Error {
@@ -611,6 +632,7 @@ export class UdsSession {
         // still running, in which case the reconcile leaves the watch down
         // because this session's stream is entitled to stay silent.
         this.reconcileTurnQuietWatch();
+        this.noteContextClearSubmitted(text, requestId);
         const content: ContentBlock[] = [{ type: "text", text }];
         this.input.push({
           type: "user",
@@ -1933,6 +1955,37 @@ export class UdsSession {
   }
 
   /**
+   * Discharge this query's resume-identity commitment when the prompt just
+   * admitted is a `/clear`.
+   *
+   * A resumed query's FIRST reported identity is normally proof that the
+   * resume landed on the conversation it was asked for, and a different id
+   * there is fatal. `/clear` breaks that premise on purpose: it discards the
+   * conversation, the vendor rotates the session uuid for it, and the rotated
+   * id is then the first thing the query ever reports — which is exactly what
+   * a revival's clear does, because the revival gate keeps every other prompt
+   * out until the cut lands. Refusing it killed the query for obeying the
+   * command it had just been given.
+   *
+   * Anything already CONFIRMED needs no discharge: a rotation after the first
+   * identity is an ordinary SDK rotation the confirmed case already adopts.
+   */
+  private noteContextClearSubmitted(text: string, requestId: string): void {
+    if (text.trim() !== CLEAR_COMMAND_TEXT) return;
+    if (this.queryIdentity.case !== "resume-unconfirmed") return;
+    const requestedVendorSessionId = this.queryIdentity.requestedVendorSessionId;
+    this.queryIdentity = { case: "resume-discharged", requestedVendorSessionId };
+    LOGGER.log({
+      operation: "shim.uds-session.resume-identity-discharge",
+      outcome: "clear_discharges_resume_commitment",
+      agent_repl_session_id: this.deps.sessionId,
+      query_instance_id: this.queryInstanceId,
+      turn_id: requestId,
+      requested_vendor_session_id: requestedVendorSessionId,
+    }, "a /clear was admitted before this resumed query reported an identity; the vendor session rotation it causes will be adopted rather than refused");
+  }
+
+  /**
    * Confirm the first SDK-reported identity before any store rekey, registry
    * observation, or process-global identity mutation can occur.
    *
@@ -1952,6 +2005,29 @@ export class UdsSession {
       case "confirmed":
         this.queryIdentity = { case: "confirmed", vendorSessionId: observedVendorSessionId };
         return;
+      case "resume-discharged": {
+        const requestedVendorSessionId = this.queryIdentity.requestedVendorSessionId;
+        this.queryIdentity = { case: "confirmed", vendorSessionId: observedVendorSessionId };
+        if (observedVendorSessionId === requestedVendorSessionId) {
+          return;
+        }
+        // ADOPTED, AND SAID SO AT THE SAME VOLUME THE REFUSAL IS. The query is
+        // now filing under a conversation other than the one it was asked to
+        // resume, and that substitution must be readable from the log even
+        // though it is the `/clear` working as intended.
+        LOGGER.log({
+          operation: "shim.uds-session.resume-identity-confirmation",
+          outcome: "clear_rotation_adopted",
+          agent_repl_session_id: this.deps.sessionId,
+          query_instance_id: this.queryInstanceId,
+          requested_vendor_session_id: requestedVendorSessionId,
+          observed_vendor_session_id: observedVendorSessionId,
+          session_source: this.deps.sessionSource,
+          shim_version: this.deps.shimVersion,
+          sdk_version: this.deps.sdkVersion ?? "",
+        }, "a /clear discharged this resumed query's identity commitment; adopting the rotated vendor session");
+        return;
+      }
       case "resume-unconfirmed": {
         const requestedVendorSessionId = this.queryIdentity.requestedVendorSessionId;
         if (observedVendorSessionId === requestedVendorSessionId) {
