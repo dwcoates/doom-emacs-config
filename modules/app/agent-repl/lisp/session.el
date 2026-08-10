@@ -124,7 +124,7 @@ non-env-struct keys that drive the tabline badge and workspace state
 glyphs:
 `:priority', `:source-ws-dir', `:model', `:last-prompt-time',
 `:repl-state', `:saved-tab-index', `:backend', `:fork-session-id',
-`:backend-session-stash', `:config-dir-override', `:frontend' (only
+`:backend-session-stash', `:frontend' (only
 when the save marked it a deliberate choice — see below),
 `:last-prompt-summary', `:last-prompt-summary-at', `:worktree-p', and
 the `:merge-completed' / `:merge-failed' / `:merge-completed-at'
@@ -180,14 +180,6 @@ remaining keys are written only when SAVED carries them."
   (agent-repl--ws-put ws :backend
                        (or (and saved (plist-get saved :backend))
                            (agent-repl--ws-get ws :backend)))
-  ;; Account override: prefer the saved value, fall back to whatever is
-  ;; already in the plist (e.g., an `account_changed_' sentinel handled
-  ;; before any state-save happened).  Restoring it is load-bearing: a
-  ;; switched workspace whose override was lost would re-create its next
-  ;; session under the path-computed account it deliberately moved off.
-  (agent-repl--ws-put ws :config-dir-override
-                       (or (and saved (plist-get saved :config-dir-override))
-                           (agent-repl--ws-get ws :config-dir-override)))
   ;; Frontend: restored ONLY when the saved plist marks it as a
   ;; DELIBERATE choice (`:frontend-explicit', written by
   ;; `agent-repl--ws-choose-frontend' — `SPC o F' and friends).  Anything
@@ -597,43 +589,36 @@ doom config tree (see `agent-repl--doom-config-tree-p')."
 (defun agent-repl--compute-config-dir (project-dir)
   "Return the CLAUDE_CONFIG_DIR to use for PROJECT-DIR, or nil.
 
-A workspace-level `:config-dir-override' wins outright when PROJECT-DIR
-resolves to a workspace carrying one — the mark a daemon-side account
-switch (or a restored state file) left, meaning the user deliberately
-moved this session off its computed default.  The override is either a
-config-dir string or the keyword `:default' (the CLI's own ~/.claude
-root, which the string convention below expresses as nil).
+THE PATH IS THE ONLY INPUT.  When PROJECT-DIR counts as under the
+multi-repo root (see `agent-repl--under-multi-repo-p'), returns the
+expanded `agent-repl-multi-repo-config-dir' (the dodge@chess.com
+account).  Otherwise returns the expanded
+`agent-repl-default-config-dir', or nil when that is nil so the CLI
+falls back to its default ~/.claude (the dodge.w.coates@gmail.com
+account).  Signals an error when PROJECT-DIR is nil, since account
+selection cannot be resolved without it.
 
-Otherwise the account is computed from the path: when PROJECT-DIR
-counts as under the multi-repo root (see
-`agent-repl--under-multi-repo-p'), returns the expanded
-`agent-repl-multi-repo-config-dir' (the dodge@chess.com account).
-Otherwise returns the expanded `agent-repl-default-config-dir', or nil
-when that is nil so the CLI falls back to its default ~/.claude (the
-dodge.w.coates@gmail.com account).  Signals an error when PROJECT-DIR is
-nil, since account selection cannot be resolved without it."
+THERE IS NO PER-WORKSPACE OVERRIDE, and that is the point.  A
+`:config-dir-override' used to win outright here, so one workspace's
+account could disagree with the account its path names — and because an
+absent value on the wire is indistinguishable from a deliberate \\='use
+the CLI default\\=', a creation that named no account silently pinned
+its workspace to ~/.claude.  A workspace under $MULTI_REPO_ROOT then
+wrote its transcript into a root nothing else reads and could never
+resume.  With the path as the sole determinant, a workspace and its
+transcripts cannot end up in different accounts."
   (unless project-dir
     (agent-repl--log nil "compute-config-dir: rejected reason=nil-project-dir")
     (error "agent-repl--compute-config-dir: project-dir is nil — cannot determine account"))
-  (let* ((ws (agent-repl--ws-for-dir project-dir))
-         (override (and ws (agent-repl--ws-get ws :config-dir-override))))
-    (cond
-     ((eq override :default)
-      (agent-repl--log ws "compute-config-dir: ws=%s override=:default -> CLI default root" ws)
-      nil)
-     ((stringp override)
-      (agent-repl--log ws "compute-config-dir: ws=%s override=%s" ws override)
-      (expand-file-name override))
-     (t
-      (let* ((under-multi-repo (agent-repl--under-multi-repo-p project-dir))
-             (dir (if under-multi-repo
-                      agent-repl-multi-repo-config-dir
-                    agent-repl-default-config-dir)))
-        (agent-repl--log nil "compute-config-dir: project-dir=%s root=%s doom-mode=%s branch=%s dir=%s"
-                          project-dir (getenv agent-repl-multi-repo-root-env)
-                          agent-repl-doom-multi-repo-mode
-                          (if under-multi-repo "multi-repo" "default") dir)
-        (and dir (expand-file-name dir)))))))
+  (let* ((under-multi-repo (agent-repl--under-multi-repo-p project-dir))
+         (dir (if under-multi-repo
+                  agent-repl-multi-repo-config-dir
+                agent-repl-default-config-dir)))
+    (agent-repl--log nil "compute-config-dir: project-dir=%s root=%s doom-mode=%s branch=%s dir=%s"
+                      project-dir (getenv agent-repl-multi-repo-root-env)
+                      agent-repl-doom-multi-repo-mode
+                      (if under-multi-repo "multi-repo" "default") dir)
+    (and dir (expand-file-name dir))))
 
 (defun agent-repl--assemble-cmd (claude-flags &optional config-dir)
   "Assemble the final `claude' shell command string.

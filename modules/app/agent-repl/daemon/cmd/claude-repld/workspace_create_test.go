@@ -237,7 +237,9 @@ func (f *fakeSessionCommands) CreateSession(_ context.Context, opts server.Creat
 }
 func (*fakeSessionCommands) DeleteSession(string) error { return nil }
 
-func TestDaemonSessionCreatorUsesExplicitAccountAndPermissionMetadata(t *testing.T) {
+// The account is NOT taken from the request any more (it follows the path), so
+// this pins what the request still carries: the model and the permission mode.
+func TestDaemonSessionCreatorUsesExplicitModelAndPermissionMetadata(t *testing.T) {
 	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
 	commands := &fakeSessionCommands{id: "s_new"}
 	// Match Server.CreateSession's durable registry effect without invoking the
@@ -262,7 +264,9 @@ func TestDaemonSessionCreatorUsesExplicitAccountAndPermissionMetadata(t *testing
 	if id != "s_new" || commands.calls != 1 {
 		t.Fatalf("id=%s calls=%d", id, commands.calls)
 	}
-	if commands.opts.ConfigDir != "/cfg" || commands.opts.PermissionMode != "plan" || commands.opts.Model != "sonnet" || commands.opts.Resume != "" {
+	// ConfigDir is empty because "/worktree" is not under $MULTI_REPO_ROOT —
+	// the path answers, and the request's own "/cfg" no longer competes.
+	if commands.opts.ConfigDir != "" || commands.opts.PermissionMode != "plan" || commands.opts.Model != "sonnet" || commands.opts.Resume != "" {
 		t.Fatalf("opts = %#v", commands.opts)
 	}
 }
@@ -286,19 +290,25 @@ func TestDaemonSessionCreatorPassesResolvedForkVendorSessionAsResume(t *testing.
 	}
 }
 
-func TestDaemonSessionCreatorSourceMetadataAssertionsAndInheritance(t *testing.T) {
+// A source workspace lends its PERMISSION MODE and nothing else. Its account
+// is deliberately not consulted: the new worktree's path already answers that,
+// and a parent under a different root would otherwise drag its account across.
+func TestDaemonSessionCreatorInheritsPermissionModeButNotTheSourceAccount(t *testing.T) {
 	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
 	if err := reg.Put(registry.Record{SessionID: "source", CWD: "/source", ConfigDir: "/cfg-source", PermissionMode: "plan"}); err != nil {
 		t.Fatal(err)
 	}
 	creator := daemonSessionCreator{Registry: reg, Logf: func(string, ...any) {}}
-	job := workspacecreate.Job{ID: "child", Request: workspacecreate.Request{SourceWorkspace: "source", SourceDir: "/source", ConfigDir: "/cfg-source", PermissionMode: "plan"}}
+	job := workspacecreate.Job{ID: "child", WorktreePath: "/child", Request: workspacecreate.Request{SourceWorkspace: "source", SourceDir: "/source", PermissionMode: "plan"}}
 	request, err := creator.ResolveSessionMetadata(context.Background(), job)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.ConfigDir != "/cfg-source" || request.PermissionMode != "plan" {
-		t.Fatalf("resolved request = %#v", request)
+	if request.PermissionMode != "plan" {
+		t.Fatalf("resolved request = %#v, want the source's permission mode", request)
+	}
+	if request.ConfigDir != "" {
+		t.Fatalf("resolved request = %#v, want the path's account rather than the source's", request)
 	}
 	job.Request.PermissionMode = "bypassPermissions"
 	if _, err := creator.ResolveSessionMetadata(context.Background(), job); err == nil {
@@ -642,9 +652,10 @@ func TestSourcelessCreateOutsideTheMultiRepoRootKeepsTheDefaultAccount(t *testin
 	}
 }
 
-func TestSourcelessCreateKeepsAnAccountTheRequestNamed(t *testing.T) {
-	// Arrange — a caller that named the account deliberately. Overriding it
-	// from the path would make the command's own field advisory.
+func TestACreateCannotNameAnAccountThePathDisagreesWith(t *testing.T) {
+	// Arrange — an emitter that named an account. It has no better information
+	// than the path carries, and honoring it would reintroduce the second
+	// determinant that put one workspace and its transcripts in two accounts.
 	home := t.TempDir()
 	multiRoot := filepath.Join(home, "workspace", "ChessCom")
 	t.Setenv(session.MultiRepoRootEnv, multiRoot)
@@ -664,8 +675,12 @@ func TestSourcelessCreateKeepsAnAccountTheRequestNamed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveSessionMetadata: %v", err)
 	}
-	if request.ConfigDir != "/named-by-the-caller" {
-		t.Fatalf("ConfigDir = %q, want the request's own account", request.ConfigDir)
+	routed, err := session.AccountConfigDirFor(job.WorktreePath)
+	if err != nil {
+		t.Fatalf("AccountConfigDirFor: %v", err)
+	}
+	if request.ConfigDir != routed {
+		t.Fatalf("ConfigDir = %q, want the path's account %q", request.ConfigDir, routed)
 	}
 }
 

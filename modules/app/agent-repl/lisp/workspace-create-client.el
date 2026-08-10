@@ -342,29 +342,6 @@ switch they did not initiate."
              :fork-session-id (plist-get available :forkSessionId)
              :priority (plist-get available :priority)
              :model (plist-get available :model)
-             ;; AN ABSENT `configDir' RECORDS NO OVERRIDE, so
-             ;; `agent-repl--compute-config-dir' computes the account from the
-             ;; workspace path exactly as it does for every workspace nobody
-             ;; switched.  It used to record the `:default' keyword, which is
-             ;; not "the daemon said nothing" but "the user deliberately moved
-             ;; this session to the CLI's own root" — an override that WINS
-             ;; OUTRIGHT over the path rule.  An empty field is
-             ;; indistinguishable from an absent one on the wire (proto3), so
-             ;; every creation that named no account silently pinned its
-             ;; workspace to ~/.claude.  For a doom worktree that is the same
-             ;; answer the path gives and the clobber was invisible; the first
-             ;; workspace ever created under $MULTI_REPO_ROOT this way ran
-             ;; under the wrong account and could never find its transcript.
-             ;;
-             ;; A DELIBERATE SWITCH IS UNAFFECTED: the daemon-side account
-             ;; switch writes the override through its own path (see
-             ;; `agent-repl--restore-workspace-state'), and this is only the
-             ;; creation announcement.
-             :config-dir-override
-             (let ((config-dir (plist-get available :configDir)))
-               (and (stringp config-dir)
-                    (not (string-empty-p config-dir))
-                    config-dir))
              :permission-mode (plist-get available :permissionMode)
              :allow-ungated (and (plist-get available :allowUngated) t)
              :initial-prompt-queued
