@@ -142,6 +142,106 @@ function runs at core.el load time, before status.el has been read."
 
 (agent-repl--cancel-all-timers)
 
+;;;; ---- One-shot settle latch ----
+;;
+;; Every asynchronous operation in this module races several arrivals for
+;; the right to finish it: the daemon's ack, a deadline timer, a polling
+;; tick, a command rejection.  Exactly one of them may settle the
+;; operation, and settling means three things happening together —
+;; claiming the one-shot flag, cancelling the timers the operation armed,
+;; and releasing whatever it registered elsewhere.
+;;
+;; Written inline, that sequence is INTERRUPTIBLE.  `C-g' landing between
+;; the flag and the timer cancels leaves a settled operation with a live
+;; deadline timer behind it; landing between the cancels and the release
+;; leaves a workspace registered to a request nothing will ever untrack.
+;; Both are exactly the stranded state the heartbeat assertion reports as
+;; `outcome=stranded'.
+;;
+;; The latch below makes the sequence UNINTERRUPTIBLE instead of merely
+;; short: `agent-repl--latch-claim' runs the whole of it with `inhibit-quit'
+;; bound, so a quit arriving anywhere inside is held until the state is
+;; consistent again.  Continuations run OUTSIDE that guard — a quit there
+;; abandons the caller's work, which is what the user asked for, and finds
+;; the registry already whole.
+;;
+;; Timers are held by KEY (`agent-repl--latch-set-timer') rather than in a
+;; list, because a polling operation re-arms the same logical timer many
+;; times per settle and a list would accumulate one entry per tick.  A
+;; timer armed after the latch is claimed is cancelled on the spot rather
+;; than recorded, which is what makes "no timer outlives its operation" a
+;; structural property of the latch instead of a discipline every caller
+;; has to keep.
+
+(cl-defstruct (agent-repl--latch
+               (:constructor agent-repl--make-latch (&optional cleanup))
+               (:copier nil))
+  "A one-shot, quit-safe settle guard for one asynchronous operation.
+
+CLEANUP is an optional thunk run — with quit inhibited, after the latch's
+timers are cancelled — by the single `agent-repl--latch-claim' that wins.
+It is where the operation releases correlation handles it registered
+elsewhere (tracked command ids, in-flight reservations).
+
+TIMERS is an alist of (KEY . TIMER); see `agent-repl--latch-set-timer'."
+  settled timers cleanup)
+
+(defun agent-repl--latch-settled-p (latch)
+  "Return non-nil once LATCH has been claimed."
+  (and (agent-repl--latch-settled latch) t))
+
+(defun agent-repl--latch-set-timer (latch key timer)
+  "Hold TIMER on LATCH under KEY, cancelling any timer already held there.
+KEY is a symbol naming the ROLE the timer plays for the operation
+\(`deadline', `poll'), so re-arming a poll replaces its predecessor
+instead of accumulating beside it.
+
+A latch that is already settled records nothing and cancels TIMER
+immediately: the operation it belonged to is over, so the only correct
+lifetime for a timer arriving late is none at all.  Returns TIMER when it
+was recorded, nil when it was cancelled as late.
+
+Runs with quit inhibited: a `C-g' between cancelling the predecessor and
+recording the replacement would strand whichever one the latch is no
+longer holding."
+  (unless (agent-repl--latch-p latch)
+    (error "[agent-repl] latch-set-timer: LATCH must be a latch, got %S" latch))
+  (unless (and key (symbolp key))
+    (error "[agent-repl] latch-set-timer: KEY must be a non-nil symbol, got %S" key))
+  (let ((inhibit-quit t))
+    (if (agent-repl--latch-settled latch)
+        (progn (when (timerp timer) (cancel-timer timer)) nil)
+      (let* ((cell (assq key (agent-repl--latch-timers latch)))
+             (prior (cdr cell)))
+        (when (timerp prior) (cancel-timer prior))
+        (if cell
+            (setcdr cell timer)
+          (setf (agent-repl--latch-timers latch)
+                (append (agent-repl--latch-timers latch) (list (cons key timer)))))
+        timer))))
+
+(defun agent-repl--latch-claim (latch)
+  "Claim LATCH for the caller, returning non-nil for exactly one caller.
+
+The winner's claim cancels every timer LATCH holds and runs its CLEANUP
+thunk, all with quit inhibited, so the operation's bookkeeping is whole
+before any `C-g' is delivered.  Every later caller gets nil and must do
+nothing.
+
+The caller runs its own continuation AFTER this returns, deliberately
+outside the guard."
+  (unless (agent-repl--latch-p latch)
+    (error "[agent-repl] latch-claim: LATCH must be a latch, got %S" latch))
+  (let ((inhibit-quit t))
+    (unless (agent-repl--latch-settled latch)
+      (setf (agent-repl--latch-settled latch) t)
+      (dolist (cell (agent-repl--latch-timers latch))
+        (when (timerp (cdr cell)) (cancel-timer (cdr cell))))
+      (setf (agent-repl--latch-timers latch) nil)
+      (when-let ((cleanup (agent-repl--latch-cleanup latch)))
+        (funcall cleanup))
+      t)))
+
 (defvar agent-repl--eager-open-in-progress nil
   "Non-nil while `agent-repl--eager-open-panels' transiently activates a
 background workspace to pre-build its REPL panels at generation time.
@@ -1992,7 +2092,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--async-gh
     agent-repl--signal-process
     agent-repl--frontend-run-build-script
-    agent-repl--frontend-spawn-build-script
+    agent-repl--frontend-spawn-run-script
     agent-repl--frontend-run-listener-probe
     agent-repl--frontend-artifact-exists-p
     agent-repl--frontend-spawn-daemon
