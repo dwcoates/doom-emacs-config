@@ -46,7 +46,7 @@
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
+(declare-function agent-repl--frontend-after-daemon-ensured "agent-repl-daemon" (on-ensured on-failure &optional force))
 (declare-function agent-repl--frontend-after-ready "agent-repl-frontend-client" (on-ready on-failure &optional ws))
 (declare-function agent-repl--frontend-after-create-session "agent-repl-frontend-client" (cwd model resume-mode explicit-id on-success on-failure &optional ws))
 (declare-function agent-repl--frontend-delete-session "agent-repl-frontend-client" (id &optional ws))
@@ -418,17 +418,10 @@ priming state change only after a new SessionView has been correlated."
                    agent-repl--explain-config-primed-p
                    agent-repl-explain-config-model
                    agent-repl-explain-config-permission-mode)
-  (if (not (agent-repl--ensure-frontend-daemon))
-      (progn
-        (agent-repl--log nil
-                         "explain-config: ensure-session FAILED frontend daemon did not start")
-        (agent-repl--user-message
-         nil "explain-config needs the frontend daemon; it did not start" nil
-         :detail "explain-config: ensure-session FAILED frontend daemon did not start")
-        (funcall on-failure
-                 "frontend daemon not started (auto-start disabled or init inhibited)"))
-    (agent-repl--frontend-after-ready
-     (lambda ()
+  (agent-repl--frontend-after-daemon-ensured
+   (lambda ()
+     (agent-repl--frontend-after-ready
+      (lambda ()
        (let* ((recorded-id agent-repl--explain-config-session-id)
               (live-p (and recorded-id
                            (agent-repl--explain-config-session-live-p recorded-id))))
@@ -456,7 +449,14 @@ priming state change only after a new SessionView has been correlated."
                                  agent-repl--explain-config-primed-p)
                 (funcall on-success id))
               on-failure)))))
-     on-failure))
+      on-failure))
+   (lambda (detail)
+     (agent-repl--log nil
+                      "explain-config: ensure-session FAILED detail=%s" detail)
+     (agent-repl--user-message
+      nil "explain-config needs the frontend daemon; it did not start" nil
+      :detail (format "explain-config: ensure-session FAILED detail=%s" detail))
+     (funcall on-failure detail)))
   :pending)
 (defun agent-repl--explain-config-release-session ()
   "Best-effort DELETE of the explain-config daemon session; clear the binding.
