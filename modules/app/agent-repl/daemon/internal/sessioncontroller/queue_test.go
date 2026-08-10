@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"runtime"
 	"strings"
@@ -1572,6 +1573,71 @@ func TestPingTurnEndWithNothingHeldTakesNoRewindClaim(t *testing.T) {
 	defer m.mu.Unlock()
 	if got, claimed := m.keepAliveRewinds["ws"]; claimed {
 		t.Fatalf("rewind claim = %q for a ping nothing was waiting on, want none", got)
+	}
+}
+
+// --- the one requeue shape ---------------------------------------------------
+
+// Every refused or failed delivery goes back to the HEAD, never to the back and
+// never nowhere: a prompt that did not reach the shim is still the user's and
+// still owed, and reordering it would run the user's work out of the order they
+// asked for.
+func TestRequeueAtHeadRestoresTheEntryAhead(t *testing.T) {
+	// Arrange: two prompts are queued behind a running turn.
+	h := newQueueHarness(t, nil)
+	h.turn(true)
+	if err := h.submit("first"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if err := h.submit("second"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	waitFor(t, "both prompts queued", func() bool { return len(h.entries()) == 2 })
+	d := h.controller()
+	headID := h.entries()[0].id
+	h.m.mu.Lock()
+	taken := d.queue.remove(headID)
+	h.m.mu.Unlock()
+
+	// Act.
+	mutated := false
+	recorded := false
+	h.requeue(taken, func() { mutated = true }, func() { recorded = true })
+
+	// Assert.
+	if got := h.texts(); len(got) != 2 || got[0] != "first" {
+		t.Fatalf("queued entries = %v, want the requeued prompt back at the head", got)
+	}
+	if !mutated || !recorded {
+		t.Fatalf("requeue hooks = mutate:%v record:%v, want both run", mutated, recorded)
+	}
+}
+
+// requeue is the harness's route to the shared requeue helper.
+func (h *queueHarness) requeue(e *queueEntry, mutate, record func()) {
+	h.t.Helper()
+	h.m.requeueAtHead(h.controller(), e, mutate, record)
+}
+
+// Every delivery refusal in deliver() uses that one helper, so a hand-rolled
+// site that forgot the publication or the head position would fail here.
+func TestEveryDeliveryRefusalGoesThroughTheSharedRequeue(t *testing.T) {
+	// Arrange.
+	src, err := os.ReadFile("queue.go")
+	if err != nil {
+		t.Fatalf("read queue.go: %v", err)
+	}
+	body := string(src)
+	deliver := body[strings.Index(body, "func (m *Manager) deliver(d *sessionController, e *queueEntry) {"):]
+	deliver = deliver[:strings.Index(deliver, "\n// The bounded redelivery")]
+
+	// Act / Assert: the only pushFront in the package's delivery paths is the
+	// helper's own.
+	if strings.Contains(deliver, "d.queue.pushFront(e)") {
+		t.Fatal("deliver() requeues an entry by hand; every refusal must go through requeueAtHead")
+	}
+	if n := strings.Count(deliver, "m.requeueAtHead("); n < 5 {
+		t.Fatalf("deliver() reaches the shared requeue %d times, want every refusal and the failure path", n)
 	}
 }
 

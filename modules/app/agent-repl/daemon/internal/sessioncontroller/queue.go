@@ -1058,6 +1058,29 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs in
 // Routing through forwardPrompt is also what gives a HELD `/clear` the same
 // reading an immediate one gets: it is recognized, echoed to nobody, and opens
 // the clearing axis. This path used to recognize nothing at all.
+// requeueAtHead puts an UNDELIVERED entry back at the head of the queue and
+// republishes it, which is the one shape every refused or failed delivery
+// takes: a prompt that did not reach the shim is still the user's and still
+// owed, so it is never dropped and never silently reordered.
+//
+// mutate runs under the manager mutex, immediately before the entry goes back,
+// and is where a caller records WHY (a verdict, a rationale, a cleared runner
+// flag). record runs after the mutex is released and before the publication, so
+// the log still precedes the frames a client acts on. Either may be nil.
+func (m *Manager) requeueAtHead(d *sessionController, e *queueEntry, mutate func(), record func()) {
+	m.mu.Lock()
+	if mutate != nil {
+		mutate()
+	}
+	d.queue.pushFront(e)
+	view, recs := m.publishQueueLocked(d)
+	m.mu.Unlock()
+	if record != nil {
+		record()
+	}
+	m.publish(d.sessionID, view, recs)
+}
+
 func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	// THE DRAIN LEASE'S BACKSTOP, at the one funnel every delivery reaches.
 	// Every selection path already refuses a parked entry; this is what makes a
@@ -1065,13 +1088,10 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	// merely unlikely to. It is a loud requeue, never a silent drop: the prompt
 	// is still the user's and still owed.
 	if e.drainHeld() {
-		m.mu.Lock()
-		d.queue.pushFront(e)
-		view, recs := m.publishQueueLocked(d)
-		m.mu.Unlock()
-		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q schedule=%s — the entry is parked by a scheduled shutdown's drain lease and a delivery path selected it anyway; requeued at the head, nothing was submitted",
-			e.id, d.sessionID, d.workspace, e.shutdownHoldScheduleID)
-		m.publish(d.sessionID, view, recs)
+		m.requeueAtHead(d, e, nil, func() {
+			m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q schedule=%s — the entry is parked by a scheduled shutdown's drain lease and a delivery path selected it anyway; requeued at the head, nothing was submitted",
+				e.id, d.sessionID, d.workspace, e.shutdownHoldScheduleID)
+		})
 		return
 	}
 	// THE KEEP-ALIVE HOLD'S BACKSTOP, at the same funnel and for the same
@@ -1079,13 +1099,10 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	// very keep-alive turns the rewind exists to discard, which is worse than
 	// delaying it: the ping would become permanent context.
 	if e.keepAliveHeld() {
-		m.mu.Lock()
-		d.queue.pushFront(e)
-		view, recs := m.publishQueueLocked(d)
-		m.mu.Unlock()
-		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q keep_alive_turn=%s — the entry is held behind an in-flight cache keep-alive turn and a delivery path selected it anyway; requeued at the head, nothing was submitted",
-			e.id, d.sessionID, d.workspace, e.keepAliveHoldTurnID)
-		m.publish(d.sessionID, view, recs)
+		m.requeueAtHead(d, e, nil, func() {
+			m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q keep_alive_turn=%s — the entry is held behind an in-flight cache keep-alive turn and a delivery path selected it anyway; requeued at the head, nothing was submitted",
+				e.id, d.sessionID, d.workspace, e.keepAliveHoldTurnID)
+		})
 		return
 	}
 	// THE REVIVAL HOLD'S BACKSTOP, at the same funnel and for the same reason.
@@ -1094,13 +1111,10 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	// paying for — and forwardPrompt's own gate would nack it anyway, marking a
 	// prompt ERROR that nothing was wrong with. Requeued at the head, loudly.
 	if e.revivalHeld() {
-		m.mu.Lock()
-		d.queue.pushFront(e)
-		view, recs := m.publishQueueLocked(d)
-		m.mu.Unlock()
-		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q revival_session=%s — the entry is parked by an in-flight compact-first revival and a delivery path selected it anyway; requeued at the head, nothing was submitted",
-			e.id, d.sessionID, d.workspace, e.revivalHoldSessionID)
-		m.publish(d.sessionID, view, recs)
+		m.requeueAtHead(d, e, nil, func() {
+			m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q revival_session=%s — the entry is parked by an in-flight compact-first revival and a delivery path selected it anyway; requeued at the head, nothing was submitted",
+				e.id, d.sessionID, d.workspace, e.revivalHoldSessionID)
+		})
 		return
 	}
 	// THE STALE-BUILD REFRESH HOLD'S BACKSTOP, at the same funnel and for the
@@ -1109,13 +1123,10 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	// and the prompt would be lost in the very restart that was supposed to
 	// deliver it. Requeued at the head, loudly.
 	if e.buildRefreshHeld() {
-		m.mu.Lock()
-		d.queue.pushFront(e)
-		view, recs := m.publishQueueLocked(d)
-		m.mu.Unlock()
-		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q build_refresh_session=%s — the entry is parked behind an armed or running stale-build refresh and a delivery path selected it anyway; requeued at the head, nothing was submitted",
-			e.id, d.sessionID, d.workspace, e.buildRefreshHoldSessionID)
-		m.publish(d.sessionID, view, recs)
+		m.requeueAtHead(d, e, nil, func() {
+			m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q build_refresh_session=%s — the entry is parked behind an armed or running stale-build refresh and a delivery path selected it anyway; requeued at the head, nothing was submitted",
+				e.id, d.sessionID, d.workspace, e.buildRefreshHoldSessionID)
+		})
 		return
 	}
 	// THE UNKNOWN-FATE RECONCILIATION, ahead of every submit and not merely
@@ -1147,22 +1158,20 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 			e.id, d.sessionID, d.workspace, e.requestID)
 	}
 
-	m.mu.Lock()
-	e.unknownFate = e.unknownFate || unknownFate
-	e.deliveryAttempts++
-	attempt := e.deliveryAttempts
-	e.interjecting = false
-	e.classification = VerdictError
-	e.rationale = fmt.Sprintf("delivery failed: %v", err)
-	// No turn started, so nothing is running alone against the paused queue.
-	// Leaving the flag set would make the pause wait on a turn end that can
-	// never arrive. The entry keeps its head-jump claim and gets another
-	// chance at the next boundary.
-	d.pausedRunner = false
-	d.queue.pushFront(e)
-	view, recs := m.publishQueueLocked(d)
-	m.mu.Unlock()
-	m.publish(d.sessionID, view, recs)
+	var attempt int
+	m.requeueAtHead(d, e, func() {
+		e.unknownFate = e.unknownFate || unknownFate
+		e.deliveryAttempts++
+		attempt = e.deliveryAttempts
+		e.interjecting = false
+		e.classification = VerdictError
+		e.rationale = fmt.Sprintf("delivery failed: %v", err)
+		// No turn started, so nothing is running alone against the paused queue.
+		// Leaving the flag set would make the pause wait on a turn end that can
+		// never arrive. The entry keeps its head-jump claim and gets another
+		// chance at the next boundary.
+		d.pausedRunner = false
+	}, nil)
 	// THE ENTRY NO LONGER WAITS FOR WHATEVER EDGE COMES NEXT. See
 	// armDeliveryRetry: an interject whose stop already ended the turn has no
 	// boundary left to wait for at all.
@@ -1303,16 +1312,14 @@ func (m *Manager) settleUnknownFateDelivery(d *sessionController, e *queueEntry)
 		// evidence that the prompt did NOT land, and submitting on no evidence
 		// is exactly the mint this path exists to prevent. The prompt keeps its
 		// place, says why, and gets another chance at the next boundary.
-		m.mu.Lock()
-		e.classification = VerdictError
-		e.rationale = fmt.Sprintf("unknown-fate reconciliation failed: %v", err)
-		d.pausedRunner = false
-		d.queue.pushFront(e)
-		view, recs := m.publishQueueLocked(d)
-		m.mu.Unlock()
-		m.errorf("session-controller: queue delivery WITHHELD entry=%s session=%s ws=%q turn_id=%q: reconciling an unknown-fate submit against the durable turn ledger failed: %v — the prompt is NOT resubmitted, because a redelivery that cannot rule out a landed submit is what mints a duplicate turn identity",
-			e.id, d.sessionID, d.workspace, e.requestID, err)
-		m.publish(d.sessionID, view, recs)
+		m.requeueAtHead(d, e, func() {
+			e.classification = VerdictError
+			e.rationale = fmt.Sprintf("unknown-fate reconciliation failed: %v", err)
+			d.pausedRunner = false
+		}, func() {
+			m.errorf("session-controller: queue delivery WITHHELD entry=%s session=%s ws=%q turn_id=%q: reconciling an unknown-fate submit against the durable turn ledger failed: %v — the prompt is NOT resubmitted, because a redelivery that cannot rule out a landed submit is what mints a duplicate turn identity",
+				e.id, d.sessionID, d.workspace, e.requestID, err)
+		})
 		return true
 	}
 	if !landed {
