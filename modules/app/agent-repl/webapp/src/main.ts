@@ -33,6 +33,7 @@ import {
   footerAgentRows,
   footerClickAction,
 } from "./progress-footer.js";
+import { FooterLivenessLog, resolveFooterLiveness } from "./footer-liveness.js";
 import {
   type CounterSpec,
   MISSING_BUBBLE_NOTICE_MS,
@@ -522,10 +523,20 @@ async function boot(): Promise<void> {
    * unwired workspace would put the prompt into a durable replay nothing reads,
    * so `revived` reads the wired axis rather than the socket.
    */
+  /**
+   * Whether this page's link to the daemon is CURRENT — the one reading of the
+   * socket every liveness gate takes.
+   *
+   * It is a function on the outer scope rather than a value because the socket
+   * is replaced across a reconnect, and because `renderChrome` shadows `ws`
+   * with the workspace path it renders. Two hand-rolled readings of the same
+   * fact are two things that can disagree about whether the page is connected.
+   */
+  const linkIsCurrent = (): boolean => (ws as WsClient | undefined)?.state === "current";
   const promptQueue = new PromptQueue({
-    linkDown: () => (ws as WsClient | undefined)?.state !== "current",
+    linkDown: () => !linkIsCurrent(),
     revived: (workspace) =>
-      (ws as WsClient | undefined)?.state === "current" &&
+      linkIsCurrent() &&
       store.state.cwd === workspace &&
       store.state.hibernation === null &&
       drainableRenderState(store.state.renderState),
@@ -720,6 +731,15 @@ async function boot(): Promise<void> {
   // a progress fact.
   const footerEl = must("progress-footer");
   const footer = new ProgressFooter(footerEl);
+  /**
+   * The cleared-footer announcement. It lives beside the footer because the
+   * gap is the footer's own event, and it holds the edge state so a chrome
+   * cadence that renders many times a second reports the gap once rather than
+   * once per frame.
+   */
+  const footerLivenessLog = new FooterLivenessLog((level, message, context) =>
+    clog(level, message, context),
+  );
 
   const statusEl = must("conn-status");
   const infoEl = must("session-info");
@@ -874,21 +894,40 @@ async function boot(): Promise<void> {
     // a dock rewrite never rides a feed reconcile. It reads the daemon's
     // resolved view plus the two rosters and the feed items the activity cell
     // needs; it derives no progress fact of its own.
-    footer.render({
-      progress: store.progress,
-      // THE phase, read off the workspace's one authoritative state rather
-      // than off a copy carried in a second message (F5).
-      renderState: s.renderState,
-      // THE structured status, on the same revisioned message as the phase
-      // above and the only merge input the footer takes.
-      mergeStatus: s.mergeStatus,
-      // The roster PLUS the two figures the expanded footer reports beside it,
-      // both projected from state this end already holds.
-      agents: footerAgentRows(s.items, s.tokenUtilization),
-      tasks: store.taskRoster,
-      items: s.items,
-      timerLabel,
-    });
+    //
+    // THROUGH THE LIVENESS CHOKE POINT, always: the parts below are what the
+    // store last held, and `resolveFooterLiveness` is the one expression that
+    // can turn them into figures the dock is allowed to paint. When the socket
+    // is not current, or this workspace has no live session behind it, it hands
+    // back the data-free `unknown` arm instead and the dock's live-activity
+    // section clears rather than standing on a memory. The gates are the SAME
+    // two the held-prompt drain consults (`linkDown` / the wired axis through
+    // `drainableRenderState`), read here off the same authorities.
+    const liveness = resolveFooterLiveness(
+      {
+        linkUp: linkIsCurrent(),
+        wired: s.hibernation === null && drainableRenderState(s.renderState),
+      },
+      {
+        progress: store.progress,
+        // THE phase, read off the workspace's one authoritative state rather
+        // than off a copy carried in a second message (F5).
+        renderState: s.renderState,
+        // THE structured status, on the same revisioned message as the phase
+        // above and the only merge input the footer takes.
+        mergeStatus: s.mergeStatus,
+        // The roster PLUS the two figures the expanded footer reports beside
+        // it, both projected from state this end already holds.
+        agents: footerAgentRows(s.items, s.tokenUtilization),
+        tasks: store.taskRoster,
+        items: s.items,
+        timerLabel,
+      },
+    );
+    // LOUD, NEVER SILENT: the cleared dock announces itself once per gap edge,
+    // rate-limited while the same gap stands.
+    footerLivenessLog.observe(liveness, Date.now(), s.sessionId);
+    footer.render(liveness);
     const interruptOutcome = store.progress?.interrupt?.outcome ?? "none";
     const footerStateSignature =
       `${s.renderState ?? "none"}|${s.sessionConnectivity ?? "none"}|` +
