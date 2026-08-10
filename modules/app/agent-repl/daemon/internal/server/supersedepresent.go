@@ -1,7 +1,7 @@
 // Presentation of the superseded-death card while its handover is still in
 // flight.
 //
-// supersederesolve.go closes the window DURABLY, and closes it on the only
+// deathresolve.go closes the window DURABLY, and closes it on the only
 // honest edge: the successor reaching operational. That is right, and this file
 // does not move it. But it leaves a real gap on the wire. `supersede` runs
 // inside Create, ahead of the successor's bring-up; the successor reaches
@@ -20,7 +20,7 @@
 //
 //   - claiming successor present -> nothing to report; the death item is not
 //     shaped onto the view at all.
-//   - successor reaches operational -> supersederesolve.go stamps the record
+//   - successor reaches operational -> deathresolve.go stamps the record
 //     and re-pushes; the card was never open, and now never will be.
 //   - successor dies or is stood down before it is operational -> its record
 //     goes terminal, the claim is gone, and the predecessor's OPEN death is
@@ -76,9 +76,12 @@ func supersedeClaimed(reg *registry.Registry, workspace, sessionID string) bool 
 // snapshot and the per-session pushes cannot present a record differently —
 // which is the same reason SessionViewFromRecord* is a single shaping.
 //
-// Only the superseded window is withheld. A delete and a shim death are
-// EVENT-shaped: nothing that happens later makes them untrue, so a successor
-// says nothing about them and they pass through whatever reg holds.
+// Only the superseded window is withheld. A DELETE is window-shaped too
+// (deathwindow.go) but needs no withholding: it is minted already resolved by
+// the delete that succeeded, so there is no in-flight gap to cover, and a
+// legacy open one is closed durably by the successor's operational edge rather
+// than hidden here. A shim death is EVENT-shaped: nothing that happens later
+// makes it untrue. Both pass through whatever reg holds.
 //
 // A NIL reg withholds NOTHING. No registry means no way to know whether a
 // successor is claiming the workspace, and the safe direction for an unknown is

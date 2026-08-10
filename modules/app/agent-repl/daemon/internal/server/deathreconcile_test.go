@@ -17,7 +17,27 @@ func TestBootReconciliationResolvesAStalePersistedSupersede(t *testing.T) {
 	seedRecords(t, reg, superseded("s_ancient", "/w"))
 
 	// Act.
-	resolved := ReconcileSupersededDeaths(reg, func() int64 { return 4242 }, nil)
+	resolved := ReconcileOpenDeaths(reg, func() int64 { return 4242 }, nil)
+
+	// Assert.
+	if resolved != 1 {
+		t.Fatalf("reconciled %d records, want 1", resolved)
+	}
+	rec, _ := reg.Get("s_ancient")
+	if rec.DeathResolvedAtMs != 4242 {
+		t.Fatalf("death_resolved_at_ms = %d, want 4242", rec.DeathResolvedAtMs)
+	}
+}
+
+func TestBootReconciliationResolvesAStalePersistedDelete(t *testing.T) {
+	// Arrange — the two records this deployment has to heal: sessions deleted
+	// under a build that minted the death open, whose workspaces have been
+	// re-announcing "the session was deleted" at every snapshot since.
+	reg := openTestRegistry(t)
+	seedRecords(t, reg, deletedDeath("s_ancient", "/w"))
+
+	// Act.
+	resolved := ReconcileOpenDeaths(reg, func() int64 { return 4242 }, nil)
 
 	// Assert.
 	if resolved != 1 {
@@ -35,8 +55,8 @@ func TestBootReconciliationLeavesOtherDeathReasonsOpen(t *testing.T) {
 		name   string
 		reason string
 	}{
-		{name: "deleted", reason: errclass.DeathReasonDeleted},
 		{name: "shim died", reason: errclass.DeathReasonShimDied},
+		{name: "unclassified legacy reason", reason: "some ancient reason"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -46,7 +66,7 @@ func TestBootReconciliationLeavesOtherDeathReasonsOpen(t *testing.T) {
 				registry.Record{SessionID: "s_old", CWD: "/w", Terminal: true, DeathReason: tc.reason})
 
 			// Act.
-			resolved := ReconcileSupersededDeaths(reg, func() int64 { return 4242 }, nil)
+			resolved := ReconcileOpenDeaths(reg, func() int64 { return 4242 }, nil)
 
 			// Assert.
 			if resolved != 0 {
@@ -66,7 +86,7 @@ func TestBootReconciliationLeavesALiveSessionAlone(t *testing.T) {
 	seedRecords(t, reg, registry.Record{SessionID: "s_live", CWD: "/w"})
 
 	// Act.
-	resolved := ReconcileSupersededDeaths(reg, func() int64 { return 4242 }, nil)
+	resolved := ReconcileOpenDeaths(reg, func() int64 { return 4242 }, nil)
 
 	// Assert.
 	if resolved != 0 {
@@ -79,10 +99,10 @@ func TestBootReconciliationDoesNotRestampAnAlreadyResolvedSupersede(t *testing.T
 	// actually closed at, so the history stays honest across restarts.
 	reg := openTestRegistry(t)
 	seedRecords(t, reg, superseded("s_old", "/w"))
-	ReconcileSupersededDeaths(reg, func() int64 { return 4242 }, nil)
+	ReconcileOpenDeaths(reg, func() int64 { return 4242 }, nil)
 
 	// Act — the next boot.
-	resolved := ReconcileSupersededDeaths(reg, func() int64 { return 9900 }, nil)
+	resolved := ReconcileOpenDeaths(reg, func() int64 { return 9900 }, nil)
 
 	// Assert.
 	if resolved != 0 {
@@ -99,7 +119,7 @@ func TestSessionViewCarriesTheResolvedSupersede(t *testing.T) {
 	// the SessionView, which is the only place a death is ever rendered from.
 	reg := openTestRegistry(t)
 	seedRecords(t, reg, superseded("s_old", "/w"))
-	ReconcileSupersededDeaths(reg, func() int64 { return 4242 }, nil)
+	ReconcileOpenDeaths(reg, func() int64 { return 4242 }, nil)
 	rec, _ := reg.Get("s_old")
 
 	// Act.

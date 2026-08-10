@@ -772,8 +772,10 @@ var deathReasonTypes = map[string]Type{
 // item itself is derived fresh from the registry on every push: a death card
 // that could not carry its own resolution would reopen on every push and every
 // boot for the rest of the record's retention, which is exactly what a
-// superseded session did. WINDOW-shaped deaths are the only ones a writer
-// stamps; an EVENT-shaped one (a delete) passes zero forever.
+// superseded session did — and what a DELETED one did too, until the delete
+// began minting its own resolution. WINDOW-shaped deaths are the only ones a
+// writer stamps (server/deathwindow.go names them); an EVENT-shaped one — a
+// shim that died — passes zero forever.
 //
 // The item also carries a stable item_uuid keyed on the session, so a resolved
 // re-push SETTLES the card the open one opened instead of landing beside it as

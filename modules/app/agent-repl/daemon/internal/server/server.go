@@ -1491,10 +1491,42 @@ func (s *Server) DeleteSession(id string) error {
 	}
 	wasTerminal := rec.Terminal
 	if !rec.Terminal {
+		// THE DEATH IS MINTED ALREADY SETTLED. A deletion the user asked for and
+		// that succeeded is not an open failure: it is their own completed
+		// action, and the card exists to record it, not to alarm about it. Left
+		// open it re-presented on every snapshot forever — the same defect the
+		// supersede had, with a louder symptom, because a deleted workspace
+		// usually gets a successor session that goes on being told its
+		// predecessor was deleted (deathwindow.go).
+		at := s.now().UnixMilli()
 		s.updateRegistry(id, "terminal transition", func(r *registry.Record) {
 			r.Terminal = true
 			r.DeathReason = errclass.DeathReasonDeleted
+			r.DeathResolvedAtMs = at
 		})
+		rec, _ = s.registry.Get(id)
+	} else if rec.DeathReason == errclass.DeathReasonDeleted && rec.DeathResolvedAtMs == 0 {
+		// IDEMPOTENT DELETE REPAIRS AN OPEN DELETION TOO. A record deleted by a
+		// build that minted the death open still carries it, and the retry is
+		// the edge that closes it — returning without stamping would leave the
+		// very card the caller asked to be rid of standing on the next snapshot.
+		//
+		// ONLY a deletion. A record superseded and then deleted keeps its
+		// supersede reason, and the delete says nothing about whether that
+		// handover completed; closing it here would be the daemon settling a
+		// window it never observed close.
+		at := s.now().UnixMilli()
+		stamped, found, err := stampDeathResolution(s.registry, id, at)
+		switch {
+		case err != nil:
+			s.logf("session %s: delete death resolution write FAILED (ws %s reason %q) — its death card stays open: %v",
+				id, rec.CWD, rec.DeathReason, err)
+		case !found:
+			s.logf("session %s: delete death resolution found no record (pruned between read and write)", id)
+		case stamped:
+			s.logf("session %s: delete death RESOLVED at %d reason=%q decision=explicit_delete_completed (ws %s)",
+				id, at, rec.DeathReason, rec.CWD)
+		}
 		rec, _ = s.registry.Get(id)
 	}
 	// Always retry this exact session's stop. A terminal transition can race a

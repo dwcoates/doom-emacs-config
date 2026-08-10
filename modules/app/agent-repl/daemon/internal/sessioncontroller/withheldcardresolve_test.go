@@ -20,7 +20,7 @@ import (
 // degradation card for a query that died days ago sat on a session whose live
 // query was healthy and driveable.
 //
-// The resolving edge is the same one supersederesolve.go uses, for the same
+// The resolving edge is the same one deathresolve.go uses, for the same
 // reason: "the live query genuinely has this workspace" is not a fact until the
 // bring-up gate closes, and no weaker edge may claim it.
 // ---------------------------------------------------------------------------
