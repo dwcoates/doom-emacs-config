@@ -793,18 +793,27 @@ foreign directory the xwidget session inherited at creation."
   ;; session is ESTABLISHED — its shim answered a health probe healthy over
   ;; the fully wired connection — so a probe here could only re-ask a question
   ;; already answered (and lose the race it kept losing).
+  ;;
+  ;; THE MOUNT IS ONE STEP, NOT THREE.  Creating the WKWebView, adopting it
+  ;; (name pinned, header-line dropped, chords armed) and binding it to the
+  ;; workspace are what makes a webview belong to WS.  A `C-g' landing
+  ;; between them leaves a live xwidget buffer no workspace holds — invisible
+  ;; to `gui-kill', so it is never released — or an adopted-but-unbound
+  ;; buffer the next open mounts a SECOND webview beside.  Quit is held off
+  ;; until the registry names the buffer it just created.
   (let* ((existing (agent-repl--ws-get ws :frontend-buffer))
          (buf (if (buffer-live-p existing)
                   (progn
                     (agent-repl--log ws "ensure-webview: outcome=reused buf=%s"
                                      (buffer-name existing))
                     existing)
-                (let* ((buf (agent-repl--frontend-make-webview-buffer url))
-                       (name (agent-repl--frontend-webview-buffer-name ws)))
-                  (agent-repl--frontend-adopt-webview-buffer buf name ws)
-                  (agent-repl--ws-put ws :frontend-buffer buf)
-                  (agent-repl--log ws "frontend webview mounted: %s -> %s" name url)
-                  buf))))
+                (let ((inhibit-quit t))
+                  (let* ((buf (agent-repl--frontend-make-webview-buffer url))
+                         (name (agent-repl--frontend-webview-buffer-name ws)))
+                    (agent-repl--frontend-adopt-webview-buffer buf name ws)
+                    (agent-repl--ws-put ws :frontend-buffer buf)
+                    (agent-repl--log ws "frontend webview mounted: %s -> %s" name url)
+                    buf)))))
     (agent-repl--align-buffer-to-ws-dir buf ws)
     buf))
 

@@ -105,7 +105,10 @@ push onto it through `symbol-value'.")
   ;; Arrange
   (agent-repl-ecfg-test--with-state
     (let (failure ready-called)
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+                 (lambda (_ok fail &optional _force)
+                   (funcall fail agent-repl--frontend-daemon-not-started-detail)
+                   nil))
                 ((symbol-function 'agent-repl--frontend-after-ready)
                  (lambda (&rest _) (setq ready-called t))))
         (should (eq :pending
@@ -120,7 +123,8 @@ push onto it through `symbol-value'.")
   (agent-repl-ecfg-test--with-state
     (let ((agent-repl-explain-config-permission-mode "bypassPermissions")
           captured success)
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) t))
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+                 (lambda (ok _fail &optional _force) (funcall ok) :pending))
                 ((symbol-function 'agent-repl--frontend-after-ready)
                  (lambda (ok _fail &optional _ws) (funcall ok) :ready))
                 ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) nil))
