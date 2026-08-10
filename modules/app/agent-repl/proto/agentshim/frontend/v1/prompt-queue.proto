@@ -5,6 +5,7 @@ syntax = "proto3";
 package agentshim.frontend.v1;
 
 import "agentshim/core/v1/core.proto";
+import "agentshim/frontend/v1/slash-menu.proto";
 
 option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 
@@ -66,6 +67,30 @@ message QueueClassificationHold {
   bool accepted = 2;
 }
 
+// NOTHING CLASSIFIED THIS ENTRY, because the turn in front of it is a CONTEXT
+// CUT — `/compact` or `/clear` — and a context cut is never interrupted for a
+// queued prompt.
+//
+// It is a verdict rather than a `hold` arm because the entry is NOT held by
+// anything other than the running turn: it is delivered by the ordinary
+// turn-end drain, in order, exactly as a HOLD verdict is. What it does not have
+// is a classifier behind it. A compaction reads the whole conversation and a
+// clear discards it; interrupting either one spends that cost for nothing and
+// leaves the context in the state the cut was supposed to change, so there is
+// no question left for a model to answer and no model call is spent asking it.
+//
+// THERE IS NO FORCE-THROUGH. QueueForceCmd is refused on one of these for the
+// reason the keep-alive and revival holds refuse it: the force's mechanism is
+// an interrupt, and the interrupt is precisely what must not happen. A user who
+// genuinely wants the cut stopped still has the interrupt command itself, which
+// says what it does.
+message QueueClassificationUninterruptibleTurn {
+  // Which cut is running, so the card can name it. Never UNSPECIFIED: the arm
+  // is set only when the daemon recognized the running prompt as one of the
+  // two, and an arm that could not say which would explain nothing.
+  SessionCommand command = 1;
+}
+
 // The classifier could not be believed (it answered with neither token, or
 // both). Surfaced as its own arm rather than silently defaulted to one of
 // the real verdicts: a frontend must be able to see that nothing decided
@@ -96,6 +121,11 @@ message QueueEntry {
     QueueClassificationInterject interject = 11;
     QueueClassificationHold hold_for_turn_end = 12;
     QueueClassificationError error = 13;
+    // No classifier ran and none will: the turn in front of this entry is a
+    // context cut, which is never interrupted. Delivery is the ordinary
+    // turn-end drain's, so this arm changes WHO decided rather than WHEN the
+    // prompt runs.
+    QueueClassificationUninterruptibleTurn uninterruptible_turn = 15;
   }
   // WHAT is holding this entry, when something other than a running turn is.
   //

@@ -1418,6 +1418,18 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 		m.publish(d.sessionID, view, recs)
 		return parked, nil
 	}
+	// THE CLASSIFIER NEVER RUNS BEHIND A CONTEXT CUT. The turn in front of the
+	// entry is `/compact` or `/clear`, and the only verdict that changes
+	// anything — INTERJECT — would interrupt it: a stopped compaction has paid
+	// for the whole-conversation read and produced no summary, and a stopped
+	// clear was over before the interrupt arrived. The entry keeps its place and
+	// the ordinary turn-end drain delivers it (uninterruptibleturn.go).
+	if entry.uninterruptible() {
+		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q command=%s classifier=SKIPPED (queued behind a context cut, which is never interrupted)",
+			entry.id, d.sessionID, workspace, origin, entry.uninterruptibleCommand.String())
+		m.publish(d.sessionID, view, recs)
+		return parked, nil
+	}
 	m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q (turn in flight)",
 		entry.id, d.sessionID, workspace, origin)
 	m.publish(d.sessionID, view, recs)
