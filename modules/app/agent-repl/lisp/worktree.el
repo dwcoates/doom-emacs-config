@@ -600,6 +600,20 @@ told what completion means would leave the workspace hanging."
                       `(("invocation" . ,invocation)
                         ("action_phrase" . ,action-phrase))))
 
+(defconst agent-repl--workspace-skill "/create-or-update-workspace"
+  "Slash command naming the workspace lifecycle skill.
+Every elisp-side spelling of a workspace verb (`merge', `close', ...)
+is built from this constant via `agent-repl--workspace-skill-command',
+so the skill can never be half-renamed across the one-shot prompts.")
+
+(defun agent-repl--workspace-skill-command (verb)
+  "Return the workspace-skill slash command for VERB.
+VERB is a lifecycle verb string (e.g. \"merge\", \"close\").  Callers
+interpolate the result into one-shot prompts rather than writing the
+slash command out by hand, so `agent-repl--workspace-skill' stays the
+single spelling of the skill name."
+  (concat agent-repl--workspace-skill " " verb))
+
 (defun agent-repl--oneshot-merge-suffix ()
   "Return the suffix for the doom-oneshot flow.
 Tells the spawned workspace agent (NOT the headless claude that runs
@@ -611,7 +625,7 @@ A FUNCTION rather than a `defconst\' so the underlying prompt file is
 read on every use; a constant would freeze the text at load time and
 defeat the point of moving it out of source."
   (agent-repl--build-oneshot-success-suffix
-   "the /create-or-update-workspace merge skill"
+   (concat "the " (agent-repl--workspace-skill-command "merge") " skill")
    "merge this workspace back into its source"))
 
 (defconst agent-repl--oneshot-create-pr-command
