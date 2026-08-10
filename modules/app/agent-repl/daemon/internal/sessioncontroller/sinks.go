@@ -2185,6 +2185,11 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	// FIRST, before attribution: a machinery record claiming a real prompt's
 	// receipt would misattribute both.
 	c.withholdMachinery(cd)
+	// The harness's detached-work completion notices, which it writes as
+	// unflagged "user" records addressed to the model (tasknotification.go).
+	// Beside withholdMachinery and before attribution for the same reason: a
+	// record nobody typed must never claim a real prompt's receipt.
+	c.withholdTaskNotifications(cd, envs)
 	// The CLI's own "No response requested." record — a synthetic assistant
 	// line closing a turn nothing was asked of — goes no further either
 	// (noresponse.go).

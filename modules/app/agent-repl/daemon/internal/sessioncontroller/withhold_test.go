@@ -6,6 +6,8 @@ import (
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/frontend"
 )
 
 // withholdTestItem is one user item carrying the uuid the assertions name it by.
@@ -202,5 +204,91 @@ func TestWithholdItemsToleratesANilDelta(t *testing.T) {
 	// Assert
 	if withheld != 0 {
 		t.Errorf("withheld count = %d, want 0", withheld)
+	}
+}
+
+// TestEveryWithholdingCuratorEmptiesTheDeltaWithoutDroppingIt asserts the
+// invariant the shared filter now guarantees for all of its call sites: a
+// curator that withholds every item leaves the DELTA itself intact, carrying
+// the through_seq that is the frontend's replay cursor.
+//
+// A curator that hand-rolled its own loop and dropped the frame instead would
+// strand every client's cursor behind the withheld record forever, which is
+// precisely the divergence one shared filter exists to prevent.
+func TestEveryWithholdingCuratorEmptiesTheDeltaWithoutDroppingIt(t *testing.T) {
+	tests := []struct {
+		name    string
+		item    *frontendv1.ConversationItem
+		envs    map[string]frontend.RecordEnvelope
+		curator func(c *consumer, cd *frontendv1.ConversationDelta, envs map[string]frontend.RecordEnvelope)
+	}{
+		{
+			name: "withholdMachinery",
+			item: machineryTestItem("u1"),
+			curator: func(c *consumer, cd *frontendv1.ConversationDelta, _ map[string]frontend.RecordEnvelope) {
+				c.withholdMachinery(cd)
+			},
+		},
+		{
+			name: "withholdTaskNotifications",
+			item: withholdTestItem("u1"),
+			envs: map[string]frontend.RecordEnvelope{"u1": {OriginKind: datav1.OriginKind_ORIGIN_KIND_TASK_NOTIFICATION}},
+			curator: func(c *consumer, cd *frontendv1.ConversationDelta, envs map[string]frontend.RecordEnvelope) {
+				c.withholdTaskNotifications(cd, envs)
+			},
+		},
+		{
+			name: "withholdNoResponsePlaceholders",
+			item: noResponseTestItem("u1"),
+			curator: func(c *consumer, cd *frontendv1.ConversationDelta, _ map[string]frontend.RecordEnvelope) {
+				c.withholdNoResponsePlaceholders(cd)
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			cl := &logCapture{}
+			c := withholdTestConsumer(cl)
+			cd := &frontendv1.ConversationDelta{ThroughSeq: 7, Items: []*frontendv1.ConversationItem{tc.item}}
+
+			// Act
+			tc.curator(c, cd, tc.envs)
+
+			// Assert
+			if len(cd.GetItems()) != 0 {
+				t.Fatalf("kept %d item(s), want the curator's own subject withheld", len(cd.GetItems()))
+			}
+			if cd.GetThroughSeq() != 7 {
+				t.Errorf("through_seq = %d, want the replay cursor intact at 7", cd.GetThroughSeq())
+			}
+		})
+	}
+}
+
+// machineryTestItem is one slash-command bookkeeping record.
+func machineryTestItem(uuid string) *frontendv1.ConversationItem {
+	return &frontendv1.ConversationItem{
+		Uuid: uuid,
+		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+			Content: &datav1.ApiUserMessage_ContentString{ContentString: compactMachinery},
+		}},
+	}
+}
+
+// noResponseTestItem is one vendor no-response placeholder.
+func noResponseTestItem(uuid string) *frontendv1.ConversationItem {
+	return &frontendv1.ConversationItem{
+		Uuid: uuid,
+		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
+			Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{
+				Body: &datav1.ApiAssistantMessage{
+					Model: syntheticModel,
+					Content: []*datav1.ContentBlock{
+						{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: noResponseRequestedText}}},
+					},
+				},
+			}},
+		}},
 	}
 }

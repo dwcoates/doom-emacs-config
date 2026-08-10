@@ -430,11 +430,12 @@ func conversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*fro
 // string-match record bodies instead of reading a flag.
 //
 // A file-plane record's envelope is the transcript's own. A STREAM-plane
-// message carries no transcript envelope, but it does carry the one fact this
+// message carries no transcript envelope, but it does carry the facts this
 // struct exists to partition on: parent_tool_use_id, the launching call of the
-// detached agent that produced it. Such a message therefore gets an entry too
-// (streamDetachmentEnvelopes); only a record with no detachment evidence at
-// all has none.
+// detached agent that produced it, and origin, the harness's statement of who
+// produced a user record. Such a message therefore gets an entry too
+// (streamUserEnvelopes / streamDetachmentEnvelopes); only a record with
+// neither detachment nor origin evidence has none.
 //
 // WHY THE STREAM PLANE MUST HAVE ONE. Both planes carry the same subagent
 // conversation, and a subagent's output reaches the daemon on the STREAM plane
@@ -466,6 +467,16 @@ type RecordEnvelope struct {
 	// routing handle for a sidechain record whose envelope names no source
 	// call.
 	AgentID string
+	// OriginKind is the harness's own statement of WHO produced a user record:
+	// a person at the keyboard, a detached task reporting completion, a peer
+	// session. Both planes carry it (LineEnvelope.origin on disk,
+	// UserMessage.origin on the stream), and it is the structured discriminator
+	// a curator reads instead of matching the record's prose.
+	//
+	// UNSPECIFIED IS UNATTRIBUTED, NEVER HUMAN (see Origin in transcript.proto).
+	// A curator keying on this must therefore test for the kind it withholds,
+	// never for "not human".
+	OriginKind datav1.OriginKind
 }
 
 // conversationItemsFromVendor unwraps the vendor Any (a data.v1 message) into
@@ -494,7 +505,7 @@ func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID str
 			return items, streamDetachmentEnvelopes(items, inner.Assistant.GetParentToolUseId()), nil
 		case *datav1.ClaudeStreamMessage_User:
 			items := userItems(inner.User, producedAtMs, requestID)
-			return items, streamDetachmentEnvelopes(items, inner.User.GetParentToolUseId()), nil
+			return items, streamUserEnvelopes(items, inner.User), nil
 		case *datav1.ClaudeStreamMessage_Result:
 			return resultItems(inner.Result, producedAtMs, requestID), nil, nil
 		default:
@@ -505,7 +516,7 @@ func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID str
 		return items, streamDetachmentEnvelopes(items, m.GetParentToolUseId()), nil
 	case *datav1.UserMessage:
 		items := userItems(m, producedAtMs, requestID)
-		return items, streamDetachmentEnvelopes(items, m.GetParentToolUseId()), nil
+		return items, streamUserEnvelopes(items, m), nil
 	case *datav1.ResultMessage:
 		return resultItems(m, producedAtMs, requestID), nil, nil
 	case *datav1.TranscriptLine:
@@ -607,21 +618,14 @@ func transcriptLineItems(tl *datav1.TranscriptLine, producedAtMs int64, requestI
 // recordEnvelopes keys one on-disk line's envelope by the uuid of each item it
 // curated to, which is the only handle the curators downstream have on it.
 func recordEnvelopes(items []*frontendv1.ConversationItem, env *datav1.LineEnvelope) map[string]RecordEnvelope {
-	if len(items) == 0 {
-		return nil
-	}
-	re := RecordEnvelope{
+	return envelopesByUUID(items, RecordEnvelope{
 		ParentUUID:      env.GetParentUuid(),
 		IsMeta:          env.GetIsMeta(),
 		IsSidechain:     env.GetIsSidechain(),
 		SourceToolUseID: env.GetSourceToolUseId(),
 		AgentID:         env.GetAgentId(),
-	}
-	out := make(map[string]RecordEnvelope, len(items))
-	for _, it := range items {
-		out[it.GetUuid()] = re
-	}
-	return out
+		OriginKind:      env.GetOrigin().GetKind(),
+	})
 }
 
 // streamDetachmentEnvelopes is the STREAM plane's answer to recordEnvelopes:
@@ -641,10 +645,41 @@ func recordEnvelopes(items []*frontendv1.ConversationItem, env *datav1.LineEnvel
 // by. AgentID stays empty: the stream plane never names one, and the launching
 // call is the stronger handle anyway.
 func streamDetachmentEnvelopes(items []*frontendv1.ConversationItem, parentToolUseID string) map[string]RecordEnvelope {
-	if len(items) == 0 || parentToolUseID == "" {
+	if parentToolUseID == "" {
 		return nil
 	}
-	re := RecordEnvelope{IsSidechain: true, SourceToolUseID: parentToolUseID}
+	return envelopesByUUID(items, RecordEnvelope{IsSidechain: true, SourceToolUseID: parentToolUseID})
+}
+
+// streamUserEnvelopes is the stream plane's envelope for a USER message, which
+// carries one fact beyond detachment: origin, the harness's own statement of
+// who produced the record.
+//
+// ORIGIN AND DETACHMENT ARE INDEPENDENT EVIDENCE, so the envelope exists when
+// EITHER is present. A task-notification lands on the MAIN conversation — no
+// parent_tool_use_id at all — so keying its envelope off detachment alone
+// would leave the one record whose provenance matters envelope-less, and the
+// curator downstream with nothing structured to read.
+func streamUserEnvelopes(items []*frontendv1.ConversationItem, u *datav1.UserMessage) map[string]RecordEnvelope {
+	parentToolUseID := u.GetParentToolUseId()
+	originKind := u.GetOrigin().GetKind()
+	if parentToolUseID == "" && originKind == datav1.OriginKind_ORIGIN_KIND_UNSPECIFIED {
+		return nil
+	}
+	return envelopesByUUID(items, RecordEnvelope{
+		IsSidechain:     parentToolUseID != "",
+		SourceToolUseID: parentToolUseID,
+		OriginKind:      originKind,
+	})
+}
+
+// envelopesByUUID keys one record's envelope by the uuid of every item that
+// record curated to, which is the only handle the curators downstream have on
+// it. A record that curated to no item has no envelope to key.
+func envelopesByUUID(items []*frontendv1.ConversationItem, re RecordEnvelope) map[string]RecordEnvelope {
+	if len(items) == 0 {
+		return nil
+	}
 	out := make(map[string]RecordEnvelope, len(items))
 	for _, it := range items {
 		out[it.GetUuid()] = re
