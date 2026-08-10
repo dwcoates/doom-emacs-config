@@ -237,6 +237,9 @@ type submitHarness struct {
 	lastClient func() *fakeClient
 	traceMu    *sync.Mutex
 	trace      *[]string
+	// log captures the manager's own record, for the assertions that pin a
+	// decision's canonical line rather than only its effect.
+	log *logCapture
 }
 
 func newSubmitHarness(t *testing.T) *submitHarness {
@@ -248,7 +251,9 @@ func newSubmitHarness(t *testing.T) *submitHarness {
 		last    *fakeClient
 	)
 	receipts := &receiptTracingStore{mu: &traceMu, trace: &trace}
+	cl := &logCapture{}
 	m, err := New(Config{
+		Logf:              cl.logf,
 		Push:              &orderingPusher{mu: &traceMu, trace: &trace},
 		SSM:               &fakeApplier{},
 		Spawner:           &fakeSpawner{},
@@ -278,6 +283,7 @@ func newSubmitHarness(t *testing.T) *submitHarness {
 		lastClient: func() *fakeClient { mu.Lock(); defer mu.Unlock(); return last },
 		traceMu:    &traceMu,
 		trace:      &trace,
+		log:        cl,
 	}
 }
 
