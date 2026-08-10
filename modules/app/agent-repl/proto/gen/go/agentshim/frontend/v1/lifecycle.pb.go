@@ -1002,6 +1002,117 @@ func (x *CancelScheduledShutdownCmd) GetScheduleId() string {
 	return ""
 }
 
+// The daemon's notice that it is about to go down ON PURPOSE.
+//
+// WHY IT EXISTS: a deploy bounce is an event the daemon knows about and its
+// clients do not. Every client learned of it the only way it could — its
+// socket died — and a dead socket is indistinguishable from a crash, so a
+// wanted, bounded outage painted the severed banner in the webapp and a
+// degraded-link segment in Emacs. This frame is the missing fact.
+//
+// PUSHED ONCE to every gui_stream client AND to the Emacs UDS host,
+// immediately before an INTENTIONAL teardown — after the daemon has stopped
+// declaring itself ready and before it closes its listeners. It is a
+// courtesy notice on a socket that is about to die, so it is never retried
+// and never acknowledged; a client that misses it simply falls back to
+// treating the disconnect as unexplained.
+//
+// DELIBERATELY ABSENT FROM StateSnapshot. A connect snapshot is proof the
+// daemon is UP, so carrying a pending-restart field there would let a
+// freshly-connected client open a quiet window on the strength of an
+// announcement whose outage has already ended. There is no "am I restarting"
+// query: the announcement is an edge, not a state.
+//
+// A PREDICTION, NOT A PROMISE. The client owns the bound: it opens a quiet
+// window of at most the stated length and must report a daemon that never
+// returns. Nothing here asks a client to suppress alarms indefinitely.
+type RestartPendingView struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Why the daemon is going down ("deploy-all rebuilt the daemon",
+	// "SIGTERM"). Display-grade and NEVER parsed; a client branches on the
+	// structured fields below, never on this text. Never empty on the wire:
+	// the daemon refuses to compose an announcement that cannot say what it is
+	// about.
+	Cause string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	// How long the outage is expected to last, in whole seconds. A CLAMPED
+	// HINT: the daemon caps it before sending, and a client is entitled to
+	// clamp it further still. Always positive on the wire — a zero or negative
+	// window is not a representable request, because "stay quiet for no time"
+	// and "stay quiet forever" are both things no announcement may ask for.
+	ExpectedOutageSeconds int32 `protobuf:"varint,2,opt,name=expected_outage_seconds,json=expectedOutageSeconds,proto3" json:"expected_outage_seconds,omitempty"`
+	// Whether this restart also SIGTERMs every session shim (the
+	// ShutdownCmd.stop_shims semantics). A client renders a longer settle when
+	// the shims roll too, since a preserved shim is reattached by the next
+	// daemon for free while a rolled one must be respawned.
+	StopShims bool `protobuf:"varint,3,opt,name=stop_shims,json=stopShims,proto3" json:"stop_shims,omitempty"`
+	// When the daemon MINTED this announcement (epoch ms), not when the client
+	// received it. The client subtracts the delivery delay from its window, so
+	// late delivery SHORTENS the quiet window rather than restarting the clock
+	// — otherwise a slow hop would extend the period during which a daemon
+	// that never came back stays unreported.
+	AnnouncedAtMs int64 `protobuf:"varint,4,opt,name=announced_at_ms,json=announcedAtMs,proto3" json:"announced_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartPendingView) Reset() {
+	*x = RestartPendingView{}
+	mi := &file_agentshim_frontend_v1_lifecycle_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartPendingView) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartPendingView) ProtoMessage() {}
+
+func (x *RestartPendingView) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_lifecycle_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartPendingView.ProtoReflect.Descriptor instead.
+func (*RestartPendingView) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_lifecycle_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *RestartPendingView) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+func (x *RestartPendingView) GetExpectedOutageSeconds() int32 {
+	if x != nil {
+		return x.ExpectedOutageSeconds
+	}
+	return 0
+}
+
+func (x *RestartPendingView) GetStopShims() bool {
+	if x != nil {
+		return x.StopShims
+	}
+	return false
+}
+
+func (x *RestartPendingView) GetAnnouncedAtMs() int64 {
+	if x != nil {
+		return x.AnnouncedAtMs
+	}
+	return 0
+}
+
 // A frontend-side diagnostic line, mirrored into the daemon's
 // own on-disk log.
 //
@@ -1030,7 +1141,7 @@ type ClientLogCmd struct {
 
 func (x *ClientLogCmd) Reset() {
 	*x = ClientLogCmd{}
-	mi := &file_agentshim_frontend_v1_lifecycle_proto_msgTypes[13]
+	mi := &file_agentshim_frontend_v1_lifecycle_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1042,7 +1153,7 @@ func (x *ClientLogCmd) String() string {
 func (*ClientLogCmd) ProtoMessage() {}
 
 func (x *ClientLogCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_lifecycle_proto_msgTypes[13]
+	mi := &file_agentshim_frontend_v1_lifecycle_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1055,7 +1166,7 @@ func (x *ClientLogCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientLogCmd.ProtoReflect.Descriptor instead.
 func (*ClientLogCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_lifecycle_proto_rawDescGZIP(), []int{13}
+	return file_agentshim_frontend_v1_lifecycle_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ClientLogCmd) GetLevel() ClientLogLevel {
@@ -1133,7 +1244,13 @@ const file_agentshim_frontend_v1_lifecycle_proto_rawDesc = "" +
 	"\x05cause\x18\x02 \x01(\tR\x05cause\"=\n" +
 	"\x1aCancelScheduledShutdownCmd\x12\x1f\n" +
 	"\vschedule_id\x18\x01 \x01(\tR\n" +
-	"scheduleId\"\x98\x01\n" +
+	"scheduleId\"\xa9\x01\n" +
+	"\x12RestartPendingView\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\x126\n" +
+	"\x17expected_outage_seconds\x18\x02 \x01(\x05R\x15expectedOutageSeconds\x12\x1d\n" +
+	"\n" +
+	"stop_shims\x18\x03 \x01(\bR\tstopShims\x12&\n" +
+	"\x0fannounced_at_ms\x18\x04 \x01(\x03R\rannouncedAtMs\"\x98\x01\n" +
 	"\fClientLogCmd\x12;\n" +
 	"\x05level\x18\x01 \x01(\x0e2%.agentshim.frontend.v1.ClientLogLevelR\x05level\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x121\n" +
@@ -1162,7 +1279,7 @@ func file_agentshim_frontend_v1_lifecycle_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_frontend_v1_lifecycle_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_agentshim_frontend_v1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_agentshim_frontend_v1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentshim_frontend_v1_lifecycle_proto_goTypes = []any{
 	(ResumeMode)(0),                    // 0: agentshim.frontend.v1.ResumeMode
 	(ClientLogLevel)(0),                // 1: agentshim.frontend.v1.ClientLogLevel
@@ -1179,8 +1296,9 @@ var file_agentshim_frontend_v1_lifecycle_proto_goTypes = []any{
 	(*ShutdownHoldTasks)(nil),          // 12: agentshim.frontend.v1.ShutdownHoldTasks
 	(*ScheduleShutdownCmd)(nil),        // 13: agentshim.frontend.v1.ScheduleShutdownCmd
 	(*CancelScheduledShutdownCmd)(nil), // 14: agentshim.frontend.v1.CancelScheduledShutdownCmd
-	(*ClientLogCmd)(nil),               // 15: agentshim.frontend.v1.ClientLogCmd
-	(*structpb.Struct)(nil),            // 16: google.protobuf.Struct
+	(*RestartPendingView)(nil),         // 15: agentshim.frontend.v1.RestartPendingView
+	(*ClientLogCmd)(nil),               // 16: agentshim.frontend.v1.ClientLogCmd
+	(*structpb.Struct)(nil),            // 17: google.protobuf.Struct
 }
 var file_agentshim_frontend_v1_lifecycle_proto_depIdxs = []int32{
 	0,  // 0: agentshim.frontend.v1.CreateSessionCmd.resume_mode:type_name -> agentshim.frontend.v1.ResumeMode
@@ -1190,7 +1308,7 @@ var file_agentshim_frontend_v1_lifecycle_proto_depIdxs = []int32{
 	11, // 4: agentshim.frontend.v1.ShutdownHold.turn:type_name -> agentshim.frontend.v1.ShutdownHoldTurn
 	12, // 5: agentshim.frontend.v1.ShutdownHold.tasks:type_name -> agentshim.frontend.v1.ShutdownHoldTasks
 	1,  // 6: agentshim.frontend.v1.ClientLogCmd.level:type_name -> agentshim.frontend.v1.ClientLogLevel
-	16, // 7: agentshim.frontend.v1.ClientLogCmd.context:type_name -> google.protobuf.Struct
+	17, // 7: agentshim.frontend.v1.ClientLogCmd.context:type_name -> google.protobuf.Struct
 	8,  // [8:8] is the sub-list for method output_type
 	8,  // [8:8] is the sub-list for method input_type
 	8,  // [8:8] is the sub-list for extension type_name
@@ -1213,7 +1331,7 @@ func file_agentshim_frontend_v1_lifecycle_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_lifecycle_proto_rawDesc), len(file_agentshim_frontend_v1_lifecycle_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

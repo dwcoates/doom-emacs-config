@@ -3732,3 +3732,29 @@ leaves the link recorded as neither up nor down."
       (should-not agent-repl--uds-process)
       (should (string-empty-p agent-repl--uds-read-accumulator))
       (should (eq (nth 1 scheduled) #'agent-repl-uds-connect)))))
+
+;;;; ---- restartPending, the intentional-restart announcement -------------
+
+(ert-deftest agent-repl-test-uds-restart-pending-is-a-known-frame-field ()
+  "The arm is on the allowlist, so a pushed announcement decodes rather than signals."
+  ;; Arrange / Act / Assert
+  (should (member "restartPending" agent-repl--uds-known-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-restart-pending-is-not-an-ignored-frame-field ()
+  "The arm has a real handler, so it is not a deliberately-unrendered arm."
+  ;; Arrange / Act / Assert
+  (should-not (member "restartPending" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-restart-pending-dispatches-to-its-handler ()
+  "A pushed announcement reaches its handler with the view intact."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (captured)
+      (agent-repl--uds-register-handler
+       "restartPending" (lambda (v) (setq captured v)))
+      ;; Act
+      (agent-repl--uds-dispatch-frame
+       '(:restartPending (:cause "deploy-all" :expectedOutageSeconds 60
+                          :stopShims t :announcedAtMs 1)))
+      ;; Assert
+      (should (equal (plist-get captured :cause) "deploy-all")))))

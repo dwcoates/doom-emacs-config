@@ -79,6 +79,11 @@ message FrontendFrame {
     // The WHOLE merge queue, pushed complete on every queue mutation. Never a
     // delta: the roster IS the drain order.
     MergeQueueRoster merge_queue_roster = 24;
+    // The daemon is going down ON PURPOSE, pushed to every gui_stream client
+    // and to the Emacs UDS host immediately before teardown. It exists so a
+    // deliberate bounce stops being indistinguishable from a crash; see
+    // RestartPendingView for why it is an edge and never snapshot state.
+    RestartPendingView restart_pending = 25;
   }
 }
 
