@@ -152,6 +152,11 @@ type Server struct {
 	// see ticket.go.
 	inflight atomic.Int64
 
+	// clientLogRefusals rate-limits the REPORTING of refused client_log
+	// telemetry writes (clientlogrefusal.go). It never touches the refusal
+	// itself. Never nil after New.
+	clientLogRefusals *clientLogRefusalLimiter
+
 	upgrader websocket.Upgrader
 
 	mu sync.Mutex
@@ -322,6 +327,7 @@ func New(cfg Config) *Server {
 		},
 		clients:           map[*client]struct{}{},
 		latestWorkspaceAt: map[string]int64{},
+		clientLogRefusals: newClientLogRefusalLimiter(time.Now, clientLogRefusalSummaryInterval),
 	}
 }
 
@@ -1597,11 +1603,25 @@ func (s *Server) writeClientLogTelemetry(rec telemetryRecord) {
 	if ack.GetOk() {
 		return
 	}
-	// The client was already told the record was accepted, so this log line is
-	// the only place the refusal can be reported. It is a warn, not a debug:
-	// a rejected browser record is evidence lost.
-	s.warn("frontend: client_log telemetry write REFUSED ws=%q request_id=%q: %s",
-		rec.cmd.GetWorkspace(), rec.cmd.GetRequestId(), ack.GetError())
+	// The client was already told the record was accepted, so this log is the
+	// only place the refusal can be reported. It is a warn, not a debug: a
+	// rejected browser record is evidence lost.
+	//
+	// It is RATE-LIMITED, not thinned: a webview stamping a retired session id
+	// refuses once per forwarded record, and reporting each one in full buried
+	// the log under thousands of identical lines. The first refusal of each
+	// kind carries the whole evidence and the run behind it is counted, so no
+	// refusal goes uncounted and none is reported twice over.
+	workspace := rec.cmd.GetWorkspace()
+	decision := s.clientLogRefusals.observe(workspace, clientLogRefusalReason(ack.GetError()))
+	switch {
+	case decision.first:
+		s.warn("frontend: client_log telemetry write REFUSED ws=%q request_id=%q: %s",
+			workspace, rec.cmd.GetRequestId(), ack.GetError())
+	case decision.summary:
+		s.warn("frontend: client_log telemetry writes REFUSED ws=%q suppressed=%d total=%d (repeating; see the first refusal above for the reason)",
+			workspace, decision.suppressed, decision.total)
+	}
 }
 
 // answerAccepted answers a command with an ok ack and no execution, settling
