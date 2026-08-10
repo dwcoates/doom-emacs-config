@@ -3094,3 +3094,75 @@ abandoned one strands the mount until its own separate timeout."
     (should-error
      (agent-repl--uds-filter nil "{\"workspaceState\":{\"workspace\":\"a\"}}\n")
      :type 'error)))
+
+;;;; ---- the session restart: no waiting, no half-registered commands -----
+
+(ert-deftest agent-repl-test-uds-restart-timeout-surfaces-the-failure-card ()
+  "A restart the daemon never acknowledges opens the unacked-command card."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl-test--pend "req-1" "restartSession" "/w")
+      (let (surfaced)
+        (cl-letf (((symbol-function 'agent-repl-failure-surface)
+                   (lambda (_ws failure &rest _) (push failure surfaced)))
+                  ((symbol-function 'message) (lambda (&rest _) nil)))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should (equal (plist-get (car surfaced) :type)
+                         "client.command_unacked")))))))
+
+(ert-deftest agent-repl-test-uds-restart-timeout-names-the-verb-in-english ()
+  "The unacked restart card says `session restart', never the wire field."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl-test--pend "req-1" "restartSession" "/w")
+      (let (echoed)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should (string-match-p "session restart" echoed))
+          (should-not (string-match-p "restartSession" echoed)))))))
+
+(ert-deftest agent-repl-test-uds-send-command-defers-a-quit-raised-mid-write ()
+  "A C-g during a congested write is deferred rather than taken mid-send."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((quit-flag nil)
+          (still-armed nil)
+          sent)
+      (agent-repl-test--capturing-send sent
+        (cl-letf (((symbol-function 'process-send-string)
+                   ;; What a C-g held during a congested write amounts to.
+                   (lambda (_proc s) (setq sent s quit-flag t))))
+          (let ((inhibit-quit t))
+            ;; Act
+            (agent-repl--uds-send-command "restartSession" nil "/w" 'fake-proc)
+            (setq still-armed quit-flag
+                  quit-flag nil))))
+      ;; Assert
+      (should still-armed))))
+
+(ert-deftest agent-repl-test-uds-send-command-quit-leaves-the-registry-consistent ()
+  "A quit mid-send never leaves a tracked command whose frame was not delivered."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((quit-flag nil)
+          (request-id nil)
+          sent)
+      (agent-repl-test--capturing-send sent
+        (cl-letf (((symbol-function 'process-send-string)
+                   (lambda (_proc s) (setq sent s quit-flag t))))
+          (let ((inhibit-quit t))
+            ;; Act
+            (setq request-id
+                  (agent-repl--uds-send-command "restartSession" nil "/w" 'fake-proc))
+            (setq quit-flag nil))))
+      ;; Assert — the command is tracked AND its frame reached the wire, so
+      ;; the ack-aging alarm can never declare lost a send that happened.
+      (should (agent-repl--uds-command-pending-p request-id))
+      (should (string-match-p request-id (or sent ""))))))
