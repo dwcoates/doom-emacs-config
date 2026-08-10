@@ -10,6 +10,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
+	"claude-repld/internal/daemonturn"
 	"claude-repld/internal/registry"
 )
 
@@ -200,7 +201,7 @@ type reviveCut struct {
 func compactionCut(text string) reviveCut {
 	return reviveCut{
 		text:             text,
-		requestIDPrefix:  "revive-compact:",
+		requestIDPrefix:  daemonturn.ReviveCompactPrefix,
 		claimsCompaction: true,
 		waiter:           func(c *consumer) *cutWaiter { return &c.compactedWaiter },
 	}
@@ -246,7 +247,7 @@ func (m ReviveMode) cut() (reviveCut, error) {
 	case ReviveModeClear:
 		return reviveCut{
 			text:             clearCommandText,
-			requestIDPrefix:  "revive-clear:",
+			requestIDPrefix:  daemonturn.ReviveClearPrefix,
 			claimsCompaction: false,
 			waiter:           func(c *consumer) *cutWaiter { return &c.clearedWaiter },
 		}, nil
