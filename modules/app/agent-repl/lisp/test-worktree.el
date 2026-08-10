@@ -4943,3 +4943,47 @@ the switch emit `unroutable log workspace'."
             ;; Assert
             (should (equal (delete-dups attributions) '("route-ws"))))
         (delete-directory project t)))))
+
+;;;; ---- async-git sentinel: quit deferral -------------------------------
+
+(ert-deftest agent-repl-test-async-git-sentinel-defers-a-quit-to-the-command-loop ()
+  "A C-g while a git result settles is deferred, never taken mid-settle."
+  ;; Arrange
+  (let ((quit-flag nil)
+        (still-armed nil))
+    (cl-letf (((symbol-function 'process-status) (lambda (_proc) 'exit))
+              ((symbol-function 'agent-repl--async-git-settle)
+               (lambda (&rest _) (setq quit-flag t))))
+      (let ((inhibit-quit t))
+        ;; Act
+        (agent-repl--async-git-sentinel 'fake-process "finished\n")
+        (setq still-armed quit-flag
+              quit-flag nil)))
+    ;; Assert
+    (should still-armed)))
+
+(ert-deftest agent-repl-test-async-git-sentinel-still-delivers-under-a-quit ()
+  "A quit raised during the settle does not cost the callback its delivery."
+  ;; Arrange
+  (let ((quit-flag nil)
+        (delivered nil)
+        (proc-buf (generate-new-buffer " *test-sentinel-quit*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer proc-buf (insert "  ok  "))
+          (cl-letf (((symbol-function 'process-status) (lambda (_proc) 'exit))
+                    ((symbol-function 'process-exit-status) (lambda (_proc) 0))
+                    ((symbol-function 'process-name) (lambda (_proc) "git"))
+                    ((symbol-function 'process-buffer) (lambda (_proc) proc-buf))
+                    ((symbol-function 'agent-repl--kill-buffer-safely) #'ignore)
+                    ((symbol-function 'process-get)
+                     (lambda (_proc _prop)
+                       (lambda (ok output) (setq delivered (list ok output))))))
+            (let ((inhibit-quit t))
+              ;; Act — the C-g arrives before the sentinel runs.
+              (setq quit-flag t)
+              (agent-repl--async-git-sentinel 'fake-process "finished\n")
+              (setq quit-flag nil))))
+      (when (buffer-live-p proc-buf) (kill-buffer proc-buf)))
+    ;; Assert
+    (should (equal delivered '(t "ok")))))

@@ -1541,6 +1541,54 @@ state.  Returns non-nil exactly when a record was emitted."
       (apply #'agent-repl--log-verbose ws fmt args)
       t)))
 
+;;;; ---- Quit deferral around asynchronous critical sections ----------------
+;;
+;; A process filter, a process sentinel and a timer callback all run at
+;; whatever moment the event loop chooses, INCLUDING the moment the user is
+;; holding `C-g'.  Emacs runs them with quitting ENABLED, so the quit lands
+;; wherever the callback happens to be — halfway through draining a batch of
+;; UDS frames, between registering a pending command and writing its frame,
+;; between spawning a build and recording the request that owns it.  The
+;; observed symptom is the `error in process filter: Quit' line in
+;; *Messages*; the observed damage is the half-mutated bookkeeping the
+;; callback was in the middle of writing.
+;;
+;; The fix is the standard one and it is STRUCTURAL rather than probabilistic:
+;; the critical section runs under `inhibit-quit', so a `C-g' arriving inside
+;; it cannot interrupt it at all.  Emacs records the request in `quit-flag'
+;; and leaves it there; the flag survives the binding and the command loop
+;; acts on it at its next quit checkpoint.  So the user's quit is DEFERRED to
+;; a boundary where nothing is half-written, and never LOST.
+;;
+;; This is deliberately NOT a swallowed quit: `agent-repl--with-deferred-quit'
+;; never clears `quit-flag', and it records the deferral through the module's
+;; canonical log so a quit that looks ignored is explainable from the log
+;; alone.
+
+(defmacro agent-repl--with-deferred-quit (context &rest body)
+  "Run BODY with quitting inhibited, deferring any `C-g' that arrives.
+CONTEXT is a string naming the critical section, used only for the
+canonical log record written when a quit was in fact deferred.
+
+Returns BODY's value.  A quit requested while BODY ran stays pending in
+`quit-flag' when this returns, so the command loop signals it at its next
+checkpoint: the quit is postponed to a safe boundary, never discarded.
+
+Intended for process filters, process sentinels and timer callbacks,
+whose run moments the user cannot see and therefore cannot avoid quitting
+into.  It is NOT a general error guard: an error signalled by BODY
+propagates exactly as it did before."
+  (declare (indent 1) (debug (form body)))
+  (let ((result (make-symbol "result")))
+    `(let ((inhibit-quit t))
+       (let ((,result (progn ,@body)))
+         (when quit-flag
+           (agent-repl--log
+            nil
+            "deferred-quit: C-g arrived inside %s — deferred to the command loop (quit-flag left armed)"
+            ,context))
+         ,result))))
+
 ;;;; ---- User-facing copy: the one thing the minibuffer is allowed to say ----
 ;;
 ;; THE MINIBUFFER CARRIES USER COPY, NEVER EVIDENCE.  A wrapped Go error

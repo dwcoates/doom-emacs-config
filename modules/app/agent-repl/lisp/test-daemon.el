@@ -2517,3 +2517,66 @@ skips the drain that reconstructs merges and releases leases."
                (lambda (path _subject) (setq asked path))))
       (agent-repl--frontend-deploy-assert-script)
       (should (equal asked agent-repl--frontend-deploy-script)))))
+;;;; ---- filter/sentinel: quit deferral ----------------------------------
+
+(ert-deftest agent-repl-test-daemon-filter-defers-a-quit-to-the-command-loop ()
+  "A C-g during a mirror leaves the quit armed rather than losing it."
+  ;; Arrange
+  (agent-repl-test--with-daemon-mirror records
+    (let ((quit-flag nil)
+          (still-armed nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-capture)
+                 (lambda (&rest _) (setq quit-flag t))))
+        (let ((inhibit-quit t))
+          ;; Act
+          (agent-repl--frontend-daemon-filter 'proc "panic: boom\n")
+          (setq still-armed quit-flag
+                quit-flag nil)))
+      ;; Assert
+      (should still-armed))))
+
+(ert-deftest agent-repl-test-daemon-filter-completes-the-line-assembly-under-a-quit ()
+  "A quit mid-mirror never strands a half-assembled line in the accumulator."
+  ;; Arrange
+  (agent-repl-test--with-daemon-mirror records
+    (let ((quit-flag nil))
+      (let ((inhibit-quit t))
+        ;; Act — the C-g lands while the chunk is being consumed.
+        (setq quit-flag t)
+        (agent-repl--frontend-daemon-filter 'proc "panic: boom\n")
+        (setq quit-flag nil))
+      ;; Assert
+      (should (member "claude-repld output: panic: boom" records))
+      (should (equal agent-repl--frontend-daemon-line-accumulator "")))))
+
+(ert-deftest agent-repl-test-daemon-sentinel-defers-a-quit-to-the-command-loop ()
+  "A C-g during the daemon's exit report is deferred, not taken mid-report."
+  ;; Arrange
+  (let ((quit-flag nil)
+        (still-armed nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-daemon-report-exit)
+               (lambda (&rest _) (setq quit-flag t))))
+      (let ((inhibit-quit t))
+        ;; Act
+        (agent-repl--frontend-daemon-sentinel 'proc "exited abnormally\n")
+        (setq still-armed quit-flag
+              quit-flag nil)))
+    ;; Assert
+    (should still-armed)))
+
+(ert-deftest agent-repl-test-async-run-sentinel-defers-a-quit-to-the-command-loop ()
+  "A C-g while an async build settles cannot strand the single-flight slot."
+  ;; Arrange
+  (let ((quit-flag nil)
+        (still-armed nil))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_proc) nil))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 0))
+              ((symbol-function 'agent-repl--frontend-async-run-settle)
+               (lambda (&rest _) (setq quit-flag t))))
+      (let ((inhibit-quit t))
+        ;; Act
+        (agent-repl--frontend-async-run-sentinel 'proc "finished\n")
+        (setq still-armed quit-flag
+              quit-flag nil)))
+    ;; Assert
+    (should still-armed)))

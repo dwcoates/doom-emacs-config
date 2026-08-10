@@ -3044,3 +3044,53 @@ abandoned one strands the mount until its own separate timeout."
           (should-not (gethash "req-abandoned" agent-repl--uds-pending-commands))
           (funcall expire)
           (should (eq (agent-repl-uds-link-health) :healthy)))))))
+
+;;;; ---- filter/sentinel: quit deferral ----------------------------------
+
+(ert-deftest agent-repl-test-uds-filter-defers-a-quit-raised-mid-drain ()
+  "A C-g inside a handler does not abandon the frames buffered behind it."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((quit-flag nil)
+          (workspaces nil))
+      (agent-repl--uds-register-handler
+       "workspaceState"
+       (lambda (p)
+         (push (plist-get p :workspace) workspaces)
+         ;; What Emacs does when C-g arrives while `inhibit-quit' is bound.
+         (when (equal (plist-get p :workspace) "a") (setq quit-flag t))))
+      (let ((inhibit-quit t))
+        ;; Act
+        (agent-repl--uds-filter
+         nil (concat "{\"workspaceState\":{\"workspace\":\"a\"}}\n"
+                     "{\"workspaceState\":{\"workspace\":\"b\"}}\n"))
+        (setq quit-flag nil))
+      ;; Assert
+      (should (equal (nreverse workspaces) '("a" "b"))))))
+
+(ert-deftest agent-repl-test-uds-filter-leaves-the-deferred-quit-armed ()
+  "The deferred quit is re-signalled by the command loop, never dropped."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((quit-flag nil)
+          (still-armed nil))
+      (agent-repl--uds-register-handler
+       "workspaceState" (lambda (_p) (setq quit-flag t)))
+      (let ((inhibit-quit t))
+        ;; Act
+        (agent-repl--uds-filter nil "{\"workspaceState\":{\"workspace\":\"a\"}}\n")
+        (setq still-armed quit-flag
+              quit-flag nil))
+      ;; Assert
+      (should still-armed))))
+
+(ert-deftest agent-repl-test-uds-filter-still-re-signals-a-handler-error ()
+  "Quit deferral does not soften the drain's own error re-signalling."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-register-handler
+     "workspaceState" (lambda (_p) (error "handler boom")))
+    ;; Act / Assert
+    (should-error
+     (agent-repl--uds-filter nil "{\"workspaceState\":{\"workspace\":\"a\"}}\n")
+     :type 'error)))
