@@ -54,6 +54,10 @@ type PromptRouter interface {
 	// can be reconciled on. The wire itself travels under a daemon-minted
 	// control id that appears in no caller's records.
 	Interrupt(ctx context.Context, workspace, requestID string) error
+	// CancelDetachedAgents stops the workspace session's detached background
+	// agents and returns the shim's typed verdict. It carries the COMMAND'S
+	// OWN request id for the same reason Interrupt does.
+	CancelDetachedAgents(ctx context.Context, workspace, requestID string) (*corev1.DetachedCancelOutcome, error)
 	// AnswerPermission carries the COMMAND'S OWN request id alongside the
 	// permission request id it answers, for the same reason Interrupt does: a
 	// DECLINE stops the workspace's turn (sessioncontroller/permdecline.go),
@@ -855,6 +859,90 @@ func (h *commandHandler) offerMergeDequeue(workspace, requestID string) error {
 	h.logf("frontend cmd: interrupt RAISED a merge dequeue offer ws=%s request_id=%s offer=%s run=%s head=%t position=%d depth=%d",
 		workspace, requestID, offer.GetOfferId(), standing.RunID, standing.Head, standing.Position, standing.Depth)
 	return nil
+}
+
+// CancelDetachedAgents stops the workspace's detached background agents — the
+// subagents, shells and workflows still working after the turn that launched
+// them ended.
+//
+// THIS IS WHAT THE INTERRUPT CONFIRMATION'S "yes" NOW SENDS. The confirmation
+// gate (interruptChallenge) fires only when NO turn is live and subagent tasks
+// are, and the interrupt it used to dispatch is aimed at exactly the turn that
+// is already over: the shim answered ALREADY_COMPLETE and the agents the user
+// had just agreed to stop kept running. The one state that raised the question
+// was the one state its answer could not act on.
+//
+// IT IS NOT GATED BY A CONFIRMATION OF ITS OWN. The command's only effect is
+// stopping detached agents, so sending it IS the deliberate act the interrupt
+// gate exists to require; a second gate here would ask the user to confirm the
+// thing they confirmed by sending it.
+//
+// A SESSION WITH NOTHING DETACHED IS A LOUD REFUSAL, not a quiet success. A
+// cancel that stopped nothing is a keystroke that did nothing, and acking it ok
+// is how a stop control comes to look like it works when it reaches nothing.
+// The typed outcome travels back beside the refusal so the frontend can say
+// "nothing was running" rather than render a bare failure — see
+// frontend.CommandHandler.CancelDetachedAgents.
+func (h *commandHandler) CancelDetachedAgents(ctx context.Context, workspace, requestID string, cmd *frontendv1.CancelDetachedAgentsCmd) (*frontendv1.DetachedCancelOutcome, error) {
+	h.logf("frontend cmd: cancel_detached_agents ws=%s request_id=%s", workspace, requestID)
+	if err := checkWorkspaceKey("cancel_detached_agents", workspace); err != nil {
+		return nil, err
+	}
+	outcome, err := h.prompts.CancelDetachedAgents(ctx, workspace, requestID)
+	if err != nil {
+		h.logf("frontend cmd: cancel_detached_agents FAILED ws=%s request_id=%s: %v", workspace, requestID, err)
+		return nil, fmt.Errorf("frontend cmd: cancel_detached_agents ws=%s: %w", workspace, err)
+	}
+	view := detachedCancelView(outcome)
+	switch arm := outcome.GetOutcome().(type) {
+	case *corev1.DetachedCancelOutcome_Cancelled:
+		h.logf("frontend cmd: cancel_detached_agents ws=%s request_id=%s CANCELLED %d agent(s) task_ids=%v",
+			workspace, requestID, len(arm.Cancelled.GetTaskIds()), arm.Cancelled.GetTaskIds())
+		return view, nil
+	case *corev1.DetachedCancelOutcome_NothingRunning:
+		h.logf("frontend cmd: cancel_detached_agents ws=%s request_id=%s found NO detached work — refusing rather than acking a stop that reached nothing",
+			workspace, requestID)
+		return view, fmt.Errorf("frontend cmd: cancel_detached_agents ws=%s: no detached background agents are running; nothing was cancelled", workspace)
+	case *corev1.DetachedCancelOutcome_Unsupported:
+		h.logf("frontend cmd: cancel_detached_agents ws=%s request_id=%s could NOT be attempted: %s",
+			workspace, requestID, arm.Unsupported.GetDetail())
+		return view, fmt.Errorf("frontend cmd: cancel_detached_agents ws=%s: the stop could not be attempted: %s", workspace, arm.Unsupported.GetDetail())
+	default:
+		// An outcome with no arm is a contract violation the shim client
+		// already refuses; naming it keeps the refusal honest if that ever
+		// changes, rather than acking a cancel nobody can account for.
+		return nil, fmt.Errorf("frontend cmd: cancel_detached_agents ws=%s: the shim returned an outcome with no arm set", workspace)
+	}
+}
+
+// detachedCancelView resolves the shim-wire cancel verdict onto the frontend
+// surface.
+//
+// THE TASK IDS DO NOT CROSS. They are the daemon's own handle on the work —
+// what it settles bubbles by — and a frontend has no vocabulary for them; what
+// a frontend renders is "cancelled 3 agents". So the count crosses and the ids
+// stay, which is the same split every other resolved view on this boundary
+// makes.
+func detachedCancelView(outcome *corev1.DetachedCancelOutcome) *frontendv1.DetachedCancelOutcome {
+	switch arm := outcome.GetOutcome().(type) {
+	case *corev1.DetachedCancelOutcome_Cancelled:
+		return &frontendv1.DetachedCancelOutcome{Outcome: &frontendv1.DetachedCancelOutcome_Cancelled{
+			Cancelled: &frontendv1.DetachedAgentsCancelled{Count: int64(len(arm.Cancelled.GetTaskIds()))},
+		}}
+	case *corev1.DetachedCancelOutcome_NothingRunning:
+		return &frontendv1.DetachedCancelOutcome{Outcome: &frontendv1.DetachedCancelOutcome_NothingRunning{
+			NothingRunning: &frontendv1.NoDetachedAgentsRunning{},
+		}}
+	case *corev1.DetachedCancelOutcome_Unsupported:
+		return &frontendv1.DetachedCancelOutcome{Outcome: &frontendv1.DetachedCancelOutcome_Unsupported{
+			Unsupported: &frontendv1.DetachedCancelUnsupported{Detail: arm.Unsupported.GetDetail()},
+		}}
+	default:
+		// No arm to resolve. Nil rather than an invented one: the caller
+		// refuses this case outright, and a manufactured arm would put a
+		// verdict on the wire nothing decided.
+		return nil
+	}
 }
 
 // AnswerMergeDequeue resolves the workspace's outstanding dequeue question.
