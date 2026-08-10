@@ -195,16 +195,32 @@ function spoolBody(header: string, spool: AsyncOutputSpool): string {
   return `${head}${body}`;
 }
 
+/**
+ * A CONVERSATIONAL bubble's folded conversation: its earlier-entries notice,
+ * then its emissions through the FEED's own renderer.
+ *
+ * The three conversational kinds — a detached agent, a merge run, a skill
+ * window — carry the identical emission shape, which the contract states
+ * deliberately, so they draw it here once rather than three times. What differs
+ * between them is what LEADS the conversation (a skill's own document) and the
+ * chrome around it, not the conversation itself.
+ */
+function conversationBody(
+  bubble: AsyncBubble,
+  fold: AsyncFold,
+  emissions: readonly UnwrappedEmission[],
+  ctx: AsyncRenderContext,
+): string {
+  return `${earlierEntriesNotice(fold, bubble.id)}${ctx.renderEmissions(emissions, bubble.id)}`;
+}
+
 /** The kind-specific body of one bubble. */
 function bubbleBody(bubble: AsyncBubble, ctx: AsyncRenderContext): string {
   switch (bubble.kind.case) {
     case "agent":
     case "merge": {
-      // A merge run is a conversation with the same emission shape as a
-      // detached agent's, so the two go through the same body — the feed's
-      // renderer, not a second one. See renderEmissions.
       const { emissions, fold } = bubble.kind.value;
-      return `${earlierEntriesNotice(fold, bubble.id)}${ctx.renderEmissions(emissions, bubble.id)}`;
+      return conversationBody(bubble, fold, emissions, ctx);
     }
     case "skill": {
       // A skill window is that same conversation, opened by the SKILL's own
@@ -213,10 +229,7 @@ function bubbleBody(bubble: AsyncBubble, ctx: AsyncRenderContext): string {
       // emissions follow. It is drawn through the one skill-body renderer the
       // card path uses, so a reader sees the same section either way.
       const { body, emissions, fold } = bubble.kind.value;
-      return `${SkillBodySection(body)}${earlierEntriesNotice(fold, bubble.id)}${ctx.renderEmissions(
-        emissions,
-        bubble.id,
-      )}`;
+      return `${SkillBodySection(body)}${conversationBody(bubble, fold, emissions, ctx)}`;
     }
     case "journal": {
       const { rows, fold } = bubble.kind.value;
