@@ -3743,3 +3743,64 @@ describe("the merge dequeue offer's frame", () => {
     expect(mergeDequeueConfirm).toMatch(/background:\s*var\(--err\)/);
   });
 });
+
+/**
+ * Recently Merged's height budget.
+ *
+ * Emacs sends every merge that landed inside the activity window, so the
+ * section's row count is unbounded and the stylesheet is the only thing
+ * keeping it from pushing the live workspaces off the rail. Each assertion
+ * below is one half of that bargain: the rows scroll rather than truncate,
+ * and ten of them is exactly the height they scroll at.
+ */
+describe("the Recently Merged section's height cap", () => {
+  const mergedSection = blockAfter(css, "#ws-sidebar .repo.merged-section {");
+  const mergedRow = blockAfter(css, "#ws-sidebar .repo.merged-section .row {");
+  const mergedRows = blockAfter(css, "#ws-sidebar .repo.merged-section > .rows {");
+
+  it("budgets the section at ten rows", () => {
+    // Arrange / Act — the section's own row budget.
+    // Assert
+    expect(mergedSection).toMatch(/--merged-visible-rows:\s*10\s*;/);
+  });
+
+  it("caps the row list at the budget rather than at a hand-written height", () => {
+    // Arrange / Act — the cap is the row height times the budget, so changing
+    // either one moves the cap with it.
+    // Assert
+    expect(mergedRows).toMatch(
+      /max-height:\s*calc\(var\(--merged-row-h\) \* var\(--merged-visible-rows\)\)/,
+    );
+  });
+
+  it("scrolls the overflow instead of hiding it", () => {
+    // Arrange / Act — the eleventh merge is reachable history, not a row the
+    // rail may drop (Emacs stopped dropping it; see sidebar.el).
+    // Assert
+    expect(mergedRows).toMatch(/overflow-y:\s*auto/);
+    expect(mergedRows).not.toMatch(/overflow-y:\s*hidden/);
+  });
+
+  it("holds no empty box open for a section shorter than the budget", () => {
+    // Arrange / Act — max-height, never height.
+    // Assert
+    expect(mergedRows).not.toMatch(/(^|[^-])height:\s*calc/);
+  });
+
+  it("fixes the merged row's height so ten rows is exactly the cap", () => {
+    // Arrange / Act — a natural row height would let the cap drift with the
+    // tallest row, so the row is drawn at the same height the cap counts in.
+    // Assert
+    expect(mergedRow).toMatch(/height:\s*var\(--merged-row-h\)/);
+    expect(mergedRow).toMatch(/box-sizing:\s*border-box/);
+  });
+
+  it("sizes the row height to clear the row's text and its status disc", () => {
+    // Arrange — .row's padding is 0.28rem top and bottom; its text is 14px and
+    // its disc 9px, both under the 1.35rem line box.
+    const rowPadding = blockAfter(css, "#ws-sidebar .row {");
+    // Act / Assert
+    expect(rowPadding).toMatch(/padding:\s*0\.28rem/);
+    expect(mergedSection).toMatch(/--merged-row-h:\s*calc\(0\.28rem \* 2 \+ 1\.35rem\)/);
+  });
+});
