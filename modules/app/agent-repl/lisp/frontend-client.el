@@ -81,6 +81,7 @@
 (declare-function agent-repl--ws-dir "agent-repl-status" (ws))
 
 (defvar agent-repl--uds-process)
+(defvar agent-repl--uds-reconnect-timer)
 (defvar agent-repl-uds-socket-path)
 
 ;;;; ---- The workspace wire key ------------------------------------------
@@ -924,7 +925,20 @@ boot id, which is what resets each workspace's give-up."
                (agent-repl--warn nil "reattach: daemon ensure failed: %s" detail)))
           (error
            (agent-repl--warn nil "reattach: daemon ensure failed: %s"
-                            (error-message-string err)))))
+                            (error-message-string err))))
+        ;; ENSURING THE DAEMON IS NOT REDIALING THE LINK.  A daemon that is
+        ;; back and listening leaves this sweep looking at a link that is
+        ;; still down, because nothing here ever dialed it; the transport's
+        ;; own ladder is the only driver, and if that ladder ever stops the
+        ;; link stays down through every sweep that follows.  This is the
+        ;; belt to its braces, and it defers to a live ladder: a pending
+        ;; reconnect timer is a retry already coming, and stacking a second
+        ;; dial on top of it would dial twice per outage tick.
+        (if (timerp agent-repl--uds-reconnect-timer)
+            (agent-repl--log nil
+                             "reattach: reconnect already pending — leaving the dial to the ladder")
+          (agent-repl--log nil "reattach: no reconnect pending — dialing driver=reattach-sweep")
+          (agent-repl-uds-connect)))
     (dolist (ws (agent-repl--live-ws-names))
       (agent-repl--frontend-ensure-workspace ws))))
 
