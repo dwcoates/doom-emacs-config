@@ -1435,6 +1435,15 @@ pre {
 .async-fold.open { cursor: default; }
 .agent-activity.open > .agent-ticker,
 .async-fold.open > .async-ticker { cursor: zoom-out; }
+/* The FIXED fold a teal card wears (ASYNC_TEAL_TOOLS in render.ts, rendered by
+   Fold's `fixed` arm): a spawned agent's conversation and a skill handoff's
+   window are the card's content rather than an aside, so there is nothing to
+   open and nothing to close — the panel is always laid out and the reader
+   scrolls it in place. Nothing here is clickable, so the fold and its ticker
+   drop the zoom cursors the click-to-open rule above gives them. */
+.fold-fixed,
+.fold-fixed > .agent-ticker,
+.fold-fixed > .async-ticker { cursor: default; }
 /* The ticker is the badge you click to reveal the fold's body, rendered in
    the same pill form as a consecutive-run tab chip (see .tab-chip) so the
    two read as one vocabulary — only its LOCATION differs (it sits at the
@@ -1481,6 +1490,16 @@ pre {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+/* The fixed panel a teal card's fold drops (see .fold-fixed above). Half the
+   viewport is the cap, so a long child feed can never swallow the feed around
+   it. `max-height` rather than `height` is what makes the box SHRINK TO FIT: a
+   panel with less content than the cap draws exactly its content, and only one
+   that would exceed the cap becomes a scroller. It sits BELOW the base rule so
+   the stylesheet's own `.agent-panel {` block stays the first of that name. */
+.fold-fixed > .agent-panel {
+  max-height: 50vh;
+  overflow-y: auto;
 }
 /* The gns-sockets fold inside a final-response bubble (see gns.ts): the
    bridge upkeep that followed the answer, wearing the shared fold dress —
