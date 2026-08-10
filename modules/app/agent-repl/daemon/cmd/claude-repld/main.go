@@ -393,6 +393,11 @@ func main() {
 	}
 	daemonLog.With("operation", "boot.exclusive-claim", "addr", *addr, "outcome", "won").
 		Log("claude-repld: exclusive daemon claim won on %s; binding sockets", *addr)
+	// EVERY BOOT PHASE FROM HERE IS MEASURED (bootphase.go). A boot slow enough
+	// to outlast Emacs's startup-restore budget must name the phase that spent
+	// the time, in the log, without a bisect.
+	phases := newBootPhases(daemonLog, time.Now)
+	phases.Mark("exclusive-claim")
 
 	// The profiling surface is opened BEFORE the daemon's dependencies, so a
 	// boot that wedges in state-store or geometry work is still profilable —
@@ -477,6 +482,7 @@ func main() {
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: open token utilization store: %v", err)
 	}
+	phases.Mark("state-store")
 
 	// The scheduled-shutdown drain lease and the prompts it parks. A daemon
 	// that cannot install these cannot promise that a bounce it scheduled
@@ -524,6 +530,7 @@ func main() {
 	// supersede is only ever resolved by its successor reaching operational, and
 	// a delete stamps its own resolution as it mints the death.
 	server.ReconcileOpenDeaths(sessionRegistry, nil, legacyLog)
+	phases.Mark("registry-prepare")
 
 	// Interactive Claude login, on a pty the daemon owns and the webapp
 	// renders. Nothing here parses the terminal: the login is a full-screen
@@ -579,6 +586,7 @@ func main() {
 		daemonFatal(daemonLog, "claude-repld: open SSM: %v", err)
 	}
 	defer ssmMgr.Close()
+	phases.Mark("ssm-open")
 
 	// The progress-footer resolver (F1) is the SSM's sibling and is owned here
 	// for the same reason: both the frontend push loop and the per-session
@@ -622,6 +630,7 @@ func main() {
 	if err := sessionlock.EnsureDir(); err != nil {
 		daemonFatal(daemonLog, "claude-repld: create session lock dir: %v", err)
 	}
+	phases.Mark("shim-listener")
 
 	// The per-session shim-controller consumes each session's UDS shim stream and
 	// renders it onto the frontend surface + SSM. Its push target (the
@@ -817,6 +826,7 @@ func main() {
 		daemonFatal(daemonLog, "claude-repld: build session controller: %v", err)
 	}
 	defer controller.Close()
+	phases.Mark("session-controller")
 
 	// THE merge-geometry map: which branch, which worktree, and which parent
 	// worktree each workspace merges with. It lives in the shared state store
@@ -853,13 +863,12 @@ func main() {
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: build workspace geometry backfiller: %v", err)
 	}
-	geometryReport, err := geometryBackfiller.Run(context.Background())
-	if err != nil {
-		daemonFatal(daemonLog, "claude-repld: backfill workspace merge geometry: %v", err)
-	}
-	daemonLog.With("operation", "geometry-backfill").Log(
-		"claude-repld: workspace merge geometry backfill recorded=%d already=%d underivable=%d",
-		geometryReport.Recorded, geometryReport.AlreadyRecorded, geometryReport.Underivable)
+	// THE BACKFILL ITSELF RUNS AFTER THE LISTENERS SERVE (bootgeometry.go). It
+	// is a git subprocess per unrecorded workspace, and it used to sit in front
+	// of the frontend UDS listener the startup restore probes. Only the merge
+	// command path awaits it, through this gate.
+	geometryBackfill := newDeferredGeometryBackfill(geometryStore)
+	phases.Mark("geometry-open")
 
 	// The merge queue's durable substrate and the shim exclusivity lease.
 	// Both are constructed HERE, not inside WireAgentShim, because the SSM's
@@ -1031,6 +1040,10 @@ func main() {
 		MergeLease:    mergeLease,
 		MergeQueue:    mergeQueue,
 		MergeGeometry: geometryStore,
+		// The merge command path reads through the backfill gate; the resolved
+		// view's branch column reads the raw map and never waits. See
+		// AgentShimConfig.MergeCommandGeometry.
+		MergeCommandGeometry: geometryBackfill,
 		Logf:          legacyLog,
 		Warnf:         legacyWarn,
 		LogVerbosef:   daemonLog.LogVerbose,
@@ -1177,6 +1190,7 @@ func main() {
 			daemonLog.With("operation", "serve-frontend-uds", "socket", sockPath).Log("claude-repld: frontend UDS serve ended: %v", serveErr)
 		}
 	}()
+	phases.Mark("frontend-listener")
 
 	httpServer := &http.Server{Addr: *addr, Handler: mux}
 	// The listener was claimed at the top of boot, not here: this is where it
@@ -1226,6 +1240,28 @@ func main() {
 	// workspace bridge, and the inbox has a live daemon session target.  Only
 	// this completed state may report readiness.
 	ready.ready.Store(true)
+	phases.Mark("ready")
+
+	// DEFERRED BOOT PHASE: the one-time merge-geometry repair. It runs here, on
+	// a serving daemon, and opens its gate once it has completed — the merge
+	// command path is the only thing that waits for it.
+	//
+	// A FAILURE IS STILL FATAL, exactly as it was on the serial path: a daemon
+	// that cannot derive the map cannot merge, and serving guessed targets is
+	// what that fatality exists to prevent. Moving the work changed WHEN it is
+	// measured, never how loudly it fails.
+	go func() {
+		finish := phases.Deferred("geometry-backfill")
+		geometryReport, gerr := geometryBackfiller.Run(context.Background())
+		finish(gerr)
+		if gerr != nil {
+			daemonFatal(daemonLog, "claude-repld: backfill workspace merge geometry: %v", gerr)
+		}
+		geometryBackfill.Finish()
+		daemonLog.With("operation", "geometry-backfill").Log(
+			"claude-repld: workspace merge geometry backfill recorded=%d already=%d underivable=%d",
+			geometryReport.Recorded, geometryReport.AlreadyRecorded, geometryReport.Underivable)
+	}()
 
 	// BOOT RECONCILIATION, strictly AFTER readiness (bootsweep.go). Shims that
 	// outlived the previous daemon are already redialling this process's
@@ -1252,6 +1288,8 @@ func main() {
 	// a SCOPE rather than a pair of calls, so it cannot be left open by a sweep
 	// that exits early on the shutdown context.
 	go controller.DuringBootWindow(func() {
+		finish := phases.Deferred("boot-sweep")
+		defer finish(nil)
 		(&server.BootSweeper{
 			Reg:       sessionRegistry,
 			Connected: shimListener.Connected,
