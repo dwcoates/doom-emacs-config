@@ -519,6 +519,12 @@ type Manager struct {
 	// dependency, so it cannot be a Config field.
 	shutdownLease shutdownLeaseBinding
 
+	// hibernationRefusals rate-limits the REPORTING of refused hibernation
+	// transitions (hibernationrefusallog.go). It has its own mutex and is
+	// deliberately NOT under mu: it is read on the sweep path, which already
+	// holds mu at a different depth. The zero value is usable.
+	hibernationRefusals hibernationRefusalLimiter
+
 	// restart is the planned-bounce grace window every failure bound in this
 	// package consults before it fires (restartepoch.go). It has its own mutex
 	// and is deliberately NOT under mu: the choke points that read it are on
