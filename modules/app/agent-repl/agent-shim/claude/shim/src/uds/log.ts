@@ -30,6 +30,27 @@ interface RuntimeContext {
   poisoned?: Error;
 }
 
+// THE STDERR MIRROR IS A CONVENIENCE, AND IT USED TO BE A LIFELINE.
+//
+// stderr is a PIPE whose read end belongs to the daemon that spawned this shim.
+// A shim is designed to outlive that daemon: it redials the socket and the next
+// daemon reattaches to the turn still running. But every log line was mirrored
+// to stderr with no failure handling, so the first line written after the
+// daemon exited raised EPIPE on process.stderr — an error event with no
+// listener, i.e. an uncaught exception — and the shim died. Silently, because
+// the channel that would have reported it is the broken one.
+//
+// That killed EVERY shim on every daemon bounce (2026-08-10 19:41: five
+// preserved shims, last durable line at the daemon's clean exit, all gone
+// seconds later with no record), destroying the in-flight async work the
+// preservation design exists to protect.
+//
+// So the mirror is now RETIRABLE: losing it is recorded once on the durable
+// sink and never again attempted. The durable sink keeps its old contract —
+// its failures poison the logger and are rethrown — because that one IS the
+// record, and losing it must never pass unnoticed.
+let stderrMirror: "live" | "retired" = "live";
+
 interface ShimLogRecord {
   timestamp: string;
   runtime: "shim";
@@ -79,6 +100,36 @@ export function configureLog(config: ShimLogConfiguration): void {
     agent_repl_session_id: config.agentReplSessionId,
     write: (fd, bytes, offset, length) => writeSync(fd, bytes, offset, length),
   };
+  stderrMirror = "live";
+  // An asynchronous EPIPE (the daemon's read end closing between writes) lands
+  // as an 'error' event, not as a throw from write(). Without this listener it
+  // is an uncaught exception and the shim dies mid-turn.
+  process.stderr.on("error", (err: Error) => retireStderrMirror(err));
+}
+
+/**
+ * Stop mirroring to stderr, recording the loss durably exactly once.
+ *
+ * The durable write here is deliberately NOT emit(): emit mirrors, and a mirror
+ * failure recursing into itself is how one broken pipe becomes a stack
+ * overflow. A durable-sink failure while recording this poisons the logger, so
+ * the next log call throws — the failure is surfaced, never swallowed.
+ */
+function retireStderrMirror(cause: Error): void {
+  if (stderrMirror === "retired") return;
+  stderrMirror = "retired";
+  const runtime = runtimeContext;
+  if (runtime === undefined || runtime.poisoned !== undefined) return;
+  const record = buildRecord("normal", {
+    level: "warn",
+    operation: "shim.logging.stderr-mirror",
+    cause: cause.message,
+  }, "stderr mirror RETIRED — the daemon that owned this pipe is gone; this shim keeps running and keeps logging durably, because a shim outlives its daemon by design");
+  try {
+    writeDurable(runtime, Buffer.from(`${JSON.stringify(record)}\n`, "utf8"));
+  } catch (err) {
+    runtime.poisoned = err instanceof Error ? err : new Error(String(err));
+  }
 }
 
 /** Record the vendor identity as soon as the SDK reveals it. */
@@ -131,7 +182,13 @@ function buildRecord(verbosity: ShimLogRecord["verbosity"], fields: LogFields, m
 /** The only pre-logger/sink-failure escape hatch. It must never persist. */
 export function emergencyStderr(message: string): void {
   const runtime = runtimeContext;
-  process.stderr.write(`${JSON.stringify({
+  if (stderrMirror === "retired") return;
+  // A failure HERE is not the failure being reported: this is the escape hatch
+  // used while the real error is on its way to the caller, and letting a dead
+  // pipe throw over it would replace a surfaced error with a process death.
+  // The real error is rethrown by every caller, so nothing is swallowed.
+  try {
+    process.stderr.write(`${JSON.stringify({
     timestamp: logTimestamp(),
     runtime: "shim",
     level: "error",
@@ -146,7 +203,10 @@ export function emergencyStderr(message: string): void {
       agent_repl_session_id: runtime.agent_repl_session_id,
       ...(runtime.claude_session_id === undefined ? {} : { claude_session_id: runtime.claude_session_id }),
     }),
-  })}\n`);
+    })}\n`);
+  } catch (err) {
+    retireStderrMirror(err instanceof Error ? err : new Error(String(err)));
+  }
 }
 
 function emit(verbosity: ShimLogRecord["verbosity"], fields: LogFields, message: string): void {
@@ -158,20 +218,35 @@ function emit(verbosity: ShimLogRecord["verbosity"], fields: LogFields, message:
     throw runtime.poisoned;
   }
   try {
-    let offset = 0;
-    while (offset < bytes.length) {
-      const written = runtime.write(runtime.fd, bytes, offset, bytes.length - offset);
-      if (!Number.isInteger(written) || written <= 0) throw new Error(`shim log sink made no progress after ${offset} bytes`);
-      if (written > bytes.length - offset) throw new Error(`shim log sink reported invalid write length ${written}`);
-      offset += written;
-    }
+    writeDurable(runtime, bytes);
   } catch (err) {
     const failure = err instanceof Error ? err : new Error(String(err));
     runtime.poisoned = failure;
     emergencyStderr(`shim log sink failure: ${failure.message}`);
     throw failure;
   }
-  if (verbosity === "normal" || process.env.AGENT_REPL_LOG_VERBOSE === "1") process.stderr.write(bytes);
+  if (stderrMirror === "retired") return;
+  if (verbosity === "normal" || process.env.AGENT_REPL_LOG_VERBOSE === "1") {
+    // A synchronous EPIPE from a dead daemon's pipe retires the mirror. It
+    // must not reach the caller: the record IS written, and killing a shim
+    // over a lost convenience copy is the incident this guard exists for.
+    try {
+      process.stderr.write(bytes);
+    } catch (err) {
+      retireStderrMirror(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+}
+
+/** Write one record to the durable inherited sink, short writes included. */
+function writeDurable(runtime: RuntimeContext, bytes: Buffer): void {
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = runtime.write(runtime.fd, bytes, offset, bytes.length - offset);
+    if (!Number.isInteger(written) || written <= 0) throw new Error(`shim log sink made no progress after ${offset} bytes`);
+    if (written > bytes.length - offset) throw new Error(`shim log sink reported invalid write length ${written}`);
+    offset += written;
+  }
 }
 
 class BoundShimLogger implements ShimLogger {
