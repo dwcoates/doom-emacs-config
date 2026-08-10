@@ -201,7 +201,10 @@ func awaitAllSeeded(t *testing.T, conn *websocket.Conn, within time.Duration, se
 	}
 	deadline := time.Now().Add(within)
 	for len(pending) > 0 && time.Now().Before(deadline) {
-		frame := readFrameWithin(t, conn, within)
+		frame, err := tryReadFrameWithin(t, conn, within)
+		if err != nil {
+			t.Fatalf("read: %v — still waiting for: %v", err, pendingNames(pending))
+		}
 		if reject != nil {
 			if why := reject(frame); why != "" {
 				t.Fatalf("forbidden frame: %s", why)
@@ -214,13 +217,20 @@ func awaitAllSeeded(t *testing.T, conn *websocket.Conn, within time.Duration, se
 		}
 	}
 	if len(pending) > 0 {
-		names := make([]string, 0, len(pending))
-		for name := range pending {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		t.Fatalf("these never arrived before the deadline: %v", names)
+		t.Fatalf("these never arrived before the deadline: %v", pendingNames(pending))
 	}
+}
+
+// pendingNames is the sorted list of awaits still outstanding, which is what
+// every timeout in this file must report: WHICH frame never came is the fact,
+// and the error alone never carries it.
+func pendingNames(pending map[string]func(*frontendv1.FrontendFrame) bool) []string {
+	names := make([]string, 0, len(pending))
+	for name := range pending {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // --- the stop sequence ------------------------------------------------------

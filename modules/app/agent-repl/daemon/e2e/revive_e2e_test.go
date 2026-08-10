@@ -32,7 +32,9 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	"claude-repld/internal/daemonturn"
 )
 
 // compactCommand is what the daemon submits on the user's behalf under
@@ -74,10 +76,14 @@ func TestE2EADirectRevivalOpensTheGate(t *testing.T) {
 
 	// Act
 	sendReviveDirect(t, s.conn, "r-revive")
-	if ack := awaitAck(t, s.conn, "r-revive", "the direct revival"); !ack.GetOk() {
+	// KEEPING what the ack await reads past: the awake SessionView rides the
+	// bulk lane and the ack the control lane, so the view may already have been
+	// delivered by the time the ack is matched.
+	ack, beforeAck := awaitAckKeeping(t, s.conn, "r-revive", "the direct revival")
+	if !ack.GetOk() {
 		t.Fatalf("reviveSession(direct) nacked: %s", ack.GetError())
 	}
-	s.awaitAwake(t)
+	s.awaitAwake(t, beforeAck...)
 	writeCmd(t, s.conn, `{"requestId":"r-prompt","submitPrompt":{"text":"after-direct-revival","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert — the prompt's own reply, which only a live shim can produce.
@@ -104,31 +110,35 @@ func TestE2EADirectRevivalCompactsNothing(t *testing.T) {
 
 	// Act
 	sendReviveDirect(t, s.conn, "r-revive")
-	if ack := awaitAck(t, s.conn, "r-revive", "the direct revival"); !ack.GetOk() {
+	// KEEPING what the ack await reads past: the awake SessionView rides the
+	// bulk lane and the ack the control lane, so the view may already have been
+	// delivered by the time the ack is matched.
+	ack, beforeAck := awaitAckKeeping(t, s.conn, "r-revive", "the direct revival")
+	if !ack.GetOk() {
 		t.Fatalf("reviveSession(direct) nacked: %s", ack.GetError())
 	}
-	s.awaitAwake(t)
+	s.awaitAwake(t, beforeAck...)
 	writeCmd(t, s.conn, `{"requestId":"r-prompt","submitPrompt":{"text":"after-direct-revival","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert — the user's own prompt is the FIRST turn of the revived session.
-	reject := func(frame *frontendv1.FrontendFrame) string {
-		for _, item := range deltaItems(frame, s.cwd) {
-			if strings.Contains(assistantText(item), echoOf(compactCommand)) {
-				return "a direct revival submitted " + compactCommand + " anyway"
+	//
+	// THE DURABLE RECORD IS WHAT PROVES THE NEGATIVE. A context cut the daemon
+	// submitted is withheld from every rendering
+	// (sessioncontroller/contextcutexclude.go), so its absence from the feed
+	// would hold whether or not one had run; the store keeps the turn either
+	// way, and its arrival order makes reading past the user's own turn proof
+	// that no compaction preceded it.
+	tail := tailStore(t, revivedVendorID(t, s))
+	tail.awaitSentinel(t, "the user's own first turn after a direct revival",
+		func(ev *corev1.Event) string {
+			if started := daemonCompactStart(ev); started != nil {
+				return "a direct revival submitted " + compactCommand + " anyway (turn_id=" + started.GetTurnId() + ")"
 			}
-		}
-		return ""
-	}
-	awaitAll(t, s.conn, reject, map[string]func(*frontendv1.FrontendFrame) bool{
-		"the user's own first post-revival turn": func(frame *frontendv1.FrontendFrame) bool {
-			for _, item := range deltaItems(frame, s.cwd) {
-				if strings.Contains(assistantText(item), echoOf("after-direct-revival")) {
-					return true
-				}
-			}
-			return false
-		},
-	})
+			return ""
+		}, func(ev *corev1.Event) bool {
+			started := userTurnStart(ev)
+			return started != nil && strings.Contains(started.GetPromptPreview(), "after-direct-revival")
+		})
 }
 
 // --- compact-first revival ----------------------------------------------------
@@ -147,17 +157,11 @@ func TestE2EACompactFirstRevivalSubmitsCompactItself(t *testing.T) {
 		t.Fatalf("reviveSession(compact_first) nacked: %s", ack.GetError())
 	}
 
-	// Assert
-	awaitAll(t, s.conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
-		"a turn carrying the daemon-submitted " + compactCommand: func(frame *frontendv1.FrontendFrame) bool {
-			for _, item := range deltaItems(frame, s.cwd) {
-				if strings.Contains(assistantText(item), echoOf(compactCommand)) {
-					return true
-				}
-			}
-			return false
-		},
-	})
+	// Assert — read from the durable record, which is where a cut the daemon
+	// submitted is observable at all.
+	if got := awaitDaemonCompact(t, s); !strings.HasPrefix(got, compactCommand) {
+		t.Fatalf("the compact-first revival submitted %q, want the vendor's own %s", got, compactCommand)
+	}
 }
 
 // TestE2EPromptsAreGatedUntilTheCompactionLands covers WHY compact_first is a
@@ -177,26 +181,17 @@ func TestE2EPromptsAreGatedUntilTheCompactionLands(t *testing.T) {
 	writeCmd(t, s.conn, `{"requestId":"r-early","submitPrompt":{"text":"typed-before-compaction","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert — the compaction's own turn runs and the early prompt does not.
-	// The compaction turn is the sentinel: it was submitted BEFORE this prompt,
-	// so its reply cannot arrive after a reply to a prompt that jumped it.
-	reject := func(frame *frontendv1.FrontendFrame) string {
-		for _, item := range deltaItems(frame, s.cwd) {
-			if strings.Contains(assistantText(item), echoOf("typed-before-compaction")) {
-				return "a prompt submitted during a compact-first revival was answered before the compaction landed"
+	// The compaction turn's END is the sentinel: it was submitted BEFORE this
+	// prompt, so the store's arrival order makes a missing earlier turn start
+	// proof of absence rather than of lateness.
+	tail := tailStore(t, revivedVendorID(t, s))
+	tail.awaitSentinel(t, "the revival's own /compact turn ending in the durable record",
+		func(ev *corev1.Event) string {
+			if started := userTurnStart(ev); started != nil && strings.Contains(started.GetPromptPreview(), "typed-before-compaction") {
+				return "a prompt submitted during a compact-first revival reached the vendor before the compaction landed"
 			}
-		}
-		return ""
-	}
-	awaitAll(t, s.conn, reject, map[string]func(*frontendv1.FrontendFrame) bool{
-		"the compaction turn's own reply": func(frame *frontendv1.FrontendFrame) bool {
-			for _, item := range deltaItems(frame, s.cwd) {
-				if strings.Contains(assistantText(item), echoOf(compactCommand)) {
-					return true
-				}
-			}
-			return false
-		},
-	})
+			return ""
+		}, daemonCompactEnded)
 }
 
 // TestE2EACompletedCompactionReleasesTheGatedPrompt covers the RELEASE: gated
@@ -211,9 +206,7 @@ func TestE2EACompletedCompactionReleasesTheGatedPrompt(t *testing.T) {
 		t.Fatalf("reviveSession(compact_first) nacked: %s", ack.GetError())
 	}
 	writeCmd(t, s.conn, `{"requestId":"r-gated","submitPrompt":{"text":"released-by-compaction","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
-	awaitItem(t, s.conn, s.cwd, "the compaction turn's reply", func(item *frontendv1.ConversationItem) bool {
-		return strings.Contains(assistantText(item), echoOf(compactCommand))
-	})
+	awaitDaemonCompactRan(t, s)
 
 	// Act — the compaction lands, exactly as the sidecar records one.
 	store := dialStoreProducer(t)
@@ -249,7 +242,7 @@ func TestE2EACompactionThatNeverLandsKeepsTheGateShut(t *testing.T) {
 	if ack := awaitAck(t, s.conn, "r-revive", "the compact-first revival"); !ack.GetOk() {
 		t.Fatalf("reviveSession(compact_first) nacked: %s", ack.GetError())
 	}
-	awaitItem(t, s.conn, s.cwd, "the compaction turn's result item", isResult)
+	awaitDaemonCompactRan(t, s)
 
 	// Act
 	writeCmd(t, s.conn, `{"requestId":"r-after","submitPrompt":{"text":"after-a-failed-compaction","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
@@ -324,23 +317,15 @@ func TestE2EAScopedCompactFirstRevivalSubmitsItsSteeredCompact(t *testing.T) {
 				t.Fatalf("reviveSession(%s) nacked: %s", tc.scope, ack.GetError())
 			}
 
-			// Assert
-			// The fake vendor echoes the WHOLE prompt it received, so the reply
-			// carries both facts at once: that the turn was a `/compact`, and
-			// that the instructions the scope adds travelled with it. The exact
-			// wording is the session controller's own unit test; what an e2e can
-			// prove is that the CLI got it.
-			awaitAll(t, s.conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
-				"a turn carrying the steered " + compactCommand: func(frame *frontendv1.FrontendFrame) bool {
-					for _, item := range deltaItems(frame, s.cwd) {
-						text := assistantText(item)
-						if strings.Contains(text, "echo: "+compactCommand+" ") && strings.Contains(text, tc.want) {
-							return true
-						}
-					}
-					return false
-				},
-			})
+			// Assert — the durable record carries the prompt the vendor was
+			// actually handed, which states both facts at once: that the turn
+			// was a `/compact`, and that the instructions the scope adds
+			// travelled with it. The exact wording is the session controller's
+			// own unit test; what an e2e can prove is that the CLI got it.
+			got := awaitDaemonCompact(t, s)
+			if !strings.HasPrefix(got, compactCommand+" ") || !strings.Contains(got, tc.want) {
+				t.Fatalf("the %s revival submitted %q, want a %s carrying %q", tc.scope, got, compactCommand, tc.want)
+			}
 		})
 	}
 }
@@ -379,4 +364,57 @@ func revivedVendorID(t *testing.T, s *keepAliveSession) string {
 	t.Helper()
 	return vendorSessionID(t, s.h, s.sessionID, func(id string) bool { return id != "" },
 		"a conversation identity for the revived session")
+}
+
+
+// --- observing the daemon's own compaction ------------------------------------
+//
+// A CONTEXT CUT THE DAEMON SUBMITTED LEAVES NO RESIDUE IN ANY RENDERING. Its
+// echo, its terminal result and any notice the CLI answered with are withheld
+// from the live push, the ring resync, the store re-pull and the durable replay
+// alike (sessioncontroller/contextcutexclude.go): the turn is the daemon's own
+// bookkeeping, and a duration chip over a turn the user cannot see is a
+// statement they have no way to read.
+//
+// So the feed is deliberately NOT where a revival's `/compact` is observable,
+// and the assertions below read the DURABLE RECORD instead. The turn is written
+// to the store under its `revive-compact:` id, which carries both facts these
+// tests need: what the CLI received, and that the turn ran.
+
+// daemonCompactStart returns the TurnStarted of a revival's own `/compact`, or
+// nil. The id's family is the verdict, read through the one vocabulary the
+// minting site uses.
+func daemonCompactStart(ev *corev1.Event) *corev1.TurnStarted {
+	started := ev.GetTurnStarted()
+	if started == nil || !strings.HasPrefix(started.GetTurnId(), daemonturn.ReviveCompactPrefix) {
+		return nil
+	}
+	return started
+}
+
+// daemonCompactEnded reports whether the event ends a revival's own `/compact`.
+func daemonCompactEnded(ev *corev1.Event) bool {
+	ended := ev.GetTurnEnded()
+	return ended != nil && strings.HasPrefix(ended.GetTurnId(), daemonturn.ReviveCompactPrefix)
+}
+
+// awaitDaemonCompact returns the prompt the revival's own `/compact` carried to
+// the vendor. The preview is the whole prompt here: every instruction this
+// daemon composes is one line well under the shim's 200-character cap.
+func awaitDaemonCompact(t *testing.T, s *keepAliveSession) string {
+	t.Helper()
+	tail := tailStore(t, revivedVendorID(t, s))
+	ev := tail.await(t, "the revival's own /compact in the durable record", func(ev *corev1.Event) bool {
+		return daemonCompactStart(ev) != nil
+	})
+	return daemonCompactStart(ev).GetPromptPreview()
+}
+
+// awaitDaemonCompactRan returns once the revival's own `/compact` turn has
+// ENDED, which is the point every "the compaction has run, only its LANDING is
+// outstanding" arrangement needs to stand on.
+func awaitDaemonCompactRan(t *testing.T, s *keepAliveSession) {
+	t.Helper()
+	tail := tailStore(t, revivedVendorID(t, s))
+	tail.await(t, "the revival's own /compact turn ending in the durable record", daemonCompactEnded)
 }

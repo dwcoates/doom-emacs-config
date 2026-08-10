@@ -292,7 +292,7 @@ func (w *shutdownWorld) bootRecordingStops(t *testing.T) *stopCauseBoot {
 		Prompts:           controller,
 		Turns:             controller,
 		Health:            controller,
-		Lifecycle:         &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Logf: logf},
+		Lifecycle:         &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Failures: controller, Logf: logf},
 		SessionDeaths:     server.RegistrySessionDeaths{Reg: reg},
 		Resyncer:          controller,
 		Catalogs:          controller,

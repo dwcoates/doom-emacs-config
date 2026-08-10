@@ -613,7 +613,7 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		Health:        controller,
 		Hibernations:  controller,
 		Restarts:      controller,
-		Lifecycle:     &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Logf: b.logf},
+		Lifecycle:     &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Failures: controller, Logf: b.logf},
 		SessionDeaths: server.RegistrySessionDeaths{Reg: reg},
 		Resyncer:      controller,
 		Catalogs:      controller,
