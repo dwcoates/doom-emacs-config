@@ -39,6 +39,9 @@ import (
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/ssm"
+	"claude-repld/internal/statedb"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // vanishedResumeFence is one session's standing terminal refusal.
@@ -119,6 +122,12 @@ func (m *Manager) clearVanishedResumeFence(workspace, sessionID string) {
 	f := m.vanishedResume[sessionID]
 	delete(m.vanishedResume, sessionID)
 	m.mu.Unlock()
+	// UNCONDITIONALLY, and before the in-memory check. The fence map is per
+	// boot and the card's row is not, so a successor daemon that has not yet
+	// re-derived the fence still holds the previous daemon's standing card —
+	// and a hard restart must withdraw that claim whether or not this process
+	// happens to be the one that made it.
+	m.withdrawTerminalStartFailure(workspace, sessionID)
 	if f == nil {
 		return
 	}
@@ -126,33 +135,113 @@ func (m *Manager) clearVanishedResumeFence(workspace, sessionID string) {
 		workspace, sessionID, f.shortCircuits)
 }
 
-// publishTerminalStartFailure pushes the fence's card WITHOUT a controller,
+// terminalStartFailureCard renders the fence's card.
+//
+// The body comes from openFailureCard, so a terminal resume failure carries the
+// SAME typed continuity evidence — which conversation, which config root, which
+// paths were searched — that every other classified resume failure does.
+//
+// THE CARD STATES THE FENCE'S OWN DISPOSITION. Every other bring-up failure is
+// `open' — it invites waiting, and the ensure/reattach ladders are right to
+// keep asking. This one cannot heal on its own, which is exactly what the
+// terminal arm means, and stamping it is what lets a client stop its automatic
+// re-open loop from the wire instead of from prose. The card is not hidden or
+// downgraded by this: it renders in the feed as it always did, and only its
+// invitation to wait is withdrawn.
+//
+// IT IS ONE RENDERING, shared by the live push and the durable record, so the
+// card a late reader is served cannot drift from the one that was pushed.
+func (m *Manager) terminalStartFailureCard(cause error) *frontendv1.FailureCardView {
+	card := openFailureCard(m.logf, cause)
+	errclass.Terminal(card)
+	return card
+}
+
+// persistTerminalStartFailure writes the fence's card to the durable store,
+// which is what makes it survive the instant it was pushed at.
+//
+// THE PUSH IS FOR THE CLIENT CONNECTED NOW; THIS IS FOR EVERY LATER ONE. A
+// resync for a workspace with no live controller is served from durable history
+// (durablereplay.go), and durable history is the vendor conversation — a
+// session that was refused before it ever spawned wrote nothing into it. So
+// without this row the terminal refusal is invisible to every client that
+// connects after it, forever, which is the failure this exists to end.
+//
+// THE ROW REPLACES rather than accumulates: the fence is cleared by a hard
+// restart and re-established when the re-check finds the transcript still gone,
+// and that flow must restate one standing card, not stack a second.
+func (m *Manager) persistTerminalStartFailure(workspace, sessionID string, item *frontendv1.ConversationItem, cause error) {
+	if m.cfg.TerminalFailureCards == nil {
+		m.warnf("session-controller: terminal bring-up failure ws=%q session=%s is NOT persisted — no TerminalFailureCardStore is wired, so only a client connected at this instant will ever see its card: %v",
+			workspace, sessionID, cause)
+		return
+	}
+	blob, err := proto.Marshal(item.GetFailureCard())
+	if err != nil {
+		m.errorf("session-controller: terminal bring-up failure card for ws=%q session=%s could not be marshaled and is NOT persisted; a client connecting later will see no account of it: %v",
+			workspace, sessionID, err)
+		return
+	}
+	if err := m.cfg.TerminalFailureCards.Record(statedb.TerminalFailureCard{
+		SessionID: sessionID,
+		Workspace: workspace,
+		UUID:      item.GetUuid(),
+		Card:      blob,
+		AtMs:      item.GetTsMs(),
+	}); err != nil {
+		m.errorf("session-controller: terminal bring-up failure card for ws=%q session=%s could not be persisted; a client connecting later will see no account of it: %v",
+			workspace, sessionID, err)
+		return
+	}
+	m.logf("session-controller: terminal bring-up failure card PERSISTED ws=%q session=%s uuid=%s — every later durable-history resync serves it, under the same identity the live push used",
+		workspace, sessionID, item.GetUuid())
+}
+
+// withdrawTerminalStartFailure deletes the session's standing card, because the
+// claim it makes has been withdrawn: clearing the fence is an explicit user
+// action, and the next bring-up either succeeds — in which case the card would
+// be a lie about a live session — or re-fences and rewrites the row.
+func (m *Manager) withdrawTerminalStartFailure(workspace, sessionID string) {
+	if m.cfg.TerminalFailureCards == nil {
+		return
+	}
+	stood, err := m.cfg.TerminalFailureCards.Withdraw(sessionID)
+	if err != nil {
+		m.errorf("session-controller: the standing terminal failure card for ws=%q session=%s could not be withdrawn; a durable-history resync will keep serving it after the fence was cleared: %v",
+			workspace, sessionID, err)
+		return
+	}
+	if stood {
+		m.logf("session-controller: standing terminal failure card WITHDRAWN ws=%q session=%s — the fence was cleared, so its account of a session that cannot come up no longer stands",
+			workspace, sessionID)
+	}
+}
+
+// publishTerminalStartFailure publishes the fence's card WITHOUT a controller,
 // which is the whole reason it exists: the refusal happens before any
 // controller is constructed, so the consumer's push path is out of reach and a
 // failure with nowhere to land is a failure the user never sees.
 //
-// The card is rendered by openFailureCard, so a terminal resume failure carries
-// the SAME typed continuity evidence — which conversation, which config root,
-// which paths were searched — that every other classified resume failure does.
+// IT PUBLISHES TWICE, TO TWO AUDIENCES. The durable record is written FIRST and
+// is the source of truth for every later reader; the live push then reaches the
+// clients connected at this instant, which the store cannot. Neither replaces
+// the other, and both carry one rendering under one identity.
 func (m *Manager) publishTerminalStartFailure(workspace, sessionID string, cause error) {
-	if m.cfg.Push == nil {
-		m.errorf("session-controller: terminal bring-up failure ws=%q session=%s has no frontend to publish its failure card onto; the cause is recorded here only: %v",
-			workspace, sessionID, cause)
-		return
-	}
-	card := openFailureCard(m.logf, cause)
-	// THE CARD STATES THE FENCE'S OWN DISPOSITION. Every other bring-up
-	// failure is `open' — it invites waiting, and the ensure/reattach ladders
-	// are right to keep asking. This one cannot heal on its own, which is
-	// exactly what the terminal arm means, and stamping it is what lets a
-	// client stop its automatic re-open loop from the wire instead of from
-	// prose. The card is not hidden or downgraded by this: it renders in the
-	// feed as it always did, and only its invitation to wait is withdrawn.
-	errclass.Terminal(card)
+	card := m.terminalStartFailureCard(cause)
 	item := &frontendv1.ConversationItem{
 		Uuid: startFailedCardUUID(sessionID),
 		TsMs: m.now(),
 		Item: &frontendv1.ConversationItem_FailureCard{FailureCard: card},
+	}
+	// PERSISTED BEFORE PUSHED, and before the Push nil-check refuses: a daemon
+	// with no frontend attached still owes the record, and a card the store
+	// holds is a card every later client is served whether or not one was
+	// listening now.
+	m.persistTerminalStartFailure(workspace, sessionID, item, cause)
+	if m.cfg.Push == nil {
+		m.errorf("session-controller: terminal bring-up failure ws=%q session=%s has no frontend to publish its failure card onto live; the cause is recorded here and in the durable card: %v",
+			workspace, sessionID, cause)
+		return
 	}
 	// Provenance is stamped exactly as the consumer's local-item push stamps
 	// it, and a refusal to stamp is a refusal to push: an item with an unset

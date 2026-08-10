@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/statedb"
 )
 
 // ---------------------------------------------------------------------------
@@ -209,5 +211,233 @@ func TestTheFenceCardIsTerminal(t *testing.T) {
 	}
 	if !errclass.IsTerminal(cards[0]) {
 		t.Fatalf("fence card lifecycle = %T, want the terminal arm", cards[0].GetLifecycle())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE DURABLE HALF OF THE FENCE. A live push reaches only the clients connected
+// at that instant; the card the store holds is what every later reader is
+// served. See vanishedresume.go and durablereplay.go.
+// ---------------------------------------------------------------------------
+
+// fakeTerminalCardStore is a TerminalFailureCardStore over a map, with the same
+// replace-on-record rule the table's ON CONFLICT clause enforces.
+type fakeTerminalCardStore struct {
+	mu   sync.Mutex
+	rows map[string]statedb.TerminalFailureCard
+	// records counts every Record call, so a test can tell a REPLACED row from
+	// a row that was only written once.
+	records   int
+	recordErr error
+	readErr   error
+}
+
+func newFakeTerminalCardStore() *fakeTerminalCardStore {
+	return &fakeTerminalCardStore{rows: map[string]statedb.TerminalFailureCard{}}
+}
+
+func (f *fakeTerminalCardStore) Record(rec statedb.TerminalFailureCard) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.records++
+	if f.recordErr != nil {
+		return f.recordErr
+	}
+	f.rows[rec.SessionID] = rec
+	return nil
+}
+
+func (f *fakeTerminalCardStore) Standing(sessionID string) (statedb.TerminalFailureCard, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.readErr != nil {
+		return statedb.TerminalFailureCard{}, false, f.readErr
+	}
+	rec, ok := f.rows[sessionID]
+	return rec, ok, nil
+}
+
+func (f *fakeTerminalCardStore) Withdraw(sessionID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.rows[sessionID]
+	delete(f.rows, sessionID)
+	return ok, nil
+}
+
+// seed installs a standing card as a previous daemon would have left it.
+func (f *fakeTerminalCardStore) seed(rec statedb.TerminalFailureCard) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rows[rec.SessionID] = rec
+}
+
+// standingCount reports how many sessions hold a standing card.
+func (f *fakeTerminalCardStore) standingCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.rows)
+}
+
+// recordCalls reports how many writes the fence made.
+func (f *fakeTerminalCardStore) recordCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.records
+}
+
+// TestTheFenceCardIsPersisted: the defect itself — the card used to exist only
+// as a live push, so a client connecting after the refusal was served history
+// with no account of why nothing drives it.
+func TestTheFenceCardIsPersisted(t *testing.T) {
+	// Arrange.
+	h := newEscapeHarness(t)
+	h.spawner.err = errVanishedTarget
+
+	// Act.
+	if _, err := h.m.ensure(context.Background(), "ws"); err == nil {
+		t.Fatal("the ensure succeeded; the harness must refuse it terminally")
+	}
+
+	// Assert.
+	rec, standing, err := h.cards.Standing("s1")
+	if err != nil {
+		t.Fatalf("Standing: %v", err)
+	}
+	if !standing {
+		t.Fatal("the fence published its card and persisted nothing; every later reader sees no account of the refusal")
+	}
+	if rec.Workspace != "ws" || rec.UUID != startFailedCardUUID("s1") || len(rec.Card) == 0 {
+		t.Fatalf("persisted card = %+v, want the fence's own workspace, uuid and rendered card", rec)
+	}
+}
+
+// TestThePersistedCardCarriesTheLivePushesIdentity: a client that saw the live
+// card and then resyncs must update ONE item, not draw a second account.
+func TestThePersistedCardCarriesTheLivePushesIdentity(t *testing.T) {
+	// Arrange.
+	h := newEscapeHarness(t)
+	h.spawner.err = errVanishedTarget
+
+	// Act.
+	if _, err := h.m.ensure(context.Background(), "ws"); err == nil {
+		t.Fatal("the ensure succeeded; the harness must refuse it terminally")
+	}
+
+	// Assert.
+	rec, _, err := h.cards.Standing("s1")
+	if err != nil {
+		t.Fatalf("Standing: %v", err)
+	}
+	pushed := h.failureCardItems()
+	if len(pushed) != 1 {
+		t.Fatalf("pushed failure items = %d, want exactly one", len(pushed))
+	}
+	if pushed[0].GetUuid() != rec.UUID {
+		t.Fatalf("pushed uuid = %q, persisted uuid = %q; the two accounts must share one identity", pushed[0].GetUuid(), rec.UUID)
+	}
+}
+
+// TestTheLivePushStillReachesConnectedClients: persistence is additive. A
+// client connected at the instant of the refusal must still be told
+// immediately rather than waiting for its next resync.
+func TestTheLivePushStillReachesConnectedClients(t *testing.T) {
+	// Arrange.
+	h := newEscapeHarness(t)
+	h.spawner.err = errVanishedTarget
+
+	// Act.
+	if _, err := h.m.ensure(context.Background(), "ws"); err == nil {
+		t.Fatal("the ensure succeeded; the harness must refuse it terminally")
+	}
+
+	// Assert.
+	if got := len(h.failureCards()); got != 1 {
+		t.Fatalf("live-pushed failure cards = %d, want the one card a connected client always got", got)
+	}
+}
+
+// TestARefenceReplacesTheStandingCard: the fence is cleared by a hard restart
+// and re-established when the re-check finds the transcript still gone. That
+// flow must restate one standing card rather than accumulate a second.
+func TestARefenceReplacesTheStandingCard(t *testing.T) {
+	// Arrange — fenced once, then restarted into a re-fence.
+	h := newEscapeHarness(t)
+	h.spawner.err = errVanishedTarget
+	if _, err := h.m.ensure(context.Background(), "ws"); err == nil {
+		t.Fatal("the first ensure succeeded; the harness must refuse it terminally")
+	}
+
+	// Act.
+	if err := h.m.RestartSession(context.Background(), "ws"); err == nil {
+		t.Fatal("the restart succeeded; the harness must refuse it terminally")
+	}
+
+	// Assert.
+	if got := h.cards.standingCount(); got != 1 {
+		t.Fatalf("standing terminal cards = %d, want one session to hold exactly one", got)
+	}
+}
+
+// TestARefenceRewritesTheStandingCard: the re-fence must actually restate the
+// claim rather than leave a stale row standing beside a fresh fence.
+func TestARefenceRewritesTheStandingCard(t *testing.T) {
+	// Arrange.
+	h := newEscapeHarness(t)
+	h.spawner.err = errVanishedTarget
+	if _, err := h.m.ensure(context.Background(), "ws"); err == nil {
+		t.Fatal("the first ensure succeeded; the harness must refuse it terminally")
+	}
+
+	// Act.
+	if err := h.m.RestartSession(context.Background(), "ws"); err == nil {
+		t.Fatal("the restart succeeded; the harness must refuse it terminally")
+	}
+
+	// Assert.
+	if got := h.cards.recordCalls(); got != 2 {
+		t.Fatalf("card writes = %d, want the re-fence to have REWRITTEN the standing row", got)
+	}
+}
+
+// TestClearingTheFenceWithdrawsTheStandingCard: the card is durable evidence of
+// a STANDING condition. A hard restart withdraws the claim, so a bring-up that
+// then succeeds is not described by a card saying it cannot come up.
+func TestClearingTheFenceWithdrawsTheStandingCard(t *testing.T) {
+	// Arrange — fenced, then the spawner heals under the restart.
+	h := newEscapeHarness(t, &fakeClient{})
+	h.spawner.err = errVanishedTarget
+	if _, err := h.m.ensure(context.Background(), "ws"); err == nil {
+		t.Fatal("the first ensure succeeded; the harness must refuse it terminally")
+	}
+	h.spawner.err = nil
+
+	// Act.
+	if err := h.m.RestartSession(context.Background(), "ws"); err != nil {
+		t.Fatalf("RestartSession: %v", err)
+	}
+
+	// Assert.
+	if got := h.cards.standingCount(); got != 0 {
+		t.Fatalf("standing terminal cards = %d, want the withdrawn claim to be gone", got)
+	}
+}
+
+// TestAnUnpersistableFenceCardIsLoud: a card that could not be written is a
+// card no later reader will ever see, which must never pass in silence.
+func TestAnUnpersistableFenceCardIsLoud(t *testing.T) {
+	// Arrange.
+	h := newEscapeHarness(t)
+	h.cards.recordErr = errors.New("statedb: disk is gone")
+	h.spawner.err = errVanishedTarget
+
+	// Act.
+	if _, err := h.m.ensure(context.Background(), "ws"); err == nil {
+		t.Fatal("the ensure succeeded; the harness must refuse it terminally")
+	}
+
+	// Assert.
+	if !h.log.contains("could not be persisted") {
+		t.Fatal("a terminal failure card that could not be persisted was not reported")
 	}
 }
