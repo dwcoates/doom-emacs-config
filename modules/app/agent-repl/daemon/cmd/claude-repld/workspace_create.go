@@ -854,7 +854,12 @@ func (b *WorkspaceCreationBridge) SnapshotHostWork() server.WorkspaceHostWorkSna
 	}
 	result := server.WorkspaceHostWorkSnapshot{}
 	for _, job := range jobs {
-		if job.State == workspacecreate.StateAwaitingEmacs {
+		// AN ABANDONED JOB IS NOT REPLAYED. The connect snapshot is the second
+		// path to the host, and the only one a daemon restart cannot silence, so
+		// a job whose wait already has a terminal disposition would be
+		// resurrected by every host connect for the rest of time if this replay
+		// did not honour it too.
+		if job.State == workspacecreate.StateAwaitingEmacs && !job.PublicationAbandoned {
 			result.WorkspaceAvailable = append(result.WorkspaceAvailable, toProtoAvailable(job))
 		}
 	}
