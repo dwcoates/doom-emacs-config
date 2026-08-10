@@ -449,24 +449,35 @@ it ran."
                    (or targets 'default) (if force "t" "nil") exit-code
                    (if (string-empty-p output) "<empty>" output)))
 
-(defun agent-repl--frontend-build-report-failure (label exit-code output)
-  "Surface a failed LABEL build (EXIT-CODE, OUTPUT) and return its detail.
-Raises the phase line, pops the capture buffer, and hands back the
-message string.  The blocking caller signals with it; the asynchronous
-caller, which has no stack to signal on, warns with it and passes it to
-its failure continuation."
+(defun agent-repl--frontend-run-report-failure (phase-subject error-subject exit-code output)
+  "Surface a failed script run and return its failure detail string.
+PHASE-SUBJECT names the run in the minibuffer phase line, ERROR-SUBJECT
+in the returned message; EXIT-CODE and OUTPUT are the run's own.  Raises
+the phase line, pops the capture buffer, and hands back the message.
+The blocking callers signal with it; the asynchronous one, which has no
+stack to signal on, warns with it and passes it to its failure
+continuation."
   (agent-repl--backend-phase
-   nil "%s build FAILED (exit %s): %s — full output in %s"
-   label exit-code (agent-repl--backend-output-tail output)
+   nil "%s FAILED (exit %s): %s — full output in %s"
+   phase-subject exit-code (agent-repl--backend-output-tail output)
    (agent-repl--logfile-path))
   (display-buffer agent-repl--frontend-build-buffer)
-  (format "agent-repl: frontend build failed (exit %s) — see %s"
-          exit-code agent-repl--frontend-build-buffer))
+  (format "agent-repl: %s failed (exit %s) — see %s"
+          error-subject exit-code agent-repl--frontend-build-buffer))
+
+(defun agent-repl--frontend-run-report-success (phrase started)
+  "Raise the phase line reading PHRASE for a run that began at STARTED."
+  (agent-repl--backend-phase nil "%s (%.1fs)" phrase
+                             (- (float-time) started)))
+
+(defun agent-repl--frontend-build-report-failure (label exit-code output)
+  "Surface a failed LABEL build (EXIT-CODE, OUTPUT) and return its detail."
+  (agent-repl--frontend-run-report-failure
+   (format "%s build" label) "frontend build" exit-code output))
 
 (defun agent-repl--frontend-build-report-success (label started)
   "Raise the phase line for a LABEL build that began at STARTED."
-  (agent-repl--backend-phase nil "%s built (%.1fs)" label
-                             (- (float-time) started)))
+  (agent-repl--frontend-run-report-success (format "%s built" label) started))
 
 (defun agent-repl--frontend-build-targets-if-stale (targets &optional force)
   "Build stale TARGETS through the shared artifact orchestrator.
@@ -706,29 +717,20 @@ it, which fails every command rather than degrading."
                      agent-repl--frontend-deploy-script)
     (error "agent-repl: deploy script not found: %s"
            agent-repl--frontend-deploy-script))
-  (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
-    (erase-buffer))
+  (agent-repl--frontend-build-reset-capture)
   (let* ((started (float-time))
          (args (append (list agent-repl--frontend-deploy-script "--no-daemon-bounce")
                        (when force (list "--force")))))
     (agent-repl--backend-phase nil "deploying the backend stack…")
     (let* ((exit-code (agent-repl--frontend-run-build-script args))
-           (output
-            (with-current-buffer agent-repl--frontend-build-buffer
-              (string-trim-right (buffer-string)))))
+           (output (agent-repl--frontend-build-captured-output)))
       (agent-repl--log nil "frontend deploy-stack: force=%s exit=%S output=%s"
                        (if force "t" "nil") exit-code
                        (if (string-empty-p output) "<empty>" output))
       (unless (eq exit-code 0)
-        (agent-repl--backend-phase
-         nil "stack deploy FAILED (exit %s): %s — full output in %s"
-         exit-code (agent-repl--backend-output-tail output)
-         (agent-repl--logfile-path))
-        (display-buffer agent-repl--frontend-build-buffer)
-        (error "agent-repl: stack deploy failed (exit %s) — see %s"
-               exit-code agent-repl--frontend-build-buffer))
-      (agent-repl--backend-phase nil "backend stack deployed (%.1fs)"
-                                 (- (float-time) started))
+        (error "%s" (agent-repl--frontend-run-report-failure
+                     "stack deploy" "stack deploy" exit-code output)))
+      (agent-repl--frontend-run-report-success "backend stack deployed" started)
       exit-code)))
 
 ;;;; ---- Launch -----------------------------------------------------------
