@@ -428,7 +428,7 @@ func TestCommandLanesRunEveryReadCommandBeforeCloseReturns(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	s := newLaneServer(t, newLaneHandler())
-	lanes := newCommandLanes(testLogf(t), func(ticket *commandTicket) {
+	lanes := newCommandLanes(testLogf(t), testLogf(t), func(ticket *commandTicket) {
 		mu.Lock()
 		ran = append(ran, ticket.cmd.GetRequestId())
 		first := len(ran) == 1
@@ -437,7 +437,7 @@ func TestCommandLanesRunEveryReadCommandBeforeCloseReturns(t *testing.T) {
 			close(started)
 			<-release
 		}
-	})
+	}, func(*commandTicket) { t.Error("nothing was coalesced, want no supersede answer") })
 
 	// Act.
 	lanes.submit(s.newCommandTicket(nil, openCmd("r1", "/ws/a"), time.Now(), 1))
@@ -463,7 +463,9 @@ func TestCommandLanesFailHardOnASubmitAfterClose(t *testing.T) {
 	s := newLaneServer(t, newLaneHandler())
 	lanes := newCommandLanes(
 		func(format string, args ...any) { logs = append(logs, sprintfLane(format, args...)) },
+		testLogf(t),
 		func(ticket *commandTicket) { ran = append(ran, ticket.cmd.GetRequestId()) },
+		func(*commandTicket) { t.Fatal("nothing was coalesced, want no supersede answer") },
 	)
 	lanes.close()
 
