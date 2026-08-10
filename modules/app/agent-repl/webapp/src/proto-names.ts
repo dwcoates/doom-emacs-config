@@ -60,6 +60,7 @@ import type {
   QueueEntryKeepAliveHold as GeneratedQueueEntryKeepAliveHold,
   QueueEntryRevivalHold as GeneratedQueueEntryRevivalHold,
   QueueEntryBuildRefreshHold as GeneratedQueueEntryBuildRefreshHold,
+  QueueClassificationUninterruptibleTurn as GeneratedQueueClassificationUninterruptibleTurn,
 } from "../../proto/gen/ts/agentshim/frontend/v1/prompt-queue_pb";
 import { PromptOrigin as GeneratedPromptOrigin } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
 
@@ -151,7 +152,18 @@ export const QUEUE_CLASSIFICATION_ARM = {
   interject: "interject",
   holdForTurnEnd: "holdForTurnEnd",
   error: "error",
+  uninterruptibleTurn: "uninterruptibleTurn",
 } as const satisfies Record<string, ArmKeys<GeneratedQueueEntry["classification"]>>;
+
+/**
+ * The uninterruptible-turn verdict's only field: WHICH context cut is running.
+ *
+ * Bound to the generated message for the reason every table here is: the arm
+ * says nothing without the command, so a drifted spelling would render a card
+ * that cannot name what the prompt is waiting behind.
+ */
+export const UNINTERRUPTIBLE_TURN_COMMAND: FieldKeys<GeneratedQueueClassificationUninterruptibleTurn> =
+  "command";
 
 /**
  * The `QueueEntry.hold` arm keys — WHAT is holding an entry, when something
@@ -342,6 +354,7 @@ export const FAILURE_KIND_SIDE = {
   interruptUndelivered: "machinery",
   queueEntryUnwired: "machinery",
   queueEntryKeepAliveHeld: "machinery",
+  queueEntryUninterruptibleTurn: "machinery",
   sessionHibernated: "machinery",
   keepAliveWindowUnclosed: "machinery",
   keepAliveWindowInverted: "machinery",

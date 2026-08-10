@@ -8,6 +8,7 @@ import {
   KEEP_ALIVE_HELD_REASON,
   LEASE_HELD_REASON,
   REVIVAL_HELD_REASON,
+  UNINTERRUPTIBLE_TURN_REASON,
   QueuedCard,
   queuedCardKey,
 } from "../src/render.js";
@@ -134,6 +135,58 @@ describe("queuedCardKey", () => {
   });
 });
 
+describe("the uninterruptible-turn verdict", () => {
+  /** A prompt queued behind a context cut, which nothing classified. */
+  function behindCut(over: Partial<QueuedItem> = {}): QueuedItem {
+    return queued({
+      classification: "uninterruptible",
+      uninterruptibleCommand: "COMPACT",
+      ...over,
+    });
+  }
+
+  it("names the cut the prompt is waiting behind", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(behindCut())).toContain("/compact is never interrupted");
+  });
+
+  it("names a clear when a clear is what is running", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(behindCut({ uninterruptibleCommand: "CLEAR" }))).toContain(
+      "/clear is never interrupted",
+    );
+  });
+
+  it("states why the prompt waits", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(behindCut())).toContain(UNINTERRUPTIBLE_TURN_REASON);
+  });
+
+  it("offers no Run now, because the daemon refuses to interrupt a cut", () => {
+    // Arrange / Act / Assert — a control the daemon nacks would acknowledge
+    // and achieve nothing.
+    expect(QueuedCard(behindCut())).not.toContain("data-queue-run-now");
+  });
+
+  it("offers no Accept, because no classifier judged this entry", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(behindCut())).not.toContain("data-queue-accept");
+  });
+
+  it("still offers Cancel, because a delayed prompt is still withdrawable", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(behindCut())).toContain('data-queue-cancel="q1"');
+  });
+
+  it("throws when the verdict names no command", () => {
+    // Arrange — the arm exists to name the cut, so an entry that arrived
+    // without one is a contradiction rather than a card to draw vaguely.
+    const nameless = queued({ classification: "uninterruptible" });
+    // Act / Assert
+    expect(() => QueuedCard(nameless)).toThrow(/names no command/);
+  });
+});
+
 describe("classification exhaustiveness (3e)", () => {
   it("renders a distinct badge for every classification the decoder admits", () => {
     // Arrange — the four the frontend-proto decoder can produce. Each must get
@@ -144,10 +197,14 @@ describe("classification exhaustiveness (3e)", () => {
       ["hold", "will run after this turn"],
       ["interject", "interrupting"],
       ["error", "unclassified"],
+      ["uninterruptible", "/compact is never interrupted"],
     ];
     for (const [classification, label] of want) {
-      // Act
-      const html = QueuedCard(queued({ classification }));
+      // Act — the uninterruptible verdict is the one that cannot be spelled
+      // without its command: the badge names the cut the prompt waits behind.
+      const html = QueuedCard(
+        queued({ classification, uninterruptibleCommand: "COMPACT" }),
+      );
       // Assert
       expect(html).toContain(label);
     }

@@ -23,6 +23,7 @@ import type {
   QueueEntryKeepAliveHold,
   QueueEntryRevivalHold,
   QueueEntryShutdownHold,
+  SessionCommand,
 } from "./frontend-proto.js";
 
 export type {
@@ -154,6 +155,13 @@ export interface QueuedItem {
    * `classification` says nothing about why this entry is waiting.
    */
   revivalHold?: QueueEntryRevivalHold;
+  /**
+   * The context cut running in front of this prompt, set ONLY with the
+   * `uninterruptible` classification. It is the whole account of that verdict:
+   * no classifier ran because a `/compact` or `/clear` is running and a cut is
+   * never interrupted for a queued prompt.
+   */
+  uninterruptibleCommand?: SessionCommand;
 }
 
 export type ResultSubtype =
