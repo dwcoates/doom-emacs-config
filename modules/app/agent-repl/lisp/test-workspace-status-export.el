@@ -462,5 +462,120 @@ filtered (small) snapshot."
     (agent-repl--ws-set-repl-state "ws-d" :merged)
     (should (= 2 (agent-repl--workspace-status-live-count)))))
 
+;;;; ---- Tests: the unchanged-payload write gate ----
+
+(ert-deftest agent-repl-test-write-workspace-status-skips-unchanged-payload ()
+  "A second write of identical workspace content does not touch the file."
+  (agent-repl-test--with-clean-state
+    (let* ((tmp (make-temp-file "agent-repl-status-" nil ".json"))
+           (agent-repl-workspace-status-file tmp))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-set-agent-state "ws-same" :idle)
+            (agent-repl--write-workspace-status)
+            (let ((first-contents
+                   (with-temp-buffer (insert-file-contents tmp) (buffer-string))))
+              (delete-file tmp)
+              (agent-repl--write-workspace-status)
+              (should-not (file-exists-p tmp))
+              (should (stringp first-contents))))
+        (when (file-exists-p tmp) (delete-file tmp))))))
+
+(ert-deftest agent-repl-test-write-workspace-status-writes-changed-payload ()
+  "A write whose workspace content moved lands on disk."
+  (agent-repl-test--with-clean-state
+    (let* ((tmp (make-temp-file "agent-repl-status-" nil ".json"))
+           (agent-repl-workspace-status-file tmp))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-set-agent-state "ws-move" :idle)
+            (agent-repl--write-workspace-status)
+            (delete-file tmp)
+            (agent-repl--ws-set-agent-state "ws-move" :thinking)
+            (agent-repl--write-workspace-status)
+            (should (file-exists-p tmp)))
+        (when (file-exists-p tmp) (delete-file tmp))))))
+
+(ert-deftest agent-repl-test-write-workspace-status-force-writes-unchanged-payload ()
+  "Non-nil FORCE writes even when the payload is byte-identical."
+  (agent-repl-test--with-clean-state
+    (let* ((tmp (make-temp-file "agent-repl-status-" nil ".json"))
+           (agent-repl-workspace-status-file tmp))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-set-agent-state "ws-force" :idle)
+            (agent-repl--write-workspace-status)
+            (delete-file tmp)
+            (agent-repl--write-workspace-status t)
+            (should (file-exists-p tmp)))
+        (when (file-exists-p tmp) (delete-file tmp))))))
+
+;;;; ---- Tests: terminal-state immediacy ----
+
+(ert-deftest agent-repl-test-workspace-status-terminal-transition-writes-immediately ()
+  "A transition into a terminal render state forces an off-cadence write."
+  (agent-repl-test--with-clean-state
+    (let ((forced nil))
+      (cl-letf (((symbol-function 'agent-repl--write-workspace-status)
+                 (lambda (&optional force) (setq forced (list :called force)))))
+        (agent-repl--workspace-status-react-to-pushed-state "ws-t" :merged :thinking)
+        (should (equal '(:called t) forced))))))
+
+(ert-deftest agent-repl-test-workspace-status-nonterminal-transition-writes-nothing ()
+  "A non-terminal transition rides the scheduler instead of writing."
+  (agent-repl-test--with-clean-state
+    (let ((calls 0))
+      (cl-letf (((symbol-function 'agent-repl--write-workspace-status)
+                 (lambda (&optional _force) (cl-incf calls))))
+        (agent-repl--workspace-status-react-to-pushed-state "ws-t" :thinking :idle)
+        (should (= 0 calls))))))
+
+(ert-deftest agent-repl-test-workspace-status-unmoved-terminal-state-writes-nothing ()
+  "A repeated push of an already-terminal state is not a transition."
+  (agent-repl-test--with-clean-state
+    (let ((calls 0))
+      (cl-letf (((symbol-function 'agent-repl--write-workspace-status)
+                 (lambda (&optional _force) (cl-incf calls))))
+        (agent-repl--workspace-status-react-to-pushed-state "ws-t" :merged :merged)
+        (should (= 0 calls))))))
+
+;;;; ---- Tests: the minimum-interval floor ----
+
+(ert-deftest agent-repl-test-reschedule-workspace-status-writes-honors-min-interval ()
+  "The floor caps writes per window: window=60, floor=10, N=18 → 6 writes."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-workspace-status-write-window-seconds 60)
+          (agent-repl-workspace-status-write-min-interval-seconds 10))
+      (dotimes (i 18)
+        (agent-repl--ws-put (format "ws-%d" i) :foo 1))
+      (agent-repl-test--with-stubbed-run-at-time calls
+        (setq agent-repl--workspace-status-write-sub-timers nil)
+        (agent-repl--reschedule-workspace-status-writes)
+        (should (= 6 (length calls)))))))
+
+(ert-deftest agent-repl-test-reschedule-workspace-status-writes-floor-spaces-delays ()
+  "Capped batches stay evenly spread: window=60, floor=20, N=18 → 0, 20, 40."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-workspace-status-write-window-seconds 60)
+          (agent-repl-workspace-status-write-min-interval-seconds 20))
+      (dotimes (i 18)
+        (agent-repl--ws-put (format "ws-%d" i) :foo 1))
+      (agent-repl-test--with-stubbed-run-at-time calls
+        (setq agent-repl--workspace-status-write-sub-timers nil)
+        (agent-repl--reschedule-workspace-status-writes)
+        (should (equal '(0.0 20.0 40.0) (sort (mapcar #'car calls) #'<)))))))
+
+(ert-deftest agent-repl-test-reschedule-workspace-status-writes-floor-keeps-one-write ()
+  "A floor wider than the window still schedules one write per window."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-workspace-status-write-window-seconds 60)
+          (agent-repl-workspace-status-write-min-interval-seconds 600))
+      (dotimes (i 5)
+        (agent-repl--ws-put (format "ws-%d" i) :foo 1))
+      (agent-repl-test--with-stubbed-run-at-time calls
+        (setq agent-repl--workspace-status-write-sub-timers nil)
+        (agent-repl--reschedule-workspace-status-writes)
+        (should (= 1 (length calls)))))))
+
 (provide 'test-workspace-status-export)
 ;;; test-workspace-status-export.el ends here

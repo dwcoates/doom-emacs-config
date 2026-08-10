@@ -184,10 +184,28 @@ projected into its own hash table too."
                  top)))
     top))
 
-(defun agent-repl--write-workspace-status ()
+(defvar agent-repl--workspace-status-last-written-fingerprint nil
+  "Content fingerprint of the last snapshot actually written to disk.
+The unit is the whole snapshot rather than one workspace because the
+export is a single whole-file rewrite: a per-workspace comparison could
+not spare the write unless EVERY workspace matched, which is exactly
+what this one value says.  `nil' means nothing has been written yet, so
+the first write of a session always lands.")
+
+(defun agent-repl--write-workspace-status (&optional force)
   "Write the current workspace status snapshot to disk as JSON.
 Writes to `agent-repl-workspace-status-file', creating the parent
-directory if it does not exist.  Errors are caught and logged via
+directory if it does not exist.
+
+The write is CHANGE-GATED: a snapshot whose workspace content
+fingerprint equals `agent-repl--workspace-status-last-written-fingerprint'
+is not written at all, because rewriting a byte-identical file only
+burns main-thread I/O.  The generated `updated_at' stamp is excluded
+from the fingerprint (see
+`agent-repl--workspace-status-content-fingerprint'), so a moving clock
+alone never counts as a change.  Non-nil FORCE bypasses the gate — used
+by the terminal-state writer, which must land immediately rather than
+waiting on the next staggered sub-timer.  Errors are caught and logged via
 `agent-repl--with-error-logging' so a serialization failure cannot
 break the 1-Hz poll loop that drives this.
 
@@ -208,14 +226,22 @@ that emits compact JSON with dramatically lower allocation."
       (format "write-workspace-status file=%s" agent-repl-workspace-status-file)
     (let* ((json-null :null)
            (snapshot (agent-repl--workspace-status-snapshot))
+           (fingerprint (agent-repl--workspace-status-content-fingerprint snapshot))
            (file agent-repl-workspace-status-file)
-           (dir  (file-name-directory file)))
-      (when (and dir (not (file-directory-p dir)))
-        (agent-repl--log
-         nil "write-workspace-status: outcome=create-parent-directory file=%s dir=%s"
-         file dir)
-        (make-directory dir t))
-      ;; Force utf-8-unix on the write.  On Emacs 30, `with-temp-file' without an
+           (dir  (file-name-directory file))
+           (changed (not (equal fingerprint
+                                agent-repl--workspace-status-last-written-fingerprint))))
+      (if (not (or force changed))
+          (agent-repl--log-verbose
+           nil
+           "write-workspace-status: outcome=skipped-unchanged file=%s content-fingerprint=%s"
+           file fingerprint)
+        (when (and dir (not (file-directory-p dir)))
+          (agent-repl--log
+           nil "write-workspace-status: outcome=create-parent-directory file=%s dir=%s"
+           file dir)
+          (make-directory dir t))
+        ;; Force utf-8-unix on the write.  On Emacs 30, `with-temp-file' without an
       ;; explicit coding system can land in `select-safe-coding-system' when the
       ;; serialized JSON contains characters whose default encoding is ambiguous
       ;; (e.g. U+FFFD from upstream-corrupted byte sequences in last-prompt
@@ -223,22 +249,22 @@ that emits compact JSON with dramatically lower allocation."
       ;; especially bad here because this writer fires from a 1-Hz timer, so the
       ;; prompt instantly re-pops the moment focus shifts away.  utf-8-unix is
       ;; the only encoding that round-trips json-serialize's output, so pin it.
-      (let* ((json (json-serialize
-                    (agent-repl--snapshot->json-serializable snapshot)
-                    :null-object :null
-                    :false-object :json-false))
-             (workspace-count
-              (hash-table-count (cdr (assoc "workspaces" snapshot))))
-             (coding-system-for-write 'utf-8-unix))
-        (with-temp-file file
-          (insert json)
-          (insert "\n"))
-        (let ((fingerprint (agent-repl--workspace-status-content-fingerprint snapshot)))
+        (let* ((json (json-serialize
+                      (agent-repl--snapshot->json-serializable snapshot)
+                      :null-object :null
+                      :false-object :json-false))
+               (workspace-count
+                (hash-table-count (cdr (assoc "workspaces" snapshot))))
+               (coding-system-for-write 'utf-8-unix))
+          (with-temp-file file
+            (insert json)
+            (insert "\n"))
+          (setq agent-repl--workspace-status-last-written-fingerprint fingerprint)
           (agent-repl--log-on-transition
-         nil "write-workspace-status"
-         (list workspace-count (1+ (string-bytes json)) fingerprint)
-         "write-workspace-status: outcome=wrote file=%s workspace-count=%d byte-count=%d content-fingerprint=%s"
-         file workspace-count (1+ (string-bytes json)) fingerprint))))))
+           nil "write-workspace-status"
+           (list workspace-count (1+ (string-bytes json)) fingerprint)
+           "write-workspace-status: outcome=wrote file=%s workspace-count=%d byte-count=%d content-fingerprint=%s"
+           file workspace-count (1+ (string-bytes json)) fingerprint))))))
 
 ;;;; Staggered write scheduler --------------------------------------------------
 
@@ -254,6 +280,19 @@ window to amortize cost more aggressively; decrease it for fresher
 peer-visibility.  The default of 60s is the smallest value that still
 reclaims the JSON-encode cost surfaced by profiling."
   :type 'integer
+  :group 'agent-repl)
+
+(defcustom agent-repl-workspace-status-write-min-interval-seconds 10
+  "Floor (in seconds) on the gap between staggered workspace-status writes.
+The window/N spacing alone scales the wake-up rate with the live
+workspace count: at 18 live workspaces a 60s window fires a write every
+3.3s, which is constant main-thread file I/O for a file whose content
+changes far less often.  The scheduler therefore spaces sub-timers by
+the LARGER of window/N and this floor, so the wake-up rate is bounded no
+matter how many workspaces are live.  A terminal state change bypasses
+the cadence entirely — see
+`agent-repl--workspace-status-react-to-pushed-state'."
+  :type 'number
   :group 'agent-repl)
 
 (defvar agent-repl--workspace-status-write-sub-timers nil
@@ -323,13 +362,19 @@ next window will pick up any newly-registered workspaces."
   (setq agent-repl--workspace-status-write-sub-timers nil)
   (let ((n (agent-repl--workspace-status-live-count)))
     (if (> n 0)
-        (let ((interval (/ (float agent-repl-workspace-status-write-window-seconds)
-                           n)))
+        (let* ((window (float agent-repl-workspace-status-write-window-seconds))
+               ;; Writes per window: one per live workspace, but never more
+               ;; than the floor allows.  At least one, so a window always
+               ;; carries a write however low the floor is set.
+               (count (max 1 (min n (floor (/ window
+                                              (max 1 agent-repl-workspace-status-write-min-interval-seconds))))))
+               (interval (/ window count)))
           (agent-repl--log
            nil
-           "reschedule-workspace-status-writes: outcome=scheduled live-count=%d window-seconds=%s interval-seconds=%s"
-           n agent-repl-workspace-status-write-window-seconds interval)
-        (dotimes (i n)
+           "reschedule-workspace-status-writes: outcome=scheduled live-count=%d write-count=%d window-seconds=%s interval-seconds=%s min-interval-seconds=%s"
+           n count agent-repl-workspace-status-write-window-seconds interval
+           agent-repl-workspace-status-write-min-interval-seconds)
+        (dotimes (i count)
           (push (run-at-time (* i interval) nil
                              #'agent-repl--write-workspace-status)
                 agent-repl--workspace-status-write-sub-timers)))
@@ -361,6 +406,45 @@ which cancels its own previous batch on every run."
     timer))
 
 (agent-repl--arm-workspace-status-export-timer)
+
+;;;; Terminal-state immediacy ---------------------------------------------------
+
+(defconst agent-repl-workspace-status-terminal-states
+  '(:merged :merge-failed :dead)
+  "Render keywords whose arrival ends a workspace's working life.
+A peer consumer polling the JSON export acts on exactly these — the
+merge landed, the merge failed, the session died — so they are the
+states worth spending an off-cadence write on.  Every other transition
+rides the staggered scheduler.")
+
+(defun agent-repl--workspace-status-terminal-state-p (state)
+  "Return non-nil when render keyword STATE is terminal for the export."
+  (and (memq state agent-repl-workspace-status-terminal-states) t))
+
+(defun agent-repl--workspace-status-react-to-pushed-state (ws new previous)
+  "Write the status export at once when WS reaches a terminal state.
+Subscriber for `agent-repl-ws-state-transition-functions'.  NEW and
+PREVIOUS are render keywords.  A terminal arrival is the one transition
+a peer must not learn about a window later, so it forces the write
+rather than waiting for the next staggered sub-timer.  A push that did
+not move the keyword changes nothing and writes nothing."
+  (cond
+   ((eq new previous)
+    (agent-repl--log-verbose
+     ws "workspace-status-terminal-write: ws=%s state=%s unchanged, skip" ws new))
+   ((not (agent-repl--workspace-status-terminal-state-p new))
+    (agent-repl--log-verbose
+     ws "workspace-status-terminal-write: ws=%s state=%s not terminal, skip" ws new))
+   (t
+    (agent-repl--log
+     ws "workspace-status-terminal-write: ws=%s %s -> %s — writing immediately"
+     ws previous new)
+    (agent-repl--write-workspace-status t))))
+
+;; Registered here though the hook variable is defined in frontend-state.el;
+;; `add-hook' auto-vivifies it, and that file's `defvar' keeps the value.
+(add-hook 'agent-repl-ws-state-transition-functions
+          #'agent-repl--workspace-status-react-to-pushed-state)
 
 (provide 'agent-repl-workspace-status-export)
 ;;; workspace-status-export.el ends here
