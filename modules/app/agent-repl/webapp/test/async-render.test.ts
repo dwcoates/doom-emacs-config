@@ -377,6 +377,61 @@ describe("the skill kind", () => {
   });
 });
 
+describe("a child a bubble's own card already draws", () => {
+  /** One tool-call emission, carrying the daemon's classification verdict. */
+  function call(id: string, spawnedBubbleId: string): UnwrappedEmission {
+    return { emission: "toolCall", arm: "toolUse", payload: { id, name: "Task" }, spawnedBubbleId };
+  }
+
+  const withCall = (emissions: UnwrappedEmission[]): AsyncBubble["kind"] => ({
+    case: "skill",
+    value: { skillName: "demo", args: "", body: "", emissions, fold: NO_FOLD },
+  });
+
+  it("is NOT drawn a second time by the parent pointer", () => {
+    // Arrange — the card inside b1 spawned b2, and b2 also points at b1.
+    const registry = seeded(
+      bubble({ id: "b1", kind: withCall([call("tu1", "b2")]) }),
+      bubble({ id: "b2", kind: agentKind, label: "dispatched worker", originToolUseId: "tu1", parentBubbleId: "b1" }),
+    );
+
+    // Act
+    const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
+
+    // Assert — the card path draws it; the pointer walk must not repeat it.
+    expect(html).not.toContain("dispatched worker");
+  });
+
+  it("IS drawn by the parent pointer when no card in the bubble spawned it", () => {
+    // Arrange — the same tree, minus the spawning card (the tail cap dropped it).
+    const registry = seeded(
+      bubble({ id: "b1", kind: withCall([]) }),
+      bubble({ id: "b2", kind: agentKind, label: "dispatched worker", originToolUseId: "tu1", parentBubbleId: "b1" }),
+    );
+
+    // Act
+    const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
+
+    // Assert — losing live work would be worse than drawing it unattached.
+    expect(html).toContain("dispatched worker");
+  });
+
+  it("leaves a SIBLING bubble the card did not spawn on the pointer walk", () => {
+    // Arrange — b3 is b1's child but was spawned by no card b1 carries.
+    const registry = seeded(
+      bubble({ id: "b1", kind: withCall([call("tu1", "b2")]) }),
+      bubble({ id: "b2", kind: agentKind, label: "attached worker", originToolUseId: "tu1", parentBubbleId: "b1" }),
+      bubble({ id: "b3", kind: agentKind, label: "unattached worker", parentBubbleId: "b1" }),
+    );
+
+    // Act
+    const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
+
+    // Assert
+    expect(html).toContain("unattached worker");
+  });
+});
+
 describe("the spool kinds", () => {
   it("headers a shell bubble with its verbatim command line", () => {
     const registry = seeded(
