@@ -3166,3 +3166,48 @@ abandoned one strands the mount until its own separate timeout."
       ;; the ack-aging alarm can never declare lost a send that happened.
       (should (agent-repl--uds-command-pending-p request-id))
       (should (string-match-p request-id (or sent ""))))))
+
+;;;; ---- the sentinel's own quit deferral ---------------------------------
+
+(ert-deftest agent-repl-test-uds-sentinel-defers-a-quit-raised-mid-transition ()
+  "A C-g during a link transition is deferred rather than taken mid-rewrite.
+The transition rewrites the connection state, drains the outbound queue
+and re-arms the reconnect ladder; a quit landing between those steps
+leaves the link recorded as neither up nor down."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((quit-flag nil)
+          (still-armed nil))
+      (cl-letf (((symbol-function 'agent-repl--uds-sentinel-transition)
+                 ;; What Emacs does when C-g arrives while `inhibit-quit' is
+                 ;; bound: the request is recorded, not taken.
+                 (lambda (&rest _) (setq quit-flag t))))
+        (let ((inhibit-quit t))
+          ;; Act
+          (agent-repl--uds-sentinel 'dead-proc "connection broken by remote peer\n")
+          (setq still-armed quit-flag
+                quit-flag nil)))
+      ;; Assert
+      (should still-armed))))
+
+(ert-deftest agent-repl-test-uds-sentinel-completes-its-transition-under-a-quit ()
+  "A quit mid-transition never leaves the link recorded as neither up nor down."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (setq agent-repl--uds-process 'dead-proc
+          agent-repl--uds-read-accumulator "leftover")
+    (let ((quit-flag nil)
+          scheduled)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'process-name) (lambda (_p) "dead"))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (delay fn) (setq scheduled (list delay fn)) 'fake-timer)))
+        (let ((inhibit-quit t))
+          ;; Act -- the C-g lands while the transition is running.
+          (setq quit-flag t)
+          (agent-repl--uds-sentinel 'dead-proc "connection broken by remote peer\n")
+          (setq quit-flag nil)))
+      ;; Assert -- the whole transition ran despite the quit.
+      (should-not agent-repl--uds-process)
+      (should (string-empty-p agent-repl--uds-read-accumulator))
+      (should (eq (nth 1 scheduled) #'agent-repl-uds-connect)))))
