@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CounterEntry,
   CounterSpec,
+  activeEntries,
   countLabel,
   counterMenuHtml,
   counterOverlayHtml,
@@ -56,6 +57,31 @@ describe("isActive", () => {
   it("reads an errored entry as inactive", () => {
     // Arrange + Act + Assert
     expect(isActive(entry({ status: "error" }))).toBe(false);
+  });
+});
+
+describe("activeEntries", () => {
+  it("keeps only the entries still working", () => {
+    // Arrange
+    const entries = [active({ id: "t1" }), entry({ id: "t2" }), active({ id: "t3" })];
+    // Act
+    const got = activeEntries(entries);
+    // Assert
+    expect(got.map((e) => e.id)).toEqual(["t1", "t3"]);
+  });
+
+  it("returns nothing when every entry has settled", () => {
+    // Arrange + Act + Assert
+    expect(activeEntries([entry(), entry({ id: "t2", status: "error" })])).toEqual([]);
+  });
+
+  it("carries the caller's own row type through the narrowing", () => {
+    // Arrange — the expanded footer's richer row must survive the filter.
+    const rows = [{ ...active(), uncachedInput: 42 }];
+    // Act
+    const got = activeEntries(rows);
+    // Assert
+    expect(got[0].uncachedInput).toBe(42);
   });
 });
 
