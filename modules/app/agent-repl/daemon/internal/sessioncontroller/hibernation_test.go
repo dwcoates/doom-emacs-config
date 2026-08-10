@@ -634,3 +634,101 @@ func TestClearHibernationRetiresTheGate(t *testing.T) {
 		t.Fatalf("hibernation detail = %+v after clearing, want the sleep retired", detail)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// THE REWIRE IS THE GATE'S CLOSING EDGE (closeHibernationGateOnWire). A hard
+// restart wires a shim over a record that still claims a sleep, and before this
+// nothing retired it: the session was driveable and every prompt was nacked
+// with the cause of a sleep that was already over.
+// ---------------------------------------------------------------------------
+
+// THE ORDINARY CASE. A session whose record says hibernated becomes driveable,
+// and the wire edge itself retires the gate.
+func TestWiringASleepingSessionRetiresItsGate(t *testing.T) {
+	// Arrange.
+	m, _, hib := newHibernationRig(t)
+	hib.setAsleep("s1", registry.HibernationDetail{Cause: registry.HibernationCauseCacheExpired, SinceMs: 7})
+
+	// Act.
+	m.noteWired("ws", "s1")
+
+	// Assert.
+	if detail, asleep := hib.HibernationOf("s1"); asleep && detail.Cause != "" {
+		t.Fatalf("hibernation detail = %+v after the rewire, want the gate retired by the wire edge", detail)
+	}
+}
+
+// AND THE PROMPT THAT WAS BEING REFUSED GOES THROUGH. The record is what the
+// gate reads, so retiring it is only worth anything if the refusal stops.
+func TestWiringASleepingSessionStopsTheGateRefusingPrompts(t *testing.T) {
+	// Arrange.
+	m, _, hib := newHibernationRig(t)
+	hib.setAsleep("s1", registry.HibernationDetail{Cause: registry.HibernationCauseIdleCutoff, SinceMs: 7})
+	m.noteWired("ws", "s1")
+
+	// Act.
+	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+
+	// Assert.
+	if errors.Is(err, ErrHibernated) {
+		t.Fatalf("SubmitPrompt after a rewire = %v, want the revival gate gone", err)
+	}
+}
+
+// A GATED REVIVAL KEEPS ITS GATE. The compact-first and clear modes bring the
+// session up ON PURPOSE while the record still says hibernated, because that
+// record is what delays prompts until the cut lands.
+func TestWiringDuringAGatedRevivalKeepsTheGate(t *testing.T) {
+	// Arrange.
+	m, _, hib := newHibernationRig(t)
+	hib.setAsleep("s1", registry.HibernationDetail{Cause: registry.HibernationCauseCacheExpired, SinceMs: 7})
+	release, _, err := m.claimRevival("ws", "s1")
+	if err != nil {
+		t.Fatalf("claimRevival: %v", err)
+	}
+	defer release()
+
+	// Act.
+	m.noteWired("ws", "s1")
+
+	// Assert.
+	if detail, asleep := hib.HibernationOf("s1"); !asleep || detail.Cause == "" {
+		t.Fatalf("hibernation detail = %+v during a gated revival, want the gate still standing", detail)
+	}
+}
+
+// AN AWAKE SESSION IS WRITTEN NOTHING. A clear against a record with no sleep
+// in it would be a durable write per bring-up on every healthy session.
+func TestWiringAnAwakeSessionWritesNoHibernationRecord(t *testing.T) {
+	// Arrange.
+	m, _, hib := newHibernationRig(t)
+	before := hib.writeCount()
+
+	// Act.
+	m.noteWired("ws", "s1")
+
+	// Assert.
+	if after := hib.writeCount(); after != before {
+		t.Fatalf("hibernation writes = %d after wiring an awake session, want the %d it started with", after, before)
+	}
+}
+
+// A CLEAR THAT FAILED LEAVES THE GATE STANDING rather than pretending the
+// session is driveable. The wire edge has no caller to return the error to, so
+// the safe direction is the honest refusal the user can still revive out of.
+func TestWiringSurfacesAFailedGateRetirement(t *testing.T) {
+	// Arrange.
+	m, _, hib := newHibernationRig(t)
+	hib.setAsleep("s1", registry.HibernationDetail{Cause: registry.HibernationCauseForced, SinceMs: 7})
+	hib.mu.Lock()
+	hib.writeErr = errors.New("registry is unwritable")
+	hib.mu.Unlock()
+
+	// Act.
+	m.noteWired("ws", "s1")
+
+	// Assert.
+	if detail, asleep := hib.HibernationOf("s1"); !asleep || detail.Cause == "" {
+		t.Fatalf("hibernation detail = %+v after a failed retirement, want the sleep still recorded", detail)
+	}
+}
