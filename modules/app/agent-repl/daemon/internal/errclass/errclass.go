@@ -462,6 +462,18 @@ var (
 	// retries, degrades, or substitutes, and a caller that reads it is being
 	// told the conversation still exists and needs a human.
 	ErrConversationUnresumable = errors.New("server: the workspace has a conversation that could not be resumed, and starting a fresh one in its place is refused")
+	// ErrResumeTargetVanished anchors the TERMINAL shape of a missing resume
+	// target: the record names a conversation whose transcript is gone AND the
+	// workspace has no other transcript under that config root to fall back to.
+	//
+	// It is a sentinel because terminality is a DISPOSITION, not a message. A
+	// bring-up refusal that no retry can change must be distinguishable from
+	// one that a retry might, without matching prose: the retrying half of the
+	// daemon reads this sentinel to stop climbing, fence the session, and leave
+	// resolution to an explicit user action. It does NOT weaken the refusal it
+	// classifies — the fresh-conversation refusal is unchanged; this only says
+	// that repeating it is pointless.
+	ErrResumeTargetVanished = errors.New("server: the resume target's transcript has vanished and the workspace has no other transcript to fall back to")
 	// ErrResumeModeRetired anchors the refusal of a wire resume_mode this
 	// daemon no longer implements — currently only the retired
 	// RESUME_MODE_FRESH (tag 2). Refused loudly rather than read as CONTINUE:
@@ -501,6 +513,12 @@ var sentinelTypes = []struct {
 	// one, and errclass already imports ssm.
 	{ssm.ErrPromptRefusedByMergeState, TypePromptRefusedByMergeState},
 	{ErrConversationUnresumable, TypeSessionConversationUnresumable},
+	// The vanished target classifies as the SAME type as the rung above it:
+	// both are "this workspace's conversation cannot be resumed and nothing
+	// blank may take its place". No new wire kind is minted for it, because the
+	// distinction the sentinel draws is about RETRY POLICY inside the daemon,
+	// not about anything a client renders differently.
+	{ErrResumeTargetVanished, TypeSessionConversationUnresumable},
 	{ErrResumeModeRetired, TypeResumeModeRetired},
 }
 
