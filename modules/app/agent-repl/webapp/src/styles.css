@@ -2007,6 +2007,16 @@ pre {
   border: 1px solid var(--border);
 }
 .queued-badge.interrupt { color: var(--thinking); border-color: var(--thinking); }
+/* A prompt queued behind a CONTEXT CUT, which no classifier judged and no
+   force can jump. Bolded and muted rather than tinted: it borrows neither the
+   interrupt's orange (nothing is preempting anything) nor a hold vocabulary's
+   color (nothing but the running turn is holding it) — the badge's job is to
+   say that the turn in front of it is one the queue never interrupts. */
+.queued-badge.uninterruptible {
+  color: var(--muted);
+  border-color: var(--muted);
+  font-weight: 700;
+}
 /* The user's own words stay upright and legible at full color — the subdued
    chrome is around them, not on them. */
 .queued-content { color: var(--fg); }
