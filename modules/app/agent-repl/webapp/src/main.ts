@@ -85,6 +85,7 @@ import {
   installHostTailHook,
   installHostTextScaleHook,
 } from "./host.js";
+import { RecoveryProbe, installHostRecoveryProbeHook } from "./recovery-probe.js";
 import { FeedNav, installNavHook, installNavKeys } from "./nav.js";
 import {
   type Account,
@@ -1488,6 +1489,19 @@ async function boot(): Promise<void> {
     log: (level, message) => clog(level, message),
   });
 
+  // THE PAGE HALF OF THE RECOVERY SLO (lisp/recovery-slo.el). Deliberately
+  // separate from `recovery` below: that drives a repair, this one is the only
+  // thing that can say whether the repair WORKED, and it refuses to say so on
+  // an open socket alone. `store.state.cwd` is the daemon's own ruling on which
+  // workspace this page holds, so the report is attributable per workspace
+  // without the page forming a second opinion about its own address.
+  const recoveryProbe = new RecoveryProbe({
+    now: () => Date.now(),
+    workspace: () => store.state.cwd,
+    socketOpen: () => (ws as WsClient | undefined)?.state === "current",
+  });
+  installHostRecoveryProbeHook(window as unknown as HostGlobal, recoveryProbe);
+
   const recovery = new BackgroundRecovery(
     {
       ensureConnected: () => {
@@ -1520,6 +1534,11 @@ async function boot(): Promise<void> {
     // arriving at a page showing the connection card is an explicit "try
     // again", and it costs exactly one resync.
     if (connectResync.isGivenUp) connectResync.retryNow();
+    // THE EPOCH OPENS WITH THE REPAIR, not with the answer. Everything the
+    // probe counts from here belongs to THIS attempt, so evidence from the
+    // connection that just failed cannot be mistaken for proof that its
+    // replacement is carrying anything.
+    recoveryProbe.openEpoch();
     recovery.recover(reason);
   };
 
@@ -1666,6 +1685,11 @@ async function boot(): Promise<void> {
           if (receipt.live) clog("info", line);
           else log("info", line, { operation: "webapp.main.user-turn-receipt", localOnly: true });
         }
+        // REAL DATA, counted BEFORE the ingest can throw: what the SLO asks is
+        // whether the daemon's content reached this page, and a batch that
+        // arrived is evidence of that whether or not the store then chokes on
+        // it. Only the adapter's content kinds count (recovery-probe.ts).
+        recoveryProbe.noteBatch(effects.map((effect) => effect.kind));
         const result = store.ingest(effects);
         // WHICH SESSION THE HTTP SIDE-CALLS TARGET, re-read from the pushed
         // plane the store just took. A workspace-addressed connection carries
@@ -1745,6 +1769,10 @@ async function boot(): Promise<void> {
             cause_seq: store.state.workspaceStateCauseSeq,
             render_state: store.state.renderState,
           });
+          // ADOPTION IS THE SECOND HALF OF THE PAGE'S EVIDENCE, and it is
+          // stamped here rather than at decode for the same reason the build
+          // pin below is: a snapshot this page failed to ingest proves nothing.
+          recoveryProbe.noteAdopted();
           // AFTER adoption, never before: a snapshot this page failed to ingest
           // proves nothing about which daemon build this bundle can talk to,
           // and pinning its build would let a wedged page believe it is
