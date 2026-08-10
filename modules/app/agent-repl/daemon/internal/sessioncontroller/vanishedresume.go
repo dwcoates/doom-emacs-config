@@ -140,10 +140,19 @@ func (m *Manager) publishTerminalStartFailure(workspace, sessionID string, cause
 			workspace, sessionID, cause)
 		return
 	}
+	card := openFailureCard(m.logf, cause)
+	// THE CARD STATES THE FENCE'S OWN DISPOSITION. Every other bring-up
+	// failure is `open' — it invites waiting, and the ensure/reattach ladders
+	// are right to keep asking. This one cannot heal on its own, which is
+	// exactly what the terminal arm means, and stamping it is what lets a
+	// client stop its automatic re-open loop from the wire instead of from
+	// prose. The card is not hidden or downgraded by this: it renders in the
+	// feed as it always did, and only its invitation to wait is withdrawn.
+	errclass.Terminal(card)
 	item := &frontendv1.ConversationItem{
 		Uuid: startFailedCardUUID(sessionID),
 		TsMs: m.now(),
-		Item: &frontendv1.ConversationItem_FailureCard{FailureCard: openFailureCard(m.logf, cause)},
+		Item: &frontendv1.ConversationItem_FailureCard{FailureCard: card},
 	}
 	// Provenance is stamped exactly as the consumer's local-item push stamps
 	// it, and a refusal to stamp is a refusal to push: an item with an unset

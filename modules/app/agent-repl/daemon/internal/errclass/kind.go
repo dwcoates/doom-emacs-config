@@ -310,6 +310,34 @@ func Resolve(card *frontendv1.FailureCardView, atMs int64) {
 	}
 }
 
+// Terminal stamps a card as having NO closing edge, ever.
+//
+// It is the disposition, not the severity: an `open' card invites waiting and
+// a consumer is right to keep retrying behind it, while a terminal one states
+// that nothing about the failure can change on its own. That distinction is
+// the whole reason the arm exists (failure-card.proto), and it is what lets a
+// client stop an automatic retry loop WITHOUT reading prose or inventing a
+// disposition of its own.
+//
+// It never un-settles a card that already resolved: a resolved card's failure
+// stopped being true, and overwriting that with "and never will" would report
+// a standing failure where there is none.
+func Terminal(card *frontendv1.FailureCardView) {
+	if card == nil {
+		return
+	}
+	if IsResolved(card) {
+		return
+	}
+	card.Lifecycle = &frontendv1.FailureCardView_Terminal{Terminal: &frontendv1.FailureCardTerminal{}}
+}
+
+// IsTerminal reports whether a card states that its failure has no closing
+// edge.
+func IsTerminal(card *frontendv1.FailureCardView) bool {
+	return card.GetTerminal() != nil
+}
+
 // IsResolved reports whether a card has settled.
 func IsResolved(card *frontendv1.FailureCardView) bool {
 	return card.GetResolved() != nil
