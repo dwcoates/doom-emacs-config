@@ -2112,6 +2112,75 @@ cannot delay the restart the user asked for."
   (should (memq 'agent-repl--frontend-webview-reload-widget
                 agent-repl--external-boundary-functions)))
 
+;;;; ---- The webview READ channel, and its crash invariants -------------------
+
+;; WHY THESE ARE CRASH TESTS AND NOT STYLE TESTS: see the docstring of
+;; `agent-repl--frontend-webview-execute-script-value'.  The NS port captures
+;; the callback into a GC-invisible Objective-C block, so a non-symbol
+;; callback is a use-after-free waiting on WebKit's reply, and a widget
+;; resolved through the session fallback can be a dead or foreign one.
+
+(ert-deftest agent-repl-test-webview-read-channel-is-a-registered-boundary ()
+  "The webview read channel is registered as an external boundary wrapper."
+  (should (memq 'agent-repl--frontend-webview-execute-script-value
+                agent-repl--external-boundary-functions)))
+
+(ert-deftest agent-repl-test-webview-read-channel-rejects-a-closure-callback ()
+  "A freshly-consed closure is refused: the NS port cannot keep it alive."
+  ;; Arrange
+  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
+    (let ((buf (get-buffer "*agent-frontend-ws1*")))
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                 (lambda (_buf) 'live-widget)))
+        ;; Act / Assert
+        (should-error (agent-repl--frontend-webview-read-script
+                       buf "1" (lambda (_raw) nil))
+                      :type 'error)))))
+
+(ert-deftest agent-repl-test-webview-read-channel-rejects-a-nil-callback ()
+  "A nil callback is refused rather than silently injecting a write."
+  ;; Arrange
+  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
+    (let ((buf (get-buffer "*agent-frontend-ws1*")))
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                 (lambda (_buf) 'live-widget)))
+        ;; Act / Assert
+        (should-error (agent-repl--frontend-webview-read-script buf "1" nil)
+                      :type 'error)))))
+
+(ert-deftest agent-repl-test-webview-read-channel-injects-nothing-into-a-dead-widget ()
+  "A buffer whose webview is gone is not injected into at all."
+  ;; Arrange
+  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
+    (let ((injected nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                 (lambda (_buf) nil))
+                ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
+                 (lambda (&rest args) (push args injected))))
+        ;; Act
+        (let ((result (agent-repl--frontend-webview-read-script
+                       (get-buffer "*agent-frontend-ws1*") "1" #'ignore)))
+          ;; Assert
+          (should (null result))
+          (should (null injected)))))))
+
+(ert-deftest agent-repl-test-webview-read-channel-injects-into-the-resolved-widget ()
+  "The widget injected into is the one resolved from the buffer, not the session."
+  ;; Arrange
+  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
+    (let ((injected nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                 (lambda (_buf) 'live-widget))
+                ((symbol-function 'xwidget-webkit-current-session)
+                 (lambda () 'stale-session-widget))
+                ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
+                 (lambda (&rest args) (push args injected))))
+        ;; Act
+        (agent-repl--frontend-webview-read-script
+         (get-buffer "*agent-frontend-ws1*") "probe()" #'ignore)
+        ;; Assert
+        (should (equal injected '((live-widget "probe()" ignore))))))))
+
 ;;;; ---- Returning the keyboard to Emacs after a script evaluation ------------
 
 (defmacro agent-repl-test--capturing-scripts (var &rest body)
