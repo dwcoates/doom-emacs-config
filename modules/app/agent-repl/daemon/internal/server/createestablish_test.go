@@ -13,6 +13,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/session"
 )
 
 // probeHealthRouter answers each establishment probe with a scripted verdict,
@@ -358,7 +359,11 @@ func TestExplicitResumeCreateClassifiesPostCreateEstablishmentFailures(t *testin
 			if errclass.TypeName(failure) != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil {
 				t.Fatalf("failure = %v, want typed create resume failure", failure)
 			}
-			if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" || detail.GetResolvedConfigDir() != "/cfg" {
+			// The frame's config_dir no longer names the account: it is resolved
+			// from the workspace's selection, else its path. "/w" is under no
+			// $MULTI_REPO_ROOT here, so it resolves to the CLI default — empty
+			// on the record, the default root once resolved.
+			if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "" || detail.GetResolvedConfigDir() != session.DefaultClaudeConfigDir() {
 				t.Fatalf("failure evidence = %v", detail)
 			}
 			tc.check(t, detail)
@@ -390,7 +395,7 @@ func TestExplicitResumeCreateClassifiesCreateCoreBringUpFailure(t *testing.T) {
 	if errclass.TypeName(failure) != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil || detail.GetBringUpFailure() == nil {
 		t.Fatalf("failure = %v, want typed create bring-up failure", failure)
 	}
-	if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" || detail.GetResolvedConfigDir() != "/cfg" {
+	if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "" || detail.GetResolvedConfigDir() != session.DefaultClaudeConfigDir() {
 		t.Fatalf("failure evidence = %v", detail)
 	}
 	if !strings.Contains(detail.GetBringUpFailure().GetCause(), cause.Error()) {
@@ -564,7 +569,7 @@ func TestExplicitResumeCallerDeadlineCarriesTypedContinuityEvidence(t *testing.T
 	if !errors.Is(err, errclass.ErrSessionNotEstablished) || errclass.TypeName(failure) != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil || detail.GetBringUpFailure() == nil {
 		t.Fatalf("failure = %v err=%v, want typed explicit-resume caller cancellation", failure, err)
 	}
-	if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" {
+	if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "" {
 		t.Fatalf("continuity evidence = %v", detail)
 	}
 }
@@ -602,7 +607,7 @@ func TestExplicitResumeEnrollmentCancellationCarriesTypedContinuityEvidence(t *t
 	if !errors.Is(err, errclass.ErrSessionNotEstablished) || errclass.TypeName(failure) != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil || detail.GetBringUpFailure() == nil {
 		t.Fatalf("failure = %v err=%v, want typed explicit-resume enrollment cancellation", failure, err)
 	}
-	if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" {
+	if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "" {
 		t.Fatalf("continuity evidence = %v", detail)
 	}
 }
@@ -739,9 +744,14 @@ func TestConcurrentIdenticalCreatesCoalesce(t *testing.T) {
 }
 
 // TestConcurrentCreatesWithDifferentOptsDoNotCoalesce is the other half of the
-// rule: a create asking for a DIFFERENT account or resume target is not
-// the same request, and answering it with the in-flight one's result would
-// silently discard what it asked for.
+// rule: a create asking for a DIFFERENT posture or resume target is not the
+// same request, and answering it with the in-flight one's result would silently
+// discard what it asked for.
+//
+// It distinguishes the two creates by PERMISSION MODE rather than by account,
+// because a caller can no longer ask for an account at all: the account is
+// resolved from the workspace's selection, else its path, so two creates for
+// one cwd necessarily agree about it.
 func TestConcurrentCreatesWithDifferentOptsDoNotCoalesce(t *testing.T) {
 	// Arrange.
 	release := make(chan struct{})
@@ -753,19 +763,19 @@ func TestConcurrentCreatesWithDifferentOptsDoNotCoalesce(t *testing.T) {
 	// Act.
 	first := make(chan error, 1)
 	go func() {
-		_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w", ConfigDir: "/cfg-a"})
+		_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w", PermissionMode: "plan"})
 		first <- err
 	}()
 	awaitEnrollment(t, enrolled)
 	awaitProbe(t, router)
 	second := make(chan error, 1)
 	go func() {
-		_, err := h.CreateSession(context.Background(), "/w", "r2", &frontendv1.CreateSessionCmd{Cwd: "/w", ConfigDir: "/cfg-b"})
+		_, err := h.CreateSession(context.Background(), "/w", "r2", &frontendv1.CreateSessionCmd{Cwd: "/w", PermissionMode: "dontAsk"})
 		second <- err
 	}()
 	close(release)
 
-	// Assert: two creates, each with the account root it asked for.
+	// Assert: two creates, each with the posture it asked for.
 	for _, ch := range []chan error{first, second} {
 		select {
 		case err := <-ch:
@@ -779,12 +789,12 @@ func TestConcurrentCreatesWithDifferentOptsDoNotCoalesce(t *testing.T) {
 	if len(sessions.created) != 2 {
 		t.Fatalf("created = %v, want both distinct creates to have run", sessions.created)
 	}
-	configs := map[string]bool{}
+	modes := map[string]bool{}
 	for _, o := range sessions.created {
-		configs[o.ConfigDir] = true
+		modes[o.PermissionMode] = true
 	}
-	if !configs["/cfg-a"] || !configs["/cfg-b"] {
-		t.Fatalf("created = %v, want one /cfg-a and one /cfg-b create", sessions.created)
+	if !modes["plan"] || !modes["dontAsk"] {
+		t.Fatalf("created = %v, want one plan and one dontAsk create", sessions.created)
 	}
 }
 
