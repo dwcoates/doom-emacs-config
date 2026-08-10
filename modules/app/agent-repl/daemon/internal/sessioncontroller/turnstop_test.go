@@ -91,7 +91,7 @@ func TestDrainInterruptsALiveTurn(t *testing.T) {
 	applier.setCurrent("ws", thinkingState())
 	client := &stubInterrupter{outcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED}
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client)
+	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client, nil)
 	// Assert.
 	if client.calls != 1 {
 		t.Fatalf("interrupt calls = %d, want 1", client.calls)
@@ -108,7 +108,7 @@ func TestDrainSkipsAWorkspaceWithNoLiveTurn(t *testing.T) {
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_DONE})
 	client := &stubInterrupter{}
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client)
+	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client, nil)
 	// Assert.
 	if client.calls != 0 {
 		t.Fatalf("interrupt calls = %d, want 0 — nothing was running", client.calls)
@@ -124,7 +124,7 @@ func TestDrainSkipsAnUnknownWorkspace(t *testing.T) {
 	m, _, _, cl := newTurnStopRig(t)
 	client := &stubInterrupter{}
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client)
+	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client, nil)
 	// Assert.
 	if client.calls != 0 {
 		t.Fatalf("interrupt calls = %d, want 0", client.calls)
@@ -141,7 +141,7 @@ func TestDrainSkipsWhenTheShimConnectionIsAlreadyGone(t *testing.T) {
 	m, _, applier, cl := newTurnStopRig(t)
 	applier.setCurrent("ws", thinkingState())
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseControllerExit(), "", nil)
+	m.drainLiveTurnForStop("ws", "s1", StopCauseControllerExit(), "", nil, nil)
 	// Assert.
 	if !cl.contains(`session-controller: teardown turn drain SKIPPED ws="ws" session=s1 path=session_controller_exit — there is no live shim connection`) {
 		t.Fatalf("missing the canonical no-connection record; log:\n%s", strings.Join(cl.lines, "\n"))
@@ -159,7 +159,7 @@ func TestDrainReportsAnInterruptThatNeverAnswers(t *testing.T) {
 	m.interruptDrain = time.Millisecond
 	m.mu.Unlock()
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client)
+	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client, nil)
 	// Assert.
 	if client.calls != 1 {
 		t.Fatalf("interrupt calls = %d, want 1", client.calls)
@@ -178,7 +178,7 @@ func TestDrainReportsANackedInterrupt(t *testing.T) {
 	applier.setCurrent("ws", thinkingState())
 	client := &stubInterrupter{err: errors.New("shim nacked")}
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client)
+	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client, nil)
 	// Assert.
 	if !cl.contains("shim nacked") ||
 		!cl.contains("teardown turn drain interrupt FAILED") {
@@ -195,7 +195,7 @@ func TestDrainInterruptsAnywayWhenTheStateReadFails(t *testing.T) {
 	applier.currentErr = errors.New("state db is gone")
 	client := &stubInterrupter{outcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE}
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client)
+	m.drainLiveTurnForStop("ws", "s1", StopCauseSessionDeleted(), "", client, nil)
 	// Assert.
 	if client.calls != 1 {
 		t.Fatalf("interrupt calls = %d, want 1 — the read is advisory, not an authorization", client.calls)
