@@ -54,6 +54,9 @@ alarm.  Tests that assert ON the seam shadow it again with their own
           (make-hash-table :test 'equal))
          (agent-repl--uds-link-health :healthy)
          (agent-repl-uds-reconnect-delay 2.0)
+         (agent-repl-uds-reconnect-max-delay 30.0)
+         (agent-repl--uds-reconnect-delay-current nil)
+         (agent-repl--uds-reconnect-attempts 0)
          (agent-repl-uds-command-ack-deadline 10.0)
          (agent-repl-debug nil))
      (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
@@ -545,6 +548,149 @@ the recorded error, so containing it there would be swallowing it."
         (should (equal (nth 0 scheduled) 5.0))
         (should (eq (nth 1 scheduled) #'agent-repl-uds-connect))
         (should (eq agent-repl--uds-reconnect-timer 'fake-timer))))))
+
+(ert-deftest agent-repl-test-uds-born-dead-dial-schedules-another-reconnect ()
+  "A dial whose process comes back already `failed' arms the next rung.
+No sentinel transition follows a process that was never live, so without
+this the ladder would end at its first attempt and the link would stay
+down for the whole daemon outage."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (scheduled)
+      (cl-letf (((symbol-function 'processp) (lambda (p) (eq p 'dead-dial)))
+                ((symbol-function 'process-status) (lambda (_p) 'failed))
+                ((symbol-function 'process-name) (lambda (_p) "dead-dial"))
+                ((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'delete-process) #'ignore)
+                ((symbol-function 'agent-repl--uds-connect)
+                 (lambda (&rest _) 'dead-dial))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (delay fn) (setq scheduled (list delay fn)) 'fake-timer)))
+        ;; Act
+        (let ((result (agent-repl-uds-connect "/tmp/x.sock")))
+          ;; Assert
+          (should-not result)
+          (should-not agent-repl--uds-process)
+          (should (equal (nth 0 scheduled) 2.0))
+          (should (eq (nth 1 scheduled) #'agent-repl-uds-connect)))))))
+
+(ert-deftest agent-repl-test-uds-reconnect-backoff-doubles ()
+  "Each successive scheduled reconnect waits twice as long as the last."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (delays)
+      (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (delay _fn) (push delay delays) 'fake-timer)))
+        ;; Act
+        (agent-repl--uds-schedule-reconnect "t1")
+        (agent-repl--uds-schedule-reconnect "t2")
+        (agent-repl--uds-schedule-reconnect "t3")
+        ;; Assert
+        (should (equal (nreverse delays) '(2.0 4.0 8.0)))))))
+
+(ert-deftest agent-repl-test-uds-reconnect-backoff-stops-at-the-cap ()
+  "The doubling ladder never schedules beyond the configured maximum."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((agent-repl-uds-reconnect-max-delay 8.0)
+          delays)
+      (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (delay _fn) (push delay delays) 'fake-timer)))
+        ;; Act
+        (dotimes (_ 6) (agent-repl--uds-schedule-reconnect "cap"))
+        ;; Assert
+        (should (equal (nreverse delays) '(2.0 4.0 8.0 8.0 8.0 8.0)))))))
+
+(ert-deftest agent-repl-test-uds-open-link-resets-reconnect-backoff ()
+  "A connection reaching `open' returns the ladder to its base delay."
+  ;; Arrange — climb the ladder, then open the link.
+  (agent-repl-test--with-uds
+    (let (delays)
+      (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (delay _fn) (push delay delays) 'fake-timer))
+                ((symbol-function 'process-live-p) (lambda (_p) t))
+                ((symbol-function 'process-name) (lambda (_p) "uds<1>"))
+                ((symbol-function 'agent-repl--uds-run-connected-hook) #'ignore))
+        (agent-repl--uds-schedule-reconnect "t1")
+        (agent-repl--uds-schedule-reconnect "t2")
+        (setq agent-repl--uds-process 'live-proc
+              agent-repl--uds-connect-started-at (float-time))
+        ;; Act
+        (agent-repl--uds-sentinel 'live-proc "open from /tmp/x.sock\n")
+        (setq delays nil)
+        (agent-repl--uds-schedule-reconnect "after-open")
+        ;; Assert
+        (should (equal delays '(2.0)))))))
+
+(ert-deftest agent-repl-test-uds-disconnect-cancels-the-pending-chain ()
+  "A deliberate disconnect cancels the pending reconnect, leaving no zombie."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((cancelled 0))
+      (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) 'pending-timer))
+                ((symbol-function 'timerp) (lambda (tm) (eq tm 'pending-timer)))
+                ((symbol-function 'cancel-timer)
+                 (lambda (_tm) (cl-incf cancelled)))
+                ((symbol-function 'process-live-p) (lambda (_p) nil)))
+        (agent-repl--uds-schedule-reconnect "outage")
+        ;; Act
+        (agent-repl-uds-disconnect)
+        ;; Assert
+        (should (= cancelled 1))
+        (should-not agent-repl--uds-reconnect-timer)))))
+
+(ert-deftest agent-repl-test-uds-disconnect-resets-reconnect-backoff ()
+  "A deliberate disconnect ends the outage, so the ladder returns to base."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (delays)
+      (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (delay _fn) (push delay delays) 'fake-timer))
+                ((symbol-function 'process-live-p) (lambda (_p) nil)))
+        (agent-repl--uds-schedule-reconnect "t1")
+        (agent-repl--uds-schedule-reconnect "t2")
+        ;; Act
+        (agent-repl-uds-disconnect)
+        (setq delays nil)
+        (agent-repl--uds-schedule-reconnect "after-disconnect")
+        ;; Assert
+        (should (equal delays '(2.0)))))))
+
+(ert-deftest agent-repl-test-uds-schedule-reconnect-replaces-a-pending-timer ()
+  "Scheduling over a pending reconnect cancels it rather than stacking one."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((cancelled 0)
+          (armed 0))
+      (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) (cl-incf armed) 'pending-timer))
+                ((symbol-function 'timerp) (lambda (tm) (eq tm 'pending-timer)))
+                ((symbol-function 'cancel-timer)
+                 (lambda (_tm) (cl-incf cancelled))))
+        (agent-repl--uds-schedule-reconnect "first")
+        ;; Act
+        (agent-repl--uds-schedule-reconnect "second")
+        ;; Assert — two arms, but the first was cancelled, so one is pending.
+        (should (= armed 2))
+        (should (= cancelled 1))))))
+
+(ert-deftest agent-repl-test-uds-connect-cancels-the-timer-it-supersedes ()
+  "A dial starting clears the pending-reconnect flag other drivers test."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (setq agent-repl--uds-reconnect-timer 'pending-timer)
+    (cl-letf (((symbol-function 'timerp) (lambda (tm) (eq tm 'pending-timer)))
+              ((symbol-function 'cancel-timer) #'ignore)
+              ((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'process-status) (lambda (_p) 'connect))
+              ((symbol-function 'process-name) (lambda (_p) "uds<1>"))
+              ((symbol-function 'agent-repl--uds-connect)
+               (lambda (&rest _) 'fake-proc)))
+      ;; Act
+      (agent-repl-uds-connect "/tmp/x.sock")
+      ;; Assert
+      (should-not agent-repl--uds-reconnect-timer))))
 
 (ert-deftest agent-repl-test-uds-sentinel-dead-link-schedules-reconnect ()
   "A dead-link sentinel clears the process/accumulator and reconnects."
