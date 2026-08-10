@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLOSE_MENUS_HOOK,
   HostGlobal,
+  RECOVER_HOOK,
   TAIL_HOOK,
   TEXT_SCALE_BASE_PX,
   TEXT_SCALE_HOOK,
@@ -10,6 +11,7 @@ import {
   TextScaleRoot,
   clampTextScale,
   installHostCloseMenusHook,
+  installHostRecoverHook,
   installHostTailHook,
   installHostTextScaleHook,
   textScalePx,
@@ -197,5 +199,39 @@ describe("installHostTextScaleHook", () => {
     fireTextScale(target, 0.3);
     fireTextScale(target, "banana");
     expect(root.style.fontSize).toBe(`${textScalePx(1.3)}px`);
+  });
+});
+
+describe("installHostRecoverHook", () => {
+  it("plants the hook under the name webview-recovery.el calls", () => {
+    const target: HostGlobal = {};
+    installHostRecoverHook(target, () => {});
+    expect(typeof target[RECOVER_HOOK]).toBe("function");
+  });
+
+  it("delegates to the page's repair path with the reason the host named", () => {
+    const target: HostGlobal = {};
+    const reasons: string[] = [];
+    installHostRecoverHook(target, (reason) => reasons.push(reason));
+    (target[RECOVER_HOOK] as (reason: unknown) => void)("host_link_up");
+    expect(reasons).toEqual(["host_link_up"]);
+  });
+
+  it("names a default reason when the host fires it with no argument", () => {
+    const target: HostGlobal = {};
+    const reasons: string[] = [];
+    installHostRecoverHook(target, (reason) => reasons.push(reason));
+    (target[RECOVER_HOOK] as () => void)();
+    expect(reasons).toEqual(["host_recover"]);
+  });
+
+  it("repairs once per host call rather than coalescing repeats", () => {
+    const target: HostGlobal = {};
+    const reasons: string[] = [];
+    installHostRecoverHook(target, (reason) => reasons.push(reason));
+    const hook = target[RECOVER_HOOK] as (reason: unknown) => void;
+    hook("a");
+    hook("b");
+    expect(reasons).toEqual(["a", "b"]);
   });
 });

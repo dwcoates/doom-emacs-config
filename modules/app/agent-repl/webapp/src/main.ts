@@ -80,6 +80,7 @@ import { installClickExpand } from "./expand.js";
 import {
   HostGlobal,
   installHostCloseMenusHook,
+  installHostRecoverHook,
   installHostTailHook,
   installHostTextScaleHook,
 } from "./host.js";
@@ -1278,6 +1279,13 @@ async function boot(): Promise<void> {
     if (connectResync.isGivenUp) connectResync.retryNow();
     recovery.recover(reason);
   };
+
+  // THE HOST'S OWN TRIGGER. Every signal above is a LOOK, and the heartbeat
+  // that was meant to replace looking does not tick in a hidden xwidget
+  // webview because the embedder suspends its timers. Emacs fires this hook
+  // on the daemon link-up edge (lisp/webview-recovery.el) — the same repair,
+  // driven by a clock the suspension cannot reach.
+  installHostRecoverHook(window as unknown as HostGlobal, catchUpOnVisible);
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") return;
