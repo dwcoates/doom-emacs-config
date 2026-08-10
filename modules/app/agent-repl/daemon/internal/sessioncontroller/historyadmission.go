@@ -4,9 +4,42 @@ import (
 	"fmt"
 
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/ssm"
 )
 
 // THE ONE ELIGIBILITY LADDER every frontend history request climbs.
+//
+// # ONE TOKEN, ONE COMPARISON
+//
+// A fence crosses the wire as ONE opaque token, and the contract says what a
+// receiver does with it: byte-compare it against the workspace's current
+// fence, never parse it (conversation-page.proto, feed.proto). This ladder is
+// the daemon-side half of that comparison, and it makes it the SAME way.
+//
+// It used to reconstruct a session/generation pair out of the echo and compare
+// the pair instead, which made the token have two readers with different
+// semantics — a byte comparison for fenced views, a structural one here — and
+// that divergence was load-bearing without anyone intending it. A workspace
+// with no controller generation used to publish `Fence(session, "")`, which
+// split back to `(session, "")` and matched, so an unwired workspace's durable
+// history was reachable BY ACCIDENT of the two readers agreeing. When the mint
+// was corrected to publish an absent fence for an absent generation (ssm's
+// connectivity.go), the accident ended: `""` splits to `("", "")`, which
+// cannot match `(session, "")`, and every durable history request started
+// being refused — the blank feed after a daemon bounce, back again, this time
+// through the admission ladder.
+//
+// Byte-comparing collapses the two readers into one. `""` echoed against `""`
+// published matches, so an unwired workspace's history is reachable again
+// without inventing anything, and a later change to how the fence is minted
+// can no longer satisfy one consumer while silently breaking the other.
+//
+// THE SPLIT SURVIVES FOR EXACTLY ONE RUNG, below: a client whose SESSION id
+// rotated under a still-live generation. That request is admitted on purpose,
+// its token legitimately differs byte-wise from the live one, and no byte
+// comparison can express it. It is the single place this daemon reads inside
+// the token, and it is guarded by a live controller and a non-empty
+// generation.
 //
 // # Why it is one ladder and not two
 //
@@ -64,6 +97,13 @@ type historyAdmission struct {
 	// that has since rotated under a still-current generation.
 	sessionID    string
 	generationID string
+	// fence is the workspace's live fence AS THE LADDER READ IT — the live
+	// controller's composed token on one route, the published WorkspaceState's
+	// token on the other. Anything this request answers with stamps THIS,
+	// rather than recomposing a fence from the pair above: an ungenerated
+	// workspace publishes an ABSENT fence, and `Fence(session, "")` is a
+	// different token that no client was ever shown and none can match.
+	fence string
 }
 
 // admitHistoryRequest rules on whether a frontend history request may be
@@ -72,6 +112,11 @@ type historyAdmission struct {
 // kind names the request for the log ("resync", "conversation page"), so the
 // two surfaces are distinguishable in a record without being judged by
 // different rules.
+//
+// echoedFence is the token the client copied out of the WorkspaceState it was
+// reading when it decided to ask. It arrives WHOLE rather than pre-split,
+// because splitting it is what this ladder must not do in the general case —
+// see the header.
 //
 // detail carries the REQUEST-SHAPED context only the caller holds — a resync's
 // `from_seq`, a page's anchor and limit — onto every record this ladder
@@ -82,7 +127,7 @@ type historyAdmission struct {
 //
 // The caller MUST hold m.mu and MUST defer the returned release. On refusal
 // the release is still returned and still must be deferred.
-func (m *Manager) admitHistoryRequest(kind, detail, workspace, expectedSessionID, expectedGenerationID string) (historyAdmission, func(), error) {
+func (m *Manager) admitHistoryRequest(kind, detail, workspace, echoedFence string) (historyAdmission, func(), error) {
 	unlockOnce := false
 	unlock := func() {
 		if unlockOnce {
@@ -98,69 +143,39 @@ func (m *Manager) admitHistoryRequest(kind, detail, workspace, expectedSessionID
 	// purpose, so serving history against it would replay a generation that is
 	// deliberately ending.
 	if m.hibernating[workspace] {
-		liveSessionID, liveGenerationID := "", ""
+		liveFence := ""
 		if live {
-			liveSessionID, liveGenerationID = d.sessionID, d.generationID
+			liveFence = ssm.Fence(d.sessionID, d.generationID)
 		}
 		unlock()
-		return historyAdmission{}, unlock, m.rejectHistoryRequest(kind, detail, workspace, expectedSessionID, expectedGenerationID,
-			liveSessionID, liveGenerationID, "hibernation_transition", "eligibility_revoked")
+		return historyAdmission{}, unlock, m.rejectHistoryRequest(kind, detail, workspace, echoedFence,
+			liveFence, "hibernation_transition", "eligibility_revoked")
 	}
 
-	// AN IDENTITY-LESS REQUEST IS A WILDCARD, not a mismatch. A request carrying
-	// NEITHER a session nor a generation is a client that holds no fence at all
-	// — it predates fenced chrome, or it connected in a window where the
-	// authoritative WorkspaceState honestly published an ABSENT fence (see
-	// ssm/connectivity.go: an absent controller generation yields an absent
-	// fence rather than an unmatchable minted one). Such a client has nothing to
-	// be stale about, so there is no identity to compare and nothing to refuse;
-	// it is served under whatever identity is current.
-	//
-	// THIS IS NOT THE ADOPTED-EMPTY-GENERATION CASE. A request carrying a
-	// session with an empty generation DID adopt a fence, and it is compared and
-	// refused exactly as before — the wildcard is only for a request that
-	// carries no identity whatsoever.
-	identityless := expectedSessionID == "" && expectedGenerationID == ""
 
 	if live {
 		liveSessionID, liveGenerationID := d.sessionID, d.generationID
+		// The live controller's own fence, composed exactly as the consumer
+		// composes the one it stamps on every delta it pushes (verdict.go), so
+		// what this compares against is the token the client was actually
+		// shown. A live controller always has a non-empty generation, so the
+		// absent-fence rule the mint applies to an ungenerated workspace
+		// cannot reach this branch.
+		liveFence := ssm.Fence(liveSessionID, liveGenerationID)
 		unlock()
-		if identityless {
-			m.logf("session-controller: %s eligibility ACCEPTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q replay_source=%q %s decision=identityless_request_wildcard",
-				kind, workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, "live_controller", detail)
-			return historyAdmission{
-				route:        historyRouteLiveController,
-				controller:   d,
-				sessionID:    liveSessionID,
-				generationID: liveGenerationID,
-			}, unlock, nil
+		decision, ok := admitAgainstFence(echoedFence, liveFence, liveGenerationID)
+		if !ok {
+			return historyAdmission{}, unlock, m.rejectHistoryRequest(kind, detail, workspace, echoedFence,
+				liveFence, "live_controller", "identity_mismatch")
 		}
-		if expectedGenerationID != liveGenerationID {
-			return historyAdmission{}, unlock, m.rejectHistoryRequest(kind, detail, workspace, expectedSessionID, expectedGenerationID,
-				liveSessionID, liveGenerationID, "live_controller", "identity_mismatch")
-		}
-		decision := "current_live_controller"
-		if expectedSessionID != liveSessionID {
-			// A NON-EMPTY controller generation uniquely identifies THIS live
-			// controller, so a client carrying it is current on the pushed
-			// plane and only its session field is stale — the exact shape a
-			// webview ends up in when a session id rotates underneath a store
-			// that already took the new generation. Refusing it deadlocked the
-			// view: a replay is a view's only recovery mechanism, so a refused
-			// one is a permanent stale banner.
-			if expectedGenerationID == "" {
-				return historyAdmission{}, unlock, m.rejectHistoryRequest(kind, detail, workspace, expectedSessionID, expectedGenerationID,
-					liveSessionID, liveGenerationID, "live_controller", "identity_mismatch")
-			}
-			decision = "current_generation_session_rebound"
-		}
-		m.logf("session-controller: %s eligibility ACCEPTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q replay_source=%q %s decision=%s",
-			kind, workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, "live_controller", detail, decision)
+		m.logf("session-controller: %s eligibility ACCEPTED ws=%q request_fence=%q live_fence=%q replay_source=%q %s decision=%s",
+			kind, workspace, echoedFence, liveFence, "live_controller", detail, decision)
 		return historyAdmission{
 			route:        historyRouteLiveController,
 			controller:   d,
 			sessionID:    liveSessionID,
 			generationID: liveGenerationID,
+			fence:        liveFence,
 		}, unlock, nil
 	}
 
@@ -170,46 +185,108 @@ func (m *Manager) admitHistoryRequest(kind, detail, workspace, expectedSessionID
 	reader, ok := m.cfg.SSM.(WorkspaceStateReader)
 	if !ok {
 		err := fmt.Errorf("session-controller: %s ws=%q has no workspace-state reader for durable-history identity validation", kind, workspace)
-		m.logf("session-controller: %s eligibility REJECTED ws=%q request_session=%q request_generation=%q replay_source=%q %s decision=missing_workspace_state_reader error=%v",
-			kind, workspace, expectedSessionID, expectedGenerationID, "durable_history", detail, err)
+		m.logf("session-controller: %s eligibility REJECTED ws=%q request_fence=%q replay_source=%q %s decision=missing_workspace_state_reader error=%v",
+			kind, workspace, echoedFence, "durable_history", detail, err)
 		return historyAdmission{}, unlock, err
 	}
 	state, found, err := reader.Current(workspace)
 	if err != nil {
-		m.logf("session-controller: %s eligibility FAILED ws=%q request_session=%q request_generation=%q replay_source=%q %s decision=workspace_state_read_failed error=%v",
-			kind, workspace, expectedSessionID, expectedGenerationID, "durable_history", detail, err)
+		m.logf("session-controller: %s eligibility FAILED ws=%q request_fence=%q replay_source=%q %s decision=workspace_state_read_failed error=%v",
+			kind, workspace, echoedFence, "durable_history", detail, err)
 		return historyAdmission{}, unlock, fmt.Errorf("session-controller: read authoritative workspace state for durable %s ws %q: %w", kind, workspace, err)
 	}
 	if !found || state == nil {
 		err := fmt.Errorf("session-controller: no authoritative workspace state for durable %s ws %q", kind, workspace)
-		m.logf("session-controller: %s eligibility REJECTED ws=%q request_session=%q request_generation=%q replay_source=%q %s decision=missing_workspace_state error=%v",
-			kind, workspace, expectedSessionID, expectedGenerationID, "durable_history", detail, err)
+		m.logf("session-controller: %s eligibility REJECTED ws=%q request_fence=%q replay_source=%q %s decision=missing_workspace_state error=%v",
+			kind, workspace, echoedFence, "durable_history", detail, err)
 		return historyAdmission{}, unlock, err
 	}
 	liveSessionID, liveGenerationID := state.GetSessionId(), state.GetControllerGenerationId()
-	if !identityless && (expectedSessionID != liveSessionID || expectedGenerationID != liveGenerationID) {
-		return historyAdmission{}, unlock, m.rejectHistoryRequest(kind, detail, workspace, expectedSessionID, expectedGenerationID,
-			liveSessionID, liveGenerationID, "durable_history", "identity_mismatch")
-	}
+	// THE PUBLISHED TOKEN, read straight off the authoritative WorkspaceState
+	// rather than recomposed from the two identities beside it. Recomposition
+	// is what made this rung wrong: an ungenerated workspace publishes an
+	// ABSENT fence, and `Fence(session, "")` is not that — it is a different
+	// token entirely, which no client was ever shown.
+	liveFence := state.GetFence()
+	// The rebind rung is deliberately NOT offered here. It exists because a
+	// live controller's generation identifies that controller; a workspace with
+	// no controller has no such guarantee to stand on, so the durable route
+	// admits an exact match and nothing else.
+	//
+	// The identity-less wildcard above applies here too, and on this route it is
+	// the ordinary case rather than the exception: an unwired workspace with no
+	// controller generation publishes an ABSENT fence, so the client echoing it
+	// and the state publishing it agree at "" and the exact comparison would
+	// have admitted it anyway. Naming the wildcard explicitly is what keeps the
+	// two routes' verdicts written the same way.
 	decision := "current_durable_snapshot"
-	if identityless {
+	if echoedFence == "" {
 		decision = "identityless_request_wildcard"
+	} else if echoedFence != liveFence {
+		return historyAdmission{}, unlock, m.rejectHistoryRequest(kind, detail, workspace, echoedFence,
+			liveFence, "durable_history", "identity_mismatch")
 	}
-	m.logf("session-controller: %s eligibility ACCEPTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q replay_source=%q %s decision=%s",
-		kind, workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, "durable_history", detail, decision)
+	m.logf("session-controller: %s eligibility ACCEPTED ws=%q request_fence=%q live_fence=%q replay_source=%q %s decision=%s",
+		kind, workspace, echoedFence, liveFence, "durable_history", detail, decision)
 	return historyAdmission{
 		route:        historyRouteDurableHistory,
 		sessionID:    liveSessionID,
 		generationID: liveGenerationID,
+		fence:        liveFence,
 	}, unlock, nil
 }
 
 // rejectHistoryRequest refuses a request whose echoed identity is not the live
 // one, in the one vocabulary both surfaces share.
-func (m *Manager) rejectHistoryRequest(kind, detail, workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, replaySource, rejectionCause string) error {
-	err := fmt.Errorf("%w: %s ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q %s replay_source=%q rejection_cause=%q",
-		errclass.ErrSessionSuperseded, kind, workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, detail, replaySource, rejectionCause)
-	m.logf("session-controller: %s eligibility REJECTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q %s replay_source=%q decision=superseded rejection_cause=%q error=%v",
-		kind, workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, detail, replaySource, rejectionCause, err)
+func (m *Manager) rejectHistoryRequest(kind, detail, workspace, requestFence, liveFence, replaySource, rejectionCause string) error {
+	err := fmt.Errorf("%w: %s ws=%q request_fence=%q live_fence=%q %s replay_source=%q rejection_cause=%q",
+		errclass.ErrSessionSuperseded, kind, workspace, requestFence, liveFence, detail, replaySource, rejectionCause)
+	m.logf("session-controller: %s eligibility REJECTED ws=%q request_fence=%q live_fence=%q %s replay_source=%q decision=superseded rejection_cause=%q error=%v",
+		kind, workspace, requestFence, liveFence, detail, replaySource, rejectionCause, err)
 	return err
+}
+
+// admitAgainstFence is the comparison itself: byte-first, with the one rung
+// that cannot be expressed byte-wise behind it.
+//
+// It returns the decision token for the log alongside the verdict, so the
+// record always says WHICH rung admitted a request rather than only that one
+// did.
+//
+// liveGenerationID is the LIVE controller's generation, and it is what gates
+// the fallback: an empty one identifies nothing, so a client whose token
+// merely happens to end in the same empty suffix has established nothing and
+// is refused.
+func admitAgainstFence(echoedFence, liveFence, liveGenerationID string) (decision string, ok bool) {
+	// AN ABSENT ECHO IS A WILDCARD, not a mismatch. A client sending no fence
+	// at all holds no claim about which generation it is reading — it predates
+	// fenced chrome, or it connected in a window where the authoritative
+	// WorkspaceState honestly published an ABSENT fence (ssm/connectivity.go).
+	// It has nothing to be stale about, so there is nothing to compare and
+	// nothing to refuse; it is served under whatever identity is current.
+	//
+	// THIS IS NOT THE ADOPTED-EMPTY-GENERATION CASE. A client echoing a
+	// non-empty token that merely ends in an empty generation DID adopt a
+	// fence, and it is compared and refused exactly as any other.
+	if echoedFence == "" {
+		return "identityless_request_wildcard", true
+	}
+	// THE CONTRACT'S OWN COMPARISON, and the answer in every ordinary case.
+	if echoedFence == liveFence {
+		return "current_fence", true
+	}
+	// THE ONE RUNG THE BYTES CANNOT EXPRESS. A non-empty controller generation
+	// uniquely identifies THIS live controller, so a client carrying it is
+	// current on the pushed plane and only its session half is stale — the
+	// exact shape a webview ends up in when a session id rotates underneath a
+	// store that already took the new generation. Refusing it deadlocks the
+	// view: a replay is a view's only recovery mechanism, so a refused one is a
+	// permanent stale banner.
+	if liveGenerationID == "" {
+		return "", false
+	}
+	if _, echoedGenerationID := ssm.SplitFence(echoedFence); echoedGenerationID == liveGenerationID {
+		return "current_generation_session_rebound", true
+	}
+	return "", false
 }
