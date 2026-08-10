@@ -98,13 +98,15 @@ one that matters, and it is the one that runs."
 (defvar agent-repl--webview-recovery-last-sweep nil
   "`float-time' of the last sweep that ran, or nil when none has.")
 
-(defcustom agent-repl-webview-precreate-stagger-seconds 0.35
+(defcustom agent-repl-webview-precreate-stagger-seconds 0.02
   "Seconds between two paced webview pre-creations.
 Each pre-creation spawns a WebKit content process, and a startup sweep
-can be owed ten of them at once.  Creating them in a tight loop stalls
-the editor for as long as the whole burst takes; a timer chain hands the
-command loop back between mounts, so the burst costs latency nobody is
-waiting on instead of a visible hitch."
+can be owed ten of them at once.  The timer chain exists so eligibility
+is re-checked between mounts and the command loop is handed back after
+each one; the interval is deliberately near-zero because a full burst is
+brief (each mount itself is milliseconds -- the heavy work happens in
+WebKit's own processes) and a fast rollout is preferred over a stretched
+one.  Raise this if a burst ever produces a visible hitch."
   :type 'number
   :group 'agent-repl)
 
