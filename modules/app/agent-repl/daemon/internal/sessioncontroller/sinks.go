@@ -2440,6 +2440,14 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 	// stuck behind the ping forever, and the next resync would re-deliver the
 	// whole conversation from before it.
 	c.withholdKeepAlive(cd)
+	// The daemon's own `/compact` turns — the warm compaction and the
+	// compact-first revival — whose plumbing the feed drew as an orphan duration
+	// chip (contextcutexclude.go). Same "withheld, not deleted" discipline as
+	// the exclusions above, and placed with them for the same reason: this is
+	// the one chokepoint every replay route funnels through. The compaction's
+	// own divider is untouched, because the vendor's `compact_boundary` record
+	// carries no turn id for this to match on.
+	c.withholdDaemonContextCut(cd)
 	// PROVENANCE, AFTER EVERY CURATION AND BEFORE THE PUSH. The curators above
 	// rebuild items (skillbody.go mints a fresh SkillBodyItem from the record it
 	// consumed), so stamping earlier would leave a rebuilt item carrying the
