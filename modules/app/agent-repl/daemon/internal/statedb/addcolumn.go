@@ -56,7 +56,7 @@ func HasColumn(db *sql.DB, table, column string) (bool, error) {
 // column ddl`, unless the column is already there.
 //
 // ddl is the column's type and constraints exactly as they would follow the
-// name in a CREATE TABLE — `TEXT`, `TEXT NOT NULL DEFAULT ''`, `INTEGER`. It is
+// name in a CREATE TABLE — `TEXT`, `TEXT NOT NULL DEFAULT ”`, `INTEGER`. It is
 // interpolated rather than bound because SQLite binds values, not identifiers
 // or type names; every caller is a compile-time literal in this repository, and
 // a caller passing user input would be a defect at the call site rather than
