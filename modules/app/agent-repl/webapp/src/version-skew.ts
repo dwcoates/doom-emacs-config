@@ -98,6 +98,43 @@ export const FORCED_RELOAD_COOLDOWN_MS =
 /** `sessionStorage` key holding the epoch-ms stamp of the last forced reload. */
 export const FORCED_RELOAD_AT_KEY = "agent-repl.forced-reload-at-ms";
 
+/** `sessionStorage` key holding how many forced reloads this page has run. */
+export const FORCED_RELOAD_COUNT_KEY = "agent-repl.forced-reload-count";
+
+/**
+ * Forced reloads after which this page refuses to reload again, whatever the
+ * clock says.
+ *
+ * WHY THE COOLDOWN ALONE IS NOT ENOUGH. The cooldown asks "was the last reload
+ * recent", and a wedge cycle SLOWER than the cooldown answers no every single
+ * time: the page reloads, adopts one snapshot (which clears the expiry
+ * counter), wedges again, expires twice, and reloads — indefinitely, with each
+ * cycle's elapsed time just over the bar. That is the production shape, where a
+ * cycle ran ~95-100s against a 135s cooldown and only barely tripped it. A
+ * COUNT cannot be outrun by a slow loop: N forced reloads is N forced reloads
+ * however long they took, so the refusal is reachable by construction rather
+ * than by arithmetic about how fast the page happens to wedge.
+ *
+ * Three, because the first forced reload is the ordinary repair this module
+ * exists to perform and the second is the fair retry after it; a third that
+ * still leaves the page unable to stay current is a defect no further reload
+ * addresses, and the loud card is the diagnosis.
+ */
+export const MAX_FORCED_RELOADS = 3;
+
+/**
+ * How long a page must have been running, at an adoption, for the persisted
+ * forced-reload count to be discharged.
+ *
+ * Discharging on ANY adoption would defeat the count entirely: every wedged
+ * page in the observed loop adopted exactly once before wedging again, so the
+ * count would reset on the very evidence it is meant to survive. Staying up for
+ * a full cooldown — longer than a whole run of expiry cycles — is a page that
+ * really did recover, and that page's history should not condemn a later,
+ * unrelated skew.
+ */
+export const HEALTHY_UPTIME_MS = FORCED_RELOAD_COOLDOWN_MS;
+
 /** What one observed event caused this module to do. */
 export type VersionSkewOutcome =
   /** Nothing; the page keeps running. */
@@ -163,8 +200,23 @@ export class VersionSkewGuard {
   private expiriesSinceAdoption = 0;
   /** A reload is already scheduled; further observations must not stack one. */
   private reloading = false;
+  /** When this page instance started, for the healthy-uptime discharge below. */
+  private readonly startedAtMs: number;
 
-  constructor(private readonly opts: VersionSkewOptions) {}
+  constructor(private readonly opts: VersionSkewOptions) {
+    this.startedAtMs = (opts.now ?? Date.now)();
+  }
+
+  /**
+   * Whether this page is on its way out under a reload IT decided on.
+   *
+   * The socket dies during that teardown, and a self-inflicted close is not a
+   * lost daemon: the ingest path reads this to withhold the "lost the
+   * connection" card for a disconnect the page itself caused (main.ts).
+   */
+  get isReloading(): boolean {
+    return this.reloading;
+  }
 
   /** The pinned daemon build, for a caller's own bookkeeping. */
   get build(): DaemonBuild | null {
@@ -193,6 +245,10 @@ export class VersionSkewGuard {
     // Adoption is the only proof this bundle can ingest this daemon's frames,
     // so it is the only thing that clears the stale-bundle evidence.
     this.expiriesSinceAdoption = 0;
+    // The CROSS-RELOAD count is discharged on a stricter condition than this
+    // one, because a single adoption is exactly what a looping page achieves
+    // between reloads (MAX_FORCED_RELOADS).
+    this.dischargeForcedReloadsIfHealthy();
     if (this.pinnedBuild === null) {
       this.pinnedBuild = build;
       this.opts.log?.("info", `version skew: pinned daemon build ${renderBuild(build)}`);
@@ -241,6 +297,21 @@ export class VersionSkewGuard {
   private forceReload(): VersionSkewOutcome {
     const now = (this.opts.now ?? Date.now)();
     const last = this.readForcedReloadStamp();
+    const attempts = this.readForcedReloadCount();
+    // THE COUNT IS CHECKED FIRST, and it is checked at all because it is the
+    // only one of the two bars a slow reload loop cannot walk past.
+    if (attempts >= MAX_FORCED_RELOADS) {
+      const detail =
+        `reloaded ${attempts} times and still cannot ingest the daemon's state ` +
+        `after ${this.expiriesSinceAdoption} snapshot-lease expiries`;
+      this.expiriesSinceAdoption = 0;
+      this.opts.log?.(
+        "error",
+        `version skew: refusing to reload again after ${attempts} forced reloads — ${detail}`,
+      );
+      this.opts.onReloadRefused(detail);
+      return "refused";
+    }
     if (last !== null && now - last < FORCED_RELOAD_COOLDOWN_MS) {
       const sinceMs = now - last;
       const detail =
@@ -255,6 +326,7 @@ export class VersionSkewGuard {
       return "refused";
     }
     this.writeForcedReloadStamp(now);
+    this.writeForcedReloadCount(attempts + 1);
     this.opts.log?.(
       "warn",
       `version skew: ${this.expiriesSinceAdoption} consecutive snapshot-lease expiries without adoption; reloading page for a fresh bundle`,
@@ -297,6 +369,63 @@ export class VersionSkewGuard {
       throw new Error(`version-skew: ${FORCED_RELOAD_AT_KEY} holds an unparsable value ${JSON.stringify(raw)}`);
     }
     return parsed;
+  }
+
+  /** Forced reloads this page has already run; 0 when it has never forced one. */
+  private readForcedReloadCount(): number {
+    let raw: string | null;
+    try {
+      raw = this.opts.storage.getItem(FORCED_RELOAD_COUNT_KEY);
+    } catch (err) {
+      this.opts.log?.(
+        "error",
+        `version skew: reading ${FORCED_RELOAD_COUNT_KEY} from session storage failed: ${String(err)}`,
+      );
+      throw err;
+    }
+    if (raw === null) return 0;
+    const parsed = Number(raw);
+    // Only this module writes the key, so anything unparsable — or negative,
+    // which would raise the reload ceiling — is corruption rather than an
+    // expected input. Refusing loudly beats reloading on a bad bound.
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      this.opts.log?.(
+        "error",
+        `version skew: ${FORCED_RELOAD_COUNT_KEY} holds the unusable value ${JSON.stringify(raw)}`,
+      );
+      throw new Error(`version-skew: ${FORCED_RELOAD_COUNT_KEY} holds an unusable value ${JSON.stringify(raw)}`);
+    }
+    return parsed;
+  }
+
+  private writeForcedReloadCount(count: number): void {
+    try {
+      this.opts.storage.setItem(FORCED_RELOAD_COUNT_KEY, String(count));
+    } catch (err) {
+      // Without the count the ceiling cannot hold, and a reload whose guard is
+      // gone is the reload loop this module exists to prevent.
+      this.opts.log?.(
+        "error",
+        `version skew: writing ${FORCED_RELOAD_COUNT_KEY} to session storage failed: ${String(err)}`,
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * Clear the forced-reload history once this page has stayed up long enough
+   * to have really recovered. A no-op below that, and a no-op when there is no
+   * history to clear, so an ordinary page writes nothing.
+   */
+  private dischargeForcedReloadsIfHealthy(): void {
+    const now = (this.opts.now ?? Date.now)();
+    if (now - this.startedAtMs < HEALTHY_UPTIME_MS) return;
+    if (this.readForcedReloadCount() === 0) return;
+    this.writeForcedReloadCount(0);
+    this.opts.log?.(
+      "info",
+      `version skew: page has been current for ${HEALTHY_UPTIME_MS}ms; discharging the forced-reload history`,
+    );
   }
 
   private writeForcedReloadStamp(atMs: number): void {
