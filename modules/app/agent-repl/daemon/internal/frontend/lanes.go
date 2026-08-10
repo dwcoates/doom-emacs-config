@@ -51,6 +51,52 @@ import (
 // a valid workspace directory, so it can never collide with a real lane.
 const globalLaneKey = "\x00global"
 
+// ---------------------------------------------------------------------------
+// Resync coalescing
+// ---------------------------------------------------------------------------
+//
+// A RESYNC IS SUPERSEDING, and it is the one command class whose backlog is
+// self-sustaining. Its meaning is "make me current AS OF NOW", so a newer
+// resync answers everything an older queued one asked for and more: replaying
+// the older one first can only re-send state the newer replay is about to send
+// again. That is harmless when a lane holds one of them and ruinous when it
+// holds thousands.
+//
+// It went ruinous the moment webview recovery stopped being visibility-gated.
+// A backgrounded page used to re-arm its resync at the throttled rate the
+// browser allowed it, which bounded the flood by accident; retrying at full
+// speed removed the bound, and the observed queue reached 5,069 commands with
+// resyncs completing 420-550 SECONDS after they were read off the socket. The
+// flood then FEEDS ITSELF: a resync unanswered past the client's ack deadline
+// is exactly what makes that client re-arm another one.
+//
+// So resyncs coalesce at intake. When one arrives for a lane that already
+// holds a QUEUED resync, the older queued entry is dropped and answered as
+// superseded — the newer entry ahead of every command behind it discharges
+// what the older one asked for. Two properties make that safe rather than a
+// silent loss:
+//
+//   - Only QUEUED entries are eligible. next() removes an entry from the queue
+//     before its command runs, so an EXECUTING resync is not in the queue and
+//     can never be dropped by this.
+//   - The superseding entry is on the SAME lane's FIFO, so it is already
+//     guaranteed to run — including during close(), which still drains what a
+//     lane holds — before anything queued behind it.
+//
+// Nothing else coalesces. Every other command is a distinct instruction whose
+// effect a later one does not contain.
+
+// maxQueuedResyncPerLane bounds how many resyncs one lane may hold queued at
+// once. Superseding coalescing already keeps a lane at one queued resync, so
+// this is a BACKSTOP rather than the mechanism: if the coalescing predicate is
+// ever narrowed (per-fence, say) so two queued resyncs can coexist, the depth a
+// lane can reach stays bounded by construction instead of by that predicate's
+// continued breadth.
+const maxQueuedResyncPerLane = 2
+
+// isResync reports whether a command is a conversation resync.
+func isResync(cmd *frontendv1.FrontendCommand) bool { return cmd.GetResync() != nil }
+
 // laneKey names the serialization domain a command belongs to. Ordering is
 // promised per workspace, and the wire field the daemon routes every command
 // by is the workspace, so the workspace IS the lane.
@@ -74,6 +120,15 @@ type commandLanes struct {
 	// wait included, not just the handler's processing time, and the ticket's
 	// deferred settle is what releases the in-flight gauge.
 	run func(t *commandTicket)
+	// debugf carries the per-coalescing accounting. It is the verbose channel
+	// on purpose: one line per superseded resync is diagnostic detail during a
+	// flood, not an operator alarm.
+	debugf dlog.Logf
+	// supersede ANSWERS a queued command this lane dropped. It is not optional
+	// and it is not "best effort": the entry was already read off the socket,
+	// so the client is waiting on it, and a drop with no answer would produce
+	// exactly the unacked-command failure the coalescing exists to end.
+	supersede func(t *commandTicket)
 
 	mu     sync.Mutex
 	lanes  map[string]*commandLane
@@ -102,8 +157,17 @@ type commandLane struct {
 	ready chan struct{}
 }
 
-func newCommandLanes(logf dlog.Logf, run func(t *commandTicket)) *commandLanes {
-	return &commandLanes{logf: logf, run: run, lanes: map[string]*commandLane{}}
+func newCommandLanes(logf, debugf dlog.Logf, run, supersede func(t *commandTicket)) *commandLanes {
+	if supersede == nil {
+		panic("frontend: command lanes require a supersede answerer")
+	}
+	return &commandLanes{
+		logf:      logf,
+		debugf:    debugf,
+		run:       run,
+		supersede: supersede,
+		lanes:     map[string]*commandLane{},
+	}
 }
 
 // submit hands a command to its lane, starting that lane's worker on first
@@ -137,7 +201,23 @@ func (l *commandLanes) submit(t *commandTicket) {
 		}()
 	}
 	l.mu.Unlock()
-	lane.push(laneItem{ticket: t})
+	superseded, queued := lane.push(laneItem{ticket: t})
+	// Answered OUTSIDE the lane's lock: the answer marshals a frame and hands
+	// it to the client's outbound queue, and none of that may run with a lane's
+	// intake blocked behind it.
+	for _, old := range superseded {
+		l.debugf("frontend: resync coalesced lane=%q superseded_request_id=%q by_request_id=%q superseded=%d queued_resyncs=%d lane_depth=%d",
+			key, old.ticket.cmd.GetRequestId(), cmd.GetRequestId(), len(superseded), queued.resyncs, queued.depth)
+		l.supersede(old.ticket)
+	}
+}
+
+// laneDepth is one lane's post-push occupancy, reported for the coalescing log.
+type laneDepth struct {
+	// depth is every queued entry, of any command.
+	depth int
+	// resyncs is how many of those are resyncs.
+	resyncs int
 }
 
 // serve runs one lane's commands in arrival order until the lane is closed AND
@@ -177,12 +257,74 @@ func (l *commandLanes) close() {
 	l.wg.Wait()
 }
 
-// push appends a command and wakes the lane's worker.
-func (lane *commandLane) push(item laneItem) {
+// push appends a command and wakes the lane's worker. It returns the queued
+// entries this push SUPERSEDED — always resyncs, always still queued, never the
+// one executing — together with the lane's occupancy after the push, and the
+// caller owes every returned entry an answer.
+func (lane *commandLane) push(item laneItem) (superseded []laneItem, queued laneDepth) {
 	lane.mu.Lock()
+	if isResync(item.ticket.cmd) {
+		superseded = lane.takeQueuedResyncsLocked()
+	}
 	lane.queue = append(lane.queue, item)
+	superseded = append(superseded, lane.trimQueuedResyncsLocked()...)
+	queued = lane.depthLocked()
 	lane.mu.Unlock()
 	lane.signal()
+	return superseded, queued
+}
+
+// takeQueuedResyncsLocked removes every queued resync and returns it. This is
+// the coalescing proper: the arriving resync is newer than all of them, and a
+// lane is one workspace, so each removed entry asked for a replay the arriving
+// one contains. Caller holds lane.mu.
+func (lane *commandLane) takeQueuedResyncsLocked() []laneItem {
+	var taken []laneItem
+	kept := lane.queue[:0]
+	for _, q := range lane.queue {
+		if isResync(q.ticket.cmd) {
+			taken = append(taken, q)
+			continue
+		}
+		kept = append(kept, q)
+	}
+	lane.queue = kept
+	return taken
+}
+
+// trimQueuedResyncsLocked enforces maxQueuedResyncPerLane by removing the
+// OLDEST queued resyncs beyond the bound, returning them for their answer.
+// Coalescing normally leaves nothing for it to do; it is the backstop that
+// keeps the bound a property of the lane rather than of the coalescing
+// predicate. Caller holds lane.mu.
+func (lane *commandLane) trimQueuedResyncsLocked() []laneItem {
+	over := lane.depthLocked().resyncs - maxQueuedResyncPerLane
+	if over <= 0 {
+		return nil
+	}
+	var trimmed []laneItem
+	kept := lane.queue[:0]
+	for _, q := range lane.queue {
+		if over > 0 && isResync(q.ticket.cmd) {
+			over--
+			trimmed = append(trimmed, q)
+			continue
+		}
+		kept = append(kept, q)
+	}
+	lane.queue = kept
+	return trimmed
+}
+
+// depthLocked reports the lane's occupancy. Caller holds lane.mu.
+func (lane *commandLane) depthLocked() laneDepth {
+	d := laneDepth{depth: len(lane.queue)}
+	for _, q := range lane.queue {
+		if isResync(q.ticket.cmd) {
+			d.resyncs++
+		}
+	}
+	return d
 }
 
 // next reports the head command, or whether the lane is finished. The three
