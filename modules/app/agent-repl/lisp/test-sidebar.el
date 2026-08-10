@@ -1621,52 +1621,33 @@ a live workspace does not belong in a list of work that has receded."
         (should (eq (plist-get roster :recentlyMerged) :null))
         (should (member "revived" (agent-repl-test--roster-repo-names roster)))))))
 
-(ert-deftest agent-repl-test-sidebar-merged-capped-at-the-max-rows ()
-  "Recently Merged renders at most `agent-repl-sidebar-merged-max-rows'."
+(ert-deftest agent-repl-test-sidebar-merged-keeps-every-merge-past-ten ()
+  "Recently Merged carries every in-window merge, well past ten rows.
+The rail bounds the section by height (the webapp scrolls it at ten rows),
+so the roster must not drop the merges that scrolling exists to reach."
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-sidebar-merged-max-rows 3)
-          (now (float-time)))
-      (dotimes (i 5)
-        (agent-repl-test--sidebar-ws (format "m%d" i) (format "/tmp/m%d" i)
+    (let ((now (float-time)))
+      (dotimes (i 25)
+        (agent-repl-test--sidebar-ws (format "m%02d" i) (format "/tmp/m%02d" i)
+                                     :pushed-render-state :merged
+                                     :merge-completed-at (+ now i)))
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (rows (append (plist-get (plist-get roster :recentlyMerged) :rows) nil)))
+        (should (= (length rows) 25))))))
+
+(ert-deftest agent-repl-test-sidebar-merged-past-ten-stays-newest-first ()
+  "The uncapped section still orders newest merge first."
+  (agent-repl-test--with-clean-state
+    (let ((now (float-time)))
+      (dotimes (i 12)
+        (agent-repl-test--sidebar-ws (format "m%02d" i) (format "/tmp/m%02d" i)
                                      :pushed-render-state :merged
                                      :merge-completed-at (+ now i)))
       (let* ((roster (car (agent-repl--sidebar-build)))
              (rows (append (plist-get (plist-get roster :recentlyMerged) :rows) nil)))
         (should (equal (mapcar (lambda (r) (plist-get r :name)) rows)
-                       '("m4" "m3" "m2")))))))
-
-(ert-deftest agent-repl-test-sidebar-merged-cap-names-what-it-dropped ()
-  "The cap logs the merges it dropped rather than truncating silently."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-sidebar-merged-max-rows 1)
-          (now (float-time))
-          (logged nil))
-      (agent-repl-test--sidebar-ws "kept" "/tmp/kept"
-                                   :pushed-render-state :merged
-                                   :merge-completed-at (+ now 1))
-      (agent-repl-test--sidebar-ws "dropped" "/tmp/dropped"
-                                   :pushed-render-state :merged
-                                   :merge-completed-at now)
-      (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
-        (agent-repl--sidebar-merged-sorted (agent-repl--sidebar-entries)))
-      (should (cl-find-if (lambda (line)
-                            (and (string-match-p "sidebar-merged-sorted: cap=1" line)
-                                 (string-match-p "dropped" line)))
-                          logged)))))
-
-(ert-deftest agent-repl-test-sidebar-merged-cap-leaves-a-short-section-whole ()
-  "A merge count at the cap renders every row (the cap drops nothing)."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-sidebar-merged-max-rows 2)
-          (now (float-time)))
-      (agent-repl-test--sidebar-ws "a" "/tmp/a"
-                                   :pushed-render-state :merged :merge-completed-at now)
-      (agent-repl-test--sidebar-ws "b" "/tmp/b"
-                                   :pushed-render-state :merged :merge-completed-at (- now 1))
-      (let* ((roster (car (agent-repl--sidebar-build)))
-             (rows (append (plist-get (plist-get roster :recentlyMerged) :rows) nil)))
-        (should (= (length rows) 2))))))
+                       '("m11" "m10" "m09" "m08" "m07" "m06"
+                         "m05" "m04" "m03" "m02" "m01" "m00")))))))
 
 (ert-deftest agent-repl-test-sidebar-merged-listed-newest-first ()
   "Recently merged rows sort by merge time, newest first."
