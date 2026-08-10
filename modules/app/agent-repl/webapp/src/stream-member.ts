@@ -55,13 +55,6 @@ export interface StreamMember {
   elapsedMs: number | undefined;
   /** The stream's accumulated text: the ws-streamed tail first, else polled. */
   tail: string;
-  /**
-   * Output tokens the detached work has spent, read from its transcript's
-   * own usage records (see transcriptStats) — live while it runs, the
-   * terminal record's total once it lands. Undefined for streams that
-   * carry no usage (a shell's spool, a journal).
-   */
-  outputTokens: number | undefined;
   /** The member's expandable bodies, child feed above stream (Shape A). */
   bodies: BodySpec[];
 }
@@ -214,7 +207,6 @@ export function resolveMember(item: ToolItem, ctx: MemberContext): StreamMember 
       polled?.elapsedMs ??
       (item.progressElapsedS !== undefined ? item.progressElapsedS * 1000 : undefined),
     tail,
-    outputTokens: stats?.outputTokens,
     bodies,
   };
 }
