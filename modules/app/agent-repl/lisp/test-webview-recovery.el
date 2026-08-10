@@ -333,7 +333,7 @@ name claims; the workspace record contributes the rest."
       ;; Act
       (let ((again (agent-repl-refresh-webviews)))
         ;; Assert
-        (should (null again))
+        (should (equal 0 again))
         (should (equal 1 (length calls)))))))
 
 (ert-deftest agent-repl-test-webview-recovery-navigate-is-a-registered-boundary ()
