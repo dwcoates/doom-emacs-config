@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { ConnectResync, isIdentityMismatch, type ConnectResyncLogLevel } from "../src/connect-resync.js";
+import {
+  ConnectResync,
+  isIdentityMismatch,
+  resyncBackoffMs,
+  RESYNC_BACKOFF_BASE_MS,
+  RESYNC_BACKOFF_MAX_MS,
+  RESYNC_FAILURE_CEILING,
+  type ConnectResyncLogLevel,
+  type ConnectResyncOptions,
+} from "../src/connect-resync.js";
 
 interface Sent {
   workspace: string;
@@ -11,6 +20,20 @@ interface Harness {
   trigger: ConnectResync;
   sent: Sent[];
   logs: Array<[ConnectResyncLogLevel, string]>;
+  /** Advance the injected clock past a backoff window. */
+  advance: (ms: number) => void;
+}
+
+/**
+ * Drain the microtask queue so a dispatched resync's promise settles.
+ *
+ * REQUIRED WHEREVER A SECOND RESYNC IS EXPECTED: only one may be in flight at
+ * a time, so a want-resync raised before the first settles coalesces into the
+ * dirty flag rather than going out. A test that re-arms without settling is
+ * asserting the flood.
+ */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 8; i++) await Promise.resolve();
 }
 
 /** A trigger whose resync always succeeds, recording what it was asked to send. */
@@ -18,17 +41,30 @@ function snapshot(workspace: string, fromSeq: number, fence = "f-current") {
   return { workspace, fromSeq, fence };
 }
 
-function harness(resync?: (sent: Sent) => Promise<void>): Harness {
+function harness(resync?: (sent: Sent) => Promise<void>, onGiveUp?: ConnectResyncOptions["onGiveUp"]): Harness {
   const sent: Sent[] = [];
   const logs: Array<[ConnectResyncLogLevel, string]> = [];
+  let clock = 1_000;
   const trigger = new ConnectResync({
     resync: (request) => {
       sent.push(request);
       return resync ? resync(request) : Promise.resolve();
     },
     log: (level, message) => logs.push([level, message]),
+    now: () => clock,
+    // No jitter, so a delay assertion names an exact number.
+    random: () => 1,
+    latestSnapshot: () => (sent.length === 0 ? null : sent[sent.length - 1]),
+    onGiveUp,
   });
-  return { trigger, sent, logs };
+  return {
+    trigger,
+    sent,
+    logs,
+    advance: (ms) => {
+      clock += ms;
+    },
+  };
 }
 
 describe("ConnectResync", () => {
@@ -177,12 +213,13 @@ describe("ConnectResync daemon identity", () => {
     expect(h.trigger.bootId).toBe("boot-1");
   });
 
-  it("re-arms a resync when the daemon identity changes", () => {
+  it("re-arms a resync when the daemon identity changes", async () => {
     // Arrange — this connection has already spent its one resync.
     const h = harness();
     h.trigger.onConnect();
     h.trigger.observeDaemonIdentity("boot-1");
     h.trigger.observe(true, snapshot("/ws", 40));
+    await flush();
     h.sent.length = 0;
     // Act — the same socket is served a snapshot from a DIFFERENT daemon.
     h.trigger.observeDaemonIdentity("boot-2");
@@ -243,11 +280,12 @@ describe("ConnectResync daemon identity", () => {
  * single dispatch path every other resync does.
  */
 describe("ConnectResync forceResync", () => {
-  it("re-arms a connection that has already spent its resync", () => {
-    // Arrange
+  it("re-arms a connection that has already spent its resync", async () => {
+    // Arrange — the first resync must SETTLE before a second can go out.
     const h = harness();
     h.trigger.onConnect();
     h.trigger.observe(true, snapshot("/ws", 12));
+    await flush();
     h.sent.length = 0;
     // Act
     h.trigger.forceResync("visibilitychange_visible");
@@ -354,7 +392,10 @@ function mismatchHarness(adopted: Sent | null, alwaysReject = false): MismatchHa
   const sent: Sent[] = [];
   const logs: Array<[ConnectResyncLogLevel, string]> = [];
   const adoptions: string[] = [];
+  let clock = 1_000;
   const trigger = new ConnectResync({
+    now: () => clock,
+    random: () => 1,
     resync: (request) => {
       sent.push(request);
       if (alwaysReject || sent.length === 1) return Promise.reject(new Error(MISMATCH));
@@ -366,7 +407,15 @@ function mismatchHarness(adopted: Sent | null, alwaysReject = false): MismatchHa
       return adopted;
     },
   });
-  return { trigger, sent, logs, adoptions };
+  return {
+    trigger,
+    sent,
+    logs,
+    adoptions,
+    advance: (ms) => {
+      clock += ms;
+    },
+  };
 }
 
 describe("ConnectResync identity mismatch", () => {
@@ -410,6 +459,9 @@ describe("ConnectResync identity mismatch", () => {
     h.trigger.observe(true, snapshot("/ws", 12, "f-stale"));
     for (let i = 0; i < 4; i++) await Promise.resolve();
     // Act — the next snapshot carries the daemon's own account of who is live.
+    // A refused resync is charged to the backoff like any other, so the clock
+    // moves past that window before the re-armed request may go out.
+    h.advance(RESYNC_BACKOFF_MAX_MS);
     h.trigger.observe(true, snapshot("/ws", 12, "f-live"));
     // Assert
     expect(h.sent[1]).toEqual(snapshot("/ws", 12, "f-live"));
@@ -447,5 +499,283 @@ describe("isIdentityMismatch", () => {
     const verdict = isIdentityMismatch("resync rejected: workspace unknown");
     // Assert
     expect(verdict).toBe(false);
+  });
+});
+
+/**
+ * THE BOUND ON THE FLOOD.
+ *
+ * Recovery is visibility-independent by design, which removed the accidental
+ * bound WebKit's throttling used to supply: a background page re-armed a
+ * resync every heartbeat whether or not the last was answered, producing a
+ * command queue 5,069 deep whose entries settled 420-550 seconds after they
+ * were sent. These are the four rules that make it finite.
+ */
+describe("ConnectResync single in-flight", () => {
+  it("coalesces a want-resync raised while one is in flight", () => {
+    // Arrange — a resync that never settles is what the heartbeat re-armed on.
+    const h = harness(() => new Promise<void>(() => {}));
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    // Act — the heartbeat fires again before the first was answered.
+    h.trigger.forceResync("recovery_heartbeat");
+    const dispatched = h.trigger.observe(false, snapshot("/ws", 12));
+    // Assert — one request, not two.
+    expect(dispatched).toBe(false);
+    expect(h.sent).toHaveLength(1);
+  });
+
+  it("spends the coalesced request when the in-flight one acks", async () => {
+    // Arrange
+    let settle: (() => void) | undefined;
+    const h = harness(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(false, snapshot("/ws", 12));
+    // Act
+    settle?.();
+    await flush();
+    // Assert — the coalesced want is honored exactly once.
+    expect(h.sent).toHaveLength(2);
+  });
+
+  it("holds only one coalesced request however many wants arrive", async () => {
+    // Arrange
+    let settle: (() => void) | undefined;
+    const h = harness(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    for (let i = 0; i < 20; i++) {
+      h.trigger.forceResync("recovery_heartbeat");
+      h.trigger.observe(false, snapshot("/ws", 12));
+    }
+    // Act
+    settle?.();
+    await flush();
+    // Assert — a dirty FLAG, not a queue.
+    expect(h.sent).toHaveLength(2);
+  });
+});
+
+describe("ConnectResync backoff", () => {
+  it("refuses a retry inside the backoff window after a failure", async () => {
+    // Arrange
+    const h = harness(() => Promise.reject(new Error("no ack")));
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    await flush();
+    // Act — the heartbeat arrives before the window elapsed.
+    h.trigger.forceResync("recovery_heartbeat");
+    const dispatched = h.trigger.observe(false, snapshot("/ws", 12));
+    // Assert
+    expect(dispatched).toBe(false);
+  });
+
+  it("allows the retry once the first backoff window has elapsed", async () => {
+    // Arrange
+    const h = harness(() => Promise.reject(new Error("no ack")));
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    await flush();
+    // Act
+    h.advance(RESYNC_BACKOFF_BASE_MS);
+    h.trigger.forceResync("recovery_heartbeat");
+    const dispatched = h.trigger.observe(false, snapshot("/ws", 12));
+    // Assert
+    expect(dispatched).toBe(true);
+  });
+
+  it("grows the window with each consecutive failure", async () => {
+    // Arrange — two failures in a row; the first window no longer suffices.
+    const h = harness(() => Promise.reject(new Error("no ack")));
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    await flush();
+    h.advance(RESYNC_BACKOFF_BASE_MS);
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(false, snapshot("/ws", 12));
+    await flush();
+    // Act — the SAME elapsed time that sufficed after one failure.
+    h.advance(RESYNC_BACKOFF_BASE_MS);
+    h.trigger.forceResync("recovery_heartbeat");
+    const dispatched = h.trigger.observe(false, snapshot("/ws", 12));
+    // Assert
+    expect(dispatched).toBe(false);
+  });
+
+  it("resets the window after a resync acks", async () => {
+    // Arrange — one failure, then a success.
+    let reject = true;
+    const h = harness(() => (reject ? Promise.reject(new Error("no ack")) : Promise.resolve()));
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    await flush();
+    reject = false;
+    h.advance(RESYNC_BACKOFF_BASE_MS);
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(false, snapshot("/ws", 12));
+    await flush();
+    h.sent.length = 0;
+    // Act — no time passes at all after the success.
+    h.trigger.forceResync("recovery_heartbeat");
+    const dispatched = h.trigger.observe(false, snapshot("/ws", 12));
+    // Assert
+    expect(dispatched).toBe(true);
+  });
+});
+
+describe("resyncBackoffMs", () => {
+  it("doubles from the base with each consecutive failure", () => {
+    // Arrange / Act
+    const second = resyncBackoffMs(2, 1);
+    // Assert
+    expect(second).toBe(RESYNC_BACKOFF_BASE_MS * 2);
+  });
+
+  it("caps the delay however many failures precede it", () => {
+    // Arrange / Act
+    const late = resyncBackoffMs(30, 1);
+    // Assert
+    expect(late).toBe(RESYNC_BACKOFF_MAX_MS);
+  });
+
+  it("jitters the delay down by up to half", () => {
+    // Arrange / Act — a fleet that lost one daemon must not re-ask in lockstep.
+    const jittered = resyncBackoffMs(1, 0);
+    // Assert
+    expect(jittered).toBe(RESYNC_BACKOFF_BASE_MS / 2);
+  });
+});
+
+/** Drive a trigger to its give-up ceiling, one failed resync per window. */
+async function exhaust(h: Harness): Promise<void> {
+  for (let i = 0; i < RESYNC_FAILURE_CEILING; i++) {
+    h.advance(RESYNC_BACKOFF_MAX_MS);
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(true, snapshot("/ws", 12));
+    await flush();
+  }
+}
+
+describe("ConnectResync give-up ceiling", () => {
+  it("surfaces the banner after the ceiling of consecutive failures", async () => {
+    // Arrange
+    const giveUps: number[] = [];
+    const h = harness(
+      () => Promise.reject(new Error("no ack")),
+      (failures) => giveUps.push(failures),
+    );
+    h.trigger.onConnect();
+    // Act
+    await exhaust(h);
+    // Assert
+    expect(giveUps).toEqual([RESYNC_FAILURE_CEILING]);
+  });
+
+  it("stops asking once it has given up", async () => {
+    // Arrange
+    const h = harness(() => Promise.reject(new Error("no ack")));
+    h.trigger.onConnect();
+    await exhaust(h);
+    h.sent.length = 0;
+    // Act
+    h.advance(RESYNC_BACKOFF_MAX_MS);
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(true, snapshot("/ws", 12));
+    // Assert — silence, not spinning.
+    expect(h.sent).toEqual([]);
+  });
+
+  it("asks again when the banner's retry affordance is used", async () => {
+    // Arrange
+    const h = harness(() => Promise.reject(new Error("no ack")));
+    h.trigger.onConnect();
+    await exhaust(h);
+    h.sent.length = 0;
+    // Act
+    h.trigger.retryNow();
+    h.trigger.observe(false, snapshot("/ws", 12));
+    // Assert
+    expect(h.sent).toEqual([snapshot("/ws", 12)]);
+  });
+
+  it("reports the given-up state so the banner is not retracted under it", async () => {
+    // Arrange
+    const h = harness(() => Promise.reject(new Error("no ack")));
+    h.trigger.onConnect();
+    // Act
+    await exhaust(h);
+    // Assert
+    expect(h.trigger.isGivenUp).toBe(true);
+  });
+});
+
+describe("ConnectResync reconnect", () => {
+  it("resyncs immediately on a fresh socket despite an unelapsed backoff", async () => {
+    // Arrange — a failure left a window this connect does not owe.
+    const h = harness(() => Promise.reject(new Error("no ack")));
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    await flush();
+    h.sent.length = 0;
+    // Act — no time passes; the socket simply came back.
+    h.trigger.onDisconnect();
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    // Assert
+    expect(h.sent).toEqual([snapshot("/ws", 12)]);
+  });
+
+  it("resyncs ONCE on a fresh socket rather than on every frame after it", async () => {
+    // Arrange
+    const h = harness(() => Promise.reject(new Error("no ack")));
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    await flush();
+    h.trigger.onDisconnect();
+    // Act
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    h.sent.length = 0;
+    h.trigger.observe(true, snapshot("/ws", 12));
+    // Assert
+    expect(h.sent).toEqual([]);
+  });
+
+  it("clears a given-up page when the socket comes back", async () => {
+    // Arrange
+    const h = harness(() => Promise.reject(new Error("no ack")));
+    h.trigger.onConnect();
+    await exhaust(h);
+    // Act
+    h.trigger.onDisconnect();
+    h.trigger.onConnect();
+    // Assert — a new socket is new evidence, not a retry.
+    expect(h.trigger.isGivenUp).toBe(false);
+  });
+
+  it("drops a request whose socket died so the next connection is not blocked", () => {
+    // Arrange — an in-flight resync that can never settle.
+    const h = harness(() => new Promise<void>(() => {}));
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    h.sent.length = 0;
+    // Act
+    h.trigger.onDisconnect();
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    // Assert
+    expect(h.sent).toEqual([snapshot("/ws", 12)]);
   });
 });
