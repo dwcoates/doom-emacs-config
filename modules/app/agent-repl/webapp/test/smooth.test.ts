@@ -188,6 +188,7 @@ describe("SmoothReveal.reveal", () => {
     const t2 = textItem({ blockId: "b2", text: "answer two", done: true });
     const result: ConversationItem = {
       kind: "result",
+      uuid: "r1",
       subtype: "success",
       durationMs: 1,
       numTurns: 1,

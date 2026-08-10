@@ -390,7 +390,7 @@ func conversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*fro
 	var envs map[string]RecordEnvelope
 	switch p := ev.GetPayload().(type) {
 	case *corev1.Event_Vendor:
-		vitems, venvs, err := conversationItemsFromVendor(p.Vendor, ev.GetProducedAtMs(), ev.GetRequestId())
+		vitems, venvs, err := conversationItemsFromVendor(p.Vendor, ev)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -486,17 +486,22 @@ type RecordEnvelope struct {
 // conversationItemsFromVendor unwraps the vendor Any (a data.v1 message) into
 // curated conversation items. It handles both observation planes: the stream
 // plane (ClaudeStreamMessage and its bare inner messages) and the file plane
-// (TranscriptLine). producedAtMs stamps ts_ms on the stream plane; transcript
-// lines prefer their own on-disk envelope timestamp. requestID is the Event's
-// control-request correlation, carried onto every item's envelope.
+// (TranscriptLine). The EVENT is passed whole rather than as its parts,
+// because a result's reconciliation identity is derived from it (eventDerivedUUID)
+// and deriving that from a different source than the stamps beside it is how
+// the two come apart. ev.produced_at_ms stamps ts_ms on the stream plane;
+// transcript lines prefer their own on-disk envelope timestamp.
+// ev.request_id is the Event's control-request correlation, carried onto every
+// item's envelope.
 //
 // The second return carries each item's RecordEnvelope: the file plane's own
 // transcript envelope, or — on the stream plane, which has none — the
 // detachment envelope synthesized from parent_tool_use_id.
-func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID string) ([]*frontendv1.ConversationItem, map[string]RecordEnvelope, error) {
+func conversationItemsFromVendor(a *anypb.Any, ev *corev1.Event) ([]*frontendv1.ConversationItem, map[string]RecordEnvelope, error) {
 	if a == nil {
 		return nil, nil, nil
 	}
+	producedAtMs, requestID := ev.GetProducedAtMs(), ev.GetRequestId()
 	msg, err := a.UnmarshalNew()
 	if err != nil {
 		return nil, nil, fmt.Errorf("frontend: unmarshal vendor Any (type=%q): %w", a.GetTypeUrl(), err)
@@ -511,7 +516,7 @@ func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID str
 			items := userItems(inner.User, producedAtMs, requestID)
 			return items, streamUserEnvelopes(items, inner.User), nil
 		case *datav1.ClaudeStreamMessage_Result:
-			return resultItems(inner.Result, producedAtMs, requestID), nil, nil
+			return resultItems(inner.Result, ev), nil, nil
 		default:
 			return nil, nil, nil // known envelope, non-conversational arm
 		}
@@ -522,7 +527,7 @@ func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID str
 		items := userItems(m, producedAtMs, requestID)
 		return items, streamUserEnvelopes(items, m), nil
 	case *datav1.ResultMessage:
-		return resultItems(m, producedAtMs, requestID), nil, nil
+		return resultItems(m, ev), nil, nil
 	case *datav1.TranscriptLine:
 		items, envs := transcriptLineItems(m, producedAtMs, requestID)
 		return items, envs, nil
@@ -546,7 +551,7 @@ func contextClearedItems(cc *corev1.ContextCleared, ev *corev1.Event) []*fronten
 		return nil
 	}
 	return []*frontendv1.ConversationItem{{
-		Uuid: clearOrCompactUUID(ev, "clear"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
+		Uuid: eventDerivedUUID(ev, "clear"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 		Item:   &frontendv1.ConversationItem_ContextCleared{ContextCleared: cc},
 	}}
@@ -567,29 +572,32 @@ func contextCompactedItems(cc *corev1.ContextCompacted, ev *corev1.Event) []*fro
 		return nil
 	}
 	return []*frontendv1.ConversationItem{{
-		Uuid: clearOrCompactUUID(ev, "compact"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
+		Uuid: eventDerivedUUID(ev, "compact"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 		Item:   &frontendv1.ConversationItem_ContextCompacted{ContextCompacted: cc},
 	}}
 }
 
-// clearOrCompactUUID is a clear's or a compaction's reconciliation identity.
+// eventDerivedUUID is the reconciliation identity of a conversation item whose
+// own payload carries none: a clear, a compaction, a turn result.
 //
-// It is the event's DEDUP KEY (`clear:<uuid>` / `compact:<uuid>`) — the very
-// key the store merges twins on, so every replay yields one item a frontend
-// replaces in place rather than accumulating. No other field on the envelope is
-// stable across replays of the same event.
+// It is the event's DEDUP KEY — the very key the store merges twins on, so
+// every replay yields one item a frontend replaces in place rather than
+// accumulating. No other field on the envelope is stable across replays of the
+// same event.
 //
 // An event that carries no dedup key was never deduped, and its identity is
 // then the position the store assigned it: seq is authoritative, gapless and
-// per-session, so the derived id is just as stable across replays. kind keeps
-// the derived form ("clear" / "compact") honest about which of the two it names,
-// matching the producer's own prefixes so the two id spaces never overlap.
+// per-session, so the derived id is just as stable across replays. KIND keeps
+// the derived form ("clear" / "compact" / "result") honest about which of them
+// it names, matching the producer's own prefixes so the id spaces never
+// overlap.
 //
-// Deriving it rather than dropping the item is what keeps the event RENDERABLE:
-// an item with no uuid would leave a frontend discarding its history at a floor
-// it can show no reason for.
-func clearOrCompactUUID(ev *corev1.Event, kind string) string {
+// Deriving it rather than dropping the item is what keeps the event
+// RENDERABLE: an item with no uuid would leave a frontend discarding its
+// history at a floor it can show no reason for — and, for a result, appending
+// one more copy of the same turn's closing chip on every resync.
+func eventDerivedUUID(ev *corev1.Event, kind string) string {
 	if key := ev.GetDedupKey(); key != "" {
 		return key
 	}
@@ -967,12 +975,18 @@ func hasUserContent(msg *datav1.ApiUserMessage) bool {
 
 // resultItems passes an end-of-turn ResultMessage through as the agent's
 // terminal result emission.
-func resultItems(r *datav1.ResultMessage, tsMs int64, requestID string) []*frontendv1.ConversationItem {
+//
+// The uuid is what makes a replayed result RECONCILE rather than accumulate. A
+// result carried none for as long as it existed, and every resync — which
+// replays the session's conversation from the floor — appended another copy of
+// the same turn's closing chip, so an interrupted turn's yellow badge repeated
+// down the feed once per resync.
+func resultItems(r *datav1.ResultMessage, ev *corev1.Event) []*frontendv1.ConversationItem {
 	if r == nil {
 		return nil
 	}
 	return []*frontendv1.ConversationItem{{
-		TsMs: tsMs, RequestId: requestID,
+		Uuid: eventDerivedUUID(ev, "result"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
 			Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: r},

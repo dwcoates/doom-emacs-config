@@ -167,6 +167,7 @@ function pendingPermission(
 function successResult(): ResultItem {
   return {
     kind: "result",
+    uuid: "catalogue-result",
     subtype: "success",
     durationMs: 5230,
     numTurns: 3,
