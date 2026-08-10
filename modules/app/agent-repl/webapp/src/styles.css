@@ -1363,8 +1363,10 @@ pre {
    announces itself now, so neither a bubble's background nor its text tail
    carries a liveness signal any more. */
 
-/* Markdown-rendered assistant text */
-.md { font-size: 0.9rem; line-height: 1.5; }
+/* Markdown-rendered assistant text. The leading is a token because the
+   response bubble's 25-line height cap is measured in these lines (see
+   --cap-line-h), so the two must never drift apart. */
+.md { font-size: 0.9rem; --md-line-h: 1.5; line-height: var(--md-line-h); }
 /* The markdown lives one level in, inside the bubble's body column, so the
    flush-with-the-bubble-edge rules reach through it. */
 .md .bubble-body > :first-child { margin-top: 0; }
@@ -1693,14 +1695,33 @@ pre {
 .tab-chip.active { color: var(--fg); border-color: var(--accent); }
 /* N-line preview caps, one shared mechanic: --cap-lines is the visible
    line budget (Read and Edit diffs get 10, Bash command and output get
-   5 each, independently scrollable) and --cap-extra absorbs the
-   .tool-output dashed-divider padding where inherited. Everything past
-   the cap stays reachable by scrolling. */
+   5 each, independently scrollable, and the agent's response bubble gets
+   25), --cap-line-h is the line box those lines are counted in, and
+   --cap-extra absorbs the .tool-output dashed-divider padding where
+   inherited. Everything past the cap stays reachable by scrolling.
+
+   --cap-line-h exists because the budget is a count of TEXT LINES, and the
+   monospace previews and the response bubble do not set their text at the
+   same leading. The default is the previews' own 1.4, which the rule below
+   sets on them; the response bubble overrides it with the leading its
+   markdown actually renders at, so 25 lines means 25 of ITS lines. */
+.tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content,
+.bubble.assistant > .bubble-body {
+  overflow-y: auto;
+  max-height: calc(var(--cap-lines) * var(--cap-line-h, 1.4em) + var(--cap-extra, 0px));
+}
+/* The monospace previews' own leading, which --cap-line-h defaults to. The
+   response bubble is deliberately absent: its leading is the markdown's. */
 .tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content {
   line-height: 1.4;
-  overflow-y: auto;
-  max-height: calc(var(--cap-lines) * 1.4em + var(--cap-extra, 0px));
 }
+/* The agent's answer caps at 25 of its own text lines and scrolls past that,
+   so one enormous response cannot push the whole rest of the feed off screen.
+   The cap rides the BODY rather than the bubble, so the corner stamp is never
+   scrolled away from the answer it labels, and the line box is read from the
+   markdown's own leading token rather than restated here — a change to `.md`'s
+   line-height moves the cap with it instead of silently mis-measuring it. */
+.bubble.assistant > .bubble-body { --cap-lines: 25; --cap-line-h: calc(var(--md-line-h) * 1em); }
 .tool-read-output { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
 .bash-input { --cap-lines: 5; }
 .bash-output { --cap-lines: 5; --cap-extra: calc(0.35rem + 1px); }

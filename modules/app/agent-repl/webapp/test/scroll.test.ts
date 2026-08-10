@@ -21,7 +21,7 @@ import {
   revealNode,
 } from "../src/scroll.js";
 import { renderItem } from "../src/render.js";
-import { PermissionItem, ToolItem } from "../src/store.js";
+import { PermissionItem, TextItem, ToolItem } from "../src/store.js";
 
 /** Fake ancestor-chain node: the shape innerScrollerAt walks. */
 interface FakeNode {
@@ -320,6 +320,22 @@ describe("SECTION_CLASSES", () => {
     };
     // Act + Assert
     expect(renderItem(item)).toContain(`class="${SECTION_CLASSES[1]} `);
+  });
+
+  it("names the class the renderer puts on a response bubble, which holds its capped body", () => {
+    // Arrange — the response body caps at 25 lines and scrolls past that, so
+    // the bubble is a section: the lit gutters must ride the bubble's own
+    // edges rather than sit inset at its body's.
+    const item: TextItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "an answer",
+      done: true,
+      ts: "2026-05-24T10:00:00.000Z",
+    };
+    // Act + Assert
+    expect(renderItem(item)).toContain(`class="${SECTION_CLASSES[2]} `);
   });
 });
 

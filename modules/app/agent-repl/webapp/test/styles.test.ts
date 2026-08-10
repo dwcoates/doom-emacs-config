@@ -1635,6 +1635,78 @@ describe("click-to-expand", () => {
   });
 });
 
+// The shared N-line cap mechanic, and the response bubble's own use of it.
+const sharedCap = blockAfter(css, ".bubble.assistant > .bubble-body {");
+const capSelector = css.slice(
+  css.indexOf(".tool-read-output, .bash-input"),
+  css.indexOf("{", css.indexOf(".tool-read-output, .bash-input")),
+);
+const responseCapVars = blockAfter(css, "\n.bubble.assistant > .bubble-body { --cap-lines");
+const mdRule = blockAfter(css, "\n.md {");
+
+describe("response bubble height cap", () => {
+  it("caps the response body at 25 of its own text lines", () => {
+    // Arrange / Act — one enormous answer must not push the rest of the feed
+    // off screen, so the body stops at a fixed line budget.
+    // Assert
+    expect(responseCapVars).toMatch(/--cap-lines:\s*25/);
+  });
+
+  it("scrolls the rest of the answer rather than clipping it away", () => {
+    // Arrange / Act — the shared cap rule the response body joined.
+    // Assert
+    expect(sharedCap).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("caps by max-height, so a short answer still shrinks to its own text", () => {
+    // Arrange / Act — a plain `height` would pad every one-line answer out to
+    // 25 lines of empty bubble.
+    // Assert
+    expect(sharedCap).toMatch(/max-height:/);
+    expect(sharedCap).not.toMatch(/(^|[^-])height:\s*calc/);
+  });
+
+  it("reuses the tool previews' cap mechanic instead of rolling a second one", () => {
+    // Arrange / Act — one rule owns "N lines then scroll" for every capped box
+    // in the feed, the response bubble included.
+    // Assert
+    expect(capSelector).toContain(".bubble.assistant > .bubble-body");
+    expect(sharedCap).toMatch(
+      /max-height:\s*calc\(var\(--cap-lines\) \* var\(--cap-line-h, 1\.4em\) \+ var\(--cap-extra, 0px\)\)/,
+    );
+  });
+
+  it("measures the budget in the markdown's own leading rather than restating it", () => {
+    // Arrange — a hard-coded line height here would silently mis-measure the
+    // cap the day `.md`'s leading changed.
+    // Act / Assert
+    expect(responseCapVars).toMatch(/--cap-line-h:\s*calc\(var\(--md-line-h\) \* 1em\)/);
+    expect(mdRule).toMatch(/line-height:\s*var\(--md-line-h\)/);
+  });
+
+  it("defines that leading token on the markdown rule the response bubble carries", () => {
+    // Arrange / Act — `.md` sits on the bubble, so the body inherits the token.
+    // Assert
+    expect(mdRule).toMatch(/--md-line-h:\s*[\d.]+/);
+  });
+
+  it("caps the body rather than the bubble, so the corner stamp never scrolls away", () => {
+    // Arrange / Act — the stamp is a sibling of the body, outside the scroll box.
+    // Assert
+    expect(capSelector).not.toMatch(/\.bubble\.assistant\s*[,{]/);
+  });
+
+  it("leaves the monospace previews their own 1.4 leading, which the cap defaults to", () => {
+    // Arrange — the previews set the leading the shared default measures in;
+    // the response bubble is deliberately absent from that list.
+    const leading = css.match(
+      /\.tool-read-output, \.bash-input, \.bash-output, \.diff-output, \.skill-input, \.skill-content \{\s*line-height:\s*1\.4;\s*\}/,
+    );
+    // Act / Assert
+    expect(leading).not.toBeNull();
+  });
+});
+
 describe("thinking spinner", () => {
   it("drives the ring with an endless linear rotation", () => {
     // Arrange / Act — the base .thinking-spinner rule.
