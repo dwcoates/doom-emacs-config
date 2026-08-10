@@ -60,6 +60,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
@@ -125,17 +126,30 @@ type WorkspaceOpener struct {
 	// session's own dir is probed first; the rest only ever produce migration
 	// candidates.
 	ConfigDirs func() []string
+	// Failures publishes a bring-up failure that lands AFTER the open command
+	// was acked (required for Open — see openbringup.go). It is the surface the
+	// ack used to be, and Open refuses to run without it.
+	Failures OpenFailureSink
 	// Logf is the loud logger (required).
 	Logf func(string, ...any)
+
+	// openMu guards opening.
+	openMu sync.Mutex
+	// opening maps a workspace to its in-flight bring-up, and is what a
+	// duplicate open coalesces onto (openbringup.go). An entry exists for
+	// exactly as long as one open owns the workspace.
+	opening map[string]*openBringUp
 }
 
 var _ WorkspaceLifecycle = (*WorkspaceOpener)(nil)
 
-// Open makes a workspace ready to render and drive: it creates the workspace's
-// session when it has none, binds a discovered transcript to that session, then
-// waits for the restore's authoritative bring-up outcome. A command
-// acknowledgement therefore means the session is driveable; a failed exact
-// resume returns its typed continuity evidence to that same command.
+// Open ACCEPTS a workspace: it creates the workspace's session when it has
+// none, binds a discovered transcript to that session, and starts the bring-up
+// — then returns, WITHOUT waiting for the bring-up to finish. A command
+// acknowledgement therefore means "accepted, and this workspace's session is
+// coming up or already is"; it does not mean driveable. See openbringup.go for
+// why the wait had to come off the command and where a late failure goes
+// instead. Every refusal Open ever made is still made here, synchronously.
 //
 // opts are the run preferences for a session this open STARTS; they are unread
 // when the workspace already has one.
@@ -143,6 +157,25 @@ func (o *WorkspaceOpener) Open(ctx context.Context, workspace string, opts Works
 	if o.Ensurer == nil {
 		return fmt.Errorf("server: open-workspace %q has no session ensurer wired", workspace)
 	}
+	if o.Failures == nil {
+		// An early ack with no late-failure surface would swallow every
+		// bring-up failure the ack used to carry. Refused, never tolerated.
+		return fmt.Errorf("server: open-workspace %q has no bring-up failure sink wired, so a failure after the ack would reach nobody", workspace)
+	}
+	round, claimed := o.claimOpen(workspace)
+	if !claimed {
+		o.Logf("server: open-workspace %q COALESCED onto the bring-up already in flight for it; this open is accepted against that one rather than starting a second bring-up for the same workspace",
+			workspace)
+		return nil
+	}
+	// The slot is handed to driveOpen once the bring-up is detached; until
+	// then every exit is a refusal and must give it back.
+	detached := false
+	defer func() {
+		if !detached {
+			o.releaseOpen(workspace, round)
+		}
+	}()
 	id, found := (&SessionLocator{Reg: o.Reg}).Locate(workspace)
 	if !found {
 		// A workspace with no session record gets one HERE. Open is the single
@@ -165,7 +198,9 @@ func (o *WorkspaceOpener) Open(ctx context.Context, workspace string, opts Works
 	if !found {
 		return fmt.Errorf("server: open-workspace %q session %q disappeared after transcript binding", workspace, id)
 	}
-	return o.establish(rec, workspace, o.Ensurer.EnsureDriveable(ctx, workspace))
+	detached = true
+	go o.driveOpen(round, rec, workspace)
+	return nil
 }
 
 // create mints workspace's first session through the daemon's one creation
