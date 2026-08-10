@@ -76,7 +76,22 @@ newline-delimited protojson `agentshim.frontend.v1' messages."
 (defcustom agent-repl-uds-reconnect-delay 2.0
   "Seconds to wait before attempting to reconnect a dropped UDS link.
 A dropped link means honest downtime (design §4.4): the display goes
-stale until the daemon is reachable again.  There is no spill buffer."
+stale until the daemon is reachable again.  There is no spill buffer.
+
+This is the BASE of the retry ladder, not its only rung: each failed
+redial doubles the wait up to `agent-repl-uds-reconnect-max-delay', and a
+connection that reaches `open' resets the ladder back to this value."
+  :type 'number
+  :group 'agent-repl)
+
+(defcustom agent-repl-uds-reconnect-max-delay 30.0
+  "Ceiling on the reconnect delay produced by doubling the base delay.
+
+A daemon restart can take tens of seconds (respawn + deploy + listen), and
+the ladder must keep redialing across the whole outage rather than giving
+up after one attempt.  Retrying every `agent-repl-uds-reconnect-delay'
+seconds for minutes would hot-spin, so the wait doubles; this cap keeps
+the worst-case recovery latency bounded once it has grown."
   :type 'number
   :group 'agent-repl)
 
@@ -121,6 +136,16 @@ is retained here until its newline arrives.")
 
 (defvar agent-repl--uds-reconnect-timer nil
   "The pending reconnect timer, or nil.  Reset via `agent-repl--uds-run-timer'.")
+
+(defvar agent-repl--uds-reconnect-delay-current nil
+  "Delay the NEXT reconnect will wait, or nil to use the base delay.
+Doubled by every scheduled attempt up to `agent-repl-uds-reconnect-max-delay'
+and returned to nil by `agent-repl--uds-reset-reconnect-backoff'.")
+
+(defvar agent-repl--uds-reconnect-attempts 0
+  "Consecutive reconnect attempts scheduled since the last open link.
+Carried in the scheduling log so an outage's ladder is readable after the
+fact; reset alongside `agent-repl--uds-reconnect-delay-current'.")
 
 (defcustom agent-repl-uds-probe-timeout 2.0
   "Seconds a callback-based UDS probe may remain unresolved."
@@ -564,6 +589,12 @@ hard error.  A refused cold-start dial is still fully logged, but it
 neither raises a premature outage alarm nor arms a competing timer.
 Returns the process on success, nil on a failed dial."
   (interactive)
+  ;; Whether this dial came from the ladder's own timer or from any other
+  ;; driver (the reattach sweep, a human `M-x'), the pending timer has been
+  ;; superseded by the attempt happening now.  Clearing it here is also what
+  ;; keeps `agent-repl--uds-reconnect-timer' honest as the "a retry is
+  ;; already coming" flag other modules test before dialing themselves.
+  (agent-repl--uds-cancel-reconnect "dial-starting")
   (when (agent-repl--uds-connected-p)
     (agent-repl--log nil "uds-connect: already connected (proc=%s) — no-op"
                      (process-name agent-repl--uds-process))
@@ -585,6 +616,25 @@ Returns the process on success, nil on a failed dial."
                 agent-repl--uds-connect-started-at (float-time))
           (agent-repl--log nil "uds-connect: start proc=%s status=%s state=dialing"
                            (process-name proc) (process-status proc))
+          ;; A non-blocking local dial against a socket with no listener can
+          ;; come back ALREADY DEAD — `status=failed' on the very process
+          ;; `make-network-process' returned.  No sentinel transition follows a
+          ;; process that was never live, so the ladder's only rung would be
+          ;; this one and the link would stay down forever (observed live
+          ;; across a daemon restart).  Settle it here instead.
+          (when (and (processp proc)
+                     (memq (process-status proc) '(failed closed)))
+            (agent-repl--warn nil
+                              "uds-connect: dial born dead proc=%s status=%s socket=%s"
+                              (process-name proc) (process-status proc) sock)
+            (delete-process proc)
+            (setq agent-repl--uds-process nil
+                  agent-repl--uds-connection-state 'failed
+                  agent-repl--uds-connect-started-at nil)
+            (agent-repl--uds-link-note-down "dial-born-dead")
+            (unless readiness-p
+              (agent-repl--uds-schedule-reconnect "dial-born-dead"))
+            (cl-return-from agent-repl-uds-connect nil))
           ;; A fresh connection is a fresh command plane: whatever went
           ;; unacknowledged belonged to the socket that is gone.  Any command
           ;; still aging on the NEW connection reports itself when its own
@@ -622,15 +672,17 @@ Returns the process on success, nil on a failed dial."
                             "the agent-repl daemon is unreachable; reconnecting"
                             (format "socket=%s %s" sock (error-message-string err))))))
            (agent-repl-connection-notice-echo text))
-         (agent-repl--uds-schedule-reconnect))
+         (agent-repl--uds-schedule-reconnect "dial-failed"))
        nil))))
 
 (defun agent-repl-uds-disconnect ()
   "Tear down the frontend UDS connection and cancel any pending reconnect."
   (interactive)
-  (when (timerp agent-repl--uds-reconnect-timer)
-    (cancel-timer agent-repl--uds-reconnect-timer)
-    (setq agent-repl--uds-reconnect-timer nil))
+  (agent-repl--uds-cancel-reconnect "disconnect")
+  ;; A deliberate teardown ends the outage the ladder was climbing: leaving a
+  ;; grown delay behind would make the NEXT unrelated drop wait out the last
+  ;; outage's backoff before its first redial.
+  (agent-repl--uds-reset-reconnect-backoff "disconnect")
   (let ((was-connected (agent-repl--uds-connected-p)))
     (when (process-live-p agent-repl--uds-process)
       (agent-repl--log nil "uds-disconnect: deleting proc=%s"
@@ -656,17 +708,65 @@ Isolated so tests can `cl-letf' it to capture (DELAY FN) without arming
 a real timer.  Production body does nothing but call `run-with-timer'."
   (run-with-timer delay nil fn))
 
-(defun agent-repl--uds-schedule-reconnect ()
-  "Schedule a single reconnect attempt after `agent-repl-uds-reconnect-delay'.
+(defun agent-repl--uds-reconnect-next-delay ()
+  "Return the delay the next scheduled reconnect should wait.
+The base delay until a failure has raised it, and never above
+`agent-repl-uds-reconnect-max-delay'."
+  (min (or agent-repl--uds-reconnect-delay-current
+           agent-repl-uds-reconnect-delay)
+       agent-repl-uds-reconnect-max-delay))
+
+(defun agent-repl--uds-reset-reconnect-backoff (cause)
+  "Return the reconnect ladder to its base delay, naming CAUSE.
+Called when a dial reaches `open' and when the link is torn down
+deliberately: both end the outage the ladder was climbing, so the next
+one starts at `agent-repl-uds-reconnect-delay' rather than inheriting a
+grown wait from an outage that is over."
+  (when (or agent-repl--uds-reconnect-delay-current
+            (> agent-repl--uds-reconnect-attempts 0))
+    (agent-repl--log nil
+                     "uds-schedule-reconnect: backoff reset to %ss cause=%s attempts=%d"
+                     agent-repl-uds-reconnect-delay cause
+                     agent-repl--uds-reconnect-attempts))
+  (setq agent-repl--uds-reconnect-delay-current nil
+        agent-repl--uds-reconnect-attempts 0))
+
+(defun agent-repl--uds-cancel-reconnect (cause)
+  "Cancel any pending reconnect timer, naming CAUSE.
+Leaves the backoff ladder alone: cancelling because a dial is starting
+NOW is not the same event as the dial succeeding."
+  (when (timerp agent-repl--uds-reconnect-timer)
+    (agent-repl--log nil "uds-schedule-reconnect: cancelled pending reconnect cause=%s"
+                     cause)
+    (cancel-timer agent-repl--uds-reconnect-timer))
+  (setq agent-repl--uds-reconnect-timer nil))
+
+(defun agent-repl--uds-schedule-reconnect (&optional cause)
+  "Schedule the next reconnect attempt, naming CAUSE in the log.
+
 Cancels any previously-pending reconnect timer first so a burst of
-disconnect signals collapses to one attempt."
+disconnect signals collapses to one attempt.
+
+THE LADDER MUST SURVIVE A DAEMON THAT IS STILL COMING BACK.  A single
+attempt after `agent-repl-uds-reconnect-delay' left the link down forever
+whenever the daemon took longer than that to listen again (observed: a
+respawn of ~20s against a 2s redial), because a dial that fails schedules
+the next rung from here and there was no next rung.  Each attempt now
+doubles its wait up to `agent-repl-uds-reconnect-max-delay', so a long
+outage is ridden out without hot-spinning, and an open link resets the
+ladder via `agent-repl--uds-reset-reconnect-backoff'."
   (when (timerp agent-repl--uds-reconnect-timer)
     (cancel-timer agent-repl--uds-reconnect-timer))
-  (agent-repl--log nil "uds-schedule-reconnect: reconnect in %ss"
-                   agent-repl-uds-reconnect-delay)
-  (setq agent-repl--uds-reconnect-timer
-        (agent-repl--uds-run-timer agent-repl-uds-reconnect-delay
-                                   #'agent-repl-uds-connect)))
+  (let ((delay (agent-repl--uds-reconnect-next-delay)))
+    (cl-incf agent-repl--uds-reconnect-attempts)
+    (agent-repl--log nil
+                     "uds-schedule-reconnect: reconnect in %ss attempt=%d cause=%s"
+                     delay agent-repl--uds-reconnect-attempts
+                     (or cause "link-down"))
+    (setq agent-repl--uds-reconnect-delay-current
+          (min (* delay 2) agent-repl-uds-reconnect-max-delay))
+    (setq agent-repl--uds-reconnect-timer
+          (agent-repl--uds-run-timer delay #'agent-repl-uds-connect))))
 
 (defvar agent-repl-uds-connected-functions nil
   "Abnormal hook run with no args once a frontend UDS connection is OPEN.
@@ -777,6 +877,8 @@ drive directly."
       ;; subscriber is free to take as long as it likes and the indicator
       ;; should not wait behind it.
       (agent-repl--uds-link-note-up "link-open")
+      ;; The ladder did its job: the next outage starts from the base delay.
+      (agent-repl--uds-reset-reconnect-backoff "link-open")
       ;; AFTER the flush: a subscriber's send belongs behind the frames
       ;; that were already waiting on this link, not ahead of them.
       (agent-repl--uds-run-connected-hook)))
@@ -836,7 +938,7 @@ drive directly."
         (agent-repl--uds-link-note-down "link-down")))
         (setq agent-repl--uds-read-accumulator "")
     (agent-repl--log nil "uds-sentinel: link down — scheduling reconnect")
-    (agent-repl--uds-schedule-reconnect))))
+    (agent-repl--uds-schedule-reconnect "sentinel-link-down"))))
 
 ;;;; ---- Inbound framing + decode ----------------------------------------
 
