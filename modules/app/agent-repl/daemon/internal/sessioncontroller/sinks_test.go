@@ -198,7 +198,11 @@ type fakeApplier struct {
 	// terminal causes the daemon ended a turn claim with when no TurnEnded
 	// could ever arrive for it.
 	synthesizedCauses []string
-	synthesizeErr     error
+	// synthesized names every turn id a synthesized close ended, so a later
+	// `TurnEnded` for one of them is admitted as the replay the real ledger
+	// admits it as rather than rejected as a contradiction.
+	synthesized   map[string]struct{}
+	synthesizeErr error
 	// interruptMarks records one workspace per MarkTurnInterrupted call — the
 	// user-commanded stops that will paint their turn's end `interrupted`.
 	interruptMarks   []string
@@ -934,6 +938,14 @@ func (a *fakeApplier) resolveTurnLifecycle(_ string, _ string, _ string, ev *cor
 		if prior, ok := a.ends[key]; ok && prior == ev.GetSeq() {
 			return before, before, true, nil
 		}
+		// A CLAIM THE DAEMON ALREADY SYNTHESIZED A CLOSE FOR ADMITS ITS OWN END AS
+		// A REPLAY, exactly as ssm.recordTurnEnd does on the synthesizedCause arm.
+		// Without this the fake would call the shim's `TurnEnded` a contradiction
+		// on every turn the terminal result settled first, which is the ordinary
+		// path rather than a fault.
+		if _, synthesized := a.synthesized[id]; synthesized {
+			return before, before, true, nil
+		}
 		if len(a.turns) == 0 || a.turns[0] != id {
 			return before, before, false, fmt.Errorf("turn end %q has no matching durable claim", id)
 		}
@@ -1025,11 +1037,47 @@ func (a *fakeApplier) SynthesizeTurnClose(_ string, _ string, cause string) (clo
 	a.reconcMutex.Lock()
 	defer a.reconcMutex.Unlock()
 	defer notifyTestActivity()
+	return a.retireClaimsLocked(cause)
+}
+
+// SettleTurnFromTerminalResult models the SSM's terminal-result settlement:
+// the SAME claim retirement a synthesized close performs, plus the axis
+// publication ReconcileAlreadyComplete performs. Modelling both halves is the
+// point — a fake that retired the claims alone would let a controller that
+// forgot the axis pass.
+func (a *fakeApplier) SettleTurnFromTerminalResult(workspace, sessionID string, publish func(*frontendv1.WorkspaceState)) (bool, error) {
+	a.reconcMutex.Lock()
+	closed, err := a.retireClaimsLocked(ssm.TurnCloseTerminalResult)
+	a.reconcMutex.Unlock()
+	defer notifyTestActivity()
+	if err != nil {
+		return false, err
+	}
+	if len(closed) == 0 {
+		return false, nil
+	}
+	publish(&frontendv1.WorkspaceState{
+		Workspace: workspace, SessionId: sessionID,
+		State:  frontendv1.RenderState_RENDER_STATE_IDLE,
+		Status: frontendv1.SessionStatus_SESSION_STATUS_READY,
+	})
+	return true, nil
+}
+
+// retireClaimsLocked is the one claim-retirement the fake performs for every
+// route that ends a turn without a `TurnEnded`. Caller holds reconcMutex.
+func (a *fakeApplier) retireClaimsLocked(cause string) (closed []string, err error) {
 	a.synthesizedCauses = append(a.synthesizedCauses, cause)
 	if a.synthesizeErr != nil {
 		return nil, a.synthesizeErr
 	}
 	closed = append([]string(nil), a.turns...)
+	if a.synthesized == nil {
+		a.synthesized = map[string]struct{}{}
+	}
+	for _, id := range closed {
+		a.synthesized[id] = struct{}{}
+	}
 	a.turns = nil
 	return closed, nil
 }
@@ -1215,7 +1263,7 @@ func TestASettledTurnsAccountingReachesTheProgressResolver(t *testing.T) {
 	c := newProgressConsumer(prog)
 	accounting := &frontendv1.TurnAccounting{TurnId: "t1"}
 	// Act
-	c.publishHeldTerminalResult("t1", accounting)
+	c.publishTurnAccountingStamp("t1", accounting)
 	// Assert
 	notes := prog.accountingNotes()
 	if len(notes) != 1 || notes[0].GetTurnId() != "t1" {
@@ -1230,7 +1278,7 @@ func TestASettlementWithNoHeldResultStillFeedsTheAccountingCell(t *testing.T) {
 	c := newProgressConsumer(prog)
 	// Act — nothing was ever held for this turn, so the discharge below is a
 	// no-op and the early return used to be reached before the cell was fed.
-	c.publishHeldTerminalResult("t-never-held", &frontendv1.TurnAccounting{TurnId: "t-never-held"})
+	c.publishTurnAccountingStamp("t-never-held", &frontendv1.TurnAccounting{TurnId: "t-never-held"})
 	// Assert
 	if len(prog.accountingNotes()) != 1 {
 		t.Fatalf("accounting notes = %v, want the settlement fed despite no held result", prog.accountingNotes())
@@ -2638,27 +2686,28 @@ func TestSynthesizedTurnCloseReleasesTheRetainedTerminalResult(t *testing.T) {
 	}
 }
 
-// The release must PUBLISH, not merely forget: dropping the retention without
-// pushing would unwedge the turn while silently losing the user's answer.
-func TestSynthesizedTurnClosePublishesTheRetainedResult(t *testing.T) {
+// The release must SETTLE, not merely forget: dropping the outstanding stamp
+// without resolving it would unwedge the turn while leaving it unaccounted, so
+// the footer's cell would keep reading a previous turn's figures as current.
+func TestSynthesizedTurnCloseSettlesTheOutstandingStamp(t *testing.T) {
 	// Arrange.
 	const turnID = "t-synth-2"
-	push := &fakePusher{}
+	prog := &fakeProgress{}
 	c := newConsumer(
-		"ws", "s1", push, &fakeApplier{}, &fakeProgress{}, newFakeClearCompactStore(), emptyTurnAccountingStore{},
+		"ws", "s1", &fakePusher{}, &fakeApplier{}, prog, newFakeClearCompactStore(), emptyTurnAccountingStore{},
 		func(string, ...any) {}, nil, nil, nil, nil, nil,
 	)
 	c.accounting.turns[turnID] = &accountingTurn{}
 	c.accounting.activeTurnID = turnID
 	c.pendingTerminal[turnID] = terminalResultEvent(t, 43)
-	before := len(push.convo)
 
 	// Act.
 	c.ReleaseSynthesizedTurnClose([]string{turnID}, "already_complete")
 
 	// Assert.
-	if len(push.convo) == before {
-		t.Fatal("the retained result was dropped rather than published; the user loses the turn's answer")
+	notes := prog.accountingNotes()
+	if len(notes) != 1 || notes[0].GetTurnId() != turnID {
+		t.Fatalf("accounting notes = %v, want the closed turn's stamp settled onto the footer cell", notes)
 	}
 }
 
