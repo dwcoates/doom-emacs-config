@@ -1045,8 +1045,9 @@ describe("countersHtml: the relocated rosters and the badges", () => {
   });
 
   it("drops a roster whose entries have all settled", () => {
-    // Arrange
-    const i = input({ agents: [agentRow({ status: "done" })] });
+    // Arrange — a TASK roster, since the agent roster reaching the footer is
+    // already live-only (`footerAgentRows`) and cannot carry a settled entry.
+    const i = input({ tasks: [counterEntry({ status: "done" })] });
     // Act
     const got = countersHtml(i, CLOSED);
     // Assert
@@ -1056,8 +1057,8 @@ describe("countersHtml: the relocated rosters and the badges", () => {
 
 describe("hasLiveCounters", () => {
   it("is false when every roster entry has settled", () => {
-    // Arrange
-    const i = input({ agents: [agentRow({ status: "done" })] });
+    // Arrange — settled TASKS, the only settled entries a footer input holds.
+    const i = input({ tasks: [counterEntry({ status: "done" })] });
     // Act / Assert
     expect(hasLiveCounters(i)).toBe(false);
   });
@@ -1279,22 +1280,6 @@ describe("sheetHtml: the subagent roster", () => {
     expect(got).toContain('<span class="pfooter-agent-runtime">12s</span>');
   });
 
-  it("reports a settled agent's total span rather than a running clock", () => {
-    // Arrange
-    const settled = agentRow({
-      status: "done",
-      item: tool({
-        toolUseId: "a1",
-        toolName: "Agent",
-        resultTs: new Date(NOW - 2_000).toISOString(),
-      }),
-    });
-    // Act
-    const got = sheetHtml(input({ agents: [settled] }), NOW);
-    // Assert
-    expect(got).toContain('<span class="pfooter-agent-runtime">10s</span>');
-  });
-
   it("puts the agent's uncached input on the right of its row", () => {
     // Arrange
     const i = input({ agents: [agentRow({ uncachedInput: 4_200 })] });
@@ -1386,6 +1371,87 @@ describe("footerAgentRows", () => {
     const got = footerAgentRows([tool()], null);
     // Assert
     expect(got).toEqual([]);
+  });
+
+  /** A subagent call that has come back — concluded, whatever its verdict. */
+  const settledCall = (id: string, isError: boolean): ToolItem =>
+    tool({
+      toolUseId: id,
+      toolName: "Agent",
+      input: { description: "verify" },
+      inputDone: true,
+      result: { isError, content: "" },
+    });
+
+  it("drops a subagent that concluded successfully", () => {
+    // Arrange / Act — the expanded footer lists LIVE subagents only.
+    const got = footerAgentRows([settledCall("tu1", false)], null);
+    // Assert
+    expect(got).toEqual([]);
+  });
+
+  it("drops a subagent that concluded with an error", () => {
+    // Arrange / Act
+    const got = footerAgentRows([settledCall("tu1", true)], null);
+    // Assert
+    expect(got).toEqual([]);
+  });
+
+  it("keeps the subagent still running beside a concluded one", () => {
+    // Arrange
+    const feed = [settledCall("tu1", false), agentCall("tu2")];
+    // Act
+    const got = footerAgentRows(feed, null);
+    // Assert
+    expect(got.map((row) => row.id)).toEqual(["tu2"]);
+  });
+
+  it("keeps a subagent whose input is still streaming", () => {
+    // Arrange — spawned but not yet started: live, and the roster says so.
+    const starting = tool({ toolUseId: "tu3", toolName: "Agent", inputDone: false });
+    // Act
+    const got = footerAgentRows([starting], null);
+    // Assert
+    expect(got.map((row) => row.id)).toEqual(["tu3"]);
+  });
+});
+
+describe("the agent chip counts exactly the rows the section draws", () => {
+  /** A feed of one running subagent per LIVE, one settled call per CONCLUDED. */
+  const feed = (live: number, concluded: number): ToolItem[] => [
+    ...Array.from({ length: live }, (_, n) =>
+      tool({ toolUseId: `live${n}`, toolName: "Agent", inputDone: true })),
+    ...Array.from({ length: concluded }, (_, n) =>
+      tool({
+        toolUseId: `done${n}`,
+        toolName: "Agent",
+        inputDone: true,
+        result: { isError: false, content: "" },
+      })),
+  ];
+
+  /** How many agent rows the expanded footer drew. */
+  const drawnRows = (html: string): number =>
+    html.match(/class="agent-row pfooter-agent-row"/g)?.length ?? 0;
+
+  it("agrees with the section when concluded subagents outnumber live ones", () => {
+    // Arrange — the invariant's whole point: settled calls must not inflate it.
+    const i = input({ agents: footerAgentRows(feed(2, 3), null) });
+    // Act
+    const got = footerHtml(i, { ...CLOSED, expanded: true }, NOW);
+    // Assert
+    expect(got).toContain(">2 agents ");
+    expect(drawnRows(got)).toBe(2);
+  });
+
+  it("hides the chip and draws no rows when every subagent has concluded", () => {
+    // Arrange
+    const i = input({ agents: footerAgentRows(feed(0, 3), null) });
+    // Act
+    const got = footerHtml(i, { ...CLOSED, expanded: true }, NOW);
+    // Assert
+    expect(got).not.toContain("agents-menu");
+    expect(drawnRows(got)).toBe(0);
   });
 });
 
