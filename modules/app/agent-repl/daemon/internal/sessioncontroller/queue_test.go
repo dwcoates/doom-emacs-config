@@ -1575,6 +1575,63 @@ func TestPingTurnEndWithNothingHeldTakesNoRewindClaim(t *testing.T) {
 	}
 }
 
+// --- the explicit-interrupt bypass ------------------------------------------
+
+// A message-style stop used to ride the queue through the classifier's model
+// round trip before its interrupt reached the shim.
+func TestAnExplicitStopInterruptsWithoutAskingTheClassifier(t *testing.T) {
+	tests := []struct {
+		name           string
+		text           string
+		wantInterrupts int
+		wantClassified int
+	}{
+		{name: "the prompt is a bare stop", text: "stop", wantInterrupts: 1, wantClassified: 0},
+		{name: "the prompt is ordinary work", text: "add a test for the parser", wantInterrupts: 0, wantClassified: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a turn is running, and the classifier BLOCKS, so a path
+			// that consults it cannot reach the shim while this test looks.
+			cls := &fakeClassifier{release: make(chan struct{})}
+			t.Cleanup(func() { close(cls.release) })
+			h := newQueueHarness(t, cls)
+			h.turn(true)
+
+			// Act.
+			if err := h.submit(tc.text); err != nil {
+				t.Fatalf("submit: %v", err)
+			}
+
+			// Assert.
+			waitFor(t, "the stop to reach the shim", func() bool {
+				return h.client.interruptCount() == tc.wantInterrupts &&
+					len(cls.requests()) == tc.wantClassified
+			})
+		})
+	}
+}
+
+func TestAnExplicitStopTakesTheInterjectVerdict(t *testing.T) {
+	// Arrange.
+	cls := &fakeClassifier{release: make(chan struct{})}
+	t.Cleanup(func() { close(cls.release) })
+	h := newQueueHarness(t, cls)
+	h.turn(true)
+
+	// Act.
+	if err := h.submit("stop"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert: the entry carries the verdict the classifier would have given it,
+	// so the frontend renders a decided prompt rather than a pending one.
+	waitFor(t, "the bypassed verdict", func() bool {
+		es := h.entries()
+		return len(es) == 1 && es[0].classification == VerdictInterject
+	})
+}
+
 // --- the unknown-fate submit ------------------------------------------------
 //
 // A control request that TIMES OUT has not failed: the shim may hold the prompt

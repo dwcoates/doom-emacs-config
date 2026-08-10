@@ -1456,6 +1456,28 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 		m.publish(d.sessionID, view, recs)
 		return parked, nil
 	}
+	// THE CLASSIFIER IS NOT CONSULTED ABOUT A BARE "STOP". It is a headless
+	// model round trip — bounded at twenty seconds, observed at fourteen — and
+	// the interrupt it implies only reaches the shim after the verdict. The
+	// same stop pressed as a key acks in about three milliseconds, so a user who
+	// typed the word instead of pressing the key paid a quarter of a minute for
+	// the one intent that needs no interpreting.
+	//
+	// The verdict is INTERJECT, which is what the classifier would have answered:
+	// this entry is not delivered here, it takes the head jump and stops the
+	// running turn, exactly as a classified interject does (beginInterject).
+	if IsExplicitInterrupt(text) {
+		m.mu.Lock()
+		entry.classification = VerdictInterject
+		entry.rationale = "explicit interrupt: the prompt is a bare stop, so no classification is needed"
+		view, recs = m.publishQueueLocked(d)
+		m.mu.Unlock()
+		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q classifier=BYPASSED verdict=INTERJECT — the prompt is an unambiguous stop, so the interrupt goes out now instead of after a model round trip",
+			entry.id, d.sessionID, workspace, origin)
+		m.publish(d.sessionID, view, recs)
+		go m.beginInterject(d, entry.id, "explicit-interrupt")
+		return parked, nil
+	}
 	m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q (turn in flight)",
 		entry.id, d.sessionID, workspace, origin)
 	m.publish(d.sessionID, view, recs)
