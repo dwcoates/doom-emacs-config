@@ -610,6 +610,69 @@ export interface RevivalGateInput {
   failure?: string;
 }
 
+/** The class on the collapsed card a taken decision leaves behind. */
+export const HIBERNATION_PROGRESS_CLASS = "hibernation-progress";
+
+/** The class on the span carrying the "asleep for" age, updated in place. */
+export const HIBERNATION_SINCE_CLASS = "hibernation-since";
+
+/**
+ * How long the session has been asleep, as the card's own words, or "" when
+ * the daemon stamped no since time (a zero would render as decades).
+ *
+ * SEPARATE FROM THE CARD because it is the one part of the card that moves
+ * without any state having changed. The chrome writes it as TEXT into the
+ * standing card between state changes, instead of rebuilding the card around
+ * a new age — which would destroy the buttons on a clock tick and swallow a
+ * click that was mid-press (see `html-slot.ts`).
+ */
+export function revivalSinceText(hibernation: HibernationDetail, now: number): string {
+  if (hibernation.sinceMs <= 0) return "";
+  return `asleep for ${formatAge(now - hibernation.sinceMs)}`;
+}
+
+/**
+ * Everything {@link revivalGateHtml} draws EXCEPT the clock, as one comparable
+ * string.
+ *
+ * WHY THE CLOCK IS EXCLUDED. The signature's whole job is to answer "has the
+ * card changed for a reason the user caused?" — and the age has not: it moves
+ * on every frame regardless, so folding it in would make the signature differ
+ * on every frame and guard nothing at all. The age is reconciled separately,
+ * as text, by the caller that owns the slot.
+ */
+export function revivalGateSignature(input: Omit<RevivalGateInput, "now">): string {
+  const { hibernation, contextTokens, pending = null, failure = "" } = input;
+  if (hibernation === null) return "awake";
+  return [
+    hibernation.cause.case,
+    String(hibernation.sinceMs),
+    contextTokens === null ? "unknown" : String(contextTokens),
+    pending ?? "none",
+    failure,
+  ].join("|");
+}
+
+/**
+ * The collapsed card a TAKEN decision leaves standing: one line saying what is
+ * running, and nothing else.
+ *
+ * WHY THE CARD COLLAPSES RATHER THAN WAITING. The block is not lifted here —
+ * the composer stays disabled until the daemon reports the session awake, and
+ * that is the one authority on it. What changes is what the user is looking
+ * at: the popup exists to ASK a question, and once it has been answered a
+ * full-height card of options that are no longer on offer stands through the
+ * whole bring-up, which for a compact-first revival is the length of a
+ * compaction. Collapsing it the instant the decision is accepted is how the
+ * click visibly lands.
+ */
+export function revivalProgressHtml(pending: Exclude<RevivePending, null>): string {
+  return `
+    <div class="${HIBERNATION_PROGRESS_CLASS}">
+      <span class="hibernation-pending">${escapeHtml(revivePendingText(pending))}</span>
+    </div>`;
+}
+
 /**
  * The revival gate card, or "" when the session is awake.
  *
@@ -618,18 +681,26 @@ export interface RevivalGateInput {
  * frame while having taught the user that the block is optional. And there is
  * no "cancel" — a hibernated session has nothing to cancel back to.
  *
- * While a decision is in flight the buttons are replaced by the pending line
- * rather than merely disabled: the daemon's answer is a pushed `SessionView`
- * that drops the field, so the honest report is "waiting", and leaving two
- * greyed buttons on screen would invite a second click on the other one.
+ * While a decision is in flight the WHOLE CARD is replaced by the collapsed
+ * progress line ({@link revivalProgressHtml}) rather than the buttons being
+ * greyed: the daemon's answer is a pushed `SessionView` that drops the field,
+ * so the honest report is "waiting", and leaving the options on screen would
+ * invite a second click on another one.
  */
 export function revivalGateHtml(input: RevivalGateInput): string {
   const { hibernation, contextTokens, pending = null, now = Date.now(), failure = "" } = input;
   if (hibernation === null) return "";
+  // A DECISION THAT HAS BEEN TAKEN IS NOT A QUESTION ANY MORE, so the card
+  // collapses to the one line that says what is now happening. The block
+  // itself does not lift — the composer stays disabled until the daemon says
+  // the session is awake — but the popup that was asking the question has
+  // been answered, and leaving the whole card standing through a compaction
+  // reads as the click having missed.
+  if (pending !== null) return revivalProgressHtml(pending);
   const since =
     hibernation.sinceMs > 0
-      ? `<span class="hibernation-since">asleep for ${escapeHtml(
-          formatAge(now - hibernation.sinceMs),
+      ? `<span class="${HIBERNATION_SINCE_CLASS}">${escapeHtml(
+          revivalSinceText(hibernation, now),
         )}</span>`
       : "";
   // THE OPTIONS ARE ONE LIST, each button beside the sentence that explains it.
@@ -638,9 +709,7 @@ export function revivalGateHtml(input: RevivalGateInput): string {
   // of one hand: the reader has to pair them by position, and a mispaired
   // reading here chooses what a conversation loses.
   const options = reviveOptions(hibernation);
-  const actions =
-    pending === null
-      ? `
+  const actions = `
       <div class="hibernation-actions">${options
         .map(
           (option) => `
@@ -652,8 +721,7 @@ export function revivalGateHtml(input: RevivalGateInput): string {
         </div>`,
         )
         .join("")}
-      </div>`
-      : `<div class="hibernation-pending">${escapeHtml(revivePendingText(pending))}</div>`;
+      </div>`;
   // The failed-revival line sits ABOVE the cause, because it is the newer news:
   // the cause explains how the session got here, and this explains why the
   // decision the user already made did not get it out.
