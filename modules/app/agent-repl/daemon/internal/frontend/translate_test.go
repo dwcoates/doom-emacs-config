@@ -171,6 +171,7 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", Fence: "s1", ThroughSeq: 12,
 				Items: []*frontendv1.ConversationItem{{
+					Uuid:   "result:s1:12",
 					TsMs:   producedMs,
 					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 					Item:   &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: resultMsg}}},
@@ -1397,4 +1398,103 @@ func TestBackgroundTasksFromVendorIgnoresAnotherStreamArm(t *testing.T) {
 func mustAnyHelper(t *testing.T, m proto.Message) *anypb.Any { return mustAny(t, m) }
 func mustStructHelper(t *testing.T, m map[string]any) *structpb.Struct {
 	return mustStructT(t, m)
+}
+
+// --- turn-result identity --------------------------------------------------
+
+// TestResultUUIDIsTheDedupKey pins the identity a result reconciles on. A
+// result carried NO uuid for as long as it existed, so every resync — which
+// replays the conversation from the floor — appended another copy of the same
+// turn's closing chip, repeating an interrupted turn's yellow badge down the
+// feed.
+func TestResultUUIDIsTheDedupKey(t *testing.T) {
+	// Arrange.
+	ev := &corev1.Event{
+		SessionId: "s1", Seq: 12, ProducedAtMs: producedMs, DedupKey: "result:r-1",
+		Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS})},
+	}
+
+	// Act.
+	got, _, err := conversationDeltaFromEvent("ws", "s1", ev)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("conversationDeltaFromEvent: %v", err)
+	}
+	if uuid := got.GetItems()[0].GetUuid(); uuid != "result:r-1" {
+		t.Fatalf("uuid = %q, want %q", uuid, "result:r-1")
+	}
+}
+
+// TestResultWithoutADedupKeyDerivesAStableUUID covers the un-deduped event: its
+// identity is then its own gapless per-session position, which is just as
+// stable across replays.
+func TestResultWithoutADedupKeyDerivesAStableUUID(t *testing.T) {
+	// Arrange.
+	ev := &corev1.Event{
+		SessionId: "s1", Seq: 12, ProducedAtMs: producedMs,
+		Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS})},
+	}
+
+	// Act.
+	got, _, err := conversationDeltaFromEvent("ws", "s1", ev)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("conversationDeltaFromEvent: %v", err)
+	}
+	if uuid := got.GetItems()[0].GetUuid(); uuid != "result:s1:12" {
+		t.Fatalf("uuid = %q, want %q", uuid, "result:s1:12")
+	}
+}
+
+// TestResultUUIDIsStableAcrossReplaysOfTheSameEvent is the property the fix
+// exists for: translating one event twice — a live push and the resync that
+// replays it — yields the SAME identity, so the frontend reconciles rather
+// than appending a second chip.
+func TestResultUUIDIsStableAcrossReplaysOfTheSameEvent(t *testing.T) {
+	// Arrange.
+	newEvent := func() *corev1.Event {
+		return &corev1.Event{
+			SessionId: "s1", Seq: 12, ProducedAtMs: producedMs,
+			Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS})},
+		}
+	}
+
+	// Act.
+	live, _, err := conversationDeltaFromEvent("ws", "s1", newEvent())
+	if err != nil {
+		t.Fatalf("conversationDeltaFromEvent (live): %v", err)
+	}
+	replay, _, err := conversationDeltaFromEvent("ws", "s1", newEvent())
+	if err != nil {
+		t.Fatalf("conversationDeltaFromEvent (replay): %v", err)
+	}
+
+	// Assert.
+	if live.GetItems()[0].GetUuid() != replay.GetItems()[0].GetUuid() {
+		t.Fatalf("uuid drifted across replays: live=%q replay=%q",
+			live.GetItems()[0].GetUuid(), replay.GetItems()[0].GetUuid())
+	}
+}
+
+// TestResultUUIDsDifferPerTurn keeps two turns' results apart: a shared
+// identity would collapse a session's every closing chip onto one node.
+func TestResultUUIDsDifferPerTurn(t *testing.T) {
+	// Arrange.
+	at := func(seq uint64) *corev1.Event {
+		return &corev1.Event{
+			SessionId: "s1", Seq: seq, ProducedAtMs: producedMs,
+			Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS})},
+		}
+	}
+
+	// Act.
+	first, _, _ := conversationDeltaFromEvent("ws", "s1", at(12))
+	second, _, _ := conversationDeltaFromEvent("ws", "s1", at(19))
+
+	// Assert.
+	if first.GetItems()[0].GetUuid() == second.GetItems()[0].GetUuid() {
+		t.Fatalf("two turns share the uuid %q", first.GetItems()[0].GetUuid())
+	}
 }
