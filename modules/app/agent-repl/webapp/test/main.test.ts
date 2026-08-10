@@ -293,8 +293,11 @@ describe("the held-prompt queue's wiring", () => {
 
   it("treats anything short of a current socket as the link being down", () => {
     // Assert — a socket that is merely open has not yet proven it carries
-    // authoritative state.
-    expect(promptQueueWiring).toContain('?.state !== "current"');
+    // authoritative state, and the reading is the ONE shared helper the
+    // footer's liveness gate also takes, so the two cannot disagree about
+    // whether this page is connected.
+    expect(promptQueueWiring).toContain("!linkIsCurrent()");
+    expect(main).toContain('const linkIsCurrent = (): boolean => (ws as WsClient | undefined)?.state === "current";');
   });
 
   it("gates the drain on the workspace's wired axis, not just the socket", () => {
@@ -328,6 +331,41 @@ describe("the held-prompt queue's wiring", () => {
   it("drains on snapshot adoption, the edge that proves state is authoritative", () => {
     // Assert
     expect(main).toContain("void promptQueue.drain(store.state.cwd);");
+  });
+});
+
+// The footer's liveness gate is boot-scope closure state with no importable
+// seam either, so the two things that make the dock incapable of lying — that
+// the render goes through the resolve, and that the gates are the shared
+// readings rather than fresh ones — are pinned here.
+const footerWiring = blocksAfter(main, "const liveness = resolveFooterLiveness(")[0]!;
+
+describe("the footer's liveness wiring", () => {
+  it("renders the dock from the resolution, never from the raw parts", () => {
+    // Assert — `footer.render` takes the resolved arm, so a dock painted from
+    // remembered values is not an expression that exists in this file.
+    expect(main).toContain("footer.render(liveness);");
+  });
+
+  it("takes the link reading from the shared helper", () => {
+    // Assert — the same reading the held-prompt queue's own gate takes.
+    expect(footerWiring).toContain("linkUp: linkIsCurrent()");
+  });
+
+  it("gates on the workspace's wired axis, not just the socket", () => {
+    // Assert — an unwired workspace has no live session to verify a figure
+    // against, however healthy the socket is.
+    expect(footerWiring).toContain(
+      "wired: s.hibernation === null && drainableRenderState(s.renderState)",
+    );
+  });
+
+  it("announces every cleared dock before rendering it", () => {
+    // Assert — the footer going silent is never itself silent.
+    const announced = main.indexOf("footerLivenessLog.observe(liveness");
+    const rendered = main.indexOf("footer.render(liveness);");
+    expect(announced).toBeGreaterThan(-1);
+    expect(announced).toBeLessThan(rendered);
   });
 });
 
