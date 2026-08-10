@@ -175,6 +175,53 @@ func ExtractVerdict(out string) (Verdict, error) {
 	}
 }
 
+// explicitInterrupts is the closed set of prompts that ARE a stop and nothing
+// else. Membership is by whole normalized text, never by substring: "stop the
+// server once the build finishes" is a task, and reading a stop out of it would
+// interrupt a turn the user wanted finished.
+var explicitInterrupts = map[string]struct{}{
+	"stop":         {},
+	"stop it":      {},
+	"stop now":     {},
+	"stop stop":    {},
+	"please stop":  {},
+	"stop please":  {},
+	"halt":         {},
+	"abort":        {},
+	"cancel":       {},
+	"cancel that":  {},
+	"nevermind":    {},
+	"never mind":   {},
+	"forget it":    {},
+	"stop working": {},
+}
+
+// IsExplicitInterrupt reports whether a queued prompt is a bare, unambiguous
+// stop.
+//
+// It exists because of what the classifier COSTS. A prompt queued behind a
+// running turn is routed by a headless `claude -p` subprocess — a model round
+// trip, bounded at twenty seconds and observed at fourteen — and only after
+// that verdict does the interrupt it implies reach the shim. A user typing
+// "stop" therefore waited a quarter of a minute for the one intent that needs
+// no interpreting, while the very same stop pressed as a key acked in three
+// milliseconds.
+//
+// So this decides the cases a model cannot decide better, and the classifier
+// keeps everything else. It is deliberately a SMALL closed set matched whole:
+// the failure mode of guessing wrong here is interrupting work the user wanted
+// to continue, which is worse than the wait it saves.
+func IsExplicitInterrupt(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	normalized = strings.TrimRight(normalized, ".!? \t\n")
+	normalized = strings.Join(strings.Fields(normalized), " ")
+	if normalized == "" {
+		return false
+	}
+	_, ok := explicitInterrupts[normalized]
+	return ok
+}
+
 // ClassifierPrompt builds the classification brief.
 //
 // Three things it does deliberately:
