@@ -546,8 +546,17 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 // A record that HAS run a turn always carries a conversation, whether or not
 // its transcript is currently readable; that is the case the resume gate exists
 // to refuse, and this function reports true for it.
+//
+// A BACKFILLED TIMESTAMP IS NOT AN OBSERVED TURN. LegacyTurnEndStamps writes
+// LastTurnEndMs from the workspace's dated state history for a session whose
+// turn ends the daemon never saw, and that write says only "this workspace was
+// active at this instant". Reading it as "a turn ran" is what silently retired
+// the handshake-only waiver for every freshly created workspace: the stamp
+// lands seconds after bring-up, long before anybody has said anything, and the
+// record's system:init uuid then looked like a conversation with a missing
+// transcript — the one shape the gate refuses forever.
 func resumeTargetCarriesAConversation(rec registry.Record) bool {
-	return rec.LastTurnEndMs > 0
+	return rec.LastTurnEndMs > 0 && !rec.LastTurnEndBackfilled
 }
 
 // DropResume clears the session's vendor conversation pointer so the next spawn
@@ -1337,6 +1346,11 @@ func (r *RegistryRegistrar) TurnEndObserved(sessionID string, atMs int64) {
 		// against a turn boundary it has already moved past.
 		if atMs > rec.LastTurnEndMs {
 			rec.LastTurnEndMs = atMs
+			// THIS is the observed article the backfill only approximates, so
+			// the backfill mark comes off with the value it described. From
+			// here the record's timestamp is evidence a turn ran, and the
+			// resume ladder may read it as such.
+			rec.LastTurnEndBackfilled = false
 		}
 	})
 	if err != nil && r.Logf != nil {

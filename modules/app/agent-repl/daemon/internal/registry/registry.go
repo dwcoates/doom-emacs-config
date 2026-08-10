@@ -149,6 +149,27 @@ type Record struct {
 	// discovery that too much time has passed is itself a decision the policy
 	// takes (HibernationCacheExpired) rather than a gap it fails to notice.
 	LastTurnEndMs int64 `json:"last_turn_end_ms,omitempty"`
+	// LastTurnEndBackfilled marks a LastTurnEndMs that was STAMPED FROM THE
+	// WORKSPACE'S STATE HISTORY rather than observed at a turn boundary
+	// (server.LegacyTurnEndStamps). The instant is a true dated fact and the
+	// keep-alive policy is right to use it; what it is NOT is evidence that a
+	// turn ever ran under this record's conversation.
+	//
+	// THE FIELD EXISTS BECAUSE TWO QUESTIONS SHARED ONE ANSWER. The keep-alive
+	// policy asks "when did this session last do anything", and the resume
+	// ladder asks "has this conversation ever said a word" — and the ladder read
+	// the same timestamp. So a brand-new workspace whose shim came up and had
+	// its state history stamped 26 seconds later carried a nonzero
+	// LastTurnEndMs, its system:init handshake uuid stopped looking like a
+	// handshake, and the handshake waiver that exists to let exactly that
+	// workspace start went dead. The workspace was then unstartable forever:
+	// every bring-up resumed a uuid with no transcript, and the gate refused it
+	// every time — correctly, because it could no longer tell that uuid from a
+	// conversation somebody had lost.
+	//
+	// Only the backfilling writer sets it, and every real turn-boundary write
+	// clears it, so the flag always describes the value currently in the field.
+	LastTurnEndBackfilled bool `json:"last_turn_end_backfilled,omitempty"`
 	// Hibernated marks a session whose shim the daemon deliberately stopped and
 	// which must NOT be revived implicitly. It is durable so a daemon restart
 	// rehydrates the sleep rather than silently un-sleeping it, and so a
