@@ -1315,3 +1315,35 @@ normal prologue."
     ;; Act / Assert
     (should (eq t (agent-repl--handle-boot-sweep-session-unwired-command
                    '((workspace . "/tmp/ws")))))))
+
+(ert-deftest agent-repl-test-available-with-no-account-records-no-override ()
+  "An announcement naming no account records NO `:config-dir-override'.
+The keyword `:default' is not \"the daemon said nothing\" — it is \"the
+user deliberately moved this session to the CLI's own root\", and it wins
+outright over the account `agent-repl--compute-config-dir' computes from
+the workspace path.  An empty `configDir' is indistinguishable from an
+absent one on the wire, so recording `:default' for it silently pinned
+every account-less creation to ~/.claude."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((available (list :jobId "job-1" :finalName "new"
+                           :worktreePath temporary-file-directory)))
+      ;; Act
+      (let ((metadata (cdr (agent-repl--workspace-create-available-metadata
+                            available))))
+        ;; Assert
+        (should (null (plist-get metadata :config-dir-override)))))))
+
+(ert-deftest agent-repl-test-available-with-an-account-records-it ()
+  "An announcement that NAMES an account records it as the override."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((available (list :jobId "job-1" :finalName "new"
+                           :worktreePath temporary-file-directory
+                           :configDir "/tmp/account")))
+      ;; Act
+      (let ((metadata (cdr (agent-repl--workspace-create-available-metadata
+                            available))))
+        ;; Assert
+        (should (equal (plist-get metadata :config-dir-override)
+                       "/tmp/account"))))))
