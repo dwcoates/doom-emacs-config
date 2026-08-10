@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 
 import { BREATH_PERIOD_MS, BUBBLE_BREATH_PERIOD_MS } from "../src/breathing.js";
 import { CAPPED_CLASSES, EXPANDED_CLASS } from "../src/expand.js";
+import { FIXED_FOLD_CLASS } from "../src/fold.js";
+import { ASYNC_TEAL_TOOLS } from "../src/render.js";
 import { NAV_CURRENT_CLASS } from "../src/nav.js";
 import { CURRENT_CLASS, MARK_CLASS, REVEAL_CLASS, SEARCHING_CLASS } from "../src/search.js";
 import { PLACEHOLDER_CLASS, PLACEHOLDER_LINE_PX } from "../src/lazy-item.js";
@@ -2053,6 +2055,32 @@ describe("tool-card status chip", () => {
   });
 });
 
+describe("async teal wash", () => {
+  /** The selector list of the rule that paints the teal wash. */
+  const tealSelectors = (css.match(/((?:\.tool-card\.tool-[a-z]+,\s*\n)*\.tool-card\.tool-[a-z]+)\s*\{\s*\n\s*background: var\(--async-card\)/) ??
+    [])[1];
+
+  it("paints the wash on exactly the tools the renderer calls teal", () => {
+    // Arrange — the renderer's list is what decides which cards get a fixed
+    // panel, so a card that looks teal and still folds is the drift this
+    // catches.
+    const fromCss = new Set((tealSelectors ?? "").split(",").map((s) => s.trim()));
+    // Act
+    const fromRenderer = new Set(
+      [...ASYNC_TEAL_TOOLS].map((name) => `.tool-card.tool-${name.toLowerCase()}`),
+    );
+    // Assert
+    expect(fromCss).toEqual(fromRenderer);
+  });
+
+  it("names the fixed-fold class the fold skeleton renders", () => {
+    // Arrange / Act — the class is fold.ts's, and the cap is the
+    // stylesheet's; neither half is useful without the other.
+    // Assert
+    expect(css).toContain(`.${FIXED_FOLD_CLASS} > .agent-panel {`);
+  });
+});
+
 describe("activity fold", () => {
   it("invites the click with a zoom cursor on the closed fold", () => {
     // Arrange / Act — the shared fold rule, which .agent-activity heads.
@@ -2143,6 +2171,35 @@ describe("activity fold", () => {
     // card, now held against this wrapper (they shrink to make room).
     // Assert
     expect(blockAfter(css, ".agent-panel {")).toMatch(/padding:\s*0\.5rem\s+0\.75rem/);
+  });
+
+  it("caps the fixed panel at half the viewport, so it cannot swallow the feed", () => {
+    // Arrange / Act — the cap a teal card's always-open panel is read through.
+    // Assert
+    expect(blockAfter(css, `.${FIXED_FOLD_CLASS} > .agent-panel {`)).toMatch(/max-height:\s*50vh/);
+  });
+
+  it("scrolls the fixed panel's overflow rather than clipping it", () => {
+    // Arrange / Act — scrolling in place is the ONLY way past the cap now
+    // that the fold is gone, so the overflow must be reachable.
+    // Assert
+    expect(blockAfter(css, `.${FIXED_FOLD_CLASS} > .agent-panel {`)).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("shrinks the fixed panel to fit a body too short to fill the cap", () => {
+    // Arrange — `height: 50vh` would hold an empty box open under a
+    // two-line child feed; `max-height` is what makes it shrink to fit.
+    const fixedPanel = blockAfter(css, `.${FIXED_FOLD_CLASS} > .agent-panel {`);
+    // Act / Assert
+    expect(fixedPanel).not.toMatch(/\n\s*height:/);
+    expect(fixedPanel).not.toMatch(/min-height:/);
+  });
+
+  it("drops the zoom cursors from the fixed fold, which nothing clicks", () => {
+    // Arrange / Act — the shared fold rule offers zoom-in; a fold that does
+    // not fold must not invite the click.
+    // Assert
+    expect(blockAfter(css, `.${FIXED_FOLD_CLASS},`)).toMatch(/cursor:\s*default/);
   });
 
   it("tints the needs-permission badge in the accent", () => {
