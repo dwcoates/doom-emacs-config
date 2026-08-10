@@ -268,6 +268,93 @@ every vocabulary assertion built on it pass vacuously."
     ;; Assert
     (should (member "PROMPT_ORIGIN_CACHE_KEEP_ALIVE" names))))
 
+;;;; ---- the quit-deferral test helpers -----------------------------------
+
+(ert-deftest agent-repl-test-helpers-quit-deferred-p-reports-an-armed-quit ()
+  "A quit requested inside the body is reported as still armed."
+  ;; Act / Assert
+  (should (agent-repl-test--quit-deferred-p
+            (setq quit-flag t))))
+
+(ert-deftest agent-repl-test-helpers-quit-deferred-p-reports-no-quit ()
+  "A body that never requests a quit is reported as having deferred none."
+  ;; Act / Assert
+  (should-not (agent-repl-test--quit-deferred-p
+                (ignore))))
+
+(ert-deftest agent-repl-test-helpers-quit-deferred-p-runs-body-under-inhibit-quit ()
+  "The body runs with quitting inhibited, which is what defers the quit."
+  ;; Arrange
+  (let (observed)
+    ;; Act
+    (agent-repl-test--quit-deferred-p (setq observed inhibit-quit))
+    ;; Assert
+    (should observed)))
+
+(ert-deftest agent-repl-test-helpers-quit-deferred-p-disarms-before-returning ()
+  "The captured quit is cleared, so it cannot land on the caller."
+  ;; Act
+  (agent-repl-test--quit-deferred-p (setq quit-flag t))
+  ;; Assert -- reaching here at all means no quit was taken on the way out.
+  (should-not quit-flag))
+
+(ert-deftest agent-repl-test-helpers-quit-deferred-p-disarms-past-a-signal ()
+  "A body that signals still leaves no armed quit behind for the next test."
+  ;; Act
+  (ignore-errors
+    (agent-repl-test--quit-deferred-p
+      (setq quit-flag t)
+      (error "boom")))
+  ;; Assert
+  (should-not quit-flag))
+
+(ert-deftest agent-repl-test-helpers-with-pending-quit-arms-before-the-body ()
+  "The body observes the quit as already requested when it starts."
+  ;; Arrange
+  (let (observed)
+    ;; Act
+    (agent-repl-test--with-pending-quit (setq observed quit-flag))
+    ;; Assert
+    (should observed)))
+
+(ert-deftest agent-repl-test-helpers-with-pending-quit-returns-the-body-value ()
+  "The body's value is handed back, so the Act can be asserted on directly."
+  ;; Act / Assert
+  (should (equal (agent-repl-test--with-pending-quit 'settled) 'settled)))
+
+(ert-deftest agent-repl-test-helpers-with-pending-quit-disarms-past-a-signal ()
+  "A signalling body leaves no armed quit behind for the next test."
+  ;; Act
+  (ignore-errors
+    (agent-repl-test--with-pending-quit (error "boom")))
+  ;; Assert
+  (should-not quit-flag))
+
+(ert-deftest agent-repl-test-helpers-quit-deferral-sites-use-the-shared-macros ()
+  "No suite hand-rolls the quit-deferral recipe beside the shared macros.
+A hand-rolled site is the failure this asserts against: it is easy to
+write one that forgets to disarm `quit-flag' inside the `inhibit-quit'
+scope, and such a site passes while leaving a live quit for whichever
+test runs next."
+  ;; Arrange -- test-helpers.el is where the recipe is ALLOWED to appear.
+  (let ((dir agent-repl-test--module-dir)
+        (offenders nil))
+    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
+      (unless (member (file-name-nondirectory file)
+                      '("test-helpers.el" "test-test-helpers.el"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          ;; Act -- the recipe's own signature: binding `inhibit-quit' by hand
+          ;; in a suite that also touches `quit-flag'.
+          (when (and (save-excursion
+                       (re-search-forward "(let ((inhibit-quit t))" nil t))
+                     (save-excursion
+                       (re-search-forward "\\_<quit-flag\\_>" nil t)))
+            (push (file-name-nondirectory file) offenders)))))
+    ;; Assert
+    (should-not offenders)))
+
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here

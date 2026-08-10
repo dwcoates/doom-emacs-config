@@ -470,16 +470,31 @@ skip work on a dirty trunk rather than abort the caller."
 (defun agent-repl--async-git-sentinel (proc _event)
   "Process sentinel for `agent-repl--async-git'.
 When PROC exits or is signaled, collects output, kills the process buffer,
-and invokes the callback stored as a process property."
+and invokes the callback stored as a process property.
+
+Runs under `agent-repl--with-deferred-quit'.  A `C-g' between reading the
+output out of the process buffer, killing that buffer and invoking the
+callback would leak the buffer and drop the only delivery of the git
+result its caller is waiting on — the worktree steps chain through these
+callbacks, so a lost one strands the chain with no completion and no
+failure.  The quit is deferred to the command loop instead."
   (when (memq (process-status proc) '(exit signal))
-    (let ((ok (zerop (process-exit-status proc)))
-          (output (with-current-buffer (process-buffer proc)
-                    (string-trim (buffer-string))))
-          (callback (process-get proc 'agent-repl-callback)))
-      (agent-repl--log nil "async-git-sentinel: proc=%s status=%s exit-code=%s"
-                        (process-name proc) (process-status proc) (process-exit-status proc))
-      (agent-repl--kill-buffer-safely (process-buffer proc))
-      (funcall callback ok output))))
+    (agent-repl--with-deferred-quit "async-git-sentinel"
+      (agent-repl--async-git-settle proc))))
+
+(defun agent-repl--async-git-settle (proc)
+  "Collect PROC\='s result, kill its buffer and deliver it to the callback.
+The quit-inhibited critical section of `agent-repl--async-git-sentinel',
+named separately so the guard has a body to wrap and tests can drive a
+settle directly."
+  (let ((ok (zerop (process-exit-status proc)))
+        (output (with-current-buffer (process-buffer proc)
+                  (string-trim (buffer-string))))
+        (callback (process-get proc 'agent-repl-callback)))
+    (agent-repl--log nil "async-git-sentinel: proc=%s status=%s exit-code=%s"
+                     (process-name proc) (process-status proc) (process-exit-status proc))
+    (agent-repl--kill-buffer-safely (process-buffer proc))
+    (funcall callback ok output)))
 
 (defun agent-repl--async-git (label git-root args callback)
   "Run git -C GIT-ROOT with ARGS asynchronously.

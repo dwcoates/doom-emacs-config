@@ -690,9 +690,22 @@ queued run parked behind it forever."
         (agent-repl--frontend-async-run-drain)))))
 
 (defun agent-repl--frontend-async-run-sentinel (proc _event)
-  "Deliver PROC's exit status to the asynchronous script settle path."
+  "Deliver PROC's exit status to the asynchronous script settle path.
+
+The settle runs under `agent-repl--with-deferred-quit'.  Settling clears
+the single-flight process and request slots, runs every waiter's
+continuation and then drains the queued request; a `C-g' landing partway
+through would leave `agent-repl--frontend-async-run-process' claiming a
+run that already exited, so every later request would queue behind a run
+that can never settle.  A quit arriving here is deferred to the command
+loop instead.
+
+The narrower `inhibit-quit' inside the settle's own state transfer stays
+where it is: the settle is reachable from callers other than this
+sentinel, and it owns that guarantee for all of them."
   (unless (process-live-p proc)
-    (agent-repl--frontend-async-run-settle (process-exit-status proc))))
+    (agent-repl--with-deferred-quit "frontend-async-run-sentinel"
+      (agent-repl--frontend-async-run-settle (process-exit-status proc)))))
 
 (defun agent-repl--frontend-run-script-async (request)
   "Run REQUEST's script in the background, without blocking the main thread.
@@ -923,7 +936,24 @@ So:
 The capture buffer is trimmed to
 `agent-repl--frontend-daemon-buffer-max-chars' after every chunk, so a
 daemon that runs for days cannot turn it into the tens-of-megabytes
-string that froze Emacs at exit."
+string that froze Emacs at exit.
+
+The capture runs under `agent-repl--with-deferred-quit'.  A `C-g' between
+appending a chunk to
+`agent-repl--frontend-daemon-line-accumulator' and consuming the complete
+lines out of it would strand a half-assembled record there, so the next
+chunk would mirror one line spliced onto the tail of another — a
+corruption of the only durable copy the relayed `sidecar' and `webapp'
+records have.  The quit is left pending in `quit-flag' for the command
+loop instead."
+  (agent-repl--with-deferred-quit "frontend-daemon-filter"
+    (agent-repl--frontend-daemon-capture proc chunk)))
+
+(defun agent-repl--frontend-daemon-capture (proc chunk)
+  "Mirror CHUNK from PROC to its buffer and the structured log.
+The quit-inhibited critical section of
+`agent-repl--frontend-daemon-filter', named separately so the guard has a
+body to wrap and tests can drive a capture directly."
   (when (buffer-live-p (process-buffer proc))
     (with-current-buffer (process-buffer proc)
       (let ((moving (= (point) (process-mark proc))))
@@ -1290,7 +1320,21 @@ Surfaces the death rather than only logging it (F4).  The daemon\='s own
 exit is the one failure with no card anywhere — the process that composes
 every other failure card is the one that just died, so it cannot report
 this about itself.  Emacs supervises the process, so Emacs classifies it,
-under the reserved `client.\=' prefix."
+under the reserved `client.\=' prefix.
+
+Runs under `agent-repl--with-deferred-quit'.  The body clears the tracked
+process, flushes the held partial line and then opens (or withholds) the
+exit failure; a `C-g' between those steps would drop the dying daemon\='s
+last line and leave the death with no card at all.  A quit arriving here
+is deferred to the command loop."
+  (agent-repl--with-deferred-quit "frontend-daemon-sentinel"
+    (agent-repl--frontend-daemon-report-exit proc event)))
+
+(defun agent-repl--frontend-daemon-report-exit (proc event)
+  "Record and surface PROC\='s EVENT transition.
+The quit-inhibited critical section of
+`agent-repl--frontend-daemon-sentinel', named separately so the guard has
+a body to wrap and tests can drive an exit directly."
   (let ((live (process-live-p proc))
         (tracked (eq proc agent-repl--frontend-daemon-process))
         (trimmed-event (string-trim event)))

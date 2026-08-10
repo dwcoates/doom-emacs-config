@@ -719,7 +719,22 @@ stops containing failures."
   "Process sentinel: on any non-live transition, schedule a reconnect.
 EVENT is the raw sentinel string.  A closed/failed/deleted link clears
 the accumulator (a partial frame across a disconnect is unrecoverable)
-and reconnects (design §4.4)."
+and reconnects (design §4.4).
+
+Runs its whole transition under `agent-repl--with-deferred-quit'.  The
+body rewrites the connection state, drains the outbound queue into acks
+and re-arms the reconnect ladder; a `C-g' landing between those steps
+would leave the link recorded as neither up nor down, with queued
+commands neither sent nor settled.  A quit arriving here is therefore
+deferred to the command loop rather than taken mid-transition."
+  (agent-repl--with-deferred-quit "uds-sentinel"
+    (agent-repl--uds-sentinel-transition proc event)))
+
+(defun agent-repl--uds-sentinel-transition (proc event)
+  "Apply PROC's EVENT transition; the quit-inhibited body of the sentinel.
+Separated from `agent-repl--uds-sentinel' only so the critical section
+has a name of its own, both for the wrapper to guard and for tests to
+drive directly."
   (agent-repl--log nil "uds-sentinel: proc=%s event=%s"
                    (process-name proc) (string-trim event))
   (cond
@@ -825,7 +840,24 @@ already sitting in the accumulator behind it — an unrelated workspace's
 `sessionView', a `commandAck' someone is blocking on — waited for the
 next chunk to arrive, which may be seconds away or never.  The batch now
 always drains, and the first failure is re-signalled at the end, so the
-error still reaches the caller exactly once and exactly as loudly."
+error still reaches the caller exactly once and exactly as loudly.
+
+The drain runs under `agent-repl--with-deferred-quit'.  A `C-g' pressed
+while frames are being dispatched used to land INSIDE the loop as the
+`error in process filter: Quit' seen in *Messages*, abandoning the frames
+still buffered behind it along with whatever bookkeeping the running
+handler was halfway through writing.  Quitting is inhibited for the
+drain and the request is left in `quit-flag', so the user's quit happens
+at the command loop instead of between two frames."
+  (agent-repl--with-deferred-quit "uds-filter"
+    (agent-repl--uds-filter-drain chunk)))
+
+(defun agent-repl--uds-filter-drain (chunk)
+  "Accumulate CHUNK and dispatch every frame it completes.
+The quit-inhibited critical section of `agent-repl--uds-filter', named
+separately so the guard has a body to wrap and tests can drive a drain
+without a process.  Re-signals the drain's first handler failure once the
+batch is done, exactly as before."
   ;; A filter may receive a high rate of small chunks; retain only framing
   ;; metrics, never wire contents, in the verbose trace.
   (agent-repl--log-verbose
@@ -1153,29 +1185,45 @@ command through its tracked callbacks instead of aging out.  Returns
                          "uds-send-command: start field=%s request-id=%s ws=%s bytes=%d state=%s"
                          field request-id workspace (length json)
                          agent-repl--uds-connection-state)
-        ;; BEFORE the write, unconditionally: see the reentrancy note above.
-        ;; This is the sole registration point, and the write below is the
-        ;; sole caller-reachable path to the socket.
-        (agent-repl--uds-register-pending-command
-         request-id field workspace on-failure on-success on-challenge
-         on-timeout)
-        (when on-registered
-          (condition-case err
-              (funcall on-registered request-id)
-            (error
-             (agent-repl--log log-workspace
-                              "uds-send-command: on-registered FAILED field=%s request-id=%s error=%s — nothing written"
-                              field request-id (error-message-string err))
-             (agent-repl--uds-untrack-command request-id workspace
-                                              "on-registered-failed")
-             (signal (car err) (cdr err)))))
-        (if (eq agent-repl--uds-connection-state 'open)
-            (agent-repl--uds-write-frame proc entry)
-          (setq agent-repl--uds-outbound-queue
-                (append agent-repl--uds-outbound-queue (list entry)))
-          (agent-repl--log log-workspace
-                           "uds-send-command: queued field=%s request-id=%s queue-depth=%d"
-                           field request-id (length agent-repl--uds-outbound-queue))))
+        ;; REGISTER-THEN-DELIVER IS ONE INDIVISIBLE STEP.  The reentrancy note
+        ;; above forces the registration to precede the write; quitting
+        ;; between them is the other way the pair can come apart, and it comes
+        ;; apart worse.  `process-send-string' yields to the event loop on a
+        ;; frame large enough to block, so a `C-g' held during a congested
+        ;; send lands exactly there: the pending entry exists with its ack
+        ;; alarm armed, and the frame it belongs to is neither on the wire nor
+        ;; on the outbound queue.  The alarm then declares lost a command the
+        ;; daemon was never asked to run, degrading the link and opening a
+        ;; card for a send that never happened.
+        ;;
+        ;; Under `agent-repl--with-deferred-quit' the quit cannot land inside
+        ;; the pair at all; it is taken at the command loop, after the entry
+        ;; and its frame have been put in agreement.  Nothing is swallowed:
+        ;; `on-registered' still untracks and re-signals its own errors here.
+        (agent-repl--with-deferred-quit "uds-send-command"
+          ;; BEFORE the write, unconditionally: see the reentrancy note above.
+          ;; This is the sole registration point, and the write below is the
+          ;; sole caller-reachable path to the socket.
+          (agent-repl--uds-register-pending-command
+           request-id field workspace on-failure on-success on-challenge
+           on-timeout)
+          (when on-registered
+            (condition-case err
+                (funcall on-registered request-id)
+              (error
+               (agent-repl--log log-workspace
+                                "uds-send-command: on-registered FAILED field=%s request-id=%s error=%s — nothing written"
+                                field request-id (error-message-string err))
+               (agent-repl--uds-untrack-command request-id workspace
+                                                "on-registered-failed")
+               (signal (car err) (cdr err)))))
+          (if (eq agent-repl--uds-connection-state 'open)
+              (agent-repl--uds-write-frame proc entry)
+            (setq agent-repl--uds-outbound-queue
+                  (append agent-repl--uds-outbound-queue (list entry)))
+            (agent-repl--log log-workspace
+                             "uds-send-command: queued field=%s request-id=%s queue-depth=%d"
+                             field request-id (length agent-repl--uds-outbound-queue)))))
       request-id)))
 
 ;;;; ---- Command-ack tracking --------------------------------------------
