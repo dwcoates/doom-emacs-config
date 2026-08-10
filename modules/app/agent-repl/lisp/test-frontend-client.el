@@ -20,6 +20,25 @@
 
 (require 'cl-lib)
 
+;;;; ---- The live-link premise -------------------------------------------
+;;
+;; `agent-repl--gui-send-turn' offers every prompt to the held-prompt queue
+;; before dispatching it (prompt-queue.el), and the queue TAKES the prompt when
+;; the link is down — which, in a batch run with no socket, it always is.  Every
+;; test below that is about what a LIVE send does must therefore say so, or it
+;; is asserting about a prompt the queue quite correctly held.
+
+(defmacro agent-repl-test--with-live-link (&rest body)
+  "Run BODY with the frontend link reading UP and nothing held.
+The premise of every live-send test: the held-prompt queue declines the
+prompt and the send goes straight out, which is the behavior these tests
+were written about."
+  (declare (indent 0))
+  `(let ((agent-repl-prompt-queue-link-down-function (lambda () nil))
+         (agent-repl--prompt-queue (make-hash-table :test 'equal))
+         (agent-repl--prompt-queue-draining (make-hash-table :test 'equal)))
+     ,@body))
+
 ;;;; ---- UDS command capture helpers -------------------------------------------
 ;;
 ;; The session-CRUD/prompt/interrupt paths were migrated off HTTP onto the
@@ -562,6 +581,7 @@ cannot offer the daemon different answers for one workspace."
 (ert-deftest agent-repl-test-gui-send-turn-does-not-mark-thinking-on-ensure-failure ()
   "A failed asynchronous ensure leaves all sent-turn state untouched."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+   (agent-repl-test--with-live-link
     (let (failure settled)
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
                  (lambda (_ws _text _origin _ok fail) (setq failure fail) :pending))
@@ -572,7 +592,7 @@ cannot offer the daemon different answers for one workspace."
         (funcall failure "no daemon")
         (should settled)
         (should-not (agent-repl--ws-get "ws1" :sent-turn))
-        (should-not (agent-repl--ws-get "ws1" :thinking))))))
+        (should-not (agent-repl--ws-get "ws1" :thinking)))))))
 
 ;;;; ---- webview URL ---------------------------------------------------------
 
@@ -1443,6 +1463,7 @@ The webapp hides the bracketed spans at render time, so stripping them on
 the wire would deprive the agent of the directive it must read."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+   (agent-repl-test--with-live-link
     (let ((sent nil)
           (input (concat (agent-repl--meta-wrap "READ-DIRECTIVE") "\n\nhello")))
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
@@ -1455,7 +1476,149 @@ the wire would deprive the agent of the directive it must read."
         ;; Act
         (agent-repl--gui-send-turn "ws1" input "hello" "PROMPT_ORIGIN_USER_SENT")
         ;; Assert
-        (should (equal sent input))))))
+        (should (equal sent input)))))))
+
+;;;; ---- The held-prompt queue's send-path integration --------------------
+
+(defmacro agent-repl-test--with-down-link (&rest body)
+  "Run BODY with the frontend link reading DOWN and an empty hold queue."
+  (declare (indent 0))
+  `(let ((agent-repl-prompt-queue-link-down-function (lambda () t))
+         (agent-repl-prompt-queue-pending-function #'ignore)
+         (agent-repl--prompt-queue (make-hash-table :test 'equal))
+         (agent-repl--prompt-queue-draining (make-hash-table :test 'equal))
+         (agent-repl--prompt-queue-timers (make-hash-table :test 'equal)))
+     (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) nil))
+               ((symbol-function 'cancel-timer) (lambda (&rest _) nil)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-gui-send-turn-holds-a-prompt-while-the-link-is-down ()
+  "A send across a backend bounce is HELD instead of hitting a dead socket."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+   (agent-repl-test--with-down-link
+    (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
+               (lambda (&rest _) (error "must not reach the wire"))))
+      ;; Act
+      (agent-repl--gui-send-turn "ws1" "prepared" "raw" "PROMPT_ORIGIN_USER_SENT")
+      ;; Assert
+      (should (equal 1 (length (agent-repl-prompt-queue-pending "ws1"))))))))
+
+(ert-deftest agent-repl-test-gui-send-turn-holds-the-raw-text-for-the-user ()
+  "A held prompt keeps the RAW text, which is what the user would get back."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+   (agent-repl-test--with-down-link
+    ;; Act
+    (agent-repl--gui-send-turn "ws1" "META\n\nraw" "raw" "PROMPT_ORIGIN_USER_SENT")
+    ;; Assert — the decoration is not the user's to be handed back.
+    (should (equal "raw"
+                   (plist-get (car (agent-repl-prompt-queue-pending "ws1")) :raw))))))
+
+(ert-deftest agent-repl-test-gui-send-turn-does-not-mark-thinking-for-a-held-prompt ()
+  "A held prompt asserts no in-flight turn: nothing was sent."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+   (agent-repl-test--with-down-link
+    ;; Act
+    (agent-repl--gui-send-turn "ws1" "prepared" "raw" "PROMPT_ORIGIN_USER_SENT")
+    ;; Assert
+    (should-not (agent-repl--ws-get "ws1" :thinking)))))
+
+(ert-deftest agent-repl-test-gui-send-turn-records-no-sent-turn-for-a-held-prompt ()
+  "A held prompt records no `:sent-turn': there is no turn to interrupt."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+   (agent-repl-test--with-down-link
+    ;; Act
+    (agent-repl--gui-send-turn "ws1" "prepared" "raw" "PROMPT_ORIGIN_USER_SENT")
+    ;; Assert
+    (should-not (agent-repl--ws-get "ws1" :sent-turn)))))
+
+(ert-deftest agent-repl-test-gui-send-turn-defers-the-settle-of-a-held-prompt ()
+  "A held prompt does not settle its caller until it reaches a verdict."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+   (agent-repl-test--with-down-link
+    (let (settled)
+      ;; Act
+      (agent-repl--gui-send-turn "ws1" "prepared" "raw" "PROMPT_ORIGIN_USER_SENT"
+                                 (lambda () (setq settled t)))
+      ;; Assert
+      (should-not settled)))))
+
+(ert-deftest agent-repl-test-gui-dispatch-turn-marks-thinking-for-a-drained-prompt ()
+  "A drained prompt lands as a real turn, not a bare command write."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (marked)
+      (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
+                 (lambda (_ws _text _origin ok _fail) (funcall ok "r_1") :pending))
+                ((symbol-function 'agent-repl--frontend-snap-webview-to-tail) #'ignore)
+                ((symbol-function 'agent-repl--mark-ws-thinking)
+                 (lambda (_ws) (setq marked t)))
+                ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
+                ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
+        ;; Act — the drain's own send seam
+        (funcall agent-repl-prompt-queue-send-function
+                 "ws1" (list :text "prepared" :raw "raw"
+                             :prompt-origin "PROMPT_ORIGIN_USER_SENT")
+                 #'ignore #'ignore)
+        ;; Assert
+        (should marked)))))
+
+(ert-deftest agent-repl-test-gui-dispatch-turn-records-the-drained-prompts-raw-text ()
+  "A drained prompt's `:sent-turn' carries RAW, so an interrupt returns it."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
+               (lambda (_ws _text _origin ok _fail) (funcall ok "r_1") :pending))
+              ((symbol-function 'agent-repl--frontend-snap-webview-to-tail) #'ignore)
+              ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
+              ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
+              ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
+      ;; Act
+      (funcall agent-repl-prompt-queue-send-function
+               "ws1" (list :text "META\n\nraw" :raw "raw"
+                           :prompt-origin "PROMPT_ORIGIN_USER_SENT")
+               #'ignore #'ignore)
+      ;; Assert
+      (should (equal '(:request-id "r_1" :raw "raw")
+                     (agent-repl--ws-get "ws1" :sent-turn))))))
+
+(ert-deftest agent-repl-test-gui-dispatch-turn-tells-the-drain-a-send-landed ()
+  "The drain's ON-SENT runs with the request id, so the queue can advance."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (sent-id)
+      (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
+                 (lambda (_ws _text _origin ok _fail) (funcall ok "r_7") :pending))
+                ((symbol-function 'agent-repl--frontend-snap-webview-to-tail) #'ignore)
+                ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
+                ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
+                ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
+        ;; Act
+        (funcall agent-repl-prompt-queue-send-function
+                 "ws1" (list :text "prepared" :raw "raw"
+                             :prompt-origin "PROMPT_ORIGIN_USER_SENT")
+                 (lambda (id) (setq sent-id id)) #'ignore)
+        ;; Assert
+        (should (equal "r_7" sent-id))))))
+
+(ert-deftest agent-repl-test-gui-dispatch-turn-tells-the-drain-a-send-failed ()
+  "The drain's ON-FAILED runs with the detail, so the prompt can be reported."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (detail)
+      (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
+                 (lambda (_ws _text _origin _ok fail) (funcall fail "no daemon") :pending)))
+        ;; Act
+        (funcall agent-repl-prompt-queue-send-function
+                 "ws1" (list :text "prepared" :raw "raw"
+                             :prompt-origin "PROMPT_ORIGIN_USER_SENT")
+                 #'ignore (lambda (d) (setq detail d)))
+        ;; Assert
+        (should (equal "no daemon" detail))))))
 
 ;;;; ---- webview URLs --------------------------------------------------------------
 
@@ -1706,6 +1869,7 @@ wire would be exactly the no-op this command replaces."
   "The send records what an undo of it would need: the id and the RAW text."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '()
+   (agent-repl-test--with-live-link
     (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
                (lambda (_ws _text _origin ok _fail)
                  (funcall ok "r_9")
@@ -1717,7 +1881,7 @@ wire would be exactly the no-op this command replaces."
       (agent-repl--gui-send-turn "ws1" "META\n\nwrite a test" "write a test" "PROMPT_ORIGIN_USER_SENT")
       ;; Assert — RAW is recorded, since the decoration is not the user's to revise.
       (should (equal (agent-repl--ws-get "ws1" :sent-turn)
-                     '(:request-id "r_9" :raw "write a test"))))))
+                     '(:request-id "r_9" :raw "write a test")))))))
 
 ;;;; ---- the workspace wire key -------------------------------------------
 ;;
