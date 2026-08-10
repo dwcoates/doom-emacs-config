@@ -505,4 +505,52 @@ describe("forwarded record source identity", () => {
     // identity as attribution to the workspace alone.
     expect("claude_session_id" in stamped).toBe(false);
   });
+
+  it("writes the bound identity into no storage a reload could read back", () => {
+    // Arrange — the observed defect was a page that came up on a fresh bundle
+    // still stamping a four-day-dead uuid, so every cross-reload carrier is
+    // suspect. Persisting the identity anywhere would make the page a second
+    // authority on which conversation it belongs to.
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
+    const written: Array<[string, string]> = [];
+    const recorder = {
+      getItem: () => null,
+      setItem: (key: string, value: string) => written.push([key, value]),
+      removeItem: () => {},
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    } as unknown as Storage;
+    vi.stubGlobal("localStorage", recorder);
+    vi.stubGlobal("sessionStorage", recorder);
+
+    // Act
+    bindLogContext({ claude_session_id: "a1b2-current" });
+    log("info", "stamped", { operation: "test.no-persistence" });
+
+    // Assert
+    expect(written).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
+  it("comes up with no identity bound after a reload", () => {
+    // Arrange — a reload is a fresh module graph: whatever the previous page
+    // bound is gone, and the new one knows only what the daemon pushes it.
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
+    bindLogContext({ claude_session_id: "60f5-retired" });
+
+    // Act — re-import the module graph, exactly as a reload would build it.
+    vi.resetModules();
+    return import("../src/wslog.js").then((reloaded) => {
+      const stamped = reloaded.restampRecordIdentity({
+        message: "first record after reload",
+        claude_session_id: "60f5-retired",
+      } as unknown as ClientLogContext) as unknown as Record<string, unknown>;
+
+      // Assert — no remembered uuid: the field is absent, not restated.
+      expect("claude_session_id" in stamped).toBe(false);
+    });
+  });
 });

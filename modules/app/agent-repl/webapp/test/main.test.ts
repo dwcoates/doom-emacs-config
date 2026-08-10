@@ -563,10 +563,32 @@ describe("the feed's tail re-anchor", () => {
 // with no importable seam, so the wiring is pinned here; the store's retirement
 // of the dead uuid is tested in store.test.ts.
 describe("the page's bound log identity", () => {
-  it("rebinds the vendor uuid on the same edge as the session id", () => {
-    // Assert — read from the store, so an unannounced successor binds nothing
-    // rather than keeping the retired session's uuid.
-    expect(main).toContain("bindLogContext({ claude_session_id: store.state.claudeSessionId });");
+  it("reconciles the vendor uuid against the store on every batch", () => {
+    // Assert — the store's gated value is the single authority, re-read after
+    // every ingest rather than on a rebase verdict, so the stamp can never
+    // drift from the identity the daemon's registry holds.
+    expect(main).toContain("if (\n          store.state.claudeSessionId !== boundClaudeSessionId &&");
+    expect(main).toContain("bindLogContext({ claude_session_id: boundClaudeSessionId });");
+  });
+
+  it("reads the batch's uuid only off the owning session's view", () => {
+    // Assert — a StateSnapshot's session catalog carries RETIRED sessions, and
+    // an ungated scan of it is how a page adopted a four-day-dead uuid at boot,
+    // on every reload, from a value nothing had persisted.
+    expect(main).toContain("claudeSessionIdOf(effects, store.state.sessionId)");
+  });
+
+  it("unbinds the stamp when the daemon refuses a forwarded record", () => {
+    // Assert — a refusal says the stamp is not the registry's identity, so the
+    // page drops it and the next record is filed under the daemon's own.
+    expect(main).toContain("onClientLogRefused: () => {");
+    expect(main).toContain('bindLogContext({ claude_session_id: "" });');
+  });
+
+  it("starts every load with no vendor uuid bound", () => {
+    // Assert — no URL param, no storage, no cached snapshot: a page that has
+    // been told nothing sends no uuid at all.
+    expect(main).toContain('let boundClaudeSessionId = "";');
   });
 
   it("forgets the rebase identity when the page rebinds sessions", () => {

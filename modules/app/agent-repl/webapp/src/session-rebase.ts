@@ -60,15 +60,52 @@ export interface SessionRebaseOptions {
 }
 
 /**
- * The vendor session uuid an ingest batch announces, or "" when it announces
- * none. A pre-init `SessionView` legitimately carries no uuid and must never be
- * read as one; the last announcement in the batch wins, as it does in the
+ * The vendor session uuid an ingest batch announces FOR THE SESSION THE
+ * WORKSPACE OWNS, or "" when it announces none. A pre-init `SessionView`
+ * legitimately carries no uuid and must never be read as one; among the owning
+ * session's views the last announcement in the batch wins, as it does in the
  * store.
+ *
+ * OWNERSHIP IS NOT OPTIONAL HERE, and reading it as optional is what stamped a
+ * four-day-dead uuid on this page's every forwarded log record. A
+ * `StateSnapshot` fans out one `session-view` effect per session the daemon
+ * holds for the workspace — RETIRED and superseded ones included
+ * (state-adapter.ts, `s.sessions.map`) — so a scan that merely took the last
+ * non-empty uuid adopted whichever catalog entry happened to come last, and a
+ * page connecting days after a session died bound that dead session's uuid at
+ * BOOT. Nothing persisted it: the snapshot re-supplied it on every reload,
+ * which is why reloading the page never cleared it. The store already refuses
+ * those views wholesale (`applySessionView`); this applies the same ownership
+ * rule to the identity the log context is stamped from.
+ *
+ * The owner is read from the batch itself — a `workspace-state` effect is the
+ * daemon's ruling on which session the workspace owns, and it precedes the
+ * session views a snapshot carries — falling back to `currentOwner`, the owner
+ * the store already holds, for a batch carrying no ruling. An UNKNOWN owner
+ * announces NOTHING: with no ruling, no view can be shown to describe this
+ * workspace, and an unstamped record is filed by the daemon under its own
+ * registry identity, which is strictly better than a stamped guess.
  */
-export function claudeSessionIdOf(effects: readonly AdapterEffect[]): string {
+export function claudeSessionIdOf(
+  effects: readonly AdapterEffect[],
+  currentOwner: string,
+): string {
+  let owner = currentOwner;
   let id = "";
   for (const effect of effects) {
-    if (effect.kind === "session-view" && effect.value.claudeSessionId !== "") {
+    if (effect.kind === "workspace-state" && effect.value.sessionId !== "") {
+      // A rotation inside the batch retires what an earlier view announced:
+      // that uuid belongs to the session the workspace has just stopped owning.
+      if (effect.value.sessionId !== owner) id = "";
+      owner = effect.value.sessionId;
+      continue;
+    }
+    if (
+      effect.kind === "session-view" &&
+      effect.value.claudeSessionId !== "" &&
+      owner !== "" &&
+      effect.value.sessionId === owner
+    ) {
       id = effect.value.claudeSessionId;
     }
   }
