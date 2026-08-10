@@ -8,13 +8,15 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { PromptOrigin } from "../../core/v1/core_pb";
 import { file_agentshim_core_v1_core } from "../../core/v1/core_pb";
+import type { SessionCommand } from "./slash-menu_pb";
+import { file_agentshim_frontend_v1_slash_menu } from "./slash-menu_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentshim/frontend/v1/prompt-queue.proto.
  */
 export const file_agentshim_frontend_v1_prompt_queue: GenFile = /*@__PURE__*/
-  fileDesc("CihhZ2VudHNoaW0vZnJvbnRlbmQvdjEvcHJvbXB0LXF1ZXVlLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEicAoPU3VibWl0UHJvbXB0Q21kEgwKBHRleHQYASABKAkSFwoPcGVybWlzc2lvbl9tb2RlGAIgASgJEjYKDXByb21wdF9vcmlnaW4YAyABKA4yHy5hZ2VudHNoaW0uY29yZS52MS5Qcm9tcHRPcmlnaW4iJgoMSW50ZXJydXB0Q21kEhYKDmNvbmZpcm1fYWdlbnRzGAEgASgIIhwKGlF1ZXVlQ2xhc3NpZmljYXRpb25QZW5kaW5nIjEKHFF1ZXVlQ2xhc3NpZmljYXRpb25JbnRlcmplY3QSEQoJcmF0aW9uYWxlGAEgASgJIj4KF1F1ZXVlQ2xhc3NpZmljYXRpb25Ib2xkEhEKCXJhdGlvbmFsZRgBIAEoCRIQCghhY2NlcHRlZBgCIAEoCCIqChhRdWV1ZUNsYXNzaWZpY2F0aW9uRXJyb3ISDgoGZGV0YWlsGAEgASgJIsIFCgpRdWV1ZUVudHJ5EgoKAmlkGAEgASgJEgwKBHRleHQYAiABKAkSFAoMcXVldWVkX2F0X21zGAMgASgDEkQKB3BlbmRpbmcYCiABKAsyMS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvblBlbmRpbmdIABJICglpbnRlcmplY3QYCyABKAsyMy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbkludGVyamVjdEgAEksKEWhvbGRfZm9yX3R1cm5fZW5kGAwgASgLMi4uYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlQ2xhc3NpZmljYXRpb25Ib2xkSAASQAoFZXJyb3IYDSABKAsyLy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbkVycm9ySAASQQoIc2h1dGRvd24YByABKAsyLS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeVNodXRkb3duSG9sZEgBEkQKCmtlZXBfYWxpdmUYCCABKAsyLi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeUtlZXBBbGl2ZUhvbGRIARI/CgdyZXZpdmFsGAkgASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlRW50cnlSZXZpdmFsSG9sZEgBEkoKDWJ1aWxkX3JlZnJlc2gYDiABKAsyMS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeUJ1aWxkUmVmcmVzaEhvbGRIAUIQCg5jbGFzc2lmaWNhdGlvbkIGCgRob2xkSgQIBBAFSgQIBRAGSgQIBhAHUg5jbGFzc2lmaWNhdGlvblIJcmF0aW9uYWxlUghhY2NlcHRlZCItChZRdWV1ZUVudHJ5U2h1dGRvd25Ib2xkEhMKC3NjaGVkdWxlX2lkGAEgASgJIioKF1F1ZXVlRW50cnlLZWVwQWxpdmVIb2xkEg8KB3R1cm5faWQYASABKAkiKQoVUXVldWVFbnRyeVJldml2YWxIb2xkSgQIARACUgpzZXNzaW9uX2lkIhwKGlF1ZXVlRW50cnlCdWlsZFJlZnJlc2hIb2xkInMKCVF1ZXVlVmlldxIRCgl3b3Jrc3BhY2UYASABKAkSMgoHZW50cmllcxgDIAMoCzIhLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUVudHJ5Eg0KBWZlbmNlGAQgASgJSgQIAhADUgpzZXNzaW9uX2lkIiEKDVF1ZXVlRm9yY2VDbWQSEAoIZW50cnlfaWQYASABKAkiIgoOUXVldWVBY2NlcHRDbWQSEAoIZW50cnlfaWQYASABKAkiIgoOUXVldWVDYW5jZWxDbWQSEAoIZW50cnlfaWQYASABKAlCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_agentshim_core_v1_core]);
+  fileDesc("CihhZ2VudHNoaW0vZnJvbnRlbmQvdjEvcHJvbXB0LXF1ZXVlLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEicAoPU3VibWl0UHJvbXB0Q21kEgwKBHRleHQYASABKAkSFwoPcGVybWlzc2lvbl9tb2RlGAIgASgJEjYKDXByb21wdF9vcmlnaW4YAyABKA4yHy5hZ2VudHNoaW0uY29yZS52MS5Qcm9tcHRPcmlnaW4iJgoMSW50ZXJydXB0Q21kEhYKDmNvbmZpcm1fYWdlbnRzGAEgASgIIhwKGlF1ZXVlQ2xhc3NpZmljYXRpb25QZW5kaW5nIjEKHFF1ZXVlQ2xhc3NpZmljYXRpb25JbnRlcmplY3QSEQoJcmF0aW9uYWxlGAEgASgJIj4KF1F1ZXVlQ2xhc3NpZmljYXRpb25Ib2xkEhEKCXJhdGlvbmFsZRgBIAEoCRIQCghhY2NlcHRlZBgCIAEoCCJgCiZRdWV1ZUNsYXNzaWZpY2F0aW9uVW5pbnRlcnJ1cHRpYmxlVHVybhI2Cgdjb21tYW5kGAEgASgOMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLlNlc3Npb25Db21tYW5kIioKGFF1ZXVlQ2xhc3NpZmljYXRpb25FcnJvchIOCgZkZXRhaWwYASABKAkioQYKClF1ZXVlRW50cnkSCgoCaWQYASABKAkSDAoEdGV4dBgCIAEoCRIUCgxxdWV1ZWRfYXRfbXMYAyABKAMSRAoHcGVuZGluZxgKIAEoCzIxLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uUGVuZGluZ0gAEkgKCWludGVyamVjdBgLIAEoCzIzLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uSW50ZXJqZWN0SAASSwoRaG9sZF9mb3JfdHVybl9lbmQYDCABKAsyLi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbkhvbGRIABJACgVlcnJvchgNIAEoCzIvLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uRXJyb3JIABJdChR1bmludGVycnVwdGlibGVfdHVybhgPIAEoCzI9LmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uVW5pbnRlcnJ1cHRpYmxlVHVybkgAEkEKCHNodXRkb3duGAcgASgLMi0uYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlRW50cnlTaHV0ZG93bkhvbGRIARJECgprZWVwX2FsaXZlGAggASgLMi4uYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlRW50cnlLZWVwQWxpdmVIb2xkSAESPwoHcmV2aXZhbBgJIAEoCzIsLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUVudHJ5UmV2aXZhbEhvbGRIARJKCg1idWlsZF9yZWZyZXNoGA4gASgLMjEuYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlRW50cnlCdWlsZFJlZnJlc2hIb2xkSAFCEAoOY2xhc3NpZmljYXRpb25CBgoEaG9sZEoECAQQBUoECAUQBkoECAYQB1IOY2xhc3NpZmljYXRpb25SCXJhdGlvbmFsZVIIYWNjZXB0ZWQiLQoWUXVldWVFbnRyeVNodXRkb3duSG9sZBITCgtzY2hlZHVsZV9pZBgBIAEoCSIqChdRdWV1ZUVudHJ5S2VlcEFsaXZlSG9sZBIPCgd0dXJuX2lkGAEgASgJIikKFVF1ZXVlRW50cnlSZXZpdmFsSG9sZEoECAEQAlIKc2Vzc2lvbl9pZCIcChpRdWV1ZUVudHJ5QnVpbGRSZWZyZXNoSG9sZCJzCglRdWV1ZVZpZXcSEQoJd29ya3NwYWNlGAEgASgJEjIKB2VudHJpZXMYAyADKAsyIS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeRINCgVmZW5jZRgEIAEoCUoECAIQA1IKc2Vzc2lvbl9pZCIhCg1RdWV1ZUZvcmNlQ21kEhAKCGVudHJ5X2lkGAEgASgJIiIKDlF1ZXVlQWNjZXB0Q21kEhAKCGVudHJ5X2lkGAEgASgJIiIKDlF1ZXVlQ2FuY2VsQ21kEhAKCGVudHJ5X2lkGAEgASgJQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_agentshim_core_v1_core, file_agentshim_frontend_v1_slash_menu]);
 
 /**
  * @generated from message agentshim.frontend.v1.SubmitPromptCmd
@@ -141,6 +143,45 @@ export const QueueClassificationHoldSchema: GenMessage<QueueClassificationHold> 
   messageDesc(file_agentshim_frontend_v1_prompt_queue, 4);
 
 /**
+ * NOTHING CLASSIFIED THIS ENTRY, because the turn in front of it is a CONTEXT
+ * CUT — `/compact` or `/clear` — and a context cut is never interrupted for a
+ * queued prompt.
+ *
+ * It is a verdict rather than a `hold` arm because the entry is NOT held by
+ * anything other than the running turn: it is delivered by the ordinary
+ * turn-end drain, in order, exactly as a HOLD verdict is. What it does not have
+ * is a classifier behind it. A compaction reads the whole conversation and a
+ * clear discards it; interrupting either one spends that cost for nothing and
+ * leaves the context in the state the cut was supposed to change, so there is
+ * no question left for a model to answer and no model call is spent asking it.
+ *
+ * THERE IS NO FORCE-THROUGH. QueueForceCmd is refused on one of these for the
+ * reason the keep-alive and revival holds refuse it: the force's mechanism is
+ * an interrupt, and the interrupt is precisely what must not happen. A user who
+ * genuinely wants the cut stopped still has the interrupt command itself, which
+ * says what it does.
+ *
+ * @generated from message agentshim.frontend.v1.QueueClassificationUninterruptibleTurn
+ */
+export type QueueClassificationUninterruptibleTurn = Message<"agentshim.frontend.v1.QueueClassificationUninterruptibleTurn"> & {
+  /**
+   * Which cut is running, so the card can name it. Never UNSPECIFIED: the arm
+   * is set only when the daemon recognized the running prompt as one of the
+   * two, and an arm that could not say which would explain nothing.
+   *
+   * @generated from field: agentshim.frontend.v1.SessionCommand command = 1;
+   */
+  command: SessionCommand;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.QueueClassificationUninterruptibleTurn.
+ * Use `create(QueueClassificationUninterruptibleTurnSchema)` to create a new message.
+ */
+export const QueueClassificationUninterruptibleTurnSchema: GenMessage<QueueClassificationUninterruptibleTurn> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 5);
+
+/**
  * The classifier could not be believed (it answered with neither token, or
  * both). Surfaced as its own arm rather than silently defaulted to one of
  * the real verdicts: a frontend must be able to see that nothing decided
@@ -163,7 +204,7 @@ export type QueueClassificationError = Message<"agentshim.frontend.v1.QueueClass
  * Use `create(QueueClassificationErrorSchema)` to create a new message.
  */
 export const QueueClassificationErrorSchema: GenMessage<QueueClassificationError> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 5);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 6);
 
 /**
  * One prompt the daemon is holding.
@@ -217,6 +258,17 @@ export type QueueEntry = Message<"agentshim.frontend.v1.QueueEntry"> & {
      */
     value: QueueClassificationError;
     case: "error";
+  } | {
+    /**
+     * No classifier ran and none will: the turn in front of this entry is a
+     * context cut, which is never interrupted. Delivery is the ordinary
+     * turn-end drain's, so this arm changes WHO decided rather than WHEN the
+     * prompt runs.
+     *
+     * @generated from field: agentshim.frontend.v1.QueueClassificationUninterruptibleTurn uninterruptible_turn = 15;
+     */
+    value: QueueClassificationUninterruptibleTurn;
+    case: "uninterruptibleTurn";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -295,7 +347,7 @@ export type QueueEntry = Message<"agentshim.frontend.v1.QueueEntry"> & {
  * Use `create(QueueEntrySchema)` to create a new message.
  */
 export const QueueEntrySchema: GenMessage<QueueEntry> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 6);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 7);
 
 /**
  * A scheduled shutdown's drain lease, holding a queue entry.
@@ -317,7 +369,7 @@ export type QueueEntryShutdownHold = Message<"agentshim.frontend.v1.QueueEntrySh
  * Use `create(QueueEntryShutdownHoldSchema)` to create a new message.
  */
 export const QueueEntryShutdownHoldSchema: GenMessage<QueueEntryShutdownHold> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 7);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 8);
 
 /**
  * The keep-alive turn holding a queue entry.
@@ -339,7 +391,7 @@ export type QueueEntryKeepAliveHold = Message<"agentshim.frontend.v1.QueueEntryK
  * Use `create(QueueEntryKeepAliveHoldSchema)` to create a new message.
  */
 export const QueueEntryKeepAliveHoldSchema: GenMessage<QueueEntryKeepAliveHold> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 8);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 9);
 
 /**
  * The pending compact-first revival holding a queue entry.
@@ -354,7 +406,7 @@ export type QueueEntryRevivalHold = Message<"agentshim.frontend.v1.QueueEntryRev
  * Use `create(QueueEntryRevivalHoldSchema)` to create a new message.
  */
 export const QueueEntryRevivalHoldSchema: GenMessage<QueueEntryRevivalHold> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 9);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 10);
 
 /**
  * The entry waits for its session's shim to restart onto the current build
@@ -371,7 +423,7 @@ export type QueueEntryBuildRefreshHold = Message<"agentshim.frontend.v1.QueueEnt
  * Use `create(QueueEntryBuildRefreshHoldSchema)` to create a new message.
  */
 export const QueueEntryBuildRefreshHoldSchema: GenMessage<QueueEntryBuildRefreshHold> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 10);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 11);
 
 /**
  * The session's queue, pushed on EVERY change and carried in StateSnapshot.
@@ -412,7 +464,7 @@ export type QueueView = Message<"agentshim.frontend.v1.QueueView"> & {
  * Use `create(QueueViewSchema)` to create a new message.
  */
 export const QueueViewSchema: GenMessage<QueueView> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 11);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 12);
 
 /**
  * Deliver this entry NOW — the user overriding the classifier, or not waiting
@@ -432,7 +484,7 @@ export type QueueForceCmd = Message<"agentshim.frontend.v1.QueueForceCmd"> & {
  * Use `create(QueueForceCmdSchema)` to create a new message.
  */
 export const QueueForceCmdSchema: GenMessage<QueueForceCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 12);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 13);
 
 /**
  * Confirm a HOLD entry. View state only: the entry is still delivered by the
@@ -452,7 +504,7 @@ export type QueueAcceptCmd = Message<"agentshim.frontend.v1.QueueAcceptCmd"> & {
  * Use `create(QueueAcceptCmdSchema)` to create a new message.
  */
 export const QueueAcceptCmdSchema: GenMessage<QueueAcceptCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 13);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 14);
 
 /**
  * Drop an entry. It is never delivered.
@@ -471,5 +523,5 @@ export type QueueCancelCmd = Message<"agentshim.frontend.v1.QueueCancelCmd"> & {
  * Use `create(QueueCancelCmdSchema)` to create a new message.
  */
 export const QueueCancelCmdSchema: GenMessage<QueueCancelCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 14);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 15);
 

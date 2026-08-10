@@ -27,6 +27,7 @@ syntax = "proto3";
 package agentshim.frontend.v1;
 
 import "agentshim/core/v1/core.proto";
+import "agentshim/frontend/v1/slash-menu.proto";
 
 option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 
@@ -169,6 +170,8 @@ message FailureKind {
     // ---- MACHINERY, continued. ----
     // The daemon refused a user prompt because the workspace's merge machinery holds the session.
     FailurePromptRefusedByMergeState prompt_refused_by_merge_state = 60;
+    // The queued prompt is waiting behind a context cut, which is never interrupted, so it cannot be forced ahead of it.
+    FailureQueueEntryUninterruptibleTurn queue_entry_uninterruptible_turn = 61;
 
     // ---- CLIENT-LOCAL failures: the one part of this vocabulary a frontend
     // mints itself. See the note on FailureKind. All resolve BLUE, because a
@@ -643,6 +646,17 @@ message FailurePromptRefusedByMergeState {
   // render-state name, verbatim (e.g. "RENDER_STATE_MERGE_QUEUED") — display
   // evidence, never parsed.
   string state = 1;
+}
+
+// The queued prompt is waiting behind a context cut, which is never
+// interrupted, so it cannot be forced ahead of it.
+//
+// Resolves the workspace BLUE.
+message FailureQueueEntryUninterruptibleTurn {
+  // Which queued entry, so the card addresses the right row.
+  string entry_id = 1;
+  // The cut that is running, so the card can name what the prompt is behind.
+  SessionCommand command = 2;
 }
 
 // The connection to the daemon dropped and the frontend is reconnecting.
