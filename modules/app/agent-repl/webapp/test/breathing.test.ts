@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AnimationEpoch,
   BREATH_PERIOD_MS,
   BREATH_SHADES,
   BUBBLE_BREATH_PERIOD_MS,
@@ -325,4 +326,111 @@ describe("bubbleBreathStyle: what a render stamps on the bubble", () => {
     // Assert
     expect(ms).toBeLessThan(BUBBLE_BREATH_PERIOD_MS);
   });
+});
+
+describe("AnimationEpoch: one immovable start time", () => {
+  it("stamps the epoch on its first read, so the first render seeks nowhere", () => {
+    // Arrange
+    const epoch = new AnimationEpoch();
+    // Act
+    const got = epoch.elapsedMs(NOW);
+    // Assert
+    expect(got).toBe(0);
+  });
+
+  it("measures every later read from that first stamp, not from the last read", () => {
+    // Arrange
+    const epoch = new AnimationEpoch();
+    epoch.elapsedMs(NOW);
+    epoch.elapsedMs(NOW + 400);
+    // Act
+    const got = epoch.elapsedMs(NOW + 1200);
+    // Assert
+    expect(got).toBe(1200);
+  });
+
+  it("never moves the epoch once stamped, which IS the continuity guarantee", () => {
+    // Arrange
+    const epoch = new AnimationEpoch();
+    epoch.elapsedMs(NOW);
+    epoch.elapsedMs(NOW + 3000);
+    // Act — an earlier-but-still-forward read measures from the original stamp.
+    const got = epoch.elapsedMs(NOW + 100);
+    // Assert
+    expect(got).toBe(100);
+  });
+
+  it("floors a clock that goes backwards at zero", () => {
+    // Arrange — a negative elapsed becomes a POSITIVE animation-delay, which
+    // stalls the animation at its start until the clock catches up.
+    const epoch = new AnimationEpoch();
+    epoch.elapsedMs(NOW);
+    // Act
+    const got = epoch.elapsedMs(NOW - 5000);
+    // Assert
+    expect(got).toBe(0);
+  });
+
+  it("keeps two epochs independent, so one animation's start never moves another's", () => {
+    // Arrange — the footer and the bubble each own one.
+    const first = new AnimationEpoch();
+    const second = new AnimationEpoch();
+    first.elapsedMs(NOW);
+    // Act — the second stamps later, at its own first read.
+    const got = second.elapsedMs(NOW + 900);
+    // Assert
+    expect(got).toBe(0);
+  });
+});
+
+describe("AnimationEpoch: both animations really share it", () => {
+  // The extraction is only worth anything if neither consumer kept its own
+  // hand-rolled epoch: a divergent copy would drift from this table silently.
+  // Each entry reads its consumer at a wall-clock instant and reports the
+  // elapsed time that consumer measured, in the units it reports it in.
+  const consumers: Array<{ name: string; elapsedAt: (at: number) => number }> = [
+    {
+      name: "the footer's breathing ticker",
+      elapsedAt: (() => {
+        const ticker = new BreathingTicker();
+        return (at: number) => ticker.state(at).elapsedMs;
+      })(),
+    },
+    {
+      name: "the prompt bubble's own animation",
+      elapsedAt: (() => {
+        const bubble = new BubbleBreath();
+        // Reported modulo the period, so the table's deltas stay inside one cycle.
+        return (at: number) => bubble.delayMs(at);
+      })(),
+    },
+  ];
+
+  for (const { name, elapsedAt } of consumers) {
+    it(`stamps ${name} on its first read`, () => {
+      // Arrange / Act
+      const got = elapsedAt(NOW);
+      // Assert
+      expect(got).toBe(0);
+    });
+
+    it(`measures ${name} from the immovable stamp rather than the last read`, () => {
+      // Arrange
+      elapsedAt(NOW);
+      elapsedAt(NOW + 400);
+      // Act
+      const got = elapsedAt(NOW + 1200);
+      // Assert
+      expect(got).toBe(1200);
+    });
+
+    it(`floors ${name} at zero when the clock goes backwards`, () => {
+      // Arrange
+      elapsedAt(NOW);
+      // Act
+      const got = elapsedAt(NOW - 5000);
+      // Assert
+      expect(got).toBe(0);
+    });
+  }
 });

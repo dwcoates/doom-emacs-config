@@ -46,6 +46,31 @@ export const BUBBLE_BREATH_PERIOD_MS = 5200;
 /** One full inhale-and-exhale. Must match the `pfooter-breath` keyframes. */
 export const BREATH_PERIOD_MS = 2600;
 
+/**
+ * ONE immovable start time, shared by every animation in this module that has
+ * to survive its element being rebuilt.
+ *
+ * Both animations here run on wall-clock time and both are painted onto nodes
+ * the feed replaces wholesale, so both need the same thing: a start time
+ * stamped once and never moved, against which each render measures how far
+ * into the cycle the page already is. That measurement is what a negative
+ * `animation-delay` seeks the fresh element to, and it is the whole reason a
+ * rebuild is invisible rather than a snap back to 0%.
+ *
+ * The clamp is not decoration: a clock that went backwards would otherwise
+ * yield a negative elapsed time, which becomes a POSITIVE `animation-delay`
+ * and stalls the animation at its start until the clock catches up.
+ */
+export class AnimationEpoch {
+  private epochMs: number | null = null;
+
+  /** Time since the epoch, stamping it on first read. Never negative. */
+  elapsedMs(nowMs: number): number {
+    if (this.epochMs === null) this.epochMs = nowMs;
+    return Math.max(0, nowMs - this.epochMs);
+  }
+}
+
 /** Ramp endpoints in HSL hue degrees: green, and purple the cool way round. */
 const HUE_GREEN = 140;
 const HUE_PURPLE = 285;
@@ -82,7 +107,7 @@ export function breathColor(shade: number): string {
  */
 export class BreathingTicker {
   private shade = 0;
-  private epochMs: number | null = null;
+  private epoch = new AnimationEpoch();
   /** The last progress view seen, by reference. `undefined` = none yet. */
   private seen: unknown = undefined;
 
@@ -105,8 +130,7 @@ export class BreathingTicker {
    * across every rewrite of the footer.
    */
   state(nowMs: number): BreathState {
-    if (this.epochMs === null) this.epochMs = nowMs;
-    return { shade: this.shade, elapsedMs: Math.max(0, nowMs - this.epochMs) };
+    return { shade: this.shade, elapsedMs: this.epoch.elapsedMs(nowMs) };
   }
 }
 
@@ -133,15 +157,11 @@ export class BreathingTicker {
  * unrelated phases drifted past each other.
  */
 export class BubbleBreath {
-  private epochMs: number | null = null;
+  private epoch = new AnimationEpoch();
 
   /** How far into the current cycle, in `[0, BUBBLE_BREATH_PERIOD_MS)`. */
   delayMs(nowMs: number): number {
-    if (this.epochMs === null) this.epochMs = nowMs;
-    // A clock that goes backwards would otherwise emit a POSITIVE delay, which
-    // stalls the animation at its start until the clock catches up.
-    const elapsed = Math.max(0, nowMs - this.epochMs);
-    return elapsed % BUBBLE_BREATH_PERIOD_MS;
+    return this.epoch.elapsedMs(nowMs) % BUBBLE_BREATH_PERIOD_MS;
   }
 }
 
