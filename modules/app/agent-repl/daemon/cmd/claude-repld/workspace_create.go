@@ -719,9 +719,11 @@ type WorkspaceCreationBridge struct {
 	avail    map[chan *frontendv1.WorkspaceAvailable]struct{}
 	actions  map[chan *frontendv1.HostAction]struct{}
 	releases map[chan server.SessionPublicationRelease]struct{}
-	// publication caches only MANAGED creation jobs. Unmanaged sessions are
-	// deliberately never cached: a later creation job for the same worktree
-	// must be discovered from durable state, never masked by an old allow.
+	// publication memoizes the gate's verdict per worktree, including the
+	// "no creation job names this worktree" verdict. A later creation job for
+	// the same worktree is never masked by an old allow: the job claims its
+	// worktree through PrepareSessionPublication, which drops this worktree's
+	// entry, at the same checkpoint that first records the path durably.
 	publication map[string]server.SessionPublicationDecision
 }
 
@@ -751,6 +753,21 @@ func (b *WorkspaceCreationBridge) SessionPublicationDecision(worktreePath, sessi
 		return server.SessionPublicationDecision{}, err
 	}
 	result := server.SessionPublicationDecision{JobID: decision.JobID, WorktreePath: decision.WorktreePath, SessionID: decision.SessionID, Materialized: decision.Materialized}
+	// A WORKTREE NO CREATION JOB NAMES IS MEMOIZED TOO, and that is what keeps
+	// snapshot assembly off the store entirely. Every snapshot asks this gate
+	// once per workspace per view family — ten families over 150 workspaces is
+	// 1500 questions per snapshot — and an unmemoized "no job here" answer paid
+	// for a full store listing every time. The daemon assembles roughly one
+	// snapshot a second (every GUI stream renews a freshness lease on a timer),
+	// so the un-memoized half of this gate was the largest repeated cost on the
+	// path a command's ack contends with.
+	//
+	// The entry cannot go stale: a creation job first names a worktree through
+	// PrepareSessionPublication, which deletes this worktree's entry, and it
+	// does so before the job has a session — so before any session frame for it
+	// can exist. A later job for the same worktree is therefore discovered, not
+	// masked, which is the property the comment below protects for holds.
+	//
 	// A HOLD IS MEMOIZED ONLY ONCE ITS JOB'S IDENTITY IS SETTLED. Frames arrive
 	// for a worktree while its creation job is still between
 	// PrepareSessionPublication and the CreateSession that gives it a session id,
@@ -760,7 +777,7 @@ func (b *WorkspaceCreationBridge) SessionPublicationDecision(worktreePath, sessi
 	// workspace stayed held for 25 minutes with 6294 hold records and no fault.
 	// An unsettled hold is still a hold; it is simply re-derived from the store
 	// on the next frame rather than frozen.
-	if result.JobID != "" && result.SessionID != "" {
+	if result.JobID == "" || result.SessionID != "" {
 		b.publication[worktreePath] = result
 	}
 	b.mu.Unlock()
@@ -854,7 +871,12 @@ func (b *WorkspaceCreationBridge) SnapshotHostWork() server.WorkspaceHostWorkSna
 	}
 	result := server.WorkspaceHostWorkSnapshot{}
 	for _, job := range jobs {
-		if job.State == workspacecreate.StateAwaitingEmacs {
+		// AN ABANDONED JOB IS NOT REPLAYED. The connect snapshot is the second
+		// path to the host, and the only one a daemon restart cannot silence, so
+		// a job whose wait already has a terminal disposition would be
+		// resurrected by every host connect for the rest of time if this replay
+		// did not honour it too.
+		if job.State == workspacecreate.StateAwaitingEmacs && !job.PublicationAbandoned {
 			result.WorkspaceAvailable = append(result.WorkspaceAvailable, toProtoAvailable(job))
 		}
 	}

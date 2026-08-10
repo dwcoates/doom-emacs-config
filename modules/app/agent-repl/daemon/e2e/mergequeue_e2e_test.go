@@ -362,12 +362,37 @@ func (w *mergeWatch) record(frame *frontendv1.FrontendFrame) {
 	}
 }
 
+// mergeRunTimeout is the wait budget for a frame a MERGE RUN has to produce,
+// and it is deliberately not the suite's frameTimeout.
+//
+// frameTimeout bounds a frame the daemon composes from state it already holds,
+// and it says so: five seconds against a measured ~0.65s, where a wait needing
+// tens of seconds would be a test synchronizing by generosity. The awaits here
+// are a different animal. A merge run's frames are published either side of
+// GIT PROCESSES — a rebase replay per commit, a suite selection, a test gate,
+// and the landing sequence of update-ref, worktree re-sync and merge commit —
+// and the run publishes nothing in between, because the merge status vocabulary
+// has no arm for "landing on the target". The bound is therefore set by how
+// long a handful of git invocations take on the machine, which on the gate is a
+// machine running every other suite of this repository at the same time; the
+// suite that exercises this same pipeline in-process takes 108s of it.
+//
+// The named bound is one merge run's git work under that contention. It is NOT
+// a hang backstop — `go test -timeout` is — and it is not a bigger number for a
+// flake: a merge that publishes nothing for a minute IS a broken merge.
+var mergeRunTimeout = 60 * time.Second
+
 // until reads and records frames until cond holds, failing at the deadline. The
 // condition is evaluated over EVERYTHING recorded so far, so a fact that
 // arrived before until was called still satisfies it.
+//
+// Both budgets are mergeRunTimeout: the total, and each individual read. The
+// read matters as much as the total here, because the silence this suite has to
+// tolerate is one uninterrupted gap between two publications rather than a slow
+// accumulation of frames.
 func (w *mergeWatch) until(what string, cond func() bool) {
 	w.t.Helper()
-	deadline := time.Now().Add(frameTimeout)
+	deadline := time.Now().Add(mergeRunTimeout)
 	for {
 		if cond() {
 			return
@@ -375,7 +400,7 @@ func (w *mergeWatch) until(what string, cond func() bool) {
 		if !time.Now().Before(deadline) {
 			w.t.Fatalf("%s never arrived before the deadline", what)
 		}
-		w.record(readFrame(w.t, w.conn))
+		w.record(readFrameWithin(w.t, w.conn, mergeRunTimeout))
 	}
 }
 

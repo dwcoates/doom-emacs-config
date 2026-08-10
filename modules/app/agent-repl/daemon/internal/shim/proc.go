@@ -4,6 +4,7 @@ package shim
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -38,14 +39,23 @@ const maxStderrTail = 8 * 1024
 const stderrTruncationMarker = "[stderr truncated to the last 8192 bytes] "
 
 const (
-	stderrCloseOwnerUnclaimed = "unclaimed"
-	stderrCloseOwnerProcWait  = "proc_wait"
-	stderrCloseOwnerCaller    = "caller"
-
-	stderrOutcomeCleanEOF            = "clean_eof"
-	stderrOutcomeExpectedReaderClose = "expected_reader_close"
-	stderrOutcomeScannerError        = "scanner_error"
+	// stderrOutcomeComplete states that the stream reached EOF, so every byte
+	// anything ever wrote to it is in the tail.
+	stderrOutcomeComplete = "complete"
+	// stderrOutcomeReadFailed states that the stream ended on an error rather
+	// than EOF, so the tail stops wherever the read stopped.
+	stderrOutcomeReadFailed = "read_failed"
+	// stderrOutcomeHeldOpen states that the child was reaped and everything IT
+	// wrote was drained, but something that inherited its stderr is still
+	// holding the stream, so nothing written from here on is retained. It is
+	// recorded because a tail that stops early must never read as a child that
+	// fell silent.
+	stderrOutcomeHeldOpen = "held_open"
 )
+
+// deadlineAlreadyPast releases a reader from an in-flight wait immediately. Its
+// value only has to be in the past; the epoch is the least surprising one.
+var deadlineAlreadyPast = time.Unix(0, 0)
 
 // stderrTail is a byte-capped ring of the child's most recent stderr. It is an
 // io.Writer so the same buffer serves both stderr paths: the parsed pump and
@@ -131,115 +141,312 @@ type Proc struct {
 	// dies without ever speaking the protocol still has evidence to hand the
 	// bring-up that was waiting for it.
 	stderr *stderrTail
-	// stderrPump tracks parsed stderr scan completion.  Proc.Wait and os/exec
-	// own the reader close, while a caller owns the child's stream when Stderr
-	// is supplied.
+	// sink is the writer the child's stderr is drained into: it owns the tail,
+	// the line classification and the caller's tee.
+	sink *stderrSink
+	// stderrPump owns the read end of that stream and the one account of how it
+	// ended.
 	stderrPump *stderrPump
 	// pid and pgid are captured at spawn so a stop record names the same
 	// process the spawn record did, even after the process has exited.
 	pid  int
 	pgid int
 
+	// shutdown carries the one authoritative account of why this child is
+	// stopping, so the reap record can say who asked and why.
+	shutdown shutdownAttribution
+
 	mu      sync.Mutex
 	stdinOK bool
 }
 
-// stderrLifecycle records the one authoritative account of why a child is
-// stopping and who owns the reader close.  The mutex makes the expected-close
-// classification structural: the scanner cannot observe the marker until the
-// lifecycle owner has committed it.
-type stderrLifecycle struct {
-	mu sync.Mutex
-
-	pid               int
-	pgid              int
-	shutdownInitiator string
-	shutdownReason    string
-	closeOwner        string
-	closeExpected     bool
+// shutdownAttribution records who commanded a deliberate stop and why.
+//
+// The mutex is held ACROSS the signalling system call, which is what makes the
+// attribution honest rather than merely likely: a stop the kernel refused can
+// never be observed as one that happened, because a reader cannot see the
+// fields until the sender has committed them.
+type shutdownAttribution struct {
+	mu        sync.Mutex
+	initiator string
+	reason    string
 }
 
-type stderrLifecycleSnapshot struct {
-	pid               int
-	pgid              int
-	shutdownInitiator string
-	shutdownReason    string
-	closeOwner        string
-	closeExpected     bool
+func newShutdownAttribution() shutdownAttribution {
+	return shutdownAttribution{initiator: "child_exit", reason: "no deliberate stop requested"}
 }
 
-// stderrPump owns daemon-parsed stderr scan completion and publishes it only
-// after the scanner has made its final lifecycle classification.
-type stderrPump struct {
-	reader       io.ReadCloser
-	logger       Logger
-	tail         *stderrTail
-	done         chan struct{}
-	logLifecycle bool
-	lifecycle    stderrLifecycle
-}
-
-func newStderrPump(reader io.ReadCloser, logger Logger, tail *stderrTail, pid, pgid int, logLifecycle bool) *stderrPump {
-	return &stderrPump{
-		reader:       reader,
-		logger:       logger,
-		tail:         tail,
-		done:         make(chan struct{}),
-		logLifecycle: logLifecycle,
-		lifecycle: stderrLifecycle{
-			pid:               pid,
-			pgid:              pgid,
-			shutdownInitiator: "child_exit",
-			shutdownReason:    "no deliberate stop requested",
-			closeOwner:        stderrCloseOwnerUnclaimed,
-		},
-	}
-}
-
-// signal holds lifecycle ownership across the system call so a scanner can
-// never pair a failed signal with a deliberately-attributed shutdown.
-func (p *stderrPump) signal(by Stop, send func() error) error {
-	p.lifecycle.mu.Lock()
-	defer p.lifecycle.mu.Unlock()
+// commit records the attribution only after send succeeds.
+func (a *shutdownAttribution) commit(by Stop, send func() error) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if err := send(); err != nil {
 		return err
 	}
-	p.lifecycle.shutdownInitiator = by.Initiator
-	p.lifecycle.shutdownReason = by.Reason
+	a.initiator = by.Initiator
+	a.reason = by.Reason
 	return nil
 }
 
-// expectClose names Proc.Wait as the logical close owner before os/exec's
-// Wait closes its pipe reader after the child exits.  Closing it here would
-// truncate a still-running child, so Wait is deliberately the only closer.
-func (p *stderrPump) expectClose(owner string) {
-	p.lifecycle.mu.Lock()
-	defer p.lifecycle.mu.Unlock()
-	if p.lifecycle.closeOwner == owner && p.lifecycle.closeExpected {
+func (a *shutdownAttribution) snapshot() (initiator, reason string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.initiator, a.reason
+}
+
+// stderrSink is the child's stderr AS A WRITER, and the tail's guarantee rests
+// on it: everything retention needs to do happens on the writing side, where
+// the bytes arrive, rather than in a reader the reap can outrun.
+type stderrSink struct {
+	logger Logger
+	tail   *stderrTail
+	// directed is the caller's own stderr writer, which is TEED rather than
+	// replaced. A caller that owns the stream (the shim persists its own log
+	// through an inherited fd) still gets every byte, and the daemon still
+	// retains the tail, so no path is blinder than the other.
+	directed io.Writer
+	// parse states whether completed lines are classified and logged by the
+	// daemon. A caller that owns stderr owns its rendering too, so the daemon
+	// only retains evidence on that path.
+	parse bool
+
+	mu      sync.Mutex
+	pending []byte
+	bytes   int
+	lines   int
+}
+
+// Write retains the bytes and classifies every line they complete.
+//
+// It NEVER returns an error: a failed write would abandon the copy, and the
+// remaining stderr of a child that is failing is exactly what must not be
+// dropped. Every failure it absorbs is reported through the logger instead.
+func (s *stderrSink) Write(p []byte) (int, error) {
+	if s.directed != nil {
+		if _, err := s.directed.Write(p); err != nil {
+			s.logger.Log("shim: directed stderr write failed, the caller's stream is missing %d bytes: %v", len(p), err)
+		}
+	}
+	if _, err := s.tail.Write(p); err != nil {
+		s.logger.Log("shim: retaining stderr tail: %v", err)
+	}
+	s.mu.Lock()
+	s.bytes += len(p)
+	s.pending = append(s.pending, p...)
+	lines := s.takeCompleteLinesLocked()
+	s.mu.Unlock()
+	for _, line := range lines {
+		s.classify(line)
+	}
+	return len(p), nil
+}
+
+// takeCompleteLinesLocked splits every newline-terminated line out of pending.
+//
+// A line that outgrows maxEventLine without ever terminating is surrendered as
+// its own line rather than buffered forever: an unbounded pending buffer would
+// make a chatty child an unbounded daemon allocation, which is the same reason
+// the tail is capped. Retention CONTINUES past it — the scanner this replaced
+// abandoned the stream on an over-long token and lost everything said after.
+func (s *stderrSink) takeCompleteLinesLocked() []string {
+	var lines []string
+	for {
+		index := bytes.IndexByte(s.pending, '\n')
+		if index < 0 {
+			if len(s.pending) > maxEventLine {
+				s.logger.Log("shim: stderr line exceeded %d bytes with no newline; the bytes so far are reported as one malformed record and retention continues", maxEventLine)
+				lines = append(lines, string(s.pending))
+				s.pending = nil
+			}
+			return lines
+		}
+		lines = append(lines, strings.TrimSuffix(string(s.pending[:index]), "\r"))
+		s.pending = s.pending[index+1:]
+		s.lines++
+	}
+}
+
+// flush surrenders a trailing line the child never terminated.
+//
+// Its ONE caller is Wait, after the stream has ended, so there is no writer
+// left to append to it: a child that died mid-line is the case this exists for,
+// and half a line of a node stack trace is still the diagnosis.
+func (s *stderrSink) flush() {
+	s.mu.Lock()
+	trailing := string(s.pending)
+	s.pending = nil
+	s.mu.Unlock()
+	if trailing != "" {
+		s.classify(strings.TrimSuffix(trailing, "\r"))
+	}
+}
+
+// classify routes one completed stderr line to the channel its shape earns.
+func (s *stderrSink) classify(line string) {
+	if !s.parse || line == "" {
 		return
 	}
-	if p.lifecycle.closeOwner != stderrCloseOwnerUnclaimed {
-		p.logger.Log("shim: stderr close ownership invariant violated pid=%d pgid=%d committed_owner=%q requested_owner=%q close_expected=%t", p.lifecycle.pid, p.lifecycle.pgid, p.lifecycle.closeOwner, owner, p.lifecycle.closeExpected)
-		panic(fmt.Sprintf("shim: stderr close owner already committed as %q", p.lifecycle.closeOwner))
+	verbose, valid := shimRecord(line)
+	if !valid {
+		s.logger.Log("shim stderr malformed: %s", line)
+		return
 	}
-	p.lifecycle.closeOwner = owner
-	p.lifecycle.closeExpected = true
+	if mirror, ok := s.logger.(stderrMirror); ok {
+		mirror.MirrorShimRecord(line)
+		return
+	}
+	if verbose {
+		s.logger.LogVerbose("shim stderr: %s", line)
+		return
+	}
+	s.logger.Log("shim stderr: %s", line)
 }
 
-func (p *stderrPump) snapshot() stderrLifecycleSnapshot {
-	p.lifecycle.mu.Lock()
-	defer p.lifecycle.mu.Unlock()
-	return stderrLifecycleSnapshot{
-		pid:               p.lifecycle.pid,
-		pgid:              p.lifecycle.pgid,
-		shutdownInitiator: p.lifecycle.shutdownInitiator,
-		shutdownReason:    p.lifecycle.shutdownReason,
-		closeOwner:        p.lifecycle.closeOwner,
-		closeExpected:     p.lifecycle.closeExpected,
+// census reports what the sink retained, for the reap record.
+func (s *stderrSink) census() (bytesWritten, lines int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.bytes, s.lines
+}
+
+// stderrPump drains the child's stderr into the sink and publishes exactly one
+// terminal account of how that stream ended.
+//
+// THE PIPE IS THIS PACKAGE'S OWN, not cmd.StderrPipe's. os/exec's Wait closes
+// the pipes IT created the moment the child exits — os/exec documents that
+// reading them and calling Wait cannot be concurrent — so the evidence a dying
+// child left in the buffer was destroyed by the very reap that went looking for
+// it whenever this goroutine had not been scheduled yet. A failed spawn's tail
+// then came back EMPTY, which is the one case the tail exists to serve, and it
+// happened only under load, which is when it is needed most. Owning the read
+// end means nothing but this pump can end the stream.
+type stderrPump struct {
+	// reader is an io.ReadCloser rather than the *os.File it always is in
+	// production so a test can arrange a stream that fails mid-read, which no
+	// test can arrange against a real pipe.
+	reader io.ReadCloser
+	sink   *stderrSink
+	logger Logger
+	pid    int
+	pgid   int
+	done   chan struct{}
+
+	mu      sync.Mutex
+	copyErr error
+}
+
+func newStderrPump(reader io.ReadCloser, sink *stderrSink, logger Logger, pid, pgid int) *stderrPump {
+	return &stderrPump{reader: reader, sink: sink, logger: logger, pid: pid, pgid: pgid, done: make(chan struct{})}
+}
+
+// run copies the stream into the sink until it ends, or until finish takes the
+// stream over.
+func (p *stderrPump) run() {
+	defer close(p.done)
+	_, err := io.Copy(p.sink, p.reader)
+	p.mu.Lock()
+	p.copyErr = err
+	p.mu.Unlock()
+}
+
+// finish ends stderr retention for a child that has ALREADY BEEN REAPED, and
+// returns the account of how the stream ended.
+//
+// It waits for nothing and loses nothing, which are usually opposed and are not
+// here. Every byte the child itself wrote completed its write before the child
+// exited, so by the time Wait has reaped it those bytes are already in the pipe
+// and a read returns them without waiting. finish therefore takes the stream
+// over from the pump and drains what is THERE — not what may yet arrive — so a
+// descendant that inherited stderr and outlived its parent can neither cost the
+// reap a stall nor cost the tail the child's last words. Both used to be on
+// offer and neither is acceptable: os/exec's close raced the reader and lost
+// the words, and draining to EOF instead would wedge the reap behind whatever
+// is still holding the stream.
+func (p *stderrPump) finish() string {
+	file, isFile := p.reader.(*os.File)
+	if isFile {
+		// A deadline already past unblocks the pump's in-flight read at once,
+		// and unblocking it CONSUMES NOTHING: the deadline is checked before
+		// the read, so whatever is buffered is still buffered afterwards.
+		if err := file.SetReadDeadline(deadlineAlreadyPast); err != nil {
+			p.logger.Log("shim: releasing the stderr reader from its wait failed pid=%d pgid=%d: %v", p.pid, p.pgid, err)
+		}
+	}
+	<-p.done
+	outcome := p.account(file, isFile)
+	if err := p.reader.Close(); err != nil {
+		p.logger.Log("shim: closing the retained stderr stream failed pid=%d pgid=%d: %v", p.pid, p.pgid, err)
+	}
+	return outcome
+}
+
+// account classifies the ended stream, draining anything the pump was still
+// waiting on when finish took over.
+func (p *stderrPump) account(file *os.File, isFile bool) string {
+	p.mu.Lock()
+	copyErr := p.copyErr
+	p.mu.Unlock()
+	switch {
+	case copyErr == nil:
+		return stderrOutcomeComplete
+	case !isFile || !errors.Is(copyErr, os.ErrDeadlineExceeded):
+		p.logger.Log("shim: stderr read failed pid=%d pgid=%d: %v — the retained tail stops where the read stopped", p.pid, p.pgid, copyErr)
+		return stderrOutcomeReadFailed
+	}
+	eof, err := p.drainBuffered(file)
+	switch {
+	case err != nil:
+		p.logger.Log("shim: draining the reaped child's remaining stderr failed pid=%d pgid=%d: %v — the retained tail stops where the drain stopped", p.pid, p.pgid, err)
+		return stderrOutcomeReadFailed
+	case eof:
+		return stderrOutcomeComplete
+	default:
+		return stderrOutcomeHeldOpen
 	}
 }
 
-func (p *stderrPump) wait() { <-p.done }
+// drainBuffered reads everything the pipe HOLDS RIGHT NOW into the sink,
+// reporting whether the stream reached EOF.
+//
+// The read is issued against the raw descriptor, which os.Pipe leaves in
+// non-blocking mode, so "the buffer is empty" comes back as EAGAIN instead of a
+// wait. That is what makes the drain exact rather than timed: it stops at the
+// first read that would have to wait for a writer, and the only writer that
+// could still be there is one the reaped child left behind.
+func (p *stderrPump) drainBuffered(file *os.File) (bool, error) {
+	// The deadline that released the pump would refuse these reads too.
+	if err := file.SetReadDeadline(time.Time{}); err != nil {
+		return false, fmt.Errorf("clearing the stderr read deadline: %w", err)
+	}
+	raw, err := file.SyscallConn()
+	if err != nil {
+		return false, fmt.Errorf("taking the stderr descriptor: %w", err)
+	}
+	buffer := make([]byte, 32*1024)
+	for {
+		var read int
+		var readErr error
+		if err := raw.Read(func(fd uintptr) bool {
+			read, readErr = syscall.Read(int(fd), buffer)
+			return true // never wait for readiness: this drain is what is THERE
+		}); err != nil {
+			return false, fmt.Errorf("reading the stderr descriptor: %w", err)
+		}
+		switch {
+		case read > 0:
+			if _, err := p.sink.Write(buffer[:read]); err != nil {
+				return false, fmt.Errorf("retaining drained stderr: %w", err)
+			}
+		case readErr == nil:
+			return true, nil // a zero-length read with no error is EOF
+		case errors.Is(readErr, syscall.EINTR):
+		case errors.Is(readErr, syscall.EAGAIN):
+			return false, nil
+		default:
+			return false, fmt.Errorf("reading the stderr descriptor: %w", readErr)
+		}
+	}
+}
 
 // Pid is the shim process's pid.
 func (p *Proc) Pid() int { return p.pid }
@@ -397,42 +604,60 @@ func Spawn(opts Options) (*Proc, error) {
 		return nil, fmt.Errorf("shim: stdout pipe: %w", err)
 	}
 	tail := &stderrTail{}
-	var stderr io.ReadCloser
-	if opts.Stderr != nil {
-		// Teed rather than replaced: the caller's writer keeps receiving the
-		// unparsed stream exactly as before, and the tail gains the same bytes
-		// so this path is no blinder than the parsed one.
-		cmd.Stderr = io.MultiWriter(opts.Stderr, tail)
-	} else {
-		stderr, err = cmd.StderrPipe()
-		if err != nil {
-			return nil, fmt.Errorf("shim: stderr pipe: %w", err)
-		}
+	// ONE STDERR PATH, whether or not the caller owns the stream. The two used
+	// to be plumbed separately — a pipe the daemon scanned, or a MultiWriter
+	// os/exec drove — and only one of them retained a tail the reap could not
+	// truncate. Both now run through the same owned pipe and the same sink.
+	stderrReader, stderrWriter, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("shim: stderr pipe: %w", err)
 	}
+	sink := &stderrSink{logger: logger, tail: tail, directed: opts.Stderr, parse: opts.Stderr == nil}
+	cmd.Stderr = stderrWriter
 	if err := cmd.Start(); err != nil {
+		closeStderrPipe(logger, stderrReader, stderrWriter)
 		return nil, fmt.Errorf("shim: start %q: %w", opts.Argv[0], err)
+	}
+	// The parent's copy of the WRITE end goes now that the child holds its own:
+	// the stream reaches EOF when its last holder closes it, and a copy this
+	// process kept would mean the pump never saw the child's exit at all.
+	if err := stderrWriter.Close(); err != nil {
+		logger.Log("shim: releasing the parent's stderr write end failed pid=%d: %v — the retained stderr stream will not reach EOF on its own", cmd.Process.Pid, err)
 	}
 
 	pid := cmd.Process.Pid
 	pgid := reportProcessGroup(pid, logger, syscall.Getpgid)
 
 	p := &Proc{
-		cmd:     cmd,
-		stdin:   stdin,
-		events:  make(chan *protocol.L1Event, 64),
-		logger:  logger,
-		stderr:  tail,
-		pid:     pid,
-		pgid:    pgid,
-		stdinOK: true,
+		cmd:        cmd,
+		stdin:      stdin,
+		events:     make(chan *protocol.L1Event, 64),
+		logger:     logger,
+		stderr:     tail,
+		sink:       sink,
+		stderrPump: newStderrPump(stderrReader, sink, logger, pid, pgid),
+		pid:        pid,
+		pgid:       pgid,
+		shutdown:   newShutdownAttribution(),
+		stdinOK:    true,
 	}
+	logger.LogLifecycle("shim: stderr retention started pid=%d pgid=%d parsed=%t directed=%t", pid, pgid, sink.parse, opts.Stderr != nil)
 
 	go p.pumpStdout(stdout, logger)
-	if stderr != nil {
-		p.stderrPump = newStderrPump(stderr, logger, tail, pid, pgid, true)
-		go p.stderrPump.run()
-	}
+	go p.stderrPump.run()
 	return p, nil
+}
+
+// closeStderrPipe releases both ends of a stderr pipe whose child never
+// started. Each failure is reported: a leaked descriptor is a daemon that runs
+// out of them later, far from the spawn that lost them.
+func closeStderrPipe(logger Logger, reader, writer *os.File) {
+	if err := reader.Close(); err != nil {
+		logger.Log("shim: closing the stderr read end of an unstarted child failed: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		logger.Log("shim: closing the stderr write end of an unstarted child failed: %v", err)
+	}
 }
 
 func (p *Proc) pumpStdout(stdout io.Reader, logger Logger) {
@@ -464,61 +689,6 @@ func (p *Proc) pumpStdout(stdout io.Reader, logger Logger) {
 	if err := scanner.Err(); err != nil {
 		logger.Log("shim: stdout scan error: %v", err)
 	}
-}
-
-func (p *stderrPump) run() {
-	defer close(p.done)
-	if p.logLifecycle {
-		lifecycle := p.snapshot()
-		p.logger.LogLifecycle("shim: stderr scanner started pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q close_owner=%q", lifecycle.pid, lifecycle.pgid, lifecycle.shutdownInitiator, lifecycle.shutdownReason, lifecycle.closeOwner)
-	}
-	scanner := bufio.NewScanner(p.reader)
-	scanner.Buffer(make([]byte, 64*1024), maxEventLine)
-	for scanner.Scan() {
-		line := scanner.Text()
-		// Retained BEFORE classification: a line that fails the shim's record
-		// shape — a node stack trace, a loader error — is exactly the evidence
-		// a spawn failure needs, so the tail must not be limited to the lines
-		// the daemon can parse.
-		if _, err := p.tail.Write([]byte(line + "\n")); err != nil {
-			p.logger.Log("shim: retaining stderr tail: %v", err)
-		}
-		verbose, valid := shimRecord(line)
-		if valid {
-			if mirror, ok := p.logger.(stderrMirror); ok {
-				mirror.MirrorShimRecord(line)
-			} else if verbose {
-				p.logger.LogVerbose("shim stderr: %s", line)
-			} else {
-				p.logger.Log("shim stderr: %s", line)
-			}
-			continue
-		}
-		p.logger.Log("shim stderr malformed: %s", line)
-	}
-	readErr := scanner.Err()
-	lifecycle := p.snapshot()
-	expectedClose := readErr != nil && lifecycle.closeExpected && lifecycle.closeOwner == stderrCloseOwnerProcWait && errors.Is(readErr, os.ErrClosed)
-	outcome := stderrOutcomeCleanEOF
-	if expectedClose {
-		outcome = stderrOutcomeExpectedReaderClose
-	} else if readErr != nil {
-		outcome = stderrOutcomeScannerError
-	}
-	if readErr != nil && !expectedClose {
-		p.logger.Log("shim: stderr scan error: %v [pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q close_owner=%q close_expected=%t]", readErr, lifecycle.pid, lifecycle.pgid, lifecycle.shutdownInitiator, lifecycle.shutdownReason, lifecycle.closeOwner, lifecycle.closeExpected)
-	}
-	if p.logLifecycle {
-		p.logger.LogLifecycle("shim: stderr scanner completed pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q close_owner=%q close_expected=%t outcome=%s expected_close=%t", lifecycle.pid, lifecycle.pgid, lifecycle.shutdownInitiator, lifecycle.shutdownReason, lifecycle.closeOwner, lifecycle.closeExpected, outcome, expectedClose)
-	}
-}
-
-// pumpStderr is retained for focused scanner tests.  A caller that invokes the
-// pump directly owns no child lifecycle, so every scanner failure is reported
-// as unexpected.
-func pumpStderr(stderr io.Reader, logger Logger, tail *stderrTail) {
-	pump := newStderrPump(io.NopCloser(stderr), logger, tail, 0, 0, false)
-	pump.run()
 }
 
 // shimVerboseRecord recognizes only the shim runtime's stable, field-shaped
@@ -618,21 +788,15 @@ func (p *Proc) Terminate(by Stop) error {
 	return p.signal(by, "terminate", func() error { return p.cmd.Process.Signal(syscall.SIGTERM) })
 }
 
-// signal commits lifecycle attribution only after its system call succeeds.
-// Holding the pump lifecycle mutex through the call makes an early scanner
-// completion structurally unable to observe a shutdown that never happened.
+// signal commits shutdown attribution only after its system call succeeds.
+// Holding the attribution mutex through the call makes a reap that lands first
+// structurally unable to report a shutdown that never happened.
 func (p *Proc) signal(by Stop, verb string, send func() error) error {
 	if err := by.Validate(); err != nil {
 		p.logger.Log("shim: shutdown attribution invalid verb=%s pid=%d pgid=%d initiator=%q reason=%q error=%v", verb, p.pid, p.pgid, by.Initiator, by.Reason, err)
 		return fmt.Errorf("shim: refusing to %s pid %d: %w", verb, p.pid, err)
 	}
-	var err error
-	if p.stderrPump != nil {
-		err = p.stderrPump.signal(by, send)
-	} else {
-		err = send()
-	}
-	if err != nil {
+	if err := p.shutdown.commit(by, send); err != nil {
 		p.logger.Log("shim: shutdown signal failed verb=%s pid=%d pgid=%d initiator=%q reason=%q error=%v", verb, p.pid, p.pgid, by.Initiator, by.Reason, err)
 		return fmt.Errorf("shim: %s pid %d (initiator=%s reason=%s): %w", verb, p.pid, by.Initiator, by.Reason, err)
 	}
@@ -640,24 +804,35 @@ func (p *Proc) signal(by Stop, verb string, send func() error) error {
 	return nil
 }
 
-// Wait makes os/exec the sole stderr reader closer, then waits for the scanner
-// to classify that close before returning the child's exit status.
+// Wait reaps the child and returns its exit status, with the guarantee that
+// every byte it wrote to stderr is in the tail by the time this returns.
+//
+// The guarantee is structural rather than probable. The stderr stream is this
+// package's own pipe, so nothing else can close it; the child's exit closes the
+// last write end it holds; and every byte it wrote completed its write before
+// it exited, so those bytes are in the pipe by the time it is reaped. The
+// daemon used to race its own reap for that evidence — os/exec closed the pipe
+// it had created as soon as the child exited — and lost the race exactly when
+// the machine was loaded enough to schedule the reader late, which is when a
+// spawn failure most needs its stderr.
 func (p *Proc) Wait() error {
-	if p.stderrPump != nil {
-		p.stderrPump.expectClose(stderrCloseOwnerProcWait)
-		lifecycle := p.stderrPump.snapshot()
-		p.logger.Log("shim: stderr lifecycle reaping pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q close_owner=%q close_expected=%t", lifecycle.pid, lifecycle.pgid, lifecycle.shutdownInitiator, lifecycle.shutdownReason, lifecycle.closeOwner, lifecycle.closeExpected)
-	}
 	waitErr := p.cmd.Wait()
-	closeOwner := stderrCloseOwnerCaller
+	outcome := stderrOutcomeComplete
 	if p.stderrPump != nil {
-		p.stderrPump.wait()
-		lifecycle := p.stderrPump.snapshot()
-		closeOwner = lifecycle.closeOwner
-		p.logger.Log("shim: child reaped pid=%d pgid=%d exit=%q shutdown_initiator=%q shutdown_reason=%q close_owner=%q", lifecycle.pid, lifecycle.pgid, ExitDescription(waitErr), lifecycle.shutdownInitiator, lifecycle.shutdownReason, closeOwner)
-	} else {
-		p.logger.Log("shim: child reaped pid=%d pgid=%d exit=%q shutdown_initiator=%q shutdown_reason=%q close_owner=%q", p.pid, p.pgid, ExitDescription(waitErr), "child_exit", "no deliberate stop requested", closeOwner)
+		outcome = p.stderrPump.finish()
 	}
+	initiator, reason := p.shutdown.snapshot()
+	if outcome == stderrOutcomeHeldOpen {
+		p.logger.Log("shim: stderr stream STILL HELD at the reap pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q — everything this child wrote is retained, but something that inherited its stderr outlived it, so nothing written from here on is", p.pid, p.pgid, initiator, reason)
+	}
+	// No writer is left once the stream has ended, so a line the child died in
+	// the middle of is surrendered here rather than discarded with the sink.
+	stderrBytes, stderrLines := 0, 0
+	if p.sink != nil {
+		p.sink.flush()
+		stderrBytes, stderrLines = p.sink.census()
+	}
+	p.logger.Log("shim: child reaped pid=%d pgid=%d exit=%q shutdown_initiator=%q shutdown_reason=%q stderr_outcome=%s stderr_bytes=%d stderr_lines=%d", p.pid, p.pgid, ExitDescription(waitErr), initiator, reason, outcome, stderrBytes, stderrLines)
 	return waitErr
 }
 

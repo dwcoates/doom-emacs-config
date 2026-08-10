@@ -2011,15 +2011,13 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	hostWork := p.workspaceCreation.SnapshotHostWork()
 	snap.WorkspaceAvailable = hostWork.WorkspaceAvailable
 	snap.HostActions = hostWork.HostActions
-	if p.logf != nil {
-		taskCount := 0
-		for _, catalog := range snap.GetCatalogs() {
-			taskCount += len(catalog.GetTasks())
-		}
-		p.logf("frontend: connect snapshot workspaces=%d sessions=%d catalogs=%d tasks=%d async_bubbles=%d inits=%d queues=%d progress=%d workspace_available=%d host_actions=%d daemon=%t",
-			len(snap.GetWorkspaces()), len(snap.GetSessions()), len(snap.GetCatalogs()), taskCount, len(snap.GetAsyncBubbles()),
-			len(snap.GetInits()), len(snap.GetQueues()), len(snap.GetProgress()), len(snap.GetWorkspaceAvailable()), len(snap.GetHostActions()), snap.GetDaemon() != nil)
-	}
+	// THE CENSUS OF THIS SNAPSHOT IS LOGGED BY ITS CALLER, not here. This
+	// provider is handed no client and cannot name one, and the line it used to
+	// write said "connect snapshot" for every assembly whatever asked for it —
+	// so 5350 of them were read as 5350 reconnects when 5250 were GUI
+	// snapshot-lease renewals and only 95 were connects. Attribution is the
+	// whole value of the record, and the only place that has it is the
+	// transport (frontend.logSnapshotCensus).
 	return snap
 }
 
