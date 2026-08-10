@@ -15,6 +15,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
+	"claude-repld/internal/session"
 	workspacecreate "claude-repld/internal/workspace/create"
 )
 
@@ -576,5 +577,118 @@ func TestToProtoActionMapsTheBootSweepVerdict(t *testing.T) {
 	}
 	if unwired.GetReason() != "its agent process is gone (boot-sweep verdict boot_sweep_no_live_shim)" {
 		t.Fatalf("verdict reason = %q, want the sweep's sentence verbatim", unwired.GetReason())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A create with NO source session still has an account, and it is the one its
+// worktree's path names. Inheritance was the only rule that existed here, so a
+// one-shot pinned to a repo — which nominates no source workspace — fell
+// through with an empty ConfigDir and ran under the CLI default. For a repo
+// under $MULTI_REPO_ROOT that meant a workspace running under a different
+// account than the repo it was cut from.
+// ---------------------------------------------------------------------------
+
+func TestSourcelessCreateTakesTheAccountItsWorktreePathNames(t *testing.T) {
+	// Arrange
+	home := t.TempDir()
+	multiRoot := filepath.Join(home, "workspace", "ChessCom")
+	multiConfig := filepath.Join(home, ".claude-chesscom")
+	t.Setenv(session.MultiRepoRootEnv, multiRoot)
+	t.Setenv(session.MultiRepoConfigDirEnv, multiConfig)
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
+	creator := daemonSessionCreator{Registry: reg, Logf: func(string, ...any) {}}
+	job := workspacecreate.Job{
+		ID:           "oneshot",
+		WorktreePath: filepath.Join(multiRoot, "explanation-engine-worktrees", "slack-thread-pr-link"),
+		Request:      workspacecreate.Request{Name: "DWC/slack-thread-pr-link", GitRoot: filepath.Join(multiRoot, "explanation-engine")},
+	}
+
+	// Act
+	request, err := creator.ResolveSessionMetadata(context.Background(), job)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ResolveSessionMetadata: %v", err)
+	}
+	if request.ConfigDir != multiConfig {
+		t.Fatalf("ConfigDir = %q, want the multi-repo account %q", request.ConfigDir, multiConfig)
+	}
+}
+
+func TestSourcelessCreateOutsideTheMultiRepoRootKeepsTheDefaultAccount(t *testing.T) {
+	// Arrange — the doom repo, whose account IS the CLI default. The empty
+	// spelling is load-bearing: it is how every record spells that account.
+	home := t.TempDir()
+	t.Setenv(session.MultiRepoRootEnv, filepath.Join(home, "workspace", "ChessCom"))
+	t.Setenv(session.MultiRepoConfigDirEnv, filepath.Join(home, ".claude-chesscom"))
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
+	creator := daemonSessionCreator{Registry: reg, Logf: func(string, ...any) {}}
+	job := workspacecreate.Job{
+		ID:           "oneshot",
+		WorktreePath: filepath.Join(home, ".config", "doom-worktrees", "some-branch"),
+		Request:      workspacecreate.Request{Name: "some-branch", GitRoot: filepath.Join(home, ".config", "doom")},
+	}
+
+	// Act
+	request, err := creator.ResolveSessionMetadata(context.Background(), job)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ResolveSessionMetadata: %v", err)
+	}
+	if request.ConfigDir != "" {
+		t.Fatalf("ConfigDir = %q, want the CLI default spelled empty", request.ConfigDir)
+	}
+}
+
+func TestSourcelessCreateKeepsAnAccountTheRequestNamed(t *testing.T) {
+	// Arrange — a caller that named the account deliberately. Overriding it
+	// from the path would make the command's own field advisory.
+	home := t.TempDir()
+	multiRoot := filepath.Join(home, "workspace", "ChessCom")
+	t.Setenv(session.MultiRepoRootEnv, multiRoot)
+	t.Setenv(session.MultiRepoConfigDirEnv, filepath.Join(home, ".claude-chesscom"))
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
+	creator := daemonSessionCreator{Registry: reg, Logf: func(string, ...any) {}}
+	job := workspacecreate.Job{
+		ID:           "named",
+		WorktreePath: filepath.Join(multiRoot, "explanation-engine-worktrees", "x"),
+		Request:      workspacecreate.Request{Name: "x", ConfigDir: "/named-by-the-caller"},
+	}
+
+	// Act
+	request, err := creator.ResolveSessionMetadata(context.Background(), job)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ResolveSessionMetadata: %v", err)
+	}
+	if request.ConfigDir != "/named-by-the-caller" {
+		t.Fatalf("ConfigDir = %q, want the request's own account", request.ConfigDir)
+	}
+}
+
+func TestSourcelessCreateFallsBackToTheGitRootBeforeItsWorktreeExists(t *testing.T) {
+	// Arrange — the account must resolve even when asked before the worktree
+	// path is planned, so the repo the workspace is cut from answers.
+	home := t.TempDir()
+	multiRoot := filepath.Join(home, "workspace", "ChessCom")
+	multiConfig := filepath.Join(home, ".claude-chesscom")
+	t.Setenv(session.MultiRepoRootEnv, multiRoot)
+	t.Setenv(session.MultiRepoConfigDirEnv, multiConfig)
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
+	creator := daemonSessionCreator{Registry: reg, Logf: func(string, ...any) {}}
+	job := workspacecreate.Job{ID: "early", Request: workspacecreate.Request{Name: "x", GitRoot: filepath.Join(multiRoot, "explanation-engine")}}
+
+	// Act
+	request, err := creator.ResolveSessionMetadata(context.Background(), job)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ResolveSessionMetadata: %v", err)
+	}
+	if request.ConfigDir != multiConfig {
+		t.Fatalf("ConfigDir = %q, want the multi-repo account %q", request.ConfigDir, multiConfig)
 	}
 }
