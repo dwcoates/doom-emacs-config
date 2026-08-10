@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { writeSync } from "node:fs";
 import { create } from "@bufbuild/protobuf";
 import { SessionServer, SessionServerHandlers, Receipt } from "../src/uds/server.js";
+import type { AsyncReceipt } from "../src/uds/server.js";
 import type { SessionServerOptions } from "../src/uds/server.js";
 import {
   AckSchema,
+  CancelDetachedAgentsSchema,
   DaemonHelloSchema,
   EventClass,
   EventSchema,
@@ -24,6 +26,7 @@ import {
   SubmitPromptSchema,
 } from "../src/uds/proto.js";
 import type {
+  CancelDetachedAgents,
   DaemonHello,
   Interrupt,
   PermissionResponse,
@@ -35,6 +38,7 @@ import { FramedPeer, acceptShim, tmpSocketPath, until } from "./uds-harness.js";
 interface Calls {
   prompts: SubmitPrompt[];
   interrupts: Interrupt[];
+  cancelDetached: CancelDetachedAgents[];
   perms: PermissionResponse[];
   /** Every DaemonHello the bring-up gate handed to onDaemonConnected. */
   hellos: DaemonHello[];
@@ -52,7 +56,7 @@ function harness(
   calls: Calls;
 } {
   const socketPath = tmpSocketPath();
-  const calls: Calls = { prompts: [], interrupts: [], perms: [], hellos: [], replays: [], connected: 0, disconnected: 0 };
+  const calls: Calls = { prompts: [], interrupts: [], cancelDetached: [], perms: [], hellos: [], replays: [], connected: 0, disconnected: 0 };
   const handlers: SessionServerHandlers = {
     onSubmitPrompt: (m): Receipt => {
       calls.prompts.push(m);
@@ -60,6 +64,10 @@ function harness(
     },
     onInterrupt: (m): Receipt => {
       calls.interrupts.push(m);
+      return create(AckSchema, { requestId: m.requestId });
+    },
+    onCancelDetachedAgents: (m): AsyncReceipt => {
+      calls.cancelDetached.push(m);
       return create(AckSchema, { requestId: m.requestId });
     },
     onSetModel: async (m) => create(AckSchema, { requestId: m.requestId, selectedModel: m.model }),
@@ -614,6 +622,7 @@ describe("SessionServer vendor session rotation bounce", () => {
       {
         onSubmitPrompt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onInterrupt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
+        onCancelDetachedAgents: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onSetModel: async (m) => create(AckSchema, { requestId: m.requestId, selectedModel: m.model }),
         onQuerySelectedModel: (m) => create(AckSchema, { requestId: m.requestId, selectedModel: "claude-sonnet-5" }),
         onPermissionResponse: () => {},
