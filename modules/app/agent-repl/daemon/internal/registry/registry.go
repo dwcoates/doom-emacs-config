@@ -474,17 +474,26 @@ type maintenanceStats struct {
 // before serving; any load, maintenance or write error is returned so startup
 // fails loudly.
 func (r *Registry) Prepare() error {
-	stats, err := r.mutate(func(*registryState) error { return nil })
+	// Workspace keys written before ingress canonicalization existed are
+	// rewritten or retired in THIS transaction (phantomkey.go), so a boot
+	// either serves a consolidated registry or fails loudly having changed
+	// nothing. Decisions are logged only after the commit.
+	var (
+		decisions []phantomDecision
+		summary   consolidationSummary
+	)
+	stats, err := r.mutate(func(state *registryState) error {
+		decisions, summary = r.consolidatePhantomWorkspaceKeys(state)
+		return nil
+	})
 	if err != nil {
 		r.logf("registry: prepare FAILED: %v", err)
 		return err
 	}
+	r.logPhantomConsolidation(decisions, summary)
 	r.logf("registry: prepared schema=%d checkpoints_created=%d records_hydrated=%d terminal_pruned=%d live=%d terminal_retained=%d",
 		schemaVersion, stats.checkpointsCreated, stats.recordsHydrated,
 		stats.terminalPruned, r.liveCount(), r.terminalCount())
-	// One-time boot report of workspace keys written before ingress
-	// canonicalization existed (phantomkey.go).
-	r.reportPhantomWorkspaceKeys()
 	return nil
 }
 
