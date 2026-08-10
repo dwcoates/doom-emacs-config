@@ -47,6 +47,11 @@ type fakeReceiptStore struct {
 	resumptionRecordErr error
 	// resumptionsErr fails every resumption read.
 	resumptionsErr error
+	// resumptionClaimErr fails every ClaimResumptionForDelivery — the store
+	// that cannot durably record which re-drive took a turn.
+	resumptionClaimErr error
+	// resumptionDischargeErr fails every DischargeResumption.
+	resumptionDischargeErr error
 }
 
 func newFakeReceiptStore() *fakeReceiptStore { return &fakeReceiptStore{} }
@@ -126,8 +131,15 @@ func (f *fakeReceiptStore) RecordPendingResumption(r statedb.PendingResumption) 
 	if f.resumptionRecordErr != nil {
 		return f.resumptionRecordErr
 	}
+	r.State = statedb.ResumptionPending
 	for i := range f.resumptions {
 		if f.resumptions[i].RequestID == r.RequestID {
+			// A CLAIMED ROW IS NEVER UN-CLAIMED, exactly as the real store's
+			// conflict update refuses to: handing a claimed re-drive back as
+			// owed is the duplicate the claim exists to prevent.
+			if f.resumptions[i].State == statedb.ResumptionDelivering {
+				return nil
+			}
 			f.resumptions[i] = r
 			return nil
 		}
@@ -137,24 +149,59 @@ func (f *fakeReceiptStore) RecordPendingResumption(r statedb.PendingResumption) 
 }
 
 func (f *fakeReceiptStore) PendingResumptions(workspace string) ([]statedb.PendingResumption, error) {
+	return f.resumptionsInStates(workspace, statedb.ResumptionPending)
+}
+
+func (f *fakeReceiptStore) UndischargedResumptions(workspace string) ([]statedb.PendingResumption, error) {
+	return f.resumptionsInStates(workspace, statedb.ResumptionPending, statedb.ResumptionDelivering)
+}
+
+func (f *fakeReceiptStore) resumptionsInStates(workspace string, states ...statedb.PromptReceiptResumption) ([]statedb.PendingResumption, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.resumptionsErr != nil {
 		return nil, f.resumptionsErr
 	}
+	wanted := map[statedb.PromptReceiptResumption]bool{}
+	for _, st := range states {
+		wanted[st] = true
+	}
 	var out []statedb.PendingResumption
 	for _, r := range f.resumptions {
-		if r.Workspace == workspace {
+		if r.Workspace == workspace && wanted[r.State] {
 			out = append(out, r)
 		}
 	}
 	return out, nil
 }
 
+// ClaimResumptionForDelivery mirrors the real store's conditional update: only
+// a still-pending row can be taken, and it can be taken once.
+func (f *fakeReceiptStore) ClaimResumptionForDelivery(requestID string, atMs int64) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "claim-resumption:"+requestID)
+	if f.resumptionClaimErr != nil {
+		return false, f.resumptionClaimErr
+	}
+	for i := range f.resumptions {
+		if f.resumptions[i].RequestID != requestID || f.resumptions[i].State != statedb.ResumptionPending {
+			continue
+		}
+		f.resumptions[i].State = statedb.ResumptionDelivering
+		f.resumptions[i].DeliveryStartedAtMs = atMs
+		return true, nil
+	}
+	return false, nil
+}
+
 func (f *fakeReceiptStore) DischargeResumption(requestID string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "discharge-resumption:"+requestID)
+	if f.resumptionDischargeErr != nil {
+		return false, f.resumptionDischargeErr
+	}
 	for i := range f.resumptions {
 		if f.resumptions[i].RequestID == requestID {
 			f.resumptions = append(f.resumptions[:i], f.resumptions[i+1:]...)

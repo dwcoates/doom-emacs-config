@@ -747,6 +747,12 @@ func (c *countingReceipts) RecordPendingResumption(statedb.PendingResumption) er
 func (c *countingReceipts) PendingResumptions(string) ([]statedb.PendingResumption, error) {
 	return nil, nil
 }
+func (c *countingReceipts) UndischargedResumptions(string) ([]statedb.PendingResumption, error) {
+	return nil, nil
+}
+func (c *countingReceipts) ClaimResumptionForDelivery(string, int64) (bool, error) {
+	return false, nil
+}
 func (c *countingReceipts) DischargeResumption(string) (bool, error)   { return false, nil }
 func (c *countingReceipts) RetireWorkspace(string, int64) (int, error) { return 0, nil }
 func (c *countingReceipts) Outstanding(string) ([]statedb.PromptReceipt, error) {
