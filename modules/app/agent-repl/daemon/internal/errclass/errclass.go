@@ -175,6 +175,13 @@ const (
 	// the ping permanent context. The prompt is still cancellable, and it is
 	// delivered on its own the moment the ping ends.
 	TypeQueueEntryKeepAliveHeld Type = "queue.entry_keep_alive_held"
+	// TypeQueueEntryUninterruptibleTurn — a force aimed at a prompt queued
+	// behind a CONTEXT CUT (`/compact` or `/clear`). A force's mechanism is an
+	// interrupt, and interrupting a cut spends the whole-conversation read (or
+	// throws away the clear) to arrive back where it started, so the refusal is
+	// the honest answer rather than a hedge. The prompt is still cancellable
+	// and is delivered on its own the moment the cut's turn ends.
+	TypeQueueEntryUninterruptibleTurn Type = "queue.entry_uninterruptible_turn"
 	// TypeSessionHibernated — a prompt refused because the session is asleep
 	// and the user has not chosen a revival mode. It is the revival gate's
 	// name, and it is a NAMED refusal rather than an internal fault precisely
@@ -336,6 +343,7 @@ var prose = map[Type]string{
 	TypeInterruptUndelivered:           "the stop could not be delivered",
 	TypeQueueEntrySessionUnwired:       "the queued prompt's session is not attached to this daemon, so it cannot be run yet",
 	TypeQueueEntryKeepAliveHeld:        "the queued prompt is waiting for a cache keep-alive response and cannot be forced ahead of it",
+	TypeQueueEntryUninterruptibleTurn:  "the queued prompt is waiting behind a context cut, which is never interrupted, so it cannot be forced ahead of it",
 	TypeSessionHibernated:              "the session is hibernated; choose how to revive it before sending prompts",
 	TypeKeepAliveWindowUnclosed:        "a cache keep-alive window could not be closed, so new conversation is being withheld until it is repaired",
 	TypeKeepAliveWindowInverted:        "a cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation",
@@ -431,6 +439,11 @@ var (
 	// ordinary refusal that reached a human as internal.unclassified would be
 	// logged twice under a name that says nothing about it.
 	ErrQueueEntryKeepAliveHeld = errors.New("session-controller: the queued prompt is held behind an in-flight cache keep-alive turn")
+	// ErrQueueEntryUninterruptibleTurn anchors the force refusal for a prompt
+	// queued behind a context cut. Same argument as the sentinel above: an
+	// ordinary, expected refusal that reached a human as internal.unclassified
+	// would be logged twice under a name that says nothing about it.
+	ErrQueueEntryUninterruptibleTurn = errors.New("session-controller: the queued prompt is waiting behind a context cut, which is never interrupted")
 	// ErrSessionHibernated anchors the revival gate's refusal, so a client can
 	// render the revival choice from a NAMED failure rather than parsing text.
 	ErrSessionHibernated = errors.New("session-controller: the session is hibernated")
@@ -480,6 +493,7 @@ var sentinelTypes = []struct {
 	{ErrInterruptUndelivered, TypeInterruptUndelivered},
 	{ErrQueueEntrySessionUnwired, TypeQueueEntrySessionUnwired},
 	{ErrQueueEntryKeepAliveHeld, TypeQueueEntryKeepAliveHeld},
+	{ErrQueueEntryUninterruptibleTurn, TypeQueueEntryUninterruptibleTurn},
 	{ErrSessionHibernated, TypeSessionHibernated},
 	{ErrClientLogIdentityStale, TypeClientLogIdentityStale},
 	// The one sentinel this ladder does not own: it is ssm's, because only the
@@ -921,6 +935,7 @@ func AllTypes() []Type {
 		TypeInterruptUndelivered,
 		TypeQueueEntrySessionUnwired,
 		TypeQueueEntryKeepAliveHeld,
+		TypeQueueEntryUninterruptibleTurn,
 		TypeSessionHibernated,
 		TypeKeepAliveWindowUnclosed,
 		TypeKeepAliveWindowInverted,

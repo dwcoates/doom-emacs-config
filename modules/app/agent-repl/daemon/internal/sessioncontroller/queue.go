@@ -154,6 +154,24 @@ type queueEntry struct {
 	// the turn the lease is waiting on, which is the user bringing the refresh
 	// forward rather than defeating it.
 	buildRefreshHoldSessionID string
+
+	// uninterruptibleCommand names the CONTEXT CUT running in front of this
+	// entry — `/compact` or `/clear` — and is UNSPECIFIED for every other
+	// entry. It is set exactly where VerdictUninterruptibleTurn is stamped, and
+	// the two are one fact: the command is the account of why no classifier ran
+	// (uninterruptibleturn.go).
+	//
+	// IT IS NOT A HOLD, deliberately. The entry is held by the running turn like
+	// any ordinary queued prompt and is delivered by the ordinary turn-end
+	// drain; making it a hold would put it behind `held()`, which is what every
+	// delivery path asks before submitting, and the entry would never go.
+	uninterruptibleCommand frontendv1.SessionCommand
+}
+
+// uninterruptible reports whether the turn in front of this entry was a context
+// cut when the entry's verdict was stamped, so a force must not interrupt it.
+func (e *queueEntry) uninterruptible() bool {
+	return e.uninterruptibleCommand != frontendv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED
 }
 
 // drainHeld reports whether a scheduled shutdown's lease is parking this entry.
@@ -441,9 +459,9 @@ func (q *promptQueue) view(workspace, fence string) *frontendv1.QueueView {
 		}
 		// The entry holds ONE free-text account, which the wire files under the
 		// field its verdict owns: a rationale on interject/hold, a detail on
-		// error. Passing it for both is what keeps the daemon from carrying two
-		// strings that can disagree about the same thing.
-		setClassification(entry, e.classification, e.rationale, e.rationale, e.accepted)
+		// error. Reading it off the entry is what keeps the daemon from carrying
+		// two strings that can disagree about the same thing.
+		setClassification(entry, e)
 		if e.drainHeld() {
 			entry.Hold = &frontendv1.QueueEntry_Shutdown{
 				Shutdown: &frontendv1.QueueEntryShutdownHold{ScheduleId: e.shutdownHoldScheduleID},
@@ -698,6 +716,16 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 		promptOrigin:   promptOrigin,
 		queuedAtMs:     m.now(),
 		classification: VerdictPending,
+	}
+	// A PROMPT QUEUED BEHIND A CONTEXT CUT IS STAMPED, NOT CLASSIFIED. The turn
+	// in front of it is `/compact` or `/clear`, and the only verdict that could
+	// change anything — INTERJECT — would interrupt the cut: paying for a
+	// whole-conversation read that lands no summary, or racing a clear that is
+	// already over (uninterruptibleturn.go). The entry keeps its place in the
+	// queue and is delivered by the ordinary turn-end drain, so this decides WHO
+	// judged it rather than WHEN it runs.
+	if command, cut := uninterruptibleRunningCommand(d); cut {
+		stampUninterruptible(e, command)
 	}
 	if d.paused {
 		d.queue.addHeadJump(e)
@@ -1120,6 +1148,22 @@ func (m *Manager) classify(d *sessionController, entryID, runningPrompt, queuedP
 		m.logf("session-controller: queue verdict for a gone entry=%s session=%s (moot)", entryID, d.sessionID)
 		return
 	}
+	// A CONTEXT CUT CAN HAVE STARTED WHILE THE CLASSIFIER RAN, and the verdict
+	// in hand was formed against the turn it replaced. A warm compaction and a
+	// revival's `/compact` are both submitted at a turn boundary, so the window
+	// is real rather than theoretical — and an INTERJECT applied here would
+	// interrupt the compaction on the strength of an answer about a turn that
+	// has already ended. The verdict is DISCARDED for the stamp the entry would
+	// have been given had the cut been running when it was queued.
+	if command, cut := uninterruptibleRunningCommand(d); cut {
+		stampUninterruptible(e, command)
+		view, recs := m.publishQueueLocked(d)
+		m.mu.Unlock()
+		m.logf("session-controller: queue verdict DISCARDED entry=%s session=%s command=%s — %s started while the classifier ran, and a context cut is never interrupted for a queued prompt; the entry is delivered when that turn ends",
+			entryID, d.sessionID, command.String(), sessionCommandLiteral(command))
+		m.publish(d.sessionID, view, recs)
+		return
+	}
 	if err != nil {
 		// NEVER silently defaulted to a real verdict: a frontend has to be able
 		// to see that nothing decided this. The entry stays queued and the
@@ -1236,6 +1280,22 @@ func (m *Manager) beginInterject(d *sessionController, entryID, source string) {
 			m.publish(d.sessionID, view2, recs2)
 			go m.deliver(d, taken)
 		}
+		return
+	}
+	// THE ONE PLACE AN INTERRUPT IS SENT ON A QUEUED PROMPT'S BEHALF, so it is
+	// the one place a context cut has to be protected from every caller at
+	// once. The classifier is skipped and a force is refused before either
+	// reaches here, and this is neither of those checks repeated: it is what
+	// makes "a cut is never interrupted for a queued prompt" hold for a caller
+	// added later, and what closes the window in which the cut STARTED between
+	// a caller's own check and this stop going out.
+	if command, cut := uninterruptibleRunningCommand(d); cut {
+		stampUninterruptible(e, command)
+		view, recs := m.publishQueueLocked(d)
+		m.mu.Unlock()
+		m.logf("session-controller: queue interject REFUSED entry=%s (%s) session=%s command=%s — %s is running and a context cut is never interrupted for a queued prompt; nothing was stopped and the entry is delivered when that turn ends",
+			entryID, source, d.sessionID, command.String(), sessionCommandLiteral(command))
+		m.publish(d.sessionID, view, recs)
 		return
 	}
 	e.interjecting = true
@@ -1355,6 +1415,19 @@ func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
 		revivalSession := e.revivalHoldSessionID
 		m.mu.Unlock()
 		return m.refuseRevivalForce(workspace, entryID, revivalSession)
+	}
+	// A CONTEXT CUT HAS NO FORCE-THROUGH EITHER, and it is the revival hold's
+	// argument applied to the same cut the user typed themselves: a force's
+	// mechanism is an interrupt, and interrupting a compaction pays for the
+	// whole-conversation read and lands no summary (uninterruptibleturn.go).
+	//
+	// The RUNNING turn is what is asked, not the stamp on the entry: a stamp
+	// says what was true when the entry was queued, and the question a force
+	// asks is what its interrupt would hit right now.
+	if command, cut := uninterruptibleRunningCommand(d); cut {
+		sessionID := d.sessionID
+		m.mu.Unlock()
+		return m.refuseUninterruptibleForce(workspace, entryID, sessionID, command)
 	}
 	forcedSchedule, hadRow := e.shutdownHoldScheduleID, e.drainRowPending
 
