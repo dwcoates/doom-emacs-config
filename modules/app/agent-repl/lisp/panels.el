@@ -9,6 +9,35 @@
 (declare-function agent-repl--open-progress-active-p "agent-repl-open-progress" (ws))
 (declare-function agent-repl--open-progress-start "agent-repl-open-progress" (ws))
 (declare-function agent-repl--open-progress-finish "agent-repl-open-progress" (ws))
+(declare-function agent-repl--preregistration-log-workspace-p "core" (ws))
+
+(defun agent-repl--foreign-perspective-p (ws)
+  "Return non-nil when WS is a persp-mode perspective agent-repl never touched.
+
+persp-mode activates every perspective it restores at startup — including
+ones left over from a prior session that agent-repl already tore down (a
+kill/merge whose bookkeeping never reached persp-mode's own saved
+perspective list) — and fires `persp-activated-functions' for each one
+exactly as it would for a live switch.
+
+Such a WS is neither a pseudo perspective (`agent-repl--pseudo-workspace-name-p',
+persp-mode's own \"none\"/\"main\") nor a workspace agent-repl has ever
+registered (`agent-repl--ws-known-p' — live, tombstoned, or mid-creation
+via `agent-repl--preregistration-log-workspace-p'): it is simply not ours.
+Scheduling the switch machinery for it would feed its name into the
+logging ladder with no sink to route to, ever — not a transient gap that
+registration closes, but a name that will never own one — which is what
+made `agent-repl--note-unroutable-log-workspace' warn once per stale
+restored perspective at every boot.
+
+A workspace genuinely missing its registration (the anomaly that warning
+exists to shout about) is unaffected: this predicate is FALSE for it
+whenever it is known or mid-creation, so its records still reach the
+ladder unscreened from their own call sites."
+  (and (stringp ws)
+       (not (agent-repl--pseudo-workspace-name-p ws))
+       (not (agent-repl--ws-known-p ws))
+       (not (agent-repl--preregistration-log-workspace-p ws))))
 
 (defcustom agent-repl-input-height-fraction 0.23
   "Fraction of the agent view window's height allocated to the input panel."
@@ -522,11 +551,21 @@ events (kill, switch, add) are traceable."
   ;; `--on-workspace-switch' for the background workspace that fires after
   ;; focus has returned to the caller and reclaims the caller's frame with
   ;; the background workspace's panels (the eviction bug `--gui-boot' documents).
-  (if agent-repl--eager-open-in-progress
-      (agent-repl--log (agent-repl--ws-current-log-name)
-                        "after-persp-activated: suppressed (eager-open in progress)")
+  (cond
+   (agent-repl--eager-open-in-progress
+    (agent-repl--log (agent-repl--ws-current-log-name)
+                      "after-persp-activated: suppressed (eager-open in progress)"))
+   ((agent-repl--foreign-perspective-p (agent-repl--ws-current-name))
+    ;; A perspective persp-mode activated that agent-repl never registered —
+    ;; typically a stale leftover from a prior session's saved perspective
+    ;; list.  Scheduling `--on-workspace-switch' for it would feed its name
+    ;; into the logging ladder with no sink it will ever own; see
+    ;; `agent-repl--foreign-perspective-p'.
+    (agent-repl--log-verbose nil "after-persp-activated: skipped foreign perspective ws=%s"
+                              (agent-repl--ws-current-name)))
+   (t
     (let ((ws (agent-repl--ws-current-name)))
-      (run-at-time 0 nil #'agent-repl--on-workspace-switch ws))))
+      (run-at-time 0 nil #'agent-repl--on-workspace-switch ws)))))
 
 (when (modulep! :ui workspaces)
   (agent-repl--ws-add-before-deactivate-hook #'agent-repl--before-persp-deactivate)

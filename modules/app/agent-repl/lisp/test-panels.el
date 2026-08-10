@@ -1704,6 +1704,7 @@ latest one."
   "after-persp-activated schedules --on-workspace-switch for the active ws
 when no eager-open is in progress."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (let ((scheduled nil)
           (agent-repl--eager-open-in-progress nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
@@ -1720,6 +1721,7 @@ switch builds panels synchronously, and a deferred pass firing after
 focus returns to the caller would reclaim the caller's frame with the
 background workspace's panels."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
     (let ((scheduled nil)
           (agent-repl--eager-open-in-progress t))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
@@ -1727,6 +1729,67 @@ background workspace's panels."
                  (lambda (&rest _) (setq scheduled t))))
         (agent-repl--after-persp-activated)
         (should-not scheduled)))))
+
+(ert-deftest agent-repl-test-panels-after-persp-activated-skips-foreign-perspective ()
+  "A perspective agent-repl never registered (a stale leftover from a
+prior session's saved perspective list, restored by persp-mode at boot)
+does not schedule `--on-workspace-switch' at all.  This is the source
+fix for the boot-time `unroutable log workspace' warning: the deferred
+switch never fires for a name that will never own a sink, instead of
+firing and then warning about the fact."
+  (agent-repl-test--with-clean-state
+    (let ((scheduled nil)
+          (agent-repl--eager-open-in-progress nil))
+      (cl-letf (((symbol-function '+workspace-current-name)
+                 (lambda () "agent-repl-stale-restored-ws"))
+                ((symbol-function 'run-at-time)
+                 (lambda (&rest _) (setq scheduled t))))
+        (agent-repl--after-persp-activated)
+        (should-not scheduled)))))
+
+(ert-deftest agent-repl-test-panels-after-persp-activated-schedules-for-preregistering-ws ()
+  "A workspace mid-creation (its own registration window still open) still
+schedules the switch: it is not foreign, merely not committed yet."
+  (agent-repl-test--with-clean-state
+    (let ((scheduled nil)
+          (agent-repl--eager-open-in-progress nil)
+          (agent-repl--log-preregistration-workspace "being-created"))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "being-created"))
+                ((symbol-function 'run-at-time)
+                 (lambda (_secs _rep fn &rest args) (setq scheduled (cons fn args)))))
+        (agent-repl--after-persp-activated)
+        (should (eq (car scheduled) #'agent-repl--on-workspace-switch))))))
+
+;;;; ---- Tests: foreign-perspective-p ----
+
+(ert-deftest agent-repl-test-panels-foreign-perspective-p-true-for-unregistered-name ()
+  "A name with no hash entry at all, not mid-creation, is foreign."
+  (agent-repl-test--with-clean-state
+    (should (agent-repl--foreign-perspective-p "never-seen-ws"))))
+
+(ert-deftest agent-repl-test-panels-foreign-perspective-p-false-for-known-ws ()
+  "A workspace with any hash entry — live or tombstoned — is not foreign."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "known-ws" :project-dir "/tmp/known-ws")
+    (should-not (agent-repl--foreign-perspective-p "known-ws"))))
+
+(ert-deftest agent-repl-test-panels-foreign-perspective-p-false-for-preregistering-ws ()
+  "A workspace inside its own declared creation window is not foreign."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--log-preregistration-workspace "being-created"))
+      (should-not (agent-repl--foreign-perspective-p "being-created")))))
+
+(ert-deftest agent-repl-test-panels-foreign-perspective-p-false-for-pseudo-workspace ()
+  "persp-mode's own placeholder perspectives are not foreign — they are
+classified separately and never reach this predicate as an anomaly."
+  (agent-repl-test--with-clean-state
+    (let ((persp-nil-name "none"))
+      (should-not (agent-repl--foreign-perspective-p "none")))))
+
+(ert-deftest agent-repl-test-panels-foreign-perspective-p-false-for-nil ()
+  "nil is not a perspective name at all."
+  (agent-repl-test--with-clean-state
+    (should-not (agent-repl--foreign-perspective-p nil))))
 
 ;;;; ---- Tests: maybe-autoselect-input ----
 
