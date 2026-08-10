@@ -52,6 +52,29 @@ export interface ConnectResyncOptions {
   /** Sends one ResyncCmd; rejects when the daemon nacks it. */
   resync: (snapshot: ResyncSnapshot) => Promise<void>;
   log?: (level: ConnectResyncLogLevel, message: string) => void;
+  /**
+   * Re-read the LIVE identity after the daemon refused a resync for naming a
+   * superseded one, returning the request to retry with — or null when this
+   * page cannot name a live identity yet.
+   *
+   * Injected rather than computed here because the live identity lives in the
+   * store (the workspace's current fence and owning session), and reading it
+   * at the retry edge is the only way the retry cannot carry the same stale
+   * generation the refusal just rejected.
+   */
+  adoptIdentity?: (rejection: string) => ResyncSnapshot | null;
+}
+
+/**
+ * Whether a refusal is the daemon saying "the identity you named is not the
+ * live one" rather than an ordinary failure.
+ *
+ * The daemon's prose is `command superseded by the current workspace
+ * generation ... rejection_cause=identity_mismatch`. The CAUSE token is the
+ * stable half of that sentence, so it is what this matches.
+ */
+export function isIdentityMismatch(rejection: string): boolean {
+  return rejection.includes("identity_mismatch");
 }
 
 export class ConnectResync {
@@ -195,15 +218,61 @@ export class ConnectResync {
       `resync: requesting snapshot-bound conversation history ws=${snapshot.workspace} ` +
         `fence=${snapshot.fence || "none"} from_seq=${snapshot.fromSeq} decision=dispatch`,
     );
+    this.send(snapshot, false);
+    return true;
+  }
+
+  /**
+   * Send one resync and rule on its refusal.
+   *
+   * IDENTITY MISMATCH IS NOT A FAILURE TO REPORT AND FORGET. A page that
+   * outlived a daemon bounce can hold a session identity the daemon has since
+   * superseded (a phantom or retired session), and every resync it sends is
+   * refused with `rejection_cause=identity_mismatch`. Repeating the request
+   * with the same identity can only be refused again, so the retry ADOPTS the
+   * live identity the store now holds and asks once more with that.
+   *
+   * EXACTLY ONE RETRY. An adopted identity that is itself refused means this
+   * page cannot name a live one from what it has, and a second adoption would
+   * be the same guess. It re-arms instead, so the NEXT snapshot — which
+   * carries the daemon's own account of who is live — supplies the identity
+   * rather than this end inventing one.
+   */
+  private send(snapshot: ResyncSnapshot, isRetry: boolean): void {
     this.opts.resync(snapshot).catch((err: unknown) => {
+      const cause = String(err);
       // A refused resync means this mount keeps whatever history it already
       // had — say so loudly rather than leaving an empty feed unexplained.
       this.opts.log?.(
         "error",
         `resync request failed ws=${snapshot.workspace} fence=${snapshot.fence || "none"} ` +
-          `from_seq=${snapshot.fromSeq} decision=rejected cause=${String(err)}`,
+          `from_seq=${snapshot.fromSeq} decision=rejected cause=${cause}`,
       );
+      if (!isIdentityMismatch(cause)) return;
+      if (isRetry) {
+        this.rearm();
+        this.opts.log?.(
+          "warn",
+          `resync: adopted identity was itself superseded ws=${snapshot.workspace} ` +
+            `fence=${snapshot.fence || "none"}; re-armed for the next snapshot's identity`,
+        );
+        return;
+      }
+      const adopted = this.opts.adoptIdentity?.(cause) ?? null;
+      if (adopted === null || adopted.workspace === "") {
+        this.rearm();
+        this.opts.log?.(
+          "warn",
+          "resync: identity mismatch with no live identity to adopt yet; re-armed for the next snapshot",
+        );
+        return;
+      }
+      this.opts.log?.(
+        "warn",
+        `resync: identity mismatch; adopting live identity ws=${adopted.workspace} ` +
+          `fence=${adopted.fence || "none"} from_seq=${adopted.fromSeq} and retrying once`,
+      );
+      this.send(adopted, true);
     });
-    return true;
   }
 }
