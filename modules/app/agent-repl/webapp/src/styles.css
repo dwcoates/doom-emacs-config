@@ -927,7 +927,7 @@ body::after {
 .topbar-info { color: var(--muted); }
 .topbar-info .info-ws { color: var(--info-ws); }
 .topbar-info .info-model { color: var(--info-model); }
-.topbar-info .info-tokens { color: var(--info-tokens); }
+.topbar-info .info-tokens:not(.token-heat) { color: var(--info-tokens); }
 
 /* The running task's timer: the one datapoint that rewrites itself once a
    second, so fixed-width digits keep everything to its right from twitching
@@ -954,7 +954,7 @@ body::after {
    datapoint token from the session-info palette. */
 .info-agents { color: var(--info-agents); }
 .info-tasks { color: var(--info-tasks); }
-.info-tokens { color: var(--info-tokens); }
+.info-tokens:not(.token-heat) { color: var(--info-tokens); }
 .info-agents:hover, .info-tasks:hover, .info-tokens:hover { text-decoration: underline; }
 .agents-caret, .tasks-caret, .tokens-caret { font-size: 0.7rem; }
 
@@ -1231,7 +1231,7 @@ pre {
    who watched the numbers climb in the footer finds the same two numbers, in
    the same two colors, stamped on the answer they were counting toward. */
 .turn-meta .turn-dur { color: var(--info-time); }
-.turn-meta .turn-in { color: var(--info-tokens); }
+.turn-meta .turn-in:not(.token-heat) { color: var(--info-tokens); }
 /* THE HEAT RAMP. A turn's uncached input carries its own color, from green at
    the cheap end through yellow and orange to red, so the magnitude reads
    before the digits do. The markup supplies only the hue (`--token-heat-hue`,
@@ -1239,11 +1239,15 @@ pre {
    the two themes need different ones to stay legible, and baking a whole
    color into the HTML would pick one theme's readability for both.
 
-   These override the flat `--info-tokens` above and the shared `.info-tokens`
-   chip color, which is why each carries the extra class: the heated figure and
-   the unheated chip are the same element wearing one more thing. */
-.turn-meta .turn-in.token-heat,
-.info-tokens.token-heat { color: hsl(var(--token-heat-hue) 82% 30%); }
+   IT IS ONE SELECTOR, and that is what makes the ramp structural rather than a
+   list every new surface has to be added to. Each unheated fallback above
+   excludes `.token-heat` (`:not(.token-heat)`) instead of this rule naming the
+   surfaces it must out-specify, so the two can never overlap and a figure that
+   wears the class is heated wherever it is drawn — the footer's live cell, the
+   settled turn's corner stamp, the expanded footer's subagent row, a detached
+   agent's catalog badge. Adding a surface to the selector list was exactly the
+   step the badge's own figure was missing. */
+.token-heat { color: hsl(var(--token-heat-hue) 82% 30%); }
 /* The duration and the token figure share ONE size on this wrapper — a notch
    below the corner's own 0.65rem — so the two figures always read at the same
    font and size as each other, just slightly smaller than the corner's dating
@@ -1629,9 +1633,11 @@ pre {
 }
 .async-badge.active { background: color-mix(in srgb, var(--async) 18%, transparent); }
 .async-badge.settled { border-color: var(--border); color: var(--muted); }
-/* The member's token spend, muted so the label stays the badge's voice —
-   live it ticks with the stream, settled it reads the run's total. */
-.async-badge-tokens { color: var(--muted); font-size: 0.7rem; }
+/* The member's uncached input, sized a notch under the label so the label
+   stays the badge's voice. NO COLOR IS SET HERE: the figure is the same one
+   the footer reports for the same agent, so it wears the same heat ramp
+   (`.token-heat`) and a muted grey here would only fight it. */
+.async-badge-tokens { font-size: 0.7rem; }
 
 /* A bubble whose parent_bubble_id names work that never arrived. It is drawn
    — it is real work the user started — but set off by a dashed rule rather
@@ -3477,6 +3483,5 @@ body.ungated #mode-select {
 /* The heat ramp's dark-theme half: the same hues, lifted and slightly desaturated
    so they read against the dark surface rather than sinking into it. */
 @media (prefers-color-scheme: dark) {
-  .turn-meta .turn-in.token-heat,
-  .info-tokens.token-heat { color: hsl(var(--token-heat-hue) 75% 63%); }
+  .token-heat { color: hsl(var(--token-heat-hue) 75% 63%); }
 }

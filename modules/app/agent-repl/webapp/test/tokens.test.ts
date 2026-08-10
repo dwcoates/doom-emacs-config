@@ -9,13 +9,15 @@ import {
   generationTokensPerSecond,
   timingRows,
   tokenHeatHue,
+  TOKEN_HEAT_CLASS,
+  uncachedInputHtml,
   tokensMenuHtml,
   tokensOverlayHtml,
   canonicalTokens,
   agentUncachedInput,
   expensiveInput,
 } from "../src/tokens.js";
-import { generatedSessionUtilization, generatedUngroupedResponse, ungroupedResponse } from "./token-utilization-fixture.js";
+import { attributedSubagent, generatedSessionUtilization, generatedUngroupedResponse, ungroupedResponse } from "./token-utilization-fixture.js";
 import {
   AgentTokenUtilizationSchema,
   ModelTokenUtilizationSchema,
@@ -500,17 +502,7 @@ describe("expensiveInput: the NEW input a turn fed the model", () => {
 });
 
 describe("agentUncachedInput: one subagent's own expensive input", () => {
-  /** A session attribution carrying ONE subagent, keyed by its Agent call. */
-  function attributed(parentToolUseId: string, tokens: number): SessionTokenUtilization {
-    return create(SessionTokenUtilizationSchema, {
-      subagents: [
-        create(AgentTokenUtilizationSchema, {
-          agent: create(TokenUtilizationSubagentSchema, { parentToolUseId }),
-          tokens: canonicalTokens({ input: tokens, cacheCreation: 0, cacheRead: 900_000, output: 7 }),
-        }),
-      ],
-    });
-  }
+  const attributed = attributedSubagent;
 
   it("reads the figure the daemon attributed to the named call", () => {
     // Arrange
@@ -615,5 +607,48 @@ describe("tokenHeatHue", () => {
     // Assert — monotonic descent green -> red; a rise anywhere would make a
     // costlier turn read as cheaper.
     expect(hues).toEqual([...hues].sort((a, b) => b - a));
+  });
+});
+
+// `uncachedInputHtml` is the ONE spelling of an uncached-input figure. The
+// cases below pin the parts the surfaces share (the measure's compact form,
+// the `in` suffix, the heat class and hue) and the one part they don't (the
+// caller's placement class), so a surface cannot drift into its own spelling.
+
+describe("uncachedInputHtml: one spelling for every uncached-input figure", () => {
+  it("writes the figure in the compact form with the shared `in` suffix", () => {
+    // Arrange / Act
+    const html = uncachedInputHtml("info-tokens", 41_000);
+    // Assert
+    expect(html).toContain(">41k in<");
+  });
+
+  it("carries the heat class so the stylesheet's one ramp rule colors it", () => {
+    // Arrange / Act
+    const html = uncachedInputHtml("info-tokens", 41_000);
+    // Assert
+    expect(html).toContain(`class="info-tokens ${TOKEN_HEAT_CLASS}"`);
+  });
+
+  it("carries the figure's own hue, so magnitude reads before the digits", () => {
+    // Arrange / Act
+    const html = uncachedInputHtml("info-tokens", 100_000);
+    // Assert — the 100k anchor's orange (see tokenHeatHue).
+    expect(html).toContain(`style="--token-heat-hue:${tokenHeatHue(100_000)}"`);
+  });
+
+  it("differs between two surfaces ONLY in the caller's placement class", () => {
+    // Arrange — the badge and the footer row reporting the same attribution.
+    const badge = uncachedInputHtml("async-badge-tokens", 12_340);
+    const row = uncachedInputHtml("pfooter-agent-tokens", 12_340);
+    // Act / Assert — swapping the class makes them identical, digits included.
+    expect(badge.replace("async-badge-tokens", "pfooter-agent-tokens")).toBe(row);
+  });
+
+  it("escapes a placement class so no caller can inject markup through it", () => {
+    // Arrange / Act — the figure itself is a number, but the class is a string.
+    const html = uncachedInputHtml("info-tokens", 0);
+    // Assert — a well-formed single span is all a caller can produce.
+    expect(html.match(/<span/g)).toHaveLength(1);
   });
 });

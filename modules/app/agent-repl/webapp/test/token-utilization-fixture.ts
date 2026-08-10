@@ -1,6 +1,8 @@
 import type { TokenUtilization } from "../src/frontend-proto.js";
+import { canonicalTokens } from "../src/tokens.js";
 import { create } from "@bufbuild/protobuf";
 import {
+  AgentTokenUtilizationSchema,
   SessionTokenUtilizationSchema,
   TokenUsageTotalsSchema,
   TokenUtilizationSchema,
@@ -10,6 +12,26 @@ import {
   type TokenUtilization as GeneratedTokenUtilization,
 } from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
 import { ApiUsageSchema } from "../../proto/gen/ts/agentshim/data/v1/tools_pb";
+
+/**
+ * A session attribution carrying ONE subagent, keyed by its `Agent` call's
+ * tool-use id — the identity every surface that reports a subagent's spend
+ * looks the figure up under (`agentUncachedInput`).
+ *
+ * The cache HIT is deliberately large and the output deliberately non-zero, so
+ * a caller that reported the wrong measure would read a wildly wrong number
+ * rather than a plausible one.
+ */
+export function attributedSubagent(parentToolUseId: string, uncachedInput: number): SessionTokenUtilization {
+  return create(SessionTokenUtilizationSchema, {
+    subagents: [
+      create(AgentTokenUtilizationSchema, {
+        agent: create(TokenUtilizationSubagentSchema, { parentToolUseId }),
+        tokens: canonicalTokens({ input: uncachedInput, cacheCreation: 0, cacheRead: 900_000, output: 7 }),
+      }),
+    ],
+  });
+}
 
 /** One ungrouped response, defaulted with complete identity and lineage. */
 export function ungroupedResponse(over: Partial<TokenUtilization> = {}): TokenUtilization {

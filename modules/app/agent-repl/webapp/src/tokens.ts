@@ -231,6 +231,30 @@ export function tokenHeatStyle(tokens: number): string {
 }
 
 /**
+ * ONE uncached-input figure, as EVERY surface that reports one draws it: the
+ * footer's live cell, the settled turn's corner stamp, the expanded footer's
+ * per-subagent row, and a detached agent's catalog badge.
+ *
+ * THE INVARIANCE IS THE POINT. All four report the same measure
+ * (`expensiveInput` — both cache misses), in the same compact form, with the
+ * same `in` suffix, carrying the same heat ramp. Before this helper each site
+ * restated that markup, and the badge restated a DIFFERENT measure entirely
+ * (its transcript's summed output tokens, labelled `tok`), so a subagent's
+ * spend read as a wholly different number from the one the footer reported for
+ * the same work. A site that renders this figure now cannot spell it its own
+ * way, because there is only one spelling.
+ *
+ * CLASSNAME is the caller's own hook for placement and size only — the COLOR
+ * comes from `TOKEN_HEAT_CLASS`, which the stylesheet lets win over every
+ * per-surface color (see the `:not(.token-heat)` fallbacks in styles.css).
+ */
+export function uncachedInputHtml(className: string, tokens: number): string {
+  return `<span class="${className} ${TOKEN_HEAT_CLASS}" style="${tokenHeatStyle(
+    tokens,
+  )}">${escapeHtml(`${compactTokens(tokens)} in`)}</span>`;
+}
+
+/**
  * A cost estimate row's text. Two decimals once the figure is readable
  * at that resolution, four below a dime so small spends do not all
  * collapse into `$0.00`.
