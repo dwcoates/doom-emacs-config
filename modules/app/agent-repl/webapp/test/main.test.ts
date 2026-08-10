@@ -297,6 +297,26 @@ describe("the revival gate's chrome wiring", () => {
     expect(chrome).toContain("HIBERNATED_BODY_CLASS");
   });
 
+  it("rebuilds the card ONLY when its state moved", () => {
+    // Assert — an unconditional rewrite destroys whichever button the user is
+    // mid-press on, and the browser then fires no click at all.
+    expect(chrome).toContain("if (gateSignature !== lastRevivalGateSignature) {");
+    expect(chrome).toContain("revivalGateEl.innerHTML = revivalGateHtml(");
+  });
+
+  it("writes the age as text into the standing card instead of rebuilding it", () => {
+    // Assert — the age is the one thing that moves without the state moving,
+    // so it must not cost the buttons their nodes once a second.
+    expect(chrome).toContain("since.textContent = revivalSinceText(");
+  });
+
+  it("keeps the clock out of the signature it compares on", () => {
+    // Assert — a signature carrying Date.now() would differ every frame and
+    // guard nothing.
+    expect(chrome).toContain("const gateSignature = revivalGateSignature(gateState)");
+    expect(chrome).not.toContain("revivalGateSignature({ ...gateState, now");
+  });
+
   it("guards the dequeue card's repaint, since it carries buttons of its own", () => {
     // Assert — an unconditional rewrite destroys whichever button the user is
     // mid-press on, and the browser then fires no click at all.

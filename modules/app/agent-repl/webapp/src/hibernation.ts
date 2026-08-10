@@ -610,6 +610,46 @@ export interface RevivalGateInput {
   failure?: string;
 }
 
+/** The class on the span carrying the "asleep for" age, updated in place. */
+export const HIBERNATION_SINCE_CLASS = "hibernation-since";
+
+/**
+ * How long the session has been asleep, as the card's own words, or "" when
+ * the daemon stamped no since time (a zero would render as decades).
+ *
+ * SEPARATE FROM THE CARD because it is the one part of the card that moves
+ * without any state having changed. The chrome writes it as TEXT into the
+ * standing card between state changes, instead of rebuilding the card around
+ * a new age — which would destroy the buttons on a clock tick and swallow a
+ * click that was mid-press (see `html-slot.ts`).
+ */
+export function revivalSinceText(hibernation: HibernationDetail, now: number): string {
+  if (hibernation.sinceMs <= 0) return "";
+  return `asleep for ${formatAge(now - hibernation.sinceMs)}`;
+}
+
+/**
+ * Everything {@link revivalGateHtml} draws EXCEPT the clock, as one comparable
+ * string.
+ *
+ * WHY THE CLOCK IS EXCLUDED. The signature's whole job is to answer "has the
+ * card changed for a reason the user caused?" — and the age has not: it moves
+ * on every frame regardless, so folding it in would make the signature differ
+ * on every frame and guard nothing at all. The age is reconciled separately,
+ * as text, by the caller that owns the slot.
+ */
+export function revivalGateSignature(input: Omit<RevivalGateInput, "now">): string {
+  const { hibernation, contextTokens, pending = null, failure = "" } = input;
+  if (hibernation === null) return "awake";
+  return [
+    hibernation.cause.case,
+    String(hibernation.sinceMs),
+    contextTokens === null ? "unknown" : String(contextTokens),
+    pending ?? "none",
+    failure,
+  ].join("|");
+}
+
 /**
  * The revival gate card, or "" when the session is awake.
  *
@@ -628,8 +668,8 @@ export function revivalGateHtml(input: RevivalGateInput): string {
   if (hibernation === null) return "";
   const since =
     hibernation.sinceMs > 0
-      ? `<span class="hibernation-since">asleep for ${escapeHtml(
-          formatAge(now - hibernation.sinceMs),
+      ? `<span class="${HIBERNATION_SINCE_CLASS}">${escapeHtml(
+          revivalSinceText(hibernation, now),
         )}</span>`
       : "";
   // THE OPTIONS ARE ONE LIST, each button beside the sentence that explains it.

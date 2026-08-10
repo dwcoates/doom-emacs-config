@@ -14,6 +14,8 @@ import type { RevivalGateInput } from "../src/hibernation.js";
 import {
   HIBERNATED_BODY_CLASS,
   HIBERNATION_COMPOSER_NOTICE,
+  revivalGateSignature,
+  revivalSinceText,
   REVIVAL_CONTEXT_UNKNOWN_TEXT,
   REVIVAL_GATE_HEADING,
   REVIVE_ATTR,
@@ -652,6 +654,65 @@ describe("the gate's failed-revival line", () => {
     const got = gate(forced(), { failure: "<script>x</script>" });
     // Assert
     expect(got).not.toContain("<script");
+  });
+});
+
+describe("revivalGateSignature: what makes the card worth rebuilding", () => {
+  const state = { hibernation: forced(), contextTokens: CONTEXT_TOKENS };
+
+  it("is unchanged while only the clock moves", () => {
+    // Arrange / Act / Assert — the age is reconciled as text; folding the
+    // clock in would differ every frame and guard nothing, and a rebuild
+    // between a mousedown and a mouseup swallows the click.
+    expect(revivalGateSignature(state)).toBe(revivalGateSignature({ ...state }));
+  });
+
+  it("changes when the session wakes", () => {
+    // Arrange / Act / Assert
+    expect(revivalGateSignature({ ...state, hibernation: null })).not.toBe(
+      revivalGateSignature(state),
+    );
+  });
+
+  it("changes when a decision goes in flight", () => {
+    // Arrange / Act / Assert — the frame that takes the buttons down.
+    expect(revivalGateSignature({ ...state, pending: "compactAll" })).not.toBe(
+      revivalGateSignature(state),
+    );
+  });
+
+  it("changes when a failure line is raised", () => {
+    // Arrange / Act / Assert — the frame that hands the choice back.
+    expect(revivalGateSignature({ ...state, failure: REVIVE_FAILED_TEXT })).not.toBe(
+      revivalGateSignature(state),
+    );
+  });
+
+  it("changes when the context figure the decision is priced by moves", () => {
+    // Arrange / Act / Assert
+    expect(revivalGateSignature({ ...state, contextTokens: 1 })).not.toBe(
+      revivalGateSignature(state),
+    );
+  });
+
+  it("changes when the daemon reports a different cause for the sleep", () => {
+    // Arrange / Act / Assert — the cause decides which option is right, so a
+    // card that kept the old one would advise on stale news.
+    expect(revivalGateSignature({ ...state, hibernation: cacheExpired() })).not.toBe(
+      revivalGateSignature(state),
+    );
+  });
+});
+
+describe("revivalSinceText: the age written in place", () => {
+  it("ages the sleep from the daemon's own since stamp", () => {
+    // Arrange / Act / Assert
+    expect(revivalSinceText(forced(), NOW)).toBe("asleep for 1h");
+  });
+
+  it("says nothing when the daemon stamped no since time", () => {
+    // Arrange — a zero would render as decades, which is fabricated.
+    expect(revivalSinceText({ sinceMs: 0, cause: { case: "forced", value: {} } }, NOW)).toBe("");
   });
 });
 
