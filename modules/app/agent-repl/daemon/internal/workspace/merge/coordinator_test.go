@@ -2647,6 +2647,81 @@ func TestAReplayedTerminalStatusAcksItsQueueEntry(t *testing.T) {
 	}
 }
 
+// THE CORPSE THIS COVERS. A run that had already reached its outcome, whose
+// terminal word could not be published, used to keep its queue entry at every
+// boot forever — so one dead run held the head across daemon lifetimes and every
+// merge behind it waited on a status nothing was ever going to say. The replay
+// is now a bounded budget of attempts, and the entry is EJECTED when it is spent.
+func TestATerminalWordThatNeverPublishesEjectsItsEntry(t *testing.T) {
+	// Arrange — a marked entry whose terminal phase the sink always refuses.
+	q, dir := newTestQueue(t)
+	req := testRequest("a")
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := q.MarkTerminal(testRepoKey, req, TerminalStatus{Outcome: OutcomeMerged, Cause: "cherry-pick landed on target"}); err != nil {
+		t.Fatalf("MarkTerminal: %v", err)
+	}
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+	hook := newFakePostMergeHook(4)
+	t.Cleanup(func() { close(hook.stop) })
+	h := newHarnessWith(t, harnessOpts{queue: next, dir: dir, postMerge: hook})
+	h.sink.failOnPhase(PhaseMerged, sentinelError("state store down"))
+
+	// Act.
+	if err := h.coord.Drain(context.Background()); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+
+	// Assert — the aftermath still runs (the merge landed), and the entry is gone
+	// rather than owed to the next boot.
+	<-hook.calls
+	hook.results <- nil
+	if got := h.queue.Snapshot()[testRepoKey]; len(got) != 0 {
+		t.Fatalf("outstanding entries after the ejection = %+v, want the corpse dropped", got)
+	}
+}
+
+// The ejection exists for the merges BEHIND the corpse: the whole point is that
+// the drain advances to them instead of stopping at a word it cannot say.
+func TestAnEjectedTerminalLetsTheNextEntryRun(t *testing.T) {
+	// Arrange — an unpublishable terminal at the head, an ordinary merge behind it.
+	q, dir := newTestQueue(t)
+	dead := testRequest("a")
+	if _, err := q.Publish(context.Background(), testRepoKey, dead); err != nil {
+		t.Fatalf("Publish dead: %v", err)
+	}
+	if err := q.MarkTerminal(testRepoKey, dead, TerminalStatus{Outcome: OutcomeMerged, Cause: "cherry-pick landed on target"}); err != nil {
+		t.Fatalf("MarkTerminal: %v", err)
+	}
+	live := testRequest("b")
+	if _, err := q.Publish(context.Background(), testRepoKey, live); err != nil {
+		t.Fatalf("Publish live: %v", err)
+	}
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+	h := newHarnessWith(t, harnessOpts{queue: next, dir: dir})
+	// Only the corpse's word is refused; the merge behind it reaches its own
+	// terminal normally, which is what proves the drain got that far. That merge
+	// fails at the lease so it terminates without the picker, keeping the
+	// assertion about the corpse rather than about how a live merge ends.
+	h.sink.failOnPhase(PhaseMerged, sentinelError("state store down"))
+	h.lease.err = sentinelError("shim gone")
+
+	// Act.
+	if err := h.coord.Drain(context.Background()); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+
+	// Assert — the queue drains past the corpse rather than stopping on it.
+	awaitQueueDrained(t, h, testRepoKey)
+}
+
 // ONE TERMINAL WORD, NOT TWO. A boot after the replay finds nothing to say: the
 // entry was acked, so a second daemon does not publish the run's terminal status
 // all over again.
