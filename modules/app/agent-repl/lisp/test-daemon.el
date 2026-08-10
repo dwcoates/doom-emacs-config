@@ -286,6 +286,179 @@ is mid-boot, and the caller starts the daemon directly anyway."
     ;; Act / Assert
     (should (eq 0 (agent-repl--frontend-build-if-stale nil)))))
 
+;;;; ---- build-if-stale: the asynchronous run --------------------------------
+;;
+;; The spawn wrapper is shadowed to hand back a fake process, so no build ever
+;; runs; the sentinel is driven by hand with the exit code under test.
+
+(cl-defstruct agent-repl-test--fake-build-proc
+  (live t) (exit 0))
+
+(defvar agent-repl-test--async-build-spawned nil
+  "Argv of every faked async build spawn, oldest first.")
+
+(defvar agent-repl-test--async-build-proc nil
+  "The fake process the most recent faked async build spawn returned.")
+
+(defmacro agent-repl-test--with-async-build (&rest body)
+  "Run BODY with the async build boundary faked and its state reset.
+`agent-repl-test--async-build-spawned' collects the argv of every spawn,
+newest last, and `agent-repl-test--async-build-proc' holds the fake the
+most recent spawn returned."
+  `(let ((agent-repl--frontend-async-build-process nil)
+         (agent-repl--frontend-async-build-request nil)
+         (agent-repl--frontend-async-build-queue nil)
+         (agent-repl-test--async-build-spawned nil)
+         (agent-repl-test--async-build-proc nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-spawn-build-script)
+                (lambda (args)
+                  (setq agent-repl-test--async-build-spawned
+                        (append agent-repl-test--async-build-spawned (list args)))
+                  (setq agent-repl-test--async-build-proc
+                        (make-agent-repl-test--fake-build-proc))))
+               ((symbol-function 'process-live-p)
+                (lambda (p) (if (agent-repl-test--fake-build-proc-p p)
+                                (agent-repl-test--fake-build-proc-live p)
+                              nil)))
+               ((symbol-function 'process-exit-status)
+                (lambda (p) (agent-repl-test--fake-build-proc-exit p)))
+               ((symbol-function 'display-buffer) #'ignore))
+       ,@body)))
+
+(defun agent-repl-test--settle-async-build (exit)
+  "Exit the tracked fake build process with EXIT, driving the real sentinel."
+  (let ((proc agent-repl--frontend-async-build-process))
+    (setf (agent-repl-test--fake-build-proc-live proc) nil)
+    (setf (agent-repl-test--fake-build-proc-exit proc) exit)
+    (agent-repl--frontend-async-build-sentinel proc "finished\n")))
+
+(ert-deftest agent-repl-test-daemon-async-build-spawns-the-shared-argv ()
+  "The asynchronous run spawns the script with the shared argv shape."
+  (agent-repl-test--with-async-build
+   ;; Act
+   (let ((outcome (agent-repl--frontend-build-targets-async '("webapp"))))
+     ;; Assert
+     (should (eq outcome 'started))
+     (should (equal agent-repl-test--async-build-spawned
+                    (list (agent-repl--frontend-build-args '("webapp") nil)))))))
+
+(ert-deftest agent-repl-test-daemon-async-build-runs-success-callback ()
+  "A zero exit runs the success continuation."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (let (won)
+     (agent-repl--frontend-build-targets-async
+      '("webapp") nil (lambda () (setq won t)) nil)
+     ;; Act
+     (agent-repl-test--settle-async-build 0)
+     ;; Assert
+     (should won))))
+
+(ert-deftest agent-repl-test-daemon-async-build-runs-failure-callback ()
+  "A non-zero exit runs the failure continuation with the failure detail."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (let (detail)
+     (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+       (agent-repl--frontend-build-targets-async
+        '("webapp") nil nil (lambda (d) (setq detail d)))
+       ;; Act
+       (agent-repl-test--settle-async-build 2))
+     ;; Assert
+     (should (string-match-p "exit 2" (or detail ""))))))
+
+(ert-deftest agent-repl-test-daemon-async-build-failure-skips-success-callback ()
+  "A non-zero exit never runs the success continuation."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (let (won)
+     (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+       (agent-repl--frontend-build-targets-async
+        '("webapp") nil (lambda () (setq won t)) nil)
+       ;; Act
+       (agent-repl-test--settle-async-build 1))
+     ;; Assert
+     (should-not won))))
+
+(ert-deftest agent-repl-test-daemon-async-build-does-not-stack-a-second-process ()
+  "A request arriving mid-build queues instead of spawning a second build."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (agent-repl--frontend-build-targets-async '("webapp"))
+   ;; Act
+   (let ((outcome (agent-repl--frontend-build-targets-async '("shim"))))
+     ;; Assert — still exactly one spawn.
+     (should (eq outcome 'queued))
+     (should (equal (length agent-repl-test--async-build-spawned) 1)))))
+
+(ert-deftest agent-repl-test-daemon-async-build-coalesces-identical-requests ()
+  "Two identical requests behind one build share a single queued run."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (agent-repl--frontend-build-targets-async '("webapp"))
+   (agent-repl--frontend-build-targets-async '("webapp"))
+   ;; Act
+   (let ((outcome (agent-repl--frontend-build-targets-async '("webapp"))))
+     ;; Assert
+     (should (eq outcome 'coalesced))
+     (should (equal (length agent-repl--frontend-async-build-queue) 1)))))
+
+(ert-deftest agent-repl-test-daemon-async-build-runs-the-queued-run-after ()
+  "The queued build starts once the in-flight one settles."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (agent-repl--frontend-build-targets-async '("webapp"))
+   (agent-repl--frontend-build-targets-async '("shim"))
+   ;; Act
+   (agent-repl-test--settle-async-build 0)
+   ;; Assert
+   (should (equal agent-repl-test--async-build-spawned
+                  (list (agent-repl--frontend-build-args '("webapp") nil)
+                        (agent-repl--frontend-build-args '("shim") nil))))))
+
+(ert-deftest agent-repl-test-daemon-async-build-coalesced-waiters-all-run ()
+  "Every waiter coalesced onto a queued run gets its continuation."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (let ((won 0))
+     (agent-repl--frontend-build-targets-async '("webapp"))
+     (agent-repl--frontend-build-targets-async
+      '("shim") nil (lambda () (setq won (1+ won))) nil)
+     (agent-repl--frontend-build-targets-async
+      '("shim") nil (lambda () (setq won (1+ won))) nil)
+     ;; Act — settle the in-flight run, then the queued one it starts.
+     (agent-repl-test--settle-async-build 0)
+     (agent-repl-test--settle-async-build 0)
+     ;; Assert
+     (should (equal won 2)))))
+
+(ert-deftest agent-repl-test-daemon-async-build-drains-past-a-throwing-waiter ()
+  "A continuation that throws does not strand the queued build behind it."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (agent-repl--frontend-build-targets-async
+    '("webapp") nil (lambda () (error "waiter blew up")) nil)
+   (agent-repl--frontend-build-targets-async '("shim"))
+   ;; Act
+   (should-error (agent-repl-test--settle-async-build 0))
+   ;; Assert — the queued run was started anyway.
+   (should (equal (length agent-repl-test--async-build-spawned) 2))))
+
+(ert-deftest agent-repl-test-daemon-async-build-errors-on-missing-script ()
+  "A missing build script signals rather than reporting a failed build."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (let ((agent-repl--frontend-build-script "/agent-repl-nonexistent/build.sh"))
+     ;; Act / Assert
+     (should-error (agent-repl--frontend-build-targets-async '("webapp")))
+     (should-not agent-repl-test--async-build-spawned))))
+
+(ert-deftest agent-repl-test-daemon-async-build-settle-without-a-request-signals ()
+  "Settling with nothing in flight is a broken invariant, not a no-op."
+  (agent-repl-test--with-async-build
+   ;; Act / Assert
+   (should-error (agent-repl--frontend-async-build-settle 0))))
+
 ;;;; ---- timer-backed lifecycle waiting --------------------------------------
 
 (ert-deftest agent-repl-test-daemon-await-calls-ready-without-scheduling ()
