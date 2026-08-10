@@ -665,3 +665,106 @@ persp-mode activated, and \"main\"/\"none\" own no durable log sink."
       (should (equal logged "ws1")))))
 
 ;;; test-window.el ends here
+
+;;;; ---- Deletion, or its structural substitute ----
+
+(ert-deftest agent-repl-window-test-delete-or-neutralize-deletes-a-deletable-window ()
+  "A window that can be deleted is deleted, and reports `deleted'."
+  (agent-repl-window-test--with-temp-frame
+    (let* ((buf (generate-new-buffer " *test-neutralize-a*"))
+           (main (selected-window))
+           (extra (split-window main)))
+      (set-window-buffer extra buf)
+      (unwind-protect
+          (progn
+            ;; Act
+            (should (eq (agent-repl-window--delete-or-neutralize extra) 'deleted))
+            ;; Assert
+            (should-not (window-live-p extra))
+            (should (window-live-p main)))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-window-test-delete-or-neutralize-switches-the-sole-window ()
+  "The frame's sole window is switched to the fallback, never deleted."
+  (agent-repl-window-test--with-temp-frame
+    (let ((buf (generate-new-buffer " *test-neutralize-sole*"))
+          (fallback (generate-new-buffer " *test-neutralize-fallback*"))
+          (sole (selected-window)))
+      (unwind-protect
+          (progn
+            (set-window-buffer sole buf)
+            ;; Act
+            (should (eq (agent-repl-window--delete-or-neutralize sole fallback)
+                        'neutralized))
+            ;; Assert — the window survives and no longer shows the retired buffer.
+            (should (window-live-p sole))
+            (should (eq (window-buffer sole) fallback)))
+        (kill-buffer buf)
+        (kill-buffer fallback)))))
+
+(ert-deftest agent-repl-window-test-delete-or-neutralize-undedicates-a-strong-dedication ()
+  "A STRONGLY dedicated sole window is un-dedicated so the switch can land."
+  (agent-repl-window-test--with-temp-frame
+    (let ((buf (generate-new-buffer " *test-neutralize-dedicated*"))
+          (fallback (generate-new-buffer " *test-neutralize-fallback2*"))
+          (sole (selected-window)))
+      (unwind-protect
+          (progn
+            (set-window-buffer sole buf)
+            (set-window-dedicated-p sole t)
+            ;; Act
+            (agent-repl-window--delete-or-neutralize sole fallback)
+            ;; Assert
+            (should-not (window-dedicated-p sole))
+            (should (eq (window-buffer sole) fallback)))
+        (kill-buffer buf)
+        (kill-buffer fallback)))))
+
+(ert-deftest agent-repl-window-test-delete-or-neutralize-signals-without-a-fallback ()
+  "An undeletable window with no fallback buffer fails loudly, never silently."
+  (agent-repl-window-test--with-temp-frame
+    (let ((buf (generate-new-buffer " *test-neutralize-nofallback*"))
+          (sole (selected-window)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'doom-fallback-buffer) (lambda () nil)))
+            (set-window-buffer sole buf)
+            ;; Act / Assert
+            (should-error (agent-repl-window--delete-or-neutralize sole)
+                          :type 'error))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-window-test-delete-buffer-windows-switches-the-sole-window ()
+  "Closing a panel that owns the frame's only window switches it, never errors."
+  (agent-repl-window-test--with-temp-frame
+    (let ((buf (generate-new-buffer " *test-sole-panel*"))
+          (fallback (generate-new-buffer " *test-sole-fallback*"))
+          (sole (selected-window))
+          (warned nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'doom-fallback-buffer) (lambda () fallback))
+                    ((symbol-function 'agent-repl--warn)
+                     (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+            (set-window-buffer sole buf)
+            ;; Act
+            (agent-repl-window--delete-buffer-windows buf)
+            ;; Assert — no "Attempt to delete ... sole ordinary window" warning,
+            ;; and the retired buffer is off screen all the same.
+            (should (window-live-p sole))
+            (should-not (eq (window-buffer sole) buf))
+            (should-not warned))
+        (kill-buffer buf)
+        (kill-buffer fallback)))))
+
+(ert-deftest agent-repl-window-test-delete-buffer-windows-omits-a-neutralized-window ()
+  "The returned list names windows actually DELETED, not ones left standing."
+  (agent-repl-window-test--with-temp-frame
+    (let ((buf (generate-new-buffer " *test-sole-return*"))
+          (fallback (generate-new-buffer " *test-sole-return-fallback*"))
+          (sole (selected-window)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'doom-fallback-buffer) (lambda () fallback)))
+            (set-window-buffer sole buf)
+            ;; Act / Assert
+            (should-not (agent-repl-window--delete-buffer-windows buf)))
+        (kill-buffer buf)
+        (kill-buffer fallback)))))
