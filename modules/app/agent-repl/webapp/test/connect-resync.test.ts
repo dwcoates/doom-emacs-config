@@ -279,3 +279,59 @@ describe("ConnectResync forceResync", () => {
     expect(h.sent).toEqual([]);
   });
 });
+
+/**
+ * THE TWO OUT-OF-BAND TRIGGERS SHARE ONE ARM. A changed daemon identity and the
+ * page coming back into view both mean "this page may be behind and no socket
+ * event is going to say so", and both need the snapshot precondition satisfied
+ * as well as the arm — there is no connect snapshot coming for a socket that
+ * never cycled, so an arm without it waits for one forever.
+ */
+describe("ConnectResync re-arm", () => {
+  it("arms an identity change and a forced check identically", () => {
+    // Arrange — two triggers, same starting point.
+    const viaIdentity = harness();
+    const viaForce = harness();
+    viaIdentity.trigger.observeDaemonIdentity("boot-1");
+
+    // Act.
+    viaIdentity.trigger.observeDaemonIdentity("boot-2");
+    viaForce.trigger.forceResync("webview_focus");
+    viaIdentity.trigger.observe(false, snapshot("/ws", 12));
+    viaForce.trigger.observe(false, snapshot("/ws", 12));
+
+    // Assert — the same request from both.
+    expect(viaForce.sent).toEqual(viaIdentity.sent);
+  });
+
+  // THE PRECONDITION IS THE HALF A THIRD TRIGGER WOULD FORGET. Arming alone
+  // waits for a connect snapshot that is never coming on a socket that never
+  // cycled, so the resync would sit armed forever and the page would simply
+  // stay behind — silently. Both triggers must satisfy it without one.
+  it("needs no connect snapshot to fire", () => {
+    // Arrange — a trigger that has never seen a connect snapshot at all.
+    const h = harness();
+
+    // Act.
+    h.trigger.forceResync("visibilitychange_visible");
+    h.trigger.observe(false, snapshot("/ws", 12));
+
+    // Assert.
+    expect(h.sent).toEqual([snapshot("/ws", 12)]);
+  });
+
+  // AND A FRESH SOCKET IS NOT AN OUT-OF-BAND TRIGGER. onConnect resets the
+  // precondition rather than satisfying it, because a real connect snapshot IS
+  // coming and firing ahead of it would ask before the store knows a workspace.
+  it("leaves a fresh connection waiting for its own snapshot", () => {
+    // Arrange.
+    const h = harness();
+
+    // Act.
+    h.trigger.onConnect();
+    h.trigger.observe(false, snapshot("/ws", 12));
+
+    // Assert.
+    expect(h.sent).toEqual([]);
+  });
+});
