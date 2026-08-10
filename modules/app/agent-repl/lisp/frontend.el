@@ -442,13 +442,19 @@ are one mechanism deliberately — a deploy and a link-up differ only in
 what named them, and a page's staleness is decided by comparing what it
 is running against what is on disk either way.
 
-Returns the number of webviews the sweep acted on, or nil when the
-sweep was debounced away by a recent one."
+ALWAYS RETURNS AN INTEGER — the number of webviews the sweep acted on,
+and 0 when the sweep was debounced away by a recent one.  The caller is
+bin/deploy-all.sh, which formats this answer over emacsclient with a
+`%d'; the sweep's own nil-for-debounced is an internal distinction, and
+handing it out over the wire made a debounced deploy report `Format
+specifier doesn\\='t match argument type' instead of a count.  Nothing was
+acted on when a sweep is debounced, so 0 is the true count, not a
+papered-over failure."
   (interactive)
-  (let ((acted (agent-repl--webview-recovery-sweep "deploy_refresh")))
+  (let ((acted (or (agent-repl--webview-recovery-sweep "deploy_refresh") 0)))
     (when (called-interactively-p 'interactive)
       (agent-repl--user-message nil "webview sweep acted on %s webview(s)"
-                                (list (or acted 0))))
+                                (list acted)))
     acted))
 
 ;;;; ---- Copying the webview's highlighted text --------------------------------

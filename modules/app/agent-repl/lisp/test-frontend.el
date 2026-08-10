@@ -2062,12 +2062,22 @@ cannot delay the restart the user asked for."
       ;; Assert
       (should (equal reasons (list "deploy_refresh"))))))
 
-(ert-deftest agent-repl-test-refresh-webviews-passes-a-debounced-sweep-through ()
-  "A debounced sweep reports nil rather than a fabricated count of zero."
+(ert-deftest agent-repl-test-refresh-webviews-reports-zero-for-a-debounced-sweep ()
+  "A debounced sweep reports the integer 0, never nil: deploy-all formats %d."
   ;; Arrange
   (cl-letf (((symbol-function 'agent-repl--webview-recovery-sweep) (lambda (_reason) nil)))
     ;; Act / Assert
-    (should (null (agent-repl-refresh-webviews)))))
+    (should (equal 0 (agent-repl-refresh-webviews)))))
+
+(ert-deftest agent-repl-test-refresh-webviews-always-returns-an-integer ()
+  "Every refresh answer survives the `%d' deploy-all formats it with."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--webview-recovery-sweep) (lambda (_reason) nil)))
+    ;; Act
+    (let ((answer (agent-repl-refresh-webviews)))
+      ;; Assert
+      (should (integerp answer))
+      (should (equal "refreshed 0" (format "refreshed %d" answer))))))
 
 (ert-deftest agent-repl-test-frontend-live-webview-buffers-skips-non-frontend-buffers ()
   "Only `*agent-frontend-WS*' buffers are enumerated for a sweep."
