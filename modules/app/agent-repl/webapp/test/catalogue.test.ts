@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Scenario, renderScenarioHtml, scenarios } from "../src/catalogue.js";
+import { FIXED_FOLD_CLASS } from "../src/fold.js";
 
 /** The scenario registered under SLUG; throws when the catalogue lost it. */
 function scenario(slug: string): Scenario {
@@ -24,19 +25,20 @@ describe("catalogue scenarios", () => {
     }
   });
 
-  it("agent-activity collapsed shows the ticker without the panel body", () => {
+  it("agent-activity shows the ticker over a panel no fold state can close", () => {
     const html = renderScenarioHtml(scenario("agent-activity"), closed);
     expect(html).toContain("agent-activity");
-    expect(html).not.toContain("agent-panel");
+    expect(html).toContain(FIXED_FOLD_CLASS);
+    expect(html).toContain("agent-panel");
   });
 
-  it("agent-activity expanded nests the child feed with its pending permission", () => {
+  it("agent-activity nests the child feed with its pending permission", () => {
     const html = expanded("agent-activity");
     expect(html).toContain("agent-panel");
     expect(html).toContain("needs permission");
-    // The grandchild Agent's own open fold, and the panel text inside it —
-    // its description never renders (subagent cards suppress their input).
-    expect(html).toContain('data-panel-toggle="s1-agent2"');
+    // The grandchild Agent card is teal too, so its own nested output is a
+    // second fixed panel rather than a toggle, and its text renders with it.
+    expect(html).not.toContain('data-panel-toggle="s1-agent2"');
     expect(html).toContain("The mac runner agrees");
   });
 
@@ -73,8 +75,10 @@ describe("catalogue scenarios", () => {
     const html = renderScenarioHtml(scenario("host-catalog"), closed);
     expect(html).toContain("async-badge");
     expect(html).toContain("async-live");
-    // Every fold closed means no detail panel is mounted anywhere.
-    expect(html).not.toContain("agent-panel");
+    // Every badge closed means no badge DETAIL is mounted inside the catalog.
+    // Scoped to the catalog markup, because the feed's own teal Agent card
+    // lays a fixed panel out above it, which is not a detail panel.
+    expect(html.slice(html.indexOf("async-catalog"))).not.toContain("agent-panel");
   });
 
   it("host-catalog expanded opens the member's own card with its transcript", () => {
