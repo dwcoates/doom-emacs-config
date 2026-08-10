@@ -83,6 +83,7 @@
 
 (defvar agent-repl--uds-process)
 (defvar agent-repl--uds-reconnect-timer)
+(defvar agent-repl--uds-connection-state)
 (defvar agent-repl-uds-socket-path)
 
 ;;;; ---- The workspace wire key ------------------------------------------
@@ -256,12 +257,38 @@ round-trip."
        (agent-repl--frontend-daemon-view)
        t))
 
+(defun agent-repl--frontend-ready-should-dial-p ()
+  "Return non-nil when the readiness poll should initiate a dial itself.
+
+The readiness poll runs at `agent-repl--frontend-ready-poll-interval'
+(0.2s), which is a READINESS CHECK cadence, not a dial cadence.  Dialing
+on every tick bypassed the reconnect ladder's backoff entirely: each
+`agent-repl-uds-connect' cancels the pending reconnect timer
+\(\"dial-starting\"), so a poll running across a daemon boot replaced the
+ladder's 2s/4s/8s rungs with 8-12 born-dead dials, each abandoned parallel
+connection later EOFing daemon-side.
+
+So the poll dials only when nobody else is already dialing:
+
+  1. no reconnect timer pends (`agent-repl--uds-reconnect-timer') — a
+     retry is already coming, and the ladder owns its own pacing;
+  2. no dial is in flight (`agent-repl--uds-connection-state' is
+     `dialing') — the answer to that dial has not arrived yet;
+  3. the link is not already up.
+
+These are the ladder's OWN state variables, deliberately: readiness must
+compose with the ladder rather than run a second, competing mechanism."
+  (and (not (agent-repl--uds-connected-p))
+       (not (timerp agent-repl--uds-reconnect-timer))
+       (not (eq agent-repl--uds-connection-state 'dialing))))
+
 (defun agent-repl--frontend-after-ready (on-ready on-failure &optional ws)
   "Run ON-READY once the frontend UDS snapshot establishes readiness.
 `agent-repl--ensure-frontend-daemon' returns as soon as the process is
 SPAWNED, which precedes the socket bind; polling closes that gap.  Each
 attempt dials when the link is down (`agent-repl-uds-connect' in its
-readiness-owned mode).  The UDS filter dispatches the connect snapshot; this
+readiness-owned mode) AND the reconnect ladder is not already handling it —
+see `agent-repl--frontend-ready-should-dial-p'.  The UDS filter dispatches the connect snapshot; this
 function never pumps Emacs process I/O or waits on the main thread.  ON-FAILURE
 receives a diagnostic string after the bounded dial budget expires.
 
@@ -286,10 +313,20 @@ Returns `:pending' when readiness is asynchronous, otherwise `:ready'."
            (cond
             ((agent-repl--frontend-daemon-ready-p) (finish 'ready))
             ((>= attempt budget)
-             (finish 'timeout (format "daemon at %s never became ready" agent-repl-uds-socket-path)))
+             ;; The link can come up BETWEEN the readiness check above and
+             ;; this branch's own tick (observed: link up 11:35:50, timeout
+             ;; claimed 11:35:53).  Re-read readiness once, from the same
+             ;; source of truth, before declaring a timeout: a daemon that is
+             ;; ready is ready, and losing the race to the budget is not a
+             ;; failure.  Ready wins.
+             (if (agent-repl--frontend-daemon-ready-p)
+                 (finish 'ready)
+               (finish 'timeout (format "daemon at %s never became ready"
+                                        agent-repl-uds-socket-path))))
             (t
              (setq attempt (1+ attempt))
-             (unless (agent-repl--uds-connected-p) (agent-repl-uds-connect nil t))
+             (when (agent-repl--frontend-ready-should-dial-p)
+               (agent-repl-uds-connect nil t))
              (agent-repl--latch-set-timer
               latch 'poll (agent-repl--uds-run-timer
                            agent-repl--frontend-ready-poll-interval #'tick))))))

@@ -138,6 +138,110 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
       (funcall (pop ticks))
       (should (equal events '(failed))))))
 
+(ert-deftest agent-repl-test-frontend-ready-tick-defers-to-pending-reconnect ()
+  "A pending reconnect timer means a retry is coming; the poll must not dial."
+  ;; Arrange
+  (let ((agent-repl-frontend-ready-attempts 5)
+        (agent-repl--uds-reconnect-timer (run-with-timer 3600 nil #'ignore))
+        (agent-repl--uds-connection-state 'failed)
+        (dials 0) ticks)
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-repl--frontend-daemon-ready-p) (lambda () nil))
+                  ((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+                  ((symbol-function 'agent-repl-uds-connect)
+                   (lambda (&rest _) (cl-incf dials) nil))
+                  ((symbol-function 'agent-repl--uds-run-timer)
+                   (lambda (_delay fn) (push fn ticks) 'timer)))
+          ;; Act — a simulated boot window of readiness polls.
+          (agent-repl--frontend-after-ready #'ignore #'ignore)
+          (dotimes (_ 3) (funcall (pop ticks)))
+          ;; Assert
+          (should (= 0 dials)))
+      (cancel-timer agent-repl--uds-reconnect-timer))))
+
+(ert-deftest agent-repl-test-frontend-ready-tick-dials-when-no-reconnect-pends ()
+  "With no ladder retry pending and no dial in flight, the poll dials itself."
+  ;; Arrange
+  (let ((agent-repl-frontend-ready-attempts 5)
+        (agent-repl--uds-reconnect-timer nil)
+        (agent-repl--uds-connection-state 'failed)
+        (dials 0) ticks)
+    (cl-letf (((symbol-function 'agent-repl--frontend-daemon-ready-p) (lambda () nil))
+              ((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+              ((symbol-function 'agent-repl-uds-connect)
+               (lambda (&rest _) (cl-incf dials) nil))
+              ((symbol-function 'agent-repl--uds-run-timer)
+               (lambda (_delay fn) (push fn ticks) 'timer)))
+      ;; Act
+      (agent-repl--frontend-after-ready #'ignore #'ignore)
+      ;; Assert
+      (should (= 1 dials)))))
+
+(ert-deftest agent-repl-test-frontend-ready-tick-defers-to-dial-in-flight ()
+  "A dial already in flight owns the answer; the poll does not start another."
+  ;; Arrange
+  (let ((agent-repl-frontend-ready-attempts 5)
+        (agent-repl--uds-reconnect-timer nil)
+        (agent-repl--uds-connection-state 'dialing)
+        (dials 0) ticks)
+    (cl-letf (((symbol-function 'agent-repl--frontend-daemon-ready-p) (lambda () nil))
+              ((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+              ((symbol-function 'agent-repl-uds-connect)
+               (lambda (&rest _) (cl-incf dials) nil))
+              ((symbol-function 'agent-repl--uds-run-timer)
+               (lambda (_delay fn) (push fn ticks) 'timer)))
+      ;; Act
+      (agent-repl--frontend-after-ready #'ignore #'ignore)
+      ;; Assert
+      (should (= 0 dials)))))
+
+(ert-deftest agent-repl-test-frontend-ready-boot-window-emits-no-born-dead-warning ()
+  "Across a boot window under the ladder, readiness produces no dial warnings."
+  ;; Arrange
+  (let ((agent-repl-frontend-ready-attempts 20)
+        (agent-repl--uds-reconnect-timer (run-with-timer 3600 nil #'ignore))
+        (agent-repl--uds-connection-state 'failed)
+        warnings ticks)
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-repl--frontend-daemon-ready-p) (lambda () nil))
+                  ((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+                  ((symbol-function 'agent-repl--warn)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings)))
+                  ((symbol-function 'agent-repl-uds-connect)
+                   (lambda (&rest _)
+                     (agent-repl--warn nil "uds-connect: dial born dead")
+                     nil))
+                  ((symbol-function 'agent-repl--uds-run-timer)
+                   (lambda (_delay fn) (push fn ticks) 'timer)))
+          ;; Act
+          (agent-repl--frontend-after-ready #'ignore #'ignore)
+          (dotimes (_ 12) (funcall (pop ticks)))
+          ;; Assert
+          (should-not warnings))
+      (cancel-timer agent-repl--uds-reconnect-timer))))
+
+(ert-deftest agent-repl-test-frontend-ready-timeout-rechecks-readiness-once ()
+  "Readiness reached a tick before the budget expired still wins the latch."
+  ;; Arrange
+  (let ((agent-repl-frontend-ready-attempts 1)
+        (agent-repl--uds-reconnect-timer nil)
+        (agent-repl--uds-connection-state 'dialing)
+        ;; The link comes up between the budget tick's readiness check and
+        ;; its re-check: nil, nil, nil, then ready.
+        (answers (list nil nil nil t))
+        ticks events)
+    (cl-letf (((symbol-function 'agent-repl--frontend-daemon-ready-p)
+               (lambda () (pop answers)))
+              ((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+              ((symbol-function 'agent-repl--uds-run-timer)
+               (lambda (_delay fn) (push fn ticks) 'timer)))
+      (agent-repl--frontend-after-ready
+       (lambda () (push 'ready events)) (lambda (_detail) (push 'failed events)))
+      ;; Act
+      (funcall (pop ticks))
+      ;; Assert
+      (should (equal events '(ready))))))
+
 (ert-deftest agent-repl-test-frontend-after-open-workspace-preserves-continuation-order ()
   "openWorkspace returns before its ack and completes only through success."
   (let (success failure ack)
