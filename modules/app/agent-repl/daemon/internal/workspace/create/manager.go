@@ -393,7 +393,61 @@ func (m *Manager) materializationHeldDeadline() time.Duration {
 // The durable latch is written FIRST.  A daemon that dies between the report
 // and the latch would re-report on every sweep forever, and an escalation that
 // repeats is one nobody reads.
-func (m *Manager) escalateHeldMaterialization(ctx context.Context, job Job, heldMs int64) {
+// heldMaterializationReason names WHICH wait ran past the deadline. The two
+// are different faults with different remedies and must never be reported in
+// the same words: one is a host that never answered, the other is a host that
+// answered and a gate that never opened behind it.
+type heldMaterializationReason struct {
+	// tag is the machine-readable cause in the error-level record.
+	tag string
+	// describe renders the user-visible sentence for one held job.
+	describe func(job Job, heldMs int64) string
+}
+
+var (
+	heldAwaitingHost = heldMaterializationReason{
+		tag: "no_host_acknowledgement",
+		describe: func(job Job, heldMs int64) string {
+			return fmt.Sprintf("workspace %q was built but no editor materialized it after %ds and %d requests; it is intact on disk at %s and appears when the editor reconnects",
+				firstNonEmptyName(job.FinalName, job.Request.Name), heldMs/1000, job.MaterializationRequests, job.WorktreePath)
+		},
+	}
+	heldPublicationRelease = heldMaterializationReason{
+		tag: "publication_release_never_opened",
+		describe: func(job Job, heldMs int64) string {
+			return fmt.Sprintf("workspace %q was built and the editor acknowledged it, but its session frames have been gated for %ds because the publication release never opened; the worktree at %s and session %s are intact and the workspace stays blank until the release succeeds",
+				firstNonEmptyName(job.FinalName, job.Request.Name), heldMs/1000, job.WorktreePath, job.SessionID)
+		},
+	}
+)
+
+// publicationStillGated reports a job the host HAS materialized whose session
+// frames are nonetheless still held, because the publication release never
+// completed.
+//
+// IT IS A SECOND SHAPE OF THE SAME WAIT, and it used to have no reporter at
+// all.  The awaiting-host sweep keyed on StateAwaitingEmacs alone, so a job
+// that got its acknowledgement and then lost its release left the ordinary
+// escalation behind: the durable record said materialized, the gate in front
+// of the frames said held, and the only trace was one hold record per frame —
+// 6294 of them for one workspace, none of them a fault.  A hold nobody can be
+// told about is the defect, independent of whatever made the release fail.
+//
+// A job with no session id is deliberately NOT gated-stuck: its identity is
+// not settled yet, so it is still on the ordinary bring-up path.
+func publicationStillGated(job Job) bool {
+	if !job.Materialized || job.PublicationReleased || job.SessionID == "" {
+		return false
+	}
+	// StateFailed counts.  A creation that failed AFTER the host materialized it
+	// still owns a real worktree and a real session, and leaving its frames
+	// gated renders the workspace blank on top of the failure — the user is
+	// denied the very session state that explains what went wrong.
+	return job.State == StateEmacsMaterialized || job.State == StatePromptSubmitting ||
+		job.State == StateReady || job.State == StateFailed
+}
+
+func (m *Manager) escalateHeldMaterialization(ctx context.Context, job Job, heldMs int64, reason heldMaterializationReason) {
 	latched, err := m.cfg.Store.Update(job.ID, func(j *Job) error {
 		j.MaterializationEscalated = true
 		return nil
@@ -402,13 +456,12 @@ func (m *Manager) escalateHeldMaterialization(ctx context.Context, job Job, held
 		m.cfg.Logf("workspace-create: held-materialization escalation could not latch id=%s error=%v; nothing is reported this sweep and the next one retries", job.ID, err)
 		return
 	}
-	m.cfg.Errorf("workspace-create: MATERIALIZATION HELD PAST DEADLINE id=%s name=%q worktree=%s session=%s held_ms=%d requests=%d deadline_ms=%d — no host ever acknowledged this workspace; it exists on disk with a live session and its initial prompt is undelivered, and it will materialize on the next host connect",
-		latched.ID, latched.FinalName, latched.WorktreePath, latched.SessionID, heldMs, latched.MaterializationRequests, m.materializationHeldDeadline().Milliseconds())
+	m.cfg.Errorf("workspace-create: MATERIALIZATION HELD PAST DEADLINE id=%s name=%q worktree=%s session=%s state=%s reason=%s held_ms=%d requests=%d deadline_ms=%d — %s",
+		latched.ID, latched.FinalName, latched.WorktreePath, latched.SessionID, latched.State, reason.tag, heldMs, latched.MaterializationRequests, m.materializationHeldDeadline().Milliseconds(), reason.describe(latched, heldMs))
 	payload, err := json.Marshal(WorkspaceCreateFailure{
 		JobID:         latched.ID,
 		RequestedName: latched.Request.Name,
-		Error: fmt.Sprintf("workspace %q was built but no editor materialized it after %ds and %d requests; it is intact on disk at %s and appears when the editor reconnects",
-			firstNonEmptyName(latched.FinalName, latched.Request.Name), heldMs/1000, latched.MaterializationRequests, latched.WorktreePath),
+		Error:         reason.describe(latched, heldMs),
 	})
 	if err != nil {
 		m.cfg.Errorf("workspace-create: HELD MATERIALIZATION NOT SURFACED id=%s reason=payload error=%v", latched.ID, err)
@@ -456,7 +509,8 @@ func (m *Manager) SweepAwaitingHost(ctx context.Context) error {
 	interval := m.materializationRequestInterval().Milliseconds()
 	deadline := m.materializationHeldDeadline().Milliseconds()
 	for _, job := range jobs {
-		if job.State != StateAwaitingEmacs {
+		gated := publicationStillGated(job)
+		if job.State != StateAwaitingEmacs && !gated {
 			continue
 		}
 		// A job persisted before this cadence existed, or one whose park was
@@ -475,7 +529,11 @@ func (m *Manager) SweepAwaitingHost(ctx context.Context) error {
 		}
 		heldMs := nowMs - job.AwaitingEmacsSinceMs
 		if heldMs >= deadline && !job.MaterializationEscalated {
-			m.escalateHeldMaterialization(ctx, job, heldMs)
+			reason := heldAwaitingHost
+			if gated {
+				reason = heldPublicationRelease
+			}
+			m.escalateHeldMaterialization(ctx, job, heldMs, reason)
 			continue
 		}
 		// AN ESCALATED JOB STOPS BEING RE-ASKED.  The host has had every
@@ -487,6 +545,26 @@ func (m *Manager) SweepAwaitingHost(ctx context.Context) error {
 			continue
 		}
 		if job.MaterializationLastRequestMs != 0 && nowMs-job.MaterializationLastRequestMs < interval {
+			continue
+		}
+		// A GATED JOB IS NOT RE-ANNOUNCED, IT IS RE-RELEASED.  The host already
+		// answered — re-asking it to materialize a workspace it has would be the
+		// daemon repeating a question that was answered — and the one step that
+		// did not complete is the publication release.  MarkMaterialized is
+		// idempotent and re-drives exactly that step from the durable record, so
+		// a release that failed on a transient (no subscriber yet at boot, a
+		// racing bounce) completes here instead of leaving the workspace blank.
+		if gated {
+			m.cfg.Logf("workspace-create: RE-RELEASING held session publication id=%s name=%q worktree=%s session=%s held_ms=%d — the host acknowledged this workspace but its frames are still gated", job.ID, job.FinalName, job.WorktreePath, job.SessionID, heldMs)
+			if err := m.MarkMaterialized(ctx, job.ID); err != nil {
+				m.cfg.Logf("workspace-create: session-publication RE-RELEASE FAILED id=%s held_ms=%d error=%v; the frames stay gated and the next sweep tries again until the deadline escalates it", job.ID, heldMs, err)
+			}
+			if _, err := m.cfg.Store.Update(job.ID, func(j *Job) error {
+				j.MaterializationLastRequestMs = nowMs
+				return nil
+			}); err != nil {
+				m.cfg.Logf("workspace-create: session-publication re-release checkpoint FAILED id=%s error=%v; the next sweep may repeat it (the release is idempotent)", job.ID, err)
+			}
 			continue
 		}
 		available := Available{JobID: job.ID, Name: job.FinalName, Branch: job.Branch, BaseCommit: job.ResolvedBaseCommit, WorktreePath: job.WorktreePath, SessionID: job.SessionID, Request: job.Request}

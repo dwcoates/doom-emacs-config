@@ -32,6 +32,7 @@ func migrate(db *sql.DB) error {
 			permission_mode             TEXT    NOT NULL DEFAULT '',
 			config_dir                  TEXT    NOT NULL DEFAULT '',
 			claude_session_id           TEXT    NOT NULL DEFAULT '',
+			config_dir_override         TEXT    NOT NULL DEFAULT '',
 			created_at                  TEXT    NOT NULL DEFAULT '',
 			terminal                    INTEGER NOT NULL DEFAULT 0,
 			death_reason                TEXT    NOT NULL DEFAULT '',
@@ -41,6 +42,7 @@ func migrate(db *sql.DB) error {
 			backfill_state              TEXT    NOT NULL DEFAULT '',
 			queued_prompts              TEXT    NOT NULL DEFAULT '',
 			last_turn_end_ms            INTEGER NOT NULL DEFAULT 0,
+			last_turn_end_backfilled    INTEGER NOT NULL DEFAULT 0,
 			hibernated                  INTEGER NOT NULL DEFAULT 0,
 			hibernation_cause           TEXT    NOT NULL DEFAULT '',
 			hibernated_since_ms         INTEGER NOT NULL DEFAULT 0,
@@ -103,6 +105,8 @@ func migrate(db *sql.DB) error {
 // two daemons migrating the same store concurrently issue the same statements.
 var sessionRecordAddedColumns = []struct{ name, ddl string }{
 	{"last_turn_end_ms", "INTEGER NOT NULL DEFAULT 0"},
+	{"last_turn_end_backfilled", "INTEGER NOT NULL DEFAULT 0"},
+	{"config_dir_override", "TEXT NOT NULL DEFAULT ''"},
 	{"hibernated", "INTEGER NOT NULL DEFAULT 0"},
 	{"hibernation_cause", "TEXT NOT NULL DEFAULT ''"},
 	{"hibernated_since_ms", "INTEGER NOT NULL DEFAULT 0"},
@@ -175,9 +179,9 @@ func loadState(q querier, logf func(string, ...any)) (map[string]Record, map[Con
 	records := map[string]Record{}
 	checkpoints := map[ConversationIdentity]ConversationCheckpoint{}
 
-	rows, err := q.Query(`SELECT session_id, cwd, model, permission_mode, config_dir, claude_session_id,
+	rows, err := q.Query(`SELECT session_id, cwd, model, permission_mode, config_dir, config_dir_override, claude_session_id,
 		created_at, terminal, death_reason, terminal_at, last_seq, newest_clear_or_compact_seq,
-		backfill_state, queued_prompts, last_turn_end_ms, hibernated, hibernation_cause,
+		backfill_state, queued_prompts, last_turn_end_ms, last_turn_end_backfilled, hibernated, hibernation_cause,
 		hibernated_since_ms, hibernation_cutoff_ms, hibernation_elapsed_ms,
 		hibernation_ttl_ms, rewind_previous_vendor_session_id, rewind_retained_leaf_uuid,
 		rewind_dropped_turn_ids, death_resolved_at_ms FROM session_record`)
@@ -192,9 +196,9 @@ func loadState(q querier, logf func(string, ...any)) (map[string]Record, map[Con
 			queued string
 		)
 		if err := rows.Scan(&rec.SessionID, &rec.CWD, &rec.Model, &rec.PermissionMode, &rec.ConfigDir,
-			&rec.ClaudeSessionID, &rec.CreatedAt, &rec.Terminal, &rec.DeathReason, &rec.TerminalAt,
+			&rec.ConfigDirOverride, &rec.ClaudeSessionID, &rec.CreatedAt, &rec.Terminal, &rec.DeathReason, &rec.TerminalAt,
 			&rec.LastSeq, &rec.NewestClearOrCompactSeq, &rec.BackfillState, &queued,
-			&rec.LastTurnEndMs, &rec.Hibernated, &rec.Hibernation.Cause, &rec.Hibernation.SinceMs,
+			&rec.LastTurnEndMs, &rec.LastTurnEndBackfilled, &rec.Hibernated, &rec.Hibernation.Cause, &rec.Hibernation.SinceMs,
 			&rec.Hibernation.CutoffMs, &rec.Hibernation.ElapsedMs, &rec.Hibernation.TTLMs,
 			&rec.Rewind.PreviousVendorSessionID, &rec.Rewind.RetainedLeafUUID,
 			&rec.Rewind.DroppedTurnIDs, &rec.DeathResolvedAtMs); err != nil {
@@ -294,13 +298,13 @@ func mergeCheckpoint(dst map[ConversationIdentity]ConversationCheckpoint, cp Con
 // comparison by construction, instead of leaving a new field's changes
 // silently unwritten until someone remembered to extend a second predicate.
 const sessionRecordInsert = `INSERT OR REPLACE INTO session_record(session_id, cwd, model, permission_mode,
-	config_dir, claude_session_id, created_at, terminal, death_reason, terminal_at,
+	config_dir, config_dir_override, claude_session_id, created_at, terminal, death_reason, terminal_at,
 	last_seq, newest_clear_or_compact_seq, backfill_state, queued_prompts,
-	last_turn_end_ms, hibernated, hibernation_cause, hibernated_since_ms,
+	last_turn_end_ms, last_turn_end_backfilled, hibernated, hibernation_cause, hibernated_since_ms,
 	hibernation_cutoff_ms, hibernation_elapsed_ms, hibernation_ttl_ms,
 	rewind_previous_vendor_session_id, rewind_retained_leaf_uuid, rewind_dropped_turn_ids,
 	death_resolved_at_ms)
-	VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 
 func sessionRecordValues(rec Record) ([]any, error) {
 	queued, err := encodeQueuedPrompts(rec.QueuedPrompts)
@@ -309,9 +313,9 @@ func sessionRecordValues(rec Record) ([]any, error) {
 	}
 	return []any{
 		rec.SessionID, rec.CWD, rec.Model, rec.PermissionMode, rec.ConfigDir,
-		rec.ClaudeSessionID, rec.CreatedAt, rec.Terminal, rec.DeathReason, rec.TerminalAt,
+		rec.ConfigDirOverride, rec.ClaudeSessionID, rec.CreatedAt, rec.Terminal, rec.DeathReason, rec.TerminalAt,
 		int64(rec.LastSeq), int64(rec.NewestClearOrCompactSeq), rec.BackfillState, queued,
-		rec.LastTurnEndMs, rec.Hibernated, rec.Hibernation.Cause, rec.Hibernation.SinceMs,
+		rec.LastTurnEndMs, rec.LastTurnEndBackfilled, rec.Hibernated, rec.Hibernation.Cause, rec.Hibernation.SinceMs,
 		rec.Hibernation.CutoffMs, rec.Hibernation.ElapsedMs, rec.Hibernation.TTLMs,
 		rec.Rewind.PreviousVendorSessionID, rec.Rewind.RetainedLeafUUID, rec.Rewind.DroppedTurnIDs,
 		rec.DeathResolvedAtMs,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -216,17 +217,24 @@ func (f *fixture) advance(d time.Duration) {
 	f.clock = f.clock.Add(d)
 }
 
-func (f *fixture) log(format string, _ ...any) {
+// RECORDS ARE STORED RENDERED, not as their format strings. A record's
+// distinguishing detail — which job, which cause — travels in the ARGUMENTS,
+// so a fixture holding only formats can assert that an escalation happened but
+// never that it named the right fault. Every literal a test matches on is a
+// literal of the format too, so rendering strengthens the assertions without
+// weakening any.
+func (f *fixture) log(format string, args ...any) {
 	f.logMu.Lock()
 	defer f.logMu.Unlock()
-	f.logs = append(f.logs, format)
+	f.logs = append(f.logs, fmt.Sprintf(format, args...))
 }
 
-func (f *fixture) logError(format string, _ ...any) {
+func (f *fixture) logError(format string, args ...any) {
 	f.logMu.Lock()
 	defer f.logMu.Unlock()
-	f.errorLogs = append(f.errorLogs, format)
-	f.logs = append(f.logs, format)
+	rendered := fmt.Sprintf(format, args...)
+	f.errorLogs = append(f.errorLogs, rendered)
+	f.logs = append(f.logs, rendered)
 }
 
 // loggedErrorFormat reports whether any ERROR-severity record's format contains
@@ -1749,7 +1757,7 @@ func TestRejectedMergeLogNamesWorkspaceAndProjectDir(t *testing.T) {
 	}
 
 	// Assert
-	if !f.loggedFormat(`workspace=%q project_dir=%q`) {
+	if !f.loggedFormat(`workspace="DWC/feature" project_dir=""`) {
 		t.Fatalf("logs = %v, want a rejection naming both the workspace and the project_dir", f.logs)
 	}
 }
@@ -2348,5 +2356,165 @@ func TestHostActionWorkerRunsTheAwaitingHostSweep(t *testing.T) {
 	// Assert.
 	if f.available.calls != before+1 {
 		t.Fatalf("available publishes = %d, want %d", f.available.calls, before+1)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The publication hold: a job the host HAS materialized whose frames are still
+// gated because the release never opened. It had no reporter and no retry, so
+// one workspace sat behind a closed gate for 25 minutes and 6294 hold records
+// with nothing above info severity to say so.
+// ---------------------------------------------------------------------------
+
+// gateStuck parks a job on the host, materializes it with a FAILING release,
+// and returns it in the exact durable shape the wedge produced: materialized,
+// never published-released.
+func gateStuck(t *testing.T, f *fixture, id string) Job {
+	t.Helper()
+	parkOnHost(t, f, id)
+	f.releases.err = errors.New("release open lost publication decision")
+	if err := f.manager.MarkMaterialized(context.Background(), id); err == nil {
+		t.Fatalf("MarkMaterialized with a failing release: err = nil, want the release failure")
+	}
+	got := job(t, f.store, id)
+	if !got.Materialized || got.PublicationReleased {
+		t.Fatalf("job after the failed release = %#v, want materialized and unreleased", got)
+	}
+	return got
+}
+
+func TestPublicationStillGatedReportsAMaterializedJobWhoseReleaseNeverOpened(t *testing.T) {
+	// Arrange
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	stuck := gateStuck(t, f, "gated")
+
+	// Act / Assert
+	if !publicationStillGated(stuck) {
+		t.Fatalf("publicationStillGated(%#v) = false, want true", stuck)
+	}
+}
+
+func TestPublicationStillGatedIgnoresAJobWithNoSessionYet(t *testing.T) {
+	// Arrange — a job whose identity is not settled cannot be gate-stuck; it is
+	// still on the ordinary bring-up path.
+	unsettled := Job{ID: "early", State: StateEmacsMaterialized, Materialized: true}
+
+	// Act / Assert
+	if publicationStillGated(unsettled) {
+		t.Fatal("publicationStillGated on a session-less job = true, want false")
+	}
+}
+
+func TestPublicationStillGatedIgnoresAReleasedJob(t *testing.T) {
+	// Arrange
+	released := Job{ID: "done", State: StateReady, SessionID: "s_1", Materialized: true, PublicationReleased: true}
+
+	// Act / Assert
+	if publicationStillGated(released) {
+		t.Fatal("publicationStillGated on a released job = true, want false")
+	}
+}
+
+func TestAwaitingHostSweepRedrivesAHeldPublicationRelease(t *testing.T) {
+	// Arrange — the wedge, with the transient release failure now cleared: the
+	// sweep must complete the step that did not, rather than leaving the
+	// workspace blank behind a gate the durable record says should be open.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	gateStuck(t, f, "gated")
+	f.releases.err = nil
+
+	// Act
+	f.advance(defaultMaterializationRequestInterval)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert
+	if got := job(t, f.store, "gated"); !got.PublicationReleased {
+		t.Fatalf("job after the sweep = %#v, want the publication released", got)
+	}
+}
+
+func TestAwaitingHostSweepNeverReAnnouncesAGatedJobToTheHost(t *testing.T) {
+	// Arrange — the host already answered for this workspace, so re-asking it
+	// to materialize one it holds is the daemon repeating an answered question.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	gateStuck(t, f, "gated")
+	f.releases.err = nil
+	before := f.available.calls
+
+	// Act
+	f.advance(defaultMaterializationRequestInterval)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert
+	if f.available.calls != before {
+		t.Fatalf("available publishes = %d, want %d (a gated job is re-released, never re-announced)", f.available.calls, before)
+	}
+}
+
+func TestHeldPublicationPastTheDeadlineIsReportedAtErrorSeverity(t *testing.T) {
+	// Arrange — the release keeps failing, which is the shape that used to hold
+	// forever in silence.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	gateStuck(t, f, "gated")
+
+	// Act
+	f.advance(defaultMaterializationHeldDeadline)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert
+	if !f.loggedErrorFormat("publication_release_never_opened") {
+		t.Fatalf("error records = %v, want the held-publication escalation naming its own cause", f.errorLogs)
+	}
+}
+
+func TestHeldPublicationEscalationSurfacesAUserVisibleFailure(t *testing.T) {
+	// Arrange
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	gateStuck(t, f, "gated")
+
+	// Act
+	f.advance(defaultMaterializationHeldDeadline)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert — the user is told the workspace is blank because its frames are
+	// gated, not that no editor ever answered.
+	var notice *HostAction
+	for i := range f.actions.items {
+		if f.actions.items[i].Type == HostActionTypeWorkspaceMaterializationHeld {
+			notice = &f.actions.items[i]
+		}
+	}
+	if notice == nil {
+		t.Fatalf("host actions = %#v, want a materialization-held notice", f.actions.items)
+	}
+	if !strings.Contains(string(notice.Payload), "publication release never opened") {
+		t.Fatalf("notice payload = %s, want the gated-frames explanation", notice.Payload)
+	}
+}
+
+func TestSessionPublicationDecisionCarriesTheJobsOwnSession(t *testing.T) {
+	// Arrange — a frame that arrives BEFORE the job has a session at all is
+	// exactly what used to memoize an empty session id as the job's identity,
+	// which the release could then never match.
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	if _, _, err := f.store.Enqueue(Job{ID: "held", Request: Request{Name: "DWC/held", GitRoot: "/repo"}, State: StateAwaitingEmacs, WorktreePath: "/worktrees/held", SessionID: "s_held"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	decision, err := SessionPublicationDecision(f.store, "/worktrees/held", "")
+
+	// Assert
+	if err != nil || decision.SessionID != "s_held" {
+		t.Fatalf("decision = %#v err=%v, want the job's own session s_held", decision, err)
 	}
 }

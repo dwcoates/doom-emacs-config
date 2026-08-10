@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -51,6 +52,19 @@ func TestConversationEvidence(t *testing.T) {
 			name: "a handshake-only record names a uuid but proves no conversation",
 			records: []registry.Record{
 				{SessionID: "s1", CWD: "/w", ConfigDir: "/cfg", ClaudeSessionID: "uuid-1"},
+			},
+			want: conversationEvidence{available: true, conversations: []string{"uuid-1"}},
+		},
+		{
+			// THE BACKFILLED STAMP. LegacyTurnEndStamps writes LastTurnEndMs
+			// from the workspace's state history seconds after bring-up, for a
+			// session whose turn ends the daemon never saw. Counting it as a
+			// turn is what made every freshly created workspace look like one
+			// that had already spoken, killing the handshake waiver and leaving
+			// the workspace permanently unstartable.
+			name: "a backfilled last-turn-end is not proof a turn ever ran",
+			records: []registry.Record{
+				{SessionID: "s1", CWD: "/w", ConfigDir: "/cfg", ClaudeSessionID: "uuid-1", LastTurnEndMs: 1786117000000, LastTurnEndBackfilled: true},
 			},
 			want: conversationEvidence{available: true, conversations: []string{"uuid-1"}},
 		},
@@ -283,5 +297,88 @@ func TestTheRefusalNamesTheConversationItProtects(t *testing.T) {
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "uuid-live") {
 		t.Fatalf("err = %v, want the protected conversation named", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE HANDSHAKE RUNG ON THE CREATE GATE. A resume target the DAEMON resolved,
+// whose transcript is missing, in a workspace that has never run a turn, is the
+// uuid the vendor minted at bring-up — not a conversation to protect. Refusing
+// it destroys nothing and leaves the workspace permanently unstartable, since
+// every later create resolves the same dead uuid.
+// ---------------------------------------------------------------------------
+
+func TestCreateWaivesADaemonResolvedHandshakeTarget(t *testing.T) {
+	// Arrange — the exact shape a workspace wedged in: a resolved uuid with no
+	// transcript, in a workspace nothing has ever spoken in.
+	h := newHarness(t)
+	cfg := t.TempDir()
+
+	// Act
+	id, err := createSessionErr(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q,"resume":"handshake-uuid","resume_daemon_resolved":true}`, cfg))
+
+	// Assert — the create completes with no conversation to resume, rather than
+	// hard-failing on a uuid nothing was ever written under.
+	if err != nil {
+		t.Fatalf("CreateSession over a handshake-only resolved target: %v", err)
+	}
+	if rec, ok := h.reg.Get(id); !ok || rec.ClaudeSessionID != "" {
+		t.Fatalf("record = %+v (ok=%v), want no conversation pointer", rec, ok)
+	}
+}
+
+func TestCreateStillRefusesACallerNamedTargetWithNoTranscript(t *testing.T) {
+	// Arrange — the same missing transcript, but the CALLER named it. That is a
+	// continuity commitment, and answering it with a different conversation is
+	// exactly what the gate exists to prevent.
+	h := newHarness(t)
+	cfg := t.TempDir()
+
+	// Act
+	_, err := createSessionErr(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q,"resume":"named-uuid"}`, cfg))
+
+	// Assert
+	var missing *ResumeTranscriptMissingError
+	if !errors.As(err, &missing) {
+		t.Fatalf("err = %v, want a *ResumeTranscriptMissingError", err)
+	}
+}
+
+func TestCreateStillRefusesAResolvedTargetInAWorkspaceThatHasSpoken(t *testing.T) {
+	// Arrange — a workspace with a conversation on record that ran a turn. A
+	// missing transcript here is a LOST conversation, and the waiver must not
+	// reach it.
+	h := newHarness(t)
+	cfg := t.TempDir()
+	if err := h.reg.Put(registry.Record{
+		SessionID: "s_old", CWD: "/w", ConfigDir: cfg,
+		ClaudeSessionID: "spoken-uuid", LastTurnEndMs: 1786117000000,
+	}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act
+	_, err := createSessionErr(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q,"resume":"gone-uuid","resume_daemon_resolved":true}`, cfg))
+
+	// Assert
+	var missing *ResumeTranscriptMissingError
+	if !errors.As(err, &missing) {
+		t.Fatalf("err = %v, want the refusal to stand for a workspace that has a conversation", err)
+	}
+}
+
+func TestResumeTargetCarriesAConversationIgnoresABackfilledStamp(t *testing.T) {
+	// Arrange / Act / Assert — the one-line rule the whole waiver turns on.
+	backfilled := registry.Record{LastTurnEndMs: 1786117000000, LastTurnEndBackfilled: true}
+	if resumeTargetCarriesAConversation(backfilled) {
+		t.Fatal("a backfilled last-turn-end counted as an observed turn")
+	}
+}
+
+func TestResumeTargetCarriesAConversationHonorsAnObservedTurn(t *testing.T) {
+	// Arrange / Act / Assert
+	observed := registry.Record{LastTurnEndMs: 1786117000000}
+	if !resumeTargetCarriesAConversation(observed) {
+		t.Fatal("an observed turn end did not count as a conversation")
 	}
 }
