@@ -1353,7 +1353,7 @@ func (s *Server) writeLoop(c conn, cl *client) {
 // commands still run one at a time in arrival order, and each is still
 // answered only once it has actually run.
 func (s *Server) readLoop(c conn, cl *client) {
-	lanes := newCommandLanes(s.logf, s.processCommand)
+	lanes := newCommandLanes(s.logf, s.logVerbosef, s.processCommand, s.answerSuperseded)
 	// inbound is why this loop stopped, and it is what the teardown reports.
 	// It is written before the deferred teardown runs and read only by it, on
 	// this goroutine, so it needs no synchronization. It starts UNRECORDED on
@@ -1484,6 +1484,56 @@ func (s *Server) processCommand(t *commandTicket) {
 	// puts those bytes on the socket, and t.ackDisposed is what observes that
 	// moment. The deferred settle above releases the in-flight gauge; whichever
 	// of the two happens second writes this command's one latency record.
+}
+
+// supersededAckNote is the account a coalesced resync's ack carries. It is
+// prose only — no client parses it — and it exists so a captured ack explains
+// itself without a reader having to correlate the daemon log.
+const supersededAckNote = "resync superseded by a newer resync on this workspace's lane; the newer replay answers this request"
+
+// answerSuperseded answers a command the lanes dropped by coalescing, and it is
+// the reason dropping one is not a loss.
+//
+// THE SHAPE IS ok=true, deliberately, after reading what both clients do with
+// each alternative:
+//
+//   - A NACK reaches the webapp's `onFailure` sink (command-dispatch.ts) and
+//     Emacs's refusal copy (core.el), so every coalesced entry during a flood
+//     would open a user-visible refusal for a request the daemon is in fact
+//     honoring. `session.reconnect_superseded` is worse still: its remedy text
+//     tells the user to reload the webview.
+//   - An ok ack resolves the webapp's pending promise and ends Emacs's wait
+//     with no card, and NEITHER client re-sends on it. ConnectResync disarms
+//     before dispatching and re-arms only on an identity-mismatch rejection,
+//     so an ok ack cannot feed the flood.
+//
+// It is not a lie about work not done: the superseding resync sits on the SAME
+// lane's FIFO, ahead of every command queued behind it, and the lanes drain
+// even through close(). The replay this entry asked for happens — it is simply
+// performed once for all of them.
+func (s *Server) answerSuperseded(t *commandTicket) {
+	cl, cmd := t.cl, t.cmd
+	ack := &frontendv1.CommandAck{
+		RequestId: cmd.GetRequestId(),
+		Ok:        true,
+		Error:     supersededAckNote,
+	}
+	// The ticket is settled on EVERY path out, exactly as processCommand does
+	// it, so a coalesced command can never leak the in-flight gauge or skip its
+	// one latency record. Processing is zero: this command never ran.
+	defer func() { t.finish(ack, 0) }()
+	data, err := marshalFrame(CommandAckFrame(ack))
+	if err != nil {
+		s.logf("frontend: marshal superseded resync ack request_id=%s: %v", ack.GetRequestId(), err)
+		t.ackUndeliverable(fmt.Errorf("frontend: marshal superseded resync ack: %w", err))
+		return
+	}
+	// Declared before the push for the same reason processCommand declares it
+	// there: the writer may dispose of these bytes the instant they are queued.
+	t.expectAckDelivery()
+	// The CONTROL lane, unlike a performed resync's ack: this one carries no
+	// snapshot, so there is no bulk frame it must stay behind.
+	s.enqueue(cl, outFrame{control: true, data: data, notify: t.ackDisposed})
 }
 
 // recordCommandLatency persists one command lifecycle sample — a completion, or
