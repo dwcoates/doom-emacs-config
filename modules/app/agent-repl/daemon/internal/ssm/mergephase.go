@@ -2,8 +2,8 @@ package ssm
 
 import (
 	"fmt"
-	"strings"
 
+	"claude-repld/internal/statedb"
 	"claude-repld/internal/workspace/merge"
 )
 
@@ -42,7 +42,7 @@ var mergeAxisStates = []string{
 // token can never leave a hand-written placeholder count behind — the two would
 // disagree silently until some workspace resolved the wrong phase.
 func mergeAxisPlaceholders() string {
-	return strings.TrimSuffix(strings.Repeat("?,", len(mergeAxisStates)), ",")
+	return statedb.Placeholders(len(mergeAxisStates))
 }
 
 // WorkspacesAtMergePhase reports every workspace whose LATEST merge-axis row

@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+
+	"claude-repld/internal/statedb"
 )
 
 // ErrTurnBridgeDeadClaim marks the ONE turn-bridge refusal that says nothing
@@ -630,12 +632,10 @@ func synthesizeTurnEndsExcept(tx *sql.Tx, workspace, claimantSessionID, cause st
 			SET end_seq=0, end_cause=?
 			WHERE workspace=? AND claimant_session_id=? AND end_seq IS NULL`
 	if len(spare) > 0 {
-		placeholders := make([]string, 0, len(spare))
 		for id := range spare {
-			placeholders = append(placeholders, "?")
 			args = append(args, id)
 		}
-		query += ` AND turn_id NOT IN (` + strings.Join(placeholders, ",") + `)`
+		query += ` AND turn_id NOT IN (` + statedb.Placeholders(len(spare)) + `)`
 	}
 	result, err := tx.Exec(query, args...)
 	if err != nil {
