@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -75,6 +76,10 @@ type queueEntry struct {
 	// prompt is actually delivered or cancelled, or a second crash in the
 	// window would lose the very prompt the row exists to save.
 	drainRowPending bool
+
+	// deliveryAttempts counts the FAILED delivery attempts this entry has
+	// made. It is what bounds the redelivery retry (armDeliveryRetry).
+	deliveryAttempts int
 
 	// unknownFate marks an entry whose LAST delivery attempt timed out on the
 	// shim's control ack rather than being refused.
@@ -1144,6 +1149,8 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 
 	m.mu.Lock()
 	e.unknownFate = e.unknownFate || unknownFate
+	e.deliveryAttempts++
+	attempt := e.deliveryAttempts
 	e.interjecting = false
 	e.classification = VerdictError
 	e.rationale = fmt.Sprintf("delivery failed: %v", err)
@@ -1156,6 +1163,121 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
 	m.publish(d.sessionID, view, recs)
+	// THE ENTRY NO LONGER WAITS FOR WHATEVER EDGE COMES NEXT. See
+	// armDeliveryRetry: an interject whose stop already ended the turn has no
+	// boundary left to wait for at all.
+	m.armDeliveryRetry(d, e.id, attempt)
+}
+
+// The bounded redelivery of a FAILED delivery.
+//
+// A failed delivery used to wait for an external edge — the next turn boundary,
+// a bring-up, or a user force — and nothing guaranteed one was coming. An
+// interject whose stop had already ended the turn had no boundary left to wait
+// for at all, so the prompt sat in the queue until something unrelated moved:
+// ninety-six seconds, in the observed case, for a prompt the user had watched
+// leave their editor.
+//
+// The retry is short, jittered and BOUNDED. Jittered because a fleet of
+// workspaces reconnecting to one shim host would otherwise retry in lockstep;
+// bounded because a prompt that cannot be delivered five times is not going to
+// be delivered by a sixth attempt, and the entry stays queued and visible with
+// its ERROR verdict rather than spinning forever.
+const (
+	deliveryRetryBase     = 2 * time.Second
+	deliveryRetryCeiling  = 15 * time.Second
+	deliveryRetryAttempts = 5
+)
+
+// deliveryRetryDelay is the backoff for one attempt, jittered by fraction (in
+// [0,1)). It is a pure function so the schedule is testable without a clock.
+func deliveryRetryDelay(attempt int, fraction float64) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	backoff := deliveryRetryBase
+	for i := 1; i < attempt && backoff < deliveryRetryCeiling; i++ {
+		backoff *= 2
+	}
+	if backoff > deliveryRetryCeiling {
+		backoff = deliveryRetryCeiling
+	}
+	// Jitter spreads the attempt over the half-interval ABOVE the backoff, so a
+	// retry is never earlier than the backoff it was chosen for.
+	return backoff + time.Duration(fraction*float64(backoff)/2)
+}
+
+// retryJitterFraction draws the jitter from crypto/rand, which is already this
+// file's randomness source. A failure to draw is not a reason to skip the retry
+// and not a reason to hide the draw: the schedule falls back to NO jitter,
+// which is the unjittered backoff rather than a wrong delay.
+func (m *Manager) retryJitterFraction() float64 {
+	var b [2]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		m.errorf("session-controller: delivery retry jitter UNDRAWABLE: %v — the retry keeps its backoff without jitter", err)
+		return 0
+	}
+	return float64(uint16(b[0])<<8|uint16(b[1])) / float64(1<<16)
+}
+
+// armDeliveryRetry schedules one bounded redelivery of a requeued entry.
+func (m *Manager) armDeliveryRetry(d *sessionController, entryID string, attempt int) {
+	if attempt > deliveryRetryAttempts {
+		m.warnf("session-controller: queue delivery RETRIES EXHAUSTED entry=%s session=%s ws=%q attempts=%d — the prompt stays queued and visible with its ERROR verdict, and is delivered by the next turn boundary or a user force",
+			entryID, d.sessionID, d.workspace, attempt-1)
+		return
+	}
+	delay := deliveryRetryDelay(attempt, m.retryJitterFraction())
+	m.logf("session-controller: queue delivery RETRY ARMED entry=%s session=%s ws=%q attempt=%d delay_ms=%d — a failed delivery used to wait for whatever external edge came next, which is why a prompt could sit for a minute and a half",
+		entryID, d.sessionID, d.workspace, attempt, delay.Milliseconds())
+	m.afterFunc(delay, func() { m.retryFailedDelivery(d, entryID) })
+}
+
+// retryFailedDelivery redelivers a requeued entry if the session is still in a
+// state that may take one.
+//
+// It selects nothing the ordinary drain would not: a turn in flight or a paused
+// queue means the boundary owns the next delivery, and this attempt stands
+// down rather than racing it.
+func (m *Manager) retryFailedDelivery(d *sessionController, entryID string) {
+	if m.rootCtx.Err() != nil {
+		return
+	}
+	m.mu.Lock()
+	e := d.queue.get(entryID)
+	switch {
+	case e == nil:
+		m.mu.Unlock()
+		m.logf("session-controller: queue delivery retry MOOT entry=%s session=%s ws=%q — the entry was delivered or cancelled while the retry was armed",
+			entryID, d.sessionID, d.workspace)
+		return
+	case d.turn.active():
+		m.mu.Unlock()
+		m.logf("session-controller: queue delivery retry STOOD DOWN entry=%s session=%s ws=%q reason=turn_in_flight — the turn boundary owns the next delivery",
+			entryID, d.sessionID, d.workspace)
+		return
+	case d.paused && !e.headJump:
+		m.mu.Unlock()
+		m.logf("session-controller: queue delivery retry STOOD DOWN entry=%s session=%s ws=%q reason=queue_paused — a paused queue delivers only the prompt the user typed after stopping",
+			entryID, d.sessionID, d.workspace)
+		return
+	}
+	e = d.queue.remove(entryID)
+	if e == nil {
+		m.mu.Unlock()
+		m.errorf("session-controller: queue delivery retry LOST entry=%s session=%s ws=%q — the entry was present a statement ago and cannot be taken now",
+			entryID, d.sessionID, d.workspace)
+		return
+	}
+	if e.headJump {
+		d.pausedRunner = true
+	}
+	view, recs := m.publishQueueLocked(d)
+	m.mu.Unlock()
+	m.logf("session-controller: queue delivering entry=%s (delivery retry) session=%s ws=%q attempt=%d",
+		e.id, d.sessionID, d.workspace, e.deliveryAttempts+1)
+	m.publish(d.sessionID, view, recs)
+	m.deliver(d, e)
 }
 
 // settleUnknownFateDelivery reconciles an entry whose last delivery timed out

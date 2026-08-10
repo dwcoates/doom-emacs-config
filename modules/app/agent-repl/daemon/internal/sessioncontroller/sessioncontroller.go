@@ -421,6 +421,11 @@ type Config struct {
 	// Nil defaults to wall clock.
 	Now func() int64
 
+	// AfterFunc schedules the queue's bounded delivery retry, defaulting to
+	// time.AfterFunc. A test injects it so the retry's delay is an assertion
+	// rather than a wait.
+	AfterFunc func(d time.Duration, f func()) *time.Timer
+
 	// WorkspaceLockHeld probes the kernel-enforced claim a live shim holds on a
 	// WORKSPACE, which is the one fact that distinguishes "no shim" from "a
 	// shim that has not dialled in yet" before anything is spawned
@@ -471,6 +476,10 @@ type Manager struct {
 	newControllerGenerationID func() (string, error)
 	// now is the queue's clock (queued_at_ms), injected by tests.
 	now func() int64
+	// afterFunc schedules the queue's bounded delivery retry. It is the ONE
+	// timer seam in this package, injected by tests so a retry's delay is
+	// asserted rather than waited out (queue.go).
+	afterFunc func(time.Duration, func()) *time.Timer
 	// workspaceLockHeld is the pre-spawn workspace-ownership probe
 	// (survivingshim.go).
 	workspaceLockHeld func(cwd string) (bool, error)
@@ -914,6 +923,10 @@ func New(cfg Config) (*Manager, error) {
 	if now == nil {
 		now = func() int64 { return time.Now().UnixMilli() }
 	}
+	afterFunc := cfg.AfterFunc
+	if afterFunc == nil {
+		afterFunc = time.AfterFunc
+	}
 	workspaceLockHeld := cfg.WorkspaceLockHeld
 	if workspaceLockHeld == nil {
 		workspaceLockHeld = sessionlock.WorkspaceLockHeld
@@ -934,6 +947,7 @@ func New(cfg Config) (*Manager, error) {
 		newClient:                 newClient,
 		newControllerGenerationID: newControllerGenerationID,
 		now:                       now,
+		afterFunc:                 afterFunc,
 		workspaceLockHeld:         workspaceLockHeld,
 		byWS:                      make(map[string]*sessionController),
 		parked:                    make(map[string]*parkedSession),
