@@ -49,6 +49,9 @@ import {
   REVIVE_ATTR,
   reviveDecisionFromAttr,
   hibernateRefusedNotice,
+  HIBERNATION_SINCE_CLASS,
+  revivalGateSignature,
+  revivalSinceText,
   hibernationBlocked,
   hibernationBlockedLog,
   hibernationNoticeHtml,
@@ -663,6 +666,8 @@ async function boot(): Promise<void> {
   });
 
   let lastFooterStateSignature = "";
+  /** The gate state the card standing in `#revival-gate` was built from. */
+  let lastRevivalGateSignature = "";
   const renderChrome = (): void => {
     const s = store.state;
     // THE HEADER IS THE DAEMON'S RESOLVED VIEW NOW. The title, the session
@@ -814,7 +819,7 @@ async function boot(): Promise<void> {
       // it would have been drawn in is gone.
       reviveFailure = "";
     }
-    revivalGateEl.innerHTML = revivalGateHtml({
+    const gateState = {
       hibernation: s.hibernation,
       // The SAME standing figure the topbar chip prints, read from the one
       // store field the daemon feeds `SessionView.total_tokens` into — so the
@@ -822,9 +827,27 @@ async function boot(): Promise<void> {
       // shown a few pixels above it.
       contextTokens: s.contextTokens,
       pending: revivePending,
-      now: Date.now(),
       failure: reviveFailure,
-    });
+    };
+    // THE CARD IS REBUILT ONLY WHEN ITS STATE MOVED, on the same signature
+    // discipline as the footer log above. Rebuilding it every frame — which is
+    // what this did — destroyed whichever button the user was mid-press on
+    // whenever a frame landed between the mousedown and the mouseup, and the
+    // browser then fired no click at all: the gate read as needing two
+    // presses. The buttons' nodes now survive every frame that is not a real
+    // state change.
+    const gateSignature = revivalGateSignature(gateState);
+    if (gateSignature !== lastRevivalGateSignature) {
+      lastRevivalGateSignature = gateSignature;
+      revivalGateEl.innerHTML = revivalGateHtml({ ...gateState, now: Date.now() });
+    } else if (s.hibernation !== null) {
+      // THE AGE IS THE ONE THING THAT MOVES WITHOUT THE STATE MOVING, so it is
+      // written as text into the standing card rather than by rebuilding the
+      // card around it. Folding the clock into the signature would make it
+      // differ on every frame and guard nothing.
+      const since = revivalGateEl.querySelector(`.${HIBERNATION_SINCE_CLASS}`);
+      if (since !== null) since.textContent = revivalSinceText(s.hibernation, Date.now());
+    }
     // THE CARD IS THE PUSHED OFFER, painted from the offer alone. Nothing here
     // decides whether it should be up: the daemon clears the offer when the
     // question is answered, superseded, or made moot by the merge ending on
