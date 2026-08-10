@@ -684,6 +684,46 @@ func TestACreateCannotNameAnAccountThePathDisagreesWith(t *testing.T) {
 	}
 }
 
+func TestAChildInheritsItsParentsAccountSelection(t *testing.T) {
+	// Arrange — a parent whose account a human switched in the webapp. That
+	// SELECTION follows its children; the parent's merely-resolved account does
+	// not (TestSourcelessCreateOutsideTheMultiRepoRootKeepsTheDefaultAccount
+	// pins the other half).
+	home := t.TempDir()
+	multiRoot := filepath.Join(home, "workspace", "ChessCom")
+	t.Setenv(session.MultiRepoRootEnv, multiRoot)
+	t.Setenv(session.MultiRepoConfigDirEnv, filepath.Join(home, ".claude-chesscom"))
+	chosen := filepath.Join(home, ".claude")
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
+	parent := filepath.Join(multiRoot, "explanation-engine")
+	if err := reg.Put(registry.Record{
+		SessionID: "s_parent", CWD: parent, ConfigDir: chosen, ConfigDirOverride: chosen,
+		CreatedAt: "2026-08-09T10:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	creator := daemonSessionCreator{Registry: reg, Logf: func(string, ...any) {}}
+	job := workspacecreate.Job{
+		ID:           "child",
+		WorktreePath: filepath.Join(multiRoot, "explanation-engine-worktrees", "child"),
+		Request: workspacecreate.Request{
+			Name: "child", SourceWorkspace: "explanation-engine", SourceDir: parent,
+		},
+	}
+
+	// Act
+	request, err := creator.ResolveSessionMetadata(context.Background(), job)
+
+	// Assert — the child runs under the parent's selection, and carries it so
+	// its own children inherit it too.
+	if err != nil {
+		t.Fatalf("ResolveSessionMetadata: %v", err)
+	}
+	if request.ConfigDir != chosen || request.ConfigDirOverride != chosen {
+		t.Fatalf("resolved request = %#v, want the inherited selection %q", request, chosen)
+	}
+}
+
 func TestSourcelessCreateFallsBackToTheGitRootBeforeItsWorktreeExists(t *testing.T) {
 	// Arrange — the account must resolve even when asked before the worktree
 	// path is planned, so the repo the workspace is cut from answers.

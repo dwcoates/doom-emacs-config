@@ -16,6 +16,7 @@ import (
 
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/progress"
+	"claude-repld/internal/registry"
 	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/workspace/merge"
@@ -74,6 +75,9 @@ type AgentShimConfig struct {
 	// starting a fresh conversation over an intact one — is the data-loss this
 	// resolver exists to prevent. See ConversationResolver.
 	Resumes ConversationResumeResolver
+	// Registry backs the account rule: a workspace's account SELECTION lives on
+	// its session records. See internal/server/accountresolve.go.
+	Registry *registry.Registry
 	// DaemonHealth supplies the one daemon-global readiness assertion shared by
 	// the HTTP health route and frontend health command.
 	DaemonHealth DaemonHealthChecker
@@ -620,6 +624,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 			Interrupt:        InterruptGateConfig{Turns: cfg.Turns, LiveTasks: cfg.Progress},
 			EstablishTimeout: cfg.EstablishTimeout,
 			Resumes:          cfg.Resumes,
+			Registry:         cfg.Registry,
 			LogTargets:       cfg.LogTargets,
 		},
 	)

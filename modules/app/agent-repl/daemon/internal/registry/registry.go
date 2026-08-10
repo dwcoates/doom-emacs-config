@@ -73,7 +73,27 @@ type Record struct {
 	// target). Empty until system:init reports it; a record never
 	// filled in cannot be rehydrated.
 	ClaudeSessionID string `json:"claude_session_id,omitempty"`
-	CreatedAt       string `json:"created_at,omitempty"`
+	// ConfigDirOverride is the account A HUMAN SELECTED for this workspace,
+	// through the webapp's account switcher. It is the ONE thing that may move
+	// a workspace off the account its path names, and it is deliberately a
+	// SEPARATE field from ConfigDir.
+	//
+	// ConfigDir is what the session RAN UNDER — a resolved value, and by
+	// itself no evidence that anybody chose it. Reading a resolved value as a
+	// selection is what let "the daemon named no account" become "the user
+	// deliberately chose ~/.claude" and pinned a workspace under
+	// $MULTI_REPO_ROOT to the wrong root forever.
+	//
+	// EMPTY MEANS NO SELECTION, always. An explicit selection of the default
+	// account is stored as that root's ABSOLUTE PATH rather than as an empty
+	// string or a sentinel, so "unset" and "chosen" can never collide — the
+	// ambiguity is unrepresentable rather than handled.
+	//
+	// A create that nominates a source workspace inherits the SOURCE'S
+	// OVERRIDE, never its resolved ConfigDir, so a deliberate selection
+	// follows a workspace's children and a path-derived account does not.
+	ConfigDirOverride string `json:"config_dir_override,omitempty"`
+	CreatedAt         string `json:"created_at,omitempty"`
 	// Terminal marks a conversation that ended for a session-scoped
 	// reason (user delete, shim death) — NOT a daemon shutdown, which
 	// deliberately leaves records non-terminal so they rehydrate.
