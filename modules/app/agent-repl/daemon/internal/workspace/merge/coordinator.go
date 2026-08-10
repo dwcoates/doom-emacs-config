@@ -982,7 +982,7 @@ func (c *QueueCoordinator) sayOwedTerminal(repo string, req Request, term Termin
 			fmt.Errorf("the durable record names outcome %q, which this package does not publish", term.Outcome))
 	}
 
-	// EVERY ATTEMPT IS ITSELF BOUNDED (statusPublishBound), so this loop's whole
+	// EVERY ATTEMPT IS ITSELF BOUNDED (sinkPublishBound), so this loop's whole
 	// cost is bounded too — which is what lets it finish inside the run's
 	// observability budget rather than deferring the question to a reboot.
 	var err error
@@ -1385,7 +1385,7 @@ func (c *QueueCoordinator) replayTerminal(repo string, req Request, term Termina
 // terminal word before ejecting its entry.
 //
 // IT IS A FAILURE BUDGET, NOT A RETRY POLICY. Each attempt is bounded by
-// statusPublishBound, so the budget's whole cost is bounded and lands inside the
+// sinkPublishBound, so the budget's whole cost is bounded and lands inside the
 // two minutes a merge run is held to for an observable update. A sink that
 // refuses three bounded attempts is not a sink that a fourth would satisfy; it
 // is a broken mechanism, and the queue's answer to one is to say so and keep
