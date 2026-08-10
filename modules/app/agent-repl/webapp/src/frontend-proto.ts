@@ -134,6 +134,7 @@ import {
   FAILURE_KIND_SIDE,
   HIBERNATION_CAUSE,
   KEEP_ALIVE_HOLD_TURN_ID,
+  UNINTERRUPTIBLE_TURN_COMMAND,
   WORKSPACE_GATE_ARM,
   PROMPT_ORIGIN_CACHE_KEEP_ALIVE,
   PROMPT_ORIGIN_PREFIX,
@@ -1716,13 +1717,17 @@ export type HostAction = {
 /**
  * How the classifier judged a held prompt (E4). `pending` = still being
  * judged; `error` = NOTHING decided it (the classifier failed, or answered
- * unreadably) and is deliberately distinct from a real verdict.
+ * unreadably) and is deliberately distinct from a real verdict;
+ * `uninterruptible` = no classifier ran and none will, because the turn in
+ * front of the prompt is a context cut (`/compact` or `/clear`) and a cut is
+ * never interrupted for a queued prompt.
  */
 export const QUEUE_CLASSIFICATIONS = [
   "pending",
   "interject",
   "hold",
   "error",
+  "uninterruptible",
 ] as const;
 export type QueueClassification = (typeof QUEUE_CLASSIFICATIONS)[number];
 
@@ -1799,6 +1804,13 @@ export interface QueueEntry {
    * the real answer "no build refresh is holding this", not a missing field.
    */
   buildRefreshHold?: QueueEntryBuildRefreshHold;
+  /**
+   * The context cut running in front of this prompt, set ONLY on the
+   * `uninterruptible` classification and never beside another one. It is what
+   * lets the card name what the prompt is waiting behind rather than saying
+   * "something".
+   */
+  uninterruptibleCommand?: SessionCommand;
 }
 
 /** The `idle` arm's payload: deliberately empty — the arm IS the state. */
@@ -4366,6 +4378,9 @@ const QUEUE_CLASSIFICATION_PENDING_KEYS = new Set<string>();
 const QUEUE_CLASSIFICATION_INTERJECT_KEYS = new Set(["rationale"]);
 const QUEUE_CLASSIFICATION_HOLD_KEYS = new Set(["rationale", "accepted"]);
 const QUEUE_CLASSIFICATION_ERROR_KEYS = new Set(["detail"]);
+const QUEUE_CLASSIFICATION_UNINTERRUPTIBLE_KEYS = new Set([
+  UNINTERRUPTIBLE_TURN_COMMAND,
+]);
 
 function decodeQueueView(v: unknown): QueueView {
   const o = ensureObject(v, "QueueView");
@@ -4409,6 +4424,9 @@ function decodeQueueEntry(v: unknown): QueueEntry {
     rationale: verdict.rationale,
     accepted: verdict.accepted,
   };
+  if (verdict.uninterruptibleCommand !== undefined) {
+    e.uninterruptibleCommand = verdict.uninterruptibleCommand;
+  }
   // Without an id nothing can force, accept or cancel this entry, so the
   // controls it renders would all be dead.
   if (e.id === "") {
@@ -4671,6 +4689,7 @@ function decodeQueueClassification(o: JsonObject): {
   classification: QueueClassification;
   rationale: string;
   accepted: boolean;
+  uninterruptibleCommand?: SessionCommand;
 } {
   const arms = Object.values(QUEUE_CLASSIFICATION_ARM).filter(
     (arm) => o[arm] !== undefined && o[arm] !== null,
@@ -4720,6 +4739,31 @@ function decodeQueueClassification(o: JsonObject): {
       classification: "hold",
       rationale: str(value, "rationale", "QueueView.entries[].holdForTurnEnd"),
       accepted: bool(value, "accepted", "QueueView.entries[].holdForTurnEnd"),
+    };
+  }
+  if (arm === QUEUE_CLASSIFICATION_ARM.uninterruptibleTurn) {
+    const value = ensureObject(
+      o[arm],
+      "QueueView.entries[].uninterruptibleTurn",
+    );
+    rejectUnknown(
+      value,
+      QUEUE_CLASSIFICATION_UNINTERRUPTIBLE_KEYS,
+      "QueueView.entries[].uninterruptibleTurn",
+    );
+    // THE COMMAND IS REQUIRED, and `sessionCommandOf` is what enforces it: the
+    // arm's entire content is which cut is running, and an entry that could not
+    // say which would render a card explaining nothing. The rationale is left
+    // empty because the command IS the reason — a second, free-text copy of it
+    // could only disagree with the arm.
+    return {
+      classification: "uninterruptible",
+      rationale: "",
+      accepted: false,
+      uninterruptibleCommand: sessionCommandOf(
+        str(value, UNINTERRUPTIBLE_TURN_COMMAND, "QueueView.entries[].uninterruptibleTurn"),
+        "QueueView.entries[].uninterruptibleTurn",
+      ),
     };
   }
   const value = ensureObject(o[arm], "QueueView.entries[].error");

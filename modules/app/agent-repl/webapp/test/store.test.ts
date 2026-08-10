@@ -2611,6 +2611,33 @@ describe("keep-alive hold adoption (the queue bubble's source of truth)", () => 
   });
 });
 
+describe("uninterruptible-turn adoption (the cut the card names)", () => {
+  it("carries the cut a queued entry is waiting behind through to the rendered item", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([
+      queueEffect([
+        queueEntry({
+          classification: "uninterruptible",
+          uninterruptibleCommand: "COMPACT",
+        }),
+      ]),
+    ]);
+    // Assert
+    expect(store.state.queued[0].uninterruptibleCommand).toBe("COMPACT");
+  });
+
+  it("leaves the cut absent on an ordinary classifier-held entry", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([queueEffect([queueEntry()])]);
+    // Assert
+    expect(store.state.queued[0].uninterruptibleCommand).toBeUndefined();
+  });
+});
+
 describe("revival hold adoption (the queue bubble's source of truth)", () => {
   it("carries a queue entry's revival hold through to the rendered item", () => {
     // Arrange
