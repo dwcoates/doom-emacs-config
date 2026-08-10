@@ -239,6 +239,14 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; `agent-repl--uds-register-handler', defined in `frontend-uds').  These
 ;; supersede the sentinel/hook-derived render-status inputs the cutover deletes.
 (agent-repl--load-module "frontend-uds")
+;; WHY HERE, AND NOT BESIDE webview-recovery.el WHICH IT DRIVES: recovery-slo.el
+;; is CALLED FROM the frame dispatch in frontend-uds.el (the wire signal) and
+;; from the state apply in frontend-state.el (the emacs signal), so it must be
+;; defined before the first frame can arrive rather than merely before the
+;; first sweep.  Everything it calls OUTWARD — the webview sweep, the
+;; ensure/reattach path, the webview script channel — is reached at runtime
+;; through `declare-function' and is loaded well before any link comes up.
+(agent-repl--load-module "recovery-slo")
 (agent-repl--load-module "frontend-state")
 ;; WHY: services.el owns launchd lifecycle for shim-store/sidecar and the
 ;; coordinated runtime bounce.  It needs the daemon/client plus the pushed
