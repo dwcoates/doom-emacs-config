@@ -1550,6 +1550,41 @@ must be rejected before the daemon is ever contacted."
         (should-not (buffer-live-p buf))
         (should (null (agent-repl--ws-get "ws1" :frontend-buffer)))))))
 
+(ert-deftest agent-repl-test-frontend-detach-webview-kills-and-clears ()
+  "Detaching a webview both kills the buffer and clears the plist key.
+Either half alone is a bug: a stale key hands a dead buffer to the next
+mount, a cleared key over a live buffer leaks the WKWebView."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (agent-repl--ws-put "ws1" :frontend-buffer buf)
+      ;; Act
+      (agent-repl--frontend-detach-webview "ws1" buf)
+      ;; Assert
+      (should-not (buffer-live-p buf))
+      (should (null (agent-repl--ws-get "ws1" :frontend-buffer))))))
+
+(ert-deftest agent-repl-test-frontend-teardown-sites-share-the-detach ()
+  "Every take-down-for-remount site routes through the shared detach.
+A hand-rolled kill-plus-clear at one of them fails here rather than
+drifting silently out of step with the others."
+  ;; Arrange — a detach that records instead of killing.
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((detached 0)
+          (buf (generate-new-buffer "*fake-webview*")))
+      (agent-repl--ws-put "ws1" :frontend-buffer buf)
+      (cl-letf (((symbol-function 'agent-repl--frontend-detach-webview)
+                 (lambda (&rest _) (setq detached (1+ detached))))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--gui-open) #'ignore)
+                ((symbol-function 'message) (lambda (&rest _) nil)))
+        ;; Act — close-panel and the restart verb's bounce.
+        (agent-repl-frontend-close-panel)
+        (agent-repl--frontend-bounce-webview "ws1")
+        ;; Assert
+        (should (equal detached 2)))
+      (kill-buffer buf))))
+
 (ert-deftest agent-repl-test-frontend-kill-webview-suppresses-query-prompt ()
   "Webview kills bypass kill-buffer query functions.
 The xwidget query fn raises a blocking yes-or-no prompt, which would
