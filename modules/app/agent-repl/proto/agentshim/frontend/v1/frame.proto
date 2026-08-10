@@ -161,6 +161,7 @@ message FrontendCommand {
     ResumeMergeQueueCmd resume_merge_queue = 31;
     EvictMergeCmd evict_merge = 32;
     AnswerMergeDequeueCmd answer_merge_dequeue = 33;
+    CancelDetachedAgentsCmd cancel_detached_agents = 34;
   }
 }
 
@@ -204,6 +205,11 @@ message CommandAck {
   // explicit yes. Set with ok=false and `failure` unset; the client asks the
   // user and resends InterruptCmd{confirm_agents: true}.
   InterruptConfirmRequired interrupt_confirm_required = 5;
+  // Present only for CancelDetachedAgentsCmd: WHAT the cancel did, relayed
+  // from the shim. Set on BOTH the success ack (the `cancelled` arm) and the
+  // refusal (`nothing_running` / `unsupported` alongside ok=false), so a
+  // client never has to read a refusal's meaning out of `error` text.
+  DetachedCancelOutcome detached_cancel = 8;
   // Present only for SetModelCmd.  It is the shim-confirmed current model on
   // both success and rejection, so a frontend never needs an optimistic model
   // state or a local recovery guess.

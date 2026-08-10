@@ -686,6 +686,7 @@ type FrontendCommand struct {
 	//	*FrontendCommand_ResumeMergeQueue
 	//	*FrontendCommand_EvictMerge
 	//	*FrontendCommand_AnswerMergeDequeue
+	//	*FrontendCommand_CancelDetachedAgents
 	Command       isFrontendCommand_Command `protobuf_oneof:"command"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1012,6 +1013,15 @@ func (x *FrontendCommand) GetAnswerMergeDequeue() *AnswerMergeDequeueCmd {
 	return nil
 }
 
+func (x *FrontendCommand) GetCancelDetachedAgents() *CancelDetachedAgentsCmd {
+	if x != nil {
+		if x, ok := x.Command.(*FrontendCommand_CancelDetachedAgents); ok {
+			return x.CancelDetachedAgents
+		}
+	}
+	return nil
+}
+
 type isFrontendCommand_Command interface {
 	isFrontendCommand_Command()
 }
@@ -1136,6 +1146,10 @@ type FrontendCommand_AnswerMergeDequeue struct {
 	AnswerMergeDequeue *AnswerMergeDequeueCmd `protobuf:"bytes,33,opt,name=answer_merge_dequeue,json=answerMergeDequeue,proto3,oneof"`
 }
 
+type FrontendCommand_CancelDetachedAgents struct {
+	CancelDetachedAgents *CancelDetachedAgentsCmd `protobuf:"bytes,34,opt,name=cancel_detached_agents,json=cancelDetachedAgents,proto3,oneof"`
+}
+
 func (*FrontendCommand_SubmitPrompt) isFrontendCommand_Command() {}
 
 func (*FrontendCommand_Interrupt) isFrontendCommand_Command() {}
@@ -1196,6 +1210,8 @@ func (*FrontendCommand_EvictMerge) isFrontendCommand_Command() {}
 
 func (*FrontendCommand_AnswerMergeDequeue) isFrontendCommand_Command() {}
 
+func (*FrontendCommand_CancelDetachedAgents) isFrontendCommand_Command() {}
+
 type CommandAck struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -1220,6 +1236,11 @@ type CommandAck struct {
 	// explicit yes. Set with ok=false and `failure` unset; the client asks the
 	// user and resends InterruptCmd{confirm_agents: true}.
 	InterruptConfirmRequired *InterruptConfirmRequired `protobuf:"bytes,5,opt,name=interrupt_confirm_required,json=interruptConfirmRequired,proto3" json:"interrupt_confirm_required,omitempty"`
+	// Present only for CancelDetachedAgentsCmd: WHAT the cancel did, relayed
+	// from the shim. Set on BOTH the success ack (the `cancelled` arm) and the
+	// refusal (`nothing_running` / `unsupported` alongside ok=false), so a
+	// client never has to read a refusal's meaning out of `error` text.
+	DetachedCancel *DetachedCancelOutcome `protobuf:"bytes,8,opt,name=detached_cancel,json=detachedCancel,proto3" json:"detached_cancel,omitempty"`
 	// Present only for SetModelCmd.  It is the shim-confirmed current model on
 	// both success and rejection, so a frontend never needs an optimistic model
 	// state or a local recovery guess.
@@ -1313,6 +1334,13 @@ func (x *CommandAck) GetFailureCard() *FailureCardRef {
 func (x *CommandAck) GetInterruptConfirmRequired() *InterruptConfirmRequired {
 	if x != nil {
 		return x.InterruptConfirmRequired
+	}
+	return nil
+}
+
+func (x *CommandAck) GetDetachedCancel() *DetachedCancelOutcome {
+	if x != nil {
+		return x.DetachedCancel
 	}
 	return nil
 }
@@ -1491,7 +1519,7 @@ const file_agentshim_frontend_v1_frame_proto_rawDesc = "" +
 	"\atopbars\x18\f \x03(\v2!.agentshim.frontend.v1.TopbarViewR\atopbars\x12T\n" +
 	"\x10token_breakdowns\x18\r \x03(\v2).agentshim.frontend.v1.TokenBreakdownViewR\x0ftokenBreakdowns\x12Q\n" +
 	"\x0fworkspace_gates\x18\x0e \x03(\v2(.agentshim.frontend.v1.WorkspaceGateViewR\x0eworkspaceGates\x12U\n" +
-	"\x12merge_queue_roster\x18\x0f \x01(\v2'.agentshim.frontend.v1.MergeQueueRosterR\x10mergeQueueRoster\"\xba\x14\n" +
+	"\x12merge_queue_roster\x18\x0f \x01(\v2'.agentshim.frontend.v1.MergeQueueRosterR\x10mergeQueueRoster\"\xa2\x15\n" +
 	"\x0fFrontendCommand\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
@@ -1529,8 +1557,9 @@ const file_agentshim_frontend_v1_frame_proto_rawDesc = "" +
 	"\x12resume_merge_queue\x18\x1f \x01(\v2*.agentshim.frontend.v1.ResumeMergeQueueCmdH\x00R\x10resumeMergeQueue\x12G\n" +
 	"\vevict_merge\x18  \x01(\v2$.agentshim.frontend.v1.EvictMergeCmdH\x00R\n" +
 	"evictMerge\x12`\n" +
-	"\x14answer_merge_dequeue\x18! \x01(\v2,.agentshim.frontend.v1.AnswerMergeDequeueCmdH\x00R\x12answerMergeDequeueB\t\n" +
-	"\acommand\"\xac\x03\n" +
+	"\x14answer_merge_dequeue\x18! \x01(\v2,.agentshim.frontend.v1.AnswerMergeDequeueCmdH\x00R\x12answerMergeDequeue\x12f\n" +
+	"\x16cancel_detached_agents\x18\" \x01(\v2..agentshim.frontend.v1.CancelDetachedAgentsCmdH\x00R\x14cancelDetachedAgentsB\t\n" +
+	"\acommand\"\x83\x04\n" +
 	"\n" +
 	"CommandAck\x12\x1d\n" +
 	"\n" +
@@ -1539,7 +1568,8 @@ const file_agentshim_frontend_v1_frame_proto_rawDesc = "" +
 	"\x05error\x18\x03 \x01(\tR\x05error\x12<\n" +
 	"\afailure\x18\x04 \x01(\v2\".agentshim.frontend.v1.FailureKindR\afailure\x12H\n" +
 	"\ffailure_card\x18\x14 \x01(\v2%.agentshim.frontend.v1.FailureCardRefR\vfailureCard\x12m\n" +
-	"\x1ainterrupt_confirm_required\x18\x05 \x01(\v2/.agentshim.frontend.v1.InterruptConfirmRequiredR\x18interruptConfirmRequired\x12%\n" +
+	"\x1ainterrupt_confirm_required\x18\x05 \x01(\v2/.agentshim.frontend.v1.InterruptConfirmRequiredR\x18interruptConfirmRequired\x12U\n" +
+	"\x0fdetached_cancel\x18\b \x01(\v2,.agentshim.frontend.v1.DetachedCancelOutcomeR\x0edetachedCancel\x12%\n" +
 	"\x0eselected_model\x18\x06 \x01(\tR\rselectedModel\x12;\n" +
 	"\x1aobserved_claude_session_id\x18\a \x01(\tR\x17observedClaudeSessionId\"9\n" +
 	"\x18InterruptConfirmRequired\x12\x1d\n" +
@@ -1621,8 +1651,10 @@ var file_agentshim_frontend_v1_frame_proto_goTypes = []any{
 	(*ResumeMergeQueueCmd)(nil),        // 54: agentshim.frontend.v1.ResumeMergeQueueCmd
 	(*EvictMergeCmd)(nil),              // 55: agentshim.frontend.v1.EvictMergeCmd
 	(*AnswerMergeDequeueCmd)(nil),      // 56: agentshim.frontend.v1.AnswerMergeDequeueCmd
-	(*FailureKind)(nil),                // 57: agentshim.frontend.v1.FailureKind
-	(*FailureCardRef)(nil),             // 58: agentshim.frontend.v1.FailureCardRef
+	(*CancelDetachedAgentsCmd)(nil),    // 57: agentshim.frontend.v1.CancelDetachedAgentsCmd
+	(*FailureKind)(nil),                // 58: agentshim.frontend.v1.FailureKind
+	(*FailureCardRef)(nil),             // 59: agentshim.frontend.v1.FailureCardRef
+	(*DetachedCancelOutcome)(nil),      // 60: agentshim.frontend.v1.DetachedCancelOutcome
 }
 var file_agentshim_frontend_v1_frame_proto_depIdxs = []int32{
 	1,  // 0: agentshim.frontend.v1.FrontendFrame.snapshot:type_name -> agentshim.frontend.v1.StateSnapshot
@@ -1693,14 +1725,16 @@ var file_agentshim_frontend_v1_frame_proto_depIdxs = []int32{
 	54, // 65: agentshim.frontend.v1.FrontendCommand.resume_merge_queue:type_name -> agentshim.frontend.v1.ResumeMergeQueueCmd
 	55, // 66: agentshim.frontend.v1.FrontendCommand.evict_merge:type_name -> agentshim.frontend.v1.EvictMergeCmd
 	56, // 67: agentshim.frontend.v1.FrontendCommand.answer_merge_dequeue:type_name -> agentshim.frontend.v1.AnswerMergeDequeueCmd
-	57, // 68: agentshim.frontend.v1.CommandAck.failure:type_name -> agentshim.frontend.v1.FailureKind
-	58, // 69: agentshim.frontend.v1.CommandAck.failure_card:type_name -> agentshim.frontend.v1.FailureCardRef
-	4,  // 70: agentshim.frontend.v1.CommandAck.interrupt_confirm_required:type_name -> agentshim.frontend.v1.InterruptConfirmRequired
-	71, // [71:71] is the sub-list for method output_type
-	71, // [71:71] is the sub-list for method input_type
-	71, // [71:71] is the sub-list for extension type_name
-	71, // [71:71] is the sub-list for extension extendee
-	0,  // [0:71] is the sub-list for field type_name
+	57, // 68: agentshim.frontend.v1.FrontendCommand.cancel_detached_agents:type_name -> agentshim.frontend.v1.CancelDetachedAgentsCmd
+	58, // 69: agentshim.frontend.v1.CommandAck.failure:type_name -> agentshim.frontend.v1.FailureKind
+	59, // 70: agentshim.frontend.v1.CommandAck.failure_card:type_name -> agentshim.frontend.v1.FailureCardRef
+	4,  // 71: agentshim.frontend.v1.CommandAck.interrupt_confirm_required:type_name -> agentshim.frontend.v1.InterruptConfirmRequired
+	60, // 72: agentshim.frontend.v1.CommandAck.detached_cancel:type_name -> agentshim.frontend.v1.DetachedCancelOutcome
+	73, // [73:73] is the sub-list for method output_type
+	73, // [73:73] is the sub-list for method input_type
+	73, // [73:73] is the sub-list for extension type_name
+	73, // [73:73] is the sub-list for extension extendee
+	0,  // [0:73] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_frame_proto_init() }
@@ -1780,6 +1814,7 @@ func file_agentshim_frontend_v1_frame_proto_init() {
 		(*FrontendCommand_ResumeMergeQueue)(nil),
 		(*FrontendCommand_EvictMerge)(nil),
 		(*FrontendCommand_AnswerMergeDequeue)(nil),
+		(*FrontendCommand_CancelDetachedAgents)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
