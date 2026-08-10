@@ -59,6 +59,7 @@
 (declare-function agent-repl--frontend-expected-restart-initiator "daemon" ())
 (declare-function agent-repl--frontend-expected-restart-covering-initiator
                   "daemon" (&optional as-of))
+(declare-function agent-repl--force-tab-bar-redraw "status" ())
 
 ;;;; ---- Configuration ---------------------------------------------------
 
@@ -156,12 +157,18 @@ command was lost, so letting a delayed ack run `:on-success' would mutate
 state that was abandoned ten seconds earlier.")
 
 (defvar agent-repl--uds-link-health :healthy
-  "The FRONTEND's own fact about its command link to the daemon.
+  "The FRONTEND's own ACK latch for its command link to the daemon.
 
 `:healthy' means every command sent since the last check was answered.
 `:degraded' means at least one command went unacknowledged past
 `agent-repl-uds-command-ack-deadline' and nothing has been acknowledged
 since.
+
+This latch is only HALF the link's health, and it is deliberately not the
+reader: a link whose process is dead has no command in flight to go
+unacknowledged, so the latch stays `:healthy' through a total outage.
+`agent-repl-uds-link-health' — the single reader — therefore also consults
+`agent-repl--uds-connected-p'.  Read that function, never this variable.
 
 This axis is Emacs-owned and Emacs-classified, exactly like
 `client.daemon_unreachable': the daemon definitionally cannot report that
@@ -596,6 +603,9 @@ Returns the process on success, nil on a failed dial."
                             "readiness-loop-retains-control"
                           (format "surface-and-reconnect-in-%ss"
                                   agent-repl-uds-reconnect-delay)))
+       ;; A dial that never completed leaves the link down, and a pending
+       ;; reconnect does not make it less down.
+       (agent-repl--uds-link-note-down "dial-failed")
        (unless readiness-p
          ;; Emacs's OWN classification (F4). The daemon definitionally
          ;; cannot report that Emacs could not reach it, so this is one of
@@ -621,15 +631,22 @@ Returns the process on success, nil on a failed dial."
   (when (timerp agent-repl--uds-reconnect-timer)
     (cancel-timer agent-repl--uds-reconnect-timer)
     (setq agent-repl--uds-reconnect-timer nil))
-  (when (process-live-p agent-repl--uds-process)
-    (agent-repl--log nil "uds-disconnect: deleting proc=%s"
-                     (process-name agent-repl--uds-process))
-    (delete-process agent-repl--uds-process))
-  (setq agent-repl--uds-process nil
-        agent-repl--uds-connection-state 'failed
-        agent-repl--uds-connect-started-at nil
-        agent-repl--uds-outbound-queue nil
-        agent-repl--uds-read-accumulator ""))
+  (let ((was-connected (agent-repl--uds-connected-p)))
+    (when (process-live-p agent-repl--uds-process)
+      (agent-repl--log nil "uds-disconnect: deleting proc=%s"
+                       (process-name agent-repl--uds-process))
+      (delete-process agent-repl--uds-process))
+    (setq agent-repl--uds-process nil
+          agent-repl--uds-connection-state 'failed
+          agent-repl--uds-connect-started-at nil
+          agent-repl--uds-outbound-queue nil
+          agent-repl--uds-read-accumulator "")
+    ;; Deliberate teardown is still a down link as far as any surface is
+    ;; concerned; the sentinel for the deleted process may or may not
+    ;; still recognize it as ours by the time it runs, so the health edge
+    ;; is recorded here rather than left to that race.
+    (when was-connected
+      (agent-repl--uds-link-note-down "disconnect"))))
 
 ;;;; ---- Reconnect scheduling (injectable timer seam) --------------------
 
@@ -755,6 +772,11 @@ drive directly."
                        (process-name proc) elapsed (length queued))
       (dolist (entry queued)
         (agent-repl--uds-write-frame proc entry))
+      ;; The link is carrying commands again, so the health axis changed
+      ;; here: report it and repaint before the subscribers run, since a
+      ;; subscriber is free to take as long as it likes and the indicator
+      ;; should not wait behind it.
+      (agent-repl--uds-link-note-up "link-open")
       ;; AFTER the flush: a subscriber's send belongs behind the frames
       ;; that were already waiting on this link, not ahead of them.
       (agent-repl--uds-run-connected-hook)))
@@ -808,7 +830,10 @@ drive directly."
                               initiator (process-name proc) (string-trim event)))
            (t
             (agent-repl--warn nil "uds-link: DOWN proc=%s (link was established) event=%s"
-                              (process-name proc) (string-trim event)))))))
+                              (process-name proc) (string-trim event)))))
+        ;; The health axis just changed for THIS link's own process: a
+        ;; down link is degraded whether or not a command was in flight.
+        (agent-repl--uds-link-note-down "link-down")))
         (setq agent-repl--uds-read-accumulator "")
     (agent-repl--log nil "uds-sentinel: link down — scheduling reconnect")
     (agent-repl--uds-schedule-reconnect))))
@@ -1242,10 +1267,73 @@ command through its tracked callbacks instead of aging out.  Returns
 (defun agent-repl-uds-link-health ()
   "Return the frontend command link's health: `:healthy' or `:degraded'.
 
-The single reader of `agent-repl--uds-link-health'.  Surfaces are expected
-to call this rather than touch the variable, so the two states stay the
-whole vocabulary."
-  agent-repl--uds-link-health)
+TWO independent facts degrade the link, and the reader owns both so no
+caller can see only one of them:
+
+  - the link PROCESS is not connected (`agent-repl--uds-connected-p' is
+    nil): a dead, never-dialed, dialing, or reconnect-pending link cannot
+    carry a command at all.  A scheduled reconnect is still a degraded
+    link, not a healthy one;
+  - a command went unacknowledged past its deadline (the ack latch
+    `agent-repl--uds-link-health'), which is the connected-but-starved
+    case the latch was built for.
+
+Reporting `:healthy' over a DOWN process was the exact failure this
+guard closes: the tab-bar indicator stayed hidden through a total link
+loss because nothing was in flight to time out.
+
+Pure read.  Surfaces call it inside redisplay, so it neither logs nor
+mutates: the transitions are logged where they are DECIDED, in the
+lifecycle handlers and `agent-repl--uds-link-degrade' /
+`agent-repl--uds-link-restore' below."
+  (if (agent-repl--uds-connected-p)
+      agent-repl--uds-link-health
+    :degraded))
+
+(defun agent-repl--uds-link-health-changed (cause)
+  "Repaint the surfaces that render the command link's health, after CAUSE.
+
+THE one repaint mechanism for this axis.  Every transition that can
+change what `agent-repl-daemon-link-segment' shows — the ack latch's
+degrade/restore and the link's own down/up edges — routes through here
+rather than growing a second path, because the health read itself runs
+inside redisplay and must stay side-effect free.
+
+The 1Hz heartbeat (`agent-repl--update-all-workspace-states') still
+repaints on its own tick; this only removes the up-to-one-second wait
+before a link outage becomes visible.  The redraw helper lives in
+status.el, which is not required from the transport, so an unloaded
+status is reported rather than assumed."
+  (agent-repl--log-verbose nil "uds-link-health: repaint cause=%s health=%S"
+                           cause (agent-repl-uds-link-health))
+  (if (fboundp 'agent-repl--force-tab-bar-redraw)
+      (agent-repl--force-tab-bar-redraw)
+    (agent-repl--warn nil
+                      (concat "uds-link-health: repaint SKIPPED cause=%s "
+                              "reason=redraw-helper-unavailable")
+                      cause)))
+
+(defun agent-repl--uds-link-note-down (cause)
+  "Record the command link going DOWN because of CAUSE, and repaint.
+
+The down edge is decided in the lifecycle handlers (sentinel, failed
+dial, explicit disconnect); this is where that decision is written to the
+durable log for the health axis, so the tab-bar indicator's appearance
+always has a matching line.  The state itself needs no write: the reader
+derives `:degraded' from the disconnected process."
+  (agent-repl--log nil "uds-link-health: -> :degraded cause=%s" cause)
+  (agent-repl--uds-link-health-changed cause))
+
+(defun agent-repl--uds-link-note-up (cause)
+  "Record the command link coming UP because of CAUSE, and repaint.
+
+The mirror of `agent-repl--uds-link-note-down'.  It does NOT clear the
+ack latch — a link that reconnects with a command still recorded lost
+stays degraded until `agent-repl--uds-link-restore' says otherwise — so
+the logged health is the reader's verdict, not an assumption."
+  (agent-repl--log nil "uds-link-health: link up cause=%s health=%S"
+                   cause (agent-repl-uds-link-health))
+  (agent-repl--uds-link-health-changed cause))
 
 (defun agent-repl--uds-link-degrade (request-id field workspace)
   "Mark the command link degraded because REQUEST-ID went unacknowledged.
@@ -1257,7 +1345,8 @@ is logged by its own deadline handler, not by a repeated state change."
     (setq agent-repl--uds-link-health :degraded)
     (agent-repl--log workspace
                      "uds-link-health: %S -> :degraded cause=unacked-command request-id=%s field=%s ws=%s"
-                     previous request-id field (or workspace "none"))))
+                     previous request-id field (or workspace "none"))
+    (agent-repl--uds-link-health-changed "unacked-command")))
 
 (defun agent-repl--uds-link-restore (reason workspace)
   "Return the command link to `:healthy' because of REASON.
@@ -1273,7 +1362,11 @@ takes this path) and would otherwise drown the durable log."
                                  reason (or workspace "none"))
       (agent-repl--log workspace
                        "uds-link-health: %S -> :healthy reason=%s ws=%s"
-                       previous reason (or workspace "none")))))
+                       previous reason (or workspace "none"))
+      ;; Only the real transition repaints.  Every ack takes the branch
+      ;; above, and forcing a tab-bar redraw per ack would put the whole
+      ;; command stream on the redisplay path.
+      (agent-repl--uds-link-health-changed reason))))
 
 ;;;; ---- Ack aging -------------------------------------------------------
 
