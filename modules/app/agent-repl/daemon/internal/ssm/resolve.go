@@ -110,6 +110,11 @@ const (
 	// its own cause kind rather than a merge_transition detail because nothing
 	// about a merge produced it: a bring-up did. See mergereopen.go.
 	causeMergeReopened = "merge_axis_retired_on_reopen"
+	// The merge axis was cleared because a terminal `merge_failed` was
+	// superseded by a user action — an explicit hard restart of the session.
+	// Like causeMergeReopened it is its own cause kind: no merge produced it,
+	// and the failed row it supersedes is left standing. See mergefailedclear.go.
+	causeMergeFailedCleared = "merge_axis_cleared_on_restart"
 	// The legacy connectivity projection's edges. The detail after the colon names which one moved
 	// it — the bring-up that started, the ShimReady that closed the gate, or the
 	// exit/hibernation/rotation that took the wiring away.
