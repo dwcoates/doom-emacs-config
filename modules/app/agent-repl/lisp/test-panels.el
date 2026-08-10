@@ -1173,6 +1173,109 @@ hides)."
         (agent-repl-simple)
         (should (equal shown "test-ws"))))))
 
+;;;; ---- Tests: entry-point open feedback ----
+
+(defmacro agent-repl-test--with-open-toggle (running-p &rest body)
+  "Run BODY with `agent-repl-simple' dispatching into recorded probes.
+RUNNING-P is the frontend's `running-p-fn' verdict.  The recorded
+dispatches land in `opened' and `shown'; placeholder display is stubbed
+because these tests are about the DISPATCH, not the frame layout.
+
+Both capabilities answer `:pending', the contract the real gui frontend
+keeps: establishment is asynchronous and its outcome — including the
+placeholder's teardown — arrives from a continuation."
+  (declare (indent 1))
+  `(agent-repl-test--with-clean-state
+     (let ((opened nil) (shown nil))
+       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                 ((symbol-function 'use-region-p) (lambda () nil))
+                 ((symbol-function 'agent-repl--open-progress-show)
+                  (lambda (_ws buf) buf))
+                 ((symbol-function 'agent-repl--ws-frontend)
+                  (lambda (_ws)
+                    (agent-repl-frontend-create
+                     :name 'probe
+                     :open-fn (lambda (ws) (setq opened ws) :pending)
+                     :kill-fn #'ignore :send-fn #'ignore :interrupt-fn #'ignore
+                     :running-p-fn (lambda (_ws) ,running-p)
+                     :show-fn (lambda (ws) (setq shown ws) :pending)
+                     :supported-backends '(claude)))))
+         ,@body))))
+
+(ert-deftest agent-repl-test-panels-synchronous-open-settles-the-placeholder ()
+  "A frontend that opens inside the call leaves no placeholder to escalate."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'use-region-p) (lambda () nil))
+              ((symbol-function 'agent-repl--open-progress-show)
+               (lambda (_ws buf) buf))
+              ((symbol-function 'agent-repl--ws-frontend)
+               (lambda (_ws)
+                 (agent-repl-frontend-create
+                  :name 'probe
+                  ;; No `:pending': this capability finished here.
+                  :open-fn (lambda (_ws) t)
+                  :kill-fn #'ignore :send-fn #'ignore :interrupt-fn #'ignore
+                  :running-p-fn (lambda (_ws) nil)
+                  :show-fn #'ignore
+                  :supported-backends '(claude)))))
+      ;; Act
+      (agent-repl-simple)
+      ;; Assert
+      (should-not (agent-repl--open-progress-active-p "test-ws")))))
+
+(ert-deftest agent-repl-test-panels-open-raises-a-placeholder ()
+  "SPC o c on a stopped workspace leaves a visible placeholder behind."
+  ;; Arrange / Act
+  (agent-repl-test--with-open-toggle nil
+    (agent-repl-simple)
+    ;; Assert
+    (should (agent-repl--open-progress-active-p "test-ws"))))
+
+(ert-deftest agent-repl-test-panels-show-raises-a-placeholder ()
+  "SPC o c on a running-but-hidden workspace also marks the wait."
+  ;; Arrange / Act
+  (agent-repl-test--with-open-toggle t
+    (agent-repl-simple)
+    ;; Assert
+    (should (agent-repl--open-progress-active-p "test-ws"))))
+
+(ert-deftest agent-repl-test-panels-second-open-dispatches-nothing ()
+  "A second SPC o c while an open is pending does not re-dispatch it."
+  ;; Arrange
+  (agent-repl-test--with-open-toggle nil
+    (agent-repl-simple)
+    (setq opened nil)
+    ;; Act
+    (agent-repl-simple)
+    ;; Assert
+    (should-not opened)))
+
+(ert-deftest agent-repl-test-panels-second-open-does-not-stack-a-placeholder ()
+  "A second SPC o c while an open is pending reuses the standing placeholder."
+  ;; Arrange
+  (agent-repl-test--with-open-toggle nil
+    (agent-repl-simple)
+    (let ((buf (plist-get (agent-repl--open-progress-entry "test-ws") :buffer)))
+      ;; Act
+      (agent-repl-simple)
+      ;; Assert
+      (should (eq buf (plist-get (agent-repl--open-progress-entry "test-ws")
+                                 :buffer))))))
+
+(ert-deftest agent-repl-test-panels-resolved-open-dispatches-again ()
+  "Once the pending open has resolved, SPC o c dispatches a fresh one."
+  ;; Arrange
+  (agent-repl-test--with-open-toggle nil
+    (agent-repl-simple)
+    (agent-repl--open-progress-finish "test-ws")
+    (setq opened nil)
+    ;; Act
+    (agent-repl-simple)
+    ;; Assert
+    (should (equal opened "test-ws"))))
+
 ;;;; ---- Tests: ws-buffer-visible-p with live but undisplayed buffer ----
 
 (ert-deftest agent-repl-test-panels-ws-buffer-visible-p-live-not-displayed ()
