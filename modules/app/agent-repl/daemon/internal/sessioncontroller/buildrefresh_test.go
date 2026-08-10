@@ -583,3 +583,105 @@ func TestAHelloWithoutAPidRecordsNone(t *testing.T) {
 		t.Fatalf("recorded pid = %d, want 0 — a stale pid is a pid-reuse hazard, not a stop handle", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// WHETHER STOPPING A SURVIVING SHIM WOULD FIX ANYTHING.
+//
+// A shim outlives its daemon by design, so a planned bounce that stops one
+// converts a free reattach — turn and all — into an interrupted turn the
+// replacement has to re-drive. The only thing a stop can fix and a reattach
+// cannot is a shim executing code the deploy replaced.
+// ---------------------------------------------------------------------------
+
+// A PROVEN MATCH IS THE ONLY "NO". The shim is already running what the daemon
+// would spawn today, so stopping it buys an interrupted turn and nothing else.
+func TestShimStopIsDeclinedForAProvenCurrentBundle(t *testing.T) {
+	// Arrange.
+	m, applier, _ := newWiredRig(t)
+	m.cfg.ShimBuildSHA = func() string { return "sha-current" }
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+	m.onConnected("ws", "s1", &corev1.ShimHello{SessionId: "s1", BuildSha: "sha-current"})
+
+	// Act.
+	stop, reported, want := m.ShimStopWouldFixTheBundle("s1")
+
+	// Assert.
+	if stop {
+		t.Fatalf("stop = true for reported=%q current=%q, want the shim preserved", reported, want)
+	}
+}
+
+// A SUPERSEDED BUNDLE IS THE ONE CASE A STOP FIXES.
+func TestShimStopIsIssuedForASupersededBundle(t *testing.T) {
+	// Arrange.
+	m, applier, _ := newWiredRig(t)
+	m.cfg.ShimBuildSHA = func() string { return "sha-current" }
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+	m.onConnected("ws", "s1", &corev1.ShimHello{SessionId: "s1", BuildSha: "sha-old"})
+
+	// Act.
+	stop, reported, want := m.ShimStopWouldFixTheBundle("s1")
+
+	// Assert.
+	if !stop || reported != "sha-old" || want != "sha-current" {
+		t.Fatalf("stop = (%v, %q, %q), want the superseded shim stopped", stop, reported, want)
+	}
+}
+
+// AN UNREADABLE IDENTITY IS STOPPED, and that is the opposite reading from the
+// automatic refresh's. Somebody explicitly asked for the bundle to be replaced,
+// and preserving on an identity the daemon cannot read would silently defeat
+// the deploy they asked for.
+func TestShimStopIsIssuedWhenAnIdentityCannotBeRead(t *testing.T) {
+	tests := []struct {
+		name     string
+		current  string
+		reported string
+	}{
+		{name: "the shim announced no build", current: "sha-current"},
+		{name: "the checkout has no stamp", reported: "sha-old"},
+		{name: "neither side is known"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			m, applier, _ := newWiredRig(t)
+			m.cfg.ShimBuildSHA = func() string { return tc.current }
+			if err := m.Ensure("ws"); err != nil {
+				t.Fatalf("Ensure: %v", err)
+			}
+			waitForWirings(applier, 1)
+			m.onConnected("ws", "s1", &corev1.ShimHello{SessionId: "s1", BuildSha: tc.reported})
+
+			// Act.
+			stop, _, _ := m.ShimStopWouldFixTheBundle("s1")
+
+			// Assert.
+			if !stop {
+				t.Fatal("an unreadable bundle identity preserved the shim; the deploy that asked for the stop would reach nothing")
+			}
+		})
+	}
+}
+
+// A SESSION NOTHING EVER HANDSHAKED FOR has no announced bundle at all, and is
+// answered on the same terms rather than by an absent map entry meaning "fine".
+func TestShimStopIsIssuedForASessionThatNeverHandshaked(t *testing.T) {
+	// Arrange.
+	m, _, _ := newWiredRig(t)
+	m.cfg.ShimBuildSHA = func() string { return "sha-current" }
+
+	// Act.
+	stop, reported, _ := m.ShimStopWouldFixTheBundle("never-seen")
+
+	// Assert.
+	if !stop || reported != "" {
+		t.Fatalf("stop = (%v, %q) for a session with no handshake, want it stopped with no reported build", stop, reported)
+	}
+}
