@@ -567,6 +567,8 @@ second copy of it would be a second thing to keep in step."
                                  (plist-get offer :offerId) standing parsed)
         parsed))))
 
+(declare-function agent-repl--recovery-slo-note-emacs "agent-repl-recovery-slo" (ws))
+
 (defun agent-repl--frontend-apply-workspace-state (ws-state)
   "Apply a `WorkspaceState' frame WS-STATE (a plist).
 Handler for the `workspaceState' oneof arm.  Maps the pushed RenderState
@@ -724,6 +726,11 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
       ;; guarded by `:agent-ready-latched' (cleared when the ws plist resets
       ;; on kill/relaunch, so the next session re-latches).
       (agent-repl--frontend-maybe-latch-agent-ready workspace)
+      ;; THE EMACS HALF OF THE RECOVERY SLO (lisp/recovery-slo.el), stamped
+      ;; HERE and not at decode: what the SLO asks is whether this end's
+      ;; RENDERED view is the new daemon's, and that is true only once the
+      ;; pushed state has actually been stored — which is the line above.
+      (agent-repl--recovery-slo-note-emacs workspace)
       ;; Re-key point for the merge reactive consequences (design §4.6/§9.3):
       ;; run AFTER the pushed state is stored so subscribers observe it.
       (agent-repl--frontend-run-state-transition-hook workspace keyword previous)
