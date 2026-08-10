@@ -42,6 +42,8 @@ import { shimBuildSha } from "../build-identity.js";
 import {
   Ack,
   AckSchema,
+  CancelDetachedAgents,
+  CancelDetachedAgentsSchema,
   DaemonHello,
   DaemonHelloSchema,
   Event,
@@ -90,6 +92,15 @@ export interface SessionServerHandlers {
   onSubmitPrompt(msg: SubmitPrompt): AsyncReceipt;
   /** Interrupt the SDK turn; return the sync receipt. */
   onInterrupt(msg: Interrupt): Receipt;
+  /**
+   * Stop the session's detached background agents; return a receipt once the
+   * stops have been delivered.
+   *
+   * ASYNCHRONOUS, unlike onInterrupt: the stop is a per-task SDK control
+   * round-trip, and a receipt naming agents that had not been asked to stop
+   * yet would be a receipt for work that had not happened.
+   */
+  onCancelDetachedAgents(msg: CancelDetachedAgents): AsyncReceipt;
   /** Set the live SDK model and return a receipt after the SDK settles. */
   onSetModel(msg: SetModel): AsyncReceipt;
   /**
@@ -557,6 +568,11 @@ export class SessionServer {
     const interrupt = unpackAs(msg, InterruptSchema);
     if (interrupt) {
       this.sendReceipt(this.handlers.onInterrupt(interrupt));
+      return;
+    }
+    const cancelDetached = unpackAs(msg, CancelDetachedAgentsSchema);
+    if (cancelDetached) {
+      this.sendAsyncReceipt(this.handlers.onCancelDetachedAgents(cancelDetached));
       return;
     }
     const setModel = unpackAs(msg, SetModelSchema);

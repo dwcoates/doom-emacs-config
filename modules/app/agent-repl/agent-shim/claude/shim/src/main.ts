@@ -710,6 +710,7 @@ function lazyQuery(queryPromise: Promise<QueryLike>): QueryLike {
     },
     interrupt: async (): Promise<InterruptReceipt | undefined> =>
       (await queryPromise).interrupt(),
+    stopTask: async (taskId): Promise<void> => (await queryPromise).stopTask(taskId),
     setPermissionMode: async (mode): Promise<void> =>
       (await queryPromise).setPermissionMode(mode),
     setModel: async (model): Promise<void> => (await queryPromise).setModel(model),

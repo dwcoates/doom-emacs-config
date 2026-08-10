@@ -25,6 +25,8 @@ import { normalizeModel } from "../model.js";
 import {
   Ack,
   AckSchema,
+  CancelDetachedAgents,
+  DetachedCancelOutcome,
   Interrupt,
   InterruptOutcome,
   Nack,
@@ -62,6 +64,18 @@ export interface SdkControlTarget {
    * uds-session.ts for why that read must precede every await.
    */
   interrupt(input: { requestId: string }): InterruptOutcome;
+  /**
+   * Stop every DETACHED background agent this session still has in flight.
+   *
+   * Returns the TYPED outcome, which only the implementation can decide: it
+   * holds the live-task set and its event loop is single-threaded, so the
+   * snapshot it takes is atomic against task end.
+   *
+   * Asynchronous, unlike interrupt(), because the stop is a per-task SDK
+   * control round-trip rather than one abort — a receipt sent before those
+   * settle would name agents that had not been asked to stop yet.
+   */
+  cancelDetachedAgents(input: { requestId: string }): Promise<DetachedCancelOutcome>;
   /** Set a model and return the SDK-confirmed selection. */
   setModel(input: { requestId: string; model: string }): Promise<string>;
   /**
@@ -205,6 +219,38 @@ export class ControlDispatch {
       return create(AckSchema, { requestId: msg.requestId, interruptOutcome: outcome });
     } catch (err) {
       LOGGER.log({ level: "error", request_id: msg.requestId, cause: err }, `interrupt failed: ${errMsg(err)}`);
+      return create(NackSchema, { requestId: msg.requestId, reason: errMsg(err) });
+    }
+  }
+
+  /**
+   * Handle a CancelDetachedAgents; stop the session's detached background
+   * agents and Ack with the outcome the target decided (Nack on throw).
+   *
+   * WHY THIS IS NOT handleInterrupt WITH A FLAG. An interrupt ends the turn.
+   * Detached agents have outlived their turn by definition, so the state this
+   * runs in is exactly the state where an interrupt has nothing to end and
+   * answers ALREADY_COMPLETE. Routing both through one handler would leave the
+   * caller unable to say which of the two it wanted.
+   *
+   * A THROW STAYS A NACK, for the same reason handleInterrupt's does: a Nack
+   * is the stronger failure signal already established on this wire, and
+   * turning it into a successful receipt carrying an `unsupported` arm would
+   * weaken coverage the daemon acts on. The `unsupported` arm is for the case
+   * the target can PROVE unattemptable while still answering.
+   */
+  async handleCancelDetachedAgents(msg: CancelDetachedAgents): Promise<Ack | Nack> {
+    LOGGER.log({ request_id: msg.requestId }, "dispatching CancelDetachedAgents to SDK session");
+    try {
+      const outcome = await this.target.cancelDetachedAgents({ requestId: msg.requestId });
+      LOGGER.log({
+        request_id: msg.requestId,
+        detached_cancel_outcome: outcome.outcome.case ?? "unset",
+        cancelled_task_count: outcome.outcome.case === "cancelled" ? outcome.outcome.value.taskIds.length : 0,
+      }, "CancelDetachedAgents resolved by SDK session");
+      return create(AckSchema, { requestId: msg.requestId, detachedCancelOutcome: outcome });
+    } catch (err) {
+      LOGGER.log({ level: "error", request_id: msg.requestId, cause: err }, `cancel detached agents failed: ${errMsg(err)}`);
       return create(NackSchema, { requestId: msg.requestId, reason: errMsg(err) });
     }
   }
