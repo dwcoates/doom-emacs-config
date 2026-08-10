@@ -442,3 +442,62 @@ func TestAPromptParkedByTheRefreshKeepsItsHoldVerdict(t *testing.T) {
 		t.Fatalf("entries = %+v, want the queue's own HOLD verdict left standing", es)
 	}
 }
+
+// AN ENTRY THAT PREDATES THE LEASE IS NOT DELIVERED AT THE BOUNDARY EITHER.
+// The prompts the lease itself parked are HELD and no selection path would
+// take them, but a prompt that was already queued when the stale shim
+// reattached carries no hold — and delivering it on this boundary would start
+// a turn into the very shim the restart is about to SIGTERM. The claim runs
+// BEFORE any delivery is selected (queue.go), so the roll happens first and
+// the queue drains onto the replacement.
+func TestAQueuedPromptThatPredatesTheLeaseIsNotDeliveredIntoTheStaleShim(t *testing.T) {
+	// Arrange — a prompt queued behind a live turn, and only THEN the stale
+	// shim's reattach that arms the lease.
+	h := newStaleRefreshHarness(t, "sha-new", nil)
+	h.turn(true)
+	if err := h.submit("queued-before-the-lease"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	stale := h.client
+	h.reattach("sha-old", true, []string{"turn-1"})
+
+	// Act — the turn resolves.
+	h.turn(false)
+
+	// Assert — it ran on the REPLACEMENT, and the stale shim was never given
+	// it on the way past.
+	waitFor(t, "the pre-lease prompt to reach the restarted shim", func() bool {
+		replacement := h.newestClient()
+		if replacement == nil || replacement == stale {
+			return false
+		}
+		got := replacement.promptTexts()
+		return len(got) == 1 && got[0] == "queued-before-the-lease"
+	})
+	if got := stale.promptTexts(); len(got) != 0 {
+		t.Fatalf("the stale shim was given %v; the roll must happen before anything drains", got)
+	}
+}
+
+// A PROMPT WAITING ON THE LEASE IS NOT PRESSURE TO ROLL EARLY. The refresh is
+// still owed to the turn boundary, so a queued prompt must not buy itself a
+// faster restart by cutting the turn it is waiting behind.
+func TestAPromptSubmittedWhileTheLeaseIsArmedDoesNotRollTheMidTurnShim(t *testing.T) {
+	// Arrange.
+	h := newStaleRefreshHarness(t, "sha-new", nil)
+	h.turn(true)
+	h.reattach("sha-old", true, []string{"turn-1"})
+
+	// Act.
+	if err := h.submit("waiting-behind-the-lease"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert — the lease is still waiting and nothing was stopped.
+	if session, armed := h.armedSession(); !armed || session != "s1" {
+		t.Fatalf("armed lease = (%q, %v), want s1 still armed while the turn runs", session, armed)
+	}
+	if stopped := h.spawner.stoppedSessions(); len(stopped) != 0 {
+		t.Fatalf("stopped %v; a queued prompt must not cut the turn the lease is waiting on", stopped)
+	}
+}
