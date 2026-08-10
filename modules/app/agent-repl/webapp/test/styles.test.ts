@@ -3787,20 +3787,32 @@ describe("the Recently Merged section's height cap", () => {
     expect(mergedRows).not.toMatch(/(^|[^-])height:\s*calc/);
   });
 
-  it("fixes the merged row's height so ten rows is exactly the cap", () => {
-    // Arrange / Act — a natural row height would let the cap drift with the
-    // tallest row, so the row is drawn at the same height the cap counts in.
+  it("pins the merged row's line box so ten rows is exactly the cap", () => {
+    // Arrange / Act — a `normal` line box would let the cap drift with whatever
+    // font resolves, so the row's one variable dimension is pinned.
     // Assert
-    expect(mergedRow).toMatch(/height:\s*var\(--merged-row-h\)/);
-    expect(mergedRow).toMatch(/box-sizing:\s*border-box/);
+    expect(mergedRow).toMatch(/line-height:\s*var\(--merged-row-line-h\)/);
   });
 
-  it("sizes the row height to clear the row's text and its status disc", () => {
+  it("draws the merged row at its content height rather than a taller fixed one", () => {
+    // Arrange / Act — a fixed `height` padded every row past its content, so ten
+    // entries stood about twelve rows tall. The row is sized by its line box.
+    // Assert
+    expect(mergedRow).not.toMatch(/(^|[^-])height:\s*var\(--merged-row-h\)/);
+    expect(mergedRow).not.toMatch(/(^|[^-])height:\s*\d/);
+  });
+
+  it("builds the row height out of the row's own padding and line box", () => {
     // Arrange — .row's padding is 0.28rem top and bottom; its text is 14px and
-    // its disc 9px, both under the 1.35rem line box.
+    // its disc 9px, both under the pinned line box.
     const rowPadding = blockAfter(css, "#ws-sidebar .row {");
-    // Act / Assert
+    // Act / Assert — the cap's unit is derived from those same two numbers, so
+    // it cannot disagree with what the row actually draws.
     expect(rowPadding).toMatch(/padding:\s*0\.28rem/);
-    expect(mergedSection).toMatch(/--merged-row-h:\s*calc\(0\.28rem \* 2 \+ 1\.35rem\)/);
+    expect(mergedSection).toMatch(/--merged-row-pad-y:\s*0\.28rem\s*;/);
+    expect(mergedSection).toMatch(/--merged-row-line-h:\s*1\.15rem\s*;/);
+    expect(mergedSection).toMatch(
+      /--merged-row-h:\s*calc\(var\(--merged-row-pad-y\) \* 2 \+ var\(--merged-row-line-h\)\)/,
+    );
   });
 });
