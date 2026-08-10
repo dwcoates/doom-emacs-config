@@ -114,6 +114,23 @@ if it is not already running.  Set to nil to require the user to run
   :type 'string
   :group 'agent-repl)
 
+(defcustom agent-repl-frontend-spawn-boot-grace-seconds 30.0
+  "Seconds a daemon spawn this Emacs started counts as STILL BOOTING.
+While a spawn is within this window, `agent-repl--ensure-frontend-daemon'
+declines to start another daemon and waits on the one already coming up.
+
+This window is what stops the ensure from becoming a daemon fork bomb.
+The reattach sweep re-runs the ensure roughly every 15 seconds, and a
+cold spawn — deploy, then a daemon boot that opens a state store, a
+session registry and a whole session fleet — routinely needs longer than
+one sweep to answer on its socket.  Without the window, every sweep that
+arrived before the first spawn finished started ANOTHER daemon.  Set it
+above the slowest boot worth waiting out; a spawn that DIES inside the
+window releases it immediately, so a generous value never delays the
+recovery of a genuinely failed launch."
+  :type 'number
+  :group 'agent-repl)
+
 (defcustom agent-repl-frontend-build-shell "bash"
   "Shell interpreter used to invoke the frontend build script."
   :type 'string
@@ -293,6 +310,29 @@ alongside the install and codex checks."
 (defvar agent-repl--frontend-daemon-process nil
   "The live `claude-repld' process object, or nil when none is running.")
 
+(defvar agent-repl--frontend-daemon-spawn-time nil
+  "`float-time' at which the spawn this Emacs is responsible for began.
+Set when the ensure commits to bringing a daemon up — at the START of the
+deploy, not at the exec, because the deploy is most of the window during
+which a second ensure used to fire — and refreshed when the process
+actually starts.  Nil means no spawn of ours is outstanding.
+
+Cleared when the spawn fails, so a failed launch is retryable at once
+rather than after `agent-repl-frontend-spawn-boot-grace-seconds'.")
+
+(defvar agent-repl--frontend-spawn-waiters nil
+  "Continuations of ensures that arrived while a spawn was in flight.
+Each entry is a cons of (ON-ENSURED . ON-FAILURE).  They are not run
+early: the ensure contract is that exactly one continuation runs and that
+ON-ENSURED means the daemon is RUNNING, so a caller that arrives
+mid-spawn is parked here and settled by the spawn it waited on.")
+
+(defvar agent-repl--frontend-adopted-daemon-pid nil
+  "Pid of a `claude-repld' this Emacs adopted rather than spawned.
+Recorded so the ensure's own logs name the process it decided to live
+with.  It is NOT a process object: this Emacs is not its parent and
+cannot signal it through the process machinery.")
+
 (defconst agent-repl--frontend-daemon-buffer "*claude-repld*"
   "Buffer capturing the daemon process's stdout/stderr.")
 
@@ -329,6 +369,29 @@ the log mirror did.")
   "Return non-nil when the tracked `claude-repld' process is running."
   (and agent-repl--frontend-daemon-process
        (process-live-p agent-repl--frontend-daemon-process)))
+
+(defun agent-repl--frontend-forget-daemon-process ()
+  "Drop the tracked daemon process and the boot grace that belonged to it.
+The two are cleared TOGETHER, always: a spawn whose process is gone is
+over however young it is, and leaving its timestamp behind would make
+`agent-repl--frontend-spawn-in-flight-p' report a boot nobody is doing —
+which would suppress exactly the respawn that recovers."
+  (setq agent-repl--frontend-daemon-process nil)
+  (setq agent-repl--frontend-daemon-spawn-time nil))
+
+(defun agent-repl--frontend-spawn-in-flight-p ()
+  "Return non-nil when a daemon spawn of ours is still inside its boot grace.
+Two facts have to hold: a spawn was started less than
+`agent-repl-frontend-spawn-boot-grace-seconds' ago, and it has not
+already died — a spawn whose process is gone is finished, however young
+it is, and blocking a replacement on it would leave this Emacs with no
+daemon at all.  A spawn that has not reached its exec yet (the deploy is
+still running) has no process object and counts as in flight."
+  (let ((since agent-repl--frontend-daemon-spawn-time))
+    (and since
+         (< (- (float-time) since) agent-repl-frontend-spawn-boot-grace-seconds)
+         (or (null agent-repl--frontend-daemon-process)
+             (process-live-p agent-repl--frontend-daemon-process)))))
 
 (defun agent-repl--frontend-init-inhibited-p ()
   "Return non-nil when automatic frontend init must not run.
@@ -1055,6 +1118,60 @@ Body does nothing but query PATH.  Tests mock it via `cl-letf';
 registered in `agent-repl--external-boundary-functions'."
   (file-exists-p path)) ; ALLOW-EXTERNAL-BOUNDARY
 
+(defconst agent-repl--frontend-daemon-process-name "claude-repld"
+  "Executable name `pgrep' matches when looking for a running daemon.")
+
+(defconst agent-repl--frontend-daemon-pgrep-program "pgrep"
+  "Program used to find `claude-repld' processes this Emacs did not spawn.")
+
+(defun agent-repl--frontend-run-daemon-pgrep ()
+  "External-boundary wrapper: return `pgrep' stdout listing daemon pids.
+Returns the raw stdout string, or nil when the probe cannot run.  Tests
+mock it via `cl-letf'; registered in
+`agent-repl--external-boundary-functions'.
+
+Beyond the external call the body only RECORDS a probe that failed: its
+exit code and merged output are gone the moment this returns nil, and the
+caller cannot reconstruct either."
+  (with-temp-buffer
+    (let ((code (call-process ;; ALLOW-EXTERNAL-BOUNDARY
+                 agent-repl--frontend-daemon-pgrep-program nil t nil
+                 "-x" agent-repl--frontend-daemon-process-name)))
+      ;; pgrep exits 1 when nothing matched, which is a legitimate "no daemon"
+      ;; answer rather than a failure.
+      (if (memq code '(0 1))
+          (buffer-string)
+        (let ((output (string-trim-right (buffer-string))))
+          (agent-repl--log nil
+                           "daemon pgrep: FAILED exit=%S output=%s"
+                           code (if (string-empty-p output) "<empty>" output))
+          nil)))))
+
+(defun agent-repl--frontend-untracked-daemon-pid ()
+  "Return the pid of a live `claude-repld' this Emacs did not spawn, or nil.
+
+Spawning next to one is the orphan-daemon failure mode: the newcomer
+loses the daemon's exclusive claim, exits, and this Emacs is no closer to
+a link than before — while the reattach sweep fires again 15 seconds
+later and repeats it.  Adopting is the only move that converges.
+
+The socket probe answers this question too, but only for a daemon that is
+already SERVING; this one also sees the daemon that exists and is still
+booting, which is precisely the window the duplicate spawns landed in."
+  (let* ((output (agent-repl--frontend-run-daemon-pgrep))
+         (tracked (and agent-repl--frontend-daemon-process
+                       (process-id agent-repl--frontend-daemon-process)))
+         (pids (when (stringp output)
+                 (delq nil
+                       (mapcar (lambda (line)
+                                 (let ((pid (string-to-number (string-trim line))))
+                                   (when (and (> pid 0) (not (eql pid tracked)))
+                                     pid)))
+                               (split-string output "\n" t))))))
+    (agent-repl--log-verbose nil "untracked daemon probe: tracked=%S pids=%S"
+                             tracked pids)
+    (car pids)))
+
 (defun agent-repl--frontend-start-daemon ()
   "Start the `claude-repld' process and track it, returning the process.
 Assumes the artifacts are already built; call
@@ -1088,6 +1205,10 @@ Assumes the artifacts are already built; call
     (setq agent-repl--frontend-daemon-line-accumulator "")
     (let ((proc (agent-repl--frontend-spawn-daemon)))
       (setq agent-repl--frontend-daemon-process proc)
+      ;; The boot grace is measured from the exec, not from the deploy that
+      ;; preceded it: what the next ensure has to wait out is this process
+      ;; reaching its socket, and the build time before it is already spent.
+      (setq agent-repl--frontend-daemon-spawn-time (float-time))
       (agent-repl--log nil "claude-repld started (pid %s) on %s"
                         (process-id proc) agent-repl-frontend-daemon-addr)
       (agent-repl--backend-phase nil "daemon up (pid %s) on %s"
@@ -1343,7 +1464,7 @@ a body to wrap and tests can drive an exit directly."
                                   "claude-repld sentinel: process-live=t tracked=%s event=%s"
                                   tracked trimmed-event)
       (when tracked
-        (setq agent-repl--frontend-daemon-process nil))
+        (agent-repl--frontend-forget-daemon-process))
       ;; A daemon that dies mid-line leaves its last line unterminated, and
       ;; that line is precisely the one a crash investigation wants.  Nothing
       ;; will ever deliver its newline, so flush it here rather than let the
@@ -1844,12 +1965,40 @@ a port nothing can use."
 auto-start is off or automatic init is inhibited, and each of its callers
 has to say the same thing about it — so it is said once, here.")
 
+(defun agent-repl--frontend-settle-spawn-waiters (detail)
+  "Settle ensures that parked on the spawn just finished.
+DETAIL nil means the spawn succeeded and every waiter's ON-ENSURED runs;
+otherwise every waiter's ON-FAILURE receives DETAIL.  The queue is taken
+and cleared BEFORE any continuation runs, so a waiter whose continuation
+issues another ensure cannot be settled twice by this same call."
+  (let ((waiters (nreverse agent-repl--frontend-spawn-waiters)))
+    (setq agent-repl--frontend-spawn-waiters nil)
+    (when waiters
+      (agent-repl--log nil "ensure-frontend-daemon: settling %d parked ensure(s) detail=%S"
+                       (length waiters) detail))
+    (dolist (waiter waiters)
+      (if detail
+          (funcall (cdr waiter) detail)
+        (funcall (car waiter))))))
+
 (defun agent-repl--ensure-frontend-daemon (&optional force on-ensured on-failure)
   "Ensure frontend daemon startup has been requested; return its state.
 Idempotent: returns the live process immediately when one exists (unless
 FORCE).  A daemon already answering on the port that this Emacs does
 NOT track is ADOPTED asynchronously: spawning next to it would only
-bind-fail and die — the orphan-daemon failure mode.  Otherwise deploys
+bind-fail and die — the orphan-daemon failure mode.  A live
+`claude-repld' this Emacs did not spawn is adopted on the same reasoning
+even when it is not answering YET, since it is still coming up.
+
+ITS JOB IS PROCESS EXISTENCE, NOT CONNECTEDNESS.  Reconnecting to a
+daemon that exists is the reattach sweep's dial ladder's work.  That
+sweep re-runs this ensure roughly every 15 seconds, so an ensure that
+treats a still-booting spawn as an absent daemon spawns a competitor
+every sweep for as long as boot takes — which is how a single slow boot
+turned into a self-sustaining doom loop of duplicate daemons.  A spawn
+inside `agent-repl-frontend-spawn-boot-grace-seconds' therefore starts
+nothing and parks this call's continuations on the spawn already in
+flight.  Otherwise deploys
 the stack asynchronously and launches `claude-repld'.  FORCE skips
 adoption: an explicit restart wants a fresh process (a foreign daemon
 cannot be stopped from here — only its owner can).  Returns nil without
@@ -1897,6 +2046,15 @@ overlap impossible rather than unlikely."
                        (process-id agent-repl--frontend-daemon-process))
       (funcall on-ensured)
       agent-repl--frontend-daemon-process)
+     ((and (not force) (agent-repl--frontend-spawn-in-flight-p))
+      ;; The spawn already in flight IS the daemon this call was asking for,
+      ;; so this call waits on it rather than starting a competitor.
+      (agent-repl--log nil
+                       "ensure-frontend-daemon: spawn in flight age=%.1fs grace=%ss; not spawning a competitor"
+                       (- (float-time) agent-repl--frontend-daemon-spawn-time)
+                       agent-repl-frontend-spawn-boot-grace-seconds)
+      (push (cons on-ensured on-failure) agent-repl--frontend-spawn-waiters)
+      :pending)
      (t
       (cl-labels ((launch ()
                     ;; The launch runs from a process sentinel, where a
@@ -1906,21 +2064,40 @@ overlap impossible rather than unlikely."
                     ;; failure path rather than lost.
                     (condition-case err
                         (progn (agent-repl--frontend-start-daemon)
-                               (funcall on-ensured))
+                               (funcall on-ensured)
+                               (agent-repl--frontend-settle-spawn-waiters nil))
                       (error
                        (let ((detail (error-message-string err)))
                          (agent-repl--warn
                           nil "ensure-frontend-daemon: launch FAILED detail=%s" detail)
-                         (funcall on-failure detail)))))
+                         ;; A failed launch ends the boot grace immediately:
+                         ;; there is nothing left to wait for, and holding the
+                         ;; window open would block the retry that recovers.
+                         (setq agent-repl--frontend-daemon-spawn-time nil)
+                         (funcall on-failure detail)
+                         (agent-repl--frontend-settle-spawn-waiters detail)))))
                   (build-and-launch ()
                     (agent-repl--log nil "ensure-frontend-daemon: build-and-launch force=%s"
                                      (if force "t" "nil"))
+                    ;; The grace opens HERE, at the deploy, not at the exec:
+                    ;; the deploy is most of the window a competing ensure used
+                    ;; to arrive in, and during it there is no process object
+                    ;; for anything else to notice.
+                    (setq agent-repl--frontend-daemon-spawn-time (float-time))
                     (agent-repl--frontend-deploy-stack-async
                      force #'launch
                      (lambda (detail)
                        (agent-repl--log nil
                                         "ensure-frontend-daemon: deploy FAILED detail=%s" detail)
-                       (funcall on-failure detail)))))
+                       (setq agent-repl--frontend-daemon-spawn-time nil)
+                       (funcall on-failure detail)
+                       (agent-repl--frontend-settle-spawn-waiters detail))))
+                  (adopt (pid reason)
+                    (agent-repl--log nil
+                                     "ensure-frontend-daemon: adopting daemon pid=%S reason=%s"
+                                     pid reason)
+                    (setq agent-repl--frontend-adopted-daemon-pid pid)
+                    (funcall on-ensured)))
         (if (and force (agent-repl--frontend-daemon-live-p))
             (progn
               (agent-repl--log nil "ensure-frontend-daemon: force=t; asynchronously stopping tracked daemon before rebuild")
@@ -1931,12 +2108,18 @@ overlap impossible rather than unlikely."
                  (build-and-launch)
                ;; An adopted daemon is ALREADY the running daemon this
                ;; ensure was asked for, so the waiter proceeds now.
-               (agent-repl--log nil "ensure-frontend-daemon: adopting foreign daemon on %s"
-                                agent-repl-frontend-daemon-addr)
-               (funcall on-ensured)))
+               (adopt nil (format "responsive on %s" agent-repl-frontend-daemon-addr))))
            (lambda (detail)
-             (agent-repl--log nil "ensure-frontend-daemon: no daemon probe-detail=%S; building" detail)
-             (build-and-launch))))
+             (agent-repl--log nil "ensure-frontend-daemon: no daemon probe-detail=%S" detail)
+             ;; A daemon that EXISTS but is not answering yet is still coming
+             ;; up.  Spawning beside it produces a process that loses the
+             ;; daemon's exclusive claim and dies, leaving this Emacs exactly
+             ;; where it started — and the sweep that fires 15 seconds later
+             ;; does it again.
+             (let ((existing (unless force (agent-repl--frontend-untracked-daemon-pid))))
+               (if existing
+                   (adopt existing "live but not yet answering")
+                 (build-and-launch))))))
         :pending)))))))
 
 (defun agent-repl--frontend-after-daemon-ensured (on-ensured on-failure &optional force)
@@ -1990,7 +2173,7 @@ inherited-pipe EOF."
     (if (not live)
         (progn
           (agent-repl--log nil "frontend stop: no tracked live daemon; clearing process slot")
-          (setq agent-repl--frontend-daemon-process nil)
+          (agent-repl--frontend-forget-daemon-process)
           (when on-stopped (funcall on-stopped)))
       (when (and stop-shims (not force))
         (when-let ((busy (agent-repl--frontend-turn-active-sessions)))
@@ -2018,14 +2201,14 @@ inherited-pipe EOF."
       (agent-repl--frontend-await-async
        (lambda () (process-live-p proc)) agent-repl-frontend-stop-grace-seconds 0.05
        (lambda ()
-         (setq agent-repl--frontend-daemon-process nil)
+         (agent-repl--frontend-forget-daemon-process)
          (agent-repl--log nil "frontend stop: graceful exit observed pid=%S" (process-id proc))
          (when on-stopped (funcall on-stopped)))
        (lambda (_live)
          (agent-repl--log nil "claude-repld ignored SIGTERM for %ss; issuing delete-process pid=%S"
                           agent-repl-frontend-stop-grace-seconds (process-id proc))
          (delete-process proc)
-         (setq agent-repl--frontend-daemon-process nil)
+         (agent-repl--frontend-forget-daemon-process)
          (when on-stopped (funcall on-stopped)))
        "tracked-daemon-stop")))
   :pending))
