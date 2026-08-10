@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1526,4 +1527,63 @@ func TestAWriteThatCompletesPromptlyIsNotAnnouncedAtAll(t *testing.T) {
 		t.Fatal("a prompt write was announced as a stall")
 	}
 	c.close()
+}
+
+// TestUDSWriteFrameReportsEachAcceptedChunkAsProgress covers the transport half
+// of the drain-progress signal: one large frame must report progress MANY
+// times, because a consumer that spends half a minute reading one snapshot is
+// otherwise indistinguishable from one that died holding it.
+func TestUDSWriteFrameReportsEachAcceptedChunkAsProgress(t *testing.T) {
+	tests := []struct {
+		name         string
+		payload      int
+		wantMinCalls int
+	}{
+		{
+			// A single small frame still reports: the delimiter write is the
+			// closing act of every frame, and a steady stream of small frames
+			// must count as progress just as a big one does.
+			name: "a frame smaller than one chunk still reports progress",
+			// net.Pipe is unbuffered, so this is bytes the peer genuinely read.
+			payload:      16,
+			wantMinCalls: 2,
+		},
+		{
+			name:         "a frame spanning several chunks reports one per chunk",
+			payload:      writeChunkBytes*4 + 7,
+			wantMinCalls: 5,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a peer that reads everything, so every chunk is accepted.
+			local, remote := net.Pipe()
+			t.Cleanup(func() { _ = local.Close(); _ = remote.Close() })
+			read := make(chan error, 1)
+			go func() {
+				_, err := io.Copy(io.Discard, remote)
+				read <- err
+			}()
+			c := newUDSConn(local)
+			var calls int
+
+			// Act.
+			err := c.writeFrame(make([]byte, tc.payload), func() { calls++ })
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("writeFrame = %v, want a clean write", err)
+			}
+			if calls < tc.wantMinCalls {
+				t.Fatalf("progress calls = %d, want at least %d for a %d-byte frame",
+					calls, tc.wantMinCalls, tc.payload)
+			}
+			// Close the write side so the reader finishes rather than being
+			// abandoned mid-copy.
+			if err := local.Close(); err != nil {
+				t.Fatalf("close local: %v", err)
+			}
+			<-read
+		})
+	}
 }
