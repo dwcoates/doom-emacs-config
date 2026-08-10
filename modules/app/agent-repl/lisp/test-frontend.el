@@ -2712,6 +2712,111 @@ pre-creation that ever reaches it is the defect these tests cover."
         ;; Act + Assert
         (should (null (agent-repl--frontend-precreate-webview "ws1")))))))
 
+;;;; ---- Pre-creating a SNAPSHOT-RESTORED workspace -------------------------
+
+;; The fixture below is the shape a startup restore actually leaves behind
+;; (`agent-repl--establish-workspace' + `agent-repl--initialize-ws-env'):
+;; `:project-dir' and a cleared `:nuked-at', the hydrated env, and the
+;; display/priority state read back off the project's state.el.  There is NO
+;; `:frontend' key — only a DELIBERATE choice is persisted, so a restored
+;; workspace resolves its presentation from the default — and no `:type' key,
+;; which the registry has never carried at all.  Idealizing the entry with an
+;; explicit `:frontend gui' is what hid this bug.
+(defconst agent-repl-test--restored-ws-plist
+  '(:project-dir "/w/feed-tail" :nuked-at nil :active-env :bare-metal
+    :repl-state :idle :priority 3 :worktree-p t :source-ws-dir "/w/parent")
+  "The registry entry a snapshot-restored gui workspace comes back as.")
+
+(ert-deftest agent-repl-test-frontend-precreate-accepts-a-restored-workspace ()
+  "A restored entry with no explicit `:frontend' is still a gui workspace."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "wsr" agent-repl-test--restored-ws-plist
+    (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () t)))
+      ;; Act + Assert
+      (should (null (agent-repl--frontend-precreate-refusal "wsr"))))))
+
+(ert-deftest agent-repl-test-frontend-precreate-mounts-a-restored-workspace-with-no-establishment ()
+  "An established workspace mounts NOW, never waiting on an establishment edge."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "wsr" agent-repl-test--restored-ws-plist
+    (agent-repl-test--with-precreate-boundaries _displayed
+      (let ((ensured nil))
+        (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+                   (lambda (_key) '(:sessionId "s_1")))
+                  ;; The continuation is NEVER invoked: an already-established
+                  ;; workspace has no establishment edge left to fire.
+                  ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                   (lambda (ws _ok _fail &rest _) (setq ensured ws) :pending)))
+          ;; Act
+          (agent-repl--frontend-precreate-webview "wsr")
+          ;; Assert
+          (should (null ensured))
+          (should (buffer-live-p (agent-repl--ws-get "wsr" :frontend-buffer))))))))
+
+(ert-deftest agent-repl-test-frontend-precreate-reports-a-created-mount ()
+  "The established path reports `:created', not the `:pending' of a wait."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "wsr" agent-repl-test--restored-ws-plist
+    (agent-repl-test--with-precreate-boundaries _displayed
+      (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+                 (lambda (_key) '(:sessionId "s_1"))))
+        ;; Act + Assert
+        (should (eq :created (agent-repl--frontend-precreate-webview "wsr")))))))
+
+(ert-deftest agent-repl-test-frontend-precreate-still-waits-for-a-mid-boot-workspace ()
+  "A workspace the daemon has no view for keeps the establishment wiring."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "wsr" agent-repl-test--restored-ws-plist
+    (agent-repl-test--with-precreate-boundaries _displayed
+      (let ((ensured nil))
+        (cl-letf (((symbol-function 'agent-repl--frontend-session-view) (lambda (_key) nil))
+                  ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                   (lambda (ws _ok _fail &rest _) (setq ensured ws) :pending)))
+          ;; Act
+          (should (eq :pending (agent-repl--frontend-precreate-webview "wsr")))
+          ;; Assert
+          (should (equal "wsr" ensured)))))))
+
+(ert-deftest agent-repl-test-frontend-precreate-refuses-a-fenced-restored-workspace ()
+  "A restored entry the daemon fenced is still refused a page."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "wsr"
+      (append '(:open-fenced t) agent-repl-test--restored-ws-plist)
+    (agent-repl-test--with-precreate-boundaries _displayed
+      (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+                 (lambda (_key) '(:sessionId "s_1"))))
+        ;; Act
+        (should (null (agent-repl--frontend-precreate-webview "wsr")))
+        ;; Assert
+        (should (null agent-repl-test--precreate-urls))))))
+
+(ert-deftest agent-repl-test-frontend-precreate-refuses-a-merged-workspace ()
+  "A merged (closed) workspace is data-only and gets no automatic page."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "wsr"
+      (append '(:merge-completed t) agent-repl-test--restored-ws-plist)
+    (agent-repl-test--with-precreate-boundaries _displayed
+      (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+                 (lambda (_key) '(:sessionId "s_1"))))
+        ;; Act + Assert
+        (should (eq :merge-completed (agent-repl--frontend-precreate-refusal "wsr")))))))
+
+(ert-deftest agent-repl-test-frontend-established-p-reads-the-daemon-view ()
+  "Establishment is answered by the daemon's pushed view for the command key."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "wsr" agent-repl-test--restored-ws-plist
+    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+               (lambda (_key) '(:sessionId "s_1"))))
+      ;; Act + Assert
+      (should (agent-repl--frontend-ws-established-p "wsr")))))
+
+(ert-deftest agent-repl-test-frontend-established-p-is-nil-without-a-project-dir ()
+  "A workspace with no command key cannot have been established."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "wsr" '(:project-dir nil)
+    ;; Act + Assert
+    (should (null (agent-repl--frontend-ws-established-p "wsr")))))
+
 (ert-deftest agent-repl-test-frontend-boot-precreates-on-establishment ()
   "gui-boot pre-creates the workspace's page once the session establishes."
   ;; Arrange

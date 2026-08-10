@@ -71,6 +71,7 @@
 (declare-function agent-repl--frontend-live-webview-buffers "agent-repl-frontend" ())
 (declare-function agent-repl--frontend-build-id "agent-repl-frontend-client" ())
 (declare-function agent-repl--frontend-precreate-webview "agent-repl-frontend" (ws))
+(declare-function agent-repl--frontend-precreate-refusal "agent-repl-frontend" (ws))
 (declare-function agent-repl--ws-live-p "agent-repl-workspace" (ws))
 (declare-function agent-repl--ws-gui-frontend-p "agent-repl-frontends" (ws))
 (declare-function agent-repl--open-fence-active-p "agent-repl-open-fence" (ws))
@@ -118,14 +119,14 @@ one.  Raise this if a burst ever produces a visible hitch."
 
 (defun agent-repl--webview-precreate-needed-p (ws)
   "Return non-nil when WS is owed a webview and has none.
-The registry's LIVE set and the open fence are both consulted here as
-well as inside `agent-repl--frontend-precreate-webview': a workspace can
-be killed, nuked or fenced during the seconds a paced queue takes to
-drain, and a page for it must not appear afterwards."
-  (and (agent-repl--ws-live-p ws)
-       (agent-repl--ws-gui-frontend-p ws)
-       (not (agent-repl--open-fence-active-p ws))
-       (not (buffer-live-p (agent-repl--ws-get ws :frontend-buffer)))))
+
+Answered by `agent-repl--frontend-precreate-refusal' — the SAME
+eligibility the mount itself applies — so the queue can never hold a
+workspace the mount would then refuse, nor skip one it would accept.
+It is re-asked here as well as at the mount because a workspace can be
+killed, nuked, merged or fenced during the seconds a paced queue takes
+to drain, and a page for it must not appear afterwards."
+  (null (agent-repl--frontend-precreate-refusal ws)))
 
 (defun agent-repl--webview-precreate-drain ()
   "Pre-create the queue's next workspace, then re-arm for the one after.

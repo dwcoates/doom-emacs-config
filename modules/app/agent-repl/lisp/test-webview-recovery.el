@@ -371,7 +371,13 @@ mount itself is the boundary under mock: batch Emacs has no xwidgets."
          (agent-repl--webview-precreate-timer nil)
          (agent-repl-webview-precreate-stagger-seconds 0.01))
      (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
-                (lambda (ws) (setq ,precreated (append ,precreated (list ws))) :pending)))
+                (lambda (ws) (setq ,precreated (append ,precreated (list ws))) :pending))
+               ;; Eligibility now asks the mount's own refusal, which refuses
+               ;; an Emacs with no xwidget support — every batch Emacs.  The
+               ;; capability is asserted so the queue's OTHER conditions are
+               ;; what these tests actually exercise.
+               ((symbol-function 'agent-repl--frontend-xwidget-available-p)
+                (lambda () t)))
        (unwind-protect (progn ,@body)
          (when (timerp agent-repl--webview-precreate-timer)
            (cancel-timer agent-repl--webview-precreate-timer))))))
@@ -396,6 +402,48 @@ mount itself is the boundary under mock: batch Emacs has no xwidgets."
         (agent-repl--webview-recovery-sweep "host_link_up")
         ;; Assert
         (should (equal '("wsp1") agent-repl--webview-precreate-queue))))))
+
+;; The entry a startup restore actually leaves in the registry: no
+;; `:frontend' (only a deliberate choice is persisted) and no `:type' (the
+;; registry carries no such field), so eligibility has to resolve the gui
+;; through the same predicate the open path resolves it through.
+(defconst agent-repl-test--recovery-restored-plist
+  '(:project-dir "/w/feed-tail" :nuked-at nil :active-env :bare-metal
+    :repl-state :idle :priority 3 :worktree-p t :source-ws-dir "/w/parent")
+  "The registry entry a snapshot-restored gui workspace comes back as.")
+
+(ert-deftest agent-repl-test-webview-recovery-sweep-queues-a-restored-workspace ()
+  "A snapshot-restored gui workspace with no page is queued for pre-creation."
+  ;; Arrange
+  (agent-repl-test--with-precreate _created
+    (agent-repl-test--with-recovery-sweep _calls
+      (unwind-protect
+          (progn
+            (puthash "wsrestored"
+                     (copy-sequence agent-repl-test--recovery-restored-plist)
+                     agent-repl--workspaces)
+            ;; Act
+            (agent-repl--webview-recovery-sweep "host_link_up")
+            ;; Assert
+            (should (equal '("wsrestored") agent-repl--webview-precreate-queue)))
+        (remhash "wsrestored" agent-repl--workspaces)))))
+
+(ert-deftest agent-repl-test-webview-recovery-sweep-skips-a-merged-workspace ()
+  "A merged (closed) workspace is never queued for an automatic page."
+  ;; Arrange
+  (agent-repl-test--with-precreate _created
+    (agent-repl-test--with-recovery-sweep _calls
+      (unwind-protect
+          (progn
+            (puthash "wsmerged"
+                     (append '(:merge-completed t)
+                             (copy-sequence agent-repl-test--recovery-restored-plist))
+                     agent-repl--workspaces)
+            ;; Act
+            (agent-repl--webview-recovery-sweep "host_link_up")
+            ;; Assert
+            (should (null agent-repl--webview-precreate-queue)))
+        (remhash "wsmerged" agent-repl--workspaces)))))
 
 (ert-deftest agent-repl-test-webview-recovery-sweep-leaves-mounted-workspaces-alone ()
   "A workspace that already holds a live webview buffer is not queued."
