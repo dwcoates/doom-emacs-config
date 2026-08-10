@@ -2502,3 +2502,67 @@ which is what produced the `outcome=stranded' re-arms."
   ;; Act / Assert
   (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
     (should-error (agent-repl--frontend-make-rendezvous 0 #'ignore) :type 'error)))
+
+;;;; ---- the rebuild's success routing: gate vs direct bounce --------------
+
+(ert-deftest agent-repl-test-rebuild-webapp-routes-success-through-the-gate ()
+  "With a GATE, the build's success arrives at the rendezvous, not the bounce.
+Bouncing straight off the build would reopen the page against a shim the
+restart has not brought back yet."
+  ;; Arrange
+  (let (arrived bounced)
+    (cl-letf (((symbol-function 'agent-repl--frontend-build-targets-async)
+               (lambda (_targets _force on-success _on-failure)
+                 (funcall on-success)
+                 'started))
+              ((symbol-function 'agent-repl--frontend-bounce-webview)
+               (lambda (&rest _) (setq bounced t))))
+      ;; Act
+      (agent-repl--frontend-rebuild-and-redeploy-webapp
+       "ws1" (lambda () (setq arrived t)))
+      ;; Assert
+      (should arrived)
+      (should-not bounced))))
+
+(ert-deftest agent-repl-test-rebuild-webapp-bounces-directly-without-a-gate ()
+  "Without a GATE the build's success bounces the webview by itself."
+  ;; Arrange
+  (let (bounced)
+    (cl-letf (((symbol-function 'agent-repl--frontend-build-targets-async)
+               (lambda (_targets _force on-success _on-failure)
+                 (funcall on-success)
+                 'started))
+              ((symbol-function 'agent-repl--frontend-bounce-webview)
+               (lambda (ws) (setq bounced ws))))
+      ;; Act
+      (agent-repl--frontend-rebuild-and-redeploy-webapp "ws1")
+      ;; Assert
+      (should (equal bounced "ws1")))))
+
+(ert-deftest agent-repl-test-rebuild-webapp-failure-never-reaches-the-gate ()
+  "A failed build never arrives at the rendezvous, so the bounce never runs.
+The webview is left on the bundle it already has, and the failure is
+warned about against the workspace."
+  ;; Arrange
+  (let (arrived warned)
+    (cl-letf (((symbol-function 'agent-repl--frontend-build-targets-async)
+               (lambda (_targets _force _on-success on-failure)
+                 (funcall on-failure "exit 1")
+                 'started))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
+      ;; Act
+      (agent-repl--frontend-rebuild-and-redeploy-webapp
+       "ws1" (lambda () (setq arrived t)))
+      ;; Assert
+      (should-not arrived)
+      (should (string-match-p "exit 1" warned)))))
+
+(ert-deftest agent-repl-test-rebuild-webapp-returns-the-async-outcome ()
+  "The rebuild hands back the build's outcome rather than blocking on it."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-build-targets-async)
+             (lambda (&rest _) 'queued)))
+    ;; Act / Assert
+    (should (eq (agent-repl--frontend-rebuild-and-redeploy-webapp "ws1")
+                'queued))))
