@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ConnectResync, type ConnectResyncLogLevel } from "../src/connect-resync.js";
+import { ConnectResync, isIdentityMismatch, type ConnectResyncLogLevel } from "../src/connect-resync.js";
 
 interface Sent {
   workspace: string;
@@ -333,5 +333,119 @@ describe("ConnectResync re-arm", () => {
 
     // Assert.
     expect(h.sent).toEqual([]);
+  });
+});
+
+/** The daemon's refusal prose for a page naming a superseded identity. */
+const MISMATCH =
+  "resync rejected: command superseded by the current workspace generation " +
+  "request_fence=f-old rejection_cause=identity_mismatch";
+
+interface MismatchHarness extends Harness {
+  adoptions: string[];
+}
+
+/**
+ * A trigger whose FIRST resync is refused for identity mismatch. `adopted` is
+ * the live identity the store hands back at the retry edge; null models a page
+ * that cannot yet name one.
+ */
+function mismatchHarness(adopted: Sent | null, alwaysReject = false): MismatchHarness {
+  const sent: Sent[] = [];
+  const logs: Array<[ConnectResyncLogLevel, string]> = [];
+  const adoptions: string[] = [];
+  const trigger = new ConnectResync({
+    resync: (request) => {
+      sent.push(request);
+      if (alwaysReject || sent.length === 1) return Promise.reject(new Error(MISMATCH));
+      return Promise.resolve();
+    },
+    log: (level, message) => logs.push([level, message]),
+    adoptIdentity: (rejection) => {
+      adoptions.push(rejection);
+      return adopted;
+    },
+  });
+  return { trigger, sent, logs, adoptions };
+}
+
+describe("ConnectResync identity mismatch", () => {
+  it("retries once with the adopted live identity", async () => {
+    // Arrange
+    const h = mismatchHarness(snapshot("/ws", 12, "f-live"));
+    h.trigger.onConnect();
+    // Act
+    h.trigger.observe(true, snapshot("/ws", 12, "f-stale"));
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    // Assert
+    expect(h.sent).toEqual([snapshot("/ws", 12, "f-stale"), snapshot("/ws", 12, "f-live")]);
+  });
+
+  it("re-reads the identity only after a mismatch refusal", async () => {
+    // Arrange
+    const h = mismatchHarness(snapshot("/ws", 12, "f-live"));
+    h.trigger.onConnect();
+    // Act
+    h.trigger.observe(true, snapshot("/ws", 12, "f-stale"));
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    // Assert
+    expect(h.adoptions).toEqual([`Error: ${MISMATCH}`]);
+  });
+
+  it("does not retry a second time when the adopted identity is also superseded", async () => {
+    // Arrange — every send is refused, so the retry mismatches too.
+    const h = mismatchHarness(snapshot("/ws", 12, "f-live"), true);
+    h.trigger.onConnect();
+    // Act
+    h.trigger.observe(true, snapshot("/ws", 12, "f-stale"));
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    // Assert
+    expect(h.sent.length).toBe(2);
+  });
+
+  it("re-arms for the next snapshot when there is no live identity to adopt", async () => {
+    // Arrange
+    const h = mismatchHarness(null);
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12, "f-stale"));
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    // Act — the next snapshot carries the daemon's own account of who is live.
+    h.trigger.observe(true, snapshot("/ws", 12, "f-live"));
+    // Assert
+    expect(h.sent[1]).toEqual(snapshot("/ws", 12, "f-live"));
+  });
+
+  it("does not retry an ordinary refusal that is not an identity mismatch", async () => {
+    // Arrange
+    const sent: Sent[] = [];
+    const trigger = new ConnectResync({
+      resync: (request) => {
+        sent.push(request);
+        return Promise.reject(new Error("resync rejected: workspace unknown"));
+      },
+      adoptIdentity: () => snapshot("/ws", 12, "f-live"),
+    });
+    trigger.onConnect();
+    // Act
+    trigger.observe(true, snapshot("/ws", 12, "f-stale"));
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    // Assert
+    expect(sent.length).toBe(1);
+  });
+});
+
+describe("isIdentityMismatch", () => {
+  it("recognizes the daemon's rejection cause token", () => {
+    // Arrange / Act
+    const verdict = isIdentityMismatch(MISMATCH);
+    // Assert
+    expect(verdict).toBe(true);
+  });
+
+  it("does not claim an unrelated refusal", () => {
+    // Arrange / Act
+    const verdict = isIdentityMismatch("resync rejected: workspace unknown");
+    // Assert
+    expect(verdict).toBe(false);
   });
 });
