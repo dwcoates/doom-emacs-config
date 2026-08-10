@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"slices"
+
+	"claude-repld/internal/statedb"
 )
 
 // metaSchemaVersion is the registry_meta key holding the schema stamp.
@@ -124,46 +126,14 @@ var sessionRecordAddedColumns = []struct{ name, ddl string }{
 // re-added: ALTER TABLE ADD COLUMN is not idempotent in SQLite, so the
 // presence check IS the idempotence.
 func addSessionRecordColumns(db *sql.DB) error {
-	present, err := sessionRecordColumns(db)
-	if err != nil {
-		return err
-	}
+	columns := make([]statedb.ColumnSpec, 0, len(sessionRecordAddedColumns))
 	for _, col := range sessionRecordAddedColumns {
-		if present[col.name] {
-			continue
-		}
-		if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE session_record ADD COLUMN %s %s`, col.name, col.ddl)); err != nil {
-			return fmt.Errorf("registry: add session_record column %s: %w", col.name, err)
-		}
+		columns = append(columns, statedb.ColumnSpec{Name: col.name, DDL: col.ddl})
+	}
+	if err := statedb.AddColumnsIfMissing(db, "session_record", columns); err != nil {
+		return fmt.Errorf("registry: %w", err)
 	}
 	return nil
-}
-
-// sessionRecordColumns reports the column names session_record currently has.
-func sessionRecordColumns(db *sql.DB) (map[string]bool, error) {
-	rows, err := db.Query(`PRAGMA table_info(session_record)`)
-	if err != nil {
-		return nil, fmt.Errorf("registry: read session_record columns: %w", err)
-	}
-	defer rows.Close()
-	present := map[string]bool{}
-	for rows.Next() {
-		var (
-			cid        int
-			name, typ  string
-			notNull    int
-			defaultVal sql.NullString
-			pk         int
-		)
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultVal, &pk); err != nil {
-			return nil, fmt.Errorf("registry: scan session_record column: %w", err)
-		}
-		present[name] = true
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("registry: iterate session_record columns: %w", err)
-	}
-	return present, nil
 }
 
 // querier is the read half shared by *sql.DB (Open's initial load) and *sql.Tx

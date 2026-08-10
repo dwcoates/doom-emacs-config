@@ -265,15 +265,12 @@ func migrate(db *sql.DB, logf dlog.Logf) error {
 // store's seq space at 1, so deduplicating on the daemon id would read a new
 // space's seq 1 as a replay of the retired space's.
 func addEventSessionIDColumn(db *sql.DB) error {
-	has, err := hasColumn(db, "workspace_state", "event_session_id")
+	added, err := statedb.AddColumnIfMissing(db, "workspace_state", "event_session_id", `TEXT`)
 	if err != nil {
 		return err
 	}
-	if has {
+	if !added {
 		return nil
-	}
-	if _, err := db.Exec(`ALTER TABLE workspace_state ADD COLUMN event_session_id TEXT`); err != nil {
-		return fmt.Errorf("ssm: add workspace_state.event_session_id: %w", err)
 	}
 	if _, err := db.Exec(
 		`CREATE INDEX IF NOT EXISTS workspace_state_event_seq ON workspace_state(event_session_id, cause_seq)`,
@@ -390,32 +387,13 @@ func hasTable(db *sql.DB, table string) (bool, error) {
 // space. Each ALTER is independently idempotent so a daemon can safely open a
 // DB left between migration statements by a crash.
 func addTurnClaimColumns(db *sql.DB) error {
-	columns := []struct {
-		name string
-		ddl  string
-	}{
-		{"start_event_session_id", `TEXT NOT NULL DEFAULT ''`},
-		{"bridge_seq", `INTEGER`},
-		{"bridge_event_session_id", `TEXT NOT NULL DEFAULT ''`},
-		{"end_event_session_id", `TEXT NOT NULL DEFAULT ''`},
-		{"end_cause", `TEXT NOT NULL DEFAULT ''`},
-	}
-	for _, column := range columns {
-		has, err := hasColumn(db, "turn_lifecycle_claim", column.name)
-		if err != nil {
-			return err
-		}
-		if has {
-			continue
-		}
-		if _, err := db.Exec(fmt.Sprintf(
-			`ALTER TABLE turn_lifecycle_claim ADD COLUMN %s %s`,
-			column.name, column.ddl,
-		)); err != nil {
-			return fmt.Errorf("ssm: add turn_lifecycle_claim.%s: %w", column.name, err)
-		}
-	}
-	return nil
+	return statedb.AddColumnsIfMissing(db, "turn_lifecycle_claim", []statedb.ColumnSpec{
+		{Name: "start_event_session_id", DDL: `TEXT NOT NULL DEFAULT ''`},
+		{Name: "bridge_seq", DDL: `INTEGER`},
+		{Name: "bridge_event_session_id", DDL: `TEXT NOT NULL DEFAULT ''`},
+		{Name: "end_event_session_id", DDL: `TEXT NOT NULL DEFAULT ''`},
+		{Name: "end_cause", DDL: `TEXT NOT NULL DEFAULT ''`},
+	})
 }
 
 // addTaskIDColumn adds workspace_state.task_id when it is absent. SQLite has
@@ -423,17 +401,8 @@ func addTurnClaimColumns(db *sql.DB) error {
 // already carrying the column is the migration having run, not a failure.
 // Any OTHER error still propagates.
 func addTaskIDColumn(db *sql.DB) error {
-	has, err := hasColumn(db, "workspace_state", "task_id")
-	if err != nil {
-		return err
-	}
-	if has {
-		return nil
-	}
-	if _, err := db.Exec(`ALTER TABLE workspace_state ADD COLUMN task_id TEXT`); err != nil {
-		return fmt.Errorf("ssm: add workspace_state.task_id: %w", err)
-	}
-	return nil
+	_, err := statedb.AddColumnIfMissing(db, "workspace_state", "task_id", `TEXT`)
+	return err
 }
 
 // addMergeLeaseDisplacedColumns installs the two columns that carry the user
@@ -447,43 +416,10 @@ func addTaskIDColumn(db *sql.DB) error {
 // displaced nothing" — the correct answer for a lease taken by a daemon that
 // had no idea it should have been recording one.
 func addMergeLeaseDisplacedColumns(db *sql.DB) error {
-	for _, column := range []string{"displaced_prompt", "displaced_permission_mode"} {
-		has, err := hasColumn(db, "merge_lease", column)
-		if err != nil {
-			return err
-		}
-		if has {
-			continue
-		}
-		if _, err := db.Exec(
-			fmt.Sprintf(`ALTER TABLE merge_lease ADD COLUMN %s TEXT`, column),
-		); err != nil {
-			return fmt.Errorf("ssm: add merge_lease.%s: %w", column, err)
-		}
-	}
-	return nil
-}
-
-// hasColumn reports whether table carries column.
-func hasColumn(db *sql.DB, table, column string) (bool, error) {
-	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
-	if err != nil {
-		return false, fmt.Errorf("ssm: inspect %s columns: %w", table, err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return false, fmt.Errorf("ssm: scan %s column name: %w", table, err)
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("ssm: iterate %s columns: %w", table, err)
-	}
-	return false, nil
+	return statedb.AddColumnsIfMissing(db, "merge_lease", []statedb.ColumnSpec{
+		{Name: "displaced_prompt", DDL: `TEXT`},
+		{Name: "displaced_permission_mode", DDL: `TEXT`},
+	})
 }
 
 type rowExecer interface {
