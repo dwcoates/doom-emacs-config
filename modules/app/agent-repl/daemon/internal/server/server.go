@@ -88,6 +88,13 @@ type CreateOpts struct {
 	RewoundFrom        string `json:"rewound_from,omitempty"`
 	RewindRetainedLeaf string `json:"rewind_retained_leaf,omitempty"`
 	RewindDroppedTurns string `json:"rewind_dropped_turns,omitempty"`
+	// ConfigDirOverride carries an account SELECTION into the create — the one
+	// a human made in the webapp, inherited by a workspace created from one
+	// that carries it. Empty means no selection, and then the account is
+	// resolved from this workspace's own prior selection or from its path
+	// (AccountResolver). It is persisted onto the new record so the selection
+	// keeps travelling to that workspace's own children.
+	ConfigDirOverride string `json:"config_dir_override,omitempty"`
 	// ResumeDaemonResolved marks a Resume the DAEMON chose from its own records
 	// (RESUME_MODE_CONTINUE) rather than one a caller NAMED.
 	//
@@ -1159,8 +1166,24 @@ func (s *Server) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 	// Persist the new root (and freshest claude_session_id) BEFORE the
 	// relaunch: if the bring-up fails, the record still rehydrates under the
 	// target root on the next access instead of the old one.
+	//
+	// THE SELECTION IS RECORDED SEPARATELY from the account it resolves to.
+	// ConfigDir alone cannot say whether a human chose it, and every later
+	// bring-up needs that distinction: without it, the next create would
+	// recompute the account from the workspace path and quietly undo this
+	// switch. The override is what makes the choice stick, and what a child
+	// workspace inherits.
+	//
+	// An explicit selection of the DEFAULT account is stored as that root's
+	// absolute path, never as "", so "nobody chose" stays distinguishable from
+	// "the default was chosen".
+	override := target.ConfigDir
+	if override == "" {
+		override = session.DefaultClaudeConfigDir()
+	}
 	s.updateRegistry(id, "account switch", func(rec *registry.Record) {
 		rec.ConfigDir = target.ConfigDir
+		rec.ConfigDirOverride = override
 		if csid != "" {
 			rec.ClaudeSessionID = csid
 		}
@@ -1400,13 +1423,17 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 	// doomed --resume; it is simply the session controller's handle on a transient session.
 	if s.registry != nil {
 		if err := s.registry.Put(registry.Record{
-			SessionID:       id,
-			CWD:             opts.CWD,
-			Model:           opts.Model,
-			PermissionMode:  opts.PermissionMode,
-			ConfigDir:       opts.ConfigDir,
-			ClaudeSessionID: opts.Resume,
-			CreatedAt:       s.now().UTC().Format(time.RFC3339),
+			SessionID:      id,
+			CWD:            opts.CWD,
+			Model:          opts.Model,
+			PermissionMode: opts.PermissionMode,
+			ConfigDir:      opts.ConfigDir,
+			// The SELECTION rides onto the record so it outlives this session
+			// and keeps travelling to this workspace's children. A resolved
+			// account is not a selection and is deliberately not copied here.
+			ConfigDirOverride: opts.ConfigDirOverride,
+			ClaudeSessionID:   opts.Resume,
+			CreatedAt:         s.now().UTC().Format(time.RFC3339),
 		}); err != nil {
 			s.logf("session %s: registry write on create FAILED — the session will not survive a daemon restart: %v", id, err)
 		}

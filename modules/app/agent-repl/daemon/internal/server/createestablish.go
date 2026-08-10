@@ -182,10 +182,27 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 	if err != nil {
 		return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w", workspace, requestID, err)
 	}
+	// THE ACCOUNT IS DECIDED HERE, not taken from the frame. The editor
+	// computes the same path rule the daemon does, and the one thing it cannot
+	// know is whether a human SELECTED an account for this workspace in the
+	// webapp — that lives on the daemon's records. Trusting the frame's
+	// config_dir would let the editor's path answer overwrite the selection on
+	// the very next create, which is exactly how a deliberate switch used to
+	// evaporate.
+	selection := h.accounts.SelectionFor(cmd.GetCwd())
+	configDir, err := h.accounts.Resolve(cmd.GetCwd(), cmd.GetCwd())
+	if err != nil {
+		return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s resolve the account for cwd %q: %w", workspace, requestID, cmd.GetCwd(), err)
+	}
+	if frame := cmd.GetConfigDir(); frame != configDir {
+		h.logf("frontend cmd: create_session cwd=%s account RESOLVED frame_config_dir=%q resolved_config_dir=%q selected=%t — the account follows the selection, else the path",
+			cmd.GetCwd(), frame, configDir, selection != "")
+	}
 	opts := CreateOpts{
 		CWD:                  cmd.GetCwd(),
 		PermissionMode:       cmd.GetPermissionMode(),
-		ConfigDir:            cmd.GetConfigDir(),
+		ConfigDir:            configDir,
+		ConfigDirOverride:    selection,
 		Resume:               resume,
 		ResumeDaemonResolved: daemonResolved,
 		Fake:                 cmd.GetFake(),

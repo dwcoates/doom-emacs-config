@@ -1000,7 +1000,10 @@ func main() {
 		// The daemon resolves a workspace's conversation for itself. Frontends
 		// send an intent (continue / fresh / explicit), never a remembered
 		// vendor uuid — see server.ConversationResolver.
-		Resumes:       &server.ConversationResolver{Reg: sessionRegistry, Logf: legacyLog},
+		Resumes: &server.ConversationResolver{Reg: sessionRegistry, Logf: legacyLog},
+		// The account rule reads a workspace's SELECTION off these same
+		// records; see internal/server/accountresolve.go.
+		Registry:      sessionRegistry,
 		MergeLease:    mergeLease,
 		MergeQueue:    mergeQueue,
 		MergeGeometry: geometryStore,
