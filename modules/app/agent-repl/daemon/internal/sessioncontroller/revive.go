@@ -481,12 +481,29 @@ func (m *Manager) ReviveForMerge(ctx context.Context, workspace string) error {
 	defer release()
 	if detail.Cause != "" {
 		m.logf("session-controller: merge revival BEGIN ws=%q session=%s cause=%s slept_since_ms=%d policy=direct", workspace, sessionID, detail.Cause, detail.SinceMs)
-		if err := m.clearHibernation(workspace, sessionID); err != nil {
-			m.logf("session-controller: merge revival FAILED ws=%q session=%s stage=clear_hibernation error=%v", workspace, sessionID, err)
-			return fmt.Errorf("session-controller: revive workspace %q session=%s for merge: clear hibernation: %w", workspace, sessionID, err)
-		}
 	} else {
 		m.logf("session-controller: merge revival ws=%q session=%s branch=already_awake policy=direct", workspace, sessionID)
+	}
+	// THE CLEAR IS UNCONDITIONAL, and the branch above is diagnosis alone.
+	//
+	// A RECORD THAT READS AWAKE IS NOT A RECORD THAT WILL STAY AWAKE. The flag
+	// is only half of the durable fact: the other half is the last turn end the
+	// keep-alive policy measures from, and a session whose flag says awake while
+	// that instant is hours old is STALE — hibernateIfStale takes the sleep the
+	// moment anything asks for the session, and bringUp asks (sessioncontroller.go).
+	// Skipping the clear on the awake branch therefore let the merge's OWN
+	// bring-up hibernate the session the merge was reviving, and ensure() came
+	// back with ErrHibernated: a merge failed by the very revival meant to make
+	// it possible.
+	//
+	// clearHibernation is what stamps the fresh measuring point (hibernation.go),
+	// so running it on both branches is what makes the revival hold against the
+	// staleness evaluator rather than merely against the flag. It is idempotent:
+	// on an already-awake record it writes the same empty detail the record
+	// already carries.
+	if err := m.clearHibernation(workspace, sessionID); err != nil {
+		m.logf("session-controller: merge revival FAILED ws=%q session=%s stage=clear_hibernation error=%v", workspace, sessionID, err)
+		return fmt.Errorf("session-controller: revive workspace %q session=%s for merge: clear hibernation: %w", workspace, sessionID, err)
 	}
 	if _, err := m.ensure(ctx, workspace); err != nil {
 		m.logf("session-controller: merge revival FAILED ws=%q session=%s stage=ensure_driveable error=%v", workspace, sessionID, err)
