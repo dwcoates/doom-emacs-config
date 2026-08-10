@@ -136,6 +136,7 @@ import {
   installWorkspaceExpandHook,
   workspaceStatusFromRenderState,
 } from "./sidebar.js";
+import { ClientLogThrottle } from "./clientlog-throttle.js";
 import { ConversationStore } from "./store.js";
 import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { type DaemonBuild, VersionSkewGuard } from "./version-skew.js";
@@ -210,13 +211,23 @@ async function boot(): Promise<void> {
   let clientLogSink:
     | ((level: ClientLogLevel, message: string, context?: ClientLogContext) => boolean)
     | null = null;
-  const wslog = new ForwardingLogger(
-    (cmd) => {
+  // Every forwarded record is its own command on its workspace's daemon lane,
+  // so an unthrottled console echo is a command flood (see
+  // clientlog-throttle.ts). The throttle sits between the logger and the
+  // dispatcher: it resolves clientLogSink at FLUSH time, so it spans the
+  // bootstrap sink, the session sink, and the intervals where neither exists.
+  const clientLogThrottle = new ClientLogThrottle({
+    send: (level, message, context) => {
       // Startup and reconnect legitimately precede an open command socket.
-      // Returning false keeps the record in ForwardingLogger's bounded queue.
+      // Returning false keeps the record buffered for the next flush.
       if (clientLogSink === null) return false;
-      return clientLogSink(cmd.level, cmd.message, cmd.context);
+      return clientLogSink(level, message, context);
     },
+  });
+  const wslog = new ForwardingLogger(
+    // A false here is the throttle's buffer bound, which keeps the record in
+    // ForwardingLogger's own bounded queue instead of losing it.
+    (cmd) => clientLogThrottle.write(cmd.level, cmd.message, cmd.context),
   );
   // A page instance exists before the first socket. Binding its initial
   // generation now guarantees even bootstrap diagnostics meet the webapp
@@ -1517,6 +1528,9 @@ async function boot(): Promise<void> {
       onFreshnessChange: (freshness: WsStateFreshness) => {
         const current = freshness === "current";
         if (current) {
+          // Throttle first: its records are older than anything the logger
+          // still holds, and both queues drain in emission order.
+          clientLogThrottle.flush();
           wslog.flush();
           connectResync.onConnect();
           if (store.state.renderState === null) {
@@ -1642,6 +1656,7 @@ async function boot(): Promise<void> {
           bootDispatcher.observe(decoded);
           if (decoded.frame.case === "snapshot" && !created) {
             bootWs.adoptSnapshot({ bootstrap: true });
+            clientLogThrottle.flush();
             wslog.flush();
             created = true;
             void bootDispatcher
