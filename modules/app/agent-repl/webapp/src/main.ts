@@ -108,9 +108,11 @@ import {
   daemonReachableFailure,
   daemonUnreachableFailure,
   frameUndecodableFailure,
+  heldPromptUnsentFailure,
   workspaceGoneFailure,
   staleBundleFailure,
 } from "./local-failure.js";
+import { PromptQueue, drainableRenderState, type QueuedPrompt } from "./prompt-queue.js";
 import { StateAdapter, userTurnReceipt } from "./state-adapter.js";
 import { CommandDispatcher, ModelSelectionRejectedError, surfaceRefusal } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
@@ -406,9 +408,13 @@ async function boot(): Promise<void> {
    * because the refusal's failure card is the only honest record of a prompt
    * that never ran.
    */
-  const submitPrompt = (text: string, promptOrigin: PromptOrigin): void => {
+  const dispatchPrompt = (
+    workspace: string,
+    text: string,
+    promptOrigin: PromptOrigin,
+  ): Promise<void> => {
     const { requestId, ack } = dispatcher.submitPrompt(
-      cmdWorkspace(),
+      workspace,
       text,
       promptOrigin,
       pendingMode.outbound,
@@ -416,9 +422,63 @@ async function boot(): Promise<void> {
     // No id means no command left the page — there is no submit to draw, and
     // the rejection below is the whole story.
     if (requestId !== "" && store.addLocalPrompt(requestId, text)) frames.schedule();
-    void ack.catch((err) => {
+    return ack.catch((err: unknown) => {
       if (store.dropUnackedPrompt(requestId)) frames.schedule();
+      // RE-THROWN, unlike before: the held-prompt queue is a caller that must
+      // learn a drained prompt was refused, because it owes that prompt its own
+      // failure card. `consumeOwnedDispatchFailure` still runs first, so the
+      // live-path caller below keeps its "the dispatcher already owns this
+      // rejection" contract and simply swallows what it is handed back.
       consumeOwnedDispatchFailure(err);
+      throw err instanceof Error ? err : new Error(String(err));
+    });
+  };
+  /**
+   * The held-prompt queue (C): what the composer does with a prompt when the
+   * backend is bouncing.
+   *
+   * The prompt is NOT refused and the words are NOT lost — they are drawn as
+   * pending and re-offered once the socket is current AND the workspace's own
+   * `WorkspaceState` says a live session is behind it again. A drain into an
+   * unwired workspace would put the prompt into a durable replay nothing reads,
+   * so `revived` reads the wired axis rather than the socket.
+   */
+  const promptQueue = new PromptQueue({
+    linkDown: () => (ws as WsClient | undefined)?.state !== "current",
+    revived: (workspace) =>
+      (ws as WsClient | undefined)?.state === "current" &&
+      store.state.cwd === workspace &&
+      store.state.hibernation === null &&
+      drainableRenderState(store.state.renderState),
+    // A held prompt shows up in the feed the instant it is typed, keyed on the
+    // queue entry rather than any request id — nothing has been sent, so there
+    // is no receipt that could ever reconcile onto this bubble.
+    echo: (entry: QueuedPrompt) => {
+      if (store.addLocalPrompt(entry.queueId, entry.text)) frames.schedule();
+    },
+    retract: (entry: QueuedPrompt) => {
+      if (store.dropUnackedPrompt(entry.queueId)) frames.schedule();
+    },
+    submit: (entry: QueuedPrompt) => dispatchPrompt(entry.workspace, entry.text, entry.promptOrigin),
+    fail: (entry: QueuedPrompt, reason: string) => {
+      clog("error", `held prompt was never sent: ${reason}`, {
+        operation: "webapp.held-prompt-lost",
+        workspace: entry.workspace,
+      });
+      if (store.addFailure(heldPromptUnsentFailure(entry.queueId, reason))) frames.schedule();
+    },
+    now: () => Date.now(),
+  });
+  const submitPrompt = (text: string, promptOrigin: PromptOrigin): void => {
+    const workspace = cmdWorkspace();
+    // THE QUEUE GETS FIRST REFUSAL. It takes the prompt only while the link
+    // cannot carry it (or while an earlier held prompt is still draining, which
+    // is what keeps the user's order); otherwise it declines and the prompt
+    // goes straight out, exactly as it always did.
+    if (promptQueue.offer(workspace, text, promptOrigin)) return;
+    void dispatchPrompt(workspace, text, promptOrigin).catch(() => {
+      // Already reported by `consumeOwnedDispatchFailure` above; the rethrow
+      // exists for the queue's benefit and has no second story to tell here.
     });
   };
   const feedEl = must("feed");
@@ -1463,6 +1523,14 @@ async function boot(): Promise<void> {
           // connection's one resync had already fired — stops being a zombie
           // pinned to a daemon that no longer exists.
           if (daemonBootId !== null) connectResync.observeDaemonIdentity(daemonBootId);
+          // THE HELD-PROMPT DRAIN EDGE. An adopted snapshot is the first moment
+          // this page holds authoritative state for the workspace, which is
+          // exactly what a held prompt has been waiting for: the queue can now
+          // read the wired axis and decide whether the session is really back.
+          // Wired here rather than to socket-open because an open socket only
+          // says the daemon answered, not that anything is attached to this
+          // workspace. The queue no-ops when nothing is held.
+          void promptQueue.drain(store.state.cwd);
         }
         // The rail, painted from the SAME burst the feed and the footer are
         // ingesting: on a connect snapshot the roster frame rides in with the
