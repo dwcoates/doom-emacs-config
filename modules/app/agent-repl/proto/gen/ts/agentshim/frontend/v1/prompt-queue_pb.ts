@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/prompt-queue.proto.
  */
 export const file_agentshim_frontend_v1_prompt_queue: GenFile = /*@__PURE__*/
-  fileDesc("CihhZ2VudHNoaW0vZnJvbnRlbmQvdjEvcHJvbXB0LXF1ZXVlLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEicAoPU3VibWl0UHJvbXB0Q21kEgwKBHRleHQYASABKAkSFwoPcGVybWlzc2lvbl9tb2RlGAIgASgJEjYKDXByb21wdF9vcmlnaW4YAyABKA4yHy5hZ2VudHNoaW0uY29yZS52MS5Qcm9tcHRPcmlnaW4iJgoMSW50ZXJydXB0Q21kEhYKDmNvbmZpcm1fYWdlbnRzGAEgASgIIhwKGlF1ZXVlQ2xhc3NpZmljYXRpb25QZW5kaW5nIjEKHFF1ZXVlQ2xhc3NpZmljYXRpb25JbnRlcmplY3QSEQoJcmF0aW9uYWxlGAEgASgJIj4KF1F1ZXVlQ2xhc3NpZmljYXRpb25Ib2xkEhEKCXJhdGlvbmFsZRgBIAEoCRIQCghhY2NlcHRlZBgCIAEoCCJgCiZRdWV1ZUNsYXNzaWZpY2F0aW9uVW5pbnRlcnJ1cHRpYmxlVHVybhI2Cgdjb21tYW5kGAEgASgOMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLlNlc3Npb25Db21tYW5kIioKGFF1ZXVlQ2xhc3NpZmljYXRpb25FcnJvchIOCgZkZXRhaWwYASABKAkioQYKClF1ZXVlRW50cnkSCgoCaWQYASABKAkSDAoEdGV4dBgCIAEoCRIUCgxxdWV1ZWRfYXRfbXMYAyABKAMSRAoHcGVuZGluZxgKIAEoCzIxLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uUGVuZGluZ0gAEkgKCWludGVyamVjdBgLIAEoCzIzLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uSW50ZXJqZWN0SAASSwoRaG9sZF9mb3JfdHVybl9lbmQYDCABKAsyLi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbkhvbGRIABJACgVlcnJvchgNIAEoCzIvLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uRXJyb3JIABJdChR1bmludGVycnVwdGlibGVfdHVybhgPIAEoCzI9LmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uVW5pbnRlcnJ1cHRpYmxlVHVybkgAEkEKCHNodXRkb3duGAcgASgLMi0uYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlRW50cnlTaHV0ZG93bkhvbGRIARJECgprZWVwX2FsaXZlGAggASgLMi4uYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlRW50cnlLZWVwQWxpdmVIb2xkSAESPwoHcmV2aXZhbBgJIAEoCzIsLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUVudHJ5UmV2aXZhbEhvbGRIARJKCg1idWlsZF9yZWZyZXNoGA4gASgLMjEuYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlRW50cnlCdWlsZFJlZnJlc2hIb2xkSAFCEAoOY2xhc3NpZmljYXRpb25CBgoEaG9sZEoECAQQBUoECAUQBkoECAYQB1IOY2xhc3NpZmljYXRpb25SCXJhdGlvbmFsZVIIYWNjZXB0ZWQiLQoWUXVldWVFbnRyeVNodXRkb3duSG9sZBITCgtzY2hlZHVsZV9pZBgBIAEoCSIqChdRdWV1ZUVudHJ5S2VlcEFsaXZlSG9sZBIPCgd0dXJuX2lkGAEgASgJIikKFVF1ZXVlRW50cnlSZXZpdmFsSG9sZEoECAEQAlIKc2Vzc2lvbl9pZCIcChpRdWV1ZUVudHJ5QnVpbGRSZWZyZXNoSG9sZCJzCglRdWV1ZVZpZXcSEQoJd29ya3NwYWNlGAEgASgJEjIKB2VudHJpZXMYAyADKAsyIS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeRINCgVmZW5jZRgEIAEoCUoECAIQA1IKc2Vzc2lvbl9pZCIhCg1RdWV1ZUZvcmNlQ21kEhAKCGVudHJ5X2lkGAEgASgJIiIKDlF1ZXVlQWNjZXB0Q21kEhAKCGVudHJ5X2lkGAEgASgJIiIKDlF1ZXVlQ2FuY2VsQ21kEhAKCGVudHJ5X2lkGAEgASgJQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_agentshim_core_v1_core, file_agentshim_frontend_v1_slash_menu]);
+  fileDesc("CihhZ2VudHNoaW0vZnJvbnRlbmQvdjEvcHJvbXB0LXF1ZXVlLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEicAoPU3VibWl0UHJvbXB0Q21kEgwKBHRleHQYASABKAkSFwoPcGVybWlzc2lvbl9tb2RlGAIgASgJEjYKDXByb21wdF9vcmlnaW4YAyABKA4yHy5hZ2VudHNoaW0uY29yZS52MS5Qcm9tcHRPcmlnaW4iJgoMSW50ZXJydXB0Q21kEhYKDmNvbmZpcm1fYWdlbnRzGAEgASgIIhkKF0NhbmNlbERldGFjaGVkQWdlbnRzQ21kIvsBChVEZXRhY2hlZENhbmNlbE91dGNvbWUSQwoJY2FuY2VsbGVkGAEgASgLMi4uYWdlbnRzaGltLmZyb250ZW5kLnYxLkRldGFjaGVkQWdlbnRzQ2FuY2VsbGVkSAASSQoPbm90aGluZ19ydW5uaW5nGAIgASgLMi4uYWdlbnRzaGltLmZyb250ZW5kLnYxLk5vRGV0YWNoZWRBZ2VudHNSdW5uaW5nSAASRwoLdW5zdXBwb3J0ZWQYAyABKAsyMC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuRGV0YWNoZWRDYW5jZWxVbnN1cHBvcnRlZEgAQgkKB291dGNvbWUiKAoXRGV0YWNoZWRBZ2VudHNDYW5jZWxsZWQSDQoFY291bnQYASABKAMiGQoXTm9EZXRhY2hlZEFnZW50c1J1bm5pbmciKwoZRGV0YWNoZWRDYW5jZWxVbnN1cHBvcnRlZBIOCgZkZXRhaWwYASABKAkiHAoaUXVldWVDbGFzc2lmaWNhdGlvblBlbmRpbmciMQocUXVldWVDbGFzc2lmaWNhdGlvbkludGVyamVjdBIRCglyYXRpb25hbGUYASABKAkiPgoXUXVldWVDbGFzc2lmaWNhdGlvbkhvbGQSEQoJcmF0aW9uYWxlGAEgASgJEhAKCGFjY2VwdGVkGAIgASgIImAKJlF1ZXVlQ2xhc3NpZmljYXRpb25VbmludGVycnVwdGlibGVUdXJuEjYKB2NvbW1hbmQYASABKA4yJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmQiKgoYUXVldWVDbGFzc2lmaWNhdGlvbkVycm9yEg4KBmRldGFpbBgBIAEoCSKhBgoKUXVldWVFbnRyeRIKCgJpZBgBIAEoCRIMCgR0ZXh0GAIgASgJEhQKDHF1ZXVlZF9hdF9tcxgDIAEoAxJECgdwZW5kaW5nGAogASgLMjEuYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlQ2xhc3NpZmljYXRpb25QZW5kaW5nSAASSAoJaW50ZXJqZWN0GAsgASgLMjMuYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlQ2xhc3NpZmljYXRpb25JbnRlcmplY3RIABJLChFob2xkX2Zvcl90dXJuX2VuZBgMIAEoCzIuLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUNsYXNzaWZpY2F0aW9uSG9sZEgAEkAKBWVycm9yGA0gASgLMi8uYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlQ2xhc3NpZmljYXRpb25FcnJvckgAEl0KFHVuaW50ZXJydXB0aWJsZV90dXJuGA8gASgLMj0uYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlQ2xhc3NpZmljYXRpb25VbmludGVycnVwdGlibGVUdXJuSAASQQoIc2h1dGRvd24YByABKAsyLS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeVNodXRkb3duSG9sZEgBEkQKCmtlZXBfYWxpdmUYCCABKAsyLi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeUtlZXBBbGl2ZUhvbGRIARI/CgdyZXZpdmFsGAkgASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlRW50cnlSZXZpdmFsSG9sZEgBEkoKDWJ1aWxkX3JlZnJlc2gYDiABKAsyMS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeUJ1aWxkUmVmcmVzaEhvbGRIAUIQCg5jbGFzc2lmaWNhdGlvbkIGCgRob2xkSgQIBBAFSgQIBRAGSgQIBhAHUg5jbGFzc2lmaWNhdGlvblIJcmF0aW9uYWxlUghhY2NlcHRlZCItChZRdWV1ZUVudHJ5U2h1dGRvd25Ib2xkEhMKC3NjaGVkdWxlX2lkGAEgASgJIioKF1F1ZXVlRW50cnlLZWVwQWxpdmVIb2xkEg8KB3R1cm5faWQYASABKAkiKQoVUXVldWVFbnRyeVJldml2YWxIb2xkSgQIARACUgpzZXNzaW9uX2lkIhwKGlF1ZXVlRW50cnlCdWlsZFJlZnJlc2hIb2xkInMKCVF1ZXVlVmlldxIRCgl3b3Jrc3BhY2UYASABKAkSMgoHZW50cmllcxgDIAMoCzIhLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZUVudHJ5Eg0KBWZlbmNlGAQgASgJSgQIAhADUgpzZXNzaW9uX2lkIiEKDVF1ZXVlRm9yY2VDbWQSEAoIZW50cnlfaWQYASABKAkiIgoOUXVldWVBY2NlcHRDbWQSEAoIZW50cnlfaWQYASABKAkiIgoOUXVldWVDYW5jZWxDbWQSEAoIZW50cnlfaWQYASABKAlCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_agentshim_core_v1_core, file_agentshim_frontend_v1_slash_menu]);
 
 /**
  * @generated from message agentshim.frontend.v1.SubmitPromptCmd
@@ -76,6 +76,153 @@ export const InterruptCmdSchema: GenMessage<InterruptCmd> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_prompt_queue, 1);
 
 /**
+ * Cancel the workspace session's DETACHED background agents: the subagent,
+ * shell and workflow tasks still working after the turn that launched them
+ * has ended.
+ *
+ * WHY IT IS ITS OWN COMMAND RATHER THAN A FLAG ON InterruptCmd. An interrupt
+ * stops the TURN. The state this command exists for — main turn over,
+ * detached agents still running — is precisely the state in which there is no
+ * turn to stop, so an interrupt sent into it is a guaranteed no-op that the
+ * shim answers ALREADY_COMPLETE. The one state that raised the interrupt's
+ * "cancel the running subagents?" question was the one state its answer could
+ * not act on; this command is what that yes now sends.
+ *
+ * IT CARRIES NO CONFIRMATION ECHO, unlike InterruptCmd.confirm_agents. There
+ * is nothing here to confirm: the command's ONLY effect is stopping detached
+ * agents, so sending it IS the deliberate second keystroke that flag exists to
+ * require. A frontend asks its user before it sends, never after.
+ *
+ * The session is the command envelope's `workspace`; the command has no
+ * fields of its own.
+ *
+ * @generated from message agentshim.frontend.v1.CancelDetachedAgentsCmd
+ */
+export type CancelDetachedAgentsCmd = Message<"agentshim.frontend.v1.CancelDetachedAgentsCmd"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.CancelDetachedAgentsCmd.
+ * Use `create(CancelDetachedAgentsCmdSchema)` to create a new message.
+ */
+export const CancelDetachedAgentsCmdSchema: GenMessage<CancelDetachedAgentsCmd> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 2);
+
+/**
+ * What a CancelDetachedAgentsCmd did, carried on the command's ack.
+ *
+ * It is the SHIM's verdict relayed, not a daemon re-derivation — see
+ * agentshim.core.v1.DetachedCancelOutcome for why only the shim can answer
+ * "what was running when this landed?" without racing task end.
+ *
+ * A ONEOF OF MESSAGES, never a bool: "did it work" cannot distinguish a stop
+ * that reached three agents from a session that had nothing to stop from a
+ * session that could not be asked, and a frontend renders those three
+ * differently.
+ *
+ * @generated from message agentshim.frontend.v1.DetachedCancelOutcome
+ */
+export type DetachedCancelOutcome = Message<"agentshim.frontend.v1.DetachedCancelOutcome"> & {
+  /**
+   * @generated from oneof agentshim.frontend.v1.DetachedCancelOutcome.outcome
+   */
+  outcome: {
+    /**
+     * @generated from field: agentshim.frontend.v1.DetachedAgentsCancelled cancelled = 1;
+     */
+    value: DetachedAgentsCancelled;
+    case: "cancelled";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.NoDetachedAgentsRunning nothing_running = 2;
+     */
+    value: NoDetachedAgentsRunning;
+    case: "nothingRunning";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.DetachedCancelUnsupported unsupported = 3;
+     */
+    value: DetachedCancelUnsupported;
+    case: "unsupported";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.DetachedCancelOutcome.
+ * Use `create(DetachedCancelOutcomeSchema)` to create a new message.
+ */
+export const DetachedCancelOutcomeSchema: GenMessage<DetachedCancelOutcome> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 3);
+
+/**
+ * Detached work was running and the stop reached every agent counted here.
+ *
+ * @generated from message agentshim.frontend.v1.DetachedAgentsCancelled
+ */
+export type DetachedAgentsCancelled = Message<"agentshim.frontend.v1.DetachedAgentsCancelled"> & {
+  /**
+   * How many detached agents were stopped. A COUNT rather than the shim's
+   * task ids: a task id is daemon-internal bookkeeping a frontend has no
+   * vocabulary for, and what a frontend renders is "cancelled 3 agents". The
+   * ids stay on the shim-wire arm, where the daemon uses them to settle
+   * exactly those agents' bubbles.
+   *
+   * @generated from field: int64 count = 1;
+   */
+  count: bigint;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.DetachedAgentsCancelled.
+ * Use `create(DetachedAgentsCancelledSchema)` to create a new message.
+ */
+export const DetachedAgentsCancelledSchema: GenMessage<DetachedAgentsCancelled> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 4);
+
+/**
+ * Nothing detached was running, so the command stopped nothing.
+ *
+ * THE DAEMON REFUSES ON THIS ARM (the ack carries ok=false alongside it). A
+ * cancel that stopped nothing is a keystroke that did nothing, and reporting
+ * it as success is how a stop control comes to look like it works when it
+ * does not reach anything. The typed arm is what lets a frontend say "nothing
+ * was running" instead of showing a bare transport failure.
+ *
+ * @generated from message agentshim.frontend.v1.NoDetachedAgentsRunning
+ */
+export type NoDetachedAgentsRunning = Message<"agentshim.frontend.v1.NoDetachedAgentsRunning"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.NoDetachedAgentsRunning.
+ * Use `create(NoDetachedAgentsRunningSchema)` to create a new message.
+ */
+export const NoDetachedAgentsRunningSchema: GenMessage<NoDetachedAgentsRunning> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 5);
+
+/**
+ * The stop could not be attempted at all: no live session behind the
+ * workspace, or a vendor CLI with no task-stop control.
+ *
+ * @generated from message agentshim.frontend.v1.DetachedCancelUnsupported
+ */
+export type DetachedCancelUnsupported = Message<"agentshim.frontend.v1.DetachedCancelUnsupported"> & {
+  /**
+   * Why, in one sentence, for display.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.DetachedCancelUnsupported.
+ * Use `create(DetachedCancelUnsupportedSchema)` to create a new message.
+ */
+export const DetachedCancelUnsupportedSchema: GenMessage<DetachedCancelUnsupported> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 6);
+
+/**
  * The classifier is still running: the entry is queued and undecided.
  *
  * @generated from message agentshim.frontend.v1.QueueClassificationPending
@@ -88,7 +235,7 @@ export type QueueClassificationPending = Message<"agentshim.frontend.v1.QueueCla
  * Use `create(QueueClassificationPendingSchema)` to create a new message.
  */
 export const QueueClassificationPendingSchema: GenMessage<QueueClassificationPending> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 2);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 7);
 
 /**
  * Deliver NOW: interrupt the running turn and submit once it has ended.
@@ -109,7 +256,7 @@ export type QueueClassificationInterject = Message<"agentshim.frontend.v1.QueueC
  * Use `create(QueueClassificationInterjectSchema)` to create a new message.
  */
 export const QueueClassificationInterjectSchema: GenMessage<QueueClassificationInterject> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 3);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 8);
 
 /**
  * Deliver when the turn ends on its own; do not interrupt for it.
@@ -140,7 +287,7 @@ export type QueueClassificationHold = Message<"agentshim.frontend.v1.QueueClassi
  * Use `create(QueueClassificationHoldSchema)` to create a new message.
  */
 export const QueueClassificationHoldSchema: GenMessage<QueueClassificationHold> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 4);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 9);
 
 /**
  * NOTHING CLASSIFIED THIS ENTRY, because the turn in front of it is a CONTEXT
@@ -179,7 +326,7 @@ export type QueueClassificationUninterruptibleTurn = Message<"agentshim.frontend
  * Use `create(QueueClassificationUninterruptibleTurnSchema)` to create a new message.
  */
 export const QueueClassificationUninterruptibleTurnSchema: GenMessage<QueueClassificationUninterruptibleTurn> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 5);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 10);
 
 /**
  * The classifier could not be believed (it answered with neither token, or
@@ -204,7 +351,7 @@ export type QueueClassificationError = Message<"agentshim.frontend.v1.QueueClass
  * Use `create(QueueClassificationErrorSchema)` to create a new message.
  */
 export const QueueClassificationErrorSchema: GenMessage<QueueClassificationError> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 6);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 11);
 
 /**
  * One prompt the daemon is holding.
@@ -347,7 +494,7 @@ export type QueueEntry = Message<"agentshim.frontend.v1.QueueEntry"> & {
  * Use `create(QueueEntrySchema)` to create a new message.
  */
 export const QueueEntrySchema: GenMessage<QueueEntry> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 7);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 12);
 
 /**
  * A scheduled shutdown's drain lease, holding a queue entry.
@@ -369,7 +516,7 @@ export type QueueEntryShutdownHold = Message<"agentshim.frontend.v1.QueueEntrySh
  * Use `create(QueueEntryShutdownHoldSchema)` to create a new message.
  */
 export const QueueEntryShutdownHoldSchema: GenMessage<QueueEntryShutdownHold> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 8);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 13);
 
 /**
  * The keep-alive turn holding a queue entry.
@@ -391,7 +538,7 @@ export type QueueEntryKeepAliveHold = Message<"agentshim.frontend.v1.QueueEntryK
  * Use `create(QueueEntryKeepAliveHoldSchema)` to create a new message.
  */
 export const QueueEntryKeepAliveHoldSchema: GenMessage<QueueEntryKeepAliveHold> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 9);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 14);
 
 /**
  * The pending compact-first revival holding a queue entry.
@@ -406,7 +553,7 @@ export type QueueEntryRevivalHold = Message<"agentshim.frontend.v1.QueueEntryRev
  * Use `create(QueueEntryRevivalHoldSchema)` to create a new message.
  */
 export const QueueEntryRevivalHoldSchema: GenMessage<QueueEntryRevivalHold> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 10);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 15);
 
 /**
  * The entry waits for its session's shim to restart onto the current build
@@ -423,7 +570,7 @@ export type QueueEntryBuildRefreshHold = Message<"agentshim.frontend.v1.QueueEnt
  * Use `create(QueueEntryBuildRefreshHoldSchema)` to create a new message.
  */
 export const QueueEntryBuildRefreshHoldSchema: GenMessage<QueueEntryBuildRefreshHold> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 11);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 16);
 
 /**
  * The session's queue, pushed on EVERY change and carried in StateSnapshot.
@@ -464,7 +611,7 @@ export type QueueView = Message<"agentshim.frontend.v1.QueueView"> & {
  * Use `create(QueueViewSchema)` to create a new message.
  */
 export const QueueViewSchema: GenMessage<QueueView> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 12);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 17);
 
 /**
  * Deliver this entry NOW — the user overriding the classifier, or not waiting
@@ -484,7 +631,7 @@ export type QueueForceCmd = Message<"agentshim.frontend.v1.QueueForceCmd"> & {
  * Use `create(QueueForceCmdSchema)` to create a new message.
  */
 export const QueueForceCmdSchema: GenMessage<QueueForceCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 13);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 18);
 
 /**
  * Confirm a HOLD entry. View state only: the entry is still delivered by the
@@ -504,7 +651,7 @@ export type QueueAcceptCmd = Message<"agentshim.frontend.v1.QueueAcceptCmd"> & {
  * Use `create(QueueAcceptCmdSchema)` to create a new message.
  */
 export const QueueAcceptCmdSchema: GenMessage<QueueAcceptCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 14);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 19);
 
 /**
  * Drop an entry. It is never delivered.
@@ -523,5 +670,5 @@ export type QueueCancelCmd = Message<"agentshim.frontend.v1.QueueCancelCmd"> & {
  * Use `create(QueueCancelCmdSchema)` to create a new message.
  */
 export const QueueCancelCmdSchema: GenMessage<QueueCancelCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_prompt_queue, 15);
+  messageDesc(file_agentshim_frontend_v1_prompt_queue, 20);
 

@@ -9,6 +9,12 @@ import {
 import {
   Ack,
   AckSchema,
+  CancelDetachedAgentsSchema,
+  DetachedAgentsCancelledSchema,
+  DetachedCancelOutcome,
+  DetachedCancelOutcomeSchema,
+  DetachedCancelUnsupportedSchema,
+  NoDetachedAgentsRunningSchema,
   InterruptOutcome,
   InterruptSchema,
   Nack,
@@ -27,7 +33,14 @@ interface Recorder {
   target: SdkControlTarget;
   prompts: Array<{ requestId: string; text: string; origin: string; promptOrigin: PromptOrigin; permissionMode?: string }>;
   interrupts: Array<{ requestId: string }>;
+  cancels: Array<{ requestId: string }>;
   models: Array<{ requestId: string; model: string }>;
+  /**
+   * What the target answers a detached-agent cancel with, and the rejection a
+   * test can force instead. Mutable rather than another positional argument to
+   * `recorder`, exactly as `selected` is: the list is long enough already.
+   */
+  detached: { outcome: DetachedCancelOutcome; throws?: string };
   throwOnPrompt?: string;
   /**
    * What the target reports as its live selection, and the only way a test can
@@ -50,14 +63,22 @@ function recorder(
 ): Recorder {
   const prompts: Recorder["prompts"] = [];
   const interrupts: Recorder["interrupts"] = [];
+  const cancels: Recorder["cancels"] = [];
   const models: Recorder["models"] = [];
   const selected: Recorder["selected"] = { value: "claude-sonnet-5" };
+  const detached: Recorder["detached"] = {
+    outcome: create(DetachedCancelOutcomeSchema, {
+      outcome: { case: "cancelled", value: create(DetachedAgentsCancelledSchema, { taskIds: ["task-a", "task-b"] }) },
+    }),
+  };
   return {
     prompts,
     interrupts,
+    cancels,
     models,
     throwOnPrompt,
     selected,
+    detached,
     target: {
       submitPrompt: async (input) => {
         if (throwOnPrompt) throw new Error(throwOnPrompt);
@@ -67,6 +88,11 @@ function recorder(
         if (throwOnInterrupt) throw new Error(throwOnInterrupt);
         interrupts.push(input);
         return outcome;
+      },
+      cancelDetachedAgents: async (input) => {
+        if (detached.throws !== undefined) throw new Error(detached.throws);
+        cancels.push(input);
+        return detached.outcome;
       },
       setModel: async (input) => {
         models.push(input);
@@ -287,6 +313,87 @@ describe("ControlDispatch.handleInterrupt", () => {
     const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i9" }));
     // Assert
     expect((receipt as { requestId: string }).requestId).toBe("i9");
+  });
+});
+
+describe("ControlDispatch.handleCancelDetachedAgents", () => {
+  it("forwards the request and Acks the cancelled arm", async () => {
+    // Arrange
+    const rec = recorder();
+    const d = dispatch(rec, []);
+    // Act
+    const receipt = await d.handleCancelDetachedAgents(create(CancelDetachedAgentsSchema, { requestId: "c1" }));
+    // Assert
+    expect(receipt.$typeName).toBe(AckSchema.typeName);
+    expect(rec.cancels).toEqual([{ requestId: "c1" }]);
+    expect((receipt as Ack).detachedCancelOutcome?.outcome.case).toBe("cancelled");
+  });
+
+  it("relays the stopped task ids verbatim", async () => {
+    // Arrange — the ids are what the daemon settles bubbles by, so a receipt
+    // that renamed or counted them would leave it guessing.
+    const rec = recorder();
+    const d = dispatch(rec, []);
+    // Act
+    const receipt = await d.handleCancelDetachedAgents(create(CancelDetachedAgentsSchema, { requestId: "c1" }));
+    // Assert
+    const outcome = (receipt as Ack).detachedCancelOutcome?.outcome;
+    expect(outcome?.case === "cancelled" ? outcome.value.taskIds : null).toEqual(["task-a", "task-b"]);
+  });
+
+  it("acks the nothing_running arm when the session had nothing detached", async () => {
+    // Arrange
+    const rec = recorder();
+    rec.detached.outcome = create(DetachedCancelOutcomeSchema, {
+      outcome: { case: "nothingRunning", value: create(NoDetachedAgentsRunningSchema, {}) },
+    });
+    const d = dispatch(rec, []);
+    // Act
+    const receipt = await d.handleCancelDetachedAgents(create(CancelDetachedAgentsSchema, { requestId: "c1" }));
+    // Assert — an ANSWER at this layer, not a wire failure: the session was
+    // asked what it had running and said nothing. Whether that reads as a
+    // refusal to the user is the daemon's ruling.
+    expect(receipt.$typeName).toBe(AckSchema.typeName);
+    expect((receipt as Ack).detachedCancelOutcome?.outcome.case).toBe("nothingRunning");
+  });
+
+  it("acks the unsupported arm when the stop could not be attempted", async () => {
+    // Arrange
+    const rec = recorder();
+    rec.detached.outcome = create(DetachedCancelOutcomeSchema, {
+      outcome: { case: "unsupported", value: create(DetachedCancelUnsupportedSchema, { detail: "no SDK query" }) },
+    });
+    const d = dispatch(rec, []);
+    // Act
+    const receipt = await d.handleCancelDetachedAgents(create(CancelDetachedAgentsSchema, { requestId: "c1" }));
+    // Assert — distinct from nothing_running: a session that could not be
+    // asked, not one that answered "nothing".
+    const outcome = (receipt as Ack).detachedCancelOutcome?.outcome;
+    expect(outcome?.case === "unsupported" ? outcome.value.detail : null).toBe("no SDK query");
+  });
+
+  it("keeps the Nack for a rejecting target rather than an unsupported ack", async () => {
+    // Arrange
+    const rec = recorder();
+    rec.detached.throws = "stop_task exploded";
+    const d = dispatch(rec, []);
+    // Act
+    const receipt = await d.handleCancelDetachedAgents(create(CancelDetachedAgentsSchema, { requestId: "c1" }));
+    // Assert — same discipline handleInterrupt keeps: a Nack is the stronger
+    // failure signal, and an ack carrying a sad arm would weaken coverage the
+    // daemon acts on.
+    expect(receipt.$typeName).toBe(NackSchema.typeName);
+    expect((receipt as Nack).reason).toBe("stop_task exploded");
+  });
+
+  it("carries the request id alongside the outcome", async () => {
+    // Arrange
+    const rec = recorder();
+    const d = dispatch(rec, []);
+    // Act
+    const receipt = await d.handleCancelDetachedAgents(create(CancelDetachedAgentsSchema, { requestId: "c9" }));
+    // Assert
+    expect(receipt.requestId).toBe("c9");
   });
 });
 

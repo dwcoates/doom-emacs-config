@@ -86,6 +86,19 @@ export function describeInterruptSurvivors(
 /** Structural subset of the SDK `Query` interface the shim uses. */
 export interface QueryLike extends AsyncIterable<SdkMessageLike> {
   interrupt(): Promise<InterruptReceipt | undefined>;
+  /**
+   * The SDK's NATIVE per-task stop (`stop_task` control request): stop one
+   * running background task. The CLI emits that task's `task_notification`
+   * with status `stopped`, which is the same terminal fact every other task
+   * end arrives on — so a stopped agent settles through the ordinary task
+   * lifecycle rather than through a stop-specific side channel.
+   *
+   * This is the mechanism the shim's detached-agent cancel is built on. There
+   * is no process to kill at this boundary: subagents run INSIDE the CLI, not
+   * as children of the shim, so the shim owns no process boundary that could
+   * reach them.
+   */
+  stopTask(taskId: string): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   setModel(model: string): Promise<void>;
   supportedModels(): Promise<ModelInfo[]>;

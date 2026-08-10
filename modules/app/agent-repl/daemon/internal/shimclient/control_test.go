@@ -601,3 +601,91 @@ func TestInterruptLogRendersAnUnnamedOrigin(t *testing.T) {
 		t.Fatalf("send lines = %q, want one naming an empty origin rather than omitting the field", sent)
 	}
 }
+
+// --- CancelDetachedAgents ---------------------------------------------------
+//
+// The stop an Interrupt structurally cannot make: an interrupt ends the turn,
+// and detached agents have outlived their turn by definition.
+
+func TestCancelDetachedAgentsRelaysTheShimVerdict(t *testing.T) {
+	// Arrange
+	h := newHarness()
+	delivered := make(chan string, 1)
+	path := startFakeShim(t, func(conn net.Conn) {
+		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
+		m, err := wire.ReadAny(conn)
+		if err != nil {
+			t.Errorf("read CancelDetachedAgents: %v", err)
+			return
+		}
+		cv, ok := m.(*corev1.CancelDetachedAgents)
+		if !ok {
+			t.Errorf("expected CancelDetachedAgents, got %T", m)
+			return
+		}
+		delivered <- cv.GetRequestId()
+		mustWriteMsg(t, conn, &corev1.Ack{
+			RequestId: cv.GetRequestId(),
+			DetachedCancelOutcome: &corev1.DetachedCancelOutcome{
+				Outcome: &corev1.DetachedCancelOutcome_Cancelled{
+					Cancelled: &corev1.DetachedAgentsCancelled{TaskIds: []string{"t-1", "t-2"}},
+				},
+			},
+		})
+		_, _ = wire.ReadAny(conn)
+	})
+	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
+	defer stop()
+	waitConnected(t, connected)
+
+	// Act
+	outcome, err := c.CancelDetachedAgents(context.Background(), "fe-1")
+
+	// Assert: the task ids come back verbatim — they are what the daemon
+	// settles bubbles by.
+	if err != nil {
+		t.Fatalf("CancelDetachedAgents: %v", err)
+	}
+	if reqID := <-delivered; reqID == "" {
+		t.Fatal("shim should have received a CancelDetachedAgents with a request id")
+	}
+	if got := outcome.GetCancelled().GetTaskIds(); len(got) != 2 || got[0] != "t-1" || got[1] != "t-2" {
+		t.Fatalf("task ids = %v, want [t-1 t-2]", got)
+	}
+}
+
+func TestCancelDetachedAgentsRefusesAnAckWithNoOutcome(t *testing.T) {
+	// Arrange — the shim acks without the field the contract sets on every arm.
+	h := newHarness()
+	path := startFakeShim(t, func(conn net.Conn) {
+		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
+		m, err := wire.ReadAny(conn)
+		if err != nil {
+			t.Errorf("read CancelDetachedAgents: %v", err)
+			return
+		}
+		cv, ok := m.(*corev1.CancelDetachedAgents)
+		if !ok {
+			t.Errorf("expected CancelDetachedAgents, got %T", m)
+			return
+		}
+		mustWriteMsg(t, conn, &corev1.Ack{RequestId: cv.GetRequestId()})
+		_, _ = wire.ReadAny(conn)
+	})
+	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
+	defer stop()
+	waitConnected(t, connected)
+
+	// Act
+	outcome, err := c.CancelDetachedAgents(context.Background(), "fe-1")
+
+	// Assert: a protocol violation, not an empty stop. Reading it as "nothing
+	// was running" would settle no bubbles and report a successful cancel for
+	// work still in flight.
+	if err == nil {
+		t.Fatal("an ack with no detached_cancel_outcome must be refused")
+	}
+	if outcome != nil {
+		t.Fatalf("outcome = %+v, want nil", outcome)
+	}
+}
