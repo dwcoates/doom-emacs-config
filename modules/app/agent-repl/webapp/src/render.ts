@@ -20,12 +20,11 @@ import {
 import { taskCreateToolUseId } from "./tasks.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
 import {
-  compactTokens,
+  agentUncachedInput,
   formatTokens,
-  TOKEN_HEAT_CLASS,
-  tokenHeatStyle,
   canonicalTokens,
   expensiveInput,
+  uncachedInputHtml,
 } from "./tokens.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
@@ -105,7 +104,7 @@ import {
   liveContextDelta,
   userTurnKey,
 } from "./store.js";
-import type { SessionCommand } from "./frontend-proto.js";
+import type { SessionCommand, SessionTokenUtilization } from "./frontend-proto.js";
 
 export interface Actions {
   decidePermission(requestId: string, behavior: "allow" | "deny"): void;
@@ -925,6 +924,16 @@ export interface PanelContext {
    * all, which is what a page that has received no async push should show.
    */
   asyncBubbles?: AsyncBubbleRegistry;
+  /**
+   * The daemon's per-subagent token attribution for the session
+   * (`SessionView.token_utilization`), so a detached agent's badge reports the
+   * SAME uncached input the expanded footer's row for that agent reports.
+   *
+   * It is the daemon's resolution, passed through untouched — the renderer
+   * never sums an agent's spend out of its transcript. Absent before the first
+   * one lands, which leaves every badge showing no figure rather than a zero.
+   */
+  tokenUtilization?: SessionTokenUtilization;
 }
 
 /** True when the child renders something the panel and ticker count. */
@@ -1518,13 +1527,19 @@ function AsyncBadge(hostId: string, item: ToolItem, panels?: PanelContext): stri
   const settled = member?.settled ?? false;
   const dot = statusDot(member?.status ?? "done");
   const open = panels?.isOpen(id) ?? false;
-  // The spend rides the badge whenever the stream meters one (see
-  // transcriptStats): live it ticks with the tail, settled it is the
-  // run's total — the collapsed pill's one glanceable progress figure.
-  const tokens =
-    member?.outputTokens !== undefined
-      ? ` <span class="async-badge-tokens">${escapeHtml(compactTokens(member.outputTokens))} tok</span>`
-      : "";
+  // THE SAME FIGURE THE FOOTER REPORTS FOR THE SAME AGENT, drawn by the same
+  // helper: the daemon-attributed uncached input for this invocation, keyed on
+  // the `Agent` call's own tool-use id (`agentUncachedInput`). The badge used
+  // to report its transcript's summed OUTPUT tokens instead, which made a
+  // subagent's spend read as an unrelated number beside the footer row for the
+  // very same work — and a locally summed one at that, a second owner of the
+  // session's economics living in a renderer.
+  //
+  // NULL RENDERS NOTHING. An invocation the daemon has attributed no usage to
+  // (and every non-agent teal card, a `Skill` among them) shows no figure,
+  // rather than a zero that would read as work that cost nothing.
+  const uncachedInput = agentUncachedInput(panels?.tokenUtilization, item.toolUseId);
+  const tokens = uncachedInput === null ? "" : ` ${uncachedInputHtml("async-badge-tokens", uncachedInput)}`;
   return `<div class="async-badge${settled ? " settled" : ""}${
     open ? " active" : ""
   }" data-panel-toggle="${escapeHtml(id)}"><span class="agent-dot agent-${dot}" aria-hidden="true">●</span> ${escapeHtml(asyncBadgeLabel(item, panels))}${tokens}</div>`;
@@ -2158,9 +2173,7 @@ function resultMeta(chip: ResultItem): string {
     // The figure carries its own heat (see tokenHeatHue): a turn's uncached
     // input is the number this corner exists to make noticeable, and a bare
     // count in a fixed color makes 5k and 150k look like the same news.
-    parts.push(
-      `<span class="turn-in ${TOKEN_HEAT_CLASS}" style="${tokenHeatStyle(input)}">${escapeHtml(`${compactTokens(input)} in`)}</span>`,
-    );
+    parts.push(uncachedInputHtml("turn-in", input));
   }
   if (parts.length === 0) return "";
   // Group both stats under one flex item so the `·` separator sits inline
@@ -3284,6 +3297,7 @@ export class FeedRenderer {
     watchers: ReadonlyMap<string, readonly ToolItem[]>,
     gnsFoldsByBubble?: ReadonlyMap<string, readonly ConversationItem[]>,
   ): PanelContext {
+    const utilization = this.lastState?.tokenUtilization ?? null;
     return {
       children,
       isOpen: (id) => this.openPanels.has(id),
@@ -3291,6 +3305,10 @@ export class FeedRenderer {
       drafts: this.msgDrafts,
       watchers,
       gnsFolds: gnsFoldsByBubble,
+      // The SAME attribution the expanded footer's agent rows read
+      // (`footerAgentRows`), off the same store field, so a subagent's badge
+      // and its footer row cannot report different spends for one invocation.
+      ...(utilization === null ? {} : { tokenUtilization: utilization }),
       ...(this.asyncBubbles === null ? {} : { asyncBubbles: this.asyncBubbles }),
       taskTail: (id) => this.watcherPoller?.tail(id),
       supportPhases: this.supportPhases,

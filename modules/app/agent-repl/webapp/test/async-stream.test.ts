@@ -243,10 +243,11 @@ function usageMsg(tokens: number): string {
   });
 }
 
-describe("transcriptStats", () => {
-  const resultLine = (o: Record<string, unknown> = {}): string =>
-    line({ type: "result", subtype: "success", is_error: false, ...o });
+/** A transcript's terminal record — the stream's own completion signal. */
+const resultLine = (o: Record<string, unknown> = {}): string =>
+  line({ type: "result", subtype: "success", is_error: false, ...o });
 
+describe("transcriptStats", () => {
   it("reads an unterminated stream as unfinished", () => {
     // Arrange / Act
     const stats = transcriptStats(usageMsg(5));
@@ -268,25 +269,13 @@ describe("transcriptStats", () => {
     expect(stats).toMatchObject({ finished: true, error: true });
   });
 
-  it("sums per-message usage into a live token figure", () => {
-    // Arrange / Act
-    const stats = transcriptStats([usageMsg(5), usageMsg(7)].join("\n"));
-    // Assert
-    expect(stats.outputTokens).toBe(12);
-  });
-
-  it("prefers the terminal record's authoritative total over the sum", () => {
-    // Arrange
+  it("meters no token figure of its own, so no renderer can read a summed one", () => {
+    // Arrange — usage records the old scan would have summed into a badge figure.
     const raw = [usageMsg(5), resultLine({ usage: { output_tokens: 40 } })].join("\n");
-    // Act / Assert
-    expect(transcriptStats(raw).outputTokens).toBe(40);
-  });
-
-  it("reports no token figure when no record carried usage", () => {
-    // Arrange / Act
-    const stats = transcriptStats(line({ type: "assistant", message: { content: [] } }));
-    // Assert
-    expect(stats.outputTokens).toBeUndefined();
+    // Act
+    const stats = transcriptStats(raw);
+    // Assert — fate only; every token figure is the daemon's attribution.
+    expect(Object.keys(stats).sort()).toEqual(["error", "finished"]);
   });
 
   it("treats a truncated terminal line as not yet finished", () => {
@@ -298,15 +287,15 @@ describe("transcriptStats", () => {
 });
 
 describe("transcriptStatsCached", () => {
-  it("rescans when the tail grows, so the figure tracks the stream", () => {
-    // Arrange
+  it("rescans when the tail grows, so the verdict tracks the stream", () => {
+    // Arrange — the terminal record lands only in the grown tail.
     const first = usageMsg(5);
-    const grown = [first, usageMsg(7)].join("\n");
+    const grown = [first, resultLine()].join("\n");
     // Act
     transcriptStatsCached("src-grow", first);
     const stats = transcriptStatsCached("src-grow", grown);
     // Assert
-    expect(stats.outputTokens).toBe(12);
+    expect(stats.finished).toBe(true);
   });
 
   it("reuses the scan while the tail is unchanged", () => {
