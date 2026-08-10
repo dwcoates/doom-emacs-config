@@ -362,6 +362,9 @@ export function bubblesDrawnForCall(
   return [named];
 }
 
+/** The empty answer, shared so the no-children case allocates nothing. */
+const EMPTY_ID_SET: ReadonlySet<string> = new Set();
+
 /**
  * The children this bubble's OWN conversation already draws, attached to the
  * cards that spawned them.
@@ -386,9 +389,6 @@ export function bubblesDrawnForCall(
  * to recognize. Reading the same items the renderer draws makes the two agree
  * by construction.
  */
-/** The empty answer, shared so the no-children case allocates nothing. */
-const EMPTY_ID_SET: ReadonlySet<string> = new Set();
-
 function bubblesDrawnByOwnCards(bubble: AsyncBubble, ctx: AsyncRenderContext): ReadonlySet<string> {
   const drawn = new Set<string>();
   const kind = bubble.kind;
