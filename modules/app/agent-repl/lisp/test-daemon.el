@@ -2938,3 +2938,111 @@ skips the drain that reconstructs merges and releases leases."
     ;; Act / Assert
     (should (agent-repl-test--quit-deferred-p
               (agent-repl--frontend-async-run-sentinel 'proc "finished\n")))))
+
+;;;; ---- The daemon's own restart announcement ----------------------------
+
+(ert-deftest agent-repl-test-restart-announcement-opens-the-quiet-window ()
+  "A daemon announcement opens the expected-restart window."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    ;; Act
+    (agent-repl-frontend-note-restart-announcement "deploy-all" 60)
+    ;; Assert
+    (should (agent-repl--frontend-expected-restart-window-live-p))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-restart-announcement-names-the-daemon-as-initiator ()
+  "The window opened by an announcement says the DAEMON asked for it."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    ;; Act
+    (agent-repl-frontend-note-restart-announcement "deploy-all" 60)
+    ;; Assert
+    (should (string-prefix-p "daemon-announced"
+                             (agent-repl--frontend-expected-restart-initiator)))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-restart-announcement-takes-the-announced-bound ()
+  "The announced outage hint becomes THIS window's bound."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    ;; Act
+    (agent-repl-frontend-note-restart-announcement "deploy-all" 60)
+    ;; Assert
+    (should (= 60 (plist-get agent-repl--frontend-expected-restart :window-seconds)))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-restart-announcement-clamps-an-oversized-hint ()
+  "A hint past the ceiling is clamped rather than trusted."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    ;; Act
+    (agent-repl-frontend-note-restart-announcement "deploy-all" 100000)
+    ;; Assert
+    (should (= agent-repl-frontend-restart-announcement-max-seconds
+               (plist-get agent-repl--frontend-expected-restart :window-seconds)))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-restart-announcement-defaults-a-missing-hint ()
+  "An announcement with no usable hint falls back to the configured window."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    ;; Act
+    (agent-repl-frontend-note-restart-announcement "deploy-all" nil)
+    ;; Assert
+    (should (= agent-repl-frontend-expected-restart-window-seconds
+               (plist-get agent-repl--frontend-expected-restart :window-seconds)))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-restart-announcement-window-expires-on-its-own-bound ()
+  "Past the ANNOUNCED bound the window covers nothing, not the global one."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (agent-repl-frontend-note-restart-announcement "deploy-all" 60)
+    (setq agent-repl--frontend-expected-restart
+          (plist-put agent-repl--frontend-expected-restart
+                     :armed-at (- (float-time) 61)))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-expected-restart-window-live-p))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-restart-announcement-expiry-surfaces-the-withheld-exit ()
+  "A daemon that announces a bounce and never returns still reports its exit."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (let (surfaced)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'agent-repl-failure-surface)
+                 (lambda (_ws failure) (setq surfaced failure))))
+        (agent-repl-frontend-note-restart-announcement "deploy-all" 60)
+        (agent-repl--frontend-daemon-sentinel 'proc "killed: 9\n")
+        ;; Act
+        (agent-repl--frontend-expected-restart-expire)
+        ;; Assert
+        (should surfaced)))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-restart-announcement-window-is-side-effect-free-to-read ()
+  "The redisplay predicate never expires the window it is asked about."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (agent-repl-frontend-note-restart-announcement "deploy-all" 60)
+    (setq agent-repl--frontend-expected-restart
+          (plist-put agent-repl--frontend-expected-restart
+                     :armed-at (- (float-time) 61)))
+    ;; Act
+    (agent-repl--frontend-expected-restart-window-live-p)
+    ;; Assert
+    (should agent-repl--frontend-expected-restart)
+    (ignore records)))
+
+(ert-deftest agent-repl-test-restart-announcement-blank-cause-still-names-an-initiator ()
+  "A blank cause still yields an initiator: a window must name its opener."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    ;; Act
+    (agent-repl-frontend-note-restart-announcement "   " 60)
+    ;; Assert
+    (should (equal "daemon-announced"
+                   (plist-get agent-repl--frontend-expected-restart :initiator)))
+    (ignore records)))

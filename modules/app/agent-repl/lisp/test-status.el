@@ -4084,6 +4084,52 @@ the tab bar."
       (should (eq (get-text-property 0 'face segment)
                   'agent-repl-daemon-link-degraded)))))
 
+(ert-deftest agent-repl-test-daemon-link-segment-quiet-during-an-announced-restart ()
+  "An announced restart suppresses the DAEMON LINK DEGRADED segment."
+  ;; Arrange
+  (let ((agent-repl--frontend-expected-restart nil))
+    (cl-letf (((symbol-function 'agent-repl-uds-link-health)
+               (lambda () :degraded))
+              ((symbol-function 'agent-repl--uds-run-timer)
+               (lambda (&rest _) nil)))
+      (agent-repl-frontend-note-restart-announcement "deploy-all" 60)
+      ;; Act / Assert
+      (should (equal (agent-repl-daemon-link-segment) "")))))
+
+(ert-deftest agent-repl-test-daemon-link-segment-honest-after-the-window-expires ()
+  "Past its bound, the announced window stops suppressing the segment."
+  ;; Arrange
+  (let ((agent-repl--frontend-expected-restart nil))
+    (cl-letf (((symbol-function 'agent-repl-uds-link-health)
+               (lambda () :degraded))
+              ((symbol-function 'agent-repl--uds-run-timer)
+               (lambda (&rest _) nil)))
+      (agent-repl-frontend-note-restart-announcement "deploy-all" 60)
+      ;; The window was armed a full bound ago: an elapsed window covers
+      ;; nothing, whether or not its timer ever got to run.
+      (setq agent-repl--frontend-expected-restart
+            (plist-put agent-repl--frontend-expected-restart
+                       :armed-at (- (float-time) 61)))
+      ;; Act / Assert
+      (should (string-match-p
+               "DAEMON LINK DEGRADED"
+               (substring-no-properties (agent-repl-daemon-link-segment)))))))
+
+(ert-deftest agent-repl-test-daemon-link-segment-honest-after-a-reconnect-closes-the-window ()
+  "A closed window leaves the segment reporting the link honestly again."
+  ;; Arrange
+  (let ((agent-repl--frontend-expected-restart nil))
+    (cl-letf (((symbol-function 'agent-repl-uds-link-health)
+               (lambda () :degraded))
+              ((symbol-function 'agent-repl--uds-run-timer)
+               (lambda (&rest _) nil)))
+      (agent-repl-frontend-note-restart-announcement "deploy-all" 60)
+      (setq agent-repl--frontend-expected-restart nil)
+      ;; Act / Assert
+      (should (string-match-p
+               "DAEMON LINK DEGRADED"
+               (substring-no-properties (agent-repl-daemon-link-segment)))))))
+
 (ert-deftest agent-repl-test-daemon-link-segment-shows-a-down-link ()
   "A DOWN link renders the caption through the real health reader.
 The indicator stayed hidden through a total link loss while the reader
