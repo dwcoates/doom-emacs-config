@@ -284,3 +284,41 @@ func TestResyncForGenerationLogsHibernationRevocationBeforeReplay(t *testing.T) 
 	}
 	t.Fatalf("missing hibernation revocation diagnostic: %v", lines)
 }
+
+// TestResyncForGenerationAcceptsAnIdentitylessRequestAgainstALiveController
+// covers the COMPATIBILITY PATH: a client holding no fence at all carries
+// neither a session nor a generation, so there is no identity to be stale
+// about and nothing to refuse.
+func TestResyncForGenerationAcceptsAnIdentitylessRequestAgainstALiveController(t *testing.T) {
+	// Arrange
+	client := &replayClient{}
+	h := newRepullHarness(t, client)
+	h.controller(t)
+
+	// Act
+	err := h.m.ResyncForGeneration("ws", "", "", 0)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("identity-less resync against a live controller: %v", err)
+	}
+}
+
+// TestResyncForGenerationStillRejectsAnAdoptedEmptyGenerationFence is the OTHER
+// half of the wildcard's boundary: a request carrying a session with an empty
+// generation DID adopt a fence, so it is compared and refused exactly as
+// before. Only a request with no identity whatsoever is a wildcard.
+func TestResyncForGenerationStillRejectsAnAdoptedEmptyGenerationFence(t *testing.T) {
+	// Arrange
+	client := &replayClient{}
+	h := newRepullHarness(t, client)
+	d := h.controller(t)
+
+	// Act
+	err := h.m.ResyncForGeneration("ws", d.sessionID, "", 0)
+
+	// Assert
+	if !errors.Is(err, errclass.ErrSessionSuperseded) {
+		t.Fatalf("error = %v, want superseded", err)
+	}
+}

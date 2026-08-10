@@ -110,16 +110,33 @@ func TestRecordOpenFailureRefusesAHibernatedSession(t *testing.T) {
 	}
 }
 
-func TestRecordOpenFailureIsLoudWithNoControllerToPublishOnto(t *testing.T) {
-	// Arrange — the bring-up may have torn its own controller down. The failure
-	// is still real, and going quiet about it is the one thing forbidden.
+func TestRecordOpenFailurePublishesWithNoControllerToPublishOnto(t *testing.T) {
+	// Arrange — this is the ORDINARY shape, not an edge: the bring-up ladder
+	// tears its own controller down as it resolves, so by the time the opener
+	// has classified the outcome there is none left. The card must still reach
+	// the user, because the ladder's own card is the UNTYPED one.
 	h := newEscapeHarness(t)
 
 	// Act.
 	h.m.RecordOpenFailure("ws", errOpenBringUp)
 
 	// Assert.
-	if !h.log.contains("no live controller to publish a failure card onto") {
+	if !h.hasCard(errclass.TypeSessionStartFailed) {
+		t.Fatalf("a late open failure with no controller published nothing; cards=%v", h.failureCards())
+	}
+}
+
+func TestRecordOpenFailureIsLoudWithNoSessionRecordToPublishAgainst(t *testing.T) {
+	// Arrange — a workspace that resolves to no session record has no seq space
+	// to publish into. The failure is still real, and going quiet about it is
+	// the one thing forbidden.
+	h := newEscapeHarness(t)
+
+	// Act.
+	h.m.RecordOpenFailure("unknown-ws", errOpenBringUp)
+
+	// Assert.
+	if !h.log.contains("no session record to publish a failure card against") {
 		t.Fatalf("the unpublishable open failure left no loud line; log=%v", h.log.lines)
 	}
 }
@@ -172,11 +189,11 @@ func TestRecordOpenFailureNonFenceStaysError(t *testing.T) {
 	h := newEscapeHarness(t)
 
 	// Act.
-	h.m.RecordOpenFailure("ws", errOpenBringUp)
+	h.m.RecordOpenFailure("unknown-ws", errOpenBringUp)
 
 	// Assert.
-	if !h.log.contains("no live controller to publish a failure card onto") {
-		t.Fatalf("a non-fence open failure with no controller lost its loud line; log=%v", h.log.lines)
+	if !h.log.contains("no session record to publish a failure card against") {
+		t.Fatalf("a non-fence unpublishable open failure lost its loud line; log=%v", h.log.lines)
 	}
 	if h.log.contains("refused by the vanished-resume fence") {
 		t.Fatalf("a non-fence open failure was misclassified as a fence refusal; log=%v", h.log.lines)

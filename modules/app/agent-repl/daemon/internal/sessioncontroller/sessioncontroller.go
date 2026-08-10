@@ -2198,9 +2198,28 @@ func (m *Manager) ResyncForGeneration(workspace, expectedSessionID, expectedGene
 		m.mu.Unlock()
 		return m.rejectSupersededResync(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "hibernation_transition", "eligibility_revoked")
 	}
+	// AN IDENTITY-LESS REQUEST IS A WILDCARD, not a mismatch. A resync carrying
+	// NEITHER a session nor a generation is a client that holds no fence at all
+	// — it predates fenced chrome, or it connected in a window where the
+	// authoritative WorkspaceState honestly published an ABSENT fence (see
+	// ssm/connectivity.go: an absent controller generation yields an absent
+	// fence rather than an unmatchable minted one). Such a client has nothing to
+	// be stale about, so there is no identity to compare and nothing to refuse;
+	// it is served under whatever identity is current.
+	//
+	// THIS IS NOT THE ADOPTED-EMPTY-GENERATION CASE. A request carrying a
+	// session with an empty generation DID adopt a fence, and it is compared and
+	// refused exactly as before — the wildcard is only for a request that
+	// carries no identity whatsoever.
+	identityless := expectedSessionID == "" && expectedGenerationID == ""
 	if live {
 		liveSessionID, liveGenerationID := d.sessionID, d.generationID
 		m.mu.Unlock()
+		if identityless {
+			m.logf("session-controller: resync eligibility ACCEPTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=identityless_request_wildcard",
+				workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "live_controller")
+			return m.resyncFromController(d, fromSeq, liveSessionID, liveGenerationID)
+		}
 		if expectedGenerationID != liveGenerationID {
 			return m.rejectSupersededResync(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "live_controller", "identity_mismatch")
 		}
@@ -2248,12 +2267,16 @@ func (m *Manager) ResyncForGeneration(workspace, expectedSessionID, expectedGene
 		return err
 	}
 	liveSessionID, liveGenerationID := state.GetSessionId(), state.GetControllerGenerationId()
-	if expectedSessionID != liveSessionID || expectedGenerationID != liveGenerationID {
+	if !identityless && (expectedSessionID != liveSessionID || expectedGenerationID != liveGenerationID) {
 		m.mu.Unlock()
 		return m.rejectSupersededResync(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "durable_history", "identity_mismatch")
 	}
-	m.logf("session-controller: resync eligibility ACCEPTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=current_durable_snapshot",
-		workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "durable_history")
+	decision := "current_durable_snapshot"
+	if identityless {
+		decision = "identityless_request_wildcard"
+	}
+	m.logf("session-controller: resync eligibility ACCEPTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=%s",
+		workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "durable_history", decision)
 	// Keep m.mu through the bounded durable replay.  bringUp installs the next
 	// controller under this same mutex, so no controller generation can appear
 	// after the no-controller snapshot check and before the store replay ends.
