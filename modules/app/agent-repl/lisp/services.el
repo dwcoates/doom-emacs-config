@@ -26,6 +26,9 @@
 (declare-function agent-repl--frontend-rebind-workspaces-after-restart "frontend-client" (&optional on-success on-failure))
 (declare-function agent-repl--frontend-runtime-bounce-preflight-async "daemon" (callback))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--make-latch "core" (&optional cleanup))
+(declare-function agent-repl--latch-claim "core" (latch))
+(declare-function agent-repl--latch-set-timer "core" (latch key timer))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 (declare-function agent-repl--backend-phase "core" (ws fmt &rest args))
@@ -202,7 +205,7 @@ terminal latch timeout and is restored when the latch returns."
     (error "agent-repl: shim-store readiness requires callable continuations"))
   (let* ((started-at (float-time))
          (deadline (+ started-at agent-repl-shim-store-ready-timeout))
-         timer settled)
+         (latch (agent-repl--make-latch)))
     (agent-repl--log nil
                      "shim-services store readiness: socket=%s timeout=%.1fs initial-ready=%s"
                      agent-repl--shim-store-socket
@@ -210,9 +213,7 @@ terminal latch timeout and is restored when the latch returns."
                      (if (agent-repl--shim-store-socket-present-p) "t" "nil"))
     (cl-labels
         ((finish (ok detail)
-           (unless settled
-             (setq settled t)
-             (when (timerp timer) (cancel-timer timer))
+           (when (agent-repl--latch-claim latch)
              (agent-repl--log nil
                               "shim-services store readiness: outcome=%s socket=%s elapsed=%.3fs timeout=%.1fs detail=%S"
                               (if ok "ready" "timeout") agent-repl--shim-store-socket
@@ -233,7 +234,9 @@ terminal latch timeout and is restored when the latch returns."
                (finish nil (format "shim-store socket %s absent after %.1fs"
                                    agent-repl--shim-store-socket
                                    agent-repl-shim-store-ready-timeout)))
-              (t (setq timer (agent-repl--shim-services-run-timer 0.1 #'poll)))))))
+              (t (agent-repl--latch-set-timer
+                  latch 'poll
+                  (agent-repl--shim-services-run-timer 0.1 #'poll)))))))
       (poll)
       :pending)))
 
