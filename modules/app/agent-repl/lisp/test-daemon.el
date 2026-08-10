@@ -195,6 +195,37 @@ near-identical argv of its own."
       ;; Assert
       (should (string-match-p "exit 3" detail)))))
 
+(ert-deftest agent-repl-test-daemon-run-report-failure-names-both-subjects ()
+  "The shared run reporter phrases the phase line and the detail separately.
+The build run and the stack deploy name themselves differently in each
+place, so both subjects are the reporter's arguments."
+  ;; Arrange
+  (let (phase)
+    (cl-letf (((symbol-function 'display-buffer) #'ignore)
+              ((symbol-function 'agent-repl--backend-phase)
+               (lambda (_ws fmt &rest args) (setq phase (apply #'format fmt args)))))
+      ;; Act
+      (let ((detail (agent-repl--frontend-run-report-failure
+                     "stack deploy" "stack deploy" 1 "boom")))
+        ;; Assert
+        (should (string-prefix-p "stack deploy FAILED (exit 1)" phase))
+        (should (string-prefix-p "agent-repl: stack deploy failed (exit 1)" detail))))))
+
+(ert-deftest agent-repl-test-daemon-deploy-failure-report-is-shared ()
+  "The stack deploy's failure goes through the shared run reporter.
+A hand-rolled second failure path at the deploy site fails here rather
+than drifting from the build's."
+  ;; Arrange
+  (let (reported)
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (lambda (_args) 1))
+              ((symbol-function 'agent-repl--frontend-run-report-failure)
+               (lambda (phase-subject &rest _) (setq reported phase-subject) "detail")))
+      ;; Act
+      (should-error (agent-repl--frontend-deploy-stack nil))
+      ;; Assert
+      (should (equal reported "stack deploy")))))
+
 (ert-deftest agent-repl-test-daemon-build-missing-script-check-is-shared ()
   "The script-presence assertion signals for an absent script.
 Both build runs gate on this one check, so neither can start a process
