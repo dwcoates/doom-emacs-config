@@ -561,6 +561,12 @@ type Manager struct {
 	// while the connection that carried it is live, and a pid outliving its
 	// connection is a pid-reuse hazard rather than a stop handle.
 	shimPID map[string]int32
+	// shimBuild is the bundle identity each session's shim announced on its
+	// ShimHello. Kept beside shimPID and for the same reason: it is the only
+	// record of what that process is EXECUTING, and a decision about the shim
+	// may have to be taken (the shutdown drain) when its connection is no
+	// longer in reach.
+	shimBuild map[string]string
 	// bringUpFailures tracks each session's CONSECUTIVE resolved bring-up
 	// failures and, once the give-up bound is reached, the PARK that bound
 	// imposes (bringupescape.go). The park is a cooldown, never a wall: it
@@ -975,6 +981,7 @@ func New(cfg Config) (*Manager, error) {
 		parked:                    make(map[string]*parkedSession),
 		lastCSID:                  make(map[string]string),
 		shimPID:                   make(map[string]int32),
+		shimBuild:                 make(map[string]string),
 		bringUpFailures:           make(map[string]*bringUpStreak),
 		buildBounced:              make(map[string]bool),
 		buildRefresh:              make(map[string]*buildRefreshState),
@@ -3293,6 +3300,7 @@ func (m *Manager) onHandshakeForGeneration(workspace, sessionID, generationID st
 	// The pid rides EVERY hello, so a reconnect refreshes it and a bounce onto
 	// a fresh process never carries the retired one's number forward.
 	m.noteShimPID(sessionID, hello.GetPid())
+	m.noteShimBuild(sessionID, hello.GetBuildSha())
 	csid := hello.GetVendorSessionId()
 	if csid == "" {
 		// A fresh session whose shim has not learned its uuid yet. Announcing
@@ -3447,6 +3455,11 @@ func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID st
 	// release AwaitReady, and it never paints operational or releases queued
 	// work on the generation being retired.
 	m.noteShimPID(sessionID, hello.GetPid())
+	// AND THE BUNDLE IDENTITY, on the same terms. It rides every hello, and it
+	// is the only record of what this process is EXECUTING — which a decision
+	// taken when the connection is gone (the shutdown drain's
+	// ShimStopWouldFixTheBundle) has no other way to read.
+	m.noteShimBuild(sessionID, hello.GetBuildSha())
 	// A shim that reattached MID-TURN arms a turn-boundary lease instead of
 	// bouncing, and therefore does NOT retire this generation: it is still
 	// serving that turn and keeps its readiness until the boundary
