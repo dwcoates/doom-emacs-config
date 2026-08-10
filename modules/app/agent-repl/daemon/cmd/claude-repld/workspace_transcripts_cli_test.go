@@ -165,9 +165,9 @@ func TestConfigDirsForAppliesTheAccountRule(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			t.Setenv(multiRepoRootEnv, tc.multiRoot)
+			t.Setenv(session.MultiRepoRootEnv, tc.multiRoot)
 			t.Setenv("CLAUDE_CONFIG_DIR", "/cfg/.claude")
-			t.Setenv(multiRepoConfigDirEnv, "/cfg/.claude-chesscom")
+			t.Setenv(session.MultiRepoConfigDirEnv, "/cfg/.claude-chesscom")
 
 			// Act.
 			primary, others, err := configDirsFor(tc.workspace, tc.override)
@@ -409,9 +409,9 @@ func TestRunListTranscriptsAlsoReportsTheOtherAccountsTranscripts(t *testing.T) 
 	multi := filepath.Join(root, "chesscom")
 	fallback := filepath.Join(root, "claude")
 	ws := t.TempDir()
-	t.Setenv(multiRepoRootEnv, filepath.Join(root, "nowhere"))
+	t.Setenv(session.MultiRepoRootEnv, filepath.Join(root, "nowhere"))
 	t.Setenv("CLAUDE_CONFIG_DIR", fallback)
-	t.Setenv(multiRepoConfigDirEnv, multi)
+	t.Setenv(session.MultiRepoConfigDirEnv, multi)
 	writeTranscript(t, multi, ws, "uuid-elsewhere", userLine("written under the other account"))
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 
