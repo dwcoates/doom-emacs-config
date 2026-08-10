@@ -840,6 +840,57 @@ keep shouting."
          (or (and (stringp nil-name) (equal ws nil-name))
              (and (stringp main-name) (equal ws main-name))))))
 
+(defvar agent-repl--log-canonicalizing-workspace nil
+  "Non-nil while `agent-repl--log-canonical-workspace' is resolving a name.
+The reverse lookup reads the workspace registry, and anything it touches
+may itself log; the guard makes the resolution non-reentrant so one record
+can never drive an unbounded chain of resolutions.")
+
+(defun agent-repl--log-canonical-workspace (ws)
+  "Return the registry key naming the same workspace as WS.
+
+The registry (`agent-repl--workspaces') is keyed by workspace NAME, but a
+log record can reach the ladder carrying that workspace's DIRECTORY
+instead: a caller holding a worktree path — a daemon `cwd' field, a
+`default-directory', a project root — is naming a real, live, registered
+workspace under its other spelling.  Routing that record on the raw string
+found it absent from the registry and warned that a LIVE workspace was
+unroutable, while its records went to the global sink.
+
+So the two spellings are reduced to the one the registry uses, here, at
+the single point where attribution becomes a sink.  A path-shaped WS is
+resolved through `agent-repl--path-canonical' — the same canonicalizer
+every other workspace-key producer uses, so a symlinked worktree resolves
+to the same entry — against each live workspace's `:project-dir'.
+
+Anything else is returned unchanged: a name that is genuinely absent from
+the registry is exactly the anomaly
+`agent-repl--note-unroutable-log-workspace' exists to shout about, and it
+must keep shouting."
+  (if (or agent-repl--log-canonicalizing-workspace
+          (not (stringp ws))
+          (not (file-name-absolute-p ws))
+          (not (boundp 'agent-repl--workspaces))
+          (not (fboundp 'agent-repl--ws-get)))
+      ws
+    (let ((agent-repl--log-canonicalizing-workspace t))
+      (or (let ((canon (ignore-errors (agent-repl--path-canonical ws)))
+                (found nil))
+            (when canon
+              (maphash
+               (lambda (name plist)
+                 (unless found
+                   (let ((dir (plist-get plist :project-dir)))
+                     (when (and (stringp dir)
+                                (equal canon
+                                       (ignore-errors
+                                         (agent-repl--path-canonical dir)))
+                                (agent-repl--ws-log-routable-p name))
+                       (setq found name)))))
+               agent-repl--workspaces))
+            found)
+          ws))))
+
 (defvar agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)
   "Workspace names already reported as unable to own a durable log sink.")
 
@@ -946,6 +997,14 @@ ladder puts it on the record as `pseudo_workspace'."
   (cond
    ((null ws) nil)
    ((agent-repl--ws-log-routable-p ws) ws)
+   ;; WS may be the registry's other spelling of a live workspace — its
+   ;; worktree path rather than its name.  Reduce both spellings to the
+   ;; registry's key here, before the absence is treated as an anomaly, so a
+   ;; registered workspace is never unroutable under its alternate spelling.
+   ((let ((canonical (agent-repl--log-canonical-workspace ws)))
+      (and (not (equal canonical ws))
+           (agent-repl--ws-log-routable-p canonical)
+           canonical)))
    ((agent-repl--pseudo-workspace-name-p ws) nil)
    ;; A FOURTH condition that is a classification rather than a degradation:
    ;; WS is being created RIGHT NOW and its registration has not committed
