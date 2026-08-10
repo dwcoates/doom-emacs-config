@@ -188,7 +188,21 @@ func (m *Manager) drainLiveTurnForStop(workspace, sessionID string, cause StopCa
 	// that root, and the shutdown teardown is exactly the one whose turns most
 	// need stopping; inheriting it would make the interrupt a guaranteed no-op
 	// on the path it matters most.
-	bound := m.drainTimeout()
+	// AND EXTENDED ACROSS A PLANNED BOUNCE (restartepoch.go). The interrupt's
+	// bound is a failure bound on the SHIM answering, and a replacement daemon
+	// still settling — or an outgoing one whose drain lease is standing — is a
+	// window in which the connection this exchange rides is being re-established
+	// through no fault of the shim's. Expiring against that window mints the one
+	// outcome this whole path exists to avoid: a turn end synthesized by the
+	// teardown instead of reported by the agent that ran it.
+	//
+	// The extension is the window's own elapsed rather than a remembered mark:
+	// this exchange is not running ACROSS the gap, it is beginning inside one.
+	bound, epoch := m.restartExtendedBound(m.drainTimeout())
+	if epoch.open {
+		m.logf("session-controller: teardown turn drain bound EXTENDED ws=%q session=%s path=%s bound=%s base=%s restart_epoch_reason=%q — a planned daemon replacement is in progress, so the shim is given the window rather than charged for it",
+			workspace, sessionID, path, bound, m.drainTimeout(), epoch.reason)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
 	// The teardown has no request id of its own, so the stop is named by the
