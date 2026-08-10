@@ -245,6 +245,11 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; round-trip) entirely from pushed `frontend.v1' state, replacing the
 ;; deleted permission sentinels/hooks (S8/S9).  Needs notifications.el and
 ;; workspace.el (both loaded above) for `--notify' and the ws accessors.
+;; WHY: open-fence.el is read BY permission.el's `conversationDelta' handler
+;; (the one delta reader Emacs owns), so it must be defined before that handler
+;; can run.  It only reads the pushed card and the `agent-repl--ws-*'
+;; accessors, both loaded above, and registers nothing of its own.
+(agent-repl--load-module "open-fence")
 (agent-repl--load-module "permission")
 (agent-repl--load-module "frontend")
 ;; WHY: tasks.el owns the user-defined task model the sidebar's "Task"
