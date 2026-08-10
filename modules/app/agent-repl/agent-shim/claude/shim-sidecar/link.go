@@ -255,7 +255,7 @@ func (s *sidecar) reportOutageClosed() {
 	reason := fmt.Sprintf("store unreachable for %dms across %d failed dial attempt(s); no files were read during the outage",
 		downMs, s.dialFailures)
 	s.log.With(logging.Context{Operation: "link-recovered"}).Log("store link recovered: %s", reason)
-	s.emit(degradedEvents(s.watchedSessions(), reason))
+	s.emit(degradedWindowEvents(s.watchedSessions(), reason))
 	s.dialFailures = 0
 }
 
@@ -276,11 +276,35 @@ func (s *sidecar) watchedSessions() []string {
 	return out
 }
 
-// degradedEvents builds one closing DegradedState per session. They are
+// degradedWindowEvents reports the outage as BOTH HALVES OF ONE WINDOW, opening
+// then closing, per session.
+//
+// The consumer's runtime-fault plumbing is a window: a DegradedState with
+// recovered=false OPENS a fault for the component, and one with recovered=true
+// CLOSES it. Sending only the closing half — which is all the sidecar could
+// ever send live, since the store it reports through is the very thing that was
+// down — asked the daemon to close a window that was never opened, and it
+// rejected the close (`branch=not-open`) instead of recording anything. The
+// outage was then invisible to workspace health even though the failure card
+// showed up.
+//
+// Both halves are sent on the recovered connection, in order, which is the
+// honest shape of a window that is already over by the time it can be told.
+func degradedWindowEvents(sessions []string, reason string) []*corev1.Event {
+	out := make([]*corev1.Event, 0, 2*len(sessions))
+	for _, id := range sessions {
+		out = append(out, degradedEvents([]string{id}, reason, false)...)
+		out = append(out, degradedEvents([]string{id}, reason, true)...)
+	}
+	return out
+}
+
+// degradedEvents builds one DegradedState per session, opening the window
+// (recovered=false) or closing it (recovered=true). They are
 // SYNTHETIC/EPHEMERAL, matching how the shim reports its own degraded windows:
 // an operational notice about the pipe belongs in the live stream, never in the
 // durable conversation history the pipe carries.
-func degradedEvents(sessions []string, reason string) []*corev1.Event {
+func degradedEvents(sessions []string, reason string, recovered bool) []*corev1.Event {
 	now := time.Now().UnixMilli()
 	out := make([]*corev1.Event, 0, len(sessions))
 	for _, id := range sessions {
@@ -292,7 +316,7 @@ func degradedEvents(sessions []string, reason string) []*corev1.Event {
 			Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
 				Component: degradedComponent,
 				Reason:    reason,
-				Recovered: true,
+				Recovered: recovered,
 			}},
 		})
 	}

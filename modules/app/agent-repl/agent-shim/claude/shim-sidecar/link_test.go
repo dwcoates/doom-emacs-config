@@ -726,13 +726,38 @@ func TestOutageIsSurfacedAsDegradedStateOnRecovery(t *testing.T) {
 	// Act — the link comes back, and reports the window it just spent down.
 	s.dial()
 
-	// Assert
+	// Assert — the OPENING half comes first, naming the component.
 	ds := awaitDegraded(t, events)
 	if ds.GetComponent() != degradedComponent {
 		t.Fatalf("component = %q, want %q", ds.GetComponent(), degradedComponent)
 	}
-	if !ds.GetRecovered() {
-		t.Fatal("report is not marked recovered; it is the CLOSING report of the window")
+	if ds.GetRecovered() {
+		t.Fatal("first report is already recovered; the window must be OPENED before it is closed")
+	}
+}
+
+func TestRecoveryClosesTheDegradedWindowItOpened(t *testing.T) {
+	// Arrange — a consumer only resolves a runtime fault it has an open window
+	// for, so the closing half is worthless without the opening one preceding
+	// it on the same connection.
+	h := newStoreHarness(t)
+	root, _ := writeHistory(t, 5)
+	s := h.sidecarOver(root)
+	s.dial() // fails; the outage happens
+
+	h.start()
+	events := subscribeEvents(t, h.sock, backfillSession)
+
+	// Act
+	s.dial()
+
+	// Assert
+	if opened := awaitDegraded(t, events); opened.GetRecovered() {
+		t.Fatal("first report is recovered; want the opening half")
+	}
+	closed := awaitDegraded(t, events)
+	if !closed.GetRecovered() {
+		t.Fatal("second report is not recovered; the window was never closed")
 	}
 }
 
@@ -756,7 +781,7 @@ func TestNoDegradedReportWhenTheLinkComesUpFirstTry(t *testing.T) {
 
 func TestDegradedEventsAreEphemeralAndSynthetic(t *testing.T) {
 	// Arrange / Act — an operational notice about the pipe, one per session.
-	evs := degradedEvents([]string{"a", "b"}, "store was unreachable")
+	evs := degradedEvents([]string{"a", "b"}, "store was unreachable", true)
 
 	// Assert — EPHEMERAL keeps it out of the durable conversation history the
 	// pipe carries, matching how the shim reports its own degraded windows.
@@ -987,6 +1012,33 @@ func TestOutageDurationMeasuresUnreachabilityNotTimeUntilDemand(t *testing.T) {
 	want := fmt.Sprintf("store unreachable for %dms", dialBackoffMin.Milliseconds())
 	if !strings.Contains(sink.String(), want) {
 		t.Fatalf("recovery record does not quote the real outage %q:\n%s", want, sink.String())
+	}
+}
+
+func TestDegradedWindowOpensBeforeItCloses(t *testing.T) {
+	// Arrange / Act — the pair one session gets for one outage.
+	evs := degradedWindowEvents([]string{"s1"}, "store was unreachable")
+
+	// Assert — the consumer opens a runtime fault on the first and resolves it
+	// on the second; the closing half alone resolves a window that is not open.
+	if len(evs) != 2 {
+		t.Fatalf("built %d event(s) for one session, want the opening and closing pair", len(evs))
+	}
+	if evs[0].GetDegradedState().GetRecovered() {
+		t.Fatal("the first half is recovered; the window must open first")
+	}
+	if !evs[1].GetDegradedState().GetRecovered() {
+		t.Fatal("the second half is not recovered; the window never closes")
+	}
+}
+
+func TestDegradedWindowPairsEverySession(t *testing.T) {
+	// Arrange / Act
+	evs := degradedWindowEvents([]string{"a", "b"}, "store was unreachable")
+
+	// Assert — each session's channel carries its own complete window.
+	if len(evs) != 4 {
+		t.Fatalf("built %d event(s) for two sessions, want a pair each", len(evs))
 	}
 }
 
