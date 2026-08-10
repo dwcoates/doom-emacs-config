@@ -427,10 +427,11 @@ func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, genera
 func (m *Manager) translateRange(ctx context.Context, workspace, sessionID, generationID string, lower, upper uint64, limit uint32, read pageRangeReader) ([]pageSegment, bool, error) {
 	capture := &pageCapture{}
 	cons := m.historyConsumer(workspace, sessionID, capture)
-	// The generation the page's items are fenced under. The consumer stamps
-	// every delta it curates with ssm.Fence(sessionID, generationID), and
-	// newPage stamps the page itself with the same pair, so an item's fence and
-	// its page's fence can never disagree.
+	// The generation the curating consumer runs under. It fences the DELTAS the
+	// consumer emits, and pageCapture keeps only the items out of those and
+	// drops the envelopes, so this token never reaches the wire — the page's own
+	// fence is the admitted one newPage stamps, and it is the only fence a
+	// client ever compares.
 	//
 	// The durable RECEIPT ledger is deliberately NOT bound (see
 	// durableConsumer): a page is a read, and retiring a receipt row because
@@ -537,13 +538,17 @@ func flattenItems(selected []pageSegment) []*frontendv1.ConversationItem {
 	return items
 }
 
-// newPage builds the wire message, stamping the fence at MINT time.
+// newPage builds the wire message, stamping the fence THE LADDER ADMITTED
+// THIS REQUEST AGAINST.
 //
-// The fence is read here rather than by the caller because "the fence as of
-// the moment this page was assembled" is the only fence the contract permits:
-// a client byte-compares it against the workspace's current state and discards
-// the page whole when they differ, and a fence read before the assembly would
-// claim currency the page does not have.
+// The fence is carried down from the admission rather than recomposed from the
+// session and generation beside it, and the difference is not cosmetic. An
+// ungenerated workspace — the hibernated one a cold webview mounts against
+// after a daemon bounce — publishes an ABSENT fence, while `Fence(session, "")`
+// is a token the mint never produces. Stamping the composed form put a fence on
+// the page that could not match the WorkspaceState the client was holding, so
+// the client byte-compared, disagreed, and discarded the very page it had
+// asked for: the blank feed again, one layer further out.
 func (m *Manager) newPage(workspace, fence string, items []*frontendv1.ConversationItem, continuation pageContinuation, liveJoinSeq uint64) *frontendv1.ConversationPage {
 	page := &frontendv1.ConversationPage{
 		Workspace:   workspace,
