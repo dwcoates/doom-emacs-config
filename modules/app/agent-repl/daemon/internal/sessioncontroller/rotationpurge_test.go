@@ -8,6 +8,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/ssm"
 )
 
 // ---------------------------------------------------------------------------
@@ -151,7 +152,7 @@ func TestPostRotationResyncReplaysNoRetiredSpaceItem(t *testing.T) {
 	h.push.mu.Unlock()
 
 	// Act — the rebased client asks from the beginning of the new space.
-	if err := h.m.ResyncForGeneration("ws", sessionID, generationID, 0); err != nil {
+	if err := h.m.ResyncForFence("ws", ssm.Fence(sessionID, generationID), 0); err != nil {
 		t.Fatalf("ResyncForGeneration after vendor rotation: %v", err)
 	}
 

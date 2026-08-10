@@ -11,6 +11,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/ssm"
 	"claude-repld/internal/storehistory"
 )
 
@@ -42,7 +43,7 @@ func TestResyncForGenerationRejectsAnOldClientBeforeReplay(t *testing.T) {
 	h := newRepullHarness(t, client)
 	d := h.controller(t)
 
-	err := h.m.ResyncForGeneration("ws", d.sessionID, d.generationID+"-retired", 0)
+	err := h.m.ResyncForFence("ws", ssm.Fence(d.sessionID, d.generationID+"-retired"), 0)
 	if !errors.Is(err, errclass.ErrSessionSuperseded) {
 		t.Fatalf("ResyncForGeneration error = %v, want session superseded", err)
 	}
@@ -94,7 +95,7 @@ func TestResyncForGenerationRejectsOldClientAcrossLifecycleBoundaries(t *testing
 			d := h.controller(t)
 			oldSession, oldGeneration := d.sessionID, d.generationID
 			tc.mutate(h, d)
-			err := h.m.ResyncForGeneration("ws", oldSession, oldGeneration, 0)
+			err := h.m.ResyncForFence("ws", ssm.Fence(oldSession, oldGeneration), 0)
 			if !errors.Is(err, errclass.ErrSessionSuperseded) {
 				t.Fatalf("error = %v, want superseded", err)
 			}
@@ -118,7 +119,7 @@ func TestResyncForGenerationAcceptsReconnectWithinTheSameControllerGeneration(t 
 	if retiring := h.m.onConnectedForGeneration("ws", sessionID, generationID, &corev1.ShimHello{SessionId: sessionID}); retiring {
 		t.Fatal("same-generation reconnect retired the live controller")
 	}
-	if err := h.m.ResyncForGeneration("ws", sessionID, generationID, 0); err != nil {
+	if err := h.m.ResyncForFence("ws", ssm.Fence(sessionID, generationID), 0); err != nil {
 		t.Fatalf("same-generation reconnect resync: %v", err)
 	}
 	if got := client.callCount(); got != 1 {
@@ -129,12 +130,22 @@ func TestResyncForGenerationAcceptsReconnectWithinTheSameControllerGeneration(t 
 func TestDurableResyncAdmissionExcludesControllerInsertionUntilReplayEnds(t *testing.T) {
 	history := &gatedDurableHistory{entered: make(chan struct{}), release: make(chan struct{})}
 	h := newDurableHarness(t, history)
+	// AN UNGENERATED WORKSPACE PUBLISHES AN ABSENT FENCE (ssm.compositeWorkspaceState),
+	// so that is what this state carries and that is what the client echoes.
+	// `Fence("s1", "")` would be a token the mint never produces and no client
+	// was ever shown.
 	h.applier.setCurrent("ws", &frontendv1.WorkspaceState{
-		Workspace: "ws", SessionId: "s1", ControllerGenerationId: "",
+		Workspace: "ws", SessionId: "s1", ControllerGenerationId: "", Fence: "",
 	})
 	done := make(chan error, 1)
-	go func() { done <- h.m.ResyncForGeneration("ws", "s1", "", 0) }()
-	<-history.entered
+	go func() { done <- h.m.ResyncForFence("ws", "", 0) }()
+	// Selecting on the resync's own return keeps a REFUSAL a test failure rather
+	// than a hang: an unconditional receive here wedges the whole package.
+	select {
+	case <-history.entered:
+	case err := <-done:
+		t.Fatalf("durable resync returned %v without ever entering the history read", err)
+	}
 
 	if h.m.mu.TryLock() {
 		h.m.mu.Unlock()
@@ -158,7 +169,7 @@ func TestResyncForGenerationAcceptsTheCurrentController(t *testing.T) {
 	h := newRepullHarness(t, client)
 	d := h.controller(t)
 
-	if err := h.m.ResyncForGeneration("ws", d.sessionID, d.generationID, 0); err != nil {
+	if err := h.m.ResyncForFence("ws", ssm.Fence(d.sessionID, d.generationID), 0); err != nil {
 		t.Fatalf("ResyncForGeneration: %v", err)
 	}
 	if got := client.callCount(); got != 1 {
@@ -171,7 +182,7 @@ func TestResyncForGenerationAcceptsAStaleSessionWithinTheCurrentGeneration(t *te
 	h := newRepullHarness(t, client)
 	d := h.controller(t)
 
-	err := h.m.ResyncForGeneration("ws", d.sessionID+"-superseded", d.generationID, 0)
+	err := h.m.ResyncForFence("ws", ssm.Fence(d.sessionID+"-superseded", d.generationID), 0)
 
 	if err != nil {
 		t.Fatalf("same-generation stale-session resync: %v", err)
@@ -186,7 +197,7 @@ func TestResyncForGenerationRejectsAStaleSessionInAnotherGeneration(t *testing.T
 	h := newRepullHarness(t, client)
 	d := h.controller(t)
 
-	err := h.m.ResyncForGeneration("ws", d.sessionID+"-superseded", d.generationID+"-retired", 0)
+	err := h.m.ResyncForFence("ws", ssm.Fence(d.sessionID+"-superseded", d.generationID+"-retired"), 0)
 
 	if !errors.Is(err, errclass.ErrSessionSuperseded) {
 		t.Fatalf("error = %v, want superseded", err)
@@ -204,7 +215,7 @@ func TestResyncForGenerationRejectsAStaleSessionWithNoGeneration(t *testing.T) {
 	d.generationID = ""
 	h.m.mu.Unlock()
 
-	err := h.m.ResyncForGeneration("ws", d.sessionID+"-superseded", "", 0)
+	err := h.m.ResyncForFence("ws", ssm.Fence(d.sessionID+"-superseded", ""), 0)
 
 	if !errors.Is(err, errclass.ErrSessionSuperseded) {
 		t.Fatalf("error = %v, want superseded", err)
@@ -222,12 +233,16 @@ func TestResyncForGenerationLogsTheSessionRebindingDecision(t *testing.T) {
 	})
 	d := h.controller(t)
 
-	_ = h.m.ResyncForGeneration("ws", "retired-session", d.generationID, 0)
+	_ = h.m.ResyncForFence("ws", ssm.Fence("retired-session", d.generationID), 0)
 
 	for _, line := range lines {
+		// The record names both identities as FENCES, because the fence is what
+		// the client sent and what the ladder compared. Each one still carries
+		// its session half, so the diagnostic loses nothing by naming the token
+		// the decision was actually made on.
 		if strings.Contains(line, "decision=current_generation_session_rebound") &&
-			strings.Contains(line, "request_session=\"retired-session\"") &&
-			strings.Contains(line, "live_session=\""+d.sessionID+"\"") {
+			strings.Contains(line, "request_fence=\""+ssm.Fence("retired-session", d.generationID)+"\"") &&
+			strings.Contains(line, "live_fence=\""+ssm.Fence(d.sessionID, d.generationID)+"\"") {
 			return
 		}
 	}
@@ -242,11 +257,11 @@ func TestResyncForGenerationLogsBothIdentitiesAndReplaySource(t *testing.T) {
 	})
 	d := h.controller(t)
 
-	_ = h.m.ResyncForGeneration("ws", "retired-session", "retired-generation", 0)
+	_ = h.m.ResyncForFence("ws", ssm.Fence("retired-session", "retired-generation"), 0)
 	for _, line := range lines {
 		if strings.Contains(line, "decision=superseded") &&
-			strings.Contains(line, "request_session=\"retired-session\"") &&
-			strings.Contains(line, "live_session=\""+d.sessionID+"\"") &&
+			strings.Contains(line, "request_fence=\""+ssm.Fence("retired-session", "retired-generation")+"\"") &&
+			strings.Contains(line, "live_fence=\""+ssm.Fence(d.sessionID, d.generationID)+"\"") &&
 			strings.Contains(line, "replay_source=\"live_controller\"") {
 			return
 		}
@@ -268,7 +283,7 @@ func TestResyncForGenerationLogsHibernationRevocationBeforeReplay(t *testing.T) 
 	h.m.hibernating["ws"] = true
 	h.m.mu.Unlock()
 
-	err := h.m.ResyncForGeneration("ws", d.sessionID, d.generationID, 9)
+	err := h.m.ResyncForFence("ws", ssm.Fence(d.sessionID, d.generationID), 9)
 	if !errors.Is(err, errclass.ErrSessionSuperseded) {
 		t.Fatalf("error = %v, want superseded", err)
 	}
@@ -295,8 +310,9 @@ func TestResyncForGenerationAcceptsAnIdentitylessRequestAgainstALiveController(t
 	h := newRepullHarness(t, client)
 	h.controller(t)
 
-	// Act
-	err := h.m.ResyncForGeneration("ws", "", "", 0)
+	// Act — NO fence at all. `Fence("", "")` would be the separator alone: a
+	// non-empty token, and therefore a claim rather than the absence of one.
+	err := h.m.ResyncForFence("ws", "", 0)
 
 	// Assert
 	if err != nil {
@@ -315,7 +331,7 @@ func TestResyncForGenerationStillRejectsAnAdoptedEmptyGenerationFence(t *testing
 	d := h.controller(t)
 
 	// Act
-	err := h.m.ResyncForGeneration("ws", d.sessionID, "", 0)
+	err := h.m.ResyncForFence("ws", ssm.Fence(d.sessionID, ""), 0)
 
 	// Assert
 	if !errors.Is(err, errclass.ErrSessionSuperseded) {

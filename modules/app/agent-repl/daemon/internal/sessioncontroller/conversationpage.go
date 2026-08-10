@@ -10,7 +10,6 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/shimclient"
-	"claude-repld/internal/ssm"
 )
 
 // The BACKWARDS PAGE READER: the daemon half of tail-first conversation
@@ -235,10 +234,10 @@ type pageSegment struct {
 // page and no empty-page-on-failure: a client cannot tell an empty
 // conversation from a failed read, and that ambiguity is the blank-feed bug
 // this protocol's whole history has been spent closing.
-func (m *Manager) ConversationPage(ctx context.Context, workspace, expectedSessionID, expectedGenerationID string, anchor PageAnchor) (*frontendv1.ConversationPage, error) {
+func (m *Manager) ConversationPage(ctx context.Context, workspace, echoedFence string, anchor PageAnchor) (*frontendv1.ConversationPage, error) {
 	limit := clampPageLimit(anchor.Limit)
 	m.mu.Lock()
-	admission, release, err := m.admitHistoryRequest("conversation page", fmt.Sprintf("anchor=%s limit=%d", pageAnchorName(anchor), limit), workspace, expectedSessionID, expectedGenerationID)
+	admission, release, err := m.admitHistoryRequest("conversation page", fmt.Sprintf("anchor=%s limit=%d", pageAnchorName(anchor), limit), workspace, echoedFence)
 	// The DURABLE route keeps the manager lock through the read, and the live
 	// route has already released it; deferring the ladder's own release is what
 	// makes that difference impossible to get wrong here (historyadmission.go).
@@ -247,24 +246,24 @@ func (m *Manager) ConversationPage(ctx context.Context, workspace, expectedSessi
 		return nil, err
 	}
 	if admission.route == historyRouteLiveController {
-		return m.pageFromController(ctx, admission.controller, anchor, limit)
+		return m.pageFromController(ctx, admission.controller, admission.fence, anchor, limit)
 	}
-	return m.pageFromDurableHistory(ctx, workspace, admission.generationID, anchor, limit)
+	return m.pageFromDurableHistory(ctx, workspace, admission.generationID, admission.fence, anchor, limit)
 }
 
 // pageFromController serves a page for a workspace with a live session
 // controller, reading the range THROUGH THE SHIM.
-func (m *Manager) pageFromController(ctx context.Context, d *sessionController, anchor PageAnchor, limit uint32) (*frontendv1.ConversationPage, error) {
+func (m *Manager) pageFromController(ctx context.Context, d *sessionController, fence string, anchor PageAnchor, limit uint32) (*frontendv1.ConversationPage, error) {
 	read := func(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (pageRangeResult, error) {
 		res, err := d.client.Replay(ctx, fromSeq, toSeq, maxEvents, onEvent)
 		return pageRangeResult{Delivered: res.Delivered, Truncated: res.Truncated, Reason: res.Reason}, err
 	}
-	return m.assemblePage(ctx, d.workspace, d.sessionID, d.generationID, m.lastSeenSeq(d), anchor, limit, "shim", read)
+	return m.assemblePage(ctx, d.workspace, d.sessionID, d.generationID, fence, m.lastSeenSeq(d), anchor, limit, "shim", read)
 }
 
 // pageFromDurableHistory serves a page for a workspace with NO live session
 // controller, straight from the store.
-func (m *Manager) pageFromDurableHistory(ctx context.Context, workspace, generationID string, anchor PageAnchor, limit uint32) (*frontendv1.ConversationPage, error) {
+func (m *Manager) pageFromDurableHistory(ctx context.Context, workspace, generationID, fence string, anchor PageAnchor, limit uint32) (*frontendv1.ConversationPage, error) {
 	if m.cfg.DurableHistory == nil {
 		return nil, fmt.Errorf("session-controller: conversation page for unwired ws %q cannot be served: no durable history source is wired", workspace)
 	}
@@ -276,7 +275,7 @@ func (m *Manager) pageFromDurableHistory(ctx context.Context, workspace, generat
 		res, err := m.cfg.DurableHistory.ReplayHistory(ctx, workspace, sessionID, fromSeq, toSeq, maxEvents, onEvent)
 		return pageRangeResult{Delivered: res.Delivered, Truncated: res.Truncated, Reason: res.Reason}, err
 	}
-	return m.assemblePage(ctx, workspace, sessionID, generationID, m.cfg.SeqStore.LastSeq(sessionID), anchor, limit, "shim-store", read)
+	return m.assemblePage(ctx, workspace, sessionID, generationID, fence, m.cfg.SeqStore.LastSeq(sessionID), anchor, limit, "shim-store", read)
 }
 
 // assemblePage is the windowed backwards walk both routes share.
@@ -284,7 +283,7 @@ func (m *Manager) pageFromDurableHistory(ctx context.Context, workspace, generat
 // lastSeen is the daemon's high-water mark for this conversation, and it is a
 // HINT rather than an authority. See the tail anchor below for why that
 // distinction is load-bearing.
-func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, generationID string, lastSeen uint64, anchor PageAnchor, limit uint32, source string, read pageRangeReader) (*frontendv1.ConversationPage, error) {
+func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, generationID, fence string, lastSeen uint64, anchor PageAnchor, limit uint32, source string, read pageRangeReader) (*frontendv1.ConversationPage, error) {
 	logf := dlog.Tag(dlog.Logf(m.logf), "ws", workspace, "session", sessionID, "source", source)
 	// The EXCLUSIVE upper bound this page walks back from. ZERO MEANS
 	// UNBOUNDED, which is what a tail anchor always is.
@@ -326,7 +325,7 @@ func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, genera
 	if !anchor.Tail && upper <= floor {
 		logf("session-controller: conversation page reaches the START ws=%q session=%s upper=%d floor=%d decision=anchor_at_or_below_floor",
 			workspace, sessionID, upper, floor)
-		return m.newPage(workspace, sessionID, generationID, nil, pageContinuation{reachedStart: true}, 0), nil
+		return m.newPage(workspace, fence, nil, pageContinuation{reachedStart: true}, 0), nil
 	}
 
 	// WHERE THE BACKWARDS WALK STARTS ITS FIRST WINDOW.
@@ -414,7 +413,7 @@ func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, genera
 	items := flattenItems(selected)
 	logf("session-controller: conversation page SERVED ws=%q session=%s anchor=%s limit=%d items=%d segments=%d scanned=%d floor=%d upper=%d continuation=%s live_join_seq=%d",
 		workspace, sessionID, pageAnchorName(anchor), limit, len(items), len(selected), scanned, floor, upper, continuationName(reachedStart), liveJoinSeq)
-	return m.newPage(workspace, sessionID, generationID, items, pageContinuation{reachedStart: reachedStart, cursor: cursor}, liveJoinSeq), nil
+	return m.newPage(workspace, fence, items, pageContinuation{reachedStart: reachedStart, cursor: cursor}, liveJoinSeq), nil
 }
 
 // translateRange reads one seq range and returns what it curated to, oldest
@@ -545,12 +544,12 @@ func flattenItems(selected []pageSegment) []*frontendv1.ConversationItem {
 // a client byte-compares it against the workspace's current state and discards
 // the page whole when they differ, and a fence read before the assembly would
 // claim currency the page does not have.
-func (m *Manager) newPage(workspace, sessionID, generationID string, items []*frontendv1.ConversationItem, continuation pageContinuation, liveJoinSeq uint64) *frontendv1.ConversationPage {
+func (m *Manager) newPage(workspace, fence string, items []*frontendv1.ConversationItem, continuation pageContinuation, liveJoinSeq uint64) *frontendv1.ConversationPage {
 	page := &frontendv1.ConversationPage{
 		Workspace:   workspace,
 		Items:       items,
 		LiveJoinSeq: liveJoinSeq,
-		Fence:       ssm.Fence(sessionID, generationID),
+		Fence:       fence,
 	}
 	if continuation.reachedStart {
 		page.Continuation = &frontendv1.ConversationPage_Start{Start: &frontendv1.ConversationPageStart{}}

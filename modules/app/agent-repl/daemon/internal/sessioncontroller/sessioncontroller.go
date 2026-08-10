@@ -2176,20 +2176,16 @@ func (m *Manager) AnswerPermission(ctx context.Context, workspace, requestID, pe
 // is what left a webview reloaded after a daemon bounce showing a correct
 // footer over an empty feed: the conversation was in the store the whole time,
 // and every read path required a shim.
-// ResyncForGeneration admits a frontend replay only when the identity copied
-// from its authoritative WorkspaceState is still current.  The comparison is
-// linearized under the controller lock before ring replay, replay allocation,
-// store reads, or shim reads can begin.  The durable-history branch compares
-// against the SSM snapshot because it deliberately has no live controller, and
-// keeps the full identity requirement.
-//
-// Against a LIVE controller the non-empty controller generation is the identity
-// that decides: a request carrying it is current even when its session field
-// names a superseded session (decision=current_generation_session_rebound).
-// A generation mismatch still rejects.
-func (m *Manager) ResyncForGeneration(workspace, expectedSessionID, expectedGenerationID string, fromSeq uint64) error {
+// ResyncForFence admits a frontend replay only when the FENCE copied from the
+// authoritative WorkspaceState it was reading is still the workspace's own.
+// The comparison is linearized under the controller lock before ring replay,
+// replay allocation, store reads, or shim reads can begin, and it is the one
+// byte-comparison the whole protocol describes — see historyadmission.go for
+// why the token is never split apart here, and for the single rung that is the
+// exception.
+func (m *Manager) ResyncForFence(workspace, echoedFence string, fromSeq uint64) error {
 	m.mu.Lock()
-	admission, release, err := m.admitHistoryRequest("resync", fmt.Sprintf("from_seq=%d", fromSeq), workspace, expectedSessionID, expectedGenerationID)
+	admission, release, err := m.admitHistoryRequest("resync", fmt.Sprintf("from_seq=%d", fromSeq), workspace, echoedFence)
 	// The DURABLE route keeps the manager lock through the replay — bringUp
 	// installs the next controller under this same mutex, so holding it is what
 	// makes the no-controller verdict still true when the store read begins —
@@ -2208,14 +2204,6 @@ func (m *Manager) ResyncForGeneration(workspace, expectedSessionID, expectedGene
 		return m.resyncFromController(admission.controller, fromSeq, admission.sessionID, admission.generationID)
 	}
 	return m.resyncFromDurableHistory(workspace, fromSeq)
-}
-
-func (m *Manager) rejectSupersededResync(workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID string, fromSeq uint64, replaySource, rejectionCause string) error {
-	err := fmt.Errorf("%w: resync ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q rejection_cause=%q",
-		errclass.ErrSessionSuperseded, workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, fromSeq, replaySource, rejectionCause)
-	m.logf("session-controller: resync eligibility REJECTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=superseded rejection_cause=%q error=%v",
-		workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, fromSeq, replaySource, rejectionCause, err)
-	return err
 }
 
 // resyncFromController performs the replay only after its caller selected the
@@ -2311,7 +2299,7 @@ func (m *Manager) runPendingResync(workspace, sessionID string) {
 		m.logf("session-controller: re-serving the resync a shim-link bounce interrupted ws=%q session=%s from_seq=%d (the shim has reattached)",
 			workspace, sessionID, pending.fromSeq)
 		var err error
-		err = m.ResyncForGeneration(workspace, pending.sessionID, pending.generationID, pending.fromSeq)
+		err = m.ResyncForFence(workspace, ssm.Fence(pending.sessionID, pending.generationID), pending.fromSeq)
 		if err != nil {
 			m.logf("session-controller: the re-armed resync ws=%q session=%s from_seq=%d FAILED: %v",
 				workspace, sessionID, pending.fromSeq, err)

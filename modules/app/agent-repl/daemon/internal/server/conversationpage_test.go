@@ -22,18 +22,20 @@ import (
 
 // recordingPager captures what the handler asked the reader for.
 type recordingPager struct {
-	gotWorkspace  string
-	gotSessionID  string
-	gotGeneration string
-	gotAnchor     sessioncontroller.PageAnchor
-	page          *frontendv1.ConversationPage
-	err           error
+	gotWorkspace string
+	// gotFence is the token as the handler passed it on. The whole point of
+	// the port's shape is that it arrives UNSPLIT, so this records the string
+	// rather than a pair reconstructed from it.
+	gotFence  string
+	gotAnchor sessioncontroller.PageAnchor
+	page      *frontendv1.ConversationPage
+	err       error
 }
 
-func (recordingPager) ResyncForGeneration(string, string, string, uint64) error { return nil }
+func (recordingPager) ResyncForFence(string, string, uint64) error { return nil }
 
-func (p *recordingPager) ConversationPage(_ context.Context, workspace, sessionID, generationID string, anchor sessioncontroller.PageAnchor) (*frontendv1.ConversationPage, error) {
-	p.gotWorkspace, p.gotSessionID, p.gotGeneration, p.gotAnchor = workspace, sessionID, generationID, anchor
+func (p *recordingPager) ConversationPage(_ context.Context, workspace, echoedFence string, anchor sessioncontroller.PageAnchor) (*frontendv1.ConversationPage, error) {
+	p.gotWorkspace, p.gotFence, p.gotAnchor = workspace, echoedFence, anchor
 	if p.err != nil {
 		return nil, p.err
 	}
@@ -54,24 +56,46 @@ func beforePageRequest(cursor string, limit uint32, fence string) *frontendv1.Co
 	}
 }
 
-func TestAPageRequestCarriesTheIdentityItsFenceNames(t *testing.T) {
-	// Arrange — the client echoes ONE token, and the daemon's eligibility
-	// ladder needs both halves of it.
+func TestAPageRequestCarriesItsFenceWhole(t *testing.T) {
+	// Arrange — the token is opaque and byte-compared by its receiver, and the
+	// daemon reads inside it in exactly ONE place. A handler that split it here
+	// would be a second reader with its own semantics, which is the divergence
+	// that left an unwired workspace's history unreachable once already.
+	pager := &recordingPager{page: &frontendv1.ConversationPage{}}
+	var lines []string
+	h := newResyncHandler(t, pager, &lines)
+	fence := ssm.Fence("s1", "g1")
+
+	// Act.
+	if _, err := h.ConversationPage(context.Background(), "/ws/a", "r-1", tailPageRequest(10, fence)); err != nil {
+		t.Fatalf("ConversationPage: %v", err)
+	}
+
+	// Assert.
+	if pager.gotFence != fence {
+		t.Fatalf("reader was asked with fence %q, want the client's echo %q passed through unsplit", pager.gotFence, fence)
+	}
+	if pager.gotWorkspace != "/ws/a" {
+		t.Fatalf("reader was asked for ws=%q, want /ws/a", pager.gotWorkspace)
+	}
+}
+
+func TestAnEmptyFenceReachesTheReaderAsAnEmptyFence(t *testing.T) {
+	// Arrange — an ungenerated workspace publishes an ABSENT fence, and a
+	// client echoing it is doing exactly the right thing. A handler that split
+	// and recomposed would turn "" into "|", a token nobody was ever shown.
 	pager := &recordingPager{page: &frontendv1.ConversationPage{}}
 	var lines []string
 	h := newResyncHandler(t, pager, &lines)
 
 	// Act.
-	if _, err := h.ConversationPage(context.Background(), "/ws/a", "r-1", tailPageRequest(10, ssm.Fence("s1", "g1"))); err != nil {
+	if _, err := h.ConversationPage(context.Background(), "/ws/a", "r-1", tailPageRequest(10, "")); err != nil {
 		t.Fatalf("ConversationPage: %v", err)
 	}
 
 	// Assert.
-	if pager.gotSessionID != "s1" || pager.gotGeneration != "g1" {
-		t.Fatalf("reader was asked for session=%q generation=%q, want the pair the fence names", pager.gotSessionID, pager.gotGeneration)
-	}
-	if pager.gotWorkspace != "/ws/a" {
-		t.Fatalf("reader was asked for ws=%q, want /ws/a", pager.gotWorkspace)
+	if pager.gotFence != "" {
+		t.Fatalf("reader was asked with fence %q, want the empty echo preserved", pager.gotFence)
 	}
 }
 
