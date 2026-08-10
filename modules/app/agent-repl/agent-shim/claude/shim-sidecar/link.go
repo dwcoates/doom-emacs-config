@@ -38,6 +38,7 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -59,12 +60,33 @@ const (
 	linkUp
 )
 
-// Redial backoff, matching the discipline the shim's own links use (an
-// immediate first attempt, then 100ms doubling to a 5s ceiling).
+// Redial backoff: an immediate first attempt, then 100ms doubling to a ceiling
+// the ladder holds FOREVER. There is no attempt budget and no terminal state —
+// a link that is down is a link that is being redialed, for as long as it stays
+// down.
 const (
 	dialBackoffMin = 100 * time.Millisecond
-	dialBackoffMax = 5 * time.Second
+	dialBackoffMax = 30 * time.Second
 )
+
+// dialJitterFraction spreads each armed delay over ±20% of its backoff, so a
+// fleet of sidecars that lost the same store does not rediscover it in lockstep
+// bursts.
+const dialJitterFraction = 0.2
+
+// dialTick is how often Run asks the state machine whether a redial is due.
+//
+// THE LADDER IS A DEADLINE THE LOOP COMPARES AGAINST, NOT AN EVENT SOMEONE MUST
+// REMEMBER TO SCHEDULE. It used to be a single re-armable time.Timer, and that
+// made the whole steady-state ladder depend on one Stop/drain/Reset dance
+// executing correctly on every transition: a single lost re-arm silenced
+// redialing entirely, with no state left in the process saying a redial was
+// owed. That is exactly what a production store bounce produced — one failed
+// dial, then 15 minutes of a down link that healed only when unrelated work
+// happened to dial again. A deadline cannot be lost: the ticker that checks it
+// runs unconditionally for the life of the process, so the worst a mishandled
+// transition can cost is one tick of latency rather than the ladder itself.
+const dialTick = 50 * time.Millisecond
 
 // degradedComponent names this state machine in DegradedState reports.
 const degradedComponent = "shim-claude-sidecar-store-link"
@@ -89,20 +111,45 @@ func (s *sidecar) requireLinkUp(what string) {
 	}
 }
 
+// dialDue runs the LADDER: it dials whenever the link is down and the armed
+// deadline has passed, and does nothing otherwise. Run calls it on every tick,
+// so redialing is driven by the link's state rather than by anything
+// remembering to schedule it.
+func (s *sidecar) dialDue() {
+	if s.link == linkUp {
+		return
+	}
+	if s.now().Before(s.nextDialAt) {
+		return
+	}
+	s.dial()
+}
+
 // dial attempts to bring the link up, backing off between attempts. It is the
 // only thing a down sidecar does, and a no-op once the link is up.
+//
+// It is SINGLE-FLIGHT: a demand-driven dial and the ladder's own dial are the
+// same call, and the second one to arrive while the first is still inside
+// establish returns immediately rather than opening a second socket and racing
+// two cursor recoveries onto one link.
 func (s *sidecar) dial() {
 	if s.link == linkUp {
 		return
 	}
+	if s.dialing {
+		return
+	}
+	s.dialing = true
+	defer func() { s.dialing = false }()
 	if err := s.establish(); err != nil {
 		s.dialFailures++
 		s.backoff = nextBackoff(s.backoff)
 		// "Reading no files" is the whole file plane stopped: for the length
 		// of this backoff nothing on disk reaches the store, so the record
 		// belongs at the severity an ingestion outage carries.
-		s.log.With(logging.Context{Operation: "dial", Level: "warn"}).Log("dial attempt %d failed, retrying in %s while reading no files: %v", s.dialFailures, s.backoff, err)
-		s.armDial(s.backoff)
+		delay := s.jitter(s.backoff)
+		s.log.With(logging.Context{Operation: "dial", Level: "warn"}).Log("dial attempt %d failed, retrying in %s while reading no files: %v", s.dialFailures, delay, err)
+		s.armDial(delay)
 		return
 	}
 }
@@ -167,7 +214,7 @@ func (s *sidecar) linkLost(operation string) {
 	s.link = linkDown
 	s.cursors = nil
 	s.store.Close()
-	s.downSince = time.Now()
+	s.downSince = s.now()
 	s.dialFailures = 0
 	s.backoff = 0
 	// The caller owns the causal error with the session or request context it
@@ -204,7 +251,7 @@ func (s *sidecar) reportOutageClosed() {
 	if s.dialFailures == 0 {
 		return
 	}
-	downMs := time.Since(s.downSince).Milliseconds()
+	downMs := s.now().Sub(s.downSince).Milliseconds()
 	reason := fmt.Sprintf("store unreachable for %dms across %d failed dial attempt(s); no files were read during the outage",
 		downMs, s.dialFailures)
 	s.log.With(logging.Context{Operation: "link-recovered"}).Log("store link recovered: %s", reason)
@@ -252,16 +299,22 @@ func degradedEvents(sessions []string, reason string) []*corev1.Event {
 	return out
 }
 
-// armDial schedules the next dial attempt after d. Every caller runs on Run's
-// single goroutine, so the stop/drain dance needs no further synchronization.
+// armDial records that the next dial attempt is due after d. It only moves a
+// deadline, so it has no way to fail silently and nothing has to be undone if
+// the link state changes before the deadline arrives — dialDue re-reads the
+// link on every tick.
 func (s *sidecar) armDial(d time.Duration) {
-	if !s.dialT.Stop() {
-		select {
-		case <-s.dialT.C:
-		default:
-		}
+	s.nextDialAt = s.now().Add(d)
+}
+
+// jitterBackoff spreads d over ±dialJitterFraction of itself. A zero delay
+// (the immediate redial a fresh link loss arms) stays immediate.
+func jitterBackoff(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
 	}
-	s.dialT.Reset(d)
+	spread := float64(d) * dialJitterFraction
+	return time.Duration(float64(d) - spread + 2*spread*rand.Float64())
 }
 
 // nextBackoff doubles d from dialBackoffMin up to the dialBackoffMax ceiling.
