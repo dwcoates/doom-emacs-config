@@ -1,17 +1,18 @@
 // The footer's breathing signal: a size oscillation that never resets, and a
-// color ramp that steps once per daemon-resolved progress view.
+// color ramp that steps once per daemon-resolved progress view. Plus the
+// prompt bubble's thinking wave, which shares the footer's epoch mechanic.
 import { describe, expect, it } from "vitest";
 
 import {
   AnimationEpoch,
   BREATH_PERIOD_MS,
   BREATH_SHADES,
-  BUBBLE_BREATH_PERIOD_MS,
+  BUBBLE_WAVE_PERIOD_MS,
   BreathingTicker,
-  BubbleBreath,
+  BubbleWave,
   breathColor,
-  bubbleBreath,
-  bubbleBreathStyle,
+  bubbleWave,
+  bubbleWaveStyle,
 } from "../src/breathing.js";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");
@@ -203,128 +204,128 @@ describe("BreathingTicker: the size oscillation never resets", () => {
   });
 });
 
-describe("BubbleBreath: the prompt bubble's phase survives a rebuild", () => {
-  it("starts the cycle where the page first painted a bubble", () => {
+describe("BubbleWave: the prompt bubble's wave phase survives a rebuild", () => {
+  it("starts the pass where the page first painted a bubble", () => {
     // Arrange
-    const breath = new BubbleBreath();
+    const wave = new BubbleWave();
     // Act
-    const got = breath.delayMs(NOW);
+    const got = wave.delayMs(NOW);
     // Assert — the epoch is the first read, so the first bubble seeks nowhere.
     expect(got).toBe(0);
   });
 
   it("advances with the clock, against the epoch rather than the last read", () => {
     // Arrange
-    const breath = new BubbleBreath();
-    breath.delayMs(NOW);
-    breath.delayMs(NOW + 400);
+    const wave = new BubbleWave();
+    wave.delayMs(NOW);
+    wave.delayMs(NOW + 400);
     // Act
-    const got = breath.delayMs(NOW + 1200);
+    const got = wave.delayMs(NOW + 1200);
     // Assert
     expect(got).toBe(1200);
   });
 
   it("gives two bubbles rendered at the same instant the same phase", () => {
-    // Arrange — one epoch for the whole page, so the feed breathes in unison.
-    const breath = new BubbleBreath();
-    breath.delayMs(NOW);
+    // Arrange — one epoch for the whole page, so the feed waves in unison.
+    const wave = new BubbleWave();
+    wave.delayMs(NOW);
     // Act
-    const first = breath.delayMs(NOW + 2000);
-    const second = breath.delayMs(NOW + 2000);
+    const first = wave.delayMs(NOW + 2000);
+    const second = wave.delayMs(NOW + 2000);
     // Assert
     expect(second).toBe(first);
   });
 
-  it("wraps back to the start of the cycle after a full period", () => {
+  it("wraps back to the start of the pass after a full period", () => {
     // Arrange
-    const breath = new BubbleBreath();
-    breath.delayMs(NOW);
+    const wave = new BubbleWave();
+    wave.delayMs(NOW);
     // Act
-    const got = breath.delayMs(NOW + BUBBLE_BREATH_PERIOD_MS);
-    // Assert — a whole cycle later is the same point in the cycle.
+    const got = wave.delayMs(NOW + BUBBLE_WAVE_PERIOD_MS);
+    // Assert — a whole pass later is the same point in the pass.
     expect(got).toBe(0);
   });
 
   it("keeps the phase inside one period however long the page has been open", () => {
     // Arrange — hours of uptime must not emit an ever-growing delay.
-    const breath = new BubbleBreath();
-    breath.delayMs(NOW);
+    const wave = new BubbleWave();
+    wave.delayMs(NOW);
     // Act
-    const got = breath.delayMs(NOW + BUBBLE_BREATH_PERIOD_MS * 1000 + 137);
+    const got = wave.delayMs(NOW + BUBBLE_WAVE_PERIOD_MS * 1000 + 137);
     // Assert
     expect(got).toBe(137);
   });
 
   it("separates a rebuild at t and one at t+delta by exactly delta", () => {
     // Arrange — a rebuild is just another read of the same never-moved epoch.
-    const breath = new BubbleBreath();
+    const wave = new BubbleWave();
     const delta = 1234;
-    const before = breath.delayMs(NOW);
+    const before = wave.delayMs(NOW);
     // Act
-    const after = breath.delayMs(NOW + delta);
+    const after = wave.delayMs(NOW + delta);
     // Assert
-    expect((after - before + BUBBLE_BREATH_PERIOD_MS) % BUBBLE_BREATH_PERIOD_MS).toBe(delta);
+    expect((after - before + BUBBLE_WAVE_PERIOD_MS) % BUBBLE_WAVE_PERIOD_MS).toBe(delta);
   });
 
   it("separates rebuilds a period apart by delta modulo the period", () => {
     // Arrange — the wrap must not break the rebuild-equals-elapsed property.
-    const breath = new BubbleBreath();
-    const delta = BUBBLE_BREATH_PERIOD_MS + 900;
-    const before = breath.delayMs(NOW);
+    const wave = new BubbleWave();
+    const delta = BUBBLE_WAVE_PERIOD_MS + 900;
+    const before = wave.delayMs(NOW);
     // Act
-    const after = breath.delayMs(NOW + delta);
+    const after = wave.delayMs(NOW + delta);
     // Assert
-    expect((after - before + BUBBLE_BREATH_PERIOD_MS) % BUBBLE_BREATH_PERIOD_MS).toBe(
-      delta % BUBBLE_BREATH_PERIOD_MS,
+    expect((after - before + BUBBLE_WAVE_PERIOD_MS) % BUBBLE_WAVE_PERIOD_MS).toBe(
+      delta % BUBBLE_WAVE_PERIOD_MS,
     );
   });
 
   it("floors a clock that goes backwards at zero", () => {
     // Arrange — a negative elapsed would emit a POSITIVE animation-delay and
-    // stall the bubble at the deflated end of the swing.
-    const breath = new BubbleBreath();
-    breath.delayMs(NOW);
+    // stall the wave at the bubble's left edge.
+    const wave = new BubbleWave();
+    wave.delayMs(NOW);
     // Act
-    const got = breath.delayMs(NOW - 5000);
+    const got = wave.delayMs(NOW - 5000);
     // Assert
     expect(got).toBe(0);
   });
 
   it("never moves the epoch once stamped", () => {
     // Arrange — the immovability IS the continuity guarantee.
-    const breath = new BubbleBreath();
-    breath.delayMs(NOW);
-    breath.delayMs(NOW + 3000);
+    const wave = new BubbleWave();
+    wave.delayMs(NOW);
+    wave.delayMs(NOW + 3000);
     // Act — a later read still measures from the original epoch.
-    const got = breath.delayMs(NOW + 100);
+    const got = wave.delayMs(NOW + 100);
     // Assert
     expect(got).toBe(100);
   });
 });
 
-describe("bubbleBreathStyle: what a render stamps on the bubble", () => {
+describe("bubbleWaveStyle: what a render stamps on the bubble", () => {
   it("emits a negative animation-delay, which is what seeks into the cycle", () => {
     // Arrange / Act
-    const got = bubbleBreathStyle(Date.now());
-    // Assert — a positive delay would DEFER the breath rather than resume it.
+    const got = bubbleWaveStyle(Date.now());
+    // Assert — a positive delay would DEFER the wave rather than resume it.
     expect(got).toMatch(/^animation-delay:-\d+ms$/);
   });
 
-  it("emits the page-global breath's phase, not a fresh one per call", () => {
+  it("emits the page-global wave's phase, not a fresh one per call", () => {
     // Arrange — every bubble reads the one shared epoch.
     const at = Date.now() + 777;
     // Act
-    const got = bubbleBreathStyle(at);
+    const got = bubbleWaveStyle(at);
     // Assert
-    expect(got).toBe(`animation-delay:-${Math.round(bubbleBreath.delayMs(at))}ms`);
+    expect(got).toBe(`animation-delay:-${Math.round(bubbleWave.delayMs(at))}ms`);
   });
 
   it("stays within one period, so the attribute never grows without bound", () => {
     // Arrange / Act — a page open for a very long time.
-    const got = bubbleBreathStyle(Date.now() + BUBBLE_BREATH_PERIOD_MS * 500);
+    const got = bubbleWaveStyle(Date.now() + BUBBLE_WAVE_PERIOD_MS * 500);
     const ms = Number(/-(\d+)ms$/.exec(got)?.[1]);
     // Assert
-    expect(ms).toBeLessThan(BUBBLE_BREATH_PERIOD_MS);
+    expect(ms).toBeLessThan(BUBBLE_WAVE_PERIOD_MS);
   });
 });
 
@@ -397,11 +398,11 @@ describe("AnimationEpoch: both animations really share it", () => {
       })(),
     },
     {
-      name: "the prompt bubble's own animation",
+      name: "the prompt bubble's wave",
       elapsedAt: (() => {
-        const bubble = new BubbleBreath();
-        // Reported modulo the period, so the table's deltas stay inside one cycle.
-        return (at: number) => bubble.delayMs(at);
+        const wave = new BubbleWave();
+        // Reported modulo the period, so the table's deltas stay inside one pass.
+        return (at: number) => wave.delayMs(at);
       })(),
     },
   ];
