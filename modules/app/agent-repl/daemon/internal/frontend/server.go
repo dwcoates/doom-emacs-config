@@ -150,12 +150,20 @@ type Server struct {
 	// through enqueue; release owns the writer side only to FLIP the hold below
 	// and to flush what the hold parked.
 	//
-	// NOTHING OUTSIDE THIS PACKAGE IS EVER CALLED UNDER IT. Release used to hold
-	// the writer side across its injected open and snapshot functions, and the
-	// snapshot provider reaches into the SSM and the workspace-view publisher —
-	// which push back through Broadcast, which wants the reader side. That is a
-	// lock cycle, and it froze every session controller and the merge queue
-	// drain twice in production. See ReleaseSessionPublication.
+	// EXACTLY ONE THING OUTSIDE THIS PACKAGE IS CALLED UNDER IT: the durable
+	// publication gate, sessionPublicationAllowed. It has to be — the verdict
+	// and the delivery it authorizes must be atomic against the hold below, or
+	// a frame could pass the gate and then be delivered after the release's
+	// snapshot. THE GATE THEREFORE MUST NEVER WAIT ON ANYTHING THAT WAITS ON
+	// THIS SERVER; it is a memoized durable read, and its owner keeps the
+	// release hand-off off the lock the gate takes for that reason.
+	//
+	// NOTHING ELSE IS. Release used to hold the writer side across its injected
+	// open and snapshot functions, and the snapshot provider reaches into the
+	// SSM and the workspace-view publisher — which push back through Broadcast,
+	// which wants the reader side. That is a lock cycle, and it froze every
+	// session controller and the merge queue drain twice in production. See
+	// ReleaseSessionPublication.
 	publicationMu sync.RWMutex
 	// publicationHeld is engaged for the duration of a materialization release.
 	// Guarded by publicationMu: engaging and clearing it take the writer side,
