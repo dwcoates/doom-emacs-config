@@ -3,47 +3,64 @@ package shim
 import (
 	"errors"
 	"io"
-	"os"
 	"strings"
+	"sync"
 	"testing"
 )
 
-// scriptedStderrReader makes scanner terminal conditions deterministic without
-// starting a shim process.  Each chunk is returned once; terminal is returned
-// after the final chunk.
-type scriptedStderrReader struct {
-	chunks   [][]byte
-	terminal error
-}
-
-func (r *scriptedStderrReader) Read(p []byte) (int, error) {
-	if len(r.chunks) == 0 {
-		return 0, r.terminal
-	}
-	chunk := r.chunks[0]
-	r.chunks = r.chunks[1:]
-	return copy(p, chunk), nil
-}
-
-func (r *scriptedStderrReader) Close() error { return nil }
-
-// blockedStderrReader keeps the scanner live until the test releases the
-// terminal condition, proving that the pump completion signal is a join point.
+// blockedStderrReader keeps the stream live until the test releases it, which
+// is what a descendant that inherited the child's stderr and outlived it looks
+// like from the daemon's side.
 type blockedStderrReader struct {
-	started chan struct{}
-	release chan struct{}
+	started   chan struct{}
+	release   chan struct{}
+	closed    chan struct{}
+	startOnce sync.Once
+	closeOnce sync.Once
+}
+
+func newBlockedStderrReader() *blockedStderrReader {
+	return &blockedStderrReader{started: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{})}
 }
 
 func (r *blockedStderrReader) Read([]byte) (int, error) {
-	close(r.started)
+	r.startOnce.Do(func() { close(r.started) })
 	<-r.release
 	return 0, io.EOF
 }
 
-func (r *blockedStderrReader) Close() error { return nil }
+// Close releases a blocked read the way closing a real descriptor would, and is
+// idempotent so a test may release the stream itself first.
+func (r *blockedStderrReader) Close() error {
+	r.closeOnce.Do(func() {
+		close(r.closed)
+		r.releaseOnce()
+	})
+	return nil
+}
 
-func newLifecycleTestPump(reader io.ReadCloser, logger Logger) *stderrPump {
-	return newStderrPump(reader, logger, &stderrTail{}, 731, 739, true)
+func (r *blockedStderrReader) releaseOnce() {
+	select {
+	case <-r.release:
+	default:
+		close(r.release)
+	}
+}
+
+// newTestStderrSink is the parsing sink every focused sink test drains into.
+func newTestStderrSink(logger Logger) *stderrSink {
+	return &stderrSink{logger: logger, tail: &stderrTail{}, parse: true}
+}
+
+// drainStderr runs one reader through a parsing sink to completion, including
+// the trailing line the stream never terminated.
+func drainStderr(t *testing.T, logger Logger, reader io.Reader) *stderrSink {
+	t.Helper()
+	sink := newTestStderrSink(logger)
+	pump := newStderrPump(io.NopCloser(reader), sink, logger, 731, 739)
+	pump.run()
+	sink.flush()
+	return sink
 }
 
 func assertLogContains(t *testing.T, logger *recordingLogger, fragments ...string) {
@@ -72,104 +89,134 @@ func assertNoLogContains(t *testing.T, logger *recordingLogger, fragment string)
 	}
 }
 
-func TestStderrPumpLogsCleanEOFWithCanonicalLifecycleContext(t *testing.T) {
+func TestStderrPumpReportsACleanEndOfStreamAsComplete(t *testing.T) {
+	// Arrange
 	logger := &recordingLogger{}
-	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: io.EOF}, logger)
+	pump := newStderrPump(io.NopCloser(strings.NewReader("")), newTestStderrSink(logger), logger, 731, 739)
 
+	// Act
 	pump.run()
 
-	assertLogContains(t, logger, "stderr scanner started", "pid=731", "pgid=739", `shutdown_initiator="child_exit"`, `close_owner="unclaimed"`)
-	assertLogContains(t, logger, "stderr scanner completed", "outcome=clean_eof", "expected_close=false", `shutdown_reason="no deliberate stop requested"`)
-	assertNoLogContains(t, logger, "stderr scan error")
-}
-
-func TestStderrPumpAnnouncesItselfOnTheLifecycleChannel(t *testing.T) {
-	// Arrange: the daemon's logger stamps Log level=error, so the channel the
-	// pump announces itself on decides whether a healthy spawn writes an error
-	// record. The scan-error path keeps Log, which the tests above cover.
-	logger := &recordingLogger{}
-	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: io.EOF}, logger)
-
-	// Act.
-	pump.run()
-
-	// Assert.
-	for _, record := range logger.logged() {
-		if strings.Contains(record.line, "stderr scanner started") {
-			if record.level != "lifecycle" {
-				t.Fatalf("scanner-start record = %#v, want the lifecycle channel", record)
-			}
-			return
-		}
+	// Assert
+	if outcome := pump.finish(); outcome != stderrOutcomeComplete {
+		t.Fatalf("outcome = %q, want %q", outcome, stderrOutcomeComplete)
 	}
-	t.Fatalf("no scanner-start record at all: %#v", logger.logged())
+	assertNoLogContains(t, logger, "stderr read failed")
 }
 
-func TestStderrPumpClassifiesOnlyLifecycleOwnedClosedReaderAsExpected(t *testing.T) {
+func TestStderrPumpFinishReturnsOnlyAfterTheStreamHasEnded(t *testing.T) {
+	// Arrange: finish is the point at which the tail is guaranteed to hold
+	// everything the reaped child wrote, so it must not report an outcome while
+	// a reader is still live.
 	logger := &recordingLogger{}
-	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: os.ErrClosed}, logger)
-	pump.expectClose(stderrCloseOwnerProcWait)
+	reader := newBlockedStderrReader()
+	pump := newStderrPump(reader, newTestStderrSink(logger), logger, 731, 739)
+	go pump.run()
+	<-reader.started
 
-	pump.run()
-
-	assertLogContains(t, logger, "stderr scanner completed", "outcome=expected_reader_close", "expected_close=true", `close_owner="proc_wait"`)
-	assertNoLogContains(t, logger, "stderr scan error")
-}
-
-func TestStderrPumpDoesNotSuppressNonClosedFailureAfterExpectedMarker(t *testing.T) {
-	logger := &recordingLogger{}
-	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: errors.New("reader exploded")}, logger)
-	pump.expectClose(stderrCloseOwnerProcWait)
-
-	pump.run()
-
-	assertLogContains(t, logger, "stderr scan error", "reader exploded", `close_expected=true`, `close_owner="proc_wait"`)
-	assertLogContains(t, logger, "stderr scanner completed", "outcome=scanner_error", "expected_close=false")
-}
-
-func TestStderrPumpDoesNotReclassifyCleanEOFAfterExpectedMarker(t *testing.T) {
-	logger := &recordingLogger{}
-	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: io.EOF}, logger)
-	pump.expectClose(stderrCloseOwnerProcWait)
-
-	pump.run()
-
-	assertLogContains(t, logger, "stderr scanner completed", "outcome=clean_eof", "expected_close=false", `close_owner="proc_wait"`)
-	assertNoLogContains(t, logger, "stderr scan error")
-}
-
-func TestStderrPumpRetainsSIGTERMStopAttributionThroughExpectedClose(t *testing.T) {
-	logger := &recordingLogger{}
-	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: os.ErrClosed}, logger)
-	stop := Stop{Initiator: "session_controller_hibernate", Reason: "idle timeout"}
-	if err := pump.signal(stop, func() error { return nil }); err != nil {
-		t.Fatalf("signal: %v", err)
+	// Act / Assert: nothing is published while the reader is live.
+	select {
+	case <-pump.done:
+		t.Fatal("the pump published an outcome before its stream ended")
+	default:
 	}
-	pump.expectClose(stderrCloseOwnerProcWait)
-
-	pump.run()
-
-	assertLogContains(t, logger, "stderr scanner completed", `shutdown_initiator="session_controller_hibernate"`, `shutdown_reason="idle timeout"`, "outcome=expected_reader_close", "expected_close=true")
+	reader.releaseOnce()
+	if outcome := pump.finish(); outcome != stderrOutcomeComplete {
+		t.Fatalf("outcome = %q, want %q", outcome, stderrOutcomeComplete)
+	}
 }
 
-func TestStderrPumpRetainsSessionDeletionStopAttributionThroughExpectedClose(t *testing.T) {
+func TestStderrPumpReportsACloseFailureAtTheReap(t *testing.T) {
+	// Arrange: a stream the daemon cannot release is a descriptor it has lost,
+	// which must not pass quietly.
 	logger := &recordingLogger{}
-	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: os.ErrClosed}, logger)
-	stop := Stop{Initiator: "session_controller_delete", Reason: "session deletion"}
-	if err := pump.signal(stop, func() error { return nil }); err != nil {
-		t.Fatalf("signal: %v", err)
-	}
-	pump.expectClose(stderrCloseOwnerProcWait)
-
+	reader := newBlockedStderrReader()
+	reader.releaseOnce()
+	pump := newStderrPump(closeFailingReader{reader}, newTestStderrSink(logger), logger, 731, 739)
 	pump.run()
 
-	assertLogContains(t, logger, "stderr scanner completed", `shutdown_initiator="session_controller_delete"`, `shutdown_reason="session deletion"`, `close_owner="proc_wait"`, "outcome=expected_reader_close")
+	// Act
+	pump.finish()
+
+	// Assert
+	assertLogContains(t, logger, "closing the retained stderr stream failed", "pid=731", "pgid=739", "close refused")
+}
+
+func TestStderrPumpSurrendersATrailingLineTheChildNeverTerminated(t *testing.T) {
+	// Arrange: a child that dies mid-line still wrote the only diagnosis there
+	// is going to be.
+	logger := &recordingLogger{}
+
+	// Act
+	sink := drainStderr(t, logger, strings.NewReader("Error: Cannot find module"))
+
+	// Assert
+	assertLogContains(t, logger, "shim stderr malformed", "Cannot find module")
+	if got := sink.tail.String(); got != "Error: Cannot find module" {
+		t.Fatalf("tail = %q, want the unterminated line retained verbatim", got)
+	}
+}
+
+func TestStderrSinkSurrendersALineThatOutgrowsTheLineBound(t *testing.T) {
+	// Arrange: an unterminated line must not become an unbounded allocation.
+	logger := &recordingLogger{}
+
+	// Act
+	drainStderr(t, logger, strings.NewReader(strings.Repeat("x", maxEventLine+1)))
+
+	// Assert
+	assertLogContains(t, logger, "stderr line exceeded", "retention continues")
+}
+
+func TestStderrSinkKeepsRetainingAfterAnOversizedLine(t *testing.T) {
+	// Arrange: the old scanner ABANDONED the stream on an over-long token, so
+	// everything the child said afterwards was lost.
+	logger := &recordingLogger{}
+
+	// Act
+	sink := drainStderr(t, logger, strings.NewReader(strings.Repeat("x", maxEventLine+1)+"\nlater words\n"))
+
+	// Assert
+	assertLogContains(t, logger, "shim stderr malformed", "later words")
+	if !strings.Contains(sink.tail.String(), "later words") {
+		t.Fatal("the tail stopped at the oversized line instead of continuing")
+	}
+}
+
+func TestStderrSinkReportsADirectedWriteFailureWithoutLosingTheTail(t *testing.T) {
+	// Arrange: the caller owns the stream, and its writer refuses the bytes.
+	logger := &recordingLogger{}
+	sink := &stderrSink{logger: logger, tail: &stderrTail{}, directed: failingWriter{}}
+
+	// Act
+	if _, err := sink.Write([]byte("boom\n")); err != nil {
+		t.Fatalf("Write = %v, want the sink to absorb a directed failure", err)
+	}
+
+	// Assert
+	assertLogContains(t, logger, "directed stderr write failed", "write refused")
+	if got := sink.tail.String(); got != "boom\n" {
+		t.Fatalf("tail = %q, want the bytes retained despite the directed failure", got)
+	}
+}
+
+func TestStderrSinkDoesNotParseAStreamTheCallerOwns(t *testing.T) {
+	// Arrange: a caller that owns stderr owns its rendering too.
+	logger := &recordingLogger{}
+	sink := &stderrSink{logger: logger, tail: &stderrTail{}, directed: io.Discard}
+
+	// Act
+	if _, err := sink.Write([]byte("not a canonical shim record\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	assertNoLogContains(t, logger, "shim stderr malformed")
 }
 
 func TestProcSignalFailureLogsCanonicalContextWithoutPartialAttribution(t *testing.T) {
 	logger := &recordingLogger{}
-	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: io.EOF}, logger)
-	p := &Proc{logger: logger, stderrPump: pump, pid: 731, pgid: 739}
+	p := &Proc{logger: logger, shutdown: newShutdownAttribution(), pid: 731, pgid: 739}
 	stop := Stop{Initiator: "session_controller_delete", Reason: "session deletion"}
 
 	err := p.signal(stop, "terminate", func() error { return errors.New("signal refused") })
@@ -177,17 +224,16 @@ func TestProcSignalFailureLogsCanonicalContextWithoutPartialAttribution(t *testi
 	if err == nil || !strings.Contains(err.Error(), "signal refused") {
 		t.Fatalf("signal error = %v, want the send failure", err)
 	}
-	lifecycle := pump.snapshot()
-	if lifecycle.shutdownInitiator != "child_exit" || lifecycle.shutdownReason != "no deliberate stop requested" {
-		t.Fatalf("failed signal committed shutdown attribution: %+v", lifecycle)
+	initiator, reason := p.shutdown.snapshot()
+	if initiator != "child_exit" || reason != "no deliberate stop requested" {
+		t.Fatalf("failed signal committed shutdown attribution: initiator=%q reason=%q", initiator, reason)
 	}
 	assertLogContains(t, logger, "shutdown signal failed", "verb=terminate", "pid=731", "pgid=739", `initiator="session_controller_delete"`, `reason="session deletion"`, "signal refused")
 }
 
 func TestProcSignalRejectsAndLogsInvalidStopWithoutSending(t *testing.T) {
 	logger := &recordingLogger{}
-	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: io.EOF}, logger)
-	p := &Proc{logger: logger, stderrPump: pump, pid: 731, pgid: 739}
+	p := &Proc{logger: logger, shutdown: newShutdownAttribution(), pid: 731, pgid: 739}
 	sent := false
 
 	err := p.signal(Stop{Reason: "session deletion"}, "terminate", func() error {
@@ -206,79 +252,29 @@ func TestProcSignalRejectsAndLogsInvalidStopWithoutSending(t *testing.T) {
 
 func TestProcSignalSuccessLogsAndCommitsStopAttribution(t *testing.T) {
 	logger := &recordingLogger{}
-	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: io.EOF}, logger)
-	p := &Proc{logger: logger, stderrPump: pump, pid: 731, pgid: 739}
+	p := &Proc{logger: logger, shutdown: newShutdownAttribution(), pid: 731, pgid: 739}
 	stop := Stop{Initiator: "session_controller_hibernate", Reason: "idle timeout"}
 
 	if err := p.signal(stop, "terminate", func() error { return nil }); err != nil {
 		t.Fatalf("signal: %v", err)
 	}
 
-	lifecycle := pump.snapshot()
-	if lifecycle.shutdownInitiator != stop.Initiator || lifecycle.shutdownReason != stop.Reason {
-		t.Fatalf("successful signal did not commit shutdown attribution: %+v", lifecycle)
+	initiator, reason := p.shutdown.snapshot()
+	if initiator != stop.Initiator || reason != stop.Reason {
+		t.Fatalf("successful signal did not commit shutdown attribution: initiator=%q reason=%q", initiator, reason)
 	}
 	assertLogContains(t, logger, "shutdown requested", "verb=terminate", "pid=731", "pgid=739", `initiator="session_controller_hibernate"`, `reason="idle timeout"`)
 }
 
-func TestStderrPumpRejectsConflictingCloseOwners(t *testing.T) {
-	logger := &recordingLogger{}
-	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: io.EOF}, logger)
-	pump.expectClose(stderrCloseOwnerCaller)
+// closeFailingReader is a stream the daemon cannot release.
+type closeFailingReader struct{ *blockedStderrReader }
 
-	defer func() {
-		if recovered := recover(); recovered == nil || !strings.Contains(recovered.(string), "close owner already committed") {
-			t.Fatalf("conflicting close owner panic = %#v", recovered)
-		}
-		assertLogContains(t, logger, "stderr close ownership invariant violated", "pid=731", "pgid=739", `committed_owner="caller"`, `requested_owner="proc_wait"`, "close_expected=true")
-	}()
-	pump.expectClose(stderrCloseOwnerProcWait)
+func (r closeFailingReader) Close() error {
+	_ = r.blockedStderrReader.Close()
+	return errors.New("close refused")
 }
 
-func TestStderrPumpReportsUnexpectedReaderFailureBeforeShutdown(t *testing.T) {
-	logger := &recordingLogger{}
-	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: errors.New("read exploded")}, logger)
+// failingWriter is a caller-owned stderr writer that refuses the bytes.
+type failingWriter struct{}
 
-	pump.run()
-
-	assertLogContains(t, logger, "stderr scan error", "read exploded", `close_expected=false`, `close_owner="unclaimed"`)
-	assertLogContains(t, logger, "stderr scanner completed", "outcome=scanner_error", "expected_close=false")
-}
-
-func TestStderrPumpKeepsMalformedStderrButSuppressesExpectedCloseError(t *testing.T) {
-	logger := &recordingLogger{}
-	pump := newLifecycleTestPump(&scriptedStderrReader{
-		chunks:   [][]byte{[]byte("not a canonical shim record\n")},
-		terminal: os.ErrClosed,
-	}, logger)
-	pump.expectClose(stderrCloseOwnerProcWait)
-
-	pump.run()
-
-	assertLogContains(t, logger, "shim stderr malformed", "not a canonical shim record")
-	assertLogContains(t, logger, "stderr scanner completed", "outcome=expected_reader_close", "expected_close=true")
-	assertNoLogContains(t, logger, "stderr scan error")
-}
-
-func TestStderrPumpWaitReturnsOnlyAfterScannerCompletion(t *testing.T) {
-	logger := &recordingLogger{}
-	reader := &blockedStderrReader{started: make(chan struct{}), release: make(chan struct{})}
-	pump := newLifecycleTestPump(reader, logger)
-	finished := make(chan struct{})
-	go func() {
-		pump.run()
-		close(finished)
-	}()
-	<-reader.started
-
-	select {
-	case <-pump.done:
-		t.Fatal("pump completed before its reader reached a terminal condition")
-	default:
-	}
-	close(reader.release)
-	pump.wait()
-	<-finished
-
-	assertLogContains(t, logger, "stderr scanner completed", "outcome=clean_eof")
-}
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("write refused") }

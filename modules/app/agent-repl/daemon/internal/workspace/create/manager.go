@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 )
@@ -41,6 +42,10 @@ type Config struct {
 	// MaterializationHeldDeadline bounds how long a job may wait on the host
 	// before the wait is escalated.  Zero takes the package default.
 	MaterializationHeldDeadline time.Duration
+	// WorktreeExists is the liveness check the sweep runs before it re-asks the
+	// host to materialize a parked job, or lets boot replay carry one forward.
+	// Nil takes an os.Stat of the worktree path; tests supply their own.
+	WorktreeExists func(path string) bool
 }
 
 // routedJobBuffer is how many job ids the creation worker may fall behind by
@@ -366,6 +371,60 @@ func (m *Manager) now() time.Time {
 	return time.Now()
 }
 
+// worktreeExists is the sweep's liveness check. Production stats the path;
+// tests inject their own.
+func (m *Manager) worktreeExists(path string) bool {
+	if m.cfg.WorktreeExists != nil {
+		return m.cfg.WorktreeExists(path)
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// abandonHeldPublication gives ONE held session publication its terminal
+// disposition: the daemon records that no acknowledgement is coming, says so
+// once at error severity, and stops holding the worktree's frames.
+//
+// THE DURABLE LATCH IS WRITTEN FIRST, for the reason every latch in this file
+// is: a daemon that died between the report and the latch would re-report on
+// every sweep forever, and a report that repeats is one nobody reads.
+//
+// The gate is invalidated through PrepareSessionPublication because that is
+// already the one port that tells the publication gate a worktree's verdict has
+// changed. Abandonment is such a change, so it travels the same path a fresh
+// creation job's does rather than a second one that could disagree with it.
+func (m *Manager) abandonHeldPublication(ctx context.Context, job Job, reason PublicationAbandonReason) {
+	latched, err := m.cfg.Store.Update(job.ID, func(j *Job) error {
+		j.PublicationAbandoned = true
+		j.PublicationAbandonedReason = string(reason)
+		return nil
+	})
+	if err != nil {
+		m.cfg.Errorf("workspace-create: HELD PUBLICATION ABANDONMENT COULD NOT LATCH id=%s worktree=%s session=%s reason=%s error=%v; the frames stay gated and the next sweep retries",
+			job.ID, job.WorktreePath, job.SessionID, reason, err)
+		return
+	}
+	m.cfg.Errorf("workspace-create: HELD PUBLICATION ABANDONED id=%s name=%q worktree=%s session=%s state=%s reason=%s requests=%d — no host acknowledgement can ever arrive for this job, so its worktree's session frames stop being gated; the worktree, branch and session are intact and untouched",
+		latched.ID, firstNonEmptyName(latched.FinalName, latched.Request.Name), latched.WorktreePath, latched.SessionID, latched.State, reason, latched.MaterializationRequests)
+	if err := m.cfg.Publication.PrepareSessionPublication(ctx, latched); err != nil {
+		m.cfg.Errorf("workspace-create: ABANDONED PUBLICATION GATE NOT REOPENED id=%s worktree=%s session=%s reason=%s error=%v; the durable disposition stands and the gate re-derives it on the next daemon start",
+			latched.ID, latched.WorktreePath, latched.SessionID, reason, err)
+	}
+}
+
+// disposeHeldPublication abandons one job's hold when a terminal disposition is
+// available, reporting whether it took one. It is the SINGLE decision point:
+// the failure path and the sweep both route through it, so a job can never be
+// abandoned for one reason on one path and left holding on another.
+func (m *Manager) disposeHeldPublication(ctx context.Context, job Job) bool {
+	reason, abandonable := publicationAbandonable(job, m.worktreeExists)
+	if !abandonable {
+		return false
+	}
+	m.abandonHeldPublication(ctx, job, reason)
+	return true
+}
+
 func (m *Manager) materializationRequestInterval() time.Duration {
 	if m.cfg.MaterializationRequestInterval > 0 {
 		return m.cfg.MaterializationRequestInterval
@@ -509,6 +568,22 @@ func (m *Manager) SweepAwaitingHost(ctx context.Context) error {
 	interval := m.materializationRequestInterval().Milliseconds()
 	deadline := m.materializationHeldDeadline().Milliseconds()
 	for _, job := range jobs {
+		// TERMINAL DISPOSITION FIRST, and for every job rather than only the
+		// parked ones. A job that failed before it was ever materialized never
+		// reaches the two clauses below — it is not awaiting_emacs and it is not
+		// gated-stuck — so the sweep used to walk straight past the only jobs
+		// whose holds could never end. This is also where a boot picks up the
+		// ones a previous daemon left behind: the store is the record, so a
+		// disposition missed by a process that died is taken by the next one.
+		if m.disposeHeldPublication(ctx, job) {
+			continue
+		}
+		// AN ABANDONED JOB IS NEVER RE-ASKED. Its disposition is terminal and
+		// on the record; re-requesting it would be the unbounded retry the
+		// disposition exists to end.
+		if job.PublicationAbandoned {
+			continue
+		}
 		gated := publicationStillGated(job)
 		if job.State != StateAwaitingEmacs && !gated {
 			continue
@@ -687,12 +762,26 @@ func (m *Manager) process(ctx context.Context, id string) error {
 				// structural: nothing about THIS job is wrong.
 				return err
 			}
-			if _, err := m.cfg.Store.Update(id, func(j *Job) error {
+			claimed, err := m.cfg.Store.Update(id, func(j *Job) error {
 				j.State = StateWorktreeReady
 				j.LastError = ""
 				return nil
-			}); err != nil {
+			})
+			if err != nil {
 				return err
+			}
+			// THE GATE IS TOLD THE INSTANT THIS JOB FIRST NAMES ITS WORKTREE.
+			// Until now the only notification was the one below, at session
+			// creation, which left a window in which the durable store already
+			// showed a job for this worktree while the gate had not been asked
+			// to re-derive it. The gate memoizes what it derives — including
+			// "no creation job names this worktree", which is what keeps
+			// snapshot assembly off the store — so the window was the one way a
+			// stale allow could outlive the fact it was derived from. Claiming
+			// the worktree here closes it: the memo can never be older than the
+			// record.
+			if err := m.cfg.Publication.PrepareSessionPublication(ctx, claimed); err != nil {
+				return m.fail(ctx, id, "claim session publication", err)
 			}
 		case StateWorktreeReady, StateSessionCreating:
 			if job.State == StateWorktreeReady {
@@ -999,10 +1088,19 @@ func (m *Manager) SurfaceBootSweepVerdict(ctx context.Context, workspace, sessio
 func (m *Manager) fail(ctx context.Context, id, action string, cause error) error {
 	err := fmt.Errorf("workspace create: job %s %s: %w: %w", id, action, ErrJobFailed, cause)
 	m.cfg.Logf("workspace-create: FAILED id=%s action=%s error=%v", id, action, cause)
-	if _, updateErr := m.transition(id, StateFailed, err.Error()); updateErr != nil {
+	failed, updateErr := m.transition(id, StateFailed, err.Error())
+	if updateErr != nil {
 		return fmt.Errorf("workspace create: job %s %s: %w (and record failure: %v)", id, action, cause, updateErr)
 	}
 	m.surfaceFailure(ctx, id, action, cause)
+	// THE HOLD DIES WITH THE JOB. A creation that failed before its
+	// WorkspaceAvailable was ever published has no path left to a host
+	// acknowledgement, so the gate in front of its worktree would wait on an
+	// event that cannot happen — which is exactly how five failed jobs gated
+	// their workspaces blank for a whole daemon lifetime. Disposing of it here,
+	// at the instant the job becomes terminal, is what makes the wait bounded by
+	// construction rather than by a sweep that has to notice it later.
+	m.disposeHeldPublication(ctx, failed)
 	return err
 }
 
