@@ -42,6 +42,10 @@
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--ws-live-p "agent-repl-workspace" (ws))
+(declare-function agent-repl--ws-gui-frontend-p "agent-repl-frontends" (ws))
+(declare-function agent-repl--open-fence-active-p "agent-repl-open-fence" (ws))
+(declare-function agent-repl--open-fence-detail "agent-repl-open-fence" (ws))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--agent-view-buffer-p "agent-repl-core" (&optional buf))
 (declare-function agent-repl--webview-recovery-sweep "webview-recovery" (reason))
@@ -1036,9 +1040,76 @@ hydrated the environment with them, and the gui reads WS's
   (agent-repl--ws-set-agent-state ws :init)
   (agent-repl--frontend-after-ensure-session
    ws
-   (lambda () (agent-repl--log ws "gui-boot: outcome=established"))
+   (lambda ()
+     (agent-repl--log ws "gui-boot: outcome=established")
+     ;; The page is built NOW, not at first look.  A booted workspace whose
+     ;; webview does not exist has nothing for a recovery sweep to repair, so
+     ;; a backend bounce leaves it stale until the user happens to focus it —
+     ;; which is the whole gate this pre-creation removes.  Nothing is
+     ;; displayed; see `agent-repl--frontend-precreate-webview'.
+     (agent-repl--frontend-precreate-webview ws))
    (lambda (detail) (agent-repl--warn ws "gui-boot: FAILED detail=%s" detail)))
   :pending)
+
+(defun agent-repl--frontend-precreate-webview (ws)
+  "Create WS's webview buffer WITHOUT displaying or selecting it.
+The non-displaying twin of `agent-repl--gui-open': it stops at the mount
+(`agent-repl--frontend-ensure-webview-buffer'), never reaching
+`agent-repl--frontend-display-webview'.  The frame's windows and the
+current perspective are therefore untouched — the buffer simply exists,
+addressed at the deployed bundle, ready for the host-driven recovery
+sweep to reach.
+
+WHY EAGERLY.  A workspace with no `:frontend-buffer' has NO PAGE, so a
+sweep after a daemon bounce or a deploy has nothing to drive or reload;
+it \"heals\" only when a look creates the page from scratch.  Pre-creating
+turns every open workspace into one the sweep can actually repair.
+
+Returns `:pending' when a mount was started, and nil when WS is not
+entitled to one.  The refusals are all preconditions, not failures:
+
+  - a DEAD or nuked workspace, or one whose frontend is not the gui;
+  - a workspace already holding a live webview buffer (this is
+    idempotent by design — every driver may call it freely);
+  - a TERMINALLY FENCED workspace (`agent-repl--open-fence-active-p'):
+    the daemon has said its conversation cannot be resumed, and an
+    automatic page for it is exactly the retry the fence exists to stop;
+  - an Emacs with no xwidget support, where there is no webview to make.
+
+Establishment failure is NOT swallowed: it is warned about, the same as
+every other ensure-session caller."
+  (cond
+   ((not (agent-repl--ws-live-p ws))
+    (agent-repl--log-verbose ws "precreate-webview: skipped=not-live") nil)
+   ((not (agent-repl--ws-gui-frontend-p ws))
+    (agent-repl--log-verbose ws "precreate-webview: skipped=not-gui") nil)
+   ((agent-repl--open-fence-active-p ws)
+    (agent-repl--log ws "precreate-webview: skipped=open-fenced detail=%s"
+                     (or (agent-repl--open-fence-detail ws) "none"))
+    nil)
+   ((buffer-live-p (agent-repl--ws-get ws :frontend-buffer))
+    (agent-repl--log-verbose ws "precreate-webview: skipped=already-mounted") nil)
+   ((not (agent-repl--frontend-xwidget-available-p))
+    (agent-repl--log ws "precreate-webview: skipped=xwidget-unavailable") nil)
+   (t
+    (agent-repl--log ws "precreate-webview: begin")
+    (agent-repl--frontend-after-ensure-session
+     ws
+     (lambda ()
+       ;; Anchored the same way the open path anchors, so the buffer is born
+       ;; into WS's perspective rather than whichever one is current when the
+       ;; daemon answers.  No window is touched either way.
+       (agent-repl--call-in-background-workspace
+        ws
+        (lambda ()
+          (let ((buf (agent-repl--frontend-ensure-webview-buffer
+                      ws (agent-repl--frontend-webview-url ws))))
+            (agent-repl--log ws "precreate-webview: outcome=created buf=%s"
+                             (and (buffer-live-p buf) (buffer-name buf)))
+            buf))))
+     (lambda (detail)
+       (agent-repl--warn ws "precreate-webview: FAILED detail=%s" detail)))
+    :pending)))
 
 (defun agent-repl--frontend-webview-url (ws)
   "Return the webapp URL for WS's webview.
