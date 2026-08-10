@@ -3298,6 +3298,17 @@ pre {
   color: var(--muted);
   font-style: italic;
 }
+/* The COLLAPSED card an accepted decision leaves: one line, no question. The
+   block itself has not lifted — the composer stays disabled until the daemon
+   reports the session awake — but the popup asked something that has now been
+   answered, and a compact-first revival keeps it answered for the length of a
+   whole compaction. A full-height card of options nobody may take any more,
+   standing that long, reads as the click having missed. */
+.hibernation-progress {
+  display: flex;
+  align-items: baseline;
+}
+.hibernation-progress .hibernation-pending { margin-top: 0; }
 /* An ACCEPTED decision whose bring-up failed. Red, unlike everything else on
    this card: a hibernated session is benign and deliberate, but a wake-up that
    was taken and then did not happen is a fault, and the user has just watched
