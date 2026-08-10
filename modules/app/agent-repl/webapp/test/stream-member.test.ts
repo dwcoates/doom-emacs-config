@@ -260,34 +260,16 @@ describe("resolveMember", () => {
     expect(m?.status).toBe("error");
   });
 
-  it("carries the transcript's token figure onto the member", () => {
-    // Arrange
+  it("carries no token figure at all, so a badge cannot read a renderer-summed one", () => {
+    // Arrange — a transcript whose usage records the resolver once summed.
     const tail = `{"type":"assistant","message":{"usage":{"output_tokens":42},"content":[]}}`;
+    // Act
     const m = resolveMember(
       pollAgent(),
       ctx({ tails: { ag1: { text: tail, offset: 1, done: false, elapsedMs: 5 } } }),
     );
-    // Assert
-    expect(m?.outputTokens).toBe(42);
-  });
-
-  it("carries no token figure for a stream that is not a transcript", () => {
-    // Arrange — a shell spool is bytes; tokens would be an invention.
-    const m = resolveMember(
-      tool({
-        result: SPAWN_RESULT,
-        taskOutput: "plain shell output",
-        asyncSource: {
-          source_id: "bg1",
-          kind: "shell",
-          status: "running",
-          stream: { transport: "ws", format: "text" },
-        },
-      }),
-      ctx(),
-    );
-    // Assert
-    expect(m?.outputTokens).toBeUndefined();
+    // Assert — every token figure is the daemon's attribution now.
+    expect(m).not.toHaveProperty("outputTokens");
   });
 });
 
