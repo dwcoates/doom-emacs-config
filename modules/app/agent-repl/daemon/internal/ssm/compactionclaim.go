@@ -3,6 +3,8 @@ package ssm
 import (
 	"database/sql"
 	"fmt"
+
+	"claude-repld/internal/daemonturn"
 )
 
 // HEALING A REVIVE-COMPACT TURN WHOSE COMPACTION IS OVER AND WHOSE CLAIM IS NOT.
@@ -53,7 +55,12 @@ const TurnCloseCompactionCompleteReconciled = "compaction_complete_reconciled"
 // reviveCompactTurnPrefix is the identity a compact-first revival submits its
 // compaction under. It is minted in sessioncontroller.newReviveCompactRequestID
 // and is the only turn id whose completion this reconciliation may infer.
-const reviveCompactTurnPrefix = "revive-compact:"
+//
+// It is the SHARED VOCABULARY'S CONSTANT rather than a second copy of it: the
+// same prefix decides what the conversation curator withholds
+// (sessioncontroller/contextcutexclude.go), and two strings that have to be
+// kept equal for those two readings to agree is one string too many.
+const reviveCompactTurnPrefix = daemonturn.ReviveCompactPrefix
 
 // causeCompactionReconciled names the session-status row this reconciliation
 // appends. It carries no store seq: the edge is the daemon's own reading of the
