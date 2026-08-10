@@ -25,6 +25,7 @@ import (
 
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
+	"claude-repld/internal/session"
 	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shim"
@@ -449,8 +450,34 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 			// talking for a week is not a blank slate, and letting the waiver
 			// mint its own permission is how it would become one.
 		} else {
-			logResumeContinuityFailure(s.logf, "automatic_restore", sessionID, opts, missing)
-			return res, missing
+			// THE STALE POINTER RUNG (resumevanished.go). The target is gone,
+			// but the workspace may still hold the conversation under another
+			// uuid — a rewind, a migration, a vendor-side re-mint. Resuming the
+			// newest one it does hold keeps the continuity this pointer stood
+			// for; wedging on the dead uuid keeps nothing.
+			sibling, ok, siblingErr := newestSiblingTranscript(opts)
+			if siblingErr != nil {
+				return res, siblingErr
+			}
+			if ok {
+				s.logf("server: session %s: resume target %s VANISHED and is CORRECTED to sibling %s (%s, modified %s) cwd=%q config_dir=%q — the recorded pointer names a transcript that is gone, and this is the newest conversation the workspace still has under its own config root; resuming it preserves continuity where refusing forever would not",
+					sessionID, opts.Resume, sibling.SessionID, sibling.Path, sibling.ModTime.UTC().Format(time.RFC3339), opts.CWD, opts.ConfigDir)
+				opts.Resume = sibling.SessionID
+			} else {
+				// TERMINAL. Nothing to resume, nothing to fall back to, and the
+				// refusal to start a fresh conversation stands exactly as it
+				// did. It is classified so the bring-up machinery stops
+				// re-running a spawn whose outcome is already known.
+				projectDir := session.ProjectDir(session.ClaudeConfigDir(opts.ConfigDir), opts.CWD)
+				// ONE RECORD, with the disposition on it. A second line saying
+				// "and this one is terminal" would be a second account of one
+				// failure, which is the thing this diagnostic owns.
+				logResumeContinuityFailure(s.logf, "automatic_restore", sessionID, opts, missing,
+					"disposition", "terminal_vanished_resume",
+					"searched_project_dir", projectDir,
+					"sibling_transcript", "none")
+				return res, newVanishedResumeTargetError(missing, projectDir)
+			}
 		}
 	}
 	// THE STRUCTURAL GATE. Every path that reaches a spawn with no --resume

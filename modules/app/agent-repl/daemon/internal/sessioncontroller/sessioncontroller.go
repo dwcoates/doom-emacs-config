@@ -592,6 +592,13 @@ type Manager struct {
 	// imposes (bringupescape.go). The park is a cooldown, never a wall: it
 	// expires on its own so no workspace can be dead-ended by it.
 	bringUpFailures map[string]*bringUpStreak
+	// vanishedResume is the TERMINAL fence: sessions whose recorded
+	// conversation has vanished from disk with nothing to fall back to, and
+	// which must therefore never be respawned automatically again
+	// (vanishedresume.go). It is deliberately not a cooldown — the fact it
+	// stands on does not heal with time — and it is cleared only by an explicit
+	// user action.
+	vanishedResume map[string]*vanishedResumeFence
 	// buildBounced remembers the sessions already bounced for a stale bundle,
 	// so a shim that comes back still reporting a mismatched build (a bundle
 	// whose identity cannot move, a stamp that is wrong) is loud ONCE instead
@@ -1017,6 +1024,7 @@ func New(cfg Config) (*Manager, error) {
 		shimPID:                   make(map[string]int32),
 		shimBuild:                 make(map[string]string),
 		bringUpFailures:           make(map[string]*bringUpStreak),
+		vanishedResume:            make(map[string]*vanishedResumeFence),
 		buildBounced:              make(map[string]bool),
 		buildRefresh:              make(map[string]*buildRefreshState),
 		staleRefreshArms:          make(map[string]*staleRefreshArm),
@@ -2772,6 +2780,15 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		return nil, false, fmt.Errorf("%w: workspace %q session %s failed bring-up %d times in a row, so it is resting for another %s — opening it again after that retries automatically, and a hard restart (RestartSession) retries right now",
 			ErrBringUpGaveUp, workspace, sessionID, m.bringUpFailuresFor(sessionID), remaining.Round(time.Second))
 	}
+	// THE TERMINAL FENCE, BEFORE ANYTHING IS SPAWNED and before any identity is
+	// minted. A session whose recorded conversation has vanished with nothing
+	// to fall back to cannot be brought up by any retry, and its failure card
+	// is already standing (vanishedresume.go). Every attempt past this line
+	// would re-derive the same absence, so the refusal is returned from the
+	// fence instead — at debug, because the error was reported once already.
+	if cause, fenced := m.vanishedResumeRefusal(workspace, sessionID); fenced {
+		return nil, false, cause
+	}
 	generationID, err := m.newControllerGenerationID()
 	if err != nil {
 		m.logf("session-controller: controller generation mint FAILED ws=%q session=%s decision=abort_before_spawn error=%v",
@@ -2805,6 +2822,12 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	}()
 	spawn, err := m.cfg.Spawner.EnsureShim(m.rootCtx, sessionID)
 	if err != nil {
+		// A TERMINAL refusal fences the session and publishes its one card
+		// here; every other spawn failure keeps the retry behavior it has
+		// always had (vanishedresume.go).
+		if terminal := m.classifyTerminalBringUp(workspace, sessionID, err); terminal != err {
+			return nil, false, terminal
+		}
 		return nil, false, fmt.Errorf("session-controller: ensure shim for session %s (ws %q): %w", sessionID, workspace, err)
 	}
 
