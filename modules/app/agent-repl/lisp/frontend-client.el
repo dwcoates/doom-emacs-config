@@ -40,6 +40,9 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-connection-notice-warn "connection-notice" (text &optional level))
+(declare-function agent-repl--open-fence-active-p "agent-repl-open-fence" (ws))
+(declare-function agent-repl--open-fence-detail "agent-repl-open-fence" (ws))
+(declare-function agent-repl--open-fence-clear "agent-repl-open-fence" (ws reason))
 (declare-function agent-repl-connection-notices-retract "connection-notice" (reason))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
@@ -1086,7 +1089,13 @@ predate boot ids report nil, which never triggers a reset."
         (when (agent-repl--ws-get ws :ensure-failed)
           (agent-repl--ws-put ws :ensure-failed nil)
           (agent-repl--ws-put ws :ensure-failures nil))
-        (agent-repl--ws-put ws :ensure-at nil)))
+        (agent-repl--ws-put ws :ensure-at nil)
+        ;; The terminal-open fence goes for the same reason, and with one
+        ;; extra: the daemon's own vanished-resume fence is PER BOOT, so a
+        ;; new instance has already re-checked the disk and re-fences only if
+        ;; the transcript is still gone.  Holding this end's fence across a
+        ;; bounce would refuse to ask a daemon that might now say yes.
+        (agent-repl--open-fence-clear ws "daemon instance changed")))
     (unless agent-repl--frontend-last-boot-id
       (agent-repl--log nil "reattach: recording initial daemon boot id=%s" boot-id))
     (setq agent-repl--frontend-last-boot-id boot-id))))
@@ -1279,6 +1288,13 @@ completed must not be followed by work that presumes it did."
         ;; below can name the request even when the ack is delivered
         ;; reentrantly from inside `process-send-string'.
         (req nil))
+    ;; A RESTART IS THE EXPLICIT WAY OUT OF THE TERMINAL-OPEN FENCE, and it is
+    ;; the same way out the daemon's own vanished-resume fence takes: the
+    ;; restart re-checks the disk through the ordinary gate exactly once and
+    ;; re-fences if the transcript is still gone.  Cleared BEFORE the send, so
+    ;; an ensure driven by the restart's own outcome is not skipped by a fence
+    ;; the restart was issued to escape.
+    (agent-repl--open-fence-clear ws "explicit session restart")
     (agent-repl--uds-send-command
      "restartSession" nil key nil
      :on-registered (lambda (id) (setq req id))
@@ -1588,6 +1604,16 @@ reattach sweep — are each other's retry."
            (agent-repl--frontend-session-controller-live-p key)
            (agent-repl--frontend-backfill-settled-p key)))
     "session already live, driven and backfilled")
+   ;; THE OPEN WAS ACKED AND STILL FAILED, TERMINALLY.  The give-up below
+   ;; counts REJECTED acks, and an early-acked open that fails afterwards
+   ;; never produces one — so a workspace the daemon fences with `retry=never'
+   ;; re-sent the same doomed open every cooldown, forever.  The fence
+   ;; (open-fence.el) reads the daemon's own terminal disposition off the
+   ;; pushed failure card and stops exactly this loop; the card itself still
+   ;; stands, and an explicit session restart clears the fence and retries.
+   ((agent-repl--open-fence-active-p ws)
+    (format "daemon reported a terminal open failure (%s)"
+            (or (agent-repl--open-fence-detail ws) "no detail supplied")))
    ((agent-repl--ws-get ws :ensure-failed) "gave up after repeated failures")
    ((let ((at (agent-repl--ws-get ws :ensure-at)))
       (and at (< (- (float-time) at) agent-repl-frontend-ensure-cooldown)))
