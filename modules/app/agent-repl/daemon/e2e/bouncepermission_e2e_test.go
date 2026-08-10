@@ -72,7 +72,7 @@ func TestE2EAPermissionRaisedWhileTheDaemonIsDownIsRedeliveredOnReattach(t *test
 	_, afterConn, _ := reattached(t, second, cwd)
 
 	// Assert — the question is asked again, is answerable, and the turn runs on.
-	permID := awaitPendingPermission(t, afterConn, cwd,
+	permID := awaitReattachedPendingPermission(t, afterConn, cwd,
 		"the parked canUseTool question, RE-ASKED to the daemon that replaced the one it was raised against — a request the shim dropped for want of a listener is not a request the user never made, and the turn behind it cannot proceed until it is put again")
 	answerPermission(t, afterConn, cwd, "r-answer", permID, true)
 	awaitSettledTurn(t, afterConn, cwd, nil,

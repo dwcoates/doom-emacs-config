@@ -1185,6 +1185,36 @@ async function boot(): Promise<void> {
   // render while the store behind it has moved on — the socket keeps
   // delivering either way. Becoming visible therefore repaints from the
   // CURRENT snapshot rather than waiting for the next arriving frame.
+  /**
+   * BECOMING VISIBLE IS EVIDENCE THIS PAGE MAY BE BEHIND, and that is the whole
+   * reason this exists beside the repaint.
+   *
+   * WebKit throttles a hidden xwidget webview: its timers are suspended, so a
+   * scheduled reconnect may simply never run, and a socket that died while the
+   * user was elsewhere stays dead until something asks. Nothing did. The user
+   * had to switch to the workspace and then wait for the page to notice, which
+   * is exactly the "it catches up only after I visit it" complaint.
+   *
+   * So a page coming into view does two things, in the order the transport
+   * allows: dial if a dial is what the state calls for (ws.ensureConnected,
+   * which is a no-op on a healthy socket), and on a socket that IS current, ask
+   * for the delta above this page's applied high-water mark. The re-arm goes
+   * through ConnectResync so the forced check obeys the same preconditions and
+   * takes the same single dispatch path every other resync does.
+   *
+   * A DIALLING SOCKET NEEDS NOTHING FROM HERE: its own connect snapshot arms a
+   * resync, and asking over a socket that is not current would be a command
+   * with nothing to carry it.
+   */
+  const catchUpOnVisible = (reason: string): void => {
+    const client = ws as WsClient | undefined;
+    if (client === undefined) return;
+    client.ensureConnected();
+    if (client.state !== "current") return;
+    connectResync.forceResync(reason);
+    connectResync.observe(false, currentResyncSnapshot(store.state.lastSeq));
+  };
+
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") return;
     // The rail's roster is PUSHED by Emacs rather than streamed, so it is the
@@ -1194,6 +1224,16 @@ async function boot(): Promise<void> {
     // current; with nothing pending, an ordinary scheduled render picks up the
     // repainted rail on the next frame.
     if (!frames.flush()) frames.schedule();
+    catchUpOnVisible("visibilitychange_visible");
+  });
+
+  // FOCUS IS THE SECOND SIGNAL, and it is not redundant with the first. An
+  // xwidget webview that was never marked hidden can still have been parked
+  // behind another Emacs window; focus is the event that fires when the user
+  // comes back to it, and a page that only listened for visibility would sit
+  // stale through exactly that case.
+  window.addEventListener("focus", () => {
+    catchUpOnVisible("webview_focus");
   });
 
   let logConnectionGeneration = 0;
@@ -1227,6 +1267,14 @@ async function boot(): Promise<void> {
         // reloaded every page and threw away the applied conversation store
         // each one was holding (version-skew.ts).
         let daemonBuild: DaemonBuild | null = null;
+        // The daemon IDENTITY the same snapshot announced. It answers a
+        // different question from the build above: the build says whether this
+        // BUNDLE could have gone stale, and the boot id says whether the
+        // applied conversation store belongs to a daemon that still exists.
+        // A bounce that redeploys nothing leaves the build alone and changes
+        // this, which is exactly the case the page has to resync out of rather
+        // than reload for (connect-resync.ts, observeDaemonIdentity).
+        let daemonBootId: string | null = null;
         try {
           const decoded = decodeFrontendFrame(data);
           isSnapshot = decoded.frame.case === "snapshot";
@@ -1236,6 +1284,7 @@ async function boot(): Promise<void> {
               version: daemon?.daemonVersion ?? "",
               binaryMtimeMs: Number(daemon?.daemonBinaryMtimeMs ?? 0),
             };
+            daemonBootId = daemon?.bootId ?? "";
           }
           dispatcher.observe(decoded);
           effects = adapter.apply(decoded);
@@ -1334,6 +1383,14 @@ async function boot(): Promise<void> {
           // again. An unchanged one — the ordinary bounce — leaves the page and
           // its applied history alone.
           if (daemonBuild !== null) versionSkew.observeSnapshotAdoption(daemonBuild);
+          // AND THE IDENTITY, on the same adoption edge and for the same
+          // reason: a snapshot this page failed to ingest proves nothing about
+          // which daemon its store belongs to. A CHANGED one re-arms the
+          // resync below, which is how a page whose socket never cycled — a
+          // throttled hidden webview, a snapshot that landed after this
+          // connection's one resync had already fired — stops being a zombie
+          // pinned to a daemon that no longer exists.
+          if (daemonBootId !== null) connectResync.observeDaemonIdentity(daemonBootId);
         }
         // The rail, painted from the SAME burst the feed and the footer are
         // ingesting: on a connect snapshot the roster frame rides in with the

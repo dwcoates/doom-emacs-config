@@ -374,7 +374,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// AFTER THE ACCEPT, never before: an axis opened for a prompt that never
 	// reached the shim would be waiting on a cut that is not coming, and would
 	// hold the phase word until the watchdog expired it.
-	m.noteClearDispatched(d.workspace, cmd)
+	m.noteClearDispatched(d, cmd)
 	return nil
 }
 
@@ -627,11 +627,22 @@ func (m *Manager) applyLocalSessionCommand(ctx context.Context, d *sessionContro
 // one the receipt was decided by. A failure is loud-logged and does not fail the
 // submit — the prompt was accepted, and losing it over a footer word would be
 // the larger harm.
-func (m *Manager) noteClearDispatched(workspace string, cmd sessionCommand) {
+// AND IT DISCHARGES THE RESUME-IDENTITY COMMITMENT. `/clear` discards the
+// conversation and the vendor rotates the session uuid for it, so from this
+// point the query is EXPECTED to report an identity other than the one it was
+// asked to resume. Telling the tracker here — where the daemon commits to the
+// rotation, and from the same classification the clearing axis is opened on —
+// is what keeps the two facts from being decided by two separate readings of
+// the text (resumeidentity.go).
+func (m *Manager) noteClearDispatched(d *sessionController, cmd sessionCommand) {
 	if !cmd.clear() {
 		return
 	}
+	workspace := d.workspace
 	m.logf("session-controller: /clear dispatched ws=%q — opening the SSM's clearing axis until the vendor session rotation it causes lands, or its ContextCleared arrives first", workspace)
+	if d.consumer != nil {
+		d.consumer.resumeIdentity.noteContextClearDispatched()
+	}
 	if err := m.cfg.SSM.ApplyClearing(workspace, true, "clear_dispatched"); err != nil {
 		m.logf("session-controller: opening the clearing axis FAILED ws=%q: %v (the cut will render as an ordinary turn)", workspace, err)
 	}

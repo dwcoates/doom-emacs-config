@@ -76,6 +76,15 @@ type keepAlivePingMeasurement struct {
 	// with the claim it belongs to, because that is the only record of when the
 	// ping began that survives to be compared against.
 	submittedAtMs int64
+	// restartGraceAtSubmitMs is the restart epoch's accumulated grace at the
+	// instant this ping was claimed (restartepoch.go).
+	//
+	// IT IS A MARK, NOT A FLAG. The deadline extends by the grace accrued SINCE
+	// this value, so a ping submitted after a bounce is owed nothing and one
+	// submitted before it is owed exactly the window it lived through. Storing
+	// the total at submit is what makes that subtraction possible without the
+	// ping having to know a bounce happened.
+	restartGraceAtSubmitMs int64
 	// usage is what the ping's terminal result actually paid, in the canonical
 	// shape. The verdict reads the expensive sum off it rather than being handed
 	// a pre-reduced number, so the one place a bucket could be substituted for
@@ -108,6 +117,10 @@ func (m *Manager) measureKeepAlivePing(workspace, turnID string) keepAlivePingMe
 		// one whose could — an unmeasurable session is not a licence to hold a
 		// claim forever — so this is the one field taken unconditionally.
 		submittedAtMs: m.now(),
+		// Taken on the same unconditional terms and for the same reason: a ping
+		// whose measurement could not be completed is owed the bounce's grace
+		// exactly as much as one whose could.
+		restartGraceAtSubmitMs: m.restartGraceMark(),
 	}
 	if m.cfg.Hibernations == nil {
 		return measurement

@@ -395,3 +395,50 @@ func TestAControllerExitDisarmsAnArmedLease(t *testing.T) {
 		t.Fatalf("the lease for %q outlived the controller that could have fired it", session)
 	}
 }
+
+// THE CLASSIFIER NEVER RUNS ON A PARKED PROMPT, and this is the hold that
+// proved the four separate skip tests were one too few: the stale-build case
+// had none, so an entry the queue created HOLD was re-stamped ERROR by a
+// classifier that should never have seen it, and the user's chip said nothing
+// had decided their prompt. The skip is one `held()` test now (queue.go), so a
+// fifth hold is honored without a fifth place to remember.
+func TestAPromptParkedByTheRefreshIsNeverClassified(t *testing.T) {
+	// Arrange — a classifier that would answer if it were asked.
+	cls := &fakeClassifier{res: ClassifyResult{Classification: VerdictInterject}}
+	h := newStaleRefreshHarness(t, "sha-new", nil)
+	h.m.cfg.Classifier = cls
+	h.turn(true)
+	h.reattach("sha-old", true, []string{"turn-1"})
+
+	// Act.
+	if err := h.submit("held-across-the-refresh"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert.
+	if reqs := cls.requests(); len(reqs) != 0 {
+		t.Fatalf("classify requests = %+v, want none: a parked prompt has no turn an interject may reach", reqs)
+	}
+}
+
+// AND ITS VERDICT STAYS THE QUEUE'S. A classifier that never runs cannot
+// overwrite the hold, which is the user-visible half of the same defect.
+func TestAPromptParkedByTheRefreshKeepsItsHoldVerdict(t *testing.T) {
+	// Arrange.
+	cls := &fakeClassifier{res: ClassifyResult{Classification: VerdictInterject}}
+	h := newStaleRefreshHarness(t, "sha-new", nil)
+	h.m.cfg.Classifier = cls
+	h.turn(true)
+	h.reattach("sha-old", true, []string{"turn-1"})
+
+	// Act.
+	if err := h.submit("held-across-the-refresh"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert.
+	es := h.entries()
+	if len(es) != 1 || es[0].classification != VerdictHold {
+		t.Fatalf("entries = %+v, want the queue's own HOLD verdict left standing", es)
+	}
+}

@@ -60,6 +60,59 @@ func (m *Manager) noteShimPID(sessionID string, pid int32) {
 	m.shimPID[sessionID] = pid
 }
 
+// noteShimBuild records the bundle identity a session's shim announced, so a
+// decision about that shim can be taken when its connection is no longer in
+// reach — which is exactly the shutdown drain's situation (ShimBundleStale).
+//
+// An empty identity DROPS the entry rather than recording "". An older bundle
+// with no field carries no identity at all, and remembering an empty string as
+// though it were one would let a comparison read a missing fact as a
+// difference — the failure refreshStaleShim's unknown-is-never-a-mismatch rule
+// exists to prevent.
+func (m *Manager) noteShimBuild(sessionID, build string) {
+	if sessionID == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if build == "" {
+		delete(m.shimBuild, sessionID)
+		return
+	}
+	m.shimBuild[sessionID] = build
+}
+
+// ShimStopWouldFixTheBundle reports whether stopping a session's shim is the
+// only way to get it onto the current bundle, together with the two identities
+// the verdict was taken from.
+//
+// IT IS THE ONLY THING THAT JUSTIFIES STOPPING A SURVIVING SHIM ON A BOUNCE. A
+// shim is daemon-independent by design: it outlives the daemon, redials the
+// socket, and the next daemon reattaches to it with the turn it was running
+// still running. So a planned bounce has no reason to kill one — the process
+// serving the user is fine, and stopping it converts a free reattach into an
+// interrupted turn that has to be re-driven. The one thing a stop CAN fix and a
+// reattach cannot is a shim executing code the deploy replaced.
+//
+// A PROVEN MATCH IS THE ONLY "NO", and the asymmetry is deliberate. This
+// question is only ever asked because somebody EXPLICITLY asked for the shim
+// bundle to be replaced, so an unreadable identity on either side leaves the
+// daemon unable to prove the stop is pointless — and preserving on that would
+// silently defeat the deploy the operator asked for. It is the opposite
+// reading from refreshStaleShim's, which answers an AUTOMATIC bounce where an
+// unknown treated as a difference is how a refresh becomes a loop; nothing
+// here loops, because nothing here repeats.
+func (m *Manager) ShimStopWouldFixTheBundle(sessionID string) (stop bool, reported, want string) {
+	want = m.currentShimBuild()
+	m.mu.Lock()
+	reported = m.shimBuild[sessionID]
+	m.mu.Unlock()
+	if want != "" && reported != "" && reported == want {
+		return false, reported, want
+	}
+	return true, reported, want
+}
+
 // shimPIDFor returns the pid a session's shim announced, or 0 when none is
 // known. 0 means the spawner must fall back on its own process handle, which
 // is the ordinary case for a shim this daemon spawned.

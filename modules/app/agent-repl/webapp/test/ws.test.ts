@@ -91,6 +91,38 @@ describe("WsClient", () => {
     expect(freshnessChanges).toEqual(["connecting", "awaiting_snapshot", "current"]);
   });
 
+  // THE READ-ONLY FRESHNESS ACCESSOR. A caller deciding between dialling and
+  // asking a live connection for something needs to know which it has, and the
+  // transitions stay this class's own: a caller that could write it could claim
+  // a currentness no snapshot had established.
+  it("reports disconnected before any dial", () => {
+    // Arrange
+    const { client } = newClient();
+    // Act, Assert
+    expect(client.state).toBe("disconnected");
+  });
+
+  it("reports current once the first snapshot is adopted", () => {
+    // Arrange
+    const { client } = newClient();
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    // Act
+    client.adoptSnapshot({ revision_at_ms: 10 });
+    // Assert
+    expect(client.state).toBe("current");
+  });
+
+  it("reports awaiting_snapshot on an open socket with no snapshot yet", () => {
+    // Arrange
+    const { client } = newClient();
+    // Act
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    // Assert
+    expect(client.state).toBe("awaiting_snapshot");
+  });
+
   it("delivers inbound messages to onMessage", () => {
     // Arrange
     const seen: string[] = [];
