@@ -48,11 +48,19 @@
  *     it and re-resolves the workspace, so the color leaves the blue band
  *     unaided.
  *
- * NONE OF THAT SOFTENS THE SAD PATH. There is still no spill buffer, a
- * rejected batch is still never retried, and a write landing during an outage
- * is still dropped loudly. Recovery restores the LINK; it never resurrects the
- * events that fell while the link was down. A deliberate close() is final and
- * never relinks.
+ * NONE OF THAT SOFTENS THE SAD PATH. A rejected batch is still never retried,
+ * and recovery restores the LINK — it never resurrects events that fell while
+ * the link was down. A deliberate close() is final and never relinks.
+ *
+ * THE ONE THING RECOVERY DOES COVER is a durable write that ARRIVES during the
+ * outage. It is HELD in write order and flushed on relink (see
+ * {@link WRITE_HOLD_BUDGET_MS}) rather than failed on the spot, because failing
+ * it on the spot took the session's fatal missing-receipt path and exited the
+ * shim — one store bounce killed every live shim in the fleet. The hold is
+ * bounded in batches and bytes, and BOTH a budget expiry and an overflow fail
+ * every held batch exactly as the instant failure did: loud per-event DROPPED
+ * lines, a DegradedState with the real count, and the same rejection. Nothing
+ * durable is ever dropped quietly, and nothing is ever reordered.
  *
  * THE SUBSCRIPTION KEY is the VENDOR session id (Claude's uuid), not this
  * shim's `--session-id` — see `storeKey`. Writes were always keyed that way
@@ -60,7 +68,7 @@
  * listened on a channel nothing published to.
  */
 import net from "node:net";
-import { create } from "@bufbuild/protobuf";
+import { create, toBinary } from "@bufbuild/protobuf";
 import { MessageConn, envelopeType, unpackAs } from "./framing.js";
 import type { Any } from "./framing.js";
 import { bindLog } from "./log.js";
@@ -145,6 +153,16 @@ export interface StoreClientOptions {
    * DegradedState; default 5000ms. See {@link RELINK_REPORT_AFTER_MS}.
    */
   relinkReportAfterMs?: number;
+  /**
+   * How long a DURABLE write may be held while the producer link relinks,
+   * before the hold is failed exactly as an unheld write always failed.
+   * Defaults to `relinkReportAfterMs`. See {@link WRITE_HOLD_BUDGET_MS}.
+   */
+  writeHoldBudgetMs?: number;
+  /** Hard cap on held batches during one outage; default {@link WRITE_HOLD_MAX_BATCHES}. */
+  writeHoldMaxBatches?: number;
+  /** Hard cap on held bytes during one outage; default {@link WRITE_HOLD_MAX_BYTES}. */
+  writeHoldMaxBytes?: number;
 }
 
 const COMPONENT = "shim-store-client";
@@ -186,6 +204,36 @@ const RELINK_BACKOFF_MAX_MS = 5000;
  */
 const RELINK_REPORT_AFTER_MS = 5000;
 
+/**
+ * THE WRITE-HOLD BUDGET: how long a DURABLE batch that arrived while the
+ * producer link was down waits for the relink before it is failed.
+ *
+ * The same 5s a dropped link is given to come back, and for the same reason:
+ * a store bounce during a deploy drops every shim's producer connection, and a
+ * batch that lands in that window used to go INSTANTLY fatal — the session
+ * reported `fatal_missing_persistent_evidence_receipt` and the shim exited 1,
+ * so one store restart killed all ~13 shims and hibernated every workspace.
+ *
+ * Holding the batch in order and flushing it on relink is not a spill buffer
+ * and does not soften the sad path:
+ *   - the hold is BOUNDED in both batches and bytes, and an overflow fails
+ *     exactly like the budget expiring;
+ *   - a hold that outlives the budget drops loudly, degrades, and rejects with
+ *     the SAME error the instant failure raised, so the session's fatal path
+ *     and its full error surface are reached unchanged;
+ *   - nothing durable is ever dropped silently, and no write is ever reordered
+ *     around a held one.
+ */
+const WRITE_HOLD_BUDGET_MS = RELINK_REPORT_AFTER_MS;
+/**
+ * Bounds on the hold. A store that is coming back does so inside one deploy
+ * step, so the queue only ever has to cover a few seconds of one session's
+ * durable traffic; anything past these bounds is an outage, not a bounce, and
+ * is failed rather than accumulated into unbounded shim memory.
+ */
+const WRITE_HOLD_MAX_BATCHES = 1024;
+const WRITE_HOLD_MAX_BYTES = 8 * 1024 * 1024;
+
 export interface StoreHealth {
   healthy: boolean;
   reason: string;
@@ -196,6 +244,8 @@ interface PendingWrite {
   resolve: (ack: StoreWriteAck) => void;
   reject: (err: Error) => void;
   events: Event[];
+  /** Serialized size, measured once when the batch is HELD (see holdWrite). */
+  bytes?: number;
 }
 
 /** A subscription socket that has sent Subscribe but has not crossed readiness. */
@@ -218,6 +268,19 @@ export class StoreClient {
   private sink: StoreSink | null = null;
   private reporter: DegradedReporter | null = null;
   private readonly pendingWrites: PendingWrite[] = [];
+  /**
+   * DURABLE batches waiting out a producer-link outage, in call order.
+   *
+   * Non-empty means every later write must be held too, or a batch issued
+   * after the relink would reach the store ahead of one issued before it.
+   * Drained only by {@link flushHeldWrites} (in order, onto the restored
+   * connection) or by {@link failHeldWrites} (loudly, as the fatal path).
+   */
+  private readonly heldWrites: PendingWrite[] = [];
+  /** Serialized bytes currently held, against {@link writeHoldMaxBytes}. */
+  private heldBytes = 0;
+  /** The armed write-hold budget expiry; null when nothing is held. */
+  private holdBudgetTimer: NodeJS.Timeout | null = null;
   /**
    * The in-flight producer redial, shared by every write that finds the
    * connection down. Writes are fire-and-forget from routeSdkMessage, so
@@ -319,6 +382,9 @@ export class StoreClient {
   private readonly relinkMinMs: number;
   private readonly relinkMaxMs: number;
   private readonly relinkReportAfterMs: number;
+  private readonly writeHoldBudgetMs: number;
+  private readonly writeHoldMaxBatches: number;
+  private readonly writeHoldMaxBytes: number;
   /**
    * The reason a link-loss report is WAITING OUT the retry budget, or null when
    * no unreported loss is outstanding. See {@link RELINK_REPORT_AFTER_MS}.
@@ -361,6 +427,9 @@ export class StoreClient {
     this.relinkMinMs = opts.relinkBackoffMinMs ?? RELINK_BACKOFF_MIN_MS;
     this.relinkMaxMs = opts.relinkBackoffMaxMs ?? RELINK_BACKOFF_MAX_MS;
     this.relinkReportAfterMs = opts.relinkReportAfterMs ?? RELINK_REPORT_AFTER_MS;
+    this.writeHoldBudgetMs = opts.writeHoldBudgetMs ?? opts.relinkReportAfterMs ?? WRITE_HOLD_BUDGET_MS;
+    this.writeHoldMaxBatches = opts.writeHoldMaxBatches ?? WRITE_HOLD_MAX_BATCHES;
+    this.writeHoldMaxBytes = opts.writeHoldMaxBytes ?? WRITE_HOLD_MAX_BYTES;
     this.storeKey = opts.storeSessionId ?? opts.sessionId;
     this.vendorKnown = (opts.storeSessionId ?? "") !== "";
   }
@@ -832,6 +901,11 @@ export class StoreClient {
       if (!this.connected || this.conn === null) {
         await this.ensureProducerConn();
       }
+      // The producer half is what durable writes need, so they go out before
+      // the subscription half is attempted: a subscription reopen that fails
+      // re-arms the relink, and holding the flush behind it would burn the
+      // write-hold budget on a half the writes do not depend on.
+      this.flushHeldWrites();
       if (this.lastFromSeq !== null && this.subConn === null && this.openingSub === null) {
         await this.openSubscription(this.resumeSeq());
       }
@@ -939,10 +1013,10 @@ export class StoreClient {
    *
    * A DOWN connection is redialed first (see ensureProducerConn), so a batch
    * arriving between a store restart and the next relink tick still reaches
-   * the store rather than racing the timer. This does not soften the sad path:
-   * there is still no spill buffer, a rejected batch is still never retried,
-   * and a redial that fails drops the batch exactly as a down connection
-   * always did.
+   * the store rather than racing the timer. A redial that fails HOLDS the
+   * batch for the relink instead of dropping it on the spot (holdWrite), and
+   * the hold's expiry or overflow drops it exactly as a down connection always
+   * did. A rejected batch is still never retried.
    */
   write(events: Event[]): Promise<StoreWriteAck> {
     LOGGER.logVerbose({ agent_repl_session_id: this.opts.sessionId, store_key: this.storeKey, event_count: events.length, event_kinds: events.map(envelopeKind) }, "queueing persistent event batch for store write");
@@ -974,11 +1048,24 @@ export class StoreClient {
    * thrown, so a caller always learns about its own batch.
    */
   private async issueBatch(pending: PendingWrite): Promise<void> {
+    // ORDER FIRST: a batch issued now would overtake everything already held,
+    // so the hold is transitive for as long as one exists.
+    if (this.heldWrites.length > 0) {
+      this.holdWrite(pending, "an earlier batch is still held for the store relink");
+      return;
+    }
     try {
       await this.ensureProducerConn();
     } catch (err) {
-      this.dropBatch(pending.events, `store connection is down (redial failed: ${errText(err)})`);
-      pending.reject(new Error("store-client: write on a down connection"));
+      const why = `store connection is down (redial failed: ${errText(err)})`;
+      // A deliberate teardown is not an outage to wait out: nothing will ever
+      // relink, so holding would only defer the same loss behind a timer.
+      if (this.closed) {
+        this.dropBatch(pending.events, why);
+        pending.reject(new Error("store-client: write on a down connection"));
+        return;
+      }
+      this.holdWrite(pending, why);
       return;
     }
     // A write that redialed successfully has restored HALF the link. Hand the
@@ -986,10 +1073,21 @@ export class StoreClient {
     // the standing subscription and reports the recovery, or re-arms if the
     // store is only partly back.
     if (this.linkDegraded || this.pendingLinkLossReason !== null) this.armRelink(0);
-    // Send BEFORE enqueueing: a send that throws never reached the wire, so no
-    // ack will ever match it, and an entry queued first would silently steal
-    // the NEXT batch's ack. Nothing can interleave, since an ack is only ever
-    // read on a later turn of the event loop.
+    this.sendBatch(pending);
+  }
+
+  /**
+   * Put one batch on the live producer connection and enqueue it for its ack.
+   *
+   * Send BEFORE enqueueing: a send that throws never reached the wire, so no
+   * ack will ever match it, and an entry queued first would silently steal the
+   * NEXT batch's ack. Nothing can interleave, since an ack is only ever read on
+   * a later turn of the event loop.
+   *
+   * Returns false when the batch failed to reach the wire — already dropped,
+   * degraded, and rejected by then, so the caller only has to stop.
+   */
+  private sendBatch(pending: PendingWrite): boolean {
     try {
       this.conn!.send(StoreWriteSchema, create(StoreWriteSchema, {
         producer: this.opts.producer,
@@ -999,10 +1097,120 @@ export class StoreClient {
       const why = err instanceof Error ? err.message : String(err);
       this.dropBatch(pending.events, `store write failed to send: ${why}`);
       pending.reject(new Error(`store-client: write failed to send: ${why}`));
-      return;
+      return false;
     }
     LOGGER.logVerbose({ agent_repl_session_id: this.opts.sessionId, store_key: this.storeKey, event_count: pending.events.length, pending_acks: this.pendingWrites.length + 1 }, "persistent event batch issued to store");
     this.pendingWrites.push(pending);
+    return true;
+  }
+
+  /**
+   * HOLD one durable batch for the duration of a producer-link outage.
+   *
+   * Bounded on both axes, and an overflow is failed rather than trimmed: a
+   * dropped-from-the-middle queue would file a conversation with a hole in it,
+   * which is exactly the silent evidence loss the fatal path exists to prevent.
+   * The budget is armed by the FIRST hold of an outage and covers the whole
+   * queue, so a burst cannot extend the wait one batch at a time.
+   */
+  private holdWrite(pending: PendingWrite, reason: string): void {
+    pending.bytes = batchBytes(pending.events);
+    this.heldWrites.push(pending);
+    this.heldBytes += pending.bytes;
+    LOGGER.log({
+      agent_repl_session_id: this.opts.sessionId,
+      store_key: this.storeKey,
+      reason,
+      held_batches: this.heldWrites.length,
+      held_bytes: this.heldBytes,
+      hold_budget_ms: this.writeHoldBudgetMs,
+    }, `persistent event batch HELD for the store relink; it fails exactly as a down-connection write always did if the link is not back within ${this.writeHoldBudgetMs}ms: ${reason}`);
+    if (this.heldWrites.length > this.writeHoldMaxBatches || this.heldBytes > this.writeHoldMaxBytes) {
+      this.failHeldWrites(`store write hold overflowed its bound (${this.heldWrites.length} batches / ${this.heldBytes} bytes held, max ${this.writeHoldMaxBatches} batches / ${this.writeHoldMaxBytes} bytes)`);
+      return;
+    }
+    // A relink already in flight will flush; otherwise the hold would sit
+    // there with nothing arranging for the connection to come back.
+    if (this.relinkTimer === null && !this.relinking) this.armRelink(this.relinkDelayMs);
+    if (this.holdBudgetTimer !== null) return;
+    this.holdBudgetTimer = setTimeout(() => {
+      this.holdBudgetTimer = null;
+      if (this.heldWrites.length === 0) return; // flushed inside the budget
+      this.failHeldWrites(`store link did not return within the ${this.writeHoldBudgetMs}ms write-hold budget`);
+    }, this.writeHoldBudgetMs);
+    this.holdBudgetTimer.unref?.();
+  }
+
+  /**
+   * Flush every held batch onto the restored producer connection, in the order
+   * the batches were written.
+   *
+   * Synchronous from end to end, so no later write can interleave into the
+   * middle of the flush: `sendBatch` never awaits, and the send chain cannot
+   * advance while this runs. A connection that dies mid-flush leaves the rest
+   * held for the next relink rather than dropping it.
+   */
+  private flushHeldWrites(): void {
+    if (this.heldWrites.length === 0) return;
+    const total = this.heldWrites.length;
+    LOGGER.log({
+      agent_repl_session_id: this.opts.sessionId,
+      store_key: this.storeKey,
+      held_batches: total,
+      held_bytes: this.heldBytes,
+    }, `store link back — flushing ${total} held persistent batch(es) in write order`);
+    while (this.heldWrites.length > 0) {
+      if (!this.connected || this.conn === null) {
+        LOGGER.log({
+          level: "error",
+          agent_repl_session_id: this.opts.sessionId,
+          store_key: this.storeKey,
+          held_batches: this.heldWrites.length,
+        }, `producer connection went down mid-flush; the remaining held batches stay held for the next relink`);
+        return;
+      }
+      const next = this.heldWrites.shift()!;
+      this.heldBytes -= next.bytes ?? 0;
+      if (!this.sendBatch(next)) return; // reported itself; order is already broken
+    }
+    this.heldBytes = 0;
+    this.clearHoldBudget();
+  }
+
+  /**
+   * Fail every held batch EXACTLY as an unheld down-connection write failed
+   * before the hold existed: one loud DROPPED-event line per event, a
+   * DegradedState carrying the real count, and the same rejection the session's
+   * fatal missing-receipt path already keys on.
+   */
+  private failHeldWrites(reason: string): void {
+    if (this.heldWrites.length === 0) return;
+    const failing = this.heldWrites.splice(0);
+    this.heldBytes = 0;
+    this.clearHoldBudget();
+    LOGGER.log({
+      level: "error",
+      agent_repl_session_id: this.opts.sessionId,
+      store_key: this.storeKey,
+      reason,
+      held_batches: failing.length,
+    }, `FAILING ${failing.length} held persistent batch(es): ${reason}`);
+    for (const pending of failing) {
+      this.dropBatch(pending.events, reason);
+      pending.reject(new Error("store-client: write on a down connection"));
+    }
+  }
+
+  /** Disarm the write-hold budget; nothing is waiting on it any more. */
+  private clearHoldBudget(): void {
+    if (this.holdBudgetTimer === null) return;
+    clearTimeout(this.holdBudgetTimer);
+    this.holdBudgetTimer = null;
+  }
+
+  /** How many durable batches are currently held for a relink. */
+  heldWriteCount(): number {
+    return this.heldWrites.length;
   }
 
   /**
@@ -1044,6 +1252,10 @@ export class StoreClient {
     this.clearLinkLossBudget();
     this.stopHeartbeat();
     this.connected = false;
+    // Teardown is final and nothing will relink, so a held batch will never
+    // reach the store. Fail it loudly here rather than letting its caller wait
+    // on a promise that can no longer settle.
+    this.failHeldWrites("store client closed with durable writes still held for a relink");
     this.dropStandingSubscription();
     if (this.conn) {
       this.conn.close();
@@ -1373,6 +1585,17 @@ export class StoreClient {
 /** Best-effort event-kind label for drop logs (the payload oneof case). */
 function envelopeKind(evt: Event): string {
   return evt.payload.case ?? "unknown";
+}
+
+/**
+ * The serialized size of one batch, which is what the write hold is bounded
+ * in. Measured on the encoded form rather than estimated, because the bound
+ * exists to cap real shim memory, and only ever on the outage path.
+ */
+function batchBytes(events: Event[]): number {
+  let total = 0;
+  for (const evt of events) total += toBinary(EventSchema, evt).length;
+  return total;
 }
 
 /** The message of a thrown value, whatever it was thrown as. */

@@ -513,12 +513,13 @@ describe("StoreClient producer redial", () => {
     await expect(ackP).resolves.toMatchObject({ accepted: 1n });
   });
 
-  it("drops the batch when the redial fails", async () => {
-    // Arrange: store gone for good — nothing is listening on the path.
+  it("drops the batch when the redial fails and the write-hold budget expires", async () => {
+    // Arrange: store gone for good — nothing is listening on the path — and a
+    // collapsed hold budget, so the wait for a relink ends immediately.
     const store = await fakeStore();
     stores.push(store);
     const degradations: DegradedState[] = [];
-    const client = await connectedClient(store, undefined, (d) => degradations.push(d));
+    const client = await connectedClient(store, undefined, (d) => degradations.push(d), 5);
     store.close();
     await until(() => !client.isConnected(), "producer conn observed down");
 
@@ -589,13 +590,14 @@ describe("StoreClient producer redial", () => {
     // wedge every write queued behind it.
     const store = await fakeStore();
     stores.push(store);
-    const client = await connectedClient(store);
+    const client = await connectedClient(store, undefined, undefined, 5);
     const socketPath = store.socketPath;
     store.close();
     await until(() => !client.isConnected(), "producer conn observed down");
 
-    // Act: the first write fails its redial (nothing listening), then the
-    // store comes back and a second write follows it.
+    // Act: the first write fails its redial (nothing listening) and outlives
+    // its collapsed write-hold budget, then the store comes back and a second
+    // write follows it.
     await expect(client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })])).rejects.toThrow();
     const restarted = await fakeStoreAt(socketPath);
     stores.push(restarted);
@@ -621,6 +623,159 @@ describe("StoreClient producer redial", () => {
     // Act / Assert: dropped without dialing, store untouched.
     await expect(client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })])).rejects.toThrow();
     expect(store.count()).toBe(before);
+  });
+});
+
+describe("StoreClient durable write hold across a store bounce", () => {
+  /**
+   * A client with an explicit write-hold configuration. The hold budget is
+   * generous by default so a test asserting the FLUSH cannot be decided by a
+   * timer, and collapsed only where the expiry itself is the subject.
+   */
+  async function holdingClient(
+    store: FakeStore,
+    hold: { writeHoldBudgetMs?: number; writeHoldMaxBatches?: number; writeHoldMaxBytes?: number },
+    degraded?: (d: DegradedState) => void,
+  ): Promise<StoreClient> {
+    const client = new StoreClient({
+      socketPath: store.socketPath,
+      sessionId: "sess-1",
+      producer: "claude-shim:sess-1",
+      heartbeatIntervalMs: 0,
+      ...hold,
+    });
+    clients.push(client);
+    if (degraded) client.onDegraded(degraded);
+    await client.connect();
+    await until(() => store.count() >= 1, "producer connection accepted");
+    return client;
+  }
+
+  it("flushes a write held through the outage once the store relinks", async () => {
+    // Arrange: a store bounce, the deploy's launchd kickstart, with a durable
+    // write landing while nothing is listening.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await holdingClient(store, { writeHoldBudgetMs: 60_000 });
+    const socketPath = store.socketPath;
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+
+    // Act: the write is HELD, not failed, and the replacement store gets it.
+    const ackP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 7n })]);
+    await until(() => client.heldWriteCount() === 1, "batch held for the relink");
+    const restarted = await fakeStoreAt(socketPath);
+    stores.push(restarted);
+    await until(() => restarted.count() >= 1, "relinked connection accepted");
+    const write = await restarted.peer().next(StoreWriteSchema, "flushed held batch");
+    restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 7n }));
+
+    // Assert: the event reached the store and its own receipt came back.
+    expect(write.batch!.events[0]!.seq).toBe(7n);
+    await expect(ackP).resolves.toMatchObject({ lastSeq: 7n });
+    expect(client.heldWriteCount()).toBe(0);
+  });
+
+  it("keeps held and post-relink writes in one write order", async () => {
+    // Arrange: two batches held during the outage, one issued as the store
+    // returns — a flush that raced the live path would reorder them.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await holdingClient(store, { writeHoldBudgetMs: 60_000 });
+    const socketPath = store.socketPath;
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+
+    // Act
+    const acks = [
+      client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]),
+      client.write([create(EventSchema, { sessionId: "sess-1", seq: 2n })]),
+    ];
+    await until(() => client.heldWriteCount() === 2, "both batches held");
+    const restarted = await fakeStoreAt(socketPath);
+    stores.push(restarted);
+    acks.push(client.write([create(EventSchema, { sessionId: "sess-1", seq: 3n })]));
+    await until(() => restarted.count() >= 1, "relinked connection accepted");
+    const seen: bigint[] = [];
+    for (let i = 0; i < 3; i++) {
+      const w = await restarted.peer().next(StoreWriteSchema, `batch ${i + 1}`);
+      seen.push(w.batch!.events[0]!.seq);
+      restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { lastSeq: w.batch!.events[0]!.seq }));
+    }
+
+    // Assert: call order on the wire, and each caller got ITS batch's receipt.
+    expect(seen).toEqual([1n, 2n, 3n]);
+    expect((await Promise.all(acks)).map((a) => a.lastSeq)).toEqual([1n, 2n, 3n]);
+  });
+
+  it("fails the held write when the hold budget expires with the store still gone", async () => {
+    // Arrange: nothing ever comes back on the path.
+    const store = await fakeStore();
+    stores.push(store);
+    const degradations: DegradedState[] = [];
+    const client = await holdingClient(store, { writeHoldBudgetMs: 10 }, (d) => degradations.push(d));
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+
+    // Act / Assert: exactly the pre-hold failure — reject, drop, degrade.
+    const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await expect(writeP).rejects.toThrow(/write on a down connection/);
+    expect(degradations.some((d) => d.droppedCount === 1n && d.recovered === false)).toBe(true);
+    expect(client.heldWriteCount()).toBe(0);
+  });
+
+  it("fails every held write when the hold overflows its batch bound", async () => {
+    // Arrange: room for one batch, a budget that will never expire first.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await holdingClient(store, { writeHoldBudgetMs: 60_000, writeHoldMaxBatches: 1 });
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+
+    // Act: the second hold is one past the bound.
+    const first = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await until(() => client.heldWriteCount() === 1, "first batch held");
+    const second = client.write([create(EventSchema, { sessionId: "sess-1", seq: 2n })]);
+
+    // Assert: the whole queue fails, so nothing is filed with a hole in it.
+    await expect(first).rejects.toThrow(/write on a down connection/);
+    await expect(second).rejects.toThrow(/write on a down connection/);
+    expect(client.heldWriteCount()).toBe(0);
+  });
+
+  it("fails the held write when the hold overflows its byte bound", async () => {
+    // Arrange: a byte bound one batch cannot fit under.
+    const store = await fakeStore();
+    stores.push(store);
+    const degradations: DegradedState[] = [];
+    const client = await holdingClient(
+      store,
+      { writeHoldBudgetMs: 60_000, writeHoldMaxBytes: 1 },
+      (d) => degradations.push(d),
+    );
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+
+    // Act / Assert
+    await expect(
+      client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]),
+    ).rejects.toThrow(/write on a down connection/);
+    expect(degradations.some((d) => d.droppedCount === 1n && d.recovered === false)).toBe(true);
+  });
+
+  it("fails a held write on a deliberate close rather than leaving it unsettled", async () => {
+    // Arrange: teardown is final, so a held batch will never reach the store.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await holdingClient(store, { writeHoldBudgetMs: 60_000 });
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+    const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await until(() => client.heldWriteCount() === 1, "batch held for the relink");
+
+    // Act / Assert
+    client.close();
+    await expect(writeP).rejects.toThrow(/write on a down connection/);
   });
 });
 
