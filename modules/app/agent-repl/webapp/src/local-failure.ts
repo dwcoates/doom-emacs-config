@@ -250,6 +250,33 @@ export function commandUnsentFailure(command: string): FailureCardItem {
 }
 
 /**
+ * Classify one HELD prompt that never made it onto the wire.
+ *
+ * Distinct from `commandUnsentFailure` in exactly one way that matters: the
+ * card is keyed on the held entry, not on the command name. N prompts held
+ * across a bounce that never ended are N lost prompts, and collapsing them onto
+ * the single `local:commandUnsent:submitPrompt` card would leave the user
+ * looking at one alarm for however many sentences they typed — which is the
+ * silent-drop this queue exists to prevent, one indirection later.
+ *
+ * REASON is carried verbatim as the evidence: it is either the bound this end
+ * enforced or the daemon's own words for its refusal, and neither is this
+ * card's to reword.
+ */
+export function heldPromptUnsentFailure(queueId: string, reason: string): FailureCardItem {
+  const kind = create(FailureKindSchema, {
+    kind: { case: "commandUnsent", value: { command: "submitPrompt" } },
+  });
+  return clientCard(
+    kind,
+    "a prompt held across the backend restart was never sent",
+    reason,
+    { case: "terminal" },
+    clientFailureUuid("commandUnsent", `held:${queueId}`),
+  );
+}
+
+/**
  * Classify a refusal the daemon declined to name.
  *
  * Legitimately classified here — the daemon decided the refusal but carried no
