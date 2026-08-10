@@ -214,6 +214,55 @@ type fakeClient struct {
 	// itself. One-shot rather than sticky so a test can fail one submit and
 	// still observe what the failure released reaching the shim afterwards.
 	submitErrOnce error
+	// setModels records every deliberate model request the daemon made, which
+	// is how a test tells a `/model <name>` that was PERFORMED from one that
+	// was forwarded to the CLI as prompt text.
+	setModels []string
+	// setModelSelected, when non-empty, is the model the fake shim reports as
+	// selected regardless of what was requested — the real shim's answer is
+	// its own post-operation state, never an echo, and a test needs the two to
+	// differ to prove the daemon commits the CONFIRMED value.
+	setModelSelected string
+	// setModelErr, when non-nil, fails every SetModel. Paired with
+	// setModelSelected it is the shim's REJECTION, which carries the live
+	// selection alongside the refusal.
+	setModelErr error
+	// modelQueries counts the live-model read-backs the daemon asked for, so a
+	// test can prove the bare `/model` is resolved AT ITS OWN TURN BOUNDARY
+	// rather than on the schedule of the user's next prompt.
+	modelQueries int
+	// queriedModel is the live selection the fake shim reports back. Empty
+	// means the fake answers with the same default a real shim would have
+	// observed.
+	queriedModel string
+	// queryModelErr, when non-nil, is a shim that CANNOT answer the read. It
+	// must surface as a failure rather than leaving the record holding a model
+	// nobody verified.
+	queryModelErr error
+}
+
+// QuerySelectedModel answers which model the fake session is running, and
+// records that it was asked.
+func (c *fakeClient) QuerySelectedModel(_ context.Context) (string, error) {
+	c.mu.Lock()
+	c.modelQueries++
+	selected, err := c.queriedModel, c.queryModelErr
+	c.mu.Unlock()
+	notifyTestActivity()
+	if err != nil {
+		return "", err
+	}
+	if selected == "" {
+		selected = "claude-sonnet-5"
+	}
+	return selected, nil
+}
+
+// modelQueryCount is how many live-model read-backs the daemon asked for.
+func (c *fakeClient) modelQueryCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.modelQueries
 }
 
 type fakeFileDiagnosticPersister struct{}
@@ -325,7 +374,35 @@ func (c *fakeClient) Interrupt(_ context.Context, originRequestID string) (corev
 	}
 	return outcome, nil
 }
-func (c *fakeClient) SetModel(_ context.Context, model string) (string, error) { return model, nil }
+
+// SetModel records the deliberate model requests the daemon made and answers
+// with the model the fake shim "selected".
+//
+// Recording is what lets a test prove the `/model <name>` slash form reaches
+// the SAME shim operation the topbar picker reaches, rather than being
+// forwarded to the CLI as prompt text.
+func (c *fakeClient) SetModel(_ context.Context, model string) (string, error) {
+	c.mu.Lock()
+	c.setModels = append(c.setModels, model)
+	selected, err := c.setModelSelected, c.setModelErr
+	c.mu.Unlock()
+	notifyTestActivity()
+	if err != nil {
+		return selected, err
+	}
+	if selected != "" {
+		return selected, nil
+	}
+	return model, nil
+}
+
+// setModelRequests returns the models the daemon asked the shim to select, in
+// request order.
+func (c *fakeClient) setModelRequests() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.setModels...)
+}
 
 func TestManagerSetModelRejectsSyntheticBeforeSessionLookup(t *testing.T) {
 	// A zero Manager has no locator or shim; reaching either would panic. The

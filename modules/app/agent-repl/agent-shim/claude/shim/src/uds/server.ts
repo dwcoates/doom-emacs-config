@@ -74,6 +74,8 @@ import {
   SubmitPrompt,
   SubmitPromptSchema,
   SetModel,
+  QuerySelectedModel,
+  QuerySelectedModelSchema,
   SetModelSchema,
 } from "./proto.js";
 import type { QueryRuntimeIdentity } from "./proto.js";
@@ -90,6 +92,13 @@ export interface SessionServerHandlers {
   onInterrupt(msg: Interrupt): Receipt;
   /** Set the live SDK model and return a receipt after the SDK settles. */
   onSetModel(msg: SetModel): AsyncReceipt;
+  /**
+   * Answer which model this session is currently running.
+   *
+   * SYNCHRONOUS, unlike onSetModel: it changes nothing and the answer is
+   * already held, so there is no SDK round-trip to await.
+   */
+  onQuerySelectedModel(msg: QuerySelectedModel): Ack | Nack;
   /** Deliver a permission decision to the blocked canUseTool round-trip. */
   onPermissionResponse(msg: PermissionResponse): void;
   /**
@@ -553,6 +562,11 @@ export class SessionServer {
     const setModel = unpackAs(msg, SetModelSchema);
     if (setModel) {
       this.sendAsyncReceipt(this.handlers.onSetModel(setModel));
+      return;
+    }
+    const querySelectedModel = unpackAs(msg, QuerySelectedModelSchema);
+    if (querySelectedModel) {
+      this.sendReceipt(this.handlers.onQuerySelectedModel(querySelectedModel));
       return;
     }
     const perm = unpackAs(msg, PermissionResponseSchema);

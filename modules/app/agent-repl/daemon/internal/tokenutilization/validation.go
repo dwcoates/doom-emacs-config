@@ -9,12 +9,19 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"google.golang.org/protobuf/proto"
+
+	"claude-repld/internal/protocmd"
 )
 
 // SyntheticModelIdentity is the explicit model identity synthetic
 // token-utilization producers must stamp. Vendor-derived records must preserve
 // the vendor-provided model and are rejected when that value is blank.
-const SyntheticModelIdentity = "<synthetic>"
+//
+// READ OFF THE SCHEMA rather than spelled here. This was one of six
+// independent declarations of the same literal, kept aligned only by review;
+// the MODEL_MARKER_SYNTHETIC enum value's option is now the one definition and
+// protocmd reads it back at package init.
+var SyntheticModelIdentity = protocmd.SyntheticModelLiteral()
 
 // ValidationError identifies the invalid wire field while retaining the
 // evidence needed by the ingress owner to log the rejected observation.
