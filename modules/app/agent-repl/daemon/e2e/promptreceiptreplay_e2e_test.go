@@ -348,8 +348,7 @@ func awaitOperational(t *testing.T, states <-chan *frontendv1.WorkspaceState, wo
 			if !ok {
 				t.Fatal("the state log closed before the session became operational")
 			}
-			if st.GetWorkspace() == workspace &&
-				st.GetConnectivity() == frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_OPERATIONAL {
+			if isOperationalState(st, workspace) {
 				return
 			}
 		case <-deadline:

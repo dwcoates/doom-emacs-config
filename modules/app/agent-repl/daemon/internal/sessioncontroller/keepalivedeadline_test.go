@@ -167,3 +167,100 @@ func TestSweepOverdueKeepAlivePingsReleasesTheClaimWhenTheLedgerRefuses(t *testi
 
 // errOriginCloseRefused stands for an unwritable ledger.
 var errOriginCloseRefused = errors.New("state log refused the origin turn close")
+
+// ---------------------------------------------------------------------------
+// A PLANNED BOUNCE IS NOT A LOST TURN BOUNDARY (restartepoch.go).
+//
+// The deadline is a wall-clock comparison, and a wall clock does not know a
+// daemon was replaced. A ping in flight across a bounce accrued the whole
+// window and was then declared OVERDUE — retiring its claim, closing a durable
+// turn that was never lost, and logging the anomaly as a defect below this code.
+// ---------------------------------------------------------------------------
+
+// THE GAP IS GRANTED, NOT CHARGED. The ping is overdue on the raw clock and is
+// left alone, because every millisecond of its lateness is the bounce's.
+func TestSweepOverdueKeepAlivePingsGrantsThePlannedBounceWindow(t *testing.T) {
+	// Arrange — a ping submitted before a bounce that spanned its whole deadline.
+	m, _, _ := keepAliveRig(t)
+	lease := &fakeLease{}
+	if err := m.BindShutdownLease(lease); err != nil {
+		t.Fatalf("BindShutdownLease: %v", err)
+	}
+	turnID, err := m.SubmitKeepAlivePing(context.Background(), "ws")
+	if err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+	base := m.now()
+	gap := overdueByMs(m)
+	lease.hold("sched-1")
+	m.restartEpochNow()
+	m.now = func() int64 { return base + gap }
+	lease.hold("")
+
+	// Act.
+	closed := m.SweepOverdueKeepAlivePings()
+
+	// Assert.
+	if closed != 0 {
+		t.Fatalf("SweepOverdueKeepAlivePings closed %d pings across a planned bounce, want none", closed)
+	}
+	if held := keepAlivePingClaim(t, m, "ws"); held != turnID {
+		t.Fatalf("ping claim = %q after a bounce spanned the deadline, want %q still standing", held, turnID)
+	}
+}
+
+// AND IT IS STILL A FAILURE BOUND. A ping that is genuinely wedged trips it one
+// full deadline past the window, rather than never.
+func TestSweepOverdueKeepAlivePingsStillRetiresAWedgedPingAfterTheWindow(t *testing.T) {
+	// Arrange.
+	m, _, _ := keepAliveRig(t)
+	lease := &fakeLease{}
+	if err := m.BindShutdownLease(lease); err != nil {
+		t.Fatalf("BindShutdownLease: %v", err)
+	}
+	if _, err := m.SubmitKeepAlivePing(context.Background(), "ws"); err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+	base := m.now()
+	gap := overdueByMs(m)
+	lease.hold("sched-1")
+	m.restartEpochNow()
+	m.now = func() int64 { return base + gap }
+	lease.hold("")
+	m.restartEpochNow()
+
+	// Act — a further full deadline elapses with the bounce long over.
+	m.now = func() int64 { return base + gap + overdueByMs(m) }
+	closed := m.SweepOverdueKeepAlivePings()
+
+	// Assert.
+	if closed != 1 {
+		t.Fatalf("SweepOverdueKeepAlivePings closed %d pings a full deadline past the window, want 1", closed)
+	}
+}
+
+// A PING SUBMITTED AFTER THE WINDOW IS OWED NOTHING. The grace is measured from
+// the ping's own start, so an earlier bounce cannot loosen a later ping's bound.
+func TestSweepOverdueKeepAlivePingsOwesNothingToAPingSubmittedAfterTheBounce(t *testing.T) {
+	// Arrange — a bounce that ends BEFORE the ping is submitted.
+	m, _, _ := keepAliveRig(t)
+	lease := &fakeLease{}
+	if err := m.BindShutdownLease(lease); err != nil {
+		t.Fatalf("BindShutdownLease: %v", err)
+	}
+	base := m.now()
+	lease.hold("sched-1")
+	m.restartEpochNow()
+	m.now = func() int64 { return base + 60_000 }
+	lease.hold("")
+	m.restartEpochNow()
+
+	// Act.
+	submitPingThenAdvance(t, m, overdueByMs(m))
+	closed := m.SweepOverdueKeepAlivePings()
+
+	// Assert.
+	if closed != 1 {
+		t.Fatalf("SweepOverdueKeepAlivePings closed %d pings submitted after the bounce, want 1", closed)
+	}
+}

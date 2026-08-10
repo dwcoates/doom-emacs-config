@@ -1223,14 +1223,22 @@ func main() {
 		Ctx:   workspaceCreateCtx,
 		Logf:  legacyLog,
 	}
-	go (&server.BootSweeper{
-		Reg:       sessionRegistry,
-		Connected: shimListener.Connected,
-		Held:      sessionlock.Held,
-		Ensurer:   controller,
-		Logf:      legacyLog,
-		Unwired:   bootSweepVerdicts.Route,
-	}).Run(sweepCtx)
+	// UNDER THE RESTART EPOCH'S BOOT WINDOW (sessioncontroller/restartepoch.go).
+	// Until the sweep returns, every surviving shim is either unclaimed or
+	// mid-redial, and a failure bound firing against that window would charge a
+	// fleet still being established for a gap the bounce caused. The window is
+	// a SCOPE rather than a pair of calls, so it cannot be left open by a sweep
+	// that exits early on the shutdown context.
+	go controller.DuringBootWindow(func() {
+		(&server.BootSweeper{
+			Reg:       sessionRegistry,
+			Connected: shimListener.Connected,
+			Held:      sessionlock.Held,
+			Ensurer:   controller,
+			Logf:      legacyLog,
+			Unwired:   bootSweepVerdicts.Route,
+		}).Run(sweepCtx)
+	})
 	daemonLog.With("operation", "serve-http", "version", daemonVersion, "address", *addr,
 		"shim", *shimScript, "workspace_create_inbox", workspaceAssembly.Inbox.Dir).
 		Log("claude-repld listening with healthz ready")

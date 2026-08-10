@@ -2573,23 +2573,45 @@ func (s *Server) hibernateAllForShutdown(cause sessioncontroller.StopCause) erro
 // identities, so parallelizing the drain changed what runs concurrently and
 // nothing about what each session's teardown reports.
 func (s *Server) hibernateOneForShutdown(rec registry.Record, cause sessioncontroller.StopCause) error {
-	s.logf("server: SHIM STOP ISSUED initiator=%s session=%s ws=%q reason=stop_shims_true", cause, rec.SessionID, rec.CWD)
+	// A SURVIVING SHIM IS ONLY STOPPED FOR A BUNDLE IT CAN NO LONGER FIX BY
+	// SURVIVING, and that is the whole test.
+	//
+	// A shim is daemon-independent by design: it outlives the daemon, redials
+	// the socket, and the next daemon reattaches to it with the turn it was
+	// running still running. Stopping one on the way out therefore converts a
+	// free reattach into an interrupted turn the replacement has to re-drive —
+	// which the user sees as a bounce that cost them their work. The one thing
+	// a stop CAN fix and a reattach cannot is a shim executing code the deploy
+	// replaced, so a bundle this shim already runs is the only reason to leave
+	// it alone, and the identities the verdict came from are named in the line
+	// (sessioncontroller.ShimStopWouldFixTheBundle).
+	worthStopping, reported, want := s.controller.ShimStopWouldFixTheBundle(rec.SessionID)
+	if !worthStopping {
+		s.logf("server: SHIM STOP DECLINED initiator=%s session=%s ws=%q reported_build=%q current_build=%q reason=bundle_not_superseded — the shim is PRESERVED: it is daemon-independent, so the next daemon reattaches to it with whatever turn it is running still running, and stopping it would buy nothing but an interrupted turn",
+			cause, rec.SessionID, rec.CWD, reported, want)
+		return nil
+	}
+	s.logf("server: SHIM STOP ISSUED initiator=%s session=%s ws=%q reported_build=%q current_build=%q reason=bundle_superseded", cause, rec.SessionID, rec.CWD, reported, want)
 	err := s.controller.Hibernate(rec.CWD, cause)
 	if err == nil {
 		return nil
 	}
-	// A MID-TURN WORKSPACE IS NOW REFUSED here too, because the settled
-	// check lives inside the shared teardown rather than in each caller.
-	// That is the right trade for this caller as well: a shim left running
-	// on the previous bundle is a stale binary, while a shim SIGTERMed
-	// mid-turn is lost work, and the version-driven stale-shim refresh
-	// already bounces the survivor the moment it reconnects.
+	// A MID-TURN WORKSPACE IS REFUSED here, because the settled check lives
+	// inside the shared teardown rather than in each caller. That is the right
+	// trade for this caller too: a shim left running on the previous bundle is
+	// a stale binary, while a shim SIGTERMed mid-turn is lost work, and the
+	// version-driven stale-shim refresh already bounces the survivor the moment
+	// it reconnects.
+	//
+	// AND IT IS NOT A DRAIN FAILURE. A deliberate preservation reported as one
+	// makes a drain that did exactly the right thing indistinguishable from one
+	// that lost sessions, which is the reading the joined error exists to give.
 	if errors.Is(err, sessioncontroller.ErrNotSettled) {
 		s.logf("server: shutdown stop-shims mode PRESERVING the shim for session %s (ws %s): it has not settled, and the stale-shim refresh will bounce it after the turn: %v",
 			rec.SessionID, rec.CWD, err)
-	} else {
-		s.logf("server: shutdown stop shim (ws %s): %v", rec.CWD, err)
+		return nil
 	}
+	s.logf("server: shutdown stop shim (ws %s): %v", rec.CWD, err)
 	return fmt.Errorf("server: shutdown stop shim for session %s (ws %q): %w", rec.SessionID, rec.CWD, err)
 }
 
