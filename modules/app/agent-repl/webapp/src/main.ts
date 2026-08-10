@@ -115,6 +115,7 @@ import { StateAdapter, userTurnReceipt } from "./state-adapter.js";
 import { CommandDispatcher, ModelSelectionRejectedError, surfaceRefusal } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
 import { BackgroundRecovery, windowRecoveryTimerHost } from "./background-recovery.js";
+import { RestartWindow, RESTARTING_INDICATOR } from "./restart-window.js";
 import { captureResyncSnapshot } from "./resync-snapshot.js";
 import type { CommandStruct, ReviveDecision } from "./frontend-command.js";
 import { PendingPermissionMode } from "./pending-mode.js";
@@ -1245,6 +1246,18 @@ async function boot(): Promise<void> {
    * "reconnecting" banner until someone looked at it, because every trigger
    * was a look. See background-recovery.ts.
    */
+  /**
+   * The bounded quiet window a daemon-announced bounce opens. Nothing opens it
+   * yet — the frontend proto arm that carries the announcement is gated — so
+   * it reports "not restarting" and every alarm below behaves exactly as it
+   * did. `restartWindow.announce(...)` is the single entry point the frame
+   * handler will call once that arm lands.
+   */
+  const restartWindow = new RestartWindow({
+    now: () => Date.now(),
+    log: (level, message) => clog(level, message),
+  });
+
   const recovery = new BackgroundRecovery(
     {
       ensureConnected: () => {
@@ -1576,7 +1589,11 @@ async function boot(): Promise<void> {
           disconnected: "disconnected",
           expired: "state stale",
         };
-        statusEl.textContent = label[freshness];
+        // The quiet indicator REPLACES the honest label only while the
+        // announced window is open; the moment it expires the ordinary
+        // "disconnected"/"state stale" wording is back.
+        const quiet = current ? null : restartWindow.indicator();
+        statusEl.textContent = quiet ?? label[freshness];
         statusEl.classList.toggle("ok", current);
       },
       // The daemon-unreachable window (F4). It is the ONE fact the daemon
@@ -1585,6 +1602,17 @@ async function boot(): Promise<void> {
       // fault it was, from the close code, instead of "reconnecting…" for
       // every transport failure alike.
       onUnreachable: (code, reason) => {
+        // AN ANNOUNCED BOUNCE IS NOT AN UNREACHABLE DAEMON. Inside the quiet
+        // window the disconnect is the expected phase of a restart the daemon
+        // told us about, so the blue card is withheld and the status line says
+        // so quietly instead. The window is bounded: once it expires this same
+        // socket loss raises the same card it always did.
+        if (restartWindow.suppressesDisconnectAlarm()) {
+          clog("info", `daemon unreachable close=${code} ${reason} during an announced restart; card withheld`);
+          statusEl.textContent = RESTARTING_INDICATOR;
+          statusEl.classList.remove("ok");
+          return;
+        }
         if (store.addFailure(daemonUnreachableFailure(code, reason))) frames.schedule();
       },
       // SOCKET RESTORE IS AN EVENT, NOT A PAINT, so the repair it triggers
@@ -1592,6 +1620,9 @@ async function boot(): Promise<void> {
       // is retracted and the history delta is asked for the moment the daemon
       // is back, rather than when someone next looks.
       onReachable: () => {
+        // The bounce is over ahead of its predicted end, so the quiet window
+        // closes now rather than riding out the rest of the hint.
+        restartWindow.onResynced();
         recovery.recover("socket_restored");
       },
       // The session-existence probe and the terminal verdict it feeds belong to
