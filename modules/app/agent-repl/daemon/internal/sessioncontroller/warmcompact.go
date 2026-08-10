@@ -131,7 +131,10 @@ func (m *Manager) warmCompactEligibleLocked(d *sessionController, anchorTurnEndM
 		return false, "compaction_gate_unreadable", err
 	}
 	if redundant {
-		return false, "already_compacted:" + compactionRedundantDetail(gate), nil
+		// The reason names WHICH cut made this pointless. A cleared conversation
+		// reported as "already compacted" would send anyone reading the log
+		// looking for a compaction that never happened.
+		return false, "already_" + cutKind(gate) + ":" + compactionRedundantDetail(gate), nil
 	}
 	if d.lastContextInputTokens <= 0 {
 		return false, "context_size_unknown", nil

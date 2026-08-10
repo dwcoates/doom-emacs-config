@@ -149,6 +149,13 @@ type StateApplier interface {
 	// closing edges also fire for a compaction that died. See
 	// ssm/compactiongate.go.
 	NoteCompactionCompleted(workspace string) error
+	// NoteConversationCleared records that the workspace's conversation was
+	// DISCARDED, which closes the same gate for the same reason: there is
+	// nothing left to compact and nothing added since. It is fed from the
+	// first-class ContextCleared alone — the clearing axis's other closing
+	// edges (the session rotation, the watchdog) also fire for a `/clear` that
+	// never took effect. See ssm/compactiongate.go.
+	NoteConversationCleared(workspace string) error
 	// CompactionGateOf reads what the log knows about the workspace's
 	// compaction history: when a compaction last completed, and when the
 	// conversation last received material a compaction would summarize. Its
@@ -2082,6 +2089,21 @@ func (c *consumer) noteCutCompleted(ev *corev1.Event) {
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_ContextCleared:
 		err = c.ssm.ApplyClearing(c.workspace, false, "context_cleared")
+		// THE GATE CLOSES HERE TOO, on the compaction's exact terms: this is the
+		// only first-class report that the conversation was actually discarded,
+		// and the axis's other closing edges also fire for a `/clear` that never
+		// took effect. A cleared conversation has nothing for a daemon-initiated
+		// compaction to summarize, and nothing an automatic hibernation should
+		// be taken over, until something is said to it (ssm/compactiongate.go).
+		//
+		// It is a SEPARATE failure from the axis close, and reported separately
+		// for the compaction's reason: a gate that failed to close permits a
+		// pointless compaction and a pointless sleep, where an axis that failed
+		// to close holds a phase word.
+		if gateErr := c.ssm.NoteConversationCleared(c.workspace); gateErr != nil {
+			c.logf("session-controller: closing the compaction gate on a clear FAILED session=%s ws=%s seq=%d: %v (a daemon-initiated compaction may run against this discarded conversation, and an automatic hibernation may be taken over it)",
+				c.sessionID, c.workspace, ev.GetSeq(), gateErr)
+		}
 		// A CLEAR revival is waiting on exactly this event, on the compaction's
 		// terms below: the clearing axis closing is the only first-class report
 		// that the conversation was actually discarded, so the gate is released
