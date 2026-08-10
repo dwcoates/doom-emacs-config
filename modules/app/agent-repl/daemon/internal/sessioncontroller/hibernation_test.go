@@ -732,3 +732,76 @@ func TestWiringSurfacesAFailedGateRetirement(t *testing.T) {
 		t.Fatalf("hibernation detail = %+v after a failed retirement, want the sleep still recorded", detail)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TONIGHT'S INCIDENT, at the command level the user drove it from.
+//
+// A session slept for `cache_expired`. `restartSession` stopped its shim and
+// brought the same conversation back to READY — and every prompt typed into
+// that live session was still nacked with the cause of a sleep that was over,
+// until an explicit `reviveSession` was sent for a session that was already
+// driveable. These pin the whole path rather than the wire edge that fixes it,
+// so a later refactor that moves the closing edge somewhere else still has to
+// keep the user-visible promise.
+// ---------------------------------------------------------------------------
+
+// THE PROMPT GOES THROUGH after a hard restart. This is the exact refusal
+// observed: cause=cache_expired, on a session the restart had just made ready.
+func TestRestartSessionDischargesTheRevivalGate(t *testing.T) {
+	// Arrange.
+	m, _, hib := newHibernationRig(t)
+	hib.setAsleep("s1", registry.HibernationDetail{Cause: registry.HibernationCauseCacheExpired, SinceMs: 11})
+
+	// Act.
+	if err := m.RestartSession(context.Background(), "ws"); err != nil {
+		t.Fatalf("RestartSession: %v", err)
+	}
+	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+
+	// Assert.
+	if errors.Is(err, ErrHibernated) {
+		t.Fatalf("SubmitPrompt after restartSession = %v, want the gate discharged by the restart that made the session driveable", err)
+	}
+}
+
+// AND THE DURABLE RECORD AGREES. The webapp renders its gate from the pushed
+// SessionView, so a record still claiming a sleep leaves the revival buttons up
+// over a session that is running.
+func TestRestartSessionRetiresTheDurableSleep(t *testing.T) {
+	// Arrange.
+	m, _, hib := newHibernationRig(t)
+	hib.setAsleep("s1", registry.HibernationDetail{Cause: registry.HibernationCauseCacheExpired, SinceMs: 11})
+
+	// Act.
+	if err := m.RestartSession(context.Background(), "ws"); err != nil {
+		t.Fatalf("RestartSession: %v", err)
+	}
+
+	// Assert.
+	if detail, asleep := hib.HibernationOf("s1"); asleep && detail.Cause != "" {
+		t.Fatalf("hibernation detail = %+v after restartSession, want the sleep retired", detail)
+	}
+}
+
+// AN ORDINARY BRING-UP DISCHARGES IT TOO, not only the hard restart. The
+// promise the user is owed is "this session is driveable", and every route to
+// driveable has to keep it — otherwise the next route added rediscovers the
+// same refusal.
+func TestEnsureDischargesTheRevivalGate(t *testing.T) {
+	// Arrange — a hibernated record over a workspace with no live controller.
+	m, _, hib := newHibernationRig(t)
+	if err := m.HibernateWorkspace("ws"); err != nil {
+		t.Fatalf("HibernateWorkspace: %v", err)
+	}
+	hib.setAsleep("s1", registry.HibernationDetail{Cause: registry.HibernationCauseCacheExpired, SinceMs: 11})
+
+	// Act.
+	if _, err := m.ensure(context.Background(), "ws"); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+
+	// Assert.
+	if detail, asleep := hib.HibernationOf("s1"); asleep && detail.Cause != "" {
+		t.Fatalf("hibernation detail = %+v after a bring-up reached driveable, want the sleep retired", detail)
+	}
+}
