@@ -20,16 +20,48 @@
 
 ;;;; ---- Helpers -----------------------------------------------------------
 
+(defconst agent-repl-test--recovery-build "bid-deployed"
+  "The deployed webapp build identity every sweep test compares against.")
+
+(defvar agent-repl-test--recovery-uris nil
+  "Alist of (BUFFER . URI) the mocked webview URI probe answers from.
+A buffer with no entry is addressed at the deployed build, which is the
+uninteresting case every test that is not about staleness wants.")
+
+(defvar agent-repl-test--recovery-navigated nil
+  "List of (BUFFER . URI) the mocked navigation recorded, in call order.")
+
+(defun agent-repl-test--recovery-uri (buf)
+  "Return the URI mocked for BUF, defaulting to the deployed build's address."
+  (or (cdr (assq buf agent-repl-test--recovery-uris))
+      (format "http://x/?workspace=%%2Fw&build=%s" agent-repl-test--recovery-build)))
+
 (defmacro agent-repl-test--with-recovery-sweep (calls &rest body)
   "Run BODY with a fresh debounce state, recording script calls in CALLS.
 CALLS is bound to a variable holding a list of (BUFFER . SCRIPT) in call
 order.  The debounce stamp is reset so a test never inherits another
-test's sweep time."
+test's sweep time.  Every webview boundary is mocked: batch Emacs has no
+xwidgets, so the widget a sweep acts on is the buffer itself, its URI
+comes from `agent-repl-test--recovery-uris', and a re-navigation lands in
+`agent-repl-test--recovery-navigated' instead of a WKWebView."
   (declare (indent 1))
   `(let ((,calls nil)
-         (agent-repl--webview-recovery-last-sweep nil))
+         (agent-repl--webview-recovery-last-sweep nil)
+         (agent-repl-test--recovery-uris nil)
+         (agent-repl-test--recovery-navigated nil))
      (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-                (lambda (buf script) (setq ,calls (append ,calls (list (cons buf script)))))))
+                (lambda (buf script) (setq ,calls (append ,calls (list (cons buf script))))))
+               ((symbol-function 'agent-repl--frontend-build-id)
+                (lambda () agent-repl-test--recovery-build))
+               ((symbol-function 'agent-repl--frontend-webview-live-widget)
+                (lambda (buf) buf))
+               ((symbol-function 'agent-repl--frontend-webview-uri)
+                #'agent-repl-test--recovery-uri)
+               ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                (lambda (xw uri)
+                  (setq agent-repl-test--recovery-navigated
+                        (append agent-repl-test--recovery-navigated (list (cons xw uri))))
+                  uri)))
        ,@body)))
 
 (defmacro agent-repl-test--with-recovery-ws (bindings &rest body)
@@ -156,19 +188,159 @@ silently turns the host-driven reattach into a no-op."
 (ert-deftest agent-repl-test-webview-recovery-sweep-continues-past-a-failed-webview ()
   "One webview whose script fails does not strand the others."
   ;; Arrange
-  (let ((agent-repl--webview-recovery-last-sweep nil)
-        (driven nil))
-    (agent-repl-test--with-recovery-ws ((b1 "wsr-bad") (b2 "wsr-ok"))
-      (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-                 (lambda (buf _script)
-                   (if (eq buf b1)
-                       (error "xwidget is gone")
-                     (push buf driven)))))
+  (agent-repl-test--with-recovery-sweep _calls
+    (let ((driven nil))
+      (agent-repl-test--with-recovery-ws ((b1 "wsr-bad") (b2 "wsr-ok"))
+        (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+                   (lambda (buf _script)
+                     (if (eq buf b1)
+                         (error "xwidget is gone")
+                       (push buf driven)))))
+          ;; Act
+          (let ((count (agent-repl--webview-recovery-sweep "host_link_up")))
+            ;; Assert
+            (should (equal 1 count))
+            (should (equal driven (list b2)))))))))
+
+;;;; ---- Bundle staleness ---------------------------------------------------
+
+(ert-deftest agent-repl-test-webview-recovery-reloads-a-stale-bundle ()
+  "A page addressed at a superseded build is re-navigated, not driven."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep calls
+    (agent-repl-test--with-recovery-ws ((b1 "wsr-stale"))
+      (setq agent-repl-test--recovery-uris
+            (list (cons b1 "http://x/?workspace=%2Fw&build=bid-old")))
+      ;; Act
+      (agent-repl--webview-recovery-sweep "deploy_refresh")
+      ;; Assert
+      (should (null calls))
+      (should (equal (mapcar #'car agent-repl-test--recovery-navigated) (list b1))))))
+
+(ert-deftest agent-repl-test-webview-recovery-reload-addresses-the-deployed-build ()
+  "The reload goes to the DEPLOYED build's address, not the page's own."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep _calls
+    (agent-repl-test--with-recovery-ws ((b1 "wsr-stale"))
+      (setq agent-repl-test--recovery-uris
+            (list (cons b1 "http://x/?workspace=%2Fw&build=bid-old")))
+      ;; Act
+      (agent-repl--webview-recovery-sweep "deploy_refresh")
+      ;; Assert
+      (should (equal (cdr (car agent-repl-test--recovery-navigated))
+                     (format "http://x/?workspace=%%2Fw&build=%s"
+                             agent-repl-test--recovery-build))))))
+
+(ert-deftest agent-repl-test-webview-recovery-drives-a-matching-bundle ()
+  "A page already on the deployed build is driven through the hook, not reloaded."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep calls
+    (agent-repl-test--with-recovery-ws ((b1 "wsr-fresh"))
+      ;; Act
+      (agent-repl--webview-recovery-sweep "deploy_refresh")
+      ;; Assert
+      (should (equal (mapcar #'car calls) (list b1)))
+      (should (null agent-repl-test--recovery-navigated)))))
+
+(ert-deftest agent-repl-test-webview-recovery-reloads-a-page-with-no-build-identity ()
+  "A bundle predating the stamped URL — and so the hook — is reloaded."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep calls
+    (agent-repl-test--with-recovery-ws ((b1 "wsr-prehook"))
+      (setq agent-repl-test--recovery-uris
+            (list (cons b1 "http://x/?workspace=%2Fw")))
+      ;; Act
+      (agent-repl--webview-recovery-sweep "deploy_refresh")
+      ;; Assert
+      (should (null calls))
+      (should (equal (cdr (car agent-repl-test--recovery-navigated))
+                     (format "http://x/?workspace=%%2Fw&build=%s"
+                             agent-repl-test--recovery-build))))))
+
+(ert-deftest agent-repl-test-webview-recovery-counts-driven-and-reloaded ()
+  "The sweep's return value counts every webview it acted on, either way."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep _calls
+    (agent-repl-test--with-recovery-ws ((b1 "wsr-fresh") (b2 "wsr-stale"))
+      (setq agent-repl-test--recovery-uris
+            (list (cons b2 "http://x/?workspace=%2Fw&build=bid-old")))
+      ;; Act / Assert
+      (should (equal 2 (agent-repl--webview-recovery-sweep "deploy_refresh"))))))
+
+(ert-deftest agent-repl-test-webview-recovery-counts-a-dead-webview-as-absent ()
+  "A buffer whose WKWebView is gone is neither driven nor reloaded."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep calls
+    (agent-repl-test--with-recovery-ws ((b1 "wsr-dead"))
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                 (lambda (_buf) nil)))
         ;; Act
-        (let ((count (agent-repl--webview-recovery-sweep "host_link_up")))
-          ;; Assert
-          (should (equal 1 count))
-          (should (equal driven (list b2))))))))
+        (should (equal 0 (agent-repl--webview-recovery-sweep "deploy_refresh")))
+        ;; Assert
+        (should (null calls))
+        (should (null agent-repl-test--recovery-navigated))))))
+
+(ert-deftest agent-repl-test-webview-recovery-fresh-uri-appends-a-missing-param ()
+  "A URI with no build param gains one rather than losing its query."
+  ;; Arrange + Act + Assert
+  (should (equal (agent-repl--webview-recovery-fresh-uri "http://x/?workspace=%2Fw" "b2")
+                 "http://x/?workspace=%2Fw&build=b2")))
+
+(ert-deftest agent-repl-test-webview-recovery-uri-build-reads-the-param ()
+  "The page's build identity is read out of the URL it was addressed at."
+  ;; Arrange + Act + Assert
+  (should (equal (agent-repl--webview-recovery-uri-build
+                  "http://x/?workspace=%2Fw&build=abc123")
+                 "abc123")))
+
+(ert-deftest agent-repl-test-webview-recovery-uri-build-is-nil-without-the-param ()
+  "A URL carrying no build identity reports none, rather than guessing one."
+  ;; Arrange + Act + Assert
+  (should (null (agent-repl--webview-recovery-uri-build "http://x/?workspace=%2Fw"))))
+
+;;;; ---- Which webviews a sweep reaches -------------------------------------
+
+(ert-deftest agent-repl-test-webview-recovery-includes-a-hibernated-workspace-buffer ()
+  "A backgrounded workspace's webview buffer is swept even when unfocused.
+`agent-repl--frontend-live-webview-buffers' finds the buffers the buffer
+name claims; the workspace record contributes the rest."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep _calls
+    (agent-repl-test--with-recovery-ws ((b1 "wsr-hibernated"))
+      (cl-letf (((symbol-function 'agent-repl--frontend-live-webview-buffers)
+                 (lambda () nil)))
+        ;; Act + Assert
+        (should (memq b1 (agent-repl--webview-recovery-buffers)))))))
+
+(ert-deftest agent-repl-test-webview-recovery-buffers-are-deduplicated ()
+  "A buffer named by both sources is swept once, not twice."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep _calls
+    (agent-repl-test--with-recovery-ws ((b1 "wsr-both"))
+      (cl-letf (((symbol-function 'agent-repl--frontend-live-webview-buffers)
+                 (lambda () (list b1))))
+        ;; Act + Assert
+        (should (equal (agent-repl--webview-recovery-buffers) (list b1)))))))
+
+;;;; ---- The deploy-time entry point ----------------------------------------
+
+(ert-deftest agent-repl-test-webview-recovery-deploy-refresh-respects-the-debounce ()
+  "A deploy refresh inside the debounce window of a link-up sweep is skipped."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep calls
+    (agent-repl-test--with-recovery-ws ((b1 "wsr1"))
+      (agent-repl--webview-recovery-on-link-up)
+      ;; Act
+      (let ((again (agent-repl-refresh-webviews)))
+        ;; Assert
+        (should (null again))
+        (should (equal 1 (length calls)))))))
+
+(ert-deftest agent-repl-test-webview-recovery-navigate-is-a-registered-boundary ()
+  "The re-navigation wrapper is registered as an external boundary wrapper."
+  ;; Arrange + Act + Assert
+  (should (memq 'agent-repl--frontend-webview-navigate-widget
+                agent-repl--external-boundary-functions)))
 
 (ert-deftest agent-repl-test-webview-recovery-subscribes-to-the-link-up-edge ()
   "The sweep is armed on the snapshot-applied edge, which is also startup's."
