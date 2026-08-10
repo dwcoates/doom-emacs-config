@@ -1081,6 +1081,38 @@ The request-id generator is stubbed deterministic (\"req-fixed\")."
           (should (equal (plist-get frame :workspace) "ws1"))
           (should (equal (plist-get (plist-get frame :submitPrompt) :text) "hi")))))))
 
+(ert-deftest agent-repl-test-uds-send-command-strips-trailing-slash-workspace ()
+  "A workspace key with a trailing slash reaches the wire normalized."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (sent)
+      (agent-repl-test--capturing-send sent
+        ;; Act
+        (agent-repl--uds-send-command
+         "restartSession" nil "/Users/u/doom-worktrees/ws/" 'fake-proc)
+        ;; Assert
+        (let ((frame (json-parse-string (string-trim-right sent)
+                                        :object-type 'plist :array-type 'list)))
+          (should (equal (plist-get frame :workspace)
+                         "/Users/u/doom-worktrees/ws")))))))
+
+(ert-deftest agent-repl-test-uds-normalize-workspace-key-keeps-plain-path ()
+  "A key with no trailing slash is left exactly as it is."
+  ;; Arrange
+  (let ((key "/Users/u/doom-worktrees/ws"))
+    ;; Act / Assert
+    (should (equal (agent-repl--uds-normalize-workspace-key key) key))))
+
+(ert-deftest agent-repl-test-uds-normalize-workspace-key-passes-nil-through ()
+  "A nil key stays nil — it means \"no workspace field\", not a path."
+  ;; Arrange / Act / Assert
+  (should (null (agent-repl--uds-normalize-workspace-key nil))))
+
+(ert-deftest agent-repl-test-uds-normalize-workspace-key-passes-empty-through ()
+  "An empty key is not a path and is not rewritten."
+  ;; Arrange / Act / Assert
+  (should (equal (agent-repl--uds-normalize-workspace-key "") "")))
+
 (ert-deftest agent-repl-test-uds-send-command-newline-terminated ()
   "The sent frame is newline-terminated (the wire delimiter)."
   ;; Arrange
@@ -2067,7 +2099,10 @@ what it must also never be is a Go error chain in the echo area."
         (should (equal logged-ws "ws1"))))))
 
 (ert-deftest agent-repl-test-uds-send-command-keeps-the-raw-cwd-on-the-wire ()
-  "Resolving for the log must NOT rewrite the cwd the daemon routes by."
+  "Resolving for the log must NOT rewrite the cwd the daemon routes by.
+Trailing-slash normalization is the ONE rewrite the wire key gets (see
+`agent-repl--uds-normalize-workspace-key'), so the expectation is the
+normalized cwd, not the log sink's workspace name."
   ;; Arrange
   (agent-repl-test--with-uds-log-sink
     (agent-repl--ws-put "ws1" :project-dir temporary-file-directory)
@@ -2081,7 +2116,7 @@ what it must also never be is a Go error chain in the echo area."
                                                      :object-type 'plist
                                                      :array-type 'list)
                                   :workspace)
-                       temporary-file-directory))))))
+                       (directory-file-name temporary-file-directory)))))))
 
 (ert-deftest agent-repl-test-uds-send-command-unowned-cwd-does-not-signal ()
   "Sending for a cwd nothing owns logs globally rather than aborting the send."
