@@ -307,6 +307,97 @@ cannot offer the daemon different answers for one workspace."
       ;; No session identity: which session a workspace owns is the daemon's.
       (should-not (plist-member payload :sessionId)))))
 
+;;;; ---- Establishment progress reporting --------------------------------
+;;
+;; This ladder is the only party that knows which of its stages an
+;; establishment is sitting on, and an open takes seconds to tens of seconds.
+;; The optional reporter is how a caller showing the user a pending open has
+;; anything to say for that whole window.
+
+(defmacro agent-repl-test--with-ensure-ladder (&rest body)
+  "Run BODY with every establishment stage stubbed to clear immediately."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+              (lambda (ok _fail &optional _force) (funcall ok) :pending))
+             ((symbol-function 'agent-repl--frontend-after-ready)
+              (lambda (ok _fail &optional _ws) (funcall ok) :ready))
+             ((symbol-function 'agent-repl--frontend-after-open-workspace)
+              (lambda (_ws ok _fail) (funcall ok) :pending)))
+     ,@body))
+
+(ert-deftest agent-repl-test-frontend-ensure-reports-the-daemon-stage ()
+  "The reporter is told when the daemon has been ensured."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (phases)
+      (agent-repl-test--with-ensure-ladder
+        ;; Act
+        (agent-repl--frontend-after-ensure-session
+         "ws1" #'ignore #'error nil (lambda (phase) (push phase phases))))
+      ;; Assert
+      (should (memq :daemon-ready phases)))))
+
+(ert-deftest agent-repl-test-frontend-ensure-reports-the-open-stage ()
+  "The reporter is told when the `openWorkspace' round-trip is dispatched."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (phases)
+      (agent-repl-test--with-ensure-ladder
+        ;; Act
+        (agent-repl--frontend-after-ensure-session
+         "ws1" #'ignore #'error nil (lambda (phase) (push phase phases))))
+      ;; Assert
+      (should (memq :opening phases)))))
+
+(ert-deftest agent-repl-test-frontend-ensure-reports-stages-in-order ()
+  "The daemon stage is reported before the open stage, never after."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (phases)
+      (agent-repl-test--with-ensure-ladder
+        ;; Act
+        (agent-repl--frontend-after-ensure-session
+         "ws1" #'ignore #'error nil (lambda (phase) (push phase phases))))
+      ;; Assert
+      (should (equal '(:daemon-ready :opening) (nreverse phases))))))
+
+(ert-deftest agent-repl-test-frontend-ensure-send-reports-no-open-stage ()
+  "A send bypasses the presentation gate, so no open stage is reported."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (phases)
+      (agent-repl-test--with-ensure-ladder
+        ;; Act
+        (agent-repl--frontend-after-ensure-session
+         "ws1" #'ignore #'error 'send (lambda (phase) (push phase phases))))
+      ;; Assert
+      (should-not (memq :opening phases)))))
+
+(ert-deftest agent-repl-test-frontend-ensure-survives-a-broken-reporter ()
+  "A reporter that signals is a defect in a REPORT; establishment still succeeds."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (success)
+      (agent-repl-test--with-ensure-ladder
+        ;; Act
+        (agent-repl--frontend-after-ensure-session
+         "ws1" (lambda () (setq success t)) #'error nil
+         (lambda (_phase) (error "reporter is broken"))))
+      ;; Assert
+      (should success))))
+
+(ert-deftest agent-repl-test-frontend-ensure-without-a-reporter-still-establishes ()
+  "Omitting the reporter leaves establishment exactly as it was."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (success)
+      (agent-repl-test--with-ensure-ladder
+        ;; Act
+        (agent-repl--frontend-after-ensure-session
+         "ws1" (lambda () (setq success t)) #'error))
+      ;; Assert
+      (should success))))
+
 (ert-deftest agent-repl-test-frontend-after-ensure-send-skips-presentation-gate ()
   "Send-purpose ensure reports establishment without opening the workspace."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
