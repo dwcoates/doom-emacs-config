@@ -3748,6 +3748,203 @@ Older entries (lexicographically earliest filenames) are pruned."
         (should (= 2 (length remaining)))
         (should-not (member "20200101T000000.el" remaining))))))
 
+;;;; ---- Tests: expired-tombstone eviction ----
+
+(defun agent-repl-cmd-test--days-ago (n)
+  "Return a time value N days before now."
+  (time-subtract (current-time) (seconds-to-time (* n 24 60 60))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/expired-dropped-from-roster ()
+  "A tombstone older than the max age is removed from the live roster."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "old" :project-dir "/tmp/old")
+      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 30))
+      (agent-repl--snapshot-evict-expired-tombstones)
+      (should-not (agent-repl--ws-known-p "old")))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/recent-tombstone-retained ()
+  "A tombstone younger than the max age stays in the live roster."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "recent" :project-dir "/tmp/recent")
+      (agent-repl--ws-put "recent" :nuked-at (agent-repl-cmd-test--days-ago 3))
+      (agent-repl--snapshot-evict-expired-tombstones)
+      (should (agent-repl--ws-known-p "recent")))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/live-workspace-never-evicted ()
+  "A live workspace is never evicted, however old its other timestamps."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "live" :project-dir "/tmp/live")
+      (agent-repl--ws-put "live" :created-at (agent-repl-cmd-test--days-ago 90))
+      (agent-repl--snapshot-evict-expired-tombstones)
+      (should (agent-repl--ws-live-p "live")))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/unstamped-tombstone-retained ()
+  "A tombstone with no `:nuked-at' stamp is retained — age is unprovable."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "unstamped" :project-dir "/tmp/unstamped")
+      (agent-repl--ws-put "unstamped" :nuked-at nil)
+      (agent-repl--snapshot-evict-expired-tombstones)
+      (should (agent-repl--ws-known-p "unstamped")))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/disabled-when-max-age-zero ()
+  "Max age 0 disables eviction entirely — ancient tombstones survive."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-tombstone-max-age 0)
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "old" :project-dir "/tmp/old")
+      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 365))
+      (agent-repl--snapshot-evict-expired-tombstones)
+      (should (agent-repl--ws-known-p "old")))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/archive-file-is-loadable ()
+  "Evicted tombstones land in an archive file the snapshot reader parses,
+so they remain reachable through the archive picker."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "old" :project-dir "/tmp/old")
+      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 30))
+      (agent-repl--snapshot-evict-expired-tombstones)
+      (let* ((archive-dir (agent-repl--workspace-snapshot-archive-dir))
+             (files (directory-files archive-dir t "expired-tombstones\\.el\\'"))
+             (entries (plist-get (agent-repl--read-workspace-snapshot (car files))
+                                 :workspaces)))
+        (should (= 1 (length files)))
+        (should (equal "/tmp/old"
+                       (plist-get (cdr (assoc "old" entries)) :project-dir)))))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/archive-appears-in-picker ()
+  "The expired-tombstone archive is offered by the archive-picker candidates."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "old" :project-dir "/tmp/old")
+      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 30))
+      (agent-repl--snapshot-evict-expired-tombstones)
+      (should (cl-some (lambda (c) (string-match-p "expired-tombstones" (cdr c)))
+                       (agent-repl--snapshot-archive-candidates))))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/save-omits-expired-entry ()
+  "A save after eviction writes a roster without the expired tombstone."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "live" :project-dir "/tmp/live")
+      (agent-repl--ws-put "old" :project-dir "/tmp/old")
+      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 30))
+      (agent-repl-save-workspace-snapshot)
+      (let ((entries (plist-get (agent-repl--read-workspace-snapshot
+                                 agent-repl-workspace-snapshot-file)
+                                :workspaces)))
+        (should-not (assoc "old" entries))))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/save-keeps-live-entry ()
+  "Eviction never drops a live workspace from the written roster."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "live" :project-dir "/tmp/live")
+      (agent-repl--ws-put "old" :project-dir "/tmp/old")
+      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 30))
+      (agent-repl-save-workspace-snapshot)
+      (let ((entries (plist-get (agent-repl--read-workspace-snapshot
+                                 agent-repl-workspace-snapshot-file)
+                                :workspaces)))
+        (should (assoc "live" entries))))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/failed-archive-evicts-nothing ()
+  "When the archive write fails, the tombstone stays in the roster —
+eviction is never allowed to outrun the durable copy."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-tombstone-max-age (* 14 24 60 60))
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "old" :project-dir "/tmp/old")
+      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 30))
+      (cl-letf (((symbol-function 'make-directory)
+                 (lambda (&rest _) (error "disk full"))))
+        (agent-repl--snapshot-evict-expired-tombstones))
+      (should (agent-repl--ws-known-p "old")))))
+
+;;;; ---- Tests: snapshot save debounce ----
+
+(ert-deftest agent-repl-cmd-test-snapshot-debounce/burst-produces-one-write ()
+  "A burst of N save requests collapses to a single roster write."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-save-idle-delay 0.01)
+          (writes 0))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl-save-workspace-snapshot)
+                     (lambda () (setq writes (1+ writes)))))
+            (dotimes (_ 10) (agent-repl--snapshot-save-request))
+            (should (= 0 writes))          ; nothing written yet: all coalesced
+            (while agent-repl--snapshot-save-timer
+              (accept-process-output nil 0.02)
+              (when agent-repl--snapshot-save-timer
+                (timer-event-handler agent-repl--snapshot-save-timer)))
+            (should (= 1 writes)))
+        (agent-repl--snapshot-save-cancel-pending)))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-debounce/zero-delay-writes-immediately ()
+  "A zero idle delay bypasses the timer and writes synchronously."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-save-idle-delay 0)
+          (writes 0))
+      (cl-letf (((symbol-function 'agent-repl-save-workspace-snapshot)
+                 (lambda () (setq writes (1+ writes)))))
+        (agent-repl--snapshot-save-request)
+        (should (= 1 writes))
+        (should-not agent-repl--snapshot-save-timer)))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-debounce/manual-save-is-immediate ()
+  "The manual save writes the file during the call, not on an idle timer."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-save-idle-delay 30)
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
+      (agent-repl-save-workspace-snapshot)
+      (should (file-exists-p agent-repl-workspace-snapshot-file)))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-debounce/manual-save-cancels-pending ()
+  "A manual save discards the queued debounced write it just superseded."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-save-idle-delay 30)
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
+      (agent-repl--snapshot-save-request)
+      (should agent-repl--snapshot-save-timer)
+      (agent-repl-save-workspace-snapshot)
+      (should-not agent-repl--snapshot-save-timer))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-debounce/flush-writes-pending ()
+  "The shutdown flush performs a pending write rather than dropping it."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-save-idle-delay 30)
+          (writes 0))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl-save-workspace-snapshot)
+                     (lambda () (setq writes (1+ writes)))))
+            (agent-repl--snapshot-save-request)
+            (agent-repl--snapshot-save-flush)
+            (should (= 1 writes)))
+        (agent-repl--snapshot-save-cancel-pending)))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-debounce/flush-without-pending-is-noop ()
+  "The shutdown flush writes nothing when no request is outstanding."
+  (agent-repl-test--with-clean-state
+    (let ((writes 0))
+      (cl-letf (((symbol-function 'agent-repl-save-workspace-snapshot)
+                 (lambda () (setq writes (1+ writes)))))
+        (agent-repl--snapshot-save-flush)
+        (should (= 0 writes))))))
+
 ;;;; ---- Tests: snapshot entry normalizer ----
 
 (ert-deftest agent-repl-cmd-test-snapshot-entry-normalize/legacy-shape ()
