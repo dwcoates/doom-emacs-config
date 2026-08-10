@@ -31,9 +31,11 @@ export const BOX_CLASS = "scroll-zone-box";
 /**
  * Classes of the feed's sections: the bordered blocks that hold scroll
  * boxes. A tool card holds up to three (input, progress, output); a
- * permission card holds its preview.
+ * permission card holds its preview; a response bubble holds its own
+ * height-capped body, and naming the bubble here is what puts the lit
+ * gutters on the bubble's edges rather than inset at its body's.
  */
-export const SECTION_CLASSES = ["tool-card", "permission"];
+export const SECTION_CLASSES = ["tool-card", "permission", "bubble"];
 
 /** Slack below which the feed still counts as parked at its tail. */
 export const PIN_PX = 40;
