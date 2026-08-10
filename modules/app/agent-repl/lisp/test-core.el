@@ -3995,35 +3995,22 @@ entry per tick for the whole bring-up."
 
 (ert-deftest agent-repl-test-deferred-quit-re-arms-a-quit-for-the-command-loop ()
   "A C-g raised inside the body survives in `quit-flag' after the guard exits."
-  ;; Arrange.  The outer `inhibit-quit' keeps the DEFERRED quit from firing
-  ;; inside the test itself; `still-armed' captures the flag before it is
-  ;; disarmed, which is exactly the observation the command loop would make.
-  (let ((quit-flag nil)
-        (still-armed nil))
-    (let ((inhibit-quit t))
-      ;; Act
-      (agent-repl--with-deferred-quit "test"
-        ;; What Emacs itself does when C-g arrives under `inhibit-quit'.
-        (setq quit-flag t))
-      (setq still-armed quit-flag
-            quit-flag nil))
-    ;; Assert
-    (should still-armed)))
+  ;; Act / Assert -- the helper makes the observation the command loop would.
+  (should (agent-repl-test--quit-deferred-p
+            (agent-repl--with-deferred-quit "test"
+              ;; What Emacs itself does when C-g arrives under `inhibit-quit'.
+              (setq quit-flag t)))))
 
 (ert-deftest agent-repl-test-deferred-quit-records-the-deferral ()
   "A deferred quit is explainable from the canonical log alone."
   ;; Arrange
-  (let ((quit-flag nil)
-        (logged nil))
+  (let ((logged nil))
     (cl-letf (((symbol-function 'agent-repl--log)
                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
-      ;; The outer `inhibit-quit' keeps the deferred quit from firing inside
-      ;; the test; it is disarmed once the record has been collected.
-      (let ((inhibit-quit t))
-        ;; Act
+      ;; Act
+      (agent-repl-test--quit-deferred-p
         (agent-repl--with-deferred-quit "uds-filter"
-          (setq quit-flag t))
-        (setq quit-flag nil)))
+          (setq quit-flag t))))
     ;; Assert
     (should (seq-find (lambda (line)
                         (and (string-match-p "deferred-quit" line)

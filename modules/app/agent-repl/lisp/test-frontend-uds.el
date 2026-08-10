@@ -3051,20 +3051,18 @@ abandoned one strands the mount until its own separate timeout."
   "A C-g inside a handler does not abandon the frames buffered behind it."
   ;; Arrange
   (agent-repl-test--with-uds
-    (let ((quit-flag nil)
-          (workspaces nil))
+    (let ((workspaces nil))
       (agent-repl--uds-register-handler
        "workspaceState"
        (lambda (p)
          (push (plist-get p :workspace) workspaces)
          ;; What Emacs does when C-g arrives while `inhibit-quit' is bound.
          (when (equal (plist-get p :workspace) "a") (setq quit-flag t))))
-      (let ((inhibit-quit t))
-        ;; Act
+      ;; Act
+      (agent-repl-test--quit-deferred-p
         (agent-repl--uds-filter
          nil (concat "{\"workspaceState\":{\"workspace\":\"a\"}}\n"
-                     "{\"workspaceState\":{\"workspace\":\"b\"}}\n"))
-        (setq quit-flag nil))
+                     "{\"workspaceState\":{\"workspace\":\"b\"}}\n")))
       ;; Assert
       (should (equal (nreverse workspaces) '("a" "b"))))))
 
@@ -3072,17 +3070,12 @@ abandoned one strands the mount until its own separate timeout."
   "The deferred quit is re-signalled by the command loop, never dropped."
   ;; Arrange
   (agent-repl-test--with-uds
-    (let ((quit-flag nil)
-          (still-armed nil))
-      (agent-repl--uds-register-handler
-       "workspaceState" (lambda (_p) (setq quit-flag t)))
-      (let ((inhibit-quit t))
-        ;; Act
-        (agent-repl--uds-filter nil "{\"workspaceState\":{\"workspace\":\"a\"}}\n")
-        (setq still-armed quit-flag
-              quit-flag nil))
-      ;; Assert
-      (should still-armed))))
+    (agent-repl--uds-register-handler
+     "workspaceState" (lambda (_p) (setq quit-flag t)))
+    ;; Act / Assert
+    (should (agent-repl-test--quit-deferred-p
+              (agent-repl--uds-filter
+               nil "{\"workspaceState\":{\"workspace\":\"a\"}}\n")))))
 
 (ert-deftest agent-repl-test-uds-filter-still-re-signals-a-handler-error ()
   "Quit deferral does not soften the drain's own error re-signalling."
@@ -3132,36 +3125,30 @@ abandoned one strands the mount until its own separate timeout."
   "A C-g during a congested write is deferred rather than taken mid-send."
   ;; Arrange
   (agent-repl-test--with-uds
-    (let ((quit-flag nil)
-          (still-armed nil)
-          sent)
+    (let (sent)
       (agent-repl-test--capturing-send sent
         (cl-letf (((symbol-function 'process-send-string)
                    ;; What a C-g held during a congested write amounts to.
                    (lambda (_proc s) (setq sent s quit-flag t))))
-          (let ((inhibit-quit t))
-            ;; Act
-            (agent-repl--uds-send-command "restartSession" nil "/w" 'fake-proc)
-            (setq still-armed quit-flag
-                  quit-flag nil))))
-      ;; Assert
-      (should still-armed))))
+          ;; Act / Assert
+          (should (agent-repl-test--quit-deferred-p
+                    (agent-repl--uds-send-command
+                     "restartSession" nil "/w" 'fake-proc))))))))
 
 (ert-deftest agent-repl-test-uds-send-command-quit-leaves-the-registry-consistent ()
   "A quit mid-send never leaves a tracked command whose frame was not delivered."
   ;; Arrange
   (agent-repl-test--with-uds
-    (let ((quit-flag nil)
-          (request-id nil)
+    (let ((request-id nil)
           sent)
       (agent-repl-test--capturing-send sent
         (cl-letf (((symbol-function 'process-send-string)
                    (lambda (_proc s) (setq sent s quit-flag t))))
-          (let ((inhibit-quit t))
-            ;; Act
+          ;; Act
+          (agent-repl-test--quit-deferred-p
             (setq request-id
-                  (agent-repl--uds-send-command "restartSession" nil "/w" 'fake-proc))
-            (setq quit-flag nil))))
+                  (agent-repl--uds-send-command
+                   "restartSession" nil "/w" 'fake-proc)))))
       ;; Assert — the command is tracked AND its frame reached the wire, so
       ;; the ack-aging alarm can never declare lost a send that happened.
       (should (agent-repl--uds-command-pending-p request-id))
@@ -3176,19 +3163,14 @@ and re-arms the reconnect ladder; a quit landing between those steps
 leaves the link recorded as neither up nor down."
   ;; Arrange
   (agent-repl-test--with-uds
-    (let ((quit-flag nil)
-          (still-armed nil))
-      (cl-letf (((symbol-function 'agent-repl--uds-sentinel-transition)
-                 ;; What Emacs does when C-g arrives while `inhibit-quit' is
-                 ;; bound: the request is recorded, not taken.
-                 (lambda (&rest _) (setq quit-flag t))))
-        (let ((inhibit-quit t))
-          ;; Act
-          (agent-repl--uds-sentinel 'dead-proc "connection broken by remote peer\n")
-          (setq still-armed quit-flag
-                quit-flag nil)))
-      ;; Assert
-      (should still-armed))))
+    (cl-letf (((symbol-function 'agent-repl--uds-sentinel-transition)
+               ;; What Emacs does when C-g arrives while `inhibit-quit' is
+               ;; bound: the request is recorded, not taken.
+               (lambda (&rest _) (setq quit-flag t))))
+      ;; Act / Assert
+      (should (agent-repl-test--quit-deferred-p
+                (agent-repl--uds-sentinel
+                 'dead-proc "connection broken by remote peer\n"))))))
 
 (ert-deftest agent-repl-test-uds-sentinel-completes-its-transition-under-a-quit ()
   "A quit mid-transition never leaves the link recorded as neither up nor down."
@@ -3196,17 +3178,15 @@ leaves the link recorded as neither up nor down."
   (agent-repl-test--with-uds
     (setq agent-repl--uds-process 'dead-proc
           agent-repl--uds-read-accumulator "leftover")
-    (let ((quit-flag nil)
-          scheduled)
+    (let (scheduled)
       (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
                 ((symbol-function 'process-name) (lambda (_p) "dead"))
                 ((symbol-function 'agent-repl--uds-run-timer)
                  (lambda (delay fn) (setq scheduled (list delay fn)) 'fake-timer)))
-        (let ((inhibit-quit t))
-          ;; Act -- the C-g lands while the transition is running.
-          (setq quit-flag t)
-          (agent-repl--uds-sentinel 'dead-proc "connection broken by remote peer\n")
-          (setq quit-flag nil)))
+        ;; Act -- the C-g lands while the transition is running.
+        (agent-repl-test--with-pending-quit
+          (agent-repl--uds-sentinel
+           'dead-proc "connection broken by remote peer\n")))
       ;; Assert -- the whole transition ran despite the quit.
       (should-not agent-repl--uds-process)
       (should (string-empty-p agent-repl--uds-read-accumulator))
