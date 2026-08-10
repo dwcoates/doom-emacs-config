@@ -80,7 +80,14 @@ alarm.  Tests that assert ON the seam shadow it again with their own
          (agent-repl-uds-command-ack-deadline 10.0)
          (agent-repl-debug nil))
      (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
-                (lambda (&rest _) 'fake-timer)))
+                (lambda (&rest _) 'fake-timer))
+               ;; The filesystem check the dial is gated on is an external
+               ;; boundary; the default arrangement is \"the socket file is
+               ;; there\", which is what every pre-gate dial test assumed.
+               ;; Gate tests shadow it again with their own `cl-letf', which
+               ;; wins.
+               ((symbol-function 'agent-repl--uds-socket-file-present-p)
+                (lambda (&rest _) t)))
        ,@body)))
 
 (defmacro agent-repl-test--with-connected-link (&rest body)
@@ -593,6 +600,139 @@ down for the whole daemon outage."
           (should-not agent-repl--uds-process)
           (should (equal (nth 0 scheduled) 2.0))
           (should (eq (nth 1 scheduled) #'agent-repl-uds-connect)))))))
+
+;;;; ---- socket-existence gate -------------------------------------------
+
+(ert-deftest agent-repl-test-uds-absent-socket-skips-the-doomed-spawn ()
+  "No socket FILE means no dial: the doomed process is never spawned."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((dials 0))
+      (cl-letf (((symbol-function 'agent-repl--uds-socket-file-present-p)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--uds-connect)
+                 (lambda (&rest _) (cl-incf dials) 'fake-proc))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) 'fake-timer)))
+        ;; Act
+        (let ((result (agent-repl-uds-connect "/tmp/absent.sock")))
+          ;; Assert
+          (should-not result)
+          (should (= dials 0))
+          (should-not agent-repl--uds-process))))))
+
+(ert-deftest agent-repl-test-uds-absent-socket-retries-through-the-ladder ()
+  "The absent-socket retry is the EXISTING ladder, not a second mechanism."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (scheduled)
+      (cl-letf (((symbol-function 'agent-repl--uds-socket-file-present-p)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--uds-connect)
+                 (lambda (&rest _) (error "must not dial")))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (delay fn) (setq scheduled (list delay fn)) 'fake-timer)))
+        ;; Act
+        (agent-repl-uds-connect "/tmp/absent.sock")
+        ;; Assert
+        (should (equal (nth 0 scheduled) 2.0))
+        (should (eq (nth 1 scheduled) #'agent-repl-uds-connect))
+        (should (eq agent-repl--uds-reconnect-timer 'fake-timer))))))
+
+(ert-deftest agent-repl-test-uds-absent-socket-does-not-warn ()
+  "A daemon that has not finished coming up is not a warning-worthy fact."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (warned)
+      (cl-letf (((symbol-function 'agent-repl--uds-socket-file-present-p)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--uds-connect)
+                 (lambda (&rest _) (error "must not dial")))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned)))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) 'fake-timer)))
+        ;; Act
+        (agent-repl-uds-connect "/tmp/absent.sock")
+        ;; Assert
+        (should-not warned)))))
+
+(ert-deftest agent-repl-test-uds-absent-socket-under-readiness-arms-no-timer ()
+  "The readiness loop keeps sole ownership of retry pacing across the gate."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (scheduled)
+      (cl-letf (((symbol-function 'agent-repl--uds-socket-file-present-p)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--uds-connect)
+                 (lambda (&rest _) (error "must not dial")))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest args) (setq scheduled args) 'fake-timer)))
+        ;; Act
+        (should-not (agent-repl-uds-connect "/tmp/absent.sock" t))
+        ;; Assert
+        (should-not scheduled)
+        (should-not agent-repl--uds-reconnect-timer)))))
+
+(ert-deftest agent-repl-test-uds-present-socket-dials ()
+  "An existing socket FILE dials exactly as before the gate."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (dialed)
+      (cl-letf (((symbol-function 'agent-repl--uds-socket-file-present-p)
+                 (lambda (&rest _) t))
+                ((symbol-function 'agent-repl--uds-connect)
+                 (lambda (path &rest _) (setq dialed path) 'fake-proc))
+                ((symbol-function 'process-live-p) (lambda (p) (eq p 'fake-proc)))
+                ((symbol-function 'process-name) (lambda (_p) "fake"))
+                ((symbol-function 'process-status) (lambda (_p) 'open)))
+        ;; Act
+        (let ((result (agent-repl-uds-connect "/tmp/present.sock")))
+          ;; Assert
+          (should (eq result 'fake-proc))
+          (should (equal dialed "/tmp/present.sock")))))))
+
+(ert-deftest agent-repl-test-uds-absent-socket-still-escalates-the-ladder ()
+  "A socket that NEVER appears keeps climbing the ladder's backoff."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (delays)
+      (cl-letf (((symbol-function 'agent-repl--uds-socket-file-present-p)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--uds-connect)
+                 (lambda (&rest _) (error "must not dial")))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (delay _fn) (push delay delays) 'fake-timer)))
+        ;; Act
+        (agent-repl-uds-connect "/tmp/absent.sock")
+        (agent-repl-uds-connect "/tmp/absent.sock")
+        (agent-repl-uds-connect "/tmp/absent.sock")
+        ;; Assert
+        (should (equal (nreverse delays) '(2.0 4.0 8.0)))
+        (should (= agent-repl--uds-reconnect-attempts 3))))))
+
+(ert-deftest agent-repl-test-uds-born-dead-warns-when-the-socket-existed ()
+  "The born-dead path survives the gate for the check-then-dial race."
+  ;; Arrange — the file was there at the check and gone by the dial.
+  (agent-repl-test--with-uds
+    (let (warned)
+      (cl-letf (((symbol-function 'agent-repl--uds-socket-file-present-p)
+                 (lambda (&rest _) t))
+                ((symbol-function 'processp) (lambda (p) (eq p 'dead-dial)))
+                ((symbol-function 'process-status) (lambda (_p) 'failed))
+                ((symbol-function 'process-name) (lambda (_p) "dead-dial"))
+                ((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'delete-process) #'ignore)
+                ((symbol-function 'agent-repl--uds-connect)
+                 (lambda (&rest _) 'dead-dial))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned)))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) 'fake-timer)))
+        ;; Act
+        (should-not (agent-repl-uds-connect "/tmp/present.sock"))
+        ;; Assert
+        (should (string-match-p "dial born dead" (car warned)))))))
 
 (ert-deftest agent-repl-test-uds-reconnect-backoff-doubles ()
   "Each successive scheduled reconnect waits twice as long as the last."
@@ -1237,6 +1377,9 @@ the two lifecycle edges are two hooks."
   ;; Arrange
   (let ((echoed nil))
     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+              ;; A refused dial is a STALE socket file: present, no listener.
+              ((symbol-function 'agent-repl--uds-socket-file-present-p)
+               (lambda (&rest _) t))
               ((symbol-function 'agent-repl--frontend-invalidate-daemon-view) #'ignore)
               ((symbol-function 'agent-repl--uds-connect)
                (lambda (&rest _) (error "connection refused")))
@@ -1256,6 +1399,9 @@ a notice here would be an alarm about a startup that has not failed yet."
   ;; Arrange
   (let ((echoed nil))
     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+              ;; A refused dial is a STALE socket file: present, no listener.
+              ((symbol-function 'agent-repl--uds-socket-file-present-p)
+               (lambda (&rest _) t))
               ((symbol-function 'agent-repl--frontend-invalidate-daemon-view) #'ignore)
               ((symbol-function 'agent-repl--uds-connect)
                (lambda (&rest _) (error "connection refused")))
