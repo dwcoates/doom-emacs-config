@@ -473,6 +473,44 @@ first, so a test can assert both what was armed and that nothing was."
       ;; Assert
       (should (equal initiator "deploy (emacsclient)")))))
 
+
+;;;; ---- store readiness settles through the shared latch --------------------
+
+(ert-deftest agent-repl-test-services-store-readiness-cancels-its-poll-timer ()
+  "The store readiness poll cancels its pending tick when it settles.
+Every one-shot async settle in the module goes through the shared latch,
+so a hand-rolled settled/timer pair reintroduced here fails rather than
+quietly stranding a 10Hz timer."
+  ;; Arrange — absent on the first poll, present on the second.
+  (let ((present nil) (armed nil) succeeded)
+    (cl-letf (((symbol-function 'agent-repl--shim-store-socket-present-p)
+               (lambda () present))
+              ((symbol-function 'agent-repl--shim-services-run-timer)
+               (lambda (_secs fn)
+                 (setq armed (run-with-timer 3600 nil fn))
+                 armed)))
+      ;; Act — the first poll arms a retry, the second settles.
+      (agent-repl--shim-store-after-ready (lambda () (setq succeeded t)) #'ignore)
+      (should (memq armed timer-list))
+      (setq present t)
+      (timer-event-handler armed)
+      ;; Assert
+      (should succeeded)
+      (should-not (memq armed timer-list)))))
+
+(ert-deftest agent-repl-test-services-store-readiness-settles-once ()
+  "A settled readiness poll never runs a second continuation."
+  ;; Arrange
+  (let ((runs 0))
+    (cl-letf (((symbol-function 'agent-repl--shim-store-socket-present-p)
+               (lambda () t)))
+      ;; Act
+      (agent-repl--shim-store-after-ready
+       (lambda () (setq runs (1+ runs)))
+       (lambda (_detail) (setq runs (1+ runs))))
+      ;; Assert
+      (should (equal runs 1)))))
+
 (provide 'test-services)
 
 ;;; test-services.el ends here

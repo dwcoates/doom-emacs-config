@@ -254,7 +254,8 @@ The continuation takes no arguments: what the workspace's session IS
 belongs to the daemon."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let (success failure)
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _force) t))
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+                 (lambda (ok _fail &optional _force) (funcall ok) :pending))
                 ((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
                 ((symbol-function 'agent-repl--frontend-workspace-session-live-p) (lambda (_key) t))
                 ((symbol-function 'agent-repl--frontend-after-open-workspace)
@@ -274,7 +275,8 @@ question and creates on open when there is nothing to reattach to."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let (opened created)
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) t))
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+                 (lambda (ok _fail &optional _force) (funcall ok) :pending))
                 ((symbol-function 'agent-repl--frontend-after-ready)
                  (lambda (ok _fail &optional _ws) (funcall ok) :ready))
                 ((symbol-function 'agent-repl--frontend-after-open-workspace)
@@ -309,7 +311,8 @@ cannot offer the daemon different answers for one workspace."
   "Send-purpose ensure reports establishment without opening the workspace."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let (success opened)
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) t))
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+                 (lambda (ok _fail &optional _force) (funcall ok) :pending))
                 ((symbol-function 'agent-repl--frontend-after-ready)
                  (lambda (ok _fail &optional _ws) (funcall ok) :ready))
                 ((symbol-function 'agent-repl--frontend-workspace-session-live-p) (lambda (_key) t))
@@ -625,8 +628,8 @@ a rival session."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let ((ensured nil))
       (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
-                ((symbol-function 'agent-repl--ensure-frontend-daemon)
-                 (lambda (&optional _f) (setq ensured t))))
+                ((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+                 (lambda (_ok _fail &optional _f) (setq ensured t))))
         ;; Act
         (agent-repl--frontend-reattach-check)
         ;; Assert
@@ -1637,3 +1640,104 @@ and \"none\", which own no `:project-dir' and so no durable log sink."
         (delete-directory project t))
       ;; Assert
       (should (equal logged "ws1")))))
+
+;;;; ---- Establishment waits for the daemon, and survives a quit -------------
+;;
+;; The ensure used to be read as a yes/no gate: readiness polling started
+;; while the stack was still deploying, so a first open on a stale checkout
+;; burned its whole poll budget against a daemon that had not been launched
+;; yet.  The continuation makes that overlap unrepresentable.
+
+(ert-deftest agent-repl-test-frontend-ensure-waits-for-the-daemon ()
+  "Readiness polling starts only once the daemon ensure reports success."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (ensured polled)
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+                 (lambda (ok _fail &optional _force) (setq ensured ok) :pending))
+                ((symbol-function 'agent-repl--frontend-after-ready)
+                 (lambda (_ok _fail &optional _ws) (setq polled t) :pending)))
+        ;; Act
+        (agent-repl--frontend-after-ensure-session "ws1" #'ignore #'ignore)
+        ;; Assert — nothing polls while the deploy is still running.
+        (should-not polled)
+        (funcall ensured)
+        (should polled)))))
+
+(ert-deftest agent-repl-test-frontend-ensure-reports-a-declined-daemon ()
+  "A declined ensure reaches ON-FAILURE and returns `:failed'."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (failure)
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+                 (lambda (_ok fail &optional _force) (funcall fail "declined") nil))
+                ((symbol-function 'agent-repl--frontend-after-ready)
+                 (lambda (&rest _) (error "readiness must not be armed"))))
+        ;; Act
+        (should (eq :failed (agent-repl--frontend-after-ensure-session
+                             "ws1" #'ignore (lambda (d) (setq failure d)))))
+        ;; Assert
+        (should (equal failure "declined"))))))
+
+(ert-deftest agent-repl-test-frontend-hydrate-writes-both-keys-under-inhibit-quit ()
+  "The project dir and the environment are written as one uninterruptible fact.
+Split by a `C-g', the workspace keeps a project dir and no environment —
+and nothing would ever fill the environment in, because only the branch
+that finds a MISSING project dir initializes it."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '()
+    (let (observed)
+      (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
+                 (lambda () "/w"))
+                ((symbol-function 'agent-repl--initialize-ws-env)
+                 (lambda (ws _dir)
+                   (setq observed inhibit-quit)
+                   (agent-repl--ws-put ws :active-env :bare-metal))))
+        ;; Act
+        (agent-repl--frontend-hydrate-ws-environment "ws1")
+        ;; Assert
+        (should observed)
+        (should (equal (agent-repl--ws-get "ws1" :project-dir) "/w"))
+        (should (eq (agent-repl--ws-get "ws1" :active-env) :bare-metal))))))
+
+(ert-deftest agent-repl-test-frontend-hydrate-leaves-a-hydrated-workspace-alone ()
+  "A workspace that already has a project dir is not re-hydrated."
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
+               (lambda () (error "must not re-resolve"))))
+      (agent-repl--frontend-hydrate-ws-environment "ws1")
+      (should (equal (agent-repl--ws-get "ws1" :project-dir) "/w")))))
+
+(ert-deftest agent-repl-test-frontend-create-reserves-under-inhibit-quit ()
+  "The create's cwd reservation and the dispatch that releases it are atomic.
+A quit between them would leave the cwd reserved with nothing armed to
+release it, and every later create for that workspace refused outright."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let ((agent-repl--frontend-creates-in-flight (make-hash-table :test 'equal))
+          observed)
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-ready)
+                 (lambda (_ok _fail &optional _ws) (setq observed inhibit-quit) :pending))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--frontend-after-create-session
+         "/w" "sonnet" 'continue nil #'ignore #'ignore "ws1")
+        ;; Assert
+        (should observed)))))
+
+(ert-deftest agent-repl-test-frontend-create-releases-its-reservation-on-failure ()
+  "A settled create clears its cwd reservation, so the next create is allowed."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let ((agent-repl--frontend-creates-in-flight (make-hash-table :test 'equal)))
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-ready)
+                 (lambda (_ok fail &optional _ws) (funcall fail "no daemon") :pending))
+                ((symbol-function 'agent-repl--frontend-async-fail) #'ignore)
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--frontend-after-create-session
+         "/w" "sonnet" 'continue nil #'ignore #'ignore "ws1")
+        ;; Assert
+        (should (equal (hash-table-count agent-repl--frontend-creates-in-flight) 0))))))

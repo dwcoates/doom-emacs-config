@@ -3879,3 +3879,98 @@ that froze Emacs; this pins the equivalence the bound relies on."
       (should-not (string-match-p "RENDER_STATE" echoed))
       (should (seq-find (lambda (line) (string-match-p "RENDER_STATE_MERGE_QUEUED" line))
                         logged)))))
+
+;;;; ---- Tests: one-shot settle latch ----
+;;
+;; The latch is what makes an asynchronous operation's settle atomic with
+;; respect to `C-g'.  Each test below pins one half of that: exactly one
+;; claimant, no timer outliving the operation, and the whole claim running
+;; with quit held off.
+
+(ert-deftest agent-repl-test-latch-claim-succeeds-once ()
+  "Exactly one caller may claim a latch."
+  ;; Arrange
+  (let ((latch (agent-repl--make-latch)))
+    ;; Act / Assert
+    (should (agent-repl--latch-claim latch))
+    (should-not (agent-repl--latch-claim latch))))
+
+(ert-deftest agent-repl-test-latch-claim-reports-settled ()
+  "A claimed latch reports itself settled."
+  (let ((latch (agent-repl--make-latch)))
+    (should-not (agent-repl--latch-settled-p latch))
+    (agent-repl--latch-claim latch)
+    (should (agent-repl--latch-settled-p latch))))
+
+(ert-deftest agent-repl-test-latch-claim-cancels-held-timers ()
+  "Claiming a latch cancels every timer it holds.
+A deadline surviving its own operation is exactly the stranded timer the
+heartbeat assertion reports."
+  ;; Arrange
+  (let* ((latch (agent-repl--make-latch))
+         (timer (run-with-timer 3600 nil #'ignore)))
+    (agent-repl--latch-set-timer latch 'deadline timer)
+    (should (memq timer timer-list))
+    ;; Act
+    (agent-repl--latch-claim latch)
+    ;; Assert
+    (should-not (memq timer timer-list))))
+
+(ert-deftest agent-repl-test-latch-claim-runs-cleanup-once ()
+  "The winning claim runs CLEANUP; later claims run nothing."
+  ;; Arrange
+  (let* ((runs 0)
+         (latch (agent-repl--make-latch (lambda () (setq runs (1+ runs))))))
+    ;; Act
+    (agent-repl--latch-claim latch)
+    (agent-repl--latch-claim latch)
+    ;; Assert
+    (should (equal runs 1))))
+
+(ert-deftest agent-repl-test-latch-claim-inhibits-quit-across-cleanup ()
+  "CLEANUP runs with quit inhibited, so a `C-g' cannot split the settle."
+  ;; Arrange
+  (let (observed)
+    (let ((latch (agent-repl--make-latch (lambda () (setq observed inhibit-quit)))))
+      ;; Act
+      (agent-repl--latch-claim latch))
+    ;; Assert
+    (should observed)))
+
+(ert-deftest agent-repl-test-latch-set-timer-replaces-same-key ()
+  "Re-arming a key cancels its predecessor rather than accumulating beside it.
+The create's 20Hz view poll re-arms every tick, so a list would grow one
+entry per tick for the whole bring-up."
+  ;; Arrange
+  (let* ((latch (agent-repl--make-latch))
+         (first (run-with-timer 3600 nil #'ignore))
+         (second (run-with-timer 3600 nil #'ignore)))
+    (agent-repl--latch-set-timer latch 'poll first)
+    ;; Act
+    (agent-repl--latch-set-timer latch 'poll second)
+    ;; Assert
+    (should-not (memq first timer-list))
+    (should (memq second timer-list))
+    (should (equal (length (agent-repl--latch-timers latch)) 1))
+    ;; Cleanup
+    (agent-repl--latch-claim latch)))
+
+(ert-deftest agent-repl-test-latch-set-timer-drops-a-late-timer ()
+  "A timer armed after the settle is cancelled instead of recorded."
+  ;; Arrange
+  (let* ((latch (agent-repl--make-latch))
+         (late (run-with-timer 3600 nil #'ignore)))
+    (agent-repl--latch-claim latch)
+    ;; Act
+    (should-not (agent-repl--latch-set-timer latch 'poll late))
+    ;; Assert
+    (should-not (memq late timer-list))
+    (should-not (agent-repl--latch-timers latch))))
+
+(ert-deftest agent-repl-test-latch-set-timer-rejects-a-non-latch ()
+  "A non-latch first argument is a programming error, not a coped-with case."
+  (should-error (agent-repl--latch-set-timer 'not-a-latch 'poll nil)))
+
+(ert-deftest agent-repl-test-latch-claim-rejects-a-non-latch ()
+  "Claiming something that is not a latch signals."
+  (should-error (agent-repl--latch-claim 'not-a-latch)))

@@ -211,21 +211,6 @@ place, so both subjects are the reporter's arguments."
         (should (string-prefix-p "stack deploy FAILED (exit 1)" phase))
         (should (string-prefix-p "agent-repl: stack deploy failed (exit 1)" detail))))))
 
-(ert-deftest agent-repl-test-daemon-deploy-failure-report-is-shared ()
-  "The stack deploy's failure goes through the shared run reporter.
-A hand-rolled second failure path at the deploy site fails here rather
-than drifting from the build's."
-  ;; Arrange
-  (let (reported)
-    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (_args) 1))
-              ((symbol-function 'agent-repl--frontend-run-report-failure)
-               (lambda (phase-subject &rest _) (setq reported phase-subject) "detail")))
-      ;; Act
-      (should-error (agent-repl--frontend-deploy-stack nil))
-      ;; Assert
-      (should (equal reported "stack deploy")))))
-
 (ert-deftest agent-repl-test-daemon-build-missing-script-check-is-shared ()
   "The script-presence assertion signals for an absent script.
 Both build runs gate on this one check, so neither can start a process
@@ -236,6 +221,52 @@ against a script that is not there."
     ;; Act / Assert
     (should-error (agent-repl--frontend-build-assert-script))))
 
+;;;; ---- build-if-stale: the asynchronous run --------------------------------
+;;
+;; The spawn wrapper is shadowed to hand back a fake process, so no build ever
+;; runs; the sentinel is driven by hand with the exit code under test.
+
+(cl-defstruct agent-repl-test--fake-run-proc
+  (live t) (exit 0))
+
+(defvar agent-repl-test--async-run-spawned nil
+  "Argv of every faked async build spawn, oldest first.")
+
+(defvar agent-repl-test--async-run-proc nil
+  "The fake process the most recent faked async build spawn returned.")
+
+(defmacro agent-repl-test--with-async-run (&rest body)
+  "Run BODY with the async build boundary faked and its state reset.
+`agent-repl-test--async-run-spawned' collects the argv of every spawn,
+newest last, and `agent-repl-test--async-run-proc' holds the fake the
+most recent spawn returned."
+  `(let ((agent-repl--frontend-async-run-process nil)
+         (agent-repl--frontend-async-run-request nil)
+         (agent-repl--frontend-async-run-queue nil)
+         (agent-repl-test--async-run-spawned nil)
+         (agent-repl-test--async-run-proc nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-spawn-run-script)
+                (lambda (args)
+                  (setq agent-repl-test--async-run-spawned
+                        (append agent-repl-test--async-run-spawned (list args)))
+                  (setq agent-repl-test--async-run-proc
+                        (make-agent-repl-test--fake-run-proc))))
+               ((symbol-function 'process-live-p)
+                (lambda (p) (if (agent-repl-test--fake-run-proc-p p)
+                                (agent-repl-test--fake-run-proc-live p)
+                              nil)))
+               ((symbol-function 'process-exit-status)
+                (lambda (p) (agent-repl-test--fake-run-proc-exit p)))
+               ((symbol-function 'display-buffer) #'ignore))
+       ,@body)))
+
+(defun agent-repl-test--settle-async-run (exit)
+  "Exit the tracked fake build process with EXIT, driving the real sentinel."
+  (let ((proc agent-repl--frontend-async-run-process))
+    (setf (agent-repl-test--fake-run-proc-live proc) nil)
+    (setf (agent-repl-test--fake-run-proc-exit proc) exit)
+    (agent-repl--frontend-async-run-sentinel proc "finished\n")))
+
 ;;;; ---- deploy-stack: the boot path's whole-stack deploy --------------------
 ;;
 ;; The boot path used to run build-frontend.sh, which covers the shim, the
@@ -243,16 +274,31 @@ against a script that is not there."
 ;; launchd services. A wire-format change could therefore leave a new Emacs
 ;; talking to a daemon built before it.
 
+(ert-deftest agent-repl-test-daemon-deploy-failure-report-is-shared ()
+  "The stack deploy's failure goes through the shared run reporter.
+A hand-rolled second failure path at the deploy site fails here rather
+than drifting from the build's."
+  ;; Arrange
+  (agent-repl-test--with-async-run
+   (let (reported)
+     (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+               ((symbol-function 'agent-repl--frontend-run-report-failure)
+                (lambda (phase-subject &rest _) (setq reported phase-subject) "detail")))
+       ;; Act
+       (agent-repl--frontend-deploy-stack-async nil)
+       (agent-repl-test--settle-async-run 1)
+       ;; Assert
+       (should (equal reported "stack deploy"))))))
+
 (ert-deftest agent-repl-test-daemon-deploy-stack-runs-the-deploy-script ()
   "deploy-stack runs bin/deploy-all.sh, not the narrower build script."
   ;; Arrange
-  (let (captured)
-    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (args) (setq captured args) 0)))
-      ;; Act
-      (agent-repl--frontend-deploy-stack nil)
-      ;; Assert
-      (should (equal (car captured) agent-repl--frontend-deploy-script)))))
+  (agent-repl-test--with-async-run
+   ;; Act
+   (agent-repl--frontend-deploy-stack-async nil)
+   ;; Assert
+   (should (equal (car (car agent-repl-test--async-run-spawned))
+                  agent-repl--frontend-deploy-script))))
 
 (ert-deftest agent-repl-test-daemon-deploy-stack-suppresses-the-daemon-bounce ()
   "deploy-stack always passes --no-daemon-bounce.
@@ -260,35 +306,70 @@ The script's last step restarts the daemon by evaluating a form in Emacs
 over emacsclient.  A call made FROM Emacs would re-enter the session that
 is mid-boot, and the caller starts the daemon directly anyway."
   ;; Arrange
-  (let (captured)
-    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (args) (setq captured args) 0)))
-      ;; Act
-      (agent-repl--frontend-deploy-stack nil)
-      ;; Assert
-      (should (member "--no-daemon-bounce" captured)))))
+  (agent-repl-test--with-async-run
+   ;; Act
+   (agent-repl--frontend-deploy-stack-async nil)
+   ;; Assert
+   (should (member "--no-daemon-bounce" (car agent-repl-test--async-run-spawned)))))
 
 (ert-deftest agent-repl-test-daemon-deploy-stack-omits-force-by-default ()
   "Without FORCE the deploy argv carries no --force."
-  (let (captured)
-    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (args) (setq captured args) 0)))
-      (agent-repl--frontend-deploy-stack nil)
-      (should-not (member "--force" captured)))))
+  (agent-repl-test--with-async-run
+   (agent-repl--frontend-deploy-stack-async nil)
+   (should-not (member "--force" (car agent-repl-test--async-run-spawned)))))
 
 (ert-deftest agent-repl-test-daemon-deploy-stack-passes-force-flag ()
   "With FORCE the deploy argv appends --force."
-  (let (captured)
-    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (args) (setq captured args) 0)))
-      (agent-repl--frontend-deploy-stack t)
-      (should (member "--force" captured)))))
+  (agent-repl-test--with-async-run
+   (agent-repl--frontend-deploy-stack-async t)
+   (should (member "--force" (car agent-repl-test--async-run-spawned)))))
 
 (ert-deftest agent-repl-test-daemon-deploy-stack-surfaces-a-failed-deploy ()
-  "A non-zero deploy exit signals rather than launching against stale code."
-  (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-             (lambda (_args) 1)))
-    (should-error (agent-repl--frontend-deploy-stack nil))))
+  "A non-zero deploy exit reports the failure to its continuation.
+The launch that would otherwise run against stale code is what the
+continuation gates, so the failure has to REACH it rather than signal
+into a process sentinel that would swallow it."
+  (agent-repl-test--with-async-run
+   (let (detail)
+     (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+       (agent-repl--frontend-deploy-stack-async nil nil (lambda (d) (setq detail d)))
+       (agent-repl-test--settle-async-run 1))
+     (should (string-match-p "exit 1" (or detail ""))))))
+
+(ert-deftest agent-repl-test-daemon-deploy-stack-never-blocks-the-main-thread ()
+  "The whole-stack deploy spawns; it never runs the blocking script wrapper.
+A `call-process' here held the main thread for the whole build, which is
+what starved the 1Hz heartbeat and the workspace update chain and burned
+the daemon's command deadlines against an Emacs that could not answer."
+  (agent-repl-test--with-async-run
+   (let (blocked)
+     (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+                (lambda (_args) (setq blocked t) 0)))
+       ;; Act
+       (agent-repl--frontend-deploy-stack-async nil)
+       ;; Assert
+       (should-not blocked)
+       (should (equal (length agent-repl-test--async-run-spawned) 1))))))
+
+(ert-deftest agent-repl-test-daemon-deploy-stack-errors-on-missing-script ()
+  "A missing deploy script signals rather than reporting a failed deploy."
+  (agent-repl-test--with-async-run
+   (let ((agent-repl--frontend-deploy-script "/agent-repl-nonexistent/deploy.sh"))
+     (should-error (agent-repl--frontend-deploy-stack-async nil))
+     (should-not agent-repl-test--async-run-spawned))))
+
+(ert-deftest agent-repl-test-daemon-deploy-shares-the-build-queue ()
+  "A deploy and a build never run as two overlapping processes.
+Both write the same artifacts and share one capture buffer, so the second
+request queues behind the first instead of racing it."
+  (agent-repl-test--with-async-run
+   ;; Arrange
+   (agent-repl--frontend-deploy-stack-async nil)
+   ;; Act
+   (let ((outcome (agent-repl--frontend-build-targets-async '("webapp"))))
+     ;; Assert
+     (should (eq outcome 'queued))
+     (should (equal (length agent-repl-test--async-run-spawned) 1)))))
 
 ;;;; ---- build-if-stale: failure surfacing -----------------------------------
 
@@ -317,114 +398,68 @@ is mid-boot, and the caller starts the daemon directly anyway."
     ;; Act / Assert
     (should (eq 0 (agent-repl--frontend-build-if-stale nil)))))
 
-;;;; ---- build-if-stale: the asynchronous run --------------------------------
-;;
-;; The spawn wrapper is shadowed to hand back a fake process, so no build ever
-;; runs; the sentinel is driven by hand with the exit code under test.
-
-(cl-defstruct agent-repl-test--fake-build-proc
-  (live t) (exit 0))
-
-(defvar agent-repl-test--async-build-spawned nil
-  "Argv of every faked async build spawn, oldest first.")
-
-(defvar agent-repl-test--async-build-proc nil
-  "The fake process the most recent faked async build spawn returned.")
-
-(defmacro agent-repl-test--with-async-build (&rest body)
-  "Run BODY with the async build boundary faked and its state reset.
-`agent-repl-test--async-build-spawned' collects the argv of every spawn,
-newest last, and `agent-repl-test--async-build-proc' holds the fake the
-most recent spawn returned."
-  `(let ((agent-repl--frontend-async-build-process nil)
-         (agent-repl--frontend-async-build-request nil)
-         (agent-repl--frontend-async-build-queue nil)
-         (agent-repl-test--async-build-spawned nil)
-         (agent-repl-test--async-build-proc nil))
-     (cl-letf (((symbol-function 'agent-repl--frontend-spawn-build-script)
-                (lambda (args)
-                  (setq agent-repl-test--async-build-spawned
-                        (append agent-repl-test--async-build-spawned (list args)))
-                  (setq agent-repl-test--async-build-proc
-                        (make-agent-repl-test--fake-build-proc))))
-               ((symbol-function 'process-live-p)
-                (lambda (p) (if (agent-repl-test--fake-build-proc-p p)
-                                (agent-repl-test--fake-build-proc-live p)
-                              nil)))
-               ((symbol-function 'process-exit-status)
-                (lambda (p) (agent-repl-test--fake-build-proc-exit p)))
-               ((symbol-function 'display-buffer) #'ignore))
-       ,@body)))
-
-(defun agent-repl-test--settle-async-build (exit)
-  "Exit the tracked fake build process with EXIT, driving the real sentinel."
-  (let ((proc agent-repl--frontend-async-build-process))
-    (setf (agent-repl-test--fake-build-proc-live proc) nil)
-    (setf (agent-repl-test--fake-build-proc-exit proc) exit)
-    (agent-repl--frontend-async-build-sentinel proc "finished\n")))
-
 (ert-deftest agent-repl-test-daemon-async-build-spawns-the-shared-argv ()
   "The asynchronous run spawns the script with the shared argv shape."
-  (agent-repl-test--with-async-build
+  (agent-repl-test--with-async-run
    ;; Act
    (let ((outcome (agent-repl--frontend-build-targets-async '("webapp"))))
      ;; Assert
      (should (eq outcome 'started))
-     (should (equal agent-repl-test--async-build-spawned
+     (should (equal agent-repl-test--async-run-spawned
                     (list (agent-repl--frontend-build-args '("webapp") nil)))))))
 
 (ert-deftest agent-repl-test-daemon-async-build-runs-success-callback ()
   "A zero exit runs the success continuation."
-  (agent-repl-test--with-async-build
+  (agent-repl-test--with-async-run
    ;; Arrange
    (let (won)
      (agent-repl--frontend-build-targets-async
       '("webapp") nil (lambda () (setq won t)) nil)
      ;; Act
-     (agent-repl-test--settle-async-build 0)
+     (agent-repl-test--settle-async-run 0)
      ;; Assert
      (should won))))
 
 (ert-deftest agent-repl-test-daemon-async-build-runs-failure-callback ()
   "A non-zero exit runs the failure continuation with the failure detail."
-  (agent-repl-test--with-async-build
+  (agent-repl-test--with-async-run
    ;; Arrange
    (let (detail)
      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
        (agent-repl--frontend-build-targets-async
         '("webapp") nil nil (lambda (d) (setq detail d)))
        ;; Act
-       (agent-repl-test--settle-async-build 2))
+       (agent-repl-test--settle-async-run 2))
      ;; Assert
      (should (string-match-p "exit 2" (or detail ""))))))
 
 (ert-deftest agent-repl-test-daemon-async-build-failure-skips-success-callback ()
   "A non-zero exit never runs the success continuation."
-  (agent-repl-test--with-async-build
+  (agent-repl-test--with-async-run
    ;; Arrange
    (let (won)
      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
        (agent-repl--frontend-build-targets-async
         '("webapp") nil (lambda () (setq won t)) nil)
        ;; Act
-       (agent-repl-test--settle-async-build 1))
+       (agent-repl-test--settle-async-run 1))
      ;; Assert
      (should-not won))))
 
 (ert-deftest agent-repl-test-daemon-async-build-does-not-stack-a-second-process ()
   "A request arriving mid-build queues instead of spawning a second build."
-  (agent-repl-test--with-async-build
+  (agent-repl-test--with-async-run
    ;; Arrange
    (agent-repl--frontend-build-targets-async '("webapp"))
    ;; Act
    (let ((outcome (agent-repl--frontend-build-targets-async '("shim"))))
      ;; Assert — still exactly one spawn.
      (should (eq outcome 'queued))
-     (should (equal (length agent-repl-test--async-build-spawned) 1)))))
+     (should (equal (length agent-repl-test--async-run-spawned) 1)))))
 
 (ert-deftest agent-repl-test-daemon-async-build-coalesces-identical-requests ()
   "Two identical requests behind one build share a single queued run."
-  (agent-repl-test--with-async-build
+  (agent-repl-test--with-async-run
    ;; Arrange
    (agent-repl--frontend-build-targets-async '("webapp"))
    (agent-repl--frontend-build-targets-async '("webapp"))
@@ -432,24 +467,24 @@ most recent spawn returned."
    (let ((outcome (agent-repl--frontend-build-targets-async '("webapp"))))
      ;; Assert
      (should (eq outcome 'coalesced))
-     (should (equal (length agent-repl--frontend-async-build-queue) 1)))))
+     (should (equal (length agent-repl--frontend-async-run-queue) 1)))))
 
 (ert-deftest agent-repl-test-daemon-async-build-runs-the-queued-run-after ()
   "The queued build starts once the in-flight one settles."
-  (agent-repl-test--with-async-build
+  (agent-repl-test--with-async-run
    ;; Arrange
    (agent-repl--frontend-build-targets-async '("webapp"))
    (agent-repl--frontend-build-targets-async '("shim"))
    ;; Act
-   (agent-repl-test--settle-async-build 0)
+   (agent-repl-test--settle-async-run 0)
    ;; Assert
-   (should (equal agent-repl-test--async-build-spawned
+   (should (equal agent-repl-test--async-run-spawned
                   (list (agent-repl--frontend-build-args '("webapp") nil)
                         (agent-repl--frontend-build-args '("shim") nil))))))
 
 (ert-deftest agent-repl-test-daemon-async-build-coalesced-waiters-all-run ()
   "Every waiter coalesced onto a queued run gets its continuation."
-  (agent-repl-test--with-async-build
+  (agent-repl-test--with-async-run
    ;; Arrange
    (let ((won 0))
      (agent-repl--frontend-build-targets-async '("webapp"))
@@ -458,37 +493,37 @@ most recent spawn returned."
      (agent-repl--frontend-build-targets-async
       '("shim") nil (lambda () (setq won (1+ won))) nil)
      ;; Act — settle the in-flight run, then the queued one it starts.
-     (agent-repl-test--settle-async-build 0)
-     (agent-repl-test--settle-async-build 0)
+     (agent-repl-test--settle-async-run 0)
+     (agent-repl-test--settle-async-run 0)
      ;; Assert
      (should (equal won 2)))))
 
 (ert-deftest agent-repl-test-daemon-async-build-drains-past-a-throwing-waiter ()
   "A continuation that throws does not strand the queued build behind it."
-  (agent-repl-test--with-async-build
+  (agent-repl-test--with-async-run
    ;; Arrange
    (agent-repl--frontend-build-targets-async
     '("webapp") nil (lambda () (error "waiter blew up")) nil)
    (agent-repl--frontend-build-targets-async '("shim"))
    ;; Act
-   (should-error (agent-repl-test--settle-async-build 0))
+   (should-error (agent-repl-test--settle-async-run 0))
    ;; Assert — the queued run was started anyway.
-   (should (equal (length agent-repl-test--async-build-spawned) 2))))
+   (should (equal (length agent-repl-test--async-run-spawned) 2))))
 
 (ert-deftest agent-repl-test-daemon-async-build-errors-on-missing-script ()
   "A missing build script signals rather than reporting a failed build."
-  (agent-repl-test--with-async-build
+  (agent-repl-test--with-async-run
    ;; Arrange
    (let ((agent-repl--frontend-build-script "/agent-repl-nonexistent/build.sh"))
      ;; Act / Assert
      (should-error (agent-repl--frontend-build-targets-async '("webapp")))
-     (should-not agent-repl-test--async-build-spawned))))
+     (should-not agent-repl-test--async-run-spawned))))
 
 (ert-deftest agent-repl-test-daemon-async-build-settle-without-a-request-signals ()
   "Settling with nothing in flight is a broken invariant, not a no-op."
-  (agent-repl-test--with-async-build
+  (agent-repl-test--with-async-run
    ;; Act / Assert
-   (should-error (agent-repl--frontend-async-build-settle 0))))
+   (should-error (agent-repl--frontend-async-run-settle 0))))
 
 ;;;; ---- timer-backed lifecycle waiting --------------------------------------
 
@@ -691,8 +726,9 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
          (fresh (agent-repl-test--make-live-daemon 777)))
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
                 (lambda (_open absent) (funcall absent 'no-listener)))
-               ((symbol-function 'agent-repl--frontend-deploy-stack)
-                (lambda (&optional _f) (setq built t) 0))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f on-success _on-failure)
+                  (setq built t) (when on-success (funcall on-success)) 'started))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () fresh)))
        ;; Act
@@ -711,8 +747,9 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
      (setq agent-repl--frontend-daemon-process old)
      (cl-letf (((symbol-function 'agent-repl--frontend-turn-active-sessions)
                 (lambda () nil))
-               ((symbol-function 'agent-repl--frontend-deploy-stack)
-                (lambda (&optional _f) 0))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f on-success _on-failure)
+                  (when on-success (funcall on-success)) 'started))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () new)))
        ;; Act
@@ -815,8 +852,9 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
    (let ((built nil) (spawned nil))
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
                 (lambda (open _absent) (funcall open)))
-               ((symbol-function 'agent-repl--frontend-deploy-stack)
-                (lambda (&optional _f) (setq built t) 0))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f on-success _on-failure)
+                  (setq built t) (when on-success (funcall on-success)) 'started))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
        ;; Act
@@ -834,8 +872,9 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
          (fresh (agent-repl-test--make-live-daemon 9)))
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
                 (lambda (open _absent) (funcall open)))
-               ((symbol-function 'agent-repl--frontend-deploy-stack)
-                (lambda (&optional _f) (setq built t) 0))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f on-success _on-failure)
+                  (setq built t) (when on-success (funcall on-success)) 'started))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () fresh)))
        ;; Act
@@ -1687,11 +1726,13 @@ by position."
   "A failed whole-stack deploy names itself rather than the narrower build."
   ;; Arrange
   (agent-repl-test--with-phase-echo lines
-    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (agent-repl-test--seed-build-output "protoc: not found\n"))
-              ((symbol-function 'display-buffer) #'ignore))
-      ;; Act
-      (should-error (agent-repl--frontend-deploy-stack nil)))
+    (agent-repl-test--with-async-run
+     (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+       ;; Act
+       (agent-repl--frontend-deploy-stack-async nil)
+       (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
+         (insert "protoc: not found\n"))
+       (agent-repl-test--settle-async-run 3)))
     ;; Assert
     (should (agent-repl-test--phase-line-p
              lines "stack deploy FAILED" "protoc: not found"))))
@@ -2334,3 +2375,145 @@ skips the drain that reconstructs merges and releases leases."
 (provide 'test-daemon)
 
 ;;; test-daemon.el ends here
+
+;;;; ---- ensure: the launch waits for the deploy -----------------------------
+;;
+;; The deploy no longer blocks, so "the daemon is running" is a fact that
+;; arrives later.  These pin that the launch and the caller's continuation
+;; both wait for it, and that a failed deploy never launches against stale
+;; code.
+
+(ert-deftest agent-repl-test-daemon-ensure-launches-only-after-the-deploy ()
+  "The spawn happens on the deploy's success continuation, not beside it."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let (deploy-done spawned
+         (fresh (agent-repl-test--make-live-daemon 5)))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (_open absent) (funcall absent 'no-listener)))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f on-success _on-failure)
+                  (setq deploy-done on-success) 'started))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) fresh)))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon)
+       ;; Assert — nothing is launched while the deploy is still running.
+       (should-not spawned)
+       (funcall deploy-done)
+       (should spawned)))))
+
+(ert-deftest agent-repl-test-daemon-ensure-runs-its-continuation-after-launch ()
+  "ON-ENSURED runs once the daemon this ensure is responsible for is up."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let (ensured (fresh (agent-repl-test--make-live-daemon 6)))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (_open absent) (funcall absent 'no-listener)))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f on-success _on-failure)
+                  (funcall on-success) 'started))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () fresh)))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon nil (lambda () (setq ensured t)) #'ignore)
+       ;; Assert
+       (should ensured)))))
+
+(ert-deftest agent-repl-test-daemon-ensure-failed-deploy-never-launches ()
+  "A failed deploy reports to ON-FAILURE and spawns nothing."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let (detail spawned)
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (_open absent) (funcall absent 'no-listener)))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f _on-success on-failure)
+                  (funcall on-failure "stack deploy failed (exit 1)") 'started))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) nil)))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon
+        nil #'ignore (lambda (d) (setq detail d)))
+       ;; Assert
+       (should-not spawned)
+       (should (string-match-p "exit 1" detail))))))
+
+(ert-deftest agent-repl-test-daemon-ensure-reports-a-failed-launch ()
+  "A launch that signals reaches ON-FAILURE rather than dying in the sentinel."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let (detail)
+     (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+               ((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (_open absent) (funcall absent 'no-listener)))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f on-success _on-failure)
+                  (funcall on-success) 'started))
+               ((symbol-function 'agent-repl--frontend-start-daemon)
+                (lambda () (error "daemon binary missing after build"))))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon
+        nil #'ignore (lambda (d) (setq detail d)))
+       ;; Assert
+       (should (string-match-p "daemon binary missing" detail))))))
+
+(ert-deftest agent-repl-test-daemon-ensure-adoption-runs-the-continuation ()
+  "An adopted foreign daemon IS the running daemon, so the waiter proceeds."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let (ensured deployed)
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (open _absent) (funcall open)))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&rest _) (setq deployed t) 'started)))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon nil (lambda () (setq ensured t)) #'ignore)
+       ;; Assert
+       (should ensured)
+       (should-not deployed)))))
+
+(ert-deftest agent-repl-test-daemon-ensure-declined-reports-the-shared-detail ()
+  "An ensure declined by the auto-start gate reports the one shared detail."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((agent-repl-frontend-auto-start nil) detail)
+     ;; Act
+     (should-not (agent-repl--ensure-frontend-daemon
+                  nil #'ignore (lambda (d) (setq detail d))))
+     ;; Assert
+     (should (equal detail agent-repl--frontend-daemon-not-started-detail)))))
+
+(ert-deftest agent-repl-test-daemon-after-ensured-requires-continuations ()
+  "The canonical ensure door refuses non-callable continuations."
+  (should-error (agent-repl--frontend-after-daemon-ensured nil nil)))
+
+;;;; ---- the script-presence assertion is one check --------------------------
+
+(ert-deftest agent-repl-test-daemon-assert-script-signals-for-an-absent-path ()
+  "The shared assertion signals, naming its subject."
+  (let ((err (should-error
+              (agent-repl--frontend-assert-script
+               "/agent-repl-nonexistent/x.sh" "stack deploy"))))
+    (should (string-match-p "stack deploy" (error-message-string err)))))
+
+(ert-deftest agent-repl-test-daemon-assert-script-passes-for-a-present-path ()
+  "A script that exists passes the assertion silently."
+  (should-not (agent-repl--frontend-assert-script
+               agent-repl--frontend-build-script "frontend build")))
+
+(ert-deftest agent-repl-test-daemon-build-assertion-uses-the-shared-check ()
+  "The build gate delegates to the shared assertion rather than its own copy."
+  (let (asked)
+    (cl-letf (((symbol-function 'agent-repl--frontend-assert-script)
+               (lambda (path _subject) (setq asked path))))
+      (agent-repl--frontend-build-assert-script)
+      (should (equal asked agent-repl--frontend-build-script)))))
+
+(ert-deftest agent-repl-test-daemon-deploy-assertion-uses-the-shared-check ()
+  "The deploy gate delegates to the shared assertion rather than its own copy."
+  (let (asked)
+    (cl-letf (((symbol-function 'agent-repl--frontend-assert-script)
+               (lambda (path _subject) (setq asked path))))
+      (agent-repl--frontend-deploy-assert-script)
+      (should (equal asked agent-repl--frontend-deploy-script)))))
