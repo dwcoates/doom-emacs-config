@@ -1965,6 +1965,39 @@ in WS's own perspective rather than the caller's."
         (should (equal ran-in "gen-ws"))
         (should (equal current "caller"))))))
 
+(ert-deftest agent-repl-test-background-anchor-evicts-foreign-windows-before-fn ()
+  "The anchor scrubs windows owned by other workspaces BEFORE calling FN.
+Activating a just-materialized workspace leaves the frame showing the
+previous workspace's windows, so without the scrub FN's panel build
+mounts WS's page over the page the user is watching."
+  (agent-repl-test--with-clean-state
+    (let ((current "caller") (events nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () current))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq current ws)))
+                ((symbol-function 'agent-repl--restore-focus)
+                 (lambda (persp &rest _) (setq current persp)))
+                ((symbol-function 'agent-repl--clean-frame-foreign-windows)
+                 (lambda (ws) (push (cons 'clean ws) events))))
+        (agent-repl--call-in-background-workspace
+         "gen-ws" (lambda () (push (cons 'fn current) events)))
+        (should (equal (reverse events)
+                       '((clean . "gen-ws") (fn . "gen-ws"))))))))
+
+(ert-deftest agent-repl-test-background-anchor-scrubs-even-without-a-switch ()
+  "A WS that is already current still gets the frame scrubbed: the
+invariant FN depends on is about the frame's contents, not about whether
+a perspective switch happened."
+  (agent-repl-test--with-clean-state
+    (let ((cleaned nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "here"))
+                ((symbol-function 'agent-repl--restore-focus) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-switch) #'ignore)
+                ((symbol-function 'agent-repl--clean-frame-foreign-windows)
+                 (lambda (ws) (push ws cleaned))))
+        (agent-repl--call-in-background-workspace "here" #'ignore)
+        (should (equal cleaned '("here")))))))
+
 (ert-deftest agent-repl-test-background-anchor-skips-a-redundant-switch ()
   "A WS that is ALREADY current is not switched to — the foreground
 `SPC o c' path must not pay a persp round trip to reach itself."
