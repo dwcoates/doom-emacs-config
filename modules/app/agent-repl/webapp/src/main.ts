@@ -568,6 +568,7 @@ async function boot(): Promise<void> {
   // at all. The pickers below kept the same guard hand-rolled as an
   // `innerHTML !== next` compare, which read the live tree back on every
   // frame; they share this one now.
+  const infoSlot = new HtmlSlot(infoEl);
   const ungatedBannerSlot = new HtmlSlot(ungatedBannerEl);
   const drainBannerSlot = new HtmlSlot(drainBannerEl);
   const mergeDequeueSlot = new HtmlSlot(mergeDequeueEl);
@@ -683,8 +684,12 @@ async function boot(): Promise<void> {
     // resolution. The daemon and this webapp deploy together, so the views
     // arrive as soon as the daemon does.
     const ws = s.cwd;
-    infoEl.innerHTML =
-      topbarViewHtml(store.topbar(ws)) + tokensDisclosureHtml(store.tokenBreakdown(ws), tokensMenuOpen);
+    // Through the same guard as the gate and the dequeue card below: the strip
+    // carries the tokens chip, so an unconditional rewrite would destroy it
+    // mid-press and the browser would fire no click at all.
+    infoSlot.paint(
+      topbarViewHtml(store.topbar(ws)) + tokensDisclosureHtml(store.tokenBreakdown(ws), tokensMenuOpen),
+    );
     // The idle-with-live-async signal breathes as the sidebar's amber dot on
     // this session's own row rather than as strip text. The flag is the feed
     // renderer's own gate reading (idle + live async), read back here so the
