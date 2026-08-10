@@ -30,6 +30,13 @@
      than a flat fill. The black stays well under the sidebar's, and the light
      theme carries the highlight brighter, so the effect is a quiet 3D hint. */
   --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 7%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 35%, transparent);
+  /* The shadow band that crosses a working prompt bubble's fill left to right
+     (see `.bubble.user` and the `bubble-wave` keyframes). A wash of black, so
+     the band reads as a shadow passing UNDER the bubble's own color rather
+     than as a second color competing with it, and faint enough that the text
+     over it never dims. The dark theme deepens it, since a faint wash reads as
+     nothing on the dark bubble fills. */
+  --bubble-wave: color-mix(in srgb, #000000 7%, transparent);
   /* The depth cue at the very bottom edge of the window (see body::after): a
      soft, upward-fading wash of black pinned across the full width, seating the
      GUI a plane BELOW the Emacs input window docked beneath it rather than
@@ -226,6 +233,10 @@
        would glow rather than hint at depth on the dark washes. Still kept well
        under the dark sidebar's black, so the bubble stays the subtler lift. */
     --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 30%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
+    /* Deeper than the light theme's wave: the same 7% black that reads as a
+       passing shadow on the pale light-theme bubble is invisible on the dark
+       one, so the band carries more black to still register. */
+    --bubble-wave: color-mix(in srgb, #000000 26%, transparent);
     /* Deeper than the light theme's bottom wash: a faint gradient reads as
        nothing against the dark feed, so the seam cue needs a heavier black to
        still register. Still kept just under the dark sidebar's black, so the
@@ -1130,9 +1141,8 @@ pre {
      reads as a gently raised, top-lit card rather than a flat fill. The token
      stays far subtler than the sidebar's floating-dock lift (see
      --bubble-shadow). box-shadow is a static token here, not itself animated,
-     so the depth holds steady while the prompt bubble rule below (the user
-     variant's own `transform: scale` breath) grows and shrinks the bubble
-     around it. */
+     so the depth holds steady while the prompt bubble rule below pans its
+     thinking wave across the fill underneath it. */
   box-shadow: var(--bubble-shadow);
   display: flex;
   align-items: flex-start;
@@ -1151,43 +1161,55 @@ pre {
      and never widens the bubble, while a bubble too small to hold the stamp
      (a bare `hello`) grows only just enough to contain the stamp. */
   display: grid;
-  /* A resting prompt bubble breathes: a slow, continuous scale oscillation
-     around 1, subtle enough to read as "alive" rather than as motion. The
-     5.2s period sits in a natural resting-breath range (comfortably slower
-     than the footer's 2.6s liveness pulse, `.pfooter-breath`, which encodes
-     a signal rather than an ambience), and `transform` (not width/height)
-     means the animation never triggers layout — box-shadow and everything
-     else in `.bubble` stays untouched by it.
+  /* A working prompt bubble carries a THINKING WAVE: a soft shadow band that
+     crosses its own background from left to right, over and over. The bubble
+     and its text hold ONE STATIC SIZE while it runs — nothing here scales,
+     translates, or reflows — so the motion reads as progress travelling
+     through the turn rather than as the box itself inflating and deflating,
+     which is the conventional way a surface says "still working".
 
-     The period is duplicated in `BUBBLE_BREATH_PERIOD_MS` (breathing.ts),
+     The band is a two-viewport-wide gradient panned across a one-viewport
+     window (`background-size: 200%`, `background-repeat: no-repeat`), so the
+     only animated property is `background-position-x`: no layout, no
+     geometry, and the `--bubble-shadow` depth and the state border stay
+     exactly where they were laid out. The gradient is declared AFTER the
+     `background` shorthand above, which would otherwise reset it.
+
+     The 3.2s period is duplicated in `BUBBLE_WAVE_PERIOD_MS` (breathing.ts),
      which every render uses to emit a negative `animation-delay` inline: a
-     rebuilt bubble node would otherwise restart this animation at 0% and snap
-     visibly back to the deflated end mid-cycle. The two MUST stay equal.
+     rebuilt bubble node would otherwise restart this animation at 0% and jump
+     the band visibly back to the left edge mid-pass. The two MUST stay equal.
 
      NOTHING INSIDE THE BUBBLE CARRIES ITS OWN COPY OF THIS ANIMATION. The
-     body is a child of this transformed element, so it is already scaled by
-     this rule; a second `bubble-breath` on `.bubble-body` MULTIPLIED the two
-     scales and swung the text at roughly twice the bubble's amplitude. What
-     locks bubble and text together is structural, not a matched pair of
-     declarations: the body inherits this transform, so it has the same start,
-     the same rate, and the same phase by construction, with no second rule
-     that could drift. */
-  animation: bubble-breath 5.2s ease-in-out infinite;
-  transform-origin: center;
+     wave is painted on this element's own fill, and the body is drawn over
+     that fill; a second `bubble-wave` on `.bubble-body` would pan a second
+     band across the text's own box at its own phase. One animated element
+     means there is nothing for a second phase to drift against. */
+  background-image: linear-gradient(90deg, transparent 0%, var(--bubble-wave) 50%, transparent 100%);
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: bubble-wave 3.2s linear infinite;
 }
-/* A prompt the webapp has drawn but the daemon has not yet acknowledged holds
-   still. The bubble appears the instant the user hits send — that is the whole
-   point of minting it locally — and the breath above is what the daemon's
-   receipt adds to it, so the motion starting is the acknowledgement itself
-   rather than an ornament that happens to arrive with it. `animation: none`
-   rather than a paused state: there is no phase worth preserving, and the
-   render emits no `animation-delay` for such a bubble either. */
+/* A prompt the webapp has drawn but the daemon has not yet acknowledged rests
+   as a plain fill. The bubble appears the instant the user hits send — that is
+   the whole point of minting it locally — and the wave above is what the
+   daemon's receipt adds to it, so the motion starting is the acknowledgement
+   itself rather than an ornament that happens to arrive with it. The band is
+   dropped outright rather than merely paused: a paused wave would park a
+   static shadow across the fill, which says "working" just as loudly as a
+   moving one. The render emits no `animation-delay` for such a bubble either. */
 .bubble.user.unacked {
   animation: none;
+  background-image: none;
 }
-@keyframes bubble-breath {
-  0%, 100% { transform: scale(0.995); }
-  50% { transform: scale(1.005); }
+/* Left to right, entering fully off the left edge and leaving fully off the
+   right. Percentages in `background-position` measure the image's travel
+   across the leftover (container − image), which is NEGATIVE for an image
+   wider than its box — so the larger percentage is the LEFTMOST position and
+   the pass runs from 200% down to -100%, not the other way round. */
+@keyframes bubble-wave {
+  from { background-position-x: 200%; }
+  to { background-position-x: -100%; }
 }
 /* A markdown fenced code block the user typed into their prompt renders as
    the same card the agent's markdown fences get (.md pre.md-code), but the
@@ -1341,8 +1363,10 @@ pre {
    announces itself now, so neither a bubble's background nor its text tail
    carries a liveness signal any more. */
 
-/* Markdown-rendered assistant text */
-.md { font-size: 0.9rem; line-height: 1.5; }
+/* Markdown-rendered assistant text. The leading is a token because the
+   response bubble's 25-line height cap is measured in these lines (see
+   --cap-line-h), so the two must never drift apart. */
+.md { font-size: 0.9rem; --md-line-h: 1.5; line-height: var(--md-line-h); }
 /* The markdown lives one level in, inside the bubble's body column, so the
    flush-with-the-bubble-edge rules reach through it. */
 .md .bubble-body > :first-child { margin-top: 0; }
@@ -1671,14 +1695,33 @@ pre {
 .tab-chip.active { color: var(--fg); border-color: var(--accent); }
 /* N-line preview caps, one shared mechanic: --cap-lines is the visible
    line budget (Read and Edit diffs get 10, Bash command and output get
-   5 each, independently scrollable) and --cap-extra absorbs the
-   .tool-output dashed-divider padding where inherited. Everything past
-   the cap stays reachable by scrolling. */
+   5 each, independently scrollable, and the agent's response bubble gets
+   25), --cap-line-h is the line box those lines are counted in, and
+   --cap-extra absorbs the .tool-output dashed-divider padding where
+   inherited. Everything past the cap stays reachable by scrolling.
+
+   --cap-line-h exists because the budget is a count of TEXT LINES, and the
+   monospace previews and the response bubble do not set their text at the
+   same leading. The default is the previews' own 1.4, which the rule below
+   sets on them; the response bubble overrides it with the leading its
+   markdown actually renders at, so 25 lines means 25 of ITS lines. */
+.tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content,
+.bubble.assistant > .bubble-body {
+  overflow-y: auto;
+  max-height: calc(var(--cap-lines) * var(--cap-line-h, 1.4em) + var(--cap-extra, 0px));
+}
+/* The monospace previews' own leading, which --cap-line-h defaults to. The
+   response bubble is deliberately absent: its leading is the markdown's. */
 .tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content {
   line-height: 1.4;
-  overflow-y: auto;
-  max-height: calc(var(--cap-lines) * 1.4em + var(--cap-extra, 0px));
 }
+/* The agent's answer caps at 25 of its own text lines and scrolls past that,
+   so one enormous response cannot push the whole rest of the feed off screen.
+   The cap rides the BODY rather than the bubble, so the corner stamp is never
+   scrolled away from the answer it labels, and the line box is read from the
+   markdown's own leading token rather than restated here — a change to `.md`'s
+   line-height moves the cap with it instead of silently mis-measuring it. */
+.bubble.assistant > .bubble-body { --cap-lines: 25; --cap-line-h: calc(var(--md-line-h) * 1em); }
 .tool-read-output { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
 .bash-input { --cap-lines: 5; }
 .bash-output { --cap-lines: 5; --cap-extra: calc(0.35rem + 1px); }
@@ -2519,20 +2562,23 @@ pre {
     width: 100%;
     opacity: 0.5;
   }
-  /* The prompt bubble's breath marks one fact — the daemon has the prompt —
-     which the feed goes on to state in full a moment later (the turn runs, the
-     footer moves, the answer arrives), so it simply stops here rather than
-     slowing, as the spinner and footer breath above do for signals nothing
-     else restates. A reader in this mode therefore cannot tell an unacked
-     bubble from an acknowledged one, and loses nothing that the rest of the
-     feed does not say. Stopping rather than re-timing also keeps the period
-     a single constant: the negative `animation-delay` each bubble renders
-     with is computed against one `BUBBLE_BREATH_PERIOD_MS`, and a reduced
-     motion override that merely LENGTHENED the cycle would leave that delay
-     seeking to the wrong phase here. The body needs no entry — it never had
-     an animation of its own, only this element's inherited transform. */
+  /* The prompt bubble's thinking wave marks one fact — the daemon has the
+     prompt — which the feed goes on to state in full a moment later (the turn
+     runs, the footer moves, the answer arrives), so it simply stops here
+     rather than slowing, as the spinner and footer breath above do for signals
+     nothing else restates. A reader in this mode therefore cannot tell an
+     unacked bubble from an acknowledged one, and loses nothing that the rest
+     of the feed does not say. Stopping rather than re-timing also keeps the
+     period a single constant: the negative `animation-delay` each bubble
+     renders with is computed against one `BUBBLE_WAVE_PERIOD_MS`, and a
+     reduced motion override that merely LENGTHENED the pass would leave that
+     delay seeking to the wrong phase here. The gradient goes with it, exactly
+     as it does for an unacked bubble: a stopped wave would otherwise park a
+     static shadow band across the fill. The body needs no entry — it never
+     had an animation of its own. */
   .bubble.user {
     animation: none;
+    background-image: none;
   }
 }
 
