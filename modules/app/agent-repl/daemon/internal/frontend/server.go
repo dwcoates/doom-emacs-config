@@ -493,6 +493,21 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) int {
 // the publication serialization: Broadcast holds the reader side, the release
 // flush holds the writer side.
 func (s *Server) broadcastGated(frame *frontendv1.FrontendFrame) int {
+	return s.broadcastGatedTo(frame, nil)
+}
+
+// broadcastGatedTo is broadcastGated narrowed to an AUDIENCE. A nil audience
+// means every client, which is the ordinary fan-out; a non-nil one admits only
+// the kinds it accepts.
+//
+// The audience is a delivery filter layered ON TOP of the existing host-only
+// and scope rules, never a way around them: a frame barred from a GUI client
+// by isHostOnlyFrame stays barred no matter what audience a caller names. It
+// exists so a caller that must report delivery PER CARRIER (the intentional-
+// restart announcement, which tells the shutdown log which clients were told
+// and which were not) can count each kind separately instead of receiving one
+// undifferentiated total.
+func (s *Server) broadcastGatedTo(frame *frontendv1.FrontendFrame, audience func(ClientKind) bool) int {
 	if !s.requireSessionPublication(frame) {
 		return 0
 	}
@@ -517,6 +532,9 @@ func (s *Server) broadcastGated(frame *frontendv1.FrontendFrame) int {
 	delivered := 0
 	for _, cl := range clients {
 		if isHostOnlyFrame(frame) && !cl.kind.isHost() {
+			continue
+		}
+		if audience != nil && !audience(cl.kind) {
 			continue
 		}
 		var (
