@@ -282,10 +282,12 @@ export function AsyncBubbleCard(
   const face = `${BUBBLE_KIND_WORD[bubble.kind.case]} · ${capLabel(bubbleLabel(bubble), 60)} · ${livenessFace(bubble.liveness)}`;
   // Children are resolved by POINTER through the registry — one lookup, no
   // walk into any payload — MINUS the ones this bubble's own conversation
-  // already draws attached to the card that spawned them.
-  const attached = bubblesDrawnByOwnCards(bubble, ctx);
-  const children = ctx.registry
-    .children(bubble.id)
+  // already draws attached to the card that spawned them. The bubble with no
+  // children at all never decomposes its emissions to answer a question about
+  // an empty list.
+  const pointed = ctx.registry.children(bubble.id);
+  const attached = pointed.length === 0 ? EMPTY_ID_SET : bubblesDrawnByOwnCards(bubble, ctx);
+  const children = pointed
     .filter((child) => !attached.has(child.id))
     .map((child) => `<div class="feed-child">${AsyncBubbleCard(child, ctx, seen)}</div>`)
     .join("");
@@ -384,6 +386,9 @@ export function bubblesDrawnForCall(
  * to recognize. Reading the same items the renderer draws makes the two agree
  * by construction.
  */
+/** The empty answer, shared so the no-children case allocates nothing. */
+const EMPTY_ID_SET: ReadonlySet<string> = new Set();
+
 function bubblesDrawnByOwnCards(bubble: AsyncBubble, ctx: AsyncRenderContext): ReadonlySet<string> {
   const drawn = new Set<string>();
   const kind = bubble.kind;
