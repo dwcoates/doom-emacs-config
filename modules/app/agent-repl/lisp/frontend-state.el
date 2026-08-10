@@ -1085,16 +1085,24 @@ delivers the view under.  Returns the workspace."
     workspace))
 
 (defvar agent-repl--frontend-surfaced-deaths (make-hash-table :test 'equal)
-  "Hash of WORKSPACE -> the classified death already surfaced for it.
+  "Hash of SESSION ID -> the classified death already surfaced for it.
 
 A terminal SessionView is re-pushed on every snapshot and on any later
 write to its record, so without this latch a dead session would announce
 its death again on every reconnect — turning one honest report into
 recurring noise about something the user already knows.
 
-The DEATH ITSELF is the latch value, not the session it befell: what
-must not repeat is the report, and a workspace whose next session dies
-differently has something new to say.")
+KEYED BY SESSION, NOT BY WORKSPACE, because a workspace has as many
+terminal records as it has had sessions and the daemon pushes a
+SessionView for every one of them.  A single workspace-wide slot held
+whichever death arrived last, so two records on one cwd dying
+differently — a supersede and a delete, say — evicted each other's latch
+on every snapshot and re-announced BOTH, forever.  One session dies once,
+so the session is the identity that makes the report once-only.
+
+The DEATH ITSELF is the latch value: what must not repeat is the report,
+and a session whose death is later re-pushed SETTLED has something new to
+say (the surfacing path logs that close rather than warning about it).")
 
 (defun agent-repl--frontend-apply-session-view (view)
   "Apply a `SessionView' frame VIEW (a plist).  Handler for `sessionView'.
@@ -1126,17 +1134,24 @@ same fact classified, so it can finally be shown."
     workspace))
 
 (defun agent-repl--frontend-surface-session-death (key view)
-  "Surface VIEW's classified death for workspace KEY, at most once.
+  "Surface VIEW's classified death for workspace KEY, at most once per session.
 KEY is the wire cwd the view arrived under.
 
 Returns the surfaced text, or nil when the session is alive, carries no
-classified death, or has already been reported."
+classified death, or has already been reported.
+
+A view that carries a death and no session id SIGNALS.  The death is
+latched per session, so an anonymous one has no identity to latch and
+would re-announce on every snapshot — the very defect this latch exists
+for — and the wire cannot produce one: `SessionView.session_id' is what
+every other reader keys on too."
   ;; Resolved to a workspace NAME once, up front.  This runs for every
   ;; replayed SessionView frame — including the no-death verbose path — so
   ;; carrying the wire CWD any further would make the chattiest branch in the
   ;; frame handler signal inside the connection's process filter.
-  (let ((workspace (agent-repl--frontend-ws-name key))
-        (item (plist-get view :death)))
+  (let* ((workspace (agent-repl--frontend-ws-name key))
+         (item (plist-get view :death))
+         (session (plist-get view :sessionId)))
     (cond
      ((null item)
       ;; SessionView frames are replayed in every snapshot; absence of death
@@ -1145,19 +1160,25 @@ classified death, or has already been reported."
                                "frontend-surface-session-death: ws=%s outcome=no-death"
                                key)
       nil)
-     ((equal item (gethash key agent-repl--frontend-surfaced-deaths))
+     ((or (null session) (equal session ""))
+      (agent-repl--log workspace
+                       "frontend-surface-session-death: MALFORMED ws=%s — a death with no session id has nothing to latch on; no fallback"
+                       key)
+      (error "agent-repl frontend: SessionView death missing session id"))
+     ((equal item (gethash session agent-repl--frontend-surfaced-deaths))
       (agent-repl--log-verbose workspace
-                               "frontend-surface-session-death: ws=%s outcome=already-surfaced"
-                               key)
+                               "frontend-surface-session-death: ws=%s session=%s outcome=already-surfaced"
+                               key session)
       nil)
      (t
-      (puthash key item agent-repl--frontend-surfaced-deaths)
+      (puthash session item agent-repl--frontend-surfaced-deaths)
       ;; `death' is a `FailureCardView' carried OUTSIDE the feed, so it was
       ;; never filed under a ConversationItem and has no uuid to pass on.
       (let ((failure (agent-repl-failure-from-wire item)))
         (agent-repl--log workspace
-                         "frontend-surface-session-death: ws=%s outcome=surface class=%s kind=%s"
-                         key (plist-get failure :class) (plist-get failure :type))
+                         "frontend-surface-session-death: ws=%s session=%s outcome=surface class=%s kind=%s resolved=%S"
+                         key session (plist-get failure :class)
+                         (plist-get failure :type) (plist-get failure :resolved))
         (agent-repl-failure-surface workspace failure))))))
 
 ;;;; ---- SessionInit store (slash-command menu source) -------------------

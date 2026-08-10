@@ -1326,6 +1326,86 @@ session-view item fail to apply at boot."
        ;; Assert
        (should (null echoed))))))
 
+(ert-deftest agent-repl-test-open-delete-death-surfaces ()
+  "A deletion the daemon left open still announces itself."
+  ;; Arrange — a record written before the delete resolved its own death.
+  (agent-repl-test--with-clean-state
+   (clrhash agent-repl--frontend-surfaced-deaths)
+   (let (echoed)
+     (cl-letf (((symbol-function 'message)
+                (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+       ;; Act
+       (agent-repl--frontend-apply-session-view
+        '(:sessionId "s1" :workspace "/w" :terminal t
+          :death (:kind (:sessionDeleted ())
+                  :message "the session was deleted"
+                  :open ())))
+       ;; Assert
+       (should (string-match-p "the session was deleted" echoed))))))
+
+(ert-deftest agent-repl-test-resolved-delete-death-is-silent ()
+  "A deletion the daemon resolved re-presents nothing.
+This is the loop the resolution exists to end: a workspace whose session
+was deleted was handed the same open card on every snapshot, forever,
+while its successor session was serving turns."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+   (clrhash agent-repl--frontend-surfaced-deaths)
+   (let (echoed)
+     (cl-letf (((symbol-function 'message)
+                (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+       ;; Act
+       (agent-repl--frontend-apply-session-view
+        '(:sessionId "s1" :workspace "/w" :terminal t
+          :death (:kind (:sessionDeleted ())
+                  :message "the session was deleted"
+                  :resolved (:resolvedAtMs 1700000000000))))
+       ;; Assert
+       (should (null echoed))))))
+
+(ert-deftest agent-repl-test-two-deaths-on-one-workspace-each-surface-once ()
+  "Two terminal records on one cwd do not evict each other's latch.
+A workspace has as many terminal records as it has had sessions and the
+daemon pushes a SessionView for every one, so a single workspace-wide
+slot held whichever death arrived last and re-announced BOTH on every
+snapshot."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+   (clrhash agent-repl--frontend-surfaced-deaths)
+   (let ((count 0)
+         (deleted '(:sessionId "s1" :workspace "/w" :terminal t
+                    :death (:kind (:sessionDeleted ())
+                            :message "the session was deleted"
+                            :open ())))
+         (died '(:sessionId "s2" :workspace "/w" :terminal t
+                 :death (:kind (:sessionShimDied ())
+                         :message "the agent process exited"
+                         :open ()))))
+     (cl-letf (((symbol-function 'message)
+                (lambda (&rest _) (unless inhibit-message (setq count (1+ count))))))
+       ;; Act — two snapshots of the same roster.
+       (agent-repl--frontend-apply-session-view deleted)
+       (agent-repl--frontend-apply-session-view died)
+       (agent-repl--frontend-apply-session-view deleted)
+       (agent-repl--frontend-apply-session-view died)
+       ;; Assert — one announcement per death, not one per snapshot.
+       (should (equal count 2))))))
+
+(ert-deftest agent-repl-test-session-death-without-a-session-id-signals ()
+  "A death with no session id has no identity to latch and is refused."
+  ;; Arrange — the latch is per session, so an anonymous death would
+  ;; re-announce on every snapshot: the very defect the latch exists for.
+  (agent-repl-test--with-clean-state
+   (agent-repl-test--with-log-sink-on
+    (clrhash agent-repl--frontend-surfaced-deaths)
+    ;; Act / Assert
+    (should-error
+     (agent-repl--frontend-surface-session-death
+      "/w" '(:workspace "/w" :terminal t
+             :death (:kind (:sessionDeleted ())
+                     :message "the session was deleted"
+                     :open ())))))))
+
 ;;;; ---- Handler registration wiring -------------------------------------
 
 (ert-deftest agent-repl-test-state-load-does-not-dial-before-lazy-daemon ()

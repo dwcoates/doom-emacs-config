@@ -497,13 +497,15 @@ func main() {
 	if err := sessionRegistry.Prepare(); err != nil {
 		daemonFatal(daemonLog, "claude-repld: registry prepare: %v", err)
 	}
-	// Every superseded session left standing by a previous daemon is closed
-	// here, BEFORE any frontend can connect and be handed a snapshot
-	// (supersederesolve.go). Both parties to a supersede died with the daemon
-	// that performed it, so its card is history rather than an open failure;
-	// held open, it re-presented on every boot forever. Within THIS lifetime a
-	// supersede is only ever resolved by its successor reaching operational.
-	server.ReconcileSupersededDeaths(sessionRegistry, nil, legacyLog)
+	// Every window-shaped death left standing by a previous daemon — a
+	// supersede, a delete — is closed here, BEFORE any frontend can connect and
+	// be handed a snapshot (deathreconcile.go). Both parties to a supersede died
+	// with the daemon that performed it and a delete was the user's own
+	// completed action, so each card is history rather than an open failure;
+	// held open, they re-presented on every boot forever. Within THIS lifetime a
+	// supersede is only ever resolved by its successor reaching operational, and
+	// a delete stamps its own resolution as it mints the death.
+	server.ReconcileOpenDeaths(sessionRegistry, nil, legacyLog)
 
 	// Interactive Claude login, on a pty the daemon owns and the webapp
 	// renders. Nothing here parses the terminal: the login is a full-screen

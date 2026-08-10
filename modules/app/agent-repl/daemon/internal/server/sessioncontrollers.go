@@ -910,7 +910,7 @@ type RegistryRegistrar struct {
 	// record, so a nil pusher costs freshness, never correctness.
 	PushView func(sessionID string)
 	// Now stamps the instant a WINDOW-shaped death was resolved
-	// (supersederesolve.go), in unix millis. Nil takes the wall clock; it is a
+	// (deathresolve.go), in unix millis. Nil takes the wall clock; it is a
 	// field so a harness can assert the exact stamp rather than a range.
 	Now func() int64
 	// Backups copies a workspace's vendor transcript aside at the two
