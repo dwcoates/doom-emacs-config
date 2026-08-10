@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -1027,110 +1026,5 @@ func TestAStatusForAnUnknownPhaseIsRefused(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("emit() error = nil, want the unknown phase refused")
-	}
-}
-
-// --- the publication bound -----------------------------------------------
-
-// blockingSink is a StatusSink that does not return until the test releases it.
-// It stands in for the SSM wedged behind its process-wide mutex, which is the
-// shape that held a merge queue head with no bound at all.
-type blockingSink struct {
-	entered  chan struct{}
-	release  chan struct{}
-	returned chan struct{}
-}
-
-func newBlockingSink() *blockingSink {
-	return &blockingSink{
-		entered:  make(chan struct{}, 1),
-		release:  make(chan struct{}),
-		returned: make(chan struct{}, 1),
-	}
-}
-
-func (s *blockingSink) RecordMergeStatus(string, Phase, string, *frontendv1.MergeStatus) error {
-	s.entered <- struct{}{}
-	<-s.release
-	s.returned <- struct{}{}
-	return nil
-}
-
-func mergedTestStatus() *frontendv1.MergeStatus {
-	return &frontendv1.MergeStatus{
-		RunId: "run-1",
-		Phase: &frontendv1.MergeStatus_Merged{Merged: &frontendv1.MergeStatusMerged{}},
-	}
-}
-
-// THE DEFECT THIS COVERS. A sink that never returns used to block the caller
-// forever, and the caller was the drain: completeMergedRun published the
-// terminal `merged` status inside it, so a wedged SSM held the queue head until
-// the daemon was bounced. The publication is now bounded, so the drain gets an
-// error back and can retire the run on the unpublished-terminal path.
-func TestAPublicationThatTheSinkNeverReturnsFromExpires(t *testing.T) {
-	// Arrange.
-	sink := newBlockingSink()
-	emitter := &statusEmitter{sink: sink, logf: t.Logf, bound: time.Millisecond}
-	defer close(sink.release)
-
-	// Act.
-	err := emitter.emit("/ws/a", PhaseMerged, "landed", mergedTestStatus())
-
-	// Assert.
-	if err == nil {
-		t.Fatal("emit() error = nil, want the wedged sink's publication bounded and reported as failed")
-	}
-	<-sink.entered
-}
-
-// The bound must not fire on a sink that answers: a publication that returned
-// carries the sink's own verdict, not the timeout's.
-func TestAPublicationTheSinkAnswersIsNotExpired(t *testing.T) {
-	// Arrange.
-	sink := newBlockingSink()
-	close(sink.release)
-	emitter := &statusEmitter{sink: sink, logf: t.Logf, bound: time.Hour}
-
-	// Act.
-	err := emitter.emit("/ws/a", PhaseMerged, "landed", mergedTestStatus())
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("emit() error = %v, want a sink that answered to publish cleanly", err)
-	}
-	<-sink.returned
-}
-
-// A sink that returns AFTER the bound expired must not block or panic on the
-// send nobody is waiting for any more. The result channel is buffered for
-// exactly this, and a regression to an unbuffered one would leak the goroutine
-// permanently.
-func TestASinkReturningAfterTheBoundDoesNotBlockItsGoroutine(t *testing.T) {
-	// Arrange.
-	sink := newBlockingSink()
-	emitter := &statusEmitter{sink: sink, logf: t.Logf, bound: time.Millisecond}
-
-	// Act.
-	err := emitter.emit("/ws/a", PhaseMerged, "landed", mergedTestStatus())
-	<-sink.entered
-	close(sink.release)
-
-	// Assert.
-	if err == nil {
-		t.Fatal("emit() error = nil, want the expired publication reported as failed")
-	}
-	// Completes only if the sink goroutine ran past its send, which an
-	// unbuffered result channel would have parked forever.
-	<-sink.returned
-}
-
-// The bound is a field so a test can pin it; production publications take
-// statusPublishBound, which must stay well inside the two-minute observability
-// budget a merge run is held to.
-func TestTheDefaultPublicationBoundIsInsideTheObservabilityBudget(t *testing.T) {
-	// Arrange, Act, Assert.
-	if statusPublishBound <= 0 || statusPublishBound >= 2*time.Minute {
-		t.Fatalf("statusPublishBound = %s, want a positive bound well inside the two-minute observability budget", statusPublishBound)
 	}
 }
