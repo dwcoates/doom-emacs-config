@@ -540,9 +540,10 @@ and returns the user's answer."
         (y-or-n-p (agent-repl--confirm-cancel-prompt running)))))
 
 (defun agent-repl-interrupt (&optional ws no-confirm)
-  "Interrupt Claude in workspace WS and re-enter insert mode after a delay.
-Sends Escape to stop the current operation, then automatically returns
-the input buffer to evil insert state after
+  "Stop workspace WS\='s work and re-enter insert mode after a delay.
+WHAT is stopped depends on what is running — the in-flight turn, or the
+detached agents that outlived it (see the dispatch decision below).  Either
+way the input buffer returns to evil insert state after
 `agent-repl-interrupt-reinsert-delay' seconds (via
 `agent-repl--enter-insert-mode', which switches evil state rather than
 forwarding a literal \"i\" keystroke to Claude).  Defaults to the
@@ -554,11 +555,18 @@ When the targeted workspace has detached background work in flight (its
 daemon-pushed render-state is `:idle-async') and NO-CONFIRM is nil, asks for
 confirmation before cancelling, unless `agent-repl-interrupt-confirm' is
 nil; declining aborts without interrupting.  A main agent running on its
-own (no spawned subagents) is interrupted without a prompt.  Only the
-running Claude agent is stopped — detached watchers and shells keep
-running (see `agent-repl--confirm-cancel-running').  Batch callers that
-confirm once for the whole set pass NO-CONFIRM non-nil to suppress the
-per-target prompt.
+own (no spawned subagents) is interrupted without a prompt.  Batch callers
+that confirm once for the whole set pass NO-CONFIRM non-nil to suppress
+the per-target prompt.
+
+THE CONFIRMED YES NOW REACHES THE AGENTS IT ASKED ABOUT.  `:idle-async'
+means the main turn has ENDED and detached subagents are still working,
+so the turn interrupt this used to send was answered ALREADY_COMPLETE and
+touched none of them: the one state that raised the question was the one
+state its answer could not act on.  That branch dispatches the daemon's
+detached-agent cancel instead (`agent-repl--interrupt-detached-agents').
+A `:thinking' workspace is unchanged and still takes the turn interrupt
+(`agent-repl--interrupt-turn').
 
 Interrupting BEFORE the agent has answered is semantically an undo, so
 this doubles as one: the frontend asks the daemon to retract the sent
@@ -577,25 +585,58 @@ the agent-shim cutover; that hook counter no longer exists.)"
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (agent-repl--log ws "interrupt: requested no-confirm=%s reinsert-delay=%.3fs"
                       no-confirm agent-repl-interrupt-reinsert-delay)
-    (if (and (not no-confirm)
-             (not (agent-repl--confirm-cancel-running (list ws))))
-        (agent-repl--log ws "interrupt: declined at confirmation, leaving agent running")
-      ;; The frontend's interrupt capability returns non-nil only when the
-      ;; interrupt was actually issued (a dead/unbound session returns nil);
-      ;; the done-marking must not fire for an undelivered interrupt.
-      (let ((outcome (agent-repl--frontend-dispatch-interrupt ws 'escape)))
-        (if (not outcome)
-            (agent-repl--warn ws "interrupt: frontend reported not delivered, skipping")
-          (agent-repl--mark-agent-done ws)
-          ;; Restore before the re-insert timer so the prompt is already
-          ;; there to revise when the buffer takes insert state.
-          (when (eq outcome 'retracted)
-            (agent-repl--restore-retracted-prompt ws))
-          (agent-repl--log ws "interrupt: delivered outcome=%s retracted=%s scheduling-insert=%.3fs"
-                            outcome (if (eq outcome 'retracted) "t" "nil")
-                            agent-repl-interrupt-reinsert-delay)
-          (run-at-time agent-repl-interrupt-reinsert-delay nil
-                       #'agent-repl--enter-insert-mode ws))))))
+    (cond
+     ((and (not no-confirm)
+           (not (agent-repl--confirm-cancel-running (list ws))))
+      (agent-repl--log ws "interrupt: declined at confirmation, leaving agent running"))
+     ((agent-repl--agent-subagents-running-p ws)
+      (agent-repl--interrupt-detached-agents ws))
+     (t
+      (agent-repl--interrupt-turn ws)))))
+
+(defun agent-repl--interrupt-detached-agents (ws)
+  "Cancel WS\='s detached background agents and re-enter insert mode.
+The `:idle-async\=' half of `agent-repl-interrupt\='.
+
+WHY IT IS NOT THE TURN INTERRUPT.  `:idle-async\=' means the main turn
+has ENDED and detached subagents are still working, so a turn interrupt
+sent into it is a guaranteed no-op — the shim answers it
+ALREADY_COMPLETE and the agents keep running.  The one state that raised
+the \='Cancel the running subagents?\=' question was the one state its yes
+could not act on; this is what that yes now sends.
+
+NOTHING IS MARKED DONE AND NOTHING IS RESTORED.  Both belong to the turn
+interrupt: there is no in-flight turn to close here, and no sent prompt
+to retract.  Only the re-insert is shared, because the gesture is the
+same one from the user\='s side."
+  (if (not (agent-repl--frontend-dispatch-cancel-detached ws))
+      (agent-repl--warn ws "interrupt: detached-agent cancel not dispatched, agents left running")
+    (agent-repl--log ws "interrupt: detached-agent cancel dispatched scheduling-insert=%.3fs"
+                      agent-repl-interrupt-reinsert-delay)
+    (run-at-time agent-repl-interrupt-reinsert-delay nil
+                 #'agent-repl--enter-insert-mode ws)))
+
+(defun agent-repl--interrupt-turn (ws)
+  "Interrupt WS\='s in-flight turn and re-enter insert mode.
+The ordinary half of `agent-repl-interrupt\=', unchanged by the
+detached-agent cancel: a `:thinking\=' workspace still takes exactly this
+path."
+  ;; The frontend's interrupt capability returns non-nil only when the
+  ;; interrupt was actually issued (a dead/unbound session returns nil);
+  ;; the done-marking must not fire for an undelivered interrupt.
+  (let ((outcome (agent-repl--frontend-dispatch-interrupt ws 'escape)))
+    (if (not outcome)
+        (agent-repl--warn ws "interrupt: frontend reported not delivered, skipping")
+      (agent-repl--mark-agent-done ws)
+      ;; Restore before the re-insert timer so the prompt is already
+      ;; there to revise when the buffer takes insert state.
+      (when (eq outcome 'retracted)
+        (agent-repl--restore-retracted-prompt ws))
+      (agent-repl--log ws "interrupt: delivered outcome=%s retracted=%s scheduling-insert=%.3fs"
+                        outcome (if (eq outcome 'retracted) "t" "nil")
+                        agent-repl-interrupt-reinsert-delay)
+      (run-at-time agent-repl-interrupt-reinsert-delay nil
+                   #'agent-repl--enter-insert-mode ws))))
 
 ;; The in-flight message-queue commands (agent-repl-queue-run-now /
 ;; agent-repl-queue-cancel and their picker helpers) were deleted in the S9

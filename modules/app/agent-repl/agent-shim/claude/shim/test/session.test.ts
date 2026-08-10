@@ -95,6 +95,7 @@ function makeHarness(opts?: HarnessOpts): Harness {
 
   const query: QueryLike = {
     [Symbol.asyncIterator]: () => sdkOut[Symbol.asyncIterator](),
+    stopTask: async (): Promise<void> => {},
     interrupt: async () => {
       interruptCount++;
       return opts?.interruptReceipt;
@@ -245,6 +246,7 @@ describe("ShimSession lifecycle", () => {
         },
       }),
       interrupt: async () => undefined,
+      stopTask: async (): Promise<void> => {},
       setPermissionMode: async () => {},
       setModel: async () => {},
       supportedModels: async () => [],

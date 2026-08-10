@@ -59,7 +59,16 @@ type fakePrompts struct {
 	// interruptRequestIDs records the command id each stop was carried under, so
 	// a test can prove the frontend's own id reaches the session controller.
 	interruptRequestIDs []string
-	perms               []string
+	// detachedCancels records the workspaces a detached-agent cancel was
+	// routed for, and detachedCancelRequestIDs the command id each carried.
+	detachedCancels          []string
+	detachedCancelRequestIDs []string
+	// detachedCancelOutcome is the shim verdict the router reports; nil with
+	// no error means the handler sees an outcome with no arm.
+	detachedCancelOutcome *corev1.DetachedCancelOutcome
+	// detachedCancelErr fails the route itself, distinct from a verdict.
+	detachedCancelErr error
+	perms             []string
 	// permRequestIDs records the command id each permission answer was carried
 	// under, which a decline needs: the stop it issues is named by it.
 	permRequestIDs []string
@@ -222,6 +231,14 @@ func (f *fakePrompts) Interrupt(_ context.Context, ws, requestID string) error {
 	f.interrupts = append(f.interrupts, ws)
 	f.interruptRequestIDs = append(f.interruptRequestIDs, requestID)
 	return f.err
+}
+func (f *fakePrompts) CancelDetachedAgents(_ context.Context, ws, requestID string) (*corev1.DetachedCancelOutcome, error) {
+	f.detachedCancels = append(f.detachedCancels, ws)
+	f.detachedCancelRequestIDs = append(f.detachedCancelRequestIDs, requestID)
+	if f.detachedCancelErr != nil {
+		return nil, f.detachedCancelErr
+	}
+	return f.detachedCancelOutcome, f.err
 }
 func (f *fakePrompts) AnswerPermission(_ context.Context, _, requestID, permReqID string, _ bool, _ string, _ *structpb.Struct) error {
 	f.perms = append(f.perms, permReqID)
@@ -2237,5 +2254,151 @@ func TestCommandHandlerRestartSessionUnconfiguredErrors(t *testing.T) {
 	// success-shaped no-op.
 	if err := h.RestartSession(context.Background(), "/w", "r1", &frontendv1.RestartSessionCmd{}); err == nil {
 		t.Fatal("an unwired restart capability reported success")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The detached-agent cancel.
+//
+// The state it exists for is the one the interrupt confirmation fires in: the
+// main turn is over, detached agents are still working. An interrupt aimed at
+// that turn is answered ALREADY_COMPLETE and touches none of them, so the one
+// state that raised "cancel the running subagents?" was the one state its
+// answer could not act on.
+// ---------------------------------------------------------------------------
+
+func TestCancelDetachedAgentsAcksTheCancelledCount(t *testing.T) {
+	// Arrange: the shim reports three agents stopped, by task id.
+	h, p := newGatedHandler(t, false, fakeLiveTasks{})
+	p.detachedCancelOutcome = &corev1.DetachedCancelOutcome{Outcome: &corev1.DetachedCancelOutcome_Cancelled{
+		Cancelled: &corev1.DetachedAgentsCancelled{TaskIds: []string{"t-1", "t-2", "t-3"}},
+	}}
+
+	// Act.
+	view, err := h.CancelDetachedAgents(context.Background(), "/ws", "c1", &frontendv1.CancelDetachedAgentsCmd{})
+
+	// Assert: the count crosses to the frontend; the ids do not.
+	if err != nil {
+		t.Fatalf("cancel err = %v, want nil", err)
+	}
+	if got := view.GetCancelled().GetCount(); got != 3 {
+		t.Fatalf("cancelled count = %d, want 3", got)
+	}
+}
+
+func TestCancelDetachedAgentsRoutesTheCommandRequestID(t *testing.T) {
+	// Arrange.
+	h, p := newGatedHandler(t, false, fakeLiveTasks{})
+	p.detachedCancelOutcome = &corev1.DetachedCancelOutcome{Outcome: &corev1.DetachedCancelOutcome_Cancelled{
+		Cancelled: &corev1.DetachedAgentsCancelled{TaskIds: []string{"t-1"}},
+	}}
+
+	// Act.
+	if _, err := h.CancelDetachedAgents(context.Background(), "/ws", "c9", &frontendv1.CancelDetachedAgentsCmd{}); err != nil {
+		t.Fatalf("cancel err = %v", err)
+	}
+
+	// Assert: the command's OWN id reaches the router, which is the only id
+	// the client, the daemon log and the shim exchange can be joined on.
+	if got := p.detachedCancelRequestIDs; len(got) != 1 || got[0] != "c9" {
+		t.Fatalf("routed request ids = %v, want [c9]", got)
+	}
+}
+
+func TestCancelDetachedAgentsRefusesWhenNothingIsRunning(t *testing.T) {
+	// Arrange: the session answers that it has nothing detached.
+	h, p := newGatedHandler(t, false, fakeLiveTasks{})
+	p.detachedCancelOutcome = &corev1.DetachedCancelOutcome{Outcome: &corev1.DetachedCancelOutcome_NothingRunning{
+		NothingRunning: &corev1.NoDetachedAgentsRunning{},
+	}}
+
+	// Act.
+	view, err := h.CancelDetachedAgents(context.Background(), "/ws", "c1", &frontendv1.CancelDetachedAgentsCmd{})
+
+	// Assert: a LOUD refusal. Acking a stop that reached nothing as ok is how a
+	// stop control comes to look like it works when it reaches nothing.
+	if err == nil {
+		t.Fatalf("cancel err = nil, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "no detached background agents are running") {
+		t.Fatalf("refusal %q does not say what it found", err)
+	}
+	// And the account travels with the refusal, so the client renders "nothing
+	// was running" rather than a bare failure.
+	if view.GetNothingRunning() == nil {
+		t.Fatalf("refusal lost its nothing_running arm: %+v", view)
+	}
+}
+
+func TestCancelDetachedAgentsRefusesWhenUnsupported(t *testing.T) {
+	// Arrange: the session could not be asked at all.
+	h, p := newGatedHandler(t, false, fakeLiveTasks{})
+	p.detachedCancelOutcome = &corev1.DetachedCancelOutcome{Outcome: &corev1.DetachedCancelOutcome_Unsupported{
+		Unsupported: &corev1.DetachedCancelUnsupported{Detail: "no SDK query is constructed for this session"},
+	}}
+
+	// Act.
+	view, err := h.CancelDetachedAgents(context.Background(), "/ws", "c1", &frontendv1.CancelDetachedAgentsCmd{})
+
+	// Assert: distinct from nothing_running — a session that could not be
+	// asked, not one that answered "nothing".
+	if err == nil {
+		t.Fatalf("cancel err = nil, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "no SDK query is constructed") {
+		t.Fatalf("refusal %q does not carry the shim's detail", err)
+	}
+	if view.GetUnsupported() == nil {
+		t.Fatalf("refusal lost its unsupported arm: %+v", view)
+	}
+}
+
+func TestCancelDetachedAgentsSurfacesARouteFailure(t *testing.T) {
+	// Arrange: the wire itself failed, which is not a verdict about the session.
+	h, p := newGatedHandler(t, false, fakeLiveTasks{})
+	p.detachedCancelErr = errors.New("shim link is down")
+
+	// Act.
+	view, err := h.CancelDetachedAgents(context.Background(), "/ws", "c1", &frontendv1.CancelDetachedAgentsCmd{})
+
+	// Assert: no verdict is invented for a stop nobody answered.
+	if err == nil {
+		t.Fatalf("cancel err = nil, want the route failure")
+	}
+	if !strings.Contains(err.Error(), "shim link is down") {
+		t.Fatalf("refusal %q lost the route failure", err)
+	}
+	if view != nil {
+		t.Fatalf("route failure carried a verdict: %+v", view)
+	}
+}
+
+func TestCancelDetachedAgentsRefusesAnArmlessOutcome(t *testing.T) {
+	// Arrange: an outcome with no arm — a contract violation, not an empty stop.
+	h, p := newGatedHandler(t, false, fakeLiveTasks{})
+	p.detachedCancelOutcome = &corev1.DetachedCancelOutcome{}
+
+	// Act.
+	_, err := h.CancelDetachedAgents(context.Background(), "/ws", "c1", &frontendv1.CancelDetachedAgentsCmd{})
+
+	// Assert: refused rather than acked as something nobody can account for.
+	if err == nil || !strings.Contains(err.Error(), "no arm set") {
+		t.Fatalf("armless outcome err = %v, want a refusal naming the missing arm", err)
+	}
+}
+
+func TestCancelDetachedAgentsRefusesAnEmptyWorkspaceKey(t *testing.T) {
+	// Arrange.
+	h, p := newGatedHandler(t, false, fakeLiveTasks{})
+
+	// Act.
+	_, err := h.CancelDetachedAgents(context.Background(), "", "c1", &frontendv1.CancelDetachedAgentsCmd{})
+
+	// Assert: refused before it can be routed at an unnamed session.
+	if err == nil {
+		t.Fatalf("empty workspace err = nil, want a refusal")
+	}
+	if len(p.detachedCancels) != 0 {
+		t.Fatalf("unnamed workspace reached the router: %v", p.detachedCancels)
 	}
 }

@@ -996,3 +996,139 @@ func TestASettlementForATaskThatOpenedNoBubbleWritesNoRecord(t *testing.T) {
 		t.Fatalf("a task that detached nothing has no bubble to settle, got %v", lines)
 	}
 }
+
+// --- settling the bubbles a detached-agent cancel stopped ------------------
+//
+// The cancel's ack is the shim's DIRECT observation that `stop_task` resolved,
+// so it is the same class of evidence a TaskEnded is — arriving on the control
+// plane rather than the event plane. Settling from it is what keeps the feed
+// and the footer from showing live work the daemon has already stopped.
+
+func TestCancelledTaskSettlesItsBubble(t *testing.T) {
+	// Arrange: a detached agent with an open bubble.
+	s := newAsyncBubbleStore("/ws", nil)
+	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
+		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1", Description: "fan out",
+	}, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	ups, err := s.settleCancelledTasks([]string{"task_1"}, frontend.AsyncVerdict{
+		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20, Reason: "user cancelled",
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ups) != 1 {
+		t.Fatalf("updates = %d, want 1: a cancelled agent's bubble must not keep rendering as live work", len(ups))
+	}
+	if ups[0].GetLiveness().GetLiveness().GetSettled() == nil {
+		t.Fatalf("update did not settle the bubble: %+v", ups[0])
+	}
+}
+
+func TestCancelledTaskSettlesToTheKilledArm(t *testing.T) {
+	// Arrange
+	s := newAsyncBubbleStore("/ws", nil)
+	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
+		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
+	}, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	ups, err := s.settleCancelledTasks([]string{"task_1"}, frontend.AsyncVerdict{
+		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20, Reason: "user cancelled",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: KILLED, not done and not error — the work did not fail, it was
+	// not allowed to conclude. The mapping is SettleAsyncBubble's, unchanged.
+	if ups[0].GetLiveness().GetLiveness().GetSettled().GetKilled() == nil {
+		t.Fatalf("settled arm = %+v, want killed", ups[0].GetLiveness().GetLiveness().GetSettled().GetOutcome())
+	}
+}
+
+func TestCancelledTasksSettleEveryNamedBubble(t *testing.T) {
+	// Arrange: two agents, both stopped by one cancel.
+	s := newAsyncBubbleStore("/ws", nil)
+	for _, id := range []string{"task_1", "task_2"} {
+		if _, err := s.observeTaskStarted(&corev1.TaskStarted{
+			TaskId: id, Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_" + id,
+		}, 10); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Act
+	ups, err := s.settleCancelledTasks([]string{"task_1", "task_2"}, frontend.AsyncVerdict{
+		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20,
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ups) != 2 {
+		t.Fatalf("updates = %d, want 2: one orphaned bubble is as visible as two", len(ups))
+	}
+}
+
+func TestACancelledTaskWithNoBubbleReportsNothing(t *testing.T) {
+	// Arrange: the store never opened detached work for this task.
+	s := newAsyncBubbleStore("/ws", nil)
+
+	// Act
+	ups, err := s.settleCancelledTasks([]string{"task_unknown"}, frontend.AsyncVerdict{
+		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20,
+	})
+
+	// Assert: not a missing bubble and not an error — the session may track a
+	// task it never opened a bubble for.
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if len(ups) != 0 {
+		t.Fatalf("updates = %d, want 0", len(ups))
+	}
+}
+
+func TestALaterTaskEndedMayOverwriteACancelSettlement(t *testing.T) {
+	// Arrange: a bubble already settled by the cancel's ack.
+	s := newAsyncBubbleStore("/ws", nil)
+	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
+		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
+	}, 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.settleCancelledTasks([]string{"task_1"}, frontend.AsyncVerdict{
+		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act: the agent had in fact finished on its own in the instant before the
+	// stop reached it, and the event plane says so.
+	push, err := s.observeTaskEnded(&corev1.TaskEnded{
+		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT,
+		Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE,
+	}, 30)
+
+	// Assert: the event plane carries the truer verdict and is NOT suppressed.
+	// Pinning the earlier, coarser answer would report a completed agent as
+	// killed forever.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(push.Updates) != 1 {
+		t.Fatalf("updates = %d, want 1: the terminal fact must still reach the client", len(push.Updates))
+	}
+	if push.Updates[0].GetLiveness().GetLiveness().GetSettled().GetDone() == nil {
+		t.Fatalf("settled arm = %+v, want done", push.Updates[0].GetLiveness().GetLiveness().GetSettled().GetOutcome())
+	}
+}
