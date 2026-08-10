@@ -232,6 +232,81 @@ Each keyword is independent and may be omitted:
                                  "window--harden: fringes=unrecognized value=%S window=%S"
                                  fringes win))))))
 
+;;;; --- Deletion, or its structural substitute -----------------------------
+;;
+;; A frame's SOLE ordinary window and the minibuffer window cannot be
+;; deleted; `delete-window' signals "Attempt to delete minibuffer or sole
+;; ordinary window" and its siblings.  Every agent-repl teardown path that
+;; targets a window has to answer the same question — what happens when the
+;; window is the last one — and answering it with a `condition-case' answers
+;; it WRONGLY: the error is caught, the window survives, and the buffer the
+;; teardown was retiring stays on screen in a workspace that no longer owns
+;; it.  That is the observed close-path failure (the
+;; `window--delete-buffer-windows' error logged closing
+;; slack-core-chess-ai-cxo) and the observed post-merge one (a dead
+;; workspace's panel left displayed).
+;;
+;; `agent-repl-window--delete-or-neutralize' answers it once, for every
+;; caller: delete when the window is deletable, and otherwise SWITCH it to a
+;; fallback buffer.  The undeletable window is never asked to be deleted, so
+;; the error is not caught — it is not raised.  Un-dedicating first is part
+;; of the same guarantee: `set-window-buffer' signals on a STRONGLY dedicated
+;; window, which is exactly what agent-repl's own hardened panels are, and
+;; that signal is the `strongly-dedicated-window' error seen right after a
+;; merge.
+
+(defun agent-repl-window--delete-or-neutralize (win &optional fallback ws)
+  "Delete WIN, or switch it to FALLBACK when WIN cannot be deleted.
+Returns `deleted' when WIN was deleted, `neutralized' when its buffer was
+switched instead, and nil when WIN was not live to begin with.
+
+FALLBACK defaults to `doom-fallback-buffer'.  WS is used only for
+workspace-scoped diagnostics.
+
+Un-dedicates WIN and strips its `no-delete-other-windows' parameter
+first: a hardened agent-repl panel is STRONGLY dedicated, which blocks
+both the deletion and the buffer switch that stands in for it.
+
+The minibuffer window is never a valid target and is neutralized-by-doing
+nothing rather than touched — it holds no buffer a teardown owns.
+
+Signals when WIN is undeletable and no live fallback buffer exists,
+rather than silently leaving a retired buffer on screen."
+  (cond
+   ((not (window-live-p win)) nil)
+   ((window-minibuffer-p win)
+    (agent-repl--log-verbose ws "window--delete-or-neutralize: skip-minibuffer window=%S" win)
+    nil)
+   (t
+    (set-window-parameter win 'no-delete-other-windows nil)
+    (set-window-dedicated-p win nil)
+    (if (eq (window-deletable-p win) t)
+        (progn
+          (agent-repl--log ws "window--delete-or-neutralize: deleting window=%S buffer=%s"
+                           win (agent-repl--safe-buffer-name (window-buffer win)))
+          (delete-window win)
+          'deleted)
+      (let ((fb (or fallback
+                    (and (fboundp 'doom-fallback-buffer) (doom-fallback-buffer)))))
+        (agent-repl--log ws
+                         "window--delete-or-neutralize: window=%S undeletable (deletable-p=%S) — switching buffer=%s to fallback=%s"
+                         win (window-deletable-p win)
+                         (agent-repl--safe-buffer-name (window-buffer win))
+                         (agent-repl--safe-buffer-name fb))
+        (unless (and fb (buffer-live-p fb))
+          ;; No buffer to neutralize the window with: fail loudly rather than
+          ;; leave a retired workspace's panel displayed.
+          (error "agent-repl-window--delete-or-neutralize: no fallback buffer for undeletable window %s"
+                 win))
+        (set-window-buffer win fb)
+        'neutralized)))))
+
+(defun agent-repl--safe-buffer-name (b)
+  "Return the name of buffer B if non-nil, otherwise nil.
+Lives here rather than in panels.el because window.el is the lower of the
+two layers that label buffers in their records, and both call this."
+  (and b (buffer-name b)))
+
 ;;;; --- Subset deletion ---------------------------------------------------
 
 (cl-defun agent-repl-window--delete-where
@@ -359,12 +434,21 @@ This helper deliberately bypasses the side-window skip that
 buffer — if BUF lives in a side window, that side window is the
 precise target.
 
-A nil BUF or a killed BUF is a no-op (returns nil).  Errors during
-individual `delete-window' calls are caught and logged via
-`agent-repl--warn' so one undeletable window doesn't abort the
-sweep — typical cause is
-the buffer's window being the lone window in a frame.  Returns the
-list of windows that were actually deleted."
+A nil BUF or a killed BUF is a no-op (returns nil).
+
+A window that CANNOT be deleted — the frame's sole ordinary window, or
+the minibuffer — is never asked to be.  Each target goes through
+`agent-repl-window--delete-or-neutralize', which switches such a window
+to the fallback buffer instead, so BUF stops being displayed either way.
+That is the whole difference from the old shape, which called
+`delete-window' unconditionally and logged the resulting \"Attempt to
+delete minibuffer or sole ordinary window\" as a failure while leaving
+the retired buffer on screen.
+
+Remaining errors are still caught per window and logged via
+`agent-repl--warn', so one problem window does not abort the sweep.
+Returns the list of windows that were actually deleted; a neutralized
+window is not in that list, because it is still a live window."
   (let* ((resolved-ws (or ws (agent-repl--ws-current-name)))
          (live (and buf (buffer-live-p buf)))
          (windows (and live (get-buffer-window-list buf nil all-frames)))
@@ -378,16 +462,16 @@ list of windows that were actually deleted."
             (agent-repl--log-verbose resolved-ws
                                      "window--delete-buffer-windows: skip-dead window=%S" win)
           (agent-repl--log-verbose resolved-ws
-                                   "window--delete-buffer-windows: deleting window=%S" win)
+                                   "window--delete-buffer-windows: retiring window=%S" win)
           (condition-case err
-              (progn
-                (delete-window win)
+              (when (eq (agent-repl-window--delete-or-neutralize win nil resolved-ws)
+                        'deleted)
                 (push win deleted)
                 (agent-repl--log resolved-ws
                                  "window--delete-buffer-windows: deleted window=%S" win))
             (error
              (agent-repl--warn resolved-ws
-                               "window--delete-buffer-windows: could not delete %s: %S"
+                               "window--delete-buffer-windows: could not retire %s: %S"
                                win err))))))
     (setq deleted (nreverse deleted))
     (agent-repl--log resolved-ws
