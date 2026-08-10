@@ -1,0 +1,163 @@
+// conversation-page.proto — TAIL-FIRST PAGED conversation loading: the cold
+// open's replacement for a from_seq=0 full replay, and the load-more that
+// walks backwards from it.
+//
+// WHAT IT REPLACES, AND WHY. A cold webview had exactly one way to obtain the
+// conversation it renders: ResyncCmd{from_seq: 0}, which replays EVERY store
+// event the session ever produced. The worst workspace observed cost 259,000
+// events and 186MB to draw a screen whose visible tail is about ten items. The
+// replay was not wrong — it was the whole conversation, correctly — it was
+// simply the wrong QUESTION for a client that is about to show the bottom of
+// it.
+//
+// This asks the right question instead: give me the last N top-level items,
+// and give me a handle for the N before those. The daemon walks its event log
+// BACKWARDS from the anchor and assembles complete feed envelopes, so a page
+// item is byte-compatible with a ConversationDelta item and a frontend needs
+// no second renderer for paged history.
+//
+// WHAT IT DOES NOT REPLACE. ResyncCmd is untouched, and it stays the LIVE-PAGE
+// path: an incremental from_seq resync is how a client that already holds
+// history catches up, and from_seq=0 remains reachable as the compatibility
+// full replay. Paging is the COLD-OPEN path only. Nothing here reads or writes
+// the resync's floor, coalescing or fence ladder.
+//
+// TOP-LEVEL ITEMS ARE THE UNIT, AND THE DAEMON OWNS THE BOUNDARY. A limit
+// counts items the feed renders as standalone bubbles or cards. Constituents —
+// a tool call inside the message that issued it, an async bubble's members —
+// travel INSIDE their parent item exactly as ConversationDelta carries them,
+// and never count toward the limit. A client therefore cannot compute what a
+// page will cost, and is not asked to: it asks for ten renderable things and
+// receives ten renderable things, whatever they contain.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+import "agentshim/frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// Ask for ONE page of conversation history.
+//
+// The two anchors are the two questions a paging feed ever asks — "where does
+// the conversation END" and "what came before this" — and they are a oneof
+// because no request is ever both. A command with neither arm set is
+// malformed and is refused rather than defaulted to a tail: defaulting would
+// turn a client bug into a silent full-tail read on every workspace it hit.
+message ConversationPageCmd {
+  oneof anchor {
+    // The cold open: the newest end of the conversation.
+    ConversationPageTail tail = 1;
+    // Load-more: the page immediately older than one already held.
+    ConversationPageBefore before = 2;
+  }
+  // The fence ECHO, captured AT DECISION TIME — an identical contract to
+  // ResyncCmd.fence, and deliberately the same token rather than a
+  // paging-specific one.
+  //
+  // It is the exact fence the client held when it decided to ask for this
+  // page, copied byte-for-byte from the WorkspaceState it was reading at that
+  // moment. Reading current state at transport time instead would let a
+  // delayed request silently rebind itself to a newer generation and page a
+  // conversation nobody asked about. The daemon compares it against the
+  // workspace's live fence and REFUSES the command before reading anything
+  // when they differ.
+  string fence = 3;
+}
+
+// The tail anchor: start at the newest item and walk backwards.
+message ConversationPageTail {
+  // How many top-level items to return.
+  //
+  // The daemon CLAMPS it to a ceiling of about 50, and reads 0 as "the daemon
+  // default", about 10. Both are the daemon's numbers rather than the client's
+  // because the cost of a page is a cost only the daemon can see: a client
+  // asking for 5,000 items is asking for the full replay this message exists
+  // to end, and a clamp makes that unrepresentable instead of merely
+  // discouraged.
+  uint32 limit = 1;
+}
+
+// The load-more anchor: start immediately older than a previously served page.
+message ConversationPageBefore {
+  // The continuation handle from a prior page's ConversationPageMore, copied
+  // back BYTE-FOR-BYTE.
+  //
+  // It is OPAQUE. The daemon mints it and is the only thing that may read
+  // meaning into it; a client that learned to decode it would depend on a fact
+  // this contract does not offer, and the token's composition is free to
+  // change. A cursor the daemon cannot read is a refusal, never a silently
+  // re-anchored tail read.
+  string cursor = 1;
+  // Same clamp semantics as ConversationPageTail.limit.
+  uint32 limit = 2;
+}
+
+// One page of conversation history, pushed in answer to a ConversationPageCmd.
+//
+// It is a PUSH rather than a command response because its items are feed
+// content, and feed content has exactly one delivery shape in this protocol.
+// The command's own ack is EARLY — it reports that the page was accepted onto
+// the workspace's lane, not that it was assembled — so a slow page cannot look
+// unanswered to a client and provoke the retry cascade an unacked resync
+// famously did.
+message ConversationPage {
+  string workspace = 1;
+  // The requesting command's request_id, echoed so a client correlates this
+  // page with the request it made rather than with whichever request was most
+  // recent. A client with a load-more in flight and a cold open still settling
+  // has two pages coming, and only the echo distinguishes them.
+  string request_id = 2;
+  // The page's items, OLDEST FIRST, as COMPLETE feed envelopes identical in
+  // shape to ConversationDelta.items.
+  //
+  // Identical in shape is the whole point: a frontend renders a paged item
+  // with the same code that renders a pushed one, and reconciles it by uuid
+  // against anything it already holds. Oldest-first is the feed's own order,
+  // so a page prepends as a block without being reversed.
+  repeated ConversationItem items = 3;
+  // WHERE THE CONVERSATION CONTINUES above this page, or that it does not.
+  //
+  // A oneof rather than an optional cursor plus a bool: "there is more" and
+  // "we reached the beginning" are the only two answers, and a message that
+  // could carry both or neither would invite a client to invent a third.
+  oneof continuation {
+    // Older history remains; the cursor reads the page before this one.
+    ConversationPageMore more = 4;
+    // This page reaches the conversation's beginning.
+    ConversationPageStart start = 5;
+  }
+  // TAIL PAGES ONLY: the seq this page is current THROUGH.
+  //
+  // The client stores it as its from_seq and subscribes to the live delta
+  // stream from there, so the splice is GAP-FREE BY CONSTRUCTION rather than
+  // by timing: an item the session produced between this page's mint and the
+  // client's subscribe is above this seq, so the first resync replays it. A
+  // client that instead joined at "whatever seq the first delta carries" would
+  // lose exactly that item, and would lose it more often the slower the page.
+  //
+  // Zero on before pages, which are history and carry no live edge.
+  uint64 live_join_seq = 6;
+  // The workspace's staleness FENCE at the moment this page was minted — the
+  // same token, with the same rules, ConversationDelta.fence carries. The
+  // client compares it BYTE-WISE against the fence on the workspace's current
+  // WorkspaceState and never parses it. Different means stale, and a stale
+  // page is discarded WHOLE rather than partially adopted.
+  string fence = 7;
+}
+
+// There is older history, and this is how to ask for it.
+message ConversationPageMore {
+  // The opaque continuation handle for the page immediately older than this
+  // one. See ConversationPageBefore.cursor for why a client may not read it.
+  string cursor = 1;
+}
+
+// This page reaches the conversation's BEGINNING: there is nothing older.
+//
+// It is an empty message rather than an absent `more`, because "no more" is a
+// FACT the daemon established by reading to the floor, and a client retires
+// its load-more affordance on it. An absent oneof would be indistinguishable
+// from a field a client failed to decode.
+message ConversationPageStart {}

@@ -83,9 +83,31 @@ export type FencedComponentView =
  * bubble registry to route by id. That is a question about destination, not
  * about staleness, so it is settled after the gate rather than inside it.
  */
+/**
+ * The fence-relevant face of a conversation page.
+ *
+ * It is the page's IDENTITY rather than the page itself: the gate rules on
+ * whether the page is current, and the items — already projected onto feed
+ * shapes by the time the store gets here — say nothing about that. Naming the
+ * three fields it does read keeps the gate from depending on the wire shape of
+ * a message it never renders.
+ */
+export interface FencedConversationPage {
+  workspace: string;
+  fence: string;
+  /** Carried so the discard record names the request left unanswered. */
+  requestId: string;
+}
+
 export type FencedView =
   | FencedComponentView
-  | { case: "asyncBubbleDelta"; value: AsyncBubbleDelta };
+  | { case: "asyncBubbleDelta"; value: AsyncBubbleDelta }
+  // A CONVERSATION PAGE IS AN ARM HERE for the same reason the async delta is:
+  // it carries the same workspace fence, minted by the same composer, so "is
+  // this page current" must have the one answer every other push gets. A page
+  // the gate discards is discarded WHOLE — never partially adopted — and the
+  // pager re-requests it once against the fresh fence.
+  | { case: "conversationPage"; value: FencedConversationPage };
 
 /** The workspace a fenced view describes, whichever arm it is. */
 export function fencedWorkspace(view: FencedView): string {

@@ -283,6 +283,9 @@ func (nopHandler) OpenWorkspace(context.Context, string, string, *frontendv1.Ope
 	return nil
 }
 func (nopHandler) Resync(context.Context, string, string, *frontendv1.ResyncCmd) error { return nil }
+func (nopHandler) ConversationPage(context.Context, string, string, *frontendv1.ConversationPageCmd) (*frontendv1.ConversationPage, error) {
+	return &frontendv1.ConversationPage{}, nil
+}
 func (nopHandler) CreateSession(context.Context, string, string, *frontendv1.CreateSessionCmd) (string, error) {
 	return "", nil
 }

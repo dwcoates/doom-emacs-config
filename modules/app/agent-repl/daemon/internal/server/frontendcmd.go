@@ -309,7 +309,23 @@ type WorkspaceHostWorkSnapshot struct {
 // frontend is never served history one of those already discarded. Satisfied by
 // *sessioncontroller.Manager.
 type Resyncer interface {
-	ResyncForGeneration(workspace, expectedSessionID, expectedGenerationID string, fromSeq uint64) error
+	// ResyncForFence and ConversationPage both take the client's echoed FENCE
+	// WHOLE rather than a session/generation pair reconstructed from it. The
+	// token is opaque by contract and byte-compared by its receiver, and the
+	// daemon reads inside it in exactly one place (historyadmission.go); a
+	// caller that split it here would be a second reader, which is the
+	// divergence that made an unwired workspace's history unreachable once
+	// already.
+	ResyncForFence(workspace, echoedFence string, fromSeq uint64) error
+	// ConversationPage serves ONE page of history: the newest N top-level items
+	// for a cold open, or the N before a cursor for a load-more.
+	//
+	// It rides this port rather than one of its own because it answers the same
+	// question from the same authority — "give this frontend the conversation" —
+	// under the same identity ladder, and one implementation satisfies both. A
+	// separate port would be a second thing to wire, and a daemon that wired one
+	// and not the other would answer half of a frontend's history needs.
+	ConversationPage(ctx context.Context, workspace, echoedFence string, anchor sessioncontroller.PageAnchor) (*frontendv1.ConversationPage, error)
 }
 
 // SessionCreateDeleter is the daemon-core session-lifecycle surface behind the
@@ -1389,37 +1405,98 @@ func (h *commandHandler) OpenWorkspace(ctx context.Context, workspace, requestID
 // A nil resyncer is a construction error, not a degraded mode: the command
 // exists, so something must answer it.
 func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, cmd *frontendv1.ResyncCmd) error {
-	// The client echoes ONE token. It held two identities in agreement before,
-	// which is exactly what the fence removed; the daemon still needs both,
-	// because its eligibility ladder distinguishes a stale session under a
-	// current generation from a stale generation, and it reads them back
-	// through the inverse of the function that minted them.
-	sessionID, generationID, minted := ssm.ParseFence(cmd.GetFence())
-	h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d", workspace, requestID, sessionID, generationID, cmd.GetFromSeq())
-	// A FENCE THIS DAEMON DID NOT MINT IS REFUSED HERE, and it is refused here
-	// rather than by the eligibility ladder because the ladder cannot tell it
-	// apart: an unmintable token and an ABSENT one both split to two empty
-	// identities, and the two owe opposite answers. A client carrying no fence
-	// predates fenced chrome and is served under whatever identity is current;
-	// a client echoing a token no workspace ever held is a delayed request that
-	// must not silently rebind itself to the current generation. Only the token
-	// itself distinguishes them, and this is the only place it exists.
+	// THE TOKEN TRAVELS WHOLE to the eligibility ladder. It is opaque by
+	// contract and byte-compared by its receiver, and the daemon reads inside it
+	// in exactly one place (historyadmission.go). Deciding admission from a pair
+	// split out here would make this a second reader with its own semantics,
+	// which is precisely the divergence that left an unwired workspace's stored
+	// history unreachable once already.
+	//
+	// The one thing read out of it here is whether this daemon MINTED it, which
+	// is a validity question rather than an admission one. It is asked here
+	// because the ladder cannot ask it: an unmintable token and an ABSENT one
+	// owe opposite answers — a client carrying no fence predates fenced chrome
+	// and is served under whatever identity is current, while a client echoing a
+	// token no workspace ever held is a delayed request that must not silently
+	// rebind itself to the current generation.
+	_, _, minted := ssm.ParseFence(cmd.GetFence())
 	if cmd.GetFence() != "" && !minted {
 		err := fmt.Errorf("%w: resync ws=%q request_id=%q echoed a fence this daemon never minted, so the identity it decided to ask against cannot be recovered",
 			errclass.ErrSessionSuperseded, workspace, requestID)
 		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d REFUSED: the echoed fence is not one this daemon minted", workspace, requestID, cmd.GetFromSeq())
 		return classifyStaleFenceResync(err)
 	}
+	h.logf("frontend cmd: resync ws=%s request_id=%s fence=%q from_seq=%d", workspace, requestID, cmd.GetFence(), cmd.GetFromSeq())
 	if h.resyncer == nil {
-		h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d FAILED — no resyncer is wired, so the conversation replay cannot be served at all (the snapshot half alone would render an empty feed)",
-			workspace, requestID, sessionID, generationID, cmd.GetFromSeq())
+		h.logf("frontend cmd: resync ws=%s request_id=%s fence=%q from_seq=%d FAILED — no resyncer is wired, so the conversation replay cannot be served at all (the snapshot half alone would render an empty feed)",
+			workspace, requestID, cmd.GetFence(), cmd.GetFromSeq())
 		return fmt.Errorf("frontend cmd: resync ws=%s request_id=%s: no resyncer wired for the conversation replay", workspace, requestID)
 	}
-	if err := h.resyncer.ResyncForGeneration(workspace, sessionID, generationID, cmd.GetFromSeq()); err != nil {
-		h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d FAILED: %v", workspace, requestID, sessionID, generationID, cmd.GetFromSeq(), err)
+	if err := h.resyncer.ResyncForFence(workspace, cmd.GetFence(), cmd.GetFromSeq()); err != nil {
+		h.logf("frontend cmd: resync ws=%s request_id=%s fence=%q from_seq=%d FAILED: %v", workspace, requestID, cmd.GetFence(), cmd.GetFromSeq(), err)
 		return classifyStaleFenceResync(err)
 	}
 	return nil
+}
+
+// ConversationPage drives the COLD-OPEN half of a frontend's history: the
+// newest N top-level items, or the N before a cursor.
+//
+// It reads the SAME fence the resync reads, through the same splitter, for the
+// same reason: a page is a replay, and one served against a generation the
+// client never saw is a page of somebody else's conversation. The refusal takes
+// the resync's remedy too — a view whose history request is refused is stuck
+// until it reloads, whichever request it was.
+//
+// THE ANCHOR ONEOF IS PROVED HERE, not defaulted. A command with neither arm
+// set is refused rather than read as a tail: defaulting would turn a client bug
+// into a silent full-tail read on every workspace it reached, and the daemon
+// would have no record that anything was wrong.
+//
+// A nil resyncer is a construction error, not a degraded mode: the command
+// exists, so something must answer it.
+func (h *commandHandler) ConversationPage(ctx context.Context, workspace, requestID string, cmd *frontendv1.ConversationPageCmd) (*frontendv1.ConversationPage, error) {
+	anchor, err := pageAnchorFrom(cmd)
+	if err != nil {
+		h.logf("frontend cmd: conversation_page ws=%s request_id=%s fence=%q REFUSED: %v",
+			workspace, requestID, cmd.GetFence(), err)
+		return nil, err
+	}
+	h.logf("frontend cmd: conversation_page ws=%s request_id=%s fence=%q anchor=%s limit=%d",
+		workspace, requestID, cmd.GetFence(), pageAnchorKind(anchor), anchor.Limit)
+	if h.resyncer == nil {
+		h.logf("frontend cmd: conversation_page ws=%s request_id=%s FAILED — no resyncer is wired, so the conversation page cannot be served at all",
+			workspace, requestID)
+		return nil, fmt.Errorf("frontend cmd: conversation_page ws=%s request_id=%s: no resyncer wired for the conversation page", workspace, requestID)
+	}
+	page, err := h.resyncer.ConversationPage(ctx, workspace, cmd.GetFence(), anchor)
+	if err != nil {
+		h.logf("frontend cmd: conversation_page ws=%s request_id=%s fence=%q anchor=%s FAILED: %v",
+			workspace, requestID, cmd.GetFence(), pageAnchorKind(anchor), err)
+		return nil, classifyStaleFenceResync(err)
+	}
+	return page, nil
+}
+
+// pageAnchorFrom resolves the wire anchor oneof, refusing a command that set
+// neither arm.
+func pageAnchorFrom(cmd *frontendv1.ConversationPageCmd) (sessioncontroller.PageAnchor, error) {
+	switch a := cmd.GetAnchor().(type) {
+	case *frontendv1.ConversationPageCmd_Tail:
+		return sessioncontroller.PageAnchor{Tail: true, Limit: a.Tail.GetLimit()}, nil
+	case *frontendv1.ConversationPageCmd_Before:
+		return sessioncontroller.PageAnchor{Cursor: a.Before.GetCursor(), Limit: a.Before.GetLimit()}, nil
+	default:
+		return sessioncontroller.PageAnchor{}, fmt.Errorf("frontend cmd: conversation_page carries neither a tail nor a before anchor, and a page is never defaulted to a tail read")
+	}
+}
+
+// pageAnchorKind names the anchor for the log line.
+func pageAnchorKind(a sessioncontroller.PageAnchor) string {
+	if a.Tail {
+		return "tail"
+	}
+	return "before"
 }
 
 // staleFenceResync carries the REMEDY for a resync the eligibility ladder

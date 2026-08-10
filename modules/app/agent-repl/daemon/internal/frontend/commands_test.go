@@ -24,6 +24,11 @@ type mockHandler struct {
 	// test can drive the ack's arm on both the success and the refusal path.
 	detachedCancel *frontendv1.DetachedCancelOutcome
 
+	// page is the ConversationPage this handler serves. A nil one with a nil
+	// err is the construction defect Dispatch refuses, which is itself a case
+	// worth being able to arrange.
+	page *frontendv1.ConversationPage
+
 	lastWorkspace string
 	lastRequestID string
 	lastResyncSeq uint64
@@ -73,6 +78,13 @@ func (m *mockHandler) OpenWorkspace(_ context.Context, ws, rid string, _ *fronte
 func (m *mockHandler) Resync(_ context.Context, ws, rid string, cmd *frontendv1.ResyncCmd) error {
 	m.called, m.lastWorkspace, m.lastRequestID, m.lastResyncSeq = "resync", ws, rid, cmd.GetFromSeq()
 	return m.err
+}
+func (m *mockHandler) ConversationPage(_ context.Context, ws, rid string, _ *frontendv1.ConversationPageCmd) (*frontendv1.ConversationPage, error) {
+	m.called, m.lastWorkspace, m.lastRequestID = "conversation_page", ws, rid
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.page, nil
 }
 func (m *mockHandler) CreateSession(_ context.Context, ws, rid string, _ *frontendv1.CreateSessionCmd) (string, error) {
 	m.called, m.lastWorkspace, m.lastRequestID = "create_session", ws, rid
