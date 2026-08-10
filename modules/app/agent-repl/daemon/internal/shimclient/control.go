@@ -127,6 +127,43 @@ func (c *Client) Interrupt(ctx context.Context, originRequestID string) (corev1.
 	return ack.GetInterruptOutcome(), nil
 }
 
+// CancelDetachedAgents asks the shim to stop the session's DETACHED background
+// agents — the subagent, shell and workflow tasks still working after the turn
+// that launched them ended — and awaits the Ack/Nack.
+//
+// IT IS NOT Interrupt, AND THE DIFFERENCE IS THE WHOLE POINT. An Interrupt is
+// aimed at the turn. The state a user reaches for this in is precisely the one
+// where the turn is already over, so the interrupt is answered
+// ALREADY_COMPLETE and the agents it was meant to stop are never touched.
+//
+// It returns the shim's OWN typed verdict, for the same reason Interrupt
+// returns InterruptOutcome: only the shim can read its live-task set atomically
+// against task end. A Nack or timeout is still an error, unchanged — the nil
+// outcome that comes with one is never a "nothing was running" reading.
+//
+// originRequestID NAMES WHO ORDERED THE STOP and is carried purely so the log
+// can say, exactly as Interrupt's is.
+func (c *Client) CancelDetachedAgents(ctx context.Context, originRequestID string) (*corev1.DetachedCancelOutcome, error) {
+	reqID, err := c.newRequestID("cancel-detached-agents")
+	if err != nil {
+		return nil, err
+	}
+	ack, err := c.sendAwait(ctx, &corev1.CancelDetachedAgents{RequestId: reqID}, originRequestID)
+	if err != nil {
+		return nil, err
+	}
+	outcome := ack.GetDetachedCancelOutcome()
+	if outcome == nil {
+		// AN ACK WITH NO OUTCOME IS A PROTOCOL VIOLATION, not an empty stop.
+		// The contract sets the field on every arm — including both refusals —
+		// so an ack without one is a shim that did something this daemon
+		// cannot account for. Reading it as "nothing was running" would settle
+		// no bubbles and report a successful cancel for work still in flight.
+		return nil, fmt.Errorf("shim acked cancel-detached-agents request_id=%s with no detached_cancel_outcome; the contract sets it on every arm", reqID)
+	}
+	return outcome, nil
+}
+
 // SetModel asks the live shim to change its SDK model and returns the model the
 // shim confirmed. Callers persist only this value, never their requested one.
 func (c *Client) SetModel(ctx context.Context, model string) (string, error) {

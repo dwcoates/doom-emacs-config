@@ -68,8 +68,14 @@ import {
   type SubscriptionUsageResponse,
 } from "../subscription-usage.js";
 import {
+  CancelDetachedAgents,
   DaemonHello,
   DegradedState,
+  DetachedAgentsCancelledSchema,
+  DetachedCancelOutcome,
+  DetachedCancelOutcomeSchema,
+  DetachedCancelUnsupportedSchema,
+  NoDetachedAgentsRunningSchema,
   DegradedStateSchema,
   Event,
   EventClass,
@@ -717,6 +723,83 @@ export class UdsSession {
         if (wasLive) this.armDisplacedTurnTerminals(displacedTurnIds);
         return wasLive ? InterruptOutcome.INTERRUPTED : InterruptOutcome.ALREADY_COMPLETE;
       },
+      cancelDetachedAgents: async ({ requestId }): Promise<DetachedCancelOutcome> => {
+        // THE SAME STRUCTURAL ARGUMENT interrupt() MAKES, applied to the task
+        // set instead of the turn counter.
+        //
+        // The snapshot is taken SYNCHRONOUSLY, here, before the first await.
+        // This event loop is single-threaded and this class owns
+        // liveSdkTaskIds — a task enters it on TaskStarted and leaves it on
+        // its terminal — so no task can start or end between this read and
+        // the outcome it decides. The ambiguous case "the last agent finished
+        // at about the moment the cancel landed, so did we stop it or was it
+        // already done?" is unrepresentable rather than merely unlikely.
+        const taskIds = [...this.liveSdkTaskIds].sort();
+        const query = this.query;
+        LOGGER.log({
+          agent_repl_session_id: this.deps.sessionId,
+          request_id: requestId,
+          live_sdk_task_ids: taskIds,
+          live_sdk_task_count: taskIds.length,
+          has_query: query !== null,
+        }, "processing daemon cancel-detached-agents request");
+        if (query === null) {
+          // Provably unattemptable, and distinct from an idle session: there
+          // is nothing to ask, rather than nothing running. Reported on the
+          // degraded channel as well as on the ack, because a session serving
+          // controls with no query behind it is a bring-up fault.
+          const detail = "cancel detached agents could not be attempted: no SDK query is constructed for this session";
+          this.reportDegraded("claude-shim-cancel-detached", detail);
+          return create(DetachedCancelOutcomeSchema, {
+            outcome: { case: "unsupported", value: create(DetachedCancelUnsupportedSchema, { detail }) },
+          });
+        }
+        if (taskIds.length === 0) {
+          return create(DetachedCancelOutcomeSchema, {
+            outcome: { case: "nothingRunning", value: create(NoDetachedAgentsRunningSchema, {}) },
+          });
+        }
+        // THE SDK'S OWN STOP, one task at a time. `stopTask` is the native
+        // mechanism (control request `stop_task`); the CLI answers it by
+        // emitting that task's `task_notification` with status `stopped`,
+        // which converts to the ordinary TaskEnded the whole stack already
+        // settles on. Nothing here reaches for a process boundary, because
+        // the shim owns none that a subagent runs behind.
+        const stopped: string[] = [];
+        const failures: string[] = [];
+        for (const taskId of taskIds) {
+          try {
+            await query.query.stopTask(taskId);
+            stopped.push(taskId);
+          } catch (err) {
+            failures.push(`${taskId}: ${errMsg(err)}`);
+          }
+        }
+        if (failures.length > 0) {
+          // A PARTIAL STOP IS NEVER SILENT. The ack names only what was
+          // actually stopped, and the agents that refused the stop are still
+          // running and still spending tokens — which is exactly the sort of
+          // divergence the degraded channel exists to say out loud.
+          this.reportDegraded("claude-shim-cancel-detached",
+            `${failures.length} of ${taskIds.length} detached agent(s) could not be stopped and are STILL RUNNING: ${failures.join("; ")}`);
+        }
+        if (stopped.length === 0) {
+          // Nothing was stopped at all. A throw, so control.ts answers with a
+          // Nack rather than an Ack whose `cancelled` arm would claim an
+          // empty stop as a success.
+          throw new Error(`no detached agent could be stopped (${taskIds.length} were running): ${failures.join("; ")}`);
+        }
+        LOGGER.log({
+          agent_repl_session_id: this.deps.sessionId,
+          request_id: requestId,
+          stopped_task_ids: stopped,
+          stopped_task_count: stopped.length,
+          failed_task_count: failures.length,
+        }, "detached agents stopped via the SDK stop_task control");
+        return create(DetachedCancelOutcomeSchema, {
+          outcome: { case: "cancelled", value: create(DetachedAgentsCancelledSchema, { taskIds: stopped }) },
+        });
+      },
       setModel: async ({ requestId, model }): Promise<string> => {
         const normalized = normalizeModel(model);
         if (normalized === "") throw new Error("set-model cannot send an empty or <synthetic> model to the SDK");
@@ -767,6 +850,7 @@ export class UdsSession {
     const handlers: SessionServerHandlers = {
       onSubmitPrompt: (m) => this.control.handleSubmitPrompt(m),
       onInterrupt: (m) => this.control.handleInterrupt(m),
+      onCancelDetachedAgents: (m: CancelDetachedAgents) => this.control.handleCancelDetachedAgents(m),
       onSetModel: (m) => this.control.handleSetModel(m),
       onQuerySelectedModel: (m) => this.control.handleQuerySelectedModel(m),
       onPermissionResponse: (m) => this.control.handlePermissionResponse(m),
@@ -1327,6 +1411,18 @@ export class UdsSession {
   /** Outstanding-turn count (test/diagnostics). */
   turnCount(): number {
     return this.activeTurnIds.length;
+  }
+
+  /**
+   * Live detached-task count: the set a CancelDetachedAgents stops
+   * (test/diagnostics).
+   *
+   * It reads the SAME set the cancel snapshots, so a test can wait for a
+   * launch to register before asking for the stop rather than sleeping and
+   * hoping — the difference between a deterministic test and a flaky one.
+   */
+  detachedTaskCount(): number {
+    return this.liveSdkTaskIds.size;
   }
 
   /**

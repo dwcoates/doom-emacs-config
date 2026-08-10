@@ -546,6 +546,93 @@ export function createFakeQuery(
   };
 
   /**
+   * Task ids this fake has announced as STARTED and not yet ended, mapped to
+   * the tool call that launched each. It is what `stopTask` resolves against,
+   * so the offline engine answers a stop the same way the CLI does: only for
+   * work it actually has running.
+   */
+  const liveFakeTasks = new Map<string, string>();
+
+  /**
+   * A DETACHED AGENT turn: the Task call, the `system:task_started`
+   * announcement, and the launch's tool_result — then the turn's own result,
+   * with the agent still running.
+   *
+   * This is the one branch that leaves live task lifecycle behind it, and it
+   * exists so an offline run can exercise detached-agent work at all. `!bg`
+   * cannot: its detached path is a tool_progress plus a `<task-notification>`
+   * TEXT block, which converts to the notification arm and never to task
+   * lifecycle, so no task is ever live afterwards.
+   *
+   * The agent does NOT finish on its own. Detached work that outlives its turn
+   * is the whole condition the cancel exists for, and a fake that ended the
+   * agent for you could never reproduce it.
+   */
+  const runAgentTurn = (messageId: string, description: string): void => {
+    const toolUseId = `toolu_fake_${turn}`;
+    const taskId = `fakeagent${turn}`;
+    emitStream({
+      type: "message_start",
+      message: { id: messageId, role: "assistant", model, usage },
+    });
+    emitStream({
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "tool_use", id: toolUseId, name: "Task", input: {} },
+    });
+    emitStream({
+      type: "content_block_delta",
+      index: 0,
+      delta: {
+        type: "input_json_delta",
+        partial_json: JSON.stringify({ description, subagent_type: "general-purpose", run_in_background: true }),
+      },
+    });
+    emitStream({ type: "content_block_stop", index: 0 });
+    emitStream({ type: "message_stop" });
+    emit({
+      type: "system",
+      subtype: "task_started",
+      session_id: sessionUuid,
+      task_id: taskId,
+      task_type: "local_agent",
+      tool_use_id: toolUseId,
+      description,
+    });
+    liveFakeTasks.set(taskId, toolUseId);
+    emit({
+      type: "user",
+      parent_tool_use_id: null,
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: toolUseId,
+            content: `Agent running in the background with ID: ${taskId}.`,
+            is_error: false,
+          },
+        ],
+      },
+    });
+    const closing = "Dispatched the agent.";
+    emitTextBlock(messageId, 1, closing);
+    emit({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        id: messageId,
+        role: "assistant",
+        model,
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: closing }],
+        usage,
+      },
+    });
+    emitResult("success", closing);
+  };
+
+  /**
    * A backgrounded tool turn: the spawn's progress heartbeat, the
    * announcing result (observed real shape), and the harness
    * task-notification that completes it — the whole detached-work frame
@@ -691,6 +778,9 @@ export function createFakeQuery(
         LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "query-eof" }, "selected fake turn branch");
         out.end();
         return;
+      } else if (text.startsWith("!agent ")) {
+        LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "agent" }, "selected fake turn branch");
+        runAgentTurn(messageId, text.slice("!agent ".length));
       } else if (text.startsWith("!bg ")) {
         LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "background" }, "selected fake turn branch");
         runBackgroundTurn(messageId, text.slice("!bg ".length));
@@ -733,6 +823,37 @@ export function createFakeQuery(
       release?.();
       LOGGER.log({ agent_repl_session_id: opts.sessionId, turns: turn }, "fake SDK interrupt accepted");
       return { still_queued: [] };
+    },
+    /**
+     * The SDK's native per-task stop, offline.
+     *
+     * It answers the way the CLI does: the stopped task emits its own
+     * `system:task_notification` with status `stopped`, which is the ordinary
+     * terminal fact the whole stack settles on. Without that emission the fake
+     * would accept a stop and leave the task live forever, which is the one
+     * behavior a cancel test must not be written against.
+     *
+     * A task this engine never started is ACCEPTED and says so, matching the
+     * real control: the stop is idempotent, and a task that has already ended
+     * is not an error to stop again.
+     */
+    stopTask: async (taskId: string): Promise<void> => {
+      const toolUseId = liveFakeTasks.get(taskId);
+      if (toolUseId === undefined) {
+        LOGGER.log({ agent_repl_session_id: opts.sessionId, task_id: taskId }, "fake SDK stop_task named no live task; accepted as a no-op");
+        return;
+      }
+      liveFakeTasks.delete(taskId);
+      emit({
+        type: "system",
+        subtype: "task_notification",
+        session_id: sessionUuid,
+        task_id: taskId,
+        tool_use_id: toolUseId,
+        status: "stopped",
+        summary: "Task stopped by request",
+      });
+      LOGGER.log({ agent_repl_session_id: opts.sessionId, task_id: taskId, tool_use_id: toolUseId }, "fake SDK stop_task stopped a live task");
     },
     setPermissionMode: async (mode: PermissionMode): Promise<void> => {
       LOGGER.log({ agent_repl_session_id: opts.sessionId, previous_permission_mode: permissionMode, permission_mode: mode }, "fake SDK permission mode changed");

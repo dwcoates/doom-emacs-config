@@ -80,6 +80,15 @@ undo and may additionally retract the sent turn.  Returns `retracted'
 when the frontend withdrew the turn's prompt (the caller then owns that
 text and is expected to restore it), or any other non-nil value when
 the interrupt merely landed.  Nil means not delivered.
+CANCEL-DETACHED-FN (WS): stop WS's DETACHED background agents — the
+subagents and shells still working after the turn that launched them
+ended.  Distinct from INTERRUPT-FN and never a variant of it: an
+interrupt ends the TURN, and detached work has outlived its turn by
+definition, so an interrupt aimed at it is a guaranteed no-op.
+Returns non-nil when the cancel was dispatched, nil when it was not.
+Optional: a frontend without it simply cannot reach detached work, and
+`agent-repl--frontend-dispatch-cancel-detached' says so loudly rather
+than quietly dispatching an interrupt that would do nothing.
 RUNNING-P-FN (WS): non-nil when WS has a live session on this frontend.
 SHOW-FN (WS): make an already-running session's view visible.
 HIDE-FN (WS): hide the view without killing the session.
@@ -115,6 +124,7 @@ gui."
   kill-fn
   send-fn
   interrupt-fn
+  cancel-detached-fn
   running-p-fn
   show-fn
   hide-fn
@@ -335,6 +345,28 @@ KIND is `ctrl-c' or `escape' (see the struct docstring)."
     (agent-repl--log ws "frontend-dispatch-interrupt: frontend=%s kind=%s result=%S"
                      frontend kind result)
     result))
+
+(defun agent-repl--frontend-dispatch-cancel-detached (ws)
+  "Cancel WS\='s detached background agents through its frontend.
+Returns the capability\='s own value: non-nil when the cancel was
+dispatched, nil when it was not.
+
+A frontend with NO such capability is a loud nil, never a silent
+fallback to the interrupt.  The whole point of this command is that an
+interrupt cannot reach detached work, so quietly sending one instead
+would report a stop that provably did nothing."
+  (let* ((fe (agent-repl--ws-frontend ws))
+         (frontend (agent-repl-frontend-name fe))
+         (cancel-fn (agent-repl-frontend-cancel-detached-fn fe)))
+    (if (not cancel-fn)
+        (progn
+          (agent-repl--warn ws "frontend-dispatch-cancel-detached: frontend=%s has NO cancel capability; detached agents are unreachable from here"
+                            frontend)
+          nil)
+      (let ((result (funcall cancel-fn ws)))
+        (agent-repl--log ws "frontend-dispatch-cancel-detached: frontend=%s result=%S"
+                         frontend result)
+        result))))
 
 (defun agent-repl--frontend-dispatch-view (ws operation accessor)
   "Run WS's frontend ACCESSOR for view OPERATION and record its outcome.

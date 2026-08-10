@@ -513,6 +513,52 @@ func (s *asyncBubbleStore) observeTaskEnded(te *corev1.TaskEnded, atMs int64) (a
 	return asyncPush{Updates: []*frontendv1.AsyncBubbleUpdate{up}}, err
 }
 
+// settleCancelledTasks settles the bubbles of the tasks a detached-agent
+// cancel just stopped.
+//
+// WHY THE CANCEL'S ACK IS A TERMINAL FACT AND NOT A GUESS. The shim does not
+// report a task id here until the SDK's `stop_task` control has RESOLVED for
+// it — the agent has been stopped, and the ack is the shim's direct
+// observation of that, exactly as a TaskEnded is. So this is the same class of
+// evidence arriving on the control plane instead of the event plane, and the
+// bubble resolves the moment the user's cancel is answered rather than
+// whenever the stopped notification happens to be folded.
+//
+// IT SETTLES THROUGH settleLocked LIKE EVERYTHING ELSE. There is still exactly
+// one function that settles a bubble, so the log record and the outcome
+// mapping cannot drift between the control-plane and event-plane routes.
+//
+// THE LATER TaskEnded IS NOT SUPPRESSED. The CLI emits the stopped
+// notification too, and when it lands it settles the same bubble again through
+// the ordinary path. That is deliberate: the two agree (both resolve to the
+// killed arm), and on the one edge where they disagree — an agent that
+// finished on its own in the instant before the stop reached it — the event
+// plane carries the truer verdict and is allowed to overwrite this one. A
+// suppression here would pin the earlier, coarser answer.
+//
+// A TASK WITH NO BUBBLE REPORTS NOTHING, matching settleByTaskLocked: work the
+// session tracked but never opened detached work for is not a missing bubble.
+func (s *asyncBubbleStore) settleCancelledTasks(taskIDs []string, v frontend.AsyncVerdict) ([]*frontendv1.AsyncBubbleUpdate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var updates []*frontendv1.AsyncBubbleUpdate
+	var errs []error
+	for _, taskID := range taskIDs {
+		up, err := s.settleByTaskLocked(taskID, v)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if up == nil {
+			s.logf("session-controller: detached cancel settled NO BUBBLE task=%s ws=%s — the shim stopped a task this session opened no detached work for",
+				taskID, s.workspace)
+			continue
+		}
+		updates = append(updates, up)
+	}
+	return updates, joinAsyncErrors(errs)
+}
+
 // observeTaskStarted enriches the bubble a launch announcement names, and
 // reports the fault when the announcement can be attributed to no call.
 //

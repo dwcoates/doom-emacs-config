@@ -186,6 +186,14 @@ type fakeClient struct {
 	// unreachable shim, a nack, or an ack that never came. It is the fake's
 	// stand-in for every route by which a stop cannot be delivered at all.
 	interruptErr error
+	// detachedCancelOutcome is the verdict the fake answers a detached-agent
+	// cancel with; nil defaults to nothing_running.
+	detachedCancelOutcome *corev1.DetachedCancelOutcome
+	// detachedCancelOrigins records who ORDERED each cancel, in that caller's
+	// own vocabulary.
+	detachedCancelOrigins []string
+	// detachedCancelErr makes the cancel fail on the wire.
+	detachedCancelErr error
 	// notReady, when non-nil, blocks AwaitReady until it is closed — the
 	// fake's stand-in for a shim that has not finished handshaking yet. Nil
 	// (the default) means the connection is already usable, so tests that do
@@ -354,6 +362,27 @@ func (c *fakeClient) UnpinAccountingTurn(turnIDs ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.unpinned = append(c.unpinned, turnIDs...)
+}
+
+// CancelDetachedAgents answers with whatever the test staged, defaulting to a
+// nothing_running verdict — the honest answer for a fake session that has never
+// launched detached work.
+func (c *fakeClient) CancelDetachedAgents(_ context.Context, originRequestID string) (*corev1.DetachedCancelOutcome, error) {
+	c.mu.Lock()
+	c.detachedCancelOrigins = append(c.detachedCancelOrigins, originRequestID)
+	outcome := c.detachedCancelOutcome
+	failure := c.detachedCancelErr
+	c.mu.Unlock()
+	notifyTestActivity()
+	if failure != nil {
+		return nil, failure
+	}
+	if outcome == nil {
+		outcome = &corev1.DetachedCancelOutcome{Outcome: &corev1.DetachedCancelOutcome_NothingRunning{
+			NothingRunning: &corev1.NoDetachedAgentsRunning{},
+		}}
+	}
+	return outcome, nil
 }
 
 func (c *fakeClient) Interrupt(_ context.Context, originRequestID string) (corev1.InterruptOutcome, error) {

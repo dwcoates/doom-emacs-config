@@ -1120,6 +1120,71 @@ enum InterruptOutcome {
   INTERRUPT_OUTCOME_FAILED = 3;
 }
 
+// Stop this session's DETACHED background agents — the subagent, shell and
+// workflow tasks that have outlived the turn that launched them.
+//
+// IT IS NOT AN INTERRUPT AND NOT A VARIANT OF ONE. An Interrupt ends the TURN.
+// Detached work has by definition already outlived its turn, so a stop aimed
+// at the turn reaches none of it and is answered ALREADY_COMPLETE — which is
+// exactly the no-op the state that motivates this command produces. This is
+// the other thing, named directly: the tasks are stopped and the turn (if one
+// happens to be running) is left alone.
+message CancelDetachedAgents {
+  string request_id = 1;
+}
+
+// What a CancelDetachedAgents actually did, decided by the SHIM.
+//
+// The shim decides it for the same reason it decides InterruptOutcome: it owns
+// the live-task set — it observes every task start and every task end on its
+// own SDK stream, on a single-threaded event loop — so the read that answers
+// "what was running when this landed?" is atomic against task end there and
+// nowhere else. A daemon deriving it from the event stream would see the stop
+// and the last task's end as two unordered facts.
+//
+// A ONEOF OF MESSAGES RATHER THAN AN ENUM, because the arms do not carry the
+// same payload: a stop that happened carries the tasks it reached, and a stop
+// that could not be attempted carries the sentence saying why.
+message DetachedCancelOutcome {
+  oneof outcome {
+    DetachedAgentsCancelled cancelled = 1;
+    NoDetachedAgentsRunning nothing_running = 2;
+    DetachedCancelUnsupported unsupported = 3;
+  }
+}
+
+// Detached work was running, and the stop was delivered to every task named
+// here.
+message DetachedAgentsCancelled {
+  // The tasks the stop reached, under the SAME task_id TaskStarted and
+  // TaskEnded carry — so a consumer can join this list against the task
+  // lifecycle it already tracks.
+  //
+  // THE IDS, NOT A COUNT. The daemon settles exactly these tasks' async
+  // bubbles the moment the stop is acked; a bare count would leave it
+  // guessing which bubbles it had just been told about.
+  repeated string task_ids = 1;
+}
+
+// No detached work was running when the stop landed.
+//
+// At the WIRE level this is an answer, not a failure: the session was asked
+// what it had running and said "nothing". Whether that reads as a refusal to
+// the person who pressed the key is the daemon's ruling to make, not the
+// shim's.
+message NoDetachedAgentsRunning {}
+
+// The stop could not be ATTEMPTED at all — the session holds no live query to
+// ask, or the running vendor CLI exposes no task-stop control.
+//
+// Distinct from `nothing_running`: that one is a session that answered, this
+// one is a session that could not be asked. Conflating them would report a
+// missing capability as an idle session.
+message DetachedCancelUnsupported {
+  // Why, in one sentence, for the daemon log and the frontend's failure card.
+  string detail = 1;
+}
+
 message Ack {
   string request_id = 1;
   // Set only on an Interrupt's ack; UNSPECIFIED on every other command,
@@ -1131,6 +1196,12 @@ message Ack {
   // with the same authority: the shim's own post-operation selected model, not
   // an echo assembled by the daemon.  UNSET on every other command's ack.
   string selected_model = 3;
+  // Set only on a CancelDetachedAgents' ack; UNSET on every other command's.
+  // The whole outcome travels here rather than as an `ok` the daemon would
+  // then have to qualify: a stop that reached three agents, a session with
+  // nothing detached, and a session that could not be asked are three
+  // different answers a frontend renders three different ways.
+  DetachedCancelOutcome detached_cancel_outcome = 4;
 }
 
 message Nack {

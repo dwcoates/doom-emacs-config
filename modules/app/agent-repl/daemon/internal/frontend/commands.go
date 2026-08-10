@@ -30,6 +30,15 @@ type CommandHandler interface {
 	SubmitPrompt(ctx context.Context, workspace, requestID string, cmd *frontendv1.SubmitPromptCmd) error
 	// Interrupt interrupts the in-flight turn (hard = SDK interrupt).
 	Interrupt(ctx context.Context, workspace, requestID string, cmd *frontendv1.InterruptCmd) error
+	// CancelDetachedAgents stops the session's detached background agents: the
+	// work an Interrupt structurally cannot reach, because it has already
+	// outlived the turn an interrupt ends.
+	//
+	// It returns the TYPED outcome for the ack, which travels beside the error
+	// rather than through it: a refusal here still carries what the daemon
+	// found (nothing running, or a session that could not be asked), and a
+	// client renders that instead of reading meaning out of error text.
+	CancelDetachedAgents(ctx context.Context, workspace, requestID string, cmd *frontendv1.CancelDetachedAgentsCmd) (*frontendv1.DetachedCancelOutcome, error)
 	// AnswerPermission answers a pending canUseTool permission request.
 	AnswerPermission(ctx context.Context, workspace, requestID string, cmd *frontendv1.PermissionAnswerCmd) error
 	// SetModel applies a user-requested model change and returns the live shim's
@@ -142,6 +151,9 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 
 	var err error
 	var selectedModel string
+	// The detached-agent cancel's typed verdict, carried on BOTH the success
+	// ack and the refusal — see CommandHandler.CancelDetachedAgents.
+	var detachedCancel *frontendv1.DetachedCancelOutcome
 	// Observability only; see CommandHandler.CreateSession.
 	var observedClaudeSessionID string
 	var response *frontendv1.FrontendFrame
@@ -160,6 +172,8 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 		err = h.SubmitPrompt(ctx, ws, reqID, c.SubmitPrompt)
 	case *frontendv1.FrontendCommand_Interrupt:
 		err = h.Interrupt(ctx, ws, reqID, c.Interrupt)
+	case *frontendv1.FrontendCommand_CancelDetachedAgents:
+		detachedCancel, err = h.CancelDetachedAgents(ctx, ws, reqID, c.CancelDetachedAgents)
 	case *frontendv1.FrontendCommand_PermissionAnswer:
 		err = h.AnswerPermission(ctx, ws, reqID, c.PermissionAnswer)
 	case *frontendv1.FrontendCommand_MergeWorkspace:
@@ -248,11 +262,17 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 		// A rejected SetModel carries the shim's current selection.  It is
 		// state authority for the frontend to render after its failed request.
 		ack.SelectedModel = selectedModel
+		// A REFUSED CANCEL STILL SAYS WHAT IT FOUND. "Nothing detached was
+		// running" is a refusal the user should read as an account of the
+		// session, not as a transport failure, and the typed arm is the only
+		// thing that lets a frontend tell the two apart.
+		ack.DetachedCancel = detachedCancel
 		return ack, nil
 	}
 	return &frontendv1.CommandAck{
 		RequestId: reqID, Ok: true, SelectedModel: selectedModel,
 		ObservedClaudeSessionId: observedClaudeSessionID,
+		DetachedCancel:          detachedCancel,
 	}, response
 }
 

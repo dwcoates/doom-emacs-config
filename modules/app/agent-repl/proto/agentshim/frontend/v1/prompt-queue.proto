@@ -30,6 +30,71 @@ message InterruptCmd {
   bool confirm_agents = 1;
 }
 
+// Cancel the workspace session's DETACHED background agents: the subagent,
+// shell and workflow tasks still working after the turn that launched them
+// has ended.
+//
+// WHY IT IS ITS OWN COMMAND RATHER THAN A FLAG ON InterruptCmd. An interrupt
+// stops the TURN. The state this command exists for — main turn over,
+// detached agents still running — is precisely the state in which there is no
+// turn to stop, so an interrupt sent into it is a guaranteed no-op that the
+// shim answers ALREADY_COMPLETE. The one state that raised the interrupt's
+// "cancel the running subagents?" question was the one state its answer could
+// not act on; this command is what that yes now sends.
+//
+// IT CARRIES NO CONFIRMATION ECHO, unlike InterruptCmd.confirm_agents. There
+// is nothing here to confirm: the command's ONLY effect is stopping detached
+// agents, so sending it IS the deliberate second keystroke that flag exists to
+// require. A frontend asks its user before it sends, never after.
+//
+// The session is the command envelope's `workspace`; the command has no
+// fields of its own.
+message CancelDetachedAgentsCmd {}
+
+// What a CancelDetachedAgentsCmd did, carried on the command's ack.
+//
+// It is the SHIM's verdict relayed, not a daemon re-derivation — see
+// agentshim.core.v1.DetachedCancelOutcome for why only the shim can answer
+// "what was running when this landed?" without racing task end.
+//
+// A ONEOF OF MESSAGES, never a bool: "did it work" cannot distinguish a stop
+// that reached three agents from a session that had nothing to stop from a
+// session that could not be asked, and a frontend renders those three
+// differently.
+message DetachedCancelOutcome {
+  oneof outcome {
+    DetachedAgentsCancelled cancelled = 1;
+    NoDetachedAgentsRunning nothing_running = 2;
+    DetachedCancelUnsupported unsupported = 3;
+  }
+}
+
+// Detached work was running and the stop reached every agent counted here.
+message DetachedAgentsCancelled {
+  // How many detached agents were stopped. A COUNT rather than the shim's
+  // task ids: a task id is daemon-internal bookkeeping a frontend has no
+  // vocabulary for, and what a frontend renders is "cancelled 3 agents". The
+  // ids stay on the shim-wire arm, where the daemon uses them to settle
+  // exactly those agents' bubbles.
+  int64 count = 1;
+}
+
+// Nothing detached was running, so the command stopped nothing.
+//
+// THE DAEMON REFUSES ON THIS ARM (the ack carries ok=false alongside it). A
+// cancel that stopped nothing is a keystroke that did nothing, and reporting
+// it as success is how a stop control comes to look like it works when it
+// does not reach anything. The typed arm is what lets a frontend say "nothing
+// was running" instead of showing a bare transport failure.
+message NoDetachedAgentsRunning {}
+
+// The stop could not be attempted at all: no live session behind the
+// workspace, or a vendor CLI with no task-stop control.
+message DetachedCancelUnsupported {
+  // Why, in one sentence, for display.
+  string detail = 1;
+}
+
 // ---------------------------------------------------------------------------
 // The daemon-held prompt queue (E4).
 //

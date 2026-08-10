@@ -72,6 +72,7 @@ import {
   HealthCheckSchema,
   HealthStatusSchema,
   FilePlaneDiagnosticSchema,
+  CancelDetachedAgentsSchema,
   InterruptSchema,
   NackSchema,
   PermissionDecision,
@@ -148,6 +149,16 @@ class FakeQuery implements QueryLike {
   interrupt(): Promise<InterruptReceipt | undefined> {
     this.interruptCalls++;
     return Promise.resolve(this.interruptReceipt);
+  }
+  /** Task ids the SDK's native stop_task control was asked to stop, in order. */
+  readonly stoppedTaskIds: string[] = [];
+  /** Task ids stopTask() rejects for, so a partial stop can be exercised. */
+  stopTaskErrors = new Map<string, Error>();
+  stopTask(taskId: string): Promise<void> {
+    const err = this.stopTaskErrors.get(taskId);
+    if (err !== undefined) return Promise.reject(err);
+    this.stoppedTaskIds.push(taskId);
+    return Promise.resolve();
   }
   /** Modes the session actually applied, and an optional forced rejection. */
   readonly permissionModes: string[] = [];
@@ -3264,6 +3275,126 @@ describe("UdsSession interrupt outcome", () => {
     const evt = await daemon.next(EventSchema);
     if (evt.payload.case !== "degradedState") throw new Error("case");
     expect(evt.payload.value.reason).toContain("still_queued=[u-1]");
+  });
+});
+
+describe("UdsSession detached-agent cancel", () => {
+  /**
+   * Submit a prompt and launch `count` detached agents off it, returning the
+   * rig once the session's own live-task set has them.
+   *
+   * Waiting on detachedTaskCount() is what makes these tests deterministic:
+   * the cancel snapshots that exact set, so a test that asked for the stop
+   * before the launch registered would be racing the SDK stream.
+   */
+  async function rigWithDetached(count: number): Promise<Awaited<ReturnType<typeof rig>>> {
+    const r = await rig({ storeSessionId: "vendor-uuid" });
+    r.daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1", text: "fan out", promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    const start = await r.store.peer().next(StoreWriteSchema);
+    r.store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    await r.daemon.next(AckSchema);
+    for (let i = 0; i < count; i++) {
+      r.query.emit({
+        type: "system",
+        subtype: "task_started",
+        uuid: `task-start-${i}`,
+        session_id: "vendor-uuid",
+        task_id: `agent-${i}`,
+        task_type: "local_agent",
+        tool_use_id: `tool-agent-${i}`,
+        description: `detached agent ${i}`,
+      } as unknown as SdkMessageLike);
+      const started = await r.store.peer().next(StoreWriteSchema);
+      r.store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+        accepted: BigInt(started.batch!.events.length),
+        lastSeq: BigInt(10 + i * 2),
+      }));
+    }
+    await until(() => r.session.detachedTaskCount() === count);
+    return r;
+  }
+
+  it("stops every live detached agent through the SDK's native stop_task", async () => {
+    // Arrange: two agents detached off a turn.
+    const { daemon, query } = await rigWithDetached(2);
+    // Act
+    daemon.send(CancelDetachedAgentsSchema, create(CancelDetachedAgentsSchema, { requestId: "c1" }));
+    const ack = await daemon.next(AckSchema);
+    // Assert: the stop went to the SDK per task, and the ack names them.
+    expect(query.stoppedTaskIds).toEqual(["agent-0", "agent-1"]);
+    const outcome = ack.detachedCancelOutcome?.outcome;
+    expect(outcome?.case === "cancelled" ? outcome.value.taskIds : null).toEqual(["agent-0", "agent-1"]);
+  });
+
+  it("reports nothing_running when the session has no detached work", async () => {
+    // Arrange: a session that never launched anything.
+    const { daemon, query, session } = await rig();
+    expect(session.detachedTaskCount()).toBe(0);
+    // Act
+    daemon.send(CancelDetachedAgentsSchema, create(CancelDetachedAgentsSchema, { requestId: "c1" }));
+    const ack = await daemon.next(AckSchema);
+    // Assert: an answer, and nothing was asked of the SDK.
+    expect(ack.detachedCancelOutcome?.outcome.case).toBe("nothingRunning");
+    expect(query.stoppedTaskIds).toEqual([]);
+  });
+
+  it("leaves the turn alone — a cancel is not an interrupt", async () => {
+    // Arrange: a live turn WITH detached agents under it.
+    const { daemon, query, session } = await rigWithDetached(1);
+    // Act
+    daemon.send(CancelDetachedAgentsSchema, create(CancelDetachedAgentsSchema, { requestId: "c1" }));
+    await daemon.next(AckSchema);
+    // Assert: the SDK's interrupt() was never called and the turn stands. The
+    // two commands mean different things and this is the seam between them.
+    expect(query.interruptCalls).toBe(0);
+    expect(session.turnCount()).toBe(1);
+  });
+
+  it("acks only the agents that actually stopped when one refuses", async () => {
+    // Arrange: two agents, one whose stop the SDK rejects.
+    const { daemon, query } = await rigWithDetached(2);
+    query.stopTaskErrors.set("agent-1", new Error("task already gone"));
+    // Act
+    daemon.send(CancelDetachedAgentsSchema, create(CancelDetachedAgentsSchema, { requestId: "c1" }));
+    const ack = await daemon.next(AckSchema);
+    // Assert: the ack claims only what happened. Naming the refuser too would
+    // tell the daemon to settle a bubble whose agent is still working.
+    const outcome = ack.detachedCancelOutcome?.outcome;
+    expect(outcome?.case === "cancelled" ? outcome.value.taskIds : null).toEqual(["agent-0"]);
+  });
+
+  it("surfaces a partial stop as DegradedState rather than swallowing it", async () => {
+    // Arrange: one of two stops fails.
+    const { daemon, query } = await rigWithDetached(2);
+    query.stopTaskErrors.set("agent-1", new Error("task already gone"));
+    // Act
+    daemon.send(CancelDetachedAgentsSchema, create(CancelDetachedAgentsSchema, { requestId: "c1" }));
+    await daemon.next(AckSchema);
+    // Assert: the surviving agent is still spending tokens, which is exactly
+    // what the degraded channel is for.
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.component).toBe("claude-shim-cancel-detached");
+    expect(evt.payload.value.reason).toContain("agent-1");
+    expect(evt.payload.value.reason).toContain("STILL RUNNING");
+  });
+
+  it("Nacks when no agent could be stopped at all", async () => {
+    // Arrange: every stop fails.
+    const { daemon, query } = await rigWithDetached(1);
+    query.stopTaskErrors.set("agent-0", new Error("task already gone"));
+    // Act
+    daemon.send(CancelDetachedAgentsSchema, create(CancelDetachedAgentsSchema, { requestId: "c1" }));
+    const nack = await daemon.next(NackSchema);
+    // Assert: a Nack, never an ack whose `cancelled` arm claims an empty stop
+    // as a success.
+    expect(nack.requestId).toBe("c1");
+    expect(nack.reason).toContain("no detached agent could be stopped");
   });
 });
 
