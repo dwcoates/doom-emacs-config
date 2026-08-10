@@ -3794,15 +3794,74 @@ Older entries (lexicographically earliest filenames) are pruned."
       (agent-repl--snapshot-evict-expired-tombstones)
       (should (agent-repl--ws-known-p "unstamped")))))
 
-(ert-deftest agent-repl-cmd-test-tombstone-evict/disabled-when-max-age-zero ()
-  "Max age 0 disables eviction entirely — ancient tombstones survive."
+(ert-deftest agent-repl-cmd-test-tombstone-evict/zero-max-age-is-live-only ()
+  "Max age 0 (the default) is LIVE-ONLY: every tombstone is archived and
+evicted immediately, any age, stamped or not — the product mandate is
+that the main roster file names only live workspaces."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-snapshot-tombstone-max-age 0)
           (agent-repl--snapshot-loaded-p t))
       (agent-repl--ws-put "old" :project-dir "/tmp/old")
       (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 365))
       (agent-repl--snapshot-evict-expired-tombstones)
-      (should (agent-repl--ws-known-p "old")))))
+      (should-not (agent-repl--ws-known-p "old")))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/nil-max-age-is-live-only ()
+  "Nil max age is equivalent to 0 — also LIVE-ONLY."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-tombstone-max-age nil)
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "old" :project-dir "/tmp/old")
+      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 365))
+      (agent-repl--snapshot-evict-expired-tombstones)
+      (should-not (agent-repl--ws-known-p "old")))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/live-only-archives-recent-tombstone ()
+  "LIVE-ONLY mode archives even a just-nuked tombstone — unlike the aged
+policy, there is no grace window at all."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-tombstone-max-age 0)
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "just-nuked" :project-dir "/tmp/just-nuked")
+      (agent-repl--ws-put "just-nuked" :nuked-at (current-time))
+      (agent-repl--snapshot-evict-expired-tombstones)
+      (should-not (agent-repl--ws-known-p "just-nuked")))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/live-only-archive-file-is-loadable ()
+  "The live-only archive file is a loadable snapshot, clearly labeled."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-snapshot-tombstone-max-age 0)
+          (agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "old" :project-dir "/tmp/old")
+      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 1))
+      (agent-repl--snapshot-evict-expired-tombstones)
+      (let* ((archive-dir (agent-repl--workspace-snapshot-archive-dir))
+             (files (directory-files archive-dir t "live-only-tombstones\\.el\\'"))
+             (entries (plist-get (agent-repl--read-workspace-snapshot (car files))
+                                 :workspaces)))
+        (should (= 1 (length files)))
+        (should (equal "/tmp/old"
+                       (plist-get (cdr (assoc "old" entries)) :project-dir)))))))
+
+(ert-deftest agent-repl-cmd-test-tombstone-evict/default-write-produces-live-only-file ()
+  "A save under the default policy writes a roster with only live
+workspaces — every tombstone, any age, has been archived out."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--snapshot-loaded-p t))
+      (should (or (null agent-repl-snapshot-tombstone-max-age)
+                  (= 0 agent-repl-snapshot-tombstone-max-age)))
+      (agent-repl--ws-put "live" :project-dir "/tmp/live")
+      (agent-repl--ws-put "old" :project-dir "/tmp/old")
+      (agent-repl--ws-put "old" :nuked-at (agent-repl-cmd-test--days-ago 1))
+      (agent-repl--ws-put "just-nuked" :project-dir "/tmp/just-nuked")
+      (agent-repl--ws-put "just-nuked" :nuked-at (current-time))
+      (agent-repl-save-workspace-snapshot)
+      (let ((entries (plist-get (agent-repl--read-workspace-snapshot
+                                 agent-repl-workspace-snapshot-file)
+                                :workspaces)))
+        (should (assoc "live" entries))
+        (should-not (assoc "old" entries))
+        (should-not (assoc "just-nuked" entries))))))
 
 (ert-deftest agent-repl-cmd-test-tombstone-evict/archive-file-is-loadable ()
   "Evicted tombstones land in an archive file the snapshot reader parses,
