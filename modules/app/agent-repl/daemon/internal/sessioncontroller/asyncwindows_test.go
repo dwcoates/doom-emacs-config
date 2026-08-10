@@ -23,26 +23,6 @@ import (
 
 const mergeOriginCall = "toolu_merge"
 
-// mergeSkillEmission is the assistant emission making one Skill call, as
-// CurateEvent hands it over.
-func mergeSkillEmission(t *testing.T, toolUseID, skill, args string) *frontendv1.ConversationItem {
-	t.Helper()
-	input, err := structpb.NewStruct(map[string]any{"skill": skill, "args": args})
-	if err != nil {
-		t.Fatalf("structpb.NewStruct: %v", err)
-	}
-	return &frontendv1.ConversationItem{
-		Uuid: "a-" + toolUseID,
-		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
-			Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{
-				Body: &datav1.ApiAssistantMessage{Content: []*datav1.ContentBlock{
-					{Block: &datav1.ContentBlock_ToolUse{ToolUse: &datav1.ToolUseBlock{Id: toolUseID, Name: "Skill", Input: input}}},
-				}},
-			}},
-		}},
-	}
-}
-
 // skillCallEvent is the transcript record making one Skill call, for the
 // consumer-level tests. It builds ANY invocation — the merge run and every
 // other skill are the same record shape and differ only by what they name.
@@ -708,15 +688,25 @@ func (h *queueHarness) skillToolCallAppends(bubbleID string) []string {
 				continue
 			}
 			for _, em := range u.GetSkill().GetEmissions().GetEmissions() {
-				if id := em.GetToolCall().GetCall().GetId(); id != "" {
-					out = append(out, id)
-				}
-				for _, block := range em.GetResponse().GetBody().GetContent() {
-					if id := block.GetToolUse().GetId(); id != "" {
-						out = append(out, id)
-					}
-				}
+				out = append(out, toolUseIDsIn(em)...)
 			}
+		}
+	}
+	return out
+}
+
+// toolUseIDsIn returns the tool_use ids one agent emission carries, whether it
+// arrived as a tool-call emission or as a tool_use block inside a response.
+// Both a bubble's fold and the top-level feed are read through it, so the two
+// cannot disagree about which cards an emission made.
+func toolUseIDsIn(em *frontendv1.AgentEmission) []string {
+	var out []string
+	if id := em.GetToolCall().GetCall().GetId(); id != "" {
+		out = append(out, id)
+	}
+	for _, block := range em.GetResponse().GetBody().GetContent() {
+		if id := block.GetToolUse().GetId(); id != "" {
+			out = append(out, id)
 		}
 	}
 	return out
@@ -730,14 +720,7 @@ func (h *queueHarness) feedToolUseIDs() []string {
 	var out []string
 	for _, cd := range h.push.convo {
 		for _, it := range cd.GetItems() {
-			if id := it.GetAgent().GetToolCall().GetCall().GetId(); id != "" {
-				out = append(out, id)
-			}
-			for _, block := range it.GetAgent().GetResponse().GetBody().GetContent() {
-				if id := block.GetToolUse().GetId(); id != "" {
-					out = append(out, id)
-				}
-			}
+			out = append(out, toolUseIDsIn(it.GetAgent())...)
 		}
 	}
 	return out
