@@ -250,6 +250,12 @@ type sessionClient interface {
 	// (modelreadback.go). A shim that cannot answer fails rather than
 	// returning an empty selection.
 	QuerySelectedModel(ctx context.Context) (string, error)
+	// QueryLiveTasks reads the shim's own live background-task set, the ONE
+	// authority on what this session is running. The daemon's task catalog is
+	// derived and can hold an entry open that nothing is running, and this list
+	// is what tells that phantom from a slow subagent (phantomtask.go). An
+	// error is a shim that did not answer and closes nothing.
+	QueryLiveTasks(ctx context.Context) ([]string, error)
 	// Replay asks the shim for a bounded slice of persisted history, streaming
 	// it to onEvent. Its events arrive over the wire as ReplayEvent, a
 	// different type from live Events, which is what keeps replayed history
