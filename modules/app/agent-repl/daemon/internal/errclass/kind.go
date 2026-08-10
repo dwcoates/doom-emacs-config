@@ -83,6 +83,8 @@ func kindFor(t Type) *frontendv1.FailureKind {
 		return &frontendv1.FailureKind{Kind: &frontendv1.FailureKind_QueueEntryUnwired{QueueEntryUnwired: &frontendv1.FailureQueueEntryUnwired{}}}
 	case TypeQueueEntryKeepAliveHeld:
 		return &frontendv1.FailureKind{Kind: &frontendv1.FailureKind_QueueEntryKeepAliveHeld{QueueEntryKeepAliveHeld: &frontendv1.FailureQueueEntryKeepAliveHeld{}}}
+	case TypeQueueEntryUninterruptibleTurn:
+		return &frontendv1.FailureKind{Kind: &frontendv1.FailureKind_QueueEntryUninterruptibleTurn{QueueEntryUninterruptibleTurn: &frontendv1.FailureQueueEntryUninterruptibleTurn{}}}
 	case TypeSessionHibernated:
 		return &frontendv1.FailureKind{Kind: &frontendv1.FailureKind_SessionHibernated{SessionHibernated: &frontendv1.FailureSessionHibernated{}}}
 	case TypeKeepAliveWindowUnclosed:
@@ -195,6 +197,8 @@ func TypeOf(kind *frontendv1.FailureKind) (Type, bool) {
 		return TypeQueueEntrySessionUnwired, true
 	case *frontendv1.FailureKind_QueueEntryKeepAliveHeld:
 		return TypeQueueEntryKeepAliveHeld, true
+	case *frontendv1.FailureKind_QueueEntryUninterruptibleTurn:
+		return TypeQueueEntryUninterruptibleTurn, true
 	case *frontendv1.FailureKind_SessionHibernated:
 		return TypeSessionHibernated, true
 	case *frontendv1.FailureKind_KeepAliveWindowUnclosed:

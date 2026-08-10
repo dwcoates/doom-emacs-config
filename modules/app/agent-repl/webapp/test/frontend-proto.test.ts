@@ -1219,6 +1219,10 @@ describe("decodeFrontendFrame — QueueView (E4)", () => {
       [{ interject: { rationale: "now" } }, "interject"],
       [{ holdForTurnEnd: { rationale: "after" } }, "hold"],
       [{ error: { detail: "classifier died" } }, "error"],
+      [
+        { uninterruptibleTurn: { command: "SESSION_COMMAND_COMPACT" } },
+        "uninterruptible",
+      ],
     ];
     for (const [arm, want] of cases) {
       // Act
@@ -1227,6 +1231,32 @@ describe("decodeFrontendFrame — QueueView (E4)", () => {
       if (frame.frame.case !== "queue") throw new Error("wrong variant");
       expect(frame.frame.value.entries[0].classification).toBe(want);
     }
+  });
+
+  it("carries the cut an uninterruptible entry is waiting behind", () => {
+    // Arrange / Act — the arm's whole content is WHICH cut is running, and the
+    // card cannot name what the prompt waits behind without it.
+    const frame = decode({
+      queue: {
+        fence: "s1",
+        entries: [
+          { id: "q1", uninterruptibleTurn: { command: "SESSION_COMMAND_CLEAR" } },
+        ],
+      },
+    });
+    // Assert
+    if (frame.frame.case !== "queue") throw new Error("wrong variant");
+    expect(frame.frame.value.entries[0].uninterruptibleCommand).toBe("CLEAR");
+  });
+
+  it("rejects an uninterruptible entry that names no cut", () => {
+    // Arrange / Act / Assert — an entry with no command explains nothing, and
+    // defaulting one would name a cut the daemon never claimed.
+    expect(() =>
+      decode({
+        queue: { fence: "s1", entries: [{ id: "q1", uninterruptibleTurn: {} }] },
+      }),
+    ).toThrow();
   });
 
   it("rejects an unrecognized classification arm rather than defaulting it", () => {

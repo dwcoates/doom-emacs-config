@@ -30,6 +30,15 @@ const (
 	// nothing decided this. Delivery still falls back to the turn-end drain, so
 	// the prompt is delayed rather than dropped.
 	VerdictError
+	// VerdictUninterruptibleTurn — no classifier ran and none will: the turn in
+	// front of the entry is a CONTEXT CUT (`/compact` or `/clear`), which is
+	// never interrupted for a queued prompt (uninterruptibleturn.go).
+	//
+	// It is its own answer for the reason ERROR is: HOLD would claim a model
+	// weighed this prompt against the running turn and decided to wait, and
+	// nothing of the kind happened. Delivery is the ordinary turn-end drain's,
+	// so the verdict states WHO decided rather than WHEN the prompt runs.
+	VerdictUninterruptibleTurn
 )
 
 func (v Verdict) String() string {
@@ -42,21 +51,29 @@ func (v Verdict) String() string {
 		return "hold"
 	case VerdictError:
 		return "error"
+	case VerdictUninterruptibleTurn:
+		return "uninterruptible-turn"
 	default:
 		return "unknown"
 	}
 }
 
-// setClassification stamps an entry's verdict arm, carrying the facts that
-// verdict owns and no others. accepted rides HOLD alone because confirming a
-// hold is the only thing QueueAcceptCmd does, and detail rides ERROR alone
-// because it is the account of a failure no other verdict had.
+// setClassification stamps view's verdict arm off the in-memory entry e,
+// carrying the facts that verdict owns and no others. accepted rides HOLD alone
+// because confirming a hold is the only thing QueueAcceptCmd does, and the
+// entry's one free-text account rides the field its verdict owns — a rationale
+// on interject and hold, a detail on error.
+//
+// IT READS THE ENTRY RATHER THAN A PARAMETER LIST because a verdict's facts are
+// the entry's: the caller used to spread them across five arguments and pass
+// the same string twice, which is how a fact could be handed to the wrong arm.
 //
 // An unknown verdict stamps ERROR carrying its own name, rather than leaving
 // the entry arm-less: an entry with no classification arm is a malformed frame
 // the client rejects whole, which would cost the user the entire queue view
 // over one unrecognized value.
-func setClassification(entry *frontendv1.QueueEntry, v Verdict, rationale, detail string, accepted bool) {
+func setClassification(entry *frontendv1.QueueEntry, e *queueEntry) {
+	v, rationale, detail, accepted := e.classification, e.rationale, e.rationale, e.accepted
 	switch v {
 	case VerdictPending:
 		entry.Classification = &frontendv1.QueueEntry_Pending{
@@ -76,6 +93,16 @@ func setClassification(entry *frontendv1.QueueEntry, v Verdict, rationale, detai
 	case VerdictError:
 		entry.Classification = &frontendv1.QueueEntry_Error{
 			Error: &frontendv1.QueueClassificationError{Detail: detail},
+		}
+	case VerdictUninterruptibleTurn:
+		// The COMMAND is the whole account this arm carries: the entry's
+		// free-text rationale says the same thing in prose for the log, and a
+		// card that read it from there would be parsing a sentence for a fact
+		// the arm already states.
+		entry.Classification = &frontendv1.QueueEntry_UninterruptibleTurn{
+			UninterruptibleTurn: &frontendv1.QueueClassificationUninterruptibleTurn{
+				Command: e.uninterruptibleCommand,
+			},
 		}
 	default:
 		entry.Classification = &frontendv1.QueueEntry_Error{
