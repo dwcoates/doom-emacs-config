@@ -720,6 +720,7 @@ so a chord wins key lookup regardless of which evil state is current.")
 
 (map! :leader
       (:prefix "TAB"
+       :desc "Add project from directory" "C-n" #'agent-repl-add-project-workspace
        :desc "New worktree ws (from current)" "n" #'agent-repl-create-worktree-workspace
        :desc "New worktree ws (from local master)" "N" #'agent-repl-create-worktree-workspace-from-origin-master
        :desc "Fork worktree ws + fork Claude session" "f" #'agent-repl-fork-worktree-workspace
