@@ -172,6 +172,8 @@ message FailureKind {
     FailurePromptRefusedByMergeState prompt_refused_by_merge_state = 60;
     // The queued prompt is waiting behind a context cut, which is never interrupted, so it cannot be forced ahead of it.
     FailureQueueEntryUninterruptibleTurn queue_entry_uninterruptible_turn = 61;
+    // A turn stood bound with nothing driving it, so the daemon closed it rather than leaving the workspace thinking forever.
+    FailureTurnUndriven turn_undriven = 62;
 
     // ---- CLIENT-LOCAL failures: the one part of this vocabulary a frontend
     // mints itself. See the note on FailureKind. All resolve BLUE, because a
@@ -652,6 +654,15 @@ message FailurePromptRefusedByMergeState {
 // interrupted, so it cannot be forced ahead of it.
 //
 // Resolves the workspace BLUE.
+// A turn stood bound with nothing driving it, so the daemon closed it rather
+// than leaving the workspace thinking forever.
+//
+// Resolves the workspace BLUE.
+message FailureTurnUndriven {
+  // Which turn, and how long it stood undriven, verbatim.
+  string reason = 1;
+}
+
 message FailureQueueEntryUninterruptibleTurn {
   // Which queued entry, so the card addresses the right row.
   string entry_id = 1;

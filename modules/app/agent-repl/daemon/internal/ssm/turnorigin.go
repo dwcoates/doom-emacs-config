@@ -52,6 +52,18 @@ const (
 	// model call answering with a single character; a claim outliving a generous
 	// multiple of that is not a slow ping, it is a turn whose end is not coming.
 	TurnCloseKeepAliveOverdue = "keep_alive_overdue"
+	// TurnCloseUndriven closes a claim that stood open with NO DRIVER: the
+	// daemon generation holding it never submitted the turn and no live shim
+	// ever announced it, so nothing in the running system is waiting on a
+	// boundary for it and nothing will ever produce one.
+	//
+	// It is its own cause rather than a reuse of TurnCloseRestartInterrupted
+	// because the two are different defects. An interrupted-by-restart claim was
+	// genuinely running when a bounce cut it; an undriven claim was opened out
+	// of a store event a revived daemon read as live, for work no process was
+	// ever doing. A reader of the ledger has to be able to tell "the deploy cut
+	// live work" from "a revival re-opened a dead turn".
+	TurnCloseUndriven = "turn_undriven"
 )
 
 // CloseOriginTurns ends the NAMED turns' open claims, attributing each close to
