@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -39,13 +40,70 @@ type StatusSink interface {
 	RecordMergeStatus(ws string, phase Phase, cause string, status *frontendv1.MergeStatus) error
 }
 
+// statusPublishBound is how long ONE status publication may spend inside the
+// StatusSink before the pipeline stops waiting on it.
+//
+// IT IS A FAILURE BOUND, NOT A TUNED DELAY. The sink is the SSM, whose append
+// serializes on a process-wide mutex shared with every other daemon subsystem;
+// a publication therefore waits on work this package neither owns nor can see.
+// The observed production shape was a drain blocked in completeMergedRun inside
+// that sink with no bound at all: the merge had landed, the queue head was held,
+// and nothing short of a daemon bounce moved it.
+//
+// A merge run must reach an observable update within two minutes, and this bound
+// is a quarter of that so a publication that expires still leaves the run's
+// terminal handling time to be seen. Expiring publishes nothing and returns an
+// error, which is the SAFE direction: an unpublished terminal keeps its durable
+// queue entry (keepForTerminalReplay), so the word is owed rather than lost.
+const statusPublishBound = 30 * time.Second
+
 // statusEmitter binds a StatusSink to the pipeline's logger, exactly as
 // stateEmitter binds a StateSink: every publication is loud-logged with its
 // workspace, run, phase and cause before it hits the sink, and a sink failure is
 // loud-logged and returned rather than dropped.
+//
+// IT IS ALSO THE ONE PLACE A PUBLICATION IS BOUNDED. Every status the pipeline
+// emits goes through emit, so bounding it HERE is what makes "no merge status
+// publication can wedge a drain" a property of the package rather than a
+// discipline every call site has to remember.
 type statusEmitter struct {
 	sink StatusSink
 	logf dlog.Logf
+	// bound is how long one sink call may take. Zero means statusPublishBound;
+	// a test pins it small so the expiry path is exercised without waiting on
+	// the production figure.
+	bound time.Duration
+}
+
+// record calls the sink under statusEmitter's bound and reports the sink's own
+// error, or the expiry.
+//
+// THE SINK CALL IS NOT ABANDONED, IT IS ONLY STOPPED BEING WAITED ON. There is
+// no way to cancel a call already inside the SSM's mutex, and pretending
+// otherwise would be a lie about what the timeout did. The goroutine survives
+// until the sink returns and its result lands in a BUFFERED channel, so it
+// cannot leak on a send nobody is receiving any more.
+//
+// A publication that expired is REPORTED AS FAILED even if the sink later
+// succeeds. That is the honest reading: the pipeline stopped knowing, and the
+// terminal-replay path it feeds is built to say a word twice rather than never.
+func (e *statusEmitter) record(ws string, phase Phase, cause string, status *frontendv1.MergeStatus) error {
+	bound := e.bound
+	if bound <= 0 {
+		bound = statusPublishBound
+	}
+	done := make(chan error, 1)
+	go func() { done <- e.sink.RecordMergeStatus(ws, phase, cause, status) }()
+	timer := time.NewTimer(bound)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		e.logf("merge: status SINK TIMED OUT {ws=%s run=%s phase=%s cause=%s bound=%s} — the sink has not returned; the pipeline stops waiting on it so the drain is not held by a publication, and the run's terminal word is treated as UNPUBLISHED (its durable queue entry is kept and replayed)",
+			ws, status.GetRunId(), phase, cause, bound)
+		return fmt.Errorf("merge: record %s status for %q: sink did not return within %s", phase, ws, bound)
+	}
 }
 
 func (e *statusEmitter) emit(ws string, phase Phase, cause string, status *frontendv1.MergeStatus) error {
@@ -62,7 +120,7 @@ func (e *statusEmitter) emit(ws string, phase Phase, cause string, status *front
 	}
 	e.logf("merge: status {ws=%s run=%s phase=%s cause=%s phase_started_at_ms=%d updated_at_ms=%d}",
 		ws, status.GetRunId(), phase, cause, status.GetPhaseStartedAtMs(), status.GetUpdatedAtMs())
-	if err := e.sink.RecordMergeStatus(ws, phase, cause, status); err != nil {
+	if err := e.record(ws, phase, cause, status); err != nil {
 		e.logf("merge: status SINK FAILED {ws=%s run=%s phase=%s cause=%s}: %v", ws, status.GetRunId(), phase, cause, err)
 		return fmt.Errorf("merge: record %s status for %q: %w", phase, ws, err)
 	}
