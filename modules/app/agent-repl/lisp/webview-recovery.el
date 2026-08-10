@@ -70,6 +70,10 @@
 (declare-function agent-repl--frontend-webview-workspace "agent-repl-frontend" (buf))
 (declare-function agent-repl--frontend-live-webview-buffers "agent-repl-frontend" ())
 (declare-function agent-repl--frontend-build-id "agent-repl-frontend-client" ())
+(declare-function agent-repl--frontend-precreate-webview "agent-repl-frontend" (ws))
+(declare-function agent-repl--ws-live-p "agent-repl-workspace" (ws))
+(declare-function agent-repl--ws-gui-frontend-p "agent-repl-frontends" (ws))
+(declare-function agent-repl--open-fence-active-p "agent-repl-open-fence" (ws))
 
 (defvar agent-repl-uds-snapshot-applied-functions)
 
@@ -93,6 +97,75 @@ one that matters, and it is the one that runs."
 
 (defvar agent-repl--webview-recovery-last-sweep nil
   "`float-time' of the last sweep that ran, or nil when none has.")
+
+(defcustom agent-repl-webview-precreate-stagger-seconds 0.35
+  "Seconds between two paced webview pre-creations.
+Each pre-creation spawns a WebKit content process, and a startup sweep
+can be owed ten of them at once.  Creating them in a tight loop stalls
+the editor for as long as the whole burst takes; a timer chain hands the
+command loop back between mounts, so the burst costs latency nobody is
+waiting on instead of a visible hitch."
+  :type 'number
+  :group 'agent-repl)
+
+(defvar agent-repl--webview-precreate-queue nil
+  "Workspaces still owed a paced pre-creation, in creation order.")
+
+(defvar agent-repl--webview-precreate-timer nil
+  "The timer draining `agent-repl--webview-precreate-queue', or nil.")
+
+(defun agent-repl--webview-precreate-needed-p (ws)
+  "Return non-nil when WS is owed a webview and has none.
+The registry's LIVE set and the open fence are both consulted here as
+well as inside `agent-repl--frontend-precreate-webview': a workspace can
+be killed, nuked or fenced during the seconds a paced queue takes to
+drain, and a page for it must not appear afterwards."
+  (and (agent-repl--ws-live-p ws)
+       (agent-repl--ws-gui-frontend-p ws)
+       (not (agent-repl--open-fence-active-p ws))
+       (not (buffer-live-p (agent-repl--ws-get ws :frontend-buffer)))))
+
+(defun agent-repl--webview-precreate-drain ()
+  "Pre-create the queue's next workspace, then re-arm for the one after.
+One mount per tick.  Eligibility is RE-CHECKED at the tick rather than
+trusted from when the workspace was queued, so a workspace closed mid
+drain gets no page.  A mount that signals is warned about and the drain
+continues: one workspace's failure must not strand the rest of the queue."
+  (setq agent-repl--webview-precreate-timer nil)
+  (let ((ws (pop agent-repl--webview-precreate-queue)))
+    (when ws
+      (condition-case err
+          (when (agent-repl--webview-precreate-needed-p ws)
+            (agent-repl--frontend-precreate-webview ws))
+        (error (agent-repl--warn ws "webview-precreate: ws=%s outcome=failed err=%S"
+                                 ws err))))
+    (when agent-repl--webview-precreate-queue
+      (setq agent-repl--webview-precreate-timer
+            (run-at-time agent-repl-webview-precreate-stagger-seconds nil
+                         #'agent-repl--webview-precreate-drain)))))
+
+(defun agent-repl--webview-precreate-schedule (workspaces)
+  "Queue WORKSPACES for paced pre-creation, returning how many were queued.
+Appends rather than replaces, so a sweep landing while an earlier queue
+is draining cannot drop the workspaces that queue still owes.  A
+workspace already queued is not queued twice."
+  (let ((added 0))
+    (dolist (ws workspaces)
+      (unless (member ws agent-repl--webview-precreate-queue)
+        (setq agent-repl--webview-precreate-queue
+              (append agent-repl--webview-precreate-queue (list ws)))
+        (setq added (1+ added))))
+    (when (and agent-repl--webview-precreate-queue
+               (null agent-repl--webview-precreate-timer))
+      (setq agent-repl--webview-precreate-timer
+            (run-at-time agent-repl-webview-precreate-stagger-seconds nil
+                         #'agent-repl--webview-precreate-drain)))
+    added))
+
+(defun agent-repl--webview-precreate-missing ()
+  "Return every live workspace owed a webview it does not have."
+  (cl-remove-if-not #'agent-repl--webview-precreate-needed-p
+                    (agent-repl--live-ws-names)))
 
 (defun agent-repl--webview-recovery-script (reason)
   "Return the JS that drives the webapp's recovery hook, naming REASON.
@@ -118,8 +191,9 @@ TWO SOURCES, because neither alone is the whole set:
 A HIBERNATED workspace is a live registry entry, so its webview buffer
 is in this set exactly when the buffer still exists — which is the point
 of the union.  A workspace with NO webview buffer contributes nothing
-and needs nothing: it has no page to reload, and it opens onto the
-deployed bundle whenever the user next opens it."
+HERE — there is no page to drive or reload.  It is not ignored, though:
+the sweep hands it to `agent-repl--webview-precreate-schedule', which
+builds the missing page so the NEXT sweep has something to repair."
   (let ((bufs (agent-repl--frontend-live-webview-buffers)))
     (dolist (ws (agent-repl--live-ws-names))
       (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
@@ -234,10 +308,16 @@ than swallowed."
                (setq failed (1+ failed))
                (agent-repl--warn ws "webview-recovery: buffer=%s outcome=failed err=%S"
                                  (buffer-name buf) err)))))
-        (agent-repl--log nil
-                         "webview-recovery: sweep reason=%s webviews=%d driven=%d reloaded=%d absent=%d failed=%d"
-                         reason (length buffers) driven reloaded absent failed)
-        (+ driven reloaded)))))
+        ;; SWEEP FIRST, CREATE SECOND.  The pages that already exist are the
+        ;; ones a user may be looking at, so they are repaired before any
+        ;; WebKit process is spawned for a workspace that has none.
+        (let ((created (agent-repl--webview-precreate-schedule
+                        (agent-repl--webview-precreate-missing))))
+          (agent-repl--log nil
+                           (concat "webview-recovery: sweep reason=%s webviews=%d driven=%d "
+                                   "reloaded=%d absent=%d failed=%d created=%d")
+                           reason (length buffers) driven reloaded absent failed created)
+          (+ driven reloaded))))))
 
 (defun agent-repl--webview-recovery-on-link-up ()
   "Sweep every live webview when the daemon link comes back.

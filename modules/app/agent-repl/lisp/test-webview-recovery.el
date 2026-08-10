@@ -359,5 +359,130 @@ name claims; the workspace record contributes the rest."
       (should (equal (cdr (car calls))
                      (agent-repl--webview-recovery-script "host_link_up"))))))
 
+;;;; ---- Pre-creation -------------------------------------------------------
+
+(defmacro agent-repl-test--with-precreate (precreated &rest body)
+  "Run BODY with a clean pre-creation queue, recording mounts in PRECREATED.
+PRECREATED is bound to a list of workspace names, in drain order.  The
+mount itself is the boundary under mock: batch Emacs has no xwidgets."
+  (declare (indent 1))
+  `(let ((,precreated nil)
+         (agent-repl--webview-precreate-queue nil)
+         (agent-repl--webview-precreate-timer nil)
+         (agent-repl-webview-precreate-stagger-seconds 0.01))
+     (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
+                (lambda (ws) (setq ,precreated (append ,precreated (list ws))) :pending)))
+       (unwind-protect (progn ,@body)
+         (when (timerp agent-repl--webview-precreate-timer)
+           (cancel-timer agent-repl--webview-precreate-timer))))))
+
+(defmacro agent-repl-test--with-pageless-ws (names &rest body)
+  "Register each name in NAMES as a live gui workspace with NO webview buffer."
+  (declare (indent 1))
+  `(unwind-protect
+       (progn
+         (dolist (name ,names)
+           (puthash name (list :project-dir "/w" :frontend 'gui) agent-repl--workspaces))
+         ,@body)
+     (dolist (name ,names) (remhash name agent-repl--workspaces))))
+
+(ert-deftest agent-repl-test-webview-recovery-sweep-queues-absent-pages ()
+  "A live workspace with no webview buffer is queued for pre-creation."
+  ;; Arrange
+  (agent-repl-test--with-precreate _created
+    (agent-repl-test--with-recovery-sweep _calls
+      (agent-repl-test--with-pageless-ws '("wsp1")
+        ;; Act
+        (agent-repl--webview-recovery-sweep "host_link_up")
+        ;; Assert
+        (should (equal '("wsp1") agent-repl--webview-precreate-queue))))))
+
+(ert-deftest agent-repl-test-webview-recovery-sweep-leaves-mounted-workspaces-alone ()
+  "A workspace that already holds a live webview buffer is not queued."
+  ;; Arrange
+  (agent-repl-test--with-precreate _created
+    (agent-repl-test--with-recovery-sweep _calls
+      (agent-repl-test--with-recovery-ws ((b1 "wsr1"))
+        ;; Act
+        (agent-repl--webview-recovery-sweep "host_link_up")
+        ;; Assert
+        (should-not (member "wsr1" agent-repl--webview-precreate-queue))))))
+
+(ert-deftest agent-repl-test-webview-precreate-drain-mounts-one-per-tick ()
+  "The drain mounts exactly one queued workspace and re-arms for the rest."
+  ;; Arrange
+  (agent-repl-test--with-precreate created
+    (agent-repl-test--with-pageless-ws '("wsp1" "wsp2")
+      (agent-repl--webview-precreate-schedule '("wsp1" "wsp2"))
+      ;; Act
+      (agent-repl--webview-precreate-drain)
+      ;; Assert
+      (should (equal '("wsp1") created))
+      (should (timerp agent-repl--webview-precreate-timer)))))
+
+(ert-deftest agent-repl-test-webview-precreate-drain-stops-when-the-queue-empties ()
+  "The last drain leaves no timer behind."
+  ;; Arrange
+  (agent-repl-test--with-precreate _created
+    (agent-repl-test--with-pageless-ws '("wsp1")
+      (agent-repl--webview-precreate-schedule '("wsp1"))
+      ;; Act
+      (agent-repl--webview-precreate-drain)
+      ;; Assert
+      (should (null agent-repl--webview-precreate-timer)))))
+
+(ert-deftest agent-repl-test-webview-precreate-skips-a-fenced-workspace ()
+  "A terminally fenced workspace gets no page."
+  ;; Arrange
+  (agent-repl-test--with-precreate created
+    (agent-repl-test--with-pageless-ws '("wsp1")
+      (agent-repl--ws-put "wsp1" :open-fenced t)
+      (agent-repl--webview-precreate-schedule '("wsp1"))
+      ;; Act
+      (agent-repl--webview-precreate-drain)
+      ;; Assert
+      (should (null created)))))
+
+(ert-deftest agent-repl-test-webview-precreate-skips-a-workspace-closed-mid-drain ()
+  "A workspace unregistered after queueing is re-checked and skipped."
+  ;; Arrange
+  (agent-repl-test--with-precreate created
+    (agent-repl-test--with-pageless-ws '("wsp1")
+      (agent-repl--webview-precreate-schedule '("wsp1"))
+      (remhash "wsp1" agent-repl--workspaces)
+      ;; Act
+      (agent-repl--webview-precreate-drain)
+      ;; Assert
+      (should (null created)))))
+
+(ert-deftest agent-repl-test-webview-precreate-schedule-does-not-queue-twice ()
+  "A workspace already queued is not queued a second time."
+  ;; Arrange
+  (agent-repl-test--with-precreate _created
+    (agent-repl-test--with-pageless-ws '("wsp1")
+      (agent-repl--webview-precreate-schedule '("wsp1"))
+      ;; Act
+      (let ((added (agent-repl--webview-precreate-schedule '("wsp1"))))
+        ;; Assert
+        (should (equal 0 added))
+        (should (equal '("wsp1") agent-repl--webview-precreate-queue))))))
+
+(ert-deftest agent-repl-test-webview-precreate-drain-survives-a-failing-mount ()
+  "A mount that signals is warned about and the queue keeps draining."
+  ;; Arrange
+  (let ((agent-repl--webview-precreate-queue nil)
+        (agent-repl--webview-precreate-timer nil)
+        (agent-repl-webview-precreate-stagger-seconds 0.01))
+    (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
+               (lambda (_ws) (error "boom"))))
+      (agent-repl-test--with-pageless-ws '("wsp1" "wsp2")
+        (agent-repl--webview-precreate-schedule '("wsp1" "wsp2"))
+        ;; Act
+        (agent-repl--webview-precreate-drain)
+        ;; Assert
+        (should (equal '("wsp2") agent-repl--webview-precreate-queue))
+        (when (timerp agent-repl--webview-precreate-timer)
+          (cancel-timer agent-repl--webview-precreate-timer))))))
+
 (provide 'test-webview-recovery)
 ;;; test-webview-recovery.el ends here
