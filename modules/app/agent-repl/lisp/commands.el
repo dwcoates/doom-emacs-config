@@ -540,9 +540,10 @@ and returns the user's answer."
         (y-or-n-p (agent-repl--confirm-cancel-prompt running)))))
 
 (defun agent-repl-interrupt (&optional ws no-confirm)
-  "Interrupt Claude in workspace WS and re-enter insert mode after a delay.
-Sends Escape to stop the current operation, then automatically returns
-the input buffer to evil insert state after
+  "Stop workspace WS\='s work and re-enter insert mode after a delay.
+WHAT is stopped depends on what is running — the in-flight turn, or the
+detached agents that outlived it (see the dispatch decision below).  Either
+way the input buffer returns to evil insert state after
 `agent-repl-interrupt-reinsert-delay' seconds (via
 `agent-repl--enter-insert-mode', which switches evil state rather than
 forwarding a literal \"i\" keystroke to Claude).  Defaults to the
