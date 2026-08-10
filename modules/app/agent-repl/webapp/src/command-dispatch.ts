@@ -345,6 +345,22 @@ export interface DispatchOptions {
    */
   onLateRefusal?: (requestId: string, error: string) => void;
   /**
+   * A forwarded diagnostic the daemon REFUSED, with its reason verbatim.
+   *
+   * The refusal this exists for is the identity one: the daemon's registry
+   * checks a record's `claude_session_id` against the uuid it holds for the
+   * session and refuses a record that names another, so a page stamping a uuid
+   * the registry disagrees with has every record it sends thrown away. Repeating
+   * the rejected stamp forever is the one disposition that cannot recover, so
+   * the seam hands the reason out and the bootstrap UNBINDS the stamp: the next
+   * record goes out unstamped and is filed under the daemon's own identity.
+   *
+   * It travels beside `logLocal` rather than through it because it is not a
+   * diagnostic — it is a correction — and it must never reach wslog, whose
+   * forwarding would send another clientLog and re-enter this path.
+   */
+  onClientLogRefused?: (error: string) => void;
+  /**
    * Dial the daemon NOW because a user action needs the transport (WsClient's
    * `ensureConnected`). Optional: a dispatcher bound to a socket with a
    * different lifetime — the bootstrap socket, which the boot path opens,
@@ -801,6 +817,12 @@ export class CommandDispatcher {
         // clientLog acknowledgement loop, so the injected local-only sink owns
         // the sole record.
         this.opts.logLocal(`clientLog rejected: ${ack.error}`);
+        // SELF-CORRECTION, before the flood counter. A refusal is the daemon
+        // telling this page that what it stamped on the record does not
+        // describe the conversation the record belongs to; the page drops the
+        // stamp so the next record can be accepted, rather than sending the
+        // same rejected identity until the forwarding is disabled entirely.
+        this.opts.onClientLogRefused?.(ack.error);
         this.clientLogRejections += 1;
         if (this.clientLogRejections >= MAX_CONSECUTIVE_CLIENT_LOG_REJECTIONS) {
           this.clientLogForwardingOff = true;
