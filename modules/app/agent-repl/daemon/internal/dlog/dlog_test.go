@@ -1148,3 +1148,101 @@ func localOffset(t *testing.T, at time.Time) int {
 	_, offset := at.Local().Zone()
 	return offset
 }
+
+// gatedWriter is a durable target writer that parks until it is released. It
+// stands in for a workspace whose underlying file write is slow: production saw
+// one workspace's log traffic hold up an unrelated workspace's open_workspace
+// handler for 8 seconds through the manager's daemon-global lock.
+type gatedWriter struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func newGatedWriter() *gatedWriter {
+	return &gatedWriter{entered: make(chan struct{}, 1), release: make(chan struct{})}
+}
+
+func (w *gatedWriter) Write(p []byte) (int, error) {
+	select {
+	case w.entered <- struct{}{}:
+	default:
+	}
+	<-w.release
+	return len(p), nil
+}
+
+// ONE WORKSPACE'S PARKED WRITER MUST NOT STALL ANOTHER WORKSPACE.
+func TestTargetManagerLogsToOneWorkspaceWhileAnotherWorkspaceWriterIsParked(t *testing.T) {
+	// Arrange.
+	parked := Workspace{Directory: t.TempDir(), ID: "ws-parked"}
+	moving := Workspace{Directory: t.TempDir(), ID: "ws-moving"}
+	manager := NewTargetManager()
+	defer manager.Close()
+	if _, err := manager.OpenWorkspace(parked); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.OpenWorkspace(moving); err != nil {
+		t.Fatal(err)
+	}
+	gate := newGatedWriter()
+	manager.targets[targetKey(parked, RuntimeDaemon)].sink.writer = gate
+	parkedLogger, err := manager.OpenWorkspaceLogger(parked, io.Discard, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parkedEmit := make(chan error, 1)
+	go func() { parkedEmit <- parkedLogger.EmitWorkspaceNormal(parked, event()) }()
+	<-gate.entered
+
+	// Act. A different workspace resolves its logger and persists a record
+	// while the first workspace's writer is still parked.
+	progress := make(chan error, 1)
+	go func() {
+		logger, openErr := manager.OpenWorkspaceLogger(moving, io.Discard, false)
+		if openErr != nil {
+			progress <- openErr
+			return
+		}
+		progress <- logger.EmitWorkspaceNormal(moving, event())
+	}()
+
+	// Assert.
+	select {
+	case err := <-progress:
+		if err != nil {
+			t.Fatalf("emit for an unrelated workspace: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("an unrelated workspace's emit waited on a parked workspace writer; the manager lock is still daemon-global")
+	}
+	close(gate.release)
+	if err := <-parkedEmit; err != nil {
+		t.Fatalf("parked workspace emit: %v", err)
+	}
+}
+
+// ONE ACQUISITION PER RECORD: resolving a logger used to take the manager lock
+// twice, doubling contention on the very lock that serialized every workspace.
+func TestTargetManagerResolvesALoggerWithOneLockAcquisition(t *testing.T) {
+	// Arrange.
+	workspace := Workspace{Directory: t.TempDir(), ID: "ws-1"}
+	manager := NewTargetManager()
+	defer manager.Close()
+	if _, err := manager.OpenWorkspace(workspace); err != nil {
+		t.Fatal(err)
+	}
+	before := manager.LockAcquisitionsForTest()
+
+	// Act.
+	const records = 10
+	for i := 0; i < records; i++ {
+		if _, err := manager.OpenWorkspaceLogger(workspace, io.Discard, false); err != nil {
+			t.Fatalf("resolve logger %d: %v", i, err)
+		}
+	}
+
+	// Assert.
+	if got := manager.LockAcquisitionsForTest() - before; got != records {
+		t.Fatalf("%d records cost %d manager lock acquisitions, want exactly %d", records, got, records)
+	}
+}
