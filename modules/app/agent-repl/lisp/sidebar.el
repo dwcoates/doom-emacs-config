@@ -486,6 +486,11 @@ cursor ring on the matching row.  Emacs owns this state entirely —
 see the Commentary for why keyboard selection needs no webapp
 round-trip.")
 
+(defvar agent-repl--sidebar-last-signature nil
+  "Signature of the roster state as of the last pushed build.
+Read and written by `agent-repl--sidebar-push', which is the single
+change gate every caller — the 1Hz tick included — goes through.")
+
 (defvar agent-repl--sidebar-flat-dirs nil
   "Visible row dirs in sidebar render order, cached by the last build.
 Depth-first over unfolded repos — exactly the order the webapp renders
@@ -535,11 +540,24 @@ records one."
     (dolist (name (agent-repl--live-ws-names) (nreverse entries))
       (cond
        ((not (agent-repl--sidebar-rostered-p name))
-        (agent-repl--log name "sidebar-entries: dropping ws=%s — no perspective (gone)" name))
+        (agent-repl--log-on-transition
+         name (format "sidebar-entries-drop:%s" name) :dropped
+         "sidebar-entries: dropping ws=%s — no perspective (gone)" name))
        ((agent-repl--ws-get name :project-dir)
+        ;; Recorded as its own transition state so a workspace that later
+        ;; loses its dir logs the skip again rather than staying silent
+        ;; behind a stale entry.
+        (agent-repl--log-on-transition
+         name (format "sidebar-entries-skip:%s" name) :present
+         "sidebar-entries: live ws=%s has :project-dir" name)
         (push (cons name (agent-repl--ws-get name :project-dir)) entries))
        (t
-        (agent-repl--log name "sidebar-entries: skipping live ws=%s with no :project-dir" name))))))
+        ;; Deduped per workspace: this fires once per rebuild, and a rebuild
+        ;; runs several times a minute — a per-rebuild line said the same
+        ;; thing about the same unchanged workspace forever.
+        (agent-repl--log-on-transition
+         name (format "sidebar-entries-skip:%s" name) :skipped
+         "sidebar-entries: skipping live ws=%s with no :project-dir" name))))))
 
 (defun agent-repl--sidebar-entry-created-at (name)
   "Return NAME's `:created-at' as a float for sibling ordering.
@@ -1136,7 +1154,9 @@ nothing: the gate belongs to whichever publish currently holds it."
       (setq agent-repl--sidebar-publish-dirty nil)
       (agent-repl--log nil "sidebar-publish: releasing the coalesced roster after request-id=%s (%s)"
                        request-id reason)
-      (agent-repl--sidebar-push)
+      ;; Forced: the coalesced roster was never sent, so the signature the
+      ;; skipped publish recorded must not be read as "already delivered".
+      (agent-repl--sidebar-push t)
       t)))
 
 (defun agent-repl--sidebar-publish-abandon-inflight (reason)
@@ -1232,16 +1252,34 @@ would instead fire on every 1Hz tick for the whole of an outage."
                        (plist-get roster :view))
       request-id))))
 
-(defun agent-repl--sidebar-push ()
+(defun agent-repl--sidebar-push (&optional force)
   "Rebuild the roster and publish it to the daemon.
-Unconditional: change-gating lives in `agent-repl--sidebar-tick's
-signature compare, and the event-driven callers (fold / switch / nav)
-push precisely because they just changed what the sidebar shows.
+
+CHANGE-GATED on `agent-repl--sidebar-signature': the rebuild walks every
+live workspace and re-groups the whole roster, so running it for a
+signature that has not moved produces a byte-identical roster at full
+cost.  The event-driven callers (fold / switch / nav / view / task) all
+move an input of that signature, so the gate costs them nothing — it
+only absorbs the repeated pushes that would rebuild the same roster.
+
+Non-nil FORCE bypasses the gate, for the callers whose reason to push
+is NOT visible in the signature: a fresh daemon connection holding no
+roster, a coalesced roster released by the publish gate, and a
+perspective teardown whose membership cache may not have caught up yet.
+
 Also refreshes `agent-repl--sidebar-flat-dirs' as the build's side
-product, so navigation always walks the order last shown."
-  (let ((built (agent-repl--sidebar-build)))
-    (setq agent-repl--sidebar-flat-dirs (cdr built))
-    (agent-repl--sidebar-publish (car built))))
+product, so navigation always walks the order last shown; when the gate
+skips, the roster it describes is still the one last published."
+  (let ((sig (agent-repl--sidebar-signature)))
+    (if (and (not force) (equal sig agent-repl--sidebar-last-signature))
+        (progn
+          (agent-repl--log-verbose
+           nil "sidebar-push: signature unchanged, skipping rebuild")
+          nil)
+      (setq agent-repl--sidebar-last-signature sig)
+      (let ((built (agent-repl--sidebar-build)))
+        (setq agent-repl--sidebar-flat-dirs (cdr built))
+        (agent-repl--sidebar-publish (car built))))))
 
 (defun agent-repl--sidebar-publish-on-connect ()
   "Republish the roster onto a freshly opened frontend UDS connection.
@@ -1258,7 +1296,9 @@ republishing would leave the new connection's sidebar empty for that
 whole window."
   (agent-repl--log nil "sidebar-publish-on-connect: republishing the roster")
   (agent-repl--sidebar-publish-abandon-inflight "new connection")
-  (agent-repl--sidebar-push))
+  ;; Forced: the daemon that just connected holds no roster at all, which
+  ;; the signature — a pure content compare — cannot express.
+  (agent-repl--sidebar-push t))
 
 (add-hook 'agent-repl-uds-connected-functions
           #'agent-repl--sidebar-publish-on-connect)
@@ -1276,9 +1316,6 @@ flips the panel and re-renders on its own.  No roster round-trip means
     (agent-repl--log nil "sidebar-expand-push: dir=%s webviews=%d" dir (length bufs))))
 
 ;;;; ---- The 1Hz change gate ----------------------------------------------
-
-(defvar agent-repl--sidebar-last-signature nil
-  "Signature of the roster state as of the last pushed build.")
 
 (defun agent-repl--sidebar-signature ()
   "Return a cheap value that changes whenever the roster would.
@@ -1319,20 +1356,15 @@ and this signature is purely a change detector over roster CONTENT."
 
 (defun agent-repl--sidebar-tick ()
   "1Hz entry point (status.el's state tick): push when the signature moved.
-The signature compare is the hot-path gate — the rebuild and push
-behind it run only on actual change, so per-tick logging stays on the
-verbose ladder.
+The signature compare that decides this lives in
+`agent-repl--sidebar-push' — ONE gate rather than one per caller, so a
+tick and an event-driven push cannot rebuild the same roster twice.
 
-The merged-window refresh runs BEFORE the signature is taken, since the
-epoch it maintains is one of the signature's inputs and a wipe must be
-visible to this very tick's compare rather than the next one."
+The merged-window refresh runs BEFORE the push, since the epoch it
+maintains is one of the signature's inputs and a wipe must be visible to
+this very tick's compare rather than the next one."
   (agent-repl--sidebar-refresh-merged-window)
-  (let ((sig (agent-repl--sidebar-signature)))
-    (if (equal sig agent-repl--sidebar-last-signature)
-        (agent-repl--log-verbose nil "sidebar-tick: signature unchanged, skip")
-      (setq agent-repl--sidebar-last-signature sig)
-      (agent-repl--log-verbose nil "sidebar-tick: signature changed, pushing roster")
-      (agent-repl--sidebar-push))))
+  (agent-repl--sidebar-push))
 
 ;;;; ---- The dot and the tab take the same value at the same moment --------
 ;;
@@ -1360,12 +1392,11 @@ Subscriber for `agent-repl-ws-state-transition-functions'
 \(frontend-state.el).  NEW and PREVIOUS are the render keywords; a push
 that did not move the keyword changes no dot, so it is skipped.
 
-The push also refreshes `agent-repl--sidebar-last-signature', so the
+The push itself refreshes `agent-repl--sidebar-last-signature', so the
 next 1Hz tick sees the state it already delivered and stays quiet."
   (unless (eq new previous)
     (agent-repl--log ws "sidebar-react-to-pushed-state: ws=%s %s -> %s — repainting the rail with the tab bar"
                      ws previous new)
-    (setq agent-repl--sidebar-last-signature (agent-repl--sidebar-signature))
     (agent-repl--sidebar-push))
   (when (eq new previous)
     (agent-repl--log-verbose ws "sidebar-react-to-pushed-state: ws=%s state=%s unchanged, skip"
