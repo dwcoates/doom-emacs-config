@@ -9,6 +9,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
+	"claude-repld/internal/registry"
 	"claude-repld/internal/shim"
 	"claude-repld/internal/ssm"
 )
@@ -421,6 +422,91 @@ func TestRestartSessionLiftsABringUpPark(t *testing.T) {
 	// Assert.
 	if !m.Live("ws") {
 		t.Fatal("the hard restart did not bring the parked session up")
+	}
+}
+
+// THE DEFECT THIS COVERS. A hard restart brought the session up READY while its
+// durable record still claimed a sleep, so the revival gate went on refusing
+// every prompt the user sent — with no revival card standing to explain why, and
+// the one control that exists for a wedged session having visibly "worked".
+func TestRestartSessionClearsTheRevivalGate(t *testing.T) {
+	// Arrange — a session whose record says it is asleep.
+	m, _, _ := newRefreshRig(t, "sha-1")
+	hib := newFakeHibernations()
+	m.cfg.Hibernations = hib
+	hib.setAsleep("s1", registry.HibernationDetail{Cause: "idle_ttl", SinceMs: 1})
+
+	// Act.
+	if err := m.RestartSession(context.Background(), "ws"); err != nil {
+		t.Fatalf("RestartSession on a hibernated session: %v", err)
+	}
+
+	// Assert — the record no longer claims a sleep, so the gate is down.
+	if detail, ok := hib.HibernationOf("s1"); ok && detail.Cause != "" {
+		t.Fatalf("hibernation record after the restart = %+v, want the sleep cleared", detail)
+	}
+}
+
+// The gate coming down is only worth anything if a prompt then gets through:
+// this asserts the OUTCOME the user experiences, not just the record write.
+func TestAPromptIsAdmittedAfterARestartClearsTheGate(t *testing.T) {
+	// Arrange.
+	m, _, _ := newRefreshRig(t, "sha-1")
+	hib := newFakeHibernations()
+	m.cfg.Hibernations = hib
+	hib.setAsleep("s1", registry.HibernationDetail{Cause: "idle_ttl", SinceMs: 1})
+	if err := m.guardHibernation("ws", "req-1", "host", submitterUser); err == nil {
+		t.Fatal("the gate admitted a prompt while the session was asleep")
+	}
+
+	// Act.
+	if err := m.RestartSession(context.Background(), "ws"); err != nil {
+		t.Fatalf("RestartSession: %v", err)
+	}
+
+	// Assert.
+	if err := m.guardHibernation("ws", "req-2", "host", submitterUser); err != nil {
+		t.Fatalf("the gate still refuses host prompts after the restart: %v", err)
+	}
+}
+
+// AN AWAKE SESSION IS NOT WRITTEN TO. clearHibernation stamps a fresh turn-end
+// as the policy's new measuring point, so clearing unconditionally would let an
+// ordinary restart shift the idle clock of a session that was never asleep.
+func TestRestartSessionDoesNotWriteHibernationForAnAwakeSession(t *testing.T) {
+	// Arrange.
+	m, _, _ := newRefreshRig(t, "sha-1")
+	hib := newFakeHibernations()
+	m.cfg.Hibernations = hib
+
+	// Act.
+	if err := m.RestartSession(context.Background(), "ws"); err != nil {
+		t.Fatalf("RestartSession: %v", err)
+	}
+
+	// Assert.
+	if got := hib.writeCount(); got != 0 {
+		t.Fatalf("hibernation writes during an awake restart = %d, want 0", got)
+	}
+}
+
+// A CLEAR THAT DID NOT LAND MUST FAIL THE RESTART. Reporting success would hand
+// the user a running session the gate still refuses — exactly the state this
+// clear exists to prevent — so the failure is surfaced rather than logged past.
+func TestRestartSessionFailsWhenTheGateCannotBeCleared(t *testing.T) {
+	// Arrange.
+	m, _, _ := newRefreshRig(t, "sha-1")
+	hib := newFakeHibernations()
+	m.cfg.Hibernations = hib
+	hib.setAsleep("s1", registry.HibernationDetail{Cause: "idle_ttl", SinceMs: 1})
+	hib.writeErr = errors.New("registry down")
+
+	// Act.
+	err := m.RestartSession(context.Background(), "ws")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("RestartSession reported success with the revival gate still standing")
 	}
 }
 

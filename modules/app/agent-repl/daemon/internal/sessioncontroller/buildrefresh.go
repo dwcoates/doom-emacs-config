@@ -335,6 +335,34 @@ func (m *Manager) RestartSession(ctx context.Context, workspace string) error {
 	// leave the one control that exists for a wedged session unable to reach the
 	// session most in need of it (bringupescape.go).
 	m.clearBringUpFailures(sessionID)
+	// AND IT IS EQUALLY THE WAY OUT OF A SLEEP, because it has already paid for
+	// one. The restart resumes the SAME vendor conversation, so the whole cost the
+	// revival gate exists to put to the user first is spent by the time this line
+	// is reached; leaving the record saying `hibernated` bought nothing and cost
+	// the user a session that comes up READY and then refuses every prompt they
+	// send it, with no revival card standing to explain why.
+	//
+	// IT IS ALSO THE HOLE IN hibernation.go's STATED INVARIANT. "Hibernated but
+	// still being pinged" is unrepresentable only because the two routes into a
+	// session both refuse a sleeping record — and this one is a third route that
+	// re-enters m.byWS without asking. Clearing here closes it, so the record and
+	// the running process cannot disagree.
+	//
+	// CLEARED BEFORE THE BRING-UP, never after: ensure() evaluates the same
+	// hibernation policy on its way through, so a clear that landed afterwards
+	// would be a clear the bring-up it was meant to admit had already been
+	// refused by. Only a record that actually claims a sleep is written, so an
+	// ordinary restart does not disturb the idle clock clearHibernation stamps.
+	m.mu.Lock()
+	_, asleep := m.hibernatedLocked(sessionID)
+	m.mu.Unlock()
+	if asleep {
+		m.logf("session-controller: hard restart ws=%q session=%s is CLEARING the revival gate — the restart resumes the same conversation, so the sleep's cost is already paid and a standing gate would only refuse the prompts the restart was asked for",
+			workspace, sessionID)
+		if err := m.clearHibernation(workspace, sessionID); err != nil {
+			return fmt.Errorf("session-controller: restarting session %s (ws %q): clearing the hibernation record: %w", sessionID, workspace, err)
+		}
+	}
 	if _, err := m.ensure(ctx, workspace); err != nil {
 		return fmt.Errorf("session-controller: restarting session %s (ws %q): bringing it back up: %w", sessionID, workspace, err)
 	}

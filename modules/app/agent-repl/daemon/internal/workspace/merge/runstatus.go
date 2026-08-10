@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -43,9 +44,33 @@ type StatusSink interface {
 // stateEmitter binds a StateSink: every publication is loud-logged with its
 // workspace, run, phase and cause before it hits the sink, and a sink failure is
 // loud-logged and returned rather than dropped.
+//
+// IT IS ALSO THE ONE PLACE A PUBLICATION IS BOUNDED. Every status the pipeline
+// emits goes through emit, so bounding it HERE is what makes "no merge status
+// publication can wedge a drain" a property of the package rather than a
+// discipline every call site has to remember.
 type statusEmitter struct {
 	sink StatusSink
 	logf dlog.Logf
+	// bound is how long one sink call may take. Zero means sinkPublishBound; a
+	// test pins it small so the expiry path is exercised without waiting on the
+	// production figure.
+	bound time.Duration
+}
+
+// record calls the sink under statusEmitter's bound and reports the sink's own
+// error, or the expiry. The bound itself is callSinkBounded's, shared with the
+// state emitter: the two differ in what they LOG, never in how long they wait.
+func (e *statusEmitter) record(ws string, phase Phase, cause string, status *frontendv1.MergeStatus) error {
+	err, expired := callSinkBounded(e.bound, func() error {
+		return e.sink.RecordMergeStatus(ws, phase, cause, status)
+	})
+	if expired {
+		e.logf("merge: status SINK TIMED OUT {ws=%s run=%s phase=%s cause=%s bound=%s} — the sink has not returned; the pipeline stops waiting on it so the drain is not held by a publication, and the run's terminal word is treated as UNPUBLISHED (its durable entry is marked and settled under the replay budget)",
+			ws, status.GetRunId(), phase, cause, boundOr(e.bound))
+		return fmt.Errorf("merge: record %s status for %q: sink did not return within %s", phase, ws, boundOr(e.bound))
+	}
+	return err
 }
 
 func (e *statusEmitter) emit(ws string, phase Phase, cause string, status *frontendv1.MergeStatus) error {
@@ -62,7 +87,7 @@ func (e *statusEmitter) emit(ws string, phase Phase, cause string, status *front
 	}
 	e.logf("merge: status {ws=%s run=%s phase=%s cause=%s phase_started_at_ms=%d updated_at_ms=%d}",
 		ws, status.GetRunId(), phase, cause, status.GetPhaseStartedAtMs(), status.GetUpdatedAtMs())
-	if err := e.sink.RecordMergeStatus(ws, phase, cause, status); err != nil {
+	if err := e.record(ws, phase, cause, status); err != nil {
 		e.logf("merge: status SINK FAILED {ws=%s run=%s phase=%s cause=%s}: %v", ws, status.GetRunId(), phase, cause, err)
 		return fmt.Errorf("merge: record %s status for %q: %w", phase, ws, err)
 	}

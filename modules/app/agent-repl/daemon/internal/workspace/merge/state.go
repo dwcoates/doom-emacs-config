@@ -18,6 +18,7 @@ package merge
 
 import (
 	"fmt"
+	"time"
 
 	"claude-repld/internal/dlog"
 )
@@ -129,6 +130,9 @@ type PhaseSource interface {
 type stateEmitter struct {
 	sink StateSink
 	logf dlog.Logf
+	// bound is how long one sink call may take, on exactly the terms
+	// statusEmitter takes it. Zero means sinkPublishBound.
+	bound time.Duration
 }
 
 // emit loud-logs the transition and records it through the sink. A sink
@@ -141,7 +145,15 @@ func (e *stateEmitter) emit(ws string, phase Phase, cause string) error {
 		return fmt.Errorf("merge: unknown state phase %q for workspace %q", phase, ws)
 	}
 	e.logf("merge: state {ws=%s phase=%s cause=%s}", ws, phase, cause)
-	if err := e.sink.RecordMergeTransition(ws, phase, cause); err != nil {
+	err, expired := callSinkBounded(e.bound, func() error {
+		return e.sink.RecordMergeTransition(ws, phase, cause)
+	})
+	if expired {
+		e.logf("merge: state SINK TIMED OUT {ws=%s phase=%s cause=%s bound=%s} — the sink has not returned; the pipeline stops waiting on it so the drain is not held by a transition, and the caller aborts as it does on any sink failure",
+			ws, phase, cause, boundOr(e.bound))
+		return fmt.Errorf("merge: record %s transition for %q: sink did not return within %s", phase, ws, boundOr(e.bound))
+	}
+	if err != nil {
 		e.logf("merge: state SINK FAILED {ws=%s phase=%s cause=%s}: %v", ws, phase, cause, err)
 		return fmt.Errorf("merge: record %s transition for %q: %w", phase, ws, err)
 	}
