@@ -1226,7 +1226,7 @@ func main() {
 		// own BOUNDED quiet window instead of alarming; a client that does not
 		// alarms exactly as it does today, which is why a failed announcement
 		// is logged loudly rather than shrugged off.
-		announceIntentionalRestart(daemonLog, req)
+		announceIntentionalRestart(daemonLog, agentShim.Server, req)
 		daemonLog.With("operation", "shutdown-stop-workspace-creation").Log("claude-repld: shutdown step: stopping workspace creation workers")
 		cancelWorkspaceCreate()
 		daemonLog.With("operation", "shutdown-all-sessions").Log("claude-repld: shutdown step: stopping session work (idle sweeper drain, shim stop decisions)")
