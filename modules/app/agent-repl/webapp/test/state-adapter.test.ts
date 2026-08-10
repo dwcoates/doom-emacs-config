@@ -379,12 +379,19 @@ describe("SessionInit mapping", () => {
 // --- DegradedNotice: RETIRED (step 11) --------------------------------------
 
 describe("DegradedNotice mapping", () => {
-  it("rejects the retired degradedNotice frame arm", () => {
-    expect(() =>
+  /**
+   * AMENDED DELIBERATELY. The decoder no longer throws on an arm this bundle
+   * does not know — that throw wedged ingest on any additive daemon change
+   * (frontend-proto.ts, UnknownFrameArm). The guarantee this case really
+   * carries is that the retired arm moves NO STATE, which the ignore effect
+   * asserts as squarely as the throw did.
+   */
+  it("moves no state for the retired degradedNotice frame arm", () => {
+    expect(
       applyOne({
         degradedNotice: { component: "shim-store", reason: "socket closed", recovered: false, atMs: "1700000000000" },
       }),
-    ).toThrow(/unrecognized field/);
+    ).toEqual([{ kind: "ignored", shape: "unknownArm" }]);
   });
 });
 
@@ -1319,6 +1326,17 @@ describe("explicit-ignore path", () => {
     expect(second).toEqual([{ kind: "ignored", shape: "commandAck" }]);
     expect(adapter.ignoredCounts().get("commandAck")).toBe(2);
     expect(logs.filter(([, m]) => m.includes("commandAck"))).toHaveLength(1);
+  });
+
+  it("ignores an arm this bundle predates instead of moving state for it", () => {
+    // Arrange — a newer daemon's additive push, which the decoder now tolerates
+    // (frontend-proto.ts, UnknownFrameArm). Nothing here can know what it
+    // means, so the only honest disposition is the ignore path.
+    const adapter = new StateAdapter(() => {});
+    // Act
+    const effects = adapter.apply(frame({ someFutureArm: {} }));
+    // Assert
+    expect(effects).toEqual([{ kind: "ignored", shape: "unknownArm" }]);
   });
 
   it("keeps a REGISTERED ignored shape at debug (its frame is consumed elsewhere)", () => {
