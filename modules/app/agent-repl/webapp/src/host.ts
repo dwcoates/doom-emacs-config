@@ -62,6 +62,36 @@ export function installHostCloseMenusHook(target: HostGlobal, close: () => void)
 }
 
 /**
+ * Name of the global that repairs this page's daemon connection.
+ * `agent-repl-frontend-recover-hook' (lisp/webview-recovery.el) MUST match
+ * this string.
+ */
+export const RECOVER_HOOK = "agentReplRecoverNow";
+
+/**
+ * Plant the recovery hook on TARGET, running RECOVER when the host fires it.
+ *
+ * WHY THE HOST DRIVES THIS AT ALL: background-recovery.ts repairs a hidden
+ * page on a `setInterval` heartbeat, but this embedder SUSPENDS a hidden
+ * xwidget webview's timers (see ws.ts above `ensureConnected`), so that
+ * heartbeat does not tick in exactly the page it exists to repair. Emacs's
+ * timers do run, and its script channel reaches a hidden webview, so Emacs
+ * fires this hook on the daemon link-up edge.
+ *
+ * This is a call INTO the existing repair path and holds no logic of its own:
+ * a host-fired repair and a user-arrives repair are the same code, differing
+ * only in the reason they name.
+ */
+export function installHostRecoverHook(
+  target: HostGlobal,
+  recover: (reason: string) => void,
+): void {
+  target[RECOVER_HOOK] = (reason: unknown): void => {
+    recover(typeof reason === "string" && reason !== "" ? reason : "host_recover");
+  };
+}
+
+/**
  * Name of the global that nudges the page's text size.
  * `agent-repl-frontend-text-size-hook' (frontend.el) MUST match this
  * string.
