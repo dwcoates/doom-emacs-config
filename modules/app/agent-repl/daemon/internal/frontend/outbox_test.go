@@ -769,3 +769,79 @@ func TestOutboxPushOntoAClosedQueueIsRefusedRatherThanQueued(t *testing.T) {
 		t.Fatalf("res = %+v, want the closed disposition", res)
 	}
 }
+
+// TestElasticOutboxTreatsAcceptedBytesAsDrainProgress is the regression test
+// for the incident the progress counter exists for: an Emacs host received a
+// 162-workspace connect snapshot, spent 31s consuming it, and was evicted at
+// 30s as "stalled" — 391ms before the write it was steadily draining completed
+// successfully. Frame count is not progress evidence; accepted bytes are.
+func TestElasticOutboxTreatsAcceptedBytesAsDrainProgress(t *testing.T) {
+	// Arrange: a queue over its soft bound whose consumer has popped exactly
+	// one enormous frame and is still inside the write for it.
+	clock := newFakeClock()
+	o := newElasticOutbox(2, 64, 30*time.Second)
+	o.now = clock.Now
+	fill(t, o, "conv1", "conv2", "conv3")
+
+	// Act: no further frame is popped for well past the grace period, but the
+	// socket keeps accepting chunks of the one in flight the whole time.
+	for elapsed := time.Duration(0); elapsed < 40*time.Second; elapsed += time.Second {
+		clock.advance(time.Second)
+		o.noteWriteProgress()
+	}
+	res := o.push(outFrame{data: []byte("conv4")})
+
+	// Assert: a consumer that is visibly reading is never a wedged one.
+	if !res.queued {
+		t.Fatalf("push = %+v, want a byte-draining consumer absorbed rather than evicted", res)
+	}
+}
+
+// TestElasticOutboxStillRefusesAConsumerWhoseWriteAcceptsNoBytes is the other
+// half of that guarantee: the eviction is not weakened, only re-based onto
+// evidence. A consumer that pops nothing AND accepts no bytes is gone.
+func TestElasticOutboxStillRefusesAConsumerWhoseWriteAcceptsNoBytes(t *testing.T) {
+	// Arrange: an episode marked by one chunk of progress, then nothing.
+	clock := newFakeClock()
+	o := newElasticOutbox(2, 64, 30*time.Second)
+	o.now = clock.Now
+	fill(t, o, "conv1", "conv2", "conv3")
+	o.noteWriteProgress()
+	if res := o.push(outFrame{data: []byte("conv4")}); !res.queued {
+		t.Fatalf("arrange push = %+v, want the progress to re-mark the episode", res)
+	}
+
+	// Act: the socket accepts nothing at all for the whole grace period.
+	clock.advance(31 * time.Second)
+	res := o.push(outFrame{data: []byte("conv5")})
+
+	// Assert.
+	if res.queued {
+		t.Fatalf("push = %+v, want a consumer accepting no bytes refused", res)
+	}
+	if res.reason != overflowStalled {
+		t.Fatalf("reason = %q, want %q", res.reason, overflowStalled)
+	}
+}
+
+// TestElasticOutboxKeepsTheHardCeilingAgainstAByteDrainingConsumer pins the
+// bound byte-level progress must NOT buy past: the ceiling is the memory limit
+// and is unconditional.
+func TestElasticOutboxKeepsTheHardCeilingAgainstAByteDrainingConsumer(t *testing.T) {
+	// Arrange: a queue filled to its ceiling with irreplaceable frames, whose
+	// consumer is accepting bytes continuously.
+	o := newElasticOutbox(2, 4, time.Minute)
+	fill(t, o, "conv1", "conv2", "conv3", "conv4")
+	o.noteWriteProgress()
+
+	// Act.
+	res := o.push(outFrame{data: []byte("conv5")})
+
+	// Assert.
+	if res.queued {
+		t.Fatalf("push = %+v, want the memory ceiling enforced regardless of progress", res)
+	}
+	if res.reason != overflowCeiling {
+		t.Fatalf("reason = %q, want %q", res.reason, overflowCeiling)
+	}
+}

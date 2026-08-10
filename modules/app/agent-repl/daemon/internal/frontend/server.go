@@ -217,6 +217,12 @@ type client struct {
 	closeOnce sync.Once
 	scope     *Scope
 	kind      ClientKind
+	// cause is WHY this connection is being torn down, recorded by disconnect
+	// BEFORE done is closed so the writer's teardown — which is what actually
+	// closes the socket — can name it in the log and put it on the wire as a
+	// WebSocket close frame. A nil load means nothing recorded a cause, which
+	// closeConn reports as the bug it is. See closecause.go.
+	cause atomic.Pointer[closeCause]
 	// drain is this connection's connect-snapshot drain window (bootdrain.go):
 	// the interval its initial StateSnapshot spent between the outbound queue
 	// and the socket. A slow ack delivered inside it is explained by the
@@ -435,7 +441,7 @@ func (s *Server) Close() error {
 	s.mu.Unlock()
 
 	for _, cl := range clients {
-		s.disconnect(cl)
+		s.disconnect(cl, causeServerShutdown)
 	}
 	if l != nil {
 		return l.Close()
@@ -646,12 +652,12 @@ func frameSessionIdentity(frame *frontendv1.FrontendFrame) (workspace, sessionID
 // deliverLocked enqueues frame into every client want selects, returning the
 // clients whose bounded buffer overflowed so the caller can disconnect them
 // after releasing mu (disconnect takes mu itself). Caller holds mu.
-func (s *Server) deliverLocked(frame *frontendv1.FrontendFrame, want func(*client) bool) []*client {
+func (s *Server) deliverLocked(frame *frontendv1.FrontendFrame, want func(*client) bool) []deadClient {
 	var (
 		unscoped     []byte
 		unscopedErr  error
 		unscopedDone bool
-		slow         []*client
+		slow         []deadClient
 	)
 	for cl := range s.clients {
 		if !want(cl) {
@@ -691,7 +697,7 @@ func (s *Server) deliverLocked(frame *frontendv1.FrontendFrame, want func(*clien
 		}
 		if !res.queued {
 			s.recordOverflow(cl, res, "broadcast")
-			slow = append(slow, cl)
+			slow = append(slow, deadClient{cl: cl, cause: causeOverflow(res, "broadcast")})
 			continue
 		}
 		s.notePressure(cl, res, "broadcast")
@@ -728,11 +734,21 @@ func enqueueLocked(cl *client, f outFrame) pushResult {
 // because its connection is already gone.
 var errClientGone = errors.New("frontend: connection closed before the frame was written")
 
-// disconnectAll tears down every client in the list. Called after mu is
-// released, since disconnect takes it.
-func (s *Server) disconnectAll(clients []*client) {
-	for _, cl := range clients {
-		s.disconnect(cl)
+// deadClient pairs a client being given up on with the CAUSE it is being given
+// up on for. The two travel together because the refusal that condemned a
+// connection happens under the delivery lock and the teardown happens after it
+// is released: carrying only the client to the teardown is exactly how a
+// per-connection reason gets replaced by a generic one.
+type deadClient struct {
+	cl    *client
+	cause closeCause
+}
+
+// disconnectAll tears down every client in the list, each for its own recorded
+// cause. Called after mu is released, since disconnect takes it.
+func (s *Server) disconnectAll(dead []deadClient) {
+	for _, d := range dead {
+		s.disconnect(d.cl, d.cause)
 	}
 }
 
@@ -786,7 +802,7 @@ func (s *Server) PushShutdownSchedule(v *frontendv1.ShutdownScheduleView) {
 func (s *Server) PushAuthoritativeSnapshot(snapshot *frontendv1.StateSnapshot) {
 	s.mu.Lock()
 	s.logf("frontend: authoritative snapshot publication clients=%d workspaces=%d sessions=%d progress=%d", len(s.clients), len(snapshot.GetWorkspaces()), len(snapshot.GetSessions()), len(snapshot.GetProgress()))
-	slow := make([]*client, 0)
+	slow := make([]deadClient, 0)
 	for cl := range s.clients {
 		view := snapshotForClient(snapshot, cl.scope, cl.kind)
 		data, err := marshalFrame(SnapshotFrame(view))
@@ -797,7 +813,7 @@ func (s *Server) PushAuthoritativeSnapshot(snapshot *frontendv1.StateSnapshot) {
 		if res := enqueueLocked(cl, outFrame{data: data}); !res.queued {
 			s.overflowEmit(cl)("frontend: authoritative snapshot queue saturated client_id=%d kind=%s scope_workspace=%q scope_session=%q depth=%d soft=%d hard=%d reason=%s stalled_for_ms=%d outcome=disconnect",
 				cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), res.depth, res.soft, res.hard, res.reason, res.stalledFor.Milliseconds())
-			slow = append(slow, cl)
+			slow = append(slow, deadClient{cl: cl, cause: causeOverflow(res, "authoritative_snapshot")})
 		} else {
 			s.logVerbosef("frontend: authoritative snapshot queued client_id=%d kind=%s scope_workspace=%q scope_session=%q", cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope))
 		}
@@ -967,13 +983,16 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		if err != nil {
 			s.warn("frontend: marshal connect snapshot kind=%s scope_workspace=%q scope_session=%q: %v",
 				kind, scopeWorkspace(scope), scopeSession(scope), err)
-			_ = c.close()
+			s.closeConn(c, cl.id, kind, causeInternal(closeReasonSnapshotMarshal, err))
 			return
 		}
 		s.mu.Lock()
 		if s.closed {
 			s.mu.Unlock()
-			_ = c.close()
+			// This used to be the one close on the serving paths with no record
+			// at all: a connection accepted into a closing server vanished
+			// silently from both ends.
+			s.closeConn(c, cl.id, kind, causeServerClosed)
 			return
 		}
 		if workspace, snapshotAt, deliveredAt, stale := s.snapshotStaleLocked(snapshot, scope); stale {
@@ -1002,7 +1021,7 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 			s.mu.Unlock()
 			s.warn("frontend: connect snapshot rejected by an empty outbox kind=%s scope_workspace=%q scope_session=%q",
 				kind, scopeWorkspace(scope), scopeSession(scope))
-			_ = c.close()
+			s.closeConn(c, cl.id, kind, causeInternal(closeReasonSnapshotRefused, nil))
 			return
 		}
 		// The retained roster rides the SAME delivery-lock operation as the
@@ -1020,14 +1039,14 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 				s.mu.Unlock()
 				s.warn("frontend: marshal connect roster kind=%s scope_workspace=%q revision=%d: %v",
 					kind, scopeWorkspace(scope), held.GetRevision(), rosterErr)
-				_ = c.close()
+				s.closeConn(c, cl.id, kind, causeInternal(closeReasonRosterMarshal, rosterErr))
 				return
 			}
 			if res := enqueueLocked(cl, outFrame{key: coalesceKey(WorkspaceRosterFrame(held)), data: rosterData}); !res.queued {
 				s.mu.Unlock()
 				s.warn("frontend: connect roster rejected by a near-empty outbox kind=%s scope_workspace=%q revision=%d",
 					kind, scopeWorkspace(scope), held.GetRevision())
-				_ = c.close()
+				s.closeConn(c, cl.id, kind, causeInternal(closeReasonRosterRefused, nil))
 				return
 			}
 		}
@@ -1083,7 +1102,7 @@ func (s *Server) renewSnapshotLease(cl *client) bool {
 		if err != nil {
 			s.logf("frontend: snapshot lease marshal failed client_id=%d kind=%s scope_workspace=%q scope_session=%q: %v",
 				cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), err)
-			s.disconnect(cl)
+			s.disconnect(cl, causeInternal(closeReasonLeaseMarshal, err))
 			return false
 		}
 		s.mu.Lock()
@@ -1105,7 +1124,7 @@ func (s *Server) renewSnapshotLease(cl *client) bool {
 		if !res.queued {
 			s.overflowEmit(cl)("frontend: snapshot lease queue full client_id=%d kind=%s scope_workspace=%q scope_session=%q buffer=%d ceiling=%d compacted=%d reason=%s stalled_for_ms=%d; hard-disconnecting",
 				cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), cl.out.capacity(), cl.out.ceiling(), res.compacted, res.reason, res.stalledFor.Milliseconds())
-			s.disconnect(cl)
+			s.disconnect(cl, causeOverflow(res, "snapshot_lease"))
 			return false
 		}
 		s.logSnapshotCensus(cl, snapshotPhaseLease, snapshot)
@@ -1236,7 +1255,11 @@ func (s *Server) writeFrameWatched(c conn, cl *client, f outFrame) error {
 		s.logf("frontend: OUTBOUND WRITER BLOCKED client_kind=%s lane=%s blocked_ms=%d — the consumer is not reading; every queued reply, including acks, waits behind this one write",
 			cl.kind, laneName(f.control), s.ackDeadline.Milliseconds())
 	})
-	err := c.writeFrame(f.data)
+	// Every chunk the socket accepts is drain progress. THIS is what stops the
+	// stall accounting from calling a host that is steadily consuming a 31s
+	// snapshot "wedged": the frame count does not move for the whole write, and
+	// the byte count moves constantly.
+	err := c.writeFrame(f.data, cl.out.noteWriteProgress)
 	alarm.Stop()
 	if reported.Load() {
 		// The stall is over one way or the other, and the record that announced
@@ -1289,22 +1312,24 @@ func (s *Server) drainOutbox(c conn, cl *client) error {
 	}
 }
 
+// writeLoop owns the socket's teardown: it is the goroutine that closes the
+// connection, and it closes it exactly once, through closeConn, with the cause
+// disconnect recorded. There is no other close on this path, silent or
+// otherwise.
 func (s *Server) writeLoop(c conn, cl *client) {
-	defer func() {
-		if err := c.close(); err != nil {
-			s.logf("frontend: connection close: %v", err)
-		}
-	}()
+	defer func() { s.closeConn(c, cl.id, cl.kind, cl.closeCause()) }()
 	for {
 		select {
 		case <-cl.done:
+			// disconnect recorded the cause before closing done, so the
+			// teardown above can name it.
 			return
 		case <-cl.out.ready:
 			// ready is a wakeup, not the queue: drain everything each wake, so
 			// a signal coalesced with an earlier one strands no frame.
 			if err := s.drainOutbox(c, cl); err != nil {
-				s.logf("frontend: write failed, disconnecting: %v", err)
-				s.disconnect(cl)
+				s.logf("frontend: write failed, disconnecting client_id=%d kind=%s: %v", cl.id, cl.kind, err)
+				s.disconnect(cl, causeWriteFailed(err))
 				return
 			}
 		}
@@ -1322,17 +1347,25 @@ func (s *Server) writeLoop(c conn, cl *client) {
 // answered only once it has actually run.
 func (s *Server) readLoop(c conn, cl *client) {
 	lanes := newCommandLanes(s.logf, s.processCommand)
+	// inbound is why this loop stopped, and it is what the teardown reports.
+	// It is written before the deferred teardown runs and read only by it, on
+	// this goroutine, so it needs no synchronization. It starts UNRECORDED on
+	// purpose: the loop's only exit sets it, and any future exit that forgets
+	// to trips the accountability backstop in closeConn instead of inventing a
+	// plausible reason.
+	var inbound closeCause
 	defer func() {
 		// Drain first, disconnect second: a command already read still owes
 		// the client an answer, exactly as it did when dispatch ran inline.
 		lanes.close()
-		s.disconnect(cl)
+		s.disconnect(cl, inbound)
 	}()
 	for {
 		cmd, err := c.readCommand()
 		if err != nil {
-			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) && !isWSClose(err) {
-				s.logf("frontend: read command: %v", err)
+			inbound = causeInboundEnded(err)
+			if !isPeerClose(err) {
+				s.logf("frontend: read command client_id=%d kind=%s: %v", cl.id, cl.kind, err)
 			}
 			return
 		}
@@ -1526,7 +1559,7 @@ func (s *Server) enqueue(cl *client, f outFrame) {
 	notifyFrame(f, fmt.Errorf("frontend: outbound queue refused the frame (%s, depth %d, soft %d, hard %d)",
 		res.reason, res.depth, res.soft, res.hard))
 	s.recordOverflow(cl, res, "delivery")
-	s.disconnect(cl)
+	s.disconnect(cl, causeOverflow(res, "delivery"))
 }
 
 // notePressure records a queue that has crossed into its elastic region but is
@@ -1563,16 +1596,32 @@ func (s *Server) overflowEmit(cl *client) dlog.Logf {
 	return s.logf
 }
 
+// closeCause reports the reason recorded for this connection's teardown, or the
+// unrecorded backstop when nothing recorded one.
+func (cl *client) closeCause() closeCause {
+	if c := cl.cause.Load(); c != nil {
+		return *c
+	}
+	return closeCause{}
+}
+
 // disconnect removes a client from the fan-out set and signals its writer to
 // stop. Idempotent: safe to call from the reader, the writer, enqueue, or Close.
 //
+// EVERY CALLER NAMES A CAUSE, and the cause is recorded BEFORE done is closed.
+// That ordering is what makes the record and the WebSocket close frame
+// possible: the writer wakes on done and is the goroutine that closes the
+// socket, so a cause published after the close would race the very teardown it
+// is supposed to explain.
+//
 // It holds no per-connection delivery state to unwind: nothing is ever withheld
 // from one frontend on account of another, so a departure strands nothing.
-func (s *Server) disconnect(cl *client) {
+func (s *Server) disconnect(cl *client, cause closeCause) {
 	s.mu.Lock()
 	delete(s.clients, cl)
 	s.mu.Unlock()
 	cl.closeOnce.Do(func() {
+		cl.cause.Store(&cause)
 		close(cl.done)
 		// Every frame still queued is now undeliverable. Reporting each one is
 		// what keeps a command whose ack died with the connection from simply
@@ -1581,8 +1630,8 @@ func (s *Server) disconnect(cl *client) {
 		for _, f := range stranded {
 			notifyFrame(f, errClientGone)
 		}
-		s.logf("frontend: client disconnected client_id=%d kind=%s scope_workspace=%q scope_session=%q stranded_frames=%d",
-			cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), len(stranded))
+		s.logf("frontend: client disconnected client_id=%d kind=%s scope_workspace=%q scope_session=%q stranded_frames=%d cause=%s ws_close_code=%d",
+			cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), len(stranded), cause.String(), cause.code)
 	})
 }
 
@@ -1650,12 +1699,31 @@ func sessionViewModelOptions(sessionView map[string]any) any {
 type conn interface {
 	// writeFrame writes one protojson frame (UDS appends the newline delimiter;
 	// WS sends it as one text message).
-	writeFrame(data []byte) error
+	//
+	// progress, when non-nil, is called every time the socket ACCEPTS A CHUNK of
+	// this frame's bytes. That callback is the drain-progress evidence the
+	// slow-consumer accounting runs on, and it exists because frame counts are
+	// not evidence: a 162-workspace connect snapshot is ONE frame, the observed
+	// host spent 31s consuming it, and for all 31 of those seconds a
+	// frame-counting stall detector saw a consumer that had drained nothing —
+	// and evicted a client that completed the write 391ms later. See outbox's
+	// progress field.
+	writeFrame(data []byte, progress func()) error
 	// readCommand reads one inbound FrontendCommand (UDS: one newline-delimited
 	// line; WS: one message). Returns io.EOF on clean close.
 	readCommand() (*frontendv1.FrontendCommand, error)
-	close() error
+	// close tears the connection down for the given reason. A WebSocket
+	// transport sends that reason as a close frame with its status code before
+	// closing, so a client sees a real code rather than 1005; a raw socket has
+	// no such channel and relies on the caller's record (closeConn).
+	close(cause closeCause) error
 }
+
+// writeChunkBytes is how much of one frame is offered to the socket per write.
+// It is the resolution of the byte-level drain-progress signal above: small
+// enough that a consumer reading steadily reports progress many times inside a
+// single large snapshot, large enough that a normal frame is one or two writes.
+const writeChunkBytes = 32 << 10
 
 // udsConn frames protojson newline-delimited over a net.Conn.
 type udsConn struct {
@@ -1667,12 +1735,33 @@ func newUDSConn(nc net.Conn) *udsConn {
 	return &udsConn{nc: nc, r: bufio.NewReader(nc)}
 }
 
-func (u *udsConn) writeFrame(data []byte) error {
-	if _, err := u.nc.Write(data); err != nil {
+// writeFrame writes the frame in bounded chunks, reporting each chunk the
+// socket accepted. Chunking changes nothing about the bytes on the wire — a UDS
+// stream has no message boundaries and the delimiter is still the trailing
+// newline — and it is what turns "this consumer is alive and reading" from an
+// unobservable fact into a signal the stall accounting can use.
+func (u *udsConn) writeFrame(data []byte, progress func()) error {
+	for off := 0; off < len(data); {
+		end := off + writeChunkBytes
+		if end > len(data) {
+			end = len(data)
+		}
+		n, err := u.nc.Write(data[off:end])
+		off += n
+		if n > 0 && progress != nil {
+			progress()
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if _, err := u.nc.Write([]byte{'\n'}); err != nil {
 		return err
 	}
-	_, err := u.nc.Write([]byte{'\n'})
-	return err
+	if progress != nil {
+		progress()
+	}
+	return nil
 }
 
 func (u *udsConn) readCommand() (*frontendv1.FrontendCommand, error) {
@@ -1687,7 +1776,11 @@ func (u *udsConn) readCommand() (*frontendv1.FrontendCommand, error) {
 	return unmarshalCommand(line)
 }
 
-func (u *udsConn) close() error { return u.nc.Close() }
+// close ends the raw stream. A UDS peer has no in-band channel for a reason, so
+// the cause is deliberately not encoded here: closeConn has already written the
+// record that accounts for this teardown, and inventing a trailer frame would
+// be a protocol change no client parses.
+func (u *udsConn) close(closeCause) error { return u.nc.Close() }
 
 // wsConn frames protojson one-frame-per-message over a WebSocket. translate,
 // when set (scoped /stream connections), adapts an inbound raw message into a
@@ -1704,8 +1797,35 @@ type wsConn struct {
 
 func newWSConn(ws *websocket.Conn) *wsConn { return &wsConn{ws: ws} }
 
-func (w *wsConn) writeFrame(data []byte) error {
-	return w.ws.WriteMessage(websocket.TextMessage, data)
+// writeFrame streams the frame as ONE text message, reporting each chunk the
+// message writer accepted. NextWriter rather than WriteMessage is what makes
+// that reporting possible; the message framing on the wire is identical.
+func (w *wsConn) writeFrame(data []byte, progress func()) error {
+	mw, err := w.ws.NextWriter(websocket.TextMessage)
+	if err != nil {
+		return err
+	}
+	for off := 0; off < len(data); {
+		end := off + writeChunkBytes
+		if end > len(data) {
+			end = len(data)
+		}
+		n, werr := mw.Write(data[off:end])
+		off += n
+		if n > 0 && progress != nil {
+			progress()
+		}
+		if werr != nil {
+			// The partial message is abandoned, and the abandonment's own
+			// failure is surfaced rather than dropped: a Close error here means
+			// the connection is in a state the caller must still hear about.
+			if cerr := mw.Close(); cerr != nil {
+				return fmt.Errorf("%w (abandoning partial message: %v)", werr, cerr)
+			}
+			return werr
+		}
+	}
+	return mw.Close()
 }
 
 func (w *wsConn) readCommand() (*frontendv1.FrontendCommand, error) {
@@ -1731,7 +1851,38 @@ func (w *wsConn) readCommand() (*frontendv1.FrontendCommand, error) {
 	}
 }
 
-func (w *wsConn) close() error { return w.ws.Close() }
+// close sends a real WebSocket CLOSE FRAME carrying the cause's status code and
+// reason, then closes the socket.
+//
+// This is the fix for the user-visible `close=1005` warning: 1005 is
+// "no status received", i.e. the daemon dropped the TCP connection without ever
+// telling the browser why, and a bare ws.Close() produces exactly that. gorilla
+// permits WriteControl concurrently with an in-flight WriteMessage, so this
+// works even while the writer goroutine is parked on a large frame.
+//
+// A close frame that cannot be sent is REPORTED, not swallowed: the underlying
+// close still happens (a failed handshake must never leak the socket), and the
+// handshake failure is returned so closeConn records it.
+func (w *wsConn) close(cause closeCause) error {
+	code := cause.code
+	if code == 0 {
+		code = websocket.CloseInternalServerErr
+	}
+	handshake := w.ws.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(code, cause.wireReason()),
+		time.Now().Add(closeFrameBudget),
+	)
+	closeErr := w.ws.Close()
+	switch {
+	case handshake != nil && closeErr != nil:
+		return fmt.Errorf("frontend: close frame (code %d): %w; close: %v", code, handshake, closeErr)
+	case handshake != nil:
+		return fmt.Errorf("frontend: close frame (code %d): %w", code, handshake)
+	default:
+		return closeErr
+	}
+}
 
 func unmarshalCommand(data []byte) (*frontendv1.FrontendCommand, error) {
 	cmd := &frontendv1.FrontendCommand{}
@@ -1739,6 +1890,14 @@ func unmarshalCommand(data []byte) (*frontendv1.FrontendCommand, error) {
 		return nil, fmt.Errorf("frontend: protojson unmarshal command: %w", err)
 	}
 	return cmd, nil
+}
+
+// isPeerClose reports an inbound error that means THE CLIENT ENDED IT: a clean
+// stream EOF, a socket this daemon already closed underneath the reader, or a
+// WebSocket close frame. Everything else is a broken frame stream, and the two
+// are recorded as different causes because they have different remedies.
+func isPeerClose(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || isWSClose(err)
 }
 
 func isWSClose(err error) bool {
