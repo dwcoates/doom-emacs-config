@@ -117,7 +117,11 @@ import { StateAdapter, userTurnReceipt } from "./state-adapter.js";
 import { CommandDispatcher, ModelSelectionRejectedError, surfaceRefusal } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
 import { BackgroundRecovery, windowRecoveryTimerHost } from "./background-recovery.js";
-import { RestartWindow, RESTARTING_INDICATOR } from "./restart-window.js";
+import {
+  RestartWindow,
+  RESTARTING_INDICATOR,
+  announcementFromView,
+} from "./restart-window.js";
 import { captureResyncSnapshot } from "./resync-snapshot.js";
 import type { CommandStruct, ReviveDecision } from "./frontend-command.js";
 import { PendingPermissionMode } from "./pending-mode.js";
@@ -1307,11 +1311,11 @@ async function boot(): Promise<void> {
    * was a look. See background-recovery.ts.
    */
   /**
-   * The bounded quiet window a daemon-announced bounce opens. Nothing opens it
-   * yet — the frontend proto arm that carries the announcement is gated — so
-   * it reports "not restarting" and every alarm below behaves exactly as it
-   * did. `restartWindow.announce(...)` is the single entry point the frame
-   * handler will call once that arm lands.
+   * The bounded quiet window a daemon-announced bounce opens. It is opened by
+   * the `restartPending` frame handled at the decode choke point below, and by
+   * nothing else — an announcement from the daemon is the only thing entitled
+   * to suppress a disconnect alarm. Absent one, it reports "not restarting"
+   * and every alarm behaves exactly as it did before this feature existed.
    */
   const restartWindow = new RestartWindow({
     now: () => Date.now(),
@@ -1430,6 +1434,15 @@ async function boot(): Promise<void> {
               binaryMtimeMs: Number(daemon?.daemonBinaryMtimeMs ?? 0),
             };
             daemonBootId = daemon?.bootId ?? "";
+          }
+          // THE DAEMON SAID IT IS GOING DOWN ON PURPOSE. Handled HERE, at the
+          // decode choke point, and BEFORE the adapter: the notice arrives on
+          // a socket that is about to die, so anything that could throw between
+          // decode and the window opening is a chance to lose it and paint the
+          // severed card for a routine bounce. The window itself refuses a
+          // malformed announcement, so a bad frame leaves the page honest.
+          if (decoded.frame.case === "restartPending") {
+            restartWindow.announce(announcementFromView(decoded.frame.value));
           }
           dispatcher.observe(decoded);
           effects = adapter.apply(decoded);
