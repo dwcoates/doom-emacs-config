@@ -89,9 +89,13 @@ var ErrHibernationMergeLeaseHeld = errors.New("session-controller: the workspace
 // here and the user's own decision is not a stale clock reading.
 var ErrHibernationMergeQueued = errors.New("session-controller: the workspace is waiting in the merge queue and cannot be hibernated by an automatic cause")
 
-// ErrHibernationConversationCut reports an AUTOMATIC hibernation refused
+// ErrHibernationConversationCut reports a CACHE-EXPIRED hibernation refused
 // because the workspace's conversation was compacted or cleared and nothing has
 // been said to it since.
+//
+// IT IS THE CACHE CAUSE'S REFUSAL ALONE. The idle cutoff is not a cache
+// judgement, so a cut conversation is still reaped at 6h — see
+// refuseAutomaticHibernationAfterCut for why the other arm was wrong.
 //
 // It is a sentinel of its own rather than a reuse of the queued one because the
 // two refusals are about different things — pending work versus a conversation
@@ -305,18 +309,25 @@ func (m *Manager) refuseAutomaticHibernationWhileQueued(workspace string, accoun
 	return fmt.Errorf("%w: workspace %q, cause %s", ErrHibernationMergeQueued, workspace, account.Cause)
 }
 
-// refuseAutomaticHibernationAfterCut refuses the two clock-driven causes for a
+// refuseAutomaticHibernationAfterCut refuses the CACHE-EXPIRED cause for a
 // workspace whose conversation was COMPACTED OR CLEARED with nothing said to it
 // since (ssm/compactiongate.go).
 //
-// THE CUT IS THE DAEMON'S OWN LAST ACT ON THAT CONVERSATION. Both automatic
-// causes read nothing but elapsed quiet, and the quiet that follows a cut is
-// not a workspace nobody wants — it is a workspace the daemon itself just
-// emptied or summarized. Sleeping on top of it stands the session down behind a
-// revival gate whose compacting choices this same gate already declines, so the
-// sleep buys a revival that has nothing to do.
+// ONLY cache_expired IS GATED, and the asymmetry is the whole point. That cause
+// is a CACHE JUDGEMENT: it sleeps a session because the prompt cache behind it
+// went cold and the next turn would pay the uncached rate anyway. A cut already
+// made the conversation small, so the cache it would be protecting is worth
+// nearly nothing — sleeping to save it buys nothing and costs a bring-up.
 //
-// ONLY THE AUTOMATIC CAUSES ARE GATED, exactly as with the merge queue. A
+// THE IDLE CUTOFF IS NOT A CACHE JUDGEMENT AT ALL. It says "nobody has touched
+// this workspace all day" (keepalive.DefaultIdleCutoff, 6h), and that verdict is
+// unaffected by whether the conversation was cut: a workspace nobody wants is a
+// workspace nobody wants. Refusing it here — as this gate first did — held a
+// live shim forever for exactly those workspaces, which is an unbounded process
+// hold rather than a saving. So a cut conversation reaches the 6h cutoff and is
+// reaped there exactly as an uncut one is.
+//
+// THE FORCED CAUSE IS NOT GATED EITHER, exactly as with the merge queue. A
 // forced sleep is the user looking at a workspace and deciding about it, and no
 // fact about its conversation outranks that.
 //
@@ -325,9 +336,15 @@ func (m *Manager) refuseAutomaticHibernationWhileQueued(workspace string, accoun
 // follow: a daemon that cannot read the gate does not know whether it is about
 // to sleep on a cut conversation, and guessing in the transition's favor is
 // exactly how the sleep this prevents gets taken anyway.
+//
+// ITS REFUSAL LINE IS RATE-LIMITED PER WORKSPACE (hibernationrefusallog.go),
+// because this refusal is a STANDING CONDITION and not an event: a cut
+// workspace is refused on every sweep tick from the moment its cache goes cold
+// until the idle cutoff finally reaps it. The first refusal is written in full
+// and the run behind it is summarized with exact counts.
 func (m *Manager) refuseAutomaticHibernationAfterCut(workspace string, account registry.HibernationDetail) error {
 	switch account.Cause {
-	case registry.HibernationCauseIdleCutoff, registry.HibernationCauseCacheExpired:
+	case registry.HibernationCauseCacheExpired:
 	default:
 		return nil
 	}
@@ -341,8 +358,15 @@ func (m *Manager) refuseAutomaticHibernationAfterCut(workspace string, account r
 	if !cut {
 		return nil
 	}
-	m.logf("session-controller: REFUSING to hibernate ws=%q cause=%s cut=%s %s — the conversation was %s and nothing has been said to it since, so the quiet this cause measured is the daemon's own last act on it rather than a workspace nobody wants. Nothing was stopped and nothing was persisted",
-		workspace, account.Cause, cutKind(gate), compactionRedundantDetail(gate), cutKind(gate))
+	decision := m.noteHibernationRefusal(workspace, "conversation-cut/"+account.Cause)
+	switch {
+	case decision.first:
+		m.logf("session-controller: REFUSING to hibernate ws=%q cause=%s cut=%s %s — the conversation was %s and nothing has been said to it since, so the cache this cause would be protecting is already small and sleeping to save it buys nothing. The 6h idle cutoff still reaps this workspace. Nothing was stopped and nothing was persisted; further refusals are summarized",
+			workspace, account.Cause, cutKind(gate), compactionRedundantDetail(gate), cutKind(gate))
+	case decision.summary:
+		m.logf("session-controller: STILL refusing to hibernate ws=%q cause=%s cut=%s — %d further refusals since the last summary, %d in all; the workspace stays awake for its cut conversation until the idle cutoff reaps it",
+			workspace, account.Cause, cutKind(gate), decision.suppressed, decision.total)
+	}
 	return fmt.Errorf("%w: workspace %q, cause %s, cut %s", ErrHibernationConversationCut, workspace, account.Cause, cutKind(gate))
 }
 
