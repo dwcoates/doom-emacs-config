@@ -970,6 +970,91 @@ describe("ConnectResync suppression logging", () => {
 });
 
 /**
+ * THE OTHER HALF OF THE SAME LOG BOUND, and the one production actually hit.
+ *
+ * A workspace whose resync keeps failing sits inside a backoff window while
+ * want-resyncs keep arriving on every ingested frame. That branch used to write
+ * a line per want with no rate limit at all, so the master workspace's page
+ * produced 3,887 identical `backing off` lines — hundreds sharing a single
+ * millisecond — which is the ~25 client_log records/second that flooded the
+ * daemon. A deferral run carries the same two facts a coalescing run does.
+ */
+describe("ConnectResync backoff logging", () => {
+  /** Every per-deferral line this run produced. */
+  function deferLines(h: Harness): string[] {
+    return h.logs.filter(([, m]) => m.includes("decision=defer")).map(([, m]) => m);
+  }
+
+  function summaryLines(h: Harness): string[] {
+    return h.logs.filter(([, m]) => m.includes("decision=summary")).map(([, m]) => m);
+  }
+
+  /** A trigger sitting inside a backoff window after one failed resync. */
+  async function backingOff(): Promise<Harness> {
+    const h = harness(() => Promise.reject(new Error("server: unavailable")));
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    await flush();
+    return h;
+  }
+
+  it("logs the first deferral of a backoff run", async () => {
+    // Arrange
+    const h = await backingOff();
+    // Act
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(false, snapshot("/ws", 12));
+    // Assert
+    expect(deferLines(h)).toHaveLength(1);
+  });
+
+  it("logs nothing for the deferrals after the first", async () => {
+    // Arrange
+    const h = await backingOff();
+    // Act — the flood: a want-resync per ingested frame inside one window.
+    for (let i = 0; i < 500; i++) {
+      h.trigger.forceResync("recovery_heartbeat");
+      h.trigger.observe(false, snapshot("/ws", 12));
+    }
+    // Assert — one line for five hundred deferrals.
+    expect(deferLines(h)).toHaveLength(1);
+  });
+
+  it("reports the deferred total when the backoff window expires", async () => {
+    // Arrange
+    const h = await backingOff();
+    for (let i = 0; i < 500; i++) {
+      h.trigger.forceResync("recovery_heartbeat");
+      h.trigger.observe(false, snapshot("/ws", 12));
+    }
+    // Act — the window closes and the deferred want finally dispatches.
+    h.advance(RESYNC_BACKOFF_MAX_MS);
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(false, snapshot("/ws", 12));
+    // Assert
+    expect(summaryLines(h)).toEqual([
+      "resync: coalesced 500 want-resync(s) ws=/ws outcome=dispatched decision=summary",
+    ]);
+  });
+
+  it("starts a fresh deferral run after the previous one was summarized", async () => {
+    // Arrange — one run, closed out by the dispatch that ended its window.
+    const h = await backingOff();
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(false, snapshot("/ws", 12));
+    h.advance(RESYNC_BACKOFF_MAX_MS);
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(false, snapshot("/ws", 12));
+    await flush();
+    // Act — the second failure opens a second window.
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(false, snapshot("/ws", 12));
+    // Assert — the new run announces itself rather than staying silent.
+    expect(deferLines(h)).toHaveLength(2);
+  });
+});
+
+/**
  * THE WEDGE THIS BOUNDS, observed live (workspace marcos-pr-remediation, daemon
  * pid 36279): a resync went out over a socket that stayed up and its ack never
  * came back. With `inFlight` cleared only by a settle or a socket event, every
