@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -1571,5 +1572,175 @@ func TestPingTurnEndWithNothingHeldTakesNoRewindClaim(t *testing.T) {
 	defer m.mu.Unlock()
 	if got, claimed := m.keepAliveRewinds["ws"]; claimed {
 		t.Fatalf("rewind claim = %q for a ping nothing was waiting on, want none", got)
+	}
+}
+
+// --- the unknown-fate submit ------------------------------------------------
+//
+// A control request that TIMES OUT has not failed: the shim may hold the prompt
+// already. Redelivering on the timeout alone resubmits the turn identity, and a
+// second `TurnStarted` under one identity used to sever the session on every
+// resume.
+
+// queueOneBehindATurn queues one prompt behind a running turn and returns the
+// request id it was submitted under.
+func queueOneBehindATurn(t *testing.T, h *queueHarness, text string) string {
+	t.Helper()
+	h.turn(true)
+	if err := h.submit(text); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	waitFor(t, "the prompt to be queued", func() bool { return len(h.entries()) == 1 })
+	return h.entries()[0].requestID
+}
+
+func TestOnlyATimedOutDeliveryLeavesTheEntryUnknownFate(t *testing.T) {
+	tests := []struct {
+		name            string
+		submitErr       error
+		wantUnknownFate bool
+	}{
+		{name: "the shim never acked the submit", submitErr: shimclient.ErrAckTimeout, wantUnknownFate: true},
+		{name: "the shim refused the submit", submitErr: errors.New("shim gone"), wantUnknownFate: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newQueueHarness(t, nil)
+			queueOneBehindATurn(t, h, "queued")
+			h.client.mu.Lock()
+			h.client.submitErrOnce = tc.submitErr
+			h.client.mu.Unlock()
+
+			// Act: the turn ends and the entry is delivered into that failure.
+			h.turn(false)
+
+			// Assert.
+			waitFor(t, "the failed delivery to requeue", func() bool {
+				es := h.entries()
+				return len(es) == 1 && es[0].classification == VerdictError
+			})
+			if got := h.entries()[0].unknownFate; got != tc.wantUnknownFate {
+				t.Fatalf("entry unknownFate = %v, want %v", got, tc.wantUnknownFate)
+			}
+		})
+	}
+}
+
+func TestAnUnknownFateRedeliveryReconcilesBeforeResubmitting(t *testing.T) {
+	tests := []struct {
+		name        string
+		claimLanded bool
+		wantRecord  string
+		wantTexts   []string
+	}{
+		{
+			name:        "the ledger proves the timed-out submit landed",
+			claimLanded: true,
+			wantRecord:  "queue delivery SETTLED WITHOUT RESUBMIT",
+			wantTexts:   nil,
+		},
+		{
+			name:        "the ledger proves no claim was ever opened",
+			claimLanded: false,
+			wantRecord:  "queue delivery RECONCILED",
+			wantTexts:   []string{"queued"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: one delivery has already timed out.
+			cl := &logCapture{}
+			h := newQueueHarnessWithPusher(t, nil, nil, cl.logf)
+			requestID := queueOneBehindATurn(t, h, "queued")
+			h.client.mu.Lock()
+			h.client.submitErrOnce = shimclient.ErrAckTimeout
+			h.client.mu.Unlock()
+			h.turn(false)
+			waitFor(t, "the unknown-fate requeue", func() bool {
+				es := h.entries()
+				return len(es) == 1 && es[0].unknownFate
+			})
+			if tc.claimLanded {
+				if _, err := h.applier.ApplyTurnBoundary("ws", "s1", "",
+					turnStartEvent(corev1.Plane_PLANE_STREAM, 41, requestID)); err != nil {
+					t.Fatalf("record the landed turn: %v", err)
+				}
+			}
+
+			// Act: the next boundary redelivers the entry.
+			h.turn(false)
+
+			// Assert.
+			waitFor(t, tc.wantRecord, func() bool { return cl.contains(tc.wantRecord) })
+			waitFor(t, "the redelivery to settle", func() bool {
+				h.client.mu.Lock()
+				defer h.client.mu.Unlock()
+				return reflect.DeepEqual(h.client.prompts, tc.wantTexts)
+			})
+		})
+	}
+}
+
+func TestAnUnknownFateRedeliveryReusesTheOriginalIdentity(t *testing.T) {
+	// Arrange: a timed-out delivery the ledger proves never landed.
+	h := newQueueHarness(t, nil)
+	requestID := queueOneBehindATurn(t, h, "queued")
+	h.client.mu.Lock()
+	h.client.submitErrOnce = shimclient.ErrAckTimeout
+	h.client.mu.Unlock()
+	h.turn(false)
+	waitFor(t, "the unknown-fate requeue", func() bool {
+		es := h.entries()
+		return len(es) == 1 && es[0].unknownFate
+	})
+
+	// Act.
+	h.turn(false)
+
+	// Assert: nothing was re-minted, so the prompt keeps the name the frontend
+	// and the durable receipt already know it by.
+	waitFor(t, "the redelivery", func() bool {
+		h.client.mu.Lock()
+		defer h.client.mu.Unlock()
+		return len(h.client.requestIDs) == 1
+	})
+	h.client.mu.Lock()
+	defer h.client.mu.Unlock()
+	if !reflect.DeepEqual(h.client.requestIDs, []string{requestID}) {
+		t.Fatalf("submitted request ids = %v, want [%s]", h.client.requestIDs, requestID)
+	}
+}
+
+func TestAnUnprovableUnknownFateWithholdsTheResubmit(t *testing.T) {
+	// Arrange: a timed-out delivery whose ledger probe cannot be read.
+	h := newQueueHarness(t, nil)
+	queueOneBehindATurn(t, h, "queued")
+	h.client.mu.Lock()
+	h.client.submitErrOnce = shimclient.ErrAckTimeout
+	h.client.mu.Unlock()
+	h.turn(false)
+	waitFor(t, "the unknown-fate requeue", func() bool {
+		es := h.entries()
+		return len(es) == 1 && es[0].unknownFate
+	})
+	h.applier.reconcMutex.Lock()
+	h.applier.turnClaimExistsErr = errors.New("ledger unreadable")
+	h.applier.reconcMutex.Unlock()
+
+	// Act.
+	h.turn(false)
+
+	// Assert: unprovable is not absent, so the prompt keeps its place instead of
+	// being resubmitted under an identity that may already be running.
+	waitFor(t, "the withheld redelivery", func() bool {
+		es := h.entries()
+		return len(es) == 1 && es[0].classification == VerdictError &&
+			strings.Contains(es[0].rationale, "unknown-fate reconciliation failed")
+	})
+	h.client.mu.Lock()
+	defer h.client.mu.Unlock()
+	if len(h.client.prompts) != 0 {
+		t.Fatalf("submitted prompts = %v, want none", h.client.prompts)
 	}
 }

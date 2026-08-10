@@ -195,6 +195,10 @@ type fakeApplier struct {
 	// activeTurnIDsErr fails the durable turn-claim READ, which is what a drain
 	// hold falls back from when it cannot name the turn it is waiting on.
 	activeTurnIDsErr error
+	// turnClaimExistsErr fails the ledger PROBE an unknown-fate submit is
+	// reconciled against, which is what leaves a redelivery unable to prove the
+	// timed-out submit did not land.
+	turnClaimExistsErr error
 	// synthesizedCauses records one entry per SynthesizeTurnClose call — the
 	// terminal causes the daemon ended a turn claim with when no TurnEnded
 	// could ever arrive for it.
@@ -1033,6 +1037,28 @@ func (a *fakeApplier) ActiveTurnIDs(_ string, _ string) ([]string, error) {
 		return nil, a.activeTurnIDsErr
 	}
 	return append([]string(nil), a.turns...), nil
+}
+
+// TurnClaimExists mirrors the ledger probe an unknown-fate submit is
+// reconciled against: it answers for every identity the fake ever opened a
+// claim under, whether or not that claim is still open.
+func (a *fakeApplier) TurnClaimExists(_ string, turnID string) (bool, error) {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	if a.turnClaimExistsErr != nil {
+		return false, a.turnClaimExistsErr
+	}
+	for key := range a.starts {
+		if strings.HasPrefix(key, turnID+":") {
+			return true, nil
+		}
+	}
+	for _, active := range a.turns {
+		if active == turnID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // SynthesizeTurnClose ends every active claim, exactly as the SSM's does, and

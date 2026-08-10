@@ -1128,6 +1128,57 @@ func TestSettledTurnStartRedeliveryVerdict(t *testing.T) {
 	}
 }
 
+// TurnClaimExists is the evidence an unknown-fate submit is reconciled
+// against, so it must answer for a turn that has already FINISHED as readily
+// as for one still running.
+func TestTurnClaimExistsAnswersForEveryClaimState(t *testing.T) {
+	tests := []struct {
+		name   string
+		turnID string
+		end    bool
+		want   bool
+	}{
+		{name: "the claim is still open", turnID: "turn-probe", end: false, want: true},
+		{name: "the claim is already closed", turnID: "turn-probe", end: true, want: true},
+		{name: "no claim was ever opened", turnID: "turn-absent", end: false, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			m := openTurnClaimManager(t, filepath.Join(t.TempDir(), "state.db"))
+			resolveTurnClaim(t, m, turnClaimEvent(true, 10, "turn-probe"))
+			if tc.end {
+				resolveTurnClaim(t, m, turnClaimEvent(false, 20, "turn-probe"))
+			}
+
+			// Act.
+			got, err := m.TurnClaimExists("ws", tc.turnID)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("TurnClaimExists err = %v, want nil", err)
+			}
+			if got != tc.want {
+				t.Fatalf("TurnClaimExists(%q) = %v, want %v", tc.turnID, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTurnClaimExistsRefusesAnIncompleteIdentity(t *testing.T) {
+	// Arrange.
+	m := openTurnClaimManager(t, filepath.Join(t.TempDir(), "state.db"))
+
+	// Act.
+	_, err := m.TurnClaimExists("ws", "")
+
+	// Assert: an empty identity matches every legacy claim, so answering it
+	// would report a landed submit for a prompt nothing was keyed by.
+	if err == nil || !strings.Contains(err.Error(), "requires workspace and turn id") {
+		t.Fatalf("TurnClaimExists err = %v, want the incomplete identity refused", err)
+	}
+}
+
 func TestConflictingTurnStartCarriesTheTurnScopedSentinel(t *testing.T) {
 	// Arrange: a turn whose claim is still OPEN.
 	m := openTurnClaimManager(t, filepath.Join(t.TempDir(), "state.db"))

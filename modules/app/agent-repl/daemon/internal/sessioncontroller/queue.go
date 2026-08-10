@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -11,6 +12,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/registry"
+	"claude-repld/internal/shimclient"
 )
 
 // queueEntry is one prompt the daemon is holding because the session's turn
@@ -73,6 +75,17 @@ type queueEntry struct {
 	// prompt is actually delivered or cancelled, or a second crash in the
 	// window would lose the very prompt the row exists to save.
 	drainRowPending bool
+
+	// unknownFate marks an entry whose LAST delivery attempt timed out on the
+	// shim's control ack rather than being refused.
+	//
+	// A timeout is not a failure: the shim may have taken the prompt and started
+	// its turn while the ack was still in flight. Redelivering such an entry
+	// blindly resubmits its turn identity, and a second `TurnStarted` under one
+	// identity is the duplicate that used to sever the session on every resume.
+	// So the flag survives the requeue and the next delivery reconciles against
+	// the durable ledger before submitting anything.
+	unknownFate bool
 
 	// keepAliveHoldTurnID names the in-flight cache keep-alive turn holding
 	// this entry, and is empty for every ordinary entry.
@@ -1100,6 +1113,12 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 		m.publish(d.sessionID, view, recs)
 		return
 	}
+	// THE UNKNOWN-FATE RECONCILIATION, ahead of every submit and not merely
+	// ahead of the retry that motivated it: an entry whose last attempt timed
+	// out may already be running under this very identity.
+	if e.unknownFate && m.settleUnknownFateDelivery(d, e) {
+		return
+	}
 	err := m.forwardPrompt(m.rootCtx, d, e.requestID, e.text, e.promptOrigin.String(), e.permissionMode, e.promptOrigin, submitterUser)
 	if err == nil {
 		m.mu.Lock()
@@ -1115,10 +1134,16 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 		}
 		return
 	}
-	m.logf("session-controller: queue delivery FAILED entry=%s session=%s ws=%q: %v (prompt requeued)",
-		e.id, d.sessionID, d.workspace, err)
+	unknownFate := errors.Is(err, shimclient.ErrAckTimeout)
+	m.logf("session-controller: queue delivery FAILED entry=%s session=%s ws=%q unknown_fate=%v: %v (prompt requeued)",
+		e.id, d.sessionID, d.workspace, unknownFate, err)
+	if unknownFate {
+		m.logf("session-controller: queue delivery UNKNOWN FATE entry=%s session=%s ws=%q turn_id=%q — the control request timed out, so the shim may hold this prompt already; the entry keeps its identity and the NEXT delivery reconciles it against the durable turn ledger before submitting anything",
+			e.id, d.sessionID, d.workspace, e.requestID)
+	}
 
 	m.mu.Lock()
+	e.unknownFate = e.unknownFate || unknownFate
 	e.interjecting = false
 	e.classification = VerdictError
 	e.rationale = fmt.Sprintf("delivery failed: %v", err)
@@ -1131,6 +1156,61 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
 	m.publish(d.sessionID, view, recs)
+}
+
+// settleUnknownFateDelivery reconciles an entry whose last delivery timed out
+// against the durable turn ledger, and reports whether the delivery is FINISHED
+// without a submit.
+//
+// A timed-out control request has an unknown fate by definition: the shim may
+// have taken the prompt and started its turn while the ack was still in flight.
+// The queue used to redeliver on the timeout alone, which resubmitted the same
+// turn identity — and a second `TurnStarted` under one identity was fatal to the
+// session, permanently, because the duplicate is durable in the vendor stream
+// and every resume replayed it.
+//
+// The ledger is the authority the reconciliation asks, and it is asked HERE
+// rather than at the moment of the timeout because the answer is only settled
+// once the shim's own stream has caught up. Delivery happens on a turn boundary
+// off that same ordered stream, so by this line the ledger already knows about
+// anything the shim produced before it.
+func (m *Manager) settleUnknownFateDelivery(d *sessionController, e *queueEntry) bool {
+	landed, err := m.cfg.SSM.TurnClaimExists(d.workspace, e.requestID)
+	if err != nil {
+		// UNPROVABLE IS NOT ABSENT. With the ledger unreadable there is no
+		// evidence that the prompt did NOT land, and submitting on no evidence
+		// is exactly the mint this path exists to prevent. The prompt keeps its
+		// place, says why, and gets another chance at the next boundary.
+		m.mu.Lock()
+		e.classification = VerdictError
+		e.rationale = fmt.Sprintf("unknown-fate reconciliation failed: %v", err)
+		d.pausedRunner = false
+		d.queue.pushFront(e)
+		view, recs := m.publishQueueLocked(d)
+		m.mu.Unlock()
+		m.errorf("session-controller: queue delivery WITHHELD entry=%s session=%s ws=%q turn_id=%q: reconciling an unknown-fate submit against the durable turn ledger failed: %v — the prompt is NOT resubmitted, because a redelivery that cannot rule out a landed submit is what mints a duplicate turn identity",
+			e.id, d.sessionID, d.workspace, e.requestID, err)
+		m.publish(d.sessionID, view, recs)
+		return true
+	}
+	if !landed {
+		m.logf("session-controller: queue delivery RECONCILED entry=%s session=%s ws=%q turn_id=%q verdict=absent — the ledger opened no claim under this identity, so the timed-out submit never landed and the redelivery may reuse it",
+			e.id, d.sessionID, d.workspace, e.requestID)
+		return false
+	}
+	m.mu.Lock()
+	e.unknownFate = false
+	d.pausedRunner = false
+	if e.drainRowPending {
+		e.drainRowPending = false
+		defer m.releaseDrainRow(e.id, "delivered")
+	}
+	view, recs := m.publishQueueLocked(d)
+	m.mu.Unlock()
+	m.logf("session-controller: queue delivery SETTLED WITHOUT RESUBMIT entry=%s session=%s ws=%q turn_id=%q verdict=landed — the ledger holds a claim under this identity, so the timed-out submit did reach the shim; the entry leaves the queue instead of minting a duplicate turn start",
+		e.id, d.sessionID, d.workspace, e.requestID)
+	m.publish(d.sessionID, view, recs)
+	return true
 }
 
 // classify runs the injected classifier for one entry and applies the verdict.

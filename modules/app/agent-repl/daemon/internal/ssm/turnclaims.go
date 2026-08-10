@@ -1138,6 +1138,48 @@ func (m *Manager) ActiveTurnIDs(workspace, claimantSessionID string) ([]string, 
 	return activeTurnIDs(m.db, workspace, claimantSessionID)
 }
 
+// TurnClaimExists answers whether the ledger holds ANY claim for one turn
+// identity in a workspace, open or closed.
+//
+// It is the reconciliation a caller owes an UNKNOWN-FATE submit. A control
+// request that times out has not failed: the shim may have taken the prompt and
+// started its turn while the ack was still in flight. Resubmitting that same
+// identity on the strength of the timeout alone is what MINTED the duplicate
+// turn starts that used to sever sessions, so the caller asks the ledger first
+// and a claim under the identity is proof the submit landed.
+//
+// The lookup is workspace-wide on purpose. A claimant session id is re-minted
+// by hibernate, revive and reopen while claims stay keyed to whichever claimant
+// opened them, so scoping the question to the CURRENT claimant would answer
+// "no claim" for a turn this very workspace is running.
+func (m *Manager) TurnClaimExists(workspace, turnID string) (bool, error) {
+	if workspace == "" || turnID == "" {
+		err := fmt.Errorf("ssm: probing a turn claim requires workspace and turn id")
+		m.logf("ssm: turn ledger decision=reject_validation operation=turn_claim_exists workspace=%q turn_id=%q error=%v",
+			workspace, turnID, err)
+		return false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var one int
+	err := m.db.QueryRow(`SELECT 1 FROM turn_lifecycle_claim
+		WHERE workspace=? AND turn_id=? LIMIT 1`, workspace, turnID).Scan(&one)
+	switch {
+	case err == sql.ErrNoRows:
+		m.logf("ssm: turn ledger decision=probe_absent operation=turn_claim_exists workspace=%s turn_id=%q — no claim was ever opened under this identity",
+			workspace, turnID)
+		return false, nil
+	case err != nil:
+		readErr := fmt.Errorf("ssm: probe turn claim %q: %w", turnID, err)
+		m.logf("ssm: turn ledger decision=probe_unreadable operation=turn_claim_exists workspace=%s turn_id=%q error=%v",
+			workspace, turnID, readErr)
+		return false, readErr
+	}
+	m.logf("ssm: turn ledger decision=probe_present operation=turn_claim_exists workspace=%s turn_id=%q — a claim exists under this identity",
+		workspace, turnID)
+	return true, nil
+}
+
 func activeTurnIDs(q interface {
 	Query(query string, args ...any) (*sql.Rows, error)
 }, workspace, claimantSessionID string) ([]string, error) {
