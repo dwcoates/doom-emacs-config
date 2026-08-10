@@ -196,6 +196,36 @@ func legacyConnectivityProjectionTop(db *sql.DB, workspace string) (string, erro
 //
 // Phase B's reattach sweep re-wires the working set; until then every restored
 // workspace is honestly asleep.
+//
+// # The hibernate-then-revive flicker, and why it is not fixed here
+//
+// A frontend that connects inside the boot window reads this answer and then
+// reads `operational` moments later, once the boot sweep claims the surviving
+// shim — so an ordinary bounce shows every workspace going teal and back, and
+// teal is a state the user cannot interact through. "Probe first, publish once
+// per session with the settled state" is the obvious repair, and it is NOT
+// available within this vocabulary:
+//
+//   - The probe cannot precede this. The connected probe needs the shim
+//     listener, which is bound long after Open; the lock probe alone would
+//     answer "a shim is alive", but there is no state to write for it.
+//   - `connecting` is not that state. Every non-hibernated connectivity row is
+//     scoped to a CONTROLLER GENERATION (connectivity.go), and at Open no
+//     generation is live — writing one would claim a bring-up on a generation
+//     that is gone. It also has a side effect that is not cosmetic:
+//     `connecting` retires a workspace's `merged` axis
+//     (supersedeMergedAxisOnReopen), so writing it speculatively at boot would
+//     lose the merged state of every merged workspace on every restart.
+//   - Blocking readiness on the sweep is refused by design (bootsweep.go): a
+//     slow probe over a dozen workspaces must never look like a daemon that
+//     failed to start.
+//
+// What it actually needs is a generation-less "alive, not yet claimed" state —
+// a new `SessionConnectivity` arm, a new `frontend.v1` enum value, its entry in
+// the render-colors vocabulary, and a reading for it in the webapp and in
+// Emacs. That is a cross-system contract change rather than a change here, and
+// half of it landed in this file would be a boot that writes a state no
+// frontend can render.
 func (m *Manager) hibernateEveryWorkspaceLocked() error {
 	names, err := distinctWorkspaces(m.db)
 	if err != nil {
