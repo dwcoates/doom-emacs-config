@@ -26,6 +26,20 @@
  * drops. A snapshot that arrives because WE asked for it therefore fires
  * nothing.
  *
+ * # And it is BOUNDED, because the triggers no longer are
+ *
+ * Recovery became visibility-independent (background-recovery.ts), which is
+ * right — a hidden page must repair itself — but it removed the accidental
+ * bound WebKit's throttling used to supply. A heartbeat that re-arms a resync
+ * every few seconds, against a daemon that is slow to answer, produced a
+ * command queue 5,069 deep whose entries settled 420-550 SECONDS after they
+ * were sent, each unanswered one provoking the next. The bound is stated here
+ * instead, in the one place every resync passes through: ONE in flight at a
+ * time (a want-resync arriving mid-flight becomes a dirty flag spent on
+ * settle), exponential jittered backoff on failure, and a ceiling that raises
+ * the connection banner rather than spinning where nobody can see it. A fresh
+ * socket discharges all three.
+ *
  * # Why it waits for a workspace
  *
  * `Manager.Resync` looks the workspace up by exact key (the session cwd); an
@@ -48,10 +62,66 @@ export interface ResyncSnapshot {
   fence: string;
 }
 
+/**
+ * First retry delay after an unacked or refused resync.
+ *
+ * THE FLOOD THIS BOUNDS: the recovery heartbeat is visibility-independent, so
+ * a background page re-arms a resync every few seconds whether or not the last
+ * one was ever answered. With the daemon slow, each tick added another
+ * `ResyncCmd` to a queue that only grew — an observed depth of 5,069 with
+ * resyncs settling 420-550 SECONDS after they were sent, and every unacked one
+ * provoking the next. Bounding is the fix; re-gating on visibility is not,
+ * because a hidden page still has to recover.
+ */
+export const RESYNC_BACKOFF_BASE_MS = 2_000;
+
+/** Ceiling on the retry delay: a page far behind still rejoins within a minute. */
+export const RESYNC_BACKOFF_MAX_MS = 60_000;
+
+/**
+ * Consecutive failures after which this page stops asking and SAYS SO.
+ *
+ * Silent spinning is what made the flood invisible. At the ceiling the
+ * connection-lost banner goes back up with a retry affordance, so the state is
+ * a thing the user can see and act on rather than a queue nobody is watching.
+ */
+export const RESYNC_FAILURE_CEILING = 8;
+
+/**
+ * The delay owed before the nth consecutive retry: exponential from the base,
+ * capped, then jittered down by up to half so a fleet of pages that lost the
+ * same daemon does not re-ask in lockstep.
+ */
+export function resyncBackoffMs(consecutiveFailures: number, random: number): number {
+  const exponential = RESYNC_BACKOFF_BASE_MS * Math.pow(2, Math.max(0, consecutiveFailures - 1));
+  const capped = Math.min(exponential, RESYNC_BACKOFF_MAX_MS);
+  return Math.round(capped * (0.5 + 0.5 * random));
+}
+
 export interface ConnectResyncOptions {
-  /** Sends one ResyncCmd; rejects when the daemon nacks it. */
+  /**
+   * Sends one ResyncCmd. Resolves when the daemon ACKED it and rejects when it
+   * nacked it — this promise is the settle signal the single-in-flight rule is
+   * built on, so a dispatcher that resolves on ENQUEUE rather than on ack would
+   * defeat the bound.
+   */
   resync: (snapshot: ResyncSnapshot) => Promise<void>;
   log?: (level: ConnectResyncLogLevel, message: string) => void;
+  /** Monotonic-enough clock for the backoff gate; injectable for tests. */
+  now?: () => number;
+  /** Jitter source in [0,1); injectable for tests. */
+  random?: () => number;
+  /**
+   * The failure ceiling was reached: surface the connection-lost banner. The
+   * page asks nothing more until `retryNow()` or a fresh socket says otherwise.
+   */
+  onGiveUp?: (consecutiveFailures: number, cause: string) => void;
+  /**
+   * The request a coalesced want-resync should carry when the in-flight one
+   * settles. Read at the settle edge rather than remembered from the dispatch,
+   * so the catch-up asks from the mark this page has actually applied by then.
+   */
+  latestSnapshot?: () => ResyncSnapshot | null;
   /**
    * Re-read the LIVE identity after the daemon refused a resync for naming a
    * superseded one, returning the request to retry with — or null when this
@@ -89,8 +159,48 @@ export class ConnectResync {
    * @see observeDaemonIdentity for why the page holds one at all.
    */
   private daemonBootId: string | null = null;
+  /**
+   * A resync is SENT and has neither acked nor failed. Exactly one may be in
+   * flight at a time: the daemon answers a resync with a full StateSnapshot,
+   * so a second one asks for work the first is already doing.
+   */
+  private inFlight = false;
+  /** A want-resync arrived while one was in flight or while backing off. */
+  private dirty = false;
+  /** Consecutive terminal failures; reset by any ack and by a fresh socket. */
+  private failures = 0;
+  /** Wall-clock before which no resync may be dispatched. */
+  private nextAllowedAtMs = 0;
+  /** The ceiling was reached: asking is suspended until told otherwise. */
+  private givenUp = false;
 
   constructor(private readonly opts: ConnectResyncOptions) {}
+
+  /** Whether this page has stopped asking and raised the banner. */
+  get isGivenUp(): boolean {
+    return this.givenUp;
+  }
+
+  /** Whether a sent resync has yet to ack or fail. */
+  get isInFlight(): boolean {
+    return this.inFlight;
+  }
+
+  private now(): number {
+    return (this.opts.now ?? Date.now)();
+  }
+
+  /**
+   * The user asked to try again from the banner: forget the failure history
+   * and owe one resync immediately.
+   */
+  retryNow(): void {
+    this.givenUp = false;
+    this.failures = 0;
+    this.nextAllowedAtMs = 0;
+    this.rearm();
+    this.opts.log?.("info", "resync: retry requested from the connection banner");
+  }
 
   /** The daemon boot id this page is currently synchronized against. */
   get bootId(): string | null {
@@ -184,10 +294,24 @@ export class ConnectResync {
     this.snapshotSeen = true;
   }
 
-  /** A socket opened: this connection owes one resync. */
+  /**
+   * A socket opened: this connection owes one resync, ONCE, and immediately.
+   *
+   * A fresh socket is new evidence, not a retry: whatever refused or swallowed
+   * the last request belonged to the connection that is now gone, so the
+   * backoff and the failure count it accumulated are discharged here. Any
+   * request still marked in flight belonged to that dead socket and can never
+   * settle, so it is dropped rather than left blocking this connection's one
+   * resync forever.
+   */
   onConnect(): void {
     this.armed = true;
     this.snapshotSeen = false;
+    this.inFlight = false;
+    this.dirty = false;
+    this.failures = 0;
+    this.nextAllowedAtMs = 0;
+    this.givenUp = false;
   }
 
   /**
@@ -197,6 +321,10 @@ export class ConnectResync {
   onDisconnect(): void {
     this.armed = false;
     this.snapshotSeen = false;
+    // A request whose socket died cannot be acked or nacked by anyone. Holding
+    // it in flight would make the NEXT connection's resync coalesce into a
+    // settle that never comes.
+    this.inFlight = false;
   }
 
   /**
@@ -209,6 +337,34 @@ export class ConnectResync {
   observe(isSnapshot: boolean, snapshot: ResyncSnapshot): boolean {
     if (isSnapshot) this.snapshotSeen = true;
     if (!this.armed || !this.snapshotSeen || snapshot.workspace === "") return false;
+    // THE THREE BOUNDS, in the order that keeps the queue finite.
+    //
+    // Given up: the ceiling was reached and the banner says so. Asking anyway
+    // would be the silent spinning the banner exists to replace.
+    if (this.givenUp) return false;
+    // In flight: exactly one outstanding request. A want-resync arriving now
+    // is not dropped — it is remembered as dirty and spent when the in-flight
+    // one settles, so the catch-up it wanted still happens, once.
+    if (this.inFlight) {
+      this.dirty = true;
+      this.opts.log?.(
+        "info",
+        `resync: request already in flight ws=${snapshot.workspace} decision=coalesce`,
+      );
+      return false;
+    }
+    // Backing off: a failed resync owes a growing delay before the next one,
+    // so a daemon that cannot answer is asked less often rather than more.
+    const now = this.now();
+    if (now < this.nextAllowedAtMs) {
+      this.dirty = true;
+      this.opts.log?.(
+        "info",
+        `resync: backing off ws=${snapshot.workspace} failures=${this.failures} ` +
+          `retry_in_ms=${this.nextAllowedAtMs - now} decision=defer`,
+      );
+      return false;
+    }
     // Disarm BEFORE dispatching: the resync's own snapshot reply comes back
     // through this same path, and a trigger still armed when it lands would
     // ask again, forever.
@@ -239,40 +395,109 @@ export class ConnectResync {
    * rather than this end inventing one.
    */
   private send(snapshot: ResyncSnapshot, isRetry: boolean): void {
-    this.opts.resync(snapshot).catch((err: unknown) => {
-      const cause = String(err);
-      // A refused resync means this mount keeps whatever history it already
-      // had — say so loudly rather than leaving an empty feed unexplained.
+    this.inFlight = true;
+    this.opts.resync(snapshot).then(
+      () => this.settleAcked(),
+      (err: unknown) => this.settleRejected(snapshot, isRetry, err),
+    );
+  }
+
+  /**
+   * The daemon acked: the failure history is discharged, and a want-resync
+   * that arrived mid-flight is spent NOW rather than waiting for the next
+   * heartbeat, from the mark this page has applied by this moment.
+   */
+  private settleAcked(): void {
+    this.inFlight = false;
+    this.failures = 0;
+    this.nextAllowedAtMs = 0;
+    if (!this.dirty) return;
+    this.dirty = false;
+    const next = this.opts.latestSnapshot?.() ?? null;
+    if (next === null || next.workspace === "") {
+      // Nothing nameable to ask with: leave the arm to the ordinary triggers
+      // rather than inventing a request.
+      this.rearm();
+      return;
+    }
+    this.opts.log?.(
+      "info",
+      `resync: spending coalesced request ws=${next.workspace} from_seq=${next.fromSeq} decision=dispatch`,
+    );
+    this.send(next, false);
+  }
+
+  /**
+   * A terminal failure: charge it to the backoff, and at the ceiling stop and
+   * raise the banner instead of continuing to ask.
+   */
+  private settleFailed(cause: string): void {
+    this.inFlight = false;
+    this.failures += 1;
+    if (this.failures >= RESYNC_FAILURE_CEILING) {
+      this.givenUp = true;
+      this.armed = false;
+      this.dirty = false;
       this.opts.log?.(
         "error",
-        `resync request failed ws=${snapshot.workspace} fence=${snapshot.fence || "none"} ` +
-          `from_seq=${snapshot.fromSeq} decision=rejected cause=${cause}`,
+        `resync: giving up after ${this.failures} consecutive failures cause=${cause}; ` +
+          `surfacing the connection banner`,
       );
-      if (!isIdentityMismatch(cause)) return;
-      if (isRetry) {
-        this.rearm();
-        this.opts.log?.(
-          "warn",
-          `resync: adopted identity was itself superseded ws=${snapshot.workspace} ` +
-            `fence=${snapshot.fence || "none"}; re-armed for the next snapshot's identity`,
-        );
-        return;
-      }
-      const adopted = this.opts.adoptIdentity?.(cause) ?? null;
-      if (adopted === null || adopted.workspace === "") {
-        this.rearm();
-        this.opts.log?.(
-          "warn",
-          "resync: identity mismatch with no live identity to adopt yet; re-armed for the next snapshot",
-        );
-        return;
-      }
+      this.opts.onGiveUp?.(this.failures, cause);
+      return;
+    }
+    const delay = resyncBackoffMs(this.failures, (this.opts.random ?? Math.random)());
+    this.nextAllowedAtMs = this.now() + delay;
+    // Re-arm so the next trigger CAN retry — the backoff gate above, not the
+    // arm, is what decides when it actually goes out.
+    this.rearm();
+    this.opts.log?.(
+      "warn",
+      `resync: failed failures=${this.failures} retry_in_ms=${delay} cause=${cause}`,
+    );
+  }
+
+  private settleRejected(snapshot: ResyncSnapshot, isRetry: boolean, err: unknown): void {
+    const cause = String(err);
+    // A refused resync means this mount keeps whatever history it already
+    // had — say so loudly rather than leaving an empty feed unexplained.
+    this.opts.log?.(
+      "error",
+      `resync request failed ws=${snapshot.workspace} fence=${snapshot.fence || "none"} ` +
+        `from_seq=${snapshot.fromSeq} decision=rejected cause=${cause}`,
+    );
+    // EVERY TERMINAL REFUSAL IS CHARGED TO THE BACKOFF, identity mismatch
+    // included — a page that cannot name a live identity re-asks on the next
+    // snapshot, and without the charge that pair is its own flood.
+    if (!isIdentityMismatch(cause)) {
+      this.settleFailed(cause);
+      return;
+    }
+    if (isRetry) {
+      this.settleFailed(cause);
       this.opts.log?.(
         "warn",
-        `resync: identity mismatch; adopting live identity ws=${adopted.workspace} ` +
-          `fence=${adopted.fence || "none"} from_seq=${adopted.fromSeq} and retrying once`,
+        `resync: adopted identity was itself superseded ws=${snapshot.workspace} ` +
+          `fence=${snapshot.fence || "none"}; re-armed for the next snapshot's identity`,
       );
-      this.send(adopted, true);
-    });
+      return;
+    }
+    const adopted = this.opts.adoptIdentity?.(cause) ?? null;
+    if (adopted === null || adopted.workspace === "") {
+      this.settleFailed(cause);
+      this.opts.log?.(
+        "warn",
+        "resync: identity mismatch with no live identity to adopt yet; re-armed for the next snapshot",
+      );
+      return;
+    }
+    this.opts.log?.(
+      "warn",
+      `resync: identity mismatch; adopting live identity ws=${adopted.workspace} ` +
+        `fence=${adopted.fence || "none"} from_seq=${adopted.fromSeq} and retrying once`,
+    );
+    // The retry is the SAME in-flight request continuing, not a second one:
+    // send() re-marks it, and only its own settle discharges the flight.
+    this.send(adopted, true);
   }
 }
