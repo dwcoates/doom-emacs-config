@@ -5,7 +5,7 @@
  * so streaming updates do not rebuild the whole list.
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
-import { bubbleBreathStyle } from "./breathing.js";
+import { bubbleWaveStyle } from "./breathing.js";
 import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/agentshim/frontend/v1/slash-menu_pb";
 import { sessionCommandSpecs } from "../../proto/ts/schema-literals.js";
 import { STREAM_ITEM_CAP, parseJournal } from "./async-stream.js";
@@ -425,23 +425,24 @@ function Bubble(cls: string, body: string, ts: string, meta = "", style = ""): s
 /**
  * The prompt bubble.
  *
- * It breathes — a slow scale oscillation that says the DAEMON HAS THE PROMPT,
- * and nothing about the turn's state beyond that (the orange `working…` tail
- * row carries progress). A bubble this webapp minted for its own submit is
- * drawn the instant the user hits send and holds still until the daemon's
- * receipt supersedes it (`UserTurnItem.unacked`), so the breath starting IS
- * the acknowledgement rather than an ornament beside it.
+ * A soft shadow wave crosses its background left to right — saying the DAEMON
+ * HAS THE PROMPT, and nothing about the turn's state beyond that (the orange
+ * `working…` tail row carries progress). The bubble and its text hold one
+ * static size throughout. A bubble this webapp minted for its own submit is
+ * drawn the instant the user hits send and stays plain until the daemon's
+ * receipt supersedes it (`UserTurnItem.unacked`), so the wave starting IS the
+ * acknowledgement rather than an ornament beside it.
  *
  * The animation itself is the stylesheet's (`.bubble.user`); what this
  * function must supply is the PHASE. The feed rebuilds bubble markup
  * wholesale, and a fresh node restarts a CSS animation at 0%, so every rebuild
- * would snap the bubble back to the deflated end of the swing. The inline
- * negative `animation-delay` seeks the new node to where the page-global
- * breath already was, which makes a rebuild indistinguishable from a node that
- * was never replaced — and makes the unacked→acked swap, which rebuilds the
- * bubble, start the breath mid-swing with everything else on the page instead
- * of alone at 0%. This is the ONLY construction site of a `.bubble.user`, so
- * stamping it here covers every render path that produces one.
+ * would jump the wave back to the left edge. The inline negative
+ * `animation-delay` seeks the new node to where the page-global wave already
+ * was, which makes a rebuild indistinguishable from a node that was never
+ * replaced — and makes the unacked→acked swap, which rebuilds the bubble,
+ * start the wave mid-pass with everything else on the page instead of alone at
+ * 0%. This is the ONLY construction site of a `.bubble.user`, so stamping it
+ * here covers every render path that produces one.
  */
 function UserTurn(item: UserTurnItem, panels?: PanelContext): string {
   // A tools-only turn hosts its live async on its own prompt bubble (see
@@ -453,13 +454,13 @@ function UserTurn(item: UserTurnItem, panels?: PanelContext): string {
   // once: the class is what the stylesheet suppresses the animation with, and
   // seeking an animation that is not running would say nothing anyway.
   const ackCls = item.unacked === true ? " unacked" : "";
-  const breath = item.unacked === true ? "" : bubbleBreathStyle();
+  const wave = item.unacked === true ? "" : bubbleWaveStyle();
   const catalog = AsyncCatalog(item.requestId, panels);
   // The prompt is shown verbatim, EXCEPT for markdown fenced code blocks,
   // which render as the same highlighted card the agent's own fences get
   // (see renderPromptBody). A fence-free prompt keeps its plain <pre>.
   const body = `${renderPromptBody(userTurnText(item))}${catalog}`;
-  return Bubble(`bubble user${stateCls}${ackCls}`, body, item.ts, "", breath);
+  return Bubble(`bubble user${stateCls}${ackCls}`, body, item.ts, "", wave);
 }
 
 /** The fixed body of the Merge status card (see `MergeCard`). */
