@@ -1635,7 +1635,7 @@ describe("click-to-expand", () => {
 });
 
 // The shared N-line cap mechanic, and both bubbles' use of it.
-const sharedCap = blockAfter(css, "\n.bubble > .bubble-body {\n");
+const sharedCap = blockAfter(css, "\n.bubble > .bubble-body,\n");
 const capSelector = css.slice(
   css.indexOf(".tool-read-output, .bash-input"),
   css.indexOf("{", css.indexOf(".tool-read-output, .bash-input")),
@@ -1651,7 +1651,8 @@ describe("bubble height cap", () => {
     // Arrange / Act — one enormous prompt or answer must not push the rest of
     // the feed off screen, so the body stops at a fixed line budget.
     // Assert
-    expect(bubbleCapBudget).toMatch(/--cap-lines:\s*25/);
+    expect(bubbleCapBudget).toMatch(/--cap-lines:\s*var\(--feed-cap-lines\)/);
+    expect(blockAfter(css, ":root {")).toMatch(/--feed-cap-lines:\s*25/);
   });
 
   it("states that budget once for both speakers rather than per bubble", () => {
@@ -1659,7 +1660,7 @@ describe("bubble height cap", () => {
     // response's cap drift to different numbers.
     // Act / Assert
     expect(
-      css.match(/\.bubble[^{}\n]*>\s*\.bubble-body[^{}\n]*\{[^}]*--cap-lines:\s*\d/g),
+      css.match(/\.bubble[^{}\n]*>\s*\.bubble-body[^{}\n]*\{[^}]*--cap-lines:/g),
     ).toHaveLength(1);
   });
 
@@ -2395,22 +2396,34 @@ describe("activity fold", () => {
     expect(blockAfter(css, ".agent-panel {")).toMatch(/padding:\s*0\.5rem\s+0\.75rem/);
   });
 
-  it("caps the fixed panel at half the viewport, so it cannot swallow the feed", () => {
-    // Arrange / Act — the cap a teal card's always-open panel is read through.
-    // Assert
-    expect(blockAfter(css, `.${FIXED_FOLD_CLASS} > .agent-panel {`)).toMatch(/max-height:\s*50vh/);
+  it("caps the fixed panel at the very budget a bubble body stops at", () => {
+    // Arrange — "the same max height as response and prompt bubbles" is the
+    // requirement, so the panel takes the shared token rather than a number.
+    // Act / Assert
+    expect(blockAfter(css, `.${FIXED_FOLD_CLASS} > .agent-panel {`)).toMatch(
+      /--cap-lines:\s*var\(--feed-cap-lines\)/,
+    );
+  });
+
+  it("reuses the shared cap arithmetic rather than restating a max-height", () => {
+    // Arrange — a second `max-height: calc(...)` here is how the panel's cap
+    // and the bubble's cap drift apart.
+    const fixedPanel = blockAfter(css, `.${FIXED_FOLD_CLASS} > .agent-panel {`);
+    // Act / Assert
+    expect(capSelector).toContain(`.${FIXED_FOLD_CLASS} > .agent-panel`);
+    expect(fixedPanel).not.toMatch(/max-height:/);
   });
 
   it("scrolls the fixed panel's overflow rather than clipping it", () => {
     // Arrange / Act — scrolling in place is the ONLY way past the cap now
     // that the fold is gone, so the overflow must be reachable.
     // Assert
-    expect(blockAfter(css, `.${FIXED_FOLD_CLASS} > .agent-panel {`)).toMatch(/overflow-y:\s*auto/);
+    expect(sharedCap).toMatch(/overflow-y:\s*auto/);
   });
 
   it("shrinks the fixed panel to fit a body too short to fill the cap", () => {
-    // Arrange — `height: 50vh` would hold an empty box open under a
-    // two-line child feed; `max-height` is what makes it shrink to fit.
+    // Arrange — a `height` would hold an empty box open under a two-line
+    // child feed; `max-height` is what makes it shrink to fit.
     const fixedPanel = blockAfter(css, `.${FIXED_FOLD_CLASS} > .agent-panel {`);
     // Act / Assert
     expect(fixedPanel).not.toMatch(/\n\s*height:/);
