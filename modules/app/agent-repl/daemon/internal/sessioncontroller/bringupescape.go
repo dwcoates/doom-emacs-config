@@ -282,6 +282,12 @@ func (m *Manager) noteWired(workspace, sessionID string) {
 	// A bring-up that wired says the previous failures were transient, so the
 	// streak toward the give-up bound starts again from zero.
 	m.clearBringUpFailures(sessionID)
+	// THE LEVEL-TRIGGER FOR AN OWED RESUMPTION (turnresumption.go). This is the
+	// ONE point at which a session becomes driveable — every bring-up reaches
+	// it, a fresh spawn and a reattach alike — so it is where the store is asked
+	// what the last bounce interrupted. On its own goroutine because a bring-up
+	// must never block on a submit.
+	go m.driveOwedResumptions(workspace, sessionID)
 }
 
 // awaitDriveable waits for the bring-up to finish, one way or the other.
