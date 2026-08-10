@@ -113,6 +113,7 @@ import {
 import { StateAdapter, userTurnReceipt } from "./state-adapter.js";
 import { CommandDispatcher, ModelSelectionRejectedError, surfaceRefusal } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
+import { BackgroundRecovery, windowRecoveryTimerHost } from "./background-recovery.js";
 import { captureResyncSnapshot } from "./resync-snapshot.js";
 import type { CommandStruct, ReviveDecision } from "./frontend-command.js";
 import { PendingPermissionMode } from "./pending-mode.js";
@@ -339,6 +340,12 @@ async function boot(): Promise<void> {
   const connectResync = new ConnectResync({
     resync: (snapshot) => dispatcher.resync(snapshot.workspace, snapshot),
     log: (level, message) => clog(level, message),
+    // The live identity, RE-READ from the store at the retry edge. A page that
+    // outlived a daemon bounce can hold a superseded session/generation, whose
+    // every resync the daemon refuses with rejection_cause=identity_mismatch;
+    // re-capturing here is what makes the retry carry the identity the store
+    // has since been told is live rather than the one just refused.
+    adoptIdentity: () => currentResyncSnapshot(store.state.lastSeq),
   });
 
   // Close the diagnostics loop declared above: from here every forwarded line
@@ -1206,13 +1213,35 @@ async function boot(): Promise<void> {
    * resync, and asking over a socket that is not current would be a command
    * with nothing to carry it.
    */
+  /**
+   * The one repair path, driven by a heartbeat as well as by the view events
+   * below. Visibility and focus are still SIGNALS, but they are no longer the
+   * only ones: a hidden page whose daemon bounced used to hold its
+   * "reconnecting" banner until someone looked at it, because every trigger
+   * was a look. See background-recovery.ts.
+   */
+  const recovery = new BackgroundRecovery(
+    {
+      ensureConnected: () => {
+        (ws as WsClient | undefined)?.ensureConnected();
+      },
+      isCurrent: () => (ws as WsClient | undefined)?.state === "current",
+      resync: (reason) => {
+        connectResync.forceResync(reason);
+        connectResync.observe(false, currentResyncSnapshot(store.state.lastSeq));
+      },
+      clearConnectionBanner: () => {
+        if (store.addFailure(daemonReachableFailure(Date.now()))) frames.schedule();
+      },
+      log: (level, message) => clog(level, message),
+    },
+    windowRecoveryTimerHost(window),
+  );
+  recovery.start();
+
   const catchUpOnVisible = (reason: string): void => {
-    const client = ws as WsClient | undefined;
-    if (client === undefined) return;
-    client.ensureConnected();
-    if (client.state !== "current") return;
-    connectResync.forceResync(reason);
-    connectResync.observe(false, currentResyncSnapshot(store.state.lastSeq));
+    if ((ws as WsClient | undefined) === undefined) return;
+    recovery.recover(reason);
   };
 
   document.addEventListener("visibilitychange", () => {
@@ -1500,8 +1529,12 @@ async function boot(): Promise<void> {
       onUnreachable: (code, reason) => {
         if (store.addFailure(daemonUnreachableFailure(code, reason))) frames.schedule();
       },
+      // SOCKET RESTORE IS AN EVENT, NOT A PAINT, so the repair it triggers
+      // runs in a hidden page exactly as it does in a visible one: the banner
+      // is retracted and the history delta is asked for the moment the daemon
+      // is back, rather than when someone next looks.
       onReachable: () => {
-        if (store.addFailure(daemonReachableFailure(Date.now()))) frames.schedule();
+        recovery.recover("socket_restored");
       },
       // The session-existence probe and the terminal verdict it feeds belong to
       // a SESSION-ADDRESSED page: its address names one session, so that
