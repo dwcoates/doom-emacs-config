@@ -197,6 +197,16 @@ async function boot(): Promise<void> {
   // the daemon pushes — the daemon rules on which session a workspace owns, and
   // a rotation there re-reads through the same channel.
   let activeSessionId: string = address.kind === "session" ? address.sessionId : "";
+  // The vendor session uuid currently bound into the log context, so the
+  // reconcile after each ingest can tell a change from a restatement. It starts
+  // EMPTY on every load and is never seeded from a URL, a cache, or any
+  // storage: a page that has been told nothing knows nothing, and says so by
+  // sending no uuid at all.
+  let boundClaudeSessionId = "";
+  // The last uuid the daemon REFUSED a forwarded record for, so the reconcile
+  // does not put it straight back on. Cleared implicitly: any other value the
+  // store reports binds normally, because the disagreement was about this one.
+  let refusedClaudeSessionId = "";
   let ws: WsClient;
 
   // What runs only once the page knows WHICH session it targets, and again on
@@ -299,6 +309,19 @@ async function boot(): Promise<void> {
     // the daemon refused is a real failure of the diagnostics channel, not a
     // quiet failure. The forward itself still happened and still failed loudly.
     logLocal: (message) => log("error", message, { operation: "webapp.client-log-rejected", localOnly: true }),
+    // BELT AND BRACES on the identity stamp. The gated read above is what keeps
+    // a dead session's uuid off this page in the first place; this is what
+    // happens if one gets on anyway. A refused record means the daemon's
+    // registry disagrees with the uuid the record carried, so the page drops
+    // the stamp — the next record goes out with no uuid and is filed under the
+    // daemon's own identity — and REMEMBERS the refused value so the reconcile
+    // after the next ingest does not immediately restore it. A uuid the store
+    // later reports as something else rebinds normally.
+    onClientLogRefused: () => {
+      refusedClaudeSessionId = boundClaudeSessionId;
+      boundClaudeSessionId = "";
+      bindLogContext({ claude_session_id: "" });
+    },
     // A refused command lands as a failure card IN THE FEED (F4). Before
     // this it reached a human through nothing at all: the ack's text went to
     // a local log and the promise it rejected was swallowed by every caller,
@@ -1579,7 +1602,12 @@ async function boot(): Promise<void> {
         // space's items and marks are dropped BEFORE the new space's items land,
         // or those items would rank above the history they follow and the feed
         // would draw the clear at the top of a conversation it discarded.
-        const verdict = sessionRebase.observe(claudeSessionIdOf(effects));
+        // The uuid is read only off the OWNING session's view — the store's
+        // pre-ingest owner is the fallback the batch's own WorkspaceState
+        // overrides. See `claudeSessionIdOf`: a snapshot's session catalog
+        // carries retired sessions, and an ungated scan of it is how this page
+        // used to adopt a dead session's uuid at boot.
+        const verdict = sessionRebase.observe(claudeSessionIdOf(effects, store.state.sessionId));
         if (verdict === "rotated") {
           // The retired conversation's blocks are not this one's: drop every
           // reveal cursor so a reused block id cannot inherit a shown length.
@@ -1636,7 +1664,9 @@ async function boot(): Promise<void> {
           // reset with it and has no retired seq space to rebase.
           sessionRebase.forget();
           if (store.state.claudeSessionId !== "") sessionRebase.observe(store.state.claudeSessionId);
-          bindLogContext({ claude_session_id: store.state.claudeSessionId });
+          // The log context is NOT bound here: the reconcile at the end of this
+          // batch binds it off the store, which is the same value and the only
+          // authority for it.
           sessionIdentity.announce();
         }
         // THE REVIVAL VERDICT, ruled on against the batch the store just took.
@@ -1747,12 +1777,26 @@ async function boot(): Promise<void> {
         // Read AFTER ingest so the snapshot's own SessionView has supplied the
         // workspace key the daemon routes a resync by.
         connectResync.observe(isSnapshot, currentResyncSnapshot(store.state.lastSeq));
-        // Logging context, re-fed from the SessionView plane. A first adoption
-        // and a rotation both re-bind it: the attribution on every log record
-        // must name the conversation that is live RIGHT NOW, which is exactly
-        // why the uuid is read from the pushed plane and never stored.
-        if (verdict !== "unchanged") {
-          bindLogContext({ claude_session_id: sessionRebase.claudeSessionId });
+        // Logging context, RECONCILED against the store on every batch. The
+        // attribution on every log record must name the conversation that is
+        // live RIGHT NOW, and the store's gated value is the one authority for
+        // that: it adopts a uuid only from a view the workspace's own
+        // WorkspaceState says it owns, and retires it the moment the workspace
+        // rotates. Binding off anything else — a rebase verdict alone, a
+        // remembered value — gives this page a second opinion about its own
+        // identity, and a second opinion is exactly what stamped every
+        // forwarded record with a dead session's uuid.
+        //
+        // An empty value UNBINDS the field (`restampRecordIdentity` drops it),
+        // which is the correct disposition for an unknown identity: the daemon
+        // files an unstamped record under its own registry identity, where a
+        // guessed stamp is refused outright.
+        if (
+          store.state.claudeSessionId !== boundClaudeSessionId &&
+          store.state.claudeSessionId !== refusedClaudeSessionId
+        ) {
+          boundClaudeSessionId = store.state.claudeSessionId;
+          bindLogContext({ claude_session_id: boundClaudeSessionId });
         }
         // The rebased view's history was just discarded (rebaseSeqSpace, above),
         // and the new space's items may have been pushed before this end learned

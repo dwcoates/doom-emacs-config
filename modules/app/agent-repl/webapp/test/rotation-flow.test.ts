@@ -78,7 +78,7 @@ function client(): Client {
     const effects = adapter.apply(decodeFrontendFrame(frameJson));
     // main.ts: the retired space's items and marks go BEFORE the new space's
     // items land, so those items rank in the space they belong to.
-    const verdict = rebase.observe(claudeSessionIdOf(effects));
+    const verdict = rebase.observe(claudeSessionIdOf(effects, store.state.sessionId));
     if (verdict === "rotated") store.rebaseSeqSpace();
     store.ingest(effects);
     // main.ts: and the replay is asked for AFTER, when the workspace is known.
@@ -166,6 +166,10 @@ function client(): Client {
 /** A client that has drawn a long conversation under uuid-a. */
 function drawnConversation(): Client {
   const c = client();
+  // The daemon's ruling on which session the workspace owns comes FIRST, as it
+  // does on the wire: a page reads a vendor uuid only off the owning session's
+  // view, so a view with no ruling behind it announces nothing.
+  c.workspaceState("f1");
   c.announce("uuid-a");
   c.delta([answerItem("a1", "the retired conversation")], 1060);
   return c;

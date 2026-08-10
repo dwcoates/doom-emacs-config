@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
 
 import { SessionRebase, claudeSessionIdOf, type SessionRebaseLogLevel } from "../src/session-rebase.js";
-import type { AdapterEffect, SessionViewInput } from "../src/state-adapter.js";
+import type { AdapterEffect, SessionViewInput, WorkspaceStatusInput } from "../src/state-adapter.js";
 
 /** A `session-view` effect announcing (or withholding) a vendor session uuid. */
-function sessionView(claudeSessionId: string): AdapterEffect {
+function sessionView(claudeSessionId: string, sessionId = "s1"): AdapterEffect {
   const value: SessionViewInput = {
     workspace: "/ws",
-    sessionId: "s1",
+    sessionId,
     model: "",
     slug: "",
     title: "",
@@ -22,6 +22,29 @@ function sessionView(claudeSessionId: string): AdapterEffect {
     models: [],
   };
   return { kind: "session-view", value };
+}
+
+/** A `workspace-state` effect: the daemon's ruling on the owning session. */
+function workspaceState(sessionId: string): AdapterEffect {
+  const value: WorkspaceStatusInput = {
+    workspace: "/ws",
+    sessionId,
+    fence: "f1",
+    state: "ready",
+    turnActive: false,
+    liveTaskCount: 0,
+    causeKind: "test",
+    causeSeq: 1,
+    atMs: 1,
+    connectivity: "operational",
+    sessionStatus: "ready",
+    controllerGenerationId: "g1",
+    activeFaults: [],
+    mergeLeaseHeld: false,
+    mergeStatus: null,
+    mergeDequeueOffer: null,
+  };
+  return { kind: "workspace-state", value };
 }
 
 interface Harness {
@@ -110,11 +133,11 @@ describe("SessionRebase", () => {
 });
 
 describe("claudeSessionIdOf", () => {
-  it("reads the uuid a session-view effect announces", () => {
+  it("reads the uuid the owning session's view announces", () => {
     // Arrange
     const effects = [sessionView("uuid-a")];
     // Act
-    const id = claudeSessionIdOf(effects);
+    const id = claudeSessionIdOf(effects, "s1");
     // Assert
     expect(id).toBe("uuid-a");
   });
@@ -123,7 +146,7 @@ describe("claudeSessionIdOf", () => {
     // Arrange — a conversation-only frame says nothing about identity.
     const effects: AdapterEffect[] = [{ kind: "ignored", shape: "whatever" }];
     // Act
-    const id = claudeSessionIdOf(effects);
+    const id = claudeSessionIdOf(effects, "s1");
     // Assert
     expect(id).toBe("");
   });
@@ -132,8 +155,48 @@ describe("claudeSessionIdOf", () => {
     // Arrange — an empty announcement must not mask the real one beside it.
     const effects = [sessionView("uuid-a"), sessionView("")];
     // Act
-    const id = claudeSessionIdOf(effects);
+    const id = claudeSessionIdOf(effects, "s1");
     // Assert
     expect(id).toBe("uuid-a");
+  });
+
+  it("ignores a retired session's view in a snapshot catalog", () => {
+    // Arrange — a snapshot fans out one view per session the daemon holds for
+    // the workspace, retired ones included, and the dead one sorts last.
+    const effects = [sessionView("uuid-live"), sessionView("uuid-dead", "s-dead")];
+    // Act
+    const id = claudeSessionIdOf(effects, "s1");
+    // Assert
+    expect(id).toBe("uuid-live");
+  });
+
+  it("takes the owner from the batch's own workspace ruling", () => {
+    // Arrange — a cold snapshot: the store has ruled on nothing yet, and the
+    // WorkspaceState in this very batch names the session the workspace owns.
+    const effects = [workspaceState("s-live"), sessionView("uuid-dead", "s-dead"), sessionView("uuid-live", "s-live")];
+    // Act
+    const id = claudeSessionIdOf(effects, "");
+    // Assert
+    expect(id).toBe("uuid-live");
+  });
+
+  it("announces nothing when no ruling names an owner", () => {
+    // Arrange — views with no WorkspaceState behind them and no owner held:
+    // nothing can be shown to describe this workspace.
+    const effects = [sessionView("uuid-dead", "s-dead")];
+    // Act
+    const id = claudeSessionIdOf(effects, "");
+    // Assert
+    expect(id).toBe("");
+  });
+
+  it("drops a uuid announced before a rotation in the same batch", () => {
+    // Arrange — the view belongs to the session the workspace stops owning
+    // three effects later.
+    const effects = [sessionView("uuid-old"), workspaceState("s-new")];
+    // Act
+    const id = claudeSessionIdOf(effects, "s1");
+    // Assert
+    expect(id).toBe("");
   });
 });
