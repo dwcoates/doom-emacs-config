@@ -49,6 +49,9 @@ import {
   REVIVE_ATTR,
   reviveDecisionFromAttr,
   hibernateRefusedNotice,
+  HIBERNATION_SINCE_CLASS,
+  revivalGateSignature,
+  revivalSinceText,
   hibernationBlocked,
   hibernationBlockedLog,
   hibernationNoticeHtml,
@@ -60,6 +63,7 @@ import {
   reviveRefusedLog,
   type RevivePending,
 } from "./hibernation.js";
+import { HtmlSlot } from "./html-slot.js";
 import { mergeStatusLogValue } from "./merge-status.js";
 import {
   DEQUEUE_ATTR,
@@ -557,6 +561,19 @@ async function boot(): Promise<void> {
   const drainBannerEl = must("drain-banner");
   const revivalGateEl = must("revival-gate");
   const mergeDequeueEl = must("merge-dequeue");
+  // THE SLOTS THE CHROME REPAINTS FROM STATE, each written only when its
+  // markup actually changed (html-slot.ts). The guard is not an optimization:
+  // a slot carrying buttons that is rewritten on an unrelated frame destroys
+  // the node a press is mid-way through, and the browser then fires no click
+  // at all. The pickers below kept the same guard hand-rolled as an
+  // `innerHTML !== next` compare, which read the live tree back on every
+  // frame; they share this one now.
+  const infoSlot = new HtmlSlot(infoEl);
+  const ungatedBannerSlot = new HtmlSlot(ungatedBannerEl);
+  const drainBannerSlot = new HtmlSlot(drainBannerEl);
+  const mergeDequeueSlot = new HtmlSlot(mergeDequeueEl);
+  const modelSlot = new HtmlSlot(modelEl);
+  const modeSlot = new HtmlSlot(modeEl);
   const hibernateEl = must<HTMLButtonElement>("hibernate-btn");
   /**
    * The revival decision this page has SENT and the daemon has not yet
@@ -650,6 +667,8 @@ async function boot(): Promise<void> {
   });
 
   let lastFooterStateSignature = "";
+  /** The gate state the card standing in `#revival-gate` was built from. */
+  let lastRevivalGateSignature = "";
   const renderChrome = (): void => {
     const s = store.state;
     // THE HEADER IS THE DAEMON'S RESOLVED VIEW NOW. The title, the session
@@ -665,8 +684,12 @@ async function boot(): Promise<void> {
     // resolution. The daemon and this webapp deploy together, so the views
     // arrive as soon as the daemon does.
     const ws = s.cwd;
-    infoEl.innerHTML =
-      topbarViewHtml(store.topbar(ws)) + tokensDisclosureHtml(store.tokenBreakdown(ws), tokensMenuOpen);
+    // Through the same guard as the gate and the dequeue card below: the strip
+    // carries the tokens chip, so an unconditional rewrite would destroy it
+    // mid-press and the browser would fire no click at all.
+    infoSlot.paint(
+      topbarViewHtml(store.topbar(ws)) + tokensDisclosureHtml(store.tokenBreakdown(ws), tokensMenuOpen),
+    );
     // The idle-with-live-async signal breathes as the sidebar's amber dot on
     // this session's own row rather than as strip text. The flag is the feed
     // renderer's own gate reading (idle + live async), read back here so the
@@ -750,8 +773,7 @@ async function boot(): Promise<void> {
     // Rebuilt only when the menu or the selection actually moved: this runs
     // on EVERY frame, and blowing the options away mid-turn would slam shut
     // a dropdown the user had open.
-    const nextOptions = modelOptionsHtml(s.models, s.model);
-    if (modelEl.innerHTML !== nextOptions) modelEl.innerHTML = nextOptions;
+    modelSlot.paint(modelOptionsHtml(s.models, s.model));
     // A held permission-mode pick keeps the picker on the user's choice until
     // the daemon reports that mode in force, at which point the pick is spent.
     const wantMode = pendingMode.settle(s.permissionMode);
@@ -761,8 +783,7 @@ async function boot(): Promise<void> {
     // the live mode as a disabled option instead, so the picker always names
     // what is actually running.
     const liveOption = unswitchableModeOptionHtml(switchableModes, wantMode);
-    const nextModeOptions = baseModeOptions + liveOption;
-    if (modeEl.innerHTML !== nextModeOptions) modeEl.innerHTML = nextModeOptions;
+    modeSlot.paint(baseModeOptions + liveOption);
     if (modeEl.value !== wantMode) modeEl.value = wantMode;
     // THE ungated-session surface: a session whose mode shadows canUseTool in
     // the fail-open direction has no daemon permission gate at all, so it gets
@@ -777,14 +798,14 @@ async function boot(): Promise<void> {
       requestedMode: s.permissionMode,
       systemInit: s.systemInit,
     });
-    ungatedBannerEl.innerHTML = ungatedBannerHtml(ungatedMode);
+    ungatedBannerSlot.paint(ungatedBannerHtml(ungatedMode));
     document.body.classList.toggle("ungated", ungatedMode !== "");
     // THE DRAIN LEASE (drain.ts): a daemon-global banner, repainted on the
     // chrome cadence so its elapsed clock advances with every frame and so a
     // cancelled or completed drain takes it down the moment the daemon says
     // `idle`. Read straight off the adopted lease — the webapp derives no
     // drain fact of its own.
-    drainBannerEl.innerHTML = drainBannerHtml(s.shutdownSchedule, Date.now());
+    drainBannerSlot.paint(drainBannerHtml(s.shutdownSchedule, Date.now()));
     document.body.classList.toggle(DRAINING_BODY_CLASS, s.shutdownSchedule !== null);
     // THE MERGE GATE (merge-gate.ts). Both halves are pure functions of the
     // revisioned `WorkspaceState` lease, repainted on the chrome cadence, so
@@ -803,7 +824,7 @@ async function boot(): Promise<void> {
       // it would have been drawn in is gone.
       reviveFailure = "";
     }
-    revivalGateEl.innerHTML = revivalGateHtml({
+    const gateState = {
       hibernation: s.hibernation,
       // The SAME standing figure the topbar chip prints, read from the one
       // store field the daemon feeds `SessionView.total_tokens` into — so the
@@ -811,14 +832,34 @@ async function boot(): Promise<void> {
       // shown a few pixels above it.
       contextTokens: s.contextTokens,
       pending: revivePending,
-      now: Date.now(),
       failure: reviveFailure,
-    });
-    // THE CARD IS THE PUSHED OFFER, redrawn every frame. Nothing here decides
-    // whether it should be up: the daemon clears the offer when the question is
-    // answered, superseded, or made moot by the merge ending on its own, and
-    // each of those arrives as the same field going away.
-    mergeDequeueEl.innerHTML = mergeDequeueCardHtml(s.mergeDequeueOffer);
+    };
+    // THE CARD IS REBUILT ONLY WHEN ITS STATE MOVED, on the same signature
+    // discipline as the footer log above. Rebuilding it every frame — which is
+    // what this did — destroyed whichever button the user was mid-press on
+    // whenever a frame landed between the mousedown and the mouseup, and the
+    // browser then fired no click at all: the gate read as needing two
+    // presses. The buttons' nodes now survive every frame that is not a real
+    // state change.
+    const gateSignature = revivalGateSignature(gateState);
+    if (gateSignature !== lastRevivalGateSignature) {
+      lastRevivalGateSignature = gateSignature;
+      revivalGateEl.innerHTML = revivalGateHtml({ ...gateState, now: Date.now() });
+    } else if (s.hibernation !== null) {
+      // THE AGE IS THE ONE THING THAT MOVES WITHOUT THE STATE MOVING, so it is
+      // written as text into the standing card rather than by rebuilding the
+      // card around it. Folding the clock into the signature would make it
+      // differ on every frame and guard nothing.
+      const since = revivalGateEl.querySelector(`.${HIBERNATION_SINCE_CLASS}`);
+      if (since !== null) since.textContent = revivalSinceText(s.hibernation, Date.now());
+    }
+    // THE CARD IS THE PUSHED OFFER, painted from the offer alone. Nothing here
+    // decides whether it should be up: the daemon clears the offer when the
+    // question is answered, superseded, or made moot by the merge ending on
+    // its own, and each of those arrives as the same field going away. Its
+    // slot skips the write when the markup is unchanged, because its two
+    // buttons must outlive a frame that changed something else.
+    mergeDequeueSlot.paint(mergeDequeueCardHtml(s.mergeDequeueOffer));
     document.body.classList.toggle(HIBERNATED_BODY_CLASS, s.hibernation !== null);
     // The sleep verb is offered only on an awake session: there is nothing to
     // hibernate on one already asleep, and the gate above is what that session
