@@ -1992,6 +1992,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--async-gh
     agent-repl--signal-process
     agent-repl--frontend-run-build-script
+    agent-repl--frontend-spawn-build-script
     agent-repl--frontend-run-listener-probe
     agent-repl--frontend-artifact-exists-p
     agent-repl--frontend-spawn-daemon

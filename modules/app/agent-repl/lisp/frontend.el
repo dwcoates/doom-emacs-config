@@ -81,6 +81,7 @@
 (declare-function agent-repl--gui-running-p "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--gui-durable-session-id "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--gui-adopt-session "agent-repl-frontend-client" (ws claude-session-id on-success on-failure))
+(declare-function agent-repl--frontend-build-targets-async "agent-repl-daemon" (targets &optional force on-success on-failure))
 (defvar agent-repl-input-height-fraction)
 (declare-function xwidget-webkit--create-new-session-buffer "xwidget" (url &optional callback))
 (declare-function xwidget-webkit-current-session "xwidget" ())
@@ -322,6 +323,21 @@ close-panel, workspace nuke), so the prompt is suppressed — left in
 place it deadlocks non-interactive callers like the nuke hook."
   (let ((kill-buffer-query-functions nil))
     (kill-buffer buf)))
+
+(defun agent-repl--frontend-detach-webview (ws buf)
+  "Kill webview BUF and clear WS\='s binding to it, in that order.
+The two halves are ONE act: `agent-repl--frontend-ensure-webview-buffer'
+reuses whatever `:frontend-buffer' names, so a kill that left the key set
+would hand a dead buffer to the next mount, and a cleared key over a live
+buffer would leak a WKWebView holding an open WebSocket.  Every site that
+takes a workspace\='s webview down for a later remount — close-panel, the
+bundle remount, the restart verb\='s bounce — goes through here so neither
+half can be forgotten at one of them.
+
+The nuke path deliberately does NOT: tombstoning nils the plist keys
+itself, and the put would resurrect the record."
+  (agent-repl--frontend-kill-webview buf)
+  (agent-repl--ws-put ws :frontend-buffer nil))
 
 ;;;; ---- Refreshing live webviews ----------------------------------------------
 
@@ -1054,8 +1070,7 @@ current bundle anyway.  Returns the new buffer when a remount happened."
          ws
          (lambda ()
            (let ((url (agent-repl--frontend-webview-url ws)))
-             (agent-repl--frontend-kill-webview buf)
-             (agent-repl--ws-put ws :frontend-buffer nil)
+             (agent-repl--frontend-detach-webview ws buf)
              (let ((new (agent-repl--frontend-ensure-webview-buffer ws url)))
                (agent-repl--log ws "remount-webview: reloaded bundle ws=%s" ws)
                (when (window-live-p win) (set-window-buffer win new)))))
@@ -1171,6 +1186,52 @@ webview open at all, matching `agent-repl-frontend-reload-webview'."
            (list (agent-repl--frontend-webview-host uri))
            :detail (format "stray-uri=%s" uri)))))))
 
+;;;; ---- Webapp rebuild + webview redeploy -------------------------------------
+
+(defconst agent-repl--frontend-webapp-build-targets '("webapp")
+  "The `bin/build-frontend.sh' targets a webview redeploy needs.
+The webapp ALONE.  The daemon serves the bundle off disk and is not
+rebuilt or restarted by this path, and the shim is replaced by the
+session restart that runs beside it.")
+
+(defun agent-repl--frontend-bounce-webview (ws)
+  "Close WS\='s webview and open it again on the freshly built bundle.
+The webview URL carries the webapp\='s build id, so a page reopened after
+a rebuild addresses the new artifact and cannot serve the old bundle out
+of cache.  Runs the ordinary close and open primitives
+\(`agent-repl--frontend-detach-webview' then `agent-repl--gui-open'),
+which is exactly what `agent-repl-frontend-close-panel' and
+`agent-repl-frontend-open-panel' do.
+
+A no-op returning nil when WS has no live webview: a panel the user
+closed stays closed, and its next open mounts the current bundle anyway.
+Returns the workspace when a bounce happened."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+    (if (not (buffer-live-p buf))
+        (progn
+          (agent-repl--log ws "bounce-webview: skipped=no-live-webview")
+          nil)
+      (agent-repl--log ws "bounce-webview: closing buf=%s" (buffer-name buf))
+      (agent-repl--frontend-detach-webview ws buf)
+      (agent-repl--gui-open ws)
+      (agent-repl--log ws "bounce-webview: reopened on the fresh build id")
+      ws)))
+
+(defun agent-repl--frontend-rebuild-and-redeploy-webapp (ws)
+  "Rebuild the webapp in the background, bouncing WS\='s webview on success.
+Returns the asynchronous build outcome (`started', `queued' or
+`coalesced'), so the caller never blocks on the build.  A failed build
+leaves the webview alone on the bundle it already has, after the failure
+has been surfaced through the shared build reporting and warned about
+against WS."
+  (agent-repl--frontend-build-targets-async
+   agent-repl--frontend-webapp-build-targets nil
+   (lambda () (agent-repl--frontend-bounce-webview ws))
+   (lambda (detail)
+     (agent-repl--warn
+      ws "restart-session: webapp rebuild FAILED, webview left on the old bundle: %s"
+      detail))))
+
 ;;;###autoload
 (defun agent-repl-restart-session ()
   "HARD-RESTART the current workspace\='s session: new shim, same conversation.
@@ -1179,6 +1240,17 @@ Stops whatever shim is serving the workspace -- including one that
 outlived a previous daemon, which this daemon never spawned and could not
 otherwise reach -- then brings the SAME session record back up, so the
 respawn resumes the same vendor conversation and nothing is lost.
+
+ALSO REBUILDS AND REDEPLOYS THE WEBAPP.  The frontend half of a workspace
+goes stale exactly as the shim half does, so this verb refreshes both:
+the webapp is rebuilt if stale in the BACKGROUND (the shim restart flies
+in parallel rather than waiting on it) and, when that build succeeds, the
+workspace\='s webview is bounced -- closed and reopened -- so the fresh
+page carries the new build id.  A build already in flight is not stacked;
+the request queues behind it.  A FAILED build is surfaced loudly and
+leaves the webview on the bundle it already has; the shim restart having
+already proceeded is fine and deliberate.  Neither the daemon nor its
+binary is rebuilt or restarted here.
 
 This is a PROCESS restart, not a new conversation.  Reach for it when the
 shim is wedged, when it survived a deploy and is running superseded code,
@@ -1191,17 +1263,21 @@ from here.  A blank conversation exists only where the daemon can prove the
 workspace never had one.
 
 A workspace whose session is merely hibernated or severed is brought up,
-because a
-restart and a start are the same request when nothing is running.  Signals when there
-is no current workspace; a daemon-side failure is surfaced loudly through
-the shared command-ack handler rather than read as success."
+because a restart and a start are the same request when nothing is
+running.  Signals when there is no current workspace; a daemon-side
+failure is surfaced loudly through the shared command-ack handler rather
+than read as success."
   (interactive)
   (let ((ws (agent-repl--ws-current-name)))
     (unless ws
       (user-error "agent-repl: no current workspace"))
     (agent-repl--log ws "restart-session: begin")
+    ;; Kicked off FIRST and asynchronously, so the shim restart below is
+    ;; issued while the webapp builds rather than behind it.
+    (agent-repl--frontend-rebuild-and-redeploy-webapp ws)
     (agent-repl--frontend-restart-session ws)
-    (agent-repl--user-message ws "restarting the session for %s..." (list ws))))
+    (agent-repl--user-message
+     ws "restarting the session for %s (webapp rebuilding)..." (list ws))))
 
 ;;;###autoload
 (defun agent-repl-hibernate-workspace ()
@@ -1358,8 +1434,7 @@ workspace nuke path (`agent-repl-ws-del-hook')."
       (agent-repl--log ws "close-panel: rejected=no-live-webview")
       (user-error "agent-repl: no webview open for workspace %s" ws))
     (agent-repl--log ws "close-panel: killing buf=%s" (buffer-name buf))
-    (agent-repl--frontend-kill-webview buf)
-    (agent-repl--ws-put ws :frontend-buffer nil)
+    (agent-repl--frontend-detach-webview ws buf)
     (agent-repl--user-message ws "webview closed (session kept)" nil)))
 
 ;;;; ---- Workspace teardown -----------------------------------------------------
