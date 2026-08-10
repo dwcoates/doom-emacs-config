@@ -540,20 +540,39 @@ type consumer struct {
 	// onTurnResultCost reports what one turn's terminal result measured, named
 	// by the turn the accounting reducer just attributed that result to.
 	//
-	// IT MATTERS FOR EXACTLY THREE KINDS OF TURN, and ONE reduction serves all
-	// three so they can never disagree about one result. A keep-alive ping is a
-	// dozen tokens of prompt, so a ping that paid for the whole conversation is
-	// the cache's absence MEASURED rather than predicted, and that measurement
-	// is what puts the session to sleep (keepalivecold.go). A DAEMON-INITIATED
+	// IT MATTERS FOR EXACTLY TWO KINDS OF TURN, and ONE reduction serves both so
+	// they can never disagree about one result. A keep-alive ping is a dozen
+	// tokens of prompt, so a ping that paid for the whole conversation is the
+	// cache's absence MEASURED rather than predicted, and that measurement is
+	// what puts the session to sleep (keepalivecold.go). A DAEMON-INITIATED
 	// COMPACTION that paid the same way is a pure cost defect and trips the
-	// cold-read alarm (compactioncold.go). And every turn's TOTAL input is the
-	// figure the warm-compaction size floor is judged against (warmcompact.go).
-	// Every other turn's cost is a cost report and is rendered as one by the
-	// progress footer.
+	// cold-read alarm (compactioncold.go). Every other turn's cost is a cost
+	// report and is rendered as one by the progress footer.
+	//
+	// THE CONVERSATION'S SIZE IS NOT ONE OF THEM, and used to be. A result's
+	// usage sums every model call the turn made, so it measures the turn's work
+	// and not the context's occupancy; onMainAgentContextSize carries the size
+	// instead, off evidence that can answer that question.
 	//
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
 	onTurnResultCost func(cost turnResultCost)
+	// onMainAgentContextSize reports how big the standing conversation is, as of
+	// one LIVE main-agent response's own Messages-API usage.
+	//
+	// It fires per response rather than per turn because that is the granularity
+	// the question has an answer at: one request's input buckets name exactly the
+	// prompt that request presented, and the latest of them is the occupancy
+	// right now. The warm-compaction size floor is the only reader
+	// (warmcompact.go, contextsize.go).
+	//
+	// HISTORICAL RECORDS ARE NOT DELIVERED. A replayed transcript row describes
+	// how big the conversation was at some past instant, and handing that to a
+	// floor judging the present would compact against history.
+	//
+	// Called on the shim read-loop goroutine, with the same non-blocking
+	// obligation onTurn carries.
+	onMainAgentContextSize func(record *frontendv1.TokenUtilization)
 	// compactedWaiter reports that a compaction COMPLETED — the compacting
 	// axis closing, which is the only first-class report the vendor gives.
 	// A compact-first revival waits on it before it will accept prompts.
@@ -677,7 +696,7 @@ type consumer struct {
 	// shim's `TurnEnded` arriving after the enrichment already settled the
 	// stamp — the quiet no-op it should be, without weakening the loud
 	// retired-turn report that a genuine collision still takes. Guarded by mu.
-	settledStamps          map[string]struct{}
+	settledStamps map[string]struct{}
 	// announcedTurnEnds names every turn whose END this consumer has already
 	// announced to the daemon's own turn machinery — the queue's drain, the
 	// keep-alive claim, the idle clock. The vendor's terminal result and the
@@ -692,7 +711,7 @@ type consumer struct {
 	// it from the vendor's result would record it as a turn that ended of its
 	// own accord. The stop's own path closes it instead, so the ledger keeps
 	// saying the shim was stopped over a live turn.
-	stoppedTurns *turnLatch
+	stoppedTurns           *turnLatch
 	replayedAccounting     map[string]*frontendv1.TurnAccounting
 	replayedResponses      map[string]*frontendv1.TokenUtilization
 	completedTerminalBySeq map[uint64]*frontendv1.TurnAccounting
@@ -1656,6 +1675,15 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 		historicalInserted = inserted
 		usage := utilization.GetUsage()
 		c.logf("session-controller: historical token utilization persisted session=%s seq=%d api_message_id=%s inserted=%t input_tokens=%d output_tokens=%d cache_read_input_tokens=%d cache_creation_input_tokens=%d root_turn_id=absent response_timing=absent", c.sessionID, ev.GetSeq(), utilization.GetApiMessageId(), inserted, usage.GetInputTokens(), usage.GetOutputTokens(), usage.GetCacheReadInputTokens(), usage.GetCacheCreationInputTokens())
+	}
+	// HOW BIG THE CONVERSATION IS RIGHT NOW, taken from the same record the
+	// ledger just accepted rather than measured again from the raw event: one
+	// reduction, one identity, one set of invariants already enforced above.
+	//
+	// LIVE ONLY. The historical arm above persists replayed rows describing a
+	// past instant, and the warm-compaction floor judges the present.
+	if observation != nil && !observation.historical && c.onMainAgentContextSize != nil {
+		c.onMainAgentContextSize(utilization)
 	}
 	c.retain(ev)
 	c.observeVendorSessionID(ev)
