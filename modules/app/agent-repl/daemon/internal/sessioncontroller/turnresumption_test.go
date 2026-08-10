@@ -53,7 +53,7 @@ func TestABounceInterruptingALiveTurnRecordsAResumption(t *testing.T) {
 	client := &stubInterrupter{outcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED}
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", client)
+	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", client, nil)
 
 	// Assert.
 	owed := receipts.owedResumptions("ws")
@@ -73,7 +73,7 @@ func TestTheResumptionIsRecordedBeforeTheInterruptIsDelivered(t *testing.T) {
 	client := &stubInterrupter{outcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED}
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", client)
+	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", client, nil)
 
 	// Assert.
 	calls := receipts.callLog()
@@ -91,7 +91,7 @@ func TestAScheduledDrainOwesAResumptionToo(t *testing.T) {
 	m, _, receipts, _ := newResumptionRig(t)
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseDrainExecution(), "t-1", &stubInterrupter{})
+	m.drainLiveTurnForStop("ws", "s1", StopCauseDrainExecution(), "t-1", &stubInterrupter{}, nil)
 
 	// Assert.
 	if len(receipts.owedResumptions("ws")) != 1 {
@@ -104,7 +104,7 @@ func TestAHardRestartOwesAResumption(t *testing.T) {
 	m, _, receipts, _ := newResumptionRig(t)
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseHardRestartLive(), "t-1", &stubInterrupter{})
+	m.drainLiveTurnForStop("ws", "s1", StopCauseHardRestartLive(), "t-1", &stubInterrupter{}, nil)
 
 	// Assert.
 	if len(receipts.owedResumptions("ws")) != 1 {
@@ -118,7 +118,7 @@ func TestAnIdleSweepOwesNoResumption(t *testing.T) {
 	m, _, receipts, cl := newResumptionRig(t)
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseHibernateIdleSweep(), "t-1", &stubInterrupter{})
+	m.drainLiveTurnForStop("ws", "s1", StopCauseHibernateIdleSweep(), "t-1", &stubInterrupter{}, nil)
 
 	// Assert.
 	if len(receipts.owedResumptions("ws")) != 0 {
@@ -134,7 +134,7 @@ func TestAUserForcedHibernationOwesNoResumption(t *testing.T) {
 	m, _, receipts, _ := newResumptionRig(t)
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseHibernateForced(), "t-1", &stubInterrupter{})
+	m.drainLiveTurnForStop("ws", "s1", StopCauseHibernateForced(), "t-1", &stubInterrupter{}, nil)
 
 	// Assert.
 	if len(receipts.owedResumptions("ws")) != 0 {
@@ -147,7 +147,7 @@ func TestAMergedTeardownOwesNoResumption(t *testing.T) {
 	m, _, receipts, _ := newResumptionRig(t)
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseMergedTeardown(), "t-1", &stubInterrupter{})
+	m.drainLiveTurnForStop("ws", "s1", StopCauseMergedTeardown(), "t-1", &stubInterrupter{}, nil)
 
 	// Assert.
 	if len(receipts.owedResumptions("ws")) != 0 {
@@ -162,7 +162,7 @@ func TestASupersededRecordOwesNoResumptionEvenUnderABounceCause(t *testing.T) {
 	m, _, receipts, _ := newResumptionRig(t)
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown().supersededRecord(), "t-1", &stubInterrupter{})
+	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown().supersededRecord(), "t-1", &stubInterrupter{}, nil)
 
 	// Assert.
 	if len(receipts.owedResumptions("ws")) != 0 {
@@ -177,7 +177,7 @@ func TestAnIdleWorkspaceRecordsNoResumptionUnderABounce(t *testing.T) {
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_DONE})
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "", &stubInterrupter{})
+	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "", &stubInterrupter{}, nil)
 
 	// Assert.
 	if len(receipts.owedResumptions("ws")) != 0 {
@@ -193,7 +193,7 @@ func TestAnUnnameableTurnStillRecordsAResumption(t *testing.T) {
 	m, _, receipts, _ := newResumptionRig(t)
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "", &stubInterrupter{})
+	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "", &stubInterrupter{}, nil)
 
 	// Assert.
 	owed := receipts.owedResumptions("ws")
@@ -211,8 +211,8 @@ func TestTwoTeardownsOfTheSameTurnOweOneResumption(t *testing.T) {
 	m, _, receipts, _ := newResumptionRig(t)
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", &stubInterrupter{})
-	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", &stubInterrupter{})
+	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", &stubInterrupter{}, nil)
+	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", &stubInterrupter{}, nil)
 
 	// Assert.
 	if owed := receipts.owedResumptions("ws"); len(owed) != 1 {
@@ -229,7 +229,7 @@ func TestATeardownThatCannotRecordItsResumptionStillTearsDownLoudly(t *testing.T
 	client := &stubInterrupter{outcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED}
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", client)
+	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", client, nil)
 
 	// Assert.
 	if client.calls != 1 {
@@ -247,7 +247,7 @@ func TestABounceWithNoReceiptStoreSaysTheTurnWillNotBeReDriven(t *testing.T) {
 	applier.setCurrent("ws", thinkingState())
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", &stubInterrupter{})
+	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", &stubInterrupter{}, nil)
 
 	// Assert.
 	if !cl.contains("teardown turn resumption NOT RECORDED") {
@@ -270,7 +270,7 @@ func TestTheResumptionInstructionDoesNotRestateTheUsersPrompt(t *testing.T) {
 	m, _, receipts, _ := newResumptionRig(t)
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", &stubInterrupter{})
+	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", &stubInterrupter{}, nil)
 
 	// Assert.
 	owed := receipts.owedResumptions("ws")
@@ -288,7 +288,7 @@ func TestAResumptionRequestIDIsMarkedInternal(t *testing.T) {
 	m, _, receipts, _ := newResumptionRig(t)
 
 	// Act.
-	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", &stubInterrupter{})
+	m.drainLiveTurnForStop("ws", "s1", StopCauseDaemonShutdown(), "t-1", &stubInterrupter{}, nil)
 
 	// Assert.
 	owed := receipts.owedResumptions("ws")

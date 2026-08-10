@@ -95,6 +95,17 @@ func (c *consumer) settleTurnOnTerminalResult(turnID string, ev *corev1.Event) {
 // the claims, paints the axis and hands the re-derived state to the frontends
 // that are already drawing the old one.
 func (c *consumer) settleTurnStateOnTerminalResult(turnID string, ev *corev1.Event) {
+	// A DISPLACED TURN IS NOT A FINISHED ONE. A teardown that is about to take
+	// this shim away interrupts the turn first, and the result that interrupt
+	// provokes is the SDK unwinding rather than the turn arriving at its own
+	// end. Settling from it would record a turn the daemon stopped as one that
+	// finished, over a resumption the successor daemon owes the user
+	// (turnresumption.go). The stop's own path closes the claim.
+	if c.turnStopInFlight(turnID) {
+		c.logf("session-controller: terminal result turn-state settlement DECLINED session=%s ws=%s turn_id=%s seq=%d decision=stop_in_flight — a teardown is stopping this shim over this turn, so the stop's own close attributes it rather than the result the interrupt provoked",
+			c.sessionID, c.workspace, turnID, ev.GetSeq())
+		return
+	}
 	settled, err := c.ssm.SettleTurnFromTerminalResult(c.workspace, c.sessionID, c.push.PushWorkspaceState)
 	if err != nil {
 		c.warn("session-controller: terminal result turn-state settlement FAILED session=%s ws=%s turn_id=%s seq=%d cause=%s: %v — the turn's result is published, but its durable claim may outlive it until the shim's own `TurnEnded` arrives",
