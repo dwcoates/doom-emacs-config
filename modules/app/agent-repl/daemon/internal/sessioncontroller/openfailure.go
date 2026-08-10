@@ -61,7 +61,9 @@ func (m *Manager) RecordOpenFailure(workspace string, err error) {
 		if errors.Is(err, errclass.ErrResumeTargetVanished) {
 			// NOT a fresh failure: the vanished-resume fence (vanishedresume.go)
 			// already carded this session's terminal refusal once, loudly, at the
-			// bring-up that established it. Every open attempt against a fenced
+			// bring-up that established it — and, since that card is PERSISTED,
+			// the account stands for every later reader too rather than only for
+			// whoever was connected at that instant. Every open attempt against a fenced
 			// session refuses BEFORE any controller exists, so it lands here on
 			// every retry — an open never stops being retried by its caller — and
 			// logging each arrival at ERROR would repeat one already-reported fact
