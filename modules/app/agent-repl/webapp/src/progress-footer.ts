@@ -27,7 +27,7 @@
  */
 import { AGENTS_SPEC, agentsToggleHtml, sessionSubagents } from "./agents.js";
 import { BreathState, BreathingTicker, breathColor } from "./breathing.js";
-import { CounterEntry, CounterSpec, isActive } from "./counter-menu.js";
+import { CounterEntry, CounterSpec, activeEntries, isActive } from "./counter-menu.js";
 import { formatCountdown, formatElapsed } from "./duration.js";
 import { PROMPT_ORIGIN_CACHE_KEEP_ALIVE } from "./frontend-proto.js";
 import { escapeHtml } from "./highlight.js";
@@ -97,11 +97,16 @@ export interface FooterAgentRow extends CounterEntry {
 }
 
 /**
- * The session's subagents as expanded-footer rows.
+ * The session's LIVE subagents as expanded-footer rows.
  *
  * The roster itself is `sessionSubagents`' — this adds only the two figures the
- * expanded footer shows beside it, so the chip's count and these rows can never
- * disagree about which agents exist.
+ * expanded footer shows beside it.
+ *
+ * A CONCLUDED SUBAGENT IS NOT A ROW. The narrowing happens HERE, once, and the
+ * result is the only array the footer holds: the chip reports its length and
+ * the section renders its rows, so "3 agents" over four rows is not a bug the
+ * footer can have. A second filter downstream would be a second account of
+ * which agents are live, and the two could disagree.
  */
 export function footerAgentRows(
   items: readonly ConversationItem[],
@@ -111,7 +116,7 @@ export function footerAgentRows(
   for (const item of items) {
     if (item.kind === "tool") calls.set(item.toolUseId, item);
   }
-  return sessionSubagents(items).map((entry) => {
+  return activeEntries(sessionSubagents(items)).map((entry) => {
     const item = calls.get(entry.id);
     if (item === undefined) {
       throw new Error(`progress-footer: roster entry ${entry.id} names no tool call in the feed`);
@@ -1199,7 +1204,9 @@ export function footerClickAction(target: FooterClickTarget): FooterClick | null
 
 /** Whether either roster has anything to show (the cluster's own gate). */
 export function hasLiveCounters(input: FooterInput): boolean {
-  return input.agents.some(isActive) || input.tasks.some(isActive);
+  // The agent roster is ALREADY live-only (`footerAgentRows`), so its length is
+  // the whole question; the task roster still carries settled entries.
+  return input.agents.length > 0 || input.tasks.some(isActive);
 }
 
 /** The two counter specs the footer hosts, for the caller's reveal notices. */
