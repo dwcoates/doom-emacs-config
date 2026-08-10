@@ -291,6 +291,16 @@ describe("agentsToggleHtml", () => {
     expect(html).toContain("2 agents");
   });
 
+  it("counts every entry it is handed rather than filtering again", () => {
+    // Arrange — the caller passes the LIVE roster (`footerAgentRows`), so the
+    // chip's number is the number of rows the expanded footer draws.
+    const agents = [entry({ id: "t1" }), entry({ id: "t2" })];
+    // Act
+    const html = agentsToggleHtml(agents, false);
+    // Assert
+    expect(html).toContain("2 agents");
+  });
+
   it("drops no overlay of its own while the section it toggles is open", () => {
     // Arrange + Act — the roster it would list is the expanded footer's rows.
     const html = agentsToggleHtml([entry()], true);
