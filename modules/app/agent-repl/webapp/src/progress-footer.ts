@@ -31,6 +31,8 @@ import { CounterEntry, CounterSpec, activeEntries, isActive } from "./counter-me
 import { formatCountdown, formatElapsed } from "./duration.js";
 import { PROMPT_ORIGIN_CACHE_KEEP_ALIVE } from "./frontend-proto.js";
 import { escapeHtml } from "./highlight.js";
+import { LIVENESS_GAP_TEXT } from "./footer-liveness.js";
+import type { FooterInput, FooterLiveness, LivenessGap } from "./footer-liveness.js";
 import { mergeFacts } from "./merge-status.js";
 import type {
   InterruptInput,
@@ -125,48 +127,37 @@ export function footerAgentRows(
   });
 }
 
-/** Everything one footer render needs. */
-export interface FooterInput {
-  /** The daemon's resolved view, or null before the first one lands. */
-  progress: ProgressInput | null;
-  /**
-   * THE workspace's resolved phase (F5), read off the same `WorkspaceState` the
-   * Emacs tab bar and the sidebar dot read. `null` before the first one lands,
-   * which collapses the phase cell rather than naming a phase nothing resolved.
-   *
-   * It arrives here rather than on `progress` because a phase carried in two
-   * messages is a phase kept in two copies, and the stale copy is what read
-   * "starting" against an already-green tab.
-   */
-  renderState: WebRenderState | null;
-  /**
-   * THE structured merge status, or null when no merge run touches this
-   * workspace. It is the ONLY merge input the footer takes.
-   *
-   * It arrives on the SAME `WorkspaceState` as `renderState` for the reason
-   * that field's own note gives: a merge fact carried in a second message is a
-   * merge fact kept in two copies, and the stale copy is the one that reads
-   * "2/3" against an already-merged workspace. The flat queue pair that used to
-   * sit here was exactly that second copy, and it is retired.
-   */
-  mergeStatus: MergeStatus | null;
-  /**
-   * The session's subagent roster, relocated from the topbar. It carries the
-   * expanded footer's two extra figures (see `FooterAgentRow`); the counters
-   * cluster reads only the `CounterEntry` half.
-   */
-  agents: readonly FooterAgentRow[];
-  /** The session's task roster, relocated from the topbar. */
-  tasks: readonly CounterEntry[];
-  /**
-   * The feed's items, for the ONE thing the ProgressView does not carry: which
-   * tool is running right now and how long it has been going (the store banks
-   * that from the `HeartbeatView` relay).
-   */
-  items: readonly ConversationItem[];
-  /** The turn clock's current reading, baked in so a fresh render shows it. */
-  timerLabel: string;
-}
+/**
+ * Everything one footer render needs, AND the proof it was resolved from a
+ * currently live source.
+ *
+ * THE TYPE LIVES IN `footer-liveness.ts` AND IS BRANDED THERE. Nothing in this
+ * module — or any other — can construct one: the only expression in the program
+ * that mints a `FooterInput` is `resolveFooterLiveness`, which hands back the
+ * data-free `unknown` arm instead whenever the link is down, the workspace is
+ * unwired, or no view has landed. That is what makes "paint the last value we
+ * saw" unrepresentable here rather than merely avoided: every builder below
+ * takes a `FooterInput`, so a builder can only ever have been handed figures
+ * that were live when they were resolved.
+ *
+ * The fields it carries are unchanged, with one exception: `progress` is
+ * NON-NULLABLE, because an absent view is a liveness gap rather than a footer
+ * with a hole in it. Its other members keep their own reasons —
+ *
+ *   `renderState`   the workspace's ONE authoritative phase (F5), not a copy
+ *                   carried in a second message that could read "starting"
+ *                   against an already-green tab;
+ *   `mergeStatus`   the structured status off that same revisioned message,
+ *                   and the only merge input the footer takes;
+ *   `agents`        the subagent roster plus the two figures only the expanded
+ *                   footer reports beside it (see `FooterAgentRow`);
+ *   `tasks`         the session's task roster, relocated from the topbar;
+ *   `items`         the feed, for the ONE thing the ProgressView does not
+ *                   carry: which tool is running and for how long;
+ *   `timerLabel`    the turn clock's current reading, baked in so a fresh
+ *                   render shows it.
+ */
+export type { FooterInput, FooterParts } from "./footer-liveness.js";
 
 /** The phase word and accent class the footer's anchor cell wears. */
 export interface PhaseLabel {
@@ -451,7 +442,6 @@ export interface Activity {
  */
 export function activityDetail(input: FooterInput, nowMs: number): Activity | null {
   const p = input.progress;
-  if (p === null) return null;
   if (p.authenticating !== null) {
     return { text: authText(p.authenticating.detail), tone: "error" };
   }
@@ -770,12 +760,12 @@ export function countersHtml(input: FooterInput, open: FooterDisclosure): string
   const tasks = tasksMenuHtml(input.tasks, open.tasksOpen);
   if (tasks !== "") parts.push(tasks);
   const p = input.progress;
-  if (p !== null && p.queueDepth > 0) {
+  if (p.queueDepth > 0) {
     parts.push(
       `<span class="pfooter-badge queued" title="prompts the daemon is holding">${p.queueDepth} queued</span>`,
     );
   }
-  if (p !== null && p.pendingPermissions > 0) {
+  if (p.pendingPermissions > 0) {
     parts.push(
       `<span class="pfooter-badge perm" title="permission prompts waiting on you">${p.pendingPermissions} perm</span>`,
     );
@@ -847,7 +837,6 @@ function agentRowHtml(row: FooterAgentRow, nowMs: number): string {
  */
 export function sheetHtml(input: FooterInput, nowMs: number): string {
   const p = input.progress;
-  if (p === null) return "";
   const rows: string[] = [];
   // The TASK count, which is roster arithmetic rather than session status: it
   // says how many entries the tasks roster is carrying, and it is the one
@@ -920,7 +909,7 @@ function accountingFactHtml(fact: AccountingFact): string {
 function accountingPeekRows(input: FooterInput): string[] {
   const settled = latestTurnAccounting(input.items);
   if (settled !== null) return accountingFacts(settled).map(accountingFactHtml);
-  const daemon = input.progress?.accounting ?? null;
+  const daemon = input.progress.accounting;
   if (daemon !== null) {
     const phrases =
       daemon.verdict.kind === "incomplete"
@@ -1024,17 +1013,46 @@ export function mergeNoteRowHtml(status: MergeStatus | null): string {
 export const FOOTER_STRIP_ATTR = "data-pfooter-strip";
 
 /**
- * The whole dock. Returns "" before the daemon has resolved anything, so the
- * slot collapses rather than showing an empty chrome bar.
+ * The strip a footer with NO VERIFIABLE FIGURES shows: one muted cell naming
+ * the gap, and nothing else.
+ *
+ * It is a strip rather than a collapse because the reader is owed the reason:
+ * a dock that simply vanished when the socket dropped would be as silent about
+ * its silence as the old dock was about its staleness. Everything a live dock
+ * carries — the phase word, the activity, the clock, the token figure, the
+ * counters, the expanded footer's rows — is ABSENT, because every one of them
+ * is a claim about right now and nothing here can currently verify one.
+ */
+function unknownFooterHtml(gap: LivenessGap): string {
+  return (
+    `<div class="pfooter pfooter-unknown" role="status" aria-live="polite">` +
+    `<div class="pfooter-cells">` +
+    `<div class="pfooter-cell pfooter-grow muted">${escapeHtml(LIVENESS_GAP_TEXT[gap])}` +
+    `<div class="pfooter-grab" aria-hidden="true"></div></div>` +
+    `</div></div>`
+  );
+}
+
+/**
+ * The whole dock.
+ *
+ * IT TAKES THE RESOLUTION, NOT THE DATA. On the `unknown` arm there is no
+ * progress view, no roster and no clock reading in hand at all, so the cleared
+ * strip is not a branch this function chose to take — it is the only markup the
+ * arm can produce. `view-absent` collapses the slot entirely, since a workspace
+ * whose first view has not landed has no dock yet rather than a silent one.
  */
 export function footerHtml(
-  input: FooterInput,
+  liveness: FooterLiveness,
   open: FooterDisclosure,
   nowMs: number = Date.now(),
   breath: BreathState = { shade: 0, elapsedMs: 0 },
 ): string {
+  if (liveness.provenance === "unknown") {
+    return liveness.gap === "view-absent" ? "" : unknownFooterHtml(liveness.gap);
+  }
+  const input = liveness.live;
   const p = input.progress;
-  if (p === null) return "";
   const cells: string[] = [];
   // The phase cell is present only once a state has actually been resolved.
   // Before that there is no phase to name, and naming one anyway is exactly
@@ -1240,7 +1258,7 @@ export class ProgressFooter {
    * without a frame arriving. It is the SAME input the peek was opened over,
    * which is what makes the revert a redraw of the section as it was.
    */
-  private lastInput: FooterInput | null = null;
+  private lastInput: FooterLiveness | null = null;
 
   constructor(
     private readonly el: HTMLElement,
@@ -1252,13 +1270,15 @@ export class ProgressFooter {
   ) {}
 
   /** Rewrite the dock. Every value it interpolates is escaped in the builders. */
-  render(input: FooterInput): void {
+  render(liveness: FooterLiveness): void {
     // Step the color ramp FIRST, so this render paints the shade belonging to
-    // the view it is rendering rather than the previous one's.
-    this.breath.observe(input.progress);
+    // the view it is rendering rather than the previous one's. An unresolved
+    // render steps it with NO view, exactly as a viewless frame always did:
+    // the breath is a per-arrival channel, and a gap is the absence of one.
+    this.breath.observe(liveness.provenance === "live" ? liveness.live.progress : null);
     const now = this.now();
-    this.lastInput = input;
-    this.el.innerHTML = footerHtml(input, this.open, now, this.breath.state(now));
+    this.lastInput = liveness;
+    this.el.innerHTML = footerHtml(liveness, this.open, now, this.breath.state(now));
   }
 
   /**

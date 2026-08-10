@@ -6,6 +6,14 @@
 import { describe, expect, it } from "vitest";
 
 import { BREATH_SHADES, breathColor } from "../src/breathing.js";
+import type { BreathState } from "../src/breathing.js";
+import {
+  FooterLivenessLog,
+  LIVENESS_GAP_TEXT,
+  LIVENESS_LOG_INTERVAL_MS,
+  resolveFooterLiveness,
+} from "../src/footer-liveness.js";
+import type { FooterLiveness, FooterParts, LivenessGap } from "../src/footer-liveness.js";
 import { CounterEntry } from "../src/counter-menu.js";
 import {
   ACCOUNTING_PEEK_MS,
@@ -25,7 +33,7 @@ import {
   errorRowHtml,
   expensiveTurnRowHtml,
   footerClickAction,
-  footerHtml,
+  footerHtml as footerHtmlOf,
   hasLiveCounters,
   interruptChip,
   mergeNoteRowHtml,
@@ -87,18 +95,59 @@ function progress(over: Partial<ProgressInput> = {}): ProgressInput {
   };
 }
 
-/** A footer input, defaulted to the quiet idle session with no rosters. */
-function input(over: Partial<FooterInput> = {}): FooterInput {
-  return {
-    progress: progress(),
-    renderState: "idle",
-    mergeStatus: null,
-    agents: [],
-    tasks: [],
-    items: [],
-    timerLabel: "0:24",
-    ...over,
-  };
+/**
+ * A footer input, defaulted to the quiet idle session with no rosters.
+ *
+ * It goes through `resolveFooterLiveness` because that is the ONLY expression
+ * in the program that can mint a `FooterInput` — the brand is private to
+ * footer-liveness.ts — which is the same reason no renderer can fabricate one
+ * out of remembered values.
+ */
+function input(over: Partial<FooterParts> = {}): FooterInput {
+  const resolved = resolveFooterLiveness(
+    { linkUp: true, wired: true },
+    {
+      progress: progress(),
+      renderState: "idle",
+      mergeStatus: null,
+      agents: [],
+      tasks: [],
+      items: [],
+      timerLabel: "0:24",
+      ...over,
+    },
+  );
+  if (resolved.provenance !== "live") {
+    throw new Error(`fixture did not resolve live: ${resolved.gap}`);
+  }
+  return resolved.live;
+}
+
+/** Live figures as the dock's argument. */
+function shown(i: FooterInput): FooterLiveness {
+  return { provenance: "live", live: i };
+}
+
+/** The dock's markup for live figures — the pre-liveness `footerHtml` shape. */
+function footerHtml(
+  i: FooterInput,
+  open: FooterDisclosure,
+  nowMs?: number,
+  breath?: BreathState,
+): string {
+  return breath === undefined
+    ? footerHtmlOf(shown(i), open, nowMs)
+    : footerHtmlOf(shown(i), open, nowMs, breath);
+}
+
+/** The unresolved arm, for a footer that can verify nothing right now. */
+function gap(g: LivenessGap): FooterLiveness {
+  return { provenance: "unknown", gap: g };
+}
+
+/** Render live figures into a mounted dock. */
+function renderLive(footer: ProgressFooter, i: FooterInput): void {
+  footer.render(shown(i));
 }
 
 /** The footer's phase cell markup, or "" when the strip renders no phase. */
@@ -1759,7 +1808,7 @@ describe("footerHtml: the V4 segmented dock", () => {
 
   it("renders nothing before the daemon has resolved anything", () => {
     // Arrange / Act
-    const got = footerHtml(input({ progress: null }), CLOSED, NOW);
+    const got = footerHtmlOf(gap("view-absent"), CLOSED, NOW);
     // Assert
     expect(got).toBe("");
   });
@@ -1914,7 +1963,7 @@ describe("ProgressFooter", () => {
     const el = document.createElement("div");
     const footer = new ProgressFooter(el, () => NOW);
     // Act
-    footer.render(input());
+    renderLive(footer, input());
     // Assert
     expect(el.querySelector(".pfooter")).not.toBeNull();
   });
@@ -1924,7 +1973,7 @@ describe("ProgressFooter", () => {
     const el = document.createElement("div");
     const footer = new ProgressFooter(el, () => NOW);
     // Act
-    footer.render(input({ progress: null }));
+    footer.render(gap("view-absent"));
     // Assert
     expect(el.innerHTML).toBe("");
   });
@@ -1933,7 +1982,7 @@ describe("ProgressFooter", () => {
     // Arrange
     const el = document.createElement("div");
     const footer = new ProgressFooter(el, () => NOW);
-    footer.render(input({ progress: progress({ turnStartedAtMs: NOW - 1_000 }) }));
+    renderLive(footer, input({ progress: progress({ turnStartedAtMs: NOW - 1_000 }) }));
     const before = el.querySelector(".pfooter-phase")?.outerHTML;
     // Act
     footer.paintTurnTimer("1m 5s");
@@ -1942,14 +1991,77 @@ describe("ProgressFooter", () => {
     expect(el.querySelector(".pfooter-phase")?.outerHTML).toBe(before);
   });
 
+  it("clears the live-activity section when the link goes down", () => {
+    // Arrange — a monitoring workspace with a live task and a subagent row is
+    // exactly the footer that used to go on claiming both forever.
+    const el = document.createElement("div");
+    const footer = new ProgressFooter(el, () => NOW);
+    renderLive(
+      footer,
+      input({ renderState: "idle_async", progress: progress({ liveTaskCount: 1 }) }),
+    );
+    // Act
+    footer.render(gap("link-down"));
+    // Assert
+    expect(el.textContent).not.toContain("1 live task");
+  });
+
+  it("names the reason the section is empty rather than vanishing", () => {
+    // Arrange
+    const el = document.createElement("div");
+    const footer = new ProgressFooter(el, () => NOW);
+    // Act
+    footer.render(gap("link-down"));
+    // Assert
+    expect(el.textContent).toContain(LIVENESS_GAP_TEXT["link-down"]);
+  });
+
+  it("clears the phase word an unwired workspace can no longer verify", () => {
+    // Arrange — `severed` / `hibernated` reach the footer as this gap, and
+    // `monitoring` is a claim about now that nothing can currently support.
+    const el = document.createElement("div");
+    const footer = new ProgressFooter(el, () => NOW);
+    renderLive(footer, input({ renderState: "idle_async" }));
+    // Act
+    footer.render(gap("workspace-unwired"));
+    // Assert
+    expect(el.querySelector(".pfooter-phase")).toBeNull();
+  });
+
+  it("clears the subagent rows an unwired workspace can no longer verify", () => {
+    // Arrange
+    const el = document.createElement("div");
+    const footer = new ProgressFooter(el, () => NOW);
+    renderLive(footer, input({ agents: [agentRow()] }));
+    // Act
+    footer.render(gap("workspace-unwired"));
+    // Assert
+    expect(el.querySelector(".pfooter-agent-row")).toBeNull();
+  });
+
+  it("repopulates from the resolved view on reconnect, with no user action", () => {
+    // Arrange — the clearing is not a terminal state: the next resolved render
+    // is the whole of the recovery.
+    const el = document.createElement("div");
+    const footer = new ProgressFooter(el, () => NOW);
+    footer.render(gap("link-down"));
+    // Act
+    renderLive(
+      footer,
+      input({ renderState: "idle_async", progress: progress({ liveTaskCount: 1 }) }),
+    );
+    // Assert
+    expect(el.textContent).toContain("1 live task");
+  });
+
   it("advances the breath's color when a new progress view arrives", () => {
     // Arrange — a distinct ProgressInput object is exactly "the daemon sent
     // another one", which is the tick the color channel reports.
     const el = document.createElement("div");
     const footer = new ProgressFooter(el, () => NOW);
-    footer.render(input({ renderState: "thinking", progress: progress() }));
+    renderLive(footer, input({ renderState: "thinking", progress: progress() }));
     // Act
-    footer.render(input({ renderState: "thinking", progress: progress() }));
+    renderLive(footer, input({ renderState: "thinking", progress: progress() }));
     // Assert
     const style = el.querySelector(".pfooter-breath")?.getAttribute("style") ?? "";
     expect(style).toContain(`color:${breathColor(1)}`);
@@ -1961,9 +2073,9 @@ describe("ProgressFooter", () => {
     const el = document.createElement("div");
     const footer = new ProgressFooter(el, () => NOW);
     const view = progress();
-    footer.render(input({ renderState: "thinking", progress: view }));
+    renderLive(footer, input({ renderState: "thinking", progress: view }));
     // Act
-    footer.render(input({ renderState: "thinking", progress: view }));
+    renderLive(footer, input({ renderState: "thinking", progress: view }));
     // Assert
     const style = el.querySelector(".pfooter-breath")?.getAttribute("style") ?? "";
     expect(style).toContain(`color:${breathColor(0)}`);
@@ -1975,7 +2087,7 @@ describe("ProgressFooter", () => {
     const footer = new ProgressFooter(el, () => NOW);
     // Act — one adoption plus a full lap.
     for (let i = 0; i <= BREATH_SHADES; i += 1) {
-      footer.render(input({ renderState: "thinking", progress: progress() }));
+      renderLive(footer, input({ renderState: "thinking", progress: progress() }));
     }
     // Assert
     const style = el.querySelector(".pfooter-breath")?.getAttribute("style") ?? "";
@@ -1988,10 +2100,10 @@ describe("ProgressFooter", () => {
     const el = document.createElement("div");
     let now = NOW;
     const footer = new ProgressFooter(el, () => now);
-    footer.render(input({ renderState: "thinking", progress: progress() }));
+    renderLive(footer, input({ renderState: "thinking", progress: progress() }));
     // Act — a second view lands most of a breath later.
     now = NOW + 1_700;
-    footer.render(input({ renderState: "thinking", progress: progress() }));
+    renderLive(footer, input({ renderState: "thinking", progress: progress() }));
     // Assert — the delay seeks the fresh element to where the cycle already was.
     const style = el.querySelector(".pfooter-breath")?.getAttribute("style") ?? "";
     expect(style).toContain("animation-delay:-1700ms");
@@ -2002,9 +2114,9 @@ describe("ProgressFooter", () => {
     // keeps no bookkeeping that could outlive the frame it was told in.
     const el = document.createElement("div");
     const footer = new ProgressFooter(el, () => NOW);
-    footer.render(input({ progress: progress({ interrupt: { sinceMs: NOW, outcome: "failed" } }) }));
+    renderLive(footer, input({ progress: progress({ interrupt: { sinceMs: NOW, outcome: "failed" } }) }));
     // Act
-    footer.render(input({ progress: progress({ interrupt: null }) }));
+    renderLive(footer, input({ progress: progress({ interrupt: null }) }));
     // Assert
     expect(el.querySelector(".pfooter-interrupt")).toBeNull();
   });
@@ -2043,7 +2155,7 @@ describe("ProgressFooter", () => {
     const footer = new ProgressFooter(el, () => NOW);
     footer.setMenu("tasks");
     // Act
-    footer.render(input({ tasks: [counterEntry({ id: "t1" })] }));
+    renderLive(footer, input({ tasks: [counterEntry({ id: "t1" })] }));
     // Assert — disclosure is renderer-owned, so the overlay outlives the frame.
     expect(el.querySelector(".tasks-overlay")).not.toBeNull();
   });
@@ -2616,10 +2728,10 @@ describe("ProgressFooter: the peek's ten-second window", () => {
   it("opens the peek on the token cell's verb", () => {
     // Arrange
     const m = mounted();
-    m.footer.render(input());
+    renderLive(m.footer, input());
     // Act
     m.footer.peekAccounting();
-    m.footer.render(input());
+    renderLive(m.footer, input());
     // Assert
     expect(m.el.innerHTML).toContain("pfooter-accounting-peek");
   });
@@ -2627,7 +2739,7 @@ describe("ProgressFooter: the peek's ten-second window", () => {
   it("holds the peek for exactly the specified window", () => {
     // Arrange
     const m = mounted();
-    m.footer.render(input());
+    renderLive(m.footer, input());
     // Act
     m.footer.peekAccounting();
     // Assert
@@ -2637,9 +2749,9 @@ describe("ProgressFooter: the peek's ten-second window", () => {
   it("repaints itself when the window lapses, with no frame arriving", () => {
     // Arrange
     const m = mounted();
-    m.footer.render(input());
+    renderLive(m.footer, input());
     m.footer.peekAccounting();
-    m.footer.render(input());
+    renderLive(m.footer, input());
     // Act
     m.fire();
     // Assert
@@ -2650,7 +2762,7 @@ describe("ProgressFooter: the peek's ten-second window", () => {
     // Arrange — the section was deliberately closed before the peek.
     const m = mounted();
     m.footer.toggleExpanded();
-    m.footer.render(input());
+    renderLive(m.footer, input());
     m.footer.peekAccounting();
     // Act
     m.fire();
@@ -2662,7 +2774,7 @@ describe("ProgressFooter: the peek's ten-second window", () => {
   it("restarts the window rather than stacking timers on a re-click", () => {
     // Arrange
     const m = mounted();
-    m.footer.render(input());
+    renderLive(m.footer, input());
     m.footer.peekAccounting();
     // Act
     m.footer.peekAccounting();
@@ -2674,7 +2786,7 @@ describe("ProgressFooter: the peek's ten-second window", () => {
   it("ends a standing peek when the reader works the disclosure itself", () => {
     // Arrange
     const m = mounted();
-    m.footer.render(input());
+    renderLive(m.footer, input());
     m.footer.peekAccounting();
     // Act
     m.footer.toggleExpanded();
