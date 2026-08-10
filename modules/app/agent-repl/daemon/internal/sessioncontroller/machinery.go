@@ -1,6 +1,7 @@
 package sessioncontroller
 
 import (
+	"fmt"
 	"strings"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
@@ -125,16 +126,12 @@ func withheldReason(it *frontendv1.ConversationItem) string {
 // an outstanding prompt receipt, which would retire the receipt for a real
 // prompt and leave that prompt's own line unattributed behind it.
 func (c *consumer) withholdMachinery(cd *frontendv1.ConversationDelta) {
-	items := cd.GetItems()
-	kept := items[:0]
-	for _, it := range items {
+	c.withholdItems(cd, func(it *frontendv1.ConversationItem) withholdVerdict {
 		reason := withheldReason(it)
 		if reason == "" {
-			kept = append(kept, it)
-			continue
+			return keepItem
 		}
-		c.logf("session-controller: user turn WITHHELD as %s ws=%q session=%s seq=%d uuid=%s — this is written as an unflagged \"user\" transcript record but is not a prompt; the store keeps it, the conversation feed does not",
-			reason, c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid())
-	}
-	cd.Items = kept
+		return withholdItem(fmt.Sprintf("session-controller: user turn WITHHELD as %s ws=%q session=%s seq=%d uuid=%s — this is written as an unflagged \"user\" transcript record but is not a prompt; the store keeps it, the conversation feed does not",
+			reason, c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid()))
+	})
 }
