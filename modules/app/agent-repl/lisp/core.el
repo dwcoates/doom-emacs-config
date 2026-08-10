@@ -2213,6 +2213,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-make-webview-buffer
     agent-repl--frontend-webview-selection
     agent-repl--frontend-webview-execute-script-1
+    agent-repl--frontend-webview-execute-script-value
     agent-repl--frontend-webview-live-widget
     agent-repl--frontend-webview-reload-widget
     agent-repl--frontend-webview-navigate-widget
