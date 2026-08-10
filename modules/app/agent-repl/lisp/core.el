@@ -2142,6 +2142,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-run-build-script
     agent-repl--frontend-spawn-run-script
     agent-repl--frontend-run-listener-probe
+    agent-repl--frontend-run-daemon-pgrep
     agent-repl--frontend-artifact-exists-p
     agent-repl--frontend-spawn-daemon
     agent-repl--launchctl-call

@@ -72,9 +72,19 @@ own `cl-letf', which shadows this one for the extent of that form.
 
 `agent-repl--frontend-run-listener-probe' is stubbed to report NO
 listener for the same hermeticity reason: the real probe runs `lsof'
-against whatever holds port 8787 on the developer's machine."
+against whatever holds port 8787 on the developer's machine.
+
+`agent-repl--frontend-run-daemon-pgrep' is stubbed to report NO daemon
+process for the same reason again: the real one runs `pgrep' and would
+otherwise adopt whatever `claude-repld' the developer has running.  The
+spawn-tracking state (`agent-repl--frontend-daemon-spawn-time' and the
+parked-ensure queue) is bound fresh so one test's spawn cannot suppress
+the next test's."
   `(let ((agent-repl-frontend-auto-start t)
-         (agent-repl--frontend-daemon-process nil))
+         (agent-repl--frontend-daemon-process nil)
+         (agent-repl--frontend-daemon-spawn-time nil)
+         (agent-repl--frontend-spawn-waiters nil)
+         (agent-repl--frontend-adopted-daemon-pid nil))
      (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
                 (lambda () nil))
                ((symbol-function 'agent-repl--frontend-artifact-exists-p)
@@ -83,6 +93,8 @@ against whatever holds port 8787 on the developer's machine."
                 (lambda () nil))
                ((symbol-function 'agent-repl--frontend-run-listener-probe)
                 (lambda (&rest _) nil))
+               ((symbol-function 'agent-repl--frontend-run-daemon-pgrep)
+                (lambda (&rest _) ""))
                ((symbol-function 'process-live-p)
                 (lambda (p) (and (agent-repl-test--fake-daemon-p p)
                                  (agent-repl-test--fake-daemon-live p))))
@@ -842,6 +854,220 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
       (agent-repl--frontend-bounce-foreign-daemon)
       (should-error (funcall timeout-called))
       (should-not started))))
+
+;;;; ---- ensure: the spawn-in-flight guard -----------------------------------
+
+(ert-deftest agent-repl-test-daemon-ensure-suppresses-spawn-within-boot-grace ()
+  "An ensure arriving while a spawn is still booting starts nothing."
+  ;; Arrange — a spawn started one second ago, still inside its grace.
+  (agent-repl-test--with-daemon-env
+   (let ((agent-repl-frontend-spawn-boot-grace-seconds 30.0)
+         (built nil) (spawned nil))
+     (setq agent-repl--frontend-daemon-spawn-time (- (float-time) 1.0))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (_open absent) (funcall absent 'no-listener)))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f on-success _on-failure)
+                  (setq built t) (when on-success (funcall on-success)) 'started))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
+       ;; Act
+       (let ((result (agent-repl--ensure-frontend-daemon)))
+         ;; Assert
+         (should (eq result :pending))
+         (should-not built)
+         (should-not spawned))))))
+
+(ert-deftest agent-repl-test-daemon-ensure-spawns-after-boot-grace-expires ()
+  "A spawn older than the boot grace no longer suppresses a new one."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((agent-repl-frontend-spawn-boot-grace-seconds 30.0)
+         (fresh (agent-repl-test--make-live-daemon 501))
+         (spawned nil))
+     (setq agent-repl--frontend-daemon-spawn-time (- (float-time) 31.0))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (_open absent) (funcall absent 'no-listener)))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f on-success _on-failure)
+                  (when on-success (funcall on-success)) 'started))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) fresh)))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon)
+       ;; Assert
+       (should spawned)))))
+
+(ert-deftest agent-repl-test-daemon-ensure-spawns-when-tracked-spawn-died ()
+  "A spawn that died inside its grace releases it, so a replacement starts."
+  ;; Arrange — young spawn, but its process is already dead.
+  (agent-repl-test--with-daemon-env
+   (let ((agent-repl-frontend-spawn-boot-grace-seconds 30.0)
+         (dead (make-agent-repl-test--fake-daemon :live nil :pid 601))
+         (fresh (agent-repl-test--make-live-daemon 602))
+         (spawned nil))
+     (setq agent-repl--frontend-daemon-process dead)
+     (setq agent-repl--frontend-daemon-spawn-time (- (float-time) 1.0))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (_open absent) (funcall absent 'no-listener)))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f on-success _on-failure)
+                  (when on-success (funcall on-success)) 'started))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) fresh)))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon)
+       ;; Assert
+       (should spawned)))))
+
+(ert-deftest agent-repl-test-daemon-ensure-parked-waiter-runs-on-spawn-success ()
+  "A suppressed ensure's ON-ENSURED runs when the in-flight spawn succeeds."
+  ;; Arrange — park a waiter, then let a later spawn settle it.
+  (agent-repl-test--with-daemon-env
+   (let ((agent-repl-frontend-spawn-boot-grace-seconds 30.0)
+         (ensured nil))
+     (setq agent-repl--frontend-daemon-spawn-time (- (float-time) 1.0))
+     (agent-repl--ensure-frontend-daemon nil (lambda () (setq ensured t)) #'ignore)
+     (should-not ensured)
+     ;; Act — the spawn everyone waited on completes.
+     (agent-repl--frontend-settle-spawn-waiters nil)
+     ;; Assert
+     (should ensured))))
+
+(ert-deftest agent-repl-test-daemon-ensure-parked-waiter-fails-on-spawn-failure ()
+  "A suppressed ensure's ON-FAILURE receives the failed spawn's detail."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((agent-repl-frontend-spawn-boot-grace-seconds 30.0)
+         (detail nil))
+     (setq agent-repl--frontend-daemon-spawn-time (- (float-time) 1.0))
+     (agent-repl--ensure-frontend-daemon nil #'ignore (lambda (d) (setq detail d)))
+     ;; Act
+     (agent-repl--frontend-settle-spawn-waiters "deploy exploded")
+     ;; Assert
+     (should (equal detail "deploy exploded")))))
+
+(ert-deftest agent-repl-test-daemon-ensure-force-ignores-the-boot-grace ()
+  "FORCE is an explicit restart and is never suppressed by a spawn in flight."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((agent-repl-frontend-spawn-boot-grace-seconds 30.0)
+         (fresh (agent-repl-test--make-live-daemon 701))
+         (spawned nil))
+     (setq agent-repl--frontend-daemon-spawn-time (- (float-time) 1.0))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (_open absent) (funcall absent 'no-listener)))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f on-success _on-failure)
+                  (when on-success (funcall on-success)) 'started))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) fresh)))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon t)
+       ;; Assert
+       (should spawned)))))
+
+(ert-deftest agent-repl-test-daemon-ensure-failed-deploy-reopens-spawning ()
+  "A deploy failure ends the boot grace so the next ensure may retry at once."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((agent-repl-frontend-spawn-boot-grace-seconds 30.0))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (_open absent) (funcall absent 'no-listener)))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f _on-success on-failure)
+                  (when on-failure (funcall on-failure "build failed")) 'started)))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon nil #'ignore #'ignore)
+       ;; Assert
+       (should-not (agent-repl--frontend-spawn-in-flight-p))))))
+
+;;;; ---- ensure: adoption of an untracked live daemon ------------------------
+
+(ert-deftest agent-repl-test-daemon-ensure-adopts-untracked-live-daemon ()
+  "A live `claude-repld' this Emacs did not spawn is adopted, not competed with."
+  ;; Arrange — nothing answering on the socket yet, but the process exists.
+  (agent-repl-test--with-daemon-env
+   (let ((built nil) (spawned nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (_open absent) (funcall absent 'no-listener)))
+               ((symbol-function 'agent-repl--frontend-run-daemon-pgrep)
+                (lambda (&rest _) "31337\n"))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f on-success _on-failure)
+                  (setq built t) (when on-success (funcall on-success)) 'started))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon)
+       ;; Assert
+       (should (eql agent-repl--frontend-adopted-daemon-pid 31337))
+       (should-not built)
+       (should-not spawned)))))
+
+(ert-deftest agent-repl-test-daemon-ensure-adoption-runs-on-ensured ()
+  "Adopting an untracked live daemon settles the caller through ON-ENSURED."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((ensured nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (_open absent) (funcall absent 'no-listener)))
+               ((symbol-function 'agent-repl--frontend-run-daemon-pgrep)
+                (lambda (&rest _) "31337\n")))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon nil (lambda () (setq ensured t)) #'ignore)
+       ;; Assert
+       (should ensured)))))
+
+(ert-deftest agent-repl-test-daemon-ensure-force-does-not-adopt-untracked-daemon ()
+  "FORCE wants a fresh process, so an untracked live daemon is not adopted."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (let ((spawned nil)
+         (fresh (agent-repl-test--make-live-daemon 801)))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (_open absent) (funcall absent 'no-listener)))
+               ((symbol-function 'agent-repl--frontend-run-daemon-pgrep)
+                (lambda (&rest _) "31337\n"))
+               ((symbol-function 'agent-repl--frontend-deploy-stack-async)
+                (lambda (&optional _f on-success _on-failure)
+                  (when on-success (funcall on-success)) 'started))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (lambda () (setq spawned t) fresh)))
+       ;; Act
+       (agent-repl--ensure-frontend-daemon t)
+       ;; Assert
+       (should spawned)))))
+
+(ert-deftest agent-repl-test-daemon-untracked-pid-excludes-the-tracked-process ()
+  "The pid this Emacs already tracks is never reported as an untracked daemon."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (setq agent-repl--frontend-daemon-process (agent-repl-test--make-live-daemon 4242))
+   (cl-letf (((symbol-function 'agent-repl--frontend-run-daemon-pgrep)
+              (lambda (&rest _) "4242\n")))
+     ;; Act / Assert
+     (should-not (agent-repl--frontend-untracked-daemon-pid)))))
+
+(ert-deftest agent-repl-test-daemon-untracked-pid-nil-when-pgrep-fails ()
+  "A pgrep that could not run reports no daemon rather than a guess."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (cl-letf (((symbol-function 'agent-repl--frontend-run-daemon-pgrep)
+              (lambda (&rest _) nil)))
+     ;; Act / Assert
+     (should-not (agent-repl--frontend-untracked-daemon-pid)))))
+
+(ert-deftest agent-repl-test-daemon-forget-process-clears-the-boot-grace ()
+  "Dropping the tracked process drops the grace that belonged to its spawn."
+  ;; Arrange
+  (agent-repl-test--with-daemon-env
+   (setq agent-repl--frontend-daemon-process (agent-repl-test--make-live-daemon 901))
+   (setq agent-repl--frontend-daemon-spawn-time (float-time))
+   ;; Act
+   (agent-repl--frontend-forget-daemon-process)
+   ;; Assert
+   (should-not (agent-repl--frontend-spawn-in-flight-p))))
 
 ;;;; ---- Foreign-daemon adoption + stop guard ---------------------------------
 
