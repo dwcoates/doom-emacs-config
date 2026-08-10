@@ -306,7 +306,7 @@ func TestFoldWindowEmissionsFoldsIntoTheOpenBubble(t *testing.T) {
 	b := openWindow(t, s)
 
 	// Act
-	if _, err := s.foldWindowEmissions(mergeEmissions("working on it"), 11); err != nil {
+	if _, err := s.foldWindowEmissions(b.GetId(), mergeEmissions("working on it"), 11); err != nil {
 		t.Fatal(err)
 	}
 
@@ -326,7 +326,7 @@ func TestFoldWindowEmissionsDeliversAMergeWindowOnTheMergeUpdateArm(t *testing.T
 	b := openWindow(t, s)
 
 	// Act
-	got, err := s.foldWindowEmissions(mergeEmissions("working on it"), 11)
+	got, err := s.foldWindowEmissions(b.GetId(), mergeEmissions("working on it"), 11)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,19 +340,25 @@ func TestFoldWindowEmissionsDeliversAMergeWindowOnTheMergeUpdateArm(t *testing.T
 	}
 }
 
-func TestFoldWindowEmissionsReportsNothingWithNoWindowOpen(t *testing.T) {
+// AMENDED: the fold's destination is now the CALLER's, because two
+// destinations exist in one event (the innermost window, and the parent of a
+// nested window whose card the event carried). A destination the stack no
+// longer holds is therefore a stale snapshot rather than "nothing is open", and
+// it is refused loudly instead of silently swallowing the session's
+// conversation.
+func TestFoldWindowEmissionsRefusesABubbleNoOpenWindowNames(t *testing.T) {
 	// Arrange
 	s := newAsyncBubbleStore("/ws", nil)
 
 	// Act
-	got, err := s.foldWindowEmissions(mergeEmissions("stray"), 11)
-	if err != nil {
-		t.Fatal(err)
-	}
+	got, err := s.foldWindowEmissions("bubble_no_window_names", mergeEmissions("stray"), 11)
 
 	// Assert
+	if err == nil {
+		t.Fatalf("a fold aimed at a bubble no open window names was applied, want a refusal; got update %v", got)
+	}
 	if got != nil {
-		t.Fatalf("with no window open the session's emissions belong to the feed, got a fold into %q", got.GetBubbleId())
+		t.Fatalf("the refused fold still produced an update addressed to %q", got.GetBubbleId())
 	}
 }
 
@@ -365,7 +371,7 @@ func TestFoldWindowEmissionsParentsANestedDispatchOnTheMergeBubble(t *testing.T)
 			{Block: &datav1.ContentBlock_ToolUse{ToolUse: &datav1.ToolUseBlock{Id: "tu_nested", Name: "Task"}}},
 		}}},
 	}}}
-	if _, err := s.foldWindowEmissions(nested, 11); err != nil {
+	if _, err := s.foldWindowEmissions(merge.GetId(), nested, 11); err != nil {
 		t.Fatal(err)
 	}
 
@@ -387,8 +393,8 @@ func TestFoldWindowEmissionsParentsANestedDispatchOnTheMergeBubble(t *testing.T)
 func TestSnapshotCarriesTheFoldedMergeBubble(t *testing.T) {
 	// Arrange
 	s := newAsyncBubbleStore("/ws", nil)
-	openWindow(t, s)
-	if _, err := s.foldWindowEmissions(mergeEmissions("working on it"), 11); err != nil {
+	b := openWindow(t, s)
+	if _, err := s.foldWindowEmissions(b.GetId(), mergeEmissions("working on it"), 11); err != nil {
 		t.Fatal(err)
 	}
 
@@ -681,6 +687,55 @@ func (h *queueHarness) skillAppends(bubbleID string) []string {
 					if text := block.GetText().GetText(); text != "" {
 						out = append(out, text)
 					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// skillToolCallAppends returns the tool_use ids every SKILL-ARM emissions
+// update addressed to bubbleID carried, in order. It is what says WHICH CARDS
+// landed inside a bubble's conversation, which is where a nested window's
+// bubble hangs.
+func (h *queueHarness) skillToolCallAppends(bubbleID string) []string {
+	h.push.mu.Lock()
+	defer h.push.mu.Unlock()
+	var out []string
+	for _, d := range h.push.bubbles {
+		for _, u := range d.GetUpdates() {
+			if u.GetBubbleId() != bubbleID {
+				continue
+			}
+			for _, em := range u.GetSkill().GetEmissions().GetEmissions() {
+				if id := em.GetToolCall().GetCall().GetId(); id != "" {
+					out = append(out, id)
+				}
+				for _, block := range em.GetResponse().GetBody().GetContent() {
+					if id := block.GetToolUse().GetId(); id != "" {
+						out = append(out, id)
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// feedToolUseIDs returns the tool_use ids every item pushed on the TOP-LEVEL
+// feed carried, in order.
+func (h *queueHarness) feedToolUseIDs() []string {
+	h.push.mu.Lock()
+	defer h.push.mu.Unlock()
+	var out []string
+	for _, cd := range h.push.convo {
+		for _, it := range cd.GetItems() {
+			if id := it.GetAgent().GetToolCall().GetCall().GetId(); id != "" {
+				out = append(out, id)
+			}
+			for _, block := range it.GetAgent().GetResponse().GetBody().GetContent() {
+				if id := block.GetToolUse().GetId(); id != "" {
+					out = append(out, id)
 				}
 			}
 		}
@@ -999,6 +1054,79 @@ func TestAnEmissionInsideANestedSkillDoesNotAlsoFoldIntoTheOuterOne(t *testing.T
 		if text == "the inner skill is working" {
 			t.Fatal("one emission folded into two windows: exactly one bubble owns an emission, and it is the innermost")
 		}
+	}
+}
+
+func TestANestedSkillsOwnCardFoldsIntoTheWindowOutsideIt(t *testing.T) {
+	// Arrange
+	h := newQueueHarness(t, nil)
+	outer := invokeSkill(t, h, 10, "a-outer", "toolu_outer", "outer", "go")
+
+	// Act
+	invokeSkill(t, h, 11, "a-inner", "toolu_inner", "inner", "go")
+
+	// Assert: the card is where the inner bubble hangs, so it must land inside
+	// the outer conversation for the inner bubble to render there.
+	var landed bool
+	for _, id := range h.skillToolCallAppends(outer.GetId()) {
+		if id == "toolu_inner" {
+			landed = true
+		}
+	}
+	if !landed {
+		t.Fatalf("the outer window was appended cards %v, want the inner invocation's own card", h.skillToolCallAppends(outer.GetId()))
+	}
+}
+
+func TestANestedSkillsOwnCardLeavesTheTopLevelFeed(t *testing.T) {
+	// Arrange
+	h := newQueueHarness(t, nil)
+	invokeSkill(t, h, 10, "a-outer", "toolu_outer", "outer", "go")
+
+	// Act
+	invokeSkill(t, h, 11, "a-inner", "toolu_inner", "inner", "go")
+
+	// Assert
+	for _, id := range h.feedToolUseIDs() {
+		if id == "toolu_inner" {
+			t.Fatal("the nested invocation's card reached the top-level feed as well as its parent's conversation, so its bubble renders twice and outside the work that started it")
+		}
+	}
+}
+
+func TestANestedSkillsOwnCardDoesNotFoldIntoItsOwnBubble(t *testing.T) {
+	// Arrange
+	h := newQueueHarness(t, nil)
+	invokeSkill(t, h, 10, "a-outer", "toolu_outer", "outer", "go")
+
+	// Act
+	inner := invokeSkill(t, h, 11, "a-inner", "toolu_inner", "inner", "go")
+
+	// Assert: a bubble hanging under a card inside itself is not a tree.
+	for _, id := range h.skillToolCallAppends(inner.GetId()) {
+		if id == "toolu_inner" {
+			t.Fatal("the inner window swallowed its own opening card, so its bubble hangs inside itself")
+		}
+	}
+}
+
+func TestAnOutermostSkillsOwnCardStaysOnTheTopLevelFeed(t *testing.T) {
+	// Arrange
+	h := newQueueHarness(t, nil)
+
+	// Act
+	invokeSkill(t, h, 10, "a-demo", "toolu_demo", "demo", "run it")
+
+	// Assert: there is no conversation outside it, so the feed is where its
+	// card — and the bubble hanging under it — belongs.
+	var onFeed bool
+	for _, id := range h.feedToolUseIDs() {
+		if id == "toolu_demo" {
+			onFeed = true
+		}
+	}
+	if !onFeed {
+		t.Fatalf("the feed carried cards %v, want the outermost invocation's own card", h.feedToolUseIDs())
 	}
 }
 
