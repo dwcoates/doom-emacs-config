@@ -6,6 +6,11 @@
 ;; transcript sidecar.  A coordinated runtime restart builds their installed
 ;; binaries only when stale, then uses launchctl kickstart so launchd remains
 ;; their process supervisor.  Store always comes up before sidecar.
+;;
+;; The deployed-fingerprint stamp (`.<name>.deployed', the same file
+;; bin/lib-deploy-stamp.sh owns) is the SOLE kickstart authority here too: a
+;; deploy that already bounced a service and stamped it must not bounce it a
+;; second time when it reaches this path through the daemon restart.
 
 ;;; Code:
 
@@ -185,12 +190,44 @@ terminal latch timeout and is restored when the latch returns."
                    agent-repl--shim-store-label agent-repl--shim-sidecar-label)
   t)
 
+(defun agent-repl--shim-service-deployed-stamp (binary)
+  "Return the deployed-fingerprint stamp path belonging to BINARY."
+  (expand-file-name (format ".%s.deployed" (file-name-nondirectory binary))
+                    agent-repl--shim-service-cache-bin))
+
+(defun agent-repl--shim-service-read-stamp (path)
+  "External-boundary wrapper: return the digest recorded at PATH, or nil."
+  (when (file-exists-p path)
+    (with-temp-buffer
+      (insert-file-contents-literally path)
+      (let ((value (string-trim (buffer-string))))
+        (unless (string-empty-p value) value)))))
+
+(defun agent-repl--shim-service-needs-bounce-p (binary)
+  "Return non-nil when the running service is not executing installed BINARY.
+
+The deployed-fingerprint stamp is the SOLE kickstart authority, exactly as
+`service_needs_bounce' in bin/lib-deploy-stamp.sh defines it: a stamp is
+written at kickstart time, so a stamp equal to the installed binary's digest
+means the live process is already serving that image and a second kickstart
+would only widen the service outage.  A missing binary or a missing/empty
+stamp is never \"in sync\" — there is nothing to be in sync with, so bounce."
+  (let* ((stamp (agent-repl--shim-service-deployed-stamp binary))
+         (recorded (agent-repl--shim-service-read-stamp stamp))
+         (stale (cond
+                 ((not (agent-repl--frontend-artifact-exists-p binary)) t)
+                 ((null recorded) t)
+                 (t (not (equal recorded
+                                (agent-repl--shim-service-file-sha256 binary)))))))
+    (agent-repl--log nil
+                     "shim-services deployed stamp: binary=%s stamp=%s recorded=%s stale=%s"
+                     binary stamp (or recorded "<absent>") (if stale "t" "nil"))
+    stale))
+
 (defun agent-repl--shim-service-record-deployed (binary)
   "Record that launchd has started the installed BINARY."
   (let* ((digest (agent-repl--shim-service-file-sha256 binary))
-         (stamp (expand-file-name
-                 (format ".%s.deployed" (file-name-nondirectory binary))
-                 agent-repl--shim-service-cache-bin)))
+         (stamp (agent-repl--shim-service-deployed-stamp binary)))
     (agent-repl--log nil
                      "shim-services deployed stamp: recording binary=%s stamp=%s sha256=%s"
                      binary stamp digest)
@@ -278,33 +315,71 @@ validated both jobs before building any runtime artifact."
                          "shim service build completed without both binaries: store=%s present=%s sidecar=%s present=%s"
                          agent-repl--shim-store-binary (if store-present "t" "nil")
                          agent-repl--shim-sidecar-binary (if sidecar-present "t" "nil"))))
-  (agent-repl--backend-phase nil "bouncing the store service…")
-  (agent-repl--shim-services-launchctl "kickstart" agent-repl--shim-store-label)
-  (agent-repl--shim-store-after-ready
-   (lambda ()
-     (condition-case err
-         (progn
-           (agent-repl--shim-service-record-deployed agent-repl--shim-store-binary)
-           (agent-repl--backend-phase nil "store up; bouncing the sidecar service…")
-           (agent-repl--shim-services-launchctl "kickstart" agent-repl--shim-sidecar-label)
-           (agent-repl--shim-service-record-deployed agent-repl--shim-sidecar-binary)
-           (agent-repl--log nil "shim-services bounce complete: store=%s sidecar=%s"
-                            agent-repl--shim-store-label agent-repl--shim-sidecar-label)
-           (agent-repl--backend-phase nil "store and sidecar services up")
-           (funcall on-success))
-       (error
-        (let ((detail (error-message-string err)))
-          (agent-repl--warn nil "shim-services bounce FAILED after store readiness: %s" detail)
-          (agent-repl--backend-phase
-           nil "sidecar service bounce FAILED: %s — full output in %s"
-           detail (agent-repl--logfile-path))
-          (funcall on-failure detail)))))
-   (lambda (detail)
-     (agent-repl--warn nil "shim-services bounce FAILED before sidecar: %s" detail)
-     (agent-repl--backend-phase
-      nil "store service never came up: %s — full output in %s"
-      detail (agent-repl--logfile-path))
-     (funcall on-failure detail)))
+  ;; The deployed-fingerprint stamp is the SOLE kickstart authority, and this
+  ;; is the second consumer of it: `deploy-all.sh' already kickstarted whatever
+  ;; its own step 4 found stale and recorded the matching stamps, then bounced
+  ;; the daemon through this path.  Kickstarting unconditionally here restarted
+  ;; the store a SECOND time within one deploy, doubling the store outage that
+  ;; kills every live shim's producer connection.  Deciding from the stamp
+  ;; makes the second kickstart a no-op while a genuinely changed binary — one
+  ;; whose digest no longer matches its stamp — still bounces.
+  (let ((store-stale (agent-repl--shim-service-needs-bounce-p
+                      agent-repl--shim-store-binary))
+        (sidecar-stale (agent-repl--shim-service-needs-bounce-p
+                        agent-repl--shim-sidecar-binary)))
+    (cl-labels
+        ((after-store-ready (store-bounced)
+           (condition-case err
+               (progn
+                 (when store-bounced
+                   (agent-repl--shim-service-record-deployed
+                    agent-repl--shim-store-binary))
+                 ;; A store bounce always bounces the sidecar too, stale or
+                 ;; not: the sidecar's link recovery is connection-scoped, and
+                 ;; a fresh pair is the known-good state after a store restart.
+                 (if (or store-bounced sidecar-stale)
+                     (progn
+                       (agent-repl--backend-phase
+                        nil "store up; bouncing the sidecar service…")
+                       (agent-repl--shim-services-launchctl
+                        "kickstart" agent-repl--shim-sidecar-label)
+                       (agent-repl--shim-service-record-deployed
+                        agent-repl--shim-sidecar-binary))
+                   (agent-repl--log
+                    nil
+                    "shim-services sidecar: deployed fingerprint current, kickstart skipped label=%s"
+                    agent-repl--shim-sidecar-label))
+                 (agent-repl--log nil "shim-services bounce complete: store=%s sidecar=%s"
+                                  agent-repl--shim-store-label agent-repl--shim-sidecar-label)
+                 (agent-repl--backend-phase nil "store and sidecar services up")
+                 (funcall on-success))
+             (error
+              (let ((detail (error-message-string err)))
+                (agent-repl--warn nil "shim-services bounce FAILED after store readiness: %s" detail)
+                (agent-repl--backend-phase
+                 nil "sidecar service bounce FAILED: %s — full output in %s"
+                 detail (agent-repl--logfile-path))
+                (funcall on-failure detail)))))
+         (store-failed (detail)
+           (agent-repl--warn nil "shim-services bounce FAILED before sidecar: %s" detail)
+           (agent-repl--backend-phase
+            nil "store service never came up: %s — full output in %s"
+            detail (agent-repl--logfile-path))
+           (funcall on-failure detail)))
+      (if store-stale
+          (progn
+            (agent-repl--backend-phase nil "bouncing the store service…")
+            (agent-repl--shim-services-launchctl "kickstart" agent-repl--shim-store-label))
+        (agent-repl--log
+         nil
+         "shim-services store: deployed fingerprint current, kickstart skipped label=%s"
+         agent-repl--shim-store-label))
+      ;; Readiness is awaited on BOTH paths.  A skipped kickstart still has to
+      ;; prove the store is serving before the sidecar is touched; a store that
+      ;; is not there fails loudly instead of letting the sidecar come up cold.
+      (agent-repl--shim-store-after-ready
+       (lambda () (after-store-ready store-stale))
+       #'store-failed)))
   :pending)
 
 (defun agent-repl--runtime-retire-bounced-link ()

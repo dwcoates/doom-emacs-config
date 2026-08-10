@@ -33,6 +33,8 @@
               ((symbol-function 'agent-repl--frontend-build-targets-if-stale)
                (lambda (&rest _) (push 'build events)))
               ((symbol-function 'agent-repl--frontend-artifact-exists-p) (lambda (_path) t))
+              ((symbol-function 'agent-repl--shim-service-needs-bounce-p)
+               (lambda (_binary) t))
               ((symbol-function 'agent-repl--shim-services-launchctl)
                (lambda (_verb label) (push label events)))
               ((symbol-function 'agent-repl--shim-store-after-ready)
@@ -49,6 +51,114 @@
       (should-not failure)
       (should (< (cl-position agent-repl--shim-store-label (reverse events))
                  (cl-position agent-repl--shim-sidecar-label (reverse events)))))))
+
+(defun agent-repl-services-test--run-bounce (store-stale sidecar-stale)
+  "Run the bounce with fixed staleness, returning (KICKSTARTS SUCCESS FAILURE)."
+  (let (kickstarts success failure store-ready)
+    (cl-letf (((symbol-function 'agent-repl--shim-services-assert-launchd-loaded)
+               (lambda () t))
+              ((symbol-function 'agent-repl--frontend-build-targets-if-stale)
+               (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--frontend-artifact-exists-p) (lambda (_path) t))
+              ((symbol-function 'agent-repl--shim-service-needs-bounce-p)
+               (lambda (binary)
+                 (if (equal binary agent-repl--shim-store-binary)
+                     store-stale
+                   sidecar-stale)))
+              ((symbol-function 'agent-repl--shim-services-launchctl)
+               (lambda (_verb label) (push label kickstarts)))
+              ((symbol-function 'agent-repl--shim-store-after-ready)
+               (lambda (ok _fail) (setq store-ready ok) :pending))
+              ((symbol-function 'agent-repl--shim-service-record-deployed)
+               (lambda (_path) t)))
+      (agent-repl--shim-services-build-and-bounce
+       t (lambda () (setq success t)) (lambda (detail) (setq failure detail)))
+      (funcall store-ready)
+      (list (nreverse kickstarts) success failure))))
+
+(ert-deftest agent-repl-services-test-current-store-fingerprint-skips-store-kickstart ()
+  "A store already serving its installed binary is not kickstarted again."
+  (let ((result (agent-repl-services-test--run-bounce nil t)))
+    (should-not (member agent-repl--shim-store-label (nth 0 result)))))
+
+(ert-deftest agent-repl-services-test-current-fingerprints-skip-every-kickstart ()
+  "Neither service is kickstarted when both stamps match their binaries."
+  (let ((result (agent-repl-services-test--run-bounce nil nil)))
+    (should (null (nth 0 result)))))
+
+(ert-deftest agent-repl-services-test-current-fingerprints-still-succeed ()
+  "A bounce that kickstarts nothing still reports success."
+  (let ((result (agent-repl-services-test--run-bounce nil nil)))
+    (should (nth 1 result))
+    (should-not (nth 2 result))))
+
+(ert-deftest agent-repl-services-test-stale-store-still-kickstarts-store ()
+  "A store binary whose digest left its stamp is still bounced."
+  (let ((result (agent-repl-services-test--run-bounce t nil)))
+    (should (member agent-repl--shim-store-label (nth 0 result)))))
+
+(ert-deftest agent-repl-services-test-store-bounce-forces-sidecar-kickstart ()
+  "A store bounce bounces the sidecar even when the sidecar stamp is current."
+  (let ((result (agent-repl-services-test--run-bounce t nil)))
+    (should (member agent-repl--shim-sidecar-label (nth 0 result)))))
+
+(ert-deftest agent-repl-services-test-stale-sidecar-kickstarts-without-store ()
+  "A stale sidecar bounces on its own while the store is left running."
+  (let ((result (agent-repl-services-test--run-bounce nil t)))
+    (should (equal (nth 0 result) (list agent-repl--shim-sidecar-label)))))
+
+(ert-deftest agent-repl-services-test-skipped-store-kickstart-still-awaits-readiness ()
+  "A skipped store kickstart still fails loudly when the socket never appears."
+  (let (failure)
+    (cl-letf (((symbol-function 'agent-repl--shim-services-assert-launchd-loaded)
+               (lambda () t))
+              ((symbol-function 'agent-repl--frontend-build-targets-if-stale)
+               (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--frontend-artifact-exists-p) (lambda (_path) t))
+              ((symbol-function 'agent-repl--shim-service-needs-bounce-p)
+               (lambda (_binary) nil))
+              ((symbol-function 'agent-repl--shim-services-launchctl)
+               (lambda (_verb _label) (error "unexpected kickstart")))
+              ((symbol-function 'agent-repl--shim-store-after-ready)
+               (lambda (_ok fail) (funcall fail "socket absent") :pending)))
+      (agent-repl--shim-services-build-and-bounce
+       t (lambda () (error "unexpected success"))
+       (lambda (detail) (setq failure detail)))
+      (should (equal failure "socket absent")))))
+
+(ert-deftest agent-repl-services-test-needs-bounce-matching-stamp-is-current ()
+  "A stamp equal to the installed binary's digest reports no bounce."
+  (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p) (lambda (_path) t))
+            ((symbol-function 'agent-repl--shim-service-read-stamp) (lambda (_path) "abc"))
+            ((symbol-function 'agent-repl--shim-service-file-sha256) (lambda (_path) "abc")))
+    (should-not (agent-repl--shim-service-needs-bounce-p agent-repl--shim-store-binary))))
+
+(ert-deftest agent-repl-services-test-needs-bounce-mismatched-stamp-is-stale ()
+  "A stamp that no longer matches the installed binary demands a bounce."
+  (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p) (lambda (_path) t))
+            ((symbol-function 'agent-repl--shim-service-read-stamp) (lambda (_path) "old"))
+            ((symbol-function 'agent-repl--shim-service-file-sha256) (lambda (_path) "new")))
+    (should (agent-repl--shim-service-needs-bounce-p agent-repl--shim-store-binary))))
+
+(ert-deftest agent-repl-services-test-needs-bounce-absent-stamp-is-stale ()
+  "A missing deployed stamp is never read as already deployed."
+  (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p) (lambda (_path) t))
+            ((symbol-function 'agent-repl--shim-service-read-stamp) (lambda (_path) nil))
+            ((symbol-function 'agent-repl--shim-service-file-sha256) (lambda (_path) "new")))
+    (should (agent-repl--shim-service-needs-bounce-p agent-repl--shim-store-binary))))
+
+(ert-deftest agent-repl-services-test-needs-bounce-absent-binary-is-stale ()
+  "A missing installed binary is not in sync with anything."
+  (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p) (lambda (_path) nil))
+            ((symbol-function 'agent-repl--shim-service-read-stamp) (lambda (_path) "abc")))
+    (should (agent-repl--shim-service-needs-bounce-p agent-repl--shim-store-binary))))
+
+(ert-deftest agent-repl-services-test-read-stamp-ignores-an-empty-stamp ()
+  "An empty stamp file reads as no recorded fingerprint."
+  (let ((path (make-temp-file "agent-repl-stamp")))
+    (unwind-protect
+        (should-not (agent-repl--shim-service-read-stamp path))
+      (delete-file path))))
 
 (ert-deftest agent-repl-services-test-runtime-refuses-active-turn-before-mutation ()
   "A STOP-SHIMS restart reaches failure before build or service mutation.
