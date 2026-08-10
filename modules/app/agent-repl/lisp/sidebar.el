@@ -290,6 +290,21 @@ idle, and Emacs not running at all."
   :type 'integer
   :group 'agent-repl)
 
+(defcustom agent-repl-sidebar-merged-max-rows 10
+  "Most rows the Recently Merged section may carry, newest merge first.
+The section's HEIGHT is its row count: the rail draws exactly as many
+rows as the roster sends and no more, so this is the ceiling on how much
+of the rail settled history can take from the live workspaces above it.
+An in-window merge past this many is dropped from the roster rather than
+parked below the fold of a scroller — a section standing at its full
+height while most of what it holds is out of sight is taller than the
+merges the user can actually see.
+
+Kept in sync with the webapp's `--merged-visible-rows' (styles.css),
+which caps the drawn height at the same ten rows."
+  :type 'integer
+  :group 'agent-repl)
+
 (defvar agent-repl--sidebar-merged-epoch nil
   "Epoch seconds after which a completed merge still counts as recent.
 `agent-repl--sidebar-refresh-merged-window' bumps it to now on every
@@ -410,19 +425,29 @@ completed merge still counts as recent."
              (>= at agent-repl--sidebar-merged-epoch)))))
 
 (defun agent-repl--sidebar-merged-sorted (entries)
-  "Return every recently-merged entry of ENTRIES, newest merge first.
-The section is NOT capped here: a merge that landed inside the activity
-window (`agent-repl-sidebar-merged-window-seconds') is history the user
-can still go looking for, and dropping the older ones made that history
-unreachable.  The rail bounds the section by HEIGHT instead — the
-webapp's `.merged-section' scrolls at ten rows — so an unbounded merge
-count costs the live workspaces above it no space at all."
-  (sort (cl-remove-if-not
-         (lambda (e) (agent-repl--sidebar-recently-merged-p (car e)))
-         (copy-sequence entries))
-        (lambda (a b)
-          (> (agent-repl--sidebar-merged-at (car a))
-             (agent-repl--sidebar-merged-at (car b))))))
+  "Return ENTRIES' recently-merged entries, newest first, capped in count.
+The cap is `agent-repl-sidebar-merged-max-rows', and it is what keeps the
+section no taller than the merges it shows: the rail draws one row per
+entry, so bounding the ENTRY COUNT is the only bound that also shrinks
+the section when few merges have landed.  Bounding drawn height alone
+left the section standing at its full ten rows off an unbounded roster,
+with everything past the tenth parked below the fold of its own scroller.
+
+Dropped merges are logged, not silently discarded — the eleventh merge
+leaving the rail is a fact about what the user can no longer see."
+  (let* ((recent (sort (cl-remove-if-not
+                        (lambda (e) (agent-repl--sidebar-recently-merged-p (car e)))
+                        (copy-sequence entries))
+                       (lambda (a b)
+                         (> (agent-repl--sidebar-merged-at (car a))
+                            (agent-repl--sidebar-merged-at (car b))))))
+         (cap agent-repl-sidebar-merged-max-rows)
+         (dropped (max 0 (- (length recent) cap))))
+    (when (> dropped 0)
+      (agent-repl--log nil "sidebar-merged-sorted: %d in-window merges exceed the %d-row cap — dropping the %d oldest: %s"
+                       (length recent) cap dropped
+                       (mapcar #'car (nthcdr cap recent))))
+    (if (> dropped 0) (cl-subseq recent 0 cap) recent)))
 
 (defun agent-repl--sidebar-merged-group (recent current-name)
   "Return the Recently Merged group plist for RECENT, or nil when empty.
