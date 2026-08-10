@@ -1608,7 +1608,15 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 	// unconditionally: an event this consumer refuses further down was still
 	// PRODUCED, and a confirmation taken after it is still newer than it.
 	c.noteStreamSeq(ev.GetSeq())
-	identityMismatch, identityErr := c.resumeIdentity.observe(ev)
+	identityMismatch, identityAdopted, identityErr := c.resumeIdentity.observe(ev)
+	if identityAdopted != nil {
+		// A ROTATION THIS DAEMON ASKED FOR. Logged at the same volume the fatal
+		// case is: the query is now filing under a conversation other than the
+		// one it was asked to resume, and that substitution must be readable
+		// from the log even though it is the `/clear` working as intended.
+		c.logf("session-controller: RESUME IDENTITY ADOPTED session=%s query_instance_id=%s requested_vendor_session_id=%s adopted_vendor_session_id=%s seq=%d outcome=clear_rotation_adopted — a /clear this daemon dispatched discharged the resume commitment, so the rotated conversation is this query's identity from here",
+			c.sessionID, identityAdopted.queryInstanceID, identityAdopted.requestedVendorSessionID, identityAdopted.adoptedVendorSessionID, ev.GetSeq())
+	}
 	if identityErr != nil {
 		c.logf("session-controller: query identity observation REJECTED before mutation session=%s seq=%d error=%v", c.sessionID, ev.GetSeq(), identityErr)
 		return fmt.Errorf("session-controller: observe query identity before frame mutation: %w", identityErr)

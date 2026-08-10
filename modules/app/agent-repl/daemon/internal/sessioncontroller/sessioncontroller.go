@@ -489,6 +489,12 @@ type Manager struct {
 	// dependency, so it cannot be a Config field.
 	shutdownLease shutdownLeaseBinding
 
+	// restart is the planned-bounce grace window every failure bound in this
+	// package consults before it fires (restartepoch.go). It has its own mutex
+	// and is deliberately NOT under mu: the choke points that read it are on
+	// the sweep and teardown paths, which already hold mu at different depths.
+	restart restartEpoch
+
 	mu   sync.Mutex
 	byWS map[string]*sessionController // workspace -> live session controller
 	// parked is the boot-materialized drain-park ledger: workspace -> the
@@ -555,6 +561,12 @@ type Manager struct {
 	// while the connection that carried it is live, and a pid outliving its
 	// connection is a pid-reuse hazard rather than a stop handle.
 	shimPID map[string]int32
+	// shimBuild is the bundle identity each session's shim announced on its
+	// ShimHello. Kept beside shimPID and for the same reason: it is the only
+	// record of what that process is EXECUTING, and a decision about the shim
+	// may have to be taken (the shutdown drain) when its connection is no
+	// longer in reach.
+	shimBuild map[string]string
 	// bringUpFailures tracks each session's CONSECUTIVE resolved bring-up
 	// failures and, once the give-up bound is reached, the PARK that bound
 	// imposes (bringupescape.go). The park is a cooldown, never a wall: it
@@ -663,6 +675,22 @@ type sessionController struct {
 	faultTermination *frontendv1.QueryTerminationFailure
 	// faulted is closed once, by the first bring-up fault, to wake the wait.
 	faulted chan struct{}
+	// lifetime ends when this generation stops existing — the run loop
+	// returning (a terminal protocol error, the transport dying) or any
+	// teardown's shared prologue cancelling it.
+	//
+	// IT IS WHAT EVERY DETACHED WAIT ON THIS CONTROLLER IS SCOPED TO. A wait
+	// that selects only on its own signal plus a bound survives the controller
+	// by the whole bound, holding whatever claim it took — which is how one
+	// crashed revival refused every later revival of the workspace until the
+	// daemon was restarted (revive.go, awaitReviveCut). Ending it where the
+	// controller dies makes the release a consequence of the death rather than
+	// something each waiter has to notice.
+	//
+	// Its ZERO VALUE is a live lifetime, deliberately: a controller with no
+	// usable lifetime is then unrepresentable, rather than a field every
+	// construction site has to remember to initialize.
+	lifetime controllerLifetime
 	// buildRefreshStarted closes when this generation's ShimReady proves that
 	// its bundle is stale and transfers bring-up ownership to a replacement.
 	// Health probes select on this edge beside AwaitReady, so the readiness that
@@ -953,6 +981,7 @@ func New(cfg Config) (*Manager, error) {
 		parked:                    make(map[string]*parkedSession),
 		lastCSID:                  make(map[string]string),
 		shimPID:                   make(map[string]int32),
+		shimBuild:                 make(map[string]string),
 		bringUpFailures:           make(map[string]*bringUpStreak),
 		buildBounced:              make(map[string]bool),
 		buildRefresh:              make(map[string]*buildRefreshState),
@@ -1421,40 +1450,36 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
 
-	// THE CLASSIFIER NEVER RUNS ON A DRAIN-HELD ENTRY. It answers exactly one
-	// question — should this prompt interrupt the turn in front of it — and a
-	// prompt parked by a scheduled bounce has no turn in front of it to
-	// interrupt. Asking anyway would spend a model call to produce a verdict
-	// that could only be wrong: an INTERJECT would demand an interrupt on
-	// behalf of a prompt the lease exists to hold back.
-	if entry.drainHeld() {
-		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q schedule=%s classifier=SKIPPED (parked by the drain lease)",
-			entry.id, d.sessionID, workspace, origin, entry.shutdownHoldScheduleID)
-		m.publish(d.sessionID, view, recs)
-		return parked, nil
-	}
-	// THE CLASSIFIER NEVER RUNS ON A KEEP-ALIVE-HELD ENTRY EITHER, and the
-	// reason is sharper than the drain lease's. The classifier answers exactly
-	// one question — should this prompt interrupt the turn in front of it —
-	// and the turn in front of this one is a machine-generated ping. Spending a
-	// model call to judge whether the user's prompt should interrupt the
-	// daemon's own cache refresh would produce a verdict that could only be
-	// wrong: INTERJECT would demand an interrupt whose whole effect is to leave
-	// a half-finished ping in the transcript the rewind is about to clean up.
-	if entry.keepAliveHeld() {
-		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q keep_alive_turn=%s classifier=SKIPPED (held behind a cache keep-alive turn)",
-			entry.id, d.sessionID, workspace, origin, entry.keepAliveHoldTurnID)
-		m.publish(d.sessionID, view, recs)
-		return parked, nil
-	}
-	// THE CLASSIFIER NEVER RUNS ON A REVIVAL-PARKED ENTRY EITHER. The turn in
-	// front of it is the revival's own `/compact`, and the only verdict the
-	// classifier could return that changes anything — INTERJECT — would demand
-	// an interrupt of the compaction the user chose to pay for. Spending a model
-	// call to ask for that is spending it to be wrong.
-	if entry.revivalHeld() {
-		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q revival_session=%s classifier=SKIPPED (parked by an in-flight compact-first revival)",
-			entry.id, d.sessionID, workspace, origin, entry.revivalHoldSessionID)
+	// THE CLASSIFIER NEVER RUNS ON A HELD ENTRY, WHATEVER HOLDS IT, and it is
+	// ONE test rather than one per hold.
+	//
+	// The classifier answers exactly one question — should this prompt
+	// interrupt the turn in front of it — and every hold is a statement that
+	// the turn in front of this entry is not one an interrupt may reach:
+	//
+	//   - the DRAIN LEASE parks a prompt that has no turn in front of it at all;
+	//   - a KEEP-ALIVE ping is machine-generated, and interrupting it would
+	//     leave a half-finished ping in the transcript the rewind is about to
+	//     clean up;
+	//   - a REVIVAL's compaction is the cut the user chose to pay for;
+	//   - a STALE-BUILD REFRESH's turn is the one the deferral exists to
+	//     protect, and interrupting it is the refresh's only possible effect.
+	//
+	// So the only verdict that could change anything, INTERJECT, is one this
+	// call could only be wrong to return, and the model call is not spent.
+	//
+	// IT USED TO BE FOUR SEPARATE TESTS, and the fourth was never written. A
+	// prompt parked behind a stale-build refresh was created HOLD by the queue
+	// and then re-stamped ERROR by a classifier that should never have run on
+	// it, so an entry the user could see said nothing had decided it. queueEntry
+	// already answers "is anything holding this" in one place for every delivery
+	// path (queue.go, held); asking the same predicate here is what stops the
+	// next hold from needing a fifth test nobody remembers to add.
+	if entry.held() {
+		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q classifier=SKIPPED (held) schedule=%q keep_alive_turn=%q revival_session=%q build_refresh_session=%q",
+			entry.id, d.sessionID, workspace, origin,
+			entry.shutdownHoldScheduleID, entry.keepAliveHoldTurnID,
+			entry.revivalHoldSessionID, entry.buildRefreshHoldSessionID)
 		m.publish(d.sessionID, view, recs)
 		return parked, nil
 	}
@@ -3003,6 +3028,12 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	m.mu.Unlock()
 	go func() {
 		defer m.exits.Done()
+		// THE FIRST THING THE DEATH DOES. Every detached wait scoped to this
+		// controller — the revival's completion wait above all — is released by
+		// this close, and it is deferred ahead of everything else here so a
+		// panic or an early return in the tail below cannot leave a waiter
+		// holding a claim against a controller that no longer exists.
+		defer d.markExited()
 		defer d.releaseControllerRegistration()
 		runErr := client.Run(runCtx)
 		if runErr != nil {
@@ -3269,6 +3300,7 @@ func (m *Manager) onHandshakeForGeneration(workspace, sessionID, generationID st
 	// The pid rides EVERY hello, so a reconnect refreshes it and a bounce onto
 	// a fresh process never carries the retired one's number forward.
 	m.noteShimPID(sessionID, hello.GetPid())
+	m.noteShimBuild(sessionID, hello.GetBuildSha())
 	csid := hello.GetVendorSessionId()
 	if csid == "" {
 		// A fresh session whose shim has not learned its uuid yet. Announcing
@@ -3423,6 +3455,11 @@ func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID st
 	// release AwaitReady, and it never paints operational or releases queued
 	// work on the generation being retired.
 	m.noteShimPID(sessionID, hello.GetPid())
+	// AND THE BUNDLE IDENTITY, on the same terms. It rides every hello, and it
+	// is the only record of what this process is EXECUTING — which a decision
+	// taken when the connection is gone (the shutdown drain's
+	// ShimStopWouldFixTheBundle) has no other way to read.
+	m.noteShimBuild(sessionID, hello.GetBuildSha())
 	// A shim that reattached MID-TURN arms a turn-boundary lease instead of
 	// bouncing, and therefore does NOT retire this generation: it is still
 	// serving that turn and keeps its readiness until the boundary

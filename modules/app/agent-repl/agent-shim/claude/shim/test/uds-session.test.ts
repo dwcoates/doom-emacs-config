@@ -4092,6 +4092,82 @@ describe("UdsSession store subscription key", () => {
     });
   });
 
+  // A CLEAR DISCHARGES THE RESUME COMMITMENT, so the rotation it causes is
+  // adopted instead of killing the query for obeying the command it was just
+  // given. A revival's `/clear` reaches the query before it has ever reported
+  // an identity — the revival gate keeps every other prompt out until the cut
+  // lands — so the rotated id IS the first observation.
+  it("adopts the vendor session rotation a submitted /clear caused", async () => {
+    // Arrange: an exact resume of uuid-old that has confirmed nothing yet.
+    const { daemon, query, store } = await rig({
+      sessionSource: SessionSource.RESUME,
+      storeSessionId: "uuid-old",
+      queryInstanceId: "query-clear-rotation",
+    });
+    const log = captureLog();
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "revive-clear", text: "/clear", promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    await daemon.next(AckSchema);
+    await until(() => query.prompts.length === 1, "the /clear reached the SDK");
+    const before = store.count();
+
+    // Act: the first authoritative identity is the rotated conversation.
+    query.emit({
+      type: "assistant",
+      uuid: "u1",
+      session_id: "uuid-rotated",
+      message: { id: "m1", model: "claude", content: [{ type: "text", text: "hi" }], stop_reason: "end_turn", usage: {} },
+    } as unknown as SdkMessageLike);
+
+    // Assert: the rotation is adopted and the store re-keys onto it, rather
+    // than the query terminating on a mismatch.
+    await until(() => store.count() > before, "resubscribed under the rotated uuid");
+    expect((await store.latest().next(SubscribeSchema)).sessionId).toBe("uuid-rotated");
+    expect(log.record("adopting the rotated vendor session")).toMatchObject({
+      context: {
+        outcome: "clear_rotation_adopted",
+        query_instance_id: "query-clear-rotation",
+        requested_vendor_session_id: "uuid-old",
+        observed_vendor_session_id: "uuid-rotated",
+      },
+    });
+  });
+
+  // A PROMPT THAT MERELY MENTIONS THE COMMAND IS NOT THE COMMAND. `/clear`
+  // clears only as the entire prompt, which is the daemon classifier's rule
+  // too, so an argument leaves the resume commitment standing and fatal.
+  it("keeps refusing the rotation when the prompt only mentions /clear", async () => {
+    // Arrange.
+    const { daemon, query, store } = await rig({
+      sessionSource: SessionSource.RESUME,
+      storeSessionId: "uuid-old",
+      queryInstanceId: "query-clear-argument",
+    });
+    const log = captureLog();
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1", text: "/clear the build cache", promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    await daemon.next(AckSchema);
+    await until(() => query.prompts.length === 1, "the prompt reached the SDK");
+    const before = store.count();
+
+    // Act: the first authoritative identity contradicts the resume target.
+    query.emit({
+      type: "assistant",
+      uuid: "u1",
+      session_id: "uuid-replacement",
+      message: { id: "m1", model: "claude", content: [{ type: "text", text: "hi" }], stop_reason: "end_turn", usage: {} },
+    } as unknown as SdkMessageLike);
+    await store.peer().next(StoreWriteSchema);
+
+    // Assert: no discharge was taken, so nothing adopted the replacement and
+    // the store never re-keyed onto it.
+    expect(log.count("adopting the rotated vendor session")).toBe(0);
+    expect(log.count("the vendor session rotation it causes will be adopted")).toBe(0);
+    expect(store.count()).toBe(before);
+  });
+
   it("re-subscribes under the vendor session id the SDK reports", async () => {
     // Arrange: the shim is `sess-1`, but the SDK reports the conversation's
     // own uuid — which is the id the store files these events under (and the
