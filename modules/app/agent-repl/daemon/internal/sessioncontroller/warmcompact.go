@@ -83,41 +83,62 @@ func newWarmCompactRequestID(sessionID string) (string, error) {
 //     succeeded. A warm compaction that failed falls back to today's behavior
 //     for this cache window rather than being retried every sweep tick against
 //     a cache that is meanwhile dying;
+//   - an ALREADY-COMPACTED CONVERSATION is one this would compact a SECOND
+//     time. The anchor above cannot see this: it makes the attempt exactly-once
+//     per cache window, which says nothing about a compaction some OTHER path
+//     ran — a compact-first revival, a `/compact` the user typed, the vendor's
+//     own auto-compaction. The gate is the durable fact all of them close
+//     (ssm/compactiongate.go), and a keep-alive ping does not re-open it,
+//     precisely so that an idle session's pings cannot make its conversation
+//     look freshly spoken-to;
 //   - a SMALL CONVERSATION is not worth a full-history model call, and an
 //     UNMEASURED one is an unknown rather than a small one. The size is one live
 //     main-agent response's own input and is therefore the context window's
 //     occupancy, not the turn's total spend (contextsize.go).
-func (m *Manager) warmCompactEligibleLocked(d *sessionController, anchorTurnEndMs int64) (ok bool, why string) {
+//
+// A GATE READ FAILURE DECLINES. It is returned as an error rather than folded
+// into a refusal reason because it is a genuine failure rather than a state,
+// and the caller reports it as one — but the outcome is the same as any other
+// refusal, because a compaction submitted on an unread gate is exactly the
+// duplicate the gate exists to prevent.
+func (m *Manager) warmCompactEligibleLocked(d *sessionController, anchorTurnEndMs int64) (ok bool, why string, err error) {
 	if detail, asleep := m.hibernatedLocked(d.sessionID); asleep {
 		m.logf("session-controller: INVARIANT VIOLATION — a warm-compaction eligibility check reached a HIBERNATED session ws=%q session=%s cause=%s; hibernation and keep-alive-stop are one transition, so this combination should be unreachable",
 			d.workspace, d.sessionID, detail.Cause)
-		return false, "hibernated"
+		return false, "hibernated", nil
 	}
 	if d.turn.active() {
-		return false, "turn_active"
+		return false, "turn_active", nil
 	}
 	if len(d.queue.entries) > 0 {
-		return false, "prompts_queued"
+		return false, "prompts_queued", nil
 	}
 	if m.keepAliveHoldTurnLocked(d) != "" {
-		return false, "keep_alive_in_flight"
+		return false, "keep_alive_in_flight", nil
 	}
 	if m.cfg.SSM.MergeLeaseHeld(d.workspace) {
-		return false, "merge_lease_held"
+		return false, "merge_lease_held", nil
 	}
 	if d.daemonCompaction != nil {
-		return false, "compaction_in_flight"
+		return false, "compaction_in_flight", nil
 	}
 	if d.warmCompactAnchorMs != 0 && d.warmCompactAnchorMs == anchorTurnEndMs {
-		return false, "already_attempted_this_cache_window"
+		return false, "already_attempted_this_cache_window", nil
+	}
+	redundant, gate, err := m.compactionRedundant(d.workspace)
+	if err != nil {
+		return false, "compaction_gate_unreadable", err
+	}
+	if redundant {
+		return false, "already_compacted:" + compactionRedundantDetail(gate), nil
 	}
 	if d.lastContextInputTokens <= 0 {
-		return false, "context_size_unknown"
+		return false, "context_size_unknown", nil
 	}
 	if d.lastContextInputTokens < keepalive.WarmCompactMinContextTokens {
-		return false, "context_below_floor"
+		return false, "context_below_floor", nil
 	}
-	return true, ""
+	return true, "", nil
 }
 
 // SubmitWarmCompaction submits one pre-expiry compaction for workspace,
@@ -157,10 +178,19 @@ func (m *Manager) SubmitWarmCompaction(ctx context.Context, workspace string, an
 		m.mu.Unlock()
 		return "", fmt.Errorf("%w: workspace %q has no live session controller", ErrWarmCompactNotEligible, workspace)
 	}
-	eligible, why := m.warmCompactEligibleLocked(d, anchorTurnEndMs)
+	eligible, why, gateErr := m.warmCompactEligibleLocked(d, anchorTurnEndMs)
 	if !eligible {
 		sessionID, contextTokens := d.sessionID, d.lastContextInputTokens
 		m.mu.Unlock()
+		if gateErr != nil {
+			// LOUDER THAN AN ORDINARY DECLINE, because it is not one. Every other
+			// refusal is a state the daemon read successfully and decided against;
+			// this is the daemon unable to tell whether it is about to compact the
+			// same conversation twice, and declining on that ignorance.
+			m.errorf("session-controller: warm compaction DECLINED ON AN UNREADABLE GATE ws=%q session=%s reason=%s error=%v — the daemon cannot tell whether this conversation has already been compacted, so it does not compact it; the cache window falls back to keep-alive pings",
+				workspace, sessionID, why, gateErr)
+			return "", fmt.Errorf("%w: workspace %q (%s): %w", ErrWarmCompactNotEligible, workspace, why, gateErr)
+		}
 		m.logf("session-controller: warm compaction declined ws=%q session=%s reason=%s context_input_tokens=%d floor=%d anchor_turn_end_ms=%d",
 			workspace, sessionID, why, contextTokens, keepalive.WarmCompactMinContextTokens, anchorTurnEndMs)
 		return "", fmt.Errorf("%w: workspace %q (%s)", ErrWarmCompactNotEligible, workspace, why)

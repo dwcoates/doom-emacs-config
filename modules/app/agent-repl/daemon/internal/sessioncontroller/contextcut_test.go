@@ -2,6 +2,8 @@ package sessioncontroller
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -259,5 +261,80 @@ func TestDispatchingAClearDischargesTheResumeIdentityCommitment(t *testing.T) {
 				t.Fatalf("clearDispatched = %v, want %v", got, tc.wantDischarge)
 			}
 		})
+	}
+}
+
+// ---- The compaction gate --------------------------------------------------
+
+// THE COMPACTION GATE CLOSES ON THE FIRST-CLASS EVENT, which is the only report
+// that a compaction actually FINISHED. From here a daemon-initiated compaction
+// is declined until the conversation is given something new to summarize.
+func TestTheFirstClassCompactionClosesTheCompactionGate(t *testing.T) {
+	// Arrange.
+	c, applier := newCutConsumer(t)
+
+	// Act.
+	c.Consume(compactEvent(9, "u-compact"))
+
+	// Assert.
+	applier.reconcMutex.Lock()
+	defer applier.reconcMutex.Unlock()
+	if got := applier.compactionGateClosures; len(got) != 1 || got[0] != "ws" {
+		t.Fatalf("compaction gate closures = %v, want exactly one for ws", got)
+	}
+}
+
+// A CLEAR CLOSES NO COMPACTION GATE. `/clear` discards the conversation rather
+// than summarizing it, and recording it as a compaction would suppress the
+// first legitimate compaction of everything said afterwards.
+func TestAClearClosesNoCompactionGate(t *testing.T) {
+	// Arrange.
+	c, applier := newCutConsumer(t)
+
+	// Act.
+	c.Consume(clearEvent(7, "u-clear"))
+
+	// Assert.
+	if got := applier.compactionGateClosureCount(); got != 0 {
+		t.Fatalf("compaction gate closures = %d, want none for a clear", got)
+	}
+}
+
+// THE VENDOR'S STATUS TICKER CLOSES NO COMPACTION GATE. It also fires for a
+// compaction that DIED, and suppressing a later compaction on that would be
+// suppressing it on no evidence at all.
+func TestTheVendorStatusTickerClosesNoCompactionGate(t *testing.T) {
+	// Arrange.
+	c, applier := newCutConsumer(t)
+
+	// Act — the status going empty, which closes the compacting AXIS.
+	c.Consume(statusEvent(t, 1, ""))
+
+	// Assert.
+	if got := applier.compactionGateClosureCount(); got != 0 {
+		t.Fatalf("compaction gate closures = %d, want none for the vendor status ticker", got)
+	}
+}
+
+// A FAILED GATE CLOSURE IS REPORTED, never swallowed: it permits a duplicate
+// whole-conversation compaction, which is a different harm from the axis
+// failing to close and is reported as its own line.
+func TestAFailedCompactionGateClosureIsReported(t *testing.T) {
+	// Arrange.
+	c, applier := newCutConsumer(t)
+	capture := &logCapture{}
+	c.logf = capture.logf
+	applier.reconcMutex.Lock()
+	applier.compactionGateCloseErr = errors.New("the state store is gone")
+	applier.reconcMutex.Unlock()
+
+	// Act.
+	c.Consume(compactEvent(9, "u-compact"))
+
+	// Assert.
+	if !capture.contains("closing the compaction gate FAILED") {
+		capture.mu.Lock()
+		defer capture.mu.Unlock()
+		t.Fatalf("missing the gate-closure failure log:\n%s", strings.Join(capture.lines, "\n"))
 	}
 }

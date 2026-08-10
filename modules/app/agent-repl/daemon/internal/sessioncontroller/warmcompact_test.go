@@ -3,9 +3,11 @@ package sessioncontroller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"claude-repld/internal/keepalive"
+	"claude-repld/internal/ssm"
 )
 
 // warmCompactRig is coldPingRig with a conversation big enough to be worth
@@ -211,5 +213,85 @@ func TestSubmitWarmCompactionDeclinesAWorkspaceWithNoLiveController(t *testing.T
 	// Assert.
 	if !errors.Is(err, ErrWarmCompactNotEligible) {
 		t.Fatalf("SubmitWarmCompaction for an unknown workspace = %v, want ErrWarmCompactNotEligible", err)
+	}
+}
+
+// ---- The compaction gate --------------------------------------------------
+//
+// The anchor above makes the warm compaction exactly-once per CACHE WINDOW,
+// which says nothing about a compaction some other path already ran. The gate
+// is the fact every path closes, and these are the warm arm's two readings of
+// it.
+
+// A CONVERSATION THAT HAS ALREADY BEEN COMPACTED IS NOT COMPACTED AGAIN. This
+// is the sequence the feature exists for: something else compacted this
+// conversation, nothing has been said to it since, and compacting it now would
+// read the whole history to produce a worse summary of the same material.
+func TestSubmitWarmCompactionDeclinesAnAlreadyCompactedConversation(t *testing.T) {
+	// Arrange.
+	m, capture := warmCompactRig(t, keepalive.WarmCompactMinContextTokens*10)
+	applierFor(t, m).setCompactionGate("ws", ssm.CompactionGate{CompactedAtMs: 200, PromptAtMs: 100})
+
+	// Act.
+	_, err := m.SubmitWarmCompaction(context.Background(), "ws", warmCompactAnchor)
+
+	// Assert.
+	if !errors.Is(err, ErrWarmCompactNotEligible) {
+		t.Fatalf("SubmitWarmCompaction against an already-compacted conversation = %v, want ErrWarmCompactNotEligible", err)
+	}
+	if !capture.contains("reason=already_compacted:last_compacted_at_ms=200 last_prompt_at_ms=100") {
+		t.Fatal("no record named the gate as the reason, with the two timestamps the verdict was taken from")
+	}
+	c := fakeClientFor(t, m, "ws")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.prompts) != 0 {
+		t.Fatalf("submitted prompts = %v, want nothing submitted for a conversation already compacted", c.prompts)
+	}
+}
+
+// A PROMPT SINCE THE COMPACTION IS NEW MATERIAL, and the conversation is
+// compactable again. Without this the gate would close permanently on a
+// session's first compaction.
+func TestSubmitWarmCompactionProceedsWhenAPromptFollowedTheCompaction(t *testing.T) {
+	// Arrange.
+	m, _ := warmCompactRig(t, keepalive.WarmCompactMinContextTokens*10)
+	applierFor(t, m).setCompactionGate("ws", ssm.CompactionGate{CompactedAtMs: 200, PromptAtMs: 300})
+
+	// Act.
+	turnID, err := m.SubmitWarmCompaction(context.Background(), "ws", warmCompactAnchor)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SubmitWarmCompaction after a prompt = %v, want a submitted compaction", err)
+	}
+	if turnID == "" {
+		t.Fatal("SubmitWarmCompaction returned no turn id")
+	}
+}
+
+// AN UNREADABLE GATE DECLINES, LOUDLY. The daemon cannot tell whether it is
+// about to compact the same conversation twice, and guessing in its own favor
+// is exactly how the duplicate gets submitted anyway.
+func TestSubmitWarmCompactionDeclinesOnAnUnreadableGate(t *testing.T) {
+	// Arrange.
+	m, capture := warmCompactRig(t, keepalive.WarmCompactMinContextTokens*10)
+	applier := applierFor(t, m)
+	applier.reconcMutex.Lock()
+	applier.compactionGateErr = errors.New("the state store is gone")
+	applier.reconcMutex.Unlock()
+
+	// Act.
+	_, err := m.SubmitWarmCompaction(context.Background(), "ws", warmCompactAnchor)
+
+	// Assert.
+	if !errors.Is(err, ErrWarmCompactNotEligible) {
+		t.Fatalf("SubmitWarmCompaction on an unreadable gate = %v, want ErrWarmCompactNotEligible", err)
+	}
+	if !strings.Contains(err.Error(), "the state store is gone") {
+		t.Fatalf("err = %v, want the read failure carried through rather than swallowed", err)
+	}
+	if !capture.contains("warm compaction DECLINED ON AN UNREADABLE GATE") {
+		t.Fatal("the unreadable gate was not reported as the fault it is")
 	}
 }
