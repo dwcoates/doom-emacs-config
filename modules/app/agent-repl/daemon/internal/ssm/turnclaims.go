@@ -50,6 +50,17 @@ const (
 	// Ack of INTERRUPT_OUTCOME_ALREADY_COMPLETE — the shim answering, live,
 	// that there is no foreground turn to stop.
 	TurnCloseAlreadyComplete = "interrupt_already_complete"
+	// TurnCloseTerminalResult closes a claim whose turn has ALREADY PRODUCED ITS
+	// RESULT. The vendor's `result` message is the SDK's own end of turn; the
+	// shim's `TurnEnded` is a second announcement of that same fact, and a turn
+	// state that waits for the second one is hostage to whatever delays it.
+	//
+	// One observed session waited ten minutes: the result landed at 18:14:30 and
+	// the shim's turn-lifecycle watchdog produced the `TurnEnded` at 18:24:30,
+	// with the workspace rendering `thinking` for the whole gap. The result is
+	// evidence enough on its own, so the daemon writes the end from it and the
+	// later `TurnEnded` is admitted idempotently as the replay it is.
+	TurnCloseTerminalResult = "terminal_result_observed"
 )
 
 // moveTurnLedgerLocked durably validates and records one STREAM turn boundary
@@ -406,9 +417,9 @@ func (m *Manager) SynthesizeTurnClose(workspace, claimantSessionID, cause string
 	if claimantSessionID == "" {
 		return nil, fmt.Errorf("ssm: SynthesizeTurnClose for workspace %q got an empty claimant session id; a turn claim can only be ended on behalf of the session that holds it", workspace)
 	}
-	if cause != TurnCloseRestartInterrupted && cause != TurnCloseAlreadyComplete && cause != TurnCloseShimStopped {
-		return nil, fmt.Errorf("ssm: SynthesizeTurnClose for workspace %q session %q got cause %q; a synthesized end must name one of the observations that authorize it (%q, %q, %q)",
-			workspace, claimantSessionID, cause, TurnCloseRestartInterrupted, TurnCloseAlreadyComplete, TurnCloseShimStopped)
+	if cause != TurnCloseRestartInterrupted && cause != TurnCloseAlreadyComplete && cause != TurnCloseShimStopped && cause != TurnCloseTerminalResult {
+		return nil, fmt.Errorf("ssm: SynthesizeTurnClose for workspace %q session %q got cause %q; a synthesized end must name one of the observations that authorize it (%q, %q, %q, %q)",
+			workspace, claimantSessionID, cause, TurnCloseRestartInterrupted, TurnCloseAlreadyComplete, TurnCloseShimStopped, TurnCloseTerminalResult)
 	}
 
 	m.mu.Lock()
