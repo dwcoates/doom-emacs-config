@@ -167,9 +167,37 @@ func awaitAll(t *testing.T, conn *websocket.Conn, reject func(*frontendv1.Fronte
 // caller must say in its own comment what that bound is.
 func awaitAllWithin(t *testing.T, conn *websocket.Conn, within time.Duration, reject func(*frontendv1.FrontendFrame) string, want map[string]func(*frontendv1.FrontendFrame) bool) {
 	t.Helper()
+	awaitAllSeeded(t, conn, within, nil, reject, want)
+}
+
+// awaitAllSeeded is awaitAllWithin over frames a PRIOR await already read off
+// the same socket, before it reads any more.
+//
+// It exists because AN ACK IS NOT A BARRIER. The daemon's pushes and its
+// CommandAcks travel one stream from different producers, so a push the daemon
+// made before the ack can arrive after it — or the reverse. An await that read
+// past a frame and dropped it would then wait out its whole budget for
+// something already delivered, which is a test that fails on machine load
+// rather than on the contract. Handing the read-past frames to the next await
+// makes the arrival order between them irrelevant instead of merely unlikely to
+// matter.
+func awaitAllSeeded(t *testing.T, conn *websocket.Conn, within time.Duration, seed []*frontendv1.FrontendFrame, reject func(*frontendv1.FrontendFrame) string, want map[string]func(*frontendv1.FrontendFrame) bool) {
+	t.Helper()
 	pending := make(map[string]func(*frontendv1.FrontendFrame) bool, len(want))
 	for name, match := range want {
 		pending[name] = match
+	}
+	for _, frame := range seed {
+		if reject != nil {
+			if why := reject(frame); why != "" {
+				t.Fatalf("forbidden frame (read before this await): %s", why)
+			}
+		}
+		for name, match := range pending {
+			if match(frame) {
+				delete(pending, name)
+			}
+		}
 	}
 	deadline := time.Now().Add(within)
 	for len(pending) > 0 && time.Now().Before(deadline) {

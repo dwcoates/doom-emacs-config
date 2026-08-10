@@ -422,8 +422,13 @@ func TestE2EReplayFloorsAtTheClear(t *testing.T) {
 	const lineUUID = "e2e-clear-line-floor"
 	clearUUID := clearDedupKey(lineUUID)
 	// The turn's items must sit in the store BELOW the clear for the floor to
-	// have anything to hide, so observe them live before injecting it.
-	beforeClear := collectItems(t, live, cwd, 2)
+	// have anything to hide, so QUIESCE THE TURN before injecting it: counting
+	// items instead leaves the turn's tail still streaming, and a tail that
+	// straddles the clear is neither reliably above the floor nor below it.
+	// isResult names the last item a turn produces, so awaiting it closes the
+	// window (the same arrangement TestE2ELiveAndReplayAgreeFromTheFloor makes).
+	result, beforeClear := awaitItem(t, live, cwd, "before-clear turn result item", isResult)
+	beforeClear = append(beforeClear, result)
 
 	// Act — inject the clear, then wait until the live stream has shown it, so
 	// the daemon has certainly recorded the floor before the replay is asked for.

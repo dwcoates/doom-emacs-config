@@ -40,8 +40,9 @@ type turnAccountingReducer struct {
 	// conversation's own history rather than rejected as evidence about some
 	// other conversation entirely — see isKnownVendorSession.
 	knownVendorSessionIDs map[string]struct{}
-	// responseUsageCorrections holds each response's FINAL vendor usage, keyed
-	// by API message id, as relayed from the vendor's message_delta frame.
+	// corrections is the session's ONE ledger of response usage corrections:
+	// each response's FINAL vendor usage, keyed by API message id, as relayed
+	// from the vendor's message_delta frame.
 	//
 	// It exists because the assistant message a response record is built from
 	// carries the `message_start` usage SNAPSHOT: settled input and cache
@@ -50,12 +51,17 @@ type turnAccountingReducer struct {
 	// with the terminal result's totals — 563 against 4407 on one measured live
 	// turn, with input reconciling exactly.
 	//
-	// IT IS A MAP RATHER THAN AN IN-PLACE PATCH because neither arrival order is
-	// guaranteed: the SDK emits one assistant message per content block, and
+	// IT IS A LEDGER RATHER THAN AN IN-PLACE PATCH because neither arrival order
+	// is guaranteed: the SDK emits one assistant message per content block, and
 	// whether those land before or after the frame's message_delta is the
 	// vendor's business. A correction is recorded here on arrival and applied to
 	// its response whichever of the two comes second.
-	responseUsageCorrections map[string]*frontendv1.VendorTokenUsage
+	//
+	// IT IS ALSO WHAT THE ACCOUNTING-STAMP ENRICHMENT HOLDS READ, at install
+	// time and on every later filing alike, which is what makes a correction
+	// that precedes its hold indistinguishable from one that follows it. See
+	// accountinghold.go.
+	corrections *accountingCorrections
 	// logf is the consumer's session-tagged logging channel. It is never nil;
 	// newTurnAccountingReducer substitutes a discard when a caller has none.
 	logf dlog.Logf
@@ -119,7 +125,7 @@ func newTurnAccountingReducer(logf dlog.Logf) *turnAccountingReducer {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &turnAccountingReducer{turns: map[string]*accountingTurn{}, latencies: map[string]responseLatency{}, knownVendorSessionIDs: map[string]struct{}{}, responseUsageCorrections: map[string]*frontendv1.VendorTokenUsage{}, logf: logf}
+	return &turnAccountingReducer{turns: map[string]*accountingTurn{}, latencies: map[string]responseLatency{}, knownVendorSessionIDs: map[string]struct{}{}, corrections: newAccountingCorrections(logf), logf: logf}
 }
 
 // recordKnownVendorSession admits id into the conversation's proven vendor
@@ -347,6 +353,11 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 		}
 		if observation.GetTurnEnd() != nil {
 			turn.endUsage = observation
+			// FILED LAST for this observation, and for the same reason a
+			// correction is: filing releases the holds that read this ledger,
+			// and a hold released before the assignment above would resolve
+			// the stamp from a turn with no end boundary on it.
+			r.corrections.RecordFact(turnEndUsageKey(observation.GetTurnId()))
 		}
 	}
 	if latency := ev.GetMessageLatency(); latency != nil && latency.GetUuid() != "" {
@@ -636,9 +647,12 @@ func (r *turnAccountingReducer) commitResolved(turnID string) error {
 	if r.activeTurnID == turnID {
 		r.activeTurnID = ""
 	}
-	// The corrections belong to the responses of the turn just settled, so they
-	// are retired with it rather than accumulating for the life of the session.
-	clear(r.responseUsageCorrections)
+	// THE CORRECTIONS LEDGER OUTLIVES THE SETTLEMENT, deliberately. It used to be
+	// cleared here, which made a correction arriving after its turn settled land
+	// on an empty ledger and vanish. Late corrections are now a first-class
+	// outcome — they REVISE the settled stamp (terminalsettlement.go) — so the
+	// ledger is retired by its own bounded window instead (accountinghold.go,
+	// enrichmentRetention) rather than by this commit.
 	return nil
 }
 
@@ -662,11 +676,36 @@ func (r *turnAccountingReducer) response(apiMessageID string) *frontendv1.TokenU
 // vendor's own cumulative usage for the same API message, reported later.
 func (r *turnAccountingReducer) recordResponseUsageCorrection(apiMessageID string, usage *datav1.ApiUsage) {
 	corrected := vendorTokenUsageFromAPI(usage)
-	r.responseUsageCorrections[apiMessageID] = corrected
 	if existing := r.response(apiMessageID); existing != nil {
 		existing.Usage = proto.Clone(corrected).(*frontendv1.VendorTokenUsage)
 		r.logf("session-controller: corrected a response's token usage from its message_delta (api_message_id=%s output_tokens=%d)", apiMessageID, corrected.GetOutputTokens())
 	}
+	// FILED LAST, because filing is what releases the enrichment holds that read
+	// this ledger, and a hold released before the in-place patch above would
+	// resolve the turn's stamp from the response record it is about to correct.
+	r.corrections.Record(apiMessageID, corrected)
+}
+
+// enrichmentDependencies names everything one turn's accounting stamp is not
+// complete without: the final usage of every response it is derived from, and
+// the turn's own END-BOUNDARY account-usage observation.
+//
+// THE END BOUNDARY IS A DEPENDENCY OF THE STAMP AND OF NOTHING ELSE. The turn
+// is settled by the vendor's result and the user has their answer long before
+// this set is satisfied; what waits on it is only the figure in the footer. A
+// turn the reducer no longer holds names nothing.
+func (r *turnAccountingReducer) enrichmentDependencies(turnID string) []string {
+	turn := r.turns[turnID]
+	if turn == nil {
+		return nil
+	}
+	deps := make([]string, 0, len(turn.responses)+1)
+	for _, response := range turn.responses {
+		if id := response.GetApiMessageId(); id != "" {
+			deps = append(deps, id)
+		}
+	}
+	return append(deps, turnEndUsageKey(turnID))
 }
 
 // applyResponseUsageCorrection gives a response record the final usage its
@@ -677,11 +716,11 @@ func (r *turnAccountingReducer) recordResponseUsageCorrection(apiMessageID strin
 // representable: the ledger reports its disagreement honestly rather than being
 // quietly reconciled against evidence nobody sent.
 func (r *turnAccountingReducer) applyResponseUsageCorrection(usage *frontendv1.TokenUtilization) {
-	corrected := r.responseUsageCorrections[usage.GetApiMessageId()]
+	corrected := r.corrections.Correction(usage.GetApiMessageId())
 	if corrected == nil {
 		return
 	}
-	usage.Usage = proto.Clone(corrected).(*frontendv1.VendorTokenUsage)
+	usage.Usage = corrected
 	r.logf("session-controller: applied a filed message_delta token-usage correction to its response (api_message_id=%s output_tokens=%d)", usage.GetApiMessageId(), corrected.GetOutputTokens())
 }
 

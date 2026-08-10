@@ -140,7 +140,7 @@ type turnInterrupter interface {
 // proceeds and `stopShimSettlingTurn` closes the axis. Nothing is returned
 // because there is nothing a caller could decide differently — a teardown that
 // could not interrupt still tears down — and each is logged where it happens.
-func (m *Manager) drainLiveTurnForStop(workspace, sessionID string, cause StopCause, turnID string, cl turnInterrupter) {
+func (m *Manager) drainLiveTurnForStop(workspace, sessionID string, cause StopCause, turnID string, cl turnInterrupter, cons *consumer) {
 	path := cause.path()
 	m.logf("session-controller: teardown turn drain ENTRY ws=%q session=%s path=%s client_present=%v",
 		workspace, sessionID, path, cl != nil)
@@ -176,6 +176,13 @@ func (m *Manager) drainLiveTurnForStop(workspace, sessionID string, cause StopCa
 	// is a window in which a crash loses the user's work — so the durable
 	// record is what the interrupt is allowed to proceed FROM.
 	m.recordInterruptedTurnResumption(workspace, sessionID, cause, turnID)
+	// ALSO BEFORE THE INTERRUPT. The result the stop provokes can reach the
+	// consumer before Interrupt returns, and a turn this teardown displaced
+	// must not be settled from it as a turn that finished on its own
+	// (terminalsettlement.go).
+	if cons != nil {
+		cons.noteTurnStopInFlight(turnID)
+	}
 	// Deliberately NOT the manager's root context. A daemon shutdown cancels
 	// that root, and the shutdown teardown is exactly the one whose turns most
 	// need stopping; inheriting it would make the interrupt a guaranteed no-op
@@ -244,7 +251,7 @@ func (m *Manager) releaseHeldTerminalResults(d *sessionController, cause StopCau
 // has been evicted from byWS, the cancel has landed, and neither the shim nor
 // the consumer is reachable from what that close is handed.
 func (m *Manager) drainAndCancelSessionController(workspace string, d *sessionController, cause StopCause) {
-	m.drainLiveTurnForStop(workspace, d.sessionID, cause, d.namedTurnForResumption(), d.client)
+	m.drainLiveTurnForStop(workspace, d.sessionID, cause, d.namedTurnForResumption(), d.client, d.consumer)
 	m.releaseHeldTerminalResults(d, cause)
 	if d.cancel != nil {
 		d.cancel()

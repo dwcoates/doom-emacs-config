@@ -83,7 +83,56 @@ func (c *consumer) reconcileTurnHandshake(hello *corev1.ShimHello) (active bool,
 			c.workspace, c.sessionID, formatTurnIDs(closed), ssm.TurnCloseRestartInterrupted,
 			formatTurnIDs(before))
 	}
+	c.healStaleThinkingOnBringUp(hello, after)
 	return len(after) > 0, closed, nil
+}
+
+// healStaleThinkingOnBringUp re-derives the workspace's render state from the
+// RECONCILED turn ledger and clears a `thinking` the ledger no longer supports.
+//
+// # Why the reconciliation above is not already enough
+//
+// It reconciles the LEDGER. A render state is a separate record, and the two
+// went out of step in production: session s_f223cd698d687299 had its claim
+// closed and turn_in_flight=false agreed at the wire, and the workspace still
+// rendered `thinking`, because nothing re-derived the render state from the
+// reconciled ledger and nothing published the re-derivation to the frontends
+// already holding the stale one. A wedge that survives its own cure is a wedge
+// that survives forever, since bring-up is the one moment every historical
+// latch passes back through.
+//
+// # Why it is level-triggered, and keyed on the ledger rather than on a branch
+//
+// The predicate is the STATE the reconciliation left behind — the hello reports
+// no turn in flight and the ledger holds no claim for this session — not which
+// internal branch produced it. So it heals a latch whatever put it there: a
+// claim this handshake just cut, a claim closed long ago by a generation that
+// never published the closing state, or a row poisoned by a shim killed outside
+// this daemon's knowledge. Nothing has to have gone a particular way for the
+// heal to run; the wedge simply cannot be represented after a bring-up.
+//
+// A FAILURE IS LOUD AND NEVER FAILS THE BRING-UP. The session is perfectly
+// driveable with a stale colour, and refusing to establish it over a row this
+// could not tidy would be strictly worse than the row.
+func (c *consumer) healStaleThinkingOnBringUp(hello *corev1.ShimHello, after []string) {
+	if hello.GetTurnInFlight() || len(hello.GetActiveTurnIds()) > 0 || len(after) > 0 {
+		return
+	}
+	// PUBLISH IS THE POINT, alongside the closing row. A frontend that is
+	// already rendering `thinking` learns nothing from a state it is never
+	// handed, which is exactly how the incident's workspace kept the colour
+	// after the wire had agreed the turn was over.
+	cleared, err := c.ssm.ReconcileAlreadyComplete(c.workspace, c.sessionID, c.push.PushWorkspaceState)
+	if err != nil {
+		c.warn("session-controller: bring-up render-state self-heal FAILED ws=%q session=%s: %v — the shim reports no turn in flight and the reconciled ledger holds no claim, but the workspace may stay latched in `thinking` until another edge supersedes it",
+			c.workspace, c.sessionID, err)
+		return
+	}
+	if !cleared {
+		return
+	}
+	c.logf("session-controller: bring-up render-state SELF-HEALED ws=%q session=%s — the shim reports no turn in flight and the reconciled turn ledger holds no claim for this session, so a `thinking` still standing over that was stale and is retired and republished here rather than waiting for an edge that is not coming",
+		c.workspace, c.sessionID)
 }
 
 // durablySettledClaims names the standing turn claims the STORE already holds a
