@@ -645,8 +645,30 @@ body::after {
   margin-top: 0.5rem;
   padding-top: 0.4rem;
   border-top: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
+  /* The section's height budget, in rows. Emacs sends EVERY merge that
+     landed inside the activity window, so the merge count is unbounded and
+     the section is bounded here instead: ten rows of height, and the rest
+     reached by scrolling in place. */
+  --merged-visible-rows: 10;
+  /* One row's drawn height: .row's own vertical padding (0.28rem twice)
+     plus a line box that clears both the 14px row text and the 9px status
+     disc. Fixed rather than natural so ten rows is EXACTLY the cap below
+     — a natural height would let the cap drift with the longest row. */
+  --merged-row-h: calc(0.28rem * 2 + 1.35rem);
 }
 #ws-sidebar .repo.merged-section .repo-head { color: var(--info-agents); }
+#ws-sidebar .repo.merged-section .row {
+  height: var(--merged-row-h);
+  box-sizing: border-box;
+}
+/* Scroll, not truncate: the eleventh merge is still history the user can go
+   looking for, so it stays in the DOM below the fold of its own scroller
+   rather than being dropped from the roster. `max-height` keeps a short
+   section shrunk to its rows instead of holding an empty ten-row box open. */
+#ws-sidebar .repo.merged-section > .rows {
+  max-height: calc(var(--merged-row-h) * var(--merged-visible-rows));
+  overflow-y: auto;
+}
 
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #ws-sidebar .row .when {
