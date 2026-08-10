@@ -1099,6 +1099,44 @@ confirmation round trip completes long after this returns."
     (agent-repl--log ws "interrupt[gui]: ws=%s kind=%s (uds interrupt)" ws kind)
     t))
 
+(defun agent-repl--gui-cancel-detached-agents (ws)
+  "The gui frontend\='s detached-agent cancel (registry `:cancel-detached-fn\=').
+Sends the UDS `cancelDetachedAgents\=' command keyed by WS\='s cwd
+\(`agent-repl--frontend-ws-command-key\=' — the daemon resolves that cwd ->
+session).  Returns t once the command is dispatched.
+
+WHY THIS IS NOT `agent-repl--gui-interrupt\='.  An interrupt stops the
+TURN.  The state this is sent in — main turn over, detached subagents
+still working — is exactly the state with no turn to stop, so the
+interrupt is answered ALREADY_COMPLETE and the agents it was meant to
+stop keep running.  This command names them directly.
+
+IT SENDS NO CONFIRMATION FLAG and arms no challenge handler.  The
+question was already put to the user before this was called
+\(`agent-repl--confirm-cancel-running\='), and the daemon does not
+challenge this command: sending it IS the deliberate act the
+interrupt\='s `confirm_agents\=' gate exists to require.
+
+THE REFUSAL IS SURFACED, not swallowed.  A cancel that found nothing
+running is nacked by the daemon, and that nack is the user\='s only
+report that their keystroke reached no work at all."
+  (let ((key (agent-repl--frontend-ws-command-key ws))
+        (req nil))
+    (agent-repl--uds-send-command
+     "cancelDetachedAgents" nil key nil
+     :on-registered (lambda (id) (setq req id))
+     :on-failure
+     (lambda (err)
+       (agent-repl--warn ws "cancel-detached-agents: ws=%s REFUSED: %s" ws err))
+     :on-success
+     (lambda ()
+       (agent-repl--log ws "cancel-detached-agents: ws=%s complete request-id=%s" ws req)
+       (agent-repl--user-message
+        ws "detached agents cancelled" nil
+        :detail (format "cancelDetachedAgents request-id=%s key=%s" req key))))
+    (agent-repl--log ws "cancel-detached[gui]: ws=%s key=%s request-id=%s" ws key req)
+    t))
+
 (defun agent-repl--frontend-restart-session (ws)
   "Send the `restartSession\=' command for WS, keyed by its cwd.
 Returns the request-id.  Signals (via `agent-repl--uds-send-command\=') when

@@ -778,16 +778,21 @@ state must not change."
 
 (defmacro agent-repl-cmd-test--with-interrupt-confirm (state answer &rest body)
   "Run BODY with `test-ws' in agent-state STATE and `y-or-n-p' returning ANSWER.
-Binds `dispatched' to nil; the frontend interrupt records into it and
-reports delivered.  `prompted' is bound to nil and set t when `y-or-n-p'
-is consulted, so BODY can assert whether a prompt was raised."
+Binds `dispatched' to nil; the frontend TURN interrupt records into it and
+reports delivered.  `cancelled' is bound the same way for the frontend
+DETACHED-AGENT cancel, so a test can assert which of the two commands the
+dispatch decision chose — they are different commands with different
+effects, and one capture could not tell them apart.  `prompted' is bound to
+nil and set t when `y-or-n-p' is consulted, so BODY can assert whether a
+prompt was raised."
   (declare (indent 2))
   `(agent-repl-test--with-clean-state
      (let ((dispatched nil)
+           (cancelled nil)
            (prompted nil))
-       ;; Not every BODY reads both captures; `ignore' marks them as
+       ;; Not every BODY reads all three captures; `ignore' marks them as
        ;; deliberately maybe-unused so expansions compile warning-free.
-       (ignore dispatched prompted)
+       (ignore dispatched cancelled prompted)
        (agent-repl--ws-put "test-ws" :frontend 'gui)
        (agent-repl--ws-set-agent-state "test-ws" ,state)
        (cl-letf (((symbol-function '+workspace-current-name)
@@ -796,25 +801,64 @@ is consulted, so BODY can assert whether a prompt was raised."
                   (lambda (_prompt) (setq prompted t) ,answer))
                  ((symbol-function 'agent-repl--frontend-dispatch-interrupt)
                   (lambda (ws kind) (setq dispatched (list ws kind)) t))
+                 ((symbol-function 'agent-repl--frontend-dispatch-cancel-detached)
+                  (lambda (ws) (setq cancelled ws) t))
                  ((symbol-function 'run-at-time)
                   (lambda (&rest _) nil)))
          ,@body))))
 
 (ert-deftest agent-repl-cmd-test-interrupt/prompts-and-cancels-when-confirmed ()
-  "A workspace with subagents in flight, confirmed at the prompt, is interrupted."
+  "A workspace with detached agents, confirmed at the prompt, has them cancelled.
+The yes now reaches the agents it asked about: `:idle-async' means the main
+turn has ENDED, so the turn interrupt this used to send was a guaranteed
+no-op and touched none of them."
   (agent-repl-cmd-test--with-interrupt-confirm :thinking t
     (agent-repl--ws-put "test-ws" :pushed-render-state :idle-async)
     (agent-repl-interrupt)
     (should prompted)
-    (should (equal dispatched '("test-ws" escape)))))
+    (should (equal cancelled "test-ws"))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/confirmed-cancel-sends-no-turn-interrupt ()
+  "The detached-agent branch sends the cancel INSTEAD of the turn interrupt.
+Sending both would put a stop on the wire that provably does nothing, which
+is the defect this branch exists to remove."
+  (agent-repl-cmd-test--with-interrupt-confirm :thinking t
+    (agent-repl--ws-put "test-ws" :pushed-render-state :idle-async)
+    (agent-repl-interrupt)
+    (should-not dispatched)))
+
+(ert-deftest agent-repl-cmd-test-interrupt/undispatched-cancel-is-surfaced ()
+  "A cancel the frontend could not dispatch is warned about, never silent.
+The agents are still running, and a quiet return would read as a stop."
+  (agent-repl-cmd-test--with-interrupt-confirm :thinking t
+    (agent-repl--ws-put "test-ws" :pushed-render-state :idle-async)
+    (let ((warned nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-dispatch-cancel-detached)
+                 (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (&rest args) (setq warned args))))
+        (agent-repl-interrupt)
+        (should warned)))))
+
+(ert-deftest agent-repl-cmd-test-interrupt/thinking-workspace-still-interrupts-the-turn ()
+  "A `:thinking' workspace with no detached work is UNCHANGED: the turn interrupt.
+The cancel is for detached agents alone; a live turn is still stopped by
+stopping the turn."
+  (agent-repl-cmd-test--with-interrupt-confirm :thinking t
+    (agent-repl--ws-put "test-ws" :pushed-render-state :thinking)
+    (agent-repl-interrupt)
+    (should (equal dispatched '("test-ws" escape)))
+    (should-not cancelled)))
 
 (ert-deftest agent-repl-cmd-test-interrupt/aborts-when-declined ()
-  "A workspace with subagents, declined at the prompt, is NOT interrupted."
+  "A workspace with detached agents, declined at the prompt, is left alone.
+Neither command goes out: a declined confirmation performs nothing."
   (agent-repl-cmd-test--with-interrupt-confirm :thinking nil
     (agent-repl--ws-put "test-ws" :pushed-render-state :idle-async)
     (agent-repl-interrupt)
     (should prompted)
-    (should-not dispatched)))
+    (should-not dispatched)
+    (should-not cancelled)))
 
 (ert-deftest agent-repl-cmd-test-interrupt/leaves-running-agent-alone-when-declined ()
   "A declined confirmation leaves the agent-state at :thinking."
@@ -838,21 +882,21 @@ is consulted, so BODY can assert whether a prompt was raised."
     (should (equal dispatched '("test-ws" escape)))))
 
 (ert-deftest agent-repl-cmd-test-interrupt/no-prompt-when-confirm-disabled ()
-  "With `agent-repl-interrupt-confirm' nil, subagents are interrupted directly."
+  "With `agent-repl-interrupt-confirm' nil, detached agents are cancelled directly."
   (let ((agent-repl-interrupt-confirm nil))
     (agent-repl-cmd-test--with-interrupt-confirm :thinking t
       (agent-repl--ws-put "test-ws" :pushed-render-state :idle-async)
       (agent-repl-interrupt)
       (should-not prompted)
-      (should (equal dispatched '("test-ws" escape))))))
+      (should (equal cancelled "test-ws")))))
 
 (ert-deftest agent-repl-cmd-test-interrupt/no-confirm-arg-suppresses-prompt ()
-  "Passing NO-CONFIRM non-nil interrupts running subagents without prompting."
+  "Passing NO-CONFIRM non-nil cancels detached agents without prompting."
   (agent-repl-cmd-test--with-interrupt-confirm :thinking t
     (agent-repl--ws-put "test-ws" :pushed-render-state :idle-async)
     (agent-repl-interrupt "test-ws" t)
     (should-not prompted)
-    (should (equal dispatched '("test-ws" escape)))))
+    (should (equal cancelled "test-ws"))))
 
 ;;;; ---- agent-repl--confirm-cancel-running / prompt ----
 

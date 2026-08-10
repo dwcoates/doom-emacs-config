@@ -367,6 +367,48 @@ that forgot to pass `:active-env' would silently accept it."
        (should (agent-repl--frontend-dispatch-interrupt "ws1" 'escape))
        (should (equal got '("ws1" escape)))))))
 
+(ert-deftest agent-repl-test-frontends-dispatch-cancel-detached-routes-by-ws ()
+  "Detached-agent cancel dispatch reaches the workspace's own capability."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-frontend-registry
+     (let ((got nil))
+       (agent-repl-register-frontend
+        (agent-repl-test--make-frontend
+         'probe :cancel-detached-fn (lambda (ws) (setq got ws) t)))
+       (agent-repl--ws-put "ws1" :frontend 'probe)
+       ;; Act / Assert
+       (should (agent-repl--frontend-dispatch-cancel-detached "ws1"))
+       (should (equal got "ws1"))))))
+
+(ert-deftest agent-repl-test-frontends-dispatch-cancel-detached-without-capability-is-nil ()
+  "A frontend with NO cancel capability answers nil rather than falling back.
+The whole point of the command is that an interrupt cannot reach detached
+work, so quietly sending one instead would report a stop that did nothing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-frontend-registry
+     (let ((interrupted nil))
+       (agent-repl-register-frontend
+        (agent-repl-test--make-frontend
+         'probe :interrupt-fn (lambda (_ws _kind) (setq interrupted t) t)))
+       (agent-repl--ws-put "ws1" :frontend 'probe)
+       ;; Act / Assert
+       (should-not (agent-repl--frontend-dispatch-cancel-detached "ws1"))
+       (should-not interrupted)))))
+
+(ert-deftest agent-repl-test-frontends-register-accepts-a-frontend-without-cancel-detached ()
+  "The cancel capability is OPTIONAL: registration does not require it.
+It is a capability a frontend may not have, unlike the interrupt every
+frontend must implement."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-frontend-registry
+     ;; Act
+     (agent-repl-register-frontend (agent-repl-test--make-frontend 'probe))
+     ;; Assert
+     (should (agent-repl-frontend-get 'probe)))))
+
 (ert-deftest agent-repl-test-frontends-dispatch-show-routes-by-ws ()
   "Show dispatch reaches the workspace's frontend capability."
   ;; Arrange
