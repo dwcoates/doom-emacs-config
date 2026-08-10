@@ -101,7 +101,7 @@ import {
 import { attachLoginTerminal, type LoginTerminal } from "./login-terminal.js";
 import { closeLogin, loginNotice, requestLogin } from "./login.js";
 import { PermissionMode } from "./protocol.js";
-import { decodeFrontendFrame } from "./frontend-proto.js";
+import { decodeFrontendFrame, unknownFrameArmTally } from "./frontend-proto.js";
 import { escapeHtml } from "./highlight.js";
 import {
   controlPlaneFailure,
@@ -1448,6 +1448,22 @@ async function boot(): Promise<void> {
           // decode and the window opening is a chance to lose it and paint the
           // severed card for a routine bounce. The window itself refuses a
           // malformed announcement, so a bad frame leaves the page honest.
+          // A NEWER DAEMON'S ADDITIVE ARM, which the decoder tolerates rather
+          // than throwing on (frontend-proto.ts, UnknownFrameArm). Reported
+          // ONCE per distinct arm: the daemon pushes such a frame on every
+          // snapshot, so a line per frame would be the flood, while a line per
+          // arm is the whole fact — this bundle predates that arm.
+          if (decoded.frame.case === "unknownArm") {
+            const field = decoded.frame.value.field;
+            const seen = unknownFrameArmTally().get(field) ?? 0;
+            if (seen === 1) {
+              clog(
+                "warn",
+                `frontend frame carries the unknown arm "${field}"; this bundle predates it and is ` +
+                  `ignoring those frames rather than failing ingest`,
+              );
+            }
+          }
           if (decoded.frame.case === "restartPending") {
             restartWindow.announce(announcementFromView(decoded.frame.value));
           }
@@ -1695,6 +1711,16 @@ async function boot(): Promise<void> {
         // told us about, so the blue card is withheld and the status line says
         // so quietly instead. The window is bounded: once it expires this same
         // socket loss raises the same card it always did.
+        // A RELOAD THIS PAGE DECIDED ON IS NOT A LOST DAEMON. The reload is
+        // deferred (version-skew.ts), so the socket is torn down by the
+        // navigation while this handler can still run — and the blue card it
+        // would raise flashes on the way out for a disconnect the page caused
+        // itself. Withheld here for the same reason the announced-restart
+        // window withholds it below: the connection is not the news.
+        if (versionSkew.isReloading) {
+          clog("info", `daemon unreachable close=${code} ${reason} during this page's own reload; card withheld`);
+          return;
+        }
         if (restartWindow.suppressesDisconnectAlarm()) {
           clog("info", `daemon unreachable close=${code} ${reason} during an announced restart; card withheld`);
           statusEl.textContent = RESTARTING_INDICATOR;

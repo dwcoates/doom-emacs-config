@@ -3,6 +3,9 @@ import { describe, it, expect } from "vitest";
 import {
   FORCED_RELOAD_AT_KEY,
   FORCED_RELOAD_COOLDOWN_MS,
+  FORCED_RELOAD_COUNT_KEY,
+  HEALTHY_UPTIME_MS,
+  MAX_FORCED_RELOADS,
   STALE_BUNDLE_EXPIRY_CYCLES,
   type DaemonBuild,
   VersionSkewGuard,
@@ -61,9 +64,15 @@ interface Harness {
   now: number;
 }
 
-/** A guard whose reload is deferred into `deferred` until `settle()` runs it. */
-function harness(): Harness {
-  const storage = new FakeStorage();
+/**
+ * A guard whose reload is deferred into `deferred` until `settle()` runs it.
+ *
+ * STORAGE and START are parameters because a page RELOAD is modelled as a new
+ * guard over the SAME session storage at a later clock — that pair is the only
+ * memory a reloaded page inherits, and the cross-reload bounds are exactly the
+ * thing under test.
+ */
+function harness(storage: FakeStorage = new FakeStorage(), startedAtMs = 1_000_000): Harness {
   const h: Harness = {
     guard: undefined as unknown as VersionSkewGuard,
     storage,
@@ -75,7 +84,7 @@ function harness(): Harness {
       const pending = h.deferred.splice(0);
       for (const fn of pending) fn();
     },
-    now: 1_000_000,
+    now: startedAtMs,
   };
   h.guard = new VersionSkewGuard({
     reload: () => {
@@ -505,5 +514,139 @@ describe("an ordinary bounce, which changes no build", () => {
     // Assert — one expiry short of the threshold, because the re-adoption
     // reset the count.
     expect(h.reloads).toBe(0);
+  });
+});
+
+/**
+ * THE PRODUCTION LOOP (workspace marcos-pr-remediation, daemon pid 36279): a
+ * page reloaded, adopted exactly one snapshot, wedged again, expired twice, and
+ * reloaded — over and over, each cycle flashing the reconnect banner. The
+ * single adoption cleared the expiry counter, and the cycle ran LONGER than the
+ * cooldown, so neither existing bound could ever be reached. The cross-reload
+ * COUNT is what makes the loop terminate in the refusal instead.
+ */
+describe("a reload loop whose cycles outrun the cooldown", () => {
+  /** One wedge cycle: a fresh page that adopts once, then expires its lease out. */
+  function wedgeCycle(storage: FakeStorage, atMs: number): Harness {
+    const h = harness(storage, atMs);
+    h.guard.observeSnapshotAdoption(buildOf("v1.2.3"));
+    for (let i = 0; i < STALE_BUNDLE_EXPIRY_CYCLES; i++) h.guard.observeLeaseExpiry();
+    h.settle();
+    return h;
+  }
+
+  it("terminates in a refusal rather than reloading forever", () => {
+    // Arrange — cycles spaced beyond the cooldown, which is the case the
+    // cooldown alone cannot catch.
+    const storage = new FakeStorage();
+    const spacingMs = FORCED_RELOAD_COOLDOWN_MS + 10_000;
+    let at = 1_000_000;
+    for (let i = 0; i < MAX_FORCED_RELOADS; i++) {
+      wedgeCycle(storage, at);
+      at += spacingMs;
+    }
+    // Act — the page that comes back from the last permitted reload.
+    const last = wedgeCycle(storage, at);
+    // Assert
+    expect(last.reloads).toBe(0);
+    expect(last.refusals).toHaveLength(1);
+  });
+
+  it("names the reload count in the refusal it surfaces", () => {
+    // Arrange
+    const storage = new FakeStorage();
+    storage.setItem(FORCED_RELOAD_COUNT_KEY, String(MAX_FORCED_RELOADS));
+    const h = harness(storage);
+    // Act
+    for (let i = 0; i < STALE_BUNDLE_EXPIRY_CYCLES; i++) h.guard.observeLeaseExpiry();
+    // Assert
+    expect(h.refusals[0]).toContain(`reloaded ${MAX_FORCED_RELOADS} times`);
+  });
+
+  it("counts each forced reload in session storage, which is all a fresh page inherits", () => {
+    // Arrange
+    const storage = new FakeStorage();
+    const h = harness(storage);
+    // Act
+    for (let i = 0; i < STALE_BUNDLE_EXPIRY_CYCLES; i++) h.guard.observeLeaseExpiry();
+    h.settle();
+    // Assert
+    expect(storage.getItem(FORCED_RELOAD_COUNT_KEY)).toBe("1");
+  });
+
+  it("refuses to reload on a count it cannot trust", () => {
+    // Arrange — only this module writes the key, so a negative count is
+    // corruption that would RAISE the ceiling if it were tolerated.
+    const storage = new FakeStorage();
+    storage.setItem(FORCED_RELOAD_COUNT_KEY, "-4");
+    const h = harness(storage);
+    // Act + Assert
+    expect(() => {
+      for (let i = 0; i < STALE_BUNDLE_EXPIRY_CYCLES; i++) h.guard.observeLeaseExpiry();
+    }).toThrow(/unusable value/);
+  });
+});
+
+describe("the forced-reload history", () => {
+  it("is discharged by a page that stays current for a full cooldown", () => {
+    // Arrange — a page that really recovered must not be condemned by a skew
+    // it already repaired.
+    const storage = new FakeStorage();
+    storage.setItem(FORCED_RELOAD_COUNT_KEY, String(MAX_FORCED_RELOADS));
+    const h = harness(storage);
+    h.now += HEALTHY_UPTIME_MS;
+    // Act
+    h.guard.observeSnapshotAdoption(buildOf("v1.2.3"));
+    // Assert
+    expect(storage.getItem(FORCED_RELOAD_COUNT_KEY)).toBe("0");
+  });
+
+  it("survives the single adoption a wedged page manages before wedging again", () => {
+    // Arrange — discharging on ANY adoption is what would reinstate the loop.
+    const storage = new FakeStorage();
+    storage.setItem(FORCED_RELOAD_COUNT_KEY, String(MAX_FORCED_RELOADS));
+    const h = harness(storage);
+    // Act — adopted immediately after the page loaded, as the wedged page did.
+    h.guard.observeSnapshotAdoption(buildOf("v1.2.3"));
+    // Assert
+    expect(storage.getItem(FORCED_RELOAD_COUNT_KEY)).toBe(String(MAX_FORCED_RELOADS));
+  });
+});
+
+/**
+ * The seam main.ts reads to withhold the "lost the connection to the daemon"
+ * card while the page tears itself down: a self-initiated reload closes the
+ * socket, and that close is not news about the daemon.
+ */
+describe("the self-reload flag", () => {
+  it("is clear on a page that has decided on no reload", () => {
+    // Arrange
+    const h = harness();
+    // Act
+    h.guard.observeSnapshotAdoption(buildOf("v1.2.3"));
+    // Assert
+    expect(h.guard.isReloading).toBe(false);
+  });
+
+  it("is set from the moment a reload is scheduled, before it runs", () => {
+    // Arrange — the socket dies during the deferred teardown, so the flag has
+    // to be true BEFORE `settle()`, not after.
+    const h = harness();
+    // Act
+    for (let i = 0; i < STALE_BUNDLE_EXPIRY_CYCLES; i++) h.guard.observeLeaseExpiry();
+    // Assert
+    expect(h.guard.isReloading).toBe(true);
+  });
+
+  it("stays clear when the reload was refused, so the card is not withheld", () => {
+    // Arrange — a refused page is NOT going anywhere, and a disconnect it
+    // suffers afterwards is a real one the user must be told about.
+    const storage = new FakeStorage();
+    storage.setItem(FORCED_RELOAD_COUNT_KEY, String(MAX_FORCED_RELOADS));
+    const h = harness(storage);
+    // Act
+    for (let i = 0; i < STALE_BUNDLE_EXPIRY_CYCLES; i++) h.guard.observeLeaseExpiry();
+    // Assert
+    expect(h.guard.isReloading).toBe(false);
   });
 });
