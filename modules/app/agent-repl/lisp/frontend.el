@@ -68,6 +68,7 @@
 (declare-function agent-repl--frontend-base-url "agent-repl-frontend-client" ())
 (declare-function agent-repl--read-known-workspace "agent-repl-keybindings" (prompt))
 (declare-function agent-repl--frontend-ws-command-key "agent-repl-frontend-client" (ws))
+(declare-function agent-repl--frontend-session-view "agent-repl-frontend-state" (workspace))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
 (declare-function agent-repl-window--harden "agent-repl-window" (win &rest recipe))
@@ -1078,38 +1079,110 @@ entitled to one.  The refusals are all preconditions, not failures:
 
 Establishment failure is NOT swallowed: it is warned about, the same as
 every other ensure-session caller."
+  (let ((refusal (agent-repl--frontend-precreate-refusal ws)))
+    (cond
+     (refusal
+      (if (memq refusal '(:not-live :not-gui :already-mounted))
+          (agent-repl--log-verbose ws "precreate-webview: skipped=%s" refusal)
+        (agent-repl--log ws "precreate-webview: skipped=%s detail=%s" refusal
+                         (or (and (eq refusal :open-fenced)
+                                  (agent-repl--open-fence-detail ws))
+                             "none")))
+      nil)
+     ;; ALREADY ESTABLISHED -> MOUNT NOW.  A workspace restored from a
+     ;; snapshot, or one the daemon has already answered for, is not
+     ;; mid-boot: there is no establishment edge left to fire, so hanging
+     ;; the mount off `--frontend-after-ensure-session' parks it forever on
+     ;; a continuation nothing will call.  The page itself connects to
+     ;; whatever state the workspace is in (including hibernated, which its
+     ;; own connect revives) and the webapp renders an unwired session
+     ;; honestly, so mounting against an established workspace needs no
+     ;; round trip from this end.
+     ((agent-repl--frontend-ws-established-p ws)
+      (agent-repl--log ws "precreate-webview: begin established=t")
+      (agent-repl--frontend-precreate-mount ws)
+      :created)
+     (t
+      ;; GENUINELY MID-BOOT.  The workspace has no daemon view yet, so the
+      ;; URL would address a workspace the daemon has not opened; the mount
+      ;; waits on the establishment that is already under way.
+      (agent-repl--log ws "precreate-webview: begin established=nil")
+      (agent-repl--frontend-after-ensure-session
+       ws
+       (lambda () (agent-repl--frontend-precreate-mount ws))
+       (lambda (detail)
+         (agent-repl--warn ws "precreate-webview: FAILED detail=%s" detail)))
+      :pending))))
+
+(defun agent-repl--frontend-precreate-mount (ws)
+  "Mount WS's webview buffer without displaying it, returning the buffer.
+Anchored the same way the open path anchors, so the buffer is born into
+WS's perspective rather than whichever one is current when the mount
+runs.  No window is touched either way."
+  (agent-repl--call-in-background-workspace
+   ws
+   (lambda ()
+     (let ((buf (agent-repl--frontend-ensure-webview-buffer
+                 ws (agent-repl--frontend-webview-url ws))))
+       (agent-repl--log ws "precreate-webview: outcome=created buf=%s"
+                        (and (buffer-live-p buf) (buffer-name buf)))
+       buf))))
+
+(defun agent-repl--frontend-ws-established-p (ws)
+  "Return non-nil when the daemon already knows WS as a workspace.
+
+The authoritative reading is the daemon's own pushed `SessionView' for
+WS's command key (`agent-repl--frontend-session-view'): the daemon
+publishes one for every workspace it has opened, and it keeps publishing
+for a session that has gone hibernated or severed.  A view therefore
+means \"establishment already happened\", which is exactly the question a
+pre-creation has to answer before deciding whether to wait for one.
+
+A workspace with no `:project-dir' has no command key at all, so it
+cannot have been established; that is answered nil rather than signalled,
+because an unroutable workspace is a state this predicate exists to
+classify."
+  (and (agent-repl--ws-get ws :project-dir)
+       (agent-repl--frontend-session-view
+        (agent-repl--frontend-ws-command-key ws))
+       t))
+
+(defun agent-repl--frontend-precreate-refusal (ws)
+  "Return the keyword naming why WS may NOT be pre-created, or nil when it may.
+
+THE ONE eligibility answer, shared by the mount
+\(`agent-repl--frontend-precreate-webview') and the recovery sweep's
+queue (`agent-repl--webview-precreate-needed-p') so the two can never
+disagree about which workspaces are owed a page.
+
+The gui test is `agent-repl--ws-gui-frontend-p' — the SAME predicate the
+switch/open path resolves a workspace's presentation through — not a raw
+plist read, so a snapshot-restored workspace (which carries no explicit
+`:frontend' at all and resolves to the default) is classified exactly as
+the open path would classify it.
+
+Refusals, all preconditions rather than failures:
+
+  - `:not-live'          a dead or nuked workspace;
+  - `:not-gui'           a workspace whose frontend is not the web gui;
+  - `:merge-completed'   a merged workspace, restored data-only with no
+                         session — a CLOSED workspace, and an automatic
+                         page for it would resurrect a presentation the
+                         user is done with;
+  - `:open-fenced'       the daemon has said the conversation cannot be
+                         resumed, and an automatic page is exactly the
+                         retry the fence exists to stop;
+  - `:already-mounted'   a live webview buffer already exists (this is
+                         what makes pre-creation idempotent);
+  - `:no-xwidget'        an Emacs with no xwidget support has no webview
+                         to make."
   (cond
-   ((not (agent-repl--ws-live-p ws))
-    (agent-repl--log-verbose ws "precreate-webview: skipped=not-live") nil)
-   ((not (agent-repl--ws-gui-frontend-p ws))
-    (agent-repl--log-verbose ws "precreate-webview: skipped=not-gui") nil)
-   ((agent-repl--open-fence-active-p ws)
-    (agent-repl--log ws "precreate-webview: skipped=open-fenced detail=%s"
-                     (or (agent-repl--open-fence-detail ws) "none"))
-    nil)
-   ((buffer-live-p (agent-repl--ws-get ws :frontend-buffer))
-    (agent-repl--log-verbose ws "precreate-webview: skipped=already-mounted") nil)
-   ((not (agent-repl--frontend-xwidget-available-p))
-    (agent-repl--log ws "precreate-webview: skipped=xwidget-unavailable") nil)
-   (t
-    (agent-repl--log ws "precreate-webview: begin")
-    (agent-repl--frontend-after-ensure-session
-     ws
-     (lambda ()
-       ;; Anchored the same way the open path anchors, so the buffer is born
-       ;; into WS's perspective rather than whichever one is current when the
-       ;; daemon answers.  No window is touched either way.
-       (agent-repl--call-in-background-workspace
-        ws
-        (lambda ()
-          (let ((buf (agent-repl--frontend-ensure-webview-buffer
-                      ws (agent-repl--frontend-webview-url ws))))
-            (agent-repl--log ws "precreate-webview: outcome=created buf=%s"
-                             (and (buffer-live-p buf) (buffer-name buf)))
-            buf))))
-     (lambda (detail)
-       (agent-repl--warn ws "precreate-webview: FAILED detail=%s" detail)))
-    :pending)))
+   ((not (agent-repl--ws-live-p ws)) :not-live)
+   ((not (agent-repl--ws-gui-frontend-p ws)) :not-gui)
+   ((agent-repl--ws-get ws :merge-completed) :merge-completed)
+   ((agent-repl--open-fence-active-p ws) :open-fenced)
+   ((buffer-live-p (agent-repl--ws-get ws :frontend-buffer)) :already-mounted)
+   ((not (agent-repl--frontend-xwidget-available-p)) :no-xwidget)))
 
 (defun agent-repl--frontend-webview-url (ws)
   "Return the webapp URL for WS's webview.
