@@ -66,6 +66,7 @@ import {
   splitChessGameSegments,
 } from "./chess-game.js";
 import { inline, renderMarkdown } from "./markdown.js";
+import { SkillBodySection } from "./skill-body.js";
 import {
   DEFERRED_CLASS,
   HEIGHT_VAR,
@@ -1257,22 +1258,15 @@ function subagentCardContent(c: CardContext): string {
 /**
  * A skill's card: the base content, followed by the skill's own SKILL.md.
  *
- * The body is FOLDED BY DEFAULT and click-expandable, through the one capped
- * -section mechanic every long card section uses (`skill-content` is a
- * CAPPED_CLASSES entry, so expand.ts caps it, the click handler toggles it,
- * and FeedRenderer.render re-applies the open state after every reconcile —
- * which is what keeps a reader's expansion from collapsing under them when
- * the card updates).
- *
- * It renders as MARKDOWN rather than escaped text because a skill IS a
- * markdown document; the same renderer draws assistant prose and markdown Read
- * previews.
+ * The body arrives here only for an invocation that opened NO bubble; one that
+ * did carries its contents on `AsyncSkillBubble.body` and draws them inside the
+ * bubble instead. Both draw the same section, from the one renderer
+ * (`SkillBodySection`), so what the reader sees does not depend on which
+ * delivery a given invocation took.
  */
 function skillCardContent(c: CardContext): string {
-  const body = c.item.skillBody;
-  if (body === undefined || body === "") return baseCardContent(c);
   return `${baseCardContent(c)}
-      <div class="tool-output skill-content skill-content-md">${renderMarkdown(body)}</div>`;
+      ${SkillBodySection(c.item.skillBody ?? "")}`;
 }
 
 /**
