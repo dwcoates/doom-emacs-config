@@ -712,13 +712,23 @@ type WorkspaceCreateAssemblyConfig struct {
 // durable create store.  It is deliberately in cmd: server stays transport
 // only while this adapter maps the wire messages to daemon lifecycle facts.
 type WorkspaceCreationBridge struct {
-	manager  *workspacecreate.Manager
-	store    workspacecreate.JobStore
-	ctx      context.Context
-	mu       sync.Mutex
-	avail    map[chan *frontendv1.WorkspaceAvailable]struct{}
-	actions  map[chan *frontendv1.HostAction]struct{}
-	releases map[chan server.SessionPublicationRelease]struct{}
+	manager *workspacecreate.Manager
+	store   workspacecreate.JobStore
+	ctx     context.Context
+	mu      sync.Mutex
+	avail   map[chan *frontendv1.WorkspaceAvailable]struct{}
+	actions map[chan *frontendv1.HostAction]struct{}
+	// releasesMu guards releases ALONE, apart from mu.
+	//
+	// The release hand-off is a blocking send into a finite buffer, and the
+	// goroutine that drains it reaches back into this bridge — through Open and
+	// through the publication gate, both of which take mu. Sending under mu
+	// would therefore make a full buffer a deadlock: the sender holding the
+	// lock the receiver needs to make room. A lock of its own lets the send
+	// stay serialized against unsubscribe (which closes the channel) without
+	// standing in the receiver's way.
+	releasesMu sync.Mutex
+	releases   map[chan server.SessionPublicationRelease]struct{}
 	// publication memoizes the gate's verdict per worktree, including the
 	// "no creation job names this worktree" verdict. A later creation job for
 	// the same worktree is never masked by an old allow: the job claims its
@@ -796,10 +806,10 @@ func (b *WorkspaceCreationBridge) PrepareSessionPublication(_ context.Context, j
 
 func (b *WorkspaceCreationBridge) SubscribeSessionPublicationReleases() (<-chan server.SessionPublicationRelease, func()) {
 	ch := make(chan server.SessionPublicationRelease, 32)
-	b.mu.Lock()
+	b.releasesMu.Lock()
 	b.releases[ch] = struct{}{}
-	b.mu.Unlock()
-	return ch, func() { b.mu.Lock(); delete(b.releases, ch); close(ch); b.mu.Unlock() }
+	b.releasesMu.Unlock()
+	return ch, func() { b.releasesMu.Lock(); delete(b.releases, ch); close(ch); b.releasesMu.Unlock() }
 }
 
 func (b *WorkspaceCreationBridge) ReleaseSessionPublication(_ context.Context, decision workspacecreate.PublicationDecision) error {
@@ -827,15 +837,20 @@ func (b *WorkspaceCreationBridge) ReleaseSessionPublication(_ context.Context, d
 	if _, ok := b.publication[decision.WorktreePath]; !ok {
 		b.publication[decision.WorktreePath] = server.SessionPublicationDecision{JobID: decision.JobID, WorktreePath: decision.WorktreePath, SessionID: decision.SessionID, Materialized: false}
 	}
+	b.mu.Unlock()
+	// THE HAND-OFF HAPPENS UNDER releasesMu, NEVER UNDER mu — see the field's
+	// own comment. The receiver reaches back into this bridge through Open and
+	// through the publication gate, both of which take mu.
+	b.releasesMu.Lock()
 	subscriberCount := len(b.releases)
 	if subscriberCount != 1 {
-		b.mu.Unlock()
+		b.releasesMu.Unlock()
 		return fmt.Errorf("workspace create: session-publication release job=%q worktree=%q session=%q needs exactly one server subscriber, got %d", decision.JobID, decision.WorktreePath, decision.SessionID, subscriberCount)
 	}
 	for ch := range b.releases {
 		ch <- value
 	}
-	b.mu.Unlock()
+	b.releasesMu.Unlock()
 	if err := <-value.Completion; err != nil {
 		return fmt.Errorf("workspace create: session-publication release job=%q worktree=%q session=%q completion: %w", decision.JobID, decision.WorktreePath, decision.SessionID, err)
 	}
