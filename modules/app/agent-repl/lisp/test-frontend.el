@@ -2425,10 +2425,15 @@ never be released and the next open would mount a second one beside it."
                 ((symbol-function 'agent-repl--frontend-display-webview)
                  (lambda (&rest _) (signal 'quit nil))))
         (agent-repl--gui-open "ws1")
-        ;; Act
-        (should-error (funcall continuation) :type 'quit)
-        ;; Assert — the registry names the buffer that was created.
-        (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer)))))))
+        ;; Act — `quit' is not an `error', so `should-error' cannot catch it;
+        ;; caught explicitly here, the quit stops escaping the test and the
+        ;; assertion below actually runs.
+        (let ((quit-seen (condition-case nil
+                             (progn (funcall continuation) nil)
+                           (quit t))))
+          ;; Assert — the registry names the buffer that was created.
+          (should quit-seen)
+          (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer))))))))
 
 (ert-deftest agent-repl-test-frontend-open-leaves-the-heartbeat-armed ()
   "An open leaves the 1Hz heartbeat timer exactly as it found it.
