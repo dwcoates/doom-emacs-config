@@ -762,12 +762,26 @@ func (m *Manager) process(ctx context.Context, id string) error {
 				// structural: nothing about THIS job is wrong.
 				return err
 			}
-			if _, err := m.cfg.Store.Update(id, func(j *Job) error {
+			claimed, err := m.cfg.Store.Update(id, func(j *Job) error {
 				j.State = StateWorktreeReady
 				j.LastError = ""
 				return nil
-			}); err != nil {
+			})
+			if err != nil {
 				return err
+			}
+			// THE GATE IS TOLD THE INSTANT THIS JOB FIRST NAMES ITS WORKTREE.
+			// Until now the only notification was the one below, at session
+			// creation, which left a window in which the durable store already
+			// showed a job for this worktree while the gate had not been asked
+			// to re-derive it. The gate memoizes what it derives — including
+			// "no creation job names this worktree", which is what keeps
+			// snapshot assembly off the store — so the window was the one way a
+			// stale allow could outlive the fact it was derived from. Claiming
+			// the worktree here closes it: the memo can never be older than the
+			// record.
+			if err := m.cfg.Publication.PrepareSessionPublication(ctx, claimed); err != nil {
+				return m.fail(ctx, id, "claim session publication", err)
 			}
 		case StateWorktreeReady, StateSessionCreating:
 			if job.State == StateWorktreeReady {

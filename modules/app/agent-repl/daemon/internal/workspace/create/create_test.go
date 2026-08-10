@@ -263,14 +263,23 @@ func (f *fixture) logError(format string, args ...any) {
 // loggedErrorFormat reports whether any ERROR-severity record's format contains
 // want.
 func (f *fixture) loggedErrorFormat(want string) bool {
+	return f.countErrorRecords(want) > 0
+}
+
+// countErrorRecords counts the ERROR-severity records containing want. The
+// COUNT is what a report meant to be emitted exactly once is asserted against:
+// "at least one" cannot tell a single record from a sweep that repeats it
+// forever.
+func (f *fixture) countErrorRecords(want string) int {
 	f.logMu.Lock()
 	defer f.logMu.Unlock()
+	n := 0
 	for _, line := range f.errorLogs {
 		if strings.Contains(line, want) {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
 
 func newFixture(t *testing.T, statePath string) *fixture {

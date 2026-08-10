@@ -29,6 +29,16 @@ import (
 // reads its connect snapshot, and returns the connection plus that snapshot.
 func dialScoped(t *testing.T, s *Server, scope Scope, kind ClientKind) (*websocket.Conn, *frontendv1.StateSnapshot) {
 	t.Helper()
+	conn := dialRaw(t, s, scope, kind)
+	return conn, readWSSnapshot(t, conn)
+}
+
+// dialRaw opens a scoped WebSocket client and reads NOTHING from it. It is the
+// half of dialScoped a test needs on its own when the connect snapshot is the
+// thing under test — a snapshot that is deliberately never going to arrive
+// cannot be read before the test can act.
+func dialRaw(t *testing.T, s *Server, scope Scope, kind ClientKind) *websocket.Conn {
+	t.Helper()
 	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.ServeWSScoped(w, r, scope, kind, nil)
 	}))
@@ -38,7 +48,7 @@ func dialScoped(t *testing.T, s *Server, scope Scope, kind ClientKind) (*websock
 		t.Fatalf("ws dial: %v", err)
 	}
 	t.Cleanup(func() { conn.Close() })
-	return conn, readWSSnapshot(t, conn)
+	return conn
 }
 
 // readWSSnapshot reads the connect snapshot, failing if the first frame is
