@@ -203,6 +203,63 @@ Registered in `agent-repl--external-boundary-functions'."
   (with-current-buffer buf
     (xwidget-webkit-execute-script (xwidget-webkit-current-session) script))) ;; ALLOW-EXTERNAL-BOUNDARY
 
+(defun agent-repl--frontend-webview-execute-script-value (xw script callback)
+  "External-boundary wrapper: evaluate SCRIPT in widget XW, value to CALLBACK.
+The raw read injection, and nothing else.  Callers go through
+`agent-repl--frontend-webview-read-script', which owns the liveness and
+callback invariants that keep this call from crashing Emacs; nothing else
+may call this directly.  Body does nothing but the external call; tests
+mock via `cl-letf'.
+Registered in `agent-repl--external-boundary-functions'."
+  (require 'xwidget)
+  (xwidget-webkit-execute-script xw script callback)) ;; ALLOW-EXTERNAL-BOUNDARY
+
+(defun agent-repl--frontend-webview-read-script (buf script callback)
+  "Evaluate SCRIPT in BUF's live webview, handing its value to CALLBACK.
+The ONLY read channel Emacs has into a mounted webview.
+`agent-repl--frontend-webview-execute-script-1' is a write — it discards
+whatever the page evaluated to — so a host that must ASK the page a
+question (the recovery SLO's page-side evidence, lisp/recovery-slo.el)
+needs this second wrapper rather than a flag on that one: the two differ
+in whether the caller is owed an answer at all.
+
+CALLBACK MUST BE A SYMBOL NAMING A FUNCTION, AND THAT IS A CRASH
+INVARIANT, NOT A STYLE RULE.  On the NS port,
+`xwidget-webkit-execute-script' hands the callback to
+`nsxwidget_webkit_execute_script', which captures it BY VALUE into an
+Objective-C block (src/nsxwidget.m) and returns.  That block lives in
+malloc'd memory the Emacs garbage collector cannot see, and — unlike the
+GTK path, which stores script and callback into `xw->script_callbacks'
+under an explicit \"Protect script and fun during GC\" comment — the NS
+path roots the callback NOWHERE.  A freshly-consed closure passed here is
+therefore collectable the moment this call returns, and WebKit's
+completion handler will later resurrect the dangling Lisp_Object into an
+input event (`store_xwidget_js_callback_event'), which
+`xwidget-event-handler' prints with %S — dereferencing freed memory
+inside `print_object'.  That is the SIGSEGV this invariant exists to make
+impossible.  A SYMBOL is immune: interned symbols are permanently
+GC-rooted, so the value the block captured stays valid however long the
+page takes to answer.  Per-call context must therefore travel through
+SCRIPT and come back in the page's reply, never in a closure.
+
+The widget is resolved through `agent-repl--frontend-webview-live-widget'
+rather than `xwidget-webkit-current-session' for the reason that
+predicate documents: the session fallback hands back some OTHER buffer's
+webview once this buffer has lost its own, and injecting a read into the
+wrong page is the mild failure — injecting into a dead one is a
+use-after-free.  Returns nil, injecting nothing, when BUF holds no live
+webview; CALLBACK is simply never invoked.
+
+No keyboard-release epilogue rides along, deliberately: this evaluation
+is a read that touches neither the DOM nor its focus, so there is nothing
+to hand back.  Returns non-nil when the read was actually injected."
+  (unless (and callback (symbolp callback) (fboundp callback))
+    (error "agent-repl: webview read callback must name a function, got %S"
+           callback))
+  (when-let ((xw (agent-repl--frontend-webview-live-widget buf)))
+    (agent-repl--frontend-webview-execute-script-value xw script callback)
+    t))
+
 ;;;; ---- Returning the keyboard to Emacs after a script evaluation -------------
 
 ;; Symptom: after a prompt send, keys stop reaching Emacs — RET draws the
