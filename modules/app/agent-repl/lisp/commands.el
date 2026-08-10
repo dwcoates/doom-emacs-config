@@ -10,6 +10,11 @@
 (declare-function agent-repl--frontend-boot-session "frontends")
 (declare-function agent-repl--runtime-startup-prepare "services" (on-success on-failure))
 
+;; Forward declaration: defined in frontend-uds.el (loaded after commands.el).
+;; The startup restore re-arms itself on this link-up/snapshot-applied edge
+;; rather than inventing a second readiness mechanism of its own.
+(defvar agent-repl-uds-snapshot-applied-functions)
+
 ;; Forward declaration: defined in hide-project-dirs.el (loaded after
 ;; commands.el).  The snapshot writer/loader persists and restores this
 ;; toggle so the hidden set survives an Emacs restart.
@@ -2165,15 +2170,92 @@ gate for each live shim/store route."
                         file (length queue) (or origin-ws "nil"))
       (agent-repl--snapshot-load-step))))
 
+(defcustom agent-repl-startup-restore-rearm-limit 5
+  "How many times a failed startup restore may re-arm on the link-up edge.
+A daemon that boots slower than the readiness budget makes the startup
+restore fail with the snapshot never read; the re-arm re-runs it the
+instant the daemon's snapshot lands.  The cap keeps a permanently dead
+daemon from retrying forever."
+  :type 'integer
+  :group 'agent-repl)
+
+(defvar agent-repl--startup-restore-rearms 0
+  "Re-arm attempts already spent by the startup snapshot restore.")
+
+(defvar agent-repl--startup-restore-began nil
+  "Non-nil once the startup restore reached its snapshot lookup.
+Set on the readiness-satisfied path, whether or not a snapshot file
+existed: in both cases the roster question has been answered and a
+re-arm would be a second, redundant restore.")
+
+(defun agent-repl--startup-restore-pending-p ()
+  "Return non-nil when a startup restore still has work to do.
+A restore that already began (`agent-repl--startup-restore-began') or a
+snapshot load already in flight (`agent-repl--snapshot-load-state') both
+mean the roster is being restored by someone else."
+  (not (or agent-repl--startup-restore-began
+           agent-repl--snapshot-load-state)))
+
+(defun agent-repl--startup-restore-rearm-run ()
+  "Re-run the startup restore on the daemon's snapshot-applied edge.
+One-shot: removes itself from `agent-repl-uds-snapshot-applied-functions'
+before doing anything else, so a burst of reconnects cannot stack
+restores.  Idempotent: a restore already begun or in flight is logged and
+left alone."
+  (remove-hook 'agent-repl-uds-snapshot-applied-functions
+               #'agent-repl--startup-restore-rearm-run)
+  (if (not (agent-repl--startup-restore-pending-p))
+      (agent-repl--log
+       nil
+       "startup restore: re-arm fired but restore already underway began=%s load-state=%s; skipping"
+       (if agent-repl--startup-restore-began "t" "nil")
+       (if agent-repl--snapshot-load-state "t" "nil"))
+    (agent-repl--log nil "startup restore: re-arm attempt=%d firing on link-up"
+                     agent-repl--startup-restore-rearms)
+    (agent-repl--load-workspace-snapshot-on-startup)))
+
+(defun agent-repl--startup-restore-rearm ()
+  "Arm one link-up retry of the startup restore; return non-nil when armed.
+Returns nil when the cap `agent-repl-startup-restore-rearm-limit' is
+exhausted or a restore is already underway."
+  (cond
+   ((not (agent-repl--startup-restore-pending-p))
+    (agent-repl--log nil "startup restore: no re-arm needed; restore already underway")
+    nil)
+   ((>= agent-repl--startup-restore-rearms agent-repl-startup-restore-rearm-limit)
+    (agent-repl--warn
+     nil
+     "startup restore: re-arm budget EXHAUSTED after %d attempt(s); workspace roster stays unrestored"
+     agent-repl--startup-restore-rearms)
+    nil)
+   (t
+    (setq agent-repl--startup-restore-rearms (1+ agent-repl--startup-restore-rearms))
+    ;; `add-hook' is idempotent on the same function symbol, so a double
+    ;; failure can never leave two continuations behind.
+    (add-hook 'agent-repl-uds-snapshot-applied-functions
+              #'agent-repl--startup-restore-rearm-run)
+    (agent-repl--log nil "startup restore: re-armed on link-up attempt=%d/%d"
+                     agent-repl--startup-restore-rearms
+                     agent-repl-startup-restore-rearm-limit)
+    t)))
+
 (defun agent-repl--load-workspace-snapshot-on-startup ()
   "Prepare runtime services, confirm daemon readiness, then restore snapshot.
 The readiness prerequisite is deliberately before even the snapshot-path
 lookup, so no workspace state is read or restored before daemon health is
-authoritative.  A failed prerequisite or malformed snapshot aborts loudly;
-there is no post-restore bounce and no degraded restore path."
+authoritative.  A malformed snapshot aborts loudly; there is no degraded
+restore path.
+
+A failed prerequisite is NOT terminal.  The daemon can take longer to
+boot than the readiness budget, and the old behavior — warn and stop —
+left the roster unrestored with nothing to bring it back.  Instead the
+restore re-arms itself on the daemon's snapshot-applied edge
+\(`agent-repl--startup-restore-rearm'), capped by
+`agent-repl-startup-restore-rearm-limit'."
   (agent-repl--log nil "startup restore: backend preparation begins before snapshot lookup")
   (agent-repl--runtime-startup-prepare
    (lambda ()
+     (setq agent-repl--startup-restore-began t)
      (let ((file (agent-repl--workspace-snapshot-file-for-read)))
        (agent-repl--log nil
                         "startup restore: runtime prepared and daemon ready; snapshot candidate=%s"
@@ -2188,7 +2270,16 @@ there is no post-restore bounce and no degraded restore path."
                           "startup restore: no snapshot file=%s; no restore requested"
                           file))))
    (lambda (detail)
-     (agent-repl--warn nil "startup restore: backend preparation FAILED detail=%s" detail))))
+     (let ((armed (agent-repl--startup-restore-rearm)))
+       (agent-repl--warn
+        nil
+        "startup restore: backend preparation FAILED detail=%s; %s"
+        detail
+        (if armed
+            (format "restore re-armed on daemon link-up (attempt %d/%d)"
+                    agent-repl--startup-restore-rearms
+                    agent-repl-startup-restore-rearm-limit)
+          "no re-arm pending; the workspace roster will NOT be restored"))))))
 
 ;;;; Workspace snapshot archive picker
 
