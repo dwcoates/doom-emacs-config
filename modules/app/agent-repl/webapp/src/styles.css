@@ -650,16 +650,28 @@ body::after {
      the section is bounded here instead: ten rows of height, and the rest
      reached by scrolling in place. */
   --merged-visible-rows: 10;
-  /* One row's drawn height: .row's own vertical padding (0.28rem twice)
-     plus a line box that clears both the 14px row text and the 9px status
-     disc. Fixed rather than natural so ten rows is EXACTLY the cap below
-     — a natural height would let the cap drift with the longest row. */
-  --merged-row-h: calc(0.28rem * 2 + 1.35rem);
+  /* .row's own vertical padding, restated here so the cap is built out of the
+     same numbers the row is drawn from. */
+  --merged-row-pad-y: 0.28rem;
+  /* The row's line box, stated rather than left to the font: `normal`
+     line-height varies with whatever font resolves, so the cap could not be
+     expressed in rows without pinning it. 1.15rem (18.4px) clears the 14px row
+     text and the 9px status disc with nothing left over — a merged row carries
+     no glyph (`glyphs: false`), so the 1.3rem spinner box cannot appear here. */
+  --merged-row-line-h: 1.15rem;
+  /* One row's drawn height, and the unit the cap below counts in. */
+  --merged-row-h: calc(var(--merged-row-pad-y) * 2 + var(--merged-row-line-h));
 }
 #ws-sidebar .repo.merged-section .repo-head { color: var(--info-agents); }
+/* The LINE BOX is pinned, not the row height. Setting `height` drew every
+   merged row taller than the content inside it, so the section stood taller
+   than the entries it holds — ten merges reached about twelve rows' worth of
+   rail. Pinning the line box instead makes the row's natural height EQUAL
+   --merged-row-h (the tallest flex item is the line box; the 9px disc is
+   smaller), so N entries are exactly N rows tall and the cap below is still
+   exact. */
 #ws-sidebar .repo.merged-section .row {
-  height: var(--merged-row-h);
-  box-sizing: border-box;
+  line-height: var(--merged-row-line-h);
 }
 /* Scroll, not truncate: the eleventh merge is still history the user can go
    looking for, so it stays in the DOM below the fold of its own scroller
