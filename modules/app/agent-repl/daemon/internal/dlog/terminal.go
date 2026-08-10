@@ -1,10 +1,13 @@
 package dlog
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -36,9 +39,16 @@ import (
 // takes the line, queues it, and returns; one goroutine drains the queue into
 // the real terminal in FIFO order. What it deliberately does NOT do:
 //
-//   - It never drops a record. A full buffer BLOCKS the writer (backpressure of
-//     last resort) rather than discarding a line, because a mirror that
-//     silently omits records is worse than a slow one.
+//   - It never BLOCKS the emitter. A full buffer drops the OLDEST queued
+//     mirror lines to make room for the newest, because the mirror is a tail
+//     for whoever is watching and the newest line is the one being watched
+//     for. Blocking here was the second half of the production stall: the
+//     producer waited for mirror space WHILE HOLDING the sink lock, so a slow
+//     mirror consumer parked every logging goroutine in the daemon.
+//   - It never drops SILENTLY. Every dropped line is counted, and once space
+//     frees the sink reports the count through itself as a canonical record,
+//     rate limited so a persistently full mirror cannot itself become the
+//     flood.
 //   - It never swallows a write failure. A failed terminal write is LATCHED and
 //     returned from the next Write, so the emitter still sees the error on its
 //     own error channel and dlog's callers still treat it exactly as they treat
@@ -55,13 +65,31 @@ import (
 // DefaultTerminalBufferBytes bounds the queued mirror. It is generous on
 // purpose — a whole Emacs startup's chatter is a few hundred kilobytes — so
 // that reaching it means the terminal has stopped consuming entirely, which is
-// the one case where blocking the emitter is the honest answer.
+// the one case where the oldest queued mirror lines are worth losing.
 const DefaultTerminalBufferBytes = 8 << 20
+
+// TerminalDropReportInterval rate limits the sink's self-report about dropped
+// mirror lines. One report per interval, carrying the number dropped since the
+// previous one, so a mirror that stays full reports a running toll instead of
+// doubling the flood it is already failing to keep up with.
+const TerminalDropReportInterval = time.Second
+
+// TerminalDropOperation is the canonical operation of the sink's self-report.
+const TerminalDropOperation = "daemon.logging.terminal-mirror-dropped"
 
 // ErrTerminalSinkClosed is returned by a Write that arrives after Close. It is
 // an error rather than a silent no-op: a record emitted after the sink was
 // closed is a lifecycle violation the caller must be able to see.
 var ErrTerminalSinkClosed = errors.New("dlog: terminal sink is closed")
+
+// pendingLine is one queued mirror line. covers is zero for an ordinary record
+// and, for the sink's own drop report, the number of drops that report accounts
+// for — so if the report is itself evicted its toll goes back on the counter
+// instead of vanishing with it.
+type pendingLine struct {
+	bytes  []byte
+	covers int
+}
 
 // TerminalSink is the asynchronous mirror described above. The zero value is
 // not usable; construct one with NewTerminalSink.
@@ -70,10 +98,17 @@ type TerminalSink struct {
 	capBytes int
 
 	mu       sync.Mutex
-	space    *sync.Cond // woken when the drain frees buffer space
 	work     *sync.Cond // woken when a line is queued or the sink is closed
-	pending  [][]byte
+	pending  []pendingLine
 	buffered int
+	// dropped counts mirror lines discarded since the last self-report, and
+	// lastReport is when that report went out. Together they make the loss
+	// visible in the mirror itself rather than inferable only from a gap.
+	dropped    int
+	lastReport time.Time
+	// now is the clock the rate limiter reads. Tests replace it; production
+	// never does.
+	now func() time.Time
 	// failure latches the first terminal write error. Once set, the drain
 	// stops and every subsequent Write reports it, so the failure reaches an
 	// emitter's error channel instead of dying in a background goroutine.
@@ -94,8 +129,7 @@ func NewTerminalSink(dest io.Writer, capBytes int) *TerminalSink {
 	if capBytes <= 0 {
 		capBytes = DefaultTerminalBufferBytes
 	}
-	t := &TerminalSink{dest: dest, capBytes: capBytes, done: make(chan struct{})}
-	t.space = sync.NewCond(&t.mu)
+	t := &TerminalSink{dest: dest, capBytes: capBytes, done: make(chan struct{}), now: time.Now}
 	t.work = sync.NewCond(&t.mu)
 	go t.drain()
 	return t
@@ -123,22 +157,76 @@ func (t *TerminalSink) Write(p []byte) (int, error) {
 	if t.closed {
 		return 0, ErrTerminalSinkClosed
 	}
-	// Backpressure, never loss. A single line larger than the whole cap is
-	// still accepted (waiting for space it can never get would deadlock); the
-	// cap bounds the QUEUE, not one record.
-	for t.buffered > 0 && t.buffered+len(line) > t.capBytes {
-		t.space.Wait()
-		if t.failure != nil {
-			return 0, fmt.Errorf("dlog: terminal sink write failed: %w", t.failure)
-		}
-		if t.closed {
-			return 0, ErrTerminalSinkClosed
-		}
-	}
-	t.pending = append(t.pending, line)
+	// Loss, never blocking. The producer must not wait here: it holds the
+	// emitter's whole logging call, and in production that call is on the
+	// critical path of every frontend command. A single line larger than the
+	// whole cap is still accepted; the cap bounds the QUEUE, not one record.
+	t.makeRoom(len(line))
+	t.reportDropsLocked(len(line))
+	t.pending = append(t.pending, pendingLine{bytes: line})
 	t.buffered += len(line)
 	t.work.Signal()
 	return len(p), nil
+}
+
+// makeRoom discards the OLDEST queued mirror lines until incoming fits, and
+// counts every one it discards. The caller holds t.mu.
+func (t *TerminalSink) makeRoom(incoming int) {
+	for len(t.pending) > 0 && t.buffered+incoming > t.capBytes {
+		oldest := t.pending[0]
+		t.pending = t.pending[1:]
+		t.buffered -= len(oldest.bytes)
+		if oldest.covers > 0 {
+			// Evicting the report would erase the only account of the lines it
+			// covers. Put the toll back and let it be reported again.
+			t.dropped += oldest.covers
+			t.lastReport = time.Time{}
+			continue
+		}
+		t.dropped++
+	}
+}
+
+// reportDropsLocked queues the sink's own account of what it discarded, at most
+// once per TerminalDropReportInterval and only when the queue has room for the
+// report. The caller holds t.mu.
+func (t *TerminalSink) reportDropsLocked(reserve int) {
+	if t.dropped == 0 {
+		return
+	}
+	at := t.now()
+	if !t.lastReport.IsZero() && at.Sub(t.lastReport) < TerminalDropReportInterval {
+		return
+	}
+	record := Record{
+		Timestamp: NewStamp(at),
+		Runtime:   RuntimeDaemon,
+		Level:     LevelWarn,
+		Verbosity: Normal,
+		Operation: TerminalDropOperation,
+		Message:   "terminal mirror buffer full; oldest mirror lines dropped",
+		Context: map[string]any{
+			"dropped_lines":     t.dropped,
+			"buffer_cap_bytes":  t.capBytes,
+			"report_interval_s": TerminalDropReportInterval.Seconds(),
+		},
+		PID: os.Getpid(),
+	}
+	line, err := json.Marshal(record)
+	if err != nil {
+		// The report is the only channel this failure has; there is no caller
+		// to return it to, so it goes into the mirror as plain text rather
+		// than being swallowed.
+		line = []byte(fmt.Sprintf("dlog: encode terminal mirror drop report failed: %v (dropped_lines=%d)", err, t.dropped))
+	}
+	line = append(line, '\n')
+	if len(t.pending) > 0 && t.buffered+len(line)+reserve > t.capBytes {
+		return // still no room; keep counting and report later
+	}
+	t.pending = append(t.pending, pendingLine{bytes: line, covers: t.dropped})
+	t.buffered += len(line)
+	t.dropped = 0
+	t.lastReport = at
 }
 
 // Close stops accepting lines and waits for the queued ones to reach the
@@ -154,7 +242,6 @@ func (t *TerminalSink) Close() error {
 	}
 	t.closed = true
 	t.work.Broadcast()
-	t.space.Broadcast()
 	t.mu.Unlock()
 	<-t.done
 	t.mu.Lock()
@@ -175,21 +262,19 @@ func (t *TerminalSink) drain() {
 			t.mu.Unlock()
 			return
 		}
-		line := t.pending[0]
+		line := t.pending[0].bytes
 		t.pending = t.pending[1:]
 		t.buffered -= len(line)
-		t.space.Broadcast()
 		t.mu.Unlock()
 
 		if err := writeFull(t.dest, line); err != nil {
 			t.mu.Lock()
 			t.failure = err
-			// Everything still queued is unreachable now; releasing it wakes
-			// the blocked writers so they observe the latched failure instead
-			// of waiting for a drain that has stopped.
+			// Everything still queued is unreachable now; releasing it keeps
+			// the stopped drain from pinning the buffer, and the next Write
+			// observes the latched failure.
 			t.pending = nil
 			t.buffered = 0
-			t.space.Broadcast()
 			t.mu.Unlock()
 			return
 		}
