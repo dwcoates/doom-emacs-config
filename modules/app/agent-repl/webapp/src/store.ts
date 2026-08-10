@@ -264,6 +264,14 @@ export interface ResultContext {
 }
 export interface ResultItem extends FeedOrderedItem {
   kind: "result";
+  /**
+   * The daemon's identity for this turn result, derived from the producing
+   * event (`resultUUID`). It is what makes a REDELIVERED result — every resync
+   * replays the conversation from the floor — reconcile onto the item it
+   * already produced instead of appending a second closing chip, which is what
+   * repeated an interrupted turn's yellow badge down the feed.
+   */
+  uuid: string;
   subtype: ResultSubtype;
   durationMs: number;
   numTurns: number;
@@ -858,6 +866,14 @@ function itemKey(item: ConversationItem): string | null {
     // by (see `isSettledConnectivityFailure`).
     case "failure":
       return `failure:${item.uuid}`;
+    // Keyed by uuid for the same reason a clear and a compaction are: a resync
+    // replays the whole conversation, and an unkeyed result appended one more
+    // closing chip every time it came back around.
+    case "result":
+    case "context-cleared":
+    case "context-compacted":
+    case "session-command":
+      return `${item.kind}:${item.uuid}`;
     // Terminal / one-shot items carry no reconcilable id: they are appended.
     default:
       return null;

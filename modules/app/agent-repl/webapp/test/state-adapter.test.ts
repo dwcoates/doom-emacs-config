@@ -789,6 +789,9 @@ describe("result arm", () => {
     });
     const expected: ResultItem = {
       kind: "result",
+      // The envelope's uuid, carried onto the item: it is what a redelivered
+      // result reconciles on instead of appending a second closing chip.
+      uuid: "m1",
       subtype: "success",
       durationMs: 100,
       numTurns: 1,
