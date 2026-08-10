@@ -53,6 +53,8 @@ import { AsyncSource } from "../src/protocol.js";
 import type { UnwrappedEmission } from "../src/agent-emission.js";
 import type { AsyncBubble } from "../src/async-bubble.js";
 import { AsyncBubbleRegistry } from "../src/async-routing.js";
+import { agentUncachedInput, uncachedInputHtml } from "../src/tokens.js";
+import { attributedSubagent } from "./token-utilization-fixture.js";
 import {
   ContextClearedItem,
   ContextCompactedItem,
@@ -4806,8 +4808,8 @@ describe("async catalog", () => {
     expect(html).not.toContain("polled line");
   });
 
-  it("shows the member's live token spend on its badge", () => {
-    // Arrange — a detached agent whose polled transcript meters 12,340 tokens.
+  /** A detached agent member and the panels that fold it into bubble b1. */
+  function detachedAgentPanels(over: Partial<PanelContext> = {}): PanelContext {
     const agent = watcher("ag1", {
       toolName: "Agent",
       result: { isError: false, content: "Async agent launched. agentId: ag1, output_file: /tmp/claude-1/s/tasks/ag1.output" },
@@ -4818,22 +4820,51 @@ describe("async catalog", () => {
         stream: { transport: "poll", format: "jsonl-transcript" },
       },
     });
-    const tail = `{"type":"assistant","message":{"usage":{"output_tokens":12340},"content":[]}}`;
-    const panels: PanelContext = {
+    return {
       children: new Map(),
       isOpen: () => false,
       watchers: new Map([["b1", [agent]]]),
-      taskTail: (id) =>
-        id === "ag1" ? { text: tail, offset: 1, done: false, elapsedMs: 0 } : undefined,
+      ...over,
     };
+  }
+
+  it("shows the daemon's uncached input for the agent on its badge", () => {
+    // Arrange — the attribution keys on the Agent call's own tool-use id.
+    const panels = detachedAgentPanels({ tokenUtilization: attributedSubagent("w1", 12_340) });
     // Act
     const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), panels);
-    // Assert — the collapsed pill carries the compact figure.
-    expect(html).toContain(`<span class="async-badge-tokens">12k tok</span>`);
+    // Assert — the collapsed pill carries the compact, heated figure.
+    expect(html).toContain(
+      `<span class="async-badge-tokens token-heat" style="--token-heat-hue:120">12k in</span>`,
+    );
   });
 
-  it("shows no token figure on a badge whose stream meters none", () => {
-    // Arrange — a shell spool carries no usage records.
+  it("draws the badge figure exactly as the footer draws the same agent's row", () => {
+    // Arrange — one attribution, read by both surfaces.
+    const utilization = attributedSubagent("w1", 12_340);
+    // Act
+    const html = renderItem(
+      text("b1"),
+      undefined,
+      finalsClosing(text("b1")),
+      detachedAgentPanels({ tokenUtilization: utilization }),
+    );
+    const footer = uncachedInputHtml("pfooter-agent-tokens", agentUncachedInput(utilization, "w1") ?? -1);
+    // Assert — same measure, same form, same heat: only the placement class differs.
+    expect(html).toContain(footer.replace("pfooter-agent-tokens", "async-badge-tokens"));
+  });
+
+  it("shows no token figure on a badge the daemon has attributed none to", () => {
+    // Arrange — an attribution naming some OTHER call, so this one has none.
+    const panels = detachedAgentPanels({ tokenUtilization: attributedSubagent("other", 12_340) });
+    // Act
+    const html = renderItem(text("b1"), undefined, finalsClosing(text("b1")), panels);
+    // Assert — absence renders nothing, never a zero.
+    expect(html).not.toContain("async-badge-tokens");
+  });
+
+  it("shows no token figure on a badge before any attribution has landed", () => {
+    // Arrange — a shell spool, and no utilization on the context at all.
     const html = renderItem(
       text("b1"),
       undefined,
