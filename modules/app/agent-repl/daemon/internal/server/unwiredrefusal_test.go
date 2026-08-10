@@ -11,6 +11,7 @@ import (
 
 	"claude-repld/internal/errclass"
 	frontend "claude-repld/internal/frontend"
+	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/ssm"
 )
 
@@ -25,16 +26,28 @@ import (
 // refusal IS the feedback.
 // ---------------------------------------------------------------------------
 
+// noPages supplies the Resyncer half these fakes do not exercise.
+//
+// Embedded rather than repeated per fake: every one of them is about how a
+// REPLAY refusal is classified, and a page they never serve is noise in each
+// of them. One copy also means a Resyncer that grows another method fails to
+// compile in exactly one place.
+type noPages struct{}
+
+func (noPages) ConversationPage(context.Context, string, string, string, sessioncontroller.PageAnchor) (*frontendv1.ConversationPage, error) {
+	return nil, errors.New("this fake serves no conversation pages")
+}
+
 // unwiredResyncer refuses with the no-live-controller sentinel, exactly as
 // sessioncontroller does for a workspace that has not been brought up.
-type unwiredResyncer struct{}
+type unwiredResyncer struct{ noPages }
 
 func (unwiredResyncer) ResyncForGeneration(string, string, string, uint64) error {
 	return errclass.ErrNoLiveSessionController
 }
 
 // brokenResyncer fails for a reason that is nobody's routine expectation.
-type brokenResyncer struct{}
+type brokenResyncer struct{ noPages }
 
 func (brokenResyncer) ResyncForGeneration(string, string, string, uint64) error {
 	return errors.New("the retained ring is corrupt")
@@ -114,7 +127,7 @@ func TestAGenuineResyncFailureStaysLoud(t *testing.T) {
 	}
 }
 
-type supersededResyncer struct{}
+type supersededResyncer struct{ noPages }
 
 func (supersededResyncer) ResyncForGeneration(string, string, string, uint64) error {
 	return errclass.ErrSessionSuperseded
