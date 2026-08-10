@@ -192,3 +192,56 @@ func TestInterruptOnAnUnwiredWorkspaceStaysLoud(t *testing.T) {
 		t.Fatal("a user-commanded interrupt on an unwired workspace returned no error")
 	}
 }
+
+// servingResyncer records what reached the eligibility ladder, and accepts
+// everything. It is what makes "refused BEFORE the ladder" provable.
+type servingResyncer struct{ entered int }
+
+func (r *servingResyncer) ResyncForGeneration(string, string, string, uint64) error {
+	r.entered++
+	return nil
+}
+
+// TestAResyncEchoingAnUnmintableFenceIsRefusedBeforeTheLadder covers the
+// distinction the ladder CANNOT make. An unmintable token and an absent one
+// both split to two empty identities; only the token itself says which
+// arrived, and a delayed request must not silently rebind itself to the
+// current generation.
+func TestAResyncEchoingAnUnmintableFenceIsRefusedBeforeTheLadder(t *testing.T) {
+	// Arrange
+	var logged []string
+	resyncer := &servingResyncer{}
+	h := newResyncHandler(t, resyncer, &logged)
+
+	// Act
+	err := h.Resync(context.Background(), "/w", "r-unmintable", &frontendv1.ResyncCmd{Fence: "no-workspace-ever-held-this"})
+
+	// Assert
+	if !errors.Is(err, errclass.ErrSessionSuperseded) {
+		t.Fatalf("error = %v, want session superseded", err)
+	}
+	if resyncer.entered != 0 {
+		t.Fatalf("the eligibility ladder ran %d time(s) for an unmintable fence, want 0", resyncer.entered)
+	}
+}
+
+// TestAResyncCarryingNoFenceAtAllReachesTheLadder is the other half of that
+// boundary: a client holding no fence predates fenced chrome, has no identity
+// to be stale about, and is served under whatever identity is current.
+func TestAResyncCarryingNoFenceAtAllReachesTheLadder(t *testing.T) {
+	// Arrange
+	var logged []string
+	resyncer := &servingResyncer{}
+	h := newResyncHandler(t, resyncer, &logged)
+
+	// Act
+	err := h.Resync(context.Background(), "/w", "r-fenceless", &frontendv1.ResyncCmd{})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("fenceless resync: %v", err)
+	}
+	if resyncer.entered != 1 {
+		t.Fatalf("the eligibility ladder ran %d time(s) for a fenceless resync, want 1", resyncer.entered)
+	}
+}
