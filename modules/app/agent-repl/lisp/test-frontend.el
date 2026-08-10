@@ -2241,3 +2241,163 @@ and \"main\"/\"none\" have neither a webview nor a durable log sink."
         (delete-directory project t))
       ;; Assert
       (should (equal logged "ws1")))))
+
+;;;; ---- The open path never holds the main thread ---------------------------
+;;
+;; `gui-open' and `gui-show' used to complete while the caller waited: the
+;; lazy daemon ensure ran a whole-stack deploy through `call-process', so
+;; the editor was frozen for the length of a Go/npm build and the only
+;; escape was `C-g'.  Every test below pins one half of the replacement —
+;; the command returns at once, the outcome (mount OR failure) arrives from
+;; a continuation, and nothing the open touches is left half-written when a
+;; quit lands.
+
+(ert-deftest agent-repl-test-frontend-open-returns-before-the-ack ()
+  "gui-open returns `:pending' with nothing mounted until establishment acks."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let (continuation mounted)
+      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+                 (lambda () t))
+                ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                 (lambda (_ws ok _fail) (setq continuation ok) :pending))
+                ((symbol-function 'agent-repl--call-in-background-workspace)
+                 (lambda (_ws fn) (funcall fn)))
+                ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
+                 (lambda (_ws _url) 'fake-buffer))
+                ((symbol-function 'agent-repl--frontend-display-webview)
+                 (lambda (_ws _buf) (setq mounted t))))
+        ;; Act — the command finishes here, with the daemon still working.
+        (should (eq :pending (agent-repl--gui-open "ws1")))
+        ;; Assert — no mount has happened yet.
+        (should-not mounted)
+        ;; Act — the ack arrives later, from a timer or a sentinel.
+        (funcall continuation)
+        ;; Assert
+        (should mounted)))))
+
+(ert-deftest agent-repl-test-frontend-show-returns-before-the-ack ()
+  "gui-show returns `:pending' too; the wake gate is awaited, not waited on."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let (continuation shown)
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                 (lambda (_ws ok _fail) (setq continuation ok) :pending))
+                ((symbol-function 'agent-repl--gui-open)
+                 (lambda (_ws) (setq shown t) :pending)))
+        ;; Act
+        (should (eq :pending (agent-repl--gui-show "ws1")))
+        (should-not shown)
+        (funcall continuation)
+        ;; Assert
+        (should shown)))))
+
+(ert-deftest agent-repl-test-frontend-open-timeout-surfaces-the-failure ()
+  "An establishment timeout reaches the failure surface, mounting nothing.
+The card the user reads is unchanged; only the waiting is gone."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let (fail warned mounted)
+      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+                 (lambda () t))
+                ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                 (lambda (_ws _ok on-failure) (setq fail on-failure) :pending))
+                ((symbol-function 'agent-repl--frontend-display-webview)
+                 (lambda (&rest _) (setq mounted t)))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
+        ;; Act — the command already returned; the deadline fires afterwards.
+        (should (eq :pending (agent-repl--gui-open "ws1")))
+        (funcall fail "timed out after 30.000s")
+        ;; Assert
+        (should (string-match-p "gui-open: FAILED" warned))
+        (should (string-match-p "timed out after 30.000s" warned))
+        (should-not mounted)))))
+
+(ert-deftest agent-repl-test-frontend-show-timeout-surfaces-the-failure ()
+  "gui-show's timeout warns exactly as it did when it blocked."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let (fail warned)
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                 (lambda (_ws _ok on-failure) (setq fail on-failure) :pending))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
+        ;; Act
+        (agent-repl--gui-show "ws1")
+        (funcall fail "timed out after 30.000s")
+        ;; Assert
+        (should (string-match-p "gui-show: FAILED" warned))
+        (should (string-match-p "timed out after 30.000s" warned))))))
+
+(ert-deftest agent-repl-test-frontend-mount-holds-quit-off ()
+  "The webview mount runs with quit inhibited, start to finish.
+Creating the WKWebView, adopting it and binding it to the workspace are
+one fact; a `C-g' between them leaks a live webview no workspace holds."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let (observed)
+      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (lambda (_url)
+                   (setq observed inhibit-quit)
+                   (generate-new-buffer "*fake-webview*")))
+                ((symbol-function 'agent-repl--align-buffer-to-ws-dir) #'ignore))
+        ;; Act
+        (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/")
+        ;; Assert
+        (should observed)))))
+
+(ert-deftest agent-repl-test-frontend-quit-mid-open-leaves-the-webview-registered ()
+  "A quit after the mount finds the workspace already holding its webview.
+An unregistered-but-live webview is invisible to `gui-kill', so it would
+never be released and the next open would mount a second one beside it."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let (continuation)
+      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+                 (lambda () t))
+                ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                 (lambda (_ws ok _fail) (setq continuation ok) :pending))
+                ((symbol-function 'agent-repl--call-in-background-workspace)
+                 (lambda (_ws fn) (funcall fn)))
+                ((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (lambda (_url) (generate-new-buffer "*fake-webview*")))
+                ((symbol-function 'agent-repl--align-buffer-to-ws-dir) #'ignore)
+                ;; The quit lands where a user's `C-g' realistically lands:
+                ;; in the window work that follows the mount.
+                ((symbol-function 'agent-repl--frontend-display-webview)
+                 (lambda (&rest _) (signal 'quit nil))))
+        (agent-repl--gui-open "ws1")
+        ;; Act
+        (should-error (funcall continuation) :type 'quit)
+        ;; Assert — the registry names the buffer that was created.
+        (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer)))))))
+
+(ert-deftest agent-repl-test-frontend-open-leaves-the-heartbeat-armed ()
+  "An open leaves the 1Hz heartbeat timer exactly as it found it.
+The blocking open starved the timer queue for the length of the deploy,
+which is what produced the `outcome=stranded' re-arms."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((agent-repl--timers nil)
+          (agent-repl--keyed-timers nil)
+          continuation)
+      (unwind-protect
+          (let ((heartbeat (agent-repl--register-timer
+                            :state-poll (run-with-timer 3600 nil #'ignore))))
+            (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+                       (lambda () t))
+                      ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                       (lambda (_ws ok _fail) (setq continuation ok) :pending))
+                      ((symbol-function 'agent-repl--call-in-background-workspace)
+                       (lambda (_ws fn) (funcall fn)))
+                      ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
+                       (lambda (_ws _url) 'fake-buffer))
+                      ((symbol-function 'agent-repl--frontend-display-webview) #'ignore))
+              ;; Act
+              (agent-repl--gui-open "ws1")
+              (funcall continuation)
+              ;; Assert — same timer object, still scheduled.
+              (should (agent-repl--timer-armed-p :state-poll))
+              (should (eq heartbeat (cdr (assq :state-poll agent-repl--keyed-timers))))))
+        (agent-repl--cancel-all-timers)))))
