@@ -508,6 +508,43 @@ describe("clientLog (E4)", () => {
     expect(local).toEqual(["clientLog rejected: no message"]);
   });
 
+  it("hands a rejected clientLog's reason to the identity correction", () => {
+    // Arrange — a refusal is how the daemon says the record's stamped identity
+    // is not the one its registry holds; repeating that stamp forever is the
+    // one disposition that cannot recover.
+    const refusals: string[] = [];
+    installLogging();
+    const dispatcher = new CommandDispatcher({
+      send: () => true,
+      newRequestId: () => "r1",
+      logLocal: () => {},
+      onClientLogRefused: (error) => refusals.push(error),
+    });
+    dispatcher.clientLog("/w", "info", "m");
+    // Act
+    dispatcher.observe(ackFrame("r1", false, "session identity mismatch"));
+    // Assert
+    expect(refusals).toEqual(["session identity mismatch"]);
+  });
+
+  it("leaves the bound identity alone when a clientLog is accepted", () => {
+    // Arrange — an accepted record says the stamp was right; clearing it there
+    // would unbind the identity on every healthy forward.
+    const refusals: string[] = [];
+    installLogging();
+    const dispatcher = new CommandDispatcher({
+      send: () => true,
+      newRequestId: () => "r1",
+      logLocal: () => {},
+      onClientLogRefused: (error) => refusals.push(error),
+    });
+    dispatcher.clientLog("/w", "info", "m");
+    // Act
+    dispatcher.observe(ackFrame("r1", true, ""));
+    // Assert
+    expect(refusals).toEqual([]);
+  });
+
   it("still reports a genuinely unknown ack as an anomaly", () => {
     // Arrange — the clientLog carve-out must not blanket-silence onAck. The
     // report is console-only: forwarding it is the ack/clientLog loop.
