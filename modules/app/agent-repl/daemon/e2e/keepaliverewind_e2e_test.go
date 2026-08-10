@@ -115,7 +115,7 @@ func TestE2EARewindFlipsTheConversationIdentityAndItsSeqMarksTogether(t *testing
 	// Arrange — a session with BOTH marks meaningfully non-zero, so a mark that
 	// survived the flip is visible as a survivor rather than as a zero that
 	// happened to be right.
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	store := dialStoreProducer(t)
 	store.write(sidecarClearEvent(s.vendorID, "e2e-rewind-floor"))
 	awaitItem(t, s.conn, s.cwd, "the injected clear", isClear)
@@ -150,7 +150,7 @@ func TestE2EARewindFlipsTheConversationIdentityAndItsSeqMarksTogether(t *testing
 // mid-history with no account of where it came from.
 func TestE2EARewoundConversationOpensWithSessionRewound(t *testing.T) {
 	// Arrange + Act
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	rw := rewindByKeepAlivePing(t, s)
 
 	// Assert — the first event the new seq space serves.
@@ -166,7 +166,7 @@ func TestE2EARewoundConversationOpensWithSessionRewound(t *testing.T) {
 // record names both ends and the exact point the truncation kept.
 func TestE2EASessionRewoundNamesTheLineageItReplaces(t *testing.T) {
 	// Arrange + Act
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	rw := rewindByKeepAlivePing(t, s)
 
 	// Assert
@@ -189,7 +189,7 @@ func TestE2EASessionRewoundNamesTheLineageItReplaces(t *testing.T) {
 // naming them would leave the record claiming turns that replay no longer has.
 func TestE2EASessionRewoundNamesTheDroppedKeepAliveTurns(t *testing.T) {
 	// Arrange + Act
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	rw := rewindByKeepAlivePing(t, s)
 
 	// Assert
@@ -220,7 +220,7 @@ func TestE2EASessionRewoundNamesTheDroppedKeepAliveTurns(t *testing.T) {
 // design's words require — without inventing the token that attributes it.
 func TestE2EADroppedKeepAliveTurnIsClosedInTheTurnLedger(t *testing.T) {
 	// Arrange + Act
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	rw := rewindByKeepAlivePing(t, s)
 
 	// Assert
@@ -247,7 +247,7 @@ func TestE2EADroppedKeepAliveTurnIsClosedInTheTurnLedger(t *testing.T) {
 // conversation without the plumbing.
 func TestE2EAFullReplayCarriesNoKeepAliveTurn(t *testing.T) {
 	// Arrange
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	rewindByKeepAlivePing(t, s)
 
 	// Act — exactly what a reloaded webview sends.
@@ -276,7 +276,7 @@ func TestE2EAFullReplayStillCarriesTheRealTurnsFromBeforeTheRewind(t *testing.T)
 	// would have appended for the turn is written here — without it the
 	// truncated copy could never carry the turn into the new seq space, no
 	// matter how correct the cut is.
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	writeFixtureTranscript(t, s.cwd, s.vendorID, []string{
 		userLine("before-user", "", s.vendorID, "before-the-rewind"),
 		assistantLine("before-echo", "before-user", s.vendorID, echoOf("before-the-rewind")+"default]"),
@@ -306,7 +306,7 @@ func TestE2EAFullReplayStillCarriesTheRealTurnsFromBeforeTheRewind(t *testing.T)
 // the one thing the store's per-session sequence promises it is not.
 func TestE2EAKeepAliveTurnStaysInTheStoreAfterTheRewind(t *testing.T) {
 	// Arrange
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	rw := rewindByKeepAlivePing(t, s)
 
 	// Act — read the RETIRED conversation from its beginning, as an auditor
@@ -328,7 +328,7 @@ func TestE2EAKeepAliveTurnStaysInTheStoreAfterTheRewind(t *testing.T) {
 // connected throughout sees the rewind happen and still never sees the ping.
 func TestE2ETheLiveStreamNeverShowedTheKeepAliveTurnEither(t *testing.T) {
 	// Arrange
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	held := heldByKeepAlivePing(t, s, "live-stream-exclusion")
 
 	// Assert — read live until the held prompt's own reply (which can only
