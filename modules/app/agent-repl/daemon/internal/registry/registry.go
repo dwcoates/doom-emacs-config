@@ -482,6 +482,9 @@ func (r *Registry) Prepare() error {
 	r.logf("registry: prepared schema=%d checkpoints_created=%d records_hydrated=%d terminal_pruned=%d live=%d terminal_retained=%d",
 		schemaVersion, stats.checkpointsCreated, stats.recordsHydrated,
 		stats.terminalPruned, r.liveCount(), r.terminalCount())
+	// One-time boot report of workspace keys written before ingress
+	// canonicalization existed (phantomkey.go).
+	r.reportPhantomWorkspaceKeys()
 	return nil
 }
 
