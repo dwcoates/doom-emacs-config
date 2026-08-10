@@ -8,6 +8,7 @@ import {
   log,
   logVerbose,
   resetLoggingForTests,
+  restampRecordIdentity,
   setLogger,
 } from "../src/wslog.js";
 
@@ -425,5 +426,83 @@ describe("emitted record timestamps", () => {
     const fixture = JSON.parse(timestampFixtureRaw) as { pattern: string };
     const record = spy.forwarded[0]!.context as unknown as { timestamp: string };
     expect(record.timestamp).toMatch(new RegExp(fixture.pattern));
+  });
+});
+
+/**
+ * The stamp is applied at the SEND, not at the emission: a bounce holds
+ * records across the session rotation that follows it, and a held record
+ * flushed under the retired id is refused by the daemon per record.
+ */
+describe("forwarded record source identity", () => {
+  afterEach(() => {
+    resetLoggingForTests();
+  });
+
+  it("restamps a record built before the page adopted a new session", () => {
+    // Arrange: a record emitted under the retired session, held (as the
+    // throttle holds records across a daemon bounce) until after adoption.
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
+    bindLogContext({ claude_session_id: "60f5-retired" });
+    log("info", "held across the bounce", { operation: "test.restamp" });
+    const held = spy.forwarded[0]!.context as unknown as Record<string, unknown>;
+    expect(held.claude_session_id).toBe("60f5-retired");
+
+    // Act: the page adopts the session the daemon now owns, then the held
+    // record reaches the socket.
+    bindLogContext({ claude_session_id: "a1b2-current" });
+    const stamped = restampRecordIdentity(held as unknown as ClientLogContext) as unknown as Record<string, unknown>;
+
+    // Assert
+    expect(stamped.claude_session_id).toBe("a1b2-current");
+  });
+
+  it("restamps a record emitted after adoption", () => {
+    // Arrange
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
+    bindLogContext({ claude_session_id: "60f5-retired" });
+
+    // Act
+    bindLogContext({ claude_session_id: "a1b2-current" });
+    log("info", "after adoption", { operation: "test.restamp-after" });
+    const record = spy.forwarded[0]!.context as unknown as ClientLogContext;
+    const stamped = restampRecordIdentity(record) as unknown as Record<string, unknown>;
+
+    // Assert
+    expect(stamped.claude_session_id).toBe("a1b2-current");
+  });
+
+  it("leaves the record's own evidence untouched", () => {
+    // Arrange
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
+    bindLogContext({ claude_session_id: "60f5-retired" });
+    log("warn", "seq gap", { operation: "test.restamp-evidence", context: { gap: 7 } });
+    const record = spy.forwarded[0]!.context as unknown as Record<string, unknown>;
+
+    // Act
+    bindLogContext({ claude_session_id: "a1b2-current" });
+    const stamped = restampRecordIdentity(record as unknown as ClientLogContext) as unknown as Record<string, unknown>;
+
+    // Assert: attribution changed, the event's own record did not.
+    expect(stamped.message).toBe("seq gap");
+    expect(stamped.operation).toBe("test.restamp-evidence");
+    expect(stamped.context).toEqual({ gap: 7 });
+  });
+
+  it("drops the identity field when the page holds none", () => {
+    // Arrange: resetLoggingForTests leaves only a connection id bound, which
+    // is the workspace-addressed page's pre-ruling state.
+    resetLoggingForTests();
+    const record = { message: "pre-ruling", claude_session_id: "60f5-retired" } as unknown as ClientLogContext;
+
+    // Act
+    const stamped = restampRecordIdentity(record) as unknown as Record<string, unknown>;
+
+    // Assert: absence, never an empty string — the daemon reads an absent
+    // identity as attribution to the workspace alone.
+    expect("claude_session_id" in stamped).toBe(false);
   });
 });

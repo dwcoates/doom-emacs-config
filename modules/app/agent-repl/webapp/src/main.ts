@@ -154,6 +154,7 @@ import {
   ForwardingLogger,
   log,
   logVerbose,
+  restampRecordIdentity,
   setLogger,
   type ClientLogContext,
   type ClientLogLevel,
@@ -229,7 +230,13 @@ async function boot(): Promise<void> {
       // Startup and reconnect legitimately precede an open command socket.
       // Returning false keeps the record buffered for the next flush.
       if (clientLogSink === null) return false;
-      return clientLogSink(level, message, context);
+      // THE IDENTITY IS STAMPED HERE, at the last point before the socket,
+      // rather than where the record was built. A bounce holds records in the
+      // throttle's buffer across the session rotation that follows it, and a
+      // record flushed with the retired id is refused by the daemon (see
+      // restampRecordIdentity). Sending them under the identity this page holds
+      // NOW is what the record's source attribution means.
+      return clientLogSink(level, message, context === undefined ? context : restampRecordIdentity(context));
     },
   });
   const wslog = new ForwardingLogger(
