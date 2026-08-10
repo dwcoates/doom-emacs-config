@@ -58,6 +58,10 @@ func (m *Manager) SweepOverdueKeepAlivePings() int {
 	// snapshot in a way that matters: every consumer below re-matches on the turn
 	// id it was given, so a ping that ended in the gap is a no-op rather than a
 	// close aimed at whatever replaced it.
+	// THE PLANNED-BOUNCE GRACE, read ONCE for the whole sweep so every session
+	// is judged against the same window rather than against a clock that could
+	// advance between two map entries (restartepoch.go).
+	epoch := m.restartEpochNow()
 	type overduePing struct {
 		d        *sessionController
 		turnID   string
@@ -65,6 +69,7 @@ func (m *Manager) SweepOverdueKeepAlivePings() int {
 		deadline int64
 	}
 	var overdue []overduePing
+	var extended []overduePing
 	m.mu.Lock()
 	for _, d := range m.byWS {
 		ping := d.keepAlivePing
@@ -75,14 +80,37 @@ func (m *Manager) SweepOverdueKeepAlivePings() int {
 		if !late {
 			continue
 		}
-		overdue = append(overdue, overduePing{
+		// THE GAP IS NOT THIS PING'S FAULT. A bounce suspends the whole fleet
+		// for as long as it takes, and a ping in flight across it accrues that
+		// elapsed without anything having gone wrong — so the deadline is
+		// EXTENDED by exactly the window this ping lived through, never
+		// skipped. A genuinely wedged ping still trips the bound, one full
+		// deadline after the gap, which is what keeps this a failure bound.
+		grace := epoch.graceMs - ping.restartGraceAtSubmitMs
+		if grace < 0 {
+			grace = 0
+		}
+		entry := overduePing{
 			d:        d,
 			turnID:   ping.turnID,
 			openMs:   open.Milliseconds(),
-			deadline: cfg.PingDeadline().Milliseconds(),
-		})
+			deadline: cfg.PingDeadline().Milliseconds() + grace,
+		}
+		if entry.openMs < entry.deadline {
+			extended = append(extended, entry)
+			continue
+		}
+		overdue = append(overdue, entry)
 	}
 	m.mu.Unlock()
+
+	for _, p := range extended {
+		// SAID OUT LOUD, EVERY TIME. A deadline that silently does not fire is
+		// indistinguishable from one that is broken, and the whole reason this
+		// bound exists is that a claim nobody retires wedges four things at once.
+		m.logf("session-controller: keep-alive ping deadline EXTENDED ws=%q session=%s turn_id=%s open_ms=%d extended_deadline_ms=%d base_deadline_ms=%d restart_epoch_open=%v restart_epoch_reason=%q — a planned daemon replacement spanned this ping, so the gap is granted rather than charged to it; the claim is retired if it is still open one full deadline past the window",
+			p.d.workspace, p.d.sessionID, p.turnID, p.openMs, p.deadline, cfg.PingDeadline().Milliseconds(), epoch.open, epoch.reason)
+	}
 
 	closed := 0
 	for _, p := range overdue {
