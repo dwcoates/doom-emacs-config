@@ -179,6 +179,12 @@ type fakeClient struct {
 	// INTERRUPTED, so a test that does not care about the outcome gets the
 	// ordinary successful stop.
 	interruptOutcome corev1.InterruptOutcome
+	// interruptOutcomeQueue answers successive stops with successive verdicts,
+	// which is what a re-aimed stop needs: the first ack reports the aimed-at
+	// turn already complete and the second reports the newer turn interrupted.
+	// It is consumed front to back and falls back to interruptOutcome when
+	// empty.
+	interruptOutcomeQueue []corev1.InterruptOutcome
 	// interruptOrigins records who ORDERED each stop, in that caller's own
 	// vocabulary, so a test can prove the correlation reaches the wire.
 	interruptOrigins []string
@@ -392,6 +398,10 @@ func (c *fakeClient) Interrupt(_ context.Context, originRequestID string) (corev
 	c.mu.Lock()
 	c.interrupts++
 	outcome := c.interruptOutcome
+	if len(c.interruptOutcomeQueue) > 0 {
+		outcome = c.interruptOutcomeQueue[0]
+		c.interruptOutcomeQueue = c.interruptOutcomeQueue[1:]
+	}
 	failure := c.interruptErr
 	c.mu.Unlock()
 	notifyTestActivity()
