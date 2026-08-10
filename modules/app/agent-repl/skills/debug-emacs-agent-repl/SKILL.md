@@ -61,6 +61,7 @@ the symptom crosses planes.
 | Critical-path observability loop | Must the path be instrumented, reloaded, provoked, and inspected iteratively to expose and verify the bug? | `references/critical-path-observability-loop.md` | logs, observability, testing |
 | Iterative fix-verify loop | Is the system being driven to a healthy steady state through repeated bounce, observe, and remediate iterations? | `references/iterative-fix-verify-loop.md` | health, logs, identity, critical path, observability |
 | Interaction replay remediation | Can the user's own interaction sequence reproduce the issue, and can it be replayed hands-free until it runs clean? | `references/interaction-replay-remediation.md` | iterative fix-verify loop, logs, observability |
+| Bounce recovery-verification loop | Does the stack actually recover from a backend bounce, for every workspace, with real data on the wire? | `references/bounce-recovery-verification-loop.md` | iterative fix-verify loop, health, logs, identity, observability |
 
 Apply an ambiguity gate before choosing:
 
