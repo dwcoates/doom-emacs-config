@@ -2936,6 +2936,7 @@ liveness gates the restore."
     (let ((deleted nil)
           (swapped nil))
       (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
+                ((symbol-function 'window-minibuffer-p) (lambda (_w) nil))
                 ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
                 ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
                 ((symbol-function 'window-deletable-p) (lambda (_w) t))
@@ -2954,6 +2955,7 @@ liveness gates the restore."
           (fallback (get-buffer-create "*agent-test-fallback*")))
       (unwind-protect
           (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
+                    ((symbol-function 'window-minibuffer-p) (lambda (_w) nil))
                     ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
                     ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
                     ((symbol-function 'window-deletable-p) (lambda (_w) nil))
@@ -2974,6 +2976,7 @@ liveness gates the restore."
           (default (get-buffer-create "*agent-test-default*")))
       (unwind-protect
           (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
+                    ((symbol-function 'window-minibuffer-p) (lambda (_w) nil))
                     ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
                     ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
                     ((symbol-function 'window-deletable-p) (lambda (_w) nil))
