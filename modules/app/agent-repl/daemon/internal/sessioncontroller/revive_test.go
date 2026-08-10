@@ -71,6 +71,31 @@ func TestReviveForMergeClearsTheGateAndRefreshesTheIdleClock(t *testing.T) {
 	}
 }
 
+// A RECORD THAT READS AWAKE IS NOT A RECORD THAT WILL STAY AWAKE. Its flag says
+// awake while the instant the keep-alive policy measures from is hours old, so
+// the merge's own bring-up hibernated the session the merge was reviving and
+// ensure() came back with ErrHibernated. The revival must clear on this branch
+// too, because clearing is what stamps the fresh measuring point.
+func TestReviveForMergeSurvivesAStaleRecordWhoseFlagReadsAwake(t *testing.T) {
+	// Arrange — never hibernated (no detail at all), last turn end far past the
+	// keep-alive cache TTL.
+	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
+	hib := newFakeHibernations()
+	m.cfg.Hibernations = hib
+	hib.TurnEndObserved("s1", time.Now().Add(-72*time.Hour).UnixMilli())
+	// The staleness transition refuses an unsettled workspace, so the record has
+	// to be settled for the stale sleep to be takeable at all.
+	m.cfg.SSM.(*fakeApplier).setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
+
+	// Act.
+	err := m.ReviveForMerge(context.Background(), "ws")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReviveForMerge over a stale-but-awake record = %v, want the revival to hold rather than hibernate the session it was reviving", err)
+	}
+}
+
 func TestReviveForMergeRefusesAnInFlightUserRevival(t *testing.T) {
 	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
 	release, _, err := m.claimRevival("ws", "s1")
