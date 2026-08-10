@@ -48,12 +48,12 @@ func (c *scriptedConn) readCommand() (*frontendv1.FrontendCommand, error) {
 	return cmd, nil
 }
 
-func (c *scriptedConn) writeFrame(data []byte) error {
+func (c *scriptedConn) writeFrame(data []byte, _ func()) error {
 	c.writes <- append([]byte(nil), data...)
 	return nil
 }
 
-func (c *scriptedConn) close() error {
+func (c *scriptedConn) close(closeCause) error {
 	c.closeOnce.Do(func() { close(c.closed) })
 	return nil
 }

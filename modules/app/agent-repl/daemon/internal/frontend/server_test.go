@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -36,9 +37,35 @@ func shortSock(t *testing.T, name string) string {
 	return filepath.Join(dir, name)
 }
 
+// testLogf routes the server's log into the test's output, and stops doing so
+// the moment the test ends.
+//
+// The guard is not decoration. A served connection's writer goroutine outlives
+// several of these tests by design — an HTTP handler's teardown is not
+// something the test's own return synchronizes with — and it now writes a
+// teardown record for every connection it closes. t.Logf after the test has
+// completed is a data race on the testing framework's own state, and it would
+// report as a race in THIS package rather than as the harness lifetime issue it
+// is.
 func testLogf(t *testing.T) func(string, ...any) {
 	t.Helper()
-	return func(format string, args ...any) { t.Logf(format, args...) }
+	var (
+		mu   sync.Mutex
+		live = true
+	)
+	t.Cleanup(func() {
+		mu.Lock()
+		live = false
+		mu.Unlock()
+	})
+	return func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !live {
+			return
+		}
+		t.Logf(format, args...)
+	}
 }
 
 // staticState is a fixed StateProvider for tests.
@@ -1433,7 +1460,7 @@ func TestWriterBlockedInOneWriteAnnouncesItselfWhileItIsBlocked(t *testing.T) {
 		t.Fatalf("blocked record does not name the consumer: %q", line)
 	}
 	c.release <- nil
-	c.close()
+	_ = c.close(causeServerShutdown)
 }
 
 func TestWriterBlockedRecordNamesTheLaneTheHeldFrameLeftBy(t *testing.T) {
@@ -1455,7 +1482,7 @@ func TestWriterBlockedRecordNamesTheLaneTheHeldFrameLeftBy(t *testing.T) {
 		t.Fatalf("blocked record does not name the lane: %q", line)
 	}
 	c.release <- nil
-	c.close()
+	_ = c.close(causeServerShutdown)
 }
 
 func TestWriterStallReportsItsResolution(t *testing.T) {
@@ -1478,7 +1505,7 @@ func TestWriterStallReportsItsResolution(t *testing.T) {
 	if !strings.Contains(line, "ok=true") {
 		t.Fatalf("resolution does not report the write's outcome: %q", line)
 	}
-	c.close()
+	_ = c.close(causeServerShutdown)
 }
 
 func TestWriterStallResolutionReportsAFailedWrite(t *testing.T) {
@@ -1501,7 +1528,7 @@ func TestWriterStallResolutionReportsAFailedWrite(t *testing.T) {
 	if !strings.Contains(line, "ok=false") {
 		t.Fatalf("resolution reports a failed write as delivered: %q", line)
 	}
-	c.close()
+	_ = c.close(causeServerShutdown)
 }
 
 func TestAWriteThatCompletesPromptlyIsNotAnnouncedAtAll(t *testing.T) {
@@ -1525,5 +1552,64 @@ func TestAWriteThatCompletesPromptlyIsNotAnnouncedAtAll(t *testing.T) {
 	if log.contains("OUTBOUND WRITER BLOCKED") {
 		t.Fatal("a prompt write was announced as a stall")
 	}
-	c.close()
+	_ = c.close(causeServerShutdown)
+}
+
+// TestUDSWriteFrameReportsEachAcceptedChunkAsProgress covers the transport half
+// of the drain-progress signal: one large frame must report progress MANY
+// times, because a consumer that spends half a minute reading one snapshot is
+// otherwise indistinguishable from one that died holding it.
+func TestUDSWriteFrameReportsEachAcceptedChunkAsProgress(t *testing.T) {
+	tests := []struct {
+		name         string
+		payload      int
+		wantMinCalls int
+	}{
+		{
+			// A single small frame still reports: the delimiter write is the
+			// closing act of every frame, and a steady stream of small frames
+			// must count as progress just as a big one does.
+			name: "a frame smaller than one chunk still reports progress",
+			// net.Pipe is unbuffered, so this is bytes the peer genuinely read.
+			payload:      16,
+			wantMinCalls: 2,
+		},
+		{
+			name:         "a frame spanning several chunks reports one per chunk",
+			payload:      writeChunkBytes*4 + 7,
+			wantMinCalls: 5,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a peer that reads everything, so every chunk is accepted.
+			local, remote := net.Pipe()
+			t.Cleanup(func() { _ = local.Close(); _ = remote.Close() })
+			read := make(chan error, 1)
+			go func() {
+				_, err := io.Copy(io.Discard, remote)
+				read <- err
+			}()
+			c := newUDSConn(local)
+			var calls int
+
+			// Act.
+			err := c.writeFrame(make([]byte, tc.payload), func() { calls++ })
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("writeFrame = %v, want a clean write", err)
+			}
+			if calls < tc.wantMinCalls {
+				t.Fatalf("progress calls = %d, want at least %d for a %d-byte frame",
+					calls, tc.wantMinCalls, tc.payload)
+			}
+			// Close the write side so the reader finishes rather than being
+			// abandoned mid-copy.
+			if err := local.Close(); err != nil {
+				t.Fatalf("close local: %v", err)
+			}
+			<-read
+		})
+	}
 }
