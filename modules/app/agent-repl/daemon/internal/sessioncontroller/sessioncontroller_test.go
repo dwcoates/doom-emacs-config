@@ -488,20 +488,24 @@ func (c *fakeClient) interruptOriginIDs() []string {
 
 // newTestManager builds a Manager whose clients are fakes, capturing the last
 // built fake so a test can inspect what the session controller sent it.
-func newTestManager(t *testing.T, locator SessionLocator, spawner Spawner) (*Manager, func() *fakeClient) {
+// OPTS mutate the Config BEFORE New, which is the only safe moment. A rig that
+// assigned to m.cfg after construction raced every goroutine the bring-up had
+// already launched — `Config` is read without a lock by design, because it is
+// meant to be immutable once the manager owns it.
+func newTestManager(t *testing.T, locator SessionLocator, spawner Spawner, opts ...func(*Config)) (*Manager, func() *fakeClient) {
 	t.Helper()
-	return newClockedTestManager(t, locator, spawner, nil)
+	return newClockedTestManager(t, locator, spawner, nil, opts...)
 }
 
 // newClockedTestManager is newTestManager over an explicit Config.Now — the
 // exported clock seam production threads its one daemon clock into. A nil now
 // leaves the field unset, which is the wall-clock default every other test
 // runs on.
-func newClockedTestManager(t *testing.T, locator SessionLocator, spawner Spawner, now func() int64) (*Manager, func() *fakeClient) {
+func newClockedTestManager(t *testing.T, locator SessionLocator, spawner Spawner, now func() int64, opts ...func(*Config)) (*Manager, func() *fakeClient) {
 	t.Helper()
 	var mu sync.Mutex
 	var last *fakeClient
-	m, err := New(Config{
+	cfg := Config{
 		Now:               now,
 		Push:              &fakePusher{},
 		SSM:               &fakeApplier{},
@@ -520,7 +524,11 @@ func newClockedTestManager(t *testing.T, locator SessionLocator, spawner Spawner
 			mu.Unlock()
 			return fc
 		},
-	})
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	m, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
