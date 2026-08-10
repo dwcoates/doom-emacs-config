@@ -324,6 +324,21 @@ place it deadlocks non-interactive callers like the nuke hook."
   (let ((kill-buffer-query-functions nil))
     (kill-buffer buf)))
 
+(defun agent-repl--frontend-detach-webview (ws buf)
+  "Kill webview BUF and clear WS\='s binding to it, in that order.
+The two halves are ONE act: `agent-repl--frontend-ensure-webview-buffer'
+reuses whatever `:frontend-buffer' names, so a kill that left the key set
+would hand a dead buffer to the next mount, and a cleared key over a live
+buffer would leak a WKWebView holding an open WebSocket.  Every site that
+takes a workspace\='s webview down for a later remount — close-panel, the
+bundle remount, the restart verb\='s bounce — goes through here so neither
+half can be forgotten at one of them.
+
+The nuke path deliberately does NOT: tombstoning nils the plist keys
+itself, and the put would resurrect the record."
+  (agent-repl--frontend-kill-webview buf)
+  (agent-repl--ws-put ws :frontend-buffer nil))
+
 ;;;; ---- Refreshing live webviews ----------------------------------------------
 
 (defun agent-repl--frontend-webview-live-widget (buf)
@@ -1055,8 +1070,7 @@ current bundle anyway.  Returns the new buffer when a remount happened."
          ws
          (lambda ()
            (let ((url (agent-repl--frontend-webview-url ws)))
-             (agent-repl--frontend-kill-webview buf)
-             (agent-repl--ws-put ws :frontend-buffer nil)
+             (agent-repl--frontend-detach-webview ws buf)
              (let ((new (agent-repl--frontend-ensure-webview-buffer ws url)))
                (agent-repl--log ws "remount-webview: reloaded bundle ws=%s" ws)
                (when (window-live-p win) (set-window-buffer win new)))))
@@ -1185,8 +1199,8 @@ session restart that runs beside it.")
 The webview URL carries the webapp\='s build id, so a page reopened after
 a rebuild addresses the new artifact and cannot serve the old bundle out
 of cache.  Runs the ordinary close and open primitives
-\(`agent-repl--frontend-kill-webview' then `agent-repl--gui-open'), which
-is exactly what `agent-repl-frontend-close-panel' and
+\(`agent-repl--frontend-detach-webview' then `agent-repl--gui-open'),
+which is exactly what `agent-repl-frontend-close-panel' and
 `agent-repl-frontend-open-panel' do.
 
 A no-op returning nil when WS has no live webview: a panel the user
@@ -1198,8 +1212,7 @@ Returns the workspace when a bounce happened."
           (agent-repl--log ws "bounce-webview: skipped=no-live-webview")
           nil)
       (agent-repl--log ws "bounce-webview: closing buf=%s" (buffer-name buf))
-      (agent-repl--frontend-kill-webview buf)
-      (agent-repl--ws-put ws :frontend-buffer nil)
+      (agent-repl--frontend-detach-webview ws buf)
       (agent-repl--gui-open ws)
       (agent-repl--log ws "bounce-webview: reopened on the fresh build id")
       ws)))
@@ -1421,8 +1434,7 @@ workspace nuke path (`agent-repl-ws-del-hook')."
       (agent-repl--log ws "close-panel: rejected=no-live-webview")
       (user-error "agent-repl: no webview open for workspace %s" ws))
     (agent-repl--log ws "close-panel: killing buf=%s" (buffer-name buf))
-    (agent-repl--frontend-kill-webview buf)
-    (agent-repl--ws-put ws :frontend-buffer nil)
+    (agent-repl--frontend-detach-webview ws buf)
     (agent-repl--user-message ws "webview closed (session kept)" nil)))
 
 ;;;; ---- Workspace teardown -----------------------------------------------------
