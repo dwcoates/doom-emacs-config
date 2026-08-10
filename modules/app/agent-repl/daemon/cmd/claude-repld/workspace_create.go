@@ -18,6 +18,7 @@ import (
 	"claude-repld/internal/gitexec"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
+	"claude-repld/internal/session"
 	workspacecreate "claude-repld/internal/workspace/create"
 
 	"google.golang.org/protobuf/types/known/structpb"
@@ -278,17 +279,14 @@ func (w DaemonWorktree) runGitOK(ctx context.Context, dir string, args ...string
 // normalizeWorkspacePath accepts the skill contract's leading ~/ spelling but
 // rejects every other relative path before any git operation can run.
 func normalizeWorkspacePath(path string) (string, error) {
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w", err)
-		}
-		path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+	expanded, err := session.ExpandHome(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
 	}
-	if path == "" || !filepath.IsAbs(path) {
+	if expanded == "" || !filepath.IsAbs(expanded) {
 		return "", fmt.Errorf("must be an absolute path or begin with ~/")
 	}
-	return filepath.Clean(path), nil
+	return expanded, nil
 }
 
 func (w DaemonWorktree) EnsureWorktree(ctx context.Context, job workspacecreate.Job) error {
@@ -444,13 +442,23 @@ func (c daemonSessionCreator) EnsureSession(ctx context.Context, job workspacecr
 // ResolveSessionMetadata resolves and returns the durable request metadata
 // before CreateSession.  An empty source ConfigDir is intentionally retained:
 // it means the source uses the CLI default, not an unspecified value.
+//
+// A CREATE WITH NO SOURCE SESSION STILL HAS AN ACCOUNT, and it is the one the
+// worktree's own path names (session.AccountConfigDirFor).  Inheritance is the
+// only rule that used to exist here, so a one-shot pinned to a repo — which
+// nominates no source workspace, because it is deliberately independent of the
+// workspace the keystroke came from — fell through with an empty ConfigDir and
+// ran under the CLI default.  For the doom repo that IS the default and the gap
+// was invisible; for a repo under $MULTI_REPO_ROOT it meant the new workspace
+// ran under a different account than the repo it was cut from, wrote its
+// transcript into a root nothing else reads, and could never resume.
 func (c daemonSessionCreator) ResolveSessionMetadata(_ context.Context, job workspacecreate.Job) (workspacecreate.Request, error) {
 	if c.Registry == nil || c.Logf == nil {
 		return workspacecreate.Request{}, fmt.Errorf("workspace create: session metadata resolver is not fully configured")
 	}
 	request := job.Request
 	if request.SourceWorkspace == "" && request.SourceDir == "" {
-		return request, nil
+		return c.resolveAccountFromPath(job, request)
 	}
 	if request.SourceWorkspace == "" || request.SourceDir == "" {
 		return workspacecreate.Request{}, fmt.Errorf("workspace create: job %s source workspace requires both name and directory", job.ID)
@@ -468,6 +476,36 @@ func (c daemonSessionCreator) ResolveSessionMetadata(_ context.Context, job work
 	}
 	request.ConfigDir, request.PermissionMode = source.ConfigDir, source.PermissionMode
 	c.Logf("workspace-create: inherited job=%s source_workspace=%q source_session=%s config_dir=%q permission_mode=%q", job.ID, request.SourceWorkspace, sourceID, request.ConfigDir, request.PermissionMode)
+	return request, nil
+}
+
+// resolveAccountFromPath fills in the account for a create that nominates no
+// source session, from the worktree the job is about to bring up.
+//
+// A ConfigDir the request ALREADY carries wins: it came from a caller that
+// named the account deliberately, and overriding it here would make the
+// command's own field advisory.  A disagreement between the two is reported
+// rather than silently resolved, because a caller naming one account for a
+// path that routes to another is a mistake somebody has to see.
+func (c daemonSessionCreator) resolveAccountFromPath(job workspacecreate.Job, request workspacecreate.Request) (workspacecreate.Request, error) {
+	path := job.WorktreePath
+	if path == "" {
+		path = request.GitRoot
+	}
+	routed, err := session.AccountConfigDirFor(path)
+	if err != nil {
+		return workspacecreate.Request{}, fmt.Errorf("workspace create: job %s resolve the account for %q: %w", job.ID, path, err)
+	}
+	if request.ConfigDir != "" {
+		if request.ConfigDir != routed {
+			c.Logf("workspace-create: account NAMED BY THE REQUEST job=%s path=%s request_config_dir=%q path_routes_to=%q — the request's account stands, and the two disagree",
+				job.ID, path, request.ConfigDir, routed)
+		}
+		return request, nil
+	}
+	request.ConfigDir = routed
+	c.Logf("workspace-create: account resolved from path job=%s path=%s config_dir=%q multi_repo_root=%q — no source workspace to inherit from",
+		job.ID, path, request.ConfigDir, os.Getenv(session.MultiRepoRootEnv))
 	return request, nil
 }
 
@@ -675,7 +713,16 @@ func (b *WorkspaceCreationBridge) SessionPublicationDecision(worktreePath, sessi
 		return server.SessionPublicationDecision{}, err
 	}
 	result := server.SessionPublicationDecision{JobID: decision.JobID, WorktreePath: decision.WorktreePath, SessionID: decision.SessionID, Materialized: decision.Materialized}
-	if result.JobID != "" {
+	// A HOLD IS MEMOIZED ONLY ONCE ITS JOB'S IDENTITY IS SETTLED. Frames arrive
+	// for a worktree while its creation job is still between
+	// PrepareSessionPublication and the CreateSession that gives it a session id,
+	// and a decision cached in that window names a job with no session. The
+	// release that follows carries the job's real session, and the entry it finds
+	// would disagree with it forever — which is exactly how a materialized
+	// workspace stayed held for 25 minutes with 6294 hold records and no fault.
+	// An unsettled hold is still a hold; it is simply re-derived from the store
+	// on the next frame rather than frozen.
+	if result.JobID != "" && result.SessionID != "" {
 		b.publication[worktreePath] = result
 	}
 	b.mu.Unlock()
@@ -705,15 +752,20 @@ func (b *WorkspaceCreationBridge) ReleaseSessionPublication(_ context.Context, d
 		return fmt.Errorf("workspace create: invalid session-publication release job=%q worktree=%q session=%q materialized=%t", decision.JobID, decision.WorktreePath, decision.SessionID, decision.Materialized)
 	}
 	value := server.SessionPublicationRelease{JobID: decision.JobID, WorktreePath: decision.WorktreePath, SessionID: decision.SessionID, Completion: make(chan error, 1)}
+	// THE RELEASE IS AUTHORITATIVE, not a request to amend an entry that must
+	// already agree with it. It carries the durable job's own identity, so it
+	// INSTALLS the open verdict rather than requiring a prior hold to match:
+	// a hold that was never memoized, or one memoized before the job had a
+	// session, is not evidence that this release is wrong. The one thing that
+	// IS wrong is another job owning the same worktree — one live workspace has
+	// exactly one creation identity — and that is refused loudly.
 	value.Open = func() error {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		current, ok := b.publication[decision.WorktreePath]
-		if !ok || current.JobID != decision.JobID || current.SessionID != decision.SessionID {
-			return fmt.Errorf("workspace create: release open lost publication decision job=%q worktree=%q session=%q", decision.JobID, decision.WorktreePath, decision.SessionID)
+		if current, ok := b.publication[decision.WorktreePath]; ok && current.JobID != "" && current.JobID != decision.JobID {
+			return fmt.Errorf("workspace create: release open found a DIFFERENT creation job holding worktree=%q: releasing job=%q session=%q but the gate holds job=%q session=%q", decision.WorktreePath, decision.JobID, decision.SessionID, current.JobID, current.SessionID)
 		}
-		current.Materialized = true
-		b.publication[decision.WorktreePath] = current
+		b.publication[decision.WorktreePath] = server.SessionPublicationDecision{JobID: decision.JobID, WorktreePath: decision.WorktreePath, SessionID: decision.SessionID, Materialized: true}
 		return nil
 	}
 	b.mu.Lock()
