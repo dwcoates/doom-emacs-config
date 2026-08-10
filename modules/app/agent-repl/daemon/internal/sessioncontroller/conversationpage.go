@@ -339,18 +339,30 @@ func (m *Manager) pageFromDurableHistory(ctx context.Context, workspace, generat
 
 // assemblePage is the windowed backwards walk both routes share.
 //
-// lastSeen is the highest seq this conversation has produced, which is what a
-// TAIL anchor resolves to. It is an argument rather than something read here
-// because the two routes learn it differently — a live controller's ring can
-// legitimately be ahead of the durable mark — and choosing between them is the
-// caller's business, not the walk's.
+// lastSeen is the daemon's high-water mark for this conversation, and it is a
+// HINT rather than an authority. See the tail anchor below for why that
+// distinction is load-bearing.
 func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, generationID string, lastSeen uint64, anchor PageAnchor, limit uint32, source string, read pageRangeReader) (*frontendv1.ConversationPage, error) {
 	logf := dlog.Tag(dlog.Logf(m.logf), "ws", workspace, "session", sessionID, "source", source)
-	// The EXCLUSIVE upper bound this page walks back from.
+	// The EXCLUSIVE upper bound this page walks back from. ZERO MEANS
+	// UNBOUNDED, which is what a tail anchor always is.
+	//
+	// A TAIL PAGE IS NEVER CAPPED AT last_seen_seq, and this is the correction
+	// an end-to-end run forced. last_seen_seq is the mark a daemon wrote as it
+	// CONSUMED the conversation, so it says nothing about what the store holds:
+	// a daemon that never consumed this session — a fresh state database, a
+	// workspace it was never wired to — carries zero, and capping the read
+	// there served an EMPTY page over a store holding the entire conversation.
+	// That is the blank-feed bug this protocol's whole history has been spent
+	// closing, re-introduced as a bound.
+	//
+	// So the mark is used for the one thing it is honest about: WHERE TO START
+	// READING FROM. The upper bound stays open, so whatever the store actually
+	// holds above the mark is served too, and a mark that is stale or absent
+	// costs a wider read rather than a wrong answer.
 	var upper uint64
 	if anchor.Tail {
-		// One past the newest seq, so the newest event is inside the range.
-		upper = lastSeen + 1
+		upper = 0
 	} else {
 		cursor, err := decodePageCursor(anchor.Cursor, sessionID)
 		if err != nil {
@@ -364,37 +376,58 @@ func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, genera
 	// page has no client mark — it is asking about history, not catching up —
 	// so the floor is whatever the conversation's own newest cut is.
 	floor := m.replayFloorAt(workspace, sessionID, lastSeen, 0)
-	if upper <= floor {
-		// The anchor is already at or below the floor: everything a client
-		// could page to has been cut away by a clear or a compaction, which is
-		// the conversation's beginning as far as any frontend is concerned.
+	// A BEFORE anchor at or below the floor has nothing left to serve:
+	// everything it could page to has been cut away by a clear or a
+	// compaction, which is the conversation's beginning as far as any frontend
+	// is concerned. A TAIL anchor is never in this position — its bound is
+	// open, and the floor is where its walk STARTS rather than where it ends.
+	if !anchor.Tail && upper <= floor {
 		logf("session-controller: conversation page reaches the START ws=%q session=%s upper=%d floor=%d decision=anchor_at_or_below_floor",
 			workspace, sessionID, upper, floor)
 		return m.newPage(workspace, sessionID, generationID, nil, pageContinuation{reachedStart: true}, 0), nil
 	}
 
+	// WHERE THE BACKWARDS WALK STARTS ITS FIRST WINDOW.
+	//
+	// A before page walks back from its cursor. A tail page walks back from the
+	// high-water hint, which is the whole use this hint is put to: it is a
+	// guess at where the interesting end of the conversation is, and a wrong
+	// guess costs a wider read, never a wrong page. A hint at or below the
+	// floor gives no starting point at all, so the walk begins at the floor —
+	// one full pass, bounded in MEMORY by the rolling buffer below, and logged
+	// so it is never mistaken for the ordinary case.
+	walkFrom := upper
+	if anchor.Tail {
+		walkFrom = lastSeen + 1
+		if walkFrom <= floor {
+			logf("session-controller: conversation page has NO high-water hint ws=%q session=%s last_seen_seq=%d floor=%d decision=scan_from_floor — this daemon never consumed this conversation, so the tail is found by one pass from the floor rather than by trusting a mark that says nothing about what the store holds",
+				workspace, sessionID, lastSeen, floor)
+		}
+	}
+
 	var (
-		segments  []pageSegment
-		window    = uint64(pageInitialWindow)
-		scanned   uint64
-		lowerRead uint64
-		atFloor   bool
+		segments     []pageSegment
+		droppedOlder bool
+		window       = uint64(pageInitialWindow)
+		scanned      uint64
+		lowerRead    uint64
+		atFloor      bool
 	)
 	for {
 		lower := floor
-		if upper > window+floor {
-			lower = upper - window
+		if walkFrom > window+floor {
+			lower = walkFrom - window
 		} else {
 			atFloor = true
 		}
 		var err error
-		segments, err = m.translateRange(ctx, workspace, sessionID, generationID, lower, upper, read)
+		segments, droppedOlder, err = m.translateRange(ctx, workspace, sessionID, generationID, lower, upper, limit, read)
 		if err != nil {
 			logf("session-controller: conversation page FAILED ws=%q session=%s lower=%d upper=%d: %v", workspace, sessionID, lower, upper, err)
 			return nil, err
 		}
 		lowerRead = lower
-		scanned = upper - lower
+		scanned = walkFrom - lower
 		if atFloor || countItems(segments) >= int(limit) {
 			break
 		}
@@ -411,10 +444,11 @@ func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, genera
 
 	selected, oldestSeq, olderRemain := selectNewest(segments, int(limit))
 	// CONTINUATION. There is more history above this page's oldest item
-	// whenever the walk left item-bearing segments behind (olderRemain), or
+	// whenever the walk left item-bearing segments behind — either still in the
+	// buffer (olderRemain) or dropped out of its oldest end (droppedOlder) — or
 	// whenever it stopped before reaching the floor. Reaching the floor with
 	// nothing left behind is the one case that is genuinely the beginning.
-	reachedStart := atFloor && !olderRemain
+	reachedStart := atFloor && !olderRemain && !droppedOlder
 	var cursor string
 	if !reachedStart {
 		before := oldestSeq
@@ -449,7 +483,7 @@ func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, genera
 // meaningful for the events it has actually seen, and re-using one across a
 // widening window would have the second read fold against a first read's
 // leftovers.
-func (m *Manager) translateRange(ctx context.Context, workspace, sessionID, generationID string, lower, upper uint64, read pageRangeReader) ([]pageSegment, error) {
+func (m *Manager) translateRange(ctx context.Context, workspace, sessionID, generationID string, lower, upper uint64, limit uint32, read pageRangeReader) ([]pageSegment, bool, error) {
 	capture := &pageCapture{}
 	cons := m.historyConsumer(workspace, sessionID, capture)
 	// The generation the page's items are fenced under. The consumer stamps
@@ -462,9 +496,28 @@ func (m *Manager) translateRange(ctx context.Context, workspace, sessionID, gene
 	// somebody scrolled up would be a write nobody asked for.
 	cons.generationID = generationID
 	if err := m.hydratePersistedAccounting(cons, sessionID); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	var segments []pageSegment
+	// THE ROLLING BUFFER, and the reason a page is bounded in MEMORY however
+	// wide its range gets.
+	//
+	// A page serves the NEWEST `limit` items of the range, so only the newest
+	// item-bearing segments can ever be selected. Keeping `limit+1` of them is
+	// exactly enough: `limit` segments carry at least `limit` items (every
+	// segment holds at least one), and the extra one is what proves there is
+	// something older to continue from. Everything that falls out of the oldest
+	// end is reported as `droppedOlder` rather than forgotten, because that is
+	// the difference between "this page reaches the beginning" and "this page
+	// is where the daemon stopped keeping".
+	//
+	// It is what makes the no-high-water-hint full pass above affordable: a
+	// 259,000-event conversation is translated in one stream and only eleven
+	// segments are ever resident.
+	keep := int(limit) + 1
+	var (
+		segments []pageSegment
+		dropped  bool
+	)
 	res, err := read(ctx, exclusiveLowerBound(lower), upper, pageMaxEvents, func(ev *corev1.Event) {
 		before := len(capture.deltas)
 		cons.pushConversation(ev, false)
@@ -473,20 +526,27 @@ func (m *Manager) translateRange(ctx context.Context, workspace, sessionID, gene
 				continue
 			}
 			segments = append(segments, pageSegment{seq: ev.GetSeq(), items: cd.GetItems()})
+			if len(segments) > keep {
+				segments = segments[1:]
+				dropped = true
+			}
 		}
+		// The capture's own backlog is released with the segments it produced,
+		// so a full pass does not retain every delta it ever translated.
+		capture.deltas = capture.deltas[:0]
 	})
 	if err != nil {
-		return nil, fmt.Errorf("session-controller: conversation page range read for ws %q (lower=%d upper=%d) failed after %d event(s): %w",
+		return nil, false, fmt.Errorf("session-controller: conversation page range read for ws %q (lower=%d upper=%d) failed after %d event(s): %w",
 			workspace, lower, upper, res.Delivered, err)
 	}
 	if res.Truncated {
 		// A truncated range is NOT served as a short page: a page's own
 		// shortness is a fact about the conversation, and presenting a
 		// truncated read as one would state that fact falsely.
-		return nil, fmt.Errorf("%w: conversation page for ws %q (lower=%d upper=%d) read %d event(s): %s",
+		return nil, false, fmt.Errorf("%w: conversation page for ws %q (lower=%d upper=%d) read %d event(s): %s",
 			ErrRepullTruncated, workspace, lower, upper, res.Delivered, res.Reason)
 	}
-	return segments, nil
+	return segments, dropped, nil
 }
 
 // selectNewest takes whole segments from the newest end until the limit is

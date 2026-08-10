@@ -356,14 +356,19 @@ func TestATailPageDoesNotScanTheWholeConversation(t *testing.T) {
 	// Act.
 	h.page(t, PageAnchor{Tail: true, Limit: 3})
 
-	// Assert — one bounded range, ending at the tail, spanning the initial
-	// window rather than the conversation.
+	// Assert — ONE range read, and it STARTS near the tail rather than at the
+	// beginning. The upper bound is deliberately open (a tail page is never
+	// capped at the daemon's consumption mark), so what bounds the cost is
+	// where the read begins: within one window of the conversation's end.
 	replays := h.history.replays()
 	if len(replays) != 1 {
 		t.Fatalf("tail page issued %d range read(s), want exactly 1", len(replays))
 	}
-	if span := replays[0][1] - replays[0][0]; span > pageInitialWindow+1 {
-		t.Fatalf("tail page read a span of %d seqs, want no more than the initial window of %d", span, pageInitialWindow)
+	if replays[0][1] != 0 {
+		t.Fatalf("tail page read to_seq = %d, want 0: a tail page's upper bound is open", replays[0][1])
+	}
+	if from := replays[0][0]; from < 4000-pageInitialWindow {
+		t.Fatalf("tail page read from_seq = %d, want it within one window (%d) of the conversation's end at 4000", from, pageInitialWindow)
 	}
 }
 
