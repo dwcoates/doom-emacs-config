@@ -487,7 +487,7 @@ type RecordEnvelope struct {
 // curated conversation items. It handles both observation planes: the stream
 // plane (ClaudeStreamMessage and its bare inner messages) and the file plane
 // (TranscriptLine). The EVENT is passed whole rather than as its parts,
-// because a result's reconciliation identity is derived from it (resultUUID)
+// because a result's reconciliation identity is derived from it (eventDerivedUUID)
 // and deriving that from a different source than the stamps beside it is how
 // the two come apart. ev.produced_at_ms stamps ts_ms on the stream plane;
 // transcript lines prefer their own on-disk envelope timestamp.
@@ -551,7 +551,7 @@ func contextClearedItems(cc *corev1.ContextCleared, ev *corev1.Event) []*fronten
 		return nil
 	}
 	return []*frontendv1.ConversationItem{{
-		Uuid: clearOrCompactUUID(ev, "clear"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
+		Uuid: eventDerivedUUID(ev, "clear"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 		Item:   &frontendv1.ConversationItem_ContextCleared{ContextCleared: cc},
 	}}
@@ -572,45 +572,36 @@ func contextCompactedItems(cc *corev1.ContextCompacted, ev *corev1.Event) []*fro
 		return nil
 	}
 	return []*frontendv1.ConversationItem{{
-		Uuid: clearOrCompactUUID(ev, "compact"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
+		Uuid: eventDerivedUUID(ev, "compact"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 		Item:   &frontendv1.ConversationItem_ContextCompacted{ContextCompacted: cc},
 	}}
 }
 
-// clearOrCompactUUID is a clear's or a compaction's reconciliation identity.
+// eventDerivedUUID is the reconciliation identity of a conversation item whose
+// own payload carries none: a clear, a compaction, a turn result.
 //
-// It is the event's DEDUP KEY (`clear:<uuid>` / `compact:<uuid>`) — the very
-// key the store merges twins on, so every replay yields one item a frontend
-// replaces in place rather than accumulating. No other field on the envelope is
-// stable across replays of the same event.
+// It is the event's DEDUP KEY — the very key the store merges twins on, so
+// every replay yields one item a frontend replaces in place rather than
+// accumulating. No other field on the envelope is stable across replays of the
+// same event.
 //
 // An event that carries no dedup key was never deduped, and its identity is
 // then the position the store assigned it: seq is authoritative, gapless and
-// per-session, so the derived id is just as stable across replays. kind keeps
-// the derived form ("clear" / "compact") honest about which of the two it names,
-// matching the producer's own prefixes so the two id spaces never overlap.
+// per-session, so the derived id is just as stable across replays. KIND keeps
+// the derived form ("clear" / "compact" / "result") honest about which of them
+// it names, matching the producer's own prefixes so the id spaces never
+// overlap.
 //
-// Deriving it rather than dropping the item is what keeps the event RENDERABLE:
-// an item with no uuid would leave a frontend discarding its history at a floor
-// it can show no reason for.
-func clearOrCompactUUID(ev *corev1.Event, kind string) string {
+// Deriving it rather than dropping the item is what keeps the event
+// RENDERABLE: an item with no uuid would leave a frontend discarding its
+// history at a floor it can show no reason for — and, for a result, appending
+// one more copy of the same turn's closing chip on every resync.
+func eventDerivedUUID(ev *corev1.Event, kind string) string {
 	if key := ev.GetDedupKey(); key != "" {
 		return key
 	}
 	return fmt.Sprintf("%s:%s:%d", kind, ev.GetSessionId(), ev.GetSeq())
-}
-
-// resultUUID is a turn result's reconciliation identity, derived on exactly the
-// terms a clear's or a compaction's is (clearOrCompactUUID): the event's dedup
-// key when it has one, else its own gapless per-session position. A
-// ResultMessage carries no id of its own — it is the SDK's end-of-turn report,
-// not a transcript record — so the event is the only stable source there is.
-func resultUUID(ev *corev1.Event) string {
-	if key := ev.GetDedupKey(); key != "" {
-		return key
-	}
-	return fmt.Sprintf("result:%s:%d", ev.GetSessionId(), ev.GetSeq())
 }
 
 // --- transcript (file) plane -----------------------------------------------
@@ -995,7 +986,7 @@ func resultItems(r *datav1.ResultMessage, ev *corev1.Event) []*frontendv1.Conver
 		return nil
 	}
 	return []*frontendv1.ConversationItem{{
-		Uuid: resultUUID(ev), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
+		Uuid: eventDerivedUUID(ev, "result"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
 			Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: r},
