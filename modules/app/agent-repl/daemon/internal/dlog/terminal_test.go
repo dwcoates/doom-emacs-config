@@ -2,6 +2,7 @@ package dlog
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -159,10 +160,47 @@ func TestATerminalSinkFlushesEveryQueuedLineOnClose(t *testing.T) {
 	}
 }
 
-// A FULL BUFFER BLOCKS, it does not discard: backpressure of last resort.
-func TestATerminalSinkBlocksRatherThanDroppingWhenItsBufferIsFull(t *testing.T) {
-	// Arrange. One line's worth of capacity, with the drain parked in a
-	// blocked terminal write.
+// A FULL BUFFER DROPS THE OLDEST LINE. The emitter must never wait on mirror
+// space: it waits holding the whole logging call, which is on the critical path
+// of every frontend command.
+func TestATerminalSinkDropsTheOldestLineWhenItsBufferIsFull(t *testing.T) {
+	// Arrange. Room for two queued lines, with the drain parked in a blocked
+	// terminal write.
+	terminal := newBlockingWriter()
+	sink := NewTerminalSink(terminal, 20)
+	if _, err := sink.Write([]byte("aaaaaaaa\n")); err != nil { // taken by the drain
+		t.Fatalf("first write: %v", err)
+	}
+	<-terminal.entered
+	if _, err := sink.Write([]byte("bbbbbbbb\n")); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+	if _, err := sink.Write([]byte("cccccccc\n")); err != nil {
+		t.Fatalf("third write: %v", err)
+	}
+
+	// Act. This one does not fit; the OLDEST queued line makes way for it.
+	if _, err := sink.Write([]byte("dddddddd\n")); err != nil {
+		t.Fatalf("fourth write: %v", err)
+	}
+	close(terminal.release)
+	if err := sink.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Assert.
+	got := strings.Join(terminal.lines(), "\n")
+	if strings.Contains(got, "bbbbbbbb") {
+		t.Fatalf("terminal got %q; the oldest queued line must be the one dropped", got)
+	}
+	if !strings.Contains(got, "dddddddd") {
+		t.Fatalf("terminal got %q; the newest line must survive a full buffer", got)
+	}
+}
+
+// A write over a full buffer RETURNS rather than waiting for the terminal.
+func TestATerminalSinkDoesNotBlockAWriteOverAFullBuffer(t *testing.T) {
+	// Arrange.
 	terminal := newBlockingWriter()
 	sink := NewTerminalSink(terminal, 8)
 	if _, err := sink.Write([]byte("aaaaaaaa\n")); err != nil { // taken by the drain
@@ -174,32 +212,102 @@ func TestATerminalSinkBlocksRatherThanDroppingWhenItsBufferIsFull(t *testing.T) 
 	}
 
 	// Act.
-	blocked := make(chan error, 1)
+	returned := make(chan error, 1)
 	go func() {
 		_, err := sink.Write([]byte("cccccccc\n"))
-		blocked <- err
+		returned <- err
 	}()
-	select {
-	case err := <-blocked:
-		t.Fatalf("a write over a full buffer returned early (%v); it must wait for space rather than drop the line", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-	close(terminal.release)
 
 	// Assert.
 	select {
-	case err := <-blocked:
+	case err := <-returned:
 		if err != nil {
 			t.Fatalf("write over a full buffer: %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("a write over a full buffer never completed after the terminal drained")
+		t.Fatal("a write over a full buffer waited for mirror space; the producer is still blocking")
 	}
+	close(terminal.release)
 	if err := sink.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	if got := len(terminal.lines()); got != 3 {
-		t.Fatalf("terminal received %d lines, want 3 with none dropped", got)
+}
+
+// A DROP IS NEVER SILENT: the sink reports it through itself, with a count.
+func TestATerminalSinkReportsDroppedLinesWithACount(t *testing.T) {
+	// Arrange.
+	terminal := newBlockingWriter()
+	sink := NewTerminalSink(terminal, 8)
+	if _, err := sink.Write([]byte("aaaaaaaa\n")); err != nil { // taken by the drain
+		t.Fatalf("first write: %v", err)
+	}
+	<-terminal.entered
+	for _, line := range []string{"bbbbbbbb\n", "cccccccc\n", "dddddddd\n"} {
+		if _, err := sink.Write([]byte(line)); err != nil {
+			t.Fatalf("write %q: %v", line, err)
+		}
+	}
+
+	// Act.
+	close(terminal.release)
+	if err := sink.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Assert.
+	var report Record
+	for _, line := range terminal.lines() {
+		var candidate Record
+		if err := json.Unmarshal([]byte(line), &candidate); err != nil {
+			continue
+		}
+		if candidate.Operation == TerminalDropOperation {
+			report = candidate
+			break
+		}
+	}
+	if report.Operation != TerminalDropOperation {
+		t.Fatalf("terminal got %v; want a %s self-report", terminal.lines(), TerminalDropOperation)
+	}
+	dropped, ok := report.Context["dropped_lines"].(float64)
+	if !ok || dropped < 1 {
+		t.Fatalf("drop report context = %v, want a positive dropped_lines count", report.Context)
+	}
+}
+
+// The self-report is RATE LIMITED: a mirror that stays full must not become the
+// flood it is failing to keep up with.
+func TestATerminalSinkReportsDropsAtMostOncePerInterval(t *testing.T) {
+	// Arrange. A frozen clock, so every drop below falls in one interval.
+	terminal := newBlockingWriter()
+	sink := NewTerminalSink(terminal, 8)
+	frozen := time.Now()
+	sink.now = func() time.Time { return frozen }
+	if _, err := sink.Write([]byte("aaaaaaaa\n")); err != nil { // taken by the drain
+		t.Fatalf("first write: %v", err)
+	}
+	<-terminal.entered
+
+	// Act.
+	for i := 0; i < 10; i++ {
+		if _, err := sink.Write([]byte(fmt.Sprintf("full-%03d\n", i))); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+	}
+	close(terminal.release)
+	if err := sink.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Assert.
+	reports := 0
+	for _, line := range terminal.lines() {
+		if strings.Contains(line, TerminalDropOperation) {
+			reports++
+		}
+	}
+	if reports != 1 {
+		t.Fatalf("terminal carried %d drop reports within one interval, want exactly 1", reports)
 	}
 }
 
