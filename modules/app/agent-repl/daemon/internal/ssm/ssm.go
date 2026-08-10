@@ -3,7 +3,9 @@ package ssm
 import (
 	"database/sql"
 	"fmt"
+	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -120,6 +122,26 @@ type Manager struct {
 	// lock order — see stagePublishLocked.
 	emitMu sync.Mutex
 
+	// flightMu guards snapshotFlight ONLY. It is deliberately not mu: the whole
+	// point of the flight is to coalesce callers while mu is free, so a joiner
+	// that had to take mu to discover the flight would queue behind exactly the
+	// work it is trying not to duplicate.
+	flightMu sync.Mutex
+	// snapshotFlight is the resolve currently in progress, or nil. Every caller
+	// that arrives while one is in flight shares its result instead of running
+	// its own — see Snapshot.
+	snapshotFlight *snapshotFlight
+	// snapshotResolves counts full-fleet resolves actually executed (not calls
+	// to Snapshot). It is what makes coalescing observable to a test.
+	snapshotResolves atomic.Uint64
+	// snapshotGate and snapshotJoined are TEST SEAMS, nil in production.
+	// snapshotGate runs at the end of a leader's lock-free resolve, so a test
+	// can hold a snapshot open and prove the mutating entry points still run;
+	// snapshotJoined runs when a caller coalesces onto an in-flight resolve, so
+	// a test can release the gate only once every joiner has actually joined.
+	snapshotGate   func()
+	snapshotJoined func()
+
 	mu sync.Mutex
 	// pendingPublications is the ordered outbox of synchronous frontend
 	// publications staged under mu and emitted after it is released. See
@@ -156,6 +178,13 @@ type Manager struct {
 	// handed two different composites one revision, which the webapp reports as
 	// a `revision conflicted` invariant violation.
 	stampedComposite map[string]*frontendv1.WorkspaceState
+	// publishEpoch counts the frames stamped per workspace. It is the ONE fact
+	// a lock-free Snapshot needs from the publication path: a workspace whose
+	// epoch moved while the snapshot was resolving had a frame go out from
+	// under it, so the resolved content may predate what the client already
+	// holds, and that workspace is re-resolved under mu before it is stamped.
+	// See Snapshot for the consistency this buys and the window it leaves.
+	publishEpoch map[string]uint64
 	// pipelineStatus is the newest MergeStatus the merge PIPELINE published per
 	// workspace. It is what the construction funnel stamps when the run is this
 	// process's; see mergestatus.go for why it is in memory and why the log
@@ -1279,6 +1308,24 @@ func (m *Manager) workspaceMessageLocked(workspace string, r resolved) (*fronten
 	if err != nil {
 		return nil, fmt.Errorf("ssm: resolve composite for push workspace=%q: %w", workspace, err)
 	}
+	msg, err := m.composeWorkspaceMessage(workspace, r, composite, found)
+	if err != nil {
+		return nil, err
+	}
+	m.stampWorkspaceMessageLocked(workspace, r, msg)
+	return msg, nil
+}
+
+// composeWorkspaceMessage is the DB-RESOLVED HALF of the construction funnel:
+// everything the frame gets from the log, and nothing it gets from this
+// process's memory.
+//
+// It touches no Manager map, so it is safe to run with mu RELEASED — which is
+// what lets Snapshot resolve a whole fleet without starving the mutating entry
+// points. The in-memory half (the merge facts and the freshness stamp) is
+// stampWorkspaceMessageLocked, and every producer still runs both: the split is
+// where the lock is taken, not how many construction sites there are.
+func (m *Manager) composeWorkspaceMessage(workspace string, r resolved, composite CompositeState, found bool) (*frontendv1.WorkspaceState, error) {
 	var msg *frontendv1.WorkspaceState
 	switch {
 	case !found || composite.LifecycleTop == "":
@@ -1293,17 +1340,24 @@ func (m *Manager) workspaceMessageLocked(workspace string, r resolved) (*fronten
 		msg.Connectivity = frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_HIBERNATED
 		m.logf("ssm: workspace state ws=%s has no controller-generation lifecycle; connectivity=hibernated (no generation is current)", workspace)
 	default:
-		msg, err = compositeWorkspaceState(workspace, r, composite)
+		built, err := compositeWorkspaceState(workspace, r, composite)
 		if err != nil {
 			return nil, err
 		}
+		msg = built
 	}
 	if err := connectivityResolved(workspace, msg, composite, found); err != nil {
 		return nil, err
 	}
+	return msg, nil
+}
+
+// stampWorkspaceMessageLocked is the IN-MEMORY HALF of the construction funnel.
+// Caller holds mu. Both stamps read (and the freshness stamp writes) per-process
+// maps, so no frame may go out without this having run under the lock.
+func (m *Manager) stampWorkspaceMessageLocked(workspace string, r resolved, msg *frontendv1.WorkspaceState) {
 	m.stampMergeFactsLocked(workspace, r, msg)
 	m.stampFreshnessLocked(workspace, msg)
-	return msg, nil
 }
 
 // connectivityResolved is THE LAST GATE BEFORE THE WIRE. Every pushed,
@@ -1362,6 +1416,14 @@ func (m *Manager) stampFreshnessLocked(workspace string, msg *frontendv1.Workspa
 	if m.stampedComposite == nil {
 		m.stampedComposite = make(map[string]*frontendv1.WorkspaceState)
 	}
+	if m.publishEpoch == nil {
+		m.publishEpoch = make(map[string]uint64)
+	}
+	// EVERY outgoing frame passes here, which is what makes this the honest
+	// place to count them: a lock-free snapshot compares the count it started
+	// with against the count it finished with to learn whether anything was
+	// published for the workspace underneath it.
+	m.publishEpoch[workspace]++
 	at := msg.GetAtMs()
 	if prev, ok := m.pushedAtMs[workspace]; ok && at <= prev {
 		if last := m.stampedComposite[workspace]; last != nil && sameComposite(last, msg) {
@@ -1411,58 +1473,203 @@ func (m *Manager) Current(workspace string) (*frontendv1.WorkspaceState, bool, e
 // resolver behind this helper lets synchronous publication validate and emit
 // one exact state without dropping the ordering lock between those actions.
 func (m *Manager) currentLocked(workspace string) (*frontendv1.WorkspaceState, bool, error) {
-	r, err := resolve(m.db, workspace, m.logf)
+	built, found, err := m.resolveWorkspace(workspace)
 	if err != nil {
 		return nil, false, err
+	}
+	if !found {
+		return nil, false, nil
+	}
+	m.stampWorkspaceMessageLocked(built.workspace, built.resolution, built.msg)
+	return built.msg, true, nil
+}
+
+// builtWorkspace is one workspace's frame BEFORE the in-memory stamps: the
+// resolution it came from (the merge stamp needs it) plus the message the log
+// alone produced.
+type builtWorkspace struct {
+	workspace  string
+	resolution resolved
+	msg        *frontendv1.WorkspaceState
+}
+
+// resolveWorkspace performs the ENTIRE database half of one workspace's frame:
+// the render resolution, the composite resolution, the unborn-workspace miss,
+// and the message construction. found=false is the same explicit miss Current
+// reports.
+//
+// It reads no Manager map, so it runs correctly with or without mu. Callers
+// holding mu (currentLocked) simply keep holding it; Snapshot runs it with mu
+// RELEASED and stamps afterwards.
+//
+// Resolving the composite ONCE is also a real saving: Snapshot and Current both
+// used to resolve it a second time inside the construction funnel, which at
+// fleet scale was ~13% of a full snapshot spent asking the same question twice.
+func (m *Manager) resolveWorkspace(workspace string) (builtWorkspace, bool, error) {
+	r, err := resolve(m.db, workspace, m.logf)
+	if err != nil {
+		return builtWorkspace{}, false, err
 	}
 	composite, compositeFound, err := resolveComposite(m.db, workspace)
 	if err != nil {
-		return nil, false, err
+		return builtWorkspace{}, false, fmt.Errorf("ssm: resolve composite for push workspace=%q: %w", workspace, err)
 	}
 	if !r.found && (!compositeFound || composite.LifecycleTop == "") {
-		return nil, false, nil
+		return builtWorkspace{}, false, nil
 	}
 	if !r.found {
 		r = resolved{found: true, state: frontendv1.RenderState_RENDER_STATE_UNSPECIFIED}
 	}
-	msg, err := m.workspaceMessageLocked(workspace, r)
+	msg, err := m.composeWorkspaceMessage(workspace, r, composite, compositeFound)
 	if err != nil {
-		return nil, false, err
+		return builtWorkspace{}, false, err
 	}
-	return msg, true, nil
+	return builtWorkspace{workspace: workspace, resolution: r, msg: msg}, true, nil
+}
+
+// snapshotFlight is one full-fleet resolve in progress. out and err are written
+// by the leader before done is closed, so every sharer reads them with a
+// happens-before edge and no lock of its own.
+type snapshotFlight struct {
+	done chan struct{}
+	out  []*frontendv1.WorkspaceState
+	err  error
 }
 
 // Snapshot returns the current WorkspaceState of every workspace with a
 // resolved render state, in stable workspace order (for a frontend resync).
+//
+// IT DOES NOT HOLD mu WHILE IT RESOLVES, and that is the whole of the fix here.
+// A full-fleet resolve is hundreds of SQL statements — at the observed live
+// scale (161 workspaces, 22k state rows) seconds of work — and it used to run
+// under mu from the first query to the last. Snapshot is called on every client
+// connect, on every resync command and periodically per client by the lease
+// loop, so during webview reconnect churn the lock was effectively never free:
+// MarkPromptAccepted, Current, LastActivityMs and the lease renewals all queued
+// behind it, and the observable symptom was the daemon never acking a user's
+// prompt.
+//
+// CONCURRENT CALLERS COALESCE onto one resolve. N clients reconnecting together
+// asked the same question N times and paid for it N times; now the first pays
+// and the rest share its answer.
+//
+// WHAT CONSISTENCY IS PROMISED. Each frame is resolved from the database, whose
+// own serialization makes it a consistent read of that workspace; the fleet is
+// NOT resolved atomically, so two workspaces may be read an instant apart. That
+// is exactly what the wire contract already assumes — WorkspaceState is a
+// per-workspace frame and the frontend applies it per workspace.
+//
+// The one hazard of dropping the lock is publishing content OLDER than a frame
+// the client already holds while stamping it with a NEWER revision, which the
+// webapp reads as the state going backwards. It is closed rather than made
+// unlikely: publishEpoch counts every frame stamped per workspace, and any
+// workspace whose epoch moved during the lock-free resolve is re-resolved under
+// mu before it is stamped — under mu no push can intervene, so the frame that
+// goes out is never older than the last one published. A workspace whose log
+// gained a row that nobody published a frame for is NOT re-resolved: nothing was
+// delivered, so nothing can regress, and the push that eventually carries it
+// supersedes the snapshot in the ordinary way.
 func (m *Manager) Snapshot() ([]*frontendv1.WorkspaceState, error) {
+	m.flightMu.Lock()
+	if inflight := m.snapshotFlight; inflight != nil {
+		m.flightMu.Unlock()
+		if m.snapshotJoined != nil {
+			m.snapshotJoined()
+		}
+		<-inflight.done
+		return inflight.out, inflight.err
+	}
+	flight := &snapshotFlight{done: make(chan struct{})}
+	m.snapshotFlight = flight
+	m.flightMu.Unlock()
+
+	flight.out, flight.err = m.resolveSnapshot()
+
+	m.flightMu.Lock()
+	m.snapshotFlight = nil
+	m.flightMu.Unlock()
+	close(flight.done)
+	return flight.out, flight.err
+}
+
+// resolveSnapshot is Snapshot's leader path: resolve the fleet from the
+// database with mu released, then take mu once to stamp the in-memory half of
+// every frame.
+func (m *Manager) resolveSnapshot() ([]*frontendv1.WorkspaceState, error) {
+	m.snapshotResolves.Add(1)
+
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	startEpoch := make(map[string]uint64, len(m.publishEpoch))
+	for ws, epoch := range m.publishEpoch {
+		startEpoch[ws] = epoch
+	}
+	m.mu.Unlock()
+
 	names, err := distinctWorkspaces(m.db)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*frontendv1.WorkspaceState, 0, len(names))
+	built := make([]builtWorkspace, 0, len(names))
 	for _, ws := range names {
-		r, err := resolve(m.db, ws, m.logf)
+		b, found, err := m.resolveWorkspace(ws)
 		if err != nil {
 			return nil, err
 		}
-		composite, compositeFound, err := resolveComposite(m.db, ws)
-		if err != nil {
-			return nil, err
-		}
-		if !r.found && (!compositeFound || composite.LifecycleTop == "") {
+		if !found {
 			continue
 		}
-		if !r.found {
-			r = resolved{found: true, state: frontendv1.RenderState_RENDER_STATE_UNSPECIFIED}
+		built = append(built, b)
+	}
+
+	// The seam sits at the END of the lock-free half: a test holding it open is
+	// holding a resolve that is complete but unstamped, which is both the window
+	// in which mu must still be free and the window in which a publication can
+	// overtake the resolved content.
+	if m.snapshotGate != nil {
+		m.snapshotGate()
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*frontendv1.WorkspaceState, 0, len(built))
+	resolvedDuring := make(map[string]bool, len(built))
+	for _, b := range built {
+		resolvedDuring[b.workspace] = true
+		if m.publishEpoch[b.workspace] != startEpoch[b.workspace] {
+			fresh, found, err := m.resolveWorkspace(b.workspace)
+			if err != nil {
+				return nil, err
+			}
+			if !found {
+				continue
+			}
+			b = fresh
 		}
-		msg, err := m.workspaceMessageLocked(ws, r)
+		m.stampWorkspaceMessageLocked(b.workspace, b.resolution, b.msg)
+		out = append(out, b.msg)
+	}
+	// A WORKSPACE BORN DURING THE RESOLVE still belongs in the snapshot. Its
+	// first frame was published while the fleet was being read — a client that
+	// subscribed after that push and reads this snapshot would otherwise never
+	// be told the workspace exists. The publication counter names it, so it is
+	// resolved here under mu like any workspace the resolve raced.
+	for ws, epoch := range m.publishEpoch {
+		if resolvedDuring[ws] || epoch == startEpoch[ws] {
+			continue
+		}
+		fresh, found, err := m.resolveWorkspace(ws)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, msg)
+		if !found {
+			continue
+		}
+		m.stampWorkspaceMessageLocked(fresh.workspace, fresh.resolution, fresh.msg)
+		out = append(out, fresh.msg)
 	}
+	// Stable workspace order is part of Snapshot's contract, and the late
+	// additions above arrive out of order by construction.
+	sort.Slice(out, func(i, j int) bool { return out[i].GetWorkspace() < out[j].GetWorkspace() })
 	return out, nil
 }
 
