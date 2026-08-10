@@ -219,12 +219,19 @@ describe("the composer's hibernation gate", () => {
 // and the daemon's receipt only starts its breath — so the filing, the id it
 // is filed under, and the take-down on a refusal are boot-scope closure state
 // with no importable seam, pinned here against the source.
-const submitPrompt = blocksAfter(main, "const submitPrompt = (text: string, promptOrigin: PromptOrigin): void => {")[0]!;
+// The DISPATCH half of the submit path: `submitPrompt` now offers the prompt
+// to the held-prompt queue first (prompt-queue.ts), and everything below —
+// filing the bubble, the id it is filed under, the take-down on a refusal — is
+// what happens once a prompt actually goes onto the wire, whether it went
+// straight out or was drained out of the queue.
+const dispatchPromptAnchor =
+  "const dispatchPrompt = (\n    workspace: string,\n    text: string,\n    promptOrigin: PromptOrigin,\n  ): Promise<void> => {";
+const submitPrompt = blocksAfter(main, dispatchPromptAnchor)[0]!;
 
 describe("the local prompt bubble", () => {
-  it("files the bubble on the one submit path every prompt goes through", () => {
+  it("files the bubble on the one dispatch path every sent prompt goes through", () => {
     // Assert — a second sending path would be a prompt with no bubble.
-    expect(blocksAfter(main, "const submitPrompt = (text: string, promptOrigin: PromptOrigin): void => {")).toHaveLength(1);
+    expect(blocksAfter(main, dispatchPromptAnchor)).toHaveLength(1);
     expect(submitPrompt).toContain("store.addLocalPrompt(requestId, text)");
   });
 
@@ -232,7 +239,7 @@ describe("the local prompt bubble", () => {
     // Assert — the whole point: the words are on screen this frame, and the
     // acknowledgement only starts the breath.
     const filed = submitPrompt.indexOf("store.addLocalPrompt(");
-    const awaited = submitPrompt.indexOf("void ack");
+    const awaited = submitPrompt.indexOf("return ack.catch");
     expect(filed).toBeLessThan(awaited);
   });
 
@@ -256,6 +263,71 @@ describe("the local prompt bubble", () => {
   it("still surfaces the refusal through the dispatcher's owned failure path", () => {
     // Assert — taking the bubble down is not a substitute for the failure card.
     expect(submitPrompt).toContain("consumeOwnedDispatchFailure(err)");
+  });
+
+  it("hands the refusal back to its caller instead of swallowing it", () => {
+    // Assert — the held-prompt queue owes a drained prompt its own failure
+    // card, which it can only mint if the rejection reaches it.
+    expect(submitPrompt).toContain("throw err instanceof Error ? err : new Error(String(err))");
+  });
+});
+
+// The held-prompt queue's wiring is boot-scope closure state with no importable
+// seam, so the decisions that make a bounce imperceptible are pinned here: what
+// counts as the link being down, what counts as the workspace being back, and
+// where the drain is triggered from.
+const promptQueueWiring = blocksAfter(main, "const promptQueue = new PromptQueue({")[0]!;
+const composerSubmitPrompt = blocksAfter(
+  main,
+  "const submitPrompt = (text: string, promptOrigin: PromptOrigin): void => {",
+)[0]!;
+
+describe("the held-prompt queue's wiring", () => {
+  it("offers every submitted prompt to the queue before dispatching it", () => {
+    // Assert — a prompt that reached the dispatcher during a bounce is the
+    // failure card this queue exists to prevent.
+    const offered = composerSubmitPrompt.indexOf("promptQueue.offer(");
+    const dispatched = composerSubmitPrompt.indexOf("dispatchPrompt(");
+    expect(offered).toBeLessThan(dispatched);
+  });
+
+  it("treats anything short of a current socket as the link being down", () => {
+    // Assert — a socket that is merely open has not yet proven it carries
+    // authoritative state.
+    expect(promptQueueWiring).toContain('?.state !== "current"');
+  });
+
+  it("gates the drain on the workspace's wired axis, not just the socket", () => {
+    // Assert — draining into a severed or hibernated workspace would submit
+    // into a durable replay with no controller reading it.
+    expect(promptQueueWiring).toContain("drainableRenderState(store.state.renderState)");
+  });
+
+  it("refuses to drain into a hibernated workspace", () => {
+    // Assert — hibernation is a gate the user must answer, not an outage.
+    expect(promptQueueWiring).toContain("store.state.hibernation === null");
+  });
+
+  it("refuses to drain into a workspace other than the one the store holds", () => {
+    // Assert — the store carries state for ONE workspace, so its wired axis
+    // says nothing about any other.
+    expect(promptQueueWiring).toContain("store.state.cwd === workspace");
+  });
+
+  it("draws a held prompt as pending rather than acking it", () => {
+    // Assert — filed under the queue entry's own id, which no daemon receipt
+    // can ever reconcile onto.
+    expect(promptQueueWiring).toContain("store.addLocalPrompt(entry.queueId, entry.text)");
+  });
+
+  it("gives a lost held prompt its own failure card", () => {
+    // Assert — never a silent drop.
+    expect(promptQueueWiring).toContain("heldPromptUnsentFailure(entry.queueId, reason)");
+  });
+
+  it("drains on snapshot adoption, the edge that proves state is authoritative", () => {
+    // Assert
+    expect(main).toContain("void promptQueue.drain(store.state.cwd);");
   });
 });
 

@@ -770,7 +770,15 @@ registered frontend and calls its `:send-fn' — for the (only
 remaining) gui frontend, that is `agent-repl--gui-send-turn'
 \(frontend-client.el), which is where the kickoff call now lives."
   (agent-repl-test--with-clean-state
-    (let ((kickoff-args nil))
+    ;; The link reads UP: `agent-repl--gui-send-turn' offers every prompt to the
+    ;; held-prompt queue first (prompt-queue.el), and a HELD prompt kicks off no
+    ;; summary — there is no turn yet to summarize.  This test is about the live
+    ;; send, so it states the live-link premise rather than asserting about a
+    ;; prompt the queue correctly held.
+    (let ((kickoff-args nil)
+          (agent-repl-prompt-queue-link-down-function (lambda () nil))
+          (agent-repl--prompt-queue (make-hash-table :test 'equal))
+          (agent-repl--prompt-queue-draining (make-hash-table :test 'equal)))
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
                   (lambda (_ws _text _origin ok _fail) (funcall ok "req") :pending))
                  ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
@@ -778,6 +786,24 @@ remaining) gui frontend, that is `agent-repl--gui-send-turn'
                  (lambda (ws raw) (setq kickoff-args (list ws raw)))))
         (agent-repl--gui-send-turn "ws1" "decorated-input" "raw-input" "PROMPT_ORIGIN_USER_SENT"))
       (should (equal kickoff-args '("ws1" "raw-input"))))))
+
+(ert-deftest agent-repl-test-gui-send-turn-held-prompt-kicks-off-no-summary ()
+  "A HELD prompt starts no summary: there is no turn to summarize yet."
+  (agent-repl-test--with-clean-state
+    (let ((kicked nil)
+          (agent-repl-prompt-queue-link-down-function (lambda () t))
+          (agent-repl-prompt-queue-pending-function #'ignore)
+          (agent-repl--prompt-queue (make-hash-table :test 'equal))
+          (agent-repl--prompt-queue-draining (make-hash-table :test 'equal))
+          (agent-repl--prompt-queue-timers (make-hash-table :test 'equal)))
+      (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) nil))
+                ((symbol-function 'cancel-timer) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--kickoff-prompt-summary)
+                 (lambda (&rest _) (setq kicked t))))
+        ;; Act
+        (agent-repl--gui-send-turn "ws1" "decorated-input" "raw-input" "PROMPT_ORIGIN_USER_SENT"))
+      ;; Assert
+      (should-not kicked))))
 
 ;;;; ---- Tests: mode-line migration (attach-to-mode-line) ----
 

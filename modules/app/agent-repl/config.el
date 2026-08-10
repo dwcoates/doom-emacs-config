@@ -214,6 +214,12 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "commands")
 (agent-repl--load-module "session")
 (agent-repl--load-module "daemon")
+;; The held-prompt queue: what a prompt sent across a backend bounce becomes
+;; instead of a `client.command_unacked' failure card.  Loaded BEFORE
+;; frontend-client, whose gui send path offers every prompt to it first; its own
+;; defaults call back into frontend-client and frontend-uds, but only from
+;; lambdas that run long after both are loaded.
+(agent-repl--load-module "prompt-queue")
 (agent-repl--load-module "frontend-client")
 ;; The classified-failure vocabulary (F4): the ONE place Emacs turns a
 ;; failure into something a human reads, and the closed `client.'-prefixed
