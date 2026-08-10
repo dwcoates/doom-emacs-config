@@ -471,6 +471,40 @@ export type ConversationItem =
 
 // --- store state -----------------------------------------------------------------
 
+/** WHICH page a request asked for, which decides where its items rank. */
+export type PageAnchorKind = "tail" | "before";
+
+/** One page request this client has out, and what it asked for. */
+export interface InFlightPage {
+  requestId: string;
+  anchor: PageAnchorKind;
+  /** The fence the request was BUILT against, so a stale answer is nameable. */
+  fence: string;
+}
+
+/**
+ * The feed's history-paging state.
+ *
+ * `cursor` is the daemon's opaque continuation token, never parsed here.
+ * `reachedStart` is set once a page reports it reached the conversation's
+ * beginning, and it is what RETIRES the load-more affordance — a fact
+ * established by the daemon reading to the floor, not inferred from an empty
+ * page.
+ */
+export interface ConversationPaging {
+  cursor: string | null;
+  reachedStart: boolean;
+  inFlight: InFlightPage | null;
+  /**
+   * The request id of the last page DISCARDED for a stale fence, or null.
+   *
+   * The pager reads and clears it, which is how "discarded whole" turns into
+   * "re-requested once against the fresh fence" without the store having to
+   * know how to send anything.
+   */
+  staleFenceRequestId: string | null;
+}
+
 export interface StoreState {
   sessionId: string;
   daemonVersion: string;
@@ -560,6 +594,16 @@ export interface StoreState {
    * `throughSeq` ingested. Diagnostics only; the daemon owns ordering now.
    */
   lastSeq: number;
+  /**
+   * The FEED's history-paging state: what the load-more affordance at the top
+   * of the feed reads, and what a load-more request is built from.
+   *
+   * The cold open no longer replays the whole conversation — it asks for the
+   * newest ~10 top-level items and walks backwards on demand
+   * (conversation-page.proto) — so the feed's top is now a place where more
+   * history may exist. This is the only record of whether it does.
+   */
+  paging: ConversationPaging;
   /**
    * THE workspace's resolved render state (F5) — the one authority for the
    * footer's phase, the same message the Emacs tab bar reads.
@@ -685,6 +729,7 @@ function initialState(): StoreState {
     costUsd: null,
     taskSummary: null,
     lastSeq: 0,
+    paging: { cursor: null, reachedStart: false, inFlight: null, staleFenceRequestId: null },
     renderState: null,
     sessionConnectivity: null,
     sessionStatus: null,
@@ -1083,6 +1128,9 @@ export class ConversationStore {
           break;
         case "conversation-items":
           changed = this.applyConversationItems(effect.items, effect.throughSeq) || changed;
+          break;
+        case "conversation-page":
+          changed = this.applyConversationPage(effect) || changed;
           break;
         case "typing":
           changed = this.applyTyping(effect.value) || changed;
@@ -1651,6 +1699,118 @@ export class ConversationStore {
     }
     if (throughSeq > this.state.lastSeq) this.state.lastSeq = throughSeq;
     return items.length > 0;
+  }
+
+  /**
+   * Record that a page request went out, so the answer can be ruled on.
+   *
+   * The ANCHOR is remembered here rather than read off the page, because the
+   * page does not carry it and could not: `liveJoinSeq` distinguishes a tail
+   * from a before page only when the tail is non-empty, and an empty tail page
+   * — a fresh workspace's cold open — is exactly the case that would then be
+   * misfiled. The request is the only place the anchor is known for certain.
+   */
+  notePageRequested(page: InFlightPage): void {
+    this.state.paging.inFlight = page;
+  }
+
+  /** Forget an in-flight page request the client gave up on. */
+  forgetPageRequest(requestId: string): boolean {
+    if (this.state.paging.inFlight?.requestId !== requestId) return false;
+    this.state.paging.inFlight = null;
+    return true;
+  }
+
+  /**
+   * Apply ONE page of history.
+   *
+   * THREE RULINGS, in this order, and each of them refuses rather than
+   * defaults:
+   *
+   *  1. THE FENCE. A page minted under a generation this client is no longer
+   *     reading describes a conversation that is gone, so it is discarded
+   *     WHOLE — never partially adopted — through the same gate every other
+   *     fenced push passes (fence.ts). The pager re-requests once against the
+   *     fresh fence.
+   *  2. THE CORRELATION. A page whose request id is not the one outstanding is
+   *     an answer to a request this client has already abandoned. Adopting it
+   *     would splice history in at a cursor the feed no longer holds.
+   *  3. THE RANK. A tail page's items rank at the seq the page is current
+   *     through; a before page's rank BELOW everything the feed already holds,
+   *     which is why the rank is computed here and not by the producer.
+   *
+   * THE LIVE SPLICE. A tail page moves `lastSeq` to `liveJoinSeq`, which is
+   * what the next resync asks from. Because that resync is INCLUSIVE of the
+   * mark, an item the session produced between the page's mint and the
+   * subscribe is above it and is replayed: the join is gap-free by
+   * construction rather than by how fast the page was.
+   */
+  private applyConversationPage(page: Extract<AdapterEffect, { kind: "conversation-page" }>): boolean {
+    const admitted = admitFenced(
+      {
+        case: "conversationPage",
+        value: { workspace: page.workspace, fence: page.fence, requestId: page.requestId },
+      },
+      this.state.fences.get(page.workspace) ?? "",
+    );
+    if (admitted.kind === "discard") {
+      this.log("warn", admitted.report.message, admitted.report.context);
+      // The pager reads this to know a re-request is owed against the fresh
+      // fence. Clearing the in-flight record with it is what stops the stale
+      // page and its replacement from both counting as outstanding.
+      this.state.paging.inFlight = null;
+      this.state.paging.staleFenceRequestId = page.requestId;
+      return false;
+    }
+    const request = this.state.paging.inFlight;
+    if (request === null || request.requestId !== page.requestId) {
+      this.log(
+        "warn",
+        "store: conversation page answers a request this client is not holding; DISCARDED whole",
+        {
+          operation: "store.page-uncorrelated",
+          context: {
+            page_request_id: page.requestId,
+            outstanding_request_id: request?.requestId ?? "none",
+            items: page.items.length,
+          },
+        },
+      );
+      return false;
+    }
+    this.state.paging.inFlight = null;
+    const rank = request.anchor === "tail" ? page.liveJoinSeq : this.oldestFeedRank() - 1;
+    for (const item of page.items) {
+      this.mergeItem(item, rank);
+      if (item.kind === "result") this.adoptResultUsage(item);
+    }
+    if (request.anchor === "tail" && page.liveJoinSeq > this.state.lastSeq) {
+      this.state.lastSeq = page.liveJoinSeq;
+    }
+    if (page.continuation.case === "start") {
+      this.state.paging.reachedStart = true;
+      this.state.paging.cursor = null;
+    } else {
+      this.state.paging.cursor = page.continuation.cursor;
+    }
+    return true;
+  }
+
+  /**
+   * The rank of the OLDEST item the feed holds, which a before page's items
+   * must sit below.
+   *
+   * An empty feed answers 0, so the first page's items rank at -1 and later
+   * pages keep walking down. The absolute values carry no meaning — only the
+   * order does — and the feed is re-ranked from scratch on every cold open.
+   */
+  private oldestFeedRank(): number {
+    let oldest = 0;
+    for (const item of this.state.items) {
+      const seq = item.seq ?? 0;
+      if (seq < oldest) oldest = seq;
+    }
+    return oldest;
   }
 
   /**

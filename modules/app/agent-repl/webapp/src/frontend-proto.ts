@@ -1193,6 +1193,52 @@ export interface ConversationDelta {
   throughSeq: number;
 }
 
+/**
+ * Where a `ConversationPage` says the conversation continues above it.
+ *
+ * `more` carries the opaque cursor that reads the page before this one;
+ * `start` says this page reaches the conversation's beginning, and the
+ * load-more affordance retires. Exactly one is set — the daemon never sends a
+ * page with neither, and a page arriving with neither is refused at the decode
+ * rather than rendered as an endless load-more.
+ */
+export type PageContinuation =
+  | { case: "more"; cursor: string }
+  | { case: "start" };
+
+/**
+ * ONE page of conversation history: the cold open's answer, and load-more's.
+ *
+ * Its `items` are the SAME `ConversationItemFrame` a `ConversationDelta`
+ * carries, which is what lets the feed render paged history with the code that
+ * already renders pushed history.
+ */
+export interface ConversationPage {
+  workspace: string;
+  /**
+   * The requesting command's id. A client with a cold open and a load-more
+   * both in flight has two pages coming, and only this distinguishes them.
+   */
+  requestId: string;
+  /** Oldest first, so a page prepends as a block without being reversed. */
+  items: ConversationItemFrame[];
+  continuation: PageContinuation;
+  /**
+   * TAIL PAGES ONLY: the seq this page is current through, which the client
+   * stores as its `fromSeq` before subscribing to the live delta stream. An
+   * item the session produced between the page's mint and the subscribe is
+   * ABOVE this seq, so the first resync replays it — the splice is gap-free by
+   * construction rather than by timing. Zero on before pages.
+   */
+  liveJoinSeq: number;
+  /**
+   * The staleness fence at MINT, byte-compared against the workspace's current
+   * fence and never parsed. Different means stale, and a stale page is
+   * discarded WHOLE rather than partially adopted.
+   */
+  fence: string;
+}
+
 /** The content-delta kinds a `TypingDelta`'s embedded `ContentDelta` may set. */
 export const CONTENT_DELTA_KINDS = [
   "text",
@@ -2145,7 +2191,8 @@ export type FrontendFrame = {
     | { case: "tokenBreakdown"; value: TokenBreakdownView }
     | { case: "workspaceGate"; value: WorkspaceGateView }
     | { case: "mergeQueueRoster"; value: MergeQueueRoster }
-    | { case: "restartPending"; value: RestartPendingView };
+    | { case: "restartPending"; value: RestartPendingView }
+    | { case: "conversationPage"; value: ConversationPage };
 };
 
 /** The frame-variant discriminators FrontendFrame.frame.case may hold. */
@@ -2279,6 +2326,13 @@ const FRAME_DECODERS: ReadonlyMap<
     (v: unknown) => ({
       case: "conversationDelta" as const,
       value: decodeConversationDelta(v),
+    }),
+  ],
+  [
+    "conversationPage",
+    (v: unknown) => ({
+      case: "conversationPage" as const,
+      value: decodeConversationPage(v),
     }),
   ],
   [
@@ -3116,6 +3170,72 @@ function decodeConversationDelta(v: unknown): ConversationDelta {
     );
   }
   return cd;
+}
+
+const CONVERSATION_PAGE_KEYS = new Set([
+  "workspace",
+  "requestId",
+  "items",
+  "more",
+  "start",
+  "liveJoinSeq",
+  "fence",
+]);
+
+/**
+ * Decode one page, refusing anything a renderer could not act on.
+ *
+ * THE CONTINUATION IS REQUIRED. A page with neither arm set would render as a
+ * load-more button that can never retire and can never advance, so it is
+ * rejected here rather than handed to the feed. The daemon always sets one; a
+ * page that does not is a frame this client cannot honestly display.
+ */
+function decodeConversationPage(v: unknown): ConversationPage {
+  const o = ensureObject(v, "ConversationPage");
+  rejectUnknown(o, CONVERSATION_PAGE_KEYS, "ConversationPage");
+  const page: ConversationPage = {
+    workspace: str(o, "workspace", "ConversationPage"),
+    requestId: str(o, "requestId", "ConversationPage"),
+    items: (o.items === undefined || o.items === null
+      ? []
+      : ensureArray(o.items, "ConversationPage.items")
+    ).map((item, i) => decodeConversationItem(item, i)),
+    continuation: decodePageContinuation(o),
+    liveJoinSeq: num(o, "liveJoinSeq", "ConversationPage"),
+    fence: str(o, "fence", "ConversationPage"),
+  };
+  if (page.fence === "") {
+    throw new Error("frontend-proto: ConversationPage missing required `fence`");
+  }
+  if (page.requestId === "") {
+    throw new Error(
+      "frontend-proto: ConversationPage missing required `request_id`, so it cannot be correlated with the request it answers",
+    );
+  }
+  return page;
+}
+
+const PAGE_MORE_KEYS = new Set(["cursor"]);
+
+function decodePageContinuation(o: JsonObject): PageContinuation {
+  const hasMore = o.more !== undefined && o.more !== null;
+  const hasStart = o.start !== undefined && o.start !== null;
+  if (hasMore && hasStart) {
+    throw new Error("frontend-proto: ConversationPage set both `more` and `start`, which are one oneof");
+  }
+  if (hasMore) {
+    const more = ensureObject(o.more, "ConversationPage.more");
+    rejectUnknown(more, PAGE_MORE_KEYS, "ConversationPage.more");
+    const cursor = str(more, "cursor", "ConversationPage.more");
+    if (cursor === "") {
+      throw new Error("frontend-proto: ConversationPage.more carried no cursor, so load-more could never advance");
+    }
+    return { case: "more", cursor };
+  }
+  if (hasStart) return { case: "start" };
+  throw new Error(
+    "frontend-proto: ConversationPage set neither `more` nor `start`; a page with no continuation would render a load-more that can never retire",
+  );
 }
 
 const CONVERSATION_ITEM_ENVELOPE_KEYS = new Set([

@@ -118,6 +118,17 @@ func ConversationDeltaFrame(c *frontendv1.ConversationDelta) *frontendv1.Fronten
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_ConversationDelta{ConversationDelta: c}}
 }
 
+// ConversationPageFrame wraps a ConversationPage.
+//
+// A page is addressed to the ONE connection that asked for it — it echoes that
+// request's id, and no other client is waiting on it — so it is enqueued to
+// the requesting client as a command response rather than broadcast. That is
+// the difference from a ConversationDelta, which is unsolicited state every
+// client of the workspace needs.
+func ConversationPageFrame(p *frontendv1.ConversationPage) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_ConversationPage{ConversationPage: p}}
+}
+
 // TypingDeltaFrame wraps a TypingDelta.
 func TypingDeltaFrame(t *frontendv1.TypingDelta) *frontendv1.FrontendFrame {
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_TypingDelta{TypingDelta: t}}
