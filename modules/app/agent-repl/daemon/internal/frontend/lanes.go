@@ -97,6 +97,37 @@ const maxQueuedResyncPerLane = 2
 // isResync reports whether a command is a conversation resync.
 func isResync(cmd *frontendv1.FrontendCommand) bool { return cmd.GetResync() != nil }
 
+// ---------------------------------------------------------------------------
+// Low-priority sublane
+// ---------------------------------------------------------------------------
+//
+// A client_log is EVIDENCE, not an operation: nothing waits on its outcome and
+// no user-visible state changes when it runs. It nevertheless rides the same
+// per-workspace lane as that workspace's opens, prompts and resyncs, because it
+// carries the workspace it came from. Sixteen refreshed webviews echoing their
+// console records drove one connection's queue to 2,355 commands, and every
+// interactive command that arrived behind that burst waited the whole burst out
+// — a lane FIFO is a FIFO.
+//
+// So each lane keeps TWO queues and serves the interactive one first. The
+// resulting guarantees are exactly the three that matter:
+//
+//   - Interactive commands keep their arrival order among themselves. They all
+//     sit in one queue, untouched; only client_log moved out of it.
+//   - client_log keeps its own relative order. The low queue is a FIFO too, so
+//     the daemon's log still reads in the order the frontend emitted.
+//   - An EXECUTING client_log is never preempted. next() removes an entry from
+//     its queue before the worker runs it, so priority is a question asked at
+//     dequeue time and never a question asked about the command in progress.
+//
+// Nothing else is low priority. The class is deliberately one command whose
+// definition is "the daemon writes it and does not act on it"; a command whose
+// completion something waits for must never be deferred behind another's.
+
+// isLowPriority reports whether a command may yield its lane to an interactive
+// command that arrived later.
+func isLowPriority(cmd *frontendv1.FrontendCommand) bool { return cmd.GetClientLog() != nil }
+
 // laneKey names the serialization domain a command belongs to. Ordering is
 // promised per workspace, and the wire field the daemon routes every command
 // by is the workspace, so the workspace IS the lane.
@@ -150,9 +181,13 @@ type laneItem struct {
 type commandLane struct {
 	key string
 
-	mu     sync.Mutex
-	queue  []laneItem
-	closed bool
+	mu    sync.Mutex
+	queue []laneItem
+	// lowQueue holds the lane's low-priority commands (see isLowPriority). It
+	// is served only when queue is empty, and it is a FIFO of its own so the
+	// deferred commands keep their emission order relative to each other.
+	lowQueue []laneItem
+	closed   bool
 	// ready is a coalescing wakeup (capacity 1), never the queue itself.
 	ready chan struct{}
 }
@@ -218,6 +253,8 @@ type laneDepth struct {
 	depth int
 	// resyncs is how many of those are resyncs.
 	resyncs int
+	// low is how many of those are on the low-priority sublane.
+	low int
 }
 
 // serve runs one lane's commands in arrival order until the lane is closed AND
@@ -263,6 +300,13 @@ func (l *commandLanes) close() {
 // caller owes every returned entry an answer.
 func (lane *commandLane) push(item laneItem) (superseded []laneItem, queued laneDepth) {
 	lane.mu.Lock()
+	if isLowPriority(item.ticket.cmd) {
+		lane.lowQueue = append(lane.lowQueue, item)
+		queued = lane.depthLocked()
+		lane.mu.Unlock()
+		lane.signal()
+		return nil, queued
+	}
 	if isResync(item.ticket.cmd) {
 		superseded = lane.takeQueuedResyncsLocked()
 	}
@@ -318,7 +362,7 @@ func (lane *commandLane) trimQueuedResyncsLocked() []laneItem {
 
 // depthLocked reports the lane's occupancy. Caller holds lane.mu.
 func (lane *commandLane) depthLocked() laneDepth {
-	d := laneDepth{depth: len(lane.queue)}
+	d := laneDepth{depth: len(lane.queue) + len(lane.lowQueue), low: len(lane.lowQueue)}
 	for _, q := range lane.queue {
 		if isResync(q.ticket.cmd) {
 			d.resyncs++
@@ -337,6 +381,14 @@ func (lane *commandLane) next() (item laneItem, ok bool, done bool) {
 		lane.queue = lane.queue[1:]
 		return head, true, false
 	}
+	// Only once the lane owes no interactive work does it spend itself on
+	// evidence. A closing lane still drains this queue: those commands were
+	// read off the socket and are owed an answer like any other.
+	if len(lane.lowQueue) > 0 {
+		head := lane.lowQueue[0]
+		lane.lowQueue = lane.lowQueue[1:]
+		return head, true, false
+	}
 	return laneItem{}, false, lane.closed
 }
 
@@ -346,7 +398,7 @@ func (lane *commandLane) next() (item laneItem, ok bool, done bool) {
 func (lane *commandLane) close() int {
 	lane.mu.Lock()
 	lane.closed = true
-	pending := len(lane.queue)
+	pending := len(lane.queue) + len(lane.lowQueue)
 	lane.mu.Unlock()
 	lane.signal()
 	return pending
