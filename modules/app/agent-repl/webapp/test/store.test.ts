@@ -3145,3 +3145,43 @@ describe("recovery after a bounce is incremental", () => {
     expect(store.state.lastSeq).toBe(0);
   });
 });
+
+// --- the fence-rotation edge -------------------------------------------------
+//
+// The workspace's fence is the answer every fenced push is measured against.
+// When it rotates, every request this page has outstanding under the previous
+// one was made under an identity the daemon has retired — so the rotation has
+// to be REPORTED UP to the resync trigger, which is the only thing that can
+// re-ask. See `IngestResult.fenceRotated`.
+
+describe("ingest reports a workspace fence rotation", () => {
+  it("reports the rotation when an adopted fence is replaced", () => {
+    // Arrange: the page has adopted the post-bounce hibernated fence.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ fence: "s1|", atMs: 1000 })]);
+    // Act: the real controller generation arrives.
+    const result = store.ingest([workspaceEffect({ fence: "s1|g1", atMs: 1001 })]);
+    // Assert
+    expect(result.fenceRotated).toBe(true);
+  });
+
+  it("does not report the FIRST fence a page ever adopts", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act: the connect path, which already owes exactly one resync.
+    const result = store.ingest([workspaceEffect({ fence: "s1|g1", atMs: 1000 })]);
+    // Assert
+    expect(result.fenceRotated).toBeUndefined();
+  });
+
+  it("does not re-report a rotation on the next batch", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ fence: "s1|", atMs: 1000 })]);
+    store.ingest([workspaceEffect({ fence: "s1|g1", atMs: 1001 })]);
+    // Act: an ordinary push under the fence already adopted.
+    const result = store.ingest([workspaceEffect({ fence: "s1|g1", atMs: 1002 })]);
+    // Assert
+    expect(result.fenceRotated).toBeUndefined();
+  });
+});
