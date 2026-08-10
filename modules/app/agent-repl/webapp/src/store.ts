@@ -1362,6 +1362,20 @@ export class ConversationStore {
     // `sessionIdAuthoritative`). A rotation to a new owning session is a
     // WorkspaceState revision, so it lands here and nowhere else.
     if (ws.sessionId !== "") {
+      // A VENDOR UUID BELONGS TO THE SESSION THAT MINTED IT. When the workspace
+      // rotates to a DIFFERENT owning session, the uuid this view still holds
+      // describes the retired one, and nothing else ever retracts it:
+      // `applySessionView` only ever writes a NON-EMPTY announcement, so a
+      // successor session that has not yet announced one leaves the dead uuid
+      // standing indefinitely. Production showed exactly that — a master
+      // workspace page stamping every forwarded log record with a uuid four
+      // days and three sessions stale, every record refused by the daemon's
+      // registry check. Clearing it here makes "unknown" the state between the
+      // rotation and the successor's first announcement, which is the truth,
+      // and an unknown uuid is stamped on nothing rather than stamped wrong.
+      if (s.sessionId !== "" && s.sessionId !== ws.sessionId) {
+        s.claudeSessionId = "";
+      }
       s.sessionId = ws.sessionId;
       this.sessionIdAuthoritative = true;
     }

@@ -1614,6 +1614,29 @@ async function boot(): Promise<void> {
           );
           activeSessionId = store.state.sessionId;
           bindLogContext({ agent_repl_session_id: activeSessionId });
+          // THE VENDOR UUID IS REBOUND WITH THE SESSION, not left to the next
+          // rotation announcement to repair. The two halves of this page's
+          // source attribution used to converge by different rules: the
+          // agent-repl session id is re-read from the pushed plane on every
+          // ingest (right above), while the Claude uuid moved only when a
+          // `SessionView` announced a NON-EMPTY new one. A successor session
+          // that had not announced one yet therefore inherited its
+          // predecessor's uuid, and every forwarded log record carried a
+          // half-stale identity the daemon's registry check refuses — observed
+          // in production as ~25 refused records/second for hours, the bound
+          // uuid four days and three sessions behind the registry's.
+          //
+          // The store retired that uuid as it took the rotation, so what is
+          // read here is either the successor's own announcement (same batch)
+          // or nothing at all. Adopting nothing is the point: an unbound
+          // identity is dropped from the record rather than sent stale, and the
+          // daemon files such a record under its own registry's identity.
+          // `forget` first so the successor's first announcement rules as a
+          // first adoption rather than a rotation — a new session's store was
+          // reset with it and has no retired seq space to rebase.
+          sessionRebase.forget();
+          if (store.state.claudeSessionId !== "") sessionRebase.observe(store.state.claudeSessionId);
+          bindLogContext({ claude_session_id: store.state.claudeSessionId });
           sessionIdentity.announce();
         }
         // THE REVIVAL VERDICT, ruled on against the batch the store just took.

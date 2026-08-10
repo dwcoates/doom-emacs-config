@@ -551,3 +551,27 @@ describe("the feed's tail re-anchor", () => {
     expect(main).toContain("new ResizeObserver(onResize).observe(feedEl)");
   });
 });
+
+// BOTH HALVES OF THE PAGE'S SOURCE ATTRIBUTION MUST CONVERGE ON THE SAME EDGE.
+// The agent-repl session id is re-read from the pushed plane on every ingest,
+// but the Claude uuid moved only when a `SessionView` announced a new one — so
+// a successor session that had announced none inherited its predecessor's uuid,
+// and every forwarded log record carried an identity the daemon's registry
+// check refuses. Production ran that way for hours: ~25 refused client_log
+// records/second from the master workspace's page, its bound uuid four days and
+// three sessions behind the registry's. The rebind is boot-scope closure state
+// with no importable seam, so the wiring is pinned here; the store's retirement
+// of the dead uuid is tested in store.test.ts.
+describe("the page's bound log identity", () => {
+  it("rebinds the vendor uuid on the same edge as the session id", () => {
+    // Assert — read from the store, so an unannounced successor binds nothing
+    // rather than keeping the retired session's uuid.
+    expect(main).toContain("bindLogContext({ claude_session_id: store.state.claudeSessionId });");
+  });
+
+  it("forgets the rebase identity when the page rebinds sessions", () => {
+    // Assert — without this the successor's first announcement rules as a
+    // rotation and wipes a history that was never in the retired seq space.
+    expect(main).toContain("sessionRebase.forget();");
+  });
+});

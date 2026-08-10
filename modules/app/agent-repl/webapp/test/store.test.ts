@@ -813,6 +813,43 @@ describe("session identity authority", () => {
     expect(store.state.sessionId).toBe("s_new");
   });
 
+  it("retires the vendor uuid when the workspace state rotates its owning session", () => {
+    // Arrange — the production shape: a session announced its uuid, then the
+    // workspace rotated to a successor that has announced none yet.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ sessionId: "s_old" })]);
+    store.ingest([sessionEffect({ sessionId: "s_old", claudeSessionId: "uuid-old" })]);
+    // Act
+    store.ingest([workspaceEffect({ sessionId: "s_new" })]);
+    // Assert — unknown, not the dead session's.
+    expect(store.state.claudeSessionId).toBe("");
+  });
+
+  it("keeps the vendor uuid when the workspace state repeats its owning session", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ sessionId: "s_live" })]);
+    store.ingest([sessionEffect({ sessionId: "s_live", claudeSessionId: "uuid-live" })]);
+    // Act — the same session, re-announced by a later revision.
+    store.ingest([workspaceEffect({ sessionId: "s_live" })]);
+    // Assert
+    expect(store.state.claudeSessionId).toBe("uuid-live");
+  });
+
+  it("adopts the successor's vendor uuid announced in the rotation's own batch", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ sessionId: "s_old" })]);
+    store.ingest([sessionEffect({ sessionId: "s_old", claudeSessionId: "uuid-old" })]);
+    // Act — the retirement must not eat the successor's announcement.
+    store.ingest([
+      workspaceEffect({ sessionId: "s_new" }),
+      sessionEffect({ sessionId: "s_new", claudeSessionId: "uuid-new" }),
+    ]);
+    // Assert
+    expect(store.state.claudeSessionId).toBe("uuid-new");
+  });
+
   it("keeps the ruled identity when a corroborating session view repeats it", () => {
     // Arrange
     const store = new ConversationStore();
