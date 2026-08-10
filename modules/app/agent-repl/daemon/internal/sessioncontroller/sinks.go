@@ -2713,7 +2713,7 @@ func (c *consumer) degradedUUID(component string) string {
 // report. One per session, so a retried-and-failed-again bring-up updates the
 // same card instead of stacking a second account of one failure.
 func (c *consumer) startFailedUUID() string {
-	return "start_failed:" + c.sessionID
+	return startFailedCardUUID(c.sessionID)
 }
 
 // boundaryInstant is the instant a lifecycle event says it happened at, which
