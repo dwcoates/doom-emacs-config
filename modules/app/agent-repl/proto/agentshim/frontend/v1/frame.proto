@@ -6,6 +6,7 @@ syntax = "proto3";
 package agentshim.frontend.v1;
 
 import "agentshim/frontend/v1/async-bubble.proto";
+import "agentshim/frontend/v1/conversation-page.proto";
 import "agentshim/frontend/v1/errors.proto";
 import "agentshim/frontend/v1/failure-card.proto";
 import "agentshim/frontend/v1/feed.proto";
@@ -84,6 +85,11 @@ message FrontendFrame {
     // deliberate bounce stops being indistinguishable from a crash; see
     // RestartPendingView for why it is an edge and never snapshot state.
     RestartPendingView restart_pending = 25;
+    // ONE page of conversation history, answering a ConversationPageCmd. It is
+    // a push rather than a command response because its items are feed
+    // content, and the command's ack is early by design — see
+    // conversation-page.proto.
+    ConversationPage conversation_page = 26;
   }
 }
 
@@ -167,6 +173,10 @@ message FrontendCommand {
     EvictMergeCmd evict_merge = 32;
     AnswerMergeDequeueCmd answer_merge_dequeue = 33;
     CancelDetachedAgentsCmd cancel_detached_agents = 34;
+    // The COLD-OPEN history request, and the load-more that walks backwards
+    // from it. It does not replace `resync` above, which stays the live-page
+    // path — see conversation-page.proto.
+    ConversationPageCmd conversation_page = 35;
   }
 }
 

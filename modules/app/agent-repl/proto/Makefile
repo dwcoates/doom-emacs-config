@@ -15,6 +15,7 @@ PROTOS := \
   agentshim/data/v1/journal.proto \
   agentshim/frontend/v1/agent-emission.proto \
   agentshim/frontend/v1/async-bubble.proto \
+  agentshim/frontend/v1/conversation-page.proto \
   agentshim/frontend/v1/durable.proto \
   agentshim/frontend/v1/errors.proto \
   agentshim/frontend/v1/failure-card.proto \
