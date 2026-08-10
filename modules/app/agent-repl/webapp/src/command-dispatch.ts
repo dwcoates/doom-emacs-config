@@ -289,6 +289,31 @@ export interface ResyncArgs {
   fence: string;
 }
 
+/** One conversation page request, as the dispatcher sends it. */
+export interface ConversationPageArgs {
+  /** "" = the tail anchor; otherwise the daemon's opaque continuation token. */
+  cursor: string;
+  /** 0 = the daemon's default. The daemon owns the ceiling and clamps to it. */
+  limit: number;
+  fence: string;
+}
+
+/** A sent page request: its correlation id, and the daemon's acceptance. */
+export interface SentConversationPage {
+  /**
+   * The id the ConversationPageCmd went out under, and the id the PAGE comes
+   * back carrying. It is how a client with a cold open and a load-more both in
+   * flight tells the two answers apart.
+   */
+  requestId: string;
+  /**
+   * Resolves on the daemon's ACCEPTANCE ack, which it sends at enqueue rather
+   * than at completion, so a slow read never looks unanswered. It is NOT the
+   * page: the page arrives as a pushed frame carrying `requestId`.
+   */
+  ack: Promise<void>;
+}
+
 export interface DispatchOptions {
   /** Send one encoded frame; returns false when the socket is not open. */
   send: (raw: string) => boolean;
@@ -310,6 +335,15 @@ export interface DispatchOptions {
    * being an acceptable disposition for a rejected prompt.
    */
   onFailure?: (refusal: CommandRefusal) => void;
+  /**
+   * A conversation page that was ACCEPTED and then failed to be read.
+   *
+   * It cannot travel on {@link onFailure}'s promise, because the acceptance ack
+   * already resolved it. This is the seam that gets the fact to the page
+   * client, which is the only thing waiting on an answer that is now never
+   * coming.
+   */
+  onLateRefusal?: (requestId: string, error: string) => void;
   /**
    * Dial the daemon NOW because a user action needs the transport (WsClient's
    * `ensureConnected`). Optional: a dispatcher bound to a socket with a
@@ -353,6 +387,24 @@ function newLoadNonce(): string {
 
 export class CommandDispatcher {
   private readonly pending = new Map<string, PendingAck>();
+  /**
+   * The request ids of conversation pages this dispatcher has sent.
+   *
+   * A page is acked TWICE in exactly one case — accepted, then refused when
+   * the read fails — and the second ack arrives with no pending entry to
+   * reject. This set is what tells that ack apart from a genuinely unknown one,
+   * so the late refusal reaches the page client while every other unknown ack
+   * keeps the local-only, no-reentry disposition below it.
+   *
+   * Entries are spent on arrival and dropped when a page lands, so it holds at
+   * most the requests actually outstanding.
+   */
+  private readonly pageRequests = new Set<string>();
+
+  /** Forget a page request whose page ARRIVED; nothing more can answer it. */
+  forgetPageRequest(requestId: string): void {
+    this.pageRequests.delete(requestId);
+  }
   private readonly knownSessions = new Set<string>();
   private readonly creates: CreateWaiter[] = [];
   private readonly clientLogAcks = new Set<string>();
@@ -468,6 +520,41 @@ export class CommandDispatcher {
       },
     });
     return this.dispatch(workspace, { case: "resync", fromSeq: args.fromSeq, fence: args.fence });
+  }
+
+  /**
+   * Ask for ONE page of conversation history.
+   *
+   * It returns the request id alongside the acceptance, because the ANSWER is
+   * a push rather than this promise's resolution — a page frame carrying that
+   * id. The promise's only job is to report that the daemon TOOK the request,
+   * which is what keeps a slow read from looking unanswered and provoking the
+   * retry cascade an unacked resync famously did.
+   *
+   * A read that is accepted and then FAILS answers with a second, failing ack
+   * under the same request id. That ack finds no pending entry — this one was
+   * already resolved by the acceptance — so it reaches {@link lateRefusal}
+   * rather than this promise.
+   */
+  conversationPage(workspace: string, args: ConversationPageArgs): SentConversationPage {
+    log("info", "command dispatcher requesting a conversation page", {
+      operation: "command-dispatch.conversation-page",
+      context: {
+        workspace,
+        anchor: args.cursor === "" ? "tail" : "before",
+        limit: args.limit,
+        fence: args.fence,
+        decision: "dispatch",
+      },
+    });
+    const sent = this.dispatchIdentified(workspace, {
+      case: "conversationPage",
+      cursor: args.cursor,
+      limit: args.limit,
+      fence: args.fence,
+    });
+    this.pageRequests.add(sent.requestId);
+    return { requestId: sent.requestId, ack: sent.ack };
   }
 
   deleteSession(sessionId: string): Promise<void> {
@@ -731,6 +818,25 @@ export class CommandDispatcher {
     }
     const p = this.pending.get(ack.requestId);
     if (p === undefined) {
+      // A PAGE'S SECOND ACK. A conversation page is acked at ACCEPTANCE, which
+      // already resolved and removed its pending entry, so a failing ack for
+      // one arrives here with nothing to reject. It is not an unknown request:
+      // this dispatcher sent it, remembers it, and the page client is waiting
+      // on an answer that is now never coming.
+      //
+      // The membership check is what keeps this off the flood path the branch
+      // below documents. Only ids this dispatcher minted for a page reach the
+      // sink, and each is spent on arrival, so no ack can provoke another.
+      if (this.pageRequests.delete(ack.requestId)) {
+        if (!ack.ok) {
+          log("warn", "command dispatcher received a late refusal for an accepted conversation page", {
+            operation: "command-dispatch.page-late-refusal",
+            context: { request_id: ack.requestId, error: ack.error },
+          });
+          this.opts.onLateRefusal?.(ack.requestId, ack.error);
+        }
+        return;
+      }
       // localOnly: this branch fires while HOLDING an ack — most often one
       // whose clientLog id was evicted from the bounded tracking set above.
       // Forwarding the warn sends another clientLog, whose ack is also
