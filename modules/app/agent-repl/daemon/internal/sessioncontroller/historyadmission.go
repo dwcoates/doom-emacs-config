@@ -152,7 +152,6 @@ func (m *Manager) admitHistoryRequest(kind, detail, workspace, echoedFence strin
 			liveFence, "hibernation_transition", "eligibility_revoked")
 	}
 
-
 	if live {
 		liveSessionID, liveGenerationID := d.sessionID, d.generationID
 		// The live controller's own fence, composed exactly as the consumer

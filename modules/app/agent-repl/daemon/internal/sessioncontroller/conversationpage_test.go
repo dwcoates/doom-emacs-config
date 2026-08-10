@@ -11,8 +11,8 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/errclass"
-
 	"claude-repld/internal/ssm"
+
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -38,11 +38,11 @@ type pageHarness struct {
 func newPageHarness(t *testing.T, events []*corev1.Event) *pageHarness {
 	t.Helper()
 	h := &pageHarness{durableHarness: newDurableHarness(t, &durableHistorySpy{events: events})}
+	// The Fence is stamped exactly as the mint stamps it (ssm.compositeWorkspaceState),
+	// because it is the token the reader compares against and the one a client
+	// was actually shown. A fixture that carried the two identities but no fence
+	// would be describing a WorkspaceState the daemon never publishes.
 	h.applier.current = map[string]*frontendv1.WorkspaceState{
-		// The Fence is stamped exactly as the mint stamps it (ssm.compositeWorkspaceState),
-		// because it is the token the ladder byte-compares and the one a client was
-		// actually shown. A fixture carrying the two identities but no fence would
-		// describe a WorkspaceState the daemon never publishes.
 		"ws": {Workspace: "ws", SessionId: "s1", ControllerGenerationId: "g1", Fence: ssm.Fence("s1", "g1")},
 	}
 	if len(events) > 0 {
@@ -329,9 +329,32 @@ func TestAPageStampsTheFenceItWasMintedUnder(t *testing.T) {
 	// Act.
 	page := h.page(t, PageAnchor{Tail: true, Limit: 3})
 
+	// Assert — the workspace's PUBLISHED fence, byte for byte.
+	if got, want := page.GetFence(), ssm.Fence("s1", "g1"); got != want {
+		t.Fatalf("page fence = %q, want the workspace's published fence %q", got, want)
+	}
+}
+
+func TestAnUngeneratedWorkspacesPageCarriesTheAbsentFenceItPublishes(t *testing.T) {
+	// Arrange — the hibernated workspace a cold webview mounts against after a
+	// daemon bounce. Its published fence is ABSENT, and a page that composed
+	// `Fence(session, "")` instead would stamp a token the mint never produces:
+	// the client byte-compares, disagrees, and discards the page it just asked
+	// for, which is the blank feed one layer further out.
+	h := newPageHarness(t, pageTextEvents(t, 3))
+	h.applier.setCurrent("ws", &frontendv1.WorkspaceState{
+		Workspace: "ws", SessionId: "s1", ControllerGenerationId: "", Fence: "",
+	})
+
+	// Act.
+	page, err := h.m.ConversationPage(context.Background(), "ws", "", PageAnchor{Tail: true, Limit: 3})
+	if err != nil {
+		t.Fatalf("ConversationPage: %v", err)
+	}
+
 	// Assert.
-	if page.GetFence() == "" {
-		t.Fatalf("page carried no fence, so a client has nothing to measure its staleness against")
+	if got := page.GetFence(); got != "" {
+		t.Fatalf("page fence = %q, want the absent fence the workspace publishes", got)
 	}
 }
 
