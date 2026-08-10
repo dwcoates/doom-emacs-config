@@ -206,6 +206,24 @@ func migrate(db *sql.DB, logf dlog.Logf) error {
 			workspace  TEXT    PRIMARY KEY,
 			merged_at  INTEGER NOT NULL
 		);
+		-- WHETHER A COMPACTION WOULD BE THE SECOND ONE OF AN UNCHANGED
+		-- CONVERSATION: when this workspace was last compacted, and when it last
+		-- accepted a prompt that was not the daemon's own idle machinery. See
+		-- compactiongate.go for why the two writers are the ones they are.
+		--
+		-- It is a pair of CURRENT facts rather than a query over the state log,
+		-- for workspace_merged's reason and one more: the log cannot answer it.
+		-- Its prompt rows do not record whose prompt they were, so a keep-alive
+		-- ping is indistinguishable there from the user speaking — and a gate
+		-- that re-opened on every ping would never close at all.
+		--
+		-- Zero in either column means the event has never been observed, which
+		-- the reader treats as UNKNOWN rather than as "at the epoch".
+		CREATE TABLE IF NOT EXISTS compaction_gate (
+			workspace    TEXT    PRIMARY KEY,
+			compacted_at INTEGER NOT NULL DEFAULT 0,
+			prompt_at    INTEGER NOT NULL DEFAULT 0
+		);
 	`); err != nil {
 		return fmt.Errorf("ssm: create schema: %w", err)
 	}
