@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -50,7 +51,7 @@ func TestSpawnPassesExtraFileAndDirectsStderrWithoutDaemonPersistence(t *testing
 	if got, err := os.ReadFile(terminal.Name()); err != nil || string(got) != "stderr" {
 		t.Fatalf("terminal=%q err=%v", got, err)
 	}
-	assertLogContains(t, logger, "child reaped", `close_owner="caller"`, `shutdown_initiator="child_exit"`)
+	assertLogContains(t, logger, "child reaped", "stderr_outcome=complete", "stderr_bytes=6", `shutdown_initiator="child_exit"`)
 	assertNoLogContains(t, logger, "shim stderr")
 }
 
@@ -294,14 +295,14 @@ func TestSpawnRejectsNilLogger(t *testing.T) {
 	}
 }
 
-func TestPumpStderrRoutesNormalAndVerboseRecords(t *testing.T) {
+func TestStderrSinkRoutesNormalAndVerboseRecords(t *testing.T) {
 	logger := &recordingLogger{}
-	pumpStderr(strings.NewReader(
+	drainStderr(t, logger, strings.NewReader(
 		canonicalShimRecord("normal")+"\n"+
 			canonicalShimRecord("verbose")+"\n"+
 			"{\"runtime\":\"shim\",\"verbosity\":\"normal\",\"message\":\"verbosity=verbose\"}\n"+
 			"malformed verbosity=verbose\n",
-	), logger, &stderrTail{})
+	))
 
 	logger.record(t, 0, "normal", "\"verbosity\":\"normal\"")
 	logger.record(t, 1, "verbose", "\"verbosity\":\"verbose\"")
@@ -309,13 +310,13 @@ func TestPumpStderrRoutesNormalAndVerboseRecords(t *testing.T) {
 	logger.record(t, 3, "normal", "malformed verbosity=verbose")
 }
 
-func TestPumpStderrMirrorsCanonicalShimRecordsWithoutDaemonPersistence(t *testing.T) {
+func TestStderrSinkMirrorsCanonicalShimRecordsWithoutDaemonPersistence(t *testing.T) {
 	logger := &mirroringLogger{}
-	pumpStderr(strings.NewReader(
+	drainStderr(t, logger, strings.NewReader(
 		canonicalShimRecord("normal")+"\n"+
 			canonicalShimRecord("verbose")+"\n"+
 			"malformed\n",
-	), logger, &stderrTail{})
+	))
 	if len(logger.mirroredRecords()) != 2 || !strings.Contains(logger.mirroredRecords()[0], `"verbosity":"normal"`) || !strings.Contains(logger.mirroredRecords()[1], `"verbosity":"verbose"`) {
 		t.Fatalf("mirrored=%q", logger.mirroredRecords())
 	}
@@ -340,10 +341,20 @@ func TestShimRecordRejectsIncompleteOrIllTypedCanonicalEnvelope(t *testing.T) {
 	}
 }
 
-func TestPumpStderrReportsScannerFailureAsDaemonError(t *testing.T) {
+func TestStderrPumpReportsAReadFailureAsADaemonError(t *testing.T) {
+	// Arrange: a stream that breaks rather than ending, which no test can
+	// arrange against a real pipe.
 	logger := &recordingLogger{}
-	pumpStderr(failingReader{}, logger, &stderrTail{})
-	logger.record(t, 0, "normal", "stderr scan error")
+	pump := newStderrPump(io.NopCloser(failingReader{}), newTestStderrSink(logger), logger, 731, 739)
+
+	// Act
+	pump.run()
+
+	// Assert
+	if outcome := pump.finish(); outcome != stderrOutcomeReadFailed {
+		t.Fatalf("outcome = %q, want %q", outcome, stderrOutcomeReadFailed)
+	}
+	logger.record(t, 0, "normal", "stderr read failed")
 }
 
 func TestPumpStdoutLogsScanErrors(t *testing.T) {

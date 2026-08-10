@@ -133,9 +133,9 @@ func TestUDSShimLoggerPersistsDaemonOwnedDiagnosticsToWorkspaceTarget(t *testing
 }
 
 // TestUDSShimLoggerLevelsSeparateLifecycleFromStderrContent pins the split the
-// level exists for: the stderr pump announces itself on every healthy spawn, and
-// routing that announcement through the error channel put a level=error record
-// in the workspace log of a session that came up perfectly.
+// level exists for: stderr retention announces itself on every healthy spawn,
+// and routing that announcement through the error channel put a level=error
+// record in the workspace log of a session that came up perfectly.
 func TestUDSShimLoggerLevelsSeparateLifecycleFromStderrContent(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -144,10 +144,10 @@ func TestUDSShimLoggerLevelsSeparateLifecycleFromStderrContent(t *testing.T) {
 		match string
 	}{
 		{
-			name:  "scanner lifecycle announcement",
-			emit:  func(l *udsShimLogger) { l.LogLifecycle("shim: stderr scanner started pid=%d", 4242) },
+			name:  "retention lifecycle announcement",
+			emit:  func(l *udsShimLogger) { l.LogLifecycle("shim: stderr retention started pid=%d", 4242) },
 			want:  dlog.LevelInfo,
-			match: "stderr scanner started",
+			match: "stderr retention started",
 		},
 		{
 			name:  "genuine shim stderr content",
