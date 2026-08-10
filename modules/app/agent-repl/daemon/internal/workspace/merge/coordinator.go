@@ -924,10 +924,15 @@ func (c *QueueCoordinator) finish(repo string, req Request, release func()) bool
 // THE LEASE STILL GOES BACK. A lease must never outlive the merge that took it,
 // whatever the status sink did, exactly as in finish.
 //
-// THE DRAIN STOPS. The head is unacked, so the repository cannot advance past
-// it; stopping loudly here is the same response finish gives a Complete that
-// failed, and for the same reason — spinning on a storage or sink failure serves
-// nobody.
+// THE DRAIN DOES NOT STOP. The word is owed, and an owed word is settled by
+// sayOwedTerminal — the SAME bounded budget a boot replay goes through — rather
+// than deferred to a daemon bounce. Halting here used to mean the repository
+// could not advance until someone restarted the daemon, which put every merge
+// behind this one at the mercy of a sink that had failed exactly once.
+//
+// THE DURABLE MARK STILL COMES FIRST, and that ordering is what makes the retry
+// safe: a crash anywhere inside the budget leaves an entry the next boot reads
+// as a word owed, not as a merge to run again.
 func (c *QueueCoordinator) keepForTerminalReplay(repo string, req Request, release func(), term TerminalStatus, publishErr error) bool {
 	if err := c.queue.MarkTerminal(repo, req, term); err != nil {
 		// Both halves failed: the status did not publish AND the terminal word
@@ -939,9 +944,65 @@ func (c *QueueCoordinator) keepForTerminalReplay(repo string, req Request, relea
 	if release != nil {
 		release()
 	}
-	c.logf("merge: drain HALTED, terminal status unpublished {repo=%s ws=%s name=%s outcome=%s}: %v — the outcome STANDS and its durable queue entry is KEPT, so the next boot's Drain re-publishes the terminal status rather than replaying the merge",
+	c.logf("merge: terminal status unpublished, SETTLING it under the replay budget {repo=%s ws=%s name=%s outcome=%s}: %v — the outcome STANDS and its durable entry is marked, so this run is answered here rather than held for a bounce",
 		repo, req.Workspace, req.Name, term.Outcome, publishErr)
-	return false
+	return c.sayOwedTerminal(repo, req, term)
+}
+
+// sayOwedTerminal publishes a terminal word a run OWES, under a bounded budget
+// of attempts, and ejects the entry when the budget is spent.
+//
+// IT IS THE ONE PATH FOR AN OWED WORD, whether the run reached its terminal in
+// this process or in one that died before it could speak. The two used to be
+// separate — a live failure halted the drain, a boot replay retried it — so the
+// same situation was answered two different ways depending on which side of a
+// daemon restart it happened on, and only one of them was bounded.
+//
+// THE PUBLISHER IS REBUILT FROM THE DURABLE ENTRY when the request carries none,
+// which keeps the run's identity: rebuildRun resumes the id the entry records,
+// so the word arrives on the run the user watched rather than on a stranger.
+func (c *QueueCoordinator) sayOwedTerminal(repo string, req Request, term TerminalStatus) bool {
+	driven := req
+	if driven.Run == nil {
+		run, err := c.rebuildRun(repo, req)
+		if err != nil {
+			// The publisher cannot be built at all, so there is no attempt to
+			// bound: nothing here can ever say this word.
+			return c.ejectTerminal(repo, req, driven, term,
+				fmt.Errorf("the run's publisher could not be rebuilt: %w", err))
+		}
+		driven.Run = run
+	}
+	say := c.terminalPublisher(driven, term)
+	if say == nil {
+		// MarkTerminal validates the outcome, so a record naming anything else
+		// was not written by this package. No attempt can publish it, and keeping
+		// it would hold the head on a word that is unsayable by construction.
+		return c.ejectTerminal(repo, req, driven, term,
+			fmt.Errorf("the durable record names outcome %q, which this package does not publish", term.Outcome))
+	}
+
+	// EVERY ATTEMPT IS ITSELF BOUNDED (statusPublishBound), so this loop's whole
+	// cost is bounded too — which is what lets it finish inside the run's
+	// observability budget rather than deferring the question to a reboot.
+	var err error
+	for attempt := 1; attempt <= terminalReplayAttempts; attempt++ {
+		if err = say(); err == nil {
+			break
+		}
+		c.logf("merge: terminal status FAILED {repo=%s ws=%s run=%s outcome=%s attempt=%d/%d}: %v",
+			repo, req.Workspace, driven.Run.RunID(), term.Outcome, attempt, terminalReplayAttempts, err)
+	}
+	if err != nil {
+		return c.ejectTerminal(repo, req, driven, term,
+			fmt.Errorf("the terminal status did not publish in %d attempts: %w", terminalReplayAttempts, err))
+	}
+	c.logf("merge: terminal word PUBLISHED {repo=%s ws=%s run=%s outcome=%s} — the run's terminal status reached the frontends",
+		repo, req.Workspace, driven.Run.RunID(), term.Outcome)
+	// The lease is already back (its holder released it before the word was
+	// settled), so there is none to release here. finishTerminal drops the entry
+	// and — for a merged run — runs the post-merge aftermath exactly once.
+	return c.finishTerminal(repo, req, driven, nil, term.Outcome, term.AfterActionError)
 }
 
 // terminalFailure is a run's terminal `failed` word together with whether
@@ -1315,51 +1376,9 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 // lifetimes, and every merge behind it waited on a status word nothing was ever
 // going to publish. See ejectTerminal for why advancing is the right answer.
 func (c *QueueCoordinator) replayTerminal(repo string, req Request, term TerminalStatus) bool {
-	driven := req
-	if driven.Run == nil {
-		run, err := c.rebuildRun(repo, req)
-		if err != nil {
-			// The publisher cannot be built at all, so there is no attempt to
-			// bound: nothing here can ever say this word.
-			return c.ejectTerminal(repo, req, driven, term,
-				fmt.Errorf("the run's publisher could not be rebuilt: %w", err))
-		}
-		driven.Run = run
-	}
 	c.logf("merge: terminal REPLAY {repo=%s ws=%s name=%s run=%s outcome=%s cause=%s} — a previous daemon reached this outcome and could not publish it; the merge is NOT re-run",
-		repo, req.Workspace, req.Name, driven.Run.RunID(), term.Outcome, term.Cause)
-
-	say := c.terminalPublisher(driven, term)
-	if say == nil {
-		// MarkTerminal validates the outcome, so a record naming anything else
-		// was not written by this package. No attempt can publish it, and keeping
-		// it would hold the head on a word that is unsayable by construction.
-		return c.ejectTerminal(repo, req, driven, term,
-			fmt.Errorf("the durable record names outcome %q, which this package does not publish", term.Outcome))
-	}
-
-	// EVERY ATTEMPT IS ITSELF BOUNDED (statusPublishBound), so this loop's whole
-	// cost is bounded too — which is what lets it finish inside the run's
-	// observability budget rather than deferring the question to a reboot.
-	var err error
-	for attempt := 1; attempt <= terminalReplayAttempts; attempt++ {
-		if err = say(); err == nil {
-			break
-		}
-		c.logf("merge: terminal REPLAY status FAILED {repo=%s ws=%s run=%s outcome=%s attempt=%d/%d}: %v",
-			repo, req.Workspace, driven.Run.RunID(), term.Outcome, attempt, terminalReplayAttempts, err)
-	}
-	if err != nil {
-		return c.ejectTerminal(repo, req, driven, term,
-			fmt.Errorf("the terminal status did not publish in %d attempts: %w", terminalReplayAttempts, err))
-	}
-	c.logf("merge: terminal REPLAY PUBLISHED {repo=%s ws=%s run=%s outcome=%s} — the run's terminal word finally reached the frontends",
-		repo, req.Workspace, driven.Run.RunID(), term.Outcome)
-	// The lease died with the daemon that held it, so there is none to release
-	// here. finishTerminal drops the entry and — for a merged run, whose hook
-	// never fired because the entry was never dropped — runs the post-merge
-	// aftermath exactly once.
-	return c.finishTerminal(repo, req, driven, nil, term.Outcome, term.AfterActionError)
+		repo, req.Workspace, req.Name, req.runIdentity(), term.Outcome, term.Cause)
+	return c.sayOwedTerminal(repo, req, term)
 }
 
 // terminalReplayAttempts is how many times ONE drain tries to publish an owed

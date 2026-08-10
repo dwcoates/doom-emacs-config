@@ -319,6 +319,16 @@ type syncSink struct {
 	// and the run would die somewhere else entirely.
 	failPhase Phase
 	phaseErr  error
+	// phaseFailsLeft, when positive, is how many more records of failPhase fail
+	// before the sink starts answering. It is what distinguishes a TRANSIENT sink
+	// fault — which the terminal budget is meant to ride out — from a persistent
+	// one, which it is meant to eject on. Zero means the failure is permanent.
+	phaseFailsLeft int
+	// onPhase runs INSIDE the record of failPhase, before the sink's own mutex is
+	// taken, so a test can snapshot durable state at the exact instant a terminal
+	// publication is being attempted. Taking no lock here is what lets the
+	// snapshot call back into the queue.
+	onPhase func()
 }
 
 func newSyncSink(capacity int) *syncSink {
@@ -327,10 +337,21 @@ func newSyncSink(capacity int) *syncSink {
 
 func (s *syncSink) RecordMergeTransition(ws string, phase Phase, cause string) error {
 	s.mu.Lock()
+	hook := s.onPhase
+	if hook != nil && phase == s.failPhase {
+		s.mu.Unlock()
+		hook()
+		s.mu.Lock()
+	}
 	s.got = append(s.got, transition{ws, phase, cause})
 	err := s.err
 	if s.phaseErr != nil && phase == s.failPhase {
-		err = s.phaseErr
+		if s.phaseFailsLeft == 0 {
+			err = s.phaseErr
+		} else if s.phaseFailsLeft > 0 {
+			err = s.phaseErr
+			s.phaseFailsLeft--
+		}
 	}
 	s.mu.Unlock()
 	s.ch <- transition{ws, phase, cause}
@@ -413,6 +434,14 @@ func (s *syncSink) failOnPhase(phase Phase, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failPhase, s.phaseErr = phase, err
+}
+
+// failPhaseTimes makes exactly n records of phase fail before the sink recovers,
+// which is how a test drives a TRANSIENT terminal-publication fault.
+func (s *syncSink) failPhaseTimes(phase Phase, n int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failPhase, s.phaseErr, s.phaseFailsLeft = phase, err, n
 }
 
 // failNext makes every subsequent record fail with err, which is how a test
@@ -2426,12 +2455,84 @@ func TestAbandonDuringATestFixIsNotLost(t *testing.T) {
 
 // --- a terminal status that did not publish -----------------------------
 
-// THE MERGE STANDS AND SO DOES ITS ENTRY. A merged status the sink refused
-// leaves the commits on the target and the durable entry in place, marked with
-// the word that did not publish — which is the only thing a later boot could
-// re-publish from.
-func TestAMergedStatusThatDidNotPublishKeepsItsMarkedQueueEntry(t *testing.T) {
-	// Arrange — a merge whose TERMINAL publication is the one that fails.
+// THE MERGE STANDS, AND A TRANSIENT SINK FAULT DOES NOT COST IT ITS WORD. The
+// terminal publication is retried under the replay budget, so a sink that
+// stumbles once still leaves the run's `merged` status on the wire and its entry
+// retired — no bounce, no owed word.
+func TestAMergedStatusRecoversFromATransientSinkFault(t *testing.T) {
+	// Arrange — the terminal publication fails once, then the sink answers.
+	h := newHarness(t)
+	h.sink.failPhaseTimes(PhaseMerged, 1, sentinelError("state store down"))
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
+
+	// Assert — the entry is gone, so the word was said rather than owed.
+	if got := <-h.lease.releases; got != req.Workspace {
+		t.Fatalf("lease released for %q, want %q", got, req.Workspace)
+	}
+	awaitQueueDrained(t, h, testRepoKey)
+}
+
+// THE DURABLE MARK COMES BEFORE THE ATTEMPTS, and that ordering is the whole
+// reason the in-process retry is safe: a crash anywhere inside the budget has to
+// leave an entry the next boot reads as a word OWED rather than as a merge to
+// run a second time. This snapshots the durable record from inside the very
+// publication that is being attempted.
+func TestTheTerminalMarkIsDurableBeforeTheWordIsAttempted(t *testing.T) {
+	// Arrange — the terminal publication fails, and reads the queue as it does.
+	h := newHarness(t)
+	marked := make(chan bool, 4)
+	h.sink.failOnPhase(PhaseMerged, sentinelError("state store down"))
+	h.sink.onPhase = func() {
+		outstanding := h.queue.Snapshot()[testRepoKey]
+		if len(outstanding) != 1 {
+			marked <- false
+			return
+		}
+		_, pending, err := h.queue.PendingTerminal(testRepoKey, outstanding[0])
+		marked <- pending && err == nil
+	}
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
+
+	// Assert — the run's FIRST terminal publication precedes any mark (nothing is
+	// owed until it fails), so what matters is that every attempt the budget makes
+	// after it saw a marked entry.
+	awaitQueueDrained(t, h, testRepoKey)
+	h.quiesce(t)
+	close(marked)
+	var seen []bool
+	for got := range marked {
+		seen = append(seen, got)
+	}
+	if len(seen) < 2 {
+		t.Fatalf("terminal publication attempts = %d, want the first plus the budget's retries", len(seen))
+	}
+	for i, got := range seen[1:] {
+		if !got {
+			t.Fatalf("budget attempt %d ran before the durable mark landed; a crash inside the budget would replay the merge instead of saying its word", i+1)
+		}
+	}
+}
+
+// A TERMINAL WORD THE SINK KEEPS REFUSING DOES NOT PARK THE REPOSITORY. The
+// entry is marked durably first — so a crash inside the budget still replays —
+// and then ejected once the budget is spent, because holding the head for a
+// notification ranks one run's last sentence above every merge behind it.
+func TestAMergedStatusThatNeverPublishesEjectsRatherThanParkingTheQueue(t *testing.T) {
+	// Arrange — a merge whose TERMINAL publication always fails.
 	h := newHarness(t)
 	h.sink.failOnPhase(PhaseMerged, sentinelError("state store down"))
 	req := testRequest("a")
@@ -2443,29 +2544,17 @@ func TestAMergedStatusThatDidNotPublishKeepsItsMarkedQueueEntry(t *testing.T) {
 	// Act.
 	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
 
-	// Assert — the lease going back is the retirement's last step, so the mark
-	// is durable by the time it arrives.
+	// Assert.
 	if got := <-h.lease.releases; got != req.Workspace {
 		t.Fatalf("lease released for %q, want %q", got, req.Workspace)
 	}
-	outstanding := h.queue.Snapshot()[testRepoKey]
-	if len(outstanding) != 1 {
-		t.Fatalf("outstanding entries = %+v, want the merge's entry KEPT", outstanding)
-	}
-	term, pending, err := h.queue.PendingTerminal(testRepoKey, outstanding[0])
-	if err != nil {
-		t.Fatalf("PendingTerminal: %v", err)
-	}
-	want := TerminalStatus{Outcome: OutcomeMerged, Cause: "cherry-pick landed on target"}
-	if !pending || term != want {
-		t.Fatalf("PendingTerminal() = %+v, %v, want %+v, true", term, pending, want)
-	}
+	awaitQueueDrained(t, h, testRepoKey)
 }
 
-// The failed terminal is durable on exactly the same terms as the merged one:
-// a run that died and could not say so is as silent as a merge that landed and
-// could not say so.
-func TestAFailedStatusThatDidNotPublishKeepsItsMarkedQueueEntry(t *testing.T) {
+// The failed terminal is settled on exactly the same terms as the merged one: a
+// run that died and could not say so gets the same bounded budget, and the same
+// ejection when the sink will not take it.
+func TestAFailedStatusThatNeverPublishesEjectsRatherThanParkingTheQueue(t *testing.T) {
 	// Arrange — a driver rejection, with the terminal publication failing.
 	h := newHarness(t)
 	h.sink.failOnPhase(PhaseMergeFailed, sentinelError("state store down"))
@@ -2482,17 +2571,7 @@ func TestAFailedStatusThatDidNotPublishKeepsItsMarkedQueueEntry(t *testing.T) {
 	if got := <-h.lease.releases; got != req.Workspace {
 		t.Fatalf("lease released for %q, want %q", got, req.Workspace)
 	}
-	outstanding := h.queue.Snapshot()[testRepoKey]
-	if len(outstanding) != 1 {
-		t.Fatalf("outstanding entries = %+v, want the run's entry KEPT", outstanding)
-	}
-	term, pending, err := h.queue.PendingTerminal(testRepoKey, outstanding[0])
-	if err != nil {
-		t.Fatalf("PendingTerminal: %v", err)
-	}
-	if !pending || term.Outcome != OutcomeFailed || !strings.Contains(term.Cause, "source worktree is dirty") {
-		t.Fatalf("PendingTerminal() = %+v, %v, want a failed record naming the driver error", term, pending)
-	}
+	awaitQueueDrained(t, h, testRepoKey)
 }
 
 // THE BOOT SAYS THE WORD, IT DOES NOT REDO THE MERGE. A marked entry belongs to
