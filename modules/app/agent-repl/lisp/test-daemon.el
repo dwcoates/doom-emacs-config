@@ -3046,3 +3046,66 @@ skips the drain that reconstructs merges and releases leases."
     (should (equal "daemon-announced"
                    (plist-get agent-repl--frontend-expected-restart :initiator)))
     (ignore records)))
+
+;;;; ---- The pushed restartPending frame -> the quiet window ---------------
+;;
+;; These cover the SEAM between the wire arm and the window: the note function
+;; above is already tested, and so is the dispatcher, but a handler that read
+;; the wrong protojson key would leave both of those passing while every
+;; deliberate bounce still painted a degraded link.
+
+(ert-deftest agent-repl-test-restart-pending-frame-opens-the-quiet-window ()
+  "A pushed `restartPending' view opens the expected-restart window."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    ;; Act
+    (agent-repl--frontend-apply-restart-pending
+     '(:cause "deploy-all rebuilt the daemon" :expectedOutageSeconds 60
+       :stopShims t :announcedAtMs 1))
+    ;; Assert
+    (should (agent-repl--frontend-expected-restart-window-live-p))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-restart-pending-frame-carries-the-announced-cause ()
+  "The view's `cause' reaches the window's initiator."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    ;; Act
+    (agent-repl--frontend-apply-restart-pending
+     '(:cause "deploy-all" :expectedOutageSeconds 60
+       :stopShims t :announcedAtMs 1))
+    ;; Assert
+    (should (string-match-p "deploy-all"
+                            (agent-repl--frontend-expected-restart-initiator)))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-restart-pending-frame-carries-the-outage-hint ()
+  "The view's `expectedOutageSeconds' becomes the window's bound."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    ;; Act
+    (agent-repl--frontend-apply-restart-pending
+     '(:cause "deploy-all" :expectedOutageSeconds 45
+       :stopShims nil :announcedAtMs 1))
+    ;; Assert
+    (should (= 45 (plist-get agent-repl--frontend-expected-restart :window-seconds)))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-restart-pending-frame-defaults-an-absent-hint ()
+  "A view with no usable hint takes the configured window, not a zero one."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    ;; Act
+    (agent-repl--frontend-apply-restart-pending
+     '(:cause "deploy-all" :stopShims nil :announcedAtMs 1))
+    ;; Assert
+    (should (= agent-repl-frontend-expected-restart-window-seconds
+               (plist-get agent-repl--frontend-expected-restart :window-seconds)))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-restart-pending-frame-refuses-a-non-plist-view ()
+  "A malformed view fails loudly rather than silently arming nothing."
+  ;; Arrange / Act / Assert
+  (agent-repl-test--with-expected-restart records
+    (should-error (agent-repl--frontend-apply-restart-pending "not-a-plist"))
+    (ignore records)))

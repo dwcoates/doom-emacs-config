@@ -220,7 +220,7 @@ that the daemon or session is healthy.")
     "workspaceAvailable" "hostAction" "daemonHealth" "sessionHealth"
     "workspaceRoster" "shutdownSchedule"
     "asyncBubbleDelta" "topbar" "tokenBreakdown" "workspaceGate"
-    "mergeQueueRoster")
+    "mergeQueueRoster" "restartPending")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frame.proto.
 A decoded frame whose sole top-level key is NOT one of these is
@@ -240,6 +240,13 @@ owns the drain banner — but it is not an ignored arm either: Emacs is a
 SENDER of `scheduleShutdown'/`cancelScheduledShutdown' and a cancel needs
 the live `schedule_id', so `frontend-state.el' registers a handler that
 records the lease and logs the edge.
+
+`restartPending' is the daemon's notice that it is going down ON PURPOSE,
+pushed once immediately before teardown.  `daemon.el' registers a handler
+that opens the bounded expected-restart window, which is what stops a
+deliberate bounce being reported as a link failure.  It is an EDGE, never
+snapshot state: a connect snapshot is proof the daemon is up, so there is
+no snapshot field of this name to seed from.
 
 `progress' (F1) is handled for exactly ONE of its fields:
 `context-cost.el' registers a handler that reads `expensive_turn' and
