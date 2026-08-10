@@ -1364,7 +1364,7 @@ exact failure seen live in the fresh instance."
                 ((symbol-function 'agent-repl--ws-current-name)
                  (lambda () "ws1"))
                  ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                  (lambda (ws ok _fail) (setq ensured ws) (funcall ok) :ready))
+                  (lambda (ws ok _fail &rest _) (setq ensured ws) (funcall ok) :ready))
                 ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
                  (lambda (_ws url)
                    ;; composer=0: Emacs owns input in the hybrid UI.  build: the
@@ -1399,7 +1399,7 @@ would lay out the frame of whichever perspective is current then."
                 ((symbol-function 'agent-repl--restore-focus)
                  (lambda (persp &rest _) (setq current persp)))
                 ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws ok _fail) (setq continuation ok) :pending))
+                 (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
                 ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
                  (lambda (_ws _url) 'fake-buffer))
                 ((symbol-function 'agent-repl--frontend-display-webview)
@@ -2317,7 +2317,7 @@ and \"main\"/\"none\" have neither a webview nor a durable log sink."
       (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
                  (lambda () t))
                 ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws ok _fail) (setq continuation ok) :pending))
+                 (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
                 ((symbol-function 'agent-repl--call-in-background-workspace)
                  (lambda (_ws fn) (funcall fn)))
                 ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
@@ -2339,7 +2339,7 @@ and \"main\"/\"none\" have neither a webview nor a durable log sink."
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let (continuation shown)
       (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws ok _fail) (setq continuation ok) :pending))
+                 (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
                 ((symbol-function 'agent-repl--gui-open)
                  (lambda (_ws) (setq shown t) :pending)))
         ;; Act
@@ -2358,7 +2358,7 @@ The card the user reads is unchanged; only the waiting is gone."
       (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
                  (lambda () t))
                 ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws _ok on-failure) (setq fail on-failure) :pending))
+                 (lambda (_ws _ok on-failure &rest _) (setq fail on-failure) :pending))
                 ((symbol-function 'agent-repl--frontend-display-webview)
                  (lambda (&rest _) (setq mounted t)))
                 ((symbol-function 'agent-repl--warn)
@@ -2377,7 +2377,7 @@ The card the user reads is unchanged; only the waiting is gone."
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let (fail warned)
       (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws _ok on-failure) (setq fail on-failure) :pending))
+                 (lambda (_ws _ok on-failure &rest _) (setq fail on-failure) :pending))
                 ((symbol-function 'agent-repl--warn)
                  (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
         ;; Act
@@ -2414,7 +2414,7 @@ never be released and the next open would mount a second one beside it."
       (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
                  (lambda () t))
                 ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws ok _fail) (setq continuation ok) :pending))
+                 (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
                 ((symbol-function 'agent-repl--call-in-background-workspace)
                  (lambda (_ws fn) (funcall fn)))
                 ((symbol-function 'agent-repl--frontend-make-webview-buffer)
@@ -2450,7 +2450,7 @@ which is what produced the `outcome=stranded' re-arms."
             (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
                        (lambda () t))
                       ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                       (lambda (_ws ok _fail) (setq continuation ok) :pending))
+                       (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
                       ((symbol-function 'agent-repl--call-in-background-workspace)
                        (lambda (_ws fn) (funcall fn)))
                       ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
@@ -2566,3 +2566,117 @@ warned about against the workspace."
     ;; Act / Assert
     (should (eq (agent-repl--frontend-rebuild-and-redeploy-webapp "ws1")
                 'queued))))
+
+;;;; ---- Open-placeholder resolution -----------------------------------------
+;;
+;; The placeholder `SPC o c' raises must be resolved by the open it describes,
+;; on every path.  These tests pin gui-open's and gui-show's half of that
+;; contract: the ladder advances while establishment runs, teardown follows a
+;; real mount, and a failure REPLACES the placeholder with the stated cause
+;; rather than leaving it spinning forever.
+
+(defmacro agent-repl-test--with-pending-open (ws &rest body)
+  "Run BODY with a placeholder standing for WS over a private registry."
+  (declare (indent 1))
+  `(let ((agent-repl--open-progress (make-hash-table :test 'equal)))
+     (cl-letf (((symbol-function 'agent-repl--open-progress-show)
+                (lambda (_ws buf) buf)))
+       (unwind-protect
+           (progn (agent-repl--open-progress-start ,ws) ,@body)
+         (when-let ((entry (agent-repl--open-progress-entry ,ws)))
+           (when-let ((timer (plist-get entry :timer)))
+             (when (timerp timer) (cancel-timer timer)))
+           (when (buffer-live-p (plist-get entry :buffer))
+             (kill-buffer (plist-get entry :buffer))))))))
+
+(ert-deftest agent-repl-test-frontend-open-tears-down-the-placeholder ()
+  "A mounted webview removes the placeholder that stood in for it."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-pending-open "ws1"
+      (let (continuation)
+        (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+                   (lambda () t))
+                  ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                   (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
+                  ((symbol-function 'agent-repl--call-in-background-workspace)
+                   (lambda (_ws fn) (funcall fn)))
+                  ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
+                   (lambda (_ws _url) 'fake-buffer))
+                  ((symbol-function 'agent-repl--frontend-display-webview) #'ignore))
+          (agent-repl--gui-open "ws1")
+          ;; Act
+          (funcall continuation)
+          ;; Assert
+          (should-not (agent-repl--open-progress-active-p "ws1")))))))
+
+(ert-deftest agent-repl-test-frontend-open-failure-names-the-cause ()
+  "A failed open replaces the placeholder's ladder with the daemon's cause."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-pending-open "ws1"
+      (let (fail)
+        (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+                   (lambda () t))
+                  ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                   (lambda (_ws _ok on-failure &rest _) (setq fail on-failure) :pending))
+                  ((symbol-function 'agent-repl--warn) #'ignore))
+          (agent-repl--gui-open "ws1")
+          ;; Act
+          (funcall fail "timed out after 30.000s")
+          ;; Assert
+          (should (equal "timed out after 30.000s"
+                         (plist-get (agent-repl--open-progress-entry "ws1") :detail))))))))
+
+(ert-deftest agent-repl-test-frontend-open-reports-establishment-stages ()
+  "gui-open hands the establishment ladder's stages to the placeholder."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-pending-open "ws1"
+      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+                 (lambda () t))
+                ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                 (lambda (_ws _ok _fail &optional _purpose on-progress)
+                   (funcall on-progress :opening)
+                   :pending)))
+        ;; Act
+        (agent-repl--gui-open "ws1")
+        ;; Assert
+        (should (eq :opening (plist-get (agent-repl--open-progress-entry "ws1")
+                                        :phase)))))))
+
+(ert-deftest agent-repl-test-frontend-show-tears-down-the-placeholder ()
+  "A redisplayed live webview removes the placeholder that stood in for it."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-pending-open "ws1"
+      (let ((webview (generate-new-buffer "*fake-live-webview*"))
+            continuation)
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put "ws1" :frontend-buffer webview)
+              (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                         (lambda (_ws ok _fail &rest _) (setq continuation ok) :pending))
+                        ((symbol-function 'agent-repl--frontend-display-webview) #'ignore))
+                (agent-repl--gui-show "ws1")
+                ;; Act
+                (funcall continuation)
+                ;; Assert
+                (should-not (agent-repl--open-progress-active-p "ws1"))))
+          (when (buffer-live-p webview) (kill-buffer webview)))))))
+
+(ert-deftest agent-repl-test-frontend-show-failure-keeps-the-placeholder ()
+  "A failed wake leaves its cause standing instead of silently vanishing."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-pending-open "ws1"
+      (let (fail)
+        (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                   (lambda (_ws _ok on-failure &rest _) (setq fail on-failure) :pending))
+                  ((symbol-function 'agent-repl--warn) #'ignore))
+          (agent-repl--gui-show "ws1")
+          ;; Act
+          (funcall fail "command rejected: daemon is shutting down")
+          ;; Assert
+          (should (eq :failed (plist-get (agent-repl--open-progress-entry "ws1")
+                                         :phase))))))))

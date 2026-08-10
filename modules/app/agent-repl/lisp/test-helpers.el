@@ -784,9 +784,21 @@ re-routes their frontend resolution instead."
          ;; a task created mid-test can't bleed across the suite.
          (agent-repl--sidebar-view :repository)
          (agent-repl--tasks (make-hash-table :test 'equal))
-         (agent-repl--tasks-loaded t))
+         (agent-repl--tasks-loaded t)
+         ;; Pending-open placeholders (open-progress.el).  A test that drives
+         ;; the `SPC o c' entry point leaves an entry here, and the entry is
+         ;; precisely the guard that makes a LATER open dispatch nothing — so
+         ;; leaking it would make the next test's toggle branch depend on
+         ;; suite order.  Its buffers and escalation timers are reaped below.
+         (agent-repl--open-progress (make-hash-table :test 'equal)))
      (unwind-protect
          (progn ,@body)
+       (maphash (lambda (_ws entry)
+                  (when-let ((timer (plist-get entry :timer)))
+                    (when (timerp timer) (cancel-timer timer)))
+                  (when-let ((buf (plist-get entry :buffer)))
+                    (when (buffer-live-p buf) (kill-buffer buf))))
+                agent-repl--open-progress)
        (when (file-exists-p agent-repl-workspace-snapshot-file)
          (delete-file agent-repl-workspace-snapshot-file))
        (let ((archive-dir (agent-repl--workspace-snapshot-archive-dir)))

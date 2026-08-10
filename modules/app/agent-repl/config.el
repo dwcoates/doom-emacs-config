@@ -278,6 +278,12 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "window")
 (agent-repl--load-module "sibling-popup")
 (agent-repl--load-module "panels")
+;; WHY: open-progress.el shows its placeholder in the SAME main-area window
+;; the webview mount claims, so it needs frontend.el's host resolution, and it
+;; reads the pushed `SessionView.backfill' through frontend-client.el.  It
+;; subscribes to the pushed-state hook at load time; `add-hook' auto-vivifies
+;; that variable, so frontend-state.el's position above is not load-critical.
+(agent-repl--load-module "open-progress")
 ;; WHY: explain-config.el mounts the SAME webkit GUI the workspace
 ;; frontend uses, so it needs frontend.el (the webview boundary wrapper)
 ;; and frontend-client.el (session CRUD + message injection) already
