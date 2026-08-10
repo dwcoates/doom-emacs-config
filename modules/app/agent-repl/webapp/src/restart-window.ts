@@ -32,9 +32,9 @@ export type RestartWindowLogLevel = "info" | "warn" | "error";
 
 /**
  * The daemon's announcement, as this end consumes it. It is deliberately NOT
- * the wire type: the frontend proto arm that will carry it is gated, so the
- * module takes the decoded facts and the frame handler that eventually lands
- * becomes a two-line adapter onto `announce`.
+ * the wire type — the window reasons in milliseconds, the wire states whole
+ * seconds — so `announcementFromView` below is the one place the two meet and
+ * the class itself stays free of protojson concerns.
  */
 export interface RestartAnnouncement {
   /** Why the backend is bouncing. Display-grade; never parsed. */
@@ -49,6 +49,33 @@ export interface RestartAnnouncement {
    * shortens the quiet period instead of restarting its clock.
    */
   atMs: number;
+}
+
+/**
+ * Adapt the decoded `restartPending` frame onto the window's input.
+ *
+ * It exists as a named function rather than an inline object literal at the
+ * frame handler so the wiring itself is testable: the unit under test is
+ * "a decoded frame becomes the announcement the window opens on", and a test
+ * that rebuilt that mapping by hand would pass while the real handler drifted.
+ *
+ * The seconds-to-milliseconds conversion is the only transformation. Nothing
+ * is defaulted or repaired here — the wire decoder has already refused a
+ * non-positive hint or a missing mint time, and `announce` refuses them again
+ * on its own terms.
+ */
+export function announcementFromView(view: {
+  cause: string;
+  expectedOutageSeconds: number;
+  stopShims: boolean;
+  announcedAtMs: number;
+}): RestartAnnouncement {
+  return {
+    cause: view.cause,
+    expectedOutageMs: view.expectedOutageSeconds * 1000,
+    stopShims: view.stopShims,
+    atMs: view.announcedAtMs,
+  };
 }
 
 /**

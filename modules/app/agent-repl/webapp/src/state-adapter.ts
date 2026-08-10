@@ -740,6 +740,18 @@ export class StateAdapter {
       // no workspace.
       case "mergeQueueRoster":
         return [this.mergeQueueRosterEffect(frame.frame.value)];
+      // NO STORE EFFECT BY DESIGN. The restart notice says nothing about the
+      // conversation, the workspaces, or any view the store holds — it changes
+      // how the TRANSPORT renders a disconnect that has not happened yet. It is
+      // consumed at the frame choke point in main.ts, which hands it to the
+      // RestartWindow; folding it into the store would put a transport concern
+      // into the state every renderer reads.
+      //
+      // It is still listed here rather than left to the exhaustiveness guard,
+      // so "this frame intentionally moves no state" is a decision on the
+      // record instead of an omission.
+      case "restartPending":
+        return [];
       default: {
         // Exhaustiveness guard: a new frame variant is a compile error here,
         // never a silent skip.
