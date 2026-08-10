@@ -1523,6 +1523,33 @@ alarm it delayed."
                      cause expected-outage-seconds)
     (agent-repl--frontend-arm-expected-restart initiator expected-outage-seconds)))
 
+(defun agent-repl--frontend-apply-restart-pending (view)
+  "Apply a pushed `RestartPendingView' VIEW (a plist) — open the quiet window.
+
+Handler for the `restartPending' oneof arm.  It is the adapter the
+announcement always expected: it reads the two fields the window is built
+from and hands them to `agent-repl-frontend-note-restart-announcement',
+which owns every downstream decision.
+
+A NON-PLIST VIEW FAILS LOUDLY rather than being skipped.  Everything else
+is left to the window: an absent or unusable `expectedOutageSeconds' is
+not repaired here, because `agent-repl--frontend-expected-restart-bound'
+is the single place that decides what an unstated window means, and
+second-guessing it here would put that policy in two places.
+
+The HANDLER IS REGISTERED IN `frontend-state.el', not here: `daemon.el'
+loads before `frontend-uds.el', so `agent-repl--uds-register-handler' does
+not exist yet at this point in the boot.
+
+Returns non-nil when a window was armed."
+  (unless (listp view)
+    (agent-repl--warn nil
+                      "restart-pending: REFUSING a non-plist view=%S" view)
+    (error "agent-repl: malformed RestartPendingView"))
+  (agent-repl-frontend-note-restart-announcement
+   (plist-get view :cause)
+   (plist-get view :expectedOutageSeconds)))
+
 (defun agent-repl--frontend-expected-restart-initiator ()
   "Return the initiator of the LIVE expected-restart window, or nil.
 
