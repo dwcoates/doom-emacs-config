@@ -35,6 +35,13 @@
  * lookup. The only recursion here walks that pointer graph, guarded by a
  * visited set, so a cyclic pointer set (which only a daemon bug could produce)
  * fails loudly instead of hanging the renderer.
+ *
+ * A CHILD IS DRAWN ONCE, ATTACHED TO THE CARD THAT SPAWNED IT WHERE THERE IS
+ * ONE. A conversational bubble's emissions carry the spawning cards, and each
+ * of those draws its own bubble through the ordinary card path — so the pointer
+ * walk covers only what no card in this bubble draws (see
+ * `bubblesDrawnByOwnCards`), rather than putting one piece of live work on
+ * screen twice.
  */
 
 import type {
@@ -260,9 +267,12 @@ export function AsyncBubbleCard(
   const arc = bubble.liveness.case === "live" ? `<span class="tool-spinner" aria-hidden="true"></span>` : "";
   const face = `${BUBBLE_KIND_WORD[bubble.kind.case]} · ${capLabel(bubbleLabel(bubble), 60)} · ${livenessFace(bubble.liveness)}`;
   // Children are resolved by POINTER through the registry — one lookup, no
-  // walk into any payload.
+  // walk into any payload — MINUS the ones this bubble's own conversation
+  // already draws attached to the card that spawned them.
+  const attached = bubblesDrawnByOwnCards(bubble, ctx);
   const children = ctx.registry
     .children(bubble.id)
+    .filter((child) => !attached.has(child.id))
     .map((child) => `<div class="feed-child">${AsyncBubbleCard(child, ctx, seen)}</div>`)
     .join("");
   return Fold({
@@ -296,16 +306,32 @@ export function AsyncBubbleForCall(
   spawnedBubbleId: string | undefined,
   ctx: AsyncRenderContext,
 ): string {
-  const byOrigin = ctx.registry.bubblesForToolUse(toolUseId);
+  return bubblesDrawnForCall(toolUseId, spawnedBubbleId, ctx.registry)
+    .map((bubble) => AsyncBubbleCard(bubble, ctx))
+    .join("");
+}
+
+/**
+ * WHICH bubbles a tool card draws — the resolution behind
+ * {@link AsyncBubbleForCall}, separated from the drawing because a second
+ * caller needs the answer without the HTML: a bubble must not draw a child by
+ * pointer that one of its OWN cards is already drawing (see
+ * {@link bubblesDrawnByOwnCards}). One function decides it, so the two can
+ * never disagree about what is on screen.
+ */
+export function bubblesDrawnForCall(
+  toolUseId: string,
+  spawnedBubbleId: string | undefined,
+  registry: AsyncBubbleRegistry,
+): AsyncBubble[] {
+  const byOrigin = registry.bubblesForToolUse(toolUseId);
   if (byOrigin.length > 0) {
     // `bubbleForCall` is what rules on agreement; a contradiction returns null
     // there and nothing is drawn here.
-    return ctx.registry.bubbleForCall(toolUseId, spawnedBubbleId) === null
-      ? ""
-      : byOrigin.map((bubble) => AsyncBubbleCard(bubble, ctx)).join("");
+    return registry.bubbleForCall(toolUseId, spawnedBubbleId) === null ? [] : byOrigin;
   }
-  if (spawnedBubbleId === undefined || spawnedBubbleId === "") return "";
-  const named = ctx.registry.bubbleForSpawn(spawnedBubbleId);
+  if (spawnedBubbleId === undefined || spawnedBubbleId === "") return [];
+  const named = registry.bubbleForSpawn(spawnedBubbleId);
   if (named === null) {
     // The verdict named a bubble the registry does not hold — the open has not
     // arrived, or a resync dropped it. Said plainly rather than papered over
@@ -315,9 +341,41 @@ export function AsyncBubbleForCall(
       dedupKey: `async-unmatched-verdict:${spawnedBubbleId}`,
       context: { tool_use_id: toolUseId, spawned_bubble_id: spawnedBubbleId },
     });
-    return "";
+    return [];
   }
-  return AsyncBubbleCard(named, ctx);
+  return [named];
+}
+
+/**
+ * The children this bubble's OWN conversation already draws, attached to the
+ * cards that spawned them.
+ *
+ * A conversational bubble renders its emissions with the feed's own renderer,
+ * and a spawning card in there draws its bubble exactly as it would on the
+ * top-level feed — which is what "a detached agent's dispatch renders inside
+ * the agent that dispatched it" MEANS. Drawing the same child a second time
+ * from the parent pointer would put one piece of live work on screen twice, in
+ * two places, with two folds that open independently.
+ *
+ * So the pointer walk is the FALLBACK, not the duplicate: a child whose
+ * spawning card is not in this bubble (dropped by the tail cap, or spawned by
+ * something the fold never carried) still gets drawn, because losing it would
+ * hide running work.
+ */
+function bubblesDrawnByOwnCards(bubble: AsyncBubble, ctx: AsyncRenderContext): ReadonlySet<string> {
+  const drawn = new Set<string>();
+  const kind = bubble.kind;
+  if (kind.case !== "agent" && kind.case !== "merge" && kind.case !== "skill") return drawn;
+  for (const emission of kind.value.emissions) {
+    // The CALL is what draws a bubble; a result merges onto the card the call
+    // already made, so it opens nothing of its own here.
+    if (emission.arm !== "toolUse") continue;
+    const toolUseId = typeof emission.payload.id === "string" ? emission.payload.id : "";
+    for (const child of bubblesDrawnForCall(toolUseId, emission.spawnedBubbleId, ctx.registry)) {
+      drawn.add(child.id);
+    }
+  }
+  return drawn;
 }
 
 /**
