@@ -58,6 +58,7 @@ import type { UnwrappedEmission } from "./agent-emission.js";
 import { Fold, capLabel } from "./fold.js";
 import { escapeHtml } from "./highlight.js";
 import { SkillBodySection } from "./skill-body.js";
+import { asyncAgentItems } from "./state-adapter.js";
 import { log } from "./wslog.js";
 
 /** What the renderer needs from the surfaces around it. */
@@ -374,17 +375,22 @@ export function bubblesDrawnForCall(
  * spawning card is not in this bubble (dropped by the tail cap, or spawned by
  * something the fold never carried) still gets drawn, because losing it would
  * hide running work.
+ *
+ * WHICH CARDS THE BUBBLE HAS is answered by the ADAPTER'S OWN DECOMPOSITION
+ * (`asyncAgentItems`), never by a second walk of the emission payloads here.
+ * A tool call reaches a bubble in more than one shape — its own `toolUse` arm,
+ * and a `tool_use` block inside an assistant message — and a private walk that
+ * knew one shape and not the other would filter exactly the children it fails
+ * to recognize. Reading the same items the renderer draws makes the two agree
+ * by construction.
  */
 function bubblesDrawnByOwnCards(bubble: AsyncBubble, ctx: AsyncRenderContext): ReadonlySet<string> {
   const drawn = new Set<string>();
   const kind = bubble.kind;
   if (kind.case !== "agent" && kind.case !== "merge" && kind.case !== "skill") return drawn;
-  for (const emission of kind.value.emissions) {
-    // The CALL is what draws a bubble; a result merges onto the card the call
-    // already made, so it opens nothing of its own here.
-    if (emission.arm !== "toolUse") continue;
-    const toolUseId = typeof emission.payload.id === "string" ? emission.payload.id : "";
-    for (const child of bubblesDrawnForCall(toolUseId, emission.spawnedBubbleId, ctx.registry)) {
+  for (const item of asyncAgentItems(kind.value.emissions, bubble.id, bubble.startedAtMs).items) {
+    if (item.kind !== "tool") continue;
+    for (const child of bubblesDrawnForCall(item.toolUseId, item.spawnedBubbleId, ctx.registry)) {
       drawn.add(child.id);
     }
   }

@@ -443,6 +443,26 @@ describe("a child a bubble's own card already draws", () => {
     expect(html).toContain("dispatched worker");
   });
 
+  it("recognizes a call made as a tool_use BLOCK of an assistant message", () => {
+    // Arrange — the shape the daemon actually folds: the call rides inside an
+    // assistant message rather than on its own toolUse arm.
+    const inMessage: UnwrappedEmission = {
+      emission: "response",
+      arm: "assistantMessage",
+      payload: { id: "m1", content: [{ toolUse: { id: "tu1", name: "Task", input: {} } }] },
+    };
+    const registry = seeded(
+      bubble({ id: "b1", kind: withCall([inMessage]) }),
+      bubble({ id: "b2", kind: agentKind, label: "dispatched worker", originToolUseId: "tu1", parentBubbleId: "b1" }),
+    );
+
+    // Act
+    const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
+
+    // Assert — a filter blind to this shape would draw the child twice.
+    expect(html).not.toContain("dispatched worker");
+  });
+
   it("leaves a SIBLING bubble the card did not spawn on the pointer walk", () => {
     // Arrange — b3 is b1's child but was spawned by no card b1 carries.
     const registry = seeded(
