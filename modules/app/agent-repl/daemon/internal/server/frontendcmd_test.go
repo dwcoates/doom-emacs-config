@@ -1457,7 +1457,10 @@ func TestSnapshotProviderIncludesSessionInits(t *testing.T) {
 	}
 }
 
-func TestSnapshotProviderIncludesTaskCatalogsAndLogsTheirShape(t *testing.T) {
+// The census of an assembled snapshot is logged by the TRANSPORT, which knows
+// which client asked for it and why (frontend.logSnapshotCensus). This provider
+// is handed no client, so it counts nothing and names nothing.
+func TestSnapshotProviderIncludesTaskCatalogs(t *testing.T) {
 	// Arrange.
 	var logs []string
 	provider := &ssmSnapshotProvider{
@@ -1478,8 +1481,8 @@ func TestSnapshotProviderIncludesTaskCatalogsAndLogsTheirShape(t *testing.T) {
 	if len(snap.GetCatalogs()) != 1 || snap.GetCatalogs()[0].GetTasks()[0].GetTaskId() != "t1" {
 		t.Fatalf("catalogs = %v, want t1", snap.GetCatalogs())
 	}
-	if len(logs) != 1 || !strings.Contains(logs[0], "catalogs=1 tasks=1") {
-		t.Fatalf("snapshot logs = %v, want catalog/task counts", logs)
+	if len(logs) != 0 {
+		t.Fatalf("snapshot logs = %v, want none (the census belongs to the client-aware transport)", logs)
 	}
 }
 
