@@ -55,7 +55,13 @@ func heldByPendingCompaction(t *testing.T, s *keepAliveSession, text string) rev
 	t.Helper()
 	s.hibernate(t, "r-hibernate")
 	sendReviveCompactFirst(t, s.conn, "r-revive")
-	if ack := awaitAck(t, s.conn, "r-revive", "the compact-first revival"); !ack.GetOk() {
+	// The ack is READ KEEPING what it reads past. The revival submits its
+	// "/compact" from inside the command's own dispatch, so the compaction
+	// turn's reply travels this same socket and can overtake the ack; an await
+	// that dropped it would then wait out its budget for a frame already
+	// delivered.
+	ack, beforeAck := awaitAckKeeping(t, s.conn, "r-revive", "the compact-first revival")
+	if !ack.GetOk() {
 		t.Fatalf("reviveSession(compact_first) nacked while setting up a revival hold: %s", ack.GetError())
 	}
 	writeCmd(t, s.conn, fmt.Sprintf(
@@ -63,7 +69,7 @@ func heldByPendingCompaction(t *testing.T, s *keepAliveSession, text string) rev
 
 	var entry *frontendv1.QueueEntry
 	var workspace string
-	awaitAll(t, s.conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAllSeeded(t, s.conn, frameTimeout, beforeAck, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a QueueEntry for the prompt typed during the revival": func(frame *frontendv1.FrontendFrame) bool {
 			view := queueViewFor(frame, s.cwd)
 			for _, e := range view.GetEntries() {
