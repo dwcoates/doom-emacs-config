@@ -58,6 +58,17 @@ type CommandHandler interface {
 	// StateSnapshot to the requesting client; this hook covers the
 	// conversation-delta replay the snapshot omits.
 	Resync(ctx context.Context, workspace, requestID string, cmd *frontendv1.ResyncCmd) error
+	// ConversationPage serves ONE page of conversation history — the newest N
+	// top-level items for a cold open, or the N before a cursor for a
+	// load-more. It is the COLD-OPEN path only; Resync above is untouched and
+	// stays the live-page path.
+	//
+	// The page is returned rather than pushed, because it is addressed to the
+	// one connection that asked for it: the frontend server enqueues it to that
+	// client as this command's response frame. A nil page with a nil error is a
+	// construction defect and is refused by the caller, because a client cannot
+	// tell an absent page from an empty conversation.
+	ConversationPage(ctx context.Context, workspace, requestID string, cmd *frontendv1.ConversationPageCmd) (*frontendv1.ConversationPage, error)
 	// CreateSession brings up a session for the command's cwd (the UDS
 	// replacement for POST /sessions). The daemon delivers the resulting
 	// session identity via a pushed SessionView; the ack carries only ok/error.
@@ -184,6 +195,23 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 		err = h.OpenWorkspace(ctx, ws, reqID, c.OpenWorkspace)
 	case *frontendv1.FrontendCommand_Resync:
 		err = h.Resync(ctx, ws, reqID, c.Resync)
+	case *frontendv1.FrontendCommand_ConversationPage:
+		var page *frontendv1.ConversationPage
+		page, err = h.ConversationPage(ctx, ws, reqID, c.ConversationPage)
+		if err == nil && page == nil {
+			// Never a silently absent page: a client cannot tell one from an
+			// empty conversation, and that ambiguity is the blank-feed bug this
+			// protocol's whole history has been spent closing.
+			err = fmt.Errorf("frontend: conversation_page ws=%q request_id=%s produced no page and no error", ws, reqID)
+		}
+		if page != nil {
+			// The request_id echo is stamped HERE, at the one place that knows
+			// both the page and the command it answers. The reader below has no
+			// request id of its own, and a page that carried the wrong one would
+			// be correlated onto a different in-flight request by the client.
+			page.RequestId = reqID
+			response = ConversationPageFrame(page)
+		}
 	case *frontendv1.FrontendCommand_CreateSession:
 		observedClaudeSessionID, err = h.CreateSession(ctx, ws, reqID, c.CreateSession)
 	case *frontendv1.FrontendCommand_DeleteSession:
