@@ -663,6 +663,22 @@ type sessionController struct {
 	faultTermination *frontendv1.QueryTerminationFailure
 	// faulted is closed once, by the first bring-up fault, to wake the wait.
 	faulted chan struct{}
+	// lifetime ends when this generation stops existing — the run loop
+	// returning (a terminal protocol error, the transport dying) or any
+	// teardown's shared prologue cancelling it.
+	//
+	// IT IS WHAT EVERY DETACHED WAIT ON THIS CONTROLLER IS SCOPED TO. A wait
+	// that selects only on its own signal plus a bound survives the controller
+	// by the whole bound, holding whatever claim it took — which is how one
+	// crashed revival refused every later revival of the workspace until the
+	// daemon was restarted (revive.go, awaitReviveCut). Ending it where the
+	// controller dies makes the release a consequence of the death rather than
+	// something each waiter has to notice.
+	//
+	// Its ZERO VALUE is a live lifetime, deliberately: a controller with no
+	// usable lifetime is then unrepresentable, rather than a field every
+	// construction site has to remember to initialize.
+	lifetime controllerLifetime
 	// buildRefreshStarted closes when this generation's ShimReady proves that
 	// its bundle is stale and transfers bring-up ownership to a replacement.
 	// Health probes select on this edge beside AwaitReady, so the readiness that
@@ -3003,6 +3019,12 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	m.mu.Unlock()
 	go func() {
 		defer m.exits.Done()
+		// THE FIRST THING THE DEATH DOES. Every detached wait scoped to this
+		// controller — the revival's completion wait above all — is released by
+		// this close, and it is deferred ahead of everything else here so a
+		// panic or an early return in the tail below cannot leave a waiter
+		// holding a claim against a controller that no longer exists.
+		defer d.markExited()
 		defer d.releaseControllerRegistration()
 		runErr := client.Run(runCtx)
 		if runErr != nil {
