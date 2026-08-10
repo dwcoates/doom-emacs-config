@@ -95,6 +95,18 @@ type SessionRestarter interface {
 	RestartSession(ctx context.Context, workspace string) error
 }
 
+// FailedMergeAxisClearer supersedes a workspace's TERMINAL `merge_failed` merge
+// axis, reporting whether it had one to supersede. Satisfied by *ssm.Manager.
+//
+// It is separate from merge.StateSink because it is not a merge transition: no
+// merge produced it. A hard restart is a user who has already seen the failure
+// asking for an operational session, and the axis has no other closing edge —
+// `merge_failed` outranks the whole session-status ladder and replays out of the
+// durable log forever. See internal/ssm/mergefailedclear.go.
+type FailedMergeAxisClearer interface {
+	ClearFailedMergeAxis(workspace, cause string) (bool, error)
+}
+
 // SessionHibernator is the user-facing hibernation surface: the forced sleep
 // and the revival modes. Satisfied by *sessioncontroller.Manager.
 //
@@ -445,6 +457,11 @@ type commandHandler struct {
 	// restarts backs the restartSession command. Nil is a loud unsupported
 	// capability, never a success-shaped no-op.
 	restarts SessionRestarter
+	// mergeAxis clears a terminal `merge_failed` when the user hard-restarts the
+	// workspace's session. Nil is a loud failing ack for the restart, never a
+	// restart that quietly leaves the verdict pinned over the session it just
+	// brought up — that pinning is the whole reason the edge exists.
+	mergeAxis FailedMergeAxisClearer
 	// hibernations backs hibernateWorkspace and reviveSession. Nil is a loud
 	// unsupported capability, never a success-shaped no-op.
 	hibernations SessionHibernator
@@ -530,6 +547,10 @@ type CommandHandlerConfig struct {
 	// Restarts backs the restartSession command. Nil is a loud unsupported
 	// capability.
 	Restarts SessionRestarter
+	// MergeAxis clears a terminal `merge_failed` on that same restart. Nil is a
+	// loud failing ack for the restart rather than a restart that leaves the
+	// verdict pinned forever over the session it brought up.
+	MergeAxis FailedMergeAxisClearer
 	// Hibernations backs the hibernateWorkspace and reviveSession commands.
 	// Nil is a loud unsupported capability, never a success-shaped no-op: a
 	// caller told its workspace was hibernated when nothing stopped would
@@ -654,6 +675,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 		health:            config.Health.Router, daemonHealth: config.Health.Daemon,
 		turns: config.Interrupt.Turns, liveTasks: config.Interrupt.LiveTasks, logf: logf,
 		restarts:         config.Restarts,
+		mergeAxis:        config.MergeAxis,
 		hibernations:     config.Hibernations,
 		establishTimeout: config.EstablishTimeout,
 		resumes:          config.Resumes,
@@ -1481,6 +1503,9 @@ func (h *commandHandler) RestartSession(ctx context.Context, workspace, requestI
 	if h.restarts == nil {
 		return fmt.Errorf("server: session restart not supported by this daemon")
 	}
+	if h.mergeAxis == nil {
+		return fmt.Errorf("server: session restart for workspace %q cannot run: the merge-axis clear is not wired, and a restart that leaves a terminal merge_failed pinned would bring the session up underneath a verdict nothing can clear", workspace)
+	}
 	if err := h.restarts.RestartSession(ctx, workspace); err != nil {
 		// CLASSIFIED, like create and open. A restart that cannot find its
 		// conversation's transcript is a continuity failure, and returning it
@@ -1488,6 +1513,17 @@ func (h *commandHandler) RestartSession(ctx context.Context, workspace, requestI
 		// and the user got an unexplained refusal to open their workspace.
 		return restartResumeEstablishment().classify(
 			fmt.Errorf("server: restarting the session for workspace %q: %w", workspace, err))
+	}
+	// AFTER the restart, and only after it succeeded. The clear says "the user
+	// acted on this verdict and has an operational session now", which is not
+	// true of a restart that failed — clearing first would take the failure off
+	// the screen and leave nothing in its place.
+	cleared, err := h.mergeAxis.ClearFailedMergeAxis(workspace, "session_restart:"+requestID)
+	if err != nil {
+		return fmt.Errorf("server: restarting the session for workspace %q: clearing the terminal merge_failed axis: %w", workspace, err)
+	}
+	if cleared {
+		h.logf("frontend cmd: restart-session ws=%s request_id=%s CLEARED a terminal merge_failed — the user has acted on that verdict, so it no longer masks the session the restart just brought up (the failure row and its cause stay in the log)", workspace, requestID)
 	}
 	h.logf("frontend cmd: restart-session ws=%s request_id=%s COMPLETE", workspace, requestID)
 	return nil

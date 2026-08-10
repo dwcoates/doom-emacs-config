@@ -1096,6 +1096,16 @@ func (m *Manager) appendMergeTransition(workspace, token, causeKind string, stat
 		// any more, so the retained status goes with it rather than describing a
 		// run no frontend should still be rendering.
 		m.retirePipelineStatusLocked(workspace, causeKind)
+	case token == sigMergeEnqueuing:
+		// A FRESH ATTEMPT SUPERSEDES THE OLD VERDICT. This row is a NEW merge
+		// arriving, so whatever the previous run published — most consequentially
+		// a terminal `failed` status and its cause text — describes a run that is
+		// no longer what this workspace is doing. The row itself supersedes the
+		// axis (it is the newest merge row from here on, so a stale `merge_failed`
+		// stops resolving), and this retires the account that hung off it; the new
+		// run publishes its own the moment it has one. Leaving it retained put the
+		// old failure's cause on every frame of the retry. See mergefailedclear.go.
+		m.retirePipelineStatusLocked(workspace, causeKind)
 	}
 	// A MERGE THAT REACHED ITS OWN END ANSWERS THE QUESTION BY ENDING. Whether
 	// it merged, failed, or had its axis cleared, there is no longer a merge on

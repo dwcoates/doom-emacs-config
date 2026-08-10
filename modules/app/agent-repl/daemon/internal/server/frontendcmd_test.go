@@ -2208,11 +2208,24 @@ func (f *fakeRestarter) RestartSession(_ context.Context, workspace string) erro
 	return f.err
 }
 
+// fakeMergeAxisClearer records the restart's merge-axis clear. `cleared`
+// controls whether the workspace had a terminal merge_failed to supersede.
+type fakeMergeAxisClearer struct {
+	calls   []string
+	cleared bool
+	err     error
+}
+
+func (f *fakeMergeAxisClearer) ClearFailedMergeAxis(workspace, cause string) (bool, error) {
+	f.calls = append(f.calls, workspace+"|"+cause)
+	return f.cleared, f.err
+}
+
 func TestCommandHandlerRestartSessionRoutesToTheRestarter(t *testing.T) {
 	// Arrange.
 	r := &fakeRestarter{}
 	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
-		CommandHandlerConfig{Restarts: r})
+		CommandHandlerConfig{Restarts: r, MergeAxis: &fakeMergeAxisClearer{}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -2232,7 +2245,7 @@ func TestCommandHandlerRestartSessionNacksAFailedRestart(t *testing.T) {
 	// Arrange.
 	r := &fakeRestarter{err: errors.New("the shim never came back")}
 	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
-		CommandHandlerConfig{Restarts: r})
+		CommandHandlerConfig{Restarts: r, MergeAxis: &fakeMergeAxisClearer{}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -2243,6 +2256,94 @@ func TestCommandHandlerRestartSessionNacksAFailedRestart(t *testing.T) {
 	// Assert — silence here would tell the user a dead workspace came back.
 	if err == nil {
 		t.Fatal("a failed restart returned ok")
+	}
+}
+
+// THE RESTART IS A CLEAR EDGE for a terminal merge_failed: the user has seen the
+// verdict and asked for an operational session, and nothing else ever takes the
+// axis off it.
+func TestCommandHandlerRestartSessionClearsTheFailedMergeAxis(t *testing.T) {
+	// Arrange.
+	clearer := &fakeMergeAxisClearer{cleared: true}
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
+		CommandHandlerConfig{Restarts: &fakeRestarter{}, MergeAxis: clearer})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act.
+	if err := h.RestartSession(context.Background(), "/w", "r1", &frontendv1.RestartSessionCmd{}); err != nil {
+		t.Fatalf("RestartSession: %v", err)
+	}
+
+	// Assert.
+	if len(clearer.calls) != 1 || clearer.calls[0] != "/w|session_restart:r1" {
+		t.Fatalf("merge-axis clear calls = %v, want exactly one for /w naming the restart", clearer.calls)
+	}
+}
+
+// A restart that FAILED is not a user with an operational session, so the
+// verdict stays on screen rather than being cleared with nothing to replace it.
+func TestCommandHandlerFailedRestartDoesNotClearTheMergeAxis(t *testing.T) {
+	// Arrange.
+	clearer := &fakeMergeAxisClearer{cleared: true}
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
+		CommandHandlerConfig{Restarts: &fakeRestarter{err: errors.New("the shim never came back")}, MergeAxis: clearer})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act.
+	_ = h.RestartSession(context.Background(), "/w", "r1", &frontendv1.RestartSessionCmd{})
+
+	// Assert.
+	if len(clearer.calls) != 0 {
+		t.Fatalf("merge-axis clear calls = %v after a FAILED restart, want none", clearer.calls)
+	}
+}
+
+// A clear that FAILS nacks the restart: reporting ok would tell the user their
+// workspace is usable while the verdict it cannot clear stays pinned over it.
+func TestCommandHandlerRestartSessionNacksAFailedMergeAxisClear(t *testing.T) {
+	// Arrange.
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
+		CommandHandlerConfig{
+			Restarts:  &fakeRestarter{},
+			MergeAxis: &fakeMergeAxisClearer{err: errors.New("the state log is unwritable")},
+		})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act.
+	err = h.RestartSession(context.Background(), "/w", "r1", &frontendv1.RestartSessionCmd{})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a restart whose merge-axis clear failed returned ok")
+	}
+}
+
+// An unwired clear is a loud failing ack, never a restart that quietly leaves
+// the verdict pinned.
+func TestCommandHandlerRestartSessionWithoutAMergeAxisClearerErrors(t *testing.T) {
+	// Arrange.
+	r := &fakeRestarter{}
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
+		CommandHandlerConfig{Restarts: r})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act.
+	err = h.RestartSession(context.Background(), "/w", "r1", &frontendv1.RestartSessionCmd{})
+
+	// Assert — and nothing was restarted behind the refusal.
+	if err == nil {
+		t.Fatal("a restart with no merge-axis clear wired returned ok")
+	}
+	if len(r.calls) != 0 {
+		t.Fatalf("restart calls = %v, want the command refused before any restart ran", r.calls)
 	}
 }
 
