@@ -78,6 +78,7 @@
 (declare-function agent-repl-frontend-create "agent-repl-frontends")
 (declare-function agent-repl--gui-send-turn "agent-repl-frontend-client" (ws input raw prompt-origin &optional on-settle))
 (declare-function agent-repl--gui-interrupt "agent-repl-frontend-client" (ws kind))
+(declare-function agent-repl--gui-cancel-detached-agents "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--gui-running-p "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--gui-durable-session-id "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--gui-adopt-session "agent-repl-frontend-client" (ws claude-session-id on-success on-failure))
@@ -1399,6 +1400,7 @@ which is not what closing a panel says."
   :kill-fn #'agent-repl--gui-kill
   :send-fn #'agent-repl--gui-send-turn
   :interrupt-fn #'agent-repl--gui-interrupt
+  :cancel-detached-fn #'agent-repl--gui-cancel-detached-agents
   :running-p-fn #'agent-repl--gui-running-p
   :show-fn #'agent-repl--gui-show
   :hide-fn #'agent-repl--gui-hide

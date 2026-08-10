@@ -1305,6 +1305,60 @@ temp dir for the whole batch session, and this pins that redirect."
       (should (eq (agent-repl--gui-interrupt "ws1" 'escape) t))
       (should (eq (agent-repl--gui-interrupt "ws1" 'ctrl-c) t)))))
 
+
+;;;; ---- the detached-agent cancel ---------------------------------------
+;;
+;; The command an interrupt structurally cannot make.  `:idle-async' means
+;; the main turn has ENDED, so a turn interrupt sent into it is answered
+;; ALREADY_COMPLETE and the detached agents it was meant to stop keep
+;; running.
+
+(ert-deftest agent-repl-test-gui-cancel-detached-sends-command-keyed-by-workspace ()
+  "The cancel dispatches `cancelDetachedAgents' keyed by the workspace CWD."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-uds
+      ;; Act
+      (agent-repl--gui-cancel-detached-agents "ws1")
+      ;; Assert
+      (pcase-let ((`(,field ,_payload ,ws) (car uds-commands)))
+        (should (equal field "cancelDetachedAgents"))
+        (should (equal ws "/w"))))))
+
+(ert-deftest agent-repl-test-gui-cancel-detached-carries-no-confirmation-flag ()
+  "The cancel sends an EMPTY payload: there is nothing here to confirm.
+The question was already put to the user before it was called, and sending
+the command IS the deliberate act the interrupt's `confirm_agents' gate
+exists to require."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-uds
+      ;; Act
+      (agent-repl--gui-cancel-detached-agents "ws1")
+      ;; Assert
+      (pcase-let ((`(,_field ,payload ,_ws) (car uds-commands)))
+        (should-not payload)))))
+
+(ert-deftest agent-repl-test-gui-cancel-detached-returns-t ()
+  "The cancel reports DISPATCH, like the interrupt does."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-uds
+      ;; Act / Assert
+      (should (eq (agent-repl--gui-cancel-detached-agents "ws1") t)))))
+
+(ert-deftest agent-repl-test-gui-cancel-detached-sends-no-interrupt ()
+  "The cancel sends ONLY itself — never an interrupt alongside it.
+An interrupt in this state provably does nothing, so putting one on the
+wire would be exactly the no-op this command replaces."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-uds
+      ;; Act
+      (agent-repl--gui-cancel-detached-agents "ws1")
+      ;; Assert
+      (should (equal (length uds-commands) 1)))))
+
 ;;;; ---- the interrupt confirmation challenge -----------------------------
 ;;
 ;; The daemon refuses an interrupt that would stop live SUBAGENTS with
