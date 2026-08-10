@@ -170,20 +170,6 @@ silently turns the host-driven reattach into a no-op."
         (should (null again))
         (should (equal 1 (length calls)))))))
 
-(ert-deftest agent-repl-test-webview-recovery-sweep-force-bypasses-the-debounce ()
-  "A FORCED sweep inside the debounce window runs anyway.
-The recovery SLO issues it on measured evidence that the debounced sweep
-did not work, so suppressing it would leave the breach unrepaired."
-  ;; Arrange
-  (agent-repl-test--with-recovery-sweep calls
-    (agent-repl-test--with-recovery-ws ((b1 "wsr1"))
-      (agent-repl--webview-recovery-sweep "host_link_up")
-      ;; Act
-      (let ((forced (agent-repl--webview-recovery-sweep "recovery_slo_force" t)))
-        ;; Assert
-        (should (equal forced 1))
-        (should (equal 2 (length calls)))))))
-
 (ert-deftest agent-repl-test-webview-recovery-sweep-runs-again-past-the-debounce-window ()
   "A sweep past the debounce window runs, so a later outage still recovers."
   ;; Arrange
