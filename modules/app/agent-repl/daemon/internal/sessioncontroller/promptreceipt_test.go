@@ -14,8 +14,6 @@ import (
 
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/statedb"
-
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // NO SUBMITTED PROMPT MAY SILENTLY VANISH.
@@ -472,21 +470,7 @@ func (s *erroringRetireStore) Retire(string) (bool, error) { return false, s.err
 // optionally naming the request it answers.
 func durableUserEvent(t *testing.T, seq uint64, uuid, requestID, text string, tsMs int64) *corev1.Event {
 	t.Helper()
-	a, err := anypb.New(&datav1.ClaudeStreamMessage{
-		Msg: &datav1.ClaudeStreamMessage_User{User: &datav1.UserMessage{
-			Uuid: uuid,
-			Message: &datav1.ApiUserMessage{
-				Content: &datav1.ApiUserMessage_ContentString{ContentString: text},
-			},
-		}},
-	})
-	if err != nil {
-		t.Fatalf("anypb.New: %v", err)
-	}
-	return &corev1.Event{
-		SessionId: "vendor-uuid", Seq: seq, ProducedAtMs: tsMs, RequestId: requestID,
-		Payload: &corev1.Event_Vendor{Vendor: a},
-	}
+	return userStreamEvent(t, seq, uuid, requestID, text, tsMs, datav1.OriginKind_ORIGIN_KIND_UNSPECIFIED)
 }
 
 // receiptItems returns every pushed prompt-receipt item, in push order.
