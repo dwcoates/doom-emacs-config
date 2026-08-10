@@ -172,6 +172,7 @@ function subagentThinking(blockId: string, done = true): ConversationItem {
 function result(subtype: ResultItem["subtype"] = "success"): ResultItem {
   return {
     kind: "result",
+    uuid: `result-${subtype}`,
     subtype,
     // The turn's own duration, which both the standalone chip and the
     // final-response corner stamp read. Above the one-second floor below
@@ -2142,6 +2143,7 @@ describe("ResultChip", () => {
   function resultItem(subtype: ResultItem["subtype"], isError = false): ResultItem {
     return {
       kind: "result",
+      uuid: `result-${subtype}`,
       subtype,
       durationMs: 12,
       numTurns: 1,
@@ -2783,10 +2785,12 @@ describe("itemKey", () => {
     expect(itemKey(item, 3)).toBe("text:b7");
   });
 
-  it("keys positional items by index", () => {
-    // Arrange
+  it("keys a result by its uuid, not its index", () => {
+    // Arrange — a resync re-pushes the same result at a different position,
+    // and an index key drew its closing chip a second time.
     const item: ConversationItem = {
       kind: "result",
+      uuid: "result:s1:42",
       subtype: "success",
       durationMs: 1,
       numTurns: 1,
@@ -2796,7 +2800,14 @@ describe("itemKey", () => {
       context: null,
     };
     // Act + Assert
-    expect(itemKey(item, 5)).toBe("result:5");
+    expect(itemKey(item, 5)).toBe("result:result:s1:42");
+  });
+
+  it("keys positional items by index", () => {
+    // Arrange — a system line carries no identity of its own.
+    const item: ConversationItem = { kind: "system", subtype: "init" };
+    // Act + Assert
+    expect(itemKey(item, 5)).toBe("system:5");
   });
 });
 
@@ -5098,6 +5109,7 @@ describe("unsupported slash-command card", () => {
   function refusal(resultText: string | undefined): ResultItem {
     return {
       kind: "result",
+      uuid: "refusal",
       subtype: "success",
       durationMs: 1,
       numTurns: 1,

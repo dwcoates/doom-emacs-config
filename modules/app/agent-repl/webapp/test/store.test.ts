@@ -187,6 +187,7 @@ function toolItem(over: Partial<ToolItem> = {}): ToolItem {
 function resultItem(over: Partial<ResultItem> = {}): ResultItem {
   return {
     kind: "result",
+    uuid: "r1",
     subtype: "success",
     durationMs: 10,
     numTurns: 1,
@@ -979,14 +980,36 @@ describe("ingest conversation-items", () => {
     expect((store.state.items[0] as TextItem).text).toBe("canonical");
   });
 
-  it("appends a terminal result item every time (no id to reconcile on)", () => {
+  it("reconciles a redelivered result onto the item it already produced", () => {
+    // Arrange — a resync replays the conversation from the floor, so the same
+    // turn result comes back around; it must not append a second closing chip.
+    const store = new ConversationStore();
+    // Act
+    store.ingest([itemsEffect([resultItem({ uuid: "result:s1:7" })])]);
+    store.ingest([itemsEffect([resultItem({ uuid: "result:s1:7" })])]);
+    // Assert
+    expect(store.state.items.filter((i) => i.kind === "result")).toHaveLength(1);
+  });
+
+  it("keeps two DISTINCT results apart", () => {
     // Arrange
     const store = new ConversationStore();
     // Act
-    store.ingest([itemsEffect([resultItem()])]);
-    store.ingest([itemsEffect([resultItem()])]);
+    store.ingest([itemsEffect([resultItem({ uuid: "result:s1:7" })])]);
+    store.ingest([itemsEffect([resultItem({ uuid: "result:s1:9" })])]);
     // Assert
     expect(store.state.items.filter((i) => i.kind === "result")).toHaveLength(2);
+  });
+
+  it("adopts a redelivered result's content in place", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([resultItem({ uuid: "result:s1:7", subtype: "success" })])]);
+    // Act
+    store.ingest([itemsEffect([resultItem({ uuid: "result:s1:7", subtype: "error_during_execution" })])]);
+    // Assert
+    const results = store.state.items.filter((i) => i.kind === "result") as ResultItem[];
+    expect(results.map((r) => r.subtype)).toEqual(["error_during_execution"]);
   });
 
   it("advances lastSeq to the delta's throughSeq", () => {

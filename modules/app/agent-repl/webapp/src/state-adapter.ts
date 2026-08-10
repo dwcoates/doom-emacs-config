@@ -1371,7 +1371,7 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
       // No correlation key on the arm + unbuilt curator counterpart; ignored.
       return { items: [], ignores: ["conversation-item:toolUseResult"] };
     case "result":
-      return { items: [resultItemFrom(frame.payload, frame.turnAccounting)], ignores: [] };
+      return { items: [resultItemFrom(frame.payload, frame.uuid, frame.turnAccounting)], ignores: [] };
     case "contextCleared":
       // An EMPTY message: its existence and position are the whole fact, so
       // there is nothing to read off the payload but the envelope's uuid.
@@ -1685,9 +1685,14 @@ function usageFrom(u: Obj | undefined): Usage {
   };
 }
 
-function resultItemFrom(r: Obj, turnAccounting?: import("./frontend-proto.js").TurnAccounting): ResultItem {
+function resultItemFrom(
+  r: Obj,
+  uuid: string,
+  turnAccounting?: import("./frontend-proto.js").TurnAccounting,
+): ResultItem {
   const item: ResultItem = {
     kind: "result",
+    uuid,
     subtype: resultSubtype(pstr(r, "subtype")),
     durationMs: pnum(r, "durationMs"),
     numTurns: pnum(r, "numTurns"),
