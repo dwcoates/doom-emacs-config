@@ -409,15 +409,21 @@ on every ordinary bounce, so it is named rather than printed as `nil'."
       (string-join targets "/")
     "shim/webapp/daemon"))
 
+(defun agent-repl--frontend-assert-script (path subject)
+  "Signal unless PATH exists, naming it SUBJECT in the log and the error.
+An absent script is the installation being broken, which is a different
+thing from a run that failed — so it is signalled at the door, before any
+process is spawned or any continuation is armed.  Every script this file
+drives gates here, so a missing one is one failure with one message
+rather than one per script and per caller."
+  (unless (file-exists-p path)
+    (agent-repl--log nil "frontend %s: script missing path=%s" subject path)
+    (error "agent-repl: %s script not found: %s" subject path)))
+
 (defun agent-repl--frontend-build-assert-script ()
-  "Signal unless the shared build script is present on disk.
-Every build run — blocking or asynchronous — starts here, so a missing
-script is one failure with one message rather than one per caller."
-  (unless (file-exists-p agent-repl--frontend-build-script)
-    (agent-repl--log nil "frontend build: script missing path=%s"
-                     agent-repl--frontend-build-script)
-    (error "agent-repl: frontend build script not found: %s"
-           agent-repl--frontend-build-script)))
+  "Signal unless the shared build script is present on disk."
+  (agent-repl--frontend-assert-script
+   agent-repl--frontend-build-script "frontend build"))
 
 (defun agent-repl--frontend-build-args (targets force)
   "Return the argv following the shell for a build of TARGETS.
@@ -729,11 +735,8 @@ Returns `started', `queued' or `coalesced' per
 
 (defun agent-repl--frontend-deploy-assert-script ()
   "Signal unless the whole-stack deploy script is present on disk."
-  (unless (file-exists-p agent-repl--frontend-deploy-script)
-    (agent-repl--log nil "frontend deploy-stack: script missing path=%s"
-                     agent-repl--frontend-deploy-script)
-    (error "agent-repl: deploy script not found: %s"
-           agent-repl--frontend-deploy-script)))
+  (agent-repl--frontend-assert-script
+   agent-repl--frontend-deploy-script "stack deploy"))
 
 (defun agent-repl--frontend-deploy-args (force)
   "Return the argv following the shell for a whole-stack deploy.

@@ -2487,3 +2487,33 @@ skips the drain that reconstructs merges and releases leases."
 (ert-deftest agent-repl-test-daemon-after-ensured-requires-continuations ()
   "The canonical ensure door refuses non-callable continuations."
   (should-error (agent-repl--frontend-after-daemon-ensured nil nil)))
+
+;;;; ---- the script-presence assertion is one check --------------------------
+
+(ert-deftest agent-repl-test-daemon-assert-script-signals-for-an-absent-path ()
+  "The shared assertion signals, naming its subject."
+  (let ((err (should-error
+              (agent-repl--frontend-assert-script
+               "/agent-repl-nonexistent/x.sh" "stack deploy"))))
+    (should (string-match-p "stack deploy" (error-message-string err)))))
+
+(ert-deftest agent-repl-test-daemon-assert-script-passes-for-a-present-path ()
+  "A script that exists passes the assertion silently."
+  (should-not (agent-repl--frontend-assert-script
+               agent-repl--frontend-build-script "frontend build")))
+
+(ert-deftest agent-repl-test-daemon-build-assertion-uses-the-shared-check ()
+  "The build gate delegates to the shared assertion rather than its own copy."
+  (let (asked)
+    (cl-letf (((symbol-function 'agent-repl--frontend-assert-script)
+               (lambda (path _subject) (setq asked path))))
+      (agent-repl--frontend-build-assert-script)
+      (should (equal asked agent-repl--frontend-build-script)))))
+
+(ert-deftest agent-repl-test-daemon-deploy-assertion-uses-the-shared-check ()
+  "The deploy gate delegates to the shared assertion rather than its own copy."
+  (let (asked)
+    (cl-letf (((symbol-function 'agent-repl--frontend-assert-script)
+               (lambda (path _subject) (setq asked path))))
+      (agent-repl--frontend-deploy-assert-script)
+      (should (equal asked agent-repl--frontend-deploy-script)))))
