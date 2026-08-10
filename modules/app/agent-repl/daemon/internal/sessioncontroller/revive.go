@@ -453,7 +453,7 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	m.exits.Add(1)
 	detached = true
 	m.mu.Unlock()
-	go m.awaitReviveCut(workspace, sessionID, mode, cut, cutRequestID, cutLanded, disarm, release)
+	go m.awaitReviveCut(workspace, sessionID, mode, cut, cutRequestID, cutLanded, d.lifetime.done(), disarm, release)
 
 	m.logf("session-controller: revive ACCEPTED ws=%q session=%s mode=%s — %q is submitted and the session STAYS GATED until it lands",
 		workspace, sessionID, mode, cut.text)
@@ -511,7 +511,17 @@ func (m *Manager) ReviveForMerge(ctx context.Context, workspace string) error {
 // reached only on the completion signal, which is what makes "a failed cut
 // leaves the session gated" structural rather than a promise each error path
 // has to keep.
-func (m *Manager) awaitReviveCut(workspace, sessionID string, mode ReviveMode, cut reviveCut, cutRequestID string, landed <-chan struct{}, disarm, release func()) {
+//
+// AND THE WAIT IS SCOPED TO THE CONTROLLER THAT IS RUNNING THE CUT, which is
+// the fourth arm of the select and the reason `exited` is threaded here at all.
+// The cut's completion signal can only ever be delivered BY that controller, so
+// a controller that dies — a terminal protocol error killing the run loop, a
+// teardown cancelling it — has already decided this revival's outcome. Waiting
+// out the ten-minute bound afterwards is not patience, it is holding the
+// workspace's exclusive revival claim over a signal that provably cannot
+// arrive, and it is what left every later ReviveSessionCmd nacked with
+// ErrRevivalInFlight until the daemon was bounced.
+func (m *Manager) awaitReviveCut(workspace, sessionID string, mode ReviveMode, cut reviveCut, cutRequestID string, landed, controllerExited <-chan struct{}, disarm, release func()) {
 	defer m.exits.Done()
 	defer release()
 	defer disarm()
@@ -546,6 +556,11 @@ func (m *Manager) awaitReviveCut(workspace, sessionID string, mode ReviveMode, c
 		m.logf("session-controller: revive cut ABANDONED ws=%q session=%s mode=%s cut=%q error=%v — the session STAYS GATED",
 			workspace, sessionID, mode, cut.text, m.rootCtx.Err())
 		m.dropRevivalHolds(workspace, sessionID, "the daemon shut down before "+cut.text+" landed")
+		return
+	case <-controllerExited:
+		m.logf("session-controller: revive cut ORPHANED ws=%q session=%s mode=%s cut=%q — the session controller running it is gone, so the completion signal can never be delivered; the session STAYS GATED and the revival claim is released NOW rather than at the %s bound, so the user can revive again immediately",
+			workspace, sessionID, mode, cut.text, bound)
+		m.dropRevivalHolds(workspace, sessionID, "the session controller running "+cut.text+" died before it landed")
 		return
 	case <-time.After(bound):
 		m.logf("session-controller: revive cut TIMED OUT ws=%q session=%s mode=%s cut=%q bound=%s — the session STAYS GATED rather than limping into accepting prompts on a conversation that was never cut",

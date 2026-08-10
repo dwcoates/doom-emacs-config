@@ -10,8 +10,10 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/registry"
+	"claude-repld/internal/shimclient"
 )
 
 // reviveRig is a hibernated, brought-up session ready for a revival.
@@ -1254,4 +1256,162 @@ func TestARevivalClaimOverAnAwakeSessionParksNothing(t *testing.T) {
 	if entries := revivalParkedEntries(m, "ws"); len(entries) != 0 {
 		t.Fatalf("%d entr(ies) parked under a revival claim over an awake session, want the prompt forwarded", len(entries))
 	}
+}
+
+// ---------------------------------------------------------------------------
+// THE REVIVAL CLAIM IS SCOPED TO THE CONTROLLER RUNNING THE CUT.
+//
+// The completion signal a gated revival waits on can only ever be delivered by
+// the controller that submitted the cut, so a controller that dies has already
+// decided the revival's outcome. Waiting out the ten-minute bound afterwards
+// held the workspace's exclusive claim over a signal that provably could not
+// arrive, and every later ReviveSessionCmd was nacked with ErrRevivalInFlight
+// until the daemon was bounced. Each of these leaves the production bound in
+// place, so only the controller-death arm of the select can release them.
+// ---------------------------------------------------------------------------
+
+// newDyingControllerReviveRig is reviveRig whose session controller's run loop
+// can be killed on demand, which is the shape of the live incident: a rejected
+// lifecycle event ends client.Run with a terminal protocol error.
+func newDyingControllerReviveRig(t *testing.T, cause string) (*Manager, *fakeHibernations, chan error) {
+	t.Helper()
+	runResult := make(chan error, 1)
+	applier := &fakeApplier{}
+	m, err := New(Config{
+		Push:              &fakePusher{},
+		SSM:               applier,
+		Spawner:           &fakeSpawner{},
+		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
+		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
+		ClearCompactStore: newFakeClearCompactStore(),
+		TurnAccountings:   emptyTurnAccountingStore{},
+		Registrar:         &fakeRegistrar{},
+		ProtocolVersion:   "1",
+		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
+		newClient:         func(c shimclient.Config) sessionClient { return &fakeClient{cfg: c, runResult: runResult} },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(m.Close)
+	hib := newFakeHibernations()
+	m.cfg.Hibernations = hib
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
+	hib.setAsleep("s1", registry.HibernationDetail{Cause: cause, SinceMs: 42})
+	return m, hib, runResult
+}
+
+// A RUN LOOP THAT DIED RELEASES THE CLAIM. This is the wedge itself: the
+// controller carrying the cut is gone, so the user must be able to revive again
+// without waiting out a bound for a signal nothing can send.
+func TestReviveSessionReleasesTheClaimWhenTheControllerDies(t *testing.T) {
+	// Arrange — the production bound stands, so only the death can release it.
+	m, _, runResult := newDyingControllerReviveRig(t, registry.HibernationCauseIdleCutoff)
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeClear); err != nil {
+		t.Fatalf("ReviveSession clear: %v", err)
+	}
+
+	// Act.
+	runResult <- errors.New("resumed query reported a rotated vendor session")
+
+	// Assert.
+	awaitClaimFree(t, m, "ws")
+}
+
+// AND A SECOND REVIVAL IS ACCEPTED AFTERWARDS. Releasing the claim is only
+// worth anything if the command the user retries stops being nacked.
+func TestReviveSessionAcceptedAgainAfterTheControllerDies(t *testing.T) {
+	// Arrange.
+	m, _, runResult := newDyingControllerReviveRig(t, registry.HibernationCauseIdleCutoff)
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeClear); err != nil {
+		t.Fatalf("ReviveSession clear: %v", err)
+	}
+	runResult <- errors.New("resumed query reported a rotated vendor session")
+	awaitClaimFree(t, m, "ws")
+
+	// Act.
+	err := m.ReviveSession(context.Background(), "ws", ReviveModeDirect)
+
+	// Assert.
+	if errors.Is(err, ErrRevivalInFlight) {
+		t.Fatalf("ReviveSession after the controller died = %v, want the claim free", err)
+	}
+}
+
+// THE DEAD REVIVAL STILL LEAVES THE SESSION GATED. The cut never landed, so the
+// record must keep refusing prompts — the released claim is permission to
+// choose again, never an implicit revival.
+func TestReviveSessionStaysGatedWhenTheControllerDies(t *testing.T) {
+	// Arrange.
+	m, hib, runResult := newDyingControllerReviveRig(t, registry.HibernationCauseIdleCutoff)
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeClear); err != nil {
+		t.Fatalf("ReviveSession clear: %v", err)
+	}
+
+	// Act.
+	runResult <- errors.New("resumed query reported a rotated vendor session")
+	awaitClaimFree(t, m, "ws")
+
+	// Assert.
+	if detail, asleep := hib.HibernationOf("s1"); !asleep || detail.Cause == "" {
+		t.Fatalf("hibernation detail = %+v after the controller died mid-cut, want the session STILL gated", detail)
+	}
+}
+
+// A TEARDOWN'S OWN PROLOGUE ENDS THE LIFETIME TOO, not only the run loop's
+// tail: a bring-up aborted before that tail is ever launched still reaches
+// drainAndCancelSessionController, and a controller that died without ever
+// announcing it is what a detached waiter cannot tell from a slow one.
+func TestControllerLifetimeEndsOnTheTeardownPrologue(t *testing.T) {
+	// Arrange.
+	m, _, _ := newHibernationRig(t)
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	m.mu.Unlock()
+
+	// Act.
+	m.drainAndCancelSessionController("ws", d, StopCauseHardRestartLive())
+
+	// Assert.
+	select {
+	case <-d.lifetime.done():
+	default:
+		t.Fatal("the teardown prologue left the controller lifetime open; a detached waiter would hold its claim until its own bound")
+	}
+}
+
+// THE ZERO VALUE IS A LIVE LIFETIME. A controller built as a bare struct
+// literal must have a lifetime that can be waited on and ended, rather than a
+// nil channel that panics the first teardown to reach it.
+func TestControllerLifetimeZeroValueIsUsable(t *testing.T) {
+	// Arrange.
+	d := &sessionController{sessionID: "s1", workspace: "ws"}
+	done := d.lifetime.done()
+
+	// Act.
+	d.markExited()
+
+	// Assert.
+	select {
+	case <-done:
+	default:
+		t.Fatal("a zero-value controller lifetime did not close on markExited")
+	}
+}
+
+// AND ENDING IT TWICE IS A NO-OP. The teardown prologue and the exit tail both
+// state the death, and neither knows whether the other ran.
+func TestControllerLifetimeEndsIdempotently(t *testing.T) {
+	// Arrange.
+	d := &sessionController{sessionID: "s1", workspace: "ws"}
+	d.markExited()
+
+	// Act, Assert — a second end must not panic on a closed channel.
+	d.markExited()
 }

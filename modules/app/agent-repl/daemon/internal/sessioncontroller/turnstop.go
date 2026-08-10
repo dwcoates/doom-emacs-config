@@ -3,6 +3,7 @@ package sessioncontroller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -256,6 +257,60 @@ func (m *Manager) drainAndCancelSessionController(workspace string, d *sessionCo
 	if d.cancel != nil {
 		d.cancel()
 	}
+	// STEP 4: the generation is over, so everything scoped to its lifetime is
+	// released. It is marked here as well as in the exit tail because a
+	// bring-up aborted before that tail is ever launched still reaches this
+	// prologue, and a controller that died without ever announcing it is
+	// exactly what a detached waiter cannot distinguish from a slow one.
+	d.markExited()
+}
+
+// markExited ends the generation's lifetime, exactly once. Idempotent by
+// construction so the teardown prologue and the exit tail can both state it
+// without either having to know whether the other ran.
+func (d *sessionController) markExited() { d.lifetime.end() }
+
+// controllerLifetime is one generation's "still exists" edge, exposed as a
+// channel a select can wait on.
+//
+// ITS ZERO VALUE IS A LIVE LIFETIME. The channel is minted on first use by
+// whichever side arrives first, so a sessionController built as a bare struct
+// literal has a working lifetime rather than a nil channel that panics the
+// first teardown to reach it. That is the whole reason it is a type and not two
+// fields: "a controller whose lifetime cannot be ended" is not representable.
+type controllerLifetime struct {
+	mu    sync.Mutex
+	ch    chan struct{}
+	ended bool
+}
+
+// chanLocked returns the lifetime's channel, minting it if nobody has yet.
+// Caller holds l.mu.
+func (l *controllerLifetime) chanLocked() chan struct{} {
+	if l.ch == nil {
+		l.ch = make(chan struct{})
+	}
+	return l.ch
+}
+
+// done is the edge a detached wait selects on. It is closed once the generation
+// is over, and a lifetime that ALREADY ended returns a closed channel, so a
+// waiter that arrives late is released immediately rather than blocked forever.
+func (l *controllerLifetime) done() <-chan struct{} {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.chanLocked()
+}
+
+// end closes the lifetime. Repeat calls are no-ops.
+func (l *controllerLifetime) end() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.ended {
+		return
+	}
+	l.ended = true
+	close(l.chanLocked())
 }
 
 // stopShimSettlingTurn stops a session's shim and then GUARANTEES the workspace's
