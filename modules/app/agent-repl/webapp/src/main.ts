@@ -346,6 +346,19 @@ async function boot(): Promise<void> {
     // re-capturing here is what makes the retry carry the identity the store
     // has since been told is live rather than the one just refused.
     adoptIdentity: () => currentResyncSnapshot(store.state.lastSeq),
+    // The request a coalesced want-resync spends when the in-flight one acks,
+    // read at THAT moment so it asks from the mark applied by then.
+    latestSnapshot: () => currentResyncSnapshot(store.state.lastSeq),
+    // THE CEILING IS A THING THE USER CAN SEE. A page whose resyncs keep going
+    // unanswered used to spin silently while its command queue grew (an
+    // observed depth of 5,069); it now stops and puts the connection card back
+    // up, which the ordinary reconnect path retracts when the daemon answers
+    // again.
+    onGiveUp: (failures, cause) => {
+      if (store.addFailure(daemonUnreachableFailure(0, `resync unanswered ${failures}x: ${cause}`))) {
+        frames.schedule();
+      }
+    },
   });
 
   // Close the diagnostics loop declared above: from here every forwarded line
@@ -1231,6 +1244,12 @@ async function boot(): Promise<void> {
         connectResync.observe(false, currentResyncSnapshot(store.state.lastSeq));
       },
       clearConnectionBanner: () => {
+        // A CURRENT SOCKET IS NOT PROOF THE HISTORY IS FLOWING. When the resync
+        // path has given up, the card this heartbeat would retract is the one
+        // the give-up just raised, and retracting it every few seconds is how
+        // the failure went unseen while the queue grew. The transport's own
+        // reconnect path retracts it when the daemon answers again.
+        if (connectResync.isGivenUp) return;
         if (store.addFailure(daemonReachableFailure(Date.now()))) frames.schedule();
       },
       log: (level, message) => clog(level, message),
@@ -1241,6 +1260,11 @@ async function boot(): Promise<void> {
 
   const catchUpOnVisible = (reason: string): void => {
     if ((ws as WsClient | undefined) === undefined) return;
+    // THE RETRY AFFORDANCE for a page that gave up. The heartbeat deliberately
+    // does not clear the give-up — that is what bounds the flood — but a user
+    // arriving at a page showing the connection card is an explicit "try
+    // again", and it costs exactly one resync.
+    if (connectResync.isGivenUp) connectResync.retryNow();
     recovery.recover(reason);
   };
 
