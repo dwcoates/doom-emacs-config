@@ -1134,6 +1134,8 @@ value, kept in the message text so an unowned path stays correlatable."
          (setq agent-repl--uds-drain-error err))
        nil))))
 
+(declare-function agent-repl--recovery-slo-note-wire "agent-repl-recovery-slo" (ws))
+
 (defun agent-repl--uds-dispatch-frame (frame)
   "Dispatch decoded FRAME (a one-key plist) to its registered handler.
 The single top-level key names the `FrontendFrame' oneof arm.  A frame
@@ -1171,6 +1173,16 @@ length of a drain batch and re-signals it afterwards."
                         (or (plist-get payload :revision)
                             (plist-get payload :revisionId))))
          (state (and (listp payload) (plist-get payload :state))))
+    ;; THE WIRE HALF OF THE RECOVERY SLO (lisp/recovery-slo.el).  Stamped at
+    ;; the dispatch point and for EVERY arm, including the ignored ones: what
+    ;; this signal answers is whether real traffic for THIS workspace crossed
+    ;; the UDS link, which is true of a frame this end chooses not to act on
+    ;; exactly as much as of one it handles.  It is deliberately upstream of
+    ;; the malformed-field signal below only in the sense that the field is
+    ;; already known to name a workspace — a frame that never got here carried
+    ;; no workspace to attribute.
+    (when log-workspace
+      (agent-repl--recovery-slo-note-wire log-workspace))
     (cond
      ((not (member field agent-repl--uds-known-frame-fields))
       (agent-repl--log log-workspace
