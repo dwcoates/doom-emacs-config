@@ -251,6 +251,59 @@ message CancelScheduledShutdownCmd {
   string schedule_id = 1;
 }
 
+// The daemon's notice that it is about to go down ON PURPOSE.
+//
+// WHY IT EXISTS: a deploy bounce is an event the daemon knows about and its
+// clients do not. Every client learned of it the only way it could — its
+// socket died — and a dead socket is indistinguishable from a crash, so a
+// wanted, bounded outage painted the severed banner in the webapp and a
+// degraded-link segment in Emacs. This frame is the missing fact.
+//
+// PUSHED ONCE to every gui_stream client AND to the Emacs UDS host,
+// immediately before an INTENTIONAL teardown — after the daemon has stopped
+// declaring itself ready and before it closes its listeners. It is a
+// courtesy notice on a socket that is about to die, so it is never retried
+// and never acknowledged; a client that misses it simply falls back to
+// treating the disconnect as unexplained.
+//
+// DELIBERATELY ABSENT FROM StateSnapshot. A connect snapshot is proof the
+// daemon is UP, so carrying a pending-restart field there would let a
+// freshly-connected client open a quiet window on the strength of an
+// announcement whose outage has already ended. There is no "am I restarting"
+// query: the announcement is an edge, not a state.
+//
+// A PREDICTION, NOT A PROMISE. The client owns the bound: it opens a quiet
+// window of at most the stated length and must report a daemon that never
+// returns. Nothing here asks a client to suppress alarms indefinitely.
+message RestartPendingView {
+  // Why the daemon is going down ("deploy-all rebuilt the daemon",
+  // "SIGTERM"). Display-grade and NEVER parsed; a client branches on the
+  // structured fields below, never on this text. Never empty on the wire:
+  // the daemon refuses to compose an announcement that cannot say what it is
+  // about.
+  string cause = 1;
+
+  // How long the outage is expected to last, in whole seconds. A CLAMPED
+  // HINT: the daemon caps it before sending, and a client is entitled to
+  // clamp it further still. Always positive on the wire — a zero or negative
+  // window is not a representable request, because "stay quiet for no time"
+  // and "stay quiet forever" are both things no announcement may ask for.
+  int32 expected_outage_seconds = 2;
+
+  // Whether this restart also SIGTERMs every session shim (the
+  // ShutdownCmd.stop_shims semantics). A client renders a longer settle when
+  // the shims roll too, since a preserved shim is reattached by the next
+  // daemon for free while a rolled one must be respawned.
+  bool stop_shims = 3;
+
+  // When the daemon MINTED this announcement (epoch ms), not when the client
+  // received it. The client subtracts the delivery delay from its window, so
+  // late delivery SHORTENS the quiet window rather than restarting the clock
+  // — otherwise a slow hop would extend the period during which a daemon
+  // that never came back stays unreported.
+  int64 announced_at_ms = 4;
+}
+
 // The severity of a ClientLogCmd. A closed vocabulary rather than a free
 // string, so a frontend cannot invent a level the daemon has no policy for.
 enum ClientLogLevel {

@@ -24,7 +24,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/lifecycle.proto.
  */
 export const file_agentshim_frontend_v1_lifecycle: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHNoaW0vZnJvbnRlbmQvdjEvbGlmZWN5Y2xlLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEi3AEKEENyZWF0ZVNlc3Npb25DbWQSCwoDY3dkGAEgASgJEhcKD3Blcm1pc3Npb25fbW9kZRgDIAEoCRISCgpjb25maWdfZGlyGAQgASgJEgwKBGZha2UYBiABKAgSFQoNYWxsb3dfdW5nYXRlZBgHIAEoCBINCgVtb2RlbBgIIAEoCRI2CgtyZXN1bWVfbW9kZRgJIAEoDjIhLmFnZW50c2hpbS5mcm9udGVuZC52MS5SZXN1bWVNb2RlEiIKGmV4cGxpY2l0X2NsYXVkZV9zZXNzaW9uX2lkGAogASgJIiYKEERlbGV0ZVNlc3Npb25DbWQSEgoKc2Vzc2lvbl9pZBgBIAEoCSITChFSZXN0YXJ0U2Vzc2lvbkNtZCIXChVIaWJlcm5hdGVXb3Jrc3BhY2VDbWQiIQoLU2h1dGRvd25DbWQSEgoKc3RvcF9zaGltcxgBIAEoCCKhAQoUU2h1dGRvd25TY2hlZHVsZVZpZXcSOwoEaWRsZRgBIAEoCzIrLmFnZW50c2hpbS5mcm9udGVuZC52MS5TaHV0ZG93blNjaGVkdWxlSWRsZUgAEkMKCGRyYWluaW5nGAIgASgLMi8uYWdlbnRzaGltLmZyb250ZW5kLnYxLlNodXRkb3duU2NoZWR1bGVEcmFpbmluZ0gAQgcKBXN0YXRlIhYKFFNodXRkb3duU2NoZWR1bGVJZGxlIp8BChhTaHV0ZG93blNjaGVkdWxlRHJhaW5pbmcSEwoLc2NoZWR1bGVfaWQYASABKAkSFwoPc2NoZWR1bGVkX2F0X21zGAIgASgDEg0KBWNhdXNlGAMgASgJEhIKCnN0b3Bfc2hpbXMYBCABKAgSMgoFaG9sZHMYBSADKAsyIy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2h1dGRvd25Ib2xkIqUBCgxTaHV0ZG93bkhvbGQSEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSNQoEdHVybhgDIAEoCzInLmFnZW50c2hpbS5mcm9udGVuZC52MS5TaHV0ZG93bkhvbGRUdXJuEjcKBXRhc2tzGAQgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLlNodXRkb3duSG9sZFRhc2tzIiMKEFNodXRkb3duSG9sZFR1cm4SDwoHdHVybl9pZBgBIAEoCSIiChFTaHV0ZG93bkhvbGRUYXNrcxINCgVjb3VudBgBIAEoBSI4ChNTY2hlZHVsZVNodXRkb3duQ21kEhIKCnN0b3Bfc2hpbXMYASABKAgSDQoFY2F1c2UYAiABKAkiMQoaQ2FuY2VsU2NoZWR1bGVkU2h1dGRvd25DbWQSEwoLc2NoZWR1bGVfaWQYASABKAkifwoMQ2xpZW50TG9nQ21kEjQKBWxldmVsGAEgASgOMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNsaWVudExvZ0xldmVsEg8KB21lc3NhZ2UYAiABKAkSKAoHY29udGV4dBgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QqdgoKUmVzdW1lTW9kZRIbChdSRVNVTUVfTU9ERV9VTlNQRUNJRklFRBAAEhgKFFJFU1VNRV9NT0RFX0NPTlRJTlVFEAESGAoUUkVTVU1FX01PREVfRVhQTElDSVQQAyIECAIQAioRUkVTVU1FX01PREVfRlJFU0gqhAEKDkNsaWVudExvZ0xldmVsEiAKHENMSUVOVF9MT0dfTEVWRUxfVU5TUEVDSUZJRUQQABIZChVDTElFTlRfTE9HX0xFVkVMX0lORk8QARIZChVDTElFTlRfTE9HX0xFVkVMX1dBUk4QAhIaChZDTElFTlRfTE9HX0xFVkVMX0VSUk9SEANCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_google_protobuf_struct]);
+  fileDesc("CiVhZ2VudHNoaW0vZnJvbnRlbmQvdjEvbGlmZWN5Y2xlLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEi3AEKEENyZWF0ZVNlc3Npb25DbWQSCwoDY3dkGAEgASgJEhcKD3Blcm1pc3Npb25fbW9kZRgDIAEoCRISCgpjb25maWdfZGlyGAQgASgJEgwKBGZha2UYBiABKAgSFQoNYWxsb3dfdW5nYXRlZBgHIAEoCBINCgVtb2RlbBgIIAEoCRI2CgtyZXN1bWVfbW9kZRgJIAEoDjIhLmFnZW50c2hpbS5mcm9udGVuZC52MS5SZXN1bWVNb2RlEiIKGmV4cGxpY2l0X2NsYXVkZV9zZXNzaW9uX2lkGAogASgJIiYKEERlbGV0ZVNlc3Npb25DbWQSEgoKc2Vzc2lvbl9pZBgBIAEoCSITChFSZXN0YXJ0U2Vzc2lvbkNtZCIXChVIaWJlcm5hdGVXb3Jrc3BhY2VDbWQiIQoLU2h1dGRvd25DbWQSEgoKc3RvcF9zaGltcxgBIAEoCCKhAQoUU2h1dGRvd25TY2hlZHVsZVZpZXcSOwoEaWRsZRgBIAEoCzIrLmFnZW50c2hpbS5mcm9udGVuZC52MS5TaHV0ZG93blNjaGVkdWxlSWRsZUgAEkMKCGRyYWluaW5nGAIgASgLMi8uYWdlbnRzaGltLmZyb250ZW5kLnYxLlNodXRkb3duU2NoZWR1bGVEcmFpbmluZ0gAQgcKBXN0YXRlIhYKFFNodXRkb3duU2NoZWR1bGVJZGxlIp8BChhTaHV0ZG93blNjaGVkdWxlRHJhaW5pbmcSEwoLc2NoZWR1bGVfaWQYASABKAkSFwoPc2NoZWR1bGVkX2F0X21zGAIgASgDEg0KBWNhdXNlGAMgASgJEhIKCnN0b3Bfc2hpbXMYBCABKAgSMgoFaG9sZHMYBSADKAsyIy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2h1dGRvd25Ib2xkIqUBCgxTaHV0ZG93bkhvbGQSEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSNQoEdHVybhgDIAEoCzInLmFnZW50c2hpbS5mcm9udGVuZC52MS5TaHV0ZG93bkhvbGRUdXJuEjcKBXRhc2tzGAQgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLlNodXRkb3duSG9sZFRhc2tzIiMKEFNodXRkb3duSG9sZFR1cm4SDwoHdHVybl9pZBgBIAEoCSIiChFTaHV0ZG93bkhvbGRUYXNrcxINCgVjb3VudBgBIAEoBSI4ChNTY2hlZHVsZVNodXRkb3duQ21kEhIKCnN0b3Bfc2hpbXMYASABKAgSDQoFY2F1c2UYAiABKAkiMQoaQ2FuY2VsU2NoZWR1bGVkU2h1dGRvd25DbWQSEwoLc2NoZWR1bGVfaWQYASABKAkicQoSUmVzdGFydFBlbmRpbmdWaWV3Eg0KBWNhdXNlGAEgASgJEh8KF2V4cGVjdGVkX291dGFnZV9zZWNvbmRzGAIgASgFEhIKCnN0b3Bfc2hpbXMYAyABKAgSFwoPYW5ub3VuY2VkX2F0X21zGAQgASgDIn8KDENsaWVudExvZ0NtZBI0CgVsZXZlbBgBIAEoDjIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5DbGllbnRMb2dMZXZlbBIPCgdtZXNzYWdlGAIgASgJEigKB2NvbnRleHQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0KnYKClJlc3VtZU1vZGUSGwoXUkVTVU1FX01PREVfVU5TUEVDSUZJRUQQABIYChRSRVNVTUVfTU9ERV9DT05USU5VRRABEhgKFFJFU1VNRV9NT0RFX0VYUExJQ0lUEAMiBAgCEAIqEVJFU1VNRV9NT0RFX0ZSRVNIKoQBCg5DbGllbnRMb2dMZXZlbBIgChxDTElFTlRfTE9HX0xFVkVMX1VOU1BFQ0lGSUVEEAASGQoVQ0xJRU5UX0xPR19MRVZFTF9JTkZPEAESGQoVQ0xJRU5UX0xPR19MRVZFTF9XQVJOEAISGgoWQ0xJRU5UX0xPR19MRVZFTF9FUlJPUhADQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_google_protobuf_struct]);
 
 /**
  * @generated from message agentshim.frontend.v1.CreateSessionCmd
@@ -478,6 +478,86 @@ export const CancelScheduledShutdownCmdSchema: GenMessage<CancelScheduledShutdow
   messageDesc(file_agentshim_frontend_v1_lifecycle, 12);
 
 /**
+ * The daemon's notice that it is about to go down ON PURPOSE.
+ *
+ * WHY IT EXISTS: a deploy bounce is an event the daemon knows about and its
+ * clients do not. Every client learned of it the only way it could — its
+ * socket died — and a dead socket is indistinguishable from a crash, so a
+ * wanted, bounded outage painted the severed banner in the webapp and a
+ * degraded-link segment in Emacs. This frame is the missing fact.
+ *
+ * PUSHED ONCE to every gui_stream client AND to the Emacs UDS host,
+ * immediately before an INTENTIONAL teardown — after the daemon has stopped
+ * declaring itself ready and before it closes its listeners. It is a
+ * courtesy notice on a socket that is about to die, so it is never retried
+ * and never acknowledged; a client that misses it simply falls back to
+ * treating the disconnect as unexplained.
+ *
+ * DELIBERATELY ABSENT FROM StateSnapshot. A connect snapshot is proof the
+ * daemon is UP, so carrying a pending-restart field there would let a
+ * freshly-connected client open a quiet window on the strength of an
+ * announcement whose outage has already ended. There is no "am I restarting"
+ * query: the announcement is an edge, not a state.
+ *
+ * A PREDICTION, NOT A PROMISE. The client owns the bound: it opens a quiet
+ * window of at most the stated length and must report a daemon that never
+ * returns. Nothing here asks a client to suppress alarms indefinitely.
+ *
+ * @generated from message agentshim.frontend.v1.RestartPendingView
+ */
+export type RestartPendingView = Message<"agentshim.frontend.v1.RestartPendingView"> & {
+  /**
+   * Why the daemon is going down ("deploy-all rebuilt the daemon",
+   * "SIGTERM"). Display-grade and NEVER parsed; a client branches on the
+   * structured fields below, never on this text. Never empty on the wire:
+   * the daemon refuses to compose an announcement that cannot say what it is
+   * about.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+
+  /**
+   * How long the outage is expected to last, in whole seconds. A CLAMPED
+   * HINT: the daemon caps it before sending, and a client is entitled to
+   * clamp it further still. Always positive on the wire — a zero or negative
+   * window is not a representable request, because "stay quiet for no time"
+   * and "stay quiet forever" are both things no announcement may ask for.
+   *
+   * @generated from field: int32 expected_outage_seconds = 2;
+   */
+  expectedOutageSeconds: number;
+
+  /**
+   * Whether this restart also SIGTERMs every session shim (the
+   * ShutdownCmd.stop_shims semantics). A client renders a longer settle when
+   * the shims roll too, since a preserved shim is reattached by the next
+   * daemon for free while a rolled one must be respawned.
+   *
+   * @generated from field: bool stop_shims = 3;
+   */
+  stopShims: boolean;
+
+  /**
+   * When the daemon MINTED this announcement (epoch ms), not when the client
+   * received it. The client subtracts the delivery delay from its window, so
+   * late delivery SHORTENS the quiet window rather than restarting the clock
+   * — otherwise a slow hop would extend the period during which a daemon
+   * that never came back stays unreported.
+   *
+   * @generated from field: int64 announced_at_ms = 4;
+   */
+  announcedAtMs: bigint;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.RestartPendingView.
+ * Use `create(RestartPendingViewSchema)` to create a new message.
+ */
+export const RestartPendingViewSchema: GenMessage<RestartPendingView> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_lifecycle, 13);
+
+/**
  * A frontend-side diagnostic line, mirrored into the daemon's
  * own on-disk log.
  *
@@ -521,7 +601,7 @@ export type ClientLogCmd = Message<"agentshim.frontend.v1.ClientLogCmd"> & {
  * Use `create(ClientLogCmdSchema)` to create a new message.
  */
 export const ClientLogCmdSchema: GenMessage<ClientLogCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_lifecycle, 13);
+  messageDesc(file_agentshim_frontend_v1_lifecycle, 14);
 
 /**
  * Session creation over UDS (replaces Emacs POST /sessions).
