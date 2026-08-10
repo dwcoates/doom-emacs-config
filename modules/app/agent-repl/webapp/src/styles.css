@@ -1155,6 +1155,16 @@ pre {
   max-width: 60%;
   margin-left: auto;
   margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
+  /* The prompt's verbatim <pre> carried no leading of its own, so it fell to
+     the UA's font-dependent `normal` — a line box no rule could count. The
+     prompt's 25-line height cap is measured in these lines (see
+     --cap-line-h), so the leading is stated here, as a token, at the same
+     1.4 every other monospace box in the feed sets (the Read, Bash, diff and
+     skill previews). Declaring it is what makes the cap exactly 25 lines
+     rather than 25 guesses, and the token is what keeps the two from ever
+     drifting apart. */
+  --prompt-line-h: 1.4;
+  line-height: var(--prompt-line-h);
   /* Body and hover stamp share ONE grid cell instead of the assistant's
      side-by-side flex columns, so the bubble's width is the WIDER of the
      two, never their sum: a roomy prompt's stamp overlays its own corner
@@ -1695,33 +1705,39 @@ pre {
 .tab-chip.active { color: var(--fg); border-color: var(--accent); }
 /* N-line preview caps, one shared mechanic: --cap-lines is the visible
    line budget (Read and Edit diffs get 10, Bash command and output get
-   5 each, independently scrollable, and the agent's response bubble gets
-   25), --cap-line-h is the line box those lines are counted in, and
+   5 each, independently scrollable, and BOTH speakers' bubbles get 25),
+   --cap-line-h is the line box those lines are counted in, and
    --cap-extra absorbs the .tool-output dashed-divider padding where
    inherited. Everything past the cap stays reachable by scrolling.
 
    --cap-line-h exists because the budget is a count of TEXT LINES, and the
-   monospace previews and the response bubble do not set their text at the
-   same leading. The default is the previews' own 1.4, which the rule below
-   sets on them; the response bubble overrides it with the leading its
-   markdown actually renders at, so 25 lines means 25 of ITS lines. */
+   monospace previews, the prompt bubble, and the response bubble do not set
+   their text at the same leading. The default is the previews' own 1.4,
+   which the rule below sets on them; each bubble overrides it with the
+   leading its own text actually renders at, so 25 lines means 25 of ITS
+   lines. */
 .tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content,
-.bubble.assistant > .bubble-body {
+.bubble > .bubble-body {
   overflow-y: auto;
   max-height: calc(var(--cap-lines) * var(--cap-line-h, 1.4em) + var(--cap-extra, 0px));
 }
 /* The monospace previews' own leading, which --cap-line-h defaults to. The
-   response bubble is deliberately absent: its leading is the markdown's. */
+   bubbles are deliberately absent: each carries its own leading token. */
 .tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content {
   line-height: 1.4;
 }
-/* The agent's answer caps at 25 of its own text lines and scrolls past that,
-   so one enormous response cannot push the whole rest of the feed off screen.
+/* Neither speaker's bubble may push the whole rest of the feed off screen, so
+   a prompt and an answer alike stop at 25 of their OWN text lines and scroll
+   past that — one budget stated once, for both.
+
    The cap rides the BODY rather than the bubble, so the corner stamp is never
-   scrolled away from the answer it labels, and the line box is read from the
-   markdown's own leading token rather than restated here — a change to `.md`'s
-   line-height moves the cap with it instead of silently mis-measuring it. */
-.bubble.assistant > .bubble-body { --cap-lines: 25; --cap-line-h: calc(var(--md-line-h) * 1em); }
+   scrolled away from the text it labels. The line box each bubble counts in is
+   read from that bubble's own leading token rather than restated here, so a
+   change to `.md`'s or the prompt's leading moves the cap with it instead of
+   silently mis-measuring it. */
+.bubble > .bubble-body { --cap-lines: 25; }
+.bubble.assistant > .bubble-body { --cap-line-h: calc(var(--md-line-h) * 1em); }
+.bubble.user > .bubble-body { --cap-line-h: calc(var(--prompt-line-h) * 1em); }
 .tool-read-output { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
 .bash-input { --cap-lines: 5; }
 .bash-output { --cap-lines: 5; --cap-extra: calc(0.35rem + 1px); }
