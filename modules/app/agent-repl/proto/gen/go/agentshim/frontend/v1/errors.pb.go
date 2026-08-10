@@ -181,6 +181,7 @@ type FailureKind struct {
 	//	*FailureKind_ApiTurnFailed
 	//	*FailureKind_PromptRefusedByMergeState
 	//	*FailureKind_QueueEntryUninterruptibleTurn
+	//	*FailureKind_TurnUndriven
 	//	*FailureKind_DaemonUnreachable
 	//	*FailureKind_WorkspaceGone
 	//	*FailureKind_BootFailed
@@ -699,6 +700,15 @@ func (x *FailureKind) GetQueueEntryUninterruptibleTurn() *FailureQueueEntryUnint
 	return nil
 }
 
+func (x *FailureKind) GetTurnUndriven() *FailureTurnUndriven {
+	if x != nil {
+		if x, ok := x.Kind.(*FailureKind_TurnUndriven); ok {
+			return x.TurnUndriven
+		}
+	}
+	return nil
+}
+
 func (x *FailureKind) GetDaemonUnreachable() *FailureDaemonUnreachable {
 	if x != nil {
 		if x, ok := x.Kind.(*FailureKind_DaemonUnreachable); ok {
@@ -1042,6 +1052,11 @@ type FailureKind_QueueEntryUninterruptibleTurn struct {
 	QueueEntryUninterruptibleTurn *FailureQueueEntryUninterruptibleTurn `protobuf:"bytes,61,opt,name=queue_entry_uninterruptible_turn,json=queueEntryUninterruptibleTurn,proto3,oneof"`
 }
 
+type FailureKind_TurnUndriven struct {
+	// A turn stood bound with nothing driving it, so the daemon closed it rather than leaving the workspace thinking forever.
+	TurnUndriven *FailureTurnUndriven `protobuf:"bytes,62,opt,name=turn_undriven,json=turnUndriven,proto3,oneof"`
+}
+
 type FailureKind_DaemonUnreachable struct {
 	// ---- CLIENT-LOCAL failures: the one part of this vocabulary a frontend
 	// mints itself. See the note on FailureKind. All resolve BLUE, because a
@@ -1181,6 +1196,8 @@ func (*FailureKind_ApiTurnFailed) isFailureKind_Kind() {}
 func (*FailureKind_PromptRefusedByMergeState) isFailureKind_Kind() {}
 
 func (*FailureKind_QueueEntryUninterruptibleTurn) isFailureKind_Kind() {}
+
+func (*FailureKind_TurnUndriven) isFailureKind_Kind() {}
 
 func (*FailureKind_DaemonUnreachable) isFailureKind_Kind() {}
 
@@ -3901,6 +3918,55 @@ func (x *FailurePromptRefusedByMergeState) GetState() string {
 // interrupted, so it cannot be forced ahead of it.
 //
 // Resolves the workspace BLUE.
+// A turn stood bound with nothing driving it, so the daemon closed it rather
+// than leaving the workspace thinking forever.
+//
+// Resolves the workspace BLUE.
+type FailureTurnUndriven struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which turn, and how long it stood undriven, verbatim.
+	Reason        string `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FailureTurnUndriven) Reset() {
+	*x = FailureTurnUndriven{}
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FailureTurnUndriven) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FailureTurnUndriven) ProtoMessage() {}
+
+func (x *FailureTurnUndriven) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FailureTurnUndriven.ProtoReflect.Descriptor instead.
+func (*FailureTurnUndriven) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *FailureTurnUndriven) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 type FailureQueueEntryUninterruptibleTurn struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Which queued entry, so the card addresses the right row.
@@ -3913,7 +3979,7 @@ type FailureQueueEntryUninterruptibleTurn struct {
 
 func (x *FailureQueueEntryUninterruptibleTurn) Reset() {
 	*x = FailureQueueEntryUninterruptibleTurn{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[53]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3925,7 +3991,7 @@ func (x *FailureQueueEntryUninterruptibleTurn) String() string {
 func (*FailureQueueEntryUninterruptibleTurn) ProtoMessage() {}
 
 func (x *FailureQueueEntryUninterruptibleTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[53]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3938,7 +4004,7 @@ func (x *FailureQueueEntryUninterruptibleTurn) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use FailureQueueEntryUninterruptibleTurn.ProtoReflect.Descriptor instead.
 func (*FailureQueueEntryUninterruptibleTurn) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{53}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *FailureQueueEntryUninterruptibleTurn) GetEntryId() string {
@@ -3974,7 +4040,7 @@ type FailureDaemonUnreachable struct {
 
 func (x *FailureDaemonUnreachable) Reset() {
 	*x = FailureDaemonUnreachable{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[54]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3986,7 +4052,7 @@ func (x *FailureDaemonUnreachable) String() string {
 func (*FailureDaemonUnreachable) ProtoMessage() {}
 
 func (x *FailureDaemonUnreachable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[54]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3999,7 +4065,7 @@ func (x *FailureDaemonUnreachable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureDaemonUnreachable.ProtoReflect.Descriptor instead.
 func (*FailureDaemonUnreachable) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{54}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *FailureDaemonUnreachable) GetCloseCode() int32 {
@@ -4028,7 +4094,7 @@ type FailureWorkspaceGone struct {
 
 func (x *FailureWorkspaceGone) Reset() {
 	*x = FailureWorkspaceGone{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[55]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4040,7 +4106,7 @@ func (x *FailureWorkspaceGone) String() string {
 func (*FailureWorkspaceGone) ProtoMessage() {}
 
 func (x *FailureWorkspaceGone) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[55]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4053,7 +4119,7 @@ func (x *FailureWorkspaceGone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureWorkspaceGone.ProtoReflect.Descriptor instead.
 func (*FailureWorkspaceGone) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{55}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{56}
 }
 
 // The frontend could not start at all.
@@ -4073,7 +4139,7 @@ type FailureBootFailed struct {
 
 func (x *FailureBootFailed) Reset() {
 	*x = FailureBootFailed{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[56]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4085,7 +4151,7 @@ func (x *FailureBootFailed) String() string {
 func (*FailureBootFailed) ProtoMessage() {}
 
 func (x *FailureBootFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[56]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4098,7 +4164,7 @@ func (x *FailureBootFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureBootFailed.ProtoReflect.Descriptor instead.
 func (*FailureBootFailed) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{56}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *FailureBootFailed) GetCause() string {
@@ -4125,7 +4191,7 @@ type FailureControlPlaneFailed struct {
 
 func (x *FailureControlPlaneFailed) Reset() {
 	*x = FailureControlPlaneFailed{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[57]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4137,7 +4203,7 @@ func (x *FailureControlPlaneFailed) String() string {
 func (*FailureControlPlaneFailed) ProtoMessage() {}
 
 func (x *FailureControlPlaneFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[57]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4150,7 +4216,7 @@ func (x *FailureControlPlaneFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureControlPlaneFailed.ProtoReflect.Descriptor instead.
 func (*FailureControlPlaneFailed) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{57}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *FailureControlPlaneFailed) GetWhat() string {
@@ -4183,7 +4249,7 @@ type FailureFrameUndecodable struct {
 
 func (x *FailureFrameUndecodable) Reset() {
 	*x = FailureFrameUndecodable{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[58]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4195,7 +4261,7 @@ func (x *FailureFrameUndecodable) String() string {
 func (*FailureFrameUndecodable) ProtoMessage() {}
 
 func (x *FailureFrameUndecodable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[58]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4208,7 +4274,7 @@ func (x *FailureFrameUndecodable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureFrameUndecodable.ProtoReflect.Descriptor instead.
 func (*FailureFrameUndecodable) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{58}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *FailureFrameUndecodable) GetCause() string {
@@ -4241,7 +4307,7 @@ type FailureStaleBundle struct {
 
 func (x *FailureStaleBundle) Reset() {
 	*x = FailureStaleBundle{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[59]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4253,7 +4319,7 @@ func (x *FailureStaleBundle) String() string {
 func (*FailureStaleBundle) ProtoMessage() {}
 
 func (x *FailureStaleBundle) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[59]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4266,7 +4332,7 @@ func (x *FailureStaleBundle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureStaleBundle.ProtoReflect.Descriptor instead.
 func (*FailureStaleBundle) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{59}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *FailureStaleBundle) GetDetail() string {
@@ -4291,7 +4357,7 @@ type FailureCommandUnsent struct {
 
 func (x *FailureCommandUnsent) Reset() {
 	*x = FailureCommandUnsent{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[60]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4303,7 +4369,7 @@ func (x *FailureCommandUnsent) String() string {
 func (*FailureCommandUnsent) ProtoMessage() {}
 
 func (x *FailureCommandUnsent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[60]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4316,7 +4382,7 @@ func (x *FailureCommandUnsent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailureCommandUnsent.ProtoReflect.Descriptor instead.
 func (*FailureCommandUnsent) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{60}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *FailureCommandUnsent) GetCommand() string {
@@ -4343,7 +4409,7 @@ type FailureCommandRejectionUnclassified struct {
 
 func (x *FailureCommandRejectionUnclassified) Reset() {
 	*x = FailureCommandRejectionUnclassified{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[61]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4355,7 +4421,7 @@ func (x *FailureCommandRejectionUnclassified) String() string {
 func (*FailureCommandRejectionUnclassified) ProtoMessage() {}
 
 func (x *FailureCommandRejectionUnclassified) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[61]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4368,7 +4434,7 @@ func (x *FailureCommandRejectionUnclassified) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use FailureCommandRejectionUnclassified.ProtoReflect.Descriptor instead.
 func (*FailureCommandRejectionUnclassified) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{61}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *FailureCommandRejectionUnclassified) GetCommand() string {
@@ -4418,7 +4484,7 @@ type QueryTerminationFailure struct {
 
 func (x *QueryTerminationFailure) Reset() {
 	*x = QueryTerminationFailure{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[62]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4430,7 +4496,7 @@ func (x *QueryTerminationFailure) String() string {
 func (*QueryTerminationFailure) ProtoMessage() {}
 
 func (x *QueryTerminationFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[62]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4443,7 +4509,7 @@ func (x *QueryTerminationFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryTerminationFailure.ProtoReflect.Descriptor instead.
 func (*QueryTerminationFailure) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{62}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *QueryTerminationFailure) GetQueryInstanceId() string {
@@ -4598,7 +4664,7 @@ type SessionResumeFailure struct {
 
 func (x *SessionResumeFailure) Reset() {
 	*x = SessionResumeFailure{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[63]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4610,7 +4676,7 @@ func (x *SessionResumeFailure) String() string {
 func (*SessionResumeFailure) ProtoMessage() {}
 
 func (x *SessionResumeFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[63]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4623,7 +4689,7 @@ func (x *SessionResumeFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionResumeFailure.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailure) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{63}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *SessionResumeFailure) GetClaudeSessionId() string {
@@ -4781,7 +4847,7 @@ type SessionResumeFailureCreate struct {
 
 func (x *SessionResumeFailureCreate) Reset() {
 	*x = SessionResumeFailureCreate{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[64]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4793,7 +4859,7 @@ func (x *SessionResumeFailureCreate) String() string {
 func (*SessionResumeFailureCreate) ProtoMessage() {}
 
 func (x *SessionResumeFailureCreate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[64]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4806,7 +4872,7 @@ func (x *SessionResumeFailureCreate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionResumeFailureCreate.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureCreate) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{64}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{65}
 }
 
 // Marks a resume failure encountered while restoring an allocated agent-repl
@@ -4819,7 +4885,7 @@ type SessionResumeFailureAutomaticRestore struct {
 
 func (x *SessionResumeFailureAutomaticRestore) Reset() {
 	*x = SessionResumeFailureAutomaticRestore{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[65]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4831,7 +4897,7 @@ func (x *SessionResumeFailureAutomaticRestore) String() string {
 func (*SessionResumeFailureAutomaticRestore) ProtoMessage() {}
 
 func (x *SessionResumeFailureAutomaticRestore) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[65]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4844,7 +4910,7 @@ func (x *SessionResumeFailureAutomaticRestore) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use SessionResumeFailureAutomaticRestore.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureAutomaticRestore) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{65}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{66}
 }
 
 // Records every transcript location examined for the authoritative Claude
@@ -4859,7 +4925,7 @@ type SessionResumeFailureTranscriptUnavailable struct {
 
 func (x *SessionResumeFailureTranscriptUnavailable) Reset() {
 	*x = SessionResumeFailureTranscriptUnavailable{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[66]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4871,7 +4937,7 @@ func (x *SessionResumeFailureTranscriptUnavailable) String() string {
 func (*SessionResumeFailureTranscriptUnavailable) ProtoMessage() {}
 
 func (x *SessionResumeFailureTranscriptUnavailable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[66]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4884,7 +4950,7 @@ func (x *SessionResumeFailureTranscriptUnavailable) ProtoReflect() protoreflect.
 
 // Deprecated: Use SessionResumeFailureTranscriptUnavailable.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureTranscriptUnavailable) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{66}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *SessionResumeFailureTranscriptUnavailable) GetSearchedPaths() []string {
@@ -4907,7 +4973,7 @@ type SessionResumeFailureIdentityMismatch struct {
 
 func (x *SessionResumeFailureIdentityMismatch) Reset() {
 	*x = SessionResumeFailureIdentityMismatch{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[67]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4919,7 +4985,7 @@ func (x *SessionResumeFailureIdentityMismatch) String() string {
 func (*SessionResumeFailureIdentityMismatch) ProtoMessage() {}
 
 func (x *SessionResumeFailureIdentityMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[67]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4932,7 +4998,7 @@ func (x *SessionResumeFailureIdentityMismatch) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use SessionResumeFailureIdentityMismatch.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureIdentityMismatch) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{67}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *SessionResumeFailureIdentityMismatch) GetReplacementClaudeSessionId() string {
@@ -4955,7 +5021,7 @@ type SessionResumeFailureBringUpFailure struct {
 
 func (x *SessionResumeFailureBringUpFailure) Reset() {
 	*x = SessionResumeFailureBringUpFailure{}
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[68]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4967,7 +5033,7 @@ func (x *SessionResumeFailureBringUpFailure) String() string {
 func (*SessionResumeFailureBringUpFailure) ProtoMessage() {}
 
 func (x *SessionResumeFailureBringUpFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[68]
+	mi := &file_agentshim_frontend_v1_errors_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4980,7 +5046,7 @@ func (x *SessionResumeFailureBringUpFailure) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use SessionResumeFailureBringUpFailure.ProtoReflect.Descriptor instead.
 func (*SessionResumeFailureBringUpFailure) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{68}
+	return file_agentshim_frontend_v1_errors_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *SessionResumeFailureBringUpFailure) GetCause() string {
@@ -4998,7 +5064,7 @@ const file_agentshim_frontend_v1_errors_proto_rawDesc = "" +
 	"\x14VendorFailureContext\x12*\n" +
 	"\x11claude_session_id\x18\x01 \x01(\tR\x0fclaudeSessionId\x12$\n" +
 	"\x0eapi_request_id\x18\x02 \x01(\tR\fapiRequestId\x12$\n" +
-	"\x0eapi_message_id\x18\x03 \x01(\tR\fapiMessageId\"\xfe.\n" +
+	"\x0eapi_message_id\x18\x03 \x01(\tR\fapiMessageId\"\xd1/\n" +
 	"\vFailureKind\x12^\n" +
 	"\x12shim_not_connected\x18\n" +
 	" \x01(\v2..agentshim.frontend.v1.FailureShimNotConnectedH\x00R\x10shimNotConnected\x12Q\n" +
@@ -5054,7 +5120,8 @@ const file_agentshim_frontend_v1_errors_proto_rawDesc = "" +
 	"apiRefusal\x12U\n" +
 	"\x0fapi_turn_failed\x18; \x01(\v2+.agentshim.frontend.v1.FailureApiTurnFailedH\x00R\rapiTurnFailed\x12{\n" +
 	"\x1dprompt_refused_by_merge_state\x18< \x01(\v27.agentshim.frontend.v1.FailurePromptRefusedByMergeStateH\x00R\x19promptRefusedByMergeState\x12\x86\x01\n" +
-	" queue_entry_uninterruptible_turn\x18= \x01(\v2;.agentshim.frontend.v1.FailureQueueEntryUninterruptibleTurnH\x00R\x1dqueueEntryUninterruptibleTurn\x12`\n" +
+	" queue_entry_uninterruptible_turn\x18= \x01(\v2;.agentshim.frontend.v1.FailureQueueEntryUninterruptibleTurnH\x00R\x1dqueueEntryUninterruptibleTurn\x12Q\n" +
+	"\rturn_undriven\x18> \x01(\v2*.agentshim.frontend.v1.FailureTurnUndrivenH\x00R\fturnUndriven\x12`\n" +
 	"\x12daemon_unreachable\x18d \x01(\v2/.agentshim.frontend.v1.FailureDaemonUnreachableH\x00R\x11daemonUnreachable\x12T\n" +
 	"\x0eworkspace_gone\x18e \x01(\v2+.agentshim.frontend.v1.FailureWorkspaceGoneH\x00R\rworkspaceGone\x12K\n" +
 	"\vboot_failed\x18f \x01(\v2(.agentshim.frontend.v1.FailureBootFailedH\x00R\n" +
@@ -5209,7 +5276,9 @@ const file_agentshim_frontend_v1_errors_proto_rawDesc = "" +
 	"\vstop_reason\x18\x02 \x01(\tR\n" +
 	"stopReason\"8\n" +
 	" FailurePromptRefusedByMergeState\x12\x14\n" +
-	"\x05state\x18\x01 \x01(\tR\x05state\"\x82\x01\n" +
+	"\x05state\x18\x01 \x01(\tR\x05state\"-\n" +
+	"\x13FailureTurnUndriven\x12\x16\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x82\x01\n" +
 	"$FailureQueueEntryUninterruptibleTurn\x12\x19\n" +
 	"\bentry_id\x18\x01 \x01(\tR\aentryId\x12?\n" +
 	"\acommand\x18\x02 \x01(\x0e2%.agentshim.frontend.v1.SessionCommandR\acommand\"\\\n" +
@@ -5281,7 +5350,7 @@ func file_agentshim_frontend_v1_errors_proto_rawDescGZIP() []byte {
 	return file_agentshim_frontend_v1_errors_proto_rawDescData
 }
 
-var file_agentshim_frontend_v1_errors_proto_msgTypes = make([]protoimpl.MessageInfo, 69)
+var file_agentshim_frontend_v1_errors_proto_msgTypes = make([]protoimpl.MessageInfo, 70)
 var file_agentshim_frontend_v1_errors_proto_goTypes = []any{
 	(*VendorFailureContext)(nil),                      // 0: agentshim.frontend.v1.VendorFailureContext
 	(*FailureKind)(nil),                               // 1: agentshim.frontend.v1.FailureKind
@@ -5336,27 +5405,28 @@ var file_agentshim_frontend_v1_errors_proto_goTypes = []any{
 	(*FailureApiRefusal)(nil),                         // 50: agentshim.frontend.v1.FailureApiRefusal
 	(*FailureApiTurnFailed)(nil),                      // 51: agentshim.frontend.v1.FailureApiTurnFailed
 	(*FailurePromptRefusedByMergeState)(nil),          // 52: agentshim.frontend.v1.FailurePromptRefusedByMergeState
-	(*FailureQueueEntryUninterruptibleTurn)(nil),      // 53: agentshim.frontend.v1.FailureQueueEntryUninterruptibleTurn
-	(*FailureDaemonUnreachable)(nil),                  // 54: agentshim.frontend.v1.FailureDaemonUnreachable
-	(*FailureWorkspaceGone)(nil),                      // 55: agentshim.frontend.v1.FailureWorkspaceGone
-	(*FailureBootFailed)(nil),                         // 56: agentshim.frontend.v1.FailureBootFailed
-	(*FailureControlPlaneFailed)(nil),                 // 57: agentshim.frontend.v1.FailureControlPlaneFailed
-	(*FailureFrameUndecodable)(nil),                   // 58: agentshim.frontend.v1.FailureFrameUndecodable
-	(*FailureStaleBundle)(nil),                        // 59: agentshim.frontend.v1.FailureStaleBundle
-	(*FailureCommandUnsent)(nil),                      // 60: agentshim.frontend.v1.FailureCommandUnsent
-	(*FailureCommandRejectionUnclassified)(nil),       // 61: agentshim.frontend.v1.FailureCommandRejectionUnclassified
-	(*QueryTerminationFailure)(nil),                   // 62: agentshim.frontend.v1.QueryTerminationFailure
-	(*SessionResumeFailure)(nil),                      // 63: agentshim.frontend.v1.SessionResumeFailure
-	(*SessionResumeFailureCreate)(nil),                // 64: agentshim.frontend.v1.SessionResumeFailureCreate
-	(*SessionResumeFailureAutomaticRestore)(nil),      // 65: agentshim.frontend.v1.SessionResumeFailureAutomaticRestore
-	(*SessionResumeFailureTranscriptUnavailable)(nil), // 66: agentshim.frontend.v1.SessionResumeFailureTranscriptUnavailable
-	(*SessionResumeFailureIdentityMismatch)(nil),      // 67: agentshim.frontend.v1.SessionResumeFailureIdentityMismatch
-	(*SessionResumeFailureBringUpFailure)(nil),        // 68: agentshim.frontend.v1.SessionResumeFailureBringUpFailure
-	(SessionCommand)(0),                               // 69: agentshim.frontend.v1.SessionCommand
-	(*v1.VendorSessionIdentityUnavailable)(nil),       // 70: agentshim.core.v1.VendorSessionIdentityUnavailable
-	(*v1.UnexpectedQueryEof)(nil),                     // 71: agentshim.core.v1.UnexpectedQueryEof
-	(*v1.QueryIteratorFailure)(nil),                   // 72: agentshim.core.v1.QueryIteratorFailure
-	(*v1.QueryStartupFailure)(nil),                    // 73: agentshim.core.v1.QueryStartupFailure
+	(*FailureTurnUndriven)(nil),                       // 53: agentshim.frontend.v1.FailureTurnUndriven
+	(*FailureQueueEntryUninterruptibleTurn)(nil),      // 54: agentshim.frontend.v1.FailureQueueEntryUninterruptibleTurn
+	(*FailureDaemonUnreachable)(nil),                  // 55: agentshim.frontend.v1.FailureDaemonUnreachable
+	(*FailureWorkspaceGone)(nil),                      // 56: agentshim.frontend.v1.FailureWorkspaceGone
+	(*FailureBootFailed)(nil),                         // 57: agentshim.frontend.v1.FailureBootFailed
+	(*FailureControlPlaneFailed)(nil),                 // 58: agentshim.frontend.v1.FailureControlPlaneFailed
+	(*FailureFrameUndecodable)(nil),                   // 59: agentshim.frontend.v1.FailureFrameUndecodable
+	(*FailureStaleBundle)(nil),                        // 60: agentshim.frontend.v1.FailureStaleBundle
+	(*FailureCommandUnsent)(nil),                      // 61: agentshim.frontend.v1.FailureCommandUnsent
+	(*FailureCommandRejectionUnclassified)(nil),       // 62: agentshim.frontend.v1.FailureCommandRejectionUnclassified
+	(*QueryTerminationFailure)(nil),                   // 63: agentshim.frontend.v1.QueryTerminationFailure
+	(*SessionResumeFailure)(nil),                      // 64: agentshim.frontend.v1.SessionResumeFailure
+	(*SessionResumeFailureCreate)(nil),                // 65: agentshim.frontend.v1.SessionResumeFailureCreate
+	(*SessionResumeFailureAutomaticRestore)(nil),      // 66: agentshim.frontend.v1.SessionResumeFailureAutomaticRestore
+	(*SessionResumeFailureTranscriptUnavailable)(nil), // 67: agentshim.frontend.v1.SessionResumeFailureTranscriptUnavailable
+	(*SessionResumeFailureIdentityMismatch)(nil),      // 68: agentshim.frontend.v1.SessionResumeFailureIdentityMismatch
+	(*SessionResumeFailureBringUpFailure)(nil),        // 69: agentshim.frontend.v1.SessionResumeFailureBringUpFailure
+	(SessionCommand)(0),                               // 70: agentshim.frontend.v1.SessionCommand
+	(*v1.VendorSessionIdentityUnavailable)(nil),       // 71: agentshim.core.v1.VendorSessionIdentityUnavailable
+	(*v1.UnexpectedQueryEof)(nil),                     // 72: agentshim.core.v1.UnexpectedQueryEof
+	(*v1.QueryIteratorFailure)(nil),                   // 73: agentshim.core.v1.QueryIteratorFailure
+	(*v1.QueryStartupFailure)(nil),                    // 74: agentshim.core.v1.QueryStartupFailure
 }
 var file_agentshim_frontend_v1_errors_proto_depIdxs = []int32{
 	2,  // 0: agentshim.frontend.v1.FailureKind.shim_not_connected:type_name -> agentshim.frontend.v1.FailureShimNotConnected
@@ -5410,50 +5480,51 @@ var file_agentshim_frontend_v1_errors_proto_depIdxs = []int32{
 	50, // 48: agentshim.frontend.v1.FailureKind.api_refusal:type_name -> agentshim.frontend.v1.FailureApiRefusal
 	51, // 49: agentshim.frontend.v1.FailureKind.api_turn_failed:type_name -> agentshim.frontend.v1.FailureApiTurnFailed
 	52, // 50: agentshim.frontend.v1.FailureKind.prompt_refused_by_merge_state:type_name -> agentshim.frontend.v1.FailurePromptRefusedByMergeState
-	53, // 51: agentshim.frontend.v1.FailureKind.queue_entry_uninterruptible_turn:type_name -> agentshim.frontend.v1.FailureQueueEntryUninterruptibleTurn
-	54, // 52: agentshim.frontend.v1.FailureKind.daemon_unreachable:type_name -> agentshim.frontend.v1.FailureDaemonUnreachable
-	55, // 53: agentshim.frontend.v1.FailureKind.workspace_gone:type_name -> agentshim.frontend.v1.FailureWorkspaceGone
-	56, // 54: agentshim.frontend.v1.FailureKind.boot_failed:type_name -> agentshim.frontend.v1.FailureBootFailed
-	57, // 55: agentshim.frontend.v1.FailureKind.control_plane_failed:type_name -> agentshim.frontend.v1.FailureControlPlaneFailed
-	58, // 56: agentshim.frontend.v1.FailureKind.frame_undecodable:type_name -> agentshim.frontend.v1.FailureFrameUndecodable
-	59, // 57: agentshim.frontend.v1.FailureKind.stale_bundle:type_name -> agentshim.frontend.v1.FailureStaleBundle
-	60, // 58: agentshim.frontend.v1.FailureKind.command_unsent:type_name -> agentshim.frontend.v1.FailureCommandUnsent
-	61, // 59: agentshim.frontend.v1.FailureKind.command_rejection_unclassified:type_name -> agentshim.frontend.v1.FailureCommandRejectionUnclassified
-	62, // 60: agentshim.frontend.v1.FailureQueryTermination.detail:type_name -> agentshim.frontend.v1.QueryTerminationFailure
-	63, // 61: agentshim.frontend.v1.FailureSessionResumeFailed.detail:type_name -> agentshim.frontend.v1.SessionResumeFailure
-	0,  // 62: agentshim.frontend.v1.FailureApiAuthenticationFailed.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 63: agentshim.frontend.v1.FailureApiBillingError.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 64: agentshim.frontend.v1.FailureApiRateLimit.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 65: agentshim.frontend.v1.FailureApiInvalidRequest.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 66: agentshim.frontend.v1.FailureApiServerError.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 67: agentshim.frontend.v1.FailureApiOverloaded.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 68: agentshim.frontend.v1.FailureApiOAuthOrgNotAllowed.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 69: agentshim.frontend.v1.FailureApiModelNotFound.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 70: agentshim.frontend.v1.FailureApiNetworkDown.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 71: agentshim.frontend.v1.FailureApiRequestFailed.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 72: agentshim.frontend.v1.FailureApiUnknown.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 73: agentshim.frontend.v1.FailureApiMaxOutputTokens.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 74: agentshim.frontend.v1.FailureApiMaxTurns.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 75: agentshim.frontend.v1.FailureApiMaxBudget.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 76: agentshim.frontend.v1.FailureApiExecutionError.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 77: agentshim.frontend.v1.FailureApiRefusal.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	0,  // 78: agentshim.frontend.v1.FailureApiTurnFailed.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	69, // 79: agentshim.frontend.v1.FailureQueueEntryUninterruptibleTurn.command:type_name -> agentshim.frontend.v1.SessionCommand
-	70, // 80: agentshim.frontend.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> agentshim.core.v1.VendorSessionIdentityUnavailable
-	71, // 81: agentshim.frontend.v1.QueryTerminationFailure.unexpected_eof:type_name -> agentshim.core.v1.UnexpectedQueryEof
-	72, // 82: agentshim.frontend.v1.QueryTerminationFailure.iterator_failure:type_name -> agentshim.core.v1.QueryIteratorFailure
-	73, // 83: agentshim.frontend.v1.QueryTerminationFailure.startup_failure:type_name -> agentshim.core.v1.QueryStartupFailure
-	64, // 84: agentshim.frontend.v1.SessionResumeFailure.create:type_name -> agentshim.frontend.v1.SessionResumeFailureCreate
-	65, // 85: agentshim.frontend.v1.SessionResumeFailure.automatic_restore:type_name -> agentshim.frontend.v1.SessionResumeFailureAutomaticRestore
-	66, // 86: agentshim.frontend.v1.SessionResumeFailure.transcript_unavailable:type_name -> agentshim.frontend.v1.SessionResumeFailureTranscriptUnavailable
-	67, // 87: agentshim.frontend.v1.SessionResumeFailure.identity_mismatch:type_name -> agentshim.frontend.v1.SessionResumeFailureIdentityMismatch
-	62, // 88: agentshim.frontend.v1.SessionResumeFailure.query_termination:type_name -> agentshim.frontend.v1.QueryTerminationFailure
-	68, // 89: agentshim.frontend.v1.SessionResumeFailure.bring_up_failure:type_name -> agentshim.frontend.v1.SessionResumeFailureBringUpFailure
-	90, // [90:90] is the sub-list for method output_type
-	90, // [90:90] is the sub-list for method input_type
-	90, // [90:90] is the sub-list for extension type_name
-	90, // [90:90] is the sub-list for extension extendee
-	0,  // [0:90] is the sub-list for field type_name
+	54, // 51: agentshim.frontend.v1.FailureKind.queue_entry_uninterruptible_turn:type_name -> agentshim.frontend.v1.FailureQueueEntryUninterruptibleTurn
+	53, // 52: agentshim.frontend.v1.FailureKind.turn_undriven:type_name -> agentshim.frontend.v1.FailureTurnUndriven
+	55, // 53: agentshim.frontend.v1.FailureKind.daemon_unreachable:type_name -> agentshim.frontend.v1.FailureDaemonUnreachable
+	56, // 54: agentshim.frontend.v1.FailureKind.workspace_gone:type_name -> agentshim.frontend.v1.FailureWorkspaceGone
+	57, // 55: agentshim.frontend.v1.FailureKind.boot_failed:type_name -> agentshim.frontend.v1.FailureBootFailed
+	58, // 56: agentshim.frontend.v1.FailureKind.control_plane_failed:type_name -> agentshim.frontend.v1.FailureControlPlaneFailed
+	59, // 57: agentshim.frontend.v1.FailureKind.frame_undecodable:type_name -> agentshim.frontend.v1.FailureFrameUndecodable
+	60, // 58: agentshim.frontend.v1.FailureKind.stale_bundle:type_name -> agentshim.frontend.v1.FailureStaleBundle
+	61, // 59: agentshim.frontend.v1.FailureKind.command_unsent:type_name -> agentshim.frontend.v1.FailureCommandUnsent
+	62, // 60: agentshim.frontend.v1.FailureKind.command_rejection_unclassified:type_name -> agentshim.frontend.v1.FailureCommandRejectionUnclassified
+	63, // 61: agentshim.frontend.v1.FailureQueryTermination.detail:type_name -> agentshim.frontend.v1.QueryTerminationFailure
+	64, // 62: agentshim.frontend.v1.FailureSessionResumeFailed.detail:type_name -> agentshim.frontend.v1.SessionResumeFailure
+	0,  // 63: agentshim.frontend.v1.FailureApiAuthenticationFailed.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 64: agentshim.frontend.v1.FailureApiBillingError.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 65: agentshim.frontend.v1.FailureApiRateLimit.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 66: agentshim.frontend.v1.FailureApiInvalidRequest.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 67: agentshim.frontend.v1.FailureApiServerError.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 68: agentshim.frontend.v1.FailureApiOverloaded.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 69: agentshim.frontend.v1.FailureApiOAuthOrgNotAllowed.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 70: agentshim.frontend.v1.FailureApiModelNotFound.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 71: agentshim.frontend.v1.FailureApiNetworkDown.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 72: agentshim.frontend.v1.FailureApiRequestFailed.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 73: agentshim.frontend.v1.FailureApiUnknown.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 74: agentshim.frontend.v1.FailureApiMaxOutputTokens.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 75: agentshim.frontend.v1.FailureApiMaxTurns.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 76: agentshim.frontend.v1.FailureApiMaxBudget.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 77: agentshim.frontend.v1.FailureApiExecutionError.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 78: agentshim.frontend.v1.FailureApiRefusal.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	0,  // 79: agentshim.frontend.v1.FailureApiTurnFailed.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
+	70, // 80: agentshim.frontend.v1.FailureQueueEntryUninterruptibleTurn.command:type_name -> agentshim.frontend.v1.SessionCommand
+	71, // 81: agentshim.frontend.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> agentshim.core.v1.VendorSessionIdentityUnavailable
+	72, // 82: agentshim.frontend.v1.QueryTerminationFailure.unexpected_eof:type_name -> agentshim.core.v1.UnexpectedQueryEof
+	73, // 83: agentshim.frontend.v1.QueryTerminationFailure.iterator_failure:type_name -> agentshim.core.v1.QueryIteratorFailure
+	74, // 84: agentshim.frontend.v1.QueryTerminationFailure.startup_failure:type_name -> agentshim.core.v1.QueryStartupFailure
+	65, // 85: agentshim.frontend.v1.SessionResumeFailure.create:type_name -> agentshim.frontend.v1.SessionResumeFailureCreate
+	66, // 86: agentshim.frontend.v1.SessionResumeFailure.automatic_restore:type_name -> agentshim.frontend.v1.SessionResumeFailureAutomaticRestore
+	67, // 87: agentshim.frontend.v1.SessionResumeFailure.transcript_unavailable:type_name -> agentshim.frontend.v1.SessionResumeFailureTranscriptUnavailable
+	68, // 88: agentshim.frontend.v1.SessionResumeFailure.identity_mismatch:type_name -> agentshim.frontend.v1.SessionResumeFailureIdentityMismatch
+	63, // 89: agentshim.frontend.v1.SessionResumeFailure.query_termination:type_name -> agentshim.frontend.v1.QueryTerminationFailure
+	69, // 90: agentshim.frontend.v1.SessionResumeFailure.bring_up_failure:type_name -> agentshim.frontend.v1.SessionResumeFailureBringUpFailure
+	91, // [91:91] is the sub-list for method output_type
+	91, // [91:91] is the sub-list for method input_type
+	91, // [91:91] is the sub-list for extension type_name
+	91, // [91:91] is the sub-list for extension extendee
+	0,  // [0:91] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_errors_proto_init() }
@@ -5515,6 +5586,7 @@ func file_agentshim_frontend_v1_errors_proto_init() {
 		(*FailureKind_ApiTurnFailed)(nil),
 		(*FailureKind_PromptRefusedByMergeState)(nil),
 		(*FailureKind_QueueEntryUninterruptibleTurn)(nil),
+		(*FailureKind_TurnUndriven)(nil),
 		(*FailureKind_DaemonUnreachable)(nil),
 		(*FailureKind_WorkspaceGone)(nil),
 		(*FailureKind_BootFailed)(nil),
@@ -5524,14 +5596,14 @@ func file_agentshim_frontend_v1_errors_proto_init() {
 		(*FailureKind_CommandUnsent)(nil),
 		(*FailureKind_CommandRejectionUnclassified)(nil),
 	}
-	file_agentshim_frontend_v1_errors_proto_msgTypes[62].OneofWrappers = []any{
+	file_agentshim_frontend_v1_errors_proto_msgTypes[63].OneofWrappers = []any{
 		(*QueryTerminationFailure_VendorSessionId)(nil),
 		(*QueryTerminationFailure_VendorSessionIdentityUnavailable)(nil),
 		(*QueryTerminationFailure_UnexpectedEof)(nil),
 		(*QueryTerminationFailure_IteratorFailure)(nil),
 		(*QueryTerminationFailure_StartupFailure)(nil),
 	}
-	file_agentshim_frontend_v1_errors_proto_msgTypes[63].OneofWrappers = []any{
+	file_agentshim_frontend_v1_errors_proto_msgTypes[64].OneofWrappers = []any{
 		(*SessionResumeFailure_Create)(nil),
 		(*SessionResumeFailure_AutomaticRestore)(nil),
 		(*SessionResumeFailure_TranscriptUnavailable)(nil),
@@ -5545,7 +5617,7 @@ func file_agentshim_frontend_v1_errors_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_errors_proto_rawDesc), len(file_agentshim_frontend_v1_errors_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   69,
+			NumMessages:   70,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
