@@ -114,9 +114,19 @@ type Manager struct {
 	resolver Resolver
 	clock    func() int64
 
-	mu     sync.Mutex
-	lastAt int64
-	last   map[string]frontendv1.RenderState // last-resolved state per workspace
+	// emitMu admits ONE drainer of pendingPublications at a time. It is taken
+	// with mu RELEASED and is the only lock held while a caller's synchronous
+	// publisher runs, which is what keeps this manager out of the frontend's
+	// lock order — see stagePublishLocked.
+	emitMu sync.Mutex
+
+	mu sync.Mutex
+	// pendingPublications is the ordered outbox of synchronous frontend
+	// publications staged under mu and emitted after it is released. See
+	// stagePublishLocked for why the barrier moved off the lock hold.
+	pendingPublications []func()
+	lastAt              int64
+	last                map[string]frontendv1.RenderState // last-resolved state per workspace
 	// lastTasks is the last-pushed live_task_count per workspace. The count is
 	// an INPUT the frontend renders (the footer's live-task figure, sourced via
 	// progress.ApplyWorkspaceState), so it can move while the render state does
@@ -1190,6 +1200,47 @@ func (m *Manager) reresolveLocked(workspace, causeKind string, causeSeq uint64) 
 	}
 
 	return m.pushMessageLocked(workspace, msg)
+}
+
+// stagePublishLocked queues one SYNCHRONOUS frontend publication to run once mu
+// is released. Caller holds mu.
+//
+// THE BARRIER MOVED OFF THE LOCK HOLD, and it had to. A synchronous publisher
+// is the frontend's Broadcast: it takes the frontend's own lock, and the
+// frontend's materialization release calls back into this manager's snapshot
+// while holding that lock. Calling out from under mu therefore closed a cycle
+// in which mu was held forever — and mu is what every session controller and
+// the merge queue's status ingest need, so all of them wedged behind it. That
+// happened twice in production.
+//
+// The ordering the lock hold bought is kept exactly: the position of a
+// publication is fixed HERE, under mu, so no later transition can stage ahead
+// of an earlier one, and drainPublications replays that order one at a time.
+func (m *Manager) stagePublishLocked(emit func()) {
+	m.pendingPublications = append(m.pendingPublications, emit)
+}
+
+// drainPublications emits every staged publication, in staging order, with mu
+// RELEASED. emitMu admits one drainer, so a goroutine that has staged but not
+// yet reached here cannot have its publication overtaken — whichever drainer
+// runs first emits it, in the order mu fixed.
+//
+// Callers register it with `defer m.drainPublications()` BEFORE taking mu, so
+// the deferred unlock runs first.
+func (m *Manager) drainPublications() {
+	m.emitMu.Lock()
+	defer m.emitMu.Unlock()
+	for {
+		m.mu.Lock()
+		if len(m.pendingPublications) == 0 {
+			m.mu.Unlock()
+			return
+		}
+		emit := m.pendingPublications[0]
+		m.pendingPublications = m.pendingPublications[1:]
+		m.mu.Unlock()
+		emit()
+	}
 }
 
 // pushLocked broadcasts a WorkspaceState to every subscriber. A full
