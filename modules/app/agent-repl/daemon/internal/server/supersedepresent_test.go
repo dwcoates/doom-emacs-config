@@ -10,7 +10,7 @@ import (
 // ---------------------------------------------------------------------------
 // A SUPERSEDE WITH A SUCCESSOR STILL COMING UP IS NOT NEWS.
 //
-// supersederesolve.go closes the window on the successor's OPERATIONAL edge,
+// deathresolve.go closes the window on the successor's OPERATIONAL edge,
 // which is the only honest close — but the gap between the supersede (inside
 // Create) and that edge (the shim's handshake) is wide enough for a connect
 // snapshot to fall into, and every snapshot taken in it handed the user an open
