@@ -628,12 +628,47 @@ a rival session."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let ((ensured nil))
       (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+                ((symbol-function 'agent-repl-uds-connect) #'ignore)
                 ((symbol-function 'agent-repl--frontend-after-daemon-ensured)
                  (lambda (_ok _fail &optional _f) (setq ensured t))))
         ;; Act
         (agent-repl--frontend-reattach-check)
         ;; Assert
         (should ensured)))))
+
+(ert-deftest agent-repl-test-frontend-reattach-check-dials-when-no-retry-pending ()
+  "A down link with no reconnect pending is redialed by the sweep itself.
+Ensuring the daemon PROCESS never redials the LINK, so a sweep that only
+ensured left the link down for as long as the transport ladder was silent."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let ((agent-repl--uds-reconnect-timer nil)
+          (dialed 0))
+      (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+                ((symbol-function 'agent-repl-uds-connect)
+                 (lambda (&rest _) (cl-incf dialed)))
+                ((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+                 (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--frontend-reattach-check)
+        ;; Assert
+        (should (= dialed 1))))))
+
+(ert-deftest agent-repl-test-frontend-reattach-check-defers-to-a-pending-retry ()
+  "A pending reconnect owns the redial; the sweep must not stack a second."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let ((agent-repl--uds-reconnect-timer (timer-create))
+          (dialed 0))
+      (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+                ((symbol-function 'agent-repl-uds-connect)
+                 (lambda (&rest _) (cl-incf dialed)))
+                ((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+                 (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--frontend-reattach-check)
+        ;; Assert
+        (should (= dialed 0))))))
 
 ;;;; ---- the sweep is the RECOVERY sweep, not only the reattach sweep ------
 ;;
