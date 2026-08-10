@@ -37,6 +37,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CommandDispatcher, InterruptConfirmRequiredError } from "../src/command-dispatch.js";
 import { decodeFrontendFrame } from "../src/frontend-proto.js";
 import { ProgressFooter, footerAgentRows } from "../src/progress-footer.js";
+import { resolveFooterLiveness } from "../src/footer-liveness.js";
 import { WorkspaceSidebar } from "../src/sidebar.js";
 import { StateAdapter } from "../src/state-adapter.js";
 import { ConversationStore } from "../src/store.js";
@@ -141,15 +142,22 @@ function flow(): Flow {
     },
     paint() {
       const s = store.state;
-      footer.render({
-        progress: store.progress,
-        renderState: s.renderState,
-        mergeStatus: s.mergeStatus,
-        agents: footerAgentRows(s.items, s.tokenUtilization),
-        tasks: store.taskRoster,
-        items: s.items,
-        timerLabel: TIMER_LABEL,
-      });
+      // Through the liveness choke point exactly as main.ts renders: a live
+      // link and a wired workspace, which is what this flow is about.
+      footer.render(
+        resolveFooterLiveness(
+          { linkUp: true, wired: true },
+          {
+            progress: store.progress,
+            renderState: s.renderState,
+            mergeStatus: s.mergeStatus,
+            agents: footerAgentRows(s.items, s.tokenUtilization),
+            tasks: store.taskRoster,
+            items: s.items,
+            timerLabel: TIMER_LABEL,
+          },
+        ),
+      );
     },
   };
 }
