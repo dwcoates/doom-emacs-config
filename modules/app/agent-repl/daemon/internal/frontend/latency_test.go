@@ -464,7 +464,7 @@ func (c *gatedConn) writeFrame(data []byte, _ func()) error {
 	return <-c.release
 }
 
-func (c *gatedConn) close() error {
+func (c *gatedConn) close(closeCause) error {
 	c.once.Do(func() { close(c.closed) })
 	return nil
 }
@@ -528,7 +528,7 @@ func TestCommandLatencyReportsAnAckThatNeverReachedTheClient(t *testing.T) {
 	s.processCommand(ticket)
 
 	// Act: the connection goes before any writer drained it.
-	s.disconnect(cl)
+	s.disconnect(cl, causeServerShutdown)
 
 	// Assert: the record still happens, and it says the client never saw the
 	// ack rather than reporting a delivery that did not occur.

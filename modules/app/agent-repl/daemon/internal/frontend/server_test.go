@@ -37,9 +37,35 @@ func shortSock(t *testing.T, name string) string {
 	return filepath.Join(dir, name)
 }
 
+// testLogf routes the server's log into the test's output, and stops doing so
+// the moment the test ends.
+//
+// The guard is not decoration. A served connection's writer goroutine outlives
+// several of these tests by design — an HTTP handler's teardown is not
+// something the test's own return synchronizes with — and it now writes a
+// teardown record for every connection it closes. t.Logf after the test has
+// completed is a data race on the testing framework's own state, and it would
+// report as a race in THIS package rather than as the harness lifetime issue it
+// is.
 func testLogf(t *testing.T) func(string, ...any) {
 	t.Helper()
-	return func(format string, args ...any) { t.Logf(format, args...) }
+	var (
+		mu   sync.Mutex
+		live = true
+	)
+	t.Cleanup(func() {
+		mu.Lock()
+		live = false
+		mu.Unlock()
+	})
+	return func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !live {
+			return
+		}
+		t.Logf(format, args...)
+	}
 }
 
 // staticState is a fixed StateProvider for tests.
@@ -1434,7 +1460,7 @@ func TestWriterBlockedInOneWriteAnnouncesItselfWhileItIsBlocked(t *testing.T) {
 		t.Fatalf("blocked record does not name the consumer: %q", line)
 	}
 	c.release <- nil
-	c.close()
+	_ = c.close(causeServerShutdown)
 }
 
 func TestWriterBlockedRecordNamesTheLaneTheHeldFrameLeftBy(t *testing.T) {
@@ -1456,7 +1482,7 @@ func TestWriterBlockedRecordNamesTheLaneTheHeldFrameLeftBy(t *testing.T) {
 		t.Fatalf("blocked record does not name the lane: %q", line)
 	}
 	c.release <- nil
-	c.close()
+	_ = c.close(causeServerShutdown)
 }
 
 func TestWriterStallReportsItsResolution(t *testing.T) {
@@ -1479,7 +1505,7 @@ func TestWriterStallReportsItsResolution(t *testing.T) {
 	if !strings.Contains(line, "ok=true") {
 		t.Fatalf("resolution does not report the write's outcome: %q", line)
 	}
-	c.close()
+	_ = c.close(causeServerShutdown)
 }
 
 func TestWriterStallResolutionReportsAFailedWrite(t *testing.T) {
@@ -1502,7 +1528,7 @@ func TestWriterStallResolutionReportsAFailedWrite(t *testing.T) {
 	if !strings.Contains(line, "ok=false") {
 		t.Fatalf("resolution reports a failed write as delivered: %q", line)
 	}
-	c.close()
+	_ = c.close(causeServerShutdown)
 }
 
 func TestAWriteThatCompletesPromptlyIsNotAnnouncedAtAll(t *testing.T) {
@@ -1526,7 +1552,7 @@ func TestAWriteThatCompletesPromptlyIsNotAnnouncedAtAll(t *testing.T) {
 	if log.contains("OUTBOUND WRITER BLOCKED") {
 		t.Fatal("a prompt write was announced as a stall")
 	}
-	c.close()
+	_ = c.close(causeServerShutdown)
 }
 
 // TestUDSWriteFrameReportsEachAcceptedChunkAsProgress covers the transport half
