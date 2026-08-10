@@ -1066,6 +1066,159 @@ best-effort and must never block the live save)."
         (setq agent-repl--snapshot-archived-this-run t)
         (agent-repl--prune-snapshot-archives)))))
 
+(defcustom agent-repl-snapshot-tombstone-max-age (* 14 24 60 60)
+  "Seconds a tombstoned workspace is kept in the live roster snapshot.
+A tombstone is an identity-only record for a nuked workspace, retained so
+a reopen/revival can still resolve its `:project-dir' and worktree source.
+That value decays: after a couple of weeks the entry is essentially never
+reopened, yet it is re-collected, re-swept and re-serialized on EVERY
+roster write, which is the dominant cost of a write once tombstones
+outnumber live workspaces several times over.
+
+Tombstones older than this are evicted from the live roster by
+`agent-repl--snapshot-evict-expired-tombstones' — but only AFTER being
+written to a loadable snapshot file in the archive dir, so they remain
+reachable through `agent-repl-load-workspace-snapshot-from-archive'.
+Nothing is deleted, only moved out of the hot path.
+
+Set to 0 to disable eviction entirely (tombstones accumulate forever, the
+pre-eviction behavior)."
+  :type 'integer
+  :group 'agent-repl)
+
+(defcustom agent-repl-snapshot-save-idle-delay 3.0
+  "Idle seconds before a requested roster-snapshot write is performed.
+The roster save piggybacks on `agent-repl--state-save', which fires on
+every state mutation — bursts of mutations therefore used to produce a
+burst of full-roster serializations on the main thread, each one a
+user-visible freeze.  `agent-repl--snapshot-save-request' coalesces those
+onto a single idle timer so a burst of N requests collapses to one write.
+
+Only the automatic piggyback path debounces.  Interactive and manual
+saves (`agent-repl-save-workspace-snapshot',
+`agent-repl-update-workspace-snapshot') stay immediate and loud, and
+flush any pending debounce.
+
+Set to 0 to disable debouncing (every request writes synchronously)."
+  :type 'number
+  :group 'agent-repl)
+
+(defvar agent-repl--snapshot-save-timer nil
+  "Pending idle timer for a debounced roster-snapshot write, or nil.
+At most one is live at a time: `agent-repl--snapshot-save-request'
+cancels any existing timer before scheduling, so the delay measures idle
+time since the LAST request rather than the first.")
+
+(defun agent-repl--snapshot-evict-expired-tombstones ()
+  "Move tombstones older than `agent-repl-snapshot-tombstone-max-age' to archive.
+Returns the list of evicted workspace names (nil when nothing expired).
+
+Order matters and is load-bearing: the expired entries are serialized to
+a timestamped file in the snapshot archive dir FIRST, and only once that
+write has succeeded are they dropped from `agent-repl--workspaces' via
+`agent-repl--ws-forget'.  A failed archive write therefore evicts
+nothing — the tombstones stay in the roster and the next save retries.
+
+The archive file uses the ordinary snapshot plist format, so it appears
+in `agent-repl--snapshot-archive-candidates' and loads through
+`agent-repl-load-workspace-snapshot-from-archive' like any other archive.
+Its name carries an `-expired-tombstones' suffix after the sortable
+timestamp so it interleaves chronologically with the per-session
+archives and is subject to the same `--prune-snapshot-archives' cap.
+
+No-op when the cap is 0 (eviction disabled) or nothing has expired."
+  (when (> agent-repl-snapshot-tombstone-max-age 0)
+    (let* ((cutoff (time-subtract (current-time)
+                                  (seconds-to-time
+                                   agent-repl-snapshot-tombstone-max-age)))
+           (expired
+            (cl-remove-if-not
+             (lambda (ws)
+               (let ((nuked-at (agent-repl--ws-get ws :nuked-at)))
+                 ;; A tombstone with no usable stamp is NOT evicted: we
+                 ;; cannot show it is old, and guessing would discard a
+                 ;; record the user may still reopen.
+                 (and nuked-at (time-less-p nuked-at cutoff))))
+             (agent-repl--ws-tombstoned-names))))
+      (when expired
+        (agent-repl--with-error-logging "snapshot-evict-expired-tombstones"
+          (let* ((entries
+                  (mapcar
+                   (lambda (ws)
+                     (cons ws (append
+                               (list :project-dir (agent-repl--ws-get ws :project-dir)
+                                     :nuked-at (agent-repl--ws-get ws :nuked-at))
+                               (when (agent-repl--ws-get ws :hidden-project-dir)
+                                 (list :hidden-project-dir t))
+                               (agent-repl--worktree-snapshot-fields ws))))
+                   expired))
+                 (dir (agent-repl--workspace-snapshot-archive-dir))
+                 (dest (expand-file-name
+                        (format-time-string "%Y%m%dT%H%M%S-expired-tombstones.el")
+                        dir)))
+            (unless (file-directory-p dir) (make-directory dir t))
+            (with-temp-file dest
+              (insert "(:workspaces (")
+              (let ((first t))
+                (dolist (entry entries)
+                  (unless first (insert "\n               "))
+                  (setq first nil)
+                  (prin1 entry (current-buffer))))
+              (insert "))"))
+            ;; Archive is durable on disk — only now drop the live entries.
+            (dolist (ws expired)
+              (agent-repl--ws-forget ws))
+            (agent-repl--info
+             nil
+             "snapshot: archived %d tombstone(s) older than %d day(s) to %s"
+             (length expired)
+             (/ agent-repl-snapshot-tombstone-max-age 86400)
+             dest)
+            (agent-repl--log-verbose
+             nil "snapshot-evict-expired-tombstones: evicted=%S" expired)
+            (agent-repl--prune-snapshot-archives)
+            expired))))))
+
+(defun agent-repl--snapshot-save-cancel-pending ()
+  "Cancel any pending debounced roster-snapshot write.
+Called by the immediate save paths: once they have written the roster,
+a queued write would be redundant work on the main thread."
+  (when agent-repl--snapshot-save-timer
+    (cancel-timer agent-repl--snapshot-save-timer)
+    (setq agent-repl--snapshot-save-timer nil)))
+
+(defun agent-repl--snapshot-save-request ()
+  "Request a roster-snapshot write, coalescing bursts onto an idle timer.
+The automatic entry point — `agent-repl--state-save' calls this instead of
+`agent-repl-save-workspace-snapshot' so that N mutations in quick
+succession cost one write rather than N.
+
+Writes synchronously when `agent-repl-snapshot-save-idle-delay' is 0.
+The timer is cleared BEFORE the write runs, so a save that signals cannot
+leave a stale timer object behind and block all future scheduling."
+  (if (<= agent-repl-snapshot-save-idle-delay 0)
+      (agent-repl-save-workspace-snapshot)
+    (agent-repl--snapshot-save-cancel-pending)
+    (setq agent-repl--snapshot-save-timer
+          (run-with-idle-timer
+           agent-repl-snapshot-save-idle-delay nil
+           (lambda ()
+             (setq agent-repl--snapshot-save-timer nil)
+             (agent-repl--with-error-logging "snapshot-save-debounced"
+               (agent-repl-save-workspace-snapshot)))))))
+
+(defun agent-repl--snapshot-save-flush ()
+  "Write the roster now if a debounced write is pending, else do nothing.
+Emacs shutdown runs this: an idle timer that never got to fire would
+otherwise silently drop the roster changes it was scheduled for."
+  (when agent-repl--snapshot-save-timer
+    (agent-repl--snapshot-save-cancel-pending)
+    (agent-repl--log nil "snapshot-save-flush: writing pending roster")
+    (agent-repl--with-error-logging "snapshot-save-flush"
+      (agent-repl-save-workspace-snapshot))))
+
+(add-hook 'kill-emacs-hook #'agent-repl--snapshot-save-flush)
+
 (defvar agent-repl--snapshot-loaded-p nil
   "Non-nil after `agent-repl-load-workspace-snapshot' has completed once
 this session.  The save path checks this to refuse clobbering a richer
@@ -1364,6 +1517,14 @@ Called interactively records a confirmation via `agent-repl--info' (log
 (the common path) stays silent so the roster-piggyback save doesn't spam
 on every state mutation."
   (interactive)
+  (agent-repl--snapshot-save-cancel-pending)
+  ;; Age out stale tombstones before collecting, so the write serializes the
+  ;; entries that still earn their place.  Gated on the loader having run:
+  ;; before that the hash is a partial view and its tombstone set is not
+  ;; authoritative enough to evict from.  With the loader done, the roster is
+  ;; authoritative and `--snapshot-save-safe-p' below necessarily passes.
+  (when agent-repl--snapshot-loaded-p
+    (agent-repl--snapshot-evict-expired-tombstones))
   (let ((snapshot (agent-repl--collect-snapshot-entries)))
     (if (not (agent-repl--snapshot-save-safe-p (length snapshot)))
         (agent-repl--log nil
@@ -1392,6 +1553,9 @@ Use this after manually creating / killing workspaces when you want
 the on-disk snapshot to reflect the current live state immediately,
 without waiting for the next `--state-save' piggyback."
   (interactive)
+  (agent-repl--snapshot-save-cancel-pending)
+  (when agent-repl--snapshot-loaded-p
+    (agent-repl--snapshot-evict-expired-tombstones))
   (let* ((snapshot (agent-repl--collect-snapshot-entries))
          (live-count (length snapshot))
          (file agent-repl-workspace-snapshot-file)
