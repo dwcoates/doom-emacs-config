@@ -252,6 +252,12 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "open-fence")
 (agent-repl--load-module "permission")
 (agent-repl--load-module "frontend")
+;; WHY: webview-recovery.el drives the webapp's recovery hook through
+;; frontend.el's execute-script chokepoint, so it must load after it, and it
+;; subscribes to `agent-repl-uds-snapshot-applied-functions' (frontend-uds.el,
+;; loaded above).  It exists because a hidden xwidget webview's own timers are
+;; suspended by the embedder — see the file's commentary.
+(agent-repl--load-module "webview-recovery")
 ;; WHY: tasks.el owns the user-defined task model the sidebar's "Task"
 ;; view groups workspaces under, persisting via history.el's sexp-file
 ;; helpers and reading the `agent-repl--ws-*' accessors — history.el and
