@@ -189,6 +189,13 @@ type fixture struct {
 	actions     *fakeActions
 	merges      *fakeMerges
 
+	// goneWorktrees names the worktree paths the manager's liveness check must
+	// report as MISSING. The fixture's worktrees are fictional paths, so the
+	// default answer is "present" and a test that wants a vanished worktree
+	// says so explicitly rather than depending on what is on the test host's
+	// disk.
+	goneWorktrees map[string]bool
+
 	// logs is written by the router goroutine AND by a worker goroutine in the
 	// tests that run one, so it carries its own lock rather than relying on the
 	// tests that happen to be single-threaded.
@@ -209,6 +216,22 @@ func (f *fixture) now() time.Time {
 	f.clockMu.Lock()
 	defer f.clockMu.Unlock()
 	return f.clock
+}
+
+// worktreeExists is the manager's liveness check under test control. It shares
+// the clock's lock because a sweep goroutine reads it while a test mutates it,
+// exactly as it does the clock.
+func (f *fixture) worktreeExists(path string) bool {
+	f.clockMu.Lock()
+	defer f.clockMu.Unlock()
+	return !f.goneWorktrees[path]
+}
+
+// removeWorktree makes the liveness check report path as gone.
+func (f *fixture) removeWorktree(path string) {
+	f.clockMu.Lock()
+	defer f.clockMu.Unlock()
+	f.goneWorktrees[path] = true
 }
 
 func (f *fixture) advance(d time.Duration) {
@@ -240,30 +263,40 @@ func (f *fixture) logError(format string, args ...any) {
 // loggedErrorFormat reports whether any ERROR-severity record's format contains
 // want.
 func (f *fixture) loggedErrorFormat(want string) bool {
+	return f.countErrorRecords(want) > 0
+}
+
+// countErrorRecords counts the ERROR-severity records containing want. The
+// COUNT is what a report meant to be emitted exactly once is asserted against:
+// "at least one" cannot tell a single record from a sweep that repeats it
+// forever.
+func (f *fixture) countErrorRecords(want string) int {
 	f.logMu.Lock()
 	defer f.logMu.Unlock()
+	n := 0
 	for _, line := range f.errorLogs {
 		if strings.Contains(line, want) {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
 
 func newFixture(t *testing.T, statePath string) *fixture {
 	t.Helper()
 	f := &fixture{
-		geometry:    &fakeGeometry{},
-		worktrees:   &fakeWorktrees{path: "/worktrees/new"},
-		sessions:    &fakeSessions{id: "s_new"},
-		health:      &fakeHealth{},
-		prompts:     &fakePrompts{},
-		available:   &fakeAvailable{},
-		releases:    &fakeReleases{},
-		publication: &fakePublication{},
-		actions:     &fakeActions{},
-		merges:      &fakeMerges{},
-		clock:       time.Date(2026, 8, 7, 11, 44, 0, 0, time.UTC),
+		geometry:      &fakeGeometry{},
+		worktrees:     &fakeWorktrees{path: "/worktrees/new"},
+		sessions:      &fakeSessions{id: "s_new"},
+		health:        &fakeHealth{},
+		prompts:       &fakePrompts{},
+		available:     &fakeAvailable{},
+		releases:      &fakeReleases{},
+		publication:   &fakePublication{},
+		actions:       &fakeActions{},
+		merges:        &fakeMerges{},
+		goneWorktrees: map[string]bool{},
+		clock:         time.Date(2026, 8, 7, 11, 44, 0, 0, time.UTC),
 	}
 	logf := f.log
 	store, err := OpenJobStore(statePath, logf)
@@ -274,7 +307,7 @@ func newFixture(t *testing.T, statePath string) *fixture {
 	f.manager, err = NewManager(Config{
 		Store: store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry, Sessions: f.sessions, Health: f.health,
 		Prompts: f.prompts, Available: f.available, Releases: f.releases, Publication: f.publication, HostActions: f.actions, Logf: logf,
-		Now: f.now, Errorf: f.logError,
+		Now: f.now, Errorf: f.logError, WorktreeExists: f.worktreeExists,
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)

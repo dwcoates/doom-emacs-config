@@ -183,6 +183,70 @@ type Job struct {
 	// re-report an escalation the user has already been shown, and an
 	// escalation that repeats every sweep is one nobody reads.
 	MaterializationEscalated bool `json:"materialization_escalated,omitempty"`
+	// PublicationAbandoned is the TERMINAL DISPOSITION of a hold that will
+	// never be released.
+	//
+	// The publication gate holds a worktree's session frames until its creation
+	// job reports Materialized, and "not materialized" used to be the only other
+	// answer the gate could give — a WAIT, forever, with no state that could end
+	// it. A job that died before it ever published its WorkspaceAvailable never
+	// reaches the host, so its Materialized latch can never be written by
+	// anything: the wait had no terminating event at all. Five such jobs held
+	// their worktrees across a three-hour daemon lifetime and produced 43550
+	// hold records, one per gated frame per snapshot, while the workspaces they
+	// gated rendered blank.
+	//
+	// Abandonment is that missing terminal state. It DESTROYS NOTHING — the
+	// worktree, the branch and the session are all real and all still the
+	// user's — it only records that no acknowledgement is coming, so the gate
+	// stops holding frames for a workspace nobody will ever materialize. It is
+	// durable because the conclusion outlives the daemon and must be reported
+	// exactly once, and it is written only against a job that is already
+	// terminal or whose worktree is already gone.
+	PublicationAbandoned bool `json:"publication_abandoned,omitempty"`
+	// PublicationAbandonedReason names WHY the hold was abandoned, so the
+	// durable record answers the question the log line answered at the instant
+	// it happened.
+	PublicationAbandonedReason string `json:"publication_abandoned_reason,omitempty"`
+}
+
+// PublicationAbandonReason names one terminal disposition of a held session
+// publication. Each is a different fault with a different remedy, so they are
+// never reported in the same words.
+type PublicationAbandonReason string
+
+const (
+	// AbandonTerminalFailure is a creation job that reached StateFailed without
+	// ever being materialized. Nothing will ever acknowledge it.
+	AbandonTerminalFailure PublicationAbandonReason = "terminal_failure_before_materialization"
+	// AbandonWorktreeGone is a job still parked on the host whose worktree no
+	// longer exists on disk. Materializing it would ask the editor to render a
+	// directory that is not there.
+	AbandonWorktreeGone PublicationAbandonReason = "worktree_no_longer_exists"
+)
+
+// publicationAbandonable reports a job whose hold has a terminal disposition
+// available RIGHT NOW, and names it.
+//
+// A job with no worktree path is deliberately not abandonable: it holds nothing,
+// because the gate is keyed by worktree and has nothing to match it against.
+// An already-materialized job is not abandonable either — its gate is open, so
+// there is no hold to dispose of.
+func publicationAbandonable(job Job, worktreeExists func(string) bool) (PublicationAbandonReason, bool) {
+	if job.WorktreePath == "" || job.Materialized || job.PublicationAbandoned {
+		return "", false
+	}
+	if job.State == StateFailed {
+		return AbandonTerminalFailure, true
+	}
+	// A LIVENESS CHECK, and it is what keeps boot replay from resurrecting a
+	// dead job: every awaiting_emacs job rides the host's connect snapshot, so
+	// a job whose worktree was deleted while the daemon was down would be
+	// re-requested on every host connect for the rest of time.
+	if job.State == StateAwaitingEmacs && worktreeExists != nil && !worktreeExists(job.WorktreePath) {
+		return AbandonWorktreeGone, true
+	}
+	return "", false
 }
 
 // PublicationDecision is the durable creation job's verdict about whether a
@@ -204,6 +268,14 @@ type PublicationDecision struct {
 	WorktreePath string
 	SessionID    string
 	Materialized bool
+	// Abandoned reports that Materialized is true because the hold was given a
+	// TERMINAL DISPOSITION rather than because the host ever acknowledged the
+	// workspace. The frames pass either way — the difference is what the daemon
+	// is entitled to say about the workspace, and a gate that could not tell
+	// the two apart would report an abandoned creation as a successful one.
+	Abandoned bool
+	// AbandonedReason carries the durable reason behind Abandoned.
+	AbandonedReason string
 }
 
 // SessionPublicationDecision returns the durable publication verdict for one
@@ -243,7 +315,7 @@ func SessionPublicationDecision(store JobStore, worktreePath, sessionID string) 
 	if match == nil {
 		unmaterialized := make([]*Job, 0, len(matches))
 		for _, candidate := range matches {
-			if !candidate.Materialized {
+			if publicationHeld(*candidate) {
 				unmaterialized = append(unmaterialized, candidate)
 			}
 		}
@@ -263,7 +335,22 @@ func SessionPublicationDecision(store JobStore, worktreePath, sessionID string) 
 	if match == nil {
 		return PublicationDecision{WorktreePath: worktreePath, Materialized: true}, nil
 	}
-	return PublicationDecision{JobID: match.ID, WorktreePath: worktreePath, SessionID: match.SessionID, Materialized: match.Materialized}, nil
+	return PublicationDecision{
+		JobID:           match.ID,
+		WorktreePath:    worktreePath,
+		SessionID:       match.SessionID,
+		Materialized:    !publicationHeld(*match),
+		Abandoned:       match.PublicationAbandoned,
+		AbandonedReason: match.PublicationAbandonedReason,
+	}, nil
+}
+
+// publicationHeld reports a job whose worktree's session frames are still
+// gated. A hold ends in exactly two ways — the host acknowledges the workspace,
+// or the daemon abandons the wait — and naming both here is what keeps every
+// reader of the gate agreeing on when a hold is over.
+func publicationHeld(job Job) bool {
+	return !job.Materialized && !job.PublicationAbandoned
 }
 
 func (j Job) validate() error {

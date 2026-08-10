@@ -180,6 +180,138 @@ func TestTheReleaseRefusesToOpenAnotherJobsGate(t *testing.T) {
 	}
 }
 
+func TestAnAbandonedHoldOpensItsWorktreesGate(t *testing.T) {
+	// Arrange — a creation that died before it was ever materialized, whose
+	// hold has been given its terminal disposition. Nothing will ever
+	// acknowledge it, so the gate must not go on holding its frames.
+	job := heldJob()
+	job.State = workspacecreate.StateFailed
+	job.PublicationAbandoned = true
+	job.PublicationAbandonedReason = string(workspacecreate.AbandonTerminalFailure)
+	bridge := gateFixture(t, job)
+
+	// Act
+	decision, err := bridge.SessionPublicationDecision("/worktrees/held", "s_held")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SessionPublicationDecision: %v", err)
+	}
+	if !decision.Materialized {
+		t.Fatal("an abandoned hold is still gating its worktree's frames")
+	}
+}
+
+func TestAnAbandonedJobIsNotReplayedToTheHost(t *testing.T) {
+	// Arrange — the connect snapshot is the second path to the host and the one
+	// a daemon restart cannot silence, so it must honour the disposition too.
+	job := heldJob()
+	job.PublicationAbandoned = true
+	job.PublicationAbandonedReason = string(workspacecreate.AbandonWorktreeGone)
+	bridge := gateFixture(t, job)
+
+	// Act
+	work := bridge.SnapshotHostWork()
+
+	// Assert
+	if len(work.WorkspaceAvailable) != 0 {
+		t.Fatalf("replayed workspace-available frames = %d, want 0 for an abandoned job", len(work.WorkspaceAvailable))
+	}
+}
+
+func TestAParkedJobIsStillReplayedToTheHost(t *testing.T) {
+	// Arrange — the replay must keep carrying the jobs it exists for.
+	bridge := gateFixture(t, heldJob())
+
+	// Act
+	work := bridge.SnapshotHostWork()
+
+	// Assert
+	if len(work.WorkspaceAvailable) != 1 {
+		t.Fatalf("replayed workspace-available frames = %d, want 1", len(work.WorkspaceAvailable))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE GATE'S COST. Every snapshot asks it once per workspace per view family —
+// ten families over 150 workspaces — and an unmemoized "no creation job names
+// this worktree" answer paid for a full store listing every time. The daemon
+// assembles roughly one snapshot a second, so that repeated read sat directly
+// on the path a command's ack contends with.
+// ---------------------------------------------------------------------------
+
+// countingStore counts how many times the gate read the durable job store.
+type countingStore struct {
+	workspacecreate.JobStore
+	lists int
+}
+
+func (s *countingStore) List() ([]workspacecreate.Job, error) {
+	s.lists++
+	return s.JobStore.List()
+}
+
+func TestTheGateReadsTheStoreOncePerWorktree(t *testing.T) {
+	// Arrange — a worktree no creation job names, which is the shape all but a
+	// handful of the daemon's workspaces have.
+	bridge := gateFixture(t, heldJob())
+	counting := &countingStore{JobStore: bridge.store}
+	bridge.store = counting
+
+	// Act — the same question a snapshot's ten view families ask.
+	for range 10 {
+		decision, err := bridge.SessionPublicationDecision("/worktrees/unmanaged", "s_unmanaged")
+		if err != nil {
+			t.Fatalf("SessionPublicationDecision: %v", err)
+		}
+		if !decision.Materialized {
+			t.Fatal("a worktree no creation job names is being gated")
+		}
+	}
+
+	// Assert.
+	if counting.lists != 1 {
+		t.Fatalf("store listings = %d, want 1", counting.lists)
+	}
+}
+
+func TestALaterCreationJobIsNotMaskedByAnEarlierAllow(t *testing.T) {
+	// Arrange — the worktree answers "no job here" first, exactly as it does
+	// for a path a workspace is about to be created at.
+	bridge := gateFixture(t, heldJob())
+	if decision, err := bridge.SessionPublicationDecision("/worktrees/later", ""); err != nil || !decision.Materialized {
+		t.Fatalf("decision before the job = %#v err=%v, want open", decision, err)
+	}
+	if _, _, err := bridge.store.Enqueue(workspacecreate.Job{
+		ID: "later", Request: workspacecreate.Request{Name: "DWC/later", GitRoot: "/repo"},
+		State: workspacecreate.StateWorktreeReady, WorktreePath: "/worktrees/later",
+	}); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Act — the job CLAIMS its worktree, which is the notification the creation
+	// manager sends at the checkpoint that first records the path durably.
+	claimed, _, err := bridge.store.Get("later")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if err := bridge.PrepareSessionPublication(context.Background(), claimed); err != nil {
+		t.Fatalf("PrepareSessionPublication: %v", err)
+	}
+
+	// Assert — the earlier allow is gone, not standing in front of the new job.
+	decision, err := bridge.SessionPublicationDecision("/worktrees/later", "")
+	if err != nil {
+		t.Fatalf("SessionPublicationDecision: %v", err)
+	}
+	if decision.Materialized {
+		t.Fatal("a new creation job's hold was masked by an earlier allow")
+	}
+	if decision.JobID != "later" {
+		t.Fatalf("decision job = %q, want later", decision.JobID)
+	}
+}
+
 // inertCreateStage satisfies every collaborator the create manager demands at
 // construction. These tests exercise the publication gate, which reads the
 // durable store directly, so nothing here is ever called.
