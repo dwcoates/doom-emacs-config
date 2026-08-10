@@ -116,7 +116,11 @@ func mustPop(t *testing.T, cl *client) []byte {
 func newTestServer(t *testing.T, buf int) (*Server, *mockHandler) {
 	t.Helper()
 	h := &mockHandler{}
-	s := New(Config{Logf: testLogf(t), LogVerbosef: testLogf(t), State: staticState{snap: sampleSnapshot()}, Handler: h, BufSize: buf})
+	// A short pacing grace, not the production 30s one: these servers have no
+	// real consumer at all, so every test that deliberately wedges one would
+	// otherwise wait out the whole production grace period to see the verdict
+	// it is asserting. The verdict itself is unchanged.
+	s := New(Config{Logf: testLogf(t), LogVerbosef: testLogf(t), State: staticState{snap: sampleSnapshot()}, Handler: h, BufSize: buf, PaceStallGrace: 2 * time.Second})
 	return s, h
 }
 

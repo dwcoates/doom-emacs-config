@@ -256,6 +256,10 @@ type outbox struct {
 	grace  time.Duration
 	now    func() time.Time
 	ready  chan struct{}
+	// room is the BROADCAST wakeup a paced producer parks on (pacing.go). It is
+	// closed and replaced whenever the queue drains to its low watermark or
+	// dies, so every waiter wakes at once. nil means nobody is waiting.
+	room chan struct{}
 	// popped counts every frame the writer has taken (log/introspection aid).
 	popped uint64
 	// progress counts every OBSERVABLE ACT OF DRAIN by this connection's
@@ -382,6 +386,10 @@ func (o *outbox) close() []outFrame {
 	o.closed = true
 	stranded := append(append([]outFrame(nil), o.control...), o.frames...)
 	o.control, o.frames = nil, nil
+	// Wake every paced producer. A waiter that slept through the teardown would
+	// hold its frame for the whole grace period and then report a STALL for a
+	// connection that did not stall, it ended.
+	o.signalRoomLocked()
 	return stranded
 }
 
@@ -399,6 +407,9 @@ func (o *outbox) noteWriteProgress() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.progress++
+	// A paced producer's grace period is judged against this counter, and it
+	// re-checks on its own timer, so no wakeup is owed here: bytes moving is
+	// proof of life, not proof of room.
 }
 
 // stalledForLocked reports how long the queue has been under pressure with no
@@ -434,6 +445,12 @@ func (o *outbox) pop() (outFrame, bool) {
 	}
 	o.popped++
 	o.progress++
+	if o.depthLocked() <= o.pacingLowLocked() {
+		// Real headroom exists now. Waking at the low watermark rather than at
+		// every pop is the hysteresis that keeps a paced producer from being
+		// woken once per drained frame.
+		o.signalRoomLocked()
+	}
 	if o.depthLocked() < o.soft {
 		// The episode is over: clear the mark so the next one is reported as a
 		// new entry into the elastic region rather than a continuation.

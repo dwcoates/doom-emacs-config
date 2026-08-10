@@ -111,6 +111,12 @@ type Config struct {
 	// itself enforces. It is a knob only so tests can reach the branch without
 	// waiting out the production deadline.
 	AckDeadline time.Duration
+	// PaceStallGrace is how long a producer waits on a connection that has made
+	// NO observable drain progress before hard-disconnecting it (pacing.go);
+	// <=0 uses paceStallGrace. It exists so a test can exercise the stall
+	// verdict without waiting out the production grace period; production never
+	// sets it.
+	PaceStallGrace time.Duration
 }
 
 // Server serves agentshim.frontend.v1 frames as protojson over a UDS listener
@@ -132,6 +138,10 @@ type Server struct {
 	// ackDeadline is when a command still in flight is announced as overdue.
 	// See Config.AckDeadline.
 	ackDeadline time.Duration
+	// paceGrace is how long a producer waits on a connection making NO
+	// observable drain progress before giving up on it (pacing.go). Always
+	// positive after New.
+	paceGrace time.Duration
 	// inflight is the daemon-wide count of frontend commands currently between
 	// receipt and ack. It is the QUEUE DEPTH every latency record carries: a
 	// per-connection read loop dispatches serially, so a command that waited
@@ -284,6 +294,10 @@ func New(cfg Config) *Server {
 	if ackDeadline <= 0 {
 		ackDeadline = CommandAckDeadline
 	}
+	paceGrace := cfg.PaceStallGrace
+	if paceGrace <= 0 {
+		paceGrace = paceStallGrace
+	}
 	warnf := cfg.Warnf
 	if warnf == nil {
 		warnf = cfg.Logf
@@ -299,6 +313,7 @@ func New(cfg Config) *Server {
 		latency:                   cfg.CommandLatency,
 		ackWarn:                   ackWarn,
 		ackDeadline:               ackDeadline,
+		paceGrace:                 paceGrace,
 		upgrader: websocket.Upgrader{
 			// Local-loopback developer tool; the webview origin is app-scoped,
 			// so origin checks are permissive by design (mirrors the existing
@@ -472,6 +487,10 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) int {
 		s.PushWorkspaceState(ws)
 		return 0
 	}
+	// PACE FIRST, before the publication gate's reader side is taken and before
+	// any delivery lock: a wait that held either would stall a materialization
+	// release, or every other connection, on one slow browser (pacing.go).
+	s.paceBulkFrame(frame)
 	_, _, scoped := frameSessionIdentity(frame)
 	if scoped {
 		s.publicationMu.RLock()
@@ -1651,6 +1670,10 @@ func (s *Server) enqueueResyncSnapshot(cl *client, cmd *frontendv1.FrontendComma
 			cl.id, cmd.GetRequestId(), cmd.GetWorkspace(), phase, err)
 		return
 	}
+	// The resync snapshot is a bulk frame like any other and is paced like one:
+	// a client whose queue is already deep from the replay it just asked for
+	// must not be evicted by the snapshot half of the same answer.
+	s.paceClient(cl)
 	s.enqueue(cl, outFrame{data: snap})
 	s.logSnapshotCensus(cl, snapshotPhaseResync, snapshot)
 	s.logVerbosef("frontend: resync snapshot queued client_id=%d request_id=%q ws=%q phase=%q workspaces=%d",
