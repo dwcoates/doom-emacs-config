@@ -109,6 +109,26 @@ if it is not already running.  Set to nil to require the user to run
   :type 'boolean
   :group 'agent-repl)
 
+(defcustom agent-repl-daemon-echo-output nil
+  "When non-nil, the daemon's terminal output flows through an Emacs filter.
+
+DEBUGGING ESCAPE HATCH, off by default.  The daemon relays every
+daemon, shim and webapp log line on its stderr; with this on, each of
+those lines is reassembled and re-serialized as an agent-repl log record
+\(`claude-repld output: …') on the main thread.  Measured on a live
+session that cost ~14.5% steady-state Emacs CPU and a large share of the
+allocation churn driving ~20 GCs a minute, for records the daemon had
+already written durably itself.
+
+With this nil the spawn redirects the daemon's stdout and stderr
+straight to `agent-repl--frontend-daemon-output-sink-path' at the
+kernel, so the stream never enters elisp at all.  Nothing is lost: the
+exit path reads its crash tail (panics, goroutine dumps, flag errors)
+out of that file, and the daemon's structured records remain in
+`agent-repl--frontend-daemon-log-path'."
+  :type 'boolean
+  :group 'agent-repl)
+
 (defcustom agent-repl-frontend-daemon-addr "127.0.0.1:8787"
   "Listen address passed to `claude-repld' via its --addr flag."
   :type 'string
@@ -926,6 +946,71 @@ trimming the buffer a loss of duplication rather than a loss of
 evidence."
   (agent-repl--global-state-file "claude-repld.log"))
 
+(defun agent-repl--frontend-daemon-output-sink-path ()
+  "Return the file the daemon's raw stdout/stderr is redirected into.
+
+This is the durable home of everything the daemon writes to a TERMINAL:
+the relayed `sidecar' and `webapp' records, and — the reason it must
+exist — the unstructured dying output, panics, Go runtime messages and
+the SIGQUIT goroutine dumps that failure analysis reads.  When
+`agent-repl-daemon-echo-output' is nil the shell wrapper built by
+`agent-repl--frontend-daemon-spawn-command' appends here directly, so
+that evidence is captured without Emacs touching the stream."
+  (agent-repl--global-state-file "claude-repld-output.log"))
+
+(defun agent-repl--frontend-daemon-terminal-output-path ()
+  "Return the file holding the daemon's raw terminal output.
+The sink file normally; agent-repl's own log when
+`agent-repl-daemon-echo-output' has the filter mirroring the stream
+there instead."
+  (if agent-repl-daemon-echo-output
+      (agent-repl--logfile-path)
+    (agent-repl--frontend-daemon-output-sink-path)))
+
+(defconst agent-repl--frontend-daemon-redirect-shell "/bin/sh"
+  "Shell used to attach the daemon's stdout/stderr to the sink file.
+`make-process' can only deliver output to a buffer or a filter, so the
+redirect is expressed where the kernel can honour it: the shell opens
+the sink and `exec's the daemon over itself, which is what keeps the
+spawned process a DIRECT child of Emacs and leaves exit-code and signal
+reporting — and therefore the sentinel — exactly as they were.")
+
+(defun agent-repl--frontend-daemon-spawn-command ()
+  "Return the argv `agent-repl--frontend-spawn-daemon' actually launches.
+
+`agent-repl--frontend-daemon-command' verbatim when
+`agent-repl-daemon-echo-output' is on.  Otherwise the same argv wrapped
+in a `sh -c ... exec' redirect appending both streams to
+`agent-repl--frontend-daemon-output-sink-path'.  The daemon argv rides
+as positional parameters rather than being interpolated into the script,
+so no path needs quoting and none can be re-parsed as shell syntax."
+  (let ((argv (agent-repl--frontend-daemon-command)))
+    (if agent-repl-daemon-echo-output
+        argv
+      (append (list agent-repl--frontend-daemon-redirect-shell
+                    "-c"
+                    (format "exec \"$@\" >>%s 2>&1"
+                            (shell-quote-argument
+                             (agent-repl--frontend-daemon-output-sink-path)))
+                    ;; $0 for the script; the daemon argv starts at $1 so
+                    ;; `"$@"' expands to the complete command.
+                    agent-repl--frontend-daemon-redirect-shell)
+              argv))))
+
+(defun agent-repl--frontend-daemon-spawn-buffer ()
+  "Return the capture buffer to attach to the daemon process, or nil.
+Nil unless `agent-repl-daemon-echo-output' is on: with the stream
+redirected at the kernel there is nothing for a buffer to receive, and
+attaching one would only advertise a capture that stays empty."
+  (and agent-repl-daemon-echo-output agent-repl--frontend-daemon-buffer))
+
+(defun agent-repl--frontend-daemon-spawn-filter ()
+  "Return the process filter for the daemon, or nil to attach none.
+Nil unless `agent-repl-daemon-echo-output' is on.  This is the whole
+point of the redirect: no filter means the daemon's log firehose costs
+the Emacs main thread nothing at all."
+  (and agent-repl-daemon-echo-output #'agent-repl--frontend-daemon-filter))
+
 (defun agent-repl--frontend-daemon-trim-capture (proc)
   "Trim the current buffer to the newest daemon output, keeping PROC's mark sane.
 
@@ -1088,28 +1173,61 @@ the whole capture.  That distinction is the incident: taking
 `buffer-string' of a multi-megabyte capture and handing it onward froze
 Emacs for over ten minutes inside a sentinel, where quit is inhibited.
 
-Empty string when the capture buffer was never created."
-  (let ((buffer (get-buffer agent-repl--frontend-daemon-buffer)))
-    (if (buffer-live-p buffer)
-        (with-current-buffer buffer
-          (string-trim-right
-           (buffer-substring-no-properties
-            (max (point-min)
-                 (- (point-max) agent-repl--frontend-daemon-output-tail-chars))
-            (point-max))))
-      "")))
+Empty string when neither capture exists.
+
+Which capture depends on `agent-repl-daemon-echo-output': with it off
+the daemon's terminal output never reaches Emacs at all, so the tail
+comes from the sink file the spawn redirects into
+\(`agent-repl--frontend-daemon-output-sink-path'); with it on the
+in-Emacs buffer is authoritative, because that is where the filter put
+the stream."
+  (if agent-repl-daemon-echo-output
+      (let ((buffer (get-buffer agent-repl--frontend-daemon-buffer)))
+        (if (buffer-live-p buffer)
+            (with-current-buffer buffer
+              (string-trim-right
+               (buffer-substring-no-properties
+                (max (point-min)
+                     (- (point-max)
+                        agent-repl--frontend-daemon-output-tail-chars))
+                (point-max))))
+          ""))
+    (string-trim-right
+     (agent-repl--frontend-read-daemon-output-sink
+      (agent-repl--frontend-daemon-output-sink-path)
+      agent-repl--frontend-daemon-output-tail-chars))))
+
+(defun agent-repl--frontend-read-daemon-output-sink (path chars)
+  "External-boundary wrapper: return the last CHARS characters of PATH.
+Empty string when PATH does not exist.  Body does nothing but read the
+file's tail region; tests mock it via `cl-letf', registered in
+`agent-repl--external-boundary-functions'."
+  (if (not (file-exists-p path)) ; ALLOW-EXTERNAL-BOUNDARY
+      ""
+    (with-temp-buffer
+      (let ((size (or (file-attribute-size (file-attributes path)) 0))) ; ALLOW-EXTERNAL-BOUNDARY
+        (insert-file-contents-literally ; ALLOW-EXTERNAL-BOUNDARY
+         path nil (max 0 (- size chars)) size))
+      (decode-coding-region (point-min) (point-max) 'utf-8 t))))
 
 (defun agent-repl--frontend-spawn-daemon ()
   "External-boundary wrapper: spawn `claude-repld' via `make-process'.
-Body does nothing but invoke `make-process' with the daemon argv, filter
-and sentinel, returning the live process.  Tests mock it via `cl-letf';
-registered in `agent-repl--external-boundary-functions'."
+Body does nothing but invoke `make-process' with the spawn argv and the
+sentinel, returning the live process.  Tests mock it via `cl-letf';
+registered in `agent-repl--external-boundary-functions'.
+
+The buffer and filter are attached ONLY under
+`agent-repl-daemon-echo-output'.  With it off the argv itself carries
+the redirect (`agent-repl--frontend-daemon-spawn-command'), so there is
+no output for Emacs to receive and none of the per-line work the filter
+would do.  The sentinel is attached unconditionally: exit detection does
+not depend on output and must never be weakened."
   (make-process ;; ALLOW-EXTERNAL-BOUNDARY
    :name "claude-repld"
-   :buffer agent-repl--frontend-daemon-buffer
-   :command (agent-repl--frontend-daemon-command)
+   :buffer (agent-repl--frontend-daemon-spawn-buffer)
+   :command (agent-repl--frontend-daemon-spawn-command)
    :noquery t
-   :filter #'agent-repl--frontend-daemon-filter
+   :filter (agent-repl--frontend-daemon-spawn-filter)
    :sentinel #'agent-repl--frontend-daemon-sentinel))
 
 (defun agent-repl--frontend-artifact-exists-p (path)
@@ -1510,12 +1628,12 @@ a body to wrap and tests can drive an exit directly."
                 (agent-repl--frontend-expected-restart-withhold-exit
                  failure trimmed-event tail))
             ;; Both paths, because the record is genuinely split: the
-            ;; unstructured dying lines (panics, Go runtime output) were
-            ;; mirrored into agent-repl's own log by the filter, while the
-            ;; daemon's structured records only ever land in its own.
+            ;; unstructured dying lines (panics, Go runtime output, SIGQUIT
+            ;; goroutine dumps) land in the terminal-output capture, while
+            ;; the daemon's structured records only ever land in its own log.
             (agent-repl--backend-phase nil "daemon exited (%s): %s — full output in %s and %s"
                                        trimmed-event tail
-                                       (agent-repl--logfile-path)
+                                       (agent-repl--frontend-daemon-terminal-output-path)
                                        (agent-repl--frontend-daemon-log-path))
             (agent-repl-failure-surface nil failure)))))))
 
