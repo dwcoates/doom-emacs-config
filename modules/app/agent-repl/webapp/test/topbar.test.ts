@@ -97,6 +97,7 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     costUsd: null,
     taskSummary: null,
     lastSeq: 0,
+    paging: { cursor: null, reachedStart: false, inFlight: null, staleFenceRequestId: null },
     renderState: null,
     sessionConnectivity: null,
     sessionStatus: null,

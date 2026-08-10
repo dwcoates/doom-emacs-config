@@ -31,6 +31,10 @@ import {
   MERGE_DEQUEUE_ANSWER,
   PROMPT_ORIGIN_WEBAPP_CARD_ACTION,
   PROMPT_ORIGIN_WEBAPP_USER_SENT,
+  PAGE_ANCHOR_ARM,
+  PAGE_BEFORE_FIELD,
+  PAGE_CMD_FIELD,
+  PAGE_TAIL_FIELD,
   RESYNC_FIELD,
   REVIVE_COMPACT_SCOPE,
   REVIVE_MODE,
@@ -141,6 +145,32 @@ export interface DeleteSessionBody {
 export interface ResyncBody {
   case: "resync";
   fromSeq: number;
+  fence: string;
+}
+
+/**
+ * ConversationPageCmd — ask for ONE page of history.
+ *
+ * It does not replace {@link ResyncBody}, which stays the LIVE-PAGE path: an
+ * incremental `from_seq` resync is how a client that already holds history
+ * catches up. This is the COLD-OPEN path, and the load-more that walks
+ * backwards from it.
+ *
+ * `cursor` empty means the TAIL anchor (the newest end of the conversation);
+ * a non-empty cursor is the BEFORE anchor and is the daemon's own opaque
+ * token, copied back byte-for-byte. The two are a oneof on the wire, and this
+ * shape is what proves exactly one arm is ever encoded.
+ *
+ * The FENCE is captured at DECISION time, exactly as a resync's is, and for
+ * exactly the same reason: a delayed request must not rebind itself to a newer
+ * controller generation and page a conversation nobody asked about.
+ */
+export interface ConversationPageBody {
+  case: "conversationPage";
+  /** "" = tail; otherwise the opaque continuation token from a prior page. */
+  cursor: string;
+  /** 0 = the daemon's default; the daemon clamps its own ceiling. */
+  limit: number;
   fence: string;
 }
 
@@ -297,6 +327,7 @@ export type FrontendCommandBody =
   | SetModelBody
   | DeleteSessionBody
   | ResyncBody
+  | ConversationPageBody
   | ClientLogBody
   | QueueForceBody
   | QueueAcceptBody
@@ -361,6 +392,24 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
         [RESYNC_FIELD.fromSeq]: String(b.fromSeq),
         [RESYNC_FIELD.fence]: b.fence,
       };
+    case "conversationPage": {
+      // The anchor is a oneof, so exactly one arm is emitted — never both and
+      // never neither. The daemon REFUSES an anchorless command rather than
+      // reading it as a tail, so an encoder that emitted neither would fail
+      // every page request rather than degrade quietly.
+      //
+      // uint32 renders as a JSON number in protojson, unlike the uint64 above.
+      const anchor =
+        b.cursor === ""
+          ? { [PAGE_ANCHOR_ARM.tail]: { [PAGE_TAIL_FIELD.limit]: b.limit } }
+          : {
+              [PAGE_ANCHOR_ARM.before]: {
+                [PAGE_BEFORE_FIELD.cursor]: b.cursor,
+                [PAGE_BEFORE_FIELD.limit]: b.limit,
+              },
+            };
+      return { ...anchor, [PAGE_CMD_FIELD.fence]: b.fence };
+    }
     case "clientLog": {
       // An enum renders as its proto NAME in canonical protojson.
       const arm: Record<string, unknown> = {
