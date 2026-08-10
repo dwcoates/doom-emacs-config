@@ -391,16 +391,40 @@ func (s *servedPrompts) claim(r statedb.PromptReceipt) (string, bool) {
 // re-pull. The curation state (the skill correlator in particular) starts empty
 // per replay, which is what a replay read in store order from the floor wants.
 func (m *Manager) durableConsumer(workspace, sessionID string) *consumer {
-	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, nil, m.cfg.ClearCompactStore, m.cfg.TurnAccountings, m.logf, nil, nil, nil, nil, nil)
-	// A replay's degradations are as user-visible as a live one's — the same
-	// conversation reaches the same frontend — so it takes the same WARN
-	// channel.
-	cons.warnf = m.warnf
+	cons := m.historyConsumer(workspace, sessionID, m.cfg.Push)
 	// The one durable store it DOES hold, and it holds it to RETIRE rows: a
 	// replay that finds a receipt's prompt already in the store has established
 	// the fact the live retirement point would have established, for a daemon
 	// that was not alive to establish it.
+	//
+	// It is bound HERE rather than in historyConsumer because retiring a row is
+	// a WRITE, and the other history reader built on that helper — the backwards
+	// page reader — is a read that must leave the ledger exactly as it found it
+	// (conversationpage.go). A shared builder that bound it would make every
+	// future history reader a receipt-retiring one by default.
 	cons.receipts = m.cfg.PromptReceipts
+	return cons
+}
+
+// historyConsumer builds the throwaway translation consumer EVERY history read
+// runs through: the durable resync above, and the backwards page reader in
+// conversationpage.go.
+//
+// It exists because those two want the same consumer for the same reason. Both
+// translate persisted events that every other plane has already consumed, so
+// both need conversation translation with the lifecycle hooks, the progress
+// resolver and the ring left unwired — and both need the two bindings below,
+// whose absence is silent rather than loud. Two hand-built consumers would
+// agree today and drift the first time a third binding is added to one of them.
+//
+// push is the caller's: a durable resync pushes to clients, while a page
+// assembly captures into a buffer and pushes nothing.
+func (m *Manager) historyConsumer(workspace, sessionID string, push Pusher) *consumer {
+	cons := newConsumer(workspace, sessionID, push, m.cfg.SSM, nil, m.cfg.ClearCompactStore, m.cfg.TurnAccountings, m.logf, nil, nil, nil, nil, nil)
+	// A replay's degradations are as user-visible as a live one's — the same
+	// conversation reaches the same frontend — so it takes the same WARN
+	// channel.
+	cons.warnf = m.warnf
 	// THE KEEP-ALIVE EXCLUSION'S EVIDENCE, bound here for the same reason the
 	// live consumer binds it (sessioncontroller.go): the exclusion is a property
 	// of the CONVERSATION CHOKEPOINT, not of the consumer that happens to be
