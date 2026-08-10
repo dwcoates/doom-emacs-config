@@ -138,6 +138,73 @@ against whatever holds port 8787 on the developer's machine."
                      (list agent-repl--frontend-build-script
                            "store" "sidecar"))))))
 
+;;;; ---- build argv/capture helpers ------------------------------------------
+;;
+;; The blocking and asynchronous build runs share one argv shape, one capture
+;; buffer and one failure report.  These cover the shared helpers directly, so
+;; a hand-rolled second spelling of any of them fails here rather than drifting
+;; silently against the script.
+
+(ert-deftest agent-repl-test-daemon-build-args-shape-script-force-targets ()
+  "The shared argv builder emits script, then --force, then the targets."
+  ;; Act
+  (let ((args (agent-repl--frontend-build-args '("webapp") t)))
+    ;; Assert
+    (should (equal args (list agent-repl--frontend-build-script
+                              "--force" "webapp")))))
+
+(ert-deftest agent-repl-test-daemon-build-args-back-the-blocking-run ()
+  "The blocking run invokes the script with exactly the shared argv.
+Asserts the call site SHARES the extracted shape rather than spelling a
+near-identical argv of its own."
+  ;; Arrange
+  (let (captured)
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (lambda (args) (setq captured args) 0)))
+      ;; Act
+      (agent-repl--frontend-build-targets-if-stale '("webapp") t)
+      ;; Assert
+      (should (equal captured (agent-repl--frontend-build-args '("webapp") t))))))
+
+(ert-deftest agent-repl-test-daemon-build-capture-resets-between-runs ()
+  "Resetting the capture leaves a run's buffer holding only its own output."
+  ;; Arrange
+  (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
+    (erase-buffer)
+    (insert "output of the previous run\n"))
+  ;; Act
+  (agent-repl--frontend-build-reset-capture)
+  ;; Assert
+  (should (equal (agent-repl--frontend-build-captured-output) "")))
+
+(ert-deftest agent-repl-test-daemon-build-capture-trims-trailing-newline ()
+  "The captured output is returned with trailing whitespace trimmed."
+  ;; Arrange
+  (agent-repl--frontend-build-reset-capture)
+  (with-current-buffer agent-repl--frontend-build-buffer
+    (insert "built ok\n\n"))
+  ;; Act / Assert
+  (should (equal (agent-repl--frontend-build-captured-output) "built ok")))
+
+(ert-deftest agent-repl-test-daemon-build-failure-report-names-the-exit-code ()
+  "The shared failure report hands back a detail naming the exit code."
+  ;; Arrange
+  (cl-letf (((symbol-function 'display-buffer) #'ignore))
+    ;; Act
+    (let ((detail (agent-repl--frontend-build-report-failure "webapp" 3 "boom")))
+      ;; Assert
+      (should (string-match-p "exit 3" detail)))))
+
+(ert-deftest agent-repl-test-daemon-build-missing-script-check-is-shared ()
+  "The script-presence assertion signals for an absent script.
+Both build runs gate on this one check, so neither can start a process
+against a script that is not there."
+  ;; Arrange — a genuinely absent path (no `file-exists-p' shadow, which
+  ;; would trip a native-comp trampoline warning; see test-sentinel.el).
+  (let ((agent-repl--frontend-build-script "/agent-repl-nonexistent/build.sh"))
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-build-assert-script))))
+
 ;;;; ---- deploy-stack: the boot path's whole-stack deploy --------------------
 ;;
 ;; The boot path used to run build-frontend.sh, which covers the shim, the
