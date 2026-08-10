@@ -137,7 +137,7 @@ func sidechainLine(uuid, parent, vendorSessionID, text string) string {
 // been amputated — a transcript the CLI cannot resume.
 func TestE2EARewindDoesNotCutAtTheToolResultUserLine(t *testing.T) {
 	// Arrange — a real tool-using turn, then a keep-alive turn behind it.
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	const (
 		realPrompt   = "real-user-prompt"
 		toolUse      = "real-tool-use"
@@ -178,7 +178,7 @@ func TestE2EARewindDoesNotCutAtTheToolResultUserLine(t *testing.T) {
 // and refusing means the conversation identity does not move.
 func TestE2EASidechainInterleaveRefusesTheRewind(t *testing.T) {
 	// Arrange
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	writeFixtureTranscript(t, s.cwd, s.vendorID, sidechainInterleavedTranscript(s.vendorID))
 	before := s.vendorID
 
@@ -208,7 +208,7 @@ func TestE2EASidechainInterleaveRefusesTheRewind(t *testing.T) {
 // clears it.
 func TestE2EASidechainInterleaveStillDeliversThePrompt(t *testing.T) {
 	// Arrange
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	writeFixtureTranscript(t, s.cwd, s.vendorID, sidechainInterleavedTranscript(s.vendorID))
 
 	// Act
@@ -229,7 +229,7 @@ func TestE2EASidechainInterleaveStillDeliversThePrompt(t *testing.T) {
 // a refusal must not produce one that claims a truncation happened.
 func TestE2EARefusedRewindIsAnnouncedRatherThanSwallowed(t *testing.T) {
 	// Arrange
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	writeFixtureTranscript(t, s.cwd, s.vendorID, sidechainInterleavedTranscript(s.vendorID))
 
 	// Act
@@ -274,7 +274,7 @@ func sidechainInterleavedTranscript(vendorSessionID string) []string {
 // will treat as an outstanding request.
 func TestE2EATrailingInterruptedPingTurnIsDroppedByTheCut(t *testing.T) {
 	// Arrange — the ping turn is a prompt with nothing after it.
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	const realFinal = "partial-real-reply"
 	writeFixtureTranscript(t, s.cwd, s.vendorID, []string{
 		userLine("partial-real-prompt", "", s.vendorID, "do the thing"),
@@ -299,7 +299,7 @@ func TestE2EATrailingInterruptedPingTurnIsDroppedByTheCut(t *testing.T) {
 // has done — so this refuses, exactly as the sidechain case does.
 func TestE2EAMissingVendorTranscriptRefusesTheRewindRatherThanInventingOne(t *testing.T) {
 	// Arrange — a `--fake` session writes no transcript, which is the premise.
-	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s := newKeepAliveSession(t, testKeepAlivePolicy(), withGatedKeepAlivePing())
 	if _, exists := readFixtureTranscript(t, s.cwd, s.vendorID); exists {
 		t.Fatalf("premise not established: a transcript already exists for %s", s.vendorID)
 	}

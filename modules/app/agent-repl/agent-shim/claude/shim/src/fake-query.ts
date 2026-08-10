@@ -16,6 +16,8 @@
  * Every turn ends with a `result` message.
  */
 import { randomBytes } from "node:crypto";
+import { existsSync, watch } from "node:fs";
+import { dirname } from "node:path";
 
 import { AsyncQueue } from "./input-queue.js";
 import { bindLog } from "./uds/log.js";
@@ -29,6 +31,48 @@ import {
 } from "./session.js";
 
 const LOGGER = bindLog({ component: "claude-shim-fake-query", operation: "shim.fake-query.lifecycle" });
+
+/**
+ * THE TURN GATE. A test that has to arrange "this turn is STILL RUNNING while
+ * something else happens" cannot do it by winning a race with the fake, which
+ * answers in microseconds. With AGENT_REPL_FAKE_TURN_GATE set to a path and
+ * AGENT_REPL_FAKE_TURN_GATE_TEXT set to a prompt, a turn carrying exactly that
+ * prompt does not begin emitting until the path exists — so the test decides
+ * when the turn ends, and the turn still ends the ORDINARY way rather than
+ * through an interrupt that would change what it is.
+ *
+ * The wait is LEVEL-then-EDGE: the file is checked first and the watch is only
+ * a wakeup, so a gate released before the turn even started is not a missed
+ * edge.
+ */
+const TURN_GATE_PATH = process.env.AGENT_REPL_FAKE_TURN_GATE ?? "";
+const TURN_GATE_TEXT = process.env.AGENT_REPL_FAKE_TURN_GATE_TEXT ?? "";
+
+const awaitTurnGate = (text: string): Promise<void> => {
+  if (TURN_GATE_PATH === "" || TURN_GATE_TEXT === "" || text.trim() !== TURN_GATE_TEXT.trim()) {
+    return Promise.resolve();
+  }
+  if (existsSync(TURN_GATE_PATH)) {
+    return Promise.resolve();
+  }
+  LOGGER.log({ gate_path: TURN_GATE_PATH }, "fake turn PARKED on its gate");
+  return new Promise<void>((resolve) => {
+    const watcher = watch(dirname(TURN_GATE_PATH), () => {
+      if (!existsSync(TURN_GATE_PATH)) {
+        return;
+      }
+      watcher.close();
+      LOGGER.log({ gate_path: TURN_GATE_PATH }, "fake turn RELEASED by its gate");
+      resolve();
+    });
+    // The gate can be released between the check above and the watch's
+    // installation, which no edge would then report.
+    if (existsSync(TURN_GATE_PATH)) {
+      watcher.close();
+      resolve();
+    }
+  });
+};
 
 /**
  * The prompt marker that makes a fake turn END IN ERROR.
@@ -633,6 +677,7 @@ export function createFakeQuery(
               .map((b) => (b.type === "text" ? b.text : ""))
               .join("");
       const messageId = messageIdFor(turn);
+      await awaitTurnGate(text);
       if (text.startsWith("!tool ")) {
         LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "tool" }, "selected fake turn branch");
         await runToolTurn(messageId, text.slice("!tool ".length));
