@@ -1286,19 +1286,26 @@ func validateResumeTarget(opts CreateOpts, skip bool) *ResumeTranscriptMissingEr
 // logResumeContinuityFailure emits the one ownership-point diagnostic for a
 // failed exact resume. Propagation layers return the typed error unchanged and
 // never log it again.
-func logResumeContinuityFailure(logf func(string, ...any), operation, sessionID string, opts CreateOpts, missing *ResumeTranscriptMissingError) {
+// extra carries additional key/value pairs onto the SAME record rather than a
+// second one: a caller with more to say about one failure (the vanished-target
+// disposition, and where it searched for a fallback) says it here, because two
+// records for one failure is exactly what "the one ownership-point diagnostic"
+// exists to prevent.
+func logResumeContinuityFailure(logf func(string, ...any), operation, sessionID string, opts CreateOpts, missing *ResumeTranscriptMissingError, extra ...any) {
 	dlog.Tag(dlog.Logf(logf),
-		"event", "resume_continuity_failure",
-		"operation", operation,
-		"decision", "hard_fail",
-		"reason", "transcript_missing_or_unreadable",
-		"agent_repl_session_id", sessionID,
-		"claude_session_id", missing.ResumeID,
-		"cwd", missing.CWD,
-		"config_dir", missing.ConfigDir,
-		"resolved_config_dir", missing.ResolvedConfigDir,
-		"transcript_path", missing.TranscriptPath,
-		"fake", opts.Fake,
+		append([]any{
+			"event", "resume_continuity_failure",
+			"operation", operation,
+			"decision", "hard_fail",
+			"reason", "transcript_missing_or_unreadable",
+			"agent_repl_session_id", sessionID,
+			"claude_session_id", missing.ResumeID,
+			"cwd", missing.CWD,
+			"config_dir", missing.ConfigDir,
+			"resolved_config_dir", missing.ResolvedConfigDir,
+			"transcript_path", missing.TranscriptPath,
+			"fake", opts.Fake,
+		}, extra...)...,
 	)("Claude resume rejected because its transcript is unavailable")
 }
 
