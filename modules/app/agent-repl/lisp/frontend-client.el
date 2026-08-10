@@ -63,6 +63,7 @@
 ;; The UDS command channel + pushed-frame SessionView store (the daemon plane
 ;; that replaced the GET /sessions poller); resolved at call time.
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process &rest keys))
+(declare-function agent-repl--uds-normalize-workspace-key "frontend-uds" (workspace))
 (declare-function agent-repl--uds-untrack-command "frontend-uds" (request-id workspace reason))
 (declare-function agent-repl--uds-track-health-response
                   "frontend-uds"
@@ -111,8 +112,16 @@ daemon's cwd-keyed lookup resolves it.  NEVER the persp name WS itself.
 
 Signals (via `agent-repl--ws-dir') when WS has no `:project-dir': a
 command with no resolvable cwd cannot be routed, and a loud failure here
-beats a daemon NACK that reads as \"no live session\"."
-  (let ((key (agent-repl--ws-dir ws)))
+beats a daemon NACK that reads as \"no live session\".
+
+The recorded `:project-dir' itself may carry a trailing slash — Emacs
+directory APIs produce that form — and the daemon keys workspaces by the
+literal string, so the key is normalized through
+`agent-repl--uds-normalize-workspace-key' before it leaves here.  That
+matters beyond the command wire: this key is also URL-encoded into the
+webview query, which must address the SAME workspace identity the
+commands do."
+  (let ((key (agent-repl--uds-normalize-workspace-key (agent-repl--ws-dir ws))))
     (agent-repl--log ws "frontend-wire-key: ws=%s cwd=%s" ws key)
     key))
 
