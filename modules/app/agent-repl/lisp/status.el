@@ -949,10 +949,12 @@ nothing about which session the user was talking to.")
   "Return the right-aligned DAEMON LINK indicator for the tab bar.
 
 Empty while `agent-repl-uds-link-health' is `:healthy', so the segment
-costs nothing and shows nothing in the ordinary case.  When a command has
-gone unacknowledged past its deadline the segment renders
-`agent-repl-daemon-link-degraded-label', which stays until an ack lands
-inside its deadline or the link reconnects.
+costs nothing and shows nothing in the ordinary case.  It renders
+`agent-repl-daemon-link-degraded-label' for EITHER degraded condition the
+reader owns: a command unacknowledged past its deadline, or a link
+process that is not connected at all (down, dialing, or waiting on a
+scheduled reconnect).  The label stays until an ack lands inside its
+deadline AND the link is connected again.
 
 Runs inside redisplay, so it deliberately performs no logging: the health
 transitions themselves are logged where they are decided, in
