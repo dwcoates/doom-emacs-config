@@ -164,6 +164,22 @@ type AgentShimConfig struct {
 	// repositories the daemon never created — and a nil map can therefore never
 	// silently produce a guessed target.
 	MergeGeometry MergeGeometrySource
+	// MergeCommandGeometry is the map the MERGE COMMAND PATH reads — the
+	// frontend command handler and the daemon-side merge dispatch — as opposed
+	// to MergeGeometry, which additionally feeds the resolved-view publisher's
+	// branch column. Nil means "the same map", which is what every focused
+	// harness wants.
+	//
+	// THE TWO ARE SEPARABLE BECAUSE ONE BOOT REPAIR IS ONLY OWED TO ONE OF
+	// THEM. main defers the boot-time geometry backfill (a git subprocess per
+	// unrecorded workspace) off the serial boot path so the frontend can serve
+	// connect snapshots immediately; a merge resolved before that repair
+	// finished could be refused for a workspace whose record was merely not
+	// derived yet, so main supplies a gated source here that AWAITS the
+	// backfill. A snapshot has no such debt — an unrecorded branch renders as
+	// unknown and is corrected by the next push — so it reads the raw map and
+	// is never made to wait.
+	MergeCommandGeometry MergeGeometrySource
 	// ShutdownSchedules is the DURABLE half of the scheduled-shutdown drain
 	// lease. Supplying it is what turns the scheduled-shutdown commands on: a
 	// nil store leaves them loud unsupported-capability nacks, because a lease
@@ -600,13 +616,20 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		logf("server: orphaned rebase worktree sweep reported failures: %v — the leftovers it could not remove are left for a human; the daemon starts either way", err)
 	}
 
+	// The merge-command path's map: the gated one when main supplied it, else
+	// the same map the views read (see AgentShimConfig.MergeCommandGeometry).
+	commandGeometry := cfg.MergeCommandGeometry
+	if commandGeometry == nil {
+		commandGeometry = cfg.MergeGeometry
+	}
+
 	handler, err := newCommandHandler(
 		cfg.Prompts, coordinator,
 		cfg.Lifecycle, cfg.Resyncer, cfg.SessionCommands, cfg.RequestShutdown,
 		cfg.Queues, logf,
 		CommandHandlerConfig{
 			WorkspaceCreation: cfg.WorkspaceCreation,
-			MergeGeometry:     cfg.MergeGeometry,
+			MergeGeometry:     commandGeometry,
 			// The SAME sink the coordinator and merge.Driver write through, so
 			// the handler's merge_enqueuing lands on one merge axis with every
 			// later phase rather than on a parallel record.
@@ -664,7 +687,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 
 	// The daemon-side merge ingress. It shares the handler above so a dispatched
 	// merge and a frontend merge record the same phases through the same sink.
-	mergeDispatch, err := NewMergeDispatch(cfg.MergeGeometry, handler, logf)
+	mergeDispatch, err := NewMergeDispatch(commandGeometry, handler, logf)
 	if err != nil {
 		cancelWorkspaceAvailable()
 		cancelHostActions()
