@@ -15,6 +15,7 @@ import {
 } from "../src/async-render.js";
 import { AsyncBubbleRegistry } from "../src/async-routing.js";
 import type { AsyncBubble, AsyncBubbleDelta, AsyncLiveness } from "../src/async-bubble.js";
+import type { UnwrappedEmission } from "../src/agent-emission.js";
 
 const LIVE: AsyncLiveness = { case: "live", value: { lastActivityMs: 0 } };
 const NO_FOLD = { droppedBefore: 0, tailCap: 0 };
@@ -287,6 +288,92 @@ describe("the workflow journal kind", () => {
     const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
 
     expect(html).not.toContain("<img");
+  });
+});
+
+describe("the skill kind", () => {
+  const skillKind = (
+    over: Partial<{ skillName: string; args: string; body: string; emissions: UnwrappedEmission[] }> = {},
+  ): AsyncBubble["kind"] => ({
+    case: "skill",
+    value: {
+      skillName: "demo",
+      args: "",
+      body: "",
+      emissions: [],
+      fold: NO_FOLD,
+      ...over,
+    },
+  });
+
+  it("hands a skill window's emissions to the same FEED renderer an agent's go to", () => {
+    const registry = seeded(
+      bubble({
+        id: "b1",
+        kind: skillKind({
+          emissions: [
+            { emission: "response", arm: "assistantMessage", payload: {} },
+            { emission: "thinking", arm: "thinking", payload: {} },
+          ],
+        }),
+      }),
+    );
+
+    const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
+
+    expect(html).toContain('<div class="stub-emissions" data-bubble="b1">2</div>');
+  });
+
+  it("says SKILL on the collapsed face, with the daemon's label verbatim", () => {
+    const registry = seeded(bubble({ id: "b1", kind: skillKind(), label: "/create-or-update-workspace merge" }));
+
+    expect(AsyncBubbleCard(registry.get("b1")!, ctxFor(registry))).toContain(
+      "skill · /create-or-update-workspace merge · running",
+    );
+  });
+
+  it("marks the fold with the skill kind class the stylesheet dresses", () => {
+    const registry = seeded(bubble({ id: "b1", kind: skillKind() }));
+
+    expect(AsyncBubbleCard(registry.get("b1")!, ctxFor(registry))).toContain("async-fold async-kind-skill");
+  });
+
+  it("draws the SKILL's own document as the bubble's body", () => {
+    const registry = seeded(bubble({ id: "b1", kind: skillKind({ body: "# Demo\n\nrun it" }) }));
+
+    const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
+
+    expect(html).toContain("run it");
+  });
+
+  it("draws no body section at all until the contents resolve", () => {
+    const registry = seeded(bubble({ id: "b1", kind: skillKind() }));
+
+    const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
+
+    expect(html).not.toContain("skill-content");
+  });
+
+  it("nests a subagent bubble parented under the skill bubble", () => {
+    const registry = seeded(
+      bubble({ id: "b1", kind: skillKind() }),
+      bubble({ id: "b2", kind: agentKind, label: "dispatched worker", parentBubbleId: "b1" }),
+    );
+
+    const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
+
+    expect(html).toContain("dispatched worker");
+  });
+
+  it("nests a skill bubble invoked inside another skill bubble", () => {
+    const registry = seeded(
+      bubble({ id: "b1", kind: skillKind() }),
+      bubble({ id: "b2", kind: skillKind({ skillName: "inner" }), label: "/inner", parentBubbleId: "b1" }),
+    );
+
+    const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
+
+    expect(html).toContain("skill · /inner · running");
   });
 });
 

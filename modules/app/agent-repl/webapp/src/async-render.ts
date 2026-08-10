@@ -50,6 +50,7 @@ import type { AsyncBubbleRegistry } from "./async-routing.js";
 import type { UnwrappedEmission } from "./agent-emission.js";
 import { Fold, capLabel } from "./fold.js";
 import { escapeHtml } from "./highlight.js";
+import { SkillBodySection } from "./skill-body.js";
 import { log } from "./wslog.js";
 
 /** What the renderer needs from the surfaces around it. */
@@ -191,14 +192,24 @@ function spoolBody(header: string, spool: AsyncOutputSpool): string {
 function bubbleBody(bubble: AsyncBubble, ctx: AsyncRenderContext): string {
   switch (bubble.kind.case) {
     case "agent":
-    case "merge":
-    case "skill": {
-      // A merge run and a skill window are conversations with the same emission
-      // shape as a detached agent's, so they go through the same body — the
-      // feed's renderer, not a second one. See renderEmissions. (A skill
-      // bubble's own `body` is not drawn here yet; this foundation carries it.)
+    case "merge": {
+      // A merge run is a conversation with the same emission shape as a
+      // detached agent's, so the two go through the same body — the feed's
+      // renderer, not a second one. See renderEmissions.
       const { emissions, fold } = bubble.kind.value;
       return `${earlierEntriesNotice(fold, bubble.id)}${ctx.renderEmissions(emissions, bubble.id)}`;
+    }
+    case "skill": {
+      // A skill window is that same conversation, opened by the SKILL's own
+      // document: AsyncSkillBubble.body is the skill's contents rather than
+      // something the conversation said, so it leads the bubble and the
+      // emissions follow. It is drawn through the one skill-body renderer the
+      // card path uses, so a reader sees the same section either way.
+      const { body, emissions, fold } = bubble.kind.value;
+      return `${SkillBodySection(body)}${earlierEntriesNotice(fold, bubble.id)}${ctx.renderEmissions(
+        emissions,
+        bubble.id,
+      )}`;
     }
     case "journal": {
       const { rows, fold } = bubble.kind.value;
