@@ -317,6 +317,12 @@ describe("the revival gate's chrome wiring", () => {
     expect(chrome).not.toContain("revivalGateSignature({ ...gateState, now");
   });
 
+  it("guards the topbar strip's repaint, since it carries the tokens chip", () => {
+    // Assert — the third click target painted in this block, on the same
+    // guard: a rewrite mid-press means the browser fires no click at all.
+    expect(chrome).toContain("infoSlot.paint(");
+  });
+
   it("guards the dequeue card's repaint, since it carries buttons of its own", () => {
     // Assert — an unconditional rewrite destroys whichever button the user is
     // mid-press on, and the browser then fires no click at all.
