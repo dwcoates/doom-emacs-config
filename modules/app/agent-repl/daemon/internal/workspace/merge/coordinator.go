@@ -1307,41 +1307,51 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 // entry, so the terminal status arrives on the very run the user watched go
 // quiet rather than on a stranger.
 //
-// A REPLAY THAT ITSELF CANNOT PUBLISH CHANGES NOTHING. The entry stays marked and
-// outstanding, so the boot after this one tries again; the word is only ever
-// dropped by a publication that landed.
+// A REPLAY THAT CANNOT PUBLISH IS BOUNDED AND THEN EJECTED. It used to return
+// without retiring the entry, so the word was owed to the boot after this one —
+// and when the failure was not transient, the SAME entry was owed again at every
+// boot forever. That is the corpse this package observed in production: a run
+// that had already reached its outcome held the queue head across daemon
+// lifetimes, and every merge behind it waited on a status word nothing was ever
+// going to publish. See ejectTerminal for why advancing is the right answer.
 func (c *QueueCoordinator) replayTerminal(repo string, req Request, term TerminalStatus) bool {
 	driven := req
 	if driven.Run == nil {
 		run, err := c.rebuildRun(repo, req)
 		if err != nil {
-			c.logf("merge: terminal REPLAY run construction FAILED {repo=%s ws=%s name=%s outcome=%s}: %v — the entry stays marked for the next boot",
-				repo, req.Workspace, req.Name, term.Outcome, err)
-			return false
+			// The publisher cannot be built at all, so there is no attempt to
+			// bound: nothing here can ever say this word.
+			return c.ejectTerminal(repo, req, driven, term,
+				fmt.Errorf("the run's publisher could not be rebuilt: %w", err))
 		}
 		driven.Run = run
 	}
 	c.logf("merge: terminal REPLAY {repo=%s ws=%s name=%s run=%s outcome=%s cause=%s} — a previous daemon reached this outcome and could not publish it; the merge is NOT re-run",
 		repo, req.Workspace, req.Name, driven.Run.RunID(), term.Outcome, term.Cause)
 
-	var err error
-	switch term.Outcome {
-	case OutcomeMerged:
-		err = driven.Run.Merged(term.AfterActionError, term.Cause)
-	case OutcomeFailed:
-		err = driven.Run.Failed(term.Cause)
-	default:
+	say := c.terminalPublisher(driven, term)
+	if say == nil {
 		// MarkTerminal validates the outcome, so a record naming anything else
-		// was not written by this package. It is refused rather than guessed at,
-		// and the entry is left for a human to find.
-		c.logf("merge: terminal REPLAY REFUSED, unknown outcome {repo=%s ws=%s name=%s outcome=%s} — the durable record does not name a terminal this package publishes",
-			repo, req.Workspace, req.Name, term.Outcome)
-		return false
+		// was not written by this package. No attempt can publish it, and keeping
+		// it would hold the head on a word that is unsayable by construction.
+		return c.ejectTerminal(repo, req, driven, term,
+			fmt.Errorf("the durable record names outcome %q, which this package does not publish", term.Outcome))
+	}
+
+	// EVERY ATTEMPT IS ITSELF BOUNDED (statusPublishBound), so this loop's whole
+	// cost is bounded too — which is what lets it finish inside the run's
+	// observability budget rather than deferring the question to a reboot.
+	var err error
+	for attempt := 1; attempt <= terminalReplayAttempts; attempt++ {
+		if err = say(); err == nil {
+			break
+		}
+		c.logf("merge: terminal REPLAY status FAILED {repo=%s ws=%s run=%s outcome=%s attempt=%d/%d}: %v",
+			repo, req.Workspace, driven.Run.RunID(), term.Outcome, attempt, terminalReplayAttempts, err)
 	}
 	if err != nil {
-		c.logf("merge: terminal REPLAY status FAILED {repo=%s ws=%s run=%s outcome=%s}: %v — the outcome STANDS and the entry stays marked, so the next boot tries again",
-			repo, req.Workspace, driven.Run.RunID(), term.Outcome, err)
-		return false
+		return c.ejectTerminal(repo, req, driven, term,
+			fmt.Errorf("the terminal status did not publish in %d attempts: %w", terminalReplayAttempts, err))
 	}
 	c.logf("merge: terminal REPLAY PUBLISHED {repo=%s ws=%s run=%s outcome=%s} — the run's terminal word finally reached the frontends",
 		repo, req.Workspace, driven.Run.RunID(), term.Outcome)
@@ -1349,6 +1359,62 @@ func (c *QueueCoordinator) replayTerminal(repo string, req Request, term Termina
 	// here. finishTerminal drops the entry and — for a merged run, whose hook
 	// never fired because the entry was never dropped — runs the post-merge
 	// aftermath exactly once.
+	return c.finishTerminal(repo, req, driven, nil, term.Outcome, term.AfterActionError)
+}
+
+// terminalReplayAttempts is how many times ONE drain tries to publish an owed
+// terminal word before ejecting its entry.
+//
+// IT IS A FAILURE BUDGET, NOT A RETRY POLICY. Each attempt is bounded by
+// statusPublishBound, so the budget's whole cost is bounded and lands inside the
+// two minutes a merge run is held to for an observable update. A sink that
+// refuses three bounded attempts is not a sink that a fourth would satisfy; it
+// is a broken mechanism, and the queue's answer to one is to say so and keep
+// moving rather than to wait on it.
+const terminalReplayAttempts = 3
+
+// terminalPublisher returns the call that says term's word on driven's run, and
+// nil for an outcome this package does not publish.
+//
+// IT EXISTS SO THE OUTCOME IS CLASSIFIED ONCE. The replay loop needs to know
+// both "which call says this" and "is this sayable at all", and deciding the
+// second inside the retry loop would re-ask an unchanging question on every
+// attempt.
+func (c *QueueCoordinator) terminalPublisher(driven Request, term TerminalStatus) func() error {
+	switch term.Outcome {
+	case OutcomeMerged:
+		return func() error { return driven.Run.Merged(term.AfterActionError, term.Cause) }
+	case OutcomeFailed:
+		return func() error { return driven.Run.Failed(term.Cause) }
+	default:
+		return nil
+	}
+}
+
+// ejectTerminal drops an entry whose owed terminal word this daemon could not
+// publish, and lets the drain advance past it.
+//
+// WHY THE QUEUE ADVANCES RATHER THAN WAITS. The status is a NOTIFICATION, and
+// the queue is the thing every other merge on the repository is waiting behind.
+// Holding the head to retry a notification ranks one run's last sentence above
+// every subsequent merge's ability to run at all, and it does so forever when
+// the failure is not transient. The run is over either way: a merged run's
+// commits are on the target and a failed run never touched it, so ejecting
+// changes no tree and undoes no outcome.
+//
+// THE WORD IS NOT SILENTLY DROPPED, IT IS RECORDED IN FULL. The whole terminal
+// status goes into the canonical log — outcome, cause, after-action error, run
+// and workspace — because that log is the only place it now exists. A sink that
+// refused a bounded budget of attempts is a broken mechanism, and the honest
+// response to one is loud instrumentation rather than machinery that pretends to
+// work around it.
+//
+// THE AFTERMATH STILL RUNS. finishTerminal fires the post-merge hook for a
+// merged outcome exactly as a published replay does: the merge landed, and its
+// process-level aftermath is owed to the tree rather than to the status.
+func (c *QueueCoordinator) ejectTerminal(repo string, req, driven Request, term TerminalStatus, why error) bool {
+	c.logf("merge: terminal REPLAY EJECTED {repo=%s ws=%s name=%s run=%s outcome=%s cause=%q after_action_error=%q}: %v — the run's terminal word CANNOT BE PUBLISHED by this daemon, so its queue entry is DROPPED and the drain advances rather than holding the head across boots; the outcome STANDS (a merged run's commits are on the target, a failed run never touched it) and this line is now the only record of the word",
+		repo, req.Workspace, req.Name, req.runIdentity(), term.Outcome, term.Cause, term.AfterActionError, why)
 	return c.finishTerminal(repo, req, driven, nil, term.Outcome, term.AfterActionError)
 }
 
