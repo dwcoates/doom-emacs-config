@@ -324,7 +324,7 @@ reasoning that keeps `queue' on this list.")
     "daemonHealth" "sessionHealth" "restartSession"
     "publishWorkspaceRoster"
     "scheduleShutdown" "cancelScheduledShutdown"
-    "hibernateWorkspace")
+    "hibernateWorkspace" "cancelDetachedAgents")
   "The protojson names of every SENDABLE `FrontendCommand' oneof arm.
 Mirrors the `command' oneof in frame.proto.  Sending an unknown
 command field is a programming error and fails loudly.
@@ -371,6 +371,13 @@ ordinary nacked `CommandAck' — which is why the send is TRACKED: a
 refused hibernate that read as a successful one would leave the user
 believing they had freed memory they still hold.
 
+`cancelDetachedAgents' stops the detached subagents that outlive a
+finished turn.  Emacs sends it from `frontend-client.el'
+\(`agent-repl--gui-cancel-detached-agents'), which is on the workspace
+CLOSE path: every close of a workspace with detached agents composes
+this command, so its absence here failed the close outright rather than
+degrading it.
+
 `publishWorkspaceRoster' carries the sidebar roster (sidebar.el).  Emacs
 is its ONLY publisher: Emacs owns the workspace model, so the roster is
 authored here and handed to the daemon to retain and rebroadcast, which
@@ -388,6 +395,7 @@ is what replaced the per-webview execute-script injection.")
     ("deleteSession"           . "session delete")
     ("restartSession"          . "session restart")
     ("hibernateWorkspace"      . "hibernate")
+    ("cancelDetachedAgents"    . "detached-agent cancel")
     ("shutdown"                . "daemon shutdown")
     ("scheduleShutdown"        . "scheduled restart")
     ("cancelScheduledShutdown" . "scheduled-restart cancel")
