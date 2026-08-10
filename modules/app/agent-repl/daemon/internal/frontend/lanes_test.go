@@ -136,6 +136,9 @@ type laneHandler struct {
 	open func(workspace string) error
 	// submit, when non-nil, replaces SubmitPrompt's body.
 	submit func(workspace, requestID string) error
+	// log, when non-nil, replaces ClientLog's body. It is how a test parks a
+	// telemetry write to prove nothing interactive is behind it.
+	log func(requestID string) error
 
 	mu      sync.Mutex
 	order   []string
@@ -200,6 +203,9 @@ func (h *laneHandler) SubmitPrompt(_ context.Context, ws, rid string, _ *fronten
 func (h *laneHandler) ClientLog(_ context.Context, ws, rid string, _ *frontendv1.ClientLogCmd) error {
 	h.enter(ws, rid)
 	defer h.exit(ws)
+	if h.log != nil {
+		return h.log(rid)
+	}
 	return nil
 }
 

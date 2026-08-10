@@ -1354,6 +1354,11 @@ func (s *Server) writeLoop(c conn, cl *client) {
 // answered only once it has actually run.
 func (s *Server) readLoop(c conn, cl *client) {
 	lanes := newCommandLanes(s.logf, s.logVerbosef, s.processCommand, s.answerSuperseded)
+	// TELEMETRY IS NOT COMMAND WORK. client_log never reaches the lanes: it is
+	// acked at ingress and written off to this connection's telemetry writer,
+	// whose bounded queue and single writer goroutine are the whole of its cost
+	// to the interactive path (telemetry.go).
+	telemetry := newTelemetryWriter(s.warn, s.writeClientLogTelemetry)
 	// inbound is why this loop stopped, and it is what the teardown reports.
 	// It is written before the deferred teardown runs and read only by it, on
 	// this goroutine, so it needs no synchronization. It starts UNRECORDED on
@@ -1365,6 +1370,10 @@ func (s *Server) readLoop(c conn, cl *client) {
 		// Drain first, disconnect second: a command already read still owes
 		// the client an answer, exactly as it did when dispatch ran inline.
 		lanes.close()
+		// Second, and for the same reason: a record this connection accepted
+		// was already answered with an ok ack, so it is written before the
+		// connection is considered gone.
+		telemetry.close()
 		s.disconnect(cl, inbound)
 	}()
 	for {
@@ -1396,7 +1405,12 @@ func (s *Server) readLoop(c conn, cl *client) {
 		// the gauge with nothing obliged to release it.
 		received := time.Now()
 		depth := s.inflight.Add(1)
-		lanes.submit(s.newCommandTicket(cl, cmd, received, depth))
+		t := s.newCommandTicket(cl, cmd, received, depth)
+		if cmd.GetClientLog() != nil {
+			s.acceptClientLog(t, telemetry)
+			continue
+		}
+		lanes.submit(t)
 	}
 }
 
@@ -1512,11 +1526,55 @@ const supersededAckNote = "resync superseded by a newer resync on this workspace
 // even through close(). The replay this entry asked for happens — it is simply
 // performed once for all of them.
 func (s *Server) answerSuperseded(t *commandTicket) {
+	s.answerAccepted(t, "superseded resync", supersededAckNote)
+}
+
+// clientLogAcceptedNote is the account an ingress-acked client_log carries. It
+// is prose only, and it states exactly what the ok means: the record was taken
+// for writing, off every lane, and nothing waits on the write.
+const clientLogAcceptedNote = "client_log accepted for telemetry writing; it is written off the workspace's command lane and nothing waits on it"
+
+// acceptClientLog answers a client_log AT INGRESS and hands the record to the
+// connection's telemetry writer.
+//
+// THE ACK IS THE RECEIPT, and that is the whole change: a client_log's ack used
+// to mean "written", which made a client's 10s deadline depend on a lane's
+// backlog for a record nothing waits on. Both clients treat this ack the same
+// way they treat any ok — the pending request resolves and nothing re-sends —
+// and neither has ever read a client_log ack for anything else.
+//
+// The write's own failures are NOT swallowed by acking early: they are surfaced
+// at warn by writeClientLogTelemetry, naming the workspace, request and error,
+// which is the channel an operator reads them on anyway. What is given up is a
+// nack the browser only logged.
+func (s *Server) acceptClientLog(t *commandTicket, telemetry *telemetryWriter) {
+	s.answerAccepted(t, "client_log", clientLogAcceptedNote)
+	telemetry.submit(telemetryRecord{cl: t.cl, cmd: t.cmd})
+}
+
+// writeClientLogTelemetry performs one accepted client_log's write. It is the
+// SAME dispatch the lane performed — the handler, its authority checks and its
+// persistence are untouched — moved onto the telemetry writer's goroutine.
+func (s *Server) writeClientLogTelemetry(rec telemetryRecord) {
+	ack, _ := s.dispatchClientCommand(rec.cl, rec.cmd)
+	if ack.GetOk() {
+		return
+	}
+	// The client was already told the record was accepted, so this log line is
+	// the only place the refusal can be reported. It is a warn, not a debug:
+	// a rejected browser record is evidence lost.
+	s.warn("frontend: client_log telemetry write REFUSED ws=%q request_id=%q: %s",
+		rec.cmd.GetWorkspace(), rec.cmd.GetRequestId(), ack.GetError())
+}
+
+// answerAccepted answers a command with an ok ack and no execution, settling
+// its ticket exactly as processCommand does. label names the case in the log.
+func (s *Server) answerAccepted(t *commandTicket, label, note string) {
 	cl, cmd := t.cl, t.cmd
 	ack := &frontendv1.CommandAck{
 		RequestId: cmd.GetRequestId(),
 		Ok:        true,
-		Error:     supersededAckNote,
+		Error:     note,
 	}
 	// The ticket is settled on EVERY path out, exactly as processCommand does
 	// it, so a coalesced command can never leak the in-flight gauge or skip its
@@ -1524,8 +1582,8 @@ func (s *Server) answerSuperseded(t *commandTicket) {
 	defer func() { t.finish(ack, 0) }()
 	data, err := marshalFrame(CommandAckFrame(ack))
 	if err != nil {
-		s.logf("frontend: marshal superseded resync ack request_id=%s: %v", ack.GetRequestId(), err)
-		t.ackUndeliverable(fmt.Errorf("frontend: marshal superseded resync ack: %w", err))
+		s.logf("frontend: marshal %s ack request_id=%s: %v", label, ack.GetRequestId(), err)
+		t.ackUndeliverable(fmt.Errorf("frontend: marshal %s ack: %w", label, err))
 		return
 	}
 	// Declared before the push for the same reason processCommand declares it
