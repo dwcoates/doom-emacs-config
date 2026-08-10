@@ -1634,32 +1634,44 @@ describe("click-to-expand", () => {
   });
 });
 
-// The shared N-line cap mechanic, and the response bubble's own use of it.
-const sharedCap = blockAfter(css, ".bubble.assistant > .bubble-body {");
+// The shared N-line cap mechanic, and both bubbles' use of it.
+const sharedCap = blockAfter(css, "\n.bubble > .bubble-body {\n");
 const capSelector = css.slice(
   css.indexOf(".tool-read-output, .bash-input"),
   css.indexOf("{", css.indexOf(".tool-read-output, .bash-input")),
 );
-const responseCapVars = blockAfter(css, "\n.bubble.assistant > .bubble-body { --cap-lines");
+const bubbleCapBudget = blockAfter(css, "\n.bubble > .bubble-body { --cap-lines");
+const responseCapVars = blockAfter(css, "\n.bubble.assistant > .bubble-body { --cap-line-h");
+const promptCapVars = blockAfter(css, "\n.bubble.user > .bubble-body { --cap-line-h");
 const mdRule = blockAfter(css, "\n.md {");
+const promptRule = blockAfter(css, "\n.bubble.user {");
 
-describe("response bubble height cap", () => {
-  it("caps the response body at 25 of its own text lines", () => {
-    // Arrange / Act — one enormous answer must not push the rest of the feed
-    // off screen, so the body stops at a fixed line budget.
+describe("bubble height cap", () => {
+  it("caps a bubble body at 25 of its own text lines", () => {
+    // Arrange / Act — one enormous prompt or answer must not push the rest of
+    // the feed off screen, so the body stops at a fixed line budget.
     // Assert
-    expect(responseCapVars).toMatch(/--cap-lines:\s*25/);
+    expect(bubbleCapBudget).toMatch(/--cap-lines:\s*25/);
   });
 
-  it("scrolls the rest of the answer rather than clipping it away", () => {
-    // Arrange / Act — the shared cap rule the response body joined.
+  it("states that budget once for both speakers rather than per bubble", () => {
+    // Arrange — a per-variant copy is what lets the prompt's cap and the
+    // response's cap drift to different numbers.
+    // Act / Assert
+    expect(
+      css.match(/\.bubble[^{}\n]*>\s*\.bubble-body[^{}\n]*\{[^}]*--cap-lines:\s*\d/g),
+    ).toHaveLength(1);
+  });
+
+  it("scrolls the rest of the text rather than clipping it away", () => {
+    // Arrange / Act — the shared cap rule both bubble bodies joined.
     // Assert
     expect(sharedCap).toMatch(/overflow-y:\s*auto/);
   });
 
-  it("caps by max-height, so a short answer still shrinks to its own text", () => {
-    // Arrange / Act — a plain `height` would pad every one-line answer out to
-    // 25 lines of empty bubble.
+  it("caps by max-height, so a short bubble still shrinks to its own text", () => {
+    // Arrange / Act — a plain `height` would pad every one-line bubble out to
+    // 25 lines of empty fill.
     // Assert
     expect(sharedCap).toMatch(/max-height:/);
     expect(sharedCap).not.toMatch(/(^|[^-])height:\s*calc/);
@@ -1667,15 +1679,15 @@ describe("response bubble height cap", () => {
 
   it("reuses the tool previews' cap mechanic instead of rolling a second one", () => {
     // Arrange / Act — one rule owns "N lines then scroll" for every capped box
-    // in the feed, the response bubble included.
+    // in the feed, both bubbles included.
     // Assert
-    expect(capSelector).toContain(".bubble.assistant > .bubble-body");
+    expect(capSelector).toContain(".bubble > .bubble-body");
     expect(sharedCap).toMatch(
       /max-height:\s*calc\(var\(--cap-lines\) \* var\(--cap-line-h, 1\.4em\) \+ var\(--cap-extra, 0px\)\)/,
     );
   });
 
-  it("measures the budget in the markdown's own leading rather than restating it", () => {
+  it("measures the response's budget in the markdown's own leading", () => {
     // Arrange — a hard-coded line height here would silently mis-measure the
     // cap the day `.md`'s leading changed.
     // Act / Assert
@@ -1689,15 +1701,30 @@ describe("response bubble height cap", () => {
     expect(mdRule).toMatch(/--md-line-h:\s*[\d.]+/);
   });
 
+  it("measures the prompt's budget in the prompt's own leading", () => {
+    // Arrange — the prompt's verbatim <pre> is monospace at its own leading,
+    // not the markdown's, so 25 lines must mean 25 of ITS lines.
+    // Act / Assert
+    expect(promptCapVars).toMatch(/--cap-line-h:\s*calc\(var\(--prompt-line-h\) \* 1em\)/);
+    expect(promptRule).toMatch(/line-height:\s*var\(--prompt-line-h\)/);
+  });
+
+  it("states the prompt's leading rather than leaving it the UA's font-dependent normal", () => {
+    // Arrange — an unstated leading is a line box no cap can count, so the
+    // prompt declares one as a token.
+    // Act / Assert
+    expect(promptRule).toMatch(/--prompt-line-h:\s*[\d.]+/);
+  });
+
   it("caps the body rather than the bubble, so the corner stamp never scrolls away", () => {
     // Arrange / Act — the stamp is a sibling of the body, outside the scroll box.
     // Assert
-    expect(capSelector).not.toMatch(/\.bubble\.assistant\s*[,{]/);
+    expect(capSelector).not.toMatch(/\.bubble\s*[,{]/);
   });
 
   it("leaves the monospace previews their own 1.4 leading, which the cap defaults to", () => {
     // Arrange — the previews set the leading the shared default measures in;
-    // the response bubble is deliberately absent from that list.
+    // both bubbles are deliberately absent from that list, each carrying its own.
     const leading = css.match(
       /\.tool-read-output, \.bash-input, \.bash-output, \.diff-output, \.skill-input, \.skill-content \{\s*line-height:\s*1\.4;\s*\}/,
     );
