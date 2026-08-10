@@ -304,6 +304,16 @@ type Config struct {
 	// still serves prompts correctly, it merely cannot testify to a prompt
 	// across its own death.
 	PromptReceipts PromptReceiptStore
+	// TerminalFailureCards persists the STANDING failure card of a session
+	// whose bring-up is terminally fenced (vanishedresume.go), so a client that
+	// connects long after the refusal is served the same account of it that the
+	// client connected at that instant was pushed.
+	//
+	// Nil is the durable half OFF, exactly as a nil PromptReceipts is: the live
+	// push still happens, and every site that would have written or read a row
+	// says out loud that it did not, so the absence is never mistaken for "this
+	// session was never fenced".
+	TerminalFailureCards TerminalFailureCardStore
 	// TurnAccountings durably records resolved terminal accounting before the
 	// terminal ResultMessage reaches any frontend. Production always supplies it.
 	TurnAccountings TurnAccountingStore
