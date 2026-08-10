@@ -411,7 +411,28 @@ func compositeWorkspaceState(workspace string, projection resolved, composite Co
 	// WorkspaceState remains the sole authority; every per-workspace push
 	// carries a copy of this token so a client can compare and discard a stale
 	// one without ever learning what a session is.
-	msg.Fence = Fence(composite.AgentReplSessionID, string(composite.ControllerGenerationID))
+	//
+	// AN ABSENT CONTROLLER GENERATION YIELDS AN ABSENT FENCE, and this is the
+	// whole point of the branch. WorkspaceState's fence is not one fence among
+	// many: it is the ANSWER every other fenced push is measured against, and
+	// the client adopts it verbatim. Composing one over an empty generation —
+	// the post-bounce hibernated window, before any controller is minted —
+	// produced a token that NOTHING could ever match, because every fenced view
+	// is published from a live generation and the resync eligibility ladder
+	// rejects an empty generation outright (identity_mismatch). A client that
+	// adopted it had its whole fenced chrome discarded and its every resync
+	// refused, and stayed that way until some later WorkspaceState happened to
+	// reach it — which for a DETACHED workspace nobody focuses never happens.
+	//
+	// The empty fence is the honest statement of the same fact and the one both
+	// ends already handle: `admitFenced` treats "" as "no ruling yet" and
+	// refuses every view against it, and a resync request carrying "" is
+	// refused loudly rather than being guessed at. Nothing is invented.
+	if composite.ControllerGenerationID == "" {
+		msg.Fence = ""
+	} else {
+		msg.Fence = Fence(composite.AgentReplSessionID, string(composite.ControllerGenerationID))
+	}
 	switch {
 	// THE STATUS AXIS WON THE RENDER STATE, so the frame's cause, instant and
 	// turn flag come from the row that won it. Keyed on the RESOLVED state

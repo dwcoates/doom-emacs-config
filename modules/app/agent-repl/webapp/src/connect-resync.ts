@@ -278,6 +278,40 @@ export class ConnectResync {
   }
 
   /**
+   * The workspace's FENCE ROTATED: adopt the consequence and owe one resync.
+   *
+   * This is a re-arm of a different kind from `forceResync`, and the
+   * difference is the whole point. A visibility wake is a GUESS that this page
+   * might be behind, so it must obey the backoff and the ceiling — those are
+   * the bound on the flood that motivated them. A fence rotation is PROOF of a
+   * specific fact: every request this page has made under the previous fence
+   * was made under an identity the daemon has since retired, so the refusals
+   * they earned say nothing about whether a request under the NEW fence will
+   * be answered. Holding a page at its ceiling on that history would leave it
+   * frozen for exactly the rotation that would have repaired it.
+   *
+   * The observed shape: a daemon bounce republishes a workspace hibernated
+   * with no controller generation; this page adopts that fence, resyncs with
+   * it, and is refused (`rejection_cause=identity_mismatch`) 0.3s before the
+   * real generation is published. The socket never cycled and the boot id
+   * never changed, so nothing else here would ever ask again.
+   *
+   * So the failure history is discharged exactly as a fresh socket discharges
+   * it — same reasoning, different evidence. An in-flight request is NOT
+   * cleared: it was really sent and will really settle, and forgetting it
+   * would break the single-in-flight bound. It becomes the coalesced dirty
+   * request instead, which is spent at the settle edge against the fence this
+   * page holds by then.
+   */
+  observeFenceRotation(reason: string): void {
+    this.failures = 0;
+    this.nextAllowedAtMs = 0;
+    this.givenUp = false;
+    this.rearm();
+    this.opts.log?.("warn", `resync: workspace fence rotated (${reason}); re-arming a resync under the new fence`);
+  }
+
+  /**
    * Owe one resync on the CURRENT connection, without waiting for a socket
    * event to supply the arming.
    *

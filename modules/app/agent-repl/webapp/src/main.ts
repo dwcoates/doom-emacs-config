@@ -1479,6 +1479,18 @@ async function boot(): Promise<void> {
           }
           sidebar.setAuthoritativeCurrentStatus(workspaceStatusFromRenderState(store.state.renderState));
         }
+        // A FENCE ROTATION IS ITS OWN RE-ARM, and it is the edge that repairs
+        // the post-bounce stale workspace. The daemon bounces, republishes the
+        // workspace before any controller generation exists, and this page
+        // adopts that fence and resyncs with it — a request the daemon refuses
+        // (rejection_cause=identity_mismatch) a fraction of a second before the
+        // real generation is published. The socket never cycled and the daemon
+        // boot id never changed, so neither of the other two re-arms fires, and
+        // the page sits on a generation that is gone with its fenced chrome
+        // permanently discarded. The rotation says otherwise, so it re-arms
+        // here, BEFORE the observe below, which dispatches it with the fence
+        // this batch just adopted.
+        if (result.fenceRotated) connectResync.observeFenceRotation("WorkspaceState adopted a new fence");
         // Ask for the conversation history this connection has not been told.
         // Read AFTER ingest so the snapshot's own SessionView has supplied the
         // workspace key the daemon routes a resync by.
