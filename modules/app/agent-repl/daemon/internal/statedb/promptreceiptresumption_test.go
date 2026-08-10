@@ -18,6 +18,14 @@ func pending() PendingResumption {
 	}
 }
 
+// storedPending is that same resumption as the store hands it back: owed and
+// unclaimed, with no delivery behind it yet.
+func storedPending() PendingResumption {
+	r := pending()
+	r.State = ResumptionPending
+	return r
+}
+
 func TestARecordedResumptionIsOwedByItsWorkspace(t *testing.T) {
 	// Arrange.
 	receipts, _ := openReceipts(t)
@@ -32,7 +40,7 @@ func TestARecordedResumptionIsOwedByItsWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PendingResumptions: %v", err)
 	}
-	if len(got) != 1 || got[0] != pending() {
+	if len(got) != 1 || got[0] != storedPending() {
 		t.Fatalf("pending = %+v, want the one recorded resumption", got)
 	}
 }
@@ -116,7 +124,7 @@ func TestAResumptionSurvivesReopeningTheStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PendingResumptions: %v", err)
 	}
-	if len(got) != 1 || got[0] != pending() {
+	if len(got) != 1 || got[0] != storedPending() {
 		t.Fatalf("pending = %+v, want the resumption to outlive the process that recorded it", got)
 	}
 }
