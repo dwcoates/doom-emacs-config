@@ -3539,6 +3539,25 @@ work."
                   (expand-file-name
                    "~/workspace/ChessCom/explanation-engine")))))
 
+;;;; ---- Tests: (agent-repl--workspace-skill-command) ----
+
+(ert-deftest agent-repl-test-workspace-skill-command-renders-merge ()
+  "The shared builder renders the `merge' verb as the full slash command."
+  (should (equal (agent-repl--workspace-skill-command "merge")
+                 "/create-or-update-workspace merge")))
+
+(ert-deftest agent-repl-test-workspace-skill-command-renders-close ()
+  "The shared builder renders the `close' verb as the full slash command."
+  (should (equal (agent-repl--workspace-skill-command "close")
+                 "/create-or-update-workspace close")))
+
+(ert-deftest agent-repl-test-oneshot-merge-suffix-uses-workspace-skill-command ()
+  "The doom one-shot suffix names the skill through the shared builder, so
+a rename of `agent-repl--workspace-skill' can't leave it behind."
+  (should (string-match-p
+           (regexp-quote (agent-repl--workspace-skill-command "merge"))
+           (agent-repl--oneshot-merge-suffix))))
+
 ;;;; ---- Tests: (agent-repl--oneshot-create-pr-then-merge-followup) ----
 
 (ert-deftest agent-repl-test-oneshot-create-pr-then-merge-followup-mentions-workspace-merge ()
