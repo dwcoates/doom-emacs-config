@@ -954,6 +954,75 @@ the report explicitly if the install loop missed an entry."
         ;; guard actually took.
         (should-not (eq orig current))))))
 
+;;;; ---- Driving `agent-repl--with-deferred-quit' from a batch test --------
+;;
+;; Every guarded critical section is tested the same two ways: a quit that
+;; ARRIVES while the section runs must be left armed rather than taken, and a
+;; quit ALREADY pending when the section starts must not stop the section
+;; from finishing.  Hand-rolling either recipe is easy to get subtly wrong in
+;; a way that still passes, so both live here instead.
+;;
+;; THE DISARM IS THE WHOLE DIFFICULTY.  `quit-flag' left set when the
+;; `inhibit-quit' binding pops is taken IMMEDIATELY -- inside the test, not
+;; inside the subject -- which aborts the run with a bare `(quit)' and no
+;; assertion.  Both macros therefore clear the flag INSIDE the `inhibit-quit'
+;; scope, before either binding pops.
+;;
+;; AND THE DISARM CANNOT USE `unwind-protect'.  Emacs consumes a set
+;; `quit-flag' as the protected body is left -- the cleanup already observes
+;; the flag as nil -- and takes the quit once the cleanup returns, so an
+;; `unwind-protect' both loses the observation and fires the quit it was
+;; written to prevent.  The body is therefore run under `condition-case', its
+;; error held, the flag read and cleared, and the error re-signalled after:
+;; the reading happens on the normal path, and a signalling body still leaves
+;; no live quit behind for the next test to inherit.
+
+(defmacro agent-repl-test--quit-deferred-p (&rest body)
+  "Run BODY under `inhibit-quit'; return non-nil if it left a quit armed.
+BODY is the Act of a deferral test: it calls the guarded entry point,
+with whatever mock stands in for the C-g already installed by the
+caller.  `quit-flag' is bound locally, so a quit BODY requests is
+observed here and never escapes into the ert runner.
+
+Returns t when the quit was still pending as BODY returned -- the
+observation the command loop would have made -- and nil when the quit
+was taken or never requested."
+  (declare (indent 0) (debug (body)))
+  (let ((armed (make-symbol "armed"))
+        (err (make-symbol "err")))
+    `(let ((,armed nil))
+       (let ((quit-flag nil))
+         (let ((inhibit-quit t))
+           ;; `condition-case' rather than `unwind-protect': see above.
+           (let ((,err (condition-case e (progn ,@body nil) (error e))))
+             (setq ,armed (and quit-flag t)
+                   quit-flag nil)
+             (when ,err (signal (car ,err) (cdr ,err))))))
+       ,armed)))
+
+(defmacro agent-repl-test--with-pending-quit (&rest body)
+  "Run BODY under `inhibit-quit' with a quit ALREADY requested.
+Stands for the C-g the user pressed just as the guarded section began.
+BODY's value is returned, and the pending quit is cleared before the
+`inhibit-quit' binding pops, so the quit never lands in the test.
+
+Use when the assertion is that the section COMPLETED despite the quit;
+use `agent-repl-test--quit-deferred-p' when the assertion is that the
+quit survived the section."
+  (declare (indent 0) (debug (body)))
+  (let ((value (make-symbol "value"))
+        (err (make-symbol "err")))
+    `(let ((quit-flag nil))
+       (let ((inhibit-quit t))
+         (setq quit-flag t)
+         ;; `condition-case' rather than `unwind-protect': see above.
+         (let* ((,err nil)
+                (,value (condition-case e (progn ,@body)
+                          (error (setq ,err e) nil))))
+           (setq quit-flag nil)
+           (when ,err (signal (car ,err) (cdr ,err)))
+           ,value)))))
+
 (provide 'test-helpers)
 
 ;;; test-helpers.el ends here

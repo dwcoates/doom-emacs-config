@@ -4949,24 +4949,17 @@ the switch emit `unroutable log workspace'."
 (ert-deftest agent-repl-test-async-git-sentinel-defers-a-quit-to-the-command-loop ()
   "A C-g while a git result settles is deferred, never taken mid-settle."
   ;; Arrange
-  (let ((quit-flag nil)
-        (still-armed nil))
-    (cl-letf (((symbol-function 'process-status) (lambda (_proc) 'exit))
-              ((symbol-function 'agent-repl--async-git-settle)
-               (lambda (&rest _) (setq quit-flag t))))
-      (let ((inhibit-quit t))
-        ;; Act
-        (agent-repl--async-git-sentinel 'fake-process "finished\n")
-        (setq still-armed quit-flag
-              quit-flag nil)))
-    ;; Assert
-    (should still-armed)))
+  (cl-letf (((symbol-function 'process-status) (lambda (_proc) 'exit))
+            ((symbol-function 'agent-repl--async-git-settle)
+             (lambda (&rest _) (setq quit-flag t))))
+    ;; Act / Assert
+    (should (agent-repl-test--quit-deferred-p
+              (agent-repl--async-git-sentinel 'fake-process "finished\n")))))
 
 (ert-deftest agent-repl-test-async-git-sentinel-still-delivers-under-a-quit ()
   "A quit raised during the settle does not cost the callback its delivery."
   ;; Arrange
-  (let ((quit-flag nil)
-        (delivered nil)
+  (let ((delivered nil)
         (proc-buf (generate-new-buffer " *test-sentinel-quit*")))
     (unwind-protect
         (progn
@@ -4979,11 +4972,9 @@ the switch emit `unroutable log workspace'."
                     ((symbol-function 'process-get)
                      (lambda (_proc _prop)
                        (lambda (ok output) (setq delivered (list ok output))))))
-            (let ((inhibit-quit t))
-              ;; Act — the C-g arrives before the sentinel runs.
-              (setq quit-flag t)
-              (agent-repl--async-git-sentinel 'fake-process "finished\n")
-              (setq quit-flag nil))))
+            ;; Act — the C-g arrives before the sentinel runs.
+            (agent-repl-test--with-pending-quit
+              (agent-repl--async-git-sentinel 'fake-process "finished\n"))))
       (when (buffer-live-p proc-buf) (kill-buffer proc-buf)))
     ;; Assert
     (should (equal delivered '(t "ok")))))
