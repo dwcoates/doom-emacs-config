@@ -100,7 +100,25 @@ type WorkspaceViews struct {
 	// accounting republication and says so once, at the seam.
 	states WorkspaceStateSource
 
+	// emitMu admits ONE drainer of pending at a time. It is taken with mu
+	// released and is the only lock held while the frontend is called, which is
+	// what keeps this publisher out of the frontend's lock order.
+	emitMu sync.Mutex
+
 	mu sync.Mutex
+	// pending is the ordered outbox of fan-outs whose retention has already
+	// been advanced under mu. Staging under mu is what fixes an emission's
+	// POSITION relative to every other resolution's; the drain then emits in
+	// that order with no subsystem lock held.
+	//
+	// THIS IS NOT A RELAXATION OF THE ORDERING the retain-and-push hold bought.
+	// Pushing directly under mu was a cross-subsystem call under a subsystem
+	// mutex: the frontend takes its own lock to broadcast, and its release path
+	// called back into this publisher's Topbars while holding it. Staging keeps
+	// "the wire is never older than the retention" — the order is fixed under
+	// mu, and one drainer replays it — without putting mu inside the frontend's
+	// lock order.
+	pending []func()
 	// retained is the last published view per workspace, per family. It is
 	// both the change-detection baseline and the snapshot source, deliberately:
 	// a separate snapshot store would be a second answer to "what has this
@@ -178,20 +196,52 @@ func (v *WorkspaceViews) PublishState(state *frontendv1.WorkspaceState) {
 	}
 	gate, gateErr := v.resolveGate(workspace, state.GetFence(), state.GetSessionId(), rec, haveRecord)
 
-	// RETAINED AND PUSHED UNDER ONE HOLD of the mutex. Pushing after the
+	// RETAINED AND STAGED UNDER ONE HOLD of the mutex. Staging after the
 	// release would let two concurrent resolutions retain the newer view and
 	// broadcast the older one — the client would then hold a view the snapshot
-	// disagrees with until something else moved.
+	// disagrees with until something else moved. The emission itself happens in
+	// drain, with the mutex released; see pending.
 	v.mu.Lock()
-	defer v.mu.Unlock()
 	if topbarErr == nil {
 		retained := v.forLocked(workspace)
 		if !proto.Equal(retained.topbar, topbar) {
 			retained.topbar = topbar
-			v.push.PushTopbarView(topbar)
+			v.stageLocked(func() { v.push.PushTopbarView(topbar) })
 		}
 	}
 	v.publishGateLocked(workspace, state.GetSessionId(), gate, gateErr)
+	v.mu.Unlock()
+	v.drain()
+}
+
+// stageLocked appends one fan-out to the ordered outbox. Caller holds v.mu,
+// which is what fixes this emission's position against every other one's.
+func (v *WorkspaceViews) stageLocked(emit func()) {
+	v.pending = append(v.pending, emit)
+}
+
+// drain emits every staged fan-out, in staging order, with v.mu RELEASED.
+//
+// emitMu admits one drainer, so the order staging fixed is the order the
+// frontend sees: a goroutine that staged an older view and has not reached
+// here yet has still put it ahead in the queue, and whichever goroutine drains
+// first emits it first. A drainer may therefore emit another goroutine's work,
+// which is the point — nothing is left staged behind a caller that is slow to
+// get here.
+func (v *WorkspaceViews) drain() {
+	v.emitMu.Lock()
+	defer v.emitMu.Unlock()
+	for {
+		v.mu.Lock()
+		if len(v.pending) == 0 {
+			v.mu.Unlock()
+			return
+		}
+		emit := v.pending[0]
+		v.pending = v.pending[1:]
+		v.mu.Unlock()
+		emit()
+	}
 }
 
 // RepublishAccounting re-renders the workspace's TOPBAR after its settled
@@ -258,8 +308,9 @@ func (v *WorkspaceViews) PublishSession(workspace, fence, sessionID string) {
 	rec, haveRecord := v.recordFor(sessionID)
 	gate, gateErr := v.resolveGate(workspace, fence, sessionID, rec, haveRecord)
 	v.mu.Lock()
-	defer v.mu.Unlock()
 	v.publishGateLocked(workspace, sessionID, gate, gateErr)
+	v.mu.Unlock()
+	v.drain()
 }
 
 // resolveGate is the ONE gate resolution both triggers run through, so a
@@ -275,9 +326,9 @@ func (v *WorkspaceViews) resolveGate(workspace, fence, sessionID string, rec reg
 	return gate, err
 }
 
-// publishGateLocked retains a resolved gate and pushes it in ONE step. The
-// caller holds v.mu, which is what keeps the retention and the broadcast from
-// being reordered against another resolution's.
+// publishGateLocked retains a resolved gate and STAGES its push in ONE step.
+// The caller holds v.mu, which is what keeps the retention and the broadcast
+// from being reordered against another resolution's.
 func (v *WorkspaceViews) publishGateLocked(workspace, sessionID string, gate *frontendv1.WorkspaceGateView, resolveErr error) {
 	if resolveErr != nil {
 		return
@@ -288,7 +339,7 @@ func (v *WorkspaceViews) publishGateLocked(workspace, sessionID string, gate *fr
 	}
 	retained.gate = gate
 	v.logf("server: workspace gate TRANSITION ws=%q session=%q gate=%s", workspace, sessionID, gateArmName(gate))
-	v.push.PushWorkspaceGateView(gate)
+	v.stageLocked(func() { v.push.PushWorkspaceGateView(gate) })
 }
 
 // PublishTokenBreakdown resolves and publishes the breakdown menu from the
@@ -308,17 +359,19 @@ func (v *WorkspaceViews) PublishTokenBreakdown(workspace, fence string, usage *f
 		v.logf("server: token breakdown view WITHHELD ws=%q — the menu keeps its last complete resolution: %v", workspace, err)
 		return
 	}
-	// One hold for the retention AND the push, for the reason PublishState
-	// gives: a broadcast outside the mutex can be overtaken by a newer
+	// One hold for the retention AND the STAGING, for the reason PublishState
+	// gives: an emission ordered outside the mutex can be overtaken by a newer
 	// resolution's, leaving the wire older than the retention.
 	v.mu.Lock()
-	defer v.mu.Unlock()
 	retained := v.forLocked(workspace)
 	if proto.Equal(retained.breakdown, view) {
+		v.mu.Unlock()
 		return
 	}
 	retained.breakdown = view
-	v.push.PushTokenBreakdownView(view)
+	v.stageLocked(func() { v.push.PushTokenBreakdownView(view) })
+	v.mu.Unlock()
+	v.drain()
 }
 
 // Forget drops a closed workspace's retained views AND its memoized branch, so
