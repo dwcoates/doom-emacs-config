@@ -239,6 +239,146 @@ func TestCompactionGatePromptWriteFailureLeavesThePromptAccepted(t *testing.T) {
 	}
 }
 
+// ---- The clear, which closes the same gate -------------------------------
+
+func TestCompactionGateRedundantVerdictsForAClear(t *testing.T) {
+	tests := []struct {
+		name string
+		gate CompactionGate
+		want bool
+	}{
+		{
+			name: "a clear with nothing said since is redundant",
+			gate: CompactionGate{ClearedAtMs: 200, PromptAtMs: 100},
+			want: true,
+		},
+		{
+			name: "a prompt after the clear re-opens the gate",
+			gate: CompactionGate{ClearedAtMs: 200, PromptAtMs: 201},
+			want: false,
+		},
+		{
+			name: "a clear after an older compaction keeps the gate closed",
+			gate: CompactionGate{CompactedAtMs: 100, ClearedAtMs: 300, PromptAtMs: 200},
+			want: true,
+		},
+		{
+			name: "a prompt after the clear outranks the older compaction too",
+			gate: CompactionGate{CompactedAtMs: 100, ClearedAtMs: 200, PromptAtMs: 300},
+			want: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.gate.Redundant(); got != tc.want {
+				t.Fatalf("Redundant() = %v, want %v (gate %+v)", got, tc.want, tc.gate)
+			}
+		})
+	}
+}
+
+func TestCompactionGateClosesOnACompletedClear(t *testing.T) {
+	// Arrange.
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+
+	// Act.
+	if err := m.NoteConversationCleared("ws1"); err != nil {
+		t.Fatalf("NoteConversationCleared: %v", err)
+	}
+
+	// Assert.
+	gate := mustGate(t, m, "ws1")
+	if !gate.Redundant() {
+		t.Fatalf("gate = %+v, want redundant after a completed clear", gate)
+	}
+	if !cl.contains("compaction gate CLOSED ws=ws1 cleared_at=") {
+		t.Fatalf("missing gate-closed log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestCompactionGateClearIsRecordedApartFromTheCompaction(t *testing.T) {
+	// Arrange — nothing has ever compacted this workspace.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+
+	// Act.
+	if err := m.NoteConversationCleared("ws1"); err != nil {
+		t.Fatalf("NoteConversationCleared: %v", err)
+	}
+
+	// Assert — a decline taken from this gate can say the conversation was
+	// cleared rather than misreporting a compaction that never happened.
+	gate := mustGate(t, m, "ws1")
+	if gate.CompactedAtMs != 0 {
+		t.Fatalf("gate = %+v, want a clear to leave compacted_at untouched", gate)
+	}
+	if gate.ClearedAtMs == 0 {
+		t.Fatalf("gate = %+v, want the clear instant recorded", gate)
+	}
+}
+
+func TestCompactionGateReopensOnThePromptAfterAClear(t *testing.T) {
+	// Arrange — cleared, so the gate stands closed.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.NoteConversationCleared("ws1"); err != nil {
+		t.Fatalf("NoteConversationCleared: %v", err)
+	}
+
+	// Act.
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}); err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+
+	// Assert.
+	if gate := mustGate(t, m, "ws1"); gate.Redundant() {
+		t.Fatalf("gate = %+v, want the prompt after the clear to re-open it", gate)
+	}
+}
+
+func TestCompactionGateNeverMovesBackwardsOnAReplayedClear(t *testing.T) {
+	// Arrange — a clear, then the user speaking.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.NoteConversationCleared("ws1"); err != nil {
+		t.Fatalf("NoteConversationCleared: %v", err)
+	}
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", PromptAdmissionUser, func(*frontendv1.WorkspaceState) {}); err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+	replayed := mustGate(t, m, "ws1")
+
+	// Act — the same ContextCleared arrives again off a replayed stream.
+	if err := noteCompactionGateEdge(m.db, "ws1", "cleared_at", replayed.ClearedAtMs); err != nil {
+		t.Fatalf("replaying the clear edge: %v", err)
+	}
+
+	// Assert.
+	if gate := mustGate(t, m, "ws1"); gate.Redundant() {
+		t.Fatalf("gate = %+v, want the prompt to still stand over a replayed older clear", gate)
+	}
+}
+
+func TestCompactionGateClearRefusesAnEmptyWorkspace(t *testing.T) {
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+
+	err := m.NoteConversationCleared("")
+
+	if err == nil || !strings.Contains(err.Error(), "empty workspace") {
+		t.Fatalf("err = %v, want an empty-workspace rejection", err)
+	}
+}
+
+func TestCompactionGateClearReportsAFailedCloseWrite(t *testing.T) {
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if _, err := m.db.Exec(`DROP TABLE compaction_gate`); err != nil {
+		t.Fatalf("dropping the gate table: %v", err)
+	}
+
+	err := m.NoteConversationCleared("ws1")
+
+	if err == nil || !strings.Contains(err.Error(), "record compaction gate cleared_at") {
+		t.Fatalf("err = %v, want the write failure surfaced", err)
+	}
+}
+
 // mustGate reads a workspace's compaction gate or fails the test.
 func mustGate(t *testing.T, m *Manager, workspace string) CompactionGate {
 	t.Helper()
