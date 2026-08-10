@@ -95,6 +95,11 @@ the next test's."
                 (lambda (&rest _) nil))
                ((symbol-function 'agent-repl--frontend-run-daemon-pgrep)
                 (lambda (&rest _) ""))
+               ;; The exit path reads the daemon's terminal-output sink off
+               ;; disk; an empty capture is the neutral fixture for tests
+               ;; that are not about the capture at all.
+               ((symbol-function 'agent-repl--frontend-read-daemon-output-sink)
+                (lambda (&rest _) ""))
                ((symbol-function 'process-live-p)
                 (lambda (p) (and (agent-repl-test--fake-daemon-p p)
                                  (agent-repl-test--fake-daemon-live p))))
@@ -2220,9 +2225,11 @@ only the buffer side of the filter is under test."
 ;;;; ---- the bounded at-exit consumption --------------------------------------
 
 (defmacro agent-repl-test--with-daemon-capture-content (content &rest body)
-  "Run BODY with the real capture buffer holding CONTENT."
+  "Run BODY with the real capture buffer holding CONTENT.
+Echoing is ON for the extent: the in-Emacs capture buffer only carries
+the daemon's output when the filter that fills it is attached."
   (declare (indent 1))
-  `(progn
+  `(let ((agent-repl-daemon-echo-output t))
      (with-current-buffer (get-buffer-create agent-repl--frontend-daemon-buffer)
        (erase-buffer)
        (insert ,content))
@@ -2253,10 +2260,153 @@ only the buffer side of the filter is under test."
 (ert-deftest agent-repl-test-daemon-output-is-empty-without-a-capture-buffer ()
   "A capture buffer that never existed reads as an empty capture."
   ;; Arrange
-  (when (get-buffer agent-repl--frontend-daemon-buffer)
-    (kill-buffer agent-repl--frontend-daemon-buffer))
-  ;; Act / Assert
-  (should (equal (agent-repl--frontend-daemon-output) "")))
+  (let ((agent-repl-daemon-echo-output t))
+    (when (get-buffer agent-repl--frontend-daemon-buffer)
+      (kill-buffer agent-repl--frontend-daemon-buffer))
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-daemon-output) ""))))
+
+;;;; ---- the file-backed output sink -----------------------------------------
+
+(ert-deftest agent-repl-test-daemon-spawn-command-redirects-into-the-sink ()
+  "With echoing off the spawn argv redirects both streams into the sink file."
+  ;; Arrange
+  (let ((agent-repl-daemon-echo-output nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-daemon-command)
+               (lambda () (list "/bin/claude-repld" "-addr" "127.0.0.1:8787")))
+              ((symbol-function 'agent-repl--frontend-daemon-output-sink-path)
+               (lambda () "/state/claude-repld-output.log")))
+      ;; Act
+      (let ((cmd (agent-repl--frontend-daemon-spawn-command)))
+        ;; Assert
+        (should (member "exec \"$@\" >>/state/claude-repld-output.log 2>&1"
+                        cmd))))))
+
+(ert-deftest agent-repl-test-daemon-spawn-command-keeps-the-daemon-argv-intact ()
+  "The redirect wrapper passes the daemon argv through as parameters."
+  ;; Arrange
+  (let ((agent-repl-daemon-echo-output nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-daemon-command)
+               (lambda () (list "/bin/claude-repld" "-addr" "127.0.0.1:8787")))
+              ((symbol-function 'agent-repl--frontend-daemon-output-sink-path)
+               (lambda () "/state/claude-repld-output.log")))
+      ;; Act
+      (let ((cmd (agent-repl--frontend-daemon-spawn-command)))
+        ;; Assert
+        (should (equal (last cmd 3)
+                       (list "/bin/claude-repld" "-addr" "127.0.0.1:8787")))))))
+
+(ert-deftest agent-repl-test-daemon-spawn-command-is-bare-argv-when-echoing ()
+  "The escape hatch launches the daemon directly, with no shell wrapper."
+  ;; Arrange
+  (let ((agent-repl-daemon-echo-output t))
+    (cl-letf (((symbol-function 'agent-repl--frontend-daemon-command)
+               (lambda () (list "/bin/claude-repld" "-addr" "127.0.0.1:8787"))))
+      ;; Act
+      (let ((cmd (agent-repl--frontend-daemon-spawn-command)))
+        ;; Assert
+        (should (equal cmd (list "/bin/claude-repld" "-addr" "127.0.0.1:8787")))))))
+
+(ert-deftest agent-repl-test-daemon-spawn-attaches-no-filter-by-default ()
+  "The firehose never enters elisp: no filter is attached by default."
+  ;; Arrange
+  (let ((agent-repl-daemon-echo-output nil))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-daemon-spawn-filter)))))
+
+(ert-deftest agent-repl-test-daemon-spawn-attaches-the-filter-when-echoing ()
+  "The escape hatch restores the mirroring filter."
+  ;; Arrange
+  (let ((agent-repl-daemon-echo-output t))
+    ;; Act / Assert
+    (should (eq (agent-repl--frontend-daemon-spawn-filter)
+                #'agent-repl--frontend-daemon-filter))))
+
+(ert-deftest agent-repl-test-daemon-spawn-attaches-no-buffer-by-default ()
+  "No capture buffer is attached when the stream is redirected at the kernel."
+  ;; Arrange
+  (let ((agent-repl-daemon-echo-output nil))
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-daemon-spawn-buffer)))))
+
+(ert-deftest agent-repl-test-daemon-spawn-attaches-the-buffer-when-echoing ()
+  "The escape hatch restores the in-Emacs capture buffer."
+  ;; Arrange
+  (let ((agent-repl-daemon-echo-output t))
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-daemon-spawn-buffer)
+                   agent-repl--frontend-daemon-buffer))))
+
+(ert-deftest agent-repl-test-daemon-output-reads-the-sink-by-default ()
+  "The at-exit capture comes from the sink file when echoing is off."
+  ;; Arrange
+  (let ((agent-repl-daemon-echo-output nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-read-daemon-output-sink)
+               (lambda (_path _chars) "panic: nil map write\n")))
+      ;; Act / Assert
+      (should (equal (agent-repl--frontend-daemon-output)
+                     "panic: nil map write")))))
+
+(ert-deftest agent-repl-test-daemon-output-bounds-the-sink-read ()
+  "The sink read is bounded by the same tail cap the buffer read uses."
+  ;; Arrange
+  (let ((agent-repl-daemon-echo-output nil)
+        (requested nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-read-daemon-output-sink)
+               (lambda (_path chars) (setq requested chars) "")))
+      ;; Act
+      (agent-repl--frontend-daemon-output)
+      ;; Assert
+      (should (equal requested agent-repl--frontend-daemon-output-tail-chars)))))
+
+(ert-deftest agent-repl-test-daemon-output-reads-the-sink-path ()
+  "The at-exit capture reads the sink the spawn redirects into."
+  ;; Arrange
+  (let ((agent-repl-daemon-echo-output nil)
+        (requested nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-read-daemon-output-sink)
+               (lambda (path _chars) (setq requested path) "")))
+      ;; Act
+      (agent-repl--frontend-daemon-output)
+      ;; Assert
+      (should (equal requested (agent-repl--frontend-daemon-output-sink-path))))))
+
+(ert-deftest agent-repl-test-daemon-exit-record-carries-the-sink-tail ()
+  "A goroutine dump in the sink file rides the exit record."
+  ;; Arrange
+  (let ((agent-repl-daemon-echo-output nil)
+        records)
+    (cl-letf (((symbol-function 'agent-repl--frontend-read-daemon-output-sink)
+               (lambda (_path _chars) "SIGQUIT: quit\ngoroutine 1 [running]:\n"))
+              ((symbol-function 'agent-repl--persist-log-record)
+               (lambda (_ws _level _verbosity fmt args)
+                 (push (apply #'format fmt args) records)))
+              ((symbol-function 'agent-repl--emit-message) #'ignore)
+              ((symbol-function 'process-live-p) (lambda (_proc) nil))
+              ((symbol-function 'agent-repl-failure-surface) #'ignore))
+      ;; Act
+      (agent-repl--frontend-daemon-sentinel 'proc "exited abnormally with code 2\n"))
+    ;; Assert
+    (should (seq-find (lambda (r)
+                        (and (string-prefix-p "claude-repld exited:" r)
+                             (string-match-p "goroutine 1 \\[running\\]:" r)))
+                      records))))
+
+(ert-deftest agent-repl-test-daemon-terminal-output-path-is-the-sink-by-default ()
+  "The exit phase points readers at the sink file when echoing is off."
+  ;; Arrange
+  (let ((agent-repl-daemon-echo-output nil))
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-daemon-terminal-output-path)
+                   (agent-repl--frontend-daemon-output-sink-path)))))
+
+(ert-deftest agent-repl-test-daemon-terminal-output-path-is-the-log-when-echoing ()
+  "The exit phase points readers at agent-repl's log when echoing mirrors there."
+  ;; Arrange
+  (let ((agent-repl-daemon-echo-output t))
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-daemon-terminal-output-path)
+                   (agent-repl--logfile-path)))))
 
 (ert-deftest agent-repl-test-daemon-exit-record-omits-the-full-capture ()
   "A multi-megabyte capture never reaches the exit log record whole."
@@ -2329,11 +2479,11 @@ only the buffer side of the filter is under test."
 (ert-deftest agent-repl-test-daemon-exit-carries-the-captured-output ()
   "The daemon's dying words ride its failure card, not only its exit event."
   ;; Arrange
-  (let (surfaced)
-    (with-current-buffer (get-buffer-create agent-repl--frontend-daemon-buffer)
-      (erase-buffer)
-      (insert "claude-repld: -accounts is malformed\n"))
-    (cl-letf (((symbol-function 'agent-repl--persist-log-record) #'ignore)
+  (let ((agent-repl-daemon-echo-output nil)
+        surfaced)
+    (cl-letf (((symbol-function 'agent-repl--frontend-read-daemon-output-sink)
+               (lambda (_path _chars) "claude-repld: -accounts is malformed\n"))
+              ((symbol-function 'agent-repl--persist-log-record) #'ignore)
               ((symbol-function 'agent-repl--emit-message) #'ignore)
               ((symbol-function 'process-live-p) (lambda (_proc) nil))
               ((symbol-function 'agent-repl-failure-surface)
@@ -2357,7 +2507,9 @@ escapes the test."
          (,records nil))
      (with-current-buffer (get-buffer-create agent-repl--frontend-daemon-buffer)
        (erase-buffer))
-     (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+     (cl-letf (((symbol-function 'agent-repl--frontend-read-daemon-output-sink)
+                (lambda (&rest _) ""))
+               ((symbol-function 'agent-repl--uds-run-timer)
                 (lambda (_delay _fn) 'agent-repl-test--fake-timer))
                ((symbol-function 'agent-repl--emit-message) #'ignore)
                ((symbol-function 'agent-repl--persist-log-record)

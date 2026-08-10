@@ -2145,6 +2145,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-run-daemon-pgrep
     agent-repl--frontend-artifact-exists-p
     agent-repl--frontend-spawn-daemon
+    agent-repl--frontend-read-daemon-output-sink
     agent-repl--launchctl-call
     agent-repl--shim-service-file-sha256
     agent-repl--shim-service-write-stamp
