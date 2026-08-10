@@ -53,7 +53,7 @@ func compactionRedundantDetail(gate ssm.CompactionGate) string {
 // compactionRedundant asks, delegated to it rather than re-derived.
 //
 // It exists because the question now has a second consumer that is not a
-// compaction: an automatic hibernation declines on exactly this fact
+// compaction: a cache-expired hibernation declines on exactly this fact
 // (hibernation.go). Two readers of one predicate would be two chances to
 // disagree about what "cut with nothing since" means, so there is one, and this
 // is a name for it that does not tell the hibernation path it is asking about a

@@ -812,9 +812,10 @@ func TestEnsureDischargesTheRevivalGate(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// A CUT CONVERSATION IS NOT SLEPT ON. A compaction or a `/clear` with nothing
-// said since is the daemon's own last act on the conversation, and the two
-// clock-driven causes cannot tell that quiet from a workspace nobody wants.
+// A CUT CONVERSATION IS NOT SLEPT ON FOR ITS CACHE. A compaction or a `/clear`
+// with nothing said since already made the conversation small, so the
+// cache-expired cause has no cache worth protecting. The 6h idle cutoff is not
+// a cache judgement and still reaps the workspace.
 // ---------------------------------------------------------------------------
 
 // cutHibernationRig is newHibernationRig with the log captured, so a decline
@@ -826,14 +827,14 @@ func cutHibernationRig(t *testing.T) (*Manager, *fakeApplier, *fakeHibernations,
 	return m, applier, hib, capture
 }
 
-func TestHibernateWithCauseRefusesACompactedConversation(t *testing.T) {
+func TestHibernateWithCauseRefusesACompactedConversationForTheCache(t *testing.T) {
 	// Arrange — compacted, nothing said since.
 	m, applier, hib, capture := cutHibernationRig(t)
 	applier.setCompactionGate("ws", ssm.CompactionGate{CompactedAtMs: 200, PromptAtMs: 100})
 
 	// Act.
 	err := m.HibernateWithCause("ws", registry.HibernationDetail{
-		Cause: registry.HibernationCauseIdleCutoff, CutoffMs: 21_600_000,
+		Cause: registry.HibernationCauseCacheExpired, TTLMs: 3_600_000,
 	})
 
 	// Assert.
@@ -843,8 +844,51 @@ func TestHibernateWithCauseRefusesACompactedConversation(t *testing.T) {
 	if got := hib.writeCount(); got != 0 {
 		t.Fatalf("hibernation writes = %d, want nothing persisted for a refused transition", got)
 	}
-	if !capture.contains("REFUSING to hibernate ws=\"ws\" cause=idle_cutoff cut=compacted") {
+	if !capture.contains("REFUSING to hibernate ws=\"ws\" cause=cache_expired cut=compacted") {
 		t.Fatal("the decline did not name the gate fact in the refusal voice the other arms use")
+	}
+}
+
+// THE IDLE CUTOFF IS NOT A CACHE JUDGEMENT. "Nobody has touched this all day" is
+// true whether or not the conversation was cut, and refusing it here held a live
+// shim forever for a workspace nobody wants.
+func TestHibernateWithCauseReapsACutConversationAtTheIdleCutoff(t *testing.T) {
+	// Arrange — compacted, nothing said since.
+	m, applier, hib, _ := cutHibernationRig(t)
+	applier.setCompactionGate("ws", ssm.CompactionGate{CompactedAtMs: 200, PromptAtMs: 100})
+
+	// Act.
+	err := m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseIdleCutoff, CutoffMs: 21_600_000,
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("idle-cutoff hibernation over a cut conversation = %v, want the workspace reaped exactly as an uncut one", err)
+	}
+	if got := hib.writeCount(); got != 1 {
+		t.Fatalf("hibernation writes = %d, want the sleep durably recorded", got)
+	}
+}
+
+// AN UNCUT CONVERSATION IS UNAFFECTED BY THE CACHE ARM, which is the arm that
+// still gates.
+func TestHibernateWithCauseSleepsAnUncutConversationOnCacheExpiry(t *testing.T) {
+	// Arrange — the user spoke after the clear.
+	m, applier, hib, _ := cutHibernationRig(t)
+	applier.setCompactionGate("ws", ssm.CompactionGate{ClearedAtMs: 200, PromptAtMs: 300})
+
+	// Act.
+	err := m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseCacheExpired, TTLMs: 3_600_000,
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("cache-expired hibernation over an uncut conversation = %v, want the sleep taken", err)
+	}
+	if got := hib.writeCount(); got != 1 {
+		t.Fatalf("hibernation writes = %d, want the sleep durably recorded", got)
 	}
 }
 
@@ -903,6 +947,28 @@ func TestHibernateWithCauseStillHonorsAForcedSleepOverACutConversation(t *testin
 	}
 }
 
+// THE REFUSAL IS A STANDING CONDITION, not an event: it repeats on every sweep
+// tick between the cache expiry and the idle cutoff, so the transition writes
+// one full line and then nothing until a summary window closes.
+func TestHibernateWithCauseWritesTheCutRefusalOnce(t *testing.T) {
+	// Arrange — cut, and a sweep that keeps asking.
+	m, applier, _, capture := cutHibernationRig(t)
+	applier.setCompactionGate("ws", ssm.CompactionGate{CompactedAtMs: 200, PromptAtMs: 100})
+	account := registry.HibernationDetail{Cause: registry.HibernationCauseCacheExpired, TTLMs: 3_600_000}
+
+	// Act — three ticks in a row.
+	for range 3 {
+		if err := m.HibernateWithCause("ws", account); !errors.Is(err, ErrHibernationConversationCut) {
+			t.Fatalf("HibernateWithCause over a cut conversation = %v, want the cut refusal on every tick", err)
+		}
+	}
+
+	// Assert.
+	if got := capture.count("REFUSING to hibernate ws=\"ws\" cause=cache_expired cut="); got != 1 {
+		t.Fatalf("full refusal lines = %d, want the standing condition reported once", got)
+	}
+}
+
 func TestHibernateWithCauseRefusesOnAnUnreadableGate(t *testing.T) {
 	// Arrange — the gate cannot be read, so whether the conversation was cut is
 	// unknown. An unknown must never resolve into the transition's favor.
@@ -913,7 +979,7 @@ func TestHibernateWithCauseRefusesOnAnUnreadableGate(t *testing.T) {
 
 	// Act.
 	err := m.HibernateWithCause("ws", registry.HibernationDetail{
-		Cause: registry.HibernationCauseIdleCutoff, CutoffMs: 21_600_000,
+		Cause: registry.HibernationCauseCacheExpired, TTLMs: 3_600_000,
 	})
 
 	// Assert.
@@ -923,7 +989,7 @@ func TestHibernateWithCauseRefusesOnAnUnreadableGate(t *testing.T) {
 	if got := hib.writeCount(); got != 0 {
 		t.Fatalf("hibernation writes = %d, want nothing persisted when the gate could not be read", got)
 	}
-	if !capture.contains("REFUSING to hibernate ws=\"ws\" cause=idle_cutoff error=") {
+	if !capture.contains("REFUSING to hibernate ws=\"ws\" cause=cache_expired error=") {
 		t.Fatal("the unreadable gate was not reported as the refusal it caused")
 	}
 }
