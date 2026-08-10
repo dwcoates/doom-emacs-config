@@ -42,7 +42,7 @@ import { ConversationItem, ToolItem } from "./store.js";
 import { TASKS_SPEC, tasksMenuHtml } from "./tasks.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
 import { agentElapsedLabel } from "./topbar.js";
-import { agentUncachedInput, compactTokens, TOKEN_HEAT_CLASS, tokenHeatStyle } from "./tokens.js";
+import { agentUncachedInput, compactTokens, uncachedInputHtml } from "./tokens.js";
 import type { SessionTokenUtilization } from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
 import { AccountingFact, accountingFacts, latestTurnAccounting } from "./turn-accounting.js";
 
@@ -739,9 +739,7 @@ export function tokenCellHtml(p: ProgressInput): string {
     // Heated on the same ramp as the bubble corner, off the same figure, so
     // the live cell and the stamp it becomes never disagree about a turn's
     // cost. The idle label below is NOT heated: it reports no figure.
-    parts.push(
-      `<span class="info-tokens ${TOKEN_HEAT_CLASS}" style="${tokenHeatStyle(p.inputTokens)}">${escapeHtml(compactTokens(p.inputTokens))} in</span>`,
-    );
+    parts.push(uncachedInputHtml("info-tokens", p.inputTokens));
   } else if (p.thinkingTokens === 0) {
     parts.push(`<span class="info-tokens">${escapeHtml(IDLE_LABEL)}</span>`);
   }
@@ -820,7 +818,7 @@ function agentRowHtml(row: FooterAgentRow, nowMs: number): string {
   const headline = row.summary === "" ? AGENTS_SPEC.placeholder : row.summary;
   const tokens = row.uncachedInput === null
     ? ""
-    : `<span class="pfooter-agent-tokens">${escapeHtml(`${compactTokens(row.uncachedInput)} in`)}</span>`;
+    : uncachedInputHtml("pfooter-agent-tokens", row.uncachedInput);
   return (
     `<div class="agent-row pfooter-agent-row" data-agent-id="${escapeHtml(row.id)}">` +
     `<span class="pfooter-agent-name">${type}` +
