@@ -9,6 +9,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
+	"claude-repld/internal/daemonturn"
 	"claude-repld/internal/keepalive"
 )
 
@@ -58,7 +59,7 @@ func newWarmCompactRequestID(sessionID string) (string, error) {
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", fmt.Errorf("session-controller: mint warm compaction request id for session %s: %w", sessionID, err)
 	}
-	return "warm-compact:" + sessionID + ":" + hex.EncodeToString(raw[:]), nil
+	return daemonturn.WarmCompactPrefix + sessionID + ":" + hex.EncodeToString(raw[:]), nil
 }
 
 // warmCompactEligibleLocked reports whether d may be warm-compacted right now,
@@ -232,7 +233,7 @@ func (m *Manager) SubmitWarmCompaction(ctx context.Context, workspace string, an
 	// would give the two compactions different accounting for no difference in
 	// what they do.
 	if err := m.forwardPrompt(ctx, d, turnID, compactCommandText,
-		"warm-compact:"+sessionID, "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, submitterWarmCompaction); err != nil {
+		daemonturn.WarmCompactPrefix+sessionID, "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, submitterWarmCompaction); err != nil {
 		// THE CLAIM IS RELEASED, THE ANCHOR IS NOT. A surviving claim would hand
 		// the next turn's result to a compaction that never ran; a released anchor
 		// would retry the failure every tick. The lifecycle is untouched either
