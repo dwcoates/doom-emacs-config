@@ -78,6 +78,8 @@ import {
   SessionStatus,
   UNSUPPORTED_SHAPES,
   type ConversationDelta,
+  type ConversationPage,
+  type PageContinuation,
   type ConversationItemArm,
   type ConversationItemFrame,
   type FooterAccountingCell,
@@ -488,6 +490,27 @@ export type AdapterEffect =
       throughSeq: number;
       items: ConversationItem[];
     }
+  /**
+   * ONE page of history, forwarded WHOLE.
+   *
+   * It is a separate effect from `conversation-items` rather than a
+   * pre-projected list of them, because a page carries two things the adapter
+   * cannot resolve: WHERE its items rank (a before page ranks below everything
+   * the feed already holds, which is store state), and WHETHER the request it
+   * answers is still one this client wants. Both are the store's to answer, so
+   * the page reaches it intact.
+   */
+  | {
+      kind: "conversation-page";
+      workspace: string;
+      /** The page's opaque staleness fence at mint (never parsed). */
+      fence: string;
+      /** The request this page answers, which the store correlates on. */
+      requestId: string;
+      items: ConversationItem[];
+      continuation: PageContinuation;
+      liveJoinSeq: number;
+    }
   | { kind: "typing"; value: TypingReveal | UnidentifiedToolInputReveal }
   | { kind: "tool-progress"; value: ToolProgressInput }
   | { kind: "queue"; value: QueueInput }
@@ -752,6 +775,8 @@ export class StateAdapter {
       // record instead of an omission.
       case "restartPending":
         return [];
+      case "conversationPage":
+        return this.conversationPageEffects(frame.frame.value);
       default: {
         // Exhaustiveness guard: a new frame variant is a compile error here,
         // never a silent skip.
@@ -989,20 +1014,37 @@ export class StateAdapter {
    * If the wire ever grows a visible keep-alive provenance, this is where it
    * belongs — beside the MERGE drop, on the same explicit-ignore path.
    */
-  private conversationEffects(cd: ConversationDelta): AdapterEffect[] {
+  /**
+   * Project a run of wire item frames onto renderable feed items.
+   *
+   * SHARED BY EVERY ROUTE THAT CARRIES FEED CONTENT — the pushed
+   * `ConversationDelta` and the paged `ConversationPage` alike — because the
+   * three rulings it makes are properties of an ITEM, not of the frame that
+   * carried it: an UNSPECIFIED source is malformed wherever it arrives, a MERGE
+   * item is not this feed's wherever it arrives, and an async-bubble anchor
+   * belongs to the registry wherever it arrives. Two copies of that would be
+   * two places a paged item could start rendering differently from a pushed
+   * one, which is exactly what the daemon's single-curator design exists to
+   * prevent on its own side.
+   *
+   * `origin` names the carrying frame for the UNSPECIFIED record, which is the
+   * one line where the two routes legitimately differ.
+   */
+  private projectItems(
+    frames: readonly ConversationItemFrame[],
+    origin: string,
+  ): { items: ConversationItem[]; ignored: AdapterEffect[]; anchored: AsyncBubble[] } {
     const items: ConversationItem[] = [];
     const ignored: AdapterEffect[] = [];
-    /** Bubbles this delta anchored; they go to the registry, not the feed. */
     const anchored: AsyncBubble[] = [];
-    for (const frame of cd.items) {
+    for (const frame of frames) {
       if (frame.source === ConversationSource.UNSPECIFIED) {
         this.log(
           "error",
           `state-adapter: conversation item has UNSPECIFIED source — the daemon ` +
             `never emits it, so the frame is malformed and the item is DROPPED ` +
-            `(never defaulted to user) workspace=${cd.workspace} fence=${cd.fence} ` +
-            `uuid=${frame.uuid} arm=${frame.arm} request_id=${frame.requestId || "none"} ` +
-            `through_seq=${String(cd.throughSeq)}`,
+            `(never defaulted to user) ${origin} ` +
+            `uuid=${frame.uuid} arm=${frame.arm} request_id=${frame.requestId || "none"}`,
         );
         ignored.push(this.ignore(`conversation-item-source:unspecified`));
         continue;
@@ -1019,6 +1061,14 @@ export class StateAdapter {
       items.push(...built.items);
       for (const shape of built.ignores) ignored.push(this.ignore(shape));
     }
+    return { items, ignored, anchored };
+  }
+
+  private conversationEffects(cd: ConversationDelta): AdapterEffect[] {
+    const { items, ignored, anchored } = this.projectItems(
+      cd.items,
+      `workspace=${cd.workspace} fence=${cd.fence} through_seq=${String(cd.throughSeq)}`,
+    );
     return [
       {
         kind: "conversation-items",
@@ -1043,6 +1093,52 @@ export class StateAdapter {
                 updates: [],
                 throughSeq: cd.throughSeq,
                 fence: cd.fence,
+              },
+            },
+          ]),
+      ...ignored,
+    ];
+  }
+
+  /**
+   * One page of history, forwarded WHOLE. See the effect's own doc for why
+   * nothing is projected here.
+   */
+  private conversationPageEffects(page: ConversationPage): AdapterEffect[] {
+    this.log(
+      "debug",
+      `state-adapter: conversation page workspace=${page.workspace} request_id=${page.requestId} ` +
+        `items=${page.items.length} continuation=${page.continuation.case} ` +
+        `live_join_seq=${String(page.liveJoinSeq)} fence=${page.fence}`,
+    );
+    const { items, ignored, anchored } = this.projectItems(
+      page.items,
+      `workspace=${page.workspace} fence=${page.fence} page_request_id=${page.requestId}`,
+    );
+    return [
+      {
+        kind: "conversation-page",
+        workspace: page.workspace,
+        fence: page.fence,
+        requestId: page.requestId,
+        items,
+        continuation: page.continuation,
+        liveJoinSeq: page.liveJoinSeq,
+      },
+      // A paged async-bubble anchor reaches the registry through the SAME seam
+      // a pushed one does, so a bubble the feed shows has one entry point
+      // whichever route delivered it.
+      ...(anchored.length === 0
+        ? []
+        : [
+            {
+              kind: "async-bubble-anchored" as const,
+              value: {
+                workspace: page.workspace,
+                opened: anchored,
+                updates: [],
+                throughSeq: page.liveJoinSeq,
+                fence: page.fence,
               },
             },
           ]),

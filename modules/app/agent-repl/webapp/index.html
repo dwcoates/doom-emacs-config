@@ -91,6 +91,19 @@
            now a self-resolving failure card IN the feed, because a user whose
            workspace changed color needs to find out why from the conversation
            rather than from chrome that scrolls away. -->
+      <!-- LOAD MORE: the top of the conversation's history.
+
+           A cold open no longer replays the whole conversation — it asks for
+           the newest ~10 top-level items and walks backwards on demand
+           (conversation-page.proto) — so the feed's top is now a place where
+           more history may exist, and this is how a user reaches it.
+
+           It sits ABOVE the scrolling feed rather than inside it because the
+           feed's children are owned by FeedRenderer's keyed node map, and a
+           foreign child would be reconciled away on the next paint. It hides
+           itself the moment the daemon reports the conversation's beginning,
+           so an exhausted history leaves no chrome behind. -->
+      <div id="load-more" hidden></div>
       <main id="feed"></main>
       <!-- The consolidated progress footer's slot (progress-footer.ts): THE
            in-flight indicator, a flex sibling wedged between the scrolling

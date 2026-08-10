@@ -1499,6 +1499,20 @@ a notice here would be an alarm about a startup that has not failed yet."
   ;; Act / Assert
   (should (member "workspaceGate" agent-repl--uds-ignored-frame-fields)))
 
+(ert-deftest agent-repl-test-uds-conversation-page-is-a-deliberately-ignored-frame ()
+  "`conversationPage' is the webapp's history paging; Emacs renders no feed."
+  ;; Act / Assert
+  (should (member "conversationPage" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-dispatch-conversation-page-does-not-signal ()
+  "A pushed `conversationPage' arm decodes instead of taking the drain down.
+Emacs never asks for a page, so one should not reach it — but the frame
+vocabulary mirrors the proto oneof rather than the subset Emacs expects,
+and an unlisted arm SIGNALS rather than being dropped."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl--uds-dispatch-frame
+               '(:conversationPage (:workspace "ws1" :requestId "r-1" :fence "sess-a|gen-b")))))
+
 (ert-deftest agent-repl-test-uds-dispatch-topbar-does-not-signal ()
   "A pushed `topbar' arm decodes instead of reading as an unknown wire field.
 The daemon broadcasts the resolved component views to every client, host

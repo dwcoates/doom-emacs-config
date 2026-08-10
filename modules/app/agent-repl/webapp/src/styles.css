@@ -1079,6 +1079,49 @@ body::after {
 .agent-dot.agent-done, .task-dot.task-done { color: var(--ok); }
 .agent-dot.agent-error, .task-dot.task-error { color: var(--err); }
 
+/* LOAD MORE — the top of the conversation's history.
+
+   A cold open is a bounded tail page now, so the feed's top is a place where
+   more history may exist. The control sits above the scrolling feed rather
+   than inside it, because the feed's children are owned by FeedRenderer's
+   keyed node map (see load-more.ts). It is `hidden` outright once the daemon
+   reports the conversation's beginning, so an exhausted history leaves no gap
+   above the first bubble. */
+#load-more {
+  display: flex;
+  justify-content: center;
+  padding: 0.35rem 0.75rem 0;
+}
+
+.load-more {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.2rem 0.9rem;
+}
+
+.load-more:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+/* Disabled means a request is already out; the cursor says so rather than
+   letting a click look ignored. */
+.load-more:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* The pager gave up. Blue, per the module colour split: the failure is on the
+   local daemon route, and there is evidence something broke. */
+.load-more--stopped {
+  border-color: var(--init);
+  color: var(--init);
+}
+
 #feed {
   flex: 1;
   overflow-y: auto;
