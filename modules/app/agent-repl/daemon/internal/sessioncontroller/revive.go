@@ -367,8 +367,8 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 				workspace, sessionID, mode, err)
 			mode = ReviveModeDirect
 		} else if redundant {
-			m.logf("session-controller: revive COMPACTION SKIPPED ws=%q session=%s mode=%s %s — this conversation has already been compacted and nothing has been said to it since, so the requested compaction would read the whole history to summarize a summary; the session is revived DIRECTLY instead",
-				workspace, sessionID, mode, compactionRedundantDetail(gate))
+			m.logf("session-controller: revive COMPACTION SKIPPED ws=%q session=%s mode=%s cut=%s %s — this conversation has already been %s and nothing has been said to it since, so the requested compaction has nothing to summarize but what that cut left behind; the session is revived DIRECTLY instead",
+				workspace, sessionID, mode, cutKind(gate), compactionRedundantDetail(gate), cutKind(gate))
 			mode = ReviveModeDirect
 		}
 	}

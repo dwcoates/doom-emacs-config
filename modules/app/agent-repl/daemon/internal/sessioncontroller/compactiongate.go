@@ -44,5 +44,37 @@ func (m *Manager) compactionRedundant(workspace string) (bool, ssm.CompactionGat
 // compaction reports the two timestamps its verdict was taken from rather than
 // only the verdict.
 func compactionRedundantDetail(gate ssm.CompactionGate) string {
-	return fmt.Sprintf("last_compacted_at_ms=%d last_prompt_at_ms=%d", gate.CompactedAtMs, gate.PromptAtMs)
+	return fmt.Sprintf("last_compacted_at_ms=%d last_cleared_at_ms=%d last_prompt_at_ms=%d",
+		gate.CompactedAtMs, gate.ClearedAtMs, gate.PromptAtMs)
+}
+
+// conversationCutSinceLastPrompt reports whether workspace's conversation was
+// compacted or cleared with nothing said to it since — the SAME question
+// compactionRedundant asks, delegated to it rather than re-derived.
+//
+// It exists because the question now has a second consumer that is not a
+// compaction: an automatic hibernation declines on exactly this fact
+// (hibernation.go). Two readers of one predicate would be two chances to
+// disagree about what "cut with nothing since" means, so there is one, and this
+// is a name for it that does not tell the hibernation path it is asking about a
+// compaction. The read's failure travels out unchanged, for the same reason it
+// does there: a caller that cannot read the gate does not know, and neither
+// caller is permitted to guess in its own favor.
+func (m *Manager) conversationCutSinceLastPrompt(workspace string) (bool, ssm.CompactionGate, error) {
+	return m.compactionRedundant(workspace)
+}
+
+// cutKind names WHICH cut a gate's verdict was taken from, so a decline reports
+// what actually happened to the conversation rather than the predicate's name
+// for it. A gate that was never cut has no kind, which no caller reaches: every
+// caller asks only after the verdict came back true.
+func cutKind(gate ssm.CompactionGate) string {
+	switch {
+	case gate.ClearedAtMs > gate.CompactedAtMs:
+		return "cleared"
+	case gate.CompactedAtMs != 0:
+		return "compacted"
+	default:
+		return "uncut"
+	}
 }
