@@ -73,7 +73,7 @@ type benchPusher struct {
 	progress      atomic.Int64
 }
 
-func (p *benchPusher) PushAsyncBubbleDelta(*frontendv1.AsyncBubbleDelta) {}
+func (p *benchPusher) PushAsyncBubbleDelta(*frontendv1.AsyncBubbleDelta)   {}
 func (p *benchPusher) PushConversationDelta(*frontendv1.ConversationDelta) { p.conversations.Add(1) }
 func (p *benchPusher) PushTypingDelta(*frontendv1.TypingDelta)             { p.typing.Add(1) }
 func (p *benchPusher) PushTaskCatalog(*frontendv1.TaskCatalog)             { p.catalogs.Add(1) }

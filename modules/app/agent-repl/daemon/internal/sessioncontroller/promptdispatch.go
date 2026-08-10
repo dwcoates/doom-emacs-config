@@ -253,7 +253,14 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// ping, and a workspace that stayed green through it would be lying about a
 	// session that is busy — the same split `/model` makes.
 	claimsTurn := cmd.claimsTurn() && who != submitterMergeLeaseHolder
-	echoes := cmd.echoes() && who != submitterMergeLeaseHolder && who != submitterKeepAlive
+	// A TURN RESUMPTION ECHOES NOTHING, for the keep-alive's reason and one
+	// stronger. The user wrote no prompt: this text is the daemon's own
+	// instruction to continue work a bounce interrupted, and a receipt for it
+	// would be durable evidence of a prompt that was never submitted by anyone
+	// — replayed on every reconnect, indistinguishable downstream from a real
+	// one (turnresumption.go).
+	echoes := cmd.echoes() && who != submitterMergeLeaseHolder && who != submitterKeepAlive &&
+		who != submitterTurnResumption
 
 	accepted := false
 	var turnBefore turnRecord

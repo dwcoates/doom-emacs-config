@@ -58,6 +58,19 @@ const (
 	// compaction would make "which compaction read cold" unanswerable at exactly
 	// the moment the answer matters.
 	submitterWarmCompaction
+	// submitterTurnResumption is the daemon re-driving a turn a planned bounce
+	// interrupted (turnresumption.go).
+	//
+	// It is a submitter of its own for submitterKeepAlive's reason: three
+	// decisions turn on it, and each would otherwise be a string comparison
+	// against a free-form origin. It takes NO PROMPT RECEIPT (the user wrote no
+	// prompt, so there is no bubble to make durable), it is refused while the
+	// merge lease is held (the lease's claim is that merge.Coordinator is the
+	// only party driving this shim, and a re-drive is still a turn), and it
+	// must never be admitted past the revival gate — a hibernated session's
+	// owed resumption waits for the user to revive it rather than waking the
+	// session on the daemon's own initiative.
+	submitterTurnResumption
 )
 
 func (s submitter) String() string {
@@ -70,6 +83,8 @@ func (s submitter) String() string {
 		return "revival"
 	case submitterWarmCompaction:
 		return "warm-compaction"
+	case submitterTurnResumption:
+		return "turn-resumption"
 	default:
 		return "user"
 	}
@@ -149,6 +164,19 @@ func (m *Manager) guardMergeLease(workspace string, who submitter, requestID, or
 		// the cold-read alarm if the revival compaction later pays for it.
 		err := fmt.Errorf("session-controller: warm compaction for workspace %q refused: merge.Coordinator holds the exclusivity lease on its session", workspace)
 		m.logf("session-controller: warm compaction REFUSED ws=%q request_id=%s origin=%q — the merge lease is held, so the cache is allowed to expire rather than a compaction landing inside conflict resolution",
+			workspace, requestID, origin)
+		return err
+	case held && who == submitterTurnResumption:
+		// A RE-DRIVE IS STILL A TURN, and the lease's claim is that
+		// merge.Coordinator is the only party driving this shim. A turn the
+		// last bounce interrupted landing inside conflict resolution would cost
+		// exactly the context the merge is working through.
+		//
+		// Nothing is lost by refusing: the resumption record is discharged only
+		// on ACCEPTANCE, so it stands here and the next wire after the merge
+		// reaches a terminal phase re-drives it (turnresumption.go).
+		err := fmt.Errorf("session-controller: turn resumption for workspace %q refused: merge.Coordinator holds the exclusivity lease on its session", workspace)
+		m.logf("session-controller: turn resumption REFUSED ws=%q request_id=%s origin=%q — the merge lease is held, so the interrupted turn stays owed rather than landing inside conflict resolution",
 			workspace, requestID, origin)
 		return err
 	case held && who == submitterUser:

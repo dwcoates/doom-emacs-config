@@ -62,14 +62,14 @@ func (c *failingClient) QuerySelectedModel(_ context.Context) (string, error) { 
 
 // queueHarness is one workspace's controller plus the doubles around it.
 type queueHarness struct {
-	t           *testing.T
-	m           *Manager
-	push        *fakePusher
-	client      *fakeClient
-	cls         *fakeClassifier
-	reg         *fakeRegistrar
-	applier     *fakeApplier
-	prog        *fakeProgress
+	t       *testing.T
+	m       *Manager
+	push    *fakePusher
+	client  *fakeClient
+	cls     *fakeClassifier
+	reg     *fakeRegistrar
+	applier *fakeApplier
+	prog    *fakeProgress
 	// spawner is the shim spawner behind the harness, retained so a test that
 	// drives a RESTART can prove which sessions were stopped and how often
 	// (turnboundaryrefresh_test.go).

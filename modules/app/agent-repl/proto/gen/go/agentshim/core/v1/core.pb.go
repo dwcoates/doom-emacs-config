@@ -438,6 +438,27 @@ const (
 	// via rewind (SessionRewound) before the next real prompt is submitted, so
 	// they can never contaminate the model's context either.
 	PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE PromptOrigin = 29
+	// Daemon-generated re-drive of a turn a planned bounce interrupted.
+	//
+	// A restart that has to take the shim with it (the shim bundle changed, or
+	// the shim is dead) interrupts whatever turn was running. The vendor SDK has
+	// no resume-the-interrupted-turn primitive — `resume`, `continue` and
+	// `resumeSessionAt` all restore CONTEXT and none restarts an aborted turn —
+	// so the successor daemon has to submit an instruction to continue the work.
+	//
+	// THE SUBMIT IS INVISIBLE AND THE TURN IS NOT. Unlike CACHE_KEEP_ALIVE, whose
+	// whole turn is conversation-plumbing that every consumer excludes, this
+	// turn's OUTPUT is the continuation of work the user asked for and belongs in
+	// the conversation at the interrupted turn's position. Only the daemon's own
+	// instruction is hidden, and it is hidden at the curator rather than by
+	// origin (the daemon drops the `user_message` whose request id carries the
+	// internal re-drive marker), so this value never has to be consulted to
+	// decide what renders.
+	//
+	// What it IS for: saying WHY a turn is running. A status surface reads this
+	// to report "resumed after restart" instead of presenting work the user did
+	// not just ask for as though they had.
+	PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART PromptOrigin = 30
 )
 
 // Enum value maps for PromptOrigin.
@@ -471,6 +492,7 @@ var (
 		26: "PROMPT_ORIGIN_MERGE_AFTER_ACTION",
 		28: "PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME",
 		29: "PROMPT_ORIGIN_CACHE_KEEP_ALIVE",
+		30: "PROMPT_ORIGIN_RESUME_AFTER_RESTART",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -501,6 +523,7 @@ var (
 		"PROMPT_ORIGIN_MERGE_AFTER_ACTION":          26,
 		"PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME": 28,
 		"PROMPT_ORIGIN_CACHE_KEEP_ALIVE":            29,
+		"PROMPT_ORIGIN_RESUME_AFTER_RESTART":        30,
 	}
 )
 
@@ -6804,7 +6827,7 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\x12PermissionDecision\x12#\n" +
 	"\x1fPERMISSION_DECISION_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19PERMISSION_DECISION_ALLOW\x10\x01\x12\x1c\n" +
-	"\x18PERMISSION_DECISION_DENY\x10\x02*\x9c\t\n" +
+	"\x18PERMISSION_DECISION_DENY\x10\x02*\xc4\t\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -6834,7 +6857,8 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"!PROMPT_ORIGIN_MERGE_BEFORE_ACTION\x10\x19\x12$\n" +
 	" PROMPT_ORIGIN_MERGE_AFTER_ACTION\x10\x1a\x12-\n" +
 	")PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME\x10\x1c\x12\"\n" +
-	"\x1ePROMPT_ORIGIN_CACHE_KEEP_ALIVE\x10\x1d\"\x04\b\x0f\x10\x0f\"\x04\b\x1b\x10\x1b*#PROMPT_ORIGIN_LEGACY_PENDING_PROMPT*'PROMPT_ORIGIN_MERGE_PARENT_NOTIFICATION*\x86\x01\n" +
+	"\x1ePROMPT_ORIGIN_CACHE_KEEP_ALIVE\x10\x1d\x12&\n" +
+	"\"PROMPT_ORIGIN_RESUME_AFTER_RESTART\x10\x1e\"\x04\b\x0f\x10\x0f\"\x04\b\x1b\x10\x1b*#PROMPT_ORIGIN_LEGACY_PENDING_PROMPT*'PROMPT_ORIGIN_MERGE_PARENT_NOTIFICATION*\x86\x01\n" +
 	"\x15ContextCompactTrigger\x12'\n" +
 	"#CONTEXT_COMPACT_TRIGGER_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eCONTEXT_COMPACT_TRIGGER_MANUAL\x10\x01\x12 \n" +
