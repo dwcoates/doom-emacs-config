@@ -1394,8 +1394,22 @@ func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, 
 	// because its eligibility ladder distinguishes a stale session under a
 	// current generation from a stale generation, and it reads them back
 	// through the inverse of the function that minted them.
-	sessionID, generationID := ssm.SplitFence(cmd.GetFence())
+	sessionID, generationID, minted := ssm.ParseFence(cmd.GetFence())
 	h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d", workspace, requestID, sessionID, generationID, cmd.GetFromSeq())
+	// A FENCE THIS DAEMON DID NOT MINT IS REFUSED HERE, and it is refused here
+	// rather than by the eligibility ladder because the ladder cannot tell it
+	// apart: an unmintable token and an ABSENT one both split to two empty
+	// identities, and the two owe opposite answers. A client carrying no fence
+	// predates fenced chrome and is served under whatever identity is current;
+	// a client echoing a token no workspace ever held is a delayed request that
+	// must not silently rebind itself to the current generation. Only the token
+	// itself distinguishes them, and this is the only place it exists.
+	if cmd.GetFence() != "" && !minted {
+		err := fmt.Errorf("%w: resync ws=%q request_id=%q echoed a fence this daemon never minted, so the identity it decided to ask against cannot be recovered",
+			errclass.ErrSessionSuperseded, workspace, requestID)
+		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d REFUSED: the echoed fence is not one this daemon minted", workspace, requestID, cmd.GetFromSeq())
+		return classifyStaleFenceResync(err)
+	}
 	if h.resyncer == nil {
 		h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d FAILED — no resyncer is wired, so the conversation replay cannot be served at all (the snapshot half alone would render an empty feed)",
 			workspace, requestID, sessionID, generationID, cmd.GetFromSeq())
