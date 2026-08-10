@@ -4985,6 +4985,80 @@ call, making deferred closures synchronous in tests."
               (should (equal switched-with tmp-dir))))
         (delete-directory tmp-dir t)))))
 
+(ert-deftest agent-repl-cmd-test-add-project-workspace/registers-in-picker-candidates ()
+  "add-project-workspace enters DIR in the picker's candidate source."
+  (agent-repl-test--with-clean-state
+    (let ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-add-project-" t))))
+      (unwind-protect
+          (agent-repl-test--with-sync-run-at-time
+            (cl-letf (((symbol-function 'agent-repl--ws-register-project) #'ignore)
+                      ((symbol-function 'projectile-switch-project-by-name) #'ignore)
+                      ((symbol-function 'agent-repl--most-recent-project-file)
+                       (lambda (_d) nil))
+                      ((symbol-function '+workspace-current-name)
+                       (lambda () "switched-ws"))
+                      ((symbol-function 'force-mode-line-update)
+                       (lambda (&optional _all) nil)))
+              (agent-repl-add-project-workspace tmp-dir)
+              (should (equal (cdr (assoc (file-name-nondirectory (directory-file-name tmp-dir))
+                                         (agent-repl--known-workspace-entries)))
+                             tmp-dir))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest agent-repl-cmd-test-add-project-workspace/picker-lists-onboarded ()
+  "The workspace picker offers the freshly onboarded directory."
+  (agent-repl-test--with-clean-state
+    (let ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-add-project-" t))))
+      (unwind-protect
+          (agent-repl-test--with-sync-run-at-time
+            (cl-letf (((symbol-function 'agent-repl--ws-register-project) #'ignore)
+                      ((symbol-function 'projectile-switch-project-by-name) #'ignore)
+                      ((symbol-function 'agent-repl--most-recent-project-file)
+                       (lambda (_d) nil))
+                      ((symbol-function '+workspace-current-name)
+                       (lambda () "switched-ws"))
+                      ((symbol-function 'force-mode-line-update)
+                       (lambda (&optional _all) nil)))
+              (agent-repl-add-project-workspace tmp-dir)
+              (cl-letf (((symbol-function 'helm)
+                         (lambda (&rest args)
+                           (let* ((src (car (plist-get args :sources)))
+                                  (cands (cdr (assq 'candidates src)))
+                                  (action (cdr (assq 'action src))))
+                             (funcall action (cdr (car cands)))))))
+                (should (equal (plist-get (agent-repl--read-workspace-via-picker) :project-dir)
+                               tmp-dir)))))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest agent-repl-cmd-test-add-project-workspace/registers-before-aborted-switch ()
+  "Registration survives a switch that aborts."
+  (agent-repl-test--with-clean-state
+    (let ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-add-project-" t))))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-register-project) #'ignore)
+                    ((symbol-function 'agent-repl--ws-switch-project)
+                     (lambda (_p) (user-error "switch aborted"))))
+            (should-error (agent-repl-add-project-workspace tmp-dir) :type 'user-error)
+            (should (equal (cdr (assoc (file-name-nondirectory (directory-file-name tmp-dir))
+                                       (agent-repl--known-workspace-entries)))
+                           tmp-dir)))
+        (delete-directory tmp-dir t)))))
+
+(ert-deftest agent-repl-cmd-test-onboard-register-workspace/idempotent ()
+  "Re-onboarding an already-known directory reuses its workspace name."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "existing-ws" :project-dir "/tmp/onboard-dir/")
+    (should (equal (agent-repl--onboard-register-workspace "/tmp/onboard-dir/")
+                   "existing-ws"))
+    (should (= 1 (length (agent-repl--known-workspace-entries))))))
+
+(ert-deftest agent-repl-cmd-test-onboard-register-workspace/entry-is-live ()
+  "A freshly onboarded directory is registered as a live (non-tombstoned) entry."
+  (agent-repl-test--with-clean-state
+    (let ((ws (agent-repl--onboard-register-workspace "/tmp/onboard-fresh/")))
+      (should (equal ws "onboard-fresh"))
+      (should-not (agent-repl--ws-get ws :nuked-at)))))
+
 (ert-deftest agent-repl-cmd-test-add-project-workspace/rejects-non-directory ()
   "add-project-workspace signals a user-error for a non-directory path."
   (agent-repl-test--with-clean-state
