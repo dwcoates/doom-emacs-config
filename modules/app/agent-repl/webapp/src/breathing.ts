@@ -24,24 +24,29 @@
  * never passes through yellow, orange, or red — those hues are spoken for
  * elsewhere in the footer (the rate-limit rungs, the failure row) and a breathing
  * word wandering into them would read as an alarm rather than as progress.
+ *
+ * The prompt bubble's own liveness signal lives here too (`BubbleWave`). It is
+ * NOT a breath: the bubble and its text hold one static size and a shadow band
+ * crosses the fill behind them instead. Both signals share the same epoch
+ * mechanic (`AnimationEpoch`) for the same reason — the nodes they paint are
+ * rebuilt out from under the animation.
  */
 
 /** Stops on the green → purple ramp. */
 export const BREATH_SHADES = 20;
 
 /**
- * One full inhale-and-exhale of a resting PROMPT bubble. Must match the
- * `bubble-breath` keyframes' duration in `styles.css` (`.bubble.user`): the
- * negative delay computed here only seeks to the point the cycle had already
- * reached if both sides agree on how long the cycle is, and a period that
+ * One full left-to-right pass of a resting PROMPT bubble's thinking wave. Must
+ * match the `bubble-wave` keyframes' duration in `styles.css` (`.bubble.user`):
+ * the negative delay computed here only seeks to the point the pass had already
+ * reached if both sides agree on how long the pass is, and a period that
  * drifted from the stylesheet would land every rebuilt bubble at the wrong
- * phase instead of no phase at all — a subtler bug than the snap-back it
- * replaced. Reduced motion STOPS the bubble breath outright rather than
- * slowing it (see the `prefers-reduced-motion` block), so this is the one
- * period in both motion modes and the delay never has to ask which mode is
- * live.
+ * phase instead of no phase at all — a subtler bug than the jump-back it
+ * replaced. Reduced motion STOPS the wave outright rather than slowing it (see
+ * the `prefers-reduced-motion` block), so this is the one period in both motion
+ * modes and the delay never has to ask which mode is live.
  */
-export const BUBBLE_BREATH_PERIOD_MS = 5200;
+export const BUBBLE_WAVE_PERIOD_MS = 3200;
 
 /** One full inhale-and-exhale. Must match the `pfooter-breath` keyframes. */
 export const BREATH_PERIOD_MS = 2600;
@@ -135,44 +140,47 @@ export class BreathingTicker {
 }
 
 /**
- * The prompt bubble's breath: the SIZE channel of the pattern above, with no
- * color channel at all — a resting prompt is ambience, not a signal.
+ * The prompt bubble's thinking WAVE: a soft shadow band that crosses the
+ * bubble's own background from left to right, over and over, while the turn
+ * runs. Nothing about the bubble's geometry moves — the bubble and its text
+ * hold one static size, and only the fill underneath them changes — so the
+ * wave reads as progress running through the answer rather than as the box
+ * itself inflating and deflating.
  *
  * The feed rebuilds bubble nodes wholesale (a re-render, a resync, a lazy item
  * upgrading out of its placeholder), and a fresh element starts its CSS
- * animation at 0% — the deflated end of the swing. Mid-cycle that reads as a
- * visible snap backwards, which is the opposite of a continuous breath. So the
- * same EPOCH the footer uses: one start time, stamped on first read and never
- * moved, and every render emits a negative `animation-delay` of how far into
- * the cycle that epoch says we are. A rebuilt bubble seeks straight to where
- * the cycle already was, making the rebuild indistinguishable from a node that
- * was never touched.
+ * animation at 0% — the band back at the left edge. Mid-pass that reads as the
+ * wave jumping backwards. So the same EPOCH the footer uses: one start time,
+ * stamped on first read and never moved, and every render emits a negative
+ * `animation-delay` of how far into the pass that epoch says we are. A rebuilt
+ * bubble seeks straight to where the wave already was, making the rebuild
+ * indistinguishable from a node that was never touched.
  *
  * The delay is reduced modulo the period here (unlike the footer's raw elapsed
  * time, which browsers accept as-is) purely to keep the emitted attribute a
  * small number; either is equivalent to the animation.
  *
- * ONE epoch serves the whole page, so every prompt bubble breathes in unison.
- * That is deliberate: per-bubble epochs would make the feed shimmer as a dozen
- * unrelated phases drifted past each other.
+ * ONE epoch serves the whole page, so every prompt bubble's wave crosses in
+ * unison. That is deliberate: per-bubble epochs would make the feed shimmer as
+ * a dozen unrelated phases drifted past each other.
  */
-export class BubbleBreath {
+export class BubbleWave {
   private epoch = new AnimationEpoch();
 
-  /** How far into the current cycle, in `[0, BUBBLE_BREATH_PERIOD_MS)`. */
+  /** How far into the current pass, in `[0, BUBBLE_WAVE_PERIOD_MS)`. */
   delayMs(nowMs: number): number {
-    return this.epoch.elapsedMs(nowMs) % BUBBLE_BREATH_PERIOD_MS;
+    return this.epoch.elapsedMs(nowMs) % BUBBLE_WAVE_PERIOD_MS;
   }
 }
 
-/** The page-global bubble breath every prompt bubble renders against. */
-export const bubbleBreath = new BubbleBreath();
+/** The page-global wave every prompt bubble renders against. */
+export const bubbleWave = new BubbleWave();
 
 /**
  * The inline delay one prompt bubble renders with, as the whole style value.
  * Every construction site of a `.bubble.user` must carry it — a bubble built
- * without it is the snap-back this module exists to remove.
+ * without it is the jump-back this module exists to remove.
  */
-export function bubbleBreathStyle(nowMs: number = Date.now()): string {
-  return `animation-delay:-${Math.round(bubbleBreath.delayMs(nowMs))}ms`;
+export function bubbleWaveStyle(nowMs: number = Date.now()): string {
+  return `animation-delay:-${Math.round(bubbleWave.delayMs(nowMs))}ms`;
 }

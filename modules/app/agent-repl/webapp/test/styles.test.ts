@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { BREATH_PERIOD_MS, BUBBLE_BREATH_PERIOD_MS } from "../src/breathing.js";
+import { BREATH_PERIOD_MS, BUBBLE_WAVE_PERIOD_MS } from "../src/breathing.js";
 import { CAPPED_CLASSES, EXPANDED_CLASS } from "../src/expand.js";
 import { FIXED_FOLD_CLASS } from "../src/fold.js";
 import { ASYNC_TEAL_TOOLS } from "../src/render.js";
@@ -1663,10 +1663,10 @@ describe("thinking spinner", () => {
   });
 });
 
-const breathUserBubble = blockAfter(css, ".bubble.user {");
-const bubbleBreathKeyframes = blockAfter(css, "@keyframes bubble-breath {");
+const waveUserBubble = blockAfter(css, ".bubble.user {");
+const bubbleWaveKeyframes = blockAfter(css, "@keyframes bubble-wave {");
 const unackedBubble = blockAfter(css, ".bubble.user.unacked {");
-const reducedBubbleBreath = blockAfter(
+const reducedBubbleWave = blockAfter(
   blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
   ".bubble.user {",
 );
@@ -1679,8 +1679,8 @@ const reducedBubbleBreath = blockAfter(
  */
 function promptBodyRules(): string[] {
   const blocks: string[] = [];
-  // Both the child form the breath rule used and the descendant form the
-  // bubble's other body rules use.
+  // Both the child form the wave rule's neighbours use and the descendant
+  // form the bubble's other body rules use.
   for (const marker of [".bubble.user > .bubble-body", ".bubble.user .bubble-body"]) {
     for (let at = css.indexOf(marker); at !== -1; at = css.indexOf(marker, at + 1)) {
       blocks.push(blockAfter(css.slice(at), marker));
@@ -1690,91 +1690,181 @@ function promptBodyRules(): string[] {
   return blocks;
 }
 
-/** The two `scale(N)` factors a `0%, 100% { ... } 50% { ... }` keyframes block swings between. */
-function scaleSwing(keyframes: string): [number, number] {
-  const rest = keyframes.match(/0%,\s*100%\s*{\s*transform:\s*scale\(([\d.]+)\)/);
-  const peak = keyframes.match(/50%\s*{\s*transform:\s*scale\(([\d.]+)\)/);
-  if (rest === null || peak === null) throw new Error("keyframes are not a rest/peak scale swing");
-  return [Number(rest[1]), Number(peak[1])];
+/** The `from`/`to` background-position-x percentages of the wave keyframes. */
+function wavePan(keyframes: string): [number, number] {
+  const from = keyframes.match(/from\s*{\s*background-position-x:\s*(-?[\d.]+)%/);
+  const to = keyframes.match(/to\s*{\s*background-position-x:\s*(-?[\d.]+)%/);
+  if (from === null || to === null) throw new Error("keyframes are not a background-position pan");
+  return [Number(from[1]), Number(to[1])];
 }
 
-describe("prompt bubble breath", () => {
-  it("breathes the bubble itself with a continuous scale oscillation", () => {
-    // Arrange / Act — the .bubble.user rule.
+describe("prompt bubble thinking wave", () => {
+  it("crosses the bubble with a continuous background pan", () => {
+    // Arrange / Act — the .bubble.user rule. Linear, not eased: a wave that
+    // slowed at each end would read as a pulse rather than a pass.
     // Assert
-    expect(breathUserBubble).toMatch(/animation:\s*bubble-breath\s+[\d.]+s\s+ease-in-out\s+infinite/);
+    expect(waveUserBubble).toMatch(/animation:\s*bubble-wave\s+[\d.]+s\s+linear\s+infinite/);
   });
 
-  it("gives the body no animation of its own, which would compound with the bubble's", () => {
-    // Arrange — the body is a child of the transformed bubble, so it is
-    // already scaled by the bubble's own animation. A second copy of
-    // bubble-breath on the body MULTIPLIED the two scales and swung the text
-    // at roughly twice the bubble's amplitude.
+  it("holds the bubble's own size static, which is what the wave replaced", () => {
+    // Arrange / Act — the retired breath scaled the whole bubble (and with it
+    // the text inside), so a transform here is the exact regression.
+    // Assert
+    expect(waveUserBubble).not.toMatch(/transform/);
+    expect(css).not.toContain("bubble-breath");
+  });
+
+  it("animates only the background position, so the wave never triggers layout", () => {
+    // Arrange — the keyframes name every property the animation touches.
+    // Act / Assert — nothing geometric among them.
+    expect(bubbleWaveKeyframes).not.toMatch(/transform|width|height|padding|margin|font-size/);
+  });
+
+  it("paints the wave as a shadow band travelling across the bubble's own fill", () => {
+    // Arrange / Act — a horizontal gradient, transparent at both ends, whose
+    // one band is the --bubble-wave shadow token.
+    // Assert
+    expect(waveUserBubble).toMatch(
+      /background-image:\s*linear-gradient\(90deg,\s*transparent 0%,\s*var\(--bubble-wave\) 50%,\s*transparent 100%\)/,
+    );
+  });
+
+  it("declares the gradient after the fill shorthand, which would otherwise reset it", () => {
+    // Arrange — `background: var(--user)` resets background-image to none.
+    // Act / Assert
+    expect(waveUserBubble.indexOf("background-image:")).toBeGreaterThan(
+      waveUserBubble.indexOf("background: var(--user)"),
+    );
+  });
+
+  it("sizes the gradient wider than the bubble so the band can pan across it", () => {
+    // Arrange / Act — a band the width of the box could only fade, not travel.
+    // Assert
+    expect(waveUserBubble).toMatch(/background-size:\s*200% 100%/);
+  });
+
+  it("stops the gradient repeating, so exactly one band crosses at a time", () => {
+    // Arrange / Act — a repeated image would tile a second band into the box.
+    // Assert
+    expect(waveUserBubble).toMatch(/background-repeat:\s*no-repeat/);
+  });
+
+  it("runs the pass left to right", () => {
+    // Arrange — position percentages measure travel across (container - image),
+    // which is negative for an image wider than its box, so the LARGER
+    // percentage is the leftmost position and the pass counts down.
+    const [from, to] = wavePan(bubbleWaveKeyframes);
+    // Act / Assert
+    expect(from).toBeGreaterThan(to);
+  });
+
+  it("brings the band fully on from off the left edge", () => {
+    // Arrange — starting at 100% would begin with the band already centered on
+    // the left edge rather than arriving from outside the bubble.
+    const [from] = wavePan(bubbleWaveKeyframes);
+    // Act / Assert
+    expect(from).toBeGreaterThanOrEqual(200);
+  });
+
+  it("carries the band fully off past the right edge", () => {
+    // Arrange — ending at 0% would leave the band parked mid-bubble.
+    const [, to] = wavePan(bubbleWaveKeyframes);
+    // Act / Assert
+    expect(to).toBeLessThanOrEqual(-100);
+  });
+
+  it("gives the body no animation of its own, which would pan a second band", () => {
+    // Arrange — the wave is painted on the bubble's fill and the body is drawn
+    // over it. A second copy on the body would cross the text's own box at its
+    // own phase, with nothing locking the two together.
     const bodies = promptBodyRules();
-    // Act / Assert — bubble and text are locked by the inherited transform,
-    // not by a matched second declaration.
+    // Act / Assert
     for (const rule of bodies) expect(rule).not.toMatch(/animation/);
   });
 
-  it("declares the breath exactly once, on the bubble itself", () => {
+  it("declares the wave exactly once, on the bubble itself", () => {
     // Arrange — one animated element under the prompt bubble, so there is
     // nothing for a second phase to drift against.
-    const declarations = css.match(/animation:\s*bubble-breath/g) ?? [];
+    const declarations = css.match(/animation:\s*bubble-wave/g) ?? [];
     // Act / Assert
     expect(declarations.length).toBe(1);
-    expect(breathUserBubble).toMatch(/animation:\s*bubble-breath/);
+    expect(waveUserBubble).toMatch(/animation:\s*bubble-wave/);
   });
 
-  it("runs the breath at the period the renderer computes its delay against", () => {
+  it("runs the wave at the period the renderer computes its delay against", () => {
     // Arrange — the inline negative animation-delay only seeks to the right
-    // point in the cycle if the stylesheet and BUBBLE_BREATH_PERIOD_MS agree.
-    const seconds = breathUserBubble.match(/animation:\s*bubble-breath\s+([\d.]+)s/)?.[1];
+    // point in the pass if the stylesheet and BUBBLE_WAVE_PERIOD_MS agree.
+    const seconds = waveUserBubble.match(/animation:\s*bubble-wave\s+([\d.]+)s/)?.[1];
     // Act / Assert
-    expect(Number(seconds) * 1000).toBe(BUBBLE_BREATH_PERIOD_MS);
+    expect(Number(seconds) * 1000).toBe(BUBBLE_WAVE_PERIOD_MS);
   });
 
-  it("swings the bubble's own scale gently around 1", () => {
-    // Arrange / Act — the bubble-breath keyframes.
-    const [rest, peak] = scaleSwing(bubbleBreathKeyframes);
-    // Assert — a barely-there swing, not a visible pulse.
-    expect(rest).toBeLessThan(1);
-    expect(peak).toBeGreaterThan(1);
-    expect(peak - rest).toBeLessThan(0.02);
-  });
-
-  it("scales the text only through the bubble's transform, so the two are locked", () => {
-    // Arrange — the body declares no transform-origin of its own either;
-    // anything it declared would be a second, independent transform.
+  it("leaves the text unscaled, so the prompt's own size never moves", () => {
+    // Arrange — the body declares no transform of its own either; the retired
+    // breath swung it through the bubble's inherited scale.
     const bodies = promptBodyRules();
     // Act / Assert
     for (const rule of bodies) expect(rule).not.toMatch(/transform/);
   });
 
-  it("scales from the bubble's own center, not a corner, so the breath reads as symmetric growth", () => {
-    // Arrange / Act — the .bubble.user rule.
+  it("defines a black wave token for the light theme", () => {
+    // Arrange / Act — a shadow band, so a black wash rather than a color.
     // Assert
-    expect(breathUserBubble).toMatch(/transform-origin:\s*center/);
+    expect(cssVar(lightTheme, "--bubble-wave")).toMatch(/#000000\s+[\d.]+%/);
   });
 
-  it("stops breathing under reduced motion rather than merely slowing", () => {
+  it("deepens the dark-theme wave so the band still registers on the dark fill", () => {
+    // Arrange — the black-mix percentage of each theme's band.
+    const pct = (block: string): number => {
+      const m = cssVar(block, "--bubble-wave").match(/#000000\s+([\d.]+)%/);
+      if (m === null) throw new Error("--bubble-wave is not a #000000 color-mix");
+      return Number(m[1]);
+    };
+    // Act / Assert
+    expect(pct(darkTheme)).toBeGreaterThan(pct(lightTheme));
+  });
+
+  it("keeps the band faint enough to read as a passing shadow, not a second fill", () => {
+    // Arrange — over half black would darken the text it passes under.
+    const pct = (block: string): number =>
+      Number(cssVar(block, "--bubble-wave").match(/#000000\s+([\d.]+)%/)?.[1]);
+    // Act / Assert
+    expect(pct(lightTheme)).toBeLessThan(50);
+    expect(pct(darkTheme)).toBeLessThan(50);
+  });
+
+  it("stops the wave under reduced motion rather than merely slowing it", () => {
     // Arrange / Act — the reduced-motion override, unlike the spinner and
     // footer breath above, drops the animation outright: the rest of the feed
-    // restates what this breath says, so nothing is lost by stopping it.
+    // restates what this wave says, so nothing is lost by stopping it.
     // Assert
-    expect(reducedBubbleBreath).toMatch(/animation:\s*none/);
+    expect(reducedBubbleWave).toMatch(/animation:\s*none/);
+  });
+
+  it("drops the band itself under reduced motion, never parking it mid-bubble", () => {
+    // Arrange / Act — a stopped animation would leave a static shadow across
+    // the fill, which says "working" just as loudly as a moving one.
+    // Assert
+    expect(reducedBubbleWave).toMatch(/background-image:\s*none/);
   });
 
   it("holds a prompt the daemon has not acknowledged still", () => {
-    // Arrange / Act — the breath says the daemon has the prompt, so the
-    // bubble the webapp mints for its own submit must not carry one until
-    // the daemon's receipt supersedes it.
+    // Arrange / Act — the wave says the daemon has the prompt, so the bubble
+    // the webapp mints for its own submit must not carry one until the
+    // daemon's receipt supersedes it.
     // Assert
     expect(unackedBubble).toMatch(/animation:\s*none/);
   });
 
-  it("suppresses the breath only for the unacknowledged bubble", () => {
+  it("leaves an unacknowledged prompt a plain fill, with no parked band on it", () => {
+    // Arrange / Act — same reason as the reduced-motion case above.
+    // Assert
+    expect(unackedBubble).toMatch(/background-image:\s*none/);
+  });
+
+  it("suppresses the wave only for the unacknowledged bubble", () => {
     // Arrange — the suppression rule must not reach an ordinary prompt
-    // bubble, which would stop every breath in the feed.
+    // bubble, which would stop every wave in the feed.
     // Act / Assert
     expect(css).toContain(".bubble.user.unacked {");
   });
@@ -2523,7 +2613,9 @@ describe("queued-card (§2.13 in-flight queue)", () => {
   // `.bubble` comment above now references `.queued-card` earlier in the file.
   const card = blockAfter(css, "\n.queued-card {");
   const interruptBadge = blockAfter(css, ".queued-badge.interrupt");
-  const userBubble = blockAfter(css, ".bubble.user");
+  // Line-leading anchor for the same reason as `.queued-card` above: the
+  // --bubble-wave token's comment names `.bubble.user` earlier in the file.
+  const userBubble = blockAfter(css, "\n.bubble.user {");
 
   it("subdues the parked card with a dashed border, unlike the solid user bubble", () => {
     // Arrange / Act — the dashed border is the "parked, not active" cue.
