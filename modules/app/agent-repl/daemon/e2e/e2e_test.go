@@ -567,6 +567,22 @@ type e2eHarness struct {
 	// TTL is not a test at all. Moving the clock and then firing sweepIdle
 	// makes the edge an EVENT the test causes.
 	clock *testClock
+	// pingGate is the path a gated fake turn parks on, for a harness built
+	// with withGatedKeepAlivePing. Creating it is how a test ENDS the keep-alive
+	// ping it arranged to still be running.
+	pingGate string
+}
+
+// releasePingGate lets a parked keep-alive ping finish its turn the ordinary
+// way. It is the release half of withGatedKeepAlivePing.
+func (h *e2eHarness) releasePingGate(t *testing.T) {
+	t.Helper()
+	if h.pingGate == "" {
+		t.Fatal("this harness has no keep-alive ping gate: build it with withGatedKeepAlivePing")
+	}
+	if err := os.WriteFile(h.pingGate, []byte("release"), 0o600); err != nil {
+		t.Fatalf("release the keep-alive ping gate: %v", err)
+	}
 }
 
 // testClock is the daemon's wall clock under test control: real time, plus an
@@ -678,6 +694,10 @@ type harnessTuning struct {
 	// BEFORE hibernation sets a real cutoff so the sweep has room to do
 	// something else first.
 	idleTimeout time.Duration
+	// gatedPing parks the fake's keep-alive turn until the test releases it, so
+	// "a prompt arrives while the ping is STILL RUNNING" is arranged rather
+	// than raced for. See withGatedKeepAlivePing.
+	gatedPing bool
 }
 
 type harnessOption func(*harnessTuning)
@@ -689,6 +709,15 @@ func withWedgedShim() harnessOption { return func(o *harnessTuning) { o.wedgeShi
 func withStaleShimBuild(baked, current string) harnessOption {
 	return func(o *harnessTuning) { o.shimBuildSHA, o.currentBuildSHA = baked, current }
 }
+
+// withGatedKeepAlivePing parks every keep-alive ping the fake runs until
+// h.releasePingGate is called.
+//
+// THE WINDOW IS THE POINT. A prompt is held only while a ping's turn is in
+// flight, and the fake answers a ping in microseconds — so a test that submits
+// its prompt "right after" the ping is racing, not arranging. The gate turns
+// that window into one the test opens and closes.
+func withGatedKeepAlivePing() harnessOption { return func(o *harnessTuning) { o.gatedPing = true } }
 
 // withIdleSweeper gives the harness a test-driven idle-sweep clock.
 func withIdleSweeper() harnessOption { return func(o *harnessTuning) { o.idleSweeper = true } }
@@ -814,6 +843,12 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	// separately and explicitly, because riding on $HOME made it an unstated
 	// claim — see isolatedShimSocket.
 	t.Setenv("HOME", sockDir)
+	pingGate := ""
+	if tuning.gatedPing {
+		pingGate = filepath.Join(sockDir, "keep-alive-ping.gate")
+		t.Setenv("AGENT_REPL_FAKE_TURN_GATE", pingGate)
+		t.Setenv("AGENT_REPL_FAKE_TURN_GATE_TEXT", keepAlivePingText)
+	}
 	shimSock := isolatedShimSocket(t, sockDir)
 	startShimStore(t, storeBin, storeSock)
 
@@ -1084,7 +1119,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	h := &e2eHarness{ts: ts, stateDB: stateStore, geometry: geometryStore, merges: mergeBinding, shimSpawns: spawnCount.Load, vendors: vendors, clock: clock}
+	h := &e2eHarness{ts: ts, stateDB: stateStore, geometry: geometryStore, merges: mergeBinding, shimSpawns: spawnCount.Load, vendors: vendors, clock: clock, pingGate: pingGate}
 	if sweepTicks != nil {
 		h.sweepIdle = sweepTicks
 	}
