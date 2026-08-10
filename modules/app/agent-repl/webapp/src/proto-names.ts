@@ -46,6 +46,11 @@ import type {
   ResyncCmd as GeneratedResyncCmd,
 } from "../../proto/gen/ts/agentshim/frontend/v1/frame_pb";
 import type {
+  ConversationPageBefore as GeneratedConversationPageBefore,
+  ConversationPageCmd as GeneratedConversationPageCmd,
+  ConversationPageTail as GeneratedConversationPageTail,
+} from "../../proto/gen/ts/agentshim/frontend/v1/conversation-page_pb";
+import type {
   HibernationDetail as GeneratedHibernationDetail,
   ReviveCompactFirst as GeneratedReviveCompactFirst,
   ReviveSessionCmd as GeneratedReviveSessionCmd,
@@ -127,6 +132,7 @@ export const COMMAND_ARM = {
   setModel: "setModel",
   deleteSession: "deleteSession",
   resync: "resync",
+  conversationPage: "conversationPage",
   clientLog: "clientLog",
   queueForce: "queueForce",
   queueAccept: "queueAccept",
@@ -194,6 +200,33 @@ export const RESYNC_FIELD = {
   fromSeq: "fromSeq",
   fence: "fence",
 } as const satisfies Record<FieldKeys<GeneratedResyncCmd>, FieldKeys<GeneratedResyncCmd>>;
+
+/**
+ * The conversation page request's field spellings, bound to the generated
+ * message for the reason RESYNC_FIELD is: this encoder is hand-typed, and a
+ * field the daemon does not have costs the WHOLE command, because canonical
+ * protojson decoding rejects an unknown field outright.
+ */
+export const PAGE_CMD_FIELD = {
+  fence: "fence",
+} as const satisfies Record<"fence", FieldKeys<GeneratedConversationPageCmd>>;
+
+/** The anchor oneof's arm keys, checked against the generated oneof. */
+export const PAGE_ANCHOR_ARM = {
+  tail: "tail",
+  before: "before",
+} as const satisfies Record<string, NonNullable<GeneratedConversationPageCmd["anchor"]["case"]>>;
+
+/** The tail anchor's only field. */
+export const PAGE_TAIL_FIELD = {
+  limit: "limit",
+} as const satisfies Record<"limit", FieldKeys<GeneratedConversationPageTail>>;
+
+/** The before anchor's fields. */
+export const PAGE_BEFORE_FIELD = {
+  cursor: "cursor",
+  limit: "limit",
+} as const satisfies Record<FieldKeys<GeneratedConversationPageBefore>, FieldKeys<GeneratedConversationPageBefore>>;
 
 /** The keep-alive hold's only field: the ping turn whose end releases it. */
 export const KEEP_ALIVE_HOLD_TURN_ID: FieldKeys<GeneratedQueueEntryKeepAliveHold> = "turnId";
