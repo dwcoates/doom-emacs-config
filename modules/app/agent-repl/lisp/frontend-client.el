@@ -190,10 +190,39 @@ creation consume this helper so the two entry points cannot drift."
           :permission-mode permission-mode
           :allow-ungated allow-ungated)))
 
-(defcustom agent-repl-frontend-ready-attempts 25
-  "Dial attempts for `agent-repl--frontend-after-ready' (0.2s apart)."
-  :type 'integer
+(defconst agent-repl--frontend-ready-poll-interval 0.2
+  "Seconds between `agent-repl--frontend-after-ready' dial attempts.")
+
+(defcustom agent-repl-frontend-ready-timeout 90.0
+  "Seconds `agent-repl--frontend-after-ready' waits for daemon readiness.
+The dial budget is expressed in wall-clock seconds because that is what
+a slow daemon boot actually costs; the attempt count is derived from it
+\(see `agent-repl--frontend-ready-attempt-budget')."
+  :type 'number
   :group 'agent-repl)
+
+(defcustom agent-repl-frontend-ready-attempts nil
+  "Dial attempts for `agent-repl--frontend-after-ready' (0.2s apart).
+nil — the default — derives the budget from
+`agent-repl-frontend-ready-timeout'.  An integer overrides the derived
+budget outright, so callers that bind this variable (deployment
+orchestration in services.el, tests) keep working unchanged."
+  :type '(choice (const :tag "Derive from timeout" nil) integer)
+  :group 'agent-repl)
+
+(defun agent-repl--frontend-ready-attempt-budget ()
+  "Return the dial-attempt budget for `agent-repl--frontend-after-ready'.
+An explicit `agent-repl-frontend-ready-attempts' wins; otherwise the
+budget is `agent-repl-frontend-ready-timeout' seconds divided by the
+poll interval, floored at one attempt."
+  (if (integerp agent-repl-frontend-ready-attempts)
+      agent-repl-frontend-ready-attempts
+    (unless (and (numberp agent-repl-frontend-ready-timeout)
+                 (> agent-repl-frontend-ready-timeout 0))
+      (error "agent-repl: invalid agent-repl-frontend-ready-timeout=%S"
+             agent-repl-frontend-ready-timeout))
+    (max 1 (floor (/ agent-repl-frontend-ready-timeout
+                     agent-repl--frontend-ready-poll-interval)))))
 
 ;;;; ---- Webview URL --------------------------------------------------------
 
@@ -239,7 +268,8 @@ receives a diagnostic string after the bounded dial budget expires.
 Returns `:pending' when readiness is asynchronous, otherwise `:ready'."
   (unless (and (functionp on-ready) (functionp on-failure))
     (error "agent-repl: frontend readiness requires callable continuations"))
-  (let ((attempt 0) (started (float-time)) (latch (agent-repl--make-latch)))
+  (let ((attempt 0) (started (float-time)) (latch (agent-repl--make-latch))
+        (budget (agent-repl--frontend-ready-attempt-budget)))
     (cl-labels
         ((finish (outcome &optional detail)
            (when (agent-repl--latch-claim latch)
@@ -255,19 +285,20 @@ Returns `:pending' when readiness is asynchronous, otherwise `:ready'."
          (tick ()
            (cond
             ((agent-repl--frontend-daemon-ready-p) (finish 'ready))
-            ((>= attempt agent-repl-frontend-ready-attempts)
+            ((>= attempt budget)
              (finish 'timeout (format "daemon at %s never became ready" agent-repl-uds-socket-path)))
             (t
              (setq attempt (1+ attempt))
              (unless (agent-repl--uds-connected-p) (agent-repl-uds-connect nil t))
              (agent-repl--latch-set-timer
-              latch 'poll (agent-repl--uds-run-timer 0.2 #'tick))))))
+              latch 'poll (agent-repl--uds-run-timer
+                           agent-repl--frontend-ready-poll-interval #'tick))))))
     (agent-repl--log
      ws
      "frontend-ready: begin connected=%s daemon-view=%s budget=%d"
      (agent-repl--uds-connected-p)
      (and (agent-repl--frontend-daemon-view) t)
-     agent-repl-frontend-ready-attempts)
+     budget)
     (if (agent-repl--frontend-daemon-ready-p) (progn (finish 'ready) :ready)
       (tick) :pending))))
 
