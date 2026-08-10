@@ -3560,6 +3560,73 @@ path needs to see both."
               (should prepared)))
         (delete-file snapshot-file)))))
 
+(ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/failure-registers-one-rearm ()
+  "A failed preparation arms exactly one link-up continuation."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-uds-snapshot-applied-functions nil)
+          (agent-repl--startup-restore-rearms 0)
+          (agent-repl--startup-restore-began nil)
+          (agent-repl--snapshot-load-state nil))
+      (cl-letf (((symbol-function 'agent-repl--runtime-startup-prepare)
+                 (lambda (_on-success on-failure) (funcall on-failure "not ready") :pending)))
+        (agent-repl--load-workspace-snapshot-on-startup)
+        (should (equal agent-repl-uds-snapshot-applied-functions
+                       (list #'agent-repl--startup-restore-rearm-run)))
+        (should (= agent-repl--startup-restore-rearms 1))))))
+
+(ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/rearm-fires-on-link-up ()
+  "The link-up edge re-runs the restore that readiness failed to reach."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-uds-snapshot-applied-functions nil)
+          (agent-repl--startup-restore-rearms 0)
+          (agent-repl--startup-restore-began nil)
+          (agent-repl--snapshot-load-state nil)
+          (attempts 0)
+          loaded)
+      (cl-letf (((symbol-function 'agent-repl--runtime-startup-prepare)
+                 (lambda (on-success on-failure)
+                   (setq attempts (1+ attempts))
+                   (if (= attempts 1) (funcall on-failure "not ready") (funcall on-success))
+                   :pending))
+                ((symbol-function 'agent-repl--workspace-snapshot-file-for-read)
+                 (lambda () "/nonexistent/agent-snap.el"))
+                ((symbol-function 'agent-repl-load-workspace-snapshot)
+                 (lambda (&rest _) (setq loaded t))))
+        (agent-repl--load-workspace-snapshot-on-startup)
+        (agent-repl--startup-restore-rearm-run)
+        (should (= attempts 2))
+        (should agent-repl--startup-restore-began)
+        (should-not loaded)
+        (should-not agent-repl-uds-snapshot-applied-functions)))))
+
+(ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/rearm-skips-when-load-in-flight ()
+  "A snapshot load already in flight makes a fired re-arm a no-op."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-uds-snapshot-applied-functions nil)
+          (agent-repl--startup-restore-rearms 1)
+          (agent-repl--startup-restore-began nil)
+          (agent-repl--snapshot-load-state '(:queue nil))
+          prepared)
+      (cl-letf (((symbol-function 'agent-repl--runtime-startup-prepare)
+                 (lambda (&rest _) (setq prepared t) :pending)))
+        (agent-repl--startup-restore-rearm-run)
+        (should-not prepared)))))
+
+(ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/rearm-cap-exhausts-loudly ()
+  "The re-arm cap stops re-arming and warns instead of retrying forever."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-uds-snapshot-applied-functions nil)
+          (agent-repl-startup-restore-rearm-limit 2)
+          (agent-repl--startup-restore-rearms 2)
+          (agent-repl--startup-restore-began nil)
+          (agent-repl--snapshot-load-state nil)
+          warned)
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (&rest args) (setq warned args))))
+        (should-not (agent-repl--startup-restore-rearm))
+        (should warned)
+        (should-not agent-repl-uds-snapshot-applied-functions)))))
+
 ;;;; ---- Tests: workspace snapshot path resolver ----
 
 (ert-deftest agent-repl-cmd-test-workspace-snapshot-file-for-read-prefers-configured ()
