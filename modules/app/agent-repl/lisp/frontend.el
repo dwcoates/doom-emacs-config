@@ -44,6 +44,7 @@
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--agent-view-buffer-p "agent-repl-core" (&optional buf))
+(declare-function agent-repl--webview-recovery-sweep "webview-recovery" (reason))
 (declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
 (declare-function agent-repl--current-ws-p "agent-repl-core" (ws))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
@@ -377,6 +378,23 @@ Registered in `agent-repl--external-boundary-functions'."
     (xwidget-webkit-goto-uri xwidget uri) ;; ALLOW-EXTERNAL-BOUNDARY
     uri))
 
+(defun agent-repl--frontend-webview-navigate-widget (xwidget uri)
+  "External-boundary wrapper: navigate XWIDGET to URI.
+Distinct from `agent-repl--frontend-webview-reload-widget', which can
+only re-fetch the address the page already carries: a page running a
+SUPERSEDED bundle must be sent to a DIFFERENT address, because the build
+identity is folded into the URL precisely so a cache cannot answer a new
+build out of an old one \(`agent-repl--frontend-workspace-url').
+Re-navigating such a page to its own URI would hand it the same stale
+bundle back.  Signals on an empty URI rather than navigating a webview
+to nothing.  Body does nothing but the external calls; tests mock via
+`cl-letf'.  Registered in `agent-repl--external-boundary-functions'."
+  (require 'xwidget)
+  (when (or (null uri) (string-empty-p uri))
+    (error "agent-repl: refusing to navigate webview to an empty URI (xwidget=%S)" xwidget))
+  (xwidget-webkit-goto-uri xwidget uri) ;; ALLOW-EXTERNAL-BOUNDARY
+  uri)
+
 (defun agent-repl--frontend-webview-uri (xwidget)
   "External-boundary wrapper: return the URI XWIDGET is currently showing.
 READ-ONLY, and deliberately separate from
@@ -409,41 +427,24 @@ the owner was stamped still has to be identifiable in the log."
 
 ;;;###autoload
 (defun agent-repl-refresh-webviews ()
-  "Reload every live workspace webview page, returning the count refreshed.
+  "Bring every workspace webview onto the deployed bundle, returning the count.
 
-A webview outlives the daemon it was mounted against: bin/deploy-all.sh
-restarts the daemon under the running Emacs, leaving each mounted page
-talking to a listener that no longer exists.  This sweep re-navigates
-every such page so it re-attaches to the freshly deployed daemon.
+The deploy-time entry point bin/deploy-all.sh calls over emacsclient
+right after it restarts the daemon.  It holds no sweep logic of its own:
+the sweep is `agent-repl--webview-recovery-sweep' (webview-recovery.el),
+which is the SAME sweep the daemon link-up edge fires.  The two edges
+are one mechanism deliberately — a deploy and a link-up differ only in
+what named them, and a page's staleness is decided by comparing what it
+is running against what is on disk either way.
 
-One bad webview never stops the sweep: a buffer whose WKWebView is dead
-or refuses to report a URI is recorded as a warning and the sweep moves
-on to the next buffer.  Every outcome — refreshed, dead, failed — is on
-the log with its workspace and buffer."
+Returns the number of webviews the sweep acted on, or nil when the
+sweep was debounced away by a recent one."
   (interactive)
-  (let ((bufs (agent-repl--frontend-live-webview-buffers))
-        (refreshed 0))
-    (agent-repl--log nil "refresh-webviews: sweep begin candidates=%d" (length bufs))
-    (dolist (buf bufs)
-      (let ((ws (agent-repl--frontend-webview-workspace buf)))
-        (condition-case err
-            (let ((xw (agent-repl--frontend-webview-live-widget buf)))
-              (if (null xw)
-                  (agent-repl--warn ws "refresh-webviews: buffer=%s outcome=dead-webview"
-                                    (buffer-name buf))
-                (let ((uri (agent-repl--frontend-webview-reload-widget xw)))
-                  (setq refreshed (1+ refreshed))
-                  (agent-repl--log ws "refresh-webviews: buffer=%s outcome=refreshed url=%s"
-                                   (buffer-name buf) uri))))
-          (error
-           (agent-repl--warn ws "refresh-webviews: buffer=%s outcome=reload-failed err=%S"
-                             (buffer-name buf) err)))))
-    (agent-repl--log nil "refresh-webviews: sweep done refreshed=%d candidates=%d"
-                     refreshed (length bufs))
+  (let ((acted (agent-repl--webview-recovery-sweep "deploy_refresh")))
     (when (called-interactively-p 'interactive)
-      (agent-repl--user-message nil "refreshed %d of %d webview(s)"
-                                (list refreshed (length bufs))))
-    refreshed))
+      (agent-repl--user-message nil "webview sweep acted on %s webview(s)"
+                                (list (or acted 0))))
+    acted))
 
 ;;;; ---- Copying the webview's highlighted text --------------------------------
 
