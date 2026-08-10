@@ -1227,20 +1227,51 @@ Returns the workspace when a bounce happened."
       (agent-repl--log ws "bounce-webview: reopened on the fresh build id")
       ws)))
 
-(defun agent-repl--frontend-rebuild-and-redeploy-webapp (ws)
+(defun agent-repl--frontend-rebuild-and-redeploy-webapp (ws &optional gate)
   "Rebuild the webapp in the background, bouncing WS\='s webview on success.
 Returns the asynchronous build outcome (`started', `queued' or
 `coalesced'), so the caller never blocks on the build.  A failed build
 leaves the webview alone on the bundle it already has, after the failure
 has been surfaced through the shared build reporting and warned about
-against WS."
+against WS.
+
+GATE, when non-nil, is a rendezvous thunk (see
+`agent-repl--frontend-make-rendezvous') called INSTEAD of bouncing
+directly: the bounce then happens when the last party to the rendezvous
+arrives.  `agent-repl-restart-session' uses that to run the build
+alongside the shim restart and still land the webview bounce behind BOTH,
+so a page is never reopened against a session that is still coming up.
+Without GATE the build's success bounces the webview by itself."
   (agent-repl--frontend-build-targets-async
    agent-repl--frontend-webapp-build-targets nil
-   (lambda () (agent-repl--frontend-bounce-webview ws))
+   (if gate gate (lambda () (agent-repl--frontend-bounce-webview ws)))
    (lambda (detail)
      (agent-repl--warn
       ws "restart-session: webapp rebuild FAILED, webview left on the old bundle: %s"
       detail))))
+
+(defun agent-repl--frontend-make-rendezvous (parties on-complete)
+  "Return a thunk that runs ON-COMPLETE once PARTIES calls have arrived.
+Every party calls the SAME returned thunk exactly once when its own leg
+finishes; ON-COMPLETE runs on the arrival that brings the count to zero,
+and never again after that.
+
+A leg that FAILS simply never calls in, so ON-COMPLETE never runs.  That
+is the intended reading: the completion belongs behind every leg
+succeeding, and a leg that failed has already surfaced its own failure.
+
+PARTIES must be a positive integer — a rendezvous of nobody is a caller
+bug, not a completion that fires immediately."
+  (unless (and (integerp parties) (> parties 0))
+    (agent-repl--log nil "frontend-rendezvous: rejected parties=%S" parties)
+    (error "agent-repl--frontend-make-rendezvous: parties must be a positive integer"))
+  (let ((remaining parties))
+    (lambda ()
+      (when (> remaining 0)
+        (setq remaining (1- remaining))
+        (agent-repl--log nil "frontend-rendezvous: arrival remaining=%d" remaining)
+        (when (zerop remaining)
+          (funcall on-complete))))))
 
 ;;;###autoload
 (defun agent-repl-restart-session ()
@@ -1251,16 +1282,25 @@ outlived a previous daemon, which this daemon never spawned and could not
 otherwise reach -- then brings the SAME session record back up, so the
 respawn resumes the same vendor conversation and nothing is lost.
 
+NOTHING ABOUT THIS VERB BLOCKS.  It issues its work and returns to the
+command loop at once; the editor stays live for the whole restart, which
+is the point -- a main thread parked on a congested daemon is an editor
+the user `C-g\='s out of, and that quit used to land in the middle of the
+restart.
+
 ALSO REBUILDS AND REDEPLOYS THE WEBAPP.  The frontend half of a workspace
 goes stale exactly as the shim half does, so this verb refreshes both:
-the webapp is rebuilt if stale in the BACKGROUND (the shim restart flies
-in parallel rather than waiting on it) and, when that build succeeds, the
-workspace\='s webview is bounced -- closed and reopened -- so the fresh
-page carries the new build id.  A build already in flight is not stacked;
-the request queues behind it.  A FAILED build is surfaced loudly and
-leaves the webview on the bundle it already has; the shim restart having
-already proceeded is fine and deliberate.  Neither the daemon nor its
-binary is rebuilt or restarted here.
+the webapp is rebuilt if stale in the BACKGROUND while the shim restart
+flies beside it, and the workspace\='s webview is bounced -- closed and
+reopened -- once BOTH have succeeded, so the fresh page carries the new
+build id AND addresses a shim that is already back.  A build already in
+flight is not stacked; the request queues behind it.  A FAILED build is
+surfaced loudly and leaves the webview on the bundle it already has; the
+shim restart having already proceeded is fine and deliberate.  A restart
+that is rejected, or that the daemon never acknowledges, likewise leaves
+the webview alone -- the unanswered command surfaces the ordinary
+`client.command_unacked\=' failure card through the shared ack-aging
+alarm.  Neither the daemon nor its binary is rebuilt or restarted here.
 
 This is a PROCESS restart, not a new conversation.  Reach for it when the
 shim is wedged, when it survived a deploy and is running superseded code,
@@ -1282,10 +1322,17 @@ than read as success."
     (unless ws
       (user-error "agent-repl: no current workspace"))
     (agent-repl--log ws "restart-session: begin")
-    ;; Kicked off FIRST and asynchronously, so the shim restart below is
-    ;; issued while the webapp builds rather than behind it.
-    (agent-repl--frontend-rebuild-and-redeploy-webapp ws)
-    (agent-repl--frontend-restart-session ws)
+    ;; The two slow legs run SIDE BY SIDE and neither one holds the main
+    ;; thread: the npm build is a background process, and the shim restart is
+    ;; a command whose completion arrives as an ack.  The webview bounce is
+    ;; the only step that depends on both, so it hangs off a rendezvous the
+    ;; two legs arrive at rather than off either leg alone — a page reopened
+    ;; on the fresh bundle before the shim is back would address a session
+    ;; still coming up.
+    (let ((redeploy (agent-repl--frontend-make-rendezvous
+                     2 (lambda () (agent-repl--frontend-bounce-webview ws)))))
+      (agent-repl--frontend-rebuild-and-redeploy-webapp ws redeploy)
+      (agent-repl--frontend-restart-session ws redeploy))
     (agent-repl--user-message
      ws "restarting the session for %s (webapp rebuilding)..." (list ws))))
 

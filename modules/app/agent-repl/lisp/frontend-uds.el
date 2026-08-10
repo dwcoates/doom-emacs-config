@@ -1185,29 +1185,45 @@ command through its tracked callbacks instead of aging out.  Returns
                          "uds-send-command: start field=%s request-id=%s ws=%s bytes=%d state=%s"
                          field request-id workspace (length json)
                          agent-repl--uds-connection-state)
-        ;; BEFORE the write, unconditionally: see the reentrancy note above.
-        ;; This is the sole registration point, and the write below is the
-        ;; sole caller-reachable path to the socket.
-        (agent-repl--uds-register-pending-command
-         request-id field workspace on-failure on-success on-challenge
-         on-timeout)
-        (when on-registered
-          (condition-case err
-              (funcall on-registered request-id)
-            (error
-             (agent-repl--log log-workspace
-                              "uds-send-command: on-registered FAILED field=%s request-id=%s error=%s — nothing written"
-                              field request-id (error-message-string err))
-             (agent-repl--uds-untrack-command request-id workspace
-                                              "on-registered-failed")
-             (signal (car err) (cdr err)))))
-        (if (eq agent-repl--uds-connection-state 'open)
-            (agent-repl--uds-write-frame proc entry)
-          (setq agent-repl--uds-outbound-queue
-                (append agent-repl--uds-outbound-queue (list entry)))
-          (agent-repl--log log-workspace
-                           "uds-send-command: queued field=%s request-id=%s queue-depth=%d"
-                           field request-id (length agent-repl--uds-outbound-queue))))
+        ;; REGISTER-THEN-DELIVER IS ONE INDIVISIBLE STEP.  The reentrancy note
+        ;; above forces the registration to precede the write; quitting
+        ;; between them is the other way the pair can come apart, and it comes
+        ;; apart worse.  `process-send-string' yields to the event loop on a
+        ;; frame large enough to block, so a `C-g' held during a congested
+        ;; send lands exactly there: the pending entry exists with its ack
+        ;; alarm armed, and the frame it belongs to is neither on the wire nor
+        ;; on the outbound queue.  The alarm then declares lost a command the
+        ;; daemon was never asked to run, degrading the link and opening a
+        ;; card for a send that never happened.
+        ;;
+        ;; Under `agent-repl--with-deferred-quit' the quit cannot land inside
+        ;; the pair at all; it is taken at the command loop, after the entry
+        ;; and its frame have been put in agreement.  Nothing is swallowed:
+        ;; `on-registered' still untracks and re-signals its own errors here.
+        (agent-repl--with-deferred-quit "uds-send-command"
+          ;; BEFORE the write, unconditionally: see the reentrancy note above.
+          ;; This is the sole registration point, and the write below is the
+          ;; sole caller-reachable path to the socket.
+          (agent-repl--uds-register-pending-command
+           request-id field workspace on-failure on-success on-challenge
+           on-timeout)
+          (when on-registered
+            (condition-case err
+                (funcall on-registered request-id)
+              (error
+               (agent-repl--log log-workspace
+                                "uds-send-command: on-registered FAILED field=%s request-id=%s error=%s — nothing written"
+                                field request-id (error-message-string err))
+               (agent-repl--uds-untrack-command request-id workspace
+                                                "on-registered-failed")
+               (signal (car err) (cdr err)))))
+          (if (eq agent-repl--uds-connection-state 'open)
+              (agent-repl--uds-write-frame proc entry)
+            (setq agent-repl--uds-outbound-queue
+                  (append agent-repl--uds-outbound-queue (list entry)))
+            (agent-repl--log log-workspace
+                             "uds-send-command: queued field=%s request-id=%s queue-depth=%d"
+                             field request-id (length agent-repl--uds-outbound-queue)))))
       request-id)))
 
 ;;;; ---- Command-ack tracking --------------------------------------------

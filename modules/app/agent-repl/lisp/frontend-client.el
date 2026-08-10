@@ -1137,12 +1137,30 @@ report that their keystroke reached no work at all."
     (agent-repl--log ws "cancel-detached[gui]: ws=%s key=%s request-id=%s" ws key req)
     t))
 
-(defun agent-repl--frontend-restart-session (ws)
+(defun agent-repl--frontend-restart-session (ws &optional on-restarted)
   "Send the `restartSession\=' command for WS, keyed by its cwd.
-Returns the request-id.  Signals (via `agent-repl--uds-send-command\=') when
-there is no link to send on; a REJECTED ack is surfaced loudly through the
-shared ack handler, which is the whole point of tracking it: a restart that
-failed must never read as a session that came back."
+Returns the request-id AS SOON AS THE COMMAND IS ISSUED.  Signals (via
+`agent-repl--uds-send-command\=') when there is no link to send on; a
+REJECTED ack is surfaced loudly through the shared ack handler, which is
+the whole point of tracking it: a restart that failed must never read as
+a session that came back.
+
+NOTHING HERE WAITS.  The daemon stops and respawns the shim, which under
+congestion takes long enough that a main thread parked on it is a frozen
+editor — and a frozen editor is one the user `C-g\='s out of, mid-restart,
+which is how this path was observed failing.  The command is issued and
+control returns immediately; everything that belongs AFTER the restart
+runs from the ack instead.
+
+ON-RESTARTED, when non-nil, is a thunk run from the SUCCESS ack, right
+after the completion message.  It is the seam for the rest of the verb\='s
+post-restart work (the webview redeploy in
+`agent-repl-restart-session\='), so that work is ordered behind the
+restart it depends on WITHOUT anyone blocking to order it.  It does not
+run on a rejected ack, and it does not run on an unacked one: an
+unanswered command already surfaces the `client.command_unacked\=' failure
+card through the shared ack-aging alarm, and a restart nobody can attest
+completed must not be followed by work that presumes it did."
   (let ((key (agent-repl--frontend-ws-command-key ws))
         ;; Bound by `:on-registered' BEFORE the write, so the ack callbacks
         ;; below can name the request even when the ack is delivered
@@ -1159,7 +1177,9 @@ failed must never read as a session that came back."
        (agent-repl--log ws "restart-session: ws=%s complete request-id=%s" ws req)
        (agent-repl--user-message
         ws "session restarted (same conversation, fresh shim)" nil
-        :detail (format "restartSession request-id=%s key=%s" req key))))
+        :detail (format "restartSession request-id=%s key=%s" req key))
+       (when on-restarted
+         (funcall on-restarted))))
     (agent-repl--log ws "restart-session: dispatched ws=%s key=%s request-id=%s" ws key req)
     req))
 
