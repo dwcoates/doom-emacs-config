@@ -91,12 +91,14 @@ func TestSessionControllerLivenessIsTrueAfterEnsure(t *testing.T) {
 	}
 }
 
-// TestOpenWaitsForDriveabilityDespiteASettledRecord — the open path itself must never
-// second-guess the switch. A record that durably claims to be fully backfilled
-// says nothing about whether THIS daemon is driving it.
-func TestOpenWaitsForDriveabilityDespiteASettledRecord(t *testing.T) {
+// TestOpenStartsADriveableBringUpDespiteASettledRecord — the open path itself
+// must never second-guess the switch. A record that durably claims to be fully
+// backfilled says nothing about whether THIS daemon is driving it. The open no
+// longer WAITS for that bring-up (openbringup.go), but it must still start it.
+func TestOpenStartsADriveableBringUpDespiteASettledRecord(t *testing.T) {
 	// Arrange.
 	o, reg, ens, _ := openerRig(t)
+	settled := openSettlements(t)
 	if err := reg.Put(settledRecord()); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
@@ -105,9 +107,11 @@ func TestOpenWaitsForDriveabilityDespiteASettledRecord(t *testing.T) {
 	if err := o.Open(context.Background(), "/w", WorkspaceOpenOpts{}); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	<-settled
 
 	// Assert.
-	if len(ens.driveable) != 1 || ens.driveable[0] != "/w" || len(ens.calls) != 0 {
-		t.Fatalf("driveable=%v ensure=%v, want exactly one driveable bring-up for /w — a settled record must not skip it", ens.driveable, ens.calls)
+	driveable, ensure := ens.driveableCalls(), ens.nonWaitingCalls()
+	if len(driveable) != 1 || driveable[0] != "/w" || len(ensure) != 0 {
+		t.Fatalf("driveable=%v ensure=%v, want exactly one driveable bring-up for /w — a settled record must not skip it", driveable, ensure)
 	}
 }

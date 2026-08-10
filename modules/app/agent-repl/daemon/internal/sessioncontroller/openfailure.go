@@ -1,0 +1,93 @@
+// openfailure.go carries the ONE thing an EARLY-ACKED open still owes its user.
+//
+// An `open_workspace' command used to be acked only once the workspace's whole
+// bring-up had finished, so a bring-up failure had a natural place to land: the
+// nack. That coupling is what collapsed the frontend command pipeline — a
+// bring-up costs seconds, the editor re-sends an unacked open every few
+// seconds, and arrivals outran the service rate permanently — so the ack now
+// means ACCEPTED and the bring-up runs behind it (server/openbringup.go).
+//
+// Moving the wait off the command MUST NOT move the failure off the user. The
+// bring-up ladder already publishes most failures itself: a resolved bring-up
+// failure pushes a start-failed card and closes the connectivity axis
+// (bringupescape.go, resolveStartFailed). This entry point exists for the
+// outcomes the opener classifies AFTER that ladder returns — a continuity
+// verdict on an exact resume, a deadline the opener itself bounds — which the
+// ladder never sees and which, before the early ack, only the nack reported.
+//
+// It pushes the card under the SAME stable identity the ladder uses, so a
+// failure that both surfaces describe is ONE card the second write updates,
+// never two accounts of one failure.
+//
+// IT DOES NOT TOUCH THE CONNECTIVITY AXIS, deliberately. That axis is the
+// bring-up ladder's to close, its edges are validated transitions, and a second
+// `unavailable' edge for a failure the ladder already resolved would be
+// rejected by the state machine and logged as a rejection — noise describing a
+// duplicate, not a fact anyone is missing.
+package sessioncontroller
+
+import (
+	"errors"
+
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/errclass"
+)
+
+// RecordOpenFailure publishes a bring-up failure that arrived after its
+// `open_workspace' command was already acked.
+//
+// A HIBERNATED session is not a failure and is refused here rather than
+// carded: the revival gate is an expected outcome with its own pushed
+// SessionView, and a failure card for it would show a continuity error for a
+// session that is merely asleep. Callers are expected to filter it too; this
+// is the backstop, and it is loud.
+func (m *Manager) RecordOpenFailure(workspace string, err error) {
+	if workspace == "" || err == nil {
+		m.errorf("session-controller: RecordOpenFailure called with workspace=%q err=%v — an open failure with no workspace or no cause names nothing and cannot be published",
+			workspace, err)
+		return
+	}
+	if errors.Is(err, errclass.ErrSessionHibernated) {
+		m.logf("session-controller: open bring-up for ws=%q ended at the revival gate, not in failure; no failure card is published for a session that is merely asleep",
+			workspace)
+		return
+	}
+	m.mu.Lock()
+	d := m.byWS[workspace]
+	m.mu.Unlock()
+	if d == nil || d.consumer == nil {
+		// LOUD, not silent: the failure is real and the user will not see this
+		// one. It happens when the bring-up tore its own controller down, in
+		// which case the ladder's own card already stands — but the daemon
+		// cannot prove that from here, so it says what it could not publish.
+		m.errorf("session-controller: open bring-up FAILED ws=%q with no live controller to publish a failure card onto; the cause is recorded here only: %v",
+			workspace, err)
+		return
+	}
+	m.logf("session-controller: open bring-up FAILED ws=%q session=%s generation=%s after the open was acked; publishing a failure card: %v",
+		workspace, d.sessionID, d.generationID, err)
+	d.consumer.pushFailure(d.consumer.startFailedUUID(), openFailureCard(m.logf, err))
+}
+
+// openFailureCard renders a late open failure WITHOUT degrading what the nack
+// used to carry.
+//
+// A failed exact resume holds TYPED continuity evidence — which conversation,
+// which config root, which transcript was searched for — that the command
+// classifier turns into a session_resume_failed card the client renders as a
+// continuity error. Flattening that to prose would be a real loss of error
+// detail, so it is classified whenever it is there.
+//
+// Everything else becomes a start-failed card rather than going through the
+// general classifier, because the general classifier's unknown-error arm logs a
+// LOUD fallthrough for a gap in its vocabulary — and a bring-up that simply did
+// not come up is not such a gap. It is the same card the ladder publishes for
+// the same event, under the same identity.
+func openFailureCard(logf func(string, ...any), err error) *frontendv1.FailureCardView {
+	var resume errclass.SessionResumeFailureDetailer
+	if errors.As(err, &resume) {
+		return errclass.Command(logf, err)
+	}
+	return errclass.StartFailed(err.Error())
+}
