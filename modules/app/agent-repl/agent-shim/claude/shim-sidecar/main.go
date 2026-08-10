@@ -200,14 +200,25 @@ type sidecar struct {
 	// recovered as the first act of every established connection and dropped the
 	// moment the link is lost, so a tailer can never be built from a stale — or
 	// absent — recovery.
-	link         linkState
-	cursors      map[string]*corev1.CursorState // by path; nil unless recovered
-	dialT        *time.Timer
+	link    linkState
+	cursors map[string]*corev1.CursorState // by path; nil unless recovered
+	// nextDialAt is the ladder: while the link is down, Run dials whenever this
+	// deadline has passed. Holding the schedule as state the loop re-reads —
+	// rather than as a timer someone must re-arm — is what makes redialing
+	// impossible to silently stop (see link.go's dialTick).
+	nextDialAt   time.Time
+	dialing      bool // a dial is in flight; makes dial() single-flight
 	backoff      time.Duration
 	dialFailures int
 	downSince    time.Time
 	bootSwept    bool
 	diagnostics  diagnosticOutbox
+
+	// now and jitter are the state machine's clock and its backoff spread,
+	// injectable so the redial ladder is tested by advancing a fake clock
+	// rather than by waiting on a real one.
+	now    func() time.Time
+	jitter func(time.Duration) time.Duration
 }
 
 func newSidecar(storeSocket string, roots []string, spoolRoot string, log *logging.Bound) *sidecar {
@@ -230,8 +241,11 @@ func newSidecar(storeSocket string, roots []string, spoolRoot string, log *loggi
 		// first dial due immediately. That is all "boot" means here.
 		link:      linkDown,
 		downSince: time.Now(),
-		dialT:     time.NewTimer(0),
+		now:       time.Now,
+		jitter:    jitterBackoff,
 	}
+	// A fresh sidecar's first dial is due immediately.
+	s.nextDialAt = s.now()
 	// Delivery only appends to an in-memory outbox. The event loop owns all
 	// store I/O, so a log created while processing a store operation cannot
 	// recursively write to the store.
@@ -247,11 +261,14 @@ func (s *sidecar) Run(stop <-chan os.Signal) error {
 	sweepT := time.NewTicker(30 * time.Second)
 	beatT := time.NewTicker(15 * time.Second)
 	rescanT := time.NewTicker(10 * time.Second)
+	// The ladder's heartbeat. It runs for the life of the process, whatever the
+	// link is doing, so a down link is always being redialed.
+	dialT := time.NewTicker(dialTick)
 	defer pollT.Stop()
 	defer sweepT.Stop()
 	defer beatT.Stop()
 	defer rescanT.Stop()
-	defer s.dialT.Stop()
+	defer dialT.Stop()
 
 	for {
 		select {
@@ -261,8 +278,8 @@ func (s *sidecar) Run(stop <-chan os.Signal) error {
 			// step this shutdown has: the shim-store connection.
 			s.log.With(logging.Context{Operation: "shutdown"}).Log("received signal=%s; beginning sidecar shutdown", sig)
 			return s.store.Close()
-		case <-s.dialT.C:
-			s.dial()
+		case <-dialT.C:
+			s.dialDue()
 		case <-rescanT.C:
 			s.whenUp(s.rescan)
 		case <-pollT.C:

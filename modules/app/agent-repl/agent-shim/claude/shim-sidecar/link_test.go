@@ -14,6 +14,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -725,13 +726,38 @@ func TestOutageIsSurfacedAsDegradedStateOnRecovery(t *testing.T) {
 	// Act — the link comes back, and reports the window it just spent down.
 	s.dial()
 
-	// Assert
+	// Assert — the OPENING half comes first, naming the component.
 	ds := awaitDegraded(t, events)
 	if ds.GetComponent() != degradedComponent {
 		t.Fatalf("component = %q, want %q", ds.GetComponent(), degradedComponent)
 	}
-	if !ds.GetRecovered() {
-		t.Fatal("report is not marked recovered; it is the CLOSING report of the window")
+	if ds.GetRecovered() {
+		t.Fatal("first report is already recovered; the window must be OPENED before it is closed")
+	}
+}
+
+func TestRecoveryClosesTheDegradedWindowItOpened(t *testing.T) {
+	// Arrange — a consumer only resolves a runtime fault it has an open window
+	// for, so the closing half is worthless without the opening one preceding
+	// it on the same connection.
+	h := newStoreHarness(t)
+	root, _ := writeHistory(t, 5)
+	s := h.sidecarOver(root)
+	s.dial() // fails; the outage happens
+
+	h.start()
+	events := subscribeEvents(t, h.sock, backfillSession)
+
+	// Act
+	s.dial()
+
+	// Assert
+	if opened := awaitDegraded(t, events); opened.GetRecovered() {
+		t.Fatal("first report is recovered; want the opening half")
+	}
+	closed := awaitDegraded(t, events)
+	if !closed.GetRecovered() {
+		t.Fatal("second report is not recovered; the window was never closed")
 	}
 }
 
@@ -755,7 +781,7 @@ func TestNoDegradedReportWhenTheLinkComesUpFirstTry(t *testing.T) {
 
 func TestDegradedEventsAreEphemeralAndSynthetic(t *testing.T) {
 	// Arrange / Act — an operational notice about the pipe, one per session.
-	evs := degradedEvents([]string{"a", "b"}, "store was unreachable")
+	evs := degradedEvents([]string{"a", "b"}, "store was unreachable", true)
 
 	// Assert — EPHEMERAL keeps it out of the durable conversation history the
 	// pipe carries, matching how the shim reports its own degraded windows.
@@ -842,5 +868,209 @@ func TestFailedDialsAccumulateWhileDown(t *testing.T) {
 	// Assert — the outage's cost is counted, for the closing report.
 	if s.dialFailures != 2 {
 		t.Fatalf("dialFailures = %d, want 2", s.dialFailures)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The steady-state redial ladder
+// ---------------------------------------------------------------------------
+
+// fakeClock is the ladder's injected clock: its schedule is asserted by moving
+// time, never by waiting for it.
+type fakeClock struct{ t time.Time }
+
+func (c *fakeClock) now() time.Time          { return c.t }
+func (c *fakeClock) advance(d time.Duration) { c.t = c.t.Add(d) }
+
+// onFakeClock puts s on a controllable clock and removes the backoff jitter, so
+// an armed delay is exactly the rung nextBackoff produced.
+func onFakeClock(s *sidecar) *fakeClock {
+	c := &fakeClock{t: time.Now()}
+	s.now = c.now
+	s.jitter = func(d time.Duration) time.Duration { return d }
+	s.downSince = c.t
+	s.nextDialAt = c.t
+	return c
+}
+
+func TestLadderKeepsRedialingWhileTheStoreIsDown(t *testing.T) {
+	// Arrange — the regression: after the first failed dial the ladder went
+	// quiet, and the link stayed down until unrelated work dialed again.
+	h := newStoreHarness(t)
+	root, _ := writeHistory(t, 5)
+	s := h.sidecarOver(root)
+	clock := onFakeClock(s)
+
+	// Act — nothing but the ladder runs, and time passes.
+	for i := 0; i < 5; i++ {
+		s.dialDue()
+		clock.advance(dialBackoffMax)
+	}
+
+	// Assert — every armed deadline produced another attempt.
+	if s.dialFailures != 5 {
+		t.Fatalf("dialFailures = %d after five due deadlines, want 5; the ladder stopped redialing", s.dialFailures)
+	}
+}
+
+func TestLadderReconnectsWithoutAnyReadDemandingIt(t *testing.T) {
+	// Arrange — a store that comes back while only the ladder is running.
+	h := newStoreHarness(t)
+	root, _ := writeHistory(t, 5)
+	s := h.sidecarOver(root)
+	clock := onFakeClock(s)
+	s.dialDue()
+	clock.advance(dialBackoffMax)
+
+	// Act
+	h.start()
+	s.dialDue()
+
+	// Assert
+	if s.link != linkUp {
+		t.Fatalf("link = %v after the store returned, want linkUp", s.link)
+	}
+}
+
+func TestLadderWaitsForTheArmedDeadline(t *testing.T) {
+	// Arrange — the first failed dial arms dialBackoffMin.
+	h := newStoreHarness(t)
+	root, _ := writeHistory(t, 5)
+	s := h.sidecarOver(root)
+	clock := onFakeClock(s)
+	s.dialDue()
+
+	// Act — a tick landing before that deadline.
+	clock.advance(dialBackoffMin / 2)
+	s.dialDue()
+
+	// Assert — backing off means backing off, not dialing on every tick.
+	if s.dialFailures != 1 {
+		t.Fatalf("dialFailures = %d, want 1; the ladder dialed before its deadline", s.dialFailures)
+	}
+}
+
+func TestLadderDoesNotDialAlongsideAnInFlightDial(t *testing.T) {
+	// Arrange — a demand-driven dial is inside establish and the ladder's
+	// deadline has passed underneath it.
+	h := newStoreHarness(t)
+	root, _ := writeHistory(t, 5)
+	s := h.sidecarOver(root)
+	onFakeClock(s)
+	s.dialing = true
+
+	// Act
+	s.dialDue()
+
+	// Assert — one dial at a time, so two cursor recoveries never race.
+	if s.dialFailures != 0 {
+		t.Fatalf("dialFailures = %d, want 0; the ladder double-dialed", s.dialFailures)
+	}
+}
+
+func TestDemandDialRunsImmediatelyWhileTheLadderIsBackedOff(t *testing.T) {
+	// Arrange — the ladder is waiting out a rung, but a read wants the link now.
+	h := newStoreHarness(t)
+	root, _ := writeHistory(t, 5)
+	s := h.sidecarOver(root)
+	clock := onFakeClock(s)
+	s.dialDue()
+	h.start()
+	clock.advance(dialBackoffMin / 2)
+
+	// Act
+	s.dial()
+
+	// Assert
+	if s.link != linkUp {
+		t.Fatalf("link = %v, want linkUp; a demand dial must not wait on the ladder", s.link)
+	}
+}
+
+func TestOutageDurationMeasuresUnreachabilityNotTimeUntilDemand(t *testing.T) {
+	// Arrange — a store away for exactly one backoff rung. Before the ladder
+	// existed this number reported the wait until some read wanted a file,
+	// which made a seconds-long store bounce read as a 15-minute outage.
+	var sink bytes.Buffer
+	h := newStoreHarness(t)
+	root, _ := writeHistory(t, 5)
+	s := newSidecar(h.sock, []string{root}, t.TempDir(),
+		logging.New(io.Discard, &sink).With(logging.Context{Component: "test"}))
+	t.Cleanup(func() { s.store.Close() })
+	clock := onFakeClock(s)
+	s.dialDue()
+	clock.advance(dialBackoffMin)
+	h.start()
+
+	// Act
+	s.dialDue()
+
+	// Assert
+	if s.link != linkUp {
+		t.Fatalf("link = %v, want linkUp", s.link)
+	}
+	want := fmt.Sprintf("store unreachable for %dms", dialBackoffMin.Milliseconds())
+	if !strings.Contains(sink.String(), want) {
+		t.Fatalf("recovery record does not quote the real outage %q:\n%s", want, sink.String())
+	}
+}
+
+func TestDegradedWindowOpensBeforeItCloses(t *testing.T) {
+	// Arrange / Act — the pair one session gets for one outage.
+	evs := degradedWindowEvents([]string{"s1"}, "store was unreachable")
+
+	// Assert — the consumer opens a runtime fault on the first and resolves it
+	// on the second; the closing half alone resolves a window that is not open.
+	if len(evs) != 2 {
+		t.Fatalf("built %d event(s) for one session, want the opening and closing pair", len(evs))
+	}
+	if evs[0].GetDegradedState().GetRecovered() {
+		t.Fatal("the first half is recovered; the window must open first")
+	}
+	if !evs[1].GetDegradedState().GetRecovered() {
+		t.Fatal("the second half is not recovered; the window never closes")
+	}
+}
+
+func TestDegradedWindowPairsEverySession(t *testing.T) {
+	// Arrange / Act
+	evs := degradedWindowEvents([]string{"a", "b"}, "store was unreachable")
+
+	// Assert — each session's channel carries its own complete window.
+	if len(evs) != 4 {
+		t.Fatalf("built %d event(s) for two sessions, want a pair each", len(evs))
+	}
+}
+
+func TestBootDialIsDueImmediately(t *testing.T) {
+	// Arrange — boot is not a case: it is a link that is not up yet, owed its
+	// first attempt at once, with the same ladder behind it.
+	h := newStoreHarness(t)
+	root, _ := writeHistory(t, 5)
+
+	// Act
+	s := h.sidecarOver(root)
+
+	// Assert
+	if s.nextDialAt.After(time.Now()) {
+		t.Fatalf("first dial is due at %v, want immediately", s.nextDialAt)
+	}
+}
+
+func TestJitterStaysWithinItsFraction(t *testing.T) {
+	// Arrange / Act / Assert — the spread never collapses a rung to nothing nor
+	// stretches it past itself.
+	lo := time.Duration(float64(dialBackoffMax) * (1 - dialJitterFraction))
+	hi := time.Duration(float64(dialBackoffMax) * (1 + dialJitterFraction))
+	for i := 0; i < 100; i++ {
+		if got := jitterBackoff(dialBackoffMax); got < lo || got > hi {
+			t.Fatalf("jitterBackoff(%v) = %v, want within [%v,%v]", dialBackoffMax, got, lo, hi)
+		}
+	}
+}
+
+func TestJitterLeavesAnImmediateRedialImmediate(t *testing.T) {
+	if got := jitterBackoff(0); got != 0 {
+		t.Fatalf("jitterBackoff(0) = %v, want 0", got)
 	}
 }
