@@ -2,6 +2,14 @@
 
 ;;; Code:
 
+;; open-progress.el loads AFTER this file (it needs frontend.el's main-area
+;; host resolution, which this file's layout helpers sit beside), so the
+;; entry point's placeholder calls are declared rather than resolved at
+;; compile time.
+(declare-function agent-repl--open-progress-active-p "agent-repl-open-progress" (ws))
+(declare-function agent-repl--open-progress-start "agent-repl-open-progress" (ws))
+(declare-function agent-repl--open-progress-finish "agent-repl-open-progress" (ws))
+
 (defcustom agent-repl-input-height-fraction 0.23
   "Fraction of the agent view window's height allocated to the input panel."
   :type 'number
@@ -909,12 +917,46 @@ push it to the back, not re-show or launch the agent."
      ((and (buffer-live-p webview) (get-buffer-window webview))
       (agent-repl--log ws "toggle: branch=close")
       (funcall close-fn))
+     ;; An open is ALREADY in flight for this workspace.  Re-show the
+     ;; placeholder it owns and dispatch nothing: establishment takes
+     ;; seconds to tens of seconds, so a second keypress in that window is
+     ;; the NORMAL impatient reaction, and answering it with a second
+     ;; establishment stacks a duplicate `openWorkspace' behind a
+     ;; placeholder the user is already looking at.
+     ((agent-repl--open-progress-active-p ws)
+      (agent-repl--log ws "toggle: branch=already-opening")
+      (agent-repl--open-progress-start ws))
      ((funcall (agent-repl-frontend-running-p-fn fe) ws)
       (agent-repl--log ws "toggle: branch=show")
-      (funcall (agent-repl-frontend-show-fn fe) ws))
+      (agent-repl--open-progress-start ws)
+      (agent-repl--settle-placeholder
+       ws (funcall (agent-repl-frontend-show-fn fe) ws)))
      (t
       (agent-repl--log ws "toggle: branch=open")
-      (funcall (agent-repl-frontend-open-fn fe) ws)))))
+      ;; Raised BEFORE the dispatch, inside the command that read the key:
+      ;; the first redisplay after `SPC o c' must already carry the
+      ;; workspace's name, not the frame the user pressed it on.
+      (agent-repl--open-progress-start ws)
+      (agent-repl--settle-placeholder
+       ws (funcall (agent-repl-frontend-open-fn fe) ws))))))
+
+(defun agent-repl--settle-placeholder (ws outcome)
+  "Tear WS's placeholder down unless OUTCOME says the open is still in flight.
+
+A frontend's open/show capability returns `:pending' precisely when it
+has taken responsibility for reporting its own outcome later — which is
+also when it owns the placeholder's resolution.  ANY OTHER return value
+means the capability already finished inside this call, so the
+placeholder has nothing left to describe and is removed here.
+
+Without this, a frontend that opens SYNCHRONOUSLY would leave a
+placeholder nobody resolves, and the escalation timer would eventually
+paint a warning over a workspace that opened perfectly."
+  (if (eq outcome :pending)
+      outcome
+    (agent-repl--log ws "toggle: settling placeholder outcome=%S" outcome)
+    (agent-repl--open-progress-finish ws)
+    outcome))
 
 (defun agent-repl ()
   "Hide Agent REPL panels and deprio the workspace.

@@ -51,7 +51,12 @@
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--align-buffer-to-ws-dir "agent-repl-status" (buf ws))
-(declare-function agent-repl--frontend-after-ensure-session "agent-repl-frontend-client" (ws on-success on-failure))
+(declare-function agent-repl--frontend-after-ensure-session "agent-repl-frontend-client" (ws on-success on-failure &optional purpose on-progress))
+;; open-progress.el loads after this file; the placeholder API is resolved at
+;; call time (see config.el for why that ordering is the right one).
+(declare-function agent-repl--open-progress-note "agent-repl-open-progress" (ws phase &optional detail))
+(declare-function agent-repl--open-progress-fail "agent-repl-open-progress" (ws detail))
+(declare-function agent-repl--open-progress-finish "agent-repl-open-progress" (ws))
 (declare-function agent-repl--frontend-restart-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-hibernate-workspace "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-workspace-url "agent-repl-frontend-client" (workspace))
@@ -982,14 +987,23 @@ anchor is inert when WS is already current."
   (agent-repl--frontend-after-ensure-session
    ws
    (lambda ()
+     (agent-repl--open-progress-note ws :acked)
      (agent-repl--call-in-background-workspace
       ws
       (lambda ()
         (let* ((url (agent-repl--frontend-webview-url ws))
                (buf (agent-repl--frontend-ensure-webview-buffer ws url)))
+          (agent-repl--open-progress-note ws :rendering)
           (agent-repl--frontend-display-webview ws buf)
+          ;; The real panel is on the frame; the placeholder has nothing
+          ;; left to say and goes away in the same call that replaced it.
+          (agent-repl--open-progress-finish ws)
           (agent-repl--log ws "gui-open: outcome=displayed buf=%s" buf)))))
-   (lambda (detail) (agent-repl--warn ws "gui-open: FAILED detail=%s" detail)))
+   (lambda (detail)
+     (agent-repl--open-progress-fail ws detail)
+     (agent-repl--warn ws "gui-open: FAILED detail=%s" detail))
+   nil
+   (lambda (phase) (agent-repl--open-progress-note ws phase)))
   :pending)
 
 (defun agent-repl--gui-boot (ws &optional _project-dir-hint _active-env-hint)
@@ -1379,11 +1393,20 @@ a hibernated workspace is brought up before its UI can look available."
   (agent-repl--frontend-after-ensure-session
    ws
    (lambda ()
+     (agent-repl--open-progress-note ws :acked)
      (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
        (if (buffer-live-p buf)
-           (agent-repl--frontend-display-webview ws buf)
+           (progn
+             (agent-repl--open-progress-note ws :rendering)
+             (agent-repl--frontend-display-webview ws buf)
+             (agent-repl--open-progress-finish ws))
+         ;; The webview died under a workspace we believed running.  The
+         ;; open path owns the placeholder from here — including its
+         ;; teardown — so nothing is resolved on this branch.
          (agent-repl--gui-open ws))))
-   (lambda (detail) (agent-repl--warn ws "gui-show: FAILED detail=%s" detail)))
+   (lambda (detail)
+     (agent-repl--open-progress-fail ws detail)
+     (agent-repl--warn ws "gui-show: FAILED detail=%s" detail)))
   :pending)
 
 (defun agent-repl--gui-hide (ws)

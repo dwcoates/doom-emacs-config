@@ -508,7 +508,7 @@ with no conversation may start one."
         (agent-repl--frontend-after-ready #'dispatch (lambda (detail) (finish nil detail)) ws))
       :pending)))
 
-(defun agent-repl--frontend-after-ensure-session (ws on-success on-failure &optional purpose)
+(defun agent-repl--frontend-after-ensure-session (ws on-success on-failure &optional purpose on-progress)
   "Asynchronously establish WS, then call exactly one continuation.
 ON-SUCCESS takes no arguments: establishment is a fact about the
 WORKSPACE, and which session the daemon has bound to it is the daemon\='s
@@ -518,6 +518,16 @@ PURPOSE is `presentation' or `send'.  A presentation reopens an existing
 workspace before delivering it; a send dispatches directly because
 `submitPrompt' performs the daemon-side establishment itself.
 
+ON-PROGRESS, when supplied, is called with ONE keyword each time a stage
+of the ladder is cleared — `:daemon-ready' once the daemon process is
+ensured, `:opening' once readiness has been asserted and the
+`openWorkspace' round-trip is being dispatched.  It exists because this
+ladder is the ONLY place that knows which of its stages an establishment
+is sitting on, and a caller showing the user a pending open otherwise has
+nothing to say for the seconds it takes.  It is advisory: a caller that
+supplies none is served exactly as before, and this function\='s outcome
+never depends on it.
+
 RETURNS IMMEDIATELY, ALWAYS.  Every stage — the daemon ensure, its
 deploy, readiness, the `openWorkspace' round-trip — completes from a
 timer or a process sentinel, so the caller's own command finishes at once
@@ -526,10 +536,21 @@ stage arrives at ON-FAILURE exactly as it always did."
   (unless (and (functionp on-success) (functionp on-failure))
     (error "agent-repl: ensure-session requires callable continuations"))
   (let* ((started (float-time))
+         ;; A broken progress reporter is a defect in a REPORT, not in the
+         ;; establishment it describes, so it is logged and the ladder walks
+         ;; on.  Letting it signal here would abort an open over a cosmetic
+         ;; callback — the establishment's own failures still reach
+         ;; ON-FAILURE untouched.
+         (report (lambda (phase)
+                   (when (functionp on-progress)
+                     (condition-case err (funcall on-progress phase)
+                       (error (agent-repl--log ws "ensure-session: progress reporter failed phase=%s err=%S"
+                                               phase err))))))
          (ensured
           (agent-repl--frontend-after-daemon-ensured
      (lambda ()
        (let ((gated (not (eq purpose 'send))))
+         (funcall report :daemon-ready)
          (agent-repl--frontend-hydrate-ws-environment ws)
          (agent-repl--frontend-after-ready
           (lambda ()
@@ -538,6 +559,7 @@ stage arrives at ON-FAILURE exactly as it always did."
                   (agent-repl--ws-put ws :reattach-failed nil)
                   (agent-repl--ws-put ws :reattach-failures nil)
                   (agent-repl--frontend-reattach-timer-start)
+                  (funcall report :opening)
                   (agent-repl--frontend-after-open-workspace ws on-success on-failure))
               (funcall on-success)))
           on-failure ws)))
