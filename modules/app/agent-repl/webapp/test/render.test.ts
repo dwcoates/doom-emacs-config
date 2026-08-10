@@ -43,7 +43,7 @@ import {
   wakeRemainingLabel,
   navTokensForEntry,
 } from "../src/render.js";
-import { BUBBLE_BREATH_PERIOD_MS } from "../src/breathing.js";
+import { BUBBLE_WAVE_PERIOD_MS } from "../src/breathing.js";
 import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
 import { DEFERRED_CLASS, HEIGHT_VAR, PLACEHOLDER_CLASS } from "../src/lazy-item.js";
 import { StubIntersectionObserver, withIntersectionObserver } from "./intersection-stub.js";
@@ -646,11 +646,11 @@ function htmlToElement(html: string): HTMLElement {
   return host;
 }
 
-/** The prompt bubble's breath offset, in ms, out of rendered markup. */
-function breathDelayMs(html: string): number {
+/** The prompt bubble's thinking-wave offset, in ms, out of rendered markup. */
+function waveDelayMs(html: string): number {
   const el = htmlToElement(html).querySelector<HTMLElement>(".bubble.user");
   const got = /^-(\d+)ms$/.exec(el?.style.animationDelay ?? "");
-  if (got === null) throw new Error(`prompt bubble carries no breath delay: ${html}`);
+  if (got === null) throw new Error(`prompt bubble carries no wave delay: ${html}`);
   return Number(got[1]);
 }
 
@@ -675,18 +675,18 @@ describe("renderItem", () => {
     expect(html).toMatch(/<div class="bubble user" style="[^"]*"><div class="bubble-body">/);
   });
 
-  it("stamps the prompt bubble with the breath's negative animation delay", () => {
-    // Arrange — a rebuilt node restarts its CSS animation at 0%, which snaps
-    // the bubble back to the deflated end of the swing mid-cycle.
+  it("stamps the prompt bubble with the wave's negative animation delay", () => {
+    // Arrange — a rebuilt node restarts its CSS animation at 0%, which jumps
+    // the wave back to the bubble's left edge mid-pass.
     const item = userTurnAt(14, 32, "do the thing");
     // Act
     const el = htmlToElement(renderItem(item)).querySelector<HTMLElement>(".bubble.user");
-    // Assert — the delay seeks the fresh node to where the cycle already was.
+    // Assert — the delay seeks the fresh node to where the pass already was.
     expect(el?.style.animationDelay).toMatch(/^-\d+ms$/);
   });
 
-  it("gives two prompt bubbles rendered at one instant the same breath phase", () => {
-    // Arrange — one page-global epoch, so the feed breathes in unison. The
+  it("gives two prompt bubbles rendered at one instant the same wave phase", () => {
+    // Arrange — one page-global epoch, so the feed waves in unison. The
     // clock is pinned so the assertion is about the shared epoch rather than
     // about how fast the two renders happened to run. It is pinned AHEAD of
     // the real clock: the epoch was stamped by an earlier render in this
@@ -694,24 +694,24 @@ describe("renderItem", () => {
     // and prove nothing.
     const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10_000);
     // Act
-    const first = breathDelayMs(renderItem(userTurnAt(14, 32, "one")));
-    const second = breathDelayMs(renderItem(userTurnAt(14, 33, "two")));
+    const first = waveDelayMs(renderItem(userTurnAt(14, 32, "one")));
+    const second = waveDelayMs(renderItem(userTurnAt(14, 33, "two")));
     // Assert
     expect(second).toBe(first);
     clock.mockRestore();
   });
 
-  it("advances the breath phase between two prompt bubbles rendered apart", () => {
-    // Arrange — the epoch never moves, so a rebuild is later in the cycle
+  it("advances the wave phase between two prompt bubbles rendered apart", () => {
+    // Arrange — the epoch never moves, so a rebuild is later in the pass
     // rather than back at its start.
     const at = Date.now() + 10_000;
     const clock = vi.spyOn(Date, "now").mockReturnValue(at);
-    const before = breathDelayMs(renderItem(userTurnAt(14, 32, "one")));
+    const before = waveDelayMs(renderItem(userTurnAt(14, 32, "one")));
     // Act — the same prompt rebuilt 300ms later.
     clock.mockReturnValue(at + 300);
-    const after = breathDelayMs(renderItem(userTurnAt(14, 32, "one")));
-    // Assert — modulo the period, since a rebuild may straddle a cycle end.
-    const P = BUBBLE_BREATH_PERIOD_MS;
+    const after = waveDelayMs(renderItem(userTurnAt(14, 32, "one")));
+    // Assert — modulo the period, since a rebuild may straddle a pass end.
+    const P = BUBBLE_WAVE_PERIOD_MS;
     expect((after - before + P) % P).toBe(300);
     clock.mockRestore();
   });
@@ -727,7 +727,7 @@ describe("renderItem", () => {
   });
 
   it("holds an unacknowledged prompt bubble still", () => {
-    // Arrange — the breath means the daemon has the prompt, so a bubble it has
+    // Arrange — the wave means the daemon has the prompt, so a bubble it has
     // not answered yet must not carry one.
     const item = { ...userTurnAt(14, 32, "do the thing"), unacked: true } as ConversationItem;
     // Act
@@ -736,7 +736,7 @@ describe("renderItem", () => {
     expect(el?.getAttribute("style")).toBeNull();
   });
 
-  it("starts the breath on the bubble the daemon's receipt replaced it with", () => {
+  it("starts the wave on the bubble the daemon's receipt replaced it with", () => {
     // Arrange — the receipt carries no unacked marking (store.mergeItem
     // whole-item replaces the local bubble with it).
     const item = userTurnAt(14, 32, "do the thing");
@@ -748,8 +748,8 @@ describe("renderItem", () => {
   });
 
   it("leaves the prompt body without a delay of its own to fall out of phase", () => {
-    // Arrange — the body inherits the bubble's transform; it carries no
-    // animation, so a delay on it would be meaningless drift.
+    // Arrange — the wave is painted on the bubble's own fill; the body carries
+    // no animation, so a delay on it would be meaningless drift.
     const item = userTurnAt(14, 32, "do the thing");
     // Act
     const body = htmlToElement(renderItem(item)).querySelector<HTMLElement>(
