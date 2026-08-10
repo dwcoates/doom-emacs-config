@@ -377,6 +377,33 @@ describe("the skill kind", () => {
   });
 });
 
+describe("the three conversational kinds share ONE conversation body", () => {
+  const ems: UnwrappedEmission[] = [
+    { emission: "response", arm: "assistantMessage", payload: {} },
+    { emission: "thinking", arm: "thinking", payload: {} },
+  ];
+  const capped = { droppedBefore: 3, tailCap: 10 };
+
+  /** One bubble's rendered body, with the kind's own chrome stripped off. */
+  function bodyOf(kind: AsyncBubble["kind"]): string {
+    const registry = seeded(bubble({ id: "b1", kind, label: "l" }));
+    const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
+    return html.slice(html.indexOf("stream-dropped"));
+  }
+
+  it("draws a merge run's conversation exactly as a detached agent's", () => {
+    expect(bodyOf({ case: "merge", value: { emissions: ems, fold: capped } })).toBe(
+      bodyOf({ case: "agent", value: { emissions: ems, fold: capped } }),
+    );
+  });
+
+  it("draws a skill window's conversation exactly as a detached agent's", () => {
+    expect(
+      bodyOf({ case: "skill", value: { skillName: "demo", args: "", body: "", emissions: ems, fold: capped } }),
+    ).toBe(bodyOf({ case: "agent", value: { emissions: ems, fold: capped } }));
+  });
+});
+
 describe("a child a bubble's own card already draws", () => {
   /** One tool-call emission, carrying the daemon's classification verdict. */
   function call(id: string, spawnedBubbleId: string): UnwrappedEmission {
