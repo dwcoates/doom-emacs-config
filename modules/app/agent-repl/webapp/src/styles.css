@@ -645,10 +645,11 @@ body::after {
   margin-top: 0.5rem;
   padding-top: 0.4rem;
   border-top: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
-  /* The section's height budget, in rows. Emacs sends EVERY merge that
-     landed inside the activity window, so the merge count is unbounded and
-     the section is bounded here instead: ten rows of height, and the rest
-     reached by scrolling in place. */
+  /* The section's height ceiling, in rows, matching the roster's own ten-row
+     cap (`agent-repl-sidebar-merged-max-rows', sidebar.el). Emacs sends at
+     most ten merges, so the section draws one row per merge and is exactly as
+     tall as the merges it holds; this ceiling is what that height can never
+     exceed if the two ever disagree. */
   --merged-visible-rows: 10;
   /* .row's own vertical padding, restated here so the cap is built out of the
      same numbers the row is drawn from. */
@@ -673,10 +674,11 @@ body::after {
 #ws-sidebar .repo.merged-section .row {
   line-height: var(--merged-row-line-h);
 }
-/* Scroll, not truncate: the eleventh merge is still history the user can go
-   looking for, so it stays in the DOM below the fold of its own scroller
-   rather than being dropped from the roster. `max-height` keeps a short
-   section shrunk to its rows instead of holding an empty ten-row box open. */
+/* `max-height`, never `height`: the section is sized by its rows, so three
+   merges draw three rows and ten is the most it can ever reach. Emacs caps
+   the roster at the same ten, so this scroller is not expected to engage —
+   and it scrolls rather than clips if it ever does, because a row the rail
+   drew is a row the user must be able to reach. */
 #ws-sidebar .repo.merged-section > .rows {
   max-height: calc(var(--merged-row-h) * var(--merged-visible-rows));
   overflow-y: auto;

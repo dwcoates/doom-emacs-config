@@ -3747,11 +3747,11 @@ describe("the merge dequeue offer's frame", () => {
 /**
  * Recently Merged's height budget.
  *
- * Emacs sends every merge that landed inside the activity window, so the
- * section's row count is unbounded and the stylesheet is the only thing
- * keeping it from pushing the live workspaces off the rail. Each assertion
- * below is one half of that bargain: the rows scroll rather than truncate,
- * and ten of them is exactly the height they scroll at.
+ * The section is sized by its rows — N merges draw N rows — and Emacs caps the
+ * roster it draws from at ten (`agent-repl-sidebar-merged-max-rows`). These
+ * assertions hold the stylesheet to the other half of that: the rows are drawn
+ * at their content height, and ten of them is the ceiling the section can
+ * never exceed.
  */
 describe("the Recently Merged section's height cap", () => {
   const mergedSection = blockAfter(css, "#ws-sidebar .repo.merged-section {");
