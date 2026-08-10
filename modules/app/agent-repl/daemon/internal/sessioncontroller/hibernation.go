@@ -430,6 +430,56 @@ func (m *Manager) hibernatedLocked(sessionID string) (registry.HibernationDetail
 	return detail, true
 }
 
+// closeHibernationGateOnWire retires the revival gate the instant the session
+// it stands over becomes driveable. It is called from noteWired, the ONE edge
+// every bring-up reaches, so "a wired shim implies an open gate" is structural
+// rather than a publish each waking path has to remember.
+//
+// IT EXISTS BECAUSE ONE PATH DID FORGET. A hard restart (buildrefresh.go,
+// RestartSession) stops the shim and calls ensure() straight back: the durable
+// record is untouched by either step, so a session hibernated for
+// `cache_expired` or `idle_cutoff` came back with a live wired shim and a
+// standing gate, and every prompt the user then typed was nacked with the cause
+// of a sleep that was already over. Adding a clear to that one path would have
+// left the next path to rediscover the same bug; the wire edge cannot be
+// reached without wiring, which is what makes it the right home.
+//
+// A GATED REVIVAL IS THE ONE EXEMPTION, and it is not an exception to the rule
+// so much as the rule's other half. A compact-first or clear revival brings the
+// session up DELIBERATELY while the record still says hibernated, because that
+// record is what keeps refusing the user's prompts until the cut lands
+// (revive.go). Retiring the gate here would open it before the conversation was
+// cut, which is precisely the outcome the mode was chosen to avoid. The claim
+// under m.reviving names exactly that window, and a DIRECT revival — which
+// clears the record before it brings anything up — reaches this with nothing
+// left to retire.
+//
+// A FAILED CLEAR IS LOGGED AND NOT PROPAGATED. There is no caller to return it
+// to (the ShimReady hook's own contract is readiness, not durability), and the
+// gate that could not be retired is the same safe direction every other
+// clearHibernation failure takes: the user meets an honest refusal and can
+// revive explicitly.
+func (m *Manager) closeHibernationGateOnWire(workspace, sessionID string) {
+	m.mu.Lock()
+	detail, asleep := m.hibernatedLocked(sessionID)
+	reviving := m.reviving[workspace]
+	m.mu.Unlock()
+	if !asleep {
+		return
+	}
+	if reviving {
+		m.logf("session-controller: wired session %s (ws %q) KEEPS its revival gate cause=%s — a gated revival is in flight and the record is what refuses prompts until its context cut lands",
+			sessionID, workspace, detail.Cause)
+		return
+	}
+	m.logf("session-controller: wired session %s (ws %q) had a STANDING revival gate cause=%s since_ms=%d — a driveable shim and a record claiming a sleep cannot both be true, so the gate is retired by the rewire itself",
+		sessionID, workspace, detail.Cause, detail.SinceMs)
+	if err := m.clearHibernation(workspace, sessionID); err != nil {
+		m.errorf("session-controller: wired session %s (ws %q) could not retire its revival gate cause=%s error=%v — the shim is live but prompts will still be refused as hibernated until the user revives explicitly",
+			sessionID, workspace, detail.Cause, err)
+	}
+}
+
 // clearHibernation retires a session's sleep. It is the revival path's ONE
 // write, and it is deliberately the same call the transition uses with an empty
 // detail, so "asleep" and "awake" are two values of one durable fact rather
