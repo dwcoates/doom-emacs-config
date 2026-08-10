@@ -116,6 +116,8 @@ import { PromptQueue, drainableRenderState, type QueuedPrompt } from "./prompt-q
 import { StateAdapter, userTurnReceipt } from "./state-adapter.js";
 import { CommandDispatcher, ModelSelectionRejectedError, surfaceRefusal } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
+import { ConversationPager } from "./conversation-pager.js";
+import { loadMoreView, paintLoadMore } from "./load-more.js";
 import { BackgroundRecovery, windowRecoveryTimerHost } from "./background-recovery.js";
 import {
   RestartWindow,
@@ -308,6 +310,16 @@ async function boot(): Promise<void> {
     // falls back to filing the refusal, so a card the feed never received
     // cannot leave the refusal invisible. `surfaceRefusal` owns that rule, so
     // every branch here ends in a card the user can see.
+    // A conversation page that was ACCEPTED and then failed to be read. Its
+    // acceptance ack already resolved the dispatcher's promise, so this is the
+    // only seam that can tell the pager no page is coming — without it, the
+    // load-more it belongs to would stay in flight forever and every later
+    // click would be dropped as a duplicate.
+    onLateRefusal: (requestId, error) => {
+      pager.observeRefusal(requestId, error);
+      store.forgetPageRequest(requestId);
+      frames.schedule();
+    },
     onFailure: (refusal) =>
       surfaceRefusal(refusal, {
         reveal: (cardUuid) => feed.revealError(cardUuid),
@@ -363,8 +375,63 @@ async function boot(): Promise<void> {
   // fresh mount asks for them: one `resync(workspace, lastSeq)` per connection,
   // fired once the snapshot has landed and a workspace is known. See
   // connect-resync.ts for why it must be exactly once per socket.
+  // THE COLD OPEN'S HISTORY, and the load-more that walks backwards from it.
+  //
+  // `request` is read at the DISPATCH edge for the reason `currentResyncSnapshot`
+  // is: a request built from state read later would rebind itself to whatever
+  // generation is live when the transport sends, rather than the one this page
+  // was reading when it decided to ask.
+  const pager = new ConversationPager({
+    request: (cursor) => {
+      const workspace = store.state.cwd;
+      if (workspace === "") return null;
+      return { workspace, cursor, limit: 0, fence: store.state.fences.get(workspace) ?? "" };
+    },
+    send: (request) => {
+      const sent = dispatcher.conversationPage(request.workspace, {
+        cursor: request.cursor,
+        limit: request.limit,
+        fence: request.fence,
+      });
+      // The store is told what was asked for BEFORE the answer can arrive: the
+      // page does not carry its own anchor, and the anchor is what decides
+      // where its items rank. Recording it at the send is the only moment the
+      // anchor is known for certain.
+      store.notePageRequested({
+        requestId: sent.requestId,
+        anchor: request.cursor === "" ? "tail" : "before",
+        fence: request.fence,
+      });
+      return sent;
+    },
+    log: (level, message) => clog(level, message),
+    // Same visible ceiling the resync has, and for the same reason: a
+    // load-more that silently stops working is worse than one that says so.
+    onGiveUp: (failures, cause) => {
+      if (store.addFailure(daemonUnreachableFailure(0, `conversation page unanswered ${failures}x: ${cause}`))) {
+        frames.schedule();
+      }
+    },
+  });
+
   const connectResync = new ConnectResync({
-    resync: (snapshot) => dispatcher.resync(snapshot.workspace, snapshot),
+    // THE COLD OPEN IS A PAGE, NOT A FULL REPLAY.
+    //
+    // A `from_seq` of 0 is what a page with nothing applied holds, and it is
+    // the exact request that used to replay every store event the session ever
+    // produced (259k events / 186MB in the worst workspace observed). The
+    // question a fresh mount actually has is "what does the bottom of this
+    // conversation look like", so that is what it now asks.
+    //
+    // EVERY OTHER RESYNC IS UNTOUCHED. A mark above zero means this page holds
+    // history and wants the delta above it, which is what the resync path is
+    // for and what it keeps doing. The tail page is also what SUPPLIES the
+    // first non-zero mark: it carries `live_join_seq`, the store adopts it as
+    // `lastSeq`, and the next resync asks from there.
+    resync: (snapshot) =>
+      snapshot.fromSeq === 0
+        ? pager.openTail()
+        : dispatcher.resync(snapshot.workspace, snapshot),
     log: (level, message) => clog(level, message),
     // The live identity, RE-READ from the store at the retry edge. A page that
     // outlived a daemon bounce can hold a superseded session/generation, whose
@@ -1208,9 +1275,39 @@ async function boot(): Promise<void> {
   // frontier (see `SmoothReveal.reveal`).
   const smooth = new SmoothReveal({ now: () => performance.now() });
 
+  // The load-more control's host, painted on every frame from the pager's own
+  // view plus the store's paging record. It is derived rather than commanded:
+  // nothing sets its state directly, so it cannot fall out of step with what
+  // the pager will actually do when it is clicked.
+  const loadMoreHost = document.getElementById("load-more");
+  if (loadMoreHost === null) throw new Error("main: the load-more host element is missing");
+  const paintLoadMoreControl = (): void => {
+    const pagerView = pager.view;
+    paintLoadMore(
+      loadMoreHost,
+      loadMoreView({
+        cursor: store.state.paging.cursor,
+        reachedStart: store.state.paging.reachedStart,
+        loading: pagerView.loading,
+        givenUp: pagerView.givenUp,
+      }),
+      () => {
+        const cursor = store.state.paging.cursor;
+        if (cursor === null) return;
+        // A click at the ceiling is the user saying "try again", so the
+        // failure history is discharged before the request is built. Without
+        // it the retry wording would offer an action the backoff then refuses.
+        if (pager.view.givenUp) pager.retryNow();
+        void pager.loadMore(cursor).catch(consumeOwnedDispatchFailure);
+        frames.schedule();
+      },
+    );
+  };
+
   const rerender = (): void => {
     const shown = smooth.reveal(store.state);
     feed.render(shown.state);
+    paintLoadMoreControl();
     nav.reconcile(lastUserTurnId(store.state.items));
     renderChrome();
     if (shown.pending) frames.schedule();
@@ -1574,6 +1671,21 @@ async function boot(): Promise<void> {
         for (const effect of effects) {
           if (effect.kind === "workspace-roster") sidebar.adoptRosterFrame(effect.value);
         }
+        // THE PAGE'S OWN SETTLE, read from the store AFTER ingest because the
+        // store is what ruled on the page: it alone knows whether the fence
+        // admitted it. A discarded page is re-requested ONCE against the fresh
+        // fence; an adopted one settles its request and frees the next
+        // load-more.
+        for (const effect of effects) {
+          if (effect.kind !== "conversation-page") continue;
+          dispatcher.forgetPageRequest(effect.requestId);
+          if (store.state.paging.staleFenceRequestId === effect.requestId) {
+            store.state.paging.staleFenceRequestId = null;
+            pager.observeStaleFence(effect.requestId);
+            continue;
+          }
+          pager.observePage(effect.requestId);
+        }
         if (effects.some((effect) => effect.kind === "workspace-state")) {
           if (store.state.renderState === null) {
             throw new Error("workspace-state ingestion completed without a render state");
@@ -1654,6 +1766,10 @@ async function boot(): Promise<void> {
           clientLogThrottle.flush();
           wslog.flush();
           connectResync.onConnect();
+          // A page request marked in flight belonged to the connection that is
+          // gone and can never settle; holding it would block this
+          // connection's cold open forever.
+          pager.reset();
           if (store.state.renderState === null) {
             throw new Error("websocket reported current before WorkspaceState adoption");
           }
