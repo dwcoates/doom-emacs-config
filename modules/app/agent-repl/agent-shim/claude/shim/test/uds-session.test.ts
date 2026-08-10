@@ -16,6 +16,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import net from "node:net";
+import fs from "node:fs";
 import { once } from "node:events";
 import { create } from "@bufbuild/protobuf";
 import { anyPack, anyUnpack } from "@bufbuild/protobuf/wkt";
@@ -194,7 +195,21 @@ interface FakeStore {
 }
 
 function fakeStore(): Promise<FakeStore> {
-  const socketPath = tmpSocketPath();
+  return fakeStoreAt(tmpSocketPath());
+}
+
+/**
+ * A fake store bound to an EXACT path, so a test can kill one and stand a
+ * replacement up on the same socket — the store bounce a deploy performs under
+ * a live shim. Any stale socket file is removed first: a closed server leaves
+ * one behind and the rebind would fail with EADDRINUSE.
+ */
+function fakeStoreAt(socketPath: string): Promise<FakeStore> {
+  try {
+    fs.unlinkSync(socketPath);
+  } catch {
+    // No stale file: the normal case for a fresh path.
+  }
   const accepted: FramedPeer[] = [];
   return new Promise((resolve, reject) => {
     const server = net.createServer((socket) => {
@@ -2621,6 +2636,58 @@ describe("UdsSession lifetime: SDK stream termination", () => {
     store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 2n }));
     await shuttingDown;
     // Assert
+    await expect(done).resolves.toBeUndefined();
+    expect(query.abortCalls).toBe(1);
+  });
+
+  it("defers the SIGTERM roll's store teardown until a write held across a store bounce flushes", async () => {
+    // Arrange: the seamless-bounce composition — the STORE is bouncing (the
+    // shim is holding its durable writes for the relink) at the moment the
+    // daemon rolls this stale shim at its turn boundary. A teardown that closed
+    // the store client here would fail every held batch, so the roll must wait
+    // the hold out.
+    const store = await fakeStore();
+    cleanups.push(() => store.close());
+    const socketPath = store.socketPath;
+    let query!: FakeQuery;
+    const session = new UdsSession({
+      sessionId: "sess-store-bouncing",
+      shimVersion: "9.9",
+      protocolVersion: "1",
+      udsSocketPath: tmpSocketPath(),
+      storeSocketPath: socketPath,
+      sessionSource: SessionSource.FRESH,
+      createQuery: (prompt, canUseTool): UdsQuery => {
+        const live = new FakeQuery(prompt, canUseTool);
+        query = live;
+        return { query: live, subscriptionUsage: () => live.subscriptionUsage(), abort: () => live.abort() };
+      },
+      heartbeatIntervalMs: 0,
+    });
+    const done = session.start();
+    await acknowledgeInitialQueryLifecycle(store);
+    store.close();
+    await until(() => !session.storeLinkConnected(), "store bounce observed by the shim");
+
+    // Act: the roll's SIGTERM lands while nothing is listening on the store.
+    const shuttingDown = session.shutdown("SIGTERM");
+    let settled = false;
+    void shuttingDown.then(() => { settled = true; });
+    await tick();
+    expect(settled).toBe(false);
+
+    // The store comes back (launchd kickstart) and the held batch flushes.
+    const restarted = await fakeStoreAt(socketPath);
+    cleanups.push(() => restarted.close());
+    await until(() => restarted.count() >= 1);
+    const terminated = await restarted.peer().next(StoreWriteSchema);
+    restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 2n }));
+    await shuttingDown;
+
+    // Assert: the write the roll would have destroyed reached the replacement
+    // store, and only then did the shim finish going down.
+    expect(terminated.batch!.events).toHaveLength(1);
+    expect(terminated.batch!.events[0]!.payload.case).toBe("queryLifecycle");
     await expect(done).resolves.toBeUndefined();
     expect(query.abortCalls).toBe(1);
   });
