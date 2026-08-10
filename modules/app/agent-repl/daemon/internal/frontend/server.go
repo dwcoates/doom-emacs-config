@@ -147,13 +147,38 @@ type Server struct {
 	mu sync.Mutex
 	// publicationMu serializes the host materialization release against every
 	// session-scoped live enqueue. Readers hold it from durable gate verdict
-	// through enqueue; release owns the writer side while opening the decision
-	// and enqueuing its authoritative snapshot.
+	// through enqueue; release owns the writer side only to FLIP the hold below
+	// and to flush what the hold parked.
+	//
+	// NOTHING OUTSIDE THIS PACKAGE IS EVER CALLED UNDER IT. Release used to hold
+	// the writer side across its injected open and snapshot functions, and the
+	// snapshot provider reaches into the SSM and the workspace-view publisher —
+	// which push back through Broadcast, which wants the reader side. That is a
+	// lock cycle, and it froze every session controller and the merge queue
+	// drain twice in production. See ReleaseSessionPublication.
 	publicationMu sync.RWMutex
-	clients       map[*client]struct{}
-	listener      net.Listener
-	closed        bool
-	nextClientID  uint64
+	// publicationHeld is engaged for the duration of a materialization release.
+	// Guarded by publicationMu: engaging and clearing it take the writer side,
+	// so a reader either delivers entirely before the release began or observes
+	// the hold. A session-scoped frame that observes it is PARKED rather than
+	// dropped — parking is what blocking on the writer used to buy, minus the
+	// wait.
+	publicationHeld bool
+	// heldMu guards heldFrames alone. It is separate from publicationMu because
+	// a parker holds the READER side (many at once) and still has to append.
+	heldMu sync.Mutex
+	// heldFrames is the release window's outbox, in arrival order. Flushed
+	// under the writer side, so every parked frame is re-offered ahead of any
+	// frame that arrives after the window closed.
+	heldFrames []*frontendv1.FrontendFrame
+	// releaseMu admits one materialization release at a time. Held across the
+	// whole release INCLUDING the injected open/snapshot calls, which is safe
+	// precisely because nothing but ReleaseSessionPublication ever takes it.
+	releaseMu    sync.Mutex
+	clients      map[*client]struct{}
+	listener     net.Listener
+	closed       bool
+	nextClientID uint64
 	// latestWorkspaceAt is the newest WorkspaceState revision that crossed the
 	// delivery lock. Snapshot paths use it to detect a concurrent publication.
 	latestWorkspaceAt map[string]int64
@@ -436,8 +461,24 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) int {
 	_, _, scoped := frameSessionIdentity(frame)
 	if scoped {
 		s.publicationMu.RLock()
+		if s.publicationHeld {
+			s.parkPublication(frame)
+			s.publicationMu.RUnlock()
+			// A PARKED FRAME HAS BEEN DELIVERED NOWHERE YET, so it reports
+			// zero. Only an UNSCOPED frame's count is load-bearing — the
+			// host-only helpers below read it — and an unscoped frame never
+			// parks, so no caller can mistake a park for a lost frame.
+			return 0
+		}
 		defer s.publicationMu.RUnlock()
 	}
+	return s.broadcastGated(frame)
+}
+
+// broadcastGated runs the durable gate verdict and the fan-out. The caller owns
+// the publication serialization: Broadcast holds the reader side, the release
+// flush holds the writer side.
+func (s *Server) broadcastGated(frame *frontendv1.FrontendFrame) int {
 	if !s.requireSessionPublication(frame) {
 		return 0
 	}
@@ -506,7 +547,18 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) int {
 // exactly the order the resolver produced them.
 func (s *Server) PushWorkspaceState(w *frontendv1.WorkspaceState) {
 	s.publicationMu.RLock()
+	if s.publicationHeld {
+		s.parkPublication(WorkspaceStateFrame(w))
+		s.publicationMu.RUnlock()
+		return
+	}
 	defer s.publicationMu.RUnlock()
+	s.pushWorkspaceStateGated(w)
+}
+
+// pushWorkspaceStateGated is PushWorkspaceState's body once publication
+// serialization is owned by the caller — see broadcastGated.
+func (s *Server) pushWorkspaceStateGated(w *frontendv1.WorkspaceState) {
 	if !s.requireSessionPublication(WorkspaceStateFrame(w)) {
 		return
 	}
@@ -749,17 +801,89 @@ func (s *Server) PushAuthoritativeSnapshot(snapshot *frontendv1.StateSnapshot) {
 // ReleaseSessionPublication makes one creation session publishable and queues
 // its full authoritative snapshot before any concurrent session frame can
 // pass the materialization gate.
+//
+// THE INJECTED FUNCTIONS RUN WITH NO SERVER LOCK HELD, and that is the whole
+// shape of this method. open writes durable creation state; snapshot reaches
+// through the SSM, the session registry and the workspace-view publisher, each
+// of which takes its own mutex and pushes back into this server while holding
+// it. Calling either under publicationMu therefore closes a cycle — this
+// server's writer waiting on the SSM's mutex, the SSM's publisher waiting on
+// this server's reader — and that cycle wedged every session controller and the
+// merge queue drain twice in production.
+//
+// The ordering the method exists for is kept by a HOLD instead of by a lock
+// hold. Engaging the hold parks every session-scoped frame; open and snapshot
+// then run unlocked; the authoritative snapshot goes out; and only then are the
+// parked frames re-offered — each re-running the durable gate, exactly as a
+// frame that used to block on the writer re-ran it on waking. So no session
+// frame overtakes the snapshot, and none is lost to the window either.
+//
+// A FAILED open STILL FLUSHES. The parked frames were held on this release's
+// account, and abandoning them because the release failed would strand live
+// state behind a gate that is still closed and will never re-offer them.
 func (s *Server) ReleaseSessionPublication(open func() error, snapshot func() *frontendv1.StateSnapshot) error {
 	if open == nil || snapshot == nil {
 		return fmt.Errorf("frontend: materialization release requires open and snapshot functions")
 	}
-	s.publicationMu.Lock()
-	defer s.publicationMu.Unlock()
+	// One release at a time: two concurrent windows would interleave their
+	// parks and flushes, and the second flush would re-offer the first's frames
+	// ahead of the second's snapshot.
+	s.releaseMu.Lock()
+	defer s.releaseMu.Unlock()
+
+	s.holdPublications()
+	defer s.flushHeldPublications()
+
 	if err := open(); err != nil {
 		return fmt.Errorf("frontend: materialization release open: %w", err)
 	}
 	s.PushAuthoritativeSnapshot(snapshot())
 	return nil
+}
+
+// holdPublications engages the release window. The writer side is what makes
+// the flip a barrier: every reader already inside a delivery finishes first,
+// and every reader after it observes the hold.
+func (s *Server) holdPublications() {
+	s.publicationMu.Lock()
+	defer s.publicationMu.Unlock()
+	s.publicationHeld = true
+}
+
+// parkPublication appends one frame to the release window's outbox. The caller
+// holds the READER side of publicationMu and has observed the hold, so the
+// flusher — which needs the writer side — cannot be draining concurrently.
+func (s *Server) parkPublication(frame *frontendv1.FrontendFrame) {
+	s.heldMu.Lock()
+	s.heldFrames = append(s.heldFrames, frame)
+	s.heldMu.Unlock()
+}
+
+// flushHeldPublications closes the release window and re-offers every parked
+// frame in arrival order, under the writer side — which is what puts all of
+// them ahead of any frame that arrives after the window.
+//
+// Each frame runs the durable gate again rather than being delivered on the
+// strength of having been parked: the gate is the authority on whether that
+// session may publish, and this method's job is to have not skipped it.
+func (s *Server) flushHeldPublications() {
+	s.publicationMu.Lock()
+	defer s.publicationMu.Unlock()
+	s.publicationHeld = false
+	s.heldMu.Lock()
+	held := s.heldFrames
+	s.heldFrames = nil
+	s.heldMu.Unlock()
+	if len(held) > 0 {
+		s.logf("frontend: materialization release flushing held frames count=%d", len(held))
+	}
+	for _, frame := range held {
+		if ws := frame.GetWorkspaceState(); ws != nil {
+			s.pushWorkspaceStateGated(ws)
+			continue
+		}
+		s.broadcastGated(frame)
+	}
 }
 
 // isHostOnlyFrame marks daemon-to-host work that must never cross into either
