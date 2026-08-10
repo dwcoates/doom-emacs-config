@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"agentrepl/logging"
@@ -594,10 +595,28 @@ type activeTarget struct {
 }
 
 type TargetManager struct {
-	mu       sync.Mutex
+	// mu guards ONLY the target map. It is an RWMutex because the hot path —
+	// resolving an already-open workspace runtime target for one record — is a
+	// read, and the previous exclusive lock made every workspace's logging
+	// serialize behind every other workspace's. One workspace's log flood
+	// stalled an unrelated workspace's open_workspace handler for seconds that
+	// way. Writing a record does not hold this lock at all: it holds the
+	// per-target durableSink mutex, which is what actually orders one file's
+	// bytes.
+	mu       sync.RWMutex
 	targets  map[string]activeTarget
 	capBytes int64
+	// lockAcquisitions counts every acquisition of mu made while resolving a
+	// target. A record must cost exactly one; the double acquisition it
+	// replaces (OpenWorkspaceRuntime then again in the logger constructor)
+	// doubled the contention on the very lock that was stalling workspaces.
+	lockAcquisitions atomic.Int64
 }
+
+// LockAcquisitionsForTest reports how many times target resolution has taken
+// the manager's map lock. TEST-ONLY: it exists so the single-acquisition-per-
+// record property is observable rather than merely believed.
+func (m *TargetManager) LockAcquisitionsForTest() int64 { return m.lockAcquisitions.Load() }
 
 // WorkspaceRuntimeCapBytes bounds each daemon-owned workspace runtime target.
 // Targets are cleared in place, preserving the canonical symlink and inode.
@@ -704,50 +723,60 @@ func (m *TargetManager) OpenWorkspace(workspace Workspace) (*os.File, error) {
 // OpenWorkspaceRuntime creates a target and atomically installs <runtime>.log.
 // Runtime-specific keys keep daemon and shim writers distinct for one workspace.
 func (m *TargetManager) OpenWorkspaceRuntime(workspace Workspace, runtime Runtime) (*os.File, error) {
-	if m == nil {
-		return nil, errors.New("dlog: target manager is required")
-	}
-	if err := workspace.validate(); err != nil {
+	active, err := m.resolveWorkspaceRuntime(workspace, runtime)
+	if err != nil {
 		return nil, err
 	}
-	if runtime != RuntimeDaemon && runtime != RuntimeShim && runtime != RuntimeWebapp && runtime != RuntimeSidecar {
-		return nil, fmt.Errorf("dlog: unsupported workspace target runtime: %q", runtime)
+	return active.file, nil
+}
+
+// resolveWorkspaceRuntime returns the manager-owned target for one workspace
+// runtime, opening it if it is not open yet. It is the ONE resolution every
+// caller goes through, so a record costs a single acquisition of m.mu: a read
+// lock when the target already exists, a write lock only on the open.
+func (m *TargetManager) resolveWorkspaceRuntime(workspace Workspace, runtime Runtime) (activeTarget, error) {
+	if m == nil {
+		return activeTarget{}, errors.New("dlog: target manager is required")
 	}
+	if err := workspace.validate(); err != nil {
+		return activeTarget{}, err
+	}
+	if runtime != RuntimeDaemon && runtime != RuntimeShim && runtime != RuntimeWebapp && runtime != RuntimeSidecar {
+		return activeTarget{}, fmt.Errorf("dlog: unsupported workspace target runtime: %q", runtime)
+	}
+	key := targetKey(workspace, runtime)
+
+	m.lockAcquisitions.Add(1)
+	m.mu.RLock()
+	active, ok := m.targets[key]
+	m.mu.RUnlock()
+	if ok {
+		return m.validateActive(active, workspace, runtime)
+	}
+
+	m.lockAcquisitions.Add(1)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	key := targetKey(workspace, runtime)
 	if active, ok := m.targets[key]; ok {
-		if active.workspace.ID != workspace.ID || active.runtime != runtime {
-			return nil, fmt.Errorf("dlog: active target workspace ID mismatch: active=%q requested=%q", active.workspace.ID, workspace.ID)
-		}
-		// A retained target that cannot be stat-ed is a target somebody CLOSED
-		// out from under the manager — the double-use the borrow type exists to
-		// prevent. It is refused with a diagnostic that names it rather than
-		// reissued, because handing it back would put a dead descriptor into
-		// the next child's fd 3.
-		if _, err := active.file.Stat(); err != nil {
-			return nil, fmt.Errorf("dlog: the active %s target for workspace %q is CLOSED (%s): %w",
-				runtime, workspace.Directory, active.file.Name(), err)
-		}
-		return active.file, nil
+		return m.validateActive(active, workspace, runtime)
 	}
 	directory, err := daemonLogDirectory(workspace.Directory)
 	if err != nil {
-		return nil, err
+		return activeTarget{}, err
 	}
 	reservation, err := os.CreateTemp("", "agent-repl-"+string(runtime)+"-*.log")
 	if err != nil {
-		return nil, fmt.Errorf("dlog: create external target: %w", err)
+		return activeTarget{}, fmt.Errorf("dlog: create external target: %w", err)
 	}
 	targetPath := reservation.Name()
 	if err := reservation.Close(); err != nil {
 		os.Remove(targetPath)
-		return nil, fmt.Errorf("dlog: close external target reservation: %w", err)
+		return activeTarget{}, fmt.Errorf("dlog: close external target reservation: %w", err)
 	}
 	target, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		os.Remove(targetPath)
-		return nil, fmt.Errorf("dlog: reopen external target O_APPEND: %w", err)
+		return activeTarget{}, fmt.Errorf("dlog: reopen external target O_APPEND: %w", err)
 	}
 	name := string(runtime) + ".log"
 	link := filepath.Join(directory, name)
@@ -755,39 +784,57 @@ func (m *TargetManager) OpenWorkspaceRuntime(workspace Workspace, runtime Runtim
 	if err != nil {
 		target.Close()
 		os.Remove(target.Name())
-		return nil, fmt.Errorf("dlog: reserve replacement symlink name: %w", err)
+		return activeTarget{}, fmt.Errorf("dlog: reserve replacement symlink name: %w", err)
 	}
 	temporaryLink := stage.Name()
 	if err := stage.Close(); err != nil {
 		os.Remove(temporaryLink)
 		target.Close()
 		os.Remove(target.Name())
-		return nil, fmt.Errorf("dlog: close replacement symlink reservation: %w", err)
+		return activeTarget{}, fmt.Errorf("dlog: close replacement symlink reservation: %w", err)
 	}
 	if err := os.Remove(temporaryLink); err != nil {
 		target.Close()
 		os.Remove(target.Name())
-		return nil, fmt.Errorf("dlog: clear replacement symlink reservation: %w", err)
+		return activeTarget{}, fmt.Errorf("dlog: clear replacement symlink reservation: %w", err)
 	}
 	if err := os.Symlink(target.Name(), temporaryLink); err != nil {
 		target.Close()
 		os.Remove(target.Name())
-		return nil, fmt.Errorf("dlog: create replacement symlink: %w", err)
+		return activeTarget{}, fmt.Errorf("dlog: create replacement symlink: %w", err)
 	}
 	if err := os.Rename(temporaryLink, link); err != nil {
 		os.Remove(temporaryLink)
 		target.Close()
 		os.Remove(target.Name())
-		return nil, fmt.Errorf("dlog: atomically install daemon log symlink: %w", err)
+		return activeTarget{}, fmt.Errorf("dlog: atomically install daemon log symlink: %w", err)
 	}
 	writer := &workspaceTargetWriter{
 		file: target, link: link, capBytes: m.capBytes, workspace: workspace, runtime: runtime,
 	}
-	m.targets[key] = activeTarget{
+	opened := activeTarget{
 		workspace: workspace, runtime: runtime, file: target, writer: writer,
 		sink: &durableSink{writer: writer},
 	}
-	return target, nil
+	m.targets[key] = opened
+	return opened, nil
+}
+
+// validateActive is the retained-target check both resolution paths share.
+//
+// A retained target that cannot be stat-ed is a target somebody CLOSED out from
+// under the manager — the double-use the borrow type exists to prevent. It is
+// refused with a diagnostic that names it rather than reissued, because handing
+// it back would put a dead descriptor into the next child's fd 3.
+func (m *TargetManager) validateActive(active activeTarget, workspace Workspace, runtime Runtime) (activeTarget, error) {
+	if active.workspace.ID != workspace.ID || active.runtime != runtime {
+		return activeTarget{}, fmt.Errorf("dlog: active target workspace ID mismatch: active=%q requested=%q", active.workspace.ID, workspace.ID)
+	}
+	if _, err := active.file.Stat(); err != nil {
+		return activeTarget{}, fmt.Errorf("dlog: the active %s target for workspace %q is CLOSED (%s): %w",
+			runtime, workspace.Directory, active.file.Name(), err)
+	}
+	return active, nil
 }
 
 // OpenWorkspaceLogger returns a fresh logger handle backed by the one
@@ -803,13 +850,11 @@ func (m *TargetManager) OpenWorkspaceRuntimeLogger(workspace Workspace, runtime 
 	if terminal == nil {
 		return nil, errors.New("dlog: terminal writer is required")
 	}
-	if _, err := m.OpenWorkspaceRuntime(workspace, runtime); err != nil {
+	active, err := m.resolveWorkspaceRuntime(workspace, runtime)
+	if err != nil {
 		return nil, err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	active, ok := m.targets[targetKey(workspace, runtime)]
-	if !ok || active.sink == nil {
+	if active.sink == nil {
 		return nil, fmt.Errorf("dlog: %s target disappeared for workspace %q", runtime, workspace.Directory)
 	}
 	return newLogger(active.sink, terminal, verboseTerminal), nil
@@ -942,8 +987,8 @@ func (m *TargetManager) ActiveTargets() int {
 	if m == nil {
 		return 0
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return len(m.targets)
 }
 
