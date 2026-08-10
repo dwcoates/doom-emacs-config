@@ -37,12 +37,27 @@ import (
 //
 // It follows that the daemon must submit something, and that the something is
 // NOT a prompt the user wrote. It is never rendered: it is not a conversation
-// item, not a prompt echo, and not a visible turn origin. The invisibility is
-// enforced where the text is STORED rather than at each surface — a pending
-// resumption is a prompt_receipt row that the receipt query cannot return
-// (statedb/promptreceipt.go) — so a live push, a connect snapshot, a resync
-// replay and a store re-pull are all incapable of serving it, and no client
-// filter has to be trusted or kept in step.
+// item, not a prompt echo, and not a visible turn origin. Three separate things
+// enforce that, at the three places the text can re-enter from:
+//
+//   - the daemon's own receipt ledger cannot serve it, because a pending
+//     resumption is a prompt_receipt row the receipt query does not return
+//     (statedb/promptreceipt.go);
+//   - the VENDOR conversation's copy — a real transcript line, because the
+//     model has to be told something — is suppressed by the one curator every
+//     route from a store event to conversation content passes through, keyed on
+//     a marker the submitted text carries into the transcript itself
+//     (frontend/internalresume.go); and
+//   - a re-drive is issued AT MOST ONCE per interrupted turn, because the row
+//     is claimed before the submit, so a thrashing bring-up cannot put several
+//     copies of the instruction into the conversation for a filter to have to
+//     hide.
+//
+// The second of those is what the live incident of 2026-08-10 was missing. The
+// curator filtered on the EVENT's request id, and a file-plane user line has
+// none: the daemon correlates a line to a submit from its outstanding receipts,
+// and a re-drive mints no receipt, so the instruction arrived unattributed and
+// rendered — live, and again on every replay.
 //
 // The only thing the user sees is the status surface saying the session resumed
 // after a restart, and the work continuing.
@@ -150,37 +165,97 @@ func (m *Manager) driveOwedResumptions(workspace, sessionID string) {
 	}
 }
 
-// driveOneResumption submits one owed re-drive and discharges it on acceptance.
+// driveOneResumption claims one owed re-drive and submits it.
 //
-// THE DISCHARGE IS ON ACCEPTANCE, NOT ON ISSUE. A re-drive the shim refused is
-// still owed: discharging it when the submit was merely attempted would lose
-// exactly the work in the case where the successor daemon is itself unhealthy,
-// which is the case this whole path exists for.
+// THE CLAIM COMES FIRST, AND IT IS WHAT MAKES THE RE-DRIVE HAPPEN ONCE. The
+// store moves the row pending → delivering in a single conditional update, so
+// the caller that comes away with the claim is the only one that submits — a
+// second wire of the same session, or a second daemon, is told the turn is
+// already being delivered and does nothing.
+//
+// THE DISCHARGE IS NOT HERE, and this is the correction the incident forced. A
+// submit's return says only what the daemon's control request was told: a
+// timeout on a shim that ran the prompt anyway looks exactly like a refusal, so
+// re-driving on that evidence is choosing the duplicate and discharging on it is
+// choosing the loss. The row is discharged where the fact is knowable — when the
+// instruction turns up in the vendor conversation and the curator suppresses it
+// (frontend/internalresume.go, dischargeDeliveredResumptions).
+//
+// A SUBMIT THAT FAILED THEREFORE LEAVES A CLAIMED ROW, deliberately: the turn is
+// not re-driven again, and the row stands as the durable evidence that it was
+// owed. It is loud, because a turn the user asked for and never got back is
+// exactly what this whole path exists to prevent.
 func (m *Manager) driveOneResumption(workspace, sessionID string, r statedb.PendingResumption) {
+	claimed, err := m.cfg.PromptReceipts.ClaimResumptionForDelivery(r.RequestID, m.now())
+	if err != nil {
+		m.logf("session-controller: turn resumption CLAIM FAILED ws=%q session=%s request_id=%q turn_id=%q: %v — no re-drive is issued, because a submit whose claim did not durably land could be issued a second time by the next wire",
+			workspace, sessionID, r.RequestID, r.TurnID, err)
+		return
+	}
+	if !claimed {
+		m.logf("session-controller: turn resumption ALREADY CLAIMED ws=%q session=%s request_id=%q turn_id=%q — another wire is delivering this same interrupted turn, so this one submits nothing",
+			workspace, sessionID, r.RequestID, r.TurnID)
+		return
+	}
 	ctx, cancel := context.WithTimeout(m.rootCtx, resumptionSubmitTimeout)
 	defer cancel()
-	_, err := m.submitPromptAs(
-		ctx, workspace, r.RequestID, r.Text, "",
+	// THE MARKER IS PART OF WHAT IS SUBMITTED (frontend/internalresume.go). The
+	// vendor writes the submitted text into the transcript verbatim, so this is
+	// what puts the re-drive's identity on disk — the only thing that makes the
+	// instruction suppressible on a replay, where no request id survives.
+	_, err = m.submitPromptAs(
+		ctx, workspace, r.RequestID, frontend.MarkInternalResumeInstruction(r.RequestID, r.Text), "",
 		"turn-resumption", corev1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART,
 		submitterTurnResumption, leavesParkedPermissions,
 	)
 	if err != nil {
-		m.logf("session-controller: turn resumption SUBMIT FAILED ws=%q session=%s request_id=%q turn_id=%q: %v — the record STANDS, so the next wire tries again rather than the turn being lost",
+		m.logf("session-controller: turn resumption SUBMIT FAILED ws=%q session=%s request_id=%q turn_id=%q: %v — the record stands CLAIMED and is NOT re-driven again, because the shim may have run a submit this daemon was told failed; the interrupted turn is lost work unless the user asks for it again",
 			workspace, sessionID, r.RequestID, r.TurnID, err)
 		return
 	}
-	discharged, err := m.cfg.PromptReceipts.DischargeResumption(r.RequestID)
-	if err != nil {
-		// The submit LANDED and the row did not clear. Saying so matters more
-		// than usual: the next wire will re-drive the same turn, which is a
-		// duplicate rather than a loss, and a duplicate nobody was told about
-		// is indistinguishable from the model deciding to repeat itself.
-		m.logf("session-controller: turn resumption DISCHARGE FAILED ws=%q session=%s request_id=%q: %v — the re-drive was ACCEPTED but its record stands, so a later wire may re-drive the same turn",
-			workspace, sessionID, r.RequestID, err)
+	m.logf("session-controller: turn resumption RE-DRIVEN ws=%q session=%s request_id=%q turn_id=%q interrupted_at_ms=%d — the work the bounce interrupted continues, with no prompt shown to the user; the record clears when the instruction reaches the conversation",
+		workspace, sessionID, r.RequestID, r.TurnID, r.InterruptedAtMs)
+}
+
+// dischargeDeliveredResumptions retires the resumptions whose instruction has
+// now been seen in the vendor conversation.
+//
+// IT IS THE ONLY CONFIRMED DELIVERY THERE IS. The submit's own return describes
+// a control request, not a conversation; the transcript carrying the
+// instruction is the fact that the re-drive landed, and it is a fact a replay
+// re-establishes just as well as the live push does. The ids come from the
+// curator that suppressed the instruction, so the daemon reads the delivery off
+// the same decision that hides it rather than deriving it a second time.
+//
+// IT IS IDEMPOTENT. Discharging a resumption that is already gone reports false
+// with no error, which is the ordinary case on every replay of a conversation
+// whose re-drive was discharged long ago.
+func (c *consumer) dischargeDeliveredResumptions(requestIDs []string) {
+	if len(requestIDs) == 0 {
 		return
 	}
-	m.logf("session-controller: turn resumption RE-DRIVEN ws=%q session=%s request_id=%q turn_id=%q discharged=%v interrupted_at_ms=%d — the work the bounce interrupted continues, with no prompt shown to the user",
-		workspace, sessionID, r.RequestID, r.TurnID, discharged, r.InterruptedAtMs)
+	if c.receipts == nil {
+		c.logf("session-controller: turn resumption NOT DISCHARGED ws=%q session=%s request_ids=%v — no durable receipt store is wired to this session controller, so the delivered re-drive's record stands",
+			c.workspace, c.sessionID, requestIDs)
+		return
+	}
+	for _, requestID := range requestIDs {
+		discharged, err := c.receipts.DischargeResumption(requestID)
+		if err != nil {
+			// LOUD, AND THE STREAM CONTINUES. The instruction is already
+			// suppressed, so nothing the user sees is wrong; what stands is a
+			// row for a re-drive that has demonstrably landed, and the honest
+			// report of that is a line rather than a stalled conversation.
+			c.logf("session-controller: turn resumption DISCHARGE FAILED ws=%q session=%s request_id=%q: %v — the instruction is in the conversation, so the record is stale rather than owed, and it stays until a later delivery of the same line clears it",
+				c.workspace, c.sessionID, requestID, err)
+			continue
+		}
+		if !discharged {
+			continue // already discharged: every replay of this line reaches here
+		}
+		c.logf("session-controller: turn resumption DELIVERED ws=%q session=%s request_id=%q — the re-drive's instruction is in the vendor conversation, so the interrupted turn is no longer owed",
+			c.workspace, c.sessionID, requestID)
+	}
 }
 
 // cancelOwedResumptions discards what a workspace is owed because the USER got
@@ -200,7 +275,11 @@ func (m *Manager) cancelOwedResumptions(workspace, cause string) {
 	if m.cfg.PromptReceipts == nil {
 		return
 	}
-	owed, err := m.cfg.PromptReceipts.PendingResumptions(workspace)
+	// EVERY UNDISCHARGED ROW, CLAIMED OR NOT. A re-drive already claimed for
+	// this workspace is a turn the user has just moved on from exactly as an
+	// unclaimed one is, and the claimed row is the one nothing else will ever
+	// clear — leaving it would keep a record of owed work the user abandoned.
+	owed, err := m.cfg.PromptReceipts.UndischargedResumptions(workspace)
 	if err != nil {
 		m.logf("session-controller: turn resumption PREEMPTION READ FAILED ws=%q cause=%s: %v — whether anything was owed is UNKNOWN, so nothing is cancelled and the next wire decides",
 			workspace, cause, err)
@@ -213,8 +292,8 @@ func (m *Manager) cancelOwedResumptions(workspace, cause string) {
 				workspace, r.RequestID, r.TurnID, cause, err)
 			continue
 		}
-		m.logf("session-controller: turn resumption CANCELLED ws=%q request_id=%q turn_id=%q cause=%s discharged=%v — the user acted first, so the turn the last bounce interrupted is NOT re-driven",
-			workspace, r.RequestID, r.TurnID, cause, discharged)
+		m.logf("session-controller: turn resumption CANCELLED ws=%q request_id=%q turn_id=%q cause=%s state=%s discharged=%v — the user acted first, so the turn the last bounce interrupted is NOT re-driven",
+			workspace, r.RequestID, r.TurnID, cause, r.State, discharged)
 	}
 }
 
