@@ -46,7 +46,11 @@
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--ws-name-for-dir "agent-repl-workspace" (dir))
-(declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
+(declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force on-ensured on-failure))
+(declare-function agent-repl--make-latch "agent-repl-core" (&optional cleanup))
+(declare-function agent-repl--latch-claim "agent-repl-core" (latch))
+(declare-function agent-repl--latch-set-timer "agent-repl-core" (latch key timer))
+(declare-function agent-repl--frontend-after-daemon-ensured "agent-repl-daemon" (on-ensured on-failure &optional force))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (defvar agent-repl--frontend-webapp-dir)
 (declare-function agent-repl--resolve-current-git-root "agent-repl-core" ())
@@ -225,12 +229,10 @@ receives a diagnostic string after the bounded dial budget expires.
 Returns `:pending' when readiness is asynchronous, otherwise `:ready'."
   (unless (and (functionp on-ready) (functionp on-failure))
     (error "agent-repl: frontend readiness requires callable continuations"))
-  (let ((attempt 0) (started (float-time)) timer settled)
+  (let ((attempt 0) (started (float-time)) (latch (agent-repl--make-latch)))
     (cl-labels
         ((finish (outcome &optional detail)
-           (unless settled
-             (setq settled t)
-             (when (timerp timer) (cancel-timer timer))
+           (when (agent-repl--latch-claim latch)
              (agent-repl--log ws "frontend-ready: outcome=%s attempts=%d elapsed=%.3fs detail=%S"
                               outcome attempt (- (float-time) started) detail)
              (if (eq outcome 'ready)
@@ -248,7 +250,8 @@ Returns `:pending' when readiness is asynchronous, otherwise `:ready'."
             (t
              (setq attempt (1+ attempt))
              (unless (agent-repl--uds-connected-p) (agent-repl-uds-connect nil t))
-             (setq timer (agent-repl--uds-run-timer 0.2 #'tick))))))
+             (agent-repl--latch-set-timer
+              latch 'poll (agent-repl--uds-run-timer 0.2 #'tick))))))
     (agent-repl--log
      ws
      "frontend-ready: begin connected=%s daemon-view=%s budget=%d"
@@ -299,15 +302,15 @@ rejection, timeout, or an unhealthy correlated response.  The caller owns no
 timer or UDS callback after either continuation runs."
   (unless (and (functionp on-success) (functionp on-failure))
     (error "agent-repl: %s health requires callable continuations" what))
-  (let ((started (float-time)) request-id timer settled)
+  (let* ((started (float-time)) request-id
+         (latch (agent-repl--make-latch
+                 (lambda ()
+                   (when request-id
+                     (agent-repl--uds-untrack-command request-id workspace "health-settled")
+                     (agent-repl--uds-untrack-health-response request-id workspace "health-settled"))))))
     (cl-labels
         ((finish (ok detail)
-           (unless settled
-             (setq settled t)
-             (when (timerp timer) (cancel-timer timer))
-             (when request-id
-               (agent-repl--uds-untrack-command request-id workspace "health-settled")
-               (agent-repl--uds-untrack-health-response request-id workspace "health-settled"))
+           (when (agent-repl--latch-claim latch)
              (if ok
                  (condition-case err
                      (progn
@@ -341,10 +344,11 @@ timer or UDS callback after either continuation runs."
             :on-failure (lambda (err) (finish nil (format "command rejected: %s" err))))
            (agent-repl--log ws "frontend-health-async: dispatched what=%s field=%s request-id=%s workspace=%s session-id=%s"
                             what field request-id workspace session-id)
-           (unless settled
-             (setq timer (agent-repl--uds-run-timer
-                          agent-repl-frontend-health-timeout
-                          (lambda () (finish nil (format "timed out after %.3fs" agent-repl-frontend-health-timeout))))))))
+           (agent-repl--latch-set-timer
+            latch 'deadline
+            (agent-repl--uds-run-timer
+             agent-repl-frontend-health-timeout
+             (lambda () (finish nil (format "timed out after %.3fs" agent-repl-frontend-health-timeout)))))))
       (agent-repl--frontend-after-ready #'dispatch
                                          (lambda (detail) (finish nil detail)) ws)
       :pending)))
@@ -372,12 +376,14 @@ An open ESTABLISHES the workspace: the daemon reattaches to the session
 it has, or starts one when it has none."
   (unless (and (functionp on-success) (functionp on-failure))
     (error "agent-repl: openWorkspace requires callable continuations"))
-  (let ((started (float-time)) request-id timer settled (key (agent-repl--frontend-ws-command-key ws)))
+  (let* ((started (float-time)) request-id
+         (key (agent-repl--frontend-ws-command-key ws))
+         (latch (agent-repl--make-latch
+                 (lambda ()
+                   (when request-id
+                     (agent-repl--uds-untrack-command request-id key "open-workspace-settled"))))))
     (cl-labels ((finish (ok detail)
-                  (unless settled
-                    (setq settled t)
-                    (when (timerp timer) (cancel-timer timer))
-                    (when request-id (agent-repl--uds-untrack-command request-id key "open-workspace-settled"))
+                  (when (agent-repl--latch-claim latch)
                     (if ok
                         (progn (agent-repl--log ws "open-workspace-async: ACCEPTED ws=%s key=%s request-id=%s elapsed=%.3fs" ws key request-id (- (float-time) started))
                                (funcall on-success))
@@ -389,9 +395,10 @@ it has, or starts one when it has none."
           :on-registered (lambda (id) (setq request-id id))
           :on-failure (lambda (err) (finish nil (format "command rejected: %s" err)))
           :on-success (lambda () (finish t nil)))
-         (unless settled
-           (setq timer (agent-repl--uds-run-timer agent-repl-frontend-open-workspace-timeout
-                                                  (lambda () (finish nil (format "timed out after %.3fs" agent-repl-frontend-open-workspace-timeout)))))))
+         (agent-repl--latch-set-timer
+          latch 'deadline
+          (agent-repl--uds-run-timer agent-repl-frontend-open-workspace-timeout
+                                     (lambda () (finish nil (format "timed out after %.3fs" agent-repl-frontend-open-workspace-timeout))))))
        (lambda (detail) (finish nil detail)) ws)
       :pending)))
 
@@ -415,7 +422,12 @@ with no conversation may start one."
     (agent-repl--log ws "createSession-async: REFUSED cwd=%s already-in-flight" cwd)
     (error "agent-repl: a createSession for %s is already in flight" cwd))
   (let* ((ws (or ws (agent-repl--ws-name-for-dir cwd)))
-         (started (float-time)) request-id deadline-timer poll-timer settled acked
+         (started (float-time)) request-id acked
+         (latch (agent-repl--make-latch
+                 (lambda ()
+                   (when request-id
+                     (agent-repl--uds-untrack-command request-id cwd "create-settled"))
+                   (remhash cwd agent-repl--frontend-creates-in-flight))))
          (resume-mode (or resume-mode 'continue))
          (model (agent-repl--effective-model model))
          (posture (agent-repl--frontend-session-posture cwd))
@@ -426,23 +438,14 @@ with no conversation may start one."
                           (when (plist-get posture :permission-mode) (list :permissionMode (plist-get posture :permission-mode)))
                           (when (plist-get posture :allow-ungated) (list :allowUngated t)))))
     (cl-labels
-        ((cleanup ()
-           (when (timerp deadline-timer) (cancel-timer deadline-timer))
-           (when (timerp poll-timer) (cancel-timer poll-timer))
-           (when request-id (agent-repl--uds-untrack-command request-id cwd "create-settled"))
-           (remhash cwd agent-repl--frontend-creates-in-flight))
-         (finish (id detail)
-           (unless settled
-             (setq settled t)
-             (cleanup)
+        ((finish (id detail)
+           (when (agent-repl--latch-claim latch)
              (if id
                  (progn (agent-repl--log ws "createSession-async: CREATED cwd=%s session-id=%s request-id=%s elapsed=%.3fs" cwd id request-id (- (float-time) started))
                         (funcall on-success id))
                (agent-repl--frontend-async-fail ws "createSession" request-id started on-failure detail))))
          (reject (err)
-           (unless settled
-             (setq settled t)
-             (cleanup)
+           (when (agent-repl--latch-claim latch)
              ;; A LOST TRANSCRIPT IS REPORTED, NEVER ROUTED AROUND.  This used
              ;; to be a fork: an override could recreate the session with no
              ;; resume, replacing the conversation the daemon had just said it
@@ -475,7 +478,10 @@ with no conversation may start one."
                  (finish (plist-get view :sessionId) nil)))))
          (poll-view ()
            (observe-view)
-           (unless settled (setq poll-timer (agent-repl--uds-run-timer 0.05 #'poll-view))))
+           ;; The latch drops a poll re-armed after the create settled, so
+           ;; the 20Hz tick cannot outlive the operation that started it.
+           (agent-repl--latch-set-timer
+            latch 'poll (agent-repl--uds-run-timer 0.05 #'poll-view)))
          (dispatch ()
            (agent-repl--uds-send-command
             "createSession" payload cwd nil
@@ -483,14 +489,22 @@ with no conversation may start one."
             :on-failure #'reject
             :on-success (lambda () (setq acked t) (observe-view)))
            (agent-repl--log ws "createSession-async: dispatched cwd=%s request-id=%s resume-mode=%s model=%s" cwd request-id resume-mode model)
-           (unless settled
-             (setq deadline-timer (agent-repl--uds-run-timer agent-repl-frontend-create-timeout
-                                                             (lambda () (finish nil (format "timed out after %.3fs awaiting acknowledgement and SessionView" agent-repl-frontend-create-timeout)))))
-             (setq poll-timer (agent-repl--uds-run-timer 0.05 #'poll-view)))))
+           (agent-repl--latch-set-timer
+            latch 'deadline
+            (agent-repl--uds-run-timer agent-repl-frontend-create-timeout
+                                       (lambda () (finish nil (format "timed out after %.3fs awaiting acknowledgement and SessionView" agent-repl-frontend-create-timeout)))))
+           (agent-repl--latch-set-timer
+            latch 'poll (agent-repl--uds-run-timer 0.05 #'poll-view))))
       ;; Reserve the cwd before readiness polling.  Two UI actions issued while
       ;; the daemon is still starting must not arm two future creates.
-      (puthash cwd t agent-repl--frontend-creates-in-flight)
-      (agent-repl--frontend-after-ready #'dispatch (lambda (detail) (finish nil detail)) ws)
+      ;;
+      ;; The reservation and the readiness dispatch that owns its release are
+      ;; taken together with quit inhibited.  A `C-g' landing between them
+      ;; would leave the cwd reserved with nothing armed to ever release it,
+      ;; and every later create for that workspace refused outright.
+      (let ((inhibit-quit t))
+        (puthash cwd t agent-repl--frontend-creates-in-flight)
+        (agent-repl--frontend-after-ready #'dispatch (lambda (detail) (finish nil detail)) ws))
       :pending)))
 
 (defun agent-repl--frontend-after-ensure-session (ws on-success on-failure &optional purpose)
@@ -501,31 +515,54 @@ to know.  Emacs routes everything by WS\='s workspace key.
 
 PURPOSE is `presentation' or `send'.  A presentation reopens an existing
 workspace before delivering it; a send dispatches directly because
-`submitPrompt' performs the daemon-side establishment itself."
+`submitPrompt' performs the daemon-side establishment itself.
+
+RETURNS IMMEDIATELY, ALWAYS.  Every stage — the daemon ensure, its
+deploy, readiness, the `openWorkspace' round-trip — completes from a
+timer or a process sentinel, so the caller's own command finishes at once
+and the editor stays live for the whole establishment.  A failure at any
+stage arrives at ON-FAILURE exactly as it always did."
   (unless (and (functionp on-success) (functionp on-failure))
     (error "agent-repl: ensure-session requires callable continuations"))
-  (if (not (agent-repl--ensure-frontend-daemon))
-      (progn
-        (agent-repl--frontend-async-fail ws "ensure-session" nil (float-time) on-failure
-                                         "frontend daemon not started (auto-start disabled or init inhibited)")
-        :failed)
-    (let ((gated (not (eq purpose 'send))))
-      (unless (agent-repl--ws-get ws :project-dir)
-        (let ((dir (agent-repl--resolve-current-git-root)))
-          (agent-repl--ws-put ws :project-dir dir)
-          (unless (agent-repl--ws-get ws :active-env)
-            (agent-repl--initialize-ws-env ws dir))))
-      (agent-repl--frontend-after-ready
-       (lambda ()
-         (if gated
-             (progn
-               (agent-repl--ws-put ws :reattach-failed nil)
-               (agent-repl--ws-put ws :reattach-failures nil)
-               (agent-repl--frontend-reattach-timer-start)
-               (agent-repl--frontend-after-open-workspace ws on-success on-failure))
-           (funcall on-success)))
-       on-failure ws)
-      :pending)))
+  (let* ((started (float-time))
+         (ensured
+          (agent-repl--frontend-after-daemon-ensured
+     (lambda ()
+       (let ((gated (not (eq purpose 'send))))
+         (agent-repl--frontend-hydrate-ws-environment ws)
+         (agent-repl--frontend-after-ready
+          (lambda ()
+            (if gated
+                (progn
+                  (agent-repl--ws-put ws :reattach-failed nil)
+                  (agent-repl--ws-put ws :reattach-failures nil)
+                  (agent-repl--frontend-reattach-timer-start)
+                  (agent-repl--frontend-after-open-workspace ws on-success on-failure))
+              (funcall on-success)))
+          on-failure ws)))
+     (lambda (detail)
+       (agent-repl--frontend-async-fail
+        ws "ensure-session" nil started on-failure detail)))))
+    ;; `:failed' is reserved for the ensure DECLINING outright (auto-start
+    ;; off, init inhibited); every other outcome is in flight.
+    (if ensured :pending :failed)))
+
+(defun agent-repl--frontend-hydrate-ws-environment (ws)
+  "Give WS a `:project-dir' and an `:active-env', if it has none yet.
+
+The two writes are ONE fact about the workspace, so they are made
+together with quit inhibited.  Split by a `C-g' the registry keeps a
+workspace holding a project directory and no environment — and because
+the environment is only ever initialized on the same branch that
+discovers a missing project directory, no later open would ever fill it
+in.  Every command the workspace then routed would be posted against a
+half-registered record."
+  (unless (agent-repl--ws-get ws :project-dir)
+    (let ((dir (agent-repl--resolve-current-git-root))
+          (inhibit-quit t))
+      (agent-repl--ws-put ws :project-dir dir)
+      (unless (agent-repl--ws-get ws :active-env)
+        (agent-repl--initialize-ws-env ws dir)))))
 
 ;;;; ---- Session CRUD -------------------------------------------------------
 
@@ -876,8 +913,15 @@ boot id, which is what resets each workspace's give-up."
   (if (not (agent-repl--uds-connected-p))
       (when (agent-repl--live-ws-names)
         (agent-repl--log nil "reattach: UDS link down with live workspaces — ensuring daemon")
+        ;; The `condition-case' still stands beside the failure continuation:
+        ;; the ensure delivers a deploy or launch failure to ON-FAILURE, but
+        ;; a missing deploy script is the caller's own broken installation
+        ;; and is signalled synchronously.  Both reach the same warning.
         (condition-case err
-            (agent-repl--ensure-frontend-daemon)
+            (agent-repl--frontend-after-daemon-ensured
+             #'ignore
+             (lambda (detail)
+               (agent-repl--warn nil "reattach: daemon ensure failed: %s" detail)))
           (error
            (agent-repl--warn nil "reattach: daemon ensure failed: %s"
                             (error-message-string err)))))
@@ -1186,19 +1230,21 @@ Creates a fresh daemon session with resume set and binds it to WS, so
 the subsequent open attaches to the continued conversation."
   (unless (and (functionp on-success) (functionp on-failure))
     (error "agent-repl: gui adoption requires callable continuations"))
-  (if (not (agent-repl--ensure-frontend-daemon))
-      (agent-repl--frontend-async-fail
-       ws "gui-adopt-session" nil (float-time) on-failure
-       "frontend daemon not started (auto-start disabled or init inhibited)")
-    (let ((dir (or (agent-repl--ws-get ws :project-dir)
-                   (agent-repl--resolve-current-git-root))))
-      (agent-repl--frontend-after-create-session
-       dir (agent-repl--ws-get ws :model) 'explicit claude-session-id
-       (lambda (id)
-         (agent-repl--log ws "gui adopted claude session %s as %s"
-                          claude-session-id id)
-         (funcall on-success id))
-       on-failure ws)))
+  (let ((started (float-time)))
+    (agent-repl--frontend-after-daemon-ensured
+     (lambda ()
+       (let ((dir (or (agent-repl--ws-get ws :project-dir)
+                      (agent-repl--resolve-current-git-root))))
+         (agent-repl--frontend-after-create-session
+          dir (agent-repl--ws-get ws :model) 'explicit claude-session-id
+          (lambda (id)
+            (agent-repl--log ws "gui adopted claude session %s as %s"
+                             claude-session-id id)
+            (funcall on-success id))
+          on-failure ws)))
+     (lambda (detail)
+       (agent-repl--frontend-async-fail
+        ws "gui-adopt-session" nil started on-failure detail))))
   :pending)
 
 (defun agent-repl--frontend-send-user-message
