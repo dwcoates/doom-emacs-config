@@ -54,13 +54,13 @@ import (
 //     user's own workspace. Nothing that reads the gate has to distinguish
 //     them; everything that REPORTS it does.
 //
-// THE GATE IS ALSO WHAT HOLDS AN AUTOMATIC SLEEP OFF. A cut conversation with
-// nothing said to it since is not hibernated by the two clock-driven causes
-// either (sessioncontroller/hibernation.go). A cut is the daemon's own most
-// recent action on that conversation, and putting the workspace to sleep on top
-// of it stands the session down behind a revival gate whose compacting choices
-// this very gate already declines — a sleep taken over material nobody has
-// added to, offering a revival that has nothing to do.
+// THE GATE IS ALSO WHAT HOLDS A CACHE-DRIVEN SLEEP OFF. A cut conversation with
+// nothing said to it since is not hibernated for `cache_expired`
+// (sessioncontroller/hibernation.go): the cut already made the conversation
+// small, so the cache that cause exists to save is worth nearly nothing and the
+// sleep buys only a bring-up. The 6h idle cutoff is NOT gated here — it is a
+// judgement about whether anybody wants the workspace, which a cut does not
+// change — so a cut workspace is still reaped there.
 //
 //   - PROMPT_AT is written for every prompt EXCEPT the daemon's own idle
 //     machinery. A keep-alive ping is the daemon refreshing a prompt cache, not
