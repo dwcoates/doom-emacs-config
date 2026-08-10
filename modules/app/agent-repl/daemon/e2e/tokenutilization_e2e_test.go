@@ -369,8 +369,14 @@ func TestE2ECreateResumeFailureIsTypedAndVisible(t *testing.T) {
 
 // TestE2EAutomaticRestoreFailureIsTypedAndVisible hibernates an offline fake
 // session, then makes its resumed fake SDK query die after the daemon
-// handshake and before readiness. OpenWorkspace must wait for that exact
-// restoration failure rather than acknowledging an unusable session.
+// handshake and before readiness.
+//
+// THE ACK IS NOT THE ASSERTION ANY MORE, and that is the point of the change it
+// pins (server/openbringup.go): the open is ACCEPTED immediately, because
+// making every open wait out its own bring-up is what collapsed the command
+// pipeline. What must survive is the EVIDENCE — the typed automatic-restore
+// failure has to reach the user through the PUSHED conversation, with the same
+// identity and the same iterator failure the nack carried before.
 func TestE2EAutomaticRestoreFailureIsTypedAndVisible(t *testing.T) {
 	t.Setenv("AGENT_REPL_E2E_FAIL_RESUMED_FAKE_QUERY", "1")
 	h := newUDSHarness(t, withIdleSweeper())
@@ -407,27 +413,32 @@ func TestE2EAutomaticRestoreFailureIsTypedAndVisible(t *testing.T) {
 	var resumeFailure *frontendv1.SessionResumeFailure
 	var termination *frontendv1.QueryTerminationFailure
 	deadline := time.Now().Add(frameTimeout)
-	for time.Now().Before(deadline) && (!acknowledged || termination == nil) {
+	for time.Now().Before(deadline) && (!acknowledged || termination == nil || resumeFailure == nil) {
 		frame := readFrame(t, conn)
 		if ack := frame.GetCommandAck(); ack != nil && ack.GetRequestId() == requestID {
-			if ack.GetOk() {
-				t.Fatal("OpenWorkspace acknowledged a session whose resumed query died before readiness")
+			if !ack.GetOk() {
+				t.Fatalf("OpenWorkspace refused a workspace it had accepted: %s", ack.GetError())
 			}
 			acknowledged = true
-			resumeFailure = ack.GetFailure().GetSessionResumeFailed().GetDetail()
 		}
 		for _, item := range deltaItems(frame, cwd) {
 			failure := item.GetFailureCard()
-			if failure != nil && errclass.TypeName(failure) == "unexpected_query_termination" {
+			if failure == nil {
+				continue
+			}
+			if errclass.TypeName(failure) == "unexpected_query_termination" {
 				termination = failure.GetKind().GetQueryTermination().GetDetail()
+			}
+			if d := failure.GetKind().GetSessionResumeFailed().GetDetail(); d != nil {
+				resumeFailure = d
 			}
 		}
 	}
 	if !acknowledged {
-		t.Fatal("OpenWorkspace did not return a failure acknowledgement after the resumed query died")
+		t.Fatal("OpenWorkspace never acknowledged the workspace it accepted")
 	}
 	if resumeFailure == nil || resumeFailure.GetAutomaticRestore() == nil || resumeFailure.GetClaudeSessionId() != view.GetClaudeSessionId() || resumeFailure.GetCwd() != cwd || resumeFailure.GetResolvedConfigDir() == "" || resumeFailure.GetQueryTermination() == nil || resumeFailure.GetQueryTermination().GetVendorSessionId() != view.GetClaudeSessionId() || resumeFailure.GetQueryTermination().GetIteratorFailure() == nil {
-		t.Fatalf("automatic restore command nack = %v, want typed session.resume iterator failure with session=%q vendor=%q", resumeFailure, id, view.GetClaudeSessionId())
+		t.Fatalf("automatic restore pushed failure card = %v, want typed session.resume iterator failure with session=%q vendor=%q", resumeFailure, id, view.GetClaudeSessionId())
 	}
 	if termination == nil || termination.GetVendorSessionId() != view.GetClaudeSessionId() || termination.GetIteratorFailure() == nil {
 		t.Fatalf("automatic restore query-termination evidence = %v, want session=%q vendor=%q iterator_failure", termination, id, view.GetClaudeSessionId())

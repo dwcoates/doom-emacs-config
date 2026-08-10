@@ -33,6 +33,7 @@ func creationHarness(t *testing.T) (*harness, *WorkspaceOpener) {
 		Ensurer:    &fakeEnsurer{},
 		Creator:    h.srv,
 		ConfigDirs: func() []string { return nil },
+		Failures:   newFakeOpenFailures(),
 		Logf:       func(string, ...any) {},
 	}
 	return h, o
