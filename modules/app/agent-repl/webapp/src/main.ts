@@ -60,6 +60,7 @@ import {
   reviveRefusedLog,
   type RevivePending,
 } from "./hibernation.js";
+import { HtmlSlot } from "./html-slot.js";
 import { mergeStatusLogValue } from "./merge-status.js";
 import {
   DEQUEUE_ATTR,
@@ -557,6 +558,18 @@ async function boot(): Promise<void> {
   const drainBannerEl = must("drain-banner");
   const revivalGateEl = must("revival-gate");
   const mergeDequeueEl = must("merge-dequeue");
+  // THE SLOTS THE CHROME REPAINTS FROM STATE, each written only when its
+  // markup actually changed (html-slot.ts). The guard is not an optimization:
+  // a slot carrying buttons that is rewritten on an unrelated frame destroys
+  // the node a press is mid-way through, and the browser then fires no click
+  // at all. The pickers below kept the same guard hand-rolled as an
+  // `innerHTML !== next` compare, which read the live tree back on every
+  // frame; they share this one now.
+  const ungatedBannerSlot = new HtmlSlot(ungatedBannerEl);
+  const drainBannerSlot = new HtmlSlot(drainBannerEl);
+  const mergeDequeueSlot = new HtmlSlot(mergeDequeueEl);
+  const modelSlot = new HtmlSlot(modelEl);
+  const modeSlot = new HtmlSlot(modeEl);
   const hibernateEl = must<HTMLButtonElement>("hibernate-btn");
   /**
    * The revival decision this page has SENT and the daemon has not yet
@@ -750,8 +763,7 @@ async function boot(): Promise<void> {
     // Rebuilt only when the menu or the selection actually moved: this runs
     // on EVERY frame, and blowing the options away mid-turn would slam shut
     // a dropdown the user had open.
-    const nextOptions = modelOptionsHtml(s.models, s.model);
-    if (modelEl.innerHTML !== nextOptions) modelEl.innerHTML = nextOptions;
+    modelSlot.paint(modelOptionsHtml(s.models, s.model));
     // A held permission-mode pick keeps the picker on the user's choice until
     // the daemon reports that mode in force, at which point the pick is spent.
     const wantMode = pendingMode.settle(s.permissionMode);
@@ -761,8 +773,7 @@ async function boot(): Promise<void> {
     // the live mode as a disabled option instead, so the picker always names
     // what is actually running.
     const liveOption = unswitchableModeOptionHtml(switchableModes, wantMode);
-    const nextModeOptions = baseModeOptions + liveOption;
-    if (modeEl.innerHTML !== nextModeOptions) modeEl.innerHTML = nextModeOptions;
+    modeSlot.paint(baseModeOptions + liveOption);
     if (modeEl.value !== wantMode) modeEl.value = wantMode;
     // THE ungated-session surface: a session whose mode shadows canUseTool in
     // the fail-open direction has no daemon permission gate at all, so it gets
@@ -777,14 +788,14 @@ async function boot(): Promise<void> {
       requestedMode: s.permissionMode,
       systemInit: s.systemInit,
     });
-    ungatedBannerEl.innerHTML = ungatedBannerHtml(ungatedMode);
+    ungatedBannerSlot.paint(ungatedBannerHtml(ungatedMode));
     document.body.classList.toggle("ungated", ungatedMode !== "");
     // THE DRAIN LEASE (drain.ts): a daemon-global banner, repainted on the
     // chrome cadence so its elapsed clock advances with every frame and so a
     // cancelled or completed drain takes it down the moment the daemon says
     // `idle`. Read straight off the adopted lease — the webapp derives no
     // drain fact of its own.
-    drainBannerEl.innerHTML = drainBannerHtml(s.shutdownSchedule, Date.now());
+    drainBannerSlot.paint(drainBannerHtml(s.shutdownSchedule, Date.now()));
     document.body.classList.toggle(DRAINING_BODY_CLASS, s.shutdownSchedule !== null);
     // THE MERGE GATE (merge-gate.ts). Both halves are pure functions of the
     // revisioned `WorkspaceState` lease, repainted on the chrome cadence, so
@@ -814,11 +825,13 @@ async function boot(): Promise<void> {
       now: Date.now(),
       failure: reviveFailure,
     });
-    // THE CARD IS THE PUSHED OFFER, redrawn every frame. Nothing here decides
-    // whether it should be up: the daemon clears the offer when the question is
-    // answered, superseded, or made moot by the merge ending on its own, and
-    // each of those arrives as the same field going away.
-    mergeDequeueEl.innerHTML = mergeDequeueCardHtml(s.mergeDequeueOffer);
+    // THE CARD IS THE PUSHED OFFER, painted from the offer alone. Nothing here
+    // decides whether it should be up: the daemon clears the offer when the
+    // question is answered, superseded, or made moot by the merge ending on
+    // its own, and each of those arrives as the same field going away. Its
+    // slot skips the write when the markup is unchanged, because its two
+    // buttons must outlive a frame that changed something else.
+    mergeDequeueSlot.paint(mergeDequeueCardHtml(s.mergeDequeueOffer));
     document.body.classList.toggle(HIBERNATED_BODY_CLASS, s.hibernation !== null);
     // The sleep verb is offered only on an awake session: there is nothing to
     // hibernate on one already asleep, and the gate above is what that session
