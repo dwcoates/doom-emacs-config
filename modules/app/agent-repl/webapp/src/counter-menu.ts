@@ -62,6 +62,18 @@ export function isActive(entry: CounterEntry): boolean {
   return ACTIVE_STATUSES.has(entry.status);
 }
 
+/**
+ * ENTRIES narrowed to the ones still working — the single filter every surface
+ * that shows "what is running" goes through.
+ *
+ * It is generic over the entry so a caller carrying a richer row (the expanded
+ * footer's `FooterAgentRow`) keeps its own type through the narrowing rather
+ * than being widened back to `CounterEntry`.
+ */
+export function activeEntries<T extends CounterEntry>(entries: readonly T[]): T[] {
+  return entries.filter(isActive);
+}
+
 /** `1 agent` / `3 tasks` — the chip's own label. */
 export function countLabel(noun: string, count: number): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -126,7 +138,7 @@ export function counterMenuHtml(
   entries: readonly CounterEntry[],
   open: boolean,
 ): string {
-  const visible = entries.filter(isActive);
+  const visible = activeEntries(entries);
   if (visible.length === 0) return "";
   return dropdownChipHtml(
     spec.menu,

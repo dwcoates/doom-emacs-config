@@ -20,7 +20,6 @@ import {
   countLabel,
   counterMenuHtml,
   dropdownChipHtml,
-  isActive,
 } from "./counter-menu.js";
 import { escapeHtml } from "./highlight.js";
 import { ConversationItem, ToolItem, stringField } from "./store.js";
@@ -118,16 +117,19 @@ export function agentsMenuHtml(
  * used to own rather than showing the same rows a second way. EXPANDED is the
  * expanded footer's state, which the caret and `aria-expanded` report, so the
  * chip says what its click will do.
+ *
+ * AGENTS IS ALREADY THE LIVE ROSTER — `footerAgentRows` narrows it once, and
+ * this counts what it is handed rather than filtering a second time. That is
+ * what ties the number to the rows below it: both are the same array.
  */
 export function agentsToggleHtml(
   agents: readonly CounterEntry[],
   expanded: boolean,
 ): string {
-  const visible = agents.filter(isActive);
-  if (visible.length === 0) return "";
+  if (agents.length === 0) return "";
   return dropdownChipHtml(
     AGENTS_SPEC.menu,
-    escapeHtml(countLabel(AGENTS_SPEC.noun, visible.length)),
+    escapeHtml(countLabel(AGENTS_SPEC.noun, agents.length)),
     "session subagents — show or hide the expanded footer",
     expanded,
     () => "",
