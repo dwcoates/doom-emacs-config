@@ -253,6 +253,27 @@ func (m *Manager) InterruptForMerge(ctx context.Context, workspace string) (*ssm
 			workspace, err)
 		return nil, nil
 	}
+	// DRIVEABLE BEFORE THE STOP. `existing` answers as soon as a controller is
+	// REGISTERED, and registration happens at the START of a bring-up — the
+	// shim has not handshaked yet and `d.client` has no connection behind it.
+	// An interrupt sent into that window does not fail fast: it is a control
+	// request with nothing to carry it, so it burns the WHOLE control timeout
+	// and the lease is rolled back over a session that was in fact coming up.
+	// That is the merge that failed with "could not interrupt the in-flight
+	// turn: control request timed out after 10s" milliseconds before its shim
+	// wired.
+	//
+	// The gate is asked HERE rather than left to the caller. A merge reaches
+	// this line through the coordinator's bring-up phase today, but the lease's
+	// requirement — a stop that actually lands — is this function's to keep, and
+	// a future caller cannot forget a wait that is inside the callee. On an
+	// already-wired session AwaitReady is the gate's closed state and returns
+	// at once, so the ordinary path pays nothing.
+	if err := d.client.AwaitReady(ctx); err != nil {
+		m.logf("session-controller: merge interrupt NOT SENT ws=%q session=%s: %v — the session never became driveable, so the stop would have been a control request with no connection to carry it",
+			workspace, d.sessionID, err)
+		return nil, fmt.Errorf("session-controller: merge interrupt for workspace %q session %s: the session never became driveable: %w", workspace, d.sessionID, err)
+	}
 	// READ BEFORE THE STOP. The interrupt is what makes the turn stop being the
 	// running one, so anything read afterwards describes a session that has
 	// already been taken away.
