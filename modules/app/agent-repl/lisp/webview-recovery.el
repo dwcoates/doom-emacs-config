@@ -235,7 +235,7 @@ cache can, and does, answer with the superseded bundle it already holds."
         (replace-match (concat (match-string 1 uri) value) t t uri)
       (concat uri (if (string-match-p "\\?" uri) "&" "?") param "=" value))))
 
-(defun agent-repl--webview-recovery-sweep (reason)
+(defun agent-repl--webview-recovery-sweep (reason &optional force)
   "Bring every reachable webview onto the deployed bundle, naming REASON.
 Returns how many webviews the sweep ACTED on (driven plus reloaded).
 
@@ -261,12 +261,20 @@ Debounced by `agent-repl-webview-recovery-debounce-seconds': a sweep
 inside that window of the previous one is skipped and returns nil, which
 is how a flapping link cannot stack sweeps.
 
+FORCE non-nil BYPASSES that debounce.  The debounce assumes the sweep it
+suppresses is redundant with one that already ran — true for a flapping
+link, and FALSE for the recovery SLO's forced path (lisp/recovery-slo.el),
+which sweeps precisely because a workspace has been MEASURED still broken
+after the earlier sweep.  Suppressing that one would leave the budget
+breach unrepaired and then re-verify the same failure.
+
 A webview the sweep fails on is WARNED about by name and the sweep
 continues to the rest: one page's broken widget is not a reason to leave
 every other page stale, and the failure is still said out loud rather
 than swallowed."
   (let ((now (float-time)))
-    (if (and agent-repl--webview-recovery-last-sweep
+    (if (and (not force)
+             agent-repl--webview-recovery-last-sweep
              (< (- now agent-repl--webview-recovery-last-sweep)
                 agent-repl-webview-recovery-debounce-seconds))
         (progn
