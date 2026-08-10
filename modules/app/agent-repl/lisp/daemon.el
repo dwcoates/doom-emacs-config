@@ -1462,9 +1462,10 @@ immediately; ON-COMPLETE receives the replacement only after socket release.
 
 The shutdown command errors benignly if the daemon drops the connection as
 it tears down, so a transport error on the send is logged and ignored —
-the asynchronous socket probe is the real exit signal.  A daemon that never frees the
-socket within `agent-repl-frontend-foreign-stop-grace-seconds' fails loudly
-and is left in place; spawning next to it would only bind-fail."
+the asynchronous socket probe is the real exit signal.  A daemon that
+never frees the socket within
+`agent-repl-frontend-foreign-stop-grace-seconds' fails loudly and is left
+in place; spawning next to it would only bind-fail."
   (agent-repl--log nil
                    "foreign daemon bounce: begin addr=%s grace-seconds=%s"
                    agent-repl-frontend-daemon-addr
