@@ -1080,6 +1080,92 @@ func TestDeleteSessionMarksRecordTerminal(t *testing.T) {
 	}
 }
 
+func TestDeleteSessionMintsTheDeathAlreadyResolved(t *testing.T) {
+	// Arrange — an intentional deletion that succeeded is not an open failure.
+	// Minted open, its card was re-announced to the user on every snapshot for
+	// as long as the record was retained.
+	h := newHarness(t)
+	id := createSession(t, h, `{"cwd":"/w"}`)
+
+	// Act
+	if err := h.srv.DeleteSession(id); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	// Assert
+	rec, _ := h.reg.Get(id)
+	if rec.DeathResolvedAtMs == 0 {
+		t.Fatalf("death_resolved_at_ms = 0; the delete minted an OPEN death card")
+	}
+}
+
+func TestDeletedSessionViewCarriesTheResolvedDeath(t *testing.T) {
+	// Arrange — the resolution only matters if it reaches the frontend, which
+	// renders a death solely from the SessionView.
+	h := newHarness(t)
+	id := createSession(t, h, `{"cwd":"/w"}`)
+	if err := h.srv.DeleteSession(id); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	rec, _ := h.reg.Get(id)
+
+	// Act
+	view := SessionViewFromRecord(t.Logf, rec, nil, false)
+
+	// Assert
+	if !errclass.IsResolved(view.GetDeath()) {
+		t.Fatalf("view death = %+v, want the resolved lifecycle arm", view.GetDeath())
+	}
+}
+
+func TestDeleteSessionResolvesADeathAnEarlierBuildLeftOpen(t *testing.T) {
+	// Arrange — the idempotent retry is the only live edge left for a record
+	// deleted before the resolution existed and never given a successor.
+	h := newHarness(t)
+	rec := registry.Record{
+		SessionID: "s_old", CWD: "/w",
+		Terminal: true, DeathReason: errclass.DeathReasonDeleted,
+	}
+	if err := h.reg.Put(rec); err != nil {
+		t.Fatalf("registry Put: %v", err)
+	}
+
+	// Act
+	if err := h.srv.DeleteSession(rec.SessionID); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	// Assert
+	got, _ := h.reg.Get(rec.SessionID)
+	if got.DeathResolvedAtMs == 0 {
+		t.Fatalf("death_resolved_at_ms = 0; the idempotent delete left the open card standing")
+	}
+}
+
+func TestDeleteSessionLeavesASupersedeWindowOpen(t *testing.T) {
+	// Arrange — deleting a record that was superseded says nothing about
+	// whether that handover completed, so the delete must not settle it.
+	h := newHarness(t)
+	rec := registry.Record{
+		SessionID: "s_old", CWD: "/w",
+		Terminal: true, DeathReason: errclass.DeathReasonSuperseded,
+	}
+	if err := h.reg.Put(rec); err != nil {
+		t.Fatalf("registry Put: %v", err)
+	}
+
+	// Act
+	if err := h.srv.DeleteSession(rec.SessionID); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	// Assert
+	got, _ := h.reg.Get(rec.SessionID)
+	if got.DeathResolvedAtMs != 0 {
+		t.Fatalf("death_resolved_at_ms = %d; the delete closed a supersede window it never observed close", got.DeathResolvedAtMs)
+	}
+}
+
 func TestDeleteSessionRepushesAnAlreadyTerminalRecord(t *testing.T) {
 	// Arrange: a superseded record whose stale client still believes it is live.
 	h := newHarness(t)
