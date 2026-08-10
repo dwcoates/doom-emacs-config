@@ -89,6 +89,25 @@ func (t turnRecord) name() (string, bool) {
 	return "", false
 }
 
+// namedTurnForResumption is the turn id a teardown records against the
+// resumption it owes, or "" when this process cannot name the turn in flight.
+//
+// AN UNNAMEABLE TURN DOES NOT BLOCK THE RESUMPTION. An adopted turn (a shim
+// that outlived the previous daemon and reattached mid-turn) is unambiguously
+// running and unambiguously the user's work; refusing to record a resumption
+// for it because this process never saw it begin would abandon exactly the
+// turns a bounce is most likely to land on. The id is what lets the teardown's
+// interrupted-turn record be resolved later, so its absence costs that
+// resolution edge and nothing else.
+//
+// It reads the record WITHOUT the manager mutex, because the teardown prologue
+// is called with the controller already evicted from byWS: nothing else holds a
+// reference through which the record could still move.
+func (d *sessionController) namedTurnForResumption() string {
+	id, _ := d.turn.name()
+	return id
+}
+
 func (t turnRecord) String() string {
 	switch t.phase {
 	case turnPhaseAccepted:

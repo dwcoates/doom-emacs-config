@@ -40,6 +40,13 @@ type fakeReceiptStore struct {
 	recordErr error
 	// outstandingErr fails every read — the unreadable receipt table.
 	outstandingErr error
+	// resumptions is the owed-resumption ledger, in insertion order.
+	resumptions []statedb.PendingResumption
+	// resumptionRecordErr fails every RecordPendingResumption — a teardown
+	// that cannot record what it owes.
+	resumptionRecordErr error
+	// resumptionsErr fails every resumption read.
+	resumptionsErr error
 }
 
 func newFakeReceiptStore() *fakeReceiptStore { return &fakeReceiptStore{} }
@@ -104,6 +111,65 @@ func (f *fakeReceiptStore) Outstanding(workspace string) ([]statedb.PromptReceip
 		}
 	}
 	return out, nil
+}
+
+// --- the resumption half ----------------------------------------------------
+//
+// Kept in the SAME fake as the receipts, mirroring the real store: the two row
+// kinds share a table, and a fake that split them could not catch a receipt
+// query that started serving resumptions.
+
+func (f *fakeReceiptStore) RecordPendingResumption(r statedb.PendingResumption) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "record-resumption:"+r.RequestID)
+	if f.resumptionRecordErr != nil {
+		return f.resumptionRecordErr
+	}
+	for i := range f.resumptions {
+		if f.resumptions[i].RequestID == r.RequestID {
+			f.resumptions[i] = r
+			return nil
+		}
+	}
+	f.resumptions = append(f.resumptions, r)
+	return nil
+}
+
+func (f *fakeReceiptStore) PendingResumptions(workspace string) ([]statedb.PendingResumption, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.resumptionsErr != nil {
+		return nil, f.resumptionsErr
+	}
+	var out []statedb.PendingResumption
+	for _, r := range f.resumptions {
+		if r.Workspace == workspace {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeReceiptStore) DischargeResumption(requestID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "discharge-resumption:"+requestID)
+	for i := range f.resumptions {
+		if f.resumptions[i].RequestID == requestID {
+			f.resumptions = append(f.resumptions[:i], f.resumptions[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeReceiptStore) owedResumptions(workspace string) []statedb.PendingResumption {
+	rows, err := f.PendingResumptions(workspace)
+	if err != nil {
+		return nil
+	}
+	return rows
 }
 
 func (f *fakeReceiptStore) seed(rows ...statedb.PromptReceipt) {
