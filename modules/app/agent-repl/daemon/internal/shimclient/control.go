@@ -164,6 +164,43 @@ func (c *Client) CancelDetachedAgents(ctx context.Context, originRequestID strin
 	return outcome, nil
 }
 
+// QueryLiveTasks asks the live shim which background tasks it is running RIGHT
+// NOW, and returns the shim's own list.
+//
+// A READ, NOT A CHANGE, and the daemon's only authority on the question. The
+// task catalog is DERIVED from the events the daemon happened to see, so it can
+// hold an entry open that nothing is running — a TaskEnded deduped as a replay,
+// an end that landed while the daemon was down, a shim roll between the start
+// and the end. This list is what tells that phantom apart from a subagent that
+// is merely slow (sessioncontroller/phantomtask.go).
+//
+// AN ACK WITHOUT THE SET IS A FAILURE, NEVER AN EMPTY SET. The whole point of
+// asking is that the answer is the shim's, so a peer that did not answer must
+// not be read as one that answered "nothing" — a catalog entry would then be
+// closed on silence, which is precisely what this path exists not to do. An ack
+// carrying the message with no ids IS an answer, and the honest one.
+func (c *Client) QueryLiveTasks(ctx context.Context) ([]string, error) {
+	reqID, err := c.newRequestID("query-live-tasks")
+	if err != nil {
+		return nil, err
+	}
+	ack, nack, err := c.sendAwaitReceipt(ctx, &corev1.QueryLiveTasks{RequestId: reqID}, reqID)
+	if err != nil {
+		return nil, err
+	}
+	if nack != nil {
+		c.logf("query-live-tasks REFUSED request_id=%s reason=%q", reqID, nack.GetReason())
+		return nil, fmt.Errorf("%w: request_id=%s reason=%q", ErrNack, reqID, nack.GetReason())
+	}
+	set := ack.GetLiveTaskSet()
+	if set == nil {
+		return nil, fmt.Errorf("query live tasks: shim ack request_id=%s omitted live_task_set; an absent set is a peer that did not answer, not a session with no tasks", reqID)
+	}
+	ids := set.GetTaskIds()
+	c.logf("query-live-tasks request_id=%s live_tasks=%d ids=%v", reqID, len(ids), ids)
+	return ids, nil
+}
+
 // SetModel asks the live shim to change its SDK model and returns the model the
 // shim confirmed. Callers persist only this value, never their requested one.
 func (c *Client) SetModel(ctx context.Context, model string) (string, error) {

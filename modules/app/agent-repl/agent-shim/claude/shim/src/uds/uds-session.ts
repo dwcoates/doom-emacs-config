@@ -845,6 +845,11 @@ export class UdsSession {
       // `system:init` and every confirmed setModel write it — so this read
       // needs no SDK round-trip and cannot race one.
       selectedModel: (): string => this.effectiveModel,
+      // THE SAME SET cancelDetachedAgents SNAPSHOTS, read the same way: this
+      // event loop is single-threaded and this class owns liveSdkTaskIds, so
+      // the array handed back describes the session at one instant and no task
+      // can start or end inside the read.
+      liveTaskIds: (): string[] => [...this.liveSdkTaskIds].sort(),
     };
     this.control = new ControlDispatch(
       target,
@@ -875,6 +880,7 @@ export class UdsSession {
       onCancelDetachedAgents: (m: CancelDetachedAgents) => this.control.handleCancelDetachedAgents(m),
       onSetModel: (m) => this.control.handleSetModel(m),
       onQuerySelectedModel: (m) => this.control.handleQuerySelectedModel(m),
+      onQueryLiveTasks: (m) => this.control.handleQueryLiveTasks(m),
       onPermissionResponse: (m) => this.control.handlePermissionResponse(m),
       onReplayRequest: (m) => void this.serveReplay(m),
       onHealthCheck: (m) => this.health(m),

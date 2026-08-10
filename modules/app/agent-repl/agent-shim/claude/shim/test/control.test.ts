@@ -23,6 +23,7 @@ import {
   PermissionRequest,
   PermissionResponseSchema,
   PromptOrigin,
+  QueryLiveTasksSchema,
   QuerySelectedModelSchema,
   SetModelSchema,
   SubmitPromptSchema,
@@ -48,6 +49,12 @@ interface Recorder {
    * has never observed one" that must NACK rather than Ack emptily.
    */
   selected: { value: string; throws?: string };
+  /**
+   * What the target reports as its live background-task set. Mutable so one
+   * test can drive the empty answer (which must ACK, since it is the answer
+   * that retires a phantom) and another a populated one.
+   */
+  liveTasks: { ids: string[]; throws?: string };
 }
 
 /**
@@ -66,6 +73,7 @@ function recorder(
   const cancels: Recorder["cancels"] = [];
   const models: Recorder["models"] = [];
   const selected: Recorder["selected"] = { value: "claude-sonnet-5" };
+  const liveTasks: Recorder["liveTasks"] = { ids: [] };
   const detached: Recorder["detached"] = {
     outcome: create(DetachedCancelOutcomeSchema, {
       outcome: { case: "cancelled", value: create(DetachedAgentsCancelledSchema, { taskIds: ["task-a", "task-b"] }) },
@@ -78,6 +86,7 @@ function recorder(
     models,
     throwOnPrompt,
     selected,
+    liveTasks,
     detached,
     target: {
       submitPrompt: async (input) => {
@@ -101,6 +110,10 @@ function recorder(
       selectedModel: () => {
         if (selected.throws !== undefined) throw new Error(selected.throws);
         return selected.value;
+      },
+      liveTaskIds: () => {
+        if (liveTasks.throws !== undefined) throw new Error(liveTasks.throws);
+        return liveTasks.ids;
       },
     },
   };
@@ -760,6 +773,58 @@ describe("ControlDispatch.resendPending", () => {
       request_id: "req-1",
       message: "permission request re-send failed: socket gone",
     });
+  });
+});
+
+describe("ControlDispatch.handleQueryLiveTasks", () => {
+  it("answers with the live task ids, sorted", () => {
+    // Arrange — the daemon's catalog is derived, so this list is the only
+    // authority it can close a catalog entry against.
+    const rec = recorder();
+    rec.liveTasks.ids = ["task-b", "task-a"];
+
+    // Act.
+    const receipt = dispatch(rec, []).handleQueryLiveTasks(
+      create(QueryLiveTasksSchema, { requestId: "q1" }),
+    );
+
+    // Assert.
+    expect(receipt.$typeName).toBe("agentshim.core.v1.Ack");
+    expect((receipt as Ack).liveTaskSet?.taskIds).toEqual(["task-a", "task-b"]);
+  });
+
+  it("ACKs an EMPTY live set rather than nacking it", () => {
+    // Arrange — "nothing is running" is the answer that retires a phantom
+    // catalog entry. A Nack here would leave the footer claiming work forever.
+    const rec = recorder();
+    rec.liveTasks.ids = [];
+
+    // Act.
+    const receipt = dispatch(rec, []).handleQueryLiveTasks(
+      create(QueryLiveTasksSchema, { requestId: "q1" }),
+    );
+
+    // Assert — the SET IS PRESENT and empty, which is what distinguishes it
+    // from a peer that never answered.
+    expect(receipt.$typeName).toBe("agentshim.core.v1.Ack");
+    expect((receipt as Ack).liveTaskSet).toBeDefined();
+    expect((receipt as Ack).liveTaskSet?.taskIds).toEqual([]);
+  });
+
+  it("NACKs when the target throws instead of answering", () => {
+    // Arrange — a read that cannot be served is a failure the daemon surfaces,
+    // never an assumed-empty set it would then close live tasks against.
+    const rec = recorder();
+    rec.liveTasks.throws = "the SDK query does not exist yet";
+
+    // Act.
+    const receipt = dispatch(rec, []).handleQueryLiveTasks(
+      create(QueryLiveTasksSchema, { requestId: "q1" }),
+    );
+
+    // Assert.
+    expect(receipt.$typeName).toBe("agentshim.core.v1.Nack");
+    expect((receipt as Nack).reason).toMatch(/does not exist yet/);
   });
 });
 

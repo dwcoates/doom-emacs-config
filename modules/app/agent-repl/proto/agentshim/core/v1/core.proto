@@ -1133,6 +1133,38 @@ message CancelDetachedAgents {
   string request_id = 1;
 }
 
+// Ask the shim which background tasks are LIVE right now, changing nothing.
+//
+// IT IS THE READ HALF OF THE SAME AUTHORITY CancelDetachedAgents ACTS ON. The
+// shim owns the live-task set: it observes every task start and every task end
+// on its own SDK stream, on a single-threaded event loop, so a read taken there
+// is atomic against task end and cannot be taken anywhere else.
+//
+// WHY THE DAEMON ASKS. The daemon's task catalog is DERIVED — folded from the
+// TaskStarted/TaskEnded events it happens to have seen — and a derived set can
+// outlive its driver: a TaskEnded deduped as a replay, a task that ended while
+// the daemon was down, a shim roll between the start and the end. Any of those
+// leaves an entry the footer renders as running forever with nothing behind it.
+// Silence cannot tell that phantom from a subagent that is simply taking a long
+// time; only this list can, so the discriminator is the shim's answer and never
+// a timeout (daemon/internal/sessioncontroller/phantomtask.go).
+message QueryLiveTasks {
+  string request_id = 1;
+}
+
+// The shim's live background-task set at the instant it answered.
+//
+// A MESSAGE RATHER THAN A BARE repeated FIELD ON Ack, so that "the session has
+// no tasks running" (a present LiveTaskSet with no ids) is distinguishable from
+// "this peer does not answer the question" (no LiveTaskSet at all). Closing a
+// catalog entry on the second would be closing it on silence, which is the one
+// thing this whole path exists not to do.
+message LiveTaskSet {
+  // Live task ids under the SAME identity TaskStarted and TaskEnded carry, so
+  // the daemon can join this list against its catalog directly.
+  repeated string task_ids = 1;
+}
+
 // What a CancelDetachedAgents actually did, decided by the SHIM.
 //
 // The shim decides it for the same reason it decides InterruptOutcome: it owns
@@ -1202,6 +1234,11 @@ message Ack {
   // nothing detached, and a session that could not be asked are three
   // different answers a frontend renders three different ways.
   DetachedCancelOutcome detached_cancel_outcome = 4;
+  // Set only on a QueryLiveTasks' ack; UNSET on every other command's. Its
+  // PRESENCE is the assertion — an ack carrying the message with no ids says
+  // "nothing is running", while an ack without it says "this shim never
+  // answered", and the daemon acts only on the first.
+  LiveTaskSet live_task_set = 5;
 }
 
 message Nack {

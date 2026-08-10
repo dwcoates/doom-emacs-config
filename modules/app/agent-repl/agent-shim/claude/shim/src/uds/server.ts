@@ -76,6 +76,8 @@ import {
   SubmitPrompt,
   SubmitPromptSchema,
   SetModel,
+  QueryLiveTasks,
+  QueryLiveTasksSchema,
   QuerySelectedModel,
   QuerySelectedModelSchema,
   SetModelSchema,
@@ -110,6 +112,15 @@ export interface SessionServerHandlers {
    * already held, so there is no SDK round-trip to await.
    */
   onQuerySelectedModel(msg: QuerySelectedModel): Ack | Nack;
+  /**
+   * Answer which background tasks are LIVE right now.
+   *
+   * SYNCHRONOUS for the same reason onQuerySelectedModel is, and for one more:
+   * the set is read on this single-threaded event loop, so the answer is atomic
+   * against task start and task end. An awaited read could describe a set that
+   * had already moved.
+   */
+  onQueryLiveTasks(msg: QueryLiveTasks): Ack | Nack;
   /** Deliver a permission decision to the blocked canUseTool round-trip. */
   onPermissionResponse(msg: PermissionResponse): void;
   /**
@@ -583,6 +594,11 @@ export class SessionServer {
     const querySelectedModel = unpackAs(msg, QuerySelectedModelSchema);
     if (querySelectedModel) {
       this.sendReceipt(this.handlers.onQuerySelectedModel(querySelectedModel));
+      return;
+    }
+    const queryLiveTasks = unpackAs(msg, QueryLiveTasksSchema);
+    if (queryLiveTasks) {
+      this.sendReceipt(this.handlers.onQueryLiveTasks(queryLiveTasks));
       return;
     }
     const perm = unpackAs(msg, PermissionResponseSchema);
