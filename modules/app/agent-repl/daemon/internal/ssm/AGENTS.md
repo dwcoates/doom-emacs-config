@@ -179,4 +179,41 @@ Two properties are load-bearing:
   instead, naming the session left running, exactly as a merge lease release
   failure is.
 
+## Snapshot resolves with the lock RELEASED
+
+A full-fleet `Snapshot` is hundreds of SQL statements — at live scale (161
+workspaces, 22k `workspace_state` rows) close to a second of work — and it used
+to run under `m.mu` from its first query to its last. It is called on every
+client connect, on every resync command and periodically per client by the
+snapshot lease loop, so during webview reconnect churn the lock was effectively
+never free: `MarkPromptAccepted`, `Current`, `LastActivityMs` and the lease
+renewals all queued behind it, and the user-visible symptom was the daemon never
+acking a prompt.
+
+Three things make that structural rather than tuned:
+
+- The construction funnel is SPLIT by where the data comes from, not into more
+  funnels. `composeWorkspaceMessage` is the half the log answers and touches no
+  in-memory map, so it runs with `mu` released; `stampWorkspaceMessageLocked` is
+  the half this process answers (merge facts, freshness watermark) and always
+  runs under `mu`. Every producer still runs both.
+- Concurrent callers COALESCE onto one resolve (`snapshotFlight`). N clients
+  reconnecting together asked the identical question N times and paid for it N
+  times.
+- `workspace_state_axis (workspace, state, at)` is the resolver's own index.
+  `resolveQuery` asks "the newest row for this workspace in this state set" once
+  per axis, and `(workspace, at)` can only answer it by re-walking the
+  workspace's whole append-only history per axis.
+
+WHAT CONSISTENCY IS PROMISED. Each frame is a consistent read of its workspace;
+the fleet is not read atomically, which is what the per-workspace wire contract
+already assumes. The one hazard of dropping the lock — publishing content older
+than a frame the client already holds, under a newer revision — is closed by
+`publishEpoch`: it counts every frame stamped per workspace, and any workspace
+whose count moved during the lock-free resolve (including one that gained its
+first frame) is re-resolved under `mu`, where no push can intervene. A log row
+that no frame was published for is deliberately not re-resolved: nothing was
+delivered, so nothing can regress, and the push that carries it supersedes the
+snapshot in the ordinary way.
+
 Dependencies: `proto/agentshim/` (generated Go), SQLite.
