@@ -1174,6 +1174,37 @@ webapp/src/render.ts) still lands the answer at the tail, but only
 once the turn arrives — this snap closes the round-trip gap so the
 sender watches the bottom from the instant the prompt leaves."
   (agent-repl--log ws "do-send[gui] ws=%s len=%d prompt-origin=%s" ws (length input) prompt-origin)
+  ;; THE HELD-PROMPT QUEUE GETS FIRST REFUSAL (prompt-queue.el).  A send across
+  ;; a backend bounce used to go straight at a dead socket and come back as
+  ;; `client.command_unacked', with the user's words already cleared out of the
+  ;; input buffer.  The queue takes the prompt only while the link cannot carry
+  ;; it (or while an earlier held prompt is still draining, which is what keeps
+  ;; the user's order); otherwise it declines and the send proceeds unchanged.
+  ;;
+  ;; NOTHING OPTIMISTIC RUNS FOR A HELD PROMPT: no `:thinking', no `:sent-turn',
+  ;; no posthooks, no summary kickoff.  All of those are claims about a turn
+  ;; that is in flight, and a held prompt is precisely one that is not — they
+  ;; run from the drain's own send, through this same function's success path.
+  (if (agent-repl-prompt-queue-offer ws input raw prompt-origin on-settle)
+      (agent-repl--log ws "do-send[gui]: HELD ws=%s — the link is down; the prompt waits for revival" ws)
+    (agent-repl--gui-dispatch-turn ws input raw prompt-origin on-settle))
+  :pending)
+
+(defun agent-repl--gui-dispatch-turn
+    (ws input raw prompt-origin &optional on-settle on-sent on-failed)
+  "Send INPUT for WS now, with the optimistic turn state a live send implies.
+Split out of `agent-repl--gui-send-turn' so the held-prompt drain reaches
+exactly the same path: a prompt that waited out a bounce must land with the
+same thinking state, `:sent-turn' record, posthooks and summary kickoff as
+one sent the instant it was typed.  RAW, PROMPT-ORIGIN and ON-SETTLE carry
+their `agent-repl--gui-send-turn' meanings.
+
+ON-SENT (with the request id) and ON-FAILED (with the failure detail) are
+the drain's own continuations: the queue must learn which of the two
+happened, because a refused held prompt owes the user its own report and
+the entries behind it must not be dispatched until this one settled.  Both
+run AFTER this function's own work, so a drained prompt is a live turn
+before the queue is told anything about it."
   (agent-repl--frontend-send-user-message
    ws input prompt-origin
    (lambda (request-id)
@@ -1185,10 +1216,12 @@ sender watches the bottom from the instant the prompt leaves."
      (agent-repl--kickoff-prompt-summary ws raw)
      (agent-repl--log ws "do-send[gui]: dispatched request-id=%s raw-len=%d"
                       request-id (length raw))
-     (when on-settle (funcall on-settle)))
+     (when on-settle (funcall on-settle))
+     (when on-sent (funcall on-sent request-id)))
    (lambda (detail)
      (agent-repl--warn ws "do-send[gui]: FAILED before dispatch detail=%s" detail)
-     (when on-settle (funcall on-settle))))
+     (when on-settle (funcall on-settle))
+     (when on-failed (funcall on-failed detail))))
   :pending)
 
 (defun agent-repl--gui-interrupt (ws kind)
