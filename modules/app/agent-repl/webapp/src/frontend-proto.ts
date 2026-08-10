@@ -180,6 +180,8 @@ import {
   type EvidenceFingerprint as GeneratedEvidenceFingerprint,
   type QueryRuntimeIdentity as GeneratedQueryRuntimeIdentity,
 } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
+import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/agentshim/frontend/v1/slash-menu_pb";
+import { selectedModel, type SelectedModel } from "../../proto/ts/schema-literals.js";
 
 // --- enums ------------------------------------------------------------------
 
@@ -841,49 +843,35 @@ export type ConversationItemArm = (typeof CONVERSATION_ITEM_ARMS)[number];
  * as a closed set.
  *
  * The daemon recognizes one of these before it forwards the submit and pushes
- * a `SessionCommandItem` INSTEAD of a prompt bubble, so this list is also the
- * complete set of things that can suppress a bubble. Anything not named here
- * is a prompt and is always drawn.
+ * a `SessionCommandItem` INSTEAD of a prompt bubble, so this set is also the
+ * complete set of things that can suppress a bubble. Anything not named by the
+ * schema is a prompt and is always drawn.
  *
- * The names are the wire's, minus the `SESSION_COMMAND_` prefix. The slash
- * form a reader sees is derived from them at render time (`sessionCommandLabel`),
- * never carried on the wire: the item deliberately has no text field, which is
- * what makes it structurally incapable of putting the user's `/model opus`
- * back on screen.
+ * DERIVED FROM THE GENERATED ENUM, NOT RESTATED. This was a hand-written list
+ * of thirty names, and `render.ts` held a second hand-written table spelling
+ * each one's slash form; the daemon held a third. Nothing compared them, so a
+ * command added or renamed on the wire left the webapp silently short of it,
+ * with each side's tests passing against its own copy. A new arm now reaches
+ * both the runtime set and the compile-time union with no edit here at all.
+ *
+ * `UNSPECIFIED` is excluded: it names no command, and an item that reports it
+ * is malformed rather than a command the user ran.
  */
-export const SESSION_COMMANDS = [
-  "CLEAR",
-  "COMPACT",
-  "MODEL",
-  "COST",
-  "USAGE",
-  "STATUS",
-  "CONTEXT",
-  "CONFIG",
-  "HELP",
-  "DOCTOR",
-  "LOGIN",
-  "LOGOUT",
-  "MEMORY",
-  "PERMISSIONS",
-  "AGENTS",
-  "MCP",
-  "HOOKS",
-  "OUTPUT_STYLE",
-  "RELEASE_NOTES",
-  "TODOS",
-  "EXPORT",
-  "ADD_DIR",
-  "RESUME",
-  "EXIT",
-  "PRIVACY_SETTINGS",
-  "STATUSLINE",
-  "TERMINAL_SETUP",
-  "VIM",
-  "REWIND",
-  "BUG",
-] as const;
-export type SessionCommand = (typeof SESSION_COMMANDS)[number];
+export type SessionCommand = Exclude<keyof typeof GeneratedSessionCommand, "UNSPECIFIED">;
+
+/**
+ * Every session command, at runtime, in the enum's own order.
+ *
+ * Numeric TypeScript enums carry a reverse mapping, so the numeric keys are
+ * filtered out and only the member names survive.
+ */
+export const SESSION_COMMANDS: readonly SessionCommand[] = Object.keys(GeneratedSessionCommand)
+  .filter((key): key is SessionCommand => key !== "UNSPECIFIED" && Number.isNaN(Number(key)));
+
+/** Whether one string is a session command the schema names. */
+function isSessionCommand(name: string): name is SessionCommand {
+  return name !== "UNSPECIFIED" && Object.hasOwn(GeneratedSessionCommand, name) && Number.isNaN(Number(name));
+}
 
 /**
  * The `SessionCommand` a wire value names.
@@ -894,15 +882,15 @@ export type SessionCommand = (typeof SESSION_COMMANDS)[number];
  * a guessed one would tell the user they ran something they did not.
  */
 export function sessionCommandOf(name: string, where: string): SessionCommand {
-  const known = SESSION_COMMANDS.find(
-    (c) => name === c || name === `SESSION_COMMAND_${c}`,
-  );
-  if (known === undefined) {
+  const short = name.startsWith("SESSION_COMMAND_")
+    ? name.slice("SESSION_COMMAND_".length)
+    : name;
+  if (!isSessionCommand(short)) {
     throw new Error(
       `frontend-proto: ${where}.command has unrecognized value '${name}'`,
     );
   }
-  return known;
+  return short;
 }
 
 // RETIRED: `ErrorClass`, `SystemFailure`, `SystemFailureDetail` and the
@@ -3050,17 +3038,14 @@ const MODEL_OPTION_KEYS = new Set(["value", "displayName", "description"]);
 function decodeModelOption(v: unknown, i: number): ModelOption {
   const o = ensureObject(v, `SessionView.modelOptions[${i}]`);
   rejectUnknown(o, MODEL_OPTION_KEYS, `SessionView.modelOptions[${i}]`);
-  const model = {
-    value: str(o, "value", `SessionView.modelOptions[${i}]`),
+  // The value is CHECKED INTO its type here, at the decode, so nothing
+  // downstream can be handed a picker option that is empty or is the marker —
+  // rendering the marker as a selectable option was the concrete failure.
+  return {
+    value: selectedModel(str(o, "value", `SessionView.modelOptions[${i}]`), `SessionView.modelOptions[${i}].value`),
     displayName: str(o, "displayName", `SessionView.modelOptions[${i}]`),
     description: str(o, "description", `SessionView.modelOptions[${i}]`),
   };
-  if (model.value === "" || model.value.trim() === "<synthetic>") {
-    throw new Error(
-      `frontend-proto: SessionView.modelOptions[${i}] has no selectable model value`,
-    );
-  }
-  return model;
 }
 
 const CONVERSATION_DELTA_KEYS = new Set([
