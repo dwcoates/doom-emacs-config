@@ -3399,12 +3399,12 @@ the spawned agent knows to invoke
                  (regexp-quote (agent-repl--oneshot-create-pr-suffix))
                  captured-prefixed))))))
 
-(ert-deftest agent-repl-test-explanation-engine-oneshot-chains-workspace-merge-after-create-pr ()
-  "The explanation-engine one-shot chains `/create-or-update-workspace merge' AFTER
+(ert-deftest agent-repl-test-explanation-engine-oneshot-chains-workspace-close-after-create-pr ()
+  "The explanation-engine one-shot chains `/create-or-update-workspace close' AFTER
 `/create-or-update-pr' as a second-stage teardown — the prefixed prompt
-must mention `/create-or-update-workspace merge', and it must appear textually AFTER the
+must mention `/create-or-update-workspace close', and it must appear textually AFTER the
 `/create-or-update-pr' reference so the chain reads chronologically
-(implement → PR → CICD → workspace-merge)."
+(implement → PR → CICD → workspace-close)."
   (agent-repl-test--with-clean-state
     (let ((captured-prefixed :unset))
       (cl-letf (((symbol-function 'read-from-minibuffer)
@@ -3416,10 +3416,25 @@ must mention `/create-or-update-workspace merge', and it must appear textually A
         (let ((pr-pos (string-match
                        (regexp-quote agent-repl--oneshot-create-pr-command)
                        captured-prefixed))
-              (merge-pos (string-match "/create-or-update-workspace merge" captured-prefixed)))
+              (close-pos (string-match "/create-or-update-workspace close" captured-prefixed)))
           (should pr-pos)
-          (should merge-pos)
-          (should (< pr-pos merge-pos)))))))
+          (should close-pos)
+          (should (< pr-pos close-pos)))))))
+
+(ert-deftest agent-repl-test-explanation-engine-oneshot-never-instructs-workspace-merge ()
+  "A multi-repo-root one-shot lands its change through CICD, so the
+prefixed prompt must NOT carry a `/create-or-update-workspace merge'
+instruction — a local cherry-pick would duplicate the merge-queue merge."
+  (agent-repl-test--with-clean-state
+    (let ((captured-prefixed :unset))
+      (cl-letf (((symbol-function 'read-from-minibuffer)
+                 (lambda (&rest _) "add caching to thing"))
+                ((symbol-function 'agent-repl--spawn-workspace-generation)
+                 (lambda (_raw prefixed _git-root _base _fork-from &optional _model)
+                   (setq captured-prefixed prefixed))))
+        (agent-repl-create-explanation-engine-oneshot-workspace)
+        (should-not (string-match-p "/create-or-update-workspace merge"
+                                    captured-prefixed))))))
 
 (ert-deftest agent-repl-test-explanation-engine-oneshot-keeps-raw-prompt-clean ()
   "The create-PR suffix is NOT appended to the raw prompt — raw is used
@@ -3558,53 +3573,65 @@ a rename of `agent-repl--workspace-skill' can't leave it behind."
            (regexp-quote (agent-repl--workspace-skill-command "merge"))
            (agent-repl--oneshot-merge-suffix))))
 
-;;;; ---- Tests: (agent-repl--oneshot-create-pr-then-merge-followup) ----
+(ert-deftest agent-repl-test-oneshot-wrapup-command-is-workspace-close ()
+  "The multi-repo-root one-shot's wrap-up verb is `close', built through
+the shared builder — repos that land via CICD must never cherry-pick."
+  (should (equal agent-repl--oneshot-wrapup-command
+                 (agent-repl--workspace-skill-command "close"))))
 
-(ert-deftest agent-repl-test-oneshot-create-pr-then-merge-followup-mentions-workspace-merge ()
-  "The follow-up clause must reference `/create-or-update-workspace merge' — that's the
+;;;; ---- Tests: (agent-repl--oneshot-create-pr-then-close-followup) ----
+
+(ert-deftest agent-repl-test-oneshot-create-pr-then-close-followup-mentions-workspace-close ()
+  "The follow-up clause must reference `/create-or-update-workspace close' — that's the
 slash command the spawned agent invokes once CICD passes."
-  (should (string-match-p "/create-or-update-workspace merge"
-                          (agent-repl--oneshot-create-pr-then-merge-followup))))
+  (should (string-match-p "/create-or-update-workspace close"
+                          (agent-repl--oneshot-create-pr-then-close-followup))))
 
-(ert-deftest agent-repl-test-oneshot-create-pr-then-merge-followup-gates-on-check-cicd-pass ()
-  "The follow-up clause must explicitly gate `/create-or-update-workspace merge' on
+(ert-deftest agent-repl-test-oneshot-create-pr-then-close-followup-forbids-workspace-merge ()
+  "The follow-up clause must never instruct a workspace MERGE — the change
+lands through the merge queue, so a host cherry-pick would duplicate it."
+  (should-not (string-match-p "/create-or-update-workspace merge"
+                              (agent-repl--oneshot-create-pr-then-close-followup))))
+
+(ert-deftest agent-repl-test-oneshot-create-pr-then-close-followup-gates-on-check-cicd-pass ()
+  "The follow-up clause must explicitly gate `/create-or-update-workspace close' on
 `/check-cicd' returning PASS — without this gate the agent could tear
 down the workspace even after a failing CI run."
   (should (string-match-p "/check-cicd"
-                          (agent-repl--oneshot-create-pr-then-merge-followup)))
+                          (agent-repl--oneshot-create-pr-then-close-followup)))
   (should (string-match-p "PASS"
-                          (agent-repl--oneshot-create-pr-then-merge-followup))))
+                          (agent-repl--oneshot-create-pr-then-close-followup))))
 
-(ert-deftest agent-repl-test-oneshot-create-pr-then-merge-followup-stops-on-check-cicd-fail ()
+(ert-deftest agent-repl-test-oneshot-create-pr-then-close-followup-stops-on-check-cicd-fail ()
   "On CICD FAIL the follow-up clause must tell the agent to STOP and NOT
-invoke `/create-or-update-workspace merge' — otherwise a failing CI could still lead to a
+invoke `/create-or-update-workspace close' — otherwise a failing CI could still lead to a
 workspace teardown that loses the editor state without the change landing."
   (should (string-match-p "FAIL"
-                          (agent-repl--oneshot-create-pr-then-merge-followup)))
+                          (agent-repl--oneshot-create-pr-then-close-followup)))
   (should (string-match-p "STOP"
-                          (agent-repl--oneshot-create-pr-then-merge-followup)))
-  ;; The "do NOT invoke /create-or-update-workspace merge" instruction must appear so the
+                          (agent-repl--oneshot-create-pr-then-close-followup)))
+  ;; The "do NOT invoke /create-or-update-workspace close" instruction must appear so the
   ;; agent doesn't mis-read STOP as merely "stop the implementation" and
   ;; still fire the teardown.
-  (should (string-match-p "NOT invoke `/create-or-update-workspace merge`"
-                          (agent-repl--oneshot-create-pr-then-merge-followup))))
+  (should (string-match-p "NOT invoke `/create-or-update-workspace close`"
+                          (agent-repl--oneshot-create-pr-then-close-followup))))
 
-(ert-deftest agent-repl-test-oneshot-create-pr-then-merge-followup-references-create-pr-command ()
+(ert-deftest agent-repl-test-oneshot-create-pr-then-close-followup-references-create-pr-command ()
   "The follow-up clause must name the create-PR command it chains off —
 otherwise the agent has to guess which prior invocation's CICD result
-gates the workspace-merge."
+gates the workspace-close."
   (should (string-match-p
            (regexp-quote agent-repl--oneshot-create-pr-command)
-           (agent-repl--oneshot-create-pr-then-merge-followup))))
+           (agent-repl--oneshot-create-pr-then-close-followup))))
 
 ;;;; ---- Tests: chained suffix integration ----
 
 (ert-deftest agent-repl-test-oneshot-create-pr-suffix-includes-followup ()
-  "The composed create-PR suffix must include the workspace-merge
+  "The composed create-PR suffix must include the workspace-close
 follow-up clause — otherwise the chain is half-wired and the agent only
 gets the first-stage gate."
   (should (string-match-p
-           (regexp-quote (agent-repl--oneshot-create-pr-then-merge-followup))
+           (regexp-quote (agent-repl--oneshot-create-pr-then-close-followup))
            (agent-repl--oneshot-create-pr-suffix))))
 
 (ert-deftest agent-repl-test-oneshot-create-pr-suffix-followup-comes-after-build-suffix ()
@@ -3618,7 +3645,7 @@ on the first-stage invocation's CICD result."
                                   (agent-repl--oneshot-create-pr-suffix)))
          (followup-pos (string-match
                         (regexp-quote
-                         (agent-repl--oneshot-create-pr-then-merge-followup))
+                         (agent-repl--oneshot-create-pr-then-close-followup))
                         (agent-repl--oneshot-create-pr-suffix))))
     (should first-pos)
     (should followup-pos)
@@ -4814,19 +4841,21 @@ waiting for instructions that never arrive."
                   "Only invoke INV when implementation, tests, and commits are all complete and successful. If you cannot accomplish that — for example, due to genuine prompt ambiguity that you cannot reasonably resolve, or because the implementation cannot be completed — STOP and surface the situation to the user instead of pushing on with a faulty implementation. You have artistic license to resolve minor ambiguity by making best-guess judgments, but if there is genuine ambiguity that materially affects the implementation, prefer to stop and surface it."))))
 
 (ert-deftest agent-repl-test-oneshot-create-pr-followup-golden ()
-  "The CICD-gated second stage matches its pre-extraction text."
-  (should (equal (agent-repl--oneshot-create-pr-then-merge-followup)
+  "The CICD-gated second stage matches its expected text."
+  (should (equal (agent-repl--oneshot-create-pr-then-close-followup)
                  (concat
                   "\n\n"
                   "After `" agent-repl--oneshot-create-pr-command "` returns and its "
                   "internal `/check-cicd` (the merge-queue CI run, when "
                   "`--add-to-merge-queue` is in effect) reports PASS, invoke the "
-                  "`/create-or-update-workspace merge` skill to merge this workspace back into its "
-                  "source.\n"
+                  "`/create-or-update-workspace close` skill to close this workspace. "
+                  "Do NOT merge this workspace back into its source: the change lands "
+                  "through CICD, and merging would duplicate it onto the local default "
+                  "branch.\n"
                   "\n"
-                  "Only invoke `/create-or-update-workspace merge` when `/check-cicd` reports PASS. If "
+                  "Only invoke `/create-or-update-workspace close` when `/check-cicd` reports PASS. If "
                   "`/check-cicd` reports FAIL — whether from the PR-level run or the "
-                  "merge-queue run — do NOT invoke `/create-or-update-workspace merge`; STOP and "
+                  "merge-queue run — do NOT invoke `/create-or-update-workspace close`; STOP and "
                   "surface the failing CI to the user instead."))))
 
 (ert-deftest agent-repl-test-workspace-generation-prompt-golden ()

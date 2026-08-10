@@ -634,17 +634,29 @@ defeat the point of moving it out of source."
 as the FIRST stage of the wrap-up.  The PR-creation flow pushes the
 branch and queues it for merge directly (which makes sense for a service
 repo) and runs `/check-cicd' internally; on CICD PASS the second stage
-(see `agent-repl--oneshot-create-pr-then-merge-followup') chains
-`/create-or-update-workspace merge' to tear down the editor workspace.")
+(see `agent-repl--oneshot-create-pr-then-close-followup') chains
+`agent-repl--oneshot-wrapup-command' to tear down the editor workspace.")
 
-(defconst agent-repl--oneshot-create-pr-then-merge-followup-file
-  "oneshot-create-pr-then-merge-followup.md"
+(defconst agent-repl--oneshot-wrapup-command
+  (agent-repl--workspace-skill-command "close")
+  "Workspace verb the explanation-engine one-shot invokes as the SECOND
+stage of the wrap-up, once `/check-cicd' reports PASS.
+
+`close' rather than `merge': a repo under
+`agent-repl-multi-repo-root-env' lands its change through the PR and
+merge queue, so cherry-picking the branch onto the local default branch
+(what `merge' does) would duplicate the commits the CICD merge already
+owns.  Closing tears the editor workspace down and leaves the git
+history entirely to CICD.")
+
+(defconst agent-repl--oneshot-create-pr-then-close-followup-file
+  "oneshot-create-pr-then-close-followup.md"
   "Prompt file holding the CICD-gated second stage of the wrap-up.
-See `agent-repl--oneshot-create-pr-then-merge-followup'.")
+See `agent-repl--oneshot-create-pr-then-close-followup'.")
 
-(defun agent-repl--oneshot-create-pr-then-merge-followup ()
+(defun agent-repl--oneshot-create-pr-then-close-followup ()
   "Return the second-stage gate appended to the create-pr suffix.
-Chains `/create-or-update-workspace merge\' onto a successful
+Chains `agent-repl--oneshot-wrapup-command\' onto a successful
 `/check-cicd\' result so the explanation-engine one-shot tears down its
 editor workspace once the PR has landed cleanly in the merge queue.
 
@@ -653,14 +665,16 @@ the two gates are structurally distinct: the first gates on
 implementation/tests/commits, the second gates on a slash-command\'s
 CICD result emitted by a downstream skill.
 
-`agent-repl--oneshot-create-pr-command\' is SUBSTITUTED in rather than
-written into the prompt file: it is the exact slash command the agent
-must invoke, and the same string is documented elsewhere in this file,
-so letting the two spellings drift would leave the agent invoking a
-command the flow does not expect."
+`agent-repl--oneshot-create-pr-command\' and
+`agent-repl--oneshot-wrapup-command\' are SUBSTITUTED in rather than
+written into the prompt file: they are the exact slash commands the
+agent must invoke, and the same strings are documented elsewhere in
+this file, so letting the spellings drift would leave the agent
+invoking a command the flow does not expect."
   (agent-repl--prompt
-   agent-repl--oneshot-create-pr-then-merge-followup-file
-   `(("create_pr_command" . ,agent-repl--oneshot-create-pr-command))))
+   agent-repl--oneshot-create-pr-then-close-followup-file
+   `(("create_pr_command" . ,agent-repl--oneshot-create-pr-command)
+     ("wrapup_command" . ,agent-repl--oneshot-wrapup-command))))
 
 (defun agent-repl--oneshot-create-pr-suffix ()
   "Return the suffix for the explanation-engine one-shot flow.
@@ -669,9 +683,9 @@ Two-stage gate:
      `agent-repl--oneshot-create-pr-command' (push + queue + internal
      `/check-cicd').
   2. `/check-cicd' reports PASS → invoke
-     `/create-or-update-workspace merge' to merge this workspace back
-     into its source.  On CICD FAIL the agent must STOP rather than
-     invoke `/create-or-update-workspace merge'.
+     `agent-repl--oneshot-wrapup-command' to close this workspace
+     without merging it locally.  On CICD FAIL the agent must STOP
+     rather than invoke `agent-repl--oneshot-wrapup-command'.
 
 A FUNCTION rather than a `defconst' so both underlying prompt files are
 read on every use."
@@ -679,7 +693,7 @@ read on every use."
    (agent-repl--build-oneshot-success-suffix
     (concat "`" agent-repl--oneshot-create-pr-command "`")
     "push and queue this branch for merge")
-   (agent-repl--oneshot-create-pr-then-merge-followup)))
+   (agent-repl--oneshot-create-pr-then-close-followup)))
 
 ;;; Amended-oneshot tracking and per-flavor prompt queue
 
@@ -1552,11 +1566,12 @@ deviations:
      explanation-engine repo regardless of the calling workspace.
   2. The spawned agent is instructed to invoke
      `agent-repl--oneshot-create-pr-command' on success (push the
-     branch and queue it for merge) instead of
-     `/create-or-update-workspace merge' (host cherry-pick + reload).
-     The cherry-pick/reload procedure makes sense for doom-config but
-     not for a service repo where the change should land via the normal
-     PR flow.
+     branch and queue it for merge) and then, once CICD passes,
+     `agent-repl--oneshot-wrapup-command' (close, no cherry-pick)
+     instead of `/create-or-update-workspace merge' (host cherry-pick +
+     reload).  The cherry-pick/reload procedure makes sense for
+     doom-config but not for a service repo where the change should
+     land via the normal PR flow.
 
 MODEL, when non-nil, is the per-workspace agent model alias the spawned
 workspace's initial session boots under (supplied by the `SPC j C-O'
