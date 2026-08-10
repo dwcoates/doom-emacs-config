@@ -180,6 +180,58 @@ func TestTheReleaseRefusesToOpenAnotherJobsGate(t *testing.T) {
 	}
 }
 
+func TestAnAbandonedHoldOpensItsWorktreesGate(t *testing.T) {
+	// Arrange — a creation that died before it was ever materialized, whose
+	// hold has been given its terminal disposition. Nothing will ever
+	// acknowledge it, so the gate must not go on holding its frames.
+	job := heldJob()
+	job.State = workspacecreate.StateFailed
+	job.PublicationAbandoned = true
+	job.PublicationAbandonedReason = string(workspacecreate.AbandonTerminalFailure)
+	bridge := gateFixture(t, job)
+
+	// Act
+	decision, err := bridge.SessionPublicationDecision("/worktrees/held", "s_held")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SessionPublicationDecision: %v", err)
+	}
+	if !decision.Materialized {
+		t.Fatal("an abandoned hold is still gating its worktree's frames")
+	}
+}
+
+func TestAnAbandonedJobIsNotReplayedToTheHost(t *testing.T) {
+	// Arrange — the connect snapshot is the second path to the host and the one
+	// a daemon restart cannot silence, so it must honour the disposition too.
+	job := heldJob()
+	job.PublicationAbandoned = true
+	job.PublicationAbandonedReason = string(workspacecreate.AbandonWorktreeGone)
+	bridge := gateFixture(t, job)
+
+	// Act
+	work := bridge.SnapshotHostWork()
+
+	// Assert
+	if len(work.WorkspaceAvailable) != 0 {
+		t.Fatalf("replayed workspace-available frames = %d, want 0 for an abandoned job", len(work.WorkspaceAvailable))
+	}
+}
+
+func TestAParkedJobIsStillReplayedToTheHost(t *testing.T) {
+	// Arrange — the replay must keep carrying the jobs it exists for.
+	bridge := gateFixture(t, heldJob())
+
+	// Act
+	work := bridge.SnapshotHostWork()
+
+	// Assert
+	if len(work.WorkspaceAvailable) != 1 {
+		t.Fatalf("replayed workspace-available frames = %d, want 1", len(work.WorkspaceAvailable))
+	}
+}
+
 // inertCreateStage satisfies every collaborator the create manager demands at
 // construction. These tests exercise the publication gate, which reads the
 // durable store directly, so nothing here is ever called.
