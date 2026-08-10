@@ -1498,3 +1498,86 @@ func TestResultUUIDsDifferPerTurn(t *testing.T) {
 		t.Fatalf("two turns share the uuid %q", first.GetItems()[0].GetUuid())
 	}
 }
+
+// --- eventDerivedUUID ------------------------------------------------------
+
+// TestEventDerivedUUIDPrefersTheDedupKey covers the invariant the helper
+// guarantees for all three of its callers (clear, compact, result): a deduped
+// event's identity IS its dedup key, whatever kind asked for it.
+func TestEventDerivedUUIDPrefersTheDedupKey(t *testing.T) {
+	// Arrange.
+	ev := &corev1.Event{SessionId: "s1", Seq: 41, DedupKey: "d-1"}
+
+	// Act + Assert.
+	for _, kind := range []string{"clear", "compact", "result"} {
+		if got := eventDerivedUUID(ev, kind); got != "d-1" {
+			t.Fatalf("eventDerivedUUID(%q) = %q, want %q", kind, got, "d-1")
+		}
+	}
+}
+
+// TestEventDerivedUUIDDerivesFromKindSessionAndSeq covers the un-deduped
+// branch: the derived form names the kind, so the three id spaces never
+// overlap even at the same store position.
+func TestEventDerivedUUIDDerivesFromKindSessionAndSeq(t *testing.T) {
+	// Arrange.
+	ev := &corev1.Event{SessionId: "s1", Seq: 41}
+	want := map[string]string{
+		"clear":   "clear:s1:41",
+		"compact": "compact:s1:41",
+		"result":  "result:s1:41",
+	}
+
+	// Act + Assert.
+	for kind, w := range want {
+		if got := eventDerivedUUID(ev, kind); got != w {
+			t.Fatalf("eventDerivedUUID(%q) = %q, want %q", kind, got, w)
+		}
+	}
+}
+
+// TestEveryIdentityLessItemUsesTheSharedDerivation is the anti-drift test: a
+// clear, a compaction and a result must all reach their uuid through
+// eventDerivedUUID, so a hand-rolled fourth site cannot pass silently.
+func TestEveryIdentityLessItemUsesTheSharedDerivation(t *testing.T) {
+	// Arrange — one un-deduped event per kind at the SAME store position, so
+	// only the shared derivation's kind prefix can tell them apart.
+	at41 := func(payload any) *corev1.Event {
+		ev := &corev1.Event{SessionId: "s1", Seq: 41, ProducedAtMs: producedMs}
+		switch p := payload.(type) {
+		case *corev1.ContextCleared:
+			ev.Payload = &corev1.Event_ContextCleared{ContextCleared: p}
+		case *corev1.ContextCompacted:
+			ev.Payload = &corev1.Event_ContextCompacted{ContextCompacted: p}
+		case *datav1.ResultMessage:
+			ev.Payload = &corev1.Event_Vendor{Vendor: mustAny(t, p)}
+		default:
+			t.Fatalf("unhandled payload %T", payload)
+		}
+		return ev
+	}
+	cases := []struct {
+		kind    string
+		payload any
+		want    string
+	}{
+		{"clear", &corev1.ContextCleared{}, "clear:s1:41"},
+		{"compact", &corev1.ContextCompacted{}, "compact:s1:41"},
+		{"result", &datav1.ResultMessage{Subtype: datav1.ResultSubtype_RESULT_SUBTYPE_SUCCESS}, "result:s1:41"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.kind, func(t *testing.T) {
+			// Act.
+			got, _, err := conversationDeltaFromEvent("ws", "s1", at41(tc.payload))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("conversationDeltaFromEvent: %v", err)
+			}
+			if uuid := got.GetItems()[0].GetUuid(); uuid != tc.want {
+				t.Fatalf("uuid = %q, want %q", uuid, tc.want)
+			}
+		})
+	}
+}
