@@ -310,6 +310,15 @@ type WorkspaceHostWorkSnapshot struct {
 // *sessioncontroller.Manager.
 type Resyncer interface {
 	ResyncForGeneration(workspace, expectedSessionID, expectedGenerationID string, fromSeq uint64) error
+	// ConversationPage serves ONE page of history: the newest N top-level items
+	// for a cold open, or the N before a cursor for a load-more.
+	//
+	// It rides this port rather than one of its own because it answers the same
+	// question from the same authority — "give this frontend the conversation" —
+	// under the same identity ladder, and one implementation satisfies both. A
+	// separate port would be a second thing to wire, and a daemon that wired one
+	// and not the other would answer half of a frontend's history needs.
+	ConversationPage(ctx context.Context, workspace, expectedSessionID, expectedGenerationID string, anchor sessioncontroller.PageAnchor) (*frontendv1.ConversationPage, error)
 }
 
 // SessionCreateDeleter is the daemon-core session-lifecycle surface behind the
@@ -1420,6 +1429,67 @@ func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, 
 		return classifyStaleFenceResync(err)
 	}
 	return nil
+}
+
+// ConversationPage drives the COLD-OPEN half of a frontend's history: the
+// newest N top-level items, or the N before a cursor.
+//
+// It reads the SAME fence the resync reads, through the same splitter, for the
+// same reason: a page is a replay, and one served against a generation the
+// client never saw is a page of somebody else's conversation. The refusal takes
+// the resync's remedy too — a view whose history request is refused is stuck
+// until it reloads, whichever request it was.
+//
+// THE ANCHOR ONEOF IS PROVED HERE, not defaulted. A command with neither arm
+// set is refused rather than read as a tail: defaulting would turn a client bug
+// into a silent full-tail read on every workspace it reached, and the daemon
+// would have no record that anything was wrong.
+//
+// A nil resyncer is a construction error, not a degraded mode: the command
+// exists, so something must answer it.
+func (h *commandHandler) ConversationPage(ctx context.Context, workspace, requestID string, cmd *frontendv1.ConversationPageCmd) (*frontendv1.ConversationPage, error) {
+	sessionID, generationID := ssm.SplitFence(cmd.GetFence())
+	anchor, err := pageAnchorFrom(cmd)
+	if err != nil {
+		h.logf("frontend cmd: conversation_page ws=%s request_id=%s session=%s generation=%s REFUSED: %v",
+			workspace, requestID, sessionID, generationID, err)
+		return nil, err
+	}
+	h.logf("frontend cmd: conversation_page ws=%s request_id=%s session=%s generation=%s anchor=%s limit=%d",
+		workspace, requestID, sessionID, generationID, pageAnchorKind(anchor), anchor.Limit)
+	if h.resyncer == nil {
+		h.logf("frontend cmd: conversation_page ws=%s request_id=%s FAILED — no resyncer is wired, so the conversation page cannot be served at all",
+			workspace, requestID)
+		return nil, fmt.Errorf("frontend cmd: conversation_page ws=%s request_id=%s: no resyncer wired for the conversation page", workspace, requestID)
+	}
+	page, err := h.resyncer.ConversationPage(ctx, workspace, sessionID, generationID, anchor)
+	if err != nil {
+		h.logf("frontend cmd: conversation_page ws=%s request_id=%s session=%s generation=%s anchor=%s FAILED: %v",
+			workspace, requestID, sessionID, generationID, pageAnchorKind(anchor), err)
+		return nil, classifyStaleFenceResync(err)
+	}
+	return page, nil
+}
+
+// pageAnchorFrom resolves the wire anchor oneof, refusing a command that set
+// neither arm.
+func pageAnchorFrom(cmd *frontendv1.ConversationPageCmd) (sessioncontroller.PageAnchor, error) {
+	switch a := cmd.GetAnchor().(type) {
+	case *frontendv1.ConversationPageCmd_Tail:
+		return sessioncontroller.PageAnchor{Tail: true, Limit: a.Tail.GetLimit()}, nil
+	case *frontendv1.ConversationPageCmd_Before:
+		return sessioncontroller.PageAnchor{Cursor: a.Before.GetCursor(), Limit: a.Before.GetLimit()}, nil
+	default:
+		return sessioncontroller.PageAnchor{}, fmt.Errorf("frontend cmd: conversation_page carries neither a tail nor a before anchor, and a page is never defaulted to a tail read")
+	}
+}
+
+// pageAnchorKind names the anchor for the log line.
+func pageAnchorKind(a sessioncontroller.PageAnchor) string {
+	if a.Tail {
+		return "tail"
+	}
+	return "before"
 }
 
 // staleFenceResync carries the REMEDY for a resync the eligibility ladder

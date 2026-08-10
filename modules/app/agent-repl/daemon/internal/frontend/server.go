@@ -1494,6 +1494,37 @@ func (s *Server) processCommand(t *commandTicket) {
 		s.enqueueResyncSnapshot(cl, cmd, "before_dispatch")
 		ackLane = bulkLane
 	}
+	// THE ONE COMMAND THAT IS ACKED BEFORE IT RUNS.
+	//
+	// A conversation page is a bounded read whose answer is a PUSH: the page
+	// frame carries the request_id, so the client correlates on that rather
+	// than on the ack. What the ack is needed for is the opposite thing — to
+	// stop the request looking unanswered while the read is in progress.
+	//
+	// That matters because of what an unanswered history request has already
+	// been observed to do here. A resync whose ack outran the client's deadline
+	// made the client re-arm another one, whose ack was also late, and the
+	// observed command queue reached 5,069 entries settling 420-550 SECONDS
+	// after they were sent (connect-resync.ts, lanes.go). A page is served from
+	// a store read of a conversation that may hold a quarter of a million
+	// events, so it is exactly the shape that trips that cascade. Acking at
+	// ACCEPTANCE removes the trigger by construction rather than by hoping the
+	// read is fast: there is no window in which the client is waiting on an ack
+	// at all.
+	//
+	// It is not a claim the page was assembled — no client reads it as one,
+	// because the page itself is what carries the items. A read that then FAILS
+	// still answers, with a second, failing ack under the same request id; the
+	// page client tracks its own in-flight ids and is what routes that late
+	// refusal to the failure sink (command-dispatch.ts).
+	pageCommand := cmd.GetConversationPage() != nil
+	if pageCommand {
+		s.enqueuePageAccepted(t)
+		// The page rides the BULK lane with the feed content it is: a page can
+		// be thousands of items, and putting it on the control lane would park
+		// every ack behind it.
+		ackLane = bulkLane
+	}
 	dispatchStart := time.Now()
 	var response *frontendv1.FrontendFrame
 	ack, response = s.dispatchClientCommand(cl, cmd)
@@ -1519,6 +1550,18 @@ func (s *Server) processCommand(t *commandTicket) {
 			// reaches the client ahead of the ack that completes it.
 			s.enqueue(cl, outFrame{control: ackLane == controlLane, data: data})
 		}
+	}
+	// A PAGE COMMAND HAS ALREADY BEEN ACKED, at acceptance. What is left is the
+	// one case acceptance could not speak for: the read FAILED, so no page is
+	// coming, and saying nothing would leave the client's load-more spinning
+	// against a request that will never answer. The refusal goes out under the
+	// same request id, and it is deliberately the only second ack this server
+	// ever sends.
+	if pageCommand {
+		if !ack.GetOk() {
+			s.enqueuePageRefusal(cl, ack, ackLane)
+		}
+		return
 	}
 	// NO COALESCE KEY. This frame used to be pushed under coalesceKey(response)
 	// — the OTHER frame's key — so a command whose response was supersedable
@@ -1649,6 +1692,54 @@ func (s *Server) answerAccepted(t *commandTicket, label, note string) {
 	// The CONTROL lane, unlike a performed resync's ack: this one carries no
 	// snapshot, so there is no bulk frame it must stay behind.
 	s.enqueue(cl, outFrame{control: true, data: data, notify: t.ackDisposed})
+}
+
+// pageAcceptedAckNote is the account an accepted-at-enqueue page ack carries.
+// Prose only — no client parses it — so a captured ack explains itself without
+// a reader having to correlate the daemon log.
+const pageAcceptedAckNote = "conversation page accepted; the page itself arrives as a pushed frame carrying this request id"
+
+// enqueuePageAccepted answers a conversation page command AT ACCEPTANCE, before
+// the read runs. See the call site for why this one command is acked early.
+//
+// It owns the ticket's ack accounting exactly as processCommand's own ack does:
+// the delivery this declares is the moment the CLIENT's wait ends, which for a
+// page really is here, because nothing it does next is gated on the ack.
+func (s *Server) enqueuePageAccepted(t *commandTicket) {
+	ack := &frontendv1.CommandAck{
+		RequestId: t.cmd.GetRequestId(),
+		Ok:        true,
+		Error:     pageAcceptedAckNote,
+	}
+	data, err := marshalFrame(CommandAckFrame(ack))
+	if err != nil {
+		s.logf("frontend: marshal conversation page acceptance ack request_id=%s: %v", ack.GetRequestId(), err)
+		t.ackUndeliverable(fmt.Errorf("frontend: marshal conversation page acceptance ack: %w", err))
+		return
+	}
+	// Declared before the push for the same reason processCommand declares it
+	// there: the writer may dispose of these bytes the instant they are queued.
+	t.expectAckDelivery()
+	// The CONTROL lane: an acceptance carries nothing bulky, and its whole
+	// purpose is to reach the client before the read it precedes.
+	s.enqueue(t.cl, outFrame{control: true, data: data, notify: t.ackDisposed})
+}
+
+// enqueuePageRefusal delivers the SECOND ack a page command can receive: the
+// one that says the read failed and no page is coming.
+//
+// It carries no ticket disposition, because the ticket's ack was already
+// delivered at acceptance and a command records ONE latency sample. What this
+// adds is the client-facing fact acceptance could not carry.
+func (s *Server) enqueuePageRefusal(c *client, ack *frontendv1.CommandAck, ackLane lane) {
+	data, err := marshalFrame(CommandAckFrame(ack))
+	if err != nil {
+		s.logf("frontend: marshal conversation page refusal request_id=%s: %v — the client's page request is left unanswered", ack.GetRequestId(), err)
+		return
+	}
+	s.logf("frontend: conversation page REFUSED request_id=%s — sending the refusal under the same request id the acceptance used: %s",
+		ack.GetRequestId(), ack.GetError())
+	s.enqueue(c, outFrame{control: ackLane == controlLane, data: data})
 }
 
 // recordCommandLatency persists one command lifecycle sample — a completion, or
