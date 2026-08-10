@@ -659,42 +659,14 @@ func (c *consumer) settleWindowsOnInterrupt(reason string) {
 	// carries the newest seq the session has SEEN rather than a seq of its own:
 	// through_seq is the client's replay cursor and inventing a number ahead of
 	// the stream would move it past events it never received.
-	c.publishWindowSettle(push, c.newestRetainedSeq())
+	c.publishControlSettle(push, c.newestRetainedSeq(), "window")
 }
 
-// windowSettlePush turns one settlement into its push, classifying a refusal
-// exactly as every other async refusal is classified.
+// windowSettlePush turns one window settlement into its push, classifying a
+// refusal exactly as every other async refusal is classified.
 func (c *consumer) windowSettlePush(ups []*frontendv1.AsyncBubbleUpdate, err error, where string) asyncPush {
-	var push asyncPush
-	gaps, residual := splitAsyncGaps(err)
-	push.Faults = append(push.Faults, gaps...)
-	if residual != nil {
+	return c.controlSettlePush(ups, err, func(residual error) {
 		c.warn("session-controller: WINDOW BUBBLE SETTLE DEGRADED session=%s ws=%q %s — the window is closed so the feed is restored, but its bubble will render as still live: %v",
 			c.sessionID, c.workspace, where, residual)
-	}
-	push.Updates = append(push.Updates, ups...)
-	return push
-}
-
-// publishWindowSettle pushes a settlement that no store event produced.
-//
-// It goes out through the SAME frame every async push uses, fenced and
-// sequenced identically, so a reconnecting client applies it with the same
-// staleness rule as any other push.
-func (c *consumer) publishWindowSettle(push asyncPush, throughSeq uint64) {
-	for _, fault := range push.Faults {
-		c.warn("session-controller: WINDOW SETTLE FAULT session=%s ws=%q card_uuid=%s — %s",
-			c.sessionID, c.workspace, fault.UUID, fault.Detail)
-	}
-	if len(push.Updates) == 0 {
-		return
-	}
-	c.logf("session-controller: window settle push session=%s ws=%q through_seq=%d updates=%s",
-		c.sessionID, c.workspace, throughSeq, updatedBubbleIDs(push.Updates))
-	c.push.PushAsyncBubbleDelta(&frontendv1.AsyncBubbleDelta{
-		Workspace:  c.workspace,
-		Updates:    push.Updates,
-		ThroughSeq: throughSeq,
-		Fence:      c.fence(),
 	})
 }
