@@ -202,15 +202,56 @@ func awaitPendingPermission(t *testing.T, conn *websocket.Conn, workspace, what 
 	t.Helper()
 	var id string
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
-		what: func(frame *frontendv1.FrontendFrame) bool {
-			if got := pendingPermissionIn(frame, workspace); got != "" {
-				id = got
-				return true
-			}
-			return false
-		},
+		what: pendingPermissionMatcher(workspace, &id),
 	})
 	return id
+}
+
+// pendingPermissionMatcher is the await predicate for "this frame carries a
+// pending permission for workspace", capturing its uuid into id.
+//
+// It is a shared constructor rather than a closure written at each await
+// because the capture is the part that goes wrong: an await that matches
+// without storing the id returns "" and the answer that follows is aimed at
+// nothing. Both permission awaits below take the same one.
+func pendingPermissionMatcher(workspace string, id *string) func(*frontendv1.FrontendFrame) bool {
+	return func(frame *frontendv1.FrontendFrame) bool {
+		if got := pendingPermissionIn(frame, workspace); got != "" {
+			*id = got
+			return true
+		}
+		return false
+	}
+}
+
+// operationalMatcher is the await predicate for "the successor has painted
+// workspace OPERATIONAL", which is the reattach handshake having completed.
+//
+// One definition, because it is the settle edge every post-bounce await has to
+// be measured against: the daemon reaches it from the ShimReady hook
+// (sessioncontroller noteConnectivity, cause "shim_ready") and therefore only
+// after everything the shim sent ahead of that ack has been ingested. An await
+// that spelled its own version of this could disagree about what settled means.
+func operationalMatcher(workspace string) (string, func(*frontendv1.FrontendFrame) bool) {
+	return "the successor painting " + workspace + " OPERATIONAL, which is the reattach handshake having completed",
+		func(frame *frontendv1.FrontendFrame) bool {
+			return isOperationalState(workspaceStateFor(frame, workspace), workspace)
+		}
+}
+
+// isOperationalState is the settle edge itself, over the WorkspaceState rather
+// than over the frame carrying it.
+//
+// It is the innermost definition because the edge is read from two different
+// shapes — pushed frames on a socket, and the state log's own channel
+// (promptreceiptreplay_e2e_test.go, awaitOperational) — and the transport a
+// state arrived over says nothing about whether it is settled. A nil state is
+// not operational: workspaceStateFor answers nil for a frame belonging to
+// another workspace, and reading "no state" as settled would resume a test
+// against a successor that has not handshaked.
+func isOperationalState(st *frontendv1.WorkspaceState, workspace string) bool {
+	return st.GetWorkspace() == workspace &&
+		st.GetConnectivity() == frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_OPERATIONAL
 }
 
 // awaitReattachedPendingPermission is awaitPendingPermission for a socket dialled
@@ -231,17 +272,10 @@ func awaitPendingPermission(t *testing.T, conn *websocket.Conn, workspace, what 
 func awaitReattachedPendingPermission(t *testing.T, conn *websocket.Conn, workspace, what string) string {
 	t.Helper()
 	var id string
+	settledName, settled := operationalMatcher(workspace)
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
-		"the successor painting " + workspace + " OPERATIONAL, which is the reattach handshake having completed": func(frame *frontendv1.FrontendFrame) bool {
-			return workspaceStateFor(frame, workspace).GetConnectivity() == frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_OPERATIONAL
-		},
-		what: func(frame *frontendv1.FrontendFrame) bool {
-			if got := pendingPermissionIn(frame, workspace); got != "" {
-				id = got
-				return true
-			}
-			return false
-		},
+		settledName: settled,
+		what:        pendingPermissionMatcher(workspace, &id),
 	})
 	return id
 }
@@ -393,10 +427,9 @@ func reattachedSnapshot(t *testing.T, b *shutdownBoot, workspace string) (string
 		t.Fatalf("first /frontend frame on the settle watch = %T, want a StateSnapshot", first.GetFrame())
 	}
 	b.sweepRecheckWhenParked(t, sessionID)
+	settledName, settled := operationalMatcher(workspace)
 	awaitAll(t, watch, nil, map[string]func(*frontendv1.FrontendFrame) bool{
-		"the successor painting " + workspace + " OPERATIONAL, which is the reattach handshake having completed": func(frame *frontendv1.FrontendFrame) bool {
-			return workspaceStateFor(frame, workspace).GetConnectivity() == frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_OPERATIONAL
-		},
+		settledName: settled,
 	})
 	return sessionID, connectSnapshot(t, b)
 }

@@ -120,8 +120,7 @@ export class ConnectResync {
     if (this.daemonBootId === bootId) return false;
     const previous = this.daemonBootId;
     this.daemonBootId = bootId;
-    this.armed = true;
-    this.snapshotSeen = true;
+    this.rearm();
     this.opts.log?.(
       "warn",
       `resync: daemon identity changed ${previous} -> ${bootId}; adopting it and re-arming a resync ` +
@@ -141,9 +140,25 @@ export class ConnectResync {
    * precondition every other resync does.
    */
   forceResync(reason: string): void {
+    this.rearm();
+    this.opts.log?.("info", `resync: re-armed on ${reason}`);
+  }
+
+  /**
+   * Owe one resync on the CURRENT connection, without waiting for a socket
+   * event to supply the arming.
+   *
+   * Both out-of-band triggers — a changed daemon identity, and the page coming
+   * back into view — mean the same thing: this page may be behind and no socket
+   * event is going to say so. Each needs the snapshot precondition satisfied as
+   * well as the arm, because there is no connect snapshot coming for a socket
+   * that never cycled, and an arm without it would sit waiting for one forever.
+   * Stating that pair once is what keeps a third trigger from setting only half
+   * of it.
+   */
+  private rearm(): void {
     this.armed = true;
     this.snapshotSeen = true;
-    this.opts.log?.("info", `resync: re-armed on ${reason}`);
   }
 
   /** A socket opened: this connection owes one resync. */
