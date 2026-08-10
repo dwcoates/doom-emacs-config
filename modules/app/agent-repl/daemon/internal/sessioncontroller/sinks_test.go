@@ -13,6 +13,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/ssm"
 
 	"google.golang.org/protobuf/types/known/anypb"
@@ -194,6 +195,10 @@ type fakeApplier struct {
 	// activeTurnIDsErr fails the durable turn-claim READ, which is what a drain
 	// hold falls back from when it cannot name the turn it is waiting on.
 	activeTurnIDsErr error
+	// turnClaimExistsErr fails the ledger PROBE an unknown-fate submit is
+	// reconciled against, which is what leaves a redelivery unable to prove the
+	// timed-out submit did not land.
+	turnClaimExistsErr error
 	// synthesizedCauses records one entry per SynthesizeTurnClose call — the
 	// terminal causes the daemon ended a turn claim with when no TurnEnded
 	// could ever arrive for it.
@@ -929,7 +934,10 @@ func (a *fakeApplier) resolveTurnLifecycle(_ string, _ string, _ string, ev *cor
 		}
 		for _, active := range a.turns {
 			if id != "" && active == id {
-				return before, before, false, fmt.Errorf("duplicate active turn %q", id)
+				// The real ledger names this refusal with a sentinel so the
+				// consumer can scope it to the turn; the fake mirrors it, or
+				// the translation under test would never be exercised.
+				return before, before, false, fmt.Errorf("%w: duplicate active turn %q", ssm.ErrTurnStartConflict, id)
 			}
 		}
 		a.starts[key] = ev.GetSeq()
@@ -1029,6 +1037,28 @@ func (a *fakeApplier) ActiveTurnIDs(_ string, _ string) ([]string, error) {
 		return nil, a.activeTurnIDsErr
 	}
 	return append([]string(nil), a.turns...), nil
+}
+
+// TurnClaimExists mirrors the ledger probe an unknown-fate submit is
+// reconciled against: it answers for every identity the fake ever opened a
+// claim under, whether or not that claim is still open.
+func (a *fakeApplier) TurnClaimExists(_ string, turnID string) (bool, error) {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	if a.turnClaimExistsErr != nil {
+		return false, a.turnClaimExistsErr
+	}
+	for key := range a.starts {
+		if strings.HasPrefix(key, turnID+":") {
+			return true, nil
+		}
+	}
+	for _, active := range a.turns {
+		if active == turnID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // SynthesizeTurnClose ends every active claim, exactly as the SSM's does, and
@@ -1754,6 +1784,50 @@ func TestApplyRejectsFileTurnEndBeforeQueueAndStateConsumers(t *testing.T) {
 		!strings.Contains(joined, "seq=12891") ||
 		!strings.Contains(joined, "active_after=[turn-new]") {
 		t.Fatalf("turn authority log = %q", joined)
+	}
+}
+
+// The consumer is where a ledger refusal becomes a verdict about the SESSION,
+// so it is where a turn-identity conflict must be declared turn-scoped instead.
+func TestApplyScopesATurnStartConflictToTheTurn(t *testing.T) {
+	tests := []struct {
+		name        string
+		second      *corev1.Event
+		wantScoped  bool
+		wantRefused bool
+	}{
+		{
+			name:        "a second start claims a turn identity that is still open",
+			second:      turnStartEvent(corev1.Plane_PLANE_STREAM, 2, "turn-1"),
+			wantScoped:  true,
+			wantRefused: true,
+		},
+		{
+			name:        "an end names a turn the ledger never opened",
+			second:      turnEndEvent(corev1.Plane_PLANE_STREAM, 2, "turn-other"),
+			wantScoped:  false,
+			wantRefused: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, nil)
+			if err := c.Apply(turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "turn-1")); err != nil {
+				t.Fatalf("first start: %v", err)
+			}
+
+			// Act.
+			err := c.Apply(tc.second)
+
+			// Assert.
+			if (err != nil) != tc.wantRefused {
+				t.Fatalf("apply err = %v, want refused=%v", err, tc.wantRefused)
+			}
+			if scoped := errors.Is(err, shimclient.ErrTurnScopedRejection); scoped != tc.wantScoped {
+				t.Fatalf("apply err = %v, scoped=%v, want scoped=%v", err, scoped, tc.wantScoped)
+			}
+		})
 	}
 }
 

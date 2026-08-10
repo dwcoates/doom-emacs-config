@@ -159,8 +159,25 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		*corev1.Event_TaskProgress,
 		*corev1.Event_TaskEnded:
 		if err := c.cfg.StateSink.Apply(ev); err != nil {
-			return fmt.Errorf("%w session=%s seq=%d kind=%T: %v",
-				ErrLifecycleRejected, ev.GetSessionId(), ev.GetSeq(), p, err)
+			if !errors.Is(err, ErrTurnScopedRejection) {
+				return fmt.Errorf("%w session=%s seq=%d kind=%T: %v",
+					ErrLifecycleRejected, ev.GetSessionId(), ev.GetSeq(), p, err)
+			}
+			// THE SINK SCOPED THIS REFUSAL TO ONE TURN. It stays an error and
+			// it stays loud, but the link is not torn down and the mark is
+			// allowed past the event: a refusal that keeps the cursor pinned
+			// replays forever, which is exactly how one rejected duplicate turn
+			// made a session unresumable across every later resume.
+			c.logError("TURN-SCOPED LIFECYCLE REJECTION session=%s seq=%d kind=%T: %v — the sink refused this event for its own turn only, so the connection survives and the durable mark advances past it rather than replaying it on every resume",
+				ev.GetSessionId(), ev.GetSeq(), p, err)
+			if c.cfg.Degraded != nil {
+				// nil envelope: this is the DAEMON's report about its own
+				// refusal, not a row read off the durable sequence.
+				c.cfg.Degraded.Degraded(c.cfg.SessionID, nil, &corev1.DegradedState{
+					Component: "daemon-turn-ledger",
+					Reason:    err.Error(),
+				})
+			}
 		}
 	case *corev1.Event_SessionRewound:
 		// A REAL ROUTE, not the default FrameSink fallthrough it used to take.

@@ -4,13 +4,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/registry"
+	"claude-repld/internal/shimclient"
 )
 
 // queueEntry is one prompt the daemon is holding because the session's turn
@@ -73,6 +76,21 @@ type queueEntry struct {
 	// prompt is actually delivered or cancelled, or a second crash in the
 	// window would lose the very prompt the row exists to save.
 	drainRowPending bool
+
+	// deliveryAttempts counts the FAILED delivery attempts this entry has
+	// made. It is what bounds the redelivery retry (armDeliveryRetry).
+	deliveryAttempts int
+
+	// unknownFate marks an entry whose LAST delivery attempt timed out on the
+	// shim's control ack rather than being refused.
+	//
+	// A timeout is not a failure: the shim may have taken the prompt and started
+	// its turn while the ack was still in flight. Redelivering such an entry
+	// blindly resubmits its turn identity, and a second `TurnStarted` under one
+	// identity is the duplicate that used to sever the session on every resume.
+	// So the flag survives the requeue and the next delivery reconciles against
+	// the durable ledger before submitting anything.
+	unknownFate bool
 
 	// keepAliveHoldTurnID names the in-flight cache keep-alive turn holding
 	// this entry, and is empty for every ordinary entry.
@@ -1040,6 +1058,29 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs in
 // Routing through forwardPrompt is also what gives a HELD `/clear` the same
 // reading an immediate one gets: it is recognized, echoed to nobody, and opens
 // the clearing axis. This path used to recognize nothing at all.
+// requeueAtHead puts an UNDELIVERED entry back at the head of the queue and
+// republishes it, which is the one shape every refused or failed delivery
+// takes: a prompt that did not reach the shim is still the user's and still
+// owed, so it is never dropped and never silently reordered.
+//
+// mutate runs under the manager mutex, immediately before the entry goes back,
+// and is where a caller records WHY (a verdict, a rationale, a cleared runner
+// flag). record runs after the mutex is released and before the publication, so
+// the log still precedes the frames a client acts on. Either may be nil.
+func (m *Manager) requeueAtHead(d *sessionController, e *queueEntry, mutate func(), record func()) {
+	m.mu.Lock()
+	if mutate != nil {
+		mutate()
+	}
+	d.queue.pushFront(e)
+	view, recs := m.publishQueueLocked(d)
+	m.mu.Unlock()
+	if record != nil {
+		record()
+	}
+	m.publish(d.sessionID, view, recs)
+}
+
 func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	// THE DRAIN LEASE'S BACKSTOP, at the one funnel every delivery reaches.
 	// Every selection path already refuses a parked entry; this is what makes a
@@ -1047,13 +1088,10 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	// merely unlikely to. It is a loud requeue, never a silent drop: the prompt
 	// is still the user's and still owed.
 	if e.drainHeld() {
-		m.mu.Lock()
-		d.queue.pushFront(e)
-		view, recs := m.publishQueueLocked(d)
-		m.mu.Unlock()
-		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q schedule=%s — the entry is parked by a scheduled shutdown's drain lease and a delivery path selected it anyway; requeued at the head, nothing was submitted",
-			e.id, d.sessionID, d.workspace, e.shutdownHoldScheduleID)
-		m.publish(d.sessionID, view, recs)
+		m.requeueAtHead(d, e, nil, func() {
+			m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q schedule=%s — the entry is parked by a scheduled shutdown's drain lease and a delivery path selected it anyway; requeued at the head, nothing was submitted",
+				e.id, d.sessionID, d.workspace, e.shutdownHoldScheduleID)
+		})
 		return
 	}
 	// THE KEEP-ALIVE HOLD'S BACKSTOP, at the same funnel and for the same
@@ -1061,13 +1099,10 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	// very keep-alive turns the rewind exists to discard, which is worse than
 	// delaying it: the ping would become permanent context.
 	if e.keepAliveHeld() {
-		m.mu.Lock()
-		d.queue.pushFront(e)
-		view, recs := m.publishQueueLocked(d)
-		m.mu.Unlock()
-		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q keep_alive_turn=%s — the entry is held behind an in-flight cache keep-alive turn and a delivery path selected it anyway; requeued at the head, nothing was submitted",
-			e.id, d.sessionID, d.workspace, e.keepAliveHoldTurnID)
-		m.publish(d.sessionID, view, recs)
+		m.requeueAtHead(d, e, nil, func() {
+			m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q keep_alive_turn=%s — the entry is held behind an in-flight cache keep-alive turn and a delivery path selected it anyway; requeued at the head, nothing was submitted",
+				e.id, d.sessionID, d.workspace, e.keepAliveHoldTurnID)
+		})
 		return
 	}
 	// THE REVIVAL HOLD'S BACKSTOP, at the same funnel and for the same reason.
@@ -1076,13 +1111,10 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	// paying for — and forwardPrompt's own gate would nack it anyway, marking a
 	// prompt ERROR that nothing was wrong with. Requeued at the head, loudly.
 	if e.revivalHeld() {
-		m.mu.Lock()
-		d.queue.pushFront(e)
-		view, recs := m.publishQueueLocked(d)
-		m.mu.Unlock()
-		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q revival_session=%s — the entry is parked by an in-flight compact-first revival and a delivery path selected it anyway; requeued at the head, nothing was submitted",
-			e.id, d.sessionID, d.workspace, e.revivalHoldSessionID)
-		m.publish(d.sessionID, view, recs)
+		m.requeueAtHead(d, e, nil, func() {
+			m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q revival_session=%s — the entry is parked by an in-flight compact-first revival and a delivery path selected it anyway; requeued at the head, nothing was submitted",
+				e.id, d.sessionID, d.workspace, e.revivalHoldSessionID)
+		})
 		return
 	}
 	// THE STALE-BUILD REFRESH HOLD'S BACKSTOP, at the same funnel and for the
@@ -1091,13 +1123,16 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	// and the prompt would be lost in the very restart that was supposed to
 	// deliver it. Requeued at the head, loudly.
 	if e.buildRefreshHeld() {
-		m.mu.Lock()
-		d.queue.pushFront(e)
-		view, recs := m.publishQueueLocked(d)
-		m.mu.Unlock()
-		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q build_refresh_session=%s — the entry is parked behind an armed or running stale-build refresh and a delivery path selected it anyway; requeued at the head, nothing was submitted",
-			e.id, d.sessionID, d.workspace, e.buildRefreshHoldSessionID)
-		m.publish(d.sessionID, view, recs)
+		m.requeueAtHead(d, e, nil, func() {
+			m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q build_refresh_session=%s — the entry is parked behind an armed or running stale-build refresh and a delivery path selected it anyway; requeued at the head, nothing was submitted",
+				e.id, d.sessionID, d.workspace, e.buildRefreshHoldSessionID)
+		})
+		return
+	}
+	// THE UNKNOWN-FATE RECONCILIATION, ahead of every submit and not merely
+	// ahead of the retry that motivated it: an entry whose last attempt timed
+	// out may already be running under this very identity.
+	if e.unknownFate && m.settleUnknownFateDelivery(d, e) {
 		return
 	}
 	err := m.forwardPrompt(m.rootCtx, d, e.requestID, e.text, e.promptOrigin.String(), e.permissionMode, e.promptOrigin, submitterUser)
@@ -1115,22 +1150,196 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 		}
 		return
 	}
-	m.logf("session-controller: queue delivery FAILED entry=%s session=%s ws=%q: %v (prompt requeued)",
-		e.id, d.sessionID, d.workspace, err)
+	unknownFate := errors.Is(err, shimclient.ErrAckTimeout)
+	m.logf("session-controller: queue delivery FAILED entry=%s session=%s ws=%q unknown_fate=%v: %v (prompt requeued)",
+		e.id, d.sessionID, d.workspace, unknownFate, err)
+	if unknownFate {
+		m.logf("session-controller: queue delivery UNKNOWN FATE entry=%s session=%s ws=%q turn_id=%q — the control request timed out, so the shim may hold this prompt already; the entry keeps its identity and the NEXT delivery reconciles it against the durable turn ledger before submitting anything",
+			e.id, d.sessionID, d.workspace, e.requestID)
+	}
 
+	var attempt int
+	m.requeueAtHead(d, e, func() {
+		e.unknownFate = e.unknownFate || unknownFate
+		e.deliveryAttempts++
+		attempt = e.deliveryAttempts
+		e.interjecting = false
+		e.classification = VerdictError
+		e.rationale = fmt.Sprintf("delivery failed: %v", err)
+		// No turn started, so nothing is running alone against the paused queue.
+		// Leaving the flag set would make the pause wait on a turn end that can
+		// never arrive. The entry keeps its head-jump claim and gets another
+		// chance at the next boundary.
+		d.pausedRunner = false
+	}, nil)
+	// THE ENTRY NO LONGER WAITS FOR WHATEVER EDGE COMES NEXT. See
+	// armDeliveryRetry: an interject whose stop already ended the turn has no
+	// boundary left to wait for at all.
+	m.armDeliveryRetry(d, e.id, attempt)
+}
+
+// The bounded redelivery of a FAILED delivery.
+//
+// A failed delivery used to wait for an external edge — the next turn boundary,
+// a bring-up, or a user force — and nothing guaranteed one was coming. An
+// interject whose stop had already ended the turn had no boundary left to wait
+// for at all, so the prompt sat in the queue until something unrelated moved:
+// ninety-six seconds, in the observed case, for a prompt the user had watched
+// leave their editor.
+//
+// The retry is short, jittered and BOUNDED. Jittered because a fleet of
+// workspaces reconnecting to one shim host would otherwise retry in lockstep;
+// bounded because a prompt that cannot be delivered five times is not going to
+// be delivered by a sixth attempt, and the entry stays queued and visible with
+// its ERROR verdict rather than spinning forever.
+const (
+	deliveryRetryBase     = 2 * time.Second
+	deliveryRetryCeiling  = 15 * time.Second
+	deliveryRetryAttempts = 5
+)
+
+// deliveryRetryDelay is the backoff for one attempt, jittered by fraction (in
+// [0,1)). It is a pure function so the schedule is testable without a clock.
+func deliveryRetryDelay(attempt int, fraction float64) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	backoff := deliveryRetryBase
+	for i := 1; i < attempt && backoff < deliveryRetryCeiling; i++ {
+		backoff *= 2
+	}
+	if backoff > deliveryRetryCeiling {
+		backoff = deliveryRetryCeiling
+	}
+	// Jitter spreads the attempt over the half-interval ABOVE the backoff, so a
+	// retry is never earlier than the backoff it was chosen for.
+	return backoff + time.Duration(fraction*float64(backoff)/2)
+}
+
+// retryJitterFraction draws the jitter from crypto/rand, which is already this
+// file's randomness source. A failure to draw is not a reason to skip the retry
+// and not a reason to hide the draw: the schedule falls back to NO jitter,
+// which is the unjittered backoff rather than a wrong delay.
+func (m *Manager) retryJitterFraction() float64 {
+	var b [2]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		m.errorf("session-controller: delivery retry jitter UNDRAWABLE: %v — the retry keeps its backoff without jitter", err)
+		return 0
+	}
+	return float64(uint16(b[0])<<8|uint16(b[1])) / float64(1<<16)
+}
+
+// armDeliveryRetry schedules one bounded redelivery of a requeued entry.
+func (m *Manager) armDeliveryRetry(d *sessionController, entryID string, attempt int) {
+	if attempt > deliveryRetryAttempts {
+		m.warnf("session-controller: queue delivery RETRIES EXHAUSTED entry=%s session=%s ws=%q attempts=%d — the prompt stays queued and visible with its ERROR verdict, and is delivered by the next turn boundary or a user force",
+			entryID, d.sessionID, d.workspace, attempt-1)
+		return
+	}
+	delay := deliveryRetryDelay(attempt, m.retryJitterFraction())
+	m.logf("session-controller: queue delivery RETRY ARMED entry=%s session=%s ws=%q attempt=%d delay_ms=%d — a failed delivery used to wait for whatever external edge came next, which is why a prompt could sit for a minute and a half",
+		entryID, d.sessionID, d.workspace, attempt, delay.Milliseconds())
+	m.afterFunc(delay, func() { m.retryFailedDelivery(d, entryID) })
+}
+
+// retryFailedDelivery redelivers a requeued entry if the session is still in a
+// state that may take one.
+//
+// It selects nothing the ordinary drain would not: a turn in flight or a paused
+// queue means the boundary owns the next delivery, and this attempt stands
+// down rather than racing it.
+func (m *Manager) retryFailedDelivery(d *sessionController, entryID string) {
+	if m.rootCtx.Err() != nil {
+		return
+	}
 	m.mu.Lock()
-	e.interjecting = false
-	e.classification = VerdictError
-	e.rationale = fmt.Sprintf("delivery failed: %v", err)
-	// No turn started, so nothing is running alone against the paused queue.
-	// Leaving the flag set would make the pause wait on a turn end that can
-	// never arrive. The entry keeps its head-jump claim and gets another
-	// chance at the next boundary.
-	d.pausedRunner = false
-	d.queue.pushFront(e)
+	e := d.queue.get(entryID)
+	switch {
+	case e == nil:
+		m.mu.Unlock()
+		m.logf("session-controller: queue delivery retry MOOT entry=%s session=%s ws=%q — the entry was delivered or cancelled while the retry was armed",
+			entryID, d.sessionID, d.workspace)
+		return
+	case d.turn.active():
+		m.mu.Unlock()
+		m.logf("session-controller: queue delivery retry STOOD DOWN entry=%s session=%s ws=%q reason=turn_in_flight — the turn boundary owns the next delivery",
+			entryID, d.sessionID, d.workspace)
+		return
+	case d.paused && !e.headJump:
+		m.mu.Unlock()
+		m.logf("session-controller: queue delivery retry STOOD DOWN entry=%s session=%s ws=%q reason=queue_paused — a paused queue delivers only the prompt the user typed after stopping",
+			entryID, d.sessionID, d.workspace)
+		return
+	}
+	e = d.queue.remove(entryID)
+	if e == nil {
+		m.mu.Unlock()
+		m.errorf("session-controller: queue delivery retry LOST entry=%s session=%s ws=%q — the entry was present a statement ago and cannot be taken now",
+			entryID, d.sessionID, d.workspace)
+		return
+	}
+	if e.headJump {
+		d.pausedRunner = true
+	}
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
+	m.logf("session-controller: queue delivering entry=%s (delivery retry) session=%s ws=%q attempt=%d",
+		e.id, d.sessionID, d.workspace, e.deliveryAttempts+1)
 	m.publish(d.sessionID, view, recs)
+	m.deliver(d, e)
+}
+
+// settleUnknownFateDelivery reconciles an entry whose last delivery timed out
+// against the durable turn ledger, and reports whether the delivery is FINISHED
+// without a submit.
+//
+// A timed-out control request has an unknown fate by definition: the shim may
+// have taken the prompt and started its turn while the ack was still in flight.
+// The queue used to redeliver on the timeout alone, which resubmitted the same
+// turn identity — and a second `TurnStarted` under one identity was fatal to the
+// session, permanently, because the duplicate is durable in the vendor stream
+// and every resume replayed it.
+//
+// The ledger is the authority the reconciliation asks, and it is asked HERE
+// rather than at the moment of the timeout because the answer is only settled
+// once the shim's own stream has caught up. Delivery happens on a turn boundary
+// off that same ordered stream, so by this line the ledger already knows about
+// anything the shim produced before it.
+func (m *Manager) settleUnknownFateDelivery(d *sessionController, e *queueEntry) bool {
+	landed, err := m.cfg.SSM.TurnClaimExists(d.workspace, e.requestID)
+	if err != nil {
+		// UNPROVABLE IS NOT ABSENT. With the ledger unreadable there is no
+		// evidence that the prompt did NOT land, and submitting on no evidence
+		// is exactly the mint this path exists to prevent. The prompt keeps its
+		// place, says why, and gets another chance at the next boundary.
+		m.requeueAtHead(d, e, func() {
+			e.classification = VerdictError
+			e.rationale = fmt.Sprintf("unknown-fate reconciliation failed: %v", err)
+			d.pausedRunner = false
+		}, func() {
+			m.errorf("session-controller: queue delivery WITHHELD entry=%s session=%s ws=%q turn_id=%q: reconciling an unknown-fate submit against the durable turn ledger failed: %v — the prompt is NOT resubmitted, because a redelivery that cannot rule out a landed submit is what mints a duplicate turn identity",
+				e.id, d.sessionID, d.workspace, e.requestID, err)
+		})
+		return true
+	}
+	if !landed {
+		m.logf("session-controller: queue delivery RECONCILED entry=%s session=%s ws=%q turn_id=%q verdict=absent — the ledger opened no claim under this identity, so the timed-out submit never landed and the redelivery may reuse it",
+			e.id, d.sessionID, d.workspace, e.requestID)
+		return false
+	}
+	m.mu.Lock()
+	e.unknownFate = false
+	d.pausedRunner = false
+	if e.drainRowPending {
+		e.drainRowPending = false
+		defer m.releaseDrainRow(e.id, "delivered")
+	}
+	view, recs := m.publishQueueLocked(d)
+	m.mu.Unlock()
+	m.logf("session-controller: queue delivery SETTLED WITHOUT RESUBMIT entry=%s session=%s ws=%q turn_id=%q verdict=landed — the ledger holds a claim under this identity, so the timed-out submit did reach the shim; the entry leaves the queue instead of minting a duplicate turn start",
+		e.id, d.sessionID, d.workspace, e.requestID)
+	m.publish(d.sessionID, view, recs)
+	return true
 }
 
 // classify runs the injected classifier for one entry and applies the verdict.

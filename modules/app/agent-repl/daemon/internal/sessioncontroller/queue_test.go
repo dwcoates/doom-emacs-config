@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -1571,5 +1573,454 @@ func TestPingTurnEndWithNothingHeldTakesNoRewindClaim(t *testing.T) {
 	defer m.mu.Unlock()
 	if got, claimed := m.keepAliveRewinds["ws"]; claimed {
 		t.Fatalf("rewind claim = %q for a ping nothing was waiting on, want none", got)
+	}
+}
+
+// --- the one requeue shape ---------------------------------------------------
+
+// Every refused or failed delivery goes back to the HEAD, never to the back and
+// never nowhere: a prompt that did not reach the shim is still the user's and
+// still owed, and reordering it would run the user's work out of the order they
+// asked for.
+func TestRequeueAtHeadRestoresTheEntryAhead(t *testing.T) {
+	// Arrange: two prompts are queued behind a running turn.
+	h := newQueueHarness(t, nil)
+	h.turn(true)
+	if err := h.submit("first"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if err := h.submit("second"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	waitFor(t, "both prompts queued", func() bool { return len(h.entries()) == 2 })
+	d := h.controller()
+	headID := h.entries()[0].id
+	h.m.mu.Lock()
+	taken := d.queue.remove(headID)
+	h.m.mu.Unlock()
+
+	// Act.
+	mutated := false
+	recorded := false
+	h.requeue(taken, func() { mutated = true }, func() { recorded = true })
+
+	// Assert.
+	if got := h.texts(); len(got) != 2 || got[0] != "first" {
+		t.Fatalf("queued entries = %v, want the requeued prompt back at the head", got)
+	}
+	if !mutated || !recorded {
+		t.Fatalf("requeue hooks = mutate:%v record:%v, want both run", mutated, recorded)
+	}
+}
+
+// requeue is the harness's route to the shared requeue helper.
+func (h *queueHarness) requeue(e *queueEntry, mutate, record func()) {
+	h.t.Helper()
+	h.m.requeueAtHead(h.controller(), e, mutate, record)
+}
+
+// Every delivery refusal in deliver() uses that one helper, so a hand-rolled
+// site that forgot the publication or the head position would fail here.
+func TestEveryDeliveryRefusalGoesThroughTheSharedRequeue(t *testing.T) {
+	// Arrange.
+	src, err := os.ReadFile("queue.go")
+	if err != nil {
+		t.Fatalf("read queue.go: %v", err)
+	}
+	body := string(src)
+	deliver := body[strings.Index(body, "func (m *Manager) deliver(d *sessionController, e *queueEntry) {"):]
+	deliver = deliver[:strings.Index(deliver, "\n// The bounded redelivery")]
+
+	// Act / Assert: the only pushFront in the package's delivery paths is the
+	// helper's own.
+	if strings.Contains(deliver, "d.queue.pushFront(e)") {
+		t.Fatal("deliver() requeues an entry by hand; every refusal must go through requeueAtHead")
+	}
+	if n := strings.Count(deliver, "m.requeueAtHead("); n < 5 {
+		t.Fatalf("deliver() reaches the shared requeue %d times, want every refusal and the failure path", n)
+	}
+}
+
+// --- the bounded delivery retry ---------------------------------------------
+
+// A failed delivery used to wait for whatever external edge came next, and an
+// interject whose stop had already ended the turn had no boundary left to wait
+// for at all.
+
+func TestTheDeliveryRetryBackoffIsBoundedAndJitteredUpward(t *testing.T) {
+	tests := []struct {
+		name     string
+		attempt  int
+		fraction float64
+		want     time.Duration
+	}{
+		{name: "the first attempt takes the base", attempt: 1, fraction: 0, want: 2 * time.Second},
+		{name: "the backoff doubles", attempt: 3, fraction: 0, want: 8 * time.Second},
+		{name: "the backoff is capped", attempt: 9, fraction: 0, want: 15 * time.Second},
+		{name: "the jitter only ever adds", attempt: 1, fraction: 0.5, want: 2500 * time.Millisecond},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act.
+			got := deliveryRetryDelay(tc.attempt, tc.fraction)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("deliveryRetryDelay(%d, %v) = %s, want %s", tc.attempt, tc.fraction, got, tc.want)
+			}
+		})
+	}
+}
+
+// retryClock captures the armed retries instead of waiting them out.
+type retryClock struct {
+	mu     sync.Mutex
+	delays []time.Duration
+	fire   []func()
+}
+
+func (c *retryClock) afterFunc(d time.Duration, f func()) *time.Timer {
+	c.mu.Lock()
+	c.delays = append(c.delays, d)
+	c.fire = append(c.fire, f)
+	c.mu.Unlock()
+	notifyTestActivity()
+	return time.NewTimer(time.Hour)
+}
+
+// armed reports how many retries have been scheduled.
+func (c *retryClock) armed() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.delays)
+}
+
+// fireNext runs the nth armed retry.
+func (c *retryClock) fireNext(n int) {
+	c.mu.Lock()
+	f := c.fire[n]
+	c.mu.Unlock()
+	f()
+}
+
+// newRetryHarness is the queue harness with the retry timer captured.
+func newRetryHarness(t *testing.T) (*queueHarness, *retryClock) {
+	t.Helper()
+	clock := &retryClock{}
+	h := newQueueHarness(t, nil)
+	// Bound before anything can fail a delivery: the manager is single-threaded
+	// until the first submit, so nothing is reading this yet.
+	h.m.afterFunc = clock.afterFunc
+	return h, clock
+}
+
+func TestAFailedDeliveryArmsARetryWithinSeconds(t *testing.T) {
+	// Arrange.
+	h, clock := newRetryHarness(t)
+	queueOneBehindATurn(t, h, "queued")
+	h.client.mu.Lock()
+	h.client.submitErrOnce = errors.New("shim gone")
+	h.client.mu.Unlock()
+
+	// Act.
+	h.turn(false)
+
+	// Assert: the prompt no longer waits on an edge that may never come.
+	waitFor(t, "the retry to be armed", func() bool { return clock.armed() == 1 })
+	clock.mu.Lock()
+	defer clock.mu.Unlock()
+	if got := clock.delays[0]; got < deliveryRetryBase || got > deliveryRetryCeiling*2 {
+		t.Fatalf("first retry delay = %s, want it inside the bounded seconds-scale window", got)
+	}
+}
+
+func TestAnArmedRetryRedeliversTheEntry(t *testing.T) {
+	// Arrange: one delivery failed and its retry is armed.
+	h, clock := newRetryHarness(t)
+	queueOneBehindATurn(t, h, "queued")
+	h.client.mu.Lock()
+	h.client.submitErrOnce = errors.New("shim gone")
+	h.client.mu.Unlock()
+	h.turn(false)
+	waitFor(t, "the retry to be armed", func() bool { return clock.armed() == 1 })
+
+	// Act.
+	clock.fireNext(0)
+
+	// Assert.
+	waitFor(t, "the retried delivery", func() bool {
+		return reflect.DeepEqual(h.client.promptTexts(), []string{"queued"})
+	})
+}
+
+func TestTheDeliveryRetryStandsDownWhileATurnIsRunning(t *testing.T) {
+	// Arrange: a delivery failed, and a new turn started before the retry fired.
+	h, clock := newRetryHarness(t)
+	queueOneBehindATurn(t, h, "queued")
+	h.client.mu.Lock()
+	h.client.submitErrOnce = errors.New("shim gone")
+	h.client.mu.Unlock()
+	h.turn(false)
+	waitFor(t, "the retry to be armed", func() bool { return clock.armed() == 1 })
+	h.turn(true)
+
+	// Act.
+	clock.fireNext(0)
+
+	// Assert: the turn boundary owns the next delivery, so nothing races it.
+	if got := h.client.promptTexts(); len(got) != 0 {
+		t.Fatalf("submitted prompts = %v, want none while a turn is in flight", got)
+	}
+	if got := len(h.entries()); got != 1 {
+		t.Fatalf("queued entries = %d, want the prompt still held", got)
+	}
+}
+
+func TestTheDeliveryRetryIsBounded(t *testing.T) {
+	// Arrange: every delivery fails.
+	h, clock := newRetryHarness(t)
+	queueOneBehindATurn(t, h, "queued")
+	h.controller().client = &failingClient{err: errors.New("shim gone")}
+
+	// Act: the boundary delivers, and every armed retry is fired.
+	h.turn(false)
+	for n := 0; n < deliveryRetryAttempts; n++ {
+		waitFor(t, "the next retry to be armed", func() bool { return clock.armed() == n+1 })
+		clock.fireNext(n)
+	}
+
+	// Assert: the attempts stop, and the prompt is still queued and visible.
+	if got := clock.armed(); got != deliveryRetryAttempts {
+		t.Fatalf("armed retries = %d, want exactly %d", got, deliveryRetryAttempts)
+	}
+	if got := h.texts(); len(got) != 1 || got[0] != "queued" {
+		t.Fatalf("queued entries = %v, want the undelivered prompt retained", got)
+	}
+}
+
+// --- the explicit-interrupt bypass ------------------------------------------
+
+// A message-style stop used to ride the queue through the classifier's model
+// round trip before its interrupt reached the shim.
+func TestAnExplicitStopInterruptsWithoutAskingTheClassifier(t *testing.T) {
+	tests := []struct {
+		name           string
+		text           string
+		wantInterrupts int
+		wantClassified int
+	}{
+		{name: "the prompt is a bare stop", text: "stop", wantInterrupts: 1, wantClassified: 0},
+		{name: "the prompt is ordinary work", text: "add a test for the parser", wantInterrupts: 0, wantClassified: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a turn is running, and the classifier BLOCKS, so a path
+			// that consults it cannot reach the shim while this test looks.
+			cls := &fakeClassifier{release: make(chan struct{})}
+			t.Cleanup(func() { close(cls.release) })
+			h := newQueueHarness(t, cls)
+			h.turn(true)
+
+			// Act.
+			if err := h.submit(tc.text); err != nil {
+				t.Fatalf("submit: %v", err)
+			}
+
+			// Assert.
+			waitFor(t, "the stop to reach the shim", func() bool {
+				return h.client.interruptCount() == tc.wantInterrupts &&
+					len(cls.requests()) == tc.wantClassified
+			})
+		})
+	}
+}
+
+func TestAnExplicitStopTakesTheInterjectVerdict(t *testing.T) {
+	// Arrange.
+	cls := &fakeClassifier{release: make(chan struct{})}
+	t.Cleanup(func() { close(cls.release) })
+	h := newQueueHarness(t, cls)
+	h.turn(true)
+
+	// Act.
+	if err := h.submit("stop"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert: the entry carries the verdict the classifier would have given it,
+	// so the frontend renders a decided prompt rather than a pending one.
+	waitFor(t, "the bypassed verdict", func() bool {
+		es := h.entries()
+		return len(es) == 1 && es[0].classification == VerdictInterject
+	})
+}
+
+// --- the unknown-fate submit ------------------------------------------------
+//
+// A control request that TIMES OUT has not failed: the shim may hold the prompt
+// already. Redelivering on the timeout alone resubmits the turn identity, and a
+// second `TurnStarted` under one identity used to sever the session on every
+// resume.
+
+// queueOneBehindATurn queues one prompt behind a running turn and returns the
+// request id it was submitted under.
+func queueOneBehindATurn(t *testing.T, h *queueHarness, text string) string {
+	t.Helper()
+	h.turn(true)
+	if err := h.submit(text); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	waitFor(t, "the prompt to be queued", func() bool { return len(h.entries()) == 1 })
+	return h.entries()[0].requestID
+}
+
+func TestOnlyATimedOutDeliveryLeavesTheEntryUnknownFate(t *testing.T) {
+	tests := []struct {
+		name            string
+		submitErr       error
+		wantUnknownFate bool
+	}{
+		{name: "the shim never acked the submit", submitErr: shimclient.ErrAckTimeout, wantUnknownFate: true},
+		{name: "the shim refused the submit", submitErr: errors.New("shim gone"), wantUnknownFate: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newQueueHarness(t, nil)
+			queueOneBehindATurn(t, h, "queued")
+			h.client.mu.Lock()
+			h.client.submitErrOnce = tc.submitErr
+			h.client.mu.Unlock()
+
+			// Act: the turn ends and the entry is delivered into that failure.
+			h.turn(false)
+
+			// Assert.
+			waitFor(t, "the failed delivery to requeue", func() bool {
+				es := h.entries()
+				return len(es) == 1 && es[0].classification == VerdictError
+			})
+			if got := h.entries()[0].unknownFate; got != tc.wantUnknownFate {
+				t.Fatalf("entry unknownFate = %v, want %v", got, tc.wantUnknownFate)
+			}
+		})
+	}
+}
+
+func TestAnUnknownFateRedeliveryReconcilesBeforeResubmitting(t *testing.T) {
+	tests := []struct {
+		name        string
+		claimLanded bool
+		wantRecord  string
+		wantTexts   []string
+	}{
+		{
+			name:        "the ledger proves the timed-out submit landed",
+			claimLanded: true,
+			wantRecord:  "queue delivery SETTLED WITHOUT RESUBMIT",
+			wantTexts:   nil,
+		},
+		{
+			name:        "the ledger proves no claim was ever opened",
+			claimLanded: false,
+			wantRecord:  "queue delivery RECONCILED",
+			wantTexts:   []string{"queued"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: one delivery has already timed out.
+			cl := &logCapture{}
+			h := newQueueHarnessWithPusher(t, nil, nil, cl.logf)
+			requestID := queueOneBehindATurn(t, h, "queued")
+			h.client.mu.Lock()
+			h.client.submitErrOnce = shimclient.ErrAckTimeout
+			h.client.mu.Unlock()
+			h.turn(false)
+			waitFor(t, "the unknown-fate requeue", func() bool {
+				es := h.entries()
+				return len(es) == 1 && es[0].unknownFate
+			})
+			if tc.claimLanded {
+				if _, err := h.applier.ApplyTurnBoundary("ws", "s1", "",
+					turnStartEvent(corev1.Plane_PLANE_STREAM, 41, requestID)); err != nil {
+					t.Fatalf("record the landed turn: %v", err)
+				}
+			}
+
+			// Act: the next boundary redelivers the entry.
+			h.turn(false)
+
+			// Assert.
+			waitFor(t, tc.wantRecord, func() bool { return cl.contains(tc.wantRecord) })
+			waitFor(t, "the redelivery to settle", func() bool {
+				h.client.mu.Lock()
+				defer h.client.mu.Unlock()
+				return reflect.DeepEqual(h.client.prompts, tc.wantTexts)
+			})
+		})
+	}
+}
+
+func TestAnUnknownFateRedeliveryReusesTheOriginalIdentity(t *testing.T) {
+	// Arrange: a timed-out delivery the ledger proves never landed.
+	h := newQueueHarness(t, nil)
+	requestID := queueOneBehindATurn(t, h, "queued")
+	h.client.mu.Lock()
+	h.client.submitErrOnce = shimclient.ErrAckTimeout
+	h.client.mu.Unlock()
+	h.turn(false)
+	waitFor(t, "the unknown-fate requeue", func() bool {
+		es := h.entries()
+		return len(es) == 1 && es[0].unknownFate
+	})
+
+	// Act.
+	h.turn(false)
+
+	// Assert: nothing was re-minted, so the prompt keeps the name the frontend
+	// and the durable receipt already know it by.
+	waitFor(t, "the redelivery", func() bool {
+		h.client.mu.Lock()
+		defer h.client.mu.Unlock()
+		return len(h.client.requestIDs) == 1
+	})
+	h.client.mu.Lock()
+	defer h.client.mu.Unlock()
+	if !reflect.DeepEqual(h.client.requestIDs, []string{requestID}) {
+		t.Fatalf("submitted request ids = %v, want [%s]", h.client.requestIDs, requestID)
+	}
+}
+
+func TestAnUnprovableUnknownFateWithholdsTheResubmit(t *testing.T) {
+	// Arrange: a timed-out delivery whose ledger probe cannot be read.
+	h := newQueueHarness(t, nil)
+	queueOneBehindATurn(t, h, "queued")
+	h.client.mu.Lock()
+	h.client.submitErrOnce = shimclient.ErrAckTimeout
+	h.client.mu.Unlock()
+	h.turn(false)
+	waitFor(t, "the unknown-fate requeue", func() bool {
+		es := h.entries()
+		return len(es) == 1 && es[0].unknownFate
+	})
+	h.applier.reconcMutex.Lock()
+	h.applier.turnClaimExistsErr = errors.New("ledger unreadable")
+	h.applier.reconcMutex.Unlock()
+
+	// Act.
+	h.turn(false)
+
+	// Assert: unprovable is not absent, so the prompt keeps its place instead of
+	// being resubmitted under an identity that may already be running.
+	waitFor(t, "the withheld redelivery", func() bool {
+		es := h.entries()
+		return len(es) == 1 && es[0].classification == VerdictError &&
+			strings.Contains(es[0].rationale, "unknown-fate reconciliation failed")
+	})
+	h.client.mu.Lock()
+	defer h.client.mu.Unlock()
+	if len(h.client.prompts) != 0 {
+		t.Fatalf("submitted prompts = %v, want none", h.client.prompts)
 	}
 }

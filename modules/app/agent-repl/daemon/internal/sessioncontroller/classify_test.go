@@ -443,3 +443,34 @@ func TestCLIClassifierRejectsMissingLogger(t *testing.T) {
 		(&CLIClassifier{run: stubRun(tokenHold, nil, &[]string{})}).Classify(context.Background(), ClassifyRequest{})
 	})
 }
+
+// --- the explicit-interrupt bypass ------------------------------------------
+
+// A bare stop must never pay for a model round trip, and a prompt that merely
+// MENTIONS stopping must never be mistaken for one.
+func TestIsExplicitInterruptMatchesOnlyABareStop(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{name: "the bare word", text: "stop", want: true},
+		{name: "trailing punctuation and case", text: "STOP!", want: true},
+		{name: "a polite stop", text: "  please stop  ", want: true},
+		{name: "a stop with inner whitespace", text: "stop\t\tit", want: true},
+		{name: "a task that mentions stopping", text: "stop the server once the build finishes", want: false},
+		{name: "a question about stopping", text: "why did you stop", want: false},
+		{name: "an empty prompt", text: "   ", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act.
+			got := IsExplicitInterrupt(tc.text)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("IsExplicitInterrupt(%q) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+}

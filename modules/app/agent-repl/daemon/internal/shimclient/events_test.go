@@ -104,6 +104,90 @@ func TestRejectedLifecycleEventDoesNotAdvanceHighWater(t *testing.T) {
 	}
 }
 
+// A sink may declare a lifecycle refusal to be about ONE TURN. That refusal
+// must not end the session, and it must not pin the durable mark behind the
+// event either: a pinned mark replays the same refusal on every resume, which
+// is how a single duplicate turn identity made sessions permanently unusable.
+func TestTurnScopedLifecycleRejectionIsNotTerminal(t *testing.T) {
+	tests := []struct {
+		name         string
+		sinkErr      error
+		wantTerminal bool
+		wantMark     uint64
+	}{
+		{
+			name:         "the sink scoped the refusal to the turn",
+			sinkErr:      fmt.Errorf("%w: duplicate turn start identity %q", ErrTurnScopedRejection, "turn-1"),
+			wantTerminal: false,
+			wantMark:     7,
+		},
+		{
+			name:         "the sink refused without scoping the refusal",
+			sinkErr:      errors.New("durable turn claim rejected"),
+			wantTerminal: true,
+			wantMark:     0,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness()
+			h.state.err = tc.sinkErr
+			c := New(h.config(t, "sess-1", "/unused.sock"))
+			ev := &corev1.Event{
+				SessionId: "sess-1", Seq: 7,
+				Plane:   corev1.Plane_PLANE_STREAM,
+				Class:   corev1.EventClass_EVENT_CLASS_PERSISTENT,
+				Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn-1"}},
+			}
+
+			// Act.
+			err := c.dispatchEvent(ev)
+			<-h.state.ch
+
+			// Assert.
+			if terminal := errors.Is(err, ErrLifecycleRejected); terminal != tc.wantTerminal {
+				t.Fatalf("dispatch err = %v, terminal=%v, want terminal=%v", err, terminal, tc.wantTerminal)
+			}
+			// The in-memory mark is what a reattach resubscribes from. The
+			// durable cursor stays pinned behind an open start either way, and
+			// is released by that turn's own end.
+			if c.lastSeen != tc.wantMark {
+				t.Fatalf("client mark after rejection = %d, want %d", c.lastSeen, tc.wantMark)
+			}
+		})
+	}
+}
+
+func TestTurnScopedLifecycleRejectionIsReportedAsDegraded(t *testing.T) {
+	// Arrange.
+	h := newHarness()
+	h.state.err = fmt.Errorf("%w: duplicate turn start identity %q", ErrTurnScopedRejection, "turn-1")
+	c := New(h.config(t, "sess-1", "/unused.sock"))
+	ev := &corev1.Event{
+		SessionId: "sess-1", Seq: 7,
+		Plane:   corev1.Plane_PLANE_STREAM,
+		Class:   corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn-1"}},
+	}
+
+	// Act.
+	if err := c.dispatchEvent(ev); err != nil {
+		t.Fatalf("turn-scoped rejection err = %v, want nil", err)
+	}
+	<-h.state.ch
+
+	// Assert: the user hears about it even though the session survives.
+	select {
+	case ds := <-h.deg.ds:
+		if ds.GetComponent() != "daemon-turn-ledger" || !strings.Contains(ds.GetReason(), "duplicate turn start identity") {
+			t.Fatalf("degraded report = component:%q reason:%q", ds.GetComponent(), ds.GetReason())
+		}
+	default:
+		t.Fatal("turn-scoped rejection reported no degradation")
+	}
+}
+
 func TestRejectedAccountUsageObservationDoesNotAdvanceHighWater(t *testing.T) {
 	h := newHarness()
 	sinkErr := errors.New("account usage observation names unknown turn")

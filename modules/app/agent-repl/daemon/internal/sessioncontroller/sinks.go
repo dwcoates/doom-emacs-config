@@ -70,6 +70,10 @@ type StateApplier interface {
 	// TurnStarted has not been observed yet still names the turn it is waiting
 	// on: process memory cannot answer that, and the ledger can.
 	ActiveTurnIDs(workspace, claimantSessionID string) ([]string, error)
+	// TurnClaimExists answers whether the ledger ever opened a claim under one
+	// turn identity, open or closed. It is what an UNKNOWN-FATE submit is
+	// reconciled against before the queue is allowed to redeliver it.
+	TurnClaimExists(workspace, turnID string) (bool, error)
 	// SynthesizeTurnClose ends every durable turn claim held by the session
 	// WITHOUT a TurnEnded, for a live shim observation that contradicts it. It
 	// is the turn-lifecycle half of ReconcileAlreadyComplete's status-axis
@@ -1049,6 +1053,19 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 			res.correlation, ev.GetRequestId(), ev.GetDedupKey(), res.before,
 			res.after, res.decision, res.apply, res.notify, res.replayed, turnErr)
 		if turnErr != nil {
+			if errors.Is(turnErr, ssm.ErrTurnStartConflict) {
+				// THE REFUSAL IS ABOUT ONE TURN, so it is declared as such to
+				// the demux instead of ending the session. Two live starts
+				// contend for a single identity: that turn is unusable and says
+				// so loudly, while the conversation around it is untouched. The
+				// alternative killed the controller, and — because the offending
+				// start is durable in the vendor stream — killed it again on
+				// every subsequent resume.
+				c.warn("session-controller: turn lifecycle CONFLICT SCOPED TO THE TURN session=%s seq=%d turn_id=%q request_id=%q: %v — the session keeps running and the durable mark advances past this start rather than replaying it into the same refusal forever",
+					c.sessionID, ev.GetSeq(), res.correlation, ev.GetRequestId(), turnErr)
+				return fmt.Errorf("%w: session-controller: turn lifecycle rejected: %v",
+					shimclient.ErrTurnScopedRejection, turnErr)
+			}
 			return fmt.Errorf("session-controller: turn lifecycle rejected: %w", turnErr)
 		}
 		turnResult = &res

@@ -32,6 +32,19 @@ import (
 // teardown loop driven by a turn that had been dead for minutes.
 var ErrTurnBridgeDeadClaim = errors.New("ssm: turn claim bridge names an already-completed claim")
 
+// ErrTurnStartConflict marks the ledger's refusal of a `TurnStarted` whose
+// identity is ALREADY OPEN at a different store coordinate: two live starts
+// contending for one turn.
+//
+// It is a sentinel so the refusal can be scoped to the TURN. Every turn-start
+// refusal used to reach shimclient as an anonymous lifecycle rejection, and
+// that is terminal for the SESSION — the controller exits and the render state
+// severs. The duplicate that caused it is durable in the vendor event stream,
+// so every later resume replayed it and severed the session again: the session
+// became permanently unresumable over one redelivered turn. A conflict is still
+// surfaced loudly; what it may no longer do is outlive the turn it is about.
+var ErrTurnStartConflict = errors.New("ssm: turn start identity conflicts with an open claim")
+
 // The two SYNTHESIZED terminal causes: the reasons a turn claim is ended by the
 // daemon rather than by a `TurnEnded` off the stream.
 //
@@ -92,7 +105,7 @@ func (m *Manager) moveTurnLedgerLocked(tx *sql.Tx, workspace, claimantSessionID,
 		return nil, nil, false, err
 	}
 	if _, started := ev.GetPayload().(*corev1.Event_TurnStarted); started && m.hibernationLeases[workspace] != 0 {
-		isReplay, _, probeErr := recordTurnStart(tx, workspace, claimantSessionID, ev.GetSessionId(), id, ev.GetSeq())
+		isReplay, _, _, probeErr := recordTurnStart(tx, workspace, claimantSessionID, ev.GetSessionId(), id, ev.GetSeq())
 		if probeErr != nil {
 			return before, before, false, probeErr
 		}
@@ -102,10 +115,20 @@ func (m *Manager) moveTurnLedgerLocked(tx *sql.Tx, workspace, claimantSessionID,
 	}
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_TurnStarted:
-		var reconstructedEnd string
-		replayed, reconstructedEnd, err = recordTurnStart(
+		var reconstructedEnd, settledReplay string
+		replayed, reconstructedEnd, settledReplay, err = recordTurnStart(
 			tx, workspace, claimantSessionID, ev.GetSessionId(), id, ev.GetSeq(),
 		)
+		if settledReplay != "" {
+			// REPLAY TOLERANCE, VISIBLE. The identity this start names is
+			// already settled in the ledger, so the redelivery is admitted as
+			// the idempotent replay it is instead of rejected as a duplicate.
+			// The rejection used to be fatal to the whole session, and because
+			// the duplicate lives in the durable vendor stream, every resume
+			// replayed it and killed the session again.
+			m.logf("ssm: turn start ADMITTED AS SETTLED REPLAY workspace=%s claimant_session=%s event_session=%s seq=%d turn_id=%q detail=%s — the ledger already holds a start and an end for this identity, so the redelivered start mutates nothing and the session stays resumable",
+				workspace, claimantSessionID, ev.GetSessionId(), ev.GetSeq(), id, settledReplay)
+		}
 		if reconstructedEnd != "" {
 			// PART B, VISIBLE. A replacement session replayed the start of a
 			// turn this daemon had already killed, and the durable end recorded
@@ -679,10 +702,14 @@ func formatClosedTurnIDs(ids []string) string {
 // reconstructedEnd names the cause when that happened, so the caller can say out
 // loud that a replayed start arrived for an already-ended turn. It is "" on the
 // ordinary path.
-func recordTurnStart(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, id string, seq uint64) (replayed bool, reconstructedEnd string, err error) {
+//
+// settledReplay names the OTHER tolerated replay: a start whose identity already
+// carries a durable start AND a durable end at a DIFFERENT store coordinate. See
+// recordTurnStartRow.
+func recordTurnStart(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, id string, seq uint64) (replayed bool, reconstructedEnd string, settledReplay string, err error) {
 	killedCause, killed, err := interruptedStartCause(tx, workspace, eventSessionID, id)
 	if err != nil {
-		return false, "", err
+		return false, "", "", err
 	}
 	endSeqValue := any(nil)
 	endCauseValue := ""
@@ -695,14 +722,36 @@ func recordTurnStart(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, i
 		endCauseValue = killedCause
 		reconstructedEnd = killedCause
 	}
-	replayed, err = recordTurnStartRow(tx, workspace, claimantSessionID, eventSessionID, id, seq, endSeqValue, endCauseValue)
+	replayed, settledReplay, err = recordTurnStartRow(tx, workspace, claimantSessionID, eventSessionID, id, seq, endSeqValue, endCauseValue)
 	if err != nil || replayed {
-		return replayed, "", err
+		return replayed, "", settledReplay, err
 	}
-	return false, reconstructedEnd, nil
+	return false, reconstructedEnd, "", nil
 }
 
-func recordTurnStartRow(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, id string, seq uint64, endSeqValue any, endCauseValue string) (bool, error) {
+// recordTurnStartRow writes (or recognizes) the claim row one start names.
+//
+// A SETTLED IDENTITY IS REPLAYED, NOT REJECTED. When the claim this identity
+// names already holds a durable start AND a durable end, a second `TurnStarted`
+// for it is a redelivery of a turn whose whole life is already recorded. That
+// happens for real, on two known paths: a shim control-request timeout declares
+// a submit unknown-fate while the shim actually took it, so the queue redelivers
+// the same turn identity at a NEW store coordinate; and a multi-delivered
+// interject crossing a warm compaction mints the same identity twice. Refusing
+// it used to be terminal for the SESSION — shimclient classified the refusal as
+// a fatal lifecycle rejection, the controller exited, and because the duplicate
+// is durable in the vendor stream, every later resume replayed it and killed the
+// session again. The turn is over either way, so admitting the redelivery
+// idempotently loses nothing and keeps the session resumable.
+//
+// A CONFLICTING duplicate — the identity's claim is still OPEN, so two live
+// starts contend for one turn — is still refused, and loudly. That refusal now
+// carries ErrTurnStartConflict so its blast radius is the TURN rather
+// than the session.
+//
+// settledReplay is the human-readable account of the tolerated replay, "" when
+// nothing was tolerated.
+func recordTurnStartRow(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, id string, seq uint64, endSeqValue any, endCauseValue string) (replayed bool, settledReplay string, err error) {
 	if id != "" {
 		var startSeq uint64
 		var startEventSessionID string
@@ -713,7 +762,7 @@ func recordTurnStartRow(tx *sql.Tx, workspace, claimantSessionID, eventSessionID
 		switch {
 		case err == sql.ErrNoRows:
 		case err != nil:
-			return false, fmt.Errorf("ssm: read turn start claim %q: %w", id, err)
+			return false, "", fmt.Errorf("ssm: read turn start claim %q: %w", id, err)
 		case startSeq == 0 && !endSeq.Valid &&
 			(startEventSessionID == "" || startEventSessionID == eventSessionID):
 			_, err = tx.Exec(`UPDATE turn_lifecycle_claim
@@ -722,12 +771,29 @@ func recordTurnStartRow(tx *sql.Tx, workspace, claimantSessionID, eventSessionID
 				WHERE workspace=? AND claimant_session_id=? AND turn_id=?`,
 				int64(seq), eventSessionID, endSeqValue, endCauseValue, endCauseValue,
 				workspace, claimantSessionID, id)
-			return false, err
+			return false, "", err
 		case startEventSessionID == eventSessionID && startSeq == seq:
-			return true, nil
+			return true, "", nil
+		case endSeq.Valid:
+			// THE TOLERATED REPLAY. The identity is settled: it has a durable
+			// start and a durable end, so nothing about this redelivery can be
+			// in flight and nothing it could contend for is still open. The
+			// claim is left exactly as it is, except that a claim which never
+			// bound a store coordinate (a handshake-adopted row closed before
+			// its start arrived) takes this start's coordinate as evidence.
+			if startSeq == 0 && (startEventSessionID == "" || startEventSessionID == eventSessionID) {
+				if _, err := tx.Exec(`UPDATE turn_lifecycle_claim
+					SET start_seq=?, start_event_session_id=?
+					WHERE workspace=? AND claimant_session_id=? AND turn_id=? AND start_seq=0`,
+					int64(seq), eventSessionID, workspace, claimantSessionID, id); err != nil {
+					return false, "", fmt.Errorf("ssm: bind settled turn start %q to seq=%d: %w", id, seq, err)
+				}
+			}
+			return true, fmt.Sprintf("settled turn start identity %q replayed at event_session=%q seq=%d (durable event_session=%q start_seq=%d end_seq=%d)",
+				id, eventSessionID, seq, startEventSessionID, startSeq, endSeq.Int64), nil
 		default:
-			return false, fmt.Errorf("duplicate turn start identity %q at event_session=%q seq=%d (durable event_session=%q start_seq=%d end_seq=%v)",
-				id, eventSessionID, seq, startEventSessionID, startSeq, endSeq)
+			return false, "", fmt.Errorf("%w: duplicate turn start identity %q at event_session=%q seq=%d (durable event_session=%q start_seq=%d end_seq=%v)",
+				ErrTurnStartConflict, id, eventSessionID, seq, startEventSessionID, startSeq, endSeq)
 		}
 	}
 	if id == "" {
@@ -750,17 +816,17 @@ func recordTurnStartRow(tx *sql.Tx, workspace, claimantSessionID, eventSessionID
 		case err == nil && startSeq == 0:
 			if _, err := tx.Exec(`UPDATE turn_lifecycle_claim SET start_seq=? WHERE claim_id=?`,
 				int64(seq), claimID); err != nil {
-				return false, fmt.Errorf("ssm: bind legacy handshake claim to seq=%d: %w", seq, err)
+				return false, "", fmt.Errorf("ssm: bind legacy handshake claim to seq=%d: %w", seq, err)
 			}
-			return false, nil
+			return false, "", nil
 		case err == nil && startSeq == seq && sameSpace:
-			return true, nil
+			return true, "", nil
 		case err == nil:
 			// A second legacy turn may be queued behind the first. Its empty
 			// identity cannot correlate, so strict FIFO ordering is the only
 			// proof available and each start gets its own claim row.
 		case err != sql.ErrNoRows:
-			return false, fmt.Errorf("ssm: read active legacy turn start seq=%d: %w", seq, err)
+			return false, "", fmt.Errorf("ssm: read active legacy turn start seq=%d: %w", seq, err)
 		}
 		var one int
 		err = tx.QueryRow(`SELECT 1 FROM turn_lifecycle_claim
@@ -768,21 +834,21 @@ func recordTurnStartRow(tx *sql.Tx, workspace, claimantSessionID, eventSessionID
 				AND (start_event_session_id='' OR start_event_session_id=?) LIMIT 1`,
 			workspace, claimantSessionID, int64(seq), eventSessionID).Scan(&one)
 		if err == nil {
-			return true, nil
+			return true, "", nil
 		}
 		if err != sql.ErrNoRows {
-			return false, fmt.Errorf("ssm: read completed legacy turn start seq=%d: %w", seq, err)
+			return false, "", fmt.Errorf("ssm: read completed legacy turn start seq=%d: %w", seq, err)
 		}
 	}
-	_, err := tx.Exec(`INSERT INTO turn_lifecycle_claim(
+	_, insertErr := tx.Exec(`INSERT INTO turn_lifecycle_claim(
 		workspace, claimant_session_id, turn_id, start_seq, start_event_session_id,
 		end_seq, end_cause
 	) VALUES (?,?,?,?,?,?,?)`, workspace, claimantSessionID, id, int64(seq), eventSessionID,
 		endSeqValue, endCauseValue)
-	if err != nil {
-		return false, fmt.Errorf("ssm: persist turn start %q seq=%d: %w", id, seq, err)
+	if insertErr != nil {
+		return false, "", fmt.Errorf("ssm: persist turn start %q seq=%d: %w", id, seq, insertErr)
 	}
-	return false, nil
+	return false, "", nil
 }
 
 func recordTurnBridge(
@@ -1070,6 +1136,48 @@ func (m *Manager) ActiveTurnIDs(workspace, claimantSessionID string) ([]string, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return activeTurnIDs(m.db, workspace, claimantSessionID)
+}
+
+// TurnClaimExists answers whether the ledger holds ANY claim for one turn
+// identity in a workspace, open or closed.
+//
+// It is the reconciliation a caller owes an UNKNOWN-FATE submit. A control
+// request that times out has not failed: the shim may have taken the prompt and
+// started its turn while the ack was still in flight. Resubmitting that same
+// identity on the strength of the timeout alone is what MINTED the duplicate
+// turn starts that used to sever sessions, so the caller asks the ledger first
+// and a claim under the identity is proof the submit landed.
+//
+// The lookup is workspace-wide on purpose. A claimant session id is re-minted
+// by hibernate, revive and reopen while claims stay keyed to whichever claimant
+// opened them, so scoping the question to the CURRENT claimant would answer
+// "no claim" for a turn this very workspace is running.
+func (m *Manager) TurnClaimExists(workspace, turnID string) (bool, error) {
+	if workspace == "" || turnID == "" {
+		err := fmt.Errorf("ssm: probing a turn claim requires workspace and turn id")
+		m.logf("ssm: turn ledger decision=reject_validation operation=turn_claim_exists workspace=%q turn_id=%q error=%v",
+			workspace, turnID, err)
+		return false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var one int
+	err := m.db.QueryRow(`SELECT 1 FROM turn_lifecycle_claim
+		WHERE workspace=? AND turn_id=? LIMIT 1`, workspace, turnID).Scan(&one)
+	switch {
+	case err == sql.ErrNoRows:
+		m.logf("ssm: turn ledger decision=probe_absent operation=turn_claim_exists workspace=%s turn_id=%q — no claim was ever opened under this identity",
+			workspace, turnID)
+		return false, nil
+	case err != nil:
+		readErr := fmt.Errorf("ssm: probe turn claim %q: %w", turnID, err)
+		m.logf("ssm: turn ledger decision=probe_unreadable operation=turn_claim_exists workspace=%s turn_id=%q error=%v",
+			workspace, turnID, readErr)
+		return false, readErr
+	}
+	m.logf("ssm: turn ledger decision=probe_present operation=turn_claim_exists workspace=%s turn_id=%q — a claim exists under this identity",
+		workspace, turnID)
+	return true, nil
 }
 
 func activeTurnIDs(q interface {

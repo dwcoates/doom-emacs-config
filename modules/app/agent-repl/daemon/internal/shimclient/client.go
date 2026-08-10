@@ -72,6 +72,19 @@ var (
 	// event. Reconnecting would replay the same unaccepted seq forever, so the
 	// session fails loudly with its high-water still behind that event.
 	ErrLifecycleRejected = errors.New("shimclient: lifecycle event rejected")
+	// ErrTurnScopedRejection is the sink's own declaration that a lifecycle
+	// refusal belongs to ONE TURN and not to the session.
+	//
+	// It is NOT terminal, and that is the whole point of it. A lifecycle
+	// rejection ends the session and pins the durable mark behind the offending
+	// event, so the next resume replays that event and ends the session again —
+	// permanent, for any refusal whose cause is durable in the vendor stream.
+	// A duplicate turn identity is exactly such a cause, so the sink marks that
+	// refusal with this sentinel and the demux keeps the link, logs loudly,
+	// reports the degradation, and lets the mark advance past the event.
+	//
+	// A sink that does not use it keeps the old terminal behavior unchanged.
+	ErrTurnScopedRejection = errors.New("shimclient: lifecycle event rejected for its turn alone")
 	// ErrTurnClaimRejected means the dedicated durable-ledger sink refused a
 	// non-lifecycle rotation proof. It is terminal for the same replay reason,
 	// but remains a distinct type so no caller can mistake proof for an SSM

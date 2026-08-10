@@ -421,6 +421,11 @@ type Config struct {
 	// Nil defaults to wall clock.
 	Now func() int64
 
+	// AfterFunc schedules the queue's bounded delivery retry, defaulting to
+	// time.AfterFunc. A test injects it so the retry's delay is an assertion
+	// rather than a wait.
+	AfterFunc func(d time.Duration, f func()) *time.Timer
+
 	// WorkspaceLockHeld probes the kernel-enforced claim a live shim holds on a
 	// WORKSPACE, which is the one fact that distinguishes "no shim" from "a
 	// shim that has not dialled in yet" before anything is spawned
@@ -471,6 +476,10 @@ type Manager struct {
 	newControllerGenerationID func() (string, error)
 	// now is the queue's clock (queued_at_ms), injected by tests.
 	now func() int64
+	// afterFunc schedules the queue's bounded delivery retry. It is the ONE
+	// timer seam in this package, injected by tests so a retry's delay is
+	// asserted rather than waited out (queue.go).
+	afterFunc func(time.Duration, func()) *time.Timer
 	// workspaceLockHeld is the pre-spawn workspace-ownership probe
 	// (survivingshim.go).
 	workspaceLockHeld func(cwd string) (bool, error)
@@ -914,6 +923,10 @@ func New(cfg Config) (*Manager, error) {
 	if now == nil {
 		now = func() int64 { return time.Now().UnixMilli() }
 	}
+	afterFunc := cfg.AfterFunc
+	if afterFunc == nil {
+		afterFunc = time.AfterFunc
+	}
 	workspaceLockHeld := cfg.WorkspaceLockHeld
 	if workspaceLockHeld == nil {
 		workspaceLockHeld = sessionlock.WorkspaceLockHeld
@@ -934,6 +947,7 @@ func New(cfg Config) (*Manager, error) {
 		newClient:                 newClient,
 		newControllerGenerationID: newControllerGenerationID,
 		now:                       now,
+		afterFunc:                 afterFunc,
 		workspaceLockHeld:         workspaceLockHeld,
 		byWS:                      make(map[string]*sessionController),
 		parked:                    make(map[string]*parkedSession),
@@ -1456,6 +1470,28 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 		m.publish(d.sessionID, view, recs)
 		return parked, nil
 	}
+	// THE CLASSIFIER IS NOT CONSULTED ABOUT A BARE "STOP". It is a headless
+	// model round trip — bounded at twenty seconds, observed at fourteen — and
+	// the interrupt it implies only reaches the shim after the verdict. The
+	// same stop pressed as a key acks in about three milliseconds, so a user who
+	// typed the word instead of pressing the key paid a quarter of a minute for
+	// the one intent that needs no interpreting.
+	//
+	// The verdict is INTERJECT, which is what the classifier would have answered:
+	// this entry is not delivered here, it takes the head jump and stops the
+	// running turn, exactly as a classified interject does (beginInterject).
+	if IsExplicitInterrupt(text) {
+		m.mu.Lock()
+		entry.classification = VerdictInterject
+		entry.rationale = "explicit interrupt: the prompt is a bare stop, so no classification is needed"
+		view, recs = m.publishQueueLocked(d)
+		m.mu.Unlock()
+		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q classifier=BYPASSED verdict=INTERJECT — the prompt is an unambiguous stop, so the interrupt goes out now instead of after a model round trip",
+			entry.id, d.sessionID, workspace, origin)
+		m.publish(d.sessionID, view, recs)
+		go m.beginInterject(d, entry.id, "explicit-interrupt")
+		return parked, nil
+	}
 	m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q (turn in flight)",
 		entry.id, d.sessionID, workspace, origin)
 	m.publish(d.sessionID, view, recs)
@@ -1662,7 +1698,31 @@ func (m *Manager) Interrupt(ctx context.Context, workspace, requestID string) er
 // different things: a stop that arrived after the turn had already finished is
 // a success (ALREADY_COMPLETE) that still moves the session, and an
 // undeliverable one is a failure that moves nothing.
+// A STOP THAT LANDED ON A TURN BOUNDARY IS RE-AIMED, ONCE.
+//
+// The shim answers ALREADY_COMPLETE for the turn the user aimed at, and by the
+// time the daemon reconciles that answer a NEWER turn has started. The
+// reconciliation rightly refuses to publish "already finished" over a live
+// `thinking`, and the stop used to die there: the command failed, no interrupt
+// window opened, and the user — who had pressed stop three milliseconds
+// earlier — saw nothing happen at all.
+//
+// The honest resolution is the one the user asked for. They wanted the session
+// to stop working, so the stop is delivered again, now aimed at the turn that
+// is actually running. It is bounded at one re-aim: a session that supersedes
+// its own turns faster than a stop can be delivered has a different problem,
+// and the second failure is reported rather than chased.
 func (m *Manager) stopTurn(ctx context.Context, d *sessionController, requestID string) (corev1.InterruptOutcome, error) {
+	outcome, err := m.stopTurnOnce(ctx, d, requestID)
+	if !errors.Is(err, ssm.ErrSettledTurnSuperseded) {
+		return outcome, err
+	}
+	m.logf("session-controller: interrupt RE-AIMED ws=%s session=%s request_id=%s first_outcome=%s — the shim reported the aimed-at turn already complete and a newer turn was running by the time that answer was reconciled, so the stop is delivered again against the turn that is actually in flight rather than being dropped: %v",
+		d.workspace, d.sessionID, requestID, outcome, err)
+	return m.stopTurnOnce(ctx, d, requestID)
+}
+
+func (m *Manager) stopTurnOnce(ctx context.Context, d *sessionController, requestID string) (corev1.InterruptOutcome, error) {
 	workspace := d.workspace
 	outcome, err := d.client.Interrupt(ctx, requestID)
 	if err != nil {
@@ -1790,6 +1850,16 @@ func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.Interru
 		}
 		closed, err := m.cfg.SSM.ReconcileAlreadyComplete(d.workspace, d.sessionID, publish)
 		if err != nil {
+			if errors.Is(err, ssm.ErrSettledTurnSuperseded) {
+				// NOT A FAILURE, AND NOT A DROP EITHER. The window is still
+				// withheld — "already finished" cannot be published over a live
+				// `thinking` — but the caller re-aims the stop at the turn that
+				// is now running, so the user's press produces a visible outcome
+				// instead of silence (stopTurn).
+				m.logf("session-controller: already-complete reconciliation SUPERSEDED ws=%s session=%s outcome=%s: %v — a newer turn is in flight, so this verdict is about a turn that is already over and the stop is re-aimed rather than discarded",
+					d.workspace, d.sessionID, outcome, err)
+				return err
+			}
 			m.logf("session-controller: already-complete reconciliation FAILED ws=%s session=%s outcome=%s: %v — withholding the interrupt window so mutually exclusive footer/state claims cannot be published",
 				d.workspace, d.sessionID, outcome, err)
 			return err

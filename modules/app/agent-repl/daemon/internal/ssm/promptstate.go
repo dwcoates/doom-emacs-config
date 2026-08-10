@@ -8,6 +8,19 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
+// ErrSettledTurnSuperseded marks the ONE settled-turn reconciliation failure
+// that says nothing is wrong: by the time the verdict resolved, a NEWER turn was
+// already active.
+//
+// The reconciliation is right to withhold its row — publishing "already
+// finished" beside a live `thinking` is the exact contradiction it exists to
+// prevent — but the caller needs to tell this case apart from a genuine
+// failure. A user's stop that landed on a turn boundary was answered
+// ALREADY_COMPLETE by the shim in milliseconds and then dropped here, so the
+// user saw NOTHING at all for a stop the shim had honored. Named, the caller can
+// re-aim the stop at the turn that is now running instead of discarding it.
+var ErrSettledTurnSuperseded = errors.New("ssm: the settled-turn verdict was superseded by a newer active turn")
+
 // MarkPromptAccepted moves the session-status lifecycle to `submitting` when the
 // daemon commits to submitting an immediately delivered prompt.
 //
@@ -626,8 +639,11 @@ func (m *Manager) reconcileSettledTurn(
 		return closed, nil
 	}
 	if state.GetTurnActive() || state.GetStatus() == frontendv1.SessionStatus_SESSION_STATUS_THINKING || state.GetStatus() == frontendv1.SessionStatus_SESSION_STATUS_PERMISSION {
-		return false, fmt.Errorf("ssm: synchronous already-complete state invariant failed for workspace %q session %q: state=%s status=%s turn_active=%t",
+		err := fmt.Errorf("%w: synchronous already-complete state invariant failed for workspace %q session %q: state=%s status=%s turn_active=%t",
+			ErrSettledTurnSuperseded, workspace, sessionID, state.GetState(), state.GetStatus(), state.GetTurnActive())
+		m.logf("ssm: already-complete reconciliation SUPERSEDED ws=%s session=%s state=%s status=%s turn_active=%t — a NEWER turn is active by the time the verdict resolved, so the settled row is withheld and the caller is told which case this is rather than being handed an anonymous failure",
 			workspace, sessionID, state.GetState(), state.GetStatus(), state.GetTurnActive())
+		return false, err
 	}
 	m.logf("ssm: already-complete reconciliation PUBLISH_SYNC ws=%s session=%s state=%s status=%s turn_active=%t cause_kind=%s cause_seq=%d at_ms=%d",
 		workspace, sessionID, state.GetState(), state.GetStatus(), state.GetTurnActive(),
