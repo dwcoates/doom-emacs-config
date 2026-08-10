@@ -239,7 +239,7 @@ func TestSubmitWarmCompactionDeclinesAnAlreadyCompactedConversation(t *testing.T
 	if !errors.Is(err, ErrWarmCompactNotEligible) {
 		t.Fatalf("SubmitWarmCompaction against an already-compacted conversation = %v, want ErrWarmCompactNotEligible", err)
 	}
-	if !capture.contains("reason=already_compacted:last_compacted_at_ms=200 last_prompt_at_ms=100") {
+	if !capture.contains("reason=already_compacted:last_compacted_at_ms=200 last_cleared_at_ms=0 last_prompt_at_ms=100") {
 		t.Fatal("no record named the gate as the reason, with the two timestamps the verdict was taken from")
 	}
 	c := fakeClientFor(t, m, "ws")
@@ -247,6 +247,51 @@ func TestSubmitWarmCompactionDeclinesAnAlreadyCompactedConversation(t *testing.T
 	defer c.mu.Unlock()
 	if len(c.prompts) != 0 {
 		t.Fatalf("submitted prompts = %v, want nothing submitted for a conversation already compacted", c.prompts)
+	}
+}
+
+// A CONVERSATION THAT WAS CLEARED IS NOT COMPACTED EITHER. A `/clear` discards
+// the conversation, so a compaction submitted after one reads whatever the
+// clear left behind to summarize material nobody has added to yet.
+func TestSubmitWarmCompactionDeclinesAClearedConversation(t *testing.T) {
+	// Arrange.
+	m, capture := warmCompactRig(t, keepalive.WarmCompactMinContextTokens*10)
+	applierFor(t, m).setCompactionGate("ws", ssm.CompactionGate{ClearedAtMs: 200, PromptAtMs: 100})
+
+	// Act.
+	_, err := m.SubmitWarmCompaction(context.Background(), "ws", warmCompactAnchor)
+
+	// Assert.
+	if !errors.Is(err, ErrWarmCompactNotEligible) {
+		t.Fatalf("SubmitWarmCompaction against a cleared conversation = %v, want ErrWarmCompactNotEligible", err)
+	}
+	if !capture.contains("reason=already_cleared:last_compacted_at_ms=0 last_cleared_at_ms=200 last_prompt_at_ms=100") {
+		t.Fatal("no record named the CLEAR as the reason; reporting it as a compaction sends a reader looking for one that never happened")
+	}
+	c := fakeClientFor(t, m, "ws")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.prompts) != 0 {
+		t.Fatalf("submitted prompts = %v, want nothing submitted for a cleared conversation", c.prompts)
+	}
+}
+
+// A PROMPT SINCE THE CLEAR IS NEW MATERIAL, exactly as one since a compaction
+// is: the conversation has something in it again.
+func TestSubmitWarmCompactionProceedsWhenAPromptFollowedTheClear(t *testing.T) {
+	// Arrange.
+	m, _ := warmCompactRig(t, keepalive.WarmCompactMinContextTokens*10)
+	applierFor(t, m).setCompactionGate("ws", ssm.CompactionGate{ClearedAtMs: 200, PromptAtMs: 300})
+
+	// Act.
+	turnID, err := m.SubmitWarmCompaction(context.Background(), "ws", warmCompactAnchor)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SubmitWarmCompaction after a prompt following the clear = %v, want a submitted compaction", err)
+	}
+	if turnID == "" {
+		t.Fatal("SubmitWarmCompaction returned no turn id")
 	}
 }
 

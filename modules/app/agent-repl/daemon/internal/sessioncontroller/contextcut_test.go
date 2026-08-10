@@ -284,10 +284,29 @@ func TestTheFirstClassCompactionClosesTheCompactionGate(t *testing.T) {
 	}
 }
 
-// A CLEAR CLOSES NO COMPACTION GATE. `/clear` discards the conversation rather
-// than summarizing it, and recording it as a compaction would suppress the
-// first legitimate compaction of everything said afterwards.
-func TestAClearClosesNoCompactionGate(t *testing.T) {
+// THE FIRST-CLASS CLEAR CLOSES THE GATE TOO, on the compaction's terms: it is
+// the only report that the conversation was actually DISCARDED, and a
+// conversation with nothing in it has nothing for a daemon-initiated compaction
+// to summarize and nothing an automatic sleep should be taken over.
+func TestTheFirstClassClearClosesTheCompactionGate(t *testing.T) {
+	// Arrange.
+	c, applier := newCutConsumer(t)
+
+	// Act.
+	c.Consume(clearEvent(7, "u-clear"))
+
+	// Assert.
+	applier.reconcMutex.Lock()
+	defer applier.reconcMutex.Unlock()
+	if got := applier.clearGateClosures; len(got) != 1 || got[0] != "ws" {
+		t.Fatalf("clear gate closures = %v, want exactly one for ws", got)
+	}
+}
+
+// A CLEAR IS NOT RECORDED AS A COMPACTION. The two are separate columns because
+// every decline taken from the gate names the cut it was taken from, and
+// reporting a cleared conversation as compacted misdescribes the workspace.
+func TestAClearIsNotRecordedAsACompaction(t *testing.T) {
 	// Arrange.
 	c, applier := newCutConsumer(t)
 
@@ -296,7 +315,27 @@ func TestAClearClosesNoCompactionGate(t *testing.T) {
 
 	// Assert.
 	if got := applier.compactionGateClosureCount(); got != 0 {
-		t.Fatalf("compaction gate closures = %d, want none for a clear", got)
+		t.Fatalf("compaction gate closures = %d, want a clear recorded as a clear", got)
+	}
+}
+
+// A FAILED CLEAR-GATE CLOSURE IS REPORTED, never swallowed: it permits both a
+// pointless compaction and a sleep taken over a discarded conversation.
+func TestAFailedClearGateClosureIsReported(t *testing.T) {
+	// Arrange.
+	c, applier := newCutConsumer(t)
+	capture := &logCapture{}
+	c.logf = capture.logf
+	applier.reconcMutex.Lock()
+	applier.clearGateCloseErr = errors.New("the state store is gone")
+	applier.reconcMutex.Unlock()
+
+	// Act.
+	c.Consume(clearEvent(7, "u-clear"))
+
+	// Assert.
+	if !capture.contains("closing the compaction gate on a clear FAILED") {
+		t.Fatal("the failed clear-gate closure was not reported")
 	}
 }
 

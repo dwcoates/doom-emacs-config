@@ -80,13 +80,58 @@ func TestCompactionRedundantSurfacesAFailedRead(t *testing.T) {
 	}
 }
 
-// The declined-compaction logs carry the two timestamps the verdict was taken
+// The declined-compaction logs carry every timestamp the verdict was taken
 // from, so a reader can tell a gate that closed an hour ago from one that
-// closed a moment ago without correlating another line.
-func TestCompactionRedundantDetailNamesBothTimestamps(t *testing.T) {
-	got := compactionRedundantDetail(ssm.CompactionGate{CompactedAtMs: 200, PromptAtMs: 100})
+// closed a moment ago — and a compaction from a clear — without correlating
+// another line.
+func TestCompactionRedundantDetailNamesEveryTimestamp(t *testing.T) {
+	got := compactionRedundantDetail(ssm.CompactionGate{CompactedAtMs: 200, ClearedAtMs: 150, PromptAtMs: 100})
 
-	if got != "last_compacted_at_ms=200 last_prompt_at_ms=100" {
-		t.Fatalf("detail = %q, want both timestamps named", got)
+	if got != "last_compacted_at_ms=200 last_cleared_at_ms=150 last_prompt_at_ms=100" {
+		t.Fatalf("detail = %q, want every timestamp named", got)
+	}
+}
+
+// A DECLINE NAMES THE CUT IT WAS TAKEN FROM. Reporting a cleared conversation
+// as "already compacted" sends anyone reading the log looking for a compaction
+// that never happened.
+func TestCutKindNamesTheLaterCut(t *testing.T) {
+	tests := []struct {
+		name string
+		gate ssm.CompactionGate
+		want string
+	}{
+		{
+			name: "a compaction alone",
+			gate: ssm.CompactionGate{CompactedAtMs: 200},
+			want: "compacted",
+		},
+		{
+			name: "a clear alone",
+			gate: ssm.CompactionGate{ClearedAtMs: 200},
+			want: "cleared",
+		},
+		{
+			name: "a clear after a compaction",
+			gate: ssm.CompactionGate{CompactedAtMs: 100, ClearedAtMs: 200},
+			want: "cleared",
+		},
+		{
+			name: "a compaction after a clear",
+			gate: ssm.CompactionGate{CompactedAtMs: 200, ClearedAtMs: 100},
+			want: "compacted",
+		},
+		{
+			name: "a conversation nothing has cut",
+			gate: ssm.CompactionGate{PromptAtMs: 100},
+			want: "uncut",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cutKind(tc.gate); got != tc.want {
+				t.Fatalf("cutKind(%+v) = %q, want %q", tc.gate, got, tc.want)
+			}
+		})
 	}
 }
