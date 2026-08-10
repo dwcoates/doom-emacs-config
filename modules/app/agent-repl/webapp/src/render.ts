@@ -2556,6 +2556,9 @@ export function itemKey(item: ConversationItem, index: number): string {
     // arrival triggers, and an index key would move under it.
     case "context-cleared":
     case "context-compacted":
+    // Keyed by uuid too, and for the same reason: a resync re-pushes the same
+    // turn result, and an index key drew its closing chip again.
+    case "result":
       return `${item.kind}:${item.uuid}`;
     // Keyed by uuid so a resync's re-push of the SAME invocation (the uuid is
     // derived from the submit's request id) reuses its node instead of drawing

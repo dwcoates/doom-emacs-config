@@ -93,7 +93,7 @@ describe("turn accounting projection", () => {
       { label: "problems", value: "tokenLedgerMismatch" },
       { label: "missing evidence", value: "runtime, timing, usage start, usage end, reconciliation" },
     ]);
-    expect(latestTurnAccounting([{ kind: "result", subtype: "success", durationMs: 0, numTurns: 0, totalCostUsd: 0, usage: { input_tokens: 0, output_tokens: 0 }, isError: false, context: null, turnAccounting: accounting }])).toBe(accounting);
+    expect(latestTurnAccounting([{ kind: "result", uuid: "r1", subtype: "success", durationMs: 0, numTurns: 0, totalCostUsd: 0, usage: { input_tokens: 0, output_tokens: 0 }, isError: false, context: null, turnAccounting: accounting }])).toBe(accounting);
   });
   it("names only the evidence an incomplete turn is actually missing", () => {
     expect(accountingFacts({ ...accounting, reconciliation: undefined })).toEqual([
