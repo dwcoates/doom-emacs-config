@@ -388,6 +388,13 @@ func (m *Manager) RestartSession(ctx context.Context, workspace string) error {
 	// leave the one control that exists for a wedged session unable to reach the
 	// session most in need of it (bringupescape.go).
 	m.clearBringUpFailures(sessionID)
+	// AND IT IS THE WAY OUT OF THE VANISHED-RESUME FENCE, for the same reason
+	// and with one difference: the fence stands on a fact about the DISK, so
+	// clearing it does not assert the session can now start — it only entitles
+	// the bring-up below to look again. A transcript that has been restored
+	// resumes; one that is still gone re-fences on the same card, from the same
+	// gate, with no extra machinery (vanishedresume.go).
+	m.clearVanishedResumeFence(workspace, sessionID)
 	// AND IT IS EQUALLY THE WAY OUT OF A SLEEP, because it has already paid for
 	// one. The restart resumes the SAME vendor conversation, so the whole cost the
 	// revival gate exists to put to the user first is spent by the time this line
