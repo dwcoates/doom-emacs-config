@@ -33,6 +33,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -435,6 +436,21 @@ type Config struct {
 	// Default = sessionlock.WorkspaceLockHeld
 	WorkspaceLockHeld func(cwd string) (bool, error)
 
+	// WorkspaceLockHolders names the pids behind a held workspace lock, which
+	// is what lets an expired surviving-shim wait ESCALATE against the squatter
+	// instead of failing the workspace forever (survivingshim.go). An error
+	// means "I could not tell", and is never read as "nobody holds it".
+	//
+	// Default = sessionlock.WorkspaceLockHolders
+	WorkspaceLockHolders func(cwd string) ([]int, error)
+
+	// SignalProcess delivers a signal to a pid this daemon does not own — a
+	// surviving shim from a previous generation. Injected by tests so the
+	// takeover is asserted rather than aimed at a real process.
+	//
+	// Default = syscall.Kill
+	SignalProcess func(pid int, sig syscall.Signal) error
+
 	// Source yields each session's shim connection: shims dial the daemon's
 	// listening socket and the listener routes each connection to the client
 	// that owns that session. Required.
@@ -483,6 +499,10 @@ type Manager struct {
 	// workspaceLockHeld is the pre-spawn workspace-ownership probe
 	// (survivingshim.go).
 	workspaceLockHeld func(cwd string) (bool, error)
+	// workspaceLockHolders names the pids behind a held workspace lock, and
+	// signalProcess is how the expired wait evicts them (survivingshim.go).
+	workspaceLockHolders func(cwd string) ([]int, error)
+	signalProcess        func(pid int, sig syscall.Signal) error
 
 	// shutdownLease binds the daemon-global scheduled-shutdown drain lease
 	// (shutdownlease.go). Late-bound because the engine takes this fleet as a
@@ -606,6 +626,10 @@ type Manager struct {
 	// expiry branch can be driven without a ten-second wait.
 	survivingShimWaitOverride time.Duration
 	survivingShimPollOverride time.Duration
+	// survivingShimKillGraceOverride overrides how long the expired wait's
+	// takeover gives a signalled holder to die before escalating and before
+	// giving up. Zero means the production constant; only a test assigns one.
+	survivingShimKillGraceOverride time.Duration
 	// reviveCompactBoundOverride overrides how long a compact-first revival's
 	// detached completion wait allows the compaction. Zero means the production
 	// constant; only a test assigns one, so the timeout branch can be driven
@@ -959,6 +983,14 @@ func New(cfg Config) (*Manager, error) {
 	if workspaceLockHeld == nil {
 		workspaceLockHeld = sessionlock.WorkspaceLockHeld
 	}
+	workspaceLockHolders := cfg.WorkspaceLockHolders
+	if workspaceLockHolders == nil {
+		workspaceLockHolders = sessionlock.WorkspaceLockHolders
+	}
+	signalProcess := cfg.SignalProcess
+	if signalProcess == nil {
+		signalProcess = syscall.Kill
+	}
 	// THE STOP HALF IS TAKEN OFF THE SPAWNER HERE and never put back: the gate
 	// below is its only holder, and the spawner the Manager retains REFUSES
 	// stops (turnstop.go). That is what keeps stopShimSettlingTurn the sole
@@ -977,6 +1009,8 @@ func New(cfg Config) (*Manager, error) {
 		now:                       now,
 		afterFunc:                 afterFunc,
 		workspaceLockHeld:         workspaceLockHeld,
+		workspaceLockHolders:      workspaceLockHolders,
+		signalProcess:             signalProcess,
 		byWS:                      make(map[string]*sessionController),
 		parked:                    make(map[string]*parkedSession),
 		lastCSID:                  make(map[string]string),
