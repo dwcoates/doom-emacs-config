@@ -229,6 +229,14 @@ type sessionClient interface {
 	// to it: the wire carries a daemon-minted control id that appears nowhere
 	// in any caller's records.
 	Interrupt(ctx context.Context, originRequestID string) (corev1.InterruptOutcome, error)
+	// CancelDetachedAgents stops the session's DETACHED background agents and
+	// returns the shim's own typed verdict on what it stopped, which — like
+	// Interrupt's — is observable nowhere else.
+	//
+	// A DIFFERENT OPERATION FROM Interrupt, not a variant of it: an interrupt
+	// ends the turn, and detached agents have outlived their turn by
+	// definition, so the interrupt reaches none of them.
+	CancelDetachedAgents(ctx context.Context, originRequestID string) (*corev1.DetachedCancelOutcome, error)
 	// UnpinAccountingTurn releases the durable-cursor hold a turn's start took,
 	// for a turn the daemon closed WITHOUT a TurnEnded. Only a stream TurnEnded
 	// releases a pin otherwise, so a synthesized close would freeze the cursor
