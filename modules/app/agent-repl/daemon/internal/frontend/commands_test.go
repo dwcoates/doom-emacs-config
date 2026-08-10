@@ -20,6 +20,10 @@ type mockHandler struct {
 	// observability-only field.
 	observedClaudeSessionID string
 
+	// detachedCancel is the typed verdict CancelDetachedAgents reports, so a
+	// test can drive the ack's arm on both the success and the refusal path.
+	detachedCancel *frontendv1.DetachedCancelOutcome
+
 	lastWorkspace string
 	lastRequestID string
 	lastResyncSeq uint64
@@ -41,6 +45,10 @@ func (m *mockHandler) SubmitPrompt(_ context.Context, ws, rid string, _ *fronten
 func (m *mockHandler) Interrupt(_ context.Context, ws, rid string, _ *frontendv1.InterruptCmd) error {
 	m.called, m.lastWorkspace, m.lastRequestID = "interrupt", ws, rid
 	return m.err
+}
+func (m *mockHandler) CancelDetachedAgents(_ context.Context, ws, rid string, _ *frontendv1.CancelDetachedAgentsCmd) (*frontendv1.DetachedCancelOutcome, error) {
+	m.called, m.lastWorkspace, m.lastRequestID = "cancel_detached_agents", ws, rid
+	return m.detachedCancel, m.err
 }
 func (m *mockHandler) AnswerPermission(_ context.Context, ws, rid string, _ *frontendv1.PermissionAnswerCmd) error {
 	m.called, m.lastWorkspace, m.lastRequestID = "permission_answer", ws, rid
@@ -159,6 +167,87 @@ func TestDispatchRefusesWireWorkspaceCreation(t *testing.T) {
 	}
 }
 
+// --- the detached-agent cancel's typed verdict on the ack -------------------
+//
+// The whole reason the outcome is a oneof of messages rather than a bool: a
+// stop that reached three agents, a session with nothing detached and a
+// session that could not be asked are three answers, and two of them are
+// refusals a client must still be able to READ rather than infer from error
+// text.
+
+func TestDispatchCarriesDetachedCancelOutcomeOnSuccess(t *testing.T) {
+	// Arrange.
+	h := &mockHandler{detachedCancel: &frontendv1.DetachedCancelOutcome{
+		Outcome: &frontendv1.DetachedCancelOutcome_Cancelled{
+			Cancelled: &frontendv1.DetachedAgentsCancelled{Count: 3},
+		},
+	}}
+	cmd := &frontendv1.FrontendCommand{
+		RequestId: "c1", Workspace: "ws",
+		Command: &frontendv1.FrontendCommand_CancelDetachedAgents{CancelDetachedAgents: &frontendv1.CancelDetachedAgentsCmd{}},
+	}
+
+	// Act.
+	ack := Dispatch(context.Background(), func(string, ...any) {}, h, nil, cmd)
+
+	// Assert.
+	if !ack.GetOk() {
+		t.Fatalf("cancel ack = %+v, want ok", ack)
+	}
+	if got := ack.GetDetachedCancel().GetCancelled().GetCount(); got != 3 {
+		t.Fatalf("cancelled count = %d, want 3", got)
+	}
+}
+
+func TestDispatchCarriesDetachedCancelOutcomeOnRefusal(t *testing.T) {
+	// Arrange: the handler refuses AND reports what it found, which is the
+	// case the typed arm exists for.
+	h := &mockHandler{
+		err: errors.New("no detached background agents are running"),
+		detachedCancel: &frontendv1.DetachedCancelOutcome{
+			Outcome: &frontendv1.DetachedCancelOutcome_NothingRunning{
+				NothingRunning: &frontendv1.NoDetachedAgentsRunning{},
+			},
+		},
+	}
+	cmd := &frontendv1.FrontendCommand{
+		RequestId: "c2", Workspace: "ws",
+		Command: &frontendv1.FrontendCommand_CancelDetachedAgents{CancelDetachedAgents: &frontendv1.CancelDetachedAgentsCmd{}},
+	}
+
+	// Act.
+	ack := Dispatch(context.Background(), func(string, ...any) {}, h, nil, cmd)
+
+	// Assert: a refusal, with the account of it still legible.
+	if ack.GetOk() {
+		t.Fatalf("cancel ack = %+v, want refusal", ack)
+	}
+	if ack.GetDetachedCancel().GetNothingRunning() == nil {
+		t.Fatalf("refusal ack lost its nothing_running arm: %+v", ack.GetDetachedCancel())
+	}
+}
+
+func TestDispatchLeavesDetachedCancelUnsetForOtherCommands(t *testing.T) {
+	// Arrange: a handler that WOULD report a verdict, driven by a command that
+	// has no business carrying one.
+	h := &mockHandler{detachedCancel: &frontendv1.DetachedCancelOutcome{
+		Outcome: &frontendv1.DetachedCancelOutcome_NothingRunning{NothingRunning: &frontendv1.NoDetachedAgentsRunning{}},
+	}}
+	cmd := &frontendv1.FrontendCommand{
+		RequestId: "i1", Workspace: "ws",
+		Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{}},
+	}
+
+	// Act.
+	ack := Dispatch(context.Background(), func(string, ...any) {}, h, nil, cmd)
+
+	// Assert: the field is the cancel's alone, so an interrupt's ack must not
+	// carry a verdict a reader would attribute to the stop it just made.
+	if ack.GetDetachedCancel() != nil {
+		t.Fatalf("interrupt ack carried a detached-cancel verdict: %+v", ack.GetDetachedCancel())
+	}
+}
+
 func TestDispatchRoutesEachCommand(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -184,6 +273,11 @@ func TestDispatchRoutesEachCommand(t *testing.T) {
 			name:    "interrupt",
 			cmd:     &frontendv1.FrontendCommand{RequestId: "r2", Workspace: "ws2", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{}}},
 			wantHit: "interrupt",
+		},
+		{
+			name:    "cancel detached agents",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r2b", Workspace: "ws2b", Command: &frontendv1.FrontendCommand_CancelDetachedAgents{CancelDetachedAgents: &frontendv1.CancelDetachedAgentsCmd{}}},
+			wantHit: "cancel_detached_agents",
 		},
 		{
 			name:    "permission answer",

@@ -264,6 +264,9 @@ func (nopHandler) SubmitPrompt(context.Context, string, string, *frontendv1.Subm
 func (nopHandler) Interrupt(context.Context, string, string, *frontendv1.InterruptCmd) error {
 	return nil
 }
+func (nopHandler) CancelDetachedAgents(context.Context, string, string, *frontendv1.CancelDetachedAgentsCmd) (*frontendv1.DetachedCancelOutcome, error) {
+	return nil, nil
+}
 func (nopHandler) AnswerPermission(context.Context, string, string, *frontendv1.PermissionAnswerCmd) error {
 	return nil
 }

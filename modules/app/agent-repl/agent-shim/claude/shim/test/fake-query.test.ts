@@ -408,6 +408,95 @@ describe("createFakeQuery", () => {
   });
 });
 
+describe("!agent detached-agent turns", () => {
+  it("announces the launch as system:task_started", async () => {
+    // Arrange
+    const h = makeFake();
+    // Act
+    h.input.push(userMsg("!agent hunt bugs"));
+    h.input.end();
+    const msgs = await h.collect();
+    // Assert: real task LIFECYCLE, which is the whole point of this branch —
+    // `!bg` produces only a task-notification text block and leaves nothing
+    // live.
+    const started = msgs.find((m) => m.type === "system" && m.subtype === "task_started");
+    expect(started).toMatchObject({ task_type: "local_agent", description: "hunt bugs" });
+  });
+
+  it("leaves the agent RUNNING when the turn ends", async () => {
+    // Arrange
+    const h = makeFake();
+    // Act
+    h.input.push(userMsg("!agent hunt bugs"));
+    h.input.end();
+    const msgs = await h.collect();
+    // Assert: detached work that outlives its turn is the condition the cancel
+    // exists for, so the fake must not end the agent for you.
+    const ended = msgs.find((m) => m.type === "system" && m.subtype === "task_notification");
+    expect(ended).toBeUndefined();
+    expect(msgs.some((m) => m.type === "result")).toBe(true);
+  });
+
+  it("stopTask ends the live agent with a stopped task_notification", async () => {
+    // Arrange: pull the stream by hand so the stop lands after the launch is
+    // OBSERVED rather than after a hopeful delay.
+    const h = makeFake();
+    const it = h.query[Symbol.asyncIterator]();
+    h.input.push(userMsg("!agent hunt bugs"));
+    let taskId = "";
+    for (;;) {
+      const next = await it.next();
+      if (next.done === true) throw new Error("the launch never arrived");
+      const m = next.value;
+      if (m.type === "system" && m.subtype === "task_started") {
+        taskId = String(m.task_id);
+        break;
+      }
+    }
+
+    // Act
+    await h.query.stopTask(taskId);
+    h.input.end();
+
+    // Assert: the ordinary terminal fact the whole stack settles on.
+    let note: SdkMessageLike | undefined;
+    for (;;) {
+      const next = await it.next();
+      if (next.done === true) break;
+      if (next.value.type === "system" && next.value.subtype === "task_notification") {
+        note = next.value;
+        break;
+      }
+    }
+    expect(note).toMatchObject({ task_id: taskId, status: "stopped" });
+  });
+
+  it("stopTask accepts a task it never started as a no-op", async () => {
+    // Arrange
+    const h = makeFake();
+    const it = h.query[Symbol.asyncIterator]();
+    h.input.push(userMsg("!agent hunt bugs"));
+    for (;;) {
+      const next = await it.next();
+      if (next.done === true) throw new Error("the launch never arrived");
+      if (next.value.type === "system" && next.value.subtype === "task_started") break;
+    }
+
+    // Act: the stop is idempotent, so a task that already ended is not an error.
+    await h.query.stopTask("fakeagent-nope");
+    h.input.end();
+
+    // Assert: nothing was ended by a stop that named nothing live.
+    const rest: SdkMessageLike[] = [];
+    for (;;) {
+      const next = await it.next();
+      if (next.done === true) break;
+      rest.push(next.value);
+    }
+    expect(rest.some((m) => m.type === "system" && m.subtype === "task_notification")).toBe(false);
+  });
+});
+
 describe("!bg background turns", () => {
   it("emits the tool_progress heartbeat for a backgrounded command", async () => {
     // Arrange
