@@ -118,9 +118,17 @@ func configDirsFor(workspace, override string) (primary string, others []string,
 	if err != nil {
 		return "", nil, fmt.Errorf("default Claude config dir %q: %w", fallbackRoot, err)
 	}
+	// The primary root comes from the SHARED account rule rather than a second
+	// evaluation of it here. That rule spells the default account "" (the way
+	// every record spells it), which this command renders as the absolute root
+	// it must actually stat.
+	routed, err := session.AccountConfigDirFor(workspace)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve the account for %q: %w", workspace, err)
+	}
 	primary, other := fallback, multi
-	if session.UnderDir(os.Getenv(session.MultiRepoRootEnv), workspace) {
-		primary, other = multi, fallback
+	if routed != "" {
+		primary, other = routed, fallback
 	}
 	if other != primary {
 		others = []string{other}
