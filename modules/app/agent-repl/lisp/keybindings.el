@@ -683,7 +683,15 @@ so a chord wins key lookup regardless of which evil state is current.")
       ;; shim, a shim still running pre-deploy code -- without losing the
       ;; conversation as collateral.  `agent-repl-kill' is still available by
       ;; name for the rarer case of genuinely ending a session.
-      :desc "Restart Claude session (same conversation)" "o C-c" #'agent-repl-restart-session
+      ;;
+      ;; The verb refreshes BOTH halves of the workspace: alongside the shim
+      ;; restart it rebuilds the webapp if stale (in the background, so the
+      ;; restart is not held behind it) and redeploys it by bouncing the
+      ;; workspace's webview onto the new build id.  That is why it is the one
+      ;; key to reach for after editing either side -- `o l' remounts the
+      ;; webview on whatever bundle is already built, `o C-c' builds it first.
+      ;; The daemon is neither rebuilt nor restarted here.
+      :desc "Restart Claude session + rebuild/redeploy webapp" "o C-c" #'agent-repl-restart-session
       :desc "Claude input" "o v" #'agent-repl-focus-input
       :desc "Claude interrupt" "o x" #'agent-repl-interrupt
       :desc "Copy file reference" "o r" #'agent-repl-copy-reference

@@ -138,6 +138,104 @@ against whatever holds port 8787 on the developer's machine."
                      (list agent-repl--frontend-build-script
                            "store" "sidecar"))))))
 
+;;;; ---- build argv/capture helpers ------------------------------------------
+;;
+;; The blocking and asynchronous build runs share one argv shape, one capture
+;; buffer and one failure report.  These cover the shared helpers directly, so
+;; a hand-rolled second spelling of any of them fails here rather than drifting
+;; silently against the script.
+
+(ert-deftest agent-repl-test-daemon-build-args-shape-script-force-targets ()
+  "The shared argv builder emits script, then --force, then the targets."
+  ;; Act
+  (let ((args (agent-repl--frontend-build-args '("webapp") t)))
+    ;; Assert
+    (should (equal args (list agent-repl--frontend-build-script
+                              "--force" "webapp")))))
+
+(ert-deftest agent-repl-test-daemon-build-args-back-the-blocking-run ()
+  "The blocking run invokes the script with exactly the shared argv.
+Asserts the call site SHARES the extracted shape rather than spelling a
+near-identical argv of its own."
+  ;; Arrange
+  (let (captured)
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (lambda (args) (setq captured args) 0)))
+      ;; Act
+      (agent-repl--frontend-build-targets-if-stale '("webapp") t)
+      ;; Assert
+      (should (equal captured (agent-repl--frontend-build-args '("webapp") t))))))
+
+(ert-deftest agent-repl-test-daemon-build-capture-resets-between-runs ()
+  "Resetting the capture leaves a run's buffer holding only its own output."
+  ;; Arrange
+  (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
+    (erase-buffer)
+    (insert "output of the previous run\n"))
+  ;; Act
+  (agent-repl--frontend-build-reset-capture)
+  ;; Assert
+  (should (equal (agent-repl--frontend-build-captured-output) "")))
+
+(ert-deftest agent-repl-test-daemon-build-capture-trims-trailing-newline ()
+  "The captured output is returned with trailing whitespace trimmed."
+  ;; Arrange
+  (agent-repl--frontend-build-reset-capture)
+  (with-current-buffer agent-repl--frontend-build-buffer
+    (insert "built ok\n\n"))
+  ;; Act / Assert
+  (should (equal (agent-repl--frontend-build-captured-output) "built ok")))
+
+(ert-deftest agent-repl-test-daemon-build-failure-report-names-the-exit-code ()
+  "The shared failure report hands back a detail naming the exit code."
+  ;; Arrange
+  (cl-letf (((symbol-function 'display-buffer) #'ignore))
+    ;; Act
+    (let ((detail (agent-repl--frontend-build-report-failure "webapp" 3 "boom")))
+      ;; Assert
+      (should (string-match-p "exit 3" detail)))))
+
+(ert-deftest agent-repl-test-daemon-run-report-failure-names-both-subjects ()
+  "The shared run reporter phrases the phase line and the detail separately.
+The build run and the stack deploy name themselves differently in each
+place, so both subjects are the reporter's arguments."
+  ;; Arrange
+  (let (phase)
+    (cl-letf (((symbol-function 'display-buffer) #'ignore)
+              ((symbol-function 'agent-repl--backend-phase)
+               (lambda (_ws fmt &rest args) (setq phase (apply #'format fmt args)))))
+      ;; Act
+      (let ((detail (agent-repl--frontend-run-report-failure
+                     "stack deploy" "stack deploy" 1 "boom")))
+        ;; Assert
+        (should (string-prefix-p "stack deploy FAILED (exit 1)" phase))
+        (should (string-prefix-p "agent-repl: stack deploy failed (exit 1)" detail))))))
+
+(ert-deftest agent-repl-test-daemon-deploy-failure-report-is-shared ()
+  "The stack deploy's failure goes through the shared run reporter.
+A hand-rolled second failure path at the deploy site fails here rather
+than drifting from the build's."
+  ;; Arrange
+  (let (reported)
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (lambda (_args) 1))
+              ((symbol-function 'agent-repl--frontend-run-report-failure)
+               (lambda (phase-subject &rest _) (setq reported phase-subject) "detail")))
+      ;; Act
+      (should-error (agent-repl--frontend-deploy-stack nil))
+      ;; Assert
+      (should (equal reported "stack deploy")))))
+
+(ert-deftest agent-repl-test-daemon-build-missing-script-check-is-shared ()
+  "The script-presence assertion signals for an absent script.
+Both build runs gate on this one check, so neither can start a process
+against a script that is not there."
+  ;; Arrange — a genuinely absent path (no `file-exists-p' shadow, which
+  ;; would trip a native-comp trampoline warning; see test-sentinel.el).
+  (let ((agent-repl--frontend-build-script "/agent-repl-nonexistent/build.sh"))
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-build-assert-script))))
+
 ;;;; ---- deploy-stack: the boot path's whole-stack deploy --------------------
 ;;
 ;; The boot path used to run build-frontend.sh, which covers the shim, the
@@ -218,6 +316,179 @@ is mid-boot, and the caller starts the daemon directly anyway."
              (lambda (_args) 0)))
     ;; Act / Assert
     (should (eq 0 (agent-repl--frontend-build-if-stale nil)))))
+
+;;;; ---- build-if-stale: the asynchronous run --------------------------------
+;;
+;; The spawn wrapper is shadowed to hand back a fake process, so no build ever
+;; runs; the sentinel is driven by hand with the exit code under test.
+
+(cl-defstruct agent-repl-test--fake-build-proc
+  (live t) (exit 0))
+
+(defvar agent-repl-test--async-build-spawned nil
+  "Argv of every faked async build spawn, oldest first.")
+
+(defvar agent-repl-test--async-build-proc nil
+  "The fake process the most recent faked async build spawn returned.")
+
+(defmacro agent-repl-test--with-async-build (&rest body)
+  "Run BODY with the async build boundary faked and its state reset.
+`agent-repl-test--async-build-spawned' collects the argv of every spawn,
+newest last, and `agent-repl-test--async-build-proc' holds the fake the
+most recent spawn returned."
+  `(let ((agent-repl--frontend-async-build-process nil)
+         (agent-repl--frontend-async-build-request nil)
+         (agent-repl--frontend-async-build-queue nil)
+         (agent-repl-test--async-build-spawned nil)
+         (agent-repl-test--async-build-proc nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-spawn-build-script)
+                (lambda (args)
+                  (setq agent-repl-test--async-build-spawned
+                        (append agent-repl-test--async-build-spawned (list args)))
+                  (setq agent-repl-test--async-build-proc
+                        (make-agent-repl-test--fake-build-proc))))
+               ((symbol-function 'process-live-p)
+                (lambda (p) (if (agent-repl-test--fake-build-proc-p p)
+                                (agent-repl-test--fake-build-proc-live p)
+                              nil)))
+               ((symbol-function 'process-exit-status)
+                (lambda (p) (agent-repl-test--fake-build-proc-exit p)))
+               ((symbol-function 'display-buffer) #'ignore))
+       ,@body)))
+
+(defun agent-repl-test--settle-async-build (exit)
+  "Exit the tracked fake build process with EXIT, driving the real sentinel."
+  (let ((proc agent-repl--frontend-async-build-process))
+    (setf (agent-repl-test--fake-build-proc-live proc) nil)
+    (setf (agent-repl-test--fake-build-proc-exit proc) exit)
+    (agent-repl--frontend-async-build-sentinel proc "finished\n")))
+
+(ert-deftest agent-repl-test-daemon-async-build-spawns-the-shared-argv ()
+  "The asynchronous run spawns the script with the shared argv shape."
+  (agent-repl-test--with-async-build
+   ;; Act
+   (let ((outcome (agent-repl--frontend-build-targets-async '("webapp"))))
+     ;; Assert
+     (should (eq outcome 'started))
+     (should (equal agent-repl-test--async-build-spawned
+                    (list (agent-repl--frontend-build-args '("webapp") nil)))))))
+
+(ert-deftest agent-repl-test-daemon-async-build-runs-success-callback ()
+  "A zero exit runs the success continuation."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (let (won)
+     (agent-repl--frontend-build-targets-async
+      '("webapp") nil (lambda () (setq won t)) nil)
+     ;; Act
+     (agent-repl-test--settle-async-build 0)
+     ;; Assert
+     (should won))))
+
+(ert-deftest agent-repl-test-daemon-async-build-runs-failure-callback ()
+  "A non-zero exit runs the failure continuation with the failure detail."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (let (detail)
+     (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+       (agent-repl--frontend-build-targets-async
+        '("webapp") nil nil (lambda (d) (setq detail d)))
+       ;; Act
+       (agent-repl-test--settle-async-build 2))
+     ;; Assert
+     (should (string-match-p "exit 2" (or detail ""))))))
+
+(ert-deftest agent-repl-test-daemon-async-build-failure-skips-success-callback ()
+  "A non-zero exit never runs the success continuation."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (let (won)
+     (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+       (agent-repl--frontend-build-targets-async
+        '("webapp") nil (lambda () (setq won t)) nil)
+       ;; Act
+       (agent-repl-test--settle-async-build 1))
+     ;; Assert
+     (should-not won))))
+
+(ert-deftest agent-repl-test-daemon-async-build-does-not-stack-a-second-process ()
+  "A request arriving mid-build queues instead of spawning a second build."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (agent-repl--frontend-build-targets-async '("webapp"))
+   ;; Act
+   (let ((outcome (agent-repl--frontend-build-targets-async '("shim"))))
+     ;; Assert — still exactly one spawn.
+     (should (eq outcome 'queued))
+     (should (equal (length agent-repl-test--async-build-spawned) 1)))))
+
+(ert-deftest agent-repl-test-daemon-async-build-coalesces-identical-requests ()
+  "Two identical requests behind one build share a single queued run."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (agent-repl--frontend-build-targets-async '("webapp"))
+   (agent-repl--frontend-build-targets-async '("webapp"))
+   ;; Act
+   (let ((outcome (agent-repl--frontend-build-targets-async '("webapp"))))
+     ;; Assert
+     (should (eq outcome 'coalesced))
+     (should (equal (length agent-repl--frontend-async-build-queue) 1)))))
+
+(ert-deftest agent-repl-test-daemon-async-build-runs-the-queued-run-after ()
+  "The queued build starts once the in-flight one settles."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (agent-repl--frontend-build-targets-async '("webapp"))
+   (agent-repl--frontend-build-targets-async '("shim"))
+   ;; Act
+   (agent-repl-test--settle-async-build 0)
+   ;; Assert
+   (should (equal agent-repl-test--async-build-spawned
+                  (list (agent-repl--frontend-build-args '("webapp") nil)
+                        (agent-repl--frontend-build-args '("shim") nil))))))
+
+(ert-deftest agent-repl-test-daemon-async-build-coalesced-waiters-all-run ()
+  "Every waiter coalesced onto a queued run gets its continuation."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (let ((won 0))
+     (agent-repl--frontend-build-targets-async '("webapp"))
+     (agent-repl--frontend-build-targets-async
+      '("shim") nil (lambda () (setq won (1+ won))) nil)
+     (agent-repl--frontend-build-targets-async
+      '("shim") nil (lambda () (setq won (1+ won))) nil)
+     ;; Act — settle the in-flight run, then the queued one it starts.
+     (agent-repl-test--settle-async-build 0)
+     (agent-repl-test--settle-async-build 0)
+     ;; Assert
+     (should (equal won 2)))))
+
+(ert-deftest agent-repl-test-daemon-async-build-drains-past-a-throwing-waiter ()
+  "A continuation that throws does not strand the queued build behind it."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (agent-repl--frontend-build-targets-async
+    '("webapp") nil (lambda () (error "waiter blew up")) nil)
+   (agent-repl--frontend-build-targets-async '("shim"))
+   ;; Act
+   (should-error (agent-repl-test--settle-async-build 0))
+   ;; Assert — the queued run was started anyway.
+   (should (equal (length agent-repl-test--async-build-spawned) 2))))
+
+(ert-deftest agent-repl-test-daemon-async-build-errors-on-missing-script ()
+  "A missing build script signals rather than reporting a failed build."
+  (agent-repl-test--with-async-build
+   ;; Arrange
+   (let ((agent-repl--frontend-build-script "/agent-repl-nonexistent/build.sh"))
+     ;; Act / Assert
+     (should-error (agent-repl--frontend-build-targets-async '("webapp")))
+     (should-not agent-repl-test--async-build-spawned))))
+
+(ert-deftest agent-repl-test-daemon-async-build-settle-without-a-request-signals ()
+  "Settling with nothing in flight is a broken invariant, not a no-op."
+  (agent-repl-test--with-async-build
+   ;; Act / Assert
+   (should-error (agent-repl--frontend-async-build-settle 0))))
 
 ;;;; ---- timer-backed lifecycle waiting --------------------------------------
 
