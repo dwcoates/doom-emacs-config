@@ -319,6 +319,28 @@ producer of the leak can be identified from the message alone."
         (should (stringp trace))
         (should (> (length trace) 0))))))
 
+;;;; ---- Tests: ws-forget (hard removal of a tombstone) ----
+
+(ert-deftest agent-repl-test-ws-forget-removes-tombstoned-entry ()
+  "ws-forget hard-removes a tombstoned entry from the hash."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (agent-repl--ws-del "ws1")
+    (agent-repl--ws-forget "ws1")
+    (should-not (agent-repl--ws-known-p "ws1"))))
+
+(ert-deftest agent-repl-test-ws-forget-refuses-live-workspace ()
+  "ws-forget signals rather than removing a live workspace."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (should-error (agent-repl--ws-forget "ws1"))
+    (should (agent-repl--ws-live-p "ws1"))))
+
+(ert-deftest agent-repl-test-ws-forget-refuses-unknown-workspace ()
+  "ws-forget signals on a name that was never registered."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl--ws-forget "never-registered"))))
+
 ;;;; ---- Tests: ws-del (tombstone semantics; moved from test-core.el) ----
 
 (ert-deftest agent-repl-test-ws-del-clears-runtime-key ()

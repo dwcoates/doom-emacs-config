@@ -22,6 +22,7 @@
 ;;   - `agent-repl--ws-put'                set one plist key (logs stub-create)
 ;;   - `agent-repl--ws-put-caller-trace'   diagnostic helper for `--ws-put'
 ;;   - `agent-repl--ws-del'                tombstone (preserves identity)
+;;   - `agent-repl--ws-forget'             hard-remove a tombstone (archived first)
 ;;   - `agent-repl--ws-live-p'             entry exists AND not tombstoned
 ;;   - `agent-repl--live-ws-names'         live names (filtered)
 ;;   - `agent-repl--ws-registered-names'   all keys (live + tombstoned)
@@ -512,6 +513,31 @@ log line preserves the pre-existing diagnostic shape."
     ;; the canonical completed-tombstone record after setter advice settles.
     (agent-repl--log ws "ws-del: ws=%s had-entry=%s (tombstone) kill-cause=%s"
                      ws (if had-entry "t" "nil") (agent-repl--kill-cause-str))))
+
+(defun agent-repl--ws-forget (ws)
+  "Hard-remove tombstoned WS from `agent-repl--workspaces'.
+The deliberate counterpart to `agent-repl--ws-del': where `--ws-del'
+tombstones (preserving the identity record so reverse-lookups and the
+revival picker still resolve), this drops the entry outright so it stops
+being collected, swept, and re-serialized on every roster write.
+
+Refuses — with an `error', never a silent no-op — when WS is unknown or
+still live.  Forgetting a live workspace would strand its persp, buffers
+and session with no hash entry to reach them by, so the caller's bug must
+surface rather than be absorbed.
+
+The ONLY sanctioned caller is the snapshot tombstone-eviction path
+\(`agent-repl--snapshot-evict-expired-tombstones'), which archives the
+entry to a loadable snapshot file BEFORE calling this — the identity
+record is moved out of the live roster, never destroyed."
+  (unless (agent-repl--ws-known-p ws)
+    (agent-repl--log ws "ws-forget: REJECT ws=%S reason=unregistered" ws)
+    (error "agent-repl: ws-forget: workspace %S is not registered" ws))
+  (unless (agent-repl--ws-tombstoned-p ws)
+    (agent-repl--log ws "ws-forget: REJECT ws=%S reason=live" ws)
+    (error "agent-repl: ws-forget: refusing to forget live workspace %S" ws))
+  (remhash ws agent-repl--workspaces)
+  (agent-repl--log ws "ws-forget: ws=%s removed=t" ws))
 
 ;;;; ---- Membership predicates -------------------------------------------
 
