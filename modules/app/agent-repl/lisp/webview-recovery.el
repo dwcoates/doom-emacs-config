@@ -32,6 +32,22 @@
 ;; ConnectResync's `retryNow' then `BackgroundRecovery.recover'), so a
 ;; host-driven repair and a user-arrives repair run the identical code.
 ;;
+;; A DEPLOY IS THE SAME PROBLEM ONE LAYER DOWN, and so it is the same
+;; sweep.  bin/deploy-all.sh replaces the webapp bundle under every
+;; mounted page; a page's own skew guard (webapp/src/version-skew.ts)
+;; reloads it, but only on ADOPTION, which a hidden webview cannot reach
+;; until it is focused — so the first look at a backgrounded workspace
+;; after a deploy shows pre-deploy behavior for a beat.  Emacs settles
+;; that without the page: the deployed bundle's identity is on disk
+;; (`webapp/dist/.build-id') and the identity a page is running is in the
+;; URL it was addressed at, so the sweep compares the two and either
+;; drives the recovery hook (same bundle, possibly stale connection) or
+;; re-navigates the page to the deployed address (different bundle, or a
+;; bundle so old the URL carries no identity and the hook may not exist).
+;; `agent-repl-refresh-webviews' — what deploy-all calls — is a thin call
+;; into this one sweep, so the deploy edge and the link-up edge cannot
+;; drift apart into two different ideas of what a stale page is.
+;;
 ;; STARTUP IS THE SAME EDGE.  Webviews restored from a saved session can
 ;; predate the running daemon entirely, and the first snapshot apply after
 ;; Emacs starts runs this hook like any other — so the startup sweep needs
@@ -40,13 +56,20 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'url-util)
 
-(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--log"agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--frontend-webview-execute-script "agent-repl-frontend" (buf script))
+(declare-function agent-repl--frontend-webview-live-widget "agent-repl-frontend" (buf))
+(declare-function agent-repl--frontend-webview-uri "agent-repl-frontend" (xwidget))
+(declare-function agent-repl--frontend-webview-navigate-widget "agent-repl-frontend" (xwidget uri))
+(declare-function agent-repl--frontend-webview-workspace "agent-repl-frontend" (buf))
+(declare-function agent-repl--frontend-live-webview-buffers "agent-repl-frontend" ())
+(declare-function agent-repl--frontend-build-id "agent-repl-frontend-client" ())
 
 (defvar agent-repl-uds-snapshot-applied-functions)
 
@@ -82,18 +105,89 @@ connection to repair, and its boot opens a fresh socket anyway."
           agent-repl-frontend-recover-hook
           reason))
 
+(defun agent-repl--webview-recovery-buffers ()
+  "Return every webview buffer a sweep can reach, deduplicated.
+
+TWO SOURCES, because neither alone is the whole set:
+
+  - `agent-repl--frontend-live-webview-buffers' walks `buffer-list', so
+    it finds a webview whose workspace record has already been dropped;
+  - each live workspace's recorded `:frontend-buffer' finds a webview
+    whose buffer the buffer-name predicate would not claim.
+
+A HIBERNATED workspace is a live registry entry, so its webview buffer
+is in this set exactly when the buffer still exists — which is the point
+of the union.  A workspace with NO webview buffer contributes nothing
+and needs nothing: it has no page to reload, and it opens onto the
+deployed bundle whenever the user next opens it."
+  (let ((bufs (agent-repl--frontend-live-webview-buffers)))
+    (dolist (ws (agent-repl--live-ws-names))
+      (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+        (when (and (buffer-live-p buf) (not (memq buf bufs)))
+          (setq bufs (append bufs (list buf))))))
+    bufs))
+
+(defconst agent-repl--webview-recovery-build-param "build"
+  "Query parameter the webview URL carries the webapp's build identity in.
+Written by `agent-repl--frontend-workspace-url' (frontend-client.el) from
+`agent-repl--frontend-build-id', which reads `webapp/dist/.build-id' —
+the same stamp bin/deploy-all.sh's revision gate is written beside.  The
+URL is therefore the host-readable statement of WHICH BUNDLE a mounted
+page is running, with no round trip into the page at all.")
+
+(defun agent-repl--webview-recovery-uri-build (uri)
+  "Return the build identity URI addresses, or nil when it carries none.
+nil is a real answer, not a failure: a page addressed without the
+parameter predates the build-stamped URL entirely, so it is running a
+bundle no deploy can be sure of and the sweep treats it as stale."
+  (when (and uri (string-match
+                  (format "[?&]%s=\\([^&]*\\)" agent-repl--webview-recovery-build-param)
+                  uri))
+    (let ((raw (match-string 1 uri)))
+      (unless (string-empty-p raw)
+        (url-unhex-string raw)))))
+
+(defun agent-repl--webview-recovery-fresh-uri (uri build)
+  "Return URI re-addressed at BUILD, replacing or appending the build param.
+The address is what selects the bundle a reload fetches, so a stale page
+must be sent to a DIFFERENT one — re-fetching its own URI is what a
+cache can, and does, answer with the superseded bundle it already holds."
+  (let ((param agent-repl--webview-recovery-build-param)
+        (value (url-hexify-string build)))
+    (if (string-match (format "\\([?&]%s=\\)[^&]*" param) uri)
+        (replace-match (concat (match-string 1 uri) value) t t uri)
+      (concat uri (if (string-match-p "\\?" uri) "&" "?") param "=" value))))
+
 (defun agent-repl--webview-recovery-sweep (reason)
-  "Drive the recovery hook in every live workspace webview, naming REASON.
-Returns the number of webviews the script was delivered to.
+  "Bring every reachable webview onto the deployed bundle, naming REASON.
+Returns how many webviews the sweep ACTED on (driven plus reloaded).
+
+WHY STALENESS IS DECIDED HOST-SIDE.  The page repairs itself on skew
+only when it is ADOPTED (webapp/src/version-skew.ts), and a hidden
+xwidget webview cannot reach adoption until it is focused — so after a
+deploy the user's first look at a backgrounded workspace lands on the
+PRE-DEPLOY bundle for a beat.  Emacs can settle it without the page's
+help: `agent-repl--frontend-build-id' reads the deployed bundle's
+identity off disk, and the webview's own URL carries the identity it was
+addressed at, so the comparison needs nothing from a suspended page.
+
+  - identities MATCH  -> the page is already on the deployed bundle and
+                         only its daemon connection can be stale, so it
+                         is DRIVEN through the existing recovery hook;
+  - identities DIFFER, or the URL carries no identity at all (a bundle
+    predating the stamped URL, which is also a bundle predating the
+    recovery hook) -> the page is RELOADED at the deployed address,
+                         because driving a hook a stale bundle may not
+                         even define would repair nothing.
 
 Debounced by `agent-repl-webview-recovery-debounce-seconds': a sweep
 inside that window of the previous one is skipped and returns nil, which
 is how a flapping link cannot stack sweeps.
 
-A webview whose script evaluation fails is WARNED about by name and the
-sweep continues to the rest: one page's broken widget is not a reason to
-leave every other page disconnected, and the failure is still said out
-loud rather than swallowed."
+A webview the sweep fails on is WARNED about by name and the sweep
+continues to the rest: one page's broken widget is not a reason to leave
+every other page stale, and the failure is still said out loud rather
+than swallowed."
   (let ((now (float-time)))
     (if (and agent-repl--webview-recovery-last-sweep
              (< (- now agent-repl--webview-recovery-last-sweep)
@@ -105,26 +199,45 @@ loud rather than swallowed."
           nil)
       (setq agent-repl--webview-recovery-last-sweep now)
       (let ((script (agent-repl--webview-recovery-script reason))
-            (workspaces (agent-repl--live-ws-names))
+            (deployed (agent-repl--frontend-build-id))
+            (buffers (agent-repl--webview-recovery-buffers))
             (driven 0)
-            (skipped 0)
+            (reloaded 0)
+            (absent 0)
             (failed 0))
-        (dolist (ws workspaces)
-          (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
-            (if (not (buffer-live-p buf))
-                (setq skipped (1+ skipped))
-              (condition-case err
-                  (progn
-                    (agent-repl--frontend-webview-execute-script buf script)
-                    (setq driven (1+ driven)))
-                (error
-                 (setq failed (1+ failed))
-                 (agent-repl--warn ws "webview-recovery: buffer=%s outcome=script-failed err=%S"
-                                   (buffer-name buf) err))))))
+        (dolist (buf buffers)
+          (let ((ws (agent-repl--frontend-webview-workspace buf)))
+            (condition-case err
+                (let ((xw (agent-repl--frontend-webview-live-widget buf)))
+                  (if (null xw)
+                      (progn
+                        (setq absent (1+ absent))
+                        (agent-repl--warn
+                         ws "webview-recovery: buffer=%s outcome=dead-webview"
+                         (buffer-name buf)))
+                    (let* ((uri (agent-repl--frontend-webview-uri xw))
+                           (build (agent-repl--webview-recovery-uri-build uri)))
+                      (if (equal build deployed)
+                          (progn
+                            (agent-repl--frontend-webview-execute-script buf script)
+                            (setq driven (1+ driven))
+                            (agent-repl--log
+                             ws "webview-recovery: buffer=%s outcome=driven build=%s"
+                             (buffer-name buf) deployed))
+                        (let ((fresh (agent-repl--webview-recovery-fresh-uri uri deployed)))
+                          (agent-repl--frontend-webview-navigate-widget xw fresh)
+                          (setq reloaded (1+ reloaded))
+                          (agent-repl--log
+                           ws "webview-recovery: buffer=%s outcome=reloaded was=%s now=%s url=%s"
+                           (buffer-name buf) (or build "none") deployed fresh))))))
+              (error
+               (setq failed (1+ failed))
+               (agent-repl--warn ws "webview-recovery: buffer=%s outcome=failed err=%S"
+                                 (buffer-name buf) err)))))
         (agent-repl--log nil
-                         "webview-recovery: sweep reason=%s workspaces=%d driven=%d no-webview=%d failed=%d"
-                         reason (length workspaces) driven skipped failed)
-        driven))))
+                         "webview-recovery: sweep reason=%s webviews=%d driven=%d reloaded=%d absent=%d failed=%d"
+                         reason (length buffers) driven reloaded absent failed)
+        (+ driven reloaded)))))
 
 (defun agent-repl--webview-recovery-on-link-up ()
   "Sweep every live webview when the daemon link comes back.
