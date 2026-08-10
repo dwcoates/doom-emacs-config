@@ -1010,10 +1010,44 @@ describe("async catalog badges", () => {
     expect(badge).toMatch(/cursor:\s*pointer/);
   });
 
-  it("mutes the token spend so the label stays the badge's voice", () => {
+  it("sizes the token figure under the label so the label stays the badge's voice", () => {
     // Arrange / Act — the .async-badge-tokens rule.
     // Assert
-    expect(blockAfter(css, ".async-badge-tokens")).toMatch(/color:\s*var\(--muted\)/);
+    expect(blockAfter(css, ".async-badge-tokens")).toMatch(/font-size:\s*0\.7rem/);
+  });
+
+  it("sets no color on the token figure, leaving the heat ramp to color it", () => {
+    // Arrange / Act — a muted grey here would fight the shared `.token-heat`.
+    // Assert
+    expect(blockAfter(css, ".async-badge-tokens")).not.toMatch(/color:/);
+  });
+});
+
+/* The heat ramp is ONE rule. Every surface that reports an uncached-input
+   figure wears `.token-heat` and is colored by it, so a new surface is heated
+   by construction rather than by being added to a selector list. */
+describe("the token heat ramp is a single owner", () => {
+  it("colors every heated figure from one selector", () => {
+    // Arrange / Act
+    // Assert
+    expect(blockAfter(css, "\n.token-heat {")).toMatch(/color:\s*hsl\(var\(--token-heat-hue\)/);
+  });
+
+  it("keeps the dark theme's half a single selector too", () => {
+    // Arrange / Act — the dark override must not re-list the surfaces either.
+    const dark = css.slice(css.lastIndexOf(".token-heat {"));
+    // Assert
+    expect(dark).toMatch(/^\.token-heat \{ color:\s*hsl\(var\(--token-heat-hue\)/);
+  });
+
+  it("excludes heated figures from every per-surface color fallback", () => {
+    // Arrange — a fallback that did NOT exclude .token-heat would out-specify
+    // the ramp and silently unheat that surface.
+    const fallbacks = [".topbar-info .info-tokens", ".info-tokens", ".turn-meta .turn-in"];
+    // Act / Assert
+    for (const selector of fallbacks) {
+      expect(css).toContain(`${selector}:not(.token-heat) { color: var(--info-tokens); }`);
+    }
   });
 });
 
@@ -2772,7 +2806,7 @@ describe("the nav marker", () => {
 // The leading newline pins the marker to the chip's own color rule: the
 // strip's scoped rule (".topbar-info .info-tokens") would otherwise match
 // first, since it precedes the chips section.
-const tokensToggle = blockAfter(css, "\n.info-tokens { color");
+const tokensToggle = blockAfter(css, "\n.info-tokens:not(.token-heat) { color");
 const tokensValue = blockAfter(css, ".tokens-value {");
 const tokensSubRow = blockAfter(css, ".tokens-row.sub {");
 
