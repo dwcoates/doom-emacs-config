@@ -256,13 +256,26 @@ type outbox struct {
 	grace  time.Duration
 	now    func() time.Time
 	ready  chan struct{}
-	// popped counts every frame the writer has taken. It is the drain-progress
-	// evidence: a wedged consumer is one whose count does not move.
+	// popped counts every frame the writer has taken (log/introspection aid).
 	popped uint64
+	// progress counts every OBSERVABLE ACT OF DRAIN by this connection's
+	// consumer: each frame the writer popped, AND each chunk of a frame's bytes
+	// the socket accepted while a write was in flight.
+	//
+	// The byte half is not an embellishment, it is the whole point. The frame
+	// count was the only progress evidence, and a single frame can take tens of
+	// seconds to write: an observed Emacs host received a 162-workspace connect
+	// snapshot, spent 31s consuming it — reading the whole time — and was
+	// evicted at 30s as "stalled" for having drained nothing, 391ms before the
+	// write it was draining completed successfully. Byte-level progress is what
+	// distinguishes a consumer that is slow from one that is gone; frame-level
+	// progress cannot, because a consumer working on one huge frame looks
+	// identical to a consumer that died holding it.
+	progress uint64
 	// overSince is when the queue last crossed into the elastic region with no
 	// drain progress since; zero means it is not currently under pressure.
-	overSince  time.Time
-	overPopped uint64
+	overSince    time.Time
+	overProgress uint64
 }
 
 // newOutbox builds a plain bounded queue: no elastic region, so a push refused
@@ -335,11 +348,12 @@ func (o *outbox) push(f outFrame) pushResult {
 	if o.depthLocked() >= o.soft {
 		res.overSoft = true
 		switch {
-		case o.overSince.IsZero() || o.popped != o.overPopped:
-			// Either pressure just began, or the consumer has drained something
-			// since the mark. Both are progress: re-mark and keep accepting.
+		case o.overSince.IsZero() || o.progress != o.overProgress:
+			// Either pressure just began, or the consumer has made observable
+			// drain progress since the mark — a popped frame or accepted bytes.
+			// Both are progress: re-mark and keep accepting.
 			res.entered = o.overSince.IsZero()
-			o.overSince, o.overPopped = o.now(), o.popped
+			o.overSince, o.overProgress = o.now(), o.progress
 		case o.now().Sub(o.overSince) >= o.grace:
 			res.depth, res.reason = o.depthLocked(), overflowStalled
 			res.stalledFor = o.stalledForLocked()
@@ -369,6 +383,22 @@ func (o *outbox) close() []outFrame {
 	stranded := append(append([]outFrame(nil), o.control...), o.frames...)
 	o.control, o.frames = nil, nil
 	return stranded
+}
+
+// noteWriteProgress records that the socket accepted a chunk of the frame
+// currently being written. The writer calls it from inside writeFrame, which is
+// the only place that can see progress a queue-depth reading cannot: a frame
+// that has been popped is off the queue, so from the queue's point of view a
+// 31-second write and a dead consumer look exactly the same until this says
+// otherwise.
+//
+// It deliberately does NOT clear the pressure mark. The queue is still deep and
+// the next push must still report that; what it clears is only the STALL
+// verdict, by advancing the progress counter the mark is compared against.
+func (o *outbox) noteWriteProgress() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.progress++
 }
 
 // stalledForLocked reports how long the queue has been under pressure with no
@@ -403,10 +433,11 @@ func (o *outbox) pop() (outFrame, bool) {
 		return outFrame{}, false
 	}
 	o.popped++
+	o.progress++
 	if o.depthLocked() < o.soft {
 		// The episode is over: clear the mark so the next one is reported as a
 		// new entry into the elastic region rather than a continuation.
-		o.overSince, o.overPopped = time.Time{}, 0
+		o.overSince, o.overProgress = time.Time{}, 0
 	}
 	return f, true
 }
