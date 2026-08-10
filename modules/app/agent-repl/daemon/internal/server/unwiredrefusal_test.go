@@ -34,7 +34,7 @@ import (
 // compile in exactly one place.
 type noPages struct{}
 
-func (noPages) ConversationPage(context.Context, string, string, string, sessioncontroller.PageAnchor) (*frontendv1.ConversationPage, error) {
+func (noPages) ConversationPage(context.Context, string, string, sessioncontroller.PageAnchor) (*frontendv1.ConversationPage, error) {
 	return nil, errors.New("this fake serves no conversation pages")
 }
 
@@ -42,14 +42,14 @@ func (noPages) ConversationPage(context.Context, string, string, string, session
 // sessioncontroller does for a workspace that has not been brought up.
 type unwiredResyncer struct{ noPages }
 
-func (unwiredResyncer) ResyncForGeneration(string, string, string, uint64) error {
+func (unwiredResyncer) ResyncForFence(string, string, uint64) error {
 	return errclass.ErrNoLiveSessionController
 }
 
 // brokenResyncer fails for a reason that is nobody's routine expectation.
 type brokenResyncer struct{ noPages }
 
-func (brokenResyncer) ResyncForGeneration(string, string, string, uint64) error {
+func (brokenResyncer) ResyncForFence(string, string, uint64) error {
 	return errors.New("the retained ring is corrupt")
 }
 
@@ -106,7 +106,10 @@ func TestAFailedResyncIsLoggedWithItsCause(t *testing.T) {
 
 	// Assert.
 	for _, l := range logged {
-		if strings.Contains(l, "resync ws=/w request_id=r1 session= generation= from_seq=1 FAILED") && strings.Contains(l, "the retained ring is corrupt") {
+		// The handler names the client's echo as the FENCE it passed on, rather
+		// than as a pair it split out of it — the split has one reader now, and
+		// it is not here.
+		if strings.Contains(l, `resync ws=/w request_id=r1 fence="" from_seq=1 FAILED`) && strings.Contains(l, "the retained ring is corrupt") {
 			return
 		}
 	}
@@ -129,7 +132,7 @@ func TestAGenuineResyncFailureStaysLoud(t *testing.T) {
 
 type supersededResyncer struct{ noPages }
 
-func (supersededResyncer) ResyncForGeneration(string, string, string, uint64) error {
+func (supersededResyncer) ResyncForFence(string, string, uint64) error {
 	return errclass.ErrSessionSuperseded
 }
 
@@ -208,9 +211,12 @@ func TestInterruptOnAnUnwiredWorkspaceStaysLoud(t *testing.T) {
 
 // servingResyncer records what reached the eligibility ladder, and accepts
 // everything. It is what makes "refused BEFORE the ladder" provable.
-type servingResyncer struct{ entered int }
+type servingResyncer struct {
+	noPages
+	entered int
+}
 
-func (r *servingResyncer) ResyncForGeneration(string, string, string, uint64) error {
+func (r *servingResyncer) ResyncForFence(string, string, uint64) error {
 	r.entered++
 	return nil
 }

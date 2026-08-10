@@ -12,6 +12,7 @@ import (
 
 	"claude-repld/internal/errclass"
 
+	"claude-repld/internal/ssm"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -38,7 +39,11 @@ func newPageHarness(t *testing.T, events []*corev1.Event) *pageHarness {
 	t.Helper()
 	h := &pageHarness{durableHarness: newDurableHarness(t, &durableHistorySpy{events: events})}
 	h.applier.current = map[string]*frontendv1.WorkspaceState{
-		"ws": {Workspace: "ws", SessionId: "s1", ControllerGenerationId: "g1"},
+		// The Fence is stamped exactly as the mint stamps it (ssm.compositeWorkspaceState),
+		// because it is the token the ladder byte-compares and the one a client was
+		// actually shown. A fixture carrying the two identities but no fence would
+		// describe a WorkspaceState the daemon never publishes.
+		"ws": {Workspace: "ws", SessionId: "s1", ControllerGenerationId: "g1", Fence: ssm.Fence("s1", "g1")},
 	}
 	if len(events) > 0 {
 		h.seq.SetLastSeq("s1", events[len(events)-1].GetSeq())
@@ -49,7 +54,7 @@ func newPageHarness(t *testing.T, events []*corev1.Event) *pageHarness {
 // page asks for one page under the live identity.
 func (h *pageHarness) page(t *testing.T, anchor PageAnchor) *frontendv1.ConversationPage {
 	t.Helper()
-	got, err := h.m.ConversationPage(context.Background(), "ws", "s1", "g1", anchor)
+	got, err := h.m.ConversationPage(context.Background(), "ws", ssm.Fence("s1", "g1"), anchor)
 	if err != nil {
 		t.Fatalf("ConversationPage(%+v): %v", anchor, err)
 	}
@@ -304,7 +309,7 @@ func TestAPageIsRefusedWhenTheEchoedFenceNamesASupersededGeneration(t *testing.T
 	h := newPageHarness(t, pageTextEvents(t, 5))
 
 	// Act.
-	_, err := h.m.ConversationPage(context.Background(), "ws", "s1", "g-retired", PageAnchor{Tail: true, Limit: 3})
+	_, err := h.m.ConversationPage(context.Background(), "ws", ssm.Fence("s1", "g-retired"), PageAnchor{Tail: true, Limit: 3})
 
 	// Assert — refused BEFORE any read, so a stale request can never
 	// half-serve someone else's history.
@@ -338,7 +343,7 @@ func TestACursorMintedForAnotherConversationIsRefused(t *testing.T) {
 	foreign := encodePageCursor(pageCursor{sessionID: "s-other", beforeSeq: 10})
 
 	// Act.
-	_, err := h.m.ConversationPage(context.Background(), "ws", "s1", "g1", PageAnchor{Cursor: foreign, Limit: 3})
+	_, err := h.m.ConversationPage(context.Background(), "ws", ssm.Fence("s1", "g1"), PageAnchor{Cursor: foreign, Limit: 3})
 
 	// Assert.
 	if !errors.Is(err, ErrPageCursorUnreadable) {

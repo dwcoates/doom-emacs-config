@@ -641,9 +641,9 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 			Restarts:           cfg.Restarts,
 			// The SSM owns the merge axis, so the restart's clear edge goes
 			// through the same manager every merge row is appended to.
-			MergeAxis: mgr,
-			Hibernations:       cfg.Hibernations,
-			Health:             HealthConfig{Router: cfg.Health, Daemon: cfg.DaemonHealth},
+			MergeAxis:    mgr,
+			Hibernations: cfg.Hibernations,
+			Health:       HealthConfig{Router: cfg.Health, Daemon: cfg.DaemonHealth},
 			// The gate reads each fact from the authority that owns it: the
 			// controller observes the turn boundary, and the progress resolver
 			// already carries the live-task count to the footer.

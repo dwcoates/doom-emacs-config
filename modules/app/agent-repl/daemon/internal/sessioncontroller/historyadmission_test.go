@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/ssm"
 )
 
 // ONE LADDER, BOTH SURFACES.
@@ -36,13 +37,13 @@ func bothHistorySurfaces() []historyRequest {
 		{
 			name: "resync",
 			call: func(h *repullHarness, sessionID, generationID string) error {
-				return h.m.ResyncForGeneration("ws", sessionID, generationID, 0)
+				return h.m.ResyncForFence("ws", ssm.Fence(sessionID, generationID), 0)
 			},
 		},
 		{
 			name: "conversation page",
 			call: func(h *repullHarness, sessionID, generationID string) error {
-				_, err := h.m.ConversationPage(context.Background(), "ws", sessionID, generationID, PageAnchor{Tail: true, Limit: 3})
+				_, err := h.m.ConversationPage(context.Background(), "ws", ssm.Fence(sessionID, generationID), PageAnchor{Tail: true, Limit: 3})
 				return err
 			},
 		},
@@ -161,14 +162,14 @@ func TestARefusalNamesTheRequestThatWasRefused(t *testing.T) {
 		{
 			name: "a resync names its mark",
 			call: func(h *repullHarness, sessionID, generationID string) error {
-				return h.m.ResyncForGeneration("ws", sessionID, generationID, 9)
+				return h.m.ResyncForFence("ws", ssm.Fence(sessionID, generationID), 9)
 			},
 			want: "from_seq=9",
 		},
 		{
 			name: "a page names its anchor and limit",
 			call: func(h *repullHarness, sessionID, generationID string) error {
-				_, err := h.m.ConversationPage(context.Background(), "ws", sessionID, generationID, PageAnchor{Tail: true, Limit: 7})
+				_, err := h.m.ConversationPage(context.Background(), "ws", ssm.Fence(sessionID, generationID), PageAnchor{Tail: true, Limit: 7})
 				return err
 			},
 			want: "anchor=tail limit=7",
@@ -200,7 +201,7 @@ func TestAnAdmittedLiveRequestReleasesTheManagerLock(t *testing.T) {
 	d := h.controller(t)
 
 	// Act.
-	if _, err := h.m.ConversationPage(context.Background(), "ws", d.sessionID, d.generationID, PageAnchor{Tail: true, Limit: 3}); err != nil {
+	if _, err := h.m.ConversationPage(context.Background(), "ws", ssm.Fence(d.sessionID, d.generationID), PageAnchor{Tail: true, Limit: 3}); err != nil {
 		t.Fatalf("ConversationPage: %v", err)
 	}
 
