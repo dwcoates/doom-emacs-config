@@ -610,6 +610,9 @@ export interface RevivalGateInput {
   failure?: string;
 }
 
+/** The class on the collapsed card a taken decision leaves behind. */
+export const HIBERNATION_PROGRESS_CLASS = "hibernation-progress";
+
 /** The class on the span carrying the "asleep for" age, updated in place. */
 export const HIBERNATION_SINCE_CLASS = "hibernation-since";
 
@@ -651,6 +654,26 @@ export function revivalGateSignature(input: Omit<RevivalGateInput, "now">): stri
 }
 
 /**
+ * The collapsed card a TAKEN decision leaves standing: one line saying what is
+ * running, and nothing else.
+ *
+ * WHY THE CARD COLLAPSES RATHER THAN WAITING. The block is not lifted here —
+ * the composer stays disabled until the daemon reports the session awake, and
+ * that is the one authority on it. What changes is what the user is looking
+ * at: the popup exists to ASK a question, and once it has been answered a
+ * full-height card of options that are no longer on offer stands through the
+ * whole bring-up, which for a compact-first revival is the length of a
+ * compaction. Collapsing it the instant the decision is accepted is how the
+ * click visibly lands.
+ */
+export function revivalProgressHtml(pending: Exclude<RevivePending, null>): string {
+  return `
+    <div class="${HIBERNATION_PROGRESS_CLASS}">
+      <span class="hibernation-pending">${escapeHtml(revivePendingText(pending))}</span>
+    </div>`;
+}
+
+/**
  * The revival gate card, or "" when the session is awake.
  *
  * THE ACTIONS ARE THE REVIVAL DECISIONS AND NOTHING ELSE. There is no "dismiss": the gate is a pure function
@@ -658,14 +681,22 @@ export function revivalGateSignature(input: Omit<RevivalGateInput, "now">): stri
  * frame while having taught the user that the block is optional. And there is
  * no "cancel" — a hibernated session has nothing to cancel back to.
  *
- * While a decision is in flight the buttons are replaced by the pending line
- * rather than merely disabled: the daemon's answer is a pushed `SessionView`
- * that drops the field, so the honest report is "waiting", and leaving two
- * greyed buttons on screen would invite a second click on the other one.
+ * While a decision is in flight the WHOLE CARD is replaced by the collapsed
+ * progress line ({@link revivalProgressHtml}) rather than the buttons being
+ * greyed: the daemon's answer is a pushed `SessionView` that drops the field,
+ * so the honest report is "waiting", and leaving the options on screen would
+ * invite a second click on another one.
  */
 export function revivalGateHtml(input: RevivalGateInput): string {
   const { hibernation, contextTokens, pending = null, now = Date.now(), failure = "" } = input;
   if (hibernation === null) return "";
+  // A DECISION THAT HAS BEEN TAKEN IS NOT A QUESTION ANY MORE, so the card
+  // collapses to the one line that says what is now happening. The block
+  // itself does not lift — the composer stays disabled until the daemon says
+  // the session is awake — but the popup that was asking the question has
+  // been answered, and leaving the whole card standing through a compaction
+  // reads as the click having missed.
+  if (pending !== null) return revivalProgressHtml(pending);
   const since =
     hibernation.sinceMs > 0
       ? `<span class="${HIBERNATION_SINCE_CLASS}">${escapeHtml(
@@ -678,9 +709,7 @@ export function revivalGateHtml(input: RevivalGateInput): string {
   // of one hand: the reader has to pair them by position, and a mispaired
   // reading here chooses what a conversation loses.
   const options = reviveOptions(hibernation);
-  const actions =
-    pending === null
-      ? `
+  const actions = `
       <div class="hibernation-actions">${options
         .map(
           (option) => `
@@ -692,8 +721,7 @@ export function revivalGateHtml(input: RevivalGateInput): string {
         </div>`,
         )
         .join("")}
-      </div>`
-      : `<div class="hibernation-pending">${escapeHtml(revivePendingText(pending))}</div>`;
+      </div>`;
   // The failed-revival line sits ABOVE the cause, because it is the newer news:
   // the cause explains how the session got here, and this explains why the
   // decision the user already made did not get it out.

@@ -14,6 +14,7 @@ import type { RevivalGateInput } from "../src/hibernation.js";
 import {
   HIBERNATED_BODY_CLASS,
   HIBERNATION_COMPOSER_NOTICE,
+  HIBERNATION_PROGRESS_CLASS,
   revivalGateSignature,
   revivalSinceText,
   REVIVAL_CONTEXT_UNKNOWN_TEXT,
@@ -248,12 +249,13 @@ describe("revivalGateHtml: the blocking card", () => {
     expect(gate(forced(), { contextTokens: null })).toContain(REVIVAL_CONTEXT_UNKNOWN_TEXT);
   });
 
-  it("keeps the token count visible while a decision is in flight", () => {
-    // Arrange — the buttons are replaced by the pending line, but the figure
-    // is what the user is watching the wake-up spend.
+  it("drops the token count once the decision it priced has been taken", () => {
+    // Arrange — the figure exists to price a decision the user is MAKING, and
+    // once it is made the card collapses to the one line saying what is
+    // running. The same standing figure stays on the topbar chip throughout.
     const got = gate(forced(), { pending: "direct" });
     // Act / Assert
-    expect(got).toContain(revivalContextSizeText(CONTEXT_TOKENS));
+    expect(got).not.toContain(revivalContextSizeText(CONTEXT_TOKENS));
   });
 
   it("offers the compact-everything action", () => {
@@ -654,6 +656,47 @@ describe("the gate's failed-revival line", () => {
     const got = gate(forced(), { failure: "<script>x</script>" });
     // Assert
     expect(got).not.toContain("<script");
+  });
+});
+
+describe("the taken decision's collapsed card", () => {
+  it("collapses the card to the progress line the moment a decision is accepted", () => {
+    // Arrange / Act
+    const got = gate(forced(), { pending: "compactAll" });
+    // Assert — the popup asked a question that has now been answered, and a
+    // compact-first revival keeps it answered for a whole compaction.
+    expect(got).toContain(HIBERNATION_PROGRESS_CLASS);
+    expect(got).not.toContain(REVIVAL_GATE_HEADING);
+  });
+
+  it("drops the cause prose from the collapsed card, since nothing is being decided", () => {
+    // Arrange / Act
+    const got = gate(forced(), { pending: "compactAll" });
+    // Assert
+    expect(got).not.toContain(hibernationCauseText(forced()));
+  });
+
+  it("keeps the waking copy, so the collapsed line still says what is running", () => {
+    // Arrange / Act
+    const got = gate(forced(), { pending: "compactAll" });
+    // Assert
+    expect(got).toContain(revivePendingText("compactAll"));
+  });
+
+  it("restores the FULL card when an accepted decision left the session asleep", () => {
+    // Arrange — the failure path: the same verdict clears the pending mark and
+    // sets the failure line.
+    const got = gate(forced(), { pending: null, failure: REVIVE_FAILED_TEXT });
+    // Assert — the choice is handed back, which is the only exit left.
+    expect(got).toContain(REVIVAL_GATE_HEADING);
+    expect(got).toContain(REVIVE_FAILED_TEXT);
+    expect(got).toContain(`${REVIVE_ATTR}="compactAll"`);
+  });
+
+  it("draws nothing at all for an awake session, pending or not", () => {
+    // Arrange / Act / Assert — the collapse is a presentation of the block,
+    // never a reason to draw one where the daemon reports none.
+    expect(gate(null, { pending: "direct" })).toBe("");
   });
 });
 
