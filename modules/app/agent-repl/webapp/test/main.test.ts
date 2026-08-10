@@ -296,6 +296,12 @@ describe("the revival gate's chrome wiring", () => {
     // Assert
     expect(chrome).toContain("HIBERNATED_BODY_CLASS");
   });
+
+  it("guards the dequeue card's repaint, since it carries buttons of its own", () => {
+    // Assert — an unconditional rewrite destroys whichever button the user is
+    // mid-press on, and the browser then fires no click at all.
+    expect(chrome).toContain("mergeDequeueSlot.paint(mergeDequeueCardHtml(");
+  });
 });
 
 describe("the revival decision's dispatch", () => {
