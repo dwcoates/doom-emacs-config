@@ -370,6 +370,38 @@ non-nil when a placeholder was actually torn down."
                      (- (float-time) (plist-get entry :started)))
     t))
 
+(defun agent-repl--open-progress-abandon (ws)
+  "Tear down WS's placeholder because WS itself is going away.
+
+Subscriber for `agent-repl-ws-del-hook', which runs at the top of
+`agent-repl--ws-del' — while WS is still registered, so this line still
+routes to WS's own sink.
+
+Without it, a workspace closed with an open still in flight left its
+escalation timer armed.  The timer outlives the workspace, and when it
+fires it calls `agent-repl--warn' against a name the registry no longer
+resolves, which is how a closed workspace kept producing records that
+`agent-repl--note-unroutable-log-workspace' then warned about.  The
+emitter is what has to stop: the placeholder is a report on an open, and
+a closed workspace has no open left to report on.
+
+This is a teardown, not a resolution: unlike
+`agent-repl--open-progress-fail' it leaves no standing buffer, because
+there is no longer a workspace for the user to read a verdict about.
+Returns non-nil when a placeholder was actually torn down."
+  (when-let ((entry (agent-repl--open-progress-entry ws)))
+    (agent-repl--open-progress-cancel-timer entry)
+    (remhash ws agent-repl--open-progress)
+    (let ((buf (plist-get entry :buffer)))
+      (when (buffer-live-p buf) (kill-buffer buf)))
+    (agent-repl--log ws "open-progress: ABANDONED phase=%s reason=workspace-deleted"
+                     (plist-get entry :phase))
+    t))
+
+;; Registered here though the hook lives in workspace.el, for the same
+;; load-order reason the state-transition subscription below is.
+(add-hook 'agent-repl-ws-del-hook #'agent-repl--open-progress-abandon)
+
 ;;;; ---- Pushed-state subscription ----------------------------------------
 
 (defconst agent-repl--open-progress-broken-states
