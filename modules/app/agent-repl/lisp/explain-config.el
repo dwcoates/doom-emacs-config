@@ -55,7 +55,7 @@
 (declare-function agent-repl-frontend-ungated-permission-mode-p "agent-repl-frontend-client" (mode))
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process &rest keys))
 (declare-function agent-repl--frontend-make-webview-buffer "agent-repl-frontend" (url))
-(declare-function agent-repl--frontend-adopt-webview-buffer "agent-repl-frontend" (buf name))
+(declare-function agent-repl--frontend-adopt-webview-buffer "agent-repl-frontend" (buf name owner))
 (declare-function agent-repl--frontend-kill-webview "agent-repl-frontend" (buf))
 (declare-function agent-repl--frontend-require-xwidget "agent-repl-frontend" ())
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
@@ -517,7 +517,9 @@ popup is chrome, not a browser."
       (let* ((buf (agent-repl--frontend-make-webview-buffer
                    (agent-repl--explain-config-webview-url session-id)))
              (name agent-repl-explain-config-buffer-name))
-        (agent-repl--frontend-adopt-webview-buffer buf name)
+        ;; nil owner: the popup is a singleton that belongs to no
+        ;; workspace, so no workspace's window sweep may claim it.
+        (agent-repl--frontend-adopt-webview-buffer buf name nil)
         (setq agent-repl--explain-config-webview-session-id session-id)
         (agent-repl--log nil "explain-config: webview mounted buffer=%S session=%S url=%S"
                          name session-id (agent-repl--explain-config-webview-url session-id))
