@@ -2192,8 +2192,53 @@ export type FrontendFrame = {
     | { case: "workspaceGate"; value: WorkspaceGateView }
     | { case: "mergeQueueRoster"; value: MergeQueueRoster }
     | { case: "restartPending"; value: RestartPendingView }
-    | { case: "conversationPage"; value: ConversationPage };
+    | { case: "conversationPage"; value: ConversationPage }
+    | { case: "unknownArm"; value: UnknownFrameArm };
 };
+
+/**
+ * A frame arm this bundle does not know — a NEWER daemon's additive push.
+ *
+ * WHY THIS IS A VALUE AND NOT AN ERROR. The daemon and this page are deployed
+ * separately: a page loaded into a long-lived webview routinely runs one bundle
+ * behind the daemon serving it, and `FrontendFrame` grows by ADDING oneof arms
+ * (`restartPending` was the most recent). Hard-failing the decode on an arm the
+ * bundle has never heard of turns every additive daemon change into a page that
+ * throws on ingest, never adopts a snapshot, lets its snapshot lease expire, and
+ * is force-reloaded into another bundle that cannot read the frame either —
+ * the reload loop version-skew.ts exists to bound rather than to cause.
+ *
+ * So an unrecognized arm is IGNORED (both `observe` and `apply` fall through to
+ * their default) and COUNTED, which is the honest disposition: a frame carrying
+ * only a variant this build has no renderer for is a frame this build has
+ * nothing to do with. It is deliberately NOT a blanket relaxation — an unknown
+ * field ALONGSIDE a known arm is still a malformed frame and still throws,
+ * because that is corruption rather than additive evolution.
+ */
+export interface UnknownFrameArm {
+  /** The protojson field name of the arm this bundle does not know. */
+  field: string;
+}
+
+/**
+ * How many frames carrying each unknown arm this page has decoded.
+ *
+ * The count is kept here (rather than logged here) because this module holds no
+ * logger; the ingest path reads it and writes ONE line per distinct arm — see
+ * main.ts. A per-frame line would be the flood, since an unknown arm is
+ * typically pushed on every snapshot.
+ */
+const unknownFrameArmCounts = new Map<string, number>();
+
+/** Per-arm decode counts for unrecognized frame arms; reading never mutates. */
+export function unknownFrameArmTally(): ReadonlyMap<string, number> {
+  return unknownFrameArmCounts;
+}
+
+/** Drop the unknown-arm tally. For tests, which must not inherit each other's. */
+export function resetUnknownFrameArmTally(): void {
+  unknownFrameArmCounts.clear();
+}
 
 /** The frame-variant discriminators FrontendFrame.frame.case may hold. */
 export type FrameCase = FrontendFrame["frame"]["case"];
@@ -2250,6 +2295,10 @@ export const UNSUPPORTED_SHAPES: ReadonlyMap<string, string> = new Map<
     "host-only workspace materialization directive; GUI transports never receive it",
   ],
   ["hostAction", "host-only UI inbox action; GUI transports never receive it"],
+  [
+    "unknownArm",
+    "a newer daemon's additive frame arm this bundle predates; counted and ignored",
+  ],
 ]);
 
 /** Whether a frame variant is mapped to a webapp visual (not in the registry). */
@@ -2276,16 +2325,29 @@ export function decodeFrontendFrame(json: string): FrontendFrame {
   const keys = Object.keys(o);
   const variantKeys = keys.filter((k) => FRAME_DECODERS.has(k));
   const unknownKeys = keys.filter((k) => !FRAME_DECODERS.has(k));
-  if (unknownKeys.length > 0) {
+  // ADDITIVE ARM vs CORRUPTION, and the difference is whether a known arm is
+  // present. A frame that carries ONLY unrecognized fields is a newer daemon
+  // pushing a variant this bundle predates (see UnknownFrameArm) — tolerated,
+  // counted, ignored. Unknown fields sitting BESIDE a known arm are not that:
+  // the frame this page is about to ingest is not the frame the daemon sent,
+  // and adopting part of it is how a store goes quietly wrong. Still throws.
+  if (unknownKeys.length > 0 && variantKeys.length > 0) {
     throw new Error(
       `frontend-proto: FrontendFrame has unrecognized field(s): ${unknownKeys.join(", ")}`,
     );
   }
   if (variantKeys.length === 0) {
-    throw new Error(
-      "frontend-proto: FrontendFrame carries no known frame variant " +
-        "(empty or unrecognized oneof)",
-    );
+    if (unknownKeys.length === 0) {
+      throw new Error(
+        "frontend-proto: FrontendFrame carries no known frame variant " +
+          "(empty or unrecognized oneof)",
+      );
+    }
+    // Sorted so the recorded name is stable whatever order the daemon's JSON
+    // serializer emitted, which keeps the one-line-per-arm report to one line.
+    const field = [...unknownKeys].sort().join("+");
+    unknownFrameArmCounts.set(field, (unknownFrameArmCounts.get(field) ?? 0) + 1);
+    return { frame: { case: "unknownArm" as const, value: { field } } };
   }
   if (variantKeys.length > 1) {
     throw new Error(
