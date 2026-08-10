@@ -1176,6 +1176,12 @@ finish-workspace path."
           (agent-repl--log ws "nuke-one-workspace: post-persp-kill ws=%s in-cache=%s cache=%S"
                             ws (if (member ws persp-names-cache) "t" "nil") persp-names-cache)))
       (error (agent-repl--warn ws "nuke-one-workspace: workspace-kill error: %S" err)))
+    ;; The perspective the user was standing in may be the one just killed, so
+    ;; where they end up is CHOSEN here rather than inherited from whatever
+    ;; persp-mode left selected — see `agent-repl--land-after-teardown'.
+    (condition-case err
+        (agent-repl--land-after-teardown ws)
+      (error (agent-repl--warn ws "nuke-one-workspace: land-after-teardown error: %S" err)))
     ;; The workspace is now gone from both the hash (tombstoned, unless
     ;; PRESERVE-ENTRY) and the tab bar, so its sidebar row is gone too.
     ;; Repaint immediately rather than letting the row outlive its tab
@@ -1975,6 +1981,64 @@ Callers must use this function instead of calling `+workspace-new' or
         (+workspace-new name))
     (when (fboundp '+workspace/new)
       (+workspace/new))))
+
+(defun agent-repl--land-after-teardown (ws)
+  "Leave the frame in a well-defined perspective now that WS is gone.
+
+TEARING DOWN A WORKSPACE MUST NAME WHERE THE USER ENDS UP.  Killing the
+perspective the user is standing in leaves the frame wherever persp-mode
+happened to drop it — a persp that no longer exists, or persp-mode's
+`nil' sentinel, which owns none of Doom's workspace keymap.  That is the
+observed post-merge state: the merge completes, the workspace vanishes,
+and `SPC ESC' reports itself undefined because the frame is standing in
+no workspace at all.
+
+So the landing is CHOSEN rather than inherited: when the current
+perspective is gone, missing, or is WS itself, this switches to the first
+surviving agent-repl workspace, falling back to the first surviving persp
+of any kind.  When nothing survives there is nowhere to land and the
+frame is left as persp-mode arranged it, which is recorded rather than
+silently accepted.
+
+Returns the workspace landed on, or nil when no switch was made or
+possible.  A failing switch is warned about, never swallowed: a landing
+that did not happen must not read as one that did."
+  (if (not (agent-repl--ws-system-available-p))
+      (progn
+        (agent-repl--log ws "land-after-teardown: skipped=no-workspace-system")
+        nil)
+    (let ((current (agent-repl--ws-current-name))
+          (survivors (agent-repl--ws-all-names)))
+      (if (and current
+               (not (equal current ws))
+               (member current survivors))
+          (progn
+            (agent-repl--log ws "land-after-teardown: already-live persp=%s" current)
+            nil)
+        (let ((target (or (car (agent-repl--ws-list-names))
+                          (car (cl-remove-if
+                                (lambda (n)
+                                  (or (equal n ws)
+                                      (and (boundp 'persp-nil-name)
+                                           (equal n persp-nil-name))))
+                                survivors)))))
+          (if (null target)
+              (progn
+                (agent-repl--warn
+                 ws "land-after-teardown: NO surviving workspace to land in (current=%s survivors=%S)"
+                 current survivors)
+                nil)
+            (agent-repl--log ws "land-after-teardown: current=%s -> target=%s"
+                             current target)
+            (condition-case err
+                (progn
+                  (agent-repl--ws-switch target)
+                  (agent-repl--log ws "land-after-teardown: landed persp=%s" target)
+                  target)
+              (error
+               (agent-repl--warn ws "land-after-teardown: switch to %s FAILED: %S"
+                                 target err)
+               nil))))))))
 
 (defun agent-repl--ws-persp-kill (ws)
   "Kill the perspective named WS via the low-level `persp-kill'.

@@ -2612,3 +2612,143 @@ The screen must only demote names that could not be routed at all."
 
 (provide 'test-workspace)
 ;;; test-workspace.el ends here
+
+;;;; ---- Tests: landing after a workspace teardown ----
+
+(ert-deftest agent-repl-test-land-after-teardown-switches-off-a-killed-persp ()
+  "A teardown that killed the current perspective lands on a survivor."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (switched)
+      (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "gone"))
+                ((symbol-function 'agent-repl--ws-all-names) (lambda () '("keeper")))
+                ((symbol-function 'agent-repl--ws-list-names) (lambda () '("keeper")))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws))))
+        ;; Act
+        (should (equal (agent-repl--land-after-teardown "gone") "keeper"))
+        ;; Assert
+        (should (equal switched "keeper"))))))
+
+(ert-deftest agent-repl-test-land-after-teardown-leaves-a-live-persp-alone ()
+  "A teardown of some OTHER workspace does not move the user off theirs."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (switched)
+      (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "mine"))
+                ((symbol-function 'agent-repl--ws-all-names) (lambda () '("mine" "other")))
+                ((symbol-function 'agent-repl--ws-list-names) (lambda () '("mine" "other")))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws))))
+        ;; Act
+        (should-not (agent-repl--land-after-teardown "other"))
+        ;; Assert
+        (should-not switched)))))
+
+(ert-deftest agent-repl-test-land-after-teardown-switches-off-a-vanished-persp ()
+  "A current perspective no longer in the tab bar is landed off as well."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (switched)
+      (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "stale"))
+                ((symbol-function 'agent-repl--ws-all-names) (lambda () '("keeper")))
+                ((symbol-function 'agent-repl--ws-list-names) (lambda () '("keeper")))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws))))
+        ;; Act
+        (agent-repl--land-after-teardown "gone")
+        ;; Assert
+        (should (equal switched "keeper"))))))
+
+(ert-deftest agent-repl-test-land-after-teardown-warns-when-nothing-survives ()
+  "With no surviving workspace the absence of a landing is surfaced, not hidden."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (warned switched)
+      (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "gone"))
+                ((symbol-function 'agent-repl--ws-all-names) (lambda () '("gone")))
+                ((symbol-function 'agent-repl--ws-list-names) (lambda () nil))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws)))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+        ;; Act
+        (should-not (agent-repl--land-after-teardown "gone"))
+        ;; Assert
+        (should-not switched)
+        (should (seq-find (lambda (l) (string-match-p "NO surviving workspace" l))
+                          warned))))))
+
+(ert-deftest agent-repl-test-land-after-teardown-surfaces-a-failed-switch ()
+  "A switch that signals is warned about rather than read as a landing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (warned)
+      (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "gone"))
+                ((symbol-function 'agent-repl--ws-all-names) (lambda () '("keeper")))
+                ((symbol-function 'agent-repl--ws-list-names) (lambda () '("keeper")))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (&rest _) (error "persp gone")))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+        ;; Act
+        (should-not (agent-repl--land-after-teardown "gone"))
+        ;; Assert
+        (should (seq-find (lambda (l) (string-match-p "FAILED" l)) warned))))))
+
+(ert-deftest agent-repl-test-land-after-teardown-is-a-noop-without-persp-mode ()
+  "With no workspace system there is no perspective to land in."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (switched)
+      (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () nil))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws))))
+        ;; Act
+        (should-not (agent-repl--land-after-teardown "gone"))
+        ;; Assert
+        (should-not switched)))))
+
+(ert-deftest agent-repl-test-nuke-one-workspace-lands-the-user-after-teardown ()
+  "Tearing a workspace down always ends by naming where the user is left."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
+    (let (landed)
+      (cl-letf (((symbol-function 'agent-repl--state-save) #'ignore)
+                ((symbol-function 'agent-repl--kill-workspace-buffers) #'ignore)
+                ((symbol-function 'agent-repl--ws-repaint-sidebar) #'ignore)
+                ((symbol-function 'agent-repl--ws-system-available-p) (lambda () nil))
+                ((symbol-function 'agent-repl--land-after-teardown)
+                 (lambda (ws) (setq landed ws))))
+        ;; Act
+        (agent-repl--nuke-one-workspace "ws")
+        ;; Assert
+        (should (equal landed "ws"))))))
+
+(ert-deftest agent-repl-test-nuke-one-workspace-survives-a-failing-landing ()
+  "A landing that signals is warned about and never aborts the teardown."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
+    (let (warned repainted)
+      (cl-letf (((symbol-function 'agent-repl--state-save) #'ignore)
+                ((symbol-function 'agent-repl--kill-workspace-buffers) #'ignore)
+                ((symbol-function 'agent-repl--ws-repaint-sidebar)
+                 (lambda (&rest _) (setq repainted t)))
+                ((symbol-function 'agent-repl--ws-system-available-p) (lambda () nil))
+                ((symbol-function 'agent-repl--land-after-teardown)
+                 (lambda (_ws) (error "no frame")))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+        ;; Act
+        (agent-repl--nuke-one-workspace "ws")
+        ;; Assert — the failure is surfaced and the teardown still finishes.
+        (should (seq-find (lambda (l) (string-match-p "land-after-teardown error" l))
+                          warned))
+        (should repainted)))))

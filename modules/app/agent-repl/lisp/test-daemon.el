@@ -2517,3 +2517,46 @@ skips the drain that reconstructs merges and releases leases."
                (lambda (path _subject) (setq asked path))))
       (agent-repl--frontend-deploy-assert-script)
       (should (equal asked agent-repl--frontend-deploy-script)))))
+
+;;;; ---- filter/sentinel: quit deferral ----------------------------------
+
+(ert-deftest agent-repl-test-daemon-filter-defers-a-quit-to-the-command-loop ()
+  "A C-g during a mirror leaves the quit armed rather than losing it."
+  ;; Arrange
+  (agent-repl-test--with-daemon-mirror records
+    (cl-letf (((symbol-function 'agent-repl--frontend-daemon-capture)
+               (lambda (&rest _) (setq quit-flag t))))
+      ;; Act / Assert
+      (should (agent-repl-test--quit-deferred-p
+                (agent-repl--frontend-daemon-filter 'proc "panic: boom\n"))))))
+
+(ert-deftest agent-repl-test-daemon-filter-completes-the-line-assembly-under-a-quit ()
+  "A quit mid-mirror never strands a half-assembled line in the accumulator."
+  ;; Arrange
+  (agent-repl-test--with-daemon-mirror records
+    ;; Act — the C-g lands while the chunk is being consumed.
+    (agent-repl-test--with-pending-quit
+      (agent-repl--frontend-daemon-filter 'proc "panic: boom\n"))
+    ;; Assert
+    (should (member "claude-repld output: panic: boom" records))
+    (should (equal agent-repl--frontend-daemon-line-accumulator ""))))
+
+(ert-deftest agent-repl-test-daemon-sentinel-defers-a-quit-to-the-command-loop ()
+  "A C-g during the daemon's exit report is deferred, not taken mid-report."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-daemon-report-exit)
+             (lambda (&rest _) (setq quit-flag t))))
+    ;; Act / Assert
+    (should (agent-repl-test--quit-deferred-p
+              (agent-repl--frontend-daemon-sentinel 'proc "exited abnormally\n")))))
+
+(ert-deftest agent-repl-test-async-run-sentinel-defers-a-quit-to-the-command-loop ()
+  "A C-g while an async build settles cannot strand the single-flight slot."
+  ;; Arrange
+  (cl-letf (((symbol-function 'process-live-p) (lambda (_proc) nil))
+            ((symbol-function 'process-exit-status) (lambda (_proc) 0))
+            ((symbol-function 'agent-repl--frontend-async-run-settle)
+             (lambda (&rest _) (setq quit-flag t))))
+    ;; Act / Assert
+    (should (agent-repl-test--quit-deferred-p
+              (agent-repl--frontend-async-run-sentinel 'proc "finished\n")))))

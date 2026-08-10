@@ -1838,14 +1838,21 @@ BUILD stands in for `agent-repl--frontend-build-targets-async' and is
 called with (TARGETS FORCE ON-SUCCESS ON-FAILURE), so each test decides
 whether the build succeeds, fails, or never settles.
 `agent-repl-test--restart-asked' records the workspace whose shim restart
-was issued, and `agent-repl-test--restart-opened' the workspace whose
-webview was reopened."
+was issued, `agent-repl-test--restart-acked' the continuation the verb
+hung off that restart's success ack (call it to simulate the ack landing),
+and `agent-repl-test--restart-opened' the workspace whose webview was
+reopened.  The faked client NEVER calls the continuation itself, so a test
+that does not fire it is testing a restart still in flight."
   (declare (indent 1))
   `(let ((agent-repl-test--restart-asked nil)
+         (agent-repl-test--restart-acked nil)
          (agent-repl-test--restart-opened nil))
      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
                ((symbol-function 'agent-repl--frontend-restart-session)
-                (lambda (ws) (setq agent-repl-test--restart-asked ws) "req-1"))
+                (lambda (ws &optional on-restarted)
+                  (setq agent-repl-test--restart-asked ws
+                        agent-repl-test--restart-acked on-restarted)
+                  "req-1"))
                ((symbol-function 'agent-repl--gui-open)
                 (lambda (ws) (setq agent-repl-test--restart-opened ws)))
                ((symbol-function 'agent-repl--frontend-build-targets-async) ,build)
@@ -1856,6 +1863,9 @@ webview was reopened."
 
 (defvar agent-repl-test--restart-asked nil
   "Workspace whose shim restart the faked client recorded.")
+
+(defvar agent-repl-test--restart-acked nil
+  "Continuation the restart verb hung off the shim restart's success ack.")
 
 (defvar agent-repl-test--restart-opened nil
   "Workspace whose webview the faked gui open recorded.")
@@ -1893,19 +1903,52 @@ cannot delay the restart the user asked for."
     (should (equal agent-repl-test--restart-asked "ws1"))
     (should (null agent-repl-test--restart-opened))))
 
-(ert-deftest agent-repl-test-restart-session-bounces-the-webview-on-build-success ()
-  "A successful build closes the webview and reopens it on the new build id."
+(ert-deftest agent-repl-test-restart-session-bounces-the-webview-once-both-legs-land ()
+  "The webview bounces when the build AND the shim restart have both settled."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((buf (generate-new-buffer "*fake-webview*")))
       (agent-repl--ws-put "ws1" :frontend-buffer buf)
       (agent-repl-test--with-restart-session
           (lambda (_ts _force on-success _on-failure) (funcall on-success) 'started)
-        ;; Act
+        ;; Act — the build already settled; the restart ack lands now.
         (agent-repl-restart-session)
+        (funcall agent-repl-test--restart-acked)
         ;; Assert
         (should-not (buffer-live-p buf))
         (should (equal agent-repl-test--restart-opened "ws1"))))))
+
+(ert-deftest agent-repl-test-restart-session-holds-the-bounce-until-the-restart-acks ()
+  "A finished build alone does not reopen a page against a shim still coming up."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (agent-repl--ws-put "ws1" :frontend-buffer buf)
+      (unwind-protect
+          (agent-repl-test--with-restart-session
+              (lambda (_ts _force on-success _on-failure) (funcall on-success) 'started)
+            ;; Act — the build settles, the restart ack never arrives.
+            (agent-repl-restart-session)
+            ;; Assert
+            (should (buffer-live-p buf))
+            (should (null agent-repl-test--restart-opened)))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-restart-session-holds-the-bounce-until-the-build-settles ()
+  "A restart ack alone does not reopen the page onto the stale bundle."
+  ;; Arrange — a build that captures its continuations and never calls them.
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (agent-repl--ws-put "ws1" :frontend-buffer buf)
+      (unwind-protect
+          (agent-repl-test--with-restart-session (lambda (&rest _) 'started)
+            ;; Act
+            (agent-repl-restart-session)
+            (funcall agent-repl-test--restart-acked)
+            ;; Assert
+            (should (buffer-live-p buf))
+            (should (null agent-repl-test--restart-opened)))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
 
 (ert-deftest agent-repl-test-restart-session-leaves-the-webview-on-build-failure ()
   "A failed build leaves the webview alone rather than bouncing it."
@@ -1916,8 +1959,10 @@ cannot delay the restart the user asked for."
       (agent-repl-test--with-restart-session
           (lambda (_ts _force _on-success on-failure)
             (funcall on-failure "exit 1") 'started)
-        ;; Act
+        ;; Act — even a restart that completes cannot bounce onto a bundle
+        ;; the failed build never produced.
         (agent-repl-restart-session)
+        (funcall agent-repl-test--restart-acked)
         ;; Assert
         (should (buffer-live-p buf))
         (should (null agent-repl-test--restart-opened))))))
@@ -1944,8 +1989,20 @@ cannot delay the restart the user asked for."
         (lambda (_ts _force on-success _on-failure) (funcall on-success) 'started)
       ;; Act
       (agent-repl-restart-session)
+      (funcall agent-repl-test--restart-acked)
       ;; Assert
       (should (null agent-repl-test--restart-opened)))))
+
+(ert-deftest agent-repl-test-restart-session-returns-before-the-restart-completes ()
+  "The verb returns to the command loop with the restart still in flight."
+  ;; Arrange
+  (agent-repl-test--with-restart-session (lambda (&rest _) 'started)
+    ;; Act
+    (agent-repl-restart-session)
+    ;; Assert — the restart is issued and its completion is still pending.
+    (should (equal agent-repl-test--restart-asked "ws1"))
+    (should (functionp agent-repl-test--restart-acked))
+    (should (null agent-repl-test--restart-opened))))
 
 (ert-deftest agent-repl-test-restart-session-command-needs-a-workspace ()
   "With no current workspace the restart signals rather than guessing one."
@@ -2368,10 +2425,15 @@ never be released and the next open would mount a second one beside it."
                 ((symbol-function 'agent-repl--frontend-display-webview)
                  (lambda (&rest _) (signal 'quit nil))))
         (agent-repl--gui-open "ws1")
-        ;; Act
-        (should-error (funcall continuation) :type 'quit)
-        ;; Assert — the registry names the buffer that was created.
-        (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer)))))))
+        ;; Act — `quit' is not an `error', so `should-error' cannot catch it;
+        ;; caught explicitly here, the quit stops escaping the test and the
+        ;; assertion below actually runs.
+        (let ((quit-seen (condition-case nil
+                             (progn (funcall continuation) nil)
+                           (quit t))))
+          ;; Assert — the registry names the buffer that was created.
+          (should quit-seen)
+          (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer))))))))
 
 (ert-deftest agent-repl-test-frontend-open-leaves-the-heartbeat-armed ()
   "An open leaves the 1Hz heartbeat timer exactly as it found it.
@@ -2401,3 +2463,106 @@ which is what produced the `outcome=stranded' re-arms."
               (should (agent-repl--timer-armed-p :state-poll))
               (should (eq heartbeat (cdr (assq :state-poll agent-repl--keyed-timers))))))
         (agent-repl--cancel-all-timers)))))
+;;;; ---- the restart/rebuild rendezvous ------------------------------------
+
+(ert-deftest agent-repl-test-rendezvous-runs-on-the-last-arrival ()
+  "The completion fires exactly when the final party arrives, not before."
+  ;; Arrange
+  (let* ((done 0)
+         (gate (agent-repl--frontend-make-rendezvous 2 (lambda () (cl-incf done)))))
+    ;; Act / Assert
+    (funcall gate)
+    (should (= done 0))
+    (funcall gate)
+    (should (= done 1))))
+
+(ert-deftest agent-repl-test-rendezvous-never-completes-twice ()
+  "An extra arrival after completion does not re-run the completion."
+  ;; Arrange
+  (let* ((done 0)
+         (gate (agent-repl--frontend-make-rendezvous 1 (lambda () (cl-incf done)))))
+    ;; Act
+    (funcall gate)
+    (funcall gate)
+    ;; Assert
+    (should (= done 1))))
+
+(ert-deftest agent-repl-test-rendezvous-withholds-completion-when-a-leg-fails ()
+  "A leg that never arrives leaves the completion unrun, which is the point."
+  ;; Arrange
+  (let* ((done nil)
+         (gate (agent-repl--frontend-make-rendezvous 2 (lambda () (setq done t)))))
+    ;; Act — only one of the two legs reports in.
+    (funcall gate)
+    ;; Assert
+    (should-not done)))
+
+(ert-deftest agent-repl-test-rendezvous-rejects-a-non-positive-party-count ()
+  "A rendezvous of nobody is a caller bug and fails hard rather than firing."
+  ;; Act / Assert
+  (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+    (should-error (agent-repl--frontend-make-rendezvous 0 #'ignore) :type 'error)))
+
+;;;; ---- the rebuild's success routing: gate vs direct bounce --------------
+
+(ert-deftest agent-repl-test-rebuild-webapp-routes-success-through-the-gate ()
+  "With a GATE, the build's success arrives at the rendezvous, not the bounce.
+Bouncing straight off the build would reopen the page against a shim the
+restart has not brought back yet."
+  ;; Arrange
+  (let (arrived bounced)
+    (cl-letf (((symbol-function 'agent-repl--frontend-build-targets-async)
+               (lambda (_targets _force on-success _on-failure)
+                 (funcall on-success)
+                 'started))
+              ((symbol-function 'agent-repl--frontend-bounce-webview)
+               (lambda (&rest _) (setq bounced t))))
+      ;; Act
+      (agent-repl--frontend-rebuild-and-redeploy-webapp
+       "ws1" (lambda () (setq arrived t)))
+      ;; Assert
+      (should arrived)
+      (should-not bounced))))
+
+(ert-deftest agent-repl-test-rebuild-webapp-bounces-directly-without-a-gate ()
+  "Without a GATE the build's success bounces the webview by itself."
+  ;; Arrange
+  (let (bounced)
+    (cl-letf (((symbol-function 'agent-repl--frontend-build-targets-async)
+               (lambda (_targets _force on-success _on-failure)
+                 (funcall on-success)
+                 'started))
+              ((symbol-function 'agent-repl--frontend-bounce-webview)
+               (lambda (ws) (setq bounced ws))))
+      ;; Act
+      (agent-repl--frontend-rebuild-and-redeploy-webapp "ws1")
+      ;; Assert
+      (should (equal bounced "ws1")))))
+
+(ert-deftest agent-repl-test-rebuild-webapp-failure-never-reaches-the-gate ()
+  "A failed build never arrives at the rendezvous, so the bounce never runs.
+The webview is left on the bundle it already has, and the failure is
+warned about against the workspace."
+  ;; Arrange
+  (let (arrived warned)
+    (cl-letf (((symbol-function 'agent-repl--frontend-build-targets-async)
+               (lambda (_targets _force _on-success on-failure)
+                 (funcall on-failure "exit 1")
+                 'started))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
+      ;; Act
+      (agent-repl--frontend-rebuild-and-redeploy-webapp
+       "ws1" (lambda () (setq arrived t)))
+      ;; Assert
+      (should-not arrived)
+      (should (string-match-p "exit 1" warned)))))
+
+(ert-deftest agent-repl-test-rebuild-webapp-returns-the-async-outcome ()
+  "The rebuild hands back the build's outcome rather than blocking on it."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-build-targets-async)
+             (lambda (&rest _) 'queued)))
+    ;; Act / Assert
+    (should (eq (agent-repl--frontend-rebuild-and-redeploy-webapp "ws1")
+                'queued))))

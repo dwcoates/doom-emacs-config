@@ -50,9 +50,9 @@ window is selected so the user can start typing immediately."
 
 ;;;; Panel display and hide
 
-(defun agent-repl--safe-buffer-name (b)
-  "Return the name of buffer B if non-nil, otherwise nil."
-  (and b (buffer-name b)))
+;; `agent-repl--safe-buffer-name' now lives in window.el, the layer below
+;; this one: the window helpers label buffers in their own records and
+;; loading order makes window.el the only home both layers can share.
 
 (defun agent-repl--close-buffer-window (buf)
   "Close windows displaying BUF in the selected frame.
@@ -261,29 +261,15 @@ displayed and the caller proceeds to reclaim the frame.  Un-dedicates
 WIN and strips `no-delete-other-windows' first so a dedicated panel
 window can be torn down.  No-op on a dead WIN.  Signals when WIN is
 undeletable and no live fallback buffer exists, rather than silently
-leaving the stale window in place."
-  (when (window-live-p win)
-    (set-window-parameter win 'no-delete-other-windows nil)
-    (set-window-dedicated-p win nil)
-    (if (eq (window-deletable-p win) t)
-        (progn
-          (agent-repl--log (agent-repl--ws-current-log-name)
-                            "safe-delete-window: deleting win=%s buf=%s"
-                            win (agent-repl--safe-buffer-name (window-buffer win)))
-          (delete-window win))
-      (let ((fb (or fallback
-                    (and (fboundp 'doom-fallback-buffer) (doom-fallback-buffer)))))
-        (agent-repl--log (agent-repl--ws-current-log-name)
-                          "safe-delete-window: win=%s undeletable (deletable-p=%S) — swapping buf=%s to fallback=%s"
-                          win (window-deletable-p win)
-                          (agent-repl--safe-buffer-name (window-buffer win))
-                          (agent-repl--safe-buffer-name fb))
-        (if (and fb (buffer-live-p fb))
-            (set-window-buffer win fb)
-          ;; No fallback buffer to neutralize the stale window with: fail
-          ;; loudly rather than silently leave a foreign agent buffer
-          ;; displayed in the new workspace's frame.
-          (error "agent-repl--safe-delete-window: no fallback buffer to neutralize undeletable window %s" win))))))
+leaving the stale window in place.
+
+The recipe itself lives in `agent-repl-window--delete-or-neutralize',
+which is the one place agent-repl answers \"what if this is the last
+window\" — the close path's buffer-window sweep answers it identically
+through the same helper.  This wrapper survives as the persp-switch
+caller's name for it."
+  (agent-repl-window--delete-or-neutralize
+   win fallback (agent-repl--ws-current-log-name)))
 
 (defun agent-repl--reclaim-frame-fullscreen (ws)
   "Take over the frame with WS's own agent panels (fullscreen).

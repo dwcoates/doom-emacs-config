@@ -1795,3 +1795,44 @@ release it, and every later create for that workspace refused outright."
          "/w" "sonnet" 'continue nil #'ignore #'ignore "ws1")
         ;; Assert
         (should (equal (hash-table-count agent-repl--frontend-creates-in-flight) 0))))))
+(ert-deftest agent-repl-test-frontend-restart-session-runs-the-continuation-on-the-ack ()
+  "The post-restart continuation runs from the SUCCESS ack, not from the send."
+  ;; Arrange
+  (let (call ran)
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+               (agent-repl-test--send-command-stub
+                "req-1" (lambda (c) (setq call c))))
+              ((symbol-function 'agent-repl--user-message) (lambda (&rest _) nil)))
+      (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+        ;; Act
+        (agent-repl--frontend-restart-session "ws1" (lambda () (setq ran t)))
+        ;; Assert — nothing has run yet; the daemon has not answered.
+        (should-not ran)
+        (funcall (plist-get call :on-success))
+        (should ran)))))
+
+(ert-deftest agent-repl-test-frontend-restart-session-withholds-the-continuation-on-a-rejection ()
+  "A rejected restart is not followed by work that presumes it completed."
+  ;; Arrange
+  (let (call ran)
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+               (agent-repl-test--send-command-stub
+                "req-1" (lambda (c) (setq call c))))
+              ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+      (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+        ;; Act
+        (agent-repl--frontend-restart-session "ws1" (lambda () (setq ran t)))
+        (funcall (plist-get call :on-failure) "no live session")
+        ;; Assert
+        (should-not ran)))))
+
+(ert-deftest agent-repl-test-frontend-restart-session-returns-its-request-id-immediately ()
+  "The dispatch returns as soon as the command is issued, ack still pending."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+             (agent-repl-test--send-command-stub "req-1" #'ignore)))
+    (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+      ;; Act
+      (let ((req (agent-repl--frontend-restart-session "ws1" #'ignore)))
+        ;; Assert
+        (should (equal req "req-1"))))))
