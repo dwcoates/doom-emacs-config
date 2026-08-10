@@ -270,3 +270,59 @@ func TestResumeDisplacedTurnRefusesAnEmptyPrompt(t *testing.T) {
 		t.Fatal("ResumeDisplacedTurn with no prompt = nil, want a refusal")
 	}
 }
+
+// THE BRING-UP RACE THE LEASE LOST. `existing` answers with a controller the
+// instant it is registered, which is the START of a bring-up: the shim has not
+// handshaked and the client has no connection behind it. An interrupt sent
+// there does not fail fast — it burns the whole control timeout — and the lease
+// is rolled back over a session that was in fact coming up.
+func TestInterruptForMergeDoesNotStopAShimThatIsStillHandshaking(t *testing.T) {
+	// Arrange — a session that is registered but whose readiness gate never
+	// closes, and a context that is already done so the wait resolves with no
+	// wall-clock dependency at all.
+	notReady := make(chan struct{})
+	m, lastClient := newTestManagerNotReady(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{}, notReady)
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	displaced, err := m.InterruptForMerge(ctx, "ws")
+
+	// Assert — refused loudly, and the stop was never handed to a client that
+	// could not carry it.
+	if err == nil {
+		t.Fatal("InterruptForMerge against a handshaking shim = nil, want the driveability refusal")
+	}
+	if !strings.Contains(err.Error(), "never became driveable") {
+		t.Fatalf("error = %q, want it to name the missing driveability", err)
+	}
+	if displaced != nil {
+		t.Fatalf("displaced = %+v, want nothing displaced by a stop that was never sent", displaced)
+	}
+	if got := lastClient().interruptCount(); got != 0 {
+		t.Fatalf("interrupts sent = %d, want 0; the control request must not be spent on an unconnected shim", got)
+	}
+}
+
+// The ordinary path pays nothing for the gate above: a wired session's
+// readiness is already resolved, so the stop still lands.
+func TestInterruptForMergeStopsAWiredSession(t *testing.T) {
+	// Arrange.
+	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	// Act.
+	if _, err := m.InterruptForMerge(context.Background(), "ws"); err != nil {
+		t.Fatalf("InterruptForMerge on a wired session = %v, want the stop to land", err)
+	}
+
+	// Assert.
+	if got := lastClient().interruptCount(); got != 1 {
+		t.Fatalf("interrupts sent = %d, want exactly 1", got)
+	}
+}
