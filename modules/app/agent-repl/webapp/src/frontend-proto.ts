@@ -1853,6 +1853,30 @@ export interface ShutdownScheduleDraining {
 }
 
 /**
+ * The daemon's notice that it is going down ON PURPOSE, pushed once
+ * immediately before teardown.
+ *
+ * It is the fact that separates a deploy bounce from a crash. Without it a
+ * dead socket is the same observation for both, so every routine bounce
+ * painted the severed-connection card. See `restart-window.ts` for what the
+ * page does with it, and why the quiet period it opens is bounded.
+ */
+export interface RestartPendingView {
+  /** Why the daemon is bouncing. Display-grade; never parsed. */
+  cause: string;
+  /** The daemon's clamped outage hint, in whole seconds. Always positive. */
+  expectedOutageSeconds: number;
+  /** Whether the session shims roll too (a longer settle after revival). */
+  stopShims: boolean;
+  /**
+   * When the daemon MINTED the notice (epoch ms), not when it arrived. The
+   * quiet window is measured from the mint, so a late notice shortens the
+   * window instead of restarting its clock.
+   */
+  announcedAtMs: number;
+}
+
+/**
  * The daemon-global scheduled-shutdown lease. EXACTLY ONE arm is always set —
  * `idle` is a real broadcast value (a cancel, or a completed drain), so
  * clearing the lease is representable and "no lease" can never be confused
@@ -2120,7 +2144,8 @@ export type FrontendFrame = {
     | { case: "topbar"; value: TopbarView }
     | { case: "tokenBreakdown"; value: TokenBreakdownView }
     | { case: "workspaceGate"; value: WorkspaceGateView }
-    | { case: "mergeQueueRoster"; value: MergeQueueRoster };
+    | { case: "mergeQueueRoster"; value: MergeQueueRoster }
+    | { case: "restartPending"; value: RestartPendingView };
 };
 
 /** The frame-variant discriminators FrontendFrame.frame.case may hold. */
@@ -2367,6 +2392,13 @@ const FRAME_DECODERS: ReadonlyMap<
     (v: unknown) => ({
       case: "mergeQueueRoster" as const,
       value: decodeMergeQueueRoster(v),
+    }),
+  ],
+  [
+    "restartPending",
+    (v: unknown) => ({
+      case: "restartPending" as const,
+      value: decodeRestartPendingView(v),
     }),
   ],
 ]);
@@ -4517,6 +4549,48 @@ function decodeQueueEntryShutdownHold(v: unknown): QueueEntryShutdownHold {
 }
 
 // --- the drain lease --------------------------------------------------------
+
+const RESTART_PENDING_KEYS = new Set([
+  "cause",
+  "expectedOutageSeconds",
+  "stopShims",
+  "announcedAtMs",
+]);
+
+/**
+ * Decode the intentional-restart notice.
+ *
+ * BOTH numeric fields are REFUSED when unusable rather than defaulted, because
+ * every default here fails in the dangerous direction. A missing mint time
+ * would make the window start on receipt, which is precisely the clock-restart
+ * the field exists to prevent; a non-positive outage hint would open a window
+ * with no stated end. `restart-window` rejects both again on its own side —
+ * this is the wire boundary refusing to manufacture facts the daemon did not
+ * state, not a duplicate of that check.
+ */
+function decodeRestartPendingView(v: unknown): RestartPendingView {
+  const o = ensureObject(v, "RestartPendingView");
+  rejectUnknown(o, RESTART_PENDING_KEYS, "RestartPendingView");
+  const view: RestartPendingView = {
+    cause: str(o, "cause", "RestartPendingView"),
+    expectedOutageSeconds: num(o, "expectedOutageSeconds", "RestartPendingView"),
+    stopShims: bool(o, "stopShims", "RestartPendingView"),
+    announcedAtMs: num(o, "announcedAtMs", "RestartPendingView"),
+  };
+  if (!(view.expectedOutageSeconds > 0)) {
+    throw new Error(
+      "frontend-proto: RestartPendingView needs a positive `expectedOutageSeconds` " +
+        "(an unbounded quiet window is not a representable request)",
+    );
+  }
+  if (!(view.announcedAtMs > 0)) {
+    throw new Error(
+      "frontend-proto: RestartPendingView missing required `announcedAtMs` " +
+        "(the window is measured from the mint, so a late notice shortens it)",
+    );
+  }
+  return view;
+}
 
 const SHUTDOWN_SCHEDULE_VIEW_KEYS = new Set(["idle", "draining"]);
 const SHUTDOWN_DRAINING_KEYS = new Set([

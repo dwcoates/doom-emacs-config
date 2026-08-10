@@ -51,6 +51,7 @@ type FrontendFrame struct {
 	//	*FrontendFrame_TokenBreakdown
 	//	*FrontendFrame_WorkspaceGate
 	//	*FrontendFrame_MergeQueueRoster
+	//	*FrontendFrame_RestartPending
 	Frame         isFrontendFrame_Frame `protobuf_oneof:"frame"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -300,6 +301,15 @@ func (x *FrontendFrame) GetMergeQueueRoster() *MergeQueueRoster {
 	return nil
 }
 
+func (x *FrontendFrame) GetRestartPending() *RestartPendingView {
+	if x != nil {
+		if x, ok := x.Frame.(*FrontendFrame_RestartPending); ok {
+			return x.RestartPending
+		}
+	}
+	return nil
+}
+
 type isFrontendFrame_Frame interface {
 	isFrontendFrame_Frame()
 }
@@ -421,6 +431,14 @@ type FrontendFrame_MergeQueueRoster struct {
 	MergeQueueRoster *MergeQueueRoster `protobuf:"bytes,24,opt,name=merge_queue_roster,json=mergeQueueRoster,proto3,oneof"`
 }
 
+type FrontendFrame_RestartPending struct {
+	// The daemon is going down ON PURPOSE, pushed to every gui_stream client
+	// and to the Emacs UDS host immediately before teardown. It exists so a
+	// deliberate bounce stops being indistinguishable from a crash; see
+	// RestartPendingView for why it is an edge and never snapshot state.
+	RestartPending *RestartPendingView `protobuf:"bytes,25,opt,name=restart_pending,json=restartPending,proto3,oneof"`
+}
+
 func (*FrontendFrame_Snapshot) isFrontendFrame_Frame() {}
 
 func (*FrontendFrame_WorkspaceState) isFrontendFrame_Frame() {}
@@ -466,6 +484,8 @@ func (*FrontendFrame_TokenBreakdown) isFrontendFrame_Frame() {}
 func (*FrontendFrame_WorkspaceGate) isFrontendFrame_Frame() {}
 
 func (*FrontendFrame_MergeQueueRoster) isFrontendFrame_Frame() {}
+
+func (*FrontendFrame_RestartPending) isFrontendFrame_Frame() {}
 
 // Full resync on (re)connect: current state of every workspace + open tasks.
 //
@@ -1471,7 +1491,7 @@ var File_agentshim_frontend_v1_frame_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_frame_proto_rawDesc = "" +
 	"\n" +
-	"!agentshim/frontend/v1/frame.proto\x12\x15agentshim.frontend.v1\x1a(agentshim/frontend/v1/async-bubble.proto\x1a\"agentshim/frontend/v1/errors.proto\x1a(agentshim/frontend/v1/failure-card.proto\x1a agentshim/frontend/v1/feed.proto\x1a\"agentshim/frontend/v1/footer.proto\x1a(agentshim/frontend/v1/gate-revival.proto\x1a agentshim/frontend/v1/host.proto\x1a%agentshim/frontend/v1/lifecycle.proto\x1a!agentshim/frontend/v1/merge.proto\x1a+agentshim/frontend/v1/permission-card.proto\x1a(agentshim/frontend/v1/prompt-queue.proto\x1a#agentshim/frontend/v1/sidebar.proto\x1a!agentshim/frontend/v1/state.proto\x1a'agentshim/frontend/v1/tokens-menu.proto\x1a%agentshim/frontend/v1/tool-call.proto\x1a\"agentshim/frontend/v1/topbar.proto\"\xa7\x0e\n" +
+	"!agentshim/frontend/v1/frame.proto\x12\x15agentshim.frontend.v1\x1a(agentshim/frontend/v1/async-bubble.proto\x1a\"agentshim/frontend/v1/errors.proto\x1a(agentshim/frontend/v1/failure-card.proto\x1a agentshim/frontend/v1/feed.proto\x1a\"agentshim/frontend/v1/footer.proto\x1a(agentshim/frontend/v1/gate-revival.proto\x1a agentshim/frontend/v1/host.proto\x1a%agentshim/frontend/v1/lifecycle.proto\x1a!agentshim/frontend/v1/merge.proto\x1a+agentshim/frontend/v1/permission-card.proto\x1a(agentshim/frontend/v1/prompt-queue.proto\x1a#agentshim/frontend/v1/sidebar.proto\x1a!agentshim/frontend/v1/state.proto\x1a'agentshim/frontend/v1/tokens-menu.proto\x1a%agentshim/frontend/v1/tool-call.proto\x1a\"agentshim/frontend/v1/topbar.proto\"\xfd\x0e\n" +
 	"\rFrontendFrame\x12B\n" +
 	"\bsnapshot\x18\x01 \x01(\v2$.agentshim.frontend.v1.StateSnapshotH\x00R\bsnapshot\x12P\n" +
 	"\x0fworkspace_state\x18\x02 \x01(\v2%.agentshim.frontend.v1.WorkspaceStateH\x00R\x0eworkspaceState\x12G\n" +
@@ -1499,7 +1519,8 @@ const file_agentshim_frontend_v1_frame_proto_rawDesc = "" +
 	"\x06topbar\x18\x15 \x01(\v2!.agentshim.frontend.v1.TopbarViewH\x00R\x06topbar\x12T\n" +
 	"\x0ftoken_breakdown\x18\x16 \x01(\v2).agentshim.frontend.v1.TokenBreakdownViewH\x00R\x0etokenBreakdown\x12Q\n" +
 	"\x0eworkspace_gate\x18\x17 \x01(\v2(.agentshim.frontend.v1.WorkspaceGateViewH\x00R\rworkspaceGate\x12W\n" +
-	"\x12merge_queue_roster\x18\x18 \x01(\v2'.agentshim.frontend.v1.MergeQueueRosterH\x00R\x10mergeQueueRosterB\a\n" +
+	"\x12merge_queue_roster\x18\x18 \x01(\v2'.agentshim.frontend.v1.MergeQueueRosterH\x00R\x10mergeQueueRoster\x12T\n" +
+	"\x0frestart_pending\x18\x19 \x01(\v2).agentshim.frontend.v1.RestartPendingViewH\x00R\x0erestartPendingB\a\n" +
 	"\x05frameJ\x04\b\b\x10\tR\x0fdegraded_notice\"\xcc\b\n" +
 	"\rStateSnapshot\x12E\n" +
 	"\n" +
@@ -1621,40 +1642,41 @@ var file_agentshim_frontend_v1_frame_proto_goTypes = []any{
 	(*TokenBreakdownView)(nil),         // 24: agentshim.frontend.v1.TokenBreakdownView
 	(*WorkspaceGateView)(nil),          // 25: agentshim.frontend.v1.WorkspaceGateView
 	(*MergeQueueRoster)(nil),           // 26: agentshim.frontend.v1.MergeQueueRoster
-	(*AsyncBubble)(nil),                // 27: agentshim.frontend.v1.AsyncBubble
-	(*SubmitPromptCmd)(nil),            // 28: agentshim.frontend.v1.SubmitPromptCmd
-	(*InterruptCmd)(nil),               // 29: agentshim.frontend.v1.InterruptCmd
-	(*PermissionAnswerCmd)(nil),        // 30: agentshim.frontend.v1.PermissionAnswerCmd
-	(*MergeWorkspaceCmd)(nil),          // 31: agentshim.frontend.v1.MergeWorkspaceCmd
-	(*CloseWorkspaceCmd)(nil),          // 32: agentshim.frontend.v1.CloseWorkspaceCmd
-	(*OpenWorkspaceCmd)(nil),           // 33: agentshim.frontend.v1.OpenWorkspaceCmd
-	(*CreateSessionCmd)(nil),           // 34: agentshim.frontend.v1.CreateSessionCmd
-	(*DeleteSessionCmd)(nil),           // 35: agentshim.frontend.v1.DeleteSessionCmd
-	(*ShutdownCmd)(nil),                // 36: agentshim.frontend.v1.ShutdownCmd
-	(*ClientLogCmd)(nil),               // 37: agentshim.frontend.v1.ClientLogCmd
-	(*QueueForceCmd)(nil),              // 38: agentshim.frontend.v1.QueueForceCmd
-	(*QueueAcceptCmd)(nil),             // 39: agentshim.frontend.v1.QueueAcceptCmd
-	(*QueueCancelCmd)(nil),             // 40: agentshim.frontend.v1.QueueCancelCmd
-	(*CreateWorkspaceCmd)(nil),         // 41: agentshim.frontend.v1.CreateWorkspaceCmd
-	(*WorkspaceMaterializedCmd)(nil),   // 42: agentshim.frontend.v1.WorkspaceMaterializedCmd
-	(*HostActionCompletedCmd)(nil),     // 43: agentshim.frontend.v1.HostActionCompletedCmd
-	(*DaemonHealthCmd)(nil),            // 44: agentshim.frontend.v1.DaemonHealthCmd
-	(*SessionHealthCmd)(nil),           // 45: agentshim.frontend.v1.SessionHealthCmd
-	(*RestartSessionCmd)(nil),          // 46: agentshim.frontend.v1.RestartSessionCmd
-	(*SetModelCmd)(nil),                // 47: agentshim.frontend.v1.SetModelCmd
-	(*PublishWorkspaceRosterCmd)(nil),  // 48: agentshim.frontend.v1.PublishWorkspaceRosterCmd
-	(*ScheduleShutdownCmd)(nil),        // 49: agentshim.frontend.v1.ScheduleShutdownCmd
-	(*CancelScheduledShutdownCmd)(nil), // 50: agentshim.frontend.v1.CancelScheduledShutdownCmd
-	(*HibernateWorkspaceCmd)(nil),      // 51: agentshim.frontend.v1.HibernateWorkspaceCmd
-	(*ReviveSessionCmd)(nil),           // 52: agentshim.frontend.v1.ReviveSessionCmd
-	(*PauseMergeQueueCmd)(nil),         // 53: agentshim.frontend.v1.PauseMergeQueueCmd
-	(*ResumeMergeQueueCmd)(nil),        // 54: agentshim.frontend.v1.ResumeMergeQueueCmd
-	(*EvictMergeCmd)(nil),              // 55: agentshim.frontend.v1.EvictMergeCmd
-	(*AnswerMergeDequeueCmd)(nil),      // 56: agentshim.frontend.v1.AnswerMergeDequeueCmd
-	(*CancelDetachedAgentsCmd)(nil),    // 57: agentshim.frontend.v1.CancelDetachedAgentsCmd
-	(*FailureKind)(nil),                // 58: agentshim.frontend.v1.FailureKind
-	(*FailureCardRef)(nil),             // 59: agentshim.frontend.v1.FailureCardRef
-	(*DetachedCancelOutcome)(nil),      // 60: agentshim.frontend.v1.DetachedCancelOutcome
+	(*RestartPendingView)(nil),         // 27: agentshim.frontend.v1.RestartPendingView
+	(*AsyncBubble)(nil),                // 28: agentshim.frontend.v1.AsyncBubble
+	(*SubmitPromptCmd)(nil),            // 29: agentshim.frontend.v1.SubmitPromptCmd
+	(*InterruptCmd)(nil),               // 30: agentshim.frontend.v1.InterruptCmd
+	(*PermissionAnswerCmd)(nil),        // 31: agentshim.frontend.v1.PermissionAnswerCmd
+	(*MergeWorkspaceCmd)(nil),          // 32: agentshim.frontend.v1.MergeWorkspaceCmd
+	(*CloseWorkspaceCmd)(nil),          // 33: agentshim.frontend.v1.CloseWorkspaceCmd
+	(*OpenWorkspaceCmd)(nil),           // 34: agentshim.frontend.v1.OpenWorkspaceCmd
+	(*CreateSessionCmd)(nil),           // 35: agentshim.frontend.v1.CreateSessionCmd
+	(*DeleteSessionCmd)(nil),           // 36: agentshim.frontend.v1.DeleteSessionCmd
+	(*ShutdownCmd)(nil),                // 37: agentshim.frontend.v1.ShutdownCmd
+	(*ClientLogCmd)(nil),               // 38: agentshim.frontend.v1.ClientLogCmd
+	(*QueueForceCmd)(nil),              // 39: agentshim.frontend.v1.QueueForceCmd
+	(*QueueAcceptCmd)(nil),             // 40: agentshim.frontend.v1.QueueAcceptCmd
+	(*QueueCancelCmd)(nil),             // 41: agentshim.frontend.v1.QueueCancelCmd
+	(*CreateWorkspaceCmd)(nil),         // 42: agentshim.frontend.v1.CreateWorkspaceCmd
+	(*WorkspaceMaterializedCmd)(nil),   // 43: agentshim.frontend.v1.WorkspaceMaterializedCmd
+	(*HostActionCompletedCmd)(nil),     // 44: agentshim.frontend.v1.HostActionCompletedCmd
+	(*DaemonHealthCmd)(nil),            // 45: agentshim.frontend.v1.DaemonHealthCmd
+	(*SessionHealthCmd)(nil),           // 46: agentshim.frontend.v1.SessionHealthCmd
+	(*RestartSessionCmd)(nil),          // 47: agentshim.frontend.v1.RestartSessionCmd
+	(*SetModelCmd)(nil),                // 48: agentshim.frontend.v1.SetModelCmd
+	(*PublishWorkspaceRosterCmd)(nil),  // 49: agentshim.frontend.v1.PublishWorkspaceRosterCmd
+	(*ScheduleShutdownCmd)(nil),        // 50: agentshim.frontend.v1.ScheduleShutdownCmd
+	(*CancelScheduledShutdownCmd)(nil), // 51: agentshim.frontend.v1.CancelScheduledShutdownCmd
+	(*HibernateWorkspaceCmd)(nil),      // 52: agentshim.frontend.v1.HibernateWorkspaceCmd
+	(*ReviveSessionCmd)(nil),           // 53: agentshim.frontend.v1.ReviveSessionCmd
+	(*PauseMergeQueueCmd)(nil),         // 54: agentshim.frontend.v1.PauseMergeQueueCmd
+	(*ResumeMergeQueueCmd)(nil),        // 55: agentshim.frontend.v1.ResumeMergeQueueCmd
+	(*EvictMergeCmd)(nil),              // 56: agentshim.frontend.v1.EvictMergeCmd
+	(*AnswerMergeDequeueCmd)(nil),      // 57: agentshim.frontend.v1.AnswerMergeDequeueCmd
+	(*CancelDetachedAgentsCmd)(nil),    // 58: agentshim.frontend.v1.CancelDetachedAgentsCmd
+	(*FailureKind)(nil),                // 59: agentshim.frontend.v1.FailureKind
+	(*FailureCardRef)(nil),             // 60: agentshim.frontend.v1.FailureCardRef
+	(*DetachedCancelOutcome)(nil),      // 61: agentshim.frontend.v1.DetachedCancelOutcome
 }
 var file_agentshim_frontend_v1_frame_proto_depIdxs = []int32{
 	1,  // 0: agentshim.frontend.v1.FrontendFrame.snapshot:type_name -> agentshim.frontend.v1.StateSnapshot
@@ -1680,61 +1702,62 @@ var file_agentshim_frontend_v1_frame_proto_depIdxs = []int32{
 	24, // 20: agentshim.frontend.v1.FrontendFrame.token_breakdown:type_name -> agentshim.frontend.v1.TokenBreakdownView
 	25, // 21: agentshim.frontend.v1.FrontendFrame.workspace_gate:type_name -> agentshim.frontend.v1.WorkspaceGateView
 	26, // 22: agentshim.frontend.v1.FrontendFrame.merge_queue_roster:type_name -> agentshim.frontend.v1.MergeQueueRoster
-	6,  // 23: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
-	7,  // 24: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
-	10, // 25: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
-	11, // 26: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
-	12, // 27: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
-	14, // 28: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
-	15, // 29: agentshim.frontend.v1.StateSnapshot.progress:type_name -> agentshim.frontend.v1.ProgressView
-	16, // 30: agentshim.frontend.v1.StateSnapshot.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
-	17, // 31: agentshim.frontend.v1.StateSnapshot.host_actions:type_name -> agentshim.frontend.v1.HostAction
-	21, // 32: agentshim.frontend.v1.StateSnapshot.shutdown_schedule:type_name -> agentshim.frontend.v1.ShutdownScheduleView
-	27, // 33: agentshim.frontend.v1.StateSnapshot.async_bubbles:type_name -> agentshim.frontend.v1.AsyncBubble
-	23, // 34: agentshim.frontend.v1.StateSnapshot.topbars:type_name -> agentshim.frontend.v1.TopbarView
-	24, // 35: agentshim.frontend.v1.StateSnapshot.token_breakdowns:type_name -> agentshim.frontend.v1.TokenBreakdownView
-	25, // 36: agentshim.frontend.v1.StateSnapshot.workspace_gates:type_name -> agentshim.frontend.v1.WorkspaceGateView
-	26, // 37: agentshim.frontend.v1.StateSnapshot.merge_queue_roster:type_name -> agentshim.frontend.v1.MergeQueueRoster
-	28, // 38: agentshim.frontend.v1.FrontendCommand.submit_prompt:type_name -> agentshim.frontend.v1.SubmitPromptCmd
-	29, // 39: agentshim.frontend.v1.FrontendCommand.interrupt:type_name -> agentshim.frontend.v1.InterruptCmd
-	30, // 40: agentshim.frontend.v1.FrontendCommand.permission_answer:type_name -> agentshim.frontend.v1.PermissionAnswerCmd
-	31, // 41: agentshim.frontend.v1.FrontendCommand.merge_workspace:type_name -> agentshim.frontend.v1.MergeWorkspaceCmd
-	32, // 42: agentshim.frontend.v1.FrontendCommand.close_workspace:type_name -> agentshim.frontend.v1.CloseWorkspaceCmd
-	33, // 43: agentshim.frontend.v1.FrontendCommand.open_workspace:type_name -> agentshim.frontend.v1.OpenWorkspaceCmd
-	5,  // 44: agentshim.frontend.v1.FrontendCommand.resync:type_name -> agentshim.frontend.v1.ResyncCmd
-	34, // 45: agentshim.frontend.v1.FrontendCommand.create_session:type_name -> agentshim.frontend.v1.CreateSessionCmd
-	35, // 46: agentshim.frontend.v1.FrontendCommand.delete_session:type_name -> agentshim.frontend.v1.DeleteSessionCmd
-	36, // 47: agentshim.frontend.v1.FrontendCommand.shutdown:type_name -> agentshim.frontend.v1.ShutdownCmd
-	37, // 48: agentshim.frontend.v1.FrontendCommand.client_log:type_name -> agentshim.frontend.v1.ClientLogCmd
-	38, // 49: agentshim.frontend.v1.FrontendCommand.queue_force:type_name -> agentshim.frontend.v1.QueueForceCmd
-	39, // 50: agentshim.frontend.v1.FrontendCommand.queue_accept:type_name -> agentshim.frontend.v1.QueueAcceptCmd
-	40, // 51: agentshim.frontend.v1.FrontendCommand.queue_cancel:type_name -> agentshim.frontend.v1.QueueCancelCmd
-	41, // 52: agentshim.frontend.v1.FrontendCommand.create_workspace:type_name -> agentshim.frontend.v1.CreateWorkspaceCmd
-	42, // 53: agentshim.frontend.v1.FrontendCommand.workspace_materialized:type_name -> agentshim.frontend.v1.WorkspaceMaterializedCmd
-	43, // 54: agentshim.frontend.v1.FrontendCommand.host_action_completed:type_name -> agentshim.frontend.v1.HostActionCompletedCmd
-	44, // 55: agentshim.frontend.v1.FrontendCommand.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthCmd
-	45, // 56: agentshim.frontend.v1.FrontendCommand.session_health:type_name -> agentshim.frontend.v1.SessionHealthCmd
-	46, // 57: agentshim.frontend.v1.FrontendCommand.restart_session:type_name -> agentshim.frontend.v1.RestartSessionCmd
-	47, // 58: agentshim.frontend.v1.FrontendCommand.set_model:type_name -> agentshim.frontend.v1.SetModelCmd
-	48, // 59: agentshim.frontend.v1.FrontendCommand.publish_workspace_roster:type_name -> agentshim.frontend.v1.PublishWorkspaceRosterCmd
-	49, // 60: agentshim.frontend.v1.FrontendCommand.schedule_shutdown:type_name -> agentshim.frontend.v1.ScheduleShutdownCmd
-	50, // 61: agentshim.frontend.v1.FrontendCommand.cancel_scheduled_shutdown:type_name -> agentshim.frontend.v1.CancelScheduledShutdownCmd
-	51, // 62: agentshim.frontend.v1.FrontendCommand.hibernate_workspace:type_name -> agentshim.frontend.v1.HibernateWorkspaceCmd
-	52, // 63: agentshim.frontend.v1.FrontendCommand.revive_session:type_name -> agentshim.frontend.v1.ReviveSessionCmd
-	53, // 64: agentshim.frontend.v1.FrontendCommand.pause_merge_queue:type_name -> agentshim.frontend.v1.PauseMergeQueueCmd
-	54, // 65: agentshim.frontend.v1.FrontendCommand.resume_merge_queue:type_name -> agentshim.frontend.v1.ResumeMergeQueueCmd
-	55, // 66: agentshim.frontend.v1.FrontendCommand.evict_merge:type_name -> agentshim.frontend.v1.EvictMergeCmd
-	56, // 67: agentshim.frontend.v1.FrontendCommand.answer_merge_dequeue:type_name -> agentshim.frontend.v1.AnswerMergeDequeueCmd
-	57, // 68: agentshim.frontend.v1.FrontendCommand.cancel_detached_agents:type_name -> agentshim.frontend.v1.CancelDetachedAgentsCmd
-	58, // 69: agentshim.frontend.v1.CommandAck.failure:type_name -> agentshim.frontend.v1.FailureKind
-	59, // 70: agentshim.frontend.v1.CommandAck.failure_card:type_name -> agentshim.frontend.v1.FailureCardRef
-	4,  // 71: agentshim.frontend.v1.CommandAck.interrupt_confirm_required:type_name -> agentshim.frontend.v1.InterruptConfirmRequired
-	60, // 72: agentshim.frontend.v1.CommandAck.detached_cancel:type_name -> agentshim.frontend.v1.DetachedCancelOutcome
-	73, // [73:73] is the sub-list for method output_type
-	73, // [73:73] is the sub-list for method input_type
-	73, // [73:73] is the sub-list for extension type_name
-	73, // [73:73] is the sub-list for extension extendee
-	0,  // [0:73] is the sub-list for field type_name
+	27, // 23: agentshim.frontend.v1.FrontendFrame.restart_pending:type_name -> agentshim.frontend.v1.RestartPendingView
+	6,  // 24: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
+	7,  // 25: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
+	10, // 26: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
+	11, // 27: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
+	12, // 28: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
+	14, // 29: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
+	15, // 30: agentshim.frontend.v1.StateSnapshot.progress:type_name -> agentshim.frontend.v1.ProgressView
+	16, // 31: agentshim.frontend.v1.StateSnapshot.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
+	17, // 32: agentshim.frontend.v1.StateSnapshot.host_actions:type_name -> agentshim.frontend.v1.HostAction
+	21, // 33: agentshim.frontend.v1.StateSnapshot.shutdown_schedule:type_name -> agentshim.frontend.v1.ShutdownScheduleView
+	28, // 34: agentshim.frontend.v1.StateSnapshot.async_bubbles:type_name -> agentshim.frontend.v1.AsyncBubble
+	23, // 35: agentshim.frontend.v1.StateSnapshot.topbars:type_name -> agentshim.frontend.v1.TopbarView
+	24, // 36: agentshim.frontend.v1.StateSnapshot.token_breakdowns:type_name -> agentshim.frontend.v1.TokenBreakdownView
+	25, // 37: agentshim.frontend.v1.StateSnapshot.workspace_gates:type_name -> agentshim.frontend.v1.WorkspaceGateView
+	26, // 38: agentshim.frontend.v1.StateSnapshot.merge_queue_roster:type_name -> agentshim.frontend.v1.MergeQueueRoster
+	29, // 39: agentshim.frontend.v1.FrontendCommand.submit_prompt:type_name -> agentshim.frontend.v1.SubmitPromptCmd
+	30, // 40: agentshim.frontend.v1.FrontendCommand.interrupt:type_name -> agentshim.frontend.v1.InterruptCmd
+	31, // 41: agentshim.frontend.v1.FrontendCommand.permission_answer:type_name -> agentshim.frontend.v1.PermissionAnswerCmd
+	32, // 42: agentshim.frontend.v1.FrontendCommand.merge_workspace:type_name -> agentshim.frontend.v1.MergeWorkspaceCmd
+	33, // 43: agentshim.frontend.v1.FrontendCommand.close_workspace:type_name -> agentshim.frontend.v1.CloseWorkspaceCmd
+	34, // 44: agentshim.frontend.v1.FrontendCommand.open_workspace:type_name -> agentshim.frontend.v1.OpenWorkspaceCmd
+	5,  // 45: agentshim.frontend.v1.FrontendCommand.resync:type_name -> agentshim.frontend.v1.ResyncCmd
+	35, // 46: agentshim.frontend.v1.FrontendCommand.create_session:type_name -> agentshim.frontend.v1.CreateSessionCmd
+	36, // 47: agentshim.frontend.v1.FrontendCommand.delete_session:type_name -> agentshim.frontend.v1.DeleteSessionCmd
+	37, // 48: agentshim.frontend.v1.FrontendCommand.shutdown:type_name -> agentshim.frontend.v1.ShutdownCmd
+	38, // 49: agentshim.frontend.v1.FrontendCommand.client_log:type_name -> agentshim.frontend.v1.ClientLogCmd
+	39, // 50: agentshim.frontend.v1.FrontendCommand.queue_force:type_name -> agentshim.frontend.v1.QueueForceCmd
+	40, // 51: agentshim.frontend.v1.FrontendCommand.queue_accept:type_name -> agentshim.frontend.v1.QueueAcceptCmd
+	41, // 52: agentshim.frontend.v1.FrontendCommand.queue_cancel:type_name -> agentshim.frontend.v1.QueueCancelCmd
+	42, // 53: agentshim.frontend.v1.FrontendCommand.create_workspace:type_name -> agentshim.frontend.v1.CreateWorkspaceCmd
+	43, // 54: agentshim.frontend.v1.FrontendCommand.workspace_materialized:type_name -> agentshim.frontend.v1.WorkspaceMaterializedCmd
+	44, // 55: agentshim.frontend.v1.FrontendCommand.host_action_completed:type_name -> agentshim.frontend.v1.HostActionCompletedCmd
+	45, // 56: agentshim.frontend.v1.FrontendCommand.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthCmd
+	46, // 57: agentshim.frontend.v1.FrontendCommand.session_health:type_name -> agentshim.frontend.v1.SessionHealthCmd
+	47, // 58: agentshim.frontend.v1.FrontendCommand.restart_session:type_name -> agentshim.frontend.v1.RestartSessionCmd
+	48, // 59: agentshim.frontend.v1.FrontendCommand.set_model:type_name -> agentshim.frontend.v1.SetModelCmd
+	49, // 60: agentshim.frontend.v1.FrontendCommand.publish_workspace_roster:type_name -> agentshim.frontend.v1.PublishWorkspaceRosterCmd
+	50, // 61: agentshim.frontend.v1.FrontendCommand.schedule_shutdown:type_name -> agentshim.frontend.v1.ScheduleShutdownCmd
+	51, // 62: agentshim.frontend.v1.FrontendCommand.cancel_scheduled_shutdown:type_name -> agentshim.frontend.v1.CancelScheduledShutdownCmd
+	52, // 63: agentshim.frontend.v1.FrontendCommand.hibernate_workspace:type_name -> agentshim.frontend.v1.HibernateWorkspaceCmd
+	53, // 64: agentshim.frontend.v1.FrontendCommand.revive_session:type_name -> agentshim.frontend.v1.ReviveSessionCmd
+	54, // 65: agentshim.frontend.v1.FrontendCommand.pause_merge_queue:type_name -> agentshim.frontend.v1.PauseMergeQueueCmd
+	55, // 66: agentshim.frontend.v1.FrontendCommand.resume_merge_queue:type_name -> agentshim.frontend.v1.ResumeMergeQueueCmd
+	56, // 67: agentshim.frontend.v1.FrontendCommand.evict_merge:type_name -> agentshim.frontend.v1.EvictMergeCmd
+	57, // 68: agentshim.frontend.v1.FrontendCommand.answer_merge_dequeue:type_name -> agentshim.frontend.v1.AnswerMergeDequeueCmd
+	58, // 69: agentshim.frontend.v1.FrontendCommand.cancel_detached_agents:type_name -> agentshim.frontend.v1.CancelDetachedAgentsCmd
+	59, // 70: agentshim.frontend.v1.CommandAck.failure:type_name -> agentshim.frontend.v1.FailureKind
+	60, // 71: agentshim.frontend.v1.CommandAck.failure_card:type_name -> agentshim.frontend.v1.FailureCardRef
+	4,  // 72: agentshim.frontend.v1.CommandAck.interrupt_confirm_required:type_name -> agentshim.frontend.v1.InterruptConfirmRequired
+	61, // 73: agentshim.frontend.v1.CommandAck.detached_cancel:type_name -> agentshim.frontend.v1.DetachedCancelOutcome
+	74, // [74:74] is the sub-list for method output_type
+	74, // [74:74] is the sub-list for method input_type
+	74, // [74:74] is the sub-list for extension type_name
+	74, // [74:74] is the sub-list for extension extendee
+	0,  // [0:74] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_frame_proto_init() }
@@ -1782,6 +1805,7 @@ func file_agentshim_frontend_v1_frame_proto_init() {
 		(*FrontendFrame_TokenBreakdown)(nil),
 		(*FrontendFrame_WorkspaceGate)(nil),
 		(*FrontendFrame_MergeQueueRoster)(nil),
+		(*FrontendFrame_RestartPending)(nil),
 	}
 	file_agentshim_frontend_v1_frame_proto_msgTypes[2].OneofWrappers = []any{
 		(*FrontendCommand_SubmitPrompt)(nil),
