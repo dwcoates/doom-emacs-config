@@ -799,6 +799,17 @@ type sessionController struct {
 	// the next ping's turn end as though it were that ping's own. Read and
 	// written only under Manager.mu (keepalivecold.go).
 	keepAlivePing *keepAlivePingMeasurement
+	// drivenTurns names every turn THIS generation has a driver for: one it
+	// submitted itself, or one the returning shim positively announced as in
+	// flight at the handshake. It is the undriven-turn watchdog's whole
+	// discriminator (undriventurn.go) — a bound turn outside this set is one
+	// nothing in this process is waiting on and no live shim claims to be
+	// running. Read and written only under Manager.mu.
+	drivenTurns map[string]struct{}
+	// undriven is the standing watch over a turn record bound with no driver,
+	// nil when the record is idle or driven. Read and written only under
+	// Manager.mu (undriventurn.go).
+	undriven *undrivenTurnWatch
 	// daemonCompaction is the DAEMON-INITIATED compaction in flight for this
 	// session — a warm pre-expiry one or a compact-first revival's own — and nil
 	// when none is. It is what the cold-read alarm matches a terminal result
@@ -3367,6 +3378,11 @@ func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHel
 // real boundary as the sole drain trigger.
 func (m *Manager) reconcileTurnSnapshot(d *sessionController, active bool, hello *corev1.ShimHello) {
 	m.mu.Lock()
+	// THE SHIM'S OWN ANNOUNCEMENT IS A DRIVE RECORD (undriventurn.go). A turn a
+	// live shim positively names as in flight has a process behind it, whichever
+	// daemon generation submitted it, so the watchdog must not read it as
+	// undriven. This is the ONLY evidence of that kind the daemon ever gets.
+	d.noteTurnDrivenLocked(hello.GetActiveTurnIds()...)
 	before, changed := d.noteTurnAdoptedLocked(active)
 	after := d.turn
 	queueDepth := len(d.queue.entries)
