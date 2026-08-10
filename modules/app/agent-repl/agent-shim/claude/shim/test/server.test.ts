@@ -6,6 +6,7 @@ import type { AsyncReceipt } from "../src/uds/server.js";
 import type { SessionServerOptions } from "../src/uds/server.js";
 import {
   AckSchema,
+  LiveTaskSetSchema,
   CancelDetachedAgentsSchema,
   DaemonHelloSchema,
   EventClass,
@@ -72,6 +73,7 @@ function harness(
     },
     onSetModel: async (m) => create(AckSchema, { requestId: m.requestId, selectedModel: m.model }),
         onQuerySelectedModel: (m) => create(AckSchema, { requestId: m.requestId, selectedModel: "claude-sonnet-5" }),
+        onQueryLiveTasks: (m) => create(AckSchema, { requestId: m.requestId, liveTaskSet: create(LiveTaskSetSchema, { taskIds: [] }) }),
     onPermissionResponse: (m) => calls.perms.push(m),
     onReplayRequest: (m) => calls.replays.push(m),
     onHealthCheck: (m) => create(HealthStatusSchema, {
@@ -625,6 +627,7 @@ describe("SessionServer vendor session rotation bounce", () => {
         onCancelDetachedAgents: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onSetModel: async (m) => create(AckSchema, { requestId: m.requestId, selectedModel: m.model }),
         onQuerySelectedModel: (m) => create(AckSchema, { requestId: m.requestId, selectedModel: "claude-sonnet-5" }),
+        onQueryLiveTasks: (m) => create(AckSchema, { requestId: m.requestId, liveTaskSet: create(LiveTaskSetSchema, { taskIds: [] }) }),
         onPermissionResponse: () => {},
         onReplayRequest: () => {},
         onHealthCheck: (m) => create(HealthStatusSchema, { requestId: m.requestId, healthy: true, component: "test-shim" }),

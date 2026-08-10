@@ -14,6 +14,7 @@ import { SessionServer, Receipt } from "../src/uds/server.js";
 import { StoreClient } from "../src/uds/store-client.js";
 import {
   AckSchema,
+  LiveTaskSetSchema,
   DaemonHelloSchema,
   EventSchema,
   HeartbeatSchema,
@@ -102,6 +103,7 @@ describe("daemon reattach with from_seq continuation", () => {
         onCancelDetachedAgents: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onSetModel: async (m) => create(AckSchema, { requestId: m.requestId, selectedModel: m.model }),
         onQuerySelectedModel: (m) => create(AckSchema, { requestId: m.requestId, selectedModel: "claude-sonnet-5" }),
+        onQueryLiveTasks: (m) => create(AckSchema, { requestId: m.requestId, liveTaskSet: create(LiveTaskSetSchema, { taskIds: [] }) }),
         onPermissionResponse: () => {},
         onReplayRequest: () => {},
         onHealthCheck: (m) => create(HealthStatusSchema, {

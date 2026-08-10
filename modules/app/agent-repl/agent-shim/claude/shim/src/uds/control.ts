@@ -37,6 +37,8 @@ import {
   PermissionResponse,
   PromptOrigin,
   PromptOriginSchema,
+  LiveTaskSetSchema,
+  QueryLiveTasks,
   QuerySelectedModel,
   SetModel,
   SubmitPrompt,
@@ -88,6 +90,17 @@ export interface SdkControlTarget {
    * an answer (see handleQuerySelectedModel).
    */
   selectedModel(): string;
+  /**
+   * The background tasks this session has LIVE right now, as ids under the
+   * same identity TaskStarted and TaskEnded carry.
+   *
+   * A READ, not a change, and synchronous for the same reason
+   * cancelDetachedAgents' snapshot is taken before its first await: the
+   * implementation owns the live set on a single-threaded event loop, so this
+   * read is atomic against task start and task end. An EMPTY array is a real
+   * answer — "nothing is running" — never an absence.
+   */
+  liveTaskIds(): string[];
 }
 
 /**
@@ -305,6 +318,33 @@ export class ControlDispatch {
     } catch (err) {
       const reason = errMsg(err);
       LOGGER.log({ level: "error", request_id: msg.requestId, cause: err }, `query-selected-model failed: ${reason}`);
+      return create(NackSchema, { requestId: msg.requestId, reason });
+    }
+  }
+
+  /**
+   * Answer which background tasks are live right now.
+   *
+   * WHY THE DAEMON ASKS, AND WHY THIS MAY NOT NACK ON AN EMPTY SET. The
+   * daemon's task catalog is derived from the events it saw, so it can hold a
+   * task open that nothing is running (a deduped TaskEnded, an end that landed
+   * while the daemon was down, a shim roll between the two). The daemon closes
+   * such an entry ONLY against this list, so an empty list must be an ACK — it
+   * is the very answer that resolves the phantom. Nacking it would leave the
+   * footer claiming work forever.
+   */
+  handleQueryLiveTasks(msg: QueryLiveTasks): Ack | Nack {
+    try {
+      const taskIds = [...this.target.liveTaskIds()].sort();
+      LOGGER.log({ request_id: msg.requestId, live_sdk_task_count: taskIds.length, live_sdk_task_ids: taskIds },
+        "reported the live background-task set");
+      return create(AckSchema, {
+        requestId: msg.requestId,
+        liveTaskSet: create(LiveTaskSetSchema, { taskIds }),
+      });
+    } catch (err) {
+      const reason = errMsg(err);
+      LOGGER.log({ level: "error", request_id: msg.requestId, cause: err }, `query-live-tasks failed: ${reason}`);
       return create(NackSchema, { requestId: msg.requestId, reason });
     }
   }
