@@ -204,6 +204,17 @@ const (
 	// What it reports is a disagreement between the clock that stamped the
 	// start and the clock that stamped the end.
 	TypeKeepAliveWindowInverted Type = "keep_alive.window_inverted"
+	// TypeTurnUndriven — a turn record stood BOUND with no driver: the daemon
+	// never submitted it, no live shim announced it, and no shim or SDK
+	// activity followed it inside the watchdog's window. It is a NAMED failure
+	// rather than a log line because of what the user sees while it stands: a
+	// workspace pinned `thinking` forever, with no output, no vendor query and
+	// nothing to interrupt. Observed live on 2026-08-10, where a revived
+	// session's backlogged TurnStarted re-opened a keep-alive ping's claim from
+	// a dead daemon generation and pinned the workspace for 25 minutes until a
+	// hard restart. The claim is closed when this is raised; the card is what
+	// tells the user the work behind it is not coming back.
+	TypeTurnUndriven Type = "turn.undriven"
 	// TypeCompactionColdRead — a compaction the DAEMON submitted read the whole
 	// conversation at the UNCACHED rate instead of from the prompt cache. It is
 	// a NAMED failure rather than a log line because it is a pure cost defect
@@ -347,6 +358,7 @@ var prose = map[Type]string{
 	TypeSessionHibernated:              "the session is hibernated; choose how to revive it before sending prompts",
 	TypeKeepAliveWindowUnclosed:        "a cache keep-alive window could not be closed, so new conversation is being withheld until it is repaired",
 	TypeKeepAliveWindowInverted:        "a cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation",
+	TypeTurnUndriven:                   "a turn was left running with nothing driving it, so it was closed; any work it stood for was not resumed and must be asked for again",
 	TypeCompactionColdRead:             "a compaction the daemon ran re-read the whole conversation at the uncached rate instead of from the prompt cache, which is the cost it exists to avoid",
 	TypeClientLogIdentityStale:         "a browser log record named a session this workspace no longer runs, so it was not recorded",
 	TypePromptRefusedByMergeState:      "prompt refused — a merge owns this workspace; wait for it to resolve or interrupt it",
@@ -860,6 +872,18 @@ func KeepAliveWindowInverted(reason string) *frontendv1.FailureCardView {
 	return CardWithFacts(TypeKeepAliveWindowInverted, reason, Facts{Reason: reason})
 }
 
+// TurnUndriven classifies a turn the watchdog closed because nothing was
+// driving it.
+//
+// It is a CARD rather than a log line because the failure it ends is entirely
+// invisible from the outside: the workspace simply thinks forever. Closing the
+// claim un-pins the workspace, and without the card the user would be left with
+// a session that silently stopped working on what they asked for and never said
+// so.
+func TurnUndriven(reason string) *frontendv1.FailureCardView {
+	return CardWithFacts(TypeTurnUndriven, reason, Facts{Reason: reason})
+}
+
 // ColdCompaction classifies a daemon-initiated compaction that read the
 // conversation at the uncached rate.
 //
@@ -959,6 +983,7 @@ func AllTypes() []Type {
 		TypeSessionHibernated,
 		TypeKeepAliveWindowUnclosed,
 		TypeKeepAliveWindowInverted,
+		TypeTurnUndriven,
 		TypeCompactionColdRead,
 		TypeClientLogIdentityStale,
 		TypePromptRefusedByMergeState,
