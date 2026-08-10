@@ -304,6 +304,21 @@ else
     fail "services already on the installed binary skip both kickstarts" "rc=$RC log: $(cat "$STUB_LOG")"
 fi
 
+# --- 2b. one deploy kickstarts each service AT MOST ONCE --------------------
+# A store restart tears down every live shim's producer connection, so a second
+# bounce inside one deploy doubles that outage for nothing. Counting is the
+# invariant: `log_has`/`log_before` are satisfied by a repeated kickstart.
+log_count() { grep -c "$1" "$STUB_LOG"; }
+
+d="$TMP/t2b"; mkdir -p "$d"; RUN_ENV="" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && [ "$(log_count "kickstart -k gui/.*shim-store")" -eq 1 ] \
+   && [ "$(log_count "kickstart -k gui/.*shim-claude-sidecar")" -eq 1 ]; then
+    pass "a full deploy kickstarts each service exactly once"
+else
+    fail "a full deploy kickstarts each service exactly once" "rc=$RC log: $(cat "$STUB_LOG")"
+fi
+
 # --- 3. store changed: sidecar bounces too, store first ---------------------
 d="$TMP/t3"
 seed_deployed "$d" shim-store bin-v0
