@@ -432,11 +432,16 @@ launches under the same request."
           (agent-repl--with-error-logging "state-save"
             (agent-repl--write-sexp-file file state)
             (agent-repl--log ws "state-save: write complete ws=%s file=%s" ws file)))))
+    ;; Roster write goes through the DEBOUNCED request, not a direct save:
+    ;; state-save fires on every state mutation, and a burst of mutations
+    ;; previously meant a burst of full-roster serializations on the main
+    ;; thread.  `--snapshot-save-request' coalesces them onto one idle timer
+    ;; (and writes synchronously when the delay is configured to 0).
     (agent-repl--with-error-logging "state-save: snapshot"
-      (if (fboundp 'agent-repl-save-workspace-snapshot)
+      (if (fboundp 'agent-repl--snapshot-save-request)
           (progn
-            (agent-repl-save-workspace-snapshot)
-            (agent-repl--log ws "state-save: snapshot complete ws=%s" ws))
+            (agent-repl--snapshot-save-request)
+            (agent-repl--log ws "state-save: snapshot requested ws=%s" ws))
         (agent-repl--warn ws "state-save: snapshot skipped ws=%s reason=function-unavailable" ws)))))
 
 (defun agent-repl--validate-ws-env (ws)
