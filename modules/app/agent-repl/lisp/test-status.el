@@ -4084,6 +4084,21 @@ the tab bar."
       (should (eq (get-text-property 0 'face segment)
                   'agent-repl-daemon-link-degraded)))))
 
+(ert-deftest agent-repl-test-daemon-link-segment-shows-a-down-link ()
+  "A DOWN link renders the caption through the real health reader.
+The indicator stayed hidden through a total link loss while the reader
+only knew about unacknowledged commands, so this drives the actual reader
+over a disconnected link rather than a stubbed verdict."
+  ;; Arrange
+  (let ((agent-repl--uds-process nil)
+        (agent-repl--uds-connection-state 'failed)
+        (agent-repl--uds-link-health :healthy))
+    ;; Act
+    (let ((segment (agent-repl-daemon-link-segment)))
+      ;; Assert
+      (should (string-match-p "DAEMON LINK DEGRADED"
+                              (substring-no-properties segment))))))
+
 (provide 'test-status)
 
 ;;; test-status.el ends here
