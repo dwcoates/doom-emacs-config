@@ -952,6 +952,13 @@ func isHostOnlyCommand(cmd *frontendv1.FrontendCommand) bool {
 }
 
 func (s *Server) dispatchClientCommand(cl *client, cmd *frontendv1.FrontendCommand) (*frontendv1.CommandAck, *frontendv1.FrontendFrame) {
+	// A workspace field that names nothing addressable is refused with a loud
+	// ack rather than routed: the read loop already canonicalized it, so this
+	// is a key the client sent that no lookup could ever resolve.
+	if err := workspaceKeyError(cmd.GetWorkspace()); err != nil {
+		s.warn("frontend: workspace key rejected kind=%s request_id=%s: %v", cl.kind, cmd.GetRequestId(), err)
+		return failAck(s.logf, cmd.GetRequestId(), err), nil
+	}
 	if isHostOnlyCommand(cmd) && !cl.kind.isHost() {
 		err := fmt.Errorf("frontend: host-only command rejected from client kind %s", cl.kind)
 		s.warn("frontend: host-only command rejected kind=%s request_id=%s", cl.kind, cmd.GetRequestId())
@@ -1369,6 +1376,13 @@ func (s *Server) readLoop(c conn, cl *client) {
 			}
 			return
 		}
+		// THE WORKSPACE KEY IS CANONICALIZED HERE AND NOWHERE ELSE. This is the
+		// single point at which a decoded command's workspace field is first
+		// read, and it runs BEFORE the lane key is computed and before any
+		// registry or session lookup, so "/path/ws/" and "/path/ws" are the
+		// same lane, the same record, and the same session from here on down
+		// (workspacekey.go).
+		normalizeCommandWorkspace(cmd)
 		// EVERY COMMAND IS TIMED, and the clock starts the instant the frame
 		// was decoded rather than inside dispatch: the interval the client
 		// actually waits out is receipt through ack, and with lanes that
