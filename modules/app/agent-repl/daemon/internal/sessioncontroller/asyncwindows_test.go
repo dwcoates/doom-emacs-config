@@ -1077,6 +1077,28 @@ func TestANestedSkillsOwnCardLeavesTheTopLevelFeed(t *testing.T) {
 	}
 }
 
+func TestANestedSkillsAnchorCardLandsInsideItsParentsConversation(t *testing.T) {
+	// Arrange
+	h := newQueueHarness(t, nil)
+	outer := invokeSkill(t, h, 10, "a-outer", "toolu_outer", "outer", "go")
+
+	// Act
+	inner := invokeSkill(t, h, 11, "a-inner", "toolu_inner", "inner", "go")
+
+	// Assert: a frontend attaches a bubble to its card by matching
+	// origin_tool_use_id, so the inner bubble renders inside the outer one only
+	// if the card carrying that id is part of the outer conversation.
+	var anchored bool
+	for _, id := range h.skillToolCallAppends(outer.GetId()) {
+		if id == inner.GetOriginToolUseId() {
+			anchored = true
+		}
+	}
+	if !anchored {
+		t.Fatalf("the outer conversation carries cards %v, want the inner bubble's anchor %q", h.skillToolCallAppends(outer.GetId()), inner.GetOriginToolUseId())
+	}
+}
+
 func TestANestedSkillsOwnCardDoesNotFoldIntoItsOwnBubble(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
