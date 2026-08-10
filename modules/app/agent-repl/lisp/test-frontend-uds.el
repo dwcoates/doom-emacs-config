@@ -32,6 +32,26 @@
 
 ;;;; ---- Fixtures --------------------------------------------------------
 
+(defun agent-repl-test--uds-send-command-literal-fields ()
+  "Return every literal FIELD name passed to `agent-repl--uds-send-command'.
+Scans the module's non-test `lisp/*.el' sources for the call form and
+collects its first argument whenever that argument is a string literal.
+Computed fields (a variable, a `format' call) are skipped: only a literal
+can be checked against the allowlist without running the caller."
+  (let ((re (concat "(agent-repl--uds-send-command[ \t\n]+"
+                    "\"\\([A-Za-z][A-Za-z0-9]*\\)\""))
+        fields)
+    (dolist (file (directory-files
+                   (expand-file-name "lisp" agent-repl-test--module-root)
+                   t "\\`[^.].*\\.el\\'"))
+      (unless (string-prefix-p "test-" (file-name-nondirectory file))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          (while (re-search-forward re nil t)
+            (push (match-string 1) fields)))))
+    (delete-dups fields)))
+
 (defmacro agent-repl-test--with-uds (&rest body)
   "Run BODY with every frontend-uds module global reset to a clean slate.
 Isolates the process, read accumulator, reconnect timer, handler
@@ -1621,6 +1641,26 @@ as a user-visible malformed-frame error on every roster publish."
   "The drain lease's `cancelScheduledShutdown' arm is an accepted command."
   ;; Act / Assert
   (should (member "cancelScheduledShutdown" agent-repl--uds-known-command-fields)))
+
+(ert-deftest agent-repl-test-uds-cancel-detached-agents-is-a-known-command ()
+  "The workspace-close `cancelDetachedAgents' arm is an accepted command."
+  ;; Act / Assert
+  (should (member "cancelDetachedAgents" agent-repl--uds-known-command-fields)))
+
+(ert-deftest agent-repl-test-uds-every-send-site-field-is-allowlisted ()
+  "Every literal field name any lisp/ send site passes is on the allowlist.
+The allowlist is what `agent-repl--uds-send-command' checks, and an arm
+added at a call site but not here fails LOUDLY at runtime — which is how
+`cancelDetachedAgents' broke every workspace close.  Scanning the sources
+turns that into a suite failure at the moment the send site lands."
+  ;; Arrange
+  (let ((fields (agent-repl-test--uds-send-command-literal-fields)))
+    ;; Act / Assert -- the scan must find sites, or it asserts nothing.
+    (should fields)
+    (should-not (cl-remove-if
+                 (lambda (field)
+                   (member field agent-repl--uds-known-command-fields))
+                 fields))))
 
 (ert-deftest agent-repl-test-uds-send-command-accepts-schedule-shutdown ()
   "`scheduleShutdown' serializes its cause under the protojson field name."
