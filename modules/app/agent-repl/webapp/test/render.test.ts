@@ -2249,6 +2249,33 @@ describe("ResultChip", () => {
     expect(html).not.toMatch(/\bin\b/);
   });
 
+  // THE STANDALONE CHIP IS NOT THE DEFECT — the ORPHAN one was. A turn the
+  // daemon submitted on its own behalf (a keep-alive ping, a warm compaction, a
+  // revival's context cut) leaves no items at all now: the daemon withholds
+  // every one of them before a client sees it, so no chip can be drawn for a
+  // turn with nothing above it. A turn the USER asked for that produced no
+  // answer — one that only ran tools — reaches this renderer exactly as before,
+  // and its chip is the only thing on the feed saying that turn ran.
+  it("still renders a standalone chip for a completed user turn that wrote no answer", () => {
+    // Arrange — a tool-only turn: it completed, and no bubble swallowed its chip.
+    const item = resultItem("success");
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`class="result ok done"`);
+  });
+
+  it("still renders a tool-only user turn's chip when its context size is unknown", () => {
+    // Arrange — the bare-duration shape the orphan badges wore, on a turn that
+    // is genuinely the user's and must keep saying it ran.
+    const item = { ...resultItem("success"), context: null };
+    // Act
+    const html = renderItem(item);
+    // Assert
+    expect(html).toContain(`class="result ok done"`);
+    expect(html).toContain("12ms");
+  });
+
   it("labels an aborted turn's chip 'interrupted' rather than its raw subtype", () => {
     // Arrange + Act — an interrupt-ended turn reads as interrupted, not aborted.
     const html = renderItem(resultItem("aborted"));
