@@ -743,6 +743,11 @@ re-routes their frontend resolution instead."
          (agent-repl-workspace-snapshot-file
           (expand-file-name (format "agent-snap-%s" (random)) temporary-file-directory))
          (agent-repl--snapshot-archived-this-run nil)
+         ;; Change gate for the workspace-status JSON export
+         ;; (workspace-status-export.el).  It suppresses a write whose
+         ;; content matches the last one written, so a value left behind by
+         ;; one test would decide whether a LATER test's write happens.
+         (agent-repl--workspace-status-last-written-fingerprint nil)
          ;; Roster-durability state (commands.el).  Both are per-Emacs-boot
          ;; globals: `--snapshot-loaded-p' gates whether a save may write at
          ;; all, and `--snapshot-materialized-pending' is the debt list a
