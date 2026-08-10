@@ -98,6 +98,12 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 		// gets, and filtering it out would leave that client's prompts parked
 		// with nothing on screen explaining why.
 		return frame, true
+	case *frontendv1.FrontendFrame_RestartPending:
+		// DAEMON-GLOBAL, listed explicitly rather than left to the default arm.
+		// The whole daemon is going down, which takes every session with it, so
+		// a session-scoped webview is exactly as entitled to the notice as the
+		// host: it is the client that would otherwise paint the severed banner.
+		return frame, true
 	case *frontendv1.FrontendFrame_WorkspaceRoster:
 		// EDITOR-GLOBAL, and listed explicitly rather than left to the default
 		// arm. The roster is the whole sidebar — every workspace, not just this
