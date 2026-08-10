@@ -206,6 +206,47 @@ describe("encodeFrontendCommand — resync", () => {
   });
 });
 
+describe("encodeFrontendCommand — conversationPage", () => {
+  it("an empty cursor encodes the TAIL anchor, and only that anchor", () => {
+    // Arrange / Act — the cold open.
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "conversationPage", cursor: "", limit: 10, fence: "f7" },
+    });
+    // Assert — the anchor is a oneof, so the before arm must be absent
+    // entirely; canonical protojson rejects a frame that sets both.
+    expect(w.conversationPage).toEqual({ tail: { limit: 10 }, fence: "f7" });
+  });
+
+  it("a cursor encodes the BEFORE anchor, carrying the token verbatim", () => {
+    // Arrange / Act — load-more.
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "conversationPage", cursor: "cp1-OPAQUE", limit: 25, fence: "f7" },
+    });
+    // Assert
+    expect(w.conversationPage).toEqual({
+      before: { cursor: "cp1-OPAQUE", limit: 25 },
+      fence: "f7",
+    });
+  });
+
+  it("a limit of zero is sent as the daemon-default it means", () => {
+    // Arrange — the daemon reads 0 as "your default", so this end must not
+    // substitute a number of its own and become a second authority on it.
+    // Act
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "conversationPage", cursor: "", limit: 0, fence: "f7" },
+    });
+    // Assert — uint32 renders as a JSON number, unlike ResyncCmd's uint64.
+    expect(w.conversationPage).toEqual({ tail: { limit: 0 }, fence: "f7" });
+  });
+});
+
 describe("encodeFrontendCommand — clientLog (E4)", () => {
   it("renders the level as its canonical protojson enum name", () => {
     const w = wire({
