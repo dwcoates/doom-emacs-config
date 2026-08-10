@@ -537,9 +537,11 @@ to carry — the vendor conversation uuid — is deliberately gone."
     ;; No :project-dir set -- should not error
     (agent-repl--state-save "ws")))
 
-(ert-deftest agent-repl-test-state-save-includes-config-dir-override ()
-  "state-save serializes `:config-dir-override' so a switched workspace's
-account survives restarts."
+(ert-deftest agent-repl-test-state-save-omits-config-dir-override ()
+  "state-save no longer serializes `:config-dir-override'.
+The account is a function of the workspace path, so there is nothing
+per-workspace to persist — and a persisted override is precisely what
+kept one worktree pinned to the wrong account across every restart."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-" t)))
       (unwind-protect
@@ -550,8 +552,7 @@ account survives restarts."
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
             (agent-repl--state-save "ws")
             (let ((data (agent-repl--read-sexp-file (agent-repl--state-file tmpdir))))
-              (should (equal (plist-get data :config-dir-override)
-                             "/home/u/.claude-chesscom"))))
+              (should-not (plist-member data :config-dir-override))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-state-save-includes-priority ()

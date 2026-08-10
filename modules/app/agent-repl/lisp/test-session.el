@@ -482,22 +482,29 @@ workspace's durable session id."
         (agent-repl-default-config-dir nil))
     (should-not (agent-repl--compute-config-dir "/home/user/multi/proj"))))
 
-(ert-deftest agent-repl-test-compute-config-dir-string-override-wins ()
-  "A workspace :config-dir-override string beats the path-computed account."
+(ert-deftest agent-repl-test-compute-config-dir-ignores-a-workspace-key ()
+  "The account is a function of the PATH, and no workspace key can move it.
+`:config-dir-override' is retired: it used to win outright here, so one
+workspace's account could disagree with the account its path names, and
+a creation that named no account silently pinned its workspace to
+~/.claude.  A leftover key in a restored state file must now be inert."
   (agent-repl-test--with-clean-state
-    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment)))
+    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
+          (agent-repl-multi-repo-config-dir "~/.claude-chesscom"))
       (agent-repl--ws-put "ws1" :config-dir-override "~/.claude-personal")
       (cl-letf (((symbol-function 'agent-repl--ws-for-dir) (lambda (_dir) "ws1")))
         (should (equal (agent-repl--compute-config-dir "/home/user/multi/repoA/proj")
-                       (expand-file-name "~/.claude-personal")))))))
+                       (expand-file-name "~/.claude-chesscom")))))))
 
-(ert-deftest agent-repl-test-compute-config-dir-default-override-yields-nil ()
-  "A :default override selects the CLI's own root even under the multi-repo root."
+(ert-deftest agent-repl-test-compute-config-dir-ignores-a-default-keyword ()
+  "A leftover `:default' key cannot pull a multi-repo path off its account."
   (agent-repl-test--with-clean-state
-    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment)))
+    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
+          (agent-repl-multi-repo-config-dir "~/.claude-chesscom"))
       (agent-repl--ws-put "ws1" :config-dir-override :default)
       (cl-letf (((symbol-function 'agent-repl--ws-for-dir) (lambda (_dir) "ws1")))
-        (should-not (agent-repl--compute-config-dir "/home/user/multi/repoA/proj"))))))
+        (should (equal (agent-repl--compute-config-dir "/home/user/multi/repoA/proj")
+                       (expand-file-name "~/.claude-chesscom")))))))
 
 (ert-deftest agent-repl-test-compute-config-dir-no-override-falls-through ()
   "A workspace without an override still resolves the path-computed account."
