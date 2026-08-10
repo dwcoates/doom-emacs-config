@@ -223,3 +223,41 @@ func TestASeqlessClearStillClosesTheClearingAxis(t *testing.T) {
 		t.Fatalf("cut edges = %+v, want the clearing axis closed", cuts)
 	}
 }
+
+// THE SAME CLASSIFICATION DISCHARGES THE RESUME COMMITMENT. The clearing axis
+// and the identity discharge are two consequences of one recognized command, so
+// they are taken from one reading of it and cannot disagree about whether a
+// clear is running (resumeidentity.go).
+func TestDispatchingAClearDischargesTheResumeIdentityCommitment(t *testing.T) {
+	tests := []struct {
+		name          string
+		text          string
+		wantDischarge bool
+	}{
+		{name: "the bare command discharges it", text: "/clear", wantDischarge: true},
+		{name: "an argument is a different prompt", text: "/clear the build cache", wantDischarge: false},
+		{name: "an ordinary prompt discharges nothing", text: "hello", wantDischarge: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			m, _ := newClearTestManager(t)
+
+			// Act.
+			if err := m.SubmitPrompt(context.Background(), "ws", "context-cut-request", tc.text, "default", testPromptOrigin); err != nil {
+				t.Fatalf("SubmitPrompt: %v", err)
+			}
+
+			// Assert.
+			m.mu.Lock()
+			d := m.byWS["ws"]
+			m.mu.Unlock()
+			if d == nil {
+				t.Fatal("no live session controller after the submit")
+			}
+			if got := d.consumer.resumeIdentity.clearDispatched; got != tc.wantDischarge {
+				t.Fatalf("clearDispatched = %v, want %v", got, tc.wantDischarge)
+			}
+		})
+	}
+}
