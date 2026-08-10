@@ -35,6 +35,13 @@
  * lookup. The only recursion here walks that pointer graph, guarded by a
  * visited set, so a cyclic pointer set (which only a daemon bug could produce)
  * fails loudly instead of hanging the renderer.
+ *
+ * A CHILD IS DRAWN ONCE, ATTACHED TO THE CARD THAT SPAWNED IT WHERE THERE IS
+ * ONE. A conversational bubble's emissions carry the spawning cards, and each
+ * of those draws its own bubble through the ordinary card path — so the pointer
+ * walk covers only what no card in this bubble draws (see
+ * `bubblesDrawnByOwnCards`), rather than putting one piece of live work on
+ * screen twice.
  */
 
 import type {
@@ -50,6 +57,8 @@ import type { AsyncBubbleRegistry } from "./async-routing.js";
 import type { UnwrappedEmission } from "./agent-emission.js";
 import { Fold, capLabel } from "./fold.js";
 import { escapeHtml } from "./highlight.js";
+import { SkillBodySection } from "./skill-body.js";
+import { asyncAgentItems } from "./state-adapter.js";
 import { log } from "./wslog.js";
 
 /** What the renderer needs from the surfaces around it. */
@@ -187,18 +196,41 @@ function spoolBody(header: string, spool: AsyncOutputSpool): string {
   return `${head}${body}`;
 }
 
+/**
+ * A CONVERSATIONAL bubble's folded conversation: its earlier-entries notice,
+ * then its emissions through the FEED's own renderer.
+ *
+ * The three conversational kinds — a detached agent, a merge run, a skill
+ * window — carry the identical emission shape, which the contract states
+ * deliberately, so they draw it here once rather than three times. What differs
+ * between them is what LEADS the conversation (a skill's own document) and the
+ * chrome around it, not the conversation itself.
+ */
+function conversationBody(
+  bubble: AsyncBubble,
+  fold: AsyncFold,
+  emissions: readonly UnwrappedEmission[],
+  ctx: AsyncRenderContext,
+): string {
+  return `${earlierEntriesNotice(fold, bubble.id)}${ctx.renderEmissions(emissions, bubble.id)}`;
+}
+
 /** The kind-specific body of one bubble. */
 function bubbleBody(bubble: AsyncBubble, ctx: AsyncRenderContext): string {
   switch (bubble.kind.case) {
     case "agent":
-    case "merge":
-    case "skill": {
-      // A merge run and a skill window are conversations with the same emission
-      // shape as a detached agent's, so they go through the same body — the
-      // feed's renderer, not a second one. See renderEmissions. (A skill
-      // bubble's own `body` is not drawn here yet; this foundation carries it.)
+    case "merge": {
       const { emissions, fold } = bubble.kind.value;
-      return `${earlierEntriesNotice(fold, bubble.id)}${ctx.renderEmissions(emissions, bubble.id)}`;
+      return conversationBody(bubble, fold, emissions, ctx);
+    }
+    case "skill": {
+      // A skill window is that same conversation, opened by the SKILL's own
+      // document: AsyncSkillBubble.body is the skill's contents rather than
+      // something the conversation said, so it leads the bubble and the
+      // emissions follow. It is drawn through the one skill-body renderer the
+      // card path uses, so a reader sees the same section either way.
+      const { body, emissions, fold } = bubble.kind.value;
+      return `${SkillBodySection(body)}${conversationBody(bubble, fold, emissions, ctx)}`;
     }
     case "journal": {
       const { rows, fold } = bubble.kind.value;
@@ -249,9 +281,14 @@ export function AsyncBubbleCard(
   const arc = bubble.liveness.case === "live" ? `<span class="tool-spinner" aria-hidden="true"></span>` : "";
   const face = `${BUBBLE_KIND_WORD[bubble.kind.case]} · ${capLabel(bubbleLabel(bubble), 60)} · ${livenessFace(bubble.liveness)}`;
   // Children are resolved by POINTER through the registry — one lookup, no
-  // walk into any payload.
-  const children = ctx.registry
-    .children(bubble.id)
+  // walk into any payload — MINUS the ones this bubble's own conversation
+  // already draws attached to the card that spawned them. The bubble with no
+  // children at all never decomposes its emissions to answer a question about
+  // an empty list.
+  const pointed = ctx.registry.children(bubble.id);
+  const attached = pointed.length === 0 ? EMPTY_ID_SET : bubblesDrawnByOwnCards(bubble, ctx);
+  const children = pointed
+    .filter((child) => !attached.has(child.id))
     .map((child) => `<div class="feed-child">${AsyncBubbleCard(child, ctx, seen)}</div>`)
     .join("");
   return Fold({
@@ -285,16 +322,32 @@ export function AsyncBubbleForCall(
   spawnedBubbleId: string | undefined,
   ctx: AsyncRenderContext,
 ): string {
-  const byOrigin = ctx.registry.bubblesForToolUse(toolUseId);
+  return bubblesDrawnForCall(toolUseId, spawnedBubbleId, ctx.registry)
+    .map((bubble) => AsyncBubbleCard(bubble, ctx))
+    .join("");
+}
+
+/**
+ * WHICH bubbles a tool card draws — the resolution behind
+ * {@link AsyncBubbleForCall}, separated from the drawing because a second
+ * caller needs the answer without the HTML: a bubble must not draw a child by
+ * pointer that one of its OWN cards is already drawing (see
+ * {@link bubblesDrawnByOwnCards}). One function decides it, so the two can
+ * never disagree about what is on screen.
+ */
+export function bubblesDrawnForCall(
+  toolUseId: string,
+  spawnedBubbleId: string | undefined,
+  registry: AsyncBubbleRegistry,
+): AsyncBubble[] {
+  const byOrigin = registry.bubblesForToolUse(toolUseId);
   if (byOrigin.length > 0) {
     // `bubbleForCall` is what rules on agreement; a contradiction returns null
     // there and nothing is drawn here.
-    return ctx.registry.bubbleForCall(toolUseId, spawnedBubbleId) === null
-      ? ""
-      : byOrigin.map((bubble) => AsyncBubbleCard(bubble, ctx)).join("");
+    return registry.bubbleForCall(toolUseId, spawnedBubbleId) === null ? [] : byOrigin;
   }
-  if (spawnedBubbleId === undefined || spawnedBubbleId === "") return "";
-  const named = ctx.registry.bubbleForSpawn(spawnedBubbleId);
+  if (spawnedBubbleId === undefined || spawnedBubbleId === "") return [];
+  const named = registry.bubbleForSpawn(spawnedBubbleId);
   if (named === null) {
     // The verdict named a bubble the registry does not hold — the open has not
     // arrived, or a resync dropped it. Said plainly rather than papered over
@@ -304,9 +357,49 @@ export function AsyncBubbleForCall(
       dedupKey: `async-unmatched-verdict:${spawnedBubbleId}`,
       context: { tool_use_id: toolUseId, spawned_bubble_id: spawnedBubbleId },
     });
-    return "";
+    return [];
   }
-  return AsyncBubbleCard(named, ctx);
+  return [named];
+}
+
+/** The empty answer, shared so the no-children case allocates nothing. */
+const EMPTY_ID_SET: ReadonlySet<string> = new Set();
+
+/**
+ * The children this bubble's OWN conversation already draws, attached to the
+ * cards that spawned them.
+ *
+ * A conversational bubble renders its emissions with the feed's own renderer,
+ * and a spawning card in there draws its bubble exactly as it would on the
+ * top-level feed — which is what "a detached agent's dispatch renders inside
+ * the agent that dispatched it" MEANS. Drawing the same child a second time
+ * from the parent pointer would put one piece of live work on screen twice, in
+ * two places, with two folds that open independently.
+ *
+ * So the pointer walk is the FALLBACK, not the duplicate: a child whose
+ * spawning card is not in this bubble (dropped by the tail cap, or spawned by
+ * something the fold never carried) still gets drawn, because losing it would
+ * hide running work.
+ *
+ * WHICH CARDS THE BUBBLE HAS is answered by the ADAPTER'S OWN DECOMPOSITION
+ * (`asyncAgentItems`), never by a second walk of the emission payloads here.
+ * A tool call reaches a bubble in more than one shape — its own `toolUse` arm,
+ * and a `tool_use` block inside an assistant message — and a private walk that
+ * knew one shape and not the other would filter exactly the children it fails
+ * to recognize. Reading the same items the renderer draws makes the two agree
+ * by construction.
+ */
+function bubblesDrawnByOwnCards(bubble: AsyncBubble, ctx: AsyncRenderContext): ReadonlySet<string> {
+  const drawn = new Set<string>();
+  const kind = bubble.kind;
+  if (kind.case !== "agent" && kind.case !== "merge" && kind.case !== "skill") return drawn;
+  for (const item of asyncAgentItems(kind.value.emissions, bubble.id, bubble.startedAtMs).items) {
+    if (item.kind !== "tool") continue;
+    for (const child of bubblesDrawnForCall(item.toolUseId, item.spawnedBubbleId, ctx.registry)) {
+      drawn.add(child.id);
+    }
+  }
+  return drawn;
 }
 
 /**
