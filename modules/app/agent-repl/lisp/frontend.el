@@ -712,18 +712,33 @@ Consumers run inside `with-current-buffer' and must not signal: an error
 here would abort a webview mount, which is a far worse outcome than a
 missing decoration.")
 
-(defun agent-repl--frontend-adopt-webview-buffer (buf name)
-  "Make webview BUF an agent-repl panel called NAME, and return it.
+(defun agent-repl--frontend-adopt-webview-buffer (buf name owner)
+  "Make webview BUF an agent-repl panel called NAME owned by OWNER, and return it.
 Every mount site (the workspace gui panel, the explain-config popup)
-adopts its webview through here, so the three properties that make a
+adopts its webview through here, so the four properties that make a
 webview OURS never drift apart:
   - the buffer name is pinned via the buffer-local
     `xwidget-webkit-buffer-name-format' (itself the fixed NAME, with no
     %-constructs), so the webapp's `document.title' changes never rename it;
   - `xwidget-webkit-mode's \"WebKit: <title>\" header-line is cleared,
     since the webview is a panel, not a browser;
-  - `agent-repl-frontend-webview-mode' arms the copy chords."
+  - `agent-repl-frontend-webview-mode' arms the copy chords;
+  - `agent-repl--owning-workspace' records OWNER, the workspace name whose
+    REPL this webview shows.
+
+OWNER is REQUIRED, not optional: the ownership stamp is what every
+owner-keyed predicate reads, and the one that matters most is
+`agent-repl--foreign-owned-buffer-p' — the screen
+`agent-repl--clean-frame-foreign-windows' uses to decide which windows a
+workspace may tear down.  An unstamped webview reads as owned by nobody,
+so a background panel build was free to take the window the user was
+watching ANOTHER workspace's page in and mount its own page there.
+Passing the owner at the sole adoption chokepoint is what makes an
+unowned workspace webview unrepresentable rather than merely unlikely.
+It is nil for the explain-config popup, which is a singleton belonging
+to no workspace and is therefore foreign to none."
   (with-current-buffer buf
+    (setq-local agent-repl--owning-workspace owner)
     (setq-local xwidget-webkit-buffer-name-format name)
     (setq-local header-line-format nil)
     (agent-repl-frontend-webview-mode 1)
@@ -770,7 +785,7 @@ foreign directory the xwidget session inherited at creation."
                     existing)
                 (let* ((buf (agent-repl--frontend-make-webview-buffer url))
                        (name (agent-repl--frontend-webview-buffer-name ws)))
-                  (agent-repl--frontend-adopt-webview-buffer buf name)
+                  (agent-repl--frontend-adopt-webview-buffer buf name ws)
                   (agent-repl--ws-put ws :frontend-buffer buf)
                   (agent-repl--log ws "frontend webview mounted: %s -> %s" name url)
                   buf))))
