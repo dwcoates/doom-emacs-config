@@ -213,6 +213,39 @@ func awaitPendingPermission(t *testing.T, conn *websocket.Conn, workspace, what 
 	return id
 }
 
+// awaitReattachedPendingPermission is awaitPendingPermission for a socket dialled
+// against a successor whose reattach has NOT been waited for, which is what
+// `reattached` returns.
+//
+// THE TWO FACTS ARE AWAITED TOGETHER, and that is the whole point. A permission
+// the shim re-asks on reattach can only be pushed once the handshake completes,
+// so awaiting it alone spends the frame budget on the BRING-UP and leaves
+// nothing for the push it is actually asserting — a test that fails on machine
+// load rather than on the contract, which is exactly the residual failure mode
+// frameTimeout's own comment names and prescribes the combined await for.
+//
+// Awaiting them separately does not work either, for the reason awaitAllSeeded
+// exists: the two frames have no ordering between them, so whichever await ran
+// first would read past the other's frame and discard it. One await over both
+// makes the arrival order irrelevant instead of merely unlikely to matter.
+func awaitReattachedPendingPermission(t *testing.T, conn *websocket.Conn, workspace, what string) string {
+	t.Helper()
+	var id string
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+		"the successor painting " + workspace + " OPERATIONAL, which is the reattach handshake having completed": func(frame *frontendv1.FrontendFrame) bool {
+			return workspaceStateFor(frame, workspace).GetConnectivity() == frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_OPERATIONAL
+		},
+		what: func(frame *frontendv1.FrontendFrame) bool {
+			if got := pendingPermissionIn(frame, workspace); got != "" {
+				id = got
+				return true
+			}
+			return false
+		},
+	})
+	return id
+}
+
 // awaitCount spins until count() reaches want, bounded by the suite's frame
 // budget.
 //
