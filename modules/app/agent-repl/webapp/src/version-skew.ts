@@ -17,14 +17,28 @@
  *
  * # Two independent triggers
  *
- * 1. BOOT ID SKEW — the precise signal. Every connect snapshot carries a
- *    `DaemonView` whose `bootId` identifies the daemon PROCESS. The page pins
- *    the first boot id it successfully adopts; a later snapshot bearing a
- *    different one means the daemon restarted underneath a live page, which is
- *    exactly the moment a redeploy could have changed the bundle. Reload.
+ * 1. BUILD SKEW — the precise signal. Every connect snapshot carries a
+ *    `DaemonView` naming the daemon's BUILD: its version string and the mtime
+ *    of the binary serving the page. The page pins the first build it
+ *    successfully adopts; a later snapshot bearing a different one means a
+ *    redeploy happened under a live page, and a page cannot be redeployed in
+ *    place. Reload.
  *
- *    This cannot loop: the reloaded page pins the NEW boot id on its own first
+ *    This cannot loop: the reloaded page pins the NEW build on its own first
  *    adoption, so the skew it reloaded for is not representable a second time.
+ *
+ *    IT USED TO BE THE BOOT ID, AND THAT WAS THE WRONG QUESTION. `bootId`
+ *    changes on every daemon restart, redeploy or not — so an ordinary bounce
+ *    reloaded every open page, and each reloaded page came back with an EMPTY
+ *    conversation store and asked the daemon to replay the whole segment from
+ *    seq 0. Hundreds of events per workspace, per bounce, to recover history
+ *    the page had been holding a moment earlier.
+ *
+ *    The build identity is the one that actually answers "could this bundle
+ *    have gone stale". A bounce that redeploys nothing leaves it unchanged, the
+ *    page keeps its applied store, and recovery is the delta since its
+ *    high-water mark rather than the entire conversation. A bounce that DOES
+ *    redeploy changes it, and the reload happens exactly as before.
  *
  * 2. REPEATED LEASE EXPIRY — the belt-and-suspenders signal, for the wedged
  *    case where the page cannot adopt at all and therefore never learns a boot
@@ -117,9 +131,34 @@ export interface VersionSkewOptions {
   log?: (level: VersionSkewLogLevel, message: string) => void;
 }
 
+/**
+ * The daemon BUILD a page is pinned to.
+ *
+ * Two fields rather than one because a redeploy can change either: the version
+ * string moves on a released build, and the binary mtime moves on a locally
+ * rebuilt one that kept its version. Comparing both means a developer's own
+ * rebuild is caught as surely as a release is.
+ */
+export interface DaemonBuild {
+  /** `DaemonView.daemonVersion`. */
+  version: string;
+  /** `DaemonView.daemonBinaryMtimeMs`. */
+  binaryMtimeMs: number;
+}
+
+/** Whether two adopted snapshots describe the same daemon build. */
+function sameBuild(a: DaemonBuild, b: DaemonBuild): boolean {
+  return a.version === b.version && a.binaryMtimeMs === b.binaryMtimeMs;
+}
+
+/** How a build reads in a log line. */
+function renderBuild(build: DaemonBuild): string {
+  return `${build.version || "unknown"}@${build.binaryMtimeMs}`;
+}
+
 export class VersionSkewGuard {
-  /** The daemon boot id this page belongs to; "" before the first adoption. */
-  private pinnedBootId = "";
+  /** The daemon build this page belongs to; null before the first adoption. */
+  private pinnedBuild: DaemonBuild | null = null;
   /** Snapshot-lease expiries since the last successful adoption. */
   private expiriesSinceAdoption = 0;
   /** A reload is already scheduled; further observations must not stack one. */
@@ -127,9 +166,9 @@ export class VersionSkewGuard {
 
   constructor(private readonly opts: VersionSkewOptions) {}
 
-  /** The pinned daemon boot id, for a caller's own bookkeeping. */
-  get bootId(): string {
-    return this.pinnedBootId;
+  /** The pinned daemon build, for a caller's own bookkeeping. */
+  get build(): DaemonBuild | null {
+    return this.pinnedBuild;
   }
 
   /**
@@ -143,29 +182,34 @@ export class VersionSkewGuard {
    * daemon stamps a `DaemonView` on every connect snapshot, so a missing one
    * means the frame is malformed and no skew decision can be made from it.
    */
-  observeSnapshotAdoption(bootId: string): VersionSkewOutcome {
-    if (bootId === "") {
+  observeSnapshotAdoption(build: DaemonBuild): VersionSkewOutcome {
+    if (build.version === "" && build.binaryMtimeMs === 0) {
       this.opts.log?.(
         "error",
-        "version skew: adopted snapshot carried no daemon boot id, which the daemon stamps on every connect snapshot",
+        "version skew: adopted snapshot carried no daemon build identity, which the daemon stamps on every connect snapshot",
       );
-      throw new Error("version-skew: adopted snapshot carried an empty daemon boot id");
+      throw new Error("version-skew: adopted snapshot carried an empty daemon build identity");
     }
     // Adoption is the only proof this bundle can ingest this daemon's frames,
     // so it is the only thing that clears the stale-bundle evidence.
     this.expiriesSinceAdoption = 0;
-    if (this.pinnedBootId === "") {
-      this.pinnedBootId = bootId;
-      this.opts.log?.("info", `version skew: pinned daemon boot id ${bootId}`);
+    if (this.pinnedBuild === null) {
+      this.pinnedBuild = build;
+      this.opts.log?.("info", `version skew: pinned daemon build ${renderBuild(build)}`);
       return "pinned";
     }
-    if (bootId === this.pinnedBootId) return "none";
-    const previous = this.pinnedBootId;
+    if (sameBuild(build, this.pinnedBuild)) {
+      // THE ORDINARY BOUNCE LANDS HERE, and landing here is the whole point:
+      // the page survives, keeps its applied conversation store, and recovers
+      // by asking for the delta since its own high-water mark.
+      return "none";
+    }
+    const previous = this.pinnedBuild;
     // LOUD: the page is about to discard itself, and an unexplained reload is
     // indistinguishable from a crash to the person watching it happen.
     this.opts.log?.(
       "warn",
-      `version skew: daemon boot id changed ${previous} -> ${bootId}; reloading page for a fresh bundle`,
+      `version skew: daemon build changed ${renderBuild(previous)} -> ${renderBuild(build)}; reloading page for a fresh bundle`,
     );
     return this.scheduleReload();
   }

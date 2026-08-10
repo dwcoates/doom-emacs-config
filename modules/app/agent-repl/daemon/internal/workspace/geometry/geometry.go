@@ -30,9 +30,9 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/statedb"
 )
 
 // Origin records HOW a geometry record was obtained. It is diagnostic, and it
@@ -142,11 +142,14 @@ func Open(db *sql.DB, logf dlog.Logf) (*Store, error) {
 	// already have the column, and it is NOT NULL, so every daemon that opens one
 	// must find it — dropping the ALTER would leave a fresh database and an
 	// existing one with two different table shapes. It is additive and idempotent
-	// (a duplicate-column error is the migration having already run, which is the
-	// only reading of it), and the NOT NULL DEFAULT '' is what lets the writes
-	// below omit the column entirely.
-	if _, err := db.Exec(`ALTER TABLE workspace_merge_geometry ADD COLUMN before_action TEXT NOT NULL DEFAULT ''`); err != nil &&
-		!strings.Contains(err.Error(), "duplicate column name") {
+	// and the NOT NULL DEFAULT '' is what lets the writes below omit the column
+	// entirely. Its idempotence is the shared one (statedb.AddColumnIfMissing):
+	// this site used to infer "already migrated" by string-matching SQLite's
+	// duplicate-column error text, which is a third answer to a question the
+	// store now has exactly one answer to.
+	if _, err := statedb.AddColumnIfMissing(
+		db, "workspace_merge_geometry", "before_action", `TEXT NOT NULL DEFAULT ''`,
+	); err != nil {
 		return nil, fmt.Errorf("geometry: add retired before_action column: %w", err)
 	}
 	return &Store{db: db, logf: logf}, nil

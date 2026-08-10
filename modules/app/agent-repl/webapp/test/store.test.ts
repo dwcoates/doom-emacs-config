@@ -3047,3 +3047,78 @@ describe("dropUnackedPrompt", () => {
     expect(store.dropUnackedPrompt("r1")).toBe(false);
   });
 });
+
+// --- surviving a bounce -----------------------------------------------------
+
+describe("recovery after a bounce is incremental", () => {
+  // A page that survives a bounce still holds everything it has applied, and
+  // that is the whole basis of a delta-only recovery: the resync asks from the
+  // store's own high-water mark, so a store that wiped itself on the way
+  // through would ask for the entire conversation instead.
+  //
+  // The wipe is the defect, not the baseline. These pin the two edges a
+  // reconnect actually crosses.
+
+  it("keeps the applied conversation when the socket drops", () => {
+    // Arrange — history applied before the bounce.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect(), itemsEffect([textItem()], 400)]);
+
+    // Act — the disconnect's own invalidation.
+    store.invalidateFrontendState("websocket_disconnected");
+
+    // Assert.
+    expect(store.state.items).toHaveLength(1);
+    expect(store.state.lastSeq).toBe(400);
+  });
+
+  it("keeps the applied conversation when a new controller generation is adopted", () => {
+    // Arrange — the successor daemon mints a fresh controller generation for
+    // the same conversation on every bring-up, so re-adopting identity is what
+    // EVERY reconnect does. It must not cost the page its history.
+    const store = new ConversationStore();
+    store.ingest([
+      workspaceEffect({ controllerGenerationId: "g1" }),
+      itemsEffect([textItem()], 400),
+    ]);
+
+    // Act.
+    store.ingest([workspaceEffect({ controllerGenerationId: "g2", atMs: 2000 })]);
+
+    // Assert.
+    expect(store.state.controllerGenerationId).toBe("g2");
+    expect(store.state.items).toHaveLength(1);
+    expect(store.state.lastSeq).toBe(400);
+  });
+
+  it("keeps the high-water mark across a disconnect and re-adoption together", () => {
+    // Arrange — the real sequence, in order: applied history, the socket goes,
+    // a new generation arrives with the successor's snapshot.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ controllerGenerationId: "g1" }), itemsEffect([textItem()], 400)]);
+    store.invalidateFrontendState("websocket_disconnected");
+
+    // Act.
+    store.ingest([workspaceEffect({ controllerGenerationId: "g2", atMs: 2000 })]);
+
+    // Assert — the mark the resync will be sent from. Zero here would be the
+    // full replay this whole path exists to avoid.
+    expect(store.state.lastSeq).toBe(400);
+  });
+
+  it("does surrender the mark when the vendor seq space is rebased", () => {
+    // Arrange — the one legitimate full replay. A vendor uuid rotation starts
+    // numbering again at 1, so the retired space's mark is a number with no
+    // meaning and the page genuinely has nothing.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect(), itemsEffect([textItem()], 400)]);
+
+    // Act.
+    store.rebaseSeqSpace();
+
+    // Assert — asking from zero here is correct, and it follows from the
+    // store's state rather than from a call site choosing it.
+    expect(store.state.items).toHaveLength(0);
+    expect(store.state.lastSeq).toBe(0);
+  });
+});

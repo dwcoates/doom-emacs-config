@@ -133,7 +133,7 @@ import {
 } from "./sidebar.js";
 import { ConversationStore } from "./store.js";
 import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
-import { VersionSkewGuard } from "./version-skew.js";
+import { type DaemonBuild, VersionSkewGuard } from "./version-skew.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe, type WsStateFreshness } from "./ws.js";
 import {
   bindLogContext,
@@ -297,6 +297,35 @@ async function boot(): Promise<void> {
   // command, so the daemon can classify a delayed old-client request instead
   // of replaying against whichever controller replaced it.
   const currentResyncSnapshot = (fromSeq: number) => captureResyncSnapshot(store.state, fromSeq);
+
+  /**
+   * Send one resync from this page's APPLIED HIGH-WATER MARK, saying why.
+   *
+   * RECOVERY IS INCREMENTAL, AND THIS IS THE ONE RULE THAT MAKES IT SO. Every
+   * resync asks for the delta above what this page has already applied; the
+   * daemon serves from exactly that mark unless a clear or compaction floor
+   * sits above it, in which case it raises the floor and logs that it did
+   * (session-controller replayFloorAt). Nothing here picks a from_seq of its
+   * own, so no branch can quietly ask for the whole conversation.
+   *
+   * A FULL REPLAY IS STILL REACHABLE and stays honest: a page with nothing
+   * applied has a mark of zero, which is what a first mount and a freshly
+   * rebased seq space both hold. The difference is that it now follows from the
+   * page's actual state instead of being written into a call site.
+   *
+   * The reason rides the log line because a full replay that nobody can explain
+   * is indistinguishable from the defect this replaced.
+   */
+  const dispatchResync = (reason: string): void => {
+    const snapshot = currentResyncSnapshot(store.state.lastSeq);
+    clog(
+      "info",
+      `resync dispatch reason=${reason} ws=${snapshot.workspace} from_seq=${snapshot.fromSeq} ` +
+        `fence=${snapshot.fence || "none"} applied_items=${store.state.items.length} ` +
+        `branch=${snapshot.fromSeq === 0 ? "full_replay_empty_store" : "delta_from_high_water"}`,
+    );
+    void dispatcher.resync(snapshot.workspace, snapshot).catch(consumeOwnedDispatchFailure);
+  };
 
   // The conversation-history request. `StateSnapshot` carries no conversation,
   // and the deltas that carry it were pushed before this page existed, so a
@@ -1151,14 +1180,21 @@ async function boot(): Promise<void> {
         // Whether THIS frame was the connect StateSnapshot — the signal the
         // history request waits for (it carries no conversation of its own).
         let isSnapshot = false;
-        // The daemon PROCESS identity this snapshot came from, which the
-        // version-skew guard compares against the one this page pinned.
-        let daemonBootId = "";
+        // The daemon BUILD this snapshot came from, which the version-skew
+        // guard compares against the one this page pinned. Deliberately NOT the
+        // boot id: that changes on every restart, so an ordinary bounce
+        // reloaded every page and threw away the applied conversation store
+        // each one was holding (version-skew.ts).
+        let daemonBuild: DaemonBuild | null = null;
         try {
           const decoded = decodeFrontendFrame(data);
           isSnapshot = decoded.frame.case === "snapshot";
           if (decoded.frame.case === "snapshot") {
-            daemonBootId = decoded.frame.value.daemon?.bootId ?? "";
+            const daemon = decoded.frame.value.daemon;
+            daemonBuild = {
+              version: daemon?.daemonVersion ?? "",
+              binaryMtimeMs: Number(daemon?.daemonBinaryMtimeMs ?? 0),
+            };
           }
           dispatcher.observe(decoded);
           effects = adapter.apply(decoded);
@@ -1251,11 +1287,12 @@ async function boot(): Promise<void> {
           });
           // AFTER adoption, never before: a snapshot this page failed to ingest
           // proves nothing about which daemon build this bundle can talk to,
-          // and pinning its boot id would let a wedged page believe it is
-          // current. A CHANGED boot id means the daemon restarted (possibly
-          // redeployed) under a page that cannot be redeployed in place, so the
-          // page fetches itself again.
-          versionSkew.observeSnapshotAdoption(daemonBootId);
+          // and pinning its build would let a wedged page believe it is
+          // current. A CHANGED build means a redeploy happened under a page
+          // that cannot be redeployed in place, so the page fetches itself
+          // again. An unchanged one — the ordinary bounce — leaves the page and
+          // its applied history alone.
+          if (daemonBuild !== null) versionSkew.observeSnapshotAdoption(daemonBuild);
         }
         // The rail, painted from the SAME burst the feed and the footer are
         // ingesting: on a connect snapshot the roster frame rides in with the
@@ -1283,23 +1320,30 @@ async function boot(): Promise<void> {
         if (verdict !== "unchanged") {
           bindLogContext({ claude_session_id: sessionRebase.claudeSessionId });
         }
-        // The rebased view holds no history at all, and the new space's items
-        // may have been pushed before this end learned the rotation. Asking from
-        // zero has the daemon serve the new space from its own replay floor —
-        // the clear that caused the rotation, and everything since — so the
-        // recovery never depends on which frame arrived first.
+        // The rebased view's history was just discarded (rebaseSeqSpace, above),
+        // and the new space's items may have been pushed before this end learned
+        // of the rotation.
+        //
+        // It asks from its APPLIED HIGH-WATER MARK like every other resync,
+        // which for a freshly rebased view is naturally zero — the store has
+        // nothing, so its mark says nothing. That is the point: there is one
+        // rule here rather than a hand-picked zero per branch, and the one rule
+        // cannot ask for a full replay unless the page genuinely has nothing.
         if (verdict === "rotated") {
-          const resyncSnapshot = currentResyncSnapshot(0);
-          void dispatcher
-            .resync(resyncSnapshot.workspace, resyncSnapshot)
-            .catch(consumeOwnedDispatchFailure);
+          dispatchResync("vendor_uuid_rotation");
         }
         // AN ASYNC GAP IS A RESYNC, not a warning to ride out. The push named
         // a bubble that is not open, carried an arm mismatching its bubble's
         // kind, or appended bytes at an offset the spool is not at — and none
         // of it was applied, so nothing local can be repaired incrementally.
-        // Asking from zero has the daemon restate every open bubble in full,
-        // which is the only thing that makes this end current again.
+        //
+        // WHAT REPAIRS IT IS THE SNAPSHOT, NOT THE REPLAY. The daemon answers a
+        // ResyncCmd with a fresh StateSnapshot, and the open bubbles are adopted
+        // wholesale from it. So this used to ask from seq 0 — re-pulling the
+        // entire conversation to fix a spool the conversation had nothing to do
+        // with — for a restatement it was going to get either way. It asks from
+        // the high-water mark like everything else now, and the bubbles are
+        // repaired exactly as before.
         if (result.asyncGap !== undefined) {
           const gap = result.asyncGap;
           clog(
@@ -1308,8 +1352,7 @@ async function boot(): Promise<void> {
               `bubble_kind=${gap.bubbleKind ?? "none"} through_offset=${gap.throughOffset ?? "n/a"} ` +
               `from_offset=${gap.fromOffset ?? "n/a"} decision=resync detail=${gap.detail}`,
           );
-          const gapResync = currentResyncSnapshot(0);
-          void dispatcher.resync(gapResync.workspace, gapResync).catch(consumeOwnedDispatchFailure);
+          dispatchResync("async_bubble_gap");
         }
         if (result.changed) {
           // One paint per animation frame, however many effects land before

@@ -220,6 +220,41 @@ func StopCauseBringUpFailed() StopCause { return StopCause{id: causeBringUpFaile
 // StopCauseControllerExit — a session controller's run loop ended on its own.
 func StopCauseControllerExit() StopCause { return StopCause{id: causeControllerExit} }
 
+// causesOwingTurnResumption is the set of stops after which an interrupted
+// turn is still OWED.
+//
+// THE DISTINCTION IS WHETHER THE WORK WAS ABANDONED OR MERELY DISPLACED. Most
+// stops end the work on purpose: an idle sweep reaped a workspace nobody has
+// touched in an hour, a user forced hibernation, a merge stood the session
+// down, a session was deleted or superseded. Re-driving a turn after any of
+// those would restart work the system was right to stop.
+//
+// These three are different. The daemon is going away and taking the shim with
+// it — a deploy whose bundle changed, a scheduled drain executing, an explicit
+// hard restart — and the user asked for the turn that the bounce happened to
+// land on top of. Nothing about their request stopped being true, so the
+// successor daemon owes them the work.
+//
+// It is a property OF THE CAUSE, defined here beside the vocabulary, so no
+// teardown re-derives "is this a bounce" from a path string.
+var causesOwingTurnResumption = map[stopCauseID]bool{
+	causeDaemonShutdown:  true,
+	causeDrainExecution:  true,
+	causeHardRestartLive: true,
+}
+
+// owesTurnResumption reports whether a turn this cause interrupts must be
+// re-driven once the session is wired again.
+//
+// A REFINED CAUSE ANSWERS FOR WHAT THE DAEMON FOUND, not for what the caller
+// asked. `supersededRecord` refines a bounce into "this record is not the one
+// driving the workspace any more", and the replacement session's own turn is
+// not this record's to resume — so the refinement's answer, not the origin's,
+// is the one that counts.
+func (c StopCause) owesTurnResumption() bool {
+	return causesOwingTurnResumption[c.id]
+}
+
 // supersededRecord refines a caller's cause for the branch where the requested
 // session is no longer the one driving the workspace. The caller's cause is
 // retained as the origin, so the record names both the request and the finding.
