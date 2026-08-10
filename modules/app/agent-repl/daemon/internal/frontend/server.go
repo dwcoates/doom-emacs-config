@@ -903,6 +903,7 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		s.mu.Unlock()
 		break
 	}
+	s.logSnapshotCensus(cl, snapshotPhaseConnect, snapshot)
 	retainedSessions, rejectedSessions := snapshotScopeSessionAudit(rawSnapshot, scope)
 	s.logf("frontend: client connected client_id=%d kind=%s scope_workspace=%q scope_session=%q snapshot_workspaces=%d snapshot_sessions_retained=%q snapshot_sessions_rejected=%q",
 		cl.id, cl.kind, scopeWorkspace(scope), scopeSession(scope), len(snapshot.GetWorkspaces()), retainedSessions, rejectedSessions)
@@ -975,6 +976,7 @@ func (s *Server) renewSnapshotLease(cl *client) bool {
 			s.disconnect(cl)
 			return false
 		}
+		s.logSnapshotCensus(cl, snapshotPhaseLease, snapshot)
 		s.logVerbosef("frontend: snapshot lease renewed client_id=%d kind=%s scope_workspace=%q scope_session=%q workspaces=%d revisions=%s interval_ms=%d",
 			cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), len(snapshot.GetWorkspaces()), snapshotRevisions(snapshot), guiSnapshotLeaseInterval.Milliseconds())
 		return true
@@ -999,6 +1001,39 @@ func (s *Server) snapshotStaleLocked(snapshot *frontendv1.StateSnapshot, scope *
 		}
 	}
 	return "", 0, 0, false
+}
+
+// Snapshot phases. Every full state snapshot the daemon assembles is served to
+// exactly one client for exactly one of these reasons, and the reason is the
+// difference between "the editor reconnected" and "a webview's freshness lease
+// came round again" — two facts with entirely different remedies that one
+// unattributed log line could not tell apart.
+const (
+	snapshotPhaseConnect = "connect"
+	snapshotPhaseLease   = "lease"
+	snapshotPhaseResync  = "resync"
+)
+
+// logSnapshotCensus records one assembled snapshot AGAINST THE CLIENT IT WAS
+// BUILT FOR.
+//
+// The count line used to be written by the state provider, which is handed no
+// client and named none, and it called every assembly a "connect snapshot".
+// Reading the log then meant reading 5350 apparent reconnects, of which 95
+// actually were: the rest were GUI streams renewing their snapshot lease on a
+// timer, each paying for a full 150-workspace assembly to publish the one
+// workspace its scope keeps. The client id, its kind and the phase are what
+// make that distinction visible without correlating against anything.
+func (s *Server) logSnapshotCensus(cl *client, phase string, snapshot *frontendv1.StateSnapshot) {
+	taskCount := 0
+	for _, catalog := range snapshot.GetCatalogs() {
+		taskCount += len(catalog.GetTasks())
+	}
+	s.logf("frontend: state snapshot served client_id=%d kind=%s phase=%s scope_workspace=%q scope_session=%q workspaces=%d sessions=%d catalogs=%d tasks=%d async_bubbles=%d inits=%d queues=%d progress=%d workspace_available=%d host_actions=%d daemon=%t",
+		cl.id, cl.kind, phase, scopeWorkspace(cl.scope), scopeSession(cl.scope),
+		len(snapshot.GetWorkspaces()), len(snapshot.GetSessions()), len(snapshot.GetCatalogs()), taskCount,
+		len(snapshot.GetAsyncBubbles()), len(snapshot.GetInits()), len(snapshot.GetQueues()), len(snapshot.GetProgress()),
+		len(snapshot.GetWorkspaceAvailable()), len(snapshot.GetHostActions()), snapshot.GetDaemon() != nil)
 }
 
 func scopeWorkspace(scope *Scope) string {
@@ -1330,6 +1365,7 @@ func (s *Server) enqueueResyncSnapshot(cl *client, cmd *frontendv1.FrontendComma
 		return
 	}
 	s.enqueue(cl, outFrame{data: snap})
+	s.logSnapshotCensus(cl, snapshotPhaseResync, snapshot)
 	s.logVerbosef("frontend: resync snapshot queued client_id=%d request_id=%q ws=%q phase=%q workspaces=%d",
 		cl.id, cmd.GetRequestId(), cmd.GetWorkspace(), phase, len(snapshot.GetWorkspaces()))
 }

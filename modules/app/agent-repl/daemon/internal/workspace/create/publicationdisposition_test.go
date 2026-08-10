@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -13,19 +12,6 @@ import (
 // its own. These tests pin the terminal disposition that ends every hold: the
 // job is acknowledged, or the daemon abandons the wait, and there is no third
 // outcome in which the gate simply keeps holding.
-
-// countErrorRecords reports how many ERROR-severity records contain want.
-func countErrorRecords(f *fixture, want string) int {
-	f.logMu.Lock()
-	defer f.logMu.Unlock()
-	n := 0
-	for _, line := range f.errorLogs {
-		if strings.Contains(line, want) {
-			n++
-		}
-	}
-	return n
-}
 
 // failBeforeMaterialization drives one job to StateFailed the way the observed
 // zombies got there: the worktree and the session are both real, the health
@@ -90,7 +76,7 @@ func TestAbandonmentIsReportedAsAFaultExactlyOnce(t *testing.T) {
 	// Arrange: a job whose hold has already been disposed of.
 	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
 	failBeforeMaterialization(t, f, "zombie")
-	if got := countErrorRecords(f, "HELD PUBLICATION ABANDONED"); got != 1 {
+	if got := f.countErrorRecords("HELD PUBLICATION ABANDONED"); got != 1 {
 		t.Fatalf("abandonment records after the failure = %d, want 1", got)
 	}
 
@@ -103,7 +89,7 @@ func TestAbandonmentIsReportedAsAFaultExactlyOnce(t *testing.T) {
 
 	// Assert: the durable latch is what makes the report exactly once, so a
 	// sweep that runs every few seconds forever cannot turn it into spam.
-	if got := countErrorRecords(f, "HELD PUBLICATION ABANDONED"); got != 1 {
+	if got := f.countErrorRecords("HELD PUBLICATION ABANDONED"); got != 1 {
 		t.Fatalf("abandonment records after three sweeps = %d, want 1", got)
 	}
 }
@@ -204,7 +190,7 @@ func TestAbandonmentThatCannotLatchIsReportedAndRetried(t *testing.T) {
 	if !f.loggedErrorFormat("HELD PUBLICATION ABANDONMENT COULD NOT LATCH") {
 		t.Fatal("a latch failure was not reported as a fault")
 	}
-	if countErrorRecords(f, "HELD PUBLICATION ABANDONED id=") != 0 {
+	if f.countErrorRecords("HELD PUBLICATION ABANDONED id=") != 0 {
 		t.Fatal("an abandonment was reported without its durable latch")
 	}
 }
