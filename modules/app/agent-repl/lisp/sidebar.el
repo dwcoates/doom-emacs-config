@@ -409,45 +409,26 @@ completed merge still counts as recent."
          (or (null agent-repl--sidebar-merged-epoch)
              (>= at agent-repl--sidebar-merged-epoch)))))
 
-(defcustom agent-repl-sidebar-merged-max-rows 10
-  "Most recently-merged rows the Recently Merged section will render.
-Merges accumulate faster than the activity window
-\(`agent-repl-sidebar-merged-window-seconds') retires them, and an
-unbounded section pushes the live workspaces — the rows the user acts on
-— off the bottom of the rail.  The newest merges survive the cap, since
-recency is the only thing the section claims to order on.  Rows dropped
-by the cap are logged, never silently truncated."
-  :type 'integer
-  :group 'agent-repl)
-
 (defun agent-repl--sidebar-merged-sorted (entries)
-  "Return the recently-merged ENTRIES, newest merge first, capped.
-The cap is `agent-repl-sidebar-merged-max-rows'; whatever it drops is
-named in the log, so a merge missing from the rail is explainable from
-the log alone rather than looking like the retention bug this section
-exists to fix."
-  (let* ((recent (sort (cl-remove-if-not
-                        (lambda (e) (agent-repl--sidebar-recently-merged-p (car e)))
-                        (copy-sequence entries))
-                       (lambda (a b)
-                         (> (agent-repl--sidebar-merged-at (car a))
-                            (agent-repl--sidebar-merged-at (car b))))))
-         (total (length recent)))
-    (if (<= total agent-repl-sidebar-merged-max-rows)
-        recent
-      (let ((kept (cl-subseq recent 0 agent-repl-sidebar-merged-max-rows)))
-        (agent-repl--log nil
-                         "sidebar-merged-sorted: cap=%d recent=%d — dropping %d older merge(s) from Recently Merged: %s"
-                         agent-repl-sidebar-merged-max-rows total
-                         (- total agent-repl-sidebar-merged-max-rows)
-                         (mapcar #'car (cl-subseq recent agent-repl-sidebar-merged-max-rows)))
-        kept))))
+  "Return every recently-merged entry of ENTRIES, newest merge first.
+The section is NOT capped here: a merge that landed inside the activity
+window (`agent-repl-sidebar-merged-window-seconds') is history the user
+can still go looking for, and dropping the older ones made that history
+unreachable.  The rail bounds the section by HEIGHT instead — the
+webapp's `.merged-section' scrolls at ten rows — so an unbounded merge
+count costs the live workspaces above it no space at all."
+  (sort (cl-remove-if-not
+         (lambda (e) (agent-repl--sidebar-recently-merged-p (car e)))
+         (copy-sequence entries))
+        (lambda (a b)
+          (> (agent-repl--sidebar-merged-at (car a))
+             (agent-repl--sidebar-merged-at (car b))))))
 
 (defun agent-repl--sidebar-merged-group (recent current-name)
   "Return the Recently Merged group plist for RECENT, or nil when empty.
-RECENT is the already-sorted, already-capped entry list
+RECENT is the already-sorted entry list
 `agent-repl--sidebar-merged-sorted' returns, passed in rather than
-recomputed so the cap is decided — and logged — exactly once per build.
+recomputed so the section's membership is decided exactly once per build.
 
 Shaped exactly like a repo group so the webapp validates and folds it
 through the same path.  Merged rows carry no children: the family tree
