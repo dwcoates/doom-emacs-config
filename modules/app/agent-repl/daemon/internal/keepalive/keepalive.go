@@ -111,9 +111,15 @@ const PingDeadlineShare = 4
 // would cost more than the miss it prevents.
 //
 // The figure is compared against the total input the session's most recent
-// turn presented to the model — cache reads included, because a token read from
-// cache is still a token of standing context that a cold revival would re-ingest
-// at full price.
+// main-agent RESPONSE presented to the model — cache reads included, because a
+// token read from cache is still a token of standing context that a cold revival
+// would re-ingest at full price.
+//
+// ONE RESPONSE, NOT ONE TURN. A turn's terminal usage sums every model call the
+// turn made, so a tool-heavy turn reports the standing prefix once per round
+// trip: measured against that, this floor declined nothing, ever, because live
+// sessions reported tens of millions of tokens against a two-hundred-thousand
+// token window. The measuring point is sessioncontroller/contextsize.go.
 const WarmCompactMinContextTokens int64 = 50_000
 
 // Config is the resolved keep-alive policy configuration.

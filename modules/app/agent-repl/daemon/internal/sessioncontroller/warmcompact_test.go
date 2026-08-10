@@ -14,15 +14,15 @@ import (
 //
 // The size is installed through the SAME reduction production uses rather than
 // by assigning the field, so a test cannot pass against a figure the real
-// result path would never have produced.
+// response path would never have produced.
 func warmCompactRig(t *testing.T, contextInputTokens int64) (*Manager, *logCapture) {
 	t.Helper()
 	m, _, _, _, capture := coldPingRig(t)
 	if contextInputTokens > 0 {
-		// The size rides the canonical shape as a CACHE HIT: the floor judges how
+		// The size rides one MAIN-AGENT response's cache read: the floor judges how
 		// big the standing conversation is, and a standing conversation is the
-		// prefix the cache is holding.
-		m.noteContextSize(controllerFor(t, m), costOf("prior-turn", 0, 0, uint64(contextInputTokens)))
+		// prefix the cache is holding for the session's own agent.
+		m.noteMainAgentContextSize(controllerFor(t, m), mainAgentUtilization("msg-prior", 0, 0, contextInputTokens))
 	}
 	return m, capture
 }

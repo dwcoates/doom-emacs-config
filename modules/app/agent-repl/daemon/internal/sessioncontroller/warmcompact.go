@@ -84,7 +84,9 @@ func newWarmCompactRequestID(sessionID string) (string, error) {
 //     for this cache window rather than being retried every sweep tick against
 //     a cache that is meanwhile dying;
 //   - a SMALL CONVERSATION is not worth a full-history model call, and an
-//     UNMEASURED one is an unknown rather than a small one.
+//     UNMEASURED one is an unknown rather than a small one. The size is one live
+//     main-agent response's own input and is therefore the context window's
+//     occupancy, not the turn's total spend (contextsize.go).
 func (m *Manager) warmCompactEligibleLocked(d *sessionController, anchorTurnEndMs int64) (ok bool, why string) {
 	if detail, asleep := m.hibernatedLocked(d.sessionID); asleep {
 		m.logf("session-controller: INVARIANT VIOLATION — a warm-compaction eligibility check reached a HIBERNATED session ws=%q session=%s cause=%s; hibernation and keep-alive-stop are one transition, so this combination should be unreachable",

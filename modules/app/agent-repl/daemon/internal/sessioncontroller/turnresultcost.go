@@ -4,7 +4,6 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
-	"claude-repld/internal/keepalive"
 	"claude-repld/internal/tokenusage"
 )
 
@@ -42,14 +41,11 @@ type turnResultCost struct {
 // the buckets processed fresh at full price.
 func (c turnResultCost) expensiveInputTokens() int64 { return tokenusage.ExpensiveInput(c.usage) }
 
-// contextInputTokens is the TOTAL input the request presented — both misses
-// plus the cache hit. It is the size of the standing conversation as the model
-// saw it, which is what the warm-compaction floor judges "is this conversation
-// even big enough to be worth compacting" against. Cache reads are INCLUDED
-// here and excluded above, and the difference is deliberate: a cached token is
-// cheap NOW but is still a token a cold revival would re-ingest at full price
-// later.
-func (c turnResultCost) contextInputTokens() int64 { return tokenusage.ContextInput(c.usage) }
+// THERE IS DELIBERATELY NO CONTEXT-SIZE ACCESSOR HERE. A result's usage is the
+// SUM over every model call the turn made, so adding the cache read back in
+// would produce the standing prefix counted once per round trip rather than the
+// conversation's size. The size is measured from a single response instead
+// (contextsize.go); this shape answers only what the turn PAID.
 
 // newTurnResultCost converts one result's vendor usage at the boundary.
 //
@@ -72,43 +68,17 @@ func newTurnResultCost(turnID string, usage *datav1.Usage) (turnResultCost, erro
 // that reads it. Called on the shim read-loop goroutine with no manager mutex
 // held, which is the obligation the consumer hook carries.
 //
-// THE ORDER IS DELIBERATE: the size is remembered FIRST, because it is a fact
-// about the session that the two verdicts below do not change, and a verdict
-// that logged before the figure it was taken beside was recorded would leave a
-// reader correlating two lines to reconstruct one instant.
+// THE CONVERSATION'S SIZE IS NOT ONE OF THEM. It was, and that was the defect: a
+// result's usage sums every model call the turn made, so it measured the turn's
+// work rather than the context's occupancy. The size is taken from one live
+// main-agent response instead (contextsize.go), which is the same question asked
+// of evidence that can answer it.
 func (m *Manager) noteTurnResultCost(d *sessionController, cost turnResultCost) {
 	if d == nil {
 		return
 	}
-	m.noteContextSize(d, cost)
 	m.noteKeepAlivePingCost(d, cost)
 	m.noteDaemonCompactionCost(d, cost)
-}
-
-// noteContextSize remembers how big the standing conversation was as of this
-// result, which is the only figure the warm-compaction floor has to judge
-// "worth compacting" by.
-//
-// A ZERO TOTAL IS NOT RECORDED. A result reporting no input at all is not
-// evidence that the conversation is empty — it is a result that measured
-// nothing — and writing it would turn a known-large session into an unknown
-// one, which the eligibility check reads as "do not compact". Keeping the last
-// real measurement is the honest answer for a turn that reported none.
-func (m *Manager) noteContextSize(d *sessionController, cost turnResultCost) {
-	context := cost.contextInputTokens()
-	if context <= 0 {
-		return
-	}
-	m.mu.Lock()
-	before := d.lastContextInputTokens
-	d.lastContextInputTokens = context
-	m.mu.Unlock()
-	if before == context {
-		return
-	}
-	m.logf("session-controller: conversation size OBSERVED ws=%q session=%s turn_id=%s before=%d after=%d warm_compaction_floor=%d %s",
-		d.workspace, d.sessionID, cost.turnID, before, context,
-		keepalive.WarmCompactMinContextTokens, cost.breakdown())
 }
 
 // breakdown renders every bucket and both derived figures for a log line or a

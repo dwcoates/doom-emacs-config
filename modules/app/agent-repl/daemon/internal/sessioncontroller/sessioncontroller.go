@@ -720,16 +720,23 @@ type sessionController struct {
 	// same failure would be re-attempted every tick until the cache died. Read
 	// and written only under Manager.mu (warmcompact.go).
 	warmCompactAnchorMs int64
-	// lastContextInputTokens is the TOTAL input the session's most recent
-	// terminal result presented to the model: the uncached buckets plus the
-	// cache read. It is the only figure this daemon holds about how big the
-	// standing conversation actually is, and it is what the warm-compaction size
-	// floor is judged against — compacting a small conversation costs a
-	// full-history model call and buys back nothing (warmcompact.go).
+	// lastContextInputTokens is the TOTAL input the session's most recent LIVE
+	// MAIN-AGENT RESPONSE presented to the model: the uncached buckets plus the
+	// cache read, for that one request. It is the only figure this daemon holds
+	// about how big the standing conversation actually is, and it is what the
+	// warm-compaction size floor is judged against — compacting a small
+	// conversation costs a full-history model call and buys back nothing
+	// (warmcompact.go).
 	//
-	// Zero means NO RESULT HAS BEEN OBSERVED in this daemon's lifetime for this
-	// session, which is an unknown and not a small conversation. Every unknown
-	// answers none. Read and written only under Manager.mu.
+	// IT IS ONE RESPONSE'S INPUT, NEVER A TURN'S. A terminal result's usage sums
+	// every model call the turn made, which measures the turn's work rather than
+	// the context's occupancy; taking the size from there is the defect
+	// contextsize.go replaced.
+	//
+	// Zero means NO LIVE MAIN-AGENT RESPONSE HAS BEEN OBSERVED in this daemon's
+	// lifetime for this session, which is an unknown and not a small
+	// conversation. Every unknown answers none. Read and written only under
+	// Manager.mu.
 	lastContextInputTokens int64
 	// runningText is the prompt that started the turn now in flight, as far as
 	// this daemon saw it. It is the classifier's "what is already running"
@@ -2744,16 +2751,22 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 			m.cfg.Hibernations.TurnEndObserved(sessionID, atMs)
 		}
 	}
-	// WHAT EVERY TURN'S TERMINAL RESULT MEASURED, routed to the three decisions
+	// WHAT EVERY TURN'S TERMINAL RESULT MEASURED, routed to the two decisions
 	// that read it: the keep-alive ping's own verdict on the cache it was sent
-	// to refresh (keepalivecold.go), the daemon compaction's cold-read alarm
-	// (compactioncold.go), and the conversation size the warm-compaction floor
-	// is judged against (warmcompact.go). Bound before Run, so a result can
-	// never reach the consumer with nothing to latch it in: for the ping it is
-	// the ONE observation the feature makes about its own premise, and it
-	// arrives exactly once.
+	// to refresh (keepalivecold.go) and the daemon compaction's cold-read alarm
+	// (compactioncold.go). Bound before Run, so a result can never reach the
+	// consumer with nothing to latch it in: for the ping it is the ONE
+	// observation the feature makes about its own premise, and it arrives
+	// exactly once.
 	cons.onTurnResultCost = func(cost turnResultCost) {
 		m.noteTurnResultCost(d, cost)
+	}
+	// HOW BIG THE STANDING CONVERSATION IS, off one live main-agent response, and
+	// read by the warm-compaction size floor alone (contextsize.go). Bound before
+	// Run for the reason above: the first response of the session is a
+	// measurement, and a hook bound later would drop it.
+	cons.onMainAgentContextSize = func(record *frontendv1.TokenUtilization) {
+		m.noteMainAgentContextSize(d, record)
 	}
 	// Every PERSISTENT store event names the conversation it belongs to.
 	// Keeping the record current off the live stream is what gives a later
