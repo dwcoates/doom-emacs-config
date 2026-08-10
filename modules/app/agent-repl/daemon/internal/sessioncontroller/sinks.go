@@ -298,7 +298,24 @@ type PromptReceiptStore interface {
 	// before throughMs — the context cut's sweep — reporting how many went.
 	RetireWorkspace(workspace string, throughMs int64) (int, error)
 	// Outstanding lists a workspace's un-retired receipts, oldest first.
+	// A PENDING RESUMPTION IS NEVER AMONG THEM: this is the render path, and a
+	// re-drive is not the user's prompt (turnresumption.go).
 	Outstanding(workspace string) ([]statedb.PromptReceipt, error)
+
+	// --- the interrupted-turn resumption (turnresumption.go) ---
+
+	// RecordPendingResumption durably records a turn a teardown is about to
+	// interrupt, so the successor daemon can re-drive it. It runs BEFORE the
+	// interrupt is delivered.
+	RecordPendingResumption(r statedb.PendingResumption) error
+	// PendingResumptions lists what a workspace is still owed, oldest
+	// interruption first. It is the LEVEL the re-drive is triggered off, which
+	// is what makes the resumption survive a bounce mid-resumption.
+	PendingResumptions(workspace string) ([]statedb.PendingResumption, error)
+	// DischargeResumption discards one owed resumption, reporting whether one
+	// was owed. Both the re-drive's acceptance and the user preempting it
+	// discharge through here.
+	DischargeResumption(requestID string) (bool, error)
 }
 
 // TurnAccountingStore durably records the evidence required to compare a
