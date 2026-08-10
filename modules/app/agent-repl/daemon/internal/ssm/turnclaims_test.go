@@ -1088,3 +1088,110 @@ func TestTurnEndForAnUnknownTurnStaysFatalAcrossEveryClaimant(t *testing.T) {
 		t.Fatalf("ResolveTurnLifecycle err = %v, want the unknown turn rejected", err)
 	}
 }
+
+// A redelivered `TurnStarted` for an identity the ledger has already SETTLED is
+// the defect class this table exists for: a shim control-request timeout
+// declares a submit unknown-fate while the shim actually took it, the queue
+// redelivers the same turn identity at a new store coordinate, and the ledger
+// used to refuse that second start fatally.
+func TestSettledTurnStartRedeliveryVerdict(t *testing.T) {
+	tests := []struct {
+		name         string
+		duplicateSeq uint64
+	}{
+		{name: "the redelivery lands at a new store coordinate", duplicateSeq: 30},
+		{name: "the redelivery repeats the original store coordinate", duplicateSeq: 10},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: one turn lived its whole life in the ledger.
+			m := openTurnClaimManager(t, filepath.Join(t.TempDir(), "state.db"))
+			resolveTurnClaim(t, m, turnClaimEvent(true, 10, "turn-settled"))
+			resolveTurnClaim(t, m, turnClaimEvent(false, 20, "turn-settled"))
+
+			// Act: the same identity is delivered a second time.
+			before, after, replayed, err := m.ResolveTurnLifecycle(
+				"ws", "daemon-session", "", turnClaimEvent(true, tc.duplicateSeq, "turn-settled"),
+			)
+
+			// Assert: idempotent, and no claim reopened.
+			if err != nil {
+				t.Fatalf("settled turn start redelivery err = %v, want nil", err)
+			}
+			if !replayed {
+				t.Fatalf("settled turn start redelivery replayed = false, want true")
+			}
+			if len(before) != 0 || len(after) != 0 {
+				t.Fatalf("settled turn start redelivery = before:%v after:%v, want no active claim either side", before, after)
+			}
+		})
+	}
+}
+
+func TestConflictingTurnStartCarriesTheTurnScopedSentinel(t *testing.T) {
+	// Arrange: a turn whose claim is still OPEN.
+	m := openTurnClaimManager(t, filepath.Join(t.TempDir(), "state.db"))
+	resolveTurnClaim(t, m, turnClaimEvent(true, 10, "turn-open"))
+
+	// Act: a second start claims the same identity at another coordinate.
+	_, _, _, err := m.ResolveTurnLifecycle(
+		"ws", "daemon-session", "", turnClaimEvent(true, 11, "turn-open"),
+	)
+
+	// Assert: still refused, and named so the refusal can be scoped to the turn.
+	if !errors.Is(err, ErrTurnStartConflict) {
+		t.Fatalf("conflicting turn start err = %v, want ErrTurnStartConflict", err)
+	}
+}
+
+func TestTheLedgerKeepsWorkingAfterATurnStartConflict(t *testing.T) {
+	// Arrange: a conflicting duplicate was refused.
+	m := openTurnClaimManager(t, filepath.Join(t.TempDir(), "state.db"))
+	resolveTurnClaim(t, m, turnClaimEvent(true, 10, "turn-open"))
+	if _, _, _, err := m.ResolveTurnLifecycle(
+		"ws", "daemon-session", "", turnClaimEvent(true, 11, "turn-open"),
+	); err == nil {
+		t.Fatalf("conflicting turn start err = nil, want a refusal")
+	}
+
+	// Act: the conversation carries on with the next turn.
+	before, after, replayed := resolveTurnClaim(t, m, turnClaimEvent(true, 12, "turn-next"))
+
+	// Assert: the ledger admitted it beside the still-open first claim.
+	if replayed || !reflect.DeepEqual(before, []string{"turn-open"}) ||
+		!reflect.DeepEqual(after, []string{"turn-open", "turn-next"}) {
+		t.Fatalf("turn after conflict = before:%v after:%v replayed:%v", before, after, replayed)
+	}
+}
+
+func TestASettledDuplicateReplaysCleanlyOnEveryResume(t *testing.T) {
+	// Arrange: a durable stream that CONTAINS the duplicate start, exactly as a
+	// resume re-reads it from the store.
+	path := filepath.Join(t.TempDir(), "state.db")
+	stream := []*corev1.Event{
+		turnClaimEvent(true, 10, "turn-settled"),
+		turnClaimEvent(false, 20, "turn-settled"),
+		turnClaimEvent(true, 30, "turn-settled"),
+	}
+	first := openTurnClaimManager(t, path)
+	for _, ev := range stream {
+		resolveTurnClaim(t, first, ev)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first manager: %v", err)
+	}
+
+	// Act: a resume replays the whole stream, duplicate included.
+	second := openTurnClaimManager(t, path)
+	var replayErr error
+	for _, ev := range stream {
+		if _, _, _, err := second.ResolveTurnLifecycle("ws", "daemon-session", "", ev); err != nil {
+			replayErr = err
+		}
+	}
+
+	// Assert: the resume is clean, so the session never becomes unresumable.
+	if replayErr != nil {
+		t.Fatalf("resume replay err = %v, want nil", replayErr)
+	}
+}
