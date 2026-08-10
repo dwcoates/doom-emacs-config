@@ -224,6 +224,10 @@ type fakeApplier struct {
 	// call — the compactions the daemon may not run a second time against.
 	compactionGateClosures []string
 	compactionGateCloseErr error
+	// clearGateClosures records one workspace per NoteConversationCleared
+	// call — the clears that close the same gate a compaction does.
+	clearGateClosures []string
+	clearGateCloseErr error
 	// compactionGates is what CompactionGateOf answers per workspace. The zero
 	// value is a workspace that has never compacted, which is never redundant
 	// and is what every test that does not care about the gate wants.
@@ -542,6 +546,16 @@ func (f *fakeApplier) NoteCompactionCompleted(workspace string) error {
 	defer notifyTestActivity()
 	f.compactionGateClosures = append(f.compactionGateClosures, workspace)
 	return f.compactionGateCloseErr
+}
+
+// NoteConversationCleared records the compaction-gate closures a completed
+// clear applied.
+func (f *fakeApplier) NoteConversationCleared(workspace string) error {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	defer notifyTestActivity()
+	f.clearGateClosures = append(f.clearGateClosures, workspace)
+	return f.clearGateCloseErr
 }
 
 // CompactionGateOf answers the workspace's staged compaction gate.
