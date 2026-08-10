@@ -1430,6 +1430,17 @@ export class UdsSession {
     return this.server.isConnected();
   }
 
+  /**
+   * Whether the store PRODUCER link is up right now (test/diagnostics).
+   *
+   * It reads the store client's own connection state, so a test can wait for a
+   * store bounce to be OBSERVED here before acting on it — rather than racing
+   * the close notification and calling the result a hold.
+   */
+  storeLinkConnected(): boolean {
+    return this.store.isConnected();
+  }
+
   /** Outstanding-turn count (test/diagnostics). */
   turnCount(): number {
     return this.activeTurnIds.length;
