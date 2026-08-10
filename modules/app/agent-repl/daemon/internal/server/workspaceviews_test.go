@@ -495,9 +495,15 @@ func TestAnUnfencedSessionPublicationWithholdsTheGate(t *testing.T) {
 }
 
 // lockProbePush answers, at push time, whether the publisher's own mutex was
-// held. That is the whole of "retention and publication are one step": a push
-// that reaches the wire with the lock free is a push a concurrent resolution
-// can overtake, retaining the newer view and broadcasting the older one.
+// held. NO PUSH MAY OBSERVE IT HELD.
+//
+// It used to assert the opposite, and that assertion was the deadlock. The
+// frontend takes its own lock to broadcast, and its materialization release
+// called back into this publisher's Topbars while holding it; pushing under
+// this mutex therefore closed a cycle that froze every session controller and
+// the merge queue drain. The ordering the old hold bought — the wire is never
+// older than the retention — is kept by staging under the mutex and draining
+// one at a time outside it, which the emission-order test below covers.
 //
 // TryLock is the probe rather than a second goroutine because it needs no
 // timing at all — the answer is a fact about this instant, not a race whose
@@ -536,36 +542,106 @@ func newLockProbePublisher(records SessionRecordSource) (*WorkspaceViews, *lockP
 	return v, probe
 }
 
-func TestTheTopbarIsBroadcastUnderTheSameHoldThatRetainedIt(t *testing.T) {
-	// Arrange.
-	v, probe := newLockProbePublisher(nil)
+func TestNoViewIsBroadcastWhileThePublisherMutexIsHeld(t *testing.T) {
+	tests := []struct {
+		name     string
+		records  SessionRecordSource
+		publish  func(*WorkspaceViews)
+		observed func(*lockProbePush) []bool
+	}{
+		{
+			name:     "topbar",
+			publish:  func(v *WorkspaceViews) { v.PublishState(liveState()) },
+			observed: func(p *lockProbePush) []bool { return p.topbarHeld },
+		},
+		{
+			name:     "gate",
+			records:  fixedRecords{},
+			publish:  func(v *WorkspaceViews) { v.PublishSession("/home/u/ws", "s1|g1", "s1") },
+			observed: func(p *lockProbePush) []bool { return p.gateHeld },
+		},
+		{
+			name:     "token breakdown",
+			publish:  func(v *WorkspaceViews) { v.PublishTokenBreakdown("/home/u/ws", "s1|g1", nil) },
+			observed: func(p *lockProbePush) []bool { return p.breakdownHeld },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			v, probe := newLockProbePublisher(tt.records)
+			// Act.
+			tt.publish(v)
+			// Assert.
+			held := tt.observed(probe)
+			if len(held) != 1 || held[0] {
+				t.Fatalf("%s push observed the lock held = %v, want one push with the lock FREE", tt.name, held)
+			}
+		})
+	}
+}
+
+// reentrantPush is the frontend's real shape: the broadcast reaches a snapshot
+// path that asks this publisher for its retained views. Under the old
+// push-under-the-mutex arrangement that call could not return.
+type reentrantPush struct {
+	v       *WorkspaceViews
+	topbars int
+}
+
+func (p *reentrantPush) PushTopbarView(*frontendv1.TopbarView) {
+	p.topbars = len(p.v.Topbars())
+}
+func (p *reentrantPush) PushTokenBreakdownView(*frontendv1.TokenBreakdownView) {}
+func (p *reentrantPush) PushWorkspaceGateView(*frontendv1.WorkspaceGateView)   {}
+
+func TestAPushMayReadTheRetainedViewsItIsPublishing(t *testing.T) {
+	// Arrange — a push that calls straight back into the snapshot side.
+	push := &reentrantPush{}
+	v := NewWorkspaceViews(func(string, ...any) {}, push, nil, nil, nil, nil, nil)
+	push.v = v
+
 	// Act.
 	v.PublishState(liveState())
-	// Assert.
-	if len(probe.topbarHeld) != 1 || !probe.topbarHeld[0] {
-		t.Fatalf("topbar push observed the lock held = %v, want one push with the lock held", probe.topbarHeld)
+
+	// Assert — the retention is already advanced when the push runs, and the
+	// read completed rather than deadlocking against the publication.
+	if push.topbars != 1 {
+		t.Fatalf("the push read %d retained topbar(s), want the one it is publishing", push.topbars)
 	}
 }
 
-func TestTheGateIsBroadcastUnderTheSameHoldThatRetainedIt(t *testing.T) {
-	// Arrange — the gate alone, published off the session record.
-	v, probe := newLockProbePublisher(fixedRecords{})
-	// Act.
-	v.PublishSession("/home/u/ws", "s1|g1", "s1")
-	// Assert.
-	if len(probe.gateHeld) != 1 || !probe.gateHeld[0] {
-		t.Fatalf("gate push observed the lock held = %v, want one push with the lock held", probe.gateHeld)
-	}
+// orderRecordingPush records the order the frontend actually sees.
+type orderRecordingPush struct {
+	mu     sync.Mutex
+	fences []string
 }
 
-func TestTheTokenBreakdownIsBroadcastUnderTheSameHoldThatRetainedIt(t *testing.T) {
-	// Arrange.
-	v, probe := newLockProbePublisher(nil)
+func (p *orderRecordingPush) PushTopbarView(v *frontendv1.TopbarView) {
+	p.mu.Lock()
+	p.fences = append(p.fences, v.GetFence())
+	p.mu.Unlock()
+}
+func (p *orderRecordingPush) PushTokenBreakdownView(*frontendv1.TokenBreakdownView) {}
+func (p *orderRecordingPush) PushWorkspaceGateView(*frontendv1.WorkspaceGateView)   {}
+
+func TestTheWireOrderIsTheOrderTheRetentionAdvanced(t *testing.T) {
+	// Arrange — two resolutions of the same workspace, serialized by the caller
+	// so the retention advances in a known order.
+	push := &orderRecordingPush{}
+	v := NewWorkspaceViews(func(string, ...any) {}, push, nil, nil, nil, nil, nil)
+	first := liveState()
+	first.Fence = "s1|g1"
+	second := liveState()
+	second.Fence = "s1|g2"
+
 	// Act.
-	v.PublishTokenBreakdown("/home/u/ws", "s1|g1", nil)
-	// Assert.
-	if len(probe.breakdownHeld) != 1 || !probe.breakdownHeld[0] {
-		t.Fatalf("breakdown push observed the lock held = %v, want one push with the lock held", probe.breakdownHeld)
+	v.PublishState(first)
+	v.PublishState(second)
+
+	// Assert — the wire is never older than the retention.
+	if len(push.fences) != 2 || push.fences[0] != "s1|g1" || push.fences[1] != "s1|g2" {
+		t.Fatalf("wire order = %v, want the retention's order [s1|g1 s1|g2]", push.fences)
 	}
 }
 

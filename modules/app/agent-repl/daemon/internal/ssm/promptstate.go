@@ -55,6 +55,9 @@ func (m *Manager) MarkPromptAccepted(
 		return fmt.Errorf("ssm: MarkPromptAccepted for workspace %q session %q got a nil synchronous publisher", workspace, sessionID)
 	}
 
+	// The staged publications run AFTER mu is released: defers are LIFO, so
+	// registering the drain first makes it run last. See stagePublishLocked.
+	defer m.drainPublications()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.rejectStartDuringHibernationLocked(workspace, "prompt acceptance"); err != nil {
@@ -228,7 +231,7 @@ func (m *Manager) publishPromptAcceptedLocked(
 	m.logf("ssm: prompt accepted PUBLISH_SYNC ws=%s session=%s request_id=%q decision=%s admission=%s state=%s turn_active=%t cause_kind=%s cause_seq=%d at_ms=%d",
 		workspace, sessionID, requestID, decision, admission, state.GetState(), state.GetTurnActive(),
 		state.GetCauseKind(), state.GetCauseSeq(), state.GetAtMs())
-	publish(state)
+	m.stagePublishLocked(func() { publish(state) })
 	return nil
 }
 
@@ -357,6 +360,9 @@ func (m *Manager) MarkPromptRejected(
 		return false, fmt.Errorf("ssm: MarkPromptRejected for workspace %q session %q got a nil synchronous publisher", workspace, sessionID)
 	}
 
+	// The staged publications run AFTER mu is released: defers are LIFO, so
+	// registering the drain first makes it run last. See stagePublishLocked.
+	defer m.drainPublications()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -438,7 +444,7 @@ func (m *Manager) publishPromptRejectedLocked(
 	m.logf("ssm: prompt rejected PUBLISH_SYNC ws=%s session=%s request_id=%q state=%s turn_active=%t cause_kind=%s cause_seq=%d at_ms=%d",
 		workspace, sessionID, requestID, state.GetState(), state.GetTurnActive(),
 		state.GetCauseKind(), state.GetCauseSeq(), state.GetAtMs())
-	publish(state)
+	m.stagePublishLocked(func() { publish(state) })
 	return nil
 }
 
@@ -510,6 +516,9 @@ func (m *Manager) reconcileSettledTurn(
 		return false, fmt.Errorf("ssm: ReconcileAlreadyComplete for workspace %q session %q got a nil synchronous publisher", workspace, sessionID)
 	}
 
+	// The staged publications run AFTER mu is released: defers are LIFO, so
+	// registering the drain first makes it run last. See stagePublishLocked.
+	defer m.drainPublications()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -623,6 +632,6 @@ func (m *Manager) reconcileSettledTurn(
 	m.logf("ssm: already-complete reconciliation PUBLISH_SYNC ws=%s session=%s state=%s status=%s turn_active=%t cause_kind=%s cause_seq=%d at_ms=%d",
 		workspace, sessionID, state.GetState(), state.GetStatus(), state.GetTurnActive(),
 		state.GetCauseKind(), state.GetCauseSeq(), state.GetAtMs())
-	publish(state)
+	m.stagePublishLocked(func() { publish(state) })
 	return closed, nil
 }
