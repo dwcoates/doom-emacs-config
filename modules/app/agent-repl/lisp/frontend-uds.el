@@ -220,7 +220,7 @@ that the daemon or session is healthy.")
     "workspaceAvailable" "hostAction" "daemonHealth" "sessionHealth"
     "workspaceRoster" "shutdownSchedule"
     "asyncBubbleDelta" "topbar" "tokenBreakdown" "workspaceGate"
-    "mergeQueueRoster" "restartPending")
+    "mergeQueueRoster" "restartPending" "conversationPage")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frame.proto.
 A decoded frame whose sole top-level key is NOT one of these is
@@ -252,15 +252,15 @@ no snapshot field of this name to seed from.
 `context-cost.el' registers a handler that reads `expensive_turn' and
 nothing else.  The consolidated progress footer remains webapp-only.
 
-`taskCatalog', `heartbeat' (E4), `workspaceRoster', and the four resolved
+`taskCatalog', `heartbeat' (E4), `workspaceRoster', the four resolved
 component views (`asyncBubbleDelta', `topbar', `tokenBreakdown',
-`workspaceGate') are decoded for wire parity and rendered by nothing here
-— see `agent-repl--uds-ignored-frame-fields'.")
+`workspaceGate') and `conversationPage' are decoded for wire parity and
+rendered by nothing here — see `agent-repl--uds-ignored-frame-fields'.")
 
 (defconst agent-repl--uds-ignored-frame-fields
   '("taskCatalog" "heartbeat" "queue" "workspaceRoster"
     "asyncBubbleDelta" "topbar" "tokenBreakdown" "workspaceGate"
-    "mergeQueueRoster")
+    "mergeQueueRoster" "conversationPage")
   "Frame arms Emacs decodes for wire parity but DELIBERATELY renders nothing for.
 These are a subset of `agent-repl--uds-known-frame-fields'.
 
@@ -321,7 +321,16 @@ push.
 broadcast to every client on every queue mutation.  The queue's runtime
 controls (pause, resume, evict) are webapp surfaces, so rendering the
 roster here would show state the user could not act on — the same
-reasoning that keeps `queue' on this list.")
+reasoning that keeps `queue' on this list.
+
+`conversationPage': one page of tail-first conversation history
+\(conversation-page.proto).  Emacs renders NO conversation, so it has no
+history to page and never sends `conversationPage\='; the daemon addresses
+a page to the one client that asked for it, so this arm should not reach
+here at all.  It is listed because the vocabulary above mirrors the frame
+oneof rather than the subset Emacs expects, and an unlisted arm SIGNALS:
+a page that ever did arrive would take down the host connection instead
+of being dropped.")
 
 (defconst agent-repl--uds-known-command-fields
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"
