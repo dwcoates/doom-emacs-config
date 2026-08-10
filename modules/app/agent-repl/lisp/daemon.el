@@ -409,50 +409,90 @@ on every ordinary bounce, so it is named rather than printed as `nil'."
       (string-join targets "/")
     "shim/webapp/daemon"))
 
+(defun agent-repl--frontend-build-assert-script ()
+  "Signal unless the shared build script is present on disk.
+Every build run — blocking or asynchronous — starts here, so a missing
+script is one failure with one message rather than one per caller."
+  (unless (file-exists-p agent-repl--frontend-build-script)
+    (agent-repl--log nil "frontend build: script missing path=%s"
+                     agent-repl--frontend-build-script)
+    (error "agent-repl: frontend build script not found: %s"
+           agent-repl--frontend-build-script)))
+
+(defun agent-repl--frontend-build-args (targets force)
+  "Return the argv following the shell for a build of TARGETS.
+The script path, `--force' when FORCE is non-nil, then TARGETS — the one
+place that shape is spelled out, so the blocking and asynchronous runs
+cannot invoke the script differently."
+  (append (list agent-repl--frontend-build-script)
+          (when force '("--force"))
+          targets))
+
+(defun agent-repl--frontend-build-reset-capture ()
+  "Empty the build capture buffer so a run's output is only its own."
+  (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
+    (erase-buffer)))
+
+(defun agent-repl--frontend-build-captured-output ()
+  "Return the build capture buffer's contents, trailing whitespace trimmed."
+  (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
+    (string-trim-right (buffer-string))))
+
+(defun agent-repl--frontend-build-log-outcome (targets force exit-code output)
+  "Copy a settled build's TARGETS, FORCE, EXIT-CODE and OUTPUT to the log.
+The full capture (stdout AND stderr, which the build process merges into
+the destination buffer) reaches the durable record BEFORE success or
+failure is decided, so a build that fails is never the only evidence that
+it ran."
+  (agent-repl--log nil
+                   "frontend build-if-stale targets=%S force=%s exit=%S output=%s"
+                   (or targets 'default) (if force "t" "nil") exit-code
+                   (if (string-empty-p output) "<empty>" output)))
+
+(defun agent-repl--frontend-build-report-failure (label exit-code output)
+  "Surface a failed LABEL build (EXIT-CODE, OUTPUT) and return its detail.
+Raises the phase line, pops the capture buffer, and hands back the
+message string.  The blocking caller signals with it; the asynchronous
+caller, which has no stack to signal on, warns with it and passes it to
+its failure continuation."
+  (agent-repl--backend-phase
+   nil "%s build FAILED (exit %s): %s — full output in %s"
+   label exit-code (agent-repl--backend-output-tail output)
+   (agent-repl--logfile-path))
+  (display-buffer agent-repl--frontend-build-buffer)
+  (format "agent-repl: frontend build failed (exit %s) — see %s"
+          exit-code agent-repl--frontend-build-buffer))
+
+(defun agent-repl--frontend-build-report-success (label started)
+  "Raise the phase line for a LABEL build that began at STARTED."
+  (agent-repl--backend-phase nil "%s built (%.1fs)" label
+                             (- (float-time) started)))
+
 (defun agent-repl--frontend-build-targets-if-stale (targets &optional force)
   "Build stale TARGETS through the shared artifact orchestrator.
 TARGETS is a list of build-frontend target strings, or nil for its normal
 shim/webapp/daemon set.  With FORCE non-nil, every selected artifact is
 rebuilt.  The complete captured subprocess output is copied into the
-persistent agent-repl log before success or failure is decided."
+persistent agent-repl log before success or failure is decided.
+
+BLOCKS until the build settles.  Callers that must not stall the main
+thread use `agent-repl--frontend-build-targets-async' instead."
   (agent-repl--log nil "frontend build-if-stale: requested targets=%S force=%s script=%s"
                    (or targets 'default) (if force "t" "nil")
                    agent-repl--frontend-build-script)
-  (unless (file-exists-p agent-repl--frontend-build-script)
-    (agent-repl--log nil "frontend build-if-stale: script missing path=%s"
-                     agent-repl--frontend-build-script)
-    (error "agent-repl: frontend build script not found: %s"
-           agent-repl--frontend-build-script))
-  (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
-    (erase-buffer))
+  (agent-repl--frontend-build-assert-script)
+  (agent-repl--frontend-build-reset-capture)
   (let* ((label (agent-repl--frontend-build-label targets))
          (started (float-time))
-         (args (append (list agent-repl--frontend-build-script)
-                       (when force '("--force"))
-                       targets)))
+         (args (agent-repl--frontend-build-args targets force)))
     (agent-repl--backend-phase nil "rebuilding %s if stale…" label)
     (let* ((exit-code (agent-repl--frontend-run-build-script args))
-           (output
-            (with-current-buffer agent-repl--frontend-build-buffer
-              (string-trim-right (buffer-string)))))
-      ;; The full capture (stdout AND stderr, which `call-process' merges into
-      ;; the destination buffer) reaches the durable record BEFORE success or
-      ;; failure is decided, so a build that fails is never the only evidence
-      ;; that it ran.
-      (agent-repl--log nil
-                       "frontend build-if-stale targets=%S force=%s exit=%S output=%s"
-                       (or targets 'default) (if force "t" "nil") exit-code
-                       (if (string-empty-p output) "<empty>" output))
+           (output (agent-repl--frontend-build-captured-output)))
+      (agent-repl--frontend-build-log-outcome targets force exit-code output)
       (unless (eq exit-code 0)
-        (agent-repl--backend-phase
-         nil "%s build FAILED (exit %s): %s — full output in %s"
-         label exit-code (agent-repl--backend-output-tail output)
-         (agent-repl--logfile-path))
-        (display-buffer agent-repl--frontend-build-buffer)
-        (error "agent-repl: frontend build failed (exit %s) — see %s"
-               exit-code agent-repl--frontend-build-buffer))
-      (agent-repl--backend-phase nil "%s built (%.1fs)" label
-                                 (- (float-time) started))
+        (error "%s" (agent-repl--frontend-build-report-failure
+                     label exit-code output)))
+      (agent-repl--frontend-build-report-success label started)
       exit-code)))
 
 (defun agent-repl--frontend-build-if-stale (&optional force)
