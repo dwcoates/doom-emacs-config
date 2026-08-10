@@ -22,6 +22,11 @@ interface Harness {
   logs: Array<[ConnectResyncLogLevel, string]>;
   /** Advance the injected clock past a backoff window. */
   advance: (ms: number) => void;
+  /**
+   * Run the in-flight resync's settle deadline, as the browser would when the
+   * ack never came. Returns whether one was armed to run.
+   */
+  fireDeadline: () => boolean;
 }
 
 /**
@@ -45,7 +50,21 @@ function harness(resync?: (sent: Sent) => Promise<void>, onGiveUp?: ConnectResyn
   const sent: Sent[] = [];
   const logs: Array<[ConnectResyncLogLevel, string]> = [];
   let clock = 1_000;
+  // The settle deadline runs on injected timers rather than the runner's, so a
+  // test fires it deliberately and no suite waits out a real one.
+  const pending = new Map<number, () => void>();
+  let nextHandle = 1;
   const trigger = new ConnectResync({
+    timers: {
+      setTimeout: (callback) => {
+        const handle = nextHandle++;
+        pending.set(handle, callback);
+        return handle;
+      },
+      clearTimeout: (handle) => {
+        pending.delete(handle);
+      },
+    },
     resync: (request) => {
       sent.push(request);
       return resync ? resync(request) : Promise.resolve();
@@ -63,6 +82,13 @@ function harness(resync?: (sent: Sent) => Promise<void>, onGiveUp?: ConnectResyn
     logs,
     advance: (ms) => {
       clock += ms;
+    },
+    fireDeadline: () => {
+      const next = [...pending.entries()][0];
+      if (next === undefined) return false;
+      pending.delete(next[0]);
+      next[1]();
+      return true;
     },
   };
 }
@@ -415,6 +441,9 @@ function mismatchHarness(adopted: Sent | null, alwaysReject = false): MismatchHa
     advance: (ms) => {
       clock += ms;
     },
+    // This harness exercises the refusal path, which settles on its own; the
+    // deadline seam is covered against the harness above.
+    fireDeadline: () => false,
   };
 }
 
@@ -937,5 +966,145 @@ describe("ConnectResync suppression logging", () => {
     expect(summaryLines(h)).toEqual([
       "resync: coalesced 1 want-resync(s) ws=/ws outcome=socket_lost decision=summary",
     ]);
+  });
+});
+
+/**
+ * THE WEDGE THIS BOUNDS, observed live (workspace marcos-pr-remediation, daemon
+ * pid 36279): a resync went out over a socket that stayed up and its ack never
+ * came back. With `inFlight` cleared only by a settle or a socket event, every
+ * later want-resync coalesced into a settle that never happened — no resync,
+ * therefore no snapshot, therefore an expiring snapshot lease and a page
+ * force-reloaded into the same wedge.
+ */
+describe("ConnectResync settle deadline", () => {
+  /** A trigger with one resync dispatched whose promise never settles. */
+  function stuck(): Harness {
+    const h = harness(() => new Promise<void>(() => {}));
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 4194));
+    return h;
+  }
+
+  it("discharges a flight whose ack never arrives", () => {
+    // Arrange
+    const h = stuck();
+    // Act
+    h.fireDeadline();
+    // Assert
+    expect(h.trigger.isInFlight).toBe(false);
+  });
+
+  it("lets the next want-resync go out instead of coalescing forever", () => {
+    // Arrange — the recovery heartbeat's want-resync, which used to be
+    // swallowed for the life of the connection.
+    const h = stuck();
+    h.fireDeadline();
+    // Act — past the backoff the discharge charged.
+    h.advance(RESYNC_BACKOFF_MAX_MS);
+    h.trigger.observe(false, snapshot("/ws", 4194));
+    // Assert
+    expect(h.sent).toHaveLength(2);
+  });
+
+  it("reports the discharge at error level, naming the request it dropped", () => {
+    // Arrange
+    const h = stuck();
+    // Act
+    h.fireDeadline();
+    // Assert
+    expect(
+      h.logs.filter(
+        ([level, message]) =>
+          level === "error" && message.includes("unsettled after") && message.includes("from_seq=4194"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("charges the discharge to the backoff, so a mute daemon is asked less often", () => {
+    // Arrange
+    const h = stuck();
+    // Act
+    h.fireDeadline();
+    h.trigger.observe(false, snapshot("/ws", 4194));
+    // Assert — the immediate retry is deferred, not dispatched.
+    expect(h.sent).toHaveLength(1);
+  });
+
+  it("reaches the give-up ceiling, which is the loud end of the loop", async () => {
+    // Arrange — a daemon that never answers must end at the banner rather than
+    // at an unbounded run of discharges.
+    const givenUp: Array<[number, string]> = [];
+    const h = harness(() => new Promise<void>(() => {}), (failures, cause) => givenUp.push([failures, cause]));
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 4194));
+    // Act
+    for (let i = 0; i < RESYNC_FAILURE_CEILING; i++) {
+      h.fireDeadline();
+      h.advance(RESYNC_BACKOFF_MAX_MS);
+      h.trigger.observe(false, snapshot("/ws", 4194));
+    }
+    // Assert
+    expect(givenUp).toHaveLength(1);
+    expect(givenUp[0][1]).toContain("settle_deadline_exceeded");
+  });
+
+  it("does not fire once the flight settled normally", async () => {
+    // Arrange — an acked resync must leave no armed deadline behind to charge
+    // a failure to the request that follows it.
+    const h = harness();
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 4194));
+    await flush();
+    // Act + Assert
+    expect(h.fireDeadline()).toBe(false);
+  });
+});
+
+describe("a settle that arrives after its flight was discharged", () => {
+  /** A resync the test settles by hand, after its deadline has already run. */
+  function lateHarness(): { h: Harness; ack: () => void } {
+    let ack = (): void => {};
+    const h = harness(() => new Promise<void>((resolve) => {
+      ack = resolve;
+    }));
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 4194));
+    h.fireDeadline();
+    return { h, ack };
+  }
+
+  it("is ignored rather than applied to whatever is in flight now", async () => {
+    // Arrange — the discharged request is still on the wire; nothing cancels it.
+    const { h, ack } = lateHarness();
+    h.advance(RESYNC_BACKOFF_MAX_MS);
+    h.trigger.observe(false, snapshot("/ws", 4194));
+    // Act — the ORIGINAL request finally acks, mid-flight of its successor.
+    ack();
+    await flush();
+    // Assert — the successor still owns the flight it is in.
+    expect(h.trigger.isInFlight).toBe(true);
+  });
+
+  it("is counted, because it is the evidence the deadline is what the page waits past", async () => {
+    // Arrange
+    const { h, ack } = lateHarness();
+    // Act
+    ack();
+    await flush();
+    // Assert
+    expect(h.trigger.lateSettleCount).toBe(1);
+  });
+
+  it("is reported once, with the running count", async () => {
+    // Arrange
+    const { h, ack } = lateHarness();
+    // Act
+    ack();
+    await flush();
+    // Assert
+    expect(
+      h.logs.filter(([level, message]) => level === "warn" && message.includes("late_settles=1")),
+    ).toHaveLength(1);
   });
 });

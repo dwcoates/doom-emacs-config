@@ -52,6 +52,12 @@
  * no history to recover.
  */
 
+// The snapshot LEASE is the clock the settle deadline below must fit inside,
+// so the deadline is derived from it rather than from a second number that
+// would drift out of relation with it. `ws.ts` imports nothing from here, so
+// this direction carries no cycle.
+import { DEFAULT_SNAPSHOT_TIMEOUT_MS } from "./ws.js";
+
 /** How this module reports itself; mirrors the app's client-log levels. */
 export type ConnectResyncLogLevel = "info" | "warn" | "error";
 
@@ -77,6 +83,41 @@ export const RESYNC_BACKOFF_BASE_MS = 2_000;
 
 /** Ceiling on the retry delay: a page far behind still rejoins within a minute. */
 export const RESYNC_BACKOFF_MAX_MS = 60_000;
+
+/**
+ * How long ONE in-flight resync may go unsettled before it is discharged as a
+ * failure.
+ *
+ * THE WEDGE THIS ENDS, observed live (workspace marcos-pr-remediation, daemon
+ * pid 36279): a resync was dispatched over a healthy socket and its ack never
+ * came back. `inFlight` is cleared only by a settle or by a socket event, so
+ * with the socket staying up the flag stayed true forever; every subsequent
+ * want-resync — the recovery heartbeat fires one every few seconds — coalesced
+ * into a settle that was never going to happen. No resync went out, so no
+ * `StateSnapshot` came back, so the ws snapshot lease renewed by adoption
+ * (ws.ts) expired twice with nothing adopted between, and version-skew.ts read
+ * that as a stale bundle and reloaded the page. The reloaded page repeated it.
+ * The single-in-flight rule is right; a flight with no deadline is not.
+ *
+ * DERIVED from the lease it must fit inside, never restated as a literal. The
+ * discharge is worth nothing unless the retry it re-arms can still get a
+ * snapshot adopted before the lease expires, so the deadline plus one backoff
+ * plus a round trip has to fit in `DEFAULT_SNAPSHOT_TIMEOUT_MS`. A third of the
+ * lease leaves two thirds for exactly that.
+ */
+export const RESYNC_SETTLE_DEADLINE_MS = Math.floor(DEFAULT_SNAPSHOT_TIMEOUT_MS / 3);
+
+/** Minimal timer surface, injectable so tests drive the deadline themselves. */
+export interface ResyncTimerHost {
+  setTimeout: (callback: () => void, ms: number) => number;
+  clearTimeout: (handle: number) => void;
+}
+
+/** The ambient timers, used when a caller injects none. */
+const AMBIENT_TIMERS: ResyncTimerHost = {
+  setTimeout: (callback, ms) => setTimeout(callback, ms) as unknown as number,
+  clearTimeout: (handle) => clearTimeout(handle),
+};
 
 /**
  * Consecutive failures after which this page stops asking and SAYS SO.
@@ -133,6 +174,13 @@ export interface ConnectResyncOptions {
    * generation the refusal just rejected.
    */
   adoptIdentity?: (rejection: string) => ResyncSnapshot | null;
+  /**
+   * Timers the settle deadline runs on. Injected so tests advance the clock
+   * themselves rather than waiting out a real lease.
+   */
+  timers?: ResyncTimerHost;
+  /** Deadline for one in-flight resync; defaults to RESYNC_SETTLE_DEADLINE_MS. */
+  settleDeadlineMs?: number;
 }
 
 /**
@@ -165,6 +213,21 @@ export class ConnectResync {
    * so a second one asks for work the first is already doing.
    */
   private inFlight = false;
+  /**
+   * Identifies the CURRENT flight, so a settle can be attributed to the flight
+   * that produced it.
+   *
+   * A resync discharged by its deadline (or by a socket event) may still have
+   * its promise resolve or reject later — nothing cancels a dispatch already
+   * on the wire. Applying that late settle would clear an `inFlight` that
+   * belongs to a DIFFERENT request, or charge a failure to it, so the token is
+   * compared first and a stale settle is counted and dropped instead.
+   */
+  private flightToken = 0;
+  /** Handle of the current flight's deadline timer, or null when none is armed. */
+  private deadlineTimer: number | null = null;
+  /** Settles that arrived for an already-discharged flight; reported once. */
+  private lateSettles = 0;
   /** A want-resync arrived while one was in flight or while backing off. */
   private dirty = false;
   /**
@@ -200,6 +263,11 @@ export class ConnectResync {
   /** Whether a sent resync has yet to ack or fail. */
   get isInFlight(): boolean {
     return this.inFlight;
+  }
+
+  /** Settles that arrived after their flight was discharged by its deadline. */
+  get lateSettleCount(): number {
+    return this.lateSettles;
   }
 
   /**
@@ -392,6 +460,10 @@ export class ConnectResync {
     this.armed = true;
     this.snapshotSeen = false;
     this.flushSuppressed("socket_reconnected");
+    // The dead socket's flight is dropped, so its eventual settle must not be
+    // applied to this connection's request: retire the token with it.
+    this.clearDeadline();
+    this.flightToken++;
     this.inFlight = false;
     this.dirty = false;
     this.failures = 0;
@@ -410,6 +482,8 @@ export class ConnectResync {
     // it in flight would make the NEXT connection's resync coalesce into a
     // settle that never comes.
     this.flushSuppressed("socket_lost");
+    this.clearDeadline();
+    this.flightToken++;
     this.inFlight = false;
   }
 
@@ -479,10 +553,79 @@ export class ConnectResync {
    */
   private send(snapshot: ResyncSnapshot, isRetry: boolean): void {
     this.inFlight = true;
+    const token = ++this.flightToken;
+    this.armDeadline(token, snapshot);
     this.opts.resync(snapshot).then(
-      () => this.settleAcked(),
-      (err: unknown) => this.settleRejected(snapshot, isRetry, err),
+      () => {
+        if (!this.claimSettle(token, "acked")) return;
+        this.settleAcked();
+      },
+      (err: unknown) => {
+        if (!this.claimSettle(token, "rejected")) return;
+        this.settleRejected(snapshot, isRetry, err);
+      },
     );
+  }
+
+  /** The deadline this instance runs its flights on. */
+  private settleDeadlineMs(): number {
+    return this.opts.settleDeadlineMs ?? RESYNC_SETTLE_DEADLINE_MS;
+  }
+
+  /**
+   * Arm the deadline for the flight TOKEN identifies.
+   *
+   * The timeout is the ONLY thing that can discharge a flight over a socket
+   * that stays up, which is exactly the wedge observed in production: without
+   * it, an ack that never comes blocks every later resync for the life of the
+   * connection.
+   */
+  private armDeadline(token: number, snapshot: ResyncSnapshot): void {
+    const timers = this.opts.timers ?? AMBIENT_TIMERS;
+    const deadlineMs = this.settleDeadlineMs();
+    this.clearDeadline();
+    this.deadlineTimer = timers.setTimeout(() => {
+      this.deadlineTimer = null;
+      // Another flight has since taken over (a retry, a reconnect): that one
+      // owns the bound now, and discharging it here would double-charge.
+      if (token !== this.flightToken || !this.inFlight) return;
+      // Retire the token so the original dispatch's eventual settle is
+      // recognized as late rather than applied to whatever runs next.
+      this.flightToken++;
+      this.opts.log?.(
+        "error",
+        `resync: request unsettled after ${deadlineMs}ms ws=${snapshot.workspace} ` +
+          `fence=${snapshot.fence || "none"} from_seq=${snapshot.fromSeq} decision=discharged; ` +
+          `holding it in flight would block every later resync on this socket`,
+      );
+      this.settleFailed(`settle_deadline_exceeded_after_${deadlineMs}ms`);
+    }, deadlineMs);
+  }
+
+  private clearDeadline(): void {
+    if (this.deadlineTimer === null) return;
+    (this.opts.timers ?? AMBIENT_TIMERS).clearTimeout(this.deadlineTimer);
+    this.deadlineTimer = null;
+  }
+
+  /**
+   * Whether a settle for TOKEN may be applied, clearing the deadline when it
+   * may. A settle for a discharged flight is COUNTED, not silently dropped:
+   * the count is the evidence that the daemon does answer eventually and the
+   * deadline is what the page is really waiting past.
+   */
+  private claimSettle(token: number, outcome: string): boolean {
+    if (token === this.flightToken) {
+      this.clearDeadline();
+      return true;
+    }
+    this.lateSettles += 1;
+    this.opts.log?.(
+      "warn",
+      `resync: ${outcome} settle arrived for a flight already discharged by its deadline ` +
+        `late_settles=${this.lateSettles} decision=ignored`,
+    );
+    return false;
   }
 
   /**
