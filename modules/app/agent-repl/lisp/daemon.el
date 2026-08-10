@@ -517,153 +517,187 @@ themselves (notably `agent-repl-runtime-restart', which kickstarts the
 services in elisp and would otherwise do it twice)."
   (agent-repl--frontend-build-targets-if-stale nil force))
 
-;;;; ---- Build-if-stale, asynchronously -----------------------------------
+;;;; ---- Script runs, asynchronously --------------------------------------
 ;;
-;; The blocking run above is right for boot, where nothing can proceed until
-;; the artifacts exist.  It is wrong for an interactive verb that only wants
-;; a REDEPLOY afterwards (`agent-repl-restart-session' rebuilding the webapp
-;; while the shim restart flies in parallel): a `call-process' there freezes
-;; Emacs for the whole npm build.
+;; The blocking runs above freeze Emacs for the whole of an npm build or a
+;; whole-stack deploy.  That is wrong everywhere it is reachable from a
+;; user action: an interactive verb that only wants a REDEPLOY afterwards
+;; (`agent-repl-restart-session' rebuilding the webapp while the shim
+;; restart flies in parallel), and — the expensive one — the lazy daemon
+;; ensure on the panel-open path, where a `call-process' stalls the main
+;; thread long enough to starve the 1Hz heartbeat and the update chain and
+;; to burn the daemon's own command deadlines while nothing can read the
+;; socket.
 ;;
-;; SINGLE-FLIGHT, NEVER STACKED.  At most one build process exists at a time.
-;; A request arriving while one is in flight is QUEUED behind it rather than
-;; joined: the in-flight run may have started before the edit that prompted
-;; the new request, so its result cannot be handed back as if it covered
-;; that edit.  Two pending requests for the same targets coalesce into one
-;; queued run, so N presses of the restart verb cost at most one extra build.
+;; ONE QUEUE FOR EVERY SCRIPT, NOT ONE PER SCRIPT.  The build script and
+;; the deploy script write the SAME artifacts and share the SAME capture
+;; buffer, so two of them running at once would interleave their output
+;; and race their outputs onto disk.  Routing both through this single
+;; queue makes that overlap unrepresentable rather than unlikely.
+;;
+;; SINGLE-FLIGHT, NEVER STACKED.  At most one script process exists at a
+;; time.  A request arriving while one is in flight is QUEUED behind it
+;; rather than joined: the in-flight run may have started before the edit
+;; that prompted the new request, so its result cannot be handed back as
+;; if it covered that edit.  Two pending requests with identical argv
+;; coalesce into one queued run, so N presses of a verb cost at most one
+;; extra run.
 
-(cl-defstruct (agent-repl--frontend-build-request
-               (:constructor agent-repl--make-frontend-build-request)
+(cl-defstruct (agent-repl--frontend-run-request
+               (:constructor agent-repl--make-frontend-run-request)
                (:copier nil))
-  "One asynchronous build run: what to build and who is waiting on it.
+  "One asynchronous script run: what to run, how to report it, who waits.
+
+ARGS is the full argument list following the shell interpreter, and is
+the run's IDENTITY: two requests with `equal' ARGS ask for the same work
+and coalesce.
+
+PHASE-START, SUCCESS-PHRASE, FAILURE-PHASE-SUBJECT and
+FAILURE-ERROR-SUBJECT are the already-resolved strings this run reports
+itself with, so the queue never has to know which script it is driving.
+LOG-OUTCOME is a function of (EXIT-CODE OUTPUT) writing the run's durable
+record before success or failure is decided.
+
 CALLBACKS is a list of (ON-SUCCESS . ON-FAILURE) conses, oldest first;
 either half may be nil.  STARTED is the `float-time' the process was
 spawned, filled in at spawn rather than at request time so a queued
 request reports its own duration."
-  targets force callbacks started)
+  args phase-start success-phrase failure-phase-subject failure-error-subject
+  log-outcome callbacks started)
 
-(defvar agent-repl--frontend-async-build-process nil
-  "The live asynchronous build process, or nil when none is running.")
+(defvar agent-repl--frontend-async-run-process nil
+  "The live asynchronous script process, or nil when none is running.")
 
-(defvar agent-repl--frontend-async-build-request nil
-  "The `agent-repl--frontend-build-request' currently in flight, or nil.")
+(defvar agent-repl--frontend-async-run-request nil
+  "The `agent-repl--frontend-run-request' currently in flight, or nil.")
 
-(defvar agent-repl--frontend-async-build-queue nil
-  "Requests waiting for the in-flight asynchronous build to settle.
+(defvar agent-repl--frontend-async-run-queue nil
+  "Requests waiting for the in-flight asynchronous script run to settle.
 Oldest first.  Drained one at a time, so the invariant that exactly one
-build process exists holds across the whole queue.")
+script process exists holds across the whole queue.")
 
-(defun agent-repl--frontend-async-build-in-flight-p ()
-  "Return non-nil while an asynchronous build process is running."
-  (and agent-repl--frontend-async-build-process
-       (process-live-p agent-repl--frontend-async-build-process)))
+(defun agent-repl--frontend-async-run-in-flight-p ()
+  "Return non-nil while an asynchronous script process is running."
+  (and agent-repl--frontend-async-run-process
+       (process-live-p agent-repl--frontend-async-run-process)))
 
-(defun agent-repl--frontend-spawn-build-script (args)
+(defun agent-repl--frontend-spawn-run-script (args)
   "External-boundary wrapper: spawn the build shell with ARGS asynchronously.
-Output is captured into `agent-repl--frontend-build-buffer' and the exit
-is delivered to `agent-repl--frontend-async-build-sentinel'.  Body does
-nothing but invoke the external process so tests mock it via `cl-letf';
-registered in `agent-repl--external-boundary-functions'."
+ARGS is the full argument list following the shell, so the SAME wrapper
+spawns the build script and the deploy script.  Output is captured into
+`agent-repl--frontend-build-buffer' and the exit is delivered to
+`agent-repl--frontend-async-run-sentinel'.  Body does nothing but invoke
+the external process so tests mock it via `cl-letf'; registered in
+`agent-repl--external-boundary-functions'."
   (make-process ;; ALLOW-EXTERNAL-BOUNDARY
-   :name "agent-repl-build-frontend"
+   :name "agent-repl-run-frontend-script"
    :buffer agent-repl--frontend-build-buffer
    :command (cons agent-repl-frontend-build-shell args)
    :noquery t
    :connection-type 'pipe
-   :sentinel #'agent-repl--frontend-async-build-sentinel))
+   :sentinel #'agent-repl--frontend-async-run-sentinel))
 
-(defun agent-repl--frontend-async-build-start (request)
-  "Spawn the build process for REQUEST and track it as the in-flight run."
-  (let* ((targets (agent-repl--frontend-build-request-targets request))
-         (force (agent-repl--frontend-build-request-force request))
-         (label (agent-repl--frontend-build-label targets))
-         (args (agent-repl--frontend-build-args targets force)))
-    (agent-repl--frontend-build-reset-capture)
-    (setf (agent-repl--frontend-build-request-started request) (float-time))
-    (agent-repl--log nil "frontend build-async: start targets=%S force=%s script=%s"
-                     (or targets 'default) (if force "t" "nil")
-                     agent-repl--frontend-build-script)
-    (agent-repl--backend-phase nil "rebuilding %s if stale…" label)
-    (setq agent-repl--frontend-async-build-request request
-          agent-repl--frontend-async-build-process
-          (agent-repl--frontend-spawn-build-script args))))
+(defun agent-repl--frontend-async-run-start (request)
+  "Spawn the script process for REQUEST and track it as the in-flight run."
+  (agent-repl--frontend-build-reset-capture)
+  (setf (agent-repl--frontend-run-request-started request) (float-time))
+  (agent-repl--log nil "frontend run-async: start args=%S"
+                   (agent-repl--frontend-run-request-args request))
+  (agent-repl--backend-phase
+   nil "%s" (agent-repl--frontend-run-request-phase-start request))
+  (setq agent-repl--frontend-async-run-request request
+        agent-repl--frontend-async-run-process
+        (agent-repl--frontend-spawn-run-script
+         (agent-repl--frontend-run-request-args request))))
 
-(defun agent-repl--frontend-async-build-enqueue (targets force callback)
-  "Park CALLBACK behind the in-flight build as a run of TARGETS with FORCE.
-Returns `coalesced' when an identical request was already queued and
-absorbed CALLBACK, `queued' when a fresh entry was added."
-  (let ((pending
-         (cl-find-if
-          (lambda (r)
-            (and (equal (agent-repl--frontend-build-request-targets r) targets)
-                 (eq (not (agent-repl--frontend-build-request-force r))
-                     (not force))))
-          agent-repl--frontend-async-build-queue)))
+(defun agent-repl--frontend-async-run-enqueue (request)
+  "Park REQUEST behind the in-flight script run.
+Returns `coalesced' when a queued request already asks for the identical
+argv and absorbed REQUEST's callbacks, `queued' when a fresh entry was
+added."
+  (let* ((args (agent-repl--frontend-run-request-args request))
+         (pending (cl-find-if
+                   (lambda (r) (equal (agent-repl--frontend-run-request-args r) args))
+                   agent-repl--frontend-async-run-queue)))
     (if pending
         (progn
-          (setf (agent-repl--frontend-build-request-callbacks pending)
-                (append (agent-repl--frontend-build-request-callbacks pending)
-                        (list callback)))
+          (setf (agent-repl--frontend-run-request-callbacks pending)
+                (append (agent-repl--frontend-run-request-callbacks pending)
+                        (agent-repl--frontend-run-request-callbacks request)))
           (agent-repl--log nil
-                           "frontend build-async: build in flight; coalesced into the queued run targets=%S force=%s"
-                           (or targets 'default) (if force "t" "nil"))
+                           "frontend run-async: run in flight; coalesced into the queued run args=%S"
+                           args)
           'coalesced)
-      (setq agent-repl--frontend-async-build-queue
-            (append agent-repl--frontend-async-build-queue
-                    (list (agent-repl--make-frontend-build-request
-                           :targets targets :force force
-                           :callbacks (list callback)))))
+      (setq agent-repl--frontend-async-run-queue
+            (append agent-repl--frontend-async-run-queue (list request)))
       (agent-repl--log nil
-                       "frontend build-async: build in flight; queued behind it rather than stacking a second targets=%S force=%s queue-depth=%d"
-                       (or targets 'default) (if force "t" "nil")
-                       (length agent-repl--frontend-async-build-queue))
+                       "frontend run-async: run in flight; queued behind it rather than stacking a second args=%S queue-depth=%d"
+                       args (length agent-repl--frontend-async-run-queue))
       'queued)))
 
-(defun agent-repl--frontend-async-build-drain ()
-  "Start the next queued build, if any, now that the in-flight one settled."
-  (let ((next (pop agent-repl--frontend-async-build-queue)))
+(defun agent-repl--frontend-async-run-drain ()
+  "Start the next queued run, if any, now that the in-flight one settled."
+  (let ((next (pop agent-repl--frontend-async-run-queue)))
     (when next
-      (agent-repl--log nil "frontend build-async: dequeued targets=%S remaining=%d"
-                       (or (agent-repl--frontend-build-request-targets next) 'default)
-                       (length agent-repl--frontend-async-build-queue))
-      (agent-repl--frontend-async-build-start next))))
+      (agent-repl--log nil "frontend run-async: dequeued args=%S remaining=%d"
+                       (agent-repl--frontend-run-request-args next)
+                       (length agent-repl--frontend-async-run-queue))
+      (agent-repl--frontend-async-run-start next))))
 
-(defun agent-repl--frontend-async-build-settle (exit-code)
-  "Report the in-flight build's EXIT-CODE, run its callbacks, drain the queue.
+(defun agent-repl--frontend-async-run-settle (exit-code)
+  "Report the in-flight run's EXIT-CODE, run its callbacks, drain the queue.
 Signals when no request is in flight: the sentinel only ever fires for a
 process this module spawned and tracked, so a settle with nothing tracked
-is a broken invariant rather than a condition to cope with."
-  (let ((request agent-repl--frontend-async-build-request))
+is a broken invariant rather than a condition to cope with.
+
+The transfer of the in-flight request out of the module's state runs with
+quit inhibited: a `C-g' landing between reading the request and clearing
+the two variables would leave a settled process tracked as live and every
+queued run parked behind it forever."
+  (let ((request agent-repl--frontend-async-run-request))
     (unless request
-      (error "agent-repl: asynchronous build settled with no request in flight"))
-    (setq agent-repl--frontend-async-build-request nil
-          agent-repl--frontend-async-build-process nil)
-    (let* ((targets (agent-repl--frontend-build-request-targets request))
-           (force (agent-repl--frontend-build-request-force request))
-           (label (agent-repl--frontend-build-label targets))
-           (callbacks (agent-repl--frontend-build-request-callbacks request))
-           (output (agent-repl--frontend-build-captured-output)))
-      (agent-repl--frontend-build-log-outcome targets force exit-code output)
+      (error "agent-repl: asynchronous script run settled with no request in flight"))
+    (let ((inhibit-quit t))
+      (setq agent-repl--frontend-async-run-request nil
+            agent-repl--frontend-async-run-process nil))
+    (let ((callbacks (agent-repl--frontend-run-request-callbacks request))
+          (output (agent-repl--frontend-build-captured-output)))
+      (funcall (agent-repl--frontend-run-request-log-outcome request)
+               exit-code output)
       ;; The queue is drained even when a continuation throws, so one bad
-      ;; waiter cannot strand every build behind it.
+      ;; waiter cannot strand every run behind it.
       (unwind-protect
           (if (eq exit-code 0)
               (progn
-                (agent-repl--frontend-build-report-success
-                 label (agent-repl--frontend-build-request-started request))
+                (agent-repl--frontend-run-report-success
+                 (agent-repl--frontend-run-request-success-phrase request)
+                 (agent-repl--frontend-run-request-started request))
                 (dolist (cb callbacks)
                   (when (car cb) (funcall (car cb)))))
-            (let ((detail (agent-repl--frontend-build-report-failure
-                           label exit-code output)))
-              (agent-repl--warn nil "frontend build-async: %s" detail)
+            (let ((detail (agent-repl--frontend-run-report-failure
+                           (agent-repl--frontend-run-request-failure-phase-subject request)
+                           (agent-repl--frontend-run-request-failure-error-subject request)
+                           exit-code output)))
+              (agent-repl--warn nil "frontend run-async: %s" detail)
               (dolist (cb callbacks)
                 (when (cdr cb) (funcall (cdr cb) detail)))))
-        (agent-repl--frontend-async-build-drain)))))
+        (agent-repl--frontend-async-run-drain)))))
 
-(defun agent-repl--frontend-async-build-sentinel (proc _event)
-  "Deliver PROC's exit status to the asynchronous build settle path."
+(defun agent-repl--frontend-async-run-sentinel (proc _event)
+  "Deliver PROC's exit status to the asynchronous script settle path."
   (unless (process-live-p proc)
-    (agent-repl--frontend-async-build-settle (process-exit-status proc))))
+    (agent-repl--frontend-async-run-settle (process-exit-status proc))))
+
+(defun agent-repl--frontend-run-script-async (request)
+  "Run REQUEST's script in the background, without blocking the main thread.
+Returns `started' when REQUEST spawned the process, `queued' when a run
+was already in flight and REQUEST was parked behind it, or `coalesced'
+when a queued request already asked for the identical argv and absorbed
+REQUEST's callbacks.  A second process is never stacked on the first."
+  (if (agent-repl--frontend-async-run-in-flight-p)
+      (agent-repl--frontend-async-run-enqueue request)
+    (agent-repl--frontend-async-run-start request)
+    'started))
 
 (defun agent-repl--frontend-build-targets-async (targets &optional force on-success on-failure)
   "Build stale TARGETS in the background, without blocking the main thread.
@@ -677,61 +711,93 @@ Signals immediately when the build script is missing — that is the
 caller's own broken installation, not an outcome to deliver to a
 continuation.
 
-Returns `started' when this request spawned the process, `queued' when a
-build was already in flight and this one was parked behind it, or
-`coalesced' when an identical request was already parked and absorbed
-these continuations.  A second build is never stacked on the first."
+Returns `started', `queued' or `coalesced' per
+`agent-repl--frontend-run-script-async'."
   (agent-repl--frontend-build-assert-script)
-  (let ((callback (cons on-success on-failure)))
-    (if (agent-repl--frontend-async-build-in-flight-p)
-        (agent-repl--frontend-async-build-enqueue targets force callback)
-      (agent-repl--frontend-async-build-start
-       (agent-repl--make-frontend-build-request
-        :targets targets :force force :callbacks (list callback)))
-      'started)))
+  (let ((label (agent-repl--frontend-build-label targets)))
+    (agent-repl--frontend-run-script-async
+     (agent-repl--make-frontend-run-request
+      :args (agent-repl--frontend-build-args targets force)
+      :phase-start (format "rebuilding %s if stale…" label)
+      :success-phrase (format "%s built" label)
+      :failure-phase-subject (format "%s build" label)
+      :failure-error-subject "frontend build"
+      :log-outcome (lambda (exit-code output)
+                     (agent-repl--frontend-build-log-outcome
+                      targets force exit-code output))
+      :callbacks (list (cons on-success on-failure))))))
 
-(defun agent-repl--frontend-deploy-stack (&optional force)
-  "Build and deploy the WHOLE agent-repl stack; signal loudly on failure.
+(defun agent-repl--frontend-deploy-assert-script ()
+  "Signal unless the whole-stack deploy script is present on disk."
+  (unless (file-exists-p agent-repl--frontend-deploy-script)
+    (agent-repl--log nil "frontend deploy-stack: script missing path=%s"
+                     agent-repl--frontend-deploy-script)
+    (error "agent-repl: deploy script not found: %s"
+           agent-repl--frontend-deploy-script)))
+
+(defun agent-repl--frontend-deploy-args (force)
+  "Return the argv following the shell for a whole-stack deploy.
+
+`--no-daemon-bounce' is not an optimization.  The script\='s last step
+restarts the daemon by evaluating a form in Emacs over emacsclient, so a
+call made FROM Emacs would re-enter the very session that is mid-boot.
+The caller starts the daemon itself once the deploy settles, which is
+what that step would have been asking for anyway."
+  (append (list agent-repl--frontend-deploy-script "--no-daemon-bounce")
+          (when force (list "--force"))))
+
+(defun agent-repl--frontend-deploy-log-outcome (force exit-code output)
+  "Copy a settled deploy's FORCE, EXIT-CODE and OUTPUT to the durable log."
+  (agent-repl--log nil "frontend deploy-stack: force=%s exit=%S output=%s"
+                   (if force "t" "nil") exit-code
+                   (if (string-empty-p output) "<empty>" output)))
+
+(defun agent-repl--frontend-deploy-stack-async (&optional force on-success on-failure)
+  "Deploy the WHOLE agent-repl stack in the background, then continue.
 Runs `bin/deploy-all.sh --no-daemon-bounce': protobuf regeneration, the
 shim/webapp/daemon build, a forced daemon rebuild (proto codegen lands
 outside `daemon/', where its staleness check cannot see it), and the
 shim-store and sidecar binaries with a launchd kickstart for whichever of
 them is not already running its installed build.
 
-`--no-daemon-bounce' is not an optimization.  The script\='s last step
-restarts the daemon by evaluating a form in Emacs over emacsclient, so a
-call made FROM Emacs would re-enter the very session that is mid-boot.
-The caller starts the daemon directly once this returns, which is what
-that step would have been asking for anyway.
+ON-SUCCESS is called with no arguments once the deploy exits zero;
+ON-FAILURE is called with the failure detail string otherwise, after the
+failure has already been logged, phase-lined and warned about.
+
+THERE IS NO BLOCKING DEPLOY.  This runs on the lazy panel-open path, and
+a `call-process' there held the main thread for the whole npm/Go build:
+the 1Hz heartbeat and the workspace update chain stopped ticking, the UDS
+socket went unread, and the daemon\='s own command deadlines expired
+against an Emacs that could not answer.  Every one of those is a
+consequence of WAITING rather than of the deploy itself, so the wait is
+gone rather than shortened.
+
+Signals immediately when the deploy script is missing — that is the
+caller\='s own broken installation, not an outcome to deliver to a
+continuation.
 
 WHY THIS IS ON THE BOOT PATH.  It used to be `build-frontend.sh', which
 left two gaps: a proto change reached neither the regenerated Go nor a
 daemon rebuilt against it, and the two launchd services were only ever
 deployed by the interactive `agent-repl-runtime-restart'.  A wire-format
 change could therefore leave a new Emacs talking to a daemon built before
-it, which fails every command rather than degrading."
+it, which fails every command rather than degrading.
+
+Returns `started', `queued' or `coalesced' per
+`agent-repl--frontend-run-script-async'."
   (agent-repl--log nil "frontend deploy-stack: requested force=%s script=%s"
                    (if force "t" "nil") agent-repl--frontend-deploy-script)
-  (unless (file-exists-p agent-repl--frontend-deploy-script)
-    (agent-repl--log nil "frontend deploy-stack: script missing path=%s"
-                     agent-repl--frontend-deploy-script)
-    (error "agent-repl: deploy script not found: %s"
-           agent-repl--frontend-deploy-script))
-  (agent-repl--frontend-build-reset-capture)
-  (let* ((started (float-time))
-         (args (append (list agent-repl--frontend-deploy-script "--no-daemon-bounce")
-                       (when force (list "--force")))))
-    (agent-repl--backend-phase nil "deploying the backend stack…")
-    (let* ((exit-code (agent-repl--frontend-run-build-script args))
-           (output (agent-repl--frontend-build-captured-output)))
-      (agent-repl--log nil "frontend deploy-stack: force=%s exit=%S output=%s"
-                       (if force "t" "nil") exit-code
-                       (if (string-empty-p output) "<empty>" output))
-      (unless (eq exit-code 0)
-        (error "%s" (agent-repl--frontend-run-report-failure
-                     "stack deploy" "stack deploy" exit-code output)))
-      (agent-repl--frontend-run-report-success "backend stack deployed" started)
-      exit-code)))
+  (agent-repl--frontend-deploy-assert-script)
+  (agent-repl--frontend-run-script-async
+   (agent-repl--make-frontend-run-request
+    :args (agent-repl--frontend-deploy-args force)
+    :phase-start "deploying the backend stack…"
+    :success-phrase "backend stack deployed"
+    :failure-phase-subject "stack deploy"
+    :failure-error-subject "stack deploy"
+    :log-outcome (lambda (exit-code output)
+                   (agent-repl--frontend-deploy-log-outcome force exit-code output))
+    :callbacks (list (cons on-success on-failure)))))
 
 ;;;; ---- Launch -----------------------------------------------------------
 
@@ -1724,21 +1790,46 @@ a port nothing can use."
    "incompatible-daemon-term")
   :pending)
 
-(defun agent-repl--ensure-frontend-daemon (&optional force)
+(defconst agent-repl--frontend-daemon-not-started-detail
+  "frontend daemon not started (auto-start disabled or init inhibited)"
+  "The failure detail every caller reports when the daemon ensure declines.
+`agent-repl--ensure-frontend-daemon' returns nil without acting when
+auto-start is off or automatic init is inhibited, and each of its callers
+has to say the same thing about it — so it is said once, here.")
+
+(defun agent-repl--ensure-frontend-daemon (&optional force on-ensured on-failure)
   "Ensure frontend daemon startup has been requested; return its state.
 Idempotent: returns the live process immediately when one exists (unless
 FORCE).  A daemon already answering on the port that this Emacs does
 NOT track is ADOPTED asynchronously: spawning next to it would only
-bind-fail and die — the orphan-daemon failure mode.  Otherwise builds
-any stale artifact and launches `claude-repld'.  FORCE skips adoption:
-an explicit restart wants a fresh process (a foreign daemon cannot be
-stopped from here — only its owner can).  Returns nil without acting
-when `agent-repl-frontend-auto-start' is nil or automatic init is
+bind-fail and die — the orphan-daemon failure mode.  Otherwise deploys
+the stack asynchronously and launches `claude-repld'.  FORCE skips
+adoption: an explicit restart wants a fresh process (a foreign daemon
+cannot be stopped from here — only its owner can).  Returns nil without
+acting when `agent-repl-frontend-auto-start' is nil or automatic init is
 inhibited (batch).  The post-snapshot startup coordinator in
 services.el owns the once-per-Emacs full-runtime bounce; this function
 remains the cheap idempotent session-open ensure.  Every probe or lifecycle
-transition returns `:pending' immediately and completes from its callback."
-  (let ((inhibited (agent-repl--frontend-init-inhibited-p)))
+transition returns `:pending' immediately and completes from its callback.
+
+ON-ENSURED and ON-FAILURE are optional continuations, and exactly one of
+them runs whenever either is supplied.  ON-ENSURED runs once the daemon
+this call is responsible for is RUNNING — immediately for a reused or
+adopted daemon, and after the asynchronous deploy and launch otherwise.
+ON-FAILURE receives a detail string when the ensure declines
+\(`agent-repl--frontend-daemon-not-started-detail') or when the deploy or
+the launch fails.
+
+WAITING FOR THE ENSURE IS THE CALLER\='S ONLY CORRECT MOVE.  Before the
+continuations existed, callers read this function\='s return value as a
+yes/no gate and went straight on to readiness polling — which meant the
+poll budget started burning while the stack was still building, and a
+first open on a cold or stale checkout could exhaust it against a daemon
+that had not been launched yet.  Chaining on ON-ENSURED makes that
+overlap impossible rather than unlikely."
+  (let ((inhibited (agent-repl--frontend-init-inhibited-p))
+        (on-ensured (or on-ensured #'ignore))
+        (on-failure (or on-failure #'ignore)))
     (agent-repl--log nil
                      "ensure-frontend-daemon: force=%s auto-start=%s init-inhibited=%s tracked-live=%s"
                      (if force "t" "nil") agent-repl-frontend-auto-start inhibited
@@ -1746,22 +1837,43 @@ transition returns `:pending' immediately and completes from its callback."
     (cond
    ((not agent-repl-frontend-auto-start)
     (agent-repl--log nil "ensure-frontend-daemon: skipped reason=auto-start-disabled")
+    (funcall on-failure agent-repl--frontend-daemon-not-started-detail)
     nil)
    (inhibited
     (agent-repl--log nil "ensure-frontend-daemon: skipped reason=init-inhibited")
+    (funcall on-failure agent-repl--frontend-daemon-not-started-detail)
     nil)
    (t
     (cond
      ((and (not force) (agent-repl--frontend-daemon-live-p))
       (agent-repl--log nil "ensure-frontend-daemon: reusing tracked pid=%S"
                        (process-id agent-repl--frontend-daemon-process))
+      (funcall on-ensured)
       agent-repl--frontend-daemon-process)
      (t
-      (cl-labels ((build-and-launch ()
+      (cl-labels ((launch ()
+                    ;; The launch runs from a process sentinel, where a
+                    ;; signal has no stack to land on and would be
+                    ;; swallowed as a filter error.  Its failure is routed
+                    ;; to ON-FAILURE instead — surfaced by the caller's own
+                    ;; failure path rather than lost.
+                    (condition-case err
+                        (progn (agent-repl--frontend-start-daemon)
+                               (funcall on-ensured))
+                      (error
+                       (let ((detail (error-message-string err)))
+                         (agent-repl--warn
+                          nil "ensure-frontend-daemon: launch FAILED detail=%s" detail)
+                         (funcall on-failure detail)))))
+                  (build-and-launch ()
                     (agent-repl--log nil "ensure-frontend-daemon: build-and-launch force=%s"
                                      (if force "t" "nil"))
-                    (agent-repl--frontend-deploy-stack force)
-                    (agent-repl--frontend-start-daemon)))
+                    (agent-repl--frontend-deploy-stack-async
+                     force #'launch
+                     (lambda (detail)
+                       (agent-repl--log nil
+                                        "ensure-frontend-daemon: deploy FAILED detail=%s" detail)
+                       (funcall on-failure detail)))))
         (if (and force (agent-repl--frontend-daemon-live-p))
             (progn
               (agent-repl--log nil "ensure-frontend-daemon: force=t; asynchronously stopping tracked daemon before rebuild")
@@ -1770,12 +1882,30 @@ transition returns `:pending' immediately and completes from its callback."
            (lambda ()
              (if force
                  (build-and-launch)
+               ;; An adopted daemon is ALREADY the running daemon this
+               ;; ensure was asked for, so the waiter proceeds now.
                (agent-repl--log nil "ensure-frontend-daemon: adopting foreign daemon on %s"
-                                agent-repl-frontend-daemon-addr)))
+                                agent-repl-frontend-daemon-addr)
+               (funcall on-ensured)))
            (lambda (detail)
              (agent-repl--log nil "ensure-frontend-daemon: no daemon probe-detail=%S; building" detail)
              (build-and-launch))))
         :pending)))))))
+
+(defun agent-repl--frontend-after-daemon-ensured (on-ensured on-failure &optional force)
+  "Run ON-ENSURED once the frontend daemon is running, ON-FAILURE otherwise.
+
+The single door every caller that NEEDS a running daemon goes through, so
+the declined-ensure detail string and the wait-for-the-launch discipline
+are written once rather than re-derived at each call site.  Exactly one
+continuation runs; ON-FAILURE receives a detail string.
+
+Returns whatever `agent-repl--ensure-frontend-daemon' returned — nil when
+the ensure declined, the tracked process when one was reused, `:pending'
+while a deploy or launch is in flight."
+  (unless (and (functionp on-ensured) (functionp on-failure))
+    (error "agent-repl: daemon ensure requires callable continuations"))
+  (agent-repl--ensure-frontend-daemon force on-ensured on-failure))
 
 (defun agent-repl--frontend-stop-daemon (&optional force stop-shims on-stopped)
   "Stop the tracked `claude-repld' process, gracefully first.
