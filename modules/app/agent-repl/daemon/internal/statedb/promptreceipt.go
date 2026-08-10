@@ -3,7 +3,6 @@ package statedb
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 )
 
 // This file is the DURABLE half of the prompt receipt (see the session
@@ -284,7 +283,7 @@ func (s *PromptReceipts) resumptionsInStates(workspace, what string, states ...P
 		`SELECT request_id, workspace, interrupted_turn_id, text, interrupted_at_ms,
 		        resumption_state, delivery_started_at_ms
 		 FROM prompt_receipt
-		 WHERE workspace = ? AND resumption_state IN (`+sqlPlaceholders(len(states))+`)
+		 WHERE workspace = ? AND resumption_state IN (`+Placeholders(len(states))+`)
 		 ORDER BY interrupted_at_ms, request_id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("statedb: read %s resumptions for workspace %q: %w", what, workspace, err)
@@ -305,11 +304,6 @@ func (s *PromptReceipts) resumptionsInStates(workspace, what string, states ...P
 		return nil, fmt.Errorf("statedb: iterate %s resumptions for workspace %q: %w", what, workspace, err)
 	}
 	return out, nil
-}
-
-// sqlPlaceholders renders n comma-separated bind placeholders.
-func sqlPlaceholders(n int) string {
-	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
 // ClaimResumptionForDelivery takes one owed resumption for a re-drive that is
