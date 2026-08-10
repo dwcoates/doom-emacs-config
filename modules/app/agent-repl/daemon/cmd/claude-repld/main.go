@@ -939,7 +939,11 @@ func main() {
 		// explicit create runs — the ungated-consent refusal above all.
 		Creator:    sessionCommands,
 		ConfigDirs: knownConfigDirs(accounts),
-		Logf:       legacyLog,
+		// The open command acks ACCEPTANCE, not completion (openbringup.go), so
+		// the bring-up's own failures need a surface that is not the ack. This
+		// is it: the controller pushes them as failure cards.
+		Failures: controller,
+		Logf:     legacyLog,
 	}
 	opener.BindAll()
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
