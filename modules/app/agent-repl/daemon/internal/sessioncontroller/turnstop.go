@@ -140,7 +140,8 @@ type turnInterrupter interface {
 // proceeds and `stopShimSettlingTurn` closes the axis. Nothing is returned
 // because there is nothing a caller could decide differently — a teardown that
 // could not interrupt still tears down — and each is logged where it happens.
-func (m *Manager) drainLiveTurnForStop(workspace, sessionID, path string, cl turnInterrupter) {
+func (m *Manager) drainLiveTurnForStop(workspace, sessionID string, cause StopCause, turnID string, cl turnInterrupter) {
+	path := cause.path()
 	m.logf("session-controller: teardown turn drain ENTRY ws=%q session=%s path=%s client_present=%v",
 		workspace, sessionID, path, cl != nil)
 	if cl == nil {
@@ -170,6 +171,11 @@ func (m *Manager) drainLiveTurnForStop(workspace, sessionID, path string, cl tur
 		m.logf("session-controller: teardown turn drain INTERRUPTING ws=%q session=%s path=%s state=%s — the shim is about to be stopped over a live turn, and its own interrupt is the only way that turn's end gets reported honestly",
 			workspace, sessionID, path, st.GetState())
 	}
+	// BEFORE the interrupt, never after. An interrupt delivered without this
+	// record is a turn nobody will ever pick up, and the window between the two
+	// is a window in which a crash loses the user's work — so the durable
+	// record is what the interrupt is allowed to proceed FROM.
+	m.recordInterruptedTurnResumption(workspace, sessionID, cause, turnID)
 	// Deliberately NOT the manager's root context. A daemon shutdown cancels
 	// that root, and the shutdown teardown is exactly the one whose turns most
 	// need stopping; inheriting it would make the interrupt a guaranteed no-op
@@ -238,7 +244,7 @@ func (m *Manager) releaseHeldTerminalResults(d *sessionController, cause StopCau
 // has been evicted from byWS, the cancel has landed, and neither the shim nor
 // the consumer is reachable from what that close is handed.
 func (m *Manager) drainAndCancelSessionController(workspace string, d *sessionController, cause StopCause) {
-	m.drainLiveTurnForStop(workspace, d.sessionID, cause.path(), d.client)
+	m.drainLiveTurnForStop(workspace, d.sessionID, cause, d.namedTurnForResumption(), d.client)
 	m.releaseHeldTerminalResults(d, cause)
 	if d.cancel != nil {
 		d.cancel()

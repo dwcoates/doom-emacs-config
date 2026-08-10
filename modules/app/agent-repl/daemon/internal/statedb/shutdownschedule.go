@@ -103,34 +103,8 @@ func NewShutdownSchedules(db *sql.DB) (*ShutdownSchedules, error) {
 // a legacy row has no truthful origin to synthesize, so reading one fails
 // loudly instead of relabeling historical input.
 func ensureShutdownPromptOriginColumn(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(shutdown_hold_prompt)`)
-	if err != nil {
-		return fmt.Errorf("statedb: inspect shutdown_hold_prompt schema: %w", err)
-	}
-	defer rows.Close()
-	found := false
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull, pk int
-		var defaultValue sql.NullString
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			return fmt.Errorf("statedb: scan shutdown_hold_prompt schema: %w", err)
-		}
-		if name == "prompt_origin" {
-			found = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("statedb: iterate shutdown_hold_prompt schema: %w", err)
-	}
-	if found {
-		return nil
-	}
-	if _, err := db.Exec(`ALTER TABLE shutdown_hold_prompt ADD COLUMN prompt_origin INTEGER`); err != nil {
-		return fmt.Errorf("statedb: add shutdown_hold_prompt.prompt_origin: %w", err)
-	}
-	return nil
+	_, err := AddColumnIfMissing(db, "shutdown_hold_prompt", "prompt_origin", `INTEGER`)
+	return err
 }
 
 // PutSchedule writes (or replaces) the singleton lease row.
