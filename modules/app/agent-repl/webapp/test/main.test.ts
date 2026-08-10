@@ -269,6 +269,12 @@ describe("the revival gate's chrome wiring", () => {
     expect(chrome).toContain("revivalGateHtml(");
   });
 
+  it("weighs the gate by the store's own context figure", () => {
+    // Assert — the same field the topbar chip prints, so the number the gate
+    // prices a resume by cannot disagree with the one shown above it.
+    expect(chrome).toContain("contextTokens: s.contextTokens");
+  });
+
   it("disables the send button while the session is asleep", () => {
     // Assert — the two gates are independent facts and EITHER blocks.
     expect(chrome).toContain("composerEls.send.disabled = mergeHeld || asleep");

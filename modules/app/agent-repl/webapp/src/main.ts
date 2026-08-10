@@ -774,12 +774,17 @@ async function boot(): Promise<void> {
       // it would have been drawn in is gone.
       reviveFailure = "";
     }
-    revivalGateEl.innerHTML = revivalGateHtml(
-      s.hibernation,
-      revivePending,
-      Date.now(),
-      reviveFailure,
-    );
+    revivalGateEl.innerHTML = revivalGateHtml({
+      hibernation: s.hibernation,
+      // The SAME standing figure the topbar chip prints, read from the one
+      // store field the daemon feeds `SessionView.total_tokens` into — so the
+      // number the gate weighs a resume by can never disagree with the number
+      // shown a few pixels above it.
+      contextTokens: s.contextTokens,
+      pending: revivePending,
+      now: Date.now(),
+      failure: reviveFailure,
+    });
     // THE CARD IS THE PUSHED OFFER, redrawn every frame. Nothing here decides
     // whether it should be up: the daemon clears the offer when the question is
     // answered, superseded, or made moot by the merge ending on its own, and
