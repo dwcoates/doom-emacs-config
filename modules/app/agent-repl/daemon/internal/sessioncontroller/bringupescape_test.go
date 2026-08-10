@@ -30,7 +30,10 @@ type escapeHarness struct {
 	spawner *fakeSpawner
 	pusher  *fakePusher
 	applier *fakeApplier
-	log     *logCapture
+	// cards is the durable ledger of standing terminal failure cards the fence
+	// writes into (vanishedresume.go).
+	cards *fakeTerminalCardStore
+	log   *logCapture
 	// warn captures ONLY the records that took the WARN channel. log stays the
 	// UNION of both channels, so every assertion written before this split still
 	// reads the whole record stream and a severity test has something to ask.
@@ -56,24 +59,26 @@ func newEscapeHarness(t *testing.T, clients ...*fakeClient) *escapeHarness {
 		spawner: &fakeSpawner{resume: map[string]string{}},
 		pusher:  &fakePusher{},
 		applier: &fakeApplier{},
+		cards:   newFakeTerminalCardStore(),
 		log:     &logCapture{},
 		warn:    &logCapture{},
 		clients: clients,
 	}
 	m, err := New(Config{
-		Push:              h.pusher,
-		SSM:               h.applier,
-		Spawner:           h.spawner,
-		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
-		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
-		ClearCompactStore: newFakeClearCompactStore(),
-		TurnAccountings:   emptyTurnAccountingStore{},
-		Registrar:         &fakeRegistrar{},
-		ProtocolVersion:   "1",
-		Source:            stubSource{},
-		FileDiagnostics:   fakeFileDiagnosticPersister{},
-		Now:               h.clockMs.Load,
-		Logf:              h.log.logf,
+		Push:                 h.pusher,
+		SSM:                  h.applier,
+		Spawner:              h.spawner,
+		Locator:              fakeLocator{m: map[string]string{"ws": "s1"}},
+		SeqStore:             &fakeSeqStore{seq: map[string]uint64{}},
+		ClearCompactStore:    newFakeClearCompactStore(),
+		TurnAccountings:      emptyTurnAccountingStore{},
+		TerminalFailureCards: h.cards,
+		Registrar:            &fakeRegistrar{},
+		ProtocolVersion:      "1",
+		Source:               stubSource{},
+		FileDiagnostics:      fakeFileDiagnosticPersister{},
+		Now:                  h.clockMs.Load,
+		Logf:                 h.log.logf,
 		Warnf: func(format string, args ...any) {
 			h.warn.logf(format, args...)
 			h.log.logf(format, args...)
@@ -120,6 +125,24 @@ func (h *escapeHarness) failureCards() []*frontendv1.FailureCardView {
 		for _, item := range delta.GetItems() {
 			if f := item.GetFailureCard(); f != nil {
 				out = append(out, f)
+			}
+		}
+	}
+	return out
+}
+
+// failureCardItems returns the whole ConversationItem of every failure card
+// pushed into the feed, so a test can assert on the card's IDENTITY rather
+// than only on its body.
+func (h *escapeHarness) failureCardItems() []*frontendv1.ConversationItem {
+	var out []*frontendv1.ConversationItem
+	h.pusher.mu.Lock()
+	deltas := append([]*frontendv1.ConversationDelta(nil), h.pusher.convo...)
+	h.pusher.mu.Unlock()
+	for _, delta := range deltas {
+		for _, item := range delta.GetItems() {
+			if item.GetFailureCard() != nil {
+				out = append(out, item)
 			}
 		}
 	}

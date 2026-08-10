@@ -444,6 +444,15 @@ func main() {
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: open prompt receipt store: %v", err)
 	}
+	// The durable half of a terminally fenced session's failure card, in the
+	// same store. FATAL on failure for the prompt receipts' reason exactly: a
+	// daemon that cannot install it cannot promise that a session it refuses to
+	// bring up ever explains itself to a client that connects later, and
+	// starting anyway would make that promise silently false.
+	terminalFailureCards, err := statedb.NewTerminalFailureCards(stateStore)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: open terminal failure card store: %v", err)
+	}
 	// The keep-alive window ledger. FATAL on failure for the prompt receipts'
 	// reason inverted: without it the daemon cannot tell its own cache pings
 	// from the user's prompts, and would render machine-generated turns as
@@ -762,25 +771,26 @@ func main() {
 	// for the very same session, and -fake is what that verdict turns on.
 	shimSpawner.ForceFake(*fake)
 	controller, err := sessioncontroller.New(sessioncontroller.Config{
-		Push:              forwarder,
-		SSM:               ssmMgr,
-		Progress:          progressMgr,
-		Spawner:           shimSpawner,
-		Source:            &server.ShimConnSource{Listener: shimListener, Deaths: shimSpawnWatch},
-		FileDiagnostics:   fileDiagnostics,
-		Locator:           &server.SessionLocator{Reg: sessionRegistry},
-		SeqStore:          seqStore,
-		ClearCompactStore: seqStore,
-		DurableHistory:    durableHistory,
-		PromptReceipts:    promptReceipts,
-		TurnAccountings:   turnAccountings,
-		HistoricalUsage:   tokenUtilizations,
-		ShutdownHolds:     shutdownSchedules,
-		PermissionModes:   server.NewRegistryModeStore(sessionRegistry),
-		Registrar:         registrar,
-		ModelCatalogs:     registrar,
-		Hibernations:      registrar,
-		VendorSessions:    registrar,
+		Push:                 forwarder,
+		SSM:                  ssmMgr,
+		Progress:             progressMgr,
+		Spawner:              shimSpawner,
+		Source:               &server.ShimConnSource{Listener: shimListener, Deaths: shimSpawnWatch},
+		FileDiagnostics:      fileDiagnostics,
+		Locator:              &server.SessionLocator{Reg: sessionRegistry},
+		SeqStore:             seqStore,
+		ClearCompactStore:    seqStore,
+		DurableHistory:       durableHistory,
+		PromptReceipts:       promptReceipts,
+		TerminalFailureCards: terminalFailureCards,
+		TurnAccountings:      turnAccountings,
+		HistoricalUsage:      tokenUtilizations,
+		ShutdownHolds:        shutdownSchedules,
+		PermissionModes:      server.NewRegistryModeStore(sessionRegistry),
+		Registrar:            registrar,
+		ModelCatalogs:        registrar,
+		Hibernations:         registrar,
+		VendorSessions:       registrar,
 		// THE SWEEPER'S OWN STAMPING RULE, handed to the controller so the
 		// staleness check taken at prompt acceptance and at bring-up measures a
 		// pre-keep-alive session exactly as the sweep does rather than through
@@ -1044,9 +1054,9 @@ func main() {
 		// view's branch column reads the raw map and never waits. See
 		// AgentShimConfig.MergeCommandGeometry.
 		MergeCommandGeometry: geometryBackfill,
-		Logf:          legacyLog,
-		Warnf:         legacyWarn,
-		LogVerbosef:   daemonLog.LogVerbose,
+		Logf:                 legacyLog,
+		Warnf:                legacyWarn,
+		LogVerbosef:          daemonLog.LogVerbose,
 	})
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: frontend surface: %v", err)
