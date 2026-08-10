@@ -1227,6 +1227,26 @@ Combines a monotonic counter with a random suffix.  Isolated so tests
           (cl-incf agent-repl--uds-request-id-counter)
           (random #x10000)))
 
+(defun agent-repl--uds-normalize-workspace-key (workspace)
+  "Return WORKSPACE stripped of any trailing slash, or WORKSPACE unchanged.
+The daemon keys workspace records by the cwd STRING it is handed, so
+\"/p/ws\" and \"/p/ws/\" mint two DIFFERENT workspace identities for one
+directory — observed live as a phantom session recorded against a
+trailing-slash key while the canonical workspace sat under the same path
+without it.  Emacs directory APIs (`default-directory',
+`expand-file-name' of a directory, `file-name-as-directory') all yield
+the trailing form, so any key derived from one is a phantom waiting to
+happen.
+
+`directory-file-name' is applied to every non-empty string key at the one
+place the outgoing frame's `workspace' field is set, so no send site can
+put the trailing form on the wire regardless of how it derived its key.
+Non-strings and the empty string pass through untouched: nil means \"no
+workspace field\", and \"\" is not a path to normalize."
+  (if (and (stringp workspace) (not (string-empty-p workspace)))
+      (directory-file-name workspace)
+    workspace))
+
 (cl-defun agent-repl--uds-send-command (field payload &optional workspace process
                                               &key on-failure on-success on-challenge
                                               on-timeout on-registered)
@@ -1270,11 +1290,15 @@ connection sentinel flushes them after `open' — registration is identical
 for a queued frame, so a dial that fails before delivery settles the
 command through its tracked callbacks instead of aging out.  Returns
 `request_id'."
-  (let ((proc (or process agent-repl--uds-process))
-        ;; WORKSPACE goes ON THE WIRE verbatim below — the daemon routes by
-        ;; cwd — so it must not be rewritten.  LOG-WORKSPACE is a separate
-        ;; binding used only for the log sink.
-        (log-workspace (agent-repl--frontend-ws-name workspace)))
+  (let* ((proc (or process agent-repl--uds-process))
+         ;; THE ONE CHOKE POINT for the wire key.  WORKSPACE otherwise goes
+         ;; on the wire verbatim — the daemon routes by cwd — so the only
+         ;; rewrite it gets is stripping a trailing slash, which is not a
+         ;; different directory but IS a different daemon-side workspace
+         ;; identity.  See `agent-repl--uds-normalize-workspace-key'.
+         (workspace (agent-repl--uds-normalize-workspace-key workspace))
+         ;; LOG-WORKSPACE is a separate binding used only for the log sink.
+         (log-workspace (agent-repl--frontend-ws-name workspace)))
     ;; STATE RECONCILIATION before the refusal. The state variable is
     ;; bookkeeping; the PROCESS is reality. A live process whose status is
     ;; `open' while the variable says otherwise is a recorded desync (observed
