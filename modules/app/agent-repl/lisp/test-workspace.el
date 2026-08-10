@@ -1471,14 +1471,17 @@ identity-distinct string injected by `agent-repl-set-priority' from
 ;; re-pushed at the kill rather than at the next 1Hz signature tick.
 
 (ert-deftest agent-repl-test-ws-kill-repaints-the-sidebar ()
-  "`--ws-kill' pushes a fresh roster after the persp is gone."
+  "`--ws-kill' pushes a fresh roster after the persp is gone.
+The push is FORCED past the sidebar's signature gate: the membership
+cache the signature reads may not have registered the kill yet, and a
+gated push would then drop the very repaint this exists for."
   (agent-repl-test--with-clean-state
     (let (pushed)
       (cl-letf (((symbol-function '+workspace/kill) (lambda (_ws)))
                 ((symbol-function 'agent-repl--sidebar-push)
-                 (lambda () (setq pushed t))))
+                 (lambda (&optional force) (setq pushed (list :force force)))))
         (agent-repl--ws-kill "doomed")
-        (should (eq pushed t))))))
+        (should (equal pushed '(:force t)))))))
 
 (ert-deftest agent-repl-test-ws-kill-repaints-after-the-persp-is-gone ()
   "The repaint runs AFTER `+workspace/kill', so the roster sees the removal."
@@ -1487,7 +1490,7 @@ identity-distinct string injected by `agent-repl-set-priority' from
       (cl-letf (((symbol-function '+workspace/kill)
                  (lambda (_ws) (push :killed order)))
                 ((symbol-function 'agent-repl--sidebar-push)
-                 (lambda () (push :pushed order))))
+                 (lambda (&optional _force) (push :pushed order))))
         (agent-repl--ws-kill "doomed")
         (should (equal (nreverse order) '(:killed :pushed)))))))
 
@@ -1497,7 +1500,7 @@ identity-distinct string injected by `agent-repl-set-priority' from
     (let (pushed)
       (cl-letf (((symbol-function 'persp-kill) (lambda (_ws)))
                 ((symbol-function 'agent-repl--sidebar-push)
-                 (lambda () (setq pushed t))))
+                 (lambda (&optional _force) (setq pushed t))))
         (agent-repl--ws-persp-kill "doomed")
         (should (eq pushed t))))))
 
