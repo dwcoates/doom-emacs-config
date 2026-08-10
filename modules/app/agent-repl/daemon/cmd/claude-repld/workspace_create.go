@@ -421,12 +421,13 @@ func (c daemonSessionCreator) EnsureSession(ctx context.Context, job workspacecr
 		return existing, nil
 	}
 	id, err := c.Commands.CreateSession(ctx, server.CreateOpts{
-		CWD:            job.WorktreePath,
-		Model:          request.Model,
-		ConfigDir:      request.ConfigDir,
-		PermissionMode: request.PermissionMode,
-		Resume:         request.ForkSessionID,
-		AllowUngated:   request.AllowUngated,
+		CWD:               job.WorktreePath,
+		Model:             request.Model,
+		ConfigDir:         request.ConfigDir,
+		ConfigDirOverride: request.ConfigDirOverride,
+		PermissionMode:    request.PermissionMode,
+		Resume:            request.ForkSessionID,
+		AllowUngated:      request.AllowUngated,
 	})
 	if err != nil {
 		return "", fmt.Errorf("workspace create: create session for job %s: %w", job.ID, err)
@@ -456,13 +457,21 @@ func (c daemonSessionCreator) EnsureSession(ctx context.Context, job workspacecr
 // determinant that can contradict the first is exactly what produced a
 // workspace and its transcripts in two different accounts.
 //
+// THE ONE EXCEPTION IS A SELECTION A HUMAN MADE.  A source workspace whose
+// account was switched in the webapp lends that SELECTION to its child
+// (server.AccountResolver.InheritSelection) — never its resolved account.  A
+// parent that merely sits under $MULTI_REPO_ROOT has chosen nothing, and a
+// create with no source workspace has nothing to inherit, so a one-shot pinned
+// to a repo lands on that repo's account whatever workspace it was invoked
+// from.
+//
 // PermissionMode is still inherited.  It is a posture the parent chose, not a
 // fact about where the workspace lives, and nothing derives it from the path.
 func (c daemonSessionCreator) ResolveSessionMetadata(_ context.Context, job workspacecreate.Job) (workspacecreate.Request, error) {
 	if c.Registry == nil || c.Logf == nil {
 		return workspacecreate.Request{}, fmt.Errorf("workspace create: session metadata resolver is not fully configured")
 	}
-	request, err := c.resolveAccountFromPath(job, job.Request)
+	request, err := c.resolveAccount(job, job.Request, "")
 	if err != nil {
 		return workspacecreate.Request{}, err
 	}
@@ -483,11 +492,18 @@ func (c daemonSessionCreator) ResolveSessionMetadata(_ context.Context, job work
 	if job.Request.PermissionMode != "" && job.Request.PermissionMode != source.PermissionMode {
 		return workspacecreate.Request{}, fmt.Errorf("workspace create: job %s source workspace metadata conflicts with live source session %s", job.ID, sourceID)
 	}
-	// THE SOURCE'S ACCOUNT IS NOT CONSULTED. A source under a different root
-	// than the new worktree would otherwise drag its account across, which is a
-	// second answer to a question the path has already answered.
-	if source.ConfigDir != request.ConfigDir {
-		c.Logf("workspace-create: source account IGNORED job=%s source_workspace=%q source_session=%s source_config_dir=%q path_config_dir=%q — the account follows the worktree path, never the parent",
+	// THE SOURCE'S RESOLVED ACCOUNT IS NOT CONSULTED — only a SELECTION it
+	// carries. A parent under $MULTI_REPO_ROOT has chosen nothing, and dragging
+	// its resolved account across would move a child whose own path answers
+	// differently.
+	if inherited := c.accounts().InheritSelection(request.SourceDir); inherited != "" {
+		request.ConfigDirOverride = inherited
+		request, err = c.resolveAccount(job, request, inherited)
+		if err != nil {
+			return workspacecreate.Request{}, err
+		}
+	} else if source.ConfigDir != request.ConfigDir {
+		c.Logf("workspace-create: source account IGNORED job=%s source_workspace=%q source_session=%s source_config_dir=%q path_config_dir=%q — the parent selected no account, so the worktree path answers",
 			job.ID, request.SourceWorkspace, sourceID, source.ConfigDir, request.ConfigDir)
 	}
 	request.PermissionMode = source.PermissionMode
@@ -495,30 +511,39 @@ func (c daemonSessionCreator) ResolveSessionMetadata(_ context.Context, job work
 	return request, nil
 }
 
-// resolveAccountFromPath fills in the account for a create that nominates no
-// source session, from the worktree the job is about to bring up.
+// accounts is this creator's view of the one account rule.
+func (c daemonSessionCreator) accounts() server.AccountResolver {
+	return server.AccountResolver{Reg: c.Registry, Logf: c.Logf}
+}
+
+// resolveAccount sets the job's account: an INHERITED selection when the parent
+// carries one, otherwise this workspace's own selection or its path.
 //
 // AN ACCOUNT THE REQUEST NAMED DOES NOT WIN — it is overwritten, and the
 // disagreement is logged.  A create command is written by an emitter (a
 // keystroke, the generation skill, an out-of-band agent) with no better
 // information about the account than the path carries, and letting any of them
 // name a different one reintroduces the second determinant this rule removes.
-func (c daemonSessionCreator) resolveAccountFromPath(job workspacecreate.Job, request workspacecreate.Request) (workspacecreate.Request, error) {
+func (c daemonSessionCreator) resolveAccount(job workspacecreate.Job, request workspacecreate.Request, inherited string) (workspacecreate.Request, error) {
 	path := job.WorktreePath
 	if path == "" {
 		path = request.GitRoot
 	}
-	routed, err := session.AccountConfigDirFor(path)
-	if err != nil {
-		return workspacecreate.Request{}, fmt.Errorf("workspace create: job %s resolve the account for %q: %w", job.ID, path, err)
+	resolved := inherited
+	if resolved == "" {
+		var err error
+		resolved, err = c.accounts().Resolve(job.WorktreePath, path)
+		if err != nil {
+			return workspacecreate.Request{}, fmt.Errorf("workspace create: job %s resolve the account for %q: %w", job.ID, path, err)
+		}
 	}
-	if request.ConfigDir != "" && request.ConfigDir != routed {
-		c.Logf("workspace-create: request account OVERWRITTEN job=%s path=%s request_config_dir=%q path_config_dir=%q — the account follows the path and nothing else",
-			job.ID, path, request.ConfigDir, routed)
+	if request.ConfigDir != "" && request.ConfigDir != resolved {
+		c.Logf("workspace-create: request account OVERWRITTEN job=%s path=%s request_config_dir=%q resolved_config_dir=%q — the account follows the selection, else the path",
+			job.ID, path, request.ConfigDir, resolved)
 	}
-	request.ConfigDir = routed
-	c.Logf("workspace-create: account resolved from path job=%s path=%s config_dir=%q multi_repo_root=%q",
-		job.ID, path, request.ConfigDir, os.Getenv(session.MultiRepoRootEnv))
+	request.ConfigDir = resolved
+	c.Logf("workspace-create: account resolved job=%s path=%s config_dir=%q inherited=%t multi_repo_root=%q",
+		job.ID, path, request.ConfigDir, inherited != "", os.Getenv(session.MultiRepoRootEnv))
 	return request, nil
 }
 
