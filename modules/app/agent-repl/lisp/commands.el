@@ -3193,6 +3193,25 @@ Keying on perspective existence revives it instead."
       (agent-repl--log (agent-repl--ws-current-log-name)
                         "picker-open-selection: invalid payload without :name payload=%S" payload))))
 
+(defun agent-repl-add-project-workspace (&optional dir)
+  "Add a brand-new project to agent-repl (`SPC TAB C-n').
+Unlike `SPC p p' (`agent-repl-switch-to-project'), which only offers
+workspaces agent-repl already knows about, this prompts for ANY
+directory on disk and onboards it: registers DIR with projectile via
+`agent-repl--ws-register-project' (mirroring what
+`agent-repl--establish-workspace' does for a revived workspace), then
+switches to it exactly as `agent-repl-switch-to-project' does for a
+PROJECT argument -- Doom's `+workspaces-switch-to-project-h' creates
+the persp keyed on DIR's basename, and the shared post-switch step
+opens the most-recently-accessed file and hydrates display state."
+  (interactive (list (read-directory-name "Add project directory: " nil nil t)))
+  (let ((canonical (file-name-as-directory (expand-file-name dir))))
+    (unless (file-directory-p canonical)
+      (user-error "agent-repl: %s is not a directory" canonical))
+    (agent-repl--log nil "add-project-workspace: registering dir=%s" canonical)
+    (agent-repl--ws-register-project canonical)
+    (agent-repl-switch-to-project canonical)))
+
 (defun agent-repl-switch-to-project (&optional project)
   "Switch to a known workspace (interactive `SPC p p'), or to PROJECT.
 
