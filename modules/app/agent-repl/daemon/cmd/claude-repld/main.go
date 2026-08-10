@@ -11,7 +11,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -376,6 +375,25 @@ func main() {
 		os.Exit(2)
 	}
 
+	// THE EXCLUSIVE CLAIM IS TAKEN BEFORE ANY SHARED SOCKET IS TOUCHED. It is
+	// the only endpoint the kernel arbitrates, so it is the only one that can
+	// tell a duplicate daemon that it lost — and it has to answer that question
+	// while the incumbent's unix sockets are still untouched. See bootclaim.go
+	// for the outage this ordering exists to make impossible.
+	claim, err := claimBootExclusivity(*addr)
+	if err != nil {
+		if errors.Is(err, errIncumbentDaemon) {
+			// Not a malfunction: an incumbent daemon is already serving. Exit
+			// without having unlinked one socket of its.
+			daemonLog.With("operation", "boot.exclusive-claim", "addr", *addr, "outcome", "incumbent").
+				Log("claude-repld: %v; this daemon is a duplicate and is exiting with the incumbent's sockets untouched", err)
+			os.Exit(3)
+		}
+		daemonFatal(daemonLog, "claude-repld: %v", err)
+	}
+	daemonLog.With("operation", "boot.exclusive-claim", "addr", *addr, "outcome", "won").
+		Log("claude-repld: exclusive daemon claim won on %s; binding sockets", *addr)
+
 	// The profiling surface is opened BEFORE the daemon's dependencies, so a
 	// boot that wedges in state-store or geometry work is still profilable —
 	// which is precisely the window the command-path stalls were observed in.
@@ -596,7 +614,7 @@ func main() {
 		daemonFatal(daemonLog, "claude-repld: resolve shim socket path: %v", err)
 	}
 	shimListener := shimlisten.New(legacyLog)
-	if err := shimListener.Listen(shimSocketPath); err != nil {
+	if err := claim.ListenShim(shimListener, shimSocketPath); err != nil {
 		daemonFatal(daemonLog, "claude-repld: listen for shims: %v", err)
 	}
 	defer shimListener.Close()
@@ -1145,7 +1163,7 @@ func main() {
 	if perr != nil {
 		daemonFatal(daemonLog, "claude-repld: frontend socket path: %v", perr)
 	}
-	frontendListener, err := frontend.ListenUDS(sockPath)
+	frontendListener, err := claim.ListenFrontendUDS(sockPath)
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: frontend UDS listen %s: %v", sockPath, err)
 	}
@@ -1157,10 +1175,10 @@ func main() {
 	}()
 
 	httpServer := &http.Server{Addr: *addr, Handler: mux}
-	httpListener, err := net.Listen("tcp", *addr)
-	if err != nil {
-		daemonFatal(daemonLog, "claude-repld: HTTP listen %s: %v", *addr, err)
-	}
+	// The listener was claimed at the top of boot, not here: this is where it
+	// starts being SERVED. Connections that arrived during boot are waiting in
+	// its accept backlog.
+	httpListener := claim.HTTPListener()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
