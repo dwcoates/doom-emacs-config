@@ -308,6 +308,41 @@ type ClearCompactStore interface {
 // yet durable when the daemon died left no trace anywhere — the shim-store had
 // never received the turn, and the bubble the user had already seen died with
 // the process.
+// WiringApplier moves a workspace's wired axis — the generation-less
+// connectivity projection that says whether ANYTHING is attached to a
+// workspace. Satisfied by *ssm.Manager.
+//
+// It is an OPTIONAL facet of the StateApplier rather than a member of it, for
+// the reason WorkspaceStateReader is: a focused harness supplies an applier
+// that answers only what its subject exercises, and widening the required
+// interface would make every such harness carry a method it never calls. The
+// one production site that needs it (durablereplay.go) says out loud when the
+// facet is absent rather than assuming it moved the axis.
+type WiringApplier interface {
+	ApplyWired(workspace string, wiring ssm.Wiring, reason string) error
+}
+
+// TerminalFailureCardStore persists a session's STANDING terminal failure card
+// — one row per session whose bring-up is fenced on a verdict that cannot heal
+// on its own. Satisfied by *statedb.TerminalFailureCards.
+//
+// It is what makes the fence's card outlive the instant it was pushed at. The
+// card used to be a live push only, so a client that connected after the
+// refusal replayed the conversation from durable history and found no account
+// of why nothing drives it — the durable history is the vendor conversation,
+// and a session that never came up wrote nothing into it.
+type TerminalFailureCardStore interface {
+	// Record writes the session's standing card, REPLACING any prior one, so a
+	// fence re-established after a hard restart restates one claim rather than
+	// stacking a second.
+	Record(rec statedb.TerminalFailureCard) error
+	// Standing reads the session's card, if one stands.
+	Standing(sessionID string) (statedb.TerminalFailureCard, bool, error)
+	// Withdraw deletes the session's card, reporting whether one stood. It is
+	// the closing edge of the standing claim, run when the fence is cleared.
+	Withdraw(sessionID string) (bool, error)
+}
+
 type PromptReceiptStore interface {
 	// Record persists one accepted prompt. It runs BEFORE the receipt bubble is
 	// pushed, so a receipt on a user's screen always implies a durable record.
@@ -2907,12 +2942,13 @@ func (c *consumer) pushLocalItem(item *frontendv1.ConversationItem) {
 	})
 }
 
-// pushReplayedReceipt pushes ONE durable prompt receipt during a durable
-// replay, and reports whether it went.
+// pushReplayedItem pushes ONE daemon-composed durable item during a durable
+// replay — a prompt receipt, or a fenced session's standing terminal failure
+// card — and reports whether it went.
 //
 // IT IS NOT pushLocalItem, and the difference is the provenance rule. A local
 // item is composed NOW, so the live lease state is its provenance; a replayed
-// receipt was composed by a daemon that no longer exists, at an instant the
+// item was composed by a daemon that no longer exists, at an instant the
 // record remembers, so its verdict must come from the merge lease's DURABLE
 // LEDGER at that instant — the same rule pushConversation applies to every
 // other replayed item. Reading the live lease instead would rewrite a merge's
@@ -2921,7 +2957,7 @@ func (c *consumer) pushLocalItem(item *frontendv1.ConversationItem) {
 //
 // Nothing is retained: this consumer is the throwaway one a durable replay runs
 // through, and the record in the state store is the thing that persists.
-func (c *consumer) pushReplayedReceipt(item *frontendv1.ConversationItem) bool {
+func (c *consumer) pushReplayedItem(item *frontendv1.ConversationItem) bool {
 	cd := &frontendv1.ConversationDelta{
 		Workspace: c.workspace,
 		Fence:     c.fence(),

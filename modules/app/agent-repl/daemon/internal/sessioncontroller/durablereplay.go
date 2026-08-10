@@ -9,6 +9,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
 	"claude-repld/internal/storehistory"
 
@@ -130,7 +131,101 @@ func (m *Manager) resyncFromDurableHistory(workspace string, fromSeq uint64) err
 	// AFTER the store's own events, never before: a receipt belongs at the
 	// bottom of the conversation, because the prompt it stands for is the most
 	// recent thing that happened to this workspace.
-	return m.serveDurableReceipts(workspace, sessionID, cons, served)
+	if err := m.serveDurableReceipts(workspace, sessionID, cons, served); err != nil {
+		return err
+	}
+	// LAST, and the unwired stamp with it: a terminal refusal is the most
+	// recent thing that happened to a fenced workspace, and it is the reason
+	// nothing is driving the conversation the replay just served.
+	fenced, err := m.serveStandingTerminalCard(workspace, sessionID, cons)
+	if err != nil {
+		return err
+	}
+	return m.stampDurableReplayUnwired(workspace, sessionID, fenced)
+}
+
+// serveStandingTerminalCard pushes the session's STANDING terminal failure card
+// onto a durable replay, and reports whether one stood.
+//
+// THIS IS THE HALF THAT WAS MISSING. The fence publishes its card live, and a
+// live push reaches only the clients connected at that instant; every later
+// webview redials and is served from here. Without this the replay handed the
+// user the whole conversation with NO account of why it stopped — indis-
+// tinguishable from a session that is merely quiet.
+//
+// The card is pushed under the SAME uuid the live push used, so a client that
+// saw both updates one item rather than drawing two accounts of one failure.
+func (m *Manager) serveStandingTerminalCard(workspace, sessionID string, cons *consumer) (bool, error) {
+	logf := dlog.Tag(dlog.Logf(m.logf), "ws", workspace, "session", sessionID, "source", "terminal-card")
+	if m.cfg.TerminalFailureCards == nil {
+		logf("session-controller: standing terminal failure card NOT served — no TerminalFailureCardStore is wired, so a terminally fenced session's account of itself cannot be recovered")
+		return false, nil
+	}
+	rec, standing, err := m.cfg.TerminalFailureCards.Standing(sessionID)
+	if err != nil {
+		logf("session-controller: standing terminal failure card UNREADABLE session=%s: %v — the resync is failed rather than served without the one item that explains it", sessionID, err)
+		return false, fmt.Errorf("session-controller: reading the standing terminal failure card for session %q failed: %w", sessionID, err)
+	}
+	if !standing {
+		return false, nil
+	}
+	card := &frontendv1.FailureCardView{}
+	if err := proto.Unmarshal(rec.Card, card); err != nil {
+		logf("session-controller: standing terminal failure card UNPARSEABLE session=%s: %v — the resync is failed rather than served without it", sessionID, err)
+		return false, fmt.Errorf("session-controller: parsing the standing terminal failure card for session %q failed: %w", sessionID, err)
+	}
+	item := &frontendv1.ConversationItem{
+		Uuid: rec.UUID,
+		TsMs: rec.AtMs,
+		Item: &frontendv1.ConversationItem_FailureCard{FailureCard: card},
+	}
+	if !cons.pushReplayedItem(item) {
+		logf("session-controller: standing terminal failure card NOT PUSHED session=%s uuid=%s — its provenance could not be resolved (see the refusal above)", sessionID, rec.UUID)
+		return true, fmt.Errorf("session-controller: the standing terminal failure card for session %q could not be published on a durable resync", sessionID)
+	}
+	logf("session-controller: standing terminal failure card SERVED session=%s uuid=%s at_ms=%d — this session's bring-up is terminally fenced, and this is the only account of it a client connecting now would get",
+		sessionID, rec.UUID, rec.AtMs)
+	return true, nil
+}
+
+// stampDurableReplayUnwired records, on the state the frontend renders
+// connectivity from, that NOTHING IS DRIVING the conversation just served.
+//
+// THE DISHONESTY IT ENDS. A durable replay hands a client a full conversation
+// with no controller behind it. Nothing in the replay itself said so, so the
+// webapp rendered it exactly as a live session — banner cleared, feed
+// populated, nothing driving it and no signal that anything was wrong.
+//
+// IT INVENTS NOTHING. The wired axis already has both closed halves and this
+// path knows which one applies, because it is reached only when no controller
+// is live:
+//
+//   - SEVERED when a terminal failure card stands: the session's bring-up is
+//     fenced on a verdict that cannot heal on its own, which is precisely
+//     "not wired, and there is EVIDENCE of breakage".
+//   - HIBERNATED otherwise: an unwired workspace after a daemon bounce is the
+//     resting state of every workspace, and painting it as broken is what
+//     spent blue's meaning in the first place.
+//
+// A no-op when the axis already reads that way, so an ordinary reload of an
+// ordinary hibernated workspace writes nothing.
+func (m *Manager) stampDurableReplayUnwired(workspace, sessionID string, fenced bool) error {
+	logf := dlog.Tag(dlog.Logf(m.logf), "ws", workspace, "session", sessionID, "source", "unwired-stamp")
+	applier, ok := m.cfg.SSM.(WiringApplier)
+	if !ok {
+		logf("session-controller: durable resync CANNOT stamp the unwired truth — the state applier does not apply the wired axis, so this replay is served without saying that nothing drives it")
+		return nil
+	}
+	wiring, reason := ssm.WiringHibernated, "durable_replay_unwired"
+	if fenced {
+		wiring, reason = ssm.WiringSevered, "durable_replay_terminally_fenced"
+	}
+	if err := applier.ApplyWired(workspace, wiring, reason); err != nil {
+		logf("session-controller: durable resync FAILED to stamp the unwired truth wiring=%s reason=%s: %v", wiring, reason, err)
+		return fmt.Errorf("session-controller: stamping ws %q as %s on a durable resync failed: %w", workspace, wiring, err)
+	}
+	logf("session-controller: durable resync STAMPED the unwired truth wiring=%s reason=%s — the replay carries a conversation nothing is driving, and now says so", wiring, reason)
+	return nil
 }
 
 // hydratePersistedAccounting loads the completed terminal records that replay
@@ -216,7 +311,7 @@ func (m *Manager) serveDurableReceipts(workspace, sessionID string, cons *consum
 				workspace, r.RequestID, age, promptReceiptStaleAfterMs)
 		}
 		item := promptReceiptItem(r.RequestID, r.Text, r.AcceptedAtMs)
-		if !cons.pushReplayedReceipt(item) {
+		if !cons.pushReplayedItem(item) {
 			logf("session-controller: durable prompt receipt NOT PUSHED ws=%q request_id=%s age_ms=%d — its provenance could not be resolved (see the refusal above)",
 				workspace, r.RequestID, age)
 			continue
