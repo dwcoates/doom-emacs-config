@@ -202,8 +202,57 @@ Eviction is preserved, not weakened; only the threshold for calling a busy
 consumer a dead one moved. A refused push names which of the two limits it hit:
 `hard_ceiling` (the memory bound, unconditional — no amount of recent drain
 progress buys a queue past it) or `stalled` (under the ceiling, but not one
-frame drained for the whole grace period, which is what a genuinely wedged
-consumer looks like).
+observable act of drain for the whole grace period, which is what a genuinely
+wedged consumer looks like).
+
+## Progress is ACCEPTED BYTES, not popped frames
+
+`stalled` originally meant "no frame popped", and that is not the same question.
+One frame can take tens of seconds to write. On 2026-08-10 the Emacs host
+connected at 02:37:27, was handed a 162-workspace connect snapshot, and the
+writer entered that single write at 02:37:28.5. The frame count did not move
+again for 31 seconds, so at 02:37:59.300 the queue declared
+`reason=stalled stalled_for_ms=30004` at depth 1580 (ceiling 4096) and evicted a
+host that was reading the whole time — the very write it was draining completed
+`ok=true` at 02:37:59.691, 391ms after the eviction. A frame-counting stall
+detector cannot tell a consumer working through one huge frame from a consumer
+that died holding it, because from the queue's side those look identical.
+
+So the outbox counts every OBSERVABLE ACT OF DRAIN: each popped frame, AND each
+chunk of bytes the socket accepts while a write is in flight
+(`outbox.noteWriteProgress`, called by the writer from inside `writeFrame`).
+Both transports write a frame in bounded `writeChunkBytes` pieces to produce
+that signal — the UDS stream has no message boundaries so chunking is invisible
+to it, and the WebSocket side uses `NextWriter` so the message framing is
+identical. The grace window therefore applies to PROGRESS, not to depth: a slow
+consumer that is visibly reading is absorbed, and a consumer accepting nothing
+at all for the whole window is still cut loose. The hard ceiling is untouched
+and remains unconditional.
+
+## Every teardown names itself, and WebSocket peers get a real close code
+
+The same incident had a second half: the Emacs host's socket went away with the
+daemon-side record naming only the queue refusal, and the webapp's user-visible
+warning read `close=1005` — the WebSocket code for "the peer never sent a close
+frame at all", which is exactly what a bare `ws.Close()` leaves behind. One
+close path (an accept that lost the race with `Server.Close`) had no record of
+any kind.
+
+A `closeCause` (`closecause.go`) is now a VALUE that travels with the teardown:
+a greppable reason token, detail, and a WebSocket status code. `disconnect`
+takes one from every caller and records it on the client BEFORE closing `done`,
+because the writer goroutine is what actually closes the socket and a cause
+published after that would race the teardown it explains. `closeConn` is the one
+place a serving connection is closed: it writes the `closing connection
+client_id=… kind=… cause=… ws_close_code=…` record first and closes second, and
+`wsConn.close` sends the cause as a real close frame (`WriteControl`, which
+gorilla permits concurrently with an in-flight `WriteMessage`) before closing.
+A raw UDS peer has no in-band channel for a reason, so its accountability is the
+record alone.
+
+A teardown that reaches the transport with NO recorded cause is reported at
+`warn` as the bug it is, rather than closing quietly under a plausible-looking
+default.
 
 Severity is asymmetric on purpose. Evicting the HOST is a user-visible service
 degradation — there is exactly one, it owns the UI, and Emacs logs its own
