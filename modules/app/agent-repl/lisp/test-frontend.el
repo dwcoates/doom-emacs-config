@@ -1797,19 +1797,120 @@ side silently turns the keys into no-ops."
 
 ;;;; ---- the hard session restart command ---------------------------------
 
+(defmacro agent-repl-test--with-restart-session (build &rest body)
+  "Run BODY with the restart verb's collaborators faked, ws1 current.
+BUILD stands in for `agent-repl--frontend-build-targets-async' and is
+called with (TARGETS FORCE ON-SUCCESS ON-FAILURE), so each test decides
+whether the build succeeds, fails, or never settles.
+`agent-repl-test--restart-asked' records the workspace whose shim restart
+was issued, and `agent-repl-test--restart-opened' the workspace whose
+webview was reopened."
+  (declare (indent 1))
+  `(let ((agent-repl-test--restart-asked nil)
+         (agent-repl-test--restart-opened nil))
+     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+               ((symbol-function 'agent-repl--frontend-restart-session)
+                (lambda (ws) (setq agent-repl-test--restart-asked ws) "req-1"))
+               ((symbol-function 'agent-repl--gui-open)
+                (lambda (ws) (setq agent-repl-test--restart-opened ws)))
+               ((symbol-function 'agent-repl--frontend-build-targets-async) ,build)
+               ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+               ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+               ((symbol-function 'message) (lambda (&rest _) nil)))
+       ,@body)))
+
+(defvar agent-repl-test--restart-asked nil
+  "Workspace whose shim restart the faked client recorded.")
+
+(defvar agent-repl-test--restart-opened nil
+  "Workspace whose webview the faked gui open recorded.")
+
 (ert-deftest agent-repl-test-restart-session-command-dispatches ()
   "`agent-repl-restart-session' asks the client to restart the current ws."
   ;; Arrange
-  (let (asked)
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--frontend-restart-session)
-               (lambda (ws) (setq asked ws) "req-1"))
-              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-              ((symbol-function 'message) (lambda (&rest _) nil)))
+  (agent-repl-test--with-restart-session (lambda (&rest _) 'started)
+    ;; Act
+    (agent-repl-restart-session)
+    ;; Assert
+    (should (equal agent-repl-test--restart-asked "ws1"))))
+
+(ert-deftest agent-repl-test-restart-session-kicks-off-the-webapp-build ()
+  "The restart requests an asynchronous build of the webapp target alone.
+The daemon is not rebuilt or restarted by this verb."
+  ;; Arrange
+  (let (targets)
+    (agent-repl-test--with-restart-session
+        (lambda (ts &rest _) (setq targets ts) 'started)
       ;; Act
       (agent-repl-restart-session)
       ;; Assert
-      (should (equal asked "ws1")))))
+      (should (equal targets '("webapp"))))))
+
+(ert-deftest agent-repl-test-restart-session-issues-the-shim-restart-unbuilt ()
+  "The shim restart is issued while the build is still in flight.
+It is never held behind the build, so a slow or never-settling build
+cannot delay the restart the user asked for."
+  ;; Arrange — a build that captures its continuations and never calls them.
+  (agent-repl-test--with-restart-session (lambda (&rest _) 'started)
+    ;; Act
+    (agent-repl-restart-session)
+    ;; Assert
+    (should (equal agent-repl-test--restart-asked "ws1"))
+    (should (null agent-repl-test--restart-opened))))
+
+(ert-deftest agent-repl-test-restart-session-bounces-the-webview-on-build-success ()
+  "A successful build closes the webview and reopens it on the new build id."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (agent-repl--ws-put "ws1" :frontend-buffer buf)
+      (agent-repl-test--with-restart-session
+          (lambda (_ts _force on-success _on-failure) (funcall on-success) 'started)
+        ;; Act
+        (agent-repl-restart-session)
+        ;; Assert
+        (should-not (buffer-live-p buf))
+        (should (equal agent-repl-test--restart-opened "ws1"))))))
+
+(ert-deftest agent-repl-test-restart-session-leaves-the-webview-on-build-failure ()
+  "A failed build leaves the webview alone rather than bouncing it."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (agent-repl--ws-put "ws1" :frontend-buffer buf)
+      (agent-repl-test--with-restart-session
+          (lambda (_ts _force _on-success on-failure)
+            (funcall on-failure "exit 1") 'started)
+        ;; Act
+        (agent-repl-restart-session)
+        ;; Assert
+        (should (buffer-live-p buf))
+        (should (null agent-repl-test--restart-opened))))))
+
+(ert-deftest agent-repl-test-restart-session-warns-on-build-failure ()
+  "A failed build is surfaced loudly rather than swallowed."
+  ;; Arrange
+  (let (warned)
+    (agent-repl-test--with-restart-session
+        (lambda (_ts _force _on-success on-failure)
+          (funcall on-failure "exit 1") 'started)
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
+        ;; Act
+        (agent-repl-restart-session)))
+    ;; Assert
+    (should (string-match-p "exit 1" (or warned "")))))
+
+(ert-deftest agent-repl-test-restart-session-bounce-skips-a-closed-panel ()
+  "A workspace with no open webview is not given one by a successful build."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-restart-session
+        (lambda (_ts _force on-success _on-failure) (funcall on-success) 'started)
+      ;; Act
+      (agent-repl-restart-session)
+      ;; Assert
+      (should (null agent-repl-test--restart-opened)))))
 
 (ert-deftest agent-repl-test-restart-session-command-needs-a-workspace ()
   "With no current workspace the restart signals rather than guessing one."
