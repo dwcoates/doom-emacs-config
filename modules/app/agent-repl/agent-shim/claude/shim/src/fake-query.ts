@@ -734,6 +734,13 @@ export function createFakeQuery(
       LOGGER.log({ agent_repl_session_id: opts.sessionId, turns: turn }, "fake SDK interrupt accepted");
       return { still_queued: [] };
     },
+    // The offline query runs no background tasks, so there is never one to
+    // stop. It ACCEPTS the stop rather than throwing: a shim wired to the fake
+    // must exercise the same control path the real one does, and a throw here
+    // would make the fake the only place a cancel is a failure.
+    stopTask: async (taskId: string): Promise<void> => {
+      LOGGER.log({ agent_repl_session_id: opts.sessionId, task_id: taskId }, "fake SDK stop_task accepted (the offline query runs no background tasks)");
+    },
     setPermissionMode: async (mode: PermissionMode): Promise<void> => {
       LOGGER.log({ agent_repl_session_id: opts.sessionId, previous_permission_mode: permissionMode, permission_mode: mode }, "fake SDK permission mode changed");
       permissionMode = mode;
