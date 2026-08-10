@@ -31,6 +31,7 @@ import (
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 )
 
@@ -57,6 +58,20 @@ func (m *Manager) RecordOpenFailure(workspace string, err error) {
 	d := m.byWS[workspace]
 	m.mu.Unlock()
 	if d == nil || d.consumer == nil {
+		if errors.Is(err, errclass.ErrResumeTargetVanished) {
+			// NOT a fresh failure: the vanished-resume fence (vanishedresume.go)
+			// already carded this session's terminal refusal once, loudly, at the
+			// bring-up that established it. Every open attempt against a fenced
+			// session refuses BEFORE any controller exists, so it lands here on
+			// every retry — an open never stops being retried by its caller — and
+			// logging each arrival at ERROR would repeat one already-reported fact
+			// for as long as the fence stands. The open caller still deserves to
+			// know why nothing was published here, so the FIRST arrival per
+			// session per boot says so at WARN; every later one says the same
+			// thing at DEBUG, naming the fence either way.
+			m.recordFencedOpenRefusal(workspace, err)
+			return
+		}
 		// LOUD, not silent: the failure is real and the user will not see this
 		// one. It happens when the bring-up tore its own controller down, in
 		// which case the ladder's own card already stands — but the daemon
@@ -68,6 +83,32 @@ func (m *Manager) RecordOpenFailure(workspace string, err error) {
 	m.logf("session-controller: open bring-up FAILED ws=%q session=%s generation=%s after the open was acked; publishing a failure card: %v",
 		workspace, d.sessionID, d.generationID, err)
 	d.consumer.pushFailure(d.consumer.startFailedUUID(), openFailureCard(m.logf, err))
+}
+
+// recordFencedOpenRefusal reports an open attempt whose bring-up failure IS the
+// vanished-resume fence's own terminal refusal, arriving here because that
+// refusal happens before any controller exists (see vanishedresume.go). The
+// FIRST such arrival per session per boot is WARN, so an operator watching
+// this workspace still learns once that its opens are being refused by the
+// fence; every later arrival this boot is DEBUG, because the fact was already
+// reported and the fence's own bring-up-time warnf already carded it.
+//
+// "Per boot" falls out of openFenceRefusals starting empty in New: a
+// restarted daemon re-derives the fence from disk on its first bring-up and
+// this map re-warns once for the new boot, same as the fence itself does.
+func (m *Manager) recordFencedOpenRefusal(workspace string, err error) {
+	m.mu.Lock()
+	first := !m.openFenceRefusals[workspace]
+	m.openFenceRefusals[workspace] = true
+	m.mu.Unlock()
+	if first {
+		m.warnf("session-controller: open bring-up ws=%q refused by the vanished-resume fence; no live controller exists to publish a failure card onto, but the fence already published this session's terminal failure card once — later refusals against this fence are logged at debug: %v",
+			workspace, err)
+		return
+	}
+	dlog.Tag(dlog.Logf(m.logf), "level", string(dlog.LevelDebug))(
+		"session-controller: open bring-up ws=%q refused by the vanished-resume fence again; already reported at warn this boot: %v",
+		workspace, err)
 }
 
 // openFailureCard renders a late open failure WITHOUT degrading what the nack
