@@ -231,8 +231,9 @@ export class ConnectResync {
   /** A want-resync arrived while one was in flight or while backing off. */
   private dirty = false;
   /**
-   * How many want-resyncs the CURRENT in-flight request has absorbed, and the
-   * workspace they named.
+   * How many want-resyncs the current suppression run has absorbed — whether
+   * they were absorbed by an in-flight request or deferred by a backoff — and
+   * the workspace they named.
    *
    * THIS COUNTER IS THE LOG RATE LIMIT. Every suppression used to write its own
    * line, and the suppressions are not rare: a want-resync fires on essentially
@@ -275,15 +276,11 @@ export class ConnectResync {
    * run. The rest are counted and reported in one summary when the in-flight
    * request settles (flushSuppressed).
    */
-  private noteSuppressed(workspace: string): void {
+  private noteSuppressed(workspace: string, first: string): void {
     this.suppressed += 1;
     this.suppressedWorkspace = workspace;
     if (this.suppressed > 1) return;
-    this.opts.log?.(
-      "info",
-      `resync: request already in flight ws=${workspace} decision=coalesce; ` +
-        `further suppressions are counted, not logged`,
-    );
+    this.opts.log?.("info", first);
   }
 
   /**
@@ -313,6 +310,7 @@ export class ConnectResync {
    * and owe one resync immediately.
    */
   retryNow(): void {
+    this.flushSuppressed("retry_requested");
     this.givenUp = false;
     this.failures = 0;
     this.nextAllowedAtMs = 0;
@@ -507,7 +505,11 @@ export class ConnectResync {
     // one settles, so the catch-up it wanted still happens, once.
     if (this.inFlight) {
       this.dirty = true;
-      this.noteSuppressed(snapshot.workspace);
+      this.noteSuppressed(
+        snapshot.workspace,
+        `resync: request already in flight ws=${snapshot.workspace} decision=coalesce; ` +
+          `further suppressions are counted, not logged`,
+      );
       return false;
     }
     // Backing off: a failed resync owes a growing delay before the next one,
@@ -515,13 +517,27 @@ export class ConnectResync {
     const now = this.now();
     if (now < this.nextAllowedAtMs) {
       this.dirty = true;
-      this.opts.log?.(
-        "info",
+      // THE SAME RATE LIMIT THE IN-FLIGHT BRANCH HAS, and for the same reason:
+      // a want-resync fires on essentially every ingested frame, so a workspace
+      // whose resync keeps failing wrote one line PER FRAME for the whole
+      // backoff window. Production showed 3,887 identical `backing off` lines
+      // for one workspace — hundreds sharing a single millisecond — which is
+      // the ~25 records/second of client-log telemetry that flooded the daemon.
+      // The run's information is the first line plus the count, exactly as for
+      // coalescing, and the summary is flushed by whichever of the dispatch,
+      // the settle, or the disconnect closes the run.
+      this.noteSuppressed(
+        snapshot.workspace,
         `resync: backing off ws=${snapshot.workspace} failures=${this.failures} ` +
-          `retry_in_ms=${this.nextAllowedAtMs - now} decision=defer`,
+          `retry_in_ms=${this.nextAllowedAtMs - now} decision=defer; ` +
+          `further deferrals are counted, not logged`,
       );
       return false;
     }
+    // A BACKOFF RUN ENDS WHERE THE BACKOFF DOES. The in-flight run is closed by
+    // its settle, but a run of deferrals has no settle to wait for — the window
+    // simply expires and this dispatch happens — so it is reported here.
+    this.flushSuppressed("dispatched");
     // Disarm BEFORE dispatching: the resync's own snapshot reply comes back
     // through this same path, and a trigger still armed when it lands would
     // ask again, forever.
