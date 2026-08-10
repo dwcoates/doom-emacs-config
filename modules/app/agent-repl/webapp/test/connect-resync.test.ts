@@ -826,3 +826,116 @@ describe("ConnectResync fence rotation", () => {
     expect(h.sent).toEqual([]);
   });
 });
+
+/**
+ * THE BOUND ON THE LOG, which is a different flood from the bound on the
+ * requests above.
+ *
+ * Suppressing a want-resync is the mechanism working, and it happens on
+ * essentially every ingested frame: one observed boot window wrote ~28,000
+ * `already in flight` lines, hundreds per millisecond, into the console AND
+ * into the client_log telemetry the daemon persists. The run carries exactly
+ * two facts — that coalescing started, and how big it got — so it gets exactly
+ * two lines.
+ */
+describe("ConnectResync suppression logging", () => {
+  /** Every per-suppression line this run produced, in order. */
+  function coalesceLines(h: Harness): string[] {
+    return h.logs.filter(([, m]) => m.includes("decision=coalesce")).map(([, m]) => m);
+  }
+
+  /** Every end-of-run summary line. */
+  function summaryLines(h: Harness): string[] {
+    return h.logs.filter(([, m]) => m.includes("decision=summary")).map(([, m]) => m);
+  }
+
+  /** A trigger with one resync in flight that settles only when told to. */
+  function inFlight(): { h: Harness; settle: () => void } {
+    let resolve: (() => void) | undefined;
+    const h = harness(
+      () =>
+        new Promise<void>((r) => {
+          resolve = r;
+        }),
+    );
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12));
+    return { h, settle: () => resolve?.() };
+  }
+
+  it("logs the first suppression of a run", () => {
+    // Arrange
+    const { h } = inFlight();
+    // Act
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(false, snapshot("/ws", 12));
+    // Assert
+    expect(coalesceLines(h)).toHaveLength(1);
+  });
+
+  it("logs nothing for the suppressions after the first", () => {
+    // Arrange
+    const { h } = inFlight();
+    // Act — the flood: many wants against one unsettled request.
+    for (let i = 0; i < 500; i++) {
+      h.trigger.forceResync("recovery_heartbeat");
+      h.trigger.observe(false, snapshot("/ws", 12));
+    }
+    // Assert — one line for five hundred suppressions.
+    expect(coalesceLines(h)).toHaveLength(1);
+  });
+
+  it("reports the suppressed total when the in-flight request settles", async () => {
+    // Arrange
+    const { h, settle } = inFlight();
+    for (let i = 0; i < 500; i++) {
+      h.trigger.forceResync("recovery_heartbeat");
+      h.trigger.observe(false, snapshot("/ws", 12));
+    }
+    // Act
+    settle();
+    await flush();
+    // Assert
+    expect(summaryLines(h)).toEqual([
+      "resync: coalesced 500 want-resync(s) ws=/ws outcome=acked decision=summary",
+    ]);
+  });
+
+  it("writes no summary for a request that suppressed nothing", async () => {
+    // Arrange
+    const h = harness();
+    h.trigger.onConnect();
+    // Act
+    h.trigger.observe(true, snapshot("/ws", 12));
+    await flush();
+    // Assert
+    expect(summaryLines(h)).toEqual([]);
+  });
+
+  it("starts a fresh run after the previous one was summarized", async () => {
+    // Arrange — one run, closed out by its ack.
+    const { h, settle } = inFlight();
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(false, snapshot("/ws", 12));
+    settle();
+    await flush();
+    // Act — a want suppressed against the request the ack spent.
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(false, snapshot("/ws", 12));
+    // Assert — the new run announces itself rather than staying silent.
+    expect(coalesceLines(h)).toHaveLength(2);
+  });
+
+  it("reports the suppressed total when the socket dies mid-flight", () => {
+    // Arrange
+    const { h } = inFlight();
+    h.trigger.forceResync("recovery_heartbeat");
+    h.trigger.observe(false, snapshot("/ws", 12));
+    // Act
+    h.trigger.onDisconnect();
+    // Assert — a run cut short still accounts for itself.
+    expect(summaryLines(h)).toEqual([
+      "resync: coalesced 1 want-resync(s) ws=/ws outcome=socket_lost decision=summary",
+    ]);
+  });
+});

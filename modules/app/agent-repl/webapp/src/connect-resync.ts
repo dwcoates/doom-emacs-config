@@ -167,6 +167,22 @@ export class ConnectResync {
   private inFlight = false;
   /** A want-resync arrived while one was in flight or while backing off. */
   private dirty = false;
+  /**
+   * How many want-resyncs the CURRENT in-flight request has absorbed, and the
+   * workspace they named.
+   *
+   * THIS COUNTER IS THE LOG RATE LIMIT. Every suppression used to write its own
+   * line, and the suppressions are not rare: a want-resync fires on essentially
+   * every ingested frame, so one boot window produced ~28,000 identical
+   * `already in flight` lines — hundreds per millisecond — which drowned the
+   * console AND flooded the client_log telemetry the daemon persists, making
+   * the very stall they accompany harder to read. The information content of
+   * the run is one fact plus one number: the first suppression says coalescing
+   * began, the count says how big it got, and every line between them says
+   * nothing the two do not.
+   */
+  private suppressed = 0;
+  private suppressedWorkspace = "";
   /** Consecutive terminal failures; reset by any ack and by a fresh socket. */
   private failures = 0;
   /** Wall-clock before which no resync may be dispatched. */
@@ -184,6 +200,40 @@ export class ConnectResync {
   /** Whether a sent resync has yet to ack or fail. */
   get isInFlight(): boolean {
     return this.inFlight;
+  }
+
+  /**
+   * Record one suppressed want-resync, writing a line only for the FIRST of a
+   * run. The rest are counted and reported in one summary when the in-flight
+   * request settles (flushSuppressed).
+   */
+  private noteSuppressed(workspace: string): void {
+    this.suppressed += 1;
+    this.suppressedWorkspace = workspace;
+    if (this.suppressed > 1) return;
+    this.opts.log?.(
+      "info",
+      `resync: request already in flight ws=${workspace} decision=coalesce; ` +
+        `further suppressions are counted, not logged`,
+    );
+  }
+
+  /**
+   * Close out a suppression run with its total. Silent when nothing was
+   * suppressed, so a clean request adds no line at all, and it never counts a
+   * run twice: the counter is cleared as it is reported.
+   */
+  private flushSuppressed(outcome: string): void {
+    if (this.suppressed === 0) return;
+    const suppressed = this.suppressed;
+    const workspace = this.suppressedWorkspace;
+    this.suppressed = 0;
+    this.suppressedWorkspace = "";
+    this.opts.log?.(
+      "info",
+      `resync: coalesced ${suppressed} want-resync(s) ws=${workspace} outcome=${outcome} ` +
+        `decision=summary`,
+    );
   }
 
   private now(): number {
@@ -341,6 +391,7 @@ export class ConnectResync {
   onConnect(): void {
     this.armed = true;
     this.snapshotSeen = false;
+    this.flushSuppressed("socket_reconnected");
     this.inFlight = false;
     this.dirty = false;
     this.failures = 0;
@@ -358,6 +409,7 @@ export class ConnectResync {
     // A request whose socket died cannot be acked or nacked by anyone. Holding
     // it in flight would make the NEXT connection's resync coalesce into a
     // settle that never comes.
+    this.flushSuppressed("socket_lost");
     this.inFlight = false;
   }
 
@@ -381,10 +433,7 @@ export class ConnectResync {
     // one settles, so the catch-up it wanted still happens, once.
     if (this.inFlight) {
       this.dirty = true;
-      this.opts.log?.(
-        "info",
-        `resync: request already in flight ws=${snapshot.workspace} decision=coalesce`,
-      );
+      this.noteSuppressed(snapshot.workspace);
       return false;
     }
     // Backing off: a failed resync owes a growing delay before the next one,
@@ -442,6 +491,7 @@ export class ConnectResync {
    * heartbeat, from the mark this page has applied by this moment.
    */
   private settleAcked(): void {
+    this.flushSuppressed("acked");
     this.inFlight = false;
     this.failures = 0;
     this.nextAllowedAtMs = 0;
@@ -466,6 +516,7 @@ export class ConnectResync {
    * raise the banner instead of continuing to ask.
    */
   private settleFailed(cause: string): void {
+    this.flushSuppressed("failed");
     this.inFlight = false;
     this.failures += 1;
     if (this.failures >= RESYNC_FAILURE_CEILING) {
