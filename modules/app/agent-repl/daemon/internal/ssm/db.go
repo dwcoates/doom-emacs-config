@@ -238,6 +238,9 @@ func migrate(db *sql.DB, logf dlog.Logf) error {
 	if err := addTaskIDColumn(db); err != nil {
 		return err
 	}
+	if err := addClearedAtColumn(db); err != nil {
+		return err
+	}
 	if err := addTurnClaimColumns(db); err != nil {
 		return err
 	}
@@ -430,6 +433,26 @@ func addTurnClaimColumns(db *sql.DB) error {
 // Any OTHER error still propagates.
 func addTaskIDColumn(db *sql.DB) error {
 	_, err := statedb.AddColumnIfMissing(db, "workspace_state", "task_id", `TEXT`)
+	return err
+}
+
+// addClearedAtColumn installs the gate's third timestamp: when the workspace's
+// conversation was last DISCARDED by a `/clear` that completed.
+//
+// It is a column of its own rather than another writer of compacted_at because
+// the two facts are not the same fact and the consumers say so out loud: a
+// declined compaction reports which cut made it pointless, and telling a user
+// their conversation "has already been compacted" when it was actually cleared
+// is a false account of their own workspace. The predicate that reads them
+// treats them alike (CompactionGate.Redundant); the reporting does not.
+//
+// Added out-of-band for every other column migration's reason: SQLite's ALTER
+// TABLE ADD COLUMN is not idempotent, so an existing column is this migration's
+// SUCCESS condition rather than an error. Rows written before it carry 0, which
+// reads as "no clear has ever been observed for this workspace" — the correct
+// answer for a daemon that was not recording them.
+func addClearedAtColumn(db *sql.DB) error {
+	_, err := statedb.AddColumnIfMissing(db, "compaction_gate", "cleared_at", `INTEGER NOT NULL DEFAULT 0`)
 	return err
 }
 
