@@ -76,6 +76,14 @@ func (m *Manager) MarkPromptAccepted(
 	if err := m.rejectStartDuringHibernationLocked(workspace, "prompt acceptance"); err != nil {
 		return err
 	}
+	// THE COMPACTION GATE RE-OPENS ON THE USER'S PROMPT AND ON NOTHING ELSE.
+	// This is where the admission is already known, so the gate cannot drift
+	// from the one place that distinguishes the user speaking from the daemon
+	// refreshing a cache. It is recorded on the IDEMPOTENT branch too: a prompt
+	// arriving while a turn is already claimed is still the user speaking.
+	if admission != PromptAdmissionIdleMachinery {
+		m.noteCompactionGatePromptLocked(workspace)
+	}
 
 	active, claimant, err := turnClaim(m.db, workspace)
 	if err != nil {

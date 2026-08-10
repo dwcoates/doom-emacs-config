@@ -220,6 +220,15 @@ type fakeApplier struct {
 	// two context-cut axes the session controller opens and closes.
 	cuts   []cutCall
 	cutErr error
+	// compactionGateClosures records one workspace per NoteCompactionCompleted
+	// call — the compactions the daemon may not run a second time against.
+	compactionGateClosures []string
+	compactionGateCloseErr error
+	// compactionGates is what CompactionGateOf answers per workspace. The zero
+	// value is a workspace that has never compacted, which is never redundant
+	// and is what every test that does not care about the gate wants.
+	compactionGates   map[string]ssm.CompactionGate
+	compactionGateErr error
 	// permissions records one entry per ApplyPermission call — the permission
 	// row's open and close edges, driven off the workspace's pending count.
 	permissions []permissionCall
@@ -523,6 +532,55 @@ func (f *fakeApplier) ApplyCompacting(workspace string, compacting bool, reason 
 	defer notifyTestActivity()
 	f.cuts = append(f.cuts, cutCall{axis: "compacting", workspace: workspace, open: compacting, reason: reason})
 	return f.cutErr
+}
+
+// NoteCompactionCompleted records the compaction-gate closures the session
+// controller applied.
+func (f *fakeApplier) NoteCompactionCompleted(workspace string) error {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	defer notifyTestActivity()
+	f.compactionGateClosures = append(f.compactionGateClosures, workspace)
+	return f.compactionGateCloseErr
+}
+
+// CompactionGateOf answers the workspace's staged compaction gate.
+func (f *fakeApplier) CompactionGateOf(workspace string) (ssm.CompactionGate, error) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	if f.compactionGateErr != nil {
+		return ssm.CompactionGate{}, f.compactionGateErr
+	}
+	return f.compactionGates[workspace], nil
+}
+
+// applierFor returns the fake StateApplier a manager was built with, so a test
+// can stage what the SSM answers without threading the fake through every rig's
+// return values.
+func applierFor(t *testing.T, m *Manager) *fakeApplier {
+	t.Helper()
+	applier, ok := m.cfg.SSM.(*fakeApplier)
+	if !ok {
+		t.Fatalf("the manager's SSM is %T, not a *fakeApplier", m.cfg.SSM)
+	}
+	return applier
+}
+
+// setCompactionGate stages the gate CompactionGateOf answers for workspace.
+func (f *fakeApplier) setCompactionGate(workspace string, gate ssm.CompactionGate) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	if f.compactionGates == nil {
+		f.compactionGates = map[string]ssm.CompactionGate{}
+	}
+	f.compactionGates[workspace] = gate
+}
+
+// compactionGateClosureCount reports how many compaction-gate closures landed.
+func (f *fakeApplier) compactionGateClosureCount() int {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return len(f.compactionGateClosures)
 }
 
 // ApplyPermission records the permission-row edges the session controller applied.

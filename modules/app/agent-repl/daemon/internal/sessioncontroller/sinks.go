@@ -142,6 +142,18 @@ type StateApplier interface {
 	// ApplyCompacting opens or closes the COMPACTING axis, from the vendor's
 	// own status ticker and the first-class ContextCompacted.
 	ApplyCompacting(workspace string, compacting bool, reason string) error
+	// NoteCompactionCompleted records that the workspace's conversation was
+	// COMPACTED, so a daemon-initiated compaction is not run a second time
+	// against a conversation nothing has been added to since. It is fed from
+	// the first-class ContextCompacted alone — the compacting axis's other
+	// closing edges also fire for a compaction that died. See
+	// ssm/compactiongate.go.
+	NoteCompactionCompleted(workspace string) error
+	// CompactionGateOf reads what the log knows about the workspace's
+	// compaction history: when a compaction last completed, and when the
+	// conversation last received material a compaction would summarize. Its
+	// Redundant method is the whole policy.
+	CompactionGateOf(workspace string) (ssm.CompactionGate, error)
 	// MergeLeaseHeld reports whether merge.Coordinator currently owns the
 	// workspace's shim. While it does, the merge is the ONLY party allowed to
 	// submit, and every conversation item the session produces is a merge's
@@ -2043,6 +2055,19 @@ func (c *consumer) noteCutCompleted(ev *corev1.Event) {
 		c.fireCutWaiter(&c.clearedWaiter)
 	case *corev1.Event_ContextCompacted:
 		err = c.ssm.ApplyCompacting(c.workspace, false, "context_compacted")
+		// THE COMPACTION GATE CLOSES HERE, on the same event and for the same
+		// reason the revival's completion gate opens here: this is the only
+		// first-class report that a compaction actually finished. A compaction
+		// the daemon initiates is declined from now until the conversation is
+		// given something new to summarize (ssm/compactiongate.go).
+		//
+		// It is a SEPARATE failure from the axis close above, and is reported
+		// separately: a gate that failed to close permits a duplicate
+		// compaction, where an axis that failed to close holds a phase word.
+		if gateErr := c.ssm.NoteCompactionCompleted(c.workspace); gateErr != nil {
+			c.logf("session-controller: closing the compaction gate FAILED session=%s ws=%s seq=%d: %v (a daemon-initiated compaction may run a second time against this same conversation)",
+				c.sessionID, c.workspace, ev.GetSeq(), gateErr)
+		}
 		// A compact-first revival is waiting on exactly this event. The
 		// compacting axis closing IS the completion signal — there is no other
 		// first-class report that a compaction finished — so the revival's gate

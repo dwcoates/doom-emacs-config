@@ -14,6 +14,7 @@ import (
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/ssm"
 )
 
 // reviveRig is a hibernated, brought-up session ready for a revival.
@@ -1439,4 +1440,134 @@ func TestControllerLifetimeEndsIdempotently(t *testing.T) {
 
 	// Act, Assert — a second end must not panic on a closed channel.
 	d.markExited()
+}
+
+// ---- The compaction gate --------------------------------------------------
+//
+// The ordinary road to a compact-first revival is warm-compact, hibernate,
+// revive: the warm compaction already ran on the cache clock while the user was
+// away, so the conversation the gate offers to compact is already a summary.
+
+// compacts is derived from the cut rather than from a second list of modes, so
+// this covers every mode the router can produce.
+func TestReviveModeCompactsIsDerivedFromTheCut(t *testing.T) {
+	tests := []struct {
+		mode ReviveMode
+		want bool
+	}{
+		{mode: ReviveModeUnset, want: false},
+		{mode: ReviveModeDirect, want: false},
+		{mode: ReviveModeClear, want: false},
+		{mode: ReviveModeCompactAll, want: true},
+		{mode: ReviveModeCompactResponses, want: true},
+		{mode: ReviveModeCompactPrompts, want: true},
+		{mode: ReviveModeCompactPromptsAndResponses, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.mode.String(), func(t *testing.T) {
+			if got := tc.mode.compacts(); got != tc.want {
+				t.Fatalf("%s.compacts() = %v, want %v", tc.mode, got, tc.want)
+			}
+		})
+	}
+}
+
+// A CONVERSATION ALREADY COMPACTED IS REVIVED DIRECTLY. The user asked for two
+// things — compact this, and bring it back — and exactly one of them is already
+// done, so the revival happens and the duplicate whole-conversation read does
+// not.
+func TestReviveSessionSkipsACompactionTheConversationAlreadyHad(t *testing.T) {
+	// Arrange.
+	m, applier, hib := reviveRig(t, registry.HibernationCauseCacheExpired)
+	applier.setCompactionGate("ws", ssm.CompactionGate{CompactedAtMs: 200, PromptAtMs: 100})
+
+	// Act.
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
+		t.Fatalf("ReviveSession compact_first against an already-compacted conversation: %v", err)
+	}
+
+	// Assert — nothing was submitted, and the session is awake rather than left
+	// standing behind a gate whose compacting choices all decline.
+	c := fakeClientFor(t, m, "ws")
+	c.mu.Lock()
+	prompts := append([]string(nil), c.prompts...)
+	c.mu.Unlock()
+	if len(prompts) != 0 {
+		t.Fatalf("submitted prompts = %v, want no second compaction of an unchanged conversation", prompts)
+	}
+	if detail, asleep := hib.HibernationOf("s1"); asleep && detail.Cause != "" {
+		t.Fatalf("hibernation detail = %+v, want the sleep retired by a direct revival", detail)
+	}
+}
+
+// A PROMPT SINCE THE COMPACTION IS NEW MATERIAL, so the requested compaction is
+// the first one of a changed conversation and runs as asked.
+func TestReviveSessionCompactsWhenAPromptFollowedTheCompaction(t *testing.T) {
+	// Arrange.
+	m, applier, _ := reviveRig(t, registry.HibernationCauseCacheExpired)
+	applier.setCompactionGate("ws", ssm.CompactionGate{CompactedAtMs: 200, PromptAtMs: 300})
+
+	// Act.
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
+		t.Fatalf("ReviveSession compact_first: %v", err)
+	}
+	awaitCompactionWaiter(t, m, "ws")
+
+	// Assert.
+	c := fakeClientFor(t, m, "ws")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.prompts) != 1 || c.prompts[0] != compactCommandText {
+		t.Fatalf("submitted prompts = %v, want exactly %q", c.prompts, compactCommandText)
+	}
+}
+
+// AN UNREADABLE GATE REVIVES WITHOUT COMPACTING. The user is standing in front
+// of a hibernated session asking for it back; the compaction is what the doubt
+// is about, so the compaction is what is declined.
+func TestReviveSessionRevivesDirectlyWhenTheGateCannotBeRead(t *testing.T) {
+	// Arrange.
+	m, applier, hib := reviveRig(t, registry.HibernationCauseCacheExpired)
+	applier.reconcMutex.Lock()
+	applier.compactionGateErr = errors.New("the state store is gone")
+	applier.reconcMutex.Unlock()
+
+	// Act.
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
+		t.Fatalf("ReviveSession compact_first on an unreadable gate = %v, want the session revived directly", err)
+	}
+
+	// Assert.
+	c := fakeClientFor(t, m, "ws")
+	c.mu.Lock()
+	prompts := append([]string(nil), c.prompts...)
+	c.mu.Unlock()
+	if len(prompts) != 0 {
+		t.Fatalf("submitted prompts = %v, want nothing submitted on a gate the daemon could not read", prompts)
+	}
+	if detail, asleep := hib.HibernationOf("s1"); asleep && detail.Cause != "" {
+		t.Fatalf("hibernation detail = %+v, want the sleep retired by a direct revival", detail)
+	}
+}
+
+// A CLEAR IS NOT A COMPACTION. `/clear` discards the conversation rather than
+// summarizing it, so a conversation compacted an hour ago has lost nothing by
+// also being cleared now.
+func TestReviveSessionClearsEvenWhenTheConversationWasAlreadyCompacted(t *testing.T) {
+	// Arrange.
+	m, applier, _ := reviveRig(t, registry.HibernationCauseCacheExpired)
+	applier.setCompactionGate("ws", ssm.CompactionGate{CompactedAtMs: 200, PromptAtMs: 100})
+
+	// Act.
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeClear); err != nil {
+		t.Fatalf("ReviveSession clear: %v", err)
+	}
+
+	// Assert.
+	c := fakeClientFor(t, m, "ws")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.prompts) != 1 || c.prompts[0] != clearCommandText {
+		t.Fatalf("submitted prompts = %v, want exactly %q", c.prompts, clearCommandText)
+	}
 }

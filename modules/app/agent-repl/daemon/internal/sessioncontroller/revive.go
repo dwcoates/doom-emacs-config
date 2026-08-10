@@ -213,6 +213,19 @@ func (m ReviveMode) cuts() bool {
 	return m != ReviveModeUnset && m != ReviveModeDirect
 }
 
+// compacts reports whether the mode's context cut is a COMPACTION — a
+// whole-conversation model call that summarizes rather than discards.
+//
+// IT IS DERIVED FROM THE CUT rather than listing the compacting modes a second
+// time. `claimsCompaction` is already the one place that says which cuts are
+// model calls over the whole history — it is what takes the cold-read alarm's
+// claim — and a fifth compacting scope added to cut() is a scope this answers
+// for without being edited. A mode with no cut compacts nothing.
+func (m ReviveMode) compacts() bool {
+	cut, err := m.cut()
+	return err == nil && cut.claimsCompaction
+}
+
 // cut is the context cut this mode drives.
 //
 // A NON-CUTTING MODE IS AN INVARIANT VIOLATION, not a case to default: the only
@@ -325,6 +338,39 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	}
 	m.logf("session-controller: revive BEGIN ws=%q session=%s mode=%s slept_since_ms=%d cause=%s",
 		workspace, sessionID, mode, detail.SinceMs, detail.Cause)
+
+	// A COMPACTION THIS SESSION HAS ALREADY HAD IS NOT PERFORMED A SECOND TIME.
+	// The ordinary road to this line is warm-compact, hibernate, revive — the
+	// warm compaction ran on the cache clock while the user was away, so the
+	// conversation the gate offers to compact is already a summary, and
+	// compacting it again would read the whole history to produce a worse
+	// summary of the same material.
+	//
+	// IT IS A DOWNGRADE TO DIRECT, NOT A REFUSAL. The user asked for two things
+	// — compact this, and bring it back — and exactly one of them is already
+	// done. Refusing the whole command would leave the session asleep behind a
+	// gate whose compacting choices all decline, which is a worse answer to
+	// "revive my session" than simply reviving it.
+	//
+	// THE CLEAR MODE IS UNTOUCHED. `/clear` is not a compaction: it discards the
+	// conversation rather than summarizing it, so a conversation that was
+	// compacted an hour ago has lost nothing by also being cleared now.
+	if mode.compacts() {
+		redundant, gate, err := m.compactionRedundant(workspace)
+		if err != nil {
+			// THE REVIVAL IS NOT FAILED OVER THIS. An unreadable gate leaves the
+			// daemon unable to prove a duplicate, and the user is standing in
+			// front of a hibernated session asking for it back; the compaction is
+			// what the doubt is about, so the compaction is what is declined.
+			m.errorf("session-controller: revive COMPACTION DECLINED ON AN UNREADABLE GATE ws=%q session=%s mode=%s error=%v — the daemon cannot tell whether this conversation has already been compacted, so it is revived DIRECTLY rather than risking a second whole-conversation compaction",
+				workspace, sessionID, mode, err)
+			mode = ReviveModeDirect
+		} else if redundant {
+			m.logf("session-controller: revive COMPACTION SKIPPED ws=%q session=%s mode=%s %s — this conversation has already been compacted and nothing has been said to it since, so the requested compaction would read the whole history to summarize a summary; the session is revived DIRECTLY instead",
+				workspace, sessionID, mode, compactionRedundantDetail(gate))
+			mode = ReviveModeDirect
+		}
+	}
 
 	if mode == ReviveModeDirect {
 		// THE CLEAR COMES FIRST on this path. There is nothing to gate: the
