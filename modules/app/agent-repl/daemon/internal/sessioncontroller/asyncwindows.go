@@ -27,9 +27,12 @@
 //     makes StampSpawnedBubbleIDs stamp the card exactly as an agent spawn
 //     stamps its own.
 //   - FOLD, for every item of every later event, until an edge closes the
-//     window. The Skill calls' OWN cards are the one exception: a call's result
-//     and its body settle the card on the feed, because the card is what the
-//     bubble hangs under.
+//     window. A window's OWN opening call is the one exception, and it is an
+//     exception about DESTINATION rather than about folding at all: the card is
+//     what the bubble hangs under, so it can never land inside the bubble it
+//     carries. The outermost window's card settles on the feed; a nested
+//     window's card folds into the window outside it, so the inner bubble
+//     renders inside its parent's conversation (see windowFoldTarget).
 //   - SETTLE, on the user's own next prompt or on an interrupt — for EVERY open
 //     window at once, because both edges are the user taking the whole session
 //     back rather than closing one frame of it.
@@ -94,17 +97,34 @@ func (s *asyncBubbleStore) mergeWindowLocked() *asyncWindow {
 	return nil
 }
 
-// windowOriginToolUseIDs reports the calls every open window was opened by.
+// windowFoldTarget says, for ONE open window, where the items of the call that
+// opened it go: the call itself, the bubble it opened, and the bubble whose
+// conversation its CARD belongs to.
 //
-// EVERY window's, not just the innermost one's: each of those cards is where a
-// bubble hangs, and folding one away would leave its bubble anchored to a card
-// the reader never sees.
-func (s *asyncBubbleStore) windowOriginToolUseIDs() []string {
+// The card is where the window's bubble hangs, so it can never be folded into
+// the window's own bubble — that would nest the bubble inside itself. It is
+// folded into the window OUTSIDE it instead, which is what puts a nested
+// skill's card, and the bubble hanging under it, inside its parent's
+// conversation exactly as a subagent's Task card sits inside the agent that
+// dispatched it. An OUTERMOST window has no such parent, and its card stays on
+// the top-level feed — reported here as an empty parentBubbleID.
+type windowFoldTarget struct {
+	origin         string
+	bubbleID       string
+	parentBubbleID string
+}
+
+// windowFoldTargets reports every open window's fold target, outermost first.
+func (s *asyncBubbleStore) windowFoldTargets() []windowFoldTarget {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.windows))
-	for _, w := range s.windows {
-		out = append(out, w.origin)
+	out := make([]windowFoldTarget, 0, len(s.windows))
+	for i, w := range s.windows {
+		t := windowFoldTarget{origin: w.origin, bubbleID: w.bubbleID}
+		if i > 0 {
+			t.parentBubbleID = s.windows[i-1].bubbleID
+		}
+		out = append(out, t)
 	}
 	return out
 }
@@ -232,25 +252,45 @@ func (s *asyncBubbleStore) innermostWindowLocked() *asyncWindow {
 	return &s.windows[len(s.windows)-1]
 }
 
+// windowByBubbleLocked is the OPEN window on the named bubble, nil when no open
+// window names it. It is what makes a caller-named fold destination checkable
+// rather than trusted.
+func (s *asyncBubbleStore) windowByBubbleLocked(bubbleID string) *asyncWindow {
+	for i := range s.windows {
+		if s.windows[i].bubbleID == bubbleID {
+			return &s.windows[i]
+		}
+	}
+	return nil
+}
+
 // foldWindowEmissions folds one batch of the session's emissions into the
-// INNERMOST open window and returns the incremental update that carries them.
+// NAMED open window's bubble and returns the incremental update that carries
+// them.
 //
-// DEEPEST WINS, and there is nothing to arbitrate: an emission produced while a
-// skill invoked inside another skill is running belongs to the inner one, which
-// is the whole reason the stack is a stack. The outer window still holds it
-// transitively, through the child's parent pointer.
+// THE CALLER NAMES THE BUBBLE because two destinations exist and only the
+// caller can tell them apart: an ordinary emission belongs to the innermost
+// window, while the items of a window's OWN opening call belong to the window
+// outside it (see windowFoldTarget). Deepest still wins for everything else —
+// an emission produced while a skill invoked inside another skill is running
+// belongs to the inner one, which is the whole reason the stack is a stack.
+//
+// THE NAMED BUBBLE MUST STILL BE AN OPEN WINDOW. A fold aimed at anything else
+// is refused rather than applied: the caller resolved the id from a snapshot of
+// the stack, and a snapshot that has gone stale must fail loudly instead of
+// attributing the session's conversation to a bubble that no longer owns it.
 //
 // It also INDEXES the calls the batch made, which is what gives a subagent
 // dispatched inside the window its parent pointer: a nested detachment's bubble
 // resolves its parent through parentByToolUse exactly as a detached agent's
 // nested dispatch does, so the tree reads truthfully rather than hanging the
 // child at the top level beside the work that started it.
-func (s *asyncBubbleStore) foldWindowEmissions(ems []*frontendv1.AgentEmission, atMs int64) (*frontendv1.AsyncBubbleUpdate, error) {
+func (s *asyncBubbleStore) foldWindowEmissions(bubbleID string, ems []*frontendv1.AgentEmission, atMs int64) (*frontendv1.AsyncBubbleUpdate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	w := s.innermostWindowLocked()
+	w := s.windowByBubbleLocked(bubbleID)
 	if w == nil {
-		return nil, nil
+		return nil, fmt.Errorf("session-controller: window fold REFUSED — bubble %q names no OPEN window, so the %d emission(s) aimed at it are not folded rather than being attributed to work that no longer owns the session", bubbleID, len(ems))
 	}
 	b := s.byID[w.bubbleID]
 	if b == nil {
@@ -428,10 +468,19 @@ func (c *consumer) openSkillInvocationWindow(inv frontend.SkillInvocation, ev *c
 // record, a machinery record or a keep-alive turn is already gone and cannot be
 // folded into a window's conversation as though the work had said it.
 //
+// WHERE A WINDOW'S OWN CARD GOES. The items of the call that OPENED a window
+// are never folded into that window's own bubble — the card is where the bubble
+// hangs, and a bubble hanging inside itself is not a tree. An OUTERMOST window's
+// card stays on the top-level feed, and a NESTED window's card folds into the
+// window outside it, which is what makes a skill invoked inside another skill
+// render inside its parent's conversation with its bubble hanging under it —
+// the same shape a subagent's Task card takes inside the agent that dispatched
+// it (see windowFoldTarget).
+//
 // WHAT STAYS ON THE FEED, and why each one:
 //
-//   - every open window's Skill call's own result and body, so its card settles
-//     normally — the card is where the bubble hangs.
+//   - the OUTERMOST open window's Skill call's own result and body, so its card
+//     settles normally — the card is where the bubble hangs.
 //   - the USER's own next prompt, which is the settle edge itself: it is the
 //     user taking the session back, so it belongs to them and to the feed.
 //   - any item with no emission arm to carry it (a permission request, a
@@ -439,17 +488,24 @@ func (c *consumer) openSkillInvocationWindow(inv frontend.SkillInvocation, ev *c
 //     and no second copy anywhere, and a permission prompt that vanishes wedges
 //     the session behind a question nobody can answer.
 func (c *consumer) foldWindows(cd *frontendv1.ConversationDelta, ev *corev1.Event) asyncPush {
-	if !c.bubbles.windowsOpen() {
+	targets := c.bubbles.windowFoldTargets()
+	if len(targets) == 0 {
 		return asyncPush{}
 	}
-	origins := c.bubbles.windowOriginToolUseIDs()
+	innermost := targets[len(targets)-1].bubbleID
 	var push asyncPush
-	var folded []*frontendv1.AgentEmission
+	var folded windowFoldBatches
 	items := cd.GetItems()
 	kept := items[:0]
 	for i, item := range items {
-		if itemBelongsToAnyCall(item, origins) {
-			kept = append(kept, item)
+		if target, ok := windowTargetForItem(item, targets); ok {
+			if target.parentBubbleID == "" {
+				kept = append(kept, item)
+				continue
+			}
+			// A nested window's own card: it belongs to the conversation OUTSIDE
+			// it, so the bubble it opened renders under it there.
+			folded.add(target.parentBubbleID, frontend.EmissionsFromItem(item))
 			continue
 		}
 		if item.GetUserMessage() != nil && len(frontend.EmissionsFromItem(item)) == 0 {
@@ -457,8 +513,8 @@ func (c *consumer) foldWindows(cd *frontendv1.ConversationDelta, ev *corev1.Even
 			// the curators above, and a user record carrying tool results is the
 			// harness handing the work its own results — so what is left is a
 			// person typing, which is the user taking the session back.
-			push.absorb(c.foldWindowBatch(folded, ev))
-			folded = nil
+			push.absorb(c.foldWindowBatches(folded, ev))
+			folded = windowFoldBatches{}
 			push.absorb(c.settleWindowsOnPrompt(item, ev))
 			kept = append(kept, items[i:]...)
 			break
@@ -470,37 +526,75 @@ func (c *consumer) foldWindows(cd *frontendv1.ConversationDelta, ev *corev1.Even
 			kept = append(kept, item)
 			continue
 		}
-		folded = append(folded, ems...)
+		folded.add(innermost, ems)
 	}
 	cd.Items = kept
-	push.absorb(c.foldWindowBatch(folded, ev))
+	push.absorb(c.foldWindowBatches(folded, ev))
 	return push
 }
 
-// itemBelongsToAnyCall reports whether one item is part of the card of ANY open
-// window's invocation.
-func itemBelongsToAnyCall(item *frontendv1.ConversationItem, toolUseIDs []string) bool {
-	for _, id := range toolUseIDs {
-		if frontend.ItemBelongsToCall(item, id) {
-			return true
+// windowTargetForItem reports the open window whose CARD this item is part of.
+func windowTargetForItem(item *frontendv1.ConversationItem, targets []windowFoldTarget) (windowFoldTarget, bool) {
+	for _, t := range targets {
+		if frontend.ItemBelongsToCall(item, t.origin) {
+			return t, true
 		}
 	}
-	return false
+	return windowFoldTarget{}, false
 }
 
-// foldWindowBatch hands one event's diverted emissions to the store and
+// windowFoldBatches accumulates one event's diverted emissions PER DESTINATION
+// BUBBLE, in the order the destinations were first touched.
+//
+// Two destinations exist in one event — the innermost window, and the parent of
+// a nested window whose card this event carried — and the batches are kept
+// apart rather than merged because merging them would attribute one window's
+// card to the other window's conversation. Within a destination the encounter
+// order is the fold order, which is what keeps a bubble's conversation in the
+// order the session produced it.
+type windowFoldBatches struct {
+	order []string
+	byID  map[string][]*frontendv1.AgentEmission
+}
+
+// add appends one item's emissions to the batch bound for bubbleID.
+func (b *windowFoldBatches) add(bubbleID string, ems []*frontendv1.AgentEmission) {
+	if len(ems) == 0 {
+		return
+	}
+	if b.byID == nil {
+		b.byID = map[string][]*frontendv1.AgentEmission{}
+	}
+	if _, seen := b.byID[bubbleID]; !seen {
+		b.order = append(b.order, bubbleID)
+	}
+	b.byID[bubbleID] = append(b.byID[bubbleID], ems...)
+}
+
+// foldWindowBatches hands every accumulated batch to the store, in
+// first-touched order, and classifies each refusal as any other async refusal
+// is classified.
+func (c *consumer) foldWindowBatches(batches windowFoldBatches, ev *corev1.Event) asyncPush {
+	var push asyncPush
+	for _, bubbleID := range batches.order {
+		push.absorb(c.foldWindowBatch(bubbleID, batches.byID[bubbleID], ev))
+	}
+	return push
+}
+
+// foldWindowBatch hands one destination's diverted emissions to the store and
 // classifies the refusal if it comes back with one.
-func (c *consumer) foldWindowBatch(ems []*frontendv1.AgentEmission, ev *corev1.Event) asyncPush {
+func (c *consumer) foldWindowBatch(bubbleID string, ems []*frontendv1.AgentEmission, ev *corev1.Event) asyncPush {
 	if len(ems) == 0 {
 		return asyncPush{}
 	}
-	up, err := c.bubbles.foldWindowEmissions(ems, c.asyncInstant(ev))
+	up, err := c.bubbles.foldWindowEmissions(bubbleID, ems, c.asyncInstant(ev))
 	push := asyncPush{}
 	gaps, residual := splitAsyncGaps(err)
 	push.Faults = append(push.Faults, gaps...)
 	if residual != nil {
-		c.warn("session-controller: WINDOW BUBBLE FOLD DEGRADED session=%s ws=%q seq=%d — %d emission(s) of the window's work will not appear in its bubble, and they have already left the top-level feed: %v",
-			c.sessionID, c.workspace, ev.GetSeq(), len(ems), residual)
+		c.warn("session-controller: WINDOW BUBBLE FOLD DEGRADED session=%s ws=%q seq=%d bubble=%s — %d emission(s) of the window's work will not appear in its bubble, and they have already left the top-level feed: %v",
+			c.sessionID, c.workspace, ev.GetSeq(), bubbleID, len(ems), residual)
 	}
 	if up != nil {
 		push.Updates = append(push.Updates, up)
