@@ -48,6 +48,7 @@ import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.
 import { DEFERRED_CLASS, HEIGHT_VAR, PLACEHOLDER_CLASS } from "../src/lazy-item.js";
 import { StubIntersectionObserver, withIntersectionObserver } from "./intersection-stub.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
+import { FIXED_FOLD_CLASS } from "../src/fold.js";
 import { AsyncSource } from "../src/protocol.js";
 import type { UnwrappedEmission } from "../src/agent-emission.js";
 import type { AsyncBubble } from "../src/async-bubble.js";
@@ -3346,21 +3347,58 @@ describe("activity panel", () => {
     expect(html).not.toContain("agent-activity");
   });
 
-  it("shows the ticker face while closed and none of the child feed", () => {
-    // Arrange + Act
+  it("keeps the ticker face as the fixed panel's heading on a teal card", () => {
+    // Arrange + Act — the step count is as useful above an open panel as it
+    // was in place of a closed one.
     const html = renderItem(agentTool(), undefined, undefined, panelCtx([childBash()]));
     // Assert
     expect(html).toContain("agent-ticker");
     expect(html).toContain("1 step · Bash: ls -la");
-    expect(html).not.toContain("agent-panel");
   });
 
-  it("renders the child feed inside the open panel", () => {
-    // Arrange + Act
-    const html = renderItem(agentTool(), undefined, undefined, panelCtx([childBash()], true));
+  it("lays a teal card's child feed out even with every fold closed", () => {
+    // Arrange + Act — a teal card's nested output is its content, not an
+    // aside, so `isOpen` says nothing about whether the panel is drawn.
+    const html = renderItem(agentTool(), undefined, undefined, panelCtx([childBash()]));
     // Assert
     expect(html).toContain("agent-panel");
     expect(html).toContain("tool-bash");
+    expect(html).toContain("$ ls -la");
+  });
+
+  it("renders a teal card's panel with no toggle, so no click can collapse it", () => {
+    // Arrange + Act
+    const html = renderItem(agentTool(), undefined, undefined, panelCtx([childBash()], true));
+    // Assert
+    expect(html).toContain(FIXED_FOLD_CLASS);
+    expect(html).not.toContain(`data-panel-toggle="${agentTool().toolUseId}"`);
+  });
+
+  it("drops the caret from a teal card's fixed panel, having no state to announce", () => {
+    // Arrange + Act
+    const html = renderItem(agentTool(), undefined, undefined, panelCtx([childBash()]));
+    // Assert
+    expect(html).not.toContain("agent-caret");
+  });
+
+  it("still folds a GREY spawner's child feed shut, panel and all", () => {
+    // Arrange — a Workflow card wears no teal, so it keeps click-to-open.
+    const wf: ToolItem = { ...agentTool(), toolName: "Workflow" };
+    // Act
+    const html = renderItem(wf, undefined, undefined, panelCtx([childBash()]));
+    // Assert
+    expect(html).toContain("agent-ticker");
+    expect(html).not.toContain("agent-panel");
+    expect(html).not.toContain(FIXED_FOLD_CLASS);
+  });
+
+  it("renders a grey spawner's child feed once its fold is opened", () => {
+    // Arrange
+    const wf: ToolItem = { ...agentTool(), toolName: "Workflow" };
+    // Act
+    const html = renderItem(wf, undefined, undefined, panelCtx([childBash()], true));
+    // Assert
+    expect(html).toContain("agent-panel");
     expect(html).toContain("$ ls -la");
   });
 
@@ -4393,11 +4431,21 @@ describe("async fold", () => {
     expect(html).not.toContain("tool-spinner");
   });
 
-  it("costs nothing while closed, rendering none of the stream", () => {
-    // Arrange / Act
-    const html = renderItem(sourcedCard(), undefined, undefined, asyncPanels(false, agentTranscript));
+  it("costs nothing while closed on a grey card, rendering none of the stream", () => {
+    // Arrange — a Workflow card wears no teal, so its stream still folds.
+    const grey = sourcedCard({}, { toolName: "Workflow" });
+    // Act
+    const html = renderItem(grey, undefined, undefined, asyncPanels(false, agentTranscript));
     // Assert
     expect(html).not.toContain("scanning the repo");
+  });
+
+  it("renders a TEAL card's stream with every fold closed, since it does not fold", () => {
+    // Arrange / Act — an Agent card's detached transcript is its content.
+    const html = renderItem(sourcedCard(), undefined, undefined, asyncPanels(false, agentTranscript));
+    // Assert
+    expect(html).toContain("scanning the repo");
+    expect(html).toContain(FIXED_FOLD_CLASS);
   });
 
   it("renders a background agent's transcript as NESTED BUBBLES when open", () => {
@@ -4442,8 +4490,9 @@ describe("async fold", () => {
     ].join("\n");
   }
 
-  it("folds a nested spawn card inside a transcript — the recursion payoff", () => {
-    // Arrange / Act — the transcript's own Agent spawn wears a fold too.
+  it("nests a spawn card's own fixed panel inside a transcript — the recursion payoff", () => {
+    // Arrange / Act — the transcript's own Agent spawn is a teal card too, so
+    // it recurses as a second fixed panel rather than a nested toggle.
     const html = renderItem(
       sourcedCard(),
       undefined,
@@ -4451,7 +4500,8 @@ describe("async fold", () => {
       asyncPanels(true, nestedSpawnTranscript("a7")),
     );
     // Assert
-    expect(html).toContain(`data-panel-toggle="async:ag1"`);
+    expect(html.match(new RegExp(FIXED_FOLD_CLASS, "g"))).toHaveLength(2);
+    expect(html).not.toContain(`data-panel-toggle="async:ag1"`);
   });
 
   it("cuts the fold of a nested spawn announcing an ancestor's own id", () => {
