@@ -52,7 +52,7 @@ import { SessionStartGate, convert, promptPreview } from "../proto/convert.js";
 import { isEphemeral, toEphemeralEvent, toPersistentEvent, StreamMessageTracker } from "../proto/delta.js";
 import { ControlDispatch, ModelSelectionError, type SdkControlTarget, type ToolPermissionResult } from "./control.js";
 import { SessionServer, type SessionServerHandlers } from "./server.js";
-import { StoreClient, type ReplayOutcome } from "./store-client.js";
+import { StoreClient, StoreWriteDeferredError, type ReplayOutcome } from "./store-client.js";
 import { envelopeIs, unpackAs, type Any } from "./framing.js";
 import { ClaudeStreamMessageSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
 import { QueueOp, TranscriptLineSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
@@ -1686,6 +1686,23 @@ export class UdsSession {
       // nevertheless complete and ordered in this same acknowledged batch.
       if (forwarded !== null) await forwarded.promise;
     } catch (cause) {
+      // Deferred, not lost: the lifecycle/degradation pair is fsynced in the
+      // spill journal and the next shim on this workspace replays it, which is
+      // the same delivery path a detached daemon relies on anyway.
+      if (cause instanceof StoreWriteDeferredError) {
+        LOGGER.log({
+          level: "error",
+          operation: "shim.uds-session.unexpected-termination-delivery",
+          ...diagnostic.logFields,
+          component: report.component,
+          reason: report.reason,
+          failed_operation: "store.write.unexpected_query_termination",
+          outcome: "termination_report_deferred_to_spill_journal",
+          spill_path: cause.spillPath,
+          cause,
+        }, "unexpected SDK termination degradation was not delivered by this shim; it is durably spilled and the next shim replays it");
+        return;
+      }
       LOGGER.log({
         level: "error",
         operation: "shim.uds-session.unexpected-termination-delivery",
@@ -2134,6 +2151,24 @@ export class UdsSession {
     try {
       await this.persistQueryTermination(kind, cause);
     } catch (err) {
+      // A DELIBERATE teardown that spills its receipt is not a lost receipt.
+      // The record is on disk and the next shim replays it, so an orderly
+      // shutdown over an unreachable store completes normally instead of
+      // exiting nonzero and presenting as an unexpected termination.
+      if (err instanceof StoreWriteDeferredError) {
+        LOGGER.log({
+          level: "error",
+          agent_repl_session_id: this.deps.sessionId,
+          query_instance_id: this.queryInstanceId,
+          store_key: this.store.storeSessionId(),
+          termination_kind: kind,
+          termination_cause: cause,
+          outcome: "termination_receipt_deferred_to_spill_journal",
+          spill_path: err.spillPath,
+          cause: err,
+        }, "query termination was not delivered by this shim; it is durably spilled and the next shim replays it");
+        return;
+      }
       LOGGER.log({
         level: "error",
         agent_repl_session_id: this.deps.sessionId,
@@ -2290,6 +2325,28 @@ export class UdsSession {
           const latency = persistent.payload.case === "messageLatency"
             ? persistent.payload.value
             : undefined;
+          // NOT A MISSING RECEIPT. A deferred write is fsynced in the spill
+          // journal and replayed by the next shim on this workspace, so the
+          // evidence exists — this shim simply did not deliver it. Throwing
+          // here would leave the SDK pump, be caught as an "iterator failure",
+          // and end a query the store never had any business ending: exactly
+          // how a store bounce came to kill a live turn.
+          if (cause instanceof StoreWriteDeferredError) {
+            LOGGER.log({
+              level: "error",
+              operation: "shim.uds-session.persistent-evidence",
+              agent_repl_session_id: this.deps.sessionId,
+              claude_session_id: persistent.sessionId,
+              query_instance_id: this.queryInstanceId,
+              api_message_id: latency?.uuid ?? this.streamMessages.current(),
+              evidence_kind: latency !== undefined ? "message_latency" : "response_usage",
+              failed_operation: latency !== undefined ? "store.write.message_latency" : "store.write.response_usage",
+              outcome: "persistent_evidence_deferred_to_spill_journal",
+              spill_path: cause.spillPath,
+              cause,
+            }, "persistent SDK structural evidence was not delivered by this shim; it is durably spilled and the next shim replays it, so the query continues");
+            return;
+          }
           LOGGER.log({
             level: "error",
             operation: "shim.uds-session.persistent-evidence",
@@ -2742,6 +2799,31 @@ export class UdsSession {
         }, "TurnEnded is durably observable; retired its handshake claim");
       }
     } catch (cause) {
+      // Deferred, not lost: the batch is fsynced in the spill journal and the
+      // next shim replays it. The TurnEnded handshake claim deliberately STAYS
+      // pending — there is no receipt yet — but the query is not ended over a
+      // store this shim merely could not reach.
+      if (cause instanceof StoreWriteDeferredError) {
+        LOGGER.log({
+          level: "error",
+          operation: "shim.uds-session.persistent-evidence",
+          agent_repl_session_id: this.deps.sessionId,
+          claude_session_id: vendor.sessionId,
+          query_instance_id: this.queryInstanceId,
+          ...(rootTurnId === undefined ? {} : { request_id: rootTurnId, turn_id: rootTurnId }),
+          sdk_type: msg.type,
+          evidence_kind: terminalTurnId === undefined ? "vendor_response" : "terminal_turn_batch",
+          persistent_event_count: persistentBatch.length,
+          failed_operation: terminalTurnId === undefined
+            ? "store.write.vendor_response"
+            : "store.write.terminal_turn_batch",
+          outcome: "persistent_evidence_deferred_to_spill_journal",
+          spill_path: cause.spillPath,
+          pending_turn_end_ids: this.pendingTurnEndIds,
+          cause,
+        }, "persistent SDK event batch was not delivered by this shim; it is durably spilled and the next shim replays it, so the query continues");
+        return;
+      }
       LOGGER.log({
         level: "error",
         operation: "shim.uds-session.persistent-evidence",
