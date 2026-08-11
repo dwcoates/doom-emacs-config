@@ -324,6 +324,41 @@ func sessionPublicationGate(bridge WorkspaceCreationBridge, logf func(string, ..
 	}
 }
 
+// memoizedSessionPublicationGate is sessionPublicationGate for ONE snapshot
+// composition.
+//
+// The live gate asks the creation bridge per FRAME, and the bridge answers by
+// listing the whole job store — copying and sorting every job, under the
+// store's own mutex, which a concurrent boot sweep holds while it persists its
+// mutations. A connect snapshot asks that question once per view across eight
+// view families: at 178 workspaces / 289 sessions that is well over a thousand
+// full job-store listings for one snapshot, so the composition cost grew as
+// O(views x jobs) and, worse, serialized against every sweep write. Memoizing
+// per composition makes it O(views + jobs): the same question about the same
+// (workspace, session) pair inside one snapshot has exactly one answer anyway,
+// because a snapshot is a view AS OF an instant.
+//
+// It memoizes only the ALLOW/HOLD verdict, never an error: an error is the
+// invariant violation the callers panic on, and a cached one would report a
+// failure that is no longer happening.
+func memoizedSessionPublicationGate(bridge WorkspaceCreationBridge, logf func(string, ...any)) func(workspace, sessionID string) (bool, error) {
+	gate := sessionPublicationGate(bridge, logf)
+	type key struct{ workspace, sessionID string }
+	cache := make(map[key]bool)
+	return func(workspace, sessionID string) (bool, error) {
+		k := key{workspace: workspace, sessionID: sessionID}
+		if allowed, ok := cache[k]; ok {
+			return allowed, nil
+		}
+		allowed, err := gate(workspace, sessionID)
+		if err != nil {
+			return false, err
+		}
+		cache[k] = allowed
+		return allowed, nil
+	}
+}
+
 // mergeSink adapts the SSM to merge.StateSink: every merge-state transition the
 // merge.Driver emits is appended to the SSM's per-workspace log (§9.2, §4.6). A sink
 // failure propagates so the merge.Driver aborts loudly rather than losing state.
