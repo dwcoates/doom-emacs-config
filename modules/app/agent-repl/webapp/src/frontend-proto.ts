@@ -10,7 +10,7 @@
  * - `ConversationDelta.items` is a repeated typed `ConversationItem`: a thin
  *   envelope {uuid, tsMs, requestId} carrying EXACTLY ONE typed data.v1/core.v1
  *   payload arm (assistantMessage, userMessage, toolUse, toolResult,
- *   toolUseResult, result, contextCleared, contextCompacted, sessionCommand,
+ *   toolUseResult, result, contextCleared, contextCompacted, daemonInterceptedCommand,
  *   permission, systemFailure). The webapp DECOMPOSES those typed payloads back into its
  *   render vocabulary in `state-adapter.ts`; the OLD `kind`-discriminated
  *   pre-rendered Struct vocabulary is gone.
@@ -833,7 +833,7 @@ export const MESSAGE_ARMS = [
   // of the `FailureKind` arm vocabulary this arm carries.
   "failureCard",
   "skillBody",
-  "sessionCommand",
+  "daemonInterceptedCommand",
   // A piece of DETACHED WORK. THIS MESSAGE IS THE WORK — its uuid is the work's
   // id and its lineage is the work's place in the feed. What rides here is the
   // work's state as of this delivery; everything it produces afterwards arrives
@@ -848,7 +848,7 @@ export type MessageArm = (typeof MESSAGE_ARMS)[number];
  * as a closed set.
  *
  * The daemon recognizes one of these before it forwards the submit and pushes
- * a `SessionCommandItem` INSTEAD of a prompt bubble, so this set is also the
+ * a `DaemonInterceptedCommandItem` INSTEAD of a prompt bubble, so this set is also the
  * complete set of things that can suppress a bubble. Anything not named by the
  * schema is a prompt and is always drawn.
  *
