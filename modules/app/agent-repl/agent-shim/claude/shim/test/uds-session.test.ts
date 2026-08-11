@@ -2548,6 +2548,47 @@ describe("UdsSession lifetime: reattach", () => {
   });
 });
 
+describe("UdsSession lifetime: reattach announces async work", () => {
+  it("carries the live detached-task set on the reattach handshake", async () => {
+    // Arrange: a session with a detached agent running and NO turn in flight —
+    // the exact shape the daemon used to read as idle. rigWithDetached is
+    // scoped to its own describe, so the launch is driven inline here.
+    const { session, store, daemon, daemonListener, query } = await rig({ storeSessionId: "vendor-uuid" });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1", text: "fan out", promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    const start = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length), lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
+    query.emit({
+      type: "system", subtype: "task_started", uuid: "task-start-0",
+      session_id: "vendor-uuid", task_id: "agent-0", task_type: "local_agent",
+      tool_use_id: "tool-agent-0", description: "detached agent 0",
+    } as unknown as SdkMessageLike);
+    const started = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(started.batch!.events.length), lastSeq: 10n,
+    }));
+    // Waiting on the session's OWN set is what makes this deterministic: the
+    // handshake reads that set, so asking before the launch registered would
+    // race the SDK stream rather than test it.
+    await until(() => session.detachedTaskCount() === 1);
+
+    // Act: the daemon vanishes and the shim redials.
+    daemon.destroy();
+    await until(() => !session.isConnected());
+    const daemon2 = await daemonListener.next();
+    cleanups.push(() => daemon2.destroy());
+    const hello = await daemon2.next(ShimHelloSchema);
+
+    // Assert: the async work is visible on the frame the roll decision reads,
+    // even though no turn field reports anything.
+    expect(hello.liveTaskSet?.taskIds).toEqual(["agent-0"]);
+  });
+});
+
 describe("UdsSession lifetime: SDK stream termination", () => {
   it("persists startup failure and its cursor-releasing degradation in one batch", async () => {
     // Arrange: the query exists, but its initial lifecycle receipt is rejected
