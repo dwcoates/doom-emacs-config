@@ -834,11 +834,22 @@ func main() {
 		Source:          &server.ShimConnSource{Listener: shimListener, Deaths: shimSpawnWatch},
 		FileDiagnostics: fileDiagnostics,
 		Locator:         &server.SessionLocator{Reg: sessionRegistry},
-		// THE SAME PARKED-CONNECTION AUTHORITY THE SPAWN CHOKEPOINT USES. The
-		// workspace-ownership gate must be able to tell a survivor that has
-		// already redialled from one that never will, or it evicts the former
-		// (survivingshim.go).
-		ShimConnected: shimListener.Connected,
+		// THE BROAD PREDICATE, and this is the ONE place that takes it. The
+		// workspace-ownership gate must tell a survivor that has already
+		// redialled from one that never will, or it evicts the former
+		// (survivingshim.go) — and the survivor it is asking about is attached
+		// under the controller generation the bounce RETIRED, while the gate
+		// itself has just minted a new one. `Connected` answers only about
+		// PARKED connections, so it reports "no shim here" about a shim in
+		// mid-conversation with this process, and the gate kills it.
+		//
+		// Every other wiring of the listener probe below deliberately keeps
+		// `Connected`: the spawn chokepoint, the spawn watch, the boot sweeper
+		// and the drain lease all ask the narrow question, and the broad answer
+		// would change their behavior — most damagingly the spawner's, which
+		// would decline to spawn a bounce's replacement because the retiring
+		// generation's claim still reads as connected.
+		ShimConnected: shimListener.Attached,
 		ShimFate: func(workspace string, adopted bool, reason string) {
 			if adopted {
 				bounceSettlement.Adopted(workspace, reason)

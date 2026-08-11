@@ -460,8 +460,9 @@ type Config struct {
 	// Default = sessionlock.WorkspaceLockHolders
 	WorkspaceLockHolders func(cwd string) ([]int, error)
 
-	// ShimConnected reports whether the named session's shim has ALREADY dialled
-	// in and is parked at this daemon's shim listener.
+	// ShimConnected reports whether the named session's shim is TALKING TO THIS
+	// DAEMON — parked at its listener awaiting a claim, or already claimed by
+	// some controller generation.
 	//
 	// It is what makes a surviving shim ADOPTABLE rather than merely alive. The
 	// workspace-lock probe above says a process is there; this says it is
@@ -469,6 +470,14 @@ type Config struct {
 	// controller in m.byWS — which only the bring-up the gate blocks can create
 	// — so a survivor that had redialled perfectly was waited out and killed
 	// (survivingshim.go).
+	//
+	// IT MUST BE WIRED TO THE BROAD PREDICATE (shimlisten.Server.Attached), not
+	// to the parked-only one. This gate mints a FRESH controller generation and
+	// then asks about the survivor, which is attached under the generation the
+	// bounce retired; a parked-only answer says "no shim here" about a shim
+	// that is mid-conversation with this very process, and the gate kills it.
+	// The narrow predicate remains correct for its own callers — the spawn
+	// chokepoint, the boot sweeper, the drain lease — and they keep it.
 	//
 	// Required whenever a workspace lock can be held: the gate refuses to evict
 	// a holder on a question it could not ask.

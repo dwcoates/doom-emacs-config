@@ -339,3 +339,170 @@ func TestConnectedSurfacesAnUnprobeableConnectionWithoutEvictingIt(t *testing.T)
 		t.Fatal("an unprobeable connection was silently evicted as dead")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ATTACHED — the BROAD predicate, and the narrow one's continued narrowness.
+//
+// The workspace-ownership gate mints a fresh controller generation and then
+// asks whether the workspace's survivor is talking to this daemon. The survivor
+// is attached under the generation the bounce RETIRED, so a parked-only answer
+// says "no shim here" about a shim mid-conversation with this very process —
+// and the gate waited it out and SIGTERM'd it while ready.
+//
+// Broadening `Connected` itself would have answered that question at the cost
+// of changing it for the spawn chokepoint, the spawn watch, the boot sweeper
+// and the drain lease, all of which ask the narrow one. So the broad question
+// is its own predicate with its own single caller.
+// ---------------------------------------------------------------------------
+
+func attached(t *testing.T, s *Server, sessionID string) bool {
+	t.Helper()
+	got, err := s.Attached(sessionID)
+	if err != nil {
+		t.Fatalf("Attached(%s): %v", sessionID, err)
+	}
+	return got
+}
+
+// THE DEFECT ITSELF.
+func TestAttachedReportsAClaimedShim(t *testing.T) {
+	// Arrange: a shim that dialled in and whose connection a controller took —
+	// the exact shape of a survivor under a retired generation.
+	s, path := serve(t)
+	dialAsShim(t, path, "s_abc")
+	waitConnected(t, s, "s_abc")
+	if _, err := s.Next(context.Background(), "s_abc"); err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+
+	// Act / Assert.
+	if !attached(t, s, "s_abc") {
+		t.Fatal("Attached = false for a shim whose connection this daemon is holding; the ownership gate would kill a ready survivor")
+	}
+}
+
+// AND THE NARROW QUESTION IS UNCHANGED BY IT. This is the non-regression the
+// whole split exists for: broadening Connected is what made a bounce's
+// replacement spawn decline, because the retiring generation's claim read as
+// connected.
+func TestClaimingLeavesConnectedFalseWhileAttachedIsTrue(t *testing.T) {
+	// Arrange.
+	s, path := serve(t)
+	dialAsShim(t, path, "s_abc")
+	waitConnected(t, s, "s_abc")
+	if _, err := s.Next(context.Background(), "s_abc"); err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+
+	// Act / Assert: the two predicates deliberately disagree here, and that
+	// disagreement IS the contract.
+	if connected(t, s, "s_abc") {
+		t.Fatal("Connected = true for a claimed connection; the spawn chokepoint would decline to spawn a replacement")
+	}
+	if !attached(t, s, "s_abc") {
+		t.Fatal("Attached = false for a claimed connection")
+	}
+}
+
+func TestAttachedReportsAParkedShim(t *testing.T) {
+	// Arrange: the other shape a survivor's connection can have.
+	s, path := serve(t)
+	dialAsShim(t, path, "s_abc")
+	waitConnected(t, s, "s_abc")
+
+	// Act / Assert.
+	if !attached(t, s, "s_abc") {
+		t.Fatal("Attached = false for a parked connection")
+	}
+}
+
+// THE FOREIGN-SESSION REFUSAL, preserved. Both indexes are keyed by the session
+// id the shim announced in its OWN hello, so another session's shim is filed
+// under an id this lookup never reaches.
+func TestAttachedRefusesAForeignSessionsShim(t *testing.T) {
+	// Arrange: a shim for a different session, claimed.
+	s, path := serve(t)
+	dialAsShim(t, path, "s_other")
+	waitConnected(t, s, "s_other")
+	if _, err := s.Next(context.Background(), "s_other"); err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+
+	// Act / Assert.
+	if attached(t, s, "s_abc") {
+		t.Fatal("Attached = true for a session whose shim is another session's; a foreign shim would be adopted")
+	}
+}
+
+// THE SUPERSEDED-SHIM REFUSAL, preserved. A redial retires the previous claim
+// record, so at most one entry per session survives and it is the newest.
+func TestAttachedForgetsAClaimRetiredByARedial(t *testing.T) {
+	// Arrange: a claimed connection, then the shim redials and that new
+	// connection is claimed too.
+	s, path := serve(t)
+	first := dialAsShim(t, path, "s_abc")
+	waitConnected(t, s, "s_abc")
+	if _, err := s.Next(context.Background(), "s_abc"); err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	dialAsShim(t, path, "s_abc")
+	waitConnected(t, s, "s_abc")
+	if _, err := s.Next(context.Background(), "s_abc"); err != nil {
+		t.Fatalf("Next (second): %v", err)
+	}
+
+	// Act: the FIRST transport dies. It is the retired one.
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: the session is still attached, because the answer is about the
+	// surviving connection rather than the corpse the redial replaced.
+	if !attached(t, s, "s_abc") {
+		t.Fatal("Attached = false after a retired connection died; the record tracked the corpse rather than the live redial")
+	}
+}
+
+// A DEAD CLAIMED PEER IS NOT ATTACHED. Every answer is re-derived from the same
+// kernel probe Connected uses, so a claim record can never outlive its
+// transport.
+func TestAttachedRefusesAClaimedConnectionWhosePeerIsGone(t *testing.T) {
+	// Arrange.
+	s, path := serve(t)
+	peer := dialAsShim(t, path, "s_dead")
+	waitConnected(t, s, "s_dead")
+	if _, err := s.Next(context.Background(), "s_dead"); err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+
+	// Act.
+	if err := peer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert.
+	if attached(t, s, "s_dead") {
+		t.Fatal("Attached = true for a claimed connection whose peer has gone; a corpse would be adopted")
+	}
+}
+
+// AN EXPLICIT STOP ENDS THE ATTACHMENT CLAIM. After a lifecycle stop the daemon
+// must stop reporting the session as attached, even though the claimed
+// transport itself is never closed here — it belongs to its claimer.
+func TestEvictDropsTheClaimRecord(t *testing.T) {
+	// Arrange.
+	s, path := serve(t)
+	dialAsShim(t, path, "s_abc")
+	waitConnected(t, s, "s_abc")
+	if _, err := s.Next(context.Background(), "s_abc"); err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+
+	// Act.
+	s.Evict("s_abc", "test_stop")
+
+	// Assert.
+	if attached(t, s, "s_abc") {
+		t.Fatal("Attached = true after an explicit stop evicted the session")
+	}
+}
