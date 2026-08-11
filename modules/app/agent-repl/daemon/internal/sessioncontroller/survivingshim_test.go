@@ -1,15 +1,26 @@
 package sessioncontroller
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/wire"
+
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/shimlisten"
+
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // ---------------------------------------------------------------------------
@@ -106,16 +117,23 @@ type fakeParkedConn struct {
 	connected bool
 	err       error
 	calls     int
+	// delegate hands the question to a REAL shim listener, so a test can prove
+	// the gate against the production probe rather than against a bool.
+	delegate func(string) (bool, error)
 }
 
-func (p *fakeParkedConn) probe(string) (bool, error) {
+func (p *fakeParkedConn) probe(sessionID string) (bool, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.calls++
-	if p.err != nil {
-		return false, p.err
+	err, connected, delegate := p.err, p.connected, p.delegate
+	p.mu.Unlock()
+	if delegate != nil {
+		return delegate(sessionID)
 	}
-	return p.connected, nil
+	if err != nil {
+		return false, err
+	}
+	return connected, nil
 }
 
 func (p *fakeParkedConn) redial() {
@@ -553,7 +571,7 @@ func TestAnUnreachableSurvivorIsStillReplacedWithItsReasonRecorded(t *testing.T)
 	if !ok {
 		t.Fatal("no replacement was recorded; a killed shim the accounting cannot name is the silent death the ledger exists to end")
 	}
-	if !strings.Contains(reason, "never parked a connection") {
+	if !strings.Contains(reason, "never presented a usable connection") {
 		t.Fatalf("replacement reason = %q, want it to name why the reattach was impossible", reason)
 	}
 }
@@ -579,9 +597,9 @@ func TestAnUnobservableParkedProbeRefusesRatherThanEvicting(t *testing.T) {
 	}
 }
 
-// TestAnUnwiredParkedProbeRefusesRatherThanEvicting: a daemon that cannot ask
-// the question must not answer it by killing.
-func TestAnUnwiredParkedProbeRefusesRatherThanEvicting(t *testing.T) {
+// TestAnUnwiredShimConnectionProbeRefusesRatherThanEvicting: a daemon that
+// cannot ask the question must not answer it by killing.
+func TestAnUnwiredShimConnectionProbeRefusesRatherThanEvicting(t *testing.T) {
 	// Arrange
 	h := newGateHarness(t, &fakeWorkspaceLock{answers: []bool{true}})
 	h.m.cfg.ShimConnected = nil
@@ -590,7 +608,7 @@ func TestAnUnwiredParkedProbeRefusesRatherThanEvicting(t *testing.T) {
 	_, err := h.m.awaitSurvivingShim("ws")
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "no parked-connection probe is wired") {
+	if err == nil || !strings.Contains(err.Error(), "no shim-connection probe is wired") {
 		t.Fatalf("awaitSurvivingShim error = %v, want a loud refusal naming the unwired probe", err)
 	}
 }
@@ -633,5 +651,169 @@ func TestASurvivorThatDialsInIsAdoptedRatherThanDuplicated(t *testing.T) {
 	}
 	if h.spawns() != 0 {
 		t.Fatalf("EnsureShim calls = %d, want 0", h.spawns())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE ADOPTION SEAM. The gate's evidence must be "does a usable connection
+// exist for this session", never "is it held by the generation I just minted".
+// These run against a REAL shimlisten.Server, because the whole defect lived in
+// what that probe answers about a CLAIMED connection — a distinction a bool
+// stub cannot express. See survivingshim.go and shimlisten.Server.Connected.
+// ---------------------------------------------------------------------------
+
+// liveListener stands a real shim listener up on a temporary socket.
+func liveListener(t *testing.T) (*shimlisten.Server, string) {
+	t.Helper()
+	// NOT t.TempDir: a unix socket path has a hard length limit the macOS
+	// per-test temp directory blows straight through, and bind then fails with
+	// a bare EINVAL that says nothing about why.
+	dir, err := os.MkdirTemp("/tmp", "sc")
+	if err != nil {
+		t.Fatalf("mkdtemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	path := filepath.Join(dir, "d.sock")
+	s := shimlisten.New(func(string, ...any) {})
+	if err := s.Listen(path); err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s, path
+}
+
+// dialAsShim connects and announces itself exactly as a shim does.
+func dialAsShim(t *testing.T, path, sessionID string) net.Conn {
+	t.Helper()
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	env, err := anypb.New(&corev1.ShimHello{
+		SessionId: sessionID, Vendor: "claude", ShimVersion: "test", ProtocolVersion: "1",
+	})
+	if err != nil {
+		t.Fatalf("anypb: %v", err)
+	}
+	payload, err := proto.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := wire.WriteFrame(conn, payload); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+	return conn
+}
+
+// claimAsRetiredGeneration dials a shim in and takes its connection the way an
+// EARLIER controller generation's client did, leaving that generation holding
+// the read side when the gate below runs. Next is the rendezvous, so nothing
+// here waits on a clock.
+func claimAsRetiredGeneration(t *testing.T, s *shimlisten.Server, path, sessionID string) net.Conn {
+	t.Helper()
+	shim := dialAsShim(t, path, sessionID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := s.Next(ctx, sessionID); err != nil {
+		t.Fatalf("claiming session %s: %v", sessionID, err)
+	}
+	return shim
+}
+
+// TestASurvivorClaimedByARetiredGenerationIsAdopted: THE ADOPTION SEAM ITSELF.
+// The shim dialled in, handshaked and went ready under a generation that has
+// since been retired, so its connection is claimed rather than parked. It is a
+// survivor to reattach to, and the gate must let the bring-up through.
+func TestASurvivorClaimedByARetiredGenerationIsAdopted(t *testing.T) {
+	// Arrange
+	listener, path := liveListener(t)
+	h := newGateHarness(t, &fakeWorkspaceLock{answers: []bool{true}})
+	h.parked.delegate = listener.Connected
+	h.holder.pids = []int{33870}
+	claimAsRetiredGeneration(t, listener, path, "s1")
+
+	// Act
+	d, err := h.m.awaitSurvivingShim("ws")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("awaitSurvivingShim over a claimed survivor = %v, want the bring-up let through to reattach", err)
+	}
+	if d != nil {
+		t.Fatalf("controller = %v, want nil so the caller proceeds into the reattach", d)
+	}
+	if got := h.holder.delivered(); len(got) != 0 {
+		t.Fatalf("signals delivered = %v, want none; a ready shim under a retired generation was killed instead of adopted", got)
+	}
+}
+
+// TestTheGateDoesNotTimeOutWhileAUsableConnectionExists: the eviction was not
+// the only cost. Every such survivor also paid the whole wait bound first, and
+// its workspace dispatched nothing for the duration.
+func TestTheGateDoesNotTimeOutWhileAUsableConnectionExists(t *testing.T) {
+	// Arrange
+	listener, path := liveListener(t)
+	h := newGateHarness(t, &fakeWorkspaceLock{answers: []bool{true}})
+	h.parked.delegate = listener.Connected
+	claimAsRetiredGeneration(t, listener, path, "s1")
+
+	// Act
+	if _, err := h.m.awaitSurvivingShim("ws"); err != nil {
+		t.Fatalf("awaitSurvivingShim = %v, want the claimed survivor adopted", err)
+	}
+
+	// Assert
+	if h.log.contains("SURVIVING SHIM WAIT EXPIRED") {
+		t.Fatal("the gate waited out a survivor whose connection to this daemon was open the whole time")
+	}
+}
+
+// TestAForeignSessionsShimDoesNotSatisfyTheGate: generation-blindness must not
+// become session-blindness. A shim connected for some OTHER session says
+// nothing about this workspace's holder, which is still evicted.
+func TestAForeignSessionsShimDoesNotSatisfyTheGate(t *testing.T) {
+	// Arrange — the only connection here belongs to a foreign session.
+	listener, path := liveListener(t)
+	h := newGateHarness(t, &fakeWorkspaceLock{answers: []bool{true}})
+	h.parked.delegate = listener.Connected
+	h.holder.pids = []int{4242}
+	h.holder.diesOn = syscall.SIGTERM
+	claimAsRetiredGeneration(t, listener, path, "s_foreign")
+
+	// Act
+	if _, err := h.m.awaitSurvivingShim("ws"); err != nil {
+		t.Fatalf("awaitSurvivingShim = %v, want the unreachable holder evicted", err)
+	}
+
+	// Assert
+	if got := h.holder.delivered(); len(got) == 0 {
+		t.Fatal("no signal was delivered; a foreign session's shim was accepted as this workspace's survivor")
+	}
+}
+
+// TestASupersededShimDoesNotSatisfyTheGate: an entry the listener still
+// remembers is not evidence. The shim whose connection it names is gone, and
+// the answer is re-derived from the kernel, so the holder is still evicted.
+func TestASupersededShimDoesNotSatisfyTheGate(t *testing.T) {
+	// Arrange — the claimed connection's process exits, which closes its socket.
+	listener, path := liveListener(t)
+	h := newGateHarness(t, &fakeWorkspaceLock{answers: []bool{true}})
+	h.parked.delegate = listener.Connected
+	h.holder.pids = []int{4242}
+	h.holder.diesOn = syscall.SIGTERM
+	shim := claimAsRetiredGeneration(t, listener, path, "s1")
+	if err := shim.Close(); err != nil {
+		t.Fatalf("closing the superseded shim's socket: %v", err)
+	}
+
+	// Act
+	if _, err := h.m.awaitSurvivingShim("ws"); err != nil {
+		t.Fatalf("awaitSurvivingShim = %v, want the superseded holder evicted", err)
+	}
+
+	// Assert
+	if got := h.holder.delivered(); len(got) == 0 {
+		t.Fatal("no signal was delivered; a superseded shim's stale connection record was accepted as adoption evidence")
 	}
 }
