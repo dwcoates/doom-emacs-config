@@ -1323,13 +1323,21 @@ A user hitting this has no working frontend, so a bare diagnosis strands them."
   "open-panel refuses on an Emacs build without xwidget support.
 The build feature is simulated absent: the test host's batch Emacs may
 itself be an xwidget build (featurep reflects the BUILD, not the
-session), so the no-support branch must be forced."
+session), so the no-support branch must be forced.
+
+The workspace is pinned and registered rather than left to resolve
+through the Doom stub: `agent-repl-frontend-open-panel' records the
+`gui' choice BEFORE the mount refuses, so an unpinned run persists a
+`test-ws' entry in the global `agent-repl--workspaces' that outlives
+this test and is seen by every later suite that sweeps the registry."
   ;; Arrange
-  (cl-letf (((symbol-function 'featurep)
-             (lambda (f &optional _sub) (not (eq f 'xwidget-internal)))))
-    (should-not (agent-repl--frontend-xwidget-available-p))
-    ;; Act / Assert
-    (should-error (agent-repl-frontend-open-panel) :type 'user-error)))
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'featurep)
+               (lambda (f &optional _sub) (not (eq f 'xwidget-internal)))))
+      (should-not (agent-repl--frontend-xwidget-available-p))
+      ;; Act / Assert
+      (should-error (agent-repl-frontend-open-panel) :type 'user-error))))
 
 (ert-deftest agent-repl-test-frontend-xwidget-available-requires-before-probe ()
   "The capability probe loads xwidget.el before the fboundp check.
