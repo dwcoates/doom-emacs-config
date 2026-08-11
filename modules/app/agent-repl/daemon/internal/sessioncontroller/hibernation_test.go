@@ -140,6 +140,16 @@ func newHibernationRig(t *testing.T, opts ...func(*Config)) (*Manager, *fakeAppl
 	}
 	waitForWirings(applier, 1)
 	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	// THE WIRE'S OWED-RESUMPTION DRIVE IS JOINED BEFORE THE RIG IS HANDED OVER.
+	// noteWired launches it, it is the ONLY goroutine allowed to claim from the
+	// owed set, and it reads the manager's clock. A rig returned while it is
+	// still running hands the test a manager it does not have to itself: a row
+	// seeded afterwards can be claimed out from under the assertion, and an
+	// injected clock is a plain data race on m.now. Joining here makes both
+	// unrepresentable rather than unlikely — the count is taken BEFORE the
+	// goroutine starts, so there is no window to slip through, and nothing
+	// re-arms it until another bring-up wires the session.
+	m.resumptionDrives.Wait()
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 	return m, applier, hib
 }
@@ -158,6 +168,9 @@ func newClockedHibernationRig(t *testing.T, now func() int64) (*Manager, *fakeHi
 	}
 	waitForWirings(applier, 1)
 	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	// Joined for newHibernationRig's reason: this rig's whole point is an
+	// injected clock, and the wire's drive reads that clock.
+	m.resumptionDrives.Wait()
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 	return m, hib
 }

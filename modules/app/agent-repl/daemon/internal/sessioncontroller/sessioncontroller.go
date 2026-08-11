@@ -721,6 +721,13 @@ type Manager struct {
 	// e2e suite it recreated registry files inside a t.TempDir mid-RemoveAll,
 	// which was the origin of the roving "directory not empty" teardown flake.
 	exits sync.WaitGroup
+	// resumptionDrives counts every owed-resumption drive launched off a wire
+	// (bringupescape.go's noteWired), so Close can JOIN them. That drive CLAIMS
+	// a durable row and submits against it; unjoined, a manager could return
+	// from Close with a claim still being taken on its behalf, and nothing in
+	// or out of this process could tell that state from a claim the daemon
+	// died mid-way through.
+	resumptionDrives sync.WaitGroup
 }
 
 // sessionController is one live session's in-memory control state.
@@ -3791,9 +3798,10 @@ func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHel
 }
 
 // Close stops every controller, abandons pending permissions (no fabricated
-// answers), and JOINS every session-controller-exit goroutine before returning, so no
-// teardown work of this manager's — queue drain, empty-view publish, the
-// registry's queued_prompts persist, the orphan-shim stop — can outlive it.
+// answers), and JOINS every session-controller-exit goroutine and every owed-
+// resumption drive before returning, so no teardown work of this manager's —
+// queue drain, empty-view publish, the registry's queued_prompts persist, the
+// orphan-shim stop, a re-drive's durable claim — can outlive it.
 // Idempotent.
 func (m *Manager) Close() {
 	m.mu.Lock()
@@ -3806,6 +3814,12 @@ func (m *Manager) Close() {
 	m.rootStop()
 	m.reg.fail("manager closed")
 	m.exits.Wait()
+	// And the owed-resumption drives (turnresumption.go), for the same reason:
+	// each one claims a durable row and submits against it, and a claim taken
+	// after Close returned would be indistinguishable from one this daemon died
+	// holding. rootStop has already fired, so an in-flight submit unwinds on
+	// its own cancelled context rather than being waited out.
+	m.resumptionDrives.Wait()
 }
 
 // permHandler bridges a session's canUseTool round-trip to the frontend: it
