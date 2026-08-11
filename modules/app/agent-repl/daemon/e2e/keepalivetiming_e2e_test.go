@@ -312,3 +312,43 @@ func TestE2EWithNoConfigurationThePingFiresAtTheDocumentedDefaults(t *testing.T)
 		return keepAlivePing(ev) != nil
 	})
 }
+
+// --- (3) the engagement clock ---------------------------------------------------
+
+// TestE2EAPingOnlySessionStillHibernatesAtTheIdleCutoff is the whole reason the
+// engagement clock exists, stated end to end.
+//
+// A keep-alive ping is an ordinary turn, so its end used to stamp the ONE clock
+// every idle decision measured. A session pinged once per cache lifetime
+// therefore looked freshly active forever: it never reached the cutoff and NEVER
+// HIBERNATED AT ALL — the exact inverse of the defect that made a cold cache
+// sleep at the cache TTL.
+//
+// THE PING IS AWAITED TO ITS END BEFORE THE CLOCK MOVES ON, deliberately. That
+// end is the boundary that stamps the clocks, so a test that advanced past it
+// would be asserting about a stamp that had not happened yet — and a hibernation
+// attempted over a live ping turn is refused as unsettled, which would pass this
+// test for entirely the wrong reason.
+func TestE2EAPingOnlySessionStillHibernatesAtTheIdleCutoff(t *testing.T) {
+	// Arrange — one real turn, then a keep-alive ping and nothing else.
+	policy := testKeepAlivePolicy()
+	s := newKeepAliveSession(t, policy)
+	s.idleFor(t, policy.pingAt())
+	ping := s.store.await(t, "the keep-alive ping's TurnStarted", func(ev *corev1.Event) bool {
+		return keepAlivePing(ev) != nil
+	})
+	pingTurnID := keepAlivePing(ping).GetTurnId()
+	s.store.await(t, "the keep-alive ping's TurnEnded", func(ev *corev1.Event) bool {
+		return turnEndedOf(ev, pingTurnID)
+	})
+
+	// Act — on past the idle cutoff, with the ping the only turn since.
+	s.idleFor(t, policy.idleCutoff+time.Minute)
+
+	// Assert.
+	detail := awaitHibernationDetail(t, s.conn, s.sessionID)
+	if detail.GetIdleCutoff() == nil {
+		t.Fatalf("hibernation cause is %T, want the idle_cutoff arm: a session kept warm for nobody must still be reaped, and the ping that kept it warm must not have reset the cutoff",
+			detail.GetCause())
+	}
+}
