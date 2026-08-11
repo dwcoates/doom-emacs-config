@@ -460,6 +460,30 @@ type Config struct {
 	// Default = sessionlock.WorkspaceLockHolders
 	WorkspaceLockHolders func(cwd string) ([]int, error)
 
+	// ShimConnected reports whether the named session's shim has ALREADY dialled
+	// in and is parked at this daemon's shim listener.
+	//
+	// It is what makes a surviving shim ADOPTABLE rather than merely alive. The
+	// workspace-lock probe above says a process is there; this says it is
+	// talking to us. Without it the gate's only evidence of a dial-in was a
+	// controller in m.byWS — which only the bring-up the gate blocks can create
+	// — so a survivor that had redialled perfectly was waited out and killed
+	// (survivingshim.go).
+	//
+	// Required whenever a workspace lock can be held: the gate refuses to evict
+	// a holder on a question it could not ask.
+	ShimConnected func(sessionID string) (bool, error)
+
+	// ShimFate reports the bounce END-STATE verdict for a workspace: adopted
+	// (the surviving process still serves the session) or replaced (it was ended
+	// and a new one took the workspace, for the reason given).
+	//
+	// OPTIONAL and accounting-only: no decision reads it, and a nil hook changes
+	// nothing about what happens to a shim. It exists because the ledger's boot
+	// verdict is taken before any bring-up runs, so PRESERVED there is a claim
+	// that this hook is what confirms or refutes (bounceledger.Settlement).
+	ShimFate func(workspace string, adopted bool, reason string)
+
 	// SignalProcess delivers a signal to a pid this daemon does not own — a
 	// surviving shim from a previous generation. Injected by tests so the
 	// takeover is asserted rather than aimed at a real process.
