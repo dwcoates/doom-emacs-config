@@ -1323,13 +1323,7 @@ A user hitting this has no working frontend, so a bare diagnosis strands them."
   "open-panel refuses on an Emacs build without xwidget support.
 The build feature is simulated absent: the test host's batch Emacs may
 itself be an xwidget build (featurep reflects the BUILD, not the
-session), so the no-support branch must be forced.
-
-The workspace is pinned and registered rather than left to resolve
-through the Doom stub: `agent-repl-frontend-open-panel' records the
-`gui' choice BEFORE the mount refuses, so an unpinned run persists a
-`test-ws' entry in the global `agent-repl--workspaces' that outlives
-this test and is seen by every later suite that sweeps the registry."
+session), so the no-support branch must be forced."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
@@ -1338,6 +1332,54 @@ this test and is seen by every later suite that sweeps the registry."
       (should-not (agent-repl--frontend-xwidget-available-p))
       ;; Act / Assert
       (should-error (agent-repl-frontend-open-panel) :type 'user-error))))
+
+(ert-deftest agent-repl-test-frontend-refused-open-panel-persists-no-frontend ()
+  "A refused open leaves no durable frontend choice on the workspace.
+Persisting ahead of the mount pinned a workspace to `gui' on a build
+that can never show it — silently, and across restarts."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'featurep)
+               (lambda (f &optional _sub) (not (eq f 'xwidget-internal)))))
+      ;; Act
+      (should-error (agent-repl-frontend-open-panel) :type 'user-error)
+      ;; Assert
+      (should (null (agent-repl--ws-get "ws1" :frontend)))
+      (should (null (agent-repl--ws-get "ws1" :frontend-explicit))))))
+
+(ert-deftest agent-repl-test-frontend-accepted-open-panel-persists-the-choice ()
+  "An open that is accepted still records `gui' as the deliberate choice."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+               (lambda () t))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'agent-repl--frontend-after-ensure-session)
+               (lambda (&rest _) :pending)))
+      ;; Act
+      (agent-repl-frontend-open-panel)
+      ;; Assert
+      (should (eq 'gui (agent-repl--ws-get "ws1" :frontend)))
+      (should (agent-repl--ws-get "ws1" :frontend-explicit)))))
+
+(ert-deftest agent-repl-test-frontend-open-panel-persists-before-the-mount-runs ()
+  "The choice lands before any mount continuation, which fires only later.
+`--frontend-after-ensure-session' returns immediately and always, so the
+async ladder must still observe an explicit `gui' when it resumes."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((continuation nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+                 (lambda () t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                 (lambda (_ws ok &rest _) (setq continuation ok) :pending)))
+        ;; Act
+        (agent-repl-frontend-open-panel)
+        ;; Assert
+        (should (functionp continuation))
+        (should (eq 'gui (agent-repl--ws-get "ws1" :frontend)))))))
 
 (ert-deftest agent-repl-test-frontend-xwidget-available-requires-before-probe ()
   "The capability probe loads xwidget.el before the fboundp check.
