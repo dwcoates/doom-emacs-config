@@ -428,3 +428,45 @@ func TestAContextCutDropsTheRetainedInvocationItems(t *testing.T) {
 		t.Fatalf("retained %d item(s) across a cut, want 0", got)
 	}
 }
+
+// TestTheInvocationItemIsEphemeral is the durability half of "a session command
+// is not a prompt": the CLI never sees the command, so no store record for it
+// exists or ever will, and the item must SAY so rather than leave the class
+// unstated and be mistaken later for a durable message the store lost.
+func TestTheInvocationItemIsEphemeral(t *testing.T) {
+	// Arrange.
+	requestID := "r1"
+
+	// Act.
+	item, err := sessionCommandItem(requestID, frontendv1.SessionCommand_SESSION_COMMAND_MODEL, 7)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("sessionCommandItem = err %v, want a classified item", err)
+	}
+	if item.GetEphemeral() == nil {
+		t.Fatalf("durability arm = %T, want the ephemeral arm set", item.GetDurability())
+	}
+}
+
+// TestTheInvocationItemIsAFeedRow pins the lineage rule the ephemeral class
+// carries: an ephemeral message names no parent and roots at itself, so it can
+// never attach into a paged conversation it will vanish from.
+func TestTheInvocationItemIsAFeedRow(t *testing.T) {
+	// Arrange.
+	requestID := "r1"
+
+	// Act.
+	item, err := sessionCommandItem(requestID, frontendv1.SessionCommand_SESSION_COMMAND_MODEL, 7)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("sessionCommandItem = err %v, want a classified item", err)
+	}
+	if root := item.GetLineage().GetTopLevelMessageId(); root != item.GetUuid() {
+		t.Fatalf("top_level_message_id = %q, want the item's own uuid %q", root, item.GetUuid())
+	}
+	if parent := item.GetLineage().GetParentMessageId(); parent != "" {
+		t.Fatalf("parent_message_id = %q, want empty", parent)
+	}
+}
