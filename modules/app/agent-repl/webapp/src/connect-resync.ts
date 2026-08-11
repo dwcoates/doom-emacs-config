@@ -107,6 +107,16 @@ export const RESYNC_BACKOFF_MAX_MS = 60_000;
  */
 export const RESYNC_SETTLE_DEADLINE_MS = Math.floor(DEFAULT_SNAPSHOT_TIMEOUT_MS / 3);
 
+/**
+ * How many dispatched fences a page remembers for the rotation bound.
+ *
+ * A page rotates between at most a handful of identities in any window that
+ * matters (the post-bounce flap between an ungenerated workspace and its first
+ * real generation is two), so this covers the flap with room to spare while
+ * staying a fixed cost.
+ */
+export const RESYNCED_FENCE_MEMORY = 8;
+
 /** Minimal timer surface, injectable so tests drive the deadline themselves. */
 export interface ResyncTimerHost {
   setTimeout: (callback: () => void, ms: number) => number;
@@ -301,6 +311,25 @@ export class ConnectResync {
     );
   }
 
+  /**
+   * Every fence this page has dispatched a resync under, bounded.
+   *
+   * Bounded for the reason the store's retired-fence memory is: forgetting the
+   * oldest entry can only cause one extra resync, never a missed one.
+   */
+  private readonly resyncedFences = new Set<string>();
+
+  /** Bank one dispatched fence, evicting the oldest past the bound. */
+  private noteResyncedFence(fence: string): void {
+    if (fence === "") return;
+    this.resyncedFences.delete(fence);
+    this.resyncedFences.add(fence);
+    if (this.resyncedFences.size > RESYNCED_FENCE_MEMORY) {
+      const oldest = this.resyncedFences.values().next();
+      if (!oldest.done) this.resyncedFences.delete(oldest.value);
+    }
+  }
+
   private now(): number {
     return (this.opts.now ?? Date.now)();
   }
@@ -419,12 +448,38 @@ export class ConnectResync {
    * request instead, which is spent at the settle edge against the fence this
    * page holds by then.
    */
-  observeFenceRotation(reason: string): void {
+  /**
+   * ONE RE-ARM PER FENCE, and this is the bound that makes the loop
+   * unsustainable rather than merely slow.
+   *
+   * Rotation is proof of a specific fact — the requests made under the old
+   * fence were made under a retired identity — and that fact is discharged by
+   * ONE resync under the new one. A rotation BACK to a fence this page has
+   * already resynced under proves nothing new: the request that token owed has
+   * already been sent and answered. Re-arming on it anyway is what turned a
+   * workspace flapping between two fences into a self-sustaining resync at the
+   * flap's own rate, each resync provoking the snapshot that rotated it back.
+   *
+   * @param fence the fence the page holds AFTER the rotation.
+   */
+  observeFenceRotation(reason: string, fence: string): void {
+    if (fence !== "" && this.resyncedFences.has(fence)) {
+      this.opts.log?.(
+        "info",
+        `resync: workspace fence rotated (${reason}) back to fence=${fence}, which this page has ` +
+          `already resynced under; decision=no_rearm`,
+      );
+      return;
+    }
     this.failures = 0;
     this.nextAllowedAtMs = 0;
     this.givenUp = false;
     this.rearm();
-    this.opts.log?.("warn", `resync: workspace fence rotated (${reason}); re-arming a resync under the new fence`);
+    this.opts.log?.(
+      "warn",
+      `resync: workspace fence rotated (${reason}) to fence=${fence || "none"}; ` +
+        `re-arming a resync under the new fence`,
+    );
   }
 
   /**
@@ -547,6 +602,10 @@ export class ConnectResync {
       `resync: requesting snapshot-bound conversation history ws=${snapshot.workspace} ` +
         `fence=${snapshot.fence || "none"} from_seq=${snapshot.fromSeq} decision=dispatch`,
     );
+    // BANKED AT DISPATCH, not at settle: what the bound above asks is whether
+    // a resync was ever OWED and sent under this token, and a request that was
+    // sent and then failed is re-asked by the backoff, not by a rotation.
+    this.noteResyncedFence(snapshot.fence);
     this.send(snapshot, false);
     return true;
   }
