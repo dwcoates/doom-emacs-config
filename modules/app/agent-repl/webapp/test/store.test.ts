@@ -94,9 +94,9 @@ function sessionEffect(over: Partial<SessionViewInput> = {}): AdapterEffect {
   };
 }
 
-type TextReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "text"; delta: string };
-type ThinkingReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "thinking"; delta: string };
-type InputReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "input_json"; toolUseId: string; delta: string };
+type TextReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "text"; delta: string; bubbleId: string };
+type ThinkingReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "thinking"; delta: string; bubbleId: string };
+type InputReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "input_json"; toolUseId: string; delta: string; bubbleId: string };
 
 function typingEffect(over: Partial<TextReveal> = {}): AdapterEffect {
   return {
@@ -108,6 +108,7 @@ function typingEffect(over: Partial<TextReveal> = {}): AdapterEffect {
       blockIndex: 0,
       kind: "text",
       delta: "hi",
+      bubbleId: "",
       ...over,
     },
   };
@@ -124,6 +125,7 @@ function inputTypingEffect(over: Partial<InputReveal> = {}): AdapterEffect {
       kind: "input_json",
       toolUseId: "tu1",
       delta: "{",
+      bubbleId: "",
       ...over,
     },
   };
@@ -132,14 +134,14 @@ function inputTypingEffect(over: Partial<InputReveal> = {}): AdapterEffect {
 function thinkingTypingEffect(over: Partial<ThinkingReveal> = {}): AdapterEffect {
   return {
     kind: "typing",
-    value: { workspace: "ws", fence: "s1", messageId: "u1", blockIndex: 0, kind: "thinking", delta: "hmm", ...over },
+    value: { workspace: "ws", fence: "s1", messageId: "u1", blockIndex: 0, kind: "thinking", delta: "hmm", bubbleId: "", ...over },
   };
 }
 
 function unidentifiedInputTypingEffect(over: Partial<UnidentifiedToolInputReveal> = {}): AdapterEffect {
   return {
     kind: "typing",
-    value: { workspace: "ws", fence: "s1", messageId: "u1", blockIndex: 0, kind: "input_json", delta: "{", ...over },
+    value: { workspace: "ws", fence: "s1", messageId: "u1", blockIndex: 0, kind: "input_json", delta: "{", bubbleId: "", ...over },
   };
 }
 
@@ -3322,5 +3324,129 @@ describe("ingest reports a workspace fence rotation", () => {
     const result = store.ingest([workspaceEffect({ fence: "s1|g1", atMs: 1002 })]);
     // Assert
     expect(result.fenceRotated).toBeUndefined();
+  });
+});
+
+/**
+ * WHERE A LIVE-TYPING PREVIEW LANDS, which is the same question as WHAT WILL
+ * RETIRE IT.
+ *
+ * `TypingDelta.bubble_id` is the daemon's statement of where the previewed
+ * record is bound. Empty is the top-level feed. Set means the record is being
+ * FOLDED into that async bubble and will never reach the feed, so a top-level
+ * preview of it could never be retired and would spin "streaming input…" with
+ * no body for the life of the page — the frozen bubbles the user reported.
+ */
+describe("ConversationStore — bubble-scoped live typing", () => {
+  const NO_FOLD = { droppedBefore: 0, tailCap: 0 };
+
+  /**
+   * A store holding `/w`'s current fence with one open agent bubble.
+   *
+   * Both the async push and the typing push are FENCED, so a store holding no
+   * fence admits neither — and a test that skipped this would "pass" on the
+   * staleness gate while proving nothing about routing.
+   */
+  function storeWithBubble(id: string) {
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ workspace: "/w", fence: "f1" })]);
+    store.ingest([
+      {
+        kind: "async-bubble-delta",
+        value: {
+          workspace: "/w",
+          fence: "f1",
+          throughSeq: 1,
+          opened: [
+            {
+              id,
+              workspace: "/w",
+              originToolUseId: "",
+              parentBubbleId: "",
+              label: "",
+              startedAtMs: 0,
+              liveness: { case: "live", value: { lastActivityMs: 0 } },
+              kind: { case: "agent", value: { emissions: [], fold: NO_FOLD } },
+            },
+          ],
+          updates: [],
+        },
+      } as AdapterEffect,
+    ]);
+    return store;
+  }
+
+  function typingAt(bubbleId: string, delta = "hi"): AdapterEffect {
+    return {
+      kind: "typing",
+      value: { workspace: "/w", fence: "f1", messageId: "u1", blockIndex: 0, kind: "text", delta, bubbleId },
+    };
+  }
+
+  it("holds an open bubble before any preview arrives", () => {
+    // Arrange / Act — the precondition every assertion below depends on.
+    const store = storeWithBubble("b1");
+
+    // Assert
+    expect(store.asyncBubbles.get("b1")).not.toBeNull();
+  });
+
+  it("keeps a bubble-scoped preview off the top-level feed", () => {
+    // Arrange — THE INVARIANT. A preview the feed can never retire must never
+    // reach the feed.
+    const store = storeWithBubble("b1");
+
+    // Act
+    store.ingest([typingAt("b1")]);
+
+    // Assert
+    expect(store.state.items).toEqual([]);
+  });
+
+  it("routes a bubble-scoped preview into its bubble", () => {
+    // Arrange
+    const store = storeWithBubble("b1");
+
+    // Act
+    store.ingest([typingAt("b1")]);
+
+    // Assert
+    expect(store.asyncBubbles.typingFor("b1")?.text).toBe("hi");
+  });
+
+  it("retires the preview when the bubble's own record lands", () => {
+    // Arrange — no top-level preview can outlive its window, and no
+    // bubble-scoped one outlives the record it stood in for.
+    const store = storeWithBubble("b1");
+    store.ingest([typingAt("b1")]);
+
+    // Act
+    store.ingest([
+      {
+        kind: "async-bubble-delta",
+        value: {
+          workspace: "/w",
+          fence: "f1",
+          throughSeq: 2,
+          opened: [],
+          updates: [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }],
+        },
+      } as AdapterEffect,
+    ]);
+
+    // Assert
+    expect(store.asyncBubbles.typingFor("b1")).toBeNull();
+  });
+
+  it("still puts an unscoped preview on the top-level feed", () => {
+    // Arrange — nothing folds, so the record lands on the feed and retires it
+    // there. This is the path the fold must not have cost anyone.
+    const store = storeWithBubble("b1");
+
+    // Act
+    store.ingest([typingAt("", "hi")]);
+
+    // Assert
+    expect(store.state.items).toHaveLength(1);
   });
 });

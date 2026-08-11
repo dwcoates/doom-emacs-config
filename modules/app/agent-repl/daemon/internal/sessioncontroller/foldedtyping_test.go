@@ -1,5 +1,6 @@
-// The LIVE TYPING RELAY against the WINDOW FOLD: a preview may be opened on the
-// top-level feed only when the record it previews will land there to retire it.
+// The LIVE TYPING RELAY against the WINDOW FOLD: a preview opens on whichever
+// surface the record it previews will land on to retire it — the top-level feed
+// when nothing folds it, and the window's own bubble when something does.
 package sessioncontroller
 
 import (
@@ -107,8 +108,9 @@ func TestTypingRelayVerdict(t *testing.T) {
 	}
 }
 
-func TestConsumeSuppressesInputPreviewThatWouldFoldAway(t *testing.T) {
+func TestConsumeStillRelaysTypingInsideAnOpenWindow(t *testing.T) {
 	// Arrange: a skill window is open, and the agent inside it starts a call.
+	// Refusing the relay here is what silenced a whole turn's live typing.
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 	openTestSkillWindow(t, c, "toolu_skill")
@@ -118,9 +120,54 @@ func TestConsumeSuppressesInputPreviewThatWouldFoldAway(t *testing.T) {
 		t.Fatalf("Consume: %v", err)
 	}
 
-	// Assert: no preview the feed could never retire was opened.
-	if len(push.typing) != 0 {
-		t.Fatalf("typing pushes = %d, want 0 — the previewed record folds into the bubble", len(push.typing))
+	// Assert.
+	if len(push.typing) != 1 {
+		t.Fatalf("typing pushes = %d, want 1 — an open window must not silence live typing", len(push.typing))
+	}
+}
+
+func TestConsumeScopesFoldedTypingToItsBubble(t *testing.T) {
+	// Arrange: the record this delta previews folds into the window's bubble,
+	// so a TOP-LEVEL preview of it could never be retired.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	openTestSkillWindow(t, c, "toolu_skill")
+
+	// Act.
+	if err := c.Consume(inputDelta("toolu_inner", `{"comm`)); err != nil {
+		t.Fatalf("Consume: %v", err)
+	}
+
+	// Assert: it is addressed to the bubble that will retire it.
+	if len(push.typing) != 1 {
+		t.Fatalf("typing pushes = %d, want 1", len(push.typing))
+	}
+	want := c.bubbles.windowFoldTargets()
+	if len(want) == 0 {
+		t.Fatal("no window fold target open")
+	}
+	if got := push.typing[0].GetBubbleId(); got != want[len(want)-1].bubbleID {
+		t.Errorf("bubble_id = %q, want %q", got, want[len(want)-1].bubbleID)
+	}
+}
+
+func TestConsumeLeavesTopLevelPreviewsUnscoped(t *testing.T) {
+	// Arrange: nothing folds, so the record lands on the feed and retires its
+	// preview there. A bubble id here would hide a real preview in a bubble.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	if err := c.Consume(inputDelta("toolu_call", `{"comm`)); err != nil {
+		t.Fatalf("Consume: %v", err)
+	}
+
+	// Assert.
+	if len(push.typing) != 1 {
+		t.Fatalf("typing pushes = %d, want 1", len(push.typing))
+	}
+	if got := push.typing[0].GetBubbleId(); got != "" {
+		t.Errorf("bubble_id = %q, want empty for a top-level preview", got)
 	}
 }
 
@@ -142,6 +189,9 @@ func TestConsumeRelaysInputPreviewForTheWindowsOwnCall(t *testing.T) {
 	}
 	if got := push.typing[0].GetDelta().GetInputJson(); got != `{"skill` {
 		t.Errorf("relayed chunk = %q, want %q", got, `{"skill`)
+	}
+	if got := push.typing[0].GetBubbleId(); got != "" {
+		t.Errorf("bubble_id = %q, want empty — this card stays on the feed", got)
 	}
 }
 
