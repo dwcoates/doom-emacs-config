@@ -167,8 +167,8 @@ func (SessionCommand) EnumDescriptor() ([]byte, []int) {
 //
 // THE CLOSED SET IS THE POINT. The daemon recognizes a submitted prompt as one
 // of these before it forwards it (sessioncontroller/sessioncommand.go), and a
-// recognized command earns NO prompt bubble — so the set of things that can
-// suppress a bubble is exactly the set of names below, fixed on the wire and
+// recognized command earns NO user message — so the set of things that can
+// suppress one is exactly the set of names below, fixed on the wire and
 // reviewable in one place. A command that is not here is a prompt, and a
 // prompt is always drawn.
 //
@@ -196,10 +196,10 @@ type SessionCommandSpec struct {
 	//
 	// FALSE IS THE DEFAULT AND FALSE IS THE SAFE SIDE. A command that takes no
 	// argument is recognized only as an ENTIRE prompt, so "/status of the build"
-	// stays a prompt and keeps its bubble. Marking a command that takes none as
-	// taking some is the one way this table can swallow something a user
+	// stays a prompt and keeps its user message. Marking a command that takes
+	// none as taking some is the one way this table can swallow something a user
 	// genuinely meant to say to the agent — an unrecoverable loss, since a
-	// suppressed bubble is never drawn later.
+	// suppressed prompt is never recovered later.
 	TakesArgs     bool `protobuf:"varint,2,opt,name=takes_args,json=takesArgs,proto3" json:"takes_args,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -254,14 +254,14 @@ func (x *SessionCommandSpec) GetTakesArgs() bool {
 //
 // WHY IT CARRIES NO TEXT, AND NEVER WILL. `/model` is not something the user
 // SAID to the agent; it is something they DID to the session. Drawing it as a
-// purple prompt bubble claims the agent was asked a question it never
+// user message claims the agent was asked a question it never
 // received, and every one of these commands the CLI answers locally — the
 // model is not in the loop at all.
 //
 // The absence of a text field is the ENFORCEMENT of that, not a note about it.
 // A frontend cannot render the submitted prompt from this item because the
 // prompt is not in it: there is no field to put it in, so no future consumer
-// can reintroduce the bubble by reading one, and no future producer can leak
+// can reintroduce the message by reading one, and no future producer can leak
 // an argument the user typed (`/model opus`, `/compact focus on the parser`)
 // onto a surface that has no business showing it. The command's IDENTITY is
 // the whole fact, and an enum is the only shape that can carry an identity
@@ -332,7 +332,7 @@ func (x *SessionCommandItem) GetCommand() SessionCommand {
 // SEPARATE transcript record — type "user", flagged isMeta, whose text is
 // "Base directory for this skill: <dir>" followed by the whole SKILL.md. It
 // is bookkeeping addressed to the model, not a prompt the person typed, so
-// rendering it as a user turn is a defect (it draws a prompt bubble nobody
+// rendering it as a user turn is a defect (it draws a user message nobody
 // wrote). The daemon correlates that record back to the Skill call that
 // caused it and pushes THIS instead; the user record itself reaches no
 // frontend at all.

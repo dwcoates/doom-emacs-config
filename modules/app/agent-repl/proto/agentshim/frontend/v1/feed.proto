@@ -272,15 +272,14 @@ message DetachedWorkDelta {
   string fence = 6;
 }
 
-// The compaction summary bubble: the purple-washed summary block that follows
-// a compaction.
+// The compaction summary: the summary the daemon records after a compaction.
 message CompactionSummaryItem {
   // The summary text, verbatim (markdown).
   string summary = 1;
   // When the compaction completed, unix millis.
   int64 compacted_at_ms = 2;
   // The resolved expensive-input cost of producing this summary (canonical
-  // derivation), so the bubble can carry its own cost note; -1 when the
+  // derivation), so the summary can carry its own cost note; -1 when the
   // result's usage was unavailable (never fabricated as 0).
   int64 expensive_input_tokens = 3;
 }
@@ -332,7 +331,7 @@ message TypingDelta {
 //
 // A preview is retired by the authoritative record of the block it previews.
 // When that record can no longer arrive — the session died, the shim rolled,
-// the query was torn down mid-block — nothing retires it, and the bubble
+// the query was torn down mid-block — nothing retires it, and the preview
 // spins "streaming input…" for the life of the page with no body.
 //
 // A CUT IS A FACT THE DAEMON OWNS, NOT A TIMEOUT THE CLIENT GUESSES. The

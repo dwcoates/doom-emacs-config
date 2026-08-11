@@ -385,8 +385,7 @@ export const DetachedWorkDeltaSchema: GenMessage<DetachedWorkDelta> = /*@__PURE_
   messageDesc(file_agentshim_frontend_v1_feed, 3);
 
 /**
- * The compaction summary bubble: the purple-washed summary block that follows
- * a compaction.
+ * The compaction summary: the summary the daemon records after a compaction.
  *
  * @generated from message agentshim.frontend.v1.CompactionSummaryItem
  */
@@ -407,7 +406,7 @@ export type CompactionSummaryItem = Message$1<"agentshim.frontend.v1.CompactionS
 
   /**
    * The resolved expensive-input cost of producing this summary (canonical
-   * derivation), so the bubble can carry its own cost note; -1 when the
+   * derivation), so the summary can carry its own cost note; -1 when the
    * result's usage was unavailable (never fabricated as 0).
    *
    * @generated from field: int64 expensive_input_tokens = 3;
@@ -489,7 +488,7 @@ export const TypingDeltaSchema: GenMessage<TypingDelta> = /*@__PURE__*/
  *
  * A preview is retired by the authoritative record of the block it previews.
  * When that record can no longer arrive — the session died, the shim rolled,
- * the query was torn down mid-block — nothing retires it, and the bubble
+ * the query was torn down mid-block — nothing retires it, and the preview
  * spins "streaming input…" for the life of the page with no body.
  *
  * A CUT IS A FACT THE DAEMON OWNS, NOT A TIMEOUT THE CLIENT GUESSES. The
