@@ -49,6 +49,7 @@
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--ws-name-for-dir "agent-repl-workspace" (dir))
+(declare-function agent-repl--restore-undelivered-prompt "agent-repl-commands" (ws request-id raw detail))
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force on-ensured on-failure))
 (declare-function agent-repl--make-latch "agent-repl-core" (&optional cleanup))
 (declare-function agent-repl--latch-claim "agent-repl-core" (latch))
@@ -1330,7 +1331,17 @@ the drain's own continuations: the queue must learn which of the two
 happened, because a refused held prompt owes the user its own report and
 the entries behind it must not be dispatched until this one settled.  Both
 run AFTER this function's own work, so a drained prompt is a live turn
-before the queue is told anything about it."
+before the queue is told anything about it.
+
+THE UNDELIVERED PROMPT COMES BACK.  The send's own `submitPrompt' nack is
+wired to `agent-repl--restore-undelivered-prompt', which puts RAW back in
+the input buffer: a prompt the daemon refused never reached a shim and
+never reached the SDK, so the words are still owed to the person who typed
+them.  RAW, never INPUT — the metaprompt decoration was never the user's
+to revise — and closed over LEXICALLY rather than read back from
+`:sent-turn', because a reentrant ack can settle this command from inside
+`process-send-string', before the success continuation above has recorded
+anything at all."
   (agent-repl--frontend-send-user-message
    ws input prompt-origin
    (lambda (request-id)
@@ -1347,7 +1358,9 @@ before the queue is told anything about it."
    (lambda (detail)
      (agent-repl--warn ws "do-send[gui]: FAILED before dispatch detail=%s" detail)
      (when on-settle (funcall on-settle))
-     (when on-failed (funcall on-failed detail))))
+     (when on-failed (funcall on-failed detail)))
+   (lambda (request-id err)
+     (agent-repl--restore-undelivered-prompt ws request-id raw err)))
   :pending)
 
 (defun agent-repl--gui-interrupt (ws kind)
@@ -1594,13 +1607,32 @@ the subsequent open attaches to the continued conversation."
   :pending)
 
 (defun agent-repl--frontend-send-user-message
-    (ws text prompt-origin on-success on-failure)
+    (ws text prompt-origin on-success on-failure &optional on-nack)
   "Send TEXT as WS's user turn over the UDS `submitPrompt' command.
 Ensures the session first (recreating a stale binding), so a send into a
 dead session heals instead of failing, then sends `submitPrompt' keyed by
 WS's cwd (`agent-repl--frontend-ws-command-key') — the daemon resolves that
 cwd -> session, so no session id is on the wire.  ON-SUCCESS receives the
 command request id.  ON-FAILURE receives the ensure failure detail.
+
+ON-NACK, when non-nil, is a function of two arguments (the command's
+request id and the daemon's error string) run when the daemon REJECTS the
+`submitPrompt' command.
+
+THAT REJECTION IS THE DELIVERY BOUNDARY, and it is the only evidence
+either frontend needs.  The daemon acks `submitPrompt' after the shim has
+taken the prompt, or after it has durably QUEUED it behind a running turn
+— in both cases the prompt is owed and will run.  It nacks only when
+neither happened: no prompt reached a shim, no queue entry holds one, the
+durable receipt was retired, and no prompt bubble was ever pushed
+\(daemon/internal/sessioncontroller/promptdispatch.go).  So a nack means
+NOTHING HAPPENED, which is exactly the case whose words must come back to
+the user, and an ack means something did — a turn that is later cut short
+still ran, and its text is emphatically not ours to resurrect.
+
+It is run IN ADDITION to the shared ack handler's loud log and echo-area
+surfacing, never instead of it (`agent-repl--uds-register-pending-command'):
+restoring the text is not a reason to stop reporting the refusal.
 
 FIRE AND FORGET, end to end.  The ensure runs with purpose `send' so it
 skips the `openWorkspace' presentation gate, and the command itself is
@@ -1627,11 +1659,22 @@ is gone — matching the already-dead server behavior (the retired HTTP
        (when origin (agent-repl--ws-put ws :next-send-origin nil))
        (agent-repl--log ws "frontend send: len=%d origin=%s prompt-origin=%s (uds submitPrompt)"
                         (length text) origin prompt-origin)
-       (let ((req (agent-repl--uds-send-command
-                   "submitPrompt" (list :text text :promptOrigin prompt-origin)
-                   (agent-repl--frontend-ws-command-key ws))))
-         (agent-repl--log ws "frontend send: dispatched request-id=%s" req)
-         (funcall on-success req))))
+       ;; Bound by `:on-registered' BEFORE the frame is written, for the
+       ;; reason every other tracked command here binds it that way: the ack
+       ;; can be delivered REENTRANTLY from inside `process-send-string', so a
+       ;; nack handler that read the id from this `let''s return value could
+       ;; run against an unbound one and restore nothing.
+       (let* ((req nil)
+              (sent (agent-repl--uds-send-command
+                     "submitPrompt" (list :text text :promptOrigin prompt-origin)
+                     (agent-repl--frontend-ws-command-key ws)
+                     nil
+                     :on-registered (lambda (id) (setq req id))
+                     :on-failure
+                     (when on-nack
+                       (lambda (err) (funcall on-nack req err))))))
+         (agent-repl--log ws "frontend send: dispatched request-id=%s" sent)
+         (funcall on-success sent))))
    on-failure 'send)
   :pending)
 

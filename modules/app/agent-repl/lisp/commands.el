@@ -470,6 +470,39 @@ flip a hidden buffer's state) or when the input buffer is dead."
               (evil-insert-state)))
         (agent-repl--log ws "enter-insert-mode: input buffer is dead, skipping")))))
 
+(defun agent-repl--restore-prompt-into-input (ws raw label)
+  "Put RAW back in WS's input buffer, reporting under LABEL.
+The one place a prompt's words go back where the user typed them, shared
+by the two callers that have grounds to put them there: the interrupt's
+retract (`agent-repl--restore-retracted-prompt') and the never-delivered
+submit (`agent-repl--restore-undelivered-prompt').  LABEL names which, so
+one log stream still says why the text came back.
+
+It is ONE function because both callers owe the same guarantee and the
+guarantee is easy to weaken by halves: restore only into an EMPTY buffer,
+never over a draft the user has since typed, and log the text rather than
+discarding it when the buffer is occupied or dead.  The words are also in
+the input history — `agent-repl--commit-input-buffer' pushed RAW there
+before the send — so the occupied-buffer branch leaves them recallable
+rather than gone.
+
+Returns non-nil when the text actually landed in the buffer."
+  (let ((buf (agent-repl--ws-get ws :input-buffer)))
+    (if (not (buffer-live-p buf))
+        (progn
+          (agent-repl--warn ws "%s: prompt owed back but the input buffer is dead: %S" label raw)
+          nil)
+      (with-current-buffer buf
+        (if (not (zerop (buffer-size)))
+            (progn
+              (agent-repl--log ws "%s: prompt not restored over a draft (recallable from input history): %S"
+                               label raw)
+              nil)
+          (agent-repl--history-replace-buffer-text raw)
+          (agent-repl--history-reset)
+          (agent-repl--log ws "%s: restored prompt (%d chars)" label (length raw))
+          t)))))
+
 (defun agent-repl--restore-retracted-prompt (ws)
   "Put WS's retracted prompt back in its input buffer for revision.
 Called only once the frontend reports the daemon actually withdrew the
@@ -484,18 +517,44 @@ trade one loss for another.
 
 Clears `:sent-turn' either way: the turn is withdrawn, so there is
 nothing left to undo."
-  (let* ((sent (agent-repl--ws-get ws :sent-turn))
-         (raw (plist-get sent :raw))
-         (buf (agent-repl--ws-get ws :input-buffer)))
+  (let ((raw (plist-get (agent-repl--ws-get ws :sent-turn) :raw)))
     (agent-repl--ws-put ws :sent-turn nil)
-    (if (not (buffer-live-p buf))
-        (agent-repl--warn ws "interrupt: retracted %S but the input buffer is dead" raw)
-      (with-current-buffer buf
-        (if (not (zerop (buffer-size)))
-            (agent-repl--log ws "interrupt: retracted prompt not restored over a draft: %S" raw)
-          (agent-repl--history-replace-buffer-text raw)
-          (agent-repl--history-reset)
-          (agent-repl--log ws "interrupt: restored retracted prompt (%d chars)" (length raw)))))))
+    (agent-repl--restore-prompt-into-input ws raw "interrupt")))
+
+(defun agent-repl--restore-undelivered-prompt (ws request-id raw detail)
+  "Put RAW back in WS's input buffer after a REFUSED `submitPrompt'.
+REQUEST-ID names the nacked command and DETAIL is the daemon's account of
+why it refused.
+
+THE NACK IS THE WHOLE EVIDENCE, and it is decisive rather than suggestive.
+The daemon acks `submitPrompt' once the shim has taken the prompt, and
+acks it too when it has durably QUEUED the prompt behind a running turn —
+in both cases the prompt is owed by the daemon and will run.  It nacks
+only when neither is true: nothing reached a shim, nothing reached the
+SDK, the durable prompt receipt was retired, and no prompt bubble was ever
+pushed to any feed.  So this runs for the never-delivered prompt ALONE.  A
+prompt the SDK did receive and that was then cut short is acked, never
+nacked, and its text is deliberately NOT restored: real work happened,
+possibly at real cost, and putting the words back would invite the user to
+pay for it twice.
+
+RAW is passed in rather than read from `:sent-turn' so the restore cannot
+depend on which of the two settled first — the ack can arrive reentrantly
+from inside the send's own write, before the success continuation has
+recorded the turn at all.  `:sent-turn' is still cleared when it names
+THIS request, because the turn it records never began; a `:sent-turn' that
+names a LATER prompt is left exactly as found.
+
+Restoring is independent of anything the feed does: the webapp retracts
+its own unacked bubble from the same nack, and neither half is a
+precondition of the other, because losing the user's words is the failure
+that actually costs them something."
+  (agent-repl--log ws "submit-nack: prompt never reached the shim request-id=%s raw-len=%d detail=%s"
+                   request-id (length raw) detail)
+  (let ((sent (agent-repl--ws-get ws :sent-turn)))
+    (when (and sent (equal (plist-get sent :request-id) request-id))
+      (agent-repl--ws-put ws :sent-turn nil)))
+  (agent-repl--restore-prompt-into-input ws raw "submit-nack"))
 
 (defun agent-repl--agent-thinking-p (ws)
   "Return non-nil when workspace WS has a Claude turn actively in flight.
