@@ -62,12 +62,16 @@ func TestWireAgentShimSweepsOnlyItsInjectedRebaseRoot(t *testing.T) {
 	root := t.TempDir()
 	leftover := arrangeLeftoverRebaseWorktree(t, root, "boot-orphan")
 
-	// Act — the boot sweep runs inside WireAgentShim.
+	// Act — the sweep is DEFERRED off the wiring (it used to run inline, in
+	// front of the reconnecting host's accept), so the caller runs it.
 	shim, err := WireAgentShim(bootSweepConfig(t, root))
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)
 	}
 	defer shim.Close()
+	if err := shim.SweepOrphanRebaseWorktrees(); err != nil {
+		t.Fatalf("SweepOrphanRebaseWorktrees: %v", err)
+	}
 
 	// Assert — the production tree outside the injected root survives, and the
 	// leftover inside it is the proof the sweep actually ran.
