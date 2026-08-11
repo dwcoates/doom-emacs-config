@@ -136,12 +136,32 @@ returning the same workspace twice.")
 The target and canonical symlink deliberately remain on disk: their history
 is useful after an ordinary workspace teardown.  Forgetting ownership lets a
 future workspace reusing WS establish a fresh runtime-owned target."
-  (let ((target (gethash ws agent-repl--workspace-log-targets)))
-    (when target
+  ;; SWEPT BY IDENTITY, because that is what the registry is keyed by
+  ;; (`agent-repl--workspace-log-targets').  Matching on WS's registered
+  ;; directory rather than resolving its identity is deliberate: this runs
+  ;; inside `agent-repl--ws-del' and from the rebinding path in
+  ;; `agent-repl--ws-put', where a workspace whose worktree has been deleted
+  ;; would make `agent-repl--workspace-log-identity' signal — and a teardown
+  ;; must not be abortable by a diagnostic sink.  A WS with nothing to match
+  ;; simply removes nothing, which is the correct outcome, not a swallowed
+  ;; failure.
+  (let* ((dir (agent-repl--ws-get ws :project-dir))
+         (canonical (and (stringp dir) (agent-repl--path-canonical dir)))
+         (stale nil))
+    (when canonical
+      (maphash (lambda (key entry)
+                 (let ((owned (plist-get entry :project-dir)))
+                   (when (and (stringp owned)
+                              (equal canonical (agent-repl--path-canonical owned)))
+                     (push key stale))))
+               agent-repl--workspace-log-targets))
+    (when stale
       ;; Emit before forgetting so this lifecycle record remains in the
       ;; existing workspace-owned history rather than recreating a target.
-      (agent-repl--log ws "ws-forget-emacs-log-target: ws=%s reason=%s" ws reason)
-      (remhash ws agent-repl--workspace-log-targets))))
+      (agent-repl--log ws "ws-forget-emacs-log-target: ws=%s reason=%s targets=%d"
+                       ws reason (length stale))
+      (dolist (key stale)
+        (remhash key agent-repl--workspace-log-targets)))))
 
 (defun agent-repl--ws-get (ws key)
   "Get KEY from workspace WS's plist."

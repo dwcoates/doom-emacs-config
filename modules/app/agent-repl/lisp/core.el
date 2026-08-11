@@ -747,7 +747,52 @@ DIR.  This helper intentionally does not log because doing so would recurse."
     (puthash dir t agent-repl--validated-private-log-directories)))
 
 (defvar agent-repl--workspace-log-targets (make-hash-table :test #'equal)
-  "Runtime-owned external targets for workspace `emacs.log' symlinks.")
+  "Runtime-owned external targets for workspace `emacs.log' symlinks.
+
+KEYED BY THE WORKSPACE'S IDENTITY, NOT BY ITS NAME
+\(`agent-repl--workspace-log-target-key'), because the thing a target
+belongs to is a DIRECTORY and the name is only one spelling of it.
+
+Keyed by name, two names for one directory each installed their own
+target and each overwrote the other's canonical `emacs.log' symlink, so
+the LOSER wrote to an orphaned temp file that nothing on disk pointed at.
+Measured 2026-08-11: `main' held
+`/var/.../agent-repl-emacs-EGrKmo.log' and `marcos-pr-remediation' held
+`/var/.../agent-repl-emacs-ZqvegH.log' for the SAME `:project-dir' and
+the SAME `workspace_id', the symlink pointed at the pseudo's, and every
+record the real workspace wrote for a day was invisible in the file every
+reader opens.
+
+With the identity as the key that is unrepresentable: one directory has
+one target and one link, whatever names resolve to it.")
+
+(defun agent-repl--workspace-log-target-key (identity)
+  "Return the durable-target registry key for IDENTITY.
+IDENTITY is an `agent-repl--workspace-log-identity' plist.  Both halves
+are in the key because either changing rebinds the sink: a workspace-id
+change is a different workspace at the same path, and a project-dir
+change is the same workspace at a different path.  NUL-joined because it
+is the one byte a path cannot contain, so two identities can never
+collide by concatenation."
+  (concat (plist-get identity :workspace-id)
+          "\0"
+          (plist-get identity :project-dir)))
+
+(defun agent-repl--workspace-log-target-entry (ws)
+  "Return the durable-target registry entry for WS's identity, or nil.
+The registry is keyed by IDENTITY, so a caller holding only a NAME asks
+through here rather than rebuilding the key — which is also what keeps a
+reader from pinning the key's encoding.
+
+Screened through `agent-repl--ws-log-routable-p', the documented predicate
+form of the identity resolver's precondition, so a name that owns no sink
+answers nil instead of reaching a resolver that would signal.  The signal
+itself is untouched at the one call site that must honour it,
+`agent-repl--workspace-emacs-log-target'."
+  (and (agent-repl--ws-log-routable-p ws)
+       (gethash (agent-repl--workspace-log-target-key
+                 (agent-repl--workspace-log-identity ws))
+                agent-repl--workspace-log-targets)))
 
 (defconst agent-repl--emacs-log-target-prefix "agent-repl-emacs-"
   "Filename prefix that identifies an Emacs-owned external log target.")
@@ -1130,9 +1175,15 @@ perspective it is about."
   "Return WS's runtime-owned external target and atomically install its link.
 WS must have a registered project directory.  Workspace-controlled paths are
 never opened for writing: the durable target is created in
-`temporary-file-directory' and the workspace path is only an atomic symlink."
+`temporary-file-directory' and the workspace path is only an atomic symlink.
+
+The registry is keyed by WS's IDENTITY rather than by WS, so every name
+that resolves to one directory shares that directory's single target and
+its single canonical link — see `agent-repl--workspace-log-targets' for
+the day of invisible records that keying by name cost."
   (let* ((identity (agent-repl--workspace-log-identity ws))
-         (cached (gethash ws agent-repl--workspace-log-targets)))
+         (key (agent-repl--workspace-log-target-key identity))
+         (cached (gethash key agent-repl--workspace-log-targets)))
     (if cached
         (let ((target (plist-get cached :target)))
           (unless (and (equal (plist-get cached :project-dir) (plist-get identity :project-dir))
@@ -1169,7 +1220,7 @@ never opened for writing: the durable target is created in
                   (make-symbolic-link target link-tmp)
                   ;; `rename-file' makes the canonical-link replacement atomic.
                   (rename-file link-tmp canonical t)
-                  (puthash ws (append (list :target target) identity)
+                  (puthash key (append (list :target target) identity)
                            agent-repl--workspace-log-targets)
                   (setq installed t)
                   target)
