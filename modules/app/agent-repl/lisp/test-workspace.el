@@ -2777,3 +2777,54 @@ The screen must only demote names that could not be routed at all."
         (should (seq-find (lambda (l) (string-match-p "land-after-teardown error" l))
                           warned))
         (should repainted)))))
+
+;;;; ---- Tests: a persp built-in may never claim a workspace directory ----
+
+(ert-deftest agent-repl-test-ws-put-refuses-project-dir-on-pseudo-perspective ()
+  "\"main\" and \"none\" are persp-mode's own; the write never commits.
+Measured 2026-08-11: the live registry held `main' -> a real worktree, which
+made the perspective log-routable and gave it that workspace's durable sink."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((+workspaces-main "main"))
+      (cl-letf (((symbol-function 'agent-repl--do-log) #'ignore))
+        ;; Act
+        (agent-repl--ws-put "main" :project-dir "/tmp/some-real-worktree")
+        ;; Assert
+        (should-not (agent-repl--ws-get "main" :project-dir))))))
+
+(ert-deftest agent-repl-test-ws-put-refusal-is-announced ()
+  "The refusal is loud: a producer bug must not be silently absorbed."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((+workspaces-main "main")
+          (log-calls nil))
+      (cl-letf (((symbol-function 'agent-repl--do-log)
+                 (lambda (ws fmt args &optional _err)
+                   (push (list ws fmt args) log-calls))))
+        ;; Act
+        (agent-repl--ws-put "main" :project-dir "/tmp/some-real-worktree"))
+      ;; Assert
+      (should (= 1 (length log-calls)))
+      (should (string-match-p "REFUSED :project-dir" (nth 1 (car log-calls)))))))
+
+(ert-deftest agent-repl-test-ws-put-allows-non-project-dir-keys-on-pseudo ()
+  "Only `:project-dir' is refused; a pseudo entry is otherwise untouched."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((+workspaces-main "main"))
+      (cl-letf (((symbol-function 'agent-repl--do-log) #'ignore))
+        ;; Act
+        (agent-repl--ws-put "main" :priority "p1")
+        ;; Assert
+        (should (equal "p1" (agent-repl--ws-get "main" :priority)))))))
+
+(ert-deftest agent-repl-test-ws-put-still-writes-project-dir-for-a-real-workspace ()
+  "The refusal is scoped to the pseudo names and nothing else."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((+workspaces-main "main"))
+      ;; Act
+      (agent-repl--ws-put "real-ws" :project-dir "/tmp/real-ws")
+      ;; Assert
+      (should (equal "/tmp/real-ws" (agent-repl--ws-get "real-ws" :project-dir))))))

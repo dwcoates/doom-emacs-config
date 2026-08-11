@@ -800,8 +800,28 @@ asking this predicate about it.
 This exists so a caller holding a name of UNKNOWN provenance — a persp-mode
 perspective, a wire field, a workspace mid-teardown — can ask whether that
 name owns a sink before handing it to the ladder.  It never suppresses the
-invariant; it lets a caller avoid violating it."
+invariant; it lets a caller avoid violating it.
+
+A PSEUDO-PERSPECTIVE IS REFUSED BEFORE THE REGISTRY IS CONSULTED, and the
+order is the whole point.  persp-mode's built-ins (\"none\",
+`+workspaces-main') are not workspaces and own no directory of their own —
+but nothing STOPS a stray `agent-repl--ws-put' from writing one into their
+hash entry, and one did: on 2026-08-11 the live registry held
+`main' -> .../marcos-pr-remediation/ and `none' -> .../slack-cee-ceac-integration-shj/,
+the trailing-slash shape of a captured `default-directory'.  Those entries
+satisfied every clause below, so both built-ins were ROUTABLE, and every
+record they carried was written into a real workspace's durable log and
+stamped with that workspace's `workspace_dir' / `workspace_id'.  Measured:
+60 of 60 `recovery-slo:' records in each of those two files named the
+pseudo, and neither workspace had ever produced a record of its own.
+
+Deciding the name CLASS first makes that unrepresentable: a built-in
+perspective cannot own a sink no matter what got registered under its name,
+so it can never shadow the workspace whose directory it borrowed.  The
+record is not lost — `agent-repl--persist-log-record' routes it globally and
+stamps `pseudo_workspace' with the name."
   (and ws
+       (not (agent-repl--pseudo-workspace-name-p ws))
        (fboundp 'agent-repl--ws-get)
        (let ((dir (agent-repl--ws-get ws :project-dir)))
          (and (stringp dir)

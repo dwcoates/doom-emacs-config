@@ -2959,24 +2959,52 @@ whole snapshot restore at startup."
           (insert-file-contents path)
           (should-not (string-match-p "workspace_id" (buffer-string))))))))
 
-(ert-deftest agent-repl-test-registered-workspace-named-main-still-routes-to-its-sink ()
-  "The pseudo screen never outranks a real registration of the same name."
+(ert-deftest agent-repl-test-pseudo-name-owns-no-sink-even-when-registered ()
+  "A persp built-in never owns a sink, whatever got registered under its name.
+
+THIS REVERSES A PRIOR RULE, deliberately.  The test that stood here asserted
+`the pseudo screen never outranks a real registration of the same name', and
+that rule is what let the defect through: on 2026-08-11 the live registry
+held `main' -> \".../marcos-pr-remediation/\" and
+`none' -> \".../slack-cee-ceac-integration-shj/\", so both built-ins were
+routable and 60 of 60 `recovery-slo:' records in each of those two
+workspaces' durable logs named the perspective instead of the workspace.
+The reversal costs nothing real: persp-mode owns \"none\" and Doom owns
+\"main\", so an agent-repl workspace cannot hold either name without
+colliding with the perspective itself."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let* ((project (make-temp-file "agent-repl-real-main-" t))
            (+workspaces-main "main")
-           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
-            (agent-repl--ws-put "main" :project-dir project)
+            (puthash "main" (list :project-dir project)
+                     agent-repl--workspaces)
+            ;; Act / Assert
+            (should-not (agent-repl--ws-log-routable-p "main"))
+            (should-not (agent-repl--log-sink-workspace "main")))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-pseudo-name-cannot-shadow-a-real-workspace-sink ()
+  "A registered pseudo sharing a real workspace's dir never wins its sink.
+The shadowing this pins is the one that was measured: the reverse lookup in
+`agent-repl--log-canonical-workspace' walks the registry for a dir match, and
+with the pseudo routable it could return the perspective for a path that
+belongs to a workspace."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-shadowed-" t))
+           (+workspaces-main "main"))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "real-ws" :project-dir project)
+            (puthash "main" (list :project-dir (file-name-as-directory project))
+                     agent-repl--workspaces)
             ;; Act
-            (let ((agent-repl-log-to-file t))
-              (cl-letf (((symbol-function 'message) #'ignore))
-                (agent-repl--log "main" "owned line")))
-            ;; Assert
-            (should (plist-get (gethash "main" agent-repl--workspace-log-targets)
-                               :target)))
+            (let ((resolved (agent-repl--log-canonical-workspace project)))
+              ;; Assert
+              (should (equal "real-ws" resolved))))
         (delete-directory project t)))))
 
 (ert-deftest agent-repl-test-log-identity-resolver-still-signals-when-called-directly ()

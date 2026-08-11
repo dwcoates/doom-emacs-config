@@ -123,6 +123,7 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--pseudo-workspace-name-p "agent-repl-core" (ws))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--frontend-webview-read-script
@@ -271,9 +272,23 @@ already own those questions, never re-derived here:
 
 Answering with the refusal keyword itself rather than a boolean is what
 makes the drift guard possible: the reason this module records is the
-reason the eligibility source gave."
-  (let ((refusal (agent-repl--frontend-precreate-refusal ws)))
+reason the eligibility source gave.
+
+A PERSP-MODE BUILT-IN IS OUT OF SCOPE BY CLASS, decided ahead of every
+eligibility question because it is not a workspace at all: `persp-nil-name'
+\(\"none\") and Doom's \"main\" are perspectives agent-repl never created,
+with no page, no session and no wire of their own.  Measured on 2026-08-11
+both were being armed like workspaces and force-recovered on every bounce,
+and because each had wrongly acquired a real workspace's `:project-dir'
+their records displaced the records of the workspace whose directory they
+had borrowed — 60 of 60 in each of two durable logs.  The registration half
+of that is refused in `agent-repl--ws-put'; this is the measurement half.
+It is STATED rather than skipped, like every other exclusion, so a reader
+still sees the whole population."
+  (let ((refusal (and (not (agent-repl--pseudo-workspace-name-p ws))
+                      (agent-repl--frontend-precreate-refusal ws))))
     (cond
+     ((agent-repl--pseudo-workspace-name-p ws) :pseudo-workspace)
      ((eq refusal :already-mounted) nil)
      (refusal refusal)
      ((agent-repl--frontend-session-controller-live-p ws) nil)
