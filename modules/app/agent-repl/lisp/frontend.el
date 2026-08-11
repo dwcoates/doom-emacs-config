@@ -1695,19 +1695,29 @@ which is not what closing a panel says."
 ;;;###autoload
 (defun agent-repl-frontend-open-panel ()
   "Open the web frontend for the current workspace's session.
-Records `gui' as the workspace's DELIBERATE frontend choice (asking for
-the web panel by name is a choice, so it outlives a restart) and
-dispatches the gui open capability.  The unified command surface —
-`SPC o c' and friends — reaches the same place through the frontend
-registry."
+Dispatches the gui open capability and, once it is accepted, records
+`gui' as the workspace's DELIBERATE frontend choice (asking for the web
+panel by name is a choice, so it outlives a restart).  The unified
+command surface — `SPC o c' and friends — reaches the same place through
+the frontend registry.
+
+THE CHOICE IS PERSISTED ONLY BY AN OPEN THAT WAS ACCEPTED.  A refused
+open leaves NO durable trace: `agent-repl--gui-open' signals a
+`user-error' synchronously when the build has no xwidget support or the
+frontend cannot drive this workspace, and persisting ahead of it would
+pin a workspace to a frontend it was never able to show — silently, and
+across restarts, with nothing in the workspace to explain why.
+`agent-repl--frontend-after-ensure-session' returns immediately and
+always, so the write below still lands before any mount continuation
+runs and the async ladder sees the same state it always did."
   (interactive)
   (let ((ws (agent-repl--ws-current-name)))
     (unless ws
       (user-error "agent-repl: no current workspace"))
     (agent-repl--log ws "open-panel: selecting gui frontend")
     (agent-repl--frontend-validate-for-ws 'gui ws)
-    (agent-repl--ws-choose-frontend ws 'gui)
-    (agent-repl--gui-open ws)))
+    (prog1 (agent-repl--gui-open ws)
+      (agent-repl--ws-choose-frontend ws 'gui))))
 
 ;;;###autoload
 (defun agent-repl-frontend-close-panel ()
