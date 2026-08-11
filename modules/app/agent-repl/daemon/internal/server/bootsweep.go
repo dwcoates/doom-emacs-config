@@ -107,6 +107,16 @@ type BootSweeper struct {
 	// the verdict it belonged to, since a classification that failed to reach
 	// the user is exactly the silence this hook exists to end.
 	Unwired func(workspace, sessionID, verdict string) error
+	// InFlight and Terminals close the bounce's WORK accounting beside its
+	// process accounting: what was in flight per workspace before the bounce,
+	// and what became of each item (inflightmanifest.go).
+	//
+	// Both are OPTIONAL and both are needed together — judging a vanished item
+	// without a terminal source could only guess between COMPLETED and
+	// INTERRUPTED — so a partially wired pair is loud-logged and skipped rather
+	// than half-run.
+	InFlight  InFlightManifestSource
+	Terminals InFlightTerminalSource
 	// Ledger is the predecessor daemon's record of which shim pid it left
 	// behind for each session, and whether it meant to. Nil (or empty) means
 	// there is nothing to compare against, which is SAID rather than passed
@@ -149,6 +159,34 @@ func (s *BootSweeper) reportBounceEnd() {
 		return
 	}
 	bounceledger.ReportEnd(s.Logf, s.Ledger, s.Settlement)
+	s.reportBounceWorkEnd()
+}
+
+// reportBounceWorkEnd closes the WORK half of the bounce accounting: for every
+// workspace the predecessor left a pre-bounce manifest for, it judges each
+// named item PRESERVED / COMPLETED / INTERRUPTED / UNKNOWN and appends the END
+// record beside the START one.
+//
+// It runs after the process accounting deliberately. A shim judged DIED
+// explains why its workspace's items are INTERRUPTED, and reading the two in
+// that order is what turns "a process is gone" into "this named work is gone".
+func (s *BootSweeper) reportBounceWorkEnd() {
+	if s.InFlight == nil || s.Terminals == nil {
+		s.Logf("server: bounce work accounting SKIPPED — a predecessor ledger of %d session(s) exists and the in-flight/terminal sources are not both wired, so what became of each workspace's live work is UNRECORDED",
+			len(s.Ledger))
+		return
+	}
+	seen := map[string]bool{}
+	for _, entry := range s.Ledger {
+		if entry.Workspace == "" || seen[entry.Workspace] {
+			continue
+		}
+		seen[entry.Workspace] = true
+		if _, err := ReportBounceEnd(s.Logf, entry.Workspace, s.InFlight, s.Terminals); err != nil {
+			s.Logf("server: bounce work accounting FAILED ws=%q session=%s: %v — this workspace's pre-bounce work stays unjudged",
+				entry.Workspace, entry.SessionID, err)
+		}
+	}
 }
 
 // The verdicts that leave a session unwired. Each is one branch of reconcile,
