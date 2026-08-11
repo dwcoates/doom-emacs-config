@@ -748,7 +748,19 @@ type sessionController struct {
 	// generation asked the spawner to resume. A transport failure may retry
 	// only while preserving this identity.
 	resumedVendorSessionID string
-	client                 sessionClient
+	// queryInstanceID is the SDK query identity this controller's shim
+	// announced at its handshake (ShimHello.query_instance_id), GUARDED BY
+	// Manager.mu.
+	//
+	// It is a COPY of the value the accounting reducer binds, and it exists
+	// only because of where each is written. The reducer's own field is
+	// mutated on the consumer's event goroutine with the manager mutex NOT
+	// held, so the in-flight resolver reading it directly would be an
+	// unsynchronized read of a live field — a data race, not merely a stale
+	// answer. This copy is written under the same mutex the resolver reads it
+	// under, which is the whole of its justification.
+	queryInstanceID string
+	client          sessionClient
 	consumer               *consumer
 	cancel                 context.CancelFunc
 	// controllerRegistrationRelease relinquishes the SSM-owned reservation
@@ -3403,6 +3415,13 @@ func (m *Manager) onHandshakeForGeneration(workspace, sessionID, generationID st
 			workspace, sessionID, generationID, controllerSessionID(d), controllerGenerationID(d), hello.GetActiveTurnIds(), err)
 		return err
 	}
+	// THE RESOLVER'S COPY, taken under the mutex it will be read under. See
+	// sessionController.queryInstanceID. It is stamped before the bind so a
+	// handshake REJECTED below leaves the workspace naming the query the shim
+	// claimed rather than a stale predecessor's.
+	m.mu.Lock()
+	d.queryInstanceID = strings.TrimSpace(hello.GetQueryInstanceId())
+	m.mu.Unlock()
 	if err := d.consumer.accounting.bindHandshakeIdentity(hello); err != nil {
 		m.logf("session-controller: query handshake decision=reject_identity ws=%q session=%q generation=%q query_instance_id=%q vendor_session_id=%q runtime_snapshot=%t error=%v",
 			workspace, sessionID, generationID, hello.GetQueryInstanceId(), hello.GetVendorSessionId(), hello.GetQueryRuntimeIdentity() != nil, err)

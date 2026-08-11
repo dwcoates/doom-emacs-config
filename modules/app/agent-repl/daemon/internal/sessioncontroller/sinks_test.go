@@ -202,6 +202,12 @@ type fakeApplier struct {
 	// activeTurnIDsErr fails the durable turn-claim READ, which is what a drain
 	// hold falls back from when it cannot name the turn it is waiting on.
 	activeTurnIDsErr error
+	// liveTasks is the live background-task set by identity, and
+	// liveTasksAnonymous the live starts that carried none. liveTaskIDsErr
+	// fails the read outright. All three feed the in-flight resolver.
+	liveTasks          []string
+	liveTasksAnonymous int64
+	liveTaskIDsErr     error
 	// turnClaimExistsErr fails the ledger PROBE an unknown-fate submit is
 	// reconciled against, which is what leaves a redelivery unable to prove the
 	// timed-out submit did not land.
@@ -1116,6 +1122,41 @@ func (a *fakeApplier) ActiveTurnIDs(_ string, _ string) ([]string, error) {
 		return nil, a.activeTurnIDsErr
 	}
 	return append([]string(nil), a.turns...), nil
+}
+
+// setCurrentErr fails the resolved-state READ, which is the first evidence the
+// in-flight resolver asks for.
+func (a *fakeApplier) setCurrentErr(err error) {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	a.currentErr = err
+}
+
+// setLiveTasks seeds the live background-task set the in-flight resolver reads.
+// anonymous stands in for live starts that carried no identity, which make the
+// set UNKNOWN rather than shorter.
+func (a *fakeApplier) setLiveTasks(anonymous int64, ids ...string) {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	a.liveTasks = append([]string(nil), ids...)
+	a.liveTasksAnonymous = anonymous
+}
+
+// setLiveTaskIDsErr fails the live background-task READ.
+func (a *fakeApplier) setLiveTaskIDsErr(err error) {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	a.liveTaskIDsErr = err
+}
+
+// LiveTaskIDs reads the live background-task set, exactly as the SSM's does.
+func (a *fakeApplier) LiveTaskIDs(_ string) ([]string, int64, error) {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	if a.liveTaskIDsErr != nil {
+		return nil, 0, a.liveTaskIDsErr
+	}
+	return append([]string(nil), a.liveTasks...), a.liveTasksAnonymous, nil
 }
 
 // TurnClaimExists mirrors the ledger probe an unknown-fate submit is
