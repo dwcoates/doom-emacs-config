@@ -108,6 +108,16 @@ func (m *Manager) warmCompactEligibleLocked(d *sessionController, anchorTurnEndM
 			d.workspace, d.sessionID, detail.Cause)
 		return false, "hibernated", nil
 	}
+	// A PROVEN-COLD CACHE DECLINES THE COMPACTION FOR THE PING'S REASON, AND
+	// MORE SO. The whole feature is the margin: a compaction is the cheapest turn
+	// of the session when every token of it is a cache READ, and the most
+	// expensive one at the uncached rate otherwise. A ping already MEASURED that
+	// there is no cache to read (keepalivecold.go), so this compaction would be
+	// the expensive case by construction — a whole-conversation read at full
+	// freight, submitted precisely because the daemon believed it would be cheap.
+	if d.cacheProvenCold != nil {
+		return false, "cache_proven_cold", nil
+	}
 	if d.turn.active() {
 		return false, "turn_active", nil
 	}
