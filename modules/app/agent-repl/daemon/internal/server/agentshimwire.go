@@ -248,6 +248,11 @@ type AgentShim struct {
 	// state subscription publishes the other two through.
 	WorkspaceViews *WorkspaceViews
 
+	// sweepOrphans removes the rebase worktrees no live merge owns. It is
+	// deferred rather than run at wire time (see SweepOrphanRebaseWorktrees
+	// below); the caller MUST invoke it, and does so off the boot path.
+	sweepOrphans func() error
+
 	cancelPush                       func()
 	cancelProgress                   func()
 	cancelWorkspaceAvailable         func()
@@ -644,11 +649,20 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	//
 	// IT SWEEPS cfg.RebaseRoot AND NOTHING ELSE, and it removes only leftovers
 	// whose own `.git` file names a repository this coordinator manages.
-	if err := driver.SweepOrphanRebaseWorktrees(context.Background(), merge.SweepScope{
-		Retained: coordinator.RetainedRebaseWorktrees(),
-		Repos:    coordinator.ManagedRepos(),
-	}); err != nil {
-		logf("server: orphaned rebase worktree sweep reported failures: %v — the leftovers it could not remove are left for a human; the daemon starts either way", err)
+	//
+	// IT IS NOT RUN HERE. Walking $TMPDIR costs ~1.3s on a developer's machine,
+	// and this function is what the frontend transport is built by: every
+	// millisecond spent here is a millisecond the reconnecting Emacs host has an
+	// open socket and no accept behind it. Nothing the daemon serves depends on
+	// the leftovers being gone — they are a disk leak, which is why a failure
+	// here was already only logged — so the sweep is handed to the caller to run
+	// once the host has been served. It is still bound to run AFTER Drain,
+	// because it is built from the coordinator's post-Drain retained set.
+	sweepOrphans := func() error {
+		return driver.SweepOrphanRebaseWorktrees(context.Background(), merge.SweepScope{
+			Retained: coordinator.RetainedRebaseWorktrees(),
+			Repos:    coordinator.ManagedRepos(),
+		})
 	}
 
 	// The merge-command path's map: the gated one when main supplied it, else
@@ -890,7 +904,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	}()
 
 	return &AgentShim{
-		Server: srv, SSM: mgr, Progress: prog, Merge: driver, MergeCoordinator: coordinator, MergeDispatch: mergeDispatch,
+		sweepOrphans: sweepOrphans,
+		Server:       srv, SSM: mgr, Progress: prog, Merge: driver, MergeCoordinator: coordinator, MergeDispatch: mergeDispatch,
 		ShutdownScheduler: scheduler,
 		WorkspaceViews:    workspaceViews,
 		cancelPush:        cancel, cancelProgress: cancelProgress,
@@ -932,4 +947,20 @@ func (a *AgentShim) Close() error {
 		}
 	}
 	return nil
+}
+
+// SweepOrphanRebaseWorktrees runs the boot's filesystem reconciliation: the
+// rebase worktrees in $TMPDIR that no live or conflict-parked merge owns.
+//
+// IT IS DEFERRED, NOT OPTIONAL. Wiring the frontend used to run it inline,
+// which put a ~1.3s $TMPDIR walk between the daemon's boot and the accept a
+// reconnecting Emacs host was already waiting on. The caller runs it once the
+// host has been served. A failure is reported to the caller and is NOT fatal —
+// an undeletable leftover is a leak, not a reason to refuse to serve — but it
+// is never silent.
+func (a *AgentShim) SweepOrphanRebaseWorktrees() error {
+	if a == nil || a.sweepOrphans == nil {
+		return fmt.Errorf("server: the orphaned rebase worktree sweep is unbound; this AgentShim was not built by WireAgentShim")
+	}
+	return a.sweepOrphans()
 }
