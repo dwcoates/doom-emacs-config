@@ -166,8 +166,35 @@ func TestHibernateReportsHibernated(t *testing.T) {
 	if got.wiring != ssm.WiringHibernated {
 		t.Fatalf("wiring = %s, want hibernated", got.wiring)
 	}
-	if got.reason != "hibernated" {
-		t.Fatalf("reason = %q, want the hibernation named", got.reason)
+	if got.reason != "hibernated:idle_sweep" {
+		t.Fatalf("reason = %q, want the hibernation AND its initiator named", got.reason)
+	}
+}
+
+// AND A TEARDOWN THAT IS NOT A HIBERNATION SAYS WHOSE IT WAS. A merged teardown,
+// a daemon bounce and an account switch all reach the same stop, and every one
+// of them used to write the bare token `hibernated` — so the log could not tell
+// a workspace the idle cutoff reaped from one a routine bounce stood down, and
+// hibernation read as far more frequent than the six-hour rule permits.
+func TestANonHibernationTeardownNamesItsOwnInitiator(t *testing.T) {
+	// Arrange.
+	m, applier, _ := newWiredRig(t)
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
+
+	// Act.
+	if err := m.Hibernate("ws", StopCauseMergedTeardown()); err != nil {
+		t.Fatalf("Hibernate: %v", err)
+	}
+
+	// Assert.
+	got := lastWiring(t, applier, "ws")
+	if got.reason != "hibernated:merged_teardown" {
+		t.Fatalf("reason = %q, want the merged teardown named rather than a bare hibernation", got.reason)
 	}
 }
 
