@@ -23,7 +23,7 @@ import {
   ShimReadySchema,
   SubscribeSchema,
 } from "../src/uds/proto.js";
-import { FramedPeer, acceptShim, tmpSocketPath, until } from "./uds-harness.js";
+import { FramedPeer, acceptShim, tmpSocketPath, tmpSpillDir, until } from "./uds-harness.js";
 import { unpackAs } from "../src/uds/framing.js";
 
 interface FakeStore {
@@ -83,6 +83,7 @@ describe("daemon reattach with from_seq continuation", () => {
     const store = await fakeStore();
     cleanups.push(() => store.close());
     const storeClient = new StoreClient({
+    spillDir: tmpSpillDir(),
       socketPath: store.socketPath,
       sessionId: "sess-1",
       producer: "claude-shim:sess-1",
