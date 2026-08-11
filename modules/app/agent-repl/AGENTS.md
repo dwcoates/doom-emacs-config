@@ -134,8 +134,25 @@ A live session costs a node+CLI process pair of roughly 500MB, and dozens of
 workspaces will exhaust a machine. `-idle-timeout` is the mitigation: after a
 workspace has been left alone for that long, the sweeper SIGTERMs its shim and
 leaves the registry record rehydratable, so the next act pays one bring-up and
-gets everything back. It defaults to **1 hour**, and `0` disables hibernation
-entirely.
+gets everything back. It defaults to the keep-alive policy's own idle cutoff,
+**6 hours**, and `0` disables hibernation entirely.
+
+IT IS FLOORED AT THAT CUTOFF AND CANNOT GO BELOW IT. `-idle-timeout` and
+`AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` answer the same question — how long has
+nobody touched this workspace — and while they disagreed, the shorter one reaped
+sessions the longer one was still keeping alive, with the longer one's own
+`idle_cutoff` cause attached to a threshold that was not its. Configuring a
+shorter value now raises it, loudly, at daemon construction.
+
+THE IDLE CUTOFF IS THE ONLY TIME-BASED ROUTE INTO A SLEEP. Nothing hibernates
+before it. A prompt cache that goes cold first — an overslept window, a missed
+ping, a bounce — stops being PINGED (`keepalive.ActionLetCacheCool`, and the
+cold-ping verdict in `keepalivecold.go`) and is not slept: a dead cache is a
+reason to stop spending on it, not a reason to tear the session down. Both of
+those used to hibernate at roughly the one-hour cache TTL, which is why
+hibernation looked far more frequent than the six-hour rule permits. The
+`cache_expired` cause is still READ — records written by earlier daemons carry
+it and must still be revivable — and is written by nothing.
 
 The window is measured from the newest row on the workspace's own state log
 (`ssm.LastActivityMs`), which is already an activity record: every row is
@@ -187,7 +204,7 @@ annoyance; lower it when memory is the constraint.
 ## One canonical token shape, and the daemon owns every judgment taken from it
 
 Every cost decision in this module — the compaction cold-read tripwire, the
-cold-ping hibernation, the progress footer's expensive-turn alert, token
+cold-ping verdict, the progress footer's expensive-turn alert, token
 accounting, any future budget gate — reads ONE representation, and it is the
 one that states the economics rather than the vendor's field names.
 
