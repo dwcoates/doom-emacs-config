@@ -2115,7 +2115,7 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	if p.workspaceCreation == nil {
 		panic("server: snapshot provider requires workspace creation bridge")
 	}
-	publicationAllowed := sessionPublicationGate(p.workspaceCreation, p.logf)
+	publicationAllowed := memoizedSessionPublicationGate(p.workspaceCreation, p.logf)
 	snap.Workspaces = filterPublishedSessionViews(snap.Workspaces, publicationAllowed, p.logf)
 	snap.Sessions = filterPublishedSessionViews(snap.Sessions, publicationAllowed, p.logf)
 	// The FENCED views carry no session id. The materialization latch is a
