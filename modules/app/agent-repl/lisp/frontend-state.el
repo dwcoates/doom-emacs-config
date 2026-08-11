@@ -858,6 +858,122 @@ silent fallback.  Returns the number of items that failed."
           (car err) (error-message-string err)))))
     failures))
 
+;;;; ---- Batched connect delivery: completeness accounting -----------------
+;;
+;; A connect snapshot may arrive as SEVERAL `StateSnapshot' frames — the fleet's
+;; `:workspaces' split into batches so this host can APPLY as they land instead
+;; of applying nothing until the last workspace of one huge frame has been
+;; decoded.  Applying a workspace's state is the expensive half (perspective,
+;; bookkeeping, readiness latches; ~18ms each at fleet scale) and decoding is
+;; not (~3ms for the whole 299KB frame), so batching is what makes ONE
+;; workspace's recovery independent of how many other workspaces exist.
+;;
+;; The daemon states the same `:workspaceTotal' — the count the WHOLE delivery
+;; carries — on every batch, and numbers the batches with `:workspaceBatchIndex'
+;; (0 is the LEAD batch, the only one carrying the wholesale fields).  An older
+;; daemon sends neither, which reads as "this frame is the whole delivery" and
+;; is exactly the pre-batching behavior.
+;;
+;; THE VIEW IS PARTIAL UNTIL IT IS NOT.  A partial view is never reported as
+;; complete: `agent-repl--frontend-snapshot-complete-p' is nil from the lead
+;; batch until this host has been handed `:workspaceTotal' DISTINCT workspaces,
+;; the snapshot-applied hook (the reconnect edge every recovery subscriber runs
+;; off) fires only at that instant, and any disagreement between batches about
+;; the total abandons the delivery LOUDLY rather than completing it.
+
+(defvar agent-repl--frontend-snapshot-expected-workspaces nil
+  "Workspaces the in-flight connect delivery will carry, or nil when none is open.")
+
+(defvar agent-repl--frontend-snapshot-delivered-workspaces
+  (make-hash-table :test 'equal)
+  "Workspace keys this connect delivery has handed to the apply path.
+A key is recorded whether or not its apply SUCCEEDED: a per-item failure is
+loud-logged and surfaced on its own, and it must not strand the delivery
+short of its total forever.  This counts DELIVERY, not correctness.")
+
+(defvar agent-repl--frontend-snapshot-complete-p nil
+  "Non-nil once the current connect delivery has landed every workspace.
+Read by anything that must not mistake a partial fleet for the fleet.")
+
+(defun agent-repl--frontend-snapshot-view-complete-p ()
+  "Return non-nil when the applied view covers the daemon's whole fleet."
+  agent-repl--frontend-snapshot-complete-p)
+
+(defun agent-repl--frontend-snapshot-invalidate ()
+  "Forget any connect delivery: the view is PARTIAL until a new one lands."
+  (setq agent-repl--frontend-snapshot-expected-workspaces nil)
+  (clrhash agent-repl--frontend-snapshot-delivered-workspaces)
+  (setq agent-repl--frontend-snapshot-complete-p nil))
+
+(defun agent-repl--frontend-snapshot-reset-delivery (total)
+  "Open a fresh connect delivery expecting TOTAL workspaces."
+  (setq agent-repl--frontend-snapshot-expected-workspaces total)
+  (clrhash agent-repl--frontend-snapshot-delivered-workspaces)
+  (setq agent-repl--frontend-snapshot-complete-p nil))
+
+(defun agent-repl--frontend-snapshot-abandon-delivery (reason)
+  "Abandon the in-flight delivery for REASON, leaving the view INCOMPLETE.
+The applied workspaces are kept — they are real state that really landed —
+but the view stops being completable, because a delivery whose own account
+of itself is inconsistent cannot be shown to have covered the fleet."
+  (setq agent-repl--frontend-snapshot-expected-workspaces nil)
+  (setq agent-repl--frontend-snapshot-complete-p nil)
+  (agent-repl--warn
+   nil
+   "frontend-apply-snapshot: connect delivery ABANDONED — %s; the applied view is PARTIAL and is not reported complete"
+   reason))
+
+(defun agent-repl--frontend-snapshot-note-delivered (workspaces)
+  "Record WORKSPACES as delivered; return non-nil when the fleet is now whole."
+  (dolist (item workspaces)
+    (let ((key (and (keywordp (car-safe item)) (plist-get item :workspace))))
+      (when (stringp key)
+        (puthash key t agent-repl--frontend-snapshot-delivered-workspaces))))
+  (let ((expected agent-repl--frontend-snapshot-expected-workspaces)
+        (have (hash-table-count agent-repl--frontend-snapshot-delivered-workspaces)))
+    (when (and expected (>= have expected))
+      (setq agent-repl--frontend-snapshot-complete-p t))
+    agent-repl--frontend-snapshot-complete-p))
+
+(defun agent-repl--frontend-apply-snapshot-continuation (snapshot total)
+  "Apply a CONTINUATION batch SNAPSHOT of a connect delivery of TOTAL workspaces.
+A continuation carries `:workspaces' and nothing else: the wholesale
+rebuilds and the daemon-global views belong to the lead batch and are
+stated exactly once per connect.  Returns the count of states applied."
+  (let ((workspaces (plist-get snapshot :workspaces))
+        (index (or (plist-get snapshot :workspaceBatchIndex) 0)))
+    (cond
+     ((null agent-repl--frontend-snapshot-expected-workspaces)
+      ;; A continuation with no lead is a delivery this host never saw the
+      ;; start of.  Its states are applied — they are the daemon's truth — but
+      ;; the view cannot be called complete, and the gap is loud.
+      (agent-repl--frontend-snapshot-abandon-delivery
+       (format "batch %d arrived with no lead batch open" index)))
+     ((/= total agent-repl--frontend-snapshot-expected-workspaces)
+      (agent-repl--frontend-snapshot-abandon-delivery
+       (format "batch %d states workspaceTotal=%d, the lead batch stated %d"
+               index total agent-repl--frontend-snapshot-expected-workspaces))))
+    (agent-repl--log nil
+                     "frontend-apply-snapshot: connect batch %d — %d workspace(s), total=%d delivered-before=%d"
+                     index (length workspaces) total
+                     (hash-table-count agent-repl--frontend-snapshot-delivered-workspaces))
+    (let ((failures
+           (let ((agent-repl--frontend-applying-snapshot-state t))
+             (agent-repl--frontend-apply-snapshot-items
+              "workspace-state" workspaces '(:workspace :state)
+              #'agent-repl--frontend-apply-workspace-state))))
+      (when (> failures 0)
+        (agent-repl--warn
+         nil
+         "frontend-apply-snapshot: %d item(s) FAILED in connect batch %d — see the per-item lines above"
+         failures index)))
+    (when (agent-repl--frontend-snapshot-note-delivered workspaces)
+      (agent-repl--log nil
+                       "frontend-apply-snapshot: connect delivery COMPLETE at batch %d — %d workspace(s)"
+                       index (hash-table-count agent-repl--frontend-snapshot-delivered-workspaces))
+      (agent-repl--uds-run-snapshot-applied-hook))
+    (length workspaces)))
+
 (defun agent-repl--frontend-apply-snapshot (snapshot)
   "Apply a `StateSnapshot' frame SNAPSHOT (a plist) — full resync.
 Handler for the `snapshot' oneof arm.  Applies every `WorkspaceState' in
@@ -888,6 +1004,23 @@ On the scoped per-session webapp connection the daemon omits `:daemon' and
 retains only that session's catalog; a nil `:daemon' is therefore skipped,
 not an error.  This handler runs on the UNSCOPED Emacs connection, which
 receives every catalog but has no per-task roster."
+  (let* ((batch-index (or (plist-get snapshot :workspaceBatchIndex) 0))
+         ;; An unset total is an older daemon, or a snapshot that was never
+         ;; batched (a resync, a GUI lease renewal): the frame IS the delivery.
+         (declared-total (or (plist-get snapshot :workspaceTotal) 0))
+         (total (if (> declared-total 0)
+                    declared-total
+                  (length (plist-get snapshot :workspaces)))))
+    (if (> batch-index 0)
+        (agent-repl--frontend-apply-snapshot-continuation snapshot total)
+      (agent-repl--frontend-snapshot-reset-delivery total)
+      (agent-repl--frontend-apply-snapshot-lead snapshot))))
+
+(defun agent-repl--frontend-apply-snapshot-lead (snapshot)
+  "Apply the LEAD batch of a connect delivery, SNAPSHOT.
+This is the whole of the pre-batching resync: the wholesale roster rebuilds,
+the daemon-global views, and the lead batch\\='s share of `:workspaces'.  See
+`agent-repl--frontend-apply-snapshot' for the containment contract."
   (let ((workspaces (plist-get snapshot :workspaces))
         (sessions (plist-get snapshot :sessions))
         (catalogs (plist-get snapshot :catalogs))
@@ -993,7 +1126,20 @@ receives every catalog but has no per-task roster."
     ;; It runs even when items failed: a partial resync is still a live link,
     ;; and leaving the outage notices standing over it would report an outage
     ;; that is over.  The per-item failures were surfaced above on their own.
-    (agent-repl--uds-run-snapshot-applied-hook)
+    ;;
+    ;; It does NOT run while the connect delivery is still arriving in batches.
+    ;; The edge means "the state of the world as of reconnection", and half a
+    ;; fleet is not that world — the sweep that runs off it would re-ensure
+    ;; workspaces it has not been told about yet.  The remaining batches fire
+    ;; it (see `agent-repl--frontend-apply-snapshot-continuation'); a delivery
+    ;; that never completes leaves it unfired, which is exactly what a
+    ;; never-delivered snapshot does today.
+    (if (agent-repl--frontend-snapshot-note-delivered workspaces)
+        (agent-repl--uds-run-snapshot-applied-hook)
+      (agent-repl--log nil
+                       "frontend-apply-snapshot: connect delivery PARTIAL after the lead batch — %d of %s workspace(s); snapshot-applied hook held"
+                       (hash-table-count agent-repl--frontend-snapshot-delivered-workspaces)
+                       agent-repl--frontend-snapshot-expected-workspaces))
     (length workspaces)))
 
 ;;;; ---- DegradedNotice: RETIRED (F4, wire removed in step 11) -----------
@@ -1429,6 +1575,13 @@ presence is tested with `plist-member' rather than `plist-get'."
 ;;
 ;; Loaded after `frontend-uds.el' (config.el load order / the test files),
 ;; so `agent-repl--uds-register-handler' is defined here.
+
+;; A NEW LINK HOLDS NO DELIVERY.  Whatever the previous connection converged
+;; on, this one has landed nothing yet, so the completeness verdict resets to
+;; "partial" at link open rather than carrying a dead daemon's "complete"
+;; across the outage.
+(add-hook 'agent-repl-uds-connected-functions
+          #'agent-repl--frontend-snapshot-invalidate)
 
 (agent-repl--uds-register-handler "workspaceState"
                                   #'agent-repl--frontend-apply-workspace-state)
