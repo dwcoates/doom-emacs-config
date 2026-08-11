@@ -502,72 +502,79 @@ func (s *Server) waitForConnection(ctx context.Context, sessionID string) (*Conn
 // ReattachDecision used to answer with a dial and a handshake read; the
 // session lock covers the other half (a shim alive but not yet dialled in).
 func (s *Server) Connected(sessionID string) (bool, error) {
-	parked, err := s.parkedConnected(sessionID)
+	parked, err := s.connectedIn(parkedIndex, sessionID)
 	if err != nil {
 		return false, err
 	}
 	if parked {
 		return true, nil
 	}
-	return s.claimedConnected(sessionID)
+	return s.connectedIn(claimedIndex, sessionID)
 }
 
-// parkedConnected answers Connected for a connection still awaiting a claim.
-func (s *Server) parkedConnected(sessionID string) (bool, error) {
-	for {
-		s.mu.Lock()
-		c := s.parked[sessionID]
-		s.mu.Unlock()
-		if c == nil {
-			return false, nil
-		}
-		open, err := connectionOpen(c.Net)
-		if err != nil {
-			return false, fmt.Errorf("shimlisten: probing parked session %s connection: %w", sessionID, err)
-		}
-		if !open {
-			if s.evictIfCurrent(sessionID, c, "peer_disconnected_while_parked") {
-				return false, nil
-			}
-			continue
-		}
-		s.mu.Lock()
-		current := s.parked[sessionID] == c
-		s.mu.Unlock()
-		if current {
-			return true, nil
-		}
-	}
+// connectionIndex names one of the two places a live shim connection is
+// recorded, so the probe below can be written ONCE for both.
+//
+// The two answers differ in exactly two ways — which map holds the entry, and
+// whether retiring a dead one closes the socket — and in nothing else. Written
+// twice they would be two copies of a loop whose whole job is refusing a stale
+// answer, free to drift into disagreeing about the same process.
+type connectionIndex struct {
+	// name is the index's own word for itself, for the probe's error text.
+	name string
+	// entries reads the CURRENT map rather than closing over one, because
+	// Close replaces both maps outright.
+	entries func(*Server) map[string]*Conn
+	// retire removes the entry once the kernel says its peer is gone, and
+	// reports whether this call is the one that did it. It is where the two
+	// indexes' ownership rules live: a parked connection is the listener's to
+	// close, a claimed one is not.
+	retire func(*Server, string, *Conn) bool
 }
 
-// claimedConnected answers Connected for a connection a controller already
-// owns. It is the parked probe's twin in every respect except the one that
-// matters: a dead entry is DROPPED, never closed, because the read side is not
-// this listener's to close.
+var parkedIndex = connectionIndex{
+	name:    "parked",
+	entries: func(s *Server) map[string]*Conn { return s.parked },
+	retire: func(s *Server, sessionID string, c *Conn) bool {
+		return s.evictIfCurrent(sessionID, c, "peer_disconnected_while_parked")
+	},
+}
+
+var claimedIndex = connectionIndex{
+	name:    "claimed",
+	entries: func(s *Server) map[string]*Conn { return s.claimed },
+	retire: func(s *Server, sessionID string, c *Conn) bool {
+		return s.dropClaimIfCurrent(sessionID, c, "peer_disconnected_while_claimed")
+	},
+}
+
+// connectedIn is the ONE probe both indexes answer through: read the entry,
+// prove its peer with a non-consuming kernel probe, retire it if the peer is
+// gone, and re-read if the entry changed underneath the probe.
 //
 // A probe error is returned, never read as "not connected". Failing to observe
 // a connection is not evidence of its absence, and the caller that reads this
 // answer decides whether to kill the process at the other end of it.
-func (s *Server) claimedConnected(sessionID string) (bool, error) {
+func (s *Server) connectedIn(idx connectionIndex, sessionID string) (bool, error) {
 	for {
 		s.mu.Lock()
-		c := s.claimed[sessionID]
+		c := idx.entries(s)[sessionID]
 		s.mu.Unlock()
 		if c == nil {
 			return false, nil
 		}
 		open, err := connectionOpen(c.Net)
 		if err != nil {
-			return false, fmt.Errorf("shimlisten: probing claimed session %s connection: %w", sessionID, err)
+			return false, fmt.Errorf("shimlisten: probing %s session %s connection: %w", idx.name, sessionID, err)
 		}
 		if !open {
-			if s.dropClaimIfCurrent(sessionID, c, "peer_disconnected_while_claimed") {
+			if idx.retire(s, sessionID, c) {
 				return false, nil
 			}
 			continue
 		}
 		s.mu.Lock()
-		current := s.claimed[sessionID] == c
+		current := idx.entries(s)[sessionID] == c
 		s.mu.Unlock()
 		if current {
 			return true, nil
