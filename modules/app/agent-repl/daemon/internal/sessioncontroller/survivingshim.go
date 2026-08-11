@@ -92,51 +92,30 @@ func (m *Manager) awaitSurvivingShim(workspace string) (*sessionController, erro
 		return nil, nil
 	}
 
-	// THE ATTACHED-CONNECTION QUESTION, ASKED BEFORE ANY WAIT BEGINS.
+	// THE PARKED-CONNECTION QUESTION, ASKED BEFORE ANY WAIT BEGINS.
 	//
 	// THIS IS THE DEADLOCK THE 20:11 BOUNCE DIED OF. The only evidence the wait
 	// below accepts for "the survivor dialled in" is m.byWS — a controller for
 	// this workspace. But m.byWS is filled by the bring-up this gate stands in
-	// front of: the survivor's connection is already attached at the daemon's
-	// shim listener, and the ONLY thing that turns it into a controller is
+	// front of: the survivor's connection is already parked at the daemon's shim
+	// listener, and the ONLY thing that turns it into a controller is
 	// EnsureShim, twenty lines further down this same call. So the gate waited
 	// for a fact that only the code it was blocking could produce, timed out,
 	// and evicted a shim that had done everything right (see the boot sweep's
 	// own "has a PARKED shim connection; reattaching" line for those same
 	// sessions, minutes before it killed them).
 	//
-	// AND IT ASKS THE QUESTION WITHOUT NAMING A GENERATION, which is the second
-	// half of the same defect. A survivor's connection may be PARKED awaiting a
-	// claim or already CLAIMED by a controller generation that has since been
-	// retired — and the second reads exactly like the first from the shim's
-	// side: the process dialled in, handshaked, and went ready. The listener
-	// used to answer "no shim is connected" for the claimed case, so a healthy
-	// ready shim satisfied nothing, was waited out, and was SIGTERM'd 5ms after
-	// the bound expired. Adoption turns on WHETHER A USABLE CONNECTION EXISTS
-	// FOR THIS SESSION, never on which generation minted it (shimlisten
-	// Server.Connected).
-	//
-	// WHAT THAT DOES NOT LOOSEN. The probe is keyed by the session id the shim
-	// ANNOUNCED in its own ShimHello and resolved through this workspace's
-	// locator, and the listener holds at most one connection per session:
-	//
-	//   - a SUPERSEDED shim is dropped from the listener's indexes by the
-	//     redial that replaced it, so only the newest connection for a session
-	//     can ever be adopted;
-	//   - a FOREIGN session's shim is filed under that session and is invisible
-	//     to this lookup; and
-	//   - a DEAD shim answers false because every answer is re-derived from a
-	//     kernel probe of the socket rather than from a remembered entry.
-	//
+	// A parked connection is therefore the FIRST-CLASS adoption signal: the
+	// holder is not merely alive, it is already talking to this daemon.
 	// Returning free here is not "spawn" — it is "proceed", and the very next
 	// thing the caller does is EnsureShim, which proves the connection open and
 	// spawns nothing.
-	if attached, sessionID, err := m.survivorAttached(workspace); err != nil {
+	if parked, sessionID, err := m.survivorParked(workspace); err != nil {
 		return nil, err
-	} else if attached {
-		m.logf("session-controller: SURVIVING SHIM ATTACHED ws=%q session=%s decision=adopt_attached — the survivor has a usable connection at this daemon's shim listener (parked, or claimed by a retired generation), so the bring-up reattaches to that process instead of waiting for a controller only the reattach can create",
+	} else if parked {
+		m.logf("session-controller: SURVIVING SHIM PARKED ws=%q session=%s decision=adopt_parked — the survivor has already redialled and its connection is parked at this daemon's shim listener, so the bring-up reattaches to that process instead of waiting for a controller only the reattach can create",
 			workspace, sessionID)
-		m.recordShimAdoption(workspace, fmt.Sprintf("the surviving shim for session %s already had a usable connection at this daemon's shim listener and the bring-up reattached to it", sessionID))
+		m.recordShimAdoption(workspace, fmt.Sprintf("the surviving shim for session %s was already parked at this daemon's shim listener and the bring-up reattached to it", sessionID))
 		return nil, nil
 	}
 
@@ -169,15 +148,15 @@ func (m *Manager) awaitSurvivingShim(workspace string) (*sessionController, erro
 				m.recordShimAdoption(workspace, fmt.Sprintf("the surviving shim dialled in during the wait and session %s is driven by that same process", d.sessionID))
 				return d, nil
 			}
-			// The survivor may also redial MID-WAIT, which lands as a parked or
-			// claimed connection rather than as a controller for exactly the
-			// reason spelled out above the pre-check. Both are adoption.
-			if attached, sessionID, err := m.survivorAttached(workspace); err != nil {
+			// The survivor may also redial MID-WAIT, which lands as a parked
+			// connection rather than as a controller for exactly the reason
+			// spelled out above the pre-check. Both are adoption.
+			if parked, sessionID, err := m.survivorParked(workspace); err != nil {
 				return nil, err
-			} else if attached {
-				m.logf("session-controller: SURVIVING SHIM ATTACHED ws=%q session=%s waited=%s decision=adopt_attached — the survivor's connection became usable during the wait, so the bring-up reattaches to it",
+			} else if parked {
+				m.logf("session-controller: SURVIVING SHIM PARKED ws=%q session=%s waited=%s decision=adopt_parked — the survivor redialled during the wait, so the bring-up reattaches to it",
 					workspace, sessionID, time.Since(started).Round(time.Millisecond))
-				m.recordShimAdoption(workspace, fmt.Sprintf("the surviving shim for session %s presented a usable connection during the wait and the bring-up reattached to it", sessionID))
+				m.recordShimAdoption(workspace, fmt.Sprintf("the surviving shim for session %s redialled during the wait and the bring-up reattached to it", sessionID))
 				return nil, nil
 			}
 			held, err := m.workspaceLockHeld(workspace)
@@ -228,7 +207,7 @@ func (m *Manager) evictSurvivingShim(workspace string, squatted, waitBound time.
 	// must still be replaced loudly; what must never happen is a replacement the
 	// bounce's accounting cannot name.
 	replacedBecause := fmt.Sprintf(
-		"the lock holder never presented a controller and never presented a usable connection within the %s surviving-shim wait (squatted %s), so it was evicted and the workspace respawned",
+		"the lock holder never presented a controller and never parked a connection within the %s surviving-shim wait (squatted %s), so it was evicted and the workspace respawned",
 		waitBound, squatted)
 
 	holders, err := m.workspaceLockHolders(workspace)
@@ -322,40 +301,33 @@ func (m *Manager) awaitHolderDeath(workspace string, grace, interval time.Durati
 	}
 }
 
-// survivorAttached answers the one question the wait used to be unable to ask:
-// does this workspace's surviving shim ALREADY have a usable connection to this
-// daemon — parked awaiting a claim, or claimed by a controller generation that
-// has since been retired?
+// survivorParked answers the one question the wait used to be unable to ask:
+// has this workspace's surviving shim ALREADY redialled and parked its
+// connection at this daemon's shim listener?
 //
 // It is the same probe the spawn chokepoint uses (server.ShimSpawner.EnsureShim
 // -> shimListener.Connected) deliberately: one authority for "is a shim talking
 // to me", asked at the gate that decides whether to kill it and at the gate that
 // decides whether to spawn beside it, so the two can never disagree about the
-// same process. That single authority is also where the generation-blindness
-// lives, so no caller can accidentally reintroduce an identity match.
+// same process.
 //
-// THE SESSION ID IS THE FENCE, and it is the reason blindness to generation
-// costs nothing. It is resolved from this workspace's own locator and matched
-// against the id the shim announced in its ShimHello, so a superseded or
-// foreign shim is never even asked about — see the account above the pre-check.
-//
-// An error is NEVER read as "not attached": failing to observe a connection is
+// An error is NEVER read as "not parked": failing to observe a connection is
 // not evidence of its absence, and reading it as one is what kills a live shim.
-func (m *Manager) survivorAttached(workspace string) (bool, string, error) {
+func (m *Manager) survivorParked(workspace string) (bool, string, error) {
 	sessionID, ok := m.cfg.Locator.Locate(workspace)
 	if !ok {
-		// No session id is bound to this workspace, so there is no connection
-		// to look for. The holder is still a survivor and the wait below is
-		// still the right answer; this is not an error.
+		// No session id is bound to this workspace, so there is no parked
+		// connection to look for. The holder is still a survivor and the wait
+		// below is still the right answer; this is not an error.
 		return false, "", nil
 	}
 	if m.cfg.ShimConnected == nil {
-		return false, sessionID, fmt.Errorf("session-controller: workspace %q session %s: a shim holds the workspace lock but no shim-connection probe is wired, so whether it already has a usable connection cannot be observed and it must not be evicted on an unasked question",
+		return false, sessionID, fmt.Errorf("session-controller: workspace %q session %s: a shim holds the workspace lock but no parked-connection probe is wired, so whether it has already redialled cannot be observed and it must not be evicted on an unasked question",
 			workspace, sessionID)
 	}
 	connected, err := m.cfg.ShimConnected(sessionID)
 	if err != nil {
-		return false, sessionID, fmt.Errorf("session-controller: workspace %q session %s: cannot determine whether the surviving shim already has a usable connection: %w",
+		return false, sessionID, fmt.Errorf("session-controller: workspace %q session %s: cannot determine whether the surviving shim has already redialled: %w",
 			workspace, sessionID, err)
 	}
 	return connected, sessionID, nil
