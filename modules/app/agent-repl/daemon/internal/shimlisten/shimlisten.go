@@ -25,6 +25,11 @@
 // connection is then PARKED under that id until a session controller claims it. Parking
 // matters on daemon restart: survivors dial in as soon as the socket exists,
 // long before any prompt causes a session controller to be built for them.
+//
+// A claim MOVES the connection from `parked` to `claimed`; it does not make it
+// disappear. Both indexes together are the answer to "is a shim connected for
+// session X?", and that answer is deliberately independent of which controller
+// generation owns the read side — see Connected.
 package shimlisten
 
 import (
@@ -94,10 +99,41 @@ type Conn struct {
 type Server struct {
 	logf func(string, ...any)
 
-	mu       sync.Mutex
-	closed   bool
-	parked   map[string]*Conn      // session id -> connection awaiting a claim
-	waiters  map[string]chan *Conn // session id -> the claimer blocked in Next
+	mu      sync.Mutex
+	closed  bool
+	parked  map[string]*Conn      // session id -> connection awaiting a claim
+	waiters map[string]chan *Conn // session id -> the claimer blocked in Next
+	// claimed is the OTHER half of "is a shim connected for this session?":
+	// the connection a claimer took out of `parked` and still owns.
+	//
+	// # Why the listener remembers a connection it gave away
+	//
+	// It used to forget. `Connected` read `parked` alone, so the instant a
+	// shimclient claimed a connection the listener answered "no shim is
+	// connected for this session" about a shim that was talking to this very
+	// daemon — and the workspace-ownership gate (sessioncontroller
+	// survivingshim.go) reads exactly that answer to decide whether a lock
+	// holder is a survivor to adopt or a squatter to kill. A healthy shim whose
+	// connection belonged to an EARLIER controller generation therefore
+	// satisfied nothing, was waited out, and was SIGTERM'd while ready.
+	//
+	// The claim is a fact about WHO IS READING the socket. It is not a fact
+	// about whether a shim is connected, and conflating the two is what made
+	// adoption turn on which generation happened to hold the read side.
+	//
+	// # It cannot go stale into a false "connected"
+	//
+	// Every read of this map re-proves the peer with the same non-consuming
+	// kernel probe `parked` entries get (connectionOpen), and a closed one is
+	// dropped by the probe that found it. A claimer that exits without closing
+	// its socket is therefore indistinguishable from one that closed it, and a
+	// redial for the same session supersedes the entry in deliver. Nothing here
+	// depends on a claimer remembering to hand anything back.
+	//
+	// Entries are never CLOSED from here. The claimer owns the read side, and
+	// Evict's contract — "this operation cannot close an active controller's
+	// route" — stays exactly as it was.
+	claimed  map[string]*Conn // session id -> connection a claimer owns
 	listener net.Listener
 }
 
@@ -109,6 +145,7 @@ func New(logf func(string, ...any)) *Server {
 	return &Server{
 		logf:    logf,
 		parked:  map[string]*Conn{},
+		claimed: map[string]*Conn{},
 		waiters: map[string]chan *Conn{},
 	}
 }
@@ -180,8 +217,16 @@ func (s *Server) deliver(sessionID string, c *Conn) {
 		c.Net.Close()
 		return
 	}
+	// A NEWER DIAL SUPERSEDES THE OLD CLAIM. The shim on the other end of a
+	// previously claimed connection has just redialled, which it only does
+	// after its old socket is gone, so the claim record describes a transport
+	// that no longer exists. Dropped rather than closed: the read side belongs
+	// to whichever claimer took it, and closing it from here would reach into
+	// another owner's connection.
+	s.dropClaimLocked(sessionID, "superseded_by_redial")
 	if ch, ok := s.waiters[sessionID]; ok {
 		delete(s.waiters, sessionID)
+		s.claimed[sessionID] = c
 		s.mu.Unlock()
 		ch <- c
 		s.logf("shimlisten: session %s connected (claimed)", sessionID)
@@ -365,6 +410,11 @@ func (s *Server) takeParked(sessionID string) (*Conn, error) {
 		s.mu.Lock()
 		if s.parked[sessionID] == c {
 			delete(s.parked, sessionID)
+			// THE CLAIM IS RECORDED IN THE SAME ACQUISITION THAT REMOVES THE
+			// PARK, so there is no instant in which this session's connection
+			// is in neither index and `Connected` answers "no shim" about a
+			// shim that is right here.
+			s.claimed[sessionID] = c
 			s.mu.Unlock()
 			if err := s.awaitWatchExit(sessionID, c); err != nil {
 				return nil, err
@@ -421,13 +471,49 @@ func (s *Server) waitForConnection(ctx context.Context, sessionID string) (*Conn
 	}
 }
 
-// Connected reports whether a shim for sessionID is currently parked here and
-// its peer remains connected. A closed peer is evicted before false returns,
-// so callers can never advertise a parked corpse as a live shim.
+// Connected reports whether a shim for sessionID has a USABLE CONNECTION to
+// this daemon right now — parked awaiting a claim, or already claimed by a
+// controller — with the peer proved live by the kernel in either case. A closed
+// peer is dropped before false returns, so callers can never advertise a corpse
+// as a live shim.
+//
+// IT IS DELIBERATELY BLIND TO WHICH CONTROLLER GENERATION HOLDS THE CLAIM.
+// "A shim is connected for session S" is a fact about the transport and the
+// process at the far end of it; which of this daemon's controllers happens to
+// own the read side is a fact about the daemon. Answering the first question
+// with the second is what let the workspace-ownership gate wait out and kill a
+// shim that had dialled in, handshaked, and gone ready — under a generation
+// that had since been retired (sessioncontroller survivingshim.go).
+//
+// WHAT IT STILL REFUSES is unchanged, because the refusals never rested on
+// generation identity:
+//
+//   - A SUPERSEDED shim. Both indexes are keyed by the session id the shim
+//     announced in its own ShimHello, and both hold at most ONE entry per
+//     session: a redial supersedes the park and drops the claim, so only the
+//     newest connection for a session is ever visible here.
+//   - A FOREIGN shim. A connection announcing some other session is filed
+//     under that session and is invisible to this lookup entirely.
+//   - A DEAD shim. Every answer is re-derived from a kernel probe of the
+//     socket, so a process that exited answers false however recently its
+//     entry was written.
+//
 // This is the cheap half of the "is a shim alive?" question that
 // ReattachDecision used to answer with a dial and a handshake read; the
 // session lock covers the other half (a shim alive but not yet dialled in).
 func (s *Server) Connected(sessionID string) (bool, error) {
+	parked, err := s.parkedConnected(sessionID)
+	if err != nil {
+		return false, err
+	}
+	if parked {
+		return true, nil
+	}
+	return s.claimedConnected(sessionID)
+}
+
+// parkedConnected answers Connected for a connection still awaiting a claim.
+func (s *Server) parkedConnected(sessionID string) (bool, error) {
 	for {
 		s.mu.Lock()
 		c := s.parked[sessionID]
@@ -454,9 +540,75 @@ func (s *Server) Connected(sessionID string) (bool, error) {
 	}
 }
 
-// Evict closes and removes sessionID's parked transport after an explicit
-// lifecycle stop. Claimed connections are owned by shimclient and are not in
-// this registry, so this operation cannot close an active controller's route.
+// claimedConnected answers Connected for a connection a controller already
+// owns. It is the parked probe's twin in every respect except the one that
+// matters: a dead entry is DROPPED, never closed, because the read side is not
+// this listener's to close.
+//
+// A probe error is returned, never read as "not connected". Failing to observe
+// a connection is not evidence of its absence, and the caller that reads this
+// answer decides whether to kill the process at the other end of it.
+func (s *Server) claimedConnected(sessionID string) (bool, error) {
+	for {
+		s.mu.Lock()
+		c := s.claimed[sessionID]
+		s.mu.Unlock()
+		if c == nil {
+			return false, nil
+		}
+		open, err := connectionOpen(c.Net)
+		if err != nil {
+			return false, fmt.Errorf("shimlisten: probing claimed session %s connection: %w", sessionID, err)
+		}
+		if !open {
+			if s.dropClaimIfCurrent(sessionID, c, "peer_disconnected_while_claimed") {
+				return false, nil
+			}
+			continue
+		}
+		s.mu.Lock()
+		current := s.claimed[sessionID] == c
+		s.mu.Unlock()
+		if current {
+			return true, nil
+		}
+	}
+}
+
+// dropClaimIfCurrent deregisters a claimed connection, and reports whether this
+// call is the one that did it. The socket is left alone: its claimer owns the
+// read side and closes it when it is done with it.
+func (s *Server) dropClaimIfCurrent(sessionID string, c *Conn, reason string) bool {
+	s.mu.Lock()
+	if s.claimed[sessionID] != c {
+		s.mu.Unlock()
+		return false
+	}
+	delete(s.claimed, sessionID)
+	s.mu.Unlock()
+	s.logf("shimlisten: claimed lifecycle session=%s decision=drop reason=%s connection_state=not_closed_by_daemon", sessionID, reason)
+	return true
+}
+
+// dropClaimLocked is dropClaimIfCurrent for a caller that already holds mu and
+// is superseding whatever claim is recorded, whichever connection it names.
+func (s *Server) dropClaimLocked(sessionID, reason string) {
+	if _, ok := s.claimed[sessionID]; !ok {
+		return
+	}
+	delete(s.claimed, sessionID)
+	s.logf("shimlisten: claimed lifecycle session=%s decision=drop reason=%s connection_state=not_closed_by_daemon", sessionID, reason)
+}
+
+// Evict closes and removes sessionID's PARKED transport after an explicit
+// lifecycle stop.
+//
+// It reaches the parked index and nothing else. A claimed connection is
+// remembered (see Server.claimed) so that "is a shim connected?" can be
+// answered honestly about it, but it is owned by the shimclient that took it,
+// so this operation still cannot close an active controller's route. A claim
+// whose peer the stop killed stops answering `Connected` at the next probe,
+// which re-derives the answer from the kernel rather than from this index.
 func (s *Server) Evict(sessionID, reason string) bool {
 	s.mu.Lock()
 	c := s.parked[sessionID]
@@ -524,6 +676,12 @@ func connectionOpen(conn net.Conn) (bool, error) {
 }
 
 // Close stops accepting and drops every parked connection.
+//
+// CLAIMED CONNECTIONS ARE FORGOTTEN, NOT CLOSED. The daemon's preserve-on-
+// shutdown contract turns on a claimed shim outliving this process, redialling
+// and parking for the next boot; closing one here would be this listener
+// severing a route it does not own, on the exact path where the shim is meant
+// to be kept.
 func (s *Server) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -534,6 +692,7 @@ func (s *Server) Close() error {
 	ln := s.listener
 	parked := s.parked
 	s.parked = map[string]*Conn{}
+	s.claimed = map[string]*Conn{}
 	s.waiters = map[string]chan *Conn{}
 	s.mu.Unlock()
 
