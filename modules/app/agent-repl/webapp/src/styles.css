@@ -959,9 +959,9 @@ body::after {
    the counter-menu facade's parallel class stems; the tokens menu emits the
    same stems from its own module. The menu anchors the overlay, which hangs
    below the topbar without displacing the row it hangs from. */
-.agents-menu, .tasks-menu, .tokens-menu { position: relative; display: inline-block; }
+.agents-menu, .tasks-menu, .tokens-menu, .warnings-menu { position: relative; display: inline-block; }
 
-.info-agents, .info-tasks, .info-tokens {
+.info-agents, .info-tasks, .info-tokens, .info-warnings {
   font: inherit;
   background: none;
   border: none;
@@ -974,9 +974,29 @@ body::after {
 .info-tasks { color: var(--info-tasks); }
 .info-tokens:not(.token-heat) { color: var(--info-tokens); }
 .info-agents:hover, .info-tasks:hover, .info-tokens:hover { text-decoration: underline; }
-.agents-caret, .tasks-caret, .tokens-caret { font-size: 0.7rem; }
+.agents-caret, .tasks-caret, .tokens-caret, .warnings-caret { font-size: 0.7rem; }
 
-.agents-overlay, .tasks-overlay, .tokens-overlay {
+/* THE WARNING INDICATOR: the topbar's one red affordance. It replaces the
+   retired accounting line, which printed a settled turn's whole sentence
+   across the header — the sentences now live in the dropdown, and the strip
+   carries only the mark that there is one to read. It exists ONLY while the
+   daemon has raised a warning, so it never sits idle in the run. */
+.info-warnings { color: var(--err); }
+.info-warnings:hover { text-decoration: underline; }
+.topbar-warning-count {
+  font-variant-numeric: tabular-nums;
+  margin-left: 0.15rem;
+}
+/* The rows are daemon-composed prose, so they wrap rather than ellipsis-clip:
+   clipping a warning is hiding the half that says what went wrong. */
+.warnings-overlay .warning-row {
+  padding: 0.3rem 0.35rem;
+  color: var(--err);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.agents-overlay, .tasks-overlay, .tokens-overlay, .warnings-overlay {
   position: absolute;
   top: calc(100% + 0.4rem);
   right: 0;
@@ -2705,7 +2725,7 @@ pre {
    card's own bottom edge. An overlay only exists in the DOM while it is open,
    so exempting the item that holds one costs nothing feed-wide and keeps the
    dropdown from being sliced off at the card boundary. */
-.feed-item:has(.agents-overlay, .tasks-overlay, .tokens-overlay) {
+.feed-item:has(.agents-overlay, .tasks-overlay, .tokens-overlay, .warnings-overlay) {
   content-visibility: visible;
 }
 

@@ -1931,7 +1931,7 @@ describe("the fenced-view routing", () => {
     sessionLine: "",
     modelDisplay: "",
     modelOptions: [],
-    accountingLine: "",
+    warnings: [],
     fence: "f1",
   };
   const BREAKDOWN = { workspace: "/ws", fence: "f1", sections: [] };
