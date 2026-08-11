@@ -494,6 +494,64 @@ A workspace with no open attempt is ignored — see
   "Stamp WS's wire-side signal: a frame for it crossed the UDS link."
   (agent-repl--recovery-slo-note ws 'wire))
 
+;;;; ---- What counts as wire EVIDENCE --------------------------------------
+;;
+;; THE MEASUREMENT MUST NOT DEPEND ON AN INCIDENTAL CARRIER.
+;;
+;; The wire signal used to be stamped from ANY frame arm that happened to carry
+;; a top-level `workspace' — whichever one arrived first.  In practice that was
+;; usually a `typingDelta', because a workspace mid-turn emits hundreds of them
+;; per second.  That is not evidence the daemon owes anyone: a workspace that is
+;; simply NOT TYPING emits none, and its wire signal then depended on some other
+;; arm happening by.  The fold in sessioncontroller/foldedtyping.go made that
+;; visible by silencing typing inside an async window — every such workspace
+;; started reporting `wire_ms=-1' — but the dependency was always there.  A
+;; measurement whose evidence is incidental measures traffic, not recovery.
+;;
+;; So the stamp is keyed on a frame class the daemon GUARANTEES for every
+;; workspace after a bounce: `WorkspaceState' and `SessionView'.  Both are
+;; published per workspace on connect (in the `StateSnapshot''s `:workspaces'
+;; and `:sessions' lists) and on every subsequent state move, for typing and
+;; idle workspaces alike.  Nothing about a workspace's activity can make them
+;; not arrive, which is exactly the property the SLO needs from its evidence.
+;;
+;; The connect `snapshot' arm carries NO top-level workspace, so under the old
+;; rule it stamped nothing at all while still driving `note-emacs' per record.
+;; It now attributes each of its per-workspace records to that record's
+;; workspace, through this same predicate — see
+;; `agent-repl--frontend-snapshot-note-wire' in frontend-state.el.
+
+(defconst agent-repl-recovery-slo-wire-carriers '("workspaceState" "sessionView")
+  "Frame arms whose arrival is WIRE EVIDENCE for the workspace they name.
+
+The daemon guarantees one of each per workspace after a bounce, whatever
+that workspace is doing, so a stamp keyed on them measures the link coming
+back rather than the workspace happening to be busy.  Names are the
+`FrontendFrame' oneof field names, exactly as `frontend-uds.el' derives
+them, and the connect snapshot's per-workspace record lists carry the same
+two shapes under the same two names.
+
+Adding an arm here is a claim that the daemon OWES that arm to every
+workspace on recovery.  An arm that only some workspaces produce belongs
+nowhere near this list.")
+
+(defun agent-repl--recovery-slo-wire-carrier-p (field)
+  "Return non-nil when FIELD names a guaranteed per-workspace wire carrier."
+  (and (stringp field)
+       (member field agent-repl-recovery-slo-wire-carriers)
+       t))
+
+(defun agent-repl--recovery-slo-note-wire-frame (field ws)
+  "Stamp WS's wire signal when FIELD is a guaranteed per-workspace carrier.
+
+THE ONE PLACE the wire signal's evidence source is decided, shared by the
+live dispatch point and the connect snapshot's per-record attribution so
+the two cannot drift into disagreeing about what counts.  Returns non-nil
+when the frame was carrier evidence and WS was named."
+  (when (and ws (agent-repl--recovery-slo-wire-carrier-p field))
+    (agent-repl--recovery-slo-note ws 'wire)
+    t))
+
 ;;;; ---- Asking the page ---------------------------------------------------
 
 (defconst agent-repl-frontend-recovery-probe-hook "agentReplRecoveryProbe"

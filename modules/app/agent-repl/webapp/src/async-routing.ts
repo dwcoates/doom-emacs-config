@@ -107,9 +107,44 @@ function appendedSpool(spool: AsyncOutputSpool, append: AsyncOutputAppend): Asyn
  * async-bubble.proto's parent-POINTER design buys. Nothing here recurses into a
  * payload, so nothing here needs a depth bound to terminate.
  */
+/**
+ * ONE bubble's live-typing preview: the ephemeral text the daemon relayed for a
+ * record it is folding into that bubble.
+ *
+ * It is a PREVIEW, never content. Nothing here is ever persisted, ranked into
+ * the feed, or counted as part of the bubble's transcript — it exists only
+ * until the bubble's own authoritative record arrives and retires it.
+ */
+export interface AsyncBubbleTyping {
+  /** The ANTHROPIC message id the previewed block belongs to. */
+  messageId: string;
+  /** The block's ordinal within that message. */
+  blockIndex: number;
+  /** The chunks relayed for that block so far, concatenated. */
+  text: string;
+}
+
 export class AsyncBubbleRegistry {
   /** Insertion-ordered, which is the order bubbles opened. */
   private bubbles = new Map<string, AsyncBubble>();
+
+  /**
+   * THE BUBBLE-SCOPED LIVE TYPING PREVIEWS, keyed by bubble id.
+   *
+   * A preview is retired by the authoritative record of the same block landing
+   * on the SAME SURFACE. While an async window is open the daemon folds the
+   * session's records off the top-level feed and into a bubble, so a preview of
+   * one of those records opened on the FEED could never be retired: it would
+   * spin "streaming input..." with no body for the life of the page, which is
+   * exactly what the user reported seeing six of in a row.
+   *
+   * So the daemon addresses those previews to the bubble
+   * (`TypingDelta.bubble_id`) and they live HERE instead, where the bubble's
+   * own next authoritative update retires them — see {@link applyDelta}. The
+   * feed never sees them, and there is no timer anywhere: a preview whose
+   * retirement is structurally guaranteed does not need one.
+   */
+  private typing = new Map<string, AsyncBubbleTyping>();
 
   /** How many bubbles are open. */
   get size(): number {
@@ -139,6 +174,11 @@ export class AsyncBubbleRegistry {
   adoptSnapshot(bubbles: readonly AsyncBubble[]): void {
     const before = this.bubbles.size;
     this.bubbles = new Map(bubbles.map((b) => [b.id, b]));
+    // Previews are ephemeral and the snapshot is authoritative about content,
+    // so every standing preview is now either redundant or orphaned. Both are
+    // dropped: a preview retained across a resync is one the snapshot that
+    // superseded it will never come back to retire.
+    this.typing.clear();
     log("info", `async-routing: adopted snapshot of ${bubbles.length} async bubble(s), replacing ${before}`, {
       operation: "async-routing.adopt-snapshot",
       context: { adopted: bubbles.length, replaced: before },
@@ -182,7 +222,54 @@ export class AsyncBubbleRegistry {
     }
 
     this.bubbles = staged;
+    // THE RETIREMENT. Every bubble this push spoke for has now stated its own
+    // authoritative content, which is precisely what a preview of that content
+    // was standing in for. Dropping it here — in the same commit that lands the
+    // record, and only once the whole push is known to land — is why a
+    // bubble-scoped preview can never outlive the window it belongs to.
+    for (const bubble of delta.opened) this.typing.delete(bubble.id);
+    for (const update of delta.updates) this.typing.delete(update.bubbleId);
     return { ok: true, opened: delta.opened.length, updated: delta.updates.length };
+  }
+
+  /**
+   * Open or extend BUBBLEID's live-typing preview with one relayed chunk.
+   *
+   * A chunk for a DIFFERENT block than the one being previewed REPLACES it
+   * rather than appending: the previous block's preview is over, and running
+   * two blocks' text together would draw prose the model never emitted.
+   *
+   * A chunk for a bubble the registry does not hold is DROPPED and reported.
+   * The alternative — keeping it against the hope that its bubble shows up —
+   * is a preview with nothing that can ever retire it, which is the whole
+   * failure this routing exists to prevent. Returns whether anything changed.
+   */
+  applyTyping(bubbleId: string, messageId: string, blockIndex: number, chunk: string): boolean {
+    if (!this.bubbles.has(bubbleId)) {
+      log("warn", `async-routing: live typing for unknown bubble ${bubbleId} — dropped`, {
+        operation: "async-routing.typing-orphan",
+        context: {
+          bubble_id: bubbleId,
+          api_message_id: messageId,
+          block_index: blockIndex,
+          chunk_length: chunk.length,
+          decision: "drop-preview-nothing-could-retire-it",
+        },
+      });
+      return false;
+    }
+    const held = this.typing.get(bubbleId);
+    if (held !== undefined && held.messageId === messageId && held.blockIndex === blockIndex) {
+      this.typing.set(bubbleId, { messageId, blockIndex, text: held.text + chunk });
+      return true;
+    }
+    this.typing.set(bubbleId, { messageId, blockIndex, text: chunk });
+    return true;
+  }
+
+  /** BUBBLEID's live-typing preview, or null when it has none standing. */
+  typingFor(bubbleId: string): AsyncBubbleTyping | null {
+    return this.typing.get(bubbleId) ?? null;
   }
 
   /**

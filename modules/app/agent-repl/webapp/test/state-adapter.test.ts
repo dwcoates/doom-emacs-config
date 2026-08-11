@@ -304,6 +304,7 @@ describe("TypingDelta mapping", () => {
           blockIndex: 2,
           kind: "thinking",
           delta: "...",
+          bubbleId: "",
         },
       },
     ]);
@@ -314,7 +315,7 @@ describe("TypingDelta mapping", () => {
       typingDelta: { workspace: "ws", fence: "s1", delta: { uuid: "msg-7", blockIndex: 2, inputJson: "{", toolUseId: "toolu_1" } },
     });
     expect(effects).toEqual([
-      { kind: "typing", value: { workspace: "ws", fence: "s1", messageId: "msg-7", blockIndex: 2, kind: "input_json", toolUseId: "toolu_1", delta: "{" } },
+      { kind: "typing", value: { workspace: "ws", fence: "s1", messageId: "msg-7", blockIndex: 2, kind: "input_json", toolUseId: "toolu_1", delta: "{", bubbleId: "" } },
     ]);
   });
 

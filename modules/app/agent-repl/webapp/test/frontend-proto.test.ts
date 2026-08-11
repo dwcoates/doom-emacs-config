@@ -893,6 +893,20 @@ describe("decodeFrontendFrame — TypingDelta embeds ContentDelta", () => {
     expect(frame.frame.value.kind).toBe("signature");
   });
 
+  it("carries the bubble the preview is scoped to", () => {
+    const frame = decode({ typingDelta: { fence: "s1", bubbleId: "b1", delta: { uuid: "u1", inputJson: "{" } } });
+    if (frame.frame.case !== "typingDelta") throw new Error("wrong variant");
+    expect(frame.frame.value.bubbleId).toBe("b1");
+  });
+
+  it("reads an omitted bubble id as the top-level feed", () => {
+    // proto3 omits an empty string, and empty means the ordinary case: this
+    // preview opens on the feed and is retired there.
+    const frame = decode({ typingDelta: { fence: "s1", delta: { uuid: "u1", inputJson: "{" } } });
+    if (frame.frame.case !== "typingDelta") throw new Error("wrong variant");
+    expect(frame.frame.value.bubbleId).toBe("");
+  });
+
   it("rejects a TypingDelta with no delta", () => {
     expect(() => decode({ typingDelta: { fence: "s1" } })).toThrow(/TypingDelta missing required `delta`/);
   });

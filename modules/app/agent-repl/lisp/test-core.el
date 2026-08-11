@@ -1780,6 +1780,49 @@ path, where the default sentinel fires during the wait's
     (should-not (string-prefix-p "~" result))
     (should (string-prefix-p "/" result))))
 
+(ert-deftest agent-repl-test-path-canonical-unbound-cache-asks-the-filesystem ()
+  "With no cache bound, every call resolves afresh — no hidden memo."
+  ;; Arrange
+  (let ((agent-repl--path-canonical-cache nil)
+        (calls 0))
+    (cl-letf (((symbol-function 'file-truename)
+               ;; Stubbed rather than wrapped: the real `file-truename'
+               ;; recurses on itself, so a counting wrapper would count
+               ;; components instead of calls.
+               (lambda (p &rest _) (setq calls (1+ calls)) p)))
+      ;; Act
+      (agent-repl--path-canonical "/tmp")
+      (agent-repl--path-canonical "/tmp")
+      ;; Assert
+      (should (= calls 2)))))
+
+(ert-deftest agent-repl-test-path-canonical-bound-cache-resolves-a-path-once ()
+  "A bound cache resolves each distinct path exactly once."
+  ;; Arrange
+  (let ((agent-repl--path-canonical-cache (make-hash-table :test 'equal))
+        (calls 0))
+    (cl-letf (((symbol-function 'file-truename)
+               ;; Stubbed rather than wrapped: the real `file-truename'
+               ;; recurses on itself, so a counting wrapper would count
+               ;; components instead of calls.
+               (lambda (p &rest _) (setq calls (1+ calls)) p)))
+      ;; Act
+      (agent-repl--path-canonical "/tmp")
+      (agent-repl--path-canonical "/tmp")
+      ;; Assert
+      (should (= calls 1)))))
+
+(ert-deftest agent-repl-test-path-canonical-cache-returns-the-same-answer ()
+  "A memoized answer is the answer the uncached call would have given."
+  ;; Arrange
+  (let ((uncached (let ((agent-repl--path-canonical-cache nil))
+                    (agent-repl--path-canonical "/tmp/foo/")))
+        (agent-repl--path-canonical-cache (make-hash-table :test 'equal)))
+    ;; Act
+    (agent-repl--path-canonical "/tmp/foo/")
+    ;; Assert
+    (should (equal uncached (agent-repl--path-canonical "/tmp/foo/")))))
+
 (ert-deftest agent-repl-test-path-canonical-relative-path ()
   "path-canonical should expand relative paths."
   (let ((result (agent-repl--path-canonical ".")))
