@@ -674,6 +674,20 @@ describe("TailFollow", () => {
     expect(a.tail.isFollowing()).toBe(true);
   });
 
+  it("keeps a first upward gesture when a resize lands before its scroll event", () => {
+    // Arrange — THE RESIDUAL. The browser dispatches scroll asynchronously, so
+    // a relayout still settling after a load can reach the owner before the
+    // gesture's own event does. It used to park on that stale decision, which
+    // is why the FIRST upward scroll after a load was yanked and no later one.
+    const box = atTail();
+    const a = armed(box);
+    // Act — the reader moves up; the resize, not the scroll event, arrives.
+    box.scrollTop = 660;
+    a.resize();
+    // Assert
+    expect([a.tail.isFollowing(), box.scrollTop]).toEqual([false, 660]);
+  });
+
   it("does not read a hydration shrink's clamp as the reader scrolling up", () => {
     // Arrange — deferred items settling to their real heights shortens the
     // feed under a parked box, and the browser clamps scrollTop down with it.

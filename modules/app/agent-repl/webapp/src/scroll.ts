@@ -348,19 +348,25 @@ export class TailFollow {
    * Re-parking on the resize removes the ordering question instead of betting
    * on one order.
    *
-   * IT DOES NOT RECONCILE FIRST, unlike every other entry point. A resize
-   * moves scrollTop by itself — a shrinking viewport clamps it downward — and
-   * reconciling would read that clamp as the reader scrolling up and drop the
-   * follow the switch just asked for. The pre-resize decision is the one that
-   * describes what the reader wanted; the resize's own displacement is absorbed
-   * either way, so it can never be mistaken for a gesture later.
+   * IT RECONCILES FIRST, like every other entry point, and that is the whole
+   * of this method's history. It used to skip `sync` because a resize moves
+   * scrollTop by itself — a shrinking viewport clamps it downward — and a
+   * reconcile that read the clamp as a gesture would drop the follow the
+   * switch just asked for. Skipping the reconcile bought that at the price of
+   * being the ONE path where a stale `following` could park the feed: a reader
+   * who has already begun scrolling up is only known to have done so through
+   * `sync`, since the browser dispatches their scroll event asynchronously and
+   * may throttle it behind a whole layout. A resize landing in that window
+   * parked the feed back at its tail under the gesture — and a resize only
+   * lands there while the page is still laying itself out, which is why it was
+   * the first upward scroll after a load that got yanked and no later one.
+   *
+   * `sync` now attributes the clamp itself (see there), so the reason to skip
+   * it is gone and the window with it.
    */
   onResize(): void {
-    if (this.following) {
-      this.park();
-      return;
-    }
-    this.lastTop = this.box.scrollTop;
+    this.sync();
+    if (this.following) this.park();
   }
 
   /** Wire the box's own events into the owner. */
