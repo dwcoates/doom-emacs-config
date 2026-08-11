@@ -379,6 +379,10 @@ type PromptReceiptStore interface {
 	// oldest interruption first. It is the LEVEL the re-drive is triggered off,
 	// which is what makes the resumption survive a bounce mid-resumption.
 	PendingResumptions(workspace string) ([]statedb.PendingResumption, error)
+	// DischargeResumptionsThrough discards every resumption a workspace carries
+	// from at or before throughMs, claimed or not — the context cut's sweep —
+	// reporting how many went.
+	DischargeResumptionsThrough(workspace string, throughMs int64) (int, error)
 	// UndischargedResumptions lists every resumption row a workspace carries,
 	// claimed or not. It is the PREEMPTION's reading: a user who moved on
 	// abandons the turn whether or not a re-drive already claimed it.
@@ -2167,6 +2171,9 @@ func (c *consumer) noteClearOrCompact(ev *corev1.Event) {
 	if dropped := c.dropCommandItems(); dropped > 0 {
 		logf("session-controller: dropped %d session-command invocation item(s) with the history this floor hides", dropped)
 	}
+	// And the interrupted-turn resumptions from below the cut, or the next wire
+	// would re-drive a turn whose conversation this event just discarded.
+	c.dischargeResumptionsThrough(c.now(), "replay_floor_raised:"+stateKind(ev))
 }
 
 // noteCutCompleted closes the SSM axis the arrived context cut was the
