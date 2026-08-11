@@ -190,7 +190,7 @@ func TestShutdownDrainJoinsEverySessionsHibernateFailure(t *testing.T) {
 func TestIdleSweepAbandonsItsRemainderOnceTeardownBegins(t *testing.T) {
 	// Arrange — the same fixture TestIdleSweepPersistsAnIdleCutoffHibernation
 	// proves this sweep DOES hibernate, with teardown already begun.
-	h, id := legacySweptWorkspace(t, time.Minute)
+	h, id := sweptPastTheCutoff(t, time.Hour)
 	h.srv.stopOnce.Do(func() { close(h.srv.stopped) })
 
 	// Act.

@@ -439,6 +439,13 @@ func New(cfg Config) *Server {
 		s.frontend = cfg.AgentShim.Server
 		s.workspaceViews = cfg.AgentShim.WorkspaceViews
 	}
+	// THE GENERIC SWEEP'S CUTOFF IS FLOORED AT THE POLICY'S, and the floor is
+	// resolved once, here, so no sweep tick can read a different answer than the
+	// one this line logged.
+	if floored := s.sweepIdleCutoff(); floored != s.idleTimeout && s.idleTimeout > 0 {
+		s.logf("server: idle sweep cutoff RAISED from the configured %s to %s — the generic sweep and the keep-alive policy are two readings of the SAME question (how long has nobody touched this workspace), and the shorter of the two would hibernate a session hours before the policy's own cutoff, which is the one number the hibernation contract is written against",
+			s.idleTimeout, floored)
+	}
 	s.idleSweep = s.sweepIdle
 	if s.idleTimeout > 0 || s.idleSweepTicks != nil {
 		go func() {
@@ -2175,12 +2182,13 @@ func (s *Server) sweepIdle() {
 		}
 		// THE IDLE TIMEOUT IS AN IDLE CUTOFF. It is the same fact the policy's
 		// own cutoff branch records — "pinging stops and the session sleeps" —
-		// measured against this daemon's own -idle-timeout rather than the
-		// policy's, so the account carries the threshold that actually tripped.
+		// measured against the FLOORED threshold (sweepIdleCutoff), so the
+		// account carries the threshold that actually tripped and no session is
+		// reaped here on a cutoff shorter than the policy's own.
 		detail := registry.HibernationDetail{
 			Cause:     registry.HibernationCauseIdleCutoff,
 			SinceMs:   nowMs,
-			CutoffMs:  int64(s.idleTimeout / time.Millisecond),
+			CutoffMs:  int64(s.sweepIdleCutoff() / time.Millisecond),
 			ElapsedMs: idleMs,
 		}
 		if err := s.controller.HibernateWithCause(rec.CWD, detail); err != nil {
@@ -2502,13 +2510,37 @@ func (s *Server) sweepable(sessionID, workspace string, nowMs int64) (idleMs int
 			sessionID, workspace)
 		return 0, false
 	}
+	cutoff := s.sweepIdleCutoff()
 	idle := time.Duration(nowMs-atMs) * time.Millisecond
-	if idle < s.idleTimeout {
+	if idle < cutoff {
 		return 0, false
 	}
 	s.logf("session %s: idle sweep hibernating (ws %s): quiet for %s, threshold %s",
-		sessionID, workspace, idle.Round(time.Second), s.idleTimeout)
+		sessionID, workspace, idle.Round(time.Second), cutoff)
 	return int64(idle / time.Millisecond), true
+}
+
+// sweepIdleCutoff is the elapsed the GENERIC idle sweep reaps at: never shorter
+// than the keep-alive policy's own idle cutoff.
+//
+// TWO CUTOFFS FOR ONE QUESTION IS THE DEFECT. The `-idle-timeout` flag and
+// keepalive.Config.IdleCutoff both answer "how long has nobody touched this
+// workspace", and they shipped an hour apart — so a session the policy would
+// have left alone for six hours was reaped by the generic sweep at one, with the
+// policy's own `idle_cutoff` cause attached to a threshold that was not the
+// policy's. The floor makes the shorter of the two unable to sleep anything the
+// longer one would still be keeping alive.
+//
+// IT RAISES, NEVER LOWERS. A deployment that deliberately configures a LONGER
+// idle timeout than the policy's cutoff keeps it: that direction only ever
+// delays a teardown, which is the safe one, and the policy's own arm reaps the
+// session at its cutoff regardless.
+func (s *Server) sweepIdleCutoff() time.Duration {
+	cutoff := s.keepAliveConfig().IdleCutoff
+	if s.idleTimeout > cutoff {
+		return s.idleTimeout
+	}
+	return cutoff
 }
 
 // ShutdownAll ends the daemon's session work (daemon teardown). The registry
