@@ -13,7 +13,7 @@ import net from "node:net";
 import { create } from "@bufbuild/protobuf";
 import { StoreClient } from "../src/uds/store-client.js";
 import { Event, EventSchema, HeartbeatSchema, SubscribeSchema } from "../src/uds/proto.js";
-import { FramedPeer, tmpSocketPath, until } from "./uds-harness.js";
+import { FramedPeer, tmpSocketPath, tmpSpillDir, until } from "./uds-harness.js";
 import { unpackAs } from "../src/uds/framing.js";
 
 interface FakeStore {
@@ -64,6 +64,7 @@ afterEach(() => {
 
 async function connectedClient(store: FakeStore): Promise<StoreClient> {
   const client = new StoreClient({
+    spillDir: tmpSpillDir(),
     socketPath: store.socketPath,
     sessionId: "sess-1",
     producer: "claude-shim:sess-1",

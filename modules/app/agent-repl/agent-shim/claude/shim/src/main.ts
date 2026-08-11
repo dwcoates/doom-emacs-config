@@ -580,6 +580,11 @@ export async function runUdsMode(
     protocolVersion: "1",
     udsSocketPath: args.daemonSocket!,
     storeSocketPath: args.storeSocket ?? defaultStoreSocket(),
+    // Validated non-empty immediately above, and the same directory the
+    // workspace lock was taken on: the store client's durable write spill
+    // journal is workspace-scoped precisely because that lock makes it
+    // exclusive.
+    workspaceDir: args.cwd,
     // SessionStarted.source: RESUME when respawned to resume an on-disk
     // session, FRESH for a brand-new one (design §5.2 SessionSource).
     sessionSource: args.resume !== undefined ? SessionSource.RESUME : SessionSource.FRESH,

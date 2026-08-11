@@ -29,6 +29,7 @@
  * turn count so a reattaching daemon learns whether a turn is running.
  */
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { AsyncQueue } from "../input-queue.js";
 import { create } from "@bufbuild/protobuf";
 import type { JsonObject } from "@bufbuild/protobuf";
@@ -171,6 +172,17 @@ export interface UdsSessionDeps {
   udsSocketPath: string;
   /** Where the shim connects to the shim-store (store.sock). */
   storeSocketPath: string;
+  /**
+   * The workspace this shim is bound to (its `--cwd`), which is where the
+   * store client's durable write spill journal lives.
+   *
+   * Required, and not derived from anything: the spill is the record of writes
+   * this shim has ACCEPTED but not yet delivered, and a session with nowhere
+   * to put it can only hold them in memory. That is a real reduction in
+   * durability and must be a visible decision at the call site, never a
+   * default nobody chose.
+   */
+  workspaceDir: string;
   /**
    * SESSION_SOURCE_RESUME when the shim was spawned with `--resume`, FRESH
    * otherwise. Threaded into every convert() so `system:init`'s SessionStarted
@@ -869,6 +881,9 @@ export class UdsSession {
       socketPath: this.deps.storeSocketPath,
       sessionId: this.deps.sessionId,
       producer: `claude-shim:${this.deps.sessionId}`,
+      // Beside the workspace's shim.log, for the same reason: it belongs to
+      // the workspace, and the shim holds that workspace exclusively.
+      spillDir: join(this.deps.workspaceDir, ".claude", "emacs"),
       ...(this.deps.heartbeatIntervalMs !== undefined ? { heartbeatIntervalMs: this.deps.heartbeatIntervalMs } : {}),
       ...(this.deps.storeSessionId !== undefined ? { storeSessionId: this.deps.storeSessionId } : {}),
       ...(this.deps.storeRelinkReportAfterMs !== undefined ? { relinkReportAfterMs: this.deps.storeRelinkReportAfterMs } : {}),
@@ -1503,6 +1518,14 @@ export class UdsSession {
     this.control.cancelAll(reason);
     this.input.end();
     this.query?.abort();
+    // SEAL THE STORE LINK BEFORE ASKING IT FOR THE TERMINATION RECEIPT. The
+    // store client holds an accepted write for as long as it takes the link to
+    // return, which is right for a store bounce and wrong for a process that is
+    // exiting: the receipt below would wait on a relink this session will not
+    // be alive to see. Sealed, the client still uses a LIVE link normally and
+    // fails a dead one immediately — after spilling the batch to disk, so the
+    // next shim on this workspace delivers what this one could not.
+    this.store.seal();
     let persistenceFailure: unknown;
     try {
       await this.persistQueryTerminationOrThrow("intentional", reason);
