@@ -1885,10 +1885,22 @@ async function boot(): Promise<void> {
             store.state.fences.get(store.state.cwd) ?? "",
           );
         }
+        // A RETIRED SEQ SPACE IS RULED ON BEFORE THE RESYNC IS ASKED FOR, and
+        // that ordering is the whole saving. This batch reported a daemon head
+        // below the mark this page holds, which is the exact condition the
+        // daemon refuses a resync on — so asking anyway buys a refusal the
+        // page has already proved, at the cost of a round trip measured at
+        // 1.75s on a live bounce. The re-anchor it would have produced is
+        // taken here instead, and the observe below is skipped because a
+        // re-anchored page asks the PAGER for a tail rather than the daemon
+        // for a delta; running both would only race them to the same page.
+        const reanchored =
+          result.seqSpaceRetired === true &&
+          connectResync.observeRetiredSeqSpace(currentResyncSnapshot(store.state.lastSeq));
         // Ask for the conversation history this connection has not been told.
         // Read AFTER ingest so the snapshot's own SessionView has supplied the
         // workspace key the daemon routes a resync by.
-        connectResync.observe(isSnapshot, currentResyncSnapshot(store.state.lastSeq));
+        if (!reanchored) connectResync.observe(isSnapshot, currentResyncSnapshot(store.state.lastSeq));
         // Logging context, RECONCILED against the store on every batch. The
         // attribution on every log record must name the conversation that is
         // live RIGHT NOW, and the store's gated value is the one authority for

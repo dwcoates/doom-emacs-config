@@ -465,6 +465,60 @@ export class ConnectResync {
   }
 
   /**
+   * The page proved LOCALLY that its replay mark counts in a retired seq
+   * space: re-anchor now instead of sending a resync that cannot be answered.
+   *
+   * WHY THIS EXISTS AT ALL, when `settleReanchored` below already handles the
+   * daemon's refusal: because the refusal costs a round trip the page does not
+   * need to pay. Measured across a live daemon bounce, six webviews each
+   * reconnected inside 700ms, adopted a snapshot at ~1.84s, sent a resync from
+   * a mark the snapshot had ALREADY shown to be above the daemon's head, and
+   * then sat for another 1,753ms waiting to be told so — the single largest
+   * segment of the whole post-bounce chain, and the reason the repair landed
+   * near 3.6s against a 3s budget. The evidence for the refusal and the
+   * refusal itself were 1.7 seconds apart, and the page held the evidence
+   * first.
+   *
+   * IT IS THE SAME DECISION, NOT A SECOND COPY OF IT. This routes into
+   * `settleReanchored`, so the re-anchor ceiling, the failure discharge, the
+   * `reanchor` callback and the logging are the ones that already existed;
+   * only the trigger is new. A page that cannot start a tail re-anchor falls
+   * back onto the backoff exactly as it does for a refusal.
+   *
+   * IT DOES NOT SUPERSEDE THE REFUSAL PATH. The local test needs a snapshot
+   * carrying a head, and the marks the daemon refuses on other paths — a
+   * rotation between two snapshots, a mark retired while nothing is being
+   * ingested — still arrive as refusals and are still handled there. Removing
+   * that coverage on the strength of this test would trade a proven detector
+   * for an optimistic one.
+   *
+   * Returns whether a re-anchor was taken, so the caller can skip the resync
+   * dispatch that would otherwise race the pager to the same tail page.
+   */
+  observeRetiredSeqSpace(snapshot: ResyncSnapshot): boolean {
+    if (snapshot.workspace === "") return false;
+    // An in-flight resync is left to settle on its own terms. It was really
+    // sent, and discharging it here would break the single-in-flight bound the
+    // whole module is built on — `settleReanchored` clears it when the answer
+    // lands.
+    if (this.inFlight) return false;
+    if (this.givenUp) return false;
+    this.opts.log?.(
+      "warn",
+      `resync: replay mark ${snapshot.fromSeq} is above the daemon's own head for ws=${snapshot.workspace}; ` +
+        `the seq space was RETIRED and this page can tell without asking, so it re-anchors now rather than ` +
+        `spending a resync round trip on a refusal it has already earned`,
+    );
+    // Disarm the pending resync: the mark it would carry is the retired one.
+    // The tail page this re-anchor requests is what supplies the next mark.
+    this.armed = false;
+    this.dirty = false;
+    const before = this.reanchors;
+    this.settleReanchored(snapshot, "retired_seq_space_observed_locally");
+    return this.reanchors > before;
+  }
+
+  /**
    * Re-arm a resync for a connection that is already current, naming why.
    *
    * The visibility trigger's half of the zombie repair: a webview WebKit

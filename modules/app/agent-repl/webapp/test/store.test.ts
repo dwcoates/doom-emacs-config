@@ -1068,6 +1068,55 @@ describe("ingest conversation-items", () => {
     // Assert
     expect(store.state.lastSeq).toBe(9);
   });
+
+  // THE EVIDENCE THE CLAMP ABOVE USED TO SWALLOW. A head below this page's
+  // mark is impossible within one seq space — the daemon records last_seen_seq
+  // before forwarding an event, so no frontend can hold a seq the conversation
+  // has not reached — which makes it proof the space RESTARTED. It is the same
+  // comparison the daemon's own refuseRetiredReplayMark makes, and the page
+  // can make it 1.75s earlier, without a round trip.
+  it("reports a head below the applied mark as a retired seq space", () => {
+    // Arrange — this page is caught up to seq 9.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem()], 9)]);
+    // Act — the daemon's head comes back as 3.
+    const result = store.ingest([itemsEffect([resultItem()], 3)]);
+    // Assert
+    expect(result.seqSpaceRetired).toBe(true);
+  });
+
+  it("says nothing about retirement while the head keeps up with the mark", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem()], 9)]);
+    // Act — an ordinary forward delta.
+    const result = store.ingest([itemsEffect([resultItem()], 12)]);
+    // Assert
+    expect(result.seqSpaceRetired).toBeUndefined();
+  });
+
+  it("treats a batch carrying no head as carrying no evidence", () => {
+    // Arrange — throughSeq 0 is "this batch ranks at the high-water mark",
+    // not "the conversation has produced nothing".
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem()], 9)]);
+    // Act
+    const result = store.ingest([itemsEffect([resultItem()], 0)]);
+    // Assert
+    expect(result.seqSpaceRetired).toBeUndefined();
+  });
+
+  it("scopes the retirement report to the batch that observed it", () => {
+    // Arrange — a retirement the caller has already acted on must not be
+    // re-reported by the next frame, which would re-anchor per push forever.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem()], 9)]);
+    expect(store.ingest([itemsEffect([resultItem()], 3)]).seqSpaceRetired).toBe(true);
+    // Act — an ordinary frame follows.
+    const result = store.ingest([itemsEffect([textItem()], 10)]);
+    // Assert
+    expect(result.seqSpaceRetired).toBeUndefined();
+  });
 });
 
 // --- feed order (seq-ranked insertion) ---------------------------------------
