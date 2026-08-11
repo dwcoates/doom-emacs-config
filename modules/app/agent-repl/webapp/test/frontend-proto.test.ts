@@ -2616,7 +2616,7 @@ describe("TopbarView decoding", () => {
     sessionLine: "session since 09:00",
     modelDisplay: "opus-5",
     modelOptions: [{ value: "opus-5", displayName: "Opus 5", description: "top" }],
-    accountingLine: "12s · 4k in",
+    warnings: [],
     fence: "f1",
   };
 
@@ -2665,6 +2665,44 @@ describe("TopbarView decoding", () => {
     // Arrange / Act / Assert — the key set is anchored to the generated
     // manifest, so drift fails the build; this is its runtime half.
     expect(() => topbarOf({ sessionId: "s1" })).toThrow(/unrecognized field\(s\): sessionId/);
+  });
+
+  it("reads no warnings as no warnings, which is the normal state", () => {
+    // Arrange / Act / Assert — an absent list is nothing to warn about, and
+    // the indicator does not exist at all for it.
+    expect(topbarOf({ warnings: undefined }).warnings).toEqual([]);
+  });
+
+  it("carries a warning's resolved sentence verbatim", () => {
+    // Arrange / Act
+    const got = topbarOf({
+      warnings: [{ text: "INVALID ACCOUNTING: totals disagree", accounting: {} }],
+    });
+    // Assert
+    expect(got.warnings[0].text).toBe("INVALID ACCOUNTING: totals disagree");
+  });
+
+  it("carries the warning's kind arm", () => {
+    // Arrange / Act
+    const got = topbarOf({ warnings: [{ text: "t", accounting: {} }] });
+    // Assert
+    expect(got.warnings[0].warning).toEqual({ kind: "accounting" });
+  });
+
+  it("REJECTS a warning with nothing to say", () => {
+    // Arrange / Act / Assert — it would light an indicator over an empty
+    // dropdown, which is a daemon fault rather than a renderable state.
+    expect(() => topbarOf({ warnings: [{ text: "", accounting: {} }] })).toThrow(
+      /warnings\[0\] requires a non-empty `text`/,
+    );
+  });
+
+  it("REJECTS a warning with no kind", () => {
+    // Arrange / Act / Assert — a kindless warning is a tag the client would
+    // have to guess at.
+    expect(() => topbarOf({ warnings: [{ text: "t" }] })).toThrow(
+      /warnings\[0\] requires a kind oneof/,
+    );
   });
 });
 
@@ -2789,7 +2827,7 @@ describe("the connect snapshot's resolved views", () => {
             sessionLine: "",
             modelDisplay: "",
             modelOptions: [],
-            accountingLine: "",
+            warnings: [],
             fence: "f1",
           },
         ],
