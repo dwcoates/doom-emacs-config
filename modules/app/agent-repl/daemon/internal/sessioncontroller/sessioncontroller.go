@@ -2729,7 +2729,24 @@ func (m *Manager) hibernate(workspace, wantSession string, cause StopCause) erro
 	// session lock that gates a following restoration. The controller exit tail
 	// is silent for this retired generation, so no later connectivity edge can
 	// overwrite this completed teardown.
-	m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityHibernated, "hibernated")
+	//
+	// THE CAUSE KIND NAMES THE INITIATOR, because most callers of this teardown
+	// are not hibernations at all. A merged teardown, a daemon shutdown in
+	// stop-shims mode, a scheduled drain's execution and an account switch all
+	// arrive here, and every one of them wrote the bare token `hibernated` on the
+	// state row — so the log could not tell a workspace the user's own idle
+	// cutoff reaped from one a routine bounce stood down, and hibernation read as
+	// far more frequent than the six-hour rule permits. Naming the initiator here
+	// makes the two countable apart.
+	//
+	// WHAT THIS DOES NOT FIX, deliberately: the RENDER STATE is still
+	// RENDER_STATE_HIBERNATED for all of them, so a bounced workspace still shows
+	// the user a sleep that never happened. Correcting that needs a third
+	// connectivity token beside `hibernated` and `severed` — "stood down, and
+	// neither asleep nor broken" — which is a proto and webapp change and
+	// therefore out of this branch's scope. It is a real defect and it is left
+	// whole rather than half-done.
+	m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityHibernated, "hibernated:"+cause.String())
 	// A deliberate stand-down retires whatever streak of bring-up failures the
 	// session had accumulated, so a revival climbs the ladder from the bottom
 	// rather than inheriting a park (bringupescape.go).
