@@ -26,6 +26,17 @@ export function tmpSocketPath(): string {
 }
 
 /**
+ * A fresh directory for a StoreClient's durable write spill journal.
+ *
+ * One per client, so a test that asserts recovery from a PREVIOUS shim's
+ * journal opts into sharing a directory explicitly rather than inheriting it
+ * from a neighbouring test.
+ */
+export function tmpSpillDir(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "spill-"));
+}
+
+/**
  * Default budget for the poll helpers below. Deliberately a WALL-CLOCK budget
  * rather than an event-loop-turn count: a turn count is load-sensitive, since
  * a spinning `setImmediate` loop burns its whole budget in single-digit

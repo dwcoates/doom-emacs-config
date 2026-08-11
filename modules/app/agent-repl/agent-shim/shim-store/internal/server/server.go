@@ -529,8 +529,17 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) (*corev1.StoreWriteAck, boo
 	if len(persistent) > 0 {
 		s.log.LogVerbose(logging.Fields{
 			Operation: "ingest", Producer: sw.GetProducer(), Session: persistent[0].GetSessionId(),
-		}, "persisted batch events=%d accepted=%d deduped=%d last_seq=%d ingest_ms=%d",
-			len(persistent), res.Accepted, res.Deduped, res.LastSeq, ingestMs)
+		}, "persisted batch events=%d accepted=%d deduped=%d replayed=%d last_seq=%d ingest_ms=%d",
+			len(persistent), res.Accepted, res.Deduped, res.Replayed, res.LastSeq, ingestMs)
+	}
+	// A REPLAY is a normal-log fact, not narration: it says a producer resent a
+	// batch it never saw acked, and that the write identity held. It is rare by
+	// construction (one store bounce per deploy), so it never floods.
+	if res.Replayed > 0 {
+		s.log.Log(logging.Fields{
+			Operation: "ingest", Producer: sw.GetProducer(), Session: persistent[0].GetSessionId(),
+		}, "REPLAYED batch absorbed idempotently events=%d accepted=%d replayed=%d — the producer resent writes whose ack it never saw, and the (session_id, write_id) identity made them no-ops instead of duplicate rows",
+			len(persistent), res.Accepted, res.Replayed)
 	}
 	return &corev1.StoreWriteAck{Accepted: res.Accepted, Deduped: res.Deduped, LastSeq: res.LastSeq}, true
 }

@@ -154,10 +154,20 @@ reconciliation. This is a designed event classification, not a fallback.
   reconnects to the SAME live shim — no `--resume` respawn when the shim
   survives. (Respawn with `--resume` remains the path when the shim itself is
   gone.)
-- Store downtime is honest downtime (metaprompt no-fallbacks rule): the shim
-  hard-fails event writes, loud-logs every dropped event, and reports a
-  degraded state on the daemon connection; the display goes stale until the
-  store returns. NO spill buffers, NO shadow paths.
+- Store downtime is honest downtime (metaprompt no-fallbacks rule): a batch the
+  store REJECTS is loud-logged per event and reported as a degraded state on
+  the daemon connection, and never retried; the display goes stale until the
+  store returns. NO shadow paths — nothing else ever serves the daemon.
+- Downtime is not destruction, though. A durable batch the shim ACCEPTED but
+  could not deliver — one that arrived during the outage, or one that was on
+  the wire when the link dropped — is fsynced to the workspace's spill journal
+  and delivered when the link returns, or by the next shim on that workspace if
+  this one dies first. NO CLOCK adjudicates that: there is no budget whose
+  expiry destroys an accepted write. The hold is bounded, and reaching the
+  bound stops the shim ACCEPTING new writes rather than discarding held ones.
+  Replay is safe because every event carries a stable `Event.write_id` and the
+  store enforces a unique `(session_id, write_id)`, so re-delivering a batch
+  that already landed is a no-op rather than a duplicate row.
 - The shim REDIALS the store's producer connection once per outage, on the
   next write that finds it down. The store is launchd-managed and restarts
   under live shims, killing a connection that is otherwise never rebuilt —
@@ -974,9 +984,11 @@ corpus.
 - `agent-shim/claude/shim/src/uds/store-client.ts` — store connection: `StoreWrite`
   with `StoreWriteAck` accounting, `Subscribe{from_seq}` + continuous forward
   loop to an injected sink, honest sad path (drop + loud-log every event +
-  `DegradedState` to an injected reporter; NO spill, NO retry of a rejected
-  batch); producer-connection redial, once per outage, driven by the next
-  write (§4.4). A dropped LINK, as opposed to a dropped batch, is reported
+  `DegradedState` to an injected reporter; NO retry of a rejected batch);
+  durable spill of accepted-but-undelivered batches (`src/uds/store-spill.ts`)
+  with backpressure at the hold's bound and idempotent replay by
+  `Event.write_id`; producer-connection redial, once per outage, driven by the
+  next write (§4.4). A dropped LINK, as opposed to a dropped batch, is reported
   only once it fails to relink within a retry budget: a store kickstart drops
   both connections of every live shim at once, and a link back inside the
   budget lost nothing — no event dropped, and the subscription resumed at the

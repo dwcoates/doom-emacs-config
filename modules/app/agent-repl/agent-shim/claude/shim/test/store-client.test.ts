@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import net from "node:net";
 import { create } from "@bufbuild/protobuf";
@@ -14,7 +14,9 @@ import {
   StoreWriteSchema,
   SubscribeSchema,
 } from "../src/uds/proto.js";
-import { FramedPeer, tmpSocketPath, until } from "./uds-harness.js";
+import { join } from "node:path";
+import { SpillJournal } from "../src/uds/store-spill.js";
+import { FramedPeer, tmpSocketPath, tmpSpillDir, until } from "./uds-harness.js";
 import { unpackAs } from "../src/uds/framing.js";
 
 /** A controllable fake shim-store: framed, one accepted connection per role. */
@@ -118,6 +120,7 @@ async function connectedClient(
   relinkReportAfterMs?: number,
 ): Promise<StoreClient> {
   const client = new StoreClient({
+    spillDir: tmpSpillDir(),
     socketPath: store.socketPath,
     sessionId: "sess-1",
     producer: "claude-shim:sess-1",
@@ -395,7 +398,7 @@ describe("StoreClient subscription connection (single-role store)", () => {
   });
 });
 
-describe("StoreClient sad path (no spill, no retry)", () => {
+describe("StoreClient sad path (loud, and never a silent loss)", () => {
   it("rejects write() and reports DegradedState when the connection is down", async () => {
     // Arrange
     const store = await fakeStore();
@@ -456,36 +459,116 @@ describe("StoreClient sad path (no spill, no retry)", () => {
     expect(client.openDegradedReport()).toBe(degradations[0]);
   });
 
-  it("rejects an in-flight write and reports degraded when the store drops", async () => {
-    // Arrange
-    const store = await fakeStore();
-    stores.push(store);
-    const degradations: DegradedState[] = [];
-    const client = await connectedClient(store, undefined, (d) => degradations.push(d));
-    // Act: issue a write, then kill the store before it acks
-    const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
-    await store.peer().next(StoreWriteSchema);
-    store.close();
-    // Assert
-    await expect(writeP).rejects.toThrow();
-    await until(() => degradations.length >= 1);
-    expect(degradations.some((d) => d.droppedCount === 1n)).toBe(true);
-    expect(client.isConnected()).toBe(false);
-  });
-
-  it("rejects every pipelined in-flight write when the store drops", async () => {
-    // Arrange: pipelining puts several batches in flight at once, and a drop
-    // must leave none of them hanging on an ack that will never come.
+  it("re-holds an in-flight write for replay when the store drops before acking", async () => {
+    // Arrange: a batch on the wire when the store dies is the case that used to
+    // be PERMANENT loss — it was declared dropped, degraded and rejected,
+    // because re-sending it might have written it twice.
     const store = await fakeStore();
     stores.push(store);
     const client = await connectedClient(store);
-    // Act: two un-acked batches on the wire, then the store dies.
+    const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await store.peer().next(StoreWriteSchema);
+
+    // Act
+    store.close();
+
+    // Assert: it is held for replay, not destroyed. The store's write identity
+    // is what makes re-sending it safe whether or not it already landed.
+    await until(() => client.heldWriteCount() === 1, "unacked batch re-held for replay");
+    expect(client.isConnected()).toBe(false);
+    void writeP.catch(() => undefined);
+  });
+
+  it("keeps every pipelined in-flight write in order when the store drops", async () => {
+    // Arrange: pipelining puts several batches in flight at once, and a drop
+    // must lose none of them and reorder none of them.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+    const socketPath = store.socketPath;
     const writes = [1n, 2n].map((seq) => client.write([create(EventSchema, { sessionId: "sess-1", seq })]));
     for (let i = 0; i < 2; i++) await store.peer().next(StoreWriteSchema, `batch ${i + 1}`);
+
+    // Act: the store dies, then a replacement comes up on the same path.
     store.close();
+    await until(() => client.heldWriteCount() === 2, "both unacked batches re-held");
+    const restarted = await fakeStoreAt(socketPath);
+    stores.push(restarted);
+    await until(() => restarted.count() >= 1, "relinked connection accepted");
+    const seen: bigint[] = [];
+    for (let i = 0; i < 2; i++) {
+      const w = await restarted.peer().next(StoreWriteSchema, `replayed batch ${i + 1}`);
+      seen.push(w.batch!.events[0]!.seq);
+      restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { lastSeq: w.batch!.events[0]!.seq }));
+    }
+
+    // Assert: both replayed, in the order they were written.
+    expect(seen).toEqual([1n, 2n]);
+    expect((await Promise.all(writes)).map((a) => a.lastSeq)).toEqual([1n, 2n]);
+  });
+
+  it("replays an unacked batch under the write identity it was first sent with", async () => {
+    // Arrange: a replay whose identity differed from the first delivery would be
+    // a NEW event to the store, which is the duplicate this whole mechanism
+    // exists to prevent.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+    const socketPath = store.socketPath;
+    const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    const first = await store.peer().next(StoreWriteSchema);
+
+    // Act
+    store.close();
+    await until(() => client.heldWriteCount() === 1, "unacked batch re-held");
+    const restarted = await fakeStoreAt(socketPath);
+    stores.push(restarted);
+    await until(() => restarted.count() >= 1, "relinked connection accepted");
+    const replayed = await restarted.peer().next(StoreWriteSchema, "replayed batch");
+    restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { deduped: 1n }));
+    await writeP;
+
     // Assert
-    const settled = await Promise.allSettled(writes);
-    expect(settled.map((s) => s.status)).toEqual(["rejected", "rejected"]);
+    expect(replayed.batch!.events[0]!.writeId).toBe(first.batch!.events[0]!.writeId);
+    expect(replayed.batch!.events[0]!.writeId).not.toBe("");
+  });
+});
+
+describe("StoreClient stable write identity", () => {
+  it("stamps a write identity on every event of a batch", async () => {
+    // Arrange
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+
+    // Act
+    void client.write([
+      create(EventSchema, { sessionId: "sess-1", seq: 1n }),
+      create(EventSchema, { sessionId: "sess-1", seq: 2n }),
+    ]).catch(() => undefined);
+    const sent = await store.peer().next(StoreWriteSchema);
+
+    // Assert
+    const ids = sent.batch!.events.map((e) => e.writeId);
+    expect(ids.every((id) => id !== "")).toBe(true);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("keeps a write identity the caller already supplied", async () => {
+    // Arrange: a batch recovered from a previous shim's spill journal is
+    // re-offered with its ORIGINAL identity, and re-minting it would make the
+    // store treat it as a second event.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+
+    // Act
+    void client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n, writeId: "already-minted" })])
+      .catch(() => undefined);
+    const sent = await store.peer().next(StoreWriteSchema);
+
+    // Assert
+    expect(sent.batch!.events[0]!.writeId).toBe("already-minted");
   });
 });
 
@@ -513,9 +596,10 @@ describe("StoreClient producer redial", () => {
     await expect(ackP).resolves.toMatchObject({ accepted: 1n });
   });
 
-  it("drops the batch when the redial fails and the write-hold budget expires", async () => {
-    // Arrange: store gone for good — nothing is listening on the path — and a
-    // collapsed hold budget, so the wait for a relink ends immediately.
+  it("holds the batch for as long as the redial keeps failing, with no deadline", async () => {
+    // Arrange: store gone — nothing is listening on the path. The batch used to
+    // be destroyed once a wall-clock budget expired, which made durability a
+    // question about how fast the store came back.
     const store = await fakeStore();
     stores.push(store);
     const degradations: DegradedState[] = [];
@@ -523,9 +607,15 @@ describe("StoreClient producer redial", () => {
     store.close();
     await until(() => !client.isConnected(), "producer conn observed down");
 
-    // Act / Assert: the honest sad path is unchanged — drop, degrade, reject.
-    await expect(client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })])).rejects.toThrow();
-    expect(degradations.some((d) => d.droppedCount === 1n && d.recovered === false)).toBe(true);
+    // Act
+    const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await until(() => client.heldWriteCount() === 1, "batch held for the relink");
+
+    // Assert: still held well past the old budget, and never counted as lost.
+    await until(() => degradations.length >= 1, "the link outage itself is reported");
+    expect(degradations.every((d) => d.droppedCount === 0n)).toBe(true);
+    expect(client.heldWriteCount()).toBe(1);
+    void writeP.catch(() => undefined);
   });
 
   it("dials once for a burst of writes arriving during one outage", async () => {
@@ -585,29 +675,26 @@ describe("StoreClient producer redial", () => {
     expect((await Promise.all(acks)).map((a) => a.lastSeq)).toEqual([1n, 2n, 3n]);
   });
 
-  it("keeps sending after a batch fails to reach the store", async () => {
+  it("keeps sending after a batch the store rejects", async () => {
     // Arrange: the send chain carries ORDER only, so one failed batch must not
-    // wedge every write queued behind it.
+    // wedge every write queued behind it. A store REJECTION is the failure that
+    // is genuinely final — unlike a down link, replaying it would only be
+    // rejected again.
     const store = await fakeStore();
     stores.push(store);
-    const client = await connectedClient(store, undefined, undefined, 5);
-    const socketPath = store.socketPath;
-    store.close();
-    await until(() => !client.isConnected(), "producer conn observed down");
+    const client = await connectedClient(store);
 
-    // Act: the first write fails its redial (nothing listening) and outlives
-    // its collapsed write-hold budget, then the store comes back and a second
-    // write follows it.
-    await expect(client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })])).rejects.toThrow();
-    const restarted = await fakeStoreAt(socketPath);
-    stores.push(restarted);
+    // Act
+    const rejected = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await store.peer().next(StoreWriteSchema, "rejected batch");
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { error: "disk full" }));
+    await expect(rejected).rejects.toThrow(/disk full/);
     const ackP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 2n })]);
-    await until(() => restarted.count() >= 1, "redialed connection accepted");
-    const write = await restarted.peer().next(StoreWriteSchema, "post-failure batch");
-    restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n }));
+    const next = await store.peer().next(StoreWriteSchema, "post-failure batch");
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n }));
 
     // Assert
-    expect(write.batch!.events[0]!.seq).toBe(2n);
+    expect(next.batch!.events[0]!.seq).toBe(2n);
     await expect(ackP).resolves.toMatchObject({ accepted: 1n });
   });
 
@@ -628,16 +715,20 @@ describe("StoreClient producer redial", () => {
 
 describe("StoreClient durable write hold across a store bounce", () => {
   /**
-   * A client with an explicit write-hold configuration. The hold budget is
-   * generous by default so a test asserting the FLUSH cannot be decided by a
-   * timer, and collapsed only where the expiry itself is the subject.
+   * A client with an explicit write-hold configuration.
+   *
+   * There is deliberately no time knob to pass: the hold has no deadline any
+   * more, so no test here can be decided by a timer. The bounds that remain are
+   * the BACKPRESSURE threshold, and `spillDir` lets a test share one journal
+   * between two clients to exercise recovery.
    */
   async function holdingClient(
     store: FakeStore,
-    hold: { writeHoldBudgetMs?: number; writeHoldMaxBatches?: number; writeHoldMaxBytes?: number },
+    hold: { writeHoldMaxBatches?: number; writeHoldMaxBytes?: number; spillDir?: string },
     degraded?: (d: DegradedState) => void,
   ): Promise<StoreClient> {
     const client = new StoreClient({
+      spillDir: hold.spillDir ?? tmpSpillDir(),
       socketPath: store.socketPath,
       sessionId: "sess-1",
       producer: "claude-shim:sess-1",
@@ -656,7 +747,7 @@ describe("StoreClient durable write hold across a store bounce", () => {
     // write landing while nothing is listening.
     const store = await fakeStore();
     stores.push(store);
-    const client = await holdingClient(store, { writeHoldBudgetMs: 60_000 });
+    const client = await holdingClient(store, {});
     const socketPath = store.socketPath;
     store.close();
     await until(() => !client.isConnected(), "producer conn observed down");
@@ -681,7 +772,7 @@ describe("StoreClient durable write hold across a store bounce", () => {
     // returns — a flush that raced the live path would reorder them.
     const store = await fakeStore();
     stores.push(store);
-    const client = await holdingClient(store, { writeHoldBudgetMs: 60_000 });
+    const client = await holdingClient(store, {});
     const socketPath = store.socketPath;
     store.close();
     await until(() => !client.isConnected(), "producer conn observed down");
@@ -708,66 +799,256 @@ describe("StoreClient durable write hold across a store bounce", () => {
     expect((await Promise.all(acks)).map((a) => a.lastSeq)).toEqual([1n, 2n, 3n]);
   });
 
-  it("fails the held write when the hold budget expires with the store still gone", async () => {
-    // Arrange: nothing ever comes back on the path.
+  it("stops ACCEPTING new batches once the hold reaches its bound", async () => {
+    // Arrange: room for one held batch. The bound used to DESTROY the queue
+    // when it was crossed; now it is a flow-control threshold, so the correct
+    // outcome is that the second batch is not taken on at all.
     const store = await fakeStore();
     stores.push(store);
-    const degradations: DegradedState[] = [];
-    const client = await holdingClient(store, { writeHoldBudgetMs: 10 }, (d) => degradations.push(d));
+    const client = await holdingClient(store, { writeHoldMaxBatches: 1 });
     store.close();
     await until(() => !client.isConnected(), "producer conn observed down");
 
-    // Act / Assert: exactly the pre-hold failure — reject, drop, degrade.
+    // Act
+    const first = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await until(() => client.heldWriteCount() === 1, "first batch held");
+    const second = client.write([create(EventSchema, { sessionId: "sess-1", seq: 2n })]);
+    await until(() => client.heldWriteCount() === 1, "second batch is NOT admitted");
+
+    // Assert: the first is intact and the second is neither held nor failed —
+    // it is waiting, which is what backpressure looks like from here.
+    expect(client.heldWriteCount()).toBe(1);
+    let secondSettled = false;
+    void second.then(() => { secondSettled = true; }, () => { secondSettled = true; });
+    await new Promise((r) => setImmediate(r));
+    expect(secondSettled).toBe(false);
+    void first.catch(() => undefined);
+    void second.catch(() => undefined);
+  });
+
+  it("accepts the backpressured batch once the hold drains", async () => {
+    // Arrange: a full hold, a batch waiting on capacity, then the store returns.
+    const store = await fakeStore();
+    stores.push(store);
+    const socketPath = store.socketPath;
+    const client = await holdingClient(store, { writeHoldMaxBatches: 1 });
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+    const first = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await until(() => client.heldWriteCount() === 1, "first batch held");
+    const second = client.write([create(EventSchema, { sessionId: "sess-1", seq: 2n })]);
+
+    // Act
+    const restarted = await fakeStoreAt(socketPath);
+    stores.push(restarted);
+    await until(() => restarted.count() >= 1, "relinked connection accepted");
+    const seen: bigint[] = [];
+    for (let i = 0; i < 2; i++) {
+      const w = await restarted.peer().next(StoreWriteSchema, `batch ${i + 1}`);
+      seen.push(w.batch!.events[0]!.seq);
+      restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { lastSeq: w.batch!.events[0]!.seq }));
+    }
+
+    // Assert: both delivered, in call order, neither dropped.
+    expect(seen).toEqual([1n, 2n]);
+    expect((await Promise.all([first, second])).map((a) => a.lastSeq)).toEqual([1n, 2n]);
+  });
+
+  it("admits a batch larger than the byte bound rather than deadlocking on it", async () => {
+    // Arrange: a byte bound no single batch can get under. Waiting for room
+    // that draining can never create would park the producer forever.
+    const store = await fakeStore();
+    stores.push(store);
+    const socketPath = store.socketPath;
+    const client = await holdingClient(store, { writeHoldMaxBytes: 1 });
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+
+    // Act
     const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await until(() => client.heldWriteCount() === 1, "oversized batch held anyway");
+    const restarted = await fakeStoreAt(socketPath);
+    stores.push(restarted);
+    await until(() => restarted.count() >= 1, "relinked connection accepted");
+    const flushed = await restarted.peer().next(StoreWriteSchema, "flushed oversized batch");
+    restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 1n }));
+
+    // Assert
+    expect(flushed.batch!.events[0]!.seq).toBe(1n);
+    await expect(writeP).resolves.toMatchObject({ lastSeq: 1n });
+  });
+
+  it("recovers a previous shim's held batch from the spill journal", async () => {
+    // Arrange: a shim accepts a durable write during a store outage and then
+    // DIES holding it. An in-memory hold takes that write to the grave; the
+    // journal is what a replacement shim reads it back out of.
+    const store = await fakeStore();
+    stores.push(store);
+    const socketPath = store.socketPath;
+    const spillDir = tmpSpillDir();
+    const dying = await holdingClient(store, { spillDir });
+    store.close();
+    await until(() => !dying.isConnected(), "producer conn observed down");
+    const lost = dying.write([create(EventSchema, { sessionId: "sess-1", seq: 42n })]);
+    await until(() => dying.heldWriteCount() === 1, "batch held and spilled");
+    void lost.catch(() => undefined);
+    dying.close();
+
+    // Act: the store comes back and a replacement shim opens the same journal.
+    const restarted = await fakeStoreAt(socketPath);
+    stores.push(restarted);
+    const replacement = await holdingClient(restarted, { spillDir });
+    const replayed = await restarted.peer().next(StoreWriteSchema, "recovered spill batch");
+    restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 42n }));
+
+    // Assert: the event the first shim accepted reached the store anyway.
+    expect(replayed.batch!.events[0]!.seq).toBe(42n);
+    expect(replacement.heldWriteCount()).toBe(0);
+  });
+
+  it("replays a recovered batch under its original write identity", async () => {
+    // Arrange: recovery is only safe because the store can recognize a repeat,
+    // and it can only do that if the identity survives the crash with the event.
+    const store = await fakeStore();
+    stores.push(store);
+    const socketPath = store.socketPath;
+    const spillDir = tmpSpillDir();
+    const dying = await holdingClient(store, { spillDir });
+    store.close();
+    await until(() => !dying.isConnected(), "producer conn observed down");
+    const event = create(EventSchema, { sessionId: "sess-1", seq: 42n });
+    void dying.write([event]).catch(() => undefined);
+    await until(() => dying.heldWriteCount() === 1, "batch held and spilled");
+    const mintedId = event.writeId;
+    dying.close();
+
+    // Act
+    const restarted = await fakeStoreAt(socketPath);
+    stores.push(restarted);
+    await holdingClient(restarted, { spillDir });
+    const replayed = await restarted.peer().next(StoreWriteSchema, "recovered spill batch");
+    restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { deduped: 1n }));
+
+    // Assert
+    expect(mintedId).not.toBe("");
+    expect(replayed.batch!.events[0]!.writeId).toBe(mintedId);
+  });
+
+  it("clears the spill journal once the store has acknowledged everything", async () => {
+    // Arrange: a journal that is never truncated would replay the whole session
+    // on every restart, so a settled batch must retire its record.
+    const store = await fakeStore();
+    stores.push(store);
+    const socketPath = store.socketPath;
+    const spillDir = tmpSpillDir();
+    const client = await holdingClient(store, { spillDir });
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+    const ackP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await until(() => client.heldWriteCount() === 1, "batch held and spilled");
+    const restarted = await fakeStoreAt(socketPath);
+    stores.push(restarted);
+    await until(() => restarted.count() >= 1, "relinked connection accepted");
+    await restarted.peer().next(StoreWriteSchema, "flushed held batch");
+
+    // Act
+    restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 1n }));
+    await ackP;
+
+    // Assert: a fresh client on the same directory finds nothing owed.
+    const journal = new SpillJournal({ path: join(spillDir, "store-write-spill.bin"), sessionId: "sess-1" });
+    const remaining = journal.read();
+    journal.close();
+    expect(remaining).toEqual([]);
+  });
+
+  it("keeps a batch held in memory, loudly, when the spill journal refuses it", async () => {
+    // Arrange: losing the CRASH-durability of a held write is strictly better
+    // than losing the write, so a journal failure must degrade rather than drop.
+    const store = await fakeStore();
+    stores.push(store);
+    const degradations: DegradedState[] = [];
+    const client = await holdingClient(store, {}, (d) => degradations.push(d));
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+    const append = vi.spyOn(SpillJournal.prototype, "append").mockImplementation(() => {
+      throw new Error("no space left on device");
+    });
+
+    // Act
+    const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await until(() => client.heldWriteCount() === 1, "batch held despite the journal failure");
+
+    // Assert
+    expect(degradations.some((d) => d.reason.includes("spill journal is unwritable"))).toBe(true);
+    expect(client.heldWriteCount()).toBe(1);
+    append.mockRestore();
+    void writeP.catch(() => undefined);
+  });
+
+  it("reports an unreadable spill journal instead of quietly starting clean", async () => {
+    // Arrange: a journal that cannot be read may be holding a previous shim's
+    // accepted writes, and starting as though it were empty would be exactly
+    // the silent loss this mechanism exists to prevent.
+    const store = await fakeStore();
+    stores.push(store);
+    const degradations: DegradedState[] = [];
+    const read = vi.spyOn(SpillJournal.prototype, "read").mockImplementation(() => {
+      throw new Error("EIO");
+    });
+
+    // Act
+    await holdingClient(store, {}, (d) => degradations.push(d));
+
+    // Assert
+    expect(degradations.some((d) => d.reason.includes("spill journal is unreadable"))).toBe(true);
+    read.mockRestore();
+  });
+
+  it("fails a held write when the client is SEALED for shutdown", async () => {
+    // Arrange: the hold's premise is that the link comes back and we deliver.
+    // That is false for a process on its way out, and waiting anyway is how an
+    // orderly shutdown hangs on an unreachable store.
+    const store = await fakeStore();
+    stores.push(store);
+    const degradations: DegradedState[] = [];
+    const client = await holdingClient(store, {}, (d) => degradations.push(d));
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+    const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await until(() => client.heldWriteCount() === 1, "batch held for the relink");
+
+    // Act
+    client.seal();
+
+    // Assert: the sad path, unchanged, and nothing left waiting.
     await expect(writeP).rejects.toThrow(/write on a down connection/);
     expect(degradations.some((d) => d.droppedCount === 1n && d.recovered === false)).toBe(true);
     expect(client.heldWriteCount()).toBe(0);
   });
 
-  it("fails every held write when the hold overflows its batch bound", async () => {
-    // Arrange: room for one batch, a budget that will never expire first.
+  it("still delivers over a LIVE link after the client is sealed", async () => {
+    // Arrange: sealing must not amputate a link that works — the termination
+    // receipt an orderly shutdown writes goes out over exactly this path.
     const store = await fakeStore();
     stores.push(store);
-    const client = await holdingClient(store, { writeHoldBudgetMs: 60_000, writeHoldMaxBatches: 1 });
-    store.close();
-    await until(() => !client.isConnected(), "producer conn observed down");
+    const client = await holdingClient(store, {});
 
-    // Act: the second hold is one past the bound.
-    const first = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
-    await until(() => client.heldWriteCount() === 1, "first batch held");
-    const second = client.write([create(EventSchema, { sessionId: "sess-1", seq: 2n })]);
+    // Act
+    client.seal();
+    const ackP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await store.peer().next(StoreWriteSchema, "post-seal batch");
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 1n }));
 
-    // Assert: the whole queue fails, so nothing is filed with a hole in it.
-    await expect(first).rejects.toThrow(/write on a down connection/);
-    await expect(second).rejects.toThrow(/write on a down connection/);
-    expect(client.heldWriteCount()).toBe(0);
-  });
-
-  it("fails the held write when the hold overflows its byte bound", async () => {
-    // Arrange: a byte bound one batch cannot fit under.
-    const store = await fakeStore();
-    stores.push(store);
-    const degradations: DegradedState[] = [];
-    const client = await holdingClient(
-      store,
-      { writeHoldBudgetMs: 60_000, writeHoldMaxBytes: 1 },
-      (d) => degradations.push(d),
-    );
-    store.close();
-    await until(() => !client.isConnected(), "producer conn observed down");
-
-    // Act / Assert
-    await expect(
-      client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]),
-    ).rejects.toThrow(/write on a down connection/);
-    expect(degradations.some((d) => d.droppedCount === 1n && d.recovered === false)).toBe(true);
+    // Assert
+    await expect(ackP).resolves.toMatchObject({ lastSeq: 1n });
   });
 
   it("fails a held write on a deliberate close rather than leaving it unsettled", async () => {
     // Arrange: teardown is final, so a held batch will never reach the store.
     const store = await fakeStore();
     stores.push(store);
-    const client = await holdingClient(store, { writeHoldBudgetMs: 60_000 });
+    const client = await holdingClient(store, {});
     store.close();
     await until(() => !client.isConnected(), "producer conn observed down");
     const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
@@ -812,6 +1093,7 @@ describe("StoreClient store link recovery", () => {
       announceRecovery = resolve;
     });
     const client = new StoreClient({
+    spillDir: tmpSpillDir(),
       socketPath: store.socketPath,
       sessionId: "sess-1",
       producer: "claude-shim:sess-1",
@@ -1102,6 +1384,7 @@ describe("StoreClient store session key", () => {
 
   async function clientWith(store: FakeStore, storeSessionId?: string): Promise<StoreClient> {
     const client = new StoreClient({
+    spillDir: tmpSpillDir(),
       socketPath: store.socketPath,
       sessionId: "sess-1",
       producer: "claude-shim:sess-1",
@@ -1232,6 +1515,7 @@ describe("StoreClient vendor session rotation", () => {
   async function rotatingClient(store: FakeStore, bounces: string[][]): Promise<StoreClient> {
     const received: Event[] = [];
     const client = new StoreClient({
+    spillDir: tmpSpillDir(),
       socketPath: store.socketPath, sessionId: "sess-1",
       producer: "claude-shim:sess-1", heartbeatIntervalMs: 0,
       storeSessionId: "uuid-old",
@@ -1367,6 +1651,7 @@ describe("StoreClient vendor session rotation", () => {
     stores.push(store);
     const bounces: string[][] = [];
     const client = new StoreClient({
+    spillDir: tmpSpillDir(),
       socketPath: store.socketPath, sessionId: "sess-1",
       producer: "claude-shim:sess-1", heartbeatIntervalMs: 0,
     });
@@ -1397,6 +1682,7 @@ describe("StoreClient vendor session rotation", () => {
     const store = await fakeStore();
     stores.push(store);
     const client = new StoreClient({
+    spillDir: tmpSpillDir(),
       socketPath: store.socketPath, sessionId: "sess-1",
       producer: "claude-shim:sess-1", heartbeatIntervalMs: 0,
     });

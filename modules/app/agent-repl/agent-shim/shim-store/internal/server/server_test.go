@@ -817,7 +817,7 @@ func TestIngestVerboseLineLogsBatchFacts(t *testing.T) {
 	recvAck(t, prod)
 
 	// Assert: the server's durable-batch outcome carries the batch's facts.
-	want := "persisted batch events=2 accepted=2 deduped=0 last_seq=2 ingest_ms="
+	want := "persisted batch events=2 accepted=2 deduped=0 replayed=0 last_seq=2 ingest_ms="
 	got := findLineContaining(drain(), "ingest", want)
 	if !strings.Contains(got, want) {
 		t.Fatalf("ingest line = %q, want message containing %q", got, want)
@@ -1444,5 +1444,76 @@ func TestCloseDisconnectsLiveConnections(t *testing.T) {
 	sub.SetReadDeadline(time.Now().Add(3 * time.Second))
 	if _, err := wire.ReadFrame(sub); err == nil {
 		t.Fatal("expected subscriber read to fail after server Close")
+	}
+}
+
+// --- idempotent replay by write identity ------------------------------------
+
+// identified stamps a producer write identity on a stream event, which is what
+// makes re-delivering it a no-op rather than a second row.
+func identified(ev *corev1.Event, writeID string) *corev1.Event {
+	ev.WriteId = writeID
+	return ev
+}
+
+func TestReplayedBatchIsAbsorbedWithoutDuplicateRows(t *testing.T) {
+	// Arrange: a batch the store has already ingested. A producer whose ack was
+	// lost to a store bounce cannot tell that from a batch that never arrived,
+	// so it resends — here, on a fresh producer connection, exactly as a relink
+	// does.
+	h := start(t, 0, testLogger())
+	first := h.dial(t)
+	send(t, first, write(
+		identified(vAssistantStream(t, "s1", "A"), "w-1"),
+		identified(vAssistantStream(t, "s1", "B"), "w-2"),
+	))
+	if ack := recvAck(t, first); ack.GetAccepted() != 2 {
+		t.Fatalf("first ack = %+v, want accepted=2", ack)
+	}
+	first.Close()
+
+	// Act
+	second := h.dial(t)
+	send(t, second, write(
+		identified(vAssistantStream(t, "s1", "A"), "w-1"),
+		identified(vAssistantStream(t, "s1", "B"), "w-2"),
+	))
+	ack := recvAck(t, second)
+
+	// Assert
+	if ack.GetAccepted() != 0 || ack.GetDeduped() != 2 {
+		t.Fatalf("replay ack = %+v, want accepted=0 deduped=2", ack)
+	}
+	if rows := collectStoredReplay(t, h.db, "s1", 0); len(rows) != 2 {
+		t.Fatalf("store holds %d rows after a replayed batch, want 2", len(rows))
+	}
+}
+
+func TestReplayedBatchIsNotFannedOutASecondTime(t *testing.T) {
+	// Arrange: a live subscriber that has already been handed the batch.
+	h := start(t, 0, testLogger())
+	sub := h.dial(t)
+	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
+	recvSubscriptionReady(t, sub)
+	prod := h.dial(t)
+	send(t, prod, write(identified(vAssistantStream(t, "s1", "A"), "w-1")))
+	recvAck(t, prod)
+	if got := recvEvent(t, sub); got.GetSeq() != 1 {
+		t.Fatalf("first delivery seq = %d, want 1", got.GetSeq())
+	}
+
+	// Act: replay the delivered batch, then write a genuinely new event. The new
+	// event is the barrier — no sleep is needed, because the subscriber's NEXT
+	// frame is either the duplicate (a failure) or the new event (a pass).
+	send(t, prod, write(identified(vAssistantStream(t, "s1", "A"), "w-1")))
+	recvAck(t, prod)
+	send(t, prod, write(identified(vAssistantStream(t, "s1", "C"), "w-2")))
+	recvAck(t, prod)
+
+	// Assert
+	next := recvEvent(t, sub)
+	if next.GetWriteId() != "w-2" || next.GetSeq() != 2 {
+		t.Fatalf("subscriber's next frame = write_id=%q seq=%d, want the NEW event w-2 at seq 2 — the replay was re-delivered",
+			next.GetWriteId(), next.GetSeq())
 	}
 }
