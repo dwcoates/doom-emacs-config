@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import net from "node:net";
 import { create } from "@bufbuild/protobuf";
@@ -960,6 +960,49 @@ describe("StoreClient durable write hold across a store bounce", () => {
     const remaining = journal.read();
     journal.close();
     expect(remaining).toEqual([]);
+  });
+
+  it("keeps a batch held in memory, loudly, when the spill journal refuses it", async () => {
+    // Arrange: losing the CRASH-durability of a held write is strictly better
+    // than losing the write, so a journal failure must degrade rather than drop.
+    const store = await fakeStore();
+    stores.push(store);
+    const degradations: DegradedState[] = [];
+    const client = await holdingClient(store, {}, (d) => degradations.push(d));
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+    const append = vi.spyOn(SpillJournal.prototype, "append").mockImplementation(() => {
+      throw new Error("no space left on device");
+    });
+
+    // Act
+    const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await until(() => client.heldWriteCount() === 1, "batch held despite the journal failure");
+
+    // Assert
+    expect(degradations.some((d) => d.reason.includes("spill journal is unwritable"))).toBe(true);
+    expect(client.heldWriteCount()).toBe(1);
+    append.mockRestore();
+    void writeP.catch(() => undefined);
+  });
+
+  it("reports an unreadable spill journal instead of quietly starting clean", async () => {
+    // Arrange: a journal that cannot be read may be holding a previous shim's
+    // accepted writes, and starting as though it were empty would be exactly
+    // the silent loss this mechanism exists to prevent.
+    const store = await fakeStore();
+    stores.push(store);
+    const degradations: DegradedState[] = [];
+    const read = vi.spyOn(SpillJournal.prototype, "read").mockImplementation(() => {
+      throw new Error("EIO");
+    });
+
+    // Act
+    await holdingClient(store, {}, (d) => degradations.push(d));
+
+    // Assert
+    expect(degradations.some((d) => d.reason.includes("spill journal is unreadable"))).toBe(true);
+    read.mockRestore();
   });
 
   it("fails a held write when the client is SEALED for shutdown", async () => {
