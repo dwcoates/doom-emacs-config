@@ -48,6 +48,7 @@ import (
 	"sync"
 	"time"
 
+	"claude-repld/internal/bounceledger"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 )
@@ -106,6 +107,28 @@ type BootSweeper struct {
 	// the verdict it belonged to, since a classification that failed to reach
 	// the user is exactly the silence this hook exists to end.
 	Unwired func(workspace, sessionID, verdict string) error
+	// Ledger is the predecessor daemon's record of which shim pid it left
+	// behind for each session, and whether it meant to. Nil (or empty) means
+	// there is nothing to compare against, which is SAID rather than passed
+	// off as health.
+	Ledger []bounceledger.Entry
+	// Holders names the live processes holding a workspace's lock. Required
+	// only when Ledger is set. Its error reaches the verdict as UNKNOWN and is
+	// never read as an absence.
+	Holders func(workspace string) ([]int, error)
+}
+
+// reportBounce accounts for the predecessor's shims BY PID before any
+// reconciliation runs, so the boot record says what the bounce did to each
+// named process instead of leaving it to be inferred from a process count.
+func (s *BootSweeper) reportBounce() {
+	if s.Holders == nil {
+		if len(s.Ledger) > 0 {
+			s.Logf("server: bounce accounting SKIPPED — a predecessor ledger of %d session(s) exists but no lock-holder probe is wired, so no verdict can be reached", len(s.Ledger))
+		}
+		return
+	}
+	bounceledger.Report(s.Logf, s.Ledger, s.Holders)
 }
 
 // The verdicts that leave a session unwired. Each is one branch of reconcile,
@@ -133,6 +156,7 @@ const (
 // second pass over whatever the first left unclaimed. It returns when the
 // second pass completes, or as soon as ctx ends.
 func (s *BootSweeper) Run(ctx context.Context) {
+	s.reportBounce()
 	deferred := s.pass(ctx, "boot", nil)
 	if ctx.Err() != nil {
 		return

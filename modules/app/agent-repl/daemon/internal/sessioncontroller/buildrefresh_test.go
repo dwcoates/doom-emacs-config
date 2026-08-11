@@ -584,6 +584,42 @@ func TestAHelloWithoutAPidRecordsNone(t *testing.T) {
 	}
 }
 
+// The bounce ledger's witness: a teardown must be able to name the pid it is
+// handing each session over with, because a successor that can only count
+// processes cannot tell a survivor from a replacement.
+func TestLiveShimPIDsNamesEverySessionsShim(t *testing.T) {
+	// Arrange.
+	m, _, _ := newRefreshRig(t, "sha-1")
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	m.onHandshake("ws", "s1", &corev1.ShimHello{Pid: 27494, QueryInstanceId: "query-build-refresh"})
+
+	// Act.
+	pids := m.LiveShimPIDs()
+
+	// Assert.
+	if pids["s1"] != 27494 {
+		t.Fatalf("LiveShimPIDs() = %v, want s1 named with pid 27494", pids)
+	}
+}
+
+// A session whose shim never reported a pid is ABSENT rather than recorded as
+// pid 0: an unknown identity must not be judged as a death later.
+func TestLiveShimPIDsOmitsASessionWithNoReportedPid(t *testing.T) {
+	// Arrange.
+	m, _, _ := newRefreshRig(t, "sha-1")
+	m.noteShimPID("s1", 0)
+
+	// Act.
+	pids := m.LiveShimPIDs()
+
+	// Assert.
+	if _, ok := pids["s1"]; ok {
+		t.Fatalf("LiveShimPIDs() = %v, want s1 omitted rather than recorded as pid 0", pids)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // WHETHER STOPPING A SURVIVING SHIM WOULD FIX ANYTHING.
 //
