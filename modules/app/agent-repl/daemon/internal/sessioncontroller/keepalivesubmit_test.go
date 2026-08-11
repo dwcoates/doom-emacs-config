@@ -324,7 +324,7 @@ func TestKeepAlivePingAbandonedWhenItsWindowCannotBeRecorded(t *testing.T) {
 }
 
 // THE PING EARNS NO RECEIPT. The user did not say it, and a durable receipt
-// would replay that bubble across every reconnect.
+// would replay that work across every reconnect.
 func TestKeepAlivePingMintsNoPromptReceipt(t *testing.T) {
 	// Arrange.
 	receipts := &countingReceipts{}
@@ -382,7 +382,7 @@ func TestPromptDuringAPingIsHeldAndUnclassified(t *testing.T) {
 }
 
 // THE HOLD IS PROJECTED so the webapp renders a dedicated "waiting on a
-// keep-alive response" bubble instead of the classifier bubble.
+// keep-alive response" work instead of the classifier work.
 func TestKeepAliveHoldIsProjectedOntoTheQueueView(t *testing.T) {
 	// Arrange.
 	m, _, _ := keepAliveRig(t)

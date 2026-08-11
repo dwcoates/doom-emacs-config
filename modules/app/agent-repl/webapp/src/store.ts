@@ -230,15 +230,15 @@ export interface ToolItem extends FeedOrderedItem {
    */
   asyncSource?: AsyncSource;
   /**
-   * THE CLASSIFICATION VERDICT: the id of the `AsyncBubble` this call detached,
-   * as the DAEMON resolved it (`AgentToolCall.spawned_bubble_id`).
+   * THE CLASSIFICATION VERDICT: the uuid of the MESSAGE this call detached work
+   * onto, as the DAEMON resolved it (`AgentToolCall.spawned_message_id`).
    *
-   * The card MATCHES this string against a bubble in the async registry; it
-   * never derives one. ABSENT means "this call detached nothing", and that is
-   * the only reading of absent — there is no second tier of evidence to fall
-   * back to, by design (see `watchers.ts`).
+   * The card MATCHES this string against work in the async registry; it never
+   * derives one. ABSENT means "this call detached nothing", and that is the
+   * only reading of absent — there is no second tier of evidence to fall back
+   * to, by design (see `watchers.ts`).
    */
-  spawnedBubbleId?: string;
+  spawnedMessageId?: string;
   /** Streamed output of the detached task this call spawned. */
   taskOutput?: string;
   /**
@@ -903,7 +903,7 @@ function mergeToolItem(existing: ToolItem, incoming: ToolItem): ToolItem {
   // half of the pair that carries it merges in. It is never cleared by a half
   // that does not carry it: the two are the same string whenever both are set,
   // and "the outcome did not restate it" is not a retraction.
-  if (incoming.spawnedBubbleId !== undefined) merged.spawnedBubbleId = incoming.spawnedBubbleId;
+  if (incoming.spawnedMessageId !== undefined) merged.spawnedMessageId = incoming.spawnedMessageId;
   if (incoming.taskOutput !== undefined) merged.taskOutput = incoming.taskOutput;
   if (incoming.skillBody !== undefined) merged.skillBody = incoming.skillBody;
   if (incoming.result !== undefined) merged.result = incoming.result;
@@ -1177,7 +1177,7 @@ export class ConversationStore {
           // — and reported once. Routing below is deliberately a separate
           // question: it decides WHERE an update lands, not whether the push is
           // current, and it never runs for a push the gate refused.
-          const admitted = this.gateFenced({ case: "asyncBubbleDelta" as const, value: effect.value });
+          const admitted = this.gateFenced({ case: "detachedWorkDelta" as const, value: effect.value });
           if (admitted === null) break;
           // A STALE PUSH RAISES NO GAP. `throughSeq` counts a sequence the
           // retired session owned, so measuring the live registry against it
@@ -2149,12 +2149,12 @@ export class ConversationStore {
    * Apply one ephemeral live-typing preview to the surface it belongs on.
    *
    * A PREVIEW IS RETIRED WHERE IT OPENS, so the surface is not a free choice.
-   * `reveal.bubbleId` is the daemon's statement of where the previewed record
-   * is bound: empty means the top-level feed, where `applyStreamDelta`
+   * `reveal.parentMessageId` is the daemon's statement of where the previewed
+   * record is bound: empty means the top-level feed, where `applyStreamDelta`
    * reconciles it against the authoritative record; set means the record is
-   * being FOLDED into that async bubble and will never reach the feed at all,
-   * so a top-level preview of it could never be retired and would spin
-   * "streaming input..." with no body for the life of the page.
+   * being FOLDED into that message's detached work and will never reach the
+   * feed at all, so a top-level preview of it could never be retired and would
+   * spin "streaming input..." with no body for the life of the page.
    *
    * The scoped branch therefore never touches `state.items`, which is the
    * invariant that keeps a preview from outliving its window.
@@ -2162,19 +2162,20 @@ export class ConversationStore {
   /**
    * Retire the preview the daemon says it will never complete.
    *
-   * IT IS ADDRESSED EXACTLY AS THE DELTA THAT OPENED IT — empty bubbleId for
-   * the top-level feed, a bubble id for a preview folded into one — so a cut
-   * can never retire a preview on the wrong surface.
+   * IT IS ADDRESSED EXACTLY AS THE DELTA THAT OPENED IT — empty
+   * parentMessageId for the top-level feed, a message id for a preview folded
+   * into that message's work — so a cut can never retire a preview on the wrong
+   * surface.
    */
-  private applyTypingCut(cut: { workspace: string; bubbleId: string; fence: string }): boolean {
-    if (cut.bubbleId !== "") return this.asyncBubbles.cutTyping(cut.bubbleId);
+  private applyTypingCut(cut: { workspace: string; parentMessageId: string; fence: string }): boolean {
+    if (cut.parentMessageId !== "") return this.asyncBubbles.cutTyping(cut.parentMessageId);
     return cutOpenPreviews(this.state.items);
   }
 
   private applyTyping(reveal: TypingReveal | import("./state-adapter.js").UnidentifiedToolInputReveal): boolean {
-    if (reveal.bubbleId !== "") {
+    if (reveal.parentMessageId !== "") {
       return this.asyncBubbles.applyTyping(
-        reveal.bubbleId,
+        reveal.parentMessageId,
         reveal.messageId,
         reveal.blockIndex,
         reveal.delta,

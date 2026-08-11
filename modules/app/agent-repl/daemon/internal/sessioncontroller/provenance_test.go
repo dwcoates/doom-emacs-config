@@ -55,7 +55,7 @@ func TestStampConversationProvenance(t *testing.T) {
 			c, _ := newProvenanceConsumer(applier)
 			cd := &frontendv1.ConversationDelta{
 				Workspace: "ws",
-				Messages:     []*frontendv1.Message{{Uuid: "u1", TsMs: tt.tsMs}},
+				Messages:  []*frontendv1.Message{{Uuid: "u1", TsMs: tt.tsMs}},
 			}
 
 			// Act.
@@ -78,7 +78,7 @@ func TestStampConversationProvenanceRefusesAnUnplaceableDelta(t *testing.T) {
 	c, push := newProvenanceConsumer(applier)
 	cd := &frontendv1.ConversationDelta{
 		Workspace: "ws",
-		Messages:     []*frontendv1.Message{{Uuid: "u1"}},
+		Messages:  []*frontendv1.Message{{Uuid: "u1"}},
 	}
 
 	// Act.

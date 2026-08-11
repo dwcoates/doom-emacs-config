@@ -2,7 +2,7 @@
 // `{"cancelDetachedAgents":{}}` command on the scoped /stream socket, through
 // the real daemon, to the real TS shim running `--fake` offline, and the frames
 // it produces coming back — the CommandAck's typed outcome and the async
-// bubble delta that settles the stopped agent.
+// work delta that settles the stopped agent.
 //
 // WHY THIS COMMAND EXISTS. The Emacs interrupt confirmation ("Cancel the
 // running subagents?") fires only when the main turn is over and detached work
@@ -40,9 +40,9 @@ import (
 )
 
 // launchDetachedAgent submits `!agent <description>` and returns once the
-// agent's bubble has OPENED, along with that bubble's id.
+// agent's work has OPENED, along with that work's id.
 //
-// The opened bubble is the receipt, and it is the right one: it proves the
+// The opened work is the receipt, and it is the right one: it proves the
 // task_started reached the daemon and was classified as detached work, which is
 // exactly the precondition the cancel acts on. Waiting on anything earlier
 // would race the classification the assertions then depend on.
@@ -58,13 +58,13 @@ func launchDetachedAgent(t *testing.T, conn *websocket.Conn, workspace, requestI
 		if delta == nil {
 			continue
 		}
-		for _, bubble := range delta.GetOpened() {
-			if bubble.GetAgent() != nil {
-				return bubble.GetId()
+		for _, work := range delta.GetOpened() {
+			if work.GetDetachedWork().GetAgent() != nil {
+				return work.GetUuid()
 			}
 		}
 	}
-	t.Fatalf("no detached-agent bubble opened for workspace %s before the deadline", workspace)
+	t.Fatalf("no detached-agent work opened for workspace %s before the deadline", workspace)
 	return ""
 }
 
@@ -93,7 +93,7 @@ func awaitCancelAck(t *testing.T, conn *websocket.Conn, workspace, requestID str
 	return nil, asyncTraffic{}
 }
 
-// awaitBubbleSettled returns the settled liveness for bubbleID, reading further
+// awaitDetachedWorkSettled returns the settled liveness for messageID, reading further
 // frames only when the pushes already seen do not carry it.
 //
 // THE SEEN PUSHES COME FIRST because an ack is not a barrier: the settlement
@@ -101,9 +101,9 @@ func awaitCancelAck(t *testing.T, conn *websocket.Conn, workspace, requestID str
 // have arrived either side of the ack. Handing the earlier read's frames in
 // makes that order irrelevant instead of merely unlikely to matter, and keeps
 // the wait a wait for a FRAME rather than for a duration.
-func awaitBubbleSettled(t *testing.T, conn *websocket.Conn, workspace, bubbleID string, seen asyncTraffic) *frontendv1.AsyncSettled {
+func awaitDetachedWorkSettled(t *testing.T, conn *websocket.Conn, workspace, messageID string, seen asyncTraffic) *frontendv1.DetachedWorkSettled {
 	t.Helper()
-	if settled := lastSettledLiveness(seen, bubbleID); settled != nil {
+	if settled := lastSettledLiveness(seen, messageID); settled != nil {
 		return settled
 	}
 	deadline := time.Now().Add(frameTimeout)
@@ -114,12 +114,12 @@ func awaitBubbleSettled(t *testing.T, conn *websocket.Conn, workspace, bubbleID 
 			continue
 		}
 		seen.deltas = append(seen.deltas, delta)
-		if settled := lastSettledLiveness(seen, bubbleID); settled != nil {
+		if settled := lastSettledLiveness(seen, messageID); settled != nil {
 			return settled
 		}
 	}
-	t.Fatalf("bubble %q never settled across the cancel (saw %d updates for it)",
-		bubbleID, len(seen.updatesFor(bubbleID)))
+	t.Fatalf("work %q never settled across the cancel (saw %d updates for it)",
+		messageID, len(seen.updatesFor(messageID)))
 	return nil
 }
 
@@ -148,20 +148,20 @@ func TestE2ECancelStopsARunningDetachedAgent(t *testing.T) {
 	}
 }
 
-func TestE2ECancelSettlesTheStoppedAgentsBubble(t *testing.T) {
+func TestE2ECancelSettlesTheStoppedAgentsDetachedWork(t *testing.T) {
 	// Arrange
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	_, conn, _, _ := liveSession(t, h, cwd)
-	bubbleID := launchDetachedAgent(t, conn, cwd, "r-launch", "hunt bugs")
+	messageID := launchDetachedAgent(t, conn, cwd, "r-launch", "hunt bugs")
 
 	// Act
 	_, seen := awaitCancelAck(t, conn, cwd, "c-stop")
 
-	// Assert: no orphaned running bubble. A feed and a footer still showing
+	// Assert: no orphaned running work. A feed and a footer still showing
 	// live work the daemon has already stopped say the opposite of what the
 	// cancel just did.
-	settled := awaitBubbleSettled(t, conn, cwd, bubbleID, seen)
+	settled := awaitDetachedWorkSettled(t, conn, cwd, messageID, seen)
 	// KILLED, not done and not error: the work did not fail, it was not
 	// allowed to conclude.
 	if settled.GetKilled() == nil {
@@ -193,7 +193,7 @@ func TestE2ECancelWithNothingDetachedIsRefusedWithTheTypedArm(t *testing.T) {
 	// Nothing was settled, because nothing was stopped.
 	for _, delta := range seen.deltas {
 		if len(delta.GetUpdates()) > 0 {
-			t.Errorf("a cancel that stopped nothing pushed %d bubble update(s)", len(delta.GetUpdates()))
+			t.Errorf("a cancel that stopped nothing pushed %d work update(s)", len(delta.GetUpdates()))
 		}
 	}
 }

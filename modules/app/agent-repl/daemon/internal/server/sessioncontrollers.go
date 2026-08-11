@@ -1555,12 +1555,12 @@ func (f *PushForwarder) PushConversationDelta(c *frontendv1.ConversationDelta) {
 	f.logMiss("conversation-delta")
 }
 
-func (f *PushForwarder) PushAsyncBubbleDelta(d *frontendv1.AsyncBubbleDelta) {
+func (f *PushForwarder) PushDetachedWorkDelta(d *frontendv1.DetachedWorkDelta) {
 	if s := f.target.Load(); s != nil {
-		s.PushAsyncBubbleDelta(d)
+		s.PushDetachedWorkDelta(d)
 		return
 	}
-	f.logMiss("async-bubble-delta")
+	f.logMiss("async-work-delta")
 }
 
 func (f *PushForwarder) PushTypingDelta(t *frontendv1.TypingDelta) {

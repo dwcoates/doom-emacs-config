@@ -1,13 +1,14 @@
 package sessioncontroller
 
 import (
+	"claude-repld/internal/frontend"
 	"strings"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
-// promptEcho is ONE prompt the shim accepted, and the bubble the daemon pushed
+// promptEcho is ONE prompt the shim accepted, and the work the daemon pushed
 // after synchronously publishing that prompt's `thinking` state.
 //
 // It is the daemon's RECEIPT OF ACCEPTANCE, not the vendor's echo of it. The
@@ -25,7 +26,7 @@ type promptEcho struct {
 }
 
 // echoUUID is the item identity a receipt is pushed under. Derived from the
-// request id so a resync re-push REPLACES the standing bubble rather than
+// request id so a resync re-push REPLACES the standing work rather than
 // adding a second one; the frontend keys on the request id first regardless, so
 // this only has to be stable.
 func echoUUID(requestID string) string { return "prompt-echo:" + requestID }
@@ -34,7 +35,7 @@ func echoUUID(requestID string) string { return "prompt-echo:" + requestID }
 // it in the daemon.
 //
 // Both the live push below and the durable replay (durablereplay.go) build the
-// bubble here, from the same identity, the same shape, and the same accept
+// work here, from the same identity, the same shape, and the same accept
 // instant, so a receipt served after a bounce is indistinguishable from the one
 // the user saw before it. There is no separate "replayed receipt" shape to keep
 // in agreement with this one, and no extra marking: an unreconciled receipt is
@@ -45,6 +46,7 @@ func promptReceiptItem(requestID, text string, tsMs int64) *frontendv1.Message {
 		Uuid:      echoUUID(requestID),
 		TsMs:      tsMs,
 		RequestId: requestID,
+		Lineage:   frontend.FeedRowLineage(echoUUID(requestID)),
 		Payload: &frontendv1.Message_UserMessage{UserMessage: &datav1.ApiUserMessage{
 			Content: &datav1.ApiUserMessage_ContentString{ContentString: text},
 		}},
@@ -65,14 +67,14 @@ func promptReceiptItem(requestID, text string, tsMs int64) *frontendv1.Message {
 // SUPERSEDED BY THE DURABLE LINE, unlike a permission item: the moment
 // attributeUserTurn stamps the transcript's UserLine with this request id, the
 // store's own copy carries the prompt — at its real seq, in its real place —
-// and the two reconcile onto one bubble in the frontend. Keeping the receipt
+// and the two reconcile onto one work in the frontend. Keeping the receipt
 // past that point would mean replaying a daemon-local duplicate of something
 // the conversation already holds. A receipt the transcript NEVER claims (the
 // shim died mid-submit) is retained indefinitely, which is right: it is then
 // the only evidence the prompt was ever sent.
 // acceptedAtMs is the instant the daemon committed to the submit, which is the
 // same instant the DURABLE receipt was recorded under. Passing it in rather
-// than reading the clock again is what makes the live bubble and a replayed one
+// than reading the clock again is what makes the live work and a replayed one
 // the same item: same uuid, same timestamp, and therefore the same provenance
 // verdict from the merge lease's ledger.
 func (c *consumer) pushUserEcho(requestID, text string, acceptedAtMs int64) {
@@ -167,7 +169,7 @@ func (c *consumer) claimOldestEcho() string {
 // transcript's line (seq, no request id) — and nothing in either says they are
 // the same prompt. Stamping the line makes them share the identity the frontend
 // already reconciles on, so the second REPLACES the first instead of drawing a
-// second bubble of the same text.
+// second work of the same text.
 //
 // A line that matches no outstanding receipt is left UNATTRIBUTED: resumed
 // history, a prompt submitted through some other client, or a submit this

@@ -341,8 +341,8 @@ func New(cfg Config) *Server {
 		latestWorkspaceAt: map[string]int64{},
 
 		latestWorkspaceState: map[string]*frontendv1.WorkspaceState{},
-		clientLogRefusals: newClientLogRefusalLimiter(time.Now, clientLogRefusalSummaryInterval),
-		hostConnect:       newHostConnectSignal(),
+		clientLogRefusals:    newClientLogRefusalLimiter(time.Now, clientLogRefusalSummaryInterval),
+		hostConnect:          newHostConnectSignal(),
 	}
 }
 
@@ -504,6 +504,10 @@ func (s *Server) Close() error {
 // learn that happened, and the host-only push helpers below turn a zero into a
 // loud line rather than a shrug.
 func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) int {
+	// EVERY Message-bearing frame is audited HERE, before pacing, parking or
+	// scoping can send it down a path that skips the check. See lineage.go: the
+	// audit records and never withholds.
+	auditFrameLineage(frame, s.warn)
 	if ws := frame.GetWorkspaceState(); ws != nil {
 		s.PushWorkspaceState(ws)
 		return 0
@@ -678,8 +682,8 @@ func frameSessionIdentity(frame *frontendv1.FrontendFrame) (workspace, sessionID
 		return f.ConversationDelta.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_TypingDelta:
 		return f.TypingDelta.GetWorkspace(), "", true
-	case *frontendv1.FrontendFrame_AsyncBubbleDelta:
-		return f.AsyncBubbleDelta.GetWorkspace(), "", true
+	case *frontendv1.FrontendFrame_DetachedWorkDelta:
+		return f.DetachedWorkDelta.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_TaskCatalog:
 		return f.TaskCatalog.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_SessionInit:
@@ -816,8 +820,8 @@ func (s *Server) PushSessionView(v *frontendv1.SessionView) { s.Broadcast(Sessio
 func (s *Server) PushConversationDelta(c *frontendv1.ConversationDelta) {
 	s.Broadcast(ConversationDeltaFrame(c))
 }
-func (s *Server) PushAsyncBubbleDelta(d *frontendv1.AsyncBubbleDelta) {
-	s.Broadcast(AsyncBubbleDeltaFrame(d))
+func (s *Server) PushDetachedWorkDelta(d *frontendv1.DetachedWorkDelta) {
+	s.Broadcast(DetachedWorkDeltaFrame(d))
 }
 func (s *Server) PushTypingDelta(t *frontendv1.TypingDelta) { s.Broadcast(TypingDeltaFrame(t)) }
 func (s *Server) PushTypingCut(c *frontendv1.TypingCut)     { s.Broadcast(TypingCutFrame(c)) }
@@ -1396,10 +1400,10 @@ func (s *Server) logSnapshotCensus(cl *client, phase string, snapshot *frontendv
 	for _, catalog := range snapshot.GetCatalogs() {
 		taskCount += len(catalog.GetTasks())
 	}
-	s.logf("frontend: state snapshot served client_id=%d kind=%s phase=%s scope_workspace=%q scope_session=%q workspaces=%d sessions=%d catalogs=%d tasks=%d async_bubbles=%d inits=%d queues=%d progress=%d workspace_available=%d host_actions=%d daemon=%t",
+	s.logf("frontend: state snapshot served client_id=%d kind=%s phase=%s scope_workspace=%q scope_session=%q workspaces=%d sessions=%d catalogs=%d tasks=%d detached_works=%d inits=%d queues=%d progress=%d workspace_available=%d host_actions=%d daemon=%t",
 		cl.id, cl.kind, phase, scopeWorkspace(cl.scope), scopeSession(cl.scope),
 		len(snapshot.GetWorkspaces()), len(snapshot.GetSessions()), len(snapshot.GetCatalogs()), taskCount,
-		len(snapshot.GetAsyncBubbles()), len(snapshot.GetInits()), len(snapshot.GetQueues()), len(snapshot.GetProgress()),
+		len(snapshot.GetDetachedWork()), len(snapshot.GetInits()), len(snapshot.GetQueues()), len(snapshot.GetProgress()),
 		len(snapshot.GetWorkspaceAvailable()), len(snapshot.GetHostActions()), snapshot.GetDaemon() != nil)
 }
 

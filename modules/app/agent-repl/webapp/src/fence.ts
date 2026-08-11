@@ -18,7 +18,7 @@
  * cannot reach the store any other way, because the store exposes no other
  * entry that writes a view slice or hands a delta to the bubble registry.
  *
- * The detached-work push (`asyncBubbleDelta`) is one of those arms. It arrives
+ * The detached-work push (`detachedWorkDelta`) is one of those arms. It arrives
  * on its own frame and lands in the registry rather than a slice, but it
  * carries the same workspace fence and gets the same verdict from the same
  * function — see {@link FencedView}.
@@ -101,7 +101,7 @@ export interface FencedConversationPage {
 
 export type FencedView =
   | FencedComponentView
-  | { case: "asyncBubbleDelta"; value: AsyncBubbleDelta }
+  | { case: "detachedWorkDelta"; value: AsyncBubbleDelta }
   // A CONVERSATION PAGE IS AN ARM HERE for the same reason the async delta is:
   // it carries the same workspace fence, minted by the same composer, so "is
   // this page current" must have the one answer every other push gets. A page

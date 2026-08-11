@@ -155,7 +155,7 @@ func DeriveRates(u *frontendv1.TokenUsage) (Rates, bool) {
 }
 
 // ResponseStamp resolves one durable utilization record into the figures an
-// assistant bubble's corner renders.
+// assistant work's corner renders.
 //
 // It is the daemon doing the arithmetic ONCE, at the boundary, exactly as every
 // other judgment in this package is: the client renders these four values

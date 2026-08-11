@@ -23,7 +23,7 @@ import (
 // so a prompt accepted and not yet carried by the vendor's durable transcript
 // disappeared with the daemon that accepted it. These tests pin the three
 // claims that close that: the record is written BEFORE the user can see the
-// bubble, it is retired the moment the conversation itself carries the prompt,
+// work, it is retired the moment the conversation itself carries the prompt,
 // and a durable replay serves whatever is left over.
 
 // --- the fake ledger --------------------------------------------------------
@@ -254,7 +254,7 @@ type orderingPusher struct {
 	trace *[]string
 }
 
-func (p *orderingPusher) PushAsyncBubbleDelta(*frontendv1.AsyncBubbleDelta) {}
+func (p *orderingPusher) PushDetachedWorkDelta(*frontendv1.DetachedWorkDelta) {}
 func (p *orderingPusher) PushConversationDelta(cd *frontendv1.ConversationDelta) {
 	p.mu.Lock()
 	*p.trace = append(*p.trace, "push:"+cd.GetMessages()[0].GetRequestId())
@@ -358,7 +358,7 @@ func (h *submitHarness) traced() []string {
 
 func TestAnAcceptedPromptIsRecordedBeforeItsReceiptIsPushed(t *testing.T) {
 	// Arrange — a receipt the user has seen must never be unrecoverable, so
-	// the durable write cannot come after the bubble.
+	// the durable write cannot come after the work.
 	h := newSubmitHarness(t)
 
 	// Act.
@@ -394,7 +394,7 @@ func TestAnAcceptedPromptIsRecordedWithTheTextTheUserTyped(t *testing.T) {
 
 func TestTheRecordedInstantIsTheOneTheReceiptBubbleCarries(t *testing.T) {
 	// Arrange — a replayed receipt is stamped from the RECORD's instant, so a
-	// disagreement here would give the replayed bubble a different provenance
+	// disagreement here would give the replayed work a different provenance
 	// verdict than the one the user saw.
 	h := newSubmitHarness(t)
 
@@ -456,23 +456,23 @@ func TestAnUnwritableReceiptLedgerWithholdsThePromptFromTheShim(t *testing.T) {
 // THE NACK IS THE DELIVERY BOUNDARY, AND IT HAS TO BE ONE FACT.
 //
 // Both frontends read a refused `submitPrompt` as "nothing happened": the
-// webapp takes its unacked bubble back down and Emacs hands the user's words
+// webapp takes its unacked work back down and Emacs hands the user's words
 // back to the input buffer. That reading is only honest if a refused submit
 // leaves NOTHING behind that could later assert the prompt ran — and the
 // durable receipt is the one such thing, because it is written BEFORE the
-// submit precisely so a bounce can replay the bubble. Left standing, it would
-// resurrect a bubble for a prompt no session ever received, from durable
+// submit precisely so a bounce can replay the work. Left standing, it would
+// resurrect a work for a prompt no session ever received, from durable
 // storage, where nothing downstream could tell it from a real one.
 //
 // The accepted case is stated beside it so the pair reads as the boundary it
 // is rather than as one lonely negative: an accepted prompt KEEPS its receipt,
-// because that prompt really is owed a bubble across a bounce.
+// because that prompt really is owed a work across a bounce.
 func TestARefusedSubmitLeavesNoDurableEvidenceThePromptRan(t *testing.T) {
 	tests := []struct {
 		name string
 		// submitErr is what the shim answers, nil for a prompt it takes.
 		submitErr error
-		// wantOutstanding is whether a receipt may still replay a bubble.
+		// wantOutstanding is whether a receipt may still replay a work.
 		wantOutstanding bool
 	}{
 		{
@@ -508,7 +508,7 @@ func TestARefusedSubmitLeavesNoDurableEvidenceThePromptRan(t *testing.T) {
 				return
 			}
 			if len(got) != 0 {
-				t.Fatalf("outstanding receipts = %v, want none: a refused submit must leave nothing that can replay a bubble for a prompt no session received", got)
+				t.Fatalf("outstanding receipts = %v, want none: a refused submit must leave nothing that can replay a work for a prompt no session received", got)
 			}
 		})
 	}
@@ -708,7 +708,7 @@ func TestADurableReplayServesAnUnretiredReceiptExactlyOnce(t *testing.T) {
 
 func TestADurableReplayServesAReceiptAfterTheStoresOwnEvents(t *testing.T) {
 	// Arrange — the prompt is the most recent thing that happened to the
-	// workspace, so its bubble belongs at the bottom of the feed.
+	// workspace, so its work belongs at the bottom of the feed.
 	history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
 	h := newDurableHarness(t, history)
 	h.receipts.seed(statedb.PromptReceipt{RequestID: "r-1", Workspace: "ws", Text: "the lost prompt", AcceptedAtMs: 2_000})
@@ -933,7 +933,7 @@ func TestAnUnreadableReceiptLedgerIsLoggedWithItsCause(t *testing.T) {
 func TestALiveWorkspaceServesItsReceiptsFromTheRetainedRingAlone(t *testing.T) {
 	// Arrange — a live session controller still holds the receipts in memory
 	// and replays them itself (consumer.resync), so reading the ledger too
-	// would draw every outstanding bubble twice.
+	// would draw every outstanding work twice.
 	history := &durableHistorySpy{}
 	h := newDurableHarness(t, history)
 	if err := h.m.Ensure("ws"); err != nil {
@@ -951,7 +951,7 @@ func TestALiveWorkspaceServesItsReceiptsFromTheRetainedRingAlone(t *testing.T) {
 		t.Fatalf("Resync: %v", err)
 	}
 
-	// Assert — one bubble from the submit itself plus one from the ring's
+	// Assert — one work from the submit itself plus one from the ring's
 	// replay, and none from the ledger.
 	if got := h.receiptItems(); len(got) != 2 {
 		t.Fatalf("receipt bubbles = %d, want 2 (the live push and the ring replay)", len(got))

@@ -1,15 +1,15 @@
-// asyncbubbles.go is one session's detached-work apparatus: the store of every
-// bubble it has opened, the classification that opens them, and the routing
+// detachedworks.go is one session's detached-work apparatus: the store of every
+// work it has opened, the classification that opens them, and the routing
 // that folds each work kind's output into the right one.
 //
 // WHAT LIVES HERE AND WHAT DOES NOT. Every construction decision — minting an
 // id, choosing a kind arm, choosing an update arm, advancing a spool cursor,
 // applying the tail cap, resolving a settlement outcome — lives in
-// internal/frontend's async-bubble apparatus, which this file only calls. What
+// internal/frontend's async-work apparatus, which this file only calls. What
 // lives here is the SESSION's part: which detachments exist, which call each
-// one came from, which bubble a record belongs to, and when a push goes out.
+// one came from, which work a record belongs to, and when a push goes out.
 //
-// THE FEED-VERSUS-BUBBLE SPLIT IS NOT HERE EITHER. It is decided once, in
+// THE FEED-VERSUS-DETACHED WORK SPLIT IS NOT HERE EITHER. It is decided once, in
 // frontend.CurateEvent, and this file consumes its verdict. That is deliberate:
 // this store is per-consumer and there are several consumers per session (the
 // live one, the durable-replay one), so a split decided here would be a rule
@@ -30,22 +30,22 @@ import (
 	"claude-repld/internal/frontend"
 )
 
-// asyncBubbleStore holds one session's open bubbles and the indexes that route
+// detachedWorkStore holds one session's open work and the indexes that route
 // evidence to them.
 //
-// The indexes are all secondary keys onto byID. There is exactly one bubble
+// The indexes are all secondary keys onto byID. There is exactly one work
 // object per detachment, and every route — a sidechain record, a task
 // lifecycle event, a tool outcome, the reconnect snapshot — reaches the SAME
 // object, which is why a snapshot and a delta cannot describe different folds.
-type asyncBubbleStore struct {
-	// workspace is stamped on every bubble this store opens. It is held here
-	// rather than passed per call so that a bubble and the AsyncBubbleDelta
+type detachedWorkStore struct {
+	// workspace is stamped on every work this store opens. It is held here
+	// rather than passed per call so that a work and the DetachedWorkDelta
 	// that carries it cannot name different workspaces: both read this one
 	// value, which the consumer set once.
 	workspace string
 	mu        sync.Mutex
-	byID      map[string]*frontendv1.AsyncBubble
-	// order preserves launch order, so a snapshot lists bubbles as they opened
+	byID      map[string]*frontendv1.Message
+	// order preserves launch order, so a snapshot lists work as they opened
 	// rather than in map order.
 	order []string
 	// idByToolUse routes by the launching call's tool_use id — the primary
@@ -55,48 +55,48 @@ type asyncBubbleStore struct {
 	// which is what a sidechain record names when its envelope carries no
 	// source call.
 	idByTask map[string]string
-	// parentByToolUse names, for a call MADE INSIDE a bubble, the bubble it was
+	// parentByToolUse names, for a call MADE INSIDE a work, the work it was
 	// made in. A detachment launched by such a call is a nested dispatch and
-	// takes that bubble as its parent.
+	// takes that work as its parent.
 	parentByToolUse map[string]string
 	// toolNames maps a tool_use id to the tool the agent named. It is the only
-	// source for AsyncUnclassifiedBubble.tool_name.
+	// source for DetachedWorkUnclassified.tool_name.
 	toolNames map[string]string
 	// windows is the OPEN WINDOW STACK, outermost first. It is the whole of the
-	// window apparatus's state: membership in a Merge or Skill bubble is
+	// window apparatus's state: membership in a Merge or Skill work is
 	// TEMPORAL — the span between the invocation and the user taking the session
-	// back — so "which bubble does this emission belong to" is answered by which
+	// back — so "which work does this emission belong to" is answered by which
 	// window is innermost rather than by a join key.
 	//
 	// A STACK RATHER THAN A FIELD because skills chain: a skill invoked inside a
 	// skill is a genuine child, the innermost window captures, and both settle
 	// together when the user takes the session back. See asyncwindows.go.
 	windows []asyncWindow
-	// journalThrough is a workflow bubble's byte cursor over its journal text.
+	// journalThrough is a workflow work's byte cursor over its journal text.
 	// The contract gives a journal no output spool — it carries rows — so this
 	// cursor has no wire home and lives here, still exactly one number per
-	// bubble with exactly one owner.
+	// work with exactly one owner.
 	journalThrough map[string]uint64
 	// logf is the fold engine's own diagnostic channel, workspace-tagged by the
 	// consumer that built the store.
 	//
 	// THE FOLD ENGINE USED TO BE ENTIRELY SILENT. Every append and every settle
 	// happened without a record, so a session whose detached work rendered
-	// perfectly and one whose bubbles silently stopped growing produced exactly
+	// perfectly and one whose work silently stopped growing produced exactly
 	// the same log — there was no evidence to compare. The two records below
 	// are what make the happy path provable, and they are per STATE CHANGE (one
 	// per fold, one per settlement) rather than per item inside a batch.
 	logf dlog.Logf
 }
 
-func newAsyncBubbleStore(workspace string, logf dlog.Logf) *asyncBubbleStore {
+func newDetachedWorkStore(workspace string, logf dlog.Logf) *detachedWorkStore {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &asyncBubbleStore{
+	return &detachedWorkStore{
 		workspace:       workspace,
 		logf:            logf,
-		byID:            map[string]*frontendv1.AsyncBubble{},
+		byID:            map[string]*frontendv1.Message{},
 		idByToolUse:     map[string]string{},
 		idByTask:        map[string]string{},
 		parentByToolUse: map[string]string{},
@@ -105,30 +105,30 @@ func newAsyncBubbleStore(workspace string, logf dlog.Logf) *asyncBubbleStore {
 	}
 }
 
-// asyncPush is everything one event produced for the async plane: bubbles that
-// opened, updates to bubbles already open, and the daemon faults that could not
+// asyncPush is everything one event produced for the async plane: work that
+// opened, updates to work already open, and the daemon faults that could not
 // be turned into either.
 type asyncPush struct {
-	// Opened are bubbles opening for the first time.
+	// Opened are work opening for the first time.
 	//
-	// NOTHING ELSE RIDES AsyncBubbleDelta.opened. A bubble already open advances
+	// NOTHING ELSE RIDES DetachedWorkDelta.opened. A work already open advances
 	// by its own update arm — including the window kinds, whose `merge` arm the
 	// contract added precisely so that new content is an APPEND rather than the
-	// whole-bubble re-send AsyncBubbleUpdate forbids. That keeps "every opened
-	// bubble gets exactly one anchor" (pushAnchors) a property of this one list
+	// whole-work re-send DetachedWorkUpdate forbids. That keeps "every opened
+	// work gets exactly one anchor" (pushAnchors) a property of this one list
 	// rather than of a dedup kept beside it.
-	Opened []*frontendv1.AsyncBubble
-	// Updates are incremental pushes to bubbles already open, in order.
-	Updates []*frontendv1.AsyncBubbleUpdate
+	Opened []*frontendv1.Message
+	// Updates are incremental pushes to work already open, in order.
+	Updates []*frontendv1.DetachedWorkUpdate
 	// Faults are detachments the daemon could not attribute or classify. They
-	// are FAILURE CARDS, not bubbles: the contract says a detachment the daemon
-	// cannot attribute to a tool call is a daemon fault, never a bubble with a
+	// are FAILURE CARDS, not work: the contract says a detachment the daemon
+	// cannot attribute to a tool call is a daemon fault, never a work with a
 	// blank id, and this is where that ruling is honoured.
 	Faults []asyncFault
 }
 
 // asyncFault is one detachment that produced a failure card instead of a
-// bubble.
+// work.
 type asyncFault struct {
 	// UUID is the card's conversation address, derived from the detachment so
 	// the card is stable across a resync rather than accumulating twins.
@@ -153,17 +153,17 @@ func (p *asyncPush) absorb(other asyncPush) {
 	p.Faults = append(p.Faults, other.Faults...)
 }
 
-// spawnedBubbleID answers "did this call detach work, and which bubble is it".
+// spawnedMessageID answers "did this call detach work, and which work is it".
 //
-// It is the resolver behind frontend.StampSpawnedBubbleIDs, and therefore the
-// ONE lookup behind BOTH AgentToolCall.spawned_bubble_id and
-// AgentToolOutcome.spawned_bubble_id. The two fields are the same string
+// It is the resolver behind frontend.StampSpawnedMessageIDs, and therefore the
+// ONE lookup behind BOTH AgentToolCall.spawned_message_id and
+// AgentToolOutcome.spawned_message_id. The two fields are the same string
 // because they are the same call's answer, not because two sites agreed to
 // write the same thing.
 //
 // An empty result means the call detached nothing, which is the only reading of
-// an empty spawned_bubble_id.
-func (s *asyncBubbleStore) spawnedBubbleID(toolUseID string) string {
+// an empty spawned_message_id.
+func (s *detachedWorkStore) spawnedMessageID(toolUseID string) string {
 	if toolUseID == "" {
 		return ""
 	}
@@ -172,17 +172,17 @@ func (s *asyncBubbleStore) spawnedBubbleID(toolUseID string) string {
 	return s.idByToolUse[toolUseID]
 }
 
-// snapshot returns every bubble the session holds, folded to date, in launch
+// snapshot returns every work the session holds, folded to date, in launch
 // order.
 //
-// The bubbles are returned by POINTER and are the store's own objects: they are
+// The work are returned by POINTER and are the store's own objects: they are
 // the same values the deltas were produced from, which is precisely why a
 // reconnecting client's snapshot and the pushes it then receives describe one
 // fold rather than two.
-func (s *asyncBubbleStore) snapshot() []*frontendv1.AsyncBubble {
+func (s *detachedWorkStore) snapshot() []*frontendv1.Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]*frontendv1.AsyncBubble, 0, len(s.order))
+	out := make([]*frontendv1.Message, 0, len(s.order))
 	for _, id := range s.order {
 		if b := s.byID[id]; b != nil {
 			out = append(out, b)
@@ -191,13 +191,13 @@ func (s *asyncBubbleStore) snapshot() []*frontendv1.AsyncBubble {
 	return out
 }
 
-// observeCuration folds one curated event's detached content into its bubbles.
+// observeCuration folds one curated event's detached content into its work.
 //
-// The Curation it takes has ALREADY had the feed-versus-bubble question
+// The Curation it takes has ALREADY had the feed-versus-work question
 // answered (frontend.CurateEvent). This method never revisits it: it receives
-// content that is detached by construction and only has to decide WHICH bubble
+// content that is detached by construction and only has to decide WHICH work
 // each piece belongs to.
-func (s *asyncBubbleStore) observeCuration(c frontend.Curation, atMs int64) (asyncPush, error) {
+func (s *detachedWorkStore) observeCuration(c frontend.Curation, atMs int64) (asyncPush, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, name := range c.ToolNames {
@@ -206,7 +206,7 @@ func (s *asyncBubbleStore) observeCuration(c frontend.Curation, atMs int64) (asy
 	var push asyncPush
 	var errs []error
 	for _, fold := range c.Detached {
-		b, opened, err := s.resolveAgentBubbleLocked(fold, atMs)
+		b, opened, err := s.resolveAgentDetachedWorkLocked(fold, atMs)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -214,12 +214,12 @@ func (s *asyncBubbleStore) observeCuration(c frontend.Curation, atMs int64) (asy
 		if opened {
 			push.Opened = append(push.Opened, b)
 		}
-		// A CALL A DETACHED AGENT MAKES IS A CALL MADE INSIDE THIS BUBBLE. Its
+		// A CALL A DETACHED AGENT MAKES IS A CALL MADE INSIDE THIS DETACHED WORK. Its
 		// own detachment, if it has one, is a nested dispatch, and this is the
 		// record that lets the child be given a parent pointer rather than
 		// being hung at the top level.
-		s.indexCallsLocked(fold.Emissions, b.GetId())
-		up, err := frontend.AppendAsyncEmissions(b, fold.Emissions, atMs)
+		s.indexCallsLocked(fold.Emissions, b.GetUuid())
+		up, err := frontend.AppendDetachedEmissions(b, fold.Emissions, atMs)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -228,10 +228,10 @@ func (s *asyncBubbleStore) observeCuration(c frontend.Curation, atMs int64) (asy
 			// ONE record for the whole emission batch, not one per emission: a
 			// detached agent's transcript arrives in bursts and per-item lines
 			// would bury the state change they describe.
-			s.logf("session-controller: async fold append bubble=%s kind=%s ws=%s appended_emissions=%d folded_emissions=%d dropped_before=%d",
-				b.GetId(), frontend.AsyncBubbleKind(b), s.workspace,
-				len(fold.Emissions), len(b.GetAgent().GetEmissions()),
-				b.GetAgent().GetFold().GetDroppedBefore())
+			s.logf("session-controller: async fold append work=%s kind=%s ws=%s appended_emissions=%d folded_emissions=%d dropped_before=%d",
+				b.GetUuid(), frontend.DetachedWorkKind(b), s.workspace,
+				len(fold.Emissions), len(b.GetDetachedWork().GetAgent().GetEmissions()),
+				b.GetDetachedWork().GetAgent().GetFold().GetDroppedBefore())
 			push.Updates = append(push.Updates, up)
 		}
 	}
@@ -252,11 +252,11 @@ func (s *asyncBubbleStore) observeCuration(c frontend.Curation, atMs int64) (asy
 	return push, joinAsyncErrors(errs)
 }
 
-// resolveAgentBubbleLocked finds the bubble a detached agent's records belong
+// resolveAgentDetachedWorkLocked finds the work a detached agent's records belong
 // to, opening it if this is the first evidence of the detachment.
 //
 // OPENING HERE IS NOT A SECOND MINTING SITE. It calls the same
-// frontend.OpenAsyncBubble every other route calls, and the id is minted inside
+// frontend.OpenDetachedWork every other route calls, and the id is minted inside
 // that function as always. What this handles is ORDER: a subagent's first
 // transcript record can reach the daemon before the task-lifecycle event that
 // announces the launch, and refusing to fold it until the announcement arrives
@@ -264,26 +264,28 @@ func (s *asyncBubbleStore) observeCuration(c frontend.Curation, atMs int64) (asy
 //
 // The lookup is by the LAUNCHING CALL first. That is what makes an out-of-order
 // open safe: when the announcement does arrive it names the same tool_use id,
-// finds this bubble, and enriches it instead of opening a twin.
-func (s *asyncBubbleStore) resolveAgentBubbleLocked(fold frontend.DetachedFold, atMs int64) (*frontendv1.AsyncBubble, bool, error) {
+// finds this work, and enriches it instead of opening a twin.
+func (s *detachedWorkStore) resolveAgentDetachedWorkLocked(fold frontend.DetachedFold, atMs int64) (*frontendv1.Message, bool, error) {
 	if b := s.lookupLocked(fold.SourceToolUseID, fold.AgentID); b != nil {
 		return b, false, nil
 	}
 	if fold.SourceToolUseID == "" {
-		return nil, false, fmt.Errorf("session-controller: async fold REFUSED for agent_id=%q — the record names neither a source tool call nor any bubble already open, so there is nothing to attribute the detachment to and a blank-origin bubble is unrepresentable", fold.AgentID)
+		return nil, false, fmt.Errorf("session-controller: async fold REFUSED for agent_id=%q — the record names neither a source tool call nor any work already open, so there is nothing to attribute the detachment to and a blank-origin work is unrepresentable", fold.AgentID)
 	}
 	taskID := fold.AgentID
 	if taskID == "" {
 		taskID = fold.SourceToolUseID
 	}
-	b, err := frontend.OpenAsyncBubble(frontend.BubbleSpec{
-		TaskID:          taskID,
-		Workspace:       s.workspace,
-		Kind:            frontend.DetachAgent,
-		OriginToolUseID: fold.SourceToolUseID,
-		ParentBubbleID:  s.parentByToolUse[fold.SourceToolUseID],
-		Label:           s.toolNames[fold.SourceToolUseID],
-		StartedAtMs:     atMs,
+	parent, parentTop := s.parentLineageLocked(s.parentByToolUse[fold.SourceToolUseID])
+	b, err := frontend.OpenDetachedWork(frontend.DetachedWorkSpec{
+		TaskID:                  taskID,
+		Workspace:               s.workspace,
+		Kind:                    frontend.DetachAgent,
+		OriginToolUseID:         fold.SourceToolUseID,
+		ParentMessageID:         parent,
+		ParentTopLevelMessageID: parentTop,
+		Label:                   s.toolNames[fold.SourceToolUseID],
+		StartedAtMs:             atMs,
 	})
 	if err != nil {
 		return nil, false, err
@@ -300,13 +302,13 @@ func (s *asyncBubbleStore) resolveAgentBubbleLocked(fold frontend.DetachedFold, 
 // agent, a WorkflowLaunchResult IS a workflow run. An arm this switch does not
 // name detached nothing, and that is not a fallback — it is the absence of
 // launch evidence.
-func (s *asyncBubbleStore) observeOutcomeLocked(o frontend.ToolOutcome, atMs int64) (*frontendv1.AsyncBubble, []*frontendv1.AsyncBubbleUpdate, *asyncFault, error) {
+func (s *detachedWorkStore) observeOutcomeLocked(o frontend.ToolOutcome, atMs int64) (*frontendv1.Message, []*frontendv1.DetachedWorkUpdate, *asyncFault, error) {
 	switch r := o.Result.GetResult().(type) {
 	case *datav1.ToolUseResult_Bash:
 		if r.Bash.GetBackgroundTaskId() == "" {
 			return nil, nil, nil, nil // a foreground shell detached nothing
 		}
-		return s.openFromOutcomeLocked(o, frontend.BubbleSpec{
+		return s.openFromOutcomeLocked(o, frontend.DetachedWorkSpec{
 			TaskID:      r.Bash.GetBackgroundTaskId(),
 			Kind:        frontend.DetachShell,
 			Command:     r.Bash.GetBackgroundCwdHint(),
@@ -314,14 +316,14 @@ func (s *asyncBubbleStore) observeOutcomeLocked(o frontend.ToolOutcome, atMs int
 			StartedAtMs: atMs,
 		})
 	case *datav1.ToolUseResult_AgentAsyncLaunch:
-		return s.openFromOutcomeLocked(o, frontend.BubbleSpec{
+		return s.openFromOutcomeLocked(o, frontend.DetachedWorkSpec{
 			TaskID:      r.AgentAsyncLaunch.GetAgentId(),
 			Kind:        frontend.DetachAgent,
 			Label:       r.AgentAsyncLaunch.GetDescription(),
 			StartedAtMs: atMs,
 		})
 	case *datav1.ToolUseResult_WorkflowLaunch:
-		return s.openFromOutcomeLocked(o, frontend.BubbleSpec{
+		return s.openFromOutcomeLocked(o, frontend.DetachedWorkSpec{
 			TaskID:      r.WorkflowLaunch.GetTaskId(),
 			Kind:        frontend.DetachWorkflow,
 			Label:       r.WorkflowLaunch.GetWorkflowName(),
@@ -331,7 +333,7 @@ func (s *asyncBubbleStore) observeOutcomeLocked(o frontend.ToolOutcome, atMs int
 		updates, err := s.foldRetrievalLocked(r.TaskOutput, atMs)
 		return nil, updates, nil, err
 	case *datav1.ToolUseResult_TaskStop:
-		up, err := s.settleByTaskLocked(r.TaskStop.GetTaskId(), frontend.AsyncVerdict{
+		up, err := s.settleByTaskLocked(r.TaskStop.GetTaskId(), frontend.DetachedVerdict{
 			Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED,
 			AtMs:   atMs,
 			Reason: r.TaskStop.GetMessage(),
@@ -339,38 +341,38 @@ func (s *asyncBubbleStore) observeOutcomeLocked(o frontend.ToolOutcome, atMs int
 		if up == nil {
 			return nil, nil, nil, err
 		}
-		return nil, []*frontendv1.AsyncBubbleUpdate{up}, nil, err
+		return nil, []*frontendv1.DetachedWorkUpdate{up}, nil, err
 	default:
 		return nil, nil, nil, nil
 	}
 }
 
-// openFromOutcomeLocked opens the bubble one launch outcome announced, or
+// openFromOutcomeLocked opens the work one launch outcome announced, or
 // returns the fault that stopped it.
 //
 // The originating call is the outcome's own tool_use id, which is why a launch
 // with no correlated call becomes a FAILURE CARD here: the contract's ruling is
 // that an unattributable detachment is a daemon fault, and the card is how the
 // user learns that work is running which the daemon cannot show them.
-func (s *asyncBubbleStore) openFromOutcomeLocked(o frontend.ToolOutcome, spec frontend.BubbleSpec) (*frontendv1.AsyncBubble, []*frontendv1.AsyncBubbleUpdate, *asyncFault, error) {
+func (s *detachedWorkStore) openFromOutcomeLocked(o frontend.ToolOutcome, spec frontend.DetachedWorkSpec) (*frontendv1.Message, []*frontendv1.DetachedWorkUpdate, *asyncFault, error) {
 	if b := s.lookupLocked(o.ToolUseID, spec.TaskID); b != nil {
 		// Already opened — by an out-of-order sidechain record, or by a replay
 		// of this same outcome. Enrich rather than mint a twin: a label the
 		// launch names is better than the tool name the record guessed at.
-		if b.GetLabel() == "" && spec.Label != "" {
-			b.Label = spec.Label
+		if b.GetDetachedWork().GetLabel() == "" && spec.Label != "" {
+			b.GetDetachedWork().Label = spec.Label
 		}
-		s.idByTask[spec.TaskID] = b.GetId()
+		s.idByTask[spec.TaskID] = b.GetUuid()
 		return nil, nil, nil, nil
 	}
 	spec.OriginToolUseID = o.ToolUseID
 	spec.Workspace = s.workspace
 	if o.FromDetachedAgent {
 		if parent := s.lookupLocked(o.SourceToolUseID, o.AgentID); parent != nil {
-			spec.ParentBubbleID = parent.GetId()
+			spec.ParentMessageID, spec.ParentTopLevelMessageID = s.parentLineageLocked(parent.GetUuid())
 		}
 	} else if parent := s.parentByToolUse[o.ToolUseID]; parent != "" {
-		spec.ParentBubbleID = parent
+		spec.ParentMessageID, spec.ParentTopLevelMessageID = s.parentLineageLocked(parent)
 	}
 	// AN UNRECOGNIZED TOOL IS THE EXPLICIT unclassified ARM, not a fault and
 	// not a silent shell. The launch evidence says work detached; the tool
@@ -384,7 +386,7 @@ func (s *asyncBubbleStore) openFromOutcomeLocked(o frontend.ToolOutcome, spec fr
 		spec.Kind = frontend.DetachUnrecognized
 		spec.ToolName = name
 	}
-	b, err := frontend.OpenAsyncBubble(spec)
+	b, err := frontend.OpenDetachedWork(spec)
 	if err != nil {
 		return nil, nil, s.faultLocked(spec.TaskID, err.Error()), nil
 	}
@@ -392,14 +394,14 @@ func (s *asyncBubbleStore) openFromOutcomeLocked(o frontend.ToolOutcome, spec fr
 	return b, nil, nil, nil
 }
 
-// foldRetrievalLocked folds a task-output retrieval into its bubble.
+// foldRetrievalLocked folds a task-output retrieval into its work.
 //
-// THE FOLD IS CHOSEN BY THE BUBBLE'S KIND, never by the retrieval's arm. The
-// retrieval says what was read; the bubble says what the work IS, and what the
+// THE FOLD IS CHOSEN BY THE DETACHED WORK'S KIND, never by the retrieval's arm. The
+// retrieval says what was read; the work says what the work IS, and what the
 // work is decides how its output is modeled. That is what keeps a workflow's
 // journal from being folded as a byte spool because it happened to arrive
 // through the same retrieval shape.
-func (s *asyncBubbleStore) foldRetrievalLocked(out *datav1.TaskOutputResult, atMs int64) ([]*frontendv1.AsyncBubbleUpdate, error) {
+func (s *detachedWorkStore) foldRetrievalLocked(out *datav1.TaskOutputResult, atMs int64) ([]*frontendv1.DetachedWorkUpdate, error) {
 	taskID, text, verdict := retrievalFacts(out)
 	if taskID == "" {
 		return nil, nil
@@ -407,16 +409,16 @@ func (s *asyncBubbleStore) foldRetrievalLocked(out *datav1.TaskOutputResult, atM
 	b := s.lookupLocked("", taskID)
 	if b == nil {
 		// A retrieval for work no launch announced. Nothing is invented from
-		// it: a bubble opened here would have no originating call and therefore
+		// it: a work opened here would have no originating call and therefore
 		// no blank-free id, which is the case the contract routes to a fault
-		// rather than to a bubble. The retrieval is simply not evidence of a
+		// rather than to a work. The retrieval is simply not evidence of a
 		// launch.
 		return nil, nil
 	}
-	var updates []*frontendv1.AsyncBubbleUpdate
-	switch frontend.AsyncBubbleKind(b) {
+	var updates []*frontendv1.DetachedWorkUpdate
+	switch frontend.DetachedWorkKind(b) {
 	case frontend.DetachShell, frontend.DetachUnrecognized:
-		up, err := frontend.AppendAsyncOutputThrough(b, text, atMs)
+		up, err := frontend.AppendDetachedOutputThrough(b, text, atMs)
 		if err != nil {
 			return nil, err
 		}
@@ -425,8 +427,8 @@ func (s *asyncBubbleStore) foldRetrievalLocked(out *datav1.TaskOutputResult, atM
 			// update is what the client applies, so a record taken from it
 			// cannot describe a different append than the one that shipped.
 			chunk := asyncOutputChunk(up)
-			s.logf("session-controller: async fold append bubble=%s kind=%s ws=%s appended_bytes=%d from_offset=%d through_offset=%d restated_bytes=%d",
-				b.GetId(), frontend.AsyncBubbleKind(b), s.workspace,
+			s.logf("session-controller: async fold append work=%s kind=%s ws=%s appended_bytes=%d from_offset=%d through_offset=%d restated_bytes=%d",
+				b.GetUuid(), frontend.DetachedWorkKind(b), s.workspace,
 				len(chunk.GetText()), chunk.GetFromOffset(),
 				chunk.GetFromOffset()+uint64(len(chunk.GetText())), len(text))
 			updates = append(updates, up)
@@ -458,17 +460,17 @@ func (s *asyncBubbleStore) foldRetrievalLocked(out *datav1.TaskOutputResult, atM
 // foldJournalLocked folds the newly-arrived tail of a workflow's journal into
 // rows.
 //
-// The cursor is this store's journalThrough — one number per bubble, advanced
+// The cursor is this store's journalThrough — one number per work, advanced
 // only here — for the same reason a spool's cursor lives on the spool: the
 // slice point and the advance must be one operation or a restated retrieval
 // duplicates rows.
-func (s *asyncBubbleStore) foldJournalLocked(b *frontendv1.AsyncBubble, text string, atMs int64) (*frontendv1.AsyncBubbleUpdate, error) {
-	through := s.journalThrough[b.GetId()]
+func (s *detachedWorkStore) foldJournalLocked(b *frontendv1.Message, text string, atMs int64) (*frontendv1.DetachedWorkUpdate, error) {
+	through := s.journalThrough[b.GetUuid()]
 	if uint64(len(text)) < through {
-		return nil, &frontend.AsyncGapError{
-			BubbleID: b.GetId(),
-			Gap:      frontend.AsyncGapJournalRewind,
-			Detail:   fmt.Sprintf("session-controller: workflow journal for bubble %q REWOUND — the retrieval restated %d bytes where the fold already stands at %d, which is a gap rather than an append and is refused", b.GetId(), len(text), through),
+		return nil, &frontend.DetachedGapError{
+			MessageID: b.GetUuid(),
+			Gap:       frontend.DetachedGapJournalRewind,
+			Detail:    fmt.Sprintf("session-controller: workflow journal for work %q REWOUND — the retrieval restated %d bytes where the fold already stands at %d, which is a gap rather than an append and is refused", b.GetUuid(), len(text), through),
 		}
 	}
 	tail := text[through:]
@@ -480,8 +482,8 @@ func (s *asyncBubbleStore) foldJournalLocked(b *frontendv1.AsyncBubble, text str
 	// past it would drop the step it describes.
 	consumed := completeJournalPrefix(tail)
 	rows, _ := frontend.ParseJournalRows(tail[:consumed])
-	s.journalThrough[b.GetId()] = through + uint64(consumed)
-	up, err := frontend.AppendAsyncJournalRows(b, rows, atMs)
+	s.journalThrough[b.GetUuid()] = through + uint64(consumed)
+	up, err := frontend.AppendDetachedJournalRows(b, rows, atMs)
 	if err != nil || up == nil {
 		return up, err
 	}
@@ -489,19 +491,19 @@ func (s *asyncBubbleStore) foldJournalLocked(b *frontendv1.AsyncBubble, text str
 	// its advance is observable. `held_bytes` is the trailing partial record
 	// deliberately left unconsumed for the next retrieval — a nonzero value
 	// that never falls is how a wedged journal writer shows up.
-	s.logf("session-controller: async fold append bubble=%s kind=%s ws=%s appended_rows=%d folded_rows=%d dropped_before=%d consumed_bytes=%d through_offset=%d held_bytes=%d",
-		b.GetId(), frontend.AsyncBubbleKind(b), s.workspace,
-		len(rows), len(b.GetJournal().GetRows()),
-		b.GetJournal().GetFold().GetDroppedBefore(),
-		consumed, s.journalThrough[b.GetId()], len(tail)-consumed)
+	s.logf("session-controller: async fold append work=%s kind=%s ws=%s appended_rows=%d folded_rows=%d dropped_before=%d consumed_bytes=%d through_offset=%d held_bytes=%d",
+		b.GetUuid(), frontend.DetachedWorkKind(b), s.workspace,
+		len(rows), len(b.GetDetachedWork().GetJournal().GetRows()),
+		b.GetDetachedWork().GetJournal().GetFold().GetDroppedBefore(),
+		consumed, s.journalThrough[b.GetUuid()], len(tail)-consumed)
 	return up, nil
 }
 
-// observeTaskEnded settles the bubble a finished detachment belongs to.
-func (s *asyncBubbleStore) observeTaskEnded(te *corev1.TaskEnded, atMs int64) (asyncPush, error) {
+// observeTaskEnded settles the work a finished detachment belongs to.
+func (s *detachedWorkStore) observeTaskEnded(te *corev1.TaskEnded, atMs int64) (asyncPush, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	up, err := s.settleByTaskLocked(te.GetTaskId(), frontend.AsyncVerdict{
+	up, err := s.settleByTaskLocked(te.GetTaskId(), frontend.DetachedVerdict{
 		Status:  te.GetStatus(),
 		AtMs:    atMs,
 		Message: te.GetSummary(),
@@ -510,10 +512,10 @@ func (s *asyncBubbleStore) observeTaskEnded(te *corev1.TaskEnded, atMs int64) (a
 	if up == nil {
 		return asyncPush{}, err
 	}
-	return asyncPush{Updates: []*frontendv1.AsyncBubbleUpdate{up}}, err
+	return asyncPush{Updates: []*frontendv1.DetachedWorkUpdate{up}}, err
 }
 
-// settleCancelledTasks settles the bubbles of the tasks a detached-agent
+// settleCancelledTasks settles the work of the tasks a detached-agent
 // cancel just stopped.
 //
 // WHY THE CANCEL'S ACK IS A TERMINAL FACT AND NOT A GUESS. The shim does not
@@ -521,27 +523,27 @@ func (s *asyncBubbleStore) observeTaskEnded(te *corev1.TaskEnded, atMs int64) (a
 // it — the agent has been stopped, and the ack is the shim's direct
 // observation of that, exactly as a TaskEnded is. So this is the same class of
 // evidence arriving on the control plane instead of the event plane, and the
-// bubble resolves the moment the user's cancel is answered rather than
+// work resolves the moment the user's cancel is answered rather than
 // whenever the stopped notification happens to be folded.
 //
 // IT SETTLES THROUGH settleLocked LIKE EVERYTHING ELSE. There is still exactly
-// one function that settles a bubble, so the log record and the outcome
+// one function that settles a work, so the log record and the outcome
 // mapping cannot drift between the control-plane and event-plane routes.
 //
 // THE LATER TaskEnded IS NOT SUPPRESSED. The CLI emits the stopped
-// notification too, and when it lands it settles the same bubble again through
+// notification too, and when it lands it settles the same work again through
 // the ordinary path. That is deliberate: the two agree (both resolve to the
 // killed arm), and on the one edge where they disagree — an agent that
 // finished on its own in the instant before the stop reached it — the event
 // plane carries the truer verdict and is allowed to overwrite this one. A
 // suppression here would pin the earlier, coarser answer.
 //
-// A TASK WITH NO BUBBLE REPORTS NOTHING, matching settleByTaskLocked: work the
-// session tracked but never opened detached work for is not a missing bubble.
-func (s *asyncBubbleStore) settleCancelledTasks(taskIDs []string, v frontend.AsyncVerdict) ([]*frontendv1.AsyncBubbleUpdate, error) {
+// A TASK WITH NO DETACHED WORK REPORTS NOTHING, matching settleByTaskLocked: work the
+// session tracked but never opened detached work for is not a missing work.
+func (s *detachedWorkStore) settleCancelledTasks(taskIDs []string, v frontend.DetachedVerdict) ([]*frontendv1.DetachedWorkUpdate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var updates []*frontendv1.AsyncBubbleUpdate
+	var updates []*frontendv1.DetachedWorkUpdate
 	var errs []error
 	for _, taskID := range taskIDs {
 		up, err := s.settleByTaskLocked(taskID, v)
@@ -550,7 +552,7 @@ func (s *asyncBubbleStore) settleCancelledTasks(taskIDs []string, v frontend.Asy
 			continue
 		}
 		if up == nil {
-			s.logf("session-controller: detached cancel settled NO BUBBLE task=%s ws=%s — the shim stopped a task this session opened no detached work for",
+			s.logf("session-controller: detached cancel settled NO DETACHED WORK task=%s ws=%s — the shim stopped a task this session opened no detached work for",
 				taskID, s.workspace)
 			continue
 		}
@@ -559,34 +561,36 @@ func (s *asyncBubbleStore) settleCancelledTasks(taskIDs []string, v frontend.Asy
 	return updates, joinAsyncErrors(errs)
 }
 
-// observeTaskStarted enriches the bubble a launch announcement names, and
+// observeTaskStarted enriches the work a launch announcement names, and
 // reports the fault when the announcement can be attributed to no call.
 //
-// It does not open bubbles for kinds it recognizes but has no launch outcome
+// It does not open work for kinds it recognizes but has no launch outcome
 // for: the outcome plane is where a launch's identity is complete (its task id,
 // its label, its originating call), and opening from both planes would be two
 // sites deciding the same thing.
-func (s *asyncBubbleStore) observeTaskStarted(ts *corev1.TaskStarted, atMs int64) (asyncPush, error) {
+func (s *detachedWorkStore) observeTaskStarted(ts *corev1.TaskStarted, atMs int64) (asyncPush, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if ts.GetToolUseId() == "" {
 		return s.openAnnouncementBornLocked(ts, atMs), nil
 	}
 	if b := s.lookupLocked(ts.GetToolUseId(), ts.GetTaskId()); b != nil {
-		if b.GetLabel() == "" {
-			b.Label = ts.GetDescription()
+		if b.GetDetachedWork().GetLabel() == "" {
+			b.GetDetachedWork().Label = ts.GetDescription()
 		}
-		s.idByTask[ts.GetTaskId()] = b.GetId()
+		s.idByTask[ts.GetTaskId()] = b.GetUuid()
 		return asyncPush{}, nil
 	}
-	spec := frontend.BubbleSpec{
-		TaskID:          ts.GetTaskId(),
-		Workspace:       s.workspace,
-		Kind:            frontend.DetachKindFromTaskKind(ts.GetKind()),
-		OriginToolUseID: ts.GetToolUseId(),
-		ParentBubbleID:  s.parentByToolUse[ts.GetToolUseId()],
-		Label:           ts.GetDescription(),
-		StartedAtMs:     atMs,
+	parent, parentTop := s.parentLineageLocked(s.parentByToolUse[ts.GetToolUseId()])
+	spec := frontend.DetachedWorkSpec{
+		TaskID:                  ts.GetTaskId(),
+		Workspace:               s.workspace,
+		Kind:                    frontend.DetachKindFromTaskKind(ts.GetKind()),
+		OriginToolUseID:         ts.GetToolUseId(),
+		ParentMessageID:         parent,
+		ParentTopLevelMessageID: parentTop,
+		Label:                   ts.GetDescription(),
+		StartedAtMs:             atMs,
 	}
 	if spec.Kind == frontend.DetachUnresolved {
 		name := s.toolNames[ts.GetToolUseId()]
@@ -597,12 +601,12 @@ func (s *asyncBubbleStore) observeTaskStarted(ts *corev1.TaskStarted, atMs int64
 		spec.Kind = frontend.DetachUnrecognized
 		spec.ToolName = name
 	}
-	b, err := frontend.OpenAsyncBubble(spec)
+	b, err := frontend.OpenDetachedWork(spec)
 	if err != nil {
 		return asyncPush{Faults: []asyncFault{*s.faultLocked(ts.GetTaskId(), err.Error())}}, nil
 	}
 	s.adoptLocked(b, ts.GetToolUseId(), ts.GetTaskId(), "")
-	return asyncPush{Opened: []*frontendv1.AsyncBubble{b}}, nil
+	return asyncPush{Opened: []*frontendv1.Message{b}}, nil
 }
 
 // openAnnouncementBornLocked handles the launch announcement that names NO tool
@@ -612,7 +616,7 @@ func (s *asyncBubbleStore) observeTaskStarted(ts *corev1.TaskStarted, atMs int64
 // this function exists apart from observeTaskStarted's main body.
 //
 // An announcement that names no call is not evidence of a lost attribution: the
-// contract admits work no tool call spawned (async-bubble.proto
+// contract admits work no tool call spawned (async-work.proto
 // origin_tool_use_id — "Empty only for work that no tool call spawned"), and
 // the harness produces exactly that for its own background shells. Treating
 // every such announcement as a daemon fault made 16 legitimately
@@ -623,7 +627,7 @@ func (s *asyncBubbleStore) observeTaskStarted(ts *corev1.TaskStarted, atMs int64
 // So the fault arm is narrowed to what it was written for — a detachment the
 // daemon believes a call spawned and cannot find (observeTaskStarted's
 // unresolved-kind arm above, unchanged) — and an announcement-born detachment
-// of a RECOGNIZABLE kind opens a bubble with an empty origin_tool_use_id
+// of a RECOGNIZABLE kind opens a work with an empty origin_tool_use_id
 // instead.
 //
 // AN UNRECOGNIZABLE KIND IS STILL A FAULT HERE. The unclassified arm requires
@@ -631,22 +635,22 @@ func (s *asyncBubbleStore) observeTaskStarted(ts *corev1.TaskStarted, atMs int64
 // announcement does not have: there is nothing to look the name up by. Such a
 // detachment can be neither classified nor honestly reported as unclassified,
 // which is precisely the condition the card exists for.
-func (s *asyncBubbleStore) openAnnouncementBornLocked(ts *corev1.TaskStarted, atMs int64) asyncPush {
+func (s *detachedWorkStore) openAnnouncementBornLocked(ts *corev1.TaskStarted, atMs int64) asyncPush {
 	kind := frontend.DetachKindFromTaskKind(ts.GetKind())
 	if kind == frontend.DetachUnresolved {
 		return asyncPush{Faults: []asyncFault{*s.faultLocked(ts.GetTaskId(),
 			fmt.Sprintf("task %q started as detached work with no kind the daemon recognizes, and the announcement named no tool call to look a tool name up by either, so the work can be neither classified nor honestly reported as unclassified", ts.GetTaskId()))}}
 	}
 	// The task id is the only handle such a detachment has — there is no call to
-	// look it up by — so a re-announcement enriches the bubble already open
+	// look it up by — so a re-announcement enriches the work already open
 	// rather than opening a twin, exactly as the call-spawned path does.
 	if b := s.lookupLocked("", ts.GetTaskId()); b != nil {
-		if b.GetLabel() == "" {
-			b.Label = ts.GetDescription()
+		if b.GetDetachedWork().GetLabel() == "" {
+			b.GetDetachedWork().Label = ts.GetDescription()
 		}
 		return asyncPush{}
 	}
-	b, err := frontend.OpenAsyncBubble(frontend.BubbleSpec{
+	b, err := frontend.OpenDetachedWork(frontend.DetachedWorkSpec{
 		TaskID:         ts.GetTaskId(),
 		Workspace:      s.workspace,
 		Kind:           kind,
@@ -658,13 +662,35 @@ func (s *asyncBubbleStore) openAnnouncementBornLocked(ts *corev1.TaskStarted, at
 		return asyncPush{Faults: []asyncFault{*s.faultLocked(ts.GetTaskId(), err.Error())}}
 	}
 	s.adoptLocked(b, "", ts.GetTaskId())
-	return asyncPush{Opened: []*frontendv1.AsyncBubble{b}}
+	return asyncPush{Opened: []*frontendv1.Message{b}}
 }
 
 // --- store internals -------------------------------------------------------
 
-// lookupLocked resolves a bubble by either handle, the launching call first.
-func (s *asyncBubbleStore) lookupLocked(toolUseID string, taskIDs ...string) *frontendv1.AsyncBubble {
+// parentLineageLocked resolves BOTH halves of a nested detachment's lineage from
+// the id of the message that contains it: the parent pointer itself, and the
+// feed row that parent ultimately belongs to.
+//
+// THE ROOT IS COPIED DOWN, NEVER WALKED. The parent already holds its own
+// top_level_message_id, so a child reads one value rather than following pointers
+// to the end — which is the unbounded traversal the denormalized field exists to
+// remove.
+//
+// An EMPTY parent id means the work sits directly in the feed, and BOTH halves
+// come back empty so OpenDetachedWork makes the lineage self-referential. A
+// parent id the store does not hold comes back with an empty root, which
+// OpenDetachedWork REFUSES by name: the daemon claimed containment it cannot
+// substantiate, and quietly promoting the work to a feed row would assert a tree
+// position nobody stated.
+func (s *detachedWorkStore) parentLineageLocked(parentID string) (parent, topLevel string) {
+	if parentID == "" {
+		return "", ""
+	}
+	return parentID, s.byID[parentID].GetLineage().GetTopLevelMessageId()
+}
+
+// lookupLocked resolves a work by either handle, the launching call first.
+func (s *detachedWorkStore) lookupLocked(toolUseID string, taskIDs ...string) *frontendv1.Message {
 	if toolUseID != "" {
 		if id := s.idByToolUse[toolUseID]; id != "" {
 			return s.byID[id]
@@ -681,25 +707,25 @@ func (s *asyncBubbleStore) lookupLocked(toolUseID string, taskIDs ...string) *fr
 	return nil
 }
 
-// adoptLocked files a freshly opened bubble under every handle it can be
+// adoptLocked files a freshly opened work under every handle it can be
 // reached by.
-func (s *asyncBubbleStore) adoptLocked(b *frontendv1.AsyncBubble, toolUseID string, taskIDs ...string) {
-	s.byID[b.GetId()] = b
-	s.order = append(s.order, b.GetId())
+func (s *detachedWorkStore) adoptLocked(b *frontendv1.Message, toolUseID string, taskIDs ...string) {
+	s.byID[b.GetUuid()] = b
+	s.order = append(s.order, b.GetUuid())
 	if toolUseID != "" {
-		s.idByToolUse[toolUseID] = b.GetId()
+		s.idByToolUse[toolUseID] = b.GetUuid()
 	}
 	for _, taskID := range taskIDs {
 		if taskID != "" {
-			s.idByTask[taskID] = b.GetId()
+			s.idByTask[taskID] = b.GetUuid()
 		}
 	}
 }
 
-// settleByTaskLocked settles the bubble a task id names, and reports nothing
-// for a task that opened no bubble — a task the session tracks in its catalog
-// but never detached work for is not a missing bubble.
-func (s *asyncBubbleStore) settleByTaskLocked(taskID string, v frontend.AsyncVerdict) (*frontendv1.AsyncBubbleUpdate, error) {
+// settleByTaskLocked settles the work a task id names, and reports nothing
+// for a task that opened no work — a task the session tracks in its catalog
+// but never detached work for is not a missing work.
+func (s *detachedWorkStore) settleByTaskLocked(taskID string, v frontend.DetachedVerdict) (*frontendv1.DetachedWorkUpdate, error) {
 	b := s.lookupLocked("", taskID)
 	if b == nil {
 		return nil, nil
@@ -708,7 +734,7 @@ func (s *asyncBubbleStore) settleByTaskLocked(taskID string, v frontend.AsyncVer
 }
 
 // settleLocked is the ONE settlement site, so the record below cannot be
-// bypassed by a route that settles a bubble some other way.
+// bypassed by a route that settles a work some other way.
 //
 // It records the RESOLVED outcome arm rather than the verdict's terminal
 // status: the daemon's own mapping (a killed process exits nonzero yet settles
@@ -716,19 +742,19 @@ func (s *asyncBubbleStore) settleByTaskLocked(taskID string, v frontend.AsyncVer
 // investigation needs to see, and re-reading the status would hide it. A
 // refused settlement writes no record here — the error is returned and becomes
 // the caller's failure card, so a settled-looking log line can never stand for a
-// bubble that did not settle.
-func (s *asyncBubbleStore) settleLocked(b *frontendv1.AsyncBubble, v frontend.AsyncVerdict) (*frontendv1.AsyncBubbleUpdate, error) {
-	up, err := frontend.SettleAsyncBubble(b, v)
+// work that did not settle.
+func (s *detachedWorkStore) settleLocked(b *frontendv1.Message, v frontend.DetachedVerdict) (*frontendv1.DetachedWorkUpdate, error) {
+	up, err := frontend.SettleDetachedWork(b, v)
 	if err != nil {
 		return nil, err
 	}
-	settled := b.GetLiveness().GetSettled()
+	settled := b.GetDetachedWork().GetLiveness().GetSettled()
 	exit := "none"
 	if e := settled.GetShellExit(); e != nil {
 		exit = fmt.Sprintf("%d", e.GetCode())
 	}
-	s.logf("session-controller: async bubble settled bubble=%s kind=%s ws=%s outcome=%s status=%s shell_exit=%s settled_at_ms=%d reason=%q",
-		b.GetId(), frontend.AsyncBubbleKind(b), s.workspace,
+	s.logf("session-controller: detached work settled work=%s kind=%s ws=%s outcome=%s status=%s shell_exit=%s settled_at_ms=%d reason=%q",
+		b.GetUuid(), frontend.DetachedWorkKind(b), s.workspace,
 		asyncSettledOutcomeArm(settled), v.Status, exit,
 		settled.GetSettledAtMs(), v.Reason)
 	return up, nil
@@ -736,15 +762,15 @@ func (s *asyncBubbleStore) settleLocked(b *frontendv1.AsyncBubble, v frontend.As
 
 // asyncSettledOutcomeArm names the settlement arm the daemon resolved. The
 // default is reachable only for a settlement that carried no arm at all, which
-// SettleAsyncBubble refuses to produce — naming it keeps the record honest if
+// SettleDetachedWork refuses to produce — naming it keeps the record honest if
 // that ever changes rather than printing a confident "done".
-func asyncSettledOutcomeArm(settled *frontendv1.AsyncSettled) string {
+func asyncSettledOutcomeArm(settled *frontendv1.DetachedWorkSettled) string {
 	switch settled.GetOutcome().(type) {
-	case *frontendv1.AsyncSettled_Done:
+	case *frontendv1.DetachedWorkSettled_Done:
 		return "done"
-	case *frontendv1.AsyncSettled_Error:
+	case *frontendv1.DetachedWorkSettled_Error:
 		return "error"
-	case *frontendv1.AsyncSettled_Killed:
+	case *frontendv1.DetachedWorkSettled_Killed:
 		return "killed"
 	default:
 		return "unset"
@@ -754,7 +780,7 @@ func asyncSettledOutcomeArm(settled *frontendv1.AsyncSettled) string {
 // asyncOutputChunk reads the byte-spool append off whichever spool-shaped arm
 // the update carries. The two arms are distinct wire types carrying the same
 // message, so one reader serves both rather than each log site re-deciding.
-func asyncOutputChunk(up *frontendv1.AsyncBubbleUpdate) *frontendv1.AsyncOutputAppend {
+func asyncOutputChunk(up *frontendv1.DetachedWorkUpdate) *frontendv1.DetachedWorkOutputAppend {
 	if c := up.GetShell(); c != nil {
 		return c
 	}
@@ -762,12 +788,12 @@ func asyncOutputChunk(up *frontendv1.AsyncBubbleUpdate) *frontendv1.AsyncOutputA
 }
 
 // indexCallsLocked records every tool call a detached agent made, so a
-// detachment launched by one of them can be given this bubble as its parent.
-func (s *asyncBubbleStore) indexCallsLocked(ems []*frontendv1.AgentEmission, bubbleID string) {
+// detachment launched by one of them can be given this work as its parent.
+func (s *detachedWorkStore) indexCallsLocked(ems []*frontendv1.AgentEmission, messageID string) {
 	for _, em := range ems {
 		for _, block := range em.GetResponse().GetBody().GetContent() {
 			if id := block.GetToolUse().GetId(); id != "" {
-				s.parentByToolUse[id] = bubbleID
+				s.parentByToolUse[id] = messageID
 				if name := block.GetToolUse().GetName(); name != "" {
 					s.toolNames[id] = name
 				}
@@ -777,9 +803,9 @@ func (s *asyncBubbleStore) indexCallsLocked(ems []*frontendv1.AgentEmission, bub
 }
 
 // faultLocked builds the failure card for a detachment that could not become a
-// bubble. Its uuid is DERIVED from the detachment so the card is stable across
+// work. Its uuid is DERIVED from the detachment so the card is stable across
 // a resync instead of accumulating a twin per replay.
-func (s *asyncBubbleStore) faultLocked(taskID, detail string) *asyncFault {
+func (s *detachedWorkStore) faultLocked(taskID, detail string) *asyncFault {
 	return &asyncFault{
 		UUID:   "async-fault:" + taskID,
 		Card:   errclass.Card(errclass.TypeInternalUnclassified, detail),
@@ -791,17 +817,17 @@ func (s *asyncBubbleStore) faultLocked(taskID, detail string) *asyncFault {
 // that says so.
 //
 // SAME PATH, SAME SHAPE as faultLocked: a fold that refused is as invisible to
-// the user as a detachment that could not be attributed — the bubble simply
+// the user as a detachment that could not be attributed — the work simply
 // stops growing, which is indistinguishable from a quiet agent — so it earns a
 // card rather than a warn nobody watching the screen can see.
 //
-// The uuid is derived from the BUBBLE AND THE GAP CLASS, so a replay of the
+// The uuid is derived from the DETACHED WORK AND THE GAP CLASS, so a replay of the
 // same defect reconciles onto the same card instead of accumulating a twin per
-// pass, while two different defects on one bubble stay two cards.
-func asyncGapFault(gap *frontend.AsyncGapError) asyncFault {
+// pass, while two different defects on one work stay two cards.
+func asyncGapFault(gap *frontend.DetachedGapError) asyncFault {
 	detail := gap.Error()
 	return asyncFault{
-		UUID:   fmt.Sprintf("async-gap:%s:%s", gap.BubbleID, gap.Gap),
+		UUID:   fmt.Sprintf("async-gap:%s:%s", gap.MessageID, gap.Gap),
 		Card:   errclass.Card(errclass.TypeInternalUnclassified, detail),
 		Detail: detail,
 	}
@@ -811,8 +837,8 @@ func asyncGapFault(gap *frontend.AsyncGapError) asyncFault {
 // become failure cards and whatever is left for the degraded-warn.
 //
 // It walks the JOIN rather than testing the top error: a batch fold reports
-// every bubble's failure together, and a gap buried behind a sibling error is
-// still a bubble that stopped growing. Duplicates collapse by uuid, because one
+// every work's failure together, and a gap buried behind a sibling error is
+// still a work that stopped growing. Duplicates collapse by uuid, because one
 // event folding the same defect twice is one defect.
 func splitAsyncGaps(err error) ([]asyncFault, error) {
 	if err == nil {
@@ -836,7 +862,7 @@ func collectAsyncGaps(err error, faults *[]asyncFault, seen map[string]bool) err
 		}
 		return errors.Join(rest...)
 	}
-	var gap *frontend.AsyncGapError
+	var gap *frontend.DetachedGapError
 	if !errors.As(err, &gap) {
 		return err
 	}
@@ -858,14 +884,14 @@ func collectAsyncGaps(err error, faults *[]asyncFault, seen map[string]bool) err
 // confirmation that it is final. A running task's absent exit code is not a
 // zero, and reading it as one would report every in-flight command as a clean
 // success.
-func retrievalFacts(out *datav1.TaskOutputResult) (taskID, text string, verdict *frontend.AsyncVerdict) {
+func retrievalFacts(out *datav1.TaskOutputResult) (taskID, text string, verdict *frontend.DetachedVerdict) {
 	switch t := out.GetTask().(type) {
 	case *datav1.TaskOutputResult_LocalBash:
 		taskID, text = t.LocalBash.GetTaskId(), t.LocalBash.GetOutput()
 		status := t.LocalBash.GetStatus()
 		if t.LocalBash.GetExitCodeSet() && status != datav1.RawTaskStatus_RAW_TASK_STATUS_RUNNING {
 			code := t.LocalBash.GetExitCode()
-			verdict = &frontend.AsyncVerdict{
+			verdict = &frontend.DetachedVerdict{
 				Status:   terminalStatusFromRaw(status),
 				ExitCode: &code,
 			}
@@ -873,7 +899,7 @@ func retrievalFacts(out *datav1.TaskOutputResult) (taskID, text string, verdict 
 	case *datav1.TaskOutputResult_LocalAgent:
 		taskID, text = t.LocalAgent.GetTaskId(), t.LocalAgent.GetOutput()
 		if status := t.LocalAgent.GetStatus(); isRawTerminal(status) {
-			verdict = &frontend.AsyncVerdict{
+			verdict = &frontend.DetachedVerdict{
 				Status:  terminalStatusFromRaw(status),
 				Message: t.LocalAgent.GetResult(),
 			}
@@ -898,7 +924,7 @@ func isRawTerminal(s datav1.RawTaskStatus) bool {
 
 // terminalStatusFromRaw translates the retrieval's raw status vocabulary into
 // the shim's typed terminal status, which is the ONE vocabulary
-// frontend.SettleAsyncBubble resolves an outcome from. A status this table does
+// frontend.SettleDetachedWork resolves an outcome from. A status this table does
 // not name leaves the result UNSPECIFIED, which the settler refuses rather than
 // standing in for.
 func terminalStatusFromRaw(s datav1.RawTaskStatus) corev1.TerminalStatus {
@@ -930,11 +956,11 @@ func completeJournalPrefix(text string) int {
 	return 0
 }
 
-// joinAsyncErrors folds a batch of per-bubble failures into one error, so a
+// joinAsyncErrors folds a batch of per-work failures into one error, so a
 // single bad fold neither aborts the rest of the batch nor disappears.
 //
 // It JOINS rather than flattening to text: the classified daemon-bug refusals
-// (frontend.AsyncGapError) each become a failure card the user sees, and a
+// (frontend.DetachedGapError) each become a failure card the user sees, and a
 // batch of two would have destroyed both classifications by rendering them into
 // one string. errors.Join keeps every failure recoverable by type, and the
 // batch's order is the fold's order, so the joined record is still stable.

@@ -66,19 +66,19 @@ func exitCode(v int32) *int32 { return &v }
 
 // --- opening from a detached agent's own records ---------------------------
 
-func TestObserveCurationOpensABubbleForANewDetachedAgent(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestObserveCurationOpensADetachedWorkForANewDetachedAgent(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(push.Opened) != 1 {
-		t.Fatalf("the first record of a detached conversation opens its bubble, got %d", len(push.Opened))
+		t.Fatalf("the first record of a detached conversation opens its work, got %d", len(push.Opened))
 	}
 }
 
-func TestObserveCurationFoldsASecondRecordIntoTheSameBubble(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestObserveCurationFoldsASecondRecordIntoTheSameDetachedWork(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "one")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -87,31 +87,31 @@ func TestObserveCurationFoldsASecondRecordIntoTheSameBubble(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(push.Opened) != 0 {
-		t.Fatalf("the same detachment must not open a second bubble, got %d opened", len(push.Opened))
+		t.Fatalf("the same detachment must not open a second work, got %d opened", len(push.Opened))
 	}
 }
 
-func TestObserveCurationAddressesTheUpdateToTheOpenedBubble(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestObserveCurationAddressesTheUpdateToTheOpenedDetachedWork(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if push.Updates[0].GetBubbleId() != push.Opened[0].GetId() {
-		t.Fatal("an update must name the bubble the same push opened")
+	if push.Updates[0].GetMessageId() != push.Opened[0].GetUuid() {
+		t.Fatal("an update must name the work the same push opened")
 	}
 }
 
 func TestObserveCurationRefusesADetachedRecordItCannotAttributeToACall(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	_, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("", "agent_1", "hi")}}, 10)
 	if err == nil {
-		t.Fatal("a record naming neither a source call nor an open bubble has nothing to attribute the detachment to")
+		t.Fatal("a record naming neither a source call nor an open work has nothing to attribute the detachment to")
 	}
 }
 
-func TestObserveCurationLabelsABubbleFromTheToolThatLaunchedIt(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestObserveCurationLabelsADetachedWorkFromTheToolThatLaunchedIt(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{
 		ToolNames: map[string]string{"tu_1": "Agent"},
 		Detached:  []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")},
@@ -119,34 +119,34 @@ func TestObserveCurationLabelsABubbleFromTheToolThatLaunchedIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if push.Opened[0].GetLabel() != "Agent" {
-		t.Fatalf("want the tool name as the fold's face, got %q", push.Opened[0].GetLabel())
+	if push.Opened[0].GetDetachedWork().GetLabel() != "Agent" {
+		t.Fatalf("want the tool name as the fold's face, got %q", push.Opened[0].GetDetachedWork().GetLabel())
 	}
 }
 
 // --- the classification verdict on the tool card ---------------------------
 
-func TestSpawnedBubbleIDNamesTheBubbleACallDetached(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestSpawnedMessageIDNamesTheDetachedWorkACallDetached(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.spawnedBubbleID("tu_1") != push.Opened[0].GetId() {
-		t.Fatal("the launching call must resolve to the bubble it launched")
+	if s.spawnedMessageID("tu_1") != push.Opened[0].GetUuid() {
+		t.Fatal("the launching call must resolve to the work it launched")
 	}
 }
 
-func TestSpawnedBubbleIDIsEmptyForACallThatDetachedNothing(t *testing.T) {
-	if got := newAsyncBubbleStore("/ws", nil).spawnedBubbleID("tu_other"); got != "" {
+func TestSpawnedMessageIDIsEmptyForACallThatDetachedNothing(t *testing.T) {
+	if got := newDetachedWorkStore("/ws", nil).spawnedMessageID("tu_other"); got != "" {
 		t.Fatalf("empty is the only reading of a call that detached nothing, got %q", got)
 	}
 }
 
 // --- nested dispatch -------------------------------------------------------
 
-func TestANestedDispatchPointsAtTheBubbleItWasLaunchedFrom(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestANestedDispatchPointsAtTheDetachedWorkItWasLaunchedFrom(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	outer, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{callingFold("tu_1", "agent_1", "tu_inner", "Agent")}}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -155,37 +155,37 @@ func TestANestedDispatchPointsAtTheBubbleItWasLaunchedFrom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inner.Opened[0].GetParentBubbleId() != outer.Opened[0].GetId() {
-		t.Fatalf("want parent=%q, got %q", outer.Opened[0].GetId(), inner.Opened[0].GetParentBubbleId())
+	if inner.Opened[0].GetLineage().GetParentMessageId() != outer.Opened[0].GetUuid() {
+		t.Fatalf("want parent=%q, got %q", outer.Opened[0].GetUuid(), inner.Opened[0].GetLineage().GetParentMessageId())
 	}
 }
 
 func TestATopLevelDispatchHasNoParentPointer(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := push.Opened[0].GetParentBubbleId(); got != "" {
+	if got := push.Opened[0].GetLineage().GetParentMessageId(); got != "" {
 		t.Fatalf("a top-level detachment has no parent, got %q", got)
 	}
 }
 
 // --- shell launches --------------------------------------------------------
 
-func TestABackgroundShellLaunchOpensAShellBubble(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestABackgroundShellLaunchOpensAShellDetachedWork(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")}}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if push.Opened[0].GetShell() == nil {
-		t.Fatalf("a BashResult carrying a background task id IS a background launch, got %T", push.Opened[0].GetKind())
+	if push.Opened[0].GetDetachedWork().GetShell() == nil {
+		t.Fatalf("a BashResult carrying a background task id IS a background launch, got %T", push.Opened[0].GetDetachedWork().GetKind())
 	}
 }
 
 func TestAForegroundShellDetachesNothing(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		{ToolUseID: "tu_1", Result: &datav1.ToolUseResult{Result: &datav1.ToolUseResult_Bash{Bash: &datav1.BashResult{}}}},
 	}}, 10)
@@ -193,12 +193,12 @@ func TestAForegroundShellDetachesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !push.empty() {
-		t.Fatal("a shell with no background task id opened no bubble")
+		t.Fatal("a shell with no background task id opened no work")
 	}
 }
 
-func TestAnAsyncAgentLaunchOpensAnAgentBubble(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestAnAsyncAgentLaunchOpensAnAgentDetachedWork(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{{
 		ToolUseID: "tu_1",
 		Result: &datav1.ToolUseResult{Result: &datav1.ToolUseResult_AgentAsyncLaunch{
@@ -208,13 +208,13 @@ func TestAnAsyncAgentLaunchOpensAnAgentBubble(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if push.Opened[0].GetAgent() == nil {
-		t.Fatalf("an AgentAsyncLaunch IS an async agent, got %T", push.Opened[0].GetKind())
+	if push.Opened[0].GetDetachedWork().GetAgent() == nil {
+		t.Fatalf("an AgentAsyncLaunch IS an async agent, got %T", push.Opened[0].GetDetachedWork().GetKind())
 	}
 }
 
-func TestAWorkflowLaunchOpensAJournalBubble(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestAWorkflowLaunchOpensAJournalDetachedWork(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{{
 		ToolUseID: "tu_1",
 		Result: &datav1.ToolUseResult{Result: &datav1.ToolUseResult_WorkflowLaunch{
@@ -224,15 +224,15 @@ func TestAWorkflowLaunchOpensAJournalBubble(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if push.Opened[0].GetJournal() == nil {
-		t.Fatalf("a WorkflowLaunchResult IS a workflow run, got %T", push.Opened[0].GetKind())
+	if push.Opened[0].GetDetachedWork().GetJournal() == nil {
+		t.Fatalf("a WorkflowLaunchResult IS a workflow run, got %T", push.Opened[0].GetDetachedWork().GetKind())
 	}
 }
 
 // --- shell folds -----------------------------------------------------------
 
 func TestARetrievalAppendsOnlyTheNewBytes(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -249,20 +249,20 @@ func TestARetrievalAppendsOnlyTheNewBytes(t *testing.T) {
 }
 
 func TestARunningShellIsNotSettledByItsAbsentExitCode(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")}}, 10); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{retrieval("task_1", "abc", datav1.RawTaskStatus_RAW_TASK_STATUS_RUNNING, nil)}}, 11); err != nil {
 		t.Fatal(err)
 	}
-	if s.snapshot()[0].GetLiveness().GetLive() == nil {
+	if s.snapshot()[0].GetDetachedWork().GetLiveness().GetLive() == nil {
 		t.Fatal("an in-flight command's absent exit code is not a zero and must not settle it")
 	}
 }
 
 func TestAShellSettlesOnItsExitCodeWithANonRunningStatus(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -271,13 +271,13 @@ func TestAShellSettlesOnItsExitCodeWithANonRunningStatus(t *testing.T) {
 	}}, 11); err != nil {
 		t.Fatal(err)
 	}
-	if s.snapshot()[0].GetLiveness().GetSettled().GetDone() == nil {
+	if s.snapshot()[0].GetDetachedWork().GetLiveness().GetSettled().GetDone() == nil {
 		t.Fatal("an exit code of 0 on a completed task is a clean exit")
 	}
 }
 
 func TestARetrievalForWorkNoLaunchAnnouncedOpensNothing(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		retrieval("task_unknown", "abc", datav1.RawTaskStatus_RAW_TASK_STATUS_RUNNING, nil),
 	}}, 10)
@@ -285,22 +285,22 @@ func TestARetrievalForWorkNoLaunchAnnouncedOpensNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !push.empty() {
-		t.Fatal("a retrieval is not evidence of a launch, and a bubble invented from one would have no originating call")
+		t.Fatal("a retrieval is not evidence of a launch, and a work invented from one would have no originating call")
 	}
 }
 
 // --- task lifecycle --------------------------------------------------------
 
-func TestTaskStartedOpensABubbleForARecognizedKind(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestTaskStartedOpensADetachedWorkForARecognizedKind(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	push, err := s.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL, ToolUseId: "tu_1", Description: "sleep 9",
 	}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(push.Opened) != 1 || push.Opened[0].GetShell() == nil {
-		t.Fatalf("want one shell bubble, got %v", push.Opened)
+	if len(push.Opened) != 1 || push.Opened[0].GetDetachedWork().GetShell() == nil {
+		t.Fatalf("want one shell work, got %v", push.Opened)
 	}
 }
 
@@ -311,9 +311,9 @@ func TestTaskStartedOpensABubbleForARecognizedKind(t *testing.T) {
 // harness's own background shells arrive exactly that way. What stays a fault is
 // a detachment the daemon cannot classify at all.
 
-func TestAnAnnouncementBornDetachmentOpensABubble(t *testing.T) {
+func TestAnAnnouncementBornDetachmentOpensADetachedWork(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
 	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
@@ -329,20 +329,20 @@ func TestAnAnnouncementBornDetachmentOpensABubble(t *testing.T) {
 
 func TestAnAnnouncementBornDetachmentCarriesAnEmptyOrigin(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
 	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
 
 	// Assert
-	if got := push.Opened[0].GetOriginToolUseId(); got != "" {
-		t.Fatalf("origin_tool_use_id = %q, want empty: naming a call that never existed would attach the bubble to the wrong card", got)
+	if got := push.Opened[0].GetDetachedWork().GetOriginToolUseId(); got != "" {
+		t.Fatalf("origin_tool_use_id = %q, want empty: naming a call that never existed would attach the work to the wrong card", got)
 	}
 }
 
 func TestAnAnnouncementBornDetachmentRaisesNoFault(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
 	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
@@ -355,20 +355,20 @@ func TestAnAnnouncementBornDetachmentRaisesNoFault(t *testing.T) {
 
 func TestAnAnnouncementBornDetachmentTakesItsKindFromItsEvidence(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
 	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
 
 	// Assert
-	if push.Opened[0].GetShell() == nil {
-		t.Fatalf("kind arm = %T, want the shell arm the announcement's own kind names", push.Opened[0].GetKind())
+	if push.Opened[0].GetDetachedWork().GetShell() == nil {
+		t.Fatalf("kind arm = %T, want the shell arm the announcement's own kind names", push.Opened[0].GetDetachedWork().GetKind())
 	}
 }
 
 func TestAReAnnouncedAnnouncementBornDetachmentOpensNoTwin(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -378,13 +378,13 @@ func TestAReAnnouncedAnnouncementBornDetachmentOpensNoTwin(t *testing.T) {
 
 	// Assert
 	if len(push.Opened) != 0 {
-		t.Fatalf("opened = %d, want 0: the task id is the only handle such a detachment has, and a replay must land on the bubble it already opened", len(push.Opened))
+		t.Fatalf("opened = %d, want 0: the task id is the only handle such a detachment has, and a replay must land on the work it already opened", len(push.Opened))
 	}
 }
 
 func TestAnAnnouncementBornDetachmentOfNoRecognizableKindStillFaults(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
 	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1"}, 10)
@@ -400,7 +400,7 @@ func TestAnAnnouncementBornDetachmentOfNoRecognizableKindStillFaults(t *testing.
 }
 
 func TestAnUnrecognizedToolOpensTheExplicitUnclassifiedArm(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{ToolNames: map[string]string{"tu_1": "Frobnicate"}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -408,13 +408,13 @@ func TestAnUnrecognizedToolOpensTheExplicitUnclassifiedArm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if push.Opened[0].GetUnclassified().GetToolName() != "Frobnicate" {
-		t.Fatalf("an unrecognized tool is a first-class kind that NAMES the tool, got %v", push.Opened[0].GetKind())
+	if push.Opened[0].GetDetachedWork().GetUnclassified().GetToolName() != "Frobnicate" {
+		t.Fatalf("an unrecognized tool is a first-class kind that NAMES the tool, got %v", push.Opened[0].GetDetachedWork().GetKind())
 	}
 }
 
 func TestAnUnrecognizedToolWithNoNameBecomesAFailureCard(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", ToolUseId: "tu_1"}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -425,7 +425,7 @@ func TestAnUnrecognizedToolWithNoNameBecomesAFailureCard(t *testing.T) {
 }
 
 func TestAFaultCardIsStableAcrossAReplay(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	first, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1"}, 10)
 	second, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1"}, 10)
 	if first.Faults[0].UUID != second.Faults[0].UUID {
@@ -433,8 +433,8 @@ func TestAFaultCardIsStableAcrossAReplay(t *testing.T) {
 	}
 }
 
-func TestTaskStartedEnrichesABubbleAlreadyOpenedByItsFirstRecord(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestTaskStartedEnrichesADetachedWorkAlreadyOpenedByItsFirstRecord(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -445,12 +445,12 @@ func TestTaskStartedEnrichesABubbleAlreadyOpenedByItsFirstRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(push.Opened) != 0 {
-		t.Fatal("an out-of-order announcement must find the bubble its records already opened, not mint a twin")
+		t.Fatal("an out-of-order announcement must find the work its records already opened, not mint a twin")
 	}
 }
 
-func TestTaskStartedSuppliesTheLabelABubbleOpenedWithout(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestTaskStartedSuppliesTheLabelADetachedWorkOpenedWithout(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -459,13 +459,13 @@ func TestTaskStartedSuppliesTheLabelABubbleOpenedWithout(t *testing.T) {
 	}, 11); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.snapshot()[0].GetLabel(); got != "review the diff" {
+	if got := s.snapshot()[0].GetDetachedWork().GetLabel(); got != "review the diff" {
 		t.Fatalf("want the launch's own description, got %q", got)
 	}
 }
 
-func TestTaskEndedSettlesTheDetachmentsBubble(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestTaskEndedSettlesTheDetachmentsDetachedWork(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
 	}, 10); err != nil {
@@ -476,18 +476,18 @@ func TestTaskEndedSettlesTheDetachmentsBubble(t *testing.T) {
 		t.Fatal(err)
 	}
 	if push.Updates[0].GetLiveness().GetLiveness().GetSettled() == nil {
-		t.Fatal("a finished detachment settles its bubble")
+		t.Fatal("a finished detachment settles its work")
 	}
 }
 
-func TestTaskEndedForATaskThatOpenedNoBubbleIsNotAFailure(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestTaskEndedForATaskThatOpenedNoDetachedWorkIsNotAFailure(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	push, err := s.observeTaskEnded(&corev1.TaskEnded{TaskId: "task_x", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}, 11)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !push.empty() {
-		t.Fatal("a task the catalog tracks but that detached nothing is not a missing bubble")
+		t.Fatal("a task the catalog tracks but that detached nothing is not a missing work")
 	}
 }
 
@@ -503,7 +503,7 @@ func journalRetrieval(taskID, text string) frontend.ToolOutcome {
 	}}
 }
 
-func openWorkflow(t *testing.T, s *asyncBubbleStore) {
+func openWorkflow(t *testing.T, s *detachedWorkStore) {
 	t.Helper()
 	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_WORKFLOW, ToolUseId: "tu_1",
@@ -513,7 +513,7 @@ func openWorkflow(t *testing.T, s *asyncBubbleStore) {
 }
 
 func TestAWorkflowsRetrievalFoldsAsJournalRowsNotBytes(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	openWorkflow(t, s)
 	push, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		journalRetrieval("task_1", `{"label":"a","result":"ok"}`+"\n"),
@@ -527,7 +527,7 @@ func TestAWorkflowsRetrievalFoldsAsJournalRowsNotBytes(t *testing.T) {
 }
 
 func TestAWorkflowsSecondRetrievalAppendsOnlyItsNewRows(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	openWorkflow(t, s)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		journalRetrieval("task_1", `{"label":"a"}`+"\n"),
@@ -547,7 +547,7 @@ func TestAWorkflowsSecondRetrievalAppendsOnlyItsNewRows(t *testing.T) {
 }
 
 func TestAWorkflowsPartialTrailingRecordIsLeftForTheNextRead(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	openWorkflow(t, s)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		journalRetrieval("task_1", `{"label":"a"}`+"\n"+`{"label":"b`),
@@ -567,7 +567,7 @@ func TestAWorkflowsPartialTrailingRecordIsLeftForTheNextRead(t *testing.T) {
 }
 
 func TestAWorkflowsRewoundJournalIsRefusedAsAGap(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	openWorkflow(t, s)
 	if _, err := s.observeCuration(frontend.Curation{Outcomes: []frontend.ToolOutcome{
 		journalRetrieval("task_1", `{"label":"a"}`+"\n"+`{"label":"b"}`+"\n"),
@@ -585,17 +585,17 @@ func TestAWorkflowsRewoundJournalIsRefusedAsAGap(t *testing.T) {
 // --- snapshot --------------------------------------------------------------
 
 func TestSnapshotServesTheSameFoldTheDeltasWereProducedFrom(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(s.snapshot()[0].GetAgent().GetEmissions()); got != 1 {
+	if got := len(s.snapshot()[0].GetDetachedWork().GetAgent().GetEmissions()); got != 1 {
 		t.Fatalf("want the snapshot carrying everything folded to date, got %d emissions", got)
 	}
 }
 
-func TestSnapshotListsBubblesInLaunchOrder(t *testing.T) {
-	s := newAsyncBubbleStore("/ws", nil)
+func TestSnapshotListsDetachedWorkInLaunchOrder(t *testing.T) {
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_a", "agent_a", "x")}}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -603,14 +603,14 @@ func TestSnapshotListsBubblesInLaunchOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	snap := s.snapshot()
-	if len(snap) != 2 || snap[0].GetOriginToolUseId() != "tu_a" {
+	if len(snap) != 2 || snap[0].GetDetachedWork().GetOriginToolUseId() != "tu_a" {
 		t.Fatalf("want launch order, got %v", snap)
 	}
 }
 
 func TestSnapshotIsEmptyForASessionWithNoDetachedWork(t *testing.T) {
-	if got := newAsyncBubbleStore("/ws", nil).snapshot(); len(got) != 0 {
-		t.Fatalf("want no bubbles, got %d", len(got))
+	if got := newDetachedWorkStore("/ws", nil).snapshot(); len(got) != 0 {
+		t.Fatalf("want no work, got %d", len(got))
 	}
 }
 
@@ -654,7 +654,7 @@ func TestCompleteJournalPrefixConsumesNothingFromASoleFragment(t *testing.T) {
 //
 // The fold engine carried NO log calls at all, so a session whose detached work
 // folded and settled perfectly left exactly the same evidence as one whose
-// bubbles silently stopped growing. These assert the two records that close
+// work silently stopped growing. These assert the two records that close
 // that hole, and — just as importantly — their DENSITY: one per state change,
 // never one per item inside a batch.
 
@@ -678,13 +678,13 @@ func (r *asyncLogRecorder) matching(needle string) []string {
 
 const (
 	asyncAppendRecord = "async fold append"
-	asyncSettleRecord = "async bubble settled"
+	asyncSettleRecord = "detached work settled"
 )
 
 func TestFoldAppendRecordsAnAgentEmissionFold(t *testing.T) {
 	// Arrange
 	rec := &asyncLogRecorder{}
-	s := newAsyncBubbleStore("/ws", rec.logf)
+	s := newDetachedWorkStore("/ws", rec.logf)
 
 	// Act
 	push, err := s.observeCuration(frontend.Curation{
@@ -700,7 +700,7 @@ func TestFoldAppendRecordsAnAgentEmissionFold(t *testing.T) {
 		t.Fatalf("one append is one record, got %d: %v", len(lines), lines)
 	}
 	for _, want := range []string{
-		"bubble=" + push.Opened[0].GetId(),
+		"work=" + push.Opened[0].GetUuid(),
 		"kind=agent",
 		"ws=/ws",
 		"appended_emissions=1",
@@ -715,7 +715,7 @@ func TestFoldAppendRecordsAnAgentEmissionFold(t *testing.T) {
 func TestFoldAppendWritesOneRecordPerBatchNotPerEmission(t *testing.T) {
 	// Arrange
 	rec := &asyncLogRecorder{}
-	s := newAsyncBubbleStore("/ws", rec.logf)
+	s := newDetachedWorkStore("/ws", rec.logf)
 	fold := detachedFold("tu_1", "agent_1", "one")
 	fold.Emissions = append(fold.Emissions, detachedFold("tu_1", "agent_1", "two").Emissions...)
 
@@ -737,7 +737,7 @@ func TestFoldAppendWritesOneRecordPerBatchNotPerEmission(t *testing.T) {
 func TestFoldAppendIsSilentForAnEmptyEmissionBatch(t *testing.T) {
 	// Arrange
 	rec := &asyncLogRecorder{}
-	s := newAsyncBubbleStore("/ws", rec.logf)
+	s := newDetachedWorkStore("/ws", rec.logf)
 	fold := detachedFold("tu_1", "agent_1", "hi")
 	fold.Emissions = nil
 
@@ -755,7 +755,7 @@ func TestFoldAppendIsSilentForAnEmptyEmissionBatch(t *testing.T) {
 func TestFoldAppendRecordsAShellSpoolAdvance(t *testing.T) {
 	// Arrange
 	rec := &asyncLogRecorder{}
-	s := newAsyncBubbleStore("/ws", rec.logf)
+	s := newDetachedWorkStore("/ws", rec.logf)
 	if _, err := s.observeCuration(frontend.Curation{
 		Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")},
 	}, 10); err != nil {
@@ -784,7 +784,7 @@ func TestFoldAppendRecordsAShellSpoolAdvance(t *testing.T) {
 func TestFoldAppendReportsTheSpoolCursorItAdvancedFrom(t *testing.T) {
 	// Arrange
 	rec := &asyncLogRecorder{}
-	s := newAsyncBubbleStore("/ws", rec.logf)
+	s := newDetachedWorkStore("/ws", rec.logf)
 	if _, err := s.observeCuration(frontend.Curation{
 		Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")},
 	}, 10); err != nil {
@@ -818,7 +818,7 @@ func TestFoldAppendReportsTheSpoolCursorItAdvancedFrom(t *testing.T) {
 func TestFoldAppendRecordsAJournalRowFold(t *testing.T) {
 	// Arrange
 	rec := &asyncLogRecorder{}
-	s := newAsyncBubbleStore("/ws", rec.logf)
+	s := newDetachedWorkStore("/ws", rec.logf)
 	openWorkflow(t, s)
 
 	// Act
@@ -843,7 +843,7 @@ func TestFoldAppendRecordsAJournalRowFold(t *testing.T) {
 func TestFoldAppendReportsTheJournalBytesHeldBackAsPartial(t *testing.T) {
 	// Arrange
 	rec := &asyncLogRecorder{}
-	s := newAsyncBubbleStore("/ws", rec.logf)
+	s := newDetachedWorkStore("/ws", rec.logf)
 	openWorkflow(t, s)
 
 	// Act — a complete row plus a trailing fragment the cursor must not consume
@@ -877,7 +877,7 @@ func TestSettleRecordNamesTheResolvedOutcomeArm(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			rec := &asyncLogRecorder{}
-			s := newAsyncBubbleStore("/ws", rec.logf)
+			s := newDetachedWorkStore("/ws", rec.logf)
 			if _, err := s.observeCuration(frontend.Curation{
 				Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")},
 			}, 10); err != nil {
@@ -904,7 +904,7 @@ func TestSettleRecordNamesTheResolvedOutcomeArm(t *testing.T) {
 func TestSettleRecordCarriesTheShellExitCode(t *testing.T) {
 	// Arrange
 	rec := &asyncLogRecorder{}
-	s := newAsyncBubbleStore("/ws", rec.logf)
+	s := newDetachedWorkStore("/ws", rec.logf)
 	if _, err := s.observeCuration(frontend.Curation{
 		Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")},
 	}, 10); err != nil {
@@ -931,7 +931,7 @@ func TestSettleRecordCarriesTheShellExitCode(t *testing.T) {
 func TestSettleRecordReportsNoExitForWorkThatNeverExited(t *testing.T) {
 	// Arrange
 	rec := &asyncLogRecorder{}
-	s := newAsyncBubbleStore("/ws", rec.logf)
+	s := newDetachedWorkStore("/ws", rec.logf)
 	if _, err := s.observeCuration(frontend.Curation{
 		Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")},
 	}, 10); err != nil {
@@ -958,7 +958,7 @@ func TestSettleRecordReportsNoExitForWorkThatNeverExited(t *testing.T) {
 func TestARefusedSettlementWritesNoSettleRecord(t *testing.T) {
 	// Arrange
 	rec := &asyncLogRecorder{}
-	s := newAsyncBubbleStore("/ws", rec.logf)
+	s := newDetachedWorkStore("/ws", rec.logf)
 	if _, err := s.observeCuration(frontend.Curation{
 		Outcomes: []frontend.ToolOutcome{bashOutcome("tu_1", "task_1")},
 	}, 10); err != nil {
@@ -979,10 +979,10 @@ func TestARefusedSettlementWritesNoSettleRecord(t *testing.T) {
 	}
 }
 
-func TestASettlementForATaskThatOpenedNoBubbleWritesNoRecord(t *testing.T) {
+func TestASettlementForATaskThatOpenedNoDetachedWorkWritesNoRecord(t *testing.T) {
 	// Arrange
 	rec := &asyncLogRecorder{}
-	s := newAsyncBubbleStore("/ws", rec.logf)
+	s := newDetachedWorkStore("/ws", rec.logf)
 
 	// Act
 	if _, err := s.observeTaskEnded(&corev1.TaskEnded{
@@ -993,20 +993,20 @@ func TestASettlementForATaskThatOpenedNoBubbleWritesNoRecord(t *testing.T) {
 
 	// Assert
 	if lines := rec.matching(asyncSettleRecord); len(lines) != 0 {
-		t.Fatalf("a task that detached nothing has no bubble to settle, got %v", lines)
+		t.Fatalf("a task that detached nothing has no work to settle, got %v", lines)
 	}
 }
 
-// --- settling the bubbles a detached-agent cancel stopped ------------------
+// --- settling the work a detached-agent cancel stopped ------------------
 //
 // The cancel's ack is the shim's DIRECT observation that `stop_task` resolved,
 // so it is the same class of evidence a TaskEnded is — arriving on the control
 // plane rather than the event plane. Settling from it is what keeps the feed
 // and the footer from showing live work the daemon has already stopped.
 
-func TestCancelledTaskSettlesItsBubble(t *testing.T) {
-	// Arrange: a detached agent with an open bubble.
-	s := newAsyncBubbleStore("/ws", nil)
+func TestCancelledTaskSettlesItsDetachedWork(t *testing.T) {
+	// Arrange: a detached agent with an open work.
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1", Description: "fan out",
 	}, 10); err != nil {
@@ -1014,7 +1014,7 @@ func TestCancelledTaskSettlesItsBubble(t *testing.T) {
 	}
 
 	// Act
-	ups, err := s.settleCancelledTasks([]string{"task_1"}, frontend.AsyncVerdict{
+	ups, err := s.settleCancelledTasks([]string{"task_1"}, frontend.DetachedVerdict{
 		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20, Reason: "user cancelled",
 	})
 
@@ -1023,16 +1023,16 @@ func TestCancelledTaskSettlesItsBubble(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(ups) != 1 {
-		t.Fatalf("updates = %d, want 1: a cancelled agent's bubble must not keep rendering as live work", len(ups))
+		t.Fatalf("updates = %d, want 1: a cancelled agent's work must not keep rendering as live work", len(ups))
 	}
 	if ups[0].GetLiveness().GetLiveness().GetSettled() == nil {
-		t.Fatalf("update did not settle the bubble: %+v", ups[0])
+		t.Fatalf("update did not settle the work: %+v", ups[0])
 	}
 }
 
 func TestCancelledTaskSettlesToTheKilledArm(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
 	}, 10); err != nil {
@@ -1040,7 +1040,7 @@ func TestCancelledTaskSettlesToTheKilledArm(t *testing.T) {
 	}
 
 	// Act
-	ups, err := s.settleCancelledTasks([]string{"task_1"}, frontend.AsyncVerdict{
+	ups, err := s.settleCancelledTasks([]string{"task_1"}, frontend.DetachedVerdict{
 		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20, Reason: "user cancelled",
 	})
 	if err != nil {
@@ -1048,15 +1048,15 @@ func TestCancelledTaskSettlesToTheKilledArm(t *testing.T) {
 	}
 
 	// Assert: KILLED, not done and not error — the work did not fail, it was
-	// not allowed to conclude. The mapping is SettleAsyncBubble's, unchanged.
+	// not allowed to conclude. The mapping is SettleDetachedWork's, unchanged.
 	if ups[0].GetLiveness().GetLiveness().GetSettled().GetKilled() == nil {
 		t.Fatalf("settled arm = %+v, want killed", ups[0].GetLiveness().GetLiveness().GetSettled().GetOutcome())
 	}
 }
 
-func TestCancelledTasksSettleEveryNamedBubble(t *testing.T) {
+func TestCancelledTasksSettleEveryNamedDetachedWork(t *testing.T) {
 	// Arrange: two agents, both stopped by one cancel.
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	for _, id := range []string{"task_1", "task_2"} {
 		if _, err := s.observeTaskStarted(&corev1.TaskStarted{
 			TaskId: id, Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_" + id,
@@ -1066,7 +1066,7 @@ func TestCancelledTasksSettleEveryNamedBubble(t *testing.T) {
 	}
 
 	// Act
-	ups, err := s.settleCancelledTasks([]string{"task_1", "task_2"}, frontend.AsyncVerdict{
+	ups, err := s.settleCancelledTasks([]string{"task_1", "task_2"}, frontend.DetachedVerdict{
 		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20,
 	})
 
@@ -1075,21 +1075,21 @@ func TestCancelledTasksSettleEveryNamedBubble(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(ups) != 2 {
-		t.Fatalf("updates = %d, want 2: one orphaned bubble is as visible as two", len(ups))
+		t.Fatalf("updates = %d, want 2: one orphaned work is as visible as two", len(ups))
 	}
 }
 
-func TestACancelledTaskWithNoBubbleReportsNothing(t *testing.T) {
+func TestACancelledTaskWithNoDetachedWorkReportsNothing(t *testing.T) {
 	// Arrange: the store never opened detached work for this task.
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
-	ups, err := s.settleCancelledTasks([]string{"task_unknown"}, frontend.AsyncVerdict{
+	ups, err := s.settleCancelledTasks([]string{"task_unknown"}, frontend.DetachedVerdict{
 		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20,
 	})
 
-	// Assert: not a missing bubble and not an error — the session may track a
-	// task it never opened a bubble for.
+	// Assert: not a missing work and not an error — the session may track a
+	// task it never opened a work for.
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -1099,14 +1099,14 @@ func TestACancelledTaskWithNoBubbleReportsNothing(t *testing.T) {
 }
 
 func TestALaterTaskEndedMayOverwriteACancelSettlement(t *testing.T) {
-	// Arrange: a bubble already settled by the cancel's ack.
-	s := newAsyncBubbleStore("/ws", nil)
+	// Arrange: a work already settled by the cancel's ack.
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
 	}, 10); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.settleCancelledTasks([]string{"task_1"}, frontend.AsyncVerdict{
+	if _, err := s.settleCancelledTasks([]string{"task_1"}, frontend.DetachedVerdict{
 		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20,
 	}); err != nil {
 		t.Fatal(err)

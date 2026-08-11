@@ -1840,7 +1840,7 @@ pre {
    (`.token-heat`) and a muted grey here would only fight it. */
 .async-badge-tokens { font-size: 0.7rem; }
 
-/* A bubble whose parent_bubble_id names work that never arrived. It is drawn
+/* Work whose parent_message_id names a message that never arrived. It is drawn
    — it is real work the user started — but set off by a dashed rule rather
    than promoted into the root list, because "top level" is a tree position
    the daemon never claimed for it. */

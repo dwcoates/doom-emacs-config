@@ -158,7 +158,7 @@ func (c *Client) CancelDetachedAgents(ctx context.Context, originRequestID strin
 		// The contract sets the field on every arm — including both refusals —
 		// so an ack without one is a shim that did something this daemon
 		// cannot account for. Reading it as "nothing was running" would settle
-		// no bubbles and report a successful cancel for work still in flight.
+		// no work and report a successful cancel for work still in flight.
 		return nil, fmt.Errorf("shim acked cancel-detached-agents request_id=%s with no detached_cancel_outcome; the contract sets it on every arm", reqID)
 	}
 	return outcome, nil

@@ -357,7 +357,7 @@ func TestE2EAPromptUnderTheLeaseIsHeldWithTheScheduleIdAndStartsNoTurn(t *testin
 		},
 	})
 	if got, want := held.GetShutdown().GetScheduleId(), fx.draining.GetScheduleId(); got != want {
-		t.Errorf("the held entry names schedule_id %q, want the live schedule %q: the bubble must join to the lease it explains", got, want)
+		t.Errorf("the held entry names schedule_id %q, want the live schedule %q: the work must join to the lease it explains", got, want)
 	}
 	if arm := held.GetClassification(); held.GetPending() != nil || held.GetInterject() != nil || held.GetError() != nil {
 		t.Errorf("the lease-held entry's classification is %T: that state is only reachable by running the classifier, which never runs on a lease-held entry", arm)

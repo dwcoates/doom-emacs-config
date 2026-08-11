@@ -1,6 +1,6 @@
 // The LIVE TYPING RELAY against the WINDOW FOLD: a preview opens on whichever
 // surface the record it previews will land on to retire it — the top-level feed
-// when nothing folds it, and the window's own bubble when something does.
+// when nothing folds it, and the window's own work when something does.
 package sessioncontroller
 
 import (
@@ -11,10 +11,10 @@ import (
 	"claude-repld/internal/frontend"
 )
 
-// openTestSkillWindow opens one skill window on a consumer's bubble store.
+// openTestSkillWindow opens one skill window on a consumer's work store.
 func openTestSkillWindow(t *testing.T, c *consumer, toolUseID string) {
 	t.Helper()
-	_, fault, err := c.bubbles.openSkillWindow(frontend.SkillInvocation{
+	_, fault, err := c.work.openSkillWindow(frontend.SkillInvocation{
 		ToolUseID: toolUseID,
 		SkillName: "some-skill",
 		Label:     "/some-skill",
@@ -92,7 +92,7 @@ func TestTypingRelayVerdict(t *testing.T) {
 			}
 
 			// Act.
-			got := c.bubbles.typingRelayVerdict(tt.toolUseID)
+			got := c.work.typingRelayVerdict(tt.toolUseID)
 
 			// Assert.
 			if got.Suppress != tt.wantSuppress {
@@ -101,8 +101,8 @@ func TestTypingRelayVerdict(t *testing.T) {
 			if got.Reason != tt.wantReason {
 				t.Errorf("Reason = %q, want %q", got.Reason, tt.wantReason)
 			}
-			if got.Suppress && got.BubbleID == "" {
-				t.Error("a suppressed verdict names no destination bubble")
+			if got.Suppress && got.MessageID == "" {
+				t.Error("a suppressed verdict names no destination work")
 			}
 		})
 	}
@@ -126,8 +126,8 @@ func TestConsumeStillRelaysTypingInsideAnOpenWindow(t *testing.T) {
 	}
 }
 
-func TestConsumeScopesFoldedTypingToItsBubble(t *testing.T) {
-	// Arrange: the record this delta previews folds into the window's bubble,
+func TestConsumeScopesFoldedTypingToItsDetachedWork(t *testing.T) {
+	// Arrange: the record this delta previews folds into the window's work,
 	// so a TOP-LEVEL preview of it could never be retired.
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
@@ -138,22 +138,22 @@ func TestConsumeScopesFoldedTypingToItsBubble(t *testing.T) {
 		t.Fatalf("Consume: %v", err)
 	}
 
-	// Assert: it is addressed to the bubble that will retire it.
+	// Assert: it is addressed to the work that will retire it.
 	if len(push.typing) != 1 {
 		t.Fatalf("typing pushes = %d, want 1", len(push.typing))
 	}
-	want := c.bubbles.windowFoldTargets()
+	want := c.work.windowFoldTargets()
 	if len(want) == 0 {
 		t.Fatal("no window fold target open")
 	}
-	if got := push.typing[0].GetBubbleId(); got != want[len(want)-1].bubbleID {
-		t.Errorf("bubble_id = %q, want %q", got, want[len(want)-1].bubbleID)
+	if got := push.typing[0].GetParentMessageId(); got != want[len(want)-1].messageID {
+		t.Errorf("message_id = %q, want %q", got, want[len(want)-1].messageID)
 	}
 }
 
 func TestConsumeLeavesTopLevelPreviewsUnscoped(t *testing.T) {
 	// Arrange: nothing folds, so the record lands on the feed and retires its
-	// preview there. A bubble id here would hide a real preview in a bubble.
+	// preview there. A work id here would hide a real preview in a work.
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 
@@ -166,8 +166,8 @@ func TestConsumeLeavesTopLevelPreviewsUnscoped(t *testing.T) {
 	if len(push.typing) != 1 {
 		t.Fatalf("typing pushes = %d, want 1", len(push.typing))
 	}
-	if got := push.typing[0].GetBubbleId(); got != "" {
-		t.Errorf("bubble_id = %q, want empty for a top-level preview", got)
+	if got := push.typing[0].GetParentMessageId(); got != "" {
+		t.Errorf("message_id = %q, want empty for a top-level preview", got)
 	}
 }
 
@@ -190,8 +190,8 @@ func TestConsumeRelaysInputPreviewForTheWindowsOwnCall(t *testing.T) {
 	if got := push.typing[0].GetDelta().GetInputJson(); got != `{"skill` {
 		t.Errorf("relayed chunk = %q, want %q", got, `{"skill`)
 	}
-	if got := push.typing[0].GetBubbleId(); got != "" {
-		t.Errorf("bubble_id = %q, want empty — this card stays on the feed", got)
+	if got := push.typing[0].GetParentMessageId(); got != "" {
+		t.Errorf("message_id = %q, want empty — this card stays on the feed", got)
 	}
 }
 
@@ -200,8 +200,8 @@ func TestConsumeRelaysPreviewOnceTheWindowIsGone(t *testing.T) {
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 	openTestSkillWindow(t, c, "toolu_skill")
-	settled := frontend.AsyncVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 1001}
-	if _, err := c.bubbles.settleWindows(settled, "user_prompt"); err != nil {
+	settled := frontend.DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 1001}
+	if _, err := c.work.settleWindows(settled, "user_prompt"); err != nil {
 		t.Fatalf("settleWindows: %v", err)
 	}
 
@@ -221,33 +221,33 @@ func TestFoldedTypingLedgerAnnouncesFirstThenPeriodically(t *testing.T) {
 	var l foldedTypingLedger
 
 	// Act + Assert.
-	if count, announce := l.note("bubble:a"); count != 1 || !announce {
+	if count, announce := l.note("work:a"); count != 1 || !announce {
 		t.Errorf("first note = (%d, %v), want (1, true)", count, announce)
 	}
 	for i := 2; i < foldedTypingAnnounceEvery; i++ {
-		if _, announce := l.note("bubble:a"); announce {
+		if _, announce := l.note("work:a"); announce {
 			t.Fatalf("note %d announced, want silent between announcements", i)
 		}
 	}
-	if count, announce := l.note("bubble:a"); count != foldedTypingAnnounceEvery || !announce {
+	if count, announce := l.note("work:a"); count != foldedTypingAnnounceEvery || !announce {
 		t.Errorf("note %d = (%d, %v), want (%d, true)", foldedTypingAnnounceEvery, count, announce, foldedTypingAnnounceEvery)
 	}
 }
 
-func TestFoldedTypingLedgerCountsPerBubble(t *testing.T) {
+func TestFoldedTypingLedgerCountsPerDetachedWork(t *testing.T) {
 	// Arrange.
 	var l foldedTypingLedger
 
 	// Act.
-	l.note("bubble:a")
-	l.note("bubble:a")
-	l.note("bubble:b")
+	l.note("work:a")
+	l.note("work:a")
+	l.note("work:b")
 
 	// Assert: two windows folding at once are two separate accounts.
-	if got := l.suppressed("bubble:a"); got != 2 {
-		t.Errorf("bubble:a suppressed = %d, want 2", got)
+	if got := l.suppressed("work:a"); got != 2 {
+		t.Errorf("work:a suppressed = %d, want 2", got)
 	}
-	if got := l.suppressed("bubble:b"); got != 1 {
-		t.Errorf("bubble:b suppressed = %d, want 1", got)
+	if got := l.suppressed("work:b"); got != 1 {
+		t.Errorf("work:b suppressed = %d, want 1", got)
 	}
 }

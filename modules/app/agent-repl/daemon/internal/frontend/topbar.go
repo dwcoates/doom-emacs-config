@@ -103,14 +103,14 @@ func TopbarView(in TopbarInputs) (*frontendv1.TopbarView, error) {
 		return nil, fmt.Errorf("frontend: topbar view for workspace %q: %w", in.Workspace, err)
 	}
 	return &frontendv1.TopbarView{
-		Workspace:      in.Workspace,
-		Title:          topbarTitle(in.Workspace, in.Branch),
-		SessionLine:    topbarSessionLine(in.SessionID, in.ClaudeSessionID),
-		ModelDisplay:   in.ModelDisplay,
-		ModelOptions:   in.ModelOptions,
-		Connectivity:   connectivity,
-		Warnings:       in.Warnings,
-		Fence:          in.Fence,
+		Workspace:    in.Workspace,
+		Title:        topbarTitle(in.Workspace, in.Branch),
+		SessionLine:  topbarSessionLine(in.SessionID, in.ClaudeSessionID),
+		ModelDisplay: in.ModelDisplay,
+		ModelOptions: in.ModelOptions,
+		Connectivity: connectivity,
+		Warnings:     in.Warnings,
+		Fence:        in.Fence,
 	}, nil
 }
 

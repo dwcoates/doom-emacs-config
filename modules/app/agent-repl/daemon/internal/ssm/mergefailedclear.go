@@ -13,7 +13,7 @@ import (
 // another merge row supersedes a merge row — and the row is durable, so it
 // replays out of the state log on every reload. A workspace whose merge failed
 // therefore pushed RENDER_STATE_MERGE_FAILED on every generation change for the
-// rest of its life. Observed live on subagent-token-bubbles and
+// rest of its life. Observed live on subagent-token-work and
 // async-gui-open-oyn: a hard restart brought a healthy session up underneath a
 // merge verdict that stayed on screen.
 //

@@ -336,7 +336,7 @@ func (m *Manager) refuseKeepAliveForce(workspace, entryID, sessionID, keepAliveT
 
 // releaseParkedHolds sheds a cancelled schedule's hold from every materialized
 // entry, so a workspace whose session never wired does not keep rendering a
-// lease bubble for a schedule that no longer exists. The durable rows are
+// lease work for a schedule that no longer exists. The durable rows are
 // dropped by the caller, per schedule, exactly as they are for live sessions —
 // and because they are, this leg TOMBSTONES exactly as the live one does
 // (restoreTombstones): the one DropHeldPromptsForSchedule statement removes both

@@ -28,7 +28,7 @@
 //     for the same reason a failed lock probe never collapses into DIED:
 //     reporting a completion nobody witnessed is a claim the evidence does not
 //     carry, and it is exactly how "nothing else in flight" came to be printed
-//     beside a running bubble.
+//     beside a running work.
 //
 // # Why it is written where it is
 //

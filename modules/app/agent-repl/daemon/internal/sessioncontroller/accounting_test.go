@@ -1585,7 +1585,7 @@ func TestDurableReplayAttachesByteEquivalentPersistedAccounting(t *testing.T) {
 	ev := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}}})
 	ev.RequestId = "t"
 	c.pushConversation(ev, false)
-	// The DURABLE record left the feed item; the bubble carries the RESOLVED
+	// The DURABLE record left the feed item; the work carries the RESOLVED
 	// stamp derived from it. Asserting the stamp is asserting that the same
 	// persisted record was found and read — a wrong record produces different
 	// figures.
@@ -1651,7 +1651,7 @@ func TestHistoricalConversationAttachesTranscriptUsageOnLiveAndReplayPaths(t *te
 	// The durable record's own fields (root turn, timing, subagent lineage) are
 	// the EVIDENCE layer's and stay in the store; what the feed carries is the
 	// resolved stamp derived from the same record, so the cache read this
-	// transcript line reported is what the bubble's corner shows.
+	// transcript line reported is what the work's corner shows.
 	for i, delta := range push.convo {
 		stamp := delta.GetMessages()[0].GetAgent().GetResponse().GetUsageStamp()
 		if stamp == nil || stamp.GetCacheReadTokens() != 5 || stamp.GetModel() != "model" {

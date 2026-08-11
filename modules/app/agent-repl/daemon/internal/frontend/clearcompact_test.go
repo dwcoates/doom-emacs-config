@@ -76,7 +76,7 @@ func TestContextCompactedCuratesIntoItsArm(t *testing.T) {
 }
 
 func TestClearCarriesTheEventEnvelopeOntoItsItem(t *testing.T) {
-	// Arrange — ts_ms draws the bubble and request_id correlates it.
+	// Arrange — ts_ms draws the work and request_id correlates it.
 	ev := &corev1.Event{
 		SessionId: "s1", Seq: 41, ProducedAtMs: producedMs, RequestId: "req-7",
 		DedupKey: "clear:u-1",
@@ -113,7 +113,7 @@ func TestClearThroughSeqIsTheEventSeq(t *testing.T) {
 
 func TestClearUUIDIsTheDedupKey(t *testing.T) {
 	// Arrange — the dedup key is the only identity stable across replays, so a
-	// re-push REPLACES the item rather than accumulating a second bubble.
+	// re-push REPLACES the item rather than accumulating a second work.
 	ev := &corev1.Event{
 		SessionId: "s1", Seq: 41, DedupKey: "clear:u-1",
 		Payload: &corev1.Event_ContextCleared{ContextCleared: &corev1.ContextCleared{}},

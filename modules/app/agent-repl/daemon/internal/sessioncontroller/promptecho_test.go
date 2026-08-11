@@ -60,7 +60,7 @@ func TestDirectSubmitPushesTheReceiptKeyedOnItsRequestID(t *testing.T) {
 		t.Fatalf("submit: %v", err)
 	}
 
-	// Assert: one bubble, carrying the submit's id and the user's own text.
+	// Assert: one work, carrying the submit's id and the user's own text.
 	turns := h.userTurns()
 	if len(turns) != 1 {
 		t.Fatalf("pushed %d user turn(s), want the one receipt", len(turns))
@@ -171,7 +171,7 @@ func TestAQueuedPromptPushesNoReceiptAtSubmit(t *testing.T) {
 		t.Fatalf("submit: %v", err)
 	}
 
-	// Assert: a bubble now would claim an execution order the session will not
+	// Assert: a work now would claim an execution order the session will not
 	// follow — the chip is the honest report until it is delivered.
 	if turns := h.userTurns(); len(turns) != 0 {
 		t.Fatalf("pushed %d user turn(s) for a queued prompt, want none until delivery", len(turns))
@@ -209,7 +209,7 @@ func TestTheDurableLineIsStampedWithTheSubmitItAnswers(t *testing.T) {
 	h.controller().consumer.Consume(transcriptUserEvent(t, 12, "u1", "hello there"))
 
 	// Assert: the durable line carries the request id, so a frontend reconciles
-	// it onto the bubble already on screen instead of drawing a second one.
+	// it onto the work already on screen instead of drawing a second one.
 	turns := h.userTurns()
 	if len(turns) != 2 {
 		t.Fatalf("pushed %d user turn(s), want the receipt and the durable line", len(turns))

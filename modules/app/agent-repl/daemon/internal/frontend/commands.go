@@ -52,7 +52,7 @@ type CommandHandler interface {
 	OpenWorkspace(ctx context.Context, workspace, requestID string, cmd *frontendv1.OpenWorkspaceCmd) error
 	// Resync arranges a conversation replay from the given seq, INCLUSIVE (a
 	// re-push replaces by uuid, so re-sending the client's last-seen item costs
-	// nothing and re-sending one short of it would lose a bubble). The actual
+	// nothing and re-sending one short of it would lose a work). The actual
 	// start is raised to the newest clear or compaction when there is one — see
 	// sessioncontroller.Manager.Resync. The server independently re-sends a
 	// StateSnapshot to the requesting client; this hook covers the

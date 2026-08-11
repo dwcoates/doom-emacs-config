@@ -4670,7 +4670,7 @@ function watcher(taskId = "bg1", over: Partial<ToolItem> = {}): ToolItem {
     inputDone: true,
     // THE CLASSIFICATION VERDICT is what makes this a member now — the result
     // prose below is spool evidence the card renders, never an identity.
-    spawnedBubbleId: taskId,
+    spawnedMessageId: taskId,
     result: { isError: false, content: `Command running in background with ID: ${taskId}. Output is being written to: /tmp/claude-1/s/tasks/${taskId}.output` },
     ...over,
   };
@@ -6391,7 +6391,8 @@ describe("a tool card's detached work", () => {
       id,
       workspace: "/w",
       originToolUseId: "w1",
-      parentBubbleId: "",
+      parentMessageId: "",
+      topLevelMessageId: id,
       label: "detached work",
       startedAtMs: 0,
       liveness: LIVE,
@@ -6406,7 +6407,7 @@ describe("a tool card's detached work", () => {
 
   it("draws the bubble its verdict names, attached to the card", () => {
     // Arrange
-    const item = { ...watcher("bg1"), spawnedBubbleId: "b1" };
+    const item = { ...watcher("bg1"), spawnedMessageId: "b1" };
     const registry = registryOf(agentBubble("b1"));
 
     // Act
@@ -6418,7 +6419,7 @@ describe("a tool card's detached work", () => {
 
   it("attaches by origin_tool_use_id, the other end of the same daemon fact", () => {
     // Arrange — no verdict on the card; the BUBBLE names the call instead.
-    const item = { ...watcher("bg1"), spawnedBubbleId: undefined };
+    const item = { ...watcher("bg1"), spawnedMessageId: undefined };
     const registry = registryOf(agentBubble("b1"));
 
     // Act
@@ -6431,7 +6432,7 @@ describe("a tool card's detached work", () => {
   it("draws no bubble for a card whose call detached nothing", () => {
     // Arrange — no verdict on the card AND no bubble naming it, which together
     // are the only reading of "detached nothing".
-    const item = { ...watcher("bg1"), spawnedBubbleId: undefined };
+    const item = { ...watcher("bg1"), spawnedMessageId: undefined };
     const registry = registryOf({ ...agentBubble("b1"), originToolUseId: "someone-else" });
 
     // Act
@@ -6443,7 +6444,7 @@ describe("a tool card's detached work", () => {
 
   it("draws no bubble when the page holds no registry to match against", () => {
     // Arrange
-    const item = { ...watcher("bg1"), spawnedBubbleId: "b1" };
+    const item = { ...watcher("bg1"), spawnedMessageId: "b1" };
 
     // Act
     const html = renderItem(item, undefined, undefined, { children: new Map(), isOpen: () => false });
@@ -6464,7 +6465,7 @@ describe("a tool card's detached work", () => {
       },
     ];
     const registry = registryOf(agentBubble("b1", emissions));
-    const item = { ...watcher("bg1"), spawnedBubbleId: "b1" };
+    const item = { ...watcher("bg1"), spawnedMessageId: "b1" };
 
     // Act — the bubble's fold open, so its body is mounted.
     const html = renderItem(item, undefined, undefined, panelsWith(registry, ["bubble:b1"]));
@@ -6494,7 +6495,7 @@ describe("a tool card's detached work", () => {
 
   /** A teal card of tool NAME, carrying the bubble its call detached. */
   function tealCardHtml(name: string, registry: AsyncBubbleRegistry): string {
-    const item = { ...watcher("bg1"), toolName: name, spawnedBubbleId: "b1" };
+    const item = { ...watcher("bg1"), toolName: name, spawnedMessageId: "b1" };
     // No id is open: an always-open section must not need one.
     return renderItem(item, undefined, undefined, panelsWith(registry));
   }
@@ -6535,7 +6536,7 @@ describe("a tool card's detached work", () => {
 
   it("hands the same verdict down to a bubble's own child bubbles", () => {
     // Arrange — one nested rung left foldable is the unobvious affordance.
-    const child = { ...agentBubble("b2"), parentBubbleId: "b1", label: "nested work" };
+    const child = { ...agentBubble("b2"), parentMessageId: "b1", label: "nested work" };
     const registry = registryOf(agentBubble("b1"), child);
     // Act
     const html = tealCardHtml("Task", registry);
@@ -6561,7 +6562,7 @@ describe("a tool card's detached work", () => {
     // card's bubble is exactly the markup it must reject.
     const registry = registryOf(agentBubble("b1"));
     const grey = renderItem(
-      { ...watcher("bg1"), toolName: "Bash", spawnedBubbleId: "b1" },
+      { ...watcher("bg1"), toolName: "Bash", spawnedMessageId: "b1" },
       undefined,
       undefined,
       panelsWith(registry),
@@ -6575,7 +6576,7 @@ describe("a tool card's detached work", () => {
     const registry = registryOf(agentBubble("b1"));
     // Act
     const html = renderItem(
-      { ...watcher("bg1"), toolName: "Bash", spawnedBubbleId: "b1" },
+      { ...watcher("bg1"), toolName: "Bash", spawnedMessageId: "b1" },
       undefined,
       undefined,
       panelsWith(registry),

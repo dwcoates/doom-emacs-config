@@ -26,8 +26,8 @@
  *
  * THE DAEMON'S CLASSIFICATION replaced all of it. The daemon links one tool
  * call to one piece of detached work and publishes that link from both ends —
- * `AsyncBubble.origin_tool_use_id` on the bubble, `AgentToolCall`/
- * `AgentToolOutcome.spawned_bubble_id` on the call — so a frontend MATCHES a
+ * `DetachedWork.origin_tool_use_id` on the work, `AgentToolCall`/
+ * `AgentToolOutcome.spawned_message_id` on the call — so a frontend MATCHES a
  * daemon-minted id by exact string equality and never derives one.
  *
  * Consulting both ends is not a two-rung ladder. They are the same fact
@@ -56,16 +56,16 @@ export type AsyncClassification = Pick<AsyncBubbleRegistry, "bubbleForCall">;
  * This is the membership verdict every async surface keys off, and its inputs
  * are exactly the daemon's two statements of one classification. BUBBLES is
  * what resolves `origin_tool_use_id`; without it only a call carrying its own
- * `spawned_bubble_id` can be recognized, which is the honest answer for a page
+ * `spawned_message_id` can be recognized, which is the honest answer for a page
  * that holds no async plane rather than a reason to guess.
  */
 export function watcherRef(item: ConversationItem, bubbles?: AsyncClassification): string | null {
   if (item.kind !== "tool") return null;
   if (bubbles === undefined) {
-    const verdict = item.spawnedBubbleId;
+    const verdict = item.spawnedMessageId;
     return verdict === undefined || verdict === "" ? null : verdict;
   }
-  return bubbles.bubbleForCall(item.toolUseId, item.spawnedBubbleId)?.id ?? null;
+  return bubbles.bubbleForCall(item.toolUseId, item.spawnedMessageId)?.id ?? null;
 }
 
 /** A tool call is an async member exactly when the daemon says it detached work. */

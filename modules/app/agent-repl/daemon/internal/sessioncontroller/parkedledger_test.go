@@ -724,7 +724,7 @@ func TestARestoreClearsItsTombstonesWhenItEnds(t *testing.T) {
 
 func TestCancellingTheScheduleShedsTheHoldFromMaterializedEntries(t *testing.T) {
 	// Otherwise a client whose session never wired keeps rendering a lease
-	// bubble for a schedule that no longer exists.
+	// work for a schedule that no longer exists.
 	// Arrange.
 	h := newParkedHarness(t)
 	h.lease.hold("sd_live")

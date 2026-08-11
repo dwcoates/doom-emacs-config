@@ -642,7 +642,7 @@ func TestCancelDetachedAgentsRelaysTheShimVerdict(t *testing.T) {
 	outcome, err := c.CancelDetachedAgents(context.Background(), "fe-1")
 
 	// Assert: the task ids come back verbatim — they are what the daemon
-	// settles bubbles by.
+	// settles work by.
 	if err != nil {
 		t.Fatalf("CancelDetachedAgents: %v", err)
 	}
@@ -680,7 +680,7 @@ func TestCancelDetachedAgentsRefusesAnAckWithNoOutcome(t *testing.T) {
 	outcome, err := c.CancelDetachedAgents(context.Background(), "fe-1")
 
 	// Assert: a protocol violation, not an empty stop. Reading it as "nothing
-	// was running" would settle no bubbles and report a successful cancel for
+	// was running" would settle no work and report a successful cancel for
 	// work still in flight.
 	if err == nil {
 		t.Fatal("an ack with no detached_cancel_outcome must be refused")

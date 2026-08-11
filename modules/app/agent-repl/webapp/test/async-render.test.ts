@@ -25,10 +25,13 @@ function bubble(over: Partial<AsyncBubble> & Pick<AsyncBubble, "id" | "kind">): 
   return {
     workspace: "/w",
     originToolUseId: "",
-    parentBubbleId: "",
+    parentMessageId: "",
     label: "",
     startedAtMs: 0,
     liveness: LIVE,
+    // A feed row's top-level id is its own uuid; a nested fixture that names a
+    // parent states its own root, so the denormalized field never drifts.
+    topLevelMessageId: over.topLevelMessageId ?? over.id,
     ...over,
   };
 }
@@ -239,7 +242,7 @@ describe("the merge kind", () => {
   it("nests a subagent bubble parented under the merge bubble", () => {
     const registry = seeded(
       bubble({ id: "b1", kind: mergeKind }),
-      bubble({ id: "b2", kind: agentKind, label: "conflict resolver", parentBubbleId: "b1" }),
+      bubble({ id: "b2", kind: agentKind, label: "conflict resolver", parentMessageId: "b1" }),
     );
 
     const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
@@ -358,7 +361,7 @@ describe("the skill kind", () => {
   it("nests a subagent bubble parented under the skill bubble", () => {
     const registry = seeded(
       bubble({ id: "b1", kind: skillKind() }),
-      bubble({ id: "b2", kind: agentKind, label: "dispatched worker", parentBubbleId: "b1" }),
+      bubble({ id: "b2", kind: agentKind, label: "dispatched worker", parentMessageId: "b1" }),
     );
 
     const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
@@ -369,7 +372,7 @@ describe("the skill kind", () => {
   it("nests a skill bubble invoked inside another skill bubble", () => {
     const registry = seeded(
       bubble({ id: "b1", kind: skillKind() }),
-      bubble({ id: "b2", kind: skillKind({ skillName: "inner" }), label: "/inner", parentBubbleId: "b1" }),
+      bubble({ id: "b2", kind: skillKind({ skillName: "inner" }), label: "/inner", parentMessageId: "b1" }),
     );
 
     const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
@@ -407,8 +410,8 @@ describe("the three conversational kinds share ONE conversation body", () => {
 
 describe("a child a bubble's own card already draws", () => {
   /** One tool-call emission, carrying the daemon's classification verdict. */
-  function call(id: string, spawnedBubbleId: string): UnwrappedEmission {
-    return { emission: "toolCall", arm: "toolUse", payload: { id, name: "Task" }, spawnedBubbleId };
+  function call(id: string, spawnedMessageId: string): UnwrappedEmission {
+    return { emission: "toolCall", arm: "toolUse", payload: { id, name: "Task" }, spawnedMessageId };
   }
 
   const withCall = (emissions: UnwrappedEmission[]): AsyncBubble["kind"] => ({
@@ -420,7 +423,7 @@ describe("a child a bubble's own card already draws", () => {
     // Arrange — the card inside b1 spawned b2, and b2 also points at b1.
     const registry = seeded(
       bubble({ id: "b1", kind: withCall([call("tu1", "b2")]) }),
-      bubble({ id: "b2", kind: agentKind, label: "dispatched worker", originToolUseId: "tu1", parentBubbleId: "b1" }),
+      bubble({ id: "b2", kind: agentKind, label: "dispatched worker", originToolUseId: "tu1", parentMessageId: "b1" }),
     );
 
     // Act
@@ -434,7 +437,7 @@ describe("a child a bubble's own card already draws", () => {
     // Arrange — the same tree, minus the spawning card (the tail cap dropped it).
     const registry = seeded(
       bubble({ id: "b1", kind: withCall([]) }),
-      bubble({ id: "b2", kind: agentKind, label: "dispatched worker", originToolUseId: "tu1", parentBubbleId: "b1" }),
+      bubble({ id: "b2", kind: agentKind, label: "dispatched worker", originToolUseId: "tu1", parentMessageId: "b1" }),
     );
 
     // Act
@@ -454,7 +457,7 @@ describe("a child a bubble's own card already draws", () => {
     };
     const registry = seeded(
       bubble({ id: "b1", kind: withCall([inMessage]) }),
-      bubble({ id: "b2", kind: agentKind, label: "dispatched worker", originToolUseId: "tu1", parentBubbleId: "b1" }),
+      bubble({ id: "b2", kind: agentKind, label: "dispatched worker", originToolUseId: "tu1", parentMessageId: "b1" }),
     );
 
     // Act
@@ -468,8 +471,8 @@ describe("a child a bubble's own card already draws", () => {
     // Arrange — b3 is b1's child but was spawned by no card b1 carries.
     const registry = seeded(
       bubble({ id: "b1", kind: withCall([call("tu1", "b2")]) }),
-      bubble({ id: "b2", kind: agentKind, label: "attached worker", originToolUseId: "tu1", parentBubbleId: "b1" }),
-      bubble({ id: "b3", kind: agentKind, label: "unattached worker", parentBubbleId: "b1" }),
+      bubble({ id: "b2", kind: agentKind, label: "attached worker", originToolUseId: "tu1", parentMessageId: "b1" }),
+      bubble({ id: "b3", kind: agentKind, label: "unattached worker", parentMessageId: "b1" }),
     );
 
     // Act
@@ -567,7 +570,7 @@ describe("the spawn tree", () => {
   it("nests a child bubble inside the bubble it was spawned from", () => {
     const registry = seeded(
       bubble({ id: "b1", kind: agentKind, label: "parent" }),
-      bubble({ id: "b2", kind: agentKind, label: "child", parentBubbleId: "b1" }),
+      bubble({ id: "b2", kind: agentKind, label: "child", parentMessageId: "b1" }),
     );
 
     const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
@@ -578,8 +581,8 @@ describe("the spawn tree", () => {
   it("nests a grandchild, resolved by pointer rather than by payload recursion", () => {
     const registry = seeded(
       bubble({ id: "b1", kind: agentKind }),
-      bubble({ id: "b2", kind: agentKind, parentBubbleId: "b1" }),
-      bubble({ id: "b3", kind: agentKind, label: "deep", parentBubbleId: "b2" }),
+      bubble({ id: "b2", kind: agentKind, parentMessageId: "b1" }),
+      bubble({ id: "b3", kind: agentKind, label: "deep", parentMessageId: "b2" }),
     );
 
     const html = AsyncBubbleCard(
@@ -592,8 +595,8 @@ describe("the spawn tree", () => {
 
   it("cuts a cyclic parent-pointer branch instead of recursing forever", () => {
     const registry = seeded(
-      bubble({ id: "b1", kind: agentKind, parentBubbleId: "b2" }),
-      bubble({ id: "b2", kind: agentKind, parentBubbleId: "b1" }),
+      bubble({ id: "b1", kind: agentKind, parentMessageId: "b2" }),
+      bubble({ id: "b2", kind: agentKind, parentMessageId: "b1" }),
     );
 
     const html = AsyncBubbleCard(
@@ -601,7 +604,7 @@ describe("the spawn tree", () => {
       ctxFor(registry, [bubbleFoldId("b1"), bubbleFoldId("b2")]),
     );
 
-    expect(html).toContain("parent pointers form a cycle");
+    expect(html).toContain("parent_message_id pointers form a cycle");
   });
 });
 
@@ -673,7 +676,7 @@ describe("AsyncBubbleForest", () => {
   it("draws the tree's roots", () => {
     const registry = seeded(
       bubble({ id: "b1", kind: agentKind, label: "root" }),
-      bubble({ id: "b2", kind: agentKind, label: "child", parentBubbleId: "b1" }),
+      bubble({ id: "b2", kind: agentKind, label: "child", parentMessageId: "b1" }),
     );
 
     const html = AsyncBubbleForest(ctxFor(registry));
@@ -684,7 +687,7 @@ describe("AsyncBubbleForest", () => {
   it("draws a child only once, inside its parent rather than beside it", () => {
     const registry = seeded(
       bubble({ id: "b1", kind: agentKind }),
-      bubble({ id: "b2", kind: agentKind, label: "child", parentBubbleId: "b1" }),
+      bubble({ id: "b2", kind: agentKind, label: "child", parentMessageId: "b1" }),
     );
 
     const html = AsyncBubbleForest(ctxFor(registry));
@@ -693,7 +696,7 @@ describe("AsyncBubbleForest", () => {
   });
 
   it("draws an orphan set off, rather than dropping its live work", () => {
-    const registry = seeded(bubble({ id: "b2", kind: agentKind, label: "stranded", parentBubbleId: "gone" }));
+    const registry = seeded(bubble({ id: "b2", kind: agentKind, label: "stranded", parentMessageId: "gone" }));
 
     const html = AsyncBubbleForest(ctxFor(registry));
 
@@ -701,7 +704,7 @@ describe("AsyncBubbleForest", () => {
   });
 
   it("says WHICH parent never arrived rather than promoting the orphan to a root", () => {
-    const registry = seeded(bubble({ id: "b2", kind: agentKind, parentBubbleId: "gone" }));
+    const registry = seeded(bubble({ id: "b2", kind: agentKind, parentMessageId: "gone" }));
 
     const html = AsyncBubbleForest(ctxFor(registry));
 

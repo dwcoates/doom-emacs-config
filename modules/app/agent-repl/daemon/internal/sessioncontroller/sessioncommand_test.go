@@ -165,7 +165,7 @@ func TestTheInvocationItemHasNowhereToPutAPrompt(t *testing.T) {
 	}
 }
 
-// --- the withheld bubble ----------------------------------------------------
+// --- the withheld work ----------------------------------------------------
 
 func TestSubmittingAModelCommandPushesNoPromptBubble(t *testing.T) {
 	// Arrange — `/model` never reaches the model: the CLI answers it locally.
@@ -185,7 +185,7 @@ func TestSubmittingAModelCommandPushesNoPromptBubble(t *testing.T) {
 }
 
 func TestSubmittingAModelCommandPushesItsInvocationItem(t *testing.T) {
-	// Arrange — withholding the bubble must not leave the feed silent: this
+	// Arrange — withholding the work must not leave the feed silent: this
 	// item is the only account the user will get of why the model changed.
 	h := newQueueHarness(t, nil)
 
@@ -205,7 +205,7 @@ func TestSubmittingAModelCommandPushesItsInvocationItem(t *testing.T) {
 }
 
 func TestSubmittingTheBareModelCommandStillForwardsItToTheShim(t *testing.T) {
-	// Arrange — withholding the BUBBLE must not withhold the COMMAND. The bare
+	// Arrange — withholding the DETACHED WORK must not withhold the COMMAND. The bare
 	// form opens the CLI's own interactive picker, which the daemon cannot
 	// stand in for, so it is still forwarded verbatim.
 	h := newQueueHarness(t, nil)
@@ -348,7 +348,7 @@ func TestSubmittingAClearAlsoPushesItsInvocationItem(t *testing.T) {
 
 func TestAnOrdinaryPromptPushesNoInvocationItem(t *testing.T) {
 	// Arrange — an ordinary prompt is the user speaking, and it gets its
-	// bubble and nothing else.
+	// work and nothing else.
 	h := newQueueHarness(t, nil)
 
 	// Act.

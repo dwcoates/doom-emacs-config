@@ -237,19 +237,20 @@ func WorkspaceRosterFrame(r *frontendv1.WorkspaceRoster) *frontendv1.FrontendFra
 // round-trip. It is a faithful passthrough — the curation of what streams lives
 // upstream (the shim only emits deltas worth previewing), so this layer never
 // re-types the delta into per-arm strings.
-// bubbleID scopes the preview: empty relays it onto the top-level feed, and a
-// set id relays it INSIDE that async bubble, where the bubble's own
-// authoritative record retires it. See TypingDelta.bubble_id in feed.proto and
-// sessioncontroller/foldedtyping.go for which of the two a delta is.
-func TypingDeltaFromContentDelta(workspace, fence, bubbleID string, cd *corev1.ContentDelta) *frontendv1.TypingDelta {
+// parentMessageID scopes the preview: empty relays it onto the top-level feed,
+// and a set id relays it INSIDE that MESSAGE's detached work, where that
+// message's own authoritative record retires it. See TypingDelta.parent_message_id
+// in feed.proto and sessioncontroller/foldedtyping.go for which of the two a
+// delta is.
+func TypingDeltaFromContentDelta(workspace, fence, parentMessageID string, cd *corev1.ContentDelta) *frontendv1.TypingDelta {
 	if cd == nil {
 		return nil
 	}
 	return &frontendv1.TypingDelta{
-		Workspace: workspace,
-		Fence:     fence,
-		BubbleId:  bubbleID,
-		Delta:     cd,
+		Workspace:       workspace,
+		Fence:           fence,
+		ParentMessageId: parentMessageID,
+		Delta:           cd,
 	}
 }
 
@@ -438,7 +439,7 @@ func conversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*fro
 	return &frontendv1.ConversationDelta{
 		Workspace:  workspace,
 		Fence:      fence,
-		Messages:      items,
+		Messages:   items,
 		ThroughSeq: ev.GetSeq(),
 	}, envs, nil
 }
@@ -487,7 +488,7 @@ type RecordEnvelope struct {
 	IsSidechain bool
 	// SourceToolUseID is the tool_use id of the call that launched the detached
 	// agent this record belongs to. It is the same id the launching tool call
-	// carries, which is what lets a record be routed to its bubble by matching
+	// carries, which is what lets a record be routed to its work by matching
 	// rather than by deriving.
 	SourceToolUseID string
 	// AgentID is the harness's own id for the agent that wrote the record, the
@@ -566,7 +567,7 @@ func conversationItemsFromVendor(a *anypb.Any, ev *corev1.Event) ([]*frontendv1.
 //
 // A clear has no fields, so everything a frontend needs is the item's envelope:
 // WHICH conversation position it lands at (the uuid, for reconciliation) and
-// WHEN (ts_ms, for the bubble). The message itself is still passed rather than
+// WHEN (ts_ms, for the work). The message itself is still passed rather than
 // re-modeled — a frontend-shaped copy of an empty message would be a second
 // shape to keep in step with the first for no gain.
 func contextClearedItems(cc *corev1.ContextCleared, ev *corev1.Event) []*frontendv1.Message {
@@ -575,8 +576,9 @@ func contextClearedItems(cc *corev1.ContextCleared, ev *corev1.Event) []*fronten
 	}
 	return []*frontendv1.Message{{
 		Uuid: eventDerivedUUID(ev, "clear"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
-		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Payload:   &frontendv1.Message_ContextCleared{ContextCleared: cc},
+		Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+		Lineage: FeedRowLineage(eventDerivedUUID(ev, "clear")),
+		Payload: &frontendv1.Message_ContextCleared{ContextCleared: cc},
 	}}
 }
 
@@ -596,8 +598,9 @@ func contextCompactedItems(cc *corev1.ContextCompacted, ev *corev1.Event) []*fro
 	}
 	return []*frontendv1.Message{{
 		Uuid: eventDerivedUUID(ev, "compact"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
-		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Payload:   &frontendv1.Message_ContextCompacted{ContextCompacted: cc},
+		Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+		Lineage: FeedRowLineage(eventDerivedUUID(ev, "compact")),
+		Payload: &frontendv1.Message_ContextCompacted{ContextCompacted: cc},
 	}}
 }
 
@@ -676,7 +679,7 @@ func recordEnvelopes(items []*frontendv1.Message, env *datav1.LineEnvelope) map[
 // no-envelope shape a main-conversation record has always had.
 //
 // The id doubles as SourceToolUseID because it IS the launching tool_use id —
-// the handle asyncsplit keys a fold by and the bubble store addresses a bubble
+// the handle asyncsplit keys a fold by and the work store addresses a work
 // by. AgentID stays empty: the stream plane never names one, and the launching
 // call is the stronger handle anyway.
 func streamDetachmentEnvelopes(items []*frontendv1.Message, parentToolUseID string) map[string]RecordEnvelope {
@@ -757,8 +760,9 @@ func systemLineItems(sl *datav1.SystemLine, tsMs int64, requestID string) []*fro
 		// there is exactly one copy of it and it is derived here.
 		return []*frontendv1.Message{{
 			Uuid: FailureUUID(uuid), TsMs: tsMs, RequestId: requestID,
-			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-			Payload:   &frontendv1.Message_FailureCard{FailureCard: failure},
+			Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+			Lineage: FeedRowLineage(FailureUUID(uuid)),
+			Payload: &frontendv1.Message_FailureCard{FailureCard: failure},
 		}}
 	default:
 		return nil
@@ -856,7 +860,7 @@ func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1
 	// The interrupt sentinel leaves with the reasoning, and for the same
 	// reason: `body` is already the clone, and a body that was nothing but the
 	// sentinel now has no content, so the empty-response check below drops the
-	// bubble outright instead of drawing a placeholder nobody said.
+	// work outright instead of drawing a placeholder nobody said.
 	body.Content, _ = stripInterruptSentinels(body.GetContent())
 	items := make([]*frontendv1.Message, 0, len(thinking)+1)
 	for i, t := range thinking {
@@ -864,7 +868,8 @@ func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1
 			// Each emission needs its own address, derived from the message's so
 			// it is stable across a resync rather than freshly minted per push.
 			Uuid: fmt.Sprintf("%s#thinking:%d", uuid, i), TsMs: tsMs, RequestId: requestID,
-			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+			Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+			Lineage: FeedRowLineage(fmt.Sprintf("%s#thinking:%d", uuid, i)),
 			Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 				Emission: &frontendv1.AgentEmission_Thinking{
 					// The daemon did the stripping, so the daemon states where the
@@ -889,7 +894,8 @@ func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1
 	}
 	return append(items, &frontendv1.Message{
 		Uuid: uuid, TsMs: tsMs, RequestId: requestID,
-		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+		Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+		Lineage: FeedRowLineage(uuid),
 		Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 			Emission: &frontendv1.AgentEmission_Response{
 				Response: &frontendv1.AgentResponse{Body: body},
@@ -948,8 +954,9 @@ func userMessageItem(uuid string, tsMs int64, requestID string, msg *datav1.ApiU
 	}
 	return []*frontendv1.Message{{
 		Uuid: uuid, TsMs: tsMs, RequestId: requestID,
-		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Payload:   &frontendv1.Message_UserMessage{UserMessage: msg},
+		Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+		Lineage: FeedRowLineage(uuid),
+		Payload: &frontendv1.Message_UserMessage{UserMessage: msg},
 	}}
 }
 
@@ -1010,7 +1017,8 @@ func resultItems(r *datav1.ResultMessage, ev *corev1.Event) []*frontendv1.Messag
 	}
 	return []*frontendv1.Message{{
 		Uuid: eventDerivedUUID(ev, "result"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
-		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+		Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+		Lineage: FeedRowLineage(eventDerivedUUID(ev, "result")),
 		Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 			Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: r},
 		}},

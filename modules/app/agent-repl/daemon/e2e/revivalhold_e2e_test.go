@@ -7,7 +7,7 @@
 //
 // The queue is where the user finds out. A gated prompt that produced no
 // QueueEntry, or one carried under the wrong hold, leaves the webapp with
-// nothing true to draw: it would run the classifier bubble on an entry no
+// nothing true to draw: it would run the classifier work on an entry no
 // classifier ever touched, or render "waiting on a keep-alive response" for a
 // wait that has nothing to do with a ping. So the projection is its own
 // contract — QueueEntry's `revival` hold arm — and it is asserted here on the
@@ -96,7 +96,7 @@ func heldByPendingCompaction(t *testing.T, s *keepAliveSession, text string) rev
 // TestE2EAPromptHeldByARevivalCarriesTheRevivalHold covers the DISTINGUISHER:
 // the entry selects the `revival` arm of its hold oneof, which is the whole
 // fact the arm carries. That presence is what tells the webapp to draw "waiting
-// on the revival's compaction" instead of the classifier bubble no classifier
+// on the revival's compaction" instead of the classifier work no classifier
 // ever ran.
 //
 // The arm's PRESENCE is the assertion because the contract deliberately left it
@@ -109,7 +109,7 @@ func TestE2EAPromptHeldByARevivalCarriesTheRevivalHold(t *testing.T) {
 
 	// Assert
 	if hold := held.entry.GetRevival(); hold == nil {
-		t.Fatalf("the entry for a prompt typed during a pending compact-first revival carries no revival_hold: the webapp has nothing to draw but the classifier bubble, and no classifier ran on it")
+		t.Fatalf("the entry for a prompt typed during a pending compact-first revival carries no revival_hold: the webapp has nothing to draw but the classifier work, and no classifier ran on it")
 	}
 }
 
@@ -118,7 +118,7 @@ func TestE2EAPromptHeldByARevivalCarriesTheRevivalHold(t *testing.T) {
 //
 // QueueEntryRevivalHold used to name the session being revived. That field is
 // reserved: a revival is a WORKSPACE-level event and the entry already rides its
-// workspace's QueueView, so the id joined the bubble to nothing a client could
+// workspace's QueueView, so the id joined the work to nothing a client could
 // not already reach. The guarantee the old assertion existed for — a held prompt
 // is attributable, never an unattributable "please wait" — is unchanged, so it
 // is asserted here against the surface that actually carries it.
@@ -135,9 +135,9 @@ func TestE2EAPromptHeldByARevivalRidesItsOwnWorkspacesQueue(t *testing.T) {
 
 // TestE2EAPromptHeldByARevivalIsNotHeldByAKeepAlivePing covers the
 // MISATTRIBUTION. The three holds are different kinds and the webapp draws a
-// different bubble from each; an entry gated by a revival's compaction but
+// different work from each; an entry gated by a revival's compaction but
 // carried under keep_alive_hold would tell the user their prompt is waiting on
-// a ping that is not running, and would join the bubble to a turn that does not
+// a ping that is not running, and would join the work to a turn that does not
 // exist.
 func TestE2EAPromptHeldByARevivalIsNotHeldByAKeepAlivePing(t *testing.T) {
 	// Arrange + Act
@@ -153,7 +153,7 @@ func TestE2EAPromptHeldByARevivalIsNotHeldByAKeepAlivePing(t *testing.T) {
 // --- the release --------------------------------------------------------------
 
 // TestE2EALandedCompactionReleasesTheRevivalHold covers the EXIT the projection
-// must show. The hold is a delay, so the bubble must stop claiming the prompt
+// must show. The hold is a delay, so the work must stop claiming the prompt
 // is waiting once it is not: the moment the compaction lands and the gate
 // opens, a QueueView shows the entry no longer holding — either released in
 // place or gone because it was delivered.

@@ -10,7 +10,7 @@ import (
 //
 // WHAT A RECEIPT IS. When a user submits a prompt, the daemon immediately
 // pushes a ConversationDelta carrying the prompt text keyed by the frontend
-// command's request id, so the user's own bubble appears without waiting for
+// command's request id, so the user's own work appears without waiting for
 // the vendor's durable transcript to echo it back. That receipt used to live
 // ONLY in daemon memory.
 //
@@ -378,7 +378,7 @@ func (s *PromptReceipts) DischargeResumption(requestID string) (bool, error) {
 }
 
 // Record persists one accepted prompt. It MUST complete before the receipt
-// bubble is pushed, so a receipt the user saw always implies a durable record.
+// work is pushed, so a receipt the user saw always implies a durable record.
 //
 // A re-record under the same request id OVERWRITES rather than failing: the
 // request id is the submit's identity, so a second write under it is the same

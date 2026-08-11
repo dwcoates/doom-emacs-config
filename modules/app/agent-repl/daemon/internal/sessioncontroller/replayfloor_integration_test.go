@@ -265,7 +265,7 @@ func TestStorePathReplayIncludesTheCompactionSummaryAndNothingBeneathIt(t *testi
 
 func TestOnlyTheNewestOfSeveralCutsFloorsTheReplay(t *testing.T) {
 	// Arrange — a conversation cut twice. The older cut is already below the
-	// floor the newer one sets, so replaying it would hand the frontend a bubble
+	// floor the newer one sets, so replaying it would hand the frontend a work
 	// announcing a discard of history it is no longer being sent.
 	h := newFloorHarness(t, &fakeClient{})
 	cons := h.consumer(t)

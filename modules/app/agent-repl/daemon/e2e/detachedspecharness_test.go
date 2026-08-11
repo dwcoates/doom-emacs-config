@@ -68,7 +68,7 @@ func asyncToolCallLine(uuid, toolUseID, toolName string) *datav1.TranscriptLine 
 
 // asyncToolResultLine is the user record reporting a tool call's result,
 // carrying the TYPED outcome. The typed outcome is where a detachment becomes
-// knowable (tool-call.proto, AgentToolOutcome.spawned_bubble_id).
+// knowable (tool-call.proto, AgentToolOutcome.spawned_message_id).
 func asyncToolResultLine(uuid, toolUseID, resultText string, outcome *datav1.ToolUseResult) *datav1.TranscriptLine {
 	return &datav1.TranscriptLine{Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
 		Envelope: &datav1.LineEnvelope{Uuid: uuid},
@@ -167,14 +167,14 @@ func degradedStateEvent(vendorSessionID, component, reason string, droppedCount 
 
 // --- observation: the frames the specification reads ------------------------
 
-// asyncDeltaIn returns the AsyncBubbleDelta a frame carries for workspace, or
+// asyncDeltaIn returns the DetachedWorkDelta a frame carries for workspace, or
 // nil when the frame is not this workspace's async push.
-func asyncDeltaIn(frame *frontendv1.FrontendFrame, workspace string) *frontendv1.AsyncBubbleDelta {
-	d, ok := frame.GetFrame().(*frontendv1.FrontendFrame_AsyncBubbleDelta)
-	if !ok || d.AsyncBubbleDelta.GetWorkspace() != workspace {
+func asyncDeltaIn(frame *frontendv1.FrontendFrame, workspace string) *frontendv1.DetachedWorkDelta {
+	d, ok := frame.GetFrame().(*frontendv1.FrontendFrame_DetachedWorkDelta)
+	if !ok || d.DetachedWorkDelta.GetWorkspace() != workspace {
 		return nil
 	}
-	return d.AsyncBubbleDelta
+	return d.DetachedWorkDelta
 }
 
 // asyncTraffic is everything one drain saw: the top-level conversation items
@@ -186,25 +186,26 @@ func asyncDeltaIn(frame *frontendv1.FrontendFrame, workspace string) *frontendv1
 // satisfy one observer and be missed by the other.
 type asyncTraffic struct {
 	items  []*frontendv1.Message
-	deltas []*frontendv1.AsyncBubbleDelta
+	deltas []*frontendv1.DetachedWorkDelta
 }
 
-// bubbles returns every bubble opened across the drained pushes.
-func (a asyncTraffic) bubbles() []*frontendv1.AsyncBubble {
-	var out []*frontendv1.AsyncBubble
+// work returns every work opened across the drained pushes, as the MESSAGES
+// that ARE that work.
+func (a asyncTraffic) work() []*frontendv1.Message {
+	var out []*frontendv1.Message
 	for _, delta := range a.deltas {
 		out = append(out, delta.GetOpened()...)
 	}
 	return out
 }
 
-// updatesFor returns every update addressed to bubbleID across the drained
+// updatesFor returns every update addressed to messageID across the drained
 // pushes, in arrival order.
-func (a asyncTraffic) updatesFor(bubbleID string) []*frontendv1.AsyncBubbleUpdate {
-	var out []*frontendv1.AsyncBubbleUpdate
+func (a asyncTraffic) updatesFor(messageID string) []*frontendv1.DetachedWorkUpdate {
+	var out []*frontendv1.DetachedWorkUpdate
 	for _, delta := range a.deltas {
 		for _, update := range delta.GetUpdates() {
-			if update.GetBubbleId() == bubbleID {
+			if update.GetMessageId() == messageID {
 				out = append(out, update)
 			}
 		}
@@ -212,11 +213,11 @@ func (a asyncTraffic) updatesFor(bubbleID string) []*frontendv1.AsyncBubbleUpdat
 	return out
 }
 
-// agentEmissions returns every emission the agent-arm updates for bubbleID
+// agentEmissions returns every emission the agent-arm updates for messageID
 // carried, in arrival order.
-func (a asyncTraffic) agentEmissions(bubbleID string) []*frontendv1.AgentEmission {
+func (a asyncTraffic) agentEmissions(messageID string) []*frontendv1.AgentEmission {
 	var out []*frontendv1.AgentEmission
-	for _, update := range a.updatesFor(bubbleID) {
+	for _, update := range a.updatesFor(messageID) {
 		out = append(out, update.GetAgent().GetEmissions()...)
 	}
 	return out
@@ -265,107 +266,100 @@ func awaitFrame(t *testing.T, conn *websocket.Conn, what string, match func(*fro
 	return nil
 }
 
-// anchorsFor returns the feed anchors naming toolUseID as their launching call.
+// openedFor returns the detached-work MESSAGES naming toolUseID as their
+// launching call.
 //
-// WHY THE ANCHOR AND NOT THE TOOL CARD. The daemon publishes its classification
-// verdict in two places by contract — AgentToolCall.spawned_bubble_id on the
-// card, and AsyncBubble.origin_tool_use_id on the anchor. The tool_call
-// EMISSION producer is deferred past this wave by orchestrator ruling (it needs
-// a second carve-out on AgentResponse.body, a contract-semantics change not
-// being rushed), so the anchor is the verdict this wave actually publishes.
+// REWRITTEN FROM anchorsFor. The daemon used to publish its classification
+// verdict twice: once as a raw bubble on the detached-work delta and once as a
+// synthesized "anchor" Message on the ConversationDelta, and this read the
+// anchor. Detached work IS a Message now, so the ONE delivery on
+// DetachedWorkDelta.opened is both the work and its place in the feed, and that
+// is what this reads.
 //
-// The gate moves; the guarantees do not. Everything downstream still reads the
-// bubble id the daemon minted, and still holds it to the same routing,
+// The gate moved; the guarantees did not. Everything downstream still reads the
+// message id the daemon minted, and still holds it to the same routing,
 // settlement and cursor contracts.
-func anchorsFor(items []*frontendv1.Message, toolUseID string) []*frontendv1.AsyncBubble {
-	var out []*frontendv1.AsyncBubble
-	for _, bubble := range asyncBubbleItems(items) {
-		if bubble.GetOriginToolUseId() == toolUseID {
-			out = append(out, bubble)
+func openedFor(seen asyncTraffic, toolUseID string) []*frontendv1.Message {
+	var out []*frontendv1.Message
+	for _, m := range seen.work() {
+		if m.GetDetachedWork().GetOriginToolUseId() == toolUseID {
+			out = append(out, m)
 		}
 	}
 	return out
 }
 
-// gateOnAnchor resolves the bubble id a launching call detached work under,
-// through the feed anchor, and fatals with the contract reason when the daemon
-// published no verdict at all.
+// gateOnOpenedWork resolves the message id a launching call detached work
+// under, and fatals with the contract reason when the daemon published no
+// verdict at all.
 //
 // It is the FIRST GATE of every downstream async assertion, so its failure text
 // has to distinguish "the daemon classified nothing" from "the daemon
 // classified it as detaching nothing" — those are different defects with
 // different fixes, and a single "not found" would conflate them.
-func gateOnAnchor(t *testing.T, seen asyncTraffic, toolUseID string) string {
+func gateOnOpenedWork(t *testing.T, seen asyncTraffic, toolUseID string) string {
 	t.Helper()
-	anchors := anchorsFor(seen.items, toolUseID)
-	if len(anchors) > 1 {
-		t.Fatalf("%d anchors name the launching call %q, want exactly 1: one launch detached one piece of work, and a second anchor means a frontend draws the same bubble twice",
-			len(anchors), toolUseID)
+	opened := openedFor(seen, toolUseID)
+	if len(opened) > 1 {
+		t.Fatalf("%d detached-work messages name the launching call %q, want exactly 1: one launch detached one piece of work, and a second delivery means a frontend draws the same work twice",
+			len(opened), toolUseID)
 	}
-	if len(anchors) == 1 {
-		bubbleID := anchors[0].GetId()
-		if bubbleID == "" {
-			t.Fatalf("the anchor for the launching call %q carries an EMPTY bubble id: async-bubble.proto states the id is never empty, and an update carrying no address can never be routed", toolUseID)
+	if len(opened) == 1 {
+		messageID := opened[0].GetUuid()
+		if messageID == "" {
+			t.Fatalf("the detached work opened for the launching call %q carries an EMPTY uuid: the message's uuid IS the work's id, and an update carrying no address can never be routed", toolUseID)
 		}
-		return bubbleID
-	}
-
-	// NO ANCHOR. This is a REPORTED FAILURE, not a skip — the anchor is what
-	// gives a bubble a place in the conversation that started it, and without
-	// one a frontend has a live agent it cannot draw anywhere.
-	//
-	// But it is deliberately NOT fatal when the daemon opened the bubble on the
-	// async push anyway. Fatalling there would park every downstream guarantee —
-	// routing, settlement, cursor continuity — behind this one gap and report
-	// nothing about whether they hold. Falling through to the pushed bubble's
-	// own id keeps the anchor gap on the record AND lets the rest of the
-	// specification run, so one wave's evidence covers all of it.
-	t.Errorf("no Message.async_bubble anchored the launching call %q in the feed (saw %d conversation items, %d anchors in total, %d async pushes which opened %s): the bubble has no place in the conversation that started it",
-		toolUseID, len(seen.items), len(asyncBubbleItems(seen.items)), len(seen.deltas), describeOpenedBubbles(seen))
-
-	for _, bubble := range seen.bubbles() {
-		if bubble.GetOriginToolUseId() == toolUseID && bubble.GetId() != "" {
-			t.Logf("continuing against the bubble id %q the async push opened, so the downstream assertions are exercised despite the missing anchor", bubble.GetId())
-			return bubble.GetId()
+		// THE WORK TRAVELS EXACTLY ONCE. The retired anchor was a second copy of
+		// this same message on the ConversationDelta; a frontend receiving both
+		// would draw the work twice.
+		if dup := detachedWorkItems(seen.items); len(dup) != 0 {
+			t.Errorf("%d detached-work messages also arrived on the conversation delta (%s): detached work travels exactly once, on DetachedWorkDelta.opened",
+				len(dup), describeDetachedWork(dup))
 		}
+		return messageID
 	}
-	t.Fatalf("the launching call %q produced neither a feed anchor nor an opened bubble naming it (%d async pushes opened %s): the daemon never published its classification verdict at all, so nothing downstream has a bubble to be routed to",
-		toolUseID, len(seen.deltas), describeOpenedBubbles(seen))
+	t.Fatalf("the launching call %q opened no detached work (saw %d conversation items, %d async pushes which opened %s): the daemon never published its classification verdict at all, so nothing downstream has a message to be routed to",
+		toolUseID, len(seen.items), len(seen.deltas), describeOpenedDetachedWork(seen))
 	return ""
 }
 
-// describeOpenedBubbles renders every bubble a drain's async pushes opened, as
+// describeOpenedDetachedWork renders every work a drain's async pushes opened, as
 // id/origin pairs, for a failure that needs to say what DID arrive rather than
 // only what did not.
-func describeOpenedBubbles(seen asyncTraffic) string {
-	opened := seen.bubbles()
-	if len(opened) == 0 {
-		return "no bubbles"
+func describeOpenedDetachedWork(seen asyncTraffic) string {
+	return describeDetachedWork(seen.work())
+}
+
+// describeDetachedWork renders detached-work messages as uuid/origin pairs.
+func describeDetachedWork(msgs []*frontendv1.Message) string {
+	if len(msgs) == 0 {
+		return "no work"
 	}
-	parts := make([]string, 0, len(opened))
-	for _, bubble := range opened {
-		parts = append(parts, fmt.Sprintf("{id=%q origin_tool_use_id=%q}", bubble.GetId(), bubble.GetOriginToolUseId()))
+	parts := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		parts = append(parts, fmt.Sprintf("{uuid=%q origin_tool_use_id=%q}", m.GetUuid(), m.GetDetachedWork().GetOriginToolUseId()))
 	}
 	return strings.Join(parts, " ")
 }
 
-// openedBubble finds the bubble with id among a drain's opened bubbles.
-func openedBubble(bubbles []*frontendv1.AsyncBubble, id string) *frontendv1.AsyncBubble {
-	for _, b := range bubbles {
-		if b.GetId() == id {
+// openedDetachedWork finds the detached-work message with uuid id.
+func openedDetachedWork(work []*frontendv1.Message, id string) *frontendv1.Message {
+	for _, b := range work {
+		if b.GetUuid() == id {
 			return b
 		}
 	}
 	return nil
 }
 
-// asyncBubbleItems returns the top-level ConversationItems carrying arm 38 —
-// the bubble's ANCHOR in the feed, distinct from the bubble's own updates.
-func asyncBubbleItems(items []*frontendv1.Message) []*frontendv1.AsyncBubble {
-	var out []*frontendv1.AsyncBubble
+// detachedWorkItems returns the top-level feed Messages whose payload arm is
+// detached work. With the anchor retired this must always be EMPTY: the work's
+// one delivery is on DetachedWorkDelta.opened.
+func detachedWorkItems(items []*frontendv1.Message) []*frontendv1.Message {
+	var out []*frontendv1.Message
 	for _, item := range items {
-		if b := item.GetAsyncBubble(); b != nil {
-			out = append(out, b)
+		if item.GetDetachedWork() != nil {
+			out = append(out, item)
 		}
 	}
 	return out

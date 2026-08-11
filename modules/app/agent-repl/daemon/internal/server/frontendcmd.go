@@ -47,7 +47,7 @@ type PromptRouter interface {
 	// SubmitPrompt carries the COMMAND'S OWN request id through to the session controller:
 	// it is what the daemon's immediate prompt receipt is keyed on, and what
 	// the durable transcript line is later stamped with, so a frontend
-	// reconciles the two onto one bubble.
+	// reconciles the two onto one work.
 	SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) error
 	// Interrupt carries the COMMAND'S OWN request id through to the session
 	// controller for the same reason SubmitPrompt does: it is the only id the
@@ -965,7 +965,7 @@ func (h *commandHandler) CancelDetachedAgents(ctx context.Context, workspace, re
 // surface.
 //
 // THE TASK IDS DO NOT CROSS. They are the daemon's own handle on the work —
-// what it settles bubbles by — and a frontend has no vocabulary for them; what
+// what it settles work by — and a frontend has no vocabulary for them; what
 // a frontend renders is "cancelled 3 agents". So the count crosses and the ids
 // stay, which is the same split every other resolved view on this boundary
 // makes.
@@ -2012,7 +2012,7 @@ type ssmSnapshotProvider struct {
 	// from the snapshot. Nil-safe: a nil source leaves snapshot.inits empty.
 	inits SessionInitSource
 	// catalogs supplies every live session's DETACHED WORK — the complete task
-	// roster and the open bubbles folded to date — so reconnect restores or
+	// roster and the open work folded to date — so reconnect restores or
 	// clears both before later deltas.
 	catalogs TaskCatalogSource
 	// queues supplies each live session's held-prompt queue (E4). Nil-safe: a
@@ -2065,24 +2065,24 @@ type SessionInitSource interface {
 }
 
 // TaskCatalogSource supplies every live session's DETACHED WORK for the
-// connect/resync snapshot: the authoritative task roster, and the open bubbles
+// connect/resync snapshot: the authoritative task roster, and the open work
 // folded to date. Satisfied by *sessioncontroller.Manager.
 //
 // BOTH HALVES ON ONE INTERFACE because they are two views of one thing — the
-// roster names the detached work, the bubbles are what that work produced —
+// roster names the detached work, the work are what that work produced —
 // and the same object has always answered for both. They were two interfaces
 // and two config fields, and the daemon's own e2e harness supplied the roster
-// and forgot the bubbles for the whole life of the feature: the snapshot side
-// is nil-safe by design, so every reconnect served zero bubbles with a live
-// bubble outstanding and nothing said so. One source makes supplying half of it
+// and forgot the work for the whole life of the feature: the snapshot side
+// is nil-safe by design, so every reconnect served zero work with a live
+// work outstanding and nothing said so. One source makes supplying half of it
 // unrepresentable.
 //
 // Empty results are significant on both halves: an empty catalog clears stale
-// frontend roster state, and contributing no bubbles is how a frontend learns
+// frontend roster state, and contributing no work is how a frontend learns
 // its previous ones are gone.
 type TaskCatalogSource interface {
 	TaskCatalogs() []*frontendv1.TaskCatalog
-	AsyncBubbles() []*frontendv1.AsyncBubble
+	DetachedWork() []*frontendv1.Message
 }
 
 // QueueSource supplies every live session's held-prompt queue (E4) for the
@@ -2140,7 +2140,7 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	}
 	if p.catalogs != nil {
 		snap.Catalogs = p.catalogs.TaskCatalogs()
-		snap.AsyncBubbles = refuseWorkspacelessBubbles(p.catalogs.AsyncBubbles(), p.logf)
+		snap.DetachedWork = refuseWorkspacelessDetachedWork(p.catalogs.DetachedWork(), p.logf)
 	}
 	if p.queues != nil {
 		snap.Queues = p.queues.QueueViews()
@@ -2176,12 +2176,13 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	snap.Topbars = filterPublishedWorkspaceViews(snap.Topbars, publicationAllowed, p.logf)
 	snap.TokenBreakdowns = filterPublishedWorkspaceViews(snap.TokenBreakdowns, publicationAllowed, p.logf)
 	snap.WorkspaceGates = filterPublishedWorkspaceViews(snap.WorkspaceGates, publicationAllowed, p.logf)
-	// A bubble is a per-workspace family like any other, and the latch holds it
-	// back for the same reason: its label, its command line and its spooled
+	// Detached work is a per-workspace family like any other, and the latch holds
+	// it back for the same reason: its label, its command line and its spooled
 	// output are the contents of work running in a workspace the client has not
 	// been told exists yet. It carries no session id of its own — the workspace
-	// IS its routing key — so it asks the gate the fenced question.
-	snap.AsyncBubbles = filterPublishedWorkspaceViews(snap.AsyncBubbles, publicationAllowed, p.logf)
+	// IS its routing key — so it asks the gate the fenced question, reading that
+	// key off the detached-work PAYLOAD because a Message has none of its own.
+	snap.DetachedWork = filterPublishedDetachedWork(snap.DetachedWork, publicationAllowed, p.logf)
 	hostWork := p.workspaceCreation.SnapshotHostWork()
 	snap.WorkspaceAvailable = hostWork.WorkspaceAvailable
 	snap.HostActions = hostWork.HostActions
@@ -2206,33 +2207,75 @@ type workspacePublicationView interface {
 	GetWorkspace() string
 }
 
-// refuseWorkspacelessBubbles drops any async bubble that names no workspace,
-// loudly.
+// refuseWorkspacelessDetachedWork drops any detached-work message that names no
+// workspace, loudly. It also refuses a message on this field whose payload is
+// not detached work at all, which is the same class of defect: neither carries a
+// routing key.
 //
-// It is DEFENCE IN DEPTH, not the primary guard: frontend.OpenAsyncBubble
-// refuses to mint a workspace-less bubble at all, so reaching this is a daemon
+// It is DEFENCE IN DEPTH, not the primary guard: frontend.OpenDetachedWork
+// refuses to mint workspace-less work at all, so reaching this is a daemon
 // defect. It is still checked here because the workspace is the ONLY routing
-// key a snapshot has for a bubble, and one that slipped through would be
-// delivered to every scoped client — a cross-workspace leak that the scope pass
-// downstream cannot detect, since an unroutable bubble and a correctly-routed
-// one are indistinguishable to it.
+// key a snapshot has, and one that slipped through would be delivered to every
+// scoped client — a cross-workspace leak that the scope pass downstream cannot
+// detect, since unroutable work and correctly-routed work are indistinguishable
+// to it.
 //
-// It refuses rather than panics: the bubble is one piece of detached work, and
+// It refuses rather than panics: the message is one piece of detached work, and
 // a connect snapshot that aborts costs the client its whole session view.
-func refuseWorkspacelessBubbles(bubbles []*frontendv1.AsyncBubble, logf func(string, ...any)) []*frontendv1.AsyncBubble {
-	filtered := make([]*frontendv1.AsyncBubble, 0, len(bubbles))
-	for _, bubble := range bubbles {
-		if bubble.GetWorkspace() == "" {
+func refuseWorkspacelessDetachedWork(msgs []*frontendv1.Message, logf func(string, ...any)) []*frontendv1.Message {
+	filtered := make([]*frontendv1.Message, 0, len(msgs))
+	for _, m := range msgs {
+		w := m.GetDetachedWork()
+		if w == nil {
 			if logf != nil {
-				logf("server: REFUSING async bubble %q from the connect snapshot — it names no workspace, which is the only routing key a snapshot has for a bubble, so it would reach every scoped client; the bubble is omitted rather than leaked",
-					bubble.GetId())
+				logf("server: REFUSING message %q from the connect snapshot's detached_work — its payload arm is not detached work, so it carries no workspace to route by and would reach every scoped client",
+					m.GetUuid())
 			}
 			continue
 		}
-		filtered = append(filtered, bubble)
+		if w.GetWorkspace() == "" {
+			if logf != nil {
+				logf("server: REFUSING detached work %q from the connect snapshot — it names no workspace, which is the only routing key a snapshot has, so it would reach every scoped client; the work is omitted rather than leaked",
+					m.GetUuid())
+			}
+			continue
+		}
+		filtered = append(filtered, m)
 	}
 	return filtered
 }
+
+// filterPublishedDetachedWork is filterPublishedWorkspaceViews for detached-work
+// MESSAGES, which cannot satisfy that constraint because a Message carries no
+// workspace of its own: the key rides its detached-work payload. Work whose
+// payload arm is not detached work is DROPPED here as it is above — it has no
+// workspace to ask the gate about, and admitting it would publish it to every
+// client unasked.
+func filterPublishedDetachedWork(msgs []*frontendv1.Message, allow func(workspace, sessionID string) (bool, error), logf func(string, ...any)) []*frontendv1.Message {
+	views := make([]workspaceKeyedMessage, 0, len(msgs))
+	for _, m := range msgs {
+		if m.GetDetachedWork() == nil {
+			if logf != nil {
+				logf("server: REFUSING message %q from the connect snapshot's detached_work publication gate — its payload arm is not detached work and it names no workspace to gate on", m.GetUuid())
+			}
+			continue
+		}
+		views = append(views, workspaceKeyedMessage{msg: m})
+	}
+	kept := filterPublishedWorkspaceViews(views, allow, logf)
+	out := make([]*frontendv1.Message, 0, len(kept))
+	for _, v := range kept {
+		out = append(out, v.msg)
+	}
+	return out
+}
+
+// workspaceKeyedMessage lends a detached-work Message the workspace accessor the
+// publication gate is written against, reading it off the payload rather than
+// lifting a workspace field onto every Message.
+type workspaceKeyedMessage struct{ msg *frontendv1.Message }
+
+func (v workspaceKeyedMessage) GetWorkspace() string { return v.msg.GetDetachedWork().GetWorkspace() }
 
 // filterPublishedWorkspaceViews is filterPublishedSessionViews for the fenced
 // views, asking the same gate the same per-workspace question with no session
