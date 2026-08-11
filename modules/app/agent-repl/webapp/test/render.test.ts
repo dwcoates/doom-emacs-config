@@ -68,6 +68,7 @@ import {
   ThinkingItem,
   ToolItem,
 } from "../src/store.js";
+import { ReanchorBox, TailFollow } from "../src/scroll.js";
 
 /** When the agent opened a text block, for the items that do not assert on it. */
 const TEXT_TS = new Date(2026, 4, 24, 9, 5).toISOString();
@@ -3256,37 +3257,27 @@ describe("lastUserTurnId", () => {
 describe("repinsToTail", () => {
   it("jumps a scrolled-up feed to the tail when a prompt was just sent", () => {
     // Arrange + Act + Assert
-    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r2", pinned: false, frozen: false })).toBe(true);
+    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r2", following: false })).toBe(true);
   });
 
   it("jumps to the tail on the feed's very first prompt", () => {
     // Arrange + Act + Assert
-    expect(repinsToTail({ prevTurnId: null, nextTurnId: "r1", pinned: false, frozen: false })).toBe(true);
+    expect(repinsToTail({ prevTurnId: null, nextTurnId: "r1", following: false })).toBe(true);
   });
 
   it("leaves a scrolled-up feed alone while the same turn streams its answer", () => {
     // Arrange + Act + Assert
-    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r1", pinned: false, frozen: false })).toBe(false);
+    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r1", following: false })).toBe(false);
   });
 
   it("leaves a scrolled-up feed alone when no prompt was ever sent", () => {
     // Arrange + Act + Assert
-    expect(repinsToTail({ prevTurnId: null, nextTurnId: null, pinned: false, frozen: false })).toBe(false);
+    expect(repinsToTail({ prevTurnId: null, nextTurnId: null, following: false })).toBe(false);
   });
 
-  it("keeps a pinned feed following its tail", () => {
+  it("keeps a following feed on its tail", () => {
     // Arrange + Act + Assert
-    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r1", pinned: true, frozen: false })).toBe(true);
-  });
-
-  it("holds a frozen feed off its tail even when it is pinned to the bottom", () => {
-    // Arrange + Act + Assert
-    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r1", pinned: true, frozen: true })).toBe(false);
-  });
-
-  it("lets a fresh prompt override the freeze and jump to the tail", () => {
-    // Arrange + Act + Assert
-    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r2", pinned: false, frozen: true })).toBe(true);
+    expect(repinsToTail({ prevTurnId: "r1", nextTurnId: "r1", following: true })).toBe(true);
   });
 });
 
@@ -6592,5 +6583,83 @@ describe("a tool card's detached work", () => {
     // Assert — the click target is still there, and the fold still closed.
     expect(html).toContain('data-panel-toggle="bubble:b1"');
     expect(html).not.toContain(FIXED_FOLD_CLASS);
+  });
+});
+
+/**
+ * THE RENDERER OBEYS THE OWNER, RENDER AFTER RENDER.
+ *
+ * The user's report was of the feed "yanking itself down erratically" while
+ * they read — and a busy workspace re-renders every few seconds, so a renderer
+ * that re-decides the tail question per render decides it wrong eventually. It
+ * no longer decides it at all: it asks `TailFollow`. These cases drive the
+ * renderer against a box with the geometry jsdom's own elements cannot supply,
+ * so what they pin is exactly that obedience.
+ */
+describe("the feed renderer's tail obedience", () => {
+  const ACTIONS: Actions = {
+    decidePermission() {},
+    answerQuestions() {},
+    cancelQueued() {},
+    runQueuedNow() {},
+    acceptQueued() {},
+  };
+
+  /** A feed box with real geometry, which a jsdom element has none of. */
+  const boxAt = (scrollTop: number): ReanchorBox => ({
+    scrollTop,
+    scrollHeight: 4000,
+    clientHeight: 600,
+  });
+
+  /** A renderer whose tail owner watches BOX rather than the jsdom container. */
+  const rendererOn = (box: ReanchorBox): { feed: FeedRenderer; tail: TailFollow } => {
+    const tail = new TailFollow(box);
+    return { feed: new FeedRenderer(document.createElement("div"), ACTIONS, tail), tail };
+  };
+
+  /** A conversation state holding ITEMS, as the store would hand it over. */
+  const stateOf = (items: ConversationItem[]): StoreState => {
+    const state = new ConversationStore().state;
+    state.items = items;
+    return state;
+  };
+
+  it("keeps following the tail for a reader who never left it", () => {
+    // Arrange — a reader parked at the bottom still wants the newest content.
+    const box = boxAt(3400);
+    const { feed } = rendererOn(box);
+    // The turn is already on screen, so the follow is the only thing deciding.
+    feed.render(stateOf([userTurnAt(9, 0, "watch me", "r1")]));
+    // Act
+    box.scrollHeight = 5000;
+    feed.render(stateOf([userTurnAt(9, 0, "watch me", "r1")]));
+    // Assert
+    expect(box.scrollTop).toBe(5000);
+  });
+
+  it("re-follows for a freshly sent prompt even from a scrolled-away place", () => {
+    // Arrange — a reader who scrolled up, then sent a prompt: sending is an
+    // explicit ask to watch the answer, and it outranks the owner's latch.
+    const box = boxAt(1000);
+    const { feed, tail } = rendererOn(box);
+    tail.release();
+    feed.render(stateOf([userTurnAt(9, 0, "first", "r1")]));
+    box.scrollTop = 1000;
+    // Act — a user turn the previous render had not seen.
+    feed.render(stateOf([userTurnAt(9, 0, "first", "r1"), userTurnAt(9, 1, "second", "r2")]));
+    // Assert
+    expect(box.scrollTop).toBe(4000);
+  });
+
+  it("resumes following after the prompt jump, so the answer keeps streaming in", () => {
+    // Arrange — the prompt's jump is a park, and a park latches the follow.
+    const box = boxAt(1000);
+    const { feed, tail } = rendererOn(box);
+    tail.release();
+    // Act
+    feed.render(stateOf([userTurnAt(9, 0, "go", "r1")]));
+    // Assert
+    expect(tail.isFollowing()).toBe(true);
   });
 });

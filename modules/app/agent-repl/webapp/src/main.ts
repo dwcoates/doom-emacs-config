@@ -136,12 +136,7 @@ import { SessionRebase, claudeSessionIdOf } from "./session-rebase.js";
 import { requestSupportWorkspace } from "./unsupported.js";
 import { statusSnapshotFromInit } from "./status.js";
 import { compactionBannerHtml, FeedRenderer, lastUserTurnId, modelOptionsHtml } from "./render.js";
-import {
-  installEdgeScroll,
-  installTailReanchor,
-  isPinnedToBottom,
-  parkAtTail,
-} from "./scroll.js";
+import { installEdgeScroll, TailFollow } from "./scroll.js";
 import { FeedSearch, type SearchHost, installSearchHook } from "./search.js";
 import {
   WorkspaceSidebar,
@@ -644,11 +639,22 @@ async function boot(): Promise<void> {
   // Chess-game bubbles fetch their payload through the daemon and mount
   // the in-place-served widget; the session getter observes startup creation, and
   // the pinning pair lets an async board mount restore the feed's tail.
+  //
+  // THE PAGE'S ONE OWNER of whether the feed follows its tail. Every mechanism
+  // that moves the feed toward the newest message — the host's workspace-switch
+  // snap, the renderer, an async board mount, the sidebar's first reveal, the
+  // relayout re-park — asks this and writes through this. Built before all of
+  // them so there is never a second answer to hand out.
+  const tailFollow = new TailFollow(feedEl);
+  tailFollow.observe(
+    (onScroll) => feedEl.addEventListener("scroll", onScroll),
+    (onResize) => new ResizeObserver(onResize).observe(feedEl),
+  );
   configureChessGames({
     base: httpBase,
     session: () => activeSessionId,
-    isPinned: () => isPinnedToBottom(feedEl),
-    parkFeed: () => parkAtTail(feedEl),
+    isPinned: () => tailFollow.isFollowing(),
+    parkFeed: () => tailFollow.park(),
   });
   // The Emacs host's webview-buffer keys step the active board through
   // this hook (out-of-band: the xwidget cannot deliver keys into the page).
@@ -663,16 +669,11 @@ async function boot(): Promise<void> {
   installCopyKeys(document);
   // The Emacs host snaps the feed to its newest message through this hook
   // whenever the user switches to the workspace holding this webview.
-  installHostTailHook(window as unknown as HostGlobal, feedEl);
   // ...and the switch relayouts the webview around that snap, in an order
-  // neither side controls. A feed that was at its tail is put back there on
-  // the resize itself, so the switched-to workspace shows its newest output
-  // whether the resize landed before or after the host's snap.
-  installTailReanchor(
-    feedEl,
-    (onScroll) => feedEl.addEventListener("scroll", onScroll),
-    (onResize) => new ResizeObserver(onResize).observe(feedEl),
-  );
+  // neither side controls. The owner observed above re-parks on the resize
+  // itself, so the switched-to workspace shows its newest output whether the
+  // resize landed before or after the host's snap.
+  installHostTailHook(window as unknown as HostGlobal, tailFollow);
   // The Emacs host dials the feed's text size up or down through this hook,
   // sizing the document root's font so every rem-based run of text scales
   // together (the interactive text-size commands in frontend.el fire it).
@@ -688,8 +689,8 @@ async function boot(): Promise<void> {
   // together (same pattern as the async chess mount above).
   const sidebar = new WorkspaceSidebar(must("ws-sidebar"), {
     httpBase,
-    isPinned: () => isPinnedToBottom(feedEl),
-    parkFeed: () => parkAtTail(feedEl),
+    isPinned: () => tailFollow.isFollowing(),
+    parkFeed: () => tailFollow.park(),
   });
   // No roster hook is planted: the rail's only ingress is the roster FRAME off
   // the websocket (WorkspaceSidebar.adoptRosterFrame), which is the sole path
@@ -777,7 +778,11 @@ async function boot(): Promise<void> {
         snapshot: statusSnapshotFromInit(store.state.systemInit),
         account,
       })),
-  });
+    },
+    // The renderer takes the page's owner rather than minting one, so its
+    // parks and the host's snap are the same decision (see TailFollow).
+    tailFollow,
+  );
   // The feed defers the heavy render of replayed history it has not scrolled
   // to (lazy-item.ts), and a placeholder carries less than the item it stands
   // for. A starting search therefore drains that first, so its walk covers the
