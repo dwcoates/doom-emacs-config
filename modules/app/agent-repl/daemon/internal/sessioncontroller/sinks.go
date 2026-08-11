@@ -709,6 +709,14 @@ type consumer struct {
 	// asks the shim about and the gate that makes a close idempotent
 	// (phantomtask.go). Guarded by c.mu, beside the ring it mirrors.
 	openTasks map[string]int64
+	// liveSetFailures counts the CONSECUTIVE phantom sweeps whose
+	// QueryLiveTasks probe this session's shim did not answer, and
+	// liveSetDegraded is the latched verdict those probes reached
+	// (phantomtask.go). Counted in probes and never in elapsed time: a count
+	// cannot be satisfied by wall time in which nothing was ever asked.
+	// Guarded by c.mu.
+	liveSetFailures int
+	liveSetDegraded bool
 	// systemInit is the last SDK system:init snapshot seen on this session's
 	// stream (a data.v1 SystemInit inside a vendor event). It backs the daemon's
 	// HTTP /status and /commands routes now that the L2 translator that used to
