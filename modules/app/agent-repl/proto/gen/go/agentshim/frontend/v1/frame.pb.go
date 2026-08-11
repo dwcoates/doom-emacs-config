@@ -550,8 +550,41 @@ type StateSnapshot struct {
 	// The merge queue as of this connect, so a client joining mid-drain renders
 	// the queue without waiting for the next mutation.
 	MergeQueueRoster *MergeQueueRoster `protobuf:"bytes,15,opt,name=merge_queue_roster,json=mergeQueueRoster,proto3" json:"merge_queue_roster,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// THE BATCHING OF `workspaces` (1) ACROSS ONE CONNECT DELIVERY.
+	//
+	// A connect snapshot at fleet scale carries every workspace, and the host
+	// applies a workspace's state — perspective, bookkeeping, readiness latches —
+	// one workspace at a time. Applying 178 of them costs seconds, and the
+	// recovery clock for the workspace the user is sitting in does not stop until
+	// ITS state has been applied, so a workspace's recovery used to be a function
+	// of how many OTHER workspaces preceded it in this list. Decoding is not the
+	// cost (a 299KB protojson frame decodes in ~3ms in Emacs); the serial
+	// per-workspace apply is.
+	//
+	// So the connect delivery may split `workspaces` across SEVERAL StateSnapshot
+	// frames, delivered back-to-back in one delivery-lock operation, and the host
+	// applies each as it arrives. Every other field on this message belongs to the
+	// LEAD batch (index 0) only — the wholesale rebuilds (sessions, inits) and the
+	// daemon-global views are stated exactly once per connect, as before.
+	//
+	// ORDERING: the lead batch carries every workspace with a live session, most
+	// recently active first, so the workspaces a host cares about most are applied
+	// before any dormant one.
+	//
+	// COMPLETENESS: `workspace_total` is the number of workspaces the WHOLE
+	// delivery will carry, stated identically on every batch. A consumer's view of
+	// the fleet is COMPLETE only once it has applied that many distinct
+	// workspaces; until then it holds a partial view and must say so. A snapshot
+	// that was not batched carries batch_index 0 and workspace_total equal to
+	// len(workspaces), which is the same rule with one batch.
+	//
+	// Additive and zero-safe: a daemon that never batches emits index 0 with
+	// total 0, and a consumer reads an unset total as "this frame is the whole
+	// delivery".
+	WorkspaceTotal      int32 `protobuf:"varint,16,opt,name=workspace_total,json=workspaceTotal,proto3" json:"workspace_total,omitempty"`
+	WorkspaceBatchIndex int32 `protobuf:"varint,17,opt,name=workspace_batch_index,json=workspaceBatchIndex,proto3" json:"workspace_batch_index,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *StateSnapshot) Reset() {
@@ -687,6 +720,20 @@ func (x *StateSnapshot) GetMergeQueueRoster() *MergeQueueRoster {
 		return x.MergeQueueRoster
 	}
 	return nil
+}
+
+func (x *StateSnapshot) GetWorkspaceTotal() int32 {
+	if x != nil {
+		return x.WorkspaceTotal
+	}
+	return 0
+}
+
+func (x *StateSnapshot) GetWorkspaceBatchIndex() int32 {
+	if x != nil {
+		return x.WorkspaceBatchIndex
+	}
+	return 0
 }
 
 // Frontend→daemon commands (the ONLY inbound frame).
@@ -1561,7 +1608,7 @@ const file_agentshim_frontend_v1_frame_proto_rawDesc = "" +
 	"\x12merge_queue_roster\x18\x18 \x01(\v2'.agentshim.frontend.v1.MergeQueueRosterH\x00R\x10mergeQueueRoster\x12T\n" +
 	"\x0frestart_pending\x18\x19 \x01(\v2).agentshim.frontend.v1.RestartPendingViewH\x00R\x0erestartPending\x12V\n" +
 	"\x11conversation_page\x18\x1a \x01(\v2'.agentshim.frontend.v1.ConversationPageH\x00R\x10conversationPageB\a\n" +
-	"\x05frameJ\x04\b\b\x10\tR\x0fdegraded_notice\"\xcc\b\n" +
+	"\x05frameJ\x04\b\b\x10\tR\x0fdegraded_notice\"\xa9\t\n" +
 	"\rStateSnapshot\x12E\n" +
 	"\n" +
 	"workspaces\x18\x01 \x03(\v2%.agentshim.frontend.v1.WorkspaceStateR\n" +
@@ -1580,7 +1627,9 @@ const file_agentshim_frontend_v1_frame_proto_rawDesc = "" +
 	"\atopbars\x18\f \x03(\v2!.agentshim.frontend.v1.TopbarViewR\atopbars\x12T\n" +
 	"\x10token_breakdowns\x18\r \x03(\v2).agentshim.frontend.v1.TokenBreakdownViewR\x0ftokenBreakdowns\x12Q\n" +
 	"\x0fworkspace_gates\x18\x0e \x03(\v2(.agentshim.frontend.v1.WorkspaceGateViewR\x0eworkspaceGates\x12U\n" +
-	"\x12merge_queue_roster\x18\x0f \x01(\v2'.agentshim.frontend.v1.MergeQueueRosterR\x10mergeQueueRoster\"\xfd\x15\n" +
+	"\x12merge_queue_roster\x18\x0f \x01(\v2'.agentshim.frontend.v1.MergeQueueRosterR\x10mergeQueueRoster\x12'\n" +
+	"\x0fworkspace_total\x18\x10 \x01(\x05R\x0eworkspaceTotal\x122\n" +
+	"\x15workspace_batch_index\x18\x11 \x01(\x05R\x13workspaceBatchIndex\"\xfd\x15\n" +
 	"\x0fFrontendCommand\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
