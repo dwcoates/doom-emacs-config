@@ -174,6 +174,8 @@ message FailureKind {
     FailureQueueEntryUninterruptibleTurn queue_entry_uninterruptible_turn = 61;
     // A turn stood bound with nothing driving it, so the daemon closed it rather than leaving the workspace thinking forever.
     FailureTurnUndriven turn_undriven = 62;
+    // The replay mark the client asked from counts in a store seq space the vendor session retired, so no delta above it exists and the client must re-anchor from the conversation's tail.
+    FailureReplayMarkRetired replay_mark_retired = 63;
 
     // ---- CLIENT-LOCAL failures: the one part of this vocabulary a frontend
     // mints itself. See the note on FailureKind. All resolve BLUE, because a
@@ -388,6 +390,33 @@ message FailureHistoryReplayTruncated {
   int64 delivered = 3;
   // Why it stopped short, verbatim.
   string reason = 4;
+}
+
+// The client's replay mark belongs to a RETIRED store seq space, so the delta it
+// asked for cannot exist and the daemon refused the read instead of replaying.
+//
+// WHY THIS IS A REFUSAL AND NOT A REPLAY. When the vendor rotates its session
+// uuid the conversation restarts its store seq space at 1, and every mark the
+// client counted in the old space becomes a number with no meaning here. The
+// daemon used to floor such a mark and serve everything above the floor, which
+// for a rotated conversation is the WHOLE conversation — the full replay paging
+// exists to end, re-inflicted on every reconnect. The mark is unanswerable, so
+// it is refused, and the client re-anchors from a tail page instead.
+//
+// THE CLIENT'S OBLIGATION on receiving this is to REPLACE its conversation from
+// a fresh tail page, never to append to it: the history it holds is ranked in
+// the retired space and the new space's items would sort above it.
+//
+// Resolves the workspace BLUE: nothing was lost and nothing failed — the client
+// asked a question that no longer has an answer, and is told which one to ask.
+message FailureReplayMarkRetired {
+  // The mark the client asked from, in the retired space.
+  uint64 from_seq = 1;
+  // The highest seq the LIVE space has produced, which is the ceiling any
+  // honest mark sits at or below. It is the evidence, not a mark to adopt: a
+  // client re-anchors from a tail page, whose live_join_seq is the only mark
+  // the daemon offers it.
+  uint64 live_last_seq = 2;
 }
 
 // The stop could not be delivered, so the turn is still running.

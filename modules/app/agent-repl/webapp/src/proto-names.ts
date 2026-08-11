@@ -384,6 +384,7 @@ export const FAILURE_KIND_SIDE = {
   sessionEndedUnclassified: "machinery",
   historyRepullInFlight: "machinery",
   historyReplayTruncated: "machinery",
+  replayMarkRetired: "machinery",
   interruptUndelivered: "machinery",
   queueEntryUnwired: "machinery",
   queueEntryKeepAliveHeld: "machinery",
