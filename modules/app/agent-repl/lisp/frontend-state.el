@@ -1043,7 +1043,18 @@ receives every catalog but has no per-task roster."
          (declared-total (or (plist-get snapshot :workspaceTotal) 0))
          (total (if (> declared-total 0)
                     declared-total
-                  (length (plist-get snapshot :workspaces)))))
+                  (length (plist-get snapshot :workspaces))))
+         ;; ONE truename per distinct path for the length of this batch.
+         ;; Resolving a daemon path to a workspace name scans every live
+         ;; workspace and canonicalizes each one's `:project-dir'
+         ;; (`agent-repl--ws-dir-owner'), so a batch that resolves R records
+         ;; against W workspaces costs R*W `file-truename' syscalls — 3.75s to
+         ;; the first workspace's emacs stamp on a 178-workspace /
+         ;; 289-session fleet even with the applies ordered correctly, which
+         ;; is the remaining half of the recovery SLO's `emacs_ms'.  Emacs
+         ;; does not yield inside this apply, so no worktree can move while
+         ;; the table is bound; it is dropped on exit.
+         (agent-repl--path-canonical-cache (make-hash-table :test 'equal)))
     (if (> batch-index 0)
         (agent-repl--frontend-apply-snapshot-continuation snapshot total)
       (agent-repl--frontend-snapshot-reset-delivery total)
