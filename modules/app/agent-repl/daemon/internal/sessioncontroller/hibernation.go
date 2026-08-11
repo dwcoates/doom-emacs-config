@@ -14,12 +14,9 @@ import (
 
 // hibernation.go — THE ONE TRANSITION, and the gate it makes unavoidable.
 //
-// Three causes put a session to sleep: the idle cutoff, a cache that went cold
-// before a ping could fire, and the user's own HibernateWorkspaceCmd. The
-// cache-expired cause has two routes into it — the sweeper's time-since
-// prediction and a keep-alive ping that came back cold, which measured the same
-// thing instead of predicting it (keepalivecold.go) — and every route calls
-// hibernateWithCause and nothing else. That is not tidiness — it is what
+// TWO CAUSES PUT A SESSION TO SLEEP: the idle cutoff, and the user's own
+// HibernateWorkspaceCmd. Nothing else may, and nothing else does. Every route
+// calls hibernateWithCause and nothing else — that is not tidiness, it is what
 // makes "hibernated but still being pinged" unrepresentable rather than merely
 // unlikely:
 //
@@ -33,6 +30,19 @@ import (
 //
 // Any one of those would end keep-alive eligibility. Having the same function
 // do all three is what stops a future caller from arranging half of it.
+//
+// A THIRD CAUSE, cache_expired, IS STILL SPELLED HERE BUT NO LONGER TAKEN. It
+// had two routes — the sweeper's time-since prediction and a keep-alive ping
+// that came back cold and measured the same thing — and both slept a session at
+// roughly the cache TTL, an HOUR, under a configured six-hour idle cutoff. Both
+// were arguments about COST, and a cold cache is a reason to stop spending on it
+// rather than a reason to tear the session down; the prediction now answers
+// keepalive.ActionLetCacheCool and the measurement now latches a verdict that
+// declines further pings (keepalivecold.go). The cause survives because DURABLE
+// RECORDS WRITTEN BY EARLIER DAEMONS still carry it: a workspace asleep for
+// cache_expired right now must still render its revival gate and still be
+// revivable, so every path that READS the token stays exactly as it was. Only
+// the paths that WRITE it are gone.
 //
 // ORDERING: the record is written AFTER a successful stop, never before. A
 // daemon that dies in the window leaves a stopped shim and a record that does
@@ -312,6 +322,12 @@ func (m *Manager) refuseAutomaticHibernationWhileQueued(workspace string, accoun
 // refuseAutomaticHibernationAfterCut refuses the CACHE-EXPIRED cause for a
 // workspace whose conversation was COMPACTED OR CLEARED with nothing said to it
 // since (ssm/compactiongate.go).
+//
+// IT GUARDS A CAUSE NOTHING WRITES ANY MORE, and it is kept for exactly that
+// reason: it is the last refusal standing between a future caller who
+// reintroduces the cause and a sleep taken on a conversation the daemon itself
+// just cut. Its argument became redundant rather than wrong — the cause it
+// refuses now refuses itself — and a redundant refusal is cheap insurance.
 //
 // ONLY cache_expired IS GATED, and the asymmetry is the whole point. That cause
 // is a CACHE JUDGEMENT: it sleeps a session because the prompt cache behind it
