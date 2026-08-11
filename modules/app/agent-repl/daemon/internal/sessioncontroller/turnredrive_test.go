@@ -439,22 +439,65 @@ func TestAnInterruptCancelsAnOwedResumption(t *testing.T) {
 	}
 }
 
+// THE DAEMON'S OWN PING IS NOT SOMEBODY MOVING ON. Only the USER preempts, so
+// the keep-alive must leave the owed turn's record standing.
+//
+// THE RECORD, NOT THE PENDING SET, IS WHAT THIS PINS, and the distinction is
+// the whole of the assertion. Every submit resolves its session through
+// ensure(), ensure() wires it, and wiring is the level-trigger for the
+// resumption driver — so the keep-alive's own ensure legitimately CLAIMS the
+// owed row and re-drives it. A claim moves the row pending → delivering; a
+// PREEMPTION deletes it. Asserting on the pending set cannot tell those apart,
+// and reading an empty pending set as preemption is how this test used to fail
+// on the driver doing exactly its job. The undischarged set holds the claimed
+// row and drops the cancelled one, so it is the record that answers the
+// question actually being asked.
 func TestTheDaemonsOwnKeepAliveDoesNotPreempt(t *testing.T) {
-	// Arrange — only the USER moving on preempts. The daemon's own producers
-	// are not somebody abandoning the work.
+	// Arrange — the session is wired BEFORE the row is seeded, so the only
+	// drive that can touch it is the one the act below launches, and that one
+	// is joined. There is no interleaving in which some other goroutine is
+	// mid-claim while the assertion reads.
 	h := newSubmitHarness(t)
+	h.wireSession(t)
 	seedOwed(t, h, reDriveRequest)
 
 	// Act.
 	_, err := h.m.submitPromptAs(context.Background(), "ws", "ka-1", "respond with only '.'", "",
 		"keep-alive", testPromptOrigin, submitterKeepAlive, leavesParkedPermissions)
+	h.m.resumptionDrives.Wait()
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("keep-alive submit: %v", err)
 	}
-	if owed := h.receipts.owedResumptions("ws"); len(owed) != 1 {
-		t.Fatalf("owed = %+v, want the daemon's own ping to leave the resumption alone", owed)
+	owed, err := h.receipts.UndischargedResumptions("ws")
+	if err != nil {
+		t.Fatalf("UndischargedResumptions: %v", err)
+	}
+	if len(owed) != 1 {
+		t.Fatalf("undischarged = %+v, want the daemon's own ping to leave the resumption's record standing", owed)
+	}
+}
+
+// AND IT IS NOT RECORDED AS A PREEMPTION EITHER. The row surviving is the
+// effect; this is the decision. A keep-alive that cancelled and then re-recorded
+// would satisfy the row assertion above and still be the bug.
+func TestTheDaemonsOwnKeepAliveRecordsNoCancellation(t *testing.T) {
+	// Arrange.
+	h := newSubmitHarness(t)
+	h.wireSession(t)
+	seedOwed(t, h, reDriveRequest)
+
+	// Act.
+	if _, err := h.m.submitPromptAs(context.Background(), "ws", "ka-1", "respond with only '.'", "",
+		"keep-alive", testPromptOrigin, submitterKeepAlive, leavesParkedPermissions); err != nil {
+		t.Fatalf("keep-alive submit: %v", err)
+	}
+	h.m.resumptionDrives.Wait()
+
+	// Assert.
+	if h.log.contains("turn resumption CANCELLED") {
+		t.Fatalf("the daemon's own ping recorded a cancellation; want only the USER to preempt")
 	}
 }
 
