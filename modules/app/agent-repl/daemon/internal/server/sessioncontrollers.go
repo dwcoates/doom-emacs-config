@@ -1540,6 +1540,14 @@ func (f *PushForwarder) PushTypingDelta(t *frontendv1.TypingDelta) {
 	f.logMiss("typing-delta")
 }
 
+func (f *PushForwarder) PushTypingCut(c *frontendv1.TypingCut) {
+	if s := f.target.Load(); s != nil {
+		s.PushTypingCut(c)
+		return
+	}
+	f.logMiss("typing-cut")
+}
+
 func (f *PushForwarder) PushTaskCatalog(c *frontendv1.TaskCatalog) {
 	if s := f.target.Load(); s != nil {
 		s.PushTaskCatalog(c)

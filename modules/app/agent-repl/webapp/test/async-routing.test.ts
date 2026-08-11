@@ -632,6 +632,43 @@ describe("AsyncBubbleRegistry — bubble-scoped live typing", () => {
     expect(registry.typingFor("b1")).toEqual({ messageId: "msg-1", blockIndex: 1, text: "second" });
   });
 
+  it("cuts the preview the daemon says nothing will complete", () => {
+    // Arrange — a preview standing inside a bubble whose authoritative update
+    // can never arrive.
+    const registry = seeded(agentBubble("b1"));
+    registry.applyTyping("b1", "msg-1", 0, "look");
+
+    // Act
+    const changed = registry.cutTyping("b1");
+
+    // Assert — the bubble stops spinning "streaming input…" with no body.
+    expect(changed).toBe(true);
+    expect(registry.typingFor("b1")).toBeNull();
+  });
+
+  it("reports no change when cutting a bubble with no preview standing", () => {
+    // Arrange
+    const registry = seeded(agentBubble("b1"));
+
+    // Act / Assert — a late or duplicated cut is harmless.
+    expect(registry.cutTyping("b1")).toBe(false);
+  });
+
+  it("cuts only the addressed bubble's preview", () => {
+    // Arrange
+    const registry = seeded(agentBubble("b1"), agentBubble("b2"));
+    registry.applyTyping("b1", "msg-1", 0, "one");
+    registry.applyTyping("b2", "msg-2", 0, "two");
+
+    // Act
+    registry.cutTyping("b1");
+
+    // Assert — a cut is addressed exactly as the delta that opened it, so it
+    // can never retire a preview on another surface.
+    expect(registry.typingFor("b1")).toBeNull();
+    expect(registry.typingFor("b2")?.text).toBe("two");
+  });
+
   it("keeps two bubbles' previews apart", () => {
     // Arrange
     const registry = seeded(agentBubble("b1"), agentBubble("b2"));

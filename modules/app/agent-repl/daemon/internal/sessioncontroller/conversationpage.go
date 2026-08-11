@@ -185,6 +185,7 @@ func (p *pageCapture) PushConversationDelta(cd *frontendv1.ConversationDelta) {
 
 func (p *pageCapture) PushAsyncBubbleDelta(*frontendv1.AsyncBubbleDelta) {}
 func (p *pageCapture) PushTypingDelta(*frontendv1.TypingDelta)           {}
+func (p *pageCapture) PushTypingCut(*frontendv1.TypingCut)               {}
 func (p *pageCapture) PushTaskCatalog(*frontendv1.TaskCatalog)           {}
 func (p *pageCapture) PushWorkspaceState(*frontendv1.WorkspaceState)     {}
 func (p *pageCapture) PushSessionInitView(*frontendv1.SessionInitView)   {}

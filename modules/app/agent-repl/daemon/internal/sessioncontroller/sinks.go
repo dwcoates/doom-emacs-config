@@ -33,6 +33,11 @@ type Pusher interface {
 	// bubbles it opened and the updates it folded, in one fenced frame.
 	PushAsyncBubbleDelta(*frontendv1.AsyncBubbleDelta)
 	PushTypingDelta(*frontendv1.TypingDelta)
+	// PushTypingCut retires a preview the daemon opened and can no longer
+	// complete. It is the counterpart to PushTypingDelta and exists because a
+	// preview is retired by the authoritative record of its own block: when
+	// that record can never arrive, nothing else would ever close the bubble.
+	PushTypingCut(*frontendv1.TypingCut)
 	PushTaskCatalog(*frontendv1.TaskCatalog)
 	PushWorkspaceState(*frontendv1.WorkspaceState)
 	PushSessionInitView(*frontendv1.SessionInitView)

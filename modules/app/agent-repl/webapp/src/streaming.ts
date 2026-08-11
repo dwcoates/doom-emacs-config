@@ -352,3 +352,35 @@ function growToolInput(
   item.inputJson += delta.delta;
   return { changed: true, toolInput: { toolUseId: delta.toolUseId, phase: "preview", branch: "preview-appended" } };
 }
+
+/**
+ * Retire every preview standing on the top-level feed, because the daemon says
+ * nothing will ever complete them.
+ *
+ * A preview is retired by the AUTHORITATIVE RECORD of the block it previews
+ * (see previewIndexFor, which is how a settle claims one). When that record can
+ * no longer arrive — the session died, the shim rolled, the query was torn down
+ * mid-block — nothing claims it, and the bubble spins "streaming input…" for
+ * the life of the page with no body.
+ *
+ * THE CUT REMOVES RATHER THAN SETTLES. A preview holds no authoritative text by
+ * definition, so marking it done would promote a partial fragment to a finished
+ * block and leave the user a half-sentence indistinguishable from a real one.
+ * There is nothing to keep, so nothing is kept.
+ *
+ * Only OPEN previews go: a block already claimed by its record is a settled
+ * item that happens to have started life as a preview, and it is real content.
+ * Mutates in place, matching applyStreamDelta, and reports whether it changed
+ * anything.
+ */
+export function cutOpenPreviews(items: ConversationItem[]): boolean {
+  let removed = false;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]!;
+    if (item.kind !== "text" && item.kind !== "thinking") continue;
+    if (phaseOf(item) !== "previewing" || item.done) continue;
+    items.splice(i, 1);
+    removed = true;
+  }
+  return removed;
+}
