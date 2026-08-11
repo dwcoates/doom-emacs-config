@@ -1147,6 +1147,8 @@ value, kept in the message text so an unowned path stays correlatable."
        nil))))
 
 (declare-function agent-repl--recovery-slo-note-wire "agent-repl-recovery-slo" (ws))
+(declare-function agent-repl--recovery-slo-note-wire-frame
+                  "agent-repl-recovery-slo" (field ws))
 
 (defun agent-repl--uds-dispatch-frame (frame)
   "Dispatch decoded FRAME (a one-key plist) to its registered handler.
@@ -1186,15 +1188,18 @@ length of a drain batch and re-signals it afterwards."
                             (plist-get payload :revisionId))))
          (state (and (listp payload) (plist-get payload :state))))
     ;; THE WIRE HALF OF THE RECOVERY SLO (lisp/recovery-slo.el).  Stamped at
-    ;; the dispatch point and for EVERY arm, including the ignored ones: what
-    ;; this signal answers is whether real traffic for THIS workspace crossed
-    ;; the UDS link, which is true of a frame this end chooses not to act on
-    ;; exactly as much as of one it handles.  It is deliberately upstream of
-    ;; the malformed-field signal below only in the sense that the field is
-    ;; already known to name a workspace — a frame that never got here carried
-    ;; no workspace to attribute.
-    (when log-workspace
-      (agent-repl--recovery-slo-note-wire log-workspace))
+    ;; the dispatch point, BEFORE this end does anything with the frame, so the
+    ;; signal measures the link carrying the frame rather than this end
+    ;; applying it — that second question is what the emacs signal answers.
+    ;;
+    ;; Stamped only for a GUARANTEED per-workspace carrier, never for whatever
+    ;; arm happened to arrive first.  This used to fire for every arm that
+    ;; carried a `workspace', which made a busy workspace's `typingDelta' the
+    ;; de-facto evidence and left a workspace that simply was not typing with
+    ;; no wire evidence at all.  See
+    ;; `agent-repl-recovery-slo-wire-carriers' for the rule and why it is
+    ;; keyed on what the daemon OWES rather than on what it happens to send.
+    (agent-repl--recovery-slo-note-wire-frame field log-workspace)
     (cond
      ((not (member field agent-repl--uds-known-frame-fields))
       (agent-repl--log log-workspace
