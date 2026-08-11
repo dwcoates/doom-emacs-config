@@ -331,10 +331,12 @@ func (a Action) String() string {
 // Cause names the hibernation cause an ActionHibernate carries. The tokens are
 // the registry's durable spelling.
 //
-// CauseIdleCutoff IS THE ONLY ONE Evaluate EVER RETURNS. CauseCacheExpired
-// remains spelled here because a COLD KEEP-ALIVE PING still records it — that is
-// a measurement rather than a time-since prediction, and it is taken elsewhere
-// (sessioncontroller/keepalivecold.go) — but no arm of this ladder produces it.
+// CauseIdleCutoff IS THE ONLY ONE ANYTHING WRITES. CauseCacheExpired remains
+// spelled here because DURABLE RECORDS STILL CARRY IT: a workspace slept for it
+// by an earlier daemon must still render its revival gate and still be
+// revivable, so every path that READS the token stays as it was. No arm of this
+// ladder produces it, and neither does the cold-ping verdict that used to
+// (sessioncontroller/keepalivecold.go).
 const (
 	CauseIdleCutoff   = "idle_cutoff"
 	CauseCacheExpired = "cache_expired"
