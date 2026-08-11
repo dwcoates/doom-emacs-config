@@ -388,8 +388,8 @@ export enum CompactionScope {
   ALL = 1,
 
   /**
-   * Summarize only the assistant's own responses — the purple bubbles — and
-   * keep the user's prompts, the tool calls, and the tool results verbatim.
+   * Summarize only the assistant's own responses, and keep the user's
+   * prompts, the tool calls, and the tool results verbatim.
    *
    * @generated from enum value: COMPACTION_SCOPE_RESPONSES = 2;
    */

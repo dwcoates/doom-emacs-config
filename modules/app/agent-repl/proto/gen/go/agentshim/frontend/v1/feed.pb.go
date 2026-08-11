@@ -663,8 +663,7 @@ func (x *DetachedWorkDelta) GetFence() string {
 	return ""
 }
 
-// The compaction summary bubble: the purple-washed summary block that follows
-// a compaction.
+// The compaction summary: the summary the daemon records after a compaction.
 type CompactionSummaryItem struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The summary text, verbatim (markdown).
@@ -672,7 +671,7 @@ type CompactionSummaryItem struct {
 	// When the compaction completed, unix millis.
 	CompactedAtMs int64 `protobuf:"varint,2,opt,name=compacted_at_ms,json=compactedAtMs,proto3" json:"compacted_at_ms,omitempty"`
 	// The resolved expensive-input cost of producing this summary (canonical
-	// derivation), so the bubble can carry its own cost note; -1 when the
+	// derivation), so the summary can carry its own cost note; -1 when the
 	// result's usage was unavailable (never fabricated as 0).
 	ExpensiveInputTokens int64 `protobuf:"varint,3,opt,name=expensive_input_tokens,json=expensiveInputTokens,proto3" json:"expensive_input_tokens,omitempty"`
 	unknownFields        protoimpl.UnknownFields
@@ -829,7 +828,7 @@ func (x *TypingDelta) GetParentMessageId() string {
 //
 // A preview is retired by the authoritative record of the block it previews.
 // When that record can no longer arrive — the session died, the shim rolled,
-// the query was torn down mid-block — nothing retires it, and the bubble
+// the query was torn down mid-block — nothing retires it, and the preview
 // spins "streaming input…" for the life of the page with no body.
 //
 // A CUT IS A FACT THE DAEMON OWNS, NOT A TIMEOUT THE CLIENT GUESSES. The

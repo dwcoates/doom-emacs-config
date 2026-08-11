@@ -720,7 +720,7 @@ type QueueEntry struct {
 	// An entry is held by at most one thing at a time: a drain lease, a
 	// keep-alive turn and a pending revival are mutually exclusive session
 	// conditions, and an entry held by two of them at once would have two
-	// different sets of exits and two different bubbles to render. Stating them
+	// different sets of exits and two different states to render. Stating them
 	// as arms makes that impossible to express rather than merely unlikely.
 	//
 	// No arm set means the entry is held by the ordinary case — a turn is
@@ -931,8 +931,8 @@ type QueueEntry_Shutdown struct {
 	// (deliver now, further delaying the bounce), QueueCancelCmd, or delivery
 	// after the bounce completes. Held entries are durable and survive the
 	// daemon swap, so such a prompt is delayed, never lost. A frontend
-	// renders a dedicated lease bubble from this arm instead of the
-	// classifier bubble.
+	// renders a dedicated lease explanation from this arm instead of the
+	// classification.
 	Shutdown *QueueEntryShutdownHold `protobuf:"bytes,7,opt,name=shutdown,proto3,oneof"`
 }
 
@@ -942,8 +942,8 @@ type QueueEntry_KeepAlive struct {
 	// complete before the rewind-and-submit can run, so the only exits are
 	// delivery when the ping's turn ends (the daemon rewinds, then submits
 	// this entry) or QueueCancelCmd. A frontend renders a dedicated "waiting
-	// on a keep-alive response" bubble from this arm instead of the
-	// classifier bubble.
+	// on a keep-alive response" explanation from this arm instead of the
+	// classification.
 	KeepAlive *QueueEntryKeepAliveHold `protobuf:"bytes,8,opt,name=keep_alive,json=keepAlive,proto3,oneof"`
 }
 
@@ -954,8 +954,8 @@ type QueueEntry_Revival struct {
 	// lands and the gate opens, a loud drop when the revival fails or expires
 	// (a session still asleep can never deliver, so a retained entry would be
 	// a leak, not a delay), or QueueCancelCmd. A frontend renders a dedicated
-	// "waiting on the revival's compaction" bubble from this arm instead of
-	// the classifier bubble.
+	// "waiting on the revival's compaction" explanation from this arm instead
+	// of the classification.
 	Revival *QueueEntryRevivalHold `protobuf:"bytes,9,opt,name=revival,proto3,oneof"`
 }
 
@@ -978,7 +978,7 @@ func (*QueueEntry_BuildRefresh) isQueueEntry_Hold() {}
 // A scheduled shutdown's drain lease, holding a queue entry.
 type QueueEntryShutdownHold struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The schedule holding this entry, joining the bubble to the
+	// The schedule holding this entry, joining the entry to the
 	// ShutdownScheduleView it should explain.
 	ScheduleId    string `protobuf:"bytes,1,opt,name=schedule_id,json=scheduleId,proto3" json:"schedule_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1025,7 +1025,7 @@ func (x *QueueEntryShutdownHold) GetScheduleId() string {
 // The keep-alive turn holding a queue entry.
 type QueueEntryKeepAliveHold struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// turn_id of the in-flight keep-alive turn, joining the bubble to the turn
+	// turn_id of the in-flight keep-alive turn, joining the entry to the turn
 	// whose completion releases it.
 	TurnId        string `protobuf:"bytes,1,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
