@@ -220,6 +220,11 @@ type Server struct {
 	// monotonic per Emacs BOOT, so a retained roster must not outlive its
 	// publisher.
 	roster *frontendv1.WorkspaceRoster
+
+	// hostConnect fires once a HOST connection has been served its connect
+	// snapshot (hostconnect.go). Deferred boot work waits on it so it can
+	// never contend with a reconnecting host again.
+	hostConnect *hostConnectSignal
 }
 
 // client is one connected frontend's outbound state. out is never closed
@@ -337,6 +342,7 @@ func New(cfg Config) *Server {
 
 		latestWorkspaceState: map[string]*frontendv1.WorkspaceState{},
 		clientLogRefusals: newClientLogRefusalLimiter(time.Now, clientLogRefusalSummaryInterval),
+		hostConnect:       newHostConnectSignal(),
 	}
 }
 
@@ -1146,6 +1152,13 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		}
 		s.clients[cl] = struct{}{}
 		s.mu.Unlock()
+	}
+	if kind.isHost() {
+		// THE HOST'S CONNECT SNAPSHOT IS SERVED. Deferred boot work has been
+		// holding for exactly this instant; releasing it here (after the whole
+		// delivery-lock operation, never before) is what keeps a backfill's
+		// subprocess storm from landing in front of a reconnecting Emacs.
+		s.hostConnect.fire()
 	}
 	s.logSnapshotCensus(cl, snapshotPhaseConnect, snapshot)
 	retainedSessions, rejectedSessions := snapshotScopeSessionAudit(rawSnapshot, scope)

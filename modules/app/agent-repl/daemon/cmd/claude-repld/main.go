@@ -400,6 +400,38 @@ func main() {
 	phases := newBootPhases(daemonLog, time.Now)
 	phases.Mark("exclusive-claim")
 
+	// THE FRONTEND SOCKET IS BOUND AND LISTENING HERE - the first thing after
+	// the exclusive claim, and BEFORE every dependency boot opens (the state
+	// store, the SSM, the session controller, the geometry store).
+	//
+	// WHY: the host is Emacs, and on a bounce it is already redialling. While
+	// the bind sat at the END of boot, every one of those dials got
+	// connection-refused and paid a client-side backoff, so ~2s of every
+	// bounce was dead time by construction - before the daemon had done one
+	// thing wrong. Binding here means the very first dial CONNECTS: the kernel
+	// holds it in this listener's accept backlog, and Serve (below, once the
+	// transport exists) accepts it and answers with a whole, untorn connect
+	// snapshot. A client that arrives before the daemon can serve it WAITS on
+	// an open socket; it is never refused, and it is never handed a partial
+	// view - the snapshot is composed at accept, and accept does not happen
+	// until the transport is real.
+	//
+	// The bind is still a method on the bootClaim, so the exclusivity ordering
+	// bootclaim.go exists to guarantee is untouched: no unix socket is unlinked
+	// or bound by a daemon that did not win the TCP claim.
+	frontendSockPath, perr := frontend.DefaultSocketPath()
+	if perr != nil {
+		daemonFatal(daemonLog, "claude-repld: frontend socket path: %v", perr)
+	}
+	frontendListener, err := claim.ListenFrontendUDS(frontendSockPath)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: frontend UDS listen %s: %v", frontendSockPath, err)
+	}
+	defer frontendListener.Close()
+	daemonLog.With("operation", "listen-frontend-uds", "socket", frontendSockPath).
+		Log("claude-repld: frontend UDS bound and listening; reconnecting clients queue in its accept backlog until the transport serves")
+	phases.Mark("frontend-listener-bind")
+
 	// The profiling surface is opened BEFORE the daemon's dependencies, so a
 	// boot that wedges in state-store or geometry work is still profilable —
 	// which is precisely the window the command-path stalls were observed in.
@@ -975,6 +1007,7 @@ func main() {
 	if err := workspaceAssembly.Forwarder.SetTargets(workspaceBridge, workspaceBridge, workspaceBridge, workspaceBridge); err != nil {
 		daemonFatal(daemonLog, "claude-repld: bind workspace creation host forwarder: %v", err)
 	}
+	phases.Mark("workspace-assembly")
 	clientLogs, err := server.NewTargetClientLogWriter(
 		targets,
 		&server.RegistryClientLogIdentityResolver{Reg: sessionRegistry},
@@ -1097,6 +1130,7 @@ func main() {
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: frontend surface: %v", err)
 	}
+	phases.Mark("agent-shim-wire")
 	// Bind the session controller's push target now that the frontend server exists.
 	forwarder.SetTarget(agentShim.Server)
 	// A schedule this daemon's PREDECESSOR took and did not finish draining is
@@ -1121,6 +1155,7 @@ func main() {
 		daemonLog.With("operation", "materialize-drain-holds").Log(
 			"claude-repld: materialized %d prompt(s) parked by a previous daemon's scheduled bounce", materialized)
 	}
+	phases.Mark("shutdown-holds")
 	defer func() {
 		if cerr := agentShim.Close(); cerr != nil {
 			daemonLog.With("operation", "close-frontend-surface").Log("claude-repld: frontend surface close: %v", cerr)
@@ -1248,21 +1283,16 @@ func main() {
 	// /sessions/{id}/stream, scope-filtered by the server handler; both mount
 	// off server.APIPrefixes above.)
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
-	sockPath, perr := frontend.DefaultSocketPath()
-	if perr != nil {
-		daemonFatal(daemonLog, "claude-repld: frontend socket path: %v", perr)
-	}
-	frontendListener, err := claim.ListenFrontendUDS(sockPath)
-	if err != nil {
-		daemonFatal(daemonLog, "claude-repld: frontend UDS listen %s: %v", sockPath, err)
-	}
+	// The listener was bound at the top of boot, not here: this is where it
+	// starts being ACCEPTED on. Dials that arrived during boot are already
+	// waiting in its accept backlog and are answered immediately.
 	go func() {
-		daemonLog.With("operation", "serve-frontend-uds", "socket", sockPath).Log("claude-repld: frontend UDS listening")
+		daemonLog.With("operation", "serve-frontend-uds", "socket", frontendSockPath).Log("claude-repld: frontend UDS accepting")
 		if serveErr := agentShim.Server.Serve(frontendListener); serveErr != nil {
-			daemonLog.With("operation", "serve-frontend-uds", "socket", sockPath).Log("claude-repld: frontend UDS serve ended: %v", serveErr)
+			daemonLog.With("operation", "serve-frontend-uds", "socket", frontendSockPath).Log("claude-repld: frontend UDS serve ended: %v", serveErr)
 		}
 	}()
-	phases.Mark("frontend-listener")
+	phases.Mark("frontend-listener-serve")
 
 	httpServer := &http.Server{Addr: *addr, Handler: mux}
 	// The listener was claimed at the top of boot, not here: this is where it
@@ -1330,7 +1360,16 @@ func main() {
 	// that cannot derive the map cannot merge, and serving guessed targets is
 	// what that fatality exists to prevent. Moving the work changed WHEN it is
 	// measured, never how loudly it fails.
+	geometryHold := newBackfillHold(agentShim.Server.HostConnectSnapshotServed(), nil, daemonLog)
 	go func() {
+		// YIELD TO THE HOST FIRST (bootbackfillgate.go). ~145 git/stat
+		// subprocesses launched microseconds after the listener starts
+		// accepting is what used to delay the host's accept by ~1.5s of a 3s
+		// recovery budget. The repair is unchanged and still fatal on failure;
+		// only its start instant moved.
+		if _, run := geometryHold.Wait(); !run {
+			return
+		}
 		finish := phases.Deferred("geometry-backfill")
 		geometryReport, gerr := geometryBackfiller.Run(context.Background())
 		finish(gerr)
@@ -1341,6 +1380,21 @@ func main() {
 		daemonLog.With("operation", "geometry-backfill").Log(
 			"claude-repld: workspace merge geometry backfill recorded=%d already=%d underivable=%d",
 			geometryReport.Recorded, geometryReport.AlreadyRecorded, geometryReport.Underivable)
+	}()
+
+	// DEFERRED BOOT PHASE: the rebase-worktree sweep, held on the same signal
+	// and for the same reason — it is a ~1.3s $TMPDIR walk that used to sit
+	// inside the frontend's own construction, in front of the host's accept.
+	// It removes a disk leak and nothing the daemon serves depends on it, so a
+	// failure is loud and non-fatal, exactly as it was inline.
+	sweepHold := newBackfillHold(agentShim.Server.HostConnectSnapshotServed(), nil, daemonLog)
+	go func() {
+		if _, run := sweepHold.Wait(); !run {
+			return
+		}
+		finish := phases.Deferred("rebase-worktree-sweep")
+		serr := agentShim.SweepOrphanRebaseWorktrees()
+		finish(serr)
 	}()
 
 	// BOOT RECONCILIATION, strictly AFTER readiness (bootsweep.go). Shims that
