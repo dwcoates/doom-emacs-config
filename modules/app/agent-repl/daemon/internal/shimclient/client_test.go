@@ -533,6 +533,97 @@ func TestHeartbeatMissSurfacesDegraded(t *testing.T) {
 	}
 }
 
+// silentThenTalkativeShim is a shim that handshakes, goes silent until resume
+// is closed, and then sends one Heartbeat. It is how the degrade and recovery
+// EDGES are arranged without a sleep anywhere: the test closes resume, and the
+// frame that closes the degraded window is the shim's answer to that close.
+func silentThenTalkativeShim(t *testing.T, sessionID string, resume <-chan struct{}) func(net.Conn) {
+	t.Helper()
+	return func(conn net.Conn) {
+		_ = fakeServerHandshake(t, conn, sessionID, "1", false)
+		<-resume
+		mustWriteMsg(t, conn, &corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()})
+		_, _ = wire.ReadAny(conn) // block; the connection outlives the test's asserts
+	}
+}
+
+func TestHeartbeatRecoveryIsReportedWhenTrafficResumes(t *testing.T) {
+	// Arrange — a shim that goes silent long enough to degrade the link and
+	// then speaks again. A latch you can enter but never watch leave is its own
+	// defect, so the closing edge is a contract of its own.
+	h := newHarness()
+	resume := make(chan struct{})
+	path := startFakeShim(t, silentThenTalkativeShim(t, "sess-1", resume))
+	cfg := h.config(t, "sess-1", path)
+	cfg.HeartbeatInterval = time.Hour
+	cfg.HeartbeatTimeout = 40 * time.Millisecond
+	c := New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.Run(ctx) }()
+	select {
+	case <-h.deg.degraded:
+	case <-time.After(2 * time.Second):
+		t.Fatal("never surfaced connection-degraded, so there is no window to recover from")
+	}
+
+	// Act — inbound traffic resumes.
+	close(resume)
+
+	// Assert.
+	select {
+	case <-h.deg.recovered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("never surfaced connection-recovered; the degraded window opened and never closed")
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run returned non-nil: %v", err)
+	}
+}
+
+func TestHeartbeatDegradeIsReportedOnceAcrossTheSilentWindow(t *testing.T) {
+	// Arrange — the same silence, held until the monitor has necessarily ticked
+	// again: the recovery report cannot come from the tick that degraded, so its
+	// arrival PROVES a further tick observed the same silence and then the
+	// resumed traffic. That is what makes "exactly one degrade" an assertion
+	// about the latch rather than about how long the test waited.
+	h := newHarness()
+	resume := make(chan struct{})
+	path := startFakeShim(t, silentThenTalkativeShim(t, "sess-1", resume))
+	cfg := h.config(t, "sess-1", path)
+	cfg.HeartbeatInterval = time.Hour
+	cfg.HeartbeatTimeout = 40 * time.Millisecond
+	c := New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.Run(ctx) }()
+	select {
+	case <-h.deg.degraded:
+	case <-time.After(2 * time.Second):
+		t.Fatal("never surfaced connection-degraded")
+	}
+
+	// Act.
+	close(resume)
+	select {
+	case <-h.deg.recovered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("never surfaced connection-recovered")
+	}
+
+	// Assert — no second degrade was reported by the ticks in between.
+	if extra := len(h.deg.degraded); extra != 0 {
+		t.Fatalf("degraded reports after the first = %d, want 0 — a mute shim must be reported on the EDGE, not on every tick", extra)
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run returned non-nil: %v", err)
+	}
+}
+
 // persistentTurnEnd builds a PERSISTENT TurnEnded event at seq.
 func persistentTurnEnd(session string, seq uint64) *corev1.Event {
 	return &corev1.Event{
