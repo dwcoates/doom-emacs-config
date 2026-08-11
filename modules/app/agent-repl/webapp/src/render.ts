@@ -99,7 +99,7 @@ import {
   ConversationItem,
   PermissionItem,
   ResultItem,
-  SessionCommandItem,
+  DaemonInterceptedCommandItem,
   FailureCardItem,
   StoreState,
   SystemItem,
@@ -973,7 +973,7 @@ function childLine(item: ConversationItem): string {
       return item.resolution ? "" : `awaiting permission: ${item.toolName}`;
     default:
       // Deliberately partial: every other kind (user-turn, result, system,
-      // failure, context-cleared, context-compacted, session-command)
+      // failure, context-cleared, context-compacted, daemon-intercepted-command)
       // legitimately contributes no ticker line, so the default is the common
       // case, not a drift signal.
       return "";
@@ -2141,7 +2141,7 @@ export function rendersEmpty(
     default:
       // Deliberately partial: only the kinds that CAN be empty are cased.
       // Every other kind (permission, result-with-button, failure,
-      // context-cleared, context-compacted, session-command) always renders
+      // context-cleared, context-compacted, daemon-intercepted-command) always renders
       // something, so the default is the common answer, not a drift signal
       // worth logging.
       return false;
@@ -2494,8 +2494,8 @@ export function sessionCommandLabel(command: SessionCommand): string {
  * is the command. There is no argument to show and no prompt text to fall
  * back on: the wire message has one field, and it is this one.
  */
-function SessionCommandChip(item: SessionCommandItem): string {
-  return `<div class="session-command" role="note"><span class="session-command-name">${escapeHtml(
+function DaemonInterceptedCommandChip(item: DaemonInterceptedCommandItem): string {
+  return `<div class="daemon-intercepted-command" role="note"><span class="daemon-intercepted-command-name">${escapeHtml(
     sessionCommandLabel(item.command),
   )}</span></div>`;
 }
@@ -2556,8 +2556,8 @@ export function renderItem(
       return ClearDivider(item);
     case "context-compacted":
       return CompactDivider(item);
-    case "session-command":
-      return SessionCommandChip(item);
+    case "daemon-intercepted-command":
+      return DaemonInterceptedCommandChip(item);
     case "failure":
       return FailureCardBubble(item);
     case "system":
@@ -2590,8 +2590,8 @@ export function itemKey(item: ConversationItem, index: number): string {
     // Keyed by uuid so a resync's re-push of the SAME invocation (the uuid is
     // derived from the submit's request id) reuses its node instead of drawing
     // the command a second time.
-    case "session-command":
-      return `session-command:${item.uuid}`;
+    case "daemon-intercepted-command":
+      return `daemon-intercepted-command:${item.uuid}`;
     // Keyed by the SAME identity the store reconciles a prompt on, so two
     // prompts can never share a DOM node. The index fallback covers a turn
     // carrying neither a request id nor a uuid (fixtures).

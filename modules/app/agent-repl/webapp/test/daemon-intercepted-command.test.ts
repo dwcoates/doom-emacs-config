@@ -1,11 +1,11 @@
 /**
- * The session-command item: the feed's record that the user ran a slash
+ * The daemon-intercepted-command item: the feed's record that the user ran a slash
  * command the CLI answered itself, in place of the prompt bubble that used to
  * claim they had said it to the agent.
  */
 import { describe, expect, it } from "vitest";
 
-import type { ConversationItem, SessionCommandItem } from "../src/store.js";
+import type { ConversationItem, DaemonInterceptedCommandItem } from "../src/store.js";
 import { SESSION_COMMANDS, decodeFrontendFrame, sessionCommandOf } from "../src/frontend-proto.js";
 import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/agentshim/frontend/v1/slash-menu_pb";
 import { StateAdapter, type AdapterEffect } from "../src/state-adapter.js";
@@ -31,9 +31,9 @@ function itemsFrom(item: Record<string, unknown>): ConversationItem[] {
   return conv.items;
 }
 
-/** A session-command item for COMMAND. */
-function commandItem(command: SessionCommandItem["command"]): SessionCommandItem {
-  return { kind: "session-command", uuid: "sc1", command };
+/** A daemon-intercepted-command item for COMMAND. */
+function commandItem(command: DaemonInterceptedCommandItem["command"]): DaemonInterceptedCommandItem {
+  return { kind: "daemon-intercepted-command", uuid: "sc1", command };
 }
 
 describe("sessionCommandOf", () => {
@@ -69,7 +69,7 @@ describe("the daemonInterceptedCommand arm", () => {
     const items = itemsFrom({ uuid: "m1", daemonInterceptedCommand: { command: "SESSION_COMMAND_MODEL" } });
 
     // Assert
-    const expected: SessionCommandItem = { kind: "session-command", uuid: "m1", command: "MODEL" };
+    const expected: DaemonInterceptedCommandItem = { kind: "daemon-intercepted-command", uuid: "m1", command: "MODEL" };
     expect(items).toEqual([expected]);
   });
 
@@ -133,7 +133,7 @@ describe("rendering a session command", () => {
     const html = renderItem(commandItem("MODEL"));
 
     // Assert
-    expect(html).toContain("session-command");
+    expect(html).toContain("daemon-intercepted-command");
     expect(html).toContain("/model");
   });
 
@@ -149,6 +149,6 @@ describe("rendering a session command", () => {
   it("keys the node on the uuid so a resync reuses it", () => {
     // Arrange + Act + Assert — the uuid is derived from the submit's request
     // id, so a replayed invocation lands on its own node.
-    expect(itemKey(commandItem("MODEL"), 3)).toBe("session-command:sc1");
+    expect(itemKey(commandItem("MODEL"), 3)).toBe("daemon-intercepted-command:sc1");
   });
 });
