@@ -93,7 +93,9 @@ import {
   SubmitPromptSchema,
   SubscribeSchema,
 } from "../src/uds/proto.js";
-import { FramedPeer, acceptShim, tmpSocketPath, until } from "./uds-harness.js";
+import { FramedPeer, acceptShim, tmpSocketPath, tmpSpillDir, until } from "./uds-harness.js";
+import { join } from "node:path";
+import { SpillJournal } from "../src/uds/store-spill.js";
 import { unpackAs } from "../src/uds/framing.js";
 
 const tick = (): Promise<void> => new Promise<void>((r) => setImmediate(r));
@@ -433,6 +435,7 @@ async function rig(
   cleanups.push(() => daemonListener.close());
 
   const session = new UdsSession({
+    workspaceDir: tmpSpillDir(),
     sessionId: "sess-1",
     shimVersion: "9.9",
     protocolVersion: "1",
@@ -2552,6 +2555,7 @@ describe("UdsSession lifetime: SDK stream termination", () => {
     cleanups.push(() => store.close());
     let query!: FakeQuery;
     const session = new UdsSession({
+    workspaceDir: tmpSpillDir(),
       sessionId: "sess-startup-failure",
       shimVersion: "9.9",
       protocolVersion: "1",
@@ -2607,6 +2611,7 @@ describe("UdsSession lifetime: SDK stream termination", () => {
     cleanups.push(() => store.close());
     let query!: FakeQuery;
     const session = new UdsSession({
+    workspaceDir: tmpSpillDir(),
       sessionId: "sess-starting",
       shimVersion: "9.9",
       protocolVersion: "1",
@@ -2640,17 +2645,24 @@ describe("UdsSession lifetime: SDK stream termination", () => {
     expect(query.abortCalls).toBe(1);
   });
 
-  it("defers the SIGTERM roll's store teardown until a write held across a store bounce flushes", async () => {
-    // Arrange: the seamless-bounce composition — the STORE is bouncing (the
-    // shim is holding its durable writes for the relink) at the moment the
-    // daemon rolls this stale shim at its turn boundary. A teardown that closed
-    // the store client here would fail every held batch, so the roll must wait
-    // the hold out.
+  it("spills the SIGTERM roll's undeliverable termination write instead of waiting out the store bounce", async () => {
+    // Arrange: the seamless-bounce composition — the STORE is bouncing at the
+    // moment the daemon rolls this stale shim at its turn boundary.
+    //
+    // THE ROLL USED TO WAIT FOR THE STORE TO COME BACK, because the only place
+    // a held batch existed was this process's heap, so tearing down destroyed
+    // it. It no longer has to: the batch is fsynced to the workspace's spill
+    // journal before it is held, so the roll settles at once and the NEXT shim
+    // on this workspace delivers what this one could not. An unbounded wait on
+    // a store that may never return was never a durability guarantee, only a
+    // hope with a timer behind it.
     const store = await fakeStore();
     cleanups.push(() => store.close());
     const socketPath = store.socketPath;
+    const workspaceDir = tmpSpillDir();
     let query!: FakeQuery;
     const session = new UdsSession({
+      workspaceDir,
       sessionId: "sess-store-bouncing",
       shimVersion: "9.9",
       protocolVersion: "1",
@@ -2670,24 +2682,19 @@ describe("UdsSession lifetime: SDK stream termination", () => {
     await until(() => !session.storeLinkConnected(), "store bounce observed by the shim");
 
     // Act: the roll's SIGTERM lands while nothing is listening on the store.
-    const shuttingDown = session.shutdown("SIGTERM");
-    let settled = false;
-    void shuttingDown.then(() => { settled = true; });
-    await tick();
-    expect(settled).toBe(false);
+    const failure = await session.shutdown("SIGTERM").catch((cause: unknown) => cause);
 
-    // The store comes back (launchd kickstart) and the held batch flushes.
-    const restarted = await fakeStoreAt(socketPath);
-    cleanups.push(() => restarted.close());
-    await until(() => restarted.count() >= 1);
-    const terminated = await restarted.peer().next(StoreWriteSchema);
-    restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 2n }));
-    await shuttingDown;
-
-    // Assert: the write the roll would have destroyed reached the replacement
-    // store, and only then did the shim finish going down.
-    expect(terminated.batch!.events).toHaveLength(1);
-    expect(terminated.batch!.events[0]!.payload.case).toBe("queryLifecycle");
+    // Assert: the shim went down without waiting on a store that never came
+    // back, it said so through the same fatal receipt error as ever, and the
+    // termination event is on disk rather than gone.
+    expect(failure).toBeInstanceOf(QueryTerminationPersistenceError);
+    const journal = new SpillJournal({
+      path: join(workspaceDir, ".claude", "emacs", "store-write-spill.bin"),
+      sessionId: "sess-store-bouncing",
+    });
+    const spilled = journal.read();
+    journal.close();
+    expect(spilled.flat().some((event) => event.payload.case === "queryLifecycle")).toBe(true);
     await expect(done).resolves.toBeUndefined();
     expect(query.abortCalls).toBe(1);
   });
@@ -2698,6 +2705,7 @@ describe("UdsSession lifetime: SDK stream termination", () => {
     const log = captureLog();
     let query!: FakeQuery;
     const session = new UdsSession({
+    workspaceDir: tmpSpillDir(),
       sessionId: "sess-rejected-stop",
       shimVersion: "9.9",
       protocolVersion: "1",
@@ -4374,6 +4382,7 @@ describe("UdsSession bring-up gate", () => {
     const daemonListener = acceptShim(udsSocketPath);
     cleanups.push(() => daemonListener.close());
     const session = new UdsSession({
+    workspaceDir: tmpSpillDir(),
       sessionId: "sess-1",
       shimVersion: "9.9",
       protocolVersion: "1",
@@ -4527,6 +4536,7 @@ describe("UdsSession handshake permission mode", () => {
     const daemonListener = acceptShim(udsSocketPath);
     cleanups.push(() => daemonListener.close());
     const session = new UdsSession({
+    workspaceDir: tmpSpillDir(),
       sessionId: "sess-1",
       shimVersion: "9.9",
       protocolVersion: "1",
@@ -4582,6 +4592,7 @@ describe("UdsSession handshake permission mode", () => {
     const daemonListener = acceptShim(udsSocketPath);
     cleanups.push(() => daemonListener.close());
     const session = new UdsSession({
+    workspaceDir: tmpSpillDir(),
       sessionId: "sess-1",
       shimVersion: "9.9",
       protocolVersion: "1",
@@ -4637,6 +4648,7 @@ describe("UdsSession rewind lineage: SessionRewound", () => {
     const store = await fakeStore();
     cleanups.push(() => store.close());
     const session = new UdsSession({
+    workspaceDir: tmpSpillDir(),
       sessionId: "sess-rewound",
       shimVersion: "9.9",
       protocolVersion: "1",
