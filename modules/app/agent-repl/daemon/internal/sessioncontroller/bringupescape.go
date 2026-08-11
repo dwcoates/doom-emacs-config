@@ -282,6 +282,9 @@ func (m *Manager) noteWired(workspace, sessionID string) {
 	// A bring-up that wired says the previous failures were transient, so the
 	// streak toward the give-up bound starts again from zero.
 	m.clearBringUpFailures(sessionID)
+	// And the owed automatic retry with it (bringupretry.go): the workspace is
+	// wired, so there is nothing left for the sweep to climb.
+	m.clearBringUpRetry(workspace, "wired")
 	// THE GATE LEDGER IS CLOSED OUT BY THE REWIRE ITSELF (hibernation.go). A
 	// wired shim and a record claiming a sleep is a contradiction, and it is
 	// retired HERE rather than by each path that happens to wire a sleeping
@@ -508,4 +511,11 @@ func (m *Manager) resolveStartFailed(workspace string, d *sessionController, cau
 		d.consumer.pushFailure(d.consumer.startFailedUUID(), errclass.StartFailed(carded.Error()))
 	}
 	m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityUnavailable, "bring_up_failed")
+	// THE BUDGET IS NOW SPENT BY SOMEBODY (bringupretry.go). Until this line a
+	// failure with attempts remaining had no consumer: every caller of the
+	// ladder is a user action or the one-shot boot walk, so a workspace nobody
+	// opened sat unwired with `given_up=false` for as long as the daemon lived.
+	if m.armBringUpRetry(workspace, d.sessionID, failures, givenUp, cooldown) {
+		m.publishBringUpGaveUpCard(workspace, d.sessionID, failures, cooldown, cause)
+	}
 }

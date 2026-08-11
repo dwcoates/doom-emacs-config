@@ -638,6 +638,11 @@ type Manager struct {
 	// imposes (bringupescape.go). The park is a cooldown, never a wall: it
 	// expires on its own so no workspace can be dead-ended by it.
 	bringUpFailures map[string]*bringUpStreak
+	// bringUpRetries tracks, per WORKSPACE, a resolved bring-up failure that is
+	// owed an automatic attempt (bringupretry.go). It is what actually spends
+	// the budget bringUpFailures merely counts: without it a workspace nobody
+	// opens sits unwired with attempts remaining for as long as the daemon runs.
+	bringUpRetries map[string]*bringUpRetryWatch
 	// vanishedResume is the TERMINAL fence: sessions whose recorded
 	// conversation has vanished from disk with nothing to fall back to, and
 	// which must therefore never be respawned automatically again
@@ -2685,6 +2690,9 @@ func (m *Manager) hibernate(workspace, wantSession string, cause StopCause) erro
 	// session had accumulated, so a revival climbs the ladder from the bottom
 	// rather than inheriting a park (bringupescape.go).
 	m.clearBringUpFailures(d.sessionID)
+	// And the owed automatic retry with it (bringupretry.go): a session put to
+	// sleep on purpose must not be woken by the retry sweep.
+	m.clearBringUpRetry(workspace, "hibernated")
 	return nil
 }
 
