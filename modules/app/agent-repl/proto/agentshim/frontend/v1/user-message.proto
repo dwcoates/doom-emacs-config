@@ -1,0 +1,13 @@
+// user-message.proto — The user's prompt message.
+//
+// DELIBERATELY DECLARATION-FREE. The user-prompt arm is
+// agentshim.data.v1.ApiUserMessage, carried on Message in feed.proto, and this
+// package declares no user-prompt message of its own today. The file exists so
+// the component has a named home the moment it acquires resolved props, rather
+// than acquiring them somewhere else.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
