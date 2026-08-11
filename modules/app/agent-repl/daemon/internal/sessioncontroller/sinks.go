@@ -697,6 +697,10 @@ type consumer struct {
 	// turns is the single lifecycle authority gate. Every turn boundary passes
 	// it before the queue, SSM, or progress resolver can mutate.
 	turns turnLifecycle
+	// foldedTyping counts the ephemeral deltas an open window's fold has kept
+	// off the live relay, so the refusal is loud without becoming the log
+	// (foldedtyping.go). Locked internally, outside the ring's mutex.
+	foldedTyping foldedTypingLedger
 
 	mu   sync.Mutex
 	ring []*corev1.Event
@@ -1829,9 +1833,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 	c.observeBackfill(ev)
 	switch p := ev.GetPayload().(type) {
 	case *corev1.Event_ContentDelta:
-		if td := frontend.TypingDeltaFromContentDelta(c.workspace, c.sessionID, p.ContentDelta); td != nil {
-			c.push.PushTypingDelta(td)
-		}
+		c.relayTypingDelta(p.ContentDelta, ev.GetSeq())
 	case *corev1.Event_HeartbeatProgress:
 		// E4: relayed as HeartbeatView. Under S9 this was a schema-forced DROP —
 		// TypingDelta carries only a ContentDelta and there was no other arm to
@@ -2346,6 +2348,31 @@ func isTranscriptLine(a *anypb.Any) bool {
 //
 // A fold failure is loud-logged, never swallowed, and never stops the stream:
 // the footer degrading is not a reason to stop delivering conversation.
+// relayTypingDelta pushes ONE ephemeral delta to the frontend's live relay —
+// unless the record it previews is bound for a window bubble, in which case the
+// preview is refused.
+//
+// A preview whose authoritative record folds away can never be retired: the
+// frontend retires a preview by the same block landing on the top-level feed,
+// and the fold is exactly what stops that from happening. Opening one anyway
+// leaves a card spinning "streaming input…" with no body for the life of the
+// page. See foldedtyping.go for the rule and why it is the fold's own rule.
+func (c *consumer) relayTypingDelta(cd *corev1.ContentDelta, seq uint64) {
+	if c.bubbles != nil {
+		if v := c.bubbles.typingRelayVerdict(cd.GetToolUseId()); v.Suppress {
+			count, announce := c.foldedTyping.note(v.BubbleID)
+			if announce {
+				c.logf("session-controller: live typing relay REFUSED session=%s ws=%q seq=%d bubble=%s tool_use_id=%q uuid=%s reason=%s suppressed_deltas=%d — the record this delta previews folds into the bubble, so a top-level preview of it could never be retired and would spin forever",
+					c.sessionID, c.workspace, seq, v.BubbleID, cd.GetToolUseId(), cd.GetUuid(), v.Reason, count)
+			}
+			return
+		}
+	}
+	if td := frontend.TypingDeltaFromContentDelta(c.workspace, c.sessionID, cd); td != nil {
+		c.push.PushTypingDelta(td)
+	}
+}
+
 func (c *consumer) applyProgress(ev *corev1.Event) {
 	if err := c.prog.Apply(c.workspace, c.sessionID, ev); err != nil {
 		c.logf("session-controller: progress apply failed session=%s seq=%d kind=%s: %v",
