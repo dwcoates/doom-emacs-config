@@ -235,7 +235,39 @@ cache can, and does, answer with the superseded bundle it already holds."
         (replace-match (concat (match-string 1 uri) value) t t uri)
       (concat uri (if (string-match-p "\\?" uri) "&" "?") param "=" value))))
 
-(defun agent-repl--webview-recovery-repair-buffer (buf ws deployed script)
+(defvar agent-repl-webview-recovery-reloaded-functions nil
+  "Abnormal hook run with (WS REASON) each time a page is RE-NAVIGATED.
+
+DESTROYING A DOCUMENT IS AN OBSERVABLE ACT, and this hook is how the host
+admits to it.  A re-navigation throws the page away and boots a new one:
+every global it carried is gone, its recovery epoch restarts, and anything
+that was mid-measurement against that document is measuring a page that no
+longer exists.  `driven' does none of that — the document survives and is
+handed a hook — so ONLY the reload arm announces itself here.
+
+The recovery SLO subscribes (lisp/recovery-slo.el) because a reload issued
+by the deploy's own webview refresh, inside an SLO window, destroys the
+very page whose readiness the window is waiting on.  Without this hook the
+SLO cannot tell that failure from the system failing to recover, and it
+blamed the system for the harness's act.
+
+REASON is the string the sweep or repair was called with, so a subscriber
+can say WHICH host action interfered.  Subscribers run guarded by the
+caller; a failing subscriber never aborts a repair.")
+
+(defun agent-repl--webview-recovery-run-reloaded-hook (ws reason)
+  "Run `agent-repl-webview-recovery-reloaded-functions' for WS and REASON.
+Each subscriber is guarded on its own: a repair must not be abandoned
+because something watching it failed, and the failure is warned rather
+than swallowed."
+  (dolist (fn agent-repl-webview-recovery-reloaded-functions)
+    (condition-case err
+        (funcall fn ws reason)
+      (error
+       (agent-repl--warn ws "webview-recovery: reloaded-hook subscriber %S FAILED: %s"
+                         fn (error-message-string err))))))
+
+(defun agent-repl--webview-recovery-repair-buffer (buf ws deployed script &optional reason)
   "Repair BUF's page for WS against DEPLOYED, driving SCRIPT when it can.
 
 THE ONE PLACE THE CHOICE IS MADE, so the sweep and the single-workspace
@@ -244,7 +276,11 @@ Returns `driven' when the page was already on DEPLOYED and was handed the
 recovery hook, `reloaded' when it was re-addressed at DEPLOYED, and
 `dead-webview' when BUF holds no live widget (which is warned about, not
 swallowed).  Signals are left to the caller, which is what lets the sweep
-count a failure and carry on to the next page."
+count a failure and carry on to the next page.
+
+REASON names the host action driving the repair and rides the
+`agent-repl-webview-recovery-reloaded-functions' announcement the RELOAD
+arm makes; see that hook for why only that arm announces."
   (let ((xw (agent-repl--frontend-webview-live-widget buf)))
     (if (null xw)
         (progn
@@ -264,6 +300,7 @@ count a failure and carry on to the next page."
             (agent-repl--log
              ws "webview-recovery: buffer=%s outcome=reloaded was=%s now=%s url=%s"
              (buffer-name buf) (or build "none") deployed fresh)
+            (agent-repl--webview-recovery-run-reloaded-hook ws reason)
             'reloaded))))))
 
 (defun agent-repl--webview-recovery-repair-workspace (ws reason)
@@ -288,7 +325,7 @@ not a failure and not a lie about one."
     (when (buffer-live-p buf)
       (agent-repl--webview-recovery-repair-buffer
        buf ws (agent-repl--frontend-build-id)
-       (agent-repl--webview-recovery-script reason)))))
+       (agent-repl--webview-recovery-script reason) reason))))
 
 (defun agent-repl--webview-recovery-sweep (reason &optional force)
   "Bring every reachable webview onto the deployed bundle, naming REASON.
@@ -348,7 +385,7 @@ than swallowed."
         (dolist (buf buffers)
           (let ((ws (agent-repl--frontend-webview-workspace buf)))
             (condition-case err
-                (pcase (agent-repl--webview-recovery-repair-buffer buf ws deployed script)
+                (pcase (agent-repl--webview-recovery-repair-buffer buf ws deployed script reason)
                   ('driven (setq driven (1+ driven)))
                   ('reloaded (setq reloaded (1+ reloaded)))
                   ('dead-webview (setq absent (1+ absent))))
