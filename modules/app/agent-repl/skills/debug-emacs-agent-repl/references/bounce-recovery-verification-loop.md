@@ -155,7 +155,7 @@ Name the reason for what provoked it; it lands in the sweep's own records.
 
 ## 4. Render the verdict
 
-All six criteria, each with its probe. A criterion with no probe run is not
+All seven criteria, each with its probe. A criterion with no probe run is not
 met; it is unmeasured.
 
 1. **The announcement was delivered and the quiet window opened, with no warns
@@ -213,12 +213,52 @@ met; it is unmeasured.
      is in master, measure against whatever it defines rather than inventing a
      second timing.
 
+7. **NO SDK QUERY WAS TERMINATED BY THE BOUNCE.**
+   - This is the requirement in its most direct form: a session must not die
+     because a SEPARATE process restarted. A store bounce reaching the SDK is
+     the loop failing, not a symptom of it.
+   - Probe: count, in each live page's rendered text, `unexpected_query_termination`
+     and the human-facing `query ended unexpectedly`. Both, because the card's
+     prose and its reason field are different strings and either may be present.
+   - MEASURE ACROSS A BOUNCE THAT DOES NOT REFRESH THE PAGES.
+     `bin/deploy-all.sh` refreshes every webview, which WIPES the very cards
+     this criterion counts — a post-deploy zero means the pages were reset, not
+     that nothing died. Bounce with `launchctl kickstart` alone when measuring
+     this, or read a durable sink instead.
+   - The durable sinks do NOT currently capture it: the workspace
+     `emacs.log`s read zero while the card is on screen, because the card is
+     produced on the daemon's translate path
+     (`daemon/internal/frontend/translate.go`, reason
+     `unexpected_query_termination`) rather than written to the workspace log.
+     Treat that gap as a finding in its own right — a criterion whose only
+     evidence is a DOM node is one page-reload away from being unmeasurable.
+   - Known origin: `agent-shim/claude/shim/src/uds/uds-session.ts`
+     (`UNEXPECTED_QUERY_TERMINATION_REASON`), reached from a store-client
+     write rejection (`store-client: write on a down connection`).
+
 ## 5. Remediate and loop
 
 Root-cause every criterion that failed, from the two sinks — not from the
 symptom. Then dispatch fixes, merge, redeploy, re-bounce, and re-render the
-verdict. Loop until ONE iteration is clean on all six criteria at once; an
+verdict. Loop until ONE iteration is clean on all the criteria at once; an
 iteration that fixes criterion 2 while criterion 5 regresses has not exited.
+
+### Restart what the bounce interrupted, then bounce again
+
+An interrupted SDK query does not resume itself, so a remediation verified only
+against workspaces that were already idle proves nothing about the case the fix
+exists for. After the fixes land and are deployed:
+
+1. Tell every SDK query the previous bounce interrupted to START AGAIN, so the
+   next bounce has live work to interrupt.
+2. Wait long enough for those queries to be genuinely in flight — verify it,
+   do not assume it, the same way the async probes are verified by a growing
+   tick file rather than a pid.
+3. Bounce the backend again and re-render the verdict, criterion 7 included.
+4. If anything was interrupted again, remediate and repeat from step 1.
+
+The loop exits only when a bounce lands on genuinely live work and interrupts
+none of it. A clean verdict over idle workspaces is not an exit.
 
 Fanout mechanics, gating on loop-critical fixes only, and the merge-then-redeploy
 discipline are owned by `iterative-fix-verify-loop.md` steps 5 through 8. Use
@@ -228,6 +268,40 @@ them as written; this runbook adds only the verdict.
 
 - **e2e skips silently without shim deps.** Covered in step 1. It has hidden
   twenty real failures inside a green summary. Always confirm e2e ran.
+
+- **A fresh worktree needs BOTH the deps and a BUILT shim.** Two different
+  masks on the same lie — "the suite did not actually test your change":
+
+  ```bash
+  ln -sfn <main-repo>/modules/app/agent-repl/agent-shim/claude/shim/node_modules \
+          <worktree>/modules/app/agent-repl/agent-shim/claude/shim/node_modules
+  bin/build-frontend.sh --force shim
+  ```
+
+  Without `node_modules` the suite SKIPS and reports `ok` in under a second.
+  With deps but no built `dist/main.js`, every spawned shim exits 1 and tests
+  fail for a reason that has nothing to do with the change. Both have already
+  cost a full revert: an agent read a 11.9s skip as a pass, its branch merged,
+  and it broke thirty e2e tests.
+
+- **Wall-clock is a FLOOR test, not a range.** A real e2e run is ~250s idle and
+  ~440s under load on this machine. Under ~30s means it skipped. A long run is
+  contention, not a hang — do not kill it and do not read the duration as a
+  failure signal.
+
+- **`deploy-all` refreshes every webview, destroying DOM evidence.** Any
+  criterion measured by reading the live page (criterion 7, feed counts, badge
+  states) must be sampled across a `launchctl kickstart` bounce rather than a
+  deploy, or the measurement records the reload instead of the bounce.
+
+- **An empty task list does NOT mean prior agents died.** After a compaction the
+  list can read empty while agents are still running. ALWAYS run `ListAgents`
+  before re-dispatching work believed lost. Skipping this put two agents in one
+  worktree, which forced a rewind-and-rebuild of the branch's history.
+
+- **Count shim survival by PID IDENTITY, never by process count.** A complete
+  kill-and-respawn satisfies an equal count. Classify with `ps -o command=`
+  first: `pgrep -f 'shim/dist/main.js'` also matches the daemon.
 
 - **`emacsclient` is not on PATH.** Use
   `/Applications/Emacs.app/Contents/MacOS/bin/emacsclient`, or
