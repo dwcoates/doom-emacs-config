@@ -101,6 +101,40 @@ func TestTopbarTitleCarriesTheBranchWhenThereIsOne(t *testing.T) {
 	}
 }
 
+func TestTopbarTitleOmitsTheParentheticalWhenTheBranchEchoesTheWorkspaceName(t *testing.T) {
+	// Arrange — a worktree whose branch was named after its directory, which is
+	// what the workspace generator produces.
+	in := validTopbarInputs()
+	in.Workspace = "/home/u/workspace/slack-cee-ceac-integration-shj"
+	in.Branch = "slack-cee-ceac-integration-shj"
+	// Act.
+	view, err := TopbarView(in)
+	// Assert — the parenthetical would repeat the name it sits beside.
+	if err != nil {
+		t.Fatalf("TopbarView: %v", err)
+	}
+	if view.GetTitle() != "slack-cee-ceac-integration-shj" {
+		t.Fatalf("title = %q, want the name alone when the branch only echoes it", view.GetTitle())
+	}
+}
+
+func TestTopbarTitleKeepsTheParentheticalWhenTheBranchIsQualified(t *testing.T) {
+	// Arrange — the same directory on an owner-qualified ref, which is the case
+	// the parenthetical exists for.
+	in := validTopbarInputs()
+	in.Workspace = "/home/u/workspace/create-game-for-analysis-xvg"
+	in.Branch = "DWC/create-game-for-analysis-xvg"
+	// Act.
+	view, err := TopbarView(in)
+	// Assert.
+	if err != nil {
+		t.Fatalf("TopbarView: %v", err)
+	}
+	if view.GetTitle() != "create-game-for-analysis-xvg (DWC/create-game-for-analysis-xvg)" {
+		t.Fatalf("title = %q, want the differing branch still stated", view.GetTitle())
+	}
+}
+
 func TestTopbarSessionLineIsEmptyForAWorkspaceWithNoSession(t *testing.T) {
 	// Arrange — a workspace between sessions has no identity to state.
 	in := validTopbarInputs()
