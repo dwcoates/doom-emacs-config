@@ -8,6 +8,8 @@
 import { describe, expect, it } from "vitest";
 import {
   tokensDisclosureHtml,
+  topbarSessionDisclosureHtml,
+  topbarStripHtml,
   topbarWarningsHtml,
   WARNING_GLYPH,
   topbarConnectivityHtml,
@@ -57,11 +59,12 @@ describe("absence renders absence", () => {
     expect(topbarViewHtml(null)).toBe("");
   });
 
-  it("omits the session line when the daemon published none", () => {
-    // Arrange / Act
-    const html = topbarViewHtml(view({ sessionLine: "" }));
+  it("never prints the session line in the strip", () => {
+    // Arrange / Act — the correlation ids are the widest and most volatile
+    // thing the strip ever carried, and they say nothing to a reader.
+    const html = topbarViewHtml(view({ sessionLine: "session s_9cebb553b0bf3924" }));
     // Assert
-    expect(html).not.toContain("topbar-session-line");
+    expect(html).not.toContain("s_9cebb553b0bf3924");
   });
 
   it("never renders a warning's prose inline in the strip", () => {
@@ -207,6 +210,159 @@ describe("tokensDisclosureHtml", () => {
     const html = tokensDisclosureHtml(breakdown(), false);
     // Assert
     expect(html).toContain(">tokens <span");
+  });
+});
+
+// --- the ids disclosure, which replaced the strip's inline session line -----
+
+describe("the ids disclosure", () => {
+  const IDS = view({
+    sessionLine: "session s_9cebb553b0bf3924 · conversation 81cb5e3e-8a09-4925-b413-607138be8ef6",
+  });
+
+  it("renders the chip when the daemon published a session line", () => {
+    // Arrange / Act
+    const html = topbarSessionDisclosureHtml(IDS, false);
+    // Assert
+    expect(html).toContain("data-session-toggle");
+  });
+
+  it("renders NO chip for a workspace between sessions", () => {
+    // Arrange / Act — a control over an identity that does not exist only
+    // invites the click that proves it does not exist.
+    const html = topbarSessionDisclosureHtml(view({ sessionLine: "" }), false);
+    // Assert
+    expect(html).toBe("");
+  });
+
+  it("renders nothing for a workspace with no published topbar", () => {
+    // Arrange / Act
+    // Assert
+    expect(topbarSessionDisclosureHtml(null, false)).toBe("");
+  });
+
+  it("keeps the ids out of the DOM while it is closed", () => {
+    // Arrange / Act — they are disclosure, not strip content.
+    const html = topbarSessionDisclosureHtml(IDS, false);
+    // Assert
+    expect(html).not.toContain("s_9cebb553b0bf3924");
+  });
+
+  it("shows the daemon's line verbatim once opened, so the ids stay obtainable", () => {
+    // Arrange / Act — removing them from the strip must not remove the
+    // debugging capability they carry.
+    const html = topbarSessionDisclosureHtml(IDS, true);
+    // Assert
+    expect(html).toContain(
+      "session s_9cebb553b0bf3924 · conversation 81cb5e3e-8a09-4925-b413-607138be8ef6",
+    );
+  });
+
+  it("labels the chip with a fixed word, so its width never moves", () => {
+    // Arrange / Act — a label carrying an id would be the volatility the ids
+    // were removed from the strip for.
+    const html = topbarSessionDisclosureHtml(IDS, false);
+    // Assert
+    expect(html).toContain(">ids <span");
+  });
+
+  it("is a real button, so it is keyboard-reachable", () => {
+    // Arrange / Act — the shared dropdown-chip shell, not a bespoke popover.
+    const html = topbarSessionDisclosureHtml(IDS, false);
+    // Assert
+    expect(html).toContain('<button type="button" class="info-session"');
+  });
+
+  it("reports its open state to assistive tech", () => {
+    // Arrange / Act
+    const html = topbarSessionDisclosureHtml(IDS, true);
+    // Assert
+    expect(html).toContain('aria-expanded="true"');
+  });
+
+  it("hangs its overlay off the `.session-menu` the dismissal handlers key on", () => {
+    // Arrange / Act — outside-click dismissal spares exactly this stem.
+    const html = topbarSessionDisclosureHtml(IDS, true);
+    // Assert
+    expect(html).toContain('class="session-menu"');
+  });
+
+  it("escapes the daemon's line", () => {
+    // Arrange / Act
+    const html = topbarSessionDisclosureHtml(view({ sessionLine: "<img src=x>" }), true);
+    // Assert
+    expect(html).not.toContain("<img");
+  });
+});
+
+// --- the composed strip, whose ORDER and reserved slot are the geometry -----
+
+describe("the composed strip", () => {
+  const CLOSED = { session: false, tokens: false, warnings: false };
+  const BREAKDOWN: TokenBreakdownView = {
+    workspace: "/ws",
+    fence: "f1",
+    sections: [
+      { label: "session", rows: [{ label: "input", tokens: 10, sharePermille: 1000, emphasized: true, depth: 0 }] },
+    ],
+  };
+
+  it("puts the title first, so the strip's leading content is its most stable", () => {
+    // Arrange / Act
+    const html = topbarStripHtml(view(), BREAKDOWN, CLOSED);
+    // Assert
+    expect(html.indexOf("topbar-title")).toBeLessThan(html.indexOf("session-menu"));
+  });
+
+  it("puts the warning slot LAST, after every constant-width chip", () => {
+    // Arrange / Act — the indicator is the one element that comes and goes with
+    // ordinary state, so nothing constant may sit behind it.
+    const html = topbarStripHtml(view(), BREAKDOWN, CLOSED);
+    // Assert
+    expect(html.indexOf("tokens-menu")).toBeLessThan(html.indexOf("topbar-warning-slot"));
+  });
+
+  it("reserves the warning slot even when nothing is warned about", () => {
+    // Arrange / Act — the slot holds the width so a warning arriving does not
+    // re-measure the strip and shove the title.
+    const html = topbarStripHtml(view({ warnings: [] }), BREAKDOWN, CLOSED);
+    // Assert
+    expect(html).toContain('<span class="topbar-warning-slot">');
+  });
+
+  it("still draws NO warning control inside the reserved slot", () => {
+    // Arrange / Act — reserving geometry is not rendering an idle control.
+    const html = topbarStripHtml(view({ warnings: [] }), BREAKDOWN, CLOSED);
+    // Assert
+    expect(html).not.toContain("data-warnings-toggle");
+  });
+
+  it("draws the warning control in the slot once the daemon raises one", () => {
+    // Arrange / Act
+    const html = topbarStripHtml(
+      view({ warnings: [{ text: "totals disagree", warning: { kind: "accounting" } }] }),
+      BREAKDOWN,
+      CLOSED,
+    );
+    // Assert
+    expect(html).toContain("data-warnings-toggle");
+  });
+
+  it("renders only the reserved slot for a workspace with no published views", () => {
+    // Arrange / Act — absence renders absence, geometry aside.
+    const html = topbarStripHtml(null, null, CLOSED);
+    // Assert
+    expect(html).toBe('<span class="topbar-warning-slot"></span>');
+  });
+
+  it("opens the ids dropdown the caller says is open", () => {
+    // Arrange / Act — disclosure is the caller's state, held across re-renders.
+    const html = topbarStripHtml(view({ sessionLine: "session s_1" }), BREAKDOWN, {
+      ...CLOSED,
+      session: true,
+    });
+    // Assert
+    expect(html).toContain("session s_1");
   });
 });
 

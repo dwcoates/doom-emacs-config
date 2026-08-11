@@ -642,6 +642,15 @@ describe("topbarClickAction", () => {
     });
   });
 
+  it("classifies a click on the ids chip as the session toggle", () => {
+    // Arrange + Act + Assert — the ids dropdown rides the strip's own click
+    // vocabulary, so it dismisses with every other topbar dropdown.
+    expect(topbarClickAction(clickOn("[data-session-toggle]"))).toEqual({
+      kind: "toggle",
+      menu: "session",
+    });
+  });
+
   it("classifies a click on a subagent row as a reveal of that agent", () => {
     // Arrange + Act + Assert
     expect(topbarClickAction(clickOn(".agent-row", { "data-agent-id": "a7" }))).toEqual({
