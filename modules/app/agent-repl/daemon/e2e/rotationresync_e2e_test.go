@@ -230,6 +230,19 @@ func TestE2ETurnAfterARetiredSpaceResyncStillFlows(t *testing.T) {
 	h := newUDSHarness(t)
 	id, conn, _, _ := liveSession(t, h, cwd)
 	rotateSession(t, h, conn, id, cwd)
+	// THE ROTATED TURN IS DRAINED TO ITS END BEFORE THE REFUSAL IS ASKED FOR.
+	// rotateSession returns on the rotated turn's REPLY, which is mid-turn: the
+	// result delta and the turn's own end are still on the wire behind it. The
+	// refusal asserts that NOTHING was pushed for the resync, and a delta the
+	// rotation produced before the resync was ever written would be counted
+	// against it — the sibling tests get this barrier from awaiting the injected
+	// clear, and this one had none. The SSM's own resolution to DONE is caused by
+	// the turn's end, so it cannot precede any of that turn's conversation.
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+		"the rotated turn RESOLVED to DONE, which is every one of its deltas drained": func(frame *frontendv1.FrontendFrame) bool {
+			return ssmResolved(frame, cwd, frontendv1.RenderState_RENDER_STATE_DONE, "turn_ended")
+		},
+	})
 	_, state := dialForReplay(t, h, id, cwd)
 	resyncRefusalFrom(t, conn, state, cwd, "r-retired-mark", retiredSpaceMark)
 
