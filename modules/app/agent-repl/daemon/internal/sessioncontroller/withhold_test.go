@@ -223,10 +223,10 @@ func TestEveryWithholdingCuratorEmptiesTheDeltaWithoutDroppingIt(t *testing.T) {
 		curator func(c *consumer, cd *frontendv1.ConversationDelta, envs map[string]frontend.RecordEnvelope)
 	}{
 		{
-			name: "withholdMachinery",
+			name: "classifyMachinery",
 			item: machineryTestItem("u1"),
-			curator: func(c *consumer, cd *frontendv1.ConversationDelta, _ map[string]frontend.RecordEnvelope) {
-				c.withholdMachinery(cd)
+			curator: func(c *consumer, cd *frontendv1.ConversationDelta, envs map[string]frontend.RecordEnvelope) {
+				c.classifyMachinery(cd, envs)
 			},
 		},
 		{
@@ -266,12 +266,15 @@ func TestEveryWithholdingCuratorEmptiesTheDeltaWithoutDroppingIt(t *testing.T) {
 	}
 }
 
-// machineryTestItem is one slash-command bookkeeping record.
+// machineryTestItem is one slash-command bookkeeping record this curator still
+// WITHHOLDS: pure command stdout, naming no command at all. A record that does
+// name one is classified and kept, so it would not exercise the emptied-delta
+// invariant this table is about.
 func machineryTestItem(uuid string) *frontendv1.Message {
 	return &frontendv1.Message{
 		Uuid: uuid,
 		Payload: &frontendv1.Message_UserMessage{UserMessage: &datav1.ApiUserMessage{
-			Content: &datav1.ApiUserMessage_ContentString{ContentString: compactMachinery},
+			Content: &datav1.ApiUserMessage_ContentString{ContentString: "<local-command-stdout>total 8</local-command-stdout>"},
 		}},
 	}
 }
