@@ -943,6 +943,24 @@ message ShimHello {
   // announced stream contains no pre-boundary lifecycle history for this
   // query.
   uint64 query_created_seq = 12;
+
+  // The shim's live background-task set AT THE MOMENT IT HANDSHAKES.
+  //
+  // WHY THE HANDSHAKE MUST CARRY IT. A bounce decision is made here, before
+  // any command round-trip: refreshStaleShim defers a roll only on
+  // turn_in_flight || active_turn_ids, both of which describe an SDK TURN.
+  // A detached background task — a spawned agent, a long-lived shell — is
+  // none of those, so a shim doing real async work looks IDLE at exactly the
+  // instant the daemon decides whether to kill it. Asking afterwards is too
+  // late: QueryLiveTasks needs a live connection, and the decision precedes it.
+  //
+  // ABSENCE AND EMPTINESS ARE DIFFERENT, which is the whole reason this is a
+  // message and not a bare repeated field. A present set with no ids means the
+  // shim answered "nothing is running" and a roll is safe. An ABSENT set means
+  // this shim does not answer the question, and a roll must NOT be treated as
+  // safe on that silence — the same rule the phantom-task reconciler already
+  // follows. A shim built before this field existed is absent, not empty.
+  LiveTaskSet live_task_set = 13;
 }
 
 message DaemonHello {
