@@ -505,6 +505,25 @@ type RecordEnvelope struct {
 	// A curator keying on this must therefore test for the kind it withholds,
 	// never for "not human".
 	OriginKind datav1.OriginKind
+	// PromptID GROUPS every record the harness wrote for ONE submission. The
+	// CLI stamps it on user records only, and a single submission's group can
+	// run to dozens of records, so it is the handle that says two records
+	// belong to the same invocation without anything having to reason about
+	// their order of arrival.
+	//
+	// Empty is ABSENT, not "the same group as the last one": a system record
+	// carries none at all, and treating an empty id as a group would put every
+	// such record in one.
+	PromptID string
+	// LocalCommandSubtype marks the harness's `"type": "system"` /
+	// `"subtype": "local_command"` record — the second of the two shapes it
+	// writes when a slash command runs.
+	//
+	// It is the STRUCTURED half of that record's identity, alongside IsMeta,
+	// and it exists so a curator can recognize the shape without reading its
+	// prose: the body of one of these is whatever the command printed, which
+	// is arbitrary text that no content test can be held to.
+	LocalCommandSubtype bool
 }
 
 // conversationItemsFromVendor unwraps the vendor Any (a data.v1 message) into
@@ -647,6 +666,9 @@ func transcriptLineItems(tl *datav1.TranscriptLine, producedAtMs int64, requestI
 		items := userMessageItem(env.GetUuid(), transcriptTsMs(env, producedAtMs), requestID, ul.GetMessage())
 		return items, recordEnvelopes(items, env)
 	case *datav1.TranscriptLine_System:
+		if line.System.GetLocalCommand() != nil {
+			return localCommandItems(line.System, producedAtMs, requestID)
+		}
 		return systemLineItems(line.System, producedAtMs, requestID), nil
 	default:
 		return nil, nil // non-conversational metadata line
@@ -663,7 +685,32 @@ func recordEnvelopes(items []*frontendv1.Message, env *datav1.LineEnvelope) map[
 		SourceToolUseID: env.GetSourceToolUseId(),
 		AgentID:         env.GetAgentId(),
 		OriginKind:      env.GetOrigin().GetKind(),
+		PromptID:        env.GetPromptId(),
 	})
+}
+
+// localCommandItems curates the harness's `system`/`local_command` record — the
+// SECOND shape it writes when a slash command runs — into an item a curator can
+// classify, and states in the envelope that it IS that shape.
+//
+// WHY IT BECOMES AN ITEM AT ALL. This record used to reach no frontend, because
+// systemLineItems models no arm for it, so the fact that the user ran the
+// command had no representation anywhere. It is a record of something the user
+// DID to the session, and sessioncontroller/machinery.go turns it into the
+// feed's account of that; without an item there is nothing for that classifier
+// to see. The user_message arm carries the body only as far as that classifier,
+// which replaces the payload with the command's identity.
+func localCommandItems(sl *datav1.SystemLine, producedAtMs int64, requestID string) ([]*frontendv1.Message, map[string]RecordEnvelope) {
+	env := sl.GetEnvelope()
+	items := userMessageItem(env.GetUuid(), transcriptTsMs(env, producedAtMs), requestID, &datav1.ApiUserMessage{
+		Content: &datav1.ApiUserMessage_ContentString{ContentString: sl.GetLocalCommand().GetContent()},
+	})
+	envs := recordEnvelopes(items, env)
+	for uuid, re := range envs {
+		re.LocalCommandSubtype = true
+		envs[uuid] = re
+	}
+	return items, envs
 }
 
 // streamDetachmentEnvelopes is the STREAM plane's answer to recordEnvelopes:
