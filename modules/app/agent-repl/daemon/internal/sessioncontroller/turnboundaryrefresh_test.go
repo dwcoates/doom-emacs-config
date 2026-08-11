@@ -77,12 +77,25 @@ func newStaleRefreshHarness(t *testing.T, current string, watch *logWatch) *queu
 
 // reattach drives the ShimReady hook a returning shim's handshake ends in —
 // the exact production entry point the build comparison is made from.
+// The hello carries an EMPTY-BUT-PRESENT live-task set, which is what a current
+// shim with no detached work sends. The presence matters: an absent set is a
+// shim that does not answer the async question at all, and these tests are
+// about the TURN fork rather than about silence (asyncrefresh.go). Tests that
+// mean to exercise detached work use reattachWithAsyncWork.
 func (h *queueHarness) reattach(build string, turnInFlight bool, activeTurnIDs []string) {
+	h.t.Helper()
+	h.reattachWithAsyncWork(build, turnInFlight, activeTurnIDs, nil)
+}
+
+// reattachWithAsyncWork is reattach for a shim also running detached background
+// work. A nil id list is still an ANSWER — present and empty.
+func (h *queueHarness) reattachWithAsyncWork(build string, turnInFlight bool, activeTurnIDs, liveTaskIDs []string) {
 	h.t.Helper()
 	h.m.onConnected("ws", "s1", &corev1.ShimHello{
 		BuildSha:      build,
 		TurnInFlight:  turnInFlight,
 		ActiveTurnIds: activeTurnIDs,
+		LiveTaskSet:   &corev1.LiveTaskSet{TaskIds: liveTaskIDs},
 	})
 }
 
