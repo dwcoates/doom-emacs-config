@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"claude-repld/internal/bounceledger"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/keepalive"
@@ -640,6 +641,24 @@ func main() {
 		daemonFatal(daemonLog, "claude-repld: create session lock dir: %v", err)
 	}
 	phases.Mark("shim-listener")
+	// The bounce ledger lives beside the locks it is read against: both answer
+	// "which process owns this workspace", one from the kernel and one from the
+	// daemon that stepped aside.
+	lockDir, err := sessionlock.Dir()
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: resolve session lock dir: %v", err)
+	}
+	bounceLedgerPath := filepath.Join(lockDir, "bounce-ledger.json")
+	// READ BEFORE ANYTHING OVERWRITES IT. The predecessor's ledger is the only
+	// account of which shim pids this daemon was handed, and the first teardown
+	// of this process replaces it.
+	predecessorBounce, err := bounceledger.Load(bounceLedgerPath)
+	if err != nil {
+		// NOT FATAL AND NOT SILENT: an unreadable ledger costs the boot its
+		// per-session verdicts, which is a lost account rather than a broken
+		// daemon. The sweep then reports that it can make no claim.
+		legacyLog("claude-repld: bounce ledger UNREADABLE at %s: %v — this boot can make no per-session claim about what the last bounce did to any shim", bounceLedgerPath, err)
+	}
 
 	// The per-session shim-controller consumes each session's UDS shim stream and
 	// renders it onto the frontend surface + SSM. Its push target (the
@@ -1119,6 +1138,32 @@ func main() {
 	// Bind the session-command surface now that the *Server exists (createSession
 	// /deleteSession UDS commands and the snapshot DaemonView delegate to it).
 	sessionCommands.SetTarget(srv)
+	// THE BOUNCE LEAVES A WITNESS. Every teardown records which shim pid each
+	// session is being handed over with, and whether that is a preservation or
+	// a deliberate roll, so the next daemon judges the bounce per session by
+	// pid identity instead of by counting processes — which is how a total
+	// fleet loss once passed for a healthy restart.
+	srv.RecordBounce = func(rolled bool, cause string) error {
+		entries := make([]bounceledger.Entry, 0, 8)
+		for sessionID, pid := range controller.LiveShimPIDs() {
+			rec, ok := sessionRegistry.Get(sessionID)
+			if !ok || rec.CWD == "" {
+				continue
+			}
+			entry := bounceledger.Entry{
+				SessionID:   sessionID,
+				Workspace:   rec.CWD,
+				PID:         int(pid),
+				Disposition: bounceledger.DispositionPreserved,
+			}
+			if rolled {
+				entry.Disposition = bounceledger.DispositionRolled
+				entry.Reason = "the caller asked for the shim bundle to be replaced (" + cause + ")"
+			}
+			entries = append(entries, entry)
+		}
+		return bounceledger.Write(bounceLedgerPath, entries)
+	}
 	// Only now can a creation job invoke the daemon's real session path.  The
 	// inbox stopping is a DEGRADED FEATURE, never a dead daemon: a single
 	// failed creation used to hibernate every live session in the editor.  Job
@@ -1315,6 +1360,8 @@ func main() {
 			Ensurer:   controller,
 			Logf:      legacyLog,
 			Unwired:   bootSweepVerdicts.Route,
+			Ledger:    predecessorBounce,
+			Holders:   sessionlock.WorkspaceLockHolders,
 		}).Run(sweepCtx)
 	})
 	daemonLog.With("operation", "serve-http", "version", daemonVersion, "address", *addr,
