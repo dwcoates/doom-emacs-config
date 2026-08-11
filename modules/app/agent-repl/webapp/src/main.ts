@@ -22,11 +22,7 @@ import {
   runningAgentClocks,
   topbarClickAction,
 } from "./topbar.js";
-import {
-  tokensDisclosureHtml,
-  topbarViewHtml,
-  topbarWarningsHtml,
-} from "./topbar-view.js";
+import { topbarStripHtml } from "./topbar-view.js";
 import { addressLabel, pageAddress, scopedStreamUrl, type PageAddress } from "./address.js";
 import { AgentClock } from "./agent-clock.js";
 import { AGENTS_SPEC } from "./agents.js";
@@ -899,6 +895,10 @@ async function boot(): Promise<void> {
   // while the daemon has raised a warning, so this can be true only for as long
   // as there is something to read.
   let warningsMenuOpen = false;
+  // Whether the topbar's IDS dropdown is open — the session and conversation
+  // identifiers the strip no longer prints inline. Held here for the same
+  // reason as the other two.
+  let sessionMenuOpen = false;
 
   // The running turn's timer paints the footer's clock cell. Its tick writes
   // just that one span rather than re-rendering the dock — and emphatically not
@@ -953,9 +953,11 @@ async function boot(): Promise<void> {
     // carries the tokens chip, so an unconditional rewrite would destroy it
     // mid-press and the browser would fire no click at all.
     infoSlot.paint(
-      topbarViewHtml(store.topbar(ws)) +
-        topbarWarningsHtml(store.topbar(ws), warningsMenuOpen) +
-        tokensDisclosureHtml(store.tokenBreakdown(ws), tokensMenuOpen),
+      topbarStripHtml(store.topbar(ws), store.tokenBreakdown(ws), {
+        session: sessionMenuOpen,
+        tokens: tokensMenuOpen,
+        warnings: warningsMenuOpen,
+      }),
     );
     // The idle-with-live-async signal breathes as the sidebar's amber dot on
     // this session's own row rather than as strip text. The flag is the feed
@@ -1200,6 +1202,11 @@ async function boot(): Promise<void> {
     if (action.menu === "warnings") {
       warningsMenuOpen = !warningsMenuOpen;
       renderChrome();
+      return;
+    }
+    if (action.menu === "session") {
+      sessionMenuOpen = !sessionMenuOpen;
+      renderChrome();
     }
   });
 
@@ -1356,6 +1363,7 @@ async function boot(): Promise<void> {
   const closeAllMenus = (): void => {
     tokensMenuOpen = false;
     warningsMenuOpen = false;
+    sessionMenuOpen = false;
     footer.closeMenus();
     feed.closeAgentMenus();
     renderChrome();
@@ -1366,7 +1374,8 @@ async function boot(): Promise<void> {
       !target.closest(".agents-menu") &&
       !target.closest(".tasks-menu") &&
       !target.closest(".tokens-menu") &&
-      !target.closest(".warnings-menu")
+      !target.closest(".warnings-menu") &&
+      !target.closest(".session-menu")
     ) {
       closeAllMenus();
     }

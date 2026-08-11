@@ -934,7 +934,56 @@ body::after {
 /* The remediation notice sits immediately right of the alarm dot. */
 #remediation { color: var(--remediation); }
 
-#session-info { margin-left: auto; }
+/* THE IDENTITY STRIP, right-anchored against the pickers.
+   Its own leading content — the workspace title — therefore sits wherever the
+   strip's TOTAL width puts it, so anything to the right of the title that
+   re-measures drags the title sideways with it. That is what made the header
+   jump on every push: the session and conversation ids used to live here, and
+   they are long, proportional-width and re-minted on every session rotation.
+   They are a dropdown now (`.session-menu`), and the three rules below hold the
+   width of everything else that is allowed to change. */
+#session-info {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* The connectivity glyph is a different CHARACTER per state ("●", "◌", "✕",
+   …), and those characters do not share an advance width. Boxed at a fixed
+   width and centred in it, so a session going from connecting to connected
+   changes the mark and nothing else. */
+.topbar-connectivity {
+  display: inline-block;
+  width: 1.25em;
+  text-align: center;
+}
+
+/* THE RESERVED WARNING SLOT. The warning indicator is the one element that
+   appears and vanishes with ordinary state, and un-reserved it would re-measure
+   the strip — shoving the title — every time a warning was raised or cleared.
+   The slot holds its width whether or not the chip is inside it. Reserving
+   geometry is NOT rendering an idle control: the chip itself is still absent
+   (see topbarWarningsHtml), so there is nothing to click and no count to read;
+   only the space stays put. */
+.topbar-warning-slot {
+  display: inline-flex;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  /* min-, not a hard width: a chip that outgrew its slot must overflow the
+     reservation rather than be clipped, because a half-drawn warning control is
+     worse than a shifted one. Sized past the widest ordinary chip so the
+     reservation is what actually governs. */
+  min-width: 3.2rem;
+}
+
+/* The strip's own row. The parts are emitted with no whitespace between them
+   (the renderer joins them with ""), so the spacing is the layout's to give. */
+.topbar-view {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
 
 /* The datapoint strip's value colors, shared by BOTH renderings of the
    strip: the header's #session-info and each subagent bubble's
@@ -959,9 +1008,9 @@ body::after {
    the counter-menu facade's parallel class stems; the tokens menu emits the
    same stems from its own module. The menu anchors the overlay, which hangs
    below the topbar without displacing the row it hangs from. */
-.agents-menu, .tasks-menu, .tokens-menu, .warnings-menu { position: relative; display: inline-block; }
+.agents-menu, .tasks-menu, .tokens-menu, .warnings-menu, .session-menu { position: relative; display: inline-block; }
 
-.info-agents, .info-tasks, .info-tokens, .info-warnings {
+.info-agents, .info-tasks, .info-tokens, .info-warnings, .info-session {
   font: inherit;
   background: none;
   border: none;
@@ -974,7 +1023,27 @@ body::after {
 .info-tasks { color: var(--info-tasks); }
 .info-tokens:not(.token-heat) { color: var(--info-tokens); }
 .info-agents:hover, .info-tasks:hover, .info-tokens:hover { text-decoration: underline; }
-.agents-caret, .tasks-caret, .tokens-caret, .warnings-caret { font-size: 0.7rem; }
+.agents-caret, .tasks-caret, .tokens-caret, .warnings-caret, .session-caret { font-size: 0.7rem; }
+
+/* THE IDS CHIP: the session and conversation correlation ids, which the strip
+   used to print inline. Quiet — muted like the rest of the datapoint run,
+   because it is debugging material rather than anything to read on a normal
+   turn. Its label is the fixed word "ids", so the chip's width never moves. */
+.info-session { color: var(--muted); }
+.info-session:hover { text-decoration: underline; }
+/* The ids exist to be COPIED into an issue or a log query, so the row is
+   monospaced (the two ids are hex and a uuid, which proportional type
+   mis-renders at a glance), selectable, and wraps rather than clipping — a
+   half-copied identifier is worse than none. */
+.session-overlay .session-row {
+  padding: 0.3rem 0.35rem;
+  color: var(--fg);
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  user-select: text;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 
 /* THE WARNING INDICATOR: the topbar's one red affordance. It replaces the
    retired accounting line, which printed a settled turn's whole sentence
@@ -983,7 +1052,12 @@ body::after {
    daemon has raised a warning, so it never sits idle in the run. */
 .info-warnings { color: var(--err); }
 .info-warnings:hover { text-decoration: underline; }
+/* Tabular figures and a reserved digit box, so a second warning arriving widens
+   nothing: the count is the strip's only number that changes on its own. */
 .topbar-warning-count {
+  display: inline-block;
+  min-width: 1ch;
+  text-align: right;
   font-variant-numeric: tabular-nums;
   margin-left: 0.15rem;
 }
@@ -996,7 +1070,7 @@ body::after {
   overflow-wrap: anywhere;
 }
 
-.agents-overlay, .tasks-overlay, .tokens-overlay, .warnings-overlay {
+.agents-overlay, .tasks-overlay, .tokens-overlay, .warnings-overlay, .session-overlay {
   position: absolute;
   top: calc(100% + 0.4rem);
   right: 0;
