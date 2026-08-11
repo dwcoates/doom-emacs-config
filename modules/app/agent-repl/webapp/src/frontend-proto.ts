@@ -945,6 +945,27 @@ export interface MessageFrame {
    * exists to keep detectable.
    */
   lineage?: { topLevelMessageId: string; parentMessageId: string };
+  /**
+   * WHETHER A DURABLE RECORD FOR THIS MESSAGE EXISTS AT ALL
+   * (`Message.durability`), as the producer STATED it.
+   *
+   * "durable" — the store holds a record for this message, so it survives a
+   * reload and can be paged. A durable message the store cannot produce is
+   * corruption, and a reader may say so loudly.
+   *
+   * "ephemeral" — no record exists ANYWHERE and none ever will: a slash
+   * command the daemon answered alone, a system/local_command record, a
+   * failure card the daemon synthesized for a session that never started.
+   * Such a message vanishes on reload, and its absence from a page is CORRECT
+   * rather than a miss. It is therefore always a feed row and never at either
+   * end of a containment edge — refused at decode, below.
+   *
+   * ABSENT MEANS THE PRODUCER STATED NO CLASS, and absence is carried through
+   * as absence rather than assumed durable, exactly as `lineage` is. A reader
+   * that defaulted it would make a producer that never set the field
+   * indistinguishable from one that claimed a record it does not have.
+   */
+  durability?: "durable" | "ephemeral";
   arm: MessageArm;
   /** The typed data.v1/core.v1 payload, adopted by shape (see file-top §5.1). */
   payload: JsonObject;
@@ -3398,6 +3419,8 @@ function decodePageContinuation(o: JsonObject): PageContinuation {
 
 const MESSAGE_ENVELOPE_KEYS = new Set([
   "uuid",
+  "durable",
+  "ephemeral",
   "tsMs",
   "requestId",
   "source",
@@ -3496,6 +3519,42 @@ function decodeMessage(v: unknown, ctx: string): MessageFrame {
       topLevelMessageId,
       parentMessageId: str(lin, "parentMessageId", `${ctx}.lineage`),
     };
+  }
+  // THE DURABILITY CLASS, and the lineage rules that ARE its shape.
+  //
+  // The two arms are empty messages, so membership is the entire claim and
+  // there is nothing to read out of either. Both set is malformed — the class
+  // is a oneof precisely so a message cannot claim a record and claim to have
+  // none — and is refused rather than resolved by preference.
+  //
+  // AN EPHEMERAL MESSAGE'S LINEAGE IS REFUSED HERE, at the only place this end
+  // builds one, rather than checked somewhere downstream that something can
+  // skip. It must be a feed row: naming a parent would attach a card into a
+  // paged conversation it will simply vanish from, leaving a hole where a
+  // reader has every reason to expect a message, and a top-level id other than
+  // its own would put it under a row it does not belong to.
+  const hasDurable = o.durable !== undefined && o.durable !== null;
+  const hasEphemeral = o.ephemeral !== undefined && o.ephemeral !== null;
+  if (hasDurable && hasEphemeral) {
+    throw new Error(
+      `frontend-proto: ${ctx} set both \`durable\` and \`ephemeral\`, which are one oneof — a message cannot both have a store record and have none`,
+    );
+  }
+  if (hasDurable) frame.durability = "durable";
+  if (hasEphemeral) {
+    frame.durability = "ephemeral";
+    if (frame.lineage !== undefined) {
+      if (frame.lineage.parentMessageId !== "") {
+        throw new Error(
+          `frontend-proto: ${ctx} is ephemeral and names parent ${frame.lineage.parentMessageId} — an ephemeral message is always a feed row, and one attached to a durable parent would vanish out of the middle of a paged conversation`,
+        );
+      }
+      if (frame.lineage.topLevelMessageId !== frame.uuid) {
+        throw new Error(
+          `frontend-proto: ${ctx} is ephemeral and names top-level ${frame.lineage.topLevelMessageId} rather than its own uuid ${frame.uuid} — an ephemeral message is its own feed row`,
+        );
+      }
+    }
   }
   if (selected.thinkingOrigin !== undefined)
     frame.thinkingOrigin = selected.thinkingOrigin;
