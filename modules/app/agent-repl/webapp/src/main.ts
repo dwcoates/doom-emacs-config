@@ -453,10 +453,46 @@ async function boot(): Promise<void> {
     // for and what it keeps doing. The tail page is also what SUPPLIES the
     // first non-zero mark: it carries `live_join_seq`, the store adopts it as
     // `lastSeq`, and the next resync asks from there.
+    //
+    // THE RULE, STATED WHOLE: a page takes the DELTA path only while its mark
+    // is one the daemon can honor, and the TAIL path otherwise. `fromSeq === 0`
+    // is one half of "otherwise" and the only half this end can see on its own;
+    // the other half is a mark counted in a store seq space the vendor session
+    // has since retired, which looks perfectly valid from here — it is a large
+    // positive number — and is recognizable only to the daemon, which refuses
+    // it (`rejection_cause=retired_seq_space`). The `reanchor` hook below is
+    // that second half, and it lands on this same tail path.
     resync: (snapshot) =>
       snapshot.fromSeq === 0
         ? pager.openTail()
         : dispatcher.resync(snapshot.workspace, snapshot),
+    // THE MARK IS VOID: REPLACE THE CONVERSATION, DO NOT EXTEND IT.
+    //
+    // The daemon refused this page's mark as belonging to a retired store seq
+    // space. Before this hook existed the daemon answered such a mark by
+    // flooring it to zero and replaying the WHOLE conversation — the full
+    // replay paging exists to end, arriving unasked on every reconnect after a
+    // vendor rotation, which is exactly the backfill the user reported.
+    //
+    // The repair is the rotation's own repair, reached by different evidence:
+    // `rebaseSeqSpace` drops the items ranked in the retired space and the mark
+    // that counts in it, and the tail page then supplies both again. Appending
+    // instead would rank the new space's items — which start again at 1 — above
+    // a conversation they follow.
+    reanchor: () => {
+      const workspace = store.state.cwd;
+      if (workspace === "") return false;
+      // The retired conversation's blocks are not this one's: drop every reveal
+      // cursor so a reused block id cannot inherit a shown length.
+      smooth.reset();
+      store.rebaseSeqSpace();
+      frames.schedule();
+      // ConversationPager owns and logs every refusal of its own requests, and
+      // surfaces the ceiling through `onGiveUp` above; this consumes the
+      // already-owned rejection rather than writing a duplicate record.
+      void pager.openTail().catch(consumeOwnedDispatchFailure);
+      return true;
+    },
     log: (level, message) => clog(level, message),
     // The live identity, RE-READ from the store at the retry edge. A page that
     // outlived a daemon bounce can hold a superseded session/generation, whose
