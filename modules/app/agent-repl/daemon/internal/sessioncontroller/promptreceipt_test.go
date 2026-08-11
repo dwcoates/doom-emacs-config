@@ -350,6 +350,27 @@ func newSubmitHarnessWith(t *testing.T, prepare func(*fakeClient)) *submitHarnes
 	}
 }
 
+// wireSession brings the harness's session up and JOINS the owed-resumption
+// drive that wiring launches, so a row seeded afterwards cannot be raced by it.
+//
+// IT IS NOT A CONVENIENCE. noteWired is the level-trigger for the resumption
+// driver, so a submit against an UNWIRED session brings the session up and,
+// with it, a goroutine that concurrently claims whatever the test seeded — a
+// test asserting on the owed set is then racing the daemon doing its job. The
+// bring-up is driven by a real submit, which returns only once awaitDriveable
+// has run noteWired, and the count is taken before the goroutine starts; so by
+// the time Wait returns, the drive has read an EMPTY owed set and exited, and
+// nothing re-arms it until another bring-up. The overlap is unrepresentable
+// rather than merely ordered.
+func (h *submitHarness) wireSession(t *testing.T) {
+	t.Helper()
+	if _, err := h.m.submitPromptAs(context.Background(), "ws", "wire-warmup", "respond with only '.'", "",
+		"keep-alive", testPromptOrigin, submitterKeepAlive, leavesParkedPermissions); err != nil {
+		t.Fatalf("wiring submit: %v", err)
+	}
+	h.m.resumptionDrives.Wait()
+}
+
 func (h *submitHarness) traced() []string {
 	h.traceMu.Lock()
 	defer h.traceMu.Unlock()
