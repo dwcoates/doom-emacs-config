@@ -71,12 +71,33 @@ export interface RecoveryProbeHost {
  * counter below is relative to it.
  */
 export class RecoveryProbe {
-  private epochAtMs = 0;
+  private epochAtMs: number;
   private adoptedAtMs = 0;
   private frames = 0;
   private firstAtMs = 0;
 
-  constructor(private readonly host: RecoveryProbeHost) {}
+  /**
+   * CONSTRUCTION IS ITSELF AN EPOCH, and that is a defect fix rather than a
+   * convenience. This probe is built once per page boot, and a page boot in
+   * this system IS a recovery: the host's webview sweep repairs a workspace
+   * by RE-NAVIGATING its webview, so the page that must answer "have I
+   * recovered?" is usually a brand-new document. Such a page has no socket
+   * drop to open an epoch from, and the host's recover hook already fired at
+   * the link-up edge that ordered the re-navigation — so under the previous
+   * "epoch starts at 0, evidence before it is discarded" rule it ingested a
+   * whole snapshot and every content frame, counted none of them, and
+   * reported `satisfied: false` for the rest of its life. Live records show
+   * exactly that: `webapp_ms=-1` on every workspace of every bounce.
+   *
+   * Opening here does not weaken the epoch's purpose. The purpose is that
+   * evidence from a DIFFERENT connection cannot prove this one is carrying
+   * anything, and a document that did not exist before this boot has no such
+   * evidence to inherit. `openEpoch` remains for the case that does: a live
+   * page whose socket dropped and is being repaired in place.
+   */
+  constructor(private readonly host: RecoveryProbeHost) {
+    this.epochAtMs = host.now();
+  }
 
   /**
    * Open a new recovery epoch, discarding evidence from the previous one.
