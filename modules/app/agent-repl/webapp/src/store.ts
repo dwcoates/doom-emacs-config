@@ -83,7 +83,7 @@ import {
  *
  * Feed order is NOT arrival order. The connect resync replays history (low
  * seqs) over the same socket that carries live pushes (high seqs), so a live
- * item — the user's own prompt echo, most visibly — can arrive mid-replay.
+ * item — the user's own prompt line, most visibly — can arrive mid-replay.
  * Appending in arrival order stranded that prompt wherever the replay
  * happened to be, permanently. Items are instead inserted at their seq rank
  * (`insertBySeq`), which is deterministic however the two streams interleave.
@@ -1738,13 +1738,13 @@ export class ConversationStore {
   // durable record existed for.
   /**
    * `throughSeq` 0 means the delta is DAEMON-COMPOSED — a permission card, a
-   * failure card, a prompt receipt — and carries no store seq because nothing
+   * failure card, an ephemeral card — and carries no store seq because nothing
    * in the store produced it. Such items rank at the high-water mark, the same
    * place a locally-minted card goes: they describe what is happening NOW.
    *
    * Ranking them at 0 instead filed them at the very TOP of the feed, above
-   * every item the session has ever produced — a user's own prompt receipt
-   * would appear above the history they had just been reading.
+   * every item the session has ever produced — a card describing what is
+   * happening now would appear above the history the user was reading.
    */
   private applyConversationItems(
     items: readonly ConversationItem[],

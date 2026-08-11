@@ -1127,7 +1127,7 @@ describe("ingest conversation-items", () => {
 // The connect resync replays history over the same socket that carries live
 // pushes, so arrival order interleaves low-seq history with high-seq live
 // frames. The feed is ordered by each delta's through-seq, not by arrival —
-// the bug this pins: a prompt echo landing mid-replay stranded wherever the
+// the bug this pins: a live prompt landing mid-replay stranded wherever the
 // replay happened to be, permanently.
 
 describe("feed order under replay/live interleave", () => {
@@ -1144,7 +1144,7 @@ describe("feed order under replay/live interleave", () => {
   }
 
   it("slots a replayed item above a live item that arrived first", () => {
-    // Arrange — the live prompt echo (seq 100) beats the replay to the socket.
+    // Arrange — the live prompt (seq 100) beats the replay to the socket.
     const store = new ConversationStore();
     store.ingest([itemsEffect([userTurnItem("live")], 100)]);
     // Act — a history item (seq 5) arrives late.
@@ -1153,7 +1153,7 @@ describe("feed order under replay/live interleave", () => {
     expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
   });
 
-  it("leaves a prompt echo last once a mid-replay burst completes", () => {
+  it("leaves a live prompt last once a mid-replay burst completes", () => {
     // Arrange / Act — replay chunk, then the echo, then the rest of the replay.
     const store = new ConversationStore();
     store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0", messageId: "mh1" })], 5)]);
@@ -1170,7 +1170,7 @@ describe("feed order under replay/live interleave", () => {
     // Arrange — history up to seq 10.
     const store = new ConversationStore();
     store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0" })], 10)]);
-    // Act — a daemon-composed delta (through-seq 0: a prompt receipt, a
+    // Act — a daemon-composed delta (through-seq 0: an ephemeral card, a
     // permission card, a failure card — none of them store facts).
     store.ingest([itemsEffect([userTurnItem("r1")], 0)]);
     // Assert — it describes what is happening NOW, so it belongs at the tail;
@@ -1178,13 +1178,13 @@ describe("feed order under replay/live interleave", () => {
     expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
   });
 
-  it("leaves a seq-less item where it landed when its durable twin arrives", () => {
-    // Arrange — history, then the daemon's seq-less prompt receipt.
+  it("leaves a seq-less item where it landed when its ranked redelivery arrives", () => {
+    // Arrange — history, then a seq-less daemon push of the prompt.
     const store = new ConversationStore();
     store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0" })], 10)]);
-    store.ingest([itemsEffect([userTurnItem("r1")], 0)]);
-    // Act — the durable transcript line, stamped with the same request id.
-    store.ingest([itemsEffect([userTurnItem("r1")], 11)]);
+    store.ingest([itemsEffect([userTurnItem("u1")], 0)]);
+    // Act — the same record, redelivered with a store seq of its own.
+    store.ingest([itemsEffect([userTurnItem("u1")], 11)]);
     // Assert — one bubble, still at the tail: a redelivery replaces content,
     // never position.
     expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
