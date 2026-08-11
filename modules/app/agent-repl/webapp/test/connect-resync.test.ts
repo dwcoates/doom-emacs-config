@@ -1382,3 +1382,116 @@ describe("a replay mark the daemon refuses as retired", () => {
     expect(h.logs.some(([, message]) => message.includes("REPLACED from a tail page"))).toBe(true);
   });
 });
+
+// A RETIRED MARK THE PAGE PROVES FOR ITSELF, rather than one it pays a round
+// trip to be told about. The daemon's rule is `from_seq > live_last_seq`, and
+// `live_last_seq` is the `through_seq` every feed batch already carries — so
+// the page holds both numbers the instant the connect snapshot lands. Measured
+// on a live bounce, the refusal it can derive from them arrived 1,753ms after
+// it could have been derived, and was the largest single segment of the whole
+// post-bounce chain.
+describe("a replay mark the page itself proves retired", () => {
+  it("re-anchors without sending the resync that would earn the refusal", () => {
+    // Arrange — a live connection that has not yet asked for its delta.
+    const h = reanchorHarness();
+    h.trigger.onConnect();
+
+    // Act — the page rules on the snapshot's head before dispatching anything.
+    const took = h.trigger.observeRetiredSeqSpace(snapshot("/ws", 1060));
+
+    // Assert — the repair is under way and NOTHING went to the daemon.
+    expect(took).toBe(true);
+    expect(h.reanchors).toHaveLength(1);
+    expect(h.sent).toHaveLength(0);
+  });
+
+  it("needs no refusal, no heartbeat and no external force to do it", () => {
+    // Arrange — nothing will drive this page but the snapshot it just ingested:
+    // no settle can arrive (nothing was sent), no timer is armed, and no
+    // recovery-SLO force is applied anywhere in this test.
+    const h = reanchorHarness();
+    h.trigger.onConnect();
+
+    // Act
+    h.trigger.observeRetiredSeqSpace(snapshot("/ws", 1060));
+
+    // Assert — the SLO force is a safety net, and a net that is load-bearing
+    // is not a net. The page repaired itself on its own evidence.
+    expect(h.reanchors).toEqual(["retired_seq_space_observed_locally"]);
+  });
+
+  it("disarms the pending resync so no delta goes out under the dead mark", () => {
+    // Arrange
+    const h = reanchorHarness();
+    h.trigger.onConnect();
+
+    // Act — re-anchor, then let an ordinary want-resync fire as every ingested
+    // frame does.
+    h.trigger.observeRetiredSeqSpace(snapshot("/ws", 1060));
+    h.trigger.observe(false, snapshot("/ws", 1060));
+
+    // Assert — still nothing sent: the pager owns the repair now, and a delta
+    // request would only race it to the same tail page.
+    expect(h.sent).toHaveLength(0);
+  });
+
+  it("obeys the same re-anchor ceiling as the daemon's refusal does", () => {
+    // Arrange — a page whose head keeps coming in below its mark.
+    const h = reanchorHarness();
+    h.trigger.onConnect();
+
+    // Act — press well past the ceiling.
+    let taken = 0;
+    for (let i = 0; i < RESYNC_REANCHOR_CEILING + 4; i++) {
+      if (h.trigger.observeRetiredSeqSpace(snapshot("/ws", 1060))) taken++;
+    }
+
+    // Assert — one bound, shared with the refusal path, because it is the same
+    // decision reached from cheaper evidence.
+    expect(taken).toBe(RESYNC_REANCHOR_CEILING);
+    expect(h.reanchors).toHaveLength(RESYNC_REANCHOR_CEILING);
+  });
+
+  it("leaves an in-flight resync alone rather than breaking the single-flight bound", async () => {
+    // Arrange — a resync is genuinely on the wire and will genuinely settle.
+    const pending: Array<() => void> = [];
+    const sent: Sent[] = [];
+    const reanchors: string[] = [];
+    const trigger = new ConnectResync({
+      resync: (request) => {
+        sent.push(request);
+        return new Promise<void>((resolve) => {
+          pending.push(resolve);
+        });
+      },
+      reanchor: (cause) => {
+        reanchors.push(cause);
+        return true;
+      },
+    });
+    trigger.onConnect();
+    trigger.observe(true, snapshot("/ws", 1060));
+    expect(sent).toHaveLength(1);
+
+    // Act — the local proof lands while that request is outstanding.
+    const took = trigger.observeRetiredSeqSpace(snapshot("/ws", 1060));
+
+    // Assert — declined. The request was really sent and will really settle;
+    // forgetting it here is exactly what would let two resyncs be in flight.
+    expect(took).toBe(false);
+    expect(reanchors).toHaveLength(0);
+    for (const resolve of pending) resolve();
+    await flush();
+  });
+
+  it("says nothing for a page with no workspace to name", () => {
+    // Arrange — before the snapshot supplies the routing key, there is no
+    // request to make and no page to re-anchor.
+    const h = reanchorHarness();
+    h.trigger.onConnect();
+
+    // Act / Assert
+    expect(h.trigger.observeRetiredSeqSpace(snapshot("", 1060))).toBe(false);
+    expect(h.reanchors).toHaveLength(0);
+  });
+});

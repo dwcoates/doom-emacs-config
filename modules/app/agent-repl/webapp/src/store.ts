@@ -841,6 +841,30 @@ export interface IngestResult {
    * path, which already owes exactly one resync.
    */
   fenceRotated?: boolean;
+
+  /**
+   * The daemon's own head for this conversation came in BELOW this page's
+   * applied mark: proof, taken locally, that the mark counts in a store seq
+   * space the daemon has retired.
+   *
+   * THIS IS THE 1.75 SECONDS THE POST-BOUNCE PAGE USED TO SPEND FINDING OUT.
+   * The daemon's refusal rule is exactly `from_seq > live_last_seq`
+   * (sessioncontroller.refuseRetiredReplayMark), and `live_last_seq` is the
+   * `through_seq` every feed batch already carries — "frontends persist this
+   * for reconnect resync", says the field's own comment. So the page holds
+   * both sides of that comparison the instant the connect snapshot lands, and
+   * used to throw one of them away: `applyConversationItems` clamps `lastSeq`
+   * monotonically, which is right for the mark and silently discarded the
+   * evidence. Measured on a live bounce, the page then sent a resync it could
+   * have known was unanswerable and waited 1,753ms for the daemon to say so,
+   * before taking the identical re-anchor the refusal prompts.
+   *
+   * The clamp is deliberately LEFT ALONE. This flag reports the observation;
+   * what to do about it belongs to `connect-resync.ts`, which owns the
+   * re-anchor's ceiling and its logging, and which still handles the daemon's
+   * refusal for every path that does not come through a snapshot.
+   */
+  seqSpaceRetired?: boolean;
 }
 
 /**
@@ -1052,6 +1076,14 @@ export class ConversationStore {
   private fenceRotatedThisBatch = false;
 
   /**
+   * Whether a batch in the ingest currently running reported a head BELOW this
+   * page's applied mark. Batch-scoped for the same reason
+   * `fenceRotatedThisBatch` is: a retirement the caller already acted on must
+   * not be re-reported by the next frame. See `IngestResult.seqSpaceRetired`.
+   */
+  private seqSpaceRetiredThisBatch = false;
+
+  /**
    * Diagnostic sink and clock. LOG surfaces ingestion anomalies (a typing
    * delta with nowhere to land); NOW stamps a turn's start (the effect carries
    * no timestamp). Both injected so the store stays transport- and clock-
@@ -1127,6 +1159,7 @@ export class ConversationStore {
     // rotation the caller already acted on must not be re-reported by the next
     // frame, which would re-arm a resync per push forever.
     this.fenceRotatedThisBatch = false;
+    this.seqSpaceRetiredThisBatch = false;
     for (const effect of effects) {
       switch (effect.kind) {
         case "async-bubbles-snapshot":
@@ -1215,6 +1248,7 @@ export class ConversationStore {
     }
     const result: IngestResult = asyncGap === undefined ? { changed } : { changed, asyncGap };
     if (this.fenceRotatedThisBatch) result.fenceRotated = true;
+    if (this.seqSpaceRetiredThisBatch) result.seqSpaceRetired = true;
     return result;
   }
 
@@ -1783,6 +1817,18 @@ export class ConversationStore {
       this.mergeItem(item, rank);
       if (item.kind === "result") this.adoptResultUsage(item);
     }
+    // THE DAEMON'S HEAD, READ RATHER THAN DISCARDED. `throughSeq` is this
+    // conversation's highest seq in the space the batch was produced in, and a
+    // head BELOW the mark this page holds is impossible in one space: the
+    // daemon records last_seen_seq before forwarding an event, so no frontend
+    // can honestly hold a seq the conversation has not reached. It therefore
+    // means the space RESTARTED, and the mark counts in the retired one — the
+    // same inference, from the same two numbers, that the daemon's
+    // refuseRetiredReplayMark makes when the resync finally asks.
+    //
+    // A head of zero says nothing: an empty batch carries no head, and the
+    // `rank` above already treats it as "no ranking information".
+    if (throughSeq > 0 && throughSeq < this.state.lastSeq) this.seqSpaceRetiredThisBatch = true;
     if (throughSeq > this.state.lastSeq) this.state.lastSeq = throughSeq;
     return items.length > 0;
   }
