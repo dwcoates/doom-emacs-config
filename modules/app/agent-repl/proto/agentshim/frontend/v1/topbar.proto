@@ -28,12 +28,12 @@ message TopbarView {
   // The connectivity glyph, resolved: which glyph and which color class to
   // draw, and the tooltip text. The client never maps connectivity enums.
   TopbarConnectivity connectivity = 6;
-  // The accounting line the expanded topbar shows, composed daemon-side and
-  // rendered verbatim. The topbar's own projection of the same reconciliation
-  // the footer cell reports: it shows the sentence and never the verdict, so
-  // it takes a string where the footer takes arms. Empty means no turn has
-  // settled yet.
-  string accounting_line = 7;
+  // RETIRED: the flat accounting line the expanded topbar used to print
+  // inline. The topbar no longer states a settled turn's prose in the strip;
+  // it raises a WARNING (see `warnings`) only when there is something wrong to
+  // say, and the sentence lives inside that warning's dropdown.
+  reserved 7;
+  reserved "accounting_line";
   // The workspace's staleness FENCE at the moment the daemon produced this
   // push: an opaque token the client compares BYTE-WISE against the fence on
   // the workspace's current WorkspaceState, and never parses, splits or
@@ -44,7 +44,41 @@ message TopbarView {
   // A client that learned to decode it would be depending on a fact this
   // contract does not offer, and the token's composition is free to change.
   string fence = 8;
+  // Everything the topbar has to WARN about right now, in display order, each
+  // already resolved into the sentence the client shows. An empty list is the
+  // daemon saying there is nothing wrong, and the client draws no indicator at
+  // all rather than a quiet one — a control over an empty list only invites
+  // the click that proves it is empty.
+  //
+  // It is a LIST because a warning is not a property of accounting: a second
+  // concern (a degraded watcher, a skewed build) joins this list and reaches
+  // the same affordance, instead of growing the strip a second bespoke slot.
+  repeated TopbarWarning warnings = 9;
 }
+
+// One thing the topbar is warning about, resolved completely by the daemon.
+//
+// The client renders `text` verbatim and NEVER re-derives it: the same
+// reconciliation the footer's accounting cell reports has exactly one author,
+// and a renderer that re-composed the sentence would be a second one.
+message TopbarWarning {
+  // The warning's display-ready sentence, composed daemon-side. Never empty —
+  // a warning with nothing to say is a daemon fault, not a renderable state.
+  string text = 1;
+  // WHICH concern raised this warning, as arms of messages rather than a state
+  // enum, so a kind arrives together with whatever evidence that kind implies
+  // and a new kind cannot be added as a bare tag the client must interpret.
+  oneof kind {
+    // The settled turn's accounting did not reconcile (incomplete evidence or
+    // a contradiction); `text` is the footer cell's own summary.
+    TopbarAccountingWarning accounting = 10;
+  }
+}
+
+// The accounting warning's kind arm. It carries no fields of its own: the
+// evidence behind the verdict is the footer accounting cell's, which states it
+// as arms, and duplicating it here would be a second copy to drift.
+message TopbarAccountingWarning {}
 
 // The topbar's connectivity indicator, fully resolved. `tone` names a color
 // class from the shared render-colors vocabulary table (the one deliberate
