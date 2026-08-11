@@ -94,6 +94,90 @@ const phantomTaskGraceMs int64 = 60_000
 // the next sweep asks again.
 const phantomTaskQueryTimeout = 5 * time.Second
 
+// phantomTaskDegradeProbes is how many CONSECUTIVE unanswered live-set probes a
+// session's shim must run up before the sweep calls its answerability degraded.
+//
+// Below it an unanswered probe is a BLIP: the ordinary case is a sweep landing
+// inside a shim roll, a reconnect, or a turn that briefly starved the shim's
+// event loop, and the very next sweep gets an answer. At or above it the shim
+// has declined to answer every time it was asked since, which is a condition an
+// operator has to see.
+//
+// COUNTED IN PROBES, NEVER IN SECONDS, for the same reason the sweep itself is a
+// comparison rather than a timer: an elapsed window is satisfied by wall time in
+// which nothing was ever asked — a suspended laptop or a starved sweeper — and
+// would report a shim as unanswerable on the strength of never having been
+// questioned.
+const phantomTaskDegradeProbes = 3
+
+// taskLiveSetVerdict is what ONE live-set probe outcome did to a session's
+// latched answerability. Every outcome has one, because every probe outcome is
+// recorded; the verdict decides only the LEVEL the record is written at.
+type taskLiveSetVerdict int
+
+const (
+	// taskLiveSetBlip — unanswered, but below the degrade threshold.
+	taskLiveSetBlip taskLiveSetVerdict = iota
+	// taskLiveSetDegradeEdge — the crossing INTO degraded. The one warn.
+	taskLiveSetDegradeEdge
+	// taskLiveSetStillDegraded — unanswered again while already latched.
+	taskLiveSetStillDegraded
+	// taskLiveSetRecoveryEdge — answered again after the latch had closed.
+	taskLiveSetRecoveryEdge
+	// taskLiveSetAnsweredAfterBlips — answered after failures that never
+	// reached the threshold.
+	taskLiveSetAnsweredAfterBlips
+	// taskLiveSetAnswered — answered with no failure run outstanding.
+	taskLiveSetAnswered
+)
+
+// noteLiveSetUnanswered records one unanswered probe and returns the verdict it
+// reached with the consecutive-failure count behind it.
+//
+// NOTHING IS DROPPED. The counter advances on every unanswered probe and the
+// caller writes a record for every one of them; the latch exists so that the
+// WARN fires on the single degrade edge instead of on every idle sweep for as
+// long as the shim stays mute.
+func (c *consumer) noteLiveSetUnanswered() (taskLiveSetVerdict, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.liveSetFailures++
+	count := c.liveSetFailures
+	switch {
+	case c.liveSetDegraded:
+		return taskLiveSetStillDegraded, count
+	case count >= phantomTaskDegradeProbes:
+		c.liveSetDegraded = true
+		return taskLiveSetDegradeEdge, count
+	default:
+		return taskLiveSetBlip, count
+	}
+}
+
+// noteLiveSetAnswered clears the failure run and returns the verdict the answer
+// reached, with the run length it ended.
+//
+// A LATCH YOU CAN ENTER BUT NEVER WATCH LEAVE IS ITS OWN DEFECT, so the recovery
+// edge is reported whenever the latch was closed, and a recovery from a
+// sub-threshold run is reported too — those failures were recorded, and their
+// end belongs beside them.
+func (c *consumer) noteLiveSetAnswered() (taskLiveSetVerdict, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	count := c.liveSetFailures
+	degraded := c.liveSetDegraded
+	c.liveSetFailures = 0
+	c.liveSetDegraded = false
+	switch {
+	case degraded:
+		return taskLiveSetRecoveryEdge, count
+	case count > 0:
+		return taskLiveSetAnsweredAfterBlips, count
+	default:
+		return taskLiveSetAnswered, 0
+	}
+}
+
 // observeTaskLifecycle records the open/closed edge of one task, so the sweep
 // has something to ask ABOUT without re-folding the whole ring.
 //
@@ -352,10 +436,28 @@ func (m *Manager) reconcilePhantomTasks(d *sessionController, candidates []strin
 	if err != nil {
 		// NEVER SWALLOWED, AND NEVER A CLOSE. This is the case the whole design
 		// turns on: silence is not evidence that a task is gone, so an
-		// unanswerable shim leaves the roster untouched and says so.
-		m.warnf("session-controller: task catalog LIVE-SET UNAVAILABLE ws=%q session=%s open_tasks=%v: %v — nothing is closed, because a shim that did not answer is not a session with no tasks; the entries stand until a later sweep gets an answer",
-			d.workspace, d.sessionID, candidates, err)
+		// unanswerable shim leaves the roster untouched and says so — on EVERY
+		// sweep, at a level the latch decides.
+		verdict, failures := d.consumer.noteLiveSetUnanswered()
+		switch verdict {
+		case taskLiveSetDegradeEdge:
+			m.warnf("session-controller: task catalog LIVE-SET UNAVAILABLE ws=%q session=%s consecutive_failures=%d/%d open_tasks=%v: %v — the shim has not answered a live-set probe on any sweep since, so the catalog is now unreconcilable; nothing is closed, because a shim that did not answer is not a session with no tasks, and the entries stand until a later sweep gets an answer",
+				d.workspace, d.sessionID, failures, phantomTaskDegradeProbes, candidates, err)
+		case taskLiveSetStillDegraded:
+			m.logf("session-controller: task catalog live-set STILL UNAVAILABLE ws=%q session=%s consecutive_failures=%d open_tasks=%v: %v — already reported as degraded on the crossing; nothing is closed",
+				d.workspace, d.sessionID, failures, candidates, err)
+		default:
+			m.logf("session-controller: task catalog live-set probe unanswered ws=%q session=%s consecutive_failures=%d/%d (below the degrade threshold) open_tasks=%v: %v — nothing is closed; the next sweep asks again",
+				d.workspace, d.sessionID, failures, phantomTaskDegradeProbes, candidates, err)
+		}
 		return nil
+	}
+	if verdict, failures := d.consumer.noteLiveSetAnswered(); verdict == taskLiveSetRecoveryEdge {
+		m.logf("session-controller: task catalog live-set ANSWERABLE AGAIN ws=%q session=%s after consecutive_failures=%d — the degraded window that opened on the crossing is closed",
+			d.workspace, d.sessionID, failures)
+	} else if verdict == taskLiveSetAnsweredAfterBlips {
+		m.logf("session-controller: task catalog live-set answered ws=%q session=%s after consecutive_failures=%d (never reached the degrade threshold)",
+			d.workspace, d.sessionID, failures)
 	}
 	liveSet := make(map[string]struct{}, len(live))
 	for _, id := range live {
