@@ -1839,7 +1839,16 @@ async function boot(): Promise<void> {
         // permanently discarded. The rotation says otherwise, so it re-arms
         // here, BEFORE the observe below, which dispatches it with the fence
         // this batch just adopted.
-        if (result.fenceRotated) connectResync.observeFenceRotation("WorkspaceState adopted a new fence");
+        if (result.fenceRotated) {
+          // The fence the store holds AFTER the batch: the rotation's re-arm is
+          // owed to the NEW identity, and it is owed only once per identity —
+          // a rotation back to one this page has already resynced under is a
+          // flap, not news. See ConnectResync.observeFenceRotation.
+          connectResync.observeFenceRotation(
+            "WorkspaceState adopted a new fence",
+            store.state.fences.get(store.state.cwd) ?? "",
+          );
+        }
         // Ask for the conversation history this connection has not been told.
         // Read AFTER ingest so the snapshot's own SessionView has supplied the
         // workspace key the daemon routes a resync by.
