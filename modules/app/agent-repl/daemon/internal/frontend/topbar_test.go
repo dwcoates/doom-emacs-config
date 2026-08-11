@@ -165,18 +165,89 @@ func TestTopbarViewCarriesTheModelMenuInTheOrderGiven(t *testing.T) {
 	}
 }
 
-func TestTopbarViewCarriesTheAccountingLineVerbatim(t *testing.T) {
-	// Arrange — the topbar shows the sentence and never the verdict.
+func TestTopbarViewCarriesItsWarningsVerbatim(t *testing.T) {
+	// Arrange — the client renders the warning's sentence and derives nothing.
 	in := validTopbarInputs()
-	in.AccountingLine = "5h 1.0%→2.0% (1.0pp) · 4s"
+	in.Warnings = []*frontendv1.TopbarWarning{{Text: "INVALID ACCOUNTING: totals disagree"}}
 	// Act.
 	view, err := TopbarView(in)
 	// Assert.
 	if err != nil {
 		t.Fatalf("TopbarView: %v", err)
 	}
-	if view.GetAccountingLine() != "5h 1.0%→2.0% (1.0pp) · 4s" {
-		t.Fatalf("accounting line = %q, want it verbatim", view.GetAccountingLine())
+	got := view.GetWarnings()
+	if len(got) != 1 || got[0].GetText() != "INVALID ACCOUNTING: totals disagree" {
+		t.Fatalf("warnings = %v, want them verbatim", got)
+	}
+}
+
+func TestAccountingWarningRaisesNothingForAReconciledTurn(t *testing.T) {
+	// Arrange.
+	cell := &frontendv1.FooterAccountingCell{
+		Summary: "5h 1.0%→2.0% (1.0pp)",
+		Verdict: &frontendv1.FooterAccountingCell_Complete{Complete: &frontendv1.AccountingComplete{}},
+	}
+	// Act.
+	got := AccountingWarning(cell)
+	// Assert.
+	if got != nil {
+		t.Fatalf("warning = %v, want none for a turn that reconciled", got)
+	}
+}
+
+func TestAccountingWarningRaisesNothingWithoutASettledCell(t *testing.T) {
+	// Arrange, Act.
+	got := AccountingWarning(nil)
+	// Assert.
+	if got != nil {
+		t.Fatalf("warning = %v, want none before a turn settles", got)
+	}
+}
+
+func TestAnIncompleteAccountingRaisesTheCellsOwnSentence(t *testing.T) {
+	// Arrange.
+	cell := &frontendv1.FooterAccountingCell{
+		Summary: "INCOMPLETE ACCOUNTING · usage at turn start is absent",
+		Verdict: &frontendv1.FooterAccountingCell_Incomplete{
+			Incomplete: &frontendv1.AccountingIncomplete{Missing: []string{"usage at turn start is absent"}},
+		},
+	}
+	// Act.
+	got := AccountingWarning(cell)
+	// Assert.
+	if got.GetText() != cell.GetSummary() {
+		t.Fatalf("warning text = %q, want the cell's own summary", got.GetText())
+	}
+}
+
+func TestAnInvalidAccountingWarningNamesItsKind(t *testing.T) {
+	// Arrange.
+	cell := &frontendv1.FooterAccountingCell{
+		Summary: "INVALID ACCOUNTING: totals disagree",
+		Verdict: &frontendv1.FooterAccountingCell_Invalid{
+			Invalid: &frontendv1.AccountingInvalid{Problems: []string{"totals disagree"}},
+		},
+	}
+	// Act.
+	got := AccountingWarning(cell)
+	// Assert.
+	if got.GetAccounting() == nil {
+		t.Fatalf("warning kind = %v, want the accounting arm set", got.GetKind())
+	}
+}
+
+func TestADegradedAccountingWithNoProseStillWarns(t *testing.T) {
+	// Arrange — a degraded verdict whose prose went missing upstream.
+	cell := &frontendv1.FooterAccountingCell{
+		Verdict: &frontendv1.FooterAccountingCell_Invalid{
+			Invalid: &frontendv1.AccountingInvalid{Problems: []string{"totals disagree"}},
+		},
+	}
+	// Act.
+	got := AccountingWarning(cell)
+	// Assert.
+	if got.GetText() == "" {
+		t.Fatalf("warning text is empty, want the daemon's complaint stated rather than dropped")
 	}
 }
 
