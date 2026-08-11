@@ -3250,6 +3250,16 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		// wrong.
 		if wasCurrent && runErr != nil {
 			m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityUnavailable, "session_controller_exit")
+			// AND THE DAEMON OWES THIS WORKSPACE A SESSION AGAIN. The line
+			// above is the whole of what used to happen here: the axis went
+			// blue and the workspace stayed dead until somebody opened it, so
+			// recovery was a property of whether a person was looking. The
+			// SAME `runErr != nil` that makes this a fault rather than a
+			// teardown is what makes it a revival: every clean cancel of a
+			// session controller ctx belongs to something that ASKED for the
+			// session to stop, and the enumeration above this branch is
+			// exhaustive over those (bringupretry.go).
+			m.armSessionRevival(workspace, sessionID, runErr)
 		}
 		if wasCurrent && runErr == nil {
 			m.logf("session-controller: session %s session controller exited CLEANLY ws=%q; leaving the legacy connectivity projection to whoever asked for the teardown (a hibernation already recorded `hibernated`, a failed bring-up already recorded `severed`)",
