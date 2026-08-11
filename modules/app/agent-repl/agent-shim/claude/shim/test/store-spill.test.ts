@@ -163,6 +163,45 @@ describe("SpillJournal", () => {
     expect(fs.readdirSync(dir).some((name) => name.includes(".foreign-"))).toBe(true);
   });
 
+  it("re-seeds the header when the file has been truncated to nothing", async () => {
+    // Arrange: a zero-length file is not a journal — there is no header to tell
+    // a reader what it is looking at.
+    const dir = tmpSpillDir();
+    const journal = openJournal(dir);
+    journal.append([event(1n, "w-1")]);
+    fs.truncateSync(path.join(dir, "store-write-spill.bin"), 0);
+
+    // Act
+    const recovered = journal.read();
+
+    // Assert: nothing owed, and the file is a journal again.
+    expect(recovered).toEqual([]);
+    expect(fs.readFileSync(path.join(dir, "store-write-spill.bin")).subarray(0, 4).toString("ascii")).toBe("ARSP");
+  });
+
+  it("stops at a record whose body is present but does not decode", async () => {
+    // Arrange: a complete-looking record that is not a valid EventBatch is NOT
+    // a torn tail — the bytes are all there and they are wrong. Reading past it
+    // would mean reading at a bad offset.
+    const dir = tmpSpillDir();
+    const journal = openJournal(dir);
+    journal.append([event(1n, "w-1")]);
+    journal.close();
+    const undecodable = Buffer.alloc(6);
+    undecodable.writeUInt32BE(2, 0);
+    // Field 1 (events), wire type LEN, declaring 127 bytes that are not there.
+    undecodable[4] = 0x0a;
+    undecodable[5] = 0x7f;
+    fs.appendFileSync(path.join(dir, "store-write-spill.bin"), undecodable);
+
+    // Act
+    const reopened = openJournal(dir);
+    const recovered = reopened.read();
+
+    // Assert: the good record before it is still delivered.
+    expect(recovered.map((batch) => batch[0]!.writeId)).toEqual(["w-1"]);
+  });
+
   it("reports closed once the descriptor is released", async () => {
     // Arrange
     const journal = openJournal(tmpSpillDir());
