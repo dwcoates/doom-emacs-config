@@ -6,6 +6,7 @@ import {
   liveContextDelta,
   stringField,
   topLevelUsage,
+  RETIRED_FENCE_MEMORY,
   type ConversationItem,
   type ResultItem,
   type StoreState,
@@ -2577,6 +2578,58 @@ describe("the fence gate (the one choke point every fenced view passes)", () => 
     expect(store.topbar("ws")?.title).toBe("ws · main");
   });
 
+  it("brands a push fenced by a token this page previously held as superseded", () => {
+    // Arrange — the page held f1 and then adopted f2; a push composed before
+    // the rotation lands after it.
+    const levels: string[] = [];
+    const store = new ConversationStore((level) => levels.push(level));
+    store.ingest([workspaceEffect({ fence: "f1" })]);
+    store.ingest([workspaceEffect({ fence: "f2" })]);
+    levels.length = 0;
+    // Act
+    store.ingest([topbarEffect("f1")]);
+    // Assert — a race with a rotation this page already adopted is INFO.
+    expect(levels).toContain("info");
+  });
+
+  it("still warns on a push fenced by a token this page never held", () => {
+    // Arrange — f9 belongs to a world this page has never been in.
+    const levels: string[] = [];
+    const store = new ConversationStore((level) => levels.push(level));
+    store.ingest([workspaceEffect({ fence: "f2" })]);
+    levels.length = 0;
+    // Act
+    store.ingest([topbarEffect("f9")]);
+    // Assert
+    expect(levels).toContain("warn");
+  });
+
+  it("discards a SUPERSEDED push whole, exactly as it discards a foreign one", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ fence: "f1" })]);
+    store.ingest([workspaceEffect({ fence: "f2" })]);
+    // Act
+    store.ingest([topbarEffect("f1")]);
+    // Assert
+    expect(store.topbar("ws")).toBeNull();
+  });
+
+  it("forgets a retired fence once the bound is passed, reporting it as foreign", () => {
+    // Arrange — nine rotations past f0 push it out of an eight-deep memory.
+    const levels: string[] = [];
+    const store = new ConversationStore((level) => levels.push(level));
+    store.ingest([workspaceEffect({ fence: "f0" })]);
+    for (let i = 1; i <= RETIRED_FENCE_MEMORY + 1; i++) {
+      store.ingest([workspaceEffect({ fence: `r${i}` })]);
+    }
+    levels.length = 0;
+    // Act
+    store.ingest([topbarEffect("f0")]);
+    // Assert
+    expect(levels).toContain("warn");
+  });
+
   it("discards a STALE push whole, adopting no part of it", () => {
     // Arrange — half a stale view is a view that disagrees with itself.
     const store = new ConversationStore();
@@ -2608,7 +2661,7 @@ describe("the fence gate (the one choke point every fenced view passes)", () => 
     // Assert
     expect(lines).toContainEqual(
       "stale fenced view discarded whole: topbar for workspace=ws carried fence=f1 " +
-        "while the workspace's current fence is f2 (no part of it was adopted)",
+        "while the workspace's current fence is f2 (no part of it was adopted; the push is foreign)",
     );
   });
 
