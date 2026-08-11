@@ -963,6 +963,123 @@ successful ensure or a manual panel open clears the marker."
 (defvar agent-repl--frontend-reattach-timer nil
   "Repeating timer driving `agent-repl--frontend-reattach-check', or nil.")
 
+;;;; ---- The daemon-reachability probe: a LATCHED verdict -----------------
+;;
+;; The reattach sweep is the only thing in Emacs that asks, on a schedule,
+;; "can this editor reach a daemon at all".  It used to answer
+;; INSTANTANEOUSLY: every sweep whose daemon ensure failed raised its own
+;; `agent-repl--warn', so a single failed ensure during a deliberate bounce
+;; — the sweep landing in the two-second hole between the old daemon exiting
+;; and the new one binding its socket — produced exactly the same record as a
+;; daemon that was never coming back, and a real outage produced one warning
+;; every 15 seconds for as long as it lasted.  Neither reader could tell a
+;; blip from a fault, which is the failure mode this latch closes.
+;;
+;; THE LATCH IS COUNTED, NOT TIMED.  The verdict turns on CONSECUTIVE FAILED
+;; PROBES — a fact the sweep already produces, one per attempt — rather than
+;; on a duration invented for the purpose.  A count says "the daemon has now
+;; refused to come up N times running"; a stopwatch says only that wall time
+;; passed, which a suspended laptop or a starved timer can supply without a
+;; single probe ever having run.
+;;
+;; NOTHING IS SWALLOWED.  Every failed ensure is still recorded with its
+;; detail, on every sweep, degraded or not.  What the latch changes is the
+;; SEVERITY: the warn fires once, on the DEGRADE EDGE, and the recovery edge
+;; is logged too — a latch you can enter but never watch leave is its own
+;; defect.
+
+(defcustom agent-repl-frontend-daemon-probe-degrade-failures 3
+  "Consecutive failed daemon ensures before the reachability probe degrades.
+Below this many, a failed ensure is a BLIP: the ordinary case is a sweep
+landing inside a deliberate daemon bounce, which the very next sweep
+resolves.  At or above it, the daemon has declined to come up this many
+times running and the probe latches `:degraded', warning once.
+
+Counted in probes, never in seconds: the sweep already produces one
+outcome per attempt, and a count cannot be satisfied by wall time during
+which nothing was ever asked."
+  :type 'integer
+  :group 'agent-repl)
+
+(defvar agent-repl--frontend-daemon-probe-failures 0
+  "Consecutive failed daemon ensures observed by the reattach sweep.
+Reset to zero by `agent-repl--frontend-daemon-probe-note-reachable' the
+moment the daemon answers again.")
+
+(defvar agent-repl--frontend-daemon-probe-state :healthy
+  "The LATCHED daemon-reachability verdict: `:healthy' or `:degraded'.
+Not an instantaneous sample.  `:degraded' means
+`agent-repl-frontend-daemon-probe-degrade-failures' consecutive ensures
+have failed and none has succeeded since.  Read it through
+`agent-repl-frontend-daemon-probe-health', never directly.")
+
+(defun agent-repl-frontend-daemon-probe-health ()
+  "Return the latched daemon-reachability verdict, `:healthy' or `:degraded'.
+
+A CONSIDERED VERDICT, not a sample: a consumer reading `:degraded' knows
+the daemon has failed
+`agent-repl-frontend-daemon-probe-degrade-failures' consecutive ensures,
+not merely that this one read landed during a hiccup.
+
+Pure read.  The transitions are logged where they are decided, in
+`agent-repl--frontend-daemon-probe-note-failure' and
+`agent-repl--frontend-daemon-probe-note-reachable'."
+  agent-repl--frontend-daemon-probe-state)
+
+(defun agent-repl--frontend-daemon-probe-note-failure (detail)
+  "Record one failed daemon ensure, DETAIL naming why, and latch if it persists.
+
+Every failure is recorded, every time.  Only the LEVEL depends on whether
+the condition persisted: below the threshold and while already latched it
+is an ordinary log line, and the single crossing into `:degraded' is the
+warning.  A failure is never dropped and never made silent."
+  (let ((count (cl-incf agent-repl--frontend-daemon-probe-failures))
+        (threshold (max 1 agent-repl-frontend-daemon-probe-degrade-failures)))
+    (cond
+     ((eq agent-repl--frontend-daemon-probe-state :degraded)
+      (agent-repl--log
+       nil
+       "daemon-probe: STILL :degraded consecutive-failures=%d detail=%s"
+       count detail))
+     ((>= count threshold)
+      (setq agent-repl--frontend-daemon-probe-state :degraded)
+      (agent-repl--warn
+       nil
+       "daemon-probe: :healthy -> :degraded consecutive-failures=%d/%d detail=%s — the daemon has declined to come up on every sweep since; Emacs cannot reach it"
+       count threshold detail))
+     (t
+      (agent-repl--log
+       nil
+       "daemon-probe: ensure failed consecutive-failures=%d/%d (below the degrade threshold) detail=%s"
+       count threshold detail)))))
+
+(defun agent-repl--frontend-daemon-probe-note-reachable (cause)
+  "Record the daemon answering again because of CAUSE, clearing the latch.
+
+The RECOVERY EDGE is logged whenever the probe was latched `:degraded',
+so the log carries a matching close for every degrade it opened.  A
+recovery from a failure run that never reached the threshold is logged
+too — quieter, but on the record, because those failures were logged and
+their end belongs beside them.  The ordinary healthy sweep is verbose
+only; it happens every interval and would otherwise drown the log."
+  (let ((previous agent-repl--frontend-daemon-probe-state)
+        (failures agent-repl--frontend-daemon-probe-failures))
+    (setq agent-repl--frontend-daemon-probe-failures 0
+          agent-repl--frontend-daemon-probe-state :healthy)
+    (cond
+     ((eq previous :degraded)
+      (agent-repl--log
+       nil
+       "daemon-probe: :degraded -> :healthy cause=%s after consecutive-failures=%d"
+       cause failures))
+     ((> failures 0)
+      (agent-repl--log
+       nil
+       "daemon-probe: reachable again cause=%s after consecutive-failures=%d (never reached the degrade threshold)"
+       cause failures))
+     (t
+      (agent-repl--log-verbose nil "daemon-probe: :healthy cause=%s" cause)))))
+
 (defvar agent-repl--frontend-last-boot-id nil
   "The daemon boot id last observed by the reattach sweep, or nil.
 A change means a NEW daemon instance: every `:reattach-failed' give-up
@@ -1015,6 +1132,11 @@ boot id, which is what resets each workspace's give-up."
                            (length (agent-repl--live-ws-names)))
   (if (not (agent-repl--uds-connected-p))
       (when (agent-repl--live-ws-names)
+        ;; A LINK STILL DOWN IS NOT ITSELF A FAILED PROBE.  Only the ensure's
+        ;; own outcome, below, feeds the latch: the transport's dial ladder
+        ;; is what brings the link back, and counting its latency as daemon
+        ;; unreachability would degrade the probe during every ordinary
+        ;; reconnect.
         (agent-repl--log nil "reattach: UDS link down with live workspaces — ensuring daemon")
         ;; The `condition-case' still stands beside the failure continuation:
         ;; the ensure delivers a deploy or launch failure to ON-FAILURE, but
@@ -1022,12 +1144,12 @@ boot id, which is what resets each workspace's give-up."
         ;; and is signalled synchronously.  Both reach the same warning.
         (condition-case err
             (agent-repl--frontend-after-daemon-ensured
-             #'ignore
+             (lambda () (agent-repl--frontend-daemon-probe-note-reachable "daemon-ensured"))
              (lambda (detail)
-               (agent-repl--warn nil "reattach: daemon ensure failed: %s" detail)))
+               (agent-repl--frontend-daemon-probe-note-failure detail)))
           (error
-           (agent-repl--warn nil "reattach: daemon ensure failed: %s"
-                            (error-message-string err))))
+           (agent-repl--frontend-daemon-probe-note-failure
+            (error-message-string err))))
         ;; ENSURING THE DAEMON IS NOT REDIALING THE LINK.  A daemon that is
         ;; back and listening leaves this sweep looking at a link that is
         ;; still down, because nothing here ever dialed it; the transport's
@@ -1041,6 +1163,10 @@ boot id, which is what resets each workspace's give-up."
                              "reattach: reconnect already pending — leaving the dial to the ladder")
           (agent-repl--log nil "reattach: no reconnect pending — dialing driver=reattach-sweep")
           (agent-repl-uds-connect)))
+    ;; A CONNECTED LINK IS THE DAEMON ANSWERING, which is the recovery edge
+    ;; the latch exists to make observable: the socket is up, so whatever run
+    ;; of failed ensures preceded it is over.
+    (agent-repl--frontend-daemon-probe-note-reachable "link-connected")
     (dolist (ws (agent-repl--live-ws-names))
       (agent-repl--frontend-ensure-workspace ws))))
 
