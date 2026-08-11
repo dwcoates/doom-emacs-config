@@ -104,6 +104,15 @@ func (m *Manager) resyncFromDurableHistory(workspace string, fromSeq uint64, pub
 		return fmt.Errorf("session-controller: resync for unwired ws %q cannot be served: %w", workspace, errclass.ErrNoLiveSessionController)
 	}
 	lastSeen := m.cfg.SeqStore.LastSeq(sessionID)
+	// The retired-mark refusal, applied here for the same reason the live route
+	// applies it: an unwired workspace's replay has NO upper bound at all, so a
+	// mark from a rotated seq space floors to zero and serves the entire stored
+	// conversation. That is the reconnect-after-bounce case exactly — the daemon
+	// restarted, no controller is up yet, and the page still holds its
+	// pre-rotation mark.
+	if err := m.refuseRetiredReplayMark(workspace, sessionID, "durable_history", fromSeq, lastSeen); err != nil {
+		return err
+	}
 	replayFrom := m.replayFloorAt(workspace, sessionID, lastSeen, fromSeq)
 	cons := m.durableConsumer(workspace, sessionID, publishedFence)
 	if err := m.hydratePersistedAccounting(cons, sessionID); err != nil {
