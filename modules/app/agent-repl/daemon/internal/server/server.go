@@ -249,6 +249,17 @@ type Server struct {
 	idleSweep   func()
 	stopOnce    sync.Once
 
+	// RecordBounce writes the outgoing daemon's pid-identity account of what it
+	// is doing to each session's shim, so the NEXT daemon can say PRESERVED,
+	// ROLLED or DIED per session instead of comparing process counts. rolled is
+	// true when this teardown deliberately ends the shims.
+	//
+	// It is optional: a daemon with no ledger writer still tears down, and the
+	// successor then reports that it can make no claim rather than reporting
+	// health. An error from it is logged, never swallowed — a bounce whose
+	// witness failed to be written must not look like one that was.
+	RecordBounce func(rolled bool, cause string) error
+
 	// viewsMu and viewsClosed own the SessionView push's access to DAEMON-OWNED
 	// DURABLE STATE, on exactly the reasoning that already ends the idle
 	// sweeper's lifetime inside ShutdownAll.
@@ -2492,6 +2503,7 @@ func (s *Server) ShutdownAll(stopShims bool, cause sessioncontroller.StopCause) 
 	// delivers the views its hibernations produce — what the caller needs is
 	// only that no push survives this call.
 	defer s.closeViewPushes(cause)
+	s.recordBounce(stopShims, cause)
 	if !stopShims {
 		s.logf("server: SHIM STOP DECLINED initiator=%s scope=all_sessions reason=stop_shims_false — every session shim is PRESERVED; survivors redial the daemon shim socket and park until the next daemon claims them", cause)
 		return
@@ -2503,6 +2515,23 @@ func (s *Server) ShutdownAll(stopShims bool, cause sessioncontroller.StopCause) 
 		// a drain that lost sessions cannot look like one that lost none.
 		s.logf("server: shutdown drain FAILURES initiator=%s: %v", cause, err)
 	}
+}
+
+// recordBounce writes the pid-identity witness for this teardown.
+//
+// IT RUNS BEFORE THE STOP PASS, deliberately: the pids it names must be the
+// ones this daemon is handing over, and after the drain they are gone.
+func (s *Server) recordBounce(stopShims bool, cause sessioncontroller.StopCause) {
+	if s.RecordBounce == nil {
+		s.logf("server: bounce ledger NOT WRITTEN initiator=%s — no ledger writer is wired, so the next daemon can make no per-session claim about what this bounce did to any shim", cause)
+		return
+	}
+	if err := s.RecordBounce(stopShims, cause.String()); err != nil {
+		s.logf("server: bounce ledger WRITE FAILED initiator=%s: %v — the next daemon will be unable to tell a preserved shim from a replaced one", cause, err)
+		return
+	}
+	s.logf("server: bounce ledger WRITTEN initiator=%s disposition=%s — the next daemon judges each session by shim pid rather than by process count",
+		cause, map[bool]string{true: "rolled", false: "preserved"}[stopShims])
 }
 
 // shutdownHibernateWorkers bounds the fan-out of the shutdown drain.

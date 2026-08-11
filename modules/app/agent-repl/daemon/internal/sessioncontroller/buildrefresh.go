@@ -122,6 +122,23 @@ func (m *Manager) shimPIDFor(sessionID string) int32 {
 	return m.shimPID[sessionID]
 }
 
+// LiveShimPIDs returns the pid each session's shim announced, as a copy.
+//
+// IT IS THE BOUNCE'S WITNESS. A daemon that promises to preserve shims must
+// write down WHICH processes it is leaving behind, because a successor can
+// otherwise only count them — and a replacement counts the same as a survivor.
+func (m *Manager) LiveShimPIDs() map[string]int32 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pids := make(map[string]int32, len(m.shimPID))
+	for sessionID, pid := range m.shimPID {
+		if pid > 0 {
+			pids[sessionID] = pid
+		}
+	}
+	return pids
+}
+
 // currentShimBuild reports the build identity of the bundle this daemon would
 // spawn today, or "" when it cannot be resolved.
 func (m *Manager) currentShimBuild() string {
