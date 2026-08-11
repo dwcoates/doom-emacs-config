@@ -108,8 +108,9 @@ function blockText(content: unknown): string {
 }
 
 /**
- * The harness's per-tool status vocabulary narrowed onto the closed
- * AsyncSource enum, mirroring the daemon's asyncStatus: unknown reads as
+ * The harness's open-ended per-tool status vocabulary, as it appears in a
+ * tool_result's structured `toolUseResult` sidecar, narrowed onto the
+ * closed `AsyncSource["status"]` enum. Anything unrecognized reads as
  * running, because a fold wrongly saying done hides live output while one
  * wrongly saying running only spins a beat too long.
  */
@@ -154,11 +155,11 @@ export function asyncShape(toolName: string): {
 }
 
 /**
- * The webapp MIRROR of the daemon's classifyAsyncSource (asyncsource.go),
- * for cards the daemon's frames never reach: a transcript-parsed spawn at
- * depth two and deeper, whose structured `toolUseResult` sidecar rides the
- * very JSONL this module already parses. One classification, two runtimes
- * — which is what retires prose-regex spawn detection everywhere except
+ * Derive an `AsyncSource` from a tool_result's structured `toolUseResult`
+ * sidecar, for cards no live async-source frame ever reaches: a
+ * transcript-parsed spawn at depth two and deeper, whose sidecar rides the
+ * very JSONL this module already parses. Structural evidence rather than
+ * prose, which is what retires regex spawn detection everywhere except
  * pre-structured history.
  */
 export function classifyAsyncSource(
@@ -288,10 +289,10 @@ export function parseTranscript(text: string, cap = STREAM_ITEM_CAP): ParsedTran
             isError: block.is_error === true,
             content: blockText(block.content),
           };
-          // The entry's structured toolUseResult sidecar is the parsed
-          // twin of the live wire's async-source frame: classifying it
-          // here gives a depth-two spawn card the SAME structural
-          // verdict a live card gets, retiring prose detection for it.
+          // The entry's structured toolUseResult sidecar is the only
+          // async-source evidence a transcript-parsed result carries:
+          // classifying it here gives a depth-two spawn card a structural
+          // verdict, retiring prose detection for it.
           const sidecar = obj(entry, "toolUseResult");
           const src = classifyAsyncSource(target.toolName, sidecar, block.is_error === true);
           if (src) target.asyncSource = src;
