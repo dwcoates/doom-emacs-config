@@ -187,8 +187,8 @@ func (m *Manager) boundQueryInstanceID(workspace string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, live := m.byWS[workspace]
-	if !live || d.consumer == nil {
+	if !live {
 		return ""
 	}
-	return d.consumer.accounting.queryID
+	return d.queryInstanceID
 }
