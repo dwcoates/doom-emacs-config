@@ -61,7 +61,7 @@ func TestE2EThePromptReceiptPrecedesTheTurnsFirstStoreFrame(t *testing.T) {
 	// turn's first store-planed one, keyed on the submit's own request id.
 	found := false
 	for _, cd := range firstStorePlanedDelta(t, live, cwd) {
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			if item.GetRequestId() != "r-echo" || item.GetUserMessage() == nil {
 				continue
 			}

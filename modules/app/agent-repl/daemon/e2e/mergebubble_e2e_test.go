@@ -51,7 +51,7 @@ func assistantProseLine(uuid, text string) *datav1.TranscriptLine {
 }
 
 // feedProse returns every assistant utterance the TOP-LEVEL feed carried.
-func feedProse(items []*frontendv1.ConversationItem) []string {
+func feedProse(items []*frontendv1.Message) []string {
 	var out []string
 	for _, it := range items {
 		for _, block := range it.GetAgent().GetResponse().GetBody().GetContent() {
@@ -120,7 +120,7 @@ func TestE2EAMergeInvocationOpensAWindowThatFoldsAndSettles(t *testing.T) {
 	store.write(sidecarUserLineEvent(t, vendorID, "e2e-merge-barrier-line", barrierPrompt))
 
 	// Assert
-	seen := drainUntilItem(t, conn, cwd, "the barrier prompt's user item", func(it *frontendv1.ConversationItem) bool {
+	seen := drainUntilItem(t, conn, cwd, "the barrier prompt's user item", func(it *frontendv1.Message) bool {
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 
@@ -180,7 +180,7 @@ func TestE2EAMergeWindowReturnsTheFeedToTheUserAfterItSettles(t *testing.T) {
 	store.write(sidecarUserLineEvent(t, vendorID, "e2e-after-barrier-line", barrierPrompt))
 
 	// Assert
-	seen := drainUntilItem(t, conn, cwd, "the barrier prompt's user item", func(it *frontendv1.ConversationItem) bool {
+	seen := drainUntilItem(t, conn, cwd, "the barrier prompt's user item", func(it *frontendv1.Message) bool {
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 	for _, text := range feedProse(seen.items) {
@@ -245,7 +245,7 @@ func TestE2EANonMergeVerbOfTheSameSkillOpensASkillBubbleNotAMergeOne(t *testing.
 	store.write(sidecarUserLineEvent(t, vendorID, "e2e-create-barrier-line", barrierPrompt))
 
 	// Assert
-	seen := drainUntilItem(t, conn, cwd, "the barrier prompt's user item", func(it *frontendv1.ConversationItem) bool {
+	seen := drainUntilItem(t, conn, cwd, "the barrier prompt's user item", func(it *frontendv1.Message) bool {
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 	for _, b := range seen.bubbles() {

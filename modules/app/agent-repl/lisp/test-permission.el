@@ -34,7 +34,7 @@
 ;;;; ---- Fixtures --------------------------------------------------------
 
 (defun agent-repl-test--perm-item (uuid tool resolution &optional deny-message input)
-  "Return a permission `ConversationItem' plist for UUID/TOOL/RESOLUTION."
+  "Return a permission `Message' plist for UUID/TOOL/RESOLUTION."
   (list :uuid uuid
         :permission (list :request (list :requestId uuid
                                          :toolName tool
@@ -69,7 +69,7 @@ reason this reader can ask for one key."
       ;; Act
       (agent-repl--frontend-apply-conversation-delta
        (list :workspace "ws1"
-             :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))
+             :messages (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))
       ;; Assert
       (should (equal (plist-get (agent-repl--ws-get "ws1" :permission-prompt-active)
                                 :request-id)
@@ -83,7 +83,7 @@ reason this reader can ask for one key."
       ;; Act
       (agent-repl--frontend-apply-conversation-delta
        (list :workspace "ws1"
-             :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))
+             :messages (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))
       ;; Assert
       (should (equal (plist-get (agent-repl--ws-get "ws1" :permission-prompt-active)
                                 :tool-name)
@@ -99,7 +99,7 @@ reason this reader can ask for one key."
         ;; Act
         (agent-repl--frontend-apply-conversation-delta
          (list :workspace "ws1"
-               :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))
+               :messages (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))
         ;; Assert
         (should (equal (nth 0 notified) "ws1"))
         (should (string-match-p "permission requested" (nth 1 notified)))
@@ -114,11 +114,11 @@ reason this reader can ask for one key."
                  (lambda (&rest _) (cl-incf count))))
         (agent-repl--frontend-apply-conversation-delta
          (list :workspace "ws1"
-               :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))
+               :messages (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))
         ;; Act — replay the identical pending item
         (agent-repl--frontend-apply-conversation-delta
          (list :workspace "ws1"
-               :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))
+               :messages (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))
         ;; Assert — notified exactly once
         (should (= count 1))))))
 
@@ -131,11 +131,11 @@ reason this reader can ask for one key."
                  (lambda (&rest _) (cl-incf count))))
         (agent-repl--frontend-apply-conversation-delta
          (list :workspace "ws1"
-               :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))
+               :messages (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))
         ;; Act — a different request id arrives
         (agent-repl--frontend-apply-conversation-delta
          (list :workspace "ws1"
-               :items (list (agent-repl-test--perm-item "r2" "Edit" "RESOLUTION_PENDING"))))
+               :messages (list (agent-repl-test--perm-item "r2" "Edit" "RESOLUTION_PENDING"))))
         ;; Assert
         (should (= count 2))
         (should (equal (plist-get (agent-repl--ws-get "ws1" :permission-prompt-active)
@@ -153,7 +153,7 @@ reason this reader can ask for one key."
       ;; Act
       (agent-repl--frontend-apply-conversation-delta
        (list :workspace "ws1"
-             :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_ALLOWED"))))
+             :messages (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_ALLOWED"))))
       ;; Assert
       (should-not (agent-repl--ws-get "ws1" :permission-prompt-active)))))
 
@@ -168,7 +168,7 @@ reason this reader can ask for one key."
         ;; Act
         (agent-repl--frontend-apply-conversation-delta
          (list :workspace "ws1"
-               :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_DENIED" "not allowed"))))
+               :messages (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_DENIED" "not allowed"))))
         ;; Assert
         (should (string-match-p "not allowed" (or echoed "")))))))
 
@@ -184,7 +184,7 @@ reason this reader can ask for one key."
         ;; Act
         (agent-repl--frontend-apply-conversation-delta
          (list :workspace "ws1"
-               :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_DENIED" "not allowed"))))
+               :messages (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_DENIED" "not allowed"))))
         ;; Assert
         (should (cl-find-if (lambda (line)
                               (string-match-p "permission-clear ws=ws1 request=r1" line))
@@ -201,7 +201,7 @@ reason this reader can ask for one key."
         ;; Act
         (agent-repl--frontend-apply-conversation-delta
          (list :workspace "ws1"
-               :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_ABANDONED"))))
+               :messages (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_ABANDONED"))))
         ;; Assert — cleared, and no echo-area message
         (should-not (agent-repl--ws-get "ws1" :permission-prompt-active))
         (should-not echoed)))))
@@ -215,7 +215,7 @@ reason this reader can ask for one key."
       ;; Act — a resolution for an unrelated request id
       (agent-repl--frontend-apply-conversation-delta
        (list :workspace "ws1"
-             :items (list (agent-repl-test--perm-item "r2" "Edit" "RESOLUTION_ALLOWED"))))
+             :messages (list (agent-repl-test--perm-item "r2" "Edit" "RESOLUTION_ALLOWED"))))
       ;; Assert
       (should (equal (plist-get (agent-repl--ws-get "ws1" :permission-prompt-active)
                                 :request-id)
@@ -231,7 +231,7 @@ reason this reader can ask for one key."
       ;; Act — a delta mixing a text item, a tool item, and one permission
       (let ((n (agent-repl--frontend-apply-conversation-delta
                 (list :workspace "ws1"
-                      :items (list '(:uuid "m1" :agent (:assistantMessage (:content "hi")))
+                      :messages (list '(:uuid "m1" :agent (:assistantMessage (:content "hi")))
                                    '(:uuid "t1" :agent (:toolUse (:name "Bash")))
                                    (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))))
         ;; Assert
@@ -244,7 +244,7 @@ reason this reader can ask for one key."
     ;; Act
     (let ((n (agent-repl--frontend-apply-conversation-delta
               (list :workspace "ws1"
-                    :items (list '(:uuid "m1" :agent (:assistantMessage (:content "hi"))))))))
+                    :messages (list '(:uuid "m1" :agent (:assistantMessage (:content "hi"))))))))
       ;; Assert
       (should (= n 0))
       (should-not (agent-repl--ws-get "ws1" :permission-prompt-active)))))
@@ -261,7 +261,7 @@ reason this reader can ask for one key."
         ;; Act
         (agent-repl--frontend-apply-conversation-delta
          (list :workspace "ws1"
-               :items (list '(:uuid "m1" :agent (:assistantMessage (:content "private message"))))))
+               :messages (list '(:uuid "m1" :agent (:assistantMessage (:content "private message"))))))
         ;; Assert
         (should-not ordinary)
         (should (seq-some (lambda (line) (string-match-p "item-count=1" line)) verbose))
@@ -275,7 +275,7 @@ reason this reader can ask for one key."
   (should-error
    (agent-repl--frontend-apply-conversation-delta
     (list :workspace ""
-          :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))))
+          :messages (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_PENDING"))))))
 
 (ert-deftest agent-repl-test-permission-unknown-resolution-errors ()
   "A permission item with an unknown/absent resolution fails loudly."
@@ -283,7 +283,7 @@ reason this reader can ask for one key."
   (should-error
    (agent-repl--frontend-apply-conversation-delta
    (list :workspace "ws1"
-         :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_BOGUS"))))))
+         :messages (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_BOGUS"))))))
 
 (ert-deftest agent-repl-test-permission-missing-workspace-log-excludes-tool-input ()
   "The missing-workspace diagnostic retains the request id but not sensitive input."
@@ -296,7 +296,7 @@ reason this reader can ask for one key."
       (should-error
        (agent-repl--frontend-apply-conversation-delta
         (list :workspace ""
-              :items (list (agent-repl-test--perm-item
+              :messages (list (agent-repl-test--perm-item
                             "r1" "Bash" "RESOLUTION_PENDING" nil
                             '(:command "TOP-SECRET-TOOL-INPUT"))))))
       (should (seq-some (lambda (line) (string-match-p "request=r1 workspace=missing" line)) logs))
@@ -477,7 +477,7 @@ asking the user to write for a reader that no longer exists."
         ;; Act
         (agent-repl--frontend-apply-conversation-delta
          (list :workspace temporary-file-directory
-               :items (list (agent-repl-test--perm-item
+               :messages (list (agent-repl-test--perm-item
                              "r1" "Bash" "RESOLUTION_PENDING"))))
         ;; Assert
         (should (equal logged-ws "ws1"))))))
@@ -491,7 +491,7 @@ asking the user to write for a reader that no longer exists."
         ;; Act / Assert
         (should (= 1 (agent-repl--frontend-apply-conversation-delta
                       (list :workspace "/nowhere/unowned"
-                            :items (list (agent-repl-test--perm-item
+                            :messages (list (agent-repl-test--perm-item
                                           "r1" "Bash" "RESOLUTION_PENDING"))))))))))
 
 (ert-deftest agent-repl-test-permission-delta-unowned-cwd-still-dispatches-raw ()
@@ -505,7 +505,7 @@ loud missing-workspace refusal into a silent one; only the log sink resolves."
         ;; Act
         (agent-repl--frontend-apply-conversation-delta
          (list :workspace "/nowhere/unowned"
-               :items (list (agent-repl-test--perm-item
+               :messages (list (agent-repl-test--perm-item
                              "r1" "Bash" "RESOLUTION_PENDING"))))
         ;; Assert
         (should (equal (plist-get (agent-repl--ws-get "/nowhere/unowned"

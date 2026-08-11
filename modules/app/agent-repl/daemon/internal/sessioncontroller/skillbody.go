@@ -18,7 +18,7 @@ import (
 // model. It is not a prompt, nobody typed it, and rendering it as a user turn
 // draws a page-long prompt bubble the user never wrote.
 //
-// It is curated here into the ConversationItem skill_body arm addressed to the
+// It is curated here into the Message skill_body arm addressed to the
 // Skill call's tool_use_id, so ONE card carries the invocation, its result and
 // its body, updated in place as each lands.
 //
@@ -96,7 +96,7 @@ const skillToolName = frontend.SkillToolName
 
 // observe records whatever skill linkage one curated item establishes: a Skill
 // call, or a record answering one.
-func (s *skillCorrelator) observe(it *frontendv1.ConversationItem) {
+func (s *skillCorrelator) observe(it *frontendv1.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, name := range toolUseCalls(it) {
@@ -174,7 +174,7 @@ func (s *skillCorrelator) reset() {
 // same reason: a record nobody typed must never claim a real prompt's receipt.
 func (c *consumer) curateMetaRecords(cd *frontendv1.ConversationDelta, envs map[string]frontend.RecordEnvelope) asyncPush {
 	var push asyncPush
-	items := cd.GetItems()
+	items := cd.GetMessages()
 	kept := items[:0]
 	for _, it := range items {
 		c.skills.observe(it)
@@ -203,11 +203,11 @@ func (c *consumer) curateMetaRecords(cd *frontendv1.ConversationDelta, envs map[
 			}
 			c.logf("session-controller: skill body ATTACHED to its card ws=%q session=%s seq=%d uuid=%s tool_use_id=%s len=%d",
 				c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), toolUseID, len(text))
-			kept = append(kept, &frontendv1.ConversationItem{
+			kept = append(kept, &frontendv1.Message{
 				Uuid:      it.GetUuid(),
 				TsMs:      it.GetTsMs(),
 				RequestId: it.GetRequestId(),
-				Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
+				Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 					Emission: &frontendv1.AgentEmission_SkillBody{SkillBody: &frontendv1.SkillBodyItem{
 						ToolUseId:    toolUseID,
 						BodyMarkdown: text,
@@ -219,7 +219,7 @@ func (c *consumer) curateMetaRecords(cd *frontendv1.ConversationDelta, envs map[
 		c.logf("session-controller: user turn WITHHELD as harness meta record ws=%q session=%s seq=%d uuid=%s parent=%s skill=%q head=%q — the harness flagged this record isMeta, meaning it wrote it FOR THE MODEL rather than a person typing it; the store keeps it, the conversation feed does not",
 			c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), env.ParentUUID, toolUseID, head(text))
 	}
-	cd.Items = kept
+	cd.Messages = kept
 	return push
 }
 

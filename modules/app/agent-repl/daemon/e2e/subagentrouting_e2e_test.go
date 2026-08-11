@@ -12,7 +12,7 @@
 // So the criterion is a single indivisible statement about one record: the
 // subagent's response arrives INSIDE its bubble's AsyncAgentUpdate, addressed
 // by the id the spawning call published, and DOES NOT appear as a top-level
-// ConversationItem. Both halves are asserted from one drain, because a record
+// Message. Both halves are asserted from one drain, because a record
 // that satisfies one observer and is missed by the other proves nothing.
 package e2e
 
@@ -56,7 +56,7 @@ func TestE2EASubagentResponseIsRoutedToItsBubbleAndNeverToTheFeed(t *testing.T) 
 	store.write(sidecarUserLineEvent(t, vendorID, "e2e-subagent-barrier", barrierPrompt))
 
 	// Assert
-	seen := drainUntilItem(t, conn, cwd, "the barrier prompt's user item", func(it *frontendv1.ConversationItem) bool {
+	seen := drainUntilItem(t, conn, cwd, "the barrier prompt's user item", func(it *frontendv1.Message) bool {
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 
@@ -79,7 +79,7 @@ func TestE2EASubagentResponseIsRoutedToItsBubbleAndNeverToTheFeed(t *testing.T) 
 	// regression the whole reshape exists to make impossible.
 	for _, item := range seen.items {
 		if itemCarriesText(item, subagentText) {
-			t.Errorf("the subagent's response reached the TOP-LEVEL FEED as ConversationItem uuid=%q: detached-agent output must be routed to bubble %q, never rendered in the conversation that dispatched it",
+			t.Errorf("the subagent's response reached the TOP-LEVEL FEED as Message uuid=%q: detached-agent output must be routed to bubble %q, never rendered in the conversation that dispatched it",
 				item.GetUuid(), bubbleID)
 		}
 	}
@@ -103,7 +103,7 @@ func emissionCarriesText(emission *frontendv1.AgentEmission, text string) bool {
 // tool result's string body. Deliberately BROADER than emissionCarriesText —
 // the negative half must not be satisfiable by the daemon merely moving the
 // utterance to a different feed arm.
-func itemCarriesText(item *frontendv1.ConversationItem, text string) bool {
+func itemCarriesText(item *frontendv1.Message, text string) bool {
 	if emissionCarriesText(item.GetAgent(), text) {
 		return true
 	}

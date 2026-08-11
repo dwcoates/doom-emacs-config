@@ -3784,7 +3784,7 @@ func (m *Manager) Close() {
 }
 
 // permHandler bridges a session's canUseTool round-trip to the frontend: it
-// pushes the permission ConversationItem (its resolution lifecycle), surfaces a
+// pushes the permission Message (its resolution lifecycle), surfaces a
 // permission render-state, and blocks on the rendezvous until the frontend
 // answers (or teardown abandons it).
 type permHandler struct {
@@ -3812,7 +3812,7 @@ func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRe
 	// human the same question again instead would be asking them to answer a
 	// question they already answered.
 	//
-	// Nothing is pushed to the frontend: the resolved ConversationItem for this
+	// Nothing is pushed to the frontend: the resolved Message for this
 	// uuid is already there from the answer, and the render-state count never
 	// moved because no waiter parks on this path.
 	if resp, ok := h.reg.recall(req.GetRequestId()); ok {
@@ -3822,7 +3822,7 @@ func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRe
 	}
 	h.logf("session-controller: permission prompt ws=%s session=%s request_id=%s tool=%s (awaiting frontend answer)",
 		h.cons.workspace, sessionID, req.GetRequestId(), req.GetToolName())
-	// Push the pending permission ConversationItem (uuid = request_id) through
+	// Push the pending permission Message (uuid = request_id) through
 	// the retained-ring pusher so a resync replays it (S8). It supersedes the
 	// earlier WorkspaceState-only decision but does NOT replace the PERMISSION
 	// render-state, which stays alongside.

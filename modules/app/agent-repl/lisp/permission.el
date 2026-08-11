@@ -76,7 +76,7 @@ carried by the pushed `WorkspaceState', not by these.")
 ;;;; ---- ConversationDelta permission handling ---------------------------
 
 (defun agent-repl--permission-item-p (item)
-  "Return non-nil when ITEM (a `ConversationItem' plist) is a permission arm.
+  "Return non-nil when ITEM (a `Message' plist) is a permission arm.
 protojson emits ONLY the set oneof arm, so a `permission' key present
 means this item is a `PermissionItem'; every other conversation item type
 is for the webapp feed and carries a different arm key, which Emacs
@@ -120,7 +120,7 @@ suppresses no item."
          ;; this handler runs inside the connection's process filter.  An
          ;; unresolvable delta is a global line naming its raw path.
          (log-workspace resolved)
-         (items (plist-get delta :items))
+         (items (plist-get delta :messages))
          (handled 0))
     ;; Conversation deltas can arrive in rapid succession while a turn is
     ;; streaming, so retain their frame-level trace only in verbose mode.
@@ -155,7 +155,7 @@ suppresses no item."
 
 (defun agent-repl--permission-handle-item (workspace item)
   "Dispatch permission ITEM for WORKSPACE on its resolution.
-ITEM is a `ConversationItem' plist whose `:permission' arm is a
+ITEM is a `Message' plist whose `:permission' arm is a
 `PermissionItem' (request + resolution).  Fails loudly (No-Silent-Fallbacks)
 when WORKSPACE is missing/blank or the resolution is unknown/absent —
 never a defaulted value.  Returns the resolution keyword acted on."
@@ -164,7 +164,7 @@ never a defaulted value.  Returns the resolution keyword acted on."
     (agent-repl--log nil
                      "permission-handle-item: request=%s workspace=missing — no fallback"
                      (plist-get item :uuid))
-    (error "agent-repl permission: ConversationItem permission arm missing workspace"))
+    (error "agent-repl permission: Message permission arm missing workspace"))
   (let* ((uuid (plist-get item :uuid))
          (perm (plist-get item :permission))
          (request (plist-get perm :request))

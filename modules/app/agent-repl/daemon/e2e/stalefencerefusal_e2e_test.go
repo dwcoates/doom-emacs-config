@@ -31,7 +31,7 @@ func TestE2EAResyncCarryingAStaleFenceIsRefusedWithoutReplay(t *testing.T) {
 	_, conn, vendorID, store := liveSession(t, h, cwd)
 	const history = "e2e-stale-fence: conversation a wrongly-served replay would carry"
 	store.write(sidecarUserLineEvent(t, vendorID, "e2e-stale-fence-history", history))
-	awaitItem(t, conn, cwd, "the history item", func(it *frontendv1.ConversationItem) bool {
+	awaitItem(t, conn, cwd, "the history item", func(it *frontendv1.Message) bool {
 		return it.GetUserMessage().GetContentString() == history
 	})
 
@@ -48,7 +48,7 @@ func TestE2EAResyncCarryingAStaleFenceIsRefusedWithoutReplay(t *testing.T) {
 	// Assert
 	var (
 		ack      *frontendv1.CommandAck
-		replayed []*frontendv1.ConversationItem
+		replayed []*frontendv1.Message
 	)
 	deadline := time.Now().Add(frameTimeout)
 	for ack == nil && time.Now().Before(deadline) {

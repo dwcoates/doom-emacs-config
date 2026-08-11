@@ -187,10 +187,10 @@ func (m *Manager) serveStandingTerminalCard(workspace, sessionID string, cons *c
 		logf("session-controller: standing terminal failure card UNPARSEABLE session=%s: %v — the resync is failed rather than served without it", sessionID, err)
 		return false, fmt.Errorf("session-controller: parsing the standing terminal failure card for session %q failed: %w", sessionID, err)
 	}
-	item := &frontendv1.ConversationItem{
+	item := &frontendv1.Message{
 		Uuid: rec.UUID,
 		TsMs: rec.AtMs,
-		Item: &frontendv1.ConversationItem_FailureCard{FailureCard: card},
+		Payload: &frontendv1.Message_FailureCard{FailureCard: card},
 	}
 	if !cons.pushReplayedItem(item) {
 		logf("session-controller: standing terminal failure card NOT PUSHED session=%s uuid=%s — its provenance could not be resolved (see the refusal above)", sessionID, rec.UUID)
@@ -358,7 +358,7 @@ func newServedPrompts() *servedPrompts {
 
 // observe records the user prompts one pushed delta carried.
 func (s *servedPrompts) observe(cd *frontendv1.ConversationDelta) {
-	for _, it := range cd.GetItems() {
+	for _, it := range cd.GetMessages() {
 		um := it.GetUserMessage()
 		if um == nil {
 			continue

@@ -1548,10 +1548,10 @@ func TestUnexpectedQueryTerminationUsesOneAuthoritativeDegradedState(t *testing.
 	if degraded != 1 {
 		t.Fatalf("degraded callbacks = %d", degraded)
 	}
-	if len(push.convo) != 1 || len(push.convo[0].GetItems()) != 1 || push.convo[0].GetItems()[0].GetFailureCard() == nil {
+	if len(push.convo) != 1 || len(push.convo[0].GetMessages()) != 1 || push.convo[0].GetMessages()[0].GetFailureCard() == nil {
 		t.Fatalf("failure pushes = %+v", push.convo)
 	}
-	failure := push.convo[0].GetItems()[0].GetFailureCard()
+	failure := push.convo[0].GetMessages()[0].GetFailureCard()
 	detail := failure.GetKind().GetQueryTermination().GetDetail()
 	if errclass.CardTone(failure) != errclass.ToneLocal || errclass.TypeName(failure) != "unexpected_query_termination" || failure.GetMessage() == "" || failure.GetDetail() == "" || detail.GetQueryInstanceId() != "q" || detail.GetVendorSessionId() != "vendor" || detail.GetObservedAtMs() != 1234 || detail.GetUnexpectedEof() == nil {
 		t.Fatalf("typed query termination failure = %+v", failure)
@@ -1568,7 +1568,7 @@ func TestReplayOnlyUnexpectedQueryDegradedStateSurfacesOnce(t *testing.T) {
 	c.onDegraded = func(*corev1.DegradedState) { degraded++ }
 	queryID := "q"
 	c.Degraded("s", nil, &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID})
-	if degraded != 1 || len(push.convo) != 1 || errclass.TypeName(push.convo[0].GetItems()[0].GetFailureCard()) != "unexpected_query_termination" {
+	if degraded != 1 || len(push.convo) != 1 || errclass.TypeName(push.convo[0].GetMessages()[0].GetFailureCard()) != "unexpected_query_termination" {
 		t.Fatalf("replay-only degraded state: callbacks=%d pushes=%+v", degraded, push.convo)
 	}
 }
@@ -1593,7 +1593,7 @@ func TestDurableReplayAttachesByteEquivalentPersistedAccounting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResponseStamp: %v", err)
 	}
-	gotStamp := push.convo[0].GetItems()[0].GetAgent().GetResponse().GetUsageStamp()
+	gotStamp := push.convo[0].GetMessages()[0].GetAgent().GetResponse().GetUsageStamp()
 	if len(push.convo) != 2 || !proto.Equal(gotStamp, wantStamp) {
 		t.Fatalf("replayed delta = %+v", push.convo)
 	}
@@ -1601,7 +1601,7 @@ func TestDurableReplayAttachesByteEquivalentPersistedAccounting(t *testing.T) {
 	// on FooterAccountingCell, rather than riding the terminal item. What the
 	// item must still carry is the turn-result emission the accounting belongs
 	// to.
-	if push.convo[1].GetItems()[0].GetAgent().GetTurnResult() == nil {
+	if push.convo[1].GetMessages()[0].GetAgent().GetTurnResult() == nil {
 		t.Fatalf("terminal delta carries no turn-result emission: %+v", push.convo[1])
 	}
 }
@@ -1615,7 +1615,7 @@ func TestHistoricalConversationNeverFallsBackToLiveReducerAccounting(t *testing.
 	ev := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Uuid: "assistant-record", Message: &datav1.ApiAssistantMessage{Id: "m", Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "hello"}}}}}}}})
 
 	c.pushConversation(ev, false)
-	if got := push.convo[0].GetItems()[0].GetAgent().GetResponse().GetUsageStamp(); got != nil {
+	if got := push.convo[0].GetMessages()[0].GetAgent().GetResponse().GetUsageStamp(); got != nil {
 		t.Fatalf("historical item attached mutable live accounting: %+v", got)
 	}
 	c.pushConversation(ev, true)
@@ -1623,7 +1623,7 @@ func TestHistoricalConversationNeverFallsBackToLiveReducerAccounting(t *testing.
 	if err != nil {
 		t.Fatalf("ResponseStamp: %v", err)
 	}
-	if got := push.convo[1].GetItems()[0].GetAgent().GetResponse().GetUsageStamp(); !proto.Equal(got, wantStamp) {
+	if got := push.convo[1].GetMessages()[0].GetAgent().GetResponse().GetUsageStamp(); !proto.Equal(got, wantStamp) {
 		t.Fatalf("live item usage stamp = %+v, want %+v", got, wantStamp)
 	}
 }
@@ -1653,7 +1653,7 @@ func TestHistoricalConversationAttachesTranscriptUsageOnLiveAndReplayPaths(t *te
 	// resolved stamp derived from the same record, so the cache read this
 	// transcript line reported is what the bubble's corner shows.
 	for i, delta := range push.convo {
-		stamp := delta.GetItems()[0].GetAgent().GetResponse().GetUsageStamp()
+		stamp := delta.GetMessages()[0].GetAgent().GetResponse().GetUsageStamp()
 		if stamp == nil || stamp.GetCacheReadTokens() != 5 || stamp.GetModel() != "model" {
 			t.Fatalf("push[%d] response usage stamp = %+v, want the transcript line's figures", i, stamp)
 		}
@@ -1775,7 +1775,7 @@ func TestTokenUtilizationModelRejectionDegradesAccountingWithoutWithholdingConve
 				t.Fatalf("conversation delivery after accounting rejection: retained=%d pushes=%d, want 1/1", len(c.snapshotRing()), len(push.convo))
 			}
 			for _, delta := range push.convo {
-				for _, item := range delta.GetItems() {
+				for _, item := range delta.GetMessages() {
 					if stamp := item.GetAgent().GetResponse().GetUsageStamp(); stamp != nil {
 						t.Fatalf("invalid token utilization reached a conversation item as a resolved stamp: %+v", stamp)
 					}

@@ -23,7 +23,7 @@ LIFECYCLE-ARM defaults to `:terminal'; MESSAGE defaults to a sentence."
 
 (defun agent-repl-test--fence-delta (ws card)
   "Return a `ConversationDelta' plist for WS carrying CARD."
-  (list :workspace ws :items (list (list :uuid "start_failed:s1" :failureCard card))))
+  (list :workspace ws :messages (list (list :uuid "start_failed:s1" :failureCard card))))
 
 (defmacro agent-repl-test--with-fenceable-ws (ws &rest body)
   "Run BODY with WS registered as a live workspace."
@@ -100,7 +100,7 @@ LIFECYCLE-ARM defaults to `:terminal'; MESSAGE defaults to a sentence."
   (agent-repl-test--with-fenceable-ws "alpha-ws"
     ;; Arrange
     (let ((delta (list :workspace "alpha-ws"
-                       :items (list (list :uuid "u1" :permission '())))))
+                       :messages (list (list :uuid "u1" :permission '())))))
       ;; Act
       (agent-repl--open-fence-note-delta delta)
       ;; Assert

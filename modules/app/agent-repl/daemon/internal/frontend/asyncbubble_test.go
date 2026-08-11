@@ -931,16 +931,16 @@ func TestSettleAsyncBubbleStopsRecordingActivityOnceSettled(t *testing.T) {
 
 // --- classification verdict on the tool card -------------------------------
 
-func toolCallItem(toolUseID string) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{Item: &frontendv1.ConversationItem_Agent{
+func toolCallItem(toolUseID string) *frontendv1.Message {
+	return &frontendv1.Message{Payload: &frontendv1.Message_Agent{
 		Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_ToolCall{
 			ToolCall: &frontendv1.AgentToolCall{Call: &datav1.ToolUseBlock{Id: toolUseID}},
 		}},
 	}}
 }
 
-func toolOutcomeItem(toolUseID string) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{Item: &frontendv1.ConversationItem_Agent{
+func toolOutcomeItem(toolUseID string) *frontendv1.Message {
+	return &frontendv1.Message{Payload: &frontendv1.Message_Agent{
 		Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_ToolOutcome{
 			ToolOutcome: &frontendv1.AgentToolOutcome{ToolUseId: toolUseID},
 		}},
@@ -949,7 +949,7 @@ func toolOutcomeItem(toolUseID string) *frontendv1.ConversationItem {
 
 func TestStampSpawnedBubbleIDsStampsTheCall(t *testing.T) {
 	item := toolCallItem("tu1")
-	StampSpawnedBubbleIDs([]*frontendv1.ConversationItem{item},
+	StampSpawnedBubbleIDs([]*frontendv1.Message{item},
 		func(string) string { return "bubble:t1" })
 	if got := item.GetAgent().GetToolCall().GetSpawnedBubbleId(); got != "bubble:t1" {
 		t.Fatalf("want the call stamped with the bubble id, got %q", got)
@@ -958,7 +958,7 @@ func TestStampSpawnedBubbleIDsStampsTheCall(t *testing.T) {
 
 func TestStampSpawnedBubbleIDsStampsTheOutcomeWithTheSameString(t *testing.T) {
 	call, outcome := toolCallItem("tu1"), toolOutcomeItem("tu1")
-	StampSpawnedBubbleIDs([]*frontendv1.ConversationItem{call, outcome},
+	StampSpawnedBubbleIDs([]*frontendv1.Message{call, outcome},
 		func(string) string { return "bubble:t1" })
 	if call.GetAgent().GetToolCall().GetSpawnedBubbleId() != outcome.GetAgent().GetToolOutcome().GetSpawnedBubbleId() {
 		t.Fatal("the daemon resolves the id once and stamps the same string on both")
@@ -967,7 +967,7 @@ func TestStampSpawnedBubbleIDsStampsTheOutcomeWithTheSameString(t *testing.T) {
 
 func TestStampSpawnedBubbleIDsLeavesACallThatDetachedNothingEmpty(t *testing.T) {
 	item := toolCallItem("tu1")
-	StampSpawnedBubbleIDs([]*frontendv1.ConversationItem{item}, func(string) string { return "" })
+	StampSpawnedBubbleIDs([]*frontendv1.Message{item}, func(string) string { return "" })
 	if got := item.GetAgent().GetToolCall().GetSpawnedBubbleId(); got != "" {
 		t.Fatalf("empty means 'this call detached nothing' and is the only reading of empty, got %q", got)
 	}

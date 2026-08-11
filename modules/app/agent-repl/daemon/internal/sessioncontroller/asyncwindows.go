@@ -408,7 +408,7 @@ func (s *asyncBubbleStore) settleWindows(v frontend.AsyncVerdict, edge string) (
 // detection cannot disagree about the same call.
 func (c *consumer) observeSkillSpawn(curated frontend.Curation, ev *corev1.Event) asyncPush {
 	var push asyncPush
-	for _, item := range curated.Feed.GetItems() {
+	for _, item := range curated.Feed.GetMessages() {
 		for _, use := range frontend.SkillToolCallsInItem(item) {
 			inv, ok := frontend.SkillCall(use)
 			if !ok {
@@ -495,7 +495,7 @@ func (c *consumer) foldWindows(cd *frontendv1.ConversationDelta, ev *corev1.Even
 	innermost := targets[len(targets)-1].bubbleID
 	var push asyncPush
 	var folded windowFoldBatches
-	items := cd.GetItems()
+	items := cd.GetMessages()
 	kept := items[:0]
 	for i, item := range items {
 		if target, ok := windowTargetForItem(item, targets); ok {
@@ -528,13 +528,13 @@ func (c *consumer) foldWindows(cd *frontendv1.ConversationDelta, ev *corev1.Even
 		}
 		folded.add(innermost, ems)
 	}
-	cd.Items = kept
+	cd.Messages = kept
 	push.absorb(c.foldWindowBatches(folded, ev))
 	return push
 }
 
 // windowTargetForItem reports the open window whose CARD this item is part of.
-func windowTargetForItem(item *frontendv1.ConversationItem, targets []windowFoldTarget) (windowFoldTarget, bool) {
+func windowTargetForItem(item *frontendv1.Message, targets []windowFoldTarget) (windowFoldTarget, bool) {
 	for _, t := range targets {
 		if frontend.ItemBelongsToCall(item, t.origin) {
 			return t, true
@@ -625,7 +625,7 @@ func (c *consumer) resolveSkillBodyIntoWindow(originToolUseID, contents string, 
 // DONE, not error: the user typing again is the window ending, not the work
 // failing. Work that actually failed said so inside its own conversation, which
 // the bubble holds.
-func (c *consumer) settleWindowsOnPrompt(item *frontendv1.ConversationItem, ev *corev1.Event) asyncPush {
+func (c *consumer) settleWindowsOnPrompt(item *frontendv1.Message, ev *corev1.Event) asyncPush {
 	ups, err := c.bubbles.settleWindows(frontend.AsyncVerdict{
 		Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE,
 		AtMs:   c.asyncInstant(ev),

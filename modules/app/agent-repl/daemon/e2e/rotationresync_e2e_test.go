@@ -45,11 +45,11 @@ const retiredSpaceMark = 1060
 // test: it drives a resync the daemon is expected to SERVE, and collects the
 // conversation it replays. A mark from a retired seq space is no longer such a
 // request — see resyncRefusalFrom below.
-func replayItemsFrom(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string, fromSeq uint64) []*frontendv1.ConversationItem {
+func replayItemsFrom(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string, fromSeq uint64) []*frontendv1.Message {
 	t.Helper()
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"resync":{"fromSeq":"%d","fence":%q}}`,
 		requestID, fromSeq, state.GetFence()))
-	var out []*frontendv1.ConversationItem
+	var out []*frontendv1.Message
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
 		frame := readFrame(t, conn)
@@ -206,11 +206,11 @@ func TestE2ETheReAnchorAfterARefusedMarkIsABoundedTailPage(t *testing.T) {
 
 	// Assert — BOUNDED. The page carries at most what was asked for, which is
 	// the property a full replay violates by definition.
-	if got := len(page.GetItems()); got > 2 {
+	if got := len(page.GetMessages()); got > 2 {
 		t.Fatalf("the re-anchor's tail page carried %d items for a limit of 2 — the reconnect path must never serve the whole conversation", got)
 	}
 	var clears int
-	for _, item := range page.GetItems() {
+	for _, item := range page.GetMessages() {
 		if isClear(item) && item.GetUuid() == clearDedupKey(lineUUID) {
 			clears++
 		}

@@ -130,9 +130,9 @@ func permissionFrame(t *testing.T, workspace, uuid string) *frontendv1.FrontendF
 		Frame: &frontendv1.FrontendFrame_ConversationDelta{
 			ConversationDelta: &frontendv1.ConversationDelta{
 				Workspace: workspace,
-				Items: []*frontendv1.ConversationItem{{
+				Messages: []*frontendv1.Message{{
 					Uuid: uuid,
-					Item: &frontendv1.ConversationItem_Permission{
+					Payload: &frontendv1.Message_Permission{
 						Permission: &corev1.PermissionItem{Resolution: corev1.PermissionItem_RESOLUTION_PENDING},
 					},
 				}},

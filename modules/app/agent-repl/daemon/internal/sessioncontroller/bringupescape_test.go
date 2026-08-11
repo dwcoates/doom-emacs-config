@@ -122,7 +122,7 @@ func (h *escapeHarness) failureCards() []*frontendv1.FailureCardView {
 	deltas := append([]*frontendv1.ConversationDelta(nil), h.pusher.convo...)
 	h.pusher.mu.Unlock()
 	for _, delta := range deltas {
-		for _, item := range delta.GetItems() {
+		for _, item := range delta.GetMessages() {
 			if f := item.GetFailureCard(); f != nil {
 				out = append(out, f)
 			}
@@ -131,16 +131,16 @@ func (h *escapeHarness) failureCards() []*frontendv1.FailureCardView {
 	return out
 }
 
-// failureCardItems returns the whole ConversationItem of every failure card
+// failureCardItems returns the whole Message of every failure card
 // pushed into the feed, so a test can assert on the card's IDENTITY rather
 // than only on its body.
-func (h *escapeHarness) failureCardItems() []*frontendv1.ConversationItem {
-	var out []*frontendv1.ConversationItem
+func (h *escapeHarness) failureCardItems() []*frontendv1.Message {
+	var out []*frontendv1.Message
 	h.pusher.mu.Lock()
 	deltas := append([]*frontendv1.ConversationDelta(nil), h.pusher.convo...)
 	h.pusher.mu.Unlock()
 	for _, delta := range deltas {
-		for _, item := range delta.GetItems() {
+		for _, item := range delta.GetMessages() {
 			if item.GetFailureCard() != nil {
 				out = append(out, item)
 			}

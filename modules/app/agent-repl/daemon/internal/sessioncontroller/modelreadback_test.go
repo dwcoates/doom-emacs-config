@@ -28,7 +28,7 @@ func (h *queueHarness) failureItemUUIDs() []string {
 	defer h.push.mu.Unlock()
 	var out []string
 	for _, cd := range h.push.convo {
-		for _, it := range cd.GetItems() {
+		for _, it := range cd.GetMessages() {
 			if it.GetFailureCard() != nil {
 				out = append(out, it.GetUuid())
 			}

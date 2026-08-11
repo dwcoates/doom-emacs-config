@@ -23,7 +23,7 @@ function itemsFrom(item: Record<string, unknown>): ConversationItem[] {
       fence: "s1",
       workspace: "ws",
       throughSeq: "9",
-      items: [{ source: "CONVERSATION_SOURCE_USER", ...item }],
+      messages: [{ source: "CONVERSATION_SOURCE_USER", ...item }],
     },
   });
   const conv = effects.find((e) => e.kind === "conversation-items");

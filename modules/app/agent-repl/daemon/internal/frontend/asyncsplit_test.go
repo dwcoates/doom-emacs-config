@@ -57,7 +57,7 @@ func TestADetachedAgentsEmissionIsNotAFeedItem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(c.Feed.GetItems()); got != 0 {
+	if got := len(c.Feed.GetMessages()); got != 0 {
 		t.Fatalf("a detached agent's emissions must never reach a frontend as top-level ConversationItems, got %d feed items", got)
 	}
 }
@@ -77,8 +77,8 @@ func TestTheMainAgentsEmissionStaysOnTheFeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Feed.GetItems()) != 1 {
-		t.Fatalf("the main conversation must stay on the feed, got %d items", len(c.Feed.GetItems()))
+	if len(c.Feed.GetMessages()) != 1 {
+		t.Fatalf("the main conversation must stay on the feed, got %d items", len(c.Feed.GetMessages()))
 	}
 }
 
@@ -123,7 +123,7 @@ func TestADetachedFoldCarriesTheSameEmissionTheFeedWouldHave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := top.Feed.GetItems()[0].GetAgent().GetResponse().GetBody().GetContent()[0].GetText().GetText()
+	want := top.Feed.GetMessages()[0].GetAgent().GetResponse().GetBody().GetContent()[0].GetText().GetText()
 	got := detached.Detached[0].Emissions[0].GetResponse().GetBody().GetContent()[0].GetText().GetText()
 	if got != want {
 		t.Fatalf("a bubble's emissions come from the same curation the feed uses: want %q, got %q", want, got)
@@ -184,8 +184,8 @@ func TestADetachedLaunchPromptIsWithheldRatherThanPromotedToTheFeed(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Feed.GetItems()) != 0 {
-		t.Fatalf("a record with no emission arm is withheld, never promoted to the feed, got %d items", len(c.Feed.GetItems()))
+	if len(c.Feed.GetMessages()) != 0 {
+		t.Fatalf("a record with no emission arm is withheld, never promoted to the feed, got %d items", len(c.Feed.GetMessages()))
 	}
 }
 
@@ -315,7 +315,7 @@ func TestAStreamPlaneSubagentEmissionIsNotAFeedItem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(c.Feed.GetItems()); got != 0 {
+	if got := len(c.Feed.GetMessages()); got != 0 {
 		t.Fatalf("a subagent's stream-plane output must never reach a frontend as a top-level item, got %d feed items", got)
 	}
 }
@@ -345,8 +345,8 @@ func TestAStreamPlaneMainAgentEmissionStaysOnTheFeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Feed.GetItems()) != 1 {
-		t.Fatalf("an empty parent_tool_use_id is not a detachment, got %d feed items", len(c.Feed.GetItems()))
+	if len(c.Feed.GetMessages()) != 1 {
+		t.Fatalf("an empty parent_tool_use_id is not a detachment, got %d feed items", len(c.Feed.GetMessages()))
 	}
 }
 
@@ -383,7 +383,7 @@ func TestAStreamPlaneSubagentLaunchPromptIsWithheldRatherThanPromotedToTheFeed(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(c.Feed.GetItems()); got != 0 {
+	if got := len(c.Feed.GetMessages()); got != 0 {
 		t.Fatalf("the launch prompt the harness writes for a subagent must not render as the user's own turn, got %d feed items", got)
 	}
 }

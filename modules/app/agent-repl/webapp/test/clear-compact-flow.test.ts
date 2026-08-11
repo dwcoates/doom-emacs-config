@@ -131,7 +131,7 @@ function flow(): Flow {
             throughSeq: String(seq),
             // The daemon stamps a provenance on every item it builds; the
             // adapter's provenance gate refuses an envelope without one.
-            items: items.map((item) => ({ source: "CONVERSATION_SOURCE_USER", ...item })),
+            messages: items.map((item) => ({ source: "CONVERSATION_SOURCE_USER", ...item })),
           },
         }),
       );

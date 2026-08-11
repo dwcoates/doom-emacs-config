@@ -65,7 +65,7 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 	id, conn, _, _ := liveSession(t, h, cwd)
 
 	writeCmd(t, conn, `{"requestId":"e2e-token-main","submitPrompt":{"text":"measure response timing","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
-	awaitItem(t, conn, cwd, "the completed assistant response", func(item *frontendv1.ConversationItem) bool {
+	awaitItem(t, conn, cwd, "the completed assistant response", func(item *frontendv1.Message) bool {
 		return isFakeTurnMessage(item.GetAgent().GetResponse().GetBody().GetId(), 1)
 	})
 	// A file-plane assistant item can be pushed before its stream-plane
@@ -76,7 +76,7 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 
 	fresh, state := dialForReplay(t, h, id, cwd)
 	replay := replayItems(t, fresh, state, cwd, "e2e-token-replay")
-	var replayed *frontendv1.ConversationItem
+	var replayed *frontendv1.Message
 	for _, candidate := range replay {
 		if isFakeTurnMessage(candidate.GetAgent().GetResponse().GetBody().GetId(), 1) {
 			replayed = candidate
@@ -147,7 +147,7 @@ func requireSingleTokenUtilization(t *testing.T, h *e2eHarness, sessionID, apiMe
 // requireResponseStamp reads the resolved figures a response's bubble renders.
 // They are the daemon's own derivation from the durable record above, so a
 // stamp that disagrees with it is the two halves drifting apart.
-func requireResponseStamp(t *testing.T, item *frontendv1.ConversationItem, source string) *frontendv1.ResponseUsageStamp {
+func requireResponseStamp(t *testing.T, item *frontendv1.Message, source string) *frontendv1.ResponseUsageStamp {
 	t.Helper()
 	stamp := item.GetAgent().GetResponse().GetUsageStamp()
 	if stamp == nil {
@@ -167,7 +167,7 @@ func TestE2EHistoricalUsageIsExplicitlyUntimedAndDeduplicated(t *testing.T) {
 	event := sidecarAssistantUsageEvent(t, vendorID, "e2e-historical-usage", "msg-historical", "agent-nested")
 	store.write(event)
 	store.write(event)
-	awaitItem(t, conn, cwd, "the historical assistant response carrying token utilization", func(item *frontendv1.ConversationItem) bool {
+	awaitItem(t, conn, cwd, "the historical assistant response carrying token utilization", func(item *frontendv1.Message) bool {
 		return item.GetAgent().GetResponse().GetBody().GetId() == "msg-historical"
 	})
 	usage := requireSingleTokenUtilization(t, h, id, "msg-historical", "historical assistant response")
@@ -248,7 +248,7 @@ func TestE2ESessionViewAggregatesTimedAndUntimedActors(t *testing.T) {
 	cwd := t.TempDir()
 	id, conn, vendorID, store := liveSession(t, h, cwd)
 	writeCmd(t, conn, `{"requestId":"e2e-token-aggregate","submitPrompt":{"text":"timed main response","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
-	awaitItem(t, conn, cwd, "the timed main-agent response", func(item *frontendv1.ConversationItem) bool {
+	awaitItem(t, conn, cwd, "the timed main-agent response", func(item *frontendv1.Message) bool {
 		return isFakeTurnMessage(item.GetAgent().GetResponse().GetBody().GetId(), 1)
 	})
 	// THE MAIN-AGENT RESPONSE ITEM IS NOT THE MAIN-AGENT LEDGER ROW. A live,
@@ -271,7 +271,7 @@ func TestE2ESessionViewAggregatesTimedAndUntimedActors(t *testing.T) {
 	// The subagent's row needs no equivalent wait: a file-plane, rootless usage
 	// record is persisted by RecordHistorical BEFORE the same delivery pushes its
 	// conversation item, so the item's arrival already implies the row.
-	awaitItem(t, conn, cwd, "the untimed subagent response", func(item *frontendv1.ConversationItem) bool {
+	awaitItem(t, conn, cwd, "the untimed subagent response", func(item *frontendv1.Message) bool {
 		return item.GetAgent().GetResponse().GetBody().GetId() == "msg-subagent"
 	})
 

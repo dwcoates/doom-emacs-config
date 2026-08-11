@@ -12,7 +12,7 @@
 // ConversationDelta item vocabulary (the S9 recomposition)
 // ---------------------------------------------------------------------------
 //
-// ConversationDelta.items is a repeated frontendv1.ConversationItem: a THIN
+// ConversationDelta.items is a repeated frontendv1.Message: a THIN
 // envelope (uuid / ts_ms / request_id) around the typed agent payload, carried
 // through into the matching oneof arm. translate.go is a CURATOR, not a
 // re-encoder: it selects WHICH store events carry visible conversation content
@@ -20,7 +20,7 @@
 // payload into a webapp-specific struct vocabulary. Frontends render the typed
 // payload; they never re-interpret facts the daemon already resolved.
 //
-// Payload → ConversationItem arm (the closed curated set):
+// Payload → Message arm (the closed curated set):
 //
 //	AssistantMessage / AssistantLine   assistant_message (ApiAssistantMessage)
 //	UserMessage / UserLine             user_message      (ApiUserMessage)
@@ -385,7 +385,7 @@ func FailureCardFromQueryTermination(sessionID string, lifecycle *corev1.QueryLi
 // are genuine anomalies, distinct from a known-but-non-conversational payload.
 //
 // The second return is the RECORD ENVELOPES of the items that came from the
-// file plane, keyed by ConversationItem.uuid — see RecordEnvelope.
+// file plane, keyed by Message.uuid — see RecordEnvelope.
 //
 // PROVENANCE IS STAMPED CONVERSATION_SOURCE_USER HERE, EXPLICITLY, on every
 // item this file builds. An ordinary turn is what a translated store event
@@ -409,7 +409,7 @@ func conversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*fro
 	if ev == nil {
 		return nil, nil, nil
 	}
-	var items []*frontendv1.ConversationItem
+	var items []*frontendv1.Message
 	var envs map[string]RecordEnvelope
 	switch p := ev.GetPayload().(type) {
 	case *corev1.Event_Vendor:
@@ -438,7 +438,7 @@ func conversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*fro
 	return &frontendv1.ConversationDelta{
 		Workspace:  workspace,
 		Fence:      fence,
-		Items:      items,
+		Messages:      items,
 		ThroughSeq: ev.GetSeq(),
 	}, envs, nil
 }
@@ -451,7 +451,7 @@ func conversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*fro
 // here is bookkeeping the harness addressed to itself, and a frontend that
 // received it could only be tempted to re-derive a curation the daemon has
 // already made (the standing rule: frontends render, never interpret). Nor can
-// a curator recover these from the delta afterwards — ConversationItem models
+// a curator recover these from the delta afterwards — Message models
 // the MESSAGE, so the moment translation runs the envelope is gone, which is
 // exactly why the slash-command curator (sessioncontroller/machinery.go) has to
 // string-match record bodies instead of reading a flag.
@@ -520,7 +520,7 @@ type RecordEnvelope struct {
 // The second return carries each item's RecordEnvelope: the file plane's own
 // transcript envelope, or — on the stream plane, which has none — the
 // detachment envelope synthesized from parent_tool_use_id.
-func conversationItemsFromVendor(a *anypb.Any, ev *corev1.Event) ([]*frontendv1.ConversationItem, map[string]RecordEnvelope, error) {
+func conversationItemsFromVendor(a *anypb.Any, ev *corev1.Event) ([]*frontendv1.Message, map[string]RecordEnvelope, error) {
 	if a == nil {
 		return nil, nil, nil
 	}
@@ -569,14 +569,14 @@ func conversationItemsFromVendor(a *anypb.Any, ev *corev1.Event) ([]*frontendv1.
 // WHEN (ts_ms, for the bubble). The message itself is still passed rather than
 // re-modeled — a frontend-shaped copy of an empty message would be a second
 // shape to keep in step with the first for no gain.
-func contextClearedItems(cc *corev1.ContextCleared, ev *corev1.Event) []*frontendv1.ConversationItem {
+func contextClearedItems(cc *corev1.ContextCleared, ev *corev1.Event) []*frontendv1.Message {
 	if cc == nil {
 		return nil
 	}
-	return []*frontendv1.ConversationItem{{
+	return []*frontendv1.Message{{
 		Uuid: eventDerivedUUID(ev, "clear"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Item:   &frontendv1.ConversationItem_ContextCleared{ContextCleared: cc},
+		Payload:   &frontendv1.Message_ContextCleared{ContextCleared: cc},
 	}}
 }
 
@@ -590,14 +590,14 @@ func contextClearedItems(cc *corev1.ContextCleared, ev *corev1.Event) []*fronten
 // result into a webapp-shaped struct would only be a chance to drift from the
 // fact the daemon already resolved. That is the whole reason the retired
 // compact_boundary / compact_boundary_line arms are gone.
-func contextCompactedItems(cc *corev1.ContextCompacted, ev *corev1.Event) []*frontendv1.ConversationItem {
+func contextCompactedItems(cc *corev1.ContextCompacted, ev *corev1.Event) []*frontendv1.Message {
 	if cc == nil {
 		return nil
 	}
-	return []*frontendv1.ConversationItem{{
+	return []*frontendv1.Message{{
 		Uuid: eventDerivedUUID(ev, "compact"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Item:   &frontendv1.ConversationItem_ContextCompacted{ContextCompacted: cc},
+		Payload:   &frontendv1.Message_ContextCompacted{ContextCompacted: cc},
 	}}
 }
 
@@ -631,7 +631,7 @@ func eventDerivedUUID(ev *corev1.Event, kind string) string {
 
 // transcriptLineItems curates the conversation-bearing on-disk line types, and
 // returns the RecordEnvelope of each item it produced alongside them.
-func transcriptLineItems(tl *datav1.TranscriptLine, producedAtMs int64, requestID string) ([]*frontendv1.ConversationItem, map[string]RecordEnvelope) {
+func transcriptLineItems(tl *datav1.TranscriptLine, producedAtMs int64, requestID string) ([]*frontendv1.Message, map[string]RecordEnvelope) {
 	switch line := tl.GetLine().(type) {
 	case *datav1.TranscriptLine_Assistant:
 		al := line.Assistant
@@ -652,7 +652,7 @@ func transcriptLineItems(tl *datav1.TranscriptLine, producedAtMs int64, requestI
 
 // recordEnvelopes keys one on-disk line's envelope by the uuid of each item it
 // curated to, which is the only handle the curators downstream have on it.
-func recordEnvelopes(items []*frontendv1.ConversationItem, env *datav1.LineEnvelope) map[string]RecordEnvelope {
+func recordEnvelopes(items []*frontendv1.Message, env *datav1.LineEnvelope) map[string]RecordEnvelope {
 	return envelopesByUUID(items, RecordEnvelope{
 		ParentUUID:      env.GetParentUuid(),
 		IsMeta:          env.GetIsMeta(),
@@ -679,7 +679,7 @@ func recordEnvelopes(items []*frontendv1.ConversationItem, env *datav1.LineEnvel
 // the handle asyncsplit keys a fold by and the bubble store addresses a bubble
 // by. AgentID stays empty: the stream plane never names one, and the launching
 // call is the stronger handle anyway.
-func streamDetachmentEnvelopes(items []*frontendv1.ConversationItem, parentToolUseID string) map[string]RecordEnvelope {
+func streamDetachmentEnvelopes(items []*frontendv1.Message, parentToolUseID string) map[string]RecordEnvelope {
 	if parentToolUseID == "" {
 		return nil
 	}
@@ -695,7 +695,7 @@ func streamDetachmentEnvelopes(items []*frontendv1.ConversationItem, parentToolU
 // parent_tool_use_id at all — so keying its envelope off detachment alone
 // would leave the one record whose provenance matters envelope-less, and the
 // curator downstream with nothing structured to read.
-func streamUserEnvelopes(items []*frontendv1.ConversationItem, u *datav1.UserMessage) map[string]RecordEnvelope {
+func streamUserEnvelopes(items []*frontendv1.Message, u *datav1.UserMessage) map[string]RecordEnvelope {
 	parentToolUseID := u.GetParentToolUseId()
 	originKind := u.GetOrigin().GetKind()
 	if parentToolUseID == "" && originKind == datav1.OriginKind_ORIGIN_KIND_UNSPECIFIED {
@@ -711,7 +711,7 @@ func streamUserEnvelopes(items []*frontendv1.ConversationItem, u *datav1.UserMes
 // envelopesByUUID keys one record's envelope by the uuid of every item that
 // record curated to, which is the only handle the curators downstream have on
 // it. A record that curated to no item has no envelope to key.
-func envelopesByUUID(items []*frontendv1.ConversationItem, re RecordEnvelope) map[string]RecordEnvelope {
+func envelopesByUUID(items []*frontendv1.Message, re RecordEnvelope) map[string]RecordEnvelope {
 	if len(items) == 0 {
 		return nil
 	}
@@ -726,7 +726,7 @@ func envelopesByUUID(items []*frontendv1.ConversationItem, re RecordEnvelope) ma
 // compaction boundaries and terminal API failures. A mid-backoff API error
 // curates to nothing here — internal/progress's retrying window is what
 // covers it — so no daemon re-typing of the retry shape is needed.
-func systemLineItems(sl *datav1.SystemLine, tsMs int64, requestID string) []*frontendv1.ConversationItem {
+func systemLineItems(sl *datav1.SystemLine, tsMs int64, requestID string) []*frontendv1.Message {
 	uuid := sl.GetEnvelope().GetUuid()
 	switch sub := sl.GetSubtype().(type) {
 	case *datav1.SystemLine_ApiError:
@@ -755,10 +755,10 @@ func systemLineItems(sl *datav1.SystemLine, tsMs int64, requestID string) []*fro
 		// on the failure itself so an out-of-feed surface could still name the
 		// card; the contract carries that address as FailureCardRef instead, so
 		// there is exactly one copy of it and it is derived here.
-		return []*frontendv1.ConversationItem{{
+		return []*frontendv1.Message{{
 			Uuid: FailureUUID(uuid), TsMs: tsMs, RequestId: requestID,
 			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-			Item:   &frontendv1.ConversationItem_FailureCard{FailureCard: failure},
+			Payload:   &frontendv1.Message_FailureCard{FailureCard: failure},
 		}}
 	default:
 		return nil
@@ -832,7 +832,7 @@ func stripInterruptSentinels(blocks []*datav1.ContentBlock) ([]*datav1.ContentBl
 	return kept, len(kept) != len(blocks)
 }
 
-func assistantItems(a *datav1.AssistantMessage, tsMs int64, requestID string) []*frontendv1.ConversationItem {
+func assistantItems(a *datav1.AssistantMessage, tsMs int64, requestID string) []*frontendv1.Message {
 	if a == nil {
 		return nil
 	}
@@ -848,7 +848,7 @@ func assistantItems(a *datav1.AssistantMessage, tsMs int64, requestID string) []
 // reasoning is carried once, as its own emission, and stripped from the
 // response body. Carrying it in both is how a frontend that draws both arms
 // draws the agent's reasoning twice; carrying it in neither loses it.
-func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1.ApiAssistantMessage) []*frontendv1.ConversationItem {
+func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1.ApiAssistantMessage) []*frontendv1.Message {
 	if msg == nil || len(msg.GetContent()) == 0 {
 		return nil
 	}
@@ -858,14 +858,14 @@ func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1
 	// sentinel now has no content, so the empty-response check below drops the
 	// bubble outright instead of drawing a placeholder nobody said.
 	body.Content, _ = stripInterruptSentinels(body.GetContent())
-	items := make([]*frontendv1.ConversationItem, 0, len(thinking)+1)
+	items := make([]*frontendv1.Message, 0, len(thinking)+1)
 	for i, t := range thinking {
-		items = append(items, &frontendv1.ConversationItem{
+		items = append(items, &frontendv1.Message{
 			// Each emission needs its own address, derived from the message's so
 			// it is stable across a resync rather than freshly minted per push.
 			Uuid: fmt.Sprintf("%s#thinking:%d", uuid, i), TsMs: tsMs, RequestId: requestID,
 			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-			Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
+			Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 				Emission: &frontendv1.AgentEmission_Thinking{
 					// The daemon did the stripping, so the daemon states where the
 					// block came from: the message's own id and the block's position
@@ -887,10 +887,10 @@ func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1
 		// reasoning block the model emits on its own.
 		return items
 	}
-	return append(items, &frontendv1.ConversationItem{
+	return append(items, &frontendv1.Message{
 		Uuid: uuid, TsMs: tsMs, RequestId: requestID,
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
+		Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 			Emission: &frontendv1.AgentEmission_Response{
 				Response: &frontendv1.AgentResponse{Body: body},
 			},
@@ -925,7 +925,7 @@ func splitThinking(msg *datav1.ApiAssistantMessage) ([]strippedThinking, *datav1
 	return thinking, body
 }
 
-func userItems(u *datav1.UserMessage, tsMs int64, requestID string) []*frontendv1.ConversationItem {
+func userItems(u *datav1.UserMessage, tsMs int64, requestID string) []*frontendv1.Message {
 	if u == nil {
 		return nil
 	}
@@ -941,15 +941,15 @@ func userItems(u *datav1.UserMessage, tsMs int64, requestID string) []*frontendv
 // writes the stop into the transcript as a user record — so it is dropped here
 // on the same terms it is dropped from an assistant body: the user did not type
 // it, and the turn's aborted result already says what it says.
-func userMessageItem(uuid string, tsMs int64, requestID string, msg *datav1.ApiUserMessage) []*frontendv1.ConversationItem {
+func userMessageItem(uuid string, tsMs int64, requestID string, msg *datav1.ApiUserMessage) []*frontendv1.Message {
 	msg = withoutInterruptSentinels(msg)
 	if !hasUserContent(msg) {
 		return nil
 	}
-	return []*frontendv1.ConversationItem{{
+	return []*frontendv1.Message{{
 		Uuid: uuid, TsMs: tsMs, RequestId: requestID,
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Item:   &frontendv1.ConversationItem_UserMessage{UserMessage: msg},
+		Payload:   &frontendv1.Message_UserMessage{UserMessage: msg},
 	}}
 }
 
@@ -1004,14 +1004,14 @@ func hasUserContent(msg *datav1.ApiUserMessage) bool {
 // replays the session's conversation from the floor — appended another copy of
 // the same turn's closing chip, so an interrupted turn's yellow badge repeated
 // down the feed once per resync.
-func resultItems(r *datav1.ResultMessage, ev *corev1.Event) []*frontendv1.ConversationItem {
+func resultItems(r *datav1.ResultMessage, ev *corev1.Event) []*frontendv1.Message {
 	if r == nil {
 		return nil
 	}
-	return []*frontendv1.ConversationItem{{
+	return []*frontendv1.Message{{
 		Uuid: eventDerivedUUID(ev, "result"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
+		Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 			Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: r},
 		}},
 	}}

@@ -643,7 +643,7 @@ func SettleAsyncBubble(b *frontendv1.AsyncBubble, v AsyncVerdict) (*frontendv1.A
 // It walks conversation items rather than being called per emission so that the
 // stamp happens at the one curation point, on the way out, for every route —
 // live push and replay alike.
-func StampSpawnedBubbleIDs(items []*frontendv1.ConversationItem, resolve func(toolUseID string) string) {
+func StampSpawnedBubbleIDs(items []*frontendv1.Message, resolve func(toolUseID string) string) {
 	if resolve == nil {
 		return
 	}

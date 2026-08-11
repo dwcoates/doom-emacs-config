@@ -21,7 +21,7 @@ type promptEcho struct {
 	// STAMPED with when it arrives (attributeUserTurn).
 	requestID string
 	text      string
-	item      *frontendv1.ConversationItem
+	item      *frontendv1.Message
 }
 
 // echoUUID is the item identity a receipt is pushed under. Derived from the
@@ -40,12 +40,12 @@ func echoUUID(requestID string) string { return "prompt-echo:" + requestID }
 // in agreement with this one, and no extra marking: an unreconciled receipt is
 // already the pending shape every frontend renders for a prompt the transcript
 // has not claimed, and that is exactly what a replayed one is.
-func promptReceiptItem(requestID, text string, tsMs int64) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{
+func promptReceiptItem(requestID, text string, tsMs int64) *frontendv1.Message {
+	return &frontendv1.Message{
 		Uuid:      echoUUID(requestID),
 		TsMs:      tsMs,
 		RequestId: requestID,
-		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+		Payload: &frontendv1.Message_UserMessage{UserMessage: &datav1.ApiUserMessage{
 			Content: &datav1.ApiUserMessage_ContentString{ContentString: text},
 		}},
 	}
@@ -100,10 +100,10 @@ func (m *Manager) echo(d *sessionController, requestID, text string, acceptedAtM
 }
 
 // snapshotEchoes returns the unclaimed receipts in submit order, for replay.
-func (c *consumer) snapshotEchoes() []*frontendv1.ConversationItem {
+func (c *consumer) snapshotEchoes() []*frontendv1.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := make([]*frontendv1.ConversationItem, 0, len(c.echoes))
+	out := make([]*frontendv1.Message, 0, len(c.echoes))
 	for _, e := range c.echoes {
 		out = append(out, e.item)
 	}
@@ -174,7 +174,7 @@ func (c *consumer) claimOldestEcho() string {
 // daemon never made. Inventing a correlation there would attach a user's prompt
 // to a request that has nothing to do with it.
 func (c *consumer) attributeUserTurn(cd *frontendv1.ConversationDelta) {
-	for _, it := range cd.GetItems() {
+	for _, it := range cd.GetMessages() {
 		if !isPromptUserMessage(it) {
 			// A line that already NAMES its request needs no stamp, but it is
 			// still this receipt's durable successor: retire the receipt so it
@@ -292,7 +292,7 @@ func userMessageText(um *datav1.ApiUserMessage) string {
 // arm too, and claiming a receipt for one would attribute a user's prompt to
 // the wrong line entirely. An item that already carries a request id is left
 // alone — something upstream already knows what it answers.
-func isPromptUserMessage(it *frontendv1.ConversationItem) bool {
+func isPromptUserMessage(it *frontendv1.Message) bool {
 	if it.GetRequestId() != "" {
 		return false
 	}

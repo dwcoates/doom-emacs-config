@@ -127,11 +127,11 @@ func (c *consumer) pushAsync(push asyncPush, ev *corev1.Event) {
 			Workspace:  c.workspace,
 			Fence:      c.fence(),
 			ThroughSeq: ev.GetSeq(),
-			Items: []*frontendv1.ConversationItem{{
+			Messages: []*frontendv1.Message{{
 				Uuid:   fault.UUID,
 				TsMs:   c.asyncInstant(ev),
 				Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-				Item:   &frontendv1.ConversationItem_FailureCard{FailureCard: fault.Card},
+				Payload:   &frontendv1.Message_FailureCard{FailureCard: fault.Card},
 			}},
 		})
 	}
@@ -158,7 +158,7 @@ func (c *consumer) pushAsync(push asyncPush, ev *corev1.Event) {
 }
 
 // pushAnchors publishes the FEED ANCHOR of every bubble this event opened: one
-// top-level ConversationItem on arm 38, carrying the bubble's OPENING state, at
+// top-level Message on arm 38, carrying the bubble's OPENING state, at
 // the point in the conversation the work was launched from.
 //
 // WHY IT IS HERE AND NOWHERE ELSE. This is the one site where a bubble becomes
@@ -183,16 +183,16 @@ func (c *consumer) pushAnchors(opened []*frontendv1.AsyncBubble, ev *corev1.Even
 	if len(opened) == 0 {
 		return
 	}
-	items := make([]*frontendv1.ConversationItem, 0, len(opened))
+	items := make([]*frontendv1.Message, 0, len(opened))
 	for _, b := range opened {
-		items = append(items, &frontendv1.ConversationItem{
+		items = append(items, &frontendv1.Message{
 			Uuid: "async-anchor:" + b.GetId(),
 			TsMs: c.asyncInstant(ev),
 			// The launch FOLLOWED FROM a user turn, which is what
 			// CONVERSATION_SOURCE_USER states (feed.proto ConversationSource);
 			// UNSPECIFIED is a malformed frame a receiver must reject.
 			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-			Item:   &frontendv1.ConversationItem_AsyncBubble{AsyncBubble: b},
+			Payload:   &frontendv1.Message_AsyncBubble{AsyncBubble: b},
 		})
 	}
 	c.logf("session-controller: async bubble ANCHORED session=%s ws=%q seq=%d anchors=%d bubbles=%s",
@@ -201,7 +201,7 @@ func (c *consumer) pushAnchors(opened []*frontendv1.AsyncBubble, ev *corev1.Even
 		Workspace:  c.workspace,
 		Fence:      c.fence(),
 		ThroughSeq: ev.GetSeq(),
-		Items:      items,
+		Messages:      items,
 	})
 }
 

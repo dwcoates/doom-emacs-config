@@ -97,7 +97,7 @@ func TestE2EPendingPermissionResolvesThePermissionState(t *testing.T) {
 // isDeniedPermission identifies a permission item the daemon resolved as a
 // DECLINE (sessioncontroller HandlePermission pushes RESOLUTION_DENIED and then
 // answers the shim with nothing — the stop is the delivery).
-func isDeniedPermission(item *frontendv1.ConversationItem) bool {
+func isDeniedPermission(item *frontendv1.Message) bool {
 	perm := item.GetPermission()
 	return perm != nil && perm.GetResolution() == corev1.PermissionItem_RESOLUTION_DENIED
 }

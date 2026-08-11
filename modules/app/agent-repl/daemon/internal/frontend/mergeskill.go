@@ -145,7 +145,7 @@ func MergeSkillCall(use *datav1.ToolUseBlock) (label string, ok bool) {
 // It reads the SAME assistant content blocks harvestToolNames reads, so the
 // classification and the tool-name harvest cannot disagree about which calls an
 // item made.
-func SkillToolCallsInItem(item *frontendv1.ConversationItem) []*datav1.ToolUseBlock {
+func SkillToolCallsInItem(item *frontendv1.Message) []*datav1.ToolUseBlock {
 	var out []*datav1.ToolUseBlock
 	for _, block := range item.GetAgent().GetResponse().GetBody().GetContent() {
 		use := block.GetToolUse()
@@ -165,7 +165,7 @@ func SkillToolCallsInItem(item *frontendv1.ConversationItem) []*datav1.ToolUseBl
 // Skill call card reach the feed and settle normally while every other emission
 // of the window folds into the bubble. The card is where the bubble hangs, so folding
 // it away would leave the bubble anchored to a card the reader never sees.
-func ItemBelongsToCall(item *frontendv1.ConversationItem, toolUseID string) bool {
+func ItemBelongsToCall(item *frontendv1.Message, toolUseID string) bool {
 	if toolUseID == "" {
 		return false
 	}
@@ -201,6 +201,6 @@ func ItemBelongsToCall(item *frontendv1.ConversationItem, toolUseID string) bool
 // function: a window folds the session's own feed items into a bubble, and
 // doing that through a second converter would give the two folds two
 // vocabularies for one contract that says they share one.
-func EmissionsFromItem(item *frontendv1.ConversationItem) []*frontendv1.AgentEmission {
+func EmissionsFromItem(item *frontendv1.Message) []*frontendv1.AgentEmission {
 	return detachedEmissions(item)
 }

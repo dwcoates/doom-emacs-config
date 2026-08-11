@@ -9,7 +9,7 @@
  * touches the DOM or mutates a store itself.
  *
  * S9 RECOMPOSITION — the daemon (translate.go) became a CURATOR that pushes the
- * TYPED data.v1/core.v1 payloads (frontend-proto.ts `ConversationItemFrame`),
+ * TYPED data.v1/core.v1 payloads (frontend-proto.ts `MessageFrame`),
  * and THIS adapter now does the DECOMPOSITION the daemon used to do: it fans a
  * payload back into the store's bubble/card vocabulary. The mapping mirrors the
  * old translate.go decomposition semantics:
@@ -80,8 +80,8 @@ import {
   type ConversationDelta,
   type ConversationPage,
   type PageContinuation,
-  type ConversationItemArm,
-  type ConversationItemFrame,
+  type MessageArm,
+  type MessageFrame,
   type FooterAccountingCell,
   type FooterFailureRow,
   type MergeDequeueOffer,
@@ -1068,7 +1068,7 @@ export class StateAdapter {
    * one line where the two routes legitimately differ.
    */
   private projectItems(
-    frames: readonly ConversationItemFrame[],
+    frames: readonly MessageFrame[],
     origin: string,
   ): { items: ConversationItem[]; ignored: AdapterEffect[]; anchored: AsyncBubble[] } {
     const items: ConversationItem[] = [];
@@ -1103,7 +1103,7 @@ export class StateAdapter {
 
   private conversationEffects(cd: ConversationDelta): AdapterEffect[] {
     const { items, ignored, anchored } = this.projectItems(
-      cd.items,
+      cd.messages,
       `workspace=${cd.workspace} fence=${cd.fence} through_seq=${String(cd.throughSeq)}`,
     );
     return [
@@ -1145,11 +1145,11 @@ export class StateAdapter {
     this.log(
       "debug",
       `state-adapter: conversation page workspace=${page.workspace} request_id=${page.requestId} ` +
-        `items=${page.items.length} continuation=${page.continuation.case} ` +
+        `messages=${page.messages.length} continuation=${page.continuation.case} ` +
         `live_join_seq=${String(page.liveJoinSeq)} fence=${page.fence}`,
     );
     const { items, ignored, anchored } = this.projectItems(
-      page.items,
+      page.messages,
       `workspace=${page.workspace} fence=${page.fence} page_request_id=${page.requestId}`,
     );
     return [
@@ -1414,7 +1414,7 @@ function taskEntryToCounter(t: TaskEntry): CounterEntry {
   };
 }
 
-// --- ConversationItemFrame → ConversationItem[] -----------------------------
+// --- MessageFrame → ConversationItem[] -----------------------------
 //
 // The daemon (translate.go, S9) is a CURATOR: it pushes the TYPED data.v1 /
 // core.v1 payload for each conversation addition and no longer pre-renders the
@@ -1469,7 +1469,7 @@ export function asyncAgentItems(
   const items: ConversationItem[] = [];
   const ignores: string[] = [];
   emissions.forEach((emission, index) => {
-    const frame: ConversationItemFrame = {
+    const frame: MessageFrame = {
       uuid: `${bubbleId}#${index}`,
       tsMs: startedAtMs,
       requestId: "",
@@ -1493,8 +1493,8 @@ export function asyncAgentItems(
 }
 
 /** Decompose one decoded conversation item into store items + ignore shapes. */
-function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem[]; ignores: string[] } {
-  const arm: ConversationItemArm = frame.arm;
+function itemsFromFrame(frame: MessageFrame): { items: ConversationItem[]; ignores: string[] } {
+  const arm: MessageArm = frame.arm;
   switch (arm) {
     case "assistantMessage":
       return assistantMessageItems(frame);
@@ -1591,7 +1591,7 @@ function contentBlockArm(block: Obj): { arm: string; value: Obj } {
  * preview. It then stands on its own rather than claiming some other block's:
  * an unnamed preview is not matched by resemblance instead.
  */
-function thinkingItemFrom(frame: ConversationItemFrame): ThinkingItem {
+function thinkingItemFrom(frame: MessageFrame): ThinkingItem {
   const origin = frame.thinkingOrigin;
   const stated = origin !== undefined && origin.apiMessageId !== "";
   const messageId = stated ? origin.apiMessageId : frame.uuid;
@@ -1608,7 +1608,7 @@ function thinkingItemFrom(frame: ConversationItemFrame): ThinkingItem {
   return item;
 }
 
-function assistantMessageItems(frame: ConversationItemFrame): {
+function assistantMessageItems(frame: MessageFrame): {
   items: ConversationItem[];
   ignores: string[];
 } {
@@ -1666,7 +1666,7 @@ function assistantMessageItems(frame: ConversationItemFrame): {
   return { items, ignores };
 }
 
-function userMessageItems(frame: ConversationItemFrame): {
+function userMessageItems(frame: MessageFrame): {
   items: ConversationItem[];
   ignores: string[];
 } {
@@ -1709,7 +1709,7 @@ function userMessageItems(frame: ConversationItemFrame): {
  * the uuid is what keeps two such prompts apart in the store (`userTurnKey`).
  */
 function userTurn(
-  frame: ConversationItemFrame,
+  frame: MessageFrame,
   content: ContentBlock[],
   ts: string,
 ): UserTurnItem {

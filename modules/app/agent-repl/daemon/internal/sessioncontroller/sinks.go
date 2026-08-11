@@ -760,19 +760,19 @@ type consumer struct {
 	// so a `SystemInit` from at-or-below the mark cannot outrank that
 	// confirmation (registry.ModelObservation). Read and written under c.mu.
 	streamSeq uint64
-	// permItems retains the LATEST permission ConversationItem per request_id,
+	// permItems retains the LATEST permission Message per request_id,
 	// in first-seen order, so a resync replays each permission's current
 	// resolution (S8). The retained ring holds core.v1.Events; a permission item
 	// is a daemon-composed frontend item with no store seq, so it lives here
 	// beside the ring and is replayed on every resync.
-	permItems map[string]*frontendv1.ConversationItem
+	permItems map[string]*frontendv1.Message
 	permOrder []string
-	// failItems retains the LATEST system-failure ConversationItem per uuid,
+	// failItems retains the LATEST system-failure Message per uuid,
 	// in first-seen order, on the same footing as permItems and for the same
 	// reason (F4). A WINDOW-shaped failure is re-sent under its opening uuid
 	// with resolved_at_ms set, so the retained copy is the SETTLED card and a
 	// resync replays that rather than re-opening the alarm.
-	failItems map[string]*frontendv1.ConversationItem
+	failItems map[string]*frontendv1.Message
 	failOrder []string
 	// withheldCards are the failItems uuids the WITHHOLD arms put up — cards
 	// about a RETIRED query, replayed off durable history. They are settled at
@@ -790,7 +790,7 @@ type consumer struct {
 	// bubble and the CLI's own transcript bookkeeping for it is withheld as
 	// machinery — so a resync that could not replay them would leave the feed
 	// silent about a command the user ran.
-	cmdItems map[string]*frontendv1.ConversationItem
+	cmdItems map[string]*frontendv1.Message
 	cmdOrder []string
 	// backfill is the last never-blue state reported for this session (F2).
 	// In-memory latch: it is what keeps a long transcript from writing the
@@ -2486,7 +2486,7 @@ func (c *consumer) applyProgress(ev *corev1.Event) {
 // tool-result feedback message rides the user_message arm too, and logging
 // every tool result would bury the one receipt per prompt this exists for.
 func userTurnReceipt(cd *frontendv1.ConversationDelta) (requestID string, textLen int) {
-	for _, it := range cd.GetItems() {
+	for _, it := range cd.GetMessages() {
 		um := it.GetUserMessage()
 		if um == nil {
 			continue
@@ -2570,8 +2570,8 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 	// THE CLASSIFICATION VERDICT ON THE TOOL CARD, from the same store the
 	// bubbles live in — so the card names a bubble the frontend has, and both
 	// spawned_bubble_id fields carry the one string that store resolved.
-	frontend.StampSpawnedBubbleIDs(cd.GetItems(), c.bubbles.spawnedBubbleID)
-	for _, item := range cd.GetItems() {
+	frontend.StampSpawnedBubbleIDs(cd.GetMessages(), c.bubbles.spawnedBubbleID)
+	for _, item := range cd.GetMessages() {
 		response := item.GetAgent().GetResponse()
 		assistant := response.GetBody()
 		if assistant == nil {
@@ -2615,7 +2615,7 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 		}
 	}
 	// TURN ACCOUNTING NO LONGER RIDES THE FEED ITEM. The contract removed the
-	// durable turn_accounting record from ConversationItem: a turn's verdict is
+	// durable turn_accounting record from Message: a turn's verdict is
 	// the session's ledger rather than the agent's utterance, and it reaches a
 	// frontend RESOLVED, on FooterAccountingCell. The reconciliation that
 	// produces that cell is not wired yet, so the accounting is consumed here
@@ -3089,15 +3089,15 @@ func (c *consumer) ringFloor() (uint64, bool) {
 	return 0, false
 }
 
-// pushPermission retains and pushes a permission ConversationItem, keyed by its
+// pushPermission retains and pushes a permission Message, keyed by its
 // uuid (the permission request_id) so a resync replays the latest resolution.
 // A same-uuid push REPLACES the retained item, tracking the resolution
 // lifecycle (PENDING -> ALLOWED/DENIED/ABANDONED). This is the S8 permission
 // surface pushed through the NORMAL retained pusher path so resync replays it.
-func (c *consumer) pushPermission(item *frontendv1.ConversationItem) {
+func (c *consumer) pushPermission(item *frontendv1.Message) {
 	c.mu.Lock()
 	if c.permItems == nil {
-		c.permItems = map[string]*frontendv1.ConversationItem{}
+		c.permItems = map[string]*frontendv1.Message{}
 	}
 	if _, seen := c.permItems[item.GetUuid()]; !seen {
 		c.permOrder = append(c.permOrder, item.GetUuid())
@@ -3118,14 +3118,14 @@ func (c *consumer) pushPermission(item *frontendv1.ConversationItem) {
 // carries no timestamp to look one up with anyway. Every caller retains the
 // stamped item (permItems, failItems, echoes), so a resync replays the verdict
 // that was made rather than deriving a new one.
-func (c *consumer) pushLocalItem(item *frontendv1.ConversationItem) {
+func (c *consumer) pushLocalItem(item *frontendv1.Message) {
 	if !c.stampLocalItemProvenance(item) {
 		return
 	}
 	c.push.PushConversationDelta(&frontendv1.ConversationDelta{
 		Workspace: c.workspace,
 		Fence:     c.fence(),
-		Items:     []*frontendv1.ConversationItem{item},
+		Messages:     []*frontendv1.Message{item},
 	})
 }
 
@@ -3144,11 +3144,11 @@ func (c *consumer) pushLocalItem(item *frontendv1.ConversationItem) {
 //
 // Nothing is retained: this consumer is the throwaway one a durable replay runs
 // through, and the record in the state store is the thing that persists.
-func (c *consumer) pushReplayedItem(item *frontendv1.ConversationItem) bool {
+func (c *consumer) pushReplayedItem(item *frontendv1.Message) bool {
 	cd := &frontendv1.ConversationDelta{
 		Workspace: c.workspace,
 		Fence:     c.fence(),
-		Items:     []*frontendv1.ConversationItem{item},
+		Messages:     []*frontendv1.Message{item},
 	}
 	if !c.stampConversationProvenance(cd) {
 		return false
@@ -3157,7 +3157,7 @@ func (c *consumer) pushReplayedItem(item *frontendv1.ConversationItem) bool {
 	return true
 }
 
-// pushFailure retains and pushes a system-failure ConversationItem under uuid,
+// pushFailure retains and pushes a system-failure Message under uuid,
 // on the same retained-and-replayed path permissions use (F4).
 //
 // Keying by uuid is what makes a WINDOW-shaped failure one card: the closing
@@ -3196,15 +3196,15 @@ func (c *consumer) retainFailure(uuid string, failure *frontendv1.FailureCardVie
 	// the failure itself so an out-of-feed surface could name the card; the
 	// contract carries that address as FailureCardRef instead, so there is one
 	// copy of it and nothing to keep in step with the envelope.
-	item := &frontendv1.ConversationItem{
+	item := &frontendv1.Message{
 		Uuid: uuid,
 		TsMs: c.now(),
-		Item: &frontendv1.ConversationItem_FailureCard{FailureCard: failure},
+		Payload: &frontendv1.Message_FailureCard{FailureCard: failure},
 	}
 
 	c.mu.Lock()
 	if c.failItems == nil {
-		c.failItems = map[string]*frontendv1.ConversationItem{}
+		c.failItems = map[string]*frontendv1.Message{}
 	}
 	if _, seen := c.failItems[uuid]; !seen {
 		c.failOrder = append(c.failOrder, uuid)
@@ -3218,9 +3218,9 @@ func (c *consumer) retainFailure(uuid string, failure *frontendv1.FailureCardVie
 	c.mu.Unlock()
 }
 
-// retainedFailure reads back the retained ConversationItem for uuid under the
+// retainedFailure reads back the retained Message for uuid under the
 // lock, so a push cannot race a concurrent retention of the same card.
-func (c *consumer) retainedFailure(uuid string) *frontendv1.ConversationItem {
+func (c *consumer) retainedFailure(uuid string) *frontendv1.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.failItems[uuid]
@@ -3388,10 +3388,10 @@ func (c *consumer) resolveBounceWindowCards(reason string) {
 
 // snapshotFailItems returns the retained failure items in first-seen order,
 // taken under the lock so a concurrent pushFailure cannot race the read.
-func (c *consumer) snapshotFailItems() []*frontendv1.ConversationItem {
+func (c *consumer) snapshotFailItems() []*frontendv1.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := make([]*frontendv1.ConversationItem, 0, len(c.failOrder))
+	out := make([]*frontendv1.Message, 0, len(c.failOrder))
 	for _, id := range c.failOrder {
 		out = append(out, c.failItems[id])
 	}
@@ -3400,23 +3400,23 @@ func (c *consumer) snapshotFailItems() []*frontendv1.ConversationItem {
 
 // snapshotPermItems returns the retained permission items in first-seen order,
 // taken under the lock so a concurrent pushPermission cannot race the read.
-func (c *consumer) snapshotPermItems() []*frontendv1.ConversationItem {
+func (c *consumer) snapshotPermItems() []*frontendv1.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := make([]*frontendv1.ConversationItem, 0, len(c.permOrder))
+	out := make([]*frontendv1.Message, 0, len(c.permOrder))
 	for _, id := range c.permOrder {
 		out = append(out, c.permItems[id])
 	}
 	return out
 }
 
-// permissionItem composes a permission ConversationItem: the request plus its
+// permissionItem composes a permission Message: the request plus its
 // resolution, keyed by the request_id as the item uuid (the reconciliation key
 // frontends replace on). denyMessage is set only on RESOLUTION_DENIED.
-func permissionItem(req *corev1.PermissionRequest, res corev1.PermissionItem_Resolution, denyMessage string) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{
+func permissionItem(req *corev1.PermissionRequest, res corev1.PermissionItem_Resolution, denyMessage string) *frontendv1.Message {
+	return &frontendv1.Message{
 		Uuid: req.GetRequestId(),
-		Item: &frontendv1.ConversationItem_Permission{Permission: &corev1.PermissionItem{
+		Payload: &frontendv1.Message_Permission{Permission: &corev1.PermissionItem{
 			Request:     req,
 			Resolution:  res,
 			DenyMessage: denyMessage,

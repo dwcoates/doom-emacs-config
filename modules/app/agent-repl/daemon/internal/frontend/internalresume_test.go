@@ -19,12 +19,12 @@ import (
 // curator's verdict, and every one of those routes inherits it.
 
 // resumeUserItem is a curated user message with the given request id.
-func resumeUserItem(uuid, requestID string) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{
+func resumeUserItem(uuid, requestID string) *frontendv1.Message {
+	return &frontendv1.Message{
 		Uuid:      uuid,
 		RequestId: requestID,
 		Source:    frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Item: &frontendv1.ConversationItem_UserMessage{
+		Payload: &frontendv1.Message_UserMessage{
 			UserMessage: &datav1.ApiUserMessage{},
 		},
 	}
@@ -32,17 +32,17 @@ func resumeUserItem(uuid, requestID string) *frontendv1.ConversationItem {
 
 // resumeAgentItem is a curated assistant emission with the given request id — the
 // re-driven turn's actual work.
-func resumeAgentItem(uuid, requestID string) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{
+func resumeAgentItem(uuid, requestID string) *frontendv1.Message {
+	return &frontendv1.Message{
 		Uuid:      uuid,
 		RequestId: requestID,
 		Source:    frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Item:      &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{}},
+		Payload:      &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{}},
 	}
 }
 
 // resumeItemUUIDs names what survived a curation, for assertions that read.
-func resumeItemUUIDs(items []*frontendv1.ConversationItem) []string {
+func resumeItemUUIDs(items []*frontendv1.Message) []string {
 	var out []string
 	for _, item := range items {
 		out = append(out, item.GetUuid())
@@ -54,7 +54,7 @@ const resumeRequest = InternalResumeRequestIDPrefix + "/ws/t-1"
 
 func TestTheInternalResumePromptIsDroppedFromTheConversation(t *testing.T) {
 	// Arrange.
-	items := []*frontendv1.ConversationItem{resumeUserItem("u-1", resumeRequest)}
+	items := []*frontendv1.Message{resumeUserItem("u-1", resumeRequest)}
 
 	// Act.
 	got, _ := dropInternalResumePrompt(items)
@@ -68,7 +68,7 @@ func TestTheInternalResumePromptIsDroppedFromTheConversation(t *testing.T) {
 func TestTheReDrivenTurnsOutputSurvivesTheDrop(t *testing.T) {
 	// Arrange — the output IS the continuation of the work the user asked for.
 	// Filtering the whole request id would delete the work along with the ask.
-	items := []*frontendv1.ConversationItem{
+	items := []*frontendv1.Message{
 		resumeUserItem("u-1", resumeRequest),
 		resumeAgentItem("a-1", resumeRequest),
 	}
@@ -84,7 +84,7 @@ func TestTheReDrivenTurnsOutputSurvivesTheDrop(t *testing.T) {
 
 func TestAnOrdinaryUserMessageIsUntouched(t *testing.T) {
 	// Arrange.
-	items := []*frontendv1.ConversationItem{resumeUserItem("u-1", "req-7")}
+	items := []*frontendv1.Message{resumeUserItem("u-1", "req-7")}
 
 	// Act.
 	got, _ := dropInternalResumePrompt(items)
@@ -98,7 +98,7 @@ func TestAnOrdinaryUserMessageIsUntouched(t *testing.T) {
 func TestAUserMessageWithNoRequestIDIsUntouched(t *testing.T) {
 	// Arrange — plenty of events carry no request id, and reading absence as
 	// "internal" would hide arbitrary user content.
-	items := []*frontendv1.ConversationItem{resumeUserItem("u-1", "")}
+	items := []*frontendv1.Message{resumeUserItem("u-1", "")}
 
 	// Act.
 	got, _ := dropInternalResumePrompt(items)
@@ -112,7 +112,7 @@ func TestAUserMessageWithNoRequestIDIsUntouched(t *testing.T) {
 func TestARequestIDMerelyContainingThePrefixIsUntouched(t *testing.T) {
 	// Arrange — the marker is a PREFIX, minted by the daemon at teardown. A id
 	// that merely mentions it somewhere is not one the daemon minted.
-	items := []*frontendv1.ConversationItem{
+	items := []*frontendv1.Message{
 		resumeUserItem("u-1", "req-7:"+InternalResumeRequestIDPrefix+"x"),
 	}
 

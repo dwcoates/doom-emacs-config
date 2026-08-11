@@ -16,23 +16,23 @@ const taskNotificationBody = "<task-notification>\n<task-id>a8abc09d2bc681337</t
 // --- the predicate ----------------------------------------------------------
 
 func TestIsTaskNotificationRecord(t *testing.T) {
-	userItem := func(uuid string) *frontendv1.ConversationItem {
-		return &frontendv1.ConversationItem{
+	userItem := func(uuid string) *frontendv1.Message {
+		return &frontendv1.Message{
 			Uuid: uuid,
-			Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+			Payload: &frontendv1.Message_UserMessage{UserMessage: &datav1.ApiUserMessage{
 				Content: &datav1.ApiUserMessage_ContentString{ContentString: taskNotificationBody},
 			}},
 		}
 	}
-	assistantItem := func(uuid string) *frontendv1.ConversationItem {
-		return &frontendv1.ConversationItem{
+	assistantItem := func(uuid string) *frontendv1.Message {
+		return &frontendv1.Message{
 			Uuid: uuid,
-			Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{}},
+			Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{}},
 		}
 	}
 	tests := []struct {
 		name string
-		item *frontendv1.ConversationItem
+		item *frontendv1.Message
 		kind datav1.OriginKind
 		want bool
 	}{
@@ -174,7 +174,7 @@ func TestAWithheldTaskNotificationStillAdvancesTheSeq(t *testing.T) {
 	if delta == nil {
 		t.Fatal("no delta carried through_seq 12, so no frontend cursor advanced past the task notification")
 	}
-	if got := len(delta.GetItems()); got != 0 {
+	if got := len(delta.GetMessages()); got != 0 {
 		t.Errorf("the through_seq-12 delta carried %d item(s), want none", got)
 	}
 }

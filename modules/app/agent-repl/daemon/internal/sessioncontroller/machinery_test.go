@@ -84,16 +84,16 @@ func TestIsSlashCommandMachineryText(t *testing.T) {
 
 // blockUserItem is a user item whose body arrives as content BLOCKS rather than
 // a single string — the other shape the same record can take on the wire.
-func blockUserItem(uuid string, texts ...string) *frontendv1.ConversationItem {
+func blockUserItem(uuid string, texts ...string) *frontendv1.Message {
 	blocks := make([]*datav1.ContentBlock, 0, len(texts))
 	for _, txt := range texts {
 		blocks = append(blocks, &datav1.ContentBlock{
 			Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: txt}},
 		})
 	}
-	return &frontendv1.ConversationItem{
+	return &frontendv1.Message{
 		Uuid: uuid,
-		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+		Payload: &frontendv1.Message_UserMessage{UserMessage: &datav1.ApiUserMessage{
 			Content: &datav1.ApiUserMessage_ContentBlocks{
 				ContentBlocks: &datav1.ApiContentBlocks{Blocks: blocks},
 			},
@@ -134,9 +134,9 @@ func TestABlockPromptWithRealFirstTextIsNotMachinery(t *testing.T) {
 
 func TestAnAssistantItemIsNeverMachinery(t *testing.T) {
 	// Arrange: only the user_message arm carries this markup.
-	item := &frontendv1.ConversationItem{
+	item := &frontendv1.Message{
 		Uuid: "a1",
-		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Content: []*datav1.ContentBlock{
+		Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Content: []*datav1.ContentBlock{
 			{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "<command-name>/compact</command-name>"}}},
 		}},
 		}}}},
@@ -226,7 +226,7 @@ func TestAWithheldMachineryLineStillAdvancesTheSeq(t *testing.T) {
 	if delta == nil {
 		t.Fatal("no delta carried through_seq 12, so no frontend cursor advanced past the machinery record")
 	}
-	if got := len(delta.GetItems()); got != 0 {
+	if got := len(delta.GetMessages()); got != 0 {
 		t.Errorf("the through_seq-12 delta carried %d item(s), want none", got)
 	}
 }

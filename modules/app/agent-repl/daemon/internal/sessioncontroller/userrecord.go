@@ -17,7 +17,7 @@ import (
 // a synthesized record's later blocks are more of the same bookkeeping, and a
 // record whose first block is real text is a real prompt whatever follows it.
 // A pure tool_result record has no text block and yields "".
-func userRecordText(it *frontendv1.ConversationItem) string {
+func userRecordText(it *frontendv1.Message) string {
 	um := it.GetUserMessage()
 	if um == nil {
 		return ""
@@ -37,7 +37,7 @@ func userRecordText(it *frontendv1.ConversationItem) string {
 
 // toolResultIDs are the tool_use ids a user record reports results for, in the
 // order the record carries them. A prompt reports none.
-func toolResultIDs(it *frontendv1.ConversationItem) []string {
+func toolResultIDs(it *frontendv1.Message) []string {
 	um := it.GetUserMessage()
 	if um == nil {
 		return nil
@@ -56,7 +56,7 @@ func toolResultIDs(it *frontendv1.ConversationItem) []string {
 }
 
 // toolUseCalls are the (id, name) tool calls an assistant record makes.
-func toolUseCalls(it *frontendv1.ConversationItem) map[string]string {
+func toolUseCalls(it *frontendv1.Message) map[string]string {
 	am := it.GetAgent().GetResponse().GetBody()
 	if am == nil {
 		return nil

@@ -404,7 +404,7 @@ func TestReplayedEventsReachConversation(t *testing.T) {
 	// Assert
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
-	if len(h.push.convo) != 1 || h.push.convo[0].GetItems()[0].GetUuid() != "old" {
+	if len(h.push.convo) != 1 || h.push.convo[0].GetMessages()[0].GetUuid() != "old" {
 		t.Fatalf("conversation pushes = %v, want one item uuid=old", h.push.convo)
 	}
 }
@@ -437,8 +437,8 @@ func TestConnectedRepullAttachesHistoricalAccountingByPersistedTurnIdentityWhile
 	// resolved, on FooterAccountingCell, rather than riding the terminal item.
 	// What the delta must carry is the turn-result emission it belongs to, and
 	// the record must have been TAKEN — a lookup that missed leaves it behind.
-	if len(h.push.convo) != 1 || len(h.push.convo[0].GetItems()) != 1 ||
-		h.push.convo[0].GetItems()[0].GetAgent().GetTurnResult() == nil {
+	if len(h.push.convo) != 1 || len(h.push.convo[0].GetMessages()) != 1 ||
+		h.push.convo[0].GetMessages()[0].GetAgent().GetTurnResult() == nil {
 		t.Fatalf("conversation pushes = %+v", h.push.convo)
 	}
 	_ = want
@@ -842,7 +842,7 @@ func TestStoreCoveredGapIsServedWithNoLiveShim(t *testing.T) {
 	}
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
-	if len(h.push.convo) != 1 || h.push.convo[0].GetItems()[0].GetUuid() != "stored" {
+	if len(h.push.convo) != 1 || h.push.convo[0].GetMessages()[0].GetUuid() != "stored" {
 		t.Fatalf("conversation pushes = %v, want one item uuid=stored", h.push.convo)
 	}
 }

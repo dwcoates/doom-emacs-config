@@ -19,16 +19,16 @@ import (
 // --- fixtures ---------------------------------------------------------------
 
 // assistantTextItem is one already-curated assistant item carrying text blocks.
-func assistantTextItem(uuid, model string, texts ...string) *frontendv1.ConversationItem {
+func assistantTextItem(uuid, model string, texts ...string) *frontendv1.Message {
 	blocks := make([]*datav1.ContentBlock, 0, len(texts))
 	for _, tx := range texts {
 		blocks = append(blocks, &datav1.ContentBlock{
 			Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: tx}},
 		})
 	}
-	return &frontendv1.ConversationItem{
+	return &frontendv1.Message{
 		Uuid: uuid,
-		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Model: model, Content: blocks}}}}},
+		Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Model: model, Content: blocks}}}}},
 	}
 }
 
@@ -52,12 +52,12 @@ func transcriptAssistantTextEvent(t *testing.T, seq uint64, uuid, model, text st
 
 // assistantTurns returns every pushed conversation item carrying an assistant
 // message, in push order.
-func (h *queueHarness) assistantTurns() []*frontendv1.ConversationItem {
+func (h *queueHarness) assistantTurns() []*frontendv1.Message {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
-	var out []*frontendv1.ConversationItem
+	var out []*frontendv1.Message
 	for _, cd := range h.push.convo {
-		for _, it := range cd.GetItems() {
+		for _, it := range cd.GetMessages() {
 			if it.GetAgent().GetResponse().GetBody() != nil {
 				out = append(out, it)
 			}
@@ -71,7 +71,7 @@ func (h *queueHarness) assistantTurns() []*frontendv1.ConversationItem {
 func TestIsNoResponsePlaceholder(t *testing.T) {
 	tests := []struct {
 		name string
-		item *frontendv1.ConversationItem
+		item *frontendv1.Message
 		want bool
 	}{
 		{
@@ -111,9 +111,9 @@ func TestIsNoResponsePlaceholder(t *testing.T) {
 		},
 		{
 			name: "a synthetic record whose sole block is not text",
-			item: &frontendv1.ConversationItem{
+			item: &frontendv1.Message{
 				Uuid: "a1",
-				Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Model: syntheticModel, Content: []*datav1.ContentBlock{
+				Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Model: syntheticModel, Content: []*datav1.ContentBlock{
 					{Block: &datav1.ContentBlock_ToolUse{ToolUse: &datav1.ToolUseBlock{Id: "t1", Name: "Read"}}},
 				}},
 				}}}},
@@ -233,7 +233,7 @@ func TestAWithheldPlaceholderStillAdvancesTheSeq(t *testing.T) {
 	if delta == nil {
 		t.Fatal("no delta carried through_seq 12, so no frontend cursor advanced past the placeholder record")
 	}
-	if got := len(delta.GetItems()); got != 0 {
+	if got := len(delta.GetMessages()); got != 0 {
 		t.Errorf("the through_seq-12 delta carried %d item(s), want none", got)
 	}
 }

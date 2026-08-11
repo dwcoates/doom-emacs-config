@@ -259,7 +259,7 @@ func TestE2EPromptAfterRotationRoundTrips(t *testing.T) {
 // and the sidecar files its ContextCleared under the identity that rotation
 // produced — so the clear is always in the NEW seq space. This injects exactly
 // what the sidecar writes, under the rotated uuid, and asserts it arrives as
-// ConversationItem arm 32.
+// Message arm 32.
 func TestE2EClearUnderTheRotatedIdentityReachesTheFrontend(t *testing.T) {
 	// Arrange — see the cleanup-order note in the first test.
 	cwd := t.TempDir()

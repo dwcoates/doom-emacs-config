@@ -22,17 +22,17 @@ func excludeConsumer(t *testing.T, windows KeepAliveWindowLedger, logf func(stri
 
 // excludeItem is one conversation item carrying a request id and an instant —
 // the two facts the exclusion can decide on.
-func excludeItem(uuid, requestID string, tsMs int64) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{Uuid: uuid, RequestId: requestID, TsMs: tsMs}
+func excludeItem(uuid, requestID string, tsMs int64) *frontendv1.Message {
+	return &frontendv1.Message{Uuid: uuid, RequestId: requestID, TsMs: tsMs}
 }
 
-func excludeDelta(items ...*frontendv1.ConversationItem) *frontendv1.ConversationDelta {
-	return &frontendv1.ConversationDelta{Workspace: "ws", Fence: "s1", Items: items, ThroughSeq: 7}
+func excludeDelta(items ...*frontendv1.Message) *frontendv1.ConversationDelta {
+	return &frontendv1.ConversationDelta{Workspace: "ws", Fence: "s1", Messages: items, ThroughSeq: 7}
 }
 
 func itemUUIDs(cd *frontendv1.ConversationDelta) []string {
 	var out []string
-	for _, item := range cd.GetItems() {
+	for _, item := range cd.GetMessages() {
 		out = append(out, item.GetUuid())
 	}
 	return out
@@ -60,7 +60,7 @@ func TestKeepAliveExclusionWithholdsByRequestIDUnderAWarpedClock(t *testing.T) {
 	withheld := c.withholdKeepAlive(cd)
 
 	// Assert.
-	if withheld != 1 || len(cd.GetItems()) != 0 {
+	if withheld != 1 || len(cd.GetMessages()) != 0 {
 		t.Fatalf("withheld=%d remaining=%v, want the ping's own item withheld on its request id alone",
 			withheld, itemUUIDs(cd))
 	}
@@ -82,7 +82,7 @@ func TestKeepAliveExclusionWithholdsAnIDLessItemByItsInterval(t *testing.T) {
 	withheld := c.withholdKeepAlive(cd)
 
 	// Assert.
-	if withheld != 1 || len(cd.GetItems()) != 0 {
+	if withheld != 1 || len(cd.GetMessages()) != 0 {
 		t.Fatalf("withheld=%d remaining=%v, want the id-less item withheld on the interval",
 			withheld, itemUUIDs(cd))
 	}
@@ -104,7 +104,7 @@ func TestKeepAliveExclusionShowsAnUnknownRequestIDInsideACoveredInterval(t *test
 	withheld := c.withholdKeepAlive(cd)
 
 	// Assert.
-	if withheld != 0 || len(cd.GetItems()) != 1 {
+	if withheld != 0 || len(cd.GetMessages()) != 1 {
 		t.Fatalf("withheld=%d remaining=%v, want the user's own turn shown",
 			withheld, itemUUIDs(cd))
 	}
@@ -127,7 +127,7 @@ func TestKeepAliveExclusionShowsAnItemWhoseIdentityReadFailed(t *testing.T) {
 	withheld := c.withholdKeepAlive(cd)
 
 	// Assert.
-	if withheld != 0 || len(cd.GetItems()) != 1 {
+	if withheld != 0 || len(cd.GetMessages()) != 1 {
 		t.Fatalf("withheld=%d remaining=%v, want the item shown after an unreadable ledger",
 			withheld, itemUUIDs(cd))
 	}

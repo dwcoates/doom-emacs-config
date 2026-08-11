@@ -39,7 +39,7 @@ func TestTheCuratorReachesTheSameVerdictWhateverTheOrigin(t *testing.T) {
 		t.Fatalf("CurateEvent: %v", err)
 	}
 	if curated.Feed != nil {
-		t.Fatalf("feed = %v, want the re-drive hidden by the request id alone", curated.Feed.GetItems())
+		t.Fatalf("feed = %v, want the re-drive hidden by the request id alone", curated.Feed.GetMessages())
 	}
 }
 
@@ -98,7 +98,7 @@ func TestAReDrivenTurnsOutputCuratesRegardlessOfOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CurateEvent: %v", err)
 	}
-	if curated.Feed == nil || len(curated.Feed.GetItems()) == 0 {
+	if curated.Feed == nil || len(curated.Feed.GetMessages()) == 0 {
 		t.Fatal("the re-driven turn's output must reach the feed")
 	}
 }

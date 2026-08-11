@@ -1406,7 +1406,7 @@ every other reader keys on too."
      (t
       (puthash session item agent-repl--frontend-surfaced-deaths)
       ;; `death' is a `FailureCardView' carried OUTSIDE the feed, so it was
-      ;; never filed under a ConversationItem and has no uuid to pass on.
+      ;; never filed under a Message and has no uuid to pass on.
       (let ((failure (agent-repl-failure-from-wire item)))
         (agent-repl--log workspace
                          "frontend-surface-session-death: ws=%s session=%s outcome=surface class=%s kind=%s resolved=%S"

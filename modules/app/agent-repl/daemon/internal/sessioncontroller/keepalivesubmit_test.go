@@ -724,7 +724,7 @@ func pushedFailureType(m *Manager, errorType string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, cd := range p.convo {
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			if errclass.TypeName(item.GetFailureCard()) == errorType {
 				return true
 			}

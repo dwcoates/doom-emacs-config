@@ -263,7 +263,7 @@ the lifecycle oneof removed."
 (defun agent-repl-failure-from-wire (card &optional item-uuid)
   "Normalize a decoded `FailureCardView' CARD plist into a failure plist.
 
-ITEM-UUID is the `ConversationItem.uuid' the card was filed under, when the
+ITEM-UUID is the `Message.uuid' the card was filed under, when the
 caller has one.  It is NOT on the card — a card carried outside the feed
 \(a `SessionView.death') was never filed at all — so it is passed in rather
 than guessed at.

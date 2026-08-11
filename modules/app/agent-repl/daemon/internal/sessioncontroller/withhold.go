@@ -51,11 +51,11 @@ func withholdItem(logLine string) withholdVerdict {
 // log on its own account for an item it KEEPS (a verdict that could not be
 // reached says so at the site), which is why it takes the consumer's logging
 // path rather than being a pure predicate.
-func (c *consumer) withholdItems(cd *frontendv1.ConversationDelta, judge func(*frontendv1.ConversationItem) withholdVerdict) int {
-	if cd == nil || len(cd.GetItems()) == 0 {
+func (c *consumer) withholdItems(cd *frontendv1.ConversationDelta, judge func(*frontendv1.Message) withholdVerdict) int {
+	if cd == nil || len(cd.GetMessages()) == 0 {
 		return 0
 	}
-	items := cd.GetItems()
+	items := cd.GetMessages()
 	kept := items[:0]
 	withheld := 0
 	for _, it := range items {
@@ -69,6 +69,6 @@ func (c *consumer) withholdItems(cd *frontendv1.ConversationDelta, judge func(*f
 			c.logf("%s", verdict.LogLine)
 		}
 	}
-	cd.Items = kept
+	cd.Messages = kept
 	return withheld
 }

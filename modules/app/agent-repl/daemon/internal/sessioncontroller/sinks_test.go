@@ -118,13 +118,13 @@ func (p *fakePusher) conversationDeltas() []*frontendv1.ConversationDelta {
 }
 
 // permissionResolutions extracts, in push order, the resolution of every
-// permission ConversationItem keyed by uuid across the recorded deltas.
+// permission Message keyed by uuid across the recorded deltas.
 func (p *fakePusher) permissionResolutions(uuid string) []corev1.PermissionItem_Resolution {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var out []corev1.PermissionItem_Resolution
 	for _, d := range p.convo {
-		for _, it := range d.GetItems() {
+		for _, it := range d.GetMessages() {
 			if it.GetUuid() == uuid {
 				if pi := it.GetPermission(); pi != nil {
 					out = append(out, pi.GetResolution())
@@ -142,7 +142,7 @@ func lastPermissionDenyMessage(p *fakePusher, uuid string) string {
 	defer p.mu.Unlock()
 	msg := ""
 	for _, d := range p.convo {
-		for _, it := range d.GetItems() {
+		for _, it := range d.GetMessages() {
 			if it.GetUuid() == uuid {
 				if pi := it.GetPermission(); pi != nil {
 					msg = pi.GetDenyMessage()
@@ -1977,7 +1977,7 @@ func TestApplyFiresOnSessionStarted(t *testing.T) {
 func failureItems(push *fakePusher) []*frontendv1.FailureCardView {
 	var out []*frontendv1.FailureCardView
 	for _, cd := range push.convo {
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			if f := item.GetFailureCard(); f != nil {
 				out = append(out, f)
 			}
@@ -1986,11 +1986,11 @@ func failureItems(push *fakePusher) []*frontendv1.FailureCardView {
 	return out
 }
 
-// failureUUIDs returns the ConversationItem uuids of the pushed failure cards.
+// failureUUIDs returns the Message uuids of the pushed failure cards.
 func failureUUIDs(push *fakePusher) []string {
 	var out []string
 	for _, cd := range push.convo {
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			if item.GetFailureCard() != nil {
 				out = append(out, item.GetUuid())
 			}
@@ -2582,9 +2582,9 @@ func TestATurnEndDoesNotReportADeath(t *testing.T) {
 
 func TestUserTurnReceiptReadsAPromptString(t *testing.T) {
 	// Arrange — a delta carrying one string-content user prompt.
-	cd := &frontendv1.ConversationDelta{Items: []*frontendv1.ConversationItem{{
+	cd := &frontendv1.ConversationDelta{Messages: []*frontendv1.Message{{
 		RequestId: "fe-9-abcd",
-		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+		Payload: &frontendv1.Message_UserMessage{UserMessage: &datav1.ApiUserMessage{
 			Content: &datav1.ApiUserMessage_ContentString{ContentString: "hello there"},
 		}},
 	}}}
@@ -2598,9 +2598,9 @@ func TestUserTurnReceiptReadsAPromptString(t *testing.T) {
 
 func TestUserTurnReceiptSumsTextBlocks(t *testing.T) {
 	// Arrange — a block-content prompt with two text blocks.
-	cd := &frontendv1.ConversationDelta{Items: []*frontendv1.ConversationItem{{
+	cd := &frontendv1.ConversationDelta{Messages: []*frontendv1.Message{{
 		RequestId: "fe-3-cafe",
-		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+		Payload: &frontendv1.Message_UserMessage{UserMessage: &datav1.ApiUserMessage{
 			Content: &datav1.ApiUserMessage_ContentBlocks{ContentBlocks: &datav1.ApiContentBlocks{
 				Blocks: []*datav1.ContentBlock{
 					{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "ab"}}},
@@ -2621,9 +2621,9 @@ func TestUserTurnReceiptIgnoresPureToolFeedback(t *testing.T) {
 	// Arrange — a user_message carrying only a tool_result block: rendered as
 	// a tool result, never a prompt bubble, so no receipt (logging one per
 	// tool call would bury the per-prompt line this exists for).
-	cd := &frontendv1.ConversationDelta{Items: []*frontendv1.ConversationItem{{
+	cd := &frontendv1.ConversationDelta{Messages: []*frontendv1.Message{{
 		RequestId: "fe-4-feed",
-		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+		Payload: &frontendv1.Message_UserMessage{UserMessage: &datav1.ApiUserMessage{
 			Content: &datav1.ApiUserMessage_ContentBlocks{ContentBlocks: &datav1.ApiContentBlocks{
 				Blocks: []*datav1.ContentBlock{
 					{Block: &datav1.ContentBlock_ToolResult{ToolResult: &datav1.ToolResultBlock{}}},
@@ -2641,9 +2641,9 @@ func TestUserTurnReceiptIgnoresPureToolFeedback(t *testing.T) {
 
 func TestUserTurnReceiptIgnoresNonUserItems(t *testing.T) {
 	// Arrange — an assistant-only delta.
-	cd := &frontendv1.ConversationDelta{Items: []*frontendv1.ConversationItem{{
+	cd := &frontendv1.ConversationDelta{Messages: []*frontendv1.Message{{
 		RequestId: "fe-5-0000",
-		Item:      &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{}}}}},
+		Payload:      &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{}}}}},
 	}}}
 	// Act
 	_, textLen := userTurnReceipt(cd)

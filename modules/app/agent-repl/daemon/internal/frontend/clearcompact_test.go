@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// The two first-class events curate to ConversationItem arms 32 and 33,
+// The two first-class events curate to Message arms 32 and 33,
 // carrying the core.v1 message VERBATIM. They are the only non-vendor Event
 // payloads that curate to an item at all.
 
@@ -29,13 +29,13 @@ func TestContextClearedCuratesIntoItsArm(t *testing.T) {
 	}
 
 	// Assert.
-	if got == nil || len(got.GetItems()) != 1 {
+	if got == nil || len(got.GetMessages()) != 1 {
 		t.Fatalf("delta = %v, want exactly one item", got)
 	}
-	item := got.GetItems()[0]
-	arm, ok := item.GetItem().(*frontendv1.ConversationItem_ContextCleared)
+	item := got.GetMessages()[0]
+	arm, ok := item.GetPayload().(*frontendv1.Message_ContextCleared)
 	if !ok {
-		t.Fatalf("item arm = %T, want ConversationItem_ContextCleared", item.GetItem())
+		t.Fatalf("item arm = %T, want Message_ContextCleared", item.GetPayload())
 	}
 	if !proto.Equal(arm.ContextCleared, cleared) {
 		t.Fatalf("payload = %v, want the core.v1 message verbatim", arm.ContextCleared)
@@ -63,12 +63,12 @@ func TestContextCompactedCuratesIntoItsArm(t *testing.T) {
 	}
 
 	// Assert.
-	if got == nil || len(got.GetItems()) != 1 {
+	if got == nil || len(got.GetMessages()) != 1 {
 		t.Fatalf("delta = %v, want exactly one item", got)
 	}
-	arm, ok := got.GetItems()[0].GetItem().(*frontendv1.ConversationItem_ContextCompacted)
+	arm, ok := got.GetMessages()[0].GetPayload().(*frontendv1.Message_ContextCompacted)
 	if !ok {
-		t.Fatalf("item arm = %T, want ConversationItem_ContextCompacted", got.GetItems()[0].GetItem())
+		t.Fatalf("item arm = %T, want Message_ContextCompacted", got.GetMessages()[0].GetPayload())
 	}
 	if !proto.Equal(arm.ContextCompacted, compacted) {
 		t.Fatalf("payload = %v, want the core.v1 message verbatim", arm.ContextCompacted)
@@ -87,7 +87,7 @@ func TestClearCarriesTheEventEnvelopeOntoItsItem(t *testing.T) {
 	got, _, _ := conversationDeltaFromEvent("ws", "", ev)
 
 	// Assert.
-	item := got.GetItems()[0]
+	item := got.GetMessages()[0]
 	if item.GetTsMs() != producedMs || item.GetRequestId() != "req-7" {
 		t.Fatalf("envelope ts_ms=%d request_id=%q, want %d/%q",
 			item.GetTsMs(), item.GetRequestId(), producedMs, "req-7")
@@ -123,7 +123,7 @@ func TestClearUUIDIsTheDedupKey(t *testing.T) {
 	got, _, _ := conversationDeltaFromEvent("ws", "", ev)
 
 	// Assert.
-	if uuid := got.GetItems()[0].GetUuid(); uuid != "clear:u-1" {
+	if uuid := got.GetMessages()[0].GetUuid(); uuid != "clear:u-1" {
 		t.Fatalf("uuid = %q, want %q", uuid, "clear:u-1")
 	}
 }
@@ -139,7 +139,7 @@ func TestCompactUUIDIsTheDedupKey(t *testing.T) {
 	got, _, _ := conversationDeltaFromEvent("ws", "", ev)
 
 	// Assert.
-	if uuid := got.GetItems()[0].GetUuid(); uuid != "compact:b-1" {
+	if uuid := got.GetMessages()[0].GetUuid(); uuid != "compact:b-1" {
 		t.Fatalf("uuid = %q, want %q", uuid, "compact:b-1")
 	}
 }
@@ -158,7 +158,7 @@ func TestClearWithoutADedupKeyDerivesAStableUUID(t *testing.T) {
 	got, _, _ := conversationDeltaFromEvent("ws", "", ev)
 
 	// Assert.
-	if uuid := got.GetItems()[0].GetUuid(); uuid != "clear:s1:41" {
+	if uuid := got.GetMessages()[0].GetUuid(); uuid != "clear:s1:41" {
 		t.Fatalf("uuid = %q, want %q", uuid, "clear:s1:41")
 	}
 }
@@ -175,7 +175,7 @@ func TestCompactWithoutADedupKeyDerivesACompactPrefixedUUID(t *testing.T) {
 	got, _, _ := conversationDeltaFromEvent("ws", "", ev)
 
 	// Assert.
-	if uuid := got.GetItems()[0].GetUuid(); uuid != "compact:s1:41" {
+	if uuid := got.GetMessages()[0].GetUuid(); uuid != "compact:s1:41" {
 		t.Fatalf("uuid = %q, want %q", uuid, "compact:s1:41")
 	}
 }

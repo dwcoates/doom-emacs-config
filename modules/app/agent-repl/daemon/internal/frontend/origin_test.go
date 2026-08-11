@@ -123,8 +123,8 @@ func TestAnOriginlessStreamUserRecordStaysEnvelopeless(t *testing.T) {
 	if _, present := c.Envelopes["u1"]; present {
 		t.Error("a record with neither detachment nor origin evidence got an envelope")
 	}
-	if len(c.Feed.GetItems()) != 1 {
-		t.Fatalf("feed carried %d item(s), want the record itself", len(c.Feed.GetItems()))
+	if len(c.Feed.GetMessages()) != 1 {
+		t.Fatalf("feed carried %d item(s), want the record itself", len(c.Feed.GetMessages()))
 	}
 }
 
@@ -138,8 +138,8 @@ func TestAStreamPlaneDetachedUserRecordStillNamesItsLaunchingCall(t *testing.T) 
 
 	// Assert: a sidechain user record with no emission arm is withheld from the
 	// feed rather than promoted, and it is the detachment that decided so.
-	if len(c.Feed.GetItems()) != 0 {
-		t.Errorf("feed carried %d item(s) for a detached record, want none", len(c.Feed.GetItems()))
+	if len(c.Feed.GetMessages()) != 0 {
+		t.Errorf("feed carried %d item(s) for a detached record, want none", len(c.Feed.GetMessages()))
 	}
 	if len(c.WithheldDetached) != 1 || c.WithheldDetached[0] != "u1" {
 		t.Errorf("withheld detached = %v, want the detached record u1", c.WithheldDetached)

@@ -153,7 +153,7 @@ func failureType(card *frontendv1.FailureCardView) string {
 // hasTurnResult reports whether a delta carries the turn's terminal result
 // emission — the item a turn's accounting record belongs to.
 func hasTurnResult(cd *frontendv1.ConversationDelta) bool {
-	for _, item := range cd.GetItems() {
+	for _, item := range cd.GetMessages() {
 		if item.GetAgent().GetTurnResult() != nil {
 			return true
 		}

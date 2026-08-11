@@ -752,9 +752,9 @@ func TestProtojsonRoundTripStability(t *testing.T) {
 		{"session_view", SessionViewFrame(&frontendv1.SessionView{Workspace: "w", Model: "m", TotalTokens: 9, TotalCostUsd: 1.5})},
 		{"conversation_delta", ConversationDeltaFrame(&frontendv1.ConversationDelta{
 			Workspace: "w", Fence: "s", ThroughSeq: 4,
-			Items: []*frontendv1.ConversationItem{{
+			Messages: []*frontendv1.Message{{
 				Uuid: "u1", TsMs: 5,
-				Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{
+				Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{
 					Content: []*datav1.ContentBlock{
 						{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "hi"}}},
 					},

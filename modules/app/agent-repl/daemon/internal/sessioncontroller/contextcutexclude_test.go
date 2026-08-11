@@ -23,10 +23,10 @@ func contextCutExcludeConsumer(t *testing.T, logf func(string, ...any)) *consume
 // resultItem is a turn's terminal result as it reaches the feed — the item the
 // webapp draws as a duration chip, and the one this exclusion exists to keep
 // off a turn the user cannot see.
-func resultItem(uuid, requestID string) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{
+func resultItem(uuid, requestID string) *frontendv1.Message {
+	return &frontendv1.Message{
 		Uuid: uuid, RequestId: requestID,
-		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
+		Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 			Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: nil},
 		}},
 	}
@@ -58,7 +58,7 @@ func TestDaemonContextCutExclusionWithholdsEveryItemOfTheDaemonsOwnCut(t *testin
 			withheld := c.withholdDaemonContextCut(cd)
 
 			// Assert.
-			if withheld != 2 || len(cd.GetItems()) != 0 {
+			if withheld != 2 || len(cd.GetMessages()) != 0 {
 				t.Fatalf("withheld=%d remaining=%v, want every item of the daemon's own compaction withheld",
 					withheld, itemUUIDs(cd))
 			}
@@ -78,7 +78,7 @@ func TestDaemonContextCutExclusionShowsARealTurnsResult(t *testing.T) {
 	withheld := c.withholdDaemonContextCut(cd)
 
 	// Assert.
-	if withheld != 0 || len(cd.GetItems()) != 1 {
+	if withheld != 0 || len(cd.GetMessages()) != 1 {
 		t.Fatalf("withheld=%d remaining=%v, want the user's own turn result shown",
 			withheld, itemUUIDs(cd))
 	}
@@ -92,9 +92,9 @@ func TestDaemonContextCutExclusionShowsARealTurnsResult(t *testing.T) {
 func TestDaemonContextCutExclusionShowsTheIDLessCompactionDivider(t *testing.T) {
 	// Arrange.
 	c := contextCutExcludeConsumer(t, func(string, ...any) {})
-	cd := excludeDelta(&frontendv1.ConversationItem{
+	cd := excludeDelta(&frontendv1.Message{
 		Uuid: "d1",
-		Item: &frontendv1.ConversationItem_ContextCompacted{
+		Payload: &frontendv1.Message_ContextCompacted{
 			ContextCompacted: &corev1.ContextCompacted{},
 		},
 	})
@@ -103,7 +103,7 @@ func TestDaemonContextCutExclusionShowsTheIDLessCompactionDivider(t *testing.T) 
 	withheld := c.withholdDaemonContextCut(cd)
 
 	// Assert.
-	if withheld != 0 || len(cd.GetItems()) != 1 {
+	if withheld != 0 || len(cd.GetMessages()) != 1 {
 		t.Fatalf("withheld=%d remaining=%v, want the compaction divider shown",
 			withheld, itemUUIDs(cd))
 	}
@@ -122,7 +122,7 @@ func TestDaemonContextCutExclusionShowsAnInternalResumeResult(t *testing.T) {
 	withheld := c.withholdDaemonContextCut(cd)
 
 	// Assert.
-	if withheld != 0 || len(cd.GetItems()) != 1 {
+	if withheld != 0 || len(cd.GetMessages()) != 1 {
 		t.Fatalf("withheld=%d remaining=%v, want the re-driven turn's result shown",
 			withheld, itemUUIDs(cd))
 	}
@@ -196,7 +196,7 @@ func TestEveryDaemonContextCutMintIsRecognizedByTheExclusion(t *testing.T) {
 
 			withheld := c.withholdDaemonContextCut(cd)
 
-			if withheld != 1 || len(cd.GetItems()) != 0 {
+			if withheld != 1 || len(cd.GetMessages()) != 0 {
 				t.Fatalf("minted id %q: withheld=%d remaining=%v, want the daemon's own cut withheld",
 					requestID, withheld, itemUUIDs(cd))
 			}

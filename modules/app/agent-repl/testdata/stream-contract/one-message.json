@@ -158,7 +158,7 @@
         "workspace": "ws",
         "fence": "s1",
         "throughSeq": "1",
-        "items": [
+        "messages": [
           {
             "uuid": "env-1#thinking:0",
             "tsMs": "1700000000000",
@@ -178,7 +178,7 @@
         "workspace": "ws",
         "fence": "s1",
         "throughSeq": "2",
-        "items": [
+        "messages": [
           {
             "uuid": "env-2",
             "tsMs": "1700000000000",

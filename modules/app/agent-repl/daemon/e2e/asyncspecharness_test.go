@@ -185,7 +185,7 @@ func asyncDeltaIn(frame *frontendv1.FrontendFrame, workspace string) *frontendv1
 // must be absent from the feed half. Reading them separately would let a record
 // satisfy one observer and be missed by the other.
 type asyncTraffic struct {
-	items  []*frontendv1.ConversationItem
+	items  []*frontendv1.Message
 	deltas []*frontendv1.AsyncBubbleDelta
 }
 
@@ -229,7 +229,7 @@ func (a asyncTraffic) agentEmissions(bubbleID string) []*frontendv1.AgentEmissio
 // preserves per-session write order and the daemon curates in that order, so
 // once the barrier's item has arrived every record written before it has been
 // through the whole pipeline. No sleeping for a guessed duration.
-func drainUntilItem(t *testing.T, conn *websocket.Conn, workspace, what string, match func(*frontendv1.ConversationItem) bool) asyncTraffic {
+func drainUntilItem(t *testing.T, conn *websocket.Conn, workspace, what string, match func(*frontendv1.Message) bool) asyncTraffic {
 	t.Helper()
 	var seen asyncTraffic
 	deadline := time.Now().Add(frameTimeout)
@@ -277,7 +277,7 @@ func awaitFrame(t *testing.T, conn *websocket.Conn, what string, match func(*fro
 // The gate moves; the guarantees do not. Everything downstream still reads the
 // bubble id the daemon minted, and still holds it to the same routing,
 // settlement and cursor contracts.
-func anchorsFor(items []*frontendv1.ConversationItem, toolUseID string) []*frontendv1.AsyncBubble {
+func anchorsFor(items []*frontendv1.Message, toolUseID string) []*frontendv1.AsyncBubble {
 	var out []*frontendv1.AsyncBubble
 	for _, bubble := range asyncBubbleItems(items) {
 		if bubble.GetOriginToolUseId() == toolUseID {
@@ -320,7 +320,7 @@ func gateOnAnchor(t *testing.T, seen asyncTraffic, toolUseID string) string {
 	// nothing about whether they hold. Falling through to the pushed bubble's
 	// own id keeps the anchor gap on the record AND lets the rest of the
 	// specification run, so one wave's evidence covers all of it.
-	t.Errorf("no ConversationItem.async_bubble anchored the launching call %q in the feed (saw %d conversation items, %d anchors in total, %d async pushes which opened %s): the bubble has no place in the conversation that started it",
+	t.Errorf("no Message.async_bubble anchored the launching call %q in the feed (saw %d conversation items, %d anchors in total, %d async pushes which opened %s): the bubble has no place in the conversation that started it",
 		toolUseID, len(seen.items), len(asyncBubbleItems(seen.items)), len(seen.deltas), describeOpenedBubbles(seen))
 
 	for _, bubble := range seen.bubbles() {
@@ -361,7 +361,7 @@ func openedBubble(bubbles []*frontendv1.AsyncBubble, id string) *frontendv1.Asyn
 
 // asyncBubbleItems returns the top-level ConversationItems carrying arm 38 —
 // the bubble's ANCHOR in the feed, distinct from the bubble's own updates.
-func asyncBubbleItems(items []*frontendv1.ConversationItem) []*frontendv1.AsyncBubble {
+func asyncBubbleItems(items []*frontendv1.Message) []*frontendv1.AsyncBubble {
 	var out []*frontendv1.AsyncBubble
 	for _, item := range items {
 		if b := item.GetAsyncBubble(); b != nil {

@@ -337,7 +337,7 @@ type mergeWatch struct {
 	conn   *websocket.Conn
 	states []*frontendv1.WorkspaceState
 	acks   map[string]*frontendv1.CommandAck
-	items  map[string][]*frontendv1.ConversationItem
+	items  map[string][]*frontendv1.Message
 }
 
 func newMergeWatch(t *testing.T, conn *websocket.Conn) *mergeWatch {
@@ -346,7 +346,7 @@ func newMergeWatch(t *testing.T, conn *websocket.Conn) *mergeWatch {
 		t:     t,
 		conn:  conn,
 		acks:  map[string]*frontendv1.CommandAck{},
-		items: map[string][]*frontendv1.ConversationItem{},
+		items: map[string][]*frontendv1.Message{},
 	}
 }
 
@@ -358,7 +358,7 @@ func (w *mergeWatch) record(frame *frontendv1.FrontendFrame) {
 		w.acks[f.CommandAck.GetRequestId()] = f.CommandAck
 	case *frontendv1.FrontendFrame_ConversationDelta:
 		ws := f.ConversationDelta.GetWorkspace()
-		w.items[ws] = append(w.items[ws], f.ConversationDelta.GetItems()...)
+		w.items[ws] = append(w.items[ws], f.ConversationDelta.GetMessages()...)
 	}
 }
 
@@ -501,9 +501,9 @@ func (w *mergeWatch) awaitOKAck(requestID string) *frontendv1.CommandAck {
 }
 
 // awaitItem blocks until a conversation item for ws satisfies match.
-func (w *mergeWatch) awaitItem(ws, what string, match func(*frontendv1.ConversationItem) bool) *frontendv1.ConversationItem {
+func (w *mergeWatch) awaitItem(ws, what string, match func(*frontendv1.Message) bool) *frontendv1.Message {
 	w.t.Helper()
-	var found *frontendv1.ConversationItem
+	var found *frontendv1.Message
 	w.until(what, func() bool {
 		for _, item := range w.items[ws] {
 			if match(item) {

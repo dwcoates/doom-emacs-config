@@ -22,7 +22,7 @@ func (h *queueHarness) commandItems() []*frontendv1.SessionCommandItem {
 	defer h.push.mu.Unlock()
 	var out []*frontendv1.SessionCommandItem
 	for _, cd := range h.push.convo {
-		for _, it := range cd.GetItems() {
+		for _, it := range cd.GetMessages() {
 			if sc := it.GetSessionCommand(); sc != nil {
 				out = append(out, sc)
 			}

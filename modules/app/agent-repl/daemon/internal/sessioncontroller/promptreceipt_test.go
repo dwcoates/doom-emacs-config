@@ -257,7 +257,7 @@ type orderingPusher struct {
 func (p *orderingPusher) PushAsyncBubbleDelta(*frontendv1.AsyncBubbleDelta) {}
 func (p *orderingPusher) PushConversationDelta(cd *frontendv1.ConversationDelta) {
 	p.mu.Lock()
-	*p.trace = append(*p.trace, "push:"+cd.GetItems()[0].GetRequestId())
+	*p.trace = append(*p.trace, "push:"+cd.GetMessages()[0].GetRequestId())
 	p.mu.Unlock()
 	p.fakePusher.PushConversationDelta(cd)
 }
@@ -414,7 +414,7 @@ func TestTheRecordedInstantIsTheOneTheReceiptBubbleCarries(t *testing.T) {
 	if len(pusher.fakePusher.convo) != 1 {
 		t.Fatalf("pushed %d deltas, want the one receipt", len(pusher.fakePusher.convo))
 	}
-	if got := pusher.fakePusher.convo[0].GetItems()[0].GetTsMs(); got != rows[0].AcceptedAtMs {
+	if got := pusher.fakePusher.convo[0].GetMessages()[0].GetTsMs(); got != rows[0].AcceptedAtMs {
 		t.Fatalf("receipt ts_ms = %d, recorded accepted_at_ms = %d; they must be the same instant", got, rows[0].AcceptedAtMs)
 	}
 }
@@ -541,10 +541,10 @@ func receiptConsumer(t *testing.T, receipts PromptReceiptStore) *consumer {
 func userDelta(uuid, requestID, text string) *frontendv1.ConversationDelta {
 	return &frontendv1.ConversationDelta{
 		Workspace: "ws",
-		Items: []*frontendv1.ConversationItem{{
+		Messages: []*frontendv1.Message{{
 			Uuid:      uuid,
 			RequestId: requestID,
-			Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+			Payload: &frontendv1.Message_UserMessage{UserMessage: &datav1.ApiUserMessage{
 				Content: &datav1.ApiUserMessage_ContentString{ContentString: text},
 			}},
 		}},
@@ -670,12 +670,12 @@ func durableUserEvent(t *testing.T, seq uint64, uuid, requestID, text string, ts
 }
 
 // receiptItems returns every pushed prompt-receipt item, in push order.
-func (h *durableHarness) receiptItems() []*frontendv1.ConversationItem {
+func (h *durableHarness) receiptItems() []*frontendv1.Message {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
-	var out []*frontendv1.ConversationItem
+	var out []*frontendv1.Message
 	for _, cd := range h.push.convo {
-		for _, it := range cd.GetItems() {
+		for _, it := range cd.GetMessages() {
 			if strings.HasPrefix(it.GetUuid(), "prompt-echo:") {
 				out = append(out, it)
 			}
@@ -722,7 +722,7 @@ func TestADurableReplayServesAReceiptAfterTheStoresOwnEvents(t *testing.T) {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
 	last := h.push.convo[len(h.push.convo)-1]
-	if got := last.GetItems()[0].GetUuid(); got != "prompt-echo:r-1" {
+	if got := last.GetMessages()[0].GetUuid(); got != "prompt-echo:r-1" {
 		t.Fatalf("last pushed item uuid = %q, want the receipt", got)
 	}
 }

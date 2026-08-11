@@ -56,7 +56,7 @@ import (
 // arm is what would be RENDERED as a prompt bubble — the thing being withheld.
 // An item on any other arm carrying this origin (there is none today) is not a
 // bubble and is left alone rather than silently dropped.
-func isTaskNotificationRecord(it *frontendv1.ConversationItem, env frontend.RecordEnvelope) bool {
+func isTaskNotificationRecord(it *frontendv1.Message, env frontend.RecordEnvelope) bool {
 	return env.OriginKind == datav1.OriginKind_ORIGIN_KIND_TASK_NOTIFICATION && it.GetUserMessage() != nil
 }
 
@@ -68,7 +68,7 @@ func isTaskNotificationRecord(it *frontendv1.ConversationItem, env frontend.Reco
 // without one are the ordinary conversation's — withholding on a missing
 // envelope would hide the user's own words on the strength of nothing.
 func (c *consumer) withholdTaskNotifications(cd *frontendv1.ConversationDelta, envs map[string]frontend.RecordEnvelope) {
-	c.withholdItems(cd, func(it *frontendv1.ConversationItem) withholdVerdict {
+	c.withholdItems(cd, func(it *frontendv1.Message) withholdVerdict {
 		env, ok := envs[it.GetUuid()]
 		if !ok || !isTaskNotificationRecord(it, env) {
 			return keepItem

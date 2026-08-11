@@ -171,7 +171,7 @@ func TestE2EUnexpectedQueryTerminationReachesTypedFailure(t *testing.T) {
 	_, conn, _, _ := liveSession(t, h, cwd)
 
 	writeCmd(t, conn, `{"requestId":"e2e-query-eof","submitPrompt":{"text":"!query-eof","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
-	item, _ := awaitItem(t, conn, cwd, "the typed unexpected-query-termination failure", func(item *frontendv1.ConversationItem) bool {
+	item, _ := awaitItem(t, conn, cwd, "the typed unexpected-query-termination failure", func(item *frontendv1.Message) bool {
 		failure := item.GetFailureCard()
 		return failure != nil && errclass.CardTone(failure) == errclass.ToneLocal && errclass.TypeName(failure) == "unexpected_query_termination"
 	})

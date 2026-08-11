@@ -81,7 +81,7 @@ module's commentary for why either one alone is the wrong question."
 
 (defun agent-repl--open-fence-item-card (item)
   "Return ITEM's `FailureCardView' plist, or nil when it carries no card.
-ITEM is a `ConversationItem' plist as pushed on a `ConversationDelta'."
+ITEM is a `Message' plist as pushed on a `ConversationDelta'."
   (plist-get item :failureCard))
 
 (defun agent-repl--open-fence-active-p (ws)
@@ -147,13 +147,13 @@ so an unresolved path would fence a workspace nothing else addresses."
         (when (cl-some (lambda (item)
                          (let ((card (agent-repl--open-fence-item-card item)))
                            (and card (agent-repl--open-fence-card-terminal-p card))))
-                       (plist-get delta :items))
+                       (plist-get delta :messages))
           (agent-repl--warn nil (concat "open-fence: a TERMINAL open failure arrived for "
                                         "wire-workspace=%s, which resolves to no known "
                                         "workspace — it cannot be fenced")
                             raw)
           0)
-      (dolist (item (plist-get delta :items))
+      (dolist (item (plist-get delta :messages))
         (let ((card (agent-repl--open-fence-item-card item)))
           (when (and card (agent-repl--open-fence-card-terminal-p card))
             (cl-incf seen)

@@ -28,16 +28,16 @@ import (
 // refusal is loud, and it carries the workspace, the session, the store seq and
 // the item count so the dropped content is identifiable in the log.
 func (c *consumer) stampConversationProvenance(cd *frontendv1.ConversationDelta) bool {
-	for _, item := range cd.GetItems() {
+	for _, item := range cd.GetMessages() {
 		if item == nil {
 			c.logf("session-controller: conversation provenance REFUSED ws=%q session=%s seq=%d — the curated delta carries a nil item; %d item(s) are not pushed",
-				c.workspace, c.sessionID, cd.GetThroughSeq(), len(cd.GetItems()))
+				c.workspace, c.sessionID, cd.GetThroughSeq(), len(cd.GetMessages()))
 			return false
 		}
 		source, err := c.ssm.ConversationSourceAt(c.workspace, item.GetTsMs())
 		if err != nil {
 			c.logf("session-controller: conversation provenance REFUSED ws=%q session=%s seq=%d uuid=%s ts_ms=%d: %v — %d item(s) are not pushed rather than sent with an unset source",
-				c.workspace, c.sessionID, cd.GetThroughSeq(), item.GetUuid(), item.GetTsMs(), err, len(cd.GetItems()))
+				c.workspace, c.sessionID, cd.GetThroughSeq(), item.GetUuid(), item.GetTsMs(), err, len(cd.GetMessages()))
 			return false
 		}
 		if err := frontend.StampItemConversationSource(item, source); err != nil {
@@ -51,7 +51,7 @@ func (c *consumer) stampConversationProvenance(cd *frontendv1.ConversationDelta)
 
 // stampLocalItemProvenance stamps one daemon-composed item and reports whether
 // it may be pushed.
-func (c *consumer) stampLocalItemProvenance(item *frontendv1.ConversationItem) bool {
+func (c *consumer) stampLocalItemProvenance(item *frontendv1.Message) bool {
 	source := frontendv1.ConversationSource_CONVERSATION_SOURCE_USER
 	if c.ssm.MergeLeaseHeld(c.workspace) {
 		source = frontendv1.ConversationSource_CONVERSATION_SOURCE_MERGE

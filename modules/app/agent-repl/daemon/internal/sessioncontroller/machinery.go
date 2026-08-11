@@ -59,7 +59,7 @@ func isSlashCommandMachineryText(content string) bool {
 // blocks of a caveat-wrapped record are more of the same bookkeeping, and a
 // prompt whose first block is real text is a real prompt regardless of what
 // follows.
-func userRecordHead(it *frontendv1.ConversationItem) string {
+func userRecordHead(it *frontendv1.Message) string {
 	um := it.GetUserMessage()
 	if um == nil {
 		return ""
@@ -79,7 +79,7 @@ func userRecordHead(it *frontendv1.ConversationItem) string {
 
 // machineryEnvelope reports the envelope tag a conversation item is machinery
 // under, or "" when the item is not a machinery user record.
-func machineryEnvelope(it *frontendv1.ConversationItem) string {
+func machineryEnvelope(it *frontendv1.Message) string {
 	head := userRecordHead(it)
 	if !isSlashCommandMachineryText(head) {
 		return ""
@@ -101,7 +101,7 @@ func machineryEnvelope(it *frontendv1.ConversationItem) string {
 // `/clear` (promptdispatch.go). Neither is anything a human typed, both arrive
 // as unflagged "user" transcript records, and both drew a purple bubble full of
 // text the user never wrote.
-func withheldReason(it *frontendv1.ConversationItem) string {
+func withheldReason(it *frontendv1.Message) string {
 	if envelope := machineryEnvelope(it); envelope != "" {
 		return "slash-command machinery " + envelope
 	}
@@ -126,7 +126,7 @@ func withheldReason(it *frontendv1.ConversationItem) string {
 // an outstanding prompt receipt, which would retire the receipt for a real
 // prompt and leave that prompt's own line unattributed behind it.
 func (c *consumer) withholdMachinery(cd *frontendv1.ConversationDelta) {
-	c.withholdItems(cd, func(it *frontendv1.ConversationItem) withholdVerdict {
+	c.withholdItems(cd, func(it *frontendv1.Message) withholdVerdict {
 		reason := withheldReason(it)
 		if reason == "" {
 			return keepItem
