@@ -117,9 +117,18 @@ func TopbarView(in TopbarInputs) (*frontendv1.TopbarView, error) {
 // topbarTitle composes the one title line: the workspace's own name, and the
 // branch beside it when there is one worth showing. Composed here so no client
 // ever joins two identity fragments and picks its own separator.
+//
+// THE PARENTHETICAL EXISTS TO SAY SOMETHING THE NAME DOES NOT. It is worth
+// drawing exactly when the branch differs from the workspace's own name —
+// "create-game-for-analysis-xvg (DWC/create-game-for-analysis-xvg)" tells the
+// reader which ref the worktree is on, while
+// "slack-cee-ceac-integration-shj (slack-cee-ceac-integration-shj)" repeats the
+// name it sits beside and is pure width. Suppressing the ECHO is not the same
+// as suppressing the branch: a differing branch still prints, because that is
+// the case the parenthetical was added for.
 func topbarTitle(workspace, branch string) string {
 	name := filepath.Base(workspace)
-	if branch == "" {
+	if branch == "" || branch == name {
 		return name
 	}
 	return name + " (" + branch + ")"
