@@ -167,8 +167,8 @@ export const DetachedWorkSchema: GenMessage<DetachedWork> = /*@__PURE__*/
 export type DetachedWorkAgent = Message<"agentshim.frontend.v1.DetachedWorkAgent"> & {
   /**
    * The agent's conversation so far, in emission order, in EXACTLY the
-   * vocabulary the top-level feed uses. A frontend's renderer for a response
-   * bubble, a thinking block or a tool card is the same code in both places.
+   * vocabulary the top-level feed uses. A frontend's renderer for a response, a
+   * thinking block or a tool card is the same code in both places.
    *
    * @generated from field: repeated agentshim.frontend.v1.AgentEmission emissions = 1;
    */
@@ -207,7 +207,7 @@ export type DetachedWorkMerge = Message<"agentshim.frontend.v1.DetachedWorkMerge
    * The merge conversation so far, in emission order, in EXACTLY the
    * vocabulary the top-level feed uses (the same shape as
    * DetachedWorkAgent.emissions, deliberately: a frontend's renderer for a
-   * response bubble, a thinking block or a tool card is the same code here).
+   * response, a thinking block or a tool card is the same code here).
    *
    * @generated from field: repeated agentshim.frontend.v1.AgentEmission emissions = 1;
    */
@@ -233,7 +233,7 @@ export const DetachedWorkMergeSchema: GenMessage<DetachedWorkMerge> = /*@__PURE_
  * render flat, now work that owns its window. The daemon opens it when it
  * classifies the Skill tool call, resolves the skill file's contents as the
  * work's own body (they are the SKILL's content, not a response of the
- * conversation — the response-bubble rendering of the file contents is retired
+ * conversation — rendering the file contents as an agent response is retired
  * by this arm), and folds the session's subsequent emissions here until the
  * user's own next prompt or an interrupt settles it — the same temporal
  * membership the merge arm uses.

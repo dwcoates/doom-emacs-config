@@ -197,7 +197,7 @@ message QueueEntry {
   // An entry is held by at most one thing at a time: a drain lease, a
   // keep-alive turn and a pending revival are mutually exclusive session
   // conditions, and an entry held by two of them at once would have two
-  // different sets of exits and two different bubbles to render. Stating them
+  // different sets of exits and two different states to render. Stating them
   // as arms makes that impossible to express rather than merely unlikely.
   //
   // No arm set means the entry is held by the ordinary case — a turn is
@@ -208,16 +208,16 @@ message QueueEntry {
     // (deliver now, further delaying the bounce), QueueCancelCmd, or delivery
     // after the bounce completes. Held entries are durable and survive the
     // daemon swap, so such a prompt is delayed, never lost. A frontend
-    // renders a dedicated lease bubble from this arm instead of the
-    // classifier bubble.
+    // renders a dedicated lease explanation from this arm instead of the
+    // classification.
     QueueEntryShutdownHold shutdown = 7;
     // Held because a cache keep-alive turn is in flight. The classifier NEVER
     // runs on such an entry and there is NO force-through: the keep-alive must
     // complete before the rewind-and-submit can run, so the only exits are
     // delivery when the ping's turn ends (the daemon rewinds, then submits
     // this entry) or QueueCancelCmd. A frontend renders a dedicated "waiting
-    // on a keep-alive response" bubble from this arm instead of the
-    // classifier bubble.
+    // on a keep-alive response" explanation from this arm instead of the
+    // classification.
     QueueEntryKeepAliveHold keep_alive = 8;
     // Held because a compact-first revival's compaction is still pending. Like
     // the other two holds, the classifier NEVER runs on such an entry and
@@ -225,8 +225,8 @@ message QueueEntry {
     // lands and the gate opens, a loud drop when the revival fails or expires
     // (a session still asleep can never deliver, so a retained entry would be
     // a leak, not a delay), or QueueCancelCmd. A frontend renders a dedicated
-    // "waiting on the revival's compaction" bubble from this arm instead of
-    // the classifier bubble.
+    // "waiting on the revival's compaction" explanation from this arm instead
+    // of the classification.
     QueueEntryRevivalHold revival = 9;
     // Held because the session's shim is being restarted onto the current
     // build at the turn boundary (automatic stale-shim refresh). Like the
@@ -238,14 +238,14 @@ message QueueEntry {
 
 // A scheduled shutdown's drain lease, holding a queue entry.
 message QueueEntryShutdownHold {
-  // The schedule holding this entry, joining the bubble to the
+  // The schedule holding this entry, joining the entry to the
   // ShutdownScheduleView it should explain.
   string schedule_id = 1;
 }
 
 // The keep-alive turn holding a queue entry.
 message QueueEntryKeepAliveHold {
-  // turn_id of the in-flight keep-alive turn, joining the bubble to the turn
+  // turn_id of the in-flight keep-alive turn, joining the entry to the turn
   // whose completion releases it.
   string turn_id = 1;
 }
@@ -254,7 +254,7 @@ message QueueEntryKeepAliveHold {
 message QueueEntryRevivalHold {
   // 1 was session_id, naming the session being revived. A revival is a
   // WORKSPACE-level event and the entry already rides its workspace's queue,
-  // so the id joined the bubble to nothing the client could not already
+  // so the id joined the entry to nothing the client could not already
   // reach. The arm's presence is the whole fact it carries.
   reserved 1;
   reserved "session_id";
