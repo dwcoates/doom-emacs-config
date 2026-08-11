@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -324,15 +325,6 @@ type ClearCompactStore interface {
 	SetNewestClearOrCompactSeq(sessionID string, seq uint64)
 }
 
-// PromptReceiptStore persists the DURABLE half of a prompt receipt: one row per
-// prompt this daemon accepted and has not yet seen the conversation carry.
-// Satisfied by *statedb.PromptReceipts.
-//
-// It is the only thing standing between a user and a silently lost prompt. A
-// receipt lived only in daemon memory before this, so a prompt accepted and not
-// yet durable when the daemon died left no trace anywhere — the shim-store had
-// never received the turn, and the work the user had already seen died with
-// the process.
 // WiringApplier moves a workspace's wired axis — the generation-less
 // connectivity projection that says whether ANYTHING is attached to a
 // workspace. Satisfied by *ssm.Manager.
@@ -368,24 +360,17 @@ type TerminalFailureCardStore interface {
 	Withdraw(sessionID string) (bool, error)
 }
 
+// PromptReceiptStore persists the interrupted-turn resumptions the prompt_receipt
+// table now holds, and nothing else. Satisfied by *statedb.PromptReceipts.
+//
+// IT NO LONGER STANDS IN FOR A PROMPT. It used to carry a second kind of row —
+// the durable half of the receipt the daemon pushed so a user's words appeared
+// before the vendor's transcript echoed them — and that receipt is gone: a
+// prompt renders when it round-trips through the SDK, so the only record of one
+// is the conversation's own. What remains is the row that was never a prompt at
+// all: the daemon's note that a teardown interrupted a turn somebody still owes
+// the user (turnresumption.go).
 type PromptReceiptStore interface {
-	// Record persists one accepted prompt. It runs BEFORE the receipt bubble is
-	// pushed, so a receipt on a user's screen always implies a durable record.
-	Record(r statedb.PromptReceipt) error
-	// Retire discards a request's receipt, reporting whether one was
-	// outstanding. Retiring an already-retired receipt is a no-op, never an
-	// error: the retirement points are several and any may run second.
-	Retire(requestID string) (bool, error)
-	// RetireWorkspace discards every receipt for a workspace accepted at or
-	// before throughMs — the context cut's sweep — reporting how many went.
-	RetireWorkspace(workspace string, throughMs int64) (int, error)
-	// Outstanding lists a workspace's un-retired receipts, oldest first.
-	// A PENDING RESUMPTION IS NEVER AMONG THEM: this is the render path, and a
-	// re-drive is not the user's prompt (turnresumption.go).
-	Outstanding(workspace string) ([]statedb.PromptReceipt, error)
-
-	// --- the interrupted-turn resumption (turnresumption.go) ---
-
 	// RecordPendingResumption durably records a turn a teardown is about to
 	// interrupt, so the successor daemon can re-drive it. It runs BEFORE the
 	// interrupt is delivered.
@@ -476,18 +461,15 @@ type consumer struct {
 	// Required: Config validation rejects a Manager built without one, so a
 	// clear or a compaction can never be observed and silently forgotten.
 	floors ClearCompactStore
-	// receipts persists prompt receipts durably. Assigned after construction
-	// (bindReceipts) rather than taken as yet another positional constructor
-	// argument. Nil is a session controller built without one, and every use
-	// site says so out loud rather than silently skipping the write.
+	// receipts is the prompt_receipt table, which since the prompt receipt was
+	// retired holds ONE kind of row: the interrupted-turn resumption this
+	// consumer discharges when the curator proves the re-drive landed
+	// (turnresumption.go). Assigned after construction rather than taken as yet
+	// another positional constructor argument. Nil is a session controller built
+	// without one, and every use site says so out loud rather than silently
+	// skipping the write.
 	receipts PromptReceiptStore
-	// onPushedConversation observes each translated ConversationDelta at the
-	// moment it is pushed. Assigned only by the throwaway consumer a DURABLE
-	// replay runs through, which needs to know which prompts the store's own
-	// events just served so it does not serve a receipt for one of them twice
-	// (durablereplay.go). Nil on every live consumer.
-	onPushedConversation func(*frontendv1.ConversationDelta)
-	logf                 func(string, ...any)
+	logf     func(string, ...any)
 	// warnf is the WARN channel for records that accompany a regression the
 	// user can see — degraded accounting, a failure card, a rejected event.
 	// At info those are indistinguishable from routine progress and invisible
@@ -780,9 +762,6 @@ type consumer struct {
 	// degradation for a query that is already dead misrepresents a session whose
 	// LIVE query is up and driveable. Guarded by mu, beside failItems.
 	withheldCards map[string]struct{}
-	// echoes are the prompt receipts this daemon has pushed and the durable
-	// transcript has not yet claimed, OLDEST FIRST. See pushUserEcho.
-	echoes []*promptEcho
 	// cmdItems retains the session-command invocation items this daemon has
 	// pushed, in first-seen order, on the same footing as permItems and
 	// failItems and for the same reason (sessioncommand.go). They are the ONLY
@@ -2182,21 +2161,12 @@ func (c *consumer) noteClearOrCompact(ev *corev1.Event) {
 	}
 	logf("session-controller: replay floor raised to this clear or compaction")
 	c.floors.SetNewestClearOrCompactSeq(c.sessionID, seq)
-	// Outstanding prompt receipts go with it. They carry no seq, so nothing
-	// else would ever floor them, and a receipt for a prompt the clear just
-	// discarded would replay pre-clear text back above the floor.
-	if dropped := c.dropEchoes(); dropped > 0 {
-		logf("session-controller: dropped %d unclaimed prompt receipt(s) with the history this floor hides", dropped)
-	}
-	// The session-command invocations go with them, for the identical reason:
-	// they carry no seq either, and an invocation from below the cut replayed
-	// above it would sit in a feed the cut exists to open.
+	// The session-command invocations go with it: they carry no seq either, so
+	// nothing else would ever floor them, and an invocation from below the cut
+	// replayed above it would sit in a feed the cut exists to open.
 	if dropped := c.dropCommandItems(); dropped > 0 {
 		logf("session-controller: dropped %d session-command invocation item(s) with the history this floor hides", dropped)
 	}
-	// And their DURABLE records, or the very next replay would put the
-	// pre-cut prompts back above the floor this event just raised.
-	c.retireDurableReceiptsThrough(c.now(), "replay_floor_raised:"+stateKind(ev))
 }
 
 // noteCutCompleted closes the SSM axis the arrived context cut was the
@@ -2480,6 +2450,26 @@ func (c *consumer) applyProgress(ev *corev1.Event) {
 	}
 }
 
+// userMessageText is the prompt text a user_message carries, across both of the
+// arms it can carry text in, with no separator between blocks. Empty means the
+// message carries no prompt at all — a pure tool-result feedback message rides
+// the user_message arm too.
+func userMessageText(um *datav1.ApiUserMessage) string {
+	switch content := um.GetContent().(type) {
+	case *datav1.ApiUserMessage_ContentString:
+		return content.ContentString
+	case *datav1.ApiUserMessage_ContentBlocks:
+		var sb strings.Builder
+		for _, b := range content.ContentBlocks.GetBlocks() {
+			if t := b.GetText(); t != nil {
+				sb.WriteString(t.GetText())
+			}
+		}
+		return sb.String()
+	}
+	return ""
+}
+
 // userTurnReceipt extracts the round-trip receipt a pushed delta carries for a
 // USER PROMPT: the request id and total prompt-text length across its
 // user_message items. textLen 0 means the delta carries no prompt — a pure
@@ -2682,14 +2672,6 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 	if !c.stampConversationProvenance(cd) {
 		return
 	}
-	// LIVE ONLY. A durable user turn arriving now may be the transcript's
-	// account of a submit this daemon made moments ago, and stamping it with
-	// that submit's request id is what lets the frontend reconcile it onto the
-	// receipt already on screen (promptecho.go). Replayed history has no live
-	// submit behind it, and claiming a receipt for one would misattribute both.
-	if live {
-		c.attributeUserTurn(cd)
-	}
 	// THE WINDOW DIVERSION, LAST. While a merge run or a skill invocation owns
 	// the session, its emissions belong to that work rather than to this delta
 	// — and running here, after every curator and every stamp, means the items it
@@ -2705,13 +2687,6 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 	// left this delta, and a client applies the removal before the fold that
 	// explains it.
 	c.pushAsync(windows, ev)
-	// A DURABLE replay watches what its own store events carried, so an
-	// un-retired receipt for a prompt those events already drew is suppressed
-	// rather than drawn a second time (durablereplay.go). Nil on every live
-	// consumer, where the ring and attributeUserTurn cover the same ground.
-	if c.onPushedConversation != nil {
-		c.onPushedConversation(cd)
-	}
 	// The prompt round-trip receipt: one line per LIVE user prompt reaching
 	// the frontend push, closing the gap between "control request acked" (the
 	// shim took the prompt) and the webapp's own mount log. Live only — a
@@ -3051,16 +3026,9 @@ func (c *consumer) resync(fromSeq uint64) (floor uint64, haveFloor bool) {
 	for _, item := range c.snapshotFailItems() {
 		c.pushLocalItem(item)
 	}
-	// And the prompt receipts the durable transcript has not claimed yet
-	// (promptecho.go). Same reasoning once more: no store seq, so no fromSeq
-	// covers them — and a frontend that reconnects between a submit and its
-	// transcript line would otherwise find the user's own prompt missing.
-	for _, item := range c.snapshotEchoes() {
-		c.pushLocalItem(item)
-	}
 	// And the session-command invocations (sessioncommand.go). Same reasoning a
-	// third time, with one addition: a session command earns no prompt receipt
-	// by design, so this item is the ONLY thing that will ever tell a
+	// third time, with one addition: a session command never round-trips through
+	// the SDK as a prompt, so this item is the ONLY thing that will ever tell a
 	// reconnecting frontend the command was run.
 	for _, item := range c.snapshotCommandItems() {
 		c.pushLocalItem(item)
@@ -3108,7 +3076,7 @@ func (c *consumer) pushPermission(item *frontendv1.Message) {
 }
 
 // pushLocalItem wraps a single DAEMON-COMPOSED item (a permission, a failure
-// card, a prompt receipt) in a ConversationDelta and pushes it. No store seq:
+// card, a session-command invocation) in a ConversationDelta and pushes it. No store seq:
 // through_seq stays 0, because nothing in the store produced it.
 //
 // PROVENANCE IS THE LIVE VERDICT HERE, not a ledger lookup, and the difference
@@ -3116,7 +3084,7 @@ func (c *consumer) pushPermission(item *frontendv1.Message) {
 // daemon-composed item is composed NOW, by this daemon, so whether the merge
 // owns the shim at this instant IS its provenance — and a permission card
 // carries no timestamp to look one up with anyway. Every caller retains the
-// stamped item (permItems, failItems, echoes), so a resync replays the verdict
+// stamped item (permItems, failItems, cmdItems), so a resync replays the verdict
 // that was made rather than deriving a new one.
 func (c *consumer) pushLocalItem(item *frontendv1.Message) {
 	if !c.stampLocalItemProvenance(item) {
@@ -3130,8 +3098,8 @@ func (c *consumer) pushLocalItem(item *frontendv1.Message) {
 }
 
 // pushReplayedItem pushes ONE daemon-composed durable item during a durable
-// replay — a prompt receipt, or a fenced session's standing terminal failure
-// card — and reports whether it went.
+// replay — today a fenced session's standing terminal failure card — and
+// reports whether it went.
 //
 // IT IS NOT pushLocalItem, and the difference is the provenance rule. A local
 // item is composed NOW, so the live lease state is its provenance; a replayed
