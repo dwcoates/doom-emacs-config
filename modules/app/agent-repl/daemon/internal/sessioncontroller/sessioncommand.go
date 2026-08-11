@@ -113,40 +113,62 @@ func sessionCommandUUID(requestID string) string { return "session-command:" + r
 // parameter to forget to omit: the submitted prompt does not reach this
 // function, so it cannot reach the wire.
 //
-// IT IS THE EPHEMERAL CASE, EXACTLY. A session command never reaches the CLI —
-// that is what makes it a session command — so the CLI writes no transcript
-// record for it, no store record for it exists, and none ever will. It is
-// therefore built through frontend.NewEphemeralFeedRow, which states that class
-// and writes the feed-row lineage the class requires in the same act, rather
-// than through a hand-written Message that could state one and forget the
-// other.
+// THE DURABILITY ARM IS AN INPUT, NOT A DERIVATION. Whether a record for this
+// invocation exists is a fact about WHO ANSWERED the command — the CLI, which
+// writes a transcript record for it, or the daemon alone, which writes nothing
+// anywhere — and that is known at the dispatch site and nowhere else. Reading
+// it back off the command enum here would be a second copy of the routing
+// decision, free to disagree with the routing itself.
 //
-// IT RETURNS AN ERROR because the constructor refuses rather than repairs, and
+// THE ARM IS STATED THROUGH THE CONSTRUCTORS, never assigned here. Each of them
+// writes the class and the lineage that class requires in ONE act, so an item
+// cannot claim a class and carry lineage that contradicts it. A hand-assigned
+// arm beside a hand-written lineage is two statements of one fact, which is one
+// more than can be kept true.
+//
+// IT RETURNS AN ERROR because the constructors refuse rather than repair, and
 // the caller's job on a refusal is to keep the unclassified item OFF the wire:
 // an item with no durability arm would later read as "the store lost this",
 // which is the exact confusion the class exists to end.
-func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsMs int64) (*frontendv1.Message, error) {
-	return frontend.NewEphemeralFeedRow(&frontendv1.Message{
+func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsMs int64, ephemeral bool) (*frontendv1.Message, error) {
+	body := &frontendv1.Message{
 		Uuid:      sessionCommandUUID(requestID),
 		TsMs:      tsMs,
 		RequestId: requestID,
 		Payload: &frontendv1.Message_DaemonInterceptedCommand{
 			DaemonInterceptedCommand: &frontendv1.DaemonInterceptedCommandItem{Command: command},
 		},
-	})
+	}
+	if ephemeral {
+		return frontend.NewEphemeralFeedRow(body)
+	}
+	return frontend.NewDurableFeedRow(body)
 }
 
 // pushSessionCommand retains and pushes the invocation item for one recognized
 // session command.
 //
-// RETAINED AND REPLAYED, on the same footing as a permission item, a failure
-// card and a prompt receipt, and for the same reason: it carries no store seq,
-// so no from_seq a resync names could ever cover it. It is also the ONLY record
-// of the invocation a frontend will ever get — the CLI's own transcript
-// bookkeeping for the command is withheld as machinery (machinery.go), and the
-// receipt that would otherwise stand in for it was deliberately not pushed —
-// so losing it on a reconnect would leave the feed with no account of why the
+// RETENTION IS CONDITIONAL ON THE EPHEMERAL ARM, and on nothing else. The
+// branch reads the item's own durability oneof rather than inferring the class
+// from the command, the payload kind or who called: the arm IS the claim that
+// no record exists, and a second reading of that claim is a second chance to
+// get it wrong.
+//
+// An EPHEMERAL invocation — one the daemon answered alone, which therefore
+// reached no CLI and left no transcript record — is retained and replayed, on
+// the same footing as a permission item and a failure card and for the same
+// reason: it carries no store seq, so no from_seq a resync names could ever
+// cover it, and it is the ONLY account of the invocation a frontend will ever
+// get. Losing it on a reconnect would leave the feed silent about why the
 // session's model changed.
+//
+// A DURABLE invocation is NOT retained. The CLI wrote a record for it, so the
+// store serves it on reconnect; retaining it here would make one invocation
+// arrive from two sources at once and draw it twice. Its account comes from the
+// store, which is the single source that can also be paged.
+//
+// The live push happens either way: retention decides what a RECONNECT
+// replays, never whether the frontend sees the invocation when it happens.
 //
 // outcome is what the daemon RESOLVED the command to, for the log only. It is
 // empty for every command that resolves to nothing, and it never reaches the
@@ -157,8 +179,8 @@ func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsM
 // invoked" could not tell what the session was switched TO, or that a switch
 // was the reason the picker disagreed with the session — the one line about the
 // command named no model at all.
-func (c *consumer) pushSessionCommand(requestID string, command frontendv1.SessionCommand, outcome string) {
-	item, err := sessionCommandItem(requestID, command, c.now())
+func (c *consumer) pushSessionCommand(requestID string, command frontendv1.SessionCommand, ephemeral bool, outcome string) {
+	item, err := sessionCommandItem(requestID, command, c.now(), ephemeral)
 	if err != nil {
 		// THE ITEM IS WITHHELD, LOUDLY. The constructor refuses rather than
 		// repairs, and pushing the unclassified item anyway would put a message
@@ -167,27 +189,34 @@ func (c *consumer) pushSessionCommand(requestID string, command frontendv1.Sessi
 		// reported in full instead, with the command and request that produced
 		// it, because the refusal is a daemon defect and not a user-visible
 		// condition anything downstream can act on.
-		c.warn("session-controller: session command %s NOT pushed ws=%q session=%s request_id=%s — the ephemeral message constructor refused it, so no DaemonInterceptedCommandItem could be classified and none is delivered: %v",
-			command.String(), c.workspace, c.sessionID, requestID, err)
+		c.warn("session-controller: session command %s NOT pushed ws=%q session=%s request_id=%s ephemeral=%t — the message constructor refused it, so no DaemonInterceptedCommandItem could be classified and none is delivered: %v",
+			command.String(), c.workspace, c.sessionID, requestID, ephemeral, err)
 		return
 	}
-	c.mu.Lock()
-	if c.cmdItems == nil {
-		c.cmdItems = map[string]*frontendv1.Message{}
+	retained := item.GetEphemeral() != nil
+	if retained {
+		c.mu.Lock()
+		if c.cmdItems == nil {
+			c.cmdItems = map[string]*frontendv1.Message{}
+		}
+		if _, seen := c.cmdItems[item.GetUuid()]; !seen {
+			c.cmdOrder = append(c.cmdOrder, item.GetUuid())
+		}
+		c.cmdItems[item.GetUuid()] = item
+		c.mu.Unlock()
 	}
-	if _, seen := c.cmdItems[item.GetUuid()]; !seen {
-		c.cmdOrder = append(c.cmdOrder, item.GetUuid())
-	}
-	c.cmdItems[item.GetUuid()] = item
-	c.mu.Unlock()
-	c.logf("session-controller: session command %s invoked ws=%q session=%s request_id=%s%s — pushed as a DaemonInterceptedCommandItem, NOT as a prompt bubble (a session command is not a prompt, and the item carries no prompt text)",
-		command.String(), c.workspace, c.sessionID, requestID, outcome)
+	c.logf("session-controller: session command %s invoked ws=%q session=%s request_id=%s ephemeral=%t retained_for_replay=%t%s — pushed as a DaemonInterceptedCommandItem, NOT as a prompt bubble (a session command is not a prompt, and the item carries no prompt text)",
+		command.String(), c.workspace, c.sessionID, requestID, item.GetEphemeral() != nil, retained, outcome)
 	c.pushLocalItem(item)
 }
 
-// snapshotCommandItems returns the retained invocation items in first-seen
-// order, taken under the lock so a concurrent pushSessionCommand cannot race
-// the read.
+// snapshotCommandItems returns the retained EPHEMERAL invocation items in
+// first-seen order, taken under the lock so a concurrent pushSessionCommand
+// cannot race the read.
+//
+// Every item here is ephemeral by construction — pushSessionCommand retains
+// nothing else — so a replay of this snapshot can never double a command the
+// store is already serving.
 func (c *consumer) snapshotCommandItems() []*frontendv1.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -205,6 +234,11 @@ func (c *consumer) snapshotCommandItems() []*frontendv1.Message {
 // (noteClearOrCompact), and for the identical reason: these carry no seq, so
 // nothing else would ever floor them, and an invocation from BELOW the cut
 // replayed above it would sit in a feed the cut exists to open.
+//
+// UNCHANGED BY THE DURABILITY SPLIT. Retention now holds ephemeral invocations
+// only, and the cut's reason applies to exactly those: a durable invocation is
+// floored by the store like everything else with a seq, while an ephemeral one
+// has nothing but this to floor it.
 func (c *consumer) dropCommandItems() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
