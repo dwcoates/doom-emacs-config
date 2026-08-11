@@ -1003,7 +1003,7 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
               (cl-letf (((symbol-function 'message) #'ignore))
                 (agent-repl--log ws "started request %s" "r-1")))
             (let* ((canonical (expand-file-name ".claude/emacs/emacs.log" project))
-                   (target (plist-get (gethash ws agent-repl--workspace-log-targets) :target))
+                   (target (plist-get (agent-repl--workspace-log-target-entry ws) :target))
                    (record (with-temp-buffer
                              (insert-file-contents target)
                              (json-parse-string (buffer-string) :object-type 'alist))))
@@ -1037,7 +1037,7 @@ workspace beside it can."
                         ((symbol-function 'agent-repl--frontend-session-view)
                          (lambda (_) '(:claudeSessionId "claude-session-1"))))
                 (agent-repl--log ws "identity test")))
-            (let* ((target (plist-get (gethash ws agent-repl--workspace-log-targets) :target))
+            (let* ((target (plist-get (agent-repl--workspace-log-target-entry ws) :target))
                    (record (with-temp-buffer
                              (insert-file-contents target)
                              (json-parse-string (buffer-string) :object-type 'alist))))
@@ -1081,7 +1081,7 @@ workspace beside it can."
             (agent-repl--ws-put ws :project-dir project)
             (let ((agent-repl-log-to-file t))
               (agent-repl--log ws "missing identities"))
-            (let* ((target (plist-get (gethash ws agent-repl--workspace-log-targets) :target))
+            (let* ((target (plist-get (agent-repl--workspace-log-target-entry ws) :target))
                    (record (with-temp-buffer
                              (insert-file-contents target)
                              (json-parse-string (buffer-string) :object-type 'alist))))
@@ -1102,7 +1102,7 @@ workspace beside it can."
               (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
                          (lambda (_) '(:claudeSessionId 99))))
                 (should-error (agent-repl--log ws "invalid claude identity"))))
-            (should-not (gethash ws agent-repl--workspace-log-targets)))
+            (should-not (agent-repl--workspace-log-target-entry ws)))
         (delete-directory project t)))))
 
 (ert-deftest agent-repl-test-log-verbose-persists-with-terminal-visibility-disabled ()
@@ -1211,7 +1211,7 @@ the record must still be persisted rather than silently discarded."
             (let ((agent-repl-log-to-file t))
               (should-error (agent-repl--log ws "must fail")))
             (should-not (file-exists-p (expand-file-name "emacs/emacs.log" external)))
-            (should-not (gethash ws agent-repl--workspace-log-targets)))
+            (should-not (agent-repl--workspace-log-target-entry ws)))
         (delete-directory project t)
         (delete-directory external t)))))
 
@@ -1232,7 +1232,7 @@ the record must still be persisted rather than silently discarded."
             (let ((agent-repl-log-to-file t))
               (should-error (agent-repl--log ws "must fail")))
             (should-not (file-exists-p (expand-file-name "emacs.log" external)))
-            (should-not (gethash ws agent-repl--workspace-log-targets)))
+            (should-not (agent-repl--workspace-log-target-entry ws)))
         (delete-directory project t)
         (delete-directory external t)))))
 
@@ -1274,12 +1274,12 @@ the record must still be persisted rather than silently discarded."
             (agent-repl--ws-put ws :project-dir first)
             (let ((agent-repl-log-to-file t))
               (agent-repl--log ws "first"))
-            (let ((target (plist-get (gethash ws agent-repl--workspace-log-targets) :target)))
+            (let ((target (plist-get (agent-repl--workspace-log-target-entry ws) :target)))
               (agent-repl--ws-put ws :project-dir second)
-              (should-not (gethash ws agent-repl--workspace-log-targets))
+              (should-not (agent-repl--workspace-log-target-entry ws))
               (let ((agent-repl-log-to-file t))
                 (agent-repl--log ws "second"))
-              (let ((rebound (plist-get (gethash ws agent-repl--workspace-log-targets) :target)))
+              (let ((rebound (plist-get (agent-repl--workspace-log-target-entry ws) :target)))
                 (should-not (equal target rebound))
                 (should (file-symlink-p (expand-file-name ".claude/emacs/emacs.log" second))))))
         (delete-directory first t)
@@ -1299,7 +1299,7 @@ the record must still be persisted rather than silently discarded."
                        (lambda (&rest _) (error "simulated staging failure"))))
               (let ((agent-repl-log-to-file t))
                 (should-error (agent-repl--log ws "must fail"))))
-            (should-not (gethash ws agent-repl--workspace-log-targets))
+            (should-not (agent-repl--workspace-log-target-entry ws))
             (should-not (directory-files-recursively project "\\.emacs\\.log-link-")))
         (delete-directory project t)))))
 
@@ -1320,7 +1320,7 @@ the record must still be persisted rather than silently discarded."
                        (lambda (&rest _) (error "simulated rename failure"))))
               (let ((agent-repl-log-to-file t))
                 (should-error (agent-repl--log ws "must fail"))))
-            (should-not (gethash ws agent-repl--workspace-log-targets))
+            (should-not (agent-repl--workspace-log-target-entry ws))
             (should (equal before (directory-files temporary-file-directory t "\\`agent-repl-emacs-")))
             (should-not (directory-files-recursively project "\\.emacs\\.log-link-"))
             (should-not (file-exists-p (expand-file-name ".claude/emacs/emacs.log" project))))
@@ -1338,7 +1338,7 @@ the record must still be persisted rather than silently discarded."
             (agent-repl--ws-put ws :project-dir project)
             (let ((agent-repl-log-to-file t))
               (agent-repl--log ws "seed"))
-            (let* ((target (plist-get (gethash ws agent-repl--workspace-log-targets) :target)))
+            (let* ((target (plist-get (agent-repl--workspace-log-target-entry ws) :target)))
               (with-temp-file target (insert (make-string 5000 ?x)))
               (agent-repl--log-truncate target (file-attribute-size (file-attributes target)) ws)
               (let* ((lines (with-temp-buffer (insert-file-contents target) (split-string (buffer-string) "\n" t)))
@@ -2873,7 +2873,7 @@ whole snapshot restore at startup."
             (let ((agent-repl-log-to-file t))
               (cl-letf (((symbol-function 'message) #'ignore))
                 (agent-repl--log "routed-ws" "owned line")))
-            (should (plist-get (gethash "routed-ws" agent-repl--workspace-log-targets)
+            (should (plist-get (agent-repl--workspace-log-target-entry "routed-ws")
                                :target)))
         (delete-directory project t)))))
 
@@ -3648,7 +3648,7 @@ that froze Emacs; this pins the equivalence the bound relies on."
               (cl-letf (((symbol-function 'message) #'ignore))
                 (agent-repl--log "routed-ws" "owned line")))
             ;; Assert
-            (should (plist-get (gethash "routed-ws" agent-repl--workspace-log-targets)
+            (should (plist-get (agent-repl--workspace-log-target-entry "routed-ws")
                                :target)))
         (delete-directory project t)))))
 
@@ -3732,7 +3732,7 @@ that froze Emacs; this pins the equivalence the bound relies on."
                 (agent-repl--user-message ws "prompt refused — queued for a merge" nil
                                           :detail "state=RENDER_STATE_MERGE_QUEUED turn_active=true")))
             ;; Assert
-            (let* ((target (plist-get (gethash ws agent-repl--workspace-log-targets) :target))
+            (let* ((target (plist-get (agent-repl--workspace-log-target-entry ws) :target))
                    (contents (with-temp-buffer
                                (insert-file-contents target)
                                (buffer-string))))
@@ -4143,3 +4143,117 @@ gone cannot silently swallow a directory-spelled record."
       ;; Act / Assert
       (should-not (equal "dirkey-tomb-ws"
                          (agent-repl--log-sink-workspace project))))))
+
+;;;; ---- Tests: one directory owns one durable target and one canonical link ----
+;;
+;; The registry used to be keyed by workspace NAME, so two names resolving to
+;; one directory each installed their own external target and each overwrote
+;; the other's `emacs.log' symlink.  The loser then wrote, forever, to a temp
+;; file nothing on disk pointed at.  Measured 2026-08-11: `main' and
+;; `marcos-pr-remediation' held two different targets for the same
+;; `:project-dir' and the same `workspace_id', the link pointed at the
+;; pseudo's, and a day of the real workspace's records were invisible in the
+;; file every reader opens.
+
+(ert-deftest agent-repl-test-two-names-for-one-directory-share-one-target ()
+  "A second name for the same directory adopts the target already installed."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-one-target-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "name-a" :project-dir project)
+            (puthash "name-b" (gethash "name-a" agent-repl--workspaces)
+                     agent-repl--workspaces)
+            ;; Act
+            (let ((first (agent-repl--workspace-emacs-log-target "name-a"))
+                  (second (agent-repl--workspace-emacs-log-target "name-b")))
+              ;; Assert
+              (should (equal first second))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-one-directory-installs-exactly-one-registry-entry ()
+  "Two names for one directory must not produce two registry entries.
+Two entries is what let one of them own the symlink while the other wrote to
+an orphan."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-one-entry-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "name-a" :project-dir project)
+            (puthash "name-b" (gethash "name-a" agent-repl--workspaces)
+                     agent-repl--workspaces)
+            ;; Act
+            (agent-repl--workspace-emacs-log-target "name-a")
+            (agent-repl--workspace-emacs-log-target "name-b")
+            ;; Assert
+            (should (= 1 (hash-table-count agent-repl--workspace-log-targets))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-second-name-does-not-repoint-the-canonical-link ()
+  "The canonical `emacs.log' link keeps pointing at the one shared target."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-one-link-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "name-a" :project-dir project)
+            (puthash "name-b" (gethash "name-a" agent-repl--workspaces)
+                     agent-repl--workspaces)
+            (let ((first (agent-repl--workspace-emacs-log-target "name-a")))
+              ;; Act
+              (agent-repl--workspace-emacs-log-target "name-b")
+              ;; Assert
+              (should (equal first
+                             (file-symlink-p
+                              (agent-repl--workspace-emacs-log-path project))))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-a-different-directory-gets-its-own-target ()
+  "The sharing is scoped to one identity; two directories stay independent."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((one (make-temp-file "agent-repl-dir-one-" t))
+           (two (make-temp-file "agent-repl-dir-two-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws-one" :project-dir one)
+            (agent-repl--ws-put "ws-two" :project-dir two)
+            ;; Act
+            (let ((a (agent-repl--workspace-emacs-log-target "ws-one"))
+                  (b (agent-repl--workspace-emacs-log-target "ws-two")))
+              ;; Assert
+              (should-not (equal a b))))
+        (delete-directory one t)
+        (delete-directory two t)))))
+
+(ert-deftest agent-repl-test-target-key-separates-identities-that-concatenate ()
+  "The key's NUL join makes two identities unable to collide by concatenation."
+  ;; Arrange / Act
+  (let ((a (agent-repl--workspace-log-target-key
+            (list :workspace-id "ab" :project-dir "/c")))
+        (b (agent-repl--workspace-log-target-key
+            (list :workspace-id "a" :project-dir "b/c"))))
+    ;; Assert
+    (should-not (equal a b))))
+
+(ert-deftest agent-repl-test-target-key-changes-when-the-workspace-id-rebinds ()
+  "A different workspace at the same path is a different sink."
+  ;; Arrange / Act
+  (let ((a (agent-repl--workspace-log-target-key
+            (list :workspace-id "one" :project-dir "/p")))
+        (b (agent-repl--workspace-log-target-key
+            (list :workspace-id "two" :project-dir "/p"))))
+    ;; Assert
+    (should-not (equal a b))))
+
+(ert-deftest agent-repl-test-target-entry-is-nil-for-a-name-owning-no-sink ()
+  "The name-shaped accessor answers nil rather than reaching a signalling resolver."
+  ;; Arrange / Act / Assert
+  (agent-repl-test--with-clean-state
+    (should-not (agent-repl--workspace-log-target-entry "never-registered"))))
