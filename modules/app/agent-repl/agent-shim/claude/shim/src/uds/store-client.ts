@@ -75,11 +75,19 @@
  *     hold drains, so nothing is ever taken on that cannot be delivered.
  *   - Nothing durable is ever dropped quietly, and nothing is ever reordered.
  *
- * A deliberate close() is the one case where accepted work genuinely cannot be
- * delivered, and it keeps the full sad path: loud per-event DROPPED lines, a
- * DegradedState with the real count, and the same rejection the session's fatal
- * missing-receipt path keys on. The spill FILE outlives it, so the next shim
- * for this workspace replays what this one could not.
+ * A deliberate close() is the one case where accepted work cannot be delivered
+ * BY THIS CLIENT, and each held batch is settled by its OWN disposition rather
+ * than by the fact that the link is down:
+ *
+ *   - SPILLED: the record is fsynced on disk and the next shim for this
+ *     workspace replays it, so the caller is rejected with a
+ *     {@link StoreWriteDeferredError} — loud per event, but not a loss, and
+ *     deliberately not a DegradedState claiming events that still exist.
+ *   - NOT SPILLED (journal unwritable, or already closed for teardown): nothing
+ *     will replay it, so it keeps the full sad path unchanged — loud per-event
+ *     DROPPED lines, a DegradedState with the real count, and the same
+ *     `write on a down connection` rejection the session's fatal
+ *     missing-receipt path keys on.
  *
  * THE SUBSCRIPTION KEY is the VENDOR session id (Claude's uuid), not this
  * shim's `--session-id` — see `storeKey`. Writes were always keyed that way
@@ -109,6 +117,45 @@ import {
   StoreWriteSchema,
   SubscribeSchema,
 } from "./proto.js";
+
+/**
+ * A write THIS client could not deliver whose record is nevertheless DURABLE.
+ *
+ * THE DISTINCTION THIS TYPE EXISTS TO MAKE. A write that ends without a store
+ * receipt has exactly two dispositions, and conflating them is how a store
+ * bounce came to kill a live query:
+ *
+ *   - DEFERRED (this error): the batch is fsynced in the spill journal, so the
+ *     next shim on this workspace reads it back and replays it, and the store's
+ *     unique (session_id, write_id) makes that replay a no-op if it already
+ *     landed. NO EVIDENCE IS LOST. The caller has no receipt YET; it does not
+ *     have a hole in its history, and must not report one.
+ *   - LOST (a plain `Error`, message `store-client: write on a down
+ *     connection`): the batch is NOT on disk — the journal was unwritable or
+ *     already closed for teardown — so nothing will replay it. That is the
+ *     fatal disposition, and it keeps the loud per-event DROPPED lines, the
+ *     DegradedState carrying the real count, and the exact rejection the
+ *     session's fatal missing-receipt path keys on.
+ *
+ * The disposition is read off the batch's own `spilled` flag, which is set only
+ * after {@link SpillJournal.append} has returned from its fsync — never off an
+ * error string and never by assuming the happy case. A REJECTION by the store
+ * is neither of these: it is permanent and deliberately non-replayable, and it
+ * rejects with its own `batch rejected` error from the ack path.
+ */
+export class StoreWriteDeferredError extends Error {
+  /** The journal holding this batch's record. */
+  readonly spillPath: string;
+  /** How many events the deferred batch carries. */
+  readonly eventCount: number;
+
+  constructor(spillPath: string, eventCount: number, reason: string) {
+    super(`store-client: write deferred to the durable spill journal (${eventCount} event(s)): ${reason}`);
+    this.name = "StoreWriteDeferredError";
+    this.spillPath = spillPath;
+    this.eventCount = eventCount;
+  }
+}
 
 /** Receives every store-merged, seq-stamped Event for forwarding. */
 export type StoreSink = (evt: Event) => void;
@@ -1335,28 +1382,58 @@ export class StoreClient {
   }
 
   /**
-   * Fail one batch that a TORN-DOWN client cannot deliver, spilling it first.
+   * Settle one batch that a TORN-DOWN client cannot deliver, spilling it first.
    *
-   * The caller-visible outcome is byte-for-byte the one the sad path always
-   * produced — a loud DROPPED line per event, a DegradedState with the real
-   * count, and `write on a down connection` — because the session's fatal
-   * missing-receipt path keys on exactly that and must keep working. What is
-   * added is the durable record: this shim could not deliver the batch, but the
-   * next shim on this workspace reads it back out of the spill journal.
+   * WHICH OUTCOME the caller gets is decided by whether the record reached
+   * disk, never by the fact that a link went down — see
+   * {@link StoreWriteDeferredError}. A spilled batch is DEFERRED (the next shim
+   * replays it); an unspilled one is LOST, and gets byte-for-byte the sad path
+   * this always produced: a loud DROPPED line per event, a DegradedState with
+   * the real count, and `write on a down connection`, because the session's
+   * fatal missing-receipt path keys on exactly that and must keep working.
    */
   private failDuringTeardown(pending: PendingWrite, why: string): void {
     this.spillBatch(pending);
+    if (pending.spilled === true) {
+      this.deferBatch(pending, `${why} (client torn down)`);
+      return;
+    }
     LOGGER.log({
       level: "error",
       agent_repl_session_id: this.opts.sessionId,
       store_key: this.storeKey,
       spill_path: this.spill.path(),
-      spilled: pending.spilled === true,
+      spilled: false,
       event_count: pending.events.length,
       decision: "fail_write_during_teardown",
-    }, `store write could not be delivered during teardown and is failed to its caller${pending.spilled === true ? "; it IS recorded in the durable spill journal for the next shim on this workspace" : "; it could NOT be spilled either"}: ${why}`);
+    }, `store write could not be delivered during teardown and is failed to its caller; it could NOT be spilled either, so nothing will replay it: ${why}`);
     this.dropBatch(pending.events, why);
     pending.reject(new Error("store-client: write on a down connection"));
+  }
+
+  /**
+   * Settle one batch as DEFERRED: undelivered by this client, durable on disk.
+   *
+   * Loud per event, exactly like the drop path, because an undelivered write is
+   * always worth a line — but deliberately WITHOUT a `DegradedState`, because
+   * nothing was dropped and a degradation carrying a fabricated loss count is
+   * the false alarm this whole distinction exists to stop. The store link's own
+   * outage still reports itself through degradeLinkAfterBudget.
+   */
+  private deferBatch(pending: PendingWrite, why: string): void {
+    for (const evt of pending.events) {
+      LOGGER.log({
+        level: "error",
+        agent_repl_session_id: this.opts.sessionId,
+        claude_session_id: evt.sessionId,
+        seq: evt.seq,
+        kind: envelopeKind(evt),
+        spill_path: this.spill.path(),
+        decision: "deferred_to_spill_journal",
+        reason: why,
+      }, `DEFERRED event: not delivered by this shim, durably spilled for the next one to replay: ${why}`);
+    }
+    pending.reject(new StoreWriteDeferredError(this.spill.path(), pending.events.length, why));
   }
 
   /**
@@ -1482,30 +1559,42 @@ export class StoreClient {
   }
 
   /**
-   * Fail every held batch EXACTLY as an unheld down-connection write failed
-   * before the hold existed: one loud DROPPED-event line per event, a
-   * DegradedState carrying the real count, and the same rejection the session's
-   * fatal missing-receipt path already keys on.
+   * Settle every held batch, because a deliberate teardown means nothing will
+   * relink and no hold can ever flush.
    *
-   * ONLY A DELIBERATE TEARDOWN REACHES HERE. It is the one condition under
-   * which accepted work genuinely cannot be delivered by THIS client, because
-   * nothing will relink. The spill FILE is deliberately left behind for the
-   * next shim on this workspace, so "this shim lost them" and "the record is
-   * gone" stay different statements.
+   * PER BATCH, BY ITS OWN DISPOSITION. A batch whose record reached the spill
+   * journal is DEFERRED — the next shim on this workspace replays it, so its
+   * caller is told "not yet", not "gone". A batch that could NOT be spilled is
+   * failed EXACTLY as an unheld down-connection write failed before the hold
+   * existed: one loud DROPPED-event line per event, a DegradedState carrying
+   * the real count, and the same rejection the session's fatal missing-receipt
+   * path already keys on.
+   *
+   * ONLY A DELIBERATE TEARDOWN REACHES HERE. The spill FILE is deliberately
+   * left behind, so "this shim did not deliver them" and "the record is gone"
+   * stay different statements — which is the whole point of the split.
    */
   private failHeldWrites(reason: string): void {
     if (this.heldWrites.length === 0) return;
     const failing = this.heldWrites.splice(0);
     this.heldBytes = 0;
     this.releaseHoldCapacity();
+    const lost = failing.filter((p) => p.spilled !== true);
     LOGGER.log({
       level: "error",
       agent_repl_session_id: this.opts.sessionId,
       store_key: this.storeKey,
       reason,
       held_batches: failing.length,
-    }, `FAILING ${failing.length} held persistent batch(es): ${reason}`);
+      deferred_batches: failing.length - lost.length,
+      lost_batches: lost.length,
+      spill_path: this.spill.path(),
+    }, `SETTLING ${failing.length} held persistent batch(es) at teardown: ${failing.length - lost.length} deferred to the durable spill journal, ${lost.length} LOST outright: ${reason}`);
     for (const pending of failing) {
+      if (pending.spilled === true) {
+        this.deferBatch(pending, reason);
+        continue;
+      }
       this.dropBatch(pending.events, reason);
       pending.reject(new Error("store-client: write on a down connection"));
     }
