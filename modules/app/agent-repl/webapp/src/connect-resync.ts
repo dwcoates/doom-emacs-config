@@ -175,6 +175,21 @@ export interface ConnectResyncOptions {
    */
   adoptIdentity?: (rejection: string) => ResyncSnapshot | null;
   /**
+   * The daemon refused this page's replay mark as belonging to a RETIRED store
+   * seq space: discard the conversation ranked in that space and re-anchor from
+   * a fresh tail page. Returns whether the re-anchor was actually started.
+   *
+   * Injected rather than done here because a re-anchor is two things this
+   * module does not own — dropping the store's items and mark, and asking the
+   * PAGER for a tail — and doing either from here would give the page a second
+   * route to its own history.
+   *
+   * A false return means the page could not re-anchor (no workspace yet, the
+   * pager is spent), and the refusal is charged to the backoff like any other:
+   * the alternative is a page that silently stops asking.
+   */
+  reanchor?: (rejection: string) => boolean;
+  /**
    * Timers the settle deadline runs on. Injected so tests advance the clock
    * themselves rather than waiting out a real lease.
    */
@@ -194,6 +209,39 @@ export interface ConnectResyncOptions {
 export function isIdentityMismatch(rejection: string): boolean {
   return rejection.includes("identity_mismatch");
 }
+
+/**
+ * Whether a refusal is the daemon saying "the mark you asked from counts in a
+ * store seq space that no longer exists".
+ *
+ * The daemon's prose is `the replay mark counts in a RETIRED store seq space
+ * ... rejection_cause=retired_seq_space`, and the CAUSE token is the stable
+ * half, exactly as it is for `isIdentityMismatch`.
+ *
+ * WHAT IT MEANS IS NOT "TRY AGAIN". A vendor session uuid rotation restarts the
+ * conversation's store seq space at 1, so this page's mark, its ranks, and the
+ * items it holds all describe a conversation that is gone. No retry of the same
+ * request can be answered, and the answer the daemon WOULD have given before —
+ * the whole conversation, floored to zero — is the full replay paging exists to
+ * end. The page re-anchors from a tail page instead, and REPLACES rather than
+ * appends.
+ */
+export function isRetiredReplayMark(rejection: string): boolean {
+  return rejection.includes("retired_seq_space");
+}
+
+/**
+ * How many re-anchors one connection may take before the refusal is treated as
+ * an ordinary failure.
+ *
+ * A re-anchor cannot loop by construction — it drops this page's mark to zero,
+ * and a resync is never sent from zero — but "cannot loop by construction" is
+ * exactly what the fence-mismatch resync loop was also believed to be. The
+ * ceiling is the cheap proof: a page that has re-anchored three times on one
+ * connection is not converging, and charging the fourth refusal to the backoff
+ * puts it in front of a human instead of leaving it to spin.
+ */
+export const RESYNC_REANCHOR_CEILING = 3;
 
 export class ConnectResync {
   /** A live socket that still owes its resync. */
@@ -249,6 +297,15 @@ export class ConnectResync {
   private suppressedWorkspace = "";
   /** Consecutive terminal failures; reset by any ack and by a fresh socket. */
   private failures = 0;
+  /**
+   * Re-anchors this connection has taken (RESYNC_REANCHOR_CEILING bounds them).
+   *
+   * Counted per SOCKET rather than per settle, and deliberately NOT reset by an
+   * ack: the bound must survive the tail page that follows a re-anchor, or a
+   * page alternating re-anchor and ack forever would never reach it. A fresh
+   * socket clears it, because a new connection is new evidence.
+   */
+  private reanchors = 0;
   /** Wall-clock before which no resync may be dispatched. */
   private nextAllowedAtMs = 0;
   /** The ceiling was reached: asking is suspended until told otherwise. */
@@ -465,6 +522,7 @@ export class ConnectResync {
     this.inFlight = false;
     this.dirty = false;
     this.failures = 0;
+    this.reanchors = 0;
     this.nextAllowedAtMs = 0;
     this.givenUp = false;
   }
@@ -701,6 +759,59 @@ export class ConnectResync {
     );
   }
 
+  /**
+   * The daemon refused this page's mark as RETIRED: hand the repair to the
+   * pager and stop asking for a delta.
+   *
+   * IT DOES NOT RE-ARM, and that is the loop guard. A re-anchor drops this
+   * page's mark to zero, and a page holding zero asks the PAGER for a tail
+   * rather than the daemon for a delta — so re-arming here would only race the
+   * pager to the same tail page. The pager owns exactly one in-flight request
+   * and its own ceiling, so the repair is bounded by machinery that already
+   * exists rather than by a second copy of it here.
+   *
+   * THE CEILING IS THE SECOND GUARD. A re-anchor that keeps being followed by
+   * another refused mark is not converging on anything, and past
+   * RESYNC_REANCHOR_CEILING the refusal is charged to the backoff and surfaces
+   * like any other, rather than cycling where nobody can see it.
+   */
+  private settleReanchored(snapshot: ResyncSnapshot, cause: string): void {
+    this.flushSuppressed("mark_retired");
+    this.inFlight = false;
+    this.dirty = false;
+    if (this.reanchors >= RESYNC_REANCHOR_CEILING) {
+      this.opts.log?.(
+        "error",
+        `resync: replay mark refused as retired ${this.reanchors + 1}x on this connection ws=${snapshot.workspace}; ` +
+          `re-anchoring is not converging, so this refusal is charged to the backoff cause=${cause}`,
+      );
+      this.settleFailed(cause);
+      return;
+    }
+    this.reanchors += 1;
+    const started = this.opts.reanchor?.(cause) ?? false;
+    if (!started) {
+      this.opts.log?.(
+        "warn",
+        `resync: replay mark refused as retired ws=${snapshot.workspace} from_seq=${snapshot.fromSeq} ` +
+          `but this page could not start a tail re-anchor; charging the refusal to the backoff`,
+      );
+      this.settleFailed(cause);
+      return;
+    }
+    // The refusal history is discharged for the reason a fence rotation
+    // discharges it: every request made against the retired space says nothing
+    // about the live one.
+    this.failures = 0;
+    this.nextAllowedAtMs = 0;
+    this.opts.log?.(
+      "warn",
+      `resync: replay mark ${snapshot.fromSeq} belongs to a RETIRED seq space ws=${snapshot.workspace} ` +
+        `decision=re_anchor reanchors=${this.reanchors}; the conversation is being REPLACED from a tail page, ` +
+        `not extended`,
+    );
+  }
+
   private settleRejected(snapshot: ResyncSnapshot, isRetry: boolean, err: unknown): void {
     const cause = String(err);
     // A refused resync means this mount keeps whatever history it already
@@ -710,6 +821,15 @@ export class ConnectResync {
       `resync request failed ws=${snapshot.workspace} fence=${snapshot.fence || "none"} ` +
         `from_seq=${snapshot.fromSeq} decision=rejected cause=${cause}`,
     );
+    // A RETIRED MARK IS RULED ON FIRST, and it is not a failure at all: the
+    // daemon answered definitively, and the answer is "ask a different
+    // question". Charging it to the backoff would delay the tail page that
+    // repairs the view, and retrying the same mark can only earn the same
+    // refusal.
+    if (isRetiredReplayMark(cause)) {
+      this.settleReanchored(snapshot, cause);
+      return;
+    }
     // EVERY TERMINAL REFUSAL IS CHARGED TO THE BACKOFF, identity mismatch
     // included — a page that cannot name a live identity re-asks on the next
     // snapshot, and without the charge that pair is its own flood.
