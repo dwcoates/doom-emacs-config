@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   ConnectResync,
   isIdentityMismatch,
+  isRetiredReplayMark,
+  RESYNC_REANCHOR_CEILING,
   resyncBackoffMs,
   RESYNC_BACKOFF_BASE_MS,
   RESYNC_BACKOFF_MAX_MS,
@@ -1191,5 +1193,153 @@ describe("a settle that arrives after its flight was discharged", () => {
     expect(
       h.logs.filter(([level, message]) => level === "warn" && message.includes("late_settles=1")),
     ).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE RETIRED REPLAY MARK: re-anchor, never re-ask.
+//
+// A vendor session uuid rotation restarts the conversation's store seq space at
+// 1, so a page that survived the bounce holds a mark counted in a space that no
+// longer exists. The daemon used to floor such a mark and serve everything above
+// the floor — the WHOLE conversation, on every bounce, for every workspace —
+// and now refuses it. These pin what this end does with that refusal.
+// ---------------------------------------------------------------------------
+
+/** The daemon's refusal prose for a mark counted in a retired seq space. */
+const RETIRED_MARK =
+  "resync rejected: the replay mark counts in a RETIRED store seq space " +
+  'from_seq=1060 live_last_seq=12 rejection_cause="retired_seq_space"';
+
+interface ReanchorHarness extends Harness {
+  reanchors: string[];
+}
+
+/**
+ * A trigger whose resyncs are ALWAYS refused as retired marks. `started` models
+ * whether this page could actually begin a tail re-anchor.
+ */
+function reanchorHarness(started = true): ReanchorHarness {
+  const sent: Sent[] = [];
+  const logs: Array<[ConnectResyncLogLevel, string]> = [];
+  const reanchors: string[] = [];
+  let clock = 1_000;
+  const trigger = new ConnectResync({
+    resync: (request) => {
+      sent.push(request);
+      return Promise.reject(new Error(RETIRED_MARK));
+    },
+    reanchor: (cause) => {
+      reanchors.push(cause);
+      return started;
+    },
+    log: (level, message) => logs.push([level, message]),
+    now: () => clock,
+    random: () => 1,
+  });
+  return {
+    trigger,
+    sent,
+    logs,
+    reanchors,
+    advance: (ms) => {
+      clock += ms;
+    },
+    fireDeadline: () => false,
+  };
+}
+
+describe("a replay mark the daemon refuses as retired", () => {
+  it("is recognized by its cause token", () => {
+    // Arrange / Act / Assert — the token is the stable half of the sentence.
+    expect(isRetiredReplayMark(RETIRED_MARK)).toBe(true);
+  });
+
+  it("is not mistaken for an identity mismatch", () => {
+    // Arrange / Act / Assert — the two refusals take opposite repairs.
+    expect(isIdentityMismatch(RETIRED_MARK)).toBe(false);
+  });
+
+  it("re-anchors the page instead of retrying the mark", async () => {
+    // Arrange
+    const h = reanchorHarness();
+    h.trigger.onConnect();
+    // Act
+    h.trigger.observe(true, snapshot("/ws", 1060));
+    await flush();
+    // Assert
+    expect(h.reanchors).toHaveLength(1);
+  });
+
+  it("does not send a second resync, because the repair is a tail page", async () => {
+    // Arrange — a re-anchor drops this page's mark to zero, and a page holding
+    // zero asks the PAGER for a tail rather than the daemon for a delta.
+    const h = reanchorHarness();
+    h.trigger.onConnect();
+    // Act
+    h.trigger.observe(true, snapshot("/ws", 1060));
+    await flush();
+    // Assert
+    expect(h.sent).toHaveLength(1);
+  });
+
+  it("bounds re-anchors so a page that never converges is not left cycling", async () => {
+    // Arrange — every mark this page offers is refused as retired.
+    const h = reanchorHarness();
+    h.trigger.onConnect();
+    // Act — press it far past the ceiling.
+    for (let i = 0; i < RESYNC_REANCHOR_CEILING + 4; i++) {
+      h.advance(RESYNC_BACKOFF_MAX_MS);
+      // A real trigger re-arms between refusals (a fence rotation, a visibility
+      // wake); the re-anchor deliberately does not, so the loop must supply it.
+      h.trigger.forceResync("test re-arm");
+      h.trigger.observe(false, snapshot("/ws", 1060));
+      await flush();
+    }
+    // Assert
+    expect(h.reanchors).toHaveLength(RESYNC_REANCHOR_CEILING);
+  });
+
+  it("charges the refusal to the backoff once the ceiling is spent", async () => {
+    // Arrange
+    const h = reanchorHarness();
+    h.trigger.onConnect();
+    // Act
+    for (let i = 0; i < RESYNC_REANCHOR_CEILING + 1; i++) {
+      h.advance(RESYNC_BACKOFF_MAX_MS);
+      // A real trigger re-arms between refusals (a fence rotation, a visibility
+      // wake); the re-anchor deliberately does not, so the loop must supply it.
+      h.trigger.forceResync("test re-arm");
+      h.trigger.observe(false, snapshot("/ws", 1060));
+      await flush();
+    }
+    // Assert
+    expect(
+      h.logs.filter(([level, message]) => level === "error" && message.includes("not converging")),
+    ).toHaveLength(1);
+  });
+
+  it("charges the refusal to the backoff when the page cannot re-anchor at all", async () => {
+    // Arrange — no workspace to ask a tail page for.
+    const h = reanchorHarness(false);
+    h.trigger.onConnect();
+    // Act
+    h.trigger.observe(true, snapshot("/ws", 1060));
+    await flush();
+    // Assert — a silently-stopped page is the failure this branch refuses.
+    expect(
+      h.logs.filter(([, message]) => message.includes("could not start a tail re-anchor")),
+    ).toHaveLength(1);
+  });
+
+  it("says the conversation is being REPLACED rather than extended", async () => {
+    // Arrange
+    const h = reanchorHarness();
+    h.trigger.onConnect();
+    // Act
+    h.trigger.observe(true, snapshot("/ws", 1060));
+    await flush();
+    // Assert
+    expect(h.logs.some(([, message]) => message.includes("REPLACED from a tail page"))).toBe(true);
   });
 });

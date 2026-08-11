@@ -265,3 +265,82 @@ describe("a page the store will not adopt", () => {
     expect(store.state.items).toHaveLength(0);
   });
 });
+
+// --- the re-anchor ----------------------------------------------------------
+
+/**
+ * THE RECONNECT WITH A RETIRED MARK: the tail page REPLACES the conversation.
+ *
+ * A page that survived a vendor session uuid rotation holds items ranked in a
+ * store seq space that no longer exists and a mark counted in it. The daemon
+ * refuses that mark (`rejection_cause=retired_seq_space`) instead of flooring it
+ * into a whole-conversation replay, and this end re-anchors: `rebaseSeqSpace`
+ * drops the retired conversation, and a tail page supplies a new one.
+ *
+ * APPENDING WOULD BE THE QUIET WRONG ANSWER. The new space starts again at 1, so
+ * its items would rank BELOW a thousand items they actually follow, and the
+ * retired mark — being the larger number — would survive the `>` guard on
+ * `lastSeq` and keep the next resync asking from the dead space forever.
+ */
+describe("re-anchoring after a retired replay mark", () => {
+  it("replaces the retired conversation rather than appending to it", () => {
+    // Arrange — a feed full of the retired space's history.
+    const store = armedStore();
+    store.ingest([deltaEffect([textItem("b-old-1", "old one"), textItem("b-old-2", "old two")], 1060)]);
+    store.rebaseSeqSpace();
+    // Act — the tail page of the LIVE space.
+    store.notePageRequested({ requestId: "r-anchor", anchor: "tail", fence: "f1" });
+    store.ingest([
+      pageEffect({ requestId: "r-anchor", items: [textItem("b-new", "new one")], liveJoinSeq: 12 }),
+    ]);
+    // Assert
+    expect(textOf(store)).toEqual(["new one"]);
+  });
+
+  it("adopts the live space's join seq even though it is BELOW the retired mark", () => {
+    // Arrange — 12 is smaller than 1060, which is exactly why the retired mark
+    // has to be dropped rather than compared against.
+    const store = armedStore();
+    store.ingest([deltaEffect([textItem("b-old-1", "old one")], 1060)]);
+    store.rebaseSeqSpace();
+    // Act
+    store.notePageRequested({ requestId: "r-anchor", anchor: "tail", fence: "f1" });
+    store.ingest([
+      pageEffect({ requestId: "r-anchor", items: [textItem("b-new", "new one")], liveJoinSeq: 12 }),
+    ]);
+    // Assert
+    expect(store.state.lastSeq).toBe(12);
+  });
+
+  it("drops the retired conversation's load-more cursor", () => {
+    // Arrange — the cursor is the daemon's handle on a position in a
+    // conversation that is gone.
+    const store = armedStore();
+    store.notePageRequested({ requestId: "r-1", anchor: "tail", fence: "f1" });
+    store.ingest([
+      pageEffect({
+        requestId: "r-1",
+        items: [textItem("b-old", "old one")],
+        continuation: { case: "more", cursor: "c-retired" },
+        liveJoinSeq: 1060,
+      }),
+    ]);
+    // Act
+    store.rebaseSeqSpace();
+    // Assert
+    expect(store.state.paging.cursor).toBeNull();
+  });
+
+  it("un-retires the load-more affordance the retired conversation had spent", () => {
+    // Arrange — `reachedStart` is a fact established about the OLD conversation.
+    const store = armedStore();
+    store.notePageRequested({ requestId: "r-1", anchor: "tail", fence: "f1" });
+    store.ingest([
+      pageEffect({ requestId: "r-1", items: [textItem("b-old", "old one")], liveJoinSeq: 1060 }),
+    ]);
+    // Act
+    store.rebaseSeqSpace();
+    // Assert
+    expect(store.state.paging.reachedStart).toBe(false);
+  });
+});

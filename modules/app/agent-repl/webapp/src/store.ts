@@ -1074,6 +1074,16 @@ export class ConversationStore {
   rebaseSeqSpace(): void {
     this.state.items = [];
     this.state.lastSeq = 0;
+    // THE PAGING CURSOR IS RANKED IN THE RETIRED SPACE TOO. It is the daemon's
+    // handle on a position in a conversation that is gone, and `reachedStart`
+    // is a fact established about that same conversation. Left standing, the
+    // load-more affordance would either be retired over a feed that has just
+    // been emptied, or would splice the retired conversation's older history
+    // in underneath the new space's items. The in-flight record is left alone
+    // deliberately: a page already asked for still has an answer coming, and
+    // the correlation check is what discards it.
+    this.state.paging.cursor = null;
+    this.state.paging.reachedStart = false;
   }
 
   /**
