@@ -2,6 +2,7 @@ package statedb
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -10,6 +11,26 @@ import (
 
 	"google.golang.org/protobuf/proto"
 )
+
+// ErrIrreconcilableObservation classifies the rejections whose verdict is a
+// FUNCTION OF THE OBSERVATION ITSELF — its own validity, its topology, and how
+// it compares with the durable rows already accepted for the session. Nothing
+// transient participates, so the same observation submitted again returns the
+// same rejection forever.
+//
+// THE CLASS EXISTS SO A CALLER CAN TELL "RETRY IS FUTILE" FROM "THE SUBSTRATE
+// FAILED". A caller that cannot tell them apart has to treat both as faults,
+// and treating this one as a fault is how a single disagreeing replayed row
+// became an unbounded shim spawn/kill loop: the daemon killed the session
+// controller on it, the respawned controller replayed the same store from the
+// same floor, and it failed on the same event with the same verdict. There is
+// no schedule under which that terminates.
+//
+// It deliberately does NOT cover a failing transaction, an unreadable row, or a
+// prior record that will not decode or no longer validates. Those say the
+// daemon's own durable state or its store is broken, which is a fault, stays a
+// fault, and must keep failing loudly.
+var ErrIrreconcilableObservation = errors.New("statedb: irreconcilable token utilization observation")
 
 // TokenUtilizations durably owns normalized API-response accounting. Live rows
 // carry a committed root turn and may carry stream timing; historical
@@ -60,7 +81,7 @@ func (s *TokenUtilizations) record(in *frontendv1.TokenUtilization, historical b
 		kind = "historical token utilization"
 	}
 	if err := validate(in, tokenutilization.Identity{}); err != nil {
-		return false, fmt.Errorf("statedb: reject %s: %w", kind, err)
+		return false, fmt.Errorf("%w: reject %s: %w", ErrIrreconcilableObservation, kind, err)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -68,7 +89,7 @@ func (s *TokenUtilizations) record(in *frontendv1.TokenUtilization, historical b
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := validateSubagentTopologyTx(tx, in.GetAgentReplSessionId(), []*frontendv1.TokenUtilization{in}); err != nil {
-		return false, fmt.Errorf("statedb: reject token utilization topology: %w", err)
+		return false, fmt.Errorf("%w: reject token utilization topology: %w", ErrIrreconcilableObservation, err)
 	}
 	var raw []byte
 	err = tx.QueryRow(`SELECT record FROM token_utilization WHERE agent_repl_session_id=? AND api_message_id=?`, in.GetAgentReplSessionId(), in.GetApiMessageId()).Scan(&raw)
@@ -94,7 +115,7 @@ func (s *TokenUtilizations) record(in *frontendv1.TokenUtilization, historical b
 	}
 	if historical && prior.GetRootTurnId() != "" {
 		if err := tokenutilization.ValidateHistoricalAgainstLive(in, &prior); err != nil {
-			return false, fmt.Errorf("statedb: conflicting historical observation for live token utilization %q: %w", in.GetApiMessageId(), err)
+			return false, fmt.Errorf("%w: conflicting historical observation for live token utilization %q: %w", ErrIrreconcilableObservation, in.GetApiMessageId(), err)
 		}
 		if err = tx.Commit(); err != nil {
 			return false, fmt.Errorf("statedb: commit converged historical token utilization %q: %w", in.GetApiMessageId(), err)
@@ -109,7 +130,7 @@ func (s *TokenUtilizations) record(in *frontendv1.TokenUtilization, historical b
 		return false, fmt.Errorf("statedb: corrupt prior token utilization %q: %w", in.GetApiMessageId(), err)
 	}
 	if !proto.Equal(&prior, in) || !tokenutilization.SameOptionalAPIRequestID(&prior, in) {
-		return false, fmt.Errorf("statedb: conflicting duplicate token utilization %q", in.GetApiMessageId())
+		return false, fmt.Errorf("%w: conflicting duplicate token utilization %q", ErrIrreconcilableObservation, in.GetApiMessageId())
 	}
 	if err = tx.Commit(); err != nil {
 		return false, fmt.Errorf("statedb: commit replayed token utilization %q: %w", in.GetApiMessageId(), err)
