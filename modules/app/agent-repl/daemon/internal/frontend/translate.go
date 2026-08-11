@@ -134,6 +134,13 @@ func TypingDeltaFrame(t *frontendv1.TypingDelta) *frontendv1.FrontendFrame {
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_TypingDelta{TypingDelta: t}}
 }
 
+// TypingCutFrame wraps a TypingCut — the daemon's statement that a preview it
+// opened will NEVER be completed, because the authoritative record that would
+// have retired it can no longer arrive.
+func TypingCutFrame(c *frontendv1.TypingCut) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_TypingCut{TypingCut: c}}
+}
+
 // TaskCatalogFrame wraps a TaskCatalog.
 func TaskCatalogFrame(c *frontendv1.TaskCatalog) *frontendv1.FrontendFrame {
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_TaskCatalog{TaskCatalog: c}}

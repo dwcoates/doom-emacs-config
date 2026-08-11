@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyStreamDelta,
   blockKey,
+  cutOpenPreviews,
   insertBySeq,
   phaseOf,
   previewBlockId,
@@ -431,5 +432,70 @@ describe("settleStreamedBlock onto a preview the record names", () => {
     settleStreamedBlock(items, settledThinking({ uuid: "env2:0", previewBlockId: "msg_1:1" }), 0);
     // Assert
     expect(items).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE CUT — retiring a preview nothing will ever complete.
+//
+// A preview is retired by the authoritative record of its own block. When that
+// record can never arrive — the session died, the shim rolled, the query was
+// torn down mid-block — the preview spins "streaming input…" with no body for
+// the life of the page. The daemon owns that fact and states it; the client
+// never guesses it with a deadline, because any deadline would be wrong for
+// exactly the long tool calls users most want to watch.
+// ---------------------------------------------------------------------------
+
+describe("cutOpenPreviews", () => {
+  it("removes an open preview", () => {
+    // Arrange.
+    const items: ConversationItem[] = [preview()];
+
+    // Act.
+    const changed = cutOpenPreviews(items);
+
+    // Assert: REMOVED, not settled. A preview holds no authoritative text, so
+    // marking it done would promote a fragment to a finished block.
+    expect(changed).toBe(true);
+    expect(items).toEqual([]);
+  });
+
+  it("leaves a settled block alone", () => {
+    // Arrange: a block its record already claimed — real content that merely
+    // began life as a preview.
+    const items: ConversationItem[] = [finished()];
+
+    // Act.
+    const changed = cutOpenPreviews(items);
+
+    // Assert.
+    expect(changed).toBe(false);
+    expect(items).toHaveLength(1);
+  });
+
+  it("reports no change when there is nothing standing", () => {
+    // Arrange.
+    const items: ConversationItem[] = [];
+
+    // Act / Assert: a cut for a preview already retired is a no-op, which is
+    // what makes a late or duplicated cut harmless.
+    expect(cutOpenPreviews(items)).toBe(false);
+  });
+
+  it("removes every open preview while keeping the settled ones", () => {
+    // Arrange: the mixed feed a real cut lands on.
+    const items: ConversationItem[] = [
+      finished(),
+      preview({ blockId: "msg_2:0", messageId: "msg_2" }),
+      preview({ blockId: "msg_3:0", messageId: "msg_3" }),
+    ];
+
+    // Act.
+    const changed = cutOpenPreviews(items);
+
+    // Assert: the settled block survives and keeps its place.
+    expect(changed).toBe(true);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ done: true });
   });
 });

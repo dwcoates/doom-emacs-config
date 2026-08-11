@@ -605,6 +605,81 @@ func (x *TypingDelta) GetBubbleId() string {
 	return ""
 }
 
+// The daemon's statement that a preview it opened will NEVER be completed.
+//
+// A preview is retired by the authoritative record of the block it previews.
+// When that record can no longer arrive — the session died, the shim rolled,
+// the query was torn down mid-block — nothing retires it, and the bubble
+// spins "streaming input…" for the life of the page with no body.
+//
+// A CUT IS A FACT THE DAEMON OWNS, NOT A TIMEOUT THE CLIENT GUESSES. The
+// daemon learns the stream ended without its record; the client cannot
+// distinguish that from a slow block, and any client-side deadline would be
+// wrong for exactly the long tool calls users care most about watching.
+type TypingCut struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// The preview being retired, addressed exactly as the delta that opened it:
+	// empty for the top-level feed, or the AsyncBubble id it was folded into.
+	BubbleId string `protobuf:"bytes,2,opt,name=bubble_id,json=bubbleId,proto3" json:"bubble_id,omitempty"`
+	// The workspace's staleness FENCE, compared byte-wise and never parsed,
+	// identically to every other push. A stale cut is discarded whole.
+	Fence         string `protobuf:"bytes,3,opt,name=fence,proto3" json:"fence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TypingCut) Reset() {
+	*x = TypingCut{}
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TypingCut) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TypingCut) ProtoMessage() {}
+
+func (x *TypingCut) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TypingCut.ProtoReflect.Descriptor instead.
+func (*TypingCut) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *TypingCut) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
+func (x *TypingCut) GetBubbleId() string {
+	if x != nil {
+		return x.BubbleId
+	}
+	return ""
+}
+
+func (x *TypingCut) GetFence() string {
+	if x != nil {
+		return x.Fence
+	}
+	return ""
+}
+
 // The session's retained SystemInit (slash commands, tools, skills, model
 // list), pushed on attach and included in StateSnapshot (S9). Replaces the
 // Emacs GET /commands HTTP menu source.
@@ -628,7 +703,7 @@ type SessionInitView struct {
 
 func (x *SessionInitView) Reset() {
 	*x = SessionInitView{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -640,7 +715,7 @@ func (x *SessionInitView) String() string {
 func (*SessionInitView) ProtoMessage() {}
 
 func (x *SessionInitView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -653,7 +728,7 @@ func (x *SessionInitView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionInitView.ProtoReflect.Descriptor instead.
 func (*SessionInitView) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{4}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SessionInitView) GetWorkspace() string {
@@ -718,7 +793,11 @@ const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"\x05delta\x18\x03 \x01(\v2\x1f.agentshim.core.v1.ContentDeltaR\x05delta\x12\x14\n" +
 	"\x05fence\x18\x04 \x01(\tR\x05fence\x12\x1b\n" +
 	"\tbubble_id\x18\x05 \x01(\tR\bbubbleIdJ\x04\b\x02\x10\x03R\n" +
-	"session_id\"\x8a\x01\n" +
+	"session_id\"\\\n" +
+	"\tTypingCut\x12\x1c\n" +
+	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1b\n" +
+	"\tbubble_id\x18\x02 \x01(\tR\bbubbleId\x12\x14\n" +
+	"\x05fence\x18\x03 \x01(\tR\x05fence\"\x8a\x01\n" +
 	"\x0fSessionInitView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x121\n" +
 	"\x04init\x18\x03 \x01(\v2\x1d.agentshim.data.v1.SystemInitR\x04init\x12\x14\n" +
@@ -742,39 +821,40 @@ func file_agentshim_frontend_v1_feed_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_frontend_v1_feed_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentshim_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_agentshim_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_agentshim_frontend_v1_feed_proto_goTypes = []any{
 	(ConversationSource)(0),       // 0: agentshim.frontend.v1.ConversationSource
 	(*ConversationDelta)(nil),     // 1: agentshim.frontend.v1.ConversationDelta
 	(*ConversationItem)(nil),      // 2: agentshim.frontend.v1.ConversationItem
 	(*CompactionSummaryItem)(nil), // 3: agentshim.frontend.v1.CompactionSummaryItem
 	(*TypingDelta)(nil),           // 4: agentshim.frontend.v1.TypingDelta
-	(*SessionInitView)(nil),       // 5: agentshim.frontend.v1.SessionInitView
-	(*AgentEmission)(nil),         // 6: agentshim.frontend.v1.AgentEmission
-	(*v1.ApiUserMessage)(nil),     // 7: agentshim.data.v1.ApiUserMessage
-	(*v11.PermissionItem)(nil),    // 8: agentshim.core.v1.PermissionItem
-	(*FailureCardView)(nil),       // 9: agentshim.frontend.v1.FailureCardView
-	(*v11.ContextCleared)(nil),    // 10: agentshim.core.v1.ContextCleared
-	(*v11.ContextCompacted)(nil),  // 11: agentshim.core.v1.ContextCompacted
-	(*SessionCommandItem)(nil),    // 12: agentshim.frontend.v1.SessionCommandItem
-	(*AsyncBubble)(nil),           // 13: agentshim.frontend.v1.AsyncBubble
-	(*v11.ContentDelta)(nil),      // 14: agentshim.core.v1.ContentDelta
-	(*v1.SystemInit)(nil),         // 15: agentshim.data.v1.SystemInit
+	(*TypingCut)(nil),             // 5: agentshim.frontend.v1.TypingCut
+	(*SessionInitView)(nil),       // 6: agentshim.frontend.v1.SessionInitView
+	(*AgentEmission)(nil),         // 7: agentshim.frontend.v1.AgentEmission
+	(*v1.ApiUserMessage)(nil),     // 8: agentshim.data.v1.ApiUserMessage
+	(*v11.PermissionItem)(nil),    // 9: agentshim.core.v1.PermissionItem
+	(*FailureCardView)(nil),       // 10: agentshim.frontend.v1.FailureCardView
+	(*v11.ContextCleared)(nil),    // 11: agentshim.core.v1.ContextCleared
+	(*v11.ContextCompacted)(nil),  // 12: agentshim.core.v1.ContextCompacted
+	(*SessionCommandItem)(nil),    // 13: agentshim.frontend.v1.SessionCommandItem
+	(*AsyncBubble)(nil),           // 14: agentshim.frontend.v1.AsyncBubble
+	(*v11.ContentDelta)(nil),      // 15: agentshim.core.v1.ContentDelta
+	(*v1.SystemInit)(nil),         // 16: agentshim.data.v1.SystemInit
 }
 var file_agentshim_frontend_v1_feed_proto_depIdxs = []int32{
 	2,  // 0: agentshim.frontend.v1.ConversationDelta.items:type_name -> agentshim.frontend.v1.ConversationItem
 	0,  // 1: agentshim.frontend.v1.ConversationItem.source:type_name -> agentshim.frontend.v1.ConversationSource
-	6,  // 2: agentshim.frontend.v1.ConversationItem.agent:type_name -> agentshim.frontend.v1.AgentEmission
-	7,  // 3: agentshim.frontend.v1.ConversationItem.user_message:type_name -> agentshim.data.v1.ApiUserMessage
-	8,  // 4: agentshim.frontend.v1.ConversationItem.permission:type_name -> agentshim.core.v1.PermissionItem
-	9,  // 5: agentshim.frontend.v1.ConversationItem.failure_card:type_name -> agentshim.frontend.v1.FailureCardView
-	10, // 6: agentshim.frontend.v1.ConversationItem.context_cleared:type_name -> agentshim.core.v1.ContextCleared
-	11, // 7: agentshim.frontend.v1.ConversationItem.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
-	12, // 8: agentshim.frontend.v1.ConversationItem.session_command:type_name -> agentshim.frontend.v1.SessionCommandItem
-	13, // 9: agentshim.frontend.v1.ConversationItem.async_bubble:type_name -> agentshim.frontend.v1.AsyncBubble
+	7,  // 2: agentshim.frontend.v1.ConversationItem.agent:type_name -> agentshim.frontend.v1.AgentEmission
+	8,  // 3: agentshim.frontend.v1.ConversationItem.user_message:type_name -> agentshim.data.v1.ApiUserMessage
+	9,  // 4: agentshim.frontend.v1.ConversationItem.permission:type_name -> agentshim.core.v1.PermissionItem
+	10, // 5: agentshim.frontend.v1.ConversationItem.failure_card:type_name -> agentshim.frontend.v1.FailureCardView
+	11, // 6: agentshim.frontend.v1.ConversationItem.context_cleared:type_name -> agentshim.core.v1.ContextCleared
+	12, // 7: agentshim.frontend.v1.ConversationItem.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
+	13, // 8: agentshim.frontend.v1.ConversationItem.session_command:type_name -> agentshim.frontend.v1.SessionCommandItem
+	14, // 9: agentshim.frontend.v1.ConversationItem.async_bubble:type_name -> agentshim.frontend.v1.AsyncBubble
 	3,  // 10: agentshim.frontend.v1.ConversationItem.compaction_summary:type_name -> agentshim.frontend.v1.CompactionSummaryItem
-	14, // 11: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
-	15, // 12: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
+	15, // 11: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
+	16, // 12: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
 	13, // [13:13] is the sub-list for method output_type
 	13, // [13:13] is the sub-list for method input_type
 	13, // [13:13] is the sub-list for extension type_name
@@ -808,7 +888,7 @@ func file_agentshim_frontend_v1_feed_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_feed_proto_rawDesc), len(file_agentshim_frontend_v1_feed_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -267,6 +267,21 @@ export class AsyncBubbleRegistry {
     return true;
   }
 
+  /**
+   * Retire BUBBLEID's live-typing preview because the daemon says nothing will
+   * ever complete it.
+   *
+   * A preview inside a bubble is retired by the bubble's next authoritative
+   * update. When that update can never arrive — the session died, the shim
+   * rolled, the query was torn down mid-block — the bubble would otherwise spin
+   * "streaming input…" with no body for the life of the page. This is the
+   * daemon stating that fact; it is never a deadline this store guesses, which
+   * is why there is no timer anywhere near it.
+   */
+  cutTyping(bubbleId: string): boolean {
+    return this.typing.delete(bubbleId);
+  }
+
   /** BUBBLEID's live-typing preview, or null when it has none standing. */
   typingFor(bubbleId: string): AsyncBubbleTyping | null {
     return this.typing.get(bubbleId) ?? null;
