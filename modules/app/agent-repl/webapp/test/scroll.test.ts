@@ -11,6 +11,7 @@ import {
   inEdgeZone,
   innerScrollerAt,
   installTailReanchor,
+  TailFollow,
   isPinnedToBottom,
   isScrollBox,
   parkAtTail,
@@ -568,6 +569,225 @@ describe("installTailReanchor", () => {
     trigger.scroll();
     // Assert
     expect(box.scrollTop).toBe(700);
+  });
+});
+
+/**
+ * THE SINGLE OWNER of the feed's tail-follow decision. Every case drives the
+ * events by hand, so the ordering the browser would decide is the thing each
+ * test states rather than something the test hopes for.
+ */
+describe("TailFollow", () => {
+  /** A follow owner plus the two triggers it subscribed to. */
+  const armed = (
+    box: ReanchorBox,
+    pinPx?: number,
+  ): { tail: TailFollow; scroll: () => void; resize: () => void } => {
+    let onScroll = (): void => {};
+    let onResize = (): void => {};
+    const tail = new TailFollow(box, pinPx);
+    tail.observe(
+      (cb) => {
+        onScroll = cb;
+      },
+      (cb) => {
+        onResize = cb;
+      },
+    );
+    return { tail, scroll: () => onScroll(), resize: () => onResize() };
+  };
+
+  /** A box the reader is following the tail of: 700 + 300 viewport = 1000. */
+  const atTail = (): ReanchorBox => ({ scrollTop: 700, scrollHeight: 1000, clientHeight: 300 });
+
+  it("follows the tail when built on a box parked at its bottom", () => {
+    // Arrange + Act + Assert
+    expect(new TailFollow(atTail()).isFollowing()).toBe(true);
+  });
+
+  it("does not follow when built on a box the reader left scrolled up", () => {
+    // Arrange + Act + Assert
+    expect(
+      new TailFollow({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 }).isFollowing(),
+    ).toBe(false);
+  });
+
+  it("stops following on a scroll UP that stays inside the pin band", () => {
+    // Arrange — THE REPORTED BUG. A trackpad flick upward begins with a few
+    // px, well inside PIN_PX, and a geometry sample called that "still pinned"
+    // and parked the feed back down under the gesture.
+    const box = atTail();
+    const a = armed(box);
+    // Act — 10px up, far short of the 40px slack band.
+    box.scrollTop = 690;
+    a.scroll();
+    // Assert
+    expect(a.tail.isFollowing()).toBe(false);
+  });
+
+  it("reports the reader's live position even before their scroll event lands", () => {
+    // Arrange — the browser dispatches scroll asynchronously, so a render can
+    // run between the gesture and its event. Reading the last-seen event there
+    // would answer about a position the reader has already left.
+    const box = atTail();
+    const a = armed(box);
+    // Act — the gesture happened; `a.scroll()` is deliberately NOT fired.
+    box.scrollTop = 400;
+    // Assert
+    expect(a.tail.isFollowing()).toBe(false);
+  });
+
+  it("keeps a scrolled-away reader unfollowed across a burst of re-renders", () => {
+    // Arrange — the reader scrolls up once, then the feed streams on.
+    const box = atTail();
+    const a = armed(box);
+    box.scrollTop = 400;
+    a.scroll();
+    // Act — every render asks the owner before it would park.
+    const answers: boolean[] = [];
+    for (let i = 0; i < 20; i++) {
+      box.scrollHeight += 120;
+      answers.push(a.tail.isFollowing());
+    }
+    // Assert — not once re-enabled, across the whole burst.
+    expect(answers.some(Boolean)).toBe(false);
+  });
+
+  it("resumes following when the reader scrolls back down to the tail", () => {
+    // Arrange — away from the tail, then returning to it.
+    const box = atTail();
+    const a = armed(box);
+    box.scrollTop = 200;
+    a.scroll();
+    // Act
+    box.scrollTop = 700;
+    a.scroll();
+    // Assert
+    expect(a.tail.isFollowing()).toBe(true);
+  });
+
+  it("does not resume following on a downward scroll short of the tail", () => {
+    // Arrange — the reader is paging down through history, not chasing it.
+    const box = atTail();
+    const a = armed(box);
+    box.scrollTop = 100;
+    a.scroll();
+    // Act
+    box.scrollTop = 400;
+    a.scroll();
+    // Assert
+    expect(a.tail.isFollowing()).toBe(false);
+  });
+
+  it("ignores the scroll event its own park emits", () => {
+    // Arrange — the browser dispatches scroll asynchronously after a write.
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.park();
+    a.scroll();
+    // Assert — the park's own event must not be read as the reader moving.
+    expect([a.tail.isFollowing(), box.scrollTop]).toEqual([true, 1000]);
+  });
+
+  it("does not end a follow when a restore places the box", () => {
+    // Arrange — a rebuild restoring the reader's place writes scrollTop; the
+    // owner must not read its own write as the reader changing their mind.
+    const box = atTail();
+    const a = armed(box);
+    // Act
+    a.tail.place(400);
+    a.scroll();
+    // Assert
+    expect([a.tail.isFollowing(), box.scrollTop]).toEqual([true, 400]);
+  });
+
+  it("does not begin a follow when a place lands the box on the tail", () => {
+    // Arrange — a backfill shifting the view down by the height it grew above
+    // the viewport can land exactly at the bottom. That is arithmetic, not the
+    // reader asking to follow again.
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.place(700);
+    a.scroll();
+    // Assert
+    expect(a.tail.isFollowing()).toBe(false);
+  });
+
+  it("stops following when the reader opens a nested view to read it", () => {
+    // Arrange + Act
+    const a = armed(atTail());
+    a.tail.release();
+    // Assert
+    expect(a.tail.isFollowing()).toBe(false);
+  });
+
+  it("re-parks a following box when the resize lands after the snap", () => {
+    // Arrange — the switch snap landed first, then the webview was resized.
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    a.tail.park();
+    // Act — the relayout grows the scrollable height under a fixed scrollTop.
+    box.clientHeight = 200;
+    box.scrollHeight = 2600;
+    a.resize();
+    // Assert — RELIABLY at the bottom, not merely near where the snap left it.
+    expect(box.scrollTop).toBe(2600);
+  });
+
+  it("parks on the settled layout when the snap lands after the resize", () => {
+    // Arrange — the other order the switch can produce, which no side controls.
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    box.clientHeight = 200;
+    box.scrollHeight = 2600;
+    a.resize();
+    a.tail.park();
+    // Assert
+    expect(box.scrollTop).toBe(2600);
+  });
+
+  it("leaves a scrolled-away box where it is when a resize arrives", () => {
+    // Arrange
+    const box = atTail();
+    const a = armed(box);
+    box.scrollTop = 200;
+    a.scroll();
+    // Act
+    box.scrollHeight = 1400;
+    a.resize();
+    // Assert
+    expect(box.scrollTop).toBe(200);
+  });
+
+  it("does not read a resize's own downward clamp as the reader scrolling up", () => {
+    // Arrange — a shrinking viewport clamps scrollTop by itself. Reconciling
+    // that would drop the follow the workspace switch just asked for.
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    a.tail.park();
+    // Act — the relayout shrank the feed and the browser clamped scrollTop.
+    box.scrollHeight = 600;
+    box.clientHeight = 200;
+    box.scrollTop = 400;
+    a.resize();
+    // Assert
+    expect([a.tail.isFollowing(), box.scrollTop]).toEqual([true, 600]);
+  });
+
+  it("honors a custom pin window when deciding a scroll reached the tail", () => {
+    // Arrange — a 10px window: 685 is 15px short of the 700 bottom.
+    const box = atTail();
+    const a = armed(box, 10);
+    box.scrollTop = 200;
+    a.scroll();
+    // Act
+    box.scrollTop = 685;
+    a.scroll();
+    // Assert
+    expect(a.tail.isFollowing()).toBe(false);
   });
 });
 
