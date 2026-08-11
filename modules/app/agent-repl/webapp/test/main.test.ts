@@ -661,6 +661,25 @@ describe("the topbar's warning indicator", () => {
 
   it("renders the indicator from the daemon's own topbar view", () => {
     // Assert — the sentences are the resolved view's; nothing re-derives them.
-    expect(main).toContain("topbarWarningsHtml(store.topbar(ws), warningsMenuOpen)");
+    // The whole strip is composed in one place (topbarStripHtml) so its order
+    // and reserved warning slot are one testable fact rather than a paint-site
+    // concatenation nobody can assert on.
+    expect(main).toContain("topbarStripHtml(store.topbar(ws), store.tokenBreakdown(ws), {");
+  });
+});
+
+describe("the topbar's ids dropdown", () => {
+  it("opens from the strip's own click vocabulary", () => {
+    // Assert — the chip is rebuilt by every renderChrome, so the toggle is
+    // delegated through topbarClickAction rather than bound to a dead node.
+    expect(main).toContain('if (action.menu === "session") {');
+    expect(main).toContain("sessionMenuOpen = !sessionMenuOpen;");
+  });
+
+  it("dismisses on an outside click and on Escape, like every other dropdown", () => {
+    // Assert — closeAllMenus is the one path both gestures reach, and the
+    // outside-click guard spares exactly the session stem.
+    expect(main).toContain("sessionMenuOpen = false;");
+    expect(main).toContain('!target.closest(".session-menu")');
   });
 });
