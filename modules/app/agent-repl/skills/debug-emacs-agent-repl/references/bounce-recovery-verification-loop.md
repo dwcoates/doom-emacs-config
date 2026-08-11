@@ -338,6 +338,45 @@ them as written; this runbook adds only the verdict.
   kill-and-respawn satisfies an equal count. Classify with `ps -o command=`
   first: `pgrep -f 'shim/dist/main.js'` also matches the daemon.
 
+- **PID identity means DIFFING THE TWO PID SETS, not comparing start times to
+  the bounce boundary.** A shim that died at 11:56:29 and respawned at 11:56:30
+  has a start time before an 11:58 bounce and passes a "started before the
+  boundary" test — while being a different process. This exact substitution
+  reported "all 7 shims preserved, zero died" for a bounce that had in fact
+  replaced one, and the process count stayed 7 the whole time so nothing looked
+  wrong. Snapshot `pid ws` pairs to a file before and after, and `diff` them.
+  Anything but an empty diff is a finding.
+
+- **Probe the page with `textContent`, NEVER `innerText`, and sample more than
+  once.** `innerText` returns only RENDERED text, so a failure card inside a
+  collapsed or hidden bubble reads as absent — a criterion-7 sweep reported
+  zero terminations on a page that was carrying one. Worse, the same page read
+  0 at 12:02 and 1 at 12:08 with no bounce in between: content enters the DOM
+  late, so **a single post-bounce sample is not a measurement**. Take at least
+  two samples spaced ~25s and require them to agree.
+
+- **A termination card on screen is not evidence the termination happened NOW.**
+  Cards are REPLAYED from history on every page load. Convert the card's own
+  `observed_at_ms` to wall clock (`date -r $((ms/1000))`) before attributing it
+  to the bounce under test. One card read as a live bounce casualty was
+  timestamped ~13 hours earlier; the daemon logs the replay explicitly as
+  `decision=retain_history_no_bring_up_fault` / `single_card_per_replayed_pair`.
+
+- **`deploy-all.sh` does NOT deploy elisp.** Its "revision gate passed" covers
+  the webapp bundle only. The long-running Emacs keeps the elisp it already
+  loaded, so a merged `lisp/` change is simply not live, and the deploy says
+  nothing about it. A measurement taken against stale elisp looks like the fix
+  failing. Verify a new symbol is actually bound
+  (`emacsclient -e '(bound-and-true-p <new-var>)'`) before believing any result,
+  and hot-load per step 2 if it is not. Note `load` does not unbind variables
+  the change DELETED, so a stale binding lingering is not proof of stale code.
+
+- **`deploy-all.sh` reports "shim: bundle unchanged" whenever you pre-build.**
+  It samples `shim_identity` before and after its OWN build step, so building
+  the shim yourself first makes it compare the new bundle against itself. It
+  never compares against what the running shims actually loaded. The message is
+  about its build, not about deployment.
+
 - **`emacsclient` is not on PATH.** Use
   `/Applications/Emacs.app/Contents/MacOS/bin/emacsclient`, or
   `$AGENT_REPL_EMACSCLIENT`. A "command not found" here reads exactly like a
