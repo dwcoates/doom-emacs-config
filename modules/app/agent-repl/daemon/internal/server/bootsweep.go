@@ -116,6 +116,11 @@ type BootSweeper struct {
 	// only when Ledger is set. Its error reaches the verdict as UNKNOWN and is
 	// never read as an absence.
 	Holders func(workspace string) ([]int, error)
+	// Settlement collects what the bring-ups actually DID with each surviving
+	// shim, so the bounce is closed out with an end-state verdict instead of
+	// with the boot verdict alone. Nil means the end state is not being
+	// collected, which is SAID rather than reported as adoption.
+	Settlement *bounceledger.Settlement
 }
 
 // reportBounce accounts for the predecessor's shims BY PID before any
@@ -129,6 +134,21 @@ func (s *BootSweeper) reportBounce() {
 		return
 	}
 	bounceledger.Report(s.Logf, s.Ledger, s.Holders)
+}
+
+// reportBounceEnd closes the accounting once every bring-up this sweep drives
+// has ruled. The boot verdict said which pids were still there; this says which
+// of them this daemon actually reattached to, so a bounce can no longer claim a
+// preservation that its own bring-up undid a second later.
+func (s *BootSweeper) reportBounceEnd() {
+	if len(s.Ledger) == 0 {
+		return
+	}
+	if s.Settlement == nil {
+		s.Logf("server: bounce end-state SKIPPED — a predecessor ledger of %d session(s) exists but no settlement is wired, so what became of each preserved shim is unrecorded", len(s.Ledger))
+		return
+	}
+	bounceledger.ReportEnd(s.Logf, s.Ledger, s.Settlement)
 }
 
 // The verdicts that leave a session unwired. Each is one branch of reconcile,
@@ -157,6 +177,10 @@ const (
 // second pass completes, or as soon as ctx ends.
 func (s *BootSweeper) Run(ctx context.Context) {
 	s.reportBounce()
+	// The end state is reported however this sweep ends, INCLUDING a cancelled
+	// one: a bounce cut short still killed or adopted whatever it got to, and
+	// dropping the account on the early return is how the last one went unseen.
+	defer s.reportBounceEnd()
 	deferred := s.pass(ctx, "boot", nil)
 	if ctx.Err() != nil {
 		return

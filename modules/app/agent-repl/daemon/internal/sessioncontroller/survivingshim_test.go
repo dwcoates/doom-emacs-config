@@ -99,6 +99,64 @@ func (h *fakeHolder) delivered() []string {
 	return append([]string(nil), h.signals...)
 }
 
+// fakeParkedConn is the listener's parked-connection probe under the test's
+// control: has the survivor already redialled this daemon?
+type fakeParkedConn struct {
+	mu        sync.Mutex
+	connected bool
+	err       error
+	calls     int
+}
+
+func (p *fakeParkedConn) probe(string) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	if p.err != nil {
+		return false, p.err
+	}
+	return p.connected, nil
+}
+
+func (p *fakeParkedConn) redial() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.connected = true
+}
+
+// fateLog captures the bounce END-STATE verdicts the gate reports.
+type fateLog struct {
+	mu      sync.Mutex
+	adopted []string
+	// replaced maps workspace to the reason recorded with the replacement.
+	replaced map[string]string
+}
+
+func newFateLog() *fateLog { return &fateLog{replaced: map[string]string{}} }
+
+func (f *fateLog) record(workspace string, adopted bool, reason string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if adopted {
+		f.adopted = append(f.adopted, workspace)
+		return
+	}
+	f.replaced[workspace] = reason
+}
+
+func (f *fateLog) adoptions() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.adopted...)
+}
+
+func (f *fateLog) replacement(workspace string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	reason, ok := f.replaced[workspace]
+	return reason, ok
+}
+
 // gateHarness is one manager whose workspace-lock probe is scripted and whose
 // wait bounds are short enough to run at test speed.
 type gateHarness struct {
@@ -107,6 +165,8 @@ type gateHarness struct {
 	applier *fakeApplier
 	lock    *fakeWorkspaceLock
 	holder  *fakeHolder
+	parked  *fakeParkedConn
+	fate    *fateLog
 	log     *logCapture
 }
 
@@ -117,6 +177,8 @@ func newGateHarness(t *testing.T, lock *fakeWorkspaceLock) *gateHarness {
 		applier: &fakeApplier{},
 		lock:    lock,
 		holder:  &fakeHolder{lock: lock},
+		parked:  &fakeParkedConn{},
+		fate:    newFateLog(),
 		log:     &logCapture{},
 	}
 	m, err := New(Config{
@@ -132,6 +194,8 @@ func newGateHarness(t *testing.T, lock *fakeWorkspaceLock) *gateHarness {
 		Source:               stubSource{},
 		FileDiagnostics:      fakeFileDiagnosticPersister{},
 		WorkspaceLockHeld:    lock.held,
+		ShimConnected:        h.parked.probe,
+		ShimFate:             h.fate.record,
 		WorkspaceLockHolders: h.holder.holders,
 		SignalProcess:        h.holder.signal,
 		Logf:                 h.log.logf,
@@ -385,6 +449,162 @@ func TestAnUnreadableWorkspaceLockRefusesRatherThanSpawning(t *testing.T) {
 	}
 	if h.spawns() != 0 {
 		t.Fatalf("EnsureShim calls = %d, want 0", h.spawns())
+	}
+}
+
+// TestAParkedSurvivorIsAdoptedRatherThanEvicted: THE DEADLOCK. A surviving
+// shim that has already redialled — its connection parked at this daemon's
+// listener — was waited out and killed, because the only dial-in evidence the
+// gate accepted was a controller that only the blocked bring-up could create.
+// A parked connection must let the bring-up through untouched.
+func TestAParkedSurvivorIsAdoptedRatherThanEvicted(t *testing.T) {
+	// Arrange — the survivor holds the workspace lock AND is already parked.
+	h := newGateHarness(t, &fakeWorkspaceLock{answers: []bool{true}})
+	h.parked.connected = true
+	h.holder.pids = []int{33870}
+
+	// Act
+	d, err := h.m.awaitSurvivingShim("ws")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("awaitSurvivingShim over a parked survivor = %v, want the bring-up let through to reattach", err)
+	}
+	if d != nil {
+		t.Fatalf("controller = %v, want nil so the caller proceeds into the reattach", d)
+	}
+	if got := h.holder.delivered(); len(got) != 0 {
+		t.Fatalf("signals delivered = %v, want none; the parked survivor was killed instead of adopted", got)
+	}
+}
+
+// TestAParkedSurvivorIsNotWaitedOutAtAll: the eviction is not the only cost of
+// the old behaviour — every parked survivor also paid the whole wait bound
+// before dying, during which its workspace dispatched nothing.
+func TestAParkedSurvivorIsNotWaitedOutAtAll(t *testing.T) {
+	// Arrange
+	h := newGateHarness(t, &fakeWorkspaceLock{answers: []bool{true}})
+	h.parked.connected = true
+
+	// Act
+	if _, err := h.m.awaitSurvivingShim("ws"); err != nil {
+		t.Fatalf("awaitSurvivingShim = %v, want the parked survivor adopted", err)
+	}
+
+	// Assert
+	if h.log.contains("SURVIVING SHIM WAIT EXPIRED") {
+		t.Fatal("the gate waited out a survivor that was already talking to this daemon")
+	}
+}
+
+// TestAParkedSurvivorIsRecordedAsAdoptedInTheBounceAccounting: the ledger's
+// end-state verdict must match the process's actual fate.
+func TestAParkedSurvivorIsRecordedAsAdoptedInTheBounceAccounting(t *testing.T) {
+	// Arrange
+	h := newGateHarness(t, &fakeWorkspaceLock{answers: []bool{true}})
+	h.parked.connected = true
+
+	// Act
+	if _, err := h.m.awaitSurvivingShim("ws"); err != nil {
+		t.Fatalf("awaitSurvivingShim = %v, want the parked survivor adopted", err)
+	}
+
+	// Assert
+	if got := h.fate.adoptions(); len(got) != 1 || got[0] != "ws" {
+		t.Fatalf("adoptions recorded = %v, want exactly the adopted workspace", got)
+	}
+}
+
+// TestASurvivorThatRedialsMidWaitIsAdopted: the redial lands as a parked
+// connection, not as a controller, so the wait must sample the same probe.
+func TestASurvivorThatRedialsMidWaitIsAdopted(t *testing.T) {
+	// Arrange — parked only once the wait is already running.
+	h := newGateHarness(t, &fakeWorkspaceLock{answers: []bool{true}})
+	go h.parked.redial()
+
+	// Act
+	d, err := h.m.awaitSurvivingShim("ws")
+
+	// Assert
+	if err != nil || d != nil {
+		t.Fatalf("awaitSurvivingShim = (%v, %v), want the mid-wait redial adopted", d, err)
+	}
+	if got := h.holder.delivered(); len(got) != 0 {
+		t.Fatalf("signals delivered = %v, want none", got)
+	}
+}
+
+// TestAnUnreachableSurvivorIsStillReplacedWithItsReasonRecorded: adoption must
+// not become a way to keep a dead-to-us shim. A holder that never presents
+// itself is still evicted, and the accounting must say so WITH the reason.
+func TestAnUnreachableSurvivorIsStillReplacedWithItsReasonRecorded(t *testing.T) {
+	// Arrange — never parked, never a controller, dies on SIGTERM.
+	h := newGateHarness(t, &fakeWorkspaceLock{answers: []bool{true}})
+	h.holder.pids = []int{4242}
+	h.holder.diesOn = syscall.SIGTERM
+
+	// Act
+	if _, _, err := h.m.bringUpTracked("ws"); err != nil {
+		t.Fatalf("bringUpTracked = %v, want the unreachable holder replaced", err)
+	}
+
+	// Assert
+	reason, ok := h.fate.replacement("ws")
+	if !ok {
+		t.Fatal("no replacement was recorded; a killed shim the accounting cannot name is the silent death the ledger exists to end")
+	}
+	if !strings.Contains(reason, "never parked a connection") {
+		t.Fatalf("replacement reason = %q, want it to name why the reattach was impossible", reason)
+	}
+}
+
+// TestAnUnobservableParkedProbeRefusesRatherThanEvicting: "I could not tell
+// whether it redialled" is never read as "it did not".
+func TestAnUnobservableParkedProbeRefusesRatherThanEvicting(t *testing.T) {
+	// Arrange
+	probeErr := errors.New("listener registry unreadable")
+	h := newGateHarness(t, &fakeWorkspaceLock{answers: []bool{true}})
+	h.parked.err = probeErr
+	h.holder.pids = []int{7}
+
+	// Act
+	_, err := h.m.awaitSurvivingShim("ws")
+
+	// Assert
+	if !errors.Is(err, probeErr) {
+		t.Fatalf("awaitSurvivingShim error = %v, want the parked-connection probe failure surfaced", err)
+	}
+	if got := h.holder.delivered(); len(got) != 0 {
+		t.Fatalf("signals delivered = %v, want none; an unobserved shim must not be killed", got)
+	}
+}
+
+// TestAnUnwiredParkedProbeRefusesRatherThanEvicting: a daemon that cannot ask
+// the question must not answer it by killing.
+func TestAnUnwiredParkedProbeRefusesRatherThanEvicting(t *testing.T) {
+	// Arrange
+	h := newGateHarness(t, &fakeWorkspaceLock{answers: []bool{true}})
+	h.m.cfg.ShimConnected = nil
+
+	// Act
+	_, err := h.m.awaitSurvivingShim("ws")
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "no parked-connection probe is wired") {
+		t.Fatalf("awaitSurvivingShim error = %v, want a loud refusal naming the unwired probe", err)
+	}
+}
+
+// TestTheSurvivingShimWaitOutlastsTheShimsRedialCadence: the bound and the
+// shim's own backoff ceiling are two halves of one contract, asserted as a
+// RELATIONSHIP so neither can be edited into disagreement. A wait shorter than
+// the ceiling would expire on a shim dialling exactly as designed.
+func TestTheSurvivingShimWaitOutlastsTheShimsRedialCadence(t *testing.T) {
+	// Arrange / Act — both are constants; the assertion is their relation.
+	// Assert
+	if survivingShimWaitTimeout < 2*shimRedialBackoffCeiling {
+		t.Fatalf("survivingShimWaitTimeout = %s, want at least two redial ceilings (%s) so one missed dial never costs a survivor its workspace",
+			survivingShimWaitTimeout, 2*shimRedialBackoffCeiling)
 	}
 }
 

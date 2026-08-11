@@ -45,15 +45,28 @@ import (
 // apart from "the shim could not be brought up" without matching message text.
 var ErrSurvivingShim = errors.New("session-controller: a shim holds the workspace lock and did not dial in")
 
+// shimRedialBackoffCeiling MIRRORS the shim's own reconnect ceiling
+// (agent-shim/claude/shim/src/uds/server.ts — `reconnectMaxMs ?? 5000`, doubling
+// from 100ms). It is stated here because the wait below is a wait for THAT
+// cadence, and a bound shorter than one redial interval would expire on a shim
+// that is dialling exactly as designed.
+const shimRedialBackoffCeiling = 5 * time.Second
+
 // survivingShimWaitTimeout bounds the wait for a lock-holding shim to dial in.
 //
-// It is deliberately NOT bringUpTimeout and deliberately much shorter. The two
-// bound different things: bringUpTimeout bounds a shim THIS daemon just
-// spawned, while this bounds one that already exists and only has to reconnect.
-// Sharing a bound would hide which of the two a stall belongs to, and it is
-// exactly that confusion — a bring-up wait charged for an absent duplicate —
-// that made the daemon deaf for half a minute per respawn.
-const survivingShimWaitTimeout = 10 * time.Second
+// It is deliberately NOT bringUpTimeout. The two bound different things:
+// bringUpTimeout bounds a shim THIS daemon just spawned, while this bounds one
+// that already exists and only has to reconnect. Sharing a bound would hide
+// which of the two a stall belongs to, and it is exactly that confusion — a
+// bring-up wait charged for an absent duplicate — that made the daemon deaf for
+// half a minute per respawn.
+//
+// It is expressed AS A MULTIPLE of the shim's redial ceiling rather than as a
+// bare number of seconds, so the relationship the wait depends on cannot be
+// broken by editing one constant: at the ceiling a survivor gets three whole
+// attempts inside the bound, so a single missed dial never costs it the
+// workspace. survivingshim_test.go asserts the relationship, not the number.
+const survivingShimWaitTimeout = 3 * shimRedialBackoffCeiling
 
 // survivingShimPollInterval is how often the wait re-reads the two facts. Both
 // are edge-free — a kernel lock and a map — so there is nothing to subscribe to
@@ -76,6 +89,33 @@ func (m *Manager) awaitSurvivingShim(workspace string) (*sessionController, erro
 		return nil, fmt.Errorf("session-controller: workspace %q: cannot determine whether a shim already holds it: %w", workspace, err)
 	}
 	if !held {
+		return nil, nil
+	}
+
+	// THE PARKED-CONNECTION QUESTION, ASKED BEFORE ANY WAIT BEGINS.
+	//
+	// THIS IS THE DEADLOCK THE 20:11 BOUNCE DIED OF. The only evidence the wait
+	// below accepts for "the survivor dialled in" is m.byWS — a controller for
+	// this workspace. But m.byWS is filled by the bring-up this gate stands in
+	// front of: the survivor's connection is already parked at the daemon's shim
+	// listener, and the ONLY thing that turns it into a controller is
+	// EnsureShim, twenty lines further down this same call. So the gate waited
+	// for a fact that only the code it was blocking could produce, timed out,
+	// and evicted a shim that had done everything right (see the boot sweep's
+	// own "has a PARKED shim connection; reattaching" line for those same
+	// sessions, minutes before it killed them).
+	//
+	// A parked connection is therefore the FIRST-CLASS adoption signal: the
+	// holder is not merely alive, it is already talking to this daemon.
+	// Returning free here is not "spawn" — it is "proceed", and the very next
+	// thing the caller does is EnsureShim, which proves the connection open and
+	// spawns nothing.
+	if parked, sessionID, err := m.survivorParked(workspace); err != nil {
+		return nil, err
+	} else if parked {
+		m.logf("session-controller: SURVIVING SHIM PARKED ws=%q session=%s decision=adopt_parked — the survivor has already redialled and its connection is parked at this daemon's shim listener, so the bring-up reattaches to that process instead of waiting for a controller only the reattach can create",
+			workspace, sessionID)
+		m.recordShimAdoption(workspace, fmt.Sprintf("the surviving shim for session %s was already parked at this daemon's shim listener and the bring-up reattached to it", sessionID))
 		return nil, nil
 	}
 
@@ -105,7 +145,19 @@ func (m *Manager) awaitSurvivingShim(workspace string) (*sessionController, erro
 			if wired {
 				m.logf("session-controller: SURVIVING SHIM DIALLED IN ws=%q session=%s waited=%s decision=adopt_existing — no shim was spawned",
 					workspace, d.sessionID, time.Since(started).Round(time.Millisecond))
+				m.recordShimAdoption(workspace, fmt.Sprintf("the surviving shim dialled in during the wait and session %s is driven by that same process", d.sessionID))
 				return d, nil
+			}
+			// The survivor may also redial MID-WAIT, which lands as a parked
+			// connection rather than as a controller for exactly the reason
+			// spelled out above the pre-check. Both are adoption.
+			if parked, sessionID, err := m.survivorParked(workspace); err != nil {
+				return nil, err
+			} else if parked {
+				m.logf("session-controller: SURVIVING SHIM PARKED ws=%q session=%s waited=%s decision=adopt_parked — the survivor redialled during the wait, so the bring-up reattaches to it",
+					workspace, sessionID, time.Since(started).Round(time.Millisecond))
+				m.recordShimAdoption(workspace, fmt.Sprintf("the surviving shim for session %s redialled during the wait and the bring-up reattached to it", sessionID))
+				return nil, nil
 			}
 			held, err := m.workspaceLockHeld(workspace)
 			if err != nil {
@@ -150,12 +202,22 @@ func (m *Manager) evictSurvivingShim(workspace string, squatted, waitBound time.
 	_, interval := m.survivingShimBounds()
 	grace := m.survivingShimKillGrace()
 
+	// THE REASON THE LEDGER WILL CARRY, composed once here so every exit from
+	// the escalation records the SAME cause. A shim that could not be reattached
+	// must still be replaced loudly; what must never happen is a replacement the
+	// bounce's accounting cannot name.
+	replacedBecause := fmt.Sprintf(
+		"the lock holder never presented a controller and never parked a connection within the %s surviving-shim wait (squatted %s), so it was evicted and the workspace respawned",
+		waitBound, squatted)
+
 	holders, err := m.workspaceLockHolders(workspace)
 	if err != nil {
+		m.recordShimReplacement(workspace, replacedBecause+", but the holder could not even be named: "+err.Error())
 		return nil, fmt.Errorf("%w: workspace %q, after %s; the holder could not be named for termination: %w",
 			ErrSurvivingShim, workspace, waitBound, err)
 	}
 	if len(holders) == 0 {
+		m.recordShimReplacement(workspace, replacedBecause+", but no holder pid could be determined, so nothing was terminated")
 		return nil, fmt.Errorf("%w: workspace %q, after %s; the lock is held but no holder pid could be determined, so nothing could be terminated",
 			ErrSurvivingShim, workspace, waitBound)
 	}
@@ -188,15 +250,18 @@ func (m *Manager) evictSurvivingShim(workspace string, squatted, waitBound time.
 		if d != nil {
 			m.logf("session-controller: SURVIVING SHIM DIALLED IN DURING TAKEOVER ws=%q session=%s decision=adopt_existing — the holder presented a controller while being evicted",
 				workspace, d.sessionID)
+			m.recordShimAdoption(workspace, fmt.Sprintf("the surviving shim presented a controller for session %s while being evicted, so it was adopted rather than replaced", d.sessionID))
 			return d, nil
 		}
 		if freed {
+			m.recordShimReplacement(workspace, replacedBecause)
 			m.logf("session-controller: SURVIVING SHIM EVICTED ws=%q holder_pids=%v squatted=%s signal=%s decision=spawn — the workspace lock is free, so this bring-up continues into a normal spawn",
 				workspace, holders, squatted, escalation.name)
 			return nil, nil
 		}
 	}
 
+	m.recordShimReplacement(workspace, replacedBecause+", and the holder survived both SIGTERM and SIGKILL, so the workspace was left to no one")
 	m.errorf("session-controller: SURVIVING SHIM TAKEOVER FAILED ws=%q holder_pids=%v squatted=%s attempted=%q decision=refuse_spawn — the holder survived SIGTERM and SIGKILL, so the workspace is still owned by a process this daemon cannot drive",
 		workspace, holders, squatted, strings.Join(attempted, ", "))
 	return nil, fmt.Errorf("%w: workspace %q, after %s; the holder %v survived the takeover (attempted %s)",
@@ -234,6 +299,56 @@ func (m *Manager) awaitHolderDeath(workspace string, grace, interval time.Durati
 			}
 		}
 	}
+}
+
+// survivorParked answers the one question the wait used to be unable to ask:
+// has this workspace's surviving shim ALREADY redialled and parked its
+// connection at this daemon's shim listener?
+//
+// It is the same probe the spawn chokepoint uses (server.ShimSpawner.EnsureShim
+// -> shimListener.Connected) deliberately: one authority for "is a shim talking
+// to me", asked at the gate that decides whether to kill it and at the gate that
+// decides whether to spawn beside it, so the two can never disagree about the
+// same process.
+//
+// An error is NEVER read as "not parked": failing to observe a connection is
+// not evidence of its absence, and reading it as one is what kills a live shim.
+func (m *Manager) survivorParked(workspace string) (bool, string, error) {
+	sessionID, ok := m.cfg.Locator.Locate(workspace)
+	if !ok {
+		// No session id is bound to this workspace, so there is no parked
+		// connection to look for. The holder is still a survivor and the wait
+		// below is still the right answer; this is not an error.
+		return false, "", nil
+	}
+	if m.cfg.ShimConnected == nil {
+		return false, sessionID, fmt.Errorf("session-controller: workspace %q session %s: a shim holds the workspace lock but no parked-connection probe is wired, so whether it has already redialled cannot be observed and it must not be evicted on an unasked question",
+			workspace, sessionID)
+	}
+	connected, err := m.cfg.ShimConnected(sessionID)
+	if err != nil {
+		return false, sessionID, fmt.Errorf("session-controller: workspace %q session %s: cannot determine whether the surviving shim has already redialled: %w",
+			workspace, sessionID, err)
+	}
+	return connected, sessionID, nil
+}
+
+// recordShimAdoption / recordShimReplacement hand the bounce's END-STATE verdict
+// to whatever is accounting for it. The hook is optional because it is pure
+// accounting — no decision depends on it — and a nil one changes nothing about
+// what happens to the shim.
+func (m *Manager) recordShimAdoption(workspace, reason string) {
+	if m.cfg.ShimFate == nil {
+		return
+	}
+	m.cfg.ShimFate(workspace, true, reason)
+}
+
+func (m *Manager) recordShimReplacement(workspace, reason string) {
+	if m.cfg.ShimFate == nil {
+		return
+	}
+	m.cfg.ShimFate(workspace, false, reason)
 }
 
 // survivingShimKillGrace resolves the escalation's grace, honoring the test

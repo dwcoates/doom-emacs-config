@@ -521,6 +521,58 @@ func TestBootSweepReportsADeliberateRollAsROLLEDRatherThanPreserved(t *testing.T
 	}
 }
 
+// THE END-STATE HALF. A boot verdict of PRESERVED that the bring-up then undoes
+// must not stand as the bounce's account of what happened.
+
+func TestBootSweepClosesTheBounceWithTheAdoptionTheBringUpReached(t *testing.T) {
+	// Arrange — the shim is preserved at boot and the bring-up adopted it.
+	s, _, lines := sweepRig(t, "/w")
+	s.Ledger = []bounceledger.Entry{{SessionID: "s_/w", Workspace: "/w", PID: 27494, Disposition: bounceledger.DispositionPreserved}}
+	s.Holders = func(string) ([]int, error) { return []int{27494}, nil }
+	s.Settlement = bounceledger.NewSettlement()
+	s.Settlement.Adopted("/w", "the parked survivor was reattached to")
+
+	// Act.
+	s.Run(context.Background())
+
+	// Assert.
+	if !logged(lines, "bounce end-state session=s_/w ws=\"/w\" shim_pid=27494 verdict=ADOPTED") {
+		t.Fatalf("no ADOPTED end-state verdict; got %v", *lines)
+	}
+}
+
+func TestBootSweepRefusesToLetAReplacedShimStandAsPreserved(t *testing.T) {
+	// Arrange — PRESERVED at boot, replaced by the bring-up a moment later.
+	s, _, lines := sweepRig(t, "/w")
+	s.Ledger = []bounceledger.Entry{{SessionID: "s_/w", Workspace: "/w", PID: 27494, Disposition: bounceledger.DispositionPreserved}}
+	s.Holders = func(string) ([]int, error) { return []int{27494}, nil }
+	s.Settlement = bounceledger.NewSettlement()
+	s.Settlement.Replaced("/w", "the survivor never redialled")
+
+	// Act.
+	s.Run(context.Background())
+
+	// Assert.
+	if !logged(lines, "PRESERVATION DID NOT HOLD") || !logged(lines, "PRESERVATION BROKEN replaced=1 of 1") {
+		t.Fatalf("a replaced shim was left standing as preserved; got %v", *lines)
+	}
+}
+
+func TestBootSweepSaysTheEndStateIsUnrecordedWithoutASettlement(t *testing.T) {
+	// Arrange.
+	s, _, lines := sweepRig(t, "/w")
+	s.Ledger = []bounceledger.Entry{{SessionID: "s_/w", Workspace: "/w", PID: 27494, Disposition: bounceledger.DispositionPreserved}}
+	s.Holders = func(string) ([]int, error) { return []int{27494}, nil }
+
+	// Act.
+	s.Run(context.Background())
+
+	// Assert.
+	if !logged(lines, "bounce end-state SKIPPED") {
+		t.Fatalf("no end-state skip line; got %v", *lines)
+	}
+}
+
 func TestBootSweepSaysItCanMakeNoClaimWithoutAHolderProbe(t *testing.T) {
 	// Arrange.
 	s, _, lines := sweepRig(t, "/w")

@@ -659,6 +659,11 @@ func main() {
 		// daemon. The sweep then reports that it can make no claim.
 		legacyLog("claude-repld: bounce ledger UNREADABLE at %s: %v — this boot can make no per-session claim about what the last bounce did to any shim", bounceLedgerPath, err)
 	}
+	// WHERE THE BOOT VERDICT GETS ITS SECOND HALF. The ledger's PRESERVED is a
+	// claim taken before a single bring-up has run; this collects what the
+	// bring-ups then did with those same processes, and the boot sweep reports
+	// the two together.
+	bounceSettlement := bounceledger.NewSettlement()
 
 	// The per-session shim-controller consumes each session's UDS shim stream and
 	// renders it onto the frontend surface + SSM. Its push target (the
@@ -790,13 +795,25 @@ func main() {
 	// for the very same session, and -fake is what that verdict turns on.
 	shimSpawner.ForceFake(*fake)
 	controller, err := sessioncontroller.New(sessioncontroller.Config{
-		Push:                 forwarder,
-		SSM:                  ssmMgr,
-		Progress:             progressMgr,
-		Spawner:              shimSpawner,
-		Source:               &server.ShimConnSource{Listener: shimListener, Deaths: shimSpawnWatch},
-		FileDiagnostics:      fileDiagnostics,
-		Locator:              &server.SessionLocator{Reg: sessionRegistry},
+		Push:            forwarder,
+		SSM:             ssmMgr,
+		Progress:        progressMgr,
+		Spawner:         shimSpawner,
+		Source:          &server.ShimConnSource{Listener: shimListener, Deaths: shimSpawnWatch},
+		FileDiagnostics: fileDiagnostics,
+		Locator:         &server.SessionLocator{Reg: sessionRegistry},
+		// THE SAME PARKED-CONNECTION AUTHORITY THE SPAWN CHOKEPOINT USES. The
+		// workspace-ownership gate must be able to tell a survivor that has
+		// already redialled from one that never will, or it evicts the former
+		// (survivingshim.go).
+		ShimConnected: shimListener.Connected,
+		ShimFate: func(workspace string, adopted bool, reason string) {
+			if adopted {
+				bounceSettlement.Adopted(workspace, reason)
+				return
+			}
+			bounceSettlement.Replaced(workspace, reason)
+		},
 		SeqStore:             seqStore,
 		ClearCompactStore:    seqStore,
 		DurableHistory:       durableHistory,
@@ -1354,14 +1371,15 @@ func main() {
 		finish := phases.Deferred("boot-sweep")
 		defer finish(nil)
 		(&server.BootSweeper{
-			Reg:       sessionRegistry,
-			Connected: shimListener.Connected,
-			Held:      sessionlock.Held,
-			Ensurer:   controller,
-			Logf:      legacyLog,
-			Unwired:   bootSweepVerdicts.Route,
-			Ledger:    predecessorBounce,
-			Holders:   sessionlock.WorkspaceLockHolders,
+			Reg:        sessionRegistry,
+			Connected:  shimListener.Connected,
+			Held:       sessionlock.Held,
+			Ensurer:    controller,
+			Logf:       legacyLog,
+			Unwired:    bootSweepVerdicts.Route,
+			Ledger:     predecessorBounce,
+			Holders:    sessionlock.WorkspaceLockHolders,
+			Settlement: bounceSettlement,
 		}).Run(sweepCtx)
 	})
 	daemonLog.With("operation", "serve-http", "version", daemonVersion, "address", *addr,
