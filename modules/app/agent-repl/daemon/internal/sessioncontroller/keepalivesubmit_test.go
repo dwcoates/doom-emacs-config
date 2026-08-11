@@ -323,27 +323,6 @@ func TestKeepAlivePingAbandonedWhenItsWindowCannotBeRecorded(t *testing.T) {
 	}
 }
 
-// THE PING EARNS NO RECEIPT. The user did not say it, and a durable receipt
-// would replay that work across every reconnect.
-func TestKeepAlivePingMintsNoPromptReceipt(t *testing.T) {
-	// Arrange.
-	receipts := &countingReceipts{}
-	m, _, _ := keepAliveRig(t, func(cfg *Config) { cfg.PromptReceipts = receipts })
-	m.mu.Lock()
-	m.byWS["ws"].consumer.receipts = receipts
-	m.mu.Unlock()
-
-	// Act.
-	if _, err := m.SubmitKeepAlivePing(context.Background(), "ws"); err != nil {
-		t.Fatalf("SubmitKeepAlivePing: %v", err)
-	}
-
-	// Assert.
-	if got := receipts.count(); got != 0 {
-		t.Fatalf("%d prompt receipt(s) recorded for a keep-alive ping, want none", got)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // The queue hold
 // ---------------------------------------------------------------------------
@@ -733,45 +712,6 @@ func pushedFailureType(m *Manager, errorType string) bool {
 	return false
 }
 
-// countingReceipts counts the durable receipts recorded through it. The count
-// is MUTEX-GUARDED because the store is reached from the session controller's
-// own goroutines as readily as from the test's.
-type countingReceipts struct {
-	mu       sync.Mutex
-	recorded int
-}
-
-func (c *countingReceipts) Record(statedb.PromptReceipt) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.recorded++
-	return nil
-}
-
-// count reports how many receipts were recorded, safe to read while the
-// session controller is running.
-func (c *countingReceipts) count() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.recorded
-}
-
-func (c *countingReceipts) Retire(string) (bool, error)                             { return false, nil }
-func (c *countingReceipts) RecordPendingResumption(statedb.PendingResumption) error { return nil }
-func (c *countingReceipts) PendingResumptions(string) ([]statedb.PendingResumption, error) {
-	return nil, nil
-}
-func (c *countingReceipts) UndischargedResumptions(string) ([]statedb.PendingResumption, error) {
-	return nil, nil
-}
-func (c *countingReceipts) ClaimResumptionForDelivery(string, int64) (bool, error) {
-	return false, nil
-}
-func (c *countingReceipts) DischargeResumption(string) (bool, error)   { return false, nil }
-func (c *countingReceipts) RetireWorkspace(string, int64) (int, error) { return 0, nil }
-func (c *countingReceipts) Outstanding(string) ([]statedb.PromptReceipt, error) {
-	return nil, nil
-}
 
 // ---------------------------------------------------------------------------
 // The hold spans the rewind

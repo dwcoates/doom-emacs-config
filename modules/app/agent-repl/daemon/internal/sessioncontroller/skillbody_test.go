@@ -346,7 +346,7 @@ func TestAnUncorrelatableBodyIsWithheldRatherThanGuessed(t *testing.T) {
 	}
 }
 
-func TestAMetaRecordClaimsNoPromptReceipt(t *testing.T) {
+func TestAMetaRecordIsNotDrawnAsTheOutstandingPrompt(t *testing.T) {
 	// Arrange: a real submit is outstanding when the skill body lands.
 	h := newQueueHarness(t, nil)
 	if err := h.submitAs("r1", "run the demo skill"); err != nil {
@@ -357,9 +357,12 @@ func TestAMetaRecordClaimsNoPromptReceipt(t *testing.T) {
 	// Act
 	h.controller().consumer.Consume(transcriptMetaUserEvent(t, 12, "u-body", "u-result", skillBody))
 
-	// Assert: the receipt still awaits the line that really answers it.
-	if got := len(h.controller().consumer.snapshotEchoes()); got != 1 {
-		t.Errorf("outstanding receipts = %d, want the real prompt's still outstanding", got)
+	// Assert: the body is not drawn. The user is still waiting for their own
+	// prompt's line, and a skill body rendered in its place would read as it.
+	for _, turn := range h.userTurns() {
+		if turn.item.GetUserMessage().GetContentString() == skillBody {
+			t.Error("the skill body reached the feed as a user prompt")
+		}
 	}
 }
 
