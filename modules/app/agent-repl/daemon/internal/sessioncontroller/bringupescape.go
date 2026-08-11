@@ -297,7 +297,37 @@ func (m *Manager) noteWired(workspace, sessionID string) {
 	// it, a fresh spawn and a reattach alike — so it is where the store is asked
 	// what the last bounce interrupted. On its own goroutine because a bring-up
 	// must never block on a submit.
-	go m.driveOwedResumptions(workspace, sessionID)
+	//
+	// COUNTED BEFORE THE GOROUTINE STARTS, so a waiter arriving between these
+	// two lines still sees the drive as in flight. The count is what makes the
+	// drive JOINABLE: Close waits on it, so a re-drive's submit — and the
+	// durable claim it stands on — cannot outlive the manager that issued it.
+	//
+	// THE COUNT IS TAKEN UNDER THE MANAGER MUTEX, AGAINST m.closed, and that is
+	// what makes the join legal rather than merely usual. A WaitGroup whose
+	// counter is at zero may not be raised once a Wait has begun; Close sets
+	// m.closed under this same mutex BEFORE it waits, so a bring-up landing
+	// alongside a close either takes the count ahead of the wait or is told the
+	// manager is going away and never takes it at all. It is the same fence
+	// bringUpTracked keeps for m.exits.
+	m.mu.Lock()
+	closing := m.closed
+	if !closing {
+		m.resumptionDrives.Add(1)
+	}
+	m.mu.Unlock()
+	if closing {
+		// NEVER SILENT. The row stands, which is the correct durable outcome —
+		// but a turn the user is owed going undriven because this daemon was on
+		// its way out is exactly the fact the next boot's operator needs.
+		m.logf("session-controller: turn resumption NOT DRIVEN ws=%q session=%s — the manager is closing, so no owed re-drive is issued and every owed row stands for the next daemon to wire this session",
+			workspace, sessionID)
+		return
+	}
+	go func() {
+		defer m.resumptionDrives.Done()
+		m.driveOwedResumptions(workspace, sessionID)
+	}()
 }
 
 // awaitDriveable waits for the bring-up to finish, one way or the other.

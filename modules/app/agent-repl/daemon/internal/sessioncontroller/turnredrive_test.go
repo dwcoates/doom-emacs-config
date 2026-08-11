@@ -439,21 +439,129 @@ func TestAnInterruptCancelsAnOwedResumption(t *testing.T) {
 	}
 }
 
+// THE DAEMON'S OWN PING IS NOT SOMEBODY MOVING ON. Only the USER preempts, so
+// the keep-alive must leave the owed turn's record standing.
+//
+// THE RECORD, NOT THE PENDING SET, IS WHAT THIS PINS, and the distinction is
+// the whole of the assertion. Every submit resolves its session through
+// ensure(), ensure() wires it, and wiring is the level-trigger for the
+// resumption driver — so the keep-alive's own ensure legitimately CLAIMS the
+// owed row and re-drives it. A claim moves the row pending → delivering; a
+// PREEMPTION deletes it. Asserting on the pending set cannot tell those apart,
+// and reading an empty pending set as preemption is how this test used to fail
+// on the driver doing exactly its job. The undischarged set holds the claimed
+// row and drops the cancelled one, so it is the record that answers the
+// question actually being asked.
 func TestTheDaemonsOwnKeepAliveDoesNotPreempt(t *testing.T) {
-	// Arrange — only the USER moving on preempts. The daemon's own producers
-	// are not somebody abandoning the work.
+	// Arrange — the session is wired BEFORE the row is seeded, so the only
+	// drive that can touch it is the one the act below launches, and that one
+	// is joined. There is no interleaving in which some other goroutine is
+	// mid-claim while the assertion reads.
 	h := newSubmitHarness(t)
+	h.wireSession(t)
 	seedOwed(t, h, reDriveRequest)
 
 	// Act.
 	_, err := h.m.submitPromptAs(context.Background(), "ws", "ka-1", "respond with only '.'", "",
 		"keep-alive", testPromptOrigin, submitterKeepAlive, leavesParkedPermissions)
+	h.m.resumptionDrives.Wait()
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("keep-alive submit: %v", err)
 	}
-	if owed := h.receipts.owedResumptions("ws"); len(owed) != 1 {
-		t.Fatalf("owed = %+v, want the daemon's own ping to leave the resumption alone", owed)
+	owed, err := h.receipts.UndischargedResumptions("ws")
+	if err != nil {
+		t.Fatalf("UndischargedResumptions: %v", err)
+	}
+	if len(owed) != 1 {
+		t.Fatalf("undischarged = %+v, want the daemon's own ping to leave the resumption's record standing", owed)
+	}
+}
+
+// AND IT IS NOT RECORDED AS A PREEMPTION EITHER. The row surviving is the
+// effect; this is the decision. A keep-alive that cancelled and then re-recorded
+// would satisfy the row assertion above and still be the bug.
+func TestTheDaemonsOwnKeepAliveRecordsNoCancellation(t *testing.T) {
+	// Arrange.
+	h := newSubmitHarness(t)
+	h.wireSession(t)
+	seedOwed(t, h, reDriveRequest)
+
+	// Act.
+	if _, err := h.m.submitPromptAs(context.Background(), "ws", "ka-1", "respond with only '.'", "",
+		"keep-alive", testPromptOrigin, submitterKeepAlive, leavesParkedPermissions); err != nil {
+		t.Fatalf("keep-alive submit: %v", err)
+	}
+	h.m.resumptionDrives.Wait()
+
+	// Assert.
+	if h.log.contains("turn resumption CANCELLED") {
+		t.Fatalf("the daemon's own ping recorded a cancellation; want only the USER to preempt")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE DRIVE IS THE MANAGER'S, AND IT DOES NOT OUTLIVE IT. The drive claims a
+// durable row and submits against it, so one taken by a manager that has
+// already closed is indistinguishable from one a dead daemon left half-done.
+// ---------------------------------------------------------------------------
+
+func TestAClosingManagerIssuesNoReDrive(t *testing.T) {
+	// Arrange — the row stands and is owed; what must not happen is this
+	// manager claiming it on its way out.
+	h := newSubmitHarness(t)
+	h.wireSession(t)
+	seedOwed(t, h, reDriveRequest)
+	h.m.Close()
+
+	// Act — a wire landing alongside the close.
+	h.m.noteWired("ws", "s1")
+
+	// Assert.
+	for _, entry := range h.receipts.callLog() {
+		if strings.HasPrefix(entry, "claim-resumption:") {
+			t.Fatalf("calls = %v, want no claim taken by a manager that has closed", h.receipts.callLog())
+		}
+	}
+}
+
+func TestAClosingManagerSaysTheOwedTurnWentUndriven(t *testing.T) {
+	// Arrange — the row surviving is the right durable outcome, but a turn the
+	// user is owed going undriven is never a silent one.
+	h := newSubmitHarness(t)
+	h.wireSession(t)
+	seedOwed(t, h, reDriveRequest)
+	h.m.Close()
+
+	// Act.
+	h.m.noteWired("ws", "s1")
+
+	// Assert.
+	if !h.log.contains("turn resumption NOT DRIVEN") {
+		t.Fatalf("missing the canonical undriven-on-close record")
+	}
+}
+
+func TestACloseJoinsTheOwedResumptionDrive(t *testing.T) {
+	// Arrange — the join is what makes the claim's window bounded by the
+	// manager's own lifetime rather than by scheduling luck.
+	h := newSubmitHarness(t)
+	h.wireSession(t)
+	seedOwed(t, h, reDriveRequest)
+	h.m.noteWired("ws", "s1")
+
+	// Act.
+	h.m.Close()
+
+	// Assert — the drive has either claimed or declined by now; nothing is
+	// still deciding. A drive still in flight would leave the row pending with
+	// a claim about to land behind Close's back.
+	owed, err := h.receipts.UndischargedResumptions("ws")
+	if err != nil {
+		t.Fatalf("UndischargedResumptions: %v", err)
+	}
+	if len(owed) != 1 || len(h.receipts.owedResumptions("ws")) != 0 {
+		t.Fatalf("undischarged = %+v pending = %+v, want the drive settled into a claim before Close returned", owed, h.receipts.owedResumptions("ws"))
 	}
 }
