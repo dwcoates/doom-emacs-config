@@ -33,6 +33,11 @@ type Pusher interface {
 	// bubbles it opened and the updates it folded, in one fenced frame.
 	PushAsyncBubbleDelta(*frontendv1.AsyncBubbleDelta)
 	PushTypingDelta(*frontendv1.TypingDelta)
+	// PushTypingCut retires a preview the daemon opened and can no longer
+	// complete. It is the counterpart to PushTypingDelta and exists because a
+	// preview is retired by the authoritative record of its own block: when
+	// that record can never arrive, nothing else would ever close the bubble.
+	PushTypingCut(*frontendv1.TypingCut)
 	PushTaskCatalog(*frontendv1.TaskCatalog)
 	PushWorkspaceState(*frontendv1.WorkspaceState)
 	PushSessionInitView(*frontendv1.SessionInitView)
@@ -685,6 +690,14 @@ type consumer struct {
 	// workspace went dead with no account of why, and the one death reason the
 	// registry documented was never written by anything.
 	onSessionEnded func()
+	// onAsyncWorkDrained reports the instant this session's live background-task
+	// set went from holding work to holding none.
+	//
+	// IT IS AN EDGE, NOT A LEVEL, and it is the async analogue of a turn
+	// boundary: a stale-shim roll deferred on detached work has nothing left to
+	// wait for exactly here (asyncrefresh.go). Bound after construction, like
+	// every other hook in this block, and nil in the harnesses that do not care.
+	onAsyncWorkDrained func()
 
 	// skills correlates a launched skill's SKILL.md body back to the Skill
 	// call that launched it (skillbody.go). Locked internally, so it sits
@@ -704,6 +717,11 @@ type consumer struct {
 
 	mu   sync.Mutex
 	ring []*corev1.Event
+	// previewSurfaces names every surface this consumer has opened a live typing
+	// preview on — "" for the top-level feed, or an async bubble id. It is what
+	// a torn-down query's cut is addressed from (typingcut.go). Guarded by c.mu,
+	// beside the ring whose deltas fill it.
+	previewSurfaces map[string]struct{}
 	// openTasks names every task the catalog currently holds `running`, mapped
 	// to the instant its start was observed. It is the set the phantom sweep
 	// asks the shim about and the gate that makes a close idempotent
@@ -1241,7 +1259,14 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 		// The SAME event moves the open-task set the phantom sweep asks about,
 		// so that set and the catalog below are two readings of one fold rather
 		// than two independent derivations (phantomtask.go).
-		c.observeTaskLifecycle(ev)
+		//
+		// A fold that DRAINED the set is the async analogue of a turn boundary,
+		// and it is announced for exactly the reason a turn end is: a stale-shim
+		// roll deferred on detached work has, at this instant, nothing left to
+		// wait for (asyncrefresh.go).
+		if c.observeTaskLifecycle(ev) && c.onAsyncWorkDrained != nil {
+			c.onAsyncWorkDrained()
+		}
 		catalog := frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.fence(), c.snapshotRing(), c.logf)
 		c.logf("session-controller: task catalog push session=%s ws=%s seq=%d event=%s tasks=%d",
 			c.sessionID, c.workspace, ev.GetSeq(), stateKind(ev), len(catalog.GetTasks()))
@@ -2081,6 +2106,15 @@ func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *fro
 	classification := faultClassifications["claude-shim-sdk"]
 	c.applyRuntimeFault("claude-shim-sdk", classification, true, "unexpected_query_termination")
 	c.pushFailure(c.degradedUUID("claude-shim-sdk"), item)
+	// THE QUERY IS GONE, so every block it was mid-way through has lost the
+	// authoritative record that would have retired its preview. Nothing else
+	// will ever retire them, and the failure card above explains the session
+	// without touching the bubbles still spinning "streaming input…" beside it.
+	//
+	// The LIVE arm only: the historical arm returns above, and replaying a
+	// year-old termination must not cut previews belonging to the session
+	// running now.
+	c.cutOpenPreviews("unexpected_query_termination")
 }
 
 // noteClearOrCompact records a clear or a compaction as the conversation's
@@ -2387,6 +2421,7 @@ func (c *consumer) relayTypingDelta(cd *corev1.ContentDelta, seq uint64) {
 		}
 	}
 	if td := frontend.TypingDeltaFromContentDelta(c.workspace, c.sessionID, bubbleID, cd); td != nil {
+		c.notePreviewOpened(bubbleID)
 		c.push.PushTypingDelta(td)
 	}
 }

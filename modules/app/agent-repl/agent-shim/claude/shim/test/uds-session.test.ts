@@ -19,6 +19,7 @@ import net from "node:net";
 import fs from "node:fs";
 import { once } from "node:events";
 import { create } from "@bufbuild/protobuf";
+import { fileURLToPath } from "node:url";
 import { anyPack, anyUnpack } from "@bufbuild/protobuf/wkt";
 import {
   ClaudeStreamMessageSchema,
@@ -2547,6 +2548,47 @@ describe("UdsSession lifetime: reattach", () => {
   });
 });
 
+describe("UdsSession lifetime: reattach announces async work", () => {
+  it("carries the live detached-task set on the reattach handshake", async () => {
+    // Arrange: a session with a detached agent running and NO turn in flight —
+    // the exact shape the daemon used to read as idle. rigWithDetached is
+    // scoped to its own describe, so the launch is driven inline here.
+    const { session, store, daemon, daemonListener, query } = await rig({ storeSessionId: "vendor-uuid" });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1", text: "fan out", promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    const start = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length), lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
+    query.emit({
+      type: "system", subtype: "task_started", uuid: "task-start-0",
+      session_id: "vendor-uuid", task_id: "agent-0", task_type: "local_agent",
+      tool_use_id: "tool-agent-0", description: "detached agent 0",
+    } as unknown as SdkMessageLike);
+    const started = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(started.batch!.events.length), lastSeq: 10n,
+    }));
+    // Waiting on the session's OWN set is what makes this deterministic: the
+    // handshake reads that set, so asking before the launch registered would
+    // race the SDK stream rather than test it.
+    await until(() => session.detachedTaskCount() === 1);
+
+    // Act: the daemon vanishes and the shim redials.
+    daemon.destroy();
+    await until(() => !session.isConnected());
+    const daemon2 = await daemonListener.next();
+    cleanups.push(() => daemon2.destroy());
+    const hello = await daemon2.next(ShimHelloSchema);
+
+    // Assert: the async work is visible on the frame the roll decision reads,
+    // even though no turn field reports anything.
+    expect(hello.liveTaskSet?.taskIds).toEqual(["agent-0"]);
+  });
+});
+
 describe("UdsSession lifetime: SDK stream termination", () => {
   it("persists startup failure and its cursor-releasing degradation in one batch", async () => {
     // Arrange: the query exists, but its initial lifecycle receipt is rejected
@@ -4915,5 +4957,36 @@ describe("UdsSession stamps the query it is running", () => {
     const event = sw.batch!.events[0]!;
     expect(event.payload.case).toBe("turnStarted");
     expect(event.queryInstanceId).toBe("turn-query");
+  });
+});
+
+/**
+ * The live-task-set snapshot has exactly ONE spelling.
+ *
+ * Every reader of `liveSdkTaskIds` needs the same detached, deterministically
+ * ordered array, and each used to spell `[...this.liveSdkTaskIds].sort()`
+ * itself across eight sites. A hand-rolled site is the failure this guards:
+ * one that forgot `.sort()` would publish the daemon an unordered set to join
+ * its catalog against, and the drift would show up only as two records of one
+ * instant that refuse to compare equal.
+ */
+describe("UdsSession live-task snapshot: one spelling", () => {
+  it("spells the sorted live-task snapshot only inside its own helper", () => {
+    // Arrange: the session source, read as text — the duplication this guards
+    // against is a source-shape fact, not a runtime one.
+    const source = fs.readFileSync(
+      fileURLToPath(new URL("../src/uds/uds-session.ts", import.meta.url)),
+      "utf8",
+    );
+
+    // Act: find every raw spelling of the snapshot expression.
+    const raw = source
+      .split("\n")
+      .map((line, i) => ({ line, n: i + 1 }))
+      .filter(({ line }) => line.includes("[...this.liveSdkTaskIds].sort()"));
+
+    // Assert: exactly one, and it is the helper's own body.
+    expect(raw.map(({ n }) => n)).toHaveLength(1);
+    expect(raw[0]!.line.trim()).toBe("return [...this.liveSdkTaskIds].sort();");
   });
 });

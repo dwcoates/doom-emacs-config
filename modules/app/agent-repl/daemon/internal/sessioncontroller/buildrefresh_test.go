@@ -23,6 +23,39 @@ import (
 // and the restart that carries them out.
 // ---------------------------------------------------------------------------
 
+// settledHello is the handshake of a shim that is doing NOTHING: no turn, and
+// an empty-but-PRESENT live-task set.
+//
+// The presence is the whole point. An empty set is the shim answering "nothing
+// is running", which is the daemon's licence to roll it; a hello with no set at
+// all is a shim that does not answer the question, and these tests would then
+// be asserting the roll of a shim whose async work was never established
+// (asyncrefresh.go). Every test that means "a settled shim rolls now" says so
+// with this.
+func settledHello(build string) *corev1.ShimHello {
+	return &corev1.ShimHello{
+		SessionId:   "s1",
+		BuildSha:    build,
+		LiveTaskSet: &corev1.LiveTaskSet{},
+	}
+}
+
+// asyncBusyHello is the handshake of a shim with NO turn running but detached
+// work still going — the exact shape that used to read as idle.
+func asyncBusyHello(build string, taskIDs ...string) *corev1.ShimHello {
+	return &corev1.ShimHello{
+		SessionId:   "s1",
+		BuildSha:    build,
+		LiveTaskSet: &corev1.LiveTaskSet{TaskIds: taskIDs},
+	}
+}
+
+// unansweredHello is the handshake of a bundle built before live_task_set
+// existed: no set at all, which is silence rather than an all-clear.
+func unansweredHello(build string) *corev1.ShimHello {
+	return &corev1.ShimHello{SessionId: "s1", BuildSha: build}
+}
+
 // newRefreshRig builds a manager whose current bundle identity is `current`.
 // The spawner ANNOUNCES its stops, so a test rendezvous with the bounce
 // goroutine instead of spinning on its bookkeeping. The buffer keeps a stop
@@ -71,7 +104,7 @@ func TestAMatchingShimBuildIsLeftAlone(t *testing.T) {
 	waitForWirings(applier, 1)
 
 	// Act.
-	if bounced := m.refreshStaleShim("ws", "s1", "sha-1", false, nil); bounced {
+	if bounced := m.refreshStaleShim("ws", "s1", settledHello("sha-1")); bounced {
 		t.Fatal("a shim already on the current bundle was bounced")
 	}
 
@@ -97,7 +130,7 @@ func TestAMismatchedShimBuildIsBounced(t *testing.T) {
 	m.mu.Unlock()
 
 	// Act.
-	if bounced := m.refreshStaleShim("ws", "s1", "sha-1", false, nil); !bounced {
+	if bounced := m.refreshStaleShim("ws", "s1", settledHello("sha-1")); !bounced {
 		t.Fatal("a shim running a superseded bundle was not bounced")
 	}
 	by := waitForStop(t, spawner)
@@ -128,10 +161,10 @@ func TestAStaleShimIsBouncedOnlyOnce(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
-	m.refreshStaleShim("ws", "s1", "sha-1", false, nil)
+	m.refreshStaleShim("ws", "s1", settledHello("sha-1"))
 
 	// Act — the replacement reports the same stale identity.
-	second := m.refreshStaleShim("ws", "s1", "sha-1", false, nil)
+	second := m.refreshStaleShim("ws", "s1", settledHello("sha-1"))
 
 	// Assert.
 	if second {
@@ -150,14 +183,14 @@ func TestASuccessfulStaleRefreshLatchesTheSessionOnce(t *testing.T) {
 	waitForWirings(applier, 1)
 
 	// Act.
-	if bounced := m.refreshStaleShim("ws", "s1", "sha-1", false, nil); !bounced {
+	if bounced := m.refreshStaleShim("ws", "s1", settledHello("sha-1")); !bounced {
 		t.Fatal("a shim running a superseded bundle was not bounced")
 	}
 	waitForBuildLatch(m, "s1", true)
 
 	// Assert — latched once, and a later mismatch is loud rather than a second
 	// bounce.
-	if second := m.refreshStaleShim("ws", "s1", "sha-1", false, nil); second {
+	if second := m.refreshStaleShim("ws", "s1", settledHello("sha-1")); second {
 		t.Fatal("a second bounce was started against an already-refreshed session")
 	}
 	if stops := len(spawner.stoppedSessions()); stops != 1 {
@@ -182,7 +215,7 @@ func TestAFailedStaleRefreshLeavesTheLatchUnsetAndSurfacesTheFault(t *testing.T)
 	spawner.mu.Unlock()
 
 	// Act.
-	if bounced := m.refreshStaleShim("ws", "s1", "sha-1", false, nil); !bounced {
+	if bounced := m.refreshStaleShim("ws", "s1", settledHello("sha-1")); !bounced {
 		t.Fatal("a shim running a superseded bundle was not bounced")
 	}
 	edge := waitForConnectivityCause(applier, staleShimRefreshFailedCause)
@@ -314,7 +347,7 @@ func TestAShimWithNoBuildIdentityIsNeverBounced(t *testing.T) {
 	waitForWirings(applier, 1)
 
 	// Act.
-	if bounced := m.refreshStaleShim("ws", "s1", "", false, nil); bounced {
+	if bounced := m.refreshStaleShim("ws", "s1", settledHello("")); bounced {
 		t.Fatal("a shim with no build identity was bounced; an unknown identity is not a difference")
 	}
 
@@ -337,7 +370,7 @@ func TestAnAbsentBuildStampNeverBounces(t *testing.T) {
 	waitForWirings(applier, 1)
 
 	// Act.
-	if bounced := m.refreshStaleShim("ws", "s1", "sha-1", false, nil); bounced {
+	if bounced := m.refreshStaleShim("ws", "s1", settledHello("sha-1")); bounced {
 		t.Fatal("a daemon with no build stamp bounced a shim it could not judge")
 	}
 
@@ -720,4 +753,120 @@ func TestShimStopIsIssuedForASessionThatNeverHandshaked(t *testing.T) {
 	if !stop || reported != "" {
 		t.Fatalf("stop = (%v, %q) for a session with no handshake, want it stopped with no reported build", stop, reported)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// THE ASYNC FORK (asyncrefresh.go).
+//
+// A bounce must not interrupt ANY of a session's work, and detached background
+// work is not shaped like a turn: a shim running a spawned agent reports no
+// turn in flight and no active turn ids, so it used to handshake looking
+// perfectly idle at the instant the daemon decided whether to SIGTERM it.
+// ---------------------------------------------------------------------------
+
+// classifyAnnouncedAsyncWork is the three-answer reader the whole fork turns
+// on. Two answers would collapse "I have nothing" into "I said nothing", which
+// is exactly how a roll comes to be taken on silence.
+func TestAnnouncedAsyncWorkIsClassifiedIntoThreeAnswers(t *testing.T) {
+	tests := []struct {
+		name  string
+		hello *corev1.ShimHello
+		want  asyncWorkVerdict
+	}{
+		{
+			name:  "a present set naming tasks is live work",
+			hello: asyncBusyHello("sha-1", "agent-0"),
+			want:  asyncWorkLive,
+		},
+		{
+			name:  "a present set naming nothing is an answered all-clear",
+			hello: settledHello("sha-1"),
+			want:  asyncWorkNone,
+		},
+		{
+			name:  "an absent set is silence, never an all-clear",
+			hello: unansweredHello("sha-1"),
+			want:  asyncWorkUnanswered,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange is the table row itself.
+			// Act.
+			got := classifyAnnouncedAsyncWork(tc.hello)
+			// Assert.
+			if got.verdict != tc.want {
+				t.Fatalf("verdict = %v, want %v", got.verdict, tc.want)
+			}
+		})
+	}
+}
+
+// THE DEFECT, stated as a test: a stale shim busy with DETACHED work is not
+// rolled out from under that work.
+func TestAStaleShimWithLiveAsyncWorkIsNotBouncedImmediately(t *testing.T) {
+	// Arrange: a stale shim whose hello names a running detached agent and no
+	// turn at all.
+	m, spawner, applier := newRefreshRig(t, "sha-2")
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+
+	// Act.
+	retiring := m.refreshStaleShim("ws", "s1", asyncBusyHello("sha-1", "agent-0"))
+
+	// Assert: no stop, and the generation is NOT retiring — the shim keeps its
+	// readiness because it is still serving work.
+	if retiring {
+		t.Fatal("the source generation was retired for a shim that is still doing async work")
+	}
+	if stops := spawner.stoppedSessions(); len(stops) != 0 {
+		t.Fatalf("stopped = %v, want no stop while detached work is running", stops)
+	}
+}
+
+// AND THE DEFERRAL IS REMEMBERED, not dropped: the workspace carries an armed
+// lease, which is what the drain later claims.
+func TestAStaleShimWithLiveAsyncWorkArmsTheBoundaryLease(t *testing.T) {
+	// Arrange.
+	m, _, applier := newRefreshRig(t, "sha-2")
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+
+	// Act.
+	m.refreshStaleShim("ws", "s1", asyncBusyHello("sha-1", "agent-0"))
+
+	// Assert: the mismatch is not forgotten; it is waiting.
+	m.mu.Lock()
+	arm := m.staleRefreshArms["ws"]
+	m.mu.Unlock()
+	if arm == nil {
+		t.Fatal("no lease was armed, so the deferred refresh has been forgotten entirely")
+	}
+	if arm.reported != "sha-1" || arm.want != "sha-2" {
+		t.Fatalf("arm carries build %q against %q, want sha-1 against sha-2", arm.reported, arm.want)
+	}
+}
+
+// AN ANSWERED ALL-CLEAR STILL ROLLS. The deferral must not become a blanket
+// refusal, or the refresh stops working for every settled shim.
+func TestAStaleShimAnnouncingNoAsyncWorkIsBouncedImmediately(t *testing.T) {
+	// Arrange.
+	m, spawner, applier := newRefreshRig(t, "sha-2")
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+
+	// Act.
+	retiring := m.refreshStaleShim("ws", "s1", settledHello("sha-1"))
+
+	// Assert.
+	if !retiring {
+		t.Fatal("a settled shim that answered 'nothing is running' was not bounced")
+	}
+	waitForStop(t, spawner)
 }

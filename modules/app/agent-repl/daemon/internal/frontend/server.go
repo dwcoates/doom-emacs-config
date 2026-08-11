@@ -820,6 +820,7 @@ func (s *Server) PushAsyncBubbleDelta(d *frontendv1.AsyncBubbleDelta) {
 	s.Broadcast(AsyncBubbleDeltaFrame(d))
 }
 func (s *Server) PushTypingDelta(t *frontendv1.TypingDelta) { s.Broadcast(TypingDeltaFrame(t)) }
+func (s *Server) PushTypingCut(c *frontendv1.TypingCut)     { s.Broadcast(TypingCutFrame(c)) }
 func (s *Server) PushTaskCatalog(c *frontendv1.TaskCatalog) { s.Broadcast(TaskCatalogFrame(c)) }
 func (s *Server) PushSessionInitView(v *frontendv1.SessionInitView) {
 	s.Broadcast(SessionInitViewFrame(v))

@@ -184,12 +184,23 @@ func (c *consumer) noteLiveSetAnswered() (taskLiveSetVerdict, int) {
 // It mirrors the catalog exactly — opened by TaskStarted, retired by TaskEnded —
 // because a set that disagreed with the catalog would either hide a phantom or
 // invent one.
-func (c *consumer) observeTaskLifecycle(ev *corev1.Event) {
+// It reports whether this event DRAINED the set — took it from holding work to
+// holding none. That edge is the async analogue of a turn boundary: it is the
+// moment a deferred stale-shim roll has nothing left to wait for, and firing
+// off the edge is what makes the deferred bounce follow the work's end as
+// immediately as the turn lease follows a turn's end, rather than at whatever
+// the next sweep tick happens to be (asyncrefresh.go).
+//
+// The transition is computed UNDER THE SAME LOCK as the mutation, so "it is
+// empty now" cannot be read by one goroutine while another is midway through
+// emptying it — which is the difference between firing the lease exactly once
+// and firing it for every concurrent task end.
+func (c *consumer) observeTaskLifecycle(ev *corev1.Event) (drained bool) {
 	switch p := ev.GetPayload().(type) {
 	case *corev1.Event_TaskStarted:
 		id := p.TaskStarted.GetTaskId()
 		if id == "" {
-			return
+			return false
 		}
 		c.mu.Lock()
 		if c.openTasks == nil {
@@ -205,12 +216,18 @@ func (c *consumer) observeTaskLifecycle(ev *corev1.Event) {
 	case *corev1.Event_TaskEnded:
 		id := p.TaskEnded.GetTaskId()
 		if id == "" {
-			return
+			return false
 		}
 		c.mu.Lock()
+		_, wasOpen := c.openTasks[id]
 		delete(c.openTasks, id)
+		// ONLY A REAL CLOSE CAN DRAIN. A re-observed end for a task already
+		// retired leaves the set exactly as it was, and reporting a drain off it
+		// would fire the lease on an event that changed nothing.
+		drained = wasOpen && len(c.openTasks) == 0
 		c.mu.Unlock()
 	}
+	return drained
 }
 
 // instantOf is the event's own produced-at instant, falling back to this
