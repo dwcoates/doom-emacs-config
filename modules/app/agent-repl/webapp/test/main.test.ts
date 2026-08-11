@@ -225,7 +225,7 @@ describe("the composer's hibernation gate", () => {
 // what happens once a prompt actually goes onto the wire, whether it went
 // straight out or was drained out of the queue.
 const dispatchPromptAnchor =
-  "const dispatchPrompt = (\n    workspace: string,\n    text: string,\n    promptOrigin: PromptOrigin,\n  ): Promise<void> => {";
+  "const dispatchPrompt = (\n    workspace: string,\n    text: string,\n    promptOrigin: PromptOrigin,\n    onRefused?: () => void,\n  ): Promise<void> => {";
 const submitPrompt = blocksAfter(main, dispatchPromptAnchor)[0]!;
 
 describe("the local prompt bubble", () => {
@@ -272,6 +272,48 @@ describe("the local prompt bubble", () => {
   });
 });
 
+// The draft is the half whose loss actually costs the user something: a
+// wrongly-drawn bubble is cosmetic, a silently eaten prompt is not. These pin
+// that the composer gets its words back from the SAME nack that takes the
+// bubble down, and that it never buys them back with a newer draft.
+describe("the refused prompt's draft", () => {
+  it("comes back to the composer when the daemon refuses the submit", () => {
+    // Assert — a nack means no shim took it and no queue holds it, so the
+    // words are still owed to whoever typed them.
+    expect(composerSubmit).toContain("input.value = text;");
+  });
+
+  it("is restored from the same refusal that retracts the bubble", () => {
+    // Assert — one signal drives both halves; a second source of truth about
+    // whether a prompt was delivered is one that can disagree with the first.
+    expect(submitPrompt).toContain("onRefused?.()");
+  });
+
+  it("comes back even when no bubble was standing to take down", () => {
+    // Assert — the restore sits OUTSIDE the bubble's `if`, so a feed
+    // retraction that finds nothing cannot also swallow the draft.
+    expect(submitPrompt).toContain(
+      "if (store.dropUnackedPrompt(requestId)) frames.schedule();\n      // BEFORE",
+    );
+  });
+
+  it("never overwrites a draft typed since the send", () => {
+    // Assert — saving the old words by destroying the new ones would just
+    // trade one loss for another.
+    expect(composerSubmit).toContain('if (input.value !== "") return;');
+  });
+
+  it("is not restored for a prompt the queue is still holding", () => {
+    // Assert — a held prompt is not a refused one. The queue owes those words
+    // and files them whole in a failure card if it finally cannot send them,
+    // so handing them back to the composer as well would duplicate the prompt.
+    const offered = composerSubmitPrompt.indexOf("promptQueue.offer(");
+    const dispatched = composerSubmitPrompt.indexOf("dispatchPrompt(workspace, text, promptOrigin, onRefused)");
+    expect(offered).toBeLessThan(dispatched);
+    expect(composerSubmitPrompt).toContain("if (promptQueue.offer(workspace, text, promptOrigin)) return;");
+  });
+});
+
 // The held-prompt queue's wiring is boot-scope closure state with no importable
 // seam, so the decisions that make a bounce imperceptible are pinned here: what
 // counts as the link being down, what counts as the workspace being back, and
@@ -279,7 +321,7 @@ describe("the local prompt bubble", () => {
 const promptQueueWiring = blocksAfter(main, "const promptQueue = new PromptQueue({")[0]!;
 const composerSubmitPrompt = blocksAfter(
   main,
-  "const submitPrompt = (text: string, promptOrigin: PromptOrigin): void => {",
+  "const submitPrompt = (\n    text: string,\n    promptOrigin: PromptOrigin,\n    onRefused?: () => void,\n  ): void => {",
 )[0]!;
 
 describe("the held-prompt queue's wiring", () => {
