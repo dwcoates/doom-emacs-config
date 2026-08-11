@@ -656,7 +656,7 @@ type WorkspaceState struct {
 	ActiveFaults           []*RuntimeFault `protobuf:"bytes,13,rep,name=active_faults,json=activeFaults,proto3" json:"active_faults,omitempty"`
 	// Whether merge.Coordinator holds the exclusivity lease on this workspace's
 	// shim. While held, USER prompting is blocked (the merge owns the session)
-	// and every conversation item the session produces carries
+	// and every message the session produces carries
 	// CONVERSATION_SOURCE_MERGE.
 	MergeLeaseHeld bool `protobuf:"varint,16,opt,name=merge_lease_held,json=mergeLeaseHeld,proto3" json:"merge_lease_held,omitempty"`
 	// WHEN this workspace's merge landed, in unix millis. 0 means it has never

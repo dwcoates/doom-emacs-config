@@ -421,7 +421,7 @@ type FrontendFrame_ShutdownSchedule struct {
 
 type FrontendFrame_AsyncBubbleDelta struct {
 	// Detached work opening, and typed incremental updates to work already
-	// open. Its own frame rather than more ConversationDelta items, because a
+	// open. Its own frame rather than more ConversationDelta messages, because a
 	// detached agent produces at its own rate and must not flood the
 	// conversation that dispatched it.
 	AsyncBubbleDelta *AsyncBubbleDelta `protobuf:"bytes,20,opt,name=async_bubble_delta,json=asyncBubbleDelta,proto3,oneof"`
@@ -461,7 +461,7 @@ type FrontendFrame_RestartPending struct {
 
 type FrontendFrame_ConversationPage struct {
 	// ONE page of conversation history, answering a ConversationPageCmd. It is
-	// a push rather than a command response because its items are feed
+	// a push rather than a command response because its messages are feed
 	// content, and the command's ack is early by design — see
 	// conversation-page.proto.
 	ConversationPage *ConversationPage `protobuf:"bytes,26,opt,name=conversation_page,json=conversationPage,proto3,oneof"`

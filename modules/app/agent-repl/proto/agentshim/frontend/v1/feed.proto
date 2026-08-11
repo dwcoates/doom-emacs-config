@@ -1,7 +1,7 @@
-// feed.proto — The conversation feed container: the ConversationItem envelope
-// and the deltas that carry it.
+// feed.proto — The conversation feed container: the Message envelope, its
+// lineage, and the deltas that carry it.
 //
-// ConversationItem is feed packaging — identity, ordering, provenance and
+// Message is feed packaging — identity, lineage, ordering, provenance and
 // resolution stamps — wrapped around a payload. Agent-produced payloads are a
 // single AgentEmission arm (agent-emission.proto); everything the agent did
 // not emit keeps an arm of its own.
@@ -30,8 +30,15 @@ message ConversationDelta {
   // fence answers without naming what rotated.
   reserved 2;
   reserved "session_id";
+  // 3 KEPT its number but was renamed items -> messages when ConversationItem
+  // became Message. The name is reserved because this surface is protojson on
+  // the wire, where the FIELD NAME is the wire token: "items" is retired and
+  // must never come back meaning something else.
+  reserved "items";
   string workspace = 1;
-  repeated ConversationItem items = 3;
+  // The conversation additions this push carries, oldest first. Each is a
+  // complete feed envelope the frontend renders without further resolution.
+  repeated Message messages = 3;
   uint64 through_seq = 4;  // frontends persist this for reconnect resync
   // The workspace's staleness FENCE at the moment the daemon produced this
   // push: an opaque token the client compares BYTE-WISE against the fence on
@@ -45,17 +52,17 @@ message ConversationDelta {
   string fence = 5;
 }
 
-// WHO drove the turn that produced a conversation item.
+// WHO drove the turn that produced a message.
 //
 // The merge coordinator borrows a workspace's own shim to resolve a merge
 // conflict (the session holding the full context of the work is the one best
 // equipped to resolve it), so a session can emit a full turn the user never
-// prompted. That provenance is a durable FACT recorded on every item, not a
+// prompted. That provenance is a durable FACT recorded on every message, not a
 // rendering hint: frontends decide independently what to do with it, and the
 // decision can change without another wire change.
 enum ConversationSource {
   // Never set by the daemon. proto3 reserves 0 for "the field was not
-  // populated", and every item the daemon builds sets one of the arms below,
+  // populated", and every message the daemon builds sets one of the arms below,
   // so a receiver seeing UNSPECIFIED is looking at a malformed frame and must
   // reject it loudly rather than assume USER.
   CONVERSATION_SOURCE_UNSPECIFIED = 0;
@@ -67,9 +74,9 @@ enum ConversationSource {
 
 // One curated conversation addition: FEED PACKAGING wrapped around a payload.
 //
-// The packaging is what the feed knows about an item regardless of what the
-// item is — its identity, its place in the order, who drove it, and the
-// figures resolved against it. The payload is the item itself.
+// The packaging is what the feed knows about a message regardless of what the
+// message is — its identity, its lineage, its place in the order, who drove
+// it, and the figures resolved against it. The payload is the message itself.
 //
 // Agent-produced payloads are ONE arm, AgentEmission, which is also the
 // vocabulary a detached agent's output arrives in (async-bubble.proto).
@@ -79,9 +86,9 @@ enum ConversationSource {
 //
 // Consumers reconcile by uuid (permission items use the permission request_id
 // as their uuid).
-message ConversationItem {
+message Message {
   // 18 was api_error (ApiErrorLine). A terminal line now curates to
-  // system_failure below only; a mid-backoff line curates to no item at all
+  // system_failure below only; a mid-backoff line curates to no message at all
   // (the retrying window covers it).
   // 16/17 were compact_boundary/compact_boundary_line, retired in favour of
   // context_compacted, which carries one coalesced compaction instead of two
@@ -109,19 +116,19 @@ message ConversationItem {
   string uuid = 1;
   int64 ts_ms = 2;
   string request_id = 3;  // vendor API request correlation, "" when absent
-  // Provenance. ALWAYS set (see ConversationSource): persisted with the item
+  // Provenance. ALWAYS set (see ConversationSource): persisted with the message
   // so a resync or transcript replay reproduces the same verdict instead of
   // re-deriving it from state that has since moved on.
   ConversationSource source = 4;
 
   // ---- Payload ----
 
-  oneof item {
+  oneof payload {
     // EVERYTHING the agent produced, in the one vocabulary that also carries
     // a detached agent's output (AsyncAgentUpdate). See AgentEmission.
     AgentEmission agent = 5;
 
-    // ---- Non-agent items: things the agent did not emit ----
+    // ---- Non-agent payloads: things the agent did not emit ----
 
     // The user's own prompt.
     agentshim.data.v1.ApiUserMessage user_message = 11;
@@ -147,7 +154,7 @@ message ConversationItem {
     //
     // What rides here is the bubble's OPENING state; everything it produces
     // afterwards arrives as AsyncBubbleUpdate addressed to `AsyncBubble.id`,
-    // on its own delta rather than as a stream of new feed items. A detached
+    // on its own delta rather than as a stream of new feed messages. A detached
     // agent emitting a thousand lines must not insert a thousand rows into
     // the conversation it was dispatched from.
     AsyncBubble async_bubble = 38;

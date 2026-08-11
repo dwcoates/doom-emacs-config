@@ -48,7 +48,7 @@ type FailureCardView struct {
 	// HOW this card ends, as arms, so that an open alarm and its all-clear can
 	// never be the same shape with a different number in it.
 	//
-	// A window-shaped failure is re-sent under the SAME ConversationItem.uuid
+	// A window-shaped failure is re-sent under the SAME Message.uuid
 	// with a different arm here, and the feed reconciles it in place. Appending
 	// instead would leave the alarm standing beside its own all-clear.
 	//
@@ -298,7 +298,7 @@ func (*FailureCardTerminal) Descriptor() ([]byte, []int) {
 // the card", and the card's address is the only thing they need in order to.
 type FailureCardRef struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The ConversationItem.uuid of the card to reveal. Empty when the failure
+	// The Message.uuid of the card to reveal. Empty when the failure
 	// produced no card, and then the referring surface offers no way to reach
 	// one rather than scrolling somewhere arbitrary.
 	CardUuid      string `protobuf:"bytes,1,opt,name=card_uuid,json=cardUuid,proto3" json:"card_uuid,omitempty"`

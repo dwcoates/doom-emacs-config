@@ -5,16 +5,16 @@
 // WHAT IT REPLACES, AND WHY. A cold webview had exactly one way to obtain the
 // conversation it renders: ResyncCmd{from_seq: 0}, which replays EVERY store
 // event the session ever produced. The worst workspace observed cost 259,000
-// events and 186MB to draw a screen whose visible tail is about ten items. The
-// replay was not wrong — it was the whole conversation, correctly — it was
+// events and 186MB to draw a screen whose visible tail is about ten messages.
+// The replay was not wrong — it was the whole conversation, correctly — it was
 // simply the wrong QUESTION for a client that is about to show the bottom of
 // it.
 //
-// This asks the right question instead: give me the last N top-level items,
+// This asks the right question instead: give me the last N top-level messages,
 // and give me a handle for the N before those. The daemon walks its event log
 // BACKWARDS from the anchor and assembles complete feed envelopes, so a page
-// item is byte-compatible with a ConversationDelta item and a frontend needs
-// no second renderer for paged history.
+// message is byte-compatible with a ConversationDelta message and a frontend
+// needs no second renderer for paged history.
 //
 // WHAT IT DOES NOT REPLACE. ResyncCmd is untouched, and it stays the LIVE-PAGE
 // path: an incremental from_seq resync is how a client that already holds
@@ -22,10 +22,10 @@
 // full replay. Paging is the COLD-OPEN path only. Nothing here reads or writes
 // the resync's floor, coalescing or fence ladder.
 //
-// TOP-LEVEL ITEMS ARE THE UNIT, AND THE DAEMON OWNS THE BOUNDARY. A limit
-// counts items the feed renders as standalone bubbles or cards. Constituents —
+// TOP-LEVEL MESSAGES ARE THE UNIT, AND THE DAEMON OWNS THE BOUNDARY. A limit
+// counts messages the feed renders as standalone rows. Constituents —
 // a tool call inside the message that issued it, an async bubble's members —
-// travel INSIDE their parent item exactly as ConversationDelta carries them,
+// travel INSIDE their parent message exactly as ConversationDelta carries them,
 // and never count toward the limit. A client therefore cannot compute what a
 // page will cost, and is not asked to: it asks for ten renderable things and
 // receives ten renderable things, whatever they contain.
@@ -36,7 +36,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { ConversationItem } from "./feed_pb";
+import type { Message as Message$1 } from "./feed_pb";
 import { file_agentshim_frontend_v1_feed } from "./feed_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -44,7 +44,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/conversation-page.proto.
  */
 export const file_agentshim_frontend_v1_conversation_page: GenFile = /*@__PURE__*/
-  fileDesc("Ci1hZ2VudHNoaW0vZnJvbnRlbmQvdjEvY29udmVyc2F0aW9uLXBhZ2UucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSKsAQoTQ29udmVyc2F0aW9uUGFnZUNtZBI7CgR0YWlsGAEgASgLMisuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblBhZ2VUYWlsSAASPwoGYmVmb3JlGAIgASgLMi0uYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblBhZ2VCZWZvcmVIABINCgVmZW5jZRgDIAEoCUIICgZhbmNob3IiJQoUQ29udmVyc2F0aW9uUGFnZVRhaWwSDQoFbGltaXQYASABKA0iNwoWQ29udmVyc2F0aW9uUGFnZUJlZm9yZRIOCgZjdXJzb3IYASABKAkSDQoFbGltaXQYAiABKA0iowIKEENvbnZlcnNhdGlvblBhZ2USEQoJd29ya3NwYWNlGAEgASgJEhIKCnJlcXVlc3RfaWQYAiABKAkSNgoFaXRlbXMYAyADKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ29udmVyc2F0aW9uSXRlbRI7CgRtb3JlGAQgASgLMisuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblBhZ2VNb3JlSAASPQoFc3RhcnQYBSABKAsyLC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ29udmVyc2F0aW9uUGFnZVN0YXJ0SAASFQoNbGl2ZV9qb2luX3NlcRgGIAEoBBINCgVmZW5jZRgHIAEoCUIOCgxjb250aW51YXRpb24iJgoUQ29udmVyc2F0aW9uUGFnZU1vcmUSDgoGY3Vyc29yGAEgASgJIhcKFUNvbnZlcnNhdGlvblBhZ2VTdGFydEIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_frontend_v1_feed]);
+  fileDesc("Ci1hZ2VudHNoaW0vZnJvbnRlbmQvdjEvY29udmVyc2F0aW9uLXBhZ2UucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSKsAQoTQ29udmVyc2F0aW9uUGFnZUNtZBI7CgR0YWlsGAEgASgLMisuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblBhZ2VUYWlsSAASPwoGYmVmb3JlGAIgASgLMi0uYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblBhZ2VCZWZvcmVIABINCgVmZW5jZRgDIAEoCUIICgZhbmNob3IiJQoUQ29udmVyc2F0aW9uUGFnZVRhaWwSDQoFbGltaXQYASABKA0iNwoWQ29udmVyc2F0aW9uUGFnZUJlZm9yZRIOCgZjdXJzb3IYASABKAkSDQoFbGltaXQYAiABKA0ipAIKEENvbnZlcnNhdGlvblBhZ2USEQoJd29ya3NwYWNlGAEgASgJEhIKCnJlcXVlc3RfaWQYAiABKAkSMAoIbWVzc2FnZXMYAyADKAsyHi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZRI7CgRtb3JlGAQgASgLMisuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblBhZ2VNb3JlSAASPQoFc3RhcnQYBSABKAsyLC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ29udmVyc2F0aW9uUGFnZVN0YXJ0SAASFQoNbGl2ZV9qb2luX3NlcRgGIAEoBBINCgVmZW5jZRgHIAEoCUIOCgxjb250aW51YXRpb25SBWl0ZW1zIiYKFENvbnZlcnNhdGlvblBhZ2VNb3JlEg4KBmN1cnNvchgBIAEoCSIXChVDb252ZXJzYXRpb25QYWdlU3RhcnRCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_agentshim_frontend_v1_feed]);
 
 /**
  * Ask for ONE page of conversation history.
@@ -105,19 +105,19 @@ export const ConversationPageCmdSchema: GenMessage<ConversationPageCmd> = /*@__P
   messageDesc(file_agentshim_frontend_v1_conversation_page, 0);
 
 /**
- * The tail anchor: start at the newest item and walk backwards.
+ * The tail anchor: start at the newest message and walk backwards.
  *
  * @generated from message agentshim.frontend.v1.ConversationPageTail
  */
 export type ConversationPageTail = Message<"agentshim.frontend.v1.ConversationPageTail"> & {
   /**
-   * How many top-level items to return.
+   * How many top-level messages to return.
    *
    * The daemon CLAMPS it to a ceiling of about 50, and reads 0 as "the daemon
    * default", about 10. Both are the daemon's numbers rather than the client's
    * because the cost of a page is a cost only the daemon can see: a client
-   * asking for 5,000 items is asking for the full replay this message exists
-   * to end, and a clamp makes that unrepresentable instead of merely
+   * asking for 5,000 messages is asking for the full replay this message
+   * exists to end, and a clamp makes that unrepresentable instead of merely
    * discouraged.
    *
    * @generated from field: uint32 limit = 1;
@@ -170,7 +170,7 @@ export const ConversationPageBeforeSchema: GenMessage<ConversationPageBefore> = 
 /**
  * One page of conversation history, pushed in answer to a ConversationPageCmd.
  *
- * It is a PUSH rather than a command response because its items are feed
+ * It is a PUSH rather than a command response because its messages are feed
  * content, and feed content has exactly one delivery shape in this protocol.
  * The command's own ack is EARLY — it reports that the page was accepted onto
  * the workspace's lane, not that it was assembled — so a slow page cannot look
@@ -196,17 +196,17 @@ export type ConversationPage = Message<"agentshim.frontend.v1.ConversationPage">
   requestId: string;
 
   /**
-   * The page's items, OLDEST FIRST, as COMPLETE feed envelopes identical in
-   * shape to ConversationDelta.items.
+   * The page's messages, OLDEST FIRST, as COMPLETE feed envelopes identical
+   * in shape to ConversationDelta.messages.
    *
-   * Identical in shape is the whole point: a frontend renders a paged item
+   * Identical in shape is the whole point: a frontend renders a paged message
    * with the same code that renders a pushed one, and reconciles it by uuid
    * against anything it already holds. Oldest-first is the feed's own order,
    * so a page prepends as a block without being reversed.
    *
-   * @generated from field: repeated agentshim.frontend.v1.ConversationItem items = 3;
+   * @generated from field: repeated agentshim.frontend.v1.Message messages = 3;
    */
-  items: ConversationItem[];
+  messages: Message$1[];
 
   /**
    * WHERE THE CONVERSATION CONTINUES above this page, or that it does not.
@@ -240,10 +240,12 @@ export type ConversationPage = Message<"agentshim.frontend.v1.ConversationPage">
    *
    * The client stores it as its from_seq and subscribes to the live delta
    * stream from there, so the splice is GAP-FREE BY CONSTRUCTION rather than
-   * by timing: an item the session produced between this page's mint and the
+   * by timing: a message the session produced between this page's mint and
+   * the
    * client's subscribe is above this seq, so the first resync replays it. A
    * client that instead joined at "whatever seq the first delta carries" would
-   * lose exactly that item, and would lose it more often the slower the page.
+   * lose exactly that message, and would lose it more often the slower the
+   * page.
    *
    * Zero on before pages, which are history and carry no live edge.
    *

@@ -2906,7 +2906,7 @@ export const PermissionResponseSchema: GenMessage<PermissionResponse> = /*@__PUR
 
 /**
  * Daemon-composed permission state (the request plus its resolution
- * lifecycle), pushed to frontends as a conversation item. Lives beside the
+ * lifecycle), pushed to frontends as a conversation message. Lives beside the
  * request/response vocabulary it composes (S8/S9).
  *
  * @generated from message agentshim.core.v1.PermissionItem

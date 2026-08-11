@@ -1,7 +1,7 @@
-// feed.proto — The conversation feed container: the ConversationItem envelope
-// and the deltas that carry it.
+// feed.proto — The conversation feed container: the Message envelope, its
+// lineage, and the deltas that carry it.
 //
-// ConversationItem is feed packaging — identity, ordering, provenance and
+// Message is feed packaging — identity, lineage, ordering, provenance and
 // resolution stamps — wrapped around a payload. Agent-produced payloads are a
 // single AgentEmission arm (agent-emission.proto); everything the agent did
 // not emit keeps an arm of its own.
@@ -26,13 +26,13 @@ import type { FailureCardView } from "./failure-card_pb";
 import { file_agentshim_frontend_v1_failure_card } from "./failure-card_pb";
 import type { SessionCommandItem } from "./slash-menu_pb";
 import { file_agentshim_frontend_v1_slash_menu } from "./slash-menu_pb";
-import type { Message } from "@bufbuild/protobuf";
+import type { Message as Message$1 } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentshim/frontend/v1/feed.proto.
  */
 export const file_agentshim_frontend_v1_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZmVlZC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIpQBChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSNgoFaXRlbXMYAyADKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ29udmVyc2F0aW9uSXRlbRITCgt0aHJvdWdoX3NlcRgEIAEoBBINCgVmZW5jZRgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZCK7BwoQQ29udmVyc2F0aW9uSXRlbRIMCgR1dWlkGAEgASgJEg0KBXRzX21zGAIgASgDEhIKCnJlcXVlc3RfaWQYAyABKAkSOQoGc291cmNlGAQgASgOMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblNvdXJjZRI1CgVhZ2VudBgFIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudEVtaXNzaW9uSAASOQoMdXNlcl9tZXNzYWdlGAsgASgLMiEuYWdlbnRzaGltLmRhdGEudjEuQXBpVXNlck1lc3NhZ2VIABI3CgpwZXJtaXNzaW9uGB4gASgLMiEuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvbkl0ZW1IABI+CgxmYWlsdXJlX2NhcmQYHyABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRWaWV3SAASPAoPY29udGV4dF9jbGVhcmVkGCAgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBghIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABJECg9zZXNzaW9uX2NvbW1hbmQYIyABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmRJdGVtSAASOgoMYXN5bmNfYnViYmxlGCYgASgLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jQnViYmxlSAASSgoSY29tcGFjdGlvbl9zdW1tYXJ5GCcgASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbXBhY3Rpb25TdW1tYXJ5SXRlbUgAQgYKBGl0ZW1KBAgQEBFKBAgREBJKBAgSEBNKBAgKEAtKBAgMEA1KBAgNEA5KBAgOEA9KBAgPEBBKBAgiECNKBAgoEClKBAgkECVKBAglECZSCWFwaV9lcnJvclIQY29tcGFjdF9ib3VuZGFyeVIVY29tcGFjdF9ib3VuZGFyeV9saW5lUhFhc3Npc3RhbnRfbWVzc2FnZVIIdG9vbF91c2VSC3Rvb2xfcmVzdWx0Ug90b29sX3VzZV9yZXN1bHRSBnJlc3VsdFIKc2tpbGxfYm9keVILdXNhZ2Vfc3RhbXBSEXRva2VuX3V0aWxpemF0aW9uUg90dXJuX2FjY291bnRpbmciYQoVQ29tcGFjdGlvblN1bW1hcnlJdGVtEg8KB3N1bW1hcnkYASABKAkSFwoPY29tcGFjdGVkX2F0X21zGAIgASgDEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYAyABKAMihAEKC1R5cGluZ0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIuCgVkZWx0YRgDIAEoCzIfLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRlbnREZWx0YRINCgVmZW5jZRgEIAEoCRIRCglidWJibGVfaWQYBSABKAlKBAgCEANSCnNlc3Npb25faWQiQAoJVHlwaW5nQ3V0EhEKCXdvcmtzcGFjZRgBIAEoCRIRCglidWJibGVfaWQYAiABKAkSDQoFZmVuY2UYAyABKAkicgoPU2Vzc2lvbkluaXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRIrCgRpbml0GAMgASgLMh0uYWdlbnRzaGltLmRhdGEudjEuU3lzdGVtSW5pdBINCgVmZW5jZRgEIAEoCUoECAIQA1IKc2Vzc2lvbl9pZCp2ChJDb252ZXJzYXRpb25Tb3VyY2USIwofQ09OVkVSU0FUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEhwKGENPTlZFUlNBVElPTl9TT1VSQ0VfVVNFUhABEh0KGUNPTlZFUlNBVElPTl9TT1VSQ0VfTUVSR0UQAkIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_core_v1_core, file_agentshim_data_v1_stream, file_agentshim_data_v1_tools, file_agentshim_frontend_v1_agent_emission, file_agentshim_frontend_v1_async_bubble, file_agentshim_frontend_v1_failure_card, file_agentshim_frontend_v1_slash_menu]);
+  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZmVlZC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIpUBChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSMAoIbWVzc2FnZXMYAyADKAsyHi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZRITCgt0aHJvdWdoX3NlcRgEIAEoBBINCgVmZW5jZRgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZFIFaXRlbXMitQcKB01lc3NhZ2USDAoEdXVpZBgBIAEoCRINCgV0c19tcxgCIAEoAxISCgpyZXF1ZXN0X2lkGAMgASgJEjkKBnNvdXJjZRgEIAEoDjIpLmFnZW50c2hpbS5mcm9udGVuZC52MS5Db252ZXJzYXRpb25Tb3VyY2USNQoFYWdlbnQYBSABKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbkgAEjkKDHVzZXJfbWVzc2FnZRgLIAEoCzIhLmFnZW50c2hpbS5kYXRhLnYxLkFwaVVzZXJNZXNzYWdlSAASNwoKcGVybWlzc2lvbhgeIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLlBlcm1pc3Npb25JdGVtSAASPgoMZmFpbHVyZV9jYXJkGB8gASgLMiYuYWdlbnRzaGltLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVmlld0gAEjwKD2NvbnRleHRfY2xlYXJlZBggIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDbGVhcmVkSAASQAoRY29udGV4dF9jb21wYWN0ZWQYISABKAsyIy5hZ2VudHNoaW0uY29yZS52MS5Db250ZXh0Q29tcGFjdGVkSAASRAoPc2Vzc2lvbl9jb21tYW5kGCMgASgLMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLlNlc3Npb25Db21tYW5kSXRlbUgAEjoKDGFzeW5jX2J1YmJsZRgmIAEoCzIiLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY0J1YmJsZUgAEkoKEmNvbXBhY3Rpb25fc3VtbWFyeRgnIAEoCzIsLmFnZW50c2hpbS5mcm9udGVuZC52MS5Db21wYWN0aW9uU3VtbWFyeUl0ZW1IAEIJCgdwYXlsb2FkSgQIEBARSgQIERASSgQIEhATSgQIChALSgQIDBANSgQIDRAOSgQIDhAPSgQIDxAQSgQIIhAjSgQIKBApSgQIJBAlSgQIJRAmUglhcGlfZXJyb3JSEGNvbXBhY3RfYm91bmRhcnlSFWNvbXBhY3RfYm91bmRhcnlfbGluZVIRYXNzaXN0YW50X21lc3NhZ2VSCHRvb2xfdXNlUgt0b29sX3Jlc3VsdFIPdG9vbF91c2VfcmVzdWx0UgZyZXN1bHRSCnNraWxsX2JvZHlSC3VzYWdlX3N0YW1wUhF0b2tlbl91dGlsaXphdGlvblIPdHVybl9hY2NvdW50aW5nImEKFUNvbXBhY3Rpb25TdW1tYXJ5SXRlbRIPCgdzdW1tYXJ5GAEgASgJEhcKD2NvbXBhY3RlZF9hdF9tcxgCIAEoAxIeChZleHBlbnNpdmVfaW5wdXRfdG9rZW5zGAMgASgDIoQBCgtUeXBpbmdEZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSLgoFZGVsdGEYAyABKAsyHy5hZ2VudHNoaW0uY29yZS52MS5Db250ZW50RGVsdGESDQoFZmVuY2UYBCABKAkSEQoJYnViYmxlX2lkGAUgASgJSgQIAhADUgpzZXNzaW9uX2lkIkAKCVR5cGluZ0N1dBIRCgl3b3Jrc3BhY2UYASABKAkSEQoJYnViYmxlX2lkGAIgASgJEg0KBWZlbmNlGAMgASgJInIKD1Nlc3Npb25Jbml0VmlldxIRCgl3b3Jrc3BhY2UYASABKAkSKwoEaW5pdBgDIAEoCzIdLmFnZW50c2hpbS5kYXRhLnYxLlN5c3RlbUluaXQSDQoFZmVuY2UYBCABKAlKBAgCEANSCnNlc3Npb25faWQqdgoSQ29udmVyc2F0aW9uU291cmNlEiMKH0NPTlZFUlNBVElPTl9TT1VSQ0VfVU5TUEVDSUZJRUQQABIcChhDT05WRVJTQVRJT05fU09VUkNFX1VTRVIQARIdChlDT05WRVJTQVRJT05fU09VUkNFX01FUkdFEAJCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_agentshim_core_v1_core, file_agentshim_data_v1_stream, file_agentshim_data_v1_tools, file_agentshim_frontend_v1_agent_emission, file_agentshim_frontend_v1_async_bubble, file_agentshim_frontend_v1_failure_card, file_agentshim_frontend_v1_slash_menu]);
 
 /**
  * Complete (store-round-tripped) conversation additions, composed from the
@@ -42,16 +42,19 @@ export const file_agentshim_frontend_v1_feed: GenFile = /*@__PURE__*/
  *
  * @generated from message agentshim.frontend.v1.ConversationDelta
  */
-export type ConversationDelta = Message<"agentshim.frontend.v1.ConversationDelta"> & {
+export type ConversationDelta = Message$1<"agentshim.frontend.v1.ConversationDelta"> & {
   /**
    * @generated from field: string workspace = 1;
    */
   workspace: string;
 
   /**
-   * @generated from field: repeated agentshim.frontend.v1.ConversationItem items = 3;
+   * The conversation additions this push carries, oldest first. Each is a
+   * complete feed envelope the frontend renders without further resolution.
+   *
+   * @generated from field: repeated agentshim.frontend.v1.Message messages = 3;
    */
-  items: ConversationItem[];
+  messages: Message[];
 
   /**
    * frontends persist this for reconnect resync
@@ -86,9 +89,9 @@ export const ConversationDeltaSchema: GenMessage<ConversationDelta> = /*@__PURE_
 /**
  * One curated conversation addition: FEED PACKAGING wrapped around a payload.
  *
- * The packaging is what the feed knows about an item regardless of what the
- * item is — its identity, its place in the order, who drove it, and the
- * figures resolved against it. The payload is the item itself.
+ * The packaging is what the feed knows about a message regardless of what the
+ * message is — its identity, its lineage, its place in the order, who drove
+ * it, and the figures resolved against it. The payload is the message itself.
  *
  * Agent-produced payloads are ONE arm, AgentEmission, which is also the
  * vocabulary a detached agent's output arrives in (async-bubble.proto).
@@ -99,9 +102,9 @@ export const ConversationDeltaSchema: GenMessage<ConversationDelta> = /*@__PURE_
  * Consumers reconcile by uuid (permission items use the permission request_id
  * as their uuid).
  *
- * @generated from message agentshim.frontend.v1.ConversationItem
+ * @generated from message agentshim.frontend.v1.Message
  */
-export type ConversationItem = Message<"agentshim.frontend.v1.ConversationItem"> & {
+export type Message = Message$1<"agentshim.frontend.v1.Message"> & {
   /**
    * @generated from field: string uuid = 1;
    */
@@ -120,7 +123,7 @@ export type ConversationItem = Message<"agentshim.frontend.v1.ConversationItem">
   requestId: string;
 
   /**
-   * Provenance. ALWAYS set (see ConversationSource): persisted with the item
+   * Provenance. ALWAYS set (see ConversationSource): persisted with the message
    * so a resync or transcript replay reproduces the same verdict instead of
    * re-deriving it from state that has since moved on.
    *
@@ -129,9 +132,9 @@ export type ConversationItem = Message<"agentshim.frontend.v1.ConversationItem">
   source: ConversationSource;
 
   /**
-   * @generated from oneof agentshim.frontend.v1.ConversationItem.item
+   * @generated from oneof agentshim.frontend.v1.Message.payload
    */
-  item: {
+  payload: {
     /**
      * EVERYTHING the agent produced, in the one vocabulary that also carries
      * a detached agent's output (AsyncAgentUpdate). See AgentEmission.
@@ -199,7 +202,7 @@ export type ConversationItem = Message<"agentshim.frontend.v1.ConversationItem">
      *
      * What rides here is the bubble's OPENING state; everything it produces
      * afterwards arrives as AsyncBubbleUpdate addressed to `AsyncBubble.id`,
-     * on its own delta rather than as a stream of new feed items. A detached
+     * on its own delta rather than as a stream of new feed messages. A detached
      * agent emitting a thousand lines must not insert a thousand rows into
      * the conversation it was dispatched from.
      *
@@ -220,10 +223,10 @@ export type ConversationItem = Message<"agentshim.frontend.v1.ConversationItem">
 };
 
 /**
- * Describes the message agentshim.frontend.v1.ConversationItem.
- * Use `create(ConversationItemSchema)` to create a new message.
+ * Describes the message agentshim.frontend.v1.Message.
+ * Use `create(MessageSchema)` to create a new message.
  */
-export const ConversationItemSchema: GenMessage<ConversationItem> = /*@__PURE__*/
+export const MessageSchema: GenMessage<Message> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_feed, 1);
 
 /**
@@ -232,7 +235,7 @@ export const ConversationItemSchema: GenMessage<ConversationItem> = /*@__PURE__*
  *
  * @generated from message agentshim.frontend.v1.CompactionSummaryItem
  */
-export type CompactionSummaryItem = Message<"agentshim.frontend.v1.CompactionSummaryItem"> & {
+export type CompactionSummaryItem = Message$1<"agentshim.frontend.v1.CompactionSummaryItem"> & {
   /**
    * The summary text, verbatim (markdown).
    *
@@ -269,7 +272,7 @@ export const CompactionSummaryItemSchema: GenMessage<CompactionSummaryItem> = /*
  *
  * @generated from message agentshim.frontend.v1.TypingDelta
  */
-export type TypingDelta = Message<"agentshim.frontend.v1.TypingDelta"> & {
+export type TypingDelta = Message$1<"agentshim.frontend.v1.TypingDelta"> & {
   /**
    * @generated from field: string workspace = 1;
    */
@@ -341,7 +344,7 @@ export const TypingDeltaSchema: GenMessage<TypingDelta> = /*@__PURE__*/
  *
  * @generated from message agentshim.frontend.v1.TypingCut
  */
-export type TypingCut = Message<"agentshim.frontend.v1.TypingCut"> & {
+export type TypingCut = Message$1<"agentshim.frontend.v1.TypingCut"> & {
   /**
    * @generated from field: string workspace = 1;
    */
@@ -378,7 +381,7 @@ export const TypingCutSchema: GenMessage<TypingCut> = /*@__PURE__*/
  *
  * @generated from message agentshim.frontend.v1.SessionInitView
  */
-export type SessionInitView = Message<"agentshim.frontend.v1.SessionInitView"> & {
+export type SessionInitView = Message$1<"agentshim.frontend.v1.SessionInitView"> & {
   /**
    * @generated from field: string workspace = 1;
    */
@@ -413,12 +416,12 @@ export const SessionInitViewSchema: GenMessage<SessionInitView> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_feed, 5);
 
 /**
- * WHO drove the turn that produced a conversation item.
+ * WHO drove the turn that produced a message.
  *
  * The merge coordinator borrows a workspace's own shim to resolve a merge
  * conflict (the session holding the full context of the work is the one best
  * equipped to resolve it), so a session can emit a full turn the user never
- * prompted. That provenance is a durable FACT recorded on every item, not a
+ * prompted. That provenance is a durable FACT recorded on every message, not a
  * rendering hint: frontends decide independently what to do with it, and the
  * decision can change without another wire change.
  *
@@ -427,7 +430,7 @@ export const SessionInitViewSchema: GenMessage<SessionInitView> = /*@__PURE__*/
 export enum ConversationSource {
   /**
    * Never set by the daemon. proto3 reserves 0 for "the field was not
-   * populated", and every item the daemon builds sets one of the arms below,
+   * populated", and every message the daemon builds sets one of the arms below,
    * so a receiver seeing UNSPECIFIED is looking at a malformed frame and must
    * reject it loudly rather than assume USER.
    *

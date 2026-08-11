@@ -6186,7 +6186,7 @@ func (x *PermissionResponse) GetDenyMessage() string {
 }
 
 // Daemon-composed permission state (the request plus its resolution
-// lifecycle), pushed to frontends as a conversation item. Lives beside the
+// lifecycle), pushed to frontends as a conversation message. Lives beside the
 // request/response vocabulary it composes (S8/S9).
 type PermissionItem struct {
 	state         protoimpl.MessageState    `protogen:"open.v1"`

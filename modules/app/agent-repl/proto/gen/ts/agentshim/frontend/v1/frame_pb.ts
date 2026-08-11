@@ -185,7 +185,7 @@ export type FrontendFrame = Message<"agentshim.frontend.v1.FrontendFrame"> & {
   } | {
     /**
      * Detached work opening, and typed incremental updates to work already
-     * open. Its own frame rather than more ConversationDelta items, because a
+     * open. Its own frame rather than more ConversationDelta messages, because a
      * detached agent produces at its own rate and must not flood the
      * conversation that dispatched it.
      *
@@ -243,7 +243,7 @@ export type FrontendFrame = Message<"agentshim.frontend.v1.FrontendFrame"> & {
   } | {
     /**
      * ONE page of conversation history, answering a ConversationPageCmd. It is
-     * a push rather than a command response because its items are feed
+     * a push rather than a command response because its messages are feed
      * content, and the command's ack is early by design — see
      * conversation-page.proto.
      *
