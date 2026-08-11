@@ -11,12 +11,17 @@
  *    handing every store-merged `Event` to an injected sink (wired to
  *    `SessionServer.sendEvent`, forwarding to the daemon verbatim).
  *
- * THE HONEST SAD PATH (design §4.4, metaprompt no-fallbacks rule): if the
- * store is unreachable or rejects a batch, every event in that batch is
- * loud-logged as dropped and a `DegradedState` is reported to the injected
- * reporter. There is NO spill buffer, NO retry of a rejected batch, NO
- * fallback — store downtime is honest downtime and the display goes stale
- * until it returns.
+ * THE HONEST SAD PATH (design §4.4, metaprompt no-fallbacks rule): a batch the
+ * store REJECTS is loud-logged per event as dropped and reported as a
+ * `DegradedState` to the injected reporter. A rejection is a decision, not an
+ * outage: it is NEVER retried, because replaying it would only be rejected
+ * again. Store downtime is honest downtime and the display goes stale until it
+ * returns — no shadow path serves the daemon in the meantime.
+ *
+ * WHAT IS NOT THE SAD PATH is a write the store never got to see. A durable
+ * batch this client ACCEPTED is written to disk and delivered when the link
+ * comes back (see below); that is not a fallback, it is the difference between
+ * a transport being down and evidence being destroyed.
  *
  * "Until it returns" is load-bearing, and the LINK STATE MACHINE below is what
  * makes it true. The store is launchd-managed and restarts under a live shim,
