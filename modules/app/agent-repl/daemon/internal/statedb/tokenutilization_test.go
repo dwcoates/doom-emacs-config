@@ -1,6 +1,7 @@
 package statedb
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -257,5 +258,118 @@ func TestTokenUtilizationTopologyCheckCoversTheAliasesItSkipsFor(t *testing.T) {
 				t.Fatalf("Record = %v, %v, want the record inserted", inserted, err)
 			}
 		})
+	}
+}
+
+// TestIrreconcilableObservationClassifiesTheVerdictsThatCanNeverChange pins the
+// membership of ErrIrreconcilableObservation, because that membership — not the
+// message text — is what tells a caller retrying is futile.
+func TestIrreconcilableObservationClassifiesTheVerdictsThatCanNeverChange(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		seed    func(*TokenUtilizations) error
+		submit  func(*TokenUtilizations) error
+		wantErr string
+	}{
+		{
+			name:    "invalid incoming record",
+			submit:  func(u *TokenUtilizations) error { _, err := u.Record(completeUtilization("s", "claude", "", "m")); return err },
+			wantErr: "reject token utilization",
+		},
+		{
+			name: "conflicting duplicate of a durable row",
+			seed: func(u *TokenUtilizations) error { _, err := u.Record(completeUtilization("s", "claude", "turn", "m")); return err },
+			submit: func(u *TokenUtilizations) error {
+				conflict := completeUtilization("s", "claude", "turn", "m")
+				conflict.Usage.InputTokens++
+				_, err := u.Record(conflict)
+				return err
+			},
+			wantErr: "conflicting duplicate token utilization",
+		},
+		{
+			// The exact shape that wedged create-game-for-analysis-xvg: a
+			// replayed file-plane observation whose figures disagree with the
+			// live row already made durable for the same response.
+			name: "historical observation disagreeing with the live row",
+			seed: func(u *TokenUtilizations) error { _, err := u.Record(completeUtilization("s", "claude", "turn", "m")); return err },
+			submit: func(u *TokenUtilizations) error {
+				conflict := completeUtilization("s", "claude", "", "m")
+				conflict.Usage.InputTokens++
+				_, err := u.RecordHistorical(conflict)
+				return err
+			},
+			wantErr: "conflicting historical observation for live token utilization",
+		},
+		{
+			name: "inconsistent subagent alias topology",
+			seed: func(u *TokenUtilizations) error {
+				rec := completeUtilization("s", "claude", "turn", "m")
+				rec.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "a", ParentToolUseId: "tool"}}
+				_, err := u.Record(rec)
+				return err
+			},
+			submit: func(u *TokenUtilizations) error {
+				rec := completeUtilization("s", "claude", "turn", "m2")
+				rec.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "a", ParentToolUseId: "other"}}
+				_, err := u.Record(rec)
+				return err
+			},
+			wantErr: "reject token utilization topology",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store, _ := openReceipts(t)
+			utilizations, err := NewTokenUtilizations(store.db)
+			if err != nil {
+				t.Fatalf("NewTokenUtilizations: %v", err)
+			}
+			if tc.seed != nil {
+				if err := tc.seed(utilizations); err != nil {
+					t.Fatalf("seed durable row: %v", err)
+				}
+			}
+
+			// Act.
+			err = tc.submit(utilizations)
+
+			// Assert.
+			if err == nil {
+				t.Fatal("irreconcilable observation was accepted")
+			}
+			if !errors.Is(err, ErrIrreconcilableObservation) {
+				t.Fatalf("error %v is not classified ErrIrreconcilableObservation", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want it to name %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestBrokenDurableStateIsNotClassifiedIrreconcilable keeps the class honest at
+// its other edge: a row this daemon can no longer decode says the STORE is
+// broken, not that an observation disagrees, and it must stay a hard fault.
+func TestBrokenDurableStateIsNotClassifiedIrreconcilable(t *testing.T) {
+	// Arrange.
+	store, _ := openReceipts(t)
+	utilizations, err := NewTokenUtilizations(store.db)
+	if err != nil {
+		t.Fatalf("NewTokenUtilizations: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO token_utilization(agent_repl_session_id, api_message_id, record) VALUES (?,?,?)`, "s", "m", []byte{0xff, 0xff, 0xff}); err != nil {
+		t.Fatalf("seed undecodable row: %v", err)
+	}
+
+	// Act.
+	_, err = utilizations.Record(completeUtilization("s", "claude", "turn", "m"))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("undecodable durable row was accepted")
+	}
+	if errors.Is(err, ErrIrreconcilableObservation) {
+		t.Fatalf("store corruption %v was classified as a mere observation disagreement", err)
 	}
 }

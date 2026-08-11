@@ -1848,12 +1848,38 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 			return fmt.Errorf("session-controller: historical token utilization store is not wired (session=%s seq=%d api_message_id=%s)", c.sessionID, ev.GetSeq(), utilization.GetApiMessageId())
 		}
 		inserted, err := c.historicalUsageStore.RecordHistorical(utilization)
-		if err != nil {
+		switch {
+		// AN IRRECONCILABLE OBSERVATION IS BOOKKEEPING THAT DISAGREES WITH
+		// BOOKKEEPING, and it degrades exactly like every other accounting
+		// rejection on this path: the row is refused before durable state can
+		// change, the refusal is recorded in full, and conversation delivery
+		// continues. It is NOT returned, and the difference is the whole point.
+		//
+		// This error is a pure function of the event and the durable rows (see
+		// statedb.ErrIrreconcilableObservation), so it recurs identically on
+		// every replay of the same store. Returning it ends the session
+		// controller's run loop, which stops the shim, which respawns, which
+		// replays the same store from the same floor and fails on the same
+		// event — an unbounded spawn/kill loop that no schedule, timeout, or
+		// backoff terminates, over a token count. Bookkeeping may not gate
+		// conversation delivery, and it may not end a session either.
+		case errors.Is(err, statedb.ErrIrreconcilableObservation):
+			c.warn("session-controller: historical token utilization IRRECONCILABLE session=%s seq=%d api_message_id=%s decision=degrade_keep_durable_row — the replayed observation disagrees with the response accounting already made durable, so it is discarded and the durable row stands; the conversation is delivered in full and only this response's historical figures are lost: %v",
+				c.sessionID, ev.GetSeq(), utilization.GetApiMessageId(), err)
+			observation = nil
+			utilization = nil
+		// EVERY OTHER FAILURE IS THE SUBSTRATE, not the observation: a
+		// transaction that would not begin or commit, a row that would not
+		// read, durable state that no longer decodes. Retrying those CAN
+		// succeed and continuing past them would be writing conversation state
+		// on top of a store that is not answering, so they stay fatal.
+		case err != nil:
 			return fmt.Errorf("session-controller: persist historical token utilization before frame mutation (session=%s seq=%d api_message_id=%s): %w", c.sessionID, ev.GetSeq(), utilization.GetApiMessageId(), err)
+		default:
+			historicalInserted = inserted
+			usage := utilization.GetUsage()
+			c.logf("session-controller: historical token utilization persisted session=%s seq=%d api_message_id=%s inserted=%t input_tokens=%d output_tokens=%d cache_read_input_tokens=%d cache_creation_input_tokens=%d root_turn_id=absent response_timing=absent", c.sessionID, ev.GetSeq(), utilization.GetApiMessageId(), inserted, usage.GetInputTokens(), usage.GetOutputTokens(), usage.GetCacheReadInputTokens(), usage.GetCacheCreationInputTokens())
 		}
-		historicalInserted = inserted
-		usage := utilization.GetUsage()
-		c.logf("session-controller: historical token utilization persisted session=%s seq=%d api_message_id=%s inserted=%t input_tokens=%d output_tokens=%d cache_read_input_tokens=%d cache_creation_input_tokens=%d root_turn_id=absent response_timing=absent", c.sessionID, ev.GetSeq(), utilization.GetApiMessageId(), inserted, usage.GetInputTokens(), usage.GetOutputTokens(), usage.GetCacheReadInputTokens(), usage.GetCacheCreationInputTokens())
 	}
 	// HOW BIG THE CONVERSATION IS RIGHT NOW, taken from the same record the
 	// ledger just accepted rather than measured again from the raw event: one

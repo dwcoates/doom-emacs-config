@@ -13,6 +13,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/statedb"
 	"claude-repld/internal/tokenusage"
 	"claude-repld/internal/tokenutilization"
 
@@ -2315,5 +2316,65 @@ func TestReconcileTokenUsageLogsSyntheticExclusionWithTurnIdentity(t *testing.T)
 	}
 	if !strings.Contains(found, "turn=t") || !strings.Contains(found, "query=q") {
 		t.Fatalf("exclusion record = %q, want the resolving turn and query identity", found)
+	}
+}
+
+// TestIrreconcilableHistoricalUsageDegradesInsteadOfEndingTheSession is the
+// blast-radius contract for the accounting error class that wedged
+// create-game-for-analysis-xvg: a replayed file-plane observation whose figures
+// disagree with the response accounting already durable. It is bookkeeping
+// disagreeing with bookkeeping, so it degrades this event's accounting loudly
+// and the conversation is still delivered.
+func TestIrreconcilableHistoricalUsageDegradesInsteadOfEndingTheSession(t *testing.T) {
+	// Arrange.
+	push := &fakePusher{}
+	var warnings []string
+	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
+	c.warnf = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
+	c.historicalUsageStore = &fakeHistoricalUsageStore{err: fmt.Errorf("%w: conflicting historical observation for live token utilization %q: historical and live response payloads disagree", statedb.ErrIrreconcilableObservation, "message")}
+	republished := 0
+	c.onHistoricalUsagePersisted = func() { republished++ }
+
+	// Act.
+	err := c.Consume(historicalUsageEvent(t))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Consume irreconcilable historical usage = %v, want the event delivered", err)
+	}
+	if len(c.snapshotRing()) != 1 || len(push.convo) != 1 {
+		t.Fatalf("conversation was withheld over bookkeeping: retained=%d pushes=%d", len(c.snapshotRing()), len(push.convo))
+	}
+	if republished != 0 {
+		t.Fatalf("historical aggregate republished %d times, want none for a discarded observation", republished)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "IRRECONCILABLE") {
+		t.Fatalf("warnings = %v, want the discarded observation recorded once at warn", warnings)
+	}
+}
+
+// TestIrreconcilableHistoricalUsageNeverEndsTheSessionAcrossRepeatedReplays is
+// the invariant the fix establishes, stated as the loop it forbids. The verdict
+// is a pure function of the event and the durable rows, so every bring-up that
+// replays this store meets it again; if it could end the run loop even once,
+// the shim it owns is stopped, respawned, and wedged forever.
+func TestIrreconcilableHistoricalUsageNeverEndsTheSessionAcrossRepeatedReplays(t *testing.T) {
+	// Arrange.
+	push := &fakePusher{}
+	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
+	c.warnf = func(string, ...any) {}
+	c.historicalUsageStore = &fakeHistoricalUsageStore{err: fmt.Errorf("%w: conflicting duplicate token utilization %q", statedb.ErrIrreconcilableObservation, "message")}
+	const replays = 5
+
+	// Act + Assert.
+	for replay := 0; replay < replays; replay++ {
+		event := historicalUsageEvent(t)
+		event.Seq = uint64(100 + replay)
+		if err := c.Consume(event); err != nil {
+			t.Fatalf("replay %d ended the session controller run loop: %v", replay, err)
+		}
+	}
+	if len(push.convo) != replays {
+		t.Fatalf("conversation pushes = %d, want %d", len(push.convo), replays)
 	}
 }
