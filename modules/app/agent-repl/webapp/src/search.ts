@@ -551,6 +551,11 @@ export class FeedSearch {
     // restored position is quoted against. The skipping the class suppressed
     // is only re-armed AFTER the restore, for the same reason: it is the
     // layout the origin was measured in.
+    // NOT through TailFollow: an abort is the reader asking to be put back
+    // where THEY were when they started searching, so the position restored is
+    // their own and the owner should read it as such. Landing back on the tail
+    // resumes following because the reader was following when they began;
+    // landing above it does not, for the same reason.
     this.feed.scrollTop = this.originScrollTop;
     this.feed.classList.remove(SEARCHING_CLASS);
     this.report("");
