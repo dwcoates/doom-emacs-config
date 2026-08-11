@@ -32,7 +32,7 @@ import type { Message as Message$1 } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/feed.proto.
  */
 export const file_agentshim_frontend_v1_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZmVlZC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIpUBChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSMAoIbWVzc2FnZXMYAyADKAsyHi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZRITCgt0aHJvdWdoX3NlcRgEIAEoBBINCgVmZW5jZRgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZFIFaXRlbXMitQcKB01lc3NhZ2USDAoEdXVpZBgBIAEoCRINCgV0c19tcxgCIAEoAxISCgpyZXF1ZXN0X2lkGAMgASgJEjkKBnNvdXJjZRgEIAEoDjIpLmFnZW50c2hpbS5mcm9udGVuZC52MS5Db252ZXJzYXRpb25Tb3VyY2USNQoFYWdlbnQYBSABKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbkgAEjkKDHVzZXJfbWVzc2FnZRgLIAEoCzIhLmFnZW50c2hpbS5kYXRhLnYxLkFwaVVzZXJNZXNzYWdlSAASNwoKcGVybWlzc2lvbhgeIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLlBlcm1pc3Npb25JdGVtSAASPgoMZmFpbHVyZV9jYXJkGB8gASgLMiYuYWdlbnRzaGltLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVmlld0gAEjwKD2NvbnRleHRfY2xlYXJlZBggIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDbGVhcmVkSAASQAoRY29udGV4dF9jb21wYWN0ZWQYISABKAsyIy5hZ2VudHNoaW0uY29yZS52MS5Db250ZXh0Q29tcGFjdGVkSAASRAoPc2Vzc2lvbl9jb21tYW5kGCMgASgLMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLlNlc3Npb25Db21tYW5kSXRlbUgAEjoKDGFzeW5jX2J1YmJsZRgmIAEoCzIiLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY0J1YmJsZUgAEkoKEmNvbXBhY3Rpb25fc3VtbWFyeRgnIAEoCzIsLmFnZW50c2hpbS5mcm9udGVuZC52MS5Db21wYWN0aW9uU3VtbWFyeUl0ZW1IAEIJCgdwYXlsb2FkSgQIEBARSgQIERASSgQIEhATSgQIChALSgQIDBANSgQIDRAOSgQIDhAPSgQIDxAQSgQIIhAjSgQIKBApSgQIJBAlSgQIJRAmUglhcGlfZXJyb3JSEGNvbXBhY3RfYm91bmRhcnlSFWNvbXBhY3RfYm91bmRhcnlfbGluZVIRYXNzaXN0YW50X21lc3NhZ2VSCHRvb2xfdXNlUgt0b29sX3Jlc3VsdFIPdG9vbF91c2VfcmVzdWx0UgZyZXN1bHRSCnNraWxsX2JvZHlSC3VzYWdlX3N0YW1wUhF0b2tlbl91dGlsaXphdGlvblIPdHVybl9hY2NvdW50aW5nImEKFUNvbXBhY3Rpb25TdW1tYXJ5SXRlbRIPCgdzdW1tYXJ5GAEgASgJEhcKD2NvbXBhY3RlZF9hdF9tcxgCIAEoAxIeChZleHBlbnNpdmVfaW5wdXRfdG9rZW5zGAMgASgDIoQBCgtUeXBpbmdEZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSLgoFZGVsdGEYAyABKAsyHy5hZ2VudHNoaW0uY29yZS52MS5Db250ZW50RGVsdGESDQoFZmVuY2UYBCABKAkSEQoJYnViYmxlX2lkGAUgASgJSgQIAhADUgpzZXNzaW9uX2lkIkAKCVR5cGluZ0N1dBIRCgl3b3Jrc3BhY2UYASABKAkSEQoJYnViYmxlX2lkGAIgASgJEg0KBWZlbmNlGAMgASgJInIKD1Nlc3Npb25Jbml0VmlldxIRCgl3b3Jrc3BhY2UYASABKAkSKwoEaW5pdBgDIAEoCzIdLmFnZW50c2hpbS5kYXRhLnYxLlN5c3RlbUluaXQSDQoFZmVuY2UYBCABKAlKBAgCEANSCnNlc3Npb25faWQqdgoSQ29udmVyc2F0aW9uU291cmNlEiMKH0NPTlZFUlNBVElPTl9TT1VSQ0VfVU5TUEVDSUZJRUQQABIcChhDT05WRVJTQVRJT05fU09VUkNFX1VTRVIQARIdChlDT05WRVJTQVRJT05fU09VUkNFX01FUkdFEAJCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_agentshim_core_v1_core, file_agentshim_data_v1_stream, file_agentshim_data_v1_tools, file_agentshim_frontend_v1_agent_emission, file_agentshim_frontend_v1_async_bubble, file_agentshim_frontend_v1_failure_card, file_agentshim_frontend_v1_slash_menu]);
+  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZmVlZC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIpUBChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSMAoIbWVzc2FnZXMYAyADKAsyHi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZRITCgt0aHJvdWdoX3NlcRgEIAEoBBINCgVmZW5jZRgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZFIFaXRlbXMiSQoOTWVzc2FnZUxpbmVhZ2USHAoUdG9wX2xldmVsX21lc3NhZ2VfaWQYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAki7QcKB01lc3NhZ2USDAoEdXVpZBgBIAEoCRINCgV0c19tcxgCIAEoAxISCgpyZXF1ZXN0X2lkGAMgASgJEjkKBnNvdXJjZRgEIAEoDjIpLmFnZW50c2hpbS5mcm9udGVuZC52MS5Db252ZXJzYXRpb25Tb3VyY2USNgoHbGluZWFnZRgGIAEoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXNzYWdlTGluZWFnZRI1CgVhZ2VudBgFIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudEVtaXNzaW9uSAASOQoMdXNlcl9tZXNzYWdlGAsgASgLMiEuYWdlbnRzaGltLmRhdGEudjEuQXBpVXNlck1lc3NhZ2VIABI3CgpwZXJtaXNzaW9uGB4gASgLMiEuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvbkl0ZW1IABI+CgxmYWlsdXJlX2NhcmQYHyABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRWaWV3SAASPAoPY29udGV4dF9jbGVhcmVkGCAgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBghIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABJECg9zZXNzaW9uX2NvbW1hbmQYIyABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmRJdGVtSAASOgoMYXN5bmNfYnViYmxlGCYgASgLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jQnViYmxlSAASSgoSY29tcGFjdGlvbl9zdW1tYXJ5GCcgASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbXBhY3Rpb25TdW1tYXJ5SXRlbUgAQgkKB3BheWxvYWRKBAgQEBFKBAgREBJKBAgSEBNKBAgKEAtKBAgMEA1KBAgNEA5KBAgOEA9KBAgPEBBKBAgiECNKBAgoEClKBAgkECVKBAglECZSCWFwaV9lcnJvclIQY29tcGFjdF9ib3VuZGFyeVIVY29tcGFjdF9ib3VuZGFyeV9saW5lUhFhc3Npc3RhbnRfbWVzc2FnZVIIdG9vbF91c2VSC3Rvb2xfcmVzdWx0Ug90b29sX3VzZV9yZXN1bHRSBnJlc3VsdFIKc2tpbGxfYm9keVILdXNhZ2Vfc3RhbXBSEXRva2VuX3V0aWxpemF0aW9uUg90dXJuX2FjY291bnRpbmciYQoVQ29tcGFjdGlvblN1bW1hcnlJdGVtEg8KB3N1bW1hcnkYASABKAkSFwoPY29tcGFjdGVkX2F0X21zGAIgASgDEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYAyABKAMihAEKC1R5cGluZ0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIuCgVkZWx0YRgDIAEoCzIfLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRlbnREZWx0YRINCgVmZW5jZRgEIAEoCRIRCglidWJibGVfaWQYBSABKAlKBAgCEANSCnNlc3Npb25faWQiQAoJVHlwaW5nQ3V0EhEKCXdvcmtzcGFjZRgBIAEoCRIRCglidWJibGVfaWQYAiABKAkSDQoFZmVuY2UYAyABKAkicgoPU2Vzc2lvbkluaXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRIrCgRpbml0GAMgASgLMh0uYWdlbnRzaGltLmRhdGEudjEuU3lzdGVtSW5pdBINCgVmZW5jZRgEIAEoCUoECAIQA1IKc2Vzc2lvbl9pZCp2ChJDb252ZXJzYXRpb25Tb3VyY2USIwofQ09OVkVSU0FUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEhwKGENPTlZFUlNBVElPTl9TT1VSQ0VfVVNFUhABEh0KGUNPTlZFUlNBVElPTl9TT1VSQ0VfTUVSR0UQAkIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_core_v1_core, file_agentshim_data_v1_stream, file_agentshim_data_v1_tools, file_agentshim_frontend_v1_agent_emission, file_agentshim_frontend_v1_async_bubble, file_agentshim_frontend_v1_failure_card, file_agentshim_frontend_v1_slash_menu]);
 
 /**
  * Complete (store-round-tripped) conversation additions, composed from the
@@ -87,6 +87,58 @@ export const ConversationDeltaSchema: GenMessage<ConversationDelta> = /*@__PURE_
   messageDesc(file_agentshim_frontend_v1_feed, 0);
 
 /**
+ * The two containment facts every message carries, in one message so no
+ * producer can supply half of them and no consumer can read them from two
+ * different shapes.
+ *
+ * SPAWN IS NOT CONTAINMENT. A message whose work was started by another
+ * message's tool call is NOT thereby contained by it: provenance lives on
+ * origin_tool_use_id, and lineage lives here. Conflating them is what made
+ * "is a top-level bubble a top-level message" unanswerable.
+ *
+ * @generated from message agentshim.frontend.v1.MessageLineage
+ */
+export type MessageLineage = Message$1<"agentshim.frontend.v1.MessageLineage"> & {
+  /**
+   * The feed row this message ultimately belongs to — the ancestor whose own
+   * parent is the feed itself.
+   *
+   * ALWAYS SET, including on a top-level message, where it equals that
+   * message's own id. It is never empty and never inferred: a reader that had
+   * to walk parent pointers to find the root would be performing the unbounded
+   * traversal this field exists to remove, and a page query would stop being a
+   * single indexed pass.
+   *
+   * DENORMALIZED ON PURPOSE. It is derivable by walking parent_message_id to
+   * its end, and storing it anyway is the entire reason a page of ten messages
+   * costs one query. The cost is that it can drift: it MUST equal the root of
+   * the parent chain, and a write that disagrees is CORRUPTION, not a variant.
+   *
+   * @generated from field: string top_level_message_id = 1;
+   */
+  topLevelMessageId: string;
+
+  /**
+   * The message immediately containing this one — ONE HOP, never the root.
+   *
+   * EMPTY means this message sits directly in the feed, in which case
+   * top_level_message_id is this message's own id. Absence is the fact itself,
+   * not a placeholder for an unknown: a message whose parent could not be
+   * resolved is a producer fault, never an empty pointer.
+   *
+   * @generated from field: string parent_message_id = 2;
+   */
+  parentMessageId: string;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MessageLineage.
+ * Use `create(MessageLineageSchema)` to create a new message.
+ */
+export const MessageLineageSchema: GenMessage<MessageLineage> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_feed, 1);
+
+/**
  * One curated conversation addition: FEED PACKAGING wrapped around a payload.
  *
  * The packaging is what the feed knows about a message regardless of what the
@@ -130,6 +182,30 @@ export type Message = Message$1<"agentshim.frontend.v1.Message"> & {
    * @generated from field: agentshim.frontend.v1.ConversationSource source = 4;
    */
   source: ConversationSource;
+
+  /**
+   * WHAT CONTAINS THIS MESSAGE. Always present — see MessageLineage, whose
+   * top_level_message_id is never empty and is self-referential on a feed row.
+   *
+   * It sits in the PACKAGING half rather than inside any payload arm because
+   * containment is a fact about the message regardless of what the message is,
+   * and because a per-arm copy is a per-arm chance to disagree. It is a low
+   * tag for the same reason uuid and source are: this is what the feed knows
+   * before it knows what it is looking at.
+   *
+   * THIS IS THE ONLY PLACE LINEAGE LIVES on this contract. Records that are
+   * not messages — turn and session boundaries, heartbeats, latency samples,
+   * claim bridges, query lifecycle, usage observations, rewinds, file-plane
+   * diagnostics — are agentshim.core.v1.Envelope payloads and are NOT Messages,
+   * so they have no field here to populate. That is deliberate and structural:
+   * if such a record could carry a top_level_message_id it would become a
+   * phantom feed row, and a page of ten "messages" would silently deliver
+   * several turn boundaries and a short screen. Do not lift this field onto
+   * Envelope, and do not model an unowned record as an empty MessageLineage.
+   *
+   * @generated from field: agentshim.frontend.v1.MessageLineage lineage = 6;
+   */
+  lineage?: MessageLineage | undefined;
 
   /**
    * @generated from oneof agentshim.frontend.v1.Message.payload
@@ -227,7 +303,7 @@ export type Message = Message$1<"agentshim.frontend.v1.Message"> & {
  * Use `create(MessageSchema)` to create a new message.
  */
 export const MessageSchema: GenMessage<Message> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 1);
+  messageDesc(file_agentshim_frontend_v1_feed, 2);
 
 /**
  * The compaction summary bubble: the purple-washed summary block that follows
@@ -265,7 +341,7 @@ export type CompactionSummaryItem = Message$1<"agentshim.frontend.v1.CompactionS
  * Use `create(CompactionSummaryItemSchema)` to create a new message.
  */
 export const CompactionSummaryItemSchema: GenMessage<CompactionSummaryItem> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 2);
+  messageDesc(file_agentshim_frontend_v1_feed, 3);
 
 /**
  * Ephemeral live-typing relay (never persisted, never in snapshots).
@@ -327,7 +403,7 @@ export type TypingDelta = Message$1<"agentshim.frontend.v1.TypingDelta"> & {
  * Use `create(TypingDeltaSchema)` to create a new message.
  */
 export const TypingDeltaSchema: GenMessage<TypingDelta> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 3);
+  messageDesc(file_agentshim_frontend_v1_feed, 4);
 
 /**
  * The daemon's statement that a preview it opened will NEVER be completed.
@@ -372,7 +448,7 @@ export type TypingCut = Message$1<"agentshim.frontend.v1.TypingCut"> & {
  * Use `create(TypingCutSchema)` to create a new message.
  */
 export const TypingCutSchema: GenMessage<TypingCut> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 4);
+  messageDesc(file_agentshim_frontend_v1_feed, 5);
 
 /**
  * The session's retained SystemInit (slash commands, tools, skills, model
@@ -413,7 +489,7 @@ export type SessionInitView = Message$1<"agentshim.frontend.v1.SessionInitView">
  * Use `create(SessionInitViewSchema)` to create a new message.
  */
 export const SessionInitViewSchema: GenMessage<SessionInitView> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 5);
+  messageDesc(file_agentshim_frontend_v1_feed, 6);
 
 /**
  * WHO drove the turn that produced a message.
