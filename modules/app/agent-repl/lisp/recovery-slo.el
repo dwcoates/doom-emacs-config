@@ -49,6 +49,49 @@
 ;; the same conjunction.  The forced path never claims success; it reports
 ;; whatever the re-verification found.
 ;;
+;; WHEN THE CLOCK STARTS, AND THE RULE THAT KEEPS IT HONEST.  There are two
+;; independent pieces of evidence that a workspace's link went away, and a
+;; real bounce produces one, the other, or both:
+;;
+;;   the ANNOUNCEMENT — the daemon says it is bouncing (or Emacs orders the
+;;            bounce itself), which opens the expected-restart window
+;;            (lisp/daemon.el).  This module subscribes to
+;;            `agent-repl-frontend-expected-restart-armed-functions';
+;;   the DOWN EDGE — an established UDS link drops (the sentinel in
+;;            lisp/frontend-uds.el).
+;;
+;; BOTH must arm, because either can be the only one that happens.  An
+;; ANNOUNCED restart is precisely the case that produces no down-edge WARNING
+;; — the window demotes it to "uds-link: down for the %s restart" — and it is
+;; also the case the verification loop measures, so arming on the down edge
+;; alone measured nothing at all for the bounce that mattered most.  An
+;; UNANNOUNCED drop, symmetrically, has no announcement to arm from and must
+;; still be measured.
+;;
+;; THE RULE, and it is one sentence: ONE WORKSPACE HAS AT MOST ONE IN-FLIGHT
+;; BUDGET, AND ITS START INSTANT IS THE FIRST EVIDENCE THE LINK WENT AWAY —
+;; whichever of the two arrived earlier.  So the two paths cannot double-arm
+;; (a second arming for a workspace that already has an attempt open never
+;; creates a second one) and cannot reset each other's clock (a LATER piece
+;; of evidence never moves the start forward; an EARLIER one — an
+;; announcement decoded after the drop it describes — moves it BACK, because
+;; the outage began then).  Stamps already collected are kept across either,
+;; since they are measurements of the same outage.  A workspace's attempt
+;; ends only when its record is emitted.
+;;
+;; THE ARMING MUST ALSO PRECEDE THE STAMPS, which is the other half of why
+;; the announcement path matters: the emacs signal is stamped while the
+;; reconnect snapshot is being APPLIED (lisp/frontend-state.el), and the
+;; link-up hook this module also subscribes to runs AFTER that same apply
+;; finishes.  A workspace armed only there therefore drops the very stamp its
+;; reconnect produced — a stamp with no attempt to belong to is discarded by
+;; design — and could never satisfy the conjunction from the reconnect that
+;; opened it.  Arming from the announcement and from the down edge puts the
+;; attempt in place BEFORE the snapshot lands, so the stamp has somewhere to
+;; go.  The link-up arming is kept as the backstop for a workspace that had
+;; neither piece of evidence attributed to it (one registered mid-outage,
+;; say), never as the primary edge.
+;;
 ;; ONE RECORD PER WORKSPACE PER RECOVERY carries all of it, at the voice of
 ;; its neighbours and through the same logging helpers, so the SLO's evidence
 ;; is greppable in a single pass on `recovery-slo:'.
@@ -71,6 +114,7 @@
                   "agent-repl-webview-recovery" (reason &optional force))
 
 (defvar agent-repl-uds-snapshot-applied-functions)
+(defvar agent-repl-frontend-expected-restart-armed-functions)
 
 (defcustom agent-repl-recovery-slo-budget-ms 3000
   "Milliseconds a workspace has to satisfy the whole recovery conjunction.
@@ -205,15 +249,51 @@ record itself names which signal was outstanding when it happened."
 
 ;;;; ---- Opening and stamping ----------------------------------------------
 
-(defun agent-repl--recovery-slo-open (ws)
-  "Open a recovery attempt for WS, discarding any attempt already open.
+(defun agent-repl--recovery-slo-open (ws &optional at)
+  "Open WS's recovery attempt, dated AT (`float-time'; nil means now).
 
-Discarding rather than keeping: a second snapshot-applied edge is a
-SECOND outage, and carrying the first one's stamps into it would date a
-recovery from a link that has since died."
-  (puthash ws (list :started-at (float-time)) agent-repl--recovery-slo-attempts)
-  (agent-repl--log-verbose ws "recovery-slo: attempt opened ws=%s budget_ms=%d"
-                           ws agent-repl-recovery-slo-budget-ms))
+ONE WORKSPACE, ONE IN-FLIGHT BUDGET, STARTED AT THE FIRST EVIDENCE THE
+LINK WENT AWAY — see this file's commentary.  A workspace that already
+has an attempt open does NOT get a second one: the existing attempt is
+kept with every stamp it has collected, and only its `:started-at' can
+change, and only ever BACKWARDS, when AT proves the outage began earlier
+than the evidence that armed it.  A later piece of evidence about the
+same outage therefore cannot shorten a budget that is already running,
+and neither arming path can reset the other's clock.
+
+Returns non-nil when this call opened a NEW attempt."
+  (let ((existing (gethash ws agent-repl--recovery-slo-attempts))
+        (at (or at (float-time))))
+    (cond
+     ((null existing)
+      (puthash ws (list :started-at at) agent-repl--recovery-slo-attempts)
+      (agent-repl--log-verbose ws "recovery-slo: attempt opened ws=%s budget_ms=%d"
+                               ws agent-repl-recovery-slo-budget-ms)
+      t)
+     ((< at (plist-get existing :started-at))
+      (agent-repl--log-verbose
+       ws "recovery-slo: attempt ws=%s start moved back by %dms — earlier evidence"
+       ws (round (* 1000 (- (plist-get existing :started-at) at))))
+      (puthash ws (plist-put existing :started-at at)
+               agent-repl--recovery-slo-attempts)
+      nil)
+     (t
+      (agent-repl--log-verbose
+       ws "recovery-slo: attempt ws=%s already open — evidence kept, clock unchanged" ws)
+      nil))))
+
+(defun agent-repl--recovery-slo-open-all (at reason)
+  "Open an attempt dated AT for every live workspace, arming the tick.
+REASON names the evidence in the log.  Shared by every arming path so the
+one-budget-per-workspace rule cannot drift between them — two copies of
+this loop is exactly how one of them quietly starts double-arming."
+  (let ((names (agent-repl--live-ws-names)))
+    (agent-repl--log-verbose nil "recovery-slo: arming reason=%s workspaces=%d"
+                             reason (length names))
+    (dolist (ws names)
+      (agent-repl--recovery-slo-open ws at))
+    (when (> (hash-table-count agent-repl--recovery-slo-attempts) 0)
+      (agent-repl--recovery-slo-arm))))
 
 (defun agent-repl--recovery-slo-note (ws signal)
   "Stamp SIGNAL for WS, if an attempt is open and SIGNAL is unstamped.
@@ -446,15 +526,45 @@ one workspace's fault must not strand the SLO for every other."
     (cancel-timer agent-repl--recovery-slo-timer))
   (setq agent-repl--recovery-slo-timer nil))
 
+(defun agent-repl--recovery-slo-on-restart-announcement (armed-at)
+  "Arm every live workspace because an expected-restart window opened at ARMED-AT.
+
+Subscriber for `agent-repl-frontend-expected-restart-armed-functions',
+which covers BOTH kinds of announcement — the daemon's own
+(`agent-repl-frontend-note-restart-announcement') and the deploy-initiated
+one — because both open the same window and both are the same outage.
+
+ARMED-AT IS THE WINDOW'S INSTANT, NOT THIS FUNCTION'S.  An announced
+restart's clock starts when the outage begins, and dating it from the
+moment the announcement finished being decoded and dispatched would
+quietly hand the SLO back however long that took."
+  (agent-repl--recovery-slo-open-all armed-at "restart-announcement"))
+
+(defun agent-repl--recovery-slo-on-link-down ()
+  "Arm every live workspace because an ESTABLISHED link just dropped.
+Called from the UDS sentinel's down transition (lisp/frontend-uds.el).
+Dated NOW, which is the drop.  An unannounced drop has no announcement to
+arm from and must still be measured; an announced one reaches here too and
+is absorbed by the one-budget rule in `agent-repl--recovery-slo-open'."
+  (agent-repl--recovery-slo-open-all (float-time) "link-down"))
+
 (defun agent-repl--recovery-slo-on-link-up ()
-  "Open an attempt for every live workspace when the daemon link comes back.
+  "Arm any live workspace still without an attempt when the link comes back.
 Subscriber for `agent-repl-uds-snapshot-applied-functions' — the same
 edge the host webview sweep runs on, so the SLO measures exactly the
-recovery that sweep is trying to perform."
-  (dolist (ws (agent-repl--live-ws-names))
-    (agent-repl--recovery-slo-open ws))
-  (when (> (hash-table-count agent-repl--recovery-slo-attempts) 0)
-    (agent-repl--recovery-slo-arm)))
+recovery that sweep is trying to perform.
+
+THE BACKSTOP, NOT THE PRIMARY EDGE.  A workspace armed only here has
+already missed the emacs stamp of the snapshot whose application ran this
+hook, so it could not satisfy the conjunction from that reconnect; the
+announcement and down-edge paths are what put the attempt in place first.
+This one still runs so a workspace with neither piece of evidence
+attributed to it is measured rather than ignored, and it cannot disturb
+an attempt already open."
+  (agent-repl--recovery-slo-open-all (float-time) "link-up"))
+
+(add-hook 'agent-repl-frontend-expected-restart-armed-functions
+          #'agent-repl--recovery-slo-on-restart-announcement)
 
 ;; ARMED AFTER the webview sweep's own subscriber, so the attempt a
 ;; workspace opens is measured against a sweep that has already been issued
