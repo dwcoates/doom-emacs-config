@@ -1045,6 +1045,82 @@ is handed back."
     (agent-repl--restore-retracted-prompt "test-ws")
     (should-not (agent-repl--ws-get "test-ws" :sent-turn))))
 
+;;;; ---- agent-repl--restore-undelivered-prompt ----
+
+(defmacro agent-repl-cmd-test--with-undelivered (&rest body)
+  "Run BODY with WS \"test-ws\" holding a live input buffer and a sent turn.
+`r_9' is the in-flight request id and \"write a test\" its raw text, so a
+nack for `r_9' is the never-delivered case and a nack for any other id is
+one that arrived after the workspace moved on."
+  (declare (indent 0))
+  `(agent-repl-test--with-clean-state
+     (let ((input-buf (generate-new-buffer " *undelivered-input*")))
+       (unwind-protect
+           (progn
+             (agent-repl--ws-put "test-ws" :input-buffer input-buf)
+             (agent-repl--ws-put "test-ws" :sent-turn
+                                 '(:request-id "r_9" :raw "write a test"))
+             ,@body)
+         (kill-buffer input-buf)))))
+
+(ert-deftest agent-repl-cmd-test-restore-undelivered/puts-the-words-back ()
+  "A prompt the daemon never delivered lands back in the input buffer."
+  (agent-repl-cmd-test--with-undelivered
+    (agent-repl--restore-undelivered-prompt "test-ws" "r_9" "write a test" "no live shim connection")
+    (should (equal (with-current-buffer input-buf (buffer-string)) "write a test"))))
+
+(ert-deftest agent-repl-cmd-test-restore-undelivered/clears-its-own-sent-turn ()
+  "The turn the nack names never began, so nothing is left recording it."
+  (agent-repl-cmd-test--with-undelivered
+    (agent-repl--restore-undelivered-prompt "test-ws" "r_9" "write a test" "no live shim connection")
+    (should-not (agent-repl--ws-get "test-ws" :sent-turn))))
+
+(ert-deftest agent-repl-cmd-test-restore-undelivered/keeps-a-later-sent-turn ()
+  "A late nack for an older prompt must not retire the turn now in flight."
+  (agent-repl-cmd-test--with-undelivered
+    (agent-repl--restore-undelivered-prompt "test-ws" "r_8" "an older prompt" "no live shim connection")
+    (should (equal (agent-repl--ws-get "test-ws" :sent-turn)
+                   '(:request-id "r_9" :raw "write a test")))))
+
+(ert-deftest agent-repl-cmd-test-restore-undelivered/restores-a-prompt-the-sent-turn-forgot ()
+  "The words come back from the nack's own copy, not from `:sent-turn'.
+A reentrant ack settles the send from inside its write, before the success
+continuation records the turn — so a restore that read `:sent-turn' would
+find nothing and drop the very text it exists to save."
+  (agent-repl-cmd-test--with-undelivered
+    (agent-repl--ws-put "test-ws" :sent-turn nil)
+    (agent-repl--restore-undelivered-prompt "test-ws" "r_9" "write a test" "no live shim connection")
+    (should (equal (with-current-buffer input-buf (buffer-string)) "write a test"))))
+
+(ert-deftest agent-repl-cmd-test-restore-undelivered/never-restores-over-a-draft ()
+  "A draft typed since the send is not overwritten to save the prompt."
+  (agent-repl-cmd-test--with-undelivered
+    (with-current-buffer input-buf (insert "a newer draft"))
+    (agent-repl--restore-undelivered-prompt "test-ws" "r_9" "write a test" "no live shim connection")
+    (should (equal (with-current-buffer input-buf (buffer-string)) "a newer draft"))))
+
+(ert-deftest agent-repl-cmd-test-restore-undelivered/survives-a-dead-input-buffer ()
+  "A nack whose input buffer died is logged, never signalled."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "test-ws" :input-buffer (generate-new-buffer " *dead*"))
+    (kill-buffer (agent-repl--ws-get "test-ws" :input-buffer))
+    (agent-repl--ws-put "test-ws" :sent-turn '(:request-id "r_9" :raw "write a test"))
+    (agent-repl--restore-undelivered-prompt "test-ws" "r_9" "write a test" "no live shim connection")
+    (should-not (agent-repl--ws-get "test-ws" :sent-turn))))
+
+;;;; ---- agent-repl--restore-prompt-into-input ----
+
+(ert-deftest agent-repl-cmd-test-restore-prompt-into-input/reports-that-it-landed ()
+  "An empty buffer takes the text, and the caller is told so."
+  (agent-repl-cmd-test--with-undelivered
+    (should (agent-repl--restore-prompt-into-input "test-ws" "write a test" "submit-nack"))))
+
+(ert-deftest agent-repl-cmd-test-restore-prompt-into-input/reports-that-a-draft-blocked-it ()
+  "An occupied buffer keeps its draft, and the caller is told nothing landed."
+  (agent-repl-cmd-test--with-undelivered
+    (with-current-buffer input-buf (insert "a newer draft"))
+    (should-not (agent-repl--restore-prompt-into-input "test-ws" "write a test" "submit-nack"))))
+
 ;; The §2.13 queue-command tests (queue-item-label, queue-act,
 ;; agent-repl-queue-run-now / agent-repl-queue-cancel) were deleted in the S9
 ;; endgame: the queue plane is retired daemon-side and the webapp owns the
