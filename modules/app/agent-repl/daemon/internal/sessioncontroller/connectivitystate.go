@@ -360,6 +360,28 @@ func (m *Manager) acquireSettledHibernationLeaseAfter(workspace string, reconcil
 	}
 	state := st.GetState()
 	if workspaceSettled(st) {
+		// THE SECOND GATE, AND IT IS THE ONE THAT SEES ASYNC WORK.
+		// workspaceSettled reads the resolved state and the turn claims folded
+		// into TurnActive, both of which describe a TURN. A workspace whose turn
+		// ended while a spawned agent or a detached shell kept running satisfies
+		// it completely, and hibernating one SIGTERMs a shim with live work in
+		// it — the same blind spot the idle sweeper had.
+		//
+		// IT IS ASKED INSIDE THE LEASE ON PURPOSE. The lease already excludes
+		// every new prompt and turn start until release, so a set read here
+		// cannot go stale between the verdict and StopShim. Reading it before
+		// the lease would reintroduce exactly the check-then-act window the
+		// lease exists to close.
+		//
+		// The refusal is ErrNotSettled and not a new sentinel: every caller of
+		// this lease already treats that as the routine "not now", and an
+		// UNKNOWN set refuses through the same arm because unknown is not empty.
+		if blocked, why := m.InFlight(workspace).Blocks(); blocked {
+			release()
+			m.logf("session-controller: REFUSING to hibernate ws=%q — %s. The resolved state reads %s and holds no turn, so only the in-flight set could see this work",
+				workspace, why, state)
+			return nil, fmt.Errorf("%w: workspace %q holds work in flight: %s", ErrNotSettled, workspace, why)
+		}
 		return release, nil
 	}
 	release()
