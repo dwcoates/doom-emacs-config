@@ -616,3 +616,57 @@ mount itself is the boundary under mock: batch Emacs has no xwidgets."
 
 (provide 'test-webview-recovery)
 ;;; test-webview-recovery.el ends here
+
+;;;; ---- Declaring a destroyed document -------------------------------------
+
+;; WHY THE HOOK EXISTS.  A re-navigation throws the page away, and anything
+;; measuring that page is left measuring a document that no longer exists.
+;; The recovery SLO subscribes so a deploy's own webview refresh, landing
+;; inside an SLO window, is recorded as the harness interfering rather than
+;; as the system failing to recover.
+
+(ert-deftest agent-repl-test-webview-recovery-reload-announces-itself ()
+  "A re-navigation runs the reloaded hook with the workspace and the reason."
+  ;; Arrange
+  (let ((seen nil))
+    (agent-repl-test--with-recovery-sweep _calls
+      (agent-repl-test--with-recovery-ws ((b1 "wsr-announce"))
+        (setq agent-repl-test--recovery-uris
+              (list (cons b1 "http://x/?workspace=%2Fw&build=bid-old")))
+        (let ((agent-repl-webview-recovery-reloaded-functions
+               (list (lambda (ws reason) (push (cons ws reason) seen)))))
+          ;; Act
+          (agent-repl--webview-recovery-repair-buffer
+           b1 "wsr-announce" agent-repl-test--recovery-build
+           "script" "deploy_refresh"))))
+    ;; Assert
+    (should (equal seen '(("wsr-announce" . "deploy_refresh"))))))
+
+(ert-deftest agent-repl-test-webview-recovery-driven-page-announces-nothing ()
+  "A page DRIVEN in place keeps its document, so it announces no destruction."
+  ;; Arrange
+  (let ((seen nil))
+    (agent-repl-test--with-recovery-sweep _calls
+      (agent-repl-test--with-recovery-ws ((b1 "wsr-quiet"))
+        (let ((agent-repl-webview-recovery-reloaded-functions
+               (list (lambda (ws reason) (push (cons ws reason) seen)))))
+          ;; Act
+          (agent-repl--webview-recovery-repair-buffer
+           b1 "wsr-quiet" agent-repl-test--recovery-build
+           "script" "deploy_refresh"))))
+    ;; Assert
+    (should (null seen))))
+
+(ert-deftest agent-repl-test-webview-recovery-reloaded-hook-failure-is-surfaced ()
+  "A failing subscriber is warned about and never aborts the repair."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep _calls
+    (agent-repl-test--with-recovery-ws ((b1 "wsr-badsub"))
+      (setq agent-repl-test--recovery-uris
+            (list (cons b1 "http://x/?workspace=%2Fw&build=bid-old")))
+      (let ((agent-repl-webview-recovery-reloaded-functions
+             (list (lambda (_ws _reason) (error "subscriber boom")))))
+        ;; Act
+        (should (equal 1 (agent-repl--webview-recovery-sweep "deploy_refresh")))
+        ;; Assert
+        (should agent-repl-test--recovery-navigated)))))

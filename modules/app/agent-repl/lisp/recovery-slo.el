@@ -45,9 +45,32 @@
 ;; satisfied within `agent-repl-recovery-slo-budget-ms' is warned about BY
 ;; NAME with WHICH signal is outstanding, force-recovered through the
 ;; machinery that already exists — the webview sweep for the page half, the
-;; ensure/reattach path for the session half — and then RE-VERIFIED against
-;; the same conjunction.  The forced path never claims success; it reports
-;; whatever the re-verification found.
+;; ensure/reattach path for the session half.
+;;
+;; THE DEADLINE JUDGES; IT DOES NOT STOP LOOKING.  A budget breach emits its
+;; verdict and drives the force, and the measurement window STAYS OPEN.  This
+;; is the correction to the shape that shipped first, which closed the attempt
+;; a fixed two seconds after the force and printed whatever it happened to
+;; hold: measured live, every such record was written between fourteen and
+;; thirty-seven seconds BEFORE the recovery it described had finished
+;; happening, and a measurement that ends before its subject does is not a
+;; slow result but a non-result.  The window now ends only on the recovery
+;; ACTUALLY completing, or on a signal becoming definitively unobtainable
+;; (`agent-repl--recovery-slo-unobtainable') — never on a duration.
+;;
+;; AND A FORCED WINDOW CAN NO LONGER REPORT A RECOVERY.  Once this module has
+;; reloaded the page or driven the ensure path, whatever lands afterwards is
+;; the repair arriving, not the system recovering, however honestly its
+;; instant was stamped.  The `forced-recovered' outcome that reported it as a
+;; pass does not exist any more; the vocabulary is
+;; `agent-repl-recovery-slo-outcomes' and `recovered' has exactly one
+;; producer, which refuses to mint it for an attempt the instrument touched.
+;; The same applies to interference this module did not cause: a host-driven
+;; page reload inside the window — which is precisely what `deploy-all.sh'
+;; does as its LAST step, after the restart the window is open across — is
+;; declared through `agent-repl-webview-recovery-reloaded-functions' and the
+;; record says `not-measured' naming the reload, instead of blaming the system
+;; for a page the harness itself destroyed.
 ;;
 ;; WHEN THE CLOCK STARTS, AND THE RULE THAT KEEPS IT HONEST.  There are two
 ;; independent pieces of evidence that a workspace's link went away, and a
@@ -141,15 +164,17 @@
 (defvar agent-repl-uds-snapshot-applied-functions)
 (defvar agent-repl-uds-connected-functions)
 (defvar agent-repl-frontend-expected-restart-armed-functions)
+(defvar agent-repl-webview-recovery-reloaded-functions)
 
 (defcustom agent-repl-recovery-slo-budget-ms 3000
   "Milliseconds a workspace has to satisfy the whole recovery conjunction.
 Counted from the snapshot-applied edge — the first instant at which the
 daemon's state of the world has landed and recovery is answerable at all.
-A workspace still outstanding at the budget is warned about and
-force-recovered; it is NOT a hard failure, because the forced path may
-still bring it back inside the following moments and the record says
-which of the two outcomes actually happened."
+A workspace still outstanding at the budget is warned about with an
+`outcome=budget-breach' record and force-recovered.  That record is the
+SLO's verdict and it is final: a conjunction satisfied after the force is
+the force working, not the budget having been met, and it closes the
+attempt as `not-measured' rather than as a pass."
   :type 'integer
   :group 'agent-repl)
 
@@ -174,16 +199,6 @@ module chooses, NOT a safety mechanism: the crash this rate once
 amplified is prevented structurally in
 `agent-repl--frontend-webview-read-script', and lowering the cadence
 alone would only have made it rarer."
-  :type 'integer
-  :group 'agent-repl)
-
-(defcustom agent-repl-recovery-slo-reverify-ms 2000
-  "Milliseconds the forced path is given before its re-verification rules.
-The forced recovery drives a page reload or a fresh ensure, neither of
-which is instantaneous; re-verifying immediately would report the
-failure the force was issued to repair.  The re-verification is still a
-verification and not a wait: it reads the same conjunction, and reports
-whatever it finds."
   :type 'integer
   :group 'agent-repl)
 
@@ -214,14 +229,40 @@ in this table that printing could ever follow into freed memory.")
 (defvar agent-repl--recovery-slo-timer nil
   "The repeating timer driving `agent-repl--recovery-slo-tick', or nil.")
 
+(defvar agent-repl--recovery-slo-outage nil
+  "Identity of the OPEN outage, or nil when none is open.
+
+ONE BOUNCE MUST PRODUCE ONE ROUND OF RECORDS, and this is what makes that
+structural rather than hoped for.  Attempts alone could not carry the
+rule: they are removed as each workspace's record is emitted, so any
+later arming edge — and a reconnect produces several — found an empty
+table, opened a whole fresh round for a bounce that was already over, and
+emitted a second set of records with every delta unstamped.  Measured
+live that was a second round about twenty-eight seconds behind the first,
+all `-1', read by the loop as total recovery failure.
+
+An outage is OPENED only by evidence that the link went away (the restart
+announcement or the down edge) and is CLOSED only when the last attempt
+it opened has emitted its record.  Every other arming edge may JOIN an
+open outage and may never start one, so a snapshot apply that belongs to
+no outage measures nothing, which is exactly what it has to measure.")
+
+(defvar agent-repl--recovery-slo-outage-seq 0
+  "Monotonic counter minting `agent-repl--recovery-slo-outage' identities.")
+
 (defvar agent-repl--recovery-slo-excluded (make-hash-table :test 'equal)
-  "Workspaces last recorded as NOT MEASURED, mapped to when that was said.
+  "Workspaces recorded as NOT MEASURED, mapped to the outage that said so.
 Kept so an exclusion is stated ONCE per outage rather than once per
 arming path — three armings of the same bounce must not print the same
 non-measurement three times — while a LATER outage still restates it.
-The staleness window is the module's own budget plus its re-verification,
-i.e. the longest a single measured recovery can last, so an entry can
-only go stale after the outage that wrote it is over.")
+
+KEYED ON THE OUTAGE IDENTITY, NOT ON A CLOCK.  It used to go stale after
+the budget plus the re-verification, on the reasoning that no single
+measured recovery could last longer than that; a measurement window that
+now stays open until the recovery it measures actually finishes has no
+such bound, and a duration was never what the question was about anyway.
+The question is `did THIS outage already say it', which the outage
+identity answers exactly.")
 
 (defvar agent-repl-recovery-slo-link-up-function
   (lambda () (agent-repl--uds-connected-p))
@@ -297,11 +338,8 @@ still sees the whole population."
 (defun agent-repl--recovery-slo-exclusion-fresh-p (ws)
   "Return non-nil when WS's non-measurement was already stated this outage."
   (let ((last (gethash ws agent-repl--recovery-slo-excluded)))
-    (and last
-         (< (- (float-time) last)
-            (/ (float (+ agent-repl-recovery-slo-budget-ms
-                         agent-repl-recovery-slo-reverify-ms))
-               1000.0)))))
+    (and last agent-repl--recovery-slo-outage
+         (equal last agent-repl--recovery-slo-outage))))
 
 (defun agent-repl--recovery-slo-record-exclusion (ws reason)
   "Record once that WS is out of scope for REASON, and return non-nil if said.
@@ -314,20 +352,44 @@ from one the instrument forgot about.  The record shares the
 returns the complete population, and it is logged rather than warned —
 an out-of-scope workspace is a precondition, not a failure."
   (unless (agent-repl--recovery-slo-exclusion-fresh-p ws)
-    (puthash ws (float-time) agent-repl--recovery-slo-excluded)
+    (puthash ws agent-repl--recovery-slo-outage agent-repl--recovery-slo-excluded)
     (agent-repl--log ws "recovery-slo: ws=%s outcome=not-measured reason=%s"
                      ws (substring (symbol-name reason) 1))
     t))
 
 ;;;; ---- The conjunction ---------------------------------------------------
 
+(defun agent-repl--recovery-slo-scope (attempt)
+  "Return the signals ATTEMPT's conjunction actually requires.
+
+A SIGNAL THE WORKSPACE CANNOT PRODUCE IS NOT A SIGNAL IT IS FAILING TO
+PRODUCE.  A workspace admitted on its live SESSION alone — no page, and
+none owed — has nothing that can re-adopt a snapshot, so demanding the
+`webapp' arm of the conjunction from it makes it outstanding forever on a
+signal that does not exist for it.  Live records show it: workspaces
+closing with `outstanding=webapp,wire' whose page had never been mounted
+at all, indistinguishable in the log from a page that was mounted and
+broken.  So the scope is decided ONCE, when the attempt opens and the
+workspace's shape is still the pre-outage one, and the record prints it
+as `scope=' so a reader sees which conjunction was actually applied.
+
+Stored as a comma-joined STRING rather than a list, to keep every value
+in `agent-repl--recovery-slo-attempts' a scalar — see that table's
+docstring for the crash behind that invariant.  An attempt with no stored
+scope takes the whole conjunction."
+  (let ((scope (plist-get attempt :scope)))
+    (if (stringp scope)
+        (mapcar #'intern (split-string scope "," t))
+      agent-repl-recovery-slo-signals)))
+
 (defun agent-repl--recovery-slo-outstanding (attempt)
   "Return the signals ATTEMPT still lacks, in `agent-repl-recovery-slo-signals' order.
 nil means the conjunction is satisfied.  Order is fixed so two warnings
-about the same shortfall read identically."
+about the same shortfall read identically, and the population is
+ATTEMPT's own scope — see `agent-repl--recovery-slo-scope'."
   (cl-remove-if (lambda (signal)
                   (plist-get attempt (intern (format ":%s" signal))))
-                agent-repl-recovery-slo-signals))
+                (agent-repl--recovery-slo-scope attempt)))
 
 (defun agent-repl--recovery-slo-base (attempt)
   "Return the instant ATTEMPT's deltas and budget are counted from, or nil.
@@ -379,25 +441,83 @@ not recovered while its wire is still silent."
   (if (agent-repl--recovery-slo-outstanding attempt)
       -1
     (let ((deltas (mapcar (lambda (s) (agent-repl--recovery-slo-delta-ms attempt s))
-                          agent-repl-recovery-slo-signals)))
+                          (agent-repl--recovery-slo-scope attempt))))
       (apply #'max deltas))))
 
 ;;;; ---- The canonical record ----------------------------------------------
 
-(defun agent-repl--recovery-slo-emit (ws attempt outcome)
-  "Emit THE record for WS's ATTEMPT under OUTCOME, returning its total gap.
+(defconst agent-repl-recovery-slo-outcomes
+  '("recovered" "budget-breach" "unrecovered" "not-measured")
+  "Every outcome a `recovery-slo:' record can carry, and the whole vocabulary.
+
+`recovered' is THE ONLY PASS, and it is reachable only from
+`agent-repl--recovery-slo-terminal-outcome', which refuses to mint it for
+an attempt this instrument touched.  There is deliberately no
+`forced-recovered': a conjunction satisfied AFTER the instrument reloaded
+the page or drove the ensure path is a measurement of the instrument's
+own repair, reported in a field whose entire purpose is to say how long
+the SYSTEM took.  Removing the outcome is what makes that unrepresentable
+rather than merely discouraged.
+
+`budget-breach' is the SLO verdict and nothing else — the deadline passed
+with the conjunction unsatisfied.  It does NOT close the measurement: see
+`agent-repl--recovery-slo-breach'.
+
+`unrecovered' is terminal and means a signal became definitively
+UNOBTAINABLE, never merely late.
+
+`not-measured' is terminal and means the measurement was invalidated —
+by the instrument's own force, by a host-driven page reload, or by the
+workspace going away — plus the pre-arming out-of-scope record.")
+
+(defun agent-repl--recovery-slo-terminal-outcome (attempt reason)
+  "Return (OUTCOME . REASON) for the terminal record on ATTEMPT.
+
+THE ONLY PRODUCER OF `recovered', and the reason this module can no
+longer fabricate a pass.  Three cases, in the order they exclude each
+other:
+
+  - a signal is still outstanding — the attempt is closing because that
+    signal is UNOBTAINABLE, which REASON names, and the outcome is
+    `unrecovered'.  It is never `recovered' and never silently dropped;
+
+  - the conjunction is complete but the instrument INTERFERED, either by
+    forcing (`:forced') or because a host-driven reload destroyed the
+    page mid-window (`:intervened').  Every stamp is still a real arrival
+    instant, but what arrived is the repair, so the record says
+    `not-measured' and names what interfered.  This is the case that used
+    to print `forced-recovered' and be counted as a pass;
+
+  - the conjunction is complete and nothing touched it: `recovered', the
+    only outcome the SLO may be read as passing on."
+  (let ((outstanding (agent-repl--recovery-slo-outstanding attempt))
+        (intervened (plist-get attempt :intervened)))
+    (cond
+     (outstanding (cons "unrecovered" (or reason "unobtainable")))
+     (intervened (cons "not-measured" intervened))
+     ((plist-get attempt :forced) (cons "not-measured" "slo-force"))
+     (t (cons "recovered" "none")))))
+
+(defun agent-repl--recovery-slo-emit (ws attempt outcome &optional reason)
+  "Emit THE record for WS's ATTEMPT under OUTCOME and REASON, returning its total gap.
 
 ONE record per workspace per recovery, carrying every per-signal delta
 and the total, so the SLO's whole evidence is one `recovery-slo:' grep.
-Emitted at `agent-repl--log' for an outcome inside budget and at
-`agent-repl--warn' otherwise — a breach is not a debug detail, and the
-record itself names which signal was outstanding when it happened."
+Emitted at `agent-repl--log' for an outcome that is not a failure and at
+`agent-repl--warn' for one that is — a breach is not a debug detail, and
+the record itself names which signal was outstanding when it happened.
+
+EVERY MILLISECOND FIELD IS AN ARRIVAL INSTANT OR IT IS -1.  Nothing here
+is derived from the moment the record is written, defaulted, or
+back-filled: `agent-repl--recovery-slo-delta-ms' reads the stamp the
+signal itself wrote and answers -1 when there is none."
   (let* ((outstanding (agent-repl--recovery-slo-outstanding attempt))
          (total (agent-repl--recovery-slo-total-ms attempt))
-         (line (concat "recovery-slo: ws=%s outcome=%s emacs_ms=%d webapp_ms=%d "
+         (line (concat "recovery-slo: ws=%s outcome=%s reason=%s "
+                       "emacs_ms=%d webapp_ms=%d "
                        "wire_ms=%d total_ms=%d outage_ms=%d budget_ms=%d "
-                       "forced=%s probe=%s outstanding=%s"))
-         (args (list ws outcome
+                       "forced=%s probe=%s scope=%s outstanding=%s"))
+         (args (list ws outcome (or reason "none")
                      (agent-repl--recovery-slo-delta-ms attempt 'emacs)
                      (agent-repl--recovery-slo-delta-ms attempt 'webapp)
                      (agent-repl--recovery-slo-delta-ms attempt 'wire)
@@ -414,18 +534,28 @@ record itself names which signal was outstanding when it happened."
                      ;; with `probe=present' it is a real, measured recovery
                      ;; that has not finished.
                      (or (plist-get attempt :probe) "silent")
+                     (mapconcat #'symbol-name
+                                (agent-repl--recovery-slo-scope attempt) ",")
                      (if outstanding
                          (mapconcat #'symbol-name outstanding ",")
                        "none"))))
-    (if outstanding
-        (apply #'agent-repl--warn ws line args)
-      (apply #'agent-repl--log ws line args))
+    ;; WARNED ON A FAILURE, LOGGED ON A NON-FAILURE, and `not-measured' is
+    ;; the second kind however incomplete it looks: the instrument invalidated
+    ;; its own measurement, which is a statement about the instrument and not
+    ;; an accusation against the system.
+    (if (member outcome '("recovered" "not-measured"))
+        (apply #'agent-repl--log ws line args)
+      (apply #'agent-repl--warn ws line args))
     total))
 
 ;;;; ---- Opening and stamping ----------------------------------------------
 
-(defun agent-repl--recovery-slo-open (ws &optional at)
+(defun agent-repl--recovery-slo-open (ws &optional at scope)
   "Open WS's recovery attempt, dated AT (`float-time'; nil means now).
+
+SCOPE is the signal list the conjunction requires of WS, decided by the
+caller from WS's shape when the outage began; nil takes the whole
+conjunction.  See `agent-repl--recovery-slo-scope'.
 
 ONE WORKSPACE, ONE IN-FLIGHT BUDGET, STARTED AT THE FIRST EVIDENCE THE
 LINK WENT AWAY — see this file's commentary.  A workspace that already
@@ -441,7 +571,11 @@ Returns non-nil when this call opened a NEW attempt."
         (at (or at (float-time))))
     (cond
      ((null existing)
-      (puthash ws (append (list :started-at at)
+      (puthash ws (append (list :started-at at
+                                :scope (mapconcat
+                                        #'symbol-name
+                                        (or scope agent-repl-recovery-slo-signals)
+                                        ","))
                           ;; Armed while the link is already carrying frames:
                           ;; recovery is answerable from this same instant, so
                           ;; the two anchors coincide and the deltas are the
@@ -464,14 +598,73 @@ Returns non-nil when this call opened a NEW attempt."
        ws "recovery-slo: attempt ws=%s already open — evidence kept, clock unchanged" ws)
       nil))))
 
-(defun agent-repl--recovery-slo-open-all (at reason)
+(defun agent-repl--recovery-slo-open-scope (ws)
+  "Return the conjunction WS can actually satisfy, decided at arming time.
+
+The `webapp' arm is required only of a workspace that HAS a page when the
+outage begins, which `agent-repl--frontend-precreate-refusal' answers with
+`:already-mounted' — the same eligibility source
+`agent-repl--recovery-slo-exclusion' rules with, never re-derived here.
+A workspace admitted on its live session alone keeps the two arms it can
+produce, and its record says so in `scope='."
+  (if (eq :already-mounted (agent-repl--frontend-precreate-refusal ws))
+      agent-repl-recovery-slo-signals
+    (cl-remove 'webapp agent-repl-recovery-slo-signals)))
+
+(defun agent-repl--recovery-slo-open-outage (reason)
+  "Open a new outage for REASON, superseding any attempts still measuring.
+
+A SECOND BOUNCE IS NOT A CONTINUATION OF THE FIRST.  An attempt that has
+already seen its link RECONNECT (`:reconnected', stamped by the sentinel's
+own open transition) and is still open when fresh down-evidence arrives is
+measuring an outage that has been overtaken; carrying it forward would
+report the new bounce's recovery against the old one's clock.  It is
+closed with what it actually observed, named `superseded', and the
+workspace is armed afresh below.
+
+RECONNECTED, NOT MERELY ANSWERABLE, and the difference is the ordinary
+announced bounce.  An announcement arms while the daemon is still alive,
+so the attempt is answerable from the instant it opens; the drop it
+PREDICTED then arrives moments later as down-evidence.  Superseding on
+answerability would throw that attempt away and re-date the outage from
+the drop — losing exactly the earlier anchor the announcement path exists
+to provide.  A link that never went down and came back is the same
+unbroken outage seen twice, which is the one-budget rule's whole subject."
+  (dolist (ws (hash-table-keys agent-repl--recovery-slo-attempts))
+    (let ((attempt (gethash ws agent-repl--recovery-slo-attempts)))
+      (when (plist-get attempt :reconnected)
+        (agent-repl--recovery-slo-close ws attempt "superseded"))))
+  (setq agent-repl--recovery-slo-outage-seq (1+ agent-repl--recovery-slo-outage-seq))
+  (setq agent-repl--recovery-slo-outage agent-repl--recovery-slo-outage-seq)
+  (agent-repl--log-verbose nil "recovery-slo: outage OPENED id=%d reason=%s"
+                           agent-repl--recovery-slo-outage reason))
+
+(defun agent-repl--recovery-slo-open-all (at reason &optional start-outage)
   "Open an attempt dated AT for every live workspace, arming the tick.
 REASON names the evidence in the log.  Shared by every arming path so the
 one-budget-per-workspace rule cannot drift between them — two copies of
-this loop is exactly how one of them quietly starts double-arming."
+this loop is exactly how one of them quietly starts double-arming.
+
+START-OUTAGE non-nil marks REASON as evidence the link WENT AWAY, which
+is the only kind of evidence permitted to open an outage.  Without an
+open outage this call arms NOTHING and says so: an edge that belongs to
+no bounce — a snapshot apply on an ordinary connect, or one arriving
+after the bounce's own round of records has been emitted — has no
+recovery to measure, and arming on it is exactly the second, all-`-1'
+round that was misread as total recovery failure."
+  (when start-outage
+    (agent-repl--recovery-slo-open-outage reason))
+  (if (null agent-repl--recovery-slo-outage)
+      (agent-repl--log-verbose
+       nil "recovery-slo: arming reason=%s SKIPPED — no outage open" reason)
+    (agent-repl--recovery-slo-open-all-1 at reason)))
+
+(defun agent-repl--recovery-slo-open-all-1 (at reason)
+  "Arm every live workspace into the OPEN outage, dated AT for REASON."
   (let ((names (agent-repl--live-ws-names)))
-    (agent-repl--log-verbose nil "recovery-slo: arming reason=%s workspaces=%d"
-                             reason (length names))
+    (agent-repl--log-verbose nil "recovery-slo: arming reason=%s workspaces=%d outage=%s"
+                             reason (length names)
+                             agent-repl--recovery-slo-outage)
     (dolist (ws names)
       ;; SCOPE FIRST.  A workspace with nothing to recover is not armed at
       ;; all — it could only breach by construction — but it is never
@@ -485,7 +678,8 @@ this loop is exactly how one of them quietly starts double-arming."
                             (agent-repl--recovery-slo-exclusion ws))))
         (if exclusion
             (agent-repl--recovery-slo-record-exclusion ws exclusion)
-          (agent-repl--recovery-slo-open ws at))))
+          (agent-repl--recovery-slo-open
+           ws at (agent-repl--recovery-slo-open-scope ws)))))
     (when (> (hash-table-count agent-repl--recovery-slo-attempts) 0)
       (agent-repl--recovery-slo-arm))))
 
@@ -500,6 +694,35 @@ A workspace with no open attempt is ignored — see
     (when (and attempt (null (plist-get attempt key)))
       (puthash ws (plist-put attempt key (float-time))
                agent-repl--recovery-slo-attempts))))
+
+(defun agent-repl--recovery-slo-note-intervention (ws reason)
+  "Record that a host action named REASON destroyed WS's page mid-window.
+
+THE MEASURER MUST DECLARE ITS OWN INTERFERENCE.  `bin/deploy-all.sh'
+re-navigates every webview as its LAST step, after the daemon restart the
+SLO window is open across; the page that would report readiness is thrown
+away and a new one booted.  The old records blamed the system for it —
+`outcome=forced-unrecovered outstanding=webapp' on every workspace on the
+host — which is an accusation about a signal the harness itself removed.
+
+The window is NOT closed here, and that is deliberate: the new page is a
+real page and its signal is a real signal, so the measurement keeps
+running and closes when the new page answers.  What the intervention
+changes is what the record may CLAIM — see
+`agent-repl--recovery-slo-terminal-outcome', which can no longer mint
+`recovered' for an attempt that carries one.
+
+FIRST INTERFERENCE WINS: the question is whether this window was
+disturbed at all, and by what first."
+  (let ((attempt (gethash ws agent-repl--recovery-slo-attempts)))
+    (when (and attempt (null (plist-get attempt :intervened)))
+      (puthash ws (plist-put attempt :intervened
+                             (if (and (stringp reason) (not (string-empty-p reason)))
+                                 reason
+                               "host-reload"))
+               agent-repl--recovery-slo-attempts)
+      (agent-repl--log-verbose
+       ws "recovery-slo: ws=%s window disturbed by host reload reason=%s" ws reason))))
 
 (defun agent-repl--recovery-slo-note-emacs (ws)
   "Stamp WS's emacs-side signal: its applied view is the new daemon's."
@@ -785,65 +1008,91 @@ other driven, and the failure is warned about rather than swallowed."
     (error (agent-repl--warn ws "recovery-slo: ws=%s force ensure failed err=%S" ws err))))
 
 (defun agent-repl--recovery-slo-breach (ws attempt)
-  "Report WS's budget breach, force it, and arm the re-verification.
-The breach record is emitted BEFORE the force so the evidence of the
-failure survives whatever the force then does, and `:forced' is set so
-the re-verification's record cannot be mistaken for the first one."
+  "Report WS's budget breach and force it, WITHOUT closing the measurement.
+
+THE VERDICT AND THE MEASUREMENT ARE TWO DIFFERENT THINGS, and conflating
+them is the defect this shape ends.  The deadline is a legitimate
+judgement — an SLO is a deadline — so `budget-breach' is emitted the
+instant the budget elapses with the conjunction unsatisfied, and it is
+the record criterion 6 reads.  What the deadline may NOT do is END the
+measurement: a window that stops looking has not observed anything, and
+the old shape closed the attempt a fixed two seconds later and printed
+whatever it happened to have.  Measured live that produced records
+written fourteen to thirty-seven seconds before the recovery they claimed
+to measure had finished happening.
+
+So the attempt stays open and keeps being evaluated until the signals
+ACTUALLY arrive or become definitively unobtainable
+\(`agent-repl--recovery-slo-unobtainable'), and the terminal record it
+eventually emits carries real arrival instants.
+
+Breached and forced EXACTLY ONCE, which is what stops one outage from
+becoming an unbounded force loop."
   (agent-repl--recovery-slo-emit ws attempt "budget-breach")
+  (setq attempt (plist-put attempt :breached t))
   (puthash ws (plist-put attempt :forced t) agent-repl--recovery-slo-attempts)
-  (agent-repl--recovery-slo-force ws)
-  (run-at-time (/ agent-repl-recovery-slo-reverify-ms 1000.0) nil
-               #'agent-repl--recovery-slo-reverify ws))
+  (agent-repl--recovery-slo-force ws))
 
-(defun agent-repl--recovery-slo-reverify (ws)
-  "Re-read WS's conjunction after a forced recovery and report the outcome.
-NEVER claims recovery on the force's say-so: the outcome is whatever the
-same three signals report now.  The attempt is closed either way —
-`forced-recovered' when the conjunction is finally satisfied,
-`forced-unrecovered' when it is not, and the latter is a warning naming
-what is still missing.
+(defun agent-repl--recovery-slo-close (ws attempt reason)
+  "Emit WS's terminal record for REASON and end its attempt.
+The outcome is minted by `agent-repl--recovery-slo-terminal-outcome' and
+nowhere else, so nothing on this path can name a pass the instrument did
+not observe.  Closing the last attempt closes the outage."
+  (let ((verdict (agent-repl--recovery-slo-terminal-outcome attempt reason)))
+    (agent-repl--recovery-slo-emit ws attempt (car verdict) (cdr verdict)))
+  (remhash ws agent-repl--recovery-slo-attempts)
+  (when (zerop (hash-table-count agent-repl--recovery-slo-attempts))
+    (setq agent-repl--recovery-slo-outage nil)))
 
-IT DOES NOT POLL THE PAGE HERE, AND THAT IS THE WHOLE FIX.  It used to
-call `agent-repl--recovery-slo-poll-webapp' and then re-read the attempt
-on the next line, on the belief that the poll's callback `may have
-stamped the page in place'.  It cannot have: the reply crosses the
-xwidget boundary as an INPUT EVENT, so it is delivered by the command
-loop strictly after this function returns, and the webapp signal was
-therefore unreadable by construction at exactly the moment the forced
-outcome was decided.  Live records show the consequence — every
-`forced-unrecovered' carried `webapp_ms=-1' whatever the page was doing.
-The polling now belongs to the tick alone (`agent-repl--recovery-slo-check'),
-which keeps asking a forced attempt, so each reply lands in the attempt
-before a later tick or this re-verification reads it."
-  (let ((attempt (gethash ws agent-repl--recovery-slo-attempts)))
-    (when attempt
-      (let* ((outcome (if (agent-repl--recovery-slo-outstanding attempt)
-                          "forced-unrecovered"
-                        "forced-recovered")))
-        (agent-repl--recovery-slo-emit ws attempt outcome)
-        (remhash ws agent-repl--recovery-slo-attempts)))))
+(defun agent-repl--recovery-slo-unobtainable (ws attempt)
+  "Return why ATTEMPT's outstanding signals can NEVER arrive for WS, or nil.
+
+THE CLOSE CONDITION IS STRUCTURAL, NOT A TIMER.  An attempt ends when the
+conjunction completes or when something it needs has demonstrably ceased
+to exist; `still waiting' is not one of the answers, however long the
+waiting has gone on.  Three ways a signal becomes unobtainable, each read
+from the state of the world rather than from a clock:
+
+  - the WORKSPACE went away — killed, merged, or reduced to a perspective
+    agent-repl does not own.  Nothing about it can recover;
+
+  - the PAGE went away and none is owed: the workspace's `webapp' arm is
+    outstanding and it has no live frontend buffer to answer through.
+    There is no document to boot, so no probe reply will ever come;
+
+  - the page's BUNDLE PREDATES THE PROBE (`probe=absent', which is only
+    ever latched on a document that reported itself `complete').  That
+    page can answer, and its answer will never carry the hook, so the
+    webapp arm is unobtainable until a deploy replaces it.
+
+Consulted only for an attempt that has already breached and been forced:
+before that, every one of these is a state the force exists to repair,
+and closing on it would report the repair's own precondition as a
+verdict."
+  (let ((outstanding (agent-repl--recovery-slo-outstanding attempt)))
+    (cond
+     ((null outstanding) nil)
+     ((memq (agent-repl--recovery-slo-exclusion ws)
+            '(:not-live :merge-completed :pseudo-workspace))
+      "workspace-gone")
+     ((not (memq 'webapp outstanding)) nil)
+     ((not (buffer-live-p (agent-repl--ws-get ws :frontend-buffer))) "no-page")
+     ((equal (plist-get attempt :probe) "absent") "probe-absent")
+     (t nil))))
 
 ;;;; ---- The tick -----------------------------------------------------------
 
 (defun agent-repl--recovery-slo-check (ws)
   "Advance WS's open attempt by one evaluation of the conjunction.
 
-Returns `recovered', `breached', `pending', or nil when no attempt is
-open.  A workspace already `:forced' is left entirely to its
-re-verification: it must not be breached a second time, which is what
-would turn one outage into an unbounded force loop."
+Returns `recovered', `unrecovered', `breached', `pending', or nil when no
+attempt is open.  A workspace already `:breached' is never breached a
+second time — that is what would turn one outage into an unbounded force
+loop — but it keeps being evaluated until its conjunction completes or a
+signal becomes definitively unobtainable."
   (let ((attempt (gethash ws agent-repl--recovery-slo-attempts)))
     (cond
      ((null attempt) nil)
-     ;; A FORCED ATTEMPT IS STILL POLLED.  It must not be breached a second
-     ;; time — that is what would turn one outage into an unbounded force
-     ;; loop — but its re-verification is a READ, and the only thing that
-     ;; produces the page's answer to read is a poll issued at least one
-     ;; command-loop turn earlier.  Stopping the polling here is what left
-     ;; every forced outcome blind to the page.
-     ((plist-get attempt :forced)
-      (agent-repl--recovery-slo-poll-webapp ws)
-      'pending)
      ;; The link has not come back yet, so there is nothing to ask and
      ;; nothing to rule on: no page can have re-adopted a snapshot that has
      ;; not been sent.  Breaching here would report the DAEMON's downtime as
@@ -851,17 +1100,25 @@ would turn one outage into an unbounded force loop."
      ;; does not exist — which is exactly what the live records showed.
      ((null (agent-repl--recovery-slo-base attempt)) 'pending)
      (t
+      ;; A BREACHED ATTEMPT IS STILL POLLED, because the page's answer is
+      ;; the only thing that can end it and the reply crosses the xwidget
+      ;; boundary as an input event delivered strictly after this returns.
       (agent-repl--recovery-slo-poll-webapp ws)
       (let* ((attempt (gethash ws agent-repl--recovery-slo-attempts))
              (elapsed-ms (round (* 1000 (- (float-time)
                                            (agent-repl--recovery-slo-base
-                                            attempt))))))
+                                            attempt)))))
+             (unobtainable (and (plist-get attempt :breached)
+                                (agent-repl--recovery-slo-unobtainable ws attempt))))
         (cond
          ((null (agent-repl--recovery-slo-outstanding attempt))
-          (agent-repl--recovery-slo-emit ws attempt "recovered")
-          (remhash ws agent-repl--recovery-slo-attempts)
+          (agent-repl--recovery-slo-close ws attempt nil)
           'recovered)
-         ((>= elapsed-ms agent-repl-recovery-slo-budget-ms)
+         (unobtainable
+          (agent-repl--recovery-slo-close ws attempt unobtainable)
+          'unrecovered)
+         ((and (not (plist-get attempt :breached))
+               (>= elapsed-ms agent-repl-recovery-slo-budget-ms))
           (agent-repl--recovery-slo-breach ws attempt)
           'breached)
          (t 'pending)))))))
@@ -872,7 +1129,8 @@ A workspace whose check signals is warned about and the tick continues:
 one workspace's fault must not strand the SLO for every other."
   (let ((open (hash-table-count agent-repl--recovery-slo-attempts)))
     (if (zerop open)
-        (agent-repl--recovery-slo-disarm)
+        (progn (setq agent-repl--recovery-slo-outage nil)
+               (agent-repl--recovery-slo-disarm))
       (dolist (ws (hash-table-keys agent-repl--recovery-slo-attempts))
         (condition-case err
             (agent-repl--recovery-slo-check ws)
@@ -903,16 +1161,21 @@ one — because both open the same window and both are the same outage.
 ARMED-AT IS THE WINDOW'S INSTANT, NOT THIS FUNCTION'S.  An announced
 restart's clock starts when the outage begins, and dating it from the
 moment the announcement finished being decoded and dispatched would
-quietly hand the SLO back however long that took."
-  (agent-repl--recovery-slo-open-all armed-at "restart-announcement"))
+quietly hand the SLO back however long that took.
+
+An announcement is EVIDENCE THE LINK IS GOING AWAY, so it may open an
+outage."
+  (agent-repl--recovery-slo-open-all armed-at "restart-announcement" t))
 
 (defun agent-repl--recovery-slo-on-link-down ()
   "Arm every live workspace because an ESTABLISHED link just dropped.
 Called from the UDS sentinel's down transition (lisp/frontend-uds.el).
 Dated NOW, which is the drop.  An unannounced drop has no announcement to
 arm from and must still be measured; an announced one reaches here too and
-is absorbed by the one-budget rule in `agent-repl--recovery-slo-open'."
-  (agent-repl--recovery-slo-open-all (float-time) "link-down"))
+is absorbed by the one-budget rule in `agent-repl--recovery-slo-open'.
+
+A down edge is EVIDENCE THE LINK WENT AWAY, so it may open an outage."
+  (agent-repl--recovery-slo-open-all (float-time) "link-down" t))
 
 (defun agent-repl--recovery-slo-on-link-open ()
   "Mark every open attempt answerable: the link is carrying frames again.
@@ -929,9 +1192,14 @@ since the first of them."
   (let ((now (float-time)))
     (dolist (ws (hash-table-keys agent-repl--recovery-slo-attempts))
       (let ((attempt (gethash ws agent-repl--recovery-slo-attempts)))
+        ;; `:reconnected' is stamped whether or not the anchor moves: it is
+        ;; the record that THIS attempt's link went away and came back, which
+        ;; is what tells a genuinely new bounce from the drop an announcement
+        ;; already predicted — see `agent-repl--recovery-slo-open-outage'.
+        (setq attempt (plist-put attempt :reconnected t))
         (unless (plist-get attempt :answerable-at)
-          (puthash ws (plist-put attempt :answerable-at now)
-                   agent-repl--recovery-slo-attempts))))))
+          (setq attempt (plist-put attempt :answerable-at now)))
+        (puthash ws attempt agent-repl--recovery-slo-attempts)))))
 
 (defun agent-repl--recovery-slo-on-link-up ()
   "Arm any live workspace still without an attempt when the link comes back.
@@ -945,8 +1213,19 @@ hook, so it could not satisfy the conjunction from that reconnect; the
 announcement and down-edge paths are what put the attempt in place first.
 This one still runs so a workspace with neither piece of evidence
 attributed to it is measured rather than ignored, and it cannot disturb
-an attempt already open."
+an attempt already open.
+
+IT MAY NEVER OPEN AN OUTAGE, only join one.  A snapshot apply is not
+evidence that a link went away — it is what an ORDINARY connect produces,
+and a reconnect produces several — so arming on it unconditionally
+started a fresh round of budgets for a bounce whose records had already
+been emitted.  That is the second, all-`-1' round the verification loop
+kept reading as total recovery failure; refusing to start an outage here
+is what makes one bounce produce one record per workspace."
   (agent-repl--recovery-slo-open-all (float-time) "link-up"))
+
+(add-hook 'agent-repl-webview-recovery-reloaded-functions
+          #'agent-repl--recovery-slo-note-intervention)
 
 (add-hook 'agent-repl-frontend-expected-restart-armed-functions
           #'agent-repl--recovery-slo-on-restart-announcement)

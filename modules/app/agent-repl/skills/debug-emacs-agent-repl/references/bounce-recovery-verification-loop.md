@@ -207,11 +207,46 @@ met; it is unmeasured.
    - A dead widget (`nil` from the live-widget call) is a finding, not a zero.
 
 6. **Per-workspace recovery within the 3s SLO.**
-   - The canonical SLO record and the forced re-hydration behind it are owned
-     by the `feat/workspace-recovery-slo` work; read that branch for the record
-     name and the measurement, and do not restate its internals here. Until it
-     is in master, measure against whatever it defines rather than inventing a
-     second timing.
+   - The canonical record is `recovery-slo:` in each workspace's `emacs.log`,
+     one per workspace per outage, owned by `lisp/recovery-slo.el`. Do not
+     invent a second timing.
+   - **`outcome=recovered` IS THE ONLY PASS.** The vocabulary is closed
+     (`agent-repl-recovery-slo-outcomes`) and each value means one thing:
+     - `recovered` — the conjunction completed inside the budget with nothing
+       having touched the workspace. The only outcome that satisfies this
+       criterion.
+     - `budget-breach` — the SLO verdict: the deadline passed with a signal
+       outstanding. This criterion FAILED for that workspace. It is emitted at
+       the deadline and does NOT end the measurement.
+     - `not-measured` — the measurement was invalidated, and `reason=` says by
+       what: `slo-force` (the instrument's own forced repair), a sweep reason
+       such as `deploy_refresh` (the harness reloaded the page mid-window), a
+       scope refusal, or `superseded`. NOT a pass and NOT a failure — an
+       unmeasured criterion, which `observability-gaps.md` governs.
+     - `unrecovered` — a signal became definitively unobtainable
+       (`reason=no-page`, `probe-absent`, `workspace-gone`). A real failure.
+   - There is deliberately no `forced-recovered`. A conjunction satisfied after
+     the instrument reloaded the page is the repair working, not the budget
+     being met; historical records carrying it, and any `outstanding=none` read
+     as a pass under `forced=yes`, are worthless for this criterion.
+   - `scope=` names the conjunction actually applied. A workspace with no page
+     when the outage began is measured on `emacs,wire` only; it is not owed a
+     page signal and its absence is not a failure.
+   - **A `deploy-all` bounce cannot measure this criterion cleanly.** The
+     deploy's own webview refresh lands inside the window and the affected
+     workspaces come back `not-measured reason=deploy_refresh`, correctly.
+     Measure criterion 6 across a `launchctl kickstart` /
+     `agent-repl-frontend-daemon-restart-await` bounce — the same restriction
+     criterion 7 already carries.
+   - **`emacs_ms` is not comparable across single bounces.** It has been seen
+     at 5ms and at 2320ms on identical code, because the anchor differed: an
+     attempt armed while the link was still up dated recovery from the arming,
+     one armed from a genuine announcement dated it from the link reopening.
+     Outage-scoped arming removes that particular split, but `webapp_ms`
+     remains a DETECTION time quantized to `agent-repl-recovery-slo-poll-ms`
+     (500ms), not an arrival time — identical `webapp_ms` across several
+     workspaces means one tick observed them all, not that they converged.
+     Compare distributions across several bounces; never conclude from one.
 
 7. **NO SDK QUERY WAS TERMINATED BY THE BOUNCE.**
    - This is the requirement in its most direct form: a session must not die

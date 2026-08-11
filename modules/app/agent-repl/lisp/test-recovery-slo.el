@@ -78,6 +78,8 @@ attempt's own `:started-at' rather than by waiting."
   (declare (indent 0))
   `(let ((agent-repl--recovery-slo-attempts (make-hash-table :test 'equal))
          (agent-repl--recovery-slo-timer nil)
+         (agent-repl--recovery-slo-outage nil)
+         (agent-repl--recovery-slo-outage-seq 0)
          (agent-repl-test--slo-logs nil)
          (agent-repl-test--slo-forced nil)
          (agent-repl-test--slo-probe-answer "")
@@ -318,10 +320,10 @@ budget breach, so the contract is asserted against the source."
       ;; Assert
       (should (null agent-repl-test--slo-forced)))))
 
-;;;; ---- The re-verification -------------------------------------------------
+;;;; ---- The terminal record after a breach --------------------------------
 
-(ert-deftest agent-repl-test-recovery-slo-reverify-reports-a-repaired-workspace ()
-  "A forced workspace whose conjunction is now satisfied reports as such."
+(ert-deftest agent-repl-test-recovery-slo-forced-completion-is-never-recovered ()
+  "A conjunction completed AFTER the force closes as not-measured, never recovered."
   (agent-repl-test--with-slo
     (agent-repl-test--with-slo-ws "slo-repaired"
       ;; Arrange
@@ -330,42 +332,94 @@ budget breach, so the contract is asserted against the source."
       (agent-repl--recovery-slo-check "slo-repaired")
       (agent-repl-test--slo-satisfy "slo-repaired")
       ;; Act
-      (agent-repl--recovery-slo-reverify "slo-repaired")
+      (agent-repl--recovery-slo-check "slo-repaired")
       ;; Assert
       (let ((record (or (agent-repl-test--slo-record 'info) "")))
-        (should (string-match-p "outcome=forced-recovered" record))
+        (should (string-match-p "outcome=not-measured reason=slo-force" record))
         (should (string-match-p "forced=yes" record))))))
 
-(ert-deftest agent-repl-test-recovery-slo-reverify-never-claims-an-unrepaired-one ()
-  "A forced workspace still missing a signal is reported unrecovered, loudly."
-  (agent-repl-test--with-slo
-    (agent-repl-test--with-slo-ws "slo-unrepaired"
-      ;; Arrange
-      (agent-repl--recovery-slo-open "slo-unrepaired")
-      (agent-repl-test--slo-age "slo-unrepaired" (1+ agent-repl-recovery-slo-budget-ms))
-      (agent-repl--recovery-slo-check "slo-unrepaired")
-      (agent-repl-test--slo-satisfy "slo-unrepaired" 'emacs 'wire)
-      ;; Act
-      (agent-repl--recovery-slo-reverify "slo-unrepaired")
+(ert-deftest agent-repl-test-recovery-slo-terminal-outcome-cannot-mint-a-forced-pass ()
+  "`recovered' is unrepresentable for a forced attempt at its only producer."
+  ;; Arrange
+  (let ((attempt (list :started-at 0.0 :answerable-at 0.0
+                       :emacs 0.1 :webapp 0.2 :wire 0.3 :forced t)))
+    ;; Act
+    (let ((verdict (agent-repl--recovery-slo-terminal-outcome attempt nil)))
       ;; Assert
-      (let ((records (cl-remove-if-not
-                      (lambda (l) (string-match-p "outcome=forced-unrecovered" l))
-                      (agent-repl-test--slo-lines 'warn))))
-        (should (= 1 (length records)))
-        (should (string-match-p "outstanding=webapp" (car records)))))))
+      (should (equal verdict '("not-measured" . "slo-force"))))))
 
-(ert-deftest agent-repl-test-recovery-slo-reverify-closes-the-attempt ()
-  "The re-verification closes the attempt either way — no attempt outlives it."
+(ert-deftest agent-repl-test-recovery-slo-breach-does-not-close-the-attempt ()
+  "The deadline judges and keeps looking: the attempt outlives its breach."
   (agent-repl-test--with-slo
-    (agent-repl-test--with-slo-ws "slo-closed"
+    (agent-repl-test--with-slo-ws "slo-open-past-breach"
       ;; Arrange
-      (agent-repl--recovery-slo-open "slo-closed")
-      (agent-repl-test--slo-age "slo-closed" (1+ agent-repl-recovery-slo-budget-ms))
-      (agent-repl--recovery-slo-check "slo-closed")
+      (agent-repl--recovery-slo-open "slo-open-past-breach")
+      (agent-repl-test--slo-age "slo-open-past-breach"
+                                (1+ agent-repl-recovery-slo-budget-ms))
       ;; Act
-      (agent-repl--recovery-slo-reverify "slo-closed")
+      (should (eq (agent-repl--recovery-slo-check "slo-open-past-breach") 'breached))
       ;; Assert
-      (should (null (gethash "slo-closed" agent-repl--recovery-slo-attempts))))))
+      (should (gethash "slo-open-past-breach" agent-repl--recovery-slo-attempts)))))
+
+(ert-deftest agent-repl-test-recovery-slo-breach-is-emitted-exactly-once ()
+  "A second evaluation past the budget does not re-breach or re-force."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-once"
+      ;; Arrange
+      (agent-repl--recovery-slo-open "slo-once")
+      (agent-repl-test--slo-age "slo-once" (1+ agent-repl-recovery-slo-budget-ms))
+      (agent-repl--recovery-slo-check "slo-once")
+      ;; Act
+      (agent-repl--recovery-slo-check "slo-once")
+      ;; Assert
+      (should (= 1 (length (cl-remove-if-not
+                            (lambda (l) (string-match-p "outcome=budget-breach" l))
+                            (agent-repl-test--slo-lines 'warn))))))))
+
+(ert-deftest agent-repl-test-recovery-slo-dead-page-closes-as-unrecovered ()
+  "A breached attempt whose page is gone closes loudly, naming no-page."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-no-page"
+      ;; Arrange
+      (agent-repl--recovery-slo-open "slo-no-page")
+      (agent-repl-test--slo-satisfy "slo-no-page" 'emacs 'wire)
+      (agent-repl-test--slo-age "slo-no-page" (1+ agent-repl-recovery-slo-budget-ms))
+      (agent-repl--recovery-slo-check "slo-no-page")
+      (kill-buffer (agent-repl--ws-get "slo-no-page" :frontend-buffer))
+      ;; Act
+      (should (eq (agent-repl--recovery-slo-check "slo-no-page") 'unrecovered))
+      ;; Assert
+      (should (string-match-p "outcome=unrecovered reason=no-page"
+                              (or (agent-repl-test--slo-record 'warn) ""))))))
+
+(ert-deftest agent-repl-test-recovery-slo-absent-probe-closes-as-unrecovered ()
+  "A breached attempt on a bundle predating the probe closes, naming probe-absent."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-old-bundle"
+      ;; Arrange
+      (setq agent-repl-test--slo-probe-present nil)
+      (agent-repl--recovery-slo-open "slo-old-bundle")
+      (agent-repl-test--slo-satisfy "slo-old-bundle" 'emacs 'wire)
+      (agent-repl-test--slo-age "slo-old-bundle"
+                                (1+ agent-repl-recovery-slo-budget-ms))
+      (agent-repl--recovery-slo-check "slo-old-bundle")
+      ;; Act
+      (should (eq (agent-repl--recovery-slo-check "slo-old-bundle") 'unrecovered))
+      ;; Assert
+      (should (string-match-p "outcome=unrecovered reason=probe-absent"
+                              (or (agent-repl-test--slo-record 'warn) ""))))))
+
+(ert-deftest agent-repl-test-recovery-slo-unobtainable-is-not-consulted-before-a-breach ()
+  "An unbreached attempt is never closed for a state the force exists to repair."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-early"
+      ;; Arrange
+      (agent-repl--recovery-slo-open "slo-early")
+      (kill-buffer (agent-repl--ws-get "slo-early" :frontend-buffer))
+      ;; Act
+      (should (eq (agent-repl--recovery-slo-check "slo-early") 'pending))
+      ;; Assert
+      (should (gethash "slo-early" agent-repl--recovery-slo-attempts)))))
 
 ;;;; ---- Stamping ------------------------------------------------------------
 
@@ -684,11 +738,16 @@ nothing to force against."
                      '(webapp wire))))))
 
 (ert-deftest agent-repl-test-recovery-slo-link-up-arms-a-workspace-with-no-attempt ()
-  "The link-up backstop still arms a workspace no earlier evidence covered."
+  "The link-up backstop still arms a workspace no earlier evidence covered.
+Inside an OPEN outage only: a snapshot apply that belongs to no bounce has
+no recovery to measure — see
+`agent-repl-test-recovery-slo-snapshot-apply-alone-arms-nothing'."
   (agent-repl-test--with-slo
     (agent-repl-test--with-slo-ws "slo-backstop"
-      ;; Act
-      (agent-repl--recovery-slo-on-link-up)
+      ;; Arrange
+      (let ((agent-repl--recovery-slo-outage 1))
+        ;; Act
+        (agent-repl--recovery-slo-on-link-up))
       ;; Assert
       (should (agent-repl-test--slo-started-at "slo-backstop")))))
 
@@ -772,10 +831,10 @@ stamp is per workspace applied, never per whole snapshot decoded."
       (let ((record (agent-repl-test--slo-record 'info)))
         (should record)
         (should (string-match-p
-                 (concat "\\`recovery-slo: ws=slo-fields outcome=recovered "
+                 (concat "\\`recovery-slo: ws=slo-fields outcome=recovered reason=none "
                          "emacs_ms=-?[0-9]+ webapp_ms=-?[0-9]+ wire_ms=-?[0-9]+ "
                          "total_ms=-?[0-9]+ outage_ms=-?[0-9]+ budget_ms=3000 forced=no "
-                         "probe=present outstanding=none\\'")
+                         "probe=present scope=emacs,webapp,wire outstanding=none\\'")
                  record))))))
 
 (ert-deftest agent-repl-test-recovery-slo-breach-record-field-set-is-pinned ()
@@ -793,10 +852,10 @@ stamp is per workspace applied, never per whole snapshot decoded."
       (let ((record (agent-repl-test--slo-record 'warn)))
         (should record)
         (should (string-match-p
-                 (concat "\\`recovery-slo: ws=slo-breach-fields outcome=budget-breach "
+                 (concat "\\`recovery-slo: ws=slo-breach-fields outcome=budget-breach reason=none "
                          "emacs_ms=-?[0-9]+ webapp_ms=-1 wire_ms=-1 "
                          "total_ms=-1 outage_ms=-?[0-9]+ budget_ms=3000 forced=no "
-                         "probe=present outstanding=webapp,wire\\'")
+                         "probe=present scope=emacs,webapp,wire outstanding=webapp,wire\\'")
                  record))
         (should (equal (cdr (assq 'repair agent-repl-test--slo-forced))
                        "slo-breach-fields"))
@@ -959,8 +1018,8 @@ re-verification reads it."
       (should (plist-get (gethash "slo-forced-poll" agent-repl--recovery-slo-attempts)
                          :webapp)))))
 
-(ert-deftest agent-repl-test-recovery-slo-reverify-reads-a-page-a-tick-already-polled ()
-  "Re-verification reports the page signal a preceding tick's reply stamped."
+(ert-deftest agent-repl-test-recovery-slo-terminal-record-reads-a-page-a-tick-polled ()
+  "The terminal record reports the page signal a preceding tick's reply stamped."
   (agent-repl-test--with-slo
     (agent-repl-test--with-slo-ws "slo-reverify-page"
       ;; Arrange: breach, then the page comes back and a tick polls it.
@@ -971,12 +1030,12 @@ re-verification reads it."
       (agent-repl--recovery-slo-check "slo-reverify-page")
       (setq agent-repl-test--slo-probe-answer
             (json-serialize '(:adopted t :realDataFrames 1)))
-      (agent-repl--recovery-slo-check "slo-reverify-page")
       ;; Act
-      (agent-repl--recovery-slo-reverify "slo-reverify-page")
+      (agent-repl--recovery-slo-check "slo-reverify-page")
       ;; Assert
-      (should (string-match-p "outcome=forced-recovered"
-                              (or (agent-repl-test--slo-record 'info) ""))))))
+      (let ((record (or (agent-repl-test--slo-record 'info) "")))
+        (should (string-match-p "outcome=not-measured reason=slo-force" record))
+        (should (string-match-p "webapp_ms=[0-9]" record))))))
 
 ;;;; ---- The crash hazards --------------------------------------------------
 
@@ -1158,3 +1217,174 @@ refusal, which is a different fact about a different thing."
           (agent-repl--recovery-slo-on-link-down)
           ;; Assert
           (should (gethash "slo-real-ws" agent-repl--recovery-slo-attempts)))))))
+
+;;;; ---- One bounce, one round of records -----------------------------------
+
+(ert-deftest agent-repl-test-recovery-slo-snapshot-apply-alone-arms-nothing ()
+  "A snapshot apply belonging to no outage opens no attempt: no second round."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-no-outage"
+      ;; Arrange: no down-evidence has been seen at all.
+      ;; Act
+      (agent-repl--recovery-slo-on-link-up)
+      ;; Assert
+      (should (zerop (hash-table-count agent-repl--recovery-slo-attempts))))))
+
+(ert-deftest agent-repl-test-recovery-slo-snapshot-apply-joins-an-open-outage ()
+  "The backstop still arms a workspace that appears DURING an open outage."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-early-ws"
+      ;; Arrange
+      (agent-repl--recovery-slo-on-link-down)
+      (agent-repl-test--with-slo-ws "slo-late-ws"
+        ;; Act
+        (agent-repl--recovery-slo-on-link-up)
+        ;; Assert
+        (should (gethash "slo-late-ws" agent-repl--recovery-slo-attempts))))))
+
+(ert-deftest agent-repl-test-recovery-slo-outage-closes-with-its-last-attempt ()
+  "The outage ends when the last record is emitted, so the next apply is inert."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-last"
+      ;; Arrange
+      (setq agent-repl-test--slo-probe-answer
+            (json-serialize '(:adopted t :realDataFrames 1)))
+      (agent-repl--recovery-slo-on-link-down)
+      (agent-repl-test--slo-satisfy "slo-last")
+      ;; Act
+      (agent-repl--recovery-slo-check "slo-last")
+      ;; Assert
+      (should (null agent-repl--recovery-slo-outage)))))
+
+(ert-deftest agent-repl-test-recovery-slo-new-bounce-supersedes-a-reconnected-attempt ()
+  "Fresh down-evidence after a reconnect closes the stale attempt, naming it."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-super"
+      ;; Arrange
+      (agent-repl--recovery-slo-on-link-down)
+      (agent-repl--recovery-slo-on-link-open)
+      ;; Act
+      (agent-repl--recovery-slo-on-link-down)
+      ;; Assert
+      (should (string-match-p "outcome=unrecovered reason=superseded"
+                              (or (agent-repl-test--slo-record 'warn) ""))))))
+
+(ert-deftest agent-repl-test-recovery-slo-predicted-drop-does-not-supersede ()
+  "The drop an announcement predicted is the same outage, not a new one."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-predicted"
+      ;; Arrange
+      (let ((armed-at (- (float-time) 1.0)))
+        (agent-repl--recovery-slo-on-restart-announcement armed-at)
+        ;; Act
+        (agent-repl--recovery-slo-on-link-down)
+        ;; Assert
+        (should (equal (agent-repl-test--slo-started-at "slo-predicted") armed-at))))))
+
+(ert-deftest agent-repl-test-recovery-slo-exclusion-restates-on-a-later-outage ()
+  "A non-measurement is stated once per outage and again on the next one."
+  (agent-repl-test--with-slo
+    ;; Arrange: an unregistered workspace is out of scope on every arming.
+    (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+               (lambda () (list "slo-gone")))
+              ((symbol-function 'agent-repl--frontend-precreate-refusal)
+               (lambda (_ws) :not-live)))
+      (agent-repl--recovery-slo-on-link-down)
+      (setq agent-repl--recovery-slo-outage nil)
+      ;; Act
+      (agent-repl--recovery-slo-on-link-down)
+      ;; Assert
+      (should (= 2 (length (cl-remove-if-not
+                            (lambda (l) (string-match-p "outcome=not-measured" l))
+                            (agent-repl-test--slo-lines 'info))))))))
+
+;;;; ---- The measurer declaring its own interference ------------------------
+
+(ert-deftest agent-repl-test-recovery-slo-host-reload-is-recorded-as-interference ()
+  "A host-driven page reload inside the window marks the attempt, naming it."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-refreshed"
+      ;; Arrange
+      (agent-repl--recovery-slo-open "slo-refreshed")
+      ;; Act
+      (agent-repl--recovery-slo-note-intervention "slo-refreshed" "deploy-refresh")
+      ;; Assert
+      (should (equal "deploy-refresh"
+                     (plist-get (gethash "slo-refreshed"
+                                         agent-repl--recovery-slo-attempts)
+                                :intervened))))))
+
+(ert-deftest agent-repl-test-recovery-slo-harness-reload-is-not-measured-not-failed ()
+  "A window the harness disturbed closes as not-measured, never as a failure."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-harness"
+      ;; Arrange
+      (setq agent-repl-test--slo-probe-answer
+            (json-serialize '(:adopted t :realDataFrames 1)))
+      (agent-repl--recovery-slo-open "slo-harness")
+      (agent-repl--recovery-slo-note-intervention "slo-harness" "deploy-refresh")
+      (agent-repl-test--slo-satisfy "slo-harness")
+      ;; Act
+      (agent-repl--recovery-slo-check "slo-harness")
+      ;; Assert
+      (let ((record (or (agent-repl-test--slo-record 'info) "")))
+        (should (string-match-p "outcome=not-measured reason=deploy-refresh" record))
+        (should (null (agent-repl-test--slo-lines 'warn)))))))
+
+(ert-deftest agent-repl-test-recovery-slo-first-interference-wins ()
+  "A second reload does not rename the first interference the window suffered."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-twice"
+      ;; Arrange
+      (agent-repl--recovery-slo-open "slo-twice")
+      (agent-repl--recovery-slo-note-intervention "slo-twice" "deploy-refresh")
+      ;; Act
+      (agent-repl--recovery-slo-note-intervention "slo-twice" "recovery_slo_force")
+      ;; Assert
+      (should (equal "deploy-refresh"
+                     (plist-get (gethash "slo-twice"
+                                         agent-repl--recovery-slo-attempts)
+                                :intervened))))))
+
+(ert-deftest agent-repl-test-recovery-slo-interference-without-an-attempt-is-dropped ()
+  "A reload of a workspace with no open window stamps nothing."
+  (agent-repl-test--with-slo
+    ;; Arrange + Act
+    (agent-repl--recovery-slo-note-intervention "slo-absent" "deploy-refresh")
+    ;; Assert
+    (should (null (gethash "slo-absent" agent-repl--recovery-slo-attempts)))))
+
+;;;; ---- The conjunction is scoped to what the workspace can produce --------
+
+(ert-deftest agent-repl-test-recovery-slo-page-less-workspace-drops-the-webapp-arm ()
+  "A workspace admitted on its session alone is not owed a page signal."
+  (agent-repl-test--with-slo
+    (cl-letf (((symbol-function 'agent-repl--frontend-precreate-refusal)
+               (lambda (_ws) :not-gui)))
+      ;; Arrange + Act
+      (let ((scope (agent-repl--recovery-slo-open-scope "slo-headless")))
+        ;; Assert
+        (should (equal scope '(emacs wire)))))))
+
+(ert-deftest agent-repl-test-recovery-slo-mounted-workspace-keeps-the-webapp-arm ()
+  "A workspace that already has a page is owed the whole conjunction."
+  (agent-repl-test--with-slo
+    (cl-letf (((symbol-function 'agent-repl--frontend-precreate-refusal)
+               (lambda (_ws) :already-mounted)))
+      ;; Arrange + Act
+      (let ((scope (agent-repl--recovery-slo-open-scope "slo-mounted")))
+        ;; Assert
+        (should (equal scope agent-repl-recovery-slo-signals))))))
+
+(ert-deftest agent-repl-test-recovery-slo-scoped-attempt-completes-without-the-page ()
+  "A two-arm conjunction is satisfied by its two arms, and says so in scope=."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-scoped"
+      ;; Arrange
+      (agent-repl--recovery-slo-open "slo-scoped" nil '(emacs wire))
+      (agent-repl-test--slo-satisfy "slo-scoped" 'emacs 'wire)
+      ;; Act
+      (should (eq (agent-repl--recovery-slo-check "slo-scoped") 'recovered))
+      ;; Assert
+      (should (string-match-p "outcome=recovered reason=none.*scope=emacs,wire outstanding=none"
+                              (or (agent-repl-test--slo-record 'info) ""))))))
