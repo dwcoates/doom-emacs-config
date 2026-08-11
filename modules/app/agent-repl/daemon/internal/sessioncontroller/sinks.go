@@ -75,6 +75,19 @@ type StateApplier interface {
 	// TurnStarted has not been observed yet still names the turn it is waiting
 	// on: process memory cannot answer that, and the ledger can.
 	ActiveTurnIDs(workspace, claimantSessionID string) ([]string, error)
+	// LiveTaskIDs names every background task with an observed start and no
+	// observed end, BY IDENTITY, and separately counts the live starts that
+	// carried no identity at all.
+	//
+	// It is the async half of the in-flight set (inflightset.go). The count
+	// beside it — live_task_count on WorkspaceState — answers the same question
+	// with a number, which is the right shape for a badge and the wrong one for
+	// a bounce decision: a count cannot distinguish the same two tasks still
+	// running from one that died while another started. The anonymous leg is
+	// returned rather than folded in, because a live task nobody can name makes
+	// the SET unknown and reporting a shorter set would understate what is
+	// running.
+	LiveTaskIDs(workspace string) (ids []string, anonymous int64, err error)
 	// TurnClaimExists answers whether the ledger ever opened a claim under one
 	// turn identity, open or closed. It is what an UNKNOWN-FATE submit is
 	// reconciled against before the queue is allowed to redeliver it.
