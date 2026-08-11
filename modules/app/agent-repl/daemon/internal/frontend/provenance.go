@@ -6,7 +6,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
-// This file owns ConversationItem PROVENANCE on the frontend wire: the single
+// This file owns Message PROVENANCE on the frontend wire: the single
 // place a curated item's ConversationSource may be revised after the curator
 // (translate.go) stamped its own verdict.
 //
@@ -28,9 +28,9 @@ func StampConversationSource(d *frontendv1.ConversationDelta, src frontendv1.Con
 	}
 	if src == frontendv1.ConversationSource_CONVERSATION_SOURCE_UNSPECIFIED {
 		return fmt.Errorf("frontend: refusing to stamp CONVERSATION_SOURCE_UNSPECIFIED on %d item(s) of workspace %q; UNSPECIFIED names a malformed frame, never a provenance",
-			len(d.GetItems()), d.GetWorkspace())
+			len(d.GetMessages()), d.GetWorkspace())
 	}
-	for _, item := range d.GetItems() {
+	for _, item := range d.GetMessages() {
 		if item == nil {
 			return fmt.Errorf("frontend: conversation delta for workspace %q carries a nil item; provenance cannot be stamped on it",
 				d.GetWorkspace())
@@ -43,7 +43,7 @@ func StampConversationSource(d *frontendv1.ConversationDelta, src frontendv1.Con
 // StampItemConversationSource is StampConversationSource for one daemon-composed
 // item that never travels inside a delta — a prompt receipt, a permission card,
 // a system-failure card, a skill body.
-func StampItemConversationSource(item *frontendv1.ConversationItem, src frontendv1.ConversationSource) error {
+func StampItemConversationSource(item *frontendv1.Message, src frontendv1.ConversationSource) error {
 	if item == nil {
 		return fmt.Errorf("frontend: cannot stamp conversation source %s onto a nil item", src)
 	}

@@ -79,7 +79,7 @@ func (c *consumer) withholdKeepAlive(cd *frontendv1.ConversationDelta) int {
 	// SILENT PER ITEM, ACCOUNTED FOR IN ONE RECORD. A ping's window covers a
 	// whole turn's worth of items, so the census below is the canonical record
 	// rather than one line per item.
-	withheld := c.withholdItems(cd, func(item *frontendv1.ConversationItem) withholdVerdict {
+	withheld := c.withholdItems(cd, func(item *frontendv1.Message) withholdVerdict {
 		covered, err := c.keepAliveVerdict(item.GetRequestId(), item.GetTsMs())
 		if err != nil {
 			c.logf("session-controller: keep-alive exclusion READ FAILED ws=%q session=%s seq=%d uuid=%s request_id=%q ts_ms=%d error=%v — the item is SHOWN rather than withheld; hiding real conversation because a bookkeeping table was unreadable is the worse failure",
@@ -93,7 +93,7 @@ func (c *consumer) withholdKeepAlive(cd *frontendv1.ConversationDelta) int {
 	})
 	if withheld > 0 {
 		c.logf("session-controller: keep-alive items WITHHELD ws=%q session=%s seq=%d withheld=%d remaining=%d — the turns stay in the store and stay excluded from every rendering",
-			c.workspace, c.sessionID, cd.GetThroughSeq(), withheld, len(cd.GetItems()))
+			c.workspace, c.sessionID, cd.GetThroughSeq(), withheld, len(cd.GetMessages()))
 	}
 	return withheld
 }

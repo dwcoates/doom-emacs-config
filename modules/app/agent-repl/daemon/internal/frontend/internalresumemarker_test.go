@@ -19,11 +19,11 @@ import (
 
 // markedUserItem is a curated user message whose BODY carries the marker and
 // whose event request id is empty — exactly the shape a file-plane line has.
-func markedUserItem(uuid, requestID string) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{
+func markedUserItem(uuid, requestID string) *frontendv1.Message {
+	return &frontendv1.Message{
 		Uuid:   uuid,
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Item: &frontendv1.ConversationItem_UserMessage{
+		Payload: &frontendv1.Message_UserMessage{
 			UserMessage: &datav1.ApiUserMessage{
 				Content: &datav1.ApiUserMessage_ContentString{
 					ContentString: MarkInternalResumeInstruction(requestID, "continue the interrupted work"),
@@ -35,11 +35,11 @@ func markedUserItem(uuid, requestID string) *frontendv1.ConversationItem {
 
 // stringUserItem is a curated user message carrying body verbatim, with no
 // request id — the unattributed shape every replayed line has.
-func stringUserItem(uuid, body string) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{
+func stringUserItem(uuid, body string) *frontendv1.Message {
+	return &frontendv1.Message{
 		Uuid:   uuid,
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Item: &frontendv1.ConversationItem_UserMessage{
+		Payload: &frontendv1.Message_UserMessage{
 			UserMessage: &datav1.ApiUserMessage{
 				Content: &datav1.ApiUserMessage_ContentString{ContentString: body},
 			},
@@ -49,11 +49,11 @@ func stringUserItem(uuid, body string) *frontendv1.ConversationItem {
 
 // blockUserItem is a curated user message whose body is content BLOCKS, whose
 // first block carries body.
-func blockUserItem(uuid, body string) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{
+func blockUserItem(uuid, body string) *frontendv1.Message {
+	return &frontendv1.Message{
 		Uuid:   uuid,
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Item: &frontendv1.ConversationItem_UserMessage{
+		Payload: &frontendv1.Message_UserMessage{
 			UserMessage: &datav1.ApiUserMessage{
 				Content: &datav1.ApiUserMessage_ContentBlocks{
 					ContentBlocks: &datav1.ApiContentBlocks{Blocks: []*datav1.ContentBlock{{
@@ -68,7 +68,7 @@ func blockUserItem(uuid, body string) *frontendv1.ConversationItem {
 func TestAMarkedInstructionWithNoRequestIDIsStillDropped(t *testing.T) {
 	// Arrange — the incident's exact shape: the transcript's line, replayed,
 	// with nothing but its own body to identify it by.
-	items := []*frontendv1.ConversationItem{markedUserItem("u-1", resumeRequest)}
+	items := []*frontendv1.Message{markedUserItem("u-1", resumeRequest)}
 
 	// Act.
 	got, _ := dropInternalResumePrompt(items)
@@ -82,7 +82,7 @@ func TestAMarkedInstructionWithNoRequestIDIsStillDropped(t *testing.T) {
 func TestAMarkedInstructionInBlockFormIsDropped(t *testing.T) {
 	// Arrange — the vendor may normalize a submitted string into one text block.
 	body := MarkInternalResumeInstruction(resumeRequest, "continue the interrupted work")
-	items := []*frontendv1.ConversationItem{blockUserItem("u-1", body)}
+	items := []*frontendv1.Message{blockUserItem("u-1", body)}
 
 	// Act.
 	got, _ := dropInternalResumePrompt(items)
@@ -96,7 +96,7 @@ func TestAMarkedInstructionInBlockFormIsDropped(t *testing.T) {
 func TestTheDropReportsTheSuppressedReDriveID(t *testing.T) {
 	// Arrange — the report is the delivery evidence the resumption is
 	// discharged off, so it is asserted rather than assumed.
-	items := []*frontendv1.ConversationItem{markedUserItem("u-1", resumeRequest)}
+	items := []*frontendv1.Message{markedUserItem("u-1", resumeRequest)}
 
 	// Act.
 	_, suppressed := dropInternalResumePrompt(items)
@@ -109,7 +109,7 @@ func TestTheDropReportsTheSuppressedReDriveID(t *testing.T) {
 
 func TestAnOrdinaryPromptSuppressesNothing(t *testing.T) {
 	// Arrange — the counterpart: nothing to discharge means nothing reported.
-	items := []*frontendv1.ConversationItem{stringUserItem("u-1", "what is the status")}
+	items := []*frontendv1.Message{stringUserItem("u-1", "what is the status")}
 
 	// Act.
 	_, suppressed := dropInternalResumePrompt(items)
@@ -123,7 +123,7 @@ func TestAnOrdinaryPromptSuppressesNothing(t *testing.T) {
 func TestAPromptQuotingTheInstructionIsKept(t *testing.T) {
 	// Arrange — the rule the whole design turns on: suppression keys on the
 	// marker, never on the instruction's wording.
-	items := []*frontendv1.ConversationItem{stringUserItem("u-1",
+	items := []*frontendv1.Message{stringUserItem("u-1",
 		"Your previous turn was interrupted by a planned restart of the tooling — why did that happen?")}
 
 	// Act.
@@ -139,7 +139,7 @@ func TestAPromptMentioningTheMarkerBelowItsFirstLineIsKept(t *testing.T) {
 	// Arrange — a user pasting a daemon log into their prompt. The marker is
 	// structural: it opens the message or it is somebody else's text.
 	body := "look at this line from the log:\n" + MarkInternalResumeInstruction(resumeRequest, "continue")
-	items := []*frontendv1.ConversationItem{stringUserItem("u-1", body)}
+	items := []*frontendv1.Message{stringUserItem("u-1", body)}
 
 	// Act.
 	got, _ := dropInternalResumePrompt(items)
@@ -153,7 +153,7 @@ func TestAPromptMentioningTheMarkerBelowItsFirstLineIsKept(t *testing.T) {
 func TestAnUnclosedMarkerIsKept(t *testing.T) {
 	// Arrange — the marker must close on its own first line, so a truncated
 	// opener is not a marker.
-	items := []*frontendv1.ConversationItem{stringUserItem("u-1",
+	items := []*frontendv1.Message{stringUserItem("u-1",
 		internalResumeMarkerOpen+resumeRequest+"\nand then some text")}
 
 	// Act.
@@ -168,7 +168,7 @@ func TestAnUnclosedMarkerIsKept(t *testing.T) {
 func TestAMarkerCarryingSomeoneElsesRequestIDIsKept(t *testing.T) {
 	// Arrange — the bracketed id must itself be a re-drive's, so a marker
 	// naming an ordinary request cannot hide that request's prompt.
-	items := []*frontendv1.ConversationItem{stringUserItem("u-1",
+	items := []*frontendv1.Message{stringUserItem("u-1",
 		internalResumeMarkerOpen+"req-7"+internalResumeMarkerClose+"\nplease do the thing")}
 
 	// Act.

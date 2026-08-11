@@ -69,7 +69,7 @@ func feedTexts(push *fakePusher) []string {
 	push.mu.Lock()
 	defer push.mu.Unlock()
 	for _, cd := range push.convo {
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			for _, block := range item.GetAgent().GetResponse().GetBody().GetContent() {
 				if text := block.GetText().GetText(); text != "" {
 					out = append(out, text)
@@ -192,7 +192,7 @@ func TestAnAllDetachedEventStillPushesItsFeedDelta(t *testing.T) {
 	defer push.mu.Unlock()
 	own := 0
 	for _, cd := range push.convo {
-		if len(cd.GetItems()) == 0 && cd.GetThroughSeq() == 7 {
+		if len(cd.GetMessages()) == 0 && cd.GetThroughSeq() == 7 {
 			own++
 		}
 	}
@@ -241,15 +241,15 @@ func TestABubbleTheSessionOpenedReachesTheReconnectSnapshot(t *testing.T) {
 // The anchor is the bubble's place in the conversation it was launched from.
 // Without it a frontend has a live agent and nowhere to draw it.
 
-// feedAnchors collects every arm-38 ConversationItem the consumer pushed onto
+// feedAnchors collects every arm-38 Message the consumer pushed onto
 // the top-level feed, paired with the item so a test can read the item's own
 // identity stamps as well as the bubble it carries.
-func feedAnchors(push *fakePusher) []*frontendv1.ConversationItem {
-	var out []*frontendv1.ConversationItem
+func feedAnchors(push *fakePusher) []*frontendv1.Message {
+	var out []*frontendv1.Message
 	push.mu.Lock()
 	defer push.mu.Unlock()
 	for _, cd := range push.convo {
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			if item.GetAsyncBubble() != nil {
 				out = append(out, item)
 			}
@@ -268,7 +268,7 @@ func TestALaunchAnchorsItsBubbleInTheTopLevelFeed(t *testing.T) {
 
 	// Assert
 	if got := len(feedAnchors(push)); got != 1 {
-		t.Fatalf("feed anchors = %d, want 1: a bubble with no ConversationItem.async_bubble has no place in the conversation that started it", got)
+		t.Fatalf("feed anchors = %d, want 1: a bubble with no Message.async_bubble has no place in the conversation that started it", got)
 	}
 }
 
@@ -376,7 +376,7 @@ func TestTheAnchorsDeltaCarriesTheWorkspacesFence(t *testing.T) {
 	push.mu.Lock()
 	defer push.mu.Unlock()
 	for _, cd := range push.convo {
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			if item.GetAsyncBubble() == nil {
 				continue
 			}
@@ -561,7 +561,7 @@ func failureCards(push *fakePusher) map[string]string {
 	push.mu.Lock()
 	defer push.mu.Unlock()
 	for _, cd := range push.convo {
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			if card := item.GetFailureCard(); card != nil {
 				out[item.GetUuid()] = card.GetDetail()
 			}

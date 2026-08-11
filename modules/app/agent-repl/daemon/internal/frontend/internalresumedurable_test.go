@@ -79,7 +79,7 @@ func TestAReDrivePromptRehydratedFromAStoreRowStillCuratesToNothing(t *testing.T
 		t.Fatalf("CurateEvent: %v", err)
 	}
 	if curated.Feed != nil {
-		t.Fatalf("feed = %v, want the re-drive's instruction absent from a re-pulled row", curated.Feed.GetItems())
+		t.Fatalf("feed = %v, want the re-drive's instruction absent from a re-pulled row", curated.Feed.GetMessages())
 	}
 }
 
@@ -110,8 +110,8 @@ func TestAUsersOwnPromptRehydratedFromAStoreRowStillCurates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CurateEvent: %v", err)
 	}
-	if curated.Feed == nil || len(curated.Feed.GetItems()) != 1 {
-		t.Fatalf("feed = %v, want the user's own prompt curated from a re-pulled row", curated.Feed.GetItems())
+	if curated.Feed == nil || len(curated.Feed.GetMessages()) != 1 {
+		t.Fatalf("feed = %v, want the user's own prompt curated from a re-pulled row", curated.Feed.GetMessages())
 	}
 }
 

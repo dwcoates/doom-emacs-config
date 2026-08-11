@@ -102,7 +102,7 @@ func pageTextEvents(t *testing.T, n int) []*corev1.Event {
 // and boundary assertion below reads.
 func pageItemUUIDs(page *frontendv1.ConversationPage) []string {
 	var out []string
-	for _, it := range page.GetItems() {
+	for _, it := range page.GetMessages() {
 		out = append(out, it.GetUuid())
 	}
 	return out
@@ -179,7 +179,7 @@ func TestConstituentsRideInsideTheirItemAndDoNotCountTowardTheLimit(t *testing.T
 	if len(got) != 3 {
 		t.Fatalf("page items = %v, want 3 top-level items with their tool calls inside them", got)
 	}
-	blocks := page.GetItems()[0].GetAgent().GetResponse().GetBody().GetContent()
+	blocks := page.GetMessages()[0].GetAgent().GetResponse().GetBody().GetContent()
 	if len(blocks) != 2 {
 		t.Fatalf("first item carried %d content block(s), want the text and the tool_use it was emitted with", len(blocks))
 	}
@@ -240,7 +240,7 @@ func TestAnEmptyConversationPagesToTheBeginningWithNoItems(t *testing.T) {
 	page := h.page(t, PageAnchor{Tail: true, Limit: 10})
 
 	// Assert.
-	if len(page.GetItems()) != 0 {
+	if len(page.GetMessages()) != 0 {
 		t.Fatalf("page items = %v, want none", pageItemUUIDs(page))
 	}
 	if page.GetStart() == nil {
@@ -283,8 +283,8 @@ func TestAnOversizedLimitIsClampedRatherThanServed(t *testing.T) {
 	page := h.page(t, PageAnchor{Tail: true, Limit: 5000})
 
 	// Assert.
-	if len(page.GetItems()) != pageMaxLimit {
-		t.Fatalf("page served %d items for a limit of 5000, want the ceiling of %d", len(page.GetItems()), pageMaxLimit)
+	if len(page.GetMessages()) != pageMaxLimit {
+		t.Fatalf("page served %d items for a limit of 5000, want the ceiling of %d", len(page.GetMessages()), pageMaxLimit)
 	}
 }
 
@@ -296,8 +296,8 @@ func TestAZeroLimitTakesTheDaemonDefault(t *testing.T) {
 	page := h.page(t, PageAnchor{Tail: true})
 
 	// Assert.
-	if len(page.GetItems()) != pageDefaultLimit {
-		t.Fatalf("page served %d items for limit 0, want the default of %d", len(page.GetItems()), pageDefaultLimit)
+	if len(page.GetMessages()) != pageDefaultLimit {
+		t.Fatalf("page served %d items for limit 0, want the default of %d", len(page.GetMessages()), pageDefaultLimit)
 	}
 }
 

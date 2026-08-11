@@ -1,7 +1,7 @@
 // Clear and compact, end to end over the REAL processes: a file-plane
 // ContextCleared / ContextCompacted injected into the real shim-store, fanned
 // out to the real TS shim's store subscription, forwarded to the daemon, and
-// rendered onto the frontend WebSocket as ConversationItem arms 32/33.
+// rendered onto the frontend WebSocket as Message arms 32/33.
 //
 // WHY THE EVENTS ARE INJECTED RATHER THAN PROVOKED. The shim-claude-sidecar is
 // the SOLE producer of both payloads (core.proto §"the file plane is the only
@@ -244,20 +244,20 @@ func attachedSessionVendorID(t *testing.T, vendorID, sessionID string) string {
 
 // deltaItems returns the conversation items a frame carries for workspace, or
 // nil when the frame is not this workspace's ConversationDelta.
-func deltaItems(frame *frontendv1.FrontendFrame, workspace string) []*frontendv1.ConversationItem {
+func deltaItems(frame *frontendv1.FrontendFrame, workspace string) []*frontendv1.Message {
 	cd, ok := frame.GetFrame().(*frontendv1.FrontendFrame_ConversationDelta)
 	if !ok || cd.ConversationDelta.GetWorkspace() != workspace {
 		return nil
 	}
-	return cd.ConversationDelta.GetItems()
+	return cd.ConversationDelta.GetMessages()
 }
 
 // awaitItem reads frames until a conversation item for workspace satisfies
 // match, returning that item and EVERY workspace item seen before it (in
 // arrival order). It fails loudly at the deadline.
-func awaitItem(t *testing.T, conn *websocket.Conn, workspace string, what string, match func(*frontendv1.ConversationItem) bool) (*frontendv1.ConversationItem, []*frontendv1.ConversationItem) {
+func awaitItem(t *testing.T, conn *websocket.Conn, workspace string, what string, match func(*frontendv1.Message) bool) (*frontendv1.Message, []*frontendv1.Message) {
 	t.Helper()
-	var before []*frontendv1.ConversationItem
+	var before []*frontendv1.Message
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
 		for _, item := range deltaItems(readFrame(t, conn), workspace) {
@@ -272,9 +272,9 @@ func awaitItem(t *testing.T, conn *websocket.Conn, workspace string, what string
 }
 
 // collectItems reads n further conversation items for workspace.
-func collectItems(t *testing.T, conn *websocket.Conn, workspace string, n int) []*frontendv1.ConversationItem {
+func collectItems(t *testing.T, conn *websocket.Conn, workspace string, n int) []*frontendv1.Message {
 	t.Helper()
-	var out []*frontendv1.ConversationItem
+	var out []*frontendv1.Message
 	deadline := time.Now().Add(frameTimeout)
 	for len(out) < n && time.Now().Before(deadline) {
 		out = append(out, deltaItems(readFrame(t, conn), workspace)...)
@@ -293,11 +293,11 @@ func collectItems(t *testing.T, conn *websocket.Conn, workspace string, n int) [
 // (frontend/server.go readLoop), and a ring-covered resync pushes its whole
 // replay synchronously inside that dispatch (sessioncontroller.Manager.Resync returns
 // without a store re-pull when the ring covers the request).
-func replayItems(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string) []*frontendv1.ConversationItem {
+func replayItems(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string) []*frontendv1.Message {
 	t.Helper()
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"resync":{"fromSeq":0,"fence":%q}}`,
 		requestID, state.GetFence()))
-	var out []*frontendv1.ConversationItem
+	var out []*frontendv1.Message
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
 		frame := readFrame(t, conn)
@@ -323,13 +323,13 @@ func dialForReplay(t *testing.T, h *e2eHarness, sessionID, workspace string) (*w
 }
 
 // isClear / isCompact identify the two first-class arms (frontend.proto 32/33).
-func isClear(item *frontendv1.ConversationItem) bool   { return item.GetContextCleared() != nil }
-func isCompact(item *frontendv1.ConversationItem) bool { return item.GetContextCompacted() != nil }
+func isClear(item *frontendv1.Message) bool   { return item.GetContextCleared() != nil }
+func isCompact(item *frontendv1.Message) bool { return item.GetContextCompacted() != nil }
 
 // isResult identifies a turn's ResultMessage item — the LAST conversation item
 // a turn produces. Awaiting it is how a test quiesces a turn before doing
 // anything that races the turn's own tail.
-func isResult(item *frontendv1.ConversationItem) bool { return item.GetAgent().GetTurnResult() != nil }
+func isResult(item *frontendv1.Message) bool { return item.GetAgent().GetTurnResult() != nil }
 
 // seqItems drops the items a replay serves REGARDLESS of seq — the retained
 // permission items (arm 30), failure cards (arm 31), and prompt receipts
@@ -337,8 +337,8 @@ func isResult(item *frontendv1.ConversationItem) bool { return item.GetAgent().G
 // seq, and are re-pushed on every resync by contract (sessioncontroller/sinks.go
 // consumer.resync). They are the only documented asymmetry between a live
 // stream and a replay, so an equivalence check names and excludes exactly them.
-func seqItems(items []*frontendv1.ConversationItem) []*frontendv1.ConversationItem {
-	var out []*frontendv1.ConversationItem
+func seqItems(items []*frontendv1.Message) []*frontendv1.Message {
+	var out []*frontendv1.Message
 	for _, item := range items {
 		if item.GetPermission() != nil || item.GetFailureCard() != nil {
 			continue
@@ -370,7 +370,7 @@ func liveSession(t *testing.T, h *e2eHarness, cwd string) (string, *websocket.Co
 
 // TestE2EInjectedClearReachesFrontendAsArm32 covers the LIVE path for a clear:
 // a sidecar-shaped ContextCleared written to the real store arrives at a
-// connected frontend as a ConversationItem carrying arm 32, keyed by the event's
+// connected frontend as a Message carrying arm 32, keyed by the event's
 // dedup key.
 func TestE2EInjectedClearReachesFrontendAsArm32(t *testing.T) {
 	// Arrange
@@ -442,7 +442,7 @@ func TestE2EReplayFloorsAtTheClear(t *testing.T) {
 		t.Fatal("the replay carried no conversation items at all")
 	}
 	if got := replayed[0]; !isClear(got) || got.GetUuid() != clearUUID {
-		t.Fatalf("replay starts at item uuid=%q (%T), want the clear %q", got.GetUuid(), got.GetItem(), clearUUID)
+		t.Fatalf("replay starts at item uuid=%q (%T), want the clear %q", got.GetUuid(), got.GetPayload(), clearUUID)
 	}
 	preClear := map[string]bool{}
 	for _, item := range beforeClear {
@@ -486,7 +486,7 @@ func TestE2ELiveAndReplayAgreeFromTheFloor(t *testing.T) {
 	// misordering. The turn's result item is its last conversation item, so
 	// observing it is the quiescence point.
 	afterResult, aboveFloor := awaitItem(t, live, cwd, "after-turn result item", isResult)
-	fromFloor := append([]*frontendv1.ConversationItem{clearItem}, aboveFloor...)
+	fromFloor := append([]*frontendv1.Message{clearItem}, aboveFloor...)
 	fromFloor = seqItems(append(fromFloor, afterResult))
 
 	// Assert

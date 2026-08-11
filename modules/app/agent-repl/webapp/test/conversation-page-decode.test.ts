@@ -15,7 +15,7 @@ const page = (over: Record<string, unknown> = {}): string =>
     conversationPage: {
       workspace: "/ws/a",
       requestId: "r-1",
-      items: [],
+      messages: [],
       start: {},
       liveJoinSeq: 0,
       fence: "f1",

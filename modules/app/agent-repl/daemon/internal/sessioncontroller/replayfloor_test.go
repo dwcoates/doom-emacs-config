@@ -469,13 +469,13 @@ func newRestartHarness(t *testing.T, floors *fakeClearCompactStore, client *repl
 }
 
 // clearItems collects every pushed context_cleared conversation item.
-func clearItems(p *fakePusher) []*frontendv1.ConversationItem {
+func clearItems(p *fakePusher) []*frontendv1.Message {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	var out []*frontendv1.ConversationItem
+	var out []*frontendv1.Message
 	for _, cd := range p.convo {
-		for _, item := range cd.GetItems() {
-			if _, ok := item.GetItem().(*frontendv1.ConversationItem_ContextCleared); ok {
+		for _, item := range cd.GetMessages() {
+			if _, ok := item.GetPayload().(*frontendv1.Message_ContextCleared); ok {
 				out = append(out, item)
 			}
 		}
@@ -484,13 +484,13 @@ func clearItems(p *fakePusher) []*frontendv1.ConversationItem {
 }
 
 // compactItems collects every pushed context_compacted conversation item.
-func compactItems(p *fakePusher) []*frontendv1.ConversationItem {
+func compactItems(p *fakePusher) []*frontendv1.Message {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	var out []*frontendv1.ConversationItem
+	var out []*frontendv1.Message
 	for _, cd := range p.convo {
-		for _, item := range cd.GetItems() {
-			if _, ok := item.GetItem().(*frontendv1.ConversationItem_ContextCompacted); ok {
+		for _, item := range cd.GetMessages() {
+			if _, ok := item.GetPayload().(*frontendv1.Message_ContextCompacted); ok {
 				out = append(out, item)
 			}
 		}

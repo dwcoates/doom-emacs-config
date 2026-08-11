@@ -166,7 +166,7 @@ func (h *queueHarness) feedTexts() []string {
 	defer h.push.mu.Unlock()
 	var out []string
 	for _, cd := range h.push.convo {
-		for _, it := range cd.GetItems() {
+		for _, it := range cd.GetMessages() {
 			for _, block := range it.GetAgent().GetResponse().GetBody().GetContent() {
 				if text := block.GetText().GetText(); text != "" {
 					out = append(out, text)
@@ -719,7 +719,7 @@ func (h *queueHarness) feedToolUseIDs() []string {
 	defer h.push.mu.Unlock()
 	var out []string
 	for _, cd := range h.push.convo {
-		for _, it := range cd.GetItems() {
+		for _, it := range cd.GetMessages() {
 			out = append(out, toolUseIDsIn(it.GetAgent())...)
 		}
 	}

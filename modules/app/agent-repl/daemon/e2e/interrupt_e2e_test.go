@@ -10,7 +10,7 @@
 // there is no window in which such a turn is "in flight". A `!tool <command>`
 // turn is different: it AWAITS canUseTool (fake-query.ts runToolTurn), which
 // travels to the daemon as a PermissionRequest and back as a PENDING permission
-// ConversationItem (sessioncontroller/sessioncontroller.go pushPermission), and the fake stays
+// Message (sessioncontroller/sessioncontroller.go pushPermission), and the fake stays
 // parked there until something answers. That pending item is therefore both the
 // hold and the proof of the hold, and it is what every test here waits for
 // before stopping the turn. The interrupt itself releases it: the shim cancels
@@ -114,7 +114,7 @@ func ackFor(frame *frontendv1.FrontendFrame, requestID string) *frontendv1.Comma
 // isPendingPermission identifies the item a blocked canUseTool round-trip
 // produces: arm 30 with RESOLUTION_PENDING (sessioncontroller/sessioncontroller.go:1092 pushes
 // permissionItem(req, PermissionItem_RESOLUTION_PENDING, "")).
-func isPendingPermission(item *frontendv1.ConversationItem) bool {
+func isPendingPermission(item *frontendv1.Message) bool {
 	perm := item.GetPermission()
 	return perm != nil && perm.GetResolution() == corev1.PermissionItem_RESOLUTION_PENDING
 }
@@ -123,7 +123,7 @@ func isPendingPermission(item *frontendv1.ConversationItem) bool {
 // 10 → data.v1.ApiAssistantMessage.content → ContentBlock.text.text). It is how
 // a fake turn is identified: the fake's reply is `echo: <prompt> [mode=<mode>]`
 // (fake-query.ts runTextTurn), so the prompt text rides its own answer.
-func assistantText(item *frontendv1.ConversationItem) string {
+func assistantText(item *frontendv1.Message) string {
 	msg := item.GetAgent().GetResponse().GetBody()
 	if msg == nil {
 		return ""
@@ -546,8 +546,8 @@ func TestE2ELateInterruptReportsAlreadyComplete(t *testing.T) {
 // from its connect StateSnapshot — the open interrupt window in the workspace's
 // ProgressView and RENDER_STATE_INTERRUPTED in its WorkspaceState — while the
 // conversation replay carries nothing about the interrupt at all. Footer state
-// is not feed content: the ConversationItem oneof has no interrupt arm
-// (frontend.proto ConversationItem), and the stop is not a failure card either.
+// is not feed content: the Message oneof has no interrupt arm
+// (frontend.proto Message), and the stop is not a failure card either.
 func TestE2EFreshConnectCarriesTheInterruptedResolution(t *testing.T) {
 	// Arrange
 	// The workspace tempdir is created BEFORE the harness on purpose: cleanups

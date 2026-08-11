@@ -292,7 +292,7 @@ func (h *bouncedHarness) resyncFrom(t *testing.T, conn *websocket.Conn, state *f
 		frame := readFrame(t, conn)
 		switch f := frame.GetFrame().(type) {
 		case *frontendv1.FrontendFrame_ConversationDelta:
-			for _, item := range f.ConversationDelta.GetItems() {
+			for _, item := range f.ConversationDelta.GetMessages() {
 				if text := assistantText(item); text != "" {
 					texts = append(texts, text)
 				}

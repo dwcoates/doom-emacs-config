@@ -17,7 +17,7 @@ func TestStampConversationSource(t *testing.T) {
 	}{
 		{
 			name: "merge revises the curator's user verdict",
-			delta: &frontendv1.ConversationDelta{Workspace: "ws", Items: []*frontendv1.ConversationItem{
+			delta: &frontendv1.ConversationDelta{Workspace: "ws", Messages: []*frontendv1.Message{
 				{Uuid: "a", Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER},
 				{Uuid: "b", Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER},
 			}},
@@ -26,7 +26,7 @@ func TestStampConversationSource(t *testing.T) {
 		},
 		{
 			name: "user is stamped on an unstamped item",
-			delta: &frontendv1.ConversationDelta{Workspace: "ws", Items: []*frontendv1.ConversationItem{
+			delta: &frontendv1.ConversationDelta{Workspace: "ws", Messages: []*frontendv1.Message{
 				{Uuid: "a"},
 			}},
 			src:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
@@ -48,7 +48,7 @@ func TestStampConversationSource(t *testing.T) {
 			if err != nil {
 				t.Fatalf("StampConversationSource: %v", err)
 			}
-			for _, item := range tt.delta.GetItems() {
+			for _, item := range tt.delta.GetMessages() {
 				if item.GetSource() != tt.want {
 					t.Fatalf("item %q source = %v, want %v", item.GetUuid(), item.GetSource(), tt.want)
 				}
@@ -73,13 +73,13 @@ func TestStampConversationSourceRefusals(t *testing.T) {
 		},
 		{
 			name:  "unspecified source",
-			delta: &frontendv1.ConversationDelta{Workspace: "ws", Items: []*frontendv1.ConversationItem{{Uuid: "a"}}},
+			delta: &frontendv1.ConversationDelta{Workspace: "ws", Messages: []*frontendv1.Message{{Uuid: "a"}}},
 			src:   frontendv1.ConversationSource_CONVERSATION_SOURCE_UNSPECIFIED,
 			want:  "UNSPECIFIED",
 		},
 		{
 			name:  "nil item inside the delta",
-			delta: &frontendv1.ConversationDelta{Workspace: "ws", Items: []*frontendv1.ConversationItem{nil}},
+			delta: &frontendv1.ConversationDelta{Workspace: "ws", Messages: []*frontendv1.Message{nil}},
 			src:   frontendv1.ConversationSource_CONVERSATION_SOURCE_MERGE,
 			want:  "nil item",
 		},
@@ -102,7 +102,7 @@ func TestStampConversationSourceRefusals(t *testing.T) {
 
 func TestStampItemConversationSource(t *testing.T) {
 	// Arrange.
-	item := &frontendv1.ConversationItem{Uuid: "a"}
+	item := &frontendv1.Message{Uuid: "a"}
 
 	// Act.
 	err := StampItemConversationSource(item, frontendv1.ConversationSource_CONVERSATION_SOURCE_MERGE)
@@ -120,7 +120,7 @@ func TestStampItemConversationSourceRefusals(t *testing.T) {
 	// Arrange.
 	tests := []struct {
 		name string
-		item *frontendv1.ConversationItem
+		item *frontendv1.Message
 		src  frontendv1.ConversationSource
 		want string
 	}{
@@ -132,7 +132,7 @@ func TestStampItemConversationSourceRefusals(t *testing.T) {
 		},
 		{
 			name: "unspecified source",
-			item: &frontendv1.ConversationItem{Uuid: "a"},
+			item: &frontendv1.Message{Uuid: "a"},
 			src:  frontendv1.ConversationSource_CONVERSATION_SOURCE_UNSPECIFIED,
 			want: "UNSPECIFIED",
 		},

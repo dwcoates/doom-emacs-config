@@ -170,7 +170,7 @@ func (m *Manager) terminalStartFailureCard(cause error) *frontendv1.FailureCardV
 // THE ROW REPLACES rather than accumulates: the fence is cleared by a hard
 // restart and re-established when the re-check finds the transcript still gone,
 // and that flow must restate one standing card, not stack a second.
-func (m *Manager) persistTerminalStartFailure(workspace, sessionID string, item *frontendv1.ConversationItem, cause error) {
+func (m *Manager) persistTerminalStartFailure(workspace, sessionID string, item *frontendv1.Message, cause error) {
 	if m.cfg.TerminalFailureCards == nil {
 		m.warnf("session-controller: terminal bring-up failure ws=%q session=%s is NOT persisted — no TerminalFailureCardStore is wired, so only a client connected at this instant will ever see its card: %v",
 			workspace, sessionID, cause)
@@ -228,10 +228,10 @@ func (m *Manager) withdrawTerminalStartFailure(workspace, sessionID string) {
 // the other, and both carry one rendering under one identity.
 func (m *Manager) publishTerminalStartFailure(workspace, sessionID string, cause error) {
 	card := m.terminalStartFailureCard(cause)
-	item := &frontendv1.ConversationItem{
+	item := &frontendv1.Message{
 		Uuid: startFailedCardUUID(sessionID),
 		TsMs: m.now(),
-		Item: &frontendv1.ConversationItem_FailureCard{FailureCard: card},
+		Payload: &frontendv1.Message_FailureCard{FailureCard: card},
 	}
 	// PERSISTED BEFORE PUSHED, and before the Push nil-check refuses: a daemon
 	// with no frontend attached still owes the record, and a card the store
@@ -262,7 +262,7 @@ func (m *Manager) publishTerminalStartFailure(workspace, sessionID string, cause
 		// generation was ever minted: nothing was spawned. The session half is
 		// what addresses the card.
 		Fence: ssm.Fence(sessionID, ""),
-		Items: []*frontendv1.ConversationItem{item},
+		Messages: []*frontendv1.Message{item},
 	})
 }
 

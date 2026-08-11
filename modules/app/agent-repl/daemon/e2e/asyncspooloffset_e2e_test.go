@@ -64,7 +64,7 @@ func TestE2EAShellBubblesAppendsAreContiguousThroughTheSnapshotCursor(t *testing
 	store.write(sidecarUserLineEvent(t, vendorID, "e2e-offset-barrier-line", barrierPrompt))
 
 	// Assert
-	seen := drainUntilItem(t, conn, cwd, "the barrier prompt's user item", func(it *frontendv1.ConversationItem) bool {
+	seen := drainUntilItem(t, conn, cwd, "the barrier prompt's user item", func(it *frontendv1.Message) bool {
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 

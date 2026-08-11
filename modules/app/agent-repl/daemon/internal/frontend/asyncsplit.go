@@ -144,16 +144,16 @@ func CurateEvent(workspace, fence string, ev *corev1.Event) (Curation, error) {
 	// It runs BEFORE the sidechain partition and before the empty check, so an
 	// event carrying ONLY the internal instruction curates to nothing at all
 	// rather than to an empty delta a client would still be handed.
-	items, suppressed := dropInternalResumePrompt(cd.GetItems())
-	cd.Items = items
+	items, suppressed := dropInternalResumePrompt(cd.GetMessages())
+	cd.Messages = items
 	if len(items) == 0 {
 		return Curation{SuppressedInternalResumes: suppressed}, nil
 	}
 	c := Curation{Feed: cd, Outcomes: toolOutcomes(ev), SuppressedInternalResumes: suppressed}
-	var feed []*frontendv1.ConversationItem
+	var feed []*frontendv1.Message
 	folds := map[string]*DetachedFold{}
 	var order []string
-	for _, item := range cd.GetItems() {
+	for _, item := range cd.GetMessages() {
 		env, hasEnv := envs[item.GetUuid()]
 		if !hasEnv || !env.IsSidechain {
 			feed = append(feed, item)
@@ -190,7 +190,7 @@ func CurateEvent(workspace, fence string, ev *corev1.Event) (Curation, error) {
 	}
 	// The delta keeps its envelope (workspace, fence, through_seq) and loses
 	// only the items that left it.
-	cd.Items = feed
+	cd.Messages = feed
 	for _, key := range order {
 		c.Detached = append(c.Detached, *folds[key])
 	}
@@ -253,11 +253,11 @@ func toolOutcomes(ev *corev1.Event) []ToolOutcome {
 // tool cards use. A sidechain user record carrying prose and no tool results is
 // the launch prompt, which the bubble's label already states; it yields nothing
 // and its caller reports it withheld.
-func detachedEmissions(item *frontendv1.ConversationItem) []*frontendv1.AgentEmission {
-	switch it := item.GetItem().(type) {
-	case *frontendv1.ConversationItem_Agent:
+func detachedEmissions(item *frontendv1.Message) []*frontendv1.AgentEmission {
+	switch it := item.GetPayload().(type) {
+	case *frontendv1.Message_Agent:
 		return []*frontendv1.AgentEmission{it.Agent}
-	case *frontendv1.ConversationItem_UserMessage:
+	case *frontendv1.Message_UserMessage:
 		var out []*frontendv1.AgentEmission
 		for _, block := range it.UserMessage.GetContentBlocks().GetBlocks() {
 			if tr := block.GetToolResult(); tr != nil {
@@ -282,10 +282,10 @@ func detachedEmissions(item *frontendv1.ConversationItem) []*frontendv1.AgentEmi
 // have to report is always on the top-level conversation. Harvesting a
 // subagent's own calls would let a nested tool name be attributed to the outer
 // launch.
-func harvestToolNames(into map[string]string, item *frontendv1.ConversationItem) map[string]string {
+func harvestToolNames(into map[string]string, item *frontendv1.Message) map[string]string {
 	var blocks []*datav1.ContentBlock
-	switch it := item.GetItem().(type) {
-	case *frontendv1.ConversationItem_Agent:
+	switch it := item.GetPayload().(type) {
+	case *frontendv1.Message_Agent:
 		blocks = it.Agent.GetResponse().GetBody().GetContent()
 	default:
 		return into

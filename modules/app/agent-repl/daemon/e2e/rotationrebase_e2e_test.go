@@ -10,7 +10,7 @@
 // exact pair the user saw: an empty feed, and a red card about it.
 //
 // So these tests assert BOTH halves at once on the real stack: the clear
-// renders as ConversationItem arm 32 on a from-zero resync, and no failure card
+// renders as Message arm 32 on a from-zero resync, and no failure card
 // is pushed while it happens.
 //
 // These tests share e2e_test.go's package and reuse its helpers READ-ONLY

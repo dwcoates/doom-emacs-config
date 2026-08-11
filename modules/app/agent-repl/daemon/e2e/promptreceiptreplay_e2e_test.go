@@ -507,17 +507,17 @@ func (f *bouncedFrontend) dial(t *testing.T, workspace string) (*websocket.Conn,
 
 // resyncItems sends one resync and returns every conversation item that
 // arrives before its CommandAck, which terminates the read.
-func (f *bouncedFrontend) resyncItems(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string) []*frontendv1.ConversationItem {
+func (f *bouncedFrontend) resyncItems(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string) []*frontendv1.Message {
 	t.Helper()
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"workspace":%q,"resync":{"fromSeq":"0","fence":%q}}`,
 		requestID, workspace, state.GetFence()))
-	var items []*frontendv1.ConversationItem
+	var items []*frontendv1.Message
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
 		frame := readFrame(t, conn)
 		switch fr := frame.GetFrame().(type) {
 		case *frontendv1.FrontendFrame_ConversationDelta:
-			items = append(items, fr.ConversationDelta.GetItems()...)
+			items = append(items, fr.ConversationDelta.GetMessages()...)
 		case *frontendv1.FrontendFrame_CommandAck:
 			if fr.CommandAck.GetRequestId() != requestID {
 				continue
@@ -533,8 +533,8 @@ func (f *bouncedFrontend) resyncItems(t *testing.T, conn *websocket.Conn, state 
 }
 
 // promptBubbles returns the user-prompt items among a replay's items.
-func promptBubbles(items []*frontendv1.ConversationItem) []*frontendv1.ConversationItem {
-	var out []*frontendv1.ConversationItem
+func promptBubbles(items []*frontendv1.Message) []*frontendv1.Message {
+	var out []*frontendv1.Message
 	for _, it := range items {
 		if um := it.GetUserMessage(); um != nil && um.GetContentString() != "" {
 			out = append(out, it)

@@ -48,7 +48,7 @@ const CONV_DELTA = {
   workspace: "ws",
   fence: "s1",
   throughSeq: "5",
-  items: [{ uuid: "u1", tsMs: "1700000000000", assistantMessage: { content: [{ text: { text: "hi" } }] } }],
+  messages: [{ uuid: "u1", tsMs: "1700000000000", assistantMessage: { content: [{ text: { text: "hi" } }] } }],
 };
 const SESSION_INIT = { workspace: "ws", fence: "s1", init: { model: "claude", cwd: "/w" } };
 const COMMAND_ACK = { requestId: "r1", ok: true };
@@ -391,35 +391,35 @@ describe("FailureCardView: the feed's resolved failure card", () => {
 
 describe("ConversationItem token utilization", () => {
   it("preserves every modeled response usage field and raw payload", () => {
-    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [TOKEN_UTILIZATION] }] } });
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [TOKEN_UTILIZATION] }] } });
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(frame.frame.value.items[0].tokenUtilization[0]).toEqual({ agentReplSessionId: "session-1", claudeSessionId: "claude-1", rootTurnId: "turn-1", apiRequestId: "request-1", apiMessageId: "msg-1", model: "claude-opus", actor: "mainAgent", usage: { inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 30, cacheCreationInputTokens: 40, cacheCreation: { ephemeral5mInputTokens: 4, ephemeral1hInputTokens: 36 }, serverToolUse: { webSearchRequests: 2, webFetchRequests: 3 }, serviceTier: "priority", speed: "fast", inferenceGeo: "us", outputDetails: { thinkingTokens: 5 }, iterations: [{ kind: "sampling", inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 3, cacheCreationInputTokens: 4, cacheCreation: { ephemeral5mInputTokens: 1, ephemeral1hInputTokens: 3 }, model: "claude-opus" }, { kind: "compaction", inputTokens: 5, outputTokens: 6, cacheReadInputTokens: 7, cacheCreationInputTokens: 8, cacheCreation: { ephemeral5mInputTokens: 2, ephemeral1hInputTokens: 6 } }, { kind: "advisor", inputTokens: 9, outputTokens: 10, cacheReadInputTokens: 11, cacheCreationInputTokens: 12, cacheCreation: { ephemeral5mInputTokens: 3, ephemeral1hInputTokens: 9 }, model: "claude-haiku" }, { kind: "fallback", inputTokens: 13, outputTokens: 14, cacheReadInputTokens: 15, cacheCreationInputTokens: 16, cacheCreation: { ephemeral5mInputTokens: 4, ephemeral1hInputTokens: 12 }, model: "claude-sonnet" }], cacheDiagnostic: { kind: "modelChanged", cacheMissedInputTokens: 17 }, cacheRates: { totalPromptInputTokens: 80, cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 }, fallbackCredit: { applied: true }, unmodeledUsage: { vendorField: { preserved: "exactly" } }, rawUsage: TOKEN_UTILIZATION.usage.rawUsage }, responseTiming: { timeToFirstTokenMs: 50, outputGenerationDurationMs: 100 } });
+    expect(frame.frame.value.messages[0].tokenUtilization[0]).toEqual({ agentReplSessionId: "session-1", claudeSessionId: "claude-1", rootTurnId: "turn-1", apiRequestId: "request-1", apiMessageId: "msg-1", model: "claude-opus", actor: "mainAgent", usage: { inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 30, cacheCreationInputTokens: 40, cacheCreation: { ephemeral5mInputTokens: 4, ephemeral1hInputTokens: 36 }, serverToolUse: { webSearchRequests: 2, webFetchRequests: 3 }, serviceTier: "priority", speed: "fast", inferenceGeo: "us", outputDetails: { thinkingTokens: 5 }, iterations: [{ kind: "sampling", inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 3, cacheCreationInputTokens: 4, cacheCreation: { ephemeral5mInputTokens: 1, ephemeral1hInputTokens: 3 }, model: "claude-opus" }, { kind: "compaction", inputTokens: 5, outputTokens: 6, cacheReadInputTokens: 7, cacheCreationInputTokens: 8, cacheCreation: { ephemeral5mInputTokens: 2, ephemeral1hInputTokens: 6 } }, { kind: "advisor", inputTokens: 9, outputTokens: 10, cacheReadInputTokens: 11, cacheCreationInputTokens: 12, cacheCreation: { ephemeral5mInputTokens: 3, ephemeral1hInputTokens: 9 }, model: "claude-haiku" }, { kind: "fallback", inputTokens: 13, outputTokens: 14, cacheReadInputTokens: 15, cacheCreationInputTokens: 16, cacheCreation: { ephemeral5mInputTokens: 4, ephemeral1hInputTokens: 12 }, model: "claude-sonnet" }], cacheDiagnostic: { kind: "modelChanged", cacheMissedInputTokens: 17 }, cacheRates: { totalPromptInputTokens: 80, cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 }, fallbackCredit: { applied: true }, unmodeledUsage: { vendorField: { preserved: "exactly" } }, rawUsage: TOKEN_UTILIZATION.usage.rawUsage }, responseTiming: { timeToFirstTokenMs: 50, outputGenerationDurationMs: 100 } });
   });
 
   it.each(["agentReplSessionId", "claudeSessionId", "rootTurnId", "apiMessageId"] as const)("rejects blank required correlation field %s", (field) => {
     const utilization = { ...TOKEN_UTILIZATION, [field]: "" };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } })).toThrow(new RegExp(`${field} must be nonblank`));
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [utilization] }] } })).toThrow(new RegExp(`${field} must be nonblank`));
   });
 
   it.each(["", " \t\n"])("rejects blank response model identity %j", (model) => {
     const utilization = { ...TOKEN_UTILIZATION, model };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } })).toThrow(/model must be nonblank/);
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [utilization] }] } })).toThrow(/model must be nonblank/);
   });
 
   it("distinguishes an absent API request identifier from an invalid empty present value", () => {
     const utilization = { ...TOKEN_UTILIZATION, apiRequestId: "" };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } })).toThrow(/apiRequestId must be absent or nonblank/);
-    const decoded = decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, apiRequestId: undefined }] }] } });
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [utilization] }] } })).toThrow(/apiRequestId must be absent or nonblank/);
+    const decoded = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, apiRequestId: undefined }] }] } });
     if (decoded.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(decoded.frame.value.items[0].tokenUtilization[0].apiRequestId).toBeUndefined();
+    expect(decoded.frame.value.messages[0].tokenUtilization[0].apiRequestId).toBeUndefined();
   });
 
   it("preserves every nested subagent lineage field", () => {
     const subagent = { agentId: "agent-child", parentToolUseId: "tool-parent", parentAgentId: "agent-parent", subagentType: "research", taskDescription: "inspect cache evidence" };
     const utilization = { ...TOKEN_UTILIZATION, mainAgent: undefined, subagent };
-    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } });
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [utilization] }] } });
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(frame.frame.value.items[0].tokenUtilization[0].subagent).toEqual(subagent);
+    expect(frame.frame.value.messages[0].tokenUtilization[0].subagent).toEqual(subagent);
   });
 
   it("preserves every cache diagnostic oneof arm", () => {
@@ -434,9 +434,9 @@ describe("ConversationItem token utilization", () => {
     ] as const;
     for (const [cacheDiagnostic, expected] of cases) {
       const utilization = { ...TOKEN_UTILIZATION, usage: { ...TOKEN_UTILIZATION.usage, cacheDiagnostic } };
-      const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } });
+      const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [utilization] }] } });
       if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-      expect(frame.frame.value.items[0].tokenUtilization[0].usage.cacheDiagnostic).toEqual(expected);
+      expect(frame.frame.value.messages[0].tokenUtilization[0].usage.cacheDiagnostic).toEqual(expected);
     }
   });
 
@@ -449,10 +449,10 @@ describe("ConversationItem token utilization", () => {
       agent: { thinking: { body: { thinking: "hmm", signature: "sig" }, apiMessageId: "msg_01ABC", blockIndex: 2 } },
     };
     // Act
-    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [item] } });
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [item] } });
     // Assert
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(frame.frame.value.items[0].thinkingOrigin).toEqual({ apiMessageId: "msg_01ABC", blockIndex: 2 });
+    expect(frame.frame.value.messages[0].thinkingOrigin).toEqual({ apiMessageId: "msg_01ABC", blockIndex: 2 });
   });
 
   it("keeps the reasoning emission's payload the block alone", () => {
@@ -465,10 +465,10 @@ describe("ConversationItem token utilization", () => {
       agent: { thinking: { body: { thinking: "hmm" }, apiMessageId: "msg_01ABC", blockIndex: 2 } },
     };
     // Act
-    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [item] } });
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [item] } });
     // Assert
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(frame.frame.value.items[0].payload).toEqual({ thinking: "hmm" });
+    expect(frame.frame.value.messages[0].payload).toEqual({ thinking: "hmm" });
   });
 
   it("states a proto3-default origin for a reasoning emission that omits it", () => {
@@ -479,10 +479,10 @@ describe("ConversationItem token utilization", () => {
       agent: { thinking: { body: { thinking: "hmm" } } },
     };
     // Act
-    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [item] } });
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [item] } });
     // Assert
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(frame.frame.value.items[0].thinkingOrigin).toEqual({ apiMessageId: "", blockIndex: 0 });
+    expect(frame.frame.value.messages[0].thinkingOrigin).toEqual({ apiMessageId: "", blockIndex: 0 });
   });
 
   it("rejects a reasoning emission whose stated origin is not a string", () => {
@@ -493,36 +493,36 @@ describe("ConversationItem token utilization", () => {
       agent: { thinking: { body: { thinking: "hmm" }, apiMessageId: 7 } },
     };
     // Act / Assert
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [item] } })).toThrow(/apiMessageId must be a string/);
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [item] } })).toThrow(/apiMessageId must be a string/);
   });
 
   it("rejects malformed response actor and unknown usage fields", () => {
-    const item = { ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, subagent: {} }] };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [item] } })).toThrow(/oneof .*actor.*set multiple times/);
+    const item = { ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, subagent: {} }] };
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [item] } })).toThrow(/oneof .*actor.*set multiple times/);
     const usage = { ...TOKEN_UTILIZATION.usage, unrecognized: 1 };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage }] }] } })).toThrow(/key "unrecognized" is unknown/);
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, rawUsage: TOKEN_UTILIZATION.usage.rawUsage }] }] } })).toThrow(/key "rawUsage" is unknown/);
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: { ...TOKEN_UTILIZATION.usage, rawUsage: undefined } }] }] } })).toThrow(/usage\.rawUsage is required/);
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage }] }] } })).toThrow(/key "unrecognized" is unknown/);
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, rawUsage: TOKEN_UTILIZATION.usage.rawUsage }] }] } })).toThrow(/key "rawUsage" is unknown/);
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: { ...TOKEN_UTILIZATION.usage, rawUsage: undefined } }] }] } })).toThrow(/usage\.rawUsage is required/);
     const malformedDiagnostic = { ...TOKEN_UTILIZATION.usage, cacheDiagnostic: { pending: { unrecognized: true } } };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: malformedDiagnostic }] }] } })).toThrow(/key "unrecognized" is unknown/);
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: malformedDiagnostic }] }] } })).toThrow(/key "unrecognized" is unknown/);
     const subagent = { agentId: "a", parentToolUseId: "t", parentAgentId: "p", subagentType: "research", taskDescription: "inspect", unrecognized: true };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, mainAgent: undefined, subagent }] }] } })).toThrow(/key "unrecognized" is unknown/);
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, mainAgent: undefined, subagent }] }] } })).toThrow(/key "unrecognized" is unknown/);
   });
 
   it("rejects scalar and nested oneof violations through the generated contract", () => {
     const wrongScalar = { ...TOKEN_UTILIZATION.usage, inputTokens: true };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: wrongScalar }] }] } })).toThrow(/generated TokenUtilization contract/);
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: wrongScalar }] }] } })).toThrow(/generated TokenUtilization contract/);
     const competingDiagnostic = { ...TOKEN_UTILIZATION.usage, cacheDiagnostic: { pending: {}, modelChanged: { cacheMissedInputTokens: "1" } } };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: competingDiagnostic }] }] } })).toThrow(/oneof .*reason.*set multiple times/);
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: competingDiagnostic }] }] } })).toThrow(/oneof .*reason.*set multiple times/);
   });
 
   it("preserves raw SDK nulls, zeroes, absence, and unknown nested values through generated decode", () => {
     const rawSdkUsage = { cache_read_input_tokens: null, cache_creation_input_tokens: 0, nested_vendor_evidence: { unknown: [null, 0, { exact: "value" }] } };
     const rawUsage = { ...TOKEN_UTILIZATION.usage.rawUsage, rawSdkUsage };
     const utilization = { ...TOKEN_UTILIZATION, usage: { ...TOKEN_UTILIZATION.usage, rawUsage } };
-    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } });
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [utilization] }] } });
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    const preserved = frame.frame.value.items[0].tokenUtilization[0].usage.rawUsage.rawSdkUsage as Record<string, unknown>;
+    const preserved = frame.frame.value.messages[0].tokenUtilization[0].usage.rawUsage.rawSdkUsage as Record<string, unknown>;
     expect(preserved).toEqual(rawSdkUsage);
     expect(preserved.cache_read_input_tokens).toBeNull();
     expect(preserved.cache_creation_input_tokens).toBe(0);
@@ -554,10 +554,10 @@ describe("Session token utilization", () => {
     const first = { ...TOKEN_UTILIZATION, apiMessageId: "msg-ungrouped-1", mainAgent: undefined, subagent: lineage, usage: { ...TOKEN_UTILIZATION.usage, inputTokens: "11" } };
     const second = { ...TOKEN_UTILIZATION, apiMessageId: "msg-ungrouped-2", mainAgent: undefined, subagent: lineage, usage: { ...TOKEN_UTILIZATION.usage, inputTokens: "22" } };
     const sessionFrame = decode({ sessionView: { ...SESSION_VIEW, tokenUtilization: { allAgents: totals, mainAgent: totals, subagents: [], models: [], ungroupedSubagentResponses: [first, second] } } });
-    const responseFrame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [first, second] }] } });
+    const responseFrame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [first, second] }] } });
     if (sessionFrame.frame.case !== "sessionView" || responseFrame.frame.case !== "conversationDelta") throw new Error("wrong frame");
     const preserved = sessionFrame.frame.value.tokenUtilization?.ungroupedSubagentResponses;
-    expect(preserved?.map((response) => response.apiMessageId)).toEqual(responseFrame.frame.value.items[0].tokenUtilization.map((response) => response.apiMessageId));
+    expect(preserved?.map((response) => response.apiMessageId)).toEqual(responseFrame.frame.value.messages[0].tokenUtilization.map((response) => response.apiMessageId));
     expect(preserved?.map((response) => [response.apiMessageId, response.usage?.inputTokens, response.actor.case === "subagent" ? { agentId: response.actor.value.agentId, parentToolUseId: response.actor.value.parentToolUseId, parentAgentId: response.actor.value.parentAgentId, subagentType: response.actor.value.subagentType, taskDescription: response.actor.value.taskDescription } : undefined])).toEqual([["msg-ungrouped-1", 11n, lineage], ["msg-ungrouped-2", 22n, lineage]]);
   });
 
@@ -586,15 +586,15 @@ describe("Session token utilization", () => {
 
 describe("ConversationItem turn accounting", () => {
   it("decodes invalid problems before accepting explicitly absent partial evidence", () => {
-    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", timing: { promptAdmittedAtMs: "1", resultReceivedAtMs: "2", accountingSettledAtMs: "3", promptToResultMs: "1", resultToSettlementMs: "1" }, responses: [TOKEN_UTILIZATION], invalid: { problems: [{ missingUsageBoundary: { turnStart: {} } }] } } }] } });
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", timing: { promptAdmittedAtMs: "1", resultReceivedAtMs: "2", accountingSettledAtMs: "3", promptToResultMs: "1", resultToSettlementMs: "1" }, responses: [TOKEN_UTILIZATION], invalid: { problems: [{ missingUsageBoundary: { turnStart: {} } }] } } }] } });
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(frame.frame.value.items[0].turnAccounting).toMatchObject({ turnId: "turn-1", queryInstanceId: "query-1", timing: { promptAdmittedAtMs: 1, resultReceivedAtMs: 2, accountingSettledAtMs: 3, promptToResultMs: 1, resultToSettlementMs: 1 }, responses: [{ usage: { rawUsage: TOKEN_UTILIZATION.usage.rawUsage } }], verdict: { kind: "invalid", problems: [{ kind: "missingUsageBoundary", boundary: "turnStart" }] } });
+    expect(frame.frame.value.messages[0].turnAccounting).toMatchObject({ turnId: "turn-1", queryInstanceId: "query-1", timing: { promptAdmittedAtMs: 1, resultReceivedAtMs: 2, accountingSettledAtMs: 3, promptToResultMs: 1, resultToSettlementMs: 1 }, responses: [{ usage: { rawUsage: TOKEN_UTILIZATION.usage.rawUsage } }], verdict: { kind: "invalid", problems: [{ kind: "missingUsageBoundary", boundary: "turnStart" }] } });
   });
 
   it("uses generated proto presence for complete accounting evidence", () => {
-    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", reconciliation: { responseRecordCount: "0", responseModels: [{ model: "metadata-absent" }, { model: "explicit-zero", canonicalModel: "", provider: "", contextWindow: "0", maxOutputTokens: "0", costUsd: 0 }], resultModels: [], apiMessageIds: [] }, complete: {} } }] } });
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", reconciliation: { responseRecordCount: "0", responseModels: [{ model: "metadata-absent" }, { model: "explicit-zero", canonicalModel: "", provider: "", contextWindow: "0", maxOutputTokens: "0", costUsd: 0 }], resultModels: [], apiMessageIds: [] }, complete: {} } }] } });
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    const accounting = frame.frame.value.items[0].turnAccounting;
+    const accounting = frame.frame.value.messages[0].turnAccounting;
     expect(accounting).toMatchObject({ turnId: "turn-1", queryInstanceId: "query-1", responses: [], verdict: { kind: "complete" } });
     if (accounting?.reconciliation === undefined) throw new Error("missing reconciliation");
     expect(accounting.reconciliation.responseAllAgents).toBeUndefined();
@@ -605,18 +605,18 @@ describe("ConversationItem turn accounting", () => {
   });
 
   it("rejects malformed account-usage outcomes instead of inventing unavailable reasons", () => {
-    const accounting = (usageAtStart: unknown) => ({ conversationDelta: { ...CONV_DELTA, items: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", usageAtStart, responses: [], complete: {} } }] } });
+    const accounting = (usageAtStart: unknown) => ({ conversationDelta: { ...CONV_DELTA, messages: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", usageAtStart, responses: [], complete: {} } }] } });
     expect(() => decode(accounting({ turnId: "turn-1", turnStart: {}, available: {} }))).toThrow(/available requires fiveHour/);
     expect(() => decode(accounting({ turnId: "turn-1", turnStart: {}, unavailable: {} }))).toThrow(/unavailable requires a reason/);
   });
 
   it("preserves explicit zero utilization and legal unavailable reasons", () => {
-    const accounting = (usageAtStart: unknown) => decode({ conversationDelta: { ...CONV_DELTA, items: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", usageAtStart, responses: [], complete: {} } }] } });
+    const accounting = (usageAtStart: unknown) => decode({ conversationDelta: { ...CONV_DELTA, messages: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", usageAtStart, responses: [], complete: {} } }] } });
     const available = accounting({ turnId: "turn-1", turnStart: {}, available: { fiveHour: { utilizationPercent: 0, resetsAtMs: "100" } } });
     const unavailable = accounting({ turnId: "turn-1", turnStart: {}, unavailable: { windowUnavailable: {} } });
     if (available.frame.case !== "conversationDelta" || unavailable.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(available.frame.value.items[0].turnAccounting?.usageAtStart?.outcome).toEqual({ kind: "available", utilizationPercent: 0, resetsAtMs: 100 });
-    expect(unavailable.frame.value.items[0].turnAccounting?.usageAtStart?.outcome).toEqual({ kind: "unavailable", reason: "windowUnavailable" });
+    expect(available.frame.value.messages[0].turnAccounting?.usageAtStart?.outcome).toEqual({ kind: "available", utilizationPercent: 0, resetsAtMs: 100 });
+    expect(unavailable.frame.value.messages[0].turnAccounting?.usageAtStart?.outcome).toEqual({ kind: "unavailable", reason: "windowUnavailable" });
   });
 });
 const HOST_ACTION = { actionId: "action-1", setRepositoryFold: { repoKey: "repo", folded: false } };
@@ -806,13 +806,13 @@ describe("decodeFrontendFrame — SessionView S7 parity fields", () => {
 
 describe("decodeFrontendFrame — ConversationItem envelope", () => {
   function itemOf(item: unknown): ReturnType<typeof decodeFrontendFrame> {
-    return decode({ conversationDelta: { fence: "s1", items: [item] } });
+    return decode({ conversationDelta: { fence: "s1", messages: [item] } });
   }
 
   it("decodes the envelope + selected arm", () => {
     const frame = itemOf({ uuid: "u1", tsMs: "1700000000000", requestId: "r7", toolUse: { id: "tu1", name: "Bash" } });
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong variant");
-    const item = frame.frame.value.items[0];
+    const item = frame.frame.value.messages[0];
     expect(item.uuid).toBe("u1");
     expect(item.tsMs).toBe(1700000000000);
     expect(item.requestId).toBe("r7");
@@ -823,7 +823,7 @@ describe("decodeFrontendFrame — ConversationItem envelope", () => {
   it("decodes the item's provenance by its proto name", () => {
     const frame = itemOf({ uuid: "u1", source: "CONVERSATION_SOURCE_MERGE", toolUse: { id: "tu1" } });
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong variant");
-    expect(frame.frame.value.items[0].source).toBe(2);
+    expect(frame.frame.value.messages[0].source).toBe(2);
   });
 
   it("ADOPTS an absent provenance as UNSPECIFIED rather than throwing", () => {
@@ -831,7 +831,7 @@ describe("decodeFrontendFrame — ConversationItem envelope", () => {
     // would lose the correlated context that makes the bad item findable.
     const frame = itemOf({ uuid: "u1", toolUse: { id: "tu1" } });
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong variant");
-    expect(frame.frame.value.items[0].source).toBe(0);
+    expect(frame.frame.value.messages[0].source).toBe(0);
   });
 
   it("rejects an unrecognized provenance name", () => {
@@ -855,7 +855,7 @@ describe("decodeFrontendFrame — ConversationItem envelope", () => {
   it("adopts the typed payload by shape (does not reject its inner fields)", () => {
     const frame = itemOf({ uuid: "u1", permission: { request: { requestId: "u1" }, brandNewField: 9 } });
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong variant");
-    expect(frame.frame.value.items[0].payload).toHaveProperty("brandNewField", 9);
+    expect(frame.frame.value.messages[0].payload).toHaveProperty("brandNewField", 9);
   });
 });
 
@@ -1103,7 +1103,7 @@ describe("decodeFrontendFrame — required-field validation is loud", () => {
   it("rejects a ConversationDelta without a fence", () => {
     // The push is fenced since the figma-idl reshape: `session_id` is reserved,
     // and an unfenced push cannot be tested for staleness at all.
-    expect(() => decode({ conversationDelta: { workspace: "ws", items: [] } })).toThrow(
+    expect(() => decode({ conversationDelta: { workspace: "ws", messages: [] } })).toThrow(
       /ConversationDelta missing required `fence`/,
     );
   });
@@ -2880,11 +2880,11 @@ describe("AgentResponse.usage_stamp", () => {
         workspace: "/ws",
         fence: "f1",
         throughSeq: "1",
-        items: [{ uuid: "m1", source: "CONVERSATION_SOURCE_USER", agent: { response } }],
+        messages: [{ uuid: "m1", source: "CONVERSATION_SOURCE_USER", agent: { response } }],
       },
     });
     if (got.frame.case !== "conversationDelta") throw new Error("wrong variant");
-    return got.frame.value.items[0];
+    return got.frame.value.messages[0];
   }
 
   it("carries the resolved stamp beside the response body", () => {
@@ -2946,12 +2946,12 @@ describe("async-bubble decode entry points", () => {
         workspace: "ws",
         fence: "s1",
         throughSeq: "1",
-        items: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
+        messages: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
       },
     });
 
     // Assert
-    expect(frame.frame.case === "conversationDelta" && frame.frame.value.items[0].asyncBubble?.id).toBe("b1");
+    expect(frame.frame.case === "conversationDelta" && frame.frame.value.messages[0].asyncBubble?.id).toBe("b1");
   });
 
   it("rejects a feed-anchored bubble with no kind arm, loudly, at decode", () => {
@@ -2962,7 +2962,7 @@ describe("async-bubble decode entry points", () => {
           workspace: "ws",
           fence: "s1",
           throughSeq: "1",
-          items: [
+          messages: [
             {
               uuid: "u1",
               tsMs: "1",
@@ -2982,7 +2982,7 @@ describe("async-bubble decode entry points", () => {
         workspace: "ws",
         fence: "s1",
         throughSeq: "1",
-        items: [
+        messages: [
           {
             uuid: "u1",
             tsMs: "1",
@@ -2994,7 +2994,7 @@ describe("async-bubble decode entry points", () => {
     });
 
     // Assert
-    expect(frame.frame.case === "conversationDelta" && frame.frame.value.items[0].spawnedBubbleId).toBe("b1");
+    expect(frame.frame.case === "conversationDelta" && frame.frame.value.messages[0].spawnedBubbleId).toBe("b1");
   });
 
   it("leaves spawnedBubbleId ABSENT when the call detached nothing", () => {
@@ -3004,7 +3004,7 @@ describe("async-bubble decode entry points", () => {
         workspace: "ws",
         fence: "s1",
         throughSeq: "1",
-        items: [
+        messages: [
           {
             uuid: "u1",
             tsMs: "1",
@@ -3016,7 +3016,7 @@ describe("async-bubble decode entry points", () => {
     });
 
     // Assert
-    expect(frame.frame.case === "conversationDelta" && "spawnedBubbleId" in frame.frame.value.items[0]).toBe(false);
+    expect(frame.frame.case === "conversationDelta" && "spawnedBubbleId" in frame.frame.value.messages[0]).toBe(false);
   });
 });
 

@@ -94,10 +94,10 @@ func TestConsumerTerminatesOnTypedResumeIdentityMismatchBeforeMutation(t *testin
 	if got := len(c.snapshotRing()); got != 1 {
 		t.Fatalf("retained frames = %d, want only QueryCreated", got)
 	}
-	if len(push.convo) != 1 || len(push.convo[0].GetItems()) != 1 {
+	if len(push.convo) != 1 || len(push.convo[0].GetMessages()) != 1 {
 		t.Fatalf("conversation pushes = %+v, want one typed identity failure", push.convo)
 	}
-	failure := push.convo[0].GetItems()[0].GetFailureCard()
+	failure := push.convo[0].GetMessages()[0].GetFailureCard()
 	if failure == nil || failure.GetKind().GetSessionResumeFailed().GetDetail().GetIdentityMismatch().GetReplacementClaudeSessionId() != "replacement" || failure.GetKind().GetSessionResumeFailed().GetDetail().GetClaudeSessionId() != "requested" {
 		t.Fatalf("identity failure = %+v", failure)
 	}

@@ -41,8 +41,8 @@ func TestAClearAndACompactionAtTheSamePositionGetDistinctIDs(t *testing.T) {
 	}
 
 	// Assert.
-	clearUUID := clearDelta.GetItems()[0].GetUuid()
-	compactUUID := compactDelta.GetItems()[0].GetUuid()
+	clearUUID := clearDelta.GetMessages()[0].GetUuid()
+	compactUUID := compactDelta.GetMessages()[0].GetUuid()
 	if clearUUID == compactUUID {
 		t.Fatalf("both cuts derived uuid %q; the two id spaces must never overlap", clearUUID)
 	}

@@ -129,7 +129,7 @@ func TestMergeSkillCallIgnoresACallWithNoInput(t *testing.T) {
 
 // classifyItem is the pass the consumer makes: every Skill call in the item,
 // each one classified once.
-func classifyItem(item *frontendv1.ConversationItem) []SkillInvocation {
+func classifyItem(item *frontendv1.Message) []SkillInvocation {
 	var out []SkillInvocation
 	for _, use := range SkillToolCallsInItem(item) {
 		if inv, ok := SkillCall(use); ok {
@@ -141,7 +141,7 @@ func classifyItem(item *frontendv1.ConversationItem) []SkillInvocation {
 
 func TestClassifyingAnItemFindsTheMergeInvocationAmongAnItemsCalls(t *testing.T) {
 	// Arrange
-	item := &frontendv1.ConversationItem{Item: &frontendv1.ConversationItem_Agent{
+	item := &frontendv1.Message{Payload: &frontendv1.Message_Agent{
 		Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{
 			Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Content: []*datav1.ContentBlock{
 				{Block: &datav1.ContentBlock_ToolUse{ToolUse: skillCall(t, "Skill", "create-or-update-pr", "merge")}},
@@ -173,7 +173,7 @@ func TestClassifyingAnItemFindsTheMergeInvocationAmongAnItemsCalls(t *testing.T)
 
 func TestClassifyingAnItemReportsEveryInvocationInOrder(t *testing.T) {
 	// Arrange: a near-miss skill and the merge, both real invocations.
-	item := &frontendv1.ConversationItem{Item: &frontendv1.ConversationItem_Agent{
+	item := &frontendv1.Message{Payload: &frontendv1.Message_Agent{
 		Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{
 			Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Content: []*datav1.ContentBlock{
 				{Block: &datav1.ContentBlock_ToolUse{ToolUse: skillCall(t, "Skill", "create-or-update-pr", "merge")}},
@@ -197,7 +197,7 @@ func TestClassifyingAnItemReportsEveryInvocationInOrder(t *testing.T) {
 
 func TestClassifyingAnItemReportsNothingForAnOrdinaryItem(t *testing.T) {
 	// Arrange
-	item := &frontendv1.ConversationItem{Item: &frontendv1.ConversationItem_UserMessage{
+	item := &frontendv1.Message{Payload: &frontendv1.Message_UserMessage{
 		UserMessage: &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentString{ContentString: "merge the workspace please"}},
 	}}
 
@@ -294,12 +294,12 @@ func TestSkillCallRefusesACallThatNamesNoSkill(t *testing.T) {
 func TestItemBelongsToCallMatchesTheCallsOwnResult(t *testing.T) {
 	tests := []struct {
 		name string
-		item *frontendv1.ConversationItem
+		item *frontendv1.Message
 		want bool
 	}{
 		{
 			name: "the user record handing the result back",
-			item: &frontendv1.ConversationItem{Item: &frontendv1.ConversationItem_UserMessage{
+			item: &frontendv1.Message{Payload: &frontendv1.Message_UserMessage{
 				UserMessage: &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentBlocks{
 					ContentBlocks: &datav1.ApiContentBlocks{Blocks: []*datav1.ContentBlock{
 						{Block: &datav1.ContentBlock_ToolResult{ToolResult: &datav1.ToolResultBlock{ToolUseId: "toolu_merge"}}},
@@ -310,7 +310,7 @@ func TestItemBelongsToCallMatchesTheCallsOwnResult(t *testing.T) {
 		},
 		{
 			name: "the skill body addressed to the card",
-			item: &frontendv1.ConversationItem{Item: &frontendv1.ConversationItem_Agent{
+			item: &frontendv1.Message{Payload: &frontendv1.Message_Agent{
 				Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_SkillBody{
 					SkillBody: &frontendv1.SkillBodyItem{ToolUseId: "toolu_merge"},
 				}},
@@ -319,7 +319,7 @@ func TestItemBelongsToCallMatchesTheCallsOwnResult(t *testing.T) {
 		},
 		{
 			name: "a result belonging to a different call",
-			item: &frontendv1.ConversationItem{Item: &frontendv1.ConversationItem_UserMessage{
+			item: &frontendv1.Message{Payload: &frontendv1.Message_UserMessage{
 				UserMessage: &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentBlocks{
 					ContentBlocks: &datav1.ApiContentBlocks{Blocks: []*datav1.ContentBlock{
 						{Block: &datav1.ContentBlock_ToolResult{ToolResult: &datav1.ToolResultBlock{ToolUseId: "toolu_other"}}},
@@ -344,7 +344,7 @@ func TestItemBelongsToCallMatchesTheCallsOwnResult(t *testing.T) {
 
 func TestItemBelongsToCallMatchesNothingWithoutACall(t *testing.T) {
 	// Arrange
-	item := &frontendv1.ConversationItem{Item: &frontendv1.ConversationItem_UserMessage{
+	item := &frontendv1.Message{Payload: &frontendv1.Message_UserMessage{
 		UserMessage: &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentBlocks{
 			ContentBlocks: &datav1.ApiContentBlocks{Blocks: []*datav1.ContentBlock{
 				{Block: &datav1.ContentBlock_ToolResult{ToolResult: &datav1.ToolResultBlock{}}},

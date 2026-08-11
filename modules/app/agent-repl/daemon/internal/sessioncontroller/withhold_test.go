@@ -11,11 +11,11 @@ import (
 )
 
 // withholdTestItem is one user item carrying the uuid the assertions name it by.
-func withholdTestItem(uuid string) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{
+func withholdTestItem(uuid string) *frontendv1.Message {
+	return &frontendv1.Message{
 		Uuid:   uuid,
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+		Payload: &frontendv1.Message_UserMessage{UserMessage: &datav1.ApiUserMessage{
 			Content: &datav1.ApiUserMessage_ContentString{ContentString: uuid},
 		}},
 	}
@@ -24,14 +24,14 @@ func withholdTestItem(uuid string) *frontendv1.ConversationItem {
 func withholdTestDelta(uuids ...string) *frontendv1.ConversationDelta {
 	cd := &frontendv1.ConversationDelta{ThroughSeq: 7}
 	for _, u := range uuids {
-		cd.Items = append(cd.Items, withholdTestItem(u))
+		cd.Messages = append(cd.Messages, withholdTestItem(u))
 	}
 	return cd
 }
 
 func keptUUIDs(cd *frontendv1.ConversationDelta) []string {
 	var out []string
-	for _, it := range cd.GetItems() {
+	for _, it := range cd.GetMessages() {
 		out = append(out, it.GetUuid())
 	}
 	return out
@@ -88,7 +88,7 @@ func TestWithholdItemsKeepsTheItemsItsJudgeKeeps(t *testing.T) {
 			cd := withholdTestDelta(tc.uuids...)
 
 			// Act
-			withheld := c.withholdItems(cd, func(it *frontendv1.ConversationItem) withholdVerdict {
+			withheld := c.withholdItems(cd, func(it *frontendv1.Message) withholdVerdict {
 				if tc.withhold[it.GetUuid()] {
 					return withholdItem("withheld " + it.GetUuid())
 				}
@@ -114,7 +114,7 @@ func TestWithholdItemsLogsEveryWithheldItemsReason(t *testing.T) {
 	cd := withholdTestDelta("a", "b")
 
 	// Act
-	c.withholdItems(cd, func(it *frontendv1.ConversationItem) withholdVerdict {
+	c.withholdItems(cd, func(it *frontendv1.Message) withholdVerdict {
 		return withholdItem("withheld " + it.GetUuid())
 	})
 
@@ -133,7 +133,7 @@ func TestWithholdItemsPassesTheReasonThroughVerbatim(t *testing.T) {
 	cd := withholdTestDelta("a")
 
 	// Act
-	c.withholdItems(cd, func(*frontendv1.ConversationItem) withholdVerdict {
+	c.withholdItems(cd, func(*frontendv1.Message) withholdVerdict {
 		return withholdItem(`withheld ws="100%" seq=%d`)
 	})
 
@@ -151,7 +151,7 @@ func TestWithholdItemsWithholdsSilentlyOnAnEmptyReason(t *testing.T) {
 	cd := withholdTestDelta("a")
 
 	// Act
-	withheld := c.withholdItems(cd, func(*frontendv1.ConversationItem) withholdVerdict {
+	withheld := c.withholdItems(cd, func(*frontendv1.Message) withholdVerdict {
 		return withholdItem("")
 	})
 
@@ -159,8 +159,8 @@ func TestWithholdItemsWithholdsSilentlyOnAnEmptyReason(t *testing.T) {
 	if withheld != 1 {
 		t.Errorf("withheld count = %d, want 1", withheld)
 	}
-	if len(cd.GetItems()) != 0 {
-		t.Errorf("kept %d item(s), want none", len(cd.GetItems()))
+	if len(cd.GetMessages()) != 0 {
+		t.Errorf("kept %d item(s), want none", len(cd.GetMessages()))
 	}
 	if n := cl.count(""); n != 0 {
 		t.Errorf("logged %d line(s) for a silent withholding, want none", n)
@@ -175,7 +175,7 @@ func TestWithholdItemsLeavesAnEmptyDeltaAlone(t *testing.T) {
 	cd := withholdTestDelta()
 
 	// Act
-	withheld := c.withholdItems(cd, func(*frontendv1.ConversationItem) withholdVerdict {
+	withheld := c.withholdItems(cd, func(*frontendv1.Message) withholdVerdict {
 		t.Error("the judge ran on a delta with no items")
 		return keepItem
 	})
@@ -196,7 +196,7 @@ func TestWithholdItemsToleratesANilDelta(t *testing.T) {
 	c := withholdTestConsumer(cl)
 
 	// Act
-	withheld := c.withholdItems(nil, func(*frontendv1.ConversationItem) withholdVerdict {
+	withheld := c.withholdItems(nil, func(*frontendv1.Message) withholdVerdict {
 		t.Error("the judge ran on a nil delta")
 		return keepItem
 	})
@@ -218,7 +218,7 @@ func TestWithholdItemsToleratesANilDelta(t *testing.T) {
 func TestEveryWithholdingCuratorEmptiesTheDeltaWithoutDroppingIt(t *testing.T) {
 	tests := []struct {
 		name    string
-		item    *frontendv1.ConversationItem
+		item    *frontendv1.Message
 		envs    map[string]frontend.RecordEnvelope
 		curator func(c *consumer, cd *frontendv1.ConversationDelta, envs map[string]frontend.RecordEnvelope)
 	}{
@@ -250,14 +250,14 @@ func TestEveryWithholdingCuratorEmptiesTheDeltaWithoutDroppingIt(t *testing.T) {
 			// Arrange
 			cl := &logCapture{}
 			c := withholdTestConsumer(cl)
-			cd := &frontendv1.ConversationDelta{ThroughSeq: 7, Items: []*frontendv1.ConversationItem{tc.item}}
+			cd := &frontendv1.ConversationDelta{ThroughSeq: 7, Messages: []*frontendv1.Message{tc.item}}
 
 			// Act
 			tc.curator(c, cd, tc.envs)
 
 			// Assert
-			if len(cd.GetItems()) != 0 {
-				t.Fatalf("kept %d item(s), want the curator's own subject withheld", len(cd.GetItems()))
+			if len(cd.GetMessages()) != 0 {
+				t.Fatalf("kept %d item(s), want the curator's own subject withheld", len(cd.GetMessages()))
 			}
 			if cd.GetThroughSeq() != 7 {
 				t.Errorf("through_seq = %d, want the replay cursor intact at 7", cd.GetThroughSeq())
@@ -267,20 +267,20 @@ func TestEveryWithholdingCuratorEmptiesTheDeltaWithoutDroppingIt(t *testing.T) {
 }
 
 // machineryTestItem is one slash-command bookkeeping record.
-func machineryTestItem(uuid string) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{
+func machineryTestItem(uuid string) *frontendv1.Message {
+	return &frontendv1.Message{
 		Uuid: uuid,
-		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+		Payload: &frontendv1.Message_UserMessage{UserMessage: &datav1.ApiUserMessage{
 			Content: &datav1.ApiUserMessage_ContentString{ContentString: compactMachinery},
 		}},
 	}
 }
 
 // noResponseTestItem is one vendor no-response placeholder.
-func noResponseTestItem(uuid string) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{
+func noResponseTestItem(uuid string) *frontendv1.Message {
+	return &frontendv1.Message{
 		Uuid: uuid,
-		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
+		Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 			Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{
 				Body: &datav1.ApiAssistantMessage{
 					Model: syntheticModel,

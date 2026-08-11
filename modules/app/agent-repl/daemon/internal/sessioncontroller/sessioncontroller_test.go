@@ -1692,7 +1692,7 @@ func TestResyncRoundTripReplaysTheRetainedHistory(t *testing.T) {
 	var gotSeqs []uint64
 	for _, cd := range h.push.convo {
 		gotSeqs = append(gotSeqs, cd.GetThroughSeq())
-		for _, it := range cd.GetItems() {
+		for _, it := range cd.GetMessages() {
 			gotUUIDs = append(gotUUIDs, it.GetUuid())
 		}
 	}

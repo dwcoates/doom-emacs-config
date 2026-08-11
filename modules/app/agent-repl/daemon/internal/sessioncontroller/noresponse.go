@@ -58,7 +58,7 @@ const noResponseRequestedText = "No response requested."
 // with the sentence and goes on to say something else is not this placeholder,
 // and neither is one carrying a second block. Surrounding whitespace is the
 // only latitude given.
-func isNoResponsePlaceholder(it *frontendv1.ConversationItem) bool {
+func isNoResponsePlaceholder(it *frontendv1.Message) bool {
 	am := it.GetAgent().GetResponse().GetBody()
 	if am == nil || am.GetModel() != syntheticModel {
 		return false
@@ -81,7 +81,7 @@ func isNoResponsePlaceholder(it *frontendv1.ConversationItem) bool {
 // only the assistant_message arm, so it cannot interact with prompt attribution
 // the way the user-record curators do.
 func (c *consumer) withholdNoResponsePlaceholders(cd *frontendv1.ConversationDelta) {
-	c.withholdItems(cd, func(it *frontendv1.ConversationItem) withholdVerdict {
+	c.withholdItems(cd, func(it *frontendv1.Message) withholdVerdict {
 		if !isNoResponsePlaceholder(it) {
 			return keepItem
 		}

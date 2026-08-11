@@ -23,7 +23,7 @@ func (h *queueHarness) submitAs(requestID, text string) error {
 // userTurnItems returns every pushed conversation item carrying a user message,
 // in push order, with the delta's through_seq beside it.
 type pushedTurn struct {
-	item       *frontendv1.ConversationItem
+	item       *frontendv1.Message
 	throughSeq uint64
 }
 
@@ -32,7 +32,7 @@ func (h *queueHarness) userTurns() []pushedTurn {
 	defer h.push.mu.Unlock()
 	var out []pushedTurn
 	for _, cd := range h.push.convo {
-		for _, it := range cd.GetItems() {
+		for _, it := range cd.GetMessages() {
 			if it.GetUserMessage() != nil {
 				out = append(out, pushedTurn{item: it, throughSeq: cd.GetThroughSeq()})
 			}

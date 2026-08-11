@@ -125,7 +125,7 @@ func pendingPermissionIn(frame *frontendv1.FrontendFrame, workspace string) stri
 // DegradedState into the failure vocabulary, and the component survives that
 // classification inside the card's own evidence. Matching the classified card
 // is what makes this an assertion about what the USER is shown.
-func degradedCardIn(frame *frontendv1.FrontendFrame, workspace, component string) *frontendv1.ConversationItem {
+func degradedCardIn(frame *frontendv1.FrontendFrame, workspace, component string) *frontendv1.Message {
 	for _, item := range deltaItems(frame, workspace) {
 		card := item.GetFailureCard()
 		if card == nil {
@@ -169,7 +169,7 @@ func protoText(msg interface{ String() string }) string {
 // itemKeys is the identity set of a conversation slice: every item's uuid, in
 // arrival order. A replay's completeness is judged against the live stream's
 // keys, so a hole is a MISSING KEY rather than a smaller number.
-func itemKeys(items []*frontendv1.ConversationItem) []string {
+func itemKeys(items []*frontendv1.Message) []string {
 	out := make([]string, 0, len(items))
 	for _, item := range items {
 		out = append(out, item.GetUuid())

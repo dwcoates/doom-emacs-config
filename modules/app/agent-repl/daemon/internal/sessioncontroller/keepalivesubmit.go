@@ -244,7 +244,7 @@ func (m *Manager) abandonKeepAlivePing(d *sessionController, turnID string) int 
 // WHY THE PRE-SUBMIT STAMP IS NOT ENOUGH. SubmitKeepAlivePing writes the window
 // before the prompt reaches the shim, so the only instant available to it is
 // m.now() — the DAEMON's clock. The items the exclusion later judges are stamped
-// by the VENDOR (the shim's own clock, carried through to ConversationItem.ts_ms).
+// by the VENDOR (the shim's own clock, carried through to Message.ts_ms).
 // Under any skew between the two the interval is not wrong by a little: a daemon
 // running ahead produces started_at_ms greater than every item the ping writes,
 // so the open window covers nothing at all while it is open, and the close —

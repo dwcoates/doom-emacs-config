@@ -126,7 +126,7 @@ func TestStreamContractRecordKeepsEnvelopeUUID(t *testing.T) {
 		if cd == nil {
 			continue
 		}
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			seen++
 			// Each fixture item is one SDK assistant record. Reasoning arrives
 			// as its own emission under a uuid DERIVED from the envelope's, so
@@ -148,10 +148,10 @@ func TestStreamContractRecordKeepsEnvelopeUUID(t *testing.T) {
 			}
 
 			// Assert
-			if len(got.GetItems()) != 1 {
-				t.Fatalf("got %d items for one assistant record, want 1", len(got.GetItems()))
+			if len(got.GetMessages()) != 1 {
+				t.Fatalf("got %d items for one assistant record, want 1", len(got.GetMessages()))
 			}
-			out := got.GetItems()[0]
+			out := got.GetMessages()[0]
 			if out.GetUuid() != item.GetUuid() {
 				t.Errorf("item uuid = %q, want %q", out.GetUuid(), item.GetUuid())
 			}
@@ -187,7 +187,7 @@ func TestStreamContractThinkingNamesThePreviewItSettlesOnto(t *testing.T) {
 		if cd == nil {
 			continue
 		}
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			want := item.GetAgent().GetThinking()
 			if want == nil {
 				continue
@@ -210,7 +210,7 @@ func TestStreamContractThinkingNamesThePreviewItSettlesOnto(t *testing.T) {
 			}
 
 			// Assert
-			th := got.GetItems()[0].GetAgent().GetThinking()
+			th := got.GetMessages()[0].GetAgent().GetThinking()
 			if th.GetApiMessageId() != want.GetApiMessageId() || th.GetBlockIndex() != want.GetBlockIndex() {
 				t.Errorf("stated origin = (%q, %d), want (%q, %d)",
 					th.GetApiMessageId(), th.GetBlockIndex(), want.GetApiMessageId(), want.GetBlockIndex())
@@ -255,7 +255,7 @@ func TestStreamContractOneStreamCarriesOneFence(t *testing.T) {
 		if cd == nil {
 			continue
 		}
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			seenConversation++
 			envelopeUUID, _, _ := strings.Cut(item.GetUuid(), "#")
 			ev := &corev1.Event{
@@ -303,7 +303,7 @@ func TestStreamContractTheStreamFenceResolvesToItsOwnIdentities(t *testing.T) {
 // fixture item. A response item carries it directly; a thinking item carries
 // only the block, because the emission is what the reasoning became once the
 // daemon stripped it out of the body.
-func recordBodyFor(t *testing.T, item *frontendv1.ConversationItem, messageID string) *datav1.ApiAssistantMessage {
+func recordBodyFor(t *testing.T, item *frontendv1.Message, messageID string) *datav1.ApiAssistantMessage {
 	t.Helper()
 	if body := item.GetAgent().GetResponse().GetBody(); body != nil {
 		return body

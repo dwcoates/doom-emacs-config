@@ -87,11 +87,11 @@ function expectedDeltas(): Array<{ uuid: string; blockIndex: number; kind: strin
     });
 }
 
-/** The conversation items the fixture declares, in order. */
+/** The conversation messages the fixture declares, in order. */
 function conversationItems(): Array<Record<string, any>> {
   return fixture.frontendFrames
     .filter((f) => f["conversationDelta"] !== undefined)
-    .flatMap((f) => f["conversationDelta"].items as Array<Record<string, any>>);
+    .flatMap((f) => f["conversationDelta"].messages as Array<Record<string, any>>);
 }
 
 /** Every arm `AgentEmission` names. An item outside this set is a contract change. */

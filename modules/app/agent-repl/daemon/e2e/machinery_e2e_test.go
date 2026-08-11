@@ -80,7 +80,7 @@ func TestE2EMachineryUserLineNeverReachesTheFrontend(t *testing.T) {
 
 	// Assert — the real prompt arrives, and nothing that arrived before it is
 	// the machinery record.
-	isRealPrompt := func(item *frontendv1.ConversationItem) bool {
+	isRealPrompt := func(item *frontendv1.Message) bool {
 		return item.GetUserMessage().GetContentString() == realPrompt
 	}
 	_, before := awaitItem(t, conn, cwd, "the real prompt's user item", isRealPrompt)
@@ -106,7 +106,7 @@ func TestE2EMachineryIsWithheldFromAReplayToo(t *testing.T) {
 	store.write(sidecarUserLineEvent(t, vendorID, "e2e-machinery-replay", machineryContent))
 	store.write(sidecarUserLineEvent(t, vendorID, "e2e-real-replay", realPrompt))
 	// Both records are certainly curated once the second one's item has landed.
-	awaitItem(t, conn, cwd, "the real prompt's user item", func(item *frontendv1.ConversationItem) bool {
+	awaitItem(t, conn, cwd, "the real prompt's user item", func(item *frontendv1.Message) bool {
 		return item.GetUserMessage().GetContentString() == realPrompt
 	})
 
