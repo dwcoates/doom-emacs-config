@@ -872,6 +872,32 @@ no typing of any kind."
           (should (equal order '((emacs . "ws1"))))
           (should (agent-repl-test--slo-wire-stamped-p "ws1")))))))
 
+(ert-deftest agent-repl-test-snapshot-lead-applies-workspaces-before-the-rosters ()
+  "The lead batch applies per-workspace state BEFORE the wholesale rebuilds.
+The emacs signal is stamped when a workspace's own state has been stored, so
+queueing the lead batch's workspaces behind the whole fleet's session views
+and SystemInits — both of which scale with the ROSTER — is what moved
+`emacs_ms' from milliseconds to seconds."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1" "/tmp/ws1")
+    (agent-repl-test--register-ws "other" "/tmp/other")
+    (let ((order nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-apply-session-view)
+                 (lambda (_v) (push 'session-view order)))
+                ((symbol-function 'agent-repl--frontend-apply-session-init)
+                 (lambda (_v) (push 'session-init order)))
+                ((symbol-function 'agent-repl--recovery-slo-note-emacs)
+                 (lambda (_ws) (push 'workspace-state order))))
+        ;; Act
+        (agent-repl-test--apply-snapshot
+         '(:workspaces ((:workspace "/tmp/ws1" :state "RENDER_STATE_IDLE"))
+           :sessions ((:sessionId "s_1" :workspace "/tmp/other"))
+           :inits ((:workspace "/tmp/other" :init (:model "m")))))
+        ;; Assert
+        (should (equal (nreverse order)
+                       '(workspace-state session-view session-init)))))))
+
 (ert-deftest agent-repl-test-apply-snapshot-applies-daemon-view ()
   "A snapshot's `:daemon' member routes into the boot-id note (give-up reset)."
   ;; Arrange
