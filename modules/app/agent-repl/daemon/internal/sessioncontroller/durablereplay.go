@@ -87,7 +87,11 @@ type DurableHistorySource interface {
 // than replayed in silence forever.
 const promptReceiptStaleAfterMs int64 = 24 * 60 * 60 * 1000
 
-func (m *Manager) resyncFromDurableHistory(workspace string, fromSeq uint64) error {
+// publishedFence is the workspace's AUTHORITATIVE WorkspaceState fence, as the
+// admission ladder read it to admit this very request. It is carried onto every
+// push the replay produces, because a replay's pushes are answers to a request
+// admitted under that token and a client measures them against the same one.
+func (m *Manager) resyncFromDurableHistory(workspace string, fromSeq uint64, publishedFence string) error {
 	logf := dlog.Tag(dlog.Logf(m.logf), "ws", workspace, "from_seq", fromSeq, "source", "shim-store")
 	logf("session-controller: resync for an UNWIRED workspace — serving the conversation replay from DURABLE history (no session controller is live, and none is brought up to answer a read)")
 	if m.cfg.DurableHistory == nil {
@@ -101,7 +105,7 @@ func (m *Manager) resyncFromDurableHistory(workspace string, fromSeq uint64) err
 	}
 	lastSeen := m.cfg.SeqStore.LastSeq(sessionID)
 	replayFrom := m.replayFloorAt(workspace, sessionID, lastSeen, fromSeq)
-	cons := m.durableConsumer(workspace, sessionID)
+	cons := m.durableConsumer(workspace, sessionID, publishedFence)
 	if err := m.hydratePersistedAccounting(cons, sessionID); err != nil {
 		return err
 	}
@@ -390,8 +394,15 @@ func (s *servedPrompts) claim(r statedb.PromptReceipt) (string, bool) {
 // nothing else, exactly as repullConversation guarantees for the shim-served
 // re-pull. The curation state (the skill correlator in particular) starts empty
 // per replay, which is what a replay read in store order from the floor wants.
-func (m *Manager) durableConsumer(workspace, sessionID string) *consumer {
+func (m *Manager) durableConsumer(workspace, sessionID, publishedFence string) *consumer {
 	cons := m.historyConsumer(workspace, sessionID, m.cfg.Push)
+	// THE FENCE THE CLIENT WILL MEASURE THESE PUSHES AGAINST, carried verbatim
+	// rather than composed. This consumer holds no controller generation, so
+	// composing gave it `Fence(session, "")` — a token no WorkspaceState ever
+	// published, so the fence gate discarded every push it made, and the page,
+	// still missing what it had discarded, resynced again and again at the
+	// heartbeat's rate. See consumer.fence.
+	cons.publishedFence = publishedFence
 	// The one durable store it DOES hold, and it holds it to RETIRE rows: a
 	// replay that finds a receipt's prompt already in the store has established
 	// the fact the live retirement point would have established, for a daemon
@@ -404,6 +415,32 @@ func (m *Manager) durableConsumer(workspace, sessionID string) *consumer {
 	// future history reader a receipt-retiring one by default.
 	cons.receipts = m.cfg.PromptReceipts
 	return cons
+}
+
+// publishedFence reads the workspace's AUTHORITATIVE WorkspaceState fence — the
+// one token every client compares a push against.
+//
+// It is a READ of the published truth, never a recomposition of it: an unwired
+// workspace publishes an ABSENT fence, and `Fence(session, "")` is now that
+// same absence, so the two agree by construction. An unreadable or absent state
+// yields "", which the fence gate reads as "nothing has been shown to be
+// current" — the honest answer, and the one both ends already handle.
+func (m *Manager) publishedFence(workspace string) string {
+	reader, ok := m.cfg.SSM.(WorkspaceStateReader)
+	if !ok {
+		m.logf("session-controller: published fence UNREADABLE ws=%q — the state applier is no WorkspaceStateReader, so this push carries no fence and the client will measure it against the state's own", workspace)
+		return ""
+	}
+	state, found, err := reader.Current(workspace)
+	if err != nil {
+		m.logf("session-controller: published fence UNREADABLE ws=%q: %v — this push carries no fence", workspace, err)
+		return ""
+	}
+	if !found || state == nil {
+		m.logf("session-controller: published fence ABSENT ws=%q — no authoritative workspace state, so this push carries no fence", workspace)
+		return ""
+	}
+	return state.GetFence()
 }
 
 // historyConsumer builds the throwaway translation consumer EVERY history read
@@ -421,6 +458,11 @@ func (m *Manager) durableConsumer(workspace, sessionID string) *consumer {
 // assembly captures into a buffer and pushes nothing.
 func (m *Manager) historyConsumer(workspace, sessionID string, push Pusher) *consumer {
 	cons := newConsumer(workspace, sessionID, push, m.cfg.SSM, nil, m.cfg.ClearCompactStore, m.cfg.TurnAccountings, m.logf, nil, nil, nil, nil, nil)
+	// A HISTORY READ, so its pushes carry the workspace's published fence
+	// rather than one composed from a generation it does not have. Set on the
+	// SHARED builder because it is true of every consumer built here, and a
+	// per-caller flag is exactly the kind of thing one caller forgets.
+	cons.servesHistory = true
 	// A replay's degradations are as user-visible as a live one's — the same
 	// conversation reaches the same frontend — so it takes the same WARN
 	// channel.
