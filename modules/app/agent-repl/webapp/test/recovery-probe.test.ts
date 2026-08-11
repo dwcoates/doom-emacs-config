@@ -18,13 +18,22 @@ function makeProbe(opts?: { socketOpen?: () => boolean; workspace?: string }) {
 }
 
 describe("RecoveryProbe", () => {
-  it("reports unsatisfied before any epoch has opened", () => {
-    const { probe } = makeProbe();
+  it("opens its epoch at construction, so a freshly booted page counts its own frames", () => {
+    const { probe, at } = makeProbe();
 
     const report = probe.report();
 
-    expect(report.epochAtMs).toBe(0);
+    expect(report.epochAtMs).toBe(at());
     expect(report.satisfied).toBe(false);
+  });
+
+  it("counts a re-navigated page's evidence without any explicit epoch call", () => {
+    const { probe } = makeProbe();
+
+    probe.noteAdopted();
+    probe.noteBatch(["session-view"]);
+
+    expect(probe.report().satisfied).toBe(true);
   });
 
   it("cannot be satisfied by an open socket alone", () => {
@@ -98,8 +107,12 @@ describe("RecoveryProbe", () => {
     expect(report.adoptedAtMs).toBe(0);
   });
 
-  it("ignores evidence arriving before any epoch opened", () => {
-    const { probe } = makeProbe();
+  it("ignores evidence when the host clock reports no epoch at all", () => {
+    const probe = new RecoveryProbe({
+      now: () => 0,
+      workspace: () => "/w",
+      socketOpen: () => true,
+    });
 
     probe.noteAdopted();
     probe.noteBatch(["session-view"]);
