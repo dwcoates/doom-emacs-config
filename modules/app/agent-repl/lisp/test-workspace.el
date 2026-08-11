@@ -364,10 +364,17 @@ nil so post-nuke passes don't act on stale runtime intent."
             (delete-file canonical)
             (make-symbolic-link target canonical)
             (agent-repl--ws-put "ws1" :project-dir temporary-file-directory)
-            (puthash "ws1" (list :target target) agent-repl--workspace-log-targets)
+            ;; Installed under the IDENTITY key the forget sweep matches on.
+            ;; A hand-placed entry under the old name key would let the
+            ;; assertion below pass vacuously.
+            (let ((identity (agent-repl--workspace-log-identity "ws1")))
+              (puthash (agent-repl--workspace-log-target-key identity)
+                       (append (list :target target) identity)
+                       agent-repl--workspace-log-targets))
+            (should (agent-repl--workspace-log-target-entry "ws1"))
             (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
               (agent-repl--ws-del "ws1"))
-            (should-not (gethash "ws1" agent-repl--workspace-log-targets))
+            (should-not (agent-repl--workspace-log-target-entry "ws1"))
             (should (file-exists-p target))
             (should (file-symlink-p canonical)))
         (when (file-symlink-p canonical) (delete-file canonical))
@@ -2777,3 +2784,86 @@ The screen must only demote names that could not be routed at all."
         (should (seq-find (lambda (l) (string-match-p "land-after-teardown error" l))
                           warned))
         (should repainted)))))
+
+;;;; ---- Tests: a persp built-in may never claim a workspace directory ----
+
+(ert-deftest agent-repl-test-ws-put-refuses-project-dir-on-pseudo-perspective ()
+  "\"main\" and \"none\" are persp-mode's own; the write never commits.
+Measured 2026-08-11: the live registry held `main' -> a real worktree, which
+made the perspective log-routable and gave it that workspace's durable sink."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((+workspaces-main "main"))
+      (cl-letf (((symbol-function 'agent-repl--do-log) #'ignore))
+        ;; Act
+        (agent-repl--ws-put "main" :project-dir "/tmp/some-real-worktree")
+        ;; Assert
+        (should-not (agent-repl--ws-get "main" :project-dir))))))
+
+(ert-deftest agent-repl-test-ws-put-refusal-is-announced ()
+  "The refusal is loud: a producer bug must not be silently absorbed."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((+workspaces-main "main")
+          (log-calls nil))
+      (cl-letf (((symbol-function 'agent-repl--do-log)
+                 (lambda (ws fmt args &optional _err)
+                   (push (list ws fmt args) log-calls))))
+        ;; Act
+        (agent-repl--ws-put "main" :project-dir "/tmp/some-real-worktree"))
+      ;; Assert
+      (should (= 1 (length log-calls)))
+      (should (string-match-p "REFUSED :project-dir" (nth 1 (car log-calls)))))))
+
+(ert-deftest agent-repl-test-ws-put-allows-non-project-dir-keys-on-pseudo ()
+  "Only `:project-dir' is refused; a pseudo entry is otherwise untouched."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((+workspaces-main "main"))
+      (cl-letf (((symbol-function 'agent-repl--do-log) #'ignore))
+        ;; Act
+        (agent-repl--ws-put "main" :priority "p1")
+        ;; Assert
+        (should (equal "p1" (agent-repl--ws-get "main" :priority)))))))
+
+(ert-deftest agent-repl-test-ws-put-still-writes-project-dir-for-a-real-workspace ()
+  "The refusal is scoped to the pseudo names and nothing else."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((+workspaces-main "main"))
+      ;; Act
+      (agent-repl--ws-put "real-ws" :project-dir "/tmp/real-ws")
+      ;; Assert
+      (should (equal "/tmp/real-ws" (agent-repl--ws-get "real-ws" :project-dir))))))
+
+(ert-deftest agent-repl-test-ws-forget-log-target-tolerates-a-deleted-worktree ()
+  "A workspace whose worktree is gone must not make the teardown signal.
+`agent-repl--ws-del' runs this, and a diagnostic sink may never abort a
+teardown — so the sweep matches on the registered directory rather than
+resolving an identity that would raise."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (agent-repl--ws-put "gone-ws" :project-dir "/no/such/worktree/at/all")
+      ;; Act / Assert
+      (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+        (should-not (agent-repl--ws-forget-emacs-log-target "gone-ws" "probe"))))))
+
+(ert-deftest agent-repl-test-ws-forget-log-target-drops-every-name-for-the-dir ()
+  "One directory's target is forgotten once, however many names reached it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-forget-shared-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "shared-a" :project-dir project)
+            (puthash "shared-b" (gethash "shared-a" agent-repl--workspaces)
+                     agent-repl--workspaces)
+            (agent-repl--workspace-emacs-log-target "shared-a")
+            ;; Act
+            (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+              (agent-repl--ws-forget-emacs-log-target "shared-b" "probe"))
+            ;; Assert — forgetting through EITHER name clears the one entry.
+            (should (= 0 (hash-table-count agent-repl--workspace-log-targets))))
+        (delete-directory project t)))))
