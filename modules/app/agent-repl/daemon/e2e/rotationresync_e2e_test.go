@@ -95,15 +95,36 @@ func resyncRefusalFrom(t *testing.T, conn *websocket.Conn, state *frontendv1.Wor
 	return ""
 }
 
+// shimReplayIdle is the window a shim-served replay must go quiet for before the
+// shim calls it complete (agent-shim/claude/shim/src/uds/uds-session.ts,
+// `replayIdleMs ?? 5000`).
+//
+// It is the ONLY terminator an UNBOUNDED replay has, and a TAIL page's replay is
+// deliberately unbounded above: conversationpage.go caps a tail read at nothing,
+// because capping it at last_seen_seq served an EMPTY page over a store holding
+// the whole conversation. A tail page through a LIVE shim therefore cannot land
+// before this window elapses, whatever the machine is doing.
+const shimReplayIdle = 5 * time.Second
+
+// tailPageBudget is what a tail page served THROUGH A LIVE SHIM is bounded by:
+// the shim's replay idle window, plus the suite's ordinary frame budget for
+// assembling and pushing the page once the replay ends.
+//
+// The bare frame budget is NOT the bound here — it is the same 5s as the idle
+// window it would have to wait out first, so an await under it can only ever
+// expire. This is the case readFrameWithin exists for, and the bound is named
+// rather than padded.
+var tailPageBudget = shimReplayIdle + frameTimeout
+
 // tailPageFrom asks for the conversation's tail — the re-anchor a client takes
 // when its mark is refused — and returns the page.
 func tailPageFrom(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string, limit int) *frontendv1.ConversationPage {
 	t.Helper()
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"workspace":%q,"conversationPage":{"tail":{"limit":%d},"fence":%q}}`,
 		requestID, workspace, limit, state.GetFence()))
-	deadline := time.Now().Add(frameTimeout)
+	deadline := time.Now().Add(tailPageBudget)
 	for time.Now().Before(deadline) {
-		frame := readFrame(t, conn)
+		frame := readFrameWithin(t, conn, tailPageBudget)
 		switch f := frame.GetFrame().(type) {
 		case *frontendv1.FrontendFrame_CommandAck:
 			if f.CommandAck.GetRequestId() == requestID && !f.CommandAck.GetOk() {
@@ -209,6 +230,19 @@ func TestE2ETurnAfterARetiredSpaceResyncStillFlows(t *testing.T) {
 	h := newUDSHarness(t)
 	id, conn, _, _ := liveSession(t, h, cwd)
 	rotateSession(t, h, conn, id, cwd)
+	// THE ROTATED TURN IS DRAINED TO ITS END BEFORE THE REFUSAL IS ASKED FOR.
+	// rotateSession returns on the rotated turn's REPLY, which is mid-turn: the
+	// result delta and the turn's own end are still on the wire behind it. The
+	// refusal asserts that NOTHING was pushed for the resync, and a delta the
+	// rotation produced before the resync was ever written would be counted
+	// against it — the sibling tests get this barrier from awaiting the injected
+	// clear, and this one had none. The SSM's own resolution to DONE is caused by
+	// the turn's end, so it cannot precede any of that turn's conversation.
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+		"the rotated turn RESOLVED to DONE, which is every one of its deltas drained": func(frame *frontendv1.FrontendFrame) bool {
+			return ssmResolved(frame, cwd, frontendv1.RenderState_RENDER_STATE_DONE, "turn_ended")
+		},
+	})
 	_, state := dialForReplay(t, h, id, cwd)
 	resyncRefusalFrom(t, conn, state, cwd, "r-retired-mark", retiredSpaceMark)
 
