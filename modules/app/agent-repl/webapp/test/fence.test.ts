@@ -16,7 +16,7 @@ function topbar(fence: string, workspace = "/ws"): FencedView {
       sessionLine: "session line",
       modelDisplay: "opus-5",
       modelOptions: [],
-      accountingLine: "",
+      warnings: [],
       fence,
     },
   };
