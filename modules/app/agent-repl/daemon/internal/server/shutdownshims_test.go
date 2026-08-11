@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -263,5 +264,85 @@ func TestShutdownLeavesRecordsNonTerminal(t *testing.T) {
 	}
 	if rec.Terminal {
 		t.Fatal("shutdown marked the record terminal; the session is merely unwired, not dead")
+	}
+}
+
+// THE BOUNCE LEAVES A WITNESS. A teardown that preserves shims must record
+// WHICH pids it is handing over; otherwise the next daemon can only count
+// processes, and a replacement counts the same as a survivor.
+
+func TestShutdownRecordsThePreservedBounce(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	var rolled []bool
+	h.srv.RecordBounce = func(r bool, _ string) error { rolled = append(rolled, r); return nil }
+
+	// Act.
+	h.srv.ShutdownAll(false, sessioncontroller.StopCauseDaemonShutdown())
+
+	// Assert.
+	if len(rolled) != 1 || rolled[0] {
+		t.Fatalf("RecordBounce calls = %v, want exactly one preserved (false) record", rolled)
+	}
+}
+
+func TestShutdownRecordsAStopShimsBounceAsARoll(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	var rolled []bool
+	h.srv.RecordBounce = func(r bool, _ string) error { rolled = append(rolled, r); return nil }
+
+	// Act.
+	h.srv.ShutdownAll(true, sessioncontroller.StopCauseDaemonShutdown())
+
+	// Assert.
+	if len(rolled) != 1 || !rolled[0] {
+		t.Fatalf("RecordBounce calls = %v, want exactly one rolled (true) record", rolled)
+	}
+}
+
+func TestShutdownSurfacesAFailedBounceLedgerWrite(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	lines := captureServerLog(h)
+	h.srv.RecordBounce = func(bool, string) error { return errors.New("disk full") }
+
+	// Act.
+	h.srv.ShutdownAll(false, sessioncontroller.StopCauseDaemonShutdown())
+
+	// Assert.
+	if !strings.Contains(lines(), "bounce ledger WRITE FAILED") {
+		t.Fatalf("a failed ledger write was not surfaced; log:\n%s", lines())
+	}
+}
+
+func TestShutdownSaysWhenNoBounceLedgerWriterIsWired(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	lines := captureServerLog(h)
+
+	// Act.
+	h.srv.ShutdownAll(false, sessioncontroller.StopCauseDaemonShutdown())
+
+	// Assert.
+	if !strings.Contains(lines(), "bounce ledger NOT WRITTEN") {
+		t.Fatalf("an unwitnessed bounce was not said out loud; log:\n%s", lines())
+	}
+}
+
+// captureServerLog redirects the harness server's loud logger into a buffer the
+// returned accessor reads back. The harness discards it by default.
+func captureServerLog(h *harness) func() string {
+	var mu sync.Mutex
+	var buf strings.Builder
+	h.srv.logf = func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		fmt.Fprintf(&buf, format+"\n", args...)
+	}
+	return func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return buf.String()
 	}
 }
