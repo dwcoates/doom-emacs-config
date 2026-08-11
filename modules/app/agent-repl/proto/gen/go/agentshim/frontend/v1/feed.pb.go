@@ -256,6 +256,114 @@ func (x *MessageLineage) GetParentMessageId() string {
 	return ""
 }
 
+// The durable class: a store record exists for this message.
+//
+// EMPTY ON PURPOSE. The message's own uuid is the record's key, so there is
+// nothing to carry that the envelope does not already say; a field here would
+// be a second address for a row already addressable, and the two could
+// disagree. The arm being SET is the entire claim.
+//
+// The claim it makes is checkable and must be checked: a durable message the
+// store cannot produce is corruption, and reporting it as an ordinary miss is
+// how a lost conversation looks like an empty one.
+type MessageDurable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MessageDurable) Reset() {
+	*x = MessageDurable{}
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MessageDurable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MessageDurable) ProtoMessage() {}
+
+func (x *MessageDurable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MessageDurable.ProtoReflect.Descriptor instead.
+func (*MessageDurable) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{2}
+}
+
+// The ephemeral class: no store record exists for this message, and none ever
+// will — not because a write failed or has not landed yet, but because there
+// was never anything to write.
+//
+// MEMBERSHIP IS DECIDED BY WHETHER CLAUDE EVER SAW THE THING, never by who
+// minted the id. A slash command the daemon answers alone (`/model` and its
+// siblings) never reaches the CLI, so the CLI writes nothing; a
+// system/local_command record is ruled out of the durable set; a failure card
+// the daemon synthesized describes a session that failed to start, so there is
+// no transcript for it to live in. Conversely a daemon-MINTED id over a real
+// TaskStarted is durable, because the record exists.
+//
+// THE LINEAGE RULES ARE THIS CLASS'S SHAPE, not advice about it. An ephemeral
+// message is ALWAYS a feed row — empty parent_message_id, top_level_message_id
+// equal to its own id — and it is NEVER at either end of a containment edge
+// crossing the classes:
+//
+//   - It may not be a parent. A durable child naming an ephemeral root would
+//     be unreachable by any store query, since a store record can only name
+//     ids that exist in the store.
+//   - It may not name a durable parent. Otherwise an ephemeral card attaches
+//     itself into a paged conversation that it will simply vanish from,
+//     leaving a hole where a reader has every reason to expect a message.
+//
+// Those are refused at construction, so a violating message cannot be built
+// and then noticed; a check applied afterwards is a check something can skip.
+type MessageEphemeral struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MessageEphemeral) Reset() {
+	*x = MessageEphemeral{}
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MessageEphemeral) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MessageEphemeral) ProtoMessage() {}
+
+func (x *MessageEphemeral) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MessageEphemeral.ProtoReflect.Descriptor instead.
+func (*MessageEphemeral) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{3}
+}
+
 // One curated conversation addition: FEED PACKAGING wrapped around a payload.
 //
 // The packaging is what the feed knows about a message regardless of what the
@@ -298,6 +406,37 @@ type Message struct {
 	// several turn boundaries and a short screen. Do not lift this field onto
 	// Envelope, and do not model an unowned record as an empty MessageLineage.
 	Lineage *MessageLineage `protobuf:"bytes,6,opt,name=lineage,proto3" json:"lineage,omitempty"`
+	// WHETHER A DURABLE RECORD FOR THIS MESSAGE EXISTS AT ALL. Always set: a
+	// message with neither arm is malformed and is rejected loudly rather than
+	// assumed durable, exactly as an UNSPECIFIED source is.
+	//
+	// WHY THIS IS AN ARM AND NOT A BOOLEAN. A `bool ephemeral` would let a
+	// message that HAS a record claim it has none, and a message that has none
+	// claim a record — two lies the type could tell. Here the class is the set
+	// arm, so the two are mutually exclusive by construction and neither can be
+	// half-stated. It is also why the arms carry no fields: the fact IS the
+	// membership, and any field on either arm would be a second, weaker place
+	// for the same claim to be made differently.
+	//
+	// WHY IT IS STATED AT ALL, rather than discovered by looking. Without it,
+	// "no durable record exists for this message" is indistinguishable from "the
+	// record was not found" — a page missing an ephemeral card looks exactly
+	// like a page that LOST a durable one, and the second is data loss reported
+	// as normal. Stating the class turns the absence into a property a reader
+	// can check, so a durable message missing from the store stays a loud
+	// failure while an ephemeral one missing from it is simply correct.
+	//
+	// IT IS PACKAGING, NOT PAYLOAD, and sits beside lineage for the same reason:
+	// it is a fact about the message whatever the message is, and a per-arm copy
+	// would be a per-arm chance to disagree. It also constrains lineage directly
+	// — see MessageEphemeral — which only works while the two are siblings on
+	// one envelope rather than facts held in two places.
+	//
+	// Types that are valid to be assigned to Durability:
+	//
+	//	*Message_Durable
+	//	*Message_Ephemeral
+	Durability isMessage_Durability `protobuf_oneof:"durability"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*Message_Agent
@@ -316,7 +455,7 @@ type Message struct {
 
 func (x *Message) Reset() {
 	*x = Message{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[2]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -328,7 +467,7 @@ func (x *Message) String() string {
 func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[2]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -341,7 +480,7 @@ func (x *Message) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message.ProtoReflect.Descriptor instead.
 func (*Message) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{2}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Message) GetUuid() string {
@@ -375,6 +514,31 @@ func (x *Message) GetSource() ConversationSource {
 func (x *Message) GetLineage() *MessageLineage {
 	if x != nil {
 		return x.Lineage
+	}
+	return nil
+}
+
+func (x *Message) GetDurability() isMessage_Durability {
+	if x != nil {
+		return x.Durability
+	}
+	return nil
+}
+
+func (x *Message) GetDurable() *MessageDurable {
+	if x != nil {
+		if x, ok := x.Durability.(*Message_Durable); ok {
+			return x.Durable
+		}
+	}
+	return nil
+}
+
+func (x *Message) GetEphemeral() *MessageEphemeral {
+	if x != nil {
+		if x, ok := x.Durability.(*Message_Ephemeral); ok {
+			return x.Ephemeral
+		}
 	}
 	return nil
 }
@@ -467,6 +631,28 @@ func (x *Message) GetCompactionSummary() *CompactionSummaryItem {
 	return nil
 }
 
+type isMessage_Durability interface {
+	isMessage_Durability()
+}
+
+type Message_Durable struct {
+	// A record for this message exists in the store, so it can be paged,
+	// replayed and reloaded. Everything the CLI wrote a transcript record for
+	// is this, INCLUDING the daemon-minted "detached-work:" ids, whose
+	// durability comes from the TaskStarted behind them and not from who
+	// chose the id.
+	Durable *MessageDurable `protobuf:"bytes,7,opt,name=durable,proto3,oneof"`
+}
+
+type Message_Ephemeral struct {
+	// No record for this message exists ANYWHERE, and none ever will.
+	Ephemeral *MessageEphemeral `protobuf:"bytes,8,opt,name=ephemeral,proto3,oneof"`
+}
+
+func (*Message_Durable) isMessage_Durability() {}
+
+func (*Message_Ephemeral) isMessage_Durability() {}
+
 type isMessage_Payload interface {
 	isMessage_Payload()
 }
@@ -511,7 +697,9 @@ type Message_ContextCompacted struct {
 }
 
 type Message_DaemonInterceptedCommand struct {
-	// A slash command the daemon took out of the user's input.
+	// A slash command the daemon took out of the user's input. Both
+	// durability classes ride this arm; which one a given command is, is
+	// stated by `durability` above and never inferred from the command.
 	DaemonInterceptedCommand *DaemonInterceptedCommandItem `protobuf:"bytes,35,opt,name=daemon_intercepted_command,json=daemonInterceptedCommand,proto3,oneof"`
 }
 
@@ -601,7 +789,7 @@ type DetachedWorkDelta struct {
 
 func (x *DetachedWorkDelta) Reset() {
 	*x = DetachedWorkDelta{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[3]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -613,7 +801,7 @@ func (x *DetachedWorkDelta) String() string {
 func (*DetachedWorkDelta) ProtoMessage() {}
 
 func (x *DetachedWorkDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[3]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -626,7 +814,7 @@ func (x *DetachedWorkDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkDelta.ProtoReflect.Descriptor instead.
 func (*DetachedWorkDelta) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{3}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DetachedWorkDelta) GetWorkspace() string {
@@ -681,7 +869,7 @@ type CompactionSummaryItem struct {
 
 func (x *CompactionSummaryItem) Reset() {
 	*x = CompactionSummaryItem{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -693,7 +881,7 @@ func (x *CompactionSummaryItem) String() string {
 func (*CompactionSummaryItem) ProtoMessage() {}
 
 func (x *CompactionSummaryItem) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -706,7 +894,7 @@ func (x *CompactionSummaryItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactionSummaryItem.ProtoReflect.Descriptor instead.
 func (*CompactionSummaryItem) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{4}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CompactionSummaryItem) GetSummary() string {
@@ -769,7 +957,7 @@ type TypingDelta struct {
 
 func (x *TypingDelta) Reset() {
 	*x = TypingDelta{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -781,7 +969,7 @@ func (x *TypingDelta) String() string {
 func (*TypingDelta) ProtoMessage() {}
 
 func (x *TypingDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -794,7 +982,7 @@ func (x *TypingDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TypingDelta.ProtoReflect.Descriptor instead.
 func (*TypingDelta) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{5}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *TypingDelta) GetWorkspace() string {
@@ -852,7 +1040,7 @@ type TypingCut struct {
 
 func (x *TypingCut) Reset() {
 	*x = TypingCut{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[6]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -864,7 +1052,7 @@ func (x *TypingCut) String() string {
 func (*TypingCut) ProtoMessage() {}
 
 func (x *TypingCut) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[6]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -877,7 +1065,7 @@ func (x *TypingCut) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TypingCut.ProtoReflect.Descriptor instead.
 func (*TypingCut) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{6}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *TypingCut) GetWorkspace() string {
@@ -924,7 +1112,7 @@ type SessionInitView struct {
 
 func (x *SessionInitView) Reset() {
 	*x = SessionInitView{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -936,7 +1124,7 @@ func (x *SessionInitView) String() string {
 func (*SessionInitView) ProtoMessage() {}
 
 func (x *SessionInitView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -949,7 +1137,7 @@ func (x *SessionInitView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionInitView.ProtoReflect.Descriptor instead.
 func (*SessionInitView) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{7}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SessionInitView) GetWorkspace() string {
@@ -987,25 +1175,32 @@ const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"session_idR\x05items\"m\n" +
 	"\x0eMessageLineage\x12/\n" +
 	"\x14top_level_message_id\x18\x01 \x01(\tR\x11topLevelMessageId\x12*\n" +
-	"\x11parent_message_id\x18\x02 \x01(\tR\x0fparentMessageId\"\xd5\t\n" +
+	"\x11parent_message_id\x18\x02 \x01(\tR\x0fparentMessageId\"\x10\n" +
+	"\x0eMessageDurable\"\x12\n" +
+	"\x10MessageEphemeral\"\xef\n" +
+	"\n" +
 	"\aMessage\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x13\n" +
 	"\x05ts_ms\x18\x02 \x01(\x03R\x04tsMs\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x03 \x01(\tR\trequestId\x12A\n" +
 	"\x06source\x18\x04 \x01(\x0e2).agentshim.frontend.v1.ConversationSourceR\x06source\x12?\n" +
-	"\alineage\x18\x06 \x01(\v2%.agentshim.frontend.v1.MessageLineageR\alineage\x12<\n" +
-	"\x05agent\x18\x05 \x01(\v2$.agentshim.frontend.v1.AgentEmissionH\x00R\x05agent\x12F\n" +
-	"\fuser_message\x18\v \x01(\v2!.agentshim.data.v1.ApiUserMessageH\x00R\vuserMessage\x12C\n" +
+	"\alineage\x18\x06 \x01(\v2%.agentshim.frontend.v1.MessageLineageR\alineage\x12A\n" +
+	"\adurable\x18\a \x01(\v2%.agentshim.frontend.v1.MessageDurableH\x00R\adurable\x12G\n" +
+	"\tephemeral\x18\b \x01(\v2'.agentshim.frontend.v1.MessageEphemeralH\x00R\tephemeral\x12<\n" +
+	"\x05agent\x18\x05 \x01(\v2$.agentshim.frontend.v1.AgentEmissionH\x01R\x05agent\x12F\n" +
+	"\fuser_message\x18\v \x01(\v2!.agentshim.data.v1.ApiUserMessageH\x01R\vuserMessage\x12C\n" +
 	"\n" +
-	"permission\x18\x1e \x01(\v2!.agentshim.core.v1.PermissionItemH\x00R\n" +
+	"permission\x18\x1e \x01(\v2!.agentshim.core.v1.PermissionItemH\x01R\n" +
 	"permission\x12K\n" +
-	"\ffailure_card\x18\x1f \x01(\v2&.agentshim.frontend.v1.FailureCardViewH\x00R\vfailureCard\x12L\n" +
-	"\x0fcontext_cleared\x18  \x01(\v2!.agentshim.core.v1.ContextClearedH\x00R\x0econtextCleared\x12R\n" +
-	"\x11context_compacted\x18! \x01(\v2#.agentshim.core.v1.ContextCompactedH\x00R\x10contextCompacted\x12s\n" +
-	"\x1adaemon_intercepted_command\x18# \x01(\v23.agentshim.frontend.v1.DaemonInterceptedCommandItemH\x00R\x18daemonInterceptedCommand\x12J\n" +
-	"\rdetached_work\x18& \x01(\v2#.agentshim.frontend.v1.DetachedWorkH\x00R\fdetachedWork\x12]\n" +
-	"\x12compaction_summary\x18' \x01(\v2,.agentshim.frontend.v1.CompactionSummaryItemH\x00R\x11compactionSummaryB\t\n" +
+	"\ffailure_card\x18\x1f \x01(\v2&.agentshim.frontend.v1.FailureCardViewH\x01R\vfailureCard\x12L\n" +
+	"\x0fcontext_cleared\x18  \x01(\v2!.agentshim.core.v1.ContextClearedH\x01R\x0econtextCleared\x12R\n" +
+	"\x11context_compacted\x18! \x01(\v2#.agentshim.core.v1.ContextCompactedH\x01R\x10contextCompacted\x12s\n" +
+	"\x1adaemon_intercepted_command\x18# \x01(\v23.agentshim.frontend.v1.DaemonInterceptedCommandItemH\x01R\x18daemonInterceptedCommand\x12J\n" +
+	"\rdetached_work\x18& \x01(\v2#.agentshim.frontend.v1.DetachedWorkH\x01R\fdetachedWork\x12]\n" +
+	"\x12compaction_summary\x18' \x01(\v2,.agentshim.frontend.v1.CompactionSummaryItemH\x01R\x11compactionSummaryB\f\n" +
+	"\n" +
+	"durabilityB\t\n" +
 	"\apayloadJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x12\x10\x13J\x04\b\n" +
 	"\x10\vJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10J\x04\b\"\x10#J\x04\b(\x10)J\x04\b$\x10%J\x04\b%\x10&R\tapi_errorR\x10compact_boundaryR\x15compact_boundary_lineR\x11assistant_messageR\btool_useR\vtool_resultR\x0ftool_use_resultR\x06resultR\n" +
 	"skill_bodyR\vusage_stampR\x11token_utilizationR\x0fturn_accountingR\fasync_bubbleR\x0fsession_command\"\xf7\x01\n" +
@@ -1054,51 +1249,55 @@ func file_agentshim_frontend_v1_feed_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_frontend_v1_feed_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentshim_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_agentshim_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_agentshim_frontend_v1_feed_proto_goTypes = []any{
 	(ConversationSource)(0),              // 0: agentshim.frontend.v1.ConversationSource
 	(*ConversationDelta)(nil),            // 1: agentshim.frontend.v1.ConversationDelta
 	(*MessageLineage)(nil),               // 2: agentshim.frontend.v1.MessageLineage
-	(*Message)(nil),                      // 3: agentshim.frontend.v1.Message
-	(*DetachedWorkDelta)(nil),            // 4: agentshim.frontend.v1.DetachedWorkDelta
-	(*CompactionSummaryItem)(nil),        // 5: agentshim.frontend.v1.CompactionSummaryItem
-	(*TypingDelta)(nil),                  // 6: agentshim.frontend.v1.TypingDelta
-	(*TypingCut)(nil),                    // 7: agentshim.frontend.v1.TypingCut
-	(*SessionInitView)(nil),              // 8: agentshim.frontend.v1.SessionInitView
-	(*AgentEmission)(nil),                // 9: agentshim.frontend.v1.AgentEmission
-	(*v1.ApiUserMessage)(nil),            // 10: agentshim.data.v1.ApiUserMessage
-	(*v11.PermissionItem)(nil),           // 11: agentshim.core.v1.PermissionItem
-	(*FailureCardView)(nil),              // 12: agentshim.frontend.v1.FailureCardView
-	(*v11.ContextCleared)(nil),           // 13: agentshim.core.v1.ContextCleared
-	(*v11.ContextCompacted)(nil),         // 14: agentshim.core.v1.ContextCompacted
-	(*DaemonInterceptedCommandItem)(nil), // 15: agentshim.frontend.v1.DaemonInterceptedCommandItem
-	(*DetachedWork)(nil),                 // 16: agentshim.frontend.v1.DetachedWork
-	(*DetachedWorkUpdate)(nil),           // 17: agentshim.frontend.v1.DetachedWorkUpdate
-	(*v11.ContentDelta)(nil),             // 18: agentshim.core.v1.ContentDelta
-	(*v1.SystemInit)(nil),                // 19: agentshim.data.v1.SystemInit
+	(*MessageDurable)(nil),               // 3: agentshim.frontend.v1.MessageDurable
+	(*MessageEphemeral)(nil),             // 4: agentshim.frontend.v1.MessageEphemeral
+	(*Message)(nil),                      // 5: agentshim.frontend.v1.Message
+	(*DetachedWorkDelta)(nil),            // 6: agentshim.frontend.v1.DetachedWorkDelta
+	(*CompactionSummaryItem)(nil),        // 7: agentshim.frontend.v1.CompactionSummaryItem
+	(*TypingDelta)(nil),                  // 8: agentshim.frontend.v1.TypingDelta
+	(*TypingCut)(nil),                    // 9: agentshim.frontend.v1.TypingCut
+	(*SessionInitView)(nil),              // 10: agentshim.frontend.v1.SessionInitView
+	(*AgentEmission)(nil),                // 11: agentshim.frontend.v1.AgentEmission
+	(*v1.ApiUserMessage)(nil),            // 12: agentshim.data.v1.ApiUserMessage
+	(*v11.PermissionItem)(nil),           // 13: agentshim.core.v1.PermissionItem
+	(*FailureCardView)(nil),              // 14: agentshim.frontend.v1.FailureCardView
+	(*v11.ContextCleared)(nil),           // 15: agentshim.core.v1.ContextCleared
+	(*v11.ContextCompacted)(nil),         // 16: agentshim.core.v1.ContextCompacted
+	(*DaemonInterceptedCommandItem)(nil), // 17: agentshim.frontend.v1.DaemonInterceptedCommandItem
+	(*DetachedWork)(nil),                 // 18: agentshim.frontend.v1.DetachedWork
+	(*DetachedWorkUpdate)(nil),           // 19: agentshim.frontend.v1.DetachedWorkUpdate
+	(*v11.ContentDelta)(nil),             // 20: agentshim.core.v1.ContentDelta
+	(*v1.SystemInit)(nil),                // 21: agentshim.data.v1.SystemInit
 }
 var file_agentshim_frontend_v1_feed_proto_depIdxs = []int32{
-	3,  // 0: agentshim.frontend.v1.ConversationDelta.messages:type_name -> agentshim.frontend.v1.Message
+	5,  // 0: agentshim.frontend.v1.ConversationDelta.messages:type_name -> agentshim.frontend.v1.Message
 	0,  // 1: agentshim.frontend.v1.Message.source:type_name -> agentshim.frontend.v1.ConversationSource
 	2,  // 2: agentshim.frontend.v1.Message.lineage:type_name -> agentshim.frontend.v1.MessageLineage
-	9,  // 3: agentshim.frontend.v1.Message.agent:type_name -> agentshim.frontend.v1.AgentEmission
-	10, // 4: agentshim.frontend.v1.Message.user_message:type_name -> agentshim.data.v1.ApiUserMessage
-	11, // 5: agentshim.frontend.v1.Message.permission:type_name -> agentshim.core.v1.PermissionItem
-	12, // 6: agentshim.frontend.v1.Message.failure_card:type_name -> agentshim.frontend.v1.FailureCardView
-	13, // 7: agentshim.frontend.v1.Message.context_cleared:type_name -> agentshim.core.v1.ContextCleared
-	14, // 8: agentshim.frontend.v1.Message.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
-	15, // 9: agentshim.frontend.v1.Message.daemon_intercepted_command:type_name -> agentshim.frontend.v1.DaemonInterceptedCommandItem
-	16, // 10: agentshim.frontend.v1.Message.detached_work:type_name -> agentshim.frontend.v1.DetachedWork
-	5,  // 11: agentshim.frontend.v1.Message.compaction_summary:type_name -> agentshim.frontend.v1.CompactionSummaryItem
-	3,  // 12: agentshim.frontend.v1.DetachedWorkDelta.opened:type_name -> agentshim.frontend.v1.Message
-	17, // 13: agentshim.frontend.v1.DetachedWorkDelta.updates:type_name -> agentshim.frontend.v1.DetachedWorkUpdate
-	18, // 14: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
-	19, // 15: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	3,  // 3: agentshim.frontend.v1.Message.durable:type_name -> agentshim.frontend.v1.MessageDurable
+	4,  // 4: agentshim.frontend.v1.Message.ephemeral:type_name -> agentshim.frontend.v1.MessageEphemeral
+	11, // 5: agentshim.frontend.v1.Message.agent:type_name -> agentshim.frontend.v1.AgentEmission
+	12, // 6: agentshim.frontend.v1.Message.user_message:type_name -> agentshim.data.v1.ApiUserMessage
+	13, // 7: agentshim.frontend.v1.Message.permission:type_name -> agentshim.core.v1.PermissionItem
+	14, // 8: agentshim.frontend.v1.Message.failure_card:type_name -> agentshim.frontend.v1.FailureCardView
+	15, // 9: agentshim.frontend.v1.Message.context_cleared:type_name -> agentshim.core.v1.ContextCleared
+	16, // 10: agentshim.frontend.v1.Message.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
+	17, // 11: agentshim.frontend.v1.Message.daemon_intercepted_command:type_name -> agentshim.frontend.v1.DaemonInterceptedCommandItem
+	18, // 12: agentshim.frontend.v1.Message.detached_work:type_name -> agentshim.frontend.v1.DetachedWork
+	7,  // 13: agentshim.frontend.v1.Message.compaction_summary:type_name -> agentshim.frontend.v1.CompactionSummaryItem
+	5,  // 14: agentshim.frontend.v1.DetachedWorkDelta.opened:type_name -> agentshim.frontend.v1.Message
+	19, // 15: agentshim.frontend.v1.DetachedWorkDelta.updates:type_name -> agentshim.frontend.v1.DetachedWorkUpdate
+	20, // 16: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
+	21, // 17: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_feed_proto_init() }
@@ -1110,7 +1309,9 @@ func file_agentshim_frontend_v1_feed_proto_init() {
 	file_agentshim_frontend_v1_detached_work_proto_init()
 	file_agentshim_frontend_v1_failure_card_proto_init()
 	file_agentshim_frontend_v1_slash_menu_proto_init()
-	file_agentshim_frontend_v1_feed_proto_msgTypes[2].OneofWrappers = []any{
+	file_agentshim_frontend_v1_feed_proto_msgTypes[4].OneofWrappers = []any{
+		(*Message_Durable)(nil),
+		(*Message_Ephemeral)(nil),
 		(*Message_Agent)(nil),
 		(*Message_UserMessage)(nil),
 		(*Message_Permission)(nil),
@@ -1127,7 +1328,7 @@ func file_agentshim_frontend_v1_feed_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_feed_proto_rawDesc), len(file_agentshim_frontend_v1_feed_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

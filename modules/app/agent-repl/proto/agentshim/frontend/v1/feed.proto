@@ -105,6 +105,46 @@ message MessageLineage {
   string parent_message_id = 2;
 }
 
+// The durable class: a store record exists for this message.
+//
+// EMPTY ON PURPOSE. The message's own uuid is the record's key, so there is
+// nothing to carry that the envelope does not already say; a field here would
+// be a second address for a row already addressable, and the two could
+// disagree. The arm being SET is the entire claim.
+//
+// The claim it makes is checkable and must be checked: a durable message the
+// store cannot produce is corruption, and reporting it as an ordinary miss is
+// how a lost conversation looks like an empty one.
+message MessageDurable {}
+
+// The ephemeral class: no store record exists for this message, and none ever
+// will — not because a write failed or has not landed yet, but because there
+// was never anything to write.
+//
+// MEMBERSHIP IS DECIDED BY WHETHER CLAUDE EVER SAW THE THING, never by who
+// minted the id. A slash command the daemon answers alone (`/model` and its
+// siblings) never reaches the CLI, so the CLI writes nothing; a
+// system/local_command record is ruled out of the durable set; a failure card
+// the daemon synthesized describes a session that failed to start, so there is
+// no transcript for it to live in. Conversely a daemon-MINTED id over a real
+// TaskStarted is durable, because the record exists.
+//
+// THE LINEAGE RULES ARE THIS CLASS'S SHAPE, not advice about it. An ephemeral
+// message is ALWAYS a feed row — empty parent_message_id, top_level_message_id
+// equal to its own id — and it is NEVER at either end of a containment edge
+// crossing the classes:
+//
+//   - It may not be a parent. A durable child naming an ephemeral root would
+//     be unreachable by any store query, since a store record can only name
+//     ids that exist in the store.
+//   - It may not name a durable parent. Otherwise an ephemeral card attaches
+//     itself into a paged conversation that it will simply vanish from,
+//     leaving a hole where a reader has every reason to expect a message.
+//
+// Those are refused at construction, so a violating message cannot be built
+// and then noticed; a check applied afterwards is a check something can skip.
+message MessageEphemeral {}
+
 // One curated conversation addition: FEED PACKAGING wrapped around a payload.
 //
 // The packaging is what the feed knows about a message regardless of what the
@@ -184,6 +224,42 @@ message Message {
   // Envelope, and do not model an unowned record as an empty MessageLineage.
   MessageLineage lineage = 6;
 
+  // WHETHER A DURABLE RECORD FOR THIS MESSAGE EXISTS AT ALL. Always set: a
+  // message with neither arm is malformed and is rejected loudly rather than
+  // assumed durable, exactly as an UNSPECIFIED source is.
+  //
+  // WHY THIS IS AN ARM AND NOT A BOOLEAN. A `bool ephemeral` would let a
+  // message that HAS a record claim it has none, and a message that has none
+  // claim a record — two lies the type could tell. Here the class is the set
+  // arm, so the two are mutually exclusive by construction and neither can be
+  // half-stated. It is also why the arms carry no fields: the fact IS the
+  // membership, and any field on either arm would be a second, weaker place
+  // for the same claim to be made differently.
+  //
+  // WHY IT IS STATED AT ALL, rather than discovered by looking. Without it,
+  // "no durable record exists for this message" is indistinguishable from "the
+  // record was not found" — a page missing an ephemeral card looks exactly
+  // like a page that LOST a durable one, and the second is data loss reported
+  // as normal. Stating the class turns the absence into a property a reader
+  // can check, so a durable message missing from the store stays a loud
+  // failure while an ephemeral one missing from it is simply correct.
+  //
+  // IT IS PACKAGING, NOT PAYLOAD, and sits beside lineage for the same reason:
+  // it is a fact about the message whatever the message is, and a per-arm copy
+  // would be a per-arm chance to disagree. It also constrains lineage directly
+  // — see MessageEphemeral — which only works while the two are siblings on
+  // one envelope rather than facts held in two places.
+  oneof durability {
+    // A record for this message exists in the store, so it can be paged,
+    // replayed and reloaded. Everything the CLI wrote a transcript record for
+    // is this, INCLUDING the daemon-minted "detached-work:" ids, whose
+    // durability comes from the TaskStarted behind them and not from who
+    // chose the id.
+    MessageDurable durable = 7;
+    // No record for this message exists ANYWHERE, and none ever will.
+    MessageEphemeral ephemeral = 8;
+  }
+
   // ---- Payload ----
 
   oneof payload {
@@ -211,7 +287,9 @@ message Message {
     // clear or compact is therefore always live.
     agentshim.core.v1.ContextCleared context_cleared = 32;
     agentshim.core.v1.ContextCompacted context_compacted = 33;
-    // A slash command the daemon took out of the user's input.
+    // A slash command the daemon took out of the user's input. Both
+    // durability classes ride this arm; which one a given command is, is
+    // stated by `durability` above and never inferred from the command.
     DaemonInterceptedCommandItem daemon_intercepted_command = 35;
     // A piece of detached work. THIS MESSAGE IS THE WORK — its uuid is the
     // work's id, and its lineage is the work's place in the feed.
