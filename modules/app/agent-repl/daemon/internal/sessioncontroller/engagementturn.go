@@ -35,6 +35,19 @@ package sessioncontroller
 // one is that exclusivity having failed, and it says so rather than being
 // absorbed into a set that would hide it.
 //
+// # THE MARK HAS ITS OWN MUTEX, AND THAT IS NOT AN OPTIMIZATION
+//
+// The reader is the turn-end hook, which runs on the SHIM READ-LOOP goroutine
+// inside the consumer's event dispatch. That path is deliberately free of the
+// manager mutex — the mutex every submit, teardown and sweep holds — and taking
+// it there serializes every turn boundary behind whatever the fleet is doing.
+// The first version of this file did exactly that, and the e2e suite found the
+// cost: a vendor terminal result arrived late enough that the turn it settled
+// had already been closed by an interrupt, the shim's own TurnEnded then named
+// an unpinned accounting turn, and the replay-cursor invariant killed the
+// session's shim link. A dedicated lock, taken for one field assignment and
+// never held across a call, has no such reach.
+//
 // # A mark for a turn that never ran is harmless
 //
 // The mark is taken BEFORE the submit, so no boundary can arrive before it. A
@@ -48,10 +61,10 @@ func (m *Manager) noteMachineTurn(d *sessionController, turnID string, who submi
 	if d == nil || turnID == "" {
 		return
 	}
-	m.mu.Lock()
+	d.machineTurnMu.Lock()
 	previous := d.machineTurnID
 	d.machineTurnID = turnID
-	m.mu.Unlock()
+	d.machineTurnMu.Unlock()
 	if previous != "" && previous != turnID {
 		// NOT ABSORBED. Two machine turns in flight at once means the claims
 		// that make them mutually exclusive have a hole, and the visible symptom
@@ -70,11 +83,11 @@ func (m *Manager) forgetMachineTurn(d *sessionController, turnID string) {
 	if d == nil || turnID == "" {
 		return
 	}
-	m.mu.Lock()
+	d.machineTurnMu.Lock()
 	if d.machineTurnID == turnID {
 		d.machineTurnID = ""
 	}
-	m.mu.Unlock()
+	d.machineTurnMu.Unlock()
 }
 
 // engagementTurn reports whether the turn that just ended was somebody using the
@@ -91,8 +104,8 @@ func (m *Manager) engagementTurn(d *sessionController, turnID string) bool {
 	if d == nil {
 		return true
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	d.machineTurnMu.Lock()
+	defer d.machineTurnMu.Unlock()
 	if turnID == "" || d.machineTurnID != turnID {
 		return true
 	}

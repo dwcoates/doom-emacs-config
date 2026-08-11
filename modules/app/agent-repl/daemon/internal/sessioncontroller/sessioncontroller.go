@@ -874,7 +874,20 @@ type sessionController struct {
 	// than growing a set that would hide it.
 	//
 	// Written at the SUBMIT funnel where the submitter is known exactly, read at
-	// that same turn's end by id. Read and written only under Manager.mu.
+	// that same turn's end by id.
+	//
+	// IT HAS ITS OWN MUTEX AND MUST NOT USE THE MANAGER'S. The reader is the
+	// turn-end hook, which runs on the SHIM READ-LOOP goroutine inside the
+	// consumer's own event dispatch — a path this package is careful to keep
+	// free of the manager mutex, because that mutex is held across submits,
+	// teardowns and sweeps. Reaching for it there serialized every turn boundary
+	// behind whatever the fleet was doing, and the observed cost was a real one:
+	// a vendor terminal result landed late enough that the turn it settled had
+	// already been closed by an interrupt, and the shim's own TurnEnded then
+	// tripped the replay-cursor invariant and killed the session's link. The
+	// lock below is taken for a single field assignment and never held across a
+	// call.
+	machineTurnMu sync.Mutex
 	machineTurnID string
 	// drivenTurns names every turn THIS generation has a driver for: one it
 	// submitted itself, or one the returning shim positively announced as in
