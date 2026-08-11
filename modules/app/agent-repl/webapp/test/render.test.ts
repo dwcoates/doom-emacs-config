@@ -67,6 +67,7 @@ import {
   TextItem,
   ThinkingItem,
   ToolItem,
+  userTurnRequestKey,
 } from "../src/store.js";
 import { ReanchorBox, TailFollow } from "../src/scroll.js";
 
@@ -4934,17 +4935,19 @@ describe("async-quiescence border (the invariant)", () => {
   });
 
   it("amber-borders a prompt bubble hosting a tools-only turn's live async", () => {
-    // Arrange — the projection hosts the survivor on the user-turn's request id (r1).
+    // Arrange — the projection hosts the survivor under the prompt's IDENTITY,
+    // which for a still-provisional prompt is its request key.
+    const host = userTurnRequestKey("r1");
     const panels: PanelContext = {
       children: new Map(),
       isOpen: () => false,
-      watchers: new Map([["r1", [watcher()]]]),
+      watchers: new Map([[host, [watcher()]]]),
     };
     // Act
     const html = renderItem(userTurnAt(9, 0), undefined, undefined, panels);
     // Assert
     expect(html).toContain("bubble user async-live");
-    expect(html).toContain(`data-panel-toggle="member:r1:w1"`);
+    expect(html).toContain(`data-panel-toggle="member:${host}:w1"`);
   });
 
   it("keeps the amber border on a prompt bubble the daemon has not acknowledged", () => {
@@ -4953,7 +4956,7 @@ describe("async-quiescence border (the invariant)", () => {
     const panels: PanelContext = {
       children: new Map(),
       isOpen: () => false,
-      watchers: new Map([["r1", [watcher()]]]),
+      watchers: new Map([[userTurnRequestKey("r1"), [watcher()]]]),
     };
     const item = { ...userTurnAt(9, 0), unacked: true } as ConversationItem;
     // Act

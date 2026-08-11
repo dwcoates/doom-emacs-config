@@ -456,15 +456,22 @@ function Bubble(cls: string, body: string, ts: string, meta = "", style = ""): s
 function UserTurn(item: UserTurnItem, panels?: PanelContext): string {
   // A tools-only turn hosts its live async on its own prompt bubble (see
   // asyncByBubble), so the prompt goes amber and catalogs that work too — the
-  // invariant holds even for a turn that wrote no answer to host it. The
-  // projection keys the prompt by the user-turn's request id.
-  const stateCls = hasLiveAsync(item.requestId, panels) ? " async-live" : "";
+  // invariant holds even for a turn that wrote no answer to host it.
+  //
+  // THE HOST KEY IS THE PROMPT'S IDENTITY, read through the SAME function the
+  // projection files it under, so the two cannot drift. It used to be the bare
+  // request id on both sides, which is `""` for every prompt the real pipeline
+  // delivers — one shared bucket that put another prompt's badges on this one.
+  // A turn with no identity hosts nothing, which is why null is not coerced to
+  // a key here.
+  const host = userTurnKey(item);
+  const stateCls = host !== null && hasLiveAsync(host, panels) ? " async-live" : "";
   // The unacked marking and the missing delay are ONE decision, made here
   // once: the class is what the stylesheet suppresses the animation with, and
   // seeking an animation that is not running would say nothing anyway.
   const ackCls = item.unacked === true ? " unacked" : "";
   const wave = item.unacked === true ? "" : bubbleWaveStyle();
-  const catalog = AsyncCatalog(item.requestId, panels);
+  const catalog = host === null ? "" : AsyncCatalog(host, panels);
   // The prompt is shown verbatim, EXCEPT for markdown fenced code blocks,
   // which render as the same highlighted card the agent's own fences get
   // (see renderPromptBody). A fence-free prompt keeps its plain <pre>.

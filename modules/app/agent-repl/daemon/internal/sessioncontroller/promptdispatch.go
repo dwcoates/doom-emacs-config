@@ -337,13 +337,55 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// client used to mint its own id here, so the ping's end boundary named a
 	// turn nothing was keyed by: the match at the boundary never fired, the
 	// window never closed, and the pings rendered as the user's own prompts.
+	// THE SUBMIT, AND THE ECHO SLOT IT FILLS, UNDER ONE MUTUAL EXCLUSION.
+	//
+	// The echo queue is read POSITIONALLY: attribution gives a transcript line
+	// the oldest outstanding receipt, because a UserLine carries no request id
+	// of its own. That reading is only sound if the queue's order is the order
+	// the prompts reached the SDK, and it used to be neither guaranteed nor
+	// even attempted — the echo was enqueued twenty-nine lines after the
+	// submit, with nothing excluding the other three paths that funnel here
+	// from interleaving in the gap. Two concurrent submits could enqueue B's
+	// receipt ahead of A's while the SDK had taken A first, and A's line would
+	// then be stamped with B's request id: two prompts swapping identities,
+	// with no error anywhere.
+	//
+	// Taking the slot and performing the submit under the session's submit lock
+	// orders them BY CONSTRUCTION. Nothing here depends on how long a submit
+	// takes, on how promptly the echo follows it, or on which goroutine won a
+	// race (sessionController.submitMu documents the lock order).
+	//
+	// THE PUBLICATION STAYS OUTSIDE, and must: it reaches the frontend server,
+	// and a session that serialized its submits behind a frontend push would
+	// deadlock the moment that push blocked.
+	//
+	// A REFUSED PROMPT STILL DRAWS NO BUBBLE. That used to be free — the echo
+	// simply came after a submit that never returned successfully — and is now
+	// paid for explicitly: the reservation is retracted on the failure path
+	// below, beside the accepted edge and the durable receipt it was written
+	// with, and nothing was ever published for it.
+	var reserved *promptEcho
+	d.submitMu.Lock()
+	if echoes && requestID != "" {
+		reserved = d.consumer.reserveEcho(requestID, text, acceptedAtMs)
+	}
 	// THE DRIVE RECORD, TAKEN BEFORE THE SUBMIT (undriventurn.go). The shim
 	// adopts requestID as the turn_id, so this is the identity the ledger claim
 	// will carry — and it must be on record BEFORE the submit that produces it,
 	// or a TurnStarted racing this return would bind a record the watchdog reads
 	// as having no driver. A submit the shim refuses retracts it below.
 	m.noteTurnDriven(d, requestID)
-	if err := d.client.SubmitPrompt(ctx, requestID, text, origin, permissionMode, promptOrigin); err != nil {
+	submitErr := d.client.SubmitPrompt(ctx, requestID, text, origin, permissionMode, promptOrigin)
+	d.submitMu.Unlock()
+	if submitErr != nil {
+		err := submitErr
+		// THE SLOT GOES BACK. Left standing it would be claimed by the next
+		// transcript line to arrive — attributing some other prompt's line to
+		// this refused submit — and it would replay a bubble for a prompt no
+		// session ever received.
+		if reserved != nil {
+			d.consumer.retractEcho(requestID)
+		}
 		m.forgetTurnDriven(d, requestID)
 		m.forgetMachineTurn(d, requestID)
 		if accepted {
@@ -371,8 +413,8 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// prompt no session received, which is why it stays behind the submit while
 	// the state edge moved ahead of it: a state edge can be retracted, a
 	// conversation item the frontend has already drawn cannot.
-	if echoes {
-		m.echo(d, requestID, text, acceptedAtMs)
+	if reserved != nil {
+		d.consumer.publishEcho(reserved)
 	}
 
 	// THE INVOCATION ITEM, in the receipt's place and on the receipt's terms:
