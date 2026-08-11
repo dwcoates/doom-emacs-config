@@ -1,8 +1,8 @@
 package frontend
 
 // topbar.go resolves the TOPBAR VIEW: the title line, the session line, the
-// model selector's contents, the connectivity indicator and the accounting
-// line, each as the exact string or flag the client draws.
+// model selector's contents, the connectivity indicator and the topbar's
+// warnings, each as the exact string or flag the client draws.
 //
 // NOTHING HERE IS DERIVED CLIENT-SIDE, which is the whole reason the view
 // exists. The title used to be concatenated in each frontend from a workspace
@@ -50,10 +50,37 @@ type TopbarInputs struct {
 	ModelOptions []*frontendv1.ModelOption
 	// Connectivity is the SSM's verdict, adopted and never re-inferred.
 	Connectivity frontendv1.SessionConnectivity
-	// AccountingLine is the settled turn's composed summary, or empty when no
-	// turn has settled yet. It is the SAME sentence the footer's accounting
-	// cell carries — the topbar shows the prose and never the verdict.
-	AccountingLine string
+	// Warnings is everything the topbar has to complain about, already
+	// resolved into the sentences the client shows. Empty is the normal state
+	// and draws no indicator at all.
+	Warnings []*frontendv1.TopbarWarning
+}
+
+// AccountingWarning turns the footer's resolved accounting cell into the
+// topbar's warning about it, or nil when there is nothing to warn about.
+//
+// A turn that RECONCILED is not a warning: its figures are the footer's to
+// state, and the topbar used to print that same prose inline for every settled
+// turn. Only the two degraded verdicts raise a warning, and the sentence is the
+// cell's own summary rather than a second composition of it.
+func AccountingWarning(cell *frontendv1.FooterAccountingCell) *frontendv1.TopbarWarning {
+	if cell == nil {
+		return nil
+	}
+	if cell.GetIncomplete() == nil && cell.GetInvalid() == nil {
+		return nil
+	}
+	summary := cell.GetSummary()
+	if summary == "" {
+		// A degraded verdict with no prose is a defect upstream, and a warning
+		// with nothing to say is unrenderable by contract. Say that, loudly,
+		// rather than dropping the daemon's own complaint on the floor.
+		summary = "the turn's accounting was declared degraded without stating why"
+	}
+	return &frontendv1.TopbarWarning{
+		Text: summary,
+		Kind: &frontendv1.TopbarWarning_Accounting{Accounting: &frontendv1.TopbarAccountingWarning{}},
+	}
 }
 
 // TopbarView resolves one workspace's topbar completely.
@@ -82,7 +109,7 @@ func TopbarView(in TopbarInputs) (*frontendv1.TopbarView, error) {
 		ModelDisplay:   in.ModelDisplay,
 		ModelOptions:   in.ModelOptions,
 		Connectivity:   connectivity,
-		AccountingLine: in.AccountingLine,
+		Warnings:       in.Warnings,
 		Fence:          in.Fence,
 	}, nil
 }
