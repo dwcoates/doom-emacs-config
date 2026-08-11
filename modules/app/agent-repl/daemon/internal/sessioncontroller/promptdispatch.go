@@ -262,6 +262,22 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	echoes := cmd.echoes() && who != submitterMergeLeaseHolder && who != submitterKeepAlive &&
 		who != submitterTurnResumption
 
+	// WHETHER THIS TURN COUNTS AS ENGAGEMENT IS DECLARED HERE, at the one funnel
+	// every prompt path reaches, and read back at the turn's own end
+	// (noteMachineTurn / engagementTurnLocked). The submitter is known exactly
+	// at this line; nothing downstream ever has to decide whether a turn "looked
+	// like" a keep-alive ping from its text, its duration, or the clock.
+	//
+	// IT IS DECLARED BEFORE THE SUBMIT for the durable receipt's reason: the
+	// turn's end can only be reached through a submit, so a fact recorded ahead
+	// of the submit is one no boundary can arrive before. A prompt that then
+	// fails to submit leaves a mark for a turn that never ran, which is
+	// harmless — turn ids are unique, so nothing else will ever match it — and
+	// it is retracted on the failure path below beside the accepted edge.
+	if !who.engagement() {
+		m.noteMachineTurn(d, requestID, who)
+	}
+
 	accepted := false
 	var turnBefore turnRecord
 	var acceptedAtMs int64
@@ -329,6 +345,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	m.noteTurnDriven(d, requestID)
 	if err := d.client.SubmitPrompt(ctx, requestID, text, origin, permissionMode, promptOrigin); err != nil {
 		m.forgetTurnDriven(d, requestID)
+		m.forgetMachineTurn(d, requestID)
 		if accepted {
 			// The `thinking` every frontend was just shown described a turn
 			// that is not going to happen, and nothing else will ever close it:

@@ -78,7 +78,7 @@ func TestATurnEndBacksUpTheTranscript(t *testing.T) {
 		Backups: &TranscriptBackups{Reg: reg, Logf: t.Logf, Now: tickingClock()}}
 
 	// Act.
-	r.TurnEndObserved("s1", 1786117000000)
+	r.TurnEndObserved("s1", 1786117000000, true)
 
 	// Assert.
 	names := backupNames(t, cwd)

@@ -120,7 +120,7 @@ func TestAnObservedTurnEndClearsTheBackfillMark(t *testing.T) {
 	r := &RegistryRegistrar{Reg: reg, Logf: t.Logf}
 
 	// Act
-	r.TurnEndObserved("s1", 1786317000000)
+	r.TurnEndObserved("s1", 1786317000000, true)
 
 	// Assert
 	rec, _ := reg.Get("s1")
@@ -145,7 +145,7 @@ func TestAStaleTurnEndLeavesTheBackfillMarkAlone(t *testing.T) {
 	r := &RegistryRegistrar{Reg: reg, Logf: t.Logf}
 
 	// Act
-	r.TurnEndObserved("s1", 1786117000000)
+	r.TurnEndObserved("s1", 1786117000000, true)
 
 	// Assert
 	rec, _ := reg.Get("s1")

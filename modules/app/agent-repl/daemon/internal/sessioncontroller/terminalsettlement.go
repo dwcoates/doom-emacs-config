@@ -143,7 +143,7 @@ func (c *consumer) settleTurnStateOnTerminalResult(turnID string, ev *corev1.Eve
 	// announcement of it. The shim's `TurnEnded` re-stamps the same turn when it
 	// lands, which moves the mark by the announcement's own latency and no more.
 	if c.onTurnEnded != nil {
-		c.onTurnEnded(boundary)
+		c.onTurnEnded(turnID, boundary)
 	}
 }
 
