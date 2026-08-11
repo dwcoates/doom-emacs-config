@@ -379,11 +379,11 @@ func TestASubmitWithNoRequestIdIsRejectedBeforeInvocationItem(t *testing.T) {
 
 // --- retention --------------------------------------------------------------
 
-func TestTheInvocationItemIsReplayedOnResync(t *testing.T) {
-	// Arrange — the item carries no store seq, so no from_seq a resync names
-	// could ever cover it, and no receipt stands in for it either.
+func TestAnEphemeralInvocationItemIsReplayedOnResync(t *testing.T) {
+	// Arrange — `/model opus` is answered by the daemon itself, so no CLI ever
+	// saw it and no store record exists. Retention is the only account of it.
 	h := newQueueHarness(t, nil)
-	if err := h.submitAs("r1", "/model"); err != nil {
+	if err := h.submitAs("r1", "/model opus"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 
@@ -404,8 +404,8 @@ func TestARepeatedInvocationUnderOneRequestIdReplacesTheRetainedItem(t *testing.
 	c := h.controller().consumer
 
 	// Act.
-	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, "")
-	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, "")
+	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, true, "")
+	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, true, "")
 
 	// Assert.
 	if got := len(c.snapshotCommandItems()); got != 1 {
@@ -413,12 +413,58 @@ func TestARepeatedInvocationUnderOneRequestIdReplacesTheRetainedItem(t *testing.
 	}
 }
 
-func TestAContextCutDropsTheRetainedInvocationItems(t *testing.T) {
-	// Arrange — an invocation from BELOW the cut, replayed above it, would sit
-	// in a feed the cut exists to open.
+func TestADurableInvocationIsNotRetainedForReplay(t *testing.T) {
+	// Arrange — the CLI handled this command and wrote a record for it, so the
+	// store serves it on reconnect; a retained copy would draw it twice.
 	h := newQueueHarness(t, nil)
 	c := h.controller().consumer
-	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, "")
+
+	// Act.
+	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_COST, false, "")
+
+	// Assert.
+	if got := len(c.snapshotCommandItems()); got != 0 {
+		t.Fatalf("retained %d durable invocation item(s), want 0 (the store is their one source)", got)
+	}
+}
+
+func TestADurableInvocationIsStillPushedLive(t *testing.T) {
+	// Arrange — retention decides what a RECONNECT replays, never whether the
+	// frontend sees the invocation when it happens.
+	h := newQueueHarness(t, nil)
+	c := h.controller().consumer
+
+	// Act.
+	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_COST, false, "")
+
+	// Assert.
+	if items := h.commandItems(); len(items) != 1 {
+		t.Fatalf("pushed %d durable invocation item(s) live, want 1", len(items))
+	}
+}
+
+func TestADurableInvocationIsNotRePushedByAResync(t *testing.T) {
+	// Arrange — the duplicate-item failure mode: one command arriving from both
+	// the store and daemon retention.
+	h := newQueueHarness(t, nil)
+	c := h.controller().consumer
+	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_COST, false, "")
+
+	// Act.
+	c.resync(0)
+
+	// Assert.
+	if items := h.commandItems(); len(items) != 1 {
+		t.Fatalf("saw %d durable invocation item(s) after a replay, want 1 (the live push alone)", len(items))
+	}
+}
+
+func TestAContextCutDropsTheRetainedEphemeralInvocationItems(t *testing.T) {
+	// Arrange — an invocation from BELOW the cut, replayed above it, would sit
+	// in a feed the cut exists to open. Nothing else floors an ephemeral one.
+	h := newQueueHarness(t, nil)
+	c := h.controller().consumer
+	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, true, "")
 
 	// Act.
 	c.Consume(clearEvent(7, "u-clear"))
@@ -438,7 +484,7 @@ func TestTheInvocationItemIsEphemeral(t *testing.T) {
 	requestID := "r1"
 
 	// Act.
-	item, err := sessionCommandItem(requestID, frontendv1.SessionCommand_SESSION_COMMAND_MODEL, 7)
+	item, err := sessionCommandItem(requestID, frontendv1.SessionCommand_SESSION_COMMAND_MODEL, 7, true)
 
 	// Assert.
 	if err != nil {
@@ -457,7 +503,7 @@ func TestTheInvocationItemIsAFeedRow(t *testing.T) {
 	requestID := "r1"
 
 	// Act.
-	item, err := sessionCommandItem(requestID, frontendv1.SessionCommand_SESSION_COMMAND_MODEL, 7)
+	item, err := sessionCommandItem(requestID, frontendv1.SessionCommand_SESSION_COMMAND_MODEL, 7, true)
 
 	// Assert.
 	if err != nil {

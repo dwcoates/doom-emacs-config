@@ -783,13 +783,17 @@ type consumer struct {
 	// echoes are the prompt receipts this daemon has pushed and the durable
 	// transcript has not yet claimed, OLDEST FIRST. See pushUserEcho.
 	echoes []*promptEcho
-	// cmdItems retains the session-command invocation items this daemon has
-	// pushed, in first-seen order, on the same footing as permItems and
-	// failItems and for the same reason (sessioncommand.go). They are the ONLY
-	// account a frontend gets of an invocation — the command earns no prompt
-	// work and the CLI's own transcript bookkeeping for it is withheld as
-	// machinery — so a resync that could not replay them would leave the feed
-	// silent about a command the user ran.
+	// cmdItems retains the EPHEMERAL session-command invocation items this
+	// daemon has pushed, in first-seen order, on the same footing as permItems
+	// and failItems and for the same reason (sessioncommand.go). They are the
+	// ONLY account a frontend gets of such an invocation — the daemon answered
+	// the command alone, so no CLI ever saw it and no store record exists — so
+	// a resync that could not replay them would leave the feed silent about a
+	// command the user ran.
+	//
+	// A DURABLE invocation is deliberately absent from this map. The CLI wrote a
+	// record for it, the store replays it, and holding a second copy here would
+	// deliver one command from two sources.
 	cmdItems map[string]*frontendv1.Message
 	cmdOrder []string
 	// backfill is the last never-blue state reported for this session (F2).
@@ -3059,10 +3063,12 @@ func (c *consumer) resync(fromSeq uint64) (floor uint64, haveFloor bool) {
 	for _, item := range c.snapshotEchoes() {
 		c.pushLocalItem(item)
 	}
-	// And the session-command invocations (sessioncommand.go). Same reasoning a
-	// third time, with one addition: a session command earns no prompt receipt
-	// by design, so this item is the ONLY thing that will ever tell a
-	// reconnecting frontend the command was run.
+	// And the EPHEMERAL session-command invocations (sessioncommand.go). Same
+	// reasoning a third time, with one addition: a command the daemon answered
+	// alone reached no CLI and has no store record, so this item is the ONLY
+	// thing that will ever tell a reconnecting frontend the command was run.
+	// Retention holds nothing else — a CLI-handled command comes back from the
+	// store, and replaying it from here as well would draw it twice.
 	for _, item := range c.snapshotCommandItems() {
 		c.pushLocalItem(item)
 	}
