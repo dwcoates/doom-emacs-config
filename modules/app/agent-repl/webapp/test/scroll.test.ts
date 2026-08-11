@@ -3,6 +3,9 @@ import {
   EDGE_PX,
   PIN_PX,
   SECTION_CLASSES,
+  captureFeedAnchor,
+  restoreFeedAnchor,
+  type AnchorBox,
   freezeOnScroll,
   freezeOnToggle,
   inEdgeZone,
@@ -590,5 +593,90 @@ describe("revealNode", () => {
     const node = spy();
     revealNode(node, "start");
     expect(node.calls).toEqual(["start"]);
+  });
+});
+
+/**
+ * THE READER'S PLACE ACROSS A REBUILD.
+ *
+ * A resync re-delivers the same history and the feed rebuilds from nothing.
+ * Nothing about the data changed, so nothing about what the reader is looking
+ * at may change either — the "jerk and reset" the user reported is a rebuild
+ * that dropped them wherever the new layout landed.
+ */
+describe("feed anchoring across a rebuild", () => {
+  /** A scroll box whose items are at fixed offsets, mounted by key. */
+  const box = (over: Partial<AnchorBox> & { offsets?: Record<string, number> } = {}): AnchorBox => {
+    const offsets = over.offsets ?? {};
+    return {
+      scrollTop: over.scrollTop ?? 0,
+      scrollHeight: over.scrollHeight ?? 1000,
+      clientHeight: over.clientHeight ?? 200,
+      querySelector: (selector: string) => {
+        const key = /\[data-key="(.*)"\]/.exec(selector)?.[1] ?? "";
+        const offsetTop = offsets[key];
+        return offsetTop === undefined ? null : { offsetTop };
+      },
+    };
+  };
+
+  it("anchors on the topmost item still on screen", () => {
+    // Arrange — the reader is 300px down; a, at 100, has scrolled away.
+    const b = box({ scrollTop: 300 });
+    // Act
+    const anchor = captureFeedAnchor(b, [
+      { key: "a", offsetTop: 100 },
+      { key: "b", offsetTop: 320 },
+      { key: "c", offsetTop: 600 },
+    ]);
+    // Assert
+    expect(anchor).toEqual({ key: "b", offsetPx: 20, pinned: false });
+  });
+
+  it("restores the anchor item to the same offset from the viewport top", () => {
+    // Arrange — the rebuild moved b from 320 to 480: every height above it
+    // changed, and the reader must not notice.
+    const b = box({ scrollTop: 0, offsets: { b: 480 } });
+    // Act
+    restoreFeedAnchor(b, { key: "b", offsetPx: 20, pinned: false });
+    // Assert
+    expect(b.scrollTop).toBe(460);
+  });
+
+  it("puts a reader who was following the tail back at the tail", () => {
+    // Arrange — pinned readers want the newest content, not a fixed pixel.
+    const b = box({ scrollTop: 0, scrollHeight: 2000 });
+    // Act
+    restoreFeedAnchor(b, { key: "", offsetPx: 0, pinned: true });
+    // Assert
+    expect(b.scrollTop).toBe(2000);
+  });
+
+  it("anchors a tail-following reader on the tail rather than on an item", () => {
+    // Arrange — scrolled to the bottom within the pin window.
+    const b = box({ scrollTop: 800 - PIN_PX + 1, scrollHeight: 1000, clientHeight: 200 });
+    // Act
+    const anchor = captureFeedAnchor(b, [{ key: "a", offsetTop: 900 }]);
+    // Assert
+    expect(anchor?.pinned).toBe(true);
+  });
+
+  it("leaves the box alone when the anchor item did not survive the rebuild", () => {
+    // Arrange — a clear discarded the item the reader was on; inventing a
+    // position for it would move them somewhere they never were.
+    const b = box({ scrollTop: 77, offsets: {} });
+    // Act
+    const restored = restoreFeedAnchor(b, { key: "gone", offsetPx: 20, pinned: false });
+    // Assert
+    expect([restored, b.scrollTop]).toEqual([false, 77]);
+  });
+
+  it("captures nothing for an empty feed, so a rebuild has nothing to restore", () => {
+    // Arrange — scrolled up in a box with no items at all.
+    const b = box({ scrollTop: 10, scrollHeight: 1000, clientHeight: 200 });
+    // Act
+    const anchor = captureFeedAnchor(b, []);
+    // Assert
+    expect(anchor).toBeNull();
   });
 });

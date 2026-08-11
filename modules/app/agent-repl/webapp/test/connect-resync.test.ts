@@ -825,10 +825,49 @@ describe("ConnectResync fence rotation", () => {
     await flush();
     h.sent.length = 0;
     // Act
-    h.trigger.observeFenceRotation("WorkspaceState adopted a new fence");
+    h.trigger.observeFenceRotation("WorkspaceState adopted a new fence", "f-new");
     h.trigger.observe(false, snapshot("/ws", 12, "s1|g1"));
     // Assert — the new request carries the fence this page now holds.
     expect(h.sent).toEqual([snapshot("/ws", 12, "s1|g1")]);
+  });
+
+  it("does not re-arm on a rotation back to a fence it has already resynced under", async () => {
+    // Arrange — one resync went out under f-a; the workspace then rotated to
+    // f-b and straight back to f-a, as a flapping workspace does.
+    const h = harness();
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12, "f-a"));
+    await flush();
+    h.trigger.observeFenceRotation("rotated away", "f-b");
+    h.trigger.observe(false, snapshot("/ws", 12, "f-b"));
+    await flush();
+    h.sent.length = 0;
+    // Act — back to the fence this page has already asked under.
+    h.trigger.observeFenceRotation("rotated back", "f-a");
+    h.trigger.observe(false, snapshot("/ws", 12, "f-a"));
+    await flush();
+    // Assert — the request f-a owed was already sent and answered.
+    expect(h.sent).toEqual([]);
+  });
+
+  it("bounds the resyncs a flapping fence can provoke", async () => {
+    // Arrange — the self-sustaining loop, driven: fifty rotations between two
+    // fences, each one the kind of edge that used to re-arm unconditionally.
+    const h = harness();
+    h.trigger.onConnect();
+    h.trigger.observe(true, snapshot("/ws", 12, "f-a"));
+    await flush();
+    h.sent.length = 0;
+    // Act
+    for (let i = 0; i < 50; i++) {
+      const fence = i % 2 === 0 ? "f-b" : "f-a";
+      h.trigger.observeFenceRotation("flap", fence);
+      h.trigger.observe(false, snapshot("/ws", 12, fence));
+      await flush();
+    }
+    // Assert — exactly one, for the one fence this page had not yet asked
+    // under. The loop cannot sustain itself.
+    expect(h.sent).toEqual([snapshot("/ws", 12, "f-b")]);
   });
 
   it("discharges a page held at its give-up ceiling by the retired fence", async () => {
@@ -837,7 +876,7 @@ describe("ConnectResync fence rotation", () => {
     h.trigger.onConnect();
     await exhaust(h);
     // Act
-    h.trigger.observeFenceRotation("WorkspaceState adopted a new fence");
+    h.trigger.observeFenceRotation("WorkspaceState adopted a new fence", "f-new");
     // Assert
     expect(h.trigger.isGivenUp).toBe(false);
   });
@@ -849,7 +888,7 @@ describe("ConnectResync fence rotation", () => {
     h.trigger.observe(true, snapshot("/ws", 12, "s1|"));
     h.sent.length = 0;
     // Act
-    h.trigger.observeFenceRotation("WorkspaceState adopted a new fence");
+    h.trigger.observeFenceRotation("WorkspaceState adopted a new fence", "f-new");
     h.trigger.observe(false, snapshot("/ws", 12, "s1|g1"));
     // Assert — coalesced into the dirty flag rather than sent beside it.
     expect(h.sent).toEqual([]);

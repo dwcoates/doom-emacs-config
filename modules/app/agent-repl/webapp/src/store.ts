@@ -31,6 +31,16 @@ import type {
   WorkspaceGateView,
 } from "./frontend-proto.js";
 import { admitFenced, type FencedComponentView, type FencedView } from "./fence.js";
+
+/**
+ * How many retired fences a workspace remembers.
+ *
+ * Enough to cover every push composed before a rotation and still in flight
+ * across a handful of rotations in a row — the post-bounce case, where a
+ * workspace can rotate several times in a second. Beyond that a fence is old
+ * enough that a push still carrying it is genuinely from another world.
+ */
+export const RETIRED_FENCE_MEMORY = 8;
 import { CONNECTIVITY_WINDOW_KINDS, failureKindName, failureResolvedAtMs } from "./failure-card.js";
 import type {
   AdapterEffect,
@@ -684,6 +694,22 @@ export interface StoreState {
    */
   fences: Map<string, string>;
   /**
+   * Every fence this page has PREVIOUSLY held for a workspace, per workspace.
+   *
+   * It is what lets a discard say WHICH KIND of stale a push is (fence.ts). A
+   * push carrying a token this page once held is merely superseded: it was
+   * composed before a rotation this page has already adopted, and the daemon is
+   * already producing its correctly-fenced successor. A push carrying a token
+   * this page has NEVER held is foreign — the two ends disagree about the world
+   * — and that is the case worth a warning.
+   *
+   * BOUNDED: a workspace that rotates all day must not grow this without limit,
+   * so only the most recent RETIRED_FENCE_MEMORY are kept. Forgetting the
+   * oldest degrades a superseded verdict into a foreign one, which is the safe
+   * direction: it reports more loudly, never less.
+   */
+  retiredFences: Map<string, string[]>;
+  /**
    * The resolved TOPBAR per workspace, adopted only through the fence gate.
    *
    * ABSENT MEANS ABSENT: a workspace with no entry renders no topbar, never a
@@ -741,6 +767,7 @@ function initialState(): StoreState {
     shutdownSchedule: null,
     hibernation: null,
     fences: new Map(),
+    retiredFences: new Map(),
     topbars: new Map(),
     tokenBreakdowns: new Map(),
     gates: new Map(),
@@ -1391,6 +1418,12 @@ export class ConversationStore {
     // against the new fence it can never match.
     const previousFence = s.fences.get(ws.workspace);
     if (previousFence !== ws.fence) {
+      // BANKED BEFORE IT IS REPLACED. A push already composed under the token
+      // being retired here is in flight right now, and this is what will let
+      // the gate name it superseded rather than foreign when it lands.
+      if (previousFence !== undefined && previousFence !== "") {
+        this.retireFence(ws.workspace, previousFence);
+      }
       s.topbars.delete(ws.workspace);
       s.tokenBreakdowns.delete(ws.workspace);
       s.gates.delete(ws.workspace);
@@ -1557,10 +1590,39 @@ export class ConversationStore {
    * has no admitted value to act on, which is how discard-whole is enforced
    * rather than merely intended.
    */
+  /**
+   * The fences this page has held for a workspace and no longer holds.
+   *
+   * A Set per call rather than a stored one: the list is at most
+   * RETIRED_FENCE_MEMORY entries and the gate is the only reader, so the
+   * alternative is a second container to keep in step with the first.
+   */
+  private retiredFencesFor(workspace: string): ReadonlySet<string> {
+    return new Set(this.state.retiredFences.get(workspace) ?? []);
+  }
+
+  /** Bank one retired fence, newest last, keeping the bound. */
+  private retireFence(workspace: string, fence: string): void {
+    const held = this.state.retiredFences.get(workspace) ?? [];
+    if (held[held.length - 1] === fence) return;
+    held.push(fence);
+    if (held.length > RETIRED_FENCE_MEMORY) held.splice(0, held.length - RETIRED_FENCE_MEMORY);
+    this.state.retiredFences.set(workspace, held);
+  }
+
   private gateFenced<T extends FencedView>(view: T): T | null {
-    const verdict = admitFenced(view, this.state.fences.get(view.value.workspace) ?? "");
+    const workspace = view.value.workspace;
+    const verdict = admitFenced(
+      view,
+      this.state.fences.get(workspace) ?? "",
+      this.retiredFencesFor(workspace),
+    );
     if (verdict.kind === "discard") {
-      this.log("warn", verdict.report.message, verdict.report.context);
+      // SUPERSEDED IS INFO, FOREIGN IS WARN. The discard is identical either
+      // way — the push is dropped whole — but a race with a rotation this page
+      // has already adopted is the protocol working, and logging 840 of them
+      // an hour at WARN is what buried the foreign ones that mattered.
+      this.log(verdict.report.superseded ? "info" : "warn", verdict.report.message, verdict.report.context);
       return null;
     }
     // `admitFenced` hands back the very view it admitted, so this narrows to
