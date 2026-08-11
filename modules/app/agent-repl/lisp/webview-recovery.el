@@ -235,6 +235,61 @@ cache can, and does, answer with the superseded bundle it already holds."
         (replace-match (concat (match-string 1 uri) value) t t uri)
       (concat uri (if (string-match-p "\\?" uri) "&" "?") param "=" value))))
 
+(defun agent-repl--webview-recovery-repair-buffer (buf ws deployed script)
+  "Repair BUF's page for WS against DEPLOYED, driving SCRIPT when it can.
+
+THE ONE PLACE THE CHOICE IS MADE, so the sweep and the single-workspace
+repair cannot drift into two different ideas of what a stale page is.
+Returns `driven' when the page was already on DEPLOYED and was handed the
+recovery hook, `reloaded' when it was re-addressed at DEPLOYED, and
+`dead-webview' when BUF holds no live widget (which is warned about, not
+swallowed).  Signals are left to the caller, which is what lets the sweep
+count a failure and carry on to the next page."
+  (let ((xw (agent-repl--frontend-webview-live-widget buf)))
+    (if (null xw)
+        (progn
+          (agent-repl--warn ws "webview-recovery: buffer=%s outcome=dead-webview"
+                            (buffer-name buf))
+          'dead-webview)
+      (let* ((uri (agent-repl--frontend-webview-uri xw))
+             (build (agent-repl--webview-recovery-uri-build uri)))
+        (if (equal build deployed)
+            (progn
+              (agent-repl--frontend-webview-execute-script buf script)
+              (agent-repl--log ws "webview-recovery: buffer=%s outcome=driven build=%s"
+                               (buffer-name buf) deployed)
+              'driven)
+          (let ((fresh (agent-repl--webview-recovery-fresh-uri uri deployed)))
+            (agent-repl--frontend-webview-navigate-widget xw fresh)
+            (agent-repl--log
+             ws "webview-recovery: buffer=%s outcome=reloaded was=%s now=%s url=%s"
+             (buffer-name buf) (or build "none") deployed fresh)
+            'reloaded))))))
+
+(defun agent-repl--webview-recovery-repair-workspace (ws reason)
+  "Repair ONLY WS's own page, naming REASON, and return what was done.
+
+WHY ONE WORKSPACE AND NOT A SWEEP.  The recovery SLO breaches PER
+WORKSPACE, and a whole-host sweep issued for one breach touches every
+other workspace's page: a page that is merely on an older bundle is
+RE-NAVIGATED, which throws away the document that was answering the
+SLO's probe and resets the page-side recovery epoch
+(`openEpoch' in webapp/src/main.ts, driven by the recovery hook).  With
+several workspaces breaching in the same outage, each one's force
+therefore re-broke every other one's page, and the measured consequence
+was a whole host reporting `probe=absent' or `probe=silent' with
+`webapp_ms=-1'.  The build-id comparison is unchanged and still decides
+WHAT to do; this only bounds WHO it is done to.
+
+Returns the `agent-repl--webview-recovery-repair-buffer' outcome, or nil
+when WS has no live webview buffer — there is no page to repair, which is
+not a failure and not a lie about one."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+    (when (buffer-live-p buf)
+      (agent-repl--webview-recovery-repair-buffer
+       buf ws (agent-repl--frontend-build-id)
+       (agent-repl--webview-recovery-script reason)))))
+
 (defun agent-repl--webview-recovery-sweep (reason &optional force)
   "Bring every reachable webview onto the deployed bundle, naming REASON.
 Returns how many webviews the sweep ACTED on (driven plus reloaded).
@@ -293,28 +348,10 @@ than swallowed."
         (dolist (buf buffers)
           (let ((ws (agent-repl--frontend-webview-workspace buf)))
             (condition-case err
-                (let ((xw (agent-repl--frontend-webview-live-widget buf)))
-                  (if (null xw)
-                      (progn
-                        (setq absent (1+ absent))
-                        (agent-repl--warn
-                         ws "webview-recovery: buffer=%s outcome=dead-webview"
-                         (buffer-name buf)))
-                    (let* ((uri (agent-repl--frontend-webview-uri xw))
-                           (build (agent-repl--webview-recovery-uri-build uri)))
-                      (if (equal build deployed)
-                          (progn
-                            (agent-repl--frontend-webview-execute-script buf script)
-                            (setq driven (1+ driven))
-                            (agent-repl--log
-                             ws "webview-recovery: buffer=%s outcome=driven build=%s"
-                             (buffer-name buf) deployed))
-                        (let ((fresh (agent-repl--webview-recovery-fresh-uri uri deployed)))
-                          (agent-repl--frontend-webview-navigate-widget xw fresh)
-                          (setq reloaded (1+ reloaded))
-                          (agent-repl--log
-                           ws "webview-recovery: buffer=%s outcome=reloaded was=%s now=%s url=%s"
-                           (buffer-name buf) (or build "none") deployed fresh))))))
+                (pcase (agent-repl--webview-recovery-repair-buffer buf ws deployed script)
+                  ('driven (setq driven (1+ driven)))
+                  ('reloaded (setq reloaded (1+ reloaded)))
+                  ('dead-webview (setq absent (1+ absent))))
               (error
                (setq failed (1+ failed))
                (agent-repl--warn ws "webview-recovery: buffer=%s outcome=failed err=%S"

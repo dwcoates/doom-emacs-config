@@ -294,6 +294,74 @@ did not work, so suppressing it would leave the breach unrepaired."
         (should (null calls))
         (should (null agent-repl-test--recovery-navigated))))))
 
+;;;; ---- Repairing ONE workspace's page -------------------------------------
+
+(ert-deftest agent-repl-test-webview-recovery-repair-drives-a-matching-bundle ()
+  "A page already on the deployed build is DRIVEN in place, never re-navigated.
+Re-navigating it would throw away the document answering the recovery
+SLO's probe, which is the self-defeating force this scope exists to end."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep calls
+    (agent-repl-test--with-recovery-ws ((b1 "wsr-repair-fresh"))
+      ;; Act
+      (let ((outcome (agent-repl--webview-recovery-repair-workspace
+                      "wsr-repair-fresh" "recovery_slo_force")))
+        ;; Assert
+        (should (eq outcome 'driven))
+        (should (equal (mapcar #'car calls) (list b1)))
+        (should (null agent-repl-test--recovery-navigated))))))
+
+(ert-deftest agent-repl-test-webview-recovery-repair-reloads-a-stale-bundle ()
+  "A page on a superseded build is re-navigated at the deployed address."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep calls
+    (agent-repl-test--with-recovery-ws ((b1 "wsr-repair-stale"))
+      (setq agent-repl-test--recovery-uris
+            (list (cons b1 "http://x/?workspace=%2Fw&build=bid-old")))
+      ;; Act
+      (let ((outcome (agent-repl--webview-recovery-repair-workspace
+                      "wsr-repair-stale" "recovery_slo_force")))
+        ;; Assert
+        (should (eq outcome 'reloaded))
+        (should (null calls))
+        (should (equal (cdr (car agent-repl-test--recovery-navigated))
+                       (format "http://x/?workspace=%%2Fw&build=%s"
+                               agent-repl-test--recovery-build)))))))
+
+(ert-deftest agent-repl-test-webview-recovery-repair-touches-no-other-workspace ()
+  "Repairing one workspace leaves every peer's page exactly as it was."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep calls
+    (agent-repl-test--with-recovery-ws ((b1 "wsr-repair-me") (b2 "wsr-repair-peer"))
+      (setq agent-repl-test--recovery-uris
+            (list (cons b2 "http://x/?workspace=%2Fw&build=bid-old")))
+      ;; Act
+      (agent-repl--webview-recovery-repair-workspace "wsr-repair-me" "recovery_slo_force")
+      ;; Assert
+      (should (equal (mapcar #'car calls) (list b1)))
+      (should (null agent-repl-test--recovery-navigated)))))
+
+(ert-deftest agent-repl-test-webview-recovery-repair-without-a-page-is-nil ()
+  "A workspace with no webview buffer reports nothing done, not a failure."
+  ;; Arrange + Act + Assert
+  (agent-repl-test--with-recovery-sweep _calls
+    (should (null (agent-repl--webview-recovery-repair-workspace
+                   "wsr-repair-absent" "recovery_slo_force")))))
+
+(ert-deftest agent-repl-test-webview-recovery-repair-reports-a-dead-webview ()
+  "A buffer whose WKWebView is gone is reported, never silently driven."
+  ;; Arrange
+  (agent-repl-test--with-recovery-sweep calls
+    (agent-repl-test--with-recovery-ws ((_b1 "wsr-repair-dead"))
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                 (lambda (_buf) nil)))
+        ;; Act
+        (let ((outcome (agent-repl--webview-recovery-repair-workspace
+                        "wsr-repair-dead" "recovery_slo_force")))
+          ;; Assert
+          (should (eq outcome 'dead-webview))
+          (should (null calls)))))))
+
 (ert-deftest agent-repl-test-webview-recovery-fresh-uri-appends-a-missing-param ()
   "A URI with no build param gains one rather than losing its query."
   ;; Arrange + Act + Assert
