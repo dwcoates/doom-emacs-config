@@ -90,6 +90,10 @@ message FrontendFrame {
     // content, and the command's ack is early by design — see
     // conversation-page.proto.
     ConversationPage conversation_page = 26;
+    // A preview the daemon opened and can no longer retire. Like TypingDelta
+    // it is an EDGE and never snapshot state: a cut describes the end of one
+    // preview, and a client that connects afterwards has no preview to retire.
+    TypingCut typing_cut = 27;
   }
 }
 

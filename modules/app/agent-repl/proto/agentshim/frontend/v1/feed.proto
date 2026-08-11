@@ -210,6 +210,27 @@ message TypingDelta {
   string bubble_id = 5;
 }
 
+// The daemon's statement that a preview it opened will NEVER be completed.
+//
+// A preview is retired by the authoritative record of the block it previews.
+// When that record can no longer arrive — the session died, the shim rolled,
+// the query was torn down mid-block — nothing retires it, and the bubble
+// spins "streaming input…" for the life of the page with no body.
+//
+// A CUT IS A FACT THE DAEMON OWNS, NOT A TIMEOUT THE CLIENT GUESSES. The
+// daemon learns the stream ended without its record; the client cannot
+// distinguish that from a slow block, and any client-side deadline would be
+// wrong for exactly the long tool calls users care most about watching.
+message TypingCut {
+  string workspace = 1;
+  // The preview being retired, addressed exactly as the delta that opened it:
+  // empty for the top-level feed, or the AsyncBubble id it was folded into.
+  string bubble_id = 2;
+  // The workspace's staleness FENCE, compared byte-wise and never parsed,
+  // identically to every other push. A stale cut is discarded whole.
+  string fence = 3;
+}
+
 // The session's retained SystemInit (slash commands, tools, skills, model
 // list), pushed on attach and included in StateSnapshot (S9). Replaces the
 // Emacs GET /commands HTTP menu source.
