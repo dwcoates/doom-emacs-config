@@ -2,6 +2,8 @@ package sessioncontroller
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -20,6 +22,10 @@ type phantomHarness struct {
 	client *fakeClient
 	mu     sync.Mutex
 	nowMs  int64
+	// logs and warns are every record the manager wrote, split by channel, so
+	// a test can assert BOTH that a condition was recorded and at which level.
+	logs  []string
+	warns []string
 }
 
 func newPhantomHarness(t *testing.T) *phantomHarness {
@@ -41,6 +47,8 @@ func newPhantomHarness(t *testing.T) *phantomHarness {
 		Source:            stubSource{},
 		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		Now:               h.now,
+		Logf:              h.record(&h.logs),
+		Warnf:             h.record(&h.warns),
 		newClient: func(c shimclient.Config) sessionClient {
 			fc := &fakeClient{cfg: c}
 			mu.Lock()
@@ -61,6 +69,28 @@ func newPhantomHarness(t *testing.T) *phantomHarness {
 	h.client = last
 	mu.Unlock()
 	return h
+}
+
+// record returns a logger that appends every formatted record to sink.
+func (h *phantomHarness) record(sink *[]string) func(string, ...any) {
+	return func(format string, args ...any) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		*sink = append(*sink, fmt.Sprintf(format, args...))
+	}
+}
+
+// countMatching reports how many records in the named channel contain needle.
+func (h *phantomHarness) countMatching(sink *[]string, needle string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, line := range *sink {
+		if strings.Contains(line, needle) {
+			n++
+		}
+	}
+	return n
 }
 
 func (h *phantomHarness) now() int64 {
@@ -266,5 +296,129 @@ func TestPhantomSweepClosesNothingWhenTheShimCannotAnswer(t *testing.T) {
 	}
 	if ids := h.consumer().openTaskIDs(); len(ids) != 1 {
 		t.Fatalf("open tasks = %v, want the entry left standing", ids)
+	}
+}
+
+// muteShimHarness is one open task past its grace whose shim refuses every
+// live-set probe, which is the condition the degrade latch is about.
+func muteShimHarness(t *testing.T) *phantomHarness {
+	t.Helper()
+	h := newPhantomHarness(t)
+	h.startTask(1, "unknown")
+	h.client.liveTasksErr = errors.New("shim gone")
+	h.advance(phantomTaskGraceMs)
+	return h
+}
+
+// sweepN runs n sweeps, which is how a test counts PROBES rather than seconds.
+func (h *phantomHarness) sweepN(n int) {
+	h.t.Helper()
+	for i := 0; i < n; i++ {
+		h.m.SweepPhantomTasks()
+	}
+}
+
+const (
+	liveSetUnavailableWarn = "task catalog LIVE-SET UNAVAILABLE"
+	liveSetBelowThreshold  = "below the degrade threshold"
+	liveSetStillUnavail    = "task catalog live-set STILL UNAVAILABLE"
+	liveSetAnswerable      = "task catalog live-set ANSWERABLE AGAIN"
+	liveSetAnsweredBlips   = "never reached the degrade threshold"
+)
+
+func TestLiveSetProbeBelowTheThresholdIsRecordedWithoutWarning(t *testing.T) {
+	// Arrange — a shim that has only just started refusing.
+	h := muteShimHarness(t)
+
+	// Act — one probe short of the degrade threshold.
+	h.sweepN(phantomTaskDegradeProbes - 1)
+
+	// Assert — the occurrences are on the record, at info.
+	if got := h.countMatching(&h.warns, liveSetUnavailableWarn); got != 0 {
+		t.Fatalf("degrade warns = %d, want 0 below the threshold — an unanswered probe is a blip until it persists", got)
+	}
+	if got := h.countMatching(&h.logs, liveSetBelowThreshold); got != phantomTaskDegradeProbes-1 {
+		t.Fatalf("sub-threshold records = %d, want %d — a level change must never become a lost record", got, phantomTaskDegradeProbes-1)
+	}
+}
+
+func TestLiveSetProbeWarnsOnceOnTheDegradeEdge(t *testing.T) {
+	// Arrange.
+	h := muteShimHarness(t)
+
+	// Act — exactly the threshold's worth of consecutive refusals.
+	h.sweepN(phantomTaskDegradeProbes)
+
+	// Assert.
+	if got := h.countMatching(&h.warns, liveSetUnavailableWarn); got != 1 {
+		t.Fatalf("degrade warns = %d, want exactly 1 on the crossing", got)
+	}
+}
+
+func TestLiveSetProbePastTheEdgeStopsWarningButKeepsRecording(t *testing.T) {
+	// Arrange — the crossing has already been reported.
+	h := muteShimHarness(t)
+	h.sweepN(phantomTaskDegradeProbes)
+
+	// Act — five more idle sweeps against the same mute shim.
+	h.sweepN(5)
+
+	// Assert — no second warn, and every one of the five is still recorded.
+	if got := h.countMatching(&h.warns, liveSetUnavailableWarn); got != 1 {
+		t.Fatalf("degrade warns = %d, want 1 — an already-degraded session must not warn on every idle sweep", got)
+	}
+	if got := h.countMatching(&h.logs, liveSetStillUnavail); got != 5 {
+		t.Fatalf("already-degraded records = %d, want 5 — the occurrences are still evidence and may not be dropped", got)
+	}
+}
+
+func TestLiveSetRecoveryEdgeIsRecorded(t *testing.T) {
+	// Arrange — a latched session.
+	h := muteShimHarness(t)
+	h.sweepN(phantomTaskDegradeProbes)
+
+	// Act — the shim answers again.
+	h.client.liveTasksErr = nil
+	h.client.liveTasks = []string{"unknown"}
+	h.m.SweepPhantomTasks()
+
+	// Assert — a latch you can enter but never watch leave is its own defect.
+	if got := h.countMatching(&h.logs, liveSetAnswerable); got != 1 {
+		t.Fatalf("recovery records = %d, want 1", got)
+	}
+}
+
+func TestLiveSetRecoveryFromASubThresholdRunIsRecorded(t *testing.T) {
+	// Arrange — failures that never reached the threshold.
+	h := muteShimHarness(t)
+	h.sweepN(phantomTaskDegradeProbes - 1)
+
+	// Act.
+	h.client.liveTasksErr = nil
+	h.client.liveTasks = []string{"unknown"}
+	h.m.SweepPhantomTasks()
+
+	// Assert — those failures were recorded, so their end belongs beside them.
+	if got := h.countMatching(&h.logs, liveSetAnsweredBlips); got != 1 {
+		t.Fatalf("sub-threshold recovery records = %d, want 1", got)
+	}
+}
+
+func TestLiveSetDegradeLatchRearmsAfterRecovery(t *testing.T) {
+	// Arrange — degrade, then recover, so the counter must be back at zero.
+	h := muteShimHarness(t)
+	h.sweepN(phantomTaskDegradeProbes)
+	h.client.liveTasksErr = nil
+	h.client.liveTasks = []string{"unknown"}
+	h.m.SweepPhantomTasks()
+
+	// Act — a second, independent run of refusals.
+	h.client.liveTasksErr = errors.New("shim gone again")
+	h.sweepN(phantomTaskDegradeProbes)
+
+	// Assert — the second degradation is its own event and warns on its own
+	// edge; a latch that never rearmed would hide every later outage.
+	if got := h.countMatching(&h.warns, liveSetUnavailableWarn); got != 2 {
+		t.Fatalf("degrade warns = %d, want 2 — each degrade run earns exactly one crossing warn", got)
 	}
 }
