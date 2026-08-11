@@ -377,3 +377,176 @@ func TestConcurrentIngestKeepsSeqGapless(t *testing.T) {
 		t.Fatalf("count=%d max_seq=%d, want both %d (gapless, nothing lost)", count, maxSeq, want)
 	}
 }
+
+// writeIdentified is a PERSISTENT core event with NO cross-plane dedup identity
+// (SessionStarted derives no dedup_key) but WITH a producer write identity. It
+// is the exact shape a replay used to duplicate: nothing about its payload lets
+// the store recognize the second copy, only write_id does.
+func writeIdentified(session, writeID string) *corev1.Event {
+	ev := persistentCore(session)
+	ev.WriteId = writeID
+	return ev
+}
+
+// --- write identity: idempotent replay --------------------------------------
+
+func TestIngestReplayedWriteIdIsANoOp(t *testing.T) {
+	// Arrange: one event delivered, then delivered again — what a producer does
+	// with a batch whose ack was lost to a store bounce.
+	d := openTemp(t)
+	first := writeIdentified("s1", "w-1")
+	if _, err := d.Ingest("p", []*corev1.Event{first}, nil); err != nil {
+		t.Fatalf("first Ingest: %v", err)
+	}
+
+	// Act
+	replay := writeIdentified("s1", "w-1")
+	res, err := d.Ingest("p", []*corev1.Event{replay}, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("replay Ingest: %v", err)
+	}
+	if res.Accepted != 0 || res.Deduped != 1 || res.Replayed != 1 {
+		t.Fatalf("result = %+v, want accepted=0 deduped=1 replayed=1", res)
+	}
+	if rows := collectReplay(t, d, "s1", 0); len(rows) != 1 {
+		t.Fatalf("persisted %d rows after a replay, want exactly 1", len(rows))
+	}
+}
+
+func TestIngestReplayedEventIsNotRefannedOut(t *testing.T) {
+	// Arrange: seq==0 is the server's fan-out selector, so a replayed event
+	// keeping its seq would become a duplicate DELIVERY.
+	d := openTemp(t)
+	if _, err := d.Ingest("p", []*corev1.Event{writeIdentified("s1", "w-1")}, nil); err != nil {
+		t.Fatalf("first Ingest: %v", err)
+	}
+	replay := writeIdentified("s1", "w-1")
+
+	// Act
+	if _, err := d.Ingest("p", []*corev1.Event{replay}, nil); err != nil {
+		t.Fatalf("replay Ingest: %v", err)
+	}
+
+	// Assert
+	if replay.GetSeq() != 0 {
+		t.Fatalf("replayed event seq = %d, want 0 so the server skips fan-out", replay.GetSeq())
+	}
+}
+
+func TestIngestReplayedWriteIdConsumesNoSeq(t *testing.T) {
+	// Arrange
+	d := openTemp(t)
+	if _, err := d.Ingest("p", []*corev1.Event{writeIdentified("s1", "w-1")}, nil); err != nil {
+		t.Fatalf("first Ingest: %v", err)
+	}
+	if _, err := d.Ingest("p", []*corev1.Event{writeIdentified("s1", "w-1")}, nil); err != nil {
+		t.Fatalf("replay Ingest: %v", err)
+	}
+
+	// Act: a genuinely new event after the replay.
+	fresh := writeIdentified("s1", "w-2")
+	res, err := d.Ingest("p", []*corev1.Event{fresh}, nil)
+
+	// Assert: the sequence never gapped around the replay.
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if fresh.GetSeq() != 2 || res.LastSeq != 2 {
+		t.Fatalf("seq after a replay = %d (last_seq=%d), want 2 — the replay must not consume a seq", fresh.GetSeq(), res.LastSeq)
+	}
+}
+
+func TestIngestDistinctWriteIdsBothLand(t *testing.T) {
+	// Arrange: two events that are otherwise byte-identical.
+	d := openTemp(t)
+	events := []*corev1.Event{writeIdentified("s1", "w-1"), writeIdentified("s1", "w-2")}
+
+	// Act
+	res, err := d.Ingest("p", events, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.Accepted != 2 || res.Deduped != 0 || res.Replayed != 0 {
+		t.Fatalf("result = %+v, want accepted=2 deduped=0 replayed=0 — distinct identities must not collide", res)
+	}
+}
+
+func TestIngestSameWriteIdInDifferentSessionsBothLand(t *testing.T) {
+	// Arrange: the identity is scoped per session, matching the index.
+	d := openTemp(t)
+	events := []*corev1.Event{writeIdentified("a", "w-1"), writeIdentified("b", "w-1")}
+
+	// Act
+	res, err := d.Ingest("p", events, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.Accepted != 2 || res.Deduped != 0 {
+		t.Fatalf("result = %+v, want accepted=2 deduped=0 — write_id is scoped to a session", res)
+	}
+}
+
+func TestIngestWithoutWriteIdIsNotDedupedByIdentity(t *testing.T) {
+	// Arrange: an older producer supplies no write_id, and must keep exactly the
+	// behavior it had before the field existed.
+	d := openTemp(t)
+	events := []*corev1.Event{persistentCore("s1"), persistentCore("s1")}
+
+	// Act
+	res, err := d.Ingest("p", events, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.Accepted != 2 || res.Deduped != 0 {
+		t.Fatalf("result = %+v, want accepted=2 deduped=0 — empty write_id is never a collision", res)
+	}
+}
+
+func TestIngestCrossPlaneDedupIsNotCountedAsAReplay(t *testing.T) {
+	// Arrange: two PLANES describing one fact is a different event from one
+	// producer delivering one event twice, and the accounting must say so.
+	d := openTemp(t)
+	stream := streamAssistant(t, "s1", "U")
+	stream.WriteId = "w-stream"
+	disk := diskAssistant(t, "s1", "U")
+	disk.WriteId = "w-disk"
+
+	// Act
+	res, err := d.Ingest("p", []*corev1.Event{stream, disk}, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.Accepted != 1 || res.Deduped != 1 || res.Replayed != 0 {
+		t.Fatalf("result = %+v, want accepted=1 deduped=1 replayed=0 — a dedup_key twin is not a replay", res)
+	}
+}
+
+func TestIngestReplayRoundTripsTheWriteIdOnTheStoredEvent(t *testing.T) {
+	// Arrange: the identity has to survive persistence, or a reader cannot tell
+	// which write a row came from.
+	d := openTemp(t)
+	if _, err := d.Ingest("p", []*corev1.Event{writeIdentified("s1", "w-1")}, nil); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	// Act
+	rows := collectReplay(t, d, "s1", 0)
+
+	// Assert
+	if len(rows) != 1 {
+		t.Fatalf("replayed %d rows, want 1", len(rows))
+	}
+	if rows[0].GetWriteId() != "w-1" {
+		t.Fatalf("stored write_id = %q, want %q", rows[0].GetWriteId(), "w-1")
+	}
+}
