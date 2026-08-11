@@ -396,7 +396,7 @@ func TestTheIdleClockIsStampedOncePerTurnEnd(t *testing.T) {
 	// Arrange.
 	rig := newSettledTurnRig(t)
 	stamps := 0
-	rig.consumer.onTurnEnded = func(int64) { stamps++ }
+	rig.consumer.onTurnEnded = func(string, int64) { stamps++ }
 	rig.correct(t, 720)
 
 	// Act.

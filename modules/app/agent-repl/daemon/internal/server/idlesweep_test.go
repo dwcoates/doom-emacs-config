@@ -6,23 +6,54 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
+	"claude-repld/internal/keepalive"
 	"claude-repld/internal/registry"
 )
 
-// legacySweptWorkspace is a workspace the KEEP-ALIVE POLICY declines and the
-// idle sweep's own threshold catches — the case that used to be torn down
-// without a hibernation record.
+// sweepWindowKeepAlive is a coherent keep-alive policy whose IDLE CUTOFF is the
+// test's window, so `window` really is the elapsed at which a session is reaped.
 //
-// Two clocks have to agree for that path to be reachable, and the helper is
-// where they are made to. The server's clock is moved one window past the
-// workspace's newest state row, which is what makes it sweepable; the record's
-// last-turn-end is put two windows into the REAL past, which is the clock the
-// session controller's claim re-reads when it re-validates the elapsed. A
-// last-turn-end that recent on the server's clock also keeps the keep-alive
-// policy answering none, so the legacy branch is the one that runs.
-func legacySweptWorkspace(t *testing.T, window time.Duration) (*harness, string) {
+// IT EXISTS BECAUSE THE TWO CUTOFFS ARE ONE NUMBER NOW. The generic idle sweep's
+// threshold is floored at the policy's idle cutoff (Server.sweepIdleCutoff), so
+// a test that configures only `-idle-timeout` is silently raised to the shipped
+// six hours and reaps nothing. Compressing the policy alongside it is what keeps
+// these tests measuring the window they name.
+func sweepWindowKeepAlive(window time.Duration) keepalive.Config {
+	cfg := keepalive.DefaultConfig()
+	cfg.CacheTTL = window / 2
+	cfg.Leeway = 2 * time.Minute
+	cfg.IdleCutoff = window
+	return cfg
+}
+
+// sweptRecord is the registry record the generic idle sweep would evaluate for
+// this session, addressed at the given workspace.
+//
+// It reads the record rather than constructing one so a test measures the same
+// engagement instant production does — including a zero one, which is what sends
+// the gate to the workspace's state log instead.
+func sweptRecord(t *testing.T, h *harness, sessionID, workspace string) registry.Record {
 	t.Helper()
-	h := newHarnessWith(t, Config{IdleTimeout: window})
+	rec, ok := h.reg.Get(sessionID)
+	if !ok {
+		t.Fatalf("session %s has no registry record to sweep", sessionID)
+	}
+	rec.CWD = workspace
+	return rec
+}
+
+// sweptPastTheCutoff is a workspace quiet past the reaping cutoff, with a
+// last-turn-end old enough on the REAL clock that the hibernation claim's own
+// fresh re-read agrees with the sweep's decision.
+//
+// Two clocks have to agree, and the helper is where they are made to. The
+// server's clock is moved one window past the workspace's newest state row,
+// which is what the sweep measures; the record's last-turn-end is put two
+// windows into the REAL past, which is the clock the session controller's claim
+// re-reads when it re-validates the elapsed.
+func sweptPastTheCutoff(t *testing.T, window time.Duration) (*harness, string) {
+	t.Helper()
+	h := newHarnessWith(t, Config{IdleTimeout: window, KeepAlive: sweepWindowKeepAlive(window)})
 	id := createSession(t, h, `{"cwd":"/w"}`)
 	markControllerOperational(t, h, "/w")
 	at, dated, err := h.ssm.LastActivityMs("/w")
@@ -45,7 +76,7 @@ func legacySweptWorkspace(t *testing.T, window time.Duration) (*harness, string)
 // session back up instead of meeting the revival gate.
 func TestIdleSweepPersistsAnIdleCutoffHibernation(t *testing.T) {
 	// Arrange.
-	h, id := legacySweptWorkspace(t, time.Minute)
+	h, id := sweptPastTheCutoff(t, time.Hour)
 
 	// Act.
 	h.srv.sweepIdle()
@@ -61,20 +92,39 @@ func TestIdleSweepPersistsAnIdleCutoffHibernation(t *testing.T) {
 	}
 }
 
-// The account carries the threshold that actually tripped — this daemon's own
-// idle timeout — rather than the keep-alive policy's cutoff, which is not what
-// this teardown was decided against.
-func TestIdleSweepRecordsItsOwnCutoff(t *testing.T) {
+// The account carries the threshold that actually tripped — the REAPING CUTOFF,
+// which is the configured idle timeout floored at the keep-alive policy's own
+// idle cutoff. The two are one number, so no account can name a shorter one.
+func TestIdleSweepRecordsTheReapingCutoff(t *testing.T) {
 	// Arrange.
-	h, id := legacySweptWorkspace(t, time.Minute)
+	h, id := sweptPastTheCutoff(t, time.Hour)
 
 	// Act.
 	h.srv.sweepIdle()
 
 	// Assert.
 	rec, _ := h.reg.Get(id)
-	if rec.Hibernation.CutoffMs != int64(time.Minute/time.Millisecond) {
-		t.Fatalf("hibernation cutoff_ms = %d, want the sweep's own one-minute timeout", rec.Hibernation.CutoffMs)
+	if want := int64(h.srv.sweepIdleCutoff() / time.Millisecond); rec.Hibernation.CutoffMs != want {
+		t.Fatalf("hibernation cutoff_ms = %d, want the reaping cutoff %d", rec.Hibernation.CutoffMs, want)
+	}
+}
+
+// A WORKSPACE QUIET FOR AN HOUR UNDER THE SHIPPED POLICY IS NOT SWEEPABLE. The
+// generic sweep used to reap at its own one-hour `-idle-timeout` while the
+// policy would have kept the session for six, and it attached the policy's own
+// `idle_cutoff` cause to a threshold that was not the policy's.
+func TestAWorkspaceQuietBelowTheKeepAlivePolicyCutoffIsHeld(t *testing.T) {
+	// Arrange — the shipped six-hour policy against a one-hour idle timeout.
+	h, id, quietFor := sweptWorkspace(t, time.Hour)
+	h.srv.keepAlive = keepalive.DefaultConfig()
+	quietFor(time.Hour)
+
+	// Act.
+	_, got := h.srv.sweepable(sweptRecord(t, h, id, "/w"), h.srv.now().UnixMilli())
+
+	// Assert.
+	if got {
+		t.Fatalf("sweepable = true after an hour, want it held to the policy's %s idle cutoff", keepalive.DefaultIdleCutoff)
 	}
 }
 
@@ -133,7 +183,7 @@ func TestIdleSweepDoesNotRestampARecordThatHasATurnEnd(t *testing.T) {
 // row. Dating off the real row avoids reaching into the SSM's own clock.
 func sweptWorkspace(t *testing.T, window time.Duration) (*harness, string, func(time.Duration)) {
 	t.Helper()
-	h := newHarnessWith(t, Config{IdleTimeout: window})
+	h := newHarnessWith(t, Config{IdleTimeout: window, KeepAlive: sweepWindowKeepAlive(window)})
 	id := createSession(t, h, `{"cwd":"/w"}`)
 	markControllerOperational(t, h, "/w")
 	at, dated, err := h.ssm.LastActivityMs("/w")
@@ -151,7 +201,7 @@ func TestAWorkspaceQuietPastTheWindowIsSweepable(t *testing.T) {
 	quietFor(time.Hour)
 
 	// Act.
-	_, got := h.srv.sweepable(id, "/w", h.srv.now().UnixMilli())
+	_, got := h.srv.sweepable(sweptRecord(t, h, id, "/w"), h.srv.now().UnixMilli())
 
 	// Assert.
 	if !got {
@@ -169,7 +219,7 @@ func TestAWorkspaceQuietInsideTheWindowIsHeld(t *testing.T) {
 	quietFor(7 * time.Minute)
 
 	// Act.
-	_, got := h.srv.sweepable(id, "/w", h.srv.now().UnixMilli())
+	_, got := h.srv.sweepable(sweptRecord(t, h, id, "/w"), h.srv.now().UnixMilli())
 
 	// Assert.
 	if got {
@@ -185,7 +235,7 @@ func TestAWorkspaceWithNoStateAtAllIsHeld(t *testing.T) {
 	quietFor(24 * time.Hour)
 
 	// Act.
-	_, got := h.srv.sweepable(id, "/never-seen", h.srv.now().UnixMilli())
+	_, got := h.srv.sweepable(sweptRecord(t, h, id, "/never-seen"), h.srv.now().UnixMilli())
 
 	// Assert.
 	if got {
@@ -211,7 +261,7 @@ func TestATurnActiveWorkspaceIsHeldHoweverOldItsLogIs(t *testing.T) {
 	quietFor(24 * time.Hour)
 
 	// Act.
-	_, got := h.srv.sweepable(id, "/w", h.srv.now().UnixMilli())
+	_, got := h.srv.sweepable(sweptRecord(t, h, id, "/w"), h.srv.now().UnixMilli())
 
 	// Assert.
 	if got {
@@ -240,7 +290,7 @@ func TestAnIdleAsyncWorkspaceIsHeldHoweverOldItsLogIs(t *testing.T) {
 	quietFor(24 * time.Hour)
 
 	// Act.
-	_, got := h.srv.sweepable(id, "/w", h.srv.now().UnixMilli())
+	_, got := h.srv.sweepable(sweptRecord(t, h, id, "/w"), h.srv.now().UnixMilli())
 
 	// Assert.
 	if got {
@@ -270,7 +320,7 @@ func TestAWorkspaceWhoseAsyncWorkEndedIsSweepableAgain(t *testing.T) {
 	quietFor(24 * time.Hour)
 
 	// Act.
-	_, got := h.srv.sweepable(id, "/w", h.srv.now().UnixMilli())
+	_, got := h.srv.sweepable(sweptRecord(t, h, id, "/w"), h.srv.now().UnixMilli())
 
 	// Assert.
 	if !got {

@@ -243,6 +243,20 @@ type Server struct {
 	// a second scheduler would be a second answer to "how long has this
 	// workspace been quiet".
 	keepAlive keepalive.Config
+	// cacheCoolReported remembers, per session, the durable last-turn-end whose
+	// cold cache has already been reported (keepalive.ActionLetCacheCool).
+	//
+	// IT IS KEYED ON THE INSTANT, NOT ON A TIMER. The cold-cache arm is a
+	// STANDING CONDITION, not an event: it holds on every sweep tick from the
+	// moment the cache dies until the idle cutoff reaps the session, which at
+	// the shipped defaults is five hours of one line per tick per session.
+	// Keying the report on the last-turn-end instant the decision was taken
+	// against gives exactly one line per session per cache window, and a session
+	// that does real work gets a fresh instant and therefore a fresh line — with
+	// no clock of its own to drift.
+	//
+	// Read and written only from the sweeper goroutine.
+	cacheCoolReported map[string]int64
 	// stopped is closed by ShutdownAll, ending the sweeper goroutine.
 	stopped     chan struct{}
 	sweeperDone chan struct{}
@@ -424,6 +438,13 @@ func New(cfg Config) *Server {
 		s.ssm = cfg.AgentShim.SSM
 		s.frontend = cfg.AgentShim.Server
 		s.workspaceViews = cfg.AgentShim.WorkspaceViews
+	}
+	// THE GENERIC SWEEP'S CUTOFF IS FLOORED AT THE POLICY'S, and the floor is
+	// resolved once, here, so no sweep tick can read a different answer than the
+	// one this line logged.
+	if floored := s.sweepIdleCutoff(); floored != s.idleTimeout && s.idleTimeout > 0 {
+		s.logf("server: idle sweep cutoff RAISED from the configured %s to %s — the generic sweep and the keep-alive policy are two readings of the SAME question (how long has nobody touched this workspace), and the shorter of the two would hibernate a session hours before the policy's own cutoff, which is the one number the hibernation contract is written against",
+			s.idleTimeout, floored)
 	}
 	s.idleSweep = s.sweepIdle
 	if s.idleTimeout > 0 || s.idleSweepTicks != nil {
@@ -2155,18 +2176,19 @@ func (s *Server) sweepIdle() {
 		if s.applyKeepAlivePolicy(rec, nowMs) {
 			continue
 		}
-		idleMs, sweepable := s.sweepable(rec.SessionID, rec.CWD, nowMs)
+		idleMs, sweepable := s.sweepable(rec, nowMs)
 		if !sweepable {
 			continue
 		}
 		// THE IDLE TIMEOUT IS AN IDLE CUTOFF. It is the same fact the policy's
 		// own cutoff branch records — "pinging stops and the session sleeps" —
-		// measured against this daemon's own -idle-timeout rather than the
-		// policy's, so the account carries the threshold that actually tripped.
+		// measured against the FLOORED threshold (sweepIdleCutoff), so the
+		// account carries the threshold that actually tripped and no session is
+		// reaped here on a cutoff shorter than the policy's own.
 		detail := registry.HibernationDetail{
 			Cause:     registry.HibernationCauseIdleCutoff,
 			SinceMs:   nowMs,
-			CutoffMs:  int64(s.idleTimeout / time.Millisecond),
+			CutoffMs:  int64(s.sweepIdleCutoff() / time.Millisecond),
 			ElapsedMs: idleMs,
 		}
 		if err := s.controller.HibernateWithCause(rec.CWD, detail); err != nil {
@@ -2268,6 +2290,17 @@ func (s LegacyTurnEndStamps) StampLegacyTurnEnd(sessionID, workspace string) (in
 		return 0, false
 	}
 	found, err := s.Reg.Update(sessionID, func(r *registry.Record) {
+		// THE ENGAGEMENT CLOCK IS STAMPED FROM THE SAME EVIDENCE, in the same
+		// write, and under its own condition. The state-history instant is a
+		// dated fact about somebody using the WORKSPACE — that is exactly what
+		// the idle cutoff asks — and a legacy record left with a zero here would
+		// never be reaped at all, since the cutoff declines every unknown. The
+		// two conditions are separate because the two fields can legitimately
+		// differ: a record may have run turns under the new daemon (turn end set)
+		// while every one of them was a keep-alive ping (engagement still zero).
+		if r.LastEngagementMs == 0 {
+			r.LastEngagementMs = atMs
+		}
 		if r.LastTurnEndMs == 0 {
 			r.LastTurnEndMs = atMs
 			// MARKED AS BACKFILLED, because that is what it is. The instant is
@@ -2291,6 +2324,22 @@ func (s LegacyTurnEndStamps) StampLegacyTurnEnd(sessionID, workspace string) (in
 	logf("session %s: legacy record STAMPED with last_turn_end_ms=%d from its dated state history (ws %s) — it enters the cache keep-alive policy from here rather than living outside it",
 		sessionID, atMs, workspace)
 	return atMs, true
+}
+
+// engagementInstant is the instant a record's IDLE CUTOFF measures from: when
+// somebody last engaged with the session, falling back to its last turn end.
+//
+// THE FALLBACK IS FOR RECORDS THAT PREDATE THE SECOND CLOCK, and it is the same
+// one sessioncontroller.durableEngagement applies, deliberately: two evaluators
+// disagreeing about which instant a record is dated by is the class of bug the
+// second clock was added to end, so the rule is written once in each package and
+// they are written the same. It errs toward looking recently engaged, which
+// delays a teardown rather than taking one.
+func engagementInstant(rec registry.Record) int64 {
+	if rec.LastEngagementMs > 0 {
+		return rec.LastEngagementMs
+	}
+	return rec.LastTurnEndMs
 }
 
 // keepAliveConfig is the resolved policy, defaulting a zero Config rather than
@@ -2324,7 +2373,10 @@ func (s *Server) applyKeepAlivePolicy(rec registry.Record, nowMs int64) (owned b
 		return true
 	}
 	cfg := s.keepAliveConfig()
-	decision := cfg.Evaluate(nowMs, rec.LastTurnEndMs)
+	// THE IDLE CUTOFF MEASURES THE ENGAGEMENT CLOCK, and the fallback is the
+	// same one every other evaluator uses: a record with none is measured by its
+	// turn end, which is the best dated evidence it carries.
+	decision := cfg.Evaluate(nowMs, rec.LastTurnEndMs, engagementInstant(rec))
 	switch decision.Action {
 	case keepalive.ActionPing:
 		// The submit RE-CHECKS eligibility under the manager mutex; this tick's
@@ -2374,25 +2426,53 @@ func (s *Server) applyKeepAlivePolicy(rec registry.Record, nowMs int64) (owned b
 		// THE RETRY FLOOR, and there is deliberately no submit in this arm.
 		// The policy decided it, so no reading of this switch can ping inside
 		// the floor; the line is the canonical record of having entered it.
-		s.logf("session %s: cache keep-alive will NOT be submitted (ws %s) elapsed_ms=%d remaining_ms=%d floor_ms=%d: the remaining margin before the cache expires is inside the retry floor, so an attempt would more likely pay a full re-ingest than save one; the cache is left to expire and the policy's cache-expired branch will report it",
+		s.logf("session %s: cache keep-alive will NOT be submitted (ws %s) elapsed_ms=%d remaining_ms=%d floor_ms=%d: the remaining margin before the cache expires is inside the retry floor, so an attempt would more likely pay a full re-ingest than save one; the cache is left to expire and the policy's let-cache-cool branch reports it from there until the idle cutoff reaps the session",
 			rec.SessionID, rec.CWD, decision.ElapsedMs, decision.RemainingMs, decision.FloorMs)
 		return true
+	case keepalive.ActionLetCacheCool:
+		// THE CACHE IS COLD AND THE SESSION STAYS UP. There is deliberately no
+		// submit in this arm and deliberately no hibernation: this used to sleep
+		// the session at the cache TTL — one hour — on an argument that only ever
+		// supported declining the ping. The session is now left alone until the
+		// idle cutoff arm above reaps it, and the finding is REPORTED rather than
+		// absorbed, once per cache window per session.
+		//
+		// THE ARM STILL OWNS THE SESSION FOR THIS TICK. Falling through to the
+		// generic idle sweep would hand a cold-cached session straight to a
+		// second, shorter cutoff — which is the very early hibernation this arm
+		// exists to prevent.
+		if s.cacheCoolReported == nil {
+			s.cacheCoolReported = map[string]int64{}
+		}
+		if s.cacheCoolReported[rec.SessionID] != rec.LastTurnEndMs {
+			s.cacheCoolReported[rec.SessionID] = rec.LastTurnEndMs
+			s.logf("session %s: the prompt cache has GONE COLD and the session is LEFT UP (ws %s): quiet for %s against a %s TTL, %s still owed before the %s idle cutoff — no ping is submitted, because warming a cache nobody is using pays a full context re-ingest for nobody; and no hibernation is taken, because a cold cache is a reason to stop spending on it and not a reason to tear the session down",
+				rec.SessionID, rec.CWD,
+				(time.Duration(decision.ElapsedMs) * time.Millisecond).Round(time.Second),
+				cfg.CacheTTL,
+				(time.Duration(decision.CutoffRemainingMs) * time.Millisecond).Round(time.Second),
+				cfg.IdleCutoff)
+		}
+		return true
 	case keepalive.ActionHibernate:
+		// THE IDLE CUTOFF IS THE ONLY CAUSE THIS ARM MAY CARRY, and an unexpected
+		// one is REFUSED rather than hibernated on. keepalive.Evaluate returns no
+		// other, so a different cause reaching here is the ladder's guarantee
+		// having broken — and the safe answer to a sleep the daemon cannot explain
+		// is not to take it.
+		if decision.Cause != keepalive.CauseIdleCutoff {
+			s.logf("session %s: keep-alive hibernation REFUSED (ws %s): the policy returned cause %q, but the idle cutoff is the only time-based route into a sleep; nothing was stopped and nothing was persisted",
+				rec.SessionID, rec.CWD, decision.Cause)
+			return true
+		}
 		detail := registry.HibernationDetail{
-			Cause:   decision.Cause,
-			SinceMs: nowMs,
+			Cause:     decision.Cause,
+			SinceMs:   nowMs,
+			CutoffMs:  int64(cfg.IdleCutoff / time.Millisecond),
+			ElapsedMs: decision.ElapsedMs,
 		}
-		switch decision.Cause {
-		case keepalive.CauseIdleCutoff:
-			detail.CutoffMs = int64(cfg.IdleCutoff / time.Millisecond)
-			s.logf("session %s: hibernating on the IDLE CUTOFF (ws %s): quiet for %s, cutoff %s — the keep-alive loop reached its configured maximum, so pinging stops and the session sleeps in the same transition",
-				rec.SessionID, rec.CWD, (time.Duration(decision.ElapsedMs) * time.Millisecond).Round(time.Second), cfg.IdleCutoff)
-		case keepalive.CauseCacheExpired:
-			detail.ElapsedMs = decision.ElapsedMs
-			detail.TTLMs = int64(cfg.CacheTTL / time.Millisecond)
-			s.logf("session %s: hibernating because the PROMPT CACHE EXPIRED before a ping could fire (ws %s): quiet for %s against a %s TTL — a laptop sleep or daemon downtime carried the session past the window, and pinging a cold cache would pay a full context re-ingest for nobody, so the discovery IS the hibernation",
-				rec.SessionID, rec.CWD, (time.Duration(decision.ElapsedMs) * time.Millisecond).Round(time.Second), cfg.CacheTTL)
-		}
+		s.logf("session %s: hibernating on the IDLE CUTOFF (ws %s): quiet for %s, cutoff %s — the keep-alive loop reached its configured maximum, so pinging stops and the session sleeps in the same transition",
+			rec.SessionID, rec.CWD, (time.Duration(decision.ElapsedMs) * time.Millisecond).Round(time.Second), cfg.IdleCutoff)
 		if err := s.controller.HibernateWithCause(rec.CWD, detail); err != nil {
 			switch {
 			case errors.Is(err, sessioncontroller.ErrNotSettled):
@@ -2445,12 +2525,23 @@ func (s *Server) applyKeepAlivePolicy(rec registry.Record, nowMs int64) (owned b
 // (sessioncontroller.Manager.InFlight), which answers over turns, live background
 // tasks and the SDK query carrying them, and whose UNKNOWN blocks exactly as a
 // non-empty answer does.
-func (s *Server) sweepable(sessionID, workspace string, nowMs int64) (idleMs int64, ok bool) {
+//
+// IT TAKES THE RECORD, NOT A NAME PAIR, because the engagement clock below is a
+// field of the record: a session kept warm by keep-alive pings must still reach
+// the cutoff, and only the record can say when somebody last actually used this
+// workspace. The two gates are independent and both are load-bearing — the
+// in-flight set answers "is work running NOW", the engagement clock answers "how
+// long since anybody asked for any", and dropping either one restores a distinct
+// defect.
+func (s *Server) sweepable(rec registry.Record, nowMs int64) (idleMs int64, ok bool) {
+	sessionID, workspace := rec.SessionID, rec.CWD
 	// THE STATE READ STAYS, even though the in-flight authority below performs
 	// its own. It is this gate's own account of an unreadable or unknown
 	// workspace, in the words the idle sweep's records already use, and dropping
 	// it would lose the distinction between "the sweeper could not read the
-	// state" and "the sweeper was told there is work".
+	// state" and "the sweeper was told there is work". The resolved state itself
+	// is no longer read: the work question moved to the in-flight set and the
+	// dating question moved to the engagement clock.
 	_, found, err := s.ssm.Current(workspace)
 	if err != nil {
 		s.logf("session %s: idle sweep state read (ws %s): %v", sessionID, workspace, err)
@@ -2466,23 +2557,71 @@ func (s *Server) sweepable(sessionID, workspace string, nowMs int64) (idleMs int
 			sessionID, workspace, why)
 		return 0, false
 	}
-	atMs, dated, err := s.ssm.LastActivityMs(workspace)
-	if err != nil {
-		s.logf("session %s: idle sweep activity read (ws %s): %v", sessionID, workspace, err)
-		return 0, false
+	// THE RECORD'S ENGAGEMENT CLOCK OUTRANKS THE STATE LOG, and this is the
+	// second half of the two-clock correction. `ssm.LastActivityMs` is the
+	// newest row on the workspace's state log, and a keep-alive ping's own turn
+	// boundaries append rows exactly as a real turn's do — so this gate read a
+	// pinged-but-untouched workspace as busy for precisely the reason the
+	// registry's cache clock did. The engagement clock already answers "when did
+	// somebody last use this workspace" and it answers it once, so this asks IT
+	// rather than growing a third opinion.
+	//
+	// The state log remains the fallback, and only that: it is the sole evidence
+	// for a record carrying no engagement instant at all, which is the case this
+	// generic sweep exists to reach in the first place.
+	atMs, dated := engagementInstant(rec), true
+	if atMs <= 0 {
+		var err error
+		atMs, dated, err = s.ssm.LastActivityMs(workspace)
+		if err != nil {
+			s.logf("session %s: idle sweep activity read (ws %s): %v", sessionID, workspace, err)
+			return 0, false
+		}
 	}
-	if !dated {
-		s.logf("session %s: idle sweep HELD (ws %s): no state history to date the workspace by",
+	if !dated || atMs <= 0 {
+		s.logf("session %s: idle sweep HELD (ws %s): no engagement instant and no state history to date the workspace by",
 			sessionID, workspace)
 		return 0, false
 	}
+	cutoff := s.sweepIdleCutoff()
 	idle := time.Duration(nowMs-atMs) * time.Millisecond
-	if idle < s.idleTimeout {
+	if idle < cutoff {
 		return 0, false
 	}
 	s.logf("session %s: idle sweep hibernating (ws %s): quiet for %s, threshold %s",
-		sessionID, workspace, idle.Round(time.Second), s.idleTimeout)
+		sessionID, workspace, idle.Round(time.Second), cutoff)
 	return int64(idle / time.Millisecond), true
+}
+
+// sweepIdleCutoff is the elapsed the GENERIC idle sweep reaps at: never shorter
+// than the keep-alive policy's own idle cutoff.
+//
+// TWO CUTOFFS FOR ONE QUESTION IS THE DEFECT. The `-idle-timeout` flag and
+// keepalive.Config.IdleCutoff both answer "how long has nobody touched this
+// workspace", and they shipped an hour apart — so a session the policy would
+// have left alone for six hours was reaped by the generic sweep at one, with the
+// policy's own `idle_cutoff` cause attached to a threshold that was not the
+// policy's. The floor makes the shorter of the two unable to sleep anything the
+// longer one would still be keeping alive.
+//
+// IT RAISES, NEVER LOWERS. A deployment that deliberately configures a LONGER
+// idle timeout than the policy's cutoff keeps it: that direction only ever
+// delays a teardown, which is the safe one, and the policy's own arm reaps the
+// session at its cutoff regardless.
+func (s *Server) sweepIdleCutoff() time.Duration {
+	// A NON-POSITIVE TIMEOUT IS NOT A SHORT ONE. Zero is the documented
+	// "hibernation is off" value, and the sweeper is not even started for it
+	// (only an injected tick channel reaches sweepIdle at all). Flooring it would
+	// turn a disabled feature into a six-hour one, which is not what anybody who
+	// set it to zero asked for.
+	if s.idleTimeout <= 0 {
+		return s.idleTimeout
+	}
+	cutoff := s.keepAliveConfig().IdleCutoff
+	if s.idleTimeout > cutoff {
+		return s.idleTimeout
+	}
+	return cutoff
 }
 
 // ShutdownAll ends the daemon's session work (daemon teardown). The registry

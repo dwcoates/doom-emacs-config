@@ -134,13 +134,60 @@ A live session costs a node+CLI process pair of roughly 500MB, and dozens of
 workspaces will exhaust a machine. `-idle-timeout` is the mitigation: after a
 workspace has been left alone for that long, the sweeper SIGTERMs its shim and
 leaves the registry record rehydratable, so the next act pays one bring-up and
-gets everything back. It defaults to **1 hour**, and `0` disables hibernation
-entirely.
+gets everything back. It defaults to the keep-alive policy's own idle cutoff,
+**6 hours**, and `0` disables hibernation entirely.
 
-The window is measured from the newest row on the workspace's own state log
-(`ssm.LastActivityMs`), which is already an activity record: every row is
-appended by something that actually happened, and nothing appends on a timer.
-So a turn ending STARTS the clock rather than arming an immediate sweep.
+IT IS FLOORED AT THAT CUTOFF AND CANNOT GO BELOW IT. `-idle-timeout` and
+`AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` answer the same question — how long has
+nobody touched this workspace — and while they disagreed, the shorter one reaped
+sessions the longer one was still keeping alive, with the longer one's own
+`idle_cutoff` cause attached to a threshold that was not its. Configuring a
+shorter value now raises it, loudly, at daemon construction.
+
+IT IS MEASURED ON THE ENGAGEMENT CLOCK, WHICH IS NOT THE CACHE CLOCK. Two
+durable instants live on the registry record and they answer different
+questions:
+
+- `last_turn_end_ms` is the CACHE clock. It moves on EVERY turn end, keep-alive
+  pings included, because a ping really does refresh the prompt cache and the
+  next one really is due a cache lifetime after it. The ping and warm-compaction
+  schedules measure from it.
+- `last_engagement_ms` is the ENGAGEMENT clock. It moves only for a turn somebody
+  asked for. The 6h idle cutoff measures from it and from nothing else.
+
+ONE FIELD ANSWERING BOTH IS A BUG IN BOTH DIRECTIONS. While the cutoff measured
+the cache clock, every successful ping reset it — so a session pinged every
+fifty-five minutes never reached six hours and NEVER HIBERNATED AT ALL, the
+exact inverse of the cold-cache defect below. The generic idle sweep had the same
+contamination through `ssm.LastActivityMs`, since a ping's own turn boundaries
+append `workspace_state` rows exactly as a real turn's do; it reads the
+engagement clock now, and the state log only to date a record that has none.
+
+WHICH TURNS COUNT IS DECLARED AT THE SUBMIT, NEVER RECOGNIZED AFTERWARDS.
+`submitter.engagement()` answers it at `forwardPrompt` — the one funnel every
+prompt path reaches — and the fact travels with the turn id to that turn's own
+end. Nothing reconstructs it from prompt text, duration, cost, or timing. The
+default is TRUE, so a submitter added later and forgotten delays a teardown
+rather than making real work invisible to the cutoff.
+
+THE IDLE CUTOFF IS THE ONLY TIME-BASED ROUTE INTO A SLEEP. Nothing hibernates
+before it. A prompt cache that goes cold first — an overslept window, a missed
+ping, a bounce — stops being PINGED (`keepalive.ActionLetCacheCool`, and the
+cold-ping verdict in `keepalivecold.go`) and is not slept: a dead cache is a
+reason to stop spending on it, not a reason to tear the session down. Both of
+those used to hibernate at roughly the one-hour cache TTL, which is why
+hibernation looked far more frequent than the six-hour rule permits. The
+`cache_expired` cause is still READ — records written by earlier daemons carry
+it and must still be revivable — and is written by nothing.
+
+For a record with NO engagement instant at all — one written before the second
+clock, or one the daemon has never seen a turn under — the window falls back to
+the newest row on the workspace's own state log (`ssm.LastActivityMs`), which is
+already an activity record: every row is appended by something that actually
+happened, and nothing appends on a timer. So a turn ending STARTS the clock
+rather than arming an immediate sweep. It is a FALLBACK and only that: the state
+log cannot tell a keep-alive ping's turn boundaries from a person's, which is
+why the engagement clock outranks it wherever one exists.
 
 AND THE SWEEPER IS NO LONGER THE ONLY GUARD.
 `sessioncontroller.hibernate()` itself refuses any workspace whose resolved
@@ -182,12 +229,24 @@ Both gates in `Server.sweepable` are load-bearing, and neither is redundant:
   event landed.
 
 Raise `-idle-timeout` when a machine has headroom and bring-up latency is the
-annoyance; lower it when memory is the constraint.
+annoyance; lower it when memory is the constraint — though it cannot go below the
+policy's idle cutoff.
+
+A KNOWN DEFECT, STILL OPEN: `Manager.Hibernate` is also the teardown a merged
+workspace, a daemon bounce in stop-shims mode, a scheduled drain and an account
+switch all take, and it publishes `RENDER_STATE_HIBERNATED` for every one of
+them. So a bounced workspace SHOWS the user a sleep that never happened, and with
+this backend bouncing often that is very likely why hibernation looked far more
+frequent than the six-hour rule permits. The state row's cause kind now names the
+real initiator (`hibernated:merged_teardown`, `hibernated:idle_sweep`, …) so the
+two are countable apart in the log; the render state is unchanged, because fixing
+it needs a third connectivity token beside `hibernated` and `severed` — "stood
+down, and neither asleep nor broken" — which is a proto and webapp change.
 
 ## One canonical token shape, and the daemon owns every judgment taken from it
 
 Every cost decision in this module — the compaction cold-read tripwire, the
-cold-ping hibernation, the progress footer's expensive-turn alert, token
+cold-ping verdict, the progress footer's expensive-turn alert, token
 accounting, any future budget gate — reads ONE representation, and it is the
 one that states the economics rather than the vendor's field names.
 
