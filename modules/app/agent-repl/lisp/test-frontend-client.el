@@ -903,6 +903,220 @@ ensured left the link down for as long as the transport ladder was silent."
         ;; Assert
         (should (= dialed 0))))))
 
+;;;; ---- the LATCHED daemon-reachability probe ----------------------------
+;;
+;; The sweep's ensure failure used to warn on every 15s tick, so a bounce
+;; blip and a dead daemon read identically.  The probe now latches on a
+;; CONSECUTIVE-FAILURE COUNT and warns once, on the degrade edge.
+
+(defmacro agent-repl-test--with-daemon-probe (&rest body)
+  "Run BODY with the daemon probe reset and its log/warn sinks captured.
+Binds the anaphoric `probe-warnings' and `probe-logs', newest last."
+  (declare (indent 0))
+  `(let ((agent-repl--frontend-daemon-probe-failures 0)
+         (agent-repl--frontend-daemon-probe-state :healthy)
+         (agent-repl-frontend-daemon-probe-degrade-failures 3)
+         (probe-warnings '())
+         (probe-logs '()))
+     (ignore probe-warnings probe-logs)
+     (cl-letf (((symbol-function 'agent-repl--warn)
+                (lambda (_ws fmt &rest args)
+                  (setq probe-warnings
+                        (append probe-warnings (list (apply #'format fmt args))))))
+               ((symbol-function 'agent-repl--log)
+                (lambda (_ws fmt &rest args)
+                  (setq probe-logs
+                        (append probe-logs (list (apply #'format fmt args))))))
+               ((symbol-function 'agent-repl--log-verbose) (lambda (&rest _) nil)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-daemon-probe-does-not-warn-on-a-single-failure ()
+  "One failed ensure is a blip, not a fault, and raises no warning."
+  ;; Arrange
+  (agent-repl-test--with-daemon-probe
+    ;; Act
+    (agent-repl--frontend-daemon-probe-note-failure "connection refused")
+    ;; Assert
+    (should (null probe-warnings))))
+
+(ert-deftest agent-repl-test-daemon-probe-records-a-sub-threshold-failure ()
+  "A blip is still REPORTED: only its severity dropped, not its record."
+  ;; Arrange
+  (agent-repl-test--with-daemon-probe
+    ;; Act
+    (agent-repl--frontend-daemon-probe-note-failure "connection refused")
+    ;; Assert
+    (should (cl-some (lambda (l)
+                       (string-match-p "daemon-probe: ensure failed consecutive-failures=1/3"
+                                       l))
+                     probe-logs))))
+
+(ert-deftest agent-repl-test-daemon-probe-warns-on-the-degrade-edge ()
+  "The threshold'th consecutive failure is the one warning the run produces."
+  ;; Arrange
+  (agent-repl-test--with-daemon-probe
+    ;; Act
+    (dotimes (_ 3)
+      (agent-repl--frontend-daemon-probe-note-failure "connection refused"))
+    ;; Assert
+    (should (= 1 (length probe-warnings)))
+    (should (string-match-p ":healthy -> :degraded consecutive-failures=3/3"
+                            (car probe-warnings)))))
+
+(ert-deftest agent-repl-test-daemon-probe-does-not-re-warn-while-degraded ()
+  "A latched probe reports the moment it degraded, not every sweep after."
+  ;; Arrange
+  (agent-repl-test--with-daemon-probe
+    (dotimes (_ 3)
+      (agent-repl--frontend-daemon-probe-note-failure "connection refused"))
+    ;; Act
+    (dotimes (_ 5)
+      (agent-repl--frontend-daemon-probe-note-failure "connection refused"))
+    ;; Assert
+    (should (= 1 (length probe-warnings)))))
+
+(ert-deftest agent-repl-test-daemon-probe-still-records-failures-while-degraded ()
+  "Suppressing the repeat WARNING never suppresses the failure record."
+  ;; Arrange
+  (agent-repl-test--with-daemon-probe
+    (dotimes (_ 3)
+      (agent-repl--frontend-daemon-probe-note-failure "connection refused"))
+    ;; Act
+    (agent-repl--frontend-daemon-probe-note-failure "still refused")
+    ;; Assert
+    (should (cl-some (lambda (l)
+                       (string-match-p "STILL :degraded consecutive-failures=4 detail=still refused"
+                                       l))
+                     probe-logs))))
+
+(ert-deftest agent-repl-test-daemon-probe-reports-the-recovery-edge ()
+  "Leaving the latch is observable: the recovery edge is logged by name."
+  ;; Arrange
+  (agent-repl-test--with-daemon-probe
+    (dotimes (_ 3)
+      (agent-repl--frontend-daemon-probe-note-failure "connection refused"))
+    ;; Act
+    (agent-repl--frontend-daemon-probe-note-reachable "daemon-ensured")
+    ;; Assert
+    (should (cl-some (lambda (l)
+                       (string-match-p ":degraded -> :healthy cause=daemon-ensured after consecutive-failures=3"
+                                       l))
+                     probe-logs))))
+
+(ert-deftest agent-repl-test-daemon-probe-clears-the-latch-on-recovery ()
+  "The verdict returns to `:healthy' once the daemon answers again."
+  ;; Arrange
+  (agent-repl-test--with-daemon-probe
+    (dotimes (_ 3)
+      (agent-repl--frontend-daemon-probe-note-failure "connection refused"))
+    ;; Act
+    (agent-repl--frontend-daemon-probe-note-reachable "daemon-ensured")
+    ;; Assert
+    (should (eq :healthy (agent-repl-frontend-daemon-probe-health)))))
+
+(ert-deftest agent-repl-test-daemon-probe-recovery-resets-the-run ()
+  "A success resets the COUNT, so the next blip starts a fresh run."
+  ;; Arrange
+  (agent-repl-test--with-daemon-probe
+    (agent-repl--frontend-daemon-probe-note-failure "connection refused")
+    (agent-repl--frontend-daemon-probe-note-failure "connection refused")
+    (agent-repl--frontend-daemon-probe-note-reachable "daemon-ensured")
+    ;; Act
+    (agent-repl--frontend-daemon-probe-note-failure "connection refused")
+    ;; Assert
+    (should (null probe-warnings))))
+
+(ert-deftest agent-repl-test-daemon-probe-health-is-healthy-below-threshold ()
+  "The verdict a consumer reads stays `:healthy' through a sub-threshold run."
+  ;; Arrange
+  (agent-repl-test--with-daemon-probe
+    ;; Act
+    (agent-repl--frontend-daemon-probe-note-failure "connection refused")
+    (agent-repl--frontend-daemon-probe-note-failure "connection refused")
+    ;; Assert
+    (should (eq :healthy (agent-repl-frontend-daemon-probe-health)))))
+
+(ert-deftest agent-repl-test-daemon-probe-health-is-degraded-at-threshold ()
+  "The verdict a consumer reads is `:degraded' once the run reaches the count."
+  ;; Arrange
+  (agent-repl-test--with-daemon-probe
+    ;; Act
+    (dotimes (_ 3)
+      (agent-repl--frontend-daemon-probe-note-failure "connection refused"))
+    ;; Assert
+    (should (eq :degraded (agent-repl-frontend-daemon-probe-health)))))
+
+(ert-deftest agent-repl-test-daemon-probe-records-a-recovered-sub-threshold-run ()
+  "A run that recovered before degrading still gets its closing record."
+  ;; Arrange
+  (agent-repl-test--with-daemon-probe
+    (agent-repl--frontend-daemon-probe-note-failure "connection refused")
+    ;; Act
+    (agent-repl--frontend-daemon-probe-note-reachable "daemon-ensured")
+    ;; Assert
+    (should (cl-some (lambda (l)
+                       (string-match-p "reachable again cause=daemon-ensured after consecutive-failures=1"
+                                       l))
+                     probe-logs))))
+
+(ert-deftest agent-repl-test-reattach-sweep-feeds-a-failed-ensure-to-the-probe ()
+  "The sweep's failed ensure lands on the latch instead of warning outright."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-daemon-probe
+      (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+                ((symbol-function 'agent-repl-uds-connect) #'ignore)
+                ((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+                 (lambda (_ok fail &optional _f) (funcall fail "connection refused"))))
+        ;; Act
+        (agent-repl--frontend-reattach-check)
+        ;; Assert
+        (should (null probe-warnings))
+        (should (= 1 agent-repl--frontend-daemon-probe-failures))))))
+
+(ert-deftest agent-repl-test-reattach-sweep-warns-once-a-failure-run-persists ()
+  "Three sweeps that all fail to ensure the daemon produce one warning."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-daemon-probe
+      (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+                ((symbol-function 'agent-repl-uds-connect) #'ignore)
+                ((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+                 (lambda (_ok fail &optional _f) (funcall fail "connection refused"))))
+        ;; Act
+        (dotimes (_ 3) (agent-repl--frontend-reattach-check))
+        ;; Assert
+        (should (= 1 (length probe-warnings)))))))
+
+(ert-deftest agent-repl-test-reattach-sweep-feeds-a-signalled-ensure-to-the-probe ()
+  "A synchronous ensure error is counted too, not warned past the latch."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-daemon-probe
+      (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+                ((symbol-function 'agent-repl-uds-connect) #'ignore)
+                ((symbol-function 'agent-repl--frontend-after-daemon-ensured)
+                 (lambda (&rest _) (error "deploy script missing"))))
+        ;; Act
+        (agent-repl--frontend-reattach-check)
+        ;; Assert
+        (should (= 1 agent-repl--frontend-daemon-probe-failures))))))
+
+(ert-deftest agent-repl-test-reattach-sweep-clears-the-latch-when-connected ()
+  "A sweep that finds the link up is the recovery edge for the latch."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-daemon-probe
+      (setq agent-repl--frontend-daemon-probe-state :degraded
+            agent-repl--frontend-daemon-probe-failures 4)
+      (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+                ((symbol-function 'agent-repl--live-ws-names) (lambda () '()))
+                ((symbol-function 'agent-repl--frontend-ensure-workspace) #'ignore))
+        ;; Act
+        (agent-repl--frontend-reattach-check)
+        ;; Assert
+        (should (eq :healthy (agent-repl-frontend-daemon-probe-health)))))))
+
 ;;;; ---- the sweep is the RECOVERY sweep, not only the reattach sweep ------
 ;;
 ;; A binding the roster still lists says nothing about whether THIS daemon
