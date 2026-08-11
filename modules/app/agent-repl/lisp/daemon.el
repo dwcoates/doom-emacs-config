@@ -1440,6 +1440,37 @@ closes quietly: there is nothing to report."
                                      (agent-repl--logfile-path))
           (agent-repl-failure-surface nil exit))))))
 
+(defvar agent-repl-frontend-expected-restart-armed-functions nil
+  "Abnormal hook run with ONE argument when an expected-restart window OPENS.
+
+The argument is the window's `:armed-at' (`float-time') — the instant the
+outage is taken to begin, NOT the instant a subscriber happens to run.
+That distinction is the whole reason the hook carries an argument at all:
+a subscriber that measures an announced restart must date it from the
+announcement, and a subscriber that read the clock itself would silently
+charge its own scheduling delay to the thing it is measuring.
+
+WHY THIS EXISTS.  An announced restart is the one bounce that produces no
+link-DOWN warning — the window demotes it to an INFO line — so anything
+armed off the down edge alone never learns the outage happened.  The
+recovery SLO (lisp/recovery-slo.el) subscribes here for exactly that
+reason.
+
+Subscribers run guarded: one subscriber's failure is loud-logged and the
+rest still run, because a window that half-opened is worse than either
+outcome.")
+
+(defun agent-repl--frontend-run-expected-restart-armed-hook (armed-at)
+  "Run `agent-repl-frontend-expected-restart-armed-functions' with ARMED-AT.
+Each subscriber is guarded on its own; a failure is surfaced loudly and
+never aborts the arming that provoked it."
+  (dolist (fn agent-repl-frontend-expected-restart-armed-functions)
+    (condition-case err
+        (funcall fn armed-at)
+      (error
+       (agent-repl--warn nil "expected-restart: armed-hook subscriber %S FAILED: %s"
+                         fn (error-message-string err))))))
+
 (defun agent-repl--frontend-arm-expected-restart (initiator &optional window-seconds)
   "Arm the expected-restart window on behalf of INITIATOR.
 
@@ -1480,6 +1511,10 @@ the first window withheld is still owed to the user if nothing ever comes back."
                      "expected-restart: ARMED initiator=%s window=%.1fs carried-exit=%s"
                      initiator bound
                      (if (plist-get prior :exit) "t" "nil"))
+    ;; LAST, and with the window's OWN instant: the outage begins when the
+    ;; window opens, not when a subscriber gets to run.
+    (agent-repl--frontend-run-expected-restart-armed-hook
+     (plist-get agent-repl--frontend-expected-restart :armed-at))
     initiator))
 
 (defun agent-repl--frontend-expected-restart-bound (window-seconds)

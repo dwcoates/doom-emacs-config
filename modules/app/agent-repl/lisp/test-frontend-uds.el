@@ -2502,6 +2502,62 @@ link loss used to report itself healthy."
         ;; Assert
         (should (= repainted 1))))))
 
+(ert-deftest agent-repl-test-uds-established-link-down-arms-the-recovery-slo ()
+  "An established link dropping is the SLO's down-edge evidence."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((agent-repl--uds-process 'fake-proc)
+          (agent-repl--uds-connection-state 'open)
+          (armed 0))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'process-name) (lambda (_p) "fake"))
+                ((symbol-function 'agent-repl--frontend-expected-restart-initiator)
+                 (lambda () nil))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) (lambda () nil))
+                ((symbol-function 'agent-repl--recovery-slo-on-link-down)
+                 (lambda () (setq armed (1+ armed)))))
+        ;; Act
+        (agent-repl--uds-sentinel-transition 'fake-proc "connection broken\n")
+        ;; Assert
+        (should (= armed 1))))))
+
+(ert-deftest agent-repl-test-uds-failed-dial-does-not-arm-the-recovery-slo ()
+  "A dial that never completed is a RETRY of an outage, not fresh evidence."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((agent-repl--uds-process 'fake-proc)
+          (agent-repl--uds-connection-state 'dialing)
+          (agent-repl--uds-connect-started-at (float-time))
+          (armed 0))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'process-name) (lambda (_p) "fake"))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) (lambda () nil))
+                ((symbol-function 'agent-repl--recovery-slo-on-link-down)
+                 (lambda () (setq armed (1+ armed)))))
+        ;; Act
+        (agent-repl--uds-sentinel-transition 'fake-proc "failed\n")
+        ;; Assert
+        (should (= armed 0))))))
+
+(ert-deftest agent-repl-test-uds-announced-link-down-still-arms-the-recovery-slo ()
+  "A drop demoted to INFO by the restart window is STILL armed on."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((agent-repl--uds-process 'fake-proc)
+          (agent-repl--uds-connection-state 'open)
+          (armed 0))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'process-name) (lambda (_p) "fake"))
+                ((symbol-function 'agent-repl--frontend-expected-restart-initiator)
+                 (lambda () "daemon-announced:deploy"))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) (lambda () nil))
+                ((symbol-function 'agent-repl--recovery-slo-on-link-down)
+                 (lambda () (setq armed (1+ armed)))))
+        ;; Act
+        (agent-repl--uds-sentinel-transition 'fake-proc "connection broken\n")
+        ;; Assert
+        (should (= armed 1))))))
+
 (ert-deftest agent-repl-test-uds-link-down-logs-the-health-transition ()
   "The down edge logs the health transition where it is DECIDED."
   ;; Arrange

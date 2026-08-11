@@ -2526,6 +2526,48 @@ escapes the test."
           (string-match-p (regexp-quote substring) (nth 1 record))))
    records))
 
+(ert-deftest agent-repl-test-daemon-expected-restart-arming-runs-the-armed-hook ()
+  "Opening a window notifies its subscribers with the window's own instant."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (let* ((seen nil)
+           (agent-repl-frontend-expected-restart-armed-functions
+            (list (lambda (at) (push at seen)))))
+      ;; Act
+      (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+      ;; Assert
+      (should (= 1 (length seen)))
+      (should (equal (car seen)
+                     (plist-get agent-repl--frontend-expected-restart :armed-at))))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-daemon-announcement-runs-the-armed-hook ()
+  "A DAEMON-ANNOUNCED restart notifies the armed hook exactly as a deploy does."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (let* ((seen nil)
+           (agent-repl-frontend-expected-restart-armed-functions
+            (list (lambda (at) (push at seen)))))
+      ;; Act
+      (agent-repl-frontend-note-restart-announcement "deploy" 30)
+      ;; Assert
+      (should (= 1 (length seen)))
+      (should (numberp (car seen))))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-daemon-armed-hook-failure-does-not-abort-arming ()
+  "A failing subscriber is surfaced loudly and the window still opens."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (let ((agent-repl-frontend-expected-restart-armed-functions
+           (list (lambda (_at) (error "boom")))))
+      ;; Act
+      (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+      ;; Assert
+      (should agent-repl--frontend-expected-restart)
+      (should (= 1 (length (agent-repl-test--records-matching
+                            records "warn" "armed-hook subscriber")))))))
+
 (ert-deftest agent-repl-test-daemon-expected-restart-exit-opens-no-card ()
   "An exit inside an armed window opens no failure card."
   ;; Arrange

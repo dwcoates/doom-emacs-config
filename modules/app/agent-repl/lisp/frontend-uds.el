@@ -56,6 +56,7 @@
 (declare-function agent-repl--frontend-ws-name "frontend-state" (workspace))
 (declare-function agent-repl-connection-notice-echo "connection-notice" (text))
 (declare-function agent-repl--frontend-invalidate-daemon-view "frontend-state" (reason))
+(declare-function agent-repl--recovery-slo-on-link-down "agent-repl-recovery-slo" ())
 (declare-function agent-repl--frontend-expected-restart-initiator "daemon" ())
 (declare-function agent-repl--frontend-expected-restart-covering-initiator
                   "daemon" (&optional as-of))
@@ -989,6 +990,17 @@ drive directly."
            (t
             (agent-repl--warn nil "uds-link: DOWN proc=%s (link was established) event=%s"
                               (process-name proc) (string-trim event)))))
+        ;; THE RECOVERY SLO'S DOWN-EDGE ARMING (lisp/recovery-slo.el), and
+        ;; only for an ESTABLISHED link — `elapsed' non-nil is a dial that
+        ;; never completed, which is a RETRY of an outage already under way
+        ;; and not fresh evidence of one starting.  Arming there would
+        ;; re-open a budget every rung of a long reconnect ladder.  It runs
+        ;; for the announced drop as well as the unannounced one: the SLO
+        ;; keeps one budget per workspace dated at the earliest evidence, so
+        ;; a drop the announcement already armed is absorbed there rather
+        ;; than discriminated here.
+        (unless elapsed
+          (agent-repl--recovery-slo-on-link-down))
         ;; The health axis just changed for THIS link's own process: a
         ;; down link is degraded whether or not a command was in flight.
         (agent-repl--uds-link-note-down "link-down")))

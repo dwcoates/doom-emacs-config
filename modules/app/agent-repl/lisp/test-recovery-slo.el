@@ -363,18 +363,184 @@ budget breach, so the contract is asserted against the source."
       (should (= first (plist-get (gethash "slo-first" agent-repl--recovery-slo-attempts)
                                   :wire))))))
 
-(ert-deftest agent-repl-test-recovery-slo-open-discards-the-previous-attempt ()
-  "A second outage opens a fresh attempt rather than inheriting old stamps."
+;;;; ---- Arming: one budget per workspace, at the earliest evidence ---------
+
+(defun agent-repl-test--slo-started-at (ws)
+  "Return WS's open attempt's start instant, or nil when none is open."
+  (plist-get (gethash ws agent-repl--recovery-slo-attempts) :started-at))
+
+(ert-deftest agent-repl-test-recovery-slo-announcement-arms-every-live-workspace ()
+  "An expected-restart window arms EVERY live workspace, dated at the window."
   (agent-repl-test--with-slo
-    ;; Arrange
-    (agent-repl--recovery-slo-open "slo-reopen")
-    (agent-repl-test--slo-satisfy "slo-reopen")
-    ;; Act
-    (agent-repl--recovery-slo-open "slo-reopen")
-    ;; Assert
-    (should (equal (agent-repl--recovery-slo-outstanding
-                    (gethash "slo-reopen" agent-repl--recovery-slo-attempts))
-                   agent-repl-recovery-slo-signals))))
+    (agent-repl-test--with-slo-ws "slo-ann-a"
+      (agent-repl-test--with-slo-ws "slo-ann-b"
+        ;; Arrange
+        (let ((armed-at (- (float-time) 1.25)))
+          ;; Act
+          (agent-repl--recovery-slo-on-restart-announcement armed-at)
+          ;; Assert
+          (should (equal (agent-repl-test--slo-started-at "slo-ann-a") armed-at))
+          (should (equal (agent-repl-test--slo-started-at "slo-ann-b") armed-at)))))))
+
+(ert-deftest agent-repl-test-recovery-slo-announcement-clock-is-the-window-not-the-decode ()
+  "An announced restart is dated from the window opening, not from arming."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-ann-clock"
+      ;; Arrange: the announcement describes an outage that began 2s ago.
+      (let ((armed-at (- (float-time) 2.0)))
+        ;; Act
+        (agent-repl--recovery-slo-on-restart-announcement armed-at)
+        ;; Assert
+        (should (equal (agent-repl-test--slo-started-at "slo-ann-clock") armed-at))))))
+
+(ert-deftest agent-repl-test-recovery-slo-unannounced-down-edge-still-arms ()
+  "An unexpected drop, with no announcement anywhere, is still measured."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-drop"
+      ;; Act
+      (agent-repl--recovery-slo-on-link-down)
+      ;; Assert
+      (should (agent-repl-test--slo-started-at "slo-drop")))))
+
+(ert-deftest agent-repl-test-recovery-slo-announcement-then-down-edge-arms-once ()
+  "Announcement then down edge is ONE attempt, kept at the earlier start."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-both"
+      ;; Arrange
+      (let ((armed-at (- (float-time) 1.0)))
+        (agent-repl--recovery-slo-on-restart-announcement armed-at)
+        ;; Act: the drop the announcement predicted now actually happens.
+        (agent-repl--recovery-slo-on-link-down)
+        ;; Assert
+        (should (equal (agent-repl-test--slo-started-at "slo-both") armed-at))))))
+
+(ert-deftest agent-repl-test-recovery-slo-down-edge-then-announcement-moves-start-back ()
+  "An announcement decoded after the drop dates the outage from the announcement."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-late-ann"
+      ;; Arrange
+      (agent-repl--recovery-slo-on-link-down)
+      (let ((armed-at (- (agent-repl-test--slo-started-at "slo-late-ann") 0.5)))
+        ;; Act
+        (agent-repl--recovery-slo-on-restart-announcement armed-at)
+        ;; Assert
+        (should (equal (agent-repl-test--slo-started-at "slo-late-ann") armed-at))))))
+
+(ert-deftest agent-repl-test-recovery-slo-second-arming-keeps-collected-stamps ()
+  "A second piece of evidence never discards the stamps already collected."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-keep"
+      ;; Arrange
+      (agent-repl--recovery-slo-on-link-down)
+      (agent-repl-test--slo-satisfy "slo-keep" 'emacs)
+      ;; Act
+      (agent-repl--recovery-slo-on-link-up)
+      ;; Assert
+      (should (equal (agent-repl--recovery-slo-outstanding
+                      (gethash "slo-keep" agent-repl--recovery-slo-attempts))
+                     '(webapp wire))))))
+
+(ert-deftest agent-repl-test-recovery-slo-link-up-arms-a-workspace-with-no-attempt ()
+  "The link-up backstop still arms a workspace no earlier evidence covered."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-backstop"
+      ;; Act
+      (agent-repl--recovery-slo-on-link-up)
+      ;; Assert
+      (should (agent-repl-test--slo-started-at "slo-backstop")))))
+
+;;;; ---- The emit path, end to end -----------------------------------------
+
+(ert-deftest agent-repl-test-recovery-slo-announced-bounce-emits-one-record-per-workspace ()
+  "An announced bounce that then satisfies the conjunction EMITS the record.
+The defect this pins: arming that missed the announced restart produced no
+record at all for the one bounce the verification loop measures."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-e2e-a"
+      (agent-repl-test--with-slo-ws "slo-e2e-b"
+        ;; Arrange: the window opens, then each half of the conjunction lands.
+        (setq agent-repl-test--slo-probe-answer
+              (json-serialize '(:adopted t :realDataFrames 3)))
+        (agent-repl--recovery-slo-on-restart-announcement (float-time))
+        (agent-repl--recovery-slo-note-emacs "slo-e2e-a")
+        (agent-repl--recovery-slo-note-emacs "slo-e2e-b")
+        (agent-repl--recovery-slo-note-wire "slo-e2e-a")
+        (agent-repl--recovery-slo-note-wire "slo-e2e-b")
+        ;; Act
+        (agent-repl--recovery-slo-tick)
+        ;; Assert
+        (let ((records (cl-remove-if-not
+                        (lambda (l) (string-prefix-p "recovery-slo: ws=" l))
+                        (agent-repl-test--slo-lines 'info))))
+          (should (= 1 (length (cl-remove-if-not
+                                (lambda (l) (string-match-p "ws=slo-e2e-a " l))
+                                records))))
+          (should (= 1 (length (cl-remove-if-not
+                                (lambda (l) (string-match-p "ws=slo-e2e-b " l))
+                                records))))
+          (should-not (agent-repl-test--slo-started-at "slo-e2e-a"))
+          (should-not (agent-repl-test--slo-started-at "slo-e2e-b")))))))
+
+(ert-deftest agent-repl-test-recovery-slo-emacs-stamp-lands-when-armed-by-announcement ()
+  "The emacs stamp of the RECONNECT SNAPSHOT lands, because arming preceded it.
+Ordering defect this pins: the emacs signal is stamped WHILE the snapshot is
+applied, and the link-up hook runs after that apply — so a workspace armed
+only there could never be stamped by the reconnect that opened it."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-order"
+      ;; Arrange: window opens BEFORE the snapshot lands.
+      (agent-repl--recovery-slo-on-restart-announcement (float-time))
+      ;; Act: the snapshot applies (stamping emacs), then the link-up hook runs.
+      (agent-repl--recovery-slo-note-emacs "slo-order")
+      (agent-repl--recovery-slo-on-link-up)
+      ;; Assert
+      (should (plist-get (gethash "slo-order" agent-repl--recovery-slo-attempts)
+                         :emacs)))))
+
+(ert-deftest agent-repl-test-recovery-slo-record-field-set-is-pinned ()
+  "The record's field set and order are a contract; this pins them exactly."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-fields"
+      ;; Arrange
+      (setq agent-repl-test--slo-probe-answer
+            (json-serialize '(:adopted t :realDataFrames 1)))
+      (agent-repl--recovery-slo-open "slo-fields")
+      (agent-repl-test--slo-satisfy "slo-fields")
+      ;; Act
+      (agent-repl--recovery-slo-check "slo-fields")
+      ;; Assert
+      (let ((record (agent-repl-test--slo-record 'info)))
+        (should record)
+        (should (string-match-p
+                 (concat "\\`recovery-slo: ws=slo-fields outcome=recovered "
+                         "emacs_ms=-?[0-9]+ webapp_ms=-?[0-9]+ wire_ms=-?[0-9]+ "
+                         "total_ms=-?[0-9]+ budget_ms=3000 forced=no "
+                         "outstanding=none\\'")
+                 record))))))
+
+(ert-deftest agent-repl-test-recovery-slo-breach-record-field-set-is-pinned ()
+  "A breach past the 3000ms budget warns with outstanding= and forces."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-breach-fields"
+      ;; Arrange
+      (agent-repl--recovery-slo-open "slo-breach-fields")
+      (agent-repl-test--slo-satisfy "slo-breach-fields" 'emacs)
+      (agent-repl-test--slo-age "slo-breach-fields"
+                                (1+ agent-repl-recovery-slo-budget-ms))
+      ;; Act
+      (agent-repl--recovery-slo-check "slo-breach-fields")
+      ;; Assert
+      (let ((record (agent-repl-test--slo-record 'warn)))
+        (should record)
+        (should (string-match-p
+                 (concat "\\`recovery-slo: ws=slo-breach-fields outcome=budget-breach "
+                         "emacs_ms=-?[0-9]+ webapp_ms=-1 wire_ms=-1 "
+                         "total_ms=-1 budget_ms=3000 forced=no "
+                         "outstanding=webapp,wire\\'")
+                 record))
+        (should (assq 'sweep agent-repl-test--slo-forced))
+        (should (equal (cdr (assq 'ensure agent-repl-test--slo-forced))
+                       "slo-breach-fields"))))))
 
 ;;;; ---- The crash hazards --------------------------------------------------
 
