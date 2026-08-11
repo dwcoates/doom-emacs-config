@@ -2935,6 +2935,14 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	cons.onTurnStarted = func(turnID string, atMs int64) {
 		m.restampKeepAliveWindowStart(d, turnID, atMs)
 	}
+	// THE ASYNC ANALOGUE OF A TURN BOUNDARY. A stale-shim roll deferred on
+	// detached work is claimed the moment that work drains, off the same fold
+	// that retires the task — not off the next idle sweep, whose tick is
+	// seconds wide and which is what made a deferred bounce feel like a hang
+	// (asyncrefresh.go).
+	cons.onAsyncWorkDrained = func() {
+		m.onAsyncWorkDrained(d)
+	}
 	// A rewind's discarded turns hold claims in the seq space it retires, and
 	// nothing in the new space will ever deliver their ends (sessionrewound.go).
 	if superseder, ok := m.cfg.SSM.(TurnClaimSuperseder); ok {
@@ -3575,11 +3583,11 @@ func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID st
 	// taken when the connection is gone (the shutdown drain's
 	// ShimStopWouldFixTheBundle) has no other way to read.
 	m.noteShimBuild(sessionID, hello.GetBuildSha())
-	// A shim that reattached MID-TURN arms a turn-boundary lease instead of
-	// bouncing, and therefore does NOT retire this generation: it is still
-	// serving that turn and keeps its readiness until the boundary
-	// (turnboundaryrefresh.go).
-	if m.refreshStaleShim(workspace, sessionID, hello.GetBuildSha(), hello.GetTurnInFlight(), hello.GetActiveTurnIds()) {
+	// A shim that reattached MID-TURN — or with DETACHED WORK still running —
+	// arms a turn-boundary lease instead of bouncing, and therefore does NOT
+	// retire this generation: it is still serving that work and keeps its
+	// readiness until the boundary (turnboundaryrefresh.go, asyncrefresh.go).
+	if m.refreshStaleShim(workspace, sessionID, hello) {
 		return true
 	}
 	// THE BRING-UP GATE CLOSED. This hook fires from the shim's ShimReady, the
