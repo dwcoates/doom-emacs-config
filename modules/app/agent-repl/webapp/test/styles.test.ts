@@ -2473,7 +2473,7 @@ describe("tab groups", () => {
 const agentsMenu = blockAfter(css, ".agents-menu");
 const agentsOverlay = blockAfter(css, ".agents-overlay");
 /* Every chip shares one button-reset rule; only the color rule is per-chip. */
-const chipReset = blockAfter(css, ".info-agents, .info-tasks, .info-tokens {");
+const chipReset = blockAfter(css, ".info-agents, .info-tasks, .info-tokens, .info-warnings {");
 const agentsToggle = blockAfter(css, ".info-agents {");
 const runningDot = blockAfter(css, ".agent-dot.agent-starting,");
 const reducedDot = blockAfter(
@@ -3017,19 +3017,19 @@ describe("tokens dropdown styles", () => {
   it("anchors the overlay on the tokens menu that drops it", () => {
     // Arrange / Act — the shared dropdown rule must name the tokens stem.
     // Assert
-    expect(css).toMatch(/\.agents-menu, \.tasks-menu, \.tokens-menu \{/);
+    expect(css).toMatch(/\.agents-menu, \.tasks-menu, \.tokens-menu, \.warnings-menu \{/);
   });
 
   it("lifts the tokens overlay out of the topbar's flex row", () => {
     // Arrange / Act — the shared overlay rule must name the tokens stem.
     // Assert
-    expect(css).toMatch(/\.agents-overlay, \.tasks-overlay, \.tokens-overlay \{/);
+    expect(css).toMatch(/\.agents-overlay, \.tasks-overlay, \.tokens-overlay, \.warnings-overlay \{/);
   });
 
   it("renders the chip as a pointer target so it reads as pressable", () => {
     // Arrange / Act — the shared chip reset must name the tokens chip.
     // Assert
-    expect(css).toMatch(/\.info-agents, \.info-tasks, \.info-tokens \{/);
+    expect(css).toMatch(/\.info-agents, \.info-tasks, \.info-tokens, \.info-warnings \{/);
     expect(chipReset).toMatch(/cursor:\s*pointer/);
   });
 
@@ -4051,5 +4051,32 @@ describe("the Recently Merged section's height cap", () => {
     expect(mergedSection).toMatch(
       /--merged-row-h:\s*calc\(var\(--merged-row-pad-y\) \* 2 \+ var\(--merged-row-line-h\)\)/,
     );
+  });
+});
+
+/* The topbar's warning indicator rides the same chip-and-overlay shell as the
+   rosters, so only its own two rules are asserted here. */
+const warningsMenu = blockAfter(css, ".warnings-menu");
+const warningsToggle = blockAfter(css, "\n.info-warnings {");
+const warningRow = blockAfter(css, ".warnings-overlay .warning-row");
+
+describe("warning indicator styles", () => {
+  it("anchors the dropdown on the menu that drops it", () => {
+    // Arrange / Act — the shared overlay rule is absolute.
+    // Assert
+    expect(warningsMenu).toMatch(/position:\s*relative/);
+  });
+
+  it("draws the indicator in the error color", () => {
+    // Arrange / Act — a warning that reads like every other datapoint is not
+    // an indicator, it is more strip text.
+    // Assert
+    expect(warningsToggle).toMatch(/color:\s*var\(--err\)/);
+  });
+
+  it("wraps a warning's prose rather than clipping it", () => {
+    // Arrange / Act — clipping a warning hides the half that says what broke.
+    // Assert
+    expect(warningRow).toMatch(/white-space:\s*normal/);
   });
 });

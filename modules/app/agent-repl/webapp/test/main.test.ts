@@ -643,3 +643,24 @@ describe("the page's bound log identity", () => {
     expect(main).toContain("sessionRebase.forget();");
   });
 });
+
+describe("the topbar's warning indicator", () => {
+  it("opens its dropdown from the strip's own click vocabulary", () => {
+    // Assert — the chip is rebuilt by every renderChrome, so the toggle is
+    // delegated through topbarClickAction rather than bound to a dead node.
+    expect(main).toContain('if (action.menu === "warnings") {');
+    expect(main).toContain("warningsMenuOpen = !warningsMenuOpen;");
+  });
+
+  it("dismisses on an outside click and on Escape, like every other dropdown", () => {
+    // Assert — closeAllMenus is the one path both gestures reach, and the
+    // outside-click guard spares exactly the warnings stem.
+    expect(main).toContain("warningsMenuOpen = false;");
+    expect(main).toContain('!target.closest(".warnings-menu")');
+  });
+
+  it("renders the indicator from the daemon's own topbar view", () => {
+    // Assert — the sentences are the resolved view's; nothing re-derives them.
+    expect(main).toContain("topbarWarningsHtml(store.topbar(ws), warningsMenuOpen)");
+  });
+});

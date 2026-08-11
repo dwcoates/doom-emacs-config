@@ -633,6 +633,15 @@ describe("topbarClickAction", () => {
     });
   });
 
+  it("classifies a click on the warning indicator as the warnings toggle", () => {
+    // Arrange + Act + Assert — the indicator rides the strip's own click
+    // vocabulary rather than a popover handler of its own.
+    expect(topbarClickAction(clickOn("[data-warnings-toggle]"))).toEqual({
+      kind: "toggle",
+      menu: "warnings",
+    });
+  });
+
   it("classifies a click on a subagent row as a reveal of that agent", () => {
     // Arrange + Act + Assert
     expect(topbarClickAction(clickOn(".agent-row", { "data-agent-id": "a7" }))).toEqual({

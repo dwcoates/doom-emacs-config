@@ -188,7 +188,7 @@ func (v *WorkspaceViews) PublishState(state *frontendv1.WorkspaceState) {
 		ModelDisplay:    rec.Model,
 		ModelOptions:    v.modelOptions(state.GetSessionId()),
 		Connectivity:    state.GetConnectivity(),
-		AccountingLine:  v.accountingLine(workspace),
+		Warnings:        v.topbarWarnings(workspace),
 	})
 	if topbarErr != nil {
 		v.logf("server: topbar view WITHHELD ws=%q session=%q — the client keeps its last complete topbar rather than one it would have to finish: %v",
@@ -455,19 +455,28 @@ func (v *WorkspaceViews) modelOptions(sessionID string) []*frontendv1.ModelOptio
 	return v.catalogs.Get(sessionID)
 }
 
-// accountingLine is the settled turn's composed summary, taken from the
-// progress resolver's own cell. The topbar renders the SENTENCE and never the
-// verdict, which is why it takes a string where the footer takes arms — and why
-// there is one composition rather than two.
-func (v *WorkspaceViews) accountingLine(workspace string) string {
+// topbarWarnings is everything the topbar has to warn about for the workspace,
+// in display order.
+//
+// Today that is the settled turn's accounting, and only when it FAILED to
+// reconcile: the topbar used to print the settled prose inline for every turn,
+// which put a paragraph in the strip to say a turn had gone fine. The sentence
+// is the progress resolver's own cell summary, so there is one composition
+// rather than two. A second warning kind appends here and reaches the same
+// indicator.
+func (v *WorkspaceViews) topbarWarnings(workspace string) []*frontendv1.TopbarWarning {
 	if v.progress == nil {
-		return ""
+		return nil
 	}
 	view, ok := v.progress.Current(workspace)
 	if !ok {
-		return ""
+		return nil
 	}
-	return view.GetAccounting().GetSummary()
+	var warnings []*frontendv1.TopbarWarning
+	if w := frontend.AccountingWarning(view.GetAccounting()); w != nil {
+		warnings = append(warnings, w)
+	}
+	return warnings
 }
 
 // branch resolves the workspace's branch once and remembers it. A lookup that

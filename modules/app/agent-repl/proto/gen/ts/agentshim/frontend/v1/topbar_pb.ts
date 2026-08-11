@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/topbar.proto.
  */
 export const file_agentshim_frontend_v1_topbar: GenFile = /*@__PURE__*/
-  fileDesc("CiJhZ2VudHNoaW0vZnJvbnRlbmQvdjEvdG9wYmFyLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEi/wEKClRvcGJhclZpZXcSEQoJd29ya3NwYWNlGAEgASgJEg0KBXRpdGxlGAIgASgJEhQKDHNlc3Npb25fbGluZRgDIAEoCRIVCg1tb2RlbF9kaXNwbGF5GAQgASgJEjkKDW1vZGVsX29wdGlvbnMYBSADKAsyIi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTW9kZWxPcHRpb24SPwoMY29ubmVjdGl2aXR5GAYgASgLMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLlRvcGJhckNvbm5lY3Rpdml0eRIXCg9hY2NvdW50aW5nX2xpbmUYByABKAkSDQoFZmVuY2UYCCABKAkiQAoSVG9wYmFyQ29ubmVjdGl2aXR5EgwKBHRvbmUYASABKAkSDQoFZ2x5cGgYAiABKAkSDQoFdGl0bGUYAyABKAkiRwoLTW9kZWxPcHRpb24SDQoFdmFsdWUYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJIhwKC1NldE1vZGVsQ21kEg0KBW1vZGVsGAEgASgJIkcKEERhZW1vbkhlYWx0aFZpZXcSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdoZWFsdGh5GAIgASgIEg4KBnJlYXNvbhgDIAEoCSJvChFTZXNzaW9uSGVhbHRoVmlldxISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXdvcmtzcGFjZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEg8KB2hlYWx0aHkYBCABKAgSDgoGcmVhc29uGAUgASgJIhEKD0RhZW1vbkhlYWx0aENtZCImChBTZXNzaW9uSGVhbHRoQ21kEhIKCnNlc3Npb25faWQYASABKAlCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM");
+  fileDesc("CiJhZ2VudHNoaW0vZnJvbnRlbmQvdjEvdG9wYmFyLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEitQIKClRvcGJhclZpZXcSEQoJd29ya3NwYWNlGAEgASgJEg0KBXRpdGxlGAIgASgJEhQKDHNlc3Npb25fbGluZRgDIAEoCRIVCg1tb2RlbF9kaXNwbGF5GAQgASgJEjkKDW1vZGVsX29wdGlvbnMYBSADKAsyIi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTW9kZWxPcHRpb24SPwoMY29ubmVjdGl2aXR5GAYgASgLMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLlRvcGJhckNvbm5lY3Rpdml0eRINCgVmZW5jZRgIIAEoCRI2Cgh3YXJuaW5ncxgJIAMoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5Ub3BiYXJXYXJuaW5nSgQIBxAIUg9hY2NvdW50aW5nX2xpbmUiawoNVG9wYmFyV2FybmluZxIMCgR0ZXh0GAEgASgJEkQKCmFjY291bnRpbmcYCiABKAsyLi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudGluZ1dhcm5pbmdIAEIGCgRraW5kIhkKF1RvcGJhckFjY291bnRpbmdXYXJuaW5nIkAKElRvcGJhckNvbm5lY3Rpdml0eRIMCgR0b25lGAEgASgJEg0KBWdseXBoGAIgASgJEg0KBXRpdGxlGAMgASgJIkcKC01vZGVsT3B0aW9uEg0KBXZhbHVlGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCSIcCgtTZXRNb2RlbENtZBINCgVtb2RlbBgBIAEoCSJHChBEYWVtb25IZWFsdGhWaWV3EhIKCnJlcXVlc3RfaWQYASABKAkSDwoHaGVhbHRoeRgCIAEoCBIOCgZyZWFzb24YAyABKAkibwoRU2Vzc2lvbkhlYWx0aFZpZXcSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl3b3Jrc3BhY2UYAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCRIPCgdoZWFsdGh5GAQgASgIEg4KBnJlYXNvbhgFIAEoCSIRCg9EYWVtb25IZWFsdGhDbWQiJgoQU2Vzc2lvbkhlYWx0aENtZBISCgpzZXNzaW9uX2lkGAEgASgJQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z");
 
 /**
  * One workspace's topbar, resolved completely by the daemon. The client
@@ -71,17 +71,6 @@ export type TopbarView = Message<"agentshim.frontend.v1.TopbarView"> & {
   connectivity?: TopbarConnectivity | undefined;
 
   /**
-   * The accounting line the expanded topbar shows, composed daemon-side and
-   * rendered verbatim. The topbar's own projection of the same reconciliation
-   * the footer cell reports: it shows the sentence and never the verdict, so
-   * it takes a string where the footer takes arms. Empty means no turn has
-   * settled yet.
-   *
-   * @generated from field: string accounting_line = 7;
-   */
-  accountingLine: string;
-
-  /**
    * The workspace's staleness FENCE at the moment the daemon produced this
    * push: an opaque token the client compares BYTE-WISE against the fence on
    * the workspace's current WorkspaceState, and never parses, splits or
@@ -95,6 +84,21 @@ export type TopbarView = Message<"agentshim.frontend.v1.TopbarView"> & {
    * @generated from field: string fence = 8;
    */
   fence: string;
+
+  /**
+   * Everything the topbar has to WARN about right now, in display order, each
+   * already resolved into the sentence the client shows. An empty list is the
+   * daemon saying there is nothing wrong, and the client draws no indicator at
+   * all rather than a quiet one — a control over an empty list only invites
+   * the click that proves it is empty.
+   *
+   * It is a LIST because a warning is not a property of accounting: a second
+   * concern (a degraded watcher, a skewed build) joins this list and reaches
+   * the same affordance, instead of growing the strip a second bespoke slot.
+   *
+   * @generated from field: repeated agentshim.frontend.v1.TopbarWarning warnings = 9;
+   */
+  warnings: TopbarWarning[];
 };
 
 /**
@@ -103,6 +107,67 @@ export type TopbarView = Message<"agentshim.frontend.v1.TopbarView"> & {
  */
 export const TopbarViewSchema: GenMessage<TopbarView> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_topbar, 0);
+
+/**
+ * One thing the topbar is warning about, resolved completely by the daemon.
+ *
+ * The client renders `text` verbatim and NEVER re-derives it: the same
+ * reconciliation the footer's accounting cell reports has exactly one author,
+ * and a renderer that re-composed the sentence would be a second one.
+ *
+ * @generated from message agentshim.frontend.v1.TopbarWarning
+ */
+export type TopbarWarning = Message<"agentshim.frontend.v1.TopbarWarning"> & {
+  /**
+   * The warning's display-ready sentence, composed daemon-side. Never empty —
+   * a warning with nothing to say is a daemon fault, not a renderable state.
+   *
+   * @generated from field: string text = 1;
+   */
+  text: string;
+
+  /**
+   * WHICH concern raised this warning, as arms of messages rather than a state
+   * enum, so a kind arrives together with whatever evidence that kind implies
+   * and a new kind cannot be added as a bare tag the client must interpret.
+   *
+   * @generated from oneof agentshim.frontend.v1.TopbarWarning.kind
+   */
+  kind: {
+    /**
+     * The settled turn's accounting did not reconcile (incomplete evidence or
+     * a contradiction); `text` is the footer cell's own summary.
+     *
+     * @generated from field: agentshim.frontend.v1.TopbarAccountingWarning accounting = 10;
+     */
+    value: TopbarAccountingWarning;
+    case: "accounting";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.TopbarWarning.
+ * Use `create(TopbarWarningSchema)` to create a new message.
+ */
+export const TopbarWarningSchema: GenMessage<TopbarWarning> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_topbar, 1);
+
+/**
+ * The accounting warning's kind arm. It carries no fields of its own: the
+ * evidence behind the verdict is the footer accounting cell's, which states it
+ * as arms, and duplicating it here would be a second copy to drift.
+ *
+ * @generated from message agentshim.frontend.v1.TopbarAccountingWarning
+ */
+export type TopbarAccountingWarning = Message<"agentshim.frontend.v1.TopbarAccountingWarning"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.TopbarAccountingWarning.
+ * Use `create(TopbarAccountingWarningSchema)` to create a new message.
+ */
+export const TopbarAccountingWarningSchema: GenMessage<TopbarAccountingWarning> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_topbar, 2);
 
 /**
  * The topbar's connectivity indicator, fully resolved. `tone` names a color
@@ -139,7 +204,7 @@ export type TopbarConnectivity = Message<"agentshim.frontend.v1.TopbarConnectivi
  * Use `create(TopbarConnectivitySchema)` to create a new message.
  */
 export const TopbarConnectivitySchema: GenMessage<TopbarConnectivity> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_topbar, 1);
+  messageDesc(file_agentshim_frontend_v1_topbar, 3);
 
 /**
  * @generated from message agentshim.frontend.v1.ModelOption
@@ -166,7 +231,7 @@ export type ModelOption = Message<"agentshim.frontend.v1.ModelOption"> & {
  * Use `create(ModelOptionSchema)` to create a new message.
  */
 export const ModelOptionSchema: GenMessage<ModelOption> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_topbar, 2);
+  messageDesc(file_agentshim_frontend_v1_topbar, 4);
 
 /**
  * A deliberate request to change an already-live session's model.  The daemon
@@ -189,7 +254,7 @@ export type SetModelCmd = Message<"agentshim.frontend.v1.SetModelCmd"> & {
  * Use `create(SetModelCmdSchema)` to create a new message.
  */
 export const SetModelCmdSchema: GenMessage<SetModelCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_topbar, 3);
+  messageDesc(file_agentshim_frontend_v1_topbar, 5);
 
 /**
  * Correlated result of the daemon-global health command.  A command ACK alone
@@ -222,7 +287,7 @@ export type DaemonHealthView = Message<"agentshim.frontend.v1.DaemonHealthView">
  * Use `create(DaemonHealthViewSchema)` to create a new message.
  */
 export const DaemonHealthViewSchema: GenMessage<DaemonHealthView> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_topbar, 4);
+  messageDesc(file_agentshim_frontend_v1_topbar, 6);
 
 /**
  * Correlated result of the session-specific health command.  The daemon sets
@@ -271,7 +336,7 @@ export type SessionHealthView = Message<"agentshim.frontend.v1.SessionHealthView
  * Use `create(SessionHealthViewSchema)` to create a new message.
  */
 export const SessionHealthViewSchema: GenMessage<SessionHealthView> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_topbar, 5);
+  messageDesc(file_agentshim_frontend_v1_topbar, 7);
 
 /**
  * Ask the daemon to assert that every boot-critical global dependency is
@@ -289,7 +354,7 @@ export type DaemonHealthCmd = Message<"agentshim.frontend.v1.DaemonHealthCmd"> &
  * Use `create(DaemonHealthCmdSchema)` to create a new message.
  */
 export const DaemonHealthCmdSchema: GenMessage<DaemonHealthCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_topbar, 6);
+  messageDesc(file_agentshim_frontend_v1_topbar, 8);
 
 /**
  * Ask the daemon to prove the entire session route for one restored workspace:
@@ -313,5 +378,5 @@ export type SessionHealthCmd = Message<"agentshim.frontend.v1.SessionHealthCmd">
  * Use `create(SessionHealthCmdSchema)` to create a new message.
  */
 export const SessionHealthCmdSchema: GenMessage<SessionHealthCmd> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_topbar, 7);
+  messageDesc(file_agentshim_frontend_v1_topbar, 9);
 

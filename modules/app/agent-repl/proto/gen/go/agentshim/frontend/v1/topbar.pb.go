@@ -46,12 +46,6 @@ type TopbarView struct {
 	// The connectivity glyph, resolved: which glyph and which color class to
 	// draw, and the tooltip text. The client never maps connectivity enums.
 	Connectivity *TopbarConnectivity `protobuf:"bytes,6,opt,name=connectivity,proto3" json:"connectivity,omitempty"`
-	// The accounting line the expanded topbar shows, composed daemon-side and
-	// rendered verbatim. The topbar's own projection of the same reconciliation
-	// the footer cell reports: it shows the sentence and never the verdict, so
-	// it takes a string where the footer takes arms. Empty means no turn has
-	// settled yet.
-	AccountingLine string `protobuf:"bytes,7,opt,name=accounting_line,json=accountingLine,proto3" json:"accounting_line,omitempty"`
 	// The workspace's staleness FENCE at the moment the daemon produced this
 	// push: an opaque token the client compares BYTE-WISE against the fence on
 	// the workspace's current WorkspaceState, and never parses, splits or
@@ -61,7 +55,17 @@ type TopbarView struct {
 	// The daemon mints it and is the only thing that can read meaning into it.
 	// A client that learned to decode it would be depending on a fact this
 	// contract does not offer, and the token's composition is free to change.
-	Fence         string `protobuf:"bytes,8,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence string `protobuf:"bytes,8,opt,name=fence,proto3" json:"fence,omitempty"`
+	// Everything the topbar has to WARN about right now, in display order, each
+	// already resolved into the sentence the client shows. An empty list is the
+	// daemon saying there is nothing wrong, and the client draws no indicator at
+	// all rather than a quiet one — a control over an empty list only invites
+	// the click that proves it is empty.
+	//
+	// It is a LIST because a warning is not a property of accounting: a second
+	// concern (a degraded watcher, a skewed build) joins this list and reaches
+	// the same affordance, instead of growing the strip a second bespoke slot.
+	Warnings      []*TopbarWarning `protobuf:"bytes,9,rep,name=warnings,proto3" json:"warnings,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -138,18 +142,144 @@ func (x *TopbarView) GetConnectivity() *TopbarConnectivity {
 	return nil
 }
 
-func (x *TopbarView) GetAccountingLine() string {
-	if x != nil {
-		return x.AccountingLine
-	}
-	return ""
-}
-
 func (x *TopbarView) GetFence() string {
 	if x != nil {
 		return x.Fence
 	}
 	return ""
+}
+
+func (x *TopbarView) GetWarnings() []*TopbarWarning {
+	if x != nil {
+		return x.Warnings
+	}
+	return nil
+}
+
+// One thing the topbar is warning about, resolved completely by the daemon.
+//
+// The client renders `text` verbatim and NEVER re-derives it: the same
+// reconciliation the footer's accounting cell reports has exactly one author,
+// and a renderer that re-composed the sentence would be a second one.
+type TopbarWarning struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The warning's display-ready sentence, composed daemon-side. Never empty —
+	// a warning with nothing to say is a daemon fault, not a renderable state.
+	Text string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	// WHICH concern raised this warning, as arms of messages rather than a state
+	// enum, so a kind arrives together with whatever evidence that kind implies
+	// and a new kind cannot be added as a bare tag the client must interpret.
+	//
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*TopbarWarning_Accounting
+	Kind          isTopbarWarning_Kind `protobuf_oneof:"kind"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TopbarWarning) Reset() {
+	*x = TopbarWarning{}
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TopbarWarning) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TopbarWarning) ProtoMessage() {}
+
+func (x *TopbarWarning) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TopbarWarning.ProtoReflect.Descriptor instead.
+func (*TopbarWarning) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *TopbarWarning) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *TopbarWarning) GetKind() isTopbarWarning_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *TopbarWarning) GetAccounting() *TopbarAccountingWarning {
+	if x != nil {
+		if x, ok := x.Kind.(*TopbarWarning_Accounting); ok {
+			return x.Accounting
+		}
+	}
+	return nil
+}
+
+type isTopbarWarning_Kind interface {
+	isTopbarWarning_Kind()
+}
+
+type TopbarWarning_Accounting struct {
+	// The settled turn's accounting did not reconcile (incomplete evidence or
+	// a contradiction); `text` is the footer cell's own summary.
+	Accounting *TopbarAccountingWarning `protobuf:"bytes,10,opt,name=accounting,proto3,oneof"`
+}
+
+func (*TopbarWarning_Accounting) isTopbarWarning_Kind() {}
+
+// The accounting warning's kind arm. It carries no fields of its own: the
+// evidence behind the verdict is the footer accounting cell's, which states it
+// as arms, and duplicating it here would be a second copy to drift.
+type TopbarAccountingWarning struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TopbarAccountingWarning) Reset() {
+	*x = TopbarAccountingWarning{}
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TopbarAccountingWarning) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TopbarAccountingWarning) ProtoMessage() {}
+
+func (x *TopbarAccountingWarning) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TopbarAccountingWarning.ProtoReflect.Descriptor instead.
+func (*TopbarAccountingWarning) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{2}
 }
 
 // The topbar's connectivity indicator, fully resolved. `tone` names a color
@@ -169,7 +299,7 @@ type TopbarConnectivity struct {
 
 func (x *TopbarConnectivity) Reset() {
 	*x = TopbarConnectivity{}
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[1]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -181,7 +311,7 @@ func (x *TopbarConnectivity) String() string {
 func (*TopbarConnectivity) ProtoMessage() {}
 
 func (x *TopbarConnectivity) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[1]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -194,7 +324,7 @@ func (x *TopbarConnectivity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarConnectivity.ProtoReflect.Descriptor instead.
 func (*TopbarConnectivity) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{1}
+	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *TopbarConnectivity) GetTone() string {
@@ -229,7 +359,7 @@ type ModelOption struct {
 
 func (x *ModelOption) Reset() {
 	*x = ModelOption{}
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[2]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -241,7 +371,7 @@ func (x *ModelOption) String() string {
 func (*ModelOption) ProtoMessage() {}
 
 func (x *ModelOption) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[2]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -254,7 +384,7 @@ func (x *ModelOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelOption.ProtoReflect.Descriptor instead.
 func (*ModelOption) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{2}
+	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ModelOption) GetValue() string {
@@ -292,7 +422,7 @@ type SetModelCmd struct {
 
 func (x *SetModelCmd) Reset() {
 	*x = SetModelCmd{}
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[3]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -304,7 +434,7 @@ func (x *SetModelCmd) String() string {
 func (*SetModelCmd) ProtoMessage() {}
 
 func (x *SetModelCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[3]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -317,7 +447,7 @@ func (x *SetModelCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetModelCmd.ProtoReflect.Descriptor instead.
 func (*SetModelCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{3}
+	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SetModelCmd) GetModel() string {
@@ -343,7 +473,7 @@ type DaemonHealthView struct {
 
 func (x *DaemonHealthView) Reset() {
 	*x = DaemonHealthView{}
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -355,7 +485,7 @@ func (x *DaemonHealthView) String() string {
 func (*DaemonHealthView) ProtoMessage() {}
 
 func (x *DaemonHealthView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -368,7 +498,7 @@ func (x *DaemonHealthView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonHealthView.ProtoReflect.Descriptor instead.
 func (*DaemonHealthView) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{4}
+	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DaemonHealthView) GetRequestId() string {
@@ -416,7 +546,7 @@ type SessionHealthView struct {
 
 func (x *SessionHealthView) Reset() {
 	*x = SessionHealthView{}
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -428,7 +558,7 @@ func (x *SessionHealthView) String() string {
 func (*SessionHealthView) ProtoMessage() {}
 
 func (x *SessionHealthView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -441,7 +571,7 @@ func (x *SessionHealthView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionHealthView.ProtoReflect.Descriptor instead.
 func (*SessionHealthView) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{5}
+	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SessionHealthView) GetRequestId() string {
@@ -491,7 +621,7 @@ type DaemonHealthCmd struct {
 
 func (x *DaemonHealthCmd) Reset() {
 	*x = DaemonHealthCmd{}
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[6]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -503,7 +633,7 @@ func (x *DaemonHealthCmd) String() string {
 func (*DaemonHealthCmd) ProtoMessage() {}
 
 func (x *DaemonHealthCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[6]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -516,7 +646,7 @@ func (x *DaemonHealthCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonHealthCmd.ProtoReflect.Descriptor instead.
 func (*DaemonHealthCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{6}
+	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{8}
 }
 
 // Ask the daemon to prove the entire session route for one restored workspace:
@@ -534,7 +664,7 @@ type SessionHealthCmd struct {
 
 func (x *SessionHealthCmd) Reset() {
 	*x = SessionHealthCmd{}
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -546,7 +676,7 @@ func (x *SessionHealthCmd) String() string {
 func (*SessionHealthCmd) ProtoMessage() {}
 
 func (x *SessionHealthCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_topbar_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -559,7 +689,7 @@ func (x *SessionHealthCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionHealthCmd.ProtoReflect.Descriptor instead.
 func (*SessionHealthCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{7}
+	return file_agentshim_frontend_v1_topbar_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SessionHealthCmd) GetSessionId() string {
@@ -573,7 +703,7 @@ var File_agentshim_frontend_v1_topbar_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_topbar_proto_rawDesc = "" +
 	"\n" +
-	"\"agentshim/frontend/v1/topbar.proto\x12\x15agentshim.frontend.v1\"\xdf\x02\n" +
+	"\"agentshim/frontend/v1/topbar.proto\x12\x15agentshim.frontend.v1\"\x8f\x03\n" +
 	"\n" +
 	"TopbarView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x14\n" +
@@ -581,9 +711,17 @@ const file_agentshim_frontend_v1_topbar_proto_rawDesc = "" +
 	"\fsession_line\x18\x03 \x01(\tR\vsessionLine\x12#\n" +
 	"\rmodel_display\x18\x04 \x01(\tR\fmodelDisplay\x12G\n" +
 	"\rmodel_options\x18\x05 \x03(\v2\".agentshim.frontend.v1.ModelOptionR\fmodelOptions\x12M\n" +
-	"\fconnectivity\x18\x06 \x01(\v2).agentshim.frontend.v1.TopbarConnectivityR\fconnectivity\x12'\n" +
-	"\x0faccounting_line\x18\a \x01(\tR\x0eaccountingLine\x12\x14\n" +
-	"\x05fence\x18\b \x01(\tR\x05fence\"T\n" +
+	"\fconnectivity\x18\x06 \x01(\v2).agentshim.frontend.v1.TopbarConnectivityR\fconnectivity\x12\x14\n" +
+	"\x05fence\x18\b \x01(\tR\x05fence\x12@\n" +
+	"\bwarnings\x18\t \x03(\v2$.agentshim.frontend.v1.TopbarWarningR\bwarningsJ\x04\b\a\x10\bR\x0faccounting_line\"}\n" +
+	"\rTopbarWarning\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x12P\n" +
+	"\n" +
+	"accounting\x18\n" +
+	" \x01(\v2..agentshim.frontend.v1.TopbarAccountingWarningH\x00R\n" +
+	"accountingB\x06\n" +
+	"\x04kind\"\x19\n" +
+	"\x17TopbarAccountingWarning\"T\n" +
 	"\x12TopbarConnectivity\x12\x12\n" +
 	"\x04tone\x18\x01 \x01(\tR\x04tone\x12\x14\n" +
 	"\x05glyph\x18\x02 \x01(\tR\x05glyph\x12\x14\n" +
@@ -624,25 +762,29 @@ func file_agentshim_frontend_v1_topbar_proto_rawDescGZIP() []byte {
 	return file_agentshim_frontend_v1_topbar_proto_rawDescData
 }
 
-var file_agentshim_frontend_v1_topbar_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_agentshim_frontend_v1_topbar_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_agentshim_frontend_v1_topbar_proto_goTypes = []any{
-	(*TopbarView)(nil),         // 0: agentshim.frontend.v1.TopbarView
-	(*TopbarConnectivity)(nil), // 1: agentshim.frontend.v1.TopbarConnectivity
-	(*ModelOption)(nil),        // 2: agentshim.frontend.v1.ModelOption
-	(*SetModelCmd)(nil),        // 3: agentshim.frontend.v1.SetModelCmd
-	(*DaemonHealthView)(nil),   // 4: agentshim.frontend.v1.DaemonHealthView
-	(*SessionHealthView)(nil),  // 5: agentshim.frontend.v1.SessionHealthView
-	(*DaemonHealthCmd)(nil),    // 6: agentshim.frontend.v1.DaemonHealthCmd
-	(*SessionHealthCmd)(nil),   // 7: agentshim.frontend.v1.SessionHealthCmd
+	(*TopbarView)(nil),              // 0: agentshim.frontend.v1.TopbarView
+	(*TopbarWarning)(nil),           // 1: agentshim.frontend.v1.TopbarWarning
+	(*TopbarAccountingWarning)(nil), // 2: agentshim.frontend.v1.TopbarAccountingWarning
+	(*TopbarConnectivity)(nil),      // 3: agentshim.frontend.v1.TopbarConnectivity
+	(*ModelOption)(nil),             // 4: agentshim.frontend.v1.ModelOption
+	(*SetModelCmd)(nil),             // 5: agentshim.frontend.v1.SetModelCmd
+	(*DaemonHealthView)(nil),        // 6: agentshim.frontend.v1.DaemonHealthView
+	(*SessionHealthView)(nil),       // 7: agentshim.frontend.v1.SessionHealthView
+	(*DaemonHealthCmd)(nil),         // 8: agentshim.frontend.v1.DaemonHealthCmd
+	(*SessionHealthCmd)(nil),        // 9: agentshim.frontend.v1.SessionHealthCmd
 }
 var file_agentshim_frontend_v1_topbar_proto_depIdxs = []int32{
-	2, // 0: agentshim.frontend.v1.TopbarView.model_options:type_name -> agentshim.frontend.v1.ModelOption
-	1, // 1: agentshim.frontend.v1.TopbarView.connectivity:type_name -> agentshim.frontend.v1.TopbarConnectivity
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	4, // 0: agentshim.frontend.v1.TopbarView.model_options:type_name -> agentshim.frontend.v1.ModelOption
+	3, // 1: agentshim.frontend.v1.TopbarView.connectivity:type_name -> agentshim.frontend.v1.TopbarConnectivity
+	1, // 2: agentshim.frontend.v1.TopbarView.warnings:type_name -> agentshim.frontend.v1.TopbarWarning
+	2, // 3: agentshim.frontend.v1.TopbarWarning.accounting:type_name -> agentshim.frontend.v1.TopbarAccountingWarning
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_topbar_proto_init() }
@@ -650,13 +792,16 @@ func file_agentshim_frontend_v1_topbar_proto_init() {
 	if File_agentshim_frontend_v1_topbar_proto != nil {
 		return
 	}
+	file_agentshim_frontend_v1_topbar_proto_msgTypes[1].OneofWrappers = []any{
+		(*TopbarWarning_Accounting)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_topbar_proto_rawDesc), len(file_agentshim_frontend_v1_topbar_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
