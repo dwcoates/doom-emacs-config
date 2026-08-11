@@ -148,10 +148,12 @@ import {
 } from "./proto-names.js";
 import {
   decodeAsyncBubble,
-  decodeAsyncBubbleDelta,
+  decodeAsyncBubbleUpdate,
   type AsyncBubble,
   type AsyncBubbleDelta,
+  type DetachedWorkPackaging,
 } from "./async-bubble.js";
+import { DetachedWorkDeltaSchema } from "../../proto/gen/ts/agentshim/frontend/v1/feed_pb";
 import {
   unwrapAgentEmission,
   type ResponseUsageStamp,
@@ -832,12 +834,12 @@ export const MESSAGE_ARMS = [
   "failureCard",
   "skillBody",
   "sessionCommand",
-  // A piece of DETACHED WORK, anchored in the feed at the point it was
-  // launched. What rides here is the bubble's OPENING state; everything it
-  // produces afterwards arrives as `AsyncBubbleUpdate` on its own delta, so a
-  // detached agent emitting a thousand lines inserts ONE row here, not a
-  // thousand.
-  "asyncBubble",
+  // A piece of DETACHED WORK. THIS MESSAGE IS THE WORK — its uuid is the work's
+  // id and its lineage is the work's place in the feed. What rides here is the
+  // work's state as of this delivery; everything it produces afterwards arrives
+  // as `DetachedWorkUpdate` addressed to this message's uuid, so a detached
+  // agent emitting a thousand lines inserts ONE row here, not a thousand.
+  "detachedWork",
 ] as const;
 export type MessageArm = (typeof MESSAGE_ARMS)[number];
 
@@ -971,28 +973,31 @@ export interface MessageFrame {
    */
   usageStamp?: ResponseUsageStamp;
   /**
-   * THE CLASSIFICATION VERDICT this item published: the id of the
-   * `AsyncBubble` its tool call detached, as the DAEMON resolved it
-   * (`AgentToolCall.spawned_bubble_id` / `AgentToolOutcome.spawned_bubble_id`).
+   * THE CLASSIFICATION VERDICT this item published: the uuid of the MESSAGE its
+   * tool call detached work onto, as the DAEMON resolved it
+   * (`AgentToolCall.spawned_message_id` /
+   * `AgentToolOutcome.spawned_message_id`).
    *
    * Present only on the `toolUse`/`toolUseResult` arms, and only when the
    * daemon actually set it. ABSENT means "this call detached nothing", and
    * that is the ONLY reading of absent. A frontend MATCHES this string against
-   * `AsyncBubble.id`; it never derives one, because the evidence a derivation
-   * would read is a mix of tool metadata, completion notifications and
-   * free-text prose that two frontends would eventually read differently.
+   * a detached-work message's uuid; it never derives one, because the evidence
+   * a derivation would read is a mix of tool metadata, completion notifications
+   * and free-text prose that two frontends would eventually read differently.
    */
-  spawnedBubbleId?: string;
+  spawnedMessageId?: string;
   /**
-   * The DETACHED WORK this item anchors, decoded. Present exactly on the
-   * `asyncBubble` arm.
+   * The DETACHED WORK this message IS, decoded. Present exactly on the
+   * `detachedWork` arm.
    *
-   * Decoded here rather than left in `payload` because `AsyncBubble` is a
+   * Decoded here rather than left in `payload` because `DetachedWork` is a
    * `frontend.v1`-owned message — the strict half of the validation contract —
    * so it gets the same loud treatment every other frontend-owned message
-   * does, instead of the by-shape adoption reserved for data.v1 payloads.
+   * does, instead of the by-shape adoption reserved for data.v1 payloads. The
+   * envelope's own uuid and lineage are LIFTED onto it here, because the
+   * payload no longer states either.
    */
-  asyncBubble?: AsyncBubble;
+  detachedWork?: AsyncBubble;
 }
 
 /** Durable evidence used to compare one completed turn with another client. */
@@ -1285,9 +1290,10 @@ export interface TypingCut {
   workspace: string;
   /**
    * The preview being retired, addressed exactly as the delta that opened it:
-   * empty for the top-level feed, or the AsyncBubble id it was folded into.
+   * empty for the top-level feed, or the uuid of the MESSAGE whose detached
+   * work it was folded into.
    */
-  bubbleId: string;
+  parentMessageId: string;
   /** Compared BYTE-WISE and never parsed, identically to every other push. */
   fence: string;
 }
@@ -1314,11 +1320,12 @@ export interface TypingDelta {
    *
    * Empty — the ordinary case — means the top-level feed, retired by the
    * authoritative record of the same block landing there. Set means the
-   * preview belongs INSIDE that `AsyncBubble` and must never touch the feed:
-   * its record is folded into the bubble and would never arrive to retire a
-   * top-level preview, leaving a card spinning "streaming input..." forever.
+   * preview belongs INSIDE the named MESSAGE — detached work whose payload is
+   * folding this record — and must never touch the feed: its record is folded
+   * into that message and would never arrive to retire a top-level preview,
+   * leaving a card spinning "streaming input..." forever.
    */
-  bubbleId: string;
+  parentMessageId: string;
 }
 
 /**
@@ -1644,15 +1651,18 @@ export interface StateSnapshot {
   daemon?: DaemonView;
   /** Retained per-session SystemInits (S9); absent on a pre-S9 daemon. */
   inits: SessionInitView[];
-  /**
-   * Every async bubble the session still holds, FOLDED TO DATE, so a
-   * reconnecting client resumes detached work rather than re-deriving it.
+   /**
+   * Every piece of detached work the session still holds, FOLDED TO DATE, so a
+   * reconnecting client resumes it rather than re-deriving it.
    *
-   * A bubble here REPLACES whatever copy the client already had: the snapshot
+   * WHOLE MESSAGES on the wire — the same envelopes `DetachedWorkDelta.opened`
+   * carries — decoded here with their packaging already lifted on.
+   *
+   * An entry here REPLACES whatever copy the client already had: the snapshot
    * is the daemon's complete statement, and merging it with stale local state
    * would produce a fold neither end vouches for.
    */
-  asyncBubbles: AsyncBubble[];
+  detachedWork: AsyncBubble[];
   /** Each live session's held-prompt queue (E4); empty on a pre-E4 daemon. */
   queues: QueueView[];
   /** Each workspace's resolved progress view (F1); empty on a pre-F1 daemon. */
@@ -2252,7 +2262,7 @@ export type FrontendFrame = {
     | { case: "workspaceState"; value: WorkspaceState }
     | { case: "sessionView"; value: SessionView }
     | { case: "conversationDelta"; value: ConversationDelta }
-    | { case: "asyncBubbleDelta"; value: AsyncBubbleDelta }
+    | { case: "detachedWorkDelta"; value: AsyncBubbleDelta }
     | { case: "typingDelta"; value: TypingDelta }
     | { case: "typingCut"; value: TypingCut }
     | { case: "taskCatalog"; value: TaskCatalog }
@@ -2477,9 +2487,9 @@ const FRAME_DECODERS: ReadonlyMap<
     }),
   ],
   [
-    "asyncBubbleDelta",
+    "detachedWorkDelta",
     (v: unknown) => ({
-      case: "asyncBubbleDelta" as const,
+      case: "detachedWorkDelta" as const,
       value: decodeAsyncBubbleDelta(v),
     }),
   ],
@@ -3309,7 +3319,7 @@ function decodeConversationDelta(v: unknown): ConversationDelta {
     messages: (o.messages === undefined || o.messages === null
       ? []
       : ensureArray(o.messages, "ConversationDelta.messages")
-    ).map((m, i) => decodeMessage(m, i)),
+    ).map((m, i) => decodeMessage(m, `Message[${i}]`)),
     throughSeq: num(o, "throughSeq", "ConversationDelta"),
   };
   if (cd.fence === "") {
@@ -3347,7 +3357,7 @@ function decodeConversationPage(v: unknown): ConversationPage {
     messages: (o.messages === undefined || o.messages === null
       ? []
       : ensureArray(o.messages, "ConversationPage.messages")
-    ).map((m, i) => decodeMessage(m, i)),
+    ).map((m, i) => decodeMessage(m, `Message[${i}]`)),
     continuation: decodePageContinuation(o),
     liveJoinSeq: num(o, "liveJoinSeq", "ConversationPage"),
     fence: str(o, "fence", "ConversationPage"),
@@ -3411,8 +3421,7 @@ const AGENT_EMISSION_ENVELOPE = "agent";
  * fails this build rather than reaching the adapter's switch as an unhandled
  * string.
  */
-function decodeMessage(v: unknown, i: number): MessageFrame {
-  const ctx = `Message[${i}]`;
+function decodeMessage(v: unknown, ctx: string): MessageFrame {
   const o = ensureObject(v, ctx);
   const keys = Object.keys(o);
   const armKeys = keys.filter(
@@ -3443,7 +3452,7 @@ function decodeMessage(v: unknown, i: number): MessageFrame {
     arm: MessageArm;
     payload: JsonObject;
     thinkingOrigin?: { apiMessageId: string; blockIndex: number };
-    spawnedBubbleId?: string;
+    spawnedMessageId?: string;
     usageStamp?: ResponseUsageStamp;
   } =
     armKeys[0] === AGENT_EMISSION_ENVELOPE
@@ -3495,25 +3504,26 @@ function decodeMessage(v: unknown, i: number): MessageFrame {
   // corner then renders no figures rather than zeros.
   if (selected.usageStamp !== undefined) frame.usageStamp = selected.usageStamp;
   // THE CLASSIFICATION VERDICT, carried through whole. A tool card learns the
-  // bubble it spawned by MATCHING this string against `AsyncBubble.id`; it
-  // never derives one. Empty means "this call detached nothing", so it is
-  // carried only when the daemon actually set it — an empty string on the
-  // frame would be indistinguishable from an arm that cannot carry a verdict
-  // at all.
+  // message its call detached work onto by MATCHING this string against that
+  // message's uuid; it never derives one. Empty means "this call detached
+  // nothing", so it is carried only when the daemon actually set it — an empty
+  // string on the frame would be indistinguishable from an arm that cannot
+  // carry a verdict at all.
   if (
-    selected.spawnedBubbleId !== undefined &&
-    selected.spawnedBubbleId !== ""
+    selected.spawnedMessageId !== undefined &&
+    selected.spawnedMessageId !== ""
   ) {
-    frame.spawnedBubbleId = selected.spawnedBubbleId;
+    frame.spawnedMessageId = selected.spawnedMessageId;
   }
-  // A bubble ANCHORED in the feed at the point its work was launched. Decoded
-  // eagerly and strictly (it is a frontend.v1-owned message, not an adopted
-  // data.v1 payload), and carried decoded so no consumer re-parses the raw
-  // JSON the payload still holds.
-  if (arm === "asyncBubble") {
-    frame.asyncBubble = decodeAsyncBubble(
+  // THE WORK THIS MESSAGE IS. Decoded eagerly and strictly (it is a
+  // frontend.v1-owned message, not an adopted data.v1 payload), with this
+  // envelope's identity and lineage lifted onto it, and carried decoded so no
+  // consumer re-parses the raw JSON the payload still holds.
+  if (arm === "detachedWork") {
+    frame.detachedWork = decodeAsyncBubble(
       selected.payload,
-      `${ctx}.asyncBubble`,
+      detachedWorkPackaging(frame, ctx),
+      `${ctx}.detachedWork`,
     );
   }
   if (o.turnAccounting !== undefined) {
@@ -3527,6 +3537,82 @@ function decodeMessage(v: unknown, i: number): MessageFrame {
     );
   }
   return frame;
+}
+
+/**
+ * The FEED PACKAGING a detached-work message hands to its payload decoder.
+ *
+ * Lineage is REQUIRED here, and its absence is refused rather than defaulted.
+ * Detached work's identity and containment used to ride the payload; they ride
+ * the envelope now, so a detached-work message with no lineage states no
+ * containment at all — and inventing one (top-level, say) would make a producer
+ * that never set the field indistinguishable from one that placed the work in
+ * the feed on purpose.
+ */
+function detachedWorkPackaging(
+  frame: MessageFrame,
+  ctx: string,
+): DetachedWorkPackaging {
+  if (frame.lineage === undefined) {
+    throw new Error(
+      `frontend-proto: ${ctx} carries detached work with no \`lineage\` — the payload no longer states its containment, so an absent lineage leaves the work unplaceable`,
+    );
+  }
+  return {
+    id: frame.uuid,
+    parentMessageId: frame.lineage.parentMessageId,
+    topLevelMessageId: frame.lineage.topLevelMessageId,
+  };
+}
+
+/**
+ * One whole `Message` whose payload MUST be detached work, decoded.
+ *
+ * `DetachedWorkDelta.opened` and `StateSnapshot.detached_work` both carry
+ * complete feed envelopes now rather than a parallel bubble type, so both come
+ * through here. A message arriving on either with any OTHER payload arm is a
+ * DAEMON BUG and is rejected loudly — never skipped, because silently dropping
+ * it would hide work the user started behind a shorter list.
+ */
+function decodeDetachedWorkMessage(v: unknown, ctx: string): AsyncBubble {
+  const frame = decodeMessage(v, ctx);
+  if (frame.detachedWork === undefined) {
+    throw new Error(
+      `frontend-proto: ${ctx} carries payload arm '${frame.arm}', but only 'detachedWork' belongs here — a message with any other arm on this channel is a daemon bug and is rejected, not skipped`,
+    );
+  }
+  return frame.detachedWork;
+}
+
+const DELTA_KEYS = generatedFieldSet<
+  keyof typeof DetachedWorkDeltaSchema.field
+>()("workspace", "opened", "updates", "throughSeq", "fence");
+
+/** Decode one `DetachedWorkDelta`. */
+function decodeAsyncBubbleDelta(v: unknown): AsyncBubbleDelta {
+  const ctx = "DetachedWorkDelta";
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, DELTA_KEYS, ctx);
+  const delta: AsyncBubbleDelta = {
+    workspace: str(o, "workspace", ctx),
+    opened: (o.opened === undefined || o.opened === null
+      ? []
+      : ensureArray(o.opened, `${ctx}.opened`)
+    ).map((m, i) => decodeDetachedWorkMessage(m, `${ctx}.opened[${i}]`)),
+    updates: (o.updates === undefined || o.updates === null
+      ? []
+      : ensureArray(o.updates, `${ctx}.updates`)
+    ).map((u, i) => decodeAsyncBubbleUpdate(u, `${ctx}.updates[${i}]`)),
+    throughSeq: num(o, "throughSeq", ctx),
+    fence: str(o, "fence", ctx),
+  };
+  if (delta.fence === "") {
+    // The fence is how a client tells a current push from a stale one. A push
+    // without one cannot be gated at all, so it is refused rather than adopted
+    // ungated.
+    throw new Error(`frontend-proto: ${ctx} missing required \`fence\``);
+  }
+  return delta;
 }
 
 const FINGERPRINT_KEYS = generatedFieldSet<
@@ -5141,7 +5227,7 @@ function decodeQueueClassification(o: JsonObject): {
   };
 }
 
-const TYPING_DELTA_KEYS = new Set(["workspace", "fence", "delta", "bubbleId"]);
+const TYPING_DELTA_KEYS = new Set(["workspace", "fence", "delta", "parentMessageId"]);
 const CONTENT_DELTA_KEYS = new Set([
   "uuid",
   "blockIndex",
@@ -5159,7 +5245,7 @@ const CONTENT_DELTA_ARM_KIND: Readonly<Record<string, ContentDeltaKind>> = {
   inputJson: "input_json",
   signature: "signature",
 };
-const TYPING_CUT_KEYS = new Set(["workspace", "bubbleId", "fence"]);
+const TYPING_CUT_KEYS = new Set(["workspace", "parentMessageId", "fence"]);
 
 function decodeTypingCut(v: unknown): TypingCut {
   const o = ensureObject(v, "TypingCut");
@@ -5168,7 +5254,7 @@ function decodeTypingCut(v: unknown): TypingCut {
     workspace: str(o, "workspace", "TypingCut"),
     // proto3 omits an empty string, and empty is the ordinary case: the cut
     // addresses a preview standing on the top-level feed.
-    bubbleId: str(o, "bubbleId", "TypingCut"),
+    parentMessageId: str(o, "parentMessageId", "TypingCut"),
     fence: str(o, "fence", "TypingCut"),
   };
 }
@@ -5203,7 +5289,7 @@ function decodeTypingDelta(v: unknown): TypingDelta {
     estimatedTokens: num(d, "estimatedTokens", "TypingDelta.delta"),
     // proto3 omits an empty string, and empty is the ordinary case: this
     // preview belongs on the top-level feed.
-    bubbleId: str(o, "bubbleId", "TypingDelta"),
+    parentMessageId: str(o, "parentMessageId", "TypingDelta"),
   };
   if (td.uuid === "") {
     throw new Error(
@@ -5717,7 +5803,7 @@ const STATE_SNAPSHOT_KEYS = new Set([
   "catalogs",
   "daemon",
   "inits",
-  "asyncBubbles",
+  "detachedWork",
   "queues",
   "progress",
   "workspaceAvailable",
@@ -5748,10 +5834,12 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
       ? []
       : ensureArray(o.inits, "StateSnapshot.inits")
     ).map(decodeSessionInitView),
-    asyncBubbles: (o.asyncBubbles === undefined || o.asyncBubbles === null
+    detachedWork: (o.detachedWork === undefined || o.detachedWork === null
       ? []
-      : ensureArray(o.asyncBubbles, "StateSnapshot.asyncBubbles")
-    ).map((b, i) => decodeAsyncBubble(b, `StateSnapshot.asyncBubbles[${i}]`)),
+      : ensureArray(o.detachedWork, "StateSnapshot.detachedWork")
+    ).map((m, i) =>
+      decodeDetachedWorkMessage(m, `StateSnapshot.detachedWork[${i}]`),
+    ),
     queues: (o.queues === undefined || o.queues === null
       ? []
       : ensureArray(o.queues, "StateSnapshot.queues")

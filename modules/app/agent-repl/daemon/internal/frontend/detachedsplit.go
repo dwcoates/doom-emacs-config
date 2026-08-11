@@ -1,6 +1,6 @@
 // asyncsplit.go holds THE ONE CURATION POINT at which the daemon decides
 // whether an agent's output belongs to the TOP-LEVEL FEED or to a DETACHED
-// WORK BUBBLE.
+// WORK DETACHED WORK.
 //
 // THE DEFECT THIS REPAIRS. A detached agent writes its whole conversation into
 // the same transcript the main agent does, flagged `isSidechain` and linked to
@@ -25,14 +25,14 @@ import (
 )
 
 // Curation is one event's whole verdict: what lands in the top-level feed, what
-// lands in a detached agent's bubble, and the daemon-internal facts the session
+// lands in a detached agent's work, and the daemon-internal facts the session
 // controller's own curators need afterwards.
 type Curation struct {
 	// Feed is the top-level ConversationDelta, carrying ONLY items that belong
 	// to the main conversation.
 	//
 	// It is non-nil whenever the event curated to anything at all, EVEN IF every
-	// item it produced was routed to a bubble. The delta carries through_seq,
+	// item it produced was routed to a work. The delta carries through_seq,
 	// which is a frontend's replay cursor: swallowing an all-detached event
 	// would leave every client's cursor stuck behind it and make the next resync
 	// re-deliver the conversation from before it.
@@ -59,7 +59,7 @@ type Curation struct {
 	Outcomes []ToolOutcome
 	// WithheldDetached names the detached records this curation had no
 	// AgentEmission arm to carry. It is REPORTED rather than dropped silently:
-	// the caller logs it, because a bubble quietly missing records looks exactly
+	// the caller logs it, because a work quietly missing records looks exactly
 	// like a quiet agent.
 	WithheldDetached []string
 	// SuppressedInternalResumes names the re-drive request ids whose internal
@@ -82,13 +82,13 @@ type Curation struct {
 //
 // The emissions are the SAME *frontendv1.AgentEmission values the feed carries,
 // produced by the SAME curation above — not re-derived from a second parse.
-// That is the wire-level guarantee behind AsyncAgentUpdate: a frontend's
+// That is the wire-level guarantee behind DetachedWorkAgentUpdate: a frontend's
 // renderer for a response bubble, a thinking block or a tool card is the same
 // code in both places because the daemon produced the same message for both.
 type DetachedFold struct {
 	// SourceToolUseID is the tool_use id of the call that launched the agent,
 	// as the transcript's own envelope records it. It is the primary handle a
-	// bubble is addressed by, because it is the same id the launching tool call
+	// work is addressed by, because it is the same id the launching tool call
 	// carries.
 	SourceToolUseID string
 	// AgentID is the harness's own id for the detached agent, the secondary
@@ -113,11 +113,11 @@ type ToolOutcome struct {
 	Result *datav1.ToolUseResult
 	// FromDetachedAgent marks an outcome produced INSIDE a detached agent's
 	// conversation. A detachment it launches is a NESTED dispatch, and this is
-	// what lets the daemon set the new bubble's parent pointer rather than
+	// what lets the daemon set the new work's parent pointer rather than
 	// hanging it at the top level.
 	FromDetachedAgent bool
 	// SourceToolUseID is the launching call of the detached agent that produced
-	// the outcome, empty for a top-level one. It names the parent bubble.
+	// the outcome, empty for a top-level one. It names the parent work.
 	SourceToolUseID string
 	// AgentID is the detached agent that produced the outcome, empty at the top
 	// level.
@@ -170,7 +170,7 @@ func CurateEvent(workspace, fence string, ev *corev1.Event) (Curation, error) {
 		if len(ems) == 0 {
 			// A sidechain record with no emission arm to carry it — the
 			// launching prompt the harness writes as the subagent's first user
-			// record is the usual case, and the bubble's label already states
+			// record is the usual case, and the work's label already states
 			// it. Withheld, never promoted to the feed: putting it there is the
 			// very defect this split exists to repair.
 			c.WithheldDetached = append(c.WithheldDetached, item.GetUuid())
@@ -204,7 +204,7 @@ func CurateEvent(workspace, fence string, ev *corev1.Event) (Curation, error) {
 // one such block the correlation is unambiguous and the outcome is claimed;
 // when it carries several there is no evidence which one the result belongs to,
 // and the outcome is left uncorrelated rather than attributed to a guess — a
-// launch attributed to the wrong call would open a bubble under the wrong card
+// launch attributed to the wrong call would open a work under the wrong card
 // and stamp the wrong tool's id on it.
 func toolOutcomes(ev *corev1.Event) []ToolOutcome {
 	vendor := ev.GetVendor()
@@ -244,14 +244,14 @@ func toolOutcomes(ev *corev1.Event) []ToolOutcome {
 	}}
 }
 
-// detachedEmissions converts one curated item into the emissions a bubble can
+// detachedEmissions converts one curated item into the emissions a work can
 // carry.
 //
 // An agent item IS an emission and passes through unchanged. A sidechain USER
 // record is the harness handing tool results back to the subagent, so its
 // tool_result blocks become tool-result emissions — the same arm the feed's own
 // tool cards use. A sidechain user record carrying prose and no tool results is
-// the launch prompt, which the bubble's label already states; it yields nothing
+// the launch prompt, which the work's label already states; it yields nothing
 // and its caller reports it withheld.
 func detachedEmissions(item *frontendv1.Message) []*frontendv1.AgentEmission {
 	switch it := item.GetPayload().(type) {
@@ -278,7 +278,7 @@ func detachedEmissions(item *frontendv1.Message) []*frontendv1.AgentEmission {
 // keyed by its tool_use id.
 //
 // Only feed items are harvested, and that is deliberate: a detachment is
-// launched by a call the MAIN agent made, so the tool whose name a bubble may
+// launched by a call the MAIN agent made, so the tool whose name a work may
 // have to report is always on the top-level conversation. Harvesting a
 // subagent's own calls would let a nested tool name be attributed to the outer
 // launch.

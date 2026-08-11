@@ -141,23 +141,23 @@ func (s *skillCorrelator) reset() {
 }
 
 // curateMetaRecords replaces each isMeta "user" item in a curated delta with
-// the skill card it belongs to, hands it to the skill's own bubble, or withholds
-// it. It returns whatever async push the bubble deliveries produced.
+// the skill card it belongs to, hands it to the skill's own work, or withholds
+// it. It returns whatever async push the work deliveries produced.
 //
 // FOUR OUTCOMES, all loud:
 //   - an isMeta record carrying the body marker whose Skill call OPENED A SKILL
-//     BUBBLE becomes that bubble's own body and leaves the feed entirely.
+//     DETACHED WORK becomes that work's own body and leaves the feed entirely.
 //   - an isMeta record that resolves to a Skill call AND carries the body
-//     marker, whose call opened no skill bubble, becomes a skill_body item
+//     marker, whose call opened no skill work, becomes a skill_body item
 //     addressed to that call.
 //   - any other isMeta record is withheld from the feed entirely.
 //   - a non-isMeta record is untouched.
 //
-// THE BODY HAS EXACTLY ONE HOME. async-bubble.proto puts a skill's contents on
-// AsyncSkillBubble.body and retires the old rendering in the same breath, so a
-// call with a bubble emits NO skill_body card: two homes for one document would
+// THE BODY HAS EXACTLY ONE HOME. async-work.proto puts a skill's contents on
+// DetachedWorkSkill.body and retires the old rendering in the same breath, so a
+// call with a work emits NO skill_body card: two homes for one document would
 // draw the whole SKILL.md twice. The card path remains for the invocations that
-// open no skill bubble — the merge run, whose bubble has no body field, and a
+// open no skill work — the merge run, whose work has no body field, and a
 // Skill call the daemon could not classify.
 //
 // WITHHELD, NOT DELETED, exactly as in machinery.go: the store keeps every
@@ -192,12 +192,12 @@ func (c *consumer) curateMetaRecords(cd *frontendv1.ConversationDelta, envs map[
 			c.skills.extend(it.GetUuid(), toolUseID)
 		}
 		if toolUseID != "" && isSkillBodyText(text) {
-			if bubbleID := c.bubbles.skillWindowBubbleID(toolUseID); bubbleID != "" {
-				// THE BUBBLE'S OWN BODY, AND NOTHING ON THE FEED. The contents
+			if messageID := c.work.skillWindowMessageID(toolUseID); messageID != "" {
+				// THE DETACHED WORK'S OWN BODY, AND NOTHING ON THE FEED. The contents
 				// belong to the skill, not to the conversation, so they land on
-				// the bubble and the card the old rendering drew is not emitted.
-				c.logf("session-controller: skill body DELIVERED to its bubble ws=%q session=%s seq=%d uuid=%s tool_use_id=%s bubble=%s len=%d — the card rendering of these contents is retired by the contract's own arm",
-					c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), toolUseID, bubbleID, len(text))
+				// the work and the card the old rendering drew is not emitted.
+				c.logf("session-controller: skill body DELIVERED to its work ws=%q session=%s seq=%d uuid=%s tool_use_id=%s work=%s len=%d — the card rendering of these contents is retired by the contract's own arm",
+					c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), toolUseID, messageID, len(text))
 				push.absorb(c.resolveSkillBodyIntoWindow(toolUseID, text, cd.GetThroughSeq()))
 				continue
 			}
@@ -207,6 +207,7 @@ func (c *consumer) curateMetaRecords(cd *frontendv1.ConversationDelta, envs map[
 				Uuid:      it.GetUuid(),
 				TsMs:      it.GetTsMs(),
 				RequestId: it.GetRequestId(),
+				Lineage:   frontend.FeedRowLineage(it.GetUuid()),
 				Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 					Emission: &frontendv1.AgentEmission_SkillBody{SkillBody: &frontendv1.SkillBodyItem{
 						ToolUseId:    toolUseID,

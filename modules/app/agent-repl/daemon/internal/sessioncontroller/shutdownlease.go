@@ -362,7 +362,7 @@ func (m *Manager) noteTurnLiveness(d *sessionController, l ssm.TurnLiveness) {
 // state this code makes unreachable. HOLD's frozen meaning is "deliver it
 // later, never interrupt for it", which is exactly the promise the lease makes.
 // The rationale stays empty because no classifier produced one; the frontend
-// renders the lease bubble off shutdownHoldScheduleID instead.
+// renders the lease work off shutdownHoldScheduleID instead.
 func newParkedEntry(id, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin, queuedAtMs int64) *queueEntry {
 	return &queueEntry{
 		id:             id,
@@ -708,7 +708,7 @@ func (m *Manager) ReleaseShutdownHolds(scheduleID string) {
 
 	// The materialized ledger holds the same schedule's parks for sessions that
 	// have not wired. A cancelled schedule leaves nothing behind THERE either,
-	// or those clients would keep rendering a lease bubble for a schedule that
+	// or those clients would keep rendering a lease work for a schedule that
 	// no longer exists (parkedledger.go).
 	m.releaseParkedHolds(scheduleID)
 

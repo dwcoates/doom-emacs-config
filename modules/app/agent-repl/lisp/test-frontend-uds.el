@@ -1518,10 +1518,10 @@ a notice here would be an alarm about a startup that has not failed yet."
   ;; Act / Assert
   (should (member "taskCatalog" agent-repl--uds-ignored-frame-fields)))
 
-(ert-deftest agent-repl-test-uds-async-bubble-delta-is-a-deliberately-ignored-frame ()
-  "`asyncBubbleDelta' is a webapp bubble surface Emacs does not draw."
+(ert-deftest agent-repl-test-uds-detached-work-delta-is-a-deliberately-ignored-frame ()
+  "`detachedWorkDelta' is a webapp detached-work surface Emacs does not draw."
   ;; Act / Assert
-  (should (member "asyncBubbleDelta" agent-repl--uds-ignored-frame-fields)))
+  (should (member "detachedWorkDelta" agent-repl--uds-ignored-frame-fields)))
 
 (ert-deftest agent-repl-test-uds-topbar-is-a-deliberately-ignored-frame ()
   "`topbar' is the webapp's resolved chrome; Emacs draws its own tab bar."

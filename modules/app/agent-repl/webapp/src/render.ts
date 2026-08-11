@@ -929,7 +929,7 @@ export interface PanelContext {
   /**
    * The DETACHED WORK registry — every open `AsyncBubble`, keyed by id.
    *
-   * A tool card draws the bubble its own `spawnedBubbleId` NAMES, matched
+   * A tool card draws the work its own `spawnedMessageId` NAMES, matched
    * here; it never derives one. Absent leaves cards drawing no bubbles at
    * all, which is what a page that has received no async push should show.
    */
@@ -1180,8 +1180,8 @@ function ToolCard(
  * launched it.
  *
  * The attachment is a MATCH on the daemon's classification and nothing else,
- * from whichever end of it the wire carries: `AsyncBubble.origin_tool_use_id`
- * against this card's tool_use id, and `AgentToolCall.spawned_bubble_id`
+ * from whichever end of it the wire carries: `DetachedWork.origin_tool_use_id`
+ * against this card's tool_use id, and `AgentToolCall.spawned_message_id`
  * against the bubble's id. Empty on both ends means the call detached nothing
  * — never a prompt to go find a plausible candidate. A card with no registry
  * to match against draws nothing, which is the honest state of a page that has
@@ -1197,7 +1197,7 @@ function asyncBubbleForCard(item: ToolItem, panels?: PanelContext): string {
   if (registry === undefined) return "";
   return AsyncBubbleForCall(
     item.toolUseId,
-    item.spawnedBubbleId,
+    item.spawnedMessageId,
     asyncRenderContext(registry, panels),
     ASYNC_TEAL_TOOLS.has(item.toolName),
   );

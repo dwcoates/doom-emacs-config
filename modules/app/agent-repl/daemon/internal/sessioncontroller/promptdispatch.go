@@ -23,7 +23,7 @@ import (
 // they disagreed:
 //
 //   - the receipt was pushed before anything was recognized, so `/clear` drew a
-//     bubble reading "/clear" beside the red divider that reported the very same
+//     work reading "/clear" beside the red divider that reported the very same
 //     cut;
 //   - the queue's delivery path recognized nothing at all, so a `/clear` held
 //     behind a running turn was cut with no axis open either.
@@ -78,7 +78,7 @@ func (c sessionCommand) clear() bool {
 // locally and the model never sees it — so a purple bubble reading "/model"
 // claims a question was asked that nobody received. `/clear` is worse still:
 // the cut already draws its own divider exactly where it happened, and the
-// bubble sits ABOVE that divider, in the region the clear exists to discard.
+// work sits ABOVE that divider, in the region the clear exists to discard.
 //
 // What the frontend gets instead is the invocation item (pushSessionCommand),
 // which carries the command's identity and no text at all.
@@ -221,7 +221,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// `/clear` alone creates no edge: it is a session command that runs no turn,
 	// and its clearing axis below is the truthful status premise. Every OTHER
 	// session command does occupy the shim exactly as a prompt would (see
-	// claimsTurn), so it takes the edge while still earning no bubble.
+	// claimsTurn), so it takes the edge while still earning no work.
 	// MarkPromptAccepted holds the SSM transition lock through the frontend
 	// publication, so neither the asynchronous SSM subscriber nor a later
 	// TurnEnded can overtake it.
@@ -243,7 +243,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// command and a purple bubble for a prompt nobody wrote. `echoes` implies
 	// `claimsTurn` by construction — an ordinary prompt is both — so the receipt
 	// below always sits inside a claimed turn.
-	// THE KEEP-ALIVE PING EARNS NO BUBBLE AND MINTS NO RECEIPT, for the reason
+	// THE KEEP-ALIVE PING EARNS NO DETACHED WORK AND MINTS NO RECEIPT, for the reason
 	// `/model` does not: the user did not say it. It is conversation PLUMBING —
 	// the daemon refreshing a cache — and a purple bubble reading "respond with
 	// only a '.'" would claim a question the user never asked and would replay
@@ -294,21 +294,21 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 		accepted, turnBefore = true, before
 	}
 
-	// THE DURABLE RECEIPT is written only for a prompt that EARNS A BUBBLE. Its
-	// sole purpose is replaying that bubble across a daemon bounce, so recording
-	// one for a session command would resurrect exactly the "/model" bubble this
+	// THE DURABLE RECEIPT is written only for a prompt that EARNS A DETACHED WORK. Its
+	// sole purpose is replaying that work across a daemon bounce, so recording
+	// one for a session command would resurrect exactly the "/model" work this
 	// whole path exists to withhold — and would resurrect it from durable
 	// storage, where nothing downstream could tell it from a real prompt.
 	if echoes {
 		// THE DURABLE RECEIPT, PART OF THE ACCEPTANCE ITSELF and therefore
-		// ahead of BOTH the submit and the pushed bubble.
+		// ahead of BOTH the submit and the pushed work.
 		//
 		// The ordering is the guarantee. A receipt the user saw must never be
 		// unrecoverable, so the record cannot come after the push; and a prompt
 		// this daemon handed to a shim must never be lost, so it cannot come
 		// after the submit either. Writing it here puts the durable evidence
 		// ahead of everything that could make the prompt real to anyone else,
-		// which makes "the user saw a bubble for a prompt with no record" and
+		// which makes "the user saw a work for a prompt with no record" and
 		// "a shim is running a prompt with no record" both unrepresentable
 		// rather than merely improbable.
 		//
@@ -367,7 +367,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// THE RECEIPT, only after every frontend has been synchronously offered the
 	// accepted prompt's `thinking` state, and only once the shim has actually
 	// TAKEN the prompt. It closes the transcript-latency gap, but never at the
-	// cost of a green prompt bubble — and never at the cost of a bubble for a
+	// cost of a green prompt bubble — and never at the cost of a work for a
 	// prompt no session received, which is why it stays behind the submit while
 	// the state edge moved ahead of it: a state edge can be retracted, a
 	// conversation item the frontend has already drawn cannot.
@@ -458,13 +458,13 @@ func (m *Manager) notePromptAccepted(d *sessionController, requestID string, adm
 }
 
 // recordPromptReceipt persists the durable evidence that this daemon accepted
-// one user prompt, BEFORE the prompt reaches a shim or its bubble reaches a
+// one user prompt, BEFORE the prompt reaches a shim or its work reaches a
 // frontend.
 //
 // A caller with no request id behind it (an internal re-submit, a harness)
 // records nothing, exactly as it pushes nothing: the record is keyed by the
-// identity the frontend reconciles the bubble on, and a minted id would name a
-// bubble nothing could ever claim.
+// identity the frontend reconciles the work on, and a minted id would name a
+// work nothing could ever claim.
 //
 // A WRITE FAILURE FAILS THE SUBMIT. This is a write to the same state store the
 // accepted edge just wrote to, so a failure here is a state store that cannot
@@ -526,7 +526,7 @@ func (m *Manager) retractPromptAccepted(d *sessionController, requestID string, 
 
 	// The durable receipt goes with the edge it was written beside. It was
 	// recorded on the daemon's INTENT to submit, and that intent has now been
-	// falsified, so replaying a bubble for it after a bounce would testify to a
+	// falsified, so replaying a work for it after a bounce would testify to a
 	// prompt no session ever received. This is the one window the accept-time
 	// write opens, and this is where it closes.
 	if requestID != "" {
@@ -644,7 +644,7 @@ func (m *Manager) applyLocalSessionCommand(ctx context.Context, d *sessionContro
 // THE DAEMON IS THE ONLY THING THAT KNOWS. Nothing in the event stream announces
 // a clear as it BEGINS — the first-class ContextCleared reports one that already
 // finished — so a footer that waited for an event would say `thinking` through
-// the entire cut and then jump straight to the cleared bubble.
+// the entire cut and then jump straight to the cleared work.
 //
 // Takes the CLASSIFICATION rather than the text, which is what keeps the
 // recognition in one place: there is no second reading here to drift from the

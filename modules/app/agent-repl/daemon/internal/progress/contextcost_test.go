@@ -117,7 +117,7 @@ func TestExpensiveTurnCarriesTheKeepAliveOrigin(t *testing.T) {
 }
 
 // The alert names the turn it is about, so a frontend can join it to that
-// turn's own bubble rather than to whatever happens to be on screen.
+// turn's own work rather than to whatever happens to be on screen.
 func TestExpensiveTurnNamesItsTurn(t *testing.T) {
 	// Arrange.
 	h := newCostHarness(t, 1_000)

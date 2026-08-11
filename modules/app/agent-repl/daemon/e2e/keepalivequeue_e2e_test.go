@@ -75,7 +75,7 @@ func heldByKeepAlivePing(t *testing.T, s *keepAliveSession, text string) keepAli
 // --- (8) the hold ---------------------------------------------------------------
 
 // TestE2EAPromptHeldByAPingNamesTheTurnHoldingIt covers the JOIN: the hold
-// carries the ping's turn_id, so the bubble the webapp renders ("waiting on a
+// carries the ping's turn_id, so the work the webapp renders ("waiting on a
 // keep-alive response") is joined to the turn whose completion releases it
 // rather than being an unattributable "please wait".
 func TestE2EAPromptHeldByAPingNamesTheTurnHoldingIt(t *testing.T) {
@@ -171,7 +171,7 @@ func TestE2EAPromptHeldByAPingCanStillBeCancelled(t *testing.T) {
 
 // TestE2EACancelledHoldRunsNoTurnForIt covers what a cancel MEANS: the prompt
 // was discarded, so it must never be submitted after the ping ends. A cancel
-// that merely removed the bubble would deliver the prompt anyway a moment
+// that merely removed the work would deliver the prompt anyway a moment
 // later, which is worse than not offering a cancel at all.
 func TestE2EACancelledHoldRunsNoTurnForIt(t *testing.T) {
 	// Arrange

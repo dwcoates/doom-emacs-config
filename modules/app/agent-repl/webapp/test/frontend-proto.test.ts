@@ -935,18 +935,24 @@ describe("decodeFrontendFrame — TypingDelta embeds ContentDelta", () => {
     expect(frame.frame.value.kind).toBe("signature");
   });
 
-  it("carries the bubble the preview is scoped to", () => {
-    const frame = decode({ typingDelta: { fence: "s1", bubbleId: "b1", delta: { uuid: "u1", inputJson: "{" } } });
+  it("carries the message the preview is scoped to", () => {
+    const frame = decode({ typingDelta: { fence: "s1", parentMessageId: "b1", delta: { uuid: "u1", inputJson: "{" } } });
     if (frame.frame.case !== "typingDelta") throw new Error("wrong variant");
-    expect(frame.frame.value.bubbleId).toBe("b1");
+    expect(frame.frame.value.parentMessageId).toBe("b1");
   });
 
-  it("reads an omitted bubble id as the top-level feed", () => {
+  it("reads an omitted parent message id as the top-level feed", () => {
     // proto3 omits an empty string, and empty means the ordinary case: this
     // preview opens on the feed and is retired there.
     const frame = decode({ typingDelta: { fence: "s1", delta: { uuid: "u1", inputJson: "{" } } });
     if (frame.frame.case !== "typingDelta") throw new Error("wrong variant");
-    expect(frame.frame.value.bubbleId).toBe("");
+    expect(frame.frame.value.parentMessageId).toBe("");
+  });
+
+  it("rejects the retired `bubbleId` wire name rather than silently ignoring it", () => {
+    expect(() =>
+      decode({ typingDelta: { fence: "s1", bubbleId: "b1", delta: { uuid: "u1", inputJson: "{" } } }),
+    ).toThrow(/unrecognized field/);
   });
 
   it("rejects a TypingDelta with no delta", () => {
@@ -2960,43 +2966,129 @@ describe("AgentResponse.usage_stamp", () => {
   });
 });
 
-// --- async bubbles: the three places the wire carries detached work ---------
+// --- detached work: the three places the wire carries it --------------------
 
-describe("async-bubble decode entry points", () => {
-  const BUBBLE = { id: "b1", liveness: { live: {} }, agent: {} };
+describe("detached-work decode entry points", () => {
+  /** The PAYLOAD. It states no id and no parent — the envelope does both. */
+  const WORK = { liveness: { live: {} }, agent: {} };
+  /** A whole feed envelope whose payload is that work: a feed row. */
+  const MSG = {
+    uuid: "b1",
+    tsMs: "1",
+    source: "CONVERSATION_SOURCE_USER",
+    lineage: { topLevelMessageId: "b1", parentMessageId: "" },
+    detachedWork: WORK,
+  };
 
-  it("decodes the asyncBubbleDelta frame variant", () => {
+  it("decodes the detachedWorkDelta frame variant", () => {
     // Arrange / Act
-    const frame = decode({ asyncBubbleDelta: { workspace: "/w", fence: "f1", opened: [BUBBLE] } });
+    const frame = decode({ detachedWorkDelta: { workspace: "/w", fence: "f1", opened: [MSG] } });
 
     // Assert
-    expect(frame.frame.case === "asyncBubbleDelta" && frame.frame.value.opened[0].id).toBe("b1");
+    expect(frame.frame.case === "detachedWorkDelta" && frame.frame.value.opened[0].id).toBe("b1");
   });
 
-  it("decodes StateSnapshot.asyncBubbles, the reconnect resume set", () => {
-    // Arrange / Act
-    const frame = decode({ snapshot: { asyncBubbles: [BUBBLE] } });
-
-    // Assert
-    expect(frame.frame.case === "snapshot" && frame.frame.value.asyncBubbles.map((b) => b.id)).toEqual(["b1"]);
-  });
-
-  it("decodes ConversationItem.asyncBubble, the feed-anchored opening state", () => {
+  it("takes the opened message's own uuid as the work's id", () => {
     // Arrange / Act
     const frame = decode({
-      conversationDelta: {
-        workspace: "ws",
-        fence: "s1",
-        throughSeq: "1",
-        messages: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
+      detachedWorkDelta: { workspace: "/w", fence: "f1", opened: [{ ...MSG, uuid: "m9", lineage: { topLevelMessageId: "m9", parentMessageId: "" } }] },
+    });
+
+    // Assert
+    expect(frame.frame.case === "detachedWorkDelta" && frame.frame.value.opened[0].id).toBe("m9");
+  });
+
+  it("takes the opened message's lineage as the work's containment", () => {
+    // Arrange / Act
+    const frame = decode({
+      detachedWorkDelta: {
+        workspace: "/w",
+        fence: "f1",
+        opened: [{ ...MSG, lineage: { topLevelMessageId: "root", parentMessageId: "mid" } }],
       },
     });
 
     // Assert
-    expect(frame.frame.case === "conversationDelta" && frame.frame.value.messages[0].asyncBubble?.id).toBe("b1");
+    expect(
+      frame.frame.case === "detachedWorkDelta" && {
+        parent: frame.frame.value.opened[0].parentMessageId,
+        top: frame.frame.value.opened[0].topLevelMessageId,
+      },
+    ).toEqual({ parent: "mid", top: "root" });
   });
 
-  it("rejects a feed-anchored bubble with no kind arm, loudly, at decode", () => {
+  it("rejects an opened message whose payload arm is not detachedWork", () => {
+    // Arrange / Act / Assert — a daemon bug, never a message to skip past.
+    expect(() =>
+      decode({
+        detachedWorkDelta: {
+          workspace: "/w",
+          fence: "f1",
+          opened: [{ uuid: "b1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", contextCleared: {} }],
+        },
+      }),
+    ).toThrow(/only 'detachedWork' belongs here/);
+  });
+
+  it("rejects an opened detached-work message carrying no lineage", () => {
+    // Arrange / Act / Assert — containment left the payload, so absent lineage
+    // leaves the work unplaceable rather than top-level by default.
+    const { lineage: _dropped, ...noLineage } = MSG;
+    expect(() =>
+      decode({ detachedWorkDelta: { workspace: "/w", fence: "f1", opened: [noLineage] } }),
+    ).toThrow(/detached work with no `lineage`/);
+  });
+
+  it("routes an update by messageId, not by any id of its own", () => {
+    // Arrange / Act
+    const frame = decode({
+      detachedWorkDelta: {
+        workspace: "/w",
+        fence: "f1",
+        updates: [{ messageId: "b1", liveness: { liveness: { live: {} } } }],
+      },
+    });
+
+    // Assert
+    expect(frame.frame.case === "detachedWorkDelta" && frame.frame.value.updates[0].messageId).toBe("b1");
+  });
+
+  it("rejects a push with no fence, which could not be gated at all", () => {
+    // Arrange / Act / Assert
+    expect(() => decode({ detachedWorkDelta: { workspace: "/w" } })).toThrow(/missing required `fence`/);
+  });
+
+  it("rejects an unrecognized field on the push envelope", () => {
+    // Arrange / Act / Assert
+    expect(() => decode({ detachedWorkDelta: { workspace: "/w", fence: "f", sessionId: "s" } })).toThrow(
+      /unrecognized field/,
+    );
+  });
+
+  it("decodes StateSnapshot.detachedWork, the reconnect resume set", () => {
+    // Arrange / Act
+    const frame = decode({ snapshot: { detachedWork: [MSG] } });
+
+    // Assert
+    expect(frame.frame.case === "snapshot" && frame.frame.value.detachedWork.map((b) => b.id)).toEqual(["b1"]);
+  });
+
+  it("rejects the retired `asyncBubbles` snapshot field name", () => {
+    // Arrange / Act / Assert
+    expect(() => decode({ snapshot: { asyncBubbles: [MSG] } })).toThrow(/unrecognized field/);
+  });
+
+  it("decodes Message.detachedWork on the ordinary conversation channel", () => {
+    // Arrange / Act
+    const frame = decode({
+      conversationDelta: { workspace: "ws", fence: "s1", throughSeq: "1", messages: [MSG] },
+    });
+
+    // Assert
+    expect(frame.frame.case === "conversationDelta" && frame.frame.value.messages[0].detachedWork?.id).toBe("b1");
+  });
+
+  it("rejects detached work with no kind arm, loudly, at decode", () => {
     // Arrange / Act / Assert
     expect(() =>
       decode({
@@ -3004,20 +3096,13 @@ describe("async-bubble decode entry points", () => {
           workspace: "ws",
           fence: "s1",
           throughSeq: "1",
-          messages: [
-            {
-              uuid: "u1",
-              tsMs: "1",
-              source: "CONVERSATION_SOURCE_USER",
-              asyncBubble: { id: "b1", liveness: { live: {} } },
-            },
-          ],
+          messages: [{ ...MSG, detachedWork: { liveness: { live: {} } } }],
         },
       }),
     ).toThrow(/requires exactly one of agent, journal, shell, unclassified/);
   });
 
-  it("carries a tool call's spawned_bubble_id through as the classification verdict", () => {
+  it("carries a tool call's spawned_message_id through as the classification verdict", () => {
     // Arrange / Act
     const frame = decode({
       conversationDelta: {
@@ -3029,17 +3114,17 @@ describe("async-bubble decode entry points", () => {
             uuid: "u1",
             tsMs: "1",
             source: "CONVERSATION_SOURCE_USER",
-            agent: { toolCall: { call: { id: "tu1", name: "Task" }, spawnedBubbleId: "b1" } },
+            agent: { toolCall: { call: { id: "tu1", name: "Task" }, spawnedMessageId: "b1" } },
           },
         ],
       },
     });
 
     // Assert
-    expect(frame.frame.case === "conversationDelta" && frame.frame.value.messages[0].spawnedBubbleId).toBe("b1");
+    expect(frame.frame.case === "conversationDelta" && frame.frame.value.messages[0].spawnedMessageId).toBe("b1");
   });
 
-  it("leaves spawnedBubbleId ABSENT when the call detached nothing", () => {
+  it("leaves spawnedMessageId ABSENT when the call detached nothing", () => {
     // Arrange / Act
     const frame = decode({
       conversationDelta: {
@@ -3058,7 +3143,7 @@ describe("async-bubble decode entry points", () => {
     });
 
     // Assert
-    expect(frame.frame.case === "conversationDelta" && "spawnedBubbleId" in frame.frame.value.messages[0]).toBe(false);
+    expect(frame.frame.case === "conversationDelta" && "spawnedMessageId" in frame.frame.value.messages[0]).toBe(false);
   });
 });
 

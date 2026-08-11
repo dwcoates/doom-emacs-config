@@ -8,7 +8,7 @@
 // is the ONLY thing that retires one.
 //
 // So when the record can never arrive — the query was torn down mid-block, the
-// session died, the shim rolled — nothing retires it. The bubble spins
+// session died, the shim rolled — nothing retires it. The work spins
 // "streaming input…" for the life of the page with no body, and no later event
 // corrects it: the conversation moves on around a card that is permanently
 // mid-sentence.
@@ -24,10 +24,10 @@
 // # Why an address set rather than a preview ledger
 //
 // What is tracked is the SURFACE a preview was opened on — the top-level feed
-// (""), or the async bubble it was folded into — and the set only has to be a
+// (""), or the detached work it was folded into — and the set only has to be a
 // SUPERSET of the surfaces that could still be showing one. A cut for a preview
 // that its own record already retired is a documented no-op on the client, so
-// over-cutting costs nothing; under-cutting leaves the spinning bubble this
+// over-cutting costs nothing; under-cutting leaves the spinning work this
 // exists to prevent. Tracking retirement precisely here would duplicate the
 // client's own claim logic and could only create a way for the two to disagree.
 package sessioncontroller
@@ -39,12 +39,12 @@ import (
 )
 
 // notePreviewOpened records the surface a live typing preview was opened on.
-func (c *consumer) notePreviewOpened(bubbleID string) {
+func (c *consumer) notePreviewOpened(messageID string) {
 	c.mu.Lock()
 	if c.previewSurfaces == nil {
 		c.previewSurfaces = make(map[string]struct{}, 2)
 	}
-	c.previewSurfaces[bubbleID] = struct{}{}
+	c.previewSurfaces[messageID] = struct{}{}
 	c.mu.Unlock()
 }
 
@@ -65,18 +65,18 @@ func (c *consumer) cutOpenPreviews(reason string) {
 	// Sorted so one teardown's records read the same way twice, and so the
 	// top-level feed ("") is always cut first.
 	addresses := make([]string, 0, len(surfaces))
-	for bubbleID := range surfaces {
-		addresses = append(addresses, bubbleID)
+	for messageID := range surfaces {
+		addresses = append(addresses, messageID)
 	}
 	sort.Strings(addresses)
 	fence := c.fence()
-	for _, bubbleID := range addresses {
-		c.logf("session-controller: CUTTING an unretirable typing preview session=%s ws=%q bubble=%q reason=%s — the authoritative record that would retire this preview can no longer arrive, so the daemon retires it rather than leaving a bubble streaming with no body",
-			c.sessionID, c.workspace, bubbleID, reason)
+	for _, messageID := range addresses {
+		c.logf("session-controller: CUTTING an unretirable typing preview session=%s ws=%q work=%q reason=%s — the authoritative record that would retire this preview can no longer arrive, so the daemon retires it rather than leaving a work streaming with no body",
+			c.sessionID, c.workspace, messageID, reason)
 		c.push.PushTypingCut(&frontendv1.TypingCut{
-			Workspace: c.workspace,
-			BubbleId:  bubbleID,
-			Fence:     fence,
+			Workspace:       c.workspace,
+			ParentMessageId: messageID,
+			Fence:           fence,
 		})
 	}
 }

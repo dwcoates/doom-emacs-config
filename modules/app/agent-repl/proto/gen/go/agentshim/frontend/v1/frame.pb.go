@@ -46,7 +46,7 @@ type FrontendFrame struct {
 	//	*FrontendFrame_SessionHealth
 	//	*FrontendFrame_WorkspaceRoster
 	//	*FrontendFrame_ShutdownSchedule
-	//	*FrontendFrame_AsyncBubbleDelta
+	//	*FrontendFrame_DetachedWorkDelta
 	//	*FrontendFrame_Topbar
 	//	*FrontendFrame_TokenBreakdown
 	//	*FrontendFrame_WorkspaceGate
@@ -258,10 +258,10 @@ func (x *FrontendFrame) GetShutdownSchedule() *ShutdownScheduleView {
 	return nil
 }
 
-func (x *FrontendFrame) GetAsyncBubbleDelta() *AsyncBubbleDelta {
+func (x *FrontendFrame) GetDetachedWorkDelta() *DetachedWorkDelta {
 	if x != nil {
-		if x, ok := x.Frame.(*FrontendFrame_AsyncBubbleDelta); ok {
-			return x.AsyncBubbleDelta
+		if x, ok := x.Frame.(*FrontendFrame_DetachedWorkDelta); ok {
+			return x.DetachedWorkDelta
 		}
 	}
 	return nil
@@ -419,12 +419,12 @@ type FrontendFrame_ShutdownSchedule struct {
 	ShutdownSchedule *ShutdownScheduleView `protobuf:"bytes,19,opt,name=shutdown_schedule,json=shutdownSchedule,proto3,oneof"`
 }
 
-type FrontendFrame_AsyncBubbleDelta struct {
-	// Detached work opening, and typed incremental updates to work already
-	// open. Its own frame rather than more ConversationDelta messages, because a
-	// detached agent produces at its own rate and must not flood the
-	// conversation that dispatched it.
-	AsyncBubbleDelta *AsyncBubbleDelta `protobuf:"bytes,20,opt,name=async_bubble_delta,json=asyncBubbleDelta,proto3,oneof"`
+type FrontendFrame_DetachedWorkDelta struct {
+	// Detached work opening as WHOLE MESSAGES, and typed incremental UPDATES to
+	// messages already open. Its own frame rather than more ConversationDelta
+	// messages, because a detached agent produces at its own rate and must not
+	// flood the conversation that dispatched it.
+	DetachedWorkDelta *DetachedWorkDelta `protobuf:"bytes,20,opt,name=detached_work_delta,json=detachedWorkDelta,proto3,oneof"`
 }
 
 type FrontendFrame_Topbar struct {
@@ -510,7 +510,7 @@ func (*FrontendFrame_WorkspaceRoster) isFrontendFrame_Frame() {}
 
 func (*FrontendFrame_ShutdownSchedule) isFrontendFrame_Frame() {}
 
-func (*FrontendFrame_AsyncBubbleDelta) isFrontendFrame_Frame() {}
+func (*FrontendFrame_DetachedWorkDelta) isFrontendFrame_Frame() {}
 
 func (*FrontendFrame_Topbar) isFrontendFrame_Frame() {}
 
@@ -556,11 +556,12 @@ type StateSnapshot struct {
 	// The daemon-global lease state as of this connect, so a client joining
 	// mid-drain renders the banner without waiting for the next edge.
 	ShutdownSchedule *ShutdownScheduleView `protobuf:"bytes,10,opt,name=shutdown_schedule,json=shutdownSchedule,proto3" json:"shutdown_schedule,omitempty"`
-	// Every async bubble the session still holds, folded to date, so a
+	// Every piece of detached work the session still holds, folded to date, as
+	// WHOLE MESSAGES — the same envelopes DetachedWorkDelta.opened carries — so a
 	// reconnecting client resumes a running detached agent rather than starting
-	// its fold over. Each bubble carries its own AsyncFold accounting, so the
+	// its fold over. Each carries its own DetachedWorkFold accounting, so the
 	// client also knows exactly what it is NOT being shown.
-	AsyncBubbles []*AsyncBubble `protobuf:"bytes,11,rep,name=async_bubbles,json=asyncBubbles,proto3" json:"async_bubbles,omitempty"`
+	DetachedWork []*Message `protobuf:"bytes,11,rep,name=detached_work,json=detachedWork,proto3" json:"detached_work,omitempty"`
 	// The resolved component views, one per workspace, so a connecting client
 	// draws its chrome without waiting for each view's first push.
 	Topbars         []*TopbarView         `protobuf:"bytes,12,rep,name=topbars,proto3" json:"topbars,omitempty"`
@@ -706,9 +707,9 @@ func (x *StateSnapshot) GetShutdownSchedule() *ShutdownScheduleView {
 	return nil
 }
 
-func (x *StateSnapshot) GetAsyncBubbles() []*AsyncBubble {
+func (x *StateSnapshot) GetDetachedWork() []*Message {
 	if x != nil {
-		return x.AsyncBubbles
+		return x.DetachedWork
 	}
 	return nil
 }
@@ -1596,7 +1597,7 @@ var File_agentshim_frontend_v1_frame_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_frame_proto_rawDesc = "" +
 	"\n" +
-	"!agentshim/frontend/v1/frame.proto\x12\x15agentshim.frontend.v1\x1a(agentshim/frontend/v1/async-bubble.proto\x1a-agentshim/frontend/v1/conversation-page.proto\x1a\"agentshim/frontend/v1/errors.proto\x1a(agentshim/frontend/v1/failure-card.proto\x1a agentshim/frontend/v1/feed.proto\x1a\"agentshim/frontend/v1/footer.proto\x1a(agentshim/frontend/v1/gate-revival.proto\x1a agentshim/frontend/v1/host.proto\x1a%agentshim/frontend/v1/lifecycle.proto\x1a!agentshim/frontend/v1/merge.proto\x1a+agentshim/frontend/v1/permission-card.proto\x1a(agentshim/frontend/v1/prompt-queue.proto\x1a#agentshim/frontend/v1/sidebar.proto\x1a!agentshim/frontend/v1/state.proto\x1a'agentshim/frontend/v1/tokens-menu.proto\x1a%agentshim/frontend/v1/tool-call.proto\x1a\"agentshim/frontend/v1/topbar.proto\"\x98\x10\n" +
+	"!agentshim/frontend/v1/frame.proto\x12\x15agentshim.frontend.v1\x1a-agentshim/frontend/v1/conversation-page.proto\x1a\"agentshim/frontend/v1/errors.proto\x1a(agentshim/frontend/v1/failure-card.proto\x1a agentshim/frontend/v1/feed.proto\x1a\"agentshim/frontend/v1/footer.proto\x1a(agentshim/frontend/v1/gate-revival.proto\x1a agentshim/frontend/v1/host.proto\x1a%agentshim/frontend/v1/lifecycle.proto\x1a!agentshim/frontend/v1/merge.proto\x1a+agentshim/frontend/v1/permission-card.proto\x1a(agentshim/frontend/v1/prompt-queue.proto\x1a#agentshim/frontend/v1/sidebar.proto\x1a!agentshim/frontend/v1/state.proto\x1a'agentshim/frontend/v1/tokens-menu.proto\x1a%agentshim/frontend/v1/tool-call.proto\x1a\"agentshim/frontend/v1/topbar.proto\"\xaf\x10\n" +
 	"\rFrontendFrame\x12B\n" +
 	"\bsnapshot\x18\x01 \x01(\v2$.agentshim.frontend.v1.StateSnapshotH\x00R\bsnapshot\x12P\n" +
 	"\x0fworkspace_state\x18\x02 \x01(\v2%.agentshim.frontend.v1.WorkspaceStateH\x00R\x0eworkspaceState\x12G\n" +
@@ -1619,8 +1620,8 @@ const file_agentshim_frontend_v1_frame_proto_rawDesc = "" +
 	"\rdaemon_health\x18\x10 \x01(\v2'.agentshim.frontend.v1.DaemonHealthViewH\x00R\fdaemonHealth\x12Q\n" +
 	"\x0esession_health\x18\x11 \x01(\v2(.agentshim.frontend.v1.SessionHealthViewH\x00R\rsessionHealth\x12S\n" +
 	"\x10workspace_roster\x18\x12 \x01(\v2&.agentshim.frontend.v1.WorkspaceRosterH\x00R\x0fworkspaceRoster\x12Z\n" +
-	"\x11shutdown_schedule\x18\x13 \x01(\v2+.agentshim.frontend.v1.ShutdownScheduleViewH\x00R\x10shutdownSchedule\x12W\n" +
-	"\x12async_bubble_delta\x18\x14 \x01(\v2'.agentshim.frontend.v1.AsyncBubbleDeltaH\x00R\x10asyncBubbleDelta\x12;\n" +
+	"\x11shutdown_schedule\x18\x13 \x01(\v2+.agentshim.frontend.v1.ShutdownScheduleViewH\x00R\x10shutdownSchedule\x12Z\n" +
+	"\x13detached_work_delta\x18\x14 \x01(\v2(.agentshim.frontend.v1.DetachedWorkDeltaH\x00R\x11detachedWorkDelta\x12;\n" +
 	"\x06topbar\x18\x15 \x01(\v2!.agentshim.frontend.v1.TopbarViewH\x00R\x06topbar\x12T\n" +
 	"\x0ftoken_breakdown\x18\x16 \x01(\v2).agentshim.frontend.v1.TokenBreakdownViewH\x00R\x0etokenBreakdown\x12Q\n" +
 	"\x0eworkspace_gate\x18\x17 \x01(\v2(.agentshim.frontend.v1.WorkspaceGateViewH\x00R\rworkspaceGate\x12W\n" +
@@ -1629,7 +1630,7 @@ const file_agentshim_frontend_v1_frame_proto_rawDesc = "" +
 	"\x11conversation_page\x18\x1a \x01(\v2'.agentshim.frontend.v1.ConversationPageH\x00R\x10conversationPage\x12A\n" +
 	"\n" +
 	"typing_cut\x18\x1b \x01(\v2 .agentshim.frontend.v1.TypingCutH\x00R\ttypingCutB\a\n" +
-	"\x05frameJ\x04\b\b\x10\tR\x0fdegraded_notice\"\xa9\t\n" +
+	"\x05frameJ\x04\b\b\x10\tR\x0fdegraded_noticeR\x12async_bubble_delta\"\xb4\t\n" +
 	"\rStateSnapshot\x12E\n" +
 	"\n" +
 	"workspaces\x18\x01 \x03(\v2%.agentshim.frontend.v1.WorkspaceStateR\n" +
@@ -1643,14 +1644,14 @@ const file_agentshim_frontend_v1_frame_proto_rawDesc = "" +
 	"\x13workspace_available\x18\b \x03(\v2).agentshim.frontend.v1.WorkspaceAvailableR\x12workspaceAvailable\x12D\n" +
 	"\fhost_actions\x18\t \x03(\v2!.agentshim.frontend.v1.HostActionR\vhostActions\x12X\n" +
 	"\x11shutdown_schedule\x18\n" +
-	" \x01(\v2+.agentshim.frontend.v1.ShutdownScheduleViewR\x10shutdownSchedule\x12G\n" +
-	"\rasync_bubbles\x18\v \x03(\v2\".agentshim.frontend.v1.AsyncBubbleR\fasyncBubbles\x12;\n" +
+	" \x01(\v2+.agentshim.frontend.v1.ShutdownScheduleViewR\x10shutdownSchedule\x12C\n" +
+	"\rdetached_work\x18\v \x03(\v2\x1e.agentshim.frontend.v1.MessageR\fdetachedWork\x12;\n" +
 	"\atopbars\x18\f \x03(\v2!.agentshim.frontend.v1.TopbarViewR\atopbars\x12T\n" +
 	"\x10token_breakdowns\x18\r \x03(\v2).agentshim.frontend.v1.TokenBreakdownViewR\x0ftokenBreakdowns\x12Q\n" +
 	"\x0fworkspace_gates\x18\x0e \x03(\v2(.agentshim.frontend.v1.WorkspaceGateViewR\x0eworkspaceGates\x12U\n" +
 	"\x12merge_queue_roster\x18\x0f \x01(\v2'.agentshim.frontend.v1.MergeQueueRosterR\x10mergeQueueRoster\x12'\n" +
 	"\x0fworkspace_total\x18\x10 \x01(\x05R\x0eworkspaceTotal\x122\n" +
-	"\x15workspace_batch_index\x18\x11 \x01(\x05R\x13workspaceBatchIndex\"\xfd\x15\n" +
+	"\x15workspace_batch_index\x18\x11 \x01(\x05R\x13workspaceBatchIndexR\rasync_bubbles\"\xfd\x15\n" +
 	"\x0fFrontendCommand\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1c\n" +
@@ -1748,7 +1749,7 @@ var file_agentshim_frontend_v1_frame_proto_goTypes = []any{
 	(*SessionHealthView)(nil),          // 19: agentshim.frontend.v1.SessionHealthView
 	(*WorkspaceRoster)(nil),            // 20: agentshim.frontend.v1.WorkspaceRoster
 	(*ShutdownScheduleView)(nil),       // 21: agentshim.frontend.v1.ShutdownScheduleView
-	(*AsyncBubbleDelta)(nil),           // 22: agentshim.frontend.v1.AsyncBubbleDelta
+	(*DetachedWorkDelta)(nil),          // 22: agentshim.frontend.v1.DetachedWorkDelta
 	(*TopbarView)(nil),                 // 23: agentshim.frontend.v1.TopbarView
 	(*TokenBreakdownView)(nil),         // 24: agentshim.frontend.v1.TokenBreakdownView
 	(*WorkspaceGateView)(nil),          // 25: agentshim.frontend.v1.WorkspaceGateView
@@ -1756,7 +1757,7 @@ var file_agentshim_frontend_v1_frame_proto_goTypes = []any{
 	(*RestartPendingView)(nil),         // 27: agentshim.frontend.v1.RestartPendingView
 	(*ConversationPage)(nil),           // 28: agentshim.frontend.v1.ConversationPage
 	(*TypingCut)(nil),                  // 29: agentshim.frontend.v1.TypingCut
-	(*AsyncBubble)(nil),                // 30: agentshim.frontend.v1.AsyncBubble
+	(*Message)(nil),                    // 30: agentshim.frontend.v1.Message
 	(*SubmitPromptCmd)(nil),            // 31: agentshim.frontend.v1.SubmitPromptCmd
 	(*InterruptCmd)(nil),               // 32: agentshim.frontend.v1.InterruptCmd
 	(*PermissionAnswerCmd)(nil),        // 33: agentshim.frontend.v1.PermissionAnswerCmd
@@ -1811,7 +1812,7 @@ var file_agentshim_frontend_v1_frame_proto_depIdxs = []int32{
 	19, // 15: agentshim.frontend.v1.FrontendFrame.session_health:type_name -> agentshim.frontend.v1.SessionHealthView
 	20, // 16: agentshim.frontend.v1.FrontendFrame.workspace_roster:type_name -> agentshim.frontend.v1.WorkspaceRoster
 	21, // 17: agentshim.frontend.v1.FrontendFrame.shutdown_schedule:type_name -> agentshim.frontend.v1.ShutdownScheduleView
-	22, // 18: agentshim.frontend.v1.FrontendFrame.async_bubble_delta:type_name -> agentshim.frontend.v1.AsyncBubbleDelta
+	22, // 18: agentshim.frontend.v1.FrontendFrame.detached_work_delta:type_name -> agentshim.frontend.v1.DetachedWorkDelta
 	23, // 19: agentshim.frontend.v1.FrontendFrame.topbar:type_name -> agentshim.frontend.v1.TopbarView
 	24, // 20: agentshim.frontend.v1.FrontendFrame.token_breakdown:type_name -> agentshim.frontend.v1.TokenBreakdownView
 	25, // 21: agentshim.frontend.v1.FrontendFrame.workspace_gate:type_name -> agentshim.frontend.v1.WorkspaceGateView
@@ -1829,7 +1830,7 @@ var file_agentshim_frontend_v1_frame_proto_depIdxs = []int32{
 	16, // 33: agentshim.frontend.v1.StateSnapshot.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
 	17, // 34: agentshim.frontend.v1.StateSnapshot.host_actions:type_name -> agentshim.frontend.v1.HostAction
 	21, // 35: agentshim.frontend.v1.StateSnapshot.shutdown_schedule:type_name -> agentshim.frontend.v1.ShutdownScheduleView
-	30, // 36: agentshim.frontend.v1.StateSnapshot.async_bubbles:type_name -> agentshim.frontend.v1.AsyncBubble
+	30, // 36: agentshim.frontend.v1.StateSnapshot.detached_work:type_name -> agentshim.frontend.v1.Message
 	23, // 37: agentshim.frontend.v1.StateSnapshot.topbars:type_name -> agentshim.frontend.v1.TopbarView
 	24, // 38: agentshim.frontend.v1.StateSnapshot.token_breakdowns:type_name -> agentshim.frontend.v1.TokenBreakdownView
 	25, // 39: agentshim.frontend.v1.StateSnapshot.workspace_gates:type_name -> agentshim.frontend.v1.WorkspaceGateView
@@ -1882,7 +1883,6 @@ func file_agentshim_frontend_v1_frame_proto_init() {
 	if File_agentshim_frontend_v1_frame_proto != nil {
 		return
 	}
-	file_agentshim_frontend_v1_async_bubble_proto_init()
 	file_agentshim_frontend_v1_conversation_page_proto_init()
 	file_agentshim_frontend_v1_errors_proto_init()
 	file_agentshim_frontend_v1_failure_card_proto_init()
@@ -1918,7 +1918,7 @@ func file_agentshim_frontend_v1_frame_proto_init() {
 		(*FrontendFrame_SessionHealth)(nil),
 		(*FrontendFrame_WorkspaceRoster)(nil),
 		(*FrontendFrame_ShutdownSchedule)(nil),
-		(*FrontendFrame_AsyncBubbleDelta)(nil),
+		(*FrontendFrame_DetachedWorkDelta)(nil),
 		(*FrontendFrame_Topbar)(nil),
 		(*FrontendFrame_TokenBreakdown)(nil),
 		(*FrontendFrame_WorkspaceGate)(nil),

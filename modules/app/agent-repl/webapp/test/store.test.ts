@@ -94,9 +94,9 @@ function sessionEffect(over: Partial<SessionViewInput> = {}): AdapterEffect {
   };
 }
 
-type TextReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "text"; delta: string; bubbleId: string };
-type ThinkingReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "thinking"; delta: string; bubbleId: string };
-type InputReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "input_json"; toolUseId: string; delta: string; bubbleId: string };
+type TextReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "text"; delta: string; parentMessageId: string };
+type ThinkingReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "thinking"; delta: string; parentMessageId: string };
+type InputReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "input_json"; toolUseId: string; delta: string; parentMessageId: string };
 
 function typingEffect(over: Partial<TextReveal> = {}): AdapterEffect {
   return {
@@ -108,7 +108,7 @@ function typingEffect(over: Partial<TextReveal> = {}): AdapterEffect {
       blockIndex: 0,
       kind: "text",
       delta: "hi",
-      bubbleId: "",
+      parentMessageId: "",
       ...over,
     },
   };
@@ -125,7 +125,7 @@ function inputTypingEffect(over: Partial<InputReveal> = {}): AdapterEffect {
       kind: "input_json",
       toolUseId: "tu1",
       delta: "{",
-      bubbleId: "",
+      parentMessageId: "",
       ...over,
     },
   };
@@ -134,14 +134,14 @@ function inputTypingEffect(over: Partial<InputReveal> = {}): AdapterEffect {
 function thinkingTypingEffect(over: Partial<ThinkingReveal> = {}): AdapterEffect {
   return {
     kind: "typing",
-    value: { workspace: "ws", fence: "s1", messageId: "u1", blockIndex: 0, kind: "thinking", delta: "hmm", bubbleId: "", ...over },
+    value: { workspace: "ws", fence: "s1", messageId: "u1", blockIndex: 0, kind: "thinking", delta: "hmm", parentMessageId: "", ...over },
   };
 }
 
 function unidentifiedInputTypingEffect(over: Partial<UnidentifiedToolInputReveal> = {}): AdapterEffect {
   return {
     kind: "typing",
-    value: { workspace: "ws", fence: "s1", messageId: "u1", blockIndex: 0, kind: "input_json", delta: "{", bubbleId: "", ...over },
+    value: { workspace: "ws", fence: "s1", messageId: "u1", blockIndex: 0, kind: "input_json", delta: "{", parentMessageId: "", ...over },
   };
 }
 
@@ -2833,7 +2833,8 @@ describe("async bubble ingestion", () => {
       id,
       workspace: "/w",
       originToolUseId: "",
-      parentBubbleId: "",
+      parentMessageId: "",
+      topLevelMessageId: id,
       label: "",
       startedAtMs: 0,
       liveness: LIVE,
@@ -2889,7 +2890,7 @@ describe("async bubble ingestion", () => {
 
     // Act
     const result = store.ingest([
-      { kind: "async-bubble-delta", value: delta([], [{ bubbleId: "ghost", update: { case: "liveness", value: LIVE } }]) },
+      { kind: "async-bubble-delta", value: delta([], [{ messageId: "ghost", update: { case: "liveness", value: LIVE } }]) },
     ]);
 
     // Assert
@@ -2990,7 +2991,8 @@ describe("a stale async push", () => {
       id,
       workspace: "/w",
       originToolUseId: "",
-      parentBubbleId: "",
+      parentMessageId: "",
+      topLevelMessageId: id,
       label: "",
       startedAtMs: 0,
       liveness: LIVE,
@@ -3028,7 +3030,7 @@ describe("a stale async push", () => {
 
     // Assert
     expect(
-      lines.filter((line) => line.includes("stale fenced view discarded whole: asyncBubbleDelta")),
+      lines.filter((line) => line.includes("stale fenced view discarded whole: detachedWorkDelta")),
     ).toHaveLength(1);
   });
 
@@ -3331,7 +3333,7 @@ describe("ingest reports a workspace fence rotation", () => {
  * WHERE A LIVE-TYPING PREVIEW LANDS, which is the same question as WHAT WILL
  * RETIRE IT.
  *
- * `TypingDelta.bubble_id` is the daemon's statement of where the previewed
+ * `TypingDelta.parent_message_id` is the daemon's statement of where the previewed
  * record is bound. Empty is the top-level feed. Set means the record is being
  * FOLDED into that async bubble and will never reach the feed, so a top-level
  * preview of it could never be retired and would spin "streaming input…" with
@@ -3362,7 +3364,8 @@ describe("ConversationStore — bubble-scoped live typing", () => {
               id,
               workspace: "/w",
               originToolUseId: "",
-              parentBubbleId: "",
+              parentMessageId: "",
+              topLevelMessageId: id,
               label: "",
               startedAtMs: 0,
               liveness: { case: "live", value: { lastActivityMs: 0 } },
@@ -3376,10 +3379,10 @@ describe("ConversationStore — bubble-scoped live typing", () => {
     return store;
   }
 
-  function typingAt(bubbleId: string, delta = "hi"): AdapterEffect {
+  function typingAt(parentMessageId: string, delta = "hi"): AdapterEffect {
     return {
       kind: "typing",
-      value: { workspace: "/w", fence: "f1", messageId: "u1", blockIndex: 0, kind: "text", delta, bubbleId },
+      value: { workspace: "/w", fence: "f1", messageId: "u1", blockIndex: 0, kind: "text", delta, parentMessageId },
     };
   }
 
@@ -3429,7 +3432,7 @@ describe("ConversationStore — bubble-scoped live typing", () => {
           fence: "f1",
           throughSeq: 2,
           opened: [],
-          updates: [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }],
+          updates: [{ messageId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }],
         },
       } as AdapterEffect,
     ]);
