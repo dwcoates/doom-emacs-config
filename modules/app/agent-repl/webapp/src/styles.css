@@ -1587,6 +1587,27 @@ pre {
   background: var(--card);
   color: var(--muted);
 }
+/* THE BUBBLE-SCOPED LIVE TYPING PREVIEW (async-render.ts BubbleTyping): the
+   text the daemon is relaying for a record it is folding INTO this bubble.
+   It sits at the bubble's tail, after everything the bubble has authoritatively
+   said, and it is drawn in the muted voice every other ephemeral preview wears
+   so it never reads as transcript the bubble has committed to. It retires
+   itself the moment the bubble's own record lands, so nothing here needs a
+   fade-out or a timeout. `pre-wrap` because a relayed chunk carries the model's
+   own newlines and collapsing them would show prose it never emitted. */
+.async-typing {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.async-typing-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-width: 0;
+}
 /* A MERGE bubble's fold (async-render.ts bubbleKindClass): the same fold
    geometry every async bubble wears, in the merge amber rather than the
    neutral card grey. --merge-border is already what the Merge status card and

@@ -837,6 +837,37 @@ being reported."
                          (plist-get item key)))
                id-keys " ")))
 
+(declare-function agent-repl--recovery-slo-note-wire-frame
+                  "agent-repl-recovery-slo" (field ws))
+
+(defun agent-repl--frontend-snapshot-note-wire (field items)
+  "Stamp the recovery SLO's wire signal for every workspace ITEMS names.
+
+THE SNAPSHOT ARM ATTRIBUTES ITS RECORDS.  A `StateSnapshot' carries no
+top-level `workspace' — it carries a LIST of per-workspace records — so
+the dispatch point that stamps a live `workspaceState'/`sessionView' has
+nothing to attribute here and used to stamp nothing at all, while the very
+same records went on to stamp the emacs signal one by one
+\(`agent-repl--recovery-slo-note-emacs').  That is the `wire_ms=-1' beside
+a real `emacs_ms' that made the whole connect path look wireless.
+
+FIELD names the arm each record IS (`workspaceState' for `:workspaces',
+`sessionView' for `:sessions'), and the decision about whether that arm is
+evidence stays in `agent-repl--recovery-slo-note-wire-frame' — this
+function attributes, it does not judge.
+
+Called BEFORE the batch is applied, for the whole batch: what the wire
+signal answers is that the frame carrying this workspace arrived, which is
+already true of every record in it, and making the last record of a batch
+wait for the first record's apply would put the emacs signal's question
+into the wire signal's answer.  A record naming a workspace this host does
+not own resolves to nil and is skipped — there is no attempt to stamp."
+  (dolist (item items)
+    (when (keywordp (car-safe item))
+      (let ((ws (agent-repl--frontend-ws-name (plist-get item :workspace))))
+        (when ws
+          (agent-repl--recovery-slo-note-wire-frame field ws))))))
+
 (defun agent-repl--frontend-apply-snapshot-items (kind items id-keys apply-fn)
   "Apply each of ITEMS through APPLY-FN, containing per-item failures.
 KIND names the snapshot list for the log; ID-KEYS identifies an item within
@@ -957,6 +988,8 @@ stated exactly once per connect.  Returns the count of states applied."
                      "frontend-apply-snapshot: connect batch %d — %d workspace(s), total=%d delivered-before=%d"
                      index (length workspaces) total
                      (hash-table-count agent-repl--frontend-snapshot-delivered-workspaces))
+    ;; Wire evidence for this batch's whole slice, before any of it is applied.
+    (agent-repl--frontend-snapshot-note-wire "workspaceState" workspaces)
     (let ((failures
            (let ((agent-repl--frontend-applying-snapshot-state t))
              (agent-repl--frontend-apply-snapshot-items
@@ -1010,7 +1043,18 @@ receives every catalog but has no per-task roster."
          (declared-total (or (plist-get snapshot :workspaceTotal) 0))
          (total (if (> declared-total 0)
                     declared-total
-                  (length (plist-get snapshot :workspaces)))))
+                  (length (plist-get snapshot :workspaces))))
+         ;; ONE truename per distinct path for the length of this batch.
+         ;; Resolving a daemon path to a workspace name scans every live
+         ;; workspace and canonicalizes each one's `:project-dir'
+         ;; (`agent-repl--ws-dir-owner'), so a batch that resolves R records
+         ;; against W workspaces costs R*W `file-truename' syscalls — 3.75s to
+         ;; the first workspace's emacs stamp on a 178-workspace /
+         ;; 289-session fleet even with the applies ordered correctly, which
+         ;; is the remaining half of the recovery SLO's `emacs_ms'.  Emacs
+         ;; does not yield inside this apply, so no worktree can move while
+         ;; the table is bound; it is dropped on exit.
+         (agent-repl--path-canonical-cache (make-hash-table :test 'equal)))
     (if (> batch-index 0)
         (agent-repl--frontend-apply-snapshot-continuation snapshot total)
       (agent-repl--frontend-snapshot-reset-delivery total)
@@ -1041,40 +1085,48 @@ the daemon-global views, and the lead batch\\='s share of `:workspaces'.  See
     ;; linger in the store where the orphan/live-p reads would still see it.
     (clrhash agent-repl--frontend-session-views)
     (clrhash agent-repl--frontend-workspace-state-views)
+    ;; Rebuild the retained-SystemInit roster wholesale too (same rationale):
+    ;; the slash-command menu source must not carry a bounced daemon's stale
+    ;; session inits.  Cleared HERE, with the other wholesale clears and ahead
+    ;; of everything, so no reader can see a bounced daemon's roster no matter
+    ;; where in this function it runs.
+    (clrhash agent-repl--frontend-session-inits)
+    ;; Wire evidence for the lead batch's slice, before any of it is applied.
+    (agent-repl--frontend-snapshot-note-wire "workspaceState" workspaces)
+    (agent-repl--frontend-snapshot-note-wire "sessionView" sessions)
     (let ((failures 0))
-      (setq failures
-            (+ failures
-               (agent-repl--frontend-apply-snapshot-items
-                "session-view" sessions '(:workspace)
-                #'agent-repl--frontend-apply-session-view)))
-      ;; Rebuild the retained-SystemInit roster wholesale too (same rationale):
-      ;; the slash-command menu source must not carry a bounced daemon's stale
-      ;; session inits.
-      (clrhash agent-repl--frontend-session-inits)
-      (setq failures
-            (+ failures
-               (agent-repl--frontend-apply-snapshot-items
-                "session-init" inits '(:workspace)
-                #'agent-repl--frontend-apply-session-init)))
+      ;; ---- THE RECOVERY-CRITICAL PREFIX ---------------------------------
+      ;;
+      ;; ORDER IS LATENCY HERE, and this prefix is ordered by what a recovering
+      ;; workspace waits on rather than by what reads well as a list.
+      ;;
+      ;; A workspace's emacs-side recovery signal is stamped when ITS
+      ;; `WorkspaceState' has been stored (`agent-repl--recovery-slo-note-emacs'
+      ;; at the end of `agent-repl--frontend-apply-workspace-state').  The
+      ;; daemon already went to the trouble of putting the live workspaces in
+      ;; the LEAD batch and shipping it first (frontend/snapshotbatch.go), for
+      ;; exactly that reason — but this end then made that batch's workspaces
+      ;; queue behind the whole fleet's session views and SystemInits, which
+      ;; are wholesale rebuilds that ride the lead batch and scale with the
+      ;; ROSTER, not with the workspace.  The lead batch's own workspaces
+      ;; therefore paid the full fleet cost the batching was introduced to
+      ;; remove, which is the `emacs_ms' that moved from ~5ms to ~2.3s.
+      ;;
+      ;; So the per-workspace applies go FIRST, behind only the two things they
+      ;; genuinely depend on: the DaemonView (identity/readiness, which nothing
+      ;; here can fail into) and WorkspaceAvailable (which materializes the
+      ;; local owner a newly-created path's render state needs).  Nothing in
+      ;; `agent-repl--frontend-apply-workspace-state' reads the session-view or
+      ;; SystemInit stores, so nothing it does depends on their rebuilds having
+      ;; run — and both stores were CLEARED above, so a subscriber that reaches
+      ;; for one sees an honestly empty roster rather than a bounced daemon's.
+      ;;
       ;; Identity/readiness lands BEFORE any item that can fail on side
       ;; effects: `agent-repl--frontend-daemon-ready-p' reads the DaemonView,
       ;; and nothing about the daemon's own identity depends on a workspace,
       ;; an init, or a host action having applied cleanly.
       (when daemon
         (agent-repl--frontend-apply-daemon-view daemon))
-      ;; The drain lease, when this daemon carries the field at all.  Routed
-      ;; through the per-item container so a malformed view is loud AND
-      ;; counted without costing the resync every other item — the lease is
-      ;; not rendered here, so it is the last thing that should abort a
-      ;; reconnect.  An absent field is an older daemon, not a failure, and
-      ;; leaves the recorded lease at its honest "unknown".
-      (setq failures
-            (+ failures
-               (agent-repl--frontend-apply-snapshot-items
-                "shutdown-schedule"
-                (when shutdown-schedule (list (plist-get snapshot :shutdownSchedule)))
-                '(:draining)
-                #'agent-repl--frontend-apply-shutdown-schedule)))
       ;; Replayed daemon-owned creation jobs materialize before their ACK.  The
       ;; handlers are defined later in load order by workspace-create-client.el;
       ;; snapshots arrive only after the full module has loaded and connected.
@@ -1091,6 +1143,34 @@ the daemon-global views, and the lead batch\\='s share of `:workspaces'.  See
                  (agent-repl--frontend-apply-snapshot-items
                   "workspace-state" workspaces '(:workspace :state)
                   #'agent-repl--frontend-apply-workspace-state))))
+      ;; ---- THE WHOLESALE REBUILDS ---------------------------------------
+      ;;
+      ;; Roster-scaled work, deliberately AFTER the per-workspace prefix: these
+      ;; are read by menus and liveness queries rather than by the render this
+      ;; connect is racing to restore.
+      (setq failures
+            (+ failures
+               (agent-repl--frontend-apply-snapshot-items
+                "session-view" sessions '(:workspace)
+                #'agent-repl--frontend-apply-session-view)))
+      (setq failures
+            (+ failures
+               (agent-repl--frontend-apply-snapshot-items
+                "session-init" inits '(:workspace)
+                #'agent-repl--frontend-apply-session-init)))
+      ;; The drain lease, when this daemon carries the field at all.  Routed
+      ;; through the per-item container so a malformed view is loud AND
+      ;; counted without costing the resync every other item — the lease is
+      ;; not rendered here, so it is the last thing that should abort a
+      ;; reconnect.  An absent field is an older daemon, not a failure, and
+      ;; leaves the recorded lease at its honest "unknown".
+      (setq failures
+            (+ failures
+               (agent-repl--frontend-apply-snapshot-items
+                "shutdown-schedule"
+                (when shutdown-schedule (list (plist-get snapshot :shutdownSchedule)))
+                '(:draining)
+                #'agent-repl--frontend-apply-shutdown-schedule)))
       ;; Last, and deliberately after the DaemonView: the host-action executor
       ;; re-signals handler failures by contract, and a retained action for a
       ;; dir with no live workspace must not cost the resync its readiness.

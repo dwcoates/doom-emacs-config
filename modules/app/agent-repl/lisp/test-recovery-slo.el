@@ -390,6 +390,67 @@ budget breach, so the contract is asserted against the source."
       (should (= first (plist-get (gethash "slo-first" agent-repl--recovery-slo-attempts)
                                   :wire))))))
 
+;;;; ---- What counts as WIRE EVIDENCE ---------------------------------------
+;;
+;; THE PIN.  These tests exist so the wire signal's evidence source cannot
+;; drift back to "whatever arm arrived first".  It did once: the stamp fired
+;; for every frame carrying a `workspace', which made a busy workspace's
+;; `typingDelta' the de-facto evidence, and the day a daemon-side fold silenced
+;; typing inside async windows every affected workspace started reporting
+;; `wire_ms=-1'.  A carrier list that grows an incidental arm re-opens exactly
+;; that, silently, so the list is asserted here by content and not merely
+;; exercised through whatever happens to be in it.
+
+(ert-deftest agent-repl-test-recovery-slo-wire-carriers-are-the-guaranteed-arms ()
+  "The wire signal's evidence is the per-workspace arms the daemon owes."
+  ;; Arrange / Act / Assert
+  (should (equal agent-repl-recovery-slo-wire-carriers
+                 '("workspaceState" "sessionView"))))
+
+(ert-deftest agent-repl-test-recovery-slo-typing-delta-is-not-wire-evidence ()
+  "A `typingDelta' is incidental traffic and cannot stand in for the carrier."
+  (agent-repl-test--with-slo
+    ;; Arrange
+    (agent-repl--recovery-slo-open "slo-typing")
+    ;; Act
+    (agent-repl--recovery-slo-note-wire-frame "typingDelta" "slo-typing")
+    ;; Assert
+    (should (null (plist-get (gethash "slo-typing" agent-repl--recovery-slo-attempts)
+                             :wire)))))
+
+(ert-deftest agent-repl-test-recovery-slo-workspace-state-is-wire-evidence ()
+  "A `workspaceState' stamps the wire signal for the workspace it names."
+  (agent-repl-test--with-slo
+    ;; Arrange
+    (agent-repl--recovery-slo-open "slo-carrier")
+    ;; Act
+    (agent-repl--recovery-slo-note-wire-frame "workspaceState" "slo-carrier")
+    ;; Assert
+    (should (plist-get (gethash "slo-carrier" agent-repl--recovery-slo-attempts)
+                       :wire))))
+
+(ert-deftest agent-repl-test-recovery-slo-session-view-is-wire-evidence ()
+  "A `sessionView' stamps the wire signal for the workspace it names."
+  (agent-repl-test--with-slo
+    ;; Arrange
+    (agent-repl--recovery-slo-open "slo-sview")
+    ;; Act
+    (agent-repl--recovery-slo-note-wire-frame "sessionView" "slo-sview")
+    ;; Assert
+    (should (plist-get (gethash "slo-sview" agent-repl--recovery-slo-attempts)
+                       :wire))))
+
+(ert-deftest agent-repl-test-recovery-slo-carrier-with-no-workspace-stamps-nothing ()
+  "A carrier arm naming no workspace has nothing to attribute and stamps nothing."
+  (agent-repl-test--with-slo
+    ;; Arrange
+    (agent-repl--recovery-slo-open "slo-unnamed")
+    ;; Act
+    (agent-repl--recovery-slo-note-wire-frame "workspaceState" nil)
+    ;; Assert
+    (should (null (plist-get (gethash "slo-unnamed" agent-repl--recovery-slo-attempts)
+                             :wire)))))
+
 ;;;; ---- Scope: only workspaces that can recover are measured ---------------
 
 (ert-deftest agent-repl-test-recovery-slo-unrecoverable-workspace-is-not-armed ()
