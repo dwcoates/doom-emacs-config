@@ -65,6 +65,7 @@ func (benchResolver) Session(sessionID string) (ssm.Binding, bool) {
 type benchPusher struct {
 	conversations atomic.Int64
 	typing        atomic.Int64
+	typingCuts    atomic.Int64
 	catalogs      atomic.Int64
 	states        atomic.Int64
 	inits         atomic.Int64
@@ -76,6 +77,7 @@ type benchPusher struct {
 func (p *benchPusher) PushAsyncBubbleDelta(*frontendv1.AsyncBubbleDelta)   {}
 func (p *benchPusher) PushConversationDelta(*frontendv1.ConversationDelta) { p.conversations.Add(1) }
 func (p *benchPusher) PushTypingDelta(*frontendv1.TypingDelta)             { p.typing.Add(1) }
+func (p *benchPusher) PushTypingCut(*frontendv1.TypingCut)                 { p.typingCuts.Add(1) }
 func (p *benchPusher) PushTaskCatalog(*frontendv1.TaskCatalog)             { p.catalogs.Add(1) }
 func (p *benchPusher) PushWorkspaceState(*frontendv1.WorkspaceState)       { p.states.Add(1) }
 func (p *benchPusher) PushSessionInitView(*frontendv1.SessionInitView)     { p.inits.Add(1) }

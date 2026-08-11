@@ -59,7 +59,7 @@ import type { AsyncBubbleDelta } from "./async-bubble.js";
 import { AsyncBubbleRegistry, type AsyncApplyResult, type AsyncGap } from "./async-routing.js";
 import { mergeStatusLogValue } from "./merge-status.js";
 import type { SelectedModel } from "../../proto/ts/schema-literals.js";
-import { applyStreamDelta, blockKey, insertBySeq, settleStreamedBlock } from "./streaming.js";
+import { applyStreamDelta, blockKey, cutOpenPreviews, insertBySeq, settleStreamedBlock } from "./streaming.js";
 import type { ClientLogContext } from "./protocol.js";
 import {
   AsyncSource,
@@ -1205,6 +1205,9 @@ export class ConversationStore {
         case "typing":
           changed = this.applyTyping(effect.value) || changed;
           break;
+        case "typing-cut":
+          changed = this.applyTypingCut(effect.value) || changed;
+          break;
         case "tool-progress":
           changed = this.applyToolProgress(effect.value) || changed;
           break;
@@ -2156,6 +2159,18 @@ export class ConversationStore {
    * The scoped branch therefore never touches `state.items`, which is the
    * invariant that keeps a preview from outliving its window.
    */
+  /**
+   * Retire the preview the daemon says it will never complete.
+   *
+   * IT IS ADDRESSED EXACTLY AS THE DELTA THAT OPENED IT — empty bubbleId for
+   * the top-level feed, a bubble id for a preview folded into one — so a cut
+   * can never retire a preview on the wrong surface.
+   */
+  private applyTypingCut(cut: { workspace: string; bubbleId: string; fence: string }): boolean {
+    if (cut.bubbleId !== "") return this.asyncBubbles.cutTyping(cut.bubbleId);
+    return cutOpenPreviews(this.state.items);
+  }
+
   private applyTyping(reveal: TypingReveal | import("./state-adapter.js").UnidentifiedToolInputReveal): boolean {
     if (reveal.bubbleId !== "") {
       return this.asyncBubbles.applyTyping(

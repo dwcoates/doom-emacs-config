@@ -526,6 +526,9 @@ export type AdapterEffect =
       liveJoinSeq: number;
     }
   | { kind: "typing"; value: TypingReveal | UnidentifiedToolInputReveal }
+  // A preview the daemon opened and can no longer retire. Addressed exactly
+  // as the delta that opened it: empty bubbleId for the top-level feed.
+  | { kind: "typing-cut"; value: { workspace: string; bubbleId: string; fence: string } }
   | { kind: "tool-progress"; value: ToolProgressInput }
   | { kind: "queue"; value: QueueInput }
   | { kind: "task-catalog"; value: TaskCatalogInput }
@@ -735,6 +738,17 @@ export class StateAdapter {
         return [this.asyncBubbleDeltaEffect(frame.frame.value)];
       case "typingDelta":
         return this.typingEffects(frame.frame.value);
+      case "typingCut":
+        return [
+          {
+            kind: "typing-cut",
+            value: {
+              workspace: frame.frame.value.workspace,
+              bubbleId: frame.frame.value.bubbleId,
+              fence: frame.frame.value.fence,
+            },
+          },
+        ];
       case "heartbeat":
         return [this.heartbeatEffect(frame.frame.value)];
       case "queue":
