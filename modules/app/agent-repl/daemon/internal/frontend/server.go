@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -205,6 +206,12 @@ type Server struct {
 	// latestWorkspaceAt is the newest WorkspaceState revision that crossed the
 	// delivery lock. Snapshot paths use it to detect a concurrent publication.
 	latestWorkspaceAt map[string]int64
+	// latestWorkspaceState is the frame that carried that revision, retained so
+	// a connect whose snapshot was captured before it can be REPAIRED with the
+	// exact frame every other client already holds, instead of re-composing the
+	// snapshot until no publication races it. Retention is bounded by the
+	// workspace count, which latestWorkspaceAt already carries.
+	latestWorkspaceState map[string]*frontendv1.WorkspaceState
 	// roster is the newest workspace roster Emacs published, or nil when none
 	// has been. It lives under the DELIVERY lock rather than a lock of its own
 	// so retention, fan-out and a concurrent connect are serialized against
@@ -327,6 +334,8 @@ func New(cfg Config) *Server {
 		},
 		clients:           map[*client]struct{}{},
 		latestWorkspaceAt: map[string]int64{},
+
+		latestWorkspaceState: map[string]*frontendv1.WorkspaceState{},
 		clientLogRefusals: newClientLogRefusalLimiter(time.Now, clientLogRefusalSummaryInterval),
 	}
 }
@@ -622,6 +631,7 @@ func (s *Server) pushWorkspaceStateGated(w *frontendv1.WorkspaceState) {
 	s.mu.Lock()
 	if at := w.GetAtMs(); at > s.latestWorkspaceAt[w.GetWorkspace()] {
 		s.latestWorkspaceAt[w.GetWorkspace()] = at
+		s.latestWorkspaceState[w.GetWorkspace()] = w
 	}
 	slow := s.deliverLocked(WorkspaceStateFrame(w), func(*client) bool { return true })
 	s.mu.Unlock()
@@ -1021,12 +1031,29 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 	// be filtered down to the states a painter had settled, which could omit a
 	// workspace from Emacs entirely; nothing filters it now but the connection's
 	// own scope.
-	var snapshot *frontendv1.StateSnapshot
-	var rawSnapshot *frontendv1.StateSnapshot
-	for {
+	//
+	// THE CONNECT COMPOSES EXACTLY ONE SNAPSHOT. It used to re-compose the whole
+	// snapshot and try again whenever a WorkspaceState had crossed the delivery
+	// lock since the capture, which is a race against the daemon's own state and
+	// therefore unbounded by construction: at 178 workspaces / 289 sessions one
+	// composition costs seconds, and the deferred boot sweep mutates state for
+	// ~23s after boot, so the Emacs host waited ~30s for the connect snapshot
+	// that gates every downstream recovery signal. Staleness is now REPAIRED
+	// rather than raced: the snapshot is served as of its capture instant and any
+	// workspace the transport has published a newer state for rides immediately
+	// behind it as an ordinary WorkspaceState frame, in the same delivery-lock
+	// operation. The client's per-workspace end state is identical to the
+	// retrying version's — WorkspaceState is a per-workspace frame the frontend
+	// applies per workspace — and no view is torn, because every catch-up frame
+	// is the exact frame already broadcast to every other client.
+	var (
+		snapshot    *frontendv1.StateSnapshot
+		rawSnapshot *frontendv1.StateSnapshot
+	)
+	{
 		// Never call StateProvider while holding the frontend lock. Synchronous
-		// SSM publication takes the locks in the opposite order. The revision
-		// check under s.mu closes the capture race this lock order creates.
+		// SSM publication takes the locks in the opposite order. The catch-up
+		// pass under s.mu closes the capture race this lock order creates.
 		rawSnapshot = s.state.Snapshot()
 		snapshot = snapshotForClient(rawSnapshot, scope, kind)
 		snap, err := marshalFrame(SnapshotFrame(snapshot))
@@ -1045,11 +1072,13 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 			s.closeConn(c, cl.id, kind, causeServerClosed)
 			return
 		}
-		if workspace, snapshotAt, deliveredAt, stale := s.snapshotStaleLocked(snapshot, scope); stale {
+		catchUp, catchUpErr := s.snapshotCatchUpLocked(snapshot, scope)
+		if catchUpErr != nil {
 			s.mu.Unlock()
-			s.logVerbosef("frontend: connect snapshot retry kind=%s scope_workspace=%q scope_session=%q stale_workspace=%q snapshot_at_ms=%d delivered_at_ms=%d",
-				kind, scopeWorkspace(scope), scopeSession(scope), workspace, snapshotAt, deliveredAt)
-			continue
+			s.warn("frontend: marshal connect catch-up kind=%s scope_workspace=%q scope_session=%q: %v",
+				kind, scopeWorkspace(scope), scopeSession(scope), catchUpErr)
+			s.closeConn(c, cl.id, kind, causeInternal(closeReasonSnapshotMarshal, catchUpErr))
+			return
 		}
 		// Registration and enqueue remain one delivery-lock operation, so no
 		// delta can slip ahead of this first FIFO frame after validation.
@@ -1073,6 +1102,21 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 				kind, scopeWorkspace(scope), scopeSession(scope))
 			s.closeConn(c, cl.id, kind, causeInternal(closeReasonSnapshotRefused, nil))
 			return
+		}
+		// THE CATCH-UP FRAMES RIDE THE SAME delivery-lock operation, immediately
+		// behind the snapshot and ahead of registration, so this client sees
+		// them in FIFO order before any broadcast that follows.
+		for _, entry := range catchUp {
+			if res := enqueueLocked(cl, outFrame{key: entry.key, data: entry.data}); !res.queued {
+				cl.drain.closeAt(time.Now())
+				s.mu.Unlock()
+				s.warn("frontend: connect catch-up rejected by a near-empty outbox kind=%s scope_workspace=%q workspace=%q",
+					kind, scopeWorkspace(scope), entry.workspace)
+				s.closeConn(c, cl.id, kind, causeInternal(closeReasonSnapshotRefused, nil))
+				return
+			}
+			s.logVerbosef("frontend: connect snapshot catch-up kind=%s scope_workspace=%q scope_session=%q catch_up_workspace=%q snapshot_at_ms=%d delivered_at_ms=%d",
+				kind, scopeWorkspace(scope), scopeSession(scope), entry.workspace, entry.snapshotAt, entry.deliveredAt)
 		}
 		// The retained roster rides the SAME delivery-lock operation as the
 		// snapshot and the registration. That is what makes a connect racing a
@@ -1102,7 +1146,6 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		}
 		s.clients[cl] = struct{}{}
 		s.mu.Unlock()
-		break
 	}
 	s.logSnapshotCensus(cl, snapshotPhaseConnect, snapshot)
 	retainedSessions, rejectedSessions := snapshotScopeSessionAudit(rawSnapshot, scope)
@@ -1182,6 +1225,80 @@ func (s *Server) renewSnapshotLease(cl *client) bool {
 			cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), len(snapshot.GetWorkspaces()), snapshotRevisions(snapshot), guiSnapshotLeaseInterval.Milliseconds())
 		return true
 	}
+}
+
+// catchUpFrame is one retained WorkspaceState marshalled for a connecting
+// client, with the revisions that made it necessary so the delivery can say
+// WHY it was sent.
+type catchUpFrame struct {
+	workspace   string
+	key         string
+	data        []byte
+	snapshotAt  int64
+	deliveredAt int64
+}
+
+// snapshotCatchUpLocked returns the frames that make a captured snapshot
+// current: for every workspace whose newest delivered WorkspaceState is newer
+// than the one in the snapshot, the retained frame itself, scoped exactly as a
+// broadcast would have scoped it. Caller holds s.mu.
+//
+// This is the bounded replacement for the connect retry loop. The retry could
+// not terminate while anything mutated state — the deferred boot sweep mutates
+// it for tens of seconds — and each attempt paid a full fleet composition. The
+// repair costs one marshal per genuinely stale workspace and always terminates,
+// because the set it iterates is fixed the moment the lock is taken.
+//
+// Order is by workspace name so a connect is reproducible and testable; the
+// frames are independent per workspace, so no ordering between them is
+// observable to a client anyway.
+func (s *Server) snapshotCatchUpLocked(snapshot *frontendv1.StateSnapshot, scope *Scope) ([]catchUpFrame, error) {
+	seen := make(map[string]int64, len(snapshot.GetWorkspaces()))
+	for _, state := range snapshot.GetWorkspaces() {
+		seen[state.GetWorkspace()] = state.GetAtMs()
+	}
+	stale := make([]string, 0, len(s.latestWorkspaceAt))
+	for workspace, deliveredAt := range s.latestWorkspaceAt {
+		if scope != nil && scope.Workspace != "" && workspace != scope.Workspace {
+			continue
+		}
+		if deliveredAt > seen[workspace] {
+			stale = append(stale, workspace)
+		}
+	}
+	sort.Strings(stale)
+	out := make([]catchUpFrame, 0, len(stale))
+	for _, workspace := range stale {
+		retained := s.latestWorkspaceState[workspace]
+		if retained == nil {
+			// The revision and the frame that carried it are recorded in one
+			// locked step, so this is unreachable; it is still refused rather
+			// than skipped, because skipping would silently serve the stale
+			// view this whole path exists to prevent.
+			return nil, fmt.Errorf("frontend: no retained WorkspaceState for stale workspace %q at revision %d", workspace, s.latestWorkspaceAt[workspace])
+		}
+		frame := WorkspaceStateFrame(retained)
+		key := coalesceKey(frame)
+		if scope != nil {
+			scoped, keep := scopeFrame(frame, *scope)
+			if !keep {
+				continue
+			}
+			frame, key = scoped, coalesceKey(scoped)
+		}
+		data, err := marshalFrame(frame)
+		if err != nil {
+			return nil, fmt.Errorf("frontend: marshal catch-up WorkspaceState workspace=%q: %w", workspace, err)
+		}
+		out = append(out, catchUpFrame{
+			workspace:   workspace,
+			key:         key,
+			data:        data,
+			snapshotAt:  seen[workspace],
+			deliveredAt: s.latestWorkspaceAt[workspace],
+		})
+	}
+	return out, nil
 }
 
 // snapshotStaleLocked reports a snapshot captured before a WorkspaceState that
