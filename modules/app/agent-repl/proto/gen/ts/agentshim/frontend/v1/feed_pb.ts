@@ -32,7 +32,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/feed.proto.
  */
 export const file_agentshim_frontend_v1_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZmVlZC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIpQBChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSNgoFaXRlbXMYAyADKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ29udmVyc2F0aW9uSXRlbRITCgt0aHJvdWdoX3NlcRgEIAEoBBINCgVmZW5jZRgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZCK7BwoQQ29udmVyc2F0aW9uSXRlbRIMCgR1dWlkGAEgASgJEg0KBXRzX21zGAIgASgDEhIKCnJlcXVlc3RfaWQYAyABKAkSOQoGc291cmNlGAQgASgOMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblNvdXJjZRI1CgVhZ2VudBgFIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudEVtaXNzaW9uSAASOQoMdXNlcl9tZXNzYWdlGAsgASgLMiEuYWdlbnRzaGltLmRhdGEudjEuQXBpVXNlck1lc3NhZ2VIABI3CgpwZXJtaXNzaW9uGB4gASgLMiEuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvbkl0ZW1IABI+CgxmYWlsdXJlX2NhcmQYHyABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRWaWV3SAASPAoPY29udGV4dF9jbGVhcmVkGCAgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBghIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABJECg9zZXNzaW9uX2NvbW1hbmQYIyABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmRJdGVtSAASOgoMYXN5bmNfYnViYmxlGCYgASgLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jQnViYmxlSAASSgoSY29tcGFjdGlvbl9zdW1tYXJ5GCcgASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbXBhY3Rpb25TdW1tYXJ5SXRlbUgAQgYKBGl0ZW1KBAgQEBFKBAgREBJKBAgSEBNKBAgKEAtKBAgMEA1KBAgNEA5KBAgOEA9KBAgPEBBKBAgiECNKBAgoEClKBAgkECVKBAglECZSCWFwaV9lcnJvclIQY29tcGFjdF9ib3VuZGFyeVIVY29tcGFjdF9ib3VuZGFyeV9saW5lUhFhc3Npc3RhbnRfbWVzc2FnZVIIdG9vbF91c2VSC3Rvb2xfcmVzdWx0Ug90b29sX3VzZV9yZXN1bHRSBnJlc3VsdFIKc2tpbGxfYm9keVILdXNhZ2Vfc3RhbXBSEXRva2VuX3V0aWxpemF0aW9uUg90dXJuX2FjY291bnRpbmciYQoVQ29tcGFjdGlvblN1bW1hcnlJdGVtEg8KB3N1bW1hcnkYASABKAkSFwoPY29tcGFjdGVkX2F0X21zGAIgASgDEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYAyABKAMihAEKC1R5cGluZ0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIuCgVkZWx0YRgDIAEoCzIfLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRlbnREZWx0YRINCgVmZW5jZRgEIAEoCRIRCglidWJibGVfaWQYBSABKAlKBAgCEANSCnNlc3Npb25faWQicgoPU2Vzc2lvbkluaXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRIrCgRpbml0GAMgASgLMh0uYWdlbnRzaGltLmRhdGEudjEuU3lzdGVtSW5pdBINCgVmZW5jZRgEIAEoCUoECAIQA1IKc2Vzc2lvbl9pZCp2ChJDb252ZXJzYXRpb25Tb3VyY2USIwofQ09OVkVSU0FUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEhwKGENPTlZFUlNBVElPTl9TT1VSQ0VfVVNFUhABEh0KGUNPTlZFUlNBVElPTl9TT1VSQ0VfTUVSR0UQAkIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_core_v1_core, file_agentshim_data_v1_stream, file_agentshim_data_v1_tools, file_agentshim_frontend_v1_agent_emission, file_agentshim_frontend_v1_async_bubble, file_agentshim_frontend_v1_failure_card, file_agentshim_frontend_v1_slash_menu]);
+  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZmVlZC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIpQBChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSNgoFaXRlbXMYAyADKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ29udmVyc2F0aW9uSXRlbRITCgt0aHJvdWdoX3NlcRgEIAEoBBINCgVmZW5jZRgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZCK7BwoQQ29udmVyc2F0aW9uSXRlbRIMCgR1dWlkGAEgASgJEg0KBXRzX21zGAIgASgDEhIKCnJlcXVlc3RfaWQYAyABKAkSOQoGc291cmNlGAQgASgOMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblNvdXJjZRI1CgVhZ2VudBgFIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudEVtaXNzaW9uSAASOQoMdXNlcl9tZXNzYWdlGAsgASgLMiEuYWdlbnRzaGltLmRhdGEudjEuQXBpVXNlck1lc3NhZ2VIABI3CgpwZXJtaXNzaW9uGB4gASgLMiEuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvbkl0ZW1IABI+CgxmYWlsdXJlX2NhcmQYHyABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRWaWV3SAASPAoPY29udGV4dF9jbGVhcmVkGCAgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBghIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABJECg9zZXNzaW9uX2NvbW1hbmQYIyABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmRJdGVtSAASOgoMYXN5bmNfYnViYmxlGCYgASgLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jQnViYmxlSAASSgoSY29tcGFjdGlvbl9zdW1tYXJ5GCcgASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbXBhY3Rpb25TdW1tYXJ5SXRlbUgAQgYKBGl0ZW1KBAgQEBFKBAgREBJKBAgSEBNKBAgKEAtKBAgMEA1KBAgNEA5KBAgOEA9KBAgPEBBKBAgiECNKBAgoEClKBAgkECVKBAglECZSCWFwaV9lcnJvclIQY29tcGFjdF9ib3VuZGFyeVIVY29tcGFjdF9ib3VuZGFyeV9saW5lUhFhc3Npc3RhbnRfbWVzc2FnZVIIdG9vbF91c2VSC3Rvb2xfcmVzdWx0Ug90b29sX3VzZV9yZXN1bHRSBnJlc3VsdFIKc2tpbGxfYm9keVILdXNhZ2Vfc3RhbXBSEXRva2VuX3V0aWxpemF0aW9uUg90dXJuX2FjY291bnRpbmciYQoVQ29tcGFjdGlvblN1bW1hcnlJdGVtEg8KB3N1bW1hcnkYASABKAkSFwoPY29tcGFjdGVkX2F0X21zGAIgASgDEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYAyABKAMihAEKC1R5cGluZ0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIuCgVkZWx0YRgDIAEoCzIfLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRlbnREZWx0YRINCgVmZW5jZRgEIAEoCRIRCglidWJibGVfaWQYBSABKAlKBAgCEANSCnNlc3Npb25faWQiQAoJVHlwaW5nQ3V0EhEKCXdvcmtzcGFjZRgBIAEoCRIRCglidWJibGVfaWQYAiABKAkSDQoFZmVuY2UYAyABKAkicgoPU2Vzc2lvbkluaXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRIrCgRpbml0GAMgASgLMh0uYWdlbnRzaGltLmRhdGEudjEuU3lzdGVtSW5pdBINCgVmZW5jZRgEIAEoCUoECAIQA1IKc2Vzc2lvbl9pZCp2ChJDb252ZXJzYXRpb25Tb3VyY2USIwofQ09OVkVSU0FUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEhwKGENPTlZFUlNBVElPTl9TT1VSQ0VfVVNFUhABEh0KGUNPTlZFUlNBVElPTl9TT1VSQ0VfTUVSR0UQAkIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_core_v1_core, file_agentshim_data_v1_stream, file_agentshim_data_v1_tools, file_agentshim_frontend_v1_agent_emission, file_agentshim_frontend_v1_async_bubble, file_agentshim_frontend_v1_failure_card, file_agentshim_frontend_v1_slash_menu]);
 
 /**
  * Complete (store-round-tripped) conversation additions, composed from the
@@ -327,6 +327,51 @@ export const TypingDeltaSchema: GenMessage<TypingDelta> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_feed, 3);
 
 /**
+ * The daemon's statement that a preview it opened will NEVER be completed.
+ *
+ * A preview is retired by the authoritative record of the block it previews.
+ * When that record can no longer arrive — the session died, the shim rolled,
+ * the query was torn down mid-block — nothing retires it, and the bubble
+ * spins "streaming input…" for the life of the page with no body.
+ *
+ * A CUT IS A FACT THE DAEMON OWNS, NOT A TIMEOUT THE CLIENT GUESSES. The
+ * daemon learns the stream ended without its record; the client cannot
+ * distinguish that from a slow block, and any client-side deadline would be
+ * wrong for exactly the long tool calls users care most about watching.
+ *
+ * @generated from message agentshim.frontend.v1.TypingCut
+ */
+export type TypingCut = Message<"agentshim.frontend.v1.TypingCut"> & {
+  /**
+   * @generated from field: string workspace = 1;
+   */
+  workspace: string;
+
+  /**
+   * The preview being retired, addressed exactly as the delta that opened it:
+   * empty for the top-level feed, or the AsyncBubble id it was folded into.
+   *
+   * @generated from field: string bubble_id = 2;
+   */
+  bubbleId: string;
+
+  /**
+   * The workspace's staleness FENCE, compared byte-wise and never parsed,
+   * identically to every other push. A stale cut is discarded whole.
+   *
+   * @generated from field: string fence = 3;
+   */
+  fence: string;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.TypingCut.
+ * Use `create(TypingCutSchema)` to create a new message.
+ */
+export const TypingCutSchema: GenMessage<TypingCut> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_feed, 4);
+
+/**
  * The session's retained SystemInit (slash commands, tools, skills, model
  * list), pushed on attach and included in StateSnapshot (S9). Replaces the
  * Emacs GET /commands HTTP menu source.
@@ -365,7 +410,7 @@ export type SessionInitView = Message<"agentshim.frontend.v1.SessionInitView"> &
  * Use `create(SessionInitViewSchema)` to create a new message.
  */
 export const SessionInitViewSchema: GenMessage<SessionInitView> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 4);
+  messageDesc(file_agentshim_frontend_v1_feed, 5);
 
 /**
  * WHO drove the turn that produced a conversation item.

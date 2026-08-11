@@ -4485,8 +4485,25 @@ type ShimHello struct {
 	// announced stream contains no pre-boundary lifecycle history for this
 	// query.
 	QueryCreatedSeq uint64 `protobuf:"varint,12,opt,name=query_created_seq,json=queryCreatedSeq,proto3" json:"query_created_seq,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The shim's live background-task set AT THE MOMENT IT HANDSHAKES.
+	//
+	// WHY THE HANDSHAKE MUST CARRY IT. A bounce decision is made here, before
+	// any command round-trip: refreshStaleShim defers a roll only on
+	// turn_in_flight || active_turn_ids, both of which describe an SDK TURN.
+	// A detached background task — a spawned agent, a long-lived shell — is
+	// none of those, so a shim doing real async work looks IDLE at exactly the
+	// instant the daemon decides whether to kill it. Asking afterwards is too
+	// late: QueryLiveTasks needs a live connection, and the decision precedes it.
+	//
+	// ABSENCE AND EMPTINESS ARE DIFFERENT, which is the whole reason this is a
+	// message and not a bare repeated field. A present set with no ids means the
+	// shim answered "nothing is running" and a roll is safe. An ABSENT set means
+	// this shim does not answer the question, and a roll must NOT be treated as
+	// safe on that silence — the same rule the phantom-task reconciler already
+	// follows. A shim built before this field existed is absent, not empty.
+	LiveTaskSet   *LiveTaskSet `protobuf:"bytes,13,opt,name=live_task_set,json=liveTaskSet,proto3" json:"live_task_set,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ShimHello) Reset() {
@@ -4601,6 +4618,13 @@ func (x *ShimHello) GetQueryCreatedSeq() uint64 {
 		return x.QueryCreatedSeq
 	}
 	return 0
+}
+
+func (x *ShimHello) GetLiveTaskSet() *LiveTaskSet {
+	if x != nil {
+		return x.LiveTaskSet
+	}
+	return nil
 }
 
 type DaemonHello struct {
@@ -7123,7 +7147,7 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\rdropped_count\x18\x03 \x01(\x04R\fdroppedCount\x12\x1c\n" +
 	"\trecovered\x18\x04 \x01(\bR\trecovered\x12/\n" +
 	"\x11query_instance_id\x18\x05 \x01(\tH\x00R\x0fqueryInstanceId\x88\x01\x01B\x14\n" +
-	"\x12_query_instance_id\"\xf0\x03\n" +
+	"\x12_query_instance_id\"\xb4\x04\n" +
 	"\tShimHello\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
@@ -7138,7 +7162,8 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\x11query_instance_id\x18\n" +
 	" \x01(\tR\x0fqueryInstanceId\x12]\n" +
 	"\x16query_runtime_identity\x18\v \x01(\v2'.agentshim.core.v1.QueryRuntimeIdentityR\x14queryRuntimeIdentity\x12*\n" +
-	"\x11query_created_seq\x18\f \x01(\x04R\x0fqueryCreatedSeq\"\xa3\x01\n" +
+	"\x11query_created_seq\x18\f \x01(\x04R\x0fqueryCreatedSeq\x12B\n" +
+	"\rlive_task_set\x18\r \x01(\v2\x1e.agentshim.core.v1.LiveTaskSetR\vliveTaskSet\"\xa3\x01\n" +
 	"\vDaemonHello\x12%\n" +
 	"\x0edaemon_version\x18\x01 \x01(\tR\rdaemonVersion\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\tR\x0fprotocolVersion\x12\x19\n" +
@@ -7548,32 +7573,33 @@ var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	2,  // 57: agentshim.core.v1.TaskEnded.kind:type_name -> agentshim.core.v1.TaskKind
 	3,  // 58: agentshim.core.v1.TaskEnded.status:type_name -> agentshim.core.v1.TerminalStatus
 	27, // 59: agentshim.core.v1.ShimHello.query_runtime_identity:type_name -> agentshim.core.v1.QueryRuntimeIdentity
-	6,  // 60: agentshim.core.v1.SubmitPrompt.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
-	61, // 61: agentshim.core.v1.ModelCatalog.models:type_name -> agentshim.core.v1.ModelOption
-	68, // 62: agentshim.core.v1.DetachedCancelOutcome.cancelled:type_name -> agentshim.core.v1.DetachedAgentsCancelled
-	69, // 63: agentshim.core.v1.DetachedCancelOutcome.nothing_running:type_name -> agentshim.core.v1.NoDetachedAgentsRunning
-	70, // 64: agentshim.core.v1.DetachedCancelOutcome.unsupported:type_name -> agentshim.core.v1.DetachedCancelUnsupported
-	9,  // 65: agentshim.core.v1.Ack.interrupt_outcome:type_name -> agentshim.core.v1.InterruptOutcome
-	67, // 66: agentshim.core.v1.Ack.detached_cancel_outcome:type_name -> agentshim.core.v1.DetachedCancelOutcome
-	66, // 67: agentshim.core.v1.Ack.live_task_set:type_name -> agentshim.core.v1.LiveTaskSet
-	12, // 68: agentshim.core.v1.ReplayEvent.event:type_name -> agentshim.core.v1.Event
-	91, // 69: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
-	5,  // 70: agentshim.core.v1.PermissionResponse.decision:type_name -> agentshim.core.v1.PermissionDecision
-	91, // 71: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
-	77, // 72: agentshim.core.v1.PermissionItem.request:type_name -> agentshim.core.v1.PermissionRequest
-	11, // 73: agentshim.core.v1.PermissionItem.resolution:type_name -> agentshim.core.v1.PermissionItem.Resolution
-	13, // 74: agentshim.core.v1.StoreWrite.batch:type_name -> agentshim.core.v1.EventBatch
-	12, // 75: agentshim.core.v1.OpenTaskState.started:type_name -> agentshim.core.v1.Event
-	85, // 76: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
-	87, // 77: agentshim.core.v1.CursorList.open_tasks:type_name -> agentshim.core.v1.OpenTaskState
-	10, // 78: agentshim.core.v1.FilePlaneDiagnostic.source_runtime:type_name -> agentshim.core.v1.DiagnosticSourceRuntime
-	91, // 79: agentshim.core.v1.FilePlaneDiagnostic.context:type_name -> google.protobuf.Struct
-	92, // 80: agentshim.core.v1.model_marker_literal:extendee -> google.protobuf.EnumValueOptions
-	81, // [81:81] is the sub-list for method output_type
-	81, // [81:81] is the sub-list for method input_type
-	81, // [81:81] is the sub-list for extension type_name
-	80, // [80:81] is the sub-list for extension extendee
-	0,  // [0:80] is the sub-list for field type_name
+	66, // 60: agentshim.core.v1.ShimHello.live_task_set:type_name -> agentshim.core.v1.LiveTaskSet
+	6,  // 61: agentshim.core.v1.SubmitPrompt.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
+	61, // 62: agentshim.core.v1.ModelCatalog.models:type_name -> agentshim.core.v1.ModelOption
+	68, // 63: agentshim.core.v1.DetachedCancelOutcome.cancelled:type_name -> agentshim.core.v1.DetachedAgentsCancelled
+	69, // 64: agentshim.core.v1.DetachedCancelOutcome.nothing_running:type_name -> agentshim.core.v1.NoDetachedAgentsRunning
+	70, // 65: agentshim.core.v1.DetachedCancelOutcome.unsupported:type_name -> agentshim.core.v1.DetachedCancelUnsupported
+	9,  // 66: agentshim.core.v1.Ack.interrupt_outcome:type_name -> agentshim.core.v1.InterruptOutcome
+	67, // 67: agentshim.core.v1.Ack.detached_cancel_outcome:type_name -> agentshim.core.v1.DetachedCancelOutcome
+	66, // 68: agentshim.core.v1.Ack.live_task_set:type_name -> agentshim.core.v1.LiveTaskSet
+	12, // 69: agentshim.core.v1.ReplayEvent.event:type_name -> agentshim.core.v1.Event
+	91, // 70: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
+	5,  // 71: agentshim.core.v1.PermissionResponse.decision:type_name -> agentshim.core.v1.PermissionDecision
+	91, // 72: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
+	77, // 73: agentshim.core.v1.PermissionItem.request:type_name -> agentshim.core.v1.PermissionRequest
+	11, // 74: agentshim.core.v1.PermissionItem.resolution:type_name -> agentshim.core.v1.PermissionItem.Resolution
+	13, // 75: agentshim.core.v1.StoreWrite.batch:type_name -> agentshim.core.v1.EventBatch
+	12, // 76: agentshim.core.v1.OpenTaskState.started:type_name -> agentshim.core.v1.Event
+	85, // 77: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
+	87, // 78: agentshim.core.v1.CursorList.open_tasks:type_name -> agentshim.core.v1.OpenTaskState
+	10, // 79: agentshim.core.v1.FilePlaneDiagnostic.source_runtime:type_name -> agentshim.core.v1.DiagnosticSourceRuntime
+	91, // 80: agentshim.core.v1.FilePlaneDiagnostic.context:type_name -> google.protobuf.Struct
+	92, // 81: agentshim.core.v1.model_marker_literal:extendee -> google.protobuf.EnumValueOptions
+	82, // [82:82] is the sub-list for method output_type
+	82, // [82:82] is the sub-list for method input_type
+	82, // [82:82] is the sub-list for extension type_name
+	81, // [81:82] is the sub-list for extension extendee
+	0,  // [0:81] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_core_v1_core_proto_init() }
