@@ -2340,15 +2340,17 @@ describe("activity fold", () => {
     // Arrange — the ticker body was copied per fold, and every copy was
     // byte-identical, so a new fold silently grew another.
     const bodies = css.match(/display: inline-flex;/g) ?? [];
-    // Act / Assert — one shared ticker rule, plus the nine unrelated
+    // Act / Assert — one shared ticker rule, plus the ten unrelated
     // inline-flex users (.tab-chip, the counter chip, the .async-badge, the
     // face's .face-side, the sidebar merge glyph that centers itself for an
     // on-axis spin, the sidebar inactive question-mark glyph that centers
     // its emoji, the sidebar view-selector segmented control, the task
-    // checkbox that centers its check mark, and the ungated banner's
-    // .ungated-mark disc that centers its "!").
+    // checkbox that centers its check mark, the ungated banner's
+    // .ungated-mark disc that centers its "!", and the topbar's reserved
+    // .topbar-warning-slot, which right-aligns the indicator inside the width
+    // it holds whether or not the indicator is there).
     expect(css).toMatch(/\.agent-ticker,\s*\n\.async-ticker,\s*\n\.gns-ticker\s*\{/);
-    expect(bodies.length).toBe(10);
+    expect(bodies.length).toBe(11);
   });
 
   it("offers the fold-back cursor on the open fold's ticker only", () => {
@@ -4081,9 +4083,48 @@ describe("warning indicator styles", () => {
   });
 });
 
+/* THE STRIP'S GEOMETRY. The header used to jump on every push, because the
+   session and conversation ids sat inline: long, proportional-width, re-minted
+   on every session rotation, and to the RIGHT of the title in a right-anchored
+   strip, so every re-measure dragged the title sideways. The ids are a dropdown
+   now; these rules hold the width of everything else that can still change. */
+const sessionInfo = blockAfter(css, "#session-info {");
+const connectivityBox = blockAfter(css, ".topbar-connectivity {");
+const warningSlot = blockAfter(css, ".topbar-warning-slot {");
+const warningCount = blockAfter(css, ".topbar-warning-count {");
+const sessionRow = blockAfter(css, ".session-overlay .session-row");
+
+describe("topbar strip geometry", () => {
+  it("keeps the strip anchored against the pickers", () => {
+    // Arrange / Act — the identity strip is the row's right-hand cluster.
+    // Assert
+    expect(sessionInfo).toMatch(/margin-left:\s*auto/);
+  });
+
+  it("boxes the connectivity glyph at a fixed width", () => {
+    // Arrange / Act — the glyph is a different CHARACTER per state, and those
+    // characters do not share an advance width.
+    // Assert
+    expect(connectivityBox).toMatch(/width:\s*1\.25em/);
+  });
+
+  it("reserves the warning slot's width whether or not a warning is raised", () => {
+    // Arrange / Act — an un-reserved indicator re-measures the strip, and so
+    // shoves the title, every time a warning is raised or cleared.
+    // Assert
+    expect(warningSlot).toMatch(/min-width:\s*3\.2rem/);
+  });
+
+  it("reserves a digit box for the warning count", () => {
+    // Arrange / Act — the count is the strip's only number that changes on its
+    // own, so a second warning arriving must not widen the chip.
+    // Assert
+    expect(warningCount).toMatch(/min-width:\s*1ch/);
+  });
+});
+
 /* The ids dropdown, which replaced the strip's inline session line. */
 const sessionToggle = blockAfter(css, "\n.info-session {");
-const sessionRow = blockAfter(css, ".session-overlay .session-row");
 
 describe("ids dropdown styles", () => {
   it("keeps the chip quiet, as debugging material rather than strip news", () => {

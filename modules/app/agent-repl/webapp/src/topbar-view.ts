@@ -233,8 +233,20 @@ export interface TopbarDisclosures {
  * hang off it, in one composition.
  *
  * It lives here rather than as three concatenated calls at the paint site so
- * the strip's contents and their order are one testable fact rather than a
- * shape nobody can assert on.
+ * the strip's ORDER AND GEOMETRY are one testable fact. Both matter:
+ *
+ * THE ORDER IS STABILITY, not taste. The strip is right-anchored in the header
+ * (`#session-info`), so its own leading content — the title — slides sideways
+ * whenever anything to its right changes width. The constant-width chips come
+ * first and the only element that appears and vanishes with ordinary state (the
+ * warning indicator) comes last.
+ *
+ * THE WARNING SLOT IS RESERVED. Its width is held whether or not a warning is
+ * raised, so a warning arriving or clearing does not re-measure the strip and
+ * shove the title. The slot is a bare `<span>`: reserving GEOMETRY is not the
+ * same as rendering an idle control, and `topbarWarningsHtml` still emits
+ * nothing at all when there is nothing to warn about, so there remains no chip
+ * to click and no count to read.
  */
 export function topbarStripHtml(
   view: TopbarView | null,
@@ -245,6 +257,6 @@ export function topbarStripHtml(
     topbarViewHtml(view) +
     topbarSessionDisclosureHtml(view, open.session) +
     tokensDisclosureHtml(breakdown, open.tokens) +
-    topbarWarningsHtml(view, open.warnings)
+    `<span class="topbar-warning-slot">${topbarWarningsHtml(view, open.warnings)}</span>`
   );
 }
