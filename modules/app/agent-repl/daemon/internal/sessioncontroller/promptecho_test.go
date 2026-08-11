@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -345,5 +346,206 @@ func TestARaisedReplayFloorDropsTheOutstandingReceipts(t *testing.T) {
 	// it would put pre-clear text back above the floor.
 	if got := len(h.controller().consumer.snapshotEchoes()); got != 0 {
 		t.Fatalf("outstanding receipts = %d after a clear, want none", got)
+	}
+}
+
+// --- the echo queue's ORDER --------------------------------------------------
+//
+// Attribution reads the echo queue POSITIONALLY: a transcript UserLine carries
+// no request id, so the oldest outstanding receipt is the one it is taken to
+// answer. That reading is sound only if the queue's order is the order the
+// prompts reached the SDK, and the tests below pin the two facts that make it
+// so by construction rather than by timing — the slot is reserved BEFORE the
+// submit, and the submit runs UNDER the lock the reservation was taken under.
+
+// outstandingEchoIDs returns the unclaimed receipts' request ids, in queue
+// order — the exact order attribution will consume them in.
+func (h *queueHarness) outstandingEchoIDs() []string {
+	c := h.controller().consumer
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, 0, len(c.echoes))
+	for _, e := range c.echoes {
+		out = append(out, e.requestID)
+	}
+	return out
+}
+
+func TestTheEchoSlotIsReservedBeforeTheSubmitReachesTheShim(t *testing.T) {
+	// Arrange: an idle session, and a hook that reads the echo queue from
+	// INSIDE SubmitPrompt — the one vantage point from which "was the slot
+	// taken first?" is answerable at all.
+	h := newQueueHarness(t, nil)
+	var duringSubmit []string
+	h.client.mu.Lock()
+	h.client.onSubmit = func() { duringSubmit = h.outstandingEchoIDs() }
+	h.client.mu.Unlock()
+
+	// Act.
+	if err := h.submitAs("r1", "hello there"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert: the prompt's slot already existed when the prompt reached the
+	// shim. The echo used to be enqueued twenty-nine lines AFTER this point,
+	// which is the whole window another submit could reserve its slot in first.
+	if got := duringSubmit; len(got) != 1 || got[0] != "r1" {
+		t.Fatalf("echo queue during the submit = %v, want [r1] reserved ahead of it", got)
+	}
+}
+
+func TestTheSubmitRunsUnderTheSessionSubmitLock(t *testing.T) {
+	// Arrange: a hook that tries to take the session's submit lock from inside
+	// SubmitPrompt. This is the mutual exclusion itself, asserted directly:
+	// if the lock is free while a prompt is being handed to the shim, then
+	// nothing stops a second submit from reserving its echo slot in between.
+	h := newQueueHarness(t, nil)
+	free := true
+	h.client.mu.Lock()
+	h.client.onSubmit = func() {
+		d := h.controller()
+		if d.submitMu.TryLock() {
+			d.submitMu.Unlock()
+			return
+		}
+		free = false
+	}
+	h.client.mu.Unlock()
+
+	// Act.
+	if err := h.submitAs("r1", "hello there"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert.
+	if free {
+		t.Fatal("the submit lock was free while a prompt was being submitted, so the echo reservation and the submit are not ordered by construction")
+	}
+}
+
+func TestTwoConcurrentSubmitsQueueTheirEchoesInSubmitOrder(t *testing.T) {
+	// Arrange: two submits that genuinely overlap. The second is released the
+	// moment the first is INSIDE SubmitPrompt, which is precisely the window
+	// the defect lived in — the first has reached the SDK and has not yet
+	// enqueued its receipt.
+	h := newQueueHarness(t, nil)
+	inFirstSubmit := make(chan struct{})
+	var once sync.Once
+	h.client.mu.Lock()
+	h.client.onSubmit = func() { once.Do(func() { close(inFirstSubmit) }) }
+	h.client.mu.Unlock()
+
+	var wg sync.WaitGroup
+	var secondErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-inFirstSubmit
+		secondErr = h.submitAs("r2", "second prompt")
+	}()
+
+	// Act.
+	if err := h.submitAs("r1", "first prompt"); err != nil {
+		t.Fatalf("first submit: %v", err)
+	}
+	wg.Wait()
+	if secondErr != nil {
+		t.Fatalf("second submit: %v", secondErr)
+	}
+
+	// Assert: the echo queue's order IS the order the shim took the prompts in.
+	// A queue in the other order would hand r1's transcript line r2's request
+	// id, swapping two prompts' identities with no error anywhere.
+	h.client.mu.Lock()
+	submitted := append([]string(nil), h.client.requestIDs...)
+	h.client.mu.Unlock()
+	echoed := h.outstandingEchoIDs()
+	if !reflect.DeepEqual(submitted, echoed) {
+		t.Fatalf("submit order = %v but echo queue order = %v; attribution reads the queue positionally, so these diverging swaps two prompts' identities", submitted, echoed)
+	}
+}
+
+func TestARefusedSubmitLeavesNoBubbleAndNoOutstandingEcho(t *testing.T) {
+	// Arrange: a shim that refuses the prompt. The slot is now reserved BEFORE
+	// the submit, so the property that a refused prompt draws no bubble is no
+	// longer free — it is paid for by the retraction.
+	h := newQueueHarness(t, nil)
+	h.client.mu.Lock()
+	h.client.submitErrOnce = errors.New("the shim refused it")
+	h.client.mu.Unlock()
+	before := len(h.userTurns())
+
+	// Act.
+	if err := h.submitAs("r1", "hello there"); err == nil {
+		t.Fatal("submit succeeded, want the shim's refusal")
+	}
+
+	// Assert: no bubble was drawn for a prompt no session received...
+	for _, turn := range h.userTurns()[before:] {
+		if turn.item.GetRequestId() == "r1" {
+			t.Fatal("a refused prompt drew a bubble")
+		}
+	}
+	// ...and no slot is left for some later transcript line to claim.
+	if got := h.outstandingEchoIDs(); len(got) != 0 {
+		t.Fatalf("outstanding receipts = %v after a refused submit, want none", got)
+	}
+}
+
+func TestADisagreeingOldestReceiptRefusesToAttributeTheLine(t *testing.T) {
+	// Arrange: an outstanding receipt whose text is not this line's. The
+	// positional correlation cannot be trusted here, so the content guard
+	// converts what would be a silent misattribution into a visible
+	// non-attribution.
+	h := newQueueHarness(t, nil)
+	if err := h.submitAs("r1", "hello there"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	cd := &frontendv1.ConversationDelta{
+		Workspace: "ws",
+		Messages: []*frontendv1.Message{{
+			Uuid: "u-1",
+			Payload: &frontendv1.Message_UserMessage{UserMessage: &datav1.ApiUserMessage{
+				Content: &datav1.ApiUserMessage_ContentString{ContentString: "some other prompt entirely"},
+			}},
+		}},
+	}
+
+	// Act.
+	h.controller().consumer.attributeUserTurn(cd)
+
+	// Assert: the line keeps its own identity rather than being stamped with a
+	// request it may not answer, and the receipt keeps its slot.
+	if got := cd.GetMessages()[0].GetRequestId(); got != "" {
+		t.Fatalf("request id = %q, want the line left unattributed", got)
+	}
+	if got := h.outstandingEchoIDs(); len(got) != 1 || got[0] != "r1" {
+		t.Fatalf("outstanding receipts = %v, want [r1] still held", got)
+	}
+}
+
+func TestAnAgreeingOldestReceiptStillAttributesTheLine(t *testing.T) {
+	// Arrange — the guard must not cost the ordinary case anything: the text
+	// the daemon submitted and the text the transcript wrote are one string.
+	h := newQueueHarness(t, nil)
+	if err := h.submitAs("r1", "hello there"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	cd := &frontendv1.ConversationDelta{
+		Workspace: "ws",
+		Messages: []*frontendv1.Message{{
+			Uuid: "u-1",
+			Payload: &frontendv1.Message_UserMessage{UserMessage: &datav1.ApiUserMessage{
+				Content: &datav1.ApiUserMessage_ContentString{ContentString: "hello there"},
+			}},
+		}},
+	}
+
+	// Act.
+	h.controller().consumer.attributeUserTurn(cd)
+
+	// Assert.
+	if got := cd.GetMessages()[0].GetRequestId(); got != "r1" {
+		t.Fatalf("request id = %q, want r1 stamped on the line", got)
 	}
 }

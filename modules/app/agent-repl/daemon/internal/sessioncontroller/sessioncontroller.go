@@ -760,7 +760,32 @@ type sessionController struct {
 	// answer. This copy is written under the same mutex the resolver reads it
 	// under, which is the whole of its justification.
 	queryInstanceID string
-	client          sessionClient
+	// submitMu SERIALIZES THIS SESSION'S PROMPT SUBMITS, and with them the
+	// reservation of each prompt's echo slot (promptecho.go).
+	//
+	// It exists because the echo queue's ORDER is load-bearing: attribution
+	// hands a transcript line the oldest outstanding receipt, so a queue whose
+	// order differs from the order the prompts reached the SDK stamps one
+	// prompt's line with another prompt's request id — two prompts swapping
+	// identities, silently. Four paths funnel into forwardPrompt (the immediate
+	// submit, the queue's drain, an interject's head jump, a merge's own
+	// submit) and the held-prompt queue serializes only ITSELF, so two of them
+	// really can run at once.
+	//
+	// Holding it across the submit — the whole of SubmitPrompt, including its
+	// ack wait — is the point rather than a cost: it is what makes "prompts
+	// reach one session's shim in submit order and come back in the same order"
+	// a construction instead of an assumption claimOldestEcho was already
+	// quietly resting on.
+	//
+	// LOCK ORDER: submitMu is taken BEFORE Manager.mu and never after it, and
+	// every caller of forwardPrompt already reaches it with Manager.mu
+	// released. It must never be taken on the shim's event-reading goroutine —
+	// that goroutine delivers the very ack a held submit is waiting for — and
+	// no caller does: every submit path arrives on a frontend command
+	// goroutine, a queue-delivery goroutine, or a timer.
+	submitMu sync.Mutex
+	client   sessionClient
 	consumer        *consumer
 	cancel          context.CancelFunc
 	// controllerRegistrationRelease relinquishes the SSM-owned reservation
