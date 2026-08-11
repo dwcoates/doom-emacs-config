@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"claude-repld/internal/bounceledger"
 	"claude-repld/internal/registry"
 )
 
@@ -463,5 +464,73 @@ func TestBootSweepSaysWhenAVerdictIsNotClassified(t *testing.T) {
 	// Assert.
 	if !logged(lines, "is NOT CLASSIFIED") {
 		t.Fatalf("an unclassified verdict was silent; lines: %v", *lines)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// BOUNCE ACCOUNTING (bootsweep.go reportBounce, bounceledger): a bounce is
+// scored by pid identity, because counting cannot tell a survivor from a
+// replacement.
+// ---------------------------------------------------------------------------
+
+func TestBootSweepReportsAPreservedShimByPID(t *testing.T) {
+	// Arrange.
+	s, _, lines := sweepRig(t, "/w")
+	s.Ledger = []bounceledger.Entry{{SessionID: "s_/w", Workspace: "/w", PID: 27494, Disposition: bounceledger.DispositionPreserved}}
+	s.Holders = func(string) ([]int, error) { return []int{27494}, nil }
+
+	// Act.
+	s.Run(context.Background())
+
+	// Assert.
+	if !logged(lines, "session=s_/w ws=\"/w\" shim_pid=27494 verdict=PRESERVED") {
+		t.Fatalf("no PRESERVED verdict; got %v", *lines)
+	}
+}
+
+func TestBootSweepReportsAReplacedShimAsDIED(t *testing.T) {
+	// Arrange.
+	s, _, lines := sweepRig(t, "/w")
+	s.Ledger = []bounceledger.Entry{{SessionID: "s_/w", Workspace: "/w", PID: 27494, Disposition: bounceledger.DispositionPreserved}}
+	s.Holders = func(string) ([]int, error) { return []int{51755}, nil }
+
+	// Act.
+	s.Run(context.Background())
+
+	// Assert.
+	if !logged(lines, "verdict=DIED") || !logged(lines, "FLEET LOSS died=1 of 1") {
+		t.Fatalf("no DIED verdict or fleet-loss line; got %v", *lines)
+	}
+}
+
+func TestBootSweepReportsADeliberateRollAsROLLEDRatherThanPreserved(t *testing.T) {
+	// Arrange.
+	s, _, lines := sweepRig(t, "/w")
+	s.Ledger = []bounceledger.Entry{{
+		SessionID: "s_/w", Workspace: "/w", PID: 27494,
+		Disposition: bounceledger.DispositionRolled, Reason: "the shim bundle was superseded",
+	}}
+	s.Holders = func(string) ([]int, error) { return nil, nil }
+
+	// Act.
+	s.Run(context.Background())
+
+	// Assert.
+	if !logged(lines, "verdict=ROLLED") || logged(lines, "verdict=PRESERVED") {
+		t.Fatalf("roll not reported as ROLLED; got %v", *lines)
+	}
+}
+
+func TestBootSweepSaysItCanMakeNoClaimWithoutAHolderProbe(t *testing.T) {
+	// Arrange.
+	s, _, lines := sweepRig(t, "/w")
+	s.Ledger = []bounceledger.Entry{{SessionID: "s_/w", Workspace: "/w", PID: 27494, Disposition: bounceledger.DispositionPreserved}}
+
+	// Act.
+	s.Run(context.Background())
+
+	// Assert.
+	if !logged(lines, "bounce accounting SKIPPED") {
+		t.Fatalf("no skip line; got %v", *lines)
 	}
 }
