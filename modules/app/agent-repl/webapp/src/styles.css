@@ -173,6 +173,13 @@
      regress), with the status chip backed by the card grey (.tool-card
      .badge) so the wash never tints it. */
   --async-card: #72b2a5;
+  /* The ONE visible-line budget the feed's tall boxes share: both speakers'
+     bubble bodies, and a teal card's always-open nested section (the fixed
+     panel further down). Stated once here so the nested section cannot drift
+     to a cap of its own — "the same height a bubble stops at" is the
+     requirement, and a second literal 25 is how that requirement quietly
+     stops being true. */
+  --feed-cap-lines: 25;
   --async-border: #4fb8a8;
   /* The Merge status card (a merge-failure remediation turn): an amber wash,
      kin to --remediation, so it reads as "needs resolving" and stays distinct
@@ -1608,15 +1615,17 @@ pre {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
-/* The fixed panel a teal card's fold drops (see .fold-fixed above). Half the
-   viewport is the cap, so a long child feed can never swallow the feed around
-   it. `max-height` rather than `height` is what makes the box SHRINK TO FIT: a
-   panel with less content than the cap draws exactly its content, and only one
-   that would exceed the cap becomes a scroller. It sits BELOW the base rule so
-   the stylesheet's own `.agent-panel {` block stays the first of that name. */
+/* The fixed panel a teal card's fold drops (see .fold-fixed above), capped at
+   the SAME visible-line budget a response or prompt bubble stops at
+   (--feed-cap-lines) and measured in the shared default line box, which is the
+   prompt's own 1.4 leading. The arithmetic is not restated here: this selector
+   joins the shared N-line cap rule below, which is what turns the budget into
+   a `max-height` and a scroller. `max-height` rather than `height` is what
+   makes the box SHRINK TO FIT — a panel with less content than the cap draws
+   exactly its content. It sits BELOW the base rule so the stylesheet's own
+   `.agent-panel {` block stays the first of that name. */
 .fold-fixed > .agent-panel {
-  max-height: 50vh;
-  overflow-y: auto;
+  --cap-lines: var(--feed-cap-lines);
 }
 /* The gns-sockets fold inside a final-response bubble (see gns.ts): the
    bridge upkeep that followed the answer, wearing the shared fold dress —
@@ -1748,7 +1757,8 @@ pre {
 .tab-chip.active { color: var(--fg); border-color: var(--accent); }
 /* N-line preview caps, one shared mechanic: --cap-lines is the visible
    line budget (Read and Edit diffs get 10, Bash command and output get
-   5 each, independently scrollable, and BOTH speakers' bubbles get 25),
+   5 each, independently scrollable, and BOTH speakers' bubbles and a teal
+   card's always-open nested section share --feed-cap-lines),
    --cap-line-h is the line box those lines are counted in, and
    --cap-extra absorbs the .tool-output dashed-divider padding where
    inherited. Everything past the cap stays reachable by scrolling.
@@ -1760,7 +1770,8 @@ pre {
    leading its own text actually renders at, so 25 lines means 25 of ITS
    lines. */
 .tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content,
-.bubble > .bubble-body {
+.bubble > .bubble-body,
+.fold-fixed > .agent-panel {
   overflow-y: auto;
   max-height: calc(var(--cap-lines) * var(--cap-line-h, 1.4em) + var(--cap-extra, 0px));
 }
@@ -1778,7 +1789,7 @@ pre {
    read from that bubble's own leading token rather than restated here, so a
    change to `.md`'s or the prompt's leading moves the cap with it instead of
    silently mis-measuring it. */
-.bubble > .bubble-body { --cap-lines: 25; }
+.bubble > .bubble-body { --cap-lines: var(--feed-cap-lines); }
 .bubble.assistant > .bubble-body { --cap-line-h: calc(var(--md-line-h) * 1em); }
 .bubble.user > .bubble-body { --cap-line-h: calc(var(--prompt-line-h) * 1em); }
 .tool-read-output { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
