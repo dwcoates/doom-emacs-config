@@ -712,7 +712,6 @@ func pushedFailureType(m *Manager, errorType string) bool {
 	return false
 }
 
-
 // ---------------------------------------------------------------------------
 // The hold spans the rewind
 // ---------------------------------------------------------------------------
