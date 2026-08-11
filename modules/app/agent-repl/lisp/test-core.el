@@ -3127,6 +3127,10 @@ survives into the rest of the batch run."
         (1+ agent-repl-test--fake-heartbeat-arm-count))
   (agent-repl--register-timer :test-heartbeat (agent-repl-test--armed-timer)))
 
+(defun agent-repl-test--arm-fn-that-arms-nothing ()
+  "Stand in for an arm function that runs but leaves its key un-armed."
+  nil)
+
 (ert-deftest agent-repl-test-register-timer-replaces-rather-than-stacks ()
   "Re-arming a key cancels the prior timer instead of stacking a duplicate."
   ;; Arrange
@@ -3202,12 +3206,11 @@ survives into the rest of the batch run."
   "A key with no live timer is re-armed through its owner's arm function."
   ;; Arrange
   (agent-repl-test--with-timer-registry
-    (let ((warnings nil)
-          (agent-repl--required-timer-keys
+    (let ((agent-repl--required-timer-keys
            '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
           (agent-repl-test--fake-heartbeat-arm-count 0))
-      (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
         ;; Act
         (let ((result (agent-repl--assert-heartbeat-armed)))
           ;; Assert
@@ -3215,8 +3218,48 @@ survives into the rest of the batch run."
           (should (equal 1 agent-repl-test--fake-heartbeat-arm-count))
           (should (agent-repl--timer-armed-p :test-heartbeat)))))))
 
-(ert-deftest agent-repl-test-assert-heartbeat-warns-naming-the-stranded-key ()
-  "The re-arm is reported loudly, naming the key that was stranded."
+(ert-deftest agent-repl-test-assert-heartbeat-records-the-stranded-key-at-info ()
+  "The strand is still recorded naming the key, at info rather than warn."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (let ((infos nil)
+          (agent-repl--required-timer-keys
+           '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
+          (agent-repl-test--fake-heartbeat-arm-count 0))
+      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Act
+        (agent-repl--assert-heartbeat-armed)
+        ;; Assert
+        (should (cl-some (lambda (i)
+                           (string-match-p
+                            "key=:test-heartbeat outcome=stranded arm-fn=agent-repl-test--arm-fake-heartbeat action=re-arming"
+                            i))
+                         infos))))))
+
+(ert-deftest agent-repl-test-assert-heartbeat-records-the-rearm-at-info ()
+  "A strand that heals reports `outcome=rearmed' at info, naming the key."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (let ((infos nil)
+          (agent-repl--required-timer-keys
+           '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
+          (agent-repl-test--fake-heartbeat-arm-count 0))
+      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Act
+        (agent-repl--assert-heartbeat-armed)
+        ;; Assert
+        (should (cl-some (lambda (i)
+                           (string-match-p
+                            "key=:test-heartbeat outcome=rearmed arm-fn=agent-repl-test--arm-fake-heartbeat"
+                            i))
+                         infos))))))
+
+(ert-deftest agent-repl-test-assert-heartbeat-does-not-warn-on-a-healed-strand ()
+  "Strand-then-rearm is self-healing, so it must raise no WARNING at all."
   ;; Arrange
   (agent-repl-test--with-timer-registry
     (let ((warnings nil)
@@ -3224,12 +3267,48 @@ survives into the rest of the batch run."
            '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
           (agent-repl-test--fake-heartbeat-arm-count 0))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings)))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--assert-heartbeat-armed)
+        ;; Assert
+        (should (null warnings))))))
+
+(ert-deftest agent-repl-test-assert-heartbeat-warns-when-the-rearm-fails ()
+  "A key still un-armed after its arm function ran is a persisted fault: warn."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (let ((warnings nil)
+          (agent-repl--required-timer-keys
+           '((:test-heartbeat . agent-repl-test--arm-fn-that-arms-nothing))))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings)))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+        ;; Act
+        (let ((result (agent-repl--assert-heartbeat-armed)))
+          ;; Assert
+          (should (equal '(:test-heartbeat) (plist-get result :failed)))
+          (should (cl-some (lambda (w)
+                             (string-match-p "key=:test-heartbeat outcome=rearm-failed" w))
+                           warnings)))))))
+
+(ert-deftest agent-repl-test-assert-heartbeat-warns-on-an-unloaded-owner ()
+  "An owner that cannot re-arm at all is a persisted fault: warn."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (let ((warnings nil)
+          (agent-repl--required-timer-keys
+           '((:test-heartbeat . agent-repl-test--arm-fn-that-does-not-exist))))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings)))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--assert-heartbeat-armed)
         ;; Assert
         (should (cl-some (lambda (w)
-                           (string-match-p "key=:test-heartbeat outcome=stranded" w))
+                           (string-match-p
+                            "key=:test-heartbeat outcome=unavailable arm-fn=agent-repl-test--arm-fn-that-does-not-exist reason=owner-not-loaded"
+                            w))
                          warnings))))))
 
 (ert-deftest agent-repl-test-assert-heartbeat-is-quiet-when-all-armed ()

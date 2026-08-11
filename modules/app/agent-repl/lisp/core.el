@@ -2702,10 +2702,19 @@ workspace-status-export.el, autosave.el, and readiness.el."
   "Verify every key in `agent-repl--required-timer-keys' has a live timer.
 
 Any key found un-armed is re-armed by calling its owner's arm function,
-and the strand is reported through `agent-repl--warn' naming the key, the
-arm function, and whether the re-arm took.  A key whose owner has not been
-loaded (its arm function is not `fboundp') cannot be re-armed and is
-reported as unavailable rather than silently passed over.
+and the strand is reported naming the key, the arm function, and whether
+the re-arm took.  A key whose owner has not been loaded (its arm function
+is not `fboundp') cannot be re-armed and is reported as unavailable rather
+than silently passed over.
+
+Severity splits on whether the condition PERSISTED.  A strand that heals
+is self-correcting bookkeeping, not a fault, so `outcome=stranded' and
+`outcome=rearmed' are recorded at `agent-repl--info': fully on the durable
+record, with the same key and arm-fn detail, but without a `WARNING:' tag
+that would train the reader to ignore warnings.  The two outcomes that
+OUTLIVE the check — `outcome=rearm-failed' (the arm function ran and the
+key is still un-armed) and `outcome=unavailable' (nothing can re-arm it at
+all) — stay at `agent-repl--warn'.
 
 Returns a plist:
   :armed        keys that were already armed
@@ -2728,14 +2737,14 @@ log line."
            nil "assert-heartbeat-armed: key=%s outcome=unavailable arm-fn=%s reason=owner-not-loaded"
            key arm-fn))
          (t
-          (agent-repl--warn
+          (agent-repl--info
            nil "assert-heartbeat-armed: key=%s outcome=stranded arm-fn=%s action=re-arming"
            key arm-fn)
           (funcall arm-fn)
           (if (agent-repl--timer-armed-p key)
               (progn
                 (push key rearmed)
-                (agent-repl--warn
+                (agent-repl--info
                  nil "assert-heartbeat-armed: key=%s outcome=rearmed arm-fn=%s" key arm-fn))
             (push key failed)
             (agent-repl--warn
