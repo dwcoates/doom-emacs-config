@@ -24,8 +24,8 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { ResultMessage } from "../../data/v1/stream_pb";
 import { file_agentshim_data_v1_stream } from "../../data/v1/stream_pb";
-import type { AgentResponse, AgentThinking } from "./response-bubble_pb";
-import { file_agentshim_frontend_v1_response_bubble } from "./response-bubble_pb";
+import type { AgentResponse, AgentThinking } from "./agent-response_pb";
+import { file_agentshim_frontend_v1_agent_response } from "./agent-response_pb";
 import type { SkillBodyItem } from "./slash-menu_pb";
 import { file_agentshim_frontend_v1_slash_menu } from "./slash-menu_pb";
 import type { AgentToolCall, AgentToolOutcome, AgentToolResult } from "./tool-call_pb";
@@ -36,13 +36,13 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/agent-emission.proto.
  */
 export const file_agentshim_frontend_v1_agent_emission: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHNoaW0vZnJvbnRlbmQvdjEvYWdlbnQtZW1pc3Npb24ucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSK/AwoNQWdlbnRFbWlzc2lvbhI4CghyZXNwb25zZRgBIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudFJlc3BvbnNlSAASOAoIdGhpbmtpbmcYAiABKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQWdlbnRUaGlua2luZ0gAEjkKCXRvb2xfY2FsbBgDIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudFRvb2xDYWxsSAASPQoLdG9vbF9yZXN1bHQYBCABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQWdlbnRUb29sUmVzdWx0SAASPwoMdG9vbF9vdXRjb21lGAUgASgLMicuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFnZW50VG9vbE91dGNvbWVIABI6Cgpza2lsbF9ib2R5GAYgASgLMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLlNraWxsQm9keUl0ZW1IABI3Cgt0dXJuX3Jlc3VsdBgHIAEoCzIgLmFnZW50c2hpbS5kYXRhLnYxLlJlc3VsdE1lc3NhZ2VIAEIKCghlbWlzc2lvbkIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_data_v1_stream, file_agentshim_frontend_v1_response_bubble, file_agentshim_frontend_v1_slash_menu, file_agentshim_frontend_v1_tool_call]);
+  fileDesc("CiphZ2VudHNoaW0vZnJvbnRlbmQvdjEvYWdlbnQtZW1pc3Npb24ucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSK/AwoNQWdlbnRFbWlzc2lvbhI4CghyZXNwb25zZRgBIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudFJlc3BvbnNlSAASOAoIdGhpbmtpbmcYAiABKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQWdlbnRUaGlua2luZ0gAEjkKCXRvb2xfY2FsbBgDIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudFRvb2xDYWxsSAASPQoLdG9vbF9yZXN1bHQYBCABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQWdlbnRUb29sUmVzdWx0SAASPwoMdG9vbF9vdXRjb21lGAUgASgLMicuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFnZW50VG9vbE91dGNvbWVIABI6Cgpza2lsbF9ib2R5GAYgASgLMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLlNraWxsQm9keUl0ZW1IABI3Cgt0dXJuX3Jlc3VsdBgHIAEoCzIgLmFnZW50c2hpbS5kYXRhLnYxLlJlc3VsdE1lc3NhZ2VIAEIKCghlbWlzc2lvbkIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_data_v1_stream, file_agentshim_frontend_v1_agent_response, file_agentshim_frontend_v1_slash_menu, file_agentshim_frontend_v1_tool_call]);
 
 /**
  * One thing an agent produced.
  *
  * The arm payloads live in the component files that draw them
- * (response-bubble.proto, tool-call.proto, slash-menu.proto) rather than
+ * (agent-response.proto, tool-call.proto, slash-menu.proto) rather than
  * here, so a component's wire shape and its picture stay in one file.
  *
  * @generated from message agentshim.frontend.v1.AgentEmission
@@ -53,8 +53,8 @@ export type AgentEmission = Message<"agentshim.frontend.v1.AgentEmission"> & {
    */
   emission: {
     /**
-     * The assistant's spoken turn: the purple bubble, with the resolved usage
-     * figures its corner renders.
+     * The assistant's spoken turn, with the resolved usage figures it is
+     * stamped with.
      *
      * @generated from field: agentshim.frontend.v1.AgentResponse response = 1;
      */
@@ -62,7 +62,7 @@ export type AgentEmission = Message<"agentshim.frontend.v1.AgentEmission"> & {
     case: "response";
   } | {
     /**
-     * A reasoning block: the collapsed grey block that precedes a response.
+     * A reasoning block: the collapsed reasoning that precedes a response.
      * Carried as its own emission rather than inside the response body — see
      * the exclusivity invariant on AgentResponse.body, which is what keeps
      * the two from being duplicate copies of the same reasoning.

@@ -21,7 +21,7 @@ syntax = "proto3";
 package agentshim.frontend.v1;
 
 import "agentshim/data/v1/stream.proto";
-import "agentshim/frontend/v1/response-bubble.proto";
+import "agentshim/frontend/v1/agent-response.proto";
 import "agentshim/frontend/v1/slash-menu.proto";
 import "agentshim/frontend/v1/tool-call.proto";
 
@@ -30,14 +30,14 @@ option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 // One thing an agent produced.
 //
 // The arm payloads live in the component files that draw them
-// (response-bubble.proto, tool-call.proto, slash-menu.proto) rather than
+// (agent-response.proto, tool-call.proto, slash-menu.proto) rather than
 // here, so a component's wire shape and its picture stay in one file.
 message AgentEmission {
   oneof emission {
-    // The assistant's spoken turn: the purple bubble, with the resolved usage
-    // figures its corner renders.
+    // The assistant's spoken turn, with the resolved usage figures it is
+    // stamped with.
     AgentResponse response = 1;
-    // A reasoning block: the collapsed grey block that precedes a response.
+    // A reasoning block: the collapsed reasoning that precedes a response.
     // Carried as its own emission rather than inside the response body — see
     // the exclusivity invariant on AgentResponse.body, which is what keeps
     // the two from being duplicate copies of the same reasoning.

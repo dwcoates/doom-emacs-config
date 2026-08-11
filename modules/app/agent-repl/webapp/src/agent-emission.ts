@@ -20,7 +20,7 @@
  */
 
 import { ensureObject, generatedFieldSet, num, rejectUnknown, str, type Obj } from "./proto-scalars.js";
-import { ResponseUsageStampSchema } from "../../proto/gen/ts/agentshim/frontend/v1/response-bubble_pb";
+import { ResponseUsageStampSchema } from "../../proto/gen/ts/agentshim/frontend/v1/agent-response_pb";
 
 /**
  * The figures an assistant bubble's corner renders, resolved daemon-side.
