@@ -203,6 +203,11 @@ func TestRePullFromARetiredSpaceIsNeverCoalescedOnto(t *testing.T) {
 	go func() { _ = h.m.Resync("ws", 0) }()
 	<-client.entered
 	h.rotate("uuid-old", "uuid-new")
+	// The new space has produced through 6, so the second request's mark of 5
+	// is one it can honor. Without that the mark would belong to the space the
+	// rotation retired, which the daemon REFUSES outright — a different ruling
+	// from the coalescing one under test here.
+	h.controller(t).consumer.Consume(assistantEvent(t, 6, "new-space"))
 
 	// Act
 	second := make(chan error, 1)

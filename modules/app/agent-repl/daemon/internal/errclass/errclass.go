@@ -157,6 +157,11 @@ const (
 	// TypeHistoryReplayTruncated — the re-pull ended before reaching the
 	// retained window, so the history it delivered is incomplete.
 	TypeHistoryReplayTruncated Type = "history.replay_truncated"
+	// TypeReplayMarkRetired — the client asked for a delta above a mark that
+	// counts in a store seq space the vendor session retired. No such delta
+	// exists, so the read is REFUSED rather than floored into a full replay,
+	// and the client is told to re-anchor from a tail page.
+	TypeReplayMarkRetired Type = "history.replay_mark_retired"
 	// TypeInterruptUndelivered — the stop could not be routed to the shim at
 	// all. The ONLY interrupt outcome that is a failure: a stop that landed
 	// on an already-finished turn is success, not an error.
@@ -351,6 +356,7 @@ var prose = map[Type]string{
 	TypeSessionEndedUnclassified:       "the session ended",
 	TypeHistoryRepullInFlight:          "a history re-pull is already running",
 	TypeHistoryReplayTruncated:         "the history re-pull ended before it reached the live window",
+	TypeReplayMarkRetired:              "this view's replay mark belongs to a conversation the agent has since restarted, so there is no history above it to send; the view re-anchors from the end of the live conversation",
 	TypeInterruptUndelivered:           "the stop could not be delivered",
 	TypeQueueEntrySessionUnwired:       "the queued prompt's session is not attached to this daemon, so it cannot be run yet",
 	TypeQueueEntryKeepAliveHeld:        "the queued prompt is waiting for a cache keep-alive response and cannot be forced ahead of it",
@@ -431,6 +437,14 @@ var (
 	ErrSessionNotEstablished   = errors.New("server: the session did not become established within the deadline")
 	ErrRepullInFlight          = errors.New("session-controller: a history re-pull is already in flight for this workspace")
 	ErrRepullTruncated         = errors.New("session-controller: history re-pull truncated before reaching the retained window")
+	// ErrReplayMarkRetired identifies a frontend replay whose from_seq counts
+	// in a store seq space the vendor session retired. It is a REFUSAL, and
+	// its whole value is that it is not a replay: flooring such a mark and
+	// serving everything above the floor means serving the entire
+	// conversation, which is what made every reconnect after a vendor rotation
+	// re-inflict the full replay paging exists to end. The client re-anchors
+	// from a tail page on it.
+	ErrReplayMarkRetired = errors.New("session-controller: the replay mark counts in a RETIRED store seq space")
 	// ErrInterruptUndelivered is the one interrupt outcome that is a failure.
 	// It is a sentinel rather than a special case at the ack site so that an
 	// undeliverable stop reaches a human through the SAME door as every other
@@ -514,6 +528,7 @@ var sentinelTypes = []struct {
 	{ErrSessionNotEstablished, TypeSessionNotEstablished},
 	{ErrRepullInFlight, TypeHistoryRepullInFlight},
 	{ErrRepullTruncated, TypeHistoryReplayTruncated},
+	{ErrReplayMarkRetired, TypeReplayMarkRetired},
 	{ErrInterruptUndelivered, TypeInterruptUndelivered},
 	{ErrQueueEntrySessionUnwired, TypeQueueEntrySessionUnwired},
 	{ErrQueueEntryKeepAliveHeld, TypeQueueEntryKeepAliveHeld},
@@ -976,6 +991,7 @@ func AllTypes() []Type {
 		TypeSessionEndedUnclassified,
 		TypeHistoryRepullInFlight,
 		TypeHistoryReplayTruncated,
+		TypeReplayMarkRetired,
 		TypeInterruptUndelivered,
 		TypeQueueEntrySessionUnwired,
 		TypeQueueEntryKeepAliveHeld,

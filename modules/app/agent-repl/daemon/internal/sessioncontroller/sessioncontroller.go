@@ -2257,6 +2257,9 @@ func (m *Manager) ResyncForFence(workspace, echoedFence string, fromSeq uint64) 
 // exact current controller generation.  It deliberately owns no eligibility
 // lookup, which keeps every store or shim read below that admission boundary.
 func (m *Manager) resyncFromController(d *sessionController, fromSeq uint64, expectedSessionID, expectedGenerationID string) error {
+	if err := m.refuseRetiredReplayMark(d.workspace, d.sessionID, "retained_ring", fromSeq, m.lastSeenSeq(d)); err != nil {
+		return err
+	}
 	replayFrom := m.replayFloor(d, fromSeq)
 	ringFloor, haveRingFloor := d.consumer.resync(replayFrom)
 	if !haveRingFloor {
@@ -2353,6 +2356,47 @@ func (m *Manager) runPendingResync(workspace, sessionID string) {
 		}
 	}()
 }
+
+// refuseRetiredReplayMark REFUSES a frontend replay whose from_seq counts in a
+// store seq space the vendor session retired, and admits every other mark by
+// returning nil.
+//
+// THIS IS THE RECONNECT PATH'S WHOLE-CONVERSATION REPLAY, ENDED. The mark is
+// unanswerable — no delta above it exists in this space — and the only two
+// things the daemon can do with it are refuse it or invent an answer. It used
+// to invent one: replayFloor floored the mark at the newest clear or
+// compaction, which for a freshly rotated conversation is zero, and the resync
+// then served EVERY event the conversation holds. That is the full replay
+// paging exists to end, re-inflicted on every reconnect after a vendor
+// rotation, for every workspace — the 259,000-event, 186MB read, arriving
+// unasked. A client that cannot prove its mark belongs to the live space is
+// told so instead, and re-anchors from a tail page.
+//
+// A MARK OF ZERO IS NEVER RETIRED. Zero is below every ceiling, so a page with
+// no history takes the ordinary path and is answered by the cold-open tail page
+// exactly as before. The refusal only ever fires on a mark a client could not
+// honestly hold.
+//
+// replayFloor's own detection of this condition is DELIBERATELY LEFT STANDING.
+// It covers the read paths this refusal does not gate — the unwired durable
+// replay's other callers, a re-pull's bounds — and a floor that quietly trusted
+// a retired mark there would be the same bug in a different doorway.
+func (m *Manager) refuseRetiredReplayMark(workspace, sessionID, replaySource string, fromSeq, lastSeen uint64) error {
+	if fromSeq <= lastSeen {
+		return nil
+	}
+	err := fmt.Errorf("%w: ws=%q session=%s from_seq=%d live_last_seq=%d replay_source=%q rejection_cause=%q",
+		errclass.ErrReplayMarkRetired, workspace, sessionID, fromSeq, lastSeen, replaySource, retiredSeqSpaceRejectionCause)
+	m.logf("session-controller: resync REFUSED ws=%q session=%s from_seq=%d live_last_seq=%d replay_source=%q decision=re_anchor rejection_cause=%q — the mark is above every seq this conversation has produced, so it was counted under a vendor session uuid that has since rotated; serving it would replay the WHOLE conversation, so the client is told to re-anchor from a tail page instead: %v",
+		workspace, sessionID, fromSeq, lastSeen, replaySource, retiredSeqSpaceRejectionCause, err)
+	return err
+}
+
+// retiredSeqSpaceRejectionCause is the STABLE half of the refusal sentence: the
+// token the webapp matches on to decide it must re-anchor, exactly as it
+// matches identity_mismatch. It lives in one place because two spellings of it
+// would be a client that silently stops re-anchoring.
+const retiredSeqSpaceRejectionCause = "retired_seq_space"
 
 // replayFloor is the first seq a frontend replay may start at:
 // max(clientLastSeq, newestClearOrCompactSeq), INCLUSIVE.
