@@ -1074,24 +1074,42 @@ the daemon-global views, and the lead batch\\='s share of `:workspaces'.  See
     ;; linger in the store where the orphan/live-p reads would still see it.
     (clrhash agent-repl--frontend-session-views)
     (clrhash agent-repl--frontend-workspace-state-views)
+    ;; Rebuild the retained-SystemInit roster wholesale too (same rationale):
+    ;; the slash-command menu source must not carry a bounced daemon's stale
+    ;; session inits.  Cleared HERE, with the other wholesale clears and ahead
+    ;; of everything, so no reader can see a bounced daemon's roster no matter
+    ;; where in this function it runs.
+    (clrhash agent-repl--frontend-session-inits)
     ;; Wire evidence for the lead batch's slice, before any of it is applied.
     (agent-repl--frontend-snapshot-note-wire "workspaceState" workspaces)
     (agent-repl--frontend-snapshot-note-wire "sessionView" sessions)
     (let ((failures 0))
-      (setq failures
-            (+ failures
-               (agent-repl--frontend-apply-snapshot-items
-                "session-view" sessions '(:workspace)
-                #'agent-repl--frontend-apply-session-view)))
-      ;; Rebuild the retained-SystemInit roster wholesale too (same rationale):
-      ;; the slash-command menu source must not carry a bounced daemon's stale
-      ;; session inits.
-      (clrhash agent-repl--frontend-session-inits)
-      (setq failures
-            (+ failures
-               (agent-repl--frontend-apply-snapshot-items
-                "session-init" inits '(:workspace)
-                #'agent-repl--frontend-apply-session-init)))
+      ;; ---- THE RECOVERY-CRITICAL PREFIX ---------------------------------
+      ;;
+      ;; ORDER IS LATENCY HERE, and this prefix is ordered by what a recovering
+      ;; workspace waits on rather than by what reads well as a list.
+      ;;
+      ;; A workspace's emacs-side recovery signal is stamped when ITS
+      ;; `WorkspaceState' has been stored (`agent-repl--recovery-slo-note-emacs'
+      ;; at the end of `agent-repl--frontend-apply-workspace-state').  The
+      ;; daemon already went to the trouble of putting the live workspaces in
+      ;; the LEAD batch and shipping it first (frontend/snapshotbatch.go), for
+      ;; exactly that reason — but this end then made that batch's workspaces
+      ;; queue behind the whole fleet's session views and SystemInits, which
+      ;; are wholesale rebuilds that ride the lead batch and scale with the
+      ;; ROSTER, not with the workspace.  The lead batch's own workspaces
+      ;; therefore paid the full fleet cost the batching was introduced to
+      ;; remove, which is the `emacs_ms' that moved from ~5ms to ~2.3s.
+      ;;
+      ;; So the per-workspace applies go FIRST, behind only the two things they
+      ;; genuinely depend on: the DaemonView (identity/readiness, which nothing
+      ;; here can fail into) and WorkspaceAvailable (which materializes the
+      ;; local owner a newly-created path's render state needs).  Nothing in
+      ;; `agent-repl--frontend-apply-workspace-state' reads the session-view or
+      ;; SystemInit stores, so nothing it does depends on their rebuilds having
+      ;; run — and both stores were CLEARED above, so a subscriber that reaches
+      ;; for one sees an honestly empty roster rather than a bounced daemon's.
+      ;;
       ;; Identity/readiness lands BEFORE any item that can fail on side
       ;; effects: `agent-repl--frontend-daemon-ready-p' reads the DaemonView,
       ;; and nothing about the daemon's own identity depends on a workspace,
@@ -1114,6 +1132,21 @@ the daemon-global views, and the lead batch\\='s share of `:workspaces'.  See
                  (agent-repl--frontend-apply-snapshot-items
                   "workspace-state" workspaces '(:workspace :state)
                   #'agent-repl--frontend-apply-workspace-state))))
+      ;; ---- THE WHOLESALE REBUILDS ---------------------------------------
+      ;;
+      ;; Roster-scaled work, deliberately AFTER the per-workspace prefix: these
+      ;; are read by menus and liveness queries rather than by the render this
+      ;; connect is racing to restore.
+      (setq failures
+            (+ failures
+               (agent-repl--frontend-apply-snapshot-items
+                "session-view" sessions '(:workspace)
+                #'agent-repl--frontend-apply-session-view)))
+      (setq failures
+            (+ failures
+               (agent-repl--frontend-apply-snapshot-items
+                "session-init" inits '(:workspace)
+                #'agent-repl--frontend-apply-session-init)))
       ;; The drain lease, when this daemon carries the field at all.  Routed
       ;; through the per-item container so a malformed view is loud AND
       ;; counted without costing the resync every other item — the lease is
