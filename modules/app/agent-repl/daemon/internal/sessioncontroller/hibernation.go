@@ -693,16 +693,20 @@ func (m *Manager) hibernateIfStale(workspace, sessionID string) (registry.Hibern
 	if decision.Action != keepalive.ActionHibernate {
 		return registry.HibernationDetail{}, false
 	}
+	// THE IDLE CUTOFF IS THE ONLY CAUSE THIS ROUTE MAY TAKE, and an unexpected
+	// one is REFUSED rather than slept on. keepalive.Evaluate returns no other,
+	// so a different cause arriving here is that guarantee having broken — and a
+	// sleep the daemon cannot explain is not one to take on a user's prompt.
+	if decision.Cause != keepalive.CauseIdleCutoff {
+		m.logf("session-controller: stale-record hibernation REFUSED ws=%q session=%s cause=%q elapsed_ms=%d — the idle cutoff is the only time-based route into a sleep, so a decision carrying any other cause is not acted on; the session stays awake",
+			workspace, sessionID, decision.Cause, decision.ElapsedMs)
+		return registry.HibernationDetail{}, false
+	}
 	detail := registry.HibernationDetail{
 		Cause:     decision.Cause,
 		SinceMs:   nowMs,
 		ElapsedMs: decision.ElapsedMs,
-	}
-	switch decision.Cause {
-	case keepalive.CauseIdleCutoff:
-		detail.CutoffMs = int64(cfg.IdleCutoff / time.Millisecond)
-	case keepalive.CauseCacheExpired:
-		detail.TTLMs = int64(cfg.CacheTTL / time.Millisecond)
+		CutoffMs:  int64(cfg.IdleCutoff / time.Millisecond),
 	}
 	m.logf("session-controller: STALE RECORD hibernating on demand ws=%q session=%s cause=%s elapsed_ms=%d last_turn_end_ms=%d — the session was found past the keep-alive policy's threshold by the route that asked for it rather than by a sweep, so it meets the revival gate now instead of one sweep interval from now",
 		workspace, sessionID, decision.Cause, decision.ElapsedMs, lastEndMs)

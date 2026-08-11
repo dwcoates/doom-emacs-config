@@ -32,16 +32,14 @@ func TestKeepAlivePolicyCausePrecedence(t *testing.T) {
 			wantAction: keepalive.ActionPing,
 		},
 		{
-			name:       "past the TTL but under the cutoff is cache_expired",
+			name:       "past the TTL but under the cutoff lets the cache cool",
 			idle:       cfg.CacheTTL + time.Minute,
-			wantAction: keepalive.ActionHibernate,
-			wantCause:  keepalive.CauseCacheExpired,
+			wantAction: keepalive.ActionLetCacheCool,
 		},
 		{
-			name:       "just under the cutoff is still cache_expired",
+			name:       "just under the cutoff still only lets the cache cool",
 			idle:       cfg.IdleCutoff - time.Minute,
-			wantAction: keepalive.ActionHibernate,
-			wantCause:  keepalive.CauseCacheExpired,
+			wantAction: keepalive.ActionLetCacheCool,
 		},
 		{
 			name:       "exactly at the cutoff is idle_cutoff, not cache_expired",
@@ -214,5 +212,54 @@ func TestKeepAlivePolicyLeavesASessionShortOfTheCompactionInstantAlone(t *testin
 	// Assert.
 	if owned {
 		t.Fatal("the policy claimed a session a minute short of the warm-compaction instant")
+	}
+}
+
+// THE COLD-CACHE ARM OWNS ITS TICK, and this is the load-bearing half of the
+// fix. If the session fell through here, the generic idle sweep — whose default
+// cutoff is an HOUR — would hibernate it immediately, which is the very early
+// sleep the arm exists to prevent.
+func TestKeepAlivePolicyOwnsAColdCacheWithoutHibernating(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	cfg := keepalive.DefaultConfig()
+	now := h.srv.now().UnixMilli()
+	rec := registry.Record{
+		SessionID:     "s1",
+		CWD:           "/ws",
+		LastTurnEndMs: msAgo(now, cfg.CacheTTL+time.Minute),
+	}
+
+	// Act.
+	owned := h.srv.applyKeepAlivePolicy(rec, now)
+
+	// Assert.
+	if !owned {
+		t.Fatal("a session whose cache went cold was not claimed by the policy; it would fall through to the generic idle sweep and be hibernated hours before the cutoff")
+	}
+}
+
+// THE COLD-CACHE REPORT IS ONE LINE PER CACHE WINDOW, not one per sweep tick.
+// The condition stands for hours, and a line per tick would make it the
+// daemon's loudest normal-mode producer.
+func TestKeepAlivePolicyReportsAColdCacheOncePerCacheWindow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	cfg := keepalive.DefaultConfig()
+	now := h.srv.now().UnixMilli()
+	rec := registry.Record{
+		SessionID:     "s1",
+		CWD:           "/ws",
+		LastTurnEndMs: msAgo(now, cfg.CacheTTL+time.Minute),
+	}
+
+	// Act.
+	h.srv.applyKeepAlivePolicy(rec, now)
+	h.srv.applyKeepAlivePolicy(rec, now)
+	h.srv.applyKeepAlivePolicy(rec, now)
+
+	// Assert.
+	if got := h.srv.cacheCoolReported[rec.SessionID]; got != rec.LastTurnEndMs {
+		t.Fatalf("cold-cache report anchor = %d, want the decision's own last-turn-end %d", got, rec.LastTurnEndMs)
 	}
 }

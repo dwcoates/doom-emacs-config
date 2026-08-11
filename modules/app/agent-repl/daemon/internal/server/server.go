@@ -243,6 +243,20 @@ type Server struct {
 	// a second scheduler would be a second answer to "how long has this
 	// workspace been quiet".
 	keepAlive keepalive.Config
+	// cacheCoolReported remembers, per session, the durable last-turn-end whose
+	// cold cache has already been reported (keepalive.ActionLetCacheCool).
+	//
+	// IT IS KEYED ON THE INSTANT, NOT ON A TIMER. The cold-cache arm is a
+	// STANDING CONDITION, not an event: it holds on every sweep tick from the
+	// moment the cache dies until the idle cutoff reaps the session, which at
+	// the shipped defaults is five hours of one line per tick per session.
+	// Keying the report on the last-turn-end instant the decision was taken
+	// against gives exactly one line per session per cache window, and a session
+	// that does real work gets a fresh instant and therefore a fresh line — with
+	// no clock of its own to drift.
+	//
+	// Read and written only from the sweeper goroutine.
+	cacheCoolReported map[string]int64
 	// stopped is closed by ShutdownAll, ending the sweeper goroutine.
 	stopped     chan struct{}
 	sweeperDone chan struct{}
@@ -2374,25 +2388,53 @@ func (s *Server) applyKeepAlivePolicy(rec registry.Record, nowMs int64) (owned b
 		// THE RETRY FLOOR, and there is deliberately no submit in this arm.
 		// The policy decided it, so no reading of this switch can ping inside
 		// the floor; the line is the canonical record of having entered it.
-		s.logf("session %s: cache keep-alive will NOT be submitted (ws %s) elapsed_ms=%d remaining_ms=%d floor_ms=%d: the remaining margin before the cache expires is inside the retry floor, so an attempt would more likely pay a full re-ingest than save one; the cache is left to expire and the policy's cache-expired branch will report it",
+		s.logf("session %s: cache keep-alive will NOT be submitted (ws %s) elapsed_ms=%d remaining_ms=%d floor_ms=%d: the remaining margin before the cache expires is inside the retry floor, so an attempt would more likely pay a full re-ingest than save one; the cache is left to expire and the policy's let-cache-cool branch reports it from there until the idle cutoff reaps the session",
 			rec.SessionID, rec.CWD, decision.ElapsedMs, decision.RemainingMs, decision.FloorMs)
 		return true
+	case keepalive.ActionLetCacheCool:
+		// THE CACHE IS COLD AND THE SESSION STAYS UP. There is deliberately no
+		// submit in this arm and deliberately no hibernation: this used to sleep
+		// the session at the cache TTL — one hour — on an argument that only ever
+		// supported declining the ping. The session is now left alone until the
+		// idle cutoff arm above reaps it, and the finding is REPORTED rather than
+		// absorbed, once per cache window per session.
+		//
+		// THE ARM STILL OWNS THE SESSION FOR THIS TICK. Falling through to the
+		// generic idle sweep would hand a cold-cached session straight to a
+		// second, shorter cutoff — which is the very early hibernation this arm
+		// exists to prevent.
+		if s.cacheCoolReported == nil {
+			s.cacheCoolReported = map[string]int64{}
+		}
+		if s.cacheCoolReported[rec.SessionID] != rec.LastTurnEndMs {
+			s.cacheCoolReported[rec.SessionID] = rec.LastTurnEndMs
+			s.logf("session %s: the prompt cache has GONE COLD and the session is LEFT UP (ws %s): quiet for %s against a %s TTL, %s still owed before the %s idle cutoff — no ping is submitted, because warming a cache nobody is using pays a full context re-ingest for nobody; and no hibernation is taken, because a cold cache is a reason to stop spending on it and not a reason to tear the session down",
+				rec.SessionID, rec.CWD,
+				(time.Duration(decision.ElapsedMs) * time.Millisecond).Round(time.Second),
+				cfg.CacheTTL,
+				(time.Duration(decision.CutoffRemainingMs) * time.Millisecond).Round(time.Second),
+				cfg.IdleCutoff)
+		}
+		return true
 	case keepalive.ActionHibernate:
+		// THE IDLE CUTOFF IS THE ONLY CAUSE THIS ARM MAY CARRY, and an unexpected
+		// one is REFUSED rather than hibernated on. keepalive.Evaluate returns no
+		// other, so a different cause reaching here is the ladder's guarantee
+		// having broken — and the safe answer to a sleep the daemon cannot explain
+		// is not to take it.
+		if decision.Cause != keepalive.CauseIdleCutoff {
+			s.logf("session %s: keep-alive hibernation REFUSED (ws %s): the policy returned cause %q, but the idle cutoff is the only time-based route into a sleep; nothing was stopped and nothing was persisted",
+				rec.SessionID, rec.CWD, decision.Cause)
+			return true
+		}
 		detail := registry.HibernationDetail{
-			Cause:   decision.Cause,
-			SinceMs: nowMs,
+			Cause:     decision.Cause,
+			SinceMs:   nowMs,
+			CutoffMs:  int64(cfg.IdleCutoff / time.Millisecond),
+			ElapsedMs: decision.ElapsedMs,
 		}
-		switch decision.Cause {
-		case keepalive.CauseIdleCutoff:
-			detail.CutoffMs = int64(cfg.IdleCutoff / time.Millisecond)
-			s.logf("session %s: hibernating on the IDLE CUTOFF (ws %s): quiet for %s, cutoff %s — the keep-alive loop reached its configured maximum, so pinging stops and the session sleeps in the same transition",
-				rec.SessionID, rec.CWD, (time.Duration(decision.ElapsedMs) * time.Millisecond).Round(time.Second), cfg.IdleCutoff)
-		case keepalive.CauseCacheExpired:
-			detail.ElapsedMs = decision.ElapsedMs
-			detail.TTLMs = int64(cfg.CacheTTL / time.Millisecond)
-			s.logf("session %s: hibernating because the PROMPT CACHE EXPIRED before a ping could fire (ws %s): quiet for %s against a %s TTL — a laptop sleep or daemon downtime carried the session past the window, and pinging a cold cache would pay a full context re-ingest for nobody, so the discovery IS the hibernation",
-				rec.SessionID, rec.CWD, (time.Duration(decision.ElapsedMs) * time.Millisecond).Round(time.Second), cfg.CacheTTL)
-		}
+		s.logf("session %s: hibernating on the IDLE CUTOFF (ws %s): quiet for %s, cutoff %s — the keep-alive loop reached its configured maximum, so pinging stops and the session sleeps in the same transition",
+			rec.SessionID, rec.CWD, (time.Duration(decision.ElapsedMs) * time.Millisecond).Round(time.Second), cfg.IdleCutoff)
 		if err := s.controller.HibernateWithCause(rec.CWD, detail); err != nil {
 			switch {
 			case errors.Is(err, sessioncontroller.ErrNotSettled):
