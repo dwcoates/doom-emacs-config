@@ -125,8 +125,8 @@ func TestConnectedReportsAParkedShim(t *testing.T) {
 }
 
 func TestClaimingRemovesTheParkedConnection(t *testing.T) {
-	// Arrange: a claimed connection is owned by a session controller, so it must not also look
-	// parked — Connected answers "is one waiting to be claimed".
+	// Arrange: a claimed connection is owned by a session controller, so it must
+	// not also sit in the parked index waiting to be handed to a second claimer.
 	s, path := serve(t)
 	dialAsShim(t, path, "s_abc")
 	waitConnected(t, s, "s_abc")
@@ -137,8 +137,114 @@ func TestClaimingRemovesTheParkedConnection(t *testing.T) {
 	}
 
 	// Assert
+	s.mu.Lock()
+	_, stillParked := s.parked["s_abc"]
+	s.mu.Unlock()
+	if stillParked {
+		t.Fatal("the parked index still holds a connection a claimer owns")
+	}
+}
+
+// TestAClaimedShimIsStillReportedConnected is THE ADOPTION SEAM. Connected is
+// what the workspace-ownership gate reads to tell a survivor it should adopt
+// from a squatter it should kill, and a shim whose connection is claimed by an
+// EARLIER controller generation is a survivor: it dialled in, it is talking to
+// this daemon, and the kernel says its socket is open. Answering "no shim is
+// connected" about it is what got a ready shim SIGTERM'd.
+func TestAClaimedShimIsStillReportedConnected(t *testing.T) {
+	// Arrange
+	s, path := serve(t)
+	dialAsShim(t, path, "s_abc")
+	waitConnected(t, s, "s_abc")
+
+	// Act — a controller claims the connection and keeps it.
+	if _, err := s.Next(context.Background(), "s_abc"); err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+
+	// Assert
+	if !connected(t, s, "s_abc") {
+		t.Fatal("Connected = false for a session whose live shim is claimed; a survivor under a retired generation must still satisfy the adoption gate")
+	}
+}
+
+// TestAClaimedShimWhoseProcessDiedIsNotReportedConnected: the claim record must
+// never outlive the transport it describes. A corpse answering Connected would
+// adopt a shim that cannot drive anything.
+func TestAClaimedShimWhoseProcessDiedIsNotReportedConnected(t *testing.T) {
+	// Arrange
+	s, path := serve(t)
+	shim := dialAsShim(t, path, "s_abc")
+	waitConnected(t, s, "s_abc")
+	if _, err := s.Next(context.Background(), "s_abc"); err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+
+	// Act — the shim process goes away, which closes its socket. The kernel
+	// records that at the instant of the close, so the probe below needs no
+	// wait of any kind.
+	if err := shim.Close(); err != nil {
+		t.Fatalf("closing the shim peer: %v", err)
+	}
+
+	// Assert
 	if connected(t, s, "s_abc") {
-		t.Fatal("Connected = true after the connection was claimed")
+		t.Fatal("Connected = true for a claimed connection whose peer is gone")
+	}
+}
+
+// TestAForeignSessionsClaimedShimIsNotReportedConnected: adoption is decided
+// per session, and a claimed connection announcing some other session must not
+// answer for this one.
+func TestAForeignSessionsClaimedShimIsNotReportedConnected(t *testing.T) {
+	// Arrange
+	s, path := serve(t)
+	dialAsShim(t, path, "s_foreign")
+	waitConnected(t, s, "s_foreign")
+	if _, err := s.Next(context.Background(), "s_foreign"); err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+
+	// Act/Assert
+	if connected(t, s, "s_abc") {
+		t.Fatal("Connected = true for s_abc while only a foreign session's shim is claimed")
+	}
+}
+
+// TestARedialSupersedesTheClaimRecord: one session has one connection here. A
+// shim that redialled has abandoned the socket its old claim names, so the
+// claim must not go on speaking for it.
+func TestARedialSupersedesTheClaimRecord(t *testing.T) {
+	// Arrange — a claimed connection.
+	s, path := serve(t)
+	dialAsShim(t, path, "s_abc")
+	waitConnected(t, s, "s_abc")
+	claimed, err := s.Next(context.Background(), "s_abc")
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+
+	// Act — the same shim redials, and the next claimer takes it. Next is the
+	// rendezvous the assertion synchronizes on: it returns only once the
+	// redialled connection has been delivered.
+	dialAsShim(t, path, "s_abc")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	redialled, err := s.Next(ctx, "s_abc")
+	if err != nil {
+		t.Fatalf("Next after the redial: %v", err)
+	}
+
+	// Assert — the claim record names the newest connection, never the one it
+	// superseded.
+	s.mu.Lock()
+	current := s.claimed["s_abc"]
+	s.mu.Unlock()
+	if current == claimed {
+		t.Fatal("the superseded claim record survived the redial that replaced it")
+	}
+	if current != redialled {
+		t.Fatalf("claim record = %p, want the redialled connection %p", current, redialled)
 	}
 }
 
