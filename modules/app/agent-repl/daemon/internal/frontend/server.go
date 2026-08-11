@@ -1053,8 +1053,10 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 	// applies per workspace — and no view is torn, because every catch-up frame
 	// is the exact frame already broadcast to every other client.
 	var (
-		snapshot    *frontendv1.StateSnapshot
-		rawSnapshot *frontendv1.StateSnapshot
+		snapshot              *frontendv1.StateSnapshot
+		rawSnapshot           *frontendv1.StateSnapshot
+		connectBatches        int
+		connectLeadWorkspaces int
 	)
 	{
 		// Never call StateProvider while holding the frontend lock. Synchronous
@@ -1062,12 +1064,38 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		// pass under s.mu closes the capture race this lock order creates.
 		rawSnapshot = s.state.Snapshot()
 		snapshot = snapshotForClient(rawSnapshot, scope, kind)
-		snap, err := marshalFrame(SnapshotFrame(snapshot))
-		if err != nil {
-			s.warn("frontend: marshal connect snapshot kind=%s scope_workspace=%q scope_session=%q: %v",
-				kind, scopeWorkspace(scope), scopeSession(scope), err)
-			s.closeConn(c, cl.id, kind, causeInternal(closeReasonSnapshotMarshal, err))
-			return
+		// THE CONNECT SNAPSHOT IS DELIVERED IN BATCHES (snapshotbatch.go). A
+		// host applies one workspace at a time, so the whole fleet in one frame
+		// made every workspace's recovery wait on every other workspace's
+		// apply; the batches let the host apply as they land, with the
+		// live-session workspaces in the first one. A single-batch delivery is
+		// byte-identical to the unbatched frame apart from its (self-
+		// describing, zero-safe) batch accounting.
+		//
+		// ONLY THE HOST IS BATCHED. A GUI client's snapshot is scoped to one
+		// session and is small, and its reader (webapp ws.ts `adoptSnapshot`)
+		// ADOPTS a snapshot as the whole state rather than folding it in — a
+		// second batch would replace the first rather than extend it. So the
+		// split is applied where the reader was taught to accumulate and
+		// nowhere else; every other client keeps receiving exactly one frame.
+		batches := []*frontendv1.StateSnapshot{snapshot}
+		if kind.isHost() {
+			batches = splitConnectSnapshot(snapshot)
+		}
+		snaps := make([][]byte, 0, len(batches))
+		for _, batch := range batches {
+			data, err := marshalFrame(SnapshotFrame(batch))
+			if err != nil {
+				s.warn("frontend: marshal connect snapshot kind=%s scope_workspace=%q scope_session=%q batch=%d/%d: %v",
+					kind, scopeWorkspace(scope), scopeSession(scope), batch.GetWorkspaceBatchIndex(), len(batches), err)
+				s.closeConn(c, cl.id, kind, causeInternal(closeReasonSnapshotMarshal, err))
+				return
+			}
+			snaps = append(snaps, data)
+		}
+		connectBatches = len(batches)
+		if connectBatches > 0 {
+			connectLeadWorkspaces = len(batches[0].GetWorkspaces())
 		}
 		s.mu.Lock()
 		if s.closed {
@@ -1097,17 +1125,23 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		// queued.
 		cl.drain.open(time.Now())
 		// A fresh outbox is empty, so this first FIFO frame always fits; a
-		// refusal here would be a programmer error, not a slow consumer.
-		if res := enqueueLocked(cl, outFrame{data: snap}); !res.queued {
-			// The window opened and no writer will ever start on this
-			// connection to close it, so close it here rather than leave a
-			// window open on a connection that is being abandoned.
-			cl.drain.closeAt(time.Now())
-			s.mu.Unlock()
-			s.warn("frontend: connect snapshot rejected by an empty outbox kind=%s scope_workspace=%q scope_session=%q",
-				kind, scopeWorkspace(scope), scopeSession(scope))
-			s.closeConn(c, cl.id, kind, causeInternal(closeReasonSnapshotRefused, nil))
-			return
+		// refusal here would be a programmer error, not a slow consumer. The
+		// CONTINUATION batches ride the same delivery-lock operation, in order,
+		// immediately behind the lead: a client that received the lead is
+		// guaranteed the rest of the fleet on the same connection, and nothing
+		// broadcast after registration can interleave between them.
+		for i, data := range snaps {
+			if res := enqueueLocked(cl, outFrame{data: data}); !res.queued {
+				// The window opened and no writer will ever start on this
+				// connection to close it, so close it here rather than leave a
+				// window open on a connection that is being abandoned.
+				cl.drain.closeAt(time.Now())
+				s.mu.Unlock()
+				s.warn("frontend: connect snapshot rejected by an empty outbox kind=%s scope_workspace=%q scope_session=%q batch=%d/%d",
+					kind, scopeWorkspace(scope), scopeSession(scope), i, len(snaps))
+				s.closeConn(c, cl.id, kind, causeInternal(closeReasonSnapshotRefused, nil))
+				return
+			}
 		}
 		// THE CATCH-UP FRAMES RIDE THE SAME delivery-lock operation, immediately
 		// behind the snapshot and ahead of registration, so this client sees
@@ -1162,8 +1196,9 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 	}
 	s.logSnapshotCensus(cl, snapshotPhaseConnect, snapshot)
 	retainedSessions, rejectedSessions := snapshotScopeSessionAudit(rawSnapshot, scope)
-	s.logf("frontend: client connected client_id=%d kind=%s scope_workspace=%q scope_session=%q snapshot_workspaces=%d snapshot_sessions_retained=%q snapshot_sessions_rejected=%q",
-		cl.id, cl.kind, scopeWorkspace(scope), scopeSession(scope), len(snapshot.GetWorkspaces()), retainedSessions, rejectedSessions)
+	s.logf("frontend: client connected client_id=%d kind=%s scope_workspace=%q scope_session=%q snapshot_workspaces=%d snapshot_batches=%d snapshot_lead_workspaces=%d snapshot_sessions_retained=%q snapshot_sessions_rejected=%q",
+		cl.id, cl.kind, scopeWorkspace(scope), scopeSession(scope), len(snapshot.GetWorkspaces()),
+		connectBatches, connectLeadWorkspaces, retainedSessions, rejectedSessions)
 
 	go s.writeLoop(c, cl)
 	if kind == ClientKindGUIStream {
