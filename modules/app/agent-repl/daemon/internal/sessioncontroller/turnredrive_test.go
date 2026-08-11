@@ -457,3 +457,68 @@ func TestTheDaemonsOwnKeepAliveDoesNotPreempt(t *testing.T) {
 		t.Fatalf("owed = %+v, want the daemon's own ping to leave the resumption alone", owed)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// THE DRIVE IS THE MANAGER'S, AND IT DOES NOT OUTLIVE IT. The drive claims a
+// durable row and submits against it, so one taken by a manager that has
+// already closed is indistinguishable from one a dead daemon left half-done.
+// ---------------------------------------------------------------------------
+
+func TestAClosingManagerIssuesNoReDrive(t *testing.T) {
+	// Arrange — the row stands and is owed; what must not happen is this
+	// manager claiming it on its way out.
+	h := newSubmitHarness(t)
+	h.wireSession(t)
+	seedOwed(t, h, reDriveRequest)
+	h.m.Close()
+
+	// Act — a wire landing alongside the close.
+	h.m.noteWired("ws", "s1")
+
+	// Assert.
+	for _, entry := range h.receipts.callLog() {
+		if strings.HasPrefix(entry, "claim-resumption:") {
+			t.Fatalf("calls = %v, want no claim taken by a manager that has closed", h.receipts.callLog())
+		}
+	}
+}
+
+func TestAClosingManagerSaysTheOwedTurnWentUndriven(t *testing.T) {
+	// Arrange — the row surviving is the right durable outcome, but a turn the
+	// user is owed going undriven is never a silent one.
+	h := newSubmitHarness(t)
+	h.wireSession(t)
+	seedOwed(t, h, reDriveRequest)
+	h.m.Close()
+
+	// Act.
+	h.m.noteWired("ws", "s1")
+
+	// Assert.
+	if !h.log.contains("turn resumption NOT DRIVEN") {
+		t.Fatalf("missing the canonical undriven-on-close record")
+	}
+}
+
+func TestACloseJoinsTheOwedResumptionDrive(t *testing.T) {
+	// Arrange — the join is what makes the claim's window bounded by the
+	// manager's own lifetime rather than by scheduling luck.
+	h := newSubmitHarness(t)
+	h.wireSession(t)
+	seedOwed(t, h, reDriveRequest)
+	h.m.noteWired("ws", "s1")
+
+	// Act.
+	h.m.Close()
+
+	// Assert — the drive has either claimed or declined by now; nothing is
+	// still deciding. A drive still in flight would leave the row pending with
+	// a claim about to land behind Close's back.
+	owed, err := h.receipts.UndischargedResumptions("ws")
+	if err != nil {
+		t.Fatalf("UndischargedResumptions: %v", err)
+	}
+	if len(owed) != 1 || len(h.receipts.owedResumptions("ws")) != 0 {
+		t.Fatalf("undischarged = %+v pending = %+v, want the drive settled into a claim before Close returned", owed, h.receipts.owedResumptions("ws"))
+	}
+}
