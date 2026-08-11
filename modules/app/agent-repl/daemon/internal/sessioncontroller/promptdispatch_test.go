@@ -65,17 +65,6 @@ func TestClassifyPromptRecognizesTheBareClear(t *testing.T) {
 	}
 }
 
-func TestARecognizedCommandEarnsNoReceipt(t *testing.T) {
-	// Arrange — one reading decides the receipt, so nothing can disagree with
-	// it about whether this string is prompt text.
-	cmd := classifyPrompt("/clear")
-
-	// Act / Assert.
-	if cmd.echoes() {
-		t.Error("a recognized command echoes; the cut already draws its own divider")
-	}
-}
-
 func TestOnlyTheClearDeclinesTheTurnClaim(t *testing.T) {
 	// Arrange — `/model` occupies the shim exactly as a prompt does (the CLI
 	// runs it and closes a turn), so a workspace that stayed green through it
@@ -103,19 +92,9 @@ func TestOnlyTheClearDeclinesTheTurnClaim(t *testing.T) {
 	}
 }
 
-func TestAnOrdinaryPromptEarnsAReceipt(t *testing.T) {
-	// Arrange.
-	cmd := classifyPrompt("hello there")
+// --- the session command ------------------------------------------------------
 
-	// Act / Assert.
-	if !cmd.echoes() {
-		t.Error("an ordinary prompt must echo — it is what the user said")
-	}
-}
-
-// --- the receipt -------------------------------------------------------------
-
-func TestSubmittingAClearPushesNoReceipt(t *testing.T) {
+func TestSubmittingAClearDrawsNoUserTurn(t *testing.T) {
 	// Arrange — an idle session, so the prompt goes straight to the shim.
 	h := newQueueHarness(t, nil)
 
@@ -133,7 +112,7 @@ func TestSubmittingAClearPushesNoReceipt(t *testing.T) {
 }
 
 func TestSubmittingAClearStillForwardsItToTheShim(t *testing.T) {
-	// Arrange — withholding the DETACHED WORK must not withhold the COMMAND.
+	// Arrange — drawing nothing for the command must not withhold the COMMAND.
 	h := newQueueHarness(t, nil)
 
 	// Act.
@@ -150,7 +129,7 @@ func TestSubmittingAClearStillForwardsItToTheShim(t *testing.T) {
 
 func TestSubmittingAClearOpensTheClearingAxis(t *testing.T) {
 	// Arrange — the daemon is the only thing that knows a clear has BEGUN, and
-	// suppressing its receipt must not cost it that knowledge.
+	// drawing nothing for the command must not cost it that knowledge.
 	h := newQueueHarness(t, nil)
 
 	// Act.
@@ -165,9 +144,9 @@ func TestSubmittingAClearOpensTheClearingAxis(t *testing.T) {
 	}
 }
 
-func TestAClearWithAnArgumentIsAnOrdinaryPromptAndEchoes(t *testing.T) {
+func TestAClearWithAnArgumentIsAnOrdinaryPromptAndOpensNoAxis(t *testing.T) {
 	// Arrange — "/clear the build cache" is something the user SAID, and the
-	// conversation is not being cut, so the work is the honest report.
+	// conversation is not being cut, so no clearing axis belongs to it.
 	h := newQueueHarness(t, nil)
 
 	// Act.
@@ -176,9 +155,12 @@ func TestAClearWithAnArgumentIsAnOrdinaryPromptAndEchoes(t *testing.T) {
 	}
 
 	// Assert.
-	turns := h.userTurns()
-	if len(turns) != 1 || turns[0].item.GetUserMessage().GetContentString() != "/clear the build cache" {
-		t.Fatalf("pushed %d user turn(s), want the ordinary prompt's receipt", len(turns))
+	if cuts := h.applier.cutsApplied(); len(cuts) != 0 {
+		t.Fatalf("cut edges = %+v, want none for a prompt that cuts nothing", cuts)
+	}
+	got := h.client.promptTexts()
+	if len(got) != 1 || got[0] != "/clear the build cache" {
+		t.Fatalf("forwarded %q, want the prompt verbatim", got)
 	}
 }
 

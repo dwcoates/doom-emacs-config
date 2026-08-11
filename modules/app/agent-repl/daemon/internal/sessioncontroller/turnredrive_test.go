@@ -109,7 +109,7 @@ func TestAClaimThatCannotBeRecordedIssuesNoReDrive(t *testing.T) {
 	// which is the duplicate the claim exists to prevent.
 	h := newSubmitHarness(t)
 	seedOwed(t, h, reDriveRequest)
-	h.receipts.fakeReceiptStore.resumptionClaimErr = errors.New("state store is unwritable")
+	h.receipts.resumptionClaimErr = errors.New("state store is unwritable")
 
 	// Act.
 	h.m.driveOwedResumptions("ws", "s1")
@@ -198,26 +198,6 @@ func TestDischargingADeliveryTheStoreRefusesIsLoud(t *testing.T) {
 	// Assert.
 	if !logged.contains("turn resumption DISCHARGE FAILED") {
 		t.Fatalf("missing the canonical discharge-failure record; log:\n%s", strings.Join(logged.lines, "\n"))
-	}
-}
-
-func TestTheReDriveLeavesNoDurableReceiptBehind(t *testing.T) {
-	// Arrange — a receipt exists to replay the user's own work. Recording one
-	// for the daemon's instruction would resurrect it from durable storage,
-	// where nothing downstream could tell it from a real prompt.
-	h := newSubmitHarness(t)
-	seedOwed(t, h, reDriveRequest)
-
-	// Act.
-	h.m.driveOwedResumptions("ws", "s1")
-
-	// Assert.
-	rows, err := h.receipts.Outstanding("ws")
-	if err != nil {
-		t.Fatalf("Outstanding: %v", err)
-	}
-	if len(rows) != 0 {
-		t.Fatalf("receipts = %+v, want the re-drive to leave none", rows)
 	}
 }
 
@@ -353,7 +333,7 @@ func TestAnUnreadableStoreIssuesNoReDriveAndSaysSo(t *testing.T) {
 	// Arrange — an unreadable store must never read as "nothing is owed",
 	// which would abandon the turn silently.
 	h := newSubmitHarness(t)
-	h.receipts.fakeReceiptStore.resumptionsErr = errors.New("state store is unreadable")
+	h.receipts.resumptionsErr = errors.New("state store is unreadable")
 
 	// Act.
 	h.m.driveOwedResumptions("ws", "s1")
@@ -396,13 +376,12 @@ func TestAUserPromptCancelsBeforeTheReDriveCouldSlipIn(t *testing.T) {
 	}
 	h.m.driveOwedResumptions("ws", "s1")
 
-	// Assert — the only submit recorded is the user's own.
-	rows, err := h.receipts.Outstanding("ws")
-	if err != nil {
-		t.Fatalf("Outstanding: %v", err)
+	// Assert — the only prompt the shim was handed is the user's own.
+	if got := h.lastClient().requestIDs; len(got) == 0 || got[len(got)-1] != "r-1" {
+		t.Fatalf("submitted request ids = %v, want the user's own prompt last and no re-drive after it", got)
 	}
-	if len(rows) != 1 || rows[0].RequestID != "r-1" {
-		t.Fatalf("receipts = %+v, want only the user's own prompt", rows)
+	if owed := h.receipts.owedResumptions("ws"); len(owed) != 0 {
+		t.Fatalf("owed = %+v, want the user's prompt to have cancelled the re-drive", owed)
 	}
 }
 

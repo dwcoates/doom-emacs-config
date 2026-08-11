@@ -245,7 +245,7 @@ func TestAMachineryLineDoesNotRaiseTheReplayFloor(t *testing.T) {
 	}
 }
 
-func TestAMachineryLineClaimsNoPromptReceipt(t *testing.T) {
+func TestAMachineryLineIsNotDrawnAsTheOutstandingPrompt(t *testing.T) {
 	// Arrange: a real submit is outstanding when the CLI writes its bookkeeping.
 	h := newQueueHarness(t, nil)
 	if err := h.submitAs("r1", "hello there"); err != nil {
@@ -255,15 +255,14 @@ func TestAMachineryLineClaimsNoPromptReceipt(t *testing.T) {
 	// Act: the machinery record arrives BEFORE the real prompt's durable line.
 	h.controller().consumer.Consume(transcriptUserEvent(t, 12, "u-machinery", compactMachinery))
 
-	// Assert: the receipt is still outstanding for the line that really answers
-	// it — a machinery record retiring it would leave the real prompt's own line
-	// unattributed and the work duplicated.
-	if got := len(h.controller().consumer.snapshotEchoes()); got != 1 {
-		t.Fatalf("outstanding receipts = %d, want the real submit's still held", got)
+	// Assert: nothing is drawn. The user is still waiting for their own prompt's
+	// line, and a machinery record rendered in its place would read as it.
+	if turns := h.userTurns(); len(turns) != 0 {
+		t.Fatalf("pushed %d user turn(s) for a machinery record, want none", len(turns))
 	}
 }
 
-func TestTheRealLineIsStillAttributedAfterAMachineryLine(t *testing.T) {
+func TestTheRealLineStillRendersAfterAMachineryLine(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 	if err := h.submitAs("r1", "hello there"); err != nil {
@@ -276,11 +275,11 @@ func TestTheRealLineIsStillAttributedAfterAMachineryLine(t *testing.T) {
 
 	// Assert
 	turns := h.userTurns()
-	if len(turns) != 2 {
-		t.Fatalf("pushed %d user turn(s), want the receipt and the real durable line", len(turns))
+	if len(turns) != 1 {
+		t.Fatalf("pushed %d user turn(s), want the real durable line alone", len(turns))
 	}
-	if got := turns[1].item.GetRequestId(); got != "r1" {
-		t.Errorf("durable line request_id = %q, want the submit's id r1", got)
+	if got := turns[0].item.GetUuid(); got != "u-real" {
+		t.Errorf("rendered uuid = %q, want the real prompt's own line", got)
 	}
 }
 
