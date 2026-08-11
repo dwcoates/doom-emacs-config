@@ -2685,9 +2685,10 @@ describe("UdsSession lifetime: SDK stream termination", () => {
     const failure = await session.shutdown("SIGTERM").catch((cause: unknown) => cause);
 
     // Assert: the shim went down without waiting on a store that never came
-    // back, it said so through the same fatal receipt error as ever, and the
-    // termination event is on disk rather than gone.
-    expect(failure).toBeInstanceOf(QueryTerminationPersistenceError);
+    // back, and WITHOUT calling that a lost receipt — the termination event is
+    // on disk, so a deliberate teardown over an unreachable store is an
+    // orderly shutdown, not a failure that exits nonzero.
+    expect(failure).toBeUndefined();
     const journal = new SpillJournal({
       path: join(workspaceDir, ".claude", "emacs", "store-write-spill.bin"),
       sessionId: "sess-store-bouncing",
@@ -2697,6 +2698,46 @@ describe("UdsSession lifetime: SDK stream termination", () => {
     expect(spilled.flat().some((event) => event.payload.case === "queryLifecycle")).toBe(true);
     await expect(done).resolves.toBeUndefined();
     expect(query.abortCalls).toBe(1);
+  });
+
+  it("keeps the query alive across a store bounce under a live turn", async () => {
+    // Arrange: a full backend bounce restarts the shim-store under a live
+    // shim. The store is a SEPARATE process; its restart is not a fact about
+    // this query, and the query must not end because of one.
+    // The vendor identity is settled up front, so the bounce is the only thing
+    // this test perturbs — a rotation would bounce the DAEMON link too.
+    const { session, query, store } = await rig({ storeSessionId: "uuid-1" });
+    store.close();
+    await until(() => !session.storeLinkConnected(), "store bounce observed by the shim");
+
+    // Act: the SDK keeps producing durable evidence through the outage, and
+    // the store's replacement comes up on the same socket.
+    query.emit({
+      type: "assistant",
+      uuid: "u1",
+      session_id: "uuid-1",
+      message: { id: "m1", type: "message", role: "assistant", model: "claude", content: [{ type: "text", text: "mid-bounce" }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } },
+    } as unknown as SdkMessageLike);
+    const revived = await fakeStoreAt(store.socketPath);
+    cleanups.push(() => revived.close());
+    await until(() => revived.count() >= 1, "the shim redialed the replacement store");
+    const flushed = await revived.peer().next(StoreWriteSchema, "held batch flushed onto the restored link");
+    revived.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(flushed.batch!.events.length),
+      lastSeq: 9n,
+    }));
+
+    // Assert: the evidence produced during the outage landed on the restored
+    // link, and the query was never aborted or terminated over a restart of a
+    // process it does not own.
+    expect(flushed.batch!.events).toHaveLength(1);
+    expect(flushed.batch!.events[0]!.writeId).not.toBe("");
+    expect(query.abortCalls).toBe(0);
+    expect(session.isConnected()).toBe(true);
+    // The fixture's own teardown writes a termination receipt; take the store
+    // away again so it settles on the durable spill rather than on an ack no
+    // one is left to send.
+    revived.close();
   });
 
   it("fails intentional shutdown after cleanup when its termination receipt is rejected", async () => {
