@@ -2536,6 +2536,14 @@ func (s *Server) sweepable(sessionID, workspace string, nowMs int64) (idleMs int
 // delays a teardown, which is the safe one, and the policy's own arm reaps the
 // session at its cutoff regardless.
 func (s *Server) sweepIdleCutoff() time.Duration {
+	// A NON-POSITIVE TIMEOUT IS NOT A SHORT ONE. Zero is the documented
+	// "hibernation is off" value, and the sweeper is not even started for it
+	// (only an injected tick channel reaches sweepIdle at all). Flooring it would
+	// turn a disabled feature into a six-hour one, which is not what anybody who
+	// set it to zero asked for.
+	if s.idleTimeout <= 0 {
+		return s.idleTimeout
+	}
 	cutoff := s.keepAliveConfig().IdleCutoff
 	if s.idleTimeout > cutoff {
 		return s.idleTimeout

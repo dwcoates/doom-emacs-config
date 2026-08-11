@@ -299,3 +299,21 @@ func TestSweepIdleCutoffKeepsALongerConfiguredTimeout(t *testing.T) {
 		t.Fatalf("sweepIdleCutoff() = %s, want the configured %s", got, keepalive.DefaultIdleCutoff+24*time.Hour)
 	}
 }
+
+// A ZERO IDLE TIMEOUT IS NOT FLOORED. Zero is the documented "hibernation is
+// off" value, and raising it to six hours would turn a disabled feature into a
+// slow one.
+func TestSweepIdleCutoffLeavesADisabledTimeoutAlone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.srv.idleTimeout = 0
+	h.srv.keepAlive = keepalive.DefaultConfig()
+
+	// Act.
+	got := h.srv.sweepIdleCutoff()
+
+	// Assert.
+	if got != 0 {
+		t.Fatalf("sweepIdleCutoff() with hibernation disabled = %s, want 0", got)
+	}
+}
