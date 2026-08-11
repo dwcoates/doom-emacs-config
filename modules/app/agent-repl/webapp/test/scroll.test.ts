@@ -662,6 +662,69 @@ describe("TailFollow", () => {
     // Assert
     expect(a.tail.isFollowing()).toBe(false);
   });
+
+  it("baselines on the box's live position before any event arrives", () => {
+    // Arrange — a box already parked deep in a long feed, as the boot render
+    // leaves it. A baseline of 0 here would make the very first reconcile
+    // compute a huge upward delta out of nothing.
+    const box = { scrollTop: 9700, scrollHeight: 10000, clientHeight: 300 };
+    const a = armed(box);
+    // Act — the first read, with nothing having moved.
+    // Assert
+    expect(a.tail.isFollowing()).toBe(true);
+  });
+
+  it("keeps a first upward gesture when a resize lands before its scroll event", () => {
+    // Arrange — THE RESIDUAL. The browser dispatches scroll asynchronously, so
+    // a relayout still settling after a load can reach the owner before the
+    // gesture's own event does. It used to park on that stale decision, which
+    // is why the FIRST upward scroll after a load was yanked and no later one.
+    const box = atTail();
+    const a = armed(box);
+    // Act — the reader moves up; the resize, not the scroll event, arrives.
+    box.scrollTop = 660;
+    a.resize();
+    // Assert
+    expect([a.tail.isFollowing(), box.scrollTop]).toEqual([false, 660]);
+  });
+
+  it("does not read a hydration shrink's clamp as the reader scrolling up", () => {
+    // Arrange — deferred items settling to their real heights shortens the
+    // feed under a parked box, and the browser clamps scrollTop down with it.
+    const box = atTail();
+    const a = armed(box);
+    // Act — the feed shrank by 300; the box rode the clamp down, untouched.
+    box.scrollHeight = 700;
+    box.scrollTop = 400;
+    a.scroll();
+    // Assert
+    expect(a.tail.isFollowing()).toBe(true);
+  });
+
+  it("leaves a reader who scrolled up unfollowed when hydration then grows", () => {
+    // Arrange — the reader left the tail during the load.
+    const box = atTail();
+    const a = armed(box);
+    box.scrollTop = 200;
+    a.scroll();
+    // Act — deferred content lands and grows the feed beneath them.
+    box.scrollHeight = 4000;
+    a.scroll();
+    // Assert
+    expect(a.tail.isFollowing()).toBe(false);
+  });
+
+  it("does not resume following when the feed ends exactly where the reader sits", () => {
+    // Arrange — the reader is scrolled up, 300 short of the bottom.
+    const box = { scrollTop: 400, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act — the feed SHRINKS to end exactly where the box already sits, so the
+    // box is at the tail without the reader having gone there.
+    box.scrollHeight = 700;
+    a.scroll();
+    // Assert
+    expect(a.tail.isFollowing()).toBe(false);
+  });
 });
 
 /**

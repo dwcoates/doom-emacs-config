@@ -348,19 +348,25 @@ export class TailFollow {
    * Re-parking on the resize removes the ordering question instead of betting
    * on one order.
    *
-   * IT DOES NOT RECONCILE FIRST, unlike every other entry point. A resize
-   * moves scrollTop by itself — a shrinking viewport clamps it downward — and
-   * reconciling would read that clamp as the reader scrolling up and drop the
-   * follow the switch just asked for. The pre-resize decision is the one that
-   * describes what the reader wanted; the resize's own displacement is absorbed
-   * either way, so it can never be mistaken for a gesture later.
+   * IT RECONCILES FIRST, like every other entry point, and that is the whole
+   * of this method's history. It used to skip `sync` because a resize moves
+   * scrollTop by itself — a shrinking viewport clamps it downward — and a
+   * reconcile that read the clamp as a gesture would drop the follow the
+   * switch just asked for. Skipping the reconcile bought that at the price of
+   * being the ONE path where a stale `following` could park the feed: a reader
+   * who has already begun scrolling up is only known to have done so through
+   * `sync`, since the browser dispatches their scroll event asynchronously and
+   * may throttle it behind a whole layout. A resize landing in that window
+   * parked the feed back at its tail under the gesture — and a resize only
+   * lands there while the page is still laying itself out, which is why it was
+   * the first upward scroll after a load that got yanked and no later one.
+   *
+   * `sync` now attributes the clamp itself (see there), so the reason to skip
+   * it is gone and the window with it.
    */
   onResize(): void {
-    if (this.following) {
-      this.park();
-      return;
-    }
-    this.lastTop = this.box.scrollTop;
+    this.sync();
+    if (this.following) this.park();
   }
 
   /** Wire the box's own events into the owner. */
@@ -377,8 +383,22 @@ export class TailFollow {
    * browser dispatches for them afterward — inert. Anything else is the reader,
    * and the reader moving up ends the follow while only the reader arriving at
    * the tail resumes it.
+   *
+   * THE BOX'S OWN CLAMP IS NOT THE READER, and reconciling against a baseline
+   * that ignored it is what made hydration attributable to them. scrollTop can
+   * never sit past the end of the scrollable range, so content SHRINKING —
+   * a deferred item settling to a smaller real height, a card collapsing, a
+   * relayout narrowing the feed — drags the position down with it, and a
+   * baseline still standing above the new range reads that drag as an upward
+   * gesture and ends a follow nobody ended. Lowering the baseline into the
+   * range first is what leaves only the reader on the other side of the
+   * comparison. Growth needs no such treatment and gets none: it moves
+   * scrollTop nowhere, so the clamp is the ONLY movement the box makes on its
+   * own and this is the whole of the correction.
    */
   private sync(): void {
+    const reachable = Math.max(0, this.box.scrollHeight - this.box.clientHeight);
+    if (this.lastTop > reachable) this.lastTop = reachable;
     const top = this.box.scrollTop;
     if (top === this.lastTop) return;
     this.following = top > this.lastTop && isPinnedToBottom(this.box, this.pinPx);
