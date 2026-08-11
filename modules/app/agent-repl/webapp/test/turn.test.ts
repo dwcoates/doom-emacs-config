@@ -8,7 +8,6 @@ import { userTurnText } from "../src/turn.js";
 function userTurn(text: string): UserTurnItem {
   return {
     kind: "user-turn",
-    requestId: "r1",
     content: [{ type: "text", text }],
     ts: "2026-05-24T09:05:00Z",
   };
@@ -31,7 +30,6 @@ describe("userTurnText", () => {
     // Arrange
     const item: UserTurnItem = {
       kind: "user-turn",
-      requestId: "r1",
       content: [{ type: "image" } as unknown as { type: string }],
       ts: "2026-05-24T09:05:00Z",
     };

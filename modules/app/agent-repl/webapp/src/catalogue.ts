@@ -97,8 +97,8 @@ const DRAIN_LEASE: ShutdownScheduleDraining = {
   ],
 };
 
-function userTurn(requestId: string, text: string): UserTurnItem {
-  return { kind: "user-turn", requestId, content: [{ type: "text", text }], ts: TS };
+function userTurn(uuid: string, text: string): UserTurnItem {
+  return { kind: "user-turn", uuid, content: [{ type: "text", text }], ts: TS };
 }
 
 function text(

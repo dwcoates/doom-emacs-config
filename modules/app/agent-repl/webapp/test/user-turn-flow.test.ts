@@ -11,10 +11,12 @@
  *
  * The stage-crossing contract pinned here:
  *
+ * - a prompt reaches the feed ONLY when its durable line round-trips, never at
+ *   submit time — the optimistic bubble and its reconciliation are gone, and
+ *   with them the two identities one prompt used to have;
  * - N prompts INGESTED is N prompt bubbles DRAWN, whatever their request ids;
- * - a request-id-bearing prompt still reconciles on that id, so the flows that
- *   DO carry one (fake-mode e2e, optimistic echo) never double up;
- * - a replayed redelivery of a transcript prompt reconciles on its uuid.
+ * - a replayed redelivery of a prompt reconciles on its uuid, which is the
+ *   only identity a prompt has.
  */
 import { describe, expect, it } from "vitest";
 
@@ -46,24 +48,13 @@ function transcriptPrompt(uuid: string, text: string): WireItem {
   return { uuid, tsMs: String(TS_MS), userMessage: { contentString: text } };
 }
 
-/** A user prompt that DOES carry a request id — the echo shape. */
+/**
+ * A user prompt whose envelope carries a request id. It is a vendor API
+ * correlation and NOTHING keys on it: two prompts sharing one are still two
+ * prompts.
+ */
 function echoedPrompt(uuid: string, requestId: string, text: string): WireItem {
   return { uuid, tsMs: String(TS_MS), requestId, userMessage: { contentString: text } };
-}
-
-/**
- * The DAEMON'S OWN prompt receipt: a user turn keyed on the submit's request
- * id, pushed the instant the daemon forwards the prompt. It carries NO store
- * seq — nothing in the store produced it — which is what the `through_seq: 0`
- * on `sendLocal` stands for.
- */
-function receipt(requestId: string, text: string): WireItem {
-  return {
-    uuid: `prompt-echo:${requestId}`,
-    tsMs: String(TS_MS),
-    requestId,
-    userMessage: { contentString: text },
-  };
 }
 
 /** One assistant text block, so a test can see where a prompt RANKS. */
@@ -175,113 +166,81 @@ describe("live prompts with no request id", () => {
   });
 });
 
-describe("prompts that DO carry a request id", () => {
-  it("reconciles a redelivered echo rather than duplicating it", () => {
-    // Arrange — the fake-mode / optimistic-echo shape.
-    const f = flow();
-    f.send([echoedPrompt("u1", "r1", "echoed prompt")]);
-    // Act — the same request id arrives again under a later uuid.
-    f.send([echoedPrompt("u2", "r1", "echoed prompt")]);
-    // Assert
-    expect(f.prompts()).toHaveLength(1);
-  });
-
-  it("still draws two bubbles for two distinct request ids", () => {
-    // Arrange
+describe("the request id names no prompt", () => {
+  it("draws two bubbles for two prompts sharing one request id", () => {
+    // Arrange — the request id is a vendor API correlation, not an identity.
+    // Keying on it collapsed distinct prompts onto one bubble.
     const f = flow();
     // Act
-    f.send([echoedPrompt("u1", "r1", "first echo")]);
-    f.send([echoedPrompt("u2", "r2", "second echo")]);
+    f.send([echoedPrompt("u1", "r1", "first")]);
+    f.send([echoedPrompt("u2", "r1", "second")]);
+    // Assert
+    expect(f.prompts()).toHaveLength(2);
+  });
+
+  it("draws two bubbles for two prompts whose request ids are both empty", () => {
+    // Arrange — THE COLLAPSE DEFECT: an empty string used to act as a valid
+    // key, so every prompt the real pipeline delivers shared one bucket.
+    const f = flow();
+    // Act
+    f.send([transcriptPrompt("u1", "continue")]);
+    f.send([transcriptPrompt("u2", "continue")]);
     // Assert
     expect(f.prompts()).toHaveLength(2);
   });
 });
 
 /**
- * THE DAEMON RECEIPT FLOW, the pipeline as it now runs: the daemon pushes the
- * prompt bubble itself the moment it forwards a submit (seq-less, keyed on the
- * request id), and the transcript's own line follows later carrying a store
- * seq and — stamped by the daemon — the SAME request id.
+ * PART 2 OF THE FROZEN CONTRACT, walked end to end: a prompt renders when it
+ * round-trips through the SDK, and not before. The webapp files nothing at
+ * submit time, so there is no second identity to reconcile and no duplicate to
+ * collapse.
  */
-describe("the daemon's prompt receipt", () => {
-  it("draws one bubble when the durable line follows the receipt", () => {
+describe("a prompt renders only after its round trip", () => {
+  it("draws no bubble before the durable line arrives", () => {
+    // Arrange — a live feed with a submit outstanding: nothing in the submit
+    // path touches the store, so the feed has seen nothing at all.
+    const f = flow();
+    // Act — no delivery.
+    // Assert
+    expect(f.prompts()).toHaveLength(0);
+  });
+
+  it("draws exactly one bubble once the durable line arrives", () => {
     // Arrange
     const f = flow();
     // Act
-    f.sendLocal([receipt("r1", "the prompt itself")]);
-    f.send([echoedPrompt("u1", "r1", "the prompt itself")]);
-    // Assert — the two deliveries of one prompt reconcile, never double up.
+    f.send([transcriptPrompt("u1", "the prompt itself")]);
+    // Assert
     expect(f.prompts()).toHaveLength(1);
   });
 
-  it("keeps the prompt's text when the durable line replaces the receipt", () => {
+  it("carries the prompt's text on that one bubble", () => {
     // Arrange
     const f = flow();
     // Act
-    f.sendLocal([receipt("r1", "the prompt itself")]);
-    f.send([echoedPrompt("u1", "r1", "the prompt itself")]);
+    f.send([transcriptPrompt("u1", "the prompt itself")]);
     // Assert
     expect(f.container.textContent).toContain("the prompt itself");
   });
 
-  it("shows the prompt even when no durable line ever arrives", () => {
-    // Arrange — the shim died between the submit and the transcript write.
+  it("draws one bubble when a resync replays the prompt", () => {
+    // Arrange — the durable line, then a reconnect replaying it.
     const f = flow();
+    f.send([transcriptPrompt("u1", "the prompt itself")]);
     // Act
-    f.sendLocal([receipt("r1", "the prompt itself")]);
-    // Assert — the receipt is the only evidence the prompt was sent.
+    f.send([transcriptPrompt("u1", "the prompt itself")]);
+    // Assert
     expect(f.prompts()).toHaveLength(1);
   });
 
-  it("ranks the receipt at the feed TAIL, not above the history", () => {
-    // Arrange — history first, then a fresh submit.
+  it("ranks the prompt at the feed TAIL, below the history it follows", () => {
+    // Arrange — history first, then the prompt.
     const f = flow();
     f.send([assistantText("a1", "an earlier answer")]);
     // Act
-    f.sendLocal([receipt("r1", "the prompt itself")]);
-    // Assert — a seq-less push carries no rank of its own; ranking it at 0
-    // would file the user's newest prompt ABOVE everything they have read.
-    const last = f.bubbles()[f.bubbles().length - 1];
-    expect(last.classList.contains("user")).toBe(true);
-  });
-
-  it("draws one bubble when a resync replays the prompt after the receipt", () => {
-    // Arrange — THE USER-VISIBLE DEFECT, walked end to end through the real
-    // pipeline. The receipt and the attributed line both name the submit; the
-    // replay names only the record, because no submit of this daemon's is
-    // outstanding for a prompt read back from history.
-    const f = flow();
-    f.sendLocal([receipt("r1", "the prompt itself")]);
-    f.send([echoedPrompt("u1", "r1", "the prompt itself")]);
-    // Act — a reconnect replays the conversation.
     f.send([transcriptPrompt("u1", "the prompt itself")]);
-    // Assert — the prompt adopted "u1" when the daemon supplied it, so the
-    // replay reconciles onto the standing bubble instead of drawing a second.
-    expect(f.prompts()).toHaveLength(1);
-  });
-
-  it("draws one bubble when the replay beats the attributed line", () => {
-    // Arrange — the same three deliveries, reordered: a replay can outrun the
-    // attributed line, so a uuid-keyed copy is already standing when the
-    // receipt is asked to adopt.
-    const f = flow();
-    f.sendLocal([receipt("r1", "the prompt itself")]);
-    f.send([transcriptPrompt("u1", "the prompt itself")]);
-    // Act
-    f.send([echoedPrompt("u1", "r1", "the prompt itself")]);
-    // Assert — the adoption COLLAPSES onto the standing copy. Adopting without
-    // collapsing would move the duplicate rather than remove it.
-    expect(f.prompts()).toHaveLength(1);
-  });
-
-  it("leaves the reconciled bubble where the receipt put it", () => {
-    // Arrange
-    const f = flow();
-    f.send([assistantText("a1", "an earlier answer")]);
-    f.sendLocal([receipt("r1", "the prompt itself")]);
-    // Act — the durable line lands at its own store seq.
-    f.send([echoedPrompt("u1", "r1", "the prompt itself")]);
-    // Assert — a redelivery replaces content, never position.
+    // Assert
     const last = f.bubbles()[f.bubbles().length - 1];
     expect(last.classList.contains("user")).toBe(true);
   });

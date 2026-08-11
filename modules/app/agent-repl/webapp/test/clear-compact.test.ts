@@ -66,7 +66,6 @@ describe("isClearOrCompact", () => {
     // Arrange — the string match this replaced would have fired here.
     const item: ConversationItem = {
       kind: "user-turn",
-      requestId: "r1",
       content: [{ type: "text", text: "/clear" }],
       ts: "2026-05-24T09:05:00Z",
     };

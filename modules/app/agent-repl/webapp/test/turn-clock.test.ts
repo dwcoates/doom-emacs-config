@@ -11,7 +11,6 @@ import { ConversationItem, UserTurnItem } from "../src/store.js";
 function userTurn(text: string, over: Partial<UserTurnItem> = {}): UserTurnItem {
   return {
     kind: "user-turn",
-    requestId: "r1",
     content: [{ type: "text", text }],
     ts: "2026-05-24T09:00:00Z",
     ...over,
