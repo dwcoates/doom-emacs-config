@@ -1,7 +1,10 @@
 package sessioncontroller
 
 import (
+	"errors"
 	"testing"
+
+	"claude-repld/internal/errclass"
 )
 
 // ---------------------------------------------------------------------------
@@ -77,26 +80,27 @@ func TestAShimRespawnLeavesTheSeqSpaceContinuous(t *testing.T) {
 	}
 }
 
-func TestAMarkAboveEverythingTheConversationProducedIsNotTrusted(t *testing.T) {
+func TestAMarkAboveEverythingTheConversationProducedIsRefused(t *testing.T) {
 	// Arrange — the counterpart, and the reason the test above is meaningful. A
 	// mark this conversation cannot have produced is evidence of a RETIRED seq
-	// space (a vendor uuid rotation restarts numbering at 1), and believing it
-	// would serve the page nothing at all — the clear that caused the rotation
-	// included.
+	// space (a vendor uuid rotation restarts numbering at 1). It used to be
+	// FLOORED and served, which for a rotated conversation means replaying the
+	// whole of it; it is refused now, and the page re-anchors from a tail page.
 	client := &replayClient{}
 	h := newRepullHarness(t, client)
 	h.floors.SetNewestClearOrCompactSeq("s1", 3)
 	h.controller(t).consumer.Consume(assistantEvent(t, 12, "u12"))
 
 	// Act — 1060 is a mark from the space that rotated away.
-	if err := h.m.Resync("ws", 1060); err != nil {
-		t.Fatalf("Resync: %v", err)
-	}
+	err := h.m.Resync("ws", 1060)
 
-	// Assert — floored at the rotation's own clear, not believed.
+	// Assert — refused, and nothing was read from the store on its behalf.
+	if !errors.Is(err, errclass.ErrReplayMarkRetired) {
+		t.Fatalf("Resync = %v, want ErrReplayMarkRetired", err)
+	}
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if len(client.calls) != 1 || client.calls[0][0] != 2 {
-		t.Fatalf("replay calls = %v, want a from_seq of 2 — an impossible mark is floored, never trusted", client.calls)
+	if len(client.calls) != 0 {
+		t.Fatalf("replay calls = %v, want none — a refused mark must not read history at all", client.calls)
 	}
 }
