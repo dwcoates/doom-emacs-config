@@ -37,6 +37,12 @@
 The crash-hazard tests are about what the genuine path does and does not
 inject, which a mock standing in its place cannot witness.")
 
+(defvar agent-repl-test--slo-probe-present t
+  "Whether the mocked page carries the probe hook at all.
+Independent of the answer, exactly as the page's own `typeof' check is:
+a page running a bundle older than webapp/src/recovery-probe.ts answers
+with `present' false, which is a different fact from an empty report.")
+
 (defun agent-repl-test--slo-page-reply (script answer)
   "Build the envelope a real page returns for SCRIPT, carrying ANSWER.
 Mimics the page rather than short-circuiting it: the workspace the reply
@@ -44,7 +50,8 @@ is attributed to is read back OUT of the script, which is the whole
 mechanism that replaced the closure the module used to correlate with."
   (should (string-match "ws:\\(\"\\(?:[^\"\\\\]\\|\\\\.\\)*\"\\)" script))
   (json-encode (list (cons "ws" (json-parse-string (match-string 1 script)))
-                     (cons "report" answer))))
+                     (cons "present" (if agent-repl-test--slo-probe-present t :false))
+                     (cons "report" (if agent-repl-test--slo-probe-present answer "")))))
 
 (defun agent-repl-test--slo-lines (level)
   "Return the captured lines emitted at LEVEL."
@@ -67,6 +74,7 @@ attempt's own `:started-at' rather than by waiting."
          (agent-repl-test--slo-logs nil)
          (agent-repl-test--slo-forced nil)
          (agent-repl-test--slo-probe-answer "")
+         (agent-repl-test--slo-probe-present t)
          (agent-repl--recovery-slo-excluded (make-hash-table :test 'equal))
          ;; The link is UP unless a test says otherwise: the fast path is
          ;; the ordinary case, and an attempt armed over a live link is
@@ -681,7 +689,7 @@ only there could never be stamped by the reconnect that opened it."
                  (concat "\\`recovery-slo: ws=slo-fields outcome=recovered "
                          "emacs_ms=-?[0-9]+ webapp_ms=-?[0-9]+ wire_ms=-?[0-9]+ "
                          "total_ms=-?[0-9]+ outage_ms=-?[0-9]+ budget_ms=3000 forced=no "
-                         "outstanding=none\\'")
+                         "probe=present outstanding=none\\'")
                  record))))))
 
 (ert-deftest agent-repl-test-recovery-slo-breach-record-field-set-is-pinned ()
@@ -702,11 +710,110 @@ only there could never be stamped by the reconnect that opened it."
                  (concat "\\`recovery-slo: ws=slo-breach-fields outcome=budget-breach "
                          "emacs_ms=-?[0-9]+ webapp_ms=-1 wire_ms=-1 "
                          "total_ms=-1 outage_ms=-?[0-9]+ budget_ms=3000 forced=no "
-                         "outstanding=webapp,wire\\'")
+                         "probe=present outstanding=webapp,wire\\'")
                  record))
         (should (assq 'sweep agent-repl-test--slo-forced))
         (should (equal (cdr (assq 'ensure agent-repl-test--slo-forced))
                        "slo-breach-fields"))))))
+
+;;;; ---- Telling an absent probe from a slow one ----------------------------
+
+(ert-deftest agent-repl-test-recovery-slo-page-without-the-probe-records-absent ()
+  "A page carrying no probe hook is recorded as probe=absent, not silently -1."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-no-probe"
+      ;; Arrange
+      (setq agent-repl-test--slo-probe-present nil)
+      (agent-repl--recovery-slo-open "slo-no-probe")
+      (agent-repl-test--slo-satisfy "slo-no-probe" 'emacs 'wire)
+      (agent-repl-test--slo-age "slo-no-probe" (1+ agent-repl-recovery-slo-budget-ms))
+      ;; Act
+      (agent-repl--recovery-slo-check "slo-no-probe")
+      ;; Assert
+      (should (string-match-p "probe=absent" (agent-repl-test--slo-record 'warn))))))
+
+(ert-deftest agent-repl-test-recovery-slo-page-that-never-answers-records-silent ()
+  "A workspace whose page never replies is recorded as probe=silent."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-silent"
+      ;; Arrange: the read path injects and the page never calls back.
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-read-script)
+                 (lambda (_buf _script _callback) t)))
+        (agent-repl--recovery-slo-open "slo-silent")
+        (agent-repl-test--slo-satisfy "slo-silent" 'emacs 'wire)
+        (agent-repl-test--slo-age "slo-silent" (1+ agent-repl-recovery-slo-budget-ms))
+        ;; Act
+        (agent-repl--recovery-slo-check "slo-silent"))
+      ;; Assert
+      (should (string-match-p "probe=silent" (agent-repl-test--slo-record 'warn))))))
+
+(ert-deftest agent-repl-test-recovery-slo-answering-page-not-yet-recovered-records-present ()
+  "A page whose probe answers `not yet' is probe=present with webapp_ms=-1."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-not-yet"
+      ;; Arrange: the probe exists and reports an unsatisfied report.
+      (setq agent-repl-test--slo-probe-answer
+            (json-serialize '(:adopted t :realDataFrames 0)))
+      (agent-repl--recovery-slo-open "slo-not-yet")
+      (agent-repl-test--slo-satisfy "slo-not-yet" 'emacs 'wire)
+      (agent-repl-test--slo-age "slo-not-yet" (1+ agent-repl-recovery-slo-budget-ms))
+      ;; Act
+      (agent-repl--recovery-slo-check "slo-not-yet")
+      ;; Assert
+      (let ((record (agent-repl-test--slo-record 'warn)))
+        (should (string-match-p "probe=present" record))
+        (should (string-match-p "webapp_ms=-1" record))))))
+
+(ert-deftest agent-repl-test-recovery-slo-probe-presence-is-never-downgraded ()
+  "A page that proved it carries the probe keeps that proof through silence."
+  (agent-repl-test--with-slo
+    ;; Arrange
+    (agent-repl--recovery-slo-open "slo-monotonic")
+    (agent-repl--recovery-slo-note-probe "slo-monotonic" "present")
+    ;; Act
+    (agent-repl--recovery-slo-note-probe "slo-monotonic" "absent")
+    ;; Assert
+    (should (equal "present" (plist-get (gethash "slo-monotonic"
+                                             agent-repl--recovery-slo-attempts)
+                                    :probe)))))
+
+(ert-deftest agent-repl-test-recovery-slo-forced-attempt-is-still-polled ()
+  "The tick keeps asking a forced page, which is what makes re-verification see it.
+The reply crosses the xwidget boundary as an input event, so the poll
+that produces the answer must be issued at least one tick BEFORE the
+re-verification reads it."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-forced-poll"
+      ;; Arrange: breach, so the attempt is :forced.
+      (agent-repl--recovery-slo-open "slo-forced-poll")
+      (agent-repl-test--slo-age "slo-forced-poll" (1+ agent-repl-recovery-slo-budget-ms))
+      (agent-repl--recovery-slo-check "slo-forced-poll")
+      (setq agent-repl-test--slo-probe-answer
+            (json-serialize '(:adopted t :realDataFrames 1)))
+      ;; Act: one further tick, which is the only thing that polls now.
+      (should (eq (agent-repl--recovery-slo-check "slo-forced-poll") 'pending))
+      ;; Assert: the page's answer landed in the attempt.
+      (should (plist-get (gethash "slo-forced-poll" agent-repl--recovery-slo-attempts)
+                         :webapp)))))
+
+(ert-deftest agent-repl-test-recovery-slo-reverify-reads-a-page-a-tick-already-polled ()
+  "Re-verification reports the page signal a preceding tick's reply stamped."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-reverify-page"
+      ;; Arrange: breach, then the page comes back and a tick polls it.
+      (agent-repl--recovery-slo-open "slo-reverify-page")
+      (agent-repl-test--slo-satisfy "slo-reverify-page" 'emacs 'wire)
+      (agent-repl-test--slo-age "slo-reverify-page"
+                                (1+ agent-repl-recovery-slo-budget-ms))
+      (agent-repl--recovery-slo-check "slo-reverify-page")
+      (setq agent-repl-test--slo-probe-answer
+            (json-serialize '(:adopted t :realDataFrames 1)))
+      (agent-repl--recovery-slo-check "slo-reverify-page")
+      ;; Act
+      (agent-repl--recovery-slo-reverify "slo-reverify-page")
+      ;; Assert
+      (should (string-match-p "outcome=forced-recovered"
+                              (or (agent-repl-test--slo-record 'info) ""))))))
 
 ;;;; ---- The crash hazards --------------------------------------------------
 

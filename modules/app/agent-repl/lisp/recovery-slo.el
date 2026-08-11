@@ -379,7 +379,7 @@ record itself names which signal was outstanding when it happened."
          (total (agent-repl--recovery-slo-total-ms attempt))
          (line (concat "recovery-slo: ws=%s outcome=%s emacs_ms=%d webapp_ms=%d "
                        "wire_ms=%d total_ms=%d outage_ms=%d budget_ms=%d "
-                       "forced=%s outstanding=%s"))
+                       "forced=%s probe=%s outstanding=%s"))
          (args (list ws outcome
                      (agent-repl--recovery-slo-delta-ms attempt 'emacs)
                      (agent-repl--recovery-slo-delta-ms attempt 'webapp)
@@ -388,6 +388,12 @@ record itself names which signal was outstanding when it happened."
                      (agent-repl--recovery-slo-outage-ms attempt)
                      agent-repl-recovery-slo-budget-ms
                      (if (plist-get attempt :forced) "yes" "no")
+                     ;; WHY THE PAGE SIGNAL IS MISSING, not merely that it
+                     ;; is.  `webapp_ms=-1' with `probe=absent' is a stale
+                     ;; deploy; with `probe=silent' it is a page that never
+                     ;; answered; with `probe=present' it is a real, measured
+                     ;; recovery that has not finished.
+                     (or (plist-get attempt :probe) "silent")
                      (if outstanding
                          (mapconcat #'symbol-name outstanding ",")
                        "none"))))
@@ -511,10 +517,18 @@ It is deliberately the host's OWN name for the workspace that is echoed,
 not the page's `workspace' field: the page reports the daemon's `cwd',
 and making the SLO's routing depend on those two strings agreeing would
 put an unrelated contract between a measurement and the thing it
-measures."
-  (format "(function(){var r=(window.%s?window.%s():\"\");\
-return JSON.stringify({ws:%s,report:r});})()"
-          agent-repl-frontend-recovery-probe-hook
+measures.
+
+THE REPLY REPORTS WHETHER THE HOOK EXISTS, SEPARATELY FROM WHAT IT SAID.
+A page running a bundle that predates the probe and a page whose probe
+answers `not yet recovered' are two completely different failures — one
+is a stale deploy, the other is a slow recovery — and the record used to
+print both as `webapp_ms=-1' with nothing to tell them apart.  `present'
+is therefore its own field, computed from `typeof' rather than from the
+report being non-empty, so an absent hook is a fact the reply carries
+rather than something inferred from silence."
+  (format "(function(){var h=window.%s;var p=(typeof h===\"function\");\
+var r=(p?h():\"\");return JSON.stringify({ws:%s,present:p,report:r});})()"
           agent-repl-frontend-recovery-probe-hook
           (json-encode-string ws)))
 
@@ -538,9 +552,45 @@ budget is what rules on a page that never starts saying it."
                        (error nil)))
            (ws (and envelope (alist-get 'ws envelope)))
            (report (and envelope (alist-get 'report envelope))))
-      (when (and (stringp ws) (not (string-empty-p ws))
-                 (agent-repl--recovery-slo-probe-satisfied-p report))
-        (agent-repl--recovery-slo-note ws 'webapp)))))
+      (when (and (stringp ws) (not (string-empty-p ws)))
+        ;; THE PAGE ANSWERED, so whatever it said is now a recorded fact
+        ;; about the probe rather than an absence.  Recorded BEFORE the
+        ;; satisfaction test: a page carrying no hook can never satisfy the
+        ;; signal, and `probe=absent' is the only thing that distinguishes
+        ;; that stale deploy from a page that simply is not back yet.
+        (agent-repl--recovery-slo-note-probe
+         ws (if (eq t (alist-get 'present envelope)) "present" "absent"))
+        (when (agent-repl--recovery-slo-probe-satisfied-p report)
+          (agent-repl--recovery-slo-note ws 'webapp))))))
+
+(defconst agent-repl-recovery-slo-probe-states '("silent" "absent" "present")
+  "Every value the record's `probe=' field can take, worst first.
+Strings, not symbols, because every value in
+`agent-repl--recovery-slo-attempts' is a scalar the record prints — see
+that table's own docstring for the crash behind that invariant.
+`silent' is the initial state of an attempt: the page was asked and has
+said nothing at all, which is what a webview that never boots looks
+like.  `absent' is a page that answered and carries no probe hook — a
+running bundle older than webapp/src/recovery-probe.ts.  `present' is a
+page whose probe answered, whether or not it was satisfied yet.")
+
+(defun agent-repl--recovery-slo-note-probe (ws state)
+  "Record STATE as WS's probe presence, never downgrading what was seen.
+
+MONOTONIC ALONG `agent-repl-recovery-slo-probe-states', because the
+question the field answers is `did this page EVER prove it carries the
+probe', and a page that answered once and was then re-navigated must not
+have that proof erased by the silence that follows.  A workspace with no
+open attempt is ignored, exactly as a signal stamp is."
+  (let ((attempt (gethash ws agent-repl--recovery-slo-attempts)))
+    (when attempt
+      (let* ((current (or (plist-get attempt :probe) "silent"))
+             (rank (lambda (s) (or (cl-position s agent-repl-recovery-slo-probe-states
+                                                :test #'equal)
+                                   0))))
+        (when (> (funcall rank state) (funcall rank current))
+          (puthash ws (plist-put attempt :probe state)
+                   agent-repl--recovery-slo-attempts))))))
 
 (defun agent-repl--recovery-slo-probe-satisfied-p (raw)
   "Return non-nil when RAW, the page's JSON report, proves REAL data landed.
@@ -628,13 +678,23 @@ NEVER claims recovery on the force's say-so: the outcome is whatever the
 same three signals report now.  The attempt is closed either way —
 `forced-recovered' when the conjunction is finally satisfied,
 `forced-unrecovered' when it is not, and the latter is a warning naming
-what is still missing."
+what is still missing.
+
+IT DOES NOT POLL THE PAGE HERE, AND THAT IS THE WHOLE FIX.  It used to
+call `agent-repl--recovery-slo-poll-webapp' and then re-read the attempt
+on the next line, on the belief that the poll's callback `may have
+stamped the page in place'.  It cannot have: the reply crosses the
+xwidget boundary as an INPUT EVENT, so it is delivered by the command
+loop strictly after this function returns, and the webapp signal was
+therefore unreadable by construction at exactly the moment the forced
+outcome was decided.  Live records show the consequence — every
+`forced-unrecovered' carried `webapp_ms=-1' whatever the page was doing.
+The polling now belongs to the tick alone (`agent-repl--recovery-slo-check'),
+which keeps asking a forced attempt, so each reply lands in the attempt
+before a later tick or this re-verification reads it."
   (let ((attempt (gethash ws agent-repl--recovery-slo-attempts)))
     (when attempt
-      (agent-repl--recovery-slo-poll-webapp ws)
-      ;; Re-read: the poll's callback may have stamped the page in place.
-      (let* ((attempt (gethash ws agent-repl--recovery-slo-attempts))
-             (outcome (if (agent-repl--recovery-slo-outstanding attempt)
+      (let* ((outcome (if (agent-repl--recovery-slo-outstanding attempt)
                           "forced-unrecovered"
                         "forced-recovered")))
         (agent-repl--recovery-slo-emit ws attempt outcome)
@@ -652,7 +712,15 @@ would turn one outage into an unbounded force loop."
   (let ((attempt (gethash ws agent-repl--recovery-slo-attempts)))
     (cond
      ((null attempt) nil)
-     ((plist-get attempt :forced) 'pending)
+     ;; A FORCED ATTEMPT IS STILL POLLED.  It must not be breached a second
+     ;; time — that is what would turn one outage into an unbounded force
+     ;; loop — but its re-verification is a READ, and the only thing that
+     ;; produces the page's answer to read is a poll issued at least one
+     ;; command-loop turn earlier.  Stopping the polling here is what left
+     ;; every forced outcome blind to the page.
+     ((plist-get attempt :forced)
+      (agent-repl--recovery-slo-poll-webapp ws)
+      'pending)
      ;; The link has not come back yet, so there is nothing to ask and
      ;; nothing to rule on: no page can have re-adopted a snapshot that has
      ;; not been sent.  Breaching here would report the DAEMON's downtime as
