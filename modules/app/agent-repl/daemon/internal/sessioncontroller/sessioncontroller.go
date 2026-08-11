@@ -461,7 +461,9 @@ type Config struct {
 	WorkspaceLockHolders func(cwd string) ([]int, error)
 
 	// ShimConnected reports whether the named session's shim has ALREADY dialled
-	// in and is parked at this daemon's shim listener.
+	// in and has a usable connection at this daemon's shim listener — parked
+	// awaiting a claim, or claimed by a controller generation that has since
+	// been retired.
 	//
 	// It is what makes a surviving shim ADOPTABLE rather than merely alive. The
 	// workspace-lock probe above says a process is there; this says it is
@@ -469,6 +471,14 @@ type Config struct {
 	// controller in m.byWS — which only the bring-up the gate blocks can create
 	// — so a survivor that had redialled perfectly was waited out and killed
 	// (survivingshim.go).
+	//
+	// IT MUST NOT BE KEYED BY GENERATION. Whether this daemon's newest
+	// generation happens to own the read side is a fact about the daemon, not
+	// about whether a shim is connected, and answering the second with the first
+	// is what SIGTERM'd a ready shim under a retired generation. The session id
+	// is the fence that keeps a superseded or foreign shim out; see
+	// shimlisten.Server.Connected, which is the one implementation of this hook
+	// in production.
 	//
 	// Required whenever a workspace lock can be held: the gate refuses to evict
 	// a holder on a question it could not ask.
@@ -3240,6 +3250,16 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		// wrong.
 		if wasCurrent && runErr != nil {
 			m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityUnavailable, "session_controller_exit")
+			// AND THE DAEMON OWES THIS WORKSPACE A SESSION AGAIN. The line
+			// above is the whole of what used to happen here: the axis went
+			// blue and the workspace stayed dead until somebody opened it, so
+			// recovery was a property of whether a person was looking. The
+			// SAME `runErr != nil` that makes this a fault rather than a
+			// teardown is what makes it a revival: every clean cancel of a
+			// session controller ctx belongs to something that ASKED for the
+			// session to stop, and the enumeration above this branch is
+			// exhaustive over those (bringupretry.go).
+			m.armSessionRevival(workspace, sessionID, runErr)
 		}
 		if wasCurrent && runErr == nil {
 			m.logf("session-controller: session %s session controller exited CLEANLY ws=%q; leaving the legacy connectivity projection to whoever asked for the teardown (a hibernation already recorded `hibernated`, a failed bring-up already recorded `severed`)",

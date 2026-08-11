@@ -48,12 +48,47 @@ func (h *queueHarness) turnActiveFlag() bool {
 type logCapture struct {
 	mu    sync.Mutex
 	lines []string
+	// cond is the RENDEZVOUS a test waiting on an asynchronous record blocks
+	// on. It is built lazily under mu, so the zero logCapture stays usable and
+	// no constructor is required of the harnesses that embed one.
+	cond *sync.Cond
 }
 
 func (c *logCapture) logf(format string, args ...any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.lines = append(c.lines, fmt.Sprintf(format, args...))
+	if c.cond != nil {
+		c.cond.Broadcast()
+	}
+}
+
+// waitFor blocks until a captured record contains substr.
+//
+// It is how a test observes work done on a goroutine it does not own — a
+// controller's exit tail, above all — WITHOUT sampling a clock: the waiter is
+// released by the record itself. A record that never arrives hangs the test
+// until go test's own timeout, which is the correct failure for "the thing
+// under test never happened".
+func (c *logCapture) waitFor(t *testing.T, substr string) {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cond == nil {
+		c.cond = sync.NewCond(&c.mu)
+	}
+	for !c.containsLocked(substr) {
+		c.cond.Wait()
+	}
+}
+
+func (c *logCapture) containsLocked(substr string) bool {
+	for _, l := range c.lines {
+		if strings.Contains(l, substr) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *logCapture) contains(substr string) bool { return c.count(substr) > 0 }

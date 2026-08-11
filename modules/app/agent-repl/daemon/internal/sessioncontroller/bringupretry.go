@@ -44,6 +44,29 @@
 // says so. There is no third state, and in particular no silent forever-unwired
 // workspace.
 //
+// # The same wedge, one step later: A SESSION THAT DIED
+//
+// The paragraphs above are about a workspace that never came up. A workspace
+// that DID come up and then lost its shim — a terminal protocol error, a shim
+// process that died under a live conversation — had exactly the same problem
+// and none of the machinery: the controller's exit tail closed the connectivity
+// axis to `unavailable` and stopped, and the workspace stayed dead until a
+// human noticed and the HOST asked for it. Nothing in the daemon owned bringing
+// it back, which made recovery a property of whether anyone happened to be
+// looking.
+//
+// armSessionRevival gives the daemon that duty explicitly, through this same
+// watch and this same sweep. "This workspace ought to have a live session and
+// does not" is one condition however it was reached, and a second mechanism for
+// it would be a second backoff, a second idempotence latch, and a second
+// account of one workspace.
+//
+// WHAT THE DUTY STOPS AT is stated in revivalSuppressed and asked at the sweep
+// rather than at the arming: a workspace deliberately closed, merged, or
+// hibernated is NOT revived, because every one of those is a person or the host
+// saying the session should not be running — and any of them can arrive after
+// the death that armed the watch.
+//
 // # The shape, which is undriventurn.go's
 //
 // A provenance-keyed watch armed at the failure, a BOUNDED SWEEP that compares
@@ -92,8 +115,9 @@ const bringUpRetryAttemptCap = 5 * time.Minute
 
 // bringUpRetryWatch is one workspace's standing "this bring-up owes a retry".
 //
-// It is armed by resolveStartFailed and dropped by the edges that make it
-// meaningless: a bring-up that WIRED, and a deliberate hibernation.
+// It is armed by resolveStartFailed and by a session that DIED
+// (armSessionRevival), and dropped by the edges that make it meaningless: a
+// bring-up that WIRED, and a deliberate hibernation.
 type bringUpRetryWatch struct {
 	// sessionID is the session the failure was resolved against. Evidence for
 	// the log; the retry re-ensures the WORKSPACE, which may legitimately
@@ -112,6 +136,14 @@ type bringUpRetryWatch struct {
 	givenUp bool
 	// terminalCarded latches the once-only terminal card.
 	terminalCarded bool
+	// revival records that this watch was armed by a session that DIED rather
+	// than by a bring-up that failed. It changes nothing about what the sweep
+	// does — the duty is the same, and so is the backoff — and exists so the
+	// log says which of the two the daemon is acting on. A watch armed by a
+	// death and then re-armed by the failure of its own attempt keeps the flag:
+	// the account of why the daemon is climbing this ladder at all is the
+	// death.
+	revival bool
 }
 
 // bringUpRetryDelay is the backoff for the nth consecutive failure: the base
@@ -165,6 +197,109 @@ func (m *Manager) armBringUpRetry(workspace, sessionID string, failures int, giv
 	return cardTerminal
 }
 
+// armSessionRevival records that this workspace's LIVE SESSION DIED and is owed
+// an automatic bring-up.
+//
+// # The duty this gives the daemon
+//
+// A failed bring-up already owed a retry (armBringUpRetry, above). A session
+// that came up, wired, served turns, and then had its shim die under it owed
+// NOTHING: the exit tail closed the connectivity axis to `unavailable` and
+// stopped there. Reviving it was the host's job by omission — Emacs would
+// notice the workspace was dead, a user would open it, and the ordinary
+// bring-up path would run. Nobody had actually been given the duty, so a
+// workspace whose session died while nobody was looking at it stayed dead for
+// as long as the daemon lived, exactly as a failed bring-up used to.
+//
+// It is the SAME watch and the SAME sweep, deliberately. "This workspace ought
+// to have a live session and does not" is one condition however it was reached,
+// and two mechanisms for it would be two backoffs, two idempotence latches and
+// two accounts of one workspace.
+//
+// # What it must not fight
+//
+// A workspace the user or the host deliberately stood down must stay down, and
+// the suppression is evaluated at the SWEEP rather than only here
+// (revivalSuppressed): a workspace can be closed, merged or hibernated between
+// the death and the attempt, and a decision taken only at arming time would
+// re-spawn a session the user had since put away.
+//
+// It never re-arms an existing watch's schedule. A watch already standing —
+// from a failed bring-up, or from an earlier death — owns this workspace's
+// backoff, and resetting its due time on every death would let a session that
+// dies repeatedly keep pushing its own retry away.
+func (m *Manager) armSessionRevival(workspace, sessionID string, cause error) {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		m.logf("session-controller: session revival NOT ARMED ws=%q session=%s reason=manager_closed cause=%v — the daemon is going away, and the next boot's own walk owns this workspace",
+			workspace, sessionID, cause)
+		return
+	}
+	if _, asleep := m.hibernatedLocked(sessionID); asleep {
+		m.mu.Unlock()
+		m.logf("session-controller: session revival NOT ARMED ws=%q session=%s reason=hibernated cause=%v — the session is deliberately asleep, and reviving it would undo the choice that put it there",
+			workspace, sessionID, cause)
+		return
+	}
+	if m.bringUpRetries == nil {
+		m.bringUpRetries = make(map[string]*bringUpRetryWatch)
+	}
+	if w := m.bringUpRetries[workspace]; w != nil {
+		w.revival = true
+		attempts, failures := w.attempts, w.failures
+		m.mu.Unlock()
+		m.logf("session-controller: session revival ALREADY OWED ws=%q session=%s consecutive_failures=%d attempts_so_far=%d cause=%v — a watch is already standing for this workspace and owns its backoff",
+			workspace, sessionID, failures, attempts, cause)
+		return
+	}
+	wait := bringUpRetryDelay(0)
+	m.bringUpRetries[workspace] = &bringUpRetryWatch{
+		sessionID: sessionID,
+		dueAtMs:   m.now() + wait.Milliseconds(),
+		revival:   true,
+	}
+	m.mu.Unlock()
+	m.logf("session-controller: session revival ARMED ws=%q session=%s retry_in=%s cause=%v — the session died rather than being stood down, so the idle sweep brings the workspace back on its own instead of waiting for the host to notice",
+		workspace, sessionID, wait, cause)
+}
+
+// revivalSuppressed reports why this workspace must NOT be brought up
+// automatically, and whether the watch owed to it should be dropped outright.
+//
+// It is asked at the sweep, immediately before an attempt, because every reason
+// listed here can arrive AFTER the watch was armed:
+//
+//   - CLOSED or MERGED-AWAY. The locator answers from the registry's non-
+//     terminal record for this workspace, so a session the user closed, or one
+//     whose workspace was merged and its record retired, resolves to nothing.
+//     The watch is dropped: no later sweep can make that record live again.
+//   - HIBERNATED. A deliberate sleep, including the one a merge stands the
+//     workspace down with (mergedteardown.go). The watch is dropped, exactly as
+//     the hibernation edge itself drops it; a revival re-opens the very gate
+//     the sleep exists to put in front of the user.
+//   - MANAGER CLOSED. The daemon is going away. The watch is KEPT and merely
+//     skipped, because nothing about this workspace has been decided.
+func (m *Manager) revivalSuppressed(workspace string) (reason string, suppressed, drop bool) {
+	m.mu.Lock()
+	closed := m.closed
+	m.mu.Unlock()
+	if closed {
+		return "manager_closed", true, false
+	}
+	sessionID, ok := m.cfg.Locator.Locate(workspace)
+	if !ok {
+		return "no_live_session", true, true
+	}
+	m.mu.Lock()
+	_, asleep := m.hibernatedLocked(sessionID)
+	m.mu.Unlock()
+	if asleep {
+		return "hibernated", true, true
+	}
+	return "", false, false
+}
+
 // clearBringUpRetry drops the workspace's owed retry. Called from the edges
 // that make it meaningless: a bring-up that wired, and a deliberate
 // hibernation.
@@ -179,13 +314,21 @@ func (m *Manager) clearBringUpRetry(workspace, reason string) {
 	}
 }
 
-// SweepFailedBringUps launches an automatic attempt for every workspace whose
-// bring-up failed, is due, and has nothing already climbing for it. It reports
-// how many attempts it launched.
+// SweepFailedBringUps launches an automatic attempt for every workspace that
+// owes one — a bring-up that failed, or a session that DIED — is due, and has
+// nothing already climbing for it. It reports how many attempts it launched.
 //
 // It is a COMPARISON AT A SWEEP rather than a timer, for undriventurn.go's
 // reason: a timer dies with the daemon and does not advance across a laptop
 // sleep, and this failure mode is born of a daemon restart.
+//
+// IT IS THE ONLY PLACE AN AUTOMATIC ATTEMPT IS LAUNCHED, which is what makes
+// the whole duty idempotent: the selection and the inFlight latch are taken
+// under ONE acquisition of m.mu, so however many triggers armed the watch and
+// however many sweeps run concurrently, exactly one climb exists per workspace
+// at a time — and the climb itself goes through ensure(), which takes the
+// workspace lock before anything is spawned (survivingshim.go). Two triggers
+// cannot produce two shims for one session at either level.
 func (m *Manager) SweepFailedBringUps() int {
 	nowMs := m.now()
 	var due []string
@@ -209,10 +352,57 @@ func (m *Manager) SweepFailedBringUps() int {
 	}
 	m.mu.Unlock()
 
+	launched := 0
 	for _, ws := range due {
+		// THE USER AND THE HOST WIN, and the question is asked HERE rather than
+		// at the arming because every answer to it can change while a watch
+		// stands. The latch taken above is released on the way out, so a
+		// workspace that is merely resting under a manager close is picked up
+		// again by the next sweep rather than wedged by its own latch.
+		if reason, suppressed, drop := m.revivalSuppressed(ws); suppressed {
+			m.releaseBringUpRetryLatch(ws, drop)
+			m.logf("session-controller: bring-up retry SUPPRESSED ws=%q reason=%s watch=%s — the workspace was deliberately stood down, so nothing is brought up on its behalf",
+				ws, reason, droppedOrKept(drop))
+			continue
+		}
+		launched++
 		go m.attemptBringUpRetry(ws)
 	}
-	return len(due)
+	return launched
+}
+
+// releaseBringUpRetryLatch hands back the inFlight latch a suppressed selection
+// took, dropping the whole watch when the suppression is permanent.
+func (m *Manager) releaseBringUpRetryLatch(workspace string, drop bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if drop {
+		delete(m.bringUpRetries, workspace)
+		return
+	}
+	if w := m.bringUpRetries[workspace]; w != nil {
+		w.inFlight = false
+		// The attempt this selection counted never ran, so it is not an attempt.
+		if w.attempts > 0 {
+			w.attempts--
+		}
+	}
+}
+
+// bringUpRetryTrigger names what put this workspace in the sweep's hands.
+func bringUpRetryTrigger(revival bool) string {
+	if revival {
+		return "session_died"
+	}
+	return "bring_up_failed"
+}
+
+// droppedOrKept names a suppressed watch's fate for the log.
+func droppedOrKept(drop bool) string {
+	if drop {
+		return "dropped"
+	}
+	return "kept"
 }
 
 // attemptBringUpRetry climbs the bring-up ladder once for a workspace that owes
@@ -226,13 +416,13 @@ func (m *Manager) SweepFailedBringUps() int {
 func (m *Manager) attemptBringUpRetry(workspace string) {
 	m.mu.Lock()
 	w := m.bringUpRetries[workspace]
-	sessionID, attempt, failures := "", 0, 0
+	sessionID, attempt, failures, revival := "", 0, 0, false
 	if w != nil {
-		sessionID, attempt, failures = w.sessionID, w.attempts, w.failures
+		sessionID, attempt, failures, revival = w.sessionID, w.attempts, w.failures, w.revival
 	}
 	m.mu.Unlock()
-	m.logf("session-controller: bring-up retry ATTEMPT ws=%q session=%s attempt=%d consecutive_failures=%d bound=%d — nothing opened this workspace, so the sweep is climbing the ladder on the user's behalf",
-		workspace, sessionID, attempt, failures, bringUpGiveUpAfter)
+	m.logf("session-controller: bring-up retry ATTEMPT ws=%q session=%s attempt=%d consecutive_failures=%d bound=%d trigger=%s — nothing opened this workspace, so the sweep is climbing the ladder on the user's behalf",
+		workspace, sessionID, attempt, failures, bringUpGiveUpAfter, bringUpRetryTrigger(revival))
 
 	ctx, cancel := context.WithTimeout(context.Background(), bringUpRetryAttemptCap)
 	defer cancel()
