@@ -272,8 +272,8 @@ func (*DetachedWork_Skill) isDetachedWork_Kind() {}
 type DetachedWorkAgent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The agent's conversation so far, in emission order, in EXACTLY the
-	// vocabulary the top-level feed uses. A frontend's renderer for a response
-	// bubble, a thinking block or a tool card is the same code in both places.
+	// vocabulary the top-level feed uses. A frontend's renderer for a response, a
+	// thinking block or a tool card is the same code in both places.
 	Emissions []*AgentEmission `protobuf:"bytes,1,rep,name=emissions,proto3" json:"emissions,omitempty"`
 	// Tail-cap accounting for `emissions`. See DetachedWorkFold.
 	Fold          *DetachedWorkFold `protobuf:"bytes,2,opt,name=fold,proto3" json:"fold,omitempty"`
@@ -339,7 +339,7 @@ type DetachedWorkMerge struct {
 	// The merge conversation so far, in emission order, in EXACTLY the
 	// vocabulary the top-level feed uses (the same shape as
 	// DetachedWorkAgent.emissions, deliberately: a frontend's renderer for a
-	// response bubble, a thinking block or a tool card is the same code here).
+	// response, a thinking block or a tool card is the same code here).
 	Emissions []*AgentEmission `protobuf:"bytes,1,rep,name=emissions,proto3" json:"emissions,omitempty"`
 	// Tail-cap accounting for `emissions`. See DetachedWorkFold.
 	Fold          *DetachedWorkFold `protobuf:"bytes,2,opt,name=fold,proto3" json:"fold,omitempty"`
@@ -395,7 +395,7 @@ func (x *DetachedWorkMerge) GetFold() *DetachedWorkFold {
 // render flat, now work that owns its window. The daemon opens it when it
 // classifies the Skill tool call, resolves the skill file's contents as the
 // work's own body (they are the SKILL's content, not a response of the
-// conversation — the response-bubble rendering of the file contents is retired
+// conversation — rendering the file contents as an agent response is retired
 // by this arm), and folds the session's subsequent emissions here until the
 // user's own next prompt or an interrupt settles it — the same temporal
 // membership the merge arm uses.

@@ -56,8 +56,8 @@ export interface SessionCommandSpec {
    *
    * FALSE IS THE SAFE SIDE: a command taking no argument is recognized only as
    * an ENTIRE prompt, so "/status of the build" stays a prompt and keeps its
-   * bubble. Marking a command that takes none as taking some is the one way
-   * the table can swallow something a user genuinely wrote.
+   * user message. Marking a command that takes none as taking some is the one
+   * way the table can swallow something a user genuinely wrote.
    */
   readonly takesArgs: boolean;
 }

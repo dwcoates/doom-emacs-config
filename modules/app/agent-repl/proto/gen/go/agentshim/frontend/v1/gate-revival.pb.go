@@ -39,8 +39,8 @@ const (
 	// Summarize the whole conversation, sparing nothing. The original
 	// compact-first behavior, and the cheapest result.
 	CompactionScope_COMPACTION_SCOPE_ALL CompactionScope = 1
-	// Summarize only the assistant's own responses — the purple bubbles — and
-	// keep the user's prompts, the tool calls, and the tool results verbatim.
+	// Summarize only the assistant's own responses, and keep the user's
+	// prompts, the tool calls, and the tool results verbatim.
 	CompactionScope_COMPACTION_SCOPE_RESPONSES CompactionScope = 2
 	// Summarize only the user's prompts and keep everything the agent produced
 	// verbatim. For a conversation whose value is in what was DONE rather than

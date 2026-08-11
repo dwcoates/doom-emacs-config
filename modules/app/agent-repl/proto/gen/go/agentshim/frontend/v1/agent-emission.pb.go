@@ -43,7 +43,7 @@ const (
 // One thing an agent produced.
 //
 // The arm payloads live in the component files that draw them
-// (response-bubble.proto, tool-call.proto, slash-menu.proto) rather than
+// (agent-response.proto, tool-call.proto, slash-menu.proto) rather than
 // here, so a component's wire shape and its picture stay in one file.
 type AgentEmission struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -166,13 +166,13 @@ type isAgentEmission_Emission interface {
 }
 
 type AgentEmission_Response struct {
-	// The assistant's spoken turn: the purple bubble, with the resolved usage
-	// figures its corner renders.
+	// The assistant's spoken turn, with the resolved usage figures it is
+	// stamped with.
 	Response *AgentResponse `protobuf:"bytes,1,opt,name=response,proto3,oneof"`
 }
 
 type AgentEmission_Thinking struct {
-	// A reasoning block: the collapsed grey block that precedes a response.
+	// A reasoning block: the collapsed reasoning that precedes a response.
 	// Carried as its own emission rather than inside the response body — see
 	// the exclusivity invariant on AgentResponse.body, which is what keeps
 	// the two from being duplicate copies of the same reasoning.
@@ -234,7 +234,7 @@ var File_agentshim_frontend_v1_agent_emission_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_agent_emission_proto_rawDesc = "" +
 	"\n" +
-	"*agentshim/frontend/v1/agent-emission.proto\x12\x15agentshim.frontend.v1\x1a\x1eagentshim/data/v1/stream.proto\x1a+agentshim/frontend/v1/response-bubble.proto\x1a&agentshim/frontend/v1/slash-menu.proto\x1a%agentshim/frontend/v1/tool-call.proto\"\x8d\x04\n" +
+	"*agentshim/frontend/v1/agent-emission.proto\x12\x15agentshim.frontend.v1\x1a\x1eagentshim/data/v1/stream.proto\x1a*agentshim/frontend/v1/agent-response.proto\x1a&agentshim/frontend/v1/slash-menu.proto\x1a%agentshim/frontend/v1/tool-call.proto\"\x8d\x04\n" +
 	"\rAgentEmission\x12B\n" +
 	"\bresponse\x18\x01 \x01(\v2$.agentshim.frontend.v1.AgentResponseH\x00R\bresponse\x12B\n" +
 	"\bthinking\x18\x02 \x01(\v2$.agentshim.frontend.v1.AgentThinkingH\x00R\bthinking\x12C\n" +
@@ -292,7 +292,7 @@ func file_agentshim_frontend_v1_agent_emission_proto_init() {
 	if File_agentshim_frontend_v1_agent_emission_proto != nil {
 		return
 	}
-	file_agentshim_frontend_v1_response_bubble_proto_init()
+	file_agentshim_frontend_v1_agent_response_proto_init()
 	file_agentshim_frontend_v1_slash_menu_proto_init()
 	file_agentshim_frontend_v1_tool_call_proto_init()
 	file_agentshim_frontend_v1_agent_emission_proto_msgTypes[0].OneofWrappers = []any{
