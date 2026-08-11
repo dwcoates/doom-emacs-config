@@ -11,20 +11,40 @@
 # process that was SIGKILLed and respawned shows a gap; one that was merely
 # reparented or reconnected does not.
 #
-# USAGE: async-probe-gaps.sh <log> [tolerance-seconds]
-#   log        the heartbeat file written by async-probe.sh
-#   tolerance  max acceptable gap, in seconds (default 2.0 for a 1s interval)
+# USAGE: async-probe-gaps.sh <log> [tolerance-seconds] [--expect-stop]
+#   log           the heartbeat file written by async-probe.sh
+#   tolerance     max acceptable gap, in seconds (default 2.0 for a 1s interval)
+#   --expect-stop the tester deliberately SIGTERMed the probe; a stop is then a
+#                 pass rather than a failure
 #
-# EXIT: 0 when every gap is within tolerance and the probe never recorded an
-#       unexpected stop; 1 otherwise. The exit code is the verdict.
+# A STOP IS A FAILURE UNLESS THE TESTER ASKED FOR IT. This script previously
+# reported PASS for a probe that had been terminated by something other than the
+# test: a clean SIGTERM leaves no gap and no second `started` line, so both of
+# the other checks are satisfied by work that is no longer running. It happened
+# for real — an editor restart took the shim down, the shim took its background
+# task with it, and the analyzer called it continuity. The probe cannot tell the
+# tester's SIGTERM from anyone else's, so the EXPECTATION has to come from the
+# caller rather than from the log.
+#
+# EXIT: 0 when every gap is within tolerance, the probe never respawned, and it
+#       is either still running or was stopped with --expect-stop; 1 otherwise.
+#       The exit code is the verdict.
 set -u
 
-log="${1:?usage: async-probe-gaps.sh <log> [tolerance-seconds]}"
-tol="${2:-2.0}"
+log="${1:?usage: async-probe-gaps.sh <log> [tolerance-seconds] [--expect-stop]}"
+tol="2.0"
+expect_stop=0
+shift
+for arg in "$@"; do
+  case "$arg" in
+    --expect-stop) expect_stop=1 ;;
+    *) tol="$arg" ;;
+  esac
+done
 
 [ -r "$log" ] || { echo "FAIL: probe log unreadable: $log"; exit 1; }
 
-awk -v tol="$tol" -v logfile="$log" '
+awk -v tol="$tol" -v logfile="$log" -v expect_stop="$expect_stop" '
   # HH:MM:SS.fraction -> seconds since midnight, as a float.
   function secs(ts,   p, hms, frac) {
     split(ts, p, ".")
@@ -67,6 +87,10 @@ awk -v tol="$tol" -v logfile="$log" '
     }
     if (starts > 1) {
       printf "VERDICT:     FAIL — probe restarted (%d starts); a respawn is not continuity\n", starts
+      exit 1
+    }
+    if (stopped && expect_stop != 1) {
+      printf "VERDICT:     FAIL — the probe STOPPED and the test did not ask it to; work that ended is not work that continued\n"
       exit 1
     }
     printf "VERDICT:     PASS — no gap exceeded tolerance; the work never stopped\n"
