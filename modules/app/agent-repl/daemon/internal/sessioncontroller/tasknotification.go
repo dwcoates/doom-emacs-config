@@ -44,10 +44,9 @@ import (
 // store keeps the record, and the delta is still pushed so its through_seq
 // advances the frontend's cursor. Only the rendered item is suppressed.
 //
-// RUNS BEFORE ATTRIBUTION (promptecho.go), with the other user-record curators
-// and for the same reason: a record nobody typed must never claim an
-// outstanding prompt's receipt, which would retire that receipt and leave the
-// real prompt's own line unattributed behind it.
+// RUNS WITH THE OTHER USER-RECORD CURATORS, and for the same reason: a record
+// nobody typed rides the user_message arm, and one that reached the feed would
+// be indistinguishable there from a prompt the user really wrote.
 
 // isTaskNotificationRecord reports whether one curated item is the harness's
 // detached-work completion notice.
