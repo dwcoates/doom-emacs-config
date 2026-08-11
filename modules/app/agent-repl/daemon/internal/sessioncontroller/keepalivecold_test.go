@@ -71,7 +71,7 @@ func coldPingRig(t *testing.T) (*Manager, *fakeApplier, *fakeHibernations, *fake
 	// The instant every keep-alive measurement is taken from. Under the rig's
 	// fixed clock this puts the session 59 minutes into a one-hour cache — the
 	// window the sweeper pings in, and the window the observed defect fired in.
-	hib.TurnEndObserved("s1", coldPingLastTurnEnd)
+	hib.TurnEndObserved("s1", coldPingLastTurnEnd, true)
 	if err := m.Ensure("ws"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
@@ -317,9 +317,11 @@ func TestColdKeepAliveVerdictCarriesTheMeasuredElapsedAndTTL(t *testing.T) {
 	turnID := submitPingUnderTurn(t, m)
 	d := controllerFor(t, m)
 	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
-	// The ping's turn ending moves the durable instant, exactly as production's
+	// The ping's turn ending moves the CACHE clock, exactly as production's
 	// TurnEndObserved does — which is what a re-derived figure would then read.
-	hib.TurnEndObserved("s1", coldPingLastTurnEnd+coldPingElapsedMs)
+	// It moves no engagement clock, because a ping is not somebody using the
+	// workspace.
+	hib.TurnEndObserved("s1", coldPingLastTurnEnd+coldPingElapsedMs, false)
 
 	// Act.
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)

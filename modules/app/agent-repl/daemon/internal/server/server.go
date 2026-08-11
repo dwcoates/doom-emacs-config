@@ -2176,7 +2176,7 @@ func (s *Server) sweepIdle() {
 		if s.applyKeepAlivePolicy(rec, nowMs) {
 			continue
 		}
-		idleMs, sweepable := s.sweepable(rec.SessionID, rec.CWD, nowMs)
+		idleMs, sweepable := s.sweepable(rec, nowMs)
 		if !sweepable {
 			continue
 		}
@@ -2290,6 +2290,17 @@ func (s LegacyTurnEndStamps) StampLegacyTurnEnd(sessionID, workspace string) (in
 		return 0, false
 	}
 	found, err := s.Reg.Update(sessionID, func(r *registry.Record) {
+		// THE ENGAGEMENT CLOCK IS STAMPED FROM THE SAME EVIDENCE, in the same
+		// write, and under its own condition. The state-history instant is a
+		// dated fact about somebody using the WORKSPACE — that is exactly what
+		// the idle cutoff asks — and a legacy record left with a zero here would
+		// never be reaped at all, since the cutoff declines every unknown. The
+		// two conditions are separate because the two fields can legitimately
+		// differ: a record may have run turns under the new daemon (turn end set)
+		// while every one of them was a keep-alive ping (engagement still zero).
+		if r.LastEngagementMs == 0 {
+			r.LastEngagementMs = atMs
+		}
 		if r.LastTurnEndMs == 0 {
 			r.LastTurnEndMs = atMs
 			// MARKED AS BACKFILLED, because that is what it is. The instant is
@@ -2313,6 +2324,22 @@ func (s LegacyTurnEndStamps) StampLegacyTurnEnd(sessionID, workspace string) (in
 	logf("session %s: legacy record STAMPED with last_turn_end_ms=%d from its dated state history (ws %s) — it enters the cache keep-alive policy from here rather than living outside it",
 		sessionID, atMs, workspace)
 	return atMs, true
+}
+
+// engagementInstant is the instant a record's IDLE CUTOFF measures from: when
+// somebody last engaged with the session, falling back to its last turn end.
+//
+// THE FALLBACK IS FOR RECORDS THAT PREDATE THE SECOND CLOCK, and it is the same
+// one sessioncontroller.durableEngagement applies, deliberately: two evaluators
+// disagreeing about which instant a record is dated by is the class of bug the
+// second clock was added to end, so the rule is written once in each package and
+// they are written the same. It errs toward looking recently engaged, which
+// delays a teardown rather than taking one.
+func engagementInstant(rec registry.Record) int64 {
+	if rec.LastEngagementMs > 0 {
+		return rec.LastEngagementMs
+	}
+	return rec.LastTurnEndMs
 }
 
 // keepAliveConfig is the resolved policy, defaulting a zero Config rather than
@@ -2346,7 +2373,10 @@ func (s *Server) applyKeepAlivePolicy(rec registry.Record, nowMs int64) (owned b
 		return true
 	}
 	cfg := s.keepAliveConfig()
-	decision := cfg.Evaluate(nowMs, rec.LastTurnEndMs)
+	// THE IDLE CUTOFF MEASURES THE ENGAGEMENT CLOCK, and the fallback is the
+	// same one every other evaluator uses: a record with none is measured by its
+	// turn end, which is the best dated evidence it carries.
+	decision := cfg.Evaluate(nowMs, rec.LastTurnEndMs, engagementInstant(rec))
 	switch decision.Action {
 	case keepalive.ActionPing:
 		// The submit RE-CHECKS eligibility under the manager mutex; this tick's
@@ -2486,7 +2516,8 @@ func (s *Server) applyKeepAlivePolicy(rec registry.Record, nowMs int64) (owned b
 // It reports the MEASURED idleness alongside the verdict, so the hibernation
 // account records the figure this gate acted on rather than one re-derived from
 // a clock that has since moved.
-func (s *Server) sweepable(sessionID, workspace string, nowMs int64) (idleMs int64, ok bool) {
+func (s *Server) sweepable(rec registry.Record, nowMs int64) (idleMs int64, ok bool) {
+	sessionID, workspace := rec.SessionID, rec.CWD
 	st, found, err := s.ssm.Current(workspace)
 	if err != nil {
 		s.logf("session %s: idle sweep state read (ws %s): %v", sessionID, workspace, err)
@@ -2500,13 +2531,29 @@ func (s *Server) sweepable(sessionID, workspace string, nowMs int64) (idleMs int
 	if st.GetTurnActive() {
 		return 0, false
 	}
-	atMs, dated, err := s.ssm.LastActivityMs(workspace)
-	if err != nil {
-		s.logf("session %s: idle sweep activity read (ws %s): %v", sessionID, workspace, err)
-		return 0, false
+	// THE RECORD'S ENGAGEMENT CLOCK OUTRANKS THE STATE LOG, and this is the
+	// second half of the two-clock correction. `ssm.LastActivityMs` is the
+	// newest row on the workspace's state log, and a keep-alive ping's own turn
+	// boundaries append rows exactly as a real turn's do — so this gate read a
+	// pinged-but-untouched workspace as busy for precisely the reason the
+	// registry's cache clock did. The engagement clock already answers "when did
+	// somebody last use this workspace" and it answers it once, so this asks IT
+	// rather than growing a third opinion.
+	//
+	// The state log remains the fallback, and only that: it is the sole evidence
+	// for a record carrying no engagement instant at all, which is the case this
+	// generic sweep exists to reach in the first place.
+	atMs, dated := engagementInstant(rec), true
+	if atMs <= 0 {
+		var err error
+		atMs, dated, err = s.ssm.LastActivityMs(workspace)
+		if err != nil {
+			s.logf("session %s: idle sweep activity read (ws %s): %v", sessionID, workspace, err)
+			return 0, false
+		}
 	}
-	if !dated {
-		s.logf("session %s: idle sweep HELD (ws %s): no state history to date the workspace by",
+	if !dated || atMs <= 0 {
+		s.logf("session %s: idle sweep HELD (ws %s): no engagement instant and no state history to date the workspace by",
 			sessionID, workspace)
 		return 0, false
 	}

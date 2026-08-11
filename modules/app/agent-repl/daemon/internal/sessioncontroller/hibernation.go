@@ -140,14 +140,27 @@ type HibernationRegistrar interface {
 	// freshly booted daemon has no live controller to ask, and the record is
 	// the only thing that knows the session was deliberately put to sleep.
 	HibernationOf(sessionID string) (registry.HibernationDetail, bool)
-	// TurnEndObserved persists when the session's most recent turn ended — the
-	// keep-alive policy's one input.
-	TurnEndObserved(sessionID string, atMs int64)
-	// LastTurnEndOf reads that instant back. It is what the hibernation claim
-	// re-validates an AUTOMATIC cause's elapsed against, under the manager
-	// mutex, so a session that started and finished work between the sweep's
-	// snapshot and the claim cannot be put to sleep on the stale reading.
+	// TurnEndObserved persists when the session's most recent turn ended, and
+	// whether that turn was ENGAGEMENT with the workspace rather than the
+	// daemon's own machinery.
+	//
+	// THE TWO CLOCKS MOVE IN ONE WRITE, and one argument, for the reason
+	// HibernationChanged takes its flag and its account together: they are two
+	// readings of the same boundary, and two calls would be two chances for a
+	// session's cache clock and engagement clock to be written by different
+	// edges and drift. A non-engagement turn moves the cache clock ALONE — that
+	// is the whole point of the second field (registry.Record.LastEngagementMs).
+	TurnEndObserved(sessionID string, atMs int64, engagement bool)
+	// LastTurnEndOf reads the CACHE clock back: the instant the ping and warm
+	// compaction schedules are measured from.
 	LastTurnEndOf(sessionID string) (int64, bool)
+	// LastEngagementOf reads the ENGAGEMENT clock back. It is what the
+	// hibernation claim re-validates an idle-cutoff decision against, under the
+	// manager mutex, so a session somebody actually worked between the sweep's
+	// snapshot and the claim cannot be put to sleep on the stale reading — and
+	// so a keep-alive ping in that same gap cannot rescue a session nobody
+	// touched, which reading the cache clock here would let it do.
+	LastEngagementOf(sessionID string) (int64, bool)
 }
 
 // LegacyTurnEndStamper resolves — and, for a record that has none, stamps —
@@ -488,7 +501,26 @@ func (m *Manager) revalidateElapsedLocked(workspace, sessionID string, account r
 	if threshold <= 0 {
 		return account, nil
 	}
-	lastEndMs, ok := m.cfg.Hibernations.LastTurnEndOf(sessionID)
+	// THE CLOCK RE-READ IS THE CAUSE'S OWN. The idle cutoff was decided against
+	// the ENGAGEMENT clock, so re-measuring it against the cache clock would let
+	// a keep-alive ping submitted between the sweep and this claim rescue a
+	// session nobody has touched all day — the very confusion the second clock
+	// exists to end. Any other automatic cause re-reads the cache clock it was
+	// decided against.
+	var lastEndMs int64
+	var ok bool
+	if account.Cause == registry.HibernationCauseIdleCutoff {
+		lastEndMs, ok = m.cfg.Hibernations.LastEngagementOf(sessionID)
+		if !ok || lastEndMs <= 0 {
+			// A record with no engagement instant is one the decision itself
+			// measured through the turn-end fallback (durableEngagement), so the
+			// re-read follows it to the same place rather than refusing a
+			// hibernation for want of a clock that was never there.
+			lastEndMs, ok = m.cfg.Hibernations.LastTurnEndOf(sessionID)
+		}
+	} else {
+		lastEndMs, ok = m.cfg.Hibernations.LastTurnEndOf(sessionID)
+	}
 	if !ok || lastEndMs <= 0 {
 		return account, nil
 	}
@@ -608,7 +640,14 @@ func (m *Manager) clearHibernation(workspace, sessionID string) error {
 	// dated fact about this session, and it is written through the same
 	// registrar hook every other turn boundary uses rather than a second field.
 	if nowMs := m.now(); nowMs > 0 {
-		m.cfg.Hibernations.TurnEndObserved(sessionID, nowMs)
+		// IT COUNTS AS ENGAGEMENT, and that is the whole point of stamping it. A
+		// revival is the user looking at a hibernated workspace and asking for it
+		// back — the freshest possible evidence that somebody wants it — so it
+		// moves the ENGAGEMENT clock the idle cutoff reads as well as the cache
+		// clock. Moving only the cache clock would leave the revived session
+		// still measuring six hours of idleness from before the sleep, and the
+		// very next sweep would hibernate it straight back.
+		m.cfg.Hibernations.TurnEndObserved(sessionID, nowMs, true)
 	}
 	m.logf("session-controller: hibernation cleared ws=%q session=%s — the revival gate no longer stands", workspace, sessionID)
 	return nil
@@ -711,9 +750,10 @@ func (m *Manager) hibernateIfStale(workspace, sessionID string) (registry.Hibern
 	if !ok || lastEndMs <= 0 {
 		return registry.HibernationDetail{}, false
 	}
+	engagedMs := m.durableEngagement(sessionID, workspace, lastEndMs)
 	cfg := m.keepAliveConfig()
 	nowMs := m.now()
-	decision := cfg.Evaluate(nowMs, lastEndMs)
+	decision := cfg.Evaluate(nowMs, lastEndMs, engagedMs)
 	if decision.Action != keepalive.ActionHibernate {
 		return registry.HibernationDetail{}, false
 	}
@@ -732,8 +772,8 @@ func (m *Manager) hibernateIfStale(workspace, sessionID string) (registry.Hibern
 		ElapsedMs: decision.ElapsedMs,
 		CutoffMs:  int64(cfg.IdleCutoff / time.Millisecond),
 	}
-	m.logf("session-controller: STALE RECORD hibernating on demand ws=%q session=%s cause=%s elapsed_ms=%d last_turn_end_ms=%d — the session was found past the keep-alive policy's threshold by the route that asked for it rather than by a sweep, so it meets the revival gate now instead of one sweep interval from now",
-		workspace, sessionID, decision.Cause, decision.ElapsedMs, lastEndMs)
+	m.logf("session-controller: STALE RECORD hibernating on demand ws=%q session=%s cause=%s elapsed_ms=%d last_engagement_ms=%d — the session was found past the keep-alive policy's threshold by the route that asked for it rather than by a sweep, so it meets the revival gate now instead of one sweep interval from now",
+		workspace, sessionID, decision.Cause, decision.ElapsedMs, engagedMs)
 	if err := m.HibernateWithCause(workspace, detail); err != nil {
 		// EVERY refusal here is the transition's own, and each one means the
 		// session stays awake: a live turn (ErrNotSettled), a merge holding the
@@ -766,6 +806,30 @@ func (m *Manager) durableLastTurnEnd(sessionID, workspace string) (int64, bool) 
 		return 0, false
 	}
 	return m.cfg.LegacyTurnEnds.StampLegacyTurnEnd(sessionID, workspace)
+}
+
+// durableEngagement reads the instant the IDLE CUTOFF measures from: the end of
+// the most recent turn somebody actually asked for.
+//
+// A RECORD WITH NO ENGAGEMENT INSTANT FALLS BACK TO ITS TURN END, and only
+// there. Two records reach that state and both deserve it: one written before
+// the engagement clock existed whose migration seed has not landed yet, and one
+// the legacy stamper dated from workspace state history. In both the turn end is
+// the best evidence there is, and it errs toward looking recently engaged, which
+// delays a teardown rather than taking one.
+//
+// IT NEVER INVENTS AN INSTANT. A session with neither clock yields zero, and
+// keepalive.Evaluate declines to reap on it — the same "every unknown answers
+// none" rule every other gate here follows.
+func (m *Manager) durableEngagement(sessionID, workspace string, lastTurnEndMs int64) int64 {
+	if engagedMs, ok := m.cfg.Hibernations.LastEngagementOf(sessionID); ok && engagedMs > 0 {
+		return engagedMs
+	}
+	if lastTurnEndMs > 0 {
+		m.logf("session-controller: session %s (ws %q) has no durable last_engagement_ms; the idle cutoff measures from its last turn end %d instead, which is the best dated evidence this record carries and errs toward looking recently used",
+			sessionID, workspace, lastTurnEndMs)
+	}
+	return lastTurnEndMs
 }
 
 // keepAliveConfig is the resolved policy this manager runs. A Manager built
