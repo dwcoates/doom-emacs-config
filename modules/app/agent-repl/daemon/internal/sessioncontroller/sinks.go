@@ -717,6 +717,11 @@ type consumer struct {
 
 	mu   sync.Mutex
 	ring []*corev1.Event
+	// previewSurfaces names every surface this consumer has opened a live typing
+	// preview on — "" for the top-level feed, or an async bubble id. It is what
+	// a torn-down query's cut is addressed from (typingcut.go). Guarded by c.mu,
+	// beside the ring whose deltas fill it.
+	previewSurfaces map[string]struct{}
 	// openTasks names every task the catalog currently holds `running`, mapped
 	// to the instant its start was observed. It is the set the phantom sweep
 	// asks the shim about and the gate that makes a close idempotent
@@ -2101,6 +2106,15 @@ func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *fro
 	classification := faultClassifications["claude-shim-sdk"]
 	c.applyRuntimeFault("claude-shim-sdk", classification, true, "unexpected_query_termination")
 	c.pushFailure(c.degradedUUID("claude-shim-sdk"), item)
+	// THE QUERY IS GONE, so every block it was mid-way through has lost the
+	// authoritative record that would have retired its preview. Nothing else
+	// will ever retire them, and the failure card above explains the session
+	// without touching the bubbles still spinning "streaming input…" beside it.
+	//
+	// The LIVE arm only: the historical arm returns above, and replaying a
+	// year-old termination must not cut previews belonging to the session
+	// running now.
+	c.cutOpenPreviews("unexpected_query_termination")
 }
 
 // noteClearOrCompact records a clear or a compaction as the conversation's
@@ -2407,6 +2421,7 @@ func (c *consumer) relayTypingDelta(cd *corev1.ContentDelta, seq uint64) {
 		}
 	}
 	if td := frontend.TypingDeltaFromContentDelta(c.workspace, c.sessionID, bubbleID, cd); td != nil {
+		c.notePreviewOpened(bubbleID)
 		c.push.PushTypingDelta(td)
 	}
 }
