@@ -3214,6 +3214,104 @@ describe("dropUnackedPrompt", () => {
   });
 });
 
+// --- a prompt's identity ----------------------------------------------------
+//
+// A prompt is PROVISIONAL until the daemon supplies a uuid for it, and
+// IDENTIFIED forever after. Adoption is the one transition, and the request id
+// is only ever the token that carries a bubble across it.
+//
+// The defect these pin: the request id came FIRST in the key, so a prompt filed
+// locally keyed `req:<id>` while the SAME prompt replayed from history keyed
+// `uuid:<uuid>` — a replay carries no request id, since no submit of this
+// daemon's is outstanding for it. Two keys, no match, and the user's own prompt
+// appeared twice.
+
+describe("a prompt adopts the daemon's uuid as its identity", () => {
+  /** The prompt as the transcript delivers it once attribution has stamped it. */
+  function attributedLine(requestId: string, uuid: string, text: string): ConversationItem {
+    return { kind: "user-turn", requestId, uuid, content: [{ type: "text", text }], ts: TS };
+  }
+
+  /** The SAME prompt on a replay: its record uuid, and no request id at all. */
+  function replayedLine(uuid: string, text: string): ConversationItem {
+    return { kind: "user-turn", requestId: "", uuid, content: [{ type: "text", text }], ts: TS };
+  }
+
+  /** Every user turn in the feed, which is what a duplicate shows up in. */
+  function prompts(store: ConversationStore): Extract<ConversationItem, { kind: "user-turn" }>[] {
+    return store.state.items.filter((i) => i.kind === "user-turn");
+  }
+
+  it("keys the prompt on the uuid once the daemon supplies one", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.addLocalPrompt("r1", "hello");
+    // Act
+    store.ingest([itemsEffect([attributedLine("r1", "u-1", "hello")], 10)]);
+    // Assert — one bubble, now identified.
+    expect(prompts(store)).toHaveLength(1);
+    expect(prompts(store)[0].uuid).toBe("u-1");
+  });
+
+  it("clears the unacked marking when the provisional bubble adopts", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.addLocalPrompt("r1", "hello");
+    // Act
+    store.ingest([itemsEffect([attributedLine("r1", "u-1", "hello")], 10)]);
+    // Assert — the acknowledgement IS the daemon's delivery superseding it.
+    expect(prompts(store)[0].unacked).toBeUndefined();
+  });
+
+  it("reconciles a later replay onto the adopted bubble instead of duplicating it", () => {
+    // Arrange — the whole defect, end to end: file locally, adopt, then replay.
+    const store = new ConversationStore();
+    store.addLocalPrompt("r1", "hello");
+    store.ingest([itemsEffect([attributedLine("r1", "u-1", "hello")], 10)]);
+    // Act — a resync replays the same prompt, carrying no request id.
+    store.ingest([itemsEffect([replayedLine("u-1", "hello")], 10)]);
+    // Assert
+    expect(prompts(store)).toHaveLength(1);
+  });
+
+  it("keeps the provisional bubble's rank through the adoption", () => {
+    // Arrange — a prompt filed at the live tail, above nothing.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem({ blockId: "b1", uuid: "t-1" })], 400)]);
+    store.addLocalPrompt("r1", "hello");
+    // Act
+    store.ingest([itemsEffect([attributedLine("r1", "u-1", "hello")], 401)]);
+    // Assert — a redelivery replaces content, never position.
+    expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
+  });
+
+  it("collapses onto a uuid-keyed copy that reached the feed first", () => {
+    // Arrange — THE RACE: a replay beats the attributed line, so a uuid-keyed
+    // copy is already standing when the provisional bubble is asked to adopt.
+    const store = new ConversationStore();
+    store.addLocalPrompt("r1", "hello");
+    store.ingest([itemsEffect([replayedLine("u-1", "hello")], 10)]);
+    expect(prompts(store)).toHaveLength(2);
+    // Act — the attributed line names both identities at once.
+    store.ingest([itemsEffect([attributedLine("r1", "u-1", "hello")], 10)]);
+    // Assert — collapsed onto the standing copy, not made its twin. Adopting
+    // without collapsing would MOVE the duplicate rather than remove it.
+    expect(prompts(store)).toHaveLength(1);
+    expect(prompts(store)[0].uuid).toBe("u-1");
+  });
+
+  it("still appends a second prompt that shares neither identity", () => {
+    // Arrange — the guard against over-collapsing: two real prompts of the same
+    // text are two prompts, and "continue" repeats constantly in this workflow.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([replayedLine("u-1", "continue")], 10)]);
+    // Act
+    store.ingest([itemsEffect([replayedLine("u-2", "continue")], 11)]);
+    // Assert
+    expect(prompts(store)).toHaveLength(2);
+  });
+});
+
 // --- surviving a bounce -----------------------------------------------------
 
 describe("recovery after a bounce is incremental", () => {

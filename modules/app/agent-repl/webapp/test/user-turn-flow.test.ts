@@ -245,6 +245,35 @@ describe("the daemon's prompt receipt", () => {
     expect(last.classList.contains("user")).toBe(true);
   });
 
+  it("draws one bubble when a resync replays the prompt after the receipt", () => {
+    // Arrange — THE USER-VISIBLE DEFECT, walked end to end through the real
+    // pipeline. The receipt and the attributed line both name the submit; the
+    // replay names only the record, because no submit of this daemon's is
+    // outstanding for a prompt read back from history.
+    const f = flow();
+    f.sendLocal([receipt("r1", "the prompt itself")]);
+    f.send([echoedPrompt("u1", "r1", "the prompt itself")]);
+    // Act — a reconnect replays the conversation.
+    f.send([transcriptPrompt("u1", "the prompt itself")]);
+    // Assert — the prompt adopted "u1" when the daemon supplied it, so the
+    // replay reconciles onto the standing bubble instead of drawing a second.
+    expect(f.prompts()).toHaveLength(1);
+  });
+
+  it("draws one bubble when the replay beats the attributed line", () => {
+    // Arrange — the same three deliveries, reordered: a replay can outrun the
+    // attributed line, so a uuid-keyed copy is already standing when the
+    // receipt is asked to adopt.
+    const f = flow();
+    f.sendLocal([receipt("r1", "the prompt itself")]);
+    f.send([transcriptPrompt("u1", "the prompt itself")]);
+    // Act
+    f.send([echoedPrompt("u1", "r1", "the prompt itself")]);
+    // Assert — the adoption COLLAPSES onto the standing copy. Adopting without
+    // collapsing would move the duplicate rather than remove it.
+    expect(f.prompts()).toHaveLength(1);
+  });
+
   it("leaves the reconciled bubble where the receipt put it", () => {
     // Arrange
     const f = flow();
