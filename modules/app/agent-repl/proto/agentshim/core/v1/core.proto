@@ -232,6 +232,35 @@ message Event {
   // producer keeps precisely the behavior it had before this field existed.
   string query_instance_id = 8;
 
+  // STABLE WRITE IDENTITY. Minted ONCE by the producer when the event is first
+  // handed to a store write, and NEVER regenerated — not for a retry, not for
+  // a replay after the store bounced underneath the producer.
+  //
+  // It is what makes a store write IDEMPOTENT BY IDENTITY, which is what makes
+  // replay safe. A batch that REACHED the store but whose StoreWriteAck was
+  // lost — a store restart between the ingest and the ack is exactly that —
+  // has to be replayed by the producer, because from the producer's side an
+  // unacked batch and a never-delivered batch are indistinguishable. Without
+  // an identity the store cannot tell the replay from a second, genuinely new
+  // event, and writes it twice. With one, the replay is a no-op.
+  //
+  // DISTINCT FROM dedup_key, and neither one substitutes for the other:
+  //   - dedup_key is a CROSS-PLANE identity. Two DIFFERENT producers (the
+  //     stream shim and the file-plane sidecar) observing the SAME underlying
+  //     fact derive the SAME key, so the store collapses the twins to one row.
+  //     Events with no cross-plane twin — turn lifecycle, content deltas,
+  //     degraded reports — carry no dedup_key at all, and those are precisely
+  //     the events a replay duplicated.
+  //   - write_id identifies ONE producer's ONE write of ONE event. It is
+  //     unique per event whether or not the event has a twin, so it covers the
+  //     whole envelope space rather than the deduped subset.
+  //
+  // EMPTY means the producer supplied no write identity, and such an event is
+  // NOT replay-idempotent. The store enforces uniqueness only over non-empty
+  // values, so an older producer keeps exactly the behavior it had before this
+  // field existed.
+  string write_id = 9;
+
   oneof payload {
     // Vendor-neutral lifecycle payloads:
     SessionStarted session_started = 10;

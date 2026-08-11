@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,6 +18,14 @@ type Result struct {
 	Accepted uint64 // events persisted with a freshly assigned seq
 	Deduped  uint64 // events dropped as duplicates (first-writer-wins)
 	LastSeq  uint64 // highest seq assigned in this batch (0 if none)
+	// Replayed is the SUBSET of Deduped that collided on write_id rather than
+	// on dedup_key: the producer re-sent an event this store had already
+	// written, which is what a batch whose ack was lost to a store restart
+	// looks like from here. It is accounted separately because the two are
+	// different facts — a dedup_key collision is two PLANES describing one
+	// event, a write_id collision is one producer delivering one event twice —
+	// and conflating them would hide whether replay is idempotent in practice.
+	Replayed uint64
 }
 
 // Ingest persists a batch of PERSISTENT events and, atomically in the SAME
@@ -29,6 +38,13 @@ type Result struct {
 // to fan out (accepted → seq>0). EPHEMERAL events must never reach here (the
 // server routes them straight to fan-out); one arriving is a loud invariant
 // violation that rejects the whole batch.
+//
+// IDEMPOTENT BY IDENTITY. An event carrying a write_id (core.proto
+// Event.write_id) can be delivered any number of times and lands exactly once:
+// the unique (session_id, write_id) index rejects every repeat, the repeat
+// consumes no seq, and it is reported as Deduped/Replayed rather than written
+// again. That is what makes a producer safe to replay a batch it sent but
+// never saw acked — which is every batch in flight when the store bounces.
 func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.CursorState) (res Result, resultErr error) {
 	d.log.LogVerbose(logging.Fields{
 		Operation: "ingest", Producer: producer, Table: "event", Transaction: "BEGIN IMMEDIATE",
@@ -70,9 +86,14 @@ func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.Curs
 		return v, nil
 	}
 
+	// OR IGNORE covers BOTH unique indexes: event_dedup (session_id,
+	// dedup_key) collapses cross-plane twins, and event_write_id (session_id,
+	// write_id) makes a REPLAYED write a no-op. Which one rejected is resolved
+	// below, because the two mean different things.
 	const insertSQL = `INSERT OR IGNORE INTO event
-	  (session_id, seq, plane, class, kind, task_id, uuid, dedup_key, produced_at, payload)
-	  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	  (session_id, seq, plane, class, kind, task_id, uuid, dedup_key, write_id, produced_at, payload)
+	  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	const writeIDSeqSQL = `SELECT seq FROM event WHERE session_id = ? AND write_id = ?`
 
 	for _, ev := range events {
 		if ev.GetClass() == corev1.EventClass_EVENT_CLASS_EPHEMERAL {
@@ -101,7 +122,7 @@ func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.Curs
 		out, err := tx.Exec(insertSQL,
 			sid, candidate, int32(ev.GetPlane()), int32(ev.GetClass()),
 			kindOf(ev), nullStr(taskIDOf(ev)), nullStr(uuidOf(key)), nullStr(key),
-			ev.GetProducedAtMs(), blob)
+			nullStr(ev.GetWriteId()), ev.GetProducedAtMs(), blob)
 		if err != nil {
 			return res, fmt.Errorf("shim-store ingest: inserting event (session=%q seq=%d): %w", sid, candidate, err)
 		}
@@ -116,10 +137,36 @@ func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.Curs
 				res.LastSeq = candidate
 			}
 		} else {
-			// Duplicate: the dedup index rejected it. Do not consume a seq;
-			// mark unpersisted so the caller does not re-fan-out the loser.
+			// Duplicate: one of the unique indexes rejected it. Do not consume
+			// a seq; mark unpersisted so the caller does not re-fan-out the
+			// loser.
 			res.Deduped++
 			ev.Seq = 0
+			// WHICH index rejected is the difference between "two planes saw
+			// one event" and "one producer delivered one event twice", and the
+			// second is the idempotent-replay guarantee actually firing. Only
+			// a write_id-bearing event can be a replay, so the lookup is
+			// skipped entirely for the events that cannot be one.
+			if wid := ev.GetWriteId(); wid != "" {
+				var prior uint64
+				switch err := tx.QueryRow(writeIDSeqSQL, sid, wid).Scan(&prior); {
+				case err == nil:
+					res.Replayed++
+					// ev.Seq STAYS 0. It is the fan-out selector (see the
+					// doc comment): the original write already fanned this
+					// event out to every subscriber, and re-fanning it would
+					// turn an idempotent store write into a duplicate
+					// DELIVERY, which is the same defect one layer up.
+					d.log.LogVerbose(logging.Fields{
+						Operation: "ingest", Producer: producer, Table: "event",
+					}, "replayed write is a no-op session=%q write_id=%q existing_seq=%d", sid, wid, prior)
+				case errors.Is(err, sql.ErrNoRows):
+					// Not a replay: the dedup_key index rejected it. Nothing to
+					// report beyond the dedup already counted.
+				default:
+					return res, fmt.Errorf("shim-store ingest: resolving duplicate cause (session=%q write_id=%q): %w", sid, wid, err)
+				}
+			}
 		}
 	}
 
@@ -134,7 +181,7 @@ func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.Curs
 	}
 	d.log.LogVerbose(logging.Fields{
 		Operation: "ingest", Producer: producer, Table: "event", Transaction: "BEGIN IMMEDIATE",
-	}, "transaction committed accepted=%d deduped=%d last_seq=%d cursor_advance=%t", res.Accepted, res.Deduped, res.LastSeq, cursor != nil)
+	}, "transaction committed accepted=%d deduped=%d replayed=%d last_seq=%d cursor_advance=%t", res.Accepted, res.Deduped, res.Replayed, res.LastSeq, cursor != nil)
 	return res, nil
 }
 

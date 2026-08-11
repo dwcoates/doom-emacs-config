@@ -11,12 +11,17 @@
  *    handing every store-merged `Event` to an injected sink (wired to
  *    `SessionServer.sendEvent`, forwarding to the daemon verbatim).
  *
- * THE HONEST SAD PATH (design §4.4, metaprompt no-fallbacks rule): if the
- * store is unreachable or rejects a batch, every event in that batch is
- * loud-logged as dropped and a `DegradedState` is reported to the injected
- * reporter. There is NO spill buffer, NO retry of a rejected batch, NO
- * fallback — store downtime is honest downtime and the display goes stale
- * until it returns.
+ * THE HONEST SAD PATH (design §4.4, metaprompt no-fallbacks rule): a batch the
+ * store REJECTS is loud-logged per event as dropped and reported as a
+ * `DegradedState` to the injected reporter. A rejection is a decision, not an
+ * outage: it is NEVER retried, because replaying it would only be rejected
+ * again. Store downtime is honest downtime and the display goes stale until it
+ * returns — no shadow path serves the daemon in the meantime.
+ *
+ * WHAT IS NOT THE SAD PATH is a write the store never got to see. A durable
+ * batch this client ACCEPTED is written to disk and delivered when the link
+ * comes back (see below); that is not a fallback, it is the difference between
+ * a transport being down and evidence being destroyed.
  *
  * "Until it returns" is load-bearing, and the LINK STATE MACHINE below is what
  * makes it true. The store is launchd-managed and restarts under a live shim,
@@ -52,26 +57,43 @@
  * and recovery restores the LINK — it never resurrects events that fell while
  * the link was down. A deliberate close() is final and never relinks.
  *
- * THE ONE THING RECOVERY DOES COVER is a durable write that ARRIVES during the
- * outage. It is HELD in write order and flushed on relink (see
- * {@link WRITE_HOLD_BUDGET_MS}) rather than failed on the spot, because failing
- * it on the spot took the session's fatal missing-receipt path and exited the
- * shim — one store bounce killed every live shim in the fleet. The hold is
- * bounded in batches and bytes, and BOTH a budget expiry and an overflow fail
- * every held batch exactly as the instant failure did: loud per-event DROPPED
- * lines, a DegradedState with the real count, and the same rejection. Nothing
- * durable is ever dropped quietly, and nothing is ever reordered.
+ * THE ONE THING RECOVERY DOES COVER is a durable write this client ACCEPTED.
+ * Such a write is never lost to a store bounce, and NO CLOCK DECIDES THAT:
+ *
+ *   - A batch arriving while the producer link is down is HELD in write order,
+ *     SPILLED TO DISK (see {@link SpillJournal}), and flushed on relink. It is
+ *     never failed because a timer ran out, because "the store came back fast
+ *     enough" is not a durability argument.
+ *   - A batch that was SENT but never ACKED when the link dropped is RE-HELD
+ *     rather than dropped. From here an unacked delivery and a lost one are
+ *     indistinguishable, so it is replayed — safely, because every event
+ *     carries a stable `write_id` and the store enforces a unique
+ *     (session_id, write_id), which makes a replay of a batch that already
+ *     landed a no-op instead of a duplicate row.
+ *   - The hold is still BOUNDED in batches and bytes, but crossing the bound is
+ *     BACKPRESSURE, not loss: the client stops ACCEPTING new batches until the
+ *     hold drains, so nothing is ever taken on that cannot be delivered.
+ *   - Nothing durable is ever dropped quietly, and nothing is ever reordered.
+ *
+ * A deliberate close() is the one case where accepted work genuinely cannot be
+ * delivered, and it keeps the full sad path: loud per-event DROPPED lines, a
+ * DegradedState with the real count, and the same rejection the session's fatal
+ * missing-receipt path keys on. The spill FILE outlives it, so the next shim
+ * for this workspace replays what this one could not.
  *
  * THE SUBSCRIPTION KEY is the VENDOR session id (Claude's uuid), not this
  * shim's `--session-id` — see `storeKey`. Writes were always keyed that way
  * (the envelope is read off the SDK message); the subscription was not, so it
  * listened on a channel nothing published to.
  */
+import { randomUUID } from "node:crypto";
 import net from "node:net";
+import path from "node:path";
 import { create, toBinary } from "@bufbuild/protobuf";
 import { MessageConn, envelopeType, unpackAs } from "./framing.js";
 import type { Any } from "./framing.js";
 import { bindLog } from "./log.js";
+import { SpillJournal } from "./store-spill.js";
 import {
   DegradedState,
   DegradedStateSchema,
@@ -154,14 +176,23 @@ export interface StoreClientOptions {
    */
   relinkReportAfterMs?: number;
   /**
-   * How long a DURABLE write may be held while the producer link relinks,
-   * before the hold is failed exactly as an unheld write always failed.
-   * Defaults to `relinkReportAfterMs`. See {@link WRITE_HOLD_BUDGET_MS}.
+   * Directory holding this workspace's durable write spill journal (see
+   * {@link SpillJournal}).
+   *
+   * REQUIRED, and deliberately not defaulted: a client with nowhere to spill
+   * can only hold accepted writes in memory, and silently deciding that for a
+   * caller is exactly the kind of quiet durability downgrade this file exists
+   * to stop. One journal per WORKSPACE is correct because the shim holds an
+   * exclusive workspace lock, so no two shims can ever share one.
    */
-  writeHoldBudgetMs?: number;
-  /** Hard cap on held batches during one outage; default {@link WRITE_HOLD_MAX_BATCHES}. */
+  spillDir: string;
+  /**
+   * Backpressure threshold in held batches; default
+   * {@link WRITE_HOLD_MAX_BATCHES}. Reaching it stops the client ACCEPTING new
+   * batches — it never discards held ones.
+   */
   writeHoldMaxBatches?: number;
-  /** Hard cap on held bytes during one outage; default {@link WRITE_HOLD_MAX_BYTES}. */
+  /** Backpressure threshold in held bytes; default {@link WRITE_HOLD_MAX_BYTES}. */
   writeHoldMaxBytes?: number;
 }
 
@@ -205,34 +236,28 @@ const RELINK_BACKOFF_MAX_MS = 5000;
 const RELINK_REPORT_AFTER_MS = 5000;
 
 /**
- * THE WRITE-HOLD BUDGET: how long a DURABLE batch that arrived while the
- * producer link was down waits for the relink before it is failed.
+ * THE WRITE-HOLD BOUNDS, which are a FLOW-CONTROL threshold and nothing else.
  *
- * The same 5s a dropped link is given to come back, and for the same reason:
- * a store bounce during a deploy drops every shim's producer connection, and a
- * batch that lands in that window used to go INSTANTLY fatal — the session
- * reported `fatal_missing_persistent_evidence_receipt` and the shim exited 1,
- * so one store restart killed all ~13 shims and hibernated every workspace.
+ * These used to be a hard cap whose crossing FAILED every held batch, and they
+ * sat next to a wall-clock budget whose expiry did the same. Both made
+ * durability probabilistic: an accepted write survived if the store came back
+ * fast enough and inside a big enough queue, and was destroyed otherwise. A
+ * bigger budget or a bigger cap only moves where the cliff is.
  *
- * Holding the batch in order and flushing it on relink is not a spill buffer
- * and does not soften the sad path:
- *   - the hold is BOUNDED in both batches and bytes, and an overflow fails
- *     exactly like the budget expiring;
- *   - a hold that outlives the budget drops loudly, degrades, and rejects with
- *     the SAME error the instant failure raised, so the session's fatal path
- *     and its full error surface are reached unchanged;
- *   - nothing durable is ever dropped silently, and no write is ever reordered
- *     around a held one.
- */
-const WRITE_HOLD_BUDGET_MS = RELINK_REPORT_AFTER_MS;
-/**
- * Bounds on the hold. A store that is coming back does so inside one deploy
- * step, so the queue only ever has to cover a few seconds of one session's
- * durable traffic; anything past these bounds is an outage, not a bounce, and
- * is failed rather than accumulated into unbounded shim memory.
+ * So the bounds no longer decide whether accepted work SURVIVES. They decide
+ * whether NEW work is accepted. At the threshold the client stops taking
+ * batches on (see {@link StoreClient.awaitHoldCapacity}); the producer — which
+ * awaits its own batch's receipt — simply waits. Memory stays bounded, and the
+ * failure mode is a stalled producer rather than a hole in the conversation.
+ *
+ * A hold is ALWAYS allowed to take at least one batch, so a single batch larger
+ * than the byte bound is admitted rather than deadlocking against a threshold
+ * it can never get under.
  */
 const WRITE_HOLD_MAX_BATCHES = 1024;
 const WRITE_HOLD_MAX_BYTES = 8 * 1024 * 1024;
+/** The spill journal's filename inside {@link StoreClientOptions.spillDir}. */
+const SPILL_FILENAME = "store-write-spill.bin";
 
 export interface StoreHealth {
   healthy: boolean;
@@ -246,6 +271,11 @@ interface PendingWrite {
   events: Event[];
   /** Serialized size, measured once when the batch is HELD (see holdWrite). */
   bytes?: number;
+  /**
+   * Whether this batch has a record in the durable spill journal, which is what
+   * says the journal must not be cleared while it is unacked.
+   */
+  spilled?: boolean;
 }
 
 /** A subscription socket that has sent Subscribe but has not crossed readiness. */
@@ -279,8 +309,21 @@ export class StoreClient {
   private readonly heldWrites: PendingWrite[] = [];
   /** Serialized bytes currently held, against {@link writeHoldMaxBytes}. */
   private heldBytes = 0;
-  /** The armed write-hold budget expiry; null when nothing is held. */
-  private holdBudgetTimer: NodeJS.Timeout | null = null;
+  /**
+   * The durable record of everything in {@link heldWrites}, which is what makes
+   * the hold survive this shim's own death rather than only a store bounce.
+   */
+  private readonly spill: SpillJournal;
+  /** Whether the journal a previous shim left behind has been replayed yet. */
+  private spillRecovered = false;
+  /**
+   * Releases the ONE batch waiting for hold capacity, or null when none is.
+   *
+   * At most one exists because `issueBatch` runs strictly serialized on
+   * {@link sendChain}, which is also what makes waiting here preserve write
+   * order rather than shuffle it.
+   */
+  private holdCapacityWaiter: (() => void) | null = null;
   /**
    * The in-flight producer redial, shared by every write that finds the
    * connection down. Writes are fire-and-forget from routeSdkMessage, so
@@ -294,6 +337,19 @@ export class StoreClient {
    * the shim is in the middle of closing.
    */
   private closed = false;
+  /**
+   * Set by seal(): this shim is going away, so the client keeps using a link
+   * that is UP but will no longer WAIT for one that is down.
+   *
+   * It is what stops an orderly shutdown hanging on an unreachable store. The
+   * hold's whole premise is "the link comes back and we deliver this" — true
+   * for a store bounce, false for a process that is exiting. Once sealed, a
+   * write that cannot go out is written to the spill journal (so the NEXT shim
+   * on this workspace delivers it) and then failed to its caller with the same
+   * error the sad path always raised, rather than parked on a promise that
+   * shutdown would block on forever.
+   */
+  private sealed = false;
   /**
    * Tail of the send queue. `pendingWrites` is matched to acks POSITIONALLY
    * (onAck shifts), so sends must be issued in call order. write() used to be
@@ -382,7 +438,6 @@ export class StoreClient {
   private readonly relinkMinMs: number;
   private readonly relinkMaxMs: number;
   private readonly relinkReportAfterMs: number;
-  private readonly writeHoldBudgetMs: number;
   private readonly writeHoldMaxBatches: number;
   private readonly writeHoldMaxBytes: number;
   /**
@@ -427,11 +482,14 @@ export class StoreClient {
     this.relinkMinMs = opts.relinkBackoffMinMs ?? RELINK_BACKOFF_MIN_MS;
     this.relinkMaxMs = opts.relinkBackoffMaxMs ?? RELINK_BACKOFF_MAX_MS;
     this.relinkReportAfterMs = opts.relinkReportAfterMs ?? RELINK_REPORT_AFTER_MS;
-    this.writeHoldBudgetMs = opts.writeHoldBudgetMs ?? opts.relinkReportAfterMs ?? WRITE_HOLD_BUDGET_MS;
     this.writeHoldMaxBatches = opts.writeHoldMaxBatches ?? WRITE_HOLD_MAX_BATCHES;
     this.writeHoldMaxBytes = opts.writeHoldMaxBytes ?? WRITE_HOLD_MAX_BYTES;
     this.storeKey = opts.storeSessionId ?? opts.sessionId;
     this.vendorKnown = (opts.storeSessionId ?? "") !== "";
+    // Opened in the constructor, not lazily on the first hold: a journal that
+    // cannot be opened must be discovered while the shim is starting, not in
+    // the middle of the outage it exists to survive.
+    this.spill = new SpillJournal({ path: path.join(opts.spillDir, SPILL_FILENAME), sessionId: opts.sessionId });
   }
 
   /** Route the rotation's daemon-link bounce to `handler`. */
@@ -660,9 +718,73 @@ export class StoreClient {
         this.connected = true;
         this.startHeartbeat();
         LOGGER.log({ agent_repl_session_id: this.opts.sessionId }, `connected to store at ${this.opts.socketPath}`);
+        // Whatever a previous shim left owing goes out before anything this
+        // shim produces, so the conversation is filed in the order it happened.
+        this.recoverSpilledWrites();
         resolve();
       });
     });
+  }
+
+  /**
+   * Replay the spill journal a PREVIOUS shim left behind, exactly once, on the
+   * first producer connection this client establishes.
+   *
+   * This is the half of durability an in-memory hold can never have: a shim
+   * that died holding accepted writes did not merely fail to deliver them, it
+   * took them with it. Here they are read back off disk and flushed like any
+   * other held batch. Duplicates are not a hazard — every recovered event
+   * still carries the `write_id` it was minted with, so anything that did land
+   * before the crash is absorbed by the store as a no-op.
+   *
+   * Only ever runs when nothing is held, so the recovered batches cannot be
+   * interleaved into the middle of a live hold.
+   */
+  private recoverSpilledWrites(): void {
+    if (this.spillRecovered) return;
+    this.spillRecovered = true;
+    let batches: Event[][];
+    try {
+      batches = this.spill.read();
+    } catch (err) {
+      LOGGER.log({
+        level: "error",
+        agent_repl_session_id: this.opts.sessionId,
+        spill_path: this.spill.path(),
+        cause: errText(err),
+      }, `store write spill journal could not be read: ${errText(err)} — whatever a previous shim was holding cannot be recovered, and that loss is reported rather than absorbed`);
+      this.degrade(`store write spill journal is unreadable: ${errText(err)}`, 0);
+      return;
+    }
+    if (batches.length === 0) return;
+    LOGGER.log({
+      agent_repl_session_id: this.opts.sessionId,
+      spill_path: this.spill.path(),
+      recovered_batches: batches.length,
+      decision: "replay_recovered_spill",
+    }, `replaying ${batches.length} persistent batch(es) a previous shim accepted but never delivered; each carries its original write identity, so any that already landed are absorbed as no-ops`);
+    for (const events of batches) {
+      // Already on disk by definition, so `spilled` is true from the start and
+      // spillBatch will not write a second copy of it.
+      this.heldWrites.push({
+        events,
+        bytes: batchBytes(events),
+        spilled: true,
+        resolve: (ack) => LOGGER.log({
+          agent_repl_session_id: this.opts.sessionId,
+          accepted: ack.accepted,
+          deduped: ack.deduped,
+          last_seq: ack.lastSeq,
+        }, "recovered spill batch acknowledged by the store"),
+        reject: (err) => LOGGER.log({
+          level: "error",
+          agent_repl_session_id: this.opts.sessionId,
+          cause: err.message,
+        }, `recovered spill batch could not be delivered: ${err.message}`),
+      });
+      this.heldBytes += batchBytes(events);
+    }
+    this.flushHeldWrites();
   }
 
   /** True while the store connection is live. */
@@ -1014,11 +1136,21 @@ export class StoreClient {
    * A DOWN connection is redialed first (see ensureProducerConn), so a batch
    * arriving between a store restart and the next relink tick still reaches
    * the store rather than racing the timer. A redial that fails HOLDS the
-   * batch for the relink instead of dropping it on the spot (holdWrite), and
-   * the hold's expiry or overflow drops it exactly as a down connection always
-   * did. A rejected batch is still never retried.
+   * batch — durably, on disk — for the relink instead of dropping it
+   * (holdWrite). No timer ever fails a held batch. A rejected batch is still
+   * never retried.
+   *
+   * EVERY EVENT IS STAMPED WITH A STABLE WRITE IDENTITY HERE, once, before the
+   * batch can be held, spilled, sent, or replayed. Minting it later — at send
+   * time, say — would give the replay of a batch a different identity from its
+   * first delivery, which is precisely the case the identity exists to
+   * recognize. An event that already carries one keeps it: the caller may be
+   * re-offering work recovered from a previous shim's spill journal.
    */
   write(events: Event[]): Promise<StoreWriteAck> {
+    for (const evt of events) {
+      if (evt.writeId === "") evt.writeId = randomUUID();
+    }
     LOGGER.logVerbose({ agent_repl_session_id: this.opts.sessionId, store_key: this.storeKey, event_count: events.length, event_kinds: events.map(envelopeKind) }, "queueing persistent event batch for store write");
     // The ack promise is built HERE and handed to the send, because the two
     // settle on different clocks: the send chains (so batches reach the wire in
@@ -1048,21 +1180,32 @@ export class StoreClient {
    * thrown, so a caller always learns about its own batch.
    */
   private async issueBatch(pending: PendingWrite): Promise<void> {
+    // BACKPRESSURE FIRST. A full hold means this client cannot currently
+    // guarantee delivery of one more batch, and the only honest answer to that
+    // is to stop accepting — not to drop the oldest, not to fail the newest,
+    // and not to grow the heap. The caller awaits its own receipt, so it simply
+    // waits with us.
+    await this.awaitHoldCapacity();
     // ORDER FIRST: a batch issued now would overtake everything already held,
     // so the hold is transitive for as long as one exists.
     if (this.heldWrites.length > 0) {
       this.holdWrite(pending, "an earlier batch is still held for the store relink");
       return;
     }
+    // A torn-down client is NOT short-circuited here: it may still have a LIVE
+    // producer connection, and a write that can go out should go out. The one
+    // case teardown changes is a link that is DOWN, which ensureProducerConn
+    // reports below.
     try {
       await this.ensureProducerConn();
     } catch (err) {
       const why = `store connection is down (redial failed: ${errText(err)})`;
-      // A deliberate teardown is not an outage to wait out: nothing will ever
-      // relink, so holding would only defer the same loss behind a timer.
-      if (this.closed) {
-        this.dropBatch(pending.events, why);
-        pending.reject(new Error("store-client: write on a down connection"));
+      // A deliberate teardown is not an outage to wait out: this client will
+      // not be here when the store returns, so holding would park the caller on
+      // a promise nothing can settle — which is how an orderly shutdown ends up
+      // hanging on an unreachable store.
+      if (this.closed || this.sealed) {
+        this.failDuringTeardown(pending, why);
         return;
       }
       this.holdWrite(pending, why);
@@ -1105,16 +1248,77 @@ export class StoreClient {
   }
 
   /**
-   * HOLD one durable batch for the duration of a producer-link outage.
+   * Wait until the hold can take one more batch.
    *
-   * Bounded on both axes, and an overflow is failed rather than trimmed: a
-   * dropped-from-the-middle queue would file a conversation with a hole in it,
-   * which is exactly the silent evidence loss the fatal path exists to prevent.
-   * The budget is armed by the FIRST hold of an outage and covers the whole
-   * queue, so a burst cannot extend the wait one batch at a time.
+   * THIS IS THE WHOLE OF THE BACKPRESSURE, and it replaces both a wall-clock
+   * budget and a hard cap that used to destroy accepted work. The bound now
+   * governs INTAKE: at the threshold this resolves only once a flush (or a
+   * teardown) has drained the hold, and until then the producer's own `await`
+   * on its receipt is what holds the stream back.
+   *
+   * AN EMPTY HOLD ALWAYS HAS CAPACITY, even for a batch bigger than the byte
+   * bound on its own — otherwise a single oversized batch would wait forever
+   * for room that draining can never create.
+   *
+   * A CLOSED CLIENT ALWAYS HAS CAPACITY too, so a teardown can never leave a
+   * caller parked on a promise nothing will settle; `issueBatch` then takes the
+   * closed path and fails the batch loudly.
+   */
+  private awaitHoldCapacity(): Promise<void> {
+    if (this.hasHoldCapacity()) return Promise.resolve();
+    LOGGER.log({
+      agent_repl_session_id: this.opts.sessionId,
+      store_key: this.storeKey,
+      held_batches: this.heldWrites.length,
+      held_bytes: this.heldBytes,
+      max_batches: this.writeHoldMaxBatches,
+      max_bytes: this.writeHoldMaxBytes,
+      decision: "backpressure_new_writes",
+    }, `store write hold is FULL (${this.heldWrites.length} batches / ${this.heldBytes} bytes) — refusing to ACCEPT another batch until it drains, rather than dropping work already accepted`);
+    return new Promise<void>((resolve) => {
+      this.holdCapacityWaiter = resolve;
+    });
+  }
+
+  /** Whether one more batch may be taken on right now. */
+  private hasHoldCapacity(): boolean {
+    if (this.closed || this.sealed) return true;
+    if (this.heldWrites.length === 0) return true;
+    return this.heldWrites.length < this.writeHoldMaxBatches && this.heldBytes < this.writeHoldMaxBytes;
+  }
+
+  /** Wake the waiting batch, if the hold now has room for it. */
+  private releaseHoldCapacity(): void {
+    if (this.holdCapacityWaiter === null || !this.hasHoldCapacity()) return;
+    const waiter = this.holdCapacityWaiter;
+    this.holdCapacityWaiter = null;
+    LOGGER.log({
+      agent_repl_session_id: this.opts.sessionId,
+      store_key: this.storeKey,
+      held_batches: this.heldWrites.length,
+      held_bytes: this.heldBytes,
+      decision: "release_backpressure",
+    }, "store write hold drained below its bound; accepting new batches again");
+    waiter();
+  }
+
+  /**
+   * HOLD one durable batch for the duration of a producer-link outage — on
+   * DISK first, then in memory.
+   *
+   * NO TIMER CAN FAIL WHAT THIS HOLDS. A held batch leaves only by being sent
+   * (flushHeldWrites) or by a deliberate teardown (failHeldWrites). "The store
+   * came back within N milliseconds" is not a durability argument, and the
+   * budget that used to make it one is gone.
+   *
+   * The spill is what carries the hold across this shim's own death. If the
+   * journal cannot take the record the batch is STILL held in memory — a
+   * weaker guarantee is not a reason to discard accepted work — but the
+   * downgrade is reported loudly rather than absorbed.
    */
   private holdWrite(pending: PendingWrite, reason: string): void {
     pending.bytes = batchBytes(pending.events);
+    this.spillBatch(pending);
     this.heldWrites.push(pending);
     this.heldBytes += pending.bytes;
     LOGGER.log({
@@ -1123,22 +1327,114 @@ export class StoreClient {
       reason,
       held_batches: this.heldWrites.length,
       held_bytes: this.heldBytes,
-      hold_budget_ms: this.writeHoldBudgetMs,
-    }, `persistent event batch HELD for the store relink; it fails exactly as a down-connection write always did if the link is not back within ${this.writeHoldBudgetMs}ms: ${reason}`);
-    if (this.heldWrites.length > this.writeHoldMaxBatches || this.heldBytes > this.writeHoldMaxBytes) {
-      this.failHeldWrites(`store write hold overflowed its bound (${this.heldWrites.length} batches / ${this.heldBytes} bytes held, max ${this.writeHoldMaxBatches} batches / ${this.writeHoldMaxBytes} bytes)`);
-      return;
-    }
+      spilled: pending.spilled === true,
+    }, `persistent event batch HELD for the store relink and will be flushed whenever the link returns, however long that takes: ${reason}`);
     // A relink already in flight will flush; otherwise the hold would sit
     // there with nothing arranging for the connection to come back.
     if (this.relinkTimer === null && !this.relinking) this.armRelink(this.relinkDelayMs);
-    if (this.holdBudgetTimer !== null) return;
-    this.holdBudgetTimer = setTimeout(() => {
-      this.holdBudgetTimer = null;
-      if (this.heldWrites.length === 0) return; // flushed inside the budget
-      this.failHeldWrites(`store link did not return within the ${this.writeHoldBudgetMs}ms write-hold budget`);
-    }, this.writeHoldBudgetMs);
-    this.holdBudgetTimer.unref?.();
+  }
+
+  /**
+   * Fail one batch that a TORN-DOWN client cannot deliver, spilling it first.
+   *
+   * The caller-visible outcome is byte-for-byte the one the sad path always
+   * produced — a loud DROPPED line per event, a DegradedState with the real
+   * count, and `write on a down connection` — because the session's fatal
+   * missing-receipt path keys on exactly that and must keep working. What is
+   * added is the durable record: this shim could not deliver the batch, but the
+   * next shim on this workspace reads it back out of the spill journal.
+   */
+  private failDuringTeardown(pending: PendingWrite, why: string): void {
+    this.spillBatch(pending);
+    LOGGER.log({
+      level: "error",
+      agent_repl_session_id: this.opts.sessionId,
+      store_key: this.storeKey,
+      spill_path: this.spill.path(),
+      spilled: pending.spilled === true,
+      event_count: pending.events.length,
+      decision: "fail_write_during_teardown",
+    }, `store write could not be delivered during teardown and is failed to its caller${pending.spilled === true ? "; it IS recorded in the durable spill journal for the next shim on this workspace" : "; it could NOT be spilled either"}: ${why}`);
+    this.dropBatch(pending.events, why);
+    pending.reject(new Error("store-client: write on a down connection"));
+  }
+
+  /**
+   * SEAL the client for an orderly shutdown: keep using a link that is up,
+   * stop WAITING for one that is down.
+   *
+   * The hold's premise is "the link comes back and we deliver this", which is
+   * true of a store bounce and false of a process that is exiting. Without
+   * this, an intentional shutdown whose termination receipt needs a store that
+   * is gone waits on a hold that nothing will ever flush — and the wall-clock
+   * budget this file no longer has is what used to (accidentally) end that
+   * wait. Sealing ends it deliberately, without a clock deciding anything about
+   * durability: everything sealed away is on disk first.
+   */
+  seal(): void {
+    if (this.sealed) return;
+    this.sealed = true;
+    LOGGER.log({
+      agent_repl_session_id: this.opts.sessionId,
+      store_key: this.storeKey,
+      held_batches: this.heldWrites.length,
+      connected: this.connected,
+    }, "store client SEALED for shutdown: writes still go out over a live link, but a down link is no longer waited on");
+    this.failHeldWrites("store client sealed for shutdown with durable writes still held for a relink");
+    this.releaseHoldCapacity();
+  }
+
+  /**
+   * Record one held batch in the durable spill journal.
+   *
+   * A journal failure is REPORTED, never swallowed, and never converted into a
+   * dropped batch: losing the crash-durability of a held write is strictly
+   * better than losing the write.
+   */
+  private spillBatch(pending: PendingWrite): void {
+    if (pending.spilled === true) return; // already on disk (a requeue or a recovery)
+    // A write arriving after close() released the descriptor cannot be made
+    // durable — the process is going away. Say so once, here, and leave the
+    // caller's account of the loss to the drop path that follows, so one
+    // failure is not reported as two degradations.
+    if (this.spill.isClosed()) {
+      LOGGER.log({
+        level: "error",
+        agent_repl_session_id: this.opts.sessionId,
+        spill_path: this.spill.path(),
+        event_count: pending.events.length,
+      }, "store write arrived after the spill journal was closed for teardown; it cannot be made durable by this shim");
+      return;
+    }
+    try {
+      this.spill.append(pending.events);
+      pending.spilled = true;
+    } catch (err) {
+      LOGGER.log({
+        level: "error",
+        agent_repl_session_id: this.opts.sessionId,
+        store_key: this.storeKey,
+        spill_path: this.spill.path(),
+        event_count: pending.events.length,
+        cause: errText(err),
+      }, `store write spill journal REFUSED a held batch: ${errText(err)} — the batch stays held IN MEMORY and is not lost, but it will not survive this shim dying`);
+      this.degrade(`store write spill journal is unwritable: ${errText(err)}`, 0);
+    }
+  }
+
+  /**
+   * Clear the spill journal once, and only once, nothing on disk is still
+   * owed: no batch is held, and no batch that came off disk is awaiting an ack.
+   *
+   * Clearing EARLY would defeat the whole point; clearing LATE only costs a
+   * replay, which the store absorbs by write identity. So this is deliberately
+   * the conservative side of the race.
+   */
+  private clearSpillIfSettled(): void {
+    if (this.spill.isEmpty()) return;
+    if (this.heldWrites.length > 0) return;
+    if (this.pendingWrites.some((p) => p.spilled === true)) return;
+    this.spill.clear();
   }
 
   /**
@@ -1171,10 +1467,18 @@ export class StoreClient {
       }
       const next = this.heldWrites.shift()!;
       this.heldBytes -= next.bytes ?? 0;
-      if (!this.sendBatch(next)) return; // reported itself; order is already broken
+      if (!this.sendBatch(next)) {
+        // Reported itself; order is already broken. The remainder stays held,
+        // so intake stays backpressured against a hold that did not drain.
+        this.releaseHoldCapacity();
+        return;
+      }
     }
     this.heldBytes = 0;
-    this.clearHoldBudget();
+    this.releaseHoldCapacity();
+    // Nothing is held any more, but the flushed batches are unacked: the
+    // journal is only safe to clear once their receipts land (see onAck).
+    this.clearSpillIfSettled();
   }
 
   /**
@@ -1182,12 +1486,18 @@ export class StoreClient {
    * before the hold existed: one loud DROPPED-event line per event, a
    * DegradedState carrying the real count, and the same rejection the session's
    * fatal missing-receipt path already keys on.
+   *
+   * ONLY A DELIBERATE TEARDOWN REACHES HERE. It is the one condition under
+   * which accepted work genuinely cannot be delivered by THIS client, because
+   * nothing will relink. The spill FILE is deliberately left behind for the
+   * next shim on this workspace, so "this shim lost them" and "the record is
+   * gone" stay different statements.
    */
   private failHeldWrites(reason: string): void {
     if (this.heldWrites.length === 0) return;
     const failing = this.heldWrites.splice(0);
     this.heldBytes = 0;
-    this.clearHoldBudget();
+    this.releaseHoldCapacity();
     LOGGER.log({
       level: "error",
       agent_repl_session_id: this.opts.sessionId,
@@ -1199,13 +1509,6 @@ export class StoreClient {
       this.dropBatch(pending.events, reason);
       pending.reject(new Error("store-client: write on a down connection"));
     }
-  }
-
-  /** Disarm the write-hold budget; nothing is waiting on it any more. */
-  private clearHoldBudget(): void {
-    if (this.holdBudgetTimer === null) return;
-    clearTimeout(this.holdBudgetTimer);
-    this.holdBudgetTimer = null;
   }
 
   /** How many durable batches are currently held for a relink. */
@@ -1253,9 +1556,19 @@ export class StoreClient {
     this.stopHeartbeat();
     this.connected = false;
     // Teardown is final and nothing will relink, so a held batch will never
-    // reach the store. Fail it loudly here rather than letting its caller wait
-    // on a promise that can no longer settle.
+    // reach the store THROUGH THIS CLIENT. Fail it loudly here rather than
+    // letting its caller wait on a promise that can no longer settle — and
+    // release any batch parked on write-hold capacity, which now has nothing
+    // to wait for.
+    this.requeueInFlight("store client closed with a batch in flight to the store");
     this.failHeldWrites("store client closed with durable writes still held for a relink");
+    this.releaseHoldCapacity();
+    // The spill FILE is left exactly where it is. What this client could not
+    // deliver, the next shim on this workspace reads back and replays; closing
+    // the descriptor is not the same as discarding the record.
+    LOGGER.log({ agent_repl_session_id: this.opts.sessionId, spill_path: this.spill.path(), spill_pending: !this.spill.isEmpty() },
+      "leaving the durable write spill journal in place for the next shim on this workspace");
+    this.spill.close();
     this.dropStandingSubscription();
     if (this.conn) {
       this.conn.close();
@@ -1324,7 +1637,10 @@ export class StoreClient {
     }
     if (ack.error !== "") {
       // The store rejected the WHOLE batch (loudly, per StoreWriteAck.error).
+      // A rejection is a decision, not an outage: replaying it would only be
+      // rejected again, so its spill obligation is retired with it.
       this.dropBatch(pending.events, `store rejected batch: ${ack.error}`);
+      if (pending.spilled === true) this.clearSpillIfSettled();
       pending.reject(new Error(`store-client: batch rejected: ${ack.error}`));
       return;
     }
@@ -1335,6 +1651,8 @@ export class StoreClient {
     if (ack.deduped === 0n) {
       LOGGER.logVerbose({ agent_repl_session_id: this.opts.sessionId, accepted: ack.accepted, last_seq: ack.lastSeq, pending_acks: this.pendingWrites.length }, "store accepted persistent event batch");
     }
+    // A receipt is the only thing that retires a spilled batch's obligation.
+    if (pending.spilled === true) this.clearSpillIfSettled();
     pending.resolve(ack);
   }
 
@@ -1344,12 +1662,7 @@ export class StoreClient {
     this.conn = null;
     // MessageConn already owns any causal framing/socket error.
     const reason = err ? "store producer connection lost after a framing failure" : "store connection closed";
-    // Every in-flight write is now a dropped batch (no spill, no retry).
-    const pending = this.pendingWrites.splice(0);
-    for (const p of pending) {
-      this.dropBatch(p.events, reason);
-      p.reject(new Error(`store-client: ${reason}`));
-    }
+    this.requeueInFlight(reason);
     // Note the outage even if nothing was in flight: the subscription is dead
     // too, so the daemon's view is stale until the store returns. Deferred by
     // the retry budget — unlike the dropBatch calls above, which lost real
@@ -1359,6 +1672,57 @@ export class StoreClient {
     // sit degraded forever waiting for one — so recovery is driven by the link
     // itself rather than by the next batch that happens to need it.
     this.linkLost();
+  }
+
+  /**
+   * Take back every batch that was SENT but never ACKED when the producer
+   * connection dropped, and re-hold it for replay.
+   *
+   * THIS USED TO BE THE LOSS. Those batches were declared dropped, degraded and
+   * rejected — the session's fatal missing-receipt path — because the client
+   * could not tell a batch the store had ingested from one that never arrived,
+   * and re-sending would have written the ingested ones twice.
+   *
+   * It cannot tell them apart NOW either, and it no longer has to. Every event
+   * carries a stable `write_id` and the store enforces a unique
+   * (session_id, write_id), so a batch that already landed is absorbed as a
+   * no-op on replay. Given that, the only correct move is to replay: an event
+   * written twice is a display artifact the store refuses anyway, and an event
+   * never written is evidence gone for good.
+   *
+   * THE ERROR PATH IS NOT REMOVED, it is RELOCATED. A batch here is no longer
+   * lost, so there is nothing to report as dropped; if it truly cannot be
+   * delivered later — a deliberate close — failHeldWrites still drops it,
+   * degrades with the real count, and rejects with the same error.
+   *
+   * They go to the FRONT of the hold, ahead of anything that arrived while the
+   * connection was dying, because they were issued first.
+   */
+  private requeueInFlight(reason: string): void {
+    if (this.pendingWrites.length === 0) return;
+    const inFlight = this.pendingWrites.splice(0);
+    // A TORN-DOWN client will never relink, so there is no replay to wait for.
+    // The batch still goes to disk for the next shim, and the caller still gets
+    // the account this path always gave.
+    if (this.closed || this.sealed) {
+      for (const p of inFlight) this.failDuringTeardown(p, reason);
+      return;
+    }
+    for (const p of inFlight) {
+      this.spillBatch(p);
+      p.bytes ??= batchBytes(p.events);
+      this.heldBytes += p.bytes;
+    }
+    this.heldWrites.unshift(...inFlight);
+    LOGGER.log({
+      agent_repl_session_id: this.opts.sessionId,
+      store_key: this.storeKey,
+      reason,
+      requeued_batches: inFlight.length,
+      held_batches: this.heldWrites.length,
+      held_bytes: this.heldBytes,
+      decision: "requeue_unacked_for_idempotent_replay",
+    }, `${inFlight.length} persistent batch(es) were sent but never acked when the producer connection dropped — re-held for replay rather than dropped; the store's (session_id, write_id) identity makes replaying one that already landed a no-op: ${reason}`);
   }
 
   /** Loud-log each dropped event and report a DegradedState. */

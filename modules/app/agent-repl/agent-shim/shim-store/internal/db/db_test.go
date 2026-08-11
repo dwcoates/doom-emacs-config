@@ -3,8 +3,10 @@ package db
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,6 +15,8 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	"agentrepl/shim-store/internal/logging"
+
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -302,5 +306,134 @@ func TestOpenTasksFailureUsesCanonicalQueryLogger(t *testing.T) {
 	if record.Context["component"] != "db" || record.Context["db"] != path || record.Context["table"] != "event" ||
 		!strings.Contains(record.Message, "database query failed") {
 		t.Fatalf("OpenTasks error lacks canonical query context: %#v", record)
+	}
+}
+
+// --- write-identity schema migration ---------------------------------------
+
+// openRawV1 creates a database in the version-1 shape — base DDL, schema_meta
+// stamped at 1, no write_id column — using the raw driver, so the migration is
+// exercised against a genuinely old file rather than a simulated one.
+func openRawV1(t *testing.T, path string) {
+	t.Helper()
+	dsn := "file:" + path + "?" + url.Values{"_pragma": {"journal_mode(WAL)"}}.Encode()
+	raw, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("raw open: %v", err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(baseDDL); err != nil {
+		t.Fatalf("raw base DDL: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO schema_meta(version) VALUES (1)`); err != nil {
+		t.Fatalf("raw schema_meta: %v", err)
+	}
+}
+
+func TestMigrateUpgradesAVersion1DatabaseToWriteIdentity(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "events.db")
+	openRawV1(t, path)
+
+	// Act
+	d, err := Open(path, logging.New(io.Discard, io.Discard, false))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Open on a v1 database: %v", err)
+	}
+	defer d.Close()
+	var version int
+	if err := d.sql.QueryRow(`SELECT version FROM schema_meta`).Scan(&version); err != nil {
+		t.Fatalf("reading schema_meta: %v", err)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("version after migration = %d, want %d", version, SchemaVersion)
+	}
+	if _, err := d.Ingest("p", []*corev1.Event{writeIdentified("s1", "w-1")}, nil); err != nil {
+		t.Fatalf("write-identified Ingest on a migrated database: %v", err)
+	}
+}
+
+func TestMigratePreservesRowsWrittenBeforeTheUpgrade(t *testing.T) {
+	// Arrange: a v1 database carrying a real event row.
+	path := filepath.Join(t.TempDir(), "events.db")
+	openRawV1(t, path)
+	// The store marshals the event AFTER stamping seq, so the blob a v1
+	// database holds already carries it.
+	preUpgrade := persistentCore("s1")
+	preUpgrade.Seq = 1
+	blob, err := proto.Marshal(preUpgrade)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	dsn := "file:" + path
+	raw, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("raw open: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO event (session_id, seq, plane, class, kind, produced_at, payload)
+	  VALUES ('s1', 1, 1, 2, 'SessionStarted', 0, ?)`, blob); err != nil {
+		t.Fatalf("raw insert: %v", err)
+	}
+	raw.Close()
+
+	// Act
+	d, err := Open(path, logging.New(io.Discard, io.Discard, false))
+	if err != nil {
+		t.Fatalf("Open on a v1 database: %v", err)
+	}
+	defer d.Close()
+
+	// Assert
+	rows := collectReplay(t, d, "s1", 0)
+	if len(rows) != 1 || rows[0].GetSeq() != 1 {
+		t.Fatalf("pre-upgrade row did not survive migration: %d rows", len(rows))
+	}
+}
+
+func TestMigrateIsIdempotentAcrossReopens(t *testing.T) {
+	// Arrange: ALTER TABLE ADD COLUMN is not itself repeatable, so a second
+	// open must not run the step again.
+	path := filepath.Join(t.TempDir(), "events.db")
+	openRawV1(t, path)
+	first, err := Open(path, logging.New(io.Discard, io.Discard, false))
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	first.Close()
+
+	// Act
+	second, err := Open(path, logging.New(io.Discard, io.Discard, false))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("reopen after migration: %v", err)
+	}
+	second.Close()
+}
+
+func TestApplyMigrationRollsBackAndSurfacesABadStep(t *testing.T) {
+	// Arrange: a failing step must leave the recorded version untouched, or a
+	// later open would claim a shape the database does not have.
+	d := openTemp(t)
+	bad := migrationStep{to: 99, name: "broken", ddl: `ALTER TABLE nonexistent ADD COLUMN x TEXT;`, reason: "test"}
+
+	// Act
+	err := d.applyMigration(SchemaVersion, bad)
+
+	// Assert
+	if err == nil {
+		t.Fatal("applyMigration accepted a broken step")
+	}
+	if !strings.Contains(err.Error(), "applying migration") {
+		t.Fatalf("error = %v, want it to name the failed migration", err)
+	}
+	var version int
+	if scanErr := d.sql.QueryRow(`SELECT version FROM schema_meta`).Scan(&version); scanErr != nil {
+		t.Fatalf("reading schema_meta: %v", scanErr)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("version after a failed migration = %d, want %d (rolled back)", version, SchemaVersion)
 	}
 }
