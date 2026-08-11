@@ -629,7 +629,7 @@ defeat the point of moving it out of source."
    "merge this workspace back into its source"))
 
 (defconst agent-repl--oneshot-create-pr-command
-  "/create-or-update-pr --patch --add-to-merge-queue --rebase"
+  "/create-or-update-pr --patch --add-to-merge-queue --rebase --self-certified"
   "Slash command the explanation-engine one-shot agent invokes on success
 as the FIRST stage of the wrap-up.  The PR-creation flow pushes the
 branch and queues it for merge directly (which makes sense for a service
