@@ -13,7 +13,7 @@
  * couple frontend.el to this page's markup and drift silently the moment a
  * class or id changes.
  */
-import { ScrollTail, parkAtTail } from "./scroll.js";
+import { TailFollow } from "./scroll.js";
 
 /**
  * Name of the global that snaps the feed to its newest message.
@@ -25,16 +25,26 @@ export const TAIL_HOOK = "agentReplParkAtTail";
 export type HostGlobal = Record<string, unknown>;
 
 /**
- * Plant the tail hook on TARGET, parking FEED at its newest message.
+ * Plant the tail hook on TARGET, parking the feed at its newest message
+ * through TAIL, the page's single owner of the follow decision.
  *
  * Emacs fires it on every switch TO the workspace, so a feed the user
  * left scrolled up in history is back at the newest message the instant
  * the workspace is on screen, rather than showing stale middle-of-history
  * content until the next turn arrives.
+ *
+ * IT RESUMES FOLLOWING, NOT JUST SCROLLS. The switch is an explicit "show me
+ * the newest", and a bare scrollTop write was not enough to keep it. The
+ * switch also relayouts the webview, asynchronously relative to the lisp that
+ * fired this, so the snap and the resize land in either order — and content
+ * that arrives after the snap (a deferred item upgrading, a board mounting)
+ * grows the feed beneath a scrollTop that stays put. Latching the follow is
+ * what re-parks through both, so the switch RELIABLY lands at the bottom
+ * rather than near it.
  */
-export function installHostTailHook(target: HostGlobal, feed: ScrollTail): void {
+export function installHostTailHook(target: HostGlobal, tail: TailFollow): void {
   target[TAIL_HOOK] = (): void => {
-    parkAtTail(feed);
+    tail.park();
   };
 }
 

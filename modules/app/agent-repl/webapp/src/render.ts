@@ -83,11 +83,8 @@ import { previewFromInput } from "./permission-preview.js";
 import { navTokensForItem } from "./nav.js";
 import type { FeedAnchor } from "./scroll.js";
 import {
+  TailFollow,
   captureFeedAnchor,
-  freezeOnScroll,
-  freezeOnToggle,
-  isPinnedToBottom,
-  parkAtTail,
   restoreFeedAnchor,
   revealNode,
 } from "./scroll.js";
@@ -2831,25 +2828,23 @@ export function groupHtml(
 /**
  * Whether a render must land the feed on its tail.
  *
- * A feed already parked at the bottom keeps following new content, as
- * ever. The addition: a user turn the previous render had not seen means
- * a prompt was JUST sent, and a sender wants to watch the answer — so the
- * feed jumps to the tail even from a scrolled-up position.
+ * A feed that is FOLLOWING keeps following new content, as ever — and
+ * `following` is `TailFollow`'s latched answer, never a fresh geometry
+ * sample, so a render landing mid-gesture cannot decide the reader is still
+ * at the bottom and park the feed out from under them.
  *
- * A freeze (the user reading a nested view they opened, see `freezeOnToggle`)
- * suppresses tail-following even from a pinned position, so streaming output
- * cannot yank the view off what they are reading. A fresh prompt still wins
- * over the freeze: sending it is an explicit ask to watch the answer.
+ * The one thing that outranks the owner: a user turn the previous render had
+ * not seen means a prompt was JUST sent, and a sender wants to watch the
+ * answer — so the feed jumps to the tail even from a scrolled-up position, and
+ * even while the reader had a nested view open.
  */
 export function repinsToTail(opts: {
   prevTurnId: string | null;
   nextTurnId: string | null;
-  pinned: boolean;
-  frozen: boolean;
+  following: boolean;
 }): boolean {
   if (opts.nextTurnId !== null && opts.nextTurnId !== opts.prevTurnId) return true;
-  if (opts.frozen) return false;
-  return opts.pinned;
+  return opts.following;
 }
 
 /** Items filled per backfill step during a restored-session render. */
@@ -2998,12 +2993,11 @@ export class FeedRenderer {
   /** Cards whose activity panel the user has open (renderer-owned too). */
   private openPanels = new Set<string>();
   /**
-   * Tail-following frozen because the user opened a nested view to read it
-   * (see `freezeOnToggle`). While set, a render never parks the feed at its
-   * tail, so streaming output cannot yank the view off the opened content;
-   * scrolling back to the tail (or sending a fresh prompt) lifts it.
+   * The single owner of whether this feed should be following its tail
+   * (see `TailFollow`). The renderer holds no tail state of its own: it asks
+   * this before moving the feed, and moves it only through this.
    */
-  private tailFrozen = false;
+  private tail: TailFollow;
   /** Tab pins per group key; an unpinned group auto-follows the newest runner. */
   private activeTabs = new Map<string, string>();
   /** Half-typed agent messages, keyed by agent id (see agentComposer). */
@@ -3089,9 +3083,11 @@ export class FeedRenderer {
   constructor(
     container: HTMLElement,
     actions: Actions,
+    tail: TailFollow = new TailFollow(container),
   ) {
     this.container = container;
     this.actions = actions;
+    this.tail = tail;
     this.upgrader = new LazyUpgrader(container, (keys) => this.upgradeKeys(keys));
     if (actions.fetchTaskTail) {
       const fetchTail = actions.fetchTaskTail;
@@ -3142,14 +3138,11 @@ export class FeedRenderer {
         this.msgDrafts.set(forId, (target as HTMLInputElement).value);
       }
     });
-    // A frozen feed (a nested view is open, §freezeOnToggle) resumes
-    // tail-following the moment the user scrolls it back to the tail. The
-    // renders that DON'T freeze park at the tail themselves, firing this too,
-    // but clearing an already-clear freeze is a no-op — so the guard only
-    // ever fires on a user scroll that reaches the bottom.
-    container.addEventListener("scroll", () => {
-      this.tailFrozen = freezeOnScroll(this.tailFrozen, isPinnedToBottom(this.container));
-    });
+    // The owner sees the feed's scrolls. It ignores the positions it wrote
+    // itself, so only a real movement by the reader ever changes the follow
+    // decision — and it reconciles on every read besides, so wiring this twice
+    // (the page also observes the feed, main.ts) decides nothing twice.
+    container.addEventListener("scroll", () => this.tail.onScroll());
   }
 
   /** Relay the drafted message to a background agent, via a prompt. */
@@ -3311,9 +3304,10 @@ export class FeedRenderer {
     } else {
       this.openPanels.delete(id);
     }
-    // Opening a nested view is the user asking to read it, so freeze the feed
-    // off its tail until they scroll back down (see `freezeOnToggle`).
-    this.tailFrozen = freezeOnToggle(this.tailFrozen, opened);
+    // Opening a nested view is the user asking to read it, so stop following
+    // the tail until they scroll back down to it (see `TailFollow.release`).
+    // Closing one holds whatever decision is already in force.
+    if (opened) this.tail.release();
     if (this.lastState) this.render(this.lastState);
   }
 
@@ -3775,8 +3769,14 @@ export class FeedRenderer {
         if (node) node.html = html;
       }
       // Content added above the viewport grows scrollHeight; shift
-      // scrollTop by the growth so the tail stays in view.
-      this.container.scrollTop += this.container.scrollHeight - before;
+      // scrollTop by the growth so what the reader is looking at stays put.
+      //
+      // THROUGH THE OWNER, not a bare assignment. This write moves the box
+      // DOWNWARD and can land it exactly on the tail, and the owner would
+      // then read its own arithmetic as the reader scrolling back to the
+      // bottom and resume following a reader who never asked to. `place`
+      // moves the pixels and leaves the decision alone.
+      this.tail.shift(this.container.scrollHeight - before);
       // Per chunk, not once at the end: a backfill step is where an older
       // item's text actually reaches the DOM, so anything derived from that
       // text (the search's marks) is stale until the step that lands it.
@@ -3802,7 +3802,7 @@ export class FeedRenderer {
     }
     if (chunks.length > 0) fillChunk(chunks[0]);
     else this.actions.onRendered?.();
-    parkAtTail(this.container);
+    this.tail.park();
     this.backfillQueue = chunks.slice(1).map((c) => () => fillChunk(c));
     this.scheduleBackfill();
   }
@@ -3870,10 +3870,9 @@ export class FeedRenderer {
     // the loading state rather than the bare card.
     this.maybeRequestStatus(state);
     const turnId = lastUserTurnId(state.items);
-    // A fresh prompt re-follows the tail: it lifts any nested-view freeze so
-    // the sender watches the answer (repinsToTail lets the fresh turn win too).
+    // A fresh prompt re-follows the tail whatever the owner had latched, so
+    // the sender watches the answer (repinsToTail lets the fresh turn win).
     if (turnId !== null && turnId !== this.lastUserTurn) {
-      this.tailFrozen = false;
       // The prompt round-trip's LAST receipt: this render is drawing a user
       // turn the previous one had not seen. `last` reports whether it ranks
       // at the feed tail — the position a just-sent prompt must land at, and
@@ -3894,8 +3893,7 @@ export class FeedRenderer {
     const toTail = repinsToTail({
       prevTurnId: this.lastUserTurn,
       nextTurnId: turnId,
-      pinned: isPinnedToBottom(this.container),
-      frozen: this.tailFrozen,
+      following: this.tail.isFollowing(),
     });
     this.lastUserTurn = turnId;
     // A clear or a compaction clears the screen: only that event and what
@@ -4035,9 +4033,9 @@ export class FeedRenderer {
     // following the tail is put back at the tail (the anchor says so itself);
     // a reader who had scrolled up is put back where they were reading, which
     // is what a rebuild used to destroy.
-    if (rebuildAnchor !== null) restoreFeedAnchor(this.container, rebuildAnchor);
+    if (rebuildAnchor !== null) restoreFeedAnchor(this.container, rebuildAnchor, this.tail);
     if (toTail) {
-      parkAtTail(this.container);
+      this.tail.park();
     }
     this.actions.onRendered?.();
   }
@@ -4053,6 +4051,6 @@ export class FeedRenderer {
     const items: { key: string; offsetTop: number }[] = [];
     for (const [key, entry] of this.nodes) items.push({ key, offsetTop: entry.el.offsetTop });
     items.sort((a, b) => a.offsetTop - b.offsetTop);
-    return captureFeedAnchor(this.container, items);
+    return captureFeedAnchor(this.container, items, this.tail.isFollowing());
   }
 }
