@@ -791,8 +791,8 @@ type sessionController struct {
 	// goroutine, a queue-delivery goroutine, or a timer.
 	submitMu sync.Mutex
 	client   sessionClient
-	consumer        *consumer
-	cancel          context.CancelFunc
+	consumer *consumer
+	cancel   context.CancelFunc
 	// controllerRegistrationRelease relinquishes the SSM-owned reservation
 	// that excludes hibernation until this generation reaches operational or
 	// exits. The closure is idempotent.

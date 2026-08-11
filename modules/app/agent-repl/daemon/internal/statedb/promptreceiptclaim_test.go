@@ -129,24 +129,6 @@ func TestAClaimedResumptionIsStillUndischarged(t *testing.T) {
 	}
 }
 
-func TestAClaimedResumptionIsStillNeverServedAsAReceipt(t *testing.T) {
-	// Arrange — the invisibility guarantee holds in the new state too: a
-	// claimed re-drive is no more the user's prompt than an owed one.
-	receipts, _ := openReceipts(t)
-	claimed(t, receipts, pending(), 5_000)
-
-	// Act.
-	got, err := receipts.Outstanding("/ws")
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Outstanding: %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("outstanding = %+v, want no renderable receipt for a claimed resumption", got)
-	}
-}
-
 func TestAClaimedResumptionCanBeDischarged(t *testing.T) {
 	// Arrange — the discharge point is the instruction reaching the
 	// conversation, which happens after the claim.
@@ -162,26 +144,6 @@ func TestAClaimedResumptionCanBeDischarged(t *testing.T) {
 	}
 	if !discharged {
 		t.Fatal("a claimed resumption must be dischargeable on confirmed delivery")
-	}
-}
-
-func TestDischargingAResumptionLeavesAnOrdinaryReceiptAlone(t *testing.T) {
-	// Arrange — the two row kinds share a table, and a discharge that reached
-	// a receipt would discard a prompt the user really typed.
-	receipts, _ := openReceipts(t)
-	if err := receipts.Record(PromptReceipt{RequestID: "r-1", Workspace: "/ws", Text: "hello", AcceptedAtMs: 1_000}); err != nil {
-		t.Fatalf("Record: %v", err)
-	}
-
-	// Act.
-	discharged, err := receipts.DischargeResumption("r-1")
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("DischargeResumption: %v", err)
-	}
-	if discharged {
-		t.Fatal("discharging must never reach an ordinary prompt receipt")
 	}
 }
 

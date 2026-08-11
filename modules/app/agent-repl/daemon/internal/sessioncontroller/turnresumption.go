@@ -323,3 +323,32 @@ func resumptionRequestID(workspace, turnID string, atMs int64) string {
 	}
 	return fmt.Sprintf("%s%s/%s", resumptionRequestIDPrefix, workspace, turnID)
 }
+
+// dischargeResumptionsThrough discards every interrupted-turn resumption this
+// workspace still owes from at or before throughMs, and reports nothing back to
+// its caller.
+//
+// IT IS THE CONTEXT CUT'S DISCHARGE, called from the replay floor rising: a
+// clear or a compaction throws away the history the interrupted turn belonged
+// to, so re-driving that turn would ask the model to continue work its own
+// conversation no longer holds.
+//
+// A failure is loud-logged and swallowed: the caller is applying a context cut,
+// and a bookkeeping row that would not delete is not a reason to stop. The cost
+// is bounded — a re-drive for a turn from below the cut — and it is stated in
+// the log rather than left to be discovered in the conversation.
+func (c *consumer) dischargeResumptionsThrough(throughMs int64, reason string) {
+	if c.receipts == nil {
+		c.logf("session-controller: turn resumptions NOT DISCHARGED ws=%q session=%s through_ms=%d reason=%s — no durable resumption store is wired to this session controller",
+			c.workspace, c.sessionID, throughMs, reason)
+		return
+	}
+	n, err := c.receipts.DischargeResumptionsThrough(c.workspace, throughMs)
+	if err != nil {
+		c.logf("session-controller: turn resumption sweep FAILED ws=%q session=%s through_ms=%d reason=%s: %v (a turn from below the new replay floor may still be re-driven)",
+			c.workspace, c.sessionID, throughMs, reason, err)
+		return
+	}
+	c.logf("session-controller: turn resumption sweep ws=%q session=%s through_ms=%d reason=%s rows_deleted=%d",
+		c.workspace, c.sessionID, throughMs, reason, n)
+}

@@ -308,6 +308,34 @@ func (s *PromptReceipts) ClaimResumptionForDelivery(requestID string, atMs int64
 	return n > 0, nil
 }
 
+// DischargeResumptionsThrough discards every resumption a workspace still
+// carries from at or before throughMs, claimed or not, and reports how many
+// went.
+//
+// IT IS THE CONTEXT CUT'S DISCHARGE. A clear or a compaction throws away the
+// history the interrupted turn belonged to, so re-driving that turn afterwards
+// would ask the model to continue work the conversation no longer contains.
+//
+// SCOPED TO THE RESUMPTION STATES, exactly as DischargeResumption is, so a row
+// an older binary left behind as a prompt receipt is never swept by it.
+func (s *PromptReceipts) DischargeResumptionsThrough(workspace string, throughMs int64) (int, error) {
+	if workspace == "" {
+		return 0, fmt.Errorf("statedb: cannot discharge resumptions for an empty workspace")
+	}
+	res, err := s.db.Exec(
+		`DELETE FROM prompt_receipt
+		  WHERE workspace = ? AND interrupted_at_ms <= ? AND resumption_state IN (?,?)`,
+		workspace, throughMs, string(ResumptionPending), string(ResumptionDelivering))
+	if err != nil {
+		return 0, fmt.Errorf("statedb: discharge resumptions for workspace %q through %d: %w", workspace, throughMs, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("statedb: discharge resumptions for workspace %q through %d: %w", workspace, throughMs, err)
+	}
+	return int(n), nil
+}
+
 // DischargeResumption discards one resumption row, claimed or not, reporting
 // whether one was there.
 //
