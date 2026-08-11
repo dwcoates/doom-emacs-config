@@ -389,6 +389,48 @@ describe("FailureCardView: the feed's resolved failure card", () => {
   });
 });
 
+describe("Message lineage: what contains a message", () => {
+  function decodeOne(lineage?: unknown) {
+    const m: Record<string, unknown> = { ...CONV_DELTA.messages[0] };
+    if (lineage !== undefined) m.lineage = lineage;
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [m] } });
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
+    return frame.frame.value.messages[0];
+  }
+
+  it("carries a feed row's self-referential lineage through verbatim", () => {
+    // Arrange / Act
+    const msg = decodeOne({ topLevelMessageId: "u1", parentMessageId: "" });
+
+    // Assert
+    expect(msg.lineage).toEqual({ topLevelMessageId: "u1", parentMessageId: "" });
+  });
+
+  it("carries a nested message's one-hop parent through verbatim", () => {
+    // Arrange / Act
+    const msg = decodeOne({ topLevelMessageId: "root", parentMessageId: "mid" });
+
+    // Assert
+    expect(msg.lineage).toEqual({ topLevelMessageId: "root", parentMessageId: "mid" });
+  });
+
+  it("leaves lineage ABSENT rather than synthesizing it from the uuid", () => {
+    // Arrange / Act
+    const msg = decodeOne();
+
+    // Assert — a producer that never set it stays distinguishable from one
+    // that set it correctly.
+    expect("lineage" in msg).toBe(false);
+  });
+
+  it("refuses a blank topLevelMessageId, which would sort in as a phantom feed row", () => {
+    // Arrange / Act / Assert
+    expect(() => decodeOne({ topLevelMessageId: "", parentMessageId: "" })).toThrow(
+      /topLevelMessageId must be nonblank/,
+    );
+  });
+});
+
 describe("ConversationItem token utilization", () => {
   it("preserves every modeled response usage field and raw payload", () => {
     const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [TOKEN_UTILIZATION] }] } });

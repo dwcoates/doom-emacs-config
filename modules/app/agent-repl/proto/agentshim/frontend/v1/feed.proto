@@ -72,6 +72,39 @@ enum ConversationSource {
   CONVERSATION_SOURCE_MERGE = 2;
 }
 
+// The two containment facts every message carries, in one message so no
+// producer can supply half of them and no consumer can read them from two
+// different shapes.
+//
+// SPAWN IS NOT CONTAINMENT. A message whose work was started by another
+// message's tool call is NOT thereby contained by it: provenance lives on
+// origin_tool_use_id, and lineage lives here. Conflating them is what made
+// "is a top-level bubble a top-level message" unanswerable.
+message MessageLineage {
+  // The feed row this message ultimately belongs to — the ancestor whose own
+  // parent is the feed itself.
+  //
+  // ALWAYS SET, including on a top-level message, where it equals that
+  // message's own id. It is never empty and never inferred: a reader that had
+  // to walk parent pointers to find the root would be performing the unbounded
+  // traversal this field exists to remove, and a page query would stop being a
+  // single indexed pass.
+  //
+  // DENORMALIZED ON PURPOSE. It is derivable by walking parent_message_id to
+  // its end, and storing it anyway is the entire reason a page of ten messages
+  // costs one query. The cost is that it can drift: it MUST equal the root of
+  // the parent chain, and a write that disagrees is CORRUPTION, not a variant.
+  string top_level_message_id = 1;
+
+  // The message immediately containing this one — ONE HOP, never the root.
+  //
+  // EMPTY means this message sits directly in the feed, in which case
+  // top_level_message_id is this message's own id. Absence is the fact itself,
+  // not a placeholder for an unknown: a message whose parent could not be
+  // resolved is a producer fault, never an empty pointer.
+  string parent_message_id = 2;
+}
+
 // One curated conversation addition: FEED PACKAGING wrapped around a payload.
 //
 // The packaging is what the feed knows about a message regardless of what the
@@ -111,7 +144,7 @@ message Message {
   reserved 36, 37;
   reserved "token_utilization", "turn_accounting";
 
-  // ---- Feed packaging: identity, ordering, provenance, resolution ----
+  // ---- Feed packaging: identity, lineage, ordering, provenance, resolution ----
 
   string uuid = 1;
   int64 ts_ms = 2;
@@ -120,6 +153,25 @@ message Message {
   // so a resync or transcript replay reproduces the same verdict instead of
   // re-deriving it from state that has since moved on.
   ConversationSource source = 4;
+  // WHAT CONTAINS THIS MESSAGE. Always present — see MessageLineage, whose
+  // top_level_message_id is never empty and is self-referential on a feed row.
+  //
+  // It sits in the PACKAGING half rather than inside any payload arm because
+  // containment is a fact about the message regardless of what the message is,
+  // and because a per-arm copy is a per-arm chance to disagree. It is a low
+  // tag for the same reason uuid and source are: this is what the feed knows
+  // before it knows what it is looking at.
+  //
+  // THIS IS THE ONLY PLACE LINEAGE LIVES on this contract. Records that are
+  // not messages — turn and session boundaries, heartbeats, latency samples,
+  // claim bridges, query lifecycle, usage observations, rewinds, file-plane
+  // diagnostics — are agentshim.core.v1.Envelope payloads and are NOT Messages,
+  // so they have no field here to populate. That is deliberate and structural:
+  // if such a record could carry a top_level_message_id it would become a
+  // phantom feed row, and a page of ten "messages" would silently deliver
+  // several turn boundaries and a short screen. Do not lift this field onto
+  // Envelope, and do not model an unowned record as an empty MessageLineage.
+  MessageLineage lineage = 6;
 
   // ---- Payload ----
 
