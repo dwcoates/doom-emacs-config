@@ -229,8 +229,9 @@ func (m *Manager) withdrawTerminalStartFailure(workspace, sessionID string) {
 func (m *Manager) publishTerminalStartFailure(workspace, sessionID string, cause error) {
 	card := m.terminalStartFailureCard(cause)
 	item := &frontendv1.Message{
-		Uuid: startFailedCardUUID(sessionID),
-		TsMs: m.now(),
+		Uuid:    startFailedCardUUID(sessionID),
+		TsMs:    m.now(),
+		Lineage: frontend.FeedRowLineage(startFailedCardUUID(sessionID)),
 		Payload: &frontendv1.Message_FailureCard{FailureCard: card},
 	}
 	// PERSISTED BEFORE PUSHED, and before the Push nil-check refuses: a daemon
@@ -261,7 +262,7 @@ func (m *Manager) publishTerminalStartFailure(workspace, sessionID string, cause
 		// The generation half of the fence is empty because no controller
 		// generation was ever minted: nothing was spawned. The session half is
 		// what addresses the card.
-		Fence: ssm.Fence(sessionID, ""),
+		Fence:    ssm.Fence(sessionID, ""),
 		Messages: []*frontendv1.Message{item},
 	})
 }

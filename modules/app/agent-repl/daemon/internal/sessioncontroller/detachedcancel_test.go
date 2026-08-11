@@ -25,7 +25,7 @@ func cancelledOutcome(taskIDs ...string) *corev1.DetachedCancelOutcome {
 	}}
 }
 
-// liveManagerWithDetachedAgent brings a session up, opens a bubble for one
+// liveManagerWithDetachedAgent brings a session up, opens a work for one
 // detached agent, and returns the manager alongside its client and pusher.
 func liveManagerWithDetachedAgent(t *testing.T, taskID string) (*Manager, func() *fakeClient, *fakePusher) {
 	t.Helper()
@@ -41,7 +41,7 @@ func liveManagerWithDetachedAgent(t *testing.T, taskID string) (*Manager, func()
 	if !ok {
 		t.Fatalf("consumer pusher = %T, want *fakePusher", d.consumer.push)
 	}
-	if _, err := d.consumer.bubbles.observeTaskStarted(&corev1.TaskStarted{
+	if _, err := d.consumer.work.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: taskID, Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_" + taskID, Description: "fan out",
 	}, 10); err != nil {
 		t.Fatalf("observeTaskStarted: %v", err)
@@ -82,7 +82,7 @@ func TestCancelDetachedAgentsCarriesTheCommandRequestID(t *testing.T) {
 	}
 }
 
-func TestCancelDetachedAgentsSettlesTheStoppedAgentsBubble(t *testing.T) {
+func TestCancelDetachedAgentsSettlesTheStoppedAgentsDetachedWork(t *testing.T) {
 	// Arrange
 	m, lastClient, push := liveManagerWithDetachedAgent(t, "task_1")
 	lastClient().detachedCancelOutcome = cancelledOutcome("task_1")
@@ -92,14 +92,14 @@ func TestCancelDetachedAgentsSettlesTheStoppedAgentsBubble(t *testing.T) {
 		t.Fatalf("cancel: %v", err)
 	}
 
-	// Assert: the bubble reaches a terminal state on the ack, so the feed and
+	// Assert: the work reaches a terminal state on the ack, so the feed and
 	// the footer stop showing live work the daemon has already stopped.
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	if len(push.bubbles) == 0 {
-		t.Fatal("cancel pushed no async delta; the agent's bubble is still rendering as live")
+	if len(push.work) == 0 {
+		t.Fatal("cancel pushed no async delta; the agent's work is still rendering as live")
 	}
-	last := push.bubbles[len(push.bubbles)-1]
+	last := push.work[len(push.work)-1]
 	if len(last.GetUpdates()) != 1 {
 		t.Fatalf("updates = %d, want 1", len(last.GetUpdates()))
 	}
@@ -115,7 +115,7 @@ func TestCancelDetachedAgentsSettlesNothingWhenNothingWasRunning(t *testing.T) {
 		Outcome: &corev1.DetachedCancelOutcome_NothingRunning{NothingRunning: &corev1.NoDetachedAgentsRunning{}},
 	}
 	push.mu.Lock()
-	before := len(push.bubbles)
+	before := len(push.work)
 	push.mu.Unlock()
 
 	// Act
@@ -131,8 +131,8 @@ func TestCancelDetachedAgentsSettlesNothingWhenNothingWasRunning(t *testing.T) {
 	}
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	if len(push.bubbles) != before {
-		t.Fatalf("async pushes = %d, want %d: a cancel that stopped nothing must settle nothing", len(push.bubbles), before)
+	if len(push.work) != before {
+		t.Fatalf("async pushes = %d, want %d: a cancel that stopped nothing must settle nothing", len(push.work), before)
 	}
 }
 
@@ -141,34 +141,34 @@ func TestCancelDetachedAgentsSettlesNothingWhenTheWireFailed(t *testing.T) {
 	m, lastClient, push := liveManagerWithDetachedAgent(t, "task_1")
 	lastClient().detachedCancelErr = errors.New("shim link is down")
 	push.mu.Lock()
-	before := len(push.bubbles)
+	before := len(push.work)
 	push.mu.Unlock()
 
 	// Act
 	_, err := m.CancelDetachedAgents(context.Background(), "ws", "fe-1")
 
 	// Assert: nothing is known to have stopped, so nothing is settled. A
-	// bubble closed on a failed cancel would report stopped work that is still
+	// work closed on a failed cancel would report stopped work that is still
 	// running — the one error a user cannot correct by waiting.
 	if err == nil {
 		t.Fatal("cancel err = nil, want the wire failure")
 	}
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	if len(push.bubbles) != before {
-		t.Fatalf("async pushes = %d, want %d", len(push.bubbles), before)
+	if len(push.work) != before {
+		t.Fatalf("async pushes = %d, want %d", len(push.work), before)
 	}
 }
 
 func TestCancelDetachedAgentsSettlesOnlyTheAgentsTheShimStopped(t *testing.T) {
-	// Arrange: two bubbles open, but the shim reports only one stopped —
+	// Arrange: two work open, but the shim reports only one stopped —
 	// the partial-stop case.
 	m, lastClient, push := liveManagerWithDetachedAgent(t, "task_1")
 	d, err := m.existing("ws")
 	if err != nil {
 		t.Fatalf("existing: %v", err)
 	}
-	if _, err := d.consumer.bubbles.observeTaskStarted(&corev1.TaskStarted{
+	if _, err := d.consumer.work.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_2", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_task_2",
 	}, 10); err != nil {
 		t.Fatalf("observeTaskStarted: %v", err)
@@ -181,12 +181,12 @@ func TestCancelDetachedAgentsSettlesOnlyTheAgentsTheShimStopped(t *testing.T) {
 	}
 
 	// Assert: the agent that refused the stop is STILL RUNNING, and settling
-	// its bubble would tell the user otherwise.
+	// its work would tell the user otherwise.
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	last := push.bubbles[len(push.bubbles)-1]
+	last := push.work[len(push.work)-1]
 	if len(last.GetUpdates()) != 1 {
-		t.Fatalf("updates = %d, want 1: only the stopped agent's bubble may settle", len(last.GetUpdates()))
+		t.Fatalf("updates = %d, want 1: only the stopped agent's work may settle", len(last.GetUpdates()))
 	}
 }
 
@@ -210,17 +210,17 @@ func TestDetachedCancelSettleUsesTheNewestSeenSeq(t *testing.T) {
 	// ahead of the stream would move it past events it never received.
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	if got := push.bubbles[len(push.bubbles)-1].GetThroughSeq(); got != want {
+	if got := push.work[len(push.work)-1].GetThroughSeq(); got != want {
 		t.Fatalf("through_seq = %d, want the newest seen %d", got, want)
 	}
 }
 
-// A settlement the store refuses must not read as a settled bubble. This drives
+// A settlement the store refuses must not read as a settled work. This drives
 // the refusal through the same verdict the cancel path builds.
 func TestADetachedCancelSettlementRefusalIsNotAnUpdate(t *testing.T) {
 	// Arrange: a verdict with no terminal status and no exit code, which
-	// SettleAsyncBubble refuses rather than resolving to a confident "done".
-	s := newAsyncBubbleStore("/ws", nil)
+	// SettleDetachedWork refuses rather than resolving to a confident "done".
+	s := newDetachedWorkStore("/ws", nil)
 	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
 	}, 10); err != nil {
@@ -228,14 +228,14 @@ func TestADetachedCancelSettlementRefusalIsNotAnUpdate(t *testing.T) {
 	}
 
 	// Act
-	ups, err := s.settleCancelledTasks([]string{"task_1"}, frontend.AsyncVerdict{AtMs: 20})
+	ups, err := s.settleCancelledTasks([]string{"task_1"}, frontend.DetachedVerdict{AtMs: 20})
 
 	// Assert
 	if err == nil {
 		t.Fatal("an unresolvable settlement must be refused, not written")
 	}
 	if len(ups) != 0 {
-		t.Fatalf("updates = %d, want 0: a refused settle must not push a settled-looking bubble", len(ups))
+		t.Fatalf("updates = %d, want 0: a refused settle must not push a settled-looking work", len(ups))
 	}
 }
 
@@ -246,8 +246,8 @@ func TestADetachedCancelSettlementRefusalIsNotAnUpdate(t *testing.T) {
 func TestBothControlSettleRoutesShareTheSameShape(t *testing.T) {
 	// Arrange
 	c := &consumer{workspace: "/ws", sessionID: "s1", logf: func(string, ...any) {}}
-	ups := []*frontendv1.AsyncBubbleUpdate{{BubbleId: "b1"}}
-	gap := &frontend.AsyncGapError{BubbleID: "b1", Detail: "the bubble is gone"}
+	ups := []*frontendv1.DetachedWorkUpdate{{MessageId: "b1"}}
+	gap := &frontend.DetachedGapError{MessageID: "b1", Detail: "the work is gone"}
 
 	// Act
 	window := c.windowSettlePush(ups, gap, "where")

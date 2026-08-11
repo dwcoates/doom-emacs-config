@@ -161,8 +161,8 @@ type laneItem struct {
 type commandLane struct {
 	key string
 
-	mu    sync.Mutex
-	queue []laneItem
+	mu     sync.Mutex
+	queue  []laneItem
 	closed bool
 	// ready is a coalescing wakeup (capacity 1), never the queue itself.
 	ready chan struct{}

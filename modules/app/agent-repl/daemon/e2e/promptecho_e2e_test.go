@@ -46,7 +46,7 @@ func firstStorePlanedDelta(t *testing.T, conn *websocket.Conn, workspace string)
 }
 
 // TestE2EThePromptReceiptPrecedesTheTurnsFirstStoreFrame is the ordering claim
-// itself: the bubble the daemon authored arrives before anything the store
+// itself: the work the daemon authored arrives before anything the store
 // stamped for that turn.
 func TestE2EThePromptReceiptPrecedesTheTurnsFirstStoreFrame(t *testing.T) {
 	// Arrange

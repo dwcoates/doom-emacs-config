@@ -1,11 +1,11 @@
-// A shell bubble's spool CURSOR: appends are contiguous, and the reconnect
+// A shell work's spool CURSOR: appends are contiguous, and the reconnect
 // snapshot's through_offset is exactly where they left off.
 //
-// async-bubble.proto makes the cursor the gap detector, twice over.
-// AsyncOutputAppend.from_offset "MUST equal the bubble's current
-// AsyncOutputSpool.through_offset; anything else is a gap ... Carried
+// async-work.proto makes the cursor the gap detector, twice over.
+// DetachedWorkOutputAppend.from_offset "MUST equal the work's current
+// DetachedWorkOutputSpool.through_offset; anything else is a gap ... Carried
 // explicitly so a gap is detectable at all — a bare append cannot tell a lost
-// chunk from a quiet one." And AsyncOutputSpool.through_offset is "Bytes
+// chunk from a quiet one." And DetachedWorkOutputSpool.through_offset is "Bytes
 // delivered so far, so a reconnecting client resumes rather than re-fetches."
 //
 // Those are one guarantee viewed from the live stream and from a reconnect, so
@@ -21,9 +21,9 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
-// TestE2EAShellBubblesAppendsAreContiguousThroughTheSnapshotCursor covers the
+// TestE2EAShellDetachedWorkAppendsAreContiguousThroughTheSnapshotCursor covers the
 // OFFSET CONTINUITY edge.
-func TestE2EAShellBubblesAppendsAreContiguousThroughTheSnapshotCursor(t *testing.T) {
+func TestE2EAShellDetachedWorkAppendsAreContiguousThroughTheSnapshotCursor(t *testing.T) {
 	// Arrange
 	h := newUDSHarness(t)
 	cwd := t.TempDir()
@@ -68,17 +68,17 @@ func TestE2EAShellBubblesAppendsAreContiguousThroughTheSnapshotCursor(t *testing
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 
-	bubbleID := gateOnAnchor(t, seen, launchToolUseID)
+	messageID := gateOnOpenedWork(t, seen, launchToolUseID)
 
-	appends := shellAppends(seen, bubbleID)
+	appends := shellAppends(seen, messageID)
 	if len(appends) == 0 {
-		t.Fatalf("no shell appends arrived for bubble %q (saw %d updates for it): the spool never reached the client at all", bubbleID, len(seen.updatesFor(bubbleID)))
+		t.Fatalf("no shell appends arrived for work %q (saw %d updates for it): the spool never reached the client at all", messageID, len(seen.updatesFor(messageID)))
 	}
 	var cursor uint64
 	for i, app := range appends {
 		if got := app.GetFromOffset(); got != cursor {
-			t.Fatalf("append %d for bubble %q starts at from_offset %d, want the spool's current through_offset %d: the proto states anything else is a GAP and must be rejected loudly rather than applied",
-				i, bubbleID, got, cursor)
+			t.Fatalf("append %d for work %q starts at from_offset %d, want the spool's current through_offset %d: the proto states anything else is a GAP and must be rejected loudly rather than applied",
+				i, messageID, got, cursor)
 		}
 		cursor += uint64(len(app.GetText()))
 	}
@@ -90,14 +90,14 @@ func TestE2EAShellBubblesAppendsAreContiguousThroughTheSnapshotCursor(t *testing
 	if snapshot == nil {
 		t.Fatal("the reconnecting client's first frame was not a StateSnapshot")
 	}
-	bubble := openedBubble(snapshot.GetAsyncBubbles(), bubbleID)
-	if bubble == nil {
-		t.Fatalf("the reconnect StateSnapshot carries no bubble %q among its %d async_bubbles: a reconnecting client would restart a running shell's fold from nothing",
-			bubbleID, len(snapshot.GetAsyncBubbles()))
+	work := openedDetachedWork(snapshot.GetDetachedWork(), messageID)
+	if work == nil {
+		t.Fatalf("the reconnect StateSnapshot carries no work %q among its %d detached_works: a reconnecting client would restart a running shell's fold from nothing",
+			messageID, len(snapshot.GetDetachedWork()))
 	}
-	spool := bubble.GetShell().GetOutput()
+	spool := work.GetDetachedWork().GetShell().GetOutput()
 	if spool == nil {
-		t.Fatalf("the snapshot's bubble %q carries no shell output spool: there is no cursor for a reconnecting client to resume from", bubbleID)
+		t.Fatalf("the snapshot's work %q carries no shell output spool: there is no cursor for a reconnecting client to resume from", messageID)
 	}
 	if got := spool.GetThroughOffset(); got != cursor {
 		t.Errorf("the snapshot spool's through_offset = %d, want %d — the byte total the live appends delivered: a reconnecting client would resume at the wrong offset and reject every subsequent append as a gap",
@@ -105,14 +105,14 @@ func TestE2EAShellBubblesAppendsAreContiguousThroughTheSnapshotCursor(t *testing
 	}
 }
 
-// shellAppends returns the shell-arm appends addressed to bubbleID, in arrival
+// shellAppends returns the shell-arm appends addressed to messageID, in arrival
 // order. The unclassified arm is deliberately NOT folded in here: it carries
-// the same message, but a shell bubble receiving its output on the
+// the same message, but a shell work receiving its output on the
 // unclassified arm is a kind/arm mismatch the proto states is a daemon bug and
 // is rejected rather than coerced.
-func shellAppends(seen asyncTraffic, bubbleID string) []*frontendv1.AsyncOutputAppend {
-	var out []*frontendv1.AsyncOutputAppend
-	for _, update := range seen.updatesFor(bubbleID) {
+func shellAppends(seen asyncTraffic, messageID string) []*frontendv1.DetachedWorkOutputAppend {
+	var out []*frontendv1.DetachedWorkOutputAppend
+	for _, update := range seen.updatesFor(messageID) {
 		if app := update.GetShell(); app != nil {
 			out = append(out, app)
 		}

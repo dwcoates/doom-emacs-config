@@ -28,7 +28,7 @@ type queueEntry struct {
 	// requestID is the frontend submit this entry is holding, carried so the
 	// prompt RECEIPT can be pushed when the entry is finally DELIVERED — the
 	// moment the prompt actually enters the conversation. Held rather than
-	// echoed at submit because a queued prompt is a chip, not a bubble.
+	// echoed at submit because a queued prompt is a chip, not a work.
 	requestID      string
 	text           string
 	permissionMode string
@@ -61,8 +61,8 @@ type queueEntry struct {
 	// there is nothing to interject into and nothing to decide — so the entry
 	// carries the HOLD stamp newParkedEntry gives it for its whole parked life
 	// (PENDING would claim a classifier is running that never will), and the
-	// frontend renders the lease bubble off this field instead of the
-	// classifier bubble.
+	// frontend renders the lease work off this field instead of the
+	// classifier work.
 	//
 	// The three exits are a user force (delivered now, further delaying the
 	// bounce), a user cancel, and the schedule ending — by cancel, which sheds
@@ -487,7 +487,7 @@ func (q *promptQueue) view(workspace, fence string) *frontendv1.QueueView {
 		}
 		// The keep-alive hold is projected beside the drain hold and never
 		// instead of a classification: the webapp renders a dedicated "waiting
-		// on a keep-alive response" bubble from this field, which is the honest
+		// on a keep-alive response" work from this field, which is the honest
 		// account of a prompt waiting on a turn nobody asked for.
 		if e.keepAliveHeld() {
 			entry.Hold = &frontendv1.QueueEntry_KeepAlive{
@@ -502,7 +502,7 @@ func (q *promptQueue) view(workspace, fence string) *frontendv1.QueueView {
 		if e.revivalHeld() {
 			// The arm's PRESENCE is the whole fact. It used to name the session
 			// being revived; a revival is a workspace-level event and the entry
-			// already rides its workspace's queue, so the id joined the bubble to
+			// already rides its workspace's queue, so the id joined the work to
 			// nothing the client could not already reach.
 			entry.Hold = &frontendv1.QueueEntry_Revival{
 				Revival: &frontendv1.QueueEntryRevivalHold{},
@@ -1052,7 +1052,7 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs in
 // one delivery funnel every path reaches — the turn-end drain, the paused
 // queue's head jump, and an interject alike (onTurnBoundary and beginInterject
 // both end in `go m.deliver`). This is the moment the prompt stops being a chip
-// and enters the conversation, which is exactly when a bubble states the truth
+// and enters the conversation, which is exactly when a work states the truth
 // about the order things ran in.
 //
 // Routing through forwardPrompt is also what gives a HELD `/clear` the same
@@ -1657,7 +1657,7 @@ func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
 	}
 
 	// A FORCE OVERRIDES THE DRAIN LEASE, and that is the point of the control.
-	// The user is looking at a bubble that says their prompt is waiting for a
+	// The user is looking at a work that says their prompt is waiting for a
 	// scheduled bounce and is telling the daemon to run it anyway. The turn it
 	// starts then becomes a drain hold of its own and delays the bounce further
 	// — which is exactly what they asked for, so it is honored rather than

@@ -236,7 +236,7 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		*corev1.Event_HeartbeatProgress,
 		*corev1.Event_MessageLatency,
 		// The clear and the compaction. Both are CONVERSATION content — each
-		// renders as its own bubble and floors the frontend's replay — so they
+		// renders as its own work and floors the frontend's replay — so they
 		// belong to the frame sink, not the lifecycle sink: nothing in the SSM's
 		// state axes moves because a conversation's history stopped informing
 		// the agent.

@@ -532,8 +532,8 @@ func (f *bouncedFrontend) resyncItems(t *testing.T, conn *websocket.Conn, state 
 	return nil
 }
 
-// promptBubbles returns the user-prompt items among a replay's items.
-func promptBubbles(items []*frontendv1.Message) []*frontendv1.Message {
+// promptDetachedWork returns the user-prompt items among a replay's items.
+func promptDetachedWork(items []*frontendv1.Message) []*frontendv1.Message {
 	var out []*frontendv1.Message
 	for _, it := range items {
 		if um := it.GetUserMessage(); um != nil && um.GetContentString() != "" {
@@ -557,14 +557,14 @@ func TestAPromptWhoseTurnNeverBecameDurableSurvivesTheDaemonThatAcceptedIt(t *te
 	items := f.resyncItems(t, conn, state, w.workspace, "e2e-receipt-resync-1")
 
 	// Assert.
-	bubbles := promptBubbles(items)
-	if len(bubbles) != 1 {
-		t.Fatalf("prompt bubbles = %d, want the receipt for the accepted prompt", len(bubbles))
+	work := promptDetachedWork(items)
+	if len(work) != 1 {
+		t.Fatalf("prompt bubbles = %d, want the receipt for the accepted prompt", len(work))
 	}
-	if got := bubbles[0].GetUserMessage().GetContentString(); got != "the prompt nobody kept" {
+	if got := work[0].GetUserMessage().GetContentString(); got != "the prompt nobody kept" {
 		t.Fatalf("replayed prompt = %q, want the submitted text", got)
 	}
-	if got := bubbles[0].GetRequestId(); got != "e2e-receipt-1" {
+	if got := work[0].GetRequestId(); got != "e2e-receipt-1" {
 		t.Fatalf("replayed prompt request id = %q, want the submit's own id", got)
 	}
 }
@@ -601,7 +601,7 @@ func TestAReplayedReceiptIsServedOnceAcrossTwoResyncs(t *testing.T) {
 	w.submitThenDie(t, "e2e-receipt-3", "the prompt nobody kept")
 	f := w.restart(t)
 	conn, state := f.dial(t, w.workspace)
-	if got := len(promptBubbles(f.resyncItems(t, conn, state, w.workspace, "e2e-receipt-resync-3a"))); got != 1 {
+	if got := len(promptDetachedWork(f.resyncItems(t, conn, state, w.workspace, "e2e-receipt-resync-3a"))); got != 1 {
 		t.Fatalf("first resync served %d prompt bubbles, want 1", got)
 	}
 
@@ -609,7 +609,7 @@ func TestAReplayedReceiptIsServedOnceAcrossTwoResyncs(t *testing.T) {
 	items := f.resyncItems(t, conn, state, w.workspace, "e2e-receipt-resync-3b")
 
 	// Assert.
-	if got := len(promptBubbles(items)); got != 1 {
+	if got := len(promptDetachedWork(items)); got != 1 {
 		t.Fatalf("second resync served %d prompt bubbles, want 1", got)
 	}
 }

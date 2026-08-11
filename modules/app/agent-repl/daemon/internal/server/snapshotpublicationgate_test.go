@@ -46,11 +46,11 @@ func (f rosterInits) SessionInits() []*frontendv1.SessionInitView { return f.vie
 // family asking the same questions again.
 type rosterCatalogs struct {
 	catalogs []*frontendv1.TaskCatalog
-	bubbles  []*frontendv1.AsyncBubble
+	work     []*frontendv1.Message
 }
 
 func (f rosterCatalogs) TaskCatalogs() []*frontendv1.TaskCatalog { return f.catalogs }
-func (f rosterCatalogs) AsyncBubbles() []*frontendv1.AsyncBubble { return f.bubbles }
+func (f rosterCatalogs) DetachedWork() []*frontendv1.Message     { return f.work }
 
 // rosterSources fills a provider with one view per family per workspace, which
 // is what a real connect snapshot composes.
@@ -60,7 +60,7 @@ func rosterSources(provider *ssmSnapshotProvider, workspaces int) {
 	queues := make([]*frontendv1.QueueView, 0, workspaces)
 	inits := make([]*frontendv1.SessionInitView, 0, workspaces)
 	catalogs := make([]*frontendv1.TaskCatalog, 0, workspaces)
-	bubbles := make([]*frontendv1.AsyncBubble, 0, workspaces)
+	work := make([]*frontendv1.Message, 0, workspaces)
 	for i := range workspaces {
 		ws := fmt.Sprintf("/ws/%d", i)
 		sessions = append(sessions, &frontendv1.SessionView{Workspace: ws, SessionId: "s"})
@@ -68,13 +68,13 @@ func rosterSources(provider *ssmSnapshotProvider, workspaces int) {
 		queues = append(queues, &frontendv1.QueueView{Workspace: ws})
 		inits = append(inits, &frontendv1.SessionInitView{Workspace: ws})
 		catalogs = append(catalogs, &frontendv1.TaskCatalog{Workspace: ws})
-		bubbles = append(bubbles, &frontendv1.AsyncBubble{Id: "bubble:" + ws, Workspace: ws})
+		work = append(work, detachedWorkMessage("detached-work:"+ws, ws))
 	}
 	provider.sessions = rosterSessions{views: sessions}
 	provider.progress = rosterProgress{views: progress}
 	provider.queues = rosterQueues{views: queues}
 	provider.inits = rosterInits{views: inits}
-	provider.catalogs = rosterCatalogs{catalogs: catalogs, bubbles: bubbles}
+	provider.catalogs = rosterCatalogs{catalogs: catalogs, work: work}
 }
 
 func rosterProvider(t *testing.T, workspaces int) (*ssmSnapshotProvider, *countingCreationBridge) {

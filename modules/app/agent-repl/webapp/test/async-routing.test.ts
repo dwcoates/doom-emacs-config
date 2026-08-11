@@ -20,10 +20,13 @@ function bubble(over: Partial<AsyncBubble> & Pick<AsyncBubble, "id" | "kind">): 
   return {
     workspace: "/w",
     originToolUseId: "",
-    parentBubbleId: "",
+    parentMessageId: "",
     label: "",
     startedAtMs: 0,
     liveness: LIVE,
+    // A feed row's top-level id is its own uuid, which is the default here;
+    // a nested fixture states its own so the two never silently disagree.
+    topLevelMessageId: over.topLevelMessageId ?? over.id,
     ...over,
   };
 }
@@ -102,7 +105,7 @@ describe("I2 — unknown bubble id", () => {
     const registry = seeded(agentBubble("b1"));
 
     const result = registry.applyDelta(
-      push([], [{ bubbleId: "ghost", update: { case: "liveness", value: LIVE } }]),
+      push([], [{ messageId: "ghost", update: { case: "liveness", value: LIVE } }]),
     );
 
     expect(result.ok === false && result.gap.kind).toBe("unknown-bubble");
@@ -112,15 +115,15 @@ describe("I2 — unknown bubble id", () => {
     const registry = seeded(agentBubble("b1"));
 
     const result = registry.applyDelta(
-      push([], [{ bubbleId: "ghost", update: { case: "liveness", value: LIVE } }]),
+      push([], [{ messageId: "ghost", update: { case: "liveness", value: LIVE } }]),
     );
 
-    expect(result.ok === false && result.gap.bubbleId).toBe("ghost");
+    expect(result.ok === false && result.gap.messageId).toBe("ghost");
   });
 
   it("does NOT buffer the update in the hope its bubble shows up", () => {
     const registry = seeded(agentBubble("b1"));
-    registry.applyDelta(push([], [{ bubbleId: "ghost", update: { case: "liveness", value: LIVE } }]));
+    registry.applyDelta(push([], [{ messageId: "ghost", update: { case: "liveness", value: LIVE } }]));
 
     // The bubble opens AFTERWARDS; a buffered update would land on it here.
     registry.applyDelta(push([agentBubble("ghost")]));
@@ -136,10 +139,10 @@ describe("I2 — unknown bubble id", () => {
         [],
         [
           {
-            bubbleId: "b1",
+            messageId: "b1",
             update: { case: "agent", value: { emissions: [], fold: { droppedBefore: 9, tailCap: 9 } } },
           },
-          { bubbleId: "ghost", update: { case: "liveness", value: LIVE } },
+          { messageId: "ghost", update: { case: "liveness", value: LIVE } },
         ],
       ),
     );
@@ -151,7 +154,7 @@ describe("I2 — unknown bubble id", () => {
     const registry = new AsyncBubbleRegistry();
 
     registry.applyDelta(
-      push([agentBubble("b1")], [{ bubbleId: "ghost", update: { case: "liveness", value: LIVE } }]),
+      push([agentBubble("b1")], [{ messageId: "ghost", update: { case: "liveness", value: LIVE } }]),
     );
 
     expect(registry.size).toBe(0);
@@ -163,7 +166,7 @@ describe("I2 — kind mismatch", () => {
     const registry = seeded(shellBubble("b1"));
 
     const result = registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "journal", value: { rows: [], fold: NO_FOLD } } }]),
+      push([], [{ messageId: "b1", update: { case: "journal", value: { rows: [], fold: NO_FOLD } } }]),
     );
 
     expect(result.ok === false && result.gap.kind).toBe("kind-mismatch");
@@ -173,7 +176,7 @@ describe("I2 — kind mismatch", () => {
     const registry = seeded(shellBubble("b1"));
 
     const result = registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "journal", value: { rows: [], fold: NO_FOLD } } }]),
+      push([], [{ messageId: "b1", update: { case: "journal", value: { rows: [], fold: NO_FOLD } } }]),
     );
 
     expect(result.ok === false && result.gap.bubbleKind).toBe("shell");
@@ -183,7 +186,7 @@ describe("I2 — kind mismatch", () => {
     const registry = seeded(shellBubble("b1", "out", 3));
 
     registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "journal", value: { rows: [], fold: NO_FOLD } } }]),
+      push([], [{ messageId: "b1", update: { case: "journal", value: { rows: [], fold: NO_FOLD } } }]),
     );
 
     expect(registry.get("b1")?.kind.case).toBe("shell");
@@ -193,7 +196,7 @@ describe("I2 — kind mismatch", () => {
     const registry = seeded(unclassifiedBubble("b1"));
 
     const result = registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "shell", value: { text: "x", fromOffset: 0 } } }]),
+      push([], [{ messageId: "b1", update: { case: "shell", value: { text: "x", fromOffset: 0 } } }]),
     );
 
     expect(result.ok === false && result.gap.kind).toBe("kind-mismatch");
@@ -203,7 +206,7 @@ describe("I2 — kind mismatch", () => {
     const registry = seeded(journalBubble("b1"));
 
     const result = registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]),
+      push([], [{ messageId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]),
     );
 
     expect(result.ok === false && result.gap.kind).toBe("kind-mismatch");
@@ -215,7 +218,7 @@ describe("I4 — spool continuity", () => {
     const registry = seeded(shellBubble("b1", "ab", 2));
 
     registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "shell", value: { text: "cd", fromOffset: 2 } } }]),
+      push([], [{ messageId: "b1", update: { case: "shell", value: { text: "cd", fromOffset: 2 } } }]),
     );
 
     expect(registry.get("b1")?.kind).toEqual({
@@ -228,7 +231,7 @@ describe("I4 — spool continuity", () => {
     const registry = seeded(shellBubble("b1", "ab", 2));
 
     const result = registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "shell", value: { text: "cd", fromOffset: 7 } } }]),
+      push([], [{ messageId: "b1", update: { case: "shell", value: { text: "cd", fromOffset: 7 } } }]),
     );
 
     expect(result.ok === false && result.gap.kind).toBe("offset-gap");
@@ -238,7 +241,7 @@ describe("I4 — spool continuity", () => {
     const registry = seeded(shellBubble("b1", "ab", 2));
 
     const result = registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "shell", value: { text: "x", fromOffset: 0 } } }]),
+      push([], [{ messageId: "b1", update: { case: "shell", value: { text: "x", fromOffset: 0 } } }]),
     );
 
     expect(result.ok === false && result.gap.kind).toBe("offset-gap");
@@ -248,7 +251,7 @@ describe("I4 — spool continuity", () => {
     const registry = seeded(shellBubble("b1", "ab", 2));
 
     const result = registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "shell", value: { text: "cd", fromOffset: 7 } } }]),
+      push([], [{ messageId: "b1", update: { case: "shell", value: { text: "cd", fromOffset: 7 } } }]),
     );
 
     expect(result.ok === false && [result.gap.throughOffset, result.gap.fromOffset]).toEqual([2, 7]);
@@ -258,7 +261,7 @@ describe("I4 — spool continuity", () => {
     const registry = seeded(shellBubble("b1", "ab", 2));
 
     registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "shell", value: { text: "cd", fromOffset: 7 } } }]),
+      push([], [{ messageId: "b1", update: { case: "shell", value: { text: "cd", fromOffset: 7 } } }]),
     );
 
     expect(registry.get("b1")?.kind).toEqual({
@@ -271,7 +274,7 @@ describe("I4 — spool continuity", () => {
     const registry = seeded(shellBubble("b1", "abcdef", 6));
 
     registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "shell", value: { text: "XX", fromOffset: 3 } } }]),
+      push([], [{ messageId: "b1", update: { case: "shell", value: { text: "XX", fromOffset: 3 } } }]),
     );
 
     const kind = kindOf(registry, "b1");
@@ -286,7 +289,7 @@ describe("I4 — spool continuity", () => {
 
     // "é" is two bytes in UTF-8 and one code unit in JavaScript.
     registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "shell", value: { text: "é", fromOffset: 0 } } }]),
+      push([], [{ messageId: "b1", update: { case: "shell", value: { text: "é", fromOffset: 0 } } }]),
     );
 
     const kind = kindOf(registry, "b1");
@@ -297,7 +300,7 @@ describe("I4 — spool continuity", () => {
     const registry = seeded(unclassifiedBubble("b1", "a", 1));
 
     registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "unclassified", value: { text: "b", fromOffset: 1 } } }]),
+      push([], [{ messageId: "b1", update: { case: "unclassified", value: { text: "b", fromOffset: 1 } } }]),
     );
 
     const kind = kindOf(registry, "b1");
@@ -308,7 +311,7 @@ describe("I4 — spool continuity", () => {
     const registry = seeded(unclassifiedBubble("b1", "a", 1));
 
     const result = registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "unclassified", value: { text: "b", fromOffset: 4 } } }]),
+      push([], [{ messageId: "b1", update: { case: "unclassified", value: { text: "b", fromOffset: 4 } } }]),
     );
 
     expect(result.ok === false && result.gap.kind).toBe("offset-gap");
@@ -324,7 +327,7 @@ describe("applying matched updates", () => {
         [],
         [
           {
-            bubbleId: "b1",
+            messageId: "b1",
             update: {
               case: "agent",
               value: {
@@ -345,10 +348,10 @@ describe("applying matched updates", () => {
     const registry = seeded(agentBubble("b1"));
 
     registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: { droppedBefore: 4, tailCap: 20 } } } }]),
+      push([], [{ messageId: "b1", update: { case: "agent", value: { emissions: [], fold: { droppedBefore: 4, tailCap: 20 } } } }]),
     );
     registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: { droppedBefore: 7, tailCap: 20 } } } }]),
+      push([], [{ messageId: "b1", update: { case: "agent", value: { emissions: [], fold: { droppedBefore: 7, tailCap: 20 } } } }]),
     );
 
     const kind = kindOf(registry, "b1");
@@ -359,10 +362,10 @@ describe("applying matched updates", () => {
     const registry = seeded(journalBubble("b1"));
 
     registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "journal", value: { rows: [{ label: "s", detail: "", status: "running" }], fold: NO_FOLD } } }]),
+      push([], [{ messageId: "b1", update: { case: "journal", value: { rows: [{ label: "s", detail: "", status: "running" }], fold: NO_FOLD } } }]),
     );
     registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "journal", value: { rows: [{ label: "s", detail: "ok", status: "done" }], fold: NO_FOLD } } }]),
+      push([], [{ messageId: "b1", update: { case: "journal", value: { rows: [{ label: "s", detail: "ok", status: "done" }], fold: NO_FOLD } } }]),
     );
 
     const kind = kindOf(registry, "b1");
@@ -376,7 +379,7 @@ describe("applying matched updates", () => {
       value: { settledAtMs: 9, shellExit: { code: 137 }, outcome: { case: "killed", reason: "stopped" } },
     };
 
-    registry.applyDelta(push([], [{ bubbleId: "b1", update: { case: "liveness", value: settled } }]));
+    registry.applyDelta(push([], [{ messageId: "b1", update: { case: "liveness", value: settled } }]));
 
     expect(registry.get("b1")?.liveness).toEqual(settled);
   });
@@ -385,7 +388,7 @@ describe("applying matched updates", () => {
     const registry = seeded(agentBubble("b1"));
 
     const result = registry.applyDelta(
-      push([agentBubble("b2")], [{ bubbleId: "b1", update: { case: "liveness", value: LIVE } }]),
+      push([agentBubble("b2")], [{ messageId: "b1", update: { case: "liveness", value: LIVE } }]),
     );
 
     expect(result).toEqual({ ok: true, opened: 1, updated: 1 });
@@ -400,7 +403,7 @@ describe("the merge kind", () => {
       value: { settledAtMs: 9, outcome: { case: "done" } },
     };
 
-    registry.applyDelta(push([], [{ bubbleId: "b1", update: { case: "liveness", value: settled } }]));
+    registry.applyDelta(push([], [{ messageId: "b1", update: { case: "liveness", value: settled } }]));
 
     expect(registry.get("b1")?.liveness).toEqual(settled);
   });
@@ -430,7 +433,7 @@ describe("the merge kind", () => {
     const registry = seeded(mergeBubble("b1"));
 
     const result = registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]),
+      push([], [{ messageId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]),
     );
 
     expect(result.ok === false && result.gap.kind).toBe("kind-mismatch");
@@ -440,14 +443,14 @@ describe("the merge kind", () => {
     const registry = seeded(mergeBubble("b1"));
 
     registry.applyDelta(
-      push([], [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]),
+      push([], [{ messageId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]),
     );
 
     expect(registry.get("b1")?.kind.case).toBe("merge");
   });
 
   it("parents a nested bubble under the merge bubble it was spawned from", () => {
-    const registry = seeded(mergeBubble("b1"), agentBubble("b2", { parentBubbleId: "b1" }));
+    const registry = seeded(mergeBubble("b1"), agentBubble("b2", { parentMessageId: "b1" }));
 
     expect(registry.children("b1").map((b) => b.id)).toEqual(["b2"]);
   });
@@ -545,7 +548,7 @@ describe("tool-card attachment", () => {
 
 describe("the spawn tree", () => {
   it("lists bubbles with no parent pointer as roots", () => {
-    const registry = seeded(agentBubble("b1"), agentBubble("b2", { parentBubbleId: "b1" }));
+    const registry = seeded(agentBubble("b1"), agentBubble("b2", { parentMessageId: "b1" }));
 
     expect(registry.roots().map((b) => b.id)).toEqual(["b1"]);
   });
@@ -553,8 +556,8 @@ describe("the spawn tree", () => {
   it("resolves children by parent POINTER, one lookup deep", () => {
     const registry = seeded(
       agentBubble("b1"),
-      agentBubble("b2", { parentBubbleId: "b1" }),
-      agentBubble("b3", { parentBubbleId: "b1" }),
+      agentBubble("b2", { parentMessageId: "b1" }),
+      agentBubble("b3", { parentMessageId: "b1" }),
     );
 
     expect(registry.children("b1").map((b) => b.id)).toEqual(["b2", "b3"]);
@@ -563,15 +566,15 @@ describe("the spawn tree", () => {
   it("resolves a grandchild without recursing into any payload", () => {
     const registry = seeded(
       agentBubble("b1"),
-      agentBubble("b2", { parentBubbleId: "b1" }),
-      agentBubble("b3", { parentBubbleId: "b2" }),
+      agentBubble("b2", { parentMessageId: "b1" }),
+      agentBubble("b3", { parentMessageId: "b2" }),
     );
 
     expect(registry.children("b2").map((b) => b.id)).toEqual(["b3"]);
   });
 
   it("reports a bubble whose parent pointer resolves to nothing as an orphan", () => {
-    const registry = seeded(agentBubble("b2", { parentBubbleId: "gone" }));
+    const registry = seeded(agentBubble("b2", { parentMessageId: "gone" }));
 
     expect(registry.orphans()).toEqual([
       { bubble: registry.get("b2"), missingParentId: "gone" },
@@ -579,7 +582,7 @@ describe("the spawn tree", () => {
   });
 
   it("does not promote an orphan to a root", () => {
-    const registry = seeded(agentBubble("b2", { parentBubbleId: "gone" }));
+    const registry = seeded(agentBubble("b2", { parentMessageId: "gone" }));
 
     expect(registry.roots()).toEqual([]);
   });
@@ -604,7 +607,7 @@ describe("AsyncBubbleRegistry — bubble-scoped live typing", () => {
     registry.applyTyping("b1", "msg-1", 0, "look");
 
     // Assert
-    expect(registry.typingFor("b1")).toEqual({ messageId: "msg-1", blockIndex: 0, text: "look" });
+    expect(registry.typingFor("b1")).toEqual({ apiMessageId: "msg-1", blockIndex: 0, text: "look" });
   });
 
   it("appends a further chunk of the SAME block", () => {
@@ -629,7 +632,7 @@ describe("AsyncBubbleRegistry — bubble-scoped live typing", () => {
     registry.applyTyping("b1", "msg-1", 1, "second");
 
     // Assert
-    expect(registry.typingFor("b1")).toEqual({ messageId: "msg-1", blockIndex: 1, text: "second" });
+    expect(registry.typingFor("b1")).toEqual({ apiMessageId: "msg-1", blockIndex: 1, text: "second" });
   });
 
   it("cuts the preview the daemon says nothing will complete", () => {
@@ -699,7 +702,7 @@ describe("AsyncBubbleRegistry — bubble-scoped live typing", () => {
     registry.applyTyping("b1", "msg-1", 0, "look");
 
     // Act
-    registry.applyDelta(push([], [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]));
+    registry.applyDelta(push([], [{ messageId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]));
 
     // Assert
     expect(registry.typingFor("b1")).toBeNull();
@@ -712,7 +715,7 @@ describe("AsyncBubbleRegistry — bubble-scoped live typing", () => {
     registry.applyTyping("b2", "msg-2", 0, "two");
 
     // Act
-    registry.applyDelta(push([], [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]));
+    registry.applyDelta(push([], [{ messageId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]));
 
     // Assert
     expect(registry.typingFor("b2")?.text).toBe("two");

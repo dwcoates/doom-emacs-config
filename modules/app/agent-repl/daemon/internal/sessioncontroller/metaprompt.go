@@ -20,7 +20,7 @@ import (
 //
 // What remains here is a READER, not a writer: transcripts recorded before the
 // migration still carry the daemon's own standalone directives as ordinary
-// "user" lines, and replaying one must not draw them as bubbles the user typed.
+// "user" lines, and replaying one must not draw them as work the user typed.
 
 // metapromptDirectiveTemplate is the read-directive the daemon used to send,
 // and the wording Emacs still sends for an ON-DEMAND re-read
@@ -49,7 +49,7 @@ var metapromptDirectiveHead, metapromptDirectiveTail = func() (string, string) {
 //
 // HEAD AND TAIL BOTH, which is precisely what keeps a FOLDED directive out of
 // this. A pre-migration daemon put the user's real prompt after the directive,
-// so that text fails the tail match and its bubble is drawn — correctly, because
+// so that text fails the tail match and its work is drawn — correctly, because
 // the user did type the prompt inside it. Only the directive standing entirely
 // alone is machinery talking to itself.
 //

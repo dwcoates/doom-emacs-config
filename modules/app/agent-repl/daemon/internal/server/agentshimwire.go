@@ -103,9 +103,9 @@ type AgentShimConfig struct {
 	// leaves snapshot.inits empty. Satisfied by *sessioncontroller.Manager.
 	Inits SessionInitSource
 	// Catalogs supplies every live session's DETACHED WORK for connect/resync
-	// snapshots: the complete task roster AND the open bubbles folded to date.
+	// snapshots: the complete task roster AND the open work folded to date.
 	// Satisfied by *sessioncontroller.Manager. It used to be two fields, and a
-	// caller that wired the roster and forgot the bubbles got a reconnect
+	// caller that wired the roster and forgot the work got a reconnect
 	// snapshot that silently served none — see TaskCatalogSource.
 	Catalogs TaskCatalogSource
 	// Queues is the prompt-queue backend (E4): the force/accept/cancel command

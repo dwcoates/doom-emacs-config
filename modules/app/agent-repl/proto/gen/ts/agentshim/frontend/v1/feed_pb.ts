@@ -20,8 +20,8 @@ import type { ApiUserMessage } from "../../data/v1/tools_pb";
 import { file_agentshim_data_v1_tools } from "../../data/v1/tools_pb";
 import type { AgentEmission } from "./agent-emission_pb";
 import { file_agentshim_frontend_v1_agent_emission } from "./agent-emission_pb";
-import type { AsyncBubble } from "./async-bubble_pb";
-import { file_agentshim_frontend_v1_async_bubble } from "./async-bubble_pb";
+import type { DetachedWork, DetachedWorkUpdate } from "./detached-work_pb";
+import { file_agentshim_frontend_v1_detached_work } from "./detached-work_pb";
 import type { FailureCardView } from "./failure-card_pb";
 import { file_agentshim_frontend_v1_failure_card } from "./failure-card_pb";
 import type { SessionCommandItem } from "./slash-menu_pb";
@@ -32,7 +32,7 @@ import type { Message as Message$1 } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/feed.proto.
  */
 export const file_agentshim_frontend_v1_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZmVlZC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIpUBChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSMAoIbWVzc2FnZXMYAyADKAsyHi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZRITCgt0aHJvdWdoX3NlcRgEIAEoBBINCgVmZW5jZRgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZFIFaXRlbXMiSQoOTWVzc2FnZUxpbmVhZ2USHAoUdG9wX2xldmVsX21lc3NhZ2VfaWQYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAki7QcKB01lc3NhZ2USDAoEdXVpZBgBIAEoCRINCgV0c19tcxgCIAEoAxISCgpyZXF1ZXN0X2lkGAMgASgJEjkKBnNvdXJjZRgEIAEoDjIpLmFnZW50c2hpbS5mcm9udGVuZC52MS5Db252ZXJzYXRpb25Tb3VyY2USNgoHbGluZWFnZRgGIAEoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXNzYWdlTGluZWFnZRI1CgVhZ2VudBgFIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudEVtaXNzaW9uSAASOQoMdXNlcl9tZXNzYWdlGAsgASgLMiEuYWdlbnRzaGltLmRhdGEudjEuQXBpVXNlck1lc3NhZ2VIABI3CgpwZXJtaXNzaW9uGB4gASgLMiEuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvbkl0ZW1IABI+CgxmYWlsdXJlX2NhcmQYHyABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRWaWV3SAASPAoPY29udGV4dF9jbGVhcmVkGCAgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBghIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABJECg9zZXNzaW9uX2NvbW1hbmQYIyABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmRJdGVtSAASOgoMYXN5bmNfYnViYmxlGCYgASgLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jQnViYmxlSAASSgoSY29tcGFjdGlvbl9zdW1tYXJ5GCcgASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbXBhY3Rpb25TdW1tYXJ5SXRlbUgAQgkKB3BheWxvYWRKBAgQEBFKBAgREBJKBAgSEBNKBAgKEAtKBAgMEA1KBAgNEA5KBAgOEA9KBAgPEBBKBAgiECNKBAgoEClKBAgkECVKBAglECZSCWFwaV9lcnJvclIQY29tcGFjdF9ib3VuZGFyeVIVY29tcGFjdF9ib3VuZGFyeV9saW5lUhFhc3Npc3RhbnRfbWVzc2FnZVIIdG9vbF91c2VSC3Rvb2xfcmVzdWx0Ug90b29sX3VzZV9yZXN1bHRSBnJlc3VsdFIKc2tpbGxfYm9keVILdXNhZ2Vfc3RhbXBSEXRva2VuX3V0aWxpemF0aW9uUg90dXJuX2FjY291bnRpbmciYQoVQ29tcGFjdGlvblN1bW1hcnlJdGVtEg8KB3N1bW1hcnkYASABKAkSFwoPY29tcGFjdGVkX2F0X21zGAIgASgDEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYAyABKAMihAEKC1R5cGluZ0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIuCgVkZWx0YRgDIAEoCzIfLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRlbnREZWx0YRINCgVmZW5jZRgEIAEoCRIRCglidWJibGVfaWQYBSABKAlKBAgCEANSCnNlc3Npb25faWQiQAoJVHlwaW5nQ3V0EhEKCXdvcmtzcGFjZRgBIAEoCRIRCglidWJibGVfaWQYAiABKAkSDQoFZmVuY2UYAyABKAkicgoPU2Vzc2lvbkluaXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRIrCgRpbml0GAMgASgLMh0uYWdlbnRzaGltLmRhdGEudjEuU3lzdGVtSW5pdBINCgVmZW5jZRgEIAEoCUoECAIQA1IKc2Vzc2lvbl9pZCp2ChJDb252ZXJzYXRpb25Tb3VyY2USIwofQ09OVkVSU0FUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEhwKGENPTlZFUlNBVElPTl9TT1VSQ0VfVVNFUhABEh0KGUNPTlZFUlNBVElPTl9TT1VSQ0VfTUVSR0UQAkIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_core_v1_core, file_agentshim_data_v1_stream, file_agentshim_data_v1_tools, file_agentshim_frontend_v1_agent_emission, file_agentshim_frontend_v1_async_bubble, file_agentshim_frontend_v1_failure_card, file_agentshim_frontend_v1_slash_menu]);
+  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZmVlZC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIpUBChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSMAoIbWVzc2FnZXMYAyADKAsyHi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZRITCgt0aHJvdWdoX3NlcRgEIAEoBBINCgVmZW5jZRgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZFIFaXRlbXMiSQoOTWVzc2FnZUxpbmVhZ2USHAoUdG9wX2xldmVsX21lc3NhZ2VfaWQYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAki/QcKB01lc3NhZ2USDAoEdXVpZBgBIAEoCRINCgV0c19tcxgCIAEoAxISCgpyZXF1ZXN0X2lkGAMgASgJEjkKBnNvdXJjZRgEIAEoDjIpLmFnZW50c2hpbS5mcm9udGVuZC52MS5Db252ZXJzYXRpb25Tb3VyY2USNgoHbGluZWFnZRgGIAEoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXNzYWdlTGluZWFnZRI1CgVhZ2VudBgFIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudEVtaXNzaW9uSAASOQoMdXNlcl9tZXNzYWdlGAsgASgLMiEuYWdlbnRzaGltLmRhdGEudjEuQXBpVXNlck1lc3NhZ2VIABI3CgpwZXJtaXNzaW9uGB4gASgLMiEuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvbkl0ZW1IABI+CgxmYWlsdXJlX2NhcmQYHyABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRWaWV3SAASPAoPY29udGV4dF9jbGVhcmVkGCAgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBghIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABJECg9zZXNzaW9uX2NvbW1hbmQYIyABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmRJdGVtSAASPAoNZGV0YWNoZWRfd29yaxgmIAEoCzIjLmFnZW50c2hpbS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtIABJKChJjb21wYWN0aW9uX3N1bW1hcnkYJyABKAsyLC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ29tcGFjdGlvblN1bW1hcnlJdGVtSABCCQoHcGF5bG9hZEoECBAQEUoECBEQEkoECBIQE0oECAoQC0oECAwQDUoECA0QDkoECA4QD0oECA8QEEoECCIQI0oECCgQKUoECCQQJUoECCUQJlIJYXBpX2Vycm9yUhBjb21wYWN0X2JvdW5kYXJ5UhVjb21wYWN0X2JvdW5kYXJ5X2xpbmVSEWFzc2lzdGFudF9tZXNzYWdlUgh0b29sX3VzZVILdG9vbF9yZXN1bHRSD3Rvb2xfdXNlX3Jlc3VsdFIGcmVzdWx0Ugpza2lsbF9ib2R5Ugt1c2FnZV9zdGFtcFIRdG9rZW5fdXRpbGl6YXRpb25SD3R1cm5fYWNjb3VudGluZ1IMYXN5bmNfYnViYmxlIsgBChFEZXRhY2hlZFdvcmtEZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSLgoGb3BlbmVkGAMgAygLMh4uYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lc3NhZ2USOgoHdXBkYXRlcxgEIAMoCzIpLmFnZW50c2hpbS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtVcGRhdGUSEwoLdGhyb3VnaF9zZXEYBSABKAQSDQoFZmVuY2UYBiABKAlKBAgCEANSCnNlc3Npb25faWQiYQoVQ29tcGFjdGlvblN1bW1hcnlJdGVtEg8KB3N1bW1hcnkYASABKAkSFwoPY29tcGFjdGVkX2F0X21zGAIgASgDEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYAyABKAMilwEKC1R5cGluZ0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIuCgVkZWx0YRgDIAEoCzIfLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRlbnREZWx0YRINCgVmZW5jZRgEIAEoCRIZChFwYXJlbnRfbWVzc2FnZV9pZBgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZFIJYnViYmxlX2lkIlMKCVR5cGluZ0N1dBIRCgl3b3Jrc3BhY2UYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAkSDQoFZmVuY2UYAyABKAlSCWJ1YmJsZV9pZCJyCg9TZXNzaW9uSW5pdFZpZXcSEQoJd29ya3NwYWNlGAEgASgJEisKBGluaXQYAyABKAsyHS5hZ2VudHNoaW0uZGF0YS52MS5TeXN0ZW1Jbml0Eg0KBWZlbmNlGAQgASgJSgQIAhADUgpzZXNzaW9uX2lkKnYKEkNvbnZlcnNhdGlvblNvdXJjZRIjCh9DT05WRVJTQVRJT05fU09VUkNFX1VOU1BFQ0lGSUVEEAASHAoYQ09OVkVSU0FUSU9OX1NPVVJDRV9VU0VSEAESHQoZQ09OVkVSU0FUSU9OX1NPVVJDRV9NRVJHRRACQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_agentshim_core_v1_core, file_agentshim_data_v1_stream, file_agentshim_data_v1_tools, file_agentshim_frontend_v1_agent_emission, file_agentshim_frontend_v1_detached_work, file_agentshim_frontend_v1_failure_card, file_agentshim_frontend_v1_slash_menu]);
 
 /**
  * Complete (store-round-tripped) conversation additions, composed from the
@@ -146,7 +146,7 @@ export const MessageLineageSchema: GenMessage<MessageLineage> = /*@__PURE__*/
  * it, and the figures resolved against it. The payload is the message itself.
  *
  * Agent-produced payloads are ONE arm, AgentEmission, which is also the
- * vocabulary a detached agent's output arrives in (async-bubble.proto).
+ * vocabulary a detached agent's output arrives in (detached-work.proto).
  * Everything the agent did not emit — the user's own prompt, the daemon's
  * failure cards, session-level events — keeps an arm of its own, because
  * folding those into AgentEmission would make that message's name untrue.
@@ -273,19 +273,20 @@ export type Message = Message$1<"agentshim.frontend.v1.Message"> & {
     case: "sessionCommand";
   } | {
     /**
-     * A piece of detached work, ANCHORED in the feed at the point it was
-     * launched.
+     * A piece of detached work. THIS MESSAGE IS THE WORK — its uuid is the
+     * work's id, and its lineage is the work's place in the feed.
      *
-     * What rides here is the bubble's OPENING state; everything it produces
-     * afterwards arrives as AsyncBubbleUpdate addressed to `AsyncBubble.id`,
-     * on its own delta rather than as a stream of new feed messages. A detached
-     * agent emitting a thousand lines must not insert a thousand rows into
-     * the conversation it was dispatched from.
+     * What rides here is the work's state as of this delivery; everything it
+     * produces afterwards arrives as DetachedWorkUpdate addressed to THIS
+     * message's uuid, on DetachedWorkDelta rather than as a stream of new feed
+     * messages. A detached agent emitting a thousand lines must not insert a
+     * thousand rows into the conversation it was dispatched from — those lines
+     * are this message's payload, not messages of their own.
      *
-     * @generated from field: agentshim.frontend.v1.AsyncBubble async_bubble = 38;
+     * @generated from field: agentshim.frontend.v1.DetachedWork detached_work = 38;
      */
-    value: AsyncBubble;
-    case: "asyncBubble";
+    value: DetachedWork;
+    case: "detachedWork";
   } | {
     /**
      * The purple-washed summary block a compaction leaves behind. Its own arm
@@ -304,6 +305,84 @@ export type Message = Message$1<"agentshim.frontend.v1.Message"> & {
  */
 export const MessageSchema: GenMessage<Message> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_feed, 2);
+
+/**
+ * The detached-work push: MESSAGES that opened, and UPDATES to messages already
+ * open.
+ *
+ * TWO ARMS BECAUSE THERE ARE TWO KINDS OF THING, and conflating them is what
+ * made "how many messages is this" unanswerable. A message is a thing the feed
+ * CONTAINS — it has a uuid, lineage, a timestamp, and it costs a page slot. An
+ * update is a change to a message the feed already contains — it is addressed by
+ * that message's id, carries no identity of its own, and costs nothing. A byte
+ * append is the second kind, always: a shell producing a megabyte of output
+ * changes one message many times, it does not produce thousands of messages.
+ *
+ * It is a SEPARATE FRAME from ConversationDelta because detached work produces
+ * at its own rate: folding its updates into the conversation push would let one
+ * chatty agent pace the feed of the conversation that dispatched it.
+ *
+ * @generated from message agentshim.frontend.v1.DetachedWorkDelta
+ */
+export type DetachedWorkDelta = Message$1<"agentshim.frontend.v1.DetachedWorkDelta"> & {
+  /**
+   * @generated from field: string workspace = 1;
+   */
+  workspace: string;
+
+  /**
+   * WHOLE MESSAGES: detached work opening for the first time, or restated in
+   * full after a resync. Complete feed envelopes, identical in shape to the ones
+   * ConversationDelta carries, so a frontend renders detached work with the same
+   * code that renders everything else and reconciles it by the same uuid.
+   *
+   * A message the receiver already holds is REPLACED by this copy — the daemon
+   * restating it in full, never a second message.
+   *
+   * Each carries payload arm `detached_work`; a message arriving here with any
+   * other payload is a daemon bug and is rejected rather than rendered.
+   *
+   * @generated from field: repeated agentshim.frontend.v1.Message opened = 3;
+   */
+  opened: Message[];
+
+  /**
+   * UPDATES to messages already open, in order. Each names its target message by
+   * id and mutates that message's payload; none of them is a message.
+   *
+   * @generated from field: repeated agentshim.frontend.v1.DetachedWorkUpdate updates = 4;
+   */
+  updates: DetachedWorkUpdate[];
+
+  /**
+   * Frontends persist this for reconnect resync.
+   *
+   * @generated from field: uint64 through_seq = 5;
+   */
+  throughSeq: bigint;
+
+  /**
+   * The workspace's staleness FENCE at the moment the daemon produced this
+   * push: an opaque token the client compares BYTE-WISE against the fence on
+   * the workspace's current WorkspaceState, and never parses, splits or
+   * interprets. Equal means current; different means stale, and a stale push
+   * is discarded whole rather than partially adopted.
+   *
+   * The daemon mints it and is the only thing that can read meaning into it.
+   * A client that learned to decode it would be depending on a fact this
+   * contract does not offer, and the token's composition is free to change.
+   *
+   * @generated from field: string fence = 6;
+   */
+  fence: string;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.DetachedWorkDelta.
+ * Use `create(DetachedWorkDeltaSchema)` to create a new message.
+ */
+export const DetachedWorkDeltaSchema: GenMessage<DetachedWorkDelta> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_feed, 3);
 
 /**
  * The compaction summary bubble: the purple-washed summary block that follows
@@ -341,7 +420,7 @@ export type CompactionSummaryItem = Message$1<"agentshim.frontend.v1.CompactionS
  * Use `create(CompactionSummaryItemSchema)` to create a new message.
  */
 export const CompactionSummaryItemSchema: GenMessage<CompactionSummaryItem> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 3);
+  messageDesc(file_agentshim_frontend_v1_feed, 4);
 
 /**
  * Ephemeral live-typing relay (never persisted, never in snapshots).
@@ -381,21 +460,21 @@ export type TypingDelta = Message$1<"agentshim.frontend.v1.TypingDelta"> & {
    * there and is retired by the authoritative record of the same block
    * landing there.
    *
-   * Set means the preview belongs INSIDE the named `AsyncBubble` and must
-   * never be opened on the top-level feed, because the record it previews is
-   * being folded into that bubble and will never land on the feed at all. A
-   * top-level preview of it could therefore never be retired, and would spin
-   * "streaming input…" with no body for the life of the page. It is retired
-   * instead by the bubble's OWN authoritative record — the next
-   * `AsyncBubbleUpdate` addressed to this id.
+   * Set means the preview belongs INSIDE the named MESSAGE — detached work
+   * whose payload is folding this record — and must never be opened on the
+   * top-level feed, because the record it previews will never land there at
+   * all. A top-level preview of it could therefore never be retired, and would
+   * spin "streaming input…" with no body for the life of the page. It is
+   * retired instead by that message's OWN authoritative record — the next
+   * `DetachedWorkUpdate` addressed to this id.
    *
    * The daemon knows which of the two it is BEFORE the preview goes out (it
    * is the same fold decision, made in the same place), so no preview it
    * cannot retire is ever created. This is provenance, not a timeout.
    *
-   * @generated from field: string bubble_id = 5;
+   * @generated from field: string parent_message_id = 5;
    */
-  bubbleId: string;
+  parentMessageId: string;
 };
 
 /**
@@ -403,7 +482,7 @@ export type TypingDelta = Message$1<"agentshim.frontend.v1.TypingDelta"> & {
  * Use `create(TypingDeltaSchema)` to create a new message.
  */
 export const TypingDeltaSchema: GenMessage<TypingDelta> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 4);
+  messageDesc(file_agentshim_frontend_v1_feed, 5);
 
 /**
  * The daemon's statement that a preview it opened will NEVER be completed.
@@ -428,11 +507,12 @@ export type TypingCut = Message$1<"agentshim.frontend.v1.TypingCut"> & {
 
   /**
    * The preview being retired, addressed exactly as the delta that opened it:
-   * empty for the top-level feed, or the AsyncBubble id it was folded into.
+   * empty for the top-level feed, or the id of the MESSAGE whose detached work
+   * it was folded into.
    *
-   * @generated from field: string bubble_id = 2;
+   * @generated from field: string parent_message_id = 2;
    */
-  bubbleId: string;
+  parentMessageId: string;
 
   /**
    * The workspace's staleness FENCE, compared byte-wise and never parsed,
@@ -448,7 +528,7 @@ export type TypingCut = Message$1<"agentshim.frontend.v1.TypingCut"> & {
  * Use `create(TypingCutSchema)` to create a new message.
  */
 export const TypingCutSchema: GenMessage<TypingCut> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 5);
+  messageDesc(file_agentshim_frontend_v1_feed, 6);
 
 /**
  * The session's retained SystemInit (slash commands, tools, skills, model
@@ -489,7 +569,7 @@ export type SessionInitView = Message$1<"agentshim.frontend.v1.SessionInitView">
  * Use `create(SessionInitViewSchema)` to create a new message.
  */
 export const SessionInitViewSchema: GenMessage<SessionInitView> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 6);
+  messageDesc(file_agentshim_frontend_v1_feed, 7);
 
 /**
  * WHO drove the turn that produced a message.

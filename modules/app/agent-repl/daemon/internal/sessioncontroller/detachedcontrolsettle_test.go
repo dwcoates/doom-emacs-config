@@ -19,7 +19,7 @@ import (
 func TestControlSettlePushCarriesTheUpdatesThrough(t *testing.T) {
 	// Arrange
 	c := &consumer{workspace: "/ws", sessionID: "s1", logf: func(string, ...any) {}}
-	ups := []*frontendv1.AsyncBubbleUpdate{{BubbleId: "b1"}, {BubbleId: "b2"}}
+	ups := []*frontendv1.DetachedWorkUpdate{{MessageId: "b1"}, {MessageId: "b2"}}
 
 	// Act
 	push := c.controlSettlePush(ups, nil, func(error) {
@@ -36,7 +36,7 @@ func TestControlSettlePushRoutesAGapToTheFaultChannel(t *testing.T) {
 	// Arrange — a classified async gap, which becomes a failure card rather
 	// than a warn.
 	c := &consumer{workspace: "/ws", sessionID: "s1", logf: func(string, ...any) {}}
-	gap := &frontend.AsyncGapError{BubbleID: "b1", Detail: "the bubble is gone"}
+	gap := &frontend.DetachedGapError{MessageID: "b1", Detail: "the work is gone"}
 
 	// Act
 	push := c.controlSettlePush(nil, gap, func(error) {
@@ -80,8 +80,8 @@ func TestPublishControlSettlePushesNothingForAnEmptySettlement(t *testing.T) {
 	// Assert: a settlement that settled nothing is not a frame.
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	if len(push.bubbles) != 0 {
-		t.Fatalf("async pushes = %d, want 0", len(push.bubbles))
+	if len(push.work) != 0 {
+		t.Fatalf("async pushes = %d, want 0", len(push.work))
 	}
 }
 
@@ -91,16 +91,16 @@ func TestPublishControlSettleCarriesTheGivenThroughSeq(t *testing.T) {
 	c := &consumer{workspace: "/ws", sessionID: "s1", push: pusher, logf: func(string, ...any) {}}
 
 	// Act
-	c.publishControlSettle(asyncPush{Updates: []*frontendv1.AsyncBubbleUpdate{{BubbleId: "b1"}}}, 7, "probe")
+	c.publishControlSettle(asyncPush{Updates: []*frontendv1.DetachedWorkUpdate{{MessageId: "b1"}}}, 7, "probe")
 
 	// Assert: through_seq is the client's replay cursor, so the publisher must
 	// carry the caller's number rather than mint one.
 	pusher.mu.Lock()
 	defer pusher.mu.Unlock()
-	if len(pusher.bubbles) != 1 {
-		t.Fatalf("async pushes = %d, want 1", len(pusher.bubbles))
+	if len(pusher.work) != 1 {
+		t.Fatalf("async pushes = %d, want 1", len(pusher.work))
 	}
-	if got := pusher.bubbles[0].GetThroughSeq(); got != 7 {
+	if got := pusher.work[0].GetThroughSeq(); got != 7 {
 		t.Fatalf("through_seq = %d, want 7", got)
 	}
 }

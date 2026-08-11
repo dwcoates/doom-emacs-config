@@ -87,7 +87,7 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 		t.Fatal("replay omitted the assistant response carrying token utilization")
 	}
 	usage := requireSingleTokenUtilization(t, h, id, replayed.GetAgent().GetResponse().GetBody().GetId(), "replayed assistant response")
-	// The wire's half of the same fact: the bubble's corner shows what the
+	// The wire's half of the same fact: the work's corner shows what the
 	// daemon resolved from this record, and it must be the record's own output.
 	if stamp := requireResponseStamp(t, replayed, "replayed assistant response"); stamp.GetOutputTokens() != usage.GetUsage().GetOutputTokens() {
 		t.Errorf("resolved stamp output_tokens = %d, want the durable record's %d", stamp.GetOutputTokens(), usage.GetUsage().GetOutputTokens())
@@ -119,7 +119,7 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 // response produced, from the ledger that owns it.
 //
 // The record left the conversation item: the feed carries the RESOLVED stamp
-// the bubble's corner renders, and the vendor-faithful evidence stays in the
+// the work's corner renders, and the vendor-faithful evidence stays in the
 // durable layer. Both are still asserted — this reads the evidence, and
 // requireResponseStamp below reads what the wire resolved from it.
 func requireSingleTokenUtilization(t *testing.T, h *e2eHarness, sessionID, apiMessageID, source string) *frontendv1.TokenUtilization {
@@ -144,7 +144,7 @@ func requireSingleTokenUtilization(t *testing.T, h *e2eHarness, sessionID, apiMe
 	return records[0]
 }
 
-// requireResponseStamp reads the resolved figures a response's bubble renders.
+// requireResponseStamp reads the resolved figures a response's work renders.
 // They are the daemon's own derivation from the durable record above, so a
 // stamp that disagrees with it is the two halves drifting apart.
 func requireResponseStamp(t *testing.T, item *frontendv1.Message, source string) *frontendv1.ResponseUsageStamp {
