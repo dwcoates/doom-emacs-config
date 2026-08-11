@@ -66,7 +66,12 @@ attempt's own `:started-at' rather than by waiting."
          (agent-repl--recovery-slo-timer nil)
          (agent-repl-test--slo-logs nil)
          (agent-repl-test--slo-forced nil)
-         (agent-repl-test--slo-probe-answer ""))
+         (agent-repl-test--slo-probe-answer "")
+         (agent-repl--recovery-slo-excluded (make-hash-table :test 'equal))
+         ;; The link is UP unless a test says otherwise: the fast path is
+         ;; the ordinary case, and an attempt armed over a live link is
+         ;; answerable from the instant it opens.
+         (agent-repl-recovery-slo-link-up-function (lambda () t)))
      (cl-letf (((symbol-function 'agent-repl--log)
                 (lambda (_ws fmt &rest args)
                   (push (cons 'info (apply #'format fmt args)) agent-repl-test--slo-logs)))
@@ -109,11 +114,17 @@ attempt's own `:started-at' rather than by waiting."
     (agent-repl--recovery-slo-note ws signal)))
 
 (defun agent-repl-test--slo-age (ws ms)
-  "Backdate WS's open attempt by MS milliseconds."
+  "Backdate WS's open attempt by MS milliseconds.
+BOTH anchors move: the outage instant and the instant recovery became
+answerable, so an aged attempt reads as one whose link came back at the
+start and whose RECOVERY has been running MS — which is the elapsed the
+budget rules on."
   (let ((attempt (gethash ws agent-repl--recovery-slo-attempts)))
-    (puthash ws (plist-put attempt :started-at
-                           (- (plist-get attempt :started-at) (/ ms 1000.0)))
-             agent-repl--recovery-slo-attempts)))
+    (dolist (key '(:started-at :answerable-at))
+      (when (plist-get attempt key)
+        (setq attempt (plist-put attempt key
+                                 (- (plist-get attempt key) (/ ms 1000.0))))))
+    (puthash ws attempt agent-repl--recovery-slo-attempts)))
 
 ;;;; ---- The conjunction ---------------------------------------------------
 
@@ -136,14 +147,14 @@ attempt's own `:started-at' rather than by waiting."
 (ert-deftest agent-repl-test-recovery-slo-total-is-the-last-signal ()
   "The total gap is the LAST signal to land, not the first."
   ;; Arrange
-  (let ((attempt (list :started-at 0.0 :emacs 0.1 :webapp 1.5 :wire 0.2)))
+  (let ((attempt (list :started-at 0.0 :answerable-at 0.0 :emacs 0.1 :webapp 1.5 :wire 0.2)))
     ;; Act + Assert
     (should (= (agent-repl--recovery-slo-total-ms attempt) 1500))))
 
 (ert-deftest agent-repl-test-recovery-slo-unstamped-delta-is-not-zero ()
   "An unstamped signal reports -1, never a zero that would read as instant."
   ;; Arrange
-  (let ((attempt (list :started-at 0.0 :emacs 0.1)))
+  (let ((attempt (list :started-at 0.0 :answerable-at 0.0 :emacs 0.1)))
     ;; Act + Assert
     (should (= (agent-repl--recovery-slo-delta-ms attempt 'webapp) -1))))
 
@@ -363,6 +374,161 @@ budget breach, so the contract is asserted against the source."
       (should (= first (plist-get (gethash "slo-first" agent-repl--recovery-slo-attempts)
                                   :wire))))))
 
+;;;; ---- Scope: only workspaces that can recover are measured ---------------
+
+(ert-deftest agent-repl-test-recovery-slo-unrecoverable-workspace-is-not-armed ()
+  "A workspace with no page and no live session opens NO attempt."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-scope-out"
+      ;; Arrange: refused a page, and the daemon holds no session for it.
+      (cl-letf (((symbol-function 'agent-repl--frontend-precreate-refusal)
+                 (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--frontend-session-controller-live-p)
+                 (lambda (_ws) nil)))
+        ;; Act
+        (agent-repl--recovery-slo-on-link-down)
+        ;; Assert
+        (should-not (gethash "slo-scope-out" agent-repl--recovery-slo-attempts))))))
+
+(ert-deftest agent-repl-test-recovery-slo-unrecoverable-workspace-is-recorded ()
+  "Exclusion is STATED — a not-measured record, never a silent skip."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-scope-said"
+      ;; Arrange
+      (cl-letf (((symbol-function 'agent-repl--frontend-precreate-refusal)
+                 (lambda (_ws) :merge-completed)))
+        ;; Act
+        (agent-repl--recovery-slo-on-link-down)
+        ;; Assert
+        (should (member "recovery-slo: ws=slo-scope-said outcome=not-measured \
+reason=merge-completed"
+                        (mapcar #'cdr agent-repl-test--slo-logs)))))))
+
+(ert-deftest agent-repl-test-recovery-slo-exclusion-is-recorded-once-per-outage ()
+  "Three armings of one bounce state the same non-measurement ONCE."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-scope-once"
+      ;; Arrange
+      (cl-letf (((symbol-function 'agent-repl--frontend-precreate-refusal)
+                 (lambda (_ws) :not-gui)))
+        ;; Act
+        (agent-repl--recovery-slo-on-link-down)
+        (agent-repl--recovery-slo-on-link-up)
+        ;; Assert
+        (should (= 1 (cl-count-if
+                      (lambda (e) (string-match-p "outcome=not-measured" (cdr e)))
+                      agent-repl-test--slo-logs)))))))
+
+(ert-deftest agent-repl-test-recovery-slo-mounted-webview-is-armed ()
+  "A workspace whose page is already mounted IS recoverable, so it is armed."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-scope-in"
+      ;; Arrange: `:already-mounted' is the refusal that means YES here.
+      (cl-letf (((symbol-function 'agent-repl--frontend-precreate-refusal)
+                 (lambda (_ws) :already-mounted))
+                ((symbol-function 'agent-repl--frontend-session-controller-live-p)
+                 (lambda (_ws) nil)))
+        ;; Act
+        (agent-repl--recovery-slo-on-link-down)
+        ;; Assert
+        (should (gethash "slo-scope-in" agent-repl--recovery-slo-attempts))))))
+
+(ert-deftest agent-repl-test-recovery-slo-live-session-without-a-page-is-armed ()
+  "No page but a live session controller still has a wire to recover."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-scope-session"
+      ;; Arrange
+      (cl-letf (((symbol-function 'agent-repl--frontend-precreate-refusal)
+                 (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--frontend-session-controller-live-p)
+                 (lambda (_ws) t)))
+        ;; Act
+        (agent-repl--recovery-slo-on-link-down)
+        ;; Assert
+        (should (gethash "slo-scope-session" agent-repl--recovery-slo-attempts))))))
+
+(ert-deftest agent-repl-test-recovery-slo-exclusion-reason-comes-from-the-eligibility-source ()
+  "THE DRIFT GUARD: every refusal the eligibility source can give is honored.
+The scope answer is not a second opinion about who is owed a page — it
+is the SAME one, so a refusal keyword added there must exclude here
+without this module being touched."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-drift"
+      (dolist (refusal '(:not-live :not-gui :merge-completed :open-fenced
+                         :no-xwidget :some-future-refusal))
+        ;; Arrange
+        (cl-letf (((symbol-function 'agent-repl--frontend-precreate-refusal)
+                   (lambda (_ws) refusal))
+                  ((symbol-function 'agent-repl--frontend-session-controller-live-p)
+                   (lambda (_ws) t)))
+          ;; Act + Assert
+          (should (eq refusal (agent-repl--recovery-slo-exclusion "slo-drift"))))))))
+
+;;;; ---- Answerability: the budget measures recovery, not the outage --------
+
+(ert-deftest agent-repl-test-recovery-slo-budget-does-not-run-while-the-link-is-down ()
+  "A daemon still down past the budget is PENDING, never a breach.
+The live records showed every workspace on the host breaching three
+seconds into a thirteen-second restart, with nothing to stamp and
+nothing to force against."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-down-long"
+      ;; Arrange
+      (let ((agent-repl-recovery-slo-link-up-function (lambda () nil)))
+        (agent-repl--recovery-slo-open "slo-down-long")
+        (agent-repl-test--slo-age "slo-down-long"
+                                  (* 10 agent-repl-recovery-slo-budget-ms))
+        ;; Act
+        (let ((outcome (agent-repl--recovery-slo-check "slo-down-long")))
+          ;; Assert
+          (should (eq outcome 'pending))
+          (should-not agent-repl-test--slo-forced))))))
+
+(ert-deftest agent-repl-test-recovery-slo-clock-rebases-on-the-link-open-edge ()
+  "Deltas are counted from the instant recovery became answerable."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-rebase"
+      ;; Arrange: armed 8s ago, over a link that was down the whole time.
+      (let ((agent-repl-recovery-slo-link-up-function (lambda () nil)))
+        (agent-repl--recovery-slo-open "slo-rebase" (- (float-time) 8.0)))
+      ;; Act: the link opens now, then the conjunction lands.
+      (agent-repl--recovery-slo-on-link-open)
+      (agent-repl-test--slo-satisfy "slo-rebase")
+      ;; Assert
+      (let ((attempt (gethash "slo-rebase" agent-repl--recovery-slo-attempts)))
+        (should (< (agent-repl--recovery-slo-delta-ms attempt 'emacs) 1000))
+        (should (>= (agent-repl--recovery-slo-outage-ms attempt) 8000))))))
+
+(ert-deftest agent-repl-test-recovery-slo-first-link-open-wins ()
+  "A flapping reconnect ladder does not keep pushing answerability forward."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-flap"
+      ;; Arrange
+      (let ((agent-repl-recovery-slo-link-up-function (lambda () nil)))
+        (agent-repl--recovery-slo-open "slo-flap"))
+      (agent-repl--recovery-slo-on-link-open)
+      (let ((first (plist-get (gethash "slo-flap" agent-repl--recovery-slo-attempts)
+                              :answerable-at)))
+        ;; Act
+        (agent-repl--recovery-slo-on-link-open)
+        ;; Assert
+        (should (equal first
+                       (plist-get (gethash "slo-flap"
+                                           agent-repl--recovery-slo-attempts)
+                                  :answerable-at)))))))
+
+(ert-deftest agent-repl-test-recovery-slo-attempt-armed-over-a-live-link-is-answerable-at-once ()
+  "THE FAST PATH IS UNCHANGED: armed while connected, the anchors coincide."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-fast"
+      ;; Act
+      (agent-repl--recovery-slo-open "slo-fast")
+      ;; Assert
+      (let ((attempt (gethash "slo-fast" agent-repl--recovery-slo-attempts)))
+        (should (equal (plist-get attempt :started-at)
+                       (plist-get attempt :answerable-at)))
+        (should (= 0 (agent-repl--recovery-slo-outage-ms attempt)))))))
+
 ;;;; ---- Arming: one budget per workspace, at the earliest evidence ---------
 
 (defun agent-repl-test--slo-started-at (ws)
@@ -514,7 +680,7 @@ only there could never be stamped by the reconnect that opened it."
         (should (string-match-p
                  (concat "\\`recovery-slo: ws=slo-fields outcome=recovered "
                          "emacs_ms=-?[0-9]+ webapp_ms=-?[0-9]+ wire_ms=-?[0-9]+ "
-                         "total_ms=-?[0-9]+ budget_ms=3000 forced=no "
+                         "total_ms=-?[0-9]+ outage_ms=-?[0-9]+ budget_ms=3000 forced=no "
                          "outstanding=none\\'")
                  record))))))
 
@@ -535,7 +701,7 @@ only there could never be stamped by the reconnect that opened it."
         (should (string-match-p
                  (concat "\\`recovery-slo: ws=slo-breach-fields outcome=budget-breach "
                          "emacs_ms=-?[0-9]+ webapp_ms=-1 wire_ms=-1 "
-                         "total_ms=-1 budget_ms=3000 forced=no "
+                         "total_ms=-1 outage_ms=-?[0-9]+ budget_ms=3000 forced=no "
                          "outstanding=webapp,wire\\'")
                  record))
         (should (assq 'sweep agent-repl-test--slo-forced))
