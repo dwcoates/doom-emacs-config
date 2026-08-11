@@ -25,6 +25,7 @@ type fakePusher struct {
 	trace      []string
 	convo      []*frontendv1.ConversationDelta
 	typing     []*frontendv1.TypingDelta
+	typingCuts []*frontendv1.TypingCut
 	catalog    []*frontendv1.TaskCatalog
 	state      []*frontendv1.WorkspaceState
 	inits      []*frontendv1.SessionInitView
@@ -51,6 +52,12 @@ func (p *fakePusher) PushAsyncBubbleDelta(d *frontendv1.AsyncBubbleDelta) {
 func (p *fakePusher) PushTypingDelta(t *frontendv1.TypingDelta) {
 	p.mu.Lock()
 	p.typing = append(p.typing, t)
+	p.mu.Unlock()
+	notifyTestActivity()
+}
+func (p *fakePusher) PushTypingCut(c *frontendv1.TypingCut) {
+	p.mu.Lock()
+	p.typingCuts = append(p.typingCuts, c)
 	p.mu.Unlock()
 	notifyTestActivity()
 }

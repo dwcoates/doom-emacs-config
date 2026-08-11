@@ -1253,6 +1253,25 @@ export type ContentDeltaKind = (typeof CONTENT_DELTA_KINDS)[number];
  * `core.v1.ContentDelta` for the store's reveal feed. `kind` is normalized to
  * the store's snake vocabulary (the `inputJson` arm reads as `input_json`).
  */
+/**
+ * The daemon's statement that a preview it opened will NEVER be completed.
+ *
+ * A preview is retired by the authoritative record of the block it previews;
+ * when that record can no longer arrive, nothing retires it and the bubble
+ * spins "streaming input…" with no body for the life of the page. The cut is a
+ * fact the daemon owns, never a deadline this client guesses.
+ */
+export interface TypingCut {
+  workspace: string;
+  /**
+   * The preview being retired, addressed exactly as the delta that opened it:
+   * empty for the top-level feed, or the AsyncBubble id it was folded into.
+   */
+  bubbleId: string;
+  /** Compared BYTE-WISE and never parsed, identically to every other push. */
+  fence: string;
+}
+
 export interface TypingDelta {
   workspace: string;
   /**
@@ -2186,6 +2205,7 @@ export type FrontendFrame = {
     | { case: "conversationDelta"; value: ConversationDelta }
     | { case: "asyncBubbleDelta"; value: AsyncBubbleDelta }
     | { case: "typingDelta"; value: TypingDelta }
+    | { case: "typingCut"; value: TypingCut }
     | { case: "taskCatalog"; value: TaskCatalog }
     | { case: "commandAck"; value: CommandAck }
     | { case: "daemonView"; value: DaemonView }
@@ -2419,6 +2439,13 @@ const FRAME_DECODERS: ReadonlyMap<
     (v: unknown) => ({
       case: "typingDelta" as const,
       value: decodeTypingDelta(v),
+    }),
+  ],
+  [
+    "typingCut",
+    (v: unknown) => ({
+      case: "typingCut" as const,
+      value: decodeTypingCut(v),
     }),
   ],
   [
@@ -5066,6 +5093,20 @@ const CONTENT_DELTA_ARM_KIND: Readonly<Record<string, ContentDeltaKind>> = {
   inputJson: "input_json",
   signature: "signature",
 };
+const TYPING_CUT_KEYS = new Set(["workspace", "bubbleId", "fence"]);
+
+function decodeTypingCut(v: unknown): TypingCut {
+  const o = ensureObject(v, "TypingCut");
+  rejectUnknown(o, TYPING_CUT_KEYS, "TypingCut");
+  return {
+    workspace: str(o, "workspace", "TypingCut"),
+    // proto3 omits an empty string, and empty is the ordinary case: the cut
+    // addresses a preview standing on the top-level feed.
+    bubbleId: str(o, "bubbleId", "TypingCut"),
+    fence: str(o, "fence", "TypingCut"),
+  };
+}
+
 function decodeTypingDelta(v: unknown): TypingDelta {
   const o = ensureObject(v, "TypingDelta");
   rejectUnknown(o, TYPING_DELTA_KEYS, "TypingDelta");
