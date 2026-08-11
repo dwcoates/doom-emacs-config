@@ -204,6 +204,107 @@ func TestReportSaysNothingRatherThanClaimingHealthWithoutALedger(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// THE END-STATE HALF. The boot verdict is taken before any bring-up runs, so
+// PRESERVED there is a claim the bring-up can still break.
+// ---------------------------------------------------------------------------
+
+func preservedEntry() Entry {
+	return Entry{SessionID: "s_1", Workspace: "/ws", PID: 33870, Disposition: DispositionPreserved}
+}
+
+func captureLines() (func(string, ...any), *[]string) {
+	var lines []string
+	return func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }, &lines
+}
+
+func TestAnAdoptedSurvivorEndsTheBounceAsAdopted(t *testing.T) {
+	t.Parallel()
+	settlement := NewSettlement()
+	settlement.Adopted("/ws", "the bring-up reattached to it")
+	logf, lines := captureLines()
+
+	tally := ReportEnd(logf, []Entry{preservedEntry()}, settlement)
+
+	if tally.Adopted != 1 || tally.Replaced != 0 {
+		t.Fatalf("tally = %+v, want the adoption counted", tally)
+	}
+	if !strings.Contains(strings.Join(*lines, "\n"), "verdict=ADOPTED") {
+		t.Fatalf("lines = %v, want an ADOPTED verdict", *lines)
+	}
+}
+
+func TestAReplacedSurvivorEndsTheBounceAsAPreservationThatDidNotHold(t *testing.T) {
+	t.Parallel()
+	settlement := NewSettlement()
+	settlement.Replaced("/ws", "it never redialled")
+	logf, lines := captureLines()
+
+	tally := ReportEnd(logf, []Entry{preservedEntry()}, settlement)
+
+	if tally.Replaced != 1 || tally.Adopted != 0 {
+		t.Fatalf("tally = %+v, want the replacement counted", tally)
+	}
+	joined := strings.Join(*lines, "\n")
+	if !strings.Contains(joined, "PRESERVATION DID NOT HOLD") || !strings.Contains(joined, "it never redialled") {
+		t.Fatalf("lines = %v, want the broken preservation named with its reason", *lines)
+	}
+}
+
+func TestASessionNoBringUpRuledOnIsUnsettledRatherThanAdopted(t *testing.T) {
+	t.Parallel()
+	logf, lines := captureLines()
+
+	tally := ReportEnd(logf, []Entry{preservedEntry()}, NewSettlement())
+
+	if tally.Unsettled != 1 || tally.Adopted != 0 {
+		t.Fatalf("tally = %+v, want silence counted as unsettled and never as adoption", tally)
+	}
+	if !strings.Contains(strings.Join(*lines, "\n"), "verdict=UNSETTLED") {
+		t.Fatalf("lines = %v, want an UNSETTLED verdict", *lines)
+	}
+}
+
+func TestAReplacementIsNotLaunderedByTheReplacementsOwnAdoption(t *testing.T) {
+	t.Parallel()
+	settlement := NewSettlement()
+	settlement.Replaced("/ws", "it never redialled")
+	settlement.Adopted("/ws", "the freshly spawned shim connected")
+
+	verdict, _, ok := settlement.Outcome("/ws")
+
+	if !ok || verdict != OutcomeReplaced {
+		t.Fatalf("outcome = (%q, %v), want the workspace to stay REPLACED", verdict, ok)
+	}
+}
+
+func TestAReplacementWithNoReasonRecordsTheOmissionRatherThanDroppingIt(t *testing.T) {
+	t.Parallel()
+	settlement := NewSettlement()
+	settlement.Replaced("/ws", "")
+
+	_, reason, _ := settlement.Outcome("/ws")
+
+	if !strings.Contains(reason, "NO REASON WAS RECORDED") {
+		t.Fatalf("reason = %q, want the missing cause surfaced as the defect it is", reason)
+	}
+}
+
+func TestARolledEntryIsNotJudgedAgainstTheEndState(t *testing.T) {
+	t.Parallel()
+	rolled := Entry{SessionID: "s_2", Workspace: "/ws2", PID: 5, Disposition: DispositionRolled, Reason: "superseded bundle"}
+	logf, lines := captureLines()
+
+	tally := ReportEnd(logf, []Entry{rolled}, NewSettlement())
+
+	if (tally != EndTally{}) {
+		t.Fatalf("tally = %+v, want a deliberate roll left out of the end-state accounting", tally)
+	}
+	if len(*lines) != 0 {
+		t.Fatalf("lines = %v, want none: the roll's end state was decided when it was ordered", *lines)
+	}
+}
+
 func TestReportPassesAProbeFailureThroughAsUnknown(t *testing.T) {
 	t.Parallel()
 	entries := []Entry{{SessionID: "s_1", Workspace: "/ws", PID: 27494, Disposition: DispositionPreserved}}
