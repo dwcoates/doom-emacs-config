@@ -155,7 +155,7 @@ func TestAnAssistantItemIsNeverMachinery(t *testing.T) {
 
 const compactMachinery = "<command-message>compact</command-message>\n<command-name>/compact</command-name>\n<command-args></command-args>"
 
-func TestAMachineryUserLineIsWithheldFromTheFeed(t *testing.T) {
+func TestAMachineryUserLineIsNeverDrawnAsAPrompt(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 
@@ -186,8 +186,8 @@ func TestARealPromptBesideMachineryStillReachesTheFeed(t *testing.T) {
 	}
 }
 
-func TestWithholdingAMachineryLineIsLoud(t *testing.T) {
-	// Arrange: a silent drop is indistinguishable from a lost record.
+func TestClassifyingAMachineryLineIsLoud(t *testing.T) {
+	// Arrange: a silent rewrite is indistinguishable from a lost record.
 	cl := &logCapture{}
 	h := newQueueHarnessWithPusher(t, nil, nil, cl.logf)
 
@@ -195,23 +195,37 @@ func TestWithholdingAMachineryLineIsLoud(t *testing.T) {
 	h.controller().consumer.Consume(transcriptUserEvent(t, 12, "u-machinery", compactMachinery))
 
 	// Assert
-	if !cl.contains("user turn WITHHELD as slash-command machinery") {
-		t.Error("no loud line accounts for the withheld machinery record")
+	if !cl.contains("slash-command machinery CLASSIFIED") {
+		t.Error("no loud line accounts for the classified machinery record")
 	}
 	if !cl.contains("uuid=u-machinery") {
-		t.Error("the loud line does not name the record it withheld")
+		t.Error("the loud line does not name the record it classified")
 	}
 }
 
-func TestAWithheldMachineryLineStillAdvancesTheSeq(t *testing.T) {
+func TestAnUnnamedMachineryLineIsStillWithheldLoudly(t *testing.T) {
+	// Arrange: a stdout-only record names no command, and an UNSPECIFIED
+	// command is a malformed frame rather than a half-stated item.
+	cl := &logCapture{}
+	h := newQueueHarnessWithPusher(t, nil, nil, cl.logf)
+
+	// Act
+	h.controller().consumer.Consume(transcriptUserEvent(t, 12, "u-stdout", "<local-command-stdout>total 8</local-command-stdout>"))
+
+	// Assert
+	if !cl.contains("slash-command machinery WITHHELD UNNAMED") {
+		t.Error("no loud line accounts for the machinery record that named no command")
+	}
+}
+
+func TestAClassifiedMachineryLineStillAdvancesTheSeq(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 
 	// Act
 	h.controller().consumer.Consume(transcriptUserEvent(t, 12, "u-machinery", compactMachinery))
 
-	// Assert: the record is retained and seq-accounted exactly as any other —
-	// only the rendered item is withheld.
+	// Assert: the record is retained and seq-accounted exactly as any other.
 	if got := h.controller().consumer.newestRetainedSeq(); got != 12 {
 		t.Errorf("newest retained seq = %d, want the machinery record's own 12", got)
 	}
@@ -226,8 +240,8 @@ func TestAWithheldMachineryLineStillAdvancesTheSeq(t *testing.T) {
 	if delta == nil {
 		t.Fatal("no delta carried through_seq 12, so no frontend cursor advanced past the machinery record")
 	}
-	if got := len(delta.GetMessages()); got != 0 {
-		t.Errorf("the through_seq-12 delta carried %d item(s), want none", got)
+	if got := len(delta.GetMessages()); got != 1 {
+		t.Errorf("the through_seq-12 delta carried %d item(s), want the classified command", got)
 	}
 }
 
@@ -284,7 +298,7 @@ func TestTheRealLineIsStillAttributedAfterAMachineryLine(t *testing.T) {
 	}
 }
 
-func TestAReplayedMachineryLineIsWithheldToo(t *testing.T) {
+func TestAReplayedMachineryLineIsNeverDrawnAsAPromptEither(t *testing.T) {
 	// Arrange: a resync must not re-pollute a feed the live path kept clean.
 	h := newQueueHarness(t, nil)
 
@@ -312,7 +326,7 @@ func machineryStreamEvent(t *testing.T, seq uint64, text string) *corev1.Event {
 	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
 }
 
-func TestMachineryOnTheStreamPlaneIsWithheldToo(t *testing.T) {
+func TestMachineryOnTheStreamPlaneIsNeverDrawnAsAPromptEither(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 
@@ -322,5 +336,126 @@ func TestMachineryOnTheStreamPlaneIsWithheldToo(t *testing.T) {
 	// Assert
 	if turns := h.userTurns(); len(turns) != 0 {
 		t.Fatalf("pushed %d user turn(s) for a stream-plane machinery record, want none", len(turns))
+	}
+}
+
+// --- outbound classification ------------------------------------------------
+
+// shapeAPromptEvent is the CLI's SHAPE A synthetic record as the file plane
+// delivers it: a "user" transcript line, NOT flagged isMeta, carrying the
+// promptId that groups one submission's records.
+func shapeAPromptEvent(t *testing.T, seq uint64, uuid, promptID, text string) *corev1.Event {
+	t.Helper()
+	a, err := anypb.New(&datav1.TranscriptLine{
+		Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
+			Envelope: &datav1.LineEnvelope{Uuid: uuid, PromptId: promptID},
+			Message: &datav1.ApiUserMessage{
+				Content: &datav1.ApiUserMessage_ContentString{ContentString: text},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("anypb.New: %v", err)
+	}
+	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+}
+
+// shapeBLocalCommandEvent is the CLI's SHAPE B synthetic record: a "system"
+// line with subtype local_command, flagged isMeta and carrying NO promptId.
+func shapeBLocalCommandEvent(t *testing.T, seq uint64, uuid, content string) *corev1.Event {
+	t.Helper()
+	a, err := anypb.New(&datav1.TranscriptLine{
+		Line: &datav1.TranscriptLine_System{System: &datav1.SystemLine{
+			Envelope: &datav1.LineEnvelope{Uuid: uuid, IsMeta: true},
+			Subtype:  &datav1.SystemLine_LocalCommand{LocalCommand: &datav1.LocalCommandLine{Content: content}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("anypb.New: %v", err)
+	}
+	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+}
+
+// classifiedCommands returns every DaemonInterceptedCommandItem the consumer
+// pushed on the conversation plane, keyed by the record uuid it rode on.
+func (h *queueHarness) classifiedCommands() map[string]frontendv1.SessionCommand {
+	h.push.mu.Lock()
+	defer h.push.mu.Unlock()
+	out := map[string]frontendv1.SessionCommand{}
+	for _, cd := range h.push.convo {
+		for _, it := range cd.GetMessages() {
+			if dic := it.GetDaemonInterceptedCommand(); dic != nil {
+				out[it.GetUuid()] = dic.GetCommand()
+			}
+		}
+	}
+	return out
+}
+
+func TestShapeAIsClassifiedByItsContentHead(t *testing.T) {
+	// Arrange: shape A's envelope says nothing, so the head is the only signal.
+	h := newQueueHarness(t, nil)
+
+	// Act
+	h.controller().consumer.Consume(shapeAPromptEvent(t, 12, "u-a", "prompt-1", compactMachinery))
+
+	// Assert
+	got := h.classifiedCommands()
+	if got["u-a"] != frontendv1.SessionCommand_SESSION_COMMAND_COMPACT {
+		t.Errorf("classified command for u-a = %v, want COMPACT", got["u-a"])
+	}
+}
+
+func TestShapeBIsClassifiedByItsEnvelopeNotItsContentHead(t *testing.T) {
+	// Arrange: a system/local_command record whose body opens with ordinary
+	// stdout — no machinery prefix at all — so only the envelope can decide it.
+	h := newQueueHarness(t, nil)
+	body := "Context Usage\n<command-name>/context</command-name>\n"
+
+	// Act
+	h.controller().consumer.Consume(shapeBLocalCommandEvent(t, 12, "u-b", body))
+
+	// Assert
+	got := h.classifiedCommands()
+	if got["u-b"] != frontendv1.SessionCommand_SESSION_COMMAND_CONTEXT {
+		t.Errorf("classified command for u-b = %v, want CONTEXT from the envelope test", got["u-b"])
+	}
+}
+
+func TestAHumanPromptQuotingAMachineryTagStaysAPrompt(t *testing.T) {
+	// Arrange: the regression guard on head-only matching.
+	h := newQueueHarness(t, nil)
+	prose := "why does the transcript contain <command-name>/compact</command-name> records?"
+
+	// Act
+	h.controller().consumer.Consume(shapeAPromptEvent(t, 12, "u-human", "prompt-1", prose))
+
+	// Assert
+	if got := h.classifiedCommands(); len(got) != 0 {
+		t.Fatalf("classified %d command(s) from a human prompt, want none", len(got))
+	}
+	turns := h.userTurns()
+	if len(turns) != 1 || turns[0].item.GetUuid() != "u-human" {
+		t.Fatalf("pushed %d user turn(s), want the human prompt untouched", len(turns))
+	}
+}
+
+func TestTwoCloseTogetherCommandsKeepTheirOwnIdentities(t *testing.T) {
+	// Arrange: two commands in adjacent records, each with its own promptId.
+	h := newQueueHarness(t, nil)
+	clearMachinery := "<command-message>clear</command-message>\n<command-name>/clear</command-name>"
+
+	// Act
+	h.controller().consumer.Consume(shapeAPromptEvent(t, 12, "u-compact", "prompt-1", compactMachinery))
+	h.controller().consumer.Consume(shapeAPromptEvent(t, 13, "u-clear", "prompt-2", clearMachinery))
+
+	// Assert: each command rides its OWN record's uuid, so nothing about the
+	// verdict depends on the order the two arrived in.
+	got := h.classifiedCommands()
+	if got["u-compact"] != frontendv1.SessionCommand_SESSION_COMMAND_COMPACT {
+		t.Errorf("classified command for u-compact = %v, want COMPACT", got["u-compact"])
+	}
+	if got["u-clear"] != frontendv1.SessionCommand_SESSION_COMMAND_CLEAR {
+		t.Errorf("classified command for u-clear = %v, want CLEAR", got["u-clear"])
 	}
 }
