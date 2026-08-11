@@ -213,6 +213,45 @@ FIELD-JSON is the already-serialized `\"field\": {...}' body."
     (should (eq (agent-repl--uds-dispatch-frame '(:workspaceState (:x 1)))
                 :applied))))
 
+;;;; ---- dispatch: the recovery SLO's wire evidence ----------------------
+;;
+;; THE PIN.  The wire stamp used to fire for EVERY arm that carried a
+;; `workspace', so the evidence was whichever frame happened to arrive first —
+;; in practice a `typingDelta', because a workspace mid-turn emits hundreds a
+;; second.  A workspace that simply was not typing had no wire evidence at all,
+;; and the day a daemon-side fold silenced typing inside async windows, every
+;; affected workspace started reporting `wire_ms=-1'.  These two tests are the
+;; before/after of that rule at the dispatch point.
+
+(defmacro agent-repl-test--capturing-wire-stamps (var &rest body)
+  "Run BODY with wire stamps captured into VAR instead of reaching the SLO."
+  (declare (indent 1))
+  `(let ((,var nil))
+     (cl-letf (((symbol-function 'agent-repl--recovery-slo-note)
+                (lambda (ws signal) (push (cons signal ws) ,var)))
+               ((symbol-function 'agent-repl--frontend-ws-name) #'identity))
+       ,@body)))
+
+(ert-deftest agent-repl-test-uds-dispatch-typing-delta-is-not-wire-evidence ()
+  "An incidental `typingDelta' does not stand in for the guaranteed carrier."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--capturing-wire-stamps stamps
+      ;; Act
+      (agent-repl--uds-dispatch-frame '(:typingDelta (:workspace "ws1")))
+      ;; Assert
+      (should (null stamps)))))
+
+(ert-deftest agent-repl-test-uds-dispatch-workspace-state-is-wire-evidence ()
+  "A `workspaceState' — which the daemon owes every workspace — stamps wire."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--capturing-wire-stamps stamps
+      ;; Act
+      (agent-repl--uds-dispatch-frame '(:workspaceState (:workspace "ws1")))
+      ;; Assert
+      (should (equal stamps '((wire . "ws1")))))))
+
 (ert-deftest agent-repl-test-uds-dispatch-no-oneof-key-signals ()
   "A frame with no oneof key is malformed and signals loudly."
   ;; Arrange
