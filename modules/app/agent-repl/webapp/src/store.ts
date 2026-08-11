@@ -458,22 +458,33 @@ export function stringField(item: ToolItem, key: string): string {
 }
 
 /**
- * A SESSION COMMAND the user invoked (`frontend.v1.DaemonInterceptedCommandItem`):
- * `/model`, `/compact`, `/clear`, and the rest of the closed set the CLI
- * answers itself.
+ * A slash command the daemon INTERCEPTED from what the user typed
+ * (`frontend.v1.DaemonInterceptedCommandItem`): `/model`, `/compact`,
+ * `/clear`, and the rest of the closed set the CLI answers itself.
+ *
+ * NAMED FOR WHERE IT WAS INTERCEPTED, not for what it acts on: the older
+ * "session command" read as a command sent TO the session, when it is one
+ * taken FROM the user's input before the prompt could become one.
  *
  * IT IS NOT A PROMPT, and that is the whole reason it exists as its own item.
  * The model never sees `/model` — the CLI resolves it locally — so drawing the
  * submitted text as a purple user bubble claimed a question was asked that
  * nobody received. The daemon withholds that bubble and pushes this instead.
  *
+ * IT ARRIVES BY EITHER ROUTE AND RENDERS THE SAME. A CLI-handled command is
+ * DURABLE, so it comes back on a `ConversationPage` after a reload exactly as
+ * it came live on a delta; a daemon-handled one is ephemeral and only ever
+ * arrives live. Both routes decode through the same arm into this item, so
+ * "where it came from" is not a property this item carries and not one the
+ * renderer can read.
+ *
  * THERE IS NO TEXT HERE, and there is no way for there to be. The wire message
  * carries the command enum and nothing else, so this end could not render the
  * prompt (or an argument like `opus`) even if a future renderer wanted to. The
  * slash form drawn on screen is derived from `command`, never received.
  */
-export interface SessionCommandItem extends FeedOrderedItem {
-  kind: "session-command";
+export interface DaemonInterceptedCommandItem extends FeedOrderedItem {
+  kind: "daemon-intercepted-command";
   uuid: string;
   command: SessionCommand;
 }
@@ -487,7 +498,7 @@ export type ConversationItem =
   | ResultItem
   | ContextClearedItem
   | ContextCompactedItem
-  | SessionCommandItem
+  | DaemonInterceptedCommandItem
   | FailureCardItem
   | SystemItem;
 
@@ -1010,7 +1021,7 @@ function itemKey(item: ConversationItem): string | null {
     case "result":
     case "context-cleared":
     case "context-compacted":
-    case "session-command":
+    case "daemon-intercepted-command":
       return `${item.kind}:${item.uuid}`;
     // Terminal / one-shot items carry no reconcilable id: they are appended.
     default:
