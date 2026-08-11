@@ -260,6 +260,165 @@ export function installTailReanchor(
   });
 }
 
+/**
+ * The two writes anything moving the feed is allowed to make (see `TailFollow`).
+ *
+ * Narrower than the owner itself so a caller that only needs to MOVE the feed
+ * cannot reach the decision, and so a test can hand one in without a box.
+ */
+export interface TailWriter {
+  park(): void;
+  place(top: number): void;
+}
+
+/**
+ * THE SINGLE OWNER OF "SHOULD THE FEED BE FOLLOWING ITS TAIL".
+ *
+ * The feed's position used to be written by four parties that each derived the
+ * answer for themselves — the render's fresh `isPinnedToBottom` sample, a
+ * separate nested-view freeze flag, the resize re-anchor's own latch, and the
+ * rebuild anchor's own pin test. Four derivations of one question is four
+ * chances to disagree, and they did: a render sampling geometry while the user
+ * was mid-gesture answered about the pixels rather than about the intent, and
+ * parked the feed under them.
+ *
+ * So intent is LATCHED here and nowhere else. Every mechanism that wants to
+ * know asks `isFollowing()`; every mechanism that wants to move the feed calls
+ * `park()` or `place()`. Nothing else writes the feed's scrollTop toward the
+ * tail, and nothing else reads geometry to decide whether it should.
+ *
+ * WHY LATCHED AND NOT SAMPLED. `isPinnedToBottom` has a PIN_PX slack band, and
+ * the first moments of every upward gesture live inside it — a trackpad flick
+ * begins with deltas of a few px. A render landing in that window sampled
+ * "still pinned", parked at the tail, and undid the gesture; the user pushed
+ * again, and got the erratic downward yank they reported. It hurt scrolling UP
+ * far more than DOWN because leaving the tail is the only direction that has to
+ * cross the band against a mechanism actively pulling the other way.
+ *
+ * The latch's rule makes DIRECTION decisive rather than distance: any movement
+ * of the box UP ends the follow, whatever the slack says, and only a movement
+ * that arrives back AT the tail resumes it. There is no band for a gesture to
+ * be trapped inside.
+ *
+ * WHY IT RECONCILES ON EVERY READ. A latch fed only by the scroll EVENT is
+ * still stale where it matters most: the browser dispatches scroll
+ * asynchronously, so a render running between the user's gesture and its event
+ * would read the pre-gesture answer, see "following", and park the feed —
+ * the same yank, now on a timing rather than a geometry mistake. `sync` closes
+ * that window by comparing the box's live scrollTop against the last position
+ * this owner knows about, so a read can never precede the movement it is
+ * about.
+ */
+export class TailFollow {
+  private following: boolean;
+  /** The last position this owner knows about: what it wrote, or what it saw. */
+  private lastTop: number;
+
+  constructor(
+    private readonly box: ReanchorBox,
+    private readonly pinPx: number = PIN_PX,
+  ) {
+    this.following = isPinnedToBottom(box, pinPx);
+    this.lastTop = box.scrollTop;
+  }
+
+  /** Whether new content should pull the view. The one question, one answer. */
+  isFollowing(): boolean {
+    this.sync();
+    return this.following;
+  }
+
+  /**
+   * Park the box at its tail and follow from here on. Every "show me the
+   * newest" act routes through this: the host's workspace-switch snap, the
+   * restored-session render, a freshly sent prompt, a render that is following.
+   *
+   * It LATCHES the follow rather than only moving the pixels, which is what
+   * makes a workspace switch land at the bottom reliably: content that arrives
+   * after the snap (a deferred item upgrading, a board mounting, the relayout
+   * itself) is parked on again instead of being left as a gap the next render
+   * would have read as "the reader is scrolled up".
+   */
+  park(): void {
+    parkAtTail(this.box);
+    this.lastTop = this.box.scrollTop;
+    this.following = true;
+  }
+
+  /**
+   * Put the box at TOP without changing the follow decision — a rebuild
+   * restoring the reader's place, or a backfill shifting the view by exactly
+   * the height it grew above the viewport. Both move the pixels precisely so
+   * that nothing about what the reader is looking at has changed, so neither
+   * may be mistaken for the reader moving.
+   */
+  place(top: number): void {
+    this.sync();
+    this.box.scrollTop = top;
+    this.lastTop = this.box.scrollTop;
+  }
+
+  /**
+   * Stop following: the user deliberately opened content to read (a nested view
+   * inside a bubble), so streaming output must not pull the view off it. Only a
+   * return to the tail, or an explicit `park`, resumes following.
+   */
+  release(): void {
+    this.sync();
+    this.following = false;
+  }
+
+  /** A scroll event on the box. Everything it decides lives in `sync`. */
+  onScroll(): void {
+    this.sync();
+  }
+
+  /**
+   * A resize of the box. A workspace switch relayouts the feed asynchronously
+   * relative to the lisp that triggered it, so the host's snap and the resize
+   * land in either order — a snap that lands FIRST is otherwise undone by the
+   * resize growing the scrollable height under a scrollTop that stays put.
+   * Re-parking on the resize removes the ordering question instead of betting
+   * on one order.
+   *
+   * IT DOES NOT RECONCILE FIRST, unlike every other entry point. A resize
+   * moves scrollTop by itself — a shrinking viewport clamps it downward — and
+   * reconciling would read that clamp as the reader scrolling up and drop the
+   * follow the switch just asked for. The pre-resize decision is the one that
+   * describes what the reader wanted; the resize's own displacement is absorbed
+   * either way, so it can never be mistaken for a gesture later.
+   */
+  onResize(): void {
+    if (this.following) {
+      this.park();
+      return;
+    }
+    this.lastTop = this.box.scrollTop;
+  }
+
+  /** Wire the box's own events into the owner. */
+  observe(subscribeScroll: SubscribeScroll, subscribeResize: SubscribeResize): void {
+    subscribeScroll(() => this.onScroll());
+    subscribeResize(() => this.onResize());
+  }
+
+  /**
+   * Fold any movement this owner did not write into the decision.
+   *
+   * A position equal to the last one it knows about decides nothing, which is
+   * what makes its own `park`/`place` writes — and the scroll events the
+   * browser dispatches for them afterward — inert. Anything else is the reader,
+   * and the reader moving up ends the follow while only the reader arriving at
+   * the tail resumes it.
+   */
+  private sync(): void {
+    const top = this.box.scrollTop;
+    if (top === this.lastTop) return;
+    this.following = top > this.lastTop && isPinnedToBottom(this.box, this.pinPx);
+    this.lastTop = top;
+  }
+}
+
 /** Where a revealed node lands: flush with the top, or as little as possible. */
 export type RevealBlock = "start" | "nearest";
 
