@@ -33,15 +33,35 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
+// acceptedAck matches the OK CommandAck for requestID.
+//
+// IT IS THE ONLY FRAME THAT PROVES THE SHIM TOOK THE PROMPT, and a published
+// turn_active is not. The SSM appends `submitting` and publishes it
+// SYNCHRONOUSLY at prompt ACCEPTANCE — before the dispatch hands the prompt to
+// the shim at all ("prompt accepted state edge APPLIED ...
+// next=shim_submit_then_prompt_echo") — so a teardown taken on that frame alone
+// races the submit. When the teardown wins, the submit is nacked with
+// `shimclient: no live shim connection`, the shim never sees the prompt, never
+// calls canUseTool, and the question the test is about is never raised by
+// anyone: the run then fails on an arrangement that never happened rather than
+// on the guarantee. The ack is enqueued after the dispatch returns and is ok
+// ONLY when the submit succeeded, which is exactly the fact the arrangement
+// needs.
+func acceptedAck(requestID string) func(*frontendv1.FrontendFrame) bool {
+	return func(frame *frontendv1.FrontendFrame) bool {
+		ack, ok := frame.GetFrame().(*frontendv1.FrontendFrame_CommandAck)
+		return ok && ack.CommandAck.GetRequestId() == requestID && ack.CommandAck.GetOk()
+	}
+}
+
 // TestE2EAPermissionRaisedWhileTheDaemonIsDownIsRedeliveredOnReattach covers
 // THE UNDELIVERED HALF.
 //
-// THE ARRANGEMENT. The daemon is taken away at the earliest moment it can
-// itself observe the turn — the pushed WorkspaceState carrying turn_active,
-// which is the daemon's receipt that the prompt was delivered and the turn
-// claimed — and BEFORE any permission item has been seen. The shim's
-// `canUseTool` call for that turn therefore lands with no daemon attached and
-// is dropped by sendPermissionRequest.
+// THE ARRANGEMENT. The daemon is taken away at the earliest moment the prompt
+// is provably the shim's — the ok ack for the submit, together with the pushed
+// WorkspaceState carrying turn_active — and BEFORE any permission item has been
+// seen. The shim's `canUseTool` call for that turn therefore lands with no
+// daemon attached and is dropped by sendPermissionRequest.
 //
 // WHY THE TEST IS HONEST EITHER WAY. If a run is unlucky and the request was
 // already delivered before the teardown completed, the arrangement degenerates
@@ -64,6 +84,7 @@ func TestE2EAPermissionRaisedWhileTheDaemonIsDownIsRedeliveredOnReattach(t *test
 			state := workspaceStateFor(frame, cwd)
 			return state != nil && state.GetTurnActive()
 		},
+		"the submit's OK ack, which is what makes the prompt the SHIM's rather than merely accepted": acceptedAck("r-tool"),
 	})
 
 	// Act — the daemon goes away while the shim is asking.
