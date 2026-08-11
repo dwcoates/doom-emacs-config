@@ -36,7 +36,7 @@ const (
 	submitterMergeLeaseHolder
 	// submitterKeepAlive is the daemon's own cache keep-alive ping. It is a
 	// submitter of its own rather than a user prompt with a distinctive origin
-	// because three separate decisions turn on it — no prompt receipt, no
+	// because three separate decisions turn on it — no detached work, no
 	// queue classifier, and refused outright while the merge lease is held —
 	// and each of those would otherwise be a string comparison against a
 	// free-form origin, which is a naming convention rather than a check.
@@ -249,7 +249,7 @@ func (m *Manager) SubmitMergePrompt(ctx context.Context, workspace, requestID, t
 // prompt the shim was never handed.
 func (m *Manager) submitMergePrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) (promptDisposition, error) {
 	if requestID == "" {
-		return promptDisposition{}, fmt.Errorf("session-controller: a merge prompt for workspace %q needs a request id; it is what the prompt receipt and the durable transcript line reconcile on", workspace)
+		return promptDisposition{}, fmt.Errorf("session-controller: a merge prompt for workspace %q needs a request id; it is the identity the submitted turn carries on the wire", workspace)
 	}
 	return m.submitPromptAs(ctx, workspace, requestID, text, permissionMode, "merge:"+requestID, promptOrigin, submitterMergeLeaseHolder, leavesParkedPermissions)
 }

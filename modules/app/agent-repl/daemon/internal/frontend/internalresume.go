@@ -42,12 +42,11 @@ import (
 // user line it is not there to be read. The line reaches the store through the
 // FILE plane: the sidecar tails the transcript and wraps each record as an
 // event of its own (`shim-claude-sidecar/internal/handler`), and no field in
-// that record names the submit that provoked it. The daemon supplies the
-// correlation in memory afterwards, oldest-outstanding-receipt first
-// (sessioncontroller/promptecho.go) — and a re-drive mints no receipt, because
-// the user typed nothing, so a re-drive's line was correlated with nothing and
-// arrived at this filter with an EMPTY request id. It rendered, live and on
-// every replay, which is the incident this marker closes.
+// that record names the submit that provoked it. Nothing downstream supplies
+// one either: a prompt is rendered by the durable line the vendor wrote for it,
+// and that line names no request. So a re-drive's line arrived at this filter
+// with an EMPTY request id and rendered, live and on every replay, which is the
+// incident this marker closes.
 //
 // So the identity rides the MESSAGE. The re-drive's submitted text opens with a
 // marker line naming the re-drive's own request id, minted at teardown, and the
