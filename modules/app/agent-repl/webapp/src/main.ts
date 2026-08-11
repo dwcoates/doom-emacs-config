@@ -542,11 +542,21 @@ async function boot(): Promise<void> {
    * `Store.addLocalPrompt`). A refused submit takes the bubble back down,
    * because the refusal's failure card is the only honest record of a prompt
    * that never ran.
+   *
+   * ONREFUSED IS THE OTHER HALF OF THAT SAME RETRACTION, and it matters more
+   * than the bubble does. The daemon acks this command once the shim has taken
+   * the prompt, and acks it too once it has durably QUEUED it behind a running
+   * turn; it nacks only when neither happened, so a nack means the words are
+   * still owed to whoever typed them. A wrongly-drawn bubble is cosmetic;
+   * silently eating a draft is not. The composer passes a restore here, and
+   * the two halves are deliberately independent — the restore runs whether or
+   * not a bubble was standing to take down.
    */
   const dispatchPrompt = (
     workspace: string,
     text: string,
     promptOrigin: PromptOrigin,
+    onRefused?: () => void,
   ): Promise<void> => {
     const { requestId, ack } = dispatcher.submitPrompt(
       workspace,
@@ -559,6 +569,10 @@ async function boot(): Promise<void> {
     if (requestId !== "" && store.addLocalPrompt(requestId, text)) frames.schedule();
     return ack.catch((err: unknown) => {
       if (store.dropUnackedPrompt(requestId)) frames.schedule();
+      // BEFORE the rethrow, and outside the bubble's `if`: the words come back
+      // even when there was no bubble to take down, because the draft is the
+      // thing whose loss actually costs the user something.
+      onRefused?.();
       // RE-THROWN, unlike before: the held-prompt queue is a caller that must
       // learn a drained prompt was refused, because it owes that prompt its own
       // failure card. `consumeOwnedDispatchFailure` still runs first, so the
@@ -614,14 +628,23 @@ async function boot(): Promise<void> {
     },
     now: () => Date.now(),
   });
-  const submitPrompt = (text: string, promptOrigin: PromptOrigin): void => {
+  const submitPrompt = (
+    text: string,
+    promptOrigin: PromptOrigin,
+    onRefused?: () => void,
+  ): void => {
     const workspace = cmdWorkspace();
     // THE QUEUE GETS FIRST REFUSAL. It takes the prompt only while the link
     // cannot carry it (or while an earlier held prompt is still draining, which
     // is what keeps the user's order); otherwise it declines and the prompt
     // goes straight out, exactly as it always did.
+    //
+    // A HELD PROMPT IS NOT A REFUSED ONE, so `onRefused` deliberately does not
+    // travel with it: the queue is holding words it still owes the user, and
+    // when it finally cannot send them it files the whole text in a
+    // `heldPromptUnsentFailure` card rather than dropping it.
     if (promptQueue.offer(workspace, text, promptOrigin)) return;
-    void dispatchPrompt(workspace, text, promptOrigin).catch(() => {
+    void dispatchPrompt(workspace, text, promptOrigin, onRefused).catch(() => {
       // Already reported by `consumeOwnedDispatchFailure` above; the rethrow
       // exists for the queue's benefit and has no second story to tell here.
     });
@@ -2278,7 +2301,18 @@ async function boot(): Promise<void> {
         composerEls.notice.innerHTML = mergeGateNoticeHtml(true, store.state.mergeStatus);
         return;
       }
-      submitPrompt(text, PromptOrigin.WEBAPP_USER_SENT);
+      // THE DRAFT COMES BACK IF THE DAEMON REFUSES IT. Clearing the composer
+      // is a claim that the prompt went somewhere, and a nack says it went
+      // nowhere at all — no shim took it, no queue holds it. The two gates
+      // above already keep the draft for the refusals they can see coming;
+      // this is the same courtesy for the one only the daemon can answer.
+      //
+      // NEVER OVER A DRAFT the user has typed since: saving the old words by
+      // destroying the new ones would just trade one loss for another.
+      submitPrompt(text, PromptOrigin.WEBAPP_USER_SENT, () => {
+        if (input.value !== "") return;
+        input.value = text;
+      });
       input.value = "";
     };
     composerEls.send.addEventListener("click", submit);

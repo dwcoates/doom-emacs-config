@@ -12,6 +12,7 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/statedb"
 )
@@ -291,6 +292,18 @@ type submitHarness struct {
 
 func newSubmitHarness(t *testing.T) *submitHarness {
 	t.Helper()
+	return newSubmitHarnessWith(t, nil)
+}
+
+// newSubmitHarnessWith is newSubmitHarness with a hook run on each fake shim
+// client as it is built, BEFORE any prompt can reach it.
+//
+// The refusal it exists for has to be armed ahead of the very first submit:
+// the client is created by the bring-up that submit performs, so a test that
+// waited for `lastClient` to exist could only ever arm the SECOND prompt, and
+// the receipt written by the first would already be standing.
+func newSubmitHarnessWith(t *testing.T, prepare func(*fakeClient)) *submitHarness {
+	t.Helper()
 	var (
 		traceMu sync.Mutex
 		trace   []string
@@ -314,6 +327,9 @@ func newSubmitHarness(t *testing.T) *submitHarness {
 		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient: func(cfg shimclient.Config) sessionClient {
 			fc := &fakeClient{cfg: cfg}
+			if prepare != nil {
+				prepare(fc)
+			}
 			mu.Lock()
 			last = fc
 			mu.Unlock()
@@ -434,6 +450,67 @@ func TestAnUnwritableReceiptLedgerWithholdsThePromptFromTheShim(t *testing.T) {
 	fc := h.lastClient()
 	if fc != nil && len(fc.promptTexts()) != 0 {
 		t.Fatalf("prompts forwarded to the shim = %v, want none", fc.promptTexts())
+	}
+}
+
+// THE NACK IS THE DELIVERY BOUNDARY, AND IT HAS TO BE ONE FACT.
+//
+// Both frontends read a refused `submitPrompt` as "nothing happened": the
+// webapp takes its unacked bubble back down and Emacs hands the user's words
+// back to the input buffer. That reading is only honest if a refused submit
+// leaves NOTHING behind that could later assert the prompt ran — and the
+// durable receipt is the one such thing, because it is written BEFORE the
+// submit precisely so a bounce can replay the bubble. Left standing, it would
+// resurrect a bubble for a prompt no session ever received, from durable
+// storage, where nothing downstream could tell it from a real one.
+//
+// The accepted case is stated beside it so the pair reads as the boundary it
+// is rather than as one lonely negative: an accepted prompt KEEPS its receipt,
+// because that prompt really is owed a bubble across a bounce.
+func TestARefusedSubmitLeavesNoDurableEvidenceThePromptRan(t *testing.T) {
+	tests := []struct {
+		name string
+		// submitErr is what the shim answers, nil for a prompt it takes.
+		submitErr error
+		// wantOutstanding is whether a receipt may still replay a bubble.
+		wantOutstanding bool
+	}{
+		{
+			name:            "a prompt the shim never took leaves no receipt to replay",
+			submitErr:       errclass.ErrShimNotConnected,
+			wantOutstanding: false,
+		},
+		{
+			name:            "a prompt the shim took keeps the receipt that replays it",
+			submitErr:       nil,
+			wantOutstanding: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newSubmitHarnessWith(t, func(fc *fakeClient) {
+				fc.submitErrOnce = tc.submitErr
+			})
+
+			// Act.
+			err := h.m.SubmitPrompt(context.Background(), "ws", "r-1", "the prompt", "default", testPromptOrigin)
+
+			// Assert.
+			if (err != nil) != (tc.submitErr != nil) {
+				t.Fatalf("SubmitPrompt error = %v, want an error: %t", err, tc.submitErr != nil)
+			}
+			got := h.receipts.outstandingIDs("ws")
+			if tc.wantOutstanding {
+				if len(got) != 1 || got[0] != "r-1" {
+					t.Fatalf("outstanding receipts = %v, want the accepted prompt's own [r-1]", got)
+				}
+				return
+			}
+			if len(got) != 0 {
+				t.Fatalf("outstanding receipts = %v, want none: a refused submit must leave nothing that can replay a bubble for a prompt no session received", got)
+			}
+		})
 	}
 }
 
