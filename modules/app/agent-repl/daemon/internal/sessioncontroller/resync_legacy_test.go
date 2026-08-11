@@ -8,7 +8,7 @@ import "errors"
 func (m *Manager) Resync(workspace string, fromSeq uint64) error {
 	d, err := m.existing(workspace)
 	if errors.Is(err, ErrNoLiveSessionController) {
-		return m.resyncFromDurableHistory(workspace, fromSeq)
+		return m.resyncFromDurableHistory(workspace, fromSeq, m.publishedFence(workspace))
 	}
 	if err != nil {
 		return err
