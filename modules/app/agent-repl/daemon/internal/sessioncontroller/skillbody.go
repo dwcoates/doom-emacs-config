@@ -179,7 +179,14 @@ func (c *consumer) curateMetaRecords(cd *frontendv1.ConversationDelta, envs map[
 	for _, it := range items {
 		c.skills.observe(it)
 		env, ok := envs[it.GetUuid()]
-		if !ok || !env.IsMeta {
+		// THE local_command SHAPE IS ISMETA AND IS NOT THIS CURATOR'S. The
+		// harness flags its `system`/`local_command` slash-command record
+		// isMeta like every other record it wrote for the model, but that
+		// record has its own classifier downstream (machinery.go), which turns
+		// it into the feed's account of the command the user ran. Withholding
+		// it here as an uncorrelated meta record would delete the fact before
+		// anything could state it.
+		if !ok || !env.IsMeta || env.LocalCommandSubtype {
 			kept = append(kept, it)
 			continue
 		}
