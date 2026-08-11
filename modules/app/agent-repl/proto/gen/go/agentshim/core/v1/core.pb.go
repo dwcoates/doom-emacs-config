@@ -887,6 +887,34 @@ type Event struct {
 	// live state, raise no error. Empty deliberately FAILS CLOSED so an older
 	// producer keeps precisely the behavior it had before this field existed.
 	QueryInstanceId string `protobuf:"bytes,8,opt,name=query_instance_id,json=queryInstanceId,proto3" json:"query_instance_id,omitempty"`
+	// STABLE WRITE IDENTITY. Minted ONCE by the producer when the event is first
+	// handed to a store write, and NEVER regenerated — not for a retry, not for
+	// a replay after the store bounced underneath the producer.
+	//
+	// It is what makes a store write IDEMPOTENT BY IDENTITY, which is what makes
+	// replay safe. A batch that REACHED the store but whose StoreWriteAck was
+	// lost — a store restart between the ingest and the ack is exactly that —
+	// has to be replayed by the producer, because from the producer's side an
+	// unacked batch and a never-delivered batch are indistinguishable. Without
+	// an identity the store cannot tell the replay from a second, genuinely new
+	// event, and writes it twice. With one, the replay is a no-op.
+	//
+	// DISTINCT FROM dedup_key, and neither one substitutes for the other:
+	//   - dedup_key is a CROSS-PLANE identity. Two DIFFERENT producers (the
+	//     stream shim and the file-plane sidecar) observing the SAME underlying
+	//     fact derive the SAME key, so the store collapses the twins to one row.
+	//     Events with no cross-plane twin — turn lifecycle, content deltas,
+	//     degraded reports — carry no dedup_key at all, and those are precisely
+	//     the events a replay duplicated.
+	//   - write_id identifies ONE producer's ONE write of ONE event. It is
+	//     unique per event whether or not the event has a twin, so it covers the
+	//     whole envelope space rather than the deduped subset.
+	//
+	// EMPTY means the producer supplied no write identity, and such an event is
+	// NOT replay-idempotent. The store enforces uniqueness only over non-empty
+	// values, so an older producer keeps exactly the behavior it had before this
+	// field existed.
+	WriteId string `protobuf:"bytes,9,opt,name=write_id,json=writeId,proto3" json:"write_id,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*Event_SessionStarted
@@ -1000,6 +1028,13 @@ func (x *Event) GetDedupKey() string {
 func (x *Event) GetQueryInstanceId() string {
 	if x != nil {
 		return x.QueryInstanceId
+	}
+	return ""
+}
+
+func (x *Event) GetWriteId() string {
+	if x != nil {
+		return x.WriteId
 	}
 	return ""
 }
@@ -6850,7 +6885,7 @@ var File_agentshim_core_v1_core_proto protoreflect.FileDescriptor
 
 const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\n" +
-	"\x1cagentshim/core/v1/core.proto\x12\x11agentshim.core.v1\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xcd\x0e\n" +
+	"\x1cagentshim/core/v1/core.proto\x12\x11agentshim.core.v1\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xe8\x0e\n" +
 	"\x05Event\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x10\n" +
@@ -6861,7 +6896,8 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"request_id\x18\x05 \x01(\tR\trequestId\x12$\n" +
 	"\x0eproduced_at_ms\x18\x06 \x01(\x03R\fproducedAtMs\x12\x1b\n" +
 	"\tdedup_key\x18\a \x01(\tR\bdedupKey\x12*\n" +
-	"\x11query_instance_id\x18\b \x01(\tR\x0fqueryInstanceId\x12L\n" +
+	"\x11query_instance_id\x18\b \x01(\tR\x0fqueryInstanceId\x12\x19\n" +
+	"\bwrite_id\x18\t \x01(\tR\awriteId\x12L\n" +
 	"\x0fsession_started\x18\n" +
 	" \x01(\v2!.agentshim.core.v1.SessionStartedH\x00R\x0esessionStarted\x12F\n" +
 	"\rsession_ended\x18\v \x01(\v2\x1f.agentshim.core.v1.SessionEndedH\x00R\fsessionEnded\x12C\n" +
