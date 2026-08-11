@@ -8,7 +8,7 @@
  * "detached nothing". One edge per test (AAA).
  */
 import { describe, expect, it } from "vitest";
-import { ConversationItem, ToolItem } from "../src/store.js";
+import { ConversationItem, ToolItem, userTurnRequestKey } from "../src/store.js";
 import { asyncByBubble, isWatcher, watcherRef, type AsyncClassification } from "../src/watchers.js";
 
 function userTurn(requestId = "u1"): ConversationItem {
@@ -202,8 +202,42 @@ describe("asyncByBubble", () => {
     const items = [userTurn("u7"), watcher, result()];
     // Act
     const byBubble = asyncByBubble(items);
-    // Assert — the prompt bubble (the user-turn's request id) is the host.
-    expect(byBubble.get("u7")).toEqual([watcher]);
+    // Assert — the prompt bubble is the host, under the prompt's own IDENTITY
+    // rather than its bare request id. Keying on the raw id put every prompt
+    // the real pipeline delivers (request id "") in one shared bucket.
+    expect(byBubble.get(userTurnRequestKey("u7"))).toEqual([watcher]);
+  });
+
+  it("gives an unattributed prompt no host bucket at all", () => {
+    // Arrange — the real pipeline delivers every prompt with an EMPTY request
+    // id, and this one has no uuid either, so it has no identity to host under.
+    const watcher = spawner("t1", "b-1");
+    const items = [userTurn(""), watcher, result()];
+    // Act
+    const byBubble = asyncByBubble(items);
+    // Assert — an absent host is ABSENT. `??` only skips null/undefined, so ""
+    // used to pass the guard and become a real Map key.
+    expect(byBubble.has("")).toBe(false);
+    expect(byBubble.size).toBe(0);
+  });
+
+  it("keeps two unattributed prompts out of one shared bucket", () => {
+    // Arrange — two tools-only turns, both with an empty request id. Sharing a
+    // bucket rendered each one's amber badges on the other.
+    const first = spawner("t1", "b-1");
+    const second = spawner("t2", "b-2");
+    const items = [
+      userTurn(""),
+      first,
+      result(),
+      userTurn(""),
+      second,
+      result(),
+    ];
+    // Act
+    const byBubble = asyncByBubble(items);
+    // Assert — neither prompt claims the other's work.
+    expect([...byBubble.values()].flat()).toEqual([]);
   });
 
   it("keys the LAST main-chain text before the result, not an earlier one", () => {

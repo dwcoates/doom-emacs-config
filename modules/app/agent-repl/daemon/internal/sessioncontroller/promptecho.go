@@ -53,10 +53,10 @@ func promptReceiptItem(requestID, text string, tsMs int64) *frontendv1.Message {
 	}
 }
 
-// pushUserEcho pushes the prompt bubble for one accepted submit and retains it
-// until the durable transcript line claims it. Its caller must first complete
-// the synchronous accepted-prompt state barrier; this function deliberately
-// owns only the receipt so the ordering remains explicit at forwardPrompt.
+// The receipt for one accepted submit is RETAINED until the durable transcript
+// line claims it. Its caller must first complete the synchronous
+// accepted-prompt state barrier; these functions deliberately own only the
+// receipt so the ordering remains explicit at forwardPrompt.
 //
 // RETAINED AND REPLAYED, exactly like a permission item (pushPermission) and
 // for the same reason: it carries no store seq, so no from_seq a resync names
@@ -77,21 +77,89 @@ func promptReceiptItem(requestID, text string, tsMs int64) *frontendv1.Message {
 // than reading the clock again is what makes the live work and a replayed one
 // the same item: same uuid, same timestamp, and therefore the same provenance
 // verdict from the merge lease's ledger.
-func (c *consumer) pushUserEcho(requestID, text string, acceptedAtMs int64) {
-	item := promptReceiptItem(requestID, text, acceptedAtMs)
+// RESERVATION AND PUBLICATION ARE TWO STEPS, and the split is the whole of the
+// echo queue's ordering guarantee.
+//
+// The queue's ORDER is what attribution reads: claimOldestEcho hands a
+// transcript line the oldest outstanding receipt, so the queue must be in the
+// same order the prompts reached the SDK or two prompts swap identities. That
+// used to be left to timing — the submit and the echo were twenty-nine lines
+// apart with no mutual exclusion between them, and any two concurrent submit
+// paths (an immediate submit against the queue's drain, an interject's head
+// jump) could interleave to enqueue B's receipt before A's while the SDK had
+// taken A first.
+//
+// So the slot is RESERVED before the submit, under the session's submit lock,
+// and the two are ordered by construction rather than by luck
+// (sessionController.submitMu, forwardPrompt). Only the PUBLICATION — which
+// reaches the frontend server — is left outside that lock, because it must be:
+// a frontend push under a submit lock would serialize the whole session behind
+// whatever the push is waiting on.
+//
+// reserveEcho takes the slot and returns the reservation. It publishes nothing.
+func (c *consumer) reserveEcho(requestID, text string, acceptedAtMs int64) *promptEcho {
+	e := &promptEcho{requestID: requestID, text: text, item: promptReceiptItem(requestID, text, acceptedAtMs)}
 	c.mu.Lock()
-	c.echoes = append(c.echoes, &promptEcho{requestID: requestID, text: text, item: item})
+	c.echoes = append(c.echoes, e)
 	pending := len(c.echoes)
 	c.mu.Unlock()
-	c.logf("session-controller: prompt echo pushed ws=%q session=%s request_id=%s len=%d unclaimed=%d",
+	c.logf("session-controller: prompt echo reserved ws=%q session=%s request_id=%s len=%d unclaimed=%d — the slot is taken ahead of the submit so the queue's order is the SDK's order",
 		c.workspace, c.sessionID, requestID, len(text), pending)
-	c.pushLocalItem(item)
+	return e
 }
 
-// echo pushes a session controller's prompt receipt, if the submit has an identity to key
-// one on. A caller with no request id behind it (a test harness, an internal
-// re-submit) pushes nothing rather than minting an id the frontend has no way
-// to correlate — the durable transcript line still draws the prompt.
+// publishEcho pushes a reserved receipt to the frontend. Called only after the
+// shim has TAKEN the prompt, which is what preserves the property that a
+// refused prompt never draws a bubble.
+//
+// Must be called with the submit lock and m.mu RELEASED: the push reaches the
+// frontend server.
+func (c *consumer) publishEcho(e *promptEcho) {
+	c.logf("session-controller: prompt echo pushed ws=%q session=%s request_id=%s len=%d",
+		c.workspace, c.sessionID, e.requestID, len(e.text))
+	c.pushLocalItem(e.item)
+}
+
+// retractEcho gives back a slot reserved for a submit the shim REFUSED,
+// reporting whether one was still outstanding.
+//
+// IT IS WHAT KEEPS THE REFUSED PROMPT BUBBLE-LESS through the reordering. The
+// echo used to be enqueued after a successful submit, so a refusal simply never
+// reached it; now the slot is taken first, and this is the path that undoes it.
+// A retraction that finds nothing is ordinary rather than an anomaly — a
+// transcript line may already have claimed the slot — and reports false.
+func (c *consumer) retractEcho(requestID string) bool {
+	c.mu.Lock()
+	removed := c.removeEchoLocked(requestID)
+	pending := len(c.echoes)
+	c.mu.Unlock()
+	c.logf("session-controller: prompt echo retracted ws=%q session=%s request_id=%s reservation_found=%v unclaimed=%d — the submit failed, so no bubble is drawn and no slot is left for a later line to claim",
+		c.workspace, c.sessionID, requestID, removed, pending)
+	return removed
+}
+
+// pushUserEcho reserves a slot and publishes its receipt in one step, for
+// every caller that is not the submit path.
+//
+// THE SUBMIT PATH DOES NOT USE IT, and that is the only reason the two halves
+// are separable at all: forwardPrompt must hold its reservation inside the
+// session's submit lock and publish outside it, which one combined call cannot
+// express. Anything with no submit to order against — a durable replay, a test
+// harness — has nothing to interleave with and says both at once here.
+func (c *consumer) pushUserEcho(requestID, text string, acceptedAtMs int64) {
+	c.publishEcho(c.reserveEcho(requestID, text, acceptedAtMs))
+}
+
+// echo reserves and immediately publishes a session controller's prompt
+// receipt, if the submit has an identity to key one on. A caller with no
+// request id behind it (a test harness, an internal re-submit) pushes nothing
+// rather than minting an id the frontend has no way to correlate — the durable
+// transcript line still draws the prompt.
+//
+// IT IS NOT THE SUBMIT PATH'S SEAM. forwardPrompt reserves and publishes
+// separately, so that its reservation sits inside the submit lock; this
+// composition exists for callers that are not submitting anything through that
+// lock.
 //
 // Must be called with m.mu RELEASED: the push reaches the frontend server.
 func (m *Manager) echo(d *sessionController, requestID, text string, acceptedAtMs int64) {
@@ -119,6 +187,16 @@ func (c *consumer) snapshotEchoes() []*frontendv1.Message {
 func (c *consumer) claimEcho(requestID string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.removeEchoLocked(requestID)
+}
+
+// removeEchoLocked takes one receipt out of the queue by request id, reporting
+// whether it was there. THE ONE removal-by-identity, shared by the claim a
+// durable line makes and the retraction a failed submit makes, so the two
+// cannot drift into two different notions of which slot belongs to a request.
+//
+// Called with c.mu held.
+func (c *consumer) removeEchoLocked(requestID string) bool {
 	for i, e := range c.echoes {
 		if e.requestID == requestID {
 			c.echoes = append(c.echoes[:i], c.echoes[i+1:]...)
@@ -141,24 +219,61 @@ func (c *consumer) dropEchoes() int {
 	return n
 }
 
-// claimOldestEcho removes and returns the oldest unclaimed receipt, or "" when
-// none is outstanding.
+// echoClaim is the verdict of one attempt to correlate a transcript line with
+// an outstanding receipt.
+//
+// requestID is non-empty EXACTLY when the line was attributed. `refused` says
+// the queue was not empty but its oldest entry disagreed with the line's text,
+// which is a different fact from "nothing was outstanding" and gets its own
+// loud log: the first means the ordering invariant this queue rests on has been
+// broken somewhere, the second is the ordinary resumed-history case.
+// The refused entry is COPIED OUT rather than left to be re-read by the log
+// line: c.echoes is guarded by c.mu, and reaching back into it after the
+// unlock to name the receipt would be an unsynchronized read of live state.
+type echoClaim struct {
+	requestID        string
+	refused          bool
+	refusedRequestID string
+	refusedText      string
+}
+
+// claimOldestEcho removes and returns the oldest unclaimed receipt, provided
+// its text matches the arriving line's.
 //
 // OLDEST-FIRST is the conservative correlation, and the only one available: a
 // transcript UserLine carries no request id of its own (that field is empty on
 // every line the file plane produces), so the sole fact relating it to a submit
 // is that the daemon sent that submit and has not yet seen its line. Prompts
-// reach one session's shim in submit order and come back in the same order, so
-// the oldest outstanding receipt is the one this line answers.
-func (c *consumer) claimOldestEcho() string {
+// reach one session's shim in submit order and come back in the same order —
+// which is true BY CONSTRUCTION rather than by hope, because the reservation of
+// each slot and the submit that fills it happen under one session-scoped lock
+// (reserveEcho, forwardPrompt).
+//
+// THE TEXT COMPARISON IS A SAFETY NET AND NOT THE MECHANISM, and it cannot be
+// the mechanism: prompts like "continue" and "yes" repeat constantly in this
+// workflow, so content cannot tell two real submits apart. What it CAN do is
+// catch the positional scheme having gone wrong — which, before the submit lock
+// existed, silently stamped one prompt's line with another prompt's request id
+// and swapped two identities downstream. Refusing to attribute converts that
+// silent misattribution into a visible non-attribution plus a loud log, which
+// is the strictly safer of the two ways to be wrong: the line simply keeps its
+// own record identity, exactly as resumed history does.
+//
+// Compared after trimming surrounding whitespace, and on nothing else: the
+// prompt the daemon submitted and the line the transcript wrote for it are the
+// same string, so any real difference is news.
+func (c *consumer) claimOldestEcho(lineText string) echoClaim {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.echoes) == 0 {
-		return ""
+		return echoClaim{}
 	}
 	e := c.echoes[0]
+	if strings.TrimSpace(e.text) != strings.TrimSpace(lineText) {
+		return echoClaim{refused: true, refusedRequestID: e.requestID, refusedText: e.text}
+	}
 	c.echoes = c.echoes[1:]
-	return e.requestID
+	return echoClaim{requestID: e.requestID}
 }
 
 // attributeUserTurn stamps a LIVE durable user turn with the request id of the
@@ -188,12 +303,27 @@ func (c *consumer) attributeUserTurn(cd *frontendv1.ConversationDelta) {
 			}
 			continue
 		}
-		requestID := c.claimOldestEcho()
-		if requestID == "" {
+		claim := c.claimOldestEcho(userMessageText(it.GetUserMessage()))
+		if claim.refused {
+			// LOUD, because this is the ordering invariant reporting itself
+			// broken. The oldest outstanding receipt is by construction the one
+			// this line answers, so a disagreement means either a submit
+			// reached the SDK out of the order its slot was reserved in — which
+			// the submit lock is supposed to make impossible — or the text the
+			// transcript wrote is not the text the daemon submitted. The line
+			// keeps its own identity and the receipt keeps its slot; nothing is
+			// stamped with a request it may not answer.
+			c.logf("session-controller: user turn ATTRIBUTION REFUSED ws=%q session=%s uuid=%s receipt_request_id=%s receipt_len=%d line_len=%d — the oldest outstanding receipt's text disagrees with this line's, so the positional correlation is not trustworthy here and the line is left unattributed",
+				c.workspace, c.sessionID, it.GetUuid(), claim.refusedRequestID, len(claim.refusedText),
+				len(userMessageText(it.GetUserMessage())))
+			continue
+		}
+		if claim.requestID == "" {
 			c.logf("session-controller: user turn UNATTRIBUTED ws=%q session=%s uuid=%s — no submit of this daemon's is outstanding for it",
 				c.workspace, c.sessionID, it.GetUuid())
 			continue
 		}
+		requestID := claim.requestID
 		it.RequestId = requestID
 		c.logf("session-controller: user turn attributed ws=%q session=%s uuid=%s request_id=%s (the receipt it supersedes is retired)",
 			c.workspace, c.sessionID, it.GetUuid(), requestID)
