@@ -6,6 +6,7 @@ import (
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/frontend"
 	"claude-repld/internal/protocmd"
 )
 
@@ -19,7 +20,7 @@ import (
 // purple user bubble therefore states something false twice over: that the
 // user said it to the agent, and that the agent received it.
 //
-// WHAT REPLACES THE BUBBLE is `frontend.v1.SessionCommandItem`, which carries
+// WHAT REPLACES THE DETACHED WORK is `frontend.v1.SessionCommandItem`, which carries
 // the command's IDENTITY and no text at all. That absence is the whole design:
 // the item has no field a prompt could be put in, so no consumer can render
 // the submitted text and no producer can leak an argument the user typed
@@ -32,7 +33,7 @@ import (
 // Suppressing every slash-prefixed submit would silently delete the opening
 // line of the majority of this workspace's turns. The set below is closed, IS
 // the `SessionCommand` enum on the wire rather than a mirror of it, and is the
-// only thing that can suppress a bubble.
+// only thing that can suppress a work.
 
 // THE TABLE IS THE SCHEMA'S, NOT THIS FILE'S. The literal each command is
 // typed as, and whether an argument may follow it, are carried as options on
@@ -116,6 +117,7 @@ func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsM
 		Uuid:      sessionCommandUUID(requestID),
 		TsMs:      tsMs,
 		RequestId: requestID,
+		Lineage:   frontend.FeedRowLineage(sessionCommandUUID(requestID)),
 		Payload: &frontendv1.Message_SessionCommand{
 			SessionCommand: &frontendv1.SessionCommandItem{Command: command},
 		},

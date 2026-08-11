@@ -12,10 +12,10 @@
  *
  * So teal is DERIVED now, from the one fact that makes those semantics true:
  * the daemon classified this call as detaching and stamped the id of the
- * bubble it detached onto the call. `AgentToolCall.spawned_bubble_id` is that
+ * message it detached work onto. `AgentToolCall.spawned_message_id` is that
  * verdict, and tool-call.proto is unambiguous about how to read it —
  * "non-empty exactly when this call detached work that has its own
- * AsyncBubble", and empty is "this call detached nothing" and nothing else. A
+ * detached-work message", and empty is "this call detached nothing" and nothing else. A
  * frontend MATCHES the id; it never derives one.
  *
  * THE INVARIANT THIS BUYS: a teal card IS an async bubble. Not by a list two
@@ -36,7 +36,7 @@
  */
 
 /**
- * The class a tool card wears when its call detached work with an AsyncBubble.
+ * The class a tool card wears when its call detached work onto a message.
  *
  * The stylesheet's teal rule is keyed on this ONE class rather than on a list
  * of `.tool-card.tool-<name>` selectors, and `styles.test.ts` pins the two
@@ -45,11 +45,11 @@
 export const ASYNC_BUBBLE_CLASS = "async-bubble-card";
 
 /**
- * Whether this call detached work that has its own AsyncBubble — the whole of
+ * Whether this call detached work onto a message of its own — the whole of
  * the teal decision, and the whole of the fixed-panel decision with it.
  */
-export function hasAsyncBubble(item: { spawnedBubbleId?: string }): boolean {
-  return typeof item.spawnedBubbleId === "string" && item.spawnedBubbleId !== "";
+export function hasAsyncBubble(item: { spawnedMessageId?: string }): boolean {
+  return typeof item.spawnedMessageId === "string" && item.spawnedMessageId !== "";
 }
 
 /**
@@ -57,6 +57,6 @@ export function hasAsyncBubble(item: { spawnedBubbleId?: string }): boolean {
  * ternary at each call site so the class name reaches the markup through one
  * path that `styles.test.ts` can pin.
  */
-export function asyncBubbleClass(item: { spawnedBubbleId?: string }): string {
+export function asyncBubbleClass(item: { spawnedMessageId?: string }): string {
   return hasAsyncBubble(item) ? ` ${ASYNC_BUBBLE_CLASS}` : "";
 }

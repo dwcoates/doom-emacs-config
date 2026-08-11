@@ -50,7 +50,7 @@ const RESPONSE_USAGE_STAMP_KEYS = generatedFieldSet<
  *
  * It lives beside the emission unwrap rather than in `frontend-proto.ts`
  * because the stamp rides the `AgentResponse` ENVELOPE, one level above the
- * verbatim payload — exactly like `thinkingOrigin` and `spawnedBubbleId`. A
+ * verbatim payload — exactly like `thinkingOrigin` and `spawnedMessageId`. A
  * detached agent's responses are the same message, so they resolve their
  * corner figures through this same decoder rather than a second copy.
  */
@@ -103,16 +103,16 @@ export interface UnwrappedEmission {
   thinkingOrigin?: { apiMessageId: string; blockIndex: number };
   /**
    * THE CLASSIFICATION VERDICT this emission published, when it published one:
-   * `AgentToolCall.spawned_bubble_id` / `AgentToolOutcome.spawned_bubble_id`.
+   * `AgentToolCall.spawned_message_id` / `AgentToolOutcome.spawned_message_id`.
    *
-   * Non-empty exactly when the call detached work that has its own
-   * `AsyncBubble`, and then equal to that bubble's id. EMPTY MEANS "this call
-   * detached nothing", and that is the only reading of empty — see
-   * tool-call.proto. It is carried up beside the payload because it sits on the
+   * Non-empty exactly when the call detached work, and then equal to the uuid
+   * of the MESSAGE that work is carried by. EMPTY MEANS "this call detached
+   * nothing", and that is the only reading of empty — see tool-call.proto. It
+   * is carried up beside the payload because it sits on the
    * `AgentToolCall`/`AgentToolOutcome` envelope, one level ABOVE the verbatim
    * data.v1 block the payload unwraps to, so it would otherwise be discarded.
    */
-  spawnedBubbleId?: string;
+  spawnedMessageId?: string;
   /**
    * The RESOLVED figures this response's bubble corner renders
    * (`AgentResponse.usage_stamp`). Present only on the `response` emission, and
@@ -155,7 +155,7 @@ export function unwrapAgentEmission(v: unknown, ctx: string): UnwrappedEmission 
     };
   }
   if (key === "toolCall" || key === "toolOutcome") {
-    out.spawnedBubbleId = str(value, "spawnedBubbleId", `${ctx}.${key}`);
+    out.spawnedMessageId = str(value, "spawnedMessageId", `${ctx}.${key}`);
   }
   if (key === "response") {
     // ABSENT STAMP STAYS ABSENT. A response that carried no usage record gets

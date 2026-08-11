@@ -183,7 +183,7 @@ func TestSessionHandlerParseFailureBecomesUnparsed(t *testing.T) {
 	}
 }
 
-func TestSessionHandlerParseFailureIsWarnBecauseTheBubbleLosesItsStructure(t *testing.T) {
+func TestSessionHandlerParseFailureIsWarnBecauseTheDetachedWorkLosesItsStructure(t *testing.T) {
 	// Arrange — a parse failure persists only as an UnparsedEvent.
 	var seen []logging.Diagnostic
 	log := logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})

@@ -5,7 +5,6 @@ syntax = "proto3";
 
 package agentshim.frontend.v1;
 
-import "agentshim/frontend/v1/async-bubble.proto";
 import "agentshim/frontend/v1/conversation-page.proto";
 import "agentshim/frontend/v1/errors.proto";
 import "agentshim/frontend/v1/failure-card.proto";
@@ -31,6 +30,10 @@ message FrontendFrame {
   // (F4); both frontends have shipped their readers.
   reserved 8;
   reserved "degraded_notice";
+  // 20 KEPT its number but was renamed async_bubble_delta -> detached_work_delta
+  // when the bubble became a Message payload. The NAME is retired because this
+  // surface is protojson on the wire, where the field name is the wire token.
+  reserved "async_bubble_delta";
   oneof frame {
     StateSnapshot snapshot = 1;
     // THE authority on which session owns a workspace, whether it arrives on
@@ -63,11 +66,11 @@ message FrontendFrame {
     // snapshot, and rebroadcasts on change.
     WorkspaceRoster workspace_roster = 18;
     ShutdownScheduleView shutdown_schedule = 19;
-    // Detached work opening, and typed incremental updates to work already
-    // open. Its own frame rather than more ConversationDelta messages, because a
-    // detached agent produces at its own rate and must not flood the
-    // conversation that dispatched it.
-    AsyncBubbleDelta async_bubble_delta = 20;
+    // Detached work opening as WHOLE MESSAGES, and typed incremental UPDATES to
+    // messages already open. Its own frame rather than more ConversationDelta
+    // messages, because a detached agent produces at its own rate and must not
+    // flood the conversation that dispatched it.
+    DetachedWorkDelta detached_work_delta = 20;
     // One workspace's topbar, fully resolved. Pushed whenever any fact the
     // topbar renders changes.
     TopbarView topbar = 21;
@@ -105,6 +108,9 @@ message FrontendFrame {
 // superseded entries by design, and their order carries no authority — so
 // folding them onto a store must never move a workspace's session binding.
 message StateSnapshot {
+  // 11 KEPT its number but was renamed async_bubbles -> detached_work, and its
+  // type changed from a parallel bubble type to Message. The NAME is retired.
+  reserved "async_bubbles";
   // THE authoritative rulings, one per workspace. Sole source of session
   // ownership for everything in this snapshot.
   repeated WorkspaceState workspaces = 1;
@@ -126,11 +132,12 @@ message StateSnapshot {
   // The daemon-global lease state as of this connect, so a client joining
   // mid-drain renders the banner without waiting for the next edge.
   ShutdownScheduleView shutdown_schedule = 10;
-  // Every async bubble the session still holds, folded to date, so a
+  // Every piece of detached work the session still holds, folded to date, as
+  // WHOLE MESSAGES — the same envelopes DetachedWorkDelta.opened carries — so a
   // reconnecting client resumes a running detached agent rather than starting
-  // its fold over. Each bubble carries its own AsyncFold accounting, so the
+  // its fold over. Each carries its own DetachedWorkFold accounting, so the
   // client also knows exactly what it is NOT being shown.
-  repeated AsyncBubble async_bubbles = 11;
+  repeated Message detached_work = 11;
   // The resolved component views, one per workspace, so a connecting client
   // draws its chrome without waiting for each view's first push.
   repeated TopbarView topbars = 12;

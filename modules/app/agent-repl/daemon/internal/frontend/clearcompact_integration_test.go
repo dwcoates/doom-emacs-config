@@ -17,7 +17,7 @@ func TestAClearAndACompactionAtTheSamePositionGetDistinctIDs(t *testing.T) {
 	// Arrange — the namespacing regression. Both cuts derive their identity
 	// from the SAME vendor position when no dedup key was stamped (one session,
 	// one seq), so a derivation that ignored WHICH cut it was naming would hand
-	// both the same id and let a frontend replace one bubble with the other.
+	// both the same id and let a frontend replace one work with the other.
 	// The compaction's id must also carry no `clear:` prefix: an earlier
 	// derivation prefixed every cut with the clear's name.
 	position := struct {

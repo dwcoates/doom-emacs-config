@@ -3,7 +3,7 @@
 //
 // The keep-alive ping keeps a cache warm, and the price of that is a turn in
 // the vendor transcript that the user never asked for. Left there, it would be
-// context every subsequent turn pays for and a bubble no reader can explain. So
+// context every subsequent turn pays for and a work no reader can explain. So
 // before the next real prompt is submitted, the conversation is rewound to the
 // last real turn boundary: a truncated copy of the transcript under a NEW
 // vendor session id, byte-identical to the prefix already sent to the vendor,

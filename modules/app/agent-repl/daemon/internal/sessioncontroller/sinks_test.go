@@ -32,7 +32,7 @@ type fakePusher struct {
 	heartbeats []*frontendv1.HeartbeatView
 	queues     []*frontendv1.QueueView
 	progress   []*frontendv1.ProgressView
-	bubbles    []*frontendv1.AsyncBubbleDelta
+	work       []*frontendv1.DetachedWorkDelta
 }
 
 func (p *fakePusher) PushConversationDelta(c *frontendv1.ConversationDelta) {
@@ -42,10 +42,10 @@ func (p *fakePusher) PushConversationDelta(c *frontendv1.ConversationDelta) {
 	p.mu.Unlock()
 	notifyTestActivity()
 }
-func (p *fakePusher) PushAsyncBubbleDelta(d *frontendv1.AsyncBubbleDelta) {
+func (p *fakePusher) PushDetachedWorkDelta(d *frontendv1.DetachedWorkDelta) {
 	p.mu.Lock()
-	p.trace = append(p.trace, "async-bubble")
-	p.bubbles = append(p.bubbles, d)
+	p.trace = append(p.trace, "async-work")
+	p.work = append(p.work, d)
 	p.mu.Unlock()
 	notifyTestActivity()
 }
@@ -178,7 +178,7 @@ type fakeApplier struct {
 	degradations []degradedCall
 	degradedErr  error
 	// promptAccepts records daemon-local prompt-accept edges, which close the
-	// bubble-before-thinking race before command completion.
+	// work-before-thinking race before command completion.
 	promptAccepts   []promptAcceptCall
 	promptAcceptErr error
 	// promptRejects records the retraction of those edges when the submit they
@@ -2643,7 +2643,7 @@ func TestUserTurnReceiptIgnoresNonUserItems(t *testing.T) {
 	// Arrange — an assistant-only delta.
 	cd := &frontendv1.ConversationDelta{Messages: []*frontendv1.Message{{
 		RequestId: "fe-5-0000",
-		Payload:      &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{}}}}},
+		Payload:   &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{}}}}},
 	}}}
 	// Act
 	_, textLen := userTurnReceipt(cd)

@@ -5,12 +5,12 @@
 // client-side derivation: each frontend worked out for itself, from a mix of
 // structured metadata and free-text prose, which utterances belonged to which
 // dispatched agent — and got it wrong. The reshape removes the derivation
-// entirely: the daemon classifies the spawning call, MINTS the bubble id,
-// stamps that id on the call's AgentToolCall.spawned_bubble_id, and addresses
-// every subsequent update to it (async-bubble.proto §"THE ROUTING HANDLE").
+// entirely: the daemon classifies the spawning call, MINTS the work id,
+// stamps that id on the call's AgentToolCall.spawned_message_id, and addresses
+// every subsequent update to it (async-work.proto §"THE ROUTING HANDLE").
 //
 // So the criterion is a single indivisible statement about one record: the
-// subagent's response arrives INSIDE its bubble's AsyncAgentUpdate, addressed
+// subagent's response arrives INSIDE its work's DetachedWorkAgentUpdate, addressed
 // by the id the spawning call published, and DOES NOT appear as a top-level
 // Message. Both halves are asserted from one drain, because a record
 // that satisfies one observer and is missed by the other proves nothing.
@@ -23,9 +23,9 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
-// TestE2EASubagentResponseIsRoutedToItsBubbleAndNeverToTheFeed is the
+// TestE2EASubagentResponseIsRoutedToItsDetachedWorkAndNeverToTheFeed is the
 // acceptance test.
-func TestE2EASubagentResponseIsRoutedToItsBubbleAndNeverToTheFeed(t *testing.T) {
+func TestE2EASubagentResponseIsRoutedToItsDetachedWorkAndNeverToTheFeed(t *testing.T) {
 	// Arrange
 	h := newUDSHarness(t)
 	cwd := t.TempDir()
@@ -35,7 +35,7 @@ func TestE2EASubagentResponseIsRoutedToItsBubbleAndNeverToTheFeed(t *testing.T) 
 		agentID   = "agent_e2e_subagent"
 		// The utterance under test. Distinctive so its presence anywhere in the
 		// top-level feed is unambiguous rather than a substring coincidence.
-		subagentText = "e2e-subagent-utterance: this belongs inside the bubble"
+		subagentText = "e2e-subagent-utterance: this belongs inside the work"
 		// The BARRIER: a real user prompt written after the subagent's record.
 		// The store preserves per-session write order and the daemon curates in
 		// that order, so once this prompt's item has arrived the subagent record
@@ -60,27 +60,27 @@ func TestE2EASubagentResponseIsRoutedToItsBubbleAndNeverToTheFeed(t *testing.T) 
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 
-	bubbleID := gateOnAnchor(t, seen, toolUseID)
+	messageID := gateOnOpenedWork(t, seen, toolUseID)
 
-	// THE POSITIVE HALF: the utterance is inside the bubble's agent-arm updates.
+	// THE POSITIVE HALF: the utterance is inside the work's agent-arm updates.
 	routed := false
-	for _, emission := range seen.agentEmissions(bubbleID) {
+	for _, emission := range seen.agentEmissions(messageID) {
 		if emissionCarriesText(emission, subagentText) {
 			routed = true
 			break
 		}
 	}
 	if !routed {
-		t.Errorf("the subagent's response never arrived in an AsyncAgentUpdate addressed to bubble %q (saw %d updates for it across %d async pushes)",
-			bubbleID, len(seen.updatesFor(bubbleID)), len(seen.deltas))
+		t.Errorf("the subagent's response never arrived in an DetachedWorkAgentUpdate addressed to work %q (saw %d updates for it across %d async pushes)",
+			messageID, len(seen.updatesFor(messageID)), len(seen.deltas))
 	}
 
 	// THE NEGATIVE HALF: it is nowhere in the top-level feed. This is the
 	// regression the whole reshape exists to make impossible.
 	for _, item := range seen.items {
 		if itemCarriesText(item, subagentText) {
-			t.Errorf("the subagent's response reached the TOP-LEVEL FEED as Message uuid=%q: detached-agent output must be routed to bubble %q, never rendered in the conversation that dispatched it",
-				item.GetUuid(), bubbleID)
+			t.Errorf("the subagent's response reached the TOP-LEVEL FEED as Message uuid=%q: detached-agent output must be routed to work %q, never rendered in the conversation that dispatched it",
+				item.GetUuid(), messageID)
 		}
 	}
 }

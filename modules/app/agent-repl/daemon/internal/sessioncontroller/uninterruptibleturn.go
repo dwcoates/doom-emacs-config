@@ -45,7 +45,7 @@ import (
 // right now, or UNSPECIFIED when the running turn is anything else (including
 // when no turn is running at all). Caller holds m.mu.
 //
-// It reads the running prompt's TEXT through the same recognizer the bubble
+// It reads the running prompt's TEXT through the same recognizer the work
 // suppression uses (sessioncommand.go), so a cut submitted by the user, by a
 // warm compaction, and by a revival are one case rather than three: each of
 // them is `/compact` or `/clear` reaching the shim as prompt text, and the

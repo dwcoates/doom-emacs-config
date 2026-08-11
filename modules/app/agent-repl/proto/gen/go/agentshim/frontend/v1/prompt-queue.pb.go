@@ -309,7 +309,7 @@ type DetachedAgentsCancelled struct {
 	// task ids: a task id is daemon-internal bookkeeping a frontend has no
 	// vocabulary for, and what a frontend renders is "cancelled 3 agents". The
 	// ids stay on the shim-wire arm, where the daemon uses them to settle
-	// exactly those agents' bubbles.
+	// exactly those agents' detached-work messages.
 	Count         int64 `protobuf:"varint,1,opt,name=count,proto3" json:"count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -72,8 +72,8 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 	// of them routes by workspace exactly as ConversationDelta already did.
 	case *frontendv1.FrontendFrame_TypingDelta:
 		return frame, sc.matchesWorkspace(f.TypingDelta.GetWorkspace())
-	case *frontendv1.FrontendFrame_AsyncBubbleDelta:
-		return frame, sc.matchesWorkspace(f.AsyncBubbleDelta.GetWorkspace())
+	case *frontendv1.FrontendFrame_DetachedWorkDelta:
+		return frame, sc.matchesWorkspace(f.DetachedWorkDelta.GetWorkspace())
 	case *frontendv1.FrontendFrame_TaskCatalog:
 		return frame, sc.matchesWorkspace(f.TaskCatalog.GetWorkspace())
 	case *frontendv1.FrontendFrame_SessionInit:
@@ -152,6 +152,32 @@ func filterWorkspaceViews[T workspaceView](views []T, sc Scope) []T {
 	return out
 }
 
+// filterDetachedWork scopes detached-work MESSAGES by workspace.
+//
+// It cannot go through filterWorkspaceViews because a Message carries no
+// workspace of its own: the key rides the detached-work PAYLOAD, which is the
+// same field the work's delta carries on its envelope. Reading it from there —
+// rather than lifting a workspace onto every Message — keeps the routing key in
+// one place and keeps Message free of a field only one payload arm could fill.
+//
+// A message whose payload is NOT detached work is DROPPED and is a daemon bug:
+// StateSnapshot.detached_work carries detached work and nothing else, so a
+// message with any other arm has no workspace to scope by and could only be
+// delivered to every client or to none.
+func filterDetachedWork(msgs []*frontendv1.Message, sc Scope) []*frontendv1.Message {
+	var out []*frontendv1.Message
+	for _, m := range msgs {
+		w := m.GetDetachedWork()
+		if w == nil {
+			continue
+		}
+		if sc.matchesWorkspace(w.GetWorkspace()) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // filterSnapshot returns a copy of snap carrying only the state-bearing views
 // matching sc. The retained protos are shared (read-only downstream), only the
 // slices are new.
@@ -171,11 +197,11 @@ func filterSnapshot(snap *frontendv1.StateSnapshot, sc Scope) *frontendv1.StateS
 		Topbars:         filterWorkspaceViews(snap.GetTopbars(), sc),
 		TokenBreakdowns: filterWorkspaceViews(snap.GetTokenBreakdowns(), sc),
 		WorkspaceGates:  filterWorkspaceViews(snap.GetWorkspaceGates(), sc),
-		// Async bubbles scope by workspace exactly as every other per-workspace
-		// family does. AsyncBubble.workspace is the same key its delta carries
+		// Detached work scopes by workspace exactly as every other per-workspace
+		// family does. DetachedWork.workspace is the same key its delta carries
 		// on the envelope, so a client's reconnect restatement and the pushes
 		// it then receives are filtered by one rule rather than two.
-		AsyncBubbles: filterWorkspaceViews(snap.GetAsyncBubbles(), sc),
+		DetachedWork: filterDetachedWork(snap.GetDetachedWork(), sc),
 		// Daemon identity is connection-global, not workspace-scoped. Dropping
 		// it here handed every scoped client a snapshot with an empty boot id,
 		// which the webapp's version-skew gate rejects on EVERY adoption —

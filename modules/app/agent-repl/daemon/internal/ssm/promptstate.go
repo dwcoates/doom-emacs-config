@@ -202,7 +202,7 @@ func (m *Manager) retractUnpublishedAcceptLocked(workspace, sessionID, requestID
 
 // publishPromptAcceptedLocked resolves and synchronously publishes the state
 // whose accepted-prompt invariant the caller is about to expose as a prompt
-// bubble. Caller holds m.mu; keeping it held is the ordering barrier.
+// work. Caller holds m.mu; keeping it held is the ordering barrier.
 func (m *Manager) publishPromptAcceptedLocked(
 	workspace, sessionID, requestID, decision string,
 	admission PromptAdmission,

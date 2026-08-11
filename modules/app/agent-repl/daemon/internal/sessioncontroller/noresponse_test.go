@@ -27,7 +27,7 @@ func assistantTextItem(uuid, model string, texts ...string) *frontendv1.Message 
 		})
 	}
 	return &frontendv1.Message{
-		Uuid: uuid,
+		Uuid:    uuid,
 		Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Model: model, Content: blocks}}}}},
 	}
 }
@@ -153,7 +153,7 @@ func TestANoResponsePlaceholderIsWithheldFromTheFeed(t *testing.T) {
 	// Act
 	h.controller().consumer.Consume(transcriptAssistantTextEvent(t, 12, "a-placeholder", syntheticModel, noResponseRequestedText))
 
-	// Assert: no model produced it and it says nothing, so no bubble is drawn.
+	// Assert: no model produced it and it says nothing, so no work is drawn.
 	if turns := h.assistantTurns(); len(turns) != 0 {
 		t.Fatalf("pushed %d assistant turn(s) for a placeholder record, want none", len(turns))
 	}
