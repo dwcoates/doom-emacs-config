@@ -49,11 +49,16 @@ func newKeepAliveTurnID() string {
 // keepAliveEligibleLocked reports whether d may be pinged right now, and why
 // not when it may not. Caller holds m.mu.
 //
-// THE FOUR REFUSALS ARE NOT INTERCHANGEABLE and none is redundant:
+// THE FIVE REFUSALS ARE NOT INTERCHANGEABLE and none is redundant:
 //
 //   - a HIBERNATED session is outside the loop entirely; reaching here at all
 //     would mean the one transition's construction had failed, so it is stated
 //     as an invariant violation rather than an ordinary decline;
+//   - a PROVEN-COLD CACHE means an earlier ping already paid full freight to
+//     discover there is no cache to refresh (keepalivecold.go); every later ping
+//     would pay the same price for the same answer, so the verdict declines them
+//     until real work rebuilds the prefix. It is what replaced the hibernation
+//     that finding used to take;
 //   - a LIVE TURN means the cache is being refreshed by real work already, and
 //     a ping would be a second turn racing it;
 //   - QUEUED OR HELD PROMPTS mean real work is waiting for the session; pinging
@@ -65,6 +70,9 @@ func (m *Manager) keepAliveEligibleLocked(d *sessionController) (ok bool, why st
 		m.logf("session-controller: INVARIANT VIOLATION — a keep-alive eligibility check reached a HIBERNATED session ws=%q session=%s cause=%s; hibernation and keep-alive-stop are one transition, so this combination should be unreachable",
 			d.workspace, d.sessionID, detail.Cause)
 		return false, "hibernated"
+	}
+	if d.cacheProvenCold != nil {
+		return false, "cache_proven_cold"
 	}
 	if d.turn.active() {
 		return false, "turn_active"

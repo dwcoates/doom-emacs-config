@@ -12,7 +12,6 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/keepalive"
-	"claude-repld/internal/registry"
 	"claude-repld/internal/shimclient"
 
 	"google.golang.org/protobuf/types/known/anypb"
@@ -72,7 +71,7 @@ func coldPingRig(t *testing.T) (*Manager, *fakeApplier, *fakeHibernations, *fake
 	// The instant every keep-alive measurement is taken from. Under the rig's
 	// fixed clock this puts the session 59 minutes into a one-hour cache — the
 	// window the sweeper pings in, and the window the observed defect fired in.
-	hib.TurnEndObserved("s1", coldPingLastTurnEnd)
+	hib.TurnEndObserved("s1", coldPingLastTurnEnd, true)
 	if err := m.Ensure("ws"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
@@ -108,32 +107,25 @@ func controllerFor(t *testing.T, m *Manager) *sessionController {
 	return d
 }
 
-// awaitHibernation blocks on the registrar's write seam. It is the whole
-// synchronization: the transition runs on its own goroutine, and a test that
-// slept for it would be asserting on the scheduler.
-func awaitHibernation(t *testing.T, hib *fakeHibernations) registry.HibernationDetail {
+// coldVerdictOf reads the session's latched cold-cache verdict.
+func coldVerdictOf(t *testing.T, m *Manager) *coldCacheVerdict {
 	t.Helper()
-	select {
-	case detail := <-hib.writeSeen:
-		return detail
-	case <-time.After(5 * time.Second):
-		t.Fatal("no hibernation was recorded; the cold ping's proof went nowhere")
-		return registry.HibernationDetail{}
-	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.byWS["ws"].cacheProvenCold
 }
 
 // ---------------------------------------------------------------------------
 // The verdict
 // ---------------------------------------------------------------------------
 
-// A PING THAT PAID FOR THE WHOLE CONVERSATION IS PROOF THE CACHE WAS GONE, and
-// the proof is what puts the session to sleep. Before this the same fact was
-// detected, logged and rendered as a red footer line, and the session stayed
-// awake with nothing offered to the user.
-func TestColdKeepAlivePingHibernatesWithCacheExpired(t *testing.T) {
+// A PING THAT PAID FOR THE WHOLE CONVERSATION IS PROOF THE CACHE WAS GONE — AND
+// PROOF OF A COST, NOT A REASON TO SLEEP. This used to hibernate the session
+// outright, at roughly the ping window (about an hour) under a six-hour idle
+// cutoff, which broke the contract that nothing sleeps before that cutoff.
+func TestColdKeepAlivePingTakesNoHibernation(t *testing.T) {
 	// Arrange.
 	m, _, hib, _, _ := coldPingRig(t)
-	hib.writeSeen = make(chan registry.HibernationDetail, 4)
 	turnID := submitPingUnderTurn(t, m)
 	d := controllerFor(t, m)
 	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
@@ -142,17 +134,96 @@ func TestColdKeepAlivePingHibernatesWithCacheExpired(t *testing.T) {
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
 
 	// Assert.
-	detail := awaitHibernation(t, hib)
-	if detail.Cause != registry.HibernationCauseCacheExpired {
-		t.Fatalf("hibernation cause = %q, want %q", detail.Cause, registry.HibernationCauseCacheExpired)
+	if n := hib.writeCount(); n != 0 {
+		t.Fatalf("hibernation writes = %d, want none: a dead cache is a reason to stop spending on it, not to tear the session down", n)
+	}
+}
+
+// WHAT IT DOES INSTEAD IS STOP THE SPENDING. The verdict is latched so no later
+// ping pays full freight to learn the same thing.
+func TestColdKeepAlivePingLatchesTheVerdict(t *testing.T) {
+	// Arrange.
+	m, _, _, _, _ := coldPingRig(t)
+	turnID := submitPingUnderTurn(t, m)
+	d := controllerFor(t, m)
+	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
+
+	// Act.
+	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
+
+	// Assert.
+	verdict := coldVerdictOf(t, m)
+	if verdict == nil || verdict.turnID != turnID {
+		t.Fatalf("cold-cache verdict = %+v, want one latched by the ping %s", verdict, turnID)
+	}
+}
+
+// AND THE LATCH IS WHAT DECLINES THE NEXT PING. Without it the policy would ping
+// an hour later, pay full freight again, and learn the same thing again.
+func TestALatchedColdVerdictDeclinesTheNextPing(t *testing.T) {
+	// Arrange.
+	m, _, _, _, _ := coldPingRig(t)
+	turnID := submitPingUnderTurn(t, m)
+	d := controllerFor(t, m)
+	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
+	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
+
+	// Act.
+	_, err := m.SubmitKeepAlivePing(context.Background(), "ws")
+
+	// Assert.
+	if !errors.Is(err, ErrKeepAliveNotEligible) {
+		t.Fatalf("SubmitKeepAlivePing after a cold verdict = %v, want %v", err, ErrKeepAliveNotEligible)
+	}
+}
+
+// THE ELIGIBILITY REFUSAL NAMES THE VERDICT, so a reader of the decline line can
+// tell a proven-cold cache from a live turn or a queued prompt.
+func TestTheColdVerdictDeclineNamesItself(t *testing.T) {
+	// Arrange.
+	m, _, _, _, _ := coldPingRig(t)
+	d := controllerFor(t, m)
+	m.mu.Lock()
+	d.cacheProvenCold = &coldCacheVerdict{turnID: "ka_earlier"}
+	m.mu.Unlock()
+
+	// Act.
+	m.mu.Lock()
+	ok, why := m.keepAliveEligibleLocked(d)
+	m.mu.Unlock()
+
+	// Assert.
+	if ok || why != "cache_proven_cold" {
+		t.Fatalf("keepAliveEligibleLocked = (%t, %q), want (false, %q)", ok, why, "cache_proven_cold")
+	}
+}
+
+// REAL WORK RETIRES THE VERDICT, because the turn it is about to run rebuilds
+// the very prefix the verdict was a fact about.
+func TestARealPromptRetiresTheColdVerdict(t *testing.T) {
+	// Arrange.
+	m, _, _, _, _ := coldPingRig(t)
+	d := controllerFor(t, m)
+	m.mu.Lock()
+	d.cacheProvenCold = &coldCacheVerdict{turnID: "ka_earlier"}
+	m.mu.Unlock()
+
+	// Act.
+	if err := m.SubmitPrompt(context.Background(), "ws", "req_user", "hello", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert.
+	if verdict := coldVerdictOf(t, m); verdict != nil {
+		t.Fatalf("cold-cache verdict = %+v, want it retired by a real prompt", verdict)
 	}
 }
 
 // A PING THAT CAME BACK CHEAP PROVES THE OPPOSITE, and the opposite of a cold
-// ping is the feature working. Nothing is stopped.
-func TestWarmKeepAlivePingTakesNoHibernation(t *testing.T) {
+// ping is the feature working. Nothing is latched.
+func TestWarmKeepAlivePingLatchesNoVerdict(t *testing.T) {
 	// Arrange.
-	m, _, hib, _, _ := coldPingRig(t)
+	m, _, _, _, _ := coldPingRig(t)
 	turnID := submitPingUnderTurn(t, m)
 	d := controllerFor(t, m)
 	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold-1), 0, 0))
@@ -160,10 +231,9 @@ func TestWarmKeepAlivePingTakesNoHibernation(t *testing.T) {
 	// Act.
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
 
-	// Assert: the verdict is taken synchronously on the boundary, so a decision
-	// NOT to hibernate has already been taken by the time the boundary returns.
-	if n := hib.writeCount(); n != 0 {
-		t.Fatalf("hibernation writes = %d, want none for a ping that read its cache", n)
+	// Assert.
+	if verdict := coldVerdictOf(t, m); verdict != nil {
+		t.Fatalf("cold-cache verdict = %+v, want none for a ping that read its cache", verdict)
 	}
 }
 
@@ -171,9 +241,9 @@ func TestWarmKeepAlivePingTakesNoHibernation(t *testing.T) {
 // rendered by the footer and stops nothing: the user is sitting there working,
 // and a re-ingest they paid for is a fact about their prompt, not about a
 // keep-alive premise.
-func TestExpensiveNonPingTurnTakesNoHibernation(t *testing.T) {
+func TestExpensiveNonPingTurnLatchesNoVerdict(t *testing.T) {
 	// Arrange: no ping is in flight at all.
-	m, _, hib, _, _ := coldPingRig(t)
+	m, _, _, _, _ := coldPingRig(t)
 	d := controllerFor(t, m)
 	m.mu.Lock()
 	d.turn = turnRecord{phase: turnPhaseNamed, turnID: "req_user"}
@@ -184,18 +254,18 @@ func TestExpensiveNonPingTurnTakesNoHibernation(t *testing.T) {
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
 
 	// Assert.
-	if n := hib.writeCount(); n != 0 {
-		t.Fatalf("hibernation writes = %d, want none for an expensive turn nobody pinged with", n)
+	if verdict := coldVerdictOf(t, m); verdict != nil {
+		t.Fatalf("cold-cache verdict = %+v, want none for an expensive turn nobody pinged with", verdict)
 	}
 }
 
 // A RESULT NAMING SOME OTHER TURN CANNOT FILL THE PING'S MEASUREMENT, even
 // while a ping is genuinely in flight. Attribution by elimination — "a ping was
 // running, so this cost must be the ping's" — is exactly what a measurement
-// that stops a session may not be built on.
+// that changes policy may not be built on.
 func TestForeignTurnCostDoesNotFillThePingsMeasurement(t *testing.T) {
 	// Arrange.
-	m, _, hib, _, _ := coldPingRig(t)
+	m, _, _, _, _ := coldPingRig(t)
 	turnID := submitPingUnderTurn(t, m)
 	d := controllerFor(t, m)
 	m.noteKeepAlivePingCost(d, costOf(turnID+"_not_the_ping", uint64(coldPingThreshold*10), 0, 0))
@@ -204,18 +274,16 @@ func TestForeignTurnCostDoesNotFillThePingsMeasurement(t *testing.T) {
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
 
 	// Assert.
-	if n := hib.writeCount(); n != 0 {
-		t.Fatalf("hibernation writes = %d, want none: the ping observed no cost of its own", n)
+	if verdict := coldVerdictOf(t, m); verdict != nil {
+		t.Fatalf("cold-cache verdict = %+v, want none: the ping observed no cost of its own", verdict)
 	}
 }
 
 // PROMPTS WAITING BEHIND THE PING MEAN THE USER IS ALREADY BACK. Their own turn
-// re-warms the cache, and hibernating here would stop the shim out from under
-// work the user is waiting on and then refuse the very prompts the rewind was
-// on its way to deliver.
-func TestColdKeepAlivePingWithPromptsWaitingTakesNoHibernation(t *testing.T) {
+// re-warms the cache, so there is nothing to stop spending on.
+func TestColdKeepAlivePingWithPromptsWaitingLatchesNoVerdict(t *testing.T) {
 	// Arrange.
-	m, _, hib, _, _ := coldPingRig(t)
+	m, _, _, _, _ := coldPingRig(t)
 	turnID := submitPingUnderTurn(t, m)
 	d := controllerFor(t, m)
 	m.mu.Lock()
@@ -230,39 +298,39 @@ func TestColdKeepAlivePingWithPromptsWaitingTakesNoHibernation(t *testing.T) {
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
 
 	// Assert.
-	if n := hib.writeCount(); n != 0 {
-		t.Fatalf("hibernation writes = %d, want none while the user's own prompts are waiting", n)
+	if verdict := coldVerdictOf(t, m); verdict != nil {
+		t.Fatalf("cold-cache verdict = %+v, want none while the user's own prompts are waiting", verdict)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// What the record carries
+// What the verdict carries
 // ---------------------------------------------------------------------------
 
 // THE ELAPSED IS THE ONE ACTUALLY MEASURED, taken when the ping was submitted.
 // The ping's own turn end stamps the durable last-turn-end to now, so a figure
-// re-derived at hibernation time would report ~0 for a session that had in fact
+// re-derived at verdict time would report ~0 for a session that had in fact
 // been quiet for 59 minutes.
-func TestColdKeepAliveHibernationCarriesTheMeasuredElapsedAndTTL(t *testing.T) {
+func TestColdKeepAliveVerdictCarriesTheMeasuredElapsedAndTTL(t *testing.T) {
 	// Arrange.
 	m, _, hib, _, _ := coldPingRig(t)
-	hib.writeSeen = make(chan registry.HibernationDetail, 4)
 	turnID := submitPingUnderTurn(t, m)
 	d := controllerFor(t, m)
 	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
-	// The ping's turn ending moves the durable instant, exactly as production's
+	// The ping's turn ending moves the CACHE clock, exactly as production's
 	// TurnEndObserved does — which is what a re-derived figure would then read.
-	hib.TurnEndObserved("s1", coldPingLastTurnEnd+coldPingElapsedMs)
+	// It moves no engagement clock, because a ping is not somebody using the
+	// workspace.
+	hib.TurnEndObserved("s1", coldPingLastTurnEnd+coldPingElapsedMs, false)
 
 	// Act.
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
 
 	// Assert.
-	detail := awaitHibernation(t, hib)
+	verdict := coldVerdictOf(t, m)
 	wantTTL := int64(coldPingCacheTTL / time.Millisecond)
-	if detail.ElapsedMs != coldPingElapsedMs || detail.TTLMs != wantTTL {
-		t.Fatalf("detail elapsed_ms=%d ttl_ms=%d, want the measured %d and %d",
-			detail.ElapsedMs, detail.TTLMs, coldPingElapsedMs, wantTTL)
+	if verdict == nil || verdict.elapsedMs != coldPingElapsedMs || verdict.ttlMs != wantTTL {
+		t.Fatalf("verdict = %+v, want the measured elapsed %d and ttl %d", verdict, coldPingElapsedMs, wantTTL)
 	}
 }
 
@@ -270,99 +338,28 @@ func TestColdKeepAliveHibernationCarriesTheMeasuredElapsedAndTTL(t *testing.T) {
 // Ordering
 // ---------------------------------------------------------------------------
 
-// THE HIBERNATION CANNOT RACE THE PING'S OWN TEARDOWN. The measurement leaves
-// with the ping's claim, in the boundary that ends its turn, so the only way to
-// reach the transition is to have already retired the ping. Asserted at the
-// instant the sleep is made durable rather than after the fact: an ordering
-// checked afterwards is one that was allowed to be wrong in between.
-func TestColdKeepAliveHibernationIsOrderedAfterThePingsTurnEnd(t *testing.T) {
+// THE VERDICT CANNOT RACE THE PING'S OWN TEARDOWN. The measurement leaves with
+// the ping's claim, in the boundary that ends its turn, so a latched verdict
+// implies a retired ping.
+func TestColdKeepAliveVerdictIsTakenAfterThePingsTurnEnd(t *testing.T) {
 	// Arrange.
-	m, _, hib, windows, _ := coldPingRig(t)
-	hib.writeSeen = make(chan registry.HibernationDetail, 4)
-	turnID := submitPingUnderTurn(t, m)
-	d := controllerFor(t, m)
-	var claimHeldAtWrite, windowOpenAtWrite bool
-	hib.onWrite = func() {
-		_, claimHeldAtWrite = m.KeepAliveTurnID("ws")
-		_, closed := windows.closed[turnID]
-		windowOpenAtWrite = !closed
-	}
-	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
-
-	// Act.
-	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
-	awaitHibernation(t, hib)
-
-	// Assert.
-	if claimHeldAtWrite {
-		t.Fatal("the ping still held its keep-alive claim when the sleep was recorded; the hibernation raced the turn it was decided from")
-	}
-	if windowOpenAtWrite {
-		t.Fatal("the ping's exclusion window was still open when the sleep was recorded; the ping was not yet fully accounted for")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// The failure path
-// ---------------------------------------------------------------------------
-
-// A HIBERNATION THAT CANNOT BE RECORDED IS SAID OUT LOUD, with everything a
-// reader needs to act: the workspace, the session, the ping's turn, what it
-// paid, and the threshold it crossed. There is no retry and no second route,
-// because a fallback would hide a session that is provably running against a
-// dead cache.
-func TestColdKeepAliveHibernationFailureLogsItsFullContext(t *testing.T) {
-	// Arrange.
-	m, _, hib, _, capture := coldPingRig(t)
-	hib.writeSeen = make(chan registry.HibernationDetail, 4)
-	hib.writeErr = errors.New("state store is unavailable")
+	m, _, _, windows, _ := coldPingRig(t)
 	turnID := submitPingUnderTurn(t, m)
 	d := controllerFor(t, m)
 	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
 
 	// Act.
 	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
-	awaitHibernation(t, hib)
 
 	// Assert.
-	want := []string{
-		"COLD KEEP-ALIVE HIBERNATION FAILED",
-		`ws="ws"`,
-		"session=s1",
-		"turn_id=" + turnID,
-		"uncached_input_tokens=20001",
-		"threshold=20000",
-		"state store is unavailable",
+	if coldVerdictOf(t, m) == nil {
+		t.Fatal("no verdict was latched; the rest of this assertion would be vacuous")
 	}
-	for _, fragment := range want {
-		if !capture.containsEventually(fragment) {
-			t.Fatalf("the canonical failure record is missing %q", fragment)
-		}
+	if _, held := m.KeepAliveTurnID("ws"); held {
+		t.Fatal("the ping still held its keep-alive claim after the verdict; the verdict raced the turn it was decided from")
 	}
-}
-
-// A FAILED DURABLE MARK MUTATES NOTHING. The record does not claim a sleep it
-// could not write, so the next prompt brings the session back up rather than
-// meeting a gate no record supports.
-func TestColdKeepAliveHibernationFailureLeavesNoPartialState(t *testing.T) {
-	// Arrange.
-	m, _, hib, _, _ := coldPingRig(t)
-	hib.writeSeen = make(chan registry.HibernationDetail, 4)
-	hib.writeErr = errors.New("state store is unavailable")
-	turnID := submitPingUnderTurn(t, m)
-	d := controllerFor(t, m)
-	m.noteKeepAlivePingCost(d, costOf(turnID, uint64(coldPingThreshold+1), 0, 0))
-
-	// Act.
-	m.onTurnBoundary(d, false, coldPingLastTurnEnd+coldPingElapsedMs)
-	awaitHibernation(t, hib)
-
-	// Assert.
-	if detail, ok := hib.HibernationOf("s1"); ok && detail.Cause != "" {
-		t.Fatalf("the record claims a sleep the registrar refused to write: %+v", detail)
-	}
-	if n := hib.writeCount(); n != 0 {
-		t.Fatalf("recorded writes = %d, want none: the write failed", n)
+	if _, closed := windows.closed[turnID]; !closed {
+		t.Fatal("the ping's exclusion window was still open after the verdict; the ping was not yet fully accounted for")
 	}
 }
 

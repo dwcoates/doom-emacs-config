@@ -861,6 +861,46 @@ type sessionController struct {
 	// the next ping's turn end as though it were that ping's own. Read and
 	// written only under Manager.mu (keepalivecold.go).
 	keepAlivePing *keepAlivePingMeasurement
+	// cacheProvenCold is the verdict of a keep-alive ping that came back having
+	// paid for the whole conversation, nil until one does (keepalivecold.go).
+	//
+	// IT IS WHAT REPLACED A HIBERNATION. A cold ping used to sleep the session
+	// outright, hours before the idle cutoff, on the argument that the cache it
+	// was refreshing is gone — which is a reason to STOP SPENDING on the cache
+	// and not a reason to tear the session down. The latch declines every later
+	// ping instead, so the finding costs the user nothing further and the session
+	// stays up until the cutoff reaps it.
+	//
+	// IT IS CLEARED BY REAL WORK, because real work rebuilds the prefix this
+	// verdict was about (submitPromptAs). Read and written only under Manager.mu.
+	cacheProvenCold *coldCacheVerdict
+	// machineTurnID names the daemon's own in-flight turn — a cache keep-alive
+	// ping or a warm compaction — empty when the turn in flight is somebody
+	// else's. It is what stops such a turn's end from moving the ENGAGEMENT
+	// clock the idle cutoff measures (engagementturn.go).
+	//
+	// ONE FIELD, NOT A SET, because the claims make one machine turn at a time
+	// structural: a ping declines while a compaction runs and vice versa, and
+	// both decline while any turn is active. A second one arriving is that
+	// exclusivity having failed, and noteMachineTurn says so out loud rather
+	// than growing a set that would hide it.
+	//
+	// Written at the SUBMIT funnel where the submitter is known exactly, read at
+	// that same turn's end by id.
+	//
+	// IT HAS ITS OWN MUTEX AND MUST NOT USE THE MANAGER'S. The reader is the
+	// turn-end hook, which runs on the SHIM READ-LOOP goroutine inside the
+	// consumer's own event dispatch — a path this package is careful to keep
+	// free of the manager mutex, because that mutex is held across submits,
+	// teardowns and sweeps. Reaching for it there serialized every turn boundary
+	// behind whatever the fleet was doing, and the observed cost was a real one:
+	// a vendor terminal result landed late enough that the turn it settled had
+	// already been closed by an interrupt, and the shim's own TurnEnded then
+	// tripped the replay-cursor invariant and killed the session's link. The
+	// lock below is taken for a single field assignment and never held across a
+	// call.
+	machineTurnMu sync.Mutex
+	machineTurnID string
 	// drivenTurns names every turn THIS generation has a driver for: one it
 	// submitted itself, or one the returning shim positively announced as in
 	// flight at the handshake. It is the undriven-turn watchdog's whole
@@ -1547,6 +1587,14 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	leaseScheduleID, _ := m.heldSchedule()
 
 	m.mu.Lock()
+	// REAL WORK RETIRES A COLD-CACHE VERDICT. The verdict is a fact about a
+	// prefix nobody was using; a prompt is somebody using it, and the turn it is
+	// about to run rebuilds the cache the keep-alive was declining to pay for.
+	// The ping's OWN submitter is excluded: a ping cannot clear the finding its
+	// predecessor made about it (keepalivecold.go).
+	if who != submitterKeepAlive {
+		m.retireColdCacheVerdictLocked(d, "prompt:"+who.String())
+	}
 	entry, queued, err := m.queueSubmitLocked(d, requestID, text, permissionMode, promptOrigin, leaseScheduleID)
 	if err != nil {
 		// A REFUSED submit is refused whole: nothing was queued, nothing is
@@ -2706,7 +2754,24 @@ func (m *Manager) hibernate(workspace, wantSession string, cause StopCause) erro
 	// session lock that gates a following restoration. The controller exit tail
 	// is silent for this retired generation, so no later connectivity edge can
 	// overwrite this completed teardown.
-	m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityHibernated, "hibernated")
+	//
+	// THE CAUSE KIND NAMES THE INITIATOR, because most callers of this teardown
+	// are not hibernations at all. A merged teardown, a daemon shutdown in
+	// stop-shims mode, a scheduled drain's execution and an account switch all
+	// arrive here, and every one of them wrote the bare token `hibernated` on the
+	// state row — so the log could not tell a workspace the user's own idle
+	// cutoff reaped from one a routine bounce stood down, and hibernation read as
+	// far more frequent than the six-hour rule permits. Naming the initiator here
+	// makes the two countable apart.
+	//
+	// WHAT THIS DOES NOT FIX, deliberately: the RENDER STATE is still
+	// RENDER_STATE_HIBERNATED for all of them, so a bounced workspace still shows
+	// the user a sleep that never happened. Correcting that needs a third
+	// connectivity token beside `hibernated` and `severed` — "stood down, and
+	// neither asleep nor broken" — which is a proto and webapp change and
+	// therefore out of this branch's scope. It is a real defect and it is left
+	// whole rather than half-done.
+	m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityHibernated, "hibernated:"+cause.String())
 	// A deliberate stand-down retires whatever streak of bring-up failures the
 	// session had accumulated, so a revival climbs the ladder from the bottom
 	// rather than inheriting a park (bringupescape.go).
@@ -2985,12 +3050,19 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	cons.onTurnLiveness = func(l ssm.TurnLiveness) {
 		m.noteTurnLiveness(d, l)
 	}
-	// The keep-alive policy's measuring point. Persisted per accepted turn end,
+	// THE TWO IDLE CLOCKS' MEASURING POINT, persisted per accepted turn end,
 	// which is what makes every later decision a time-since check against a
 	// durable instant rather than a timer nothing can restore (hibernation.go).
+	//
+	// The turn's KIND is resolved here, from the mark its own submit left
+	// (engagementturn.go), and handed to the registrar with the instant so both
+	// clocks move in one write. A keep-alive ping and a warm compaction move the
+	// cache clock alone: they refresh the prompt cache, so the ping schedule
+	// must measure from them, and they are not somebody using the workspace, so
+	// the six-hour idle cutoff must not.
 	if m.cfg.Hibernations != nil {
-		cons.onTurnEnded = func(atMs int64) {
-			m.cfg.Hibernations.TurnEndObserved(sessionID, atMs)
+		cons.onTurnEnded = func(turnID string, atMs int64) {
+			m.cfg.Hibernations.TurnEndObserved(sessionID, atMs, m.engagementTurn(d, turnID))
 		}
 	}
 	// WHAT EVERY TURN'S TERMINAL RESULT MEASURED, routed to the two decisions

@@ -618,7 +618,7 @@ type consumer struct {
 	//
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
-	onTurnEnded func(atMs int64)
+	onTurnEnded func(turnID string, atMs int64)
 	// onTurnStarted reports an accepted turn START with the boundary's OWN
 	// instant, so the controller can re-stamp a keep-alive window's lower bound
 	// onto the clock that stamps conversation items (keepalivesubmit.go).
@@ -1234,7 +1234,15 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	// registry.Record.LastTurnEndMs for why the timestamp rather than a timer
 	// is what survives a laptop sleep and a daemon bounce.
 	if te := ev.GetTurnEnded(); te != nil && c.onTurnEnded != nil && announce {
-		c.onTurnEnded(c.boundaryInstant(ev))
+		// THE TURN'S OWN ID TRAVELS WITH ITS END, because the two clocks the
+		// hook writes are not both moved by every turn: a keep-alive ping and a
+		// warm compaction move the cache clock and must leave the engagement
+		// clock alone, and the id is how the boundary is matched to the fact the
+		// SUBMIT recorded about it (engagementturn.go). Deriving that at this
+		// end instead — from the prompt text, the turn's cost, its duration —
+		// would be a heuristic standing in for something the daemon already knew
+		// exactly.
+		c.onTurnEnded(te.GetTurnId(), c.boundaryInstant(ev))
 	}
 	// THE KEEP-ALIVE WINDOW'S LOWER BOUND, taken from the START boundary for the
 	// exact reason its upper bound is taken from the END boundary (queue.go):

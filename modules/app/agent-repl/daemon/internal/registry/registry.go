@@ -190,6 +190,33 @@ type Record struct {
 	// Only the backfilling writer sets it, and every real turn-boundary write
 	// clears it, so the flag always describes the value currently in the field.
 	LastTurnEndBackfilled bool `json:"last_turn_end_backfilled,omitempty"`
+	// LastEngagementMs is when somebody last ENGAGED with this session, unix
+	// millis: the end of the most recent turn that was not the daemon's own
+	// machinery. Zero means no engagement has ever been observed under this
+	// record.
+	//
+	// IT IS A SECOND CLOCK BECAUSE THERE ARE TWO QUESTIONS, and one field
+	// answering both is what made the idle cutoff unreachable. LastTurnEndMs is
+	// the CACHE clock: it must move on every turn INCLUDING a keep-alive ping,
+	// because a ping refreshes the prompt cache and the next ping is due a cache
+	// lifetime after it. The idle cutoff asks something else — "has anybody
+	// touched this workspace in six hours" — and measuring that from the cache
+	// clock meant every successful ping reset it. A session pinged every
+	// fifty-five minutes therefore never reached six hours and NEVER HIBERNATED
+	// AT ALL, which is the exact inverse of the defect that made cold caches
+	// sleep at one hour.
+	//
+	// WHAT COUNTS AS ENGAGEMENT IS DECLARED AT SUBMIT, NEVER INFERRED LATER. The
+	// submitter of every prompt is known explicitly at the one funnel every
+	// prompt path reaches (sessioncontroller.forwardPrompt), and the two machine
+	// submitters — the cache keep-alive ping and the warm compaction — are the
+	// only ones that do not count. Nothing downstream re-derives it from prompt
+	// text, turn duration, or timing.
+	//
+	// A record migrated from before this field carries its LastTurnEndMs, which
+	// is the best evidence available and errs toward looking recently engaged —
+	// the safe direction, since it delays a teardown rather than taking one.
+	LastEngagementMs int64 `json:"last_engagement_ms,omitempty"`
 	// Hibernated marks a session whose shim the daemon deliberately stopped and
 	// which must NOT be revived implicitly. It is durable so a daemon restart
 	// rehydrates the sleep rather than silently un-sleeping it, and so a

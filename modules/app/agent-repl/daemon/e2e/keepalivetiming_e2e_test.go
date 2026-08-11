@@ -213,90 +213,73 @@ func TestE2ENoKeepAlivePingWhileTheMergeLeaseHoldsTheWorkspace(t *testing.T) {
 
 // --- (2) the overslept cache ---------------------------------------------------
 
-// TestE2EAnOversleptCacheHibernatesInsteadOfPinging covers THE LAPTOP LID: the
-// check runs at an elapsed idleness at or beyond the whole TTL, because the
-// machine slept or the daemon was down. The cache is already gone, so a ping
-// would pay a full cold re-ingest to warm nothing — the discovery IS the
-// hibernate.
-func TestE2EAnOversleptCacheHibernatesInsteadOfPinging(t *testing.T) {
+// TestE2EAnOversleptCacheDoesNotHibernate covers THE LAPTOP LID, and the
+// correction at the heart of this policy. The check runs at an elapsed idleness
+// at or beyond the whole TTL, because the machine slept or the daemon was down.
+// The cache is already gone, so a ping would pay a full cold re-ingest to warm
+// nothing — and the daemon declines the ping.
+//
+// IT DOES NOT DECLINE THE SESSION. This used to hibernate here, at the TTL, on
+// an argument that only ever supported not pinging: a cold cache is a reason to
+// stop spending on it, not a reason to tear the session down. The workspace stays
+// up and answers prompts until the idle cutoff reaps it, and the sentinel prompt
+// below is what proves it — a hibernated session refuses prompts at the revival
+// gate, so its turn would never start.
+func TestE2EAnOversleptCacheDoesNotHibernate(t *testing.T) {
 	// Arrange
 	policy := testKeepAlivePolicy()
 	s := newKeepAliveSession(t, policy)
 
 	// Act — the whole TTL has passed since the last turn ended.
 	s.idleFor(t, policy.ttl)
+	writeCmd(t, s.conn, `{"requestId":"r-sentinel","submitPrompt":{"text":"sentinel","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
-	// Assert — hibernated, and with no ping submitted on the way there. The
-	// frontend assertion comes first because it is the one that establishes the
-	// transition happened at all.
-	detail := awaitHibernationDetail(t, s.conn, s.sessionID)
-	if detail.GetCacheExpired() == nil {
-		t.Fatalf("hibernation cause is %T, want the cache_expired arm: the session went to sleep because its prompt cache was already cold, not because it had been idle past the cutoff", detail.GetCause())
-	}
+	// Assert — the prompt was accepted and its turn began, which a session held
+	// behind the revival gate could not have done.
+	s.store.await(t, "the sentinel user turn on a session the cold cache did not sleep", func(ev *corev1.Event) bool {
+		started := userTurnStart(ev)
+		return started != nil && started.GetPromptPreview() == "sentinel"
+	})
 }
 
-// TestE2EAnOversleptCacheReportsTheElapsedAndTtlItMeasured covers WHAT THE USER
-// IS TOLD. The cause carries its own evidence so the gate can say "asleep — the
-// cache expired N minutes into a M-minute TTL" without the frontend knowing any
-// daemon configuration.
-func TestE2EAnOversleptCacheReportsTheElapsedAndTtlItMeasured(t *testing.T) {
-	// Arrange
-	policy := testKeepAlivePolicy()
-	s := newKeepAliveSession(t, policy)
-	overslept := policy.ttl + 3*time.Minute
-
-	// Act
-	s.idleFor(t, overslept)
-
-	// Assert
-	expired := awaitHibernationDetail(t, s.conn, s.sessionID).GetCacheExpired()
-	if expired == nil {
-		t.Fatal("no cache_expired cause to read evidence from")
-	}
-	if got, want := expired.GetTtlMs(), policy.ttl.Milliseconds(); got != want {
-		t.Errorf("cache_expired ttl_ms = %d, want the configured TTL %d", got, want)
-	}
-	// The elapsed is a MEASUREMENT, so it is bounded rather than pinned: it is
-	// however long the daemon's clock says has passed since the durable last
-	// turn end, which is at least what this test claimed and no more than that
-	// plus the real time the warm-up turn itself took.
-	if got := expired.GetElapsedMs(); got < overslept.Milliseconds() {
-		t.Errorf("cache_expired elapsed_ms = %d, want at least the %d ms of idleness this test claimed", got, overslept.Milliseconds())
-	}
-	if got, floor := expired.GetElapsedMs(), policy.ttl.Milliseconds(); got < floor {
-		t.Errorf("cache_expired elapsed_ms = %d is BELOW the ttl_ms it is supposed to have exceeded (%d): this cause is only reachable when the cache is already cold", got, floor)
-	}
-}
-
-// TestE2EAnOversleptCacheSubmitsNoPingOnItsWayToHibernation covers the other
-// half of the same edge, stated as the negative it is: the discovery and the
-// hibernation are ONE transition, so no ping is submitted first and none is
-// submitted after.
-func TestE2EAnOversleptCacheSubmitsNoPingOnItsWayToHibernation(t *testing.T) {
+// TestE2EAnOversleptCacheSubmitsNoPing covers the other half of the same edge.
+// Declining the ping is the whole of what the cold cache decides, so no ping is
+// submitted before the discovery and none after it.
+func TestE2EAnOversleptCacheSubmitsNoPing(t *testing.T) {
 	// Arrange
 	policy := testKeepAlivePolicy()
 	s := newKeepAliveSession(t, policy)
 
 	// Act
 	s.idleFor(t, policy.ttl)
-	awaitHibernationDetail(t, s.conn, s.sessionID)
+	writeCmd(t, s.conn, `{"requestId":"r-sentinel","submitPrompt":{"text":"sentinel","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
-	// Assert — the session's whole durable record, read to its end, contains no
-	// keep-alive turn. The hibernation stopped the shim, so the seq space is
-	// closed and the tail cannot be outrun by a late write.
-	forbidden := noKeepAlivePing("the cache had already expired, so the check hibernated instead of pinging")
-	for {
-		select {
-		case ev, ok := <-s.store.events:
-			if !ok {
-				return
-			}
-			if why := forbidden(ev); why != "" {
-				t.Fatalf("forbidden durable event: %s", why)
-			}
-		default:
-			return
-		}
+	// Assert
+	s.store.awaitSentinel(t, "the sentinel user turn",
+		noKeepAlivePing("the cache had already expired, so the check declined the ping rather than paying a full re-ingest to warm nothing"),
+		func(ev *corev1.Event) bool {
+			started := userTurnStart(ev)
+			return started != nil && started.GetPromptPreview() == "sentinel"
+		})
+}
+
+// TestE2EAColdCacheStillHibernatesAtTheIdleCutoff covers WHERE THE SLEEP DID
+// GO. The cutoff is now the only time-based route into a hibernation, and a
+// session whose cache went cold hours earlier still meets it — with the cutoff's
+// own cause, carrying the cutoff's own evidence.
+func TestE2EAColdCacheStillHibernatesAtTheIdleCutoff(t *testing.T) {
+	// Arrange — long past the TTL, and nothing slept.
+	policy := testKeepAlivePolicy()
+	s := newKeepAliveSession(t, policy)
+	s.idleFor(t, policy.ttl+time.Minute)
+
+	// Act — on to the cutoff.
+	s.idleFor(t, policy.idleCutoff-policy.ttl)
+
+	// Assert
+	detail := awaitHibernationDetail(t, s.conn, s.sessionID)
+	if detail.GetIdleCutoff() == nil {
+		t.Fatalf("hibernation cause is %T, want the idle_cutoff arm: the idle cutoff is the only time-based route into a sleep, and a cold cache is not one", detail.GetCause())
 	}
 }
 
@@ -328,4 +311,44 @@ func TestE2EWithNoConfigurationThePingFiresAtTheDocumentedDefaults(t *testing.T)
 	s.store.await(t, "a keep-alive ping at the default TTL less the default leeway", func(ev *corev1.Event) bool {
 		return keepAlivePing(ev) != nil
 	})
+}
+
+// --- (3) the engagement clock ---------------------------------------------------
+
+// TestE2EAPingOnlySessionStillHibernatesAtTheIdleCutoff is the whole reason the
+// engagement clock exists, stated end to end.
+//
+// A keep-alive ping is an ordinary turn, so its end used to stamp the ONE clock
+// every idle decision measured. A session pinged once per cache lifetime
+// therefore looked freshly active forever: it never reached the cutoff and NEVER
+// HIBERNATED AT ALL — the exact inverse of the defect that made a cold cache
+// sleep at the cache TTL.
+//
+// THE PING IS AWAITED TO ITS END BEFORE THE CLOCK MOVES ON, deliberately. That
+// end is the boundary that stamps the clocks, so a test that advanced past it
+// would be asserting about a stamp that had not happened yet — and a hibernation
+// attempted over a live ping turn is refused as unsettled, which would pass this
+// test for entirely the wrong reason.
+func TestE2EAPingOnlySessionStillHibernatesAtTheIdleCutoff(t *testing.T) {
+	// Arrange — one real turn, then a keep-alive ping and nothing else.
+	policy := testKeepAlivePolicy()
+	s := newKeepAliveSession(t, policy)
+	s.idleFor(t, policy.pingAt())
+	ping := s.store.await(t, "the keep-alive ping's TurnStarted", func(ev *corev1.Event) bool {
+		return keepAlivePing(ev) != nil
+	})
+	pingTurnID := keepAlivePing(ping).GetTurnId()
+	s.store.await(t, "the keep-alive ping's TurnEnded", func(ev *corev1.Event) bool {
+		return turnEndedOf(ev, pingTurnID)
+	})
+
+	// Act — on past the idle cutoff, with the ping the only turn since.
+	s.idleFor(t, policy.idleCutoff+time.Minute)
+
+	// Assert.
+	detail := awaitHibernationDetail(t, s.conn, s.sessionID)
+	if detail.GetIdleCutoff() == nil {
+		t.Fatalf("hibernation cause is %T, want the idle_cutoff arm: a session kept warm for nobody must still be reaped, and the ping that kept it warm must not have reset the cutoff",
+			detail.GetCause())
+	}
 }

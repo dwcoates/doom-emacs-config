@@ -90,6 +90,39 @@ func (s submitter) String() string {
 	}
 }
 
+// engagement reports whether a turn from this submitter counts as somebody
+// ENGAGING with the workspace, which is the ONE input to the idle cutoff
+// (registry.Record.LastEngagementMs).
+//
+// IT IS DECLARED HERE, BESIDE THE VOCABULARY, AND ASKED AT THE SUBMIT FUNNEL.
+// The alternative — deciding at the turn end, or at the sweep, whether a turn
+// "looked like" a ping — is a heuristic over prompt text, turn duration or
+// timing, and an invariant that depends on recognizing machinery after the fact
+// is one that breaks the first time the machinery changes shape. The submitter
+// is known exactly, at the one funnel every prompt path reaches, so the fact
+// travels WITH the turn instead of being reconstructed from it.
+//
+// THE TWO MACHINE SUBMITTERS ARE THE ONLY FALSE ANSWERS, and they are the same
+// two the admission class already singles out: the cache keep-alive ping and
+// the warm compaction are the daemon talking to itself to keep a prompt cache
+// warm. Everything else — a user prompt, a merge's conflict resolution, a
+// compact-first revival the user chose, a bounce's owed turn resumption — is
+// somebody wanting something from this workspace, and a workspace somebody
+// wants is not one to reap.
+//
+// THE DEFAULT IS TRUE, deliberately. A submitter added later and forgotten here
+// counts as engagement, which delays a teardown; the opposite default would
+// silently make a whole class of real work invisible to the cutoff and reap a
+// workspace somebody was using.
+func (s submitter) engagement() bool {
+	switch s {
+	case submitterKeepAlive, submitterWarmCompaction:
+		return false
+	default:
+		return true
+	}
+}
+
 // admission maps a submitter onto the SSM's accepted-edge admission class.
 //
 // THE TWO IDLE-MACHINERY SUBMITTERS ARE THE KEEP-ALIVE PING AND THE WARM

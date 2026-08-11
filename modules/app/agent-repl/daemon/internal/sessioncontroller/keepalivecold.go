@@ -5,8 +5,6 @@ import (
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
-	"claude-repld/internal/keepalive"
-	"claude-repld/internal/registry"
 	"claude-repld/internal/tokenusage"
 )
 
@@ -22,10 +20,17 @@ import (
 // A ping that came back having paid for the whole conversation is that same
 // question OBSERVED. It is the only direct evidence the feature ever produces
 // about its own premise, and it says the premise was false. So it OVERRULES the
-// prediction: the session hibernates with cause cache_expired — the same cause
-// the predicted branch already spells, recorded through the same one transition
-// — and the user meets the revival gate that already exists, which offers
-// "compact first" or "resume as-is".
+// prediction — but only about PINGING. The session STOPS BEING PINGED and stays
+// up; it is not slept.
+//
+// IT USED TO HIBERNATE HERE, WITH CAUSE cache_expired, and that was the same
+// conflation the policy ladder made in its own cold-cache arm. The evidence is
+// about cost — a dozen tokens of prompt billed for the whole conversation — and
+// cost is a reason to stop spending, not a reason to tear a session down. A
+// hibernation taken here landed at roughly the ping window, about an HOUR, under
+// a configured six-hour idle cutoff; the user's contract is that nothing sleeps
+// before that cutoff, and this was one of the two routes breaking it. The idle
+// cutoff is now the only threshold that sleeps anything.
 //
 // WHY THE TRIGGER LIVES HERE AND NOT IN THE PROGRESS RESOLVER. progress.Manager
 // reduces the same result first, for the footer's expensive-turn alert, and it
@@ -37,15 +42,11 @@ import (
 // hibernation transition, and the stop causes, so the FACT is routed here and
 // the DECISION is taken where the transition already lives.
 //
-// WHY THE ORDERING IS STRUCTURAL RATHER THAN TIMED. Hibernation stops the shim
-// through the settled-gated teardown, which refuses a live turn outright, so a
-// hibernation racing the ping's own teardown would simply fail. Nothing here
-// waits for that race to resolve. The ping's result lands on the shim demux
-// goroutine and does one thing: LATCH the measurement. The only reader of that
-// latch is the ping's turn-end boundary, which by construction cannot run
-// before the turn has ended. There is no window in which a hibernation and a
-// live ping turn coexist, because the thing that takes the hibernation is the
-// turn's own end.
+// WHY THE ORDERING IS STRUCTURAL RATHER THAN TIMED. The ping's result lands on
+// the shim demux goroutine and does one thing: LATCH the measurement. The only
+// reader of that latch is the ping's turn-end boundary, which by construction
+// cannot run before the turn has ended — so the verdict is never taken while the
+// turn it was measured from is still live.
 
 // keepAlivePingMeasurement is what ONE in-flight keep-alive ping measured about
 // the cache it was sent to refresh. Read and written only under Manager.mu.
@@ -193,42 +194,87 @@ func (m *Manager) actOnColdKeepAlivePing(d *sessionController, measurement *keep
 			d.workspace, d.sessionID, measurement.turnID, tokenusage.ExpensiveInput(measurement.usage), cfg.UncachedCostAlertTokens)
 		return
 	}
-	// DISPATCHED OFF THE SHIM READ LOOP. The transition stops and reaps the shim,
-	// which cannot be done from the goroutine reading that shim's stream — the
-	// same reason the ping's rewind aftermath is dispatched here.
-	go m.hibernateOnColdKeepAlivePing(d, *measurement)
+	m.latchColdKeepAlivePing(d, *measurement)
 }
 
-// hibernateOnColdKeepAlivePing records the sleep a cold ping has proved is
-// owed, through the ONE transition every other cause takes.
+// coldCacheVerdict is what ONE cold keep-alive ping proved about the prompt
+// cache behind a session, kept so no later ping pays the same price to learn it
+// again. Read and written only under Manager.mu.
+type coldCacheVerdict struct {
+	// turnID names the ping that measured it.
+	turnID string
+	// elapsedMs is how long the session had been quiet when that ping was
+	// submitted, taken at the submit and never re-derived: the ping's own turn
+	// end stamps the durable last-turn-end to now.
+	elapsedMs int64
+	// ttlMs is the cache lifetime the measurement disproved.
+	ttlMs int64
+	// uncachedInputTokens is what the ping actually paid — a dozen tokens of
+	// prompt billed for the whole conversation, which IS the evidence.
+	uncachedInputTokens int64
+	// atMs is when the verdict was taken, on the daemon's own clock.
+	atMs int64
+}
+
+// latchColdKeepAlivePing records the verdict a cold ping has proved and STOPS
+// PINGING this session — it does not sleep it.
 //
-// It builds no new cause and no new frontend message. registry's
-// HibernationCauseCacheExpired already means exactly this — the prompt cache
-// this session was being kept warm for is gone — and everything downstream of
-// it already exists: the detail is persisted by the transition, mapped to
-// HibernationDetail_CacheExpired by the server, and rendered by the webapp as
-// the revival gate whose two buttons are "compact first" and "resume as-is".
+// IT USED TO HIBERNATE, AND THAT WAS THE SAME CONFLATION THE POLICY LADDER MADE.
+// A ping that came back cold is direct evidence that the cache this session was
+// being kept warm for is gone, and the whole argument built on that evidence was
+// about COST: refreshing a dead cache pays a full context re-ingest for nobody.
+// That supports declining the ping. It does not support tearing the session
+// down, and a session torn down here slept at roughly ONE HOUR — the ping window
+// — against a configured six-hour idle cutoff. The user's contract is that
+// nothing sleeps before the cutoff, and this was one of the two routes breaking
+// it.
 //
-// A FAILURE IS SURFACED, NEVER ABSORBED. There is no retry and no second route:
-// the cache is provably gone, and if the sleep could not be recorded then the
-// session stays awake with no record of it, which the log line says in those
-// words rather than leaving a reader to infer it from silence.
-func (m *Manager) hibernateOnColdKeepAlivePing(d *sessionController, measurement keepAlivePingMeasurement) {
+// SO THE FINDING NOW COSTS THE USER NOTHING FURTHER AND TAKES NOTHING AWAY. The
+// latch declines every later ping (keepAliveEligibleLocked, `cache_proven_cold`)
+// until real work rebuilds the prefix, and the session stays up until the idle
+// cutoff reaps it exactly as an un-pinged cold-cached session does.
+//
+// A SECOND VERDICT DOES NOT OVERWRITE THE FIRST. The first is the one that
+// stopped the pinging, and its measurement is the one an operator diagnoses
+// from; a later one could only be a ping the latch failed to decline, which is
+// worth saying out loud rather than quietly recording.
+func (m *Manager) latchColdKeepAlivePing(d *sessionController, measurement keepAlivePingMeasurement) {
 	cfg := m.keepAliveConfig()
-	account := registry.HibernationDetail{
-		Cause:   registry.HibernationCauseCacheExpired,
-		SinceMs: m.now(),
-		// THE MEASURED FIGURES, both of them taken at the ping's submit and
-		// carried here rather than re-derived from a clock that has since moved.
-		ElapsedMs: measurement.elapsedMs,
-		TTLMs:     measurement.ttlMs,
+	verdict := coldCacheVerdict{
+		turnID:              measurement.turnID,
+		elapsedMs:           measurement.elapsedMs,
+		ttlMs:               measurement.ttlMs,
+		uncachedInputTokens: tokenusage.ExpensiveInput(measurement.usage),
+		atMs:                m.now(),
 	}
-	m.logf("session-controller: CACHE KEEP-ALIVE CAME BACK COLD ws=%q session=%s turn_id=%s uncached_input_tokens=%d threshold=%d elapsed_ms=%d ttl_ms=%d — the ping is a dozen tokens of prompt and it paid for the whole conversation, so the cache it was sent to refresh was already gone; the policy's prediction is overruled by its own measurement and the session hibernates with cause %s so the user is offered a compaction",
-		d.workspace, d.sessionID, measurement.turnID, tokenusage.ExpensiveInput(measurement.usage),
-		cfg.UncachedCostAlertTokens, measurement.elapsedMs, measurement.ttlMs, keepalive.CauseCacheExpired)
-	if err := m.hibernateWithCause(d.workspace, account, evidenceObserved); err != nil {
-		m.logf("session-controller: COLD KEEP-ALIVE HIBERNATION FAILED ws=%q session=%s turn_id=%s uncached_input_tokens=%d threshold=%d elapsed_ms=%d ttl_ms=%d error=%v — the prompt cache is provably gone and the session stays AWAKE with nothing recording it, so the next prompt pays a full context re-ingest without the user ever being offered the compaction",
-			d.workspace, d.sessionID, measurement.turnID, tokenusage.ExpensiveInput(measurement.usage),
-			cfg.UncachedCostAlertTokens, measurement.elapsedMs, measurement.ttlMs, err)
+	m.mu.Lock()
+	previous := d.cacheProvenCold
+	if previous == nil {
+		d.cacheProvenCold = &verdict
 	}
+	m.mu.Unlock()
+	if previous != nil {
+		m.logf("session-controller: INVARIANT VIOLATION — a SECOND cold keep-alive ping ran on ws=%q session=%s turn_id=%s while the verdict from turn_id=%s (at_ms=%d) should have declined it; the earlier verdict is kept and the later ping paid %d uncached input tokens for a finding the daemon already had",
+			d.workspace, d.sessionID, verdict.turnID, previous.turnID, previous.atMs, verdict.uncachedInputTokens)
+		return
+	}
+	m.logf("session-controller: CACHE KEEP-ALIVE CAME BACK COLD ws=%q session=%s turn_id=%s uncached_input_tokens=%d threshold=%d elapsed_ms=%d ttl_ms=%d — the ping is a dozen tokens of prompt and it paid for the whole conversation, so the cache it was sent to refresh was already gone. NO HIBERNATION IS TAKEN: a dead cache is a reason to stop spending on it, not a reason to tear the session down, and the idle cutoff (%s) is the only threshold that sleeps anything. Further pings for this session are declined until real work rebuilds the prefix",
+		d.workspace, d.sessionID, verdict.turnID, verdict.uncachedInputTokens,
+		cfg.UncachedCostAlertTokens, verdict.elapsedMs, verdict.ttlMs, cfg.IdleCutoff)
+}
+
+// retireColdCacheVerdictLocked drops a session's cold-cache verdict because real
+// work is about to rebuild the prefix it was about. Caller holds m.mu.
+//
+// A SESSION WITH NO VERDICT IS UNTOUCHED AND SILENT: this runs on every prompt
+// submission, and a line per prompt for a condition that almost never holds
+// would drown the one that matters.
+func (m *Manager) retireColdCacheVerdictLocked(d *sessionController, why string) {
+	verdict := d.cacheProvenCold
+	if verdict == nil {
+		return
+	}
+	d.cacheProvenCold = nil
+	m.logf("session-controller: cold-cache verdict RETIRED ws=%q session=%s by=%s turn_id=%s uncached_input_tokens=%d — real work is being submitted and its turn rebuilds the prompt cache the verdict was about, so keep-alive pings are eligible again",
+		d.workspace, d.sessionID, why, verdict.turnID, verdict.uncachedInputTokens)
 }

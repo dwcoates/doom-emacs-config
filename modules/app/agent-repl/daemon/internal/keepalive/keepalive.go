@@ -8,8 +8,13 @@
 // representation of the same fact: it dies with the daemon, it does not
 // advance across a laptop sleep, and it cannot tell "the ping is due" from
 // "the ping is already too late". The comparison can tell those apart, which
-// is why the overslept case is a DECISION (Decision.Hibernate with
-// CauseCacheExpired) rather than a missed tick nobody notices.
+// is why the overslept case is a DECISION (ActionLetCacheCool) rather than a
+// missed tick nobody notices.
+//
+// THE IDLE CUTOFF IS THE ONLY ROUTE OUT OF THIS PACKAGE INTO A HIBERNATION.
+// Every other arm submits something or submits nothing; none of them sleeps.
+// See ActionLetCacheCool for the conflation that used to make the overslept
+// case sleep at the cache TTL — an HOUR — rather than at the cutoff.
 package keepalive
 
 import (
@@ -276,12 +281,34 @@ const (
 	// ActionAwaitExpiry is the RETRY FLOOR as an action: the session is inside
 	// the ping window but too close to expiry for a ping to be worth
 	// submitting, so nothing is submitted and the cache is left to go cold —
-	// which the policy's own cache-expired branch will then report.
+	// which ActionLetCacheCool then reports for the rest of the session's quiet.
 	//
 	// It is a DISTINCT ARM rather than a flag on ActionPing because the floor
 	// has to be unforgettable. A caller switching on Action cannot submit here
 	// without writing a case that says it is doing so.
 	ActionAwaitExpiry
+	// ActionLetCacheCool is the cache having ALREADY GONE COLD, below the idle
+	// cutoff. Nothing is submitted and NOTHING IS SLEPT: the session stays up,
+	// un-pinged, until the idle cutoff reaps it.
+	//
+	// IT REPLACES A HIBERNATION, AND THAT REPLACEMENT IS THE POINT. This arm
+	// used to return ActionHibernate with CauseCacheExpired, justified in its own
+	// comment on COST — "pinging now would pay a full context re-ingest to warm a
+	// cache for a session nobody is using". That argument supports NOT PINGING.
+	// It does not support HIBERNATING, and the two were conflated: any session
+	// whose ping window was missed or whose ping failed — a daemon bounce, a
+	// restart, a starved sweep, a clock skew — was torn down at ONE HOUR by a
+	// policy whose configured cutoff is six. A cold cache is a reason to stop
+	// spending money keeping it warm; it is not a reason to tear the session
+	// down.
+	//
+	// IT IS A NAMED ARM RATHER THAN A FALL-THROUGH TO ActionNone. "Nothing is
+	// due" and "the cache is gone and we are deliberately declining both the ping
+	// and the sleep" are different findings about a session, and a reader of the
+	// log or of a Decision must be able to tell them apart. Silently answering
+	// ActionNone here would hide the one condition this whole ladder exists to
+	// report.
+	ActionLetCacheCool
 )
 
 func (a Action) String() string {
@@ -294,6 +321,8 @@ func (a Action) String() string {
 		return "warm_compact"
 	case ActionAwaitExpiry:
 		return "await_expiry"
+	case ActionLetCacheCool:
+		return "let_cache_cool"
 	default:
 		return "none"
 	}
@@ -301,6 +330,13 @@ func (a Action) String() string {
 
 // Cause names the hibernation cause an ActionHibernate carries. The tokens are
 // the registry's durable spelling.
+//
+// CauseIdleCutoff IS THE ONLY ONE ANYTHING WRITES. CauseCacheExpired remains
+// spelled here because DURABLE RECORDS STILL CARRY IT: a workspace slept for it
+// by an earlier daemon must still render its revival gate and still be
+// revivable, so every path that READS the token stays as it was. No arm of this
+// ladder produces it, and neither does the cold-ping verdict that used to
+// (sessioncontroller/keepalivecold.go).
 const (
 	CauseIdleCutoff   = "idle_cutoff"
 	CauseCacheExpired = "cache_expired"
@@ -325,6 +361,22 @@ type Decision struct {
 	// ActionAwaitExpiry so the record of a refusal names the threshold that
 	// caused it.
 	FloorMs int64
+	// TTLMs is the cache lifetime the session has now outlived, carried on
+	// ActionLetCacheCool so the report of a cold cache names the threshold it
+	// went cold against rather than leaving a reader to re-derive it from a
+	// configuration they cannot see.
+	TTLMs int64
+	// CutoffRemainingMs is how much of the idle cutoff is still owed before the
+	// session is reaped, carried on ActionLetCacheCool and measured on the
+	// ENGAGEMENT clock the cutoff itself reads. Zero when that clock is undated
+	// and there is therefore nothing truthful to report.
+	//
+	// IT IS THE FIELD THAT MAKES THE DECLINE READABLE. The whole point of the
+	// arm is that the session is NOT being slept — so the one figure an operator
+	// wants beside it is how long it will stay up, and re-deriving that from a
+	// clock that has since moved is the mistake every other measured field here
+	// exists to avoid.
+	CutoffRemainingMs int64
 }
 
 // Evaluate takes the policy decision for one session from its durable
@@ -333,14 +385,39 @@ type Decision struct {
 // THE ORDER OF THE TESTS IS THE POLICY. The idle cutoff is checked first
 // because it subsumes everything past it: a session quiet for longer than the
 // cutoff is not a candidate for a ping under any reading, so asking about the
-// cache first would produce a cache_expired hibernation for a session whose
-// real reason is that nobody has touched it all day.
+// cache first would report a cold cache for a session whose real reason is that
+// nobody has touched it all day.
+//
+// EXACTLY ONE ARM HIBERNATES, and it is the idle cutoff. Every other arm either
+// submits something or deliberately submits nothing; none of them sleeps. That
+// is the guarantee this ladder owes its caller, and it is why the cold-cache arm
+// is ActionLetCacheCool rather than a second hibernation.
 //
 // A session with no recorded turn end (lastTurnEndMs zero) is left alone.
 // EVERY UNKNOWN ANSWERS NONE, the same rule the idle sweeper's own gates
 // follow: an undated session is one the policy knows nothing about, and both
 // pinging it and reaping it would be acting on absent evidence.
-func (c Config) Evaluate(nowMs, lastTurnEndMs int64) Decision {
+//
+// # TWO CLOCKS, AND THEY ARE NOT INTERCHANGEABLE
+//
+// lastTurnEndMs is the CACHE clock: the end of the most recent turn of ANY
+// kind, keep-alive pings included. Every cache-shaped arm measures from it,
+// because a ping really does refresh the prompt cache and the next one really is
+// due a cache lifetime after it.
+//
+// lastEngagementMs is the ENGAGEMENT clock: the end of the most recent turn
+// somebody actually asked for. THE IDLE CUTOFF MEASURES FROM IT ALONE, and that
+// is the correction. Measuring the cutoff from the cache clock meant every
+// successful ping reset it, so a session pinged every fifty-five minutes never
+// reached six hours and never hibernated AT ALL — the exact inverse of the
+// defect that made a cold cache sleep at one hour, and from the same cause: one
+// field answering two questions.
+//
+// An UNDATED engagement clock cannot reap. It answers the cutoff's unknown the
+// way every other unknown here is answered — with none — and the session is
+// still evaluated for the cache arms, which is exactly what a record that has
+// run turns but predates the second clock deserves.
+func (c Config) Evaluate(nowMs, lastTurnEndMs, lastEngagementMs int64) Decision {
 	if lastTurnEndMs <= 0 {
 		return Decision{Action: ActionNone}
 	}
@@ -352,15 +429,40 @@ func (c Config) Evaluate(nowMs, lastTurnEndMs int64) Decision {
 		return Decision{Action: ActionNone, ElapsedMs: int64(elapsed / time.Millisecond)}
 	}
 	elapsedMs := int64(elapsed / time.Millisecond)
-	if elapsed >= c.IdleCutoff {
-		return Decision{Action: ActionHibernate, Cause: CauseIdleCutoff, ElapsedMs: elapsedMs}
+	if quiet, dated := c.engagementElapsed(nowMs, lastEngagementMs); dated && quiet >= c.IdleCutoff {
+		// THE ELAPSED THE ACCOUNT CARRIES IS THE ENGAGEMENT ONE, because it is
+		// the figure this decision was actually taken against. Reporting the
+		// cache elapsed here would put a number in the durable hibernation
+		// record that no threshold in this ladder was compared to.
+		return Decision{
+			Action:    ActionHibernate,
+			Cause:     CauseIdleCutoff,
+			ElapsedMs: int64(quiet / time.Millisecond),
+		}
 	}
 	if elapsed >= c.CacheTTL {
-		// THE CACHE IS ALREADY COLD. Pinging now would pay a full context
-		// re-ingest to warm a cache for a session nobody is using — the exact
-		// cost the keep-alive exists to avoid — so the discovery IS the
-		// hibernate transition, reported rather than absorbed.
-		return Decision{Action: ActionHibernate, Cause: CauseCacheExpired, ElapsedMs: elapsedMs}
+		// THE CACHE IS ALREADY COLD, AND THAT IS NOT A REASON TO SLEEP. Pinging
+		// now would pay a full context re-ingest to warm a cache for a session
+		// nobody is using — the exact cost the keep-alive exists to avoid — so
+		// nothing is submitted. The session STAYS UP, un-pinged, until the idle
+		// cutoff above reaps it. See ActionLetCacheCool for the hibernation this
+		// arm used to take and why it was wrong.
+		decision := Decision{
+			Action:    ActionLetCacheCool,
+			ElapsedMs: elapsedMs,
+			TTLMs:     int64(c.CacheTTL / time.Millisecond),
+		}
+		// THE REMAINING IS MEASURED ON THE CUTOFF'S OWN CLOCK, not on the cache
+		// clock this arm was reached by. They are different questions and by now
+		// they are usually different numbers — a session pinged an hour ago has a
+		// fresh cache clock and an engagement clock hours older — so subtracting
+		// the cutoff from the cache elapsed would report a session as having
+		// hours left when the very next sweep is about to reap it. An undated
+		// engagement clock reports nothing rather than a fabricated figure.
+		if quiet, dated := c.engagementElapsed(nowMs, lastEngagementMs); dated {
+			decision.CutoffRemainingMs = int64((c.IdleCutoff - quiet) / time.Millisecond)
+		}
+		return decision
 	}
 	if elapsed >= c.CacheTTL-c.Leeway {
 		remainingMs := int64((c.CacheTTL - elapsed) / time.Millisecond)
@@ -397,6 +499,28 @@ func (c Config) Evaluate(nowMs, lastTurnEndMs int64) Decision {
 		}
 	}
 	return Decision{Action: ActionNone, ElapsedMs: elapsedMs}
+}
+
+// engagementElapsed is how long the session has gone without a turn somebody
+// asked for, and whether that is knowable at all.
+//
+// AN UNDATED CLOCK IS NOT AN ANCIENT ONE. Zero means no engagement has ever been
+// observed under this record — a session that predates the field, or one whose
+// only turns were the daemon's own — and reading that as "idle since the epoch"
+// is how a sweeper reaps the session it knows least about. It answers false, and
+// the caller declines to reap.
+//
+// A clock in the FUTURE is a clock that moved backwards, and it answers false
+// for the same conservative reason the cache clock's own negative branch does.
+func (c Config) engagementElapsed(nowMs, lastEngagementMs int64) (time.Duration, bool) {
+	if lastEngagementMs <= 0 {
+		return 0, false
+	}
+	quiet := time.Duration(nowMs-lastEngagementMs) * time.Millisecond
+	if quiet < 0 {
+		return 0, false
+	}
+	return quiet, true
 }
 
 // PingDeadline is how long a submitted ping's turn may stay open before the

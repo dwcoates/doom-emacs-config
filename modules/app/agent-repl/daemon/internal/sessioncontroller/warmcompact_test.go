@@ -340,3 +340,29 @@ func TestSubmitWarmCompactionDeclinesOnAnUnreadableGate(t *testing.T) {
 		t.Fatal("the unreadable gate was not reported as the fault it is")
 	}
 }
+
+// A PROVEN-COLD CACHE DECLINES THE WARM COMPACTION. The whole feature is the
+// margin — a whole-conversation read served from cache — and a ping has already
+// MEASURED that there is no cache to read, so this compaction would be the
+// expensive case by construction.
+func TestWarmCompactionIsDeclinedOnAProvenColdCache(t *testing.T) {
+	// Arrange.
+	m, _ := warmCompactRig(t, keepalive.WarmCompactMinContextTokens)
+	d := controllerFor(t, m)
+	m.mu.Lock()
+	d.cacheProvenCold = &coldCacheVerdict{turnID: "ka_earlier"}
+	m.mu.Unlock()
+
+	// Act.
+	m.mu.Lock()
+	ok, why, err := m.warmCompactEligibleLocked(d, warmCompactAnchor)
+	m.mu.Unlock()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("warmCompactEligibleLocked: %v", err)
+	}
+	if ok || why != "cache_proven_cold" {
+		t.Fatalf("warmCompactEligibleLocked = (%t, %q), want (false, %q)", ok, why, "cache_proven_cold")
+	}
+}
