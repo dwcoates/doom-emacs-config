@@ -39,7 +39,7 @@
  * elsewhere.
  */
 import type { AsyncBubbleRegistry } from "./async-routing.js";
-import { ConversationItem, ToolItem } from "./store.js";
+import { ConversationItem, ToolItem, userTurnKey } from "./store.js";
 
 /**
  * The registry surface this projection needs: one lookup, nothing more.
@@ -84,8 +84,8 @@ export function isWatcher(item: ConversationItem, bubbles?: AsyncClassification)
  * a member spawned anywhere in that span belongs to the turn. Ownership
  * extends PAST success turns, so no live async is ever orphaned: the host is
  * the turn's last main-chain text bubble, or — when the turn produced no
- * final text (a tools-only turn) — its prompt bubble (the `user-turn`'s
- * request id). An interrupted (`aborted`) or errored turn hosts its
+ * final text (a tools-only turn) — its prompt bubble, under the prompt's own
+ * identity (`userTurnKey`). An interrupted (`aborted`) or errored turn hosts its
  * survivors just the same, since its background work outlives the severed
  * turn exactly as a completed turn's does.
  *
@@ -120,7 +120,15 @@ export function asyncByBubble(
       // A prompt landing on an unclosed turn (an interrupt race) still hosts
       // that turn's survivors on its own bubble before the new turn opens.
       flush();
-      promptId = item.requestId;
+      // THE PROMPT'S IDENTITY, not its request id. The request id is EMPTY on
+      // every prompt the real pipeline delivers and on all replayed history,
+      // and `??` below only skips null/undefined — so `""` passed the guard
+      // and became a real Map key. Every such prompt shared that one bucket,
+      // and any async work landing in it rendered its badges on all of them:
+      // amber borders and member lists on prompts that own no work at all.
+      // `userTurnKey` is null when a turn has no identity to host under, which
+      // is the honest answer and is what the guard now sees.
+      promptId = userTurnKey(item);
     } else if (isWatcher(item, bubbles)) {
       members.push(item);
     } else if (item.kind === "text" && item.parentToolUseId === undefined) {
