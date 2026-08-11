@@ -1,7 +1,7 @@
-// feed.proto — The conversation feed container: the ConversationItem envelope
-// and the deltas that carry it.
+// feed.proto — The conversation feed container: the Message envelope, its
+// lineage, and the deltas that carry it.
 //
-// ConversationItem is feed packaging — identity, ordering, provenance and
+// Message is feed packaging — identity, lineage, ordering, provenance and
 // resolution stamps — wrapped around a payload. Agent-produced payloads are a
 // single AgentEmission arm (agent-emission.proto); everything the agent did
 // not emit keeps an arm of its own.
@@ -31,19 +31,19 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// WHO drove the turn that produced a conversation item.
+// WHO drove the turn that produced a message.
 //
 // The merge coordinator borrows a workspace's own shim to resolve a merge
 // conflict (the session holding the full context of the work is the one best
 // equipped to resolve it), so a session can emit a full turn the user never
-// prompted. That provenance is a durable FACT recorded on every item, not a
+// prompted. That provenance is a durable FACT recorded on every message, not a
 // rendering hint: frontends decide independently what to do with it, and the
 // decision can change without another wire change.
 type ConversationSource int32
 
 const (
 	// Never set by the daemon. proto3 reserves 0 for "the field was not
-	// populated", and every item the daemon builds sets one of the arms below,
+	// populated", and every message the daemon builds sets one of the arms below,
 	// so a receiver seeing UNSPECIFIED is looking at a malformed frame and must
 	// reject it loudly rather than assume USER.
 	ConversationSource_CONVERSATION_SOURCE_UNSPECIFIED ConversationSource = 0
@@ -99,10 +99,12 @@ func (ConversationSource) EnumDescriptor() ([]byte, []int) {
 // which payloads are pushed but never re-types them — frontends render,
 // never interpret.
 type ConversationDelta struct {
-	state      protoimpl.MessageState `protogen:"open.v1"`
-	Workspace  string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	Items      []*ConversationItem    `protobuf:"bytes,3,rep,name=items,proto3" json:"items,omitempty"`
-	ThroughSeq uint64                 `protobuf:"varint,4,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"` // frontends persist this for reconnect resync
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// The conversation additions this push carries, oldest first. Each is a
+	// complete feed envelope the frontend renders without further resolution.
+	Messages   []*Message `protobuf:"bytes,3,rep,name=messages,proto3" json:"messages,omitempty"`
+	ThroughSeq uint64     `protobuf:"varint,4,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"` // frontends persist this for reconnect resync
 	// The workspace's staleness FENCE at the moment the daemon produced this
 	// push: an opaque token the client compares BYTE-WISE against the fence on
 	// the workspace's current WorkspaceState, and never parses, splits or
@@ -154,9 +156,9 @@ func (x *ConversationDelta) GetWorkspace() string {
 	return ""
 }
 
-func (x *ConversationDelta) GetItems() []*ConversationItem {
+func (x *ConversationDelta) GetMessages() []*Message {
 	if x != nil {
-		return x.Items
+		return x.Messages
 	}
 	return nil
 }
@@ -177,9 +179,9 @@ func (x *ConversationDelta) GetFence() string {
 
 // One curated conversation addition: FEED PACKAGING wrapped around a payload.
 //
-// The packaging is what the feed knows about an item regardless of what the
-// item is — its identity, its place in the order, who drove it, and the
-// figures resolved against it. The payload is the item itself.
+// The packaging is what the feed knows about a message regardless of what the
+// message is — its identity, its lineage, its place in the order, who drove
+// it, and the figures resolved against it. The payload is the message itself.
 //
 // Agent-produced payloads are ONE arm, AgentEmission, which is also the
 // vocabulary a detached agent's output arrives in (async-bubble.proto).
@@ -189,45 +191,45 @@ func (x *ConversationDelta) GetFence() string {
 //
 // Consumers reconcile by uuid (permission items use the permission request_id
 // as their uuid).
-type ConversationItem struct {
+type Message struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Uuid      string                 `protobuf:"bytes,1,opt,name=uuid,proto3" json:"uuid,omitempty"`
 	TsMs      int64                  `protobuf:"varint,2,opt,name=ts_ms,json=tsMs,proto3" json:"ts_ms,omitempty"`
 	RequestId string                 `protobuf:"bytes,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"` // vendor API request correlation, "" when absent
-	// Provenance. ALWAYS set (see ConversationSource): persisted with the item
+	// Provenance. ALWAYS set (see ConversationSource): persisted with the message
 	// so a resync or transcript replay reproduces the same verdict instead of
 	// re-deriving it from state that has since moved on.
 	Source ConversationSource `protobuf:"varint,4,opt,name=source,proto3,enum=agentshim.frontend.v1.ConversationSource" json:"source,omitempty"`
-	// Types that are valid to be assigned to Item:
+	// Types that are valid to be assigned to Payload:
 	//
-	//	*ConversationItem_Agent
-	//	*ConversationItem_UserMessage
-	//	*ConversationItem_Permission
-	//	*ConversationItem_FailureCard
-	//	*ConversationItem_ContextCleared
-	//	*ConversationItem_ContextCompacted
-	//	*ConversationItem_SessionCommand
-	//	*ConversationItem_AsyncBubble
-	//	*ConversationItem_CompactionSummary
-	Item          isConversationItem_Item `protobuf_oneof:"item"`
+	//	*Message_Agent
+	//	*Message_UserMessage
+	//	*Message_Permission
+	//	*Message_FailureCard
+	//	*Message_ContextCleared
+	//	*Message_ContextCompacted
+	//	*Message_SessionCommand
+	//	*Message_AsyncBubble
+	//	*Message_CompactionSummary
+	Payload       isMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ConversationItem) Reset() {
-	*x = ConversationItem{}
+func (x *Message) Reset() {
+	*x = Message{}
 	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ConversationItem) String() string {
+func (x *Message) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ConversationItem) ProtoMessage() {}
+func (*Message) ProtoMessage() {}
 
-func (x *ConversationItem) ProtoReflect() protoreflect.Message {
+func (x *Message) ProtoReflect() protoreflect.Message {
 	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -239,143 +241,143 @@ func (x *ConversationItem) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ConversationItem.ProtoReflect.Descriptor instead.
-func (*ConversationItem) Descriptor() ([]byte, []int) {
+// Deprecated: Use Message.ProtoReflect.Descriptor instead.
+func (*Message) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *ConversationItem) GetUuid() string {
+func (x *Message) GetUuid() string {
 	if x != nil {
 		return x.Uuid
 	}
 	return ""
 }
 
-func (x *ConversationItem) GetTsMs() int64 {
+func (x *Message) GetTsMs() int64 {
 	if x != nil {
 		return x.TsMs
 	}
 	return 0
 }
 
-func (x *ConversationItem) GetRequestId() string {
+func (x *Message) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *ConversationItem) GetSource() ConversationSource {
+func (x *Message) GetSource() ConversationSource {
 	if x != nil {
 		return x.Source
 	}
 	return ConversationSource_CONVERSATION_SOURCE_UNSPECIFIED
 }
 
-func (x *ConversationItem) GetItem() isConversationItem_Item {
+func (x *Message) GetPayload() isMessage_Payload {
 	if x != nil {
-		return x.Item
+		return x.Payload
 	}
 	return nil
 }
 
-func (x *ConversationItem) GetAgent() *AgentEmission {
+func (x *Message) GetAgent() *AgentEmission {
 	if x != nil {
-		if x, ok := x.Item.(*ConversationItem_Agent); ok {
+		if x, ok := x.Payload.(*Message_Agent); ok {
 			return x.Agent
 		}
 	}
 	return nil
 }
 
-func (x *ConversationItem) GetUserMessage() *v1.ApiUserMessage {
+func (x *Message) GetUserMessage() *v1.ApiUserMessage {
 	if x != nil {
-		if x, ok := x.Item.(*ConversationItem_UserMessage); ok {
+		if x, ok := x.Payload.(*Message_UserMessage); ok {
 			return x.UserMessage
 		}
 	}
 	return nil
 }
 
-func (x *ConversationItem) GetPermission() *v11.PermissionItem {
+func (x *Message) GetPermission() *v11.PermissionItem {
 	if x != nil {
-		if x, ok := x.Item.(*ConversationItem_Permission); ok {
+		if x, ok := x.Payload.(*Message_Permission); ok {
 			return x.Permission
 		}
 	}
 	return nil
 }
 
-func (x *ConversationItem) GetFailureCard() *FailureCardView {
+func (x *Message) GetFailureCard() *FailureCardView {
 	if x != nil {
-		if x, ok := x.Item.(*ConversationItem_FailureCard); ok {
+		if x, ok := x.Payload.(*Message_FailureCard); ok {
 			return x.FailureCard
 		}
 	}
 	return nil
 }
 
-func (x *ConversationItem) GetContextCleared() *v11.ContextCleared {
+func (x *Message) GetContextCleared() *v11.ContextCleared {
 	if x != nil {
-		if x, ok := x.Item.(*ConversationItem_ContextCleared); ok {
+		if x, ok := x.Payload.(*Message_ContextCleared); ok {
 			return x.ContextCleared
 		}
 	}
 	return nil
 }
 
-func (x *ConversationItem) GetContextCompacted() *v11.ContextCompacted {
+func (x *Message) GetContextCompacted() *v11.ContextCompacted {
 	if x != nil {
-		if x, ok := x.Item.(*ConversationItem_ContextCompacted); ok {
+		if x, ok := x.Payload.(*Message_ContextCompacted); ok {
 			return x.ContextCompacted
 		}
 	}
 	return nil
 }
 
-func (x *ConversationItem) GetSessionCommand() *SessionCommandItem {
+func (x *Message) GetSessionCommand() *SessionCommandItem {
 	if x != nil {
-		if x, ok := x.Item.(*ConversationItem_SessionCommand); ok {
+		if x, ok := x.Payload.(*Message_SessionCommand); ok {
 			return x.SessionCommand
 		}
 	}
 	return nil
 }
 
-func (x *ConversationItem) GetAsyncBubble() *AsyncBubble {
+func (x *Message) GetAsyncBubble() *AsyncBubble {
 	if x != nil {
-		if x, ok := x.Item.(*ConversationItem_AsyncBubble); ok {
+		if x, ok := x.Payload.(*Message_AsyncBubble); ok {
 			return x.AsyncBubble
 		}
 	}
 	return nil
 }
 
-func (x *ConversationItem) GetCompactionSummary() *CompactionSummaryItem {
+func (x *Message) GetCompactionSummary() *CompactionSummaryItem {
 	if x != nil {
-		if x, ok := x.Item.(*ConversationItem_CompactionSummary); ok {
+		if x, ok := x.Payload.(*Message_CompactionSummary); ok {
 			return x.CompactionSummary
 		}
 	}
 	return nil
 }
 
-type isConversationItem_Item interface {
-	isConversationItem_Item()
+type isMessage_Payload interface {
+	isMessage_Payload()
 }
 
-type ConversationItem_Agent struct {
+type Message_Agent struct {
 	// EVERYTHING the agent produced, in the one vocabulary that also carries
 	// a detached agent's output (AsyncAgentUpdate). See AgentEmission.
 	Agent *AgentEmission `protobuf:"bytes,5,opt,name=agent,proto3,oneof"`
 }
 
-type ConversationItem_UserMessage struct {
+type Message_UserMessage struct {
 	// The user's own prompt.
 	UserMessage *v1.ApiUserMessage `protobuf:"bytes,11,opt,name=user_message,json=userMessage,proto3,oneof"`
 }
 
-type ConversationItem_Permission struct {
+type Message_Permission struct {
 	// A permission request. Agent-CAUSED but not agent-emitted: it is a
 	// question addressed to the user and answered by a command
 	// (PermissionAnswerCmd), so it is an interaction, not an utterance, and
@@ -383,11 +385,11 @@ type ConversationItem_Permission struct {
 	Permission *v11.PermissionItem `protobuf:"bytes,30,opt,name=permission,proto3,oneof"`
 }
 
-type ConversationItem_FailureCard struct {
+type Message_FailureCard struct {
 	FailureCard *FailureCardView `protobuf:"bytes,31,opt,name=failure_card,json=failureCard,proto3,oneof"`
 }
 
-type ConversationItem_ContextCleared struct {
+type Message_ContextCleared struct {
 	// CLEAR and COMPACT, carried verbatim from core.v1 rather than re-modeled
 	// here: the daemon has already coalesced and de-duplicated them, so a
 	// second frontend-shaped copy would only be a chance to drift.
@@ -399,49 +401,49 @@ type ConversationItem_ContextCleared struct {
 	ContextCleared *v11.ContextCleared `protobuf:"bytes,32,opt,name=context_cleared,json=contextCleared,proto3,oneof"`
 }
 
-type ConversationItem_ContextCompacted struct {
+type Message_ContextCompacted struct {
 	ContextCompacted *v11.ContextCompacted `protobuf:"bytes,33,opt,name=context_compacted,json=contextCompacted,proto3,oneof"`
 }
 
-type ConversationItem_SessionCommand struct {
+type Message_SessionCommand struct {
 	SessionCommand *SessionCommandItem `protobuf:"bytes,35,opt,name=session_command,json=sessionCommand,proto3,oneof"`
 }
 
-type ConversationItem_AsyncBubble struct {
+type Message_AsyncBubble struct {
 	// A piece of detached work, ANCHORED in the feed at the point it was
 	// launched.
 	//
 	// What rides here is the bubble's OPENING state; everything it produces
 	// afterwards arrives as AsyncBubbleUpdate addressed to `AsyncBubble.id`,
-	// on its own delta rather than as a stream of new feed items. A detached
+	// on its own delta rather than as a stream of new feed messages. A detached
 	// agent emitting a thousand lines must not insert a thousand rows into
 	// the conversation it was dispatched from.
 	AsyncBubble *AsyncBubble `protobuf:"bytes,38,opt,name=async_bubble,json=asyncBubble,proto3,oneof"`
 }
 
-type ConversationItem_CompactionSummary struct {
+type Message_CompactionSummary struct {
 	// The purple-washed summary block a compaction leaves behind. Its own arm
 	// so that the wash is a stated kind rather than an inference.
 	CompactionSummary *CompactionSummaryItem `protobuf:"bytes,39,opt,name=compaction_summary,json=compactionSummary,proto3,oneof"`
 }
 
-func (*ConversationItem_Agent) isConversationItem_Item() {}
+func (*Message_Agent) isMessage_Payload() {}
 
-func (*ConversationItem_UserMessage) isConversationItem_Item() {}
+func (*Message_UserMessage) isMessage_Payload() {}
 
-func (*ConversationItem_Permission) isConversationItem_Item() {}
+func (*Message_Permission) isMessage_Payload() {}
 
-func (*ConversationItem_FailureCard) isConversationItem_Item() {}
+func (*Message_FailureCard) isMessage_Payload() {}
 
-func (*ConversationItem_ContextCleared) isConversationItem_Item() {}
+func (*Message_ContextCleared) isMessage_Payload() {}
 
-func (*ConversationItem_ContextCompacted) isConversationItem_Item() {}
+func (*Message_ContextCompacted) isMessage_Payload() {}
 
-func (*ConversationItem_SessionCommand) isConversationItem_Item() {}
+func (*Message_SessionCommand) isMessage_Payload() {}
 
-func (*ConversationItem_AsyncBubble) isConversationItem_Item() {}
+func (*Message_AsyncBubble) isMessage_Payload() {}
 
-func (*ConversationItem_CompactionSummary) isConversationItem_Item() {}
+func (*Message_CompactionSummary) isMessage_Payload() {}
 
 // The compaction summary bubble: the purple-washed summary block that follows
 // a compaction.
@@ -756,15 +758,15 @@ var File_agentshim_frontend_v1_feed_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"\n" +
-	" agentshim/frontend/v1/feed.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a\x1eagentshim/data/v1/stream.proto\x1a\x1dagentshim/data/v1/tools.proto\x1a*agentshim/frontend/v1/agent-emission.proto\x1a(agentshim/frontend/v1/async-bubble.proto\x1a(agentshim/frontend/v1/failure-card.proto\x1a&agentshim/frontend/v1/slash-menu.proto\"\xb9\x01\n" +
+	" agentshim/frontend/v1/feed.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a\x1eagentshim/data/v1/stream.proto\x1a\x1dagentshim/data/v1/tools.proto\x1a*agentshim/frontend/v1/agent-emission.proto\x1a(agentshim/frontend/v1/async-bubble.proto\x1a(agentshim/frontend/v1/failure-card.proto\x1a&agentshim/frontend/v1/slash-menu.proto\"\xbd\x01\n" +
 	"\x11ConversationDelta\x12\x1c\n" +
-	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12=\n" +
-	"\x05items\x18\x03 \x03(\v2'.agentshim.frontend.v1.ConversationItemR\x05items\x12\x1f\n" +
+	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12:\n" +
+	"\bmessages\x18\x03 \x03(\v2\x1e.agentshim.frontend.v1.MessageR\bmessages\x12\x1f\n" +
 	"\vthrough_seq\x18\x04 \x01(\x04R\n" +
 	"throughSeq\x12\x14\n" +
 	"\x05fence\x18\x05 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03R\n" +
-	"session_id\"\xd9\b\n" +
-	"\x10ConversationItem\x12\x12\n" +
+	"session_idR\x05items\"\xd3\b\n" +
+	"\aMessage\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x13\n" +
 	"\x05ts_ms\x18\x02 \x01(\x03R\x04tsMs\x12\x1d\n" +
 	"\n" +
@@ -780,8 +782,8 @@ const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"\x11context_compacted\x18! \x01(\v2#.agentshim.core.v1.ContextCompactedH\x00R\x10contextCompacted\x12T\n" +
 	"\x0fsession_command\x18# \x01(\v2).agentshim.frontend.v1.SessionCommandItemH\x00R\x0esessionCommand\x12G\n" +
 	"\fasync_bubble\x18& \x01(\v2\".agentshim.frontend.v1.AsyncBubbleH\x00R\vasyncBubble\x12]\n" +
-	"\x12compaction_summary\x18' \x01(\v2,.agentshim.frontend.v1.CompactionSummaryItemH\x00R\x11compactionSummaryB\x06\n" +
-	"\x04itemJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x12\x10\x13J\x04\b\n" +
+	"\x12compaction_summary\x18' \x01(\v2,.agentshim.frontend.v1.CompactionSummaryItemH\x00R\x11compactionSummaryB\t\n" +
+	"\apayloadJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x12\x10\x13J\x04\b\n" +
 	"\x10\vJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10J\x04\b\"\x10#J\x04\b(\x10)J\x04\b$\x10%J\x04\b%\x10&R\tapi_errorR\x10compact_boundaryR\x15compact_boundary_lineR\x11assistant_messageR\btool_useR\vtool_resultR\x0ftool_use_resultR\x06resultR\n" +
 	"skill_bodyR\vusage_stampR\x11token_utilizationR\x0fturn_accounting\"\x8f\x01\n" +
 	"\x15CompactionSummaryItem\x12\x18\n" +
@@ -825,7 +827,7 @@ var file_agentshim_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInf
 var file_agentshim_frontend_v1_feed_proto_goTypes = []any{
 	(ConversationSource)(0),       // 0: agentshim.frontend.v1.ConversationSource
 	(*ConversationDelta)(nil),     // 1: agentshim.frontend.v1.ConversationDelta
-	(*ConversationItem)(nil),      // 2: agentshim.frontend.v1.ConversationItem
+	(*Message)(nil),               // 2: agentshim.frontend.v1.Message
 	(*CompactionSummaryItem)(nil), // 3: agentshim.frontend.v1.CompactionSummaryItem
 	(*TypingDelta)(nil),           // 4: agentshim.frontend.v1.TypingDelta
 	(*TypingCut)(nil),             // 5: agentshim.frontend.v1.TypingCut
@@ -842,17 +844,17 @@ var file_agentshim_frontend_v1_feed_proto_goTypes = []any{
 	(*v1.SystemInit)(nil),         // 16: agentshim.data.v1.SystemInit
 }
 var file_agentshim_frontend_v1_feed_proto_depIdxs = []int32{
-	2,  // 0: agentshim.frontend.v1.ConversationDelta.items:type_name -> agentshim.frontend.v1.ConversationItem
-	0,  // 1: agentshim.frontend.v1.ConversationItem.source:type_name -> agentshim.frontend.v1.ConversationSource
-	7,  // 2: agentshim.frontend.v1.ConversationItem.agent:type_name -> agentshim.frontend.v1.AgentEmission
-	8,  // 3: agentshim.frontend.v1.ConversationItem.user_message:type_name -> agentshim.data.v1.ApiUserMessage
-	9,  // 4: agentshim.frontend.v1.ConversationItem.permission:type_name -> agentshim.core.v1.PermissionItem
-	10, // 5: agentshim.frontend.v1.ConversationItem.failure_card:type_name -> agentshim.frontend.v1.FailureCardView
-	11, // 6: agentshim.frontend.v1.ConversationItem.context_cleared:type_name -> agentshim.core.v1.ContextCleared
-	12, // 7: agentshim.frontend.v1.ConversationItem.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
-	13, // 8: agentshim.frontend.v1.ConversationItem.session_command:type_name -> agentshim.frontend.v1.SessionCommandItem
-	14, // 9: agentshim.frontend.v1.ConversationItem.async_bubble:type_name -> agentshim.frontend.v1.AsyncBubble
-	3,  // 10: agentshim.frontend.v1.ConversationItem.compaction_summary:type_name -> agentshim.frontend.v1.CompactionSummaryItem
+	2,  // 0: agentshim.frontend.v1.ConversationDelta.messages:type_name -> agentshim.frontend.v1.Message
+	0,  // 1: agentshim.frontend.v1.Message.source:type_name -> agentshim.frontend.v1.ConversationSource
+	7,  // 2: agentshim.frontend.v1.Message.agent:type_name -> agentshim.frontend.v1.AgentEmission
+	8,  // 3: agentshim.frontend.v1.Message.user_message:type_name -> agentshim.data.v1.ApiUserMessage
+	9,  // 4: agentshim.frontend.v1.Message.permission:type_name -> agentshim.core.v1.PermissionItem
+	10, // 5: agentshim.frontend.v1.Message.failure_card:type_name -> agentshim.frontend.v1.FailureCardView
+	11, // 6: agentshim.frontend.v1.Message.context_cleared:type_name -> agentshim.core.v1.ContextCleared
+	12, // 7: agentshim.frontend.v1.Message.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
+	13, // 8: agentshim.frontend.v1.Message.session_command:type_name -> agentshim.frontend.v1.SessionCommandItem
+	14, // 9: agentshim.frontend.v1.Message.async_bubble:type_name -> agentshim.frontend.v1.AsyncBubble
+	3,  // 10: agentshim.frontend.v1.Message.compaction_summary:type_name -> agentshim.frontend.v1.CompactionSummaryItem
 	15, // 11: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
 	16, // 12: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
 	13, // [13:13] is the sub-list for method output_type
@@ -872,15 +874,15 @@ func file_agentshim_frontend_v1_feed_proto_init() {
 	file_agentshim_frontend_v1_failure_card_proto_init()
 	file_agentshim_frontend_v1_slash_menu_proto_init()
 	file_agentshim_frontend_v1_feed_proto_msgTypes[1].OneofWrappers = []any{
-		(*ConversationItem_Agent)(nil),
-		(*ConversationItem_UserMessage)(nil),
-		(*ConversationItem_Permission)(nil),
-		(*ConversationItem_FailureCard)(nil),
-		(*ConversationItem_ContextCleared)(nil),
-		(*ConversationItem_ContextCompacted)(nil),
-		(*ConversationItem_SessionCommand)(nil),
-		(*ConversationItem_AsyncBubble)(nil),
-		(*ConversationItem_CompactionSummary)(nil),
+		(*Message_Agent)(nil),
+		(*Message_UserMessage)(nil),
+		(*Message_Permission)(nil),
+		(*Message_FailureCard)(nil),
+		(*Message_ContextCleared)(nil),
+		(*Message_ContextCompacted)(nil),
+		(*Message_SessionCommand)(nil),
+		(*Message_AsyncBubble)(nil),
+		(*Message_CompactionSummary)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
