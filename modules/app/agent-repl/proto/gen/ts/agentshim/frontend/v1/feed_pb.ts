@@ -32,7 +32,7 @@ import type { Message as Message$1 } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/feed.proto.
  */
 export const file_agentshim_frontend_v1_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZmVlZC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIpUBChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSMAoIbWVzc2FnZXMYAyADKAsyHi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZRITCgt0aHJvdWdoX3NlcRgEIAEoBBINCgVmZW5jZRgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZFIFaXRlbXMiSQoOTWVzc2FnZUxpbmVhZ2USHAoUdG9wX2xldmVsX21lc3NhZ2VfaWQYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAkiowgKB01lc3NhZ2USDAoEdXVpZBgBIAEoCRINCgV0c19tcxgCIAEoAxISCgpyZXF1ZXN0X2lkGAMgASgJEjkKBnNvdXJjZRgEIAEoDjIpLmFnZW50c2hpbS5mcm9udGVuZC52MS5Db252ZXJzYXRpb25Tb3VyY2USNgoHbGluZWFnZRgGIAEoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5NZXNzYWdlTGluZWFnZRI1CgVhZ2VudBgFIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudEVtaXNzaW9uSAASOQoMdXNlcl9tZXNzYWdlGAsgASgLMiEuYWdlbnRzaGltLmRhdGEudjEuQXBpVXNlck1lc3NhZ2VIABI3CgpwZXJtaXNzaW9uGB4gASgLMiEuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvbkl0ZW1IABI+CgxmYWlsdXJlX2NhcmQYHyABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuRmFpbHVyZUNhcmRWaWV3SAASPAoPY29udGV4dF9jbGVhcmVkGCAgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBghIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABJZChpkYWVtb25faW50ZXJjZXB0ZWRfY29tbWFuZBgjIAEoCzIzLmFnZW50c2hpbS5mcm9udGVuZC52MS5EYWVtb25JbnRlcmNlcHRlZENvbW1hbmRJdGVtSAASPAoNZGV0YWNoZWRfd29yaxgmIAEoCzIjLmFnZW50c2hpbS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtIABJKChJjb21wYWN0aW9uX3N1bW1hcnkYJyABKAsyLC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ29tcGFjdGlvblN1bW1hcnlJdGVtSABCCQoHcGF5bG9hZEoECBAQEUoECBEQEkoECBIQE0oECAoQC0oECAwQDUoECA0QDkoECA4QD0oECA8QEEoECCIQI0oECCgQKUoECCQQJUoECCUQJlIJYXBpX2Vycm9yUhBjb21wYWN0X2JvdW5kYXJ5UhVjb21wYWN0X2JvdW5kYXJ5X2xpbmVSEWFzc2lzdGFudF9tZXNzYWdlUgh0b29sX3VzZVILdG9vbF9yZXN1bHRSD3Rvb2xfdXNlX3Jlc3VsdFIGcmVzdWx0Ugpza2lsbF9ib2R5Ugt1c2FnZV9zdGFtcFIRdG9rZW5fdXRpbGl6YXRpb25SD3R1cm5fYWNjb3VudGluZ1IMYXN5bmNfYnViYmxlUg9zZXNzaW9uX2NvbW1hbmQiyAEKEURldGFjaGVkV29ya0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIuCgZvcGVuZWQYAyADKAsyHi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZRI6Cgd1cGRhdGVzGAQgAygLMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya1VwZGF0ZRITCgt0aHJvdWdoX3NlcRgFIAEoBBINCgVmZW5jZRgGIAEoCUoECAIQA1IKc2Vzc2lvbl9pZCJhChVDb21wYWN0aW9uU3VtbWFyeUl0ZW0SDwoHc3VtbWFyeRgBIAEoCRIXCg9jb21wYWN0ZWRfYXRfbXMYAiABKAMSHgoWZXhwZW5zaXZlX2lucHV0X3Rva2VucxgDIAEoAyKXAQoLVHlwaW5nRGVsdGESEQoJd29ya3NwYWNlGAEgASgJEi4KBWRlbHRhGAMgASgLMh8uYWdlbnRzaGltLmNvcmUudjEuQ29udGVudERlbHRhEg0KBWZlbmNlGAQgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAUgASgJSgQIAhADUgpzZXNzaW9uX2lkUglidWJibGVfaWQiUwoJVHlwaW5nQ3V0EhEKCXdvcmtzcGFjZRgBIAEoCRIZChFwYXJlbnRfbWVzc2FnZV9pZBgCIAEoCRINCgVmZW5jZRgDIAEoCVIJYnViYmxlX2lkInIKD1Nlc3Npb25Jbml0VmlldxIRCgl3b3Jrc3BhY2UYASABKAkSKwoEaW5pdBgDIAEoCzIdLmFnZW50c2hpbS5kYXRhLnYxLlN5c3RlbUluaXQSDQoFZmVuY2UYBCABKAlKBAgCEANSCnNlc3Npb25faWQqdgoSQ29udmVyc2F0aW9uU291cmNlEiMKH0NPTlZFUlNBVElPTl9TT1VSQ0VfVU5TUEVDSUZJRUQQABIcChhDT05WRVJTQVRJT05fU09VUkNFX1VTRVIQARIdChlDT05WRVJTQVRJT05fU09VUkNFX01FUkdFEAJCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_agentshim_core_v1_core, file_agentshim_data_v1_stream, file_agentshim_data_v1_tools, file_agentshim_frontend_v1_agent_emission, file_agentshim_frontend_v1_detached_work, file_agentshim_frontend_v1_failure_card, file_agentshim_frontend_v1_slash_menu]);
+  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZmVlZC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIpUBChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSMAoIbWVzc2FnZXMYAyADKAsyHi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZRITCgt0aHJvdWdoX3NlcRgEIAEoBBINCgVmZW5jZRgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZFIFaXRlbXMiSQoOTWVzc2FnZUxpbmVhZ2USHAoUdG9wX2xldmVsX21lc3NhZ2VfaWQYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAkiEAoOTWVzc2FnZUR1cmFibGUiEgoQTWVzc2FnZUVwaGVtZXJhbCKpCQoHTWVzc2FnZRIMCgR1dWlkGAEgASgJEg0KBXRzX21zGAIgASgDEhIKCnJlcXVlc3RfaWQYAyABKAkSOQoGc291cmNlGAQgASgOMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblNvdXJjZRI2CgdsaW5lYWdlGAYgASgLMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lc3NhZ2VMaW5lYWdlEjgKB2R1cmFibGUYByABKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZUR1cmFibGVIABI8CgllcGhlbWVyYWwYCCABKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZUVwaGVtZXJhbEgAEjUKBWFnZW50GAUgASgLMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFnZW50RW1pc3Npb25IARI5Cgx1c2VyX21lc3NhZ2UYCyABKAsyIS5hZ2VudHNoaW0uZGF0YS52MS5BcGlVc2VyTWVzc2FnZUgBEjcKCnBlcm1pc3Npb24YHiABKAsyIS5hZ2VudHNoaW0uY29yZS52MS5QZXJtaXNzaW9uSXRlbUgBEj4KDGZhaWx1cmVfY2FyZBgfIAEoCzImLmFnZW50c2hpbS5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZFZpZXdIARI8Cg9jb250ZXh0X2NsZWFyZWQYICABKAsyIS5hZ2VudHNoaW0uY29yZS52MS5Db250ZXh0Q2xlYXJlZEgBEkAKEWNvbnRleHRfY29tcGFjdGVkGCEgASgLMiMuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENvbXBhY3RlZEgBElkKGmRhZW1vbl9pbnRlcmNlcHRlZF9jb21tYW5kGCMgASgLMjMuYWdlbnRzaGltLmZyb250ZW5kLnYxLkRhZW1vbkludGVyY2VwdGVkQ29tbWFuZEl0ZW1IARI8Cg1kZXRhY2hlZF93b3JrGCYgASgLMiMuYWdlbnRzaGltLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0gBEkoKEmNvbXBhY3Rpb25fc3VtbWFyeRgnIAEoCzIsLmFnZW50c2hpbS5mcm9udGVuZC52MS5Db21wYWN0aW9uU3VtbWFyeUl0ZW1IAUIMCgpkdXJhYmlsaXR5QgkKB3BheWxvYWRKBAgQEBFKBAgREBJKBAgSEBNKBAgKEAtKBAgMEA1KBAgNEA5KBAgOEA9KBAgPEBBKBAgiECNKBAgoEClKBAgkECVKBAglECZSCWFwaV9lcnJvclIQY29tcGFjdF9ib3VuZGFyeVIVY29tcGFjdF9ib3VuZGFyeV9saW5lUhFhc3Npc3RhbnRfbWVzc2FnZVIIdG9vbF91c2VSC3Rvb2xfcmVzdWx0Ug90b29sX3VzZV9yZXN1bHRSBnJlc3VsdFIKc2tpbGxfYm9keVILdXNhZ2Vfc3RhbXBSEXRva2VuX3V0aWxpemF0aW9uUg90dXJuX2FjY291bnRpbmdSDGFzeW5jX2J1YmJsZVIPc2Vzc2lvbl9jb21tYW5kIsgBChFEZXRhY2hlZFdvcmtEZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSLgoGb3BlbmVkGAMgAygLMh4uYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lc3NhZ2USOgoHdXBkYXRlcxgEIAMoCzIpLmFnZW50c2hpbS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtVcGRhdGUSEwoLdGhyb3VnaF9zZXEYBSABKAQSDQoFZmVuY2UYBiABKAlKBAgCEANSCnNlc3Npb25faWQiYQoVQ29tcGFjdGlvblN1bW1hcnlJdGVtEg8KB3N1bW1hcnkYASABKAkSFwoPY29tcGFjdGVkX2F0X21zGAIgASgDEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYAyABKAMilwEKC1R5cGluZ0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIuCgVkZWx0YRgDIAEoCzIfLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRlbnREZWx0YRINCgVmZW5jZRgEIAEoCRIZChFwYXJlbnRfbWVzc2FnZV9pZBgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZFIJYnViYmxlX2lkIlMKCVR5cGluZ0N1dBIRCgl3b3Jrc3BhY2UYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAkSDQoFZmVuY2UYAyABKAlSCWJ1YmJsZV9pZCJyCg9TZXNzaW9uSW5pdFZpZXcSEQoJd29ya3NwYWNlGAEgASgJEisKBGluaXQYAyABKAsyHS5hZ2VudHNoaW0uZGF0YS52MS5TeXN0ZW1Jbml0Eg0KBWZlbmNlGAQgASgJSgQIAhADUgpzZXNzaW9uX2lkKnYKEkNvbnZlcnNhdGlvblNvdXJjZRIjCh9DT05WRVJTQVRJT05fU09VUkNFX1VOU1BFQ0lGSUVEEAASHAoYQ09OVkVSU0FUSU9OX1NPVVJDRV9VU0VSEAESHQoZQ09OVkVSU0FUSU9OX1NPVVJDRV9NRVJHRRACQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_agentshim_core_v1_core, file_agentshim_data_v1_stream, file_agentshim_data_v1_tools, file_agentshim_frontend_v1_agent_emission, file_agentshim_frontend_v1_detached_work, file_agentshim_frontend_v1_failure_card, file_agentshim_frontend_v1_slash_menu]);
 
 /**
  * Complete (store-round-tripped) conversation additions, composed from the
@@ -139,6 +139,70 @@ export const MessageLineageSchema: GenMessage<MessageLineage> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_feed, 1);
 
 /**
+ * The durable class: a store record exists for this message.
+ *
+ * EMPTY ON PURPOSE. The message's own uuid is the record's key, so there is
+ * nothing to carry that the envelope does not already say; a field here would
+ * be a second address for a row already addressable, and the two could
+ * disagree. The arm being SET is the entire claim.
+ *
+ * The claim it makes is checkable and must be checked: a durable message the
+ * store cannot produce is corruption, and reporting it as an ordinary miss is
+ * how a lost conversation looks like an empty one.
+ *
+ * @generated from message agentshim.frontend.v1.MessageDurable
+ */
+export type MessageDurable = Message$1<"agentshim.frontend.v1.MessageDurable"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MessageDurable.
+ * Use `create(MessageDurableSchema)` to create a new message.
+ */
+export const MessageDurableSchema: GenMessage<MessageDurable> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_feed, 2);
+
+/**
+ * The ephemeral class: no store record exists for this message, and none ever
+ * will — not because a write failed or has not landed yet, but because there
+ * was never anything to write.
+ *
+ * MEMBERSHIP IS DECIDED BY WHETHER CLAUDE EVER SAW THE THING, never by who
+ * minted the id. A slash command the daemon answers alone (`/model` and its
+ * siblings) never reaches the CLI, so the CLI writes nothing; a
+ * system/local_command record is ruled out of the durable set; a failure card
+ * the daemon synthesized describes a session that failed to start, so there is
+ * no transcript for it to live in. Conversely a daemon-MINTED id over a real
+ * TaskStarted is durable, because the record exists.
+ *
+ * THE LINEAGE RULES ARE THIS CLASS'S SHAPE, not advice about it. An ephemeral
+ * message is ALWAYS a feed row — empty parent_message_id, top_level_message_id
+ * equal to its own id — and it is NEVER at either end of a containment edge
+ * crossing the classes:
+ *
+ *   - It may not be a parent. A durable child naming an ephemeral root would
+ *     be unreachable by any store query, since a store record can only name
+ *     ids that exist in the store.
+ *   - It may not name a durable parent. Otherwise an ephemeral card attaches
+ *     itself into a paged conversation that it will simply vanish from,
+ *     leaving a hole where a reader has every reason to expect a message.
+ *
+ * Those are refused at construction, so a violating message cannot be built
+ * and then noticed; a check applied afterwards is a check something can skip.
+ *
+ * @generated from message agentshim.frontend.v1.MessageEphemeral
+ */
+export type MessageEphemeral = Message$1<"agentshim.frontend.v1.MessageEphemeral"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.MessageEphemeral.
+ * Use `create(MessageEphemeralSchema)` to create a new message.
+ */
+export const MessageEphemeralSchema: GenMessage<MessageEphemeral> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_feed, 3);
+
+/**
  * One curated conversation addition: FEED PACKAGING wrapped around a payload.
  *
  * The packaging is what the feed knows about a message regardless of what the
@@ -208,6 +272,57 @@ export type Message = Message$1<"agentshim.frontend.v1.Message"> & {
   lineage?: MessageLineage | undefined;
 
   /**
+   * WHETHER A DURABLE RECORD FOR THIS MESSAGE EXISTS AT ALL. Always set: a
+   * message with neither arm is malformed and is rejected loudly rather than
+   * assumed durable, exactly as an UNSPECIFIED source is.
+   *
+   * WHY THIS IS AN ARM AND NOT A BOOLEAN. A `bool ephemeral` would let a
+   * message that HAS a record claim it has none, and a message that has none
+   * claim a record — two lies the type could tell. Here the class is the set
+   * arm, so the two are mutually exclusive by construction and neither can be
+   * half-stated. It is also why the arms carry no fields: the fact IS the
+   * membership, and any field on either arm would be a second, weaker place
+   * for the same claim to be made differently.
+   *
+   * WHY IT IS STATED AT ALL, rather than discovered by looking. Without it,
+   * "no durable record exists for this message" is indistinguishable from "the
+   * record was not found" — a page missing an ephemeral card looks exactly
+   * like a page that LOST a durable one, and the second is data loss reported
+   * as normal. Stating the class turns the absence into a property a reader
+   * can check, so a durable message missing from the store stays a loud
+   * failure while an ephemeral one missing from it is simply correct.
+   *
+   * IT IS PACKAGING, NOT PAYLOAD, and sits beside lineage for the same reason:
+   * it is a fact about the message whatever the message is, and a per-arm copy
+   * would be a per-arm chance to disagree. It also constrains lineage directly
+   * — see MessageEphemeral — which only works while the two are siblings on
+   * one envelope rather than facts held in two places.
+   *
+   * @generated from oneof agentshim.frontend.v1.Message.durability
+   */
+  durability: {
+    /**
+     * A record for this message exists in the store, so it can be paged,
+     * replayed and reloaded. Everything the CLI wrote a transcript record for
+     * is this, INCLUDING the daemon-minted "detached-work:" ids, whose
+     * durability comes from the TaskStarted behind them and not from who
+     * chose the id.
+     *
+     * @generated from field: agentshim.frontend.v1.MessageDurable durable = 7;
+     */
+    value: MessageDurable;
+    case: "durable";
+  } | {
+    /**
+     * No record for this message exists ANYWHERE, and none ever will.
+     *
+     * @generated from field: agentshim.frontend.v1.MessageEphemeral ephemeral = 8;
+     */
+    value: MessageEphemeral;
+    case: "ephemeral";
+  } | { case: undefined; value?: undefined };
+
+  /**
    * @generated from oneof agentshim.frontend.v1.Message.payload
    */
   payload: {
@@ -267,7 +382,9 @@ export type Message = Message$1<"agentshim.frontend.v1.Message"> & {
     case: "contextCompacted";
   } | {
     /**
-     * A slash command the daemon took out of the user's input.
+     * A slash command the daemon took out of the user's input. Both
+     * durability classes ride this arm; which one a given command is, is
+     * stated by `durability` above and never inferred from the command.
      *
      * @generated from field: agentshim.frontend.v1.DaemonInterceptedCommandItem daemon_intercepted_command = 35;
      */
@@ -306,7 +423,7 @@ export type Message = Message$1<"agentshim.frontend.v1.Message"> & {
  * Use `create(MessageSchema)` to create a new message.
  */
 export const MessageSchema: GenMessage<Message> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 2);
+  messageDesc(file_agentshim_frontend_v1_feed, 4);
 
 /**
  * The detached-work push: MESSAGES that opened, and UPDATES to messages already
@@ -384,7 +501,7 @@ export type DetachedWorkDelta = Message$1<"agentshim.frontend.v1.DetachedWorkDel
  * Use `create(DetachedWorkDeltaSchema)` to create a new message.
  */
 export const DetachedWorkDeltaSchema: GenMessage<DetachedWorkDelta> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 3);
+  messageDesc(file_agentshim_frontend_v1_feed, 5);
 
 /**
  * The compaction summary: the summary the daemon records after a compaction.
@@ -421,7 +538,7 @@ export type CompactionSummaryItem = Message$1<"agentshim.frontend.v1.CompactionS
  * Use `create(CompactionSummaryItemSchema)` to create a new message.
  */
 export const CompactionSummaryItemSchema: GenMessage<CompactionSummaryItem> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 4);
+  messageDesc(file_agentshim_frontend_v1_feed, 6);
 
 /**
  * Ephemeral live-typing relay (never persisted, never in snapshots).
@@ -483,7 +600,7 @@ export type TypingDelta = Message$1<"agentshim.frontend.v1.TypingDelta"> & {
  * Use `create(TypingDeltaSchema)` to create a new message.
  */
 export const TypingDeltaSchema: GenMessage<TypingDelta> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 5);
+  messageDesc(file_agentshim_frontend_v1_feed, 7);
 
 /**
  * The daemon's statement that a preview it opened will NEVER be completed.
@@ -529,7 +646,7 @@ export type TypingCut = Message$1<"agentshim.frontend.v1.TypingCut"> & {
  * Use `create(TypingCutSchema)` to create a new message.
  */
 export const TypingCutSchema: GenMessage<TypingCut> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 6);
+  messageDesc(file_agentshim_frontend_v1_feed, 8);
 
 /**
  * The session's retained SystemInit (slash commands, tools, skills, model
@@ -570,7 +687,7 @@ export type SessionInitView = Message$1<"agentshim.frontend.v1.SessionInitView">
  * Use `create(SessionInitViewSchema)` to create a new message.
  */
 export const SessionInitViewSchema: GenMessage<SessionInitView> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_feed, 7);
+  messageDesc(file_agentshim_frontend_v1_feed, 9);
 
 /**
  * WHO drove the turn that produced a message.
