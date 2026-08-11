@@ -51,7 +51,7 @@ import (
 // daemon's" (daemonturn.IsContextCut) is what keeps the one thing a cut OWES the
 // user on the feed.
 //
-// WHY HERE. Beside withholdKeepAlive, withholdMachinery and
+// WHY HERE. Beside withholdKeepAlive, classifyMachinery and
 // withholdNoResponsePlaceholders, in the curation block of pushConversation:
 // every route that can put a conversation item in front of a user funnels
 // through it — the live push, the ring resync, the history re-pull and the

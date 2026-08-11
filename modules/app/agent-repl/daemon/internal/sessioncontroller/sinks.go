@@ -2637,11 +2637,12 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 	// to, or nothing at all (skillbody.go). A body delivered to a work is async
 	// traffic, and rides out with the window's own push below.
 	windows := c.curateMetaRecords(cd, envs)
-	// The CLI's own slash-command bookkeeping, which it writes as unflagged
-	// "user" transcript records, goes no further than this (machinery.go).
-	// FIRST, before attribution: a machinery record claiming a real prompt's
-	// receipt would misattribute both.
-	c.withholdMachinery(cd)
+	// The CLI's own slash-command bookkeeping — a `"type": "user"` record read
+	// by its content head, or a `system`/`local_command` record read by its
+	// envelope — becomes the feed's record of the command it reports
+	// (machinery.go). FIRST, before attribution: a machinery record claiming a
+	// real prompt's receipt would misattribute both.
+	c.classifyMachinery(cd, envs)
 	// The harness's detached-work completion notices, which it writes as
 	// unflagged "user" records addressed to the model (tasknotification.go).
 	// Beside withholdMachinery and before attribution for the same reason: a
