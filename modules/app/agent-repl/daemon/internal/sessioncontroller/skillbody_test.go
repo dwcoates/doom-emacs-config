@@ -4,11 +4,11 @@
 // must reach it not at all.
 //
 // THIS FILE DRIVES THE CARD PATH, which is the path for an invocation that
-// opened no SKILL bubble. An invocation that did opens one gets its body as the
-// bubble's own body instead and emits no card at all — async-bubble.proto puts
-// the contents on AsyncSkillBubble.body and retires their old rendering — and
+// opened no SKILL work. An invocation that did opens one gets its body as the
+// work's own body instead and emits no card at all — async-work.proto puts
+// the contents on DetachedWorkSkill.body and retires their old rendering — and
 // that path is covered in asyncwindows_test.go. Two invocations still reach the
-// card: the MERGE run, whose bubble has no body field (covered below), and a
+// card: the MERGE run, whose work has no body field (covered below), and a
 // Skill call whose input names no skill, which is what the bare-`Skill` fixtures
 // here are.
 //
@@ -168,7 +168,7 @@ func TestASkillBodyAttachesToItsOwnCall(t *testing.T) {
 }
 
 func TestTheMergeRunsBodyStillAttachesToItsCard(t *testing.T) {
-	// Arrange: AsyncMergeBubble has no body field, so the merge invocation is the
+	// Arrange: DetachedWorkMerge has no body field, so the merge invocation is the
 	// one live skill whose contents still belong on its card.
 	h := newQueueHarness(t, nil)
 	h.controller().consumer.Consume(skillCallEvent(t, 10, "a-merge", mergeOriginCall, "create-or-update-workspace", "merge"))

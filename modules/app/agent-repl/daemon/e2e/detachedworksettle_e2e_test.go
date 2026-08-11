@@ -1,13 +1,13 @@
-// A bubble's SETTLE, typed.
+// A work's SETTLE, typed.
 //
-// async-bubble.proto states the invariant in the message itself: "Live-or-
+// async-work.proto states the invariant in the message itself: "Live-or-
 // settled, expressed as arms so that 'settled' and 'settled with what outcome'
-// are one indivisible fact. A settled bubble with no outcome is
-// unrepresentable." And for work that IS a process, AsyncSettled.shell_exit
+// are one indivisible fact. A settled work with no outcome is
+// unrepresentable." And for work that IS a process, DetachedWorkSettled.shell_exit
 // carries the exit status BESIDE the outcome, so a shell's card can show
 // "exited 137" rather than an unexplained red dot.
 //
-// A settled bubble arriving with neither arm set is the shape this test exists
+// A settled work arriving with neither arm set is the shape this test exists
 // to make impossible: it renders as a stopped spinner with nothing to say.
 package e2e
 
@@ -18,9 +18,9 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
-// TestE2EASettledShellBubbleCarriesItsOutcomeAndExitStatus covers the SETTLE
+// TestE2EASettledShellDetachedWorkCarriesItsOutcomeAndExitStatus covers the SETTLE
 // edge for the process-shaped kind.
-func TestE2EASettledShellBubbleCarriesItsOutcomeAndExitStatus(t *testing.T) {
+func TestE2EASettledShellDetachedWorkCarriesItsOutcomeAndExitStatus(t *testing.T) {
 	// Arrange
 	h := newUDSHarness(t)
 	cwd := t.TempDir()
@@ -53,36 +53,36 @@ func TestE2EASettledShellBubbleCarriesItsOutcomeAndExitStatus(t *testing.T) {
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 
-	bubbleID := gateOnAnchor(t, seen, launchToolUseID)
+	messageID := gateOnOpenedWork(t, seen, launchToolUseID)
 
-	settled := lastSettledLiveness(seen, bubbleID)
+	settled := lastSettledLiveness(seen, messageID)
 	if settled == nil {
-		t.Fatalf("bubble %q never settled: no liveness update carrying the settled arm arrived (saw %d updates for it)", bubbleID, len(seen.updatesFor(bubbleID)))
+		t.Fatalf("work %q never settled: no liveness update carrying the settled arm arrived (saw %d updates for it)", messageID, len(seen.updatesFor(messageID)))
 	}
 	if settled.GetOutcome() == nil {
-		t.Errorf("bubble %q settled with NO outcome arm set: async-bubble.proto states exactly one arm is always set, and a settled bubble with no outcome is unrepresentable", bubbleID)
+		t.Errorf("work %q settled with NO outcome arm set: async-work.proto states exactly one arm is always set, and a settled work with no outcome is unrepresentable", messageID)
 	}
 	if settled.GetShellExit() == nil {
-		t.Fatalf("bubble %q settled without shell_exit: it is a process, and the proto states absence is the only reading of 'this work did not exit, it concluded'", bubbleID)
+		t.Fatalf("work %q settled without shell_exit: it is a process, and the proto states absence is the only reading of 'this work did not exit, it concluded'", messageID)
 	}
 	if got := settled.GetShellExit().GetCode(); got != exitCode {
-		t.Errorf("bubble %q settled with shell_exit.code = %d, want the process's own %d", bubbleID, got, exitCode)
+		t.Errorf("work %q settled with shell_exit.code = %d, want the process's own %d", messageID, got, exitCode)
 	}
 	if settled.GetError() == nil {
-		t.Errorf("bubble %q settled on outcome %T for a nonzero exit, want the error arm: the proto states the daemon resolves the outcome FROM the exit code, and that mapping is not a client's to make",
-			bubbleID, settled.GetOutcome())
+		t.Errorf("work %q settled on outcome %T for a nonzero exit, want the error arm: the proto states the daemon resolves the outcome FROM the exit code, and that mapping is not a client's to make",
+			messageID, settled.GetOutcome())
 	}
 }
 
 // lastSettledLiveness returns the settled liveness of the LAST liveness update
-// addressed to bubbleID, or nil when none settled it.
+// addressed to messageID, or nil when none settled it.
 //
 // The last rather than the first: the proto admits a settled outcome CHANGING
-// (a running agent that is then killed), so the bubble's ending is whatever the
+// (a running agent that is then killed), so the work's ending is whatever the
 // most recent transition says it is.
-func lastSettledLiveness(seen asyncTraffic, bubbleID string) *frontendv1.AsyncSettled {
-	var settled *frontendv1.AsyncSettled
-	for _, update := range seen.updatesFor(bubbleID) {
+func lastSettledLiveness(seen asyncTraffic, messageID string) *frontendv1.DetachedWorkSettled {
+	var settled *frontendv1.DetachedWorkSettled
+	for _, update := range seen.updatesFor(messageID) {
 		if s := update.GetLiveness().GetLiveness().GetSettled(); s != nil {
 			settled = s
 		}

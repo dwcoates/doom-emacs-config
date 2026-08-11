@@ -17,7 +17,7 @@ func TestIsMetapromptDirectiveTextStandalone(t *testing.T) {
 
 	// Act + Assert.
 	if !isMetapromptDirectiveText(text) {
-		t.Fatal("a standalone read-directive must be recognized so its transcript line draws no bubble")
+		t.Fatal("a standalone read-directive must be recognized so its transcript line draws no work")
 	}
 }
 
@@ -36,7 +36,7 @@ func TestIsMetapromptDirectiveTextFoldedKeepsUserPrompt(t *testing.T) {
 	// after it.
 	text := directiveFor("/repo/modules/app/agent-repl/metaprompt.md") + "\n\nfix the parser"
 
-	// Act + Assert: the tail no longer matches, so the bubble is drawn —
+	// Act + Assert: the tail no longer matches, so the work is drawn —
 	// correctly, because the user did type the prompt inside it.
 	if isMetapromptDirectiveText(text) {
 		t.Fatal("a folded directive carries a real user prompt and must still be shown")

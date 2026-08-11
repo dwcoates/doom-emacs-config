@@ -304,7 +304,7 @@ describe("TypingDelta mapping", () => {
           blockIndex: 2,
           kind: "thinking",
           delta: "...",
-          bubbleId: "",
+          parentMessageId: "",
         },
       },
     ]);
@@ -315,7 +315,7 @@ describe("TypingDelta mapping", () => {
       typingDelta: { workspace: "ws", fence: "s1", delta: { uuid: "msg-7", blockIndex: 2, inputJson: "{", toolUseId: "toolu_1" } },
     });
     expect(effects).toEqual([
-      { kind: "typing", value: { workspace: "ws", fence: "s1", messageId: "msg-7", blockIndex: 2, kind: "input_json", toolUseId: "toolu_1", delta: "{", bubbleId: "" } },
+      { kind: "typing", value: { workspace: "ws", fence: "s1", messageId: "msg-7", blockIndex: 2, kind: "input_json", toolUseId: "toolu_1", delta: "{", parentMessageId: "" } },
     ]);
   });
 
@@ -432,13 +432,18 @@ describe("StateSnapshot mapping", () => {
   it("ingests a snapshot's folded MERGE bubble whole", () => {
     const effects = applyOne({
       snapshot: {
-        asyncBubbles: [
+        detachedWork: [
           {
-            id: "b1",
-            liveness: { live: {} },
-            merge: {
-              emissions: [{ response: { body: { role: "assistant" } } }],
-              fold: { droppedBefore: "3", tailCap: 200 },
+            uuid: "b1",
+            tsMs: "1",
+            source: "CONVERSATION_SOURCE_USER",
+            lineage: { topLevelMessageId: "b1", parentMessageId: "" },
+            detachedWork: {
+              liveness: { live: {} },
+              merge: {
+                emissions: [{ response: { body: { role: "assistant" } } }],
+                fold: { droppedBefore: "3", tailCap: 200 },
+              },
             },
           },
         ],
@@ -2028,12 +2033,19 @@ describe("the fenced-view routing", () => {
 // --- detached work: the seam and the shared decomposition -------------------
 
 describe("async bubble effects", () => {
-  const BUBBLE = { id: "b1", liveness: { live: {} }, agent: {} };
+  /** A whole feed envelope whose payload is detached work: the wire's unit now. */
+  const BUBBLE = {
+    uuid: "b1",
+    tsMs: "1",
+    source: "CONVERSATION_SOURCE_USER",
+    lineage: { topLevelMessageId: "b1", parentMessageId: "" },
+    detachedWork: { liveness: { live: {} }, agent: {} },
+  };
 
   it("forwards an async push WHOLE, unprojected and unsplit", () => {
     // Arrange / Act
     const effects = applyOne({
-      asyncBubbleDelta: { workspace: "/w", fence: "f1", opened: [BUBBLE], throughSeq: "7" },
+      detachedWorkDelta: { workspace: "/w", fence: "f1", opened: [BUBBLE], throughSeq: "7" },
     });
 
     // Assert
@@ -2058,7 +2070,7 @@ describe("async bubble effects", () => {
         workspace: "ws",
         fence: "s1",
         throughSeq: "3",
-        messages: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
+        messages: [BUBBLE],
       },
     });
 
@@ -2074,7 +2086,7 @@ describe("async bubble effects", () => {
         workspace: "ws",
         fence: "s1",
         throughSeq: "3",
-        messages: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
+        messages: [BUBBLE],
       },
     });
 
@@ -2132,7 +2144,7 @@ describe("asyncAgentItems — a detached agent decomposed by the FEED's own path
         emission: "toolCall" as const,
         arm: "toolUse" as const,
         payload: { id: "tu1", name: "Task" },
-        spawnedBubbleId: "b2",
+        spawnedMessageId: "b2",
       },
     ];
 
@@ -2140,7 +2152,7 @@ describe("asyncAgentItems — a detached agent decomposed by the FEED's own path
     const built = asyncAgentItems(emissions, "b1", 0);
 
     // Assert
-    expect(built.items[0].kind === "tool" && built.items[0].spawnedBubbleId).toBe("b2");
+    expect(built.items[0].kind === "tool" && built.items[0].spawnedMessageId).toBe("b2");
   });
 
   it("takes the emission's timestamp from the BUBBLE's launch stamp", () => {

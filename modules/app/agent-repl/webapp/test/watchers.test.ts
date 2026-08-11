@@ -1,6 +1,6 @@
 /**
  * watchers — the async projection, on ONE identity tier: the daemon's
- * classification verdict (`AgentToolCall.spawned_bubble_id`).
+ * classification verdict (`AgentToolCall.spawned_message_id`).
  *
  * The three-tier identity ladder this module used to walk is gone, so the
  * lower rungs get tests of their own here proving they no longer establish an
@@ -48,7 +48,7 @@ function tool(id: string, name = "Bash", parent?: string): ToolItem {
 
 /** A call the DAEMON classified as detaching work, naming the bubble it minted. */
 function spawner(id: string, bubbleId: string): ToolItem {
-  return { ...tool(id), spawnedBubbleId: bubbleId };
+  return { ...tool(id), spawnedMessageId: bubbleId };
 }
 
 function result(subtype = "success"): ConversationItem {
@@ -68,7 +68,7 @@ describe("watcherRef", () => {
 
   it("reads an EMPTY verdict as 'detached nothing', never as a bubble named ''", () => {
     // Arrange / Act / Assert
-    expect(watcherRef({ ...tool("t1"), spawnedBubbleId: "" })).toBeNull();
+    expect(watcherRef({ ...tool("t1"), spawnedMessageId: "" })).toBeNull();
   });
 
   it("returns null for a non-tool item, which cannot detach anything", () => {

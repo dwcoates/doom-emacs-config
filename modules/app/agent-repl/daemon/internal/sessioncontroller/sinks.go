@@ -29,14 +29,14 @@ import (
 // a recording fake.
 type Pusher interface {
 	PushConversationDelta(*frontendv1.ConversationDelta)
-	// PushAsyncBubbleDelta publishes one event's whole async effect: the
-	// bubbles it opened and the updates it folded, in one fenced frame.
-	PushAsyncBubbleDelta(*frontendv1.AsyncBubbleDelta)
+	// PushDetachedWorkDelta publishes one event's whole async effect: the
+	// work it opened and the updates it folded, in one fenced frame.
+	PushDetachedWorkDelta(*frontendv1.DetachedWorkDelta)
 	PushTypingDelta(*frontendv1.TypingDelta)
 	// PushTypingCut retires a preview the daemon opened and can no longer
 	// complete. It is the counterpart to PushTypingDelta and exists because a
 	// preview is retired by the authoritative record of its own block: when
-	// that record can never arrive, nothing else would ever close the bubble.
+	// that record can never arrive, nothing else would ever close the work.
 	PushTypingCut(*frontendv1.TypingCut)
 	PushTaskCatalog(*frontendv1.TaskCatalog)
 	PushWorkspaceState(*frontendv1.WorkspaceState)
@@ -331,7 +331,7 @@ type ClearCompactStore interface {
 // It is the only thing standing between a user and a silently lost prompt. A
 // receipt lived only in daemon memory before this, so a prompt accepted and not
 // yet durable when the daemon died left no trace anywhere — the shim-store had
-// never received the turn, and the bubble the user had already seen died with
+// never received the turn, and the work the user had already seen died with
 // the process.
 // WiringApplier moves a workspace's wired axis — the generation-less
 // connectivity projection that says whether ANYTHING is attached to a
@@ -468,7 +468,7 @@ type consumer struct {
 	// above — see consumer.fence.
 	publishedFence string
 	push           Pusher
-	ssm          StateApplier
+	ssm            StateApplier
 	// prog is the progress-footer resolver, fed the same stream as the SSM.
 	// Never nil (noopProgress stands in), so the feed sites stay unconditional.
 	prog ProgressResolver
@@ -716,10 +716,10 @@ type consumer struct {
 	// call that launched it (skillbody.go). Locked internally, so it sits
 	// outside the ring's mutex rather than under it.
 	skills *skillCorrelator
-	// bubbles is this consumer's detached-work apparatus: every async bubble
+	// work is this consumer's detached-work apparatus: every detached work
 	// the session has opened, and the routing that folds each work kind's
-	// output into the right one (asyncbubbles.go).
-	bubbles *asyncBubbleStore
+	// output into the right one (detachedworks.go).
+	work *detachedWorkStore
 	// turns is the single lifecycle authority gate. Every turn boundary passes
 	// it before the queue, SSM, or progress resolver can mutate.
 	turns turnLifecycle
@@ -731,7 +731,7 @@ type consumer struct {
 	mu   sync.Mutex
 	ring []*corev1.Event
 	// previewSurfaces names every surface this consumer has opened a live typing
-	// preview on — "" for the top-level feed, or an async bubble id. It is what
+	// preview on — "" for the top-level feed, or an detached work id. It is what
 	// a torn-down query's cut is addressed from (typingcut.go). Guarded by c.mu,
 	// beside the ring whose deltas fill it.
 	previewSurfaces map[string]struct{}
@@ -787,7 +787,7 @@ type consumer struct {
 	// pushed, in first-seen order, on the same footing as permItems and
 	// failItems and for the same reason (sessioncommand.go). They are the ONLY
 	// account a frontend gets of an invocation — the command earns no prompt
-	// bubble and the CLI's own transcript bookkeeping for it is withheld as
+	// work and the CLI's own transcript bookkeeping for it is withheld as
 	// machinery — so a resync that could not replay them would leave the feed
 	// silent about a command the user ran.
 	cmdItems map[string]*frontendv1.Message
@@ -887,7 +887,7 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		onSystemInit:           onSystemInit,
 		onSessionEnded:         onSessionEnded,
 		skills:                 newSkillCorrelator(),
-		bubbles:                newAsyncBubbleStore(workspace, dlog.Tag(dlog.Logf(logf), "session", sessionID, "ws", workspace)),
+		work:                   newDetachedWorkStore(workspace, dlog.Tag(dlog.Logf(logf), "session", sessionID, "ws", workspace)),
 		turns:                  newTurnLifecycle(applier, workspace, sessionID),
 		accounting:             newTurnAccountingReducer(dlog.Tag(dlog.Logf(logf), "session", sessionID, "ws", workspace)),
 		resumeIdentity:         newResumeIdentityTracker(),
@@ -1273,8 +1273,8 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_TaskStarted, *corev1.Event_TaskEnded:
 		// The SAME lifecycle event that moves the task catalog opens and settles
-		// the detachment's bubble. One event, both surfaces, so a task the
-		// footer shows as running and a bubble that says it settled cannot come
+		// the detachment's work. One event, both surfaces, so a task the
+		// footer shows as running and a work that says it settled cannot come
 		// from two different readings of the stream.
 		c.pushAsync(c.observeAsyncTask(ev), ev)
 		// The SAME event moves the open-task set the phantom sweep asks about,
@@ -1982,7 +1982,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 		c.pushConversation(ev, true)
 	case *corev1.Event_ContextCleared, *corev1.Event_ContextCompacted:
 		// A clear and a compaction each do two things at once: they render as
-		// their own bubble, and they RAISE this conversation's replay floor so no
+		// their own work, and they RAISE this conversation's replay floor so no
 		// reconnecting frontend is ever served the history they discarded. The
 		// floor is recorded FIRST — one pushed but not recorded would be drawn
 		// once and then buried under a replay of everything above it.
@@ -2156,7 +2156,7 @@ func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *fro
 	// THE QUERY IS GONE, so every block it was mid-way through has lost the
 	// authoritative record that would have retired its preview. Nothing else
 	// will ever retire them, and the failure card above explains the session
-	// without touching the bubbles still spinning "streaming input…" beside it.
+	// without touching the work still spinning "streaming input…" beside it.
 	//
 	// The LIVE arm only: the historical arm returns above, and replaying a
 	// year-old termination must not cut previews belonging to the session
@@ -2442,8 +2442,8 @@ func isTranscriptLine(a *anypb.Any) bool {
 //
 // A preview is retired by the authoritative record of the same block landing on
 // the SAME surface. So the surface the preview opens on is not a free choice:
-// a delta whose record folds into a window bubble must open its preview inside
-// that bubble, because that is the only place its retirement will ever arrive.
+// a delta whose record folds into a window work must open its preview inside
+// that work, because that is the only place its retirement will ever arrive.
 // Opening it on the top-level feed instead leaves a card spinning "streaming
 // input…" with no body for the life of the page — six of them, consecutive, is
 // what the user reported.
@@ -2456,19 +2456,19 @@ func isTranscriptLine(a *anypb.Any) bool {
 // See foldedtyping.go for the rule that decides the destination and why it is
 // the fold's own rule.
 func (c *consumer) relayTypingDelta(cd *corev1.ContentDelta, seq uint64) {
-	bubbleID := ""
-	if c.bubbles != nil {
-		if v := c.bubbles.typingRelayVerdict(cd.GetToolUseId()); v.Suppress {
-			bubbleID = v.BubbleID
-			count, announce := c.foldedTyping.note(v.BubbleID)
+	messageID := ""
+	if c.work != nil {
+		if v := c.work.typingRelayVerdict(cd.GetToolUseId()); v.Suppress {
+			messageID = v.MessageID
+			count, announce := c.foldedTyping.note(v.MessageID)
 			if announce {
-				c.logf("session-controller: live typing relay SCOPED TO BUBBLE session=%s ws=%q seq=%d bubble=%s tool_use_id=%q uuid=%s reason=%s scoped_deltas=%d — the record this delta previews folds into the bubble, so its preview opens there and is retired by the bubble's own record",
-					c.sessionID, c.workspace, seq, v.BubbleID, cd.GetToolUseId(), cd.GetUuid(), v.Reason, count)
+				c.logf("session-controller: live typing relay SCOPED TO DETACHED WORK session=%s ws=%q seq=%d work=%s tool_use_id=%q uuid=%s reason=%s scoped_deltas=%d — the record this delta previews folds into the work, so its preview opens there and is retired by the work's own record",
+					c.sessionID, c.workspace, seq, v.MessageID, cd.GetToolUseId(), cd.GetUuid(), v.Reason, count)
 			}
 		}
 	}
-	if td := frontend.TypingDeltaFromContentDelta(c.workspace, c.sessionID, bubbleID, cd); td != nil {
-		c.notePreviewOpened(bubbleID)
+	if td := frontend.TypingDeltaFromContentDelta(c.workspace, c.sessionID, messageID, cd); td != nil {
+		c.notePreviewOpened(messageID)
 		c.push.PushTypingDelta(td)
 	}
 }
@@ -2536,7 +2536,7 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 	}
 	// THE ONE CURATION POINT. CurateEvent decides, for this event and every
 	// route that replays it, which content is the top-level conversation and
-	// which belongs inside a detached agent's bubble. Nothing below re-asks
+	// which belongs inside a detached agent's work. Nothing below re-asks
 	// that question: a detached agent's emissions are already gone from cd.
 	curated, err := frontend.CurateEvent(c.workspace, c.fence(), ev)
 	if err != nil {
@@ -2557,20 +2557,20 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 	if cd == nil {
 		return // known-but-non-conversational vendor payload
 	}
-	// The detached half, folded into its bubbles and pushed on the async plane.
-	// It runs BEFORE the feed push so that a bubble a frontend is about to be
+	// The detached half, folded into its work and pushed on the async plane.
+	// It runs BEFORE the feed push so that a work a frontend is about to be
 	// told about by a stamped tool card has already been opened for it.
 	//
 	// A WINDOW's opening edge rides the same push, and for the same reason: the
-	// Skill call's card is in this very delta, and the bubble has to exist
+	// Skill call's card is in this very delta, and the work has to exist
 	// before the stamp below resolves it (asyncwindows.go).
 	detached := c.observeAsync(curated, ev)
 	detached.absorb(c.observeSkillSpawn(curated, ev))
 	c.pushAsync(detached, ev)
 	// THE CLASSIFICATION VERDICT ON THE TOOL CARD, from the same store the
-	// bubbles live in — so the card names a bubble the frontend has, and both
-	// spawned_bubble_id fields carry the one string that store resolved.
-	frontend.StampSpawnedBubbleIDs(cd.GetMessages(), c.bubbles.spawnedBubbleID)
+	// work live in — so the card names a work the frontend has, and both
+	// spawned_message_id fields carry the one string that store resolved.
+	frontend.StampSpawnedMessageIDs(cd.GetMessages(), c.work.spawnedMessageID)
 	for _, item := range cd.GetMessages() {
 		response := item.GetAgent().GetResponse()
 		assistant := response.GetBody()
@@ -2595,7 +2595,7 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 		if utilization == nil {
 			continue
 		}
-		// The DURABLE record no longer rides the feed item; the bubble carries
+		// The DURABLE record no longer rides the feed item; the work carries
 		// the RESOLVED figures its corner renders, derived once here. The
 		// evidence layer is untouched — it is still persisted and still
 		// vendor-faithful; what changed is that a renderer is handed the answer
@@ -2633,8 +2633,8 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 		panic(fmt.Sprintf("session-controller: accounting terminal seq=%d turn_id=%s had no result item", ev.GetSeq(), terminalTurnID))
 	}
 	// The harness's isMeta records — a launched skill's body and the notices
-	// around it — become the skill's own bubble body, the skill card they belong
-	// to, or nothing at all (skillbody.go). A body delivered to a bubble is async
+	// around it — become the skill's own work body, the skill card they belong
+	// to, or nothing at all (skillbody.go). A body delivered to a work is async
 	// traffic, and rides out with the window's own push below.
 	windows := c.curateMetaRecords(cd, envs)
 	// The CLI's own slash-command bookkeeping, which it writes as unflagged
@@ -2691,17 +2691,17 @@ func (c *consumer) pushConversationAttributed(ev *corev1.Event, live bool, termi
 		c.attributeUserTurn(cd)
 	}
 	// THE WINDOW DIVERSION, LAST. While a merge run or a skill invocation owns
-	// the session, its emissions belong to that bubble rather than to this delta
+	// the session, its emissions belong to that work rather than to this delta
 	// — and running here, after every curator and every stamp, means the items it
 	// diverts are exactly the ones that would otherwise have been pushed
 	// (asyncwindows.go). The delta is still pushed when the diversion empties it,
 	// because it carries the frontend's replay cursor.
 	//
 	// The body deliveries absorbed above go out FIRST in the same frame: a
-	// skill's body is what the bubble opens with, and its emissions follow.
+	// skill's body is what the work opens with, and its emissions follow.
 	windows.absorb(c.foldWindows(cd, ev))
 	c.push.PushConversationDelta(cd)
-	// AFTER the feed push: the bubble's new content is the content that just
+	// AFTER the feed push: the work's new content is the content that just
 	// left this delta, and a client applies the removal before the fold that
 	// explains it.
 	c.pushAsync(windows, ev)
@@ -3125,7 +3125,7 @@ func (c *consumer) pushLocalItem(item *frontendv1.Message) {
 	c.push.PushConversationDelta(&frontendv1.ConversationDelta{
 		Workspace: c.workspace,
 		Fence:     c.fence(),
-		Messages:     []*frontendv1.Message{item},
+		Messages:  []*frontendv1.Message{item},
 	})
 }
 
@@ -3148,7 +3148,7 @@ func (c *consumer) pushReplayedItem(item *frontendv1.Message) bool {
 	cd := &frontendv1.ConversationDelta{
 		Workspace: c.workspace,
 		Fence:     c.fence(),
-		Messages:     []*frontendv1.Message{item},
+		Messages:  []*frontendv1.Message{item},
 	}
 	if !c.stampConversationProvenance(cd) {
 		return false
@@ -3197,8 +3197,9 @@ func (c *consumer) retainFailure(uuid string, failure *frontendv1.FailureCardVie
 	// contract carries that address as FailureCardRef instead, so there is one
 	// copy of it and nothing to keep in step with the envelope.
 	item := &frontendv1.Message{
-		Uuid: uuid,
-		TsMs: c.now(),
+		Uuid:    uuid,
+		TsMs:    c.now(),
+		Lineage: frontend.FeedRowLineage(uuid),
 		Payload: &frontendv1.Message_FailureCard{FailureCard: failure},
 	}
 
@@ -3415,7 +3416,8 @@ func (c *consumer) snapshotPermItems() []*frontendv1.Message {
 // frontends replace on). denyMessage is set only on RESOLUTION_DENIED.
 func permissionItem(req *corev1.PermissionRequest, res corev1.PermissionItem_Resolution, denyMessage string) *frontendv1.Message {
 	return &frontendv1.Message{
-		Uuid: req.GetRequestId(),
+		Uuid:    req.GetRequestId(),
+		Lineage: frontend.FeedRowLineage(req.GetRequestId()),
 		Payload: &frontendv1.Message_Permission{Permission: &corev1.PermissionItem{
 			Request:     req,
 			Resolution:  res,

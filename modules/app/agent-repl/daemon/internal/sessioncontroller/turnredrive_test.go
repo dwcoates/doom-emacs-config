@@ -202,7 +202,7 @@ func TestDischargingADeliveryTheStoreRefusesIsLoud(t *testing.T) {
 }
 
 func TestTheReDriveLeavesNoDurableReceiptBehind(t *testing.T) {
-	// Arrange — a receipt exists to replay the user's own bubble. Recording one
+	// Arrange — a receipt exists to replay the user's own work. Recording one
 	// for the daemon's instruction would resurrect it from durable storage,
 	// where nothing downstream could tell it from a real prompt.
 	h := newSubmitHarness(t)
@@ -233,7 +233,7 @@ func TestTheReDrivePushesNoReceiptBubble(t *testing.T) {
 	// Assert.
 	for _, entry := range h.traced() {
 		if strings.HasPrefix(entry, "push:") {
-			t.Fatalf("trace = %v, want no pushed bubble for the re-drive", h.traced())
+			t.Fatalf("trace = %v, want no pushed work for the re-drive", h.traced())
 		}
 	}
 }

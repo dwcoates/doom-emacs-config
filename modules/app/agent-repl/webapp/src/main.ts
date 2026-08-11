@@ -2031,11 +2031,11 @@ async function boot(): Promise<void> {
           const gap = result.asyncGap;
           clog(
             "error",
-            `async bubble gap kind=${gap.kind} bubble=${gap.bubbleId} arm=${gap.arm} ` +
+            `detached work gap kind=${gap.kind} message=${gap.messageId} arm=${gap.arm} ` +
               `bubble_kind=${gap.bubbleKind ?? "none"} through_offset=${gap.throughOffset ?? "n/a"} ` +
               `from_offset=${gap.fromOffset ?? "n/a"} decision=resync detail=${gap.detail}`,
           );
-          dispatchResync("async_bubble_gap");
+          dispatchResync("detached_work_gap");
         }
         if (result.changed) {
           // One paint per animation frame, however many effects land before

@@ -1,7 +1,7 @@
 /**
  * async-render — drawing one `AsyncBubble` as WHAT IT IS.
  *
- * async-bubble.proto's whole point is that detached work is not a notice that
+ * detached-work.proto's whole point is that detached work is not a notice that
  * something is happening elsewhere, so this module draws each kind as its own
  * thing and never as a generic "background task" row:
  *
@@ -30,11 +30,11 @@
  * an unrecognized tool is never quietly drawn as a shell, an agent or a
  * workflow, and the tool's own name is what labels it.
  *
- * NESTING IS BY LOOKUP, NOT BY RECURSION INTO PAYLOADS. Bubbles form a tree
- * through `parent_bubble_id` POINTERS, so a child is found with one registry
- * lookup. The only recursion here walks that pointer graph, guarded by a
- * visited set, so a cyclic pointer set (which only a daemon bug could produce)
- * fails loudly instead of hanging the renderer.
+ * NESTING IS BY LOOKUP, NOT BY RECURSION INTO PAYLOADS. Detached work forms a
+ * tree through `MessageLineage.parent_message_id` POINTERS, so a child is found
+ * with one registry lookup. The only recursion here walks that pointer graph,
+ * guarded by a visited set, so a cyclic pointer set (which only a daemon bug
+ * could produce) fails loudly instead of hanging the renderer.
  *
  * A CHILD IS DRAWN ONCE, ATTACHED TO THE CARD THAT SPAWNED IT WHERE THERE IS
  * ONE. A conversational bubble's emissions carry the spawning cards, and each
@@ -118,7 +118,7 @@ function livenessFace(liveness: AsyncLiveness): string {
   return liveness.case === "live" ? "running" : settledFace(liveness.value);
 }
 
-/** What a bubble calls itself: its label, or its id when the daemon had none. */
+/** What work calls itself: its label, or its message id when the daemon had none. */
 export function bubbleLabel(bubble: AsyncBubble): string {
   return bubble.label !== "" ? bubble.label : bubble.id;
 }
@@ -164,12 +164,12 @@ export function bubbleKindClass(bubble: AsyncBubble): string {
  * resolving the cap is what keeps two frontends from disagreeing about what the
  * user is being shown.
  */
-export function earlierEntriesNotice(fold: AsyncFold, bubbleId: string): string {
+export function earlierEntriesNotice(fold: AsyncFold, messageId: string): string {
   if (fold.droppedBefore === 0) return "";
-  log("warn", `async-render: the daemon's ${fold.tailCap}-entry tail cap left ${fold.droppedBefore} earlier entry/entries out of bubble ${bubbleId}`, {
+  log("warn", `async-render: the daemon's ${fold.tailCap}-entry tail cap left ${fold.droppedBefore} earlier entry/entries out of message ${messageId}`, {
     operation: "async-render.fold-capped",
-    dedupKey: `async-fold-capped:${bubbleId}`,
-    context: { bubble_id: bubbleId, dropped_before: fold.droppedBefore, tail_cap: fold.tailCap },
+    dedupKey: `async-fold-capped:${messageId}`,
+    context: { message_id: messageId, dropped_before: fold.droppedBefore, tail_cap: fold.tailCap },
   });
   return `<div class="stream-dropped">… ${fold.droppedBefore} earlier ${
     fold.droppedBefore === 1 ? "entry" : "entries"
@@ -250,8 +250,8 @@ function bubbleBody(bubble: AsyncBubble, ctx: AsyncRenderContext): string {
 }
 
 /** The fold id one bubble's panel toggles on. */
-export function bubbleFoldId(bubbleId: string): string {
-  return `bubble:${bubbleId}`;
+export function bubbleFoldId(messageId: string): string {
+  return `bubble:${messageId}`;
 }
 
 /**
@@ -276,12 +276,20 @@ export function AsyncBubbleCard(
   fixed = false,
 ): string {
   if (visited.has(bubble.id)) {
-    log("error", `async-render: bubble ${bubble.id} is its own ancestor — the parent_bubble_id pointers form a cycle, so the branch is cut rather than recursed into`, {
+    // A CYCLE IS WORSE UNDER LINEAGE, NOT BENIGN. `top_level_message_id` is
+    // denormalized precisely so no reader has to walk parents to find the root,
+    // and a cycle makes that root underivable — so the walk that would confirm
+    // the denormalized value can never terminate. Cut loudly.
+    log("error", `async-render: message ${bubble.id} is its own ancestor — the parent_message_id pointers form a cycle, so the root its top_level_message_id claims is underivable and the branch is cut rather than recursed into`, {
       operation: "async-render.parent-cycle",
       dedupKey: `async-parent-cycle:${bubble.id}`,
-      context: { bubble_id: bubble.id, parent_bubble_id: bubble.parentBubbleId },
+      context: {
+        message_id: bubble.id,
+        parent_message_id: bubble.parentMessageId,
+        top_level_message_id: bubble.topLevelMessageId,
+      },
     });
-    return `<div class="stream-dropped">… ${escapeHtml(bubble.id)} already drawn above (parent pointers form a cycle)</div>`;
+    return `<div class="stream-dropped">… ${escapeHtml(bubble.id)} already drawn above (parent_message_id pointers form a cycle)</div>`;
   }
   const seen = new Set(visited).add(bubble.id);
   const id = bubbleFoldId(bubble.id);
@@ -340,9 +348,9 @@ export function BubbleTyping(bubble: AsyncBubble, ctx: AsyncRenderContext): stri
  * The bubble(s) a tool card owns, or "" when it owns none.
  *
  * BOTH ENDS OF ONE DAEMON FACT are matched, by exact string equality and
- * nothing else: `AsyncBubble.origin_tool_use_id` against the card's
- * TOOLUSEID, and the card's own `spawned_bubble_id` verdict against the
- * bubble's id. Neither is derived, neither is preferred, and a disagreement
+ * nothing else: `DetachedWork.origin_tool_use_id` against the card's
+ * TOOLUSEID, and the card's own `spawned_message_id` verdict against the
+ * message's uuid. Neither is derived, neither is preferred, and a disagreement
  * between them is reported by `bubbleForCall` rather than resolved — see
  * `async-routing.ts` for why that is not a two-rung identity ladder.
  *
@@ -354,11 +362,11 @@ export function BubbleTyping(bubble: AsyncBubble, ctx: AsyncRenderContext): stri
  */
 export function AsyncBubbleForCall(
   toolUseId: string,
-  spawnedBubbleId: string | undefined,
+  spawnedMessageId: string | undefined,
   ctx: AsyncRenderContext,
   fixed = false,
 ): string {
-  return bubblesDrawnForCall(toolUseId, spawnedBubbleId, ctx.registry)
+  return bubblesDrawnForCall(toolUseId, spawnedMessageId, ctx.registry)
     .map((bubble) => AsyncBubbleCard(bubble, ctx, new Set(), fixed))
     .join("");
 }
@@ -373,25 +381,25 @@ export function AsyncBubbleForCall(
  */
 export function bubblesDrawnForCall(
   toolUseId: string,
-  spawnedBubbleId: string | undefined,
+  spawnedMessageId: string | undefined,
   registry: AsyncBubbleRegistry,
 ): AsyncBubble[] {
   const byOrigin = registry.bubblesForToolUse(toolUseId);
   if (byOrigin.length > 0) {
     // `bubbleForCall` is what rules on agreement; a contradiction returns null
     // there and nothing is drawn here.
-    return registry.bubbleForCall(toolUseId, spawnedBubbleId) === null ? [] : byOrigin;
+    return registry.bubbleForCall(toolUseId, spawnedMessageId) === null ? [] : byOrigin;
   }
-  if (spawnedBubbleId === undefined || spawnedBubbleId === "") return [];
-  const named = registry.bubbleForSpawn(spawnedBubbleId);
+  if (spawnedMessageId === undefined || spawnedMessageId === "") return [];
+  const named = registry.bubbleForSpawn(spawnedMessageId);
   if (named === null) {
-    // The verdict named a bubble the registry does not hold — the open has not
+    // The verdict named a message the registry does not hold — the open has not
     // arrived, or a resync dropped it. Said plainly rather than papered over
-    // with an invented placeholder bubble.
-    log("warn", `async-render: tool card names bubble ${spawnedBubbleId}, which is not open — nothing is drawn for it`, {
+    // with invented placeholder work.
+    log("warn", `async-render: tool card names a message that is not open (${spawnedMessageId}) — nothing is drawn for it`, {
       operation: "async-render.unmatched-verdict",
-      dedupKey: `async-unmatched-verdict:${spawnedBubbleId}`,
-      context: { tool_use_id: toolUseId, spawned_bubble_id: spawnedBubbleId },
+      dedupKey: `async-unmatched-verdict:${spawnedMessageId}`,
+      context: { tool_use_id: toolUseId, spawned_message_id: spawnedMessageId },
     });
     return [];
   }
@@ -431,7 +439,7 @@ function bubblesDrawnByOwnCards(bubble: AsyncBubble, ctx: AsyncRenderContext): R
   if (kind.case !== "agent" && kind.case !== "merge" && kind.case !== "skill") return drawn;
   for (const item of asyncAgentItems(kind.value.emissions, bubble.id, bubble.startedAtMs).items) {
     if (item.kind !== "tool") continue;
-    for (const child of bubblesDrawnForCall(item.toolUseId, item.spawnedBubbleId, ctx.registry)) {
+    for (const child of bubblesDrawnForCall(item.toolUseId, item.spawnedMessageId, ctx.registry)) {
       drawn.add(child.id);
     }
   }
@@ -439,20 +447,25 @@ function bubblesDrawnByOwnCards(bubble: AsyncBubble, ctx: AsyncRenderContext): R
 }
 
 /**
- * Every bubble that is not attached to a card: the tree's roots, plus the
- * ORPHANS whose parent pointer resolves to nothing.
+ * Every piece of work that is not attached to a card: the tree's roots, plus
+ * the ORPHANS whose `parent_message_id` resolves to nothing.
  *
  * An orphan is listed rather than silently promoted to a root. Its work is
  * real and the user should see it, but drawing it as top-level would assert a
- * tree position the daemon never claimed.
+ * containment the daemon never claimed, and would contradict the
+ * `top_level_message_id` the message itself carries.
  */
 export function AsyncBubbleForest(ctx: AsyncRenderContext): string {
   const roots = ctx.registry.roots().map((b) => AsyncBubbleCard(b, ctx));
   const orphans = ctx.registry.orphans().map(({ bubble, missingParentId }) => {
-    log("warn", `async-render: bubble ${bubble.id} points at parent ${missingParentId}, which is not open — it is drawn as a detached branch rather than promoted to a root`, {
+    log("warn", `async-render: message ${bubble.id} names parent_message_id ${missingParentId}, which is not open — it is drawn as a detached branch rather than promoted to a root`, {
       operation: "async-render.orphan-bubble",
       dedupKey: `async-orphan:${bubble.id}`,
-      context: { bubble_id: bubble.id, missing_parent_id: missingParentId },
+      context: {
+        message_id: bubble.id,
+        missing_parent_message_id: missingParentId,
+        top_level_message_id: bubble.topLevelMessageId,
+      },
     });
     return `<div class="async-orphan"><div class="stream-dropped">parent ${escapeHtml(
       missingParentId,

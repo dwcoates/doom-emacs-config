@@ -15,7 +15,7 @@ import (
 //
 // A frontend replay starts at max(clientLastSeq, newestClearOrCompactSeq),
 // INCLUSIVE. History above a clear or a compaction is history the frontend
-// would only discard, and the event itself is the bubble it draws and the rule
+// would only discard, and the event itself is the work it draws and the rule
 // it discards above — so a floor that excluded it would tell a frontend to
 // throw everything away and hand it nothing to show for it.
 
@@ -139,7 +139,7 @@ func TestASeqlessClearIsLoudRatherThanSilentlyForgotten(t *testing.T) {
 
 func TestAClearIsPushedAsAConversationItem(t *testing.T) {
 	// Arrange — the floor is only half the job: a frontend that discards its
-	// history and receives no bubble has nothing to show for it.
+	// history and receives no work has nothing to show for it.
 	h := newRepullHarness(t, &replayClient{})
 
 	// Act.
@@ -239,7 +239,7 @@ func TestResyncFloorsAtACompactionRatherThanTheClientMark(t *testing.T) {
 }
 
 func TestResyncReplaysTheCompactionItselfFromTheRing(t *testing.T) {
-	// Arrange — the compaction bubble carries the summary that stands in for
+	// Arrange — the compaction work carries the summary that stands in for
 	// the history it discarded, so it is the one item a floored replay must
 	// never omit.
 	h := newRepullHarness(t, &replayClient{})
@@ -288,7 +288,7 @@ func TestTheRePullBoundIsExclusiveSoTheFloorEventIsItselfReplayed(t *testing.T) 
 func TestTheRingReplayIncludesTheFloorEventItself(t *testing.T) {
 	// Arrange — the same inclusivity on the OTHER replay path: the live ring.
 	// The clear at the floor must come back, or the frontend discards its
-	// history with no bubble to show for it.
+	// history with no work to show for it.
 	h := newRepullHarness(t, &replayClient{})
 	cons := h.controller(t).consumer
 	cons.Consume(assistantEvent(t, 10, "u10"))

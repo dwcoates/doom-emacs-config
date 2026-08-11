@@ -37,7 +37,7 @@ package handler
 // has not yet discovered the new uuid's transcript emits nothing at all. The
 // daemon closes its clearing axis on the ROTATION instead (ssm
 // closeClearingLocked) and treats a ContextCleared arriving afterwards as the
-// no-op it is. This event remains the only producer of the cleared BUBBLE and
+// no-op it is. This event remains the only producer of the cleared DETACHED WORK and
 // of the conversation's replay floor.
 //
 // CLEAR DETECTION. The harness never writes the literal prompt "/clear" to the

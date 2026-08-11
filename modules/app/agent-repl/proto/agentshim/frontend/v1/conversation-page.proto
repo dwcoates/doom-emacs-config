@@ -24,7 +24,8 @@
 //
 // TOP-LEVEL MESSAGES ARE THE UNIT, AND THE DAEMON OWNS THE BOUNDARY. A limit
 // counts messages the feed renders as standalone rows. Constituents —
-// a tool call inside the message that issued it, an async bubble's members —
+// a tool call inside the message that issued it, a detached-work message's
+// members —
 // travel INSIDE their parent message exactly as ConversationDelta carries them,
 // and never count toward the limit. A client therefore cannot compute what a
 // page will cost, and is not asked to: it asks for ten renderable things and

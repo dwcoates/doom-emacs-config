@@ -5,8 +5,8 @@
 // ONE PASS, ONE VERDICT. Both questions are answered by the same function, so
 // merge detection cannot disagree with skill detection about the same call:
 // `/create-or-update-workspace merge` is a merge run and never also a skill
-// bubble, and every other invocation is a skill bubble and never also a merge.
-// async-bubble.proto states that split — "`merge` is the one skill with an arm
+// work, and every other invocation is a skill work and never also a merge.
+// async-work.proto states that split — "`merge` is the one skill with an arm
 // of its own … every other skill arrives as `skill`" — and this is where it is
 // decided.
 //
@@ -19,7 +19,7 @@
 // `create-or-update-workspace`, and an argument list whose FIRST token is the
 // bare verb `merge`. A prompt that merely mentions merging, a `merge-status`
 // verb that does not exist today but might tomorrow, and every other skill are
-// all near-misses that must NOT open a MERGE bubble: they are ordinary skill
+// all near-misses that must NOT open a MERGE work: they are ordinary skill
 // invocations, and rendering one as a merge run would describe work nobody
 // started.
 package frontend
@@ -32,7 +32,7 @@ import (
 )
 
 // SkillToolName is the harness's tool for launching a skill. Every invocation of
-// it is bubble-forming by contract; this name is what both readings find their
+// it is work-forming by contract; this name is what both readings find their
 // invocations among.
 const SkillToolName = "Skill"
 
@@ -43,7 +43,7 @@ const (
 	// treating it as this one would hand a stranger's skill the power to
 	// swallow the session's feed.
 	mergeSkillName = "create-or-update-workspace"
-	// mergeSkillVerb is the one verb of that skill which opens a bubble.
+	// mergeSkillVerb is the one verb of that skill which opens a work.
 	mergeSkillVerb = "merge"
 	// skillInputSkillKey and skillInputArgsKey are the two keys a Skill call's
 	// input carries on disk: {"skill": "<name>", "args": "<verb and flags>"}.
@@ -52,9 +52,9 @@ const (
 )
 
 // SkillInvocation is one classified Skill call: what it invoked, how it is
-// labelled, and which of the two bubble kinds it opens.
+// labelled, and which of the two work kinds it opens.
 type SkillInvocation struct {
-	// ToolUseID is the call that made the invocation. It is the bubble's
+	// ToolUseID is the call that made the invocation. It is the work's
 	// identity, its origin_tool_use_id, and the handle the card is stamped by.
 	ToolUseID string
 	// SkillName is the skill as the call named it, verbatim.
@@ -66,7 +66,7 @@ type SkillInvocation struct {
 	// Label is the invocation as the agent wrote it: `/<skill> <args>`.
 	Label string
 	// IsMerge states that this invocation is THE merge run — the one skill call
-	// that opens a Merge bubble rather than a Skill one.
+	// that opens a Merge work rather than a Skill one.
 	IsMerge bool
 }
 
@@ -74,11 +74,11 @@ type SkillInvocation struct {
 // it invoked.
 //
 // A CALL THAT NAMES NO SKILL IS NOT AN INVOCATION. The skill's name is the whole
-// of what identifies the work — it is the bubble's label, and the only thing a
+// of what identifies the work — it is the work's label, and the only thing a
 // reader could act on — so a `Skill` call whose input carries no name opens no
-// bubble. It is not silently dropped either: its card still renders, and the
+// work. It is not silently dropped either: its card still renders, and the
 // caller records the refusal (see the consumer's observeSkillSpawn), because a
-// nameless bubble would be a fold nobody could say anything about.
+// nameless work would be a fold nobody could say anything about.
 //
 // The label is the invocation as the agent wrote it — `/create-or-update-
 // workspace merge <rest>` — rather than a resolved target: for a merge the
@@ -125,7 +125,7 @@ func skillLabel(name, args string) string {
 }
 
 // MergeSkillCall reports whether one tool_use block is the merge skill's
-// invocation, and the label the bubble wears. It is SkillCall's merge verdict
+// invocation, and the label the work wears. It is SkillCall's merge verdict
 // under the name the merge window asks by, so the two readings are one.
 func MergeSkillCall(use *datav1.ToolUseBlock) (label string, ok bool) {
 	inv, ok := SkillCall(use)
@@ -163,8 +163,8 @@ func SkillToolCallsInItem(item *frontendv1.Message) []*datav1.ToolUseBlock {
 //
 // It exists for the window apparatus, which must let each open window's own
 // Skill call card reach the feed and settle normally while every other emission
-// of the window folds into the bubble. The card is where the bubble hangs, so folding
-// it away would leave the bubble anchored to a card the reader never sees.
+// of the window folds into the work. The card is where the work hangs, so folding
+// it away would leave the work anchored to a card the reader never sees.
 func ItemBelongsToCall(item *frontendv1.Message, toolUseID string) bool {
 	if toolUseID == "" {
 		return false
@@ -195,10 +195,10 @@ func ItemBelongsToCall(item *frontendv1.Message, toolUseID string) bool {
 }
 
 // EmissionsFromItem converts one curated conversation item into the emissions a
-// bubble can carry, or nothing when the item has no emission arm to carry it.
+// work can carry, or nothing when the item has no emission arm to carry it.
 //
 // It is detachedEmissions under an exported name, deliberately the SAME
-// function: a window folds the session's own feed items into a bubble, and
+// function: a window folds the session's own feed items into a work, and
 // doing that through a second converter would give the two folds two
 // vocabularies for one contract that says they share one.
 func EmissionsFromItem(item *frontendv1.Message) []*frontendv1.AgentEmission {

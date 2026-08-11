@@ -12,7 +12,7 @@
  * it is the only identity shared by a streaming message and its finished form.
  * The SDK mints a FRESH envelope uuid for every message it emits, including
  * every individual `stream_event`, so keying deltas on it gave each chunk a
- * different id and the frontend rendered one bubble per chunk instead of
+ * different id and the frontend rendered one response bubble per chunk instead of
  * growing one. The envelope uuid still identifies a finished conversation
  * ITEM (it is what both planes dedup on, and the only id user turns,
  * attachments and system lines have at all) — it simply cannot identify a

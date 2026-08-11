@@ -613,7 +613,7 @@ func TestE2EFreshConnectCarriesTheInterruptedResolution(t *testing.T) {
 //
 // Order is observed off the fake's own replies, which echo the prompt text
 // back (`echo: <prompt> [mode=...]`), because a fake-mode turn produces no user
-// bubble at all: the user echo a real session's bubble comes from is a
+// work at all: the user echo a real session's work comes from is a
 // transcript UserLine or a stream UserMessage (uds-session.ts userPromptText),
 // and the fake engine emits neither for a submitted prompt.
 func TestE2EInterruptedQueueRunsTheNextPromptAlone(t *testing.T) {

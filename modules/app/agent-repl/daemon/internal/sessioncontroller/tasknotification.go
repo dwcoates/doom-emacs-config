@@ -28,7 +28,7 @@ import (
 //
 // THE COMPLETION IS ALREADY RENDERED, PROPERLY, ELSEWHERE. The same event
 // reaches the frontend as the typed `system`/`task_notification` message, which
-// is what settles the launching tool's watcher bubble. Withholding the user
+// is what settles the launching tool's watcher work. Withholding the user
 // record removes the DUPLICATE prose rendering of a fact the watcher already
 // states; it takes nothing away from the UI.
 //
@@ -55,7 +55,7 @@ import (
 // BOTH HALVES ARE REQUIRED. The origin names the producer, and the user_message
 // arm is what would be RENDERED as a prompt bubble — the thing being withheld.
 // An item on any other arm carrying this origin (there is none today) is not a
-// bubble and is left alone rather than silently dropped.
+// work and is left alone rather than silently dropped.
 func isTaskNotificationRecord(it *frontendv1.Message, env frontend.RecordEnvelope) bool {
 	return env.OriginKind == datav1.OriginKind_ORIGIN_KIND_TASK_NOTIFICATION && it.GetUserMessage() != nil
 }
@@ -73,7 +73,7 @@ func (c *consumer) withholdTaskNotifications(cd *frontendv1.ConversationDelta, e
 		if !ok || !isTaskNotificationRecord(it, env) {
 			return keepItem
 		}
-		return withholdItem(fmt.Sprintf("session-controller: user turn WITHHELD as a detached-work task notification ws=%q session=%s seq=%d uuid=%s — the harness writes this completion notice as an unflagged \"user\" record addressed to the model, and origin.kind says so; the watcher bubble already renders the completion; the store keeps the record, the conversation feed does not",
+		return withholdItem(fmt.Sprintf("session-controller: user turn WITHHELD as a detached-work task notification ws=%q session=%s seq=%d uuid=%s — the harness writes this completion notice as an unflagged \"user\" record addressed to the model, and origin.kind says so; the watcher work already renders the completion; the store keeps the record, the conversation feed does not",
 			c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid()))
 	})
 }

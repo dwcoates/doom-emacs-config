@@ -11,7 +11,7 @@ import (
 
 // The daemon's single reading of a submitted prompt, and the two consequences
 // it decides together: the receipt and the clearing axis. Splitting them is
-// what let a `/clear` be both cut AND drawn as a bubble.
+// what let a `/clear` be both cut AND drawn as a work.
 
 // --- the reading -------------------------------------------------------------
 
@@ -124,7 +124,7 @@ func TestSubmittingAClearPushesNoReceipt(t *testing.T) {
 		t.Fatalf("submit: %v", err)
 	}
 
-	// Assert: a bubble reading "/clear" beside the red divider reporting the very
+	// Assert: a work reading "/clear" beside the red divider reporting the very
 	// same cut is the machinery narrating itself — and it would sit ABOVE the
 	// divider, in the region the clear exists to discard.
 	if turns := h.userTurns(); len(turns) != 0 {
@@ -133,7 +133,7 @@ func TestSubmittingAClearPushesNoReceipt(t *testing.T) {
 }
 
 func TestSubmittingAClearStillForwardsItToTheShim(t *testing.T) {
-	// Arrange — withholding the BUBBLE must not withhold the COMMAND.
+	// Arrange — withholding the DETACHED WORK must not withhold the COMMAND.
 	h := newQueueHarness(t, nil)
 
 	// Act.
@@ -167,7 +167,7 @@ func TestSubmittingAClearOpensTheClearingAxis(t *testing.T) {
 
 func TestAClearWithAnArgumentIsAnOrdinaryPromptAndEchoes(t *testing.T) {
 	// Arrange — "/clear the build cache" is something the user SAID, and the
-	// conversation is not being cut, so the bubble is the honest report.
+	// conversation is not being cut, so the work is the honest report.
 	h := newQueueHarness(t, nil)
 
 	// Act.

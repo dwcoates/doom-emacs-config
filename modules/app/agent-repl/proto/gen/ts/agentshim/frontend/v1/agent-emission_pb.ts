@@ -7,8 +7,8 @@
 //
 //   1. the top-level feed, where Message (feed.proto) wraps it with
 //      the session's own identity/ordering/provenance stamps, and
-//   2. a detached agent's bubble, where AsyncAgentUpdate (async-bubble.proto)
-//      wraps it with a bubble id and that bubble's fold accounting.
+//   2. detached work, where DetachedWorkAgentUpdate (detached-work.proto)
+//      wraps it with the target message's id and that message's fold accounting.
 //
 // The same message serves both because a detached agent is not a second,
 // weaker kind of conversation — it is the same conversation happening

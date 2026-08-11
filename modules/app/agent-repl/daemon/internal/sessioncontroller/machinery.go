@@ -94,7 +94,7 @@ func machineryEnvelope(it *frontendv1.Message) string {
 }
 
 // withheldReason reports why a user record must not be RENDERED as a prompt
-// bubble, or "" when it is a real prompt and belongs in the feed.
+// work, or "" when it is a real prompt and belongs in the feed.
 //
 // TWO PRODUCERS OF NON-PROMPTS, one treatment. The CLI writes bookkeeping for
 // its own slash commands; the daemon fires a read-directive of its own behind a

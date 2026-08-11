@@ -80,13 +80,13 @@ func feedTexts(push *fakePusher) []string {
 	return out
 }
 
-// bubbleTexts collects every response body text the consumer pushed INSIDE an
-// async bubble's agent update.
-func bubbleTexts(push *fakePusher) []string {
+// workTexts collects every response body text the consumer pushed INSIDE an
+// detached work's agent update.
+func workTexts(push *fakePusher) []string {
 	var out []string
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	for _, delta := range push.bubbles {
+	for _, delta := range push.work {
 		for _, up := range delta.GetUpdates() {
 			for _, em := range up.GetAgent().GetEmissions() {
 				for _, block := range em.GetResponse().GetBody().GetContent() {
@@ -111,12 +111,12 @@ func containsText(haystack []string, needle string) bool {
 
 // --- THE ACCEPTANCE CRITERION, through the consumer ------------------------
 
-func TestADetachedAgentsResponseAppearsInItsBubbleDelta(t *testing.T) {
+func TestADetachedAgentsResponseAppearsInItsDetachedWorkDelta(t *testing.T) {
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "subagent speaking"), true)
-	if !containsText(bubbleTexts(push), "subagent speaking") {
-		t.Fatalf("a detached agent's emissions must reach frontends inside its bubble, got %v", bubbleTexts(push))
+	if !containsText(workTexts(push), "subagent speaking") {
+		t.Fatalf("a detached agent's emissions must reach frontends inside its work, got %v", workTexts(push))
 	}
 }
 
@@ -138,23 +138,23 @@ func TestTheMainAgentsResponseStillAppearsAsAFeedItem(t *testing.T) {
 	}
 }
 
-func TestTheMainAgentsResponseIsNotPushedIntoAnyBubble(t *testing.T) {
+func TestTheMainAgentsResponseIsNotPushedIntoAnyDetachedWork(t *testing.T) {
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 	c.pushConversation(mainAssistantEvent(t, 1, "u1", "main agent speaking"), true)
-	if len(bubbleTexts(push)) != 0 {
-		t.Fatalf("nothing the main agent said is detached work, got %v", bubbleTexts(push))
+	if len(workTexts(push)) != 0 {
+		t.Fatalf("nothing the main agent said is detached work, got %v", workTexts(push))
 	}
 }
 
-func TestADetachedAgentsFirstRecordOpensItsBubbleInTheSamePush(t *testing.T) {
+func TestADetachedAgentsFirstRecordOpensItsDetachedWorkInTheSamePush(t *testing.T) {
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "subagent speaking"), true)
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	if len(push.bubbles) != 1 || len(push.bubbles[0].GetOpened()) != 1 {
-		t.Fatal("an update must never land in a client that has not been told about its bubble")
+	if len(push.work) != 1 || len(push.work[0].GetOpened()) != 1 {
+		t.Fatal("an update must never land in a client that has not been told about its work")
 	}
 }
 
@@ -164,8 +164,8 @@ func TestTheAsyncPushCarriesTheWorkspacesFence(t *testing.T) {
 	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	if push.bubbles[0].GetFence() != c.fence() {
-		t.Fatalf("a stale push must be discardable whole: want fence %q, got %q", c.fence(), push.bubbles[0].GetFence())
+	if push.work[0].GetFence() != c.fence() {
+		t.Fatalf("a stale push must be discardable whole: want fence %q, got %q", c.fence(), push.work[0].GetFence())
 	}
 }
 
@@ -175,15 +175,15 @@ func TestTheAsyncPushCarriesTheEventsReplayCursor(t *testing.T) {
 	c.pushConversation(sidechainAssistantEvent(t, 42, "u1", "tu_task", "x"), true)
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	if push.bubbles[0].GetThroughSeq() != 42 {
-		t.Fatalf("want through_seq=42, got %d", push.bubbles[0].GetThroughSeq())
+	if push.work[0].GetThroughSeq() != 42 {
+		t.Fatalf("want through_seq=42, got %d", push.work[0].GetThroughSeq())
 	}
 }
 
-// The subject is the EVENT'S OWN delta, which is counted apart from the launch
-// anchor's: a detaching event now pushes both, and a bare count of the
-// conversation deltas would no longer be a statement about the one this test is
-// named for.
+// The subject is the EVENT'S OWN feed delta. It is identified by its cursor
+// rather than by a bare count of the conversation deltas, which survives the
+// anchor's retirement unchanged: a detaching event still owes the feed the
+// delta that advances every client's replay cursor past it.
 func TestAnAllDetachedEventStillPushesItsFeedDelta(t *testing.T) {
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
@@ -201,56 +201,78 @@ func TestAnAllDetachedEventStillPushesItsFeedDelta(t *testing.T) {
 	}
 }
 
-func TestASecondDetachedRecordFoldsWithoutReopeningItsBubble(t *testing.T) {
+func TestASecondDetachedRecordFoldsWithoutReopeningItsDetachedWork(t *testing.T) {
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "one"), true)
 	c.pushConversation(sidechainAssistantEvent(t, 2, "u2", "tu_task", "two"), true)
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	if len(push.bubbles[1].GetOpened()) != 0 {
-		t.Fatal("a bubble the receiver already knows is not re-opened by every later record")
+	if len(push.work[1].GetOpened()) != 0 {
+		t.Fatal("a work the receiver already knows is not re-opened by every later record")
 	}
 }
 
-func TestABubbleNamesTheSameWorkspaceItsDeltaDoes(t *testing.T) {
+func TestADetachedWorkNamesTheSameWorkspaceItsDeltaDoes(t *testing.T) {
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	delta := push.bubbles[0]
-	if delta.GetOpened()[0].GetWorkspace() != delta.GetWorkspace() {
-		t.Fatalf("the bubble and its envelope must always name one workspace: bubble=%q delta=%q",
-			delta.GetOpened()[0].GetWorkspace(), delta.GetWorkspace())
+	delta := push.work[0]
+	if delta.GetOpened()[0].GetDetachedWork().GetWorkspace() != delta.GetWorkspace() {
+		t.Fatalf("the work and its envelope must always name one workspace: work=%q delta=%q",
+			delta.GetOpened()[0].GetDetachedWork().GetWorkspace(), delta.GetWorkspace())
 	}
 }
 
-func TestABubbleTheSessionOpenedReachesTheReconnectSnapshot(t *testing.T) {
+func TestADetachedWorkTheSessionOpenedReachesTheReconnectSnapshot(t *testing.T) {
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "one"), true)
-	snap := c.bubbles.snapshot()
-	if len(snap) != 1 || len(snap[0].GetAgent().GetEmissions()) != 1 {
+	snap := c.work.snapshot()
+	if len(snap) != 1 || len(snap[0].GetDetachedWork().GetAgent().GetEmissions()) != 1 {
 		t.Fatalf("a reconnecting client must be handed the fold the pushes had been building, got %v", snap)
 	}
 }
 
-// --- the launch's ANCHOR in the feed (arm 38) ------------------------------
+// --- the launch's ONE DELIVERY of its detached-work message ----------------
 //
-// The anchor is the bubble's place in the conversation it was launched from.
-// Without it a frontend has a live agent and nowhere to draw it.
+// REWRITTEN, not retired. These tests used to pin a SECOND delivery: the daemon
+// synthesized an "anchor" Message with uuid "async-anchor:"+id onto the
+// ConversationDelta so a frontend had somewhere to draw a work that otherwise
+// only existed as a raw bubble on the detached-work delta. Detached work IS a
+// Message now, so the one it travels as IS its place in the feed and the anchor
+// is a duplicate rather than a companion.
+//
+// What these were protecting still holds and is still covered here: every
+// opened piece of work reaches the feed EXACTLY ONCE, carrying its opening
+// liveness and its provenance, with a uuid derived from its task rather than
+// minted — plus the new fact the collapse creates, that the ConversationDelta
+// carries no second copy.
 
-// feedAnchors collects every arm-38 Message the consumer pushed onto
-// the top-level feed, paired with the item so a test can read the item's own
-// identity stamps as well as the bubble it carries.
-func feedAnchors(push *fakePusher) []*frontendv1.Message {
+// openedWork collects every detached-work MESSAGE the consumer opened, across
+// every detached-work delta it pushed.
+func openedWork(push *fakePusher) []*frontendv1.Message {
+	var out []*frontendv1.Message
+	push.mu.Lock()
+	defer push.mu.Unlock()
+	for _, delta := range push.work {
+		out = append(out, delta.GetOpened()...)
+	}
+	return out
+}
+
+// feedDetachedWork collects every detached-work Message that reached the
+// TOP-LEVEL feed. With the anchor retired this must always be empty: the one
+// delivery is on the detached-work delta.
+func feedDetachedWork(push *fakePusher) []*frontendv1.Message {
 	var out []*frontendv1.Message
 	push.mu.Lock()
 	defer push.mu.Unlock()
 	for _, cd := range push.convo {
 		for _, item := range cd.GetMessages() {
-			if item.GetAsyncBubble() != nil {
+			if item.GetDetachedWork() != nil {
 				out = append(out, item)
 			}
 		}
@@ -258,7 +280,7 @@ func feedAnchors(push *fakePusher) []*frontendv1.Message {
 	return out
 }
 
-func TestALaunchAnchorsItsBubbleInTheTopLevelFeed(t *testing.T) {
+func TestALaunchDeliversItsDetachedWorkMessageOnce(t *testing.T) {
 	// Arrange
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
@@ -267,12 +289,15 @@ func TestALaunchAnchorsItsBubbleInTheTopLevelFeed(t *testing.T) {
 	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
 
 	// Assert
-	if got := len(feedAnchors(push)); got != 1 {
-		t.Fatalf("feed anchors = %d, want 1: a bubble with no Message.async_bubble has no place in the conversation that started it", got)
+	if got := len(openedWork(push)); got != 1 {
+		t.Fatalf("opened detached work = %d, want 1: work the feed never receives has no place in the conversation that started it", got)
 	}
 }
 
-func TestTheAnchorNamesTheCallThatLaunchedIt(t *testing.T) {
+// The anchor's whole reason for existing was that the work travelled as a raw
+// bubble the feed could not hold. It travels as a Message now, so a SECOND copy
+// on the ConversationDelta would make a frontend draw the same work twice.
+func TestADetachedWorkMessageDoesNotAlsoTravelOnTheConversationDelta(t *testing.T) {
 	// Arrange
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
@@ -281,14 +306,12 @@ func TestTheAnchorNamesTheCallThatLaunchedIt(t *testing.T) {
 	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
 
 	// Assert
-	anchors := feedAnchors(push)
-	if len(anchors) != 1 || anchors[0].GetAsyncBubble().GetOriginToolUseId() != "tu_task" {
-		t.Fatalf("anchor origin_tool_use_id = %q, want %q: the reader cannot tell which call started the work otherwise",
-			anchors[0].GetAsyncBubble().GetOriginToolUseId(), "tu_task")
+	if got := len(feedDetachedWork(push)); got != 0 {
+		t.Fatalf("detached-work messages on the conversation delta = %d, want 0: the retired anchor was that second copy", got)
 	}
 }
 
-func TestTheAnchorCarriesTheSameBubbleIdTheAsyncPushOpened(t *testing.T) {
+func TestTheOpenedDetachedWorkNamesTheCallThatLaunchedIt(t *testing.T) {
 	// Arrange
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
@@ -297,16 +320,14 @@ func TestTheAnchorCarriesTheSameBubbleIdTheAsyncPushOpened(t *testing.T) {
 	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
 
 	// Assert
-	anchors := feedAnchors(push)
-	push.mu.Lock()
-	opened := push.bubbles[0].GetOpened()[0].GetId()
-	push.mu.Unlock()
-	if got := anchors[0].GetAsyncBubble().GetId(); got != opened {
-		t.Fatalf("anchor bubble id = %q, async push opened %q: every later update is addressed to one id, and two answers means half the updates are unroutable", got, opened)
+	opened := openedWork(push)
+	if len(opened) != 1 || opened[0].GetDetachedWork().GetOriginToolUseId() != "tu_task" {
+		t.Fatalf("origin_tool_use_id = %q, want %q: the reader cannot tell which call started the work otherwise",
+			opened[0].GetDetachedWork().GetOriginToolUseId(), "tu_task")
 	}
 }
 
-func TestTheAnchorCarriesTheBubblesOpeningLiveness(t *testing.T) {
+func TestTheOpenedDetachedWorkCarriesItsOpeningLiveness(t *testing.T) {
 	// Arrange
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
@@ -315,12 +336,12 @@ func TestTheAnchorCarriesTheBubblesOpeningLiveness(t *testing.T) {
 	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
 
 	// Assert
-	if feedAnchors(push)[0].GetAsyncBubble().GetLiveness().GetLive() == nil {
-		t.Fatal("a launch that anchors already-settled is unrepresentable while its agent is still running")
+	if openedWork(push)[0].GetDetachedWork().GetLiveness().GetLive() == nil {
+		t.Fatal("work delivered already-settled is unrepresentable while its agent is still running")
 	}
 }
 
-func TestTheAnchorDeclaresItsProvenance(t *testing.T) {
+func TestTheOpenedDetachedWorkDeclaresItsProvenance(t *testing.T) {
 	// Arrange
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
@@ -329,12 +350,29 @@ func TestTheAnchorDeclaresItsProvenance(t *testing.T) {
 	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
 
 	// Assert
-	if got := feedAnchors(push)[0].GetSource(); got != frontendv1.ConversationSource_CONVERSATION_SOURCE_USER {
-		t.Fatalf("anchor source = %s, want CONVERSATION_SOURCE_USER: proto3's zero is the malformed-frame value a receiver must reject", got)
+	if got := openedWork(push)[0].GetSource(); got != frontendv1.ConversationSource_CONVERSATION_SOURCE_USER {
+		t.Fatalf("source = %s, want CONVERSATION_SOURCE_USER: proto3's zero is the malformed-frame value a receiver must reject", got)
 	}
 }
 
-func TestTheAnchorsUuidIsDerivedFromItsBubble(t *testing.T) {
+func TestTheOpenedDetachedWorksUuidIsDerivedFromItsTask(t *testing.T) {
+	// Arrange
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act
+	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
+
+	// Assert: the sidechain envelope names agent_1, and the id is DERIVED from
+	// it — a minted uuid would open the same work again on every resync pass.
+	if got, want := openedWork(push)[0].GetUuid(), "detached-work:agent_1"; got != want {
+		t.Fatalf("uuid = %q, want %q", got, want)
+	}
+}
+
+// RULING 5: detached work is a FEED ROW, so the message it travels as names no
+// parent and IS its own top-level row.
+func TestTheOpenedDetachedWorkIsAFeedRow(t *testing.T) {
 	// Arrange
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
@@ -343,13 +381,13 @@ func TestTheAnchorsUuidIsDerivedFromItsBubble(t *testing.T) {
 	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
 
 	// Assert
-	anchor := feedAnchors(push)[0]
-	if want := "async-anchor:" + anchor.GetAsyncBubble().GetId(); anchor.GetUuid() != want {
-		t.Fatalf("anchor uuid = %q, want %q: a minted uuid would anchor the same bubble again on every resync pass", anchor.GetUuid(), want)
+	m := openedWork(push)[0]
+	if m.GetLineage().GetParentMessageId() != "" || m.GetLineage().GetTopLevelMessageId() != m.GetUuid() {
+		t.Fatalf("lineage = %v for uuid %q, want no parent and a self-referential root", m.GetLineage(), m.GetUuid())
 	}
 }
 
-func TestASecondDetachedRecordDoesNotAnchorItsBubbleTwice(t *testing.T) {
+func TestASecondDetachedRecordDoesNotDeliverItsDetachedWorkTwice(t *testing.T) {
 	// Arrange
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
@@ -359,12 +397,12 @@ func TestASecondDetachedRecordDoesNotAnchorItsBubbleTwice(t *testing.T) {
 	c.pushConversation(sidechainAssistantEvent(t, 2, "u2", "tu_task", "two"), true)
 
 	// Assert
-	if got := len(feedAnchors(push)); got != 1 {
-		t.Fatalf("feed anchors = %d, want 1: a second anchor makes a frontend draw the same bubble twice", got)
+	if got := len(openedWork(push)); got != 1 {
+		t.Fatalf("opened detached work = %d, want 1: a second delivery makes a frontend draw the same work twice", got)
 	}
 }
 
-func TestTheAnchorsDeltaCarriesTheWorkspacesFence(t *testing.T) {
+func TestTheDeltaThatOpensDetachedWorkCarriesTheWorkspacesFence(t *testing.T) {
 	// Arrange
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
@@ -375,19 +413,17 @@ func TestTheAnchorsDeltaCarriesTheWorkspacesFence(t *testing.T) {
 	// Assert
 	push.mu.Lock()
 	defer push.mu.Unlock()
-	for _, cd := range push.convo {
-		for _, item := range cd.GetMessages() {
-			if item.GetAsyncBubble() == nil {
-				continue
-			}
-			if cd.GetFence() != c.fence() {
-				t.Fatalf("the anchor's delta carries fence %q, want %q: a stale push must be discardable whole", cd.GetFence(), c.fence())
-			}
+	for _, delta := range push.work {
+		if len(delta.GetOpened()) == 0 {
+			continue
+		}
+		if delta.GetFence() != c.fence() {
+			t.Fatalf("the opening delta carries fence %q, want %q: a stale push must be discardable whole", delta.GetFence(), c.fence())
 		}
 	}
 }
 
-func TestAnEventThatOpensNoBubbleAnchorsNothing(t *testing.T) {
+func TestAnEventThatOpensNoDetachedWorkDeliversNone(t *testing.T) {
 	// Arrange
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
@@ -396,8 +432,8 @@ func TestAnEventThatOpensNoBubbleAnchorsNothing(t *testing.T) {
 	c.pushConversation(mainAssistantEvent(t, 1, "u1", "main agent speaking"), true)
 
 	// Assert
-	if got := len(feedAnchors(push)); got != 0 {
-		t.Fatalf("feed anchors = %d, want 0: nothing the main agent said detached any work", got)
+	if got := len(openedWork(push)); got != 0 {
+		t.Fatalf("opened detached work = %d, want 0: nothing the main agent said detached any work", got)
 	}
 }
 
@@ -434,12 +470,12 @@ func streamSubagentEvent(t *testing.T, seq uint64, uuid, parentToolUseID, text s
 	}
 }
 
-func TestAStreamedSubagentsResponseAppearsInItsBubbleDelta(t *testing.T) {
+func TestAStreamedSubagentsResponseAppearsInItsDetachedWorkDelta(t *testing.T) {
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 	c.pushConversation(streamSubagentEvent(t, 1, "u1", "toolu_launch", "subagent speaking"), true)
-	if !containsText(bubbleTexts(push), "subagent speaking") {
-		t.Fatalf("a subagent observed on the stream plane must reach frontends inside its bubble, got %v", bubbleTexts(push))
+	if !containsText(workTexts(push), "subagent speaking") {
+		t.Fatalf("a subagent observed on the stream plane must reach frontends inside its work, got %v", workTexts(push))
 	}
 }
 
@@ -481,12 +517,12 @@ func TestTheCurationVerdictIsSilentForTheMainConversation(t *testing.T) {
 	}
 }
 
-func TestTheAsyncPushNamesTheBubbleItOpened(t *testing.T) {
+func TestTheAsyncPushNamesTheDetachedWorkItOpened(t *testing.T) {
 	push := &fakePusher{}
 	c, lines := gapConsumer(t, push)
 	c.pushConversation(streamSubagentEvent(t, 1, "u1", "toolu_launch", "subagent speaking"), true)
 	if countLinesWith(*lines, "origin_tool_use_id=toolu_launch") == 0 {
-		t.Fatalf("an opened bubble must be recorded with the launching call it hangs under, got %v", *lines)
+		t.Fatalf("an opened work must be recorded with the launching call it hangs under, got %v", *lines)
 	}
 }
 
@@ -508,20 +544,20 @@ func gapEvent(seq uint64) *corev1.Event {
 	return &corev1.Event{SessionId: "s1", Seq: seq, ProducedAtMs: 1700000000000}
 }
 
-// openWorkflowBubble opens a WORKFLOW bubble, whose fold is a row journal.
-func openWorkflowBubble(t *testing.T, c *consumer) {
+// openWorkflowDetachedWork opens a WORKFLOW work, whose fold is a row journal.
+func openWorkflowDetachedWork(t *testing.T, c *consumer) {
 	t.Helper()
-	if _, err := c.bubbles.observeTaskStarted(&corev1.TaskStarted{
+	if _, err := c.work.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_WORKFLOW, ToolUseId: "tu_1",
 	}, 10); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// openShellBubble opens a SHELL bubble, whose fold is a byte spool.
-func openShellBubble(t *testing.T, c *consumer) {
+// openShellDetachedWork opens a SHELL work, whose fold is a byte spool.
+func openShellDetachedWork(t *testing.T, c *consumer) {
 	t.Helper()
-	if _, err := c.bubbles.observeTaskStarted(&corev1.TaskStarted{
+	if _, err := c.work.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL, ToolUseId: "tu_1",
 	}, 10); err != nil {
 		t.Fatal(err)
@@ -543,8 +579,8 @@ func retrievalOutcome(text string) frontend.Curation {
 	}}}
 }
 
-// agentFoldOntoTu1 is a detached agent's emissions addressed to whatever bubble
-// tu_1 opened — an AGENT update, whichever kind that bubble actually is.
+// agentFoldOntoTu1 is a detached agent's emissions addressed to whatever work
+// tu_1 opened — an AGENT update, whichever kind that work actually is.
 func agentFoldOntoTu1() frontend.Curation {
 	return frontend.Curation{Detached: []frontend.DetachedFold{{
 		SourceToolUseID: "tu_1",
@@ -585,20 +621,20 @@ func countLinesWith(lines []string, marker string) int {
 func TestAKindMismatchedFoldBecomesAFailureCard(t *testing.T) {
 	push := &fakePusher{}
 	c, _ := gapConsumer(t, push)
-	openWorkflowBubble(t, c)
+	openWorkflowDetachedWork(t, c)
 
 	c.pushAsync(c.observeAsync(agentFoldOntoTu1(), gapEvent(1)), gapEvent(1))
 
 	cards := failureCards(push)
 	if _, ok := cards[gapCardUUID(t, c, "kind_mismatch")]; !ok {
-		t.Fatalf("a bubble that silently stops growing is indistinguishable from a quiet agent and must earn a card, got %v", cards)
+		t.Fatalf("a work that silently stops growing is indistinguishable from a quiet agent and must earn a card, got %v", cards)
 	}
 }
 
 func TestAKindMismatchedFoldsCardCarriesTheRefusalsEvidence(t *testing.T) {
 	push := &fakePusher{}
 	c, _ := gapConsumer(t, push)
-	openWorkflowBubble(t, c)
+	openWorkflowDetachedWork(t, c)
 
 	c.pushAsync(c.observeAsync(agentFoldOntoTu1(), gapEvent(1)), gapEvent(1))
 
@@ -610,7 +646,7 @@ func TestAKindMismatchedFoldsCardCarriesTheRefusalsEvidence(t *testing.T) {
 func TestAKindMismatchedFoldIsRecordedExactlyOnce(t *testing.T) {
 	push := &fakePusher{}
 	c, lines := gapConsumer(t, push)
-	openWorkflowBubble(t, c)
+	openWorkflowDetachedWork(t, c)
 
 	c.pushAsync(c.observeAsync(agentFoldOntoTu1(), gapEvent(1)), gapEvent(1))
 
@@ -622,7 +658,7 @@ func TestAKindMismatchedFoldIsRecordedExactlyOnce(t *testing.T) {
 func TestAKindMismatchedFoldReplaysOntoTheSameCard(t *testing.T) {
 	push := &fakePusher{}
 	c, _ := gapConsumer(t, push)
-	openWorkflowBubble(t, c)
+	openWorkflowDetachedWork(t, c)
 
 	c.pushAsync(c.observeAsync(agentFoldOntoTu1(), gapEvent(1)), gapEvent(1))
 	c.pushAsync(c.observeAsync(agentFoldOntoTu1(), gapEvent(2)), gapEvent(2))
@@ -635,7 +671,7 @@ func TestAKindMismatchedFoldReplaysOntoTheSameCard(t *testing.T) {
 func TestARewoundOutputSpoolBecomesAFailureCard(t *testing.T) {
 	push := &fakePusher{}
 	c, _ := gapConsumer(t, push)
-	openShellBubble(t, c)
+	openShellDetachedWork(t, c)
 	c.pushAsync(c.observeAsync(retrievalOutcome("hello world"), gapEvent(1)), gapEvent(1))
 
 	c.pushAsync(c.observeAsync(retrievalOutcome("hi"), gapEvent(2)), gapEvent(2))
@@ -649,7 +685,7 @@ func TestARewoundOutputSpoolBecomesAFailureCard(t *testing.T) {
 func TestARewoundOutputSpoolIsRecordedExactlyOnce(t *testing.T) {
 	push := &fakePusher{}
 	c, lines := gapConsumer(t, push)
-	openShellBubble(t, c)
+	openShellDetachedWork(t, c)
 	c.pushAsync(c.observeAsync(retrievalOutcome("hello world"), gapEvent(1)), gapEvent(1))
 
 	c.pushAsync(c.observeAsync(retrievalOutcome("hi"), gapEvent(2)), gapEvent(2))
@@ -662,7 +698,7 @@ func TestARewoundOutputSpoolIsRecordedExactlyOnce(t *testing.T) {
 func TestARewoundWorkflowJournalBecomesAFailureCard(t *testing.T) {
 	push := &fakePusher{}
 	c, _ := gapConsumer(t, push)
-	openWorkflowBubble(t, c)
+	openWorkflowDetachedWork(t, c)
 	c.pushAsync(c.observeAsync(retrievalOutcome(`{"label":"a"}`+"\n"+`{"label":"b"}`+"\n"), gapEvent(1)), gapEvent(1))
 
 	c.pushAsync(c.observeAsync(retrievalOutcome(`{"label":"a"}`+"\n"), gapEvent(2)), gapEvent(2))
@@ -676,12 +712,12 @@ func TestARewoundWorkflowJournalBecomesAFailureCard(t *testing.T) {
 func TestARewoundWorkflowJournalIsRecordedExactlyOnce(t *testing.T) {
 	push := &fakePusher{}
 	c, lines := gapConsumer(t, push)
-	openWorkflowBubble(t, c)
+	openWorkflowDetachedWork(t, c)
 	c.pushAsync(c.observeAsync(retrievalOutcome(`{"label":"a"}`+"\n"+`{"label":"b"}`+"\n"), gapEvent(1)), gapEvent(1))
 
 	c.pushAsync(c.observeAsync(retrievalOutcome(`{"label":"a"}`+"\n"), gapEvent(2)), gapEvent(2))
 
-	if got := countLinesWith(*lines, "journal for bubble"); got != 1 {
+	if got := countLinesWith(*lines, "journal for work"); got != 1 {
 		t.Fatalf("one fault is one canonical record, got %d in %v", got, *lines)
 	}
 }
@@ -690,11 +726,11 @@ func TestAnUnclassifiedFoldRefusalStillTakesTheDegradedWarn(t *testing.T) {
 	push := &fakePusher{}
 	c, lines := gapConsumer(t, push)
 
-	// A detached record naming neither a source call nor an open bubble is a
+	// A detached record naming neither a source call nor an open work is a
 	// refusal with no daemon-bug class: it keeps the warn it always had.
 	c.pushAsync(c.observeAsync(frontend.Curation{Detached: []frontend.DetachedFold{{AgentID: "agent_x"}}}, gapEvent(1)), gapEvent(1))
 
-	if got := countLinesWith(*lines, "ASYNC BUBBLE FOLD DEGRADED"); got != 1 {
+	if got := countLinesWith(*lines, "DETACHED WORK FOLD DEGRADED"); got != 1 {
 		t.Fatalf("an unclassified refusal must keep its warn rather than disappear, got %d in %v", got, *lines)
 	}
 }
@@ -731,7 +767,7 @@ func faultLevelConsumer(t *testing.T, push Pusher) (*consumer, *levelSplitLogs) 
 // look a tool name up by.
 func unclassifiableFault(t *testing.T, c *consumer) asyncPush {
 	t.Helper()
-	push, err := c.bubbles.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_x"}, 10)
+	push, err := c.work.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_x"}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -841,7 +877,7 @@ func TestAnAnnouncementBornDetachmentReplaysWithoutAnyFaultRecord(t *testing.T) 
 	// Arrange
 	pusher := &fakePusher{}
 	c, logs := faultLevelConsumer(t, pusher)
-	push, err := c.bubbles.observeTaskStarted(&corev1.TaskStarted{
+	push, err := c.work.observeTaskStarted(&corev1.TaskStarted{
 		TaskId: "bgbjlnfrv", Kind: corev1.TaskKind_TASK_KIND_SHELL,
 	}, 10)
 	if err != nil {
@@ -858,13 +894,13 @@ func TestAnAnnouncementBornDetachmentReplaysWithoutAnyFaultRecord(t *testing.T) 
 }
 
 // gapCardUUID is the address a gap card is expected under: the store's own
-// bubble id and the gap class, so the test names the same key the production
+// work id and the gap class, so the test names the same key the production
 // derivation does rather than a hand-copied string.
 func gapCardUUID(t *testing.T, c *consumer, gap string) string {
 	t.Helper()
-	snap := c.bubbles.snapshot()
+	snap := c.work.snapshot()
 	if len(snap) != 1 {
-		t.Fatalf("the arrange step must leave exactly one bubble, got %d", len(snap))
+		t.Fatalf("the arrange step must leave exactly one work, got %d", len(snap))
 	}
-	return fmt.Sprintf("async-gap:%s:%s", snap[0].GetId(), gap)
+	return fmt.Sprintf("async-gap:%s:%s", snap[0].GetUuid(), gap)
 }

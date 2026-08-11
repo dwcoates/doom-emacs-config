@@ -45,7 +45,7 @@ var scopedModeCases = []struct {
 }
 
 // EVERY SCOPED MODE IS STILL A `/compact`, so the CLI runs the compaction it
-// already knows how to run and sessioncommand.go still suppresses the bubble.
+// already knows how to run and sessioncommand.go still suppresses the work.
 func TestScopedCompactCommandsAreStillTheCompactSessionCommand(t *testing.T) {
 	for _, tc := range scopedModeCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -244,7 +244,7 @@ func TestReviveSessionScopedStaysGatedUntilCompactionLands(t *testing.T) {
 // recognizes the command only as the ENTIRE prompt — deliberately, because
 // mistaking a sentence for it would discard the conversation — so a clear
 // revival that steered its text the way the scoped compactions do would lose
-// the bubble suppression and, worse, stop being the command at all.
+// the work suppression and, worse, stop being the command at all.
 func TestClearCutSubmitsTheBareClearSessionCommand(t *testing.T) {
 	// Arrange / Act
 	cut, err := ReviveModeClear.cut()

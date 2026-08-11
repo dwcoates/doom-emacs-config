@@ -37,7 +37,7 @@ func resumeAgentItem(uuid, requestID string) *frontendv1.Message {
 		Uuid:      uuid,
 		RequestId: requestID,
 		Source:    frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Payload:      &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{}},
+		Payload:   &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{}},
 	}
 }
 

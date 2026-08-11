@@ -5,7 +5,7 @@
 // made every frontend a second interpreter of the same bytes and left the
 // status verdict — running / done / failed — decided independently in each one.
 // The contract moved that verdict to the daemon: journal rows arrive as
-// AsyncWorkflowJournalRow with a status ARM already chosen, so a state added
+// DetachedWorkJournalRow with a status ARM already chosen, so a state added
 // later is an arm a reader must handle rather than an integer it silently
 // renders as something else.
 package frontend
@@ -28,7 +28,7 @@ import (
 // A record with no label is not a step. The label is the row's whole identity —
 // it is what a frontend collapses rows by — and inventing one would put a step
 // on screen that the run never logged.
-func ParseJournalRows(text string) (rows []*frontendv1.AsyncWorkflowJournalRow, skipped int) {
+func ParseJournalRows(text string) (rows []*frontendv1.DetachedWorkJournalRow, skipped int) {
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -57,24 +57,24 @@ func ParseJournalRows(text string) (rows []*frontendv1.AsyncWorkflowJournalRow, 
 // record carries, a `result` key is a completed step, and a record with neither
 // is a step still running. The detail line follows the same order, so the text
 // on screen and the dot beside it are always drawn from the same reading.
-func journalRow(rec map[string]any) *frontendv1.AsyncWorkflowJournalRow {
+func journalRow(rec map[string]any) *frontendv1.DetachedWorkJournalRow {
 	label := firstString(rec, "label", "agent", "phase")
 	if label == "" {
 		return nil
 	}
-	row := &frontendv1.AsyncWorkflowJournalRow{Label: label}
+	row := &frontendv1.DetachedWorkJournalRow{Label: label}
 	if failure := stringField(rec, "error"); failure != "" {
 		row.Detail = failure
-		row.Status = &frontendv1.AsyncWorkflowJournalRow_Failed{Failed: &frontendv1.AsyncWorkflowStepFailed{}}
+		row.Status = &frontendv1.DetachedWorkJournalRow_Failed{Failed: &frontendv1.DetachedWorkStepFailed{}}
 		return row
 	}
 	if _, done := rec["result"]; done {
 		row.Detail = stringField(rec, "result")
-		row.Status = &frontendv1.AsyncWorkflowJournalRow_Done{Done: &frontendv1.AsyncWorkflowStepDone{}}
+		row.Status = &frontendv1.DetachedWorkJournalRow_Done{Done: &frontendv1.DetachedWorkStepDone{}}
 		return row
 	}
 	row.Detail = stringField(rec, "prompt")
-	row.Status = &frontendv1.AsyncWorkflowJournalRow_Running{Running: &frontendv1.AsyncWorkflowStepRunning{}}
+	row.Status = &frontendv1.DetachedWorkJournalRow_Running{Running: &frontendv1.DetachedWorkStepRunning{}}
 	return row
 }
 

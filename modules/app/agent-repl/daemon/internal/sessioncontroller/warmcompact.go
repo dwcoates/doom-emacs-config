@@ -159,7 +159,7 @@ func (m *Manager) warmCompactEligibleLocked(d *sessionController, anchorTurnEndM
 // anchored on the durable last-turn-end the policy decided against.
 //
 // It is an ORDINARY forwardPrompt of the same `/compact` text a compact-first
-// revival submits. It earns no conversation bubble, because sessioncommand.go
+// revival submits. It earns no conversation work, because sessioncommand.go
 // recognizes `/compact` as a session command and promptdispatch.go withholds
 // receipts for those — so the daemon's own compaction does not render as a
 // prompt the user typed, which is the same guarantee the keep-alive window
@@ -241,7 +241,7 @@ func (m *Manager) SubmitWarmCompaction(ctx context.Context, workspace string, an
 		workspace, sessionID, turnID, contextTokens, keepalive.WarmCompactMinContextTokens, anchorTurnEndMs, keepalive.WarmCompactMargin)
 
 	// PROMPT_ORIGIN_USER_SENT is the revival compaction's own origin and is kept
-	// here deliberately: `/compact` is a session command, so it earns no bubble
+	// here deliberately: `/compact` is a session command, so it earns no work
 	// on any origin, and inventing a second origin for the identical submission
 	// would give the two compactions different accounting for no difference in
 	// what they do.

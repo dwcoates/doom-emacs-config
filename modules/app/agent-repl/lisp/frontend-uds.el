@@ -220,7 +220,7 @@ that the daemon or session is healthy.")
     "sessionInit" "heartbeat" "queue" "progress"
     "workspaceAvailable" "hostAction" "daemonHealth" "sessionHealth"
     "workspaceRoster" "shutdownSchedule"
-    "asyncBubbleDelta" "topbar" "tokenBreakdown" "workspaceGate"
+    "detachedWorkDelta" "topbar" "tokenBreakdown" "workspaceGate"
     "mergeQueueRoster" "restartPending" "conversationPage")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frame.proto.
@@ -254,13 +254,13 @@ no snapshot field of this name to seed from.
 nothing else.  The consolidated progress footer remains webapp-only.
 
 `taskCatalog', `heartbeat' (E4), `workspaceRoster', the four resolved
-component views (`asyncBubbleDelta', `topbar', `tokenBreakdown',
+component views (`detachedWorkDelta', `topbar', `tokenBreakdown',
 `workspaceGate') and `conversationPage' are decoded for wire parity and
 rendered by nothing here — see `agent-repl--uds-ignored-frame-fields'.")
 
 (defconst agent-repl--uds-ignored-frame-fields
   '("taskCatalog" "heartbeat" "queue" "workspaceRoster"
-    "asyncBubbleDelta" "topbar" "tokenBreakdown" "workspaceGate"
+    "detachedWorkDelta" "topbar" "tokenBreakdown" "workspaceGate"
     "mergeQueueRoster" "conversationPage")
   "Frame arms Emacs decodes for wire parity but DELIBERATELY renders nothing for.
 These are a subset of `agent-repl--uds-known-frame-fields'.
@@ -307,13 +307,13 @@ telling itself what it just said.  The arm is decoded for wire parity
 and deliberately renders nothing.  This is a settled design decision,
 not unfinished wiring.
 
-`asyncBubbleDelta', `topbar', `tokenBreakdown', `workspaceGate': the
+`detachedWorkDelta', `topbar', `tokenBreakdown', `workspaceGate': the
 resolved component views the daemon composes for a RENDERING frontend —
-a detached agent's bubble, the topbar, the token-breakdown menu, and the
+a detached agent's work, the topbar, the token-breakdown menu, and the
 revival gate.  Emacs draws none of those chromes: its topbar is the Emacs
 tab bar fed from `WorkspaceState', its cost surfacing is the mode-line
-alarm `context-cost.el' reads off `ProgressView', and it has no bubble or
-menu at all.  They are broadcast to every client rather than stripped for
+alarm `context-cost.el' reads off `ProgressView', and it has no detached-work
+surface or menu at all.  They are broadcast to every client rather than stripped for
 the host, so they must DECODE here or the arm signals; listing them makes
 that a stated decision instead of an unfinished-wiring log line on every
 push.

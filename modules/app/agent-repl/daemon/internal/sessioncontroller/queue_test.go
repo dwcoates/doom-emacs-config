@@ -1509,7 +1509,7 @@ func TestViewProjectsTheRevivalHoldSessionID(t *testing.T) {
 	// Assert.
 	// The arm's PRESENCE is the whole fact. It named the session being revived
 	// before; a revival is a workspace-level event and the entry already rides
-	// its workspace's queue, so the id joined the bubble to nothing.
+	// its workspace's queue, so the id joined the work to nothing.
 	if view.GetEntries()[0].GetRevival() == nil {
 		t.Fatalf("hold = %T, want the revival arm", view.GetEntries()[0].GetHold())
 	}

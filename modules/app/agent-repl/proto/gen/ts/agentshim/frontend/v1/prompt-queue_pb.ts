@@ -165,7 +165,7 @@ export type DetachedAgentsCancelled = Message<"agentshim.frontend.v1.DetachedAge
    * task ids: a task id is daemon-internal bookkeeping a frontend has no
    * vocabulary for, and what a frontend renders is "cancelled 3 agents". The
    * ids stay on the shim-wire arm, where the daemon uses them to settle
-   * exactly those agents' bubbles.
+   * exactly those agents' detached-work messages.
    *
    * @generated from field: int64 count = 1;
    */

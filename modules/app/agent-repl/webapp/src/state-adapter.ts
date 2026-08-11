@@ -286,13 +286,13 @@ interface TypingRevealBase {
    * there and `streaming.ts` retires it when the authoritative record of the
    * same block lands there.
    *
-   * Set names the `AsyncBubble` the previewed record is being FOLDED into. The
-   * preview must open inside that bubble and must never touch the feed: the
-   * record it previews will never arrive on the feed, so a top-level preview
-   * of it could never be retired and would spin "streaming input..." with no
-   * body for the life of the page.
+   * Set names the MESSAGE whose detached work is FOLDING the previewed record.
+   * The preview must open inside that message and must never touch the feed:
+   * the record it previews will never arrive on the feed, so a top-level
+   * preview of it could never be retired and would spin "streaming input..."
+   * with no body for the life of the page.
    */
-  bubbleId: string;
+  parentMessageId: string;
 }
 
 /** A valid live prose delta. */
@@ -527,8 +527,8 @@ export type AdapterEffect =
     }
   | { kind: "typing"; value: TypingReveal | UnidentifiedToolInputReveal }
   // A preview the daemon opened and can no longer retire. Addressed exactly
-  // as the delta that opened it: empty bubbleId for the top-level feed.
-  | { kind: "typing-cut"; value: { workspace: string; bubbleId: string; fence: string } }
+  // as the delta that opened it: empty parentMessageId for the top-level feed.
+  | { kind: "typing-cut"; value: { workspace: string; parentMessageId: string; fence: string } }
   | { kind: "tool-progress"; value: ToolProgressInput }
   | { kind: "queue"; value: QueueInput }
   | { kind: "task-catalog"; value: TaskCatalogInput }
@@ -565,7 +565,7 @@ export type AdapterEffect =
   /**
    * THE ASYNC-BUBBLE SEAM. One push of detached work, carried whole to
    * `AsyncBubbleRegistry.applyDelta`, which is the ONLY thing allowed to route
-   * it (invariant I2: strictly by `bubble_id`).
+   * it (invariant I2: strictly by `message_id`).
    *
    * The delta is forwarded UNPROJECTED and unsplit, for two reasons. First,
    * `applyDelta` validates the whole push before it mutates anything, so
@@ -581,20 +581,21 @@ export type AdapterEffect =
    */
   | { kind: "async-bubble-delta"; value: AsyncBubbleDelta }
   /**
-   * Detached work ANCHORED IN THE FEED at the point it was launched
-   * (`ConversationItem.async_bubble`), lifted onto the same seam as a push
-   * whose `opened` list is those bubbles.
+   * Detached work arriving on the ORDINARY conversation channel
+   * (`Message.detached_work`), lifted onto the same seam as a push whose
+   * `opened` list is those messages.
    *
-   * It is deliberately NOT a store feed item. The bubble's identity is its id
-   * and everything it produces afterwards is addressed to that id, so it lives
-   * in the registry with every other bubble — one home, one router. A second
-   * copy pinned in the item list would be a second place an update could have
-   * been meant to land, which is how id-only routing stops being id-only.
+   * It is deliberately NOT a store feed item. The work's identity is its
+   * message's uuid and everything it produces afterwards is addressed to that
+   * uuid, so it lives in the registry with every other piece of detached work —
+   * one home, one router. A second copy pinned in the item list would be a
+   * second place an update could have been meant to land, which is how id-only
+   * routing stops being id-only.
    */
   | { kind: "async-bubble-anchored"; value: AsyncBubbleDelta }
   /**
-   * The reconnect snapshot's complete set of still-open bubbles
-   * (`StateSnapshot.async_bubbles`), for `AsyncBubbleRegistry.adoptSnapshot`.
+   * The reconnect snapshot's complete set of still-open detached work
+   * (`StateSnapshot.detached_work`), for `AsyncBubbleRegistry.adoptSnapshot`.
    *
    * Separate from the push seam because the semantics differ in kind: a push
    * ADDS and UPDATES, a snapshot REPLACES. Folding them together would make
@@ -700,7 +701,7 @@ export class StateAdapter {
           // the daemon stating that no detached work is open, which is what
           // retires bubbles a reconnecting client still holds. Skipping it
           // when empty would make a reaped bubble immortal.
-          this.asyncBubblesSnapshotEffect(s.asyncBubbles),
+          this.asyncBubblesSnapshotEffect(s.detachedWork),
           ...s.queues.map((q) => this.queueEffect(q)),
           ...s.progress.map((p) => this.progressEffect(p)),
           // SEEDED ONLY WHEN THE SNAPSHOT CARRIES IT. A daemon that does not
@@ -734,7 +735,7 @@ export class StateAdapter {
         return [this.sessionEffect(frame.frame.value)];
       case "conversationDelta":
         return this.conversationEffects(frame.frame.value);
-      case "asyncBubbleDelta":
+      case "detachedWorkDelta":
         return [this.asyncBubbleDeltaEffect(frame.frame.value)];
       case "typingDelta":
         return this.typingEffects(frame.frame.value);
@@ -744,7 +745,7 @@ export class StateAdapter {
             kind: "typing-cut",
             value: {
               workspace: frame.frame.value.workspace,
-              bubbleId: frame.frame.value.bubbleId,
+              parentMessageId: frame.frame.value.parentMessageId,
               fence: frame.frame.value.fence,
             },
           },
@@ -1010,7 +1011,7 @@ export class StateAdapter {
       messageId: td.uuid,
       blockIndex: td.blockIndex,
       delta: td.delta,
-      bubbleId: td.bubbleId,
+      parentMessageId: td.parentMessageId,
     };
     const value = td.kind === "input_json"
       ? { ...base, kind: td.kind, ...(td.toolUseId === undefined ? {} : { toolUseId: td.toolUseId }) }
@@ -1058,7 +1059,7 @@ export class StateAdapter {
    * `ConversationDelta` and the paged `ConversationPage` alike — because the
    * three rulings it makes are properties of an ITEM, not of the frame that
    * carried it: an UNSPECIFIED source is malformed wherever it arrives, a MERGE
-   * item is not this feed's wherever it arrives, and an async-bubble anchor
+   * item is not this feed's wherever it arrives, and a detached-work message
    * belongs to the registry wherever it arrives. Two copies of that would be
    * two places a paged item could start rendering differently from a pushed
    * one, which is exactly what the daemon's single-curator design exists to
@@ -1090,8 +1091,8 @@ export class StateAdapter {
         ignored.push(this.ignore("conversation-item-source:merge"));
         continue;
       }
-      if (frame.asyncBubble !== undefined) {
-        anchored.push(frame.asyncBubble);
+      if (frame.detachedWork !== undefined) {
+        anchored.push(frame.detachedWork);
         continue;
       }
       const built = itemsFromFrame(frame);
@@ -1480,10 +1481,10 @@ export function asyncAgentItems(
     };
     if (emission.thinkingOrigin !== undefined) frame.thinkingOrigin = emission.thinkingOrigin;
     // A detached agent dispatches detached agents, so its own tool calls carry
-    // verdicts too — carried through so a nested bubble attaches to the card
-    // inside the bubble that spawned it.
-    if (emission.spawnedBubbleId !== undefined && emission.spawnedBubbleId !== "") {
-      frame.spawnedBubbleId = emission.spawnedBubbleId;
+    // verdicts too — carried through so nested work attaches to the card
+    // inside the work that spawned it.
+    if (emission.spawnedMessageId !== undefined && emission.spawnedMessageId !== "") {
+      frame.spawnedMessageId = emission.spawnedMessageId;
     }
     const built = itemsFromFrame(frame);
     items.push(...built.items);
@@ -1507,7 +1508,7 @@ function itemsFromFrame(frame: MessageFrame): { items: ConversationItem[]; ignor
         // The card's CLASSIFICATION VERDICT rides the emission envelope, one
         // level above the verbatim ToolUseBlock, so it is passed in rather
         // than read off the payload.
-        items: [toolItemFromUse(frame.payload, frame.uuid, tsFromMs(frame.tsMs), frame.spawnedBubbleId)],
+        items: [toolItemFromUse(frame.payload, frame.uuid, tsFromMs(frame.tsMs), frame.spawnedMessageId)],
         ignores: [],
       };
     case "toolResult":
@@ -1533,15 +1534,15 @@ function itemsFromFrame(frame: MessageFrame): { items: ConversationItem[]; ignor
       // The command enum is the ENTIRE payload — there is no text field on
       // the wire message — so this is everything there is to read.
       return { items: [sessionCommandItem(frame.payload, frame.uuid)], ignores: [] };
-    case "asyncBubble":
+    case "detachedWork":
       // UNREACHABLE by construction: `conversationEffects` lifts every frame
-      // carrying a decoded bubble onto the async seam before it gets here, and
-      // the decoder sets this arm and that field together. Reaching this line
-      // means the two came apart, so it fails loudly instead of returning an
-      // empty item list that would make a live detached process invisible.
+      // carrying decoded detached work onto the async seam before it gets here,
+      // and the decoder sets this arm and that field together. Reaching this
+      // line means the two came apart, so it fails loudly instead of returning
+      // an empty item list that would make a live detached process invisible.
       throw new Error(
-        `state-adapter: asyncBubble item ${frame.uuid} reached the feed decomposition ` +
-          `without a decoded bubble — the arm and \`asyncBubble\` must be set together`,
+        `state-adapter: detachedWork message ${frame.uuid} reached the feed decomposition ` +
+          `without decoded work — the arm and \`detachedWork\` must be set together`,
       );
     default: {
       const never: never = arm;
@@ -1719,7 +1720,7 @@ function userTurn(
 }
 
 /** ToolUseBlock {id, name, input, caller} → the tool CALL item (no result). */
-function toolItemFromUse(use: Obj, messageUuid: string, ts: string, spawnedBubbleId?: string): ToolItem {
+function toolItemFromUse(use: Obj, messageUuid: string, ts: string, spawnedMessageId?: string): ToolItem {
   const item: ToolItem = {
     kind: "tool",
     toolUseId: pstr(use, "id"),
@@ -1732,8 +1733,8 @@ function toolItemFromUse(use: Obj, messageUuid: string, ts: string, spawnedBubbl
   const input = pobj(use, "input");
   if (input !== undefined) item.input = input;
   // Stamped only when the daemon set it. Empty means "detached nothing", which
-  // is the ABSENCE of a bubble rather than a bubble named "".
-  if (spawnedBubbleId !== undefined && spawnedBubbleId !== "") item.spawnedBubbleId = spawnedBubbleId;
+  // is the ABSENCE of a detached-work message rather than one named "".
+  if (spawnedMessageId !== undefined && spawnedMessageId !== "") item.spawnedMessageId = spawnedMessageId;
   return item;
 }
 

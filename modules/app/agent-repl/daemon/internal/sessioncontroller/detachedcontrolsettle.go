@@ -1,10 +1,10 @@
-// asynccontrolsettle.go holds what EVERY control-plane bubble settlement
+// asynccontrolsettle.go holds what EVERY control-plane work settlement
 // shares.
 //
 // A control-plane settlement is one a COMMAND ordered rather than one the
 // event stream reported: the interrupt's window close and the detached-agent
 // cancel are both of them, and each has exactly one thing of its own — which
-// bubbles it settles and what it says when a settle is refused. Everything
+// work it settles and what it says when a settle is refused. Everything
 // else (the frame, the fence, the through_seq rule, the fault channel, the
 // gap classification) is one decision, so it is made once, here, rather than
 // twice in two files that would drift the moment either changed.
@@ -21,10 +21,10 @@ import (
 //
 // `degraded` writes the caller's OWN sentence for that leftover, because what
 // a failed settle leaves on screen differs by route — a window that closed
-// with a live-looking bubble under it is not the same regression as an agent
+// with a live-looking work under it is not the same regression as an agent
 // the daemon has already stopped still rendering as working — and a shared
 // sentence could only describe one of them.
-func (c *consumer) controlSettlePush(ups []*frontendv1.AsyncBubbleUpdate, err error, degraded func(residual error)) asyncPush {
+func (c *consumer) controlSettlePush(ups []*frontendv1.DetachedWorkUpdate, err error, degraded func(residual error)) asyncPush {
 	var push asyncPush
 	gaps, residual := splitAsyncGaps(err)
 	push.Faults = append(push.Faults, gaps...)
@@ -57,8 +57,8 @@ func (c *consumer) publishControlSettle(push asyncPush, throughSeq uint64, label
 		return
 	}
 	c.logf("session-controller: %s settle push session=%s ws=%q through_seq=%d updates=%s",
-		label, c.sessionID, c.workspace, throughSeq, updatedBubbleIDs(push.Updates))
-	c.push.PushAsyncBubbleDelta(&frontendv1.AsyncBubbleDelta{
+		label, c.sessionID, c.workspace, throughSeq, updatedWorkIDs(push.Updates))
+	c.push.PushDetachedWorkDelta(&frontendv1.DetachedWorkDelta{
 		Workspace:  c.workspace,
 		Updates:    push.Updates,
 		ThroughSeq: throughSeq,

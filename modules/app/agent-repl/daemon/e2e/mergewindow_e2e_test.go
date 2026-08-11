@@ -1,13 +1,13 @@
 // The MERGE WINDOW end to end over the REAL processes: the merge skill's
 // invocation is put into the real shim-store, fanned out to the real TS shim,
 // forwarded to the daemon, and must reach a connected frontend as a Merge
-// BUBBLE — with the session's own subsequent utterances folded inside it rather
+// DETACHED WORK — with the session's own subsequent utterances folded inside it rather
 // than in the top-level feed, and settled by the user's next prompt.
 //
 // WHY THE RECORDS ARE INJECTED RATHER THAN PROVOKED. Same reason as
 // skillbody_e2e_test.go and asyncspecharness_test.go, whose helpers this file
 // reuses READ-ONLY (liveSession, storeProducer.write, drainUntilItem,
-// gateOnAnchor): the shim-claude-sidecar is the sole producer of file-plane
+// gateOnOpenedWork): the shim-claude-sidecar is the sole producer of file-plane
 // records and it produces them by tailing a real vendor transcript, which the
 // `--fake` harness has none of. Everything downstream — store ingest, fan-out,
 // the shim's forward, the daemon's classification, folding and settlement, the
@@ -64,15 +64,15 @@ func feedProse(items []*frontendv1.Message) []string {
 }
 
 // mergeProse returns every assistant utterance the merge window delivered for
-// bubbleID: the fold the OPEN carried, plus every MERGE-ARM update appended to
+// messageID: the fold the OPEN carried, plus every MERGE-ARM update appended to
 // it since.
 //
-// AMENDED: this used to read the last whole-bubble re-delivery, which was how a
+// AMENDED: this used to read the last whole-work re-delivery, which was how a
 // merge window advanced before the contract had an arm for it. The update
-// oneof's own rule — "Never a re-send of the whole bubble" — retires that route,
+// oneof's own rule — "Never a re-send of the whole work" — retires that route,
 // so the fold a client holds is now the open plus its appends, and that is what
 // this reconstructs.
-func mergeProse(seen asyncTraffic, bubbleID string) []string {
+func mergeProse(seen asyncTraffic, messageID string) []string {
 	var out []string
 	appendEmissions := func(ems []*frontendv1.AgentEmission) {
 		for _, em := range ems {
@@ -83,19 +83,19 @@ func mergeProse(seen asyncTraffic, bubbleID string) []string {
 			}
 		}
 	}
-	for _, b := range seen.bubbles() {
-		if b.GetId() == bubbleID && b.GetMerge() != nil {
-			appendEmissions(b.GetMerge().GetEmissions())
+	for _, b := range seen.work() {
+		if b.GetUuid() == messageID && b.GetDetachedWork().GetMerge() != nil {
+			appendEmissions(b.GetDetachedWork().GetMerge().GetEmissions())
 		}
 	}
-	for _, u := range seen.updatesFor(bubbleID) {
+	for _, u := range seen.updatesFor(messageID) {
 		appendEmissions(u.GetMerge().GetEmissions())
 	}
 	return out
 }
 
 // TestE2EAMergeInvocationOpensAWindowThatFoldsAndSettles drives the whole
-// window: the invocation opens the bubble, the session's next utterance folds
+// window: the invocation opens the work, the session's next utterance folds
 // into it instead of the feed, and the user's own next prompt settles it.
 func TestE2EAMergeInvocationOpensAWindowThatFoldsAndSettles(t *testing.T) {
 	// Arrange
@@ -124,38 +124,38 @@ func TestE2EAMergeInvocationOpensAWindowThatFoldsAndSettles(t *testing.T) {
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 
-	bubbleID := gateOnAnchor(t, seen, toolUseID)
-	opened := openedBubble(seen.bubbles(), bubbleID)
+	messageID := gateOnOpenedWork(t, seen, toolUseID)
+	opened := openedDetachedWork(seen.work(), messageID)
 	if opened == nil {
-		t.Fatalf("the async plane never delivered bubble %q at all", bubbleID)
+		t.Fatalf("the async plane never delivered work %q at all", messageID)
 	}
-	if opened.GetMerge() == nil {
-		t.Fatalf("the merge invocation opened a bubble of arm %T, want the merge arm: a merge run is a conversation, not detached work of another kind", opened.GetKind())
+	if opened.GetDetachedWork().GetMerge() == nil {
+		t.Fatalf("the merge invocation opened a work of arm %T, want the merge arm: a merge run is a conversation, not detached work of another kind", opened.GetDetachedWork().GetKind())
 	}
 
 	for _, text := range feedProse(seen.items) {
 		if text == inside {
-			t.Errorf("the merge run's utterance reached the TOP-LEVEL FEED: inside the window it belongs to the bubble, and the feed is the user's own conversation")
+			t.Errorf("the merge run's utterance reached the TOP-LEVEL FEED: inside the window it belongs to the work, and the feed is the user's own conversation")
 		}
 	}
 	var folded bool
-	for _, text := range mergeProse(seen, bubbleID) {
+	for _, text := range mergeProse(seen, messageID) {
 		if text == inside {
 			folded = true
 		}
 	}
 	if !folded {
-		t.Errorf("bubble %q folded %v, want the merge run's own utterance %q: the window claims every emission until the user takes the session back",
-			bubbleID, mergeProse(seen, bubbleID), inside)
+		t.Errorf("work %q folded %v, want the merge run's own utterance %q: the window claims every emission until the user takes the session back",
+			messageID, mergeProse(seen, messageID), inside)
 	}
 
-	settled := lastSettledLiveness(seen, bubbleID)
+	settled := lastSettledLiveness(seen, messageID)
 	if settled == nil {
-		t.Fatalf("bubble %q never settled: the user's own next prompt is the boundary async-bubble.proto names for a merge run (saw %d updates for it)",
-			bubbleID, len(seen.updatesFor(bubbleID)))
+		t.Fatalf("work %q never settled: the user's own next prompt is the boundary async-work.proto names for a merge run (saw %d updates for it)",
+			messageID, len(seen.updatesFor(messageID)))
 	}
 	if settled.GetDone() == nil {
-		t.Errorf("bubble %q settled on outcome %T, want done: the user typing again is the window ending, not the merge failing", bubbleID, settled.GetOutcome())
+		t.Errorf("work %q settled on outcome %T, want done: the user typing again is the window ending, not the merge failing", messageID, settled.GetOutcome())
 	}
 }
 
@@ -192,9 +192,9 @@ func TestE2EAMergeWindowReturnsTheFeedToTheUserAfterItSettles(t *testing.T) {
 		feedProse(seen.items))
 }
 
-// skillProse returns every assistant utterance a SKILL bubble was delivered:
+// skillProse returns every assistant utterance a SKILL work was delivered:
 // the fold its open carried, plus every skill-arm emissions update since.
-func skillProse(seen asyncTraffic, bubbleID string) []string {
+func skillProse(seen asyncTraffic, messageID string) []string {
 	var out []string
 	appendEmissions := func(ems []*frontendv1.AgentEmission) {
 		for _, em := range ems {
@@ -205,30 +205,30 @@ func skillProse(seen asyncTraffic, bubbleID string) []string {
 			}
 		}
 	}
-	for _, b := range seen.bubbles() {
-		if b.GetId() == bubbleID && b.GetSkill() != nil {
-			appendEmissions(b.GetSkill().GetEmissions())
+	for _, b := range seen.work() {
+		if b.GetUuid() == messageID && b.GetDetachedWork().GetSkill() != nil {
+			appendEmissions(b.GetDetachedWork().GetSkill().GetEmissions())
 		}
 	}
-	for _, u := range seen.updatesFor(bubbleID) {
+	for _, u := range seen.updatesFor(messageID) {
 		appendEmissions(u.GetSkill().GetEmissions().GetEmissions())
 	}
 	return out
 }
 
-// TestE2EANonMergeVerbOfTheSameSkillOpensASkillBubbleNotAMergeOne is the
+// TestE2EANonMergeVerbOfTheSameSkillOpensASkillDetachedWorkNotAMergeOne is the
 // near-miss the classifier exists for: /create-or-update-workspace has seven
 // verbs and only `merge` is the merge run. The other six are skill invocations
-// like any other, and a MERGE bubble opened by one of them would render the
+// like any other, and a MERGE work opened by one of them would render the
 // wrong thing entirely.
 //
-// AMENDED: this asserted that the `create` verb opened no bubble at all and that
+// AMENDED: this asserted that the `create` verb opened no work at all and that
 // its reply reached the top-level feed. Both were true while the merge skill was
-// the only bubble-forming one. async-bubble.proto now says "Skill invocations
-// are bubble-forming … `merge` is the one skill with an arm of its own; every
-// other skill arrives as `skill`", so the reply belongs to the skill bubble and
-// what must not happen is a MERGE bubble.
-func TestE2EANonMergeVerbOfTheSameSkillOpensASkillBubbleNotAMergeOne(t *testing.T) {
+// the only work-forming one. async-work.proto now says "Skill invocations
+// are work-forming … `merge` is the one skill with an arm of its own; every
+// other skill arrives as `skill`", so the reply belongs to the skill work and
+// what must not happen is a MERGE work.
+func TestE2EANonMergeVerbOfTheSameSkillOpensASkillDetachedWorkNotAMergeOne(t *testing.T) {
 	// Arrange
 	h := newUDSHarness(t)
 	cwd := t.TempDir()
@@ -248,21 +248,21 @@ func TestE2EANonMergeVerbOfTheSameSkillOpensASkillBubbleNotAMergeOne(t *testing.
 	seen := drainUntilItem(t, conn, cwd, "the barrier prompt's user item", func(it *frontendv1.Message) bool {
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
-	for _, b := range seen.bubbles() {
-		if b.GetMerge() != nil {
-			t.Errorf("the `create` verb opened merge bubble %q: every verb but `merge` is an ordinary skill invocation", b.GetId())
+	for _, b := range seen.work() {
+		if b.GetDetachedWork().GetMerge() != nil {
+			t.Errorf("the `create` verb opened merge work %q: every verb but `merge` is an ordinary skill invocation", b.GetUuid())
 		}
 	}
-	bubbleID := gateOnAnchor(t, seen, toolUseID)
-	opened := openedBubble(seen.bubbles(), bubbleID)
-	if opened.GetSkill() == nil {
-		t.Fatalf("the `create` verb opened a bubble of arm %T, want the skill arm every non-merge skill arrives on", opened.GetKind())
+	messageID := gateOnOpenedWork(t, seen, toolUseID)
+	opened := openedDetachedWork(seen.work(), messageID)
+	if opened.GetDetachedWork().GetSkill() == nil {
+		t.Fatalf("the `create` verb opened a work of arm %T, want the skill arm every non-merge skill arrives on", opened.GetDetachedWork().GetKind())
 	}
-	for _, text := range skillProse(seen, bubbleID) {
+	for _, text := range skillProse(seen, messageID) {
 		if text == after {
 			return
 		}
 	}
-	t.Fatalf("the reply following the skill invocation never reached its bubble (bubble carried %v, feed carried %v)",
-		skillProse(seen, bubbleID), feedProse(seen.items))
+	t.Fatalf("the reply following the skill invocation never reached its work (work carried %v, feed carried %v)",
+		skillProse(seen, messageID), feedProse(seen.items))
 }

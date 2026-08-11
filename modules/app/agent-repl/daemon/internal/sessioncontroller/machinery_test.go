@@ -162,7 +162,7 @@ func TestAMachineryUserLineIsWithheldFromTheFeed(t *testing.T) {
 	// Act: the CLI's own /compact bookkeeping arrives as a "user" record.
 	h.controller().consumer.Consume(transcriptUserEvent(t, 12, "u-machinery", compactMachinery))
 
-	// Assert: the user never typed it, so no bubble is drawn for it.
+	// Assert: the user never typed it, so no work is drawn for it.
 	if turns := h.userTurns(); len(turns) != 0 {
 		t.Fatalf("pushed %d user turn(s) for a machinery record, want none", len(turns))
 	}
@@ -257,7 +257,7 @@ func TestAMachineryLineClaimsNoPromptReceipt(t *testing.T) {
 
 	// Assert: the receipt is still outstanding for the line that really answers
 	// it — a machinery record retiring it would leave the real prompt's own line
-	// unattributed and the bubble duplicated.
+	// unattributed and the work duplicated.
 	if got := len(h.controller().consumer.snapshotEchoes()); got != 1 {
 		t.Fatalf("outstanding receipts = %d, want the real submit's still held", got)
 	}

@@ -5466,9 +5466,9 @@ type DetachedAgentsCancelled struct {
 	// TaskEnded carry — so a consumer can join this list against the task
 	// lifecycle it already tracks.
 	//
-	// THE IDS, NOT A COUNT. The daemon settles exactly these tasks' async
-	// bubbles the moment the stop is acked; a bare count would leave it
-	// guessing which bubbles it had just been told about.
+	// THE IDS, NOT A COUNT. The daemon settles exactly these tasks' detached-work
+	// messages the moment the stop is acked; a bare count would leave it guessing
+	// which work it had just been told about.
 	TaskIds       []string `protobuf:"bytes,1,rep,name=task_ids,json=taskIds,proto3" json:"task_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

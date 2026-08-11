@@ -149,8 +149,8 @@ func TestRecordingTheSameRequestTwiceOverwritesRatherThanFailing(t *testing.T) {
 }
 
 func TestRecordingAReceiptWithNoRequestIDIsRefused(t *testing.T) {
-	// Arrange — the request id is the identity the bubble is keyed on, so a
-	// receipt without one names a bubble nothing could ever claim.
+	// Arrange — the request id is the identity the work is keyed on, so a
+	// receipt without one names a work nothing could ever claim.
 	receipts, _ := openReceipts(t)
 
 	// Act.

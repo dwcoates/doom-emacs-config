@@ -1,5 +1,5 @@
 // The WINDOW APPARATUS, driven through the store directly and through the real
-// consumer: a Skill invocation opens a bubble — Merge for the merge run, Skill
+// consumer: a Skill invocation opens a work — Merge for the merge run, Skill
 // for every other skill — every emission of the session folds into the innermost
 // open one until the user takes the session back, and the two closing edges —
 // the user's own next prompt, and an interrupt — settle every open window.
@@ -87,8 +87,8 @@ func mergeEmissions(text string) []*frontendv1.AgentEmission {
 	}}}
 }
 
-// openWindow opens a merge window on a bare store and returns the bubble.
-func openWindow(t *testing.T, s *asyncBubbleStore) *frontendv1.AsyncBubble {
+// openWindow opens a merge window on a bare store and returns the work.
+func openWindow(t *testing.T, s *detachedWorkStore) *frontendv1.Message {
 	t.Helper()
 	b, fault, err := s.openMergeWindow(mergeOriginCall, "/create-or-update-workspace merge", 10)
 	if err != nil {
@@ -98,21 +98,21 @@ func openWindow(t *testing.T, s *asyncBubbleStore) *frontendv1.AsyncBubble {
 		t.Fatalf("openMergeWindow faulted on the first invocation: %s", fault.Detail)
 	}
 	if b == nil {
-		t.Fatal("the first invocation must open a bubble")
+		t.Fatal("the first invocation must open a work")
 	}
 	return b
 }
 
-// mergeBubbles returns every merge-kind bubble the frontend was OPENED with.
-// A merge bubble is opened once and advances by its update arm thereafter, so
+// mergeDetachedWork returns every merge-kind work the frontend was OPENED with.
+// A merge work is opened once and advances by its update arm thereafter, so
 // this list has one entry per merge run.
-func (h *queueHarness) mergeBubbles() []*frontendv1.AsyncBubble {
+func (h *queueHarness) mergeDetachedWork() []*frontendv1.Message {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
-	var out []*frontendv1.AsyncBubble
-	for _, d := range h.push.bubbles {
+	var out []*frontendv1.Message
+	for _, d := range h.push.work {
 		for _, b := range d.GetOpened() {
-			if b.GetMerge() != nil {
+			if b.GetDetachedWork().GetMerge() != nil {
 				out = append(out, b)
 			}
 		}
@@ -121,16 +121,16 @@ func (h *queueHarness) mergeBubbles() []*frontendv1.AsyncBubble {
 }
 
 // mergeAppends returns the assistant prose every MERGE-ARM update addressed to
-// bubbleID carried, in order. It reads the wire arm rather than the store's own
-// bubble object, which is the only way to tell an update that shipped from a
+// messageID carried, in order. It reads the wire arm rather than the store's own
+// work object, which is the only way to tell an update that shipped from a
 // fold that merely happened.
-func (h *queueHarness) mergeAppends(bubbleID string) []string {
+func (h *queueHarness) mergeAppends(messageID string) []string {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
 	var out []string
-	for _, d := range h.push.bubbles {
+	for _, d := range h.push.work {
 		for _, u := range d.GetUpdates() {
-			if u.GetBubbleId() != bubbleID || u.GetMerge() == nil {
+			if u.GetMessageId() != messageID || u.GetMerge() == nil {
 				continue
 			}
 			for _, em := range u.GetMerge().GetEmissions() {
@@ -145,14 +145,14 @@ func (h *queueHarness) mergeAppends(bubbleID string) []string {
 	return out
 }
 
-// mergeLiveness returns the liveness updates addressed to bubbleID, in order.
-func (h *queueHarness) mergeLiveness(bubbleID string) []*frontendv1.AsyncLiveness {
+// mergeLiveness returns the liveness updates addressed to messageID, in order.
+func (h *queueHarness) mergeLiveness(messageID string) []*frontendv1.DetachedWorkLiveness {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
-	var out []*frontendv1.AsyncLiveness
-	for _, d := range h.push.bubbles {
+	var out []*frontendv1.DetachedWorkLiveness
+	for _, d := range h.push.work {
 		for _, u := range d.GetUpdates() {
-			if u.GetBubbleId() == bubbleID && u.GetLiveness() != nil {
+			if u.GetMessageId() == messageID && u.GetLiveness() != nil {
 				out = append(out, u.GetLiveness().GetLiveness())
 			}
 		}
@@ -179,62 +179,62 @@ func (h *queueHarness) feedTexts() []string {
 
 // --- the opening edge -------------------------------------------------------
 
-func TestOpenMergeWindowGivesTheBubbleTheMergeArm(t *testing.T) {
+func TestOpenMergeWindowGivesTheDetachedWorkTheMergeArm(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
 	b := openWindow(t, s)
 
 	// Assert
-	if b.GetMerge() == nil {
-		t.Fatalf("a merge run opened on arm %T, want the merge arm the contract gives it", b.GetKind())
+	if b.GetDetachedWork().GetMerge() == nil {
+		t.Fatalf("a merge run opened on arm %T, want the merge arm the contract gives it", b.GetDetachedWork().GetKind())
 	}
 }
 
-func TestOpenMergeWindowFilesTheBubbleUnderItsSpawningCall(t *testing.T) {
+func TestOpenMergeWindowFilesTheDetachedWorkUnderItsSpawningCall(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
 	b := openWindow(t, s)
 
-	// Assert: this lookup IS what StampSpawnedBubbleIDs stamps on the card.
-	if got := s.spawnedBubbleID(mergeOriginCall); got != b.GetId() {
-		t.Fatalf("spawnedBubbleID(%q) = %q, want the merge bubble %q: the card's spawned_bubble_id is this one resolution",
-			mergeOriginCall, got, b.GetId())
+	// Assert: this lookup IS what StampSpawnedMessageIDs stamps on the card.
+	if got := s.spawnedMessageID(mergeOriginCall); got != b.GetUuid() {
+		t.Fatalf("spawnedMessageID(%q) = %q, want the merge work %q: the card's spawned_message_id is this one resolution",
+			mergeOriginCall, got, b.GetUuid())
 	}
 }
 
-func TestOpenMergeWindowAnchorsTheBubbleOnItsSpawningCall(t *testing.T) {
+func TestOpenMergeWindowAnchorsTheDetachedWorkOnItsSpawningCall(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
 	b := openWindow(t, s)
 
 	// Assert
-	if got := b.GetOriginToolUseId(); got != mergeOriginCall {
-		t.Fatalf("origin_tool_use_id = %q, want the Skill call %q the bubble hangs under", got, mergeOriginCall)
+	if got := b.GetDetachedWork().GetOriginToolUseId(); got != mergeOriginCall {
+		t.Fatalf("origin_tool_use_id = %q, want the Skill call %q the work hangs under", got, mergeOriginCall)
 	}
 }
 
 func TestOpenMergeWindowOpensLive(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
 	b := openWindow(t, s)
 
 	// Assert
-	if b.GetLiveness().GetLive() == nil {
-		t.Fatalf("a merge window opened with liveness %v, want the live arm", b.GetLiveness().GetState())
+	if b.GetDetachedWork().GetLiveness().GetLive() == nil {
+		t.Fatalf("a merge window opened with liveness %v, want the live arm", b.GetDetachedWork().GetLiveness().GetState())
 	}
 }
 
 func TestOpenMergeWindowFaultsOnASecondInvocationWhileOneIsOpen(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	first := openWindow(t, s)
 
 	// Act
@@ -248,16 +248,16 @@ func TestOpenMergeWindowFaultsOnASecondInvocationWhileOneIsOpen(t *testing.T) {
 		t.Fatal("a second merge invocation while one is open has no representable membership rule and must be a classified fault")
 	}
 	if b != nil {
-		t.Fatalf("the second invocation opened bubble %q; the first window must stand", b.GetId())
+		t.Fatalf("the second invocation opened work %q; the first window must stand", b.GetUuid())
 	}
-	if got := s.spawnedBubbleID(mergeOriginCall); got != first.GetId() {
-		t.Errorf("the open window moved to %q, want the first bubble %q left untouched", got, first.GetId())
+	if got := s.spawnedMessageID(mergeOriginCall); got != first.GetUuid() {
+		t.Errorf("the open window moved to %q, want the first work %q left untouched", got, first.GetUuid())
 	}
 }
 
 func TestOpenMergeWindowReadoptsItsOwnInvocationOnReplay(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	first := openWindow(t, s)
 
 	// Act — the same classifying event consumed a second time.
@@ -271,42 +271,42 @@ func TestOpenMergeWindowReadoptsItsOwnInvocationOnReplay(t *testing.T) {
 		t.Fatalf("a replay of one invocation is not a second one: %s", fault.Detail)
 	}
 	if b != nil {
-		t.Fatalf("a replay opened a twin bubble %q", b.GetId())
+		t.Fatalf("a replay opened a twin work %q", b.GetUuid())
 	}
 	if got := len(s.snapshot()); got != 1 {
-		t.Errorf("the store holds %d bubbles after a replay, want the one merge bubble %q", got, first.GetId())
+		t.Errorf("the store holds %d work after a replay, want the one merge work %q", got, first.GetUuid())
 	}
 }
 
 // --- the fold ---------------------------------------------------------------
 
-func TestFoldWindowEmissionsFoldsIntoTheOpenBubble(t *testing.T) {
+func TestFoldWindowEmissionsFoldsIntoTheOpenDetachedWork(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	b := openWindow(t, s)
 
 	// Act
-	if _, err := s.foldWindowEmissions(b.GetId(), mergeEmissions("working on it"), 11); err != nil {
+	if _, err := s.foldWindowEmissions(b.GetUuid(), mergeEmissions("working on it"), 11); err != nil {
 		t.Fatal(err)
 	}
 
 	// Assert
-	if got := len(b.GetMerge().GetEmissions()); got != 1 {
-		t.Fatalf("the merge bubble holds %d emissions, want the one that folded", got)
+	if got := len(b.GetDetachedWork().GetMerge().GetEmissions()); got != 1 {
+		t.Fatalf("the merge work holds %d emissions, want the one that folded", got)
 	}
 }
 
-// AMENDED: this test pinned whole-bubble re-delivery, the interim shape the
+// AMENDED: this test pinned whole-work re-delivery, the interim shape the
 // window advanced by before the contract had an arm for it. The update oneof's
-// own rule — "Never a re-send of the whole bubble" — is what retires that
+// own rule — "Never a re-send of the whole work" — is what retires that
 // mechanism, and `merge = 15` is the arm it names instead.
 func TestFoldWindowEmissionsDeliversAMergeWindowOnTheMergeUpdateArm(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	b := openWindow(t, s)
 
 	// Act
-	got, err := s.foldWindowEmissions(b.GetId(), mergeEmissions("working on it"), 11)
+	got, err := s.foldWindowEmissions(b.GetUuid(), mergeEmissions("working on it"), 11)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,8 +315,8 @@ func TestFoldWindowEmissionsDeliversAMergeWindowOnTheMergeUpdateArm(t *testing.T
 	if got.GetMerge() == nil {
 		t.Fatalf("the fold delivered on arm %T, want the merge arm", got.GetUpdate())
 	}
-	if got.GetBubbleId() != b.GetId() {
-		t.Fatalf("the update is addressed to %q, want the open window %q", got.GetBubbleId(), b.GetId())
+	if got.GetMessageId() != b.GetUuid() {
+		t.Fatalf("the update is addressed to %q, want the open window %q", got.GetMessageId(), b.GetUuid())
 	}
 }
 
@@ -326,32 +326,32 @@ func TestFoldWindowEmissionsDeliversAMergeWindowOnTheMergeUpdateArm(t *testing.T
 // longer holds is therefore a stale snapshot rather than "nothing is open", and
 // it is refused loudly instead of silently swallowing the session's
 // conversation.
-func TestFoldWindowEmissionsRefusesABubbleNoOpenWindowNames(t *testing.T) {
+func TestFoldWindowEmissionsRefusesADetachedWorkNoOpenWindowNames(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
-	got, err := s.foldWindowEmissions("bubble_no_window_names", mergeEmissions("stray"), 11)
+	got, err := s.foldWindowEmissions("work_no_window_names", mergeEmissions("stray"), 11)
 
 	// Assert
 	if err == nil {
-		t.Fatalf("a fold aimed at a bubble no open window names was applied, want a refusal; got update %v", got)
+		t.Fatalf("a fold aimed at a work no open window names was applied, want a refusal; got update %v", got)
 	}
 	if got != nil {
-		t.Fatalf("the refused fold still produced an update addressed to %q", got.GetBubbleId())
+		t.Fatalf("the refused fold still produced an update addressed to %q", got.GetMessageId())
 	}
 }
 
-func TestFoldWindowEmissionsParentsANestedDispatchOnTheMergeBubble(t *testing.T) {
+func TestFoldWindowEmissionsParentsANestedDispatchOnTheMergeDetachedWork(t *testing.T) {
 	// Arrange: the merge's own conversation dispatches a subagent.
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	merge := openWindow(t, s)
 	nested := []*frontendv1.AgentEmission{{Emission: &frontendv1.AgentEmission_Response{
 		Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Content: []*datav1.ContentBlock{
 			{Block: &datav1.ContentBlock_ToolUse{ToolUse: &datav1.ToolUseBlock{Id: "tu_nested", Name: "Task"}}},
 		}}},
 	}}}
-	if _, err := s.foldWindowEmissions(merge.GetId(), nested, 11); err != nil {
+	if _, err := s.foldWindowEmissions(merge.GetUuid(), nested, 11); err != nil {
 		t.Fatal(err)
 	}
 
@@ -363,18 +363,18 @@ func TestFoldWindowEmissionsParentsANestedDispatchOnTheMergeBubble(t *testing.T)
 
 	// Assert
 	if len(push.Opened) != 1 {
-		t.Fatalf("the nested dispatch opened %d bubbles, want one", len(push.Opened))
+		t.Fatalf("the nested dispatch opened %d work, want one", len(push.Opened))
 	}
-	if got := push.Opened[0].GetParentBubbleId(); got != merge.GetId() {
-		t.Fatalf("the nested bubble's parent = %q, want the merge bubble %q so the tree reads truthfully", got, merge.GetId())
+	if got := push.Opened[0].GetLineage().GetParentMessageId(); got != merge.GetUuid() {
+		t.Fatalf("the nested work's parent = %q, want the merge work %q so the tree reads truthfully", got, merge.GetUuid())
 	}
 }
 
-func TestSnapshotCarriesTheFoldedMergeBubble(t *testing.T) {
+func TestSnapshotCarriesTheFoldedMergeDetachedWork(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	b := openWindow(t, s)
-	if _, err := s.foldWindowEmissions(b.GetId(), mergeEmissions("working on it"), 11); err != nil {
+	if _, err := s.foldWindowEmissions(b.GetUuid(), mergeEmissions("working on it"), 11); err != nil {
 		t.Fatal(err)
 	}
 
@@ -383,39 +383,39 @@ func TestSnapshotCarriesTheFoldedMergeBubble(t *testing.T) {
 
 	// Assert
 	if len(snap) != 1 {
-		t.Fatalf("the snapshot carries %d bubbles, want the merge run's", len(snap))
+		t.Fatalf("the snapshot carries %d work, want the merge run's", len(snap))
 	}
-	if got := len(snap[0].GetMerge().GetEmissions()); got != 1 {
-		t.Fatalf("the snapshot's merge bubble carries %d emissions, want everything folded to date", got)
+	if got := len(snap[0].GetDetachedWork().GetMerge().GetEmissions()); got != 1 {
+		t.Fatalf("the snapshot's merge work carries %d emissions, want everything folded to date", got)
 	}
 }
 
 // --- the settling edges -----------------------------------------------------
 
-func TestSettleWindowsSettlesTheBubble(t *testing.T) {
+func TestSettleWindowsSettlesTheDetachedWork(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	b := openWindow(t, s)
 
 	// Act
-	ups, err := s.settleWindows(frontend.AsyncVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 12}, "user_prompt")
+	ups, err := s.settleWindows(frontend.DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 12}, "user_prompt")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Assert
 	if len(ups) != 1 || ups[0].GetLiveness().GetLiveness().GetSettled().GetDone() == nil {
-		t.Fatalf("the window settled on %v, want the done outcome", b.GetLiveness().GetState())
+		t.Fatalf("the window settled on %v, want the done outcome", b.GetDetachedWork().GetLiveness().GetState())
 	}
 }
 
 func TestSettleWindowsClosesTheWindow(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 	openWindow(t, s)
 
 	// Act
-	if _, err := s.settleWindows(frontend.AsyncVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 12}, "user_prompt"); err != nil {
+	if _, err := s.settleWindows(frontend.DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 12}, "user_prompt"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -427,10 +427,10 @@ func TestSettleWindowsClosesTheWindow(t *testing.T) {
 
 func TestSettleWindowsReportsNothingWithNoWindowOpen(t *testing.T) {
 	// Arrange
-	s := newAsyncBubbleStore("/ws", nil)
+	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
-	ups, err := s.settleWindows(frontend.AsyncVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 12}, "user_prompt")
+	ups, err := s.settleWindows(frontend.DetachedVerdict{Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, AtMs: 12}, "user_prompt")
 
 	// Assert
 	if err != nil || len(ups) != 0 {
@@ -440,7 +440,7 @@ func TestSettleWindowsReportsNothingWithNoWindowOpen(t *testing.T) {
 
 // --- through the real consumer ---------------------------------------------
 
-func TestTheMergeSkillInvocationOpensABubbleOnTheAsyncPlane(t *testing.T) {
+func TestTheMergeSkillInvocationOpensADetachedWorkOnTheAsyncPlane(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 
@@ -448,21 +448,21 @@ func TestTheMergeSkillInvocationOpensABubbleOnTheAsyncPlane(t *testing.T) {
 	h.controller().consumer.Consume(skillCallEvent(t, 10, "a-merge", mergeOriginCall, "create-or-update-workspace", "merge"))
 
 	// Assert
-	bubbles := h.mergeBubbles()
-	if len(bubbles) != 1 {
-		t.Fatalf("the merge invocation opened %d merge bubbles, want exactly one", len(bubbles))
+	work := h.mergeDetachedWork()
+	if len(work) != 1 {
+		t.Fatalf("the merge invocation opened %d merge work, want exactly one", len(work))
 	}
-	if got := bubbles[0].GetOriginToolUseId(); got != mergeOriginCall {
-		t.Errorf("the merge bubble names origin %q, want the Skill call %q", got, mergeOriginCall)
+	if got := work[0].GetDetachedWork().GetOriginToolUseId(); got != mergeOriginCall {
+		t.Errorf("the merge work names origin %q, want the Skill call %q", got, mergeOriginCall)
 	}
 }
 
-// AMENDED: this asserted that a non-merge verb opened NO bubble at all, which
-// was true while only the merge skill was bubble-forming. async-bubble.proto now
-// says every Skill invocation is bubble-forming and that "`merge` is the one
+// AMENDED: this asserted that a non-merge verb opened NO work at all, which
+// was true while only the merge skill was work-forming. async-work.proto now
+// says every Skill invocation is work-forming and that "`merge` is the one
 // skill with an arm of its own", so what the near-miss must not do is open a
-// MERGE bubble — it opens a Skill one.
-func TestANonMergeSkillInvocationOpensNoMergeBubble(t *testing.T) {
+// MERGE work — it opens a Skill one.
+func TestANonMergeSkillInvocationOpensNoMergeDetachedWork(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 
@@ -470,33 +470,33 @@ func TestANonMergeSkillInvocationOpensNoMergeBubble(t *testing.T) {
 	h.controller().consumer.Consume(skillCallEvent(t, 10, "a-create", mergeOriginCall, "create-or-update-workspace", "create feat/thing"))
 
 	// Assert
-	if got := len(h.mergeBubbles()); got != 0 {
-		t.Fatalf("a non-merge verb opened %d merge bubbles: every other verb is an ordinary skill invocation", got)
+	if got := len(h.mergeDetachedWork()); got != 0 {
+		t.Fatalf("a non-merge verb opened %d merge work: every other verb is an ordinary skill invocation", got)
 	}
 }
 
-// AMENDED: this read the fold off the bubble the store had already handed the
+// AMENDED: this read the fold off the work the store had already handed the
 // pusher by pointer, which a re-delivery mechanism made meaningful and an append
 // mechanism does not — the store's object grows whether or not anything shipped.
 // It now reads the merge-arm update, which is what the client actually applies.
-func TestTheSessionsEmissionsFoldIntoTheOpenMergeBubble(t *testing.T) {
+func TestTheSessionsEmissionsFoldIntoTheOpenMergeDetachedWork(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 	h.controller().consumer.Consume(skillCallEvent(t, 10, "a-merge", mergeOriginCall, "create-or-update-workspace", "merge"))
-	bubbleID := h.mergeBubbles()[0].GetId()
+	messageID := h.mergeDetachedWork()[0].GetUuid()
 
 	// Act
 	h.controller().consumer.Consume(assistantTextEvent(t, 11, "a-inside", "cherry-picking the workspace"))
 
 	// Assert
 	var folded bool
-	for _, text := range h.mergeAppends(bubbleID) {
+	for _, text := range h.mergeAppends(messageID) {
 		if text == "cherry-picking the workspace" {
 			folded = true
 		}
 	}
 	if !folded {
-		t.Fatalf("the merge bubble was appended %v; the merge run's own utterance never reached it on the merge arm", h.mergeAppends(bubbleID))
+		t.Fatalf("the merge work was appended %v; the merge run's own utterance never reached it on the merge arm", h.mergeAppends(messageID))
 	}
 }
 
@@ -511,7 +511,7 @@ func TestTheSessionsEmissionsLeaveTheTopLevelFeed(t *testing.T) {
 	// Assert
 	for _, text := range h.feedTexts() {
 		if text == "cherry-picking the workspace" {
-			t.Fatal("the merge run's utterance reached the top-level feed as well as its bubble")
+			t.Fatal("the merge run's utterance reached the top-level feed as well as its work")
 		}
 	}
 }
@@ -539,15 +539,15 @@ func TestTheUsersNextPromptSettlesTheMergeWindow(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 	h.controller().consumer.Consume(skillCallEvent(t, 10, "a-merge", mergeOriginCall, "create-or-update-workspace", "merge"))
-	bubbleID := h.mergeBubbles()[0].GetId()
+	messageID := h.mergeDetachedWork()[0].GetUuid()
 
 	// Act
 	h.controller().consumer.Consume(userPromptEvent(t, 11, "u-next", "thanks, now do the other thing"))
 
 	// Assert
-	liveness := h.mergeLiveness(bubbleID)
+	liveness := h.mergeLiveness(messageID)
 	if len(liveness) == 0 {
-		t.Fatal("the user taking the session back must settle the merge bubble")
+		t.Fatal("the user taking the session back must settle the merge work")
 	}
 	if liveness[len(liveness)-1].GetSettled().GetDone() == nil {
 		t.Fatalf("the window settled on %v, want done: the user typing again is the window ending, not the merge failing",
@@ -600,7 +600,7 @@ func TestAnInterruptSettlesTheMergeWindow(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 	h.controller().consumer.Consume(skillCallEvent(t, 10, "a-merge", mergeOriginCall, "create-or-update-workspace", "merge"))
-	bubbleID := h.mergeBubbles()[0].GetId()
+	messageID := h.mergeDetachedWork()[0].GetUuid()
 	h.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 
 	// Act
@@ -609,7 +609,7 @@ func TestAnInterruptSettlesTheMergeWindow(t *testing.T) {
 	}
 
 	// Assert
-	liveness := h.mergeLiveness(bubbleID)
+	liveness := h.mergeLiveness(messageID)
 	if len(liveness) == 0 {
 		t.Fatal("a user-commanded stop is one of the two boundaries that end a merge window")
 	}
@@ -629,21 +629,21 @@ func TestAnUndeliverableInterruptLeavesTheMergeWindowOpen(t *testing.T) {
 	_ = h.m.Interrupt(context.Background(), "ws", "fe-merge-stop")
 
 	// Assert
-	if !h.controller().consumer.bubbles.windowsOpen() {
+	if !h.controller().consumer.work.windowsOpen() {
 		t.Fatal("a stop that was never delivered took nothing back from the merge, so its window must still stand")
 	}
 }
 
 // --- skill windows ----------------------------------------------------------
 
-// skillBubbles returns every skill-kind bubble the frontend was opened with.
-func (h *queueHarness) skillBubbles() []*frontendv1.AsyncBubble {
+// skillDetachedWork returns every skill-kind work the frontend was opened with.
+func (h *queueHarness) skillDetachedWork() []*frontendv1.Message {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
-	var out []*frontendv1.AsyncBubble
-	for _, d := range h.push.bubbles {
+	var out []*frontendv1.Message
+	for _, d := range h.push.work {
 		for _, b := range d.GetOpened() {
-			if b.GetSkill() != nil {
+			if b.GetDetachedWork().GetSkill() != nil {
 				out = append(out, b)
 			}
 		}
@@ -652,14 +652,14 @@ func (h *queueHarness) skillBubbles() []*frontendv1.AsyncBubble {
 }
 
 // skillAppends returns the assistant prose every SKILL-ARM emissions update
-// addressed to bubbleID carried, in order.
-func (h *queueHarness) skillAppends(bubbleID string) []string {
+// addressed to messageID carried, in order.
+func (h *queueHarness) skillAppends(messageID string) []string {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
 	var out []string
-	for _, d := range h.push.bubbles {
+	for _, d := range h.push.work {
 		for _, u := range d.GetUpdates() {
-			if u.GetBubbleId() != bubbleID {
+			if u.GetMessageId() != messageID {
 				continue
 			}
 			for _, em := range u.GetSkill().GetEmissions().GetEmissions() {
@@ -675,16 +675,16 @@ func (h *queueHarness) skillAppends(bubbleID string) []string {
 }
 
 // skillToolCallAppends returns the tool_use ids every SKILL-ARM emissions
-// update addressed to bubbleID carried, in order. It is what says WHICH CARDS
-// landed inside a bubble's conversation, which is where a nested window's
-// bubble hangs.
-func (h *queueHarness) skillToolCallAppends(bubbleID string) []string {
+// update addressed to messageID carried, in order. It is what says WHICH CARDS
+// landed inside a work's conversation, which is where a nested window's
+// work hangs.
+func (h *queueHarness) skillToolCallAppends(messageID string) []string {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
 	var out []string
-	for _, d := range h.push.bubbles {
+	for _, d := range h.push.work {
 		for _, u := range d.GetUpdates() {
-			if u.GetBubbleId() != bubbleID {
+			if u.GetMessageId() != messageID {
 				continue
 			}
 			for _, em := range u.GetSkill().GetEmissions().GetEmissions() {
@@ -697,7 +697,7 @@ func (h *queueHarness) skillToolCallAppends(bubbleID string) []string {
 
 // toolUseIDsIn returns the tool_use ids one agent emission carries, whether it
 // arrived as a tool-call emission or as a tool_use block inside a response.
-// Both a bubble's fold and the top-level feed are read through it, so the two
+// Both a work's fold and the top-level feed are read through it, so the two
 // cannot disagree about which cards an emission made.
 func toolUseIDsIn(em *frontendv1.AgentEmission) []string {
 	var out []string
@@ -727,14 +727,14 @@ func (h *queueHarness) feedToolUseIDs() []string {
 }
 
 // skillBodyDeliveries returns the contents every BODY-arm update addressed to
-// bubbleID carried, in order.
-func (h *queueHarness) skillBodyDeliveries(bubbleID string) []string {
+// messageID carried, in order.
+func (h *queueHarness) skillBodyDeliveries(messageID string) []string {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
 	var out []string
-	for _, d := range h.push.bubbles {
+	for _, d := range h.push.work {
 		for _, u := range d.GetUpdates() {
-			if u.GetBubbleId() == bubbleID && u.GetSkill().GetBody() != nil {
+			if u.GetMessageId() == messageID && u.GetSkill().GetBody() != nil {
 				out = append(out, u.GetSkill().GetBody().GetContents())
 			}
 		}
@@ -742,33 +742,33 @@ func (h *queueHarness) skillBodyDeliveries(bubbleID string) []string {
 	return out
 }
 
-// bubbleByID finds one bubble in the store's own snapshot — what a reconnecting
+// workByID finds one work in the store's own snapshot — what a reconnecting
 // client is served.
-func (h *queueHarness) snapshotBubble(id string) *frontendv1.AsyncBubble {
-	for _, b := range h.controller().consumer.bubbles.snapshot() {
-		if b.GetId() == id {
+func (h *queueHarness) snapshotDetachedWork(id string) *frontendv1.Message {
+	for _, b := range h.controller().consumer.work.snapshot() {
+		if b.GetUuid() == id {
 			return b
 		}
 	}
 	return nil
 }
 
-// invokeSkill consumes one non-merge Skill invocation and returns its bubble.
-func invokeSkill(t *testing.T, h *queueHarness, seq uint64, uuid, toolUseID, skill, args string) *frontendv1.AsyncBubble {
+// invokeSkill consumes one non-merge Skill invocation and returns its work.
+func invokeSkill(t *testing.T, h *queueHarness, seq uint64, uuid, toolUseID, skill, args string) *frontendv1.Message {
 	t.Helper()
 	h.controller().consumer.Consume(skillCallEvent(t, seq, uuid, toolUseID, skill, args))
-	for _, b := range h.skillBubbles() {
-		if b.GetOriginToolUseId() == toolUseID {
+	for _, b := range h.skillDetachedWork() {
+		if b.GetDetachedWork().GetOriginToolUseId() == toolUseID {
 			return b
 		}
 	}
-	t.Fatalf("the %q invocation on call %q opened no skill bubble", skill, toolUseID)
+	t.Fatalf("the %q invocation on call %q opened no skill work", skill, toolUseID)
 	return nil
 }
 
 // --- classification ---------------------------------------------------------
 
-func TestANonMergeSkillInvocationOpensASkillBubble(t *testing.T) {
+func TestANonMergeSkillInvocationOpensASkillDetachedWork(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 
@@ -776,12 +776,12 @@ func TestANonMergeSkillInvocationOpensASkillBubble(t *testing.T) {
 	b := invokeSkill(t, h, 10, "a-demo", "toolu_demo", "demo", "run it")
 
 	// Assert
-	if b.GetSkill() == nil {
-		t.Fatalf("the invocation opened arm %T, want the skill arm every non-merge skill arrives on", b.GetKind())
+	if b.GetDetachedWork().GetSkill() == nil {
+		t.Fatalf("the invocation opened arm %T, want the skill arm every non-merge skill arrives on", b.GetDetachedWork().GetKind())
 	}
 }
 
-func TestASkillBubbleCarriesItsSkillNameVerbatim(t *testing.T) {
+func TestASkillDetachedWorkCarriesItsSkillNameVerbatim(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 
@@ -789,12 +789,12 @@ func TestASkillBubbleCarriesItsSkillNameVerbatim(t *testing.T) {
 	b := invokeSkill(t, h, 10, "a-demo", "toolu_demo", "demo", "run it")
 
 	// Assert
-	if got := b.GetSkill().GetSkillName(); got != "demo" {
+	if got := b.GetDetachedWork().GetSkill().GetSkillName(); got != "demo" {
 		t.Fatalf("skill_name = %q, want the name the call made, verbatim", got)
 	}
 }
 
-func TestASkillBubbleCarriesItsArgsVerbatim(t *testing.T) {
+func TestASkillDetachedWorkCarriesItsArgsVerbatim(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 
@@ -802,12 +802,12 @@ func TestASkillBubbleCarriesItsArgsVerbatim(t *testing.T) {
 	b := invokeSkill(t, h, 10, "a-demo", "toolu_demo", "demo", "run it")
 
 	// Assert
-	if got := b.GetSkill().GetArgs(); got != "run it" {
+	if got := b.GetDetachedWork().GetSkill().GetArgs(); got != "run it" {
 		t.Fatalf("args = %q, want the arguments the call made, verbatim", got)
 	}
 }
 
-func TestASkillBubbleWearsTheInvocationAsItsLabel(t *testing.T) {
+func TestASkillDetachedWorkWearsTheInvocationAsItsLabel(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 
@@ -815,25 +815,25 @@ func TestASkillBubbleWearsTheInvocationAsItsLabel(t *testing.T) {
 	b := invokeSkill(t, h, 10, "a-demo", "toolu_demo", "demo", "run it")
 
 	// Assert
-	if got := b.GetLabel(); got != "/demo run it" {
+	if got := b.GetDetachedWork().GetLabel(); got != "/demo run it" {
 		t.Fatalf("label = %q, want the invocation as the agent wrote it", got)
 	}
 }
 
-func TestASkillBubbleIsStampedOnItsOwnCall(t *testing.T) {
+func TestASkillDetachedWorkIsStampedOnItsOwnCall(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 
 	// Act
 	b := invokeSkill(t, h, 10, "a-demo", "toolu_demo", "demo", "run it")
 
-	// Assert: this lookup IS what StampSpawnedBubbleIDs stamps on the card.
-	if got := h.controller().consumer.bubbles.spawnedBubbleID("toolu_demo"); got != b.GetId() {
-		t.Fatalf("spawnedBubbleID = %q, want the skill bubble %q", got, b.GetId())
+	// Assert: this lookup IS what StampSpawnedMessageIDs stamps on the card.
+	if got := h.controller().consumer.work.spawnedMessageID("toolu_demo"); got != b.GetUuid() {
+		t.Fatalf("spawnedMessageID = %q, want the skill work %q", got, b.GetUuid())
 	}
 }
 
-func TestASkillCallNamingNoSkillOpensNoBubble(t *testing.T) {
+func TestASkillCallNamingNoSkillOpensNoDetachedWork(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 
@@ -841,8 +841,8 @@ func TestASkillCallNamingNoSkillOpensNoBubble(t *testing.T) {
 	h.controller().consumer.Consume(transcriptToolUseEvent(t, 10, "a-bare", "toolu_bare", "Skill"))
 
 	// Assert
-	if got := len(h.skillBubbles()); got != 0 {
-		t.Fatalf("a nameless Skill call opened %d skill bubble(s): there is nothing to label one with", got)
+	if got := len(h.skillDetachedWork()); got != 0 {
+		t.Fatalf("a nameless Skill call opened %d skill work(s): there is nothing to label one with", got)
 	}
 }
 
@@ -873,9 +873,9 @@ func TestASkillsBodyIsDeliveredOnTheBodyArm(t *testing.T) {
 	h.controller().consumer.Consume(transcriptMetaUserEvent(t, 12, "u-body", "u-result", skillBody))
 
 	// Assert
-	got := h.skillBodyDeliveries(b.GetId())
+	got := h.skillBodyDeliveries(b.GetUuid())
 	if len(got) != 1 || got[0] != skillBody {
-		t.Fatalf("the bubble was delivered bodies %v, want the SKILL.md once on the body arm", got)
+		t.Fatalf("the work was delivered bodies %v, want the SKILL.md once on the body arm", got)
 	}
 }
 
@@ -890,12 +890,12 @@ func TestASkillsBodyIsCarriedByItsSnapshot(t *testing.T) {
 
 	// Assert: a reconnecting client is served the fold, and the body is part of
 	// it.
-	if got := h.snapshotBubble(b.GetId()).GetSkill().GetBody(); got != skillBody {
+	if got := h.snapshotDetachedWork(b.GetUuid()).GetDetachedWork().GetSkill().GetBody(); got != skillBody {
 		t.Fatalf("the snapshot's body = %q, want the SKILL.md the update delivered", got)
 	}
 }
 
-func TestASkillWithABubbleEmitsNoSkillBodyCard(t *testing.T) {
+func TestASkillWithADetachedWorkEmitsNoSkillBodyCard(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 	invokeSkill(t, h, 10, "a-demo", "toolu_demo", "demo", "run it")
@@ -907,7 +907,7 @@ func TestASkillWithABubbleEmitsNoSkillBodyCard(t *testing.T) {
 	// Assert: the contents have exactly one home, and the card rendering of them
 	// is retired by the arm that gave them one.
 	if got := h.skillBodies(); len(got) != 0 {
-		t.Fatalf("pushed %d skill_body card(s) for a call whose bubble already carries the body, want none", len(got))
+		t.Fatalf("pushed %d skill_body card(s) for a call whose work already carries the body, want none", len(got))
 	}
 }
 
@@ -921,8 +921,8 @@ func TestASkillWhoseBodyNeverArrivesKeepsAnEmptyBody(t *testing.T) {
 	h.controller().consumer.Consume(transcriptToolResultEvent(t, 11, "u-result", "toolu_demo"))
 
 	// Assert
-	if got := h.snapshotBubble(b.GetId()).GetSkill().GetBody(); got != "" {
-		t.Fatalf("the bubble's body = %q, want it empty: nothing is invented for a body that never resolved", got)
+	if got := h.snapshotDetachedWork(b.GetUuid()).GetDetachedWork().GetSkill().GetBody(); got != "" {
+		t.Fatalf("the work's body = %q, want it empty: nothing is invented for a body that never resolved", got)
 	}
 }
 
@@ -959,17 +959,17 @@ func TestTheSessionsEmissionsArriveOnTheSkillUpdateArm(t *testing.T) {
 
 	// Assert
 	var folded bool
-	for _, text := range h.skillAppends(b.GetId()) {
+	for _, text := range h.skillAppends(b.GetUuid()) {
 		if text == "reading the workspace" {
 			folded = true
 		}
 	}
 	if !folded {
-		t.Fatalf("the skill bubble was appended %v on its own arm, want the invocation's own utterance", h.skillAppends(b.GetId()))
+		t.Fatalf("the skill work was appended %v on its own arm, want the invocation's own utterance", h.skillAppends(b.GetUuid()))
 	}
 }
 
-func TestTheSessionsEmissionsLeaveTheFeedForTheSkillBubble(t *testing.T) {
+func TestTheSessionsEmissionsLeaveTheFeedForTheSkillDetachedWork(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 	invokeSkill(t, h, 10, "a-demo", "toolu_demo", "demo", "run it")
@@ -980,7 +980,7 @@ func TestTheSessionsEmissionsLeaveTheFeedForTheSkillBubble(t *testing.T) {
 	// Assert
 	for _, text := range h.feedTexts() {
 		if text == "reading the workspace" {
-			t.Fatal("the skill's utterance reached the top-level feed as well as its bubble")
+			t.Fatal("the skill's utterance reached the top-level feed as well as its work")
 		}
 	}
 }
@@ -996,8 +996,8 @@ func TestASkillInvokedInsideASkillParentsUnderIt(t *testing.T) {
 	inner := invokeSkill(t, h, 11, "a-inner", "toolu_inner", "inner", "go")
 
 	// Assert
-	if got := inner.GetParentBubbleId(); got != outer.GetId() {
-		t.Fatalf("the inner skill's parent = %q, want the open window %q: skills chain, and the tree must read truthfully", got, outer.GetId())
+	if got := inner.GetLineage().GetParentMessageId(); got != outer.GetUuid() {
+		t.Fatalf("the inner skill's parent = %q, want the open window %q: skills chain, and the tree must read truthfully", got, outer.GetUuid())
 	}
 }
 
@@ -1012,13 +1012,13 @@ func TestTheDeepestOpenWindowCapturesTheSessionsEmissions(t *testing.T) {
 
 	// Assert
 	var folded bool
-	for _, text := range h.skillAppends(inner.GetId()) {
+	for _, text := range h.skillAppends(inner.GetUuid()) {
 		if text == "the inner skill is working" {
 			folded = true
 		}
 	}
 	if !folded {
-		t.Fatalf("the innermost window was appended %v, want the utterance that happened while it was open", h.skillAppends(inner.GetId()))
+		t.Fatalf("the innermost window was appended %v, want the utterance that happened while it was open", h.skillAppends(inner.GetUuid()))
 	}
 }
 
@@ -1033,9 +1033,9 @@ func TestAnEmissionInsideANestedSkillDoesNotAlsoFoldIntoTheOuterOne(t *testing.T
 
 	// Assert: the outer window holds it through the child's parent pointer, not
 	// as a second copy of its own.
-	for _, text := range h.skillAppends(outer.GetId()) {
+	for _, text := range h.skillAppends(outer.GetUuid()) {
 		if text == "the inner skill is working" {
-			t.Fatal("one emission folded into two windows: exactly one bubble owns an emission, and it is the innermost")
+			t.Fatal("one emission folded into two windows: exactly one work owns an emission, and it is the innermost")
 		}
 	}
 }
@@ -1048,16 +1048,16 @@ func TestANestedSkillsOwnCardFoldsIntoTheWindowOutsideIt(t *testing.T) {
 	// Act
 	invokeSkill(t, h, 11, "a-inner", "toolu_inner", "inner", "go")
 
-	// Assert: the card is where the inner bubble hangs, so it must land inside
-	// the outer conversation for the inner bubble to render there.
+	// Assert: the card is where the inner work hangs, so it must land inside
+	// the outer conversation for the inner work to render there.
 	var landed bool
-	for _, id := range h.skillToolCallAppends(outer.GetId()) {
+	for _, id := range h.skillToolCallAppends(outer.GetUuid()) {
 		if id == "toolu_inner" {
 			landed = true
 		}
 	}
 	if !landed {
-		t.Fatalf("the outer window was appended cards %v, want the inner invocation's own card", h.skillToolCallAppends(outer.GetId()))
+		t.Fatalf("the outer window was appended cards %v, want the inner invocation's own card", h.skillToolCallAppends(outer.GetUuid()))
 	}
 }
 
@@ -1072,7 +1072,7 @@ func TestANestedSkillsOwnCardLeavesTheTopLevelFeed(t *testing.T) {
 	// Assert
 	for _, id := range h.feedToolUseIDs() {
 		if id == "toolu_inner" {
-			t.Fatal("the nested invocation's card reached the top-level feed as well as its parent's conversation, so its bubble renders twice and outside the work that started it")
+			t.Fatal("the nested invocation's card reached the top-level feed as well as its parent's conversation, so its work renders twice and outside the work that started it")
 		}
 	}
 }
@@ -1085,21 +1085,21 @@ func TestANestedSkillsAnchorCardLandsInsideItsParentsConversation(t *testing.T) 
 	// Act
 	inner := invokeSkill(t, h, 11, "a-inner", "toolu_inner", "inner", "go")
 
-	// Assert: a frontend attaches a bubble to its card by matching
-	// origin_tool_use_id, so the inner bubble renders inside the outer one only
+	// Assert: a frontend attaches a work to its card by matching
+	// origin_tool_use_id, so the inner work renders inside the outer one only
 	// if the card carrying that id is part of the outer conversation.
 	var anchored bool
-	for _, id := range h.skillToolCallAppends(outer.GetId()) {
-		if id == inner.GetOriginToolUseId() {
+	for _, id := range h.skillToolCallAppends(outer.GetUuid()) {
+		if id == inner.GetDetachedWork().GetOriginToolUseId() {
 			anchored = true
 		}
 	}
 	if !anchored {
-		t.Fatalf("the outer conversation carries cards %v, want the inner bubble's anchor %q", h.skillToolCallAppends(outer.GetId()), inner.GetOriginToolUseId())
+		t.Fatalf("the outer conversation carries cards %v, want the inner work's anchor %q", h.skillToolCallAppends(outer.GetUuid()), inner.GetDetachedWork().GetOriginToolUseId())
 	}
 }
 
-func TestANestedSkillsOwnCardDoesNotFoldIntoItsOwnBubble(t *testing.T) {
+func TestANestedSkillsOwnCardDoesNotFoldIntoItsOwnDetachedWork(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 	invokeSkill(t, h, 10, "a-outer", "toolu_outer", "outer", "go")
@@ -1107,10 +1107,10 @@ func TestANestedSkillsOwnCardDoesNotFoldIntoItsOwnBubble(t *testing.T) {
 	// Act
 	inner := invokeSkill(t, h, 11, "a-inner", "toolu_inner", "inner", "go")
 
-	// Assert: a bubble hanging under a card inside itself is not a tree.
-	for _, id := range h.skillToolCallAppends(inner.GetId()) {
+	// Assert: a work hanging under a card inside itself is not a tree.
+	for _, id := range h.skillToolCallAppends(inner.GetUuid()) {
 		if id == "toolu_inner" {
-			t.Fatal("the inner window swallowed its own opening card, so its bubble hangs inside itself")
+			t.Fatal("the inner window swallowed its own opening card, so its work hangs inside itself")
 		}
 	}
 }
@@ -1123,7 +1123,7 @@ func TestAnOutermostSkillsOwnCardStaysOnTheTopLevelFeed(t *testing.T) {
 	invokeSkill(t, h, 10, "a-demo", "toolu_demo", "demo", "run it")
 
 	// Assert: there is no conversation outside it, so the feed is where its
-	// card — and the bubble hanging under it — belongs.
+	// card — and the work hanging under it — belongs.
 	var onFeed bool
 	for _, id := range h.feedToolUseIDs() {
 		if id == "toolu_demo" {
@@ -1144,12 +1144,12 @@ func TestAMergeInvokedInsideASkillWindowParentsUnderIt(t *testing.T) {
 	h.controller().consumer.Consume(skillCallEvent(t, 11, "a-merge", mergeOriginCall, "create-or-update-workspace", "merge"))
 
 	// Assert
-	bubbles := h.mergeBubbles()
-	if len(bubbles) != 1 {
-		t.Fatalf("the merge invocation opened %d merge bubbles inside a skill window, want one", len(bubbles))
+	work := h.mergeDetachedWork()
+	if len(work) != 1 {
+		t.Fatalf("the merge invocation opened %d merge work inside a skill window, want one", len(work))
 	}
-	if got := bubbles[0].GetParentBubbleId(); got != outer.GetId() {
-		t.Fatalf("the merge bubble's parent = %q, want the skill window %q it was invoked inside", got, outer.GetId())
+	if got := work[0].GetLineage().GetParentMessageId(); got != outer.GetUuid() {
+		t.Fatalf("the merge work's parent = %q, want the skill window %q it was invoked inside", got, outer.GetUuid())
 	}
 }
 
@@ -1165,10 +1165,10 @@ func TestTheUsersNextPromptSettlesEveryOpenWindow(t *testing.T) {
 	h.controller().consumer.Consume(userPromptEvent(t, 12, "u-next", "thanks, now do the other thing"))
 
 	// Assert
-	for _, b := range []*frontendv1.AsyncBubble{outer, inner} {
-		liveness := h.mergeLiveness(b.GetId())
+	for _, b := range []*frontendv1.Message{outer, inner} {
+		liveness := h.mergeLiveness(b.GetUuid())
 		if len(liveness) == 0 || liveness[len(liveness)-1].GetSettled() == nil {
-			t.Fatalf("bubble %q never settled: the user taking the session back ends every open window, not only the innermost", b.GetId())
+			t.Fatalf("work %q never settled: the user taking the session back ends every open window, not only the innermost", b.GetUuid())
 		}
 	}
 }
@@ -1204,7 +1204,7 @@ func TestAnInterruptSettlesTheSkillWindow(t *testing.T) {
 	}
 
 	// Assert
-	liveness := h.mergeLiveness(b.GetId())
+	liveness := h.mergeLiveness(b.GetUuid())
 	if len(liveness) == 0 {
 		t.Fatal("a user-commanded stop is one of the two boundaries that end a skill window")
 	}

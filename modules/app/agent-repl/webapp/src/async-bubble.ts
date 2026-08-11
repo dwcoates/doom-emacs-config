@@ -1,28 +1,38 @@
 /**
  * async-bubble — `agentshim.frontend.v1` DETACHED WORK, decoded.
  *
- * async-bubble.proto models detached work as what it IS rather than as a notice
+ * detached-work.proto models detached work as what it IS rather than as a notice
  * that something is happening elsewhere: a detached agent is a live, growing,
  * recursively spawning conversation; a Workflow run is a live table of journal
  * rows; a backgrounded shell command is a live byte spool; and a spawn whose
  * tool the daemon does not recognize is a first-class kind that says so.
  *
+ * DETACHED WORK IS A MESSAGE, AND ONLY A MESSAGE. It carries no id of its own
+ * and no parent pointer of its own: the containing `Message.uuid` IS the work's
+ * id, and `Message.lineage` IS its containment. This module keeps the RENDERER's
+ * word "bubble" for its own internal type (see the store's item vocabulary for
+ * the same precedent), but the packaging it reads is the message envelope's —
+ * see {@link DetachedWorkPackaging}, which is lifted onto the decoded payload so
+ * the registry, the routing and the renderer can go on keying by one id.
+ *
  * The daemon owns the whole apparatus. It classifies a detaching tool call,
- * MINTS the bubble's id, folds the work's output, and pushes typed updates
- * addressed to that id. This module's entire job is to read those pushes
- * faithfully and loudly. It derives no identity, parses no transcript, and
- * infers no kind — every one of those is a daemon fact that arrives on the
- * wire.
+ * MINTS the message the work is carried by, folds the work's output, and pushes
+ * typed updates addressed to that message's id. This module's entire job is to
+ * read those pushes faithfully and loudly. It derives no identity, parses no
+ * transcript, and infers no kind — every one of those is a daemon fact that
+ * arrives on the wire.
  *
  * WHAT THIS MODULE REFUSES TO DO, and why each refusal is structural:
  *
- * - It never invents a bubble id. `AsyncBubble.id` is "never empty" on the
- *   contract, so an empty one is a malformed frame, not a bubble to name after
- *   something else.
+ * - It never invents an id. `Message.uuid` is never empty on the contract, so an
+ *   empty one is a malformed frame, not work to name after something else.
+ * - It never derives lineage. `topLevelMessageId` is denormalized on purpose and
+ *   `parentMessageId` is one hop; a message that arrived without them is a
+ *   producer fault, not a message to place by walking pointers.
  * - It never picks a kind. Exactly one `kind` arm is set; zero or two is a
  *   producer fault. An unrecognized TOOL already has its own arm
  *   (`unclassified`), so there is nothing left for a fallback to cover.
- * - It never resolves a settled bubble's outcome from its exit code. The
+ * - It never resolves settled work's outcome from its exit code. The
  *   daemon resolves `outcome` FROM `shell_exit` and puts both on the wire
  *   precisely so that this end does not make that mapping.
  *
@@ -35,41 +45,40 @@
  */
 
 import {
-  AsyncAgentBubbleSchema,
-  AsyncAgentUpdateSchema,
-  AsyncBubbleDeltaSchema,
-  AsyncBubbleSchema,
-  AsyncBubbleUpdateSchema,
-  AsyncFoldSchema,
-  AsyncLiveSchema,
-  AsyncLivenessSchema,
-  AsyncLivenessUpdateSchema,
-  AsyncMergeBubbleSchema,
-  AsyncOutcomeDoneSchema,
-  AsyncOutcomeErrorSchema,
-  AsyncOutcomeKilledSchema,
-  AsyncOutputAppendSchema,
-  AsyncOutputSpoolSchema,
-  AsyncSettledSchema,
-  AsyncShellBubbleSchema,
-  AsyncShellExitSchema,
-  AsyncSkillBodyResolvedSchema,
-  AsyncSkillBubbleSchema,
-  AsyncSkillUpdateSchema,
-  AsyncUnclassifiedBubbleSchema,
-  AsyncWorkflowJournalRowSchema,
-  AsyncWorkflowJournalSchema,
-  AsyncWorkflowJournalUpdateSchema,
-  AsyncWorkflowStepDoneSchema,
-  AsyncWorkflowStepFailedSchema,
-  AsyncWorkflowStepRunningSchema,
-  type AsyncBubble as GeneratedAsyncBubble,
-  type AsyncBubbleUpdate as GeneratedAsyncBubbleUpdate,
-  type AsyncLiveness as GeneratedAsyncLiveness,
-  type AsyncSettled as GeneratedAsyncSettled,
-  type AsyncSkillUpdate as GeneratedAsyncSkillUpdate,
-  type AsyncWorkflowJournalRow as GeneratedAsyncWorkflowJournalRow,
-} from "../../proto/gen/ts/agentshim/frontend/v1/async-bubble_pb";
+  DetachedWorkAgentSchema,
+  DetachedWorkAgentUpdateSchema,
+  DetachedWorkSchema,
+  DetachedWorkUpdateSchema,
+  DetachedWorkFoldSchema,
+  DetachedWorkLiveSchema,
+  DetachedWorkLivenessSchema,
+  DetachedWorkLivenessUpdateSchema,
+  DetachedWorkMergeSchema,
+  DetachedWorkOutcomeDoneSchema,
+  DetachedWorkOutcomeErrorSchema,
+  DetachedWorkOutcomeKilledSchema,
+  DetachedWorkOutputAppendSchema,
+  DetachedWorkOutputSpoolSchema,
+  DetachedWorkSettledSchema,
+  DetachedWorkShellSchema,
+  DetachedWorkShellExitSchema,
+  DetachedWorkSkillBodyResolvedSchema,
+  DetachedWorkSkillSchema,
+  DetachedWorkSkillUpdateSchema,
+  DetachedWorkUnclassifiedSchema,
+  DetachedWorkJournalRowSchema,
+  DetachedWorkJournalSchema,
+  DetachedWorkJournalUpdateSchema,
+  DetachedWorkStepDoneSchema,
+  DetachedWorkStepFailedSchema,
+  DetachedWorkStepRunningSchema,
+  type DetachedWork as GeneratedDetachedWork,
+  type DetachedWorkUpdate as GeneratedDetachedWorkUpdate,
+  type DetachedWorkLiveness as GeneratedDetachedWorkLiveness,
+  type DetachedWorkSettled as GeneratedDetachedWorkSettled,
+  type DetachedWorkSkillUpdate as GeneratedDetachedWorkSkillUpdate,
+  type DetachedWorkJournalRow as GeneratedDetachedWorkJournalRow,
+} from "../../proto/gen/ts/agentshim/frontend/v1/detached-work_pb";
 import { unwrapAgentEmission, type UnwrappedEmission } from "./agent-emission.js";
 import {
   ensureArray,
@@ -159,7 +168,7 @@ export interface AsyncOutputSpool {
 export interface AsyncWorkflowJournalRow {
   label: string;
   detail: string;
-  status: ArmKeys<GeneratedAsyncWorkflowJournalRow["status"]>;
+  status: ArmKeys<GeneratedDetachedWorkJournalRow["status"]>;
 }
 
 /** A detached agent: a whole conversation happening elsewhere. */
@@ -236,9 +245,34 @@ export type AsyncBubbleKind =
 /** The kind discriminators a bubble may carry. */
 export type AsyncBubbleKindCase = AsyncBubbleKind["case"];
 
+/**
+ * THE FEED PACKAGING of a detached-work message, lifted off its envelope.
+ *
+ * Detached work stopped carrying identity and containment of its own: the
+ * containing `Message.uuid` is the work's id and `Message.lineage` is its place
+ * in the feed. These three fields are read off that envelope and stapled onto
+ * the decoded payload so every consumer below still sees ONE object with ONE id
+ * — the alternative is every renderer, registry and router carrying the message
+ * beside the work and eventually disagreeing about which one it is keyed by.
+ */
+export interface DetachedWorkPackaging {
+  /** `Message.uuid`. THE ROUTING HANDLE. Never empty; matched, never derived. */
+  id: string;
+  /**
+   * `Message.lineage.parentMessageId` — ONE HOP, never the root. Empty means
+   * this work sits directly in the feed.
+   */
+  parentMessageId: string;
+  /**
+   * `Message.lineage.topLevelMessageId` — the feed row this work ultimately
+   * belongs to, equal to its own id when it IS a feed row. NEVER empty.
+   */
+  topLevelMessageId: string;
+}
+
 /** One piece of detached work, and the unit every later update is addressed to. */
 export interface AsyncBubble {
-  /** THE ROUTING HANDLE. Never empty; matched, never derived. */
+  /** THE ROUTING HANDLE — the containing `Message.uuid`. Never empty. */
   id: string;
   /**
    * The workspace this detached work belongs to (contract amendment 2).
@@ -253,8 +287,20 @@ export interface AsyncBubble {
   workspace: string;
   /** The tool_use id of the call that spawned this work; empty when none did. */
   originToolUseId: string;
-  /** The bubble this one was spawned FROM; empty at the top level. */
-  parentBubbleId: string;
+  /**
+   * WHAT CONTAINS THIS WORK — `Message.lineage.parentMessageId`, one hop.
+   * Empty means it sits directly in the feed.
+   *
+   * PROVENANCE IS NOT CONTAINMENT: {@link originToolUseId} says which call
+   * STARTED the work, which is a different fact and is never read as this one.
+   */
+  parentMessageId: string;
+  /**
+   * The feed row this work ultimately belongs to
+   * (`Message.lineage.topLevelMessageId`). Never empty; equal to {@link id}
+   * when this work IS a feed row.
+   */
+  topLevelMessageId: string;
   /** The collapsed fold's face; empty means the client shows the id. */
   label: string;
   startedAtMs: number;
@@ -311,17 +357,30 @@ export type AsyncBubbleUpdateArm =
 /** The update arm discriminators. `liveness` is the kind-independent one. */
 export type AsyncBubbleUpdateCase = AsyncBubbleUpdateArm["case"];
 
-/** One incremental push to one bubble: the id routes it, the arm types it. */
+/**
+ * One incremental push to ONE MESSAGE'S detached-work payload: the message id
+ * routes it, the arm types it.
+ *
+ * AN UPDATE, NOT A MESSAGE. It carries no uuid, no lineage and no timestamp of
+ * its own — it is a change to a message the feed already contains, which is why
+ * a shell writing a megabyte mints no feed rows at all.
+ */
 export interface AsyncBubbleUpdate {
-  /** Which bubble this lands on. Never empty; the ONLY routing input. */
-  bubbleId: string;
+  /**
+   * WHICH MESSAGE this lands on (`DetachedWorkUpdate.message_id`). Never empty;
+   * the ONLY routing input.
+   */
+  messageId: string;
   update: AsyncBubbleUpdateArm;
 }
 
-/** The async push frame: bubbles that opened, and updates to bubbles open. */
+/** The detached-work push: messages that opened, and updates to those open. */
 export interface AsyncBubbleDelta {
   workspace: string;
-  /** Bubbles opening for the first time, or re-delivered in full after a resync. */
+  /**
+   * Whole MESSAGES whose payload is detached work: opening for the first time,
+   * or restated in full after a resync, with their packaging already lifted on.
+   */
   opened: AsyncBubble[];
   /** Incremental pushes to bubbles already open, in order. */
   updates: AsyncBubbleUpdate[];
@@ -359,36 +418,41 @@ export const UPDATE_ARM_KIND: Readonly<Record<Exclude<AsyncBubbleUpdateCase, "li
 // --- anchored key sets ------------------------------------------------------
 
 /**
- * CONTRACT AMENDMENT 2 landed `AsyncBubble.workspace = 7`, and regenerating the
+ * CONTRACT AMENDMENT 2 landed `DetachedWork.workspace = 7`, and regenerating the
  * stubs turned this line into the build failure it was designed to produce —
  * the anchor named the missing key rather than letting a decoder silently drop
  * a field the daemon had started sending. `workspace` is spelled here now that
  * the generated stub actually has it, which is what invariant I5 requires.
+ *
+ * `id` and `parentBubbleId` are GONE from this set, and the same anchoring is
+ * what proves it: both are `reserved` by name on `DetachedWork`, so the
+ * generated stub no longer has them and naming either here would not compile.
+ * Identity and containment arrive on the message envelope instead — see
+ * {@link DetachedWorkPackaging}.
  */
-const BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncBubbleSchema.field>()("id", "workspace", "originToolUseId", "parentBubbleId", "label", "startedAtMs", "liveness", "agent", "journal", "shell", "unclassified", "merge", "skill");
-const AGENT_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncAgentBubbleSchema.field>()("emissions", "fold");
-const JOURNAL_KEYS = generatedFieldSet<keyof typeof AsyncWorkflowJournalSchema.field>()("rows", "fold");
-const SHELL_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncShellBubbleSchema.field>()("command", "output");
-const UNCLASSIFIED_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncUnclassifiedBubbleSchema.field>()("toolName", "output");
-const MERGE_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncMergeBubbleSchema.field>()("emissions", "fold");
-const SKILL_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncSkillBubbleSchema.field>()("skillName", "args", "body", "emissions", "fold");
-const SPOOL_KEYS = generatedFieldSet<keyof typeof AsyncOutputSpoolSchema.field>()("text", "throughOffset");
-const JOURNAL_ROW_KEYS = generatedFieldSet<keyof typeof AsyncWorkflowJournalRowSchema.field>()("label", "detail", "running", "done", "failed");
-const LIVENESS_KEYS = generatedFieldSet<keyof typeof AsyncLivenessSchema.field>()("live", "settled");
-const LIVE_KEYS = generatedFieldSet<keyof typeof AsyncLiveSchema.field>()("lastActivityMs");
-const SETTLED_KEYS = generatedFieldSet<keyof typeof AsyncSettledSchema.field>()("settledAtMs", "shellExit", "done", "error", "killed");
-const SHELL_EXIT_KEYS = generatedFieldSet<keyof typeof AsyncShellExitSchema.field>()("code");
-const OUTCOME_ERROR_KEYS = generatedFieldSet<keyof typeof AsyncOutcomeErrorSchema.field>()("message");
-const OUTCOME_KILLED_KEYS = generatedFieldSet<keyof typeof AsyncOutcomeKilledSchema.field>()("reason");
-const FOLD_KEYS = generatedFieldSet<keyof typeof AsyncFoldSchema.field>()("droppedBefore", "tailCap");
-const UPDATE_KEYS = generatedFieldSet<keyof typeof AsyncBubbleUpdateSchema.field>()("bubbleId", "agent", "journal", "shell", "unclassified", "liveness", "merge", "skill");
-const AGENT_UPDATE_KEYS = generatedFieldSet<keyof typeof AsyncAgentUpdateSchema.field>()("emissions", "fold");
-const SKILL_UPDATE_KEYS = generatedFieldSet<keyof typeof AsyncSkillUpdateSchema.field>()("body", "emissions");
-const SKILL_BODY_RESOLVED_KEYS = generatedFieldSet<keyof typeof AsyncSkillBodyResolvedSchema.field>()("contents");
-const JOURNAL_UPDATE_KEYS = generatedFieldSet<keyof typeof AsyncWorkflowJournalUpdateSchema.field>()("rows", "fold");
-const OUTPUT_APPEND_KEYS = generatedFieldSet<keyof typeof AsyncOutputAppendSchema.field>()("text", "fromOffset");
-const LIVENESS_UPDATE_KEYS = generatedFieldSet<keyof typeof AsyncLivenessUpdateSchema.field>()("liveness");
-const DELTA_KEYS = generatedFieldSet<keyof typeof AsyncBubbleDeltaSchema.field>()("workspace", "opened", "updates", "throughSeq", "fence");
+const BUBBLE_KEYS = generatedFieldSet<keyof typeof DetachedWorkSchema.field>()("workspace", "originToolUseId", "label", "startedAtMs", "liveness", "agent", "journal", "shell", "unclassified", "merge", "skill");
+const AGENT_BUBBLE_KEYS = generatedFieldSet<keyof typeof DetachedWorkAgentSchema.field>()("emissions", "fold");
+const JOURNAL_KEYS = generatedFieldSet<keyof typeof DetachedWorkJournalSchema.field>()("rows", "fold");
+const SHELL_BUBBLE_KEYS = generatedFieldSet<keyof typeof DetachedWorkShellSchema.field>()("command", "output");
+const UNCLASSIFIED_BUBBLE_KEYS = generatedFieldSet<keyof typeof DetachedWorkUnclassifiedSchema.field>()("toolName", "output");
+const MERGE_BUBBLE_KEYS = generatedFieldSet<keyof typeof DetachedWorkMergeSchema.field>()("emissions", "fold");
+const SKILL_BUBBLE_KEYS = generatedFieldSet<keyof typeof DetachedWorkSkillSchema.field>()("skillName", "args", "body", "emissions", "fold");
+const SPOOL_KEYS = generatedFieldSet<keyof typeof DetachedWorkOutputSpoolSchema.field>()("text", "throughOffset");
+const JOURNAL_ROW_KEYS = generatedFieldSet<keyof typeof DetachedWorkJournalRowSchema.field>()("label", "detail", "running", "done", "failed");
+const LIVENESS_KEYS = generatedFieldSet<keyof typeof DetachedWorkLivenessSchema.field>()("live", "settled");
+const LIVE_KEYS = generatedFieldSet<keyof typeof DetachedWorkLiveSchema.field>()("lastActivityMs");
+const SETTLED_KEYS = generatedFieldSet<keyof typeof DetachedWorkSettledSchema.field>()("settledAtMs", "shellExit", "done", "error", "killed");
+const SHELL_EXIT_KEYS = generatedFieldSet<keyof typeof DetachedWorkShellExitSchema.field>()("code");
+const OUTCOME_ERROR_KEYS = generatedFieldSet<keyof typeof DetachedWorkOutcomeErrorSchema.field>()("message");
+const OUTCOME_KILLED_KEYS = generatedFieldSet<keyof typeof DetachedWorkOutcomeKilledSchema.field>()("reason");
+const FOLD_KEYS = generatedFieldSet<keyof typeof DetachedWorkFoldSchema.field>()("droppedBefore", "tailCap");
+const UPDATE_KEYS = generatedFieldSet<keyof typeof DetachedWorkUpdateSchema.field>()("messageId", "agent", "journal", "shell", "unclassified", "liveness", "merge", "skill");
+const AGENT_UPDATE_KEYS = generatedFieldSet<keyof typeof DetachedWorkAgentUpdateSchema.field>()("emissions", "fold");
+const SKILL_UPDATE_KEYS = generatedFieldSet<keyof typeof DetachedWorkSkillUpdateSchema.field>()("body", "emissions");
+const SKILL_BODY_RESOLVED_KEYS = generatedFieldSet<keyof typeof DetachedWorkSkillBodyResolvedSchema.field>()("contents");
+const JOURNAL_UPDATE_KEYS = generatedFieldSet<keyof typeof DetachedWorkJournalUpdateSchema.field>()("rows", "fold");
+const OUTPUT_APPEND_KEYS = generatedFieldSet<keyof typeof DetachedWorkOutputAppendSchema.field>()("text", "fromOffset");
+const LIVENESS_UPDATE_KEYS = generatedFieldSet<keyof typeof DetachedWorkLivenessUpdateSchema.field>()("liveness");
 
 /**
  * The EMPTY marker messages, each anchored to its own generated stub.
@@ -400,10 +464,10 @@ const DELTA_KEYS = generatedFieldSet<keyof typeof AsyncBubbleDeltaSchema.field>(
  * `EMPTY_KEY_SET` precisely so each message's emptiness is asserted
  * independently.
  */
-const STEP_RUNNING_KEYS = generatedFieldSet<keyof typeof AsyncWorkflowStepRunningSchema.field>()();
-const STEP_DONE_KEYS = generatedFieldSet<keyof typeof AsyncWorkflowStepDoneSchema.field>()();
-const STEP_FAILED_KEYS = generatedFieldSet<keyof typeof AsyncWorkflowStepFailedSchema.field>()();
-const OUTCOME_DONE_KEYS = generatedFieldSet<keyof typeof AsyncOutcomeDoneSchema.field>()();
+const STEP_RUNNING_KEYS = generatedFieldSet<keyof typeof DetachedWorkStepRunningSchema.field>()();
+const STEP_DONE_KEYS = generatedFieldSet<keyof typeof DetachedWorkStepDoneSchema.field>()();
+const STEP_FAILED_KEYS = generatedFieldSet<keyof typeof DetachedWorkStepFailedSchema.field>()();
+const OUTCOME_DONE_KEYS = generatedFieldSet<keyof typeof DetachedWorkOutcomeDoneSchema.field>()();
 
 /** Each journal step status arm → the anchored key set proving it is empty. */
 const JOURNAL_STATUS_KEYS: Readonly<Record<AsyncWorkflowJournalRow["status"], ReadonlySet<string>>> = {
@@ -413,17 +477,17 @@ const JOURNAL_STATUS_KEYS: Readonly<Record<AsyncWorkflowJournalRow["status"], Re
 };
 
 /** The bubble `kind` arm keys, typed against the generated oneof. */
-const BUBBLE_KIND_ARMS = ["agent", "journal", "shell", "unclassified", "merge", "skill"] as const satisfies readonly ArmKeys<GeneratedAsyncBubble["kind"]>[];
+const BUBBLE_KIND_ARMS = ["agent", "journal", "shell", "unclassified", "merge", "skill"] as const satisfies readonly ArmKeys<GeneratedDetachedWork["kind"]>[];
 /** The update arm keys, typed against the generated oneof. */
-const UPDATE_ARMS = ["agent", "journal", "shell", "unclassified", "liveness", "merge", "skill"] as const satisfies readonly ArmKeys<GeneratedAsyncBubbleUpdate["update"]>[];
+const UPDATE_ARMS = ["agent", "journal", "shell", "unclassified", "liveness", "merge", "skill"] as const satisfies readonly ArmKeys<GeneratedDetachedWorkUpdate["update"]>[];
 /** The skill update's own arm keys, typed against the generated oneof. */
-const SKILL_UPDATE_ARMS = ["body", "emissions"] as const satisfies readonly ArmKeys<GeneratedAsyncSkillUpdate["update"]>[];
+const SKILL_UPDATE_ARMS = ["body", "emissions"] as const satisfies readonly ArmKeys<GeneratedDetachedWorkSkillUpdate["update"]>[];
 /** The liveness state arms, typed against the generated oneof. */
-const LIVENESS_ARMS = ["live", "settled"] as const satisfies readonly ArmKeys<GeneratedAsyncLiveness["state"]>[];
+const LIVENESS_ARMS = ["live", "settled"] as const satisfies readonly ArmKeys<GeneratedDetachedWorkLiveness["state"]>[];
 /** The settled outcome arms, typed against the generated oneof. */
-const OUTCOME_ARMS = ["done", "error", "killed"] as const satisfies readonly ArmKeys<GeneratedAsyncSettled["outcome"]>[];
+const OUTCOME_ARMS = ["done", "error", "killed"] as const satisfies readonly ArmKeys<GeneratedDetachedWorkSettled["outcome"]>[];
 /** The journal row status arms, typed against the generated oneof. */
-const JOURNAL_STATUS_ARMS = ["running", "done", "failed"] as const satisfies readonly ArmKeys<GeneratedAsyncWorkflowJournalRow["status"]>[];
+const JOURNAL_STATUS_ARMS = ["running", "done", "failed"] as const satisfies readonly ArmKeys<GeneratedDetachedWorkJournalRow["status"]>[];
 
 // --- decoders ---------------------------------------------------------------
 
@@ -609,25 +673,38 @@ function decodeBubbleKind(o: Obj, ctx: string): AsyncBubbleKind {
   }
 }
 
-/** Decode one `AsyncBubble`. */
-export function decodeAsyncBubble(v: unknown, ctx: string): AsyncBubble {
+/**
+ * Decode one `DetachedWork` PAYLOAD and lift its message envelope's PACKAGING
+ * onto it.
+ *
+ * The payload no longer states who it is or what contains it — both are read
+ * off the `Message` that carries it and passed in as PACKAGING, so the two can
+ * never disagree the way a payload-side copy of either eventually would.
+ */
+export function decodeAsyncBubble(v: unknown, packaging: DetachedWorkPackaging, ctx: string): AsyncBubble {
   const o = ensureObject(v, ctx);
   rejectUnknown(o, BUBBLE_KEYS, ctx);
-  const id = str(o, "id", ctx);
-  if (id === "") {
-    // "Never empty" on the contract: a detachment the daemon cannot attribute
-    // to a tool call is a daemon fault surfaced as a failure card, not a bubble
-    // with a blank id. Accepting one here would mint an unroutable bubble.
-    throw new Error(`frontend-proto: ${ctx}.id is empty — a bubble's routing handle is never empty`);
+  if (packaging.id === "") {
+    // `Message.uuid` is never empty on the contract: a detachment the daemon
+    // cannot attribute is a daemon fault surfaced as a failure card, not a
+    // message with a blank uuid. Accepting one would mint unroutable work.
+    throw new Error(`frontend-proto: ${ctx} carries no message id — detached work's routing handle is its message's uuid, which is never empty`);
+  }
+  if (packaging.topLevelMessageId === "") {
+    // Denormalized ON PURPOSE and never inferred: deriving it by walking parent
+    // pointers is the unbounded traversal the field exists to remove, so a blank
+    // one is refused rather than reconstructed.
+    throw new Error(`frontend-proto: ${ctx} carries no topLevelMessageId — a message's top-level id is never empty, and is its own uuid on a feed row`);
   }
   if (o.liveness === undefined || o.liveness === null) {
-    throw new Error(`frontend-proto: ${ctx}.liveness is absent — a bubble is always live or settled`);
+    throw new Error(`frontend-proto: ${ctx}.liveness is absent — detached work is always live or settled`);
   }
   return {
-    id,
+    id: packaging.id,
     workspace: str(o, "workspace", ctx),
     originToolUseId: str(o, "originToolUseId", ctx),
-    parentBubbleId: str(o, "parentBubbleId", ctx),
+    parentMessageId: packaging.parentMessageId,
+    topLevelMessageId: packaging.topLevelMessageId,
     label: str(o, "label", ctx),
     startedAtMs: int64OrZero(o, "startedAtMs", ctx),
     liveness: decodeLiveness(o.liveness, `${ctx}.liveness`),
@@ -699,44 +776,22 @@ function decodeUpdateArm(o: Obj, ctx: string): AsyncBubbleUpdateArm {
   }
 }
 
-/** Decode one `AsyncBubbleUpdate`. */
+/** Decode one `DetachedWorkUpdate`. */
 export function decodeAsyncBubbleUpdate(v: unknown, ctx: string): AsyncBubbleUpdate {
   const o = ensureObject(v, ctx);
   rejectUnknown(o, UPDATE_KEYS, ctx);
-  const bubbleId = str(o, "bubbleId", ctx);
-  if (bubbleId === "") {
-    // The id is the ONLY thing an update carries to say where it lands
+  const messageId = str(o, "messageId", ctx);
+  if (messageId === "") {
+    // The message id is the ONLY thing an update carries to say where it lands
     // (invariant I2). An empty one is not routable by any means this frontend
     // is allowed to use, so it is refused rather than matched by some other
     // evidence.
-    throw new Error(`frontend-proto: ${ctx}.bubbleId is empty — an update names its bubble or it is unroutable`);
+    throw new Error(`frontend-proto: ${ctx}.messageId is empty — an update names its message or it is unroutable`);
   }
-  return { bubbleId, update: decodeUpdateArm(o, ctx) };
+  return { messageId, update: decodeUpdateArm(o, ctx) };
 }
 
-/** Decode one `AsyncBubbleDelta`. */
-export function decodeAsyncBubbleDelta(v: unknown): AsyncBubbleDelta {
-  const ctx = "AsyncBubbleDelta";
-  const o = ensureObject(v, ctx);
-  rejectUnknown(o, DELTA_KEYS, ctx);
-  const delta: AsyncBubbleDelta = {
-    workspace: str(o, "workspace", ctx),
-    opened: (o.opened === undefined || o.opened === null
-      ? []
-      : ensureArray(o.opened, `${ctx}.opened`)
-    ).map((b, i) => decodeAsyncBubble(b, `${ctx}.opened[${i}]`)),
-    updates: (o.updates === undefined || o.updates === null
-      ? []
-      : ensureArray(o.updates, `${ctx}.updates`)
-    ).map((u, i) => decodeAsyncBubbleUpdate(u, `${ctx}.updates[${i}]`)),
-    throughSeq: num(o, "throughSeq", ctx),
-    fence: str(o, "fence", ctx),
-  };
-  if (delta.fence === "") {
-    // The fence is how a client tells a current push from a stale one. A push
-    // without one cannot be gated at all, so it is refused rather than adopted
-    // ungated.
-    throw new Error(`frontend-proto: ${ctx} missing required \`fence\``);
-  }
-  return delta;
-}
+// `DetachedWorkDelta` is decoded in `frontend-proto.ts`, not here: its `opened`
+// arm carries whole `Message` envelopes now, and the message decoder is that
+// module's. Splitting it out keeps the dependency one-way rather than making
+// this module import the decoder that imports it.

@@ -761,8 +761,8 @@ type sessionController struct {
 	// under, which is the whole of its justification.
 	queryInstanceID string
 	client          sessionClient
-	consumer               *consumer
-	cancel                 context.CancelFunc
+	consumer        *consumer
+	cancel          context.CancelFunc
 	// controllerRegistrationRelease relinquishes the SSM-owned reservation
 	// that excludes hibernation until this generation reaches operational or
 	// exits. The closure is idempotent.
@@ -1276,22 +1276,22 @@ func (m *Manager) TaskCatalogs() []*frontendv1.TaskCatalog {
 	return catalogs
 }
 
-// AsyncBubbles returns every async bubble every live session still holds,
+// DetachedWork returns every detached work every live session still holds,
 // folded to date, for the connect/resync snapshot.
 //
-// The bubbles come from the SAME store the deltas were produced from, so a
+// The work come from the SAME store the deltas were produced from, so a
 // reconnecting client is handed exactly the fold its pushes had been building —
 // never a second, separately derived account of the same detached work. Order
 // is by workspace and then by launch, so two consecutive snapshots of an
 // unchanged session are byte-identical.
-func (m *Manager) AsyncBubbles() []*frontendv1.AsyncBubble {
+func (m *Manager) DetachedWork() []*frontendv1.Message {
 	controllers := m.snapshotSessionControllers()
 	sort.Slice(controllers, func(i, j int) bool { return controllers[i].workspace < controllers[j].workspace })
-	var out []*frontendv1.AsyncBubble
+	var out []*frontendv1.Message
 	for _, d := range controllers {
-		out = append(out, d.consumer.bubbles.snapshot()...)
+		out = append(out, d.consumer.work.snapshot()...)
 	}
-	m.logf("session-controller: async bubble snapshot sessions=%d bubbles=%d", len(controllers), len(out))
+	m.logf("session-controller: detached work snapshot sessions=%d work=%d", len(controllers), len(out))
 	return out
 }
 
@@ -1609,11 +1609,11 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 		m.mu.Unlock()
 		// The reading of the prompt, the receipt, and the forward all happen
 		// together in forwardPrompt (promptdispatch.go) — a `/clear` must not be
-		// echoed as a bubble, and deciding that anywhere but where the text is
+		// echoed as a work, and deciding that anywhere but where the text is
 		// read is how the two came apart.
 		//
 		// A QUEUED prompt deliberately reaches none of this: it renders as a
-		// queue chip until it is DELIVERED, and a bubble drawn now would claim
+		// queue chip until it is DELIVERED, and a work drawn now would claim
 		// an execution order the session is not going to follow. Its receipt is
 		// pushed at the delivery site instead (queue.go, deliver).
 		if err := m.forwardPrompt(ctx, d, requestID, text, origin, permissionMode, promptOrigin, who); err != nil {
@@ -2087,7 +2087,7 @@ func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.Interru
 	m.progress().NoteInterrupt(d.workspace, d.sessionID, outcome)
 
 	// A USER-COMMANDED STOP CLOSES EVERY OPEN WINDOW. It is one of the two
-	// boundaries async-bubble.proto names for a Merge or Skill bubble, and this
+	// boundaries async-work.proto names for a Merge or Skill work, and this
 	// is the one place a user's stop is known — every stop, whether the user
 	// pressed it or submitted a prompt the classifier judged INTERJECT, since
 	// both reach here through stopTurn.
@@ -2475,7 +2475,7 @@ const retiredSeqSpaceRejectionCause = "retired_seq_space"
 // replayFloor is the first seq a frontend replay may start at:
 // max(clientLastSeq, newestClearOrCompactSeq), INCLUSIVE.
 //
-// Inclusive is the whole point. The clear or the compaction IS the bubble the
+// Inclusive is the whole point. The clear or the compaction IS the work the
 // frontend draws and the rule it discards above, so a floor of
 // newestClearOrCompactSeq+1 would tell a frontend to throw away everything it
 // holds and hand it nothing to show for it. Both consumers of this value honor
@@ -2552,7 +2552,7 @@ func (m *Manager) lastSeenSeq(d *sessionController) uint64 {
 // lower bound, matching Subscribe.from_seq").
 //
 // Without the conversion a re-pull floored at a clear or a compaction would
-// serve everything AFTER it and not the event itself — precisely the bubble the
+// serve everything AFTER it and not the event itself — precisely the work the
 // frontend needs, missing in exactly the case that matters most: a restarted
 // daemon, whose ring is empty, so every replay goes through the store.
 //

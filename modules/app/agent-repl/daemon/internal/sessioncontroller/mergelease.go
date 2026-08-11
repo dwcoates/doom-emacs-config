@@ -64,7 +64,7 @@ const (
 	// It is a submitter of its own for submitterKeepAlive's reason: three
 	// decisions turn on it, and each would otherwise be a string comparison
 	// against a free-form origin. It takes NO PROMPT RECEIPT (the user wrote no
-	// prompt, so there is no bubble to make durable), it is refused while the
+	// prompt, so there is no work to make durable), it is refused while the
 	// merge lease is held (the lease's claim is that merge.Coordinator is the
 	// only party driving this shim, and a re-drive is still a turn), and it
 	// must never be admitted past the revival gate — a hibernated session's

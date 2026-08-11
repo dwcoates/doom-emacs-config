@@ -263,7 +263,7 @@ func (x *MessageLineage) GetParentMessageId() string {
 // it, and the figures resolved against it. The payload is the message itself.
 //
 // Agent-produced payloads are ONE arm, AgentEmission, which is also the
-// vocabulary a detached agent's output arrives in (async-bubble.proto).
+// vocabulary a detached agent's output arrives in (detached-work.proto).
 // Everything the agent did not emit — the user's own prompt, the daemon's
 // failure cards, session-level events — keeps an arm of its own, because
 // folding those into AgentEmission would make that message's name untrue.
@@ -307,7 +307,7 @@ type Message struct {
 	//	*Message_ContextCleared
 	//	*Message_ContextCompacted
 	//	*Message_SessionCommand
-	//	*Message_AsyncBubble
+	//	*Message_DetachedWork
 	//	*Message_CompactionSummary
 	Payload       isMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
@@ -449,10 +449,10 @@ func (x *Message) GetSessionCommand() *SessionCommandItem {
 	return nil
 }
 
-func (x *Message) GetAsyncBubble() *AsyncBubble {
+func (x *Message) GetDetachedWork() *DetachedWork {
 	if x != nil {
-		if x, ok := x.Payload.(*Message_AsyncBubble); ok {
-			return x.AsyncBubble
+		if x, ok := x.Payload.(*Message_DetachedWork); ok {
+			return x.DetachedWork
 		}
 	}
 	return nil
@@ -514,16 +514,17 @@ type Message_SessionCommand struct {
 	SessionCommand *SessionCommandItem `protobuf:"bytes,35,opt,name=session_command,json=sessionCommand,proto3,oneof"`
 }
 
-type Message_AsyncBubble struct {
-	// A piece of detached work, ANCHORED in the feed at the point it was
-	// launched.
+type Message_DetachedWork struct {
+	// A piece of detached work. THIS MESSAGE IS THE WORK — its uuid is the
+	// work's id, and its lineage is the work's place in the feed.
 	//
-	// What rides here is the bubble's OPENING state; everything it produces
-	// afterwards arrives as AsyncBubbleUpdate addressed to `AsyncBubble.id`,
-	// on its own delta rather than as a stream of new feed messages. A detached
-	// agent emitting a thousand lines must not insert a thousand rows into
-	// the conversation it was dispatched from.
-	AsyncBubble *AsyncBubble `protobuf:"bytes,38,opt,name=async_bubble,json=asyncBubble,proto3,oneof"`
+	// What rides here is the work's state as of this delivery; everything it
+	// produces afterwards arrives as DetachedWorkUpdate addressed to THIS
+	// message's uuid, on DetachedWorkDelta rather than as a stream of new feed
+	// messages. A detached agent emitting a thousand lines must not insert a
+	// thousand rows into the conversation it was dispatched from — those lines
+	// are this message's payload, not messages of their own.
+	DetachedWork *DetachedWork `protobuf:"bytes,38,opt,name=detached_work,json=detachedWork,proto3,oneof"`
 }
 
 type Message_CompactionSummary struct {
@@ -546,9 +547,121 @@ func (*Message_ContextCompacted) isMessage_Payload() {}
 
 func (*Message_SessionCommand) isMessage_Payload() {}
 
-func (*Message_AsyncBubble) isMessage_Payload() {}
+func (*Message_DetachedWork) isMessage_Payload() {}
 
 func (*Message_CompactionSummary) isMessage_Payload() {}
+
+// The detached-work push: MESSAGES that opened, and UPDATES to messages already
+// open.
+//
+// TWO ARMS BECAUSE THERE ARE TWO KINDS OF THING, and conflating them is what
+// made "how many messages is this" unanswerable. A message is a thing the feed
+// CONTAINS — it has a uuid, lineage, a timestamp, and it costs a page slot. An
+// update is a change to a message the feed already contains — it is addressed by
+// that message's id, carries no identity of its own, and costs nothing. A byte
+// append is the second kind, always: a shell producing a megabyte of output
+// changes one message many times, it does not produce thousands of messages.
+//
+// It is a SEPARATE FRAME from ConversationDelta because detached work produces
+// at its own rate: folding its updates into the conversation push would let one
+// chatty agent pace the feed of the conversation that dispatched it.
+type DetachedWorkDelta struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// WHOLE MESSAGES: detached work opening for the first time, or restated in
+	// full after a resync. Complete feed envelopes, identical in shape to the ones
+	// ConversationDelta carries, so a frontend renders detached work with the same
+	// code that renders everything else and reconciles it by the same uuid.
+	//
+	// A message the receiver already holds is REPLACED by this copy — the daemon
+	// restating it in full, never a second message.
+	//
+	// Each carries payload arm `detached_work`; a message arriving here with any
+	// other payload is a daemon bug and is rejected rather than rendered.
+	Opened []*Message `protobuf:"bytes,3,rep,name=opened,proto3" json:"opened,omitempty"`
+	// UPDATES to messages already open, in order. Each names its target message by
+	// id and mutates that message's payload; none of them is a message.
+	Updates []*DetachedWorkUpdate `protobuf:"bytes,4,rep,name=updates,proto3" json:"updates,omitempty"`
+	// Frontends persist this for reconnect resync.
+	ThroughSeq uint64 `protobuf:"varint,5,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"`
+	// The workspace's staleness FENCE at the moment the daemon produced this
+	// push: an opaque token the client compares BYTE-WISE against the fence on
+	// the workspace's current WorkspaceState, and never parses, splits or
+	// interprets. Equal means current; different means stale, and a stale push
+	// is discarded whole rather than partially adopted.
+	//
+	// The daemon mints it and is the only thing that can read meaning into it.
+	// A client that learned to decode it would be depending on a fact this
+	// contract does not offer, and the token's composition is free to change.
+	Fence         string `protobuf:"bytes,6,opt,name=fence,proto3" json:"fence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DetachedWorkDelta) Reset() {
+	*x = DetachedWorkDelta{}
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DetachedWorkDelta) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DetachedWorkDelta) ProtoMessage() {}
+
+func (x *DetachedWorkDelta) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DetachedWorkDelta.ProtoReflect.Descriptor instead.
+func (*DetachedWorkDelta) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *DetachedWorkDelta) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
+func (x *DetachedWorkDelta) GetOpened() []*Message {
+	if x != nil {
+		return x.Opened
+	}
+	return nil
+}
+
+func (x *DetachedWorkDelta) GetUpdates() []*DetachedWorkUpdate {
+	if x != nil {
+		return x.Updates
+	}
+	return nil
+}
+
+func (x *DetachedWorkDelta) GetThroughSeq() uint64 {
+	if x != nil {
+		return x.ThroughSeq
+	}
+	return 0
+}
+
+func (x *DetachedWorkDelta) GetFence() string {
+	if x != nil {
+		return x.Fence
+	}
+	return ""
+}
 
 // The compaction summary bubble: the purple-washed summary block that follows
 // a compaction.
@@ -568,7 +681,7 @@ type CompactionSummaryItem struct {
 
 func (x *CompactionSummaryItem) Reset() {
 	*x = CompactionSummaryItem{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[3]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -580,7 +693,7 @@ func (x *CompactionSummaryItem) String() string {
 func (*CompactionSummaryItem) ProtoMessage() {}
 
 func (x *CompactionSummaryItem) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[3]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -593,7 +706,7 @@ func (x *CompactionSummaryItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactionSummaryItem.ProtoReflect.Descriptor instead.
 func (*CompactionSummaryItem) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{3}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CompactionSummaryItem) GetSummary() string {
@@ -638,25 +751,25 @@ type TypingDelta struct {
 	// there and is retired by the authoritative record of the same block
 	// landing there.
 	//
-	// Set means the preview belongs INSIDE the named `AsyncBubble` and must
-	// never be opened on the top-level feed, because the record it previews is
-	// being folded into that bubble and will never land on the feed at all. A
-	// top-level preview of it could therefore never be retired, and would spin
-	// "streaming input…" with no body for the life of the page. It is retired
-	// instead by the bubble's OWN authoritative record — the next
-	// `AsyncBubbleUpdate` addressed to this id.
+	// Set means the preview belongs INSIDE the named MESSAGE — detached work
+	// whose payload is folding this record — and must never be opened on the
+	// top-level feed, because the record it previews will never land there at
+	// all. A top-level preview of it could therefore never be retired, and would
+	// spin "streaming input…" with no body for the life of the page. It is
+	// retired instead by that message's OWN authoritative record — the next
+	// `DetachedWorkUpdate` addressed to this id.
 	//
 	// The daemon knows which of the two it is BEFORE the preview goes out (it
 	// is the same fold decision, made in the same place), so no preview it
 	// cannot retire is ever created. This is provenance, not a timeout.
-	BubbleId      string `protobuf:"bytes,5,opt,name=bubble_id,json=bubbleId,proto3" json:"bubble_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ParentMessageId string `protobuf:"bytes,5,opt,name=parent_message_id,json=parentMessageId,proto3" json:"parent_message_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *TypingDelta) Reset() {
 	*x = TypingDelta{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -668,7 +781,7 @@ func (x *TypingDelta) String() string {
 func (*TypingDelta) ProtoMessage() {}
 
 func (x *TypingDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -681,7 +794,7 @@ func (x *TypingDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TypingDelta.ProtoReflect.Descriptor instead.
 func (*TypingDelta) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{4}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *TypingDelta) GetWorkspace() string {
@@ -705,9 +818,9 @@ func (x *TypingDelta) GetFence() string {
 	return ""
 }
 
-func (x *TypingDelta) GetBubbleId() string {
+func (x *TypingDelta) GetParentMessageId() string {
 	if x != nil {
-		return x.BubbleId
+		return x.ParentMessageId
 	}
 	return ""
 }
@@ -727,8 +840,9 @@ type TypingCut struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// The preview being retired, addressed exactly as the delta that opened it:
-	// empty for the top-level feed, or the AsyncBubble id it was folded into.
-	BubbleId string `protobuf:"bytes,2,opt,name=bubble_id,json=bubbleId,proto3" json:"bubble_id,omitempty"`
+	// empty for the top-level feed, or the id of the MESSAGE whose detached work
+	// it was folded into.
+	ParentMessageId string `protobuf:"bytes,2,opt,name=parent_message_id,json=parentMessageId,proto3" json:"parent_message_id,omitempty"`
 	// The workspace's staleness FENCE, compared byte-wise and never parsed,
 	// identically to every other push. A stale cut is discarded whole.
 	Fence         string `protobuf:"bytes,3,opt,name=fence,proto3" json:"fence,omitempty"`
@@ -738,7 +852,7 @@ type TypingCut struct {
 
 func (x *TypingCut) Reset() {
 	*x = TypingCut{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -750,7 +864,7 @@ func (x *TypingCut) String() string {
 func (*TypingCut) ProtoMessage() {}
 
 func (x *TypingCut) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -763,7 +877,7 @@ func (x *TypingCut) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TypingCut.ProtoReflect.Descriptor instead.
 func (*TypingCut) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{5}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *TypingCut) GetWorkspace() string {
@@ -773,9 +887,9 @@ func (x *TypingCut) GetWorkspace() string {
 	return ""
 }
 
-func (x *TypingCut) GetBubbleId() string {
+func (x *TypingCut) GetParentMessageId() string {
 	if x != nil {
-		return x.BubbleId
+		return x.ParentMessageId
 	}
 	return ""
 }
@@ -810,7 +924,7 @@ type SessionInitView struct {
 
 func (x *SessionInitView) Reset() {
 	*x = SessionInitView{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[6]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -822,7 +936,7 @@ func (x *SessionInitView) String() string {
 func (*SessionInitView) ProtoMessage() {}
 
 func (x *SessionInitView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[6]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -835,7 +949,7 @@ func (x *SessionInitView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionInitView.ProtoReflect.Descriptor instead.
 func (*SessionInitView) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{6}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SessionInitView) GetWorkspace() string {
@@ -863,7 +977,7 @@ var File_agentshim_frontend_v1_feed_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"\n" +
-	" agentshim/frontend/v1/feed.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a\x1eagentshim/data/v1/stream.proto\x1a\x1dagentshim/data/v1/tools.proto\x1a*agentshim/frontend/v1/agent-emission.proto\x1a(agentshim/frontend/v1/async-bubble.proto\x1a(agentshim/frontend/v1/failure-card.proto\x1a&agentshim/frontend/v1/slash-menu.proto\"\xbd\x01\n" +
+	" agentshim/frontend/v1/feed.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a\x1eagentshim/data/v1/stream.proto\x1a\x1dagentshim/data/v1/tools.proto\x1a*agentshim/frontend/v1/agent-emission.proto\x1a)agentshim/frontend/v1/detached-work.proto\x1a(agentshim/frontend/v1/failure-card.proto\x1a&agentshim/frontend/v1/slash-menu.proto\"\xbd\x01\n" +
 	"\x11ConversationDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12:\n" +
 	"\bmessages\x18\x03 \x03(\v2\x1e.agentshim.frontend.v1.MessageR\bmessages\x12\x1f\n" +
@@ -873,7 +987,7 @@ const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"session_idR\x05items\"m\n" +
 	"\x0eMessageLineage\x12/\n" +
 	"\x14top_level_message_id\x18\x01 \x01(\tR\x11topLevelMessageId\x12*\n" +
-	"\x11parent_message_id\x18\x02 \x01(\tR\x0fparentMessageId\"\x94\t\n" +
+	"\x11parent_message_id\x18\x02 \x01(\tR\x0fparentMessageId\"\xa5\t\n" +
 	"\aMessage\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x13\n" +
 	"\x05ts_ms\x18\x02 \x01(\x03R\x04tsMs\x12\x1d\n" +
@@ -889,26 +1003,34 @@ const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"\ffailure_card\x18\x1f \x01(\v2&.agentshim.frontend.v1.FailureCardViewH\x00R\vfailureCard\x12L\n" +
 	"\x0fcontext_cleared\x18  \x01(\v2!.agentshim.core.v1.ContextClearedH\x00R\x0econtextCleared\x12R\n" +
 	"\x11context_compacted\x18! \x01(\v2#.agentshim.core.v1.ContextCompactedH\x00R\x10contextCompacted\x12T\n" +
-	"\x0fsession_command\x18# \x01(\v2).agentshim.frontend.v1.SessionCommandItemH\x00R\x0esessionCommand\x12G\n" +
-	"\fasync_bubble\x18& \x01(\v2\".agentshim.frontend.v1.AsyncBubbleH\x00R\vasyncBubble\x12]\n" +
+	"\x0fsession_command\x18# \x01(\v2).agentshim.frontend.v1.SessionCommandItemH\x00R\x0esessionCommand\x12J\n" +
+	"\rdetached_work\x18& \x01(\v2#.agentshim.frontend.v1.DetachedWorkH\x00R\fdetachedWork\x12]\n" +
 	"\x12compaction_summary\x18' \x01(\v2,.agentshim.frontend.v1.CompactionSummaryItemH\x00R\x11compactionSummaryB\t\n" +
 	"\apayloadJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x12\x10\x13J\x04\b\n" +
 	"\x10\vJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10J\x04\b\"\x10#J\x04\b(\x10)J\x04\b$\x10%J\x04\b%\x10&R\tapi_errorR\x10compact_boundaryR\x15compact_boundary_lineR\x11assistant_messageR\btool_useR\vtool_resultR\x0ftool_use_resultR\x06resultR\n" +
-	"skill_bodyR\vusage_stampR\x11token_utilizationR\x0fturn_accounting\"\x8f\x01\n" +
+	"skill_bodyR\vusage_stampR\x11token_utilizationR\x0fturn_accountingR\fasync_bubble\"\xf7\x01\n" +
+	"\x11DetachedWorkDelta\x12\x1c\n" +
+	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x126\n" +
+	"\x06opened\x18\x03 \x03(\v2\x1e.agentshim.frontend.v1.MessageR\x06opened\x12C\n" +
+	"\aupdates\x18\x04 \x03(\v2).agentshim.frontend.v1.DetachedWorkUpdateR\aupdates\x12\x1f\n" +
+	"\vthrough_seq\x18\x05 \x01(\x04R\n" +
+	"throughSeq\x12\x14\n" +
+	"\x05fence\x18\x06 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03R\n" +
+	"session_id\"\x8f\x01\n" +
 	"\x15CompactionSummaryItem\x12\x18\n" +
 	"\asummary\x18\x01 \x01(\tR\asummary\x12&\n" +
 	"\x0fcompacted_at_ms\x18\x02 \x01(\x03R\rcompactedAtMs\x124\n" +
-	"\x16expensive_input_tokens\x18\x03 \x01(\x03R\x14expensiveInputTokens\"\xa7\x01\n" +
+	"\x16expensive_input_tokens\x18\x03 \x01(\x03R\x14expensiveInputTokens\"\xc1\x01\n" +
 	"\vTypingDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x125\n" +
 	"\x05delta\x18\x03 \x01(\v2\x1f.agentshim.core.v1.ContentDeltaR\x05delta\x12\x14\n" +
-	"\x05fence\x18\x04 \x01(\tR\x05fence\x12\x1b\n" +
-	"\tbubble_id\x18\x05 \x01(\tR\bbubbleIdJ\x04\b\x02\x10\x03R\n" +
-	"session_id\"\\\n" +
+	"\x05fence\x18\x04 \x01(\tR\x05fence\x12*\n" +
+	"\x11parent_message_id\x18\x05 \x01(\tR\x0fparentMessageIdJ\x04\b\x02\x10\x03R\n" +
+	"session_idR\tbubble_id\"v\n" +
 	"\tTypingCut\x12\x1c\n" +
-	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1b\n" +
-	"\tbubble_id\x18\x02 \x01(\tR\bbubbleId\x12\x14\n" +
-	"\x05fence\x18\x03 \x01(\tR\x05fence\"\x8a\x01\n" +
+	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12*\n" +
+	"\x11parent_message_id\x18\x02 \x01(\tR\x0fparentMessageId\x12\x14\n" +
+	"\x05fence\x18\x03 \x01(\tR\x05fenceR\tbubble_id\"\x8a\x01\n" +
 	"\x0fSessionInitView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x121\n" +
 	"\x04init\x18\x03 \x01(\v2\x1d.agentshim.data.v1.SystemInitR\x04init\x12\x14\n" +
@@ -932,47 +1054,51 @@ func file_agentshim_frontend_v1_feed_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_frontend_v1_feed_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentshim_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_agentshim_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_agentshim_frontend_v1_feed_proto_goTypes = []any{
 	(ConversationSource)(0),       // 0: agentshim.frontend.v1.ConversationSource
 	(*ConversationDelta)(nil),     // 1: agentshim.frontend.v1.ConversationDelta
 	(*MessageLineage)(nil),        // 2: agentshim.frontend.v1.MessageLineage
 	(*Message)(nil),               // 3: agentshim.frontend.v1.Message
-	(*CompactionSummaryItem)(nil), // 4: agentshim.frontend.v1.CompactionSummaryItem
-	(*TypingDelta)(nil),           // 5: agentshim.frontend.v1.TypingDelta
-	(*TypingCut)(nil),             // 6: agentshim.frontend.v1.TypingCut
-	(*SessionInitView)(nil),       // 7: agentshim.frontend.v1.SessionInitView
-	(*AgentEmission)(nil),         // 8: agentshim.frontend.v1.AgentEmission
-	(*v1.ApiUserMessage)(nil),     // 9: agentshim.data.v1.ApiUserMessage
-	(*v11.PermissionItem)(nil),    // 10: agentshim.core.v1.PermissionItem
-	(*FailureCardView)(nil),       // 11: agentshim.frontend.v1.FailureCardView
-	(*v11.ContextCleared)(nil),    // 12: agentshim.core.v1.ContextCleared
-	(*v11.ContextCompacted)(nil),  // 13: agentshim.core.v1.ContextCompacted
-	(*SessionCommandItem)(nil),    // 14: agentshim.frontend.v1.SessionCommandItem
-	(*AsyncBubble)(nil),           // 15: agentshim.frontend.v1.AsyncBubble
-	(*v11.ContentDelta)(nil),      // 16: agentshim.core.v1.ContentDelta
-	(*v1.SystemInit)(nil),         // 17: agentshim.data.v1.SystemInit
+	(*DetachedWorkDelta)(nil),     // 4: agentshim.frontend.v1.DetachedWorkDelta
+	(*CompactionSummaryItem)(nil), // 5: agentshim.frontend.v1.CompactionSummaryItem
+	(*TypingDelta)(nil),           // 6: agentshim.frontend.v1.TypingDelta
+	(*TypingCut)(nil),             // 7: agentshim.frontend.v1.TypingCut
+	(*SessionInitView)(nil),       // 8: agentshim.frontend.v1.SessionInitView
+	(*AgentEmission)(nil),         // 9: agentshim.frontend.v1.AgentEmission
+	(*v1.ApiUserMessage)(nil),     // 10: agentshim.data.v1.ApiUserMessage
+	(*v11.PermissionItem)(nil),    // 11: agentshim.core.v1.PermissionItem
+	(*FailureCardView)(nil),       // 12: agentshim.frontend.v1.FailureCardView
+	(*v11.ContextCleared)(nil),    // 13: agentshim.core.v1.ContextCleared
+	(*v11.ContextCompacted)(nil),  // 14: agentshim.core.v1.ContextCompacted
+	(*SessionCommandItem)(nil),    // 15: agentshim.frontend.v1.SessionCommandItem
+	(*DetachedWork)(nil),          // 16: agentshim.frontend.v1.DetachedWork
+	(*DetachedWorkUpdate)(nil),    // 17: agentshim.frontend.v1.DetachedWorkUpdate
+	(*v11.ContentDelta)(nil),      // 18: agentshim.core.v1.ContentDelta
+	(*v1.SystemInit)(nil),         // 19: agentshim.data.v1.SystemInit
 }
 var file_agentshim_frontend_v1_feed_proto_depIdxs = []int32{
 	3,  // 0: agentshim.frontend.v1.ConversationDelta.messages:type_name -> agentshim.frontend.v1.Message
 	0,  // 1: agentshim.frontend.v1.Message.source:type_name -> agentshim.frontend.v1.ConversationSource
 	2,  // 2: agentshim.frontend.v1.Message.lineage:type_name -> agentshim.frontend.v1.MessageLineage
-	8,  // 3: agentshim.frontend.v1.Message.agent:type_name -> agentshim.frontend.v1.AgentEmission
-	9,  // 4: agentshim.frontend.v1.Message.user_message:type_name -> agentshim.data.v1.ApiUserMessage
-	10, // 5: agentshim.frontend.v1.Message.permission:type_name -> agentshim.core.v1.PermissionItem
-	11, // 6: agentshim.frontend.v1.Message.failure_card:type_name -> agentshim.frontend.v1.FailureCardView
-	12, // 7: agentshim.frontend.v1.Message.context_cleared:type_name -> agentshim.core.v1.ContextCleared
-	13, // 8: agentshim.frontend.v1.Message.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
-	14, // 9: agentshim.frontend.v1.Message.session_command:type_name -> agentshim.frontend.v1.SessionCommandItem
-	15, // 10: agentshim.frontend.v1.Message.async_bubble:type_name -> agentshim.frontend.v1.AsyncBubble
-	4,  // 11: agentshim.frontend.v1.Message.compaction_summary:type_name -> agentshim.frontend.v1.CompactionSummaryItem
-	16, // 12: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
-	17, // 13: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	9,  // 3: agentshim.frontend.v1.Message.agent:type_name -> agentshim.frontend.v1.AgentEmission
+	10, // 4: agentshim.frontend.v1.Message.user_message:type_name -> agentshim.data.v1.ApiUserMessage
+	11, // 5: agentshim.frontend.v1.Message.permission:type_name -> agentshim.core.v1.PermissionItem
+	12, // 6: agentshim.frontend.v1.Message.failure_card:type_name -> agentshim.frontend.v1.FailureCardView
+	13, // 7: agentshim.frontend.v1.Message.context_cleared:type_name -> agentshim.core.v1.ContextCleared
+	14, // 8: agentshim.frontend.v1.Message.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
+	15, // 9: agentshim.frontend.v1.Message.session_command:type_name -> agentshim.frontend.v1.SessionCommandItem
+	16, // 10: agentshim.frontend.v1.Message.detached_work:type_name -> agentshim.frontend.v1.DetachedWork
+	5,  // 11: agentshim.frontend.v1.Message.compaction_summary:type_name -> agentshim.frontend.v1.CompactionSummaryItem
+	3,  // 12: agentshim.frontend.v1.DetachedWorkDelta.opened:type_name -> agentshim.frontend.v1.Message
+	17, // 13: agentshim.frontend.v1.DetachedWorkDelta.updates:type_name -> agentshim.frontend.v1.DetachedWorkUpdate
+	18, // 14: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
+	19, // 15: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_feed_proto_init() }
@@ -981,7 +1107,7 @@ func file_agentshim_frontend_v1_feed_proto_init() {
 		return
 	}
 	file_agentshim_frontend_v1_agent_emission_proto_init()
-	file_agentshim_frontend_v1_async_bubble_proto_init()
+	file_agentshim_frontend_v1_detached_work_proto_init()
 	file_agentshim_frontend_v1_failure_card_proto_init()
 	file_agentshim_frontend_v1_slash_menu_proto_init()
 	file_agentshim_frontend_v1_feed_proto_msgTypes[2].OneofWrappers = []any{
@@ -992,7 +1118,7 @@ func file_agentshim_frontend_v1_feed_proto_init() {
 		(*Message_ContextCleared)(nil),
 		(*Message_ContextCompacted)(nil),
 		(*Message_SessionCommand)(nil),
-		(*Message_AsyncBubble)(nil),
+		(*Message_DetachedWork)(nil),
 		(*Message_CompactionSummary)(nil),
 	}
 	type x struct{}
@@ -1001,7 +1127,7 @@ func file_agentshim_frontend_v1_feed_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_feed_proto_rawDesc), len(file_agentshim_frontend_v1_feed_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

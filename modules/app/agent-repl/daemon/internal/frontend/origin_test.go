@@ -82,7 +82,7 @@ func TestAStreamPlaneUserRecordCarriesItsOriginKind(t *testing.T) {
 }
 
 func TestAStreamPlaneUserRecordWithAnOriginIsNotDetached(t *testing.T) {
-	// Arrange: origin evidence alone must not route the record to a bubble.
+	// Arrange: origin evidence alone must not route the record to a work.
 	c, err := CurateEvent("/ws", "f1", streamUserEvent(t, "u1", taskNotificationBody, "", datav1.OriginKind_ORIGIN_KIND_TASK_NOTIFICATION))
 	if err != nil {
 		t.Fatal(err)
