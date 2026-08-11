@@ -75,35 +75,6 @@ export function isPinnedToBottom(pos: ScrollPosition, pinPx: number = PIN_PX): b
   return pos.scrollHeight - pos.scrollTop - pos.clientHeight < pinPx;
 }
 
-/**
- * Tail-following is FROZEN while the user reads content they deliberately
- * opened — a nested view inside a bubble (an agent's stream in a monitoring
- * bubble). A frozen feed stops chasing its tail, so streaming output can no
- * longer yank the view off what the user is reading. The freeze is the same
- * question isPinnedToBottom answers — who owns the scroll position, the user
- * or the feed — so its two transitions live here beside it.
- */
-
-/**
- * The freeze after a fold toggle: opening a nested view BEGINS the freeze,
- * and closing one holds whatever state was already in force (only a return
- * to the tail lifts it, see freezeOnScroll). So a user who opens one view,
- * closes it, and opens another stays frozen throughout.
- */
-export function freezeOnToggle(frozen: boolean, opened: boolean): boolean {
-  return opened || frozen;
-}
-
-/**
- * The freeze after a user scroll: it ENDS the moment the feed is back at its
- * tail, which is the user asking to follow new content again. Anywhere short
- * of the tail keeps the freeze, so a scroll that merely reads more of the
- * opened content does not resume tail-following.
- */
-export function freezeOnScroll(frozen: boolean, pinned: boolean): boolean {
-  return frozen && !pinned;
-}
-
 /** The one mutable field parking a box at its tail touches. */
 export interface ScrollTail {
   scrollTop: number;
@@ -163,13 +134,21 @@ export interface AnchorItem {
  * reader is looking at; anything above it has already scrolled away. A feed
  * with no items, or one the reader is following the tail of, anchors on the
  * tail — which is what `pinned` says and what `restoreFeedAnchor` then does.
+ *
+ * FOLLOWING IS TOLD TO IT, NOT MEASURED HERE. Deriving it from geometry made
+ * this a second owner of the tail question (see `TailFollow`), and a second
+ * owner that read the PIN_PX slack band: a reader who had just nudged a few px
+ * off the bottom was captured as "following", and the rebuild's restore then
+ * parked them at the tail — the same yank the render used to produce, on a
+ * different trigger. The caller passes `TailFollow.isFollowing()`, and the
+ * answer to the question is one answer.
  */
 export function captureFeedAnchor(
   box: AnchorBox,
   items: readonly AnchorItem[],
-  pinPx: number = PIN_PX,
+  following: boolean,
 ): FeedAnchor | null {
-  if (isPinnedToBottom(box, pinPx)) return { key: "", offsetPx: 0, pinned: true };
+  if (following) return { key: "", offsetPx: 0, pinned: true };
   for (const item of items) {
     if (item.offsetTop >= box.scrollTop) {
       return { key: item.key, offsetPx: item.offsetTop - box.scrollTop, pinned: false };
@@ -191,15 +170,23 @@ export function captureFeedAnchor(
  * it, and the caller's own tail rule applies. Returns whether the anchor was
  * restored, so a caller can say which happened.
  */
-export function restoreFeedAnchor(box: AnchorBox, anchor: FeedAnchor | null): boolean {
+export function restoreFeedAnchor(
+  box: AnchorBox,
+  anchor: FeedAnchor | null,
+  tail: TailWriter,
+): boolean {
   if (anchor === null) return false;
   if (anchor.pinned) {
-    parkAtTail(box);
+    tail.park();
     return true;
   }
   const node = box.querySelector(`[data-key="${cssEscapeKey(anchor.key)}"]`);
   if (node === null) return false;
-  box.scrollTop = node.offsetTop - anchor.offsetPx;
+  // Through the owner, not a bare assignment: a restore that wrote scrollTop
+  // itself would be seen by the owner as the READER scrolling — upward, on a
+  // rebuild that shortened the feed — and would end a follow the reader never
+  // ended. `place` moves the pixels and leaves the intent alone.
+  tail.place(node.offsetTop - anchor.offsetPx);
   return true;
 }
 
@@ -220,45 +207,8 @@ export type SubscribeScroll = (onScroll: () => void) => void;
 /** Registering a listener for a box's own size changes. */
 export type SubscribeResize = (onResize: () => void) => void;
 
-/** Everything the tail re-anchor reads and writes on the box it guards. */
+/** Everything the tail owner reads and writes on the box it guards. */
 export type ReanchorBox = ScrollTail & ScrollPosition;
-
-/**
- * Keep BOX parked at its tail across every resize of BOX itself.
- *
- * A workspace switch relayouts the feed: Emacs re-displays the webview's
- * window alongside the input panel, and the WKWebView is resized to the new
- * geometry. That resize is asynchronous relative to the lisp that triggered
- * it, so the host's switch snap (`agentReplParkAtTail`, host.ts) and the
- * resize can land in either order — and a snap that lands FIRST is undone by
- * the resize, which grows the scrollable height under a scrollTop that stays
- * put and leaves the feed short of the bottom.
- *
- * Re-anchoring on the resize event itself removes the ordering question
- * rather than betting on one order: snap-then-resize re-parks here, and
- * resize-then-snap parks against the settled layout. Neither needs the
- * resize to have finished by any particular moment.
- *
- * The decision is the pre-resize sample of `isPinnedToBottom`, not a fresh
- * one: by the time the resize fires, the new geometry has already moved the
- * box off its tail, so reading it then would answer about the damage instead
- * of about what the reader wanted. A box the user had deliberately scrolled
- * up in keeps its place, exactly as it does under streaming output.
- */
-export function installTailReanchor(
-  box: ReanchorBox,
-  subscribeScroll: SubscribeScroll,
-  subscribeResize: SubscribeResize,
-  pinPx: number = PIN_PX,
-): void {
-  let pinned = isPinnedToBottom(box, pinPx);
-  subscribeScroll(() => {
-    pinned = isPinnedToBottom(box, pinPx);
-  });
-  subscribeResize(() => {
-    if (pinned) parkAtTail(box);
-  });
-}
 
 /**
  * The two writes anything moving the feed is allowed to make (see `TailFollow`).
@@ -567,6 +517,10 @@ export function installEdgeScroll(feed: HTMLElement, edgePx: number = EDGE_PX): 
       });
       if (delta === null) return;
       e.preventDefault();
+      // NOT through TailFollow, and deliberately so: this IS the reader's own
+      // wheel, merely redirected off a section onto the feed. The owner reads
+      // it as the gesture it is — up ends the follow, back to the tail resumes
+      // it — which is exactly the treatment a wheel on the feed itself gets.
       feed.scrollTop += delta;
     },
     { capture: true, passive: false },
