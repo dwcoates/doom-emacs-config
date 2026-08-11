@@ -112,16 +112,28 @@ func sessionCommandUUID(requestID string) string { return "session-command:" + r
 // It carries the command and nothing else. There is deliberately no `text`
 // parameter to forget to omit: the submitted prompt does not reach this
 // function, so it cannot reach the wire.
-func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsMs int64) *frontendv1.Message {
-	return &frontendv1.Message{
+//
+// IT IS THE EPHEMERAL CASE, EXACTLY. A session command never reaches the CLI —
+// that is what makes it a session command — so the CLI writes no transcript
+// record for it, no store record for it exists, and none ever will. It is
+// therefore built through frontend.NewEphemeralFeedRow, which states that class
+// and writes the feed-row lineage the class requires in the same act, rather
+// than through a hand-written Message that could state one and forget the
+// other.
+//
+// IT RETURNS AN ERROR because the constructor refuses rather than repairs, and
+// the caller's job on a refusal is to keep the unclassified item OFF the wire:
+// an item with no durability arm would later read as "the store lost this",
+// which is the exact confusion the class exists to end.
+func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsMs int64) (*frontendv1.Message, error) {
+	return frontend.NewEphemeralFeedRow(&frontendv1.Message{
 		Uuid:      sessionCommandUUID(requestID),
 		TsMs:      tsMs,
 		RequestId: requestID,
-		Lineage:   frontend.FeedRowLineage(sessionCommandUUID(requestID)),
 		Payload: &frontendv1.Message_DaemonInterceptedCommand{
 			DaemonInterceptedCommand: &frontendv1.DaemonInterceptedCommandItem{Command: command},
 		},
-	}
+	})
 }
 
 // pushSessionCommand retains and pushes the invocation item for one recognized
@@ -146,7 +158,19 @@ func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsM
 // was the reason the picker disagreed with the session — the one line about the
 // command named no model at all.
 func (c *consumer) pushSessionCommand(requestID string, command frontendv1.SessionCommand, outcome string) {
-	item := sessionCommandItem(requestID, command, c.now())
+	item, err := sessionCommandItem(requestID, command, c.now())
+	if err != nil {
+		// THE ITEM IS WITHHELD, LOUDLY. The constructor refuses rather than
+		// repairs, and pushing the unclassified item anyway would put a message
+		// with no durability arm on the wire — which a later reader cannot tell
+		// apart from a durable message the store lost. The invocation is
+		// reported in full instead, with the command and request that produced
+		// it, because the refusal is a daemon defect and not a user-visible
+		// condition anything downstream can act on.
+		c.warn("session-controller: session command %s NOT pushed ws=%q session=%s request_id=%s — the ephemeral message constructor refused it, so no DaemonInterceptedCommandItem could be classified and none is delivered: %v",
+			command.String(), c.workspace, c.sessionID, requestID, err)
+		return
+	}
 	c.mu.Lock()
 	if c.cmdItems == nil {
 		c.cmdItems = map[string]*frontendv1.Message{}
