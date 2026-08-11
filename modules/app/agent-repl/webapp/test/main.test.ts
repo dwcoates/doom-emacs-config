@@ -580,7 +580,15 @@ describe("the refusal sink", () => {
 describe("the feed's tail re-anchor", () => {
   it("is armed on the feed element itself", () => {
     // Assert — the box observed is the one the snap parks, not the document.
-    expect(main).toContain("installTailReanchor(\n    feedEl,");
+    expect(main).toContain("new TailFollow(feedEl)");
+  });
+
+  it("hands every scroll-moving mechanism the SAME owner", () => {
+    // Assert — the host snap, the renderer, the chess mount and the sidebar
+    // reveal all park through one latched decision. A second `new TailFollow`
+    // in the boot closure is a second answer to the one question, which is the
+    // shape of defect this whole change removes.
+    expect(main.match(/new TailFollow\(/g)).toHaveLength(1);
   });
 
   it("is driven by a real resize observation", () => {
