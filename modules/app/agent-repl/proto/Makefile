@@ -14,6 +14,7 @@ PROTOS := \
   agentshim/data/v1/transcript.proto \
   agentshim/data/v1/journal.proto \
   agentshim/frontend/v1/agent-emission.proto \
+  agentshim/frontend/v1/agent-response.proto \
   agentshim/frontend/v1/conversation-page.proto \
   agentshim/frontend/v1/detached-work.proto \
   agentshim/frontend/v1/durable.proto \
@@ -28,7 +29,6 @@ PROTOS := \
   agentshim/frontend/v1/merge.proto \
   agentshim/frontend/v1/permission-card.proto \
   agentshim/frontend/v1/prompt-queue.proto \
-  agentshim/frontend/v1/response-bubble.proto \
   agentshim/frontend/v1/sidebar.proto \
   agentshim/frontend/v1/slash-menu.proto \
   agentshim/frontend/v1/state.proto \
@@ -36,7 +36,7 @@ PROTOS := \
   agentshim/frontend/v1/tokens.proto \
   agentshim/frontend/v1/tool-call.proto \
   agentshim/frontend/v1/topbar.proto \
-  agentshim/frontend/v1/user-bubble.proto
+  agentshim/frontend/v1/user-message.proto
 
 # The component tree the structural gates scan. Overridable so the gate
 # self-tests can drive the REAL targets against a fixture tree; the default is
