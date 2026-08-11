@@ -134,6 +134,8 @@
 (declare-function agent-repl--uds-connected-p "agent-repl-frontend-uds" ())
 (declare-function agent-repl--webview-recovery-sweep
                   "agent-repl-webview-recovery" (reason &optional force))
+(declare-function agent-repl--webview-recovery-repair-workspace
+                  "agent-repl-webview-recovery" (ws reason))
 
 (defvar agent-repl-uds-snapshot-applied-functions)
 (defvar agent-repl-uds-connected-functions)
@@ -390,9 +392,12 @@ record itself names which signal was outstanding when it happened."
                      (if (plist-get attempt :forced) "yes" "no")
                      ;; WHY THE PAGE SIGNAL IS MISSING, not merely that it
                      ;; is.  `webapp_ms=-1' with `probe=absent' is a stale
-                     ;; deploy; with `probe=silent' it is a page that never
-                     ;; answered; with `probe=present' it is a real, measured
-                     ;; recovery that has not finished.
+                     ;; deploy — a document that FINISHED loading without the
+                     ;; hook; with `probe=loading' it is a page that was still
+                     ;; building its document when the budget ran out; with
+                     ;; `probe=silent' it is a page that never answered at all;
+                     ;; with `probe=present' it is a real, measured recovery
+                     ;; that has not finished.
                      (or (plist-get attempt :probe) "silent")
                      (if outstanding
                          (mapconcat #'symbol-name outstanding ",")
@@ -526,9 +531,20 @@ is a stale deploy, the other is a slow recovery — and the record used to
 print both as `webapp_ms=-1' with nothing to tell them apart.  `present'
 is therefore its own field, computed from `typeof' rather than from the
 report being non-empty, so an absent hook is a fact the reply carries
-rather than something inferred from silence."
+rather than something inferred from silence.
+
+AND THE DOCUMENT'S OWN LOADING STATE RIDES BACK WITH IT, because without
+it a MISSING hook has two completely different meanings that the record
+printed identically.  Measured on this host by driving `document.readyState'
+beside `typeof window.agentReplRecoveryProbe' into a live webview across a
+re-navigation: for the first ~150ms the page reports
+readyState=\"interactive\" with the hook `undefined', and from then on
+readyState=\"complete\" with the hook a `function'.  A page the host just
+re-navigated is therefore GUARANTEED to look hookless for a beat, and
+calling that a stale bundle is a lie about the one thing `absent' exists
+to say.  So `rs' comes back and the reader distinguishes them."
   (format "(function(){var h=window.%s;var p=(typeof h===\"function\");\
-var r=(p?h():\"\");return JSON.stringify({ws:%s,present:p,report:r});})()"
+var r=(p?h():\"\");return JSON.stringify({ws:%s,present:p,rs:document.readyState,report:r});})()"
           agent-repl-frontend-recovery-probe-hook
           (json-encode-string ws)))
 
@@ -559,20 +575,42 @@ budget is what rules on a page that never starts saying it."
         ;; signal, and `probe=absent' is the only thing that distinguishes
         ;; that stale deploy from a page that simply is not back yet.
         (agent-repl--recovery-slo-note-probe
-         ws (if (eq t (alist-get 'present envelope)) "present" "absent"))
+         ws (agent-repl--recovery-slo-probe-state envelope))
         (when (agent-repl--recovery-slo-probe-satisfied-p report)
           (agent-repl--recovery-slo-note ws 'webapp))))))
 
-(defconst agent-repl-recovery-slo-probe-states '("silent" "absent" "present")
+(defun agent-repl--recovery-slo-probe-state (envelope)
+  "Return the `probe=' state ENVELOPE, one page reply, proves.
+
+THE VERDICT IS NEVER LATCHED ON A PAGE THAT HAD NOT FINISHED LOADING.
+A document the host re-navigated has no globals for the first beat of
+its life, so `present' false ALONE says nothing about which bundle the
+page runs; it is `absent' only once the document says it is
+`complete', which is the state in which a missing hook really is a
+bundle older than webapp/src/recovery-probe.ts.  Anything else — a
+document still parsing, or one whose readyState this reply did not
+carry — is `loading', which ranks BELOW `absent' so the very next tick
+inside the budget can still overwrite it with the truth."
+  (cond
+   ((eq t (alist-get 'present envelope)) "present")
+   ((equal (alist-get 'rs envelope) "complete") "absent")
+   (t "loading")))
+
+(defconst agent-repl-recovery-slo-probe-states '("silent" "loading" "absent" "present")
   "Every value the record's `probe=' field can take, worst first.
 Strings, not symbols, because every value in
 `agent-repl--recovery-slo-attempts' is a scalar the record prints — see
 that table's own docstring for the crash behind that invariant.
 `silent' is the initial state of an attempt: the page was asked and has
-said nothing at all, which is what a webview that never boots looks
-like.  `absent' is a page that answered and carries no probe hook — a
-running bundle older than webapp/src/recovery-probe.ts.  `present' is a
-page whose probe answered, whether or not it was satisfied yet.")
+said nothing at all, which is what a webview that never boots — or one
+whose evaluation never completes at all, as a page mid-navigation's does
+not — looks like.  `loading' is a page that ANSWERED and was still
+building its document, so it has no globals yet and nothing about its
+bundle is known.  `absent' is a page that answered, finished loading,
+and carries no probe hook — a running bundle older than
+webapp/src/recovery-probe.ts, and the only genuine stale-bundle signal.
+`present' is a page whose probe answered, whether or not it was satisfied
+yet.")
 
 (defun agent-repl--recovery-slo-note-probe (ws state)
   "Record STATE as WS's probe presence, never downgrading what was seen.
@@ -645,18 +683,30 @@ which is the honest reading of a workspace whose page does not exist."
   "Force WS through the recovery machinery that already exists.
 
 TWO HALVES, because the conjunction has two halves that can fail apart:
-the host-driven webview sweep repairs the PAGE (and is forced past its
-debounce — see `agent-repl--webview-recovery-sweep' — because this sweep
-is issued on measured evidence that the debounced one did not work), and
+the host-driven webview repair fixes the PAGE
+(`agent-repl--webview-recovery-repair-workspace'), and
 `agent-repl--frontend-ensure-workspace' repairs the SESSION through the
 ordinary ensure/reattach path.  Neither is a new recovery mechanism, and
 deliberately so: a second one would drift from the first.
 
+IT REPAIRS THIS WORKSPACE'S PAGE AND NOBODY ELSE'S, which is a defect fix
+rather than tidiness.  This used to drive the whole-host sweep past its
+debounce, so a bounce in which several workspaces breached issued one
+FULL sweep per breach — and every sweep re-navigated every page whose
+bundle did not match the deployed one, throwing away documents that were
+mid-boot from the previous force and resetting the page-side recovery
+epoch each time.  Live records show the result: a host-wide
+`webapp_ms=-1' with `probe=absent' or `probe=silent'.  The build-id
+comparison inside the repair is unchanged — a page already on the
+deployed bundle is DRIVEN in place through the recovery hook, and only a
+genuinely stale bundle is re-navigated — so the force no longer destroys
+the very page it is measuring, nor anyone else's.
+
 Each half is guarded on its own, so a failure in one still leaves the
 other driven, and the failure is warned about rather than swallowed."
   (condition-case err
-      (agent-repl--webview-recovery-sweep "recovery_slo_force" t)
-    (error (agent-repl--warn ws "recovery-slo: ws=%s force sweep failed err=%S" ws err)))
+      (agent-repl--webview-recovery-repair-workspace ws "recovery_slo_force")
+    (error (agent-repl--warn ws "recovery-slo: ws=%s force repair failed err=%S" ws err)))
   (condition-case err
       (agent-repl--frontend-ensure-workspace ws)
     (error (agent-repl--warn ws "recovery-slo: ws=%s force ensure failed err=%S" ws err))))
