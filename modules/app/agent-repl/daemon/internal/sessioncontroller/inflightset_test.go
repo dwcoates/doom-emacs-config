@@ -220,3 +220,71 @@ func TestInFlightRefusesAnEmptyWorkspace(t *testing.T) {
 		t.Fatal("InFlight answered for an empty workspace")
 	}
 }
+
+// settledHarness is a manager whose workspace resolves SETTLED — no turn, a
+// green state — so the only thing that can refuse its hibernation lease is the
+// in-flight set. It uses the gate harness because that one has no controller
+// registration standing in the way of the lease.
+func settledHarness(t *testing.T) *gateHarness {
+	t.Helper()
+	h := newGateHarness(t, &fakeWorkspaceLock{answers: []bool{false}})
+	h.applier.setCurrent("ws", &frontendv1.WorkspaceState{
+		Workspace: "ws",
+		SessionId: "s1",
+		State:     frontendv1.RenderState_RENDER_STATE_IDLE,
+	})
+	return h
+}
+
+// TestHibernationIsRefusedWhileAsyncWorkRuns is the settledness guard's own
+// regression: the workspace reads a settled state and holds no turn, and only
+// the in-flight set can see the detached work that would die with the shim.
+func TestHibernationIsRefusedWhileAsyncWorkRuns(t *testing.T) {
+	// Arrange
+	h := settledHarness(t)
+	h.applier.setLiveTasks(0, "task-1")
+
+	// Act
+	_, err := h.m.acquireSettledHibernationLease("ws")
+
+	// Assert
+	if !errors.Is(err, ErrNotSettled) {
+		t.Fatalf("acquireSettledHibernationLease err = %v, want ErrNotSettled while a background task runs", err)
+	}
+	if !strings.Contains(err.Error(), "task:task-1") {
+		t.Fatalf("refusal = %v, want it to name the work it is protecting", err)
+	}
+}
+
+// TestHibernationIsRefusedWhenTheInFlightSetIsUnknown pins that silence is not
+// a licence: an unreadable task set refuses the teardown exactly as a live task
+// does.
+func TestHibernationIsRefusedWhenTheInFlightSetIsUnknown(t *testing.T) {
+	// Arrange
+	h := settledHarness(t)
+	h.applier.setLiveTaskIDsErr(errors.New("task rows unreadable"))
+
+	// Act
+	_, err := h.m.acquireSettledHibernationLease("ws")
+
+	// Assert
+	if !errors.Is(err, ErrNotSettled) {
+		t.Fatalf("acquireSettledHibernationLease err = %v, want ErrNotSettled on an UNKNOWN in-flight set", err)
+	}
+}
+
+// TestHibernationIsGrantedForAWorkspaceHoldingNothing pins that the new gate
+// refuses only what it must — a gate that always refuses is a gate nobody keeps.
+func TestHibernationIsGrantedForAWorkspaceHoldingNothing(t *testing.T) {
+	// Arrange
+	h := settledHarness(t)
+
+	// Act
+	release, err := h.m.acquireSettledHibernationLease("ws")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("acquireSettledHibernationLease err = %v, want the lease granted for a quiet workspace", err)
+	}
+	release()
+}
