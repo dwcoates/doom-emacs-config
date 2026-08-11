@@ -964,6 +964,12 @@ export class UdsSession {
         protocolVersion: this.deps.protocolVersion,
         turnInFlight: () => this.handshakeTurnIds().length > 0,
         activeTurnIds: () => this.handshakeTurnIds(),
+        // THE SAME SET QueryLiveTasks answers from, ANNOUNCED rather than
+        // waited for. A detached task is not a turn, so without this a shim
+        // busy with real async work handshakes looking perfectly idle — and
+        // the daemon's roll decision is taken from that very frame, before any
+        // command could be sent to ask.
+        liveTaskIds: () => this.sortedLiveTaskIds(),
         // The daemon resets its store cursor when this differs from the uuid
         // it has persisted, which is how a rotation's fresh seq space is
         // subscribed from zero instead of from a retired high-water mark.
