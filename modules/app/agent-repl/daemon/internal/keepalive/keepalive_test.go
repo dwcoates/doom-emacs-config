@@ -75,7 +75,7 @@ func TestEvaluateAction(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := cfg.Evaluate(now, tc.lastTurnEndMs)
+			got := cfg.Evaluate(now, tc.lastTurnEndMs, tc.lastTurnEndMs)
 
 			if got.Action != tc.wantAction {
 				t.Fatalf("Evaluate action = %s, want %s", got.Action, tc.wantAction)
@@ -95,7 +95,7 @@ func TestEvaluateEntersTheRetryFloorAsItsOwnAction(t *testing.T) {
 	cfg := testConfig()
 	const now = int64(10_000_000_000)
 
-	got := cfg.Evaluate(now, now-int64((DefaultCacheTTL-RetryFloor)/time.Millisecond))
+	got := cfg.Evaluate(now, now-int64((DefaultCacheTTL-RetryFloor)/time.Millisecond), now-int64((DefaultCacheTTL-RetryFloor)/time.Millisecond))
 
 	if got.Action != ActionAwaitExpiry {
 		t.Fatalf("Evaluate action at the retry floor = %s, want await_expiry; an ActionPing here is a submit inside the floor", got.Action)
@@ -108,7 +108,7 @@ func TestEvaluatePingsOneMillisecondBeforeTheRetryFloor(t *testing.T) {
 	cfg := testConfig()
 	const now = int64(10_000_000_000)
 
-	got := cfg.Evaluate(now, now-int64((DefaultCacheTTL-RetryFloor-time.Millisecond)/time.Millisecond))
+	got := cfg.Evaluate(now, now-int64((DefaultCacheTTL-RetryFloor-time.Millisecond)/time.Millisecond), now-int64((DefaultCacheTTL-RetryFloor-time.Millisecond)/time.Millisecond))
 
 	if got.Action != ActionPing {
 		t.Fatalf("Evaluate action one millisecond before the retry floor = %s, want ping", got.Action)
@@ -121,7 +121,7 @@ func TestEvaluateFloorDecisionCarriesTheFloorAccount(t *testing.T) {
 	cfg := testConfig()
 	const now = int64(10_000_000_000)
 
-	got := cfg.Evaluate(now, now-int64((DefaultCacheTTL-RetryFloor)/time.Millisecond))
+	got := cfg.Evaluate(now, now-int64((DefaultCacheTTL-RetryFloor)/time.Millisecond), now-int64((DefaultCacheTTL-RetryFloor)/time.Millisecond))
 
 	if got.FloorMs != int64(RetryFloor/time.Millisecond) {
 		t.Fatalf("Evaluate floor_ms = %d, want %d", got.FloorMs, int64(RetryFloor/time.Millisecond))
@@ -135,7 +135,7 @@ func TestEvaluatePingReportsRemainingMargin(t *testing.T) {
 	cfg := testConfig()
 	const now = int64(10_000_000_000)
 
-	got := cfg.Evaluate(now, now-int64((DefaultCacheTTL-DefaultLeeway)/time.Millisecond))
+	got := cfg.Evaluate(now, now-int64((DefaultCacheTTL-DefaultLeeway)/time.Millisecond), now-int64((DefaultCacheTTL-DefaultLeeway)/time.Millisecond))
 
 	if got.RemainingMs != int64(DefaultLeeway/time.Millisecond) {
 		t.Fatalf("Evaluate remaining_ms = %d, want %d", got.RemainingMs, int64(DefaultLeeway/time.Millisecond))
@@ -161,7 +161,7 @@ func TestEvaluateReportsMeasuredElapsed(t *testing.T) {
 	const now = int64(10_000_000_000)
 	const idle = 3 * time.Hour
 
-	got := cfg.Evaluate(now, now-int64(idle/time.Millisecond))
+	got := cfg.Evaluate(now, now-int64(idle/time.Millisecond), now-int64(idle/time.Millisecond))
 
 	if want := int64(idle / time.Millisecond); got.ElapsedMs != want {
 		t.Fatalf("Evaluate elapsed = %d ms, want %d ms", got.ElapsedMs, want)
@@ -347,7 +347,7 @@ func TestEvaluateWarmCompactsFromItsDueInstant(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got := cfg.Evaluate(now, msAgo(tc.idle))
+			got := cfg.Evaluate(now, msAgo(tc.idle), msAgo(tc.idle))
 
 			// Assert.
 			if got.Action != tc.want {
@@ -502,7 +502,7 @@ func TestEvaluateNeverHibernatesBelowTheIdleCutoff(t *testing.T) {
 
 	// Act & Assert.
 	for elapsed := time.Duration(0); elapsed < cfg.IdleCutoff; elapsed += time.Minute {
-		got := cfg.Evaluate(now, now-int64(elapsed/time.Millisecond))
+		got := cfg.Evaluate(now, now-int64(elapsed/time.Millisecond), now-int64(elapsed/time.Millisecond))
 		if got.Action == ActionHibernate {
 			t.Fatalf("Evaluate at %s idle hibernated with cause %q; nothing below the %s cutoff may sleep",
 				elapsed, got.Cause, cfg.IdleCutoff)
@@ -520,7 +520,7 @@ func TestEvaluateNeverReportsCacheExpiredAsAHibernationCause(t *testing.T) {
 
 	// Act & Assert.
 	for elapsed := time.Duration(0); elapsed < 2*cfg.IdleCutoff; elapsed += time.Minute {
-		got := cfg.Evaluate(now, now-int64(elapsed/time.Millisecond))
+		got := cfg.Evaluate(now, now-int64(elapsed/time.Millisecond), now-int64(elapsed/time.Millisecond))
 		if got.Cause == CauseCacheExpired {
 			t.Fatalf("Evaluate at %s idle returned cause %q; the only cause this ladder may return is %q",
 				elapsed, got.Cause, CauseIdleCutoff)
@@ -537,7 +537,7 @@ func TestEvaluateDeclinesThePingOnceTheCacheIsCold(t *testing.T) {
 	const now = int64(10_000_000_000)
 
 	// Act.
-	got := cfg.Evaluate(now, now-int64((cfg.CacheTTL+time.Minute)/time.Millisecond))
+	got := cfg.Evaluate(now, now-int64((cfg.CacheTTL+time.Minute)/time.Millisecond), now-int64((cfg.CacheTTL+time.Minute)/time.Millisecond))
 
 	// Assert.
 	if got.Action != ActionLetCacheCool {
@@ -555,7 +555,7 @@ func TestLetCacheCoolNamesTheColdCacheCondition(t *testing.T) {
 	elapsed := cfg.CacheTTL + 30*time.Minute
 
 	// Act.
-	got := cfg.Evaluate(now, now-int64(elapsed/time.Millisecond))
+	got := cfg.Evaluate(now, now-int64(elapsed/time.Millisecond), now-int64(elapsed/time.Millisecond))
 
 	// Assert.
 	if got.Action.String() != "let_cache_cool" {
@@ -577,10 +577,144 @@ func TestEvaluateHibernatesAtTheIdleCutoffBoundary(t *testing.T) {
 	const now = int64(10_000_000_000)
 
 	// Act.
-	got := cfg.Evaluate(now, now-int64(cfg.IdleCutoff/time.Millisecond))
+	got := cfg.Evaluate(now, now-int64(cfg.IdleCutoff/time.Millisecond), now-int64(cfg.IdleCutoff/time.Millisecond))
 
 	// Assert.
 	if got.Action != ActionHibernate || got.Cause != CauseIdleCutoff {
 		t.Fatalf("Evaluate at the cutoff = %s/%q, want %s/%q", got.Action, got.Cause, ActionHibernate, CauseIdleCutoff)
+	}
+}
+
+// TestAPingOnlySessionStillReachesTheIdleCutoff is the engagement clock's whole
+// reason for existing. The cache clock is reset by every keep-alive ping, so a
+// session pinged once per cache lifetime is permanently "fresh" by that reading
+// — and while the cutoff measured it, such a session never hibernated at all.
+func TestAPingOnlySessionStillReachesTheIdleCutoff(t *testing.T) {
+	// Arrange — engaged eight hours ago; the last ping ended one minute ago.
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+	lastPingEndMs := now - int64(time.Minute/time.Millisecond)
+	lastEngagementMs := now - int64(8*time.Hour/time.Millisecond)
+
+	// Act.
+	got := cfg.Evaluate(now, lastPingEndMs, lastEngagementMs)
+
+	// Assert.
+	if got.Action != ActionHibernate || got.Cause != CauseIdleCutoff {
+		t.Fatalf("Evaluate for a ping-only session = %s/%q, want %s/%q; a session kept warm for nobody must still be reaped",
+			got.Action, got.Cause, ActionHibernate, CauseIdleCutoff)
+	}
+}
+
+// AND THE ACCOUNT CARRIES THE ENGAGEMENT ELAPSED, not the cache one. The
+// durable hibernation record must report the figure the threshold was actually
+// compared against, or it names a number no arm of this ladder ever tested.
+func TestTheIdleCutoffAccountCarriesTheEngagementElapsed(t *testing.T) {
+	// Arrange.
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+	quiet := 8 * time.Hour
+
+	// Act.
+	got := cfg.Evaluate(now, now-int64(time.Minute/time.Millisecond), now-int64(quiet/time.Millisecond))
+
+	// Assert.
+	if want := int64(quiet / time.Millisecond); got.ElapsedMs != want {
+		t.Fatalf("ElapsedMs = %d, want the engagement elapsed %d", got.ElapsedMs, want)
+	}
+}
+
+// AN ENGAGEMENT TURN RESETS THE CUTOFF. The mirror of the test above: the same
+// long-idle session, engaged a minute ago, is not reaped.
+func TestAnEngagementTurnResetsTheIdleCutoff(t *testing.T) {
+	// Arrange — both clocks fresh, as a real turn leaves them.
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+	justNow := now - int64(time.Minute/time.Millisecond)
+
+	// Act.
+	got := cfg.Evaluate(now, justNow, justNow)
+
+	// Assert.
+	if got.Action == ActionHibernate {
+		t.Fatalf("Evaluate a minute after an engagement turn = %s/%q, want no hibernation",
+			got.Action, got.Cause)
+	}
+}
+
+// AN UNDATED ENGAGEMENT CLOCK CANNOT REAP. Zero means no engagement has ever
+// been observed, and reading that as "idle since the epoch" is how a sweeper
+// reaps the session it knows least about.
+func TestAnUndatedEngagementClockDoesNotHibernate(t *testing.T) {
+	// Arrange — a cache clock far past the cutoff, and no engagement instant.
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+
+	// Act.
+	got := cfg.Evaluate(now, now-int64(24*time.Hour/time.Millisecond), 0)
+
+	// Assert.
+	if got.Action == ActionHibernate {
+		t.Fatalf("Evaluate with an undated engagement clock = %s/%q, want no hibernation on absent evidence",
+			got.Action, got.Cause)
+	}
+}
+
+// AN ENGAGEMENT CLOCK IN THE FUTURE IS A CLOCK THAT MOVED BACKWARDS, not a
+// session with negative idle time. It is not reaped either.
+func TestABackwardsEngagementClockDoesNotHibernate(t *testing.T) {
+	// Arrange.
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+
+	// Act.
+	got := cfg.Evaluate(now, now-int64(24*time.Hour/time.Millisecond), now+int64(time.Hour/time.Millisecond))
+
+	// Assert.
+	if got.Action == ActionHibernate {
+		t.Fatalf("Evaluate with an engagement clock in the future = %s/%q, want no hibernation",
+			got.Action, got.Cause)
+	}
+}
+
+// THE PING SCHEDULE STILL MEASURES THE CACHE CLOCK. The engagement clock must
+// not reach the cache arms: a session engaged eight hours ago whose cache was
+// refreshed 58 minutes ago is due a ping, not a compaction and not nothing.
+func TestThePingWindowStillMeasuresTheCacheClock(t *testing.T) {
+	// Arrange — one minute short of the idle cutoff, so the cutoff does not fire.
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+	pingDue := now - int64((cfg.CacheTTL-cfg.Leeway)/time.Millisecond)
+	engaged := now - int64((cfg.IdleCutoff-time.Minute)/time.Millisecond)
+
+	// Act.
+	got := cfg.Evaluate(now, pingDue, engaged)
+
+	// Assert.
+	if got.Action != ActionPing {
+		t.Fatalf("Evaluate = %s, want %s: the ping window is a fact about the cache, not about engagement", got.Action, ActionPing)
+	}
+}
+
+// THE COLD-CACHE ARM REPORTS ITS REMAINING ON THE CUTOFF'S OWN CLOCK. Measuring
+// it on the cache clock would tell an operator a session has hours left when the
+// very next sweep is about to reap it.
+func TestLetCacheCoolReportsRemainingOnTheEngagementClock(t *testing.T) {
+	// Arrange — the cache went cold two minutes ago; engagement was 5h ago.
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+	quiet := 5 * time.Hour
+
+	// Act.
+	got := cfg.Evaluate(now,
+		now-int64((cfg.CacheTTL+2*time.Minute)/time.Millisecond),
+		now-int64(quiet/time.Millisecond))
+
+	// Assert.
+	if got.Action != ActionLetCacheCool {
+		t.Fatalf("Evaluate action = %s, want %s", got.Action, ActionLetCacheCool)
+	}
+	if want := int64((cfg.IdleCutoff - quiet) / time.Millisecond); got.CutoffRemainingMs != want {
+		t.Fatalf("CutoffRemainingMs = %d, want %d measured on the engagement clock", got.CutoffRemainingMs, want)
 	}
 }

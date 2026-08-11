@@ -58,7 +58,7 @@ func TestKeepAlivePolicyCausePrecedence(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got := cfg.Evaluate(now, msAgo(now, tc.idle))
+			got := cfg.Evaluate(now, msAgo(now, tc.idle), msAgo(now, tc.idle))
 
 			// Assert.
 			if got.Action != tc.wantAction || got.Cause != tc.wantCause {
@@ -315,5 +315,95 @@ func TestSweepIdleCutoffLeavesADisabledTimeoutAlone(t *testing.T) {
 	// Assert.
 	if got != 0 {
 		t.Fatalf("sweepIdleCutoff() with hibernation disabled = %s, want 0", got)
+	}
+}
+
+// A PING-ONLY SESSION IS STILL REAPED BY THE SWEEP. The cache clock is reset by
+// every keep-alive ping, so before the engagement clock this session read as
+// freshly active forever and the sweeper never hibernated it at all.
+func TestKeepAlivePolicyHibernatesAPingOnlySessionAtTheCutoff(t *testing.T) {
+	// Arrange — engaged eight hours ago; the last ping ended a minute ago.
+	h := newHarness(t)
+	cfg := keepalive.DefaultConfig()
+	now := h.srv.now().UnixMilli()
+	rec := registry.Record{
+		SessionID:        "s1",
+		CWD:              "/ws",
+		LastTurnEndMs:    msAgo(now, time.Minute),
+		LastEngagementMs: msAgo(now, cfg.IdleCutoff+2*time.Hour),
+	}
+
+	// Act.
+	owned := h.srv.applyKeepAlivePolicy(rec, now)
+
+	// Assert.
+	if !owned {
+		t.Fatal("the policy did not claim a session idle past the cutoff on its engagement clock; a session kept warm for nobody must still be reaped")
+	}
+}
+
+// A RECORD WITH NO ENGAGEMENT INSTANT FALLS BACK TO ITS TURN END, which is the
+// upgrade path: a session written by an earlier daemon carries only the one
+// clock, and it must still be evaluated rather than becoming immortal.
+func TestKeepAlivePolicyFallsBackToTheTurnEndForAnUnengagedRecord(t *testing.T) {
+	// Arrange — no engagement instant at all, and a turn end past the cutoff.
+	h := newHarness(t)
+	cfg := keepalive.DefaultConfig()
+	now := h.srv.now().UnixMilli()
+	rec := registry.Record{
+		SessionID:     "s1",
+		CWD:           "/ws",
+		LastTurnEndMs: msAgo(now, cfg.IdleCutoff+time.Hour),
+	}
+
+	// Act.
+	owned := h.srv.applyKeepAlivePolicy(rec, now)
+
+	// Assert.
+	if !owned {
+		t.Fatal("a pre-engagement-clock record past the cutoff was not claimed; the fallback is what keeps it evaluable")
+	}
+}
+
+// THE GENERIC SWEEP READS THE ENGAGEMENT CLOCK, NOT THE STATE LOG. A keep-alive
+// ping's own turn boundaries append workspace_state rows exactly as a real
+// turn's do, so `ssm.LastActivityMs` was fooled by pings for the same reason the
+// registry's cache clock was.
+func TestSweepableMeasuresTheEngagementClockRatherThanTheStateLog(t *testing.T) {
+	// Arrange — the state log is fresh (the harness just wrote it), and the
+	// record says nobody has engaged with the workspace in days.
+	h, id, quietFor := sweptWorkspace(t, time.Hour)
+	quietFor(time.Minute)
+	rec := sweptRecord(t, h, id, "/w")
+	rec.LastEngagementMs = msAgo(h.srv.now().UnixMilli(), 48*time.Hour)
+
+	// Act.
+	idleMs, ok := h.srv.sweepable(rec, h.srv.now().UnixMilli())
+
+	// Assert.
+	if !ok {
+		t.Fatal("sweepable = false for a workspace nobody has engaged with in 48 hours; the fresh state-log row is a keep-alive ping's, not somebody's")
+	}
+	if idleMs < int64(24*time.Hour/time.Millisecond) {
+		t.Fatalf("measured idleness %dms, want the engagement clock's ~48h; the state log's own timestamp would report minutes", idleMs)
+	}
+}
+
+// AND THE FRESH ENGAGEMENT CLOCK HOLDS IT, which is the same gate stated the
+// other way: a workspace somebody used a minute ago is not reaped however old
+// its state log happens to be.
+func TestSweepableHoldsAFreshlyEngagedWorkspace(t *testing.T) {
+	// Arrange.
+	h, id, quietFor := sweptWorkspace(t, time.Hour)
+	quietFor(48 * time.Hour)
+	rec := sweptRecord(t, h, id, "/w")
+	rec.LastEngagementMs = msAgo(h.srv.now().UnixMilli(), time.Minute)
+
+	// Act.
+	_, ok := h.srv.sweepable(rec, h.srv.now().UnixMilli())
+
+	// Assert.
+	if ok {
+		t.Fatal("sweepable = true for a workspace engaged a minute ago")
 	}
 }
