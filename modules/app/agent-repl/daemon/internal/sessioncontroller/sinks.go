@@ -685,6 +685,14 @@ type consumer struct {
 	// workspace went dead with no account of why, and the one death reason the
 	// registry documented was never written by anything.
 	onSessionEnded func()
+	// onAsyncWorkDrained reports the instant this session's live background-task
+	// set went from holding work to holding none.
+	//
+	// IT IS AN EDGE, NOT A LEVEL, and it is the async analogue of a turn
+	// boundary: a stale-shim roll deferred on detached work has nothing left to
+	// wait for exactly here (asyncrefresh.go). Bound after construction, like
+	// every other hook in this block, and nil in the harnesses that do not care.
+	onAsyncWorkDrained func()
 
 	// skills correlates a launched skill's SKILL.md body back to the Skill
 	// call that launched it (skillbody.go). Locked internally, so it sits
@@ -1241,7 +1249,14 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 		// The SAME event moves the open-task set the phantom sweep asks about,
 		// so that set and the catalog below are two readings of one fold rather
 		// than two independent derivations (phantomtask.go).
-		c.observeTaskLifecycle(ev)
+		//
+		// A fold that DRAINED the set is the async analogue of a turn boundary,
+		// and it is announced for exactly the reason a turn end is: a stale-shim
+		// roll deferred on detached work has, at this instant, nothing left to
+		// wait for (asyncrefresh.go).
+		if c.observeTaskLifecycle(ev) && c.onAsyncWorkDrained != nil {
+			c.onAsyncWorkDrained()
+		}
 		catalog := frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.fence(), c.snapshotRing(), c.logf)
 		c.logf("session-controller: task catalog push session=%s ws=%s seq=%d event=%s tasks=%d",
 			c.sessionID, c.workspace, ev.GetSeq(), stateKind(ev), len(catalog.GetTasks()))
