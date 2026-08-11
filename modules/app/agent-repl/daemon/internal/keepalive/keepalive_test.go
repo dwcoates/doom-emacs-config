@@ -51,16 +51,14 @@ func TestEvaluateAction(t *testing.T) {
 			wantAction:    ActionPing,
 		},
 		{
-			name:          "at the TTL the cache is already cold",
+			name:          "at the TTL the cache is left to cool rather than slept on",
 			lastTurnEndMs: msAgo(DefaultCacheTTL),
-			wantAction:    ActionHibernate,
-			wantCause:     CauseCacheExpired,
+			wantAction:    ActionLetCacheCool,
 		},
 		{
-			name:          "an overslept session hibernates cache-expired",
+			name:          "an overslept session below the cutoff is left to cool",
 			lastTurnEndMs: msAgo(3 * time.Hour),
-			wantAction:    ActionHibernate,
-			wantCause:     CauseCacheExpired,
+			wantAction:    ActionLetCacheCool,
 		},
 		{
 			name:          "past the idle cutoff hibernates idle-cutoff, not cache-expired",
@@ -491,5 +489,98 @@ func TestValidateRefusesADeadlineShorterThanOneSweepInterval(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Validate() accepted a %s ping deadline against a %s sweep interval; a ping would be judged dead on the tick after its submit",
 			cfg.PingDeadline(), cfg.SweepInterval(0))
+	}
+}
+
+// TestEvaluateNeverHibernatesBelowTheIdleCutoff is the whole point of
+// ActionLetCacheCool: no elapsed short of the cutoff produces a sleep, however
+// far past the cache TTL it is.
+func TestEvaluateNeverHibernatesBelowTheIdleCutoff(t *testing.T) {
+	// Arrange.
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+
+	// Act & Assert.
+	for elapsed := time.Duration(0); elapsed < cfg.IdleCutoff; elapsed += time.Minute {
+		got := cfg.Evaluate(now, now-int64(elapsed/time.Millisecond))
+		if got.Action == ActionHibernate {
+			t.Fatalf("Evaluate at %s idle hibernated with cause %q; nothing below the %s cutoff may sleep",
+				elapsed, got.Cause, cfg.IdleCutoff)
+		}
+	}
+}
+
+// TestEvaluateNeverReportsCacheExpiredAsAHibernationCause states the guarantee
+// as the ladder's own: cache_expired is a MEASUREMENT taken elsewhere, and no
+// arm of this time-since policy produces it.
+func TestEvaluateNeverReportsCacheExpiredAsAHibernationCause(t *testing.T) {
+	// Arrange.
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+
+	// Act & Assert.
+	for elapsed := time.Duration(0); elapsed < 2*cfg.IdleCutoff; elapsed += time.Minute {
+		got := cfg.Evaluate(now, now-int64(elapsed/time.Millisecond))
+		if got.Cause == CauseCacheExpired {
+			t.Fatalf("Evaluate at %s idle returned cause %q; the only cause this ladder may return is %q",
+				elapsed, got.Cause, CauseIdleCutoff)
+		}
+	}
+}
+
+// TestEvaluateDeclinesThePingOnceTheCacheIsCold covers the arm's OTHER half:
+// the cold cache is not pinged either. ActionLetCacheCool carries no submit, so
+// no reading of the switch can pay a full re-ingest here.
+func TestEvaluateDeclinesThePingOnceTheCacheIsCold(t *testing.T) {
+	// Arrange.
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+
+	// Act.
+	got := cfg.Evaluate(now, now-int64((cfg.CacheTTL+time.Minute)/time.Millisecond))
+
+	// Assert.
+	if got.Action != ActionLetCacheCool {
+		t.Fatalf("Evaluate action = %s, want %s", got.Action, ActionLetCacheCool)
+	}
+}
+
+// TestLetCacheCoolNamesTheColdCacheCondition covers observability: the decision
+// says the cache went cold, against which TTL, and how long the session will
+// stay up before the cutoff reaps it.
+func TestLetCacheCoolNamesTheColdCacheCondition(t *testing.T) {
+	// Arrange.
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+	elapsed := cfg.CacheTTL + 30*time.Minute
+
+	// Act.
+	got := cfg.Evaluate(now, now-int64(elapsed/time.Millisecond))
+
+	// Assert.
+	if got.Action.String() != "let_cache_cool" {
+		t.Fatalf("Action.String() = %q, want %q", got.Action.String(), "let_cache_cool")
+	}
+	if got.TTLMs != int64(cfg.CacheTTL/time.Millisecond) {
+		t.Fatalf("TTLMs = %d, want %d", got.TTLMs, int64(cfg.CacheTTL/time.Millisecond))
+	}
+	if want := int64((cfg.IdleCutoff - elapsed) / time.Millisecond); got.CutoffRemainingMs != want {
+		t.Fatalf("CutoffRemainingMs = %d, want %d", got.CutoffRemainingMs, want)
+	}
+}
+
+// TestEvaluateHibernatesAtTheIdleCutoffBoundary covers the one surviving sleep
+// at its exact edge.
+func TestEvaluateHibernatesAtTheIdleCutoffBoundary(t *testing.T) {
+	// Arrange.
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+
+	// Act.
+	got := cfg.Evaluate(now, now-int64(cfg.IdleCutoff/time.Millisecond))
+
+	// Assert.
+	if got.Action != ActionHibernate || got.Cause != CauseIdleCutoff {
+		t.Fatalf("Evaluate at the cutoff = %s/%q, want %s/%q", got.Action, got.Cause, ActionHibernate, CauseIdleCutoff)
 	}
 }
