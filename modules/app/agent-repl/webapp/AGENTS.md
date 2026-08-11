@@ -80,3 +80,32 @@
 source-line and canonical-call counts. This is a rough syntactic review aid,
 not semantic logging coverage. Directly audit every critical branch and error
 path even when the ratio rises.
+
+## The async teal wash, and what it guarantees
+
+Teal is keyed on TOOL KIND, not on asyncness. `ASYNC_TEAL_TOOLS` in
+`src/render.ts` is the one list — `Skill` plus `SUBAGENT_TOOLS` (`Task`,
+`Agent`) — and `test/styles.test.ts` pins it to the stylesheet's
+`.tool-card.tool-skill, .tool-card.tool-agent, .tool-card.tool-task` selector
+list. A card can be async without being teal (a background `Bash` watcher is
+grey), and a teal card need not have detached anything.
+
+A teal card's NESTED SECTION — the expanded area holding its constituent
+sub-bubbles: its activity fold, its stream fold, the `AsyncBubble` its call
+detached, and that bubble's own children — is not an aside to be opened. It is
+the card's content, so it carries three guarantees:
+
+- ALWAYS OPEN. It renders through `Fold`'s `fixed` arm: no
+  `data-panel-toggle`, no chevron, no click target, and no open state
+  consulted.
+- THE SHARED CAP. `.fold-fixed > .agent-panel` joins the shared N-line cap rule
+  and takes `--cap-lines: var(--feed-cap-lines)` — the very budget a response
+  or prompt bubble body stops at, stated once in `:root`.
+- SCROLLED, NOT CLIPPED. `overflow-y: auto` comes off that same shared rule,
+  and `max-height` (never `height`) lets a short body shrink to fit.
+
+Adding a kind to the wash means inheriting all three. `test/render.test.ts`
+asserts them for every member of `ASYNC_TEAL_TOOLS`, so a kind that gains the
+teal without the guarantees fails the suite rather than shipping a card that
+looks teal and still folds. Grey (non-teal) cards fold exactly as they always
+have; nothing here changes them.

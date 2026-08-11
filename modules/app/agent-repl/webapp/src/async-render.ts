@@ -260,11 +260,20 @@ export function bubbleFoldId(bubbleId: string): string {
  * VISITED is the cycle guard on the parent-pointer walk. A bubble reached twice
  * means the pointers form a loop, which no legal tree does; it is reported and
  * the branch is cut rather than recursed into forever.
+ *
+ * FIXED is set when this bubble is drawn INSIDE a teal card (ASYNC_TEAL_TOOLS
+ * in `render.ts`): the whole nested section of a teal card is always open and
+ * has no fold affordance, so the bubble renders as a fixed panel and passes
+ * the same verdict down to the bubbles it spawned — a nested section with one
+ * foldable rung left is exactly the unobvious affordance this removes. A
+ * bubble drawn at the top of the feed (`AsyncFeed`) is not in a teal card and
+ * folds as it always has.
  */
 export function AsyncBubbleCard(
   bubble: AsyncBubble,
   ctx: AsyncRenderContext,
   visited: ReadonlySet<string> = new Set(),
+  fixed = false,
 ): string {
   if (visited.has(bubble.id)) {
     log("error", `async-render: bubble ${bubble.id} is its own ancestor — the parent_bubble_id pointers form a cycle, so the branch is cut rather than recursed into`, {
@@ -289,7 +298,7 @@ export function AsyncBubbleCard(
   const attached = pointed.length === 0 ? EMPTY_ID_SET : bubblesDrawnByOwnCards(bubble, ctx);
   const children = pointed
     .filter((child) => !attached.has(child.id))
-    .map((child) => `<div class="feed-child">${AsyncBubbleCard(child, ctx, seen)}</div>`)
+    .map((child) => `<div class="feed-child">${AsyncBubbleCard(child, ctx, seen, fixed)}</div>`)
     .join("");
   return Fold({
     id,
@@ -298,6 +307,7 @@ export function AsyncBubbleCard(
     ticker: `${arc}<span class="agent-dot agent-${dot}" aria-hidden="true">●</span> ${escapeHtml(face)}`,
     body: () => `${bubbleBody(bubble, ctx)}${children}`,
     open,
+    fixed,
   });
 }
 
@@ -321,9 +331,10 @@ export function AsyncBubbleForCall(
   toolUseId: string,
   spawnedBubbleId: string | undefined,
   ctx: AsyncRenderContext,
+  fixed = false,
 ): string {
   return bubblesDrawnForCall(toolUseId, spawnedBubbleId, ctx.registry)
-    .map((bubble) => AsyncBubbleCard(bubble, ctx))
+    .map((bubble) => AsyncBubbleCard(bubble, ctx, new Set(), fixed))
     .join("");
 }
 
