@@ -122,6 +122,98 @@ export function parkAtTail(box: ScrollTail): void {
   box.scrollTop = box.scrollHeight;
 }
 
+/**
+ * The reader's PLACE in a feed, as something that survives the feed being
+ * rebuilt from nothing.
+ *
+ * A scrollTop cannot survive a rebuild: every element is discarded and
+ * recreated, so the number it named describes a layout that no longer exists.
+ * What does survive is an ITEM — the topmost one still on screen — and how far
+ * down the viewport it sat. Restoring the pair puts the same content back under
+ * the reader's eyes whatever the rebuild did to the heights above it.
+ *
+ * `key` is the feed's own per-item key (`data-key`), so this depends on nothing
+ * about how the items are rendered.
+ */
+export interface FeedAnchor {
+  key: string;
+  /** The anchor item's offset from the viewport top, in px, at capture. */
+  offsetPx: number;
+  /** Whether the reader was following the tail: then the tail IS the anchor. */
+  pinned: boolean;
+}
+
+/** The box operations anchoring reads and writes. */
+export interface AnchorBox extends ScrollTail {
+  scrollTop: number;
+  clientHeight: number;
+  querySelector(selectors: string): { offsetTop: number } | null;
+}
+
+/** One rendered feed item, as the anchor capture reads it. */
+export interface AnchorItem {
+  key: string;
+  offsetTop: number;
+}
+
+/**
+ * Sample where the reader is, BEFORE a rebuild discards the elements.
+ *
+ * The topmost item whose bottom is still below the viewport top is the one the
+ * reader is looking at; anything above it has already scrolled away. A feed
+ * with no items, or one the reader is following the tail of, anchors on the
+ * tail — which is what `pinned` says and what `restoreFeedAnchor` then does.
+ */
+export function captureFeedAnchor(
+  box: AnchorBox,
+  items: readonly AnchorItem[],
+  pinPx: number = PIN_PX,
+): FeedAnchor | null {
+  if (isPinnedToBottom(box, pinPx)) return { key: "", offsetPx: 0, pinned: true };
+  for (const item of items) {
+    if (item.offsetTop >= box.scrollTop) {
+      return { key: item.key, offsetPx: item.offsetTop - box.scrollTop, pinned: false };
+    }
+  }
+  return null;
+}
+
+/**
+ * Put the reader back where `captureFeedAnchor` found them, AFTER the rebuild.
+ *
+ * A pinned reader is parked at the tail, which is where they were. Anyone else
+ * is placed so the anchor item sits at the same offset from the viewport top it
+ * sat at before — the identical pixels, however the heights above it changed.
+ *
+ * AN ANCHOR THAT NO LONGER EXISTS IS NOT GUESSED AT. The item may have been
+ * cleared or compacted away, and inventing a position for it would move the
+ * reader somewhere they never were; the box is left exactly as the rebuild left
+ * it, and the caller's own tail rule applies. Returns whether the anchor was
+ * restored, so a caller can say which happened.
+ */
+export function restoreFeedAnchor(box: AnchorBox, anchor: FeedAnchor | null): boolean {
+  if (anchor === null) return false;
+  if (anchor.pinned) {
+    parkAtTail(box);
+    return true;
+  }
+  const node = box.querySelector(`[data-key="${cssEscapeKey(anchor.key)}"]`);
+  if (node === null) return false;
+  box.scrollTop = node.offsetTop - anchor.offsetPx;
+  return true;
+}
+
+/**
+ * Escape a feed key for use inside an attribute selector.
+ *
+ * Keys are the daemon's uuids and derived strings, but a selector built from an
+ * unescaped one is a parse error waiting for the first key with a quote in it —
+ * and a throwing selector inside a render is a frozen feed.
+ */
+function cssEscapeKey(key: string): string {
+  return key.replace(/["\\]/g, "\\$&");
+}
+
 /** Registering a listener for a box's own scroll events. */
 export type SubscribeScroll = (onScroll: () => void) => void;
 
