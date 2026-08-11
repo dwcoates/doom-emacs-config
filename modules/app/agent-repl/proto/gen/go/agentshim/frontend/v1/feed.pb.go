@@ -177,6 +177,85 @@ func (x *ConversationDelta) GetFence() string {
 	return ""
 }
 
+// The two containment facts every message carries, in one message so no
+// producer can supply half of them and no consumer can read them from two
+// different shapes.
+//
+// SPAWN IS NOT CONTAINMENT. A message whose work was started by another
+// message's tool call is NOT thereby contained by it: provenance lives on
+// origin_tool_use_id, and lineage lives here. Conflating them is what made
+// "is a top-level bubble a top-level message" unanswerable.
+type MessageLineage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The feed row this message ultimately belongs to — the ancestor whose own
+	// parent is the feed itself.
+	//
+	// ALWAYS SET, including on a top-level message, where it equals that
+	// message's own id. It is never empty and never inferred: a reader that had
+	// to walk parent pointers to find the root would be performing the unbounded
+	// traversal this field exists to remove, and a page query would stop being a
+	// single indexed pass.
+	//
+	// DENORMALIZED ON PURPOSE. It is derivable by walking parent_message_id to
+	// its end, and storing it anyway is the entire reason a page of ten messages
+	// costs one query. The cost is that it can drift: it MUST equal the root of
+	// the parent chain, and a write that disagrees is CORRUPTION, not a variant.
+	TopLevelMessageId string `protobuf:"bytes,1,opt,name=top_level_message_id,json=topLevelMessageId,proto3" json:"top_level_message_id,omitempty"`
+	// The message immediately containing this one — ONE HOP, never the root.
+	//
+	// EMPTY means this message sits directly in the feed, in which case
+	// top_level_message_id is this message's own id. Absence is the fact itself,
+	// not a placeholder for an unknown: a message whose parent could not be
+	// resolved is a producer fault, never an empty pointer.
+	ParentMessageId string `protobuf:"bytes,2,opt,name=parent_message_id,json=parentMessageId,proto3" json:"parent_message_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *MessageLineage) Reset() {
+	*x = MessageLineage{}
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MessageLineage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MessageLineage) ProtoMessage() {}
+
+func (x *MessageLineage) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MessageLineage.ProtoReflect.Descriptor instead.
+func (*MessageLineage) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *MessageLineage) GetTopLevelMessageId() string {
+	if x != nil {
+		return x.TopLevelMessageId
+	}
+	return ""
+}
+
+func (x *MessageLineage) GetParentMessageId() string {
+	if x != nil {
+		return x.ParentMessageId
+	}
+	return ""
+}
+
 // One curated conversation addition: FEED PACKAGING wrapped around a payload.
 //
 // The packaging is what the feed knows about a message regardless of what the
@@ -200,6 +279,25 @@ type Message struct {
 	// so a resync or transcript replay reproduces the same verdict instead of
 	// re-deriving it from state that has since moved on.
 	Source ConversationSource `protobuf:"varint,4,opt,name=source,proto3,enum=agentshim.frontend.v1.ConversationSource" json:"source,omitempty"`
+	// WHAT CONTAINS THIS MESSAGE. Always present — see MessageLineage, whose
+	// top_level_message_id is never empty and is self-referential on a feed row.
+	//
+	// It sits in the PACKAGING half rather than inside any payload arm because
+	// containment is a fact about the message regardless of what the message is,
+	// and because a per-arm copy is a per-arm chance to disagree. It is a low
+	// tag for the same reason uuid and source are: this is what the feed knows
+	// before it knows what it is looking at.
+	//
+	// THIS IS THE ONLY PLACE LINEAGE LIVES on this contract. Records that are
+	// not messages — turn and session boundaries, heartbeats, latency samples,
+	// claim bridges, query lifecycle, usage observations, rewinds, file-plane
+	// diagnostics — are agentshim.core.v1.Envelope payloads and are NOT Messages,
+	// so they have no field here to populate. That is deliberate and structural:
+	// if such a record could carry a top_level_message_id it would become a
+	// phantom feed row, and a page of ten "messages" would silently deliver
+	// several turn boundaries and a short screen. Do not lift this field onto
+	// Envelope, and do not model an unowned record as an empty MessageLineage.
+	Lineage *MessageLineage `protobuf:"bytes,6,opt,name=lineage,proto3" json:"lineage,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*Message_Agent
@@ -218,7 +316,7 @@ type Message struct {
 
 func (x *Message) Reset() {
 	*x = Message{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[1]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -230,7 +328,7 @@ func (x *Message) String() string {
 func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[1]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -243,7 +341,7 @@ func (x *Message) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message.ProtoReflect.Descriptor instead.
 func (*Message) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{1}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Message) GetUuid() string {
@@ -272,6 +370,13 @@ func (x *Message) GetSource() ConversationSource {
 		return x.Source
 	}
 	return ConversationSource_CONVERSATION_SOURCE_UNSPECIFIED
+}
+
+func (x *Message) GetLineage() *MessageLineage {
+	if x != nil {
+		return x.Lineage
+	}
+	return nil
 }
 
 func (x *Message) GetPayload() isMessage_Payload {
@@ -463,7 +568,7 @@ type CompactionSummaryItem struct {
 
 func (x *CompactionSummaryItem) Reset() {
 	*x = CompactionSummaryItem{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[2]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -475,7 +580,7 @@ func (x *CompactionSummaryItem) String() string {
 func (*CompactionSummaryItem) ProtoMessage() {}
 
 func (x *CompactionSummaryItem) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[2]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -488,7 +593,7 @@ func (x *CompactionSummaryItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactionSummaryItem.ProtoReflect.Descriptor instead.
 func (*CompactionSummaryItem) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{2}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CompactionSummaryItem) GetSummary() string {
@@ -551,7 +656,7 @@ type TypingDelta struct {
 
 func (x *TypingDelta) Reset() {
 	*x = TypingDelta{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[3]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -563,7 +668,7 @@ func (x *TypingDelta) String() string {
 func (*TypingDelta) ProtoMessage() {}
 
 func (x *TypingDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[3]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -576,7 +681,7 @@ func (x *TypingDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TypingDelta.ProtoReflect.Descriptor instead.
 func (*TypingDelta) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{3}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *TypingDelta) GetWorkspace() string {
@@ -633,7 +738,7 @@ type TypingCut struct {
 
 func (x *TypingCut) Reset() {
 	*x = TypingCut{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -645,7 +750,7 @@ func (x *TypingCut) String() string {
 func (*TypingCut) ProtoMessage() {}
 
 func (x *TypingCut) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -658,7 +763,7 @@ func (x *TypingCut) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TypingCut.ProtoReflect.Descriptor instead.
 func (*TypingCut) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{4}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *TypingCut) GetWorkspace() string {
@@ -705,7 +810,7 @@ type SessionInitView struct {
 
 func (x *SessionInitView) Reset() {
 	*x = SessionInitView{}
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -717,7 +822,7 @@ func (x *SessionInitView) String() string {
 func (*SessionInitView) ProtoMessage() {}
 
 func (x *SessionInitView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -730,7 +835,7 @@ func (x *SessionInitView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionInitView.ProtoReflect.Descriptor instead.
 func (*SessionInitView) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{5}
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SessionInitView) GetWorkspace() string {
@@ -765,13 +870,17 @@ const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"\vthrough_seq\x18\x04 \x01(\x04R\n" +
 	"throughSeq\x12\x14\n" +
 	"\x05fence\x18\x05 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03R\n" +
-	"session_idR\x05items\"\xd3\b\n" +
+	"session_idR\x05items\"m\n" +
+	"\x0eMessageLineage\x12/\n" +
+	"\x14top_level_message_id\x18\x01 \x01(\tR\x11topLevelMessageId\x12*\n" +
+	"\x11parent_message_id\x18\x02 \x01(\tR\x0fparentMessageId\"\x94\t\n" +
 	"\aMessage\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x13\n" +
 	"\x05ts_ms\x18\x02 \x01(\x03R\x04tsMs\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x03 \x01(\tR\trequestId\x12A\n" +
-	"\x06source\x18\x04 \x01(\x0e2).agentshim.frontend.v1.ConversationSourceR\x06source\x12<\n" +
+	"\x06source\x18\x04 \x01(\x0e2).agentshim.frontend.v1.ConversationSourceR\x06source\x12?\n" +
+	"\alineage\x18\x06 \x01(\v2%.agentshim.frontend.v1.MessageLineageR\alineage\x12<\n" +
 	"\x05agent\x18\x05 \x01(\v2$.agentshim.frontend.v1.AgentEmissionH\x00R\x05agent\x12F\n" +
 	"\fuser_message\x18\v \x01(\v2!.agentshim.data.v1.ApiUserMessageH\x00R\vuserMessage\x12C\n" +
 	"\n" +
@@ -823,45 +932,47 @@ func file_agentshim_frontend_v1_feed_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_frontend_v1_feed_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentshim_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_agentshim_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_agentshim_frontend_v1_feed_proto_goTypes = []any{
 	(ConversationSource)(0),       // 0: agentshim.frontend.v1.ConversationSource
 	(*ConversationDelta)(nil),     // 1: agentshim.frontend.v1.ConversationDelta
-	(*Message)(nil),               // 2: agentshim.frontend.v1.Message
-	(*CompactionSummaryItem)(nil), // 3: agentshim.frontend.v1.CompactionSummaryItem
-	(*TypingDelta)(nil),           // 4: agentshim.frontend.v1.TypingDelta
-	(*TypingCut)(nil),             // 5: agentshim.frontend.v1.TypingCut
-	(*SessionInitView)(nil),       // 6: agentshim.frontend.v1.SessionInitView
-	(*AgentEmission)(nil),         // 7: agentshim.frontend.v1.AgentEmission
-	(*v1.ApiUserMessage)(nil),     // 8: agentshim.data.v1.ApiUserMessage
-	(*v11.PermissionItem)(nil),    // 9: agentshim.core.v1.PermissionItem
-	(*FailureCardView)(nil),       // 10: agentshim.frontend.v1.FailureCardView
-	(*v11.ContextCleared)(nil),    // 11: agentshim.core.v1.ContextCleared
-	(*v11.ContextCompacted)(nil),  // 12: agentshim.core.v1.ContextCompacted
-	(*SessionCommandItem)(nil),    // 13: agentshim.frontend.v1.SessionCommandItem
-	(*AsyncBubble)(nil),           // 14: agentshim.frontend.v1.AsyncBubble
-	(*v11.ContentDelta)(nil),      // 15: agentshim.core.v1.ContentDelta
-	(*v1.SystemInit)(nil),         // 16: agentshim.data.v1.SystemInit
+	(*MessageLineage)(nil),        // 2: agentshim.frontend.v1.MessageLineage
+	(*Message)(nil),               // 3: agentshim.frontend.v1.Message
+	(*CompactionSummaryItem)(nil), // 4: agentshim.frontend.v1.CompactionSummaryItem
+	(*TypingDelta)(nil),           // 5: agentshim.frontend.v1.TypingDelta
+	(*TypingCut)(nil),             // 6: agentshim.frontend.v1.TypingCut
+	(*SessionInitView)(nil),       // 7: agentshim.frontend.v1.SessionInitView
+	(*AgentEmission)(nil),         // 8: agentshim.frontend.v1.AgentEmission
+	(*v1.ApiUserMessage)(nil),     // 9: agentshim.data.v1.ApiUserMessage
+	(*v11.PermissionItem)(nil),    // 10: agentshim.core.v1.PermissionItem
+	(*FailureCardView)(nil),       // 11: agentshim.frontend.v1.FailureCardView
+	(*v11.ContextCleared)(nil),    // 12: agentshim.core.v1.ContextCleared
+	(*v11.ContextCompacted)(nil),  // 13: agentshim.core.v1.ContextCompacted
+	(*SessionCommandItem)(nil),    // 14: agentshim.frontend.v1.SessionCommandItem
+	(*AsyncBubble)(nil),           // 15: agentshim.frontend.v1.AsyncBubble
+	(*v11.ContentDelta)(nil),      // 16: agentshim.core.v1.ContentDelta
+	(*v1.SystemInit)(nil),         // 17: agentshim.data.v1.SystemInit
 }
 var file_agentshim_frontend_v1_feed_proto_depIdxs = []int32{
-	2,  // 0: agentshim.frontend.v1.ConversationDelta.messages:type_name -> agentshim.frontend.v1.Message
+	3,  // 0: agentshim.frontend.v1.ConversationDelta.messages:type_name -> agentshim.frontend.v1.Message
 	0,  // 1: agentshim.frontend.v1.Message.source:type_name -> agentshim.frontend.v1.ConversationSource
-	7,  // 2: agentshim.frontend.v1.Message.agent:type_name -> agentshim.frontend.v1.AgentEmission
-	8,  // 3: agentshim.frontend.v1.Message.user_message:type_name -> agentshim.data.v1.ApiUserMessage
-	9,  // 4: agentshim.frontend.v1.Message.permission:type_name -> agentshim.core.v1.PermissionItem
-	10, // 5: agentshim.frontend.v1.Message.failure_card:type_name -> agentshim.frontend.v1.FailureCardView
-	11, // 6: agentshim.frontend.v1.Message.context_cleared:type_name -> agentshim.core.v1.ContextCleared
-	12, // 7: agentshim.frontend.v1.Message.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
-	13, // 8: agentshim.frontend.v1.Message.session_command:type_name -> agentshim.frontend.v1.SessionCommandItem
-	14, // 9: agentshim.frontend.v1.Message.async_bubble:type_name -> agentshim.frontend.v1.AsyncBubble
-	3,  // 10: agentshim.frontend.v1.Message.compaction_summary:type_name -> agentshim.frontend.v1.CompactionSummaryItem
-	15, // 11: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
-	16, // 12: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	2,  // 2: agentshim.frontend.v1.Message.lineage:type_name -> agentshim.frontend.v1.MessageLineage
+	8,  // 3: agentshim.frontend.v1.Message.agent:type_name -> agentshim.frontend.v1.AgentEmission
+	9,  // 4: agentshim.frontend.v1.Message.user_message:type_name -> agentshim.data.v1.ApiUserMessage
+	10, // 5: agentshim.frontend.v1.Message.permission:type_name -> agentshim.core.v1.PermissionItem
+	11, // 6: agentshim.frontend.v1.Message.failure_card:type_name -> agentshim.frontend.v1.FailureCardView
+	12, // 7: agentshim.frontend.v1.Message.context_cleared:type_name -> agentshim.core.v1.ContextCleared
+	13, // 8: agentshim.frontend.v1.Message.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
+	14, // 9: agentshim.frontend.v1.Message.session_command:type_name -> agentshim.frontend.v1.SessionCommandItem
+	15, // 10: agentshim.frontend.v1.Message.async_bubble:type_name -> agentshim.frontend.v1.AsyncBubble
+	4,  // 11: agentshim.frontend.v1.Message.compaction_summary:type_name -> agentshim.frontend.v1.CompactionSummaryItem
+	16, // 12: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
+	17, // 13: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_feed_proto_init() }
@@ -873,7 +984,7 @@ func file_agentshim_frontend_v1_feed_proto_init() {
 	file_agentshim_frontend_v1_async_bubble_proto_init()
 	file_agentshim_frontend_v1_failure_card_proto_init()
 	file_agentshim_frontend_v1_slash_menu_proto_init()
-	file_agentshim_frontend_v1_feed_proto_msgTypes[1].OneofWrappers = []any{
+	file_agentshim_frontend_v1_feed_proto_msgTypes[2].OneofWrappers = []any{
 		(*Message_Agent)(nil),
 		(*Message_UserMessage)(nil),
 		(*Message_Permission)(nil),
@@ -890,7 +1001,7 @@ func file_agentshim_frontend_v1_feed_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_feed_proto_rawDesc), len(file_agentshim_frontend_v1_feed_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

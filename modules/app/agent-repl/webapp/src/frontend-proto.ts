@@ -928,6 +928,21 @@ export interface MessageFrame {
    * it loudly rather than assuming a user drove it.
    */
   source: ConversationSource;
+  /**
+   * WHAT CONTAINS THIS MESSAGE (`Message.lineage`).
+   *
+   * `topLevelMessageId` is the feed row this message ultimately belongs to and
+   * is NEVER empty — on a feed row it equals the message's own uuid.
+   * `parentMessageId` is ONE HOP, never the root, and empty means this message
+   * sits directly in the feed.
+   *
+   * ABSENT MEANS THE PRODUCER SENT NO LINEAGE, and absence is carried through
+   * as absence rather than synthesized from the uuid. Synthesizing it would
+   * make a producer that never set it indistinguishable from one that set it
+   * correctly, which is exactly the drift a denormalized `topLevelMessageId`
+   * exists to keep detectable.
+   */
+  lineage?: { topLevelMessageId: string; parentMessageId: string };
   arm: MessageArm;
   /** The typed data.v1/core.v1 payload, adopted by shape (see file-top §5.1). */
   payload: JsonObject;
@@ -3371,15 +3386,16 @@ function decodePageContinuation(o: JsonObject): PageContinuation {
   );
 }
 
-const CONVERSATION_ITEM_ENVELOPE_KEYS = new Set([
+const MESSAGE_ENVELOPE_KEYS = new Set([
   "uuid",
   "tsMs",
   "requestId",
   "source",
+  "lineage",
   "tokenUtilization",
   "turnAccounting",
 ]);
-const CONVERSATION_ITEM_ARM_SET: ReadonlySet<string> = new Set(
+const MESSAGE_ARM_SET: ReadonlySet<string> = new Set(
   MESSAGE_ARMS,
 );
 
@@ -3396,16 +3412,16 @@ const AGENT_EMISSION_ENVELOPE = "agent";
  * string.
  */
 function decodeMessage(v: unknown, i: number): MessageFrame {
-  const ctx = `ConversationItem[${i}]`;
+  const ctx = `Message[${i}]`;
   const o = ensureObject(v, ctx);
   const keys = Object.keys(o);
   const armKeys = keys.filter(
-    (k) => CONVERSATION_ITEM_ARM_SET.has(k) || k === AGENT_EMISSION_ENVELOPE,
+    (k) => MESSAGE_ARM_SET.has(k) || k === AGENT_EMISSION_ENVELOPE,
   );
   const unknown = keys.filter(
     (k) =>
-      !CONVERSATION_ITEM_ENVELOPE_KEYS.has(k) &&
-      !CONVERSATION_ITEM_ARM_SET.has(k) &&
+      !MESSAGE_ENVELOPE_KEYS.has(k) &&
+      !MESSAGE_ARM_SET.has(k) &&
       k !== AGENT_EMISSION_ENVELOPE,
   );
   if (unknown.length > 0) {
@@ -3456,6 +3472,22 @@ function decodeMessage(v: unknown, i: number): MessageFrame {
               ),
           ),
   };
+  // LINEAGE, carried through decoded. Absent stays absent (see the field's own
+  // doc); present is validated, because `topLevelMessageId` is documented as
+  // never empty and a blank one would sort into a page query as a phantom row.
+  if (o.lineage !== undefined && o.lineage !== null) {
+    const lin = ensureObject(o.lineage, `${ctx}.lineage`);
+    const topLevelMessageId = str(lin, "topLevelMessageId", `${ctx}.lineage`);
+    if (topLevelMessageId === "") {
+      throw new Error(
+        `frontend-proto: ${ctx}.lineage.topLevelMessageId must be nonblank — a message's top-level id is never empty, and is its own uuid on a feed row`,
+      );
+    }
+    frame.lineage = {
+      topLevelMessageId,
+      parentMessageId: str(lin, "parentMessageId", `${ctx}.lineage`),
+    };
+  }
   if (selected.thinkingOrigin !== undefined)
     frame.thinkingOrigin = selected.thinkingOrigin;
   // The RESOLVED figures for this response's bubble corner. ABSENT STAYS
