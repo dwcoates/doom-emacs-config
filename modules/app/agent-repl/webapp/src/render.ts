@@ -3769,8 +3769,14 @@ export class FeedRenderer {
         if (node) node.html = html;
       }
       // Content added above the viewport grows scrollHeight; shift
-      // scrollTop by the growth so the tail stays in view.
-      this.container.scrollTop += this.container.scrollHeight - before;
+      // scrollTop by the growth so what the reader is looking at stays put.
+      //
+      // THROUGH THE OWNER, not a bare assignment. This write moves the box
+      // DOWNWARD and can land it exactly on the tail, and the owner would
+      // then read its own arithmetic as the reader scrolling back to the
+      // bottom and resume following a reader who never asked to. `place`
+      // moves the pixels and leaves the decision alone.
+      this.tail.shift(this.container.scrollHeight - before);
       // Per chunk, not once at the end: a backfill step is where an older
       // item's text actually reaches the DOM, so anything derived from that
       // text (the search's marks) is stale until the step that lands it.

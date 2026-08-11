@@ -6625,6 +6625,24 @@ describe("the feed renderer's tail obedience", () => {
     return state;
   };
 
+  it("never pulls a scrolled-away reader back down across a burst of renders", () => {
+    // Arrange — the reader scrolled up; the workspace keeps streaming.
+    const box = boxAt(3400);
+    const { feed, tail } = rendererOn(box);
+    // The turn is already on screen: this reader is watching an answer arrive,
+    // not sending one, so no fresh prompt is in play to outrank them.
+    feed.render(stateOf([userTurnAt(9, 0, "read me", "r1")]));
+    box.scrollTop = 3400;
+    tail.release();
+    // Act — the same turn re-rendering as an open bubble appends, over and over.
+    for (let i = 0; i < 12; i++) {
+      box.scrollHeight += 200;
+      feed.render(stateOf([userTurnAt(9, 0, "read me", "r1")]));
+    }
+    // Assert — not one render moved them.
+    expect(box.scrollTop).toBe(3400);
+  });
+
   it("keeps following the tail for a reader who never left it", () => {
     // Arrange — a reader parked at the bottom still wants the newest content.
     const box = boxAt(3400);

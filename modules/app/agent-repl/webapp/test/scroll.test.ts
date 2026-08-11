@@ -563,6 +563,31 @@ describe("TailFollow", () => {
     expect(a.tail.isFollowing()).toBe(false);
   });
 
+  it("does not begin a follow when a shift lands the box on the tail", () => {
+    // Arrange — a backfill's growth compensation can add exactly enough to
+    // reach the bottom. That is arithmetic about content, not the reader
+    // asking to follow again.
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.shift(600);
+    a.scroll();
+    // Assert
+    expect([a.tail.isFollowing(), box.scrollTop]).toEqual([false, 700]);
+  });
+
+  it("shifts from where the reader now is, not from where it last wrote", () => {
+    // Arrange — the reader scrolled during the render whose growth this
+    // compensates for, and their gesture's event has not been dispatched yet.
+    const box = atTail();
+    const a = armed(box);
+    box.scrollTop = 500;
+    // Act
+    a.tail.shift(40);
+    // Assert
+    expect(box.scrollTop).toBe(540);
+  });
+
   it("stops following when the reader opens a nested view to read it", () => {
     // Arrange + Act
     const a = armed(atTail());
