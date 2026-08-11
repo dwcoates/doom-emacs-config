@@ -1,11 +1,13 @@
 package sessioncontroller
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/shimclient"
 )
 
@@ -79,10 +81,10 @@ func newStaleEpochHarness(t *testing.T, client *replayClient) *staleEpochHarness
 	return h
 }
 
-func TestAMarkAboveEverySeqIsFlooredAtTheClearRatherThanTrusted(t *testing.T) {
+func TestAMarkAboveEverySeqIsREFUSEDRatherThanReplayed(t *testing.T) {
 	// Arrange — the rotated conversation's new space holds a clear at 12 and one
 	// message above it. The client's mark belongs to the space that clear
-	// retired.
+	// retired, so there is no delta above it to serve.
 	h := newStaleEpochHarness(t, &replayClient{})
 	cons := h.controller(t).consumer
 	cons.Consume(clearEvent(12, "u-clear"))
@@ -92,14 +94,53 @@ func TestAMarkAboveEverySeqIsFlooredAtTheClearRatherThanTrusted(t *testing.T) {
 	h.push.mu.Unlock()
 
 	// Act
-	if err := h.m.Resync("ws", 1060); err != nil {
-		t.Fatalf("Resync: %v", err)
-	}
+	err := h.m.Resync("ws", 1060)
 
-	// Assert — the clear that caused the rotation is exactly what a mark trusted
-	// as "past everything" would have withheld.
-	if got := clearItems(h.push); len(got) != 1 {
-		t.Fatalf("replayed %d context_cleared items, want 1 — a retired-space mark must not floor the clear away", len(got))
+	// Assert — REFUSED, not answered. Flooring the mark and serving everything
+	// above the floor is a replay of the WHOLE conversation, which is the
+	// backfill paging exists to end; the client re-anchors from a tail page on
+	// this refusal instead.
+	if !errors.Is(err, errclass.ErrReplayMarkRetired) {
+		t.Fatalf("Resync from a retired-space mark returned %v, want ErrReplayMarkRetired", err)
+	}
+}
+
+func TestARefusedRetiredMarkServesNoConversationAtAll(t *testing.T) {
+	// Arrange — the same rotated conversation, with the assertion turned on the
+	// thing the user actually reported: bytes on the wire.
+	h := newStaleEpochHarness(t, &replayClient{})
+	cons := h.controller(t).consumer
+	cons.Consume(clearEvent(12, "u-clear"))
+	cons.Consume(assistantEvent(t, 13, "u13"))
+	h.push.mu.Lock()
+	h.push.convo = nil
+	h.push.mu.Unlock()
+
+	// Act
+	_ = h.m.Resync("ws", 1060)
+
+	// Assert — not one item. A refusal that still pushed history would be the
+	// full replay with an error stapled to it.
+	h.push.mu.Lock()
+	pushed := len(h.push.convo)
+	h.push.mu.Unlock()
+	if pushed != 0 {
+		t.Fatalf("a REFUSED resync pushed %d conversation delta(s), want 0", pushed)
+	}
+}
+
+func TestARefusedRetiredMarkNamesTheCauseTheClientMatchesOn(t *testing.T) {
+	// Arrange — the webapp decides to re-anchor by matching the cause token, so
+	// the token is contract, not prose.
+	h := newStaleEpochHarness(t, &replayClient{})
+	h.controller(t).consumer.Consume(clearEvent(12, "u-clear"))
+
+	// Act
+	err := h.m.Resync("ws", 1060)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), `rejection_cause="retired_seq_space"`) {
+		t.Fatalf("refusal = %v, want it to carry rejection_cause=\"retired_seq_space\"", err)
 	}
 }
 
@@ -110,19 +151,43 @@ func TestAMarkAboveEverySeqIsLoudAboutTheRetiredSpace(t *testing.T) {
 	h.controller(t).consumer.Consume(clearEvent(12, "u-clear"))
 
 	// Act
-	if err := h.m.Resync("ws", 1060); err != nil {
-		t.Fatalf("Resync: %v", err)
-	}
+	_ = h.m.Resync("ws", 1060)
 
 	// Assert
 	var found bool
 	for _, line := range h.lines() {
-		if strings.Contains(line, "RETIRED seq space") {
+		if strings.Contains(line, "RETIRED store seq space") || strings.Contains(line, "rejection_cause=\"retired_seq_space\"") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("logged = %v, want a loud line naming the retired seq space", h.lines())
+		t.Fatalf("logged = %v, want a loud line naming the retired seq space refusal", h.lines())
+	}
+}
+
+func TestAnInSpaceMarkStillGetsItsDelta(t *testing.T) {
+	// Arrange — THE OTHER HALF OF THE RULE. A mark the live space can honor is
+	// untouched by the refusal: it still takes the incremental delta path, which
+	// is the whole reason the refusal is narrow.
+	h := newStaleEpochHarness(t, &replayClient{})
+	cons := h.controller(t).consumer
+	cons.Consume(assistantEvent(t, 12, "u12"))
+	cons.Consume(assistantEvent(t, 13, "u13"))
+	h.push.mu.Lock()
+	h.push.convo = nil
+	h.push.mu.Unlock()
+
+	// Act — 12 is in-space, and 13 is the delta above it.
+	if err := h.m.Resync("ws", 12); err != nil {
+		t.Fatalf("Resync from an in-space mark: %v", err)
+	}
+
+	// Assert
+	h.push.mu.Lock()
+	pushed := len(h.push.convo)
+	h.push.mu.Unlock()
+	if pushed == 0 {
+		t.Fatal("an in-space mark was served nothing; the delta path must be untouched by the retired-mark refusal")
 	}
 }
 
@@ -146,4 +211,46 @@ func TestAMarkAtTheNewestSeqKeepsItsOwnFloor(t *testing.T) {
 	if n := client.callCount(); n != 0 {
 		t.Fatalf("re-pulled %d time(s); a caught-up in-space client owes no replay at all", n)
 	}
+}
+
+// TestTheRetiredMarkRefusalIsMeasuredAgainstWhatItReplaced is the SIZE of the
+// change, asserted rather than asserted-about.
+//
+// The old rule and the new one are both evaluated here on one conversation, so
+// the test cannot drift from the claim it makes: `replayFloorAt` is the floor
+// the daemon USED to serve a retired mark from — zero, for a conversation the
+// rotation restarted — and every retained event at or above it is what the
+// frontend was sent. The refusal sends none of them.
+func TestTheRetiredMarkRefusalIsMeasuredAgainstWhatItReplaced(t *testing.T) {
+	// Arrange — a conversation of 250 items in the LIVE space, and a client
+	// holding a mark from the space that rotated away.
+	const items = 250
+	h := newStaleEpochHarness(t, &replayClient{})
+	cons := h.controller(t).consumer
+	for seq := uint64(1); seq <= items; seq++ {
+		cons.Consume(assistantEvent(t, seq, fmt.Sprintf("u%d", seq)))
+	}
+	h.push.mu.Lock()
+	h.push.convo = nil // drop the live pushes; only the replay is under test
+	h.push.mu.Unlock()
+
+	// Act — the floor the OLD rule would have replayed from, then the refusal.
+	oldFloor := h.m.replayFloorAt("ws", "s1", items, 1060)
+	err := h.m.Resync("ws", 1060)
+
+	// Assert — the old floor is zero, which is the whole conversation; the new
+	// answer is a refusal that serves none of it.
+	if oldFloor != 0 {
+		t.Fatalf("the old floor for a retired mark = %d, want 0 — the premise of this measurement is that it replayed everything", oldFloor)
+	}
+	if !errors.Is(err, errclass.ErrReplayMarkRetired) {
+		t.Fatalf("Resync = %v, want ErrReplayMarkRetired", err)
+	}
+	h.push.mu.Lock()
+	pushed := len(h.push.convo)
+	h.push.mu.Unlock()
+	if pushed != 0 {
+		t.Fatalf("replay served %d delta(s) of a %d-item conversation, want 0", pushed, items)
+	}
+	t.Logf("retired-mark reconnect: replay floor was %d over a %d-item conversation (the whole of it); served now = %d deltas", oldFloor, items, pushed)
 }
