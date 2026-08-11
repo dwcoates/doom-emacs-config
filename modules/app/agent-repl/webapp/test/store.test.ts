@@ -2559,7 +2559,7 @@ describe("the fence gate (the one choke point every fenced view passes)", () => 
     sessionLine: "session line",
     modelDisplay: "opus-5",
     modelOptions: [],
-    accountingLine: "",
+    warnings: [],
     fence: "f1",
   };
 

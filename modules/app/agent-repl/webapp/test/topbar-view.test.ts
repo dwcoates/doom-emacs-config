@@ -8,6 +8,8 @@
 import { describe, expect, it } from "vitest";
 import {
   tokensDisclosureHtml,
+  topbarWarningsHtml,
+  WARNING_GLYPH,
   topbarConnectivityHtml,
   topbarModelOptionsHtml,
   topbarViewHtml,
@@ -24,7 +26,7 @@ function view(over: Partial<TopbarView> = {}): TopbarView {
       { value: "opus-5", displayName: "Opus 5", description: "highest capability" },
       { value: "sonnet-5", displayName: "Sonnet 5", description: "fast" },
     ],
-    accountingLine: "12s · 4k in · 900 out",
+    warnings: [],
     fence: "f1",
     ...over,
   };
@@ -62,11 +64,14 @@ describe("absence renders absence", () => {
     expect(html).not.toContain("topbar-session-line");
   });
 
-  it("omits the accounting line before any turn has settled", () => {
-    // Arrange / Act — empty is the daemon saying there is nothing to show.
-    const html = topbarViewHtml(view({ accountingLine: "" }));
+  it("never renders a warning's prose inline in the strip", () => {
+    // Arrange / Act — the retired `accountingLine` put the whole sentence
+    // across the header; the strip now carries no warning text at all.
+    const html = topbarViewHtml(
+      view({ warnings: [{ text: "INVALID ACCOUNTING: totals disagree", warning: { kind: "accounting" } }] }),
+    );
     // Assert
-    expect(html).not.toContain("topbar-accounting");
+    expect(html).not.toContain("INVALID ACCOUNTING");
   });
 
   it("renders the selector's placeholder when no model is selected", () => {
@@ -202,5 +207,109 @@ describe("tokensDisclosureHtml", () => {
     const html = tokensDisclosureHtml(breakdown(), false);
     // Assert
     expect(html).toContain(">tokens <span");
+  });
+});
+
+describe("the warning indicator", () => {
+  const WARNED = view({
+    warnings: [
+      { text: "INVALID ACCOUNTING: totals disagree", warning: { kind: "accounting" } },
+    ],
+  });
+
+  it("renders the red exclamation affordance when the daemon raised a warning", () => {
+    // Arrange / Act
+    const html = topbarWarningsHtml(WARNED, false);
+    // Assert
+    expect(html).toContain(WARNING_GLYPH);
+  });
+
+  it("renders NO affordance at all when there is nothing to warn about", () => {
+    // Arrange / Act — a control over an empty list only invites the click that
+    // proves it is empty.
+    const html = topbarWarningsHtml(view({ warnings: [] }), false);
+    // Assert
+    expect(html).toBe("");
+  });
+
+  it("renders nothing for a workspace with no published topbar", () => {
+    // Arrange / Act
+    // Assert
+    expect(topbarWarningsHtml(null, false)).toBe("");
+  });
+
+  it("keeps the resolved text out of the DOM while it is closed", () => {
+    // Arrange / Act — the sentence is disclosure, not strip content.
+    const html = topbarWarningsHtml(WARNED, false);
+    // Assert
+    expect(html).not.toContain("INVALID ACCOUNTING");
+  });
+
+  it("shows the daemon's resolved text once opened", () => {
+    // Arrange / Act
+    const html = topbarWarningsHtml(WARNED, true);
+    // Assert
+    expect(html).toContain("INVALID ACCOUNTING: totals disagree");
+  });
+
+  it("lists every warning in the dropdown, not just the first", () => {
+    // Arrange / Act — the indicator is the topbar's warnings, plural.
+    const html = topbarWarningsHtml(
+      view({
+        warnings: [
+          { text: "first complaint", warning: { kind: "accounting" } },
+          { text: "second complaint", warning: { kind: "accounting" } },
+        ],
+      }),
+      true,
+    );
+    // Assert
+    expect(html).toContain("second complaint");
+  });
+
+  it("counts the warnings on the chip", () => {
+    // Arrange / Act
+    const html = topbarWarningsHtml(
+      view({
+        warnings: [
+          { text: "first complaint", warning: { kind: "accounting" } },
+          { text: "second complaint", warning: { kind: "accounting" } },
+        ],
+      }),
+      false,
+    );
+    // Assert
+    expect(html).toContain('class="topbar-warning-count">2<');
+  });
+
+  it("escapes the daemon's text", () => {
+    // Arrange / Act
+    const html = topbarWarningsHtml(
+      view({ warnings: [{ text: "<img src=x>", warning: { kind: "accounting" } }] }),
+      true,
+    );
+    // Assert
+    expect(html).not.toContain("<img");
+  });
+
+  it("is a real button, so it is keyboard-reachable", () => {
+    // Arrange / Act — the shared dropdown-chip shell, not a bespoke popover.
+    const html = topbarWarningsHtml(WARNED, false);
+    // Assert
+    expect(html).toContain('<button type="button" class="info-warnings"');
+  });
+
+  it("reports its open state to assistive tech", () => {
+    // Arrange / Act
+    const html = topbarWarningsHtml(WARNED, true);
+    // Assert
+    expect(html).toContain('aria-expanded="true"');
+  });
+
+  it("hangs its overlay off the `.warnings-menu` the dismissal handlers key on", () => {
+    // Arrange / Act — outside-click dismissal spares exactly this stem.
+    const html = topbarWarningsHtml(WARNED, true);
+    // Assert
+    expect(html).toContain('class="warnings-menu"');
   });
 });

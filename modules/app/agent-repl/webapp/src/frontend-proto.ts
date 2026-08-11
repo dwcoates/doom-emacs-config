@@ -106,8 +106,10 @@ import {
 } from "../../proto/gen/ts/agentshim/frontend/v1/failure-card_pb";
 import {
   ModelOptionSchema,
+  TopbarAccountingWarningSchema,
   TopbarConnectivitySchema,
   TopbarViewSchema,
+  TopbarWarningSchema,
 } from "../../proto/gen/ts/agentshim/frontend/v1/topbar_pb";
 import {
   TokenBreakdownRowSchema,
@@ -1968,6 +1970,29 @@ export interface TopbarConnectivity {
 }
 
 /**
+ * WHICH concern raised a topbar warning, as arms rather than a tag.
+ *
+ * The client picks nothing from the kind today — the sentence is the daemon's
+ * either way — but the arm is what lets a later kind arrive with the evidence
+ * its kind implies instead of as an opaque string the client must interpret.
+ */
+export type TopbarWarningKind = { kind: "accounting" };
+
+/**
+ * One thing the topbar is warning about, resolved completely by the daemon.
+ *
+ * `text` IS RENDERED VERBATIM AND NEVER RE-DERIVED. The same reconciliation the
+ * footer's accounting cell reports has exactly one author, and a renderer that
+ * re-composed the sentence from the cell's arms would be a second one.
+ */
+export interface TopbarWarning {
+  /** The display-ready sentence, composed daemon-side. Never empty. */
+  text: string;
+  /** Which concern raised it. */
+  warning: TopbarWarningKind;
+}
+
+/**
  * ONE workspace's topbar, resolved completely by the daemon.
  *
  * EVERY STRING HERE IS RENDERED VERBATIM. `title` is already the composed
@@ -1984,8 +2009,14 @@ export interface TopbarView {
   modelOptions: ModelOption[];
   /** Absent means the daemon published no glyph; the client draws none. */
   connectivity?: TopbarConnectivity;
-  /** Empty means no turn has settled yet. */
-  accountingLine: string;
+  /**
+   * Everything the topbar is warning about, in the daemon's display order.
+   *
+   * EMPTY IS THE NORMAL STATE and renders NO affordance at all — not a quiet
+   * indicator, not a disabled one. It is a list rather than an accounting
+   * field so a second warning kind reaches the same indicator.
+   */
+  warnings: TopbarWarning[];
   /**
    * The workspace's staleness FENCE, compared BYTE-WISE against
    * `WorkspaceState.fence` and never parsed. See `fence.ts` for the one gate
@@ -6054,9 +6085,15 @@ const TOPBAR_VIEW_KEYS = generatedFieldSet<
   "modelDisplay",
   "modelOptions",
   "connectivity",
-  "accountingLine",
   "fence",
+  "warnings",
 );
+const TOPBAR_WARNING_KEYS = generatedFieldSet<
+  keyof typeof TopbarWarningSchema.field
+>()("text", "accounting");
+const TOPBAR_ACCOUNTING_WARNING_KEYS = generatedFieldSet<
+  keyof typeof TopbarAccountingWarningSchema.field
+>()();
 const TOPBAR_CONNECTIVITY_KEYS = generatedFieldSet<
   keyof typeof TopbarConnectivitySchema.field
 >()("tone", "glyph", "title");
@@ -6093,7 +6130,9 @@ function decodeTopbarView(v: unknown): TopbarView {
         description: str(opt, "description", inner),
       };
     }),
-    accountingLine: str(o, "accountingLine", where),
+    warnings: ensureArray(o.warnings ?? [], `${where}.warnings`).map(
+      (entry, i) => decodeTopbarWarning(entry, `${where}.warnings[${i}]`),
+    ),
     fence: str(o, "fence", where),
   };
   if (view.fence === "")
@@ -6112,6 +6151,36 @@ function decodeTopbarView(v: unknown): TopbarView {
     };
   }
   return view;
+}
+
+/**
+ * Decode one `TopbarWarning`.
+ *
+ * The text is REQUIRED non-empty and the kind oneof is REQUIRED: a warning
+ * with nothing to say would light an indicator that opens on an empty
+ * dropdown, and a kindless warning is a tag the client would have to guess at.
+ * Both are daemon faults rather than renderable states, so they are refused
+ * here instead of drawn.
+ */
+function decodeTopbarWarning(v: unknown, where: string): TopbarWarning {
+  const o = ensureObject(v, where);
+  rejectUnknown(o, TOPBAR_WARNING_KEYS, where);
+  const text = str(o, "text", where);
+  if (text === "") {
+    throw new Error(`frontend-proto: ${where} requires a non-empty \`text\``);
+  }
+  // protojson carries the SET arm as a present key — an empty arm arrives as
+  // an empty object rather than as an absence.
+  if (o.accounting !== undefined && o.accounting !== null) {
+    const inner = `${where}.accounting`;
+    rejectUnknown(
+      ensureObject(o.accounting, inner),
+      TOPBAR_ACCOUNTING_WARNING_KEYS,
+      inner,
+    );
+    return { text, warning: { kind: "accounting" } };
+  }
+  throw new Error(`frontend-proto: ${where} requires a kind oneof`);
 }
 
 const TOKEN_BREAKDOWN_VIEW_KEYS = generatedFieldSet<
