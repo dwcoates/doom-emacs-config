@@ -287,6 +287,61 @@ describe("WsClient", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
+  it("dials the FIRST reconnect immediately, without spending a backoff rung", () => {
+    // Arrange — a live socket, so the close below is the daemon going away.
+    const { client } = newClient();
+    client.connect();
+    const first = FakeWebSocket.instances[0];
+    first.open();
+
+    // Act — the socket drops and NO time passes.
+    first.close();
+    vi.advanceTimersByTime(0);
+
+    // Assert — the redial is already out. A backoff has nothing to back off
+    // from before the first attempt, and the 251ms every workspace spent on
+    // this rung in production was pure page-side latency.
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("keeps the ladder for reconnects after the first one fails", () => {
+    // Arrange — first redial goes out immediately and is refused.
+    const { client } = newClient();
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    FakeWebSocket.instances[0].close();
+    vi.advanceTimersByTime(0);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    // Act — that attempt fails; the ladder's first rung (10ms) now applies.
+    FakeWebSocket.instances[1].close();
+    vi.advanceTimersByTime(9);
+    // Assert — still waiting: a failed attempt DOES owe a delay.
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    expect(FakeWebSocket.instances).toHaveLength(3);
+  });
+
+  it("returns to an immediate first redial once a connection has succeeded", () => {
+    // Arrange — climb the ladder, then open successfully, which resets it.
+    const { client } = newClient();
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    FakeWebSocket.instances[0].close();
+    vi.advanceTimersByTime(0);
+    FakeWebSocket.instances[1].close();
+    vi.advanceTimersByTime(10);
+    FakeWebSocket.instances[2].open();
+
+    // Act — a later drop on that healthy socket.
+    FakeWebSocket.instances[2].close();
+    vi.advanceTimersByTime(0);
+
+    // Assert — immediate again: an open socket is what the ladder backs off
+    // FROM, so surviving one discharges the history it accumulated.
+    expect(FakeWebSocket.instances).toHaveLength(4);
+  });
+
   it("defers error ownership to close so a transport drop records once", () => {
     const { client } = newClient();
     client.connect();
