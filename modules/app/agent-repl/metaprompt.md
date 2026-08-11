@@ -206,6 +206,16 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - Backticks are NEVER escaped, and a plain-english concept is NEVER wrapped in them.
   - Inline code marks a literal, typeable token, not the idea that token names.
 
+### Every referenced pull request is a hyperlink to it on GitHub
+
+- Every pull request named anywhere in the response MUST be a markdown hyperlink to its GitHub URL.
+  - The link TEXT is the PR's name (its title), because a bare number identifies nothing to a reader who does not memorize numbers.
+  - The number may ride along inside the link text or a parenthetical (e.g. `[Retire the topbar's accounting line (#7026)](https://github.com/ORG/REPO/pull/7026)`), but it is NEVER the sole identifier.
+- A PR mentioned without a resolvable URL is reported as such rather than linked to a guessed one.
+  - Fabricating a plausible PR URL is worse than omitting the link, because a wrong link reads as verified.
+  - Resolve the real URL (e.g. `gh pr view <n> --json url`) before writing the link.
+- This rule governs the WHOLE response, at every depth of the TLDR tree and in the response header.
+
 ### Fenced code blocks for anything longer than one statement
 
 - Code longer than one statement is NEVER inlined; it is always relayed in a fenced markdown code block.
