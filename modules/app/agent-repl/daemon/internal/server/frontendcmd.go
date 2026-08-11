@@ -28,6 +28,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/inflight"
 	"claude-repld/internal/protocol"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/sessioncontroller"
@@ -528,6 +529,13 @@ type ClientLogIdentityResolver interface {
 // *sessioncontroller.Manager, which is where that observation already lives.
 type TurnStateSource interface {
 	TurnActive(workspace string) (bool, error)
+	// InFlight is the daemon's ONE answer to "does this workspace have work in
+	// flight" — over turns, live background tasks AND the SDK query carrying
+	// them — as a set of IDENTIFIED items rather than a flag or a count
+	// (internal/inflight). Satisfied by *sessioncontroller.Manager, the same
+	// value TurnActive is answered by, so a command gate and a bounce gate
+	// cannot disagree about what a workspace is running.
+	InFlight(workspace string) inflight.Set
 }
 
 // LiveTaskSource reports a workspace's live subagent-task count, and whether
@@ -1291,6 +1299,10 @@ func (h *commandHandler) MergeWorkspace(ctx context.Context, workspace, requestI
 	}
 	h.logf("frontend cmd: merge_workspace ws=%s name=%q request_id=%s source_branch=%q source_dir=%q target_dir=%q",
 		workspace, req.Name, requestID, req.SourceBranch, req.SourceDir, req.TargetDir)
+	// A merge TAKES OVER this workspace's session — the merge lease blocks user
+	// prompting for its duration — so whatever the session is running is being
+	// displaced by it. Named for the same reason close's is.
+	h.noteInFlightAtCommand("merge_workspace", workspace, requestID)
 	pos, enqueueErr := h.merges.Enqueue(ctx, req)
 	if enqueueErr != nil {
 		h.logf("frontend cmd: merge_workspace ENQUEUE FAILED ws=%s name=%q request_id=%s: %v", workspace, req.Name, requestID, enqueueErr)
@@ -1301,8 +1313,43 @@ func (h *commandHandler) MergeWorkspace(ctx context.Context, workspace, requestI
 	return nil
 }
 
+// noteInFlightAtCommand records what a workspace is running at the instant a
+// command that will end or take over its session is admitted.
+//
+// # Why these commands PROCEED and the bounce gates REFUSE
+//
+// close and merge are EXPLICIT USER ACTIONS. A person pressed the key knowing
+// what their workspace was doing, and a daemon that refused them would be
+// overruling the human on their own workspace — which is a different failure
+// from a background sweeper silently killing work nobody asked it to touch.
+//
+// SO THE ARM IS NAMED RATHER THAN OMITTED. Before this, close and merge
+// consulted the in-flight question NOWHERE, which is indistinguishable from
+// having decided it does not matter. They now ask the one authority and record
+// the answer at `warn` when there is work, so a user who loses a running
+// background task to a close can find out what was discarded and when. An
+// UNKNOWN answer is recorded as loudly as a populated one: proceeding on
+// silence is exactly the reading this whole mechanism exists to make visible.
+func (h *commandHandler) noteInFlightAtCommand(command, workspace, requestID string) {
+	if h.turns == nil {
+		h.logf("frontend cmd: %s in-flight census SKIPPED ws=%s request_id=%s — no work-state source is wired, so what this command is about to end cannot be named",
+			command, workspace, requestID)
+		return
+	}
+	set := h.turns.InFlight(workspace)
+	blocked, why := set.Blocks()
+	if !blocked {
+		h.logf("frontend cmd: %s in-flight census ws=%s request_id=%s decision=proceed_nothing_in_flight — %s",
+			command, workspace, requestID, why)
+		return
+	}
+	h.logf("frontend cmd: %s in-flight census ws=%s request_id=%s decision=proceed_user_forced — %s. This command is an explicit user action and is NOT refused, and the work named here ends with it.",
+		command, workspace, requestID, why)
+}
+
 func (h *commandHandler) CloseWorkspace(ctx context.Context, workspace, requestID string, _ *frontendv1.CloseWorkspaceCmd) error {
 	h.logf("frontend cmd: close_workspace ws=%s request_id=%s", workspace, requestID)
+	h.noteInFlightAtCommand("close_workspace", workspace, requestID)
 	// A close is also the abandonment of any merge the workspace has parked on
 	// a conflict: the lease must not outlive the workspace it was taken over,
 	// and there is no separate abandon command on the wire. An abandon failure

@@ -19,6 +19,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/inflight"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/sessioncontroller"
@@ -49,7 +50,11 @@ func openTestSSM(t *testing.T, reg *registry.Registry) *ssm.Manager {
 // --- fakes ----------------------------------------------------------------
 
 type fakePrompts struct {
-	prompted []string
+	// inFlightTasks are the live background-task identities the in-flight
+	// census reports for this workspace, so a test can pose work that no turn
+	// flag would ever describe.
+	inFlightTasks []string
+	prompted      []string
 	// promptRequestIDs records the request id each submit was routed WITH: it
 	// is what the daemon keys the prompt receipt on, so dropping it would be
 	// invisible to a test that only watched the text.
@@ -91,6 +96,24 @@ type fakePrompts struct {
 
 // TurnActive makes the prompt double the gate's turn source.
 func (f *fakePrompts) TurnActive(string) (bool, error) { return f.turnActive, f.turnErr }
+
+// InFlight answers the in-flight census the close and merge commands record.
+// It mirrors the real resolver's two arms: an error on the turn read makes the
+// set UNKNOWN, and otherwise the fake's live turn and task identities are the
+// members.
+func (f *fakePrompts) InFlight(workspace string) inflight.Set {
+	if f.turnErr != nil {
+		return inflight.Unanswered(workspace, f.turnErr.Error())
+	}
+	var items []inflight.Item
+	if f.turnActive {
+		items = append(items, inflight.Item{Kind: inflight.KindTurn, ID: "fake-turn"})
+	}
+	for _, id := range f.inFlightTasks {
+		items = append(items, inflight.Item{Kind: inflight.KindTask, ID: id})
+	}
+	return inflight.MustAnswered(workspace, items...)
+}
 
 // ResolveMergeConflict makes the prompt double merge.Coordinator's conflict
 // resolver too, exactly as the production controller is both. It records the
@@ -2504,5 +2527,112 @@ func TestCancelDetachedAgentsRefusesAnEmptyWorkspaceKey(t *testing.T) {
 	}
 	if len(p.detachedCancels) != 0 {
 		t.Fatalf("unnamed workspace reached the router: %v", p.detachedCancels)
+	}
+}
+
+// inFlightCensusHandler is a command handler with the work-state source wired
+// and its records captured, which newTestHandler deliberately leaves out.
+func inFlightCensusHandler(t *testing.T) (*commandHandler, *fakePrompts, *[]string) {
+	t.Helper()
+	p := &fakePrompts{}
+	var records []string
+	logf := func(format string, args ...any) {
+		records = append(records, fmt.Sprintf(format, args...))
+	}
+	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, logf,
+		CommandHandlerConfig{
+			MergeStates: &fakeMergeStates{},
+			MergeGeometry: &fakeGeometry{records: map[string]geometry.Record{
+				"ws1": {SourceBranch: "b", SourceDir: "ws1", TargetDir: "/repo", Origin: geometry.OriginCreated},
+			}},
+			Interrupt: InterruptGateConfig{Turns: p, LiveTasks: &fakeLiveTasks{}},
+		})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+	return h, p, &records
+}
+
+func censusLogged(records *[]string, want string) bool {
+	for _, rec := range *records {
+		if strings.Contains(rec, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCloseWorkspaceNamesTheWorkItEnds is the close gate's whole contribution.
+//
+// A close is a user action and is deliberately NOT refused; what it may no
+// longer do is end a session's live background work with no account of what was
+// discarded. Before this the close consulted the in-flight question nowhere,
+// which is indistinguishable from having decided it does not matter.
+func TestCloseWorkspaceNamesTheWorkItEnds(t *testing.T) {
+	// Arrange
+	h, p, records := inFlightCensusHandler(t)
+	p.inFlightTasks = []string{"task-1"}
+
+	// Act
+	err := h.CloseWorkspace(context.Background(), "ws1", "r1", &frontendv1.CloseWorkspaceCmd{})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CloseWorkspace err = %v, want the user's close to proceed", err)
+	}
+	if !censusLogged(records, "decision=proceed_user_forced") || !censusLogged(records, "task:task-1") {
+		t.Fatalf("close records = %v, want the user-forced arm naming the work it ended", *records)
+	}
+}
+
+// TestCloseWorkspaceRecordsAnEmptyCensus pins the other arm: a close over a
+// quiet workspace states that it was quiet, so a silent record can never be
+// read as an unasked question.
+func TestCloseWorkspaceRecordsAnEmptyCensus(t *testing.T) {
+	// Arrange
+	h, _, records := inFlightCensusHandler(t)
+
+	// Act
+	if err := h.CloseWorkspace(context.Background(), "ws1", "r1", &frontendv1.CloseWorkspaceCmd{}); err != nil {
+		t.Fatalf("CloseWorkspace err = %v", err)
+	}
+
+	// Assert
+	if !censusLogged(records, "decision=proceed_nothing_in_flight") {
+		t.Fatalf("close records = %v, want the empty-census arm recorded", *records)
+	}
+}
+
+// TestCloseWorkspaceRecordsAnUnknownCensusLoudly pins that proceeding on
+// SILENCE is recorded as loudly as proceeding over named work.
+func TestCloseWorkspaceRecordsAnUnknownCensusLoudly(t *testing.T) {
+	// Arrange
+	h, p, records := inFlightCensusHandler(t)
+	p.turnErr = errors.New("the turn ledger is unreadable")
+
+	// Act
+	if err := h.CloseWorkspace(context.Background(), "ws1", "r1", &frontendv1.CloseWorkspaceCmd{}); err != nil {
+		t.Fatalf("CloseWorkspace err = %v", err)
+	}
+
+	// Assert
+	if !censusLogged(records, "UNKNOWN") || !censusLogged(records, "decision=proceed_user_forced") {
+		t.Fatalf("close records = %v, want an UNKNOWN census recorded on the user-forced arm", *records)
+	}
+}
+
+// TestMergeWorkspaceNamesTheWorkItDisplaces covers the second user-forced arm:
+// a merge takes the session over for its duration.
+func TestMergeWorkspaceNamesTheWorkItDisplaces(t *testing.T) {
+	// Arrange
+	h, p, records := inFlightCensusHandler(t)
+	p.inFlightTasks = []string{"task-9"}
+
+	// Act
+	_ = h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{WorkspaceName: "n"})
+
+	// Assert
+	if !censusLogged(records, "merge_workspace in-flight census") || !censusLogged(records, "task:task-9") {
+		t.Fatalf("merge records = %v, want the merge census naming the displaced work", *records)
 	}
 }

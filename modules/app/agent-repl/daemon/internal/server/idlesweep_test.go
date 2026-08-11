@@ -218,3 +218,62 @@ func TestATurnActiveWorkspaceIsHeldHoweverOldItsLogIs(t *testing.T) {
 		t.Fatal("sweepable = true, want a turn-active workspace never hibernated")
 	}
 }
+
+// TestAnIdleAsyncWorkspaceIsHeldHoweverOldItsLogIs is the regression this
+// gate's rewrite exists for.
+//
+// The turn has ended, so `turn_active` is false and the OLD gate — which
+// consulted that flag and nothing else — declared the workspace sweepable and
+// SIGTERMed a shim with a spawned agent or a detached shell still running. The
+// in-flight authority answers over live background tasks too, so the same
+// workspace is now held.
+func TestAnIdleAsyncWorkspaceIsHeldHoweverOldItsLogIs(t *testing.T) {
+	// Arrange — no turn, one live background task, the clock long past the window.
+	h, id, quietFor := sweptWorkspace(t, time.Hour)
+	if err := h.ssm.Apply(&corev1.Event{
+		SessionId: id, Seq: 3,
+		Plane:   corev1.Plane_PLANE_STREAM,
+		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "task-1"}},
+	}); err != nil {
+		t.Fatalf("apply task started: %v", err)
+	}
+	quietFor(24 * time.Hour)
+
+	// Act.
+	_, got := h.srv.sweepable(id, "/w", h.srv.now().UnixMilli())
+
+	// Assert.
+	if got {
+		t.Fatal("sweepable = true, want a workspace with live async work never hibernated")
+	}
+}
+
+// TestAWorkspaceWhoseAsyncWorkEndedIsSweepableAgain pins the closing edge:
+// holding on live tasks must be released by the task's END, not by a timer.
+func TestAWorkspaceWhoseAsyncWorkEndedIsSweepableAgain(t *testing.T) {
+	// Arrange — a task that started and ended.
+	h, id, quietFor := sweptWorkspace(t, time.Hour)
+	if err := h.ssm.Apply(&corev1.Event{
+		SessionId: id, Seq: 3,
+		Plane:   corev1.Plane_PLANE_STREAM,
+		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "task-1"}},
+	}); err != nil {
+		t.Fatalf("apply task started: %v", err)
+	}
+	if err := h.ssm.Apply(&corev1.Event{
+		SessionId: id, Seq: 4,
+		Plane:   corev1.Plane_PLANE_STREAM,
+		Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "task-1"}},
+	}); err != nil {
+		t.Fatalf("apply task ended: %v", err)
+	}
+	quietFor(24 * time.Hour)
+
+	// Act.
+	_, got := h.srv.sweepable(id, "/w", h.srv.now().UnixMilli())
+
+	// Assert.
+	if !got {
+		t.Fatal("sweepable = false, want a workspace whose async work ended released by that end")
+	}
+}
