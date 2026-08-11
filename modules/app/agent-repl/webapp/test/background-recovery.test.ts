@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   BackgroundRecovery,
+  RECOVERY_FULL_CHECK_EVERY_TICKS,
   type RecoveryTimerHost,
 } from "../src/background-recovery.js";
 
@@ -167,5 +168,136 @@ describe("BackgroundRecovery", () => {
     h.recovery.recover("visibilitychange_visible");
     // Assert
     expect(h.resyncs).toEqual(["visibilitychange_visible"]);
+  });
+});
+
+/**
+ * A heartbeat wired to a page that can report whether anything moved.
+ *
+ * THE COST BEING MEASURED IS A FULL StateSnapshot PER TICK. The daemon answers
+ * every resync with the whole world, so an unconditional heartbeat asks it to
+ * rebuild and ship that for every open page every interval whether or not
+ * anything changed — 3,140 `re-armed on recovery_heartbeat` lines and 233
+ * resyncs in a two-minute window with nothing wrong.
+ */
+function gatedHarness(opts: { current: boolean; pending: () => boolean; fullCheckEveryTicks?: number }) {
+  const state = { dials: 0, resyncs: [] as string[], bannerClears: 0 };
+  const ticks: Array<() => void> = [];
+  const timers: RecoveryTimerHost = {
+    setInterval: (callback) => {
+      ticks.push(callback);
+      return ticks.length;
+    },
+    clearInterval: () => {
+      ticks.length = 0;
+    },
+  };
+  const recovery = new BackgroundRecovery(
+    {
+      ensureConnected: () => {
+        state.dials++;
+      },
+      isCurrent: () => opts.current,
+      resync: (reason) => {
+        state.resyncs.push(reason);
+      },
+      clearConnectionBanner: () => {
+        state.bannerClears++;
+      },
+      hasPendingWork: opts.pending,
+    },
+    timers,
+    5_000,
+    opts.fullCheckEveryTicks ?? RECOVERY_FULL_CHECK_EVERY_TICKS,
+  );
+  return {
+    recovery,
+    state,
+    tick: () => {
+      for (const t of [...ticks]) t();
+    },
+  };
+}
+
+describe("a heartbeat on a page that is already current", () => {
+  it("issues no resync at all while nothing has moved", () => {
+    // Arrange — a current, caught-up, idle page: the snapshot a resync would
+    // fetch is the one already applied here.
+    const h = gatedHarness({ current: true, pending: () => false });
+    h.recovery.start();
+
+    // Act — several ordinary intervals pass with the agent idle.
+    for (let i = 0; i < RECOVERY_FULL_CHECK_EVERY_TICKS - 1; i++) h.tick();
+
+    // Assert — the whole world was not shipped even once.
+    expect(h.state.resyncs).toEqual([]);
+  });
+
+  it("still dials on every tick, because that costs nothing and is local", () => {
+    // Arrange
+    const h = gatedHarness({ current: true, pending: () => false });
+    h.recovery.start();
+    // Act
+    h.tick();
+    h.tick();
+    // Assert — the dial half is never what was expensive.
+    expect(h.state.dials).toBe(2);
+  });
+
+  it("asks anyway on the periodic full check, because a page cannot always see that it is behind", () => {
+    // Arrange — the skip is an optimization over what this page can observe,
+    // and the page this module exists for is the one that observes wrongly.
+    const h = gatedHarness({ current: true, pending: () => false, fullCheckEveryTicks: 3 });
+    h.recovery.start();
+
+    // Act
+    h.tick();
+    h.tick();
+    expect(h.state.resyncs).toEqual([]);
+    h.tick();
+
+    // Assert — the unconditional probe survives, at a twelfth of the rate.
+    expect(h.state.resyncs).toEqual(["recovery_heartbeat"]);
+  });
+
+  it("resyncs immediately on the tick where something did move", () => {
+    // Arrange — quiet, then the mark moves.
+    let moved = false;
+    const h = gatedHarness({ current: true, pending: () => moved });
+    h.recovery.start();
+    h.tick();
+    expect(h.state.resyncs).toEqual([]);
+
+    // Act
+    moved = true;
+    h.tick();
+
+    // Assert — the gate delays nothing that had a reason to go.
+    expect(h.state.resyncs).toEqual(["recovery_heartbeat"]);
+  });
+
+  it("does not gate a repair driven by evidence rather than by the clock", () => {
+    // Arrange — a socket that just came back is a FACT about the world, not a
+    // guess, and is owed its resync no matter how quiet the page looks.
+    const h = gatedHarness({ current: true, pending: () => false });
+    h.recovery.start();
+    h.tick();
+
+    // Act
+    h.recovery.recover("socket_restored");
+
+    // Assert
+    expect(h.state.resyncs).toEqual(["socket_restored"]);
+  });
+
+  it("dials but never resyncs while the socket is not current", () => {
+    // Arrange — nothing can carry a command yet.
+    const h = gatedHarness({ current: false, pending: () => true });
+    h.recovery.start();
+    // Act
+    h.tick();
+    // Assert
+    expect(h.state.dials).toBe(1);
+    expect(h.state.resyncs).toEqual([]);
   });
 });

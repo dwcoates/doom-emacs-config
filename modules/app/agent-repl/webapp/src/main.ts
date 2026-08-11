@@ -1538,6 +1538,12 @@ async function boot(): Promise<void> {
   });
   installHostRecoveryProbeHook(window as unknown as HostGlobal, recoveryProbe);
 
+  /**
+   * The (mark, fence, daemon identity) triple this page held the last time its
+   * heartbeat looked. Not a store fact — it is one observer's memory of a
+   * previous look, which is exactly what "has anything moved since?" needs.
+   */
+  let lastHeartbeatWitness = "";
   const recovery = new BackgroundRecovery(
     {
       ensureConnected: () => {
@@ -1547,6 +1553,24 @@ async function boot(): Promise<void> {
       resync: (reason) => {
         connectResync.forceResync(reason);
         connectResync.observe(false, currentResyncSnapshot(store.state.lastSeq));
+      },
+      // WHAT THIS PAGE CAN SEE THAT WOULD MAKE A RESYNC WORTH ITS SNAPSHOT.
+      // Every one of these is a fact the page holds locally: a mark that moved
+      // (items arrived), a fence or daemon identity that rotated (the store is
+      // bound to a generation that changed), or a resync the page already
+      // knows it owes. When all of them say "nothing moved", the snapshot a
+      // heartbeat would provoke is the one already applied here, and the
+      // daemon rebuilds and ships the whole world to tell this page what it
+      // already knows. The unconditional probe still runs periodically —
+      // BackgroundRecovery owns that bound — because a page that is behind is
+      // exactly a page whose mark did NOT move.
+      hasPendingWork: () => {
+        if (connectResync.isInFlight) return true;
+        const fence = store.state.fences.get(store.state.cwd) ?? "";
+        const witness = `${store.state.lastSeq}|${fence}|${connectResync.bootId ?? ""}`;
+        if (witness === lastHeartbeatWitness) return false;
+        lastHeartbeatWitness = witness;
+        return true;
       },
       clearConnectionBanner: () => {
         // A CURRENT SOCKET IS NOT PROOF THE HISTORY IS FLOWING. When the resync
