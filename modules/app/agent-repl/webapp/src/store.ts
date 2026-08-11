@@ -98,17 +98,29 @@ interface FeedOrderedItem {
 export interface UserTurnItem extends FeedOrderedItem {
   kind: "user-turn";
   /**
-   * The submit this prompt answers, when one is known. EMPTY for every prompt
-   * that reaches the feed off the transcript file plane (the real, non-fake
-   * pipeline: a `UserLine` the shim forwards), and for replayed history, which
-   * legitimately predates any live request. So it is NOT an identity —
-   * see `userTurnKey`.
+   * THE ACK-CORRELATION TOKEN, and nothing more: which submit this delivery
+   * answers, when one is known.
+   *
+   * EMPTY for every prompt that reaches the feed off the transcript file plane
+   * (the real, non-fake pipeline: a `UserLine` the shim forwards), and for
+   * replayed history, which legitimately predates any live request. It is NOT
+   * an identity and must never be used as one — see `userTurnKey`, whose
+   * ordering this field's emptiness is the whole reason for.
+   *
+   * What it IS for: carrying a provisional bubble across its adoption
+   * (`mergeUserTurn`) and naming the bubble a refused submit must take down
+   * (`dropUnackedPrompt`).
    */
   requestId: string;
   /**
-   * The conversation record's own uuid, when the turn came from one. This is
-   * what makes a request-id-less transcript prompt distinguishable from the
-   * one before it; absent only for turns minted without a record (fixtures).
+   * THE PROMPT'S IDENTITY once the daemon has supplied one: the conversation
+   * record's own uuid. Stable for the life of the prompt and across every
+   * redelivery of it, which is what lets a replay reconcile onto the bubble
+   * already standing rather than drawing a second one.
+   *
+   * Absent only while the prompt is still provisional — a bubble this webapp
+   * minted for its own submit, before any daemon delivery has landed — and on
+   * turns minted without a record (fixtures).
    */
   uuid?: string;
   content: ContentBlock[];
@@ -132,9 +144,9 @@ export interface UserTurnItem extends FeedOrderedItem {
    *
    * It can never survive the acknowledgement, and that is structural rather
    * than bookkeeping: the daemon's receipt carries the SAME request id this
-   * bubble was minted under, so `userTurnKey` gives the two one key and
-   * `mergeItem` whole-item replaces the local bubble with the daemon's — which
-   * has no such flag — at the rank the local one already holds.
+   * bubble was minted under, so `mergeUserTurn` finds this bubble by that
+   * correlation and whole-item replaces it with the daemon's — which has no
+   * such flag — at the rank the local one already holds.
    */
   unacked?: true;
 }
@@ -911,26 +923,8 @@ function mergeToolItem(existing: ToolItem, incoming: ToolItem): ToolItem {
 }
 
 /**
- * The identity ONE user turn reconciles on, or null when it has none and must
- * simply be appended.
- *
- * The request id comes FIRST and is authoritative when present: a prompt the
- * webapp submitted is echoed back under that id (fake-mode e2e, optimistic
- * echo), and those two deliveries must land on one bubble.
- *
- * But the real pipeline delivers a prompt as a transcript `UserLine` off the
- * file plane, whose request id is EMPTY on every live push. Keying those on
- * the request id gave every one of them the same key, so each new prompt
- * REPLACED the previous turn in place instead of appending — the reader saw
- * one stale bubble and never their own prompts. Such a turn is keyed on its
- * record uuid, which is unique per prompt and stable across a replay
- * redelivery, so a resync still reconciles rather than duplicating.
- *
- * With neither id there is nothing to reconcile on, and appending is right:
- * a turn with no identity can only ever be its own bubble.
- */
-/**
- * The key a prompt with a request id reconciles on, spelled once.
+ * The PROVISIONAL key a prompt holds until the daemon supplies a uuid for it,
+ * spelled once.
  *
  * Two places need it and they must agree exactly: `userTurnKey` below derives
  * it from an item, and `Store.dropUnackedPrompt` derives it from a bare
@@ -941,9 +935,36 @@ export function userTurnRequestKey(requestId: string): string {
   return `user-turn:req:${requestId}`;
 }
 
+/**
+ * The identity ONE user turn reconciles on, or null when it has none and must
+ * simply be appended.
+ *
+ * A PROMPT HAS ONE IDENTITY AT A TIME, and which one it is depends on a single
+ * fact: whether the daemon has supplied a uuid for it yet.
+ *
+ *   PROVISIONAL — a bubble this webapp minted for its own submit
+ *     (`addLocalPrompt`). It holds a request id and nothing else, and keys on
+ *     it, because there is nothing else in the world that names this prompt.
+ *
+ *   IDENTIFIED — every delivery the daemon makes. It keys on the uuid, which
+ *     is the identity the prompt keeps for the rest of its life: across the
+ *     transcript line, across a resync, across a replay of history years old.
+ *
+ * THE REQUEST ID IS NOT AN IDENTITY, and treating it as one is the defect this
+ * ordering exists to end. It used to come first, so a prompt filed locally
+ * keyed `req:<id>` while the SAME prompt replayed from history keyed
+ * `uuid:<uuid>` — a replay carries no request id, since no submit of this
+ * daemon's is outstanding for it. Two keys, no match, and the user saw their
+ * own prompt twice. The request id is now purely an ACK-CORRELATION TOKEN: it
+ * says which submit a delivery answers (`mergeUserTurn`, `dropUnackedPrompt`),
+ * and it never says which prompt this is.
+ *
+ * With neither id there is nothing to reconcile on, and appending is right:
+ * a turn with no identity can only ever be its own bubble (fixtures).
+ */
 export function userTurnKey(item: UserTurnItem): string | null {
-  if (item.requestId !== "") return userTurnRequestKey(item.requestId);
   if (item.uuid !== undefined && item.uuid !== "") return `user-turn:uuid:${item.uuid}`;
+  if (item.requestId !== "") return userTurnRequestKey(item.requestId);
   return null;
 }
 
@@ -1792,9 +1813,12 @@ export class ConversationStore {
    * here however late the refusal arrives.
    */
   dropUnackedPrompt(requestId: string): boolean {
-    const key = userTurnRequestKey(requestId);
+    // THE CORRELATION TOKEN, which is what the request id is for. This asks
+    // "which bubble did this submit mint?", not "which prompt is this?", so it
+    // reads the token directly rather than going through `userTurnKey` — the
+    // answer must not change if a prompt's identity does.
     const idx = this.state.items.findIndex(
-      (i) => i.kind === "user-turn" && i.unacked === true && userTurnKey(i) === key,
+      (i) => i.kind === "user-turn" && i.unacked === true && i.requestId === requestId,
     );
     if (idx === -1) return false;
     this.state.items.splice(idx, 1);
@@ -1997,6 +2021,14 @@ export class ConversationStore {
       this.retractConnectivityCard(item, key);
       return;
     }
+    // A prompt's identity CHANGES once — the moment the daemon supplies a uuid
+    // for it — and that transition needs the correlation token to survive it.
+    // It is the one merge that is not a plain key lookup, so it has its own
+    // seam rather than a special case buried in this one.
+    if (item.kind === "user-turn") {
+      this.mergeUserTurn(item, key, seq);
+      return;
+    }
     if (key !== null) {
       const idx = this.state.items.findIndex((i) => itemKey(i) === key);
       if (idx !== -1) {
@@ -2014,6 +2046,63 @@ export class ConversationStore {
       }
     }
     insertBySeq(this.state.items, item, seq);
+  }
+
+  /**
+   * Reconcile ONE user turn, which is the only feed item whose identity can
+   * change under it.
+   *
+   * A prompt is filed PROVISIONALLY the instant the user hits send, keyed on
+   * the request id because nothing else names it yet. Every later delivery of
+   * that same prompt comes from the daemon carrying a uuid, and the prompt
+   * ADOPTS that uuid as its identity — permanently, and from then on it is
+   * found by uuid alone, which is what makes a replay years later reconcile
+   * onto it instead of drawing a second bubble.
+   *
+   * TWO THINGS CAN THEREFORE NAME THE STANDING ITEM, and both are consulted:
+   *
+   *   - its IDENTITY, `userTurnKey`, the ordinary lookup;
+   *   - its CORRELATION, the request id, which is what carries a provisional
+   *     item across the adoption. Without it the arriving uuid-keyed delivery
+   *     would match nothing and append, and the adoption would produce a twin
+   *     rather than replacing the bubble it supersedes.
+   *
+   * THE COLLAPSE. A replay can beat the attributed line, so a uuid-keyed copy
+   * of this prompt may ALREADY be standing when the provisional item is asked
+   * to adopt — the arriving delivery then matches BOTH. Filing it under the
+   * identity and leaving the correlated item behind would move the duplicate
+   * rather than remove it, so the correlated item is spliced out and the
+   * identified one keeps its place: it holds the prompt's real seq, which is
+   * where in the conversation the prompt actually belongs, while the
+   * provisional bubble only ever held the live tail.
+   */
+  private mergeUserTurn(item: UserTurnItem, key: string | null, seq: number): void {
+    const identityIdx = key === null ? -1 : this.state.items.findIndex((i) => itemKey(i) === key);
+    // A provisional item's identity IS its request key, so it is found by the
+    // identity lookup above and must not be counted a second time here.
+    const correlatedIdx =
+      item.requestId === ""
+        ? -1
+        : this.state.items.findIndex(
+            (i, idx) =>
+              idx !== identityIdx && i.kind === "user-turn" && i.requestId === item.requestId,
+          );
+    const idx = identityIdx !== -1 ? identityIdx : correlatedIdx;
+    if (idx === -1) {
+      insertBySeq(this.state.items, item, seq);
+      return;
+    }
+    item.seq = this.state.items[idx].seq;
+    this.state.items[idx] = item;
+    // The collapse, and only when the two are genuinely different items.
+    if (identityIdx !== -1 && correlatedIdx !== -1) {
+      this.state.items.splice(correlatedIdx, 1);
+      this.log(
+        "info",
+        `collapsed the provisional bubble for ${userTurnRequestKey(item.requestId)} onto ` +
+          `the standing ${key} — a replay reached the feed before the attributed line did`,
+      );
+    }
   }
 
   /**
