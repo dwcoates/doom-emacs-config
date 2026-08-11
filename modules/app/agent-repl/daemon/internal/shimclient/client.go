@@ -1096,6 +1096,36 @@ func (c *Client) heartbeatSender(ctx context.Context, ac *activeConn) {
 // HeartbeatTimeout it opens a degraded window (once); when traffic resumes it
 // closes it. It never tears the connection down — a truly dead socket surfaces
 // through the read loop; this is honest reporting, not a fallback.
+//
+// # WHY THIS ONE LATCHES ON A DURATION AND NOT ON A PROBE COUNT
+//
+// The daemon's other degrade latches — the phantom sweep's live-set probe
+// (sessioncontroller/phantomtask.go) and Emacs's daemon-reachability probe
+// (lisp/frontend-client.el) — count CONSECUTIVE UNANSWERED PROBES, precisely
+// because an elapsed window can be satisfied by wall time in which nothing was
+// ever asked. That objection does not reach this monitor, and converting it
+// would make it worse:
+//
+//   - THERE IS NO PROBE WITH AN OUTCOME TO COUNT. A Heartbeat is fire and
+//     forget in both directions: the shim never acks ours (events.go, the
+//     Heartbeat case: "Liveness only... No reply"), and its own heartbeats are
+//     unsolicited. Nothing here is an ask, so nothing here can go unanswered.
+//     Pairing them would be a wire change spanning the shim, replacing a signal
+//     that works with one that does not exist yet.
+//   - THE ONLY COUNT AVAILABLE WOULD BE A DURATION IN DISGUISE. "N consecutive
+//     ticks that saw no new inbound frame" is measured by this same ticker,
+//     which fires on wall time whether or not anything was ever sent — so it is
+//     satisfied by exactly the schedules a bare timer is, while delaying a
+//     genuine degrade by a factor of N.
+//   - SILENCE HERE IS A FACT ABOUT THE PEER, not about our own scheduling. A
+//     probe nobody issued says nothing; inbound traffic that did not arrive is
+//     an observation, and after a suspend the link really has received nothing
+//     and may well be dead. Reporting that is honest, and the very next frame
+//     closes the window through the recovery edge below.
+//
+// The cry-wolf property the count buys elsewhere is already had here: the
+// degrade is published on ONE edge (degraded.CompareAndSwap) and has a matching
+// recovery edge, so a mute shim produces one report, not one per tick.
 func (c *Client) heartbeatMonitor(ctx context.Context) {
 	interval := c.cfg.HeartbeatTimeout / 2
 	if interval <= 0 {
