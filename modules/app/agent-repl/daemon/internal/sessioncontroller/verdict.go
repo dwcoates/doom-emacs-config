@@ -117,7 +117,25 @@ func setClassification(entry *frontendv1.QueueEntry, e *queueEntry) {
 // it produces. It is minted from the same two identities the SSM projects onto
 // WorkspaceState, through the same function, so a push and the state a client
 // compares it against can never disagree about what "current" means.
+//
+// A HISTORY CONSUMER CARRIES THE PUBLISHED TOKEN INSTEAD OF COMPOSING ONE, and
+// the distinction is the consumer's KIND rather than whether the field happens
+// to be set — an absent published fence is an answer ("" is what an unwired
+// workspace publishes), not a reason to fall back to composing.
+//
+// A consumer serving a history read runs under no controller of its own, so it
+// has no generation to compose from and used to compose `Fence(session, "")` —
+// the token "s_…|", which no WorkspaceState ever published and which therefore
+// no client could ever match. Its every push was discarded whole by the fence
+// gate, and the page, still missing what it had discarded, resynced again at
+// the next heartbeat: the ~2Hz churn this field ends. The admission ladder had
+// already resolved the workspace's AUTHORITATIVE fence to admit the request;
+// carrying that same token verbatim is what makes producer and consumer agree
+// by construction rather than by two compositions happening to coincide.
 func (c *consumer) fence() string {
+	if c.servesHistory {
+		return c.publishedFence
+	}
 	return ssm.Fence(c.sessionID, c.generationID)
 }
 

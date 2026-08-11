@@ -95,7 +95,11 @@ func (m *Manager) RecordOpenFailure(workspace string, err error) {
 		}
 		m.logf("session-controller: open bring-up FAILED ws=%q session=%s after the open was acked, with no live controller; publishing the failure card through an unwired push: %v",
 			workspace, sessionID, err)
-		cons := m.durableConsumer(workspace, sessionID)
+		// The card rides the workspace's PUBLISHED fence, read off the
+		// authoritative WorkspaceState, because that is the token the client
+		// measures it against. Composing one here from a generation this path
+		// does not have is what got such pushes discarded whole.
+		cons := m.durableConsumer(workspace, sessionID, m.publishedFence(workspace))
 		cons.pushFailure(cons.startFailedUUID(), openFailureCard(m.logf, err))
 		return
 	}
