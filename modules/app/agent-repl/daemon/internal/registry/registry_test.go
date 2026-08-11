@@ -732,3 +732,59 @@ func TestRewindLineagePartialNamesTheIncompleteShapes(t *testing.T) {
 		})
 	}
 }
+
+// THE ENGAGEMENT CLOCK SURVIVES A DAEMON BOUNCE, held to exactly the standard
+// LastTurnEndMs is: the idle cutoff is a time-since check against a durable
+// instant, so a clock that died with the process would restart every session's
+// six hours on every restart — and this daemon has been bouncing constantly.
+func TestLastEngagementSurvivesAReopen(t *testing.T) {
+	// Arrange — the two clocks apart, as a session pinged since its last real
+	// turn genuinely is.
+	path := testPath(t)
+	r := Open(path, discardLogf)
+	if err := r.Put(Record{
+		SessionID:        "s_1",
+		CWD:              "/w",
+		LastTurnEndMs:    1_700_000_600_000,
+		LastEngagementMs: 1_700_000_000_000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act — reopen from the store, as a restarted daemon would.
+	rec, ok := Open(path, discardLogf).Get("s_1")
+
+	// Assert.
+	if !ok {
+		t.Fatal("record did not survive the reopen")
+	}
+	if rec.LastEngagementMs != 1_700_000_000_000 {
+		t.Fatalf("last_engagement_ms = %d, want 1700000000000 restored from the store", rec.LastEngagementMs)
+	}
+}
+
+// AND IT DOES NOT COLLAPSE INTO THE CACHE CLOCK ACROSS THE BOUNCE. The two are
+// separately persisted columns, so a successor daemon reads the same gap its
+// predecessor recorded rather than a session that looks freshly used.
+func TestTheTwoClocksStayDistinctAcrossAReopen(t *testing.T) {
+	// Arrange.
+	path := testPath(t)
+	r := Open(path, discardLogf)
+	if err := r.Put(Record{
+		SessionID:        "s_1",
+		CWD:              "/w",
+		LastTurnEndMs:    1_700_000_600_000,
+		LastEngagementMs: 1_700_000_000_000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	rec, _ := Open(path, discardLogf).Get("s_1")
+
+	// Assert.
+	if rec.LastTurnEndMs == rec.LastEngagementMs {
+		t.Fatalf("both clocks read %d after the reopen; a restart that collapsed them would make every pinged session look freshly engaged",
+			rec.LastTurnEndMs)
+	}
+}

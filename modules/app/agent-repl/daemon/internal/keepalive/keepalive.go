@@ -367,7 +367,9 @@ type Decision struct {
 	// configuration they cannot see.
 	TTLMs int64
 	// CutoffRemainingMs is how much of the idle cutoff is still owed before the
-	// session is reaped, carried on ActionLetCacheCool.
+	// session is reaped, carried on ActionLetCacheCool and measured on the
+	// ENGAGEMENT clock the cutoff itself reads. Zero when that clock is undated
+	// and there is therefore nothing truthful to report.
 	//
 	// IT IS THE FIELD THAT MAKES THE DECLINE READABLE. The whole point of the
 	// arm is that the session is NOT being slept — so the one figure an operator
@@ -395,7 +397,27 @@ type Decision struct {
 // EVERY UNKNOWN ANSWERS NONE, the same rule the idle sweeper's own gates
 // follow: an undated session is one the policy knows nothing about, and both
 // pinging it and reaping it would be acting on absent evidence.
-func (c Config) Evaluate(nowMs, lastTurnEndMs int64) Decision {
+//
+// # TWO CLOCKS, AND THEY ARE NOT INTERCHANGEABLE
+//
+// lastTurnEndMs is the CACHE clock: the end of the most recent turn of ANY
+// kind, keep-alive pings included. Every cache-shaped arm measures from it,
+// because a ping really does refresh the prompt cache and the next one really is
+// due a cache lifetime after it.
+//
+// lastEngagementMs is the ENGAGEMENT clock: the end of the most recent turn
+// somebody actually asked for. THE IDLE CUTOFF MEASURES FROM IT ALONE, and that
+// is the correction. Measuring the cutoff from the cache clock meant every
+// successful ping reset it, so a session pinged every fifty-five minutes never
+// reached six hours and never hibernated AT ALL — the exact inverse of the
+// defect that made a cold cache sleep at one hour, and from the same cause: one
+// field answering two questions.
+//
+// An UNDATED engagement clock cannot reap. It answers the cutoff's unknown the
+// way every other unknown here is answered — with none — and the session is
+// still evaluated for the cache arms, which is exactly what a record that has
+// run turns but predates the second clock deserves.
+func (c Config) Evaluate(nowMs, lastTurnEndMs, lastEngagementMs int64) Decision {
 	if lastTurnEndMs <= 0 {
 		return Decision{Action: ActionNone}
 	}
@@ -407,8 +429,16 @@ func (c Config) Evaluate(nowMs, lastTurnEndMs int64) Decision {
 		return Decision{Action: ActionNone, ElapsedMs: int64(elapsed / time.Millisecond)}
 	}
 	elapsedMs := int64(elapsed / time.Millisecond)
-	if elapsed >= c.IdleCutoff {
-		return Decision{Action: ActionHibernate, Cause: CauseIdleCutoff, ElapsedMs: elapsedMs}
+	if quiet, dated := c.engagementElapsed(nowMs, lastEngagementMs); dated && quiet >= c.IdleCutoff {
+		// THE ELAPSED THE ACCOUNT CARRIES IS THE ENGAGEMENT ONE, because it is
+		// the figure this decision was actually taken against. Reporting the
+		// cache elapsed here would put a number in the durable hibernation
+		// record that no threshold in this ladder was compared to.
+		return Decision{
+			Action:    ActionHibernate,
+			Cause:     CauseIdleCutoff,
+			ElapsedMs: int64(quiet / time.Millisecond),
+		}
 	}
 	if elapsed >= c.CacheTTL {
 		// THE CACHE IS ALREADY COLD, AND THAT IS NOT A REASON TO SLEEP. Pinging
@@ -417,12 +447,22 @@ func (c Config) Evaluate(nowMs, lastTurnEndMs int64) Decision {
 		// nothing is submitted. The session STAYS UP, un-pinged, until the idle
 		// cutoff above reaps it. See ActionLetCacheCool for the hibernation this
 		// arm used to take and why it was wrong.
-		return Decision{
-			Action:            ActionLetCacheCool,
-			ElapsedMs:         elapsedMs,
-			TTLMs:             int64(c.CacheTTL / time.Millisecond),
-			CutoffRemainingMs: int64((c.IdleCutoff - elapsed) / time.Millisecond),
+		decision := Decision{
+			Action:    ActionLetCacheCool,
+			ElapsedMs: elapsedMs,
+			TTLMs:     int64(c.CacheTTL / time.Millisecond),
 		}
+		// THE REMAINING IS MEASURED ON THE CUTOFF'S OWN CLOCK, not on the cache
+		// clock this arm was reached by. They are different questions and by now
+		// they are usually different numbers — a session pinged an hour ago has a
+		// fresh cache clock and an engagement clock hours older — so subtracting
+		// the cutoff from the cache elapsed would report a session as having
+		// hours left when the very next sweep is about to reap it. An undated
+		// engagement clock reports nothing rather than a fabricated figure.
+		if quiet, dated := c.engagementElapsed(nowMs, lastEngagementMs); dated {
+			decision.CutoffRemainingMs = int64((c.IdleCutoff - quiet) / time.Millisecond)
+		}
+		return decision
 	}
 	if elapsed >= c.CacheTTL-c.Leeway {
 		remainingMs := int64((c.CacheTTL - elapsed) / time.Millisecond)
@@ -459,6 +499,28 @@ func (c Config) Evaluate(nowMs, lastTurnEndMs int64) Decision {
 		}
 	}
 	return Decision{Action: ActionNone, ElapsedMs: elapsedMs}
+}
+
+// engagementElapsed is how long the session has gone without a turn somebody
+// asked for, and whether that is knowable at all.
+//
+// AN UNDATED CLOCK IS NOT AN ANCIENT ONE. Zero means no engagement has ever been
+// observed under this record — a session that predates the field, or one whose
+// only turns were the daemon's own — and reading that as "idle since the epoch"
+// is how a sweeper reaps the session it knows least about. It answers false, and
+// the caller declines to reap.
+//
+// A clock in the FUTURE is a clock that moved backwards, and it answers false
+// for the same conservative reason the cache clock's own negative branch does.
+func (c Config) engagementElapsed(nowMs, lastEngagementMs int64) (time.Duration, bool) {
+	if lastEngagementMs <= 0 {
+		return 0, false
+	}
+	quiet := time.Duration(nowMs-lastEngagementMs) * time.Millisecond
+	if quiet < 0 {
+		return 0, false
+	}
+	return quiet, true
 }
 
 // PingDeadline is how long a submitted ping's turn may stay open before the

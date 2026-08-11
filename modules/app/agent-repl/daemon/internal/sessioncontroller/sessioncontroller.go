@@ -862,6 +862,20 @@ type sessionController struct {
 	// IT IS CLEARED BY REAL WORK, because real work rebuilds the prefix this
 	// verdict was about (submitPromptAs). Read and written only under Manager.mu.
 	cacheProvenCold *coldCacheVerdict
+	// machineTurnID names the daemon's own in-flight turn — a cache keep-alive
+	// ping or a warm compaction — empty when the turn in flight is somebody
+	// else's. It is what stops such a turn's end from moving the ENGAGEMENT
+	// clock the idle cutoff measures (engagementturn.go).
+	//
+	// ONE FIELD, NOT A SET, because the claims make one machine turn at a time
+	// structural: a ping declines while a compaction runs and vice versa, and
+	// both decline while any turn is active. A second one arriving is that
+	// exclusivity having failed, and noteMachineTurn says so out loud rather
+	// than growing a set that would hide it.
+	//
+	// Written at the SUBMIT funnel where the submitter is known exactly, read at
+	// that same turn's end by id. Read and written only under Manager.mu.
+	machineTurnID string
 	// drivenTurns names every turn THIS generation has a driver for: one it
 	// submitted itself, or one the returning shim positively announced as in
 	// flight at the handshake. It is the undriven-turn watchdog's whole
@@ -2994,12 +3008,19 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	cons.onTurnLiveness = func(l ssm.TurnLiveness) {
 		m.noteTurnLiveness(d, l)
 	}
-	// The keep-alive policy's measuring point. Persisted per accepted turn end,
+	// THE TWO IDLE CLOCKS' MEASURING POINT, persisted per accepted turn end,
 	// which is what makes every later decision a time-since check against a
 	// durable instant rather than a timer nothing can restore (hibernation.go).
+	//
+	// The turn's KIND is resolved here, from the mark its own submit left
+	// (engagementturn.go), and handed to the registrar with the instant so both
+	// clocks move in one write. A keep-alive ping and a warm compaction move the
+	// cache clock alone: they refresh the prompt cache, so the ping schedule
+	// must measure from them, and they are not somebody using the workspace, so
+	// the six-hour idle cutoff must not.
 	if m.cfg.Hibernations != nil {
-		cons.onTurnEnded = func(atMs int64) {
-			m.cfg.Hibernations.TurnEndObserved(sessionID, atMs)
+		cons.onTurnEnded = func(turnID string, atMs int64) {
+			m.cfg.Hibernations.TurnEndObserved(sessionID, atMs, m.engagementTurn(d, turnID))
 		}
 	}
 	// WHAT EVERY TURN'S TERMINAL RESULT MEASURED, routed to the two decisions

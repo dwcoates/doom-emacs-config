@@ -1363,7 +1363,7 @@ func (r *RegistryRegistrar) QueuedPromptsChanged(sessionID string, queued []regi
 // leaves an undated session alone — but it does silently switch the keep-alive
 // off for that session, which is exactly the kind of quiet degradation the log
 // line exists to make findable.
-func (r *RegistryRegistrar) TurnEndObserved(sessionID string, atMs int64) {
+func (r *RegistryRegistrar) TurnEndObserved(sessionID string, atMs int64, engagement bool) {
 	if r.Reg == nil || atMs <= 0 {
 		return
 	}
@@ -1378,6 +1378,19 @@ func (r *RegistryRegistrar) TurnEndObserved(sessionID string, atMs int64) {
 			// here the record's timestamp is evidence a turn ran, and the
 			// resume ladder may read it as such.
 			rec.LastTurnEndBackfilled = false
+		}
+		// THE ENGAGEMENT CLOCK MOVES ONLY FOR A TURN SOMEBODY ASKED FOR. A
+		// keep-alive ping and a warm compaction are the daemon talking to
+		// itself: they refresh the prompt cache, so they move the cache clock
+		// above, and they are not somebody using the workspace, so they leave
+		// this one exactly where it was. That is what lets a session pinged
+		// every cache lifetime still reach the six-hour idle cutoff — before
+		// this field existed it never did, and such a session never hibernated
+		// at all.
+		//
+		// The same never-backwards rule, for the same reason.
+		if engagement && atMs > rec.LastEngagementMs {
+			rec.LastEngagementMs = atMs
 		}
 	})
 	if err != nil && r.Logf != nil {
@@ -1396,6 +1409,24 @@ func (r *RegistryRegistrar) TurnEndObserved(sessionID string, atMs int64) {
 	if !found && r.Logf != nil {
 		r.Logf("server: session %s: last_turn_end_ms write found no record (never registered) at_ms=%d", sessionID, atMs)
 	}
+}
+
+// LastEngagementOf reads back the instant somebody last engaged with the
+// session, which is the ONE input to the idle cutoff.
+//
+// It is separate from LastTurnEndOf rather than a flag on it because the two
+// answer different questions and a caller must not be able to ask for one and
+// receive the other: measuring the cutoff against the cache clock is precisely
+// the defect the engagement clock exists to fix.
+func (r *RegistryRegistrar) LastEngagementOf(sessionID string) (int64, bool) {
+	if r.Reg == nil {
+		return 0, false
+	}
+	rec, ok := r.Reg.Get(sessionID)
+	if !ok {
+		return 0, false
+	}
+	return rec.LastEngagementMs, rec.LastEngagementMs > 0
 }
 
 // HibernationChanged persists a session's hibernation state and its typed

@@ -45,6 +45,7 @@ func migrate(db *sql.DB) error {
 			queued_prompts              TEXT    NOT NULL DEFAULT '',
 			last_turn_end_ms            INTEGER NOT NULL DEFAULT 0,
 			last_turn_end_backfilled    INTEGER NOT NULL DEFAULT 0,
+			last_engagement_ms          INTEGER NOT NULL DEFAULT 0,
 			hibernated                  INTEGER NOT NULL DEFAULT 0,
 			hibernation_cause           TEXT    NOT NULL DEFAULT '',
 			hibernated_since_ms         INTEGER NOT NULL DEFAULT 0,
@@ -78,6 +79,9 @@ func migrate(db *sql.DB) error {
 	// without a schema-version bump: an older binary reading a store that has
 	// the columns simply never selects them.
 	if err := addSessionRecordColumns(db); err != nil {
+		return err
+	}
+	if err := seedLastEngagementFromLastTurnEnd(db); err != nil {
 		return err
 	}
 
@@ -119,6 +123,7 @@ var sessionRecordAddedColumns = []struct{ name, ddl string }{
 	{"rewind_retained_leaf_uuid", "TEXT NOT NULL DEFAULT ''"},
 	{"rewind_dropped_turn_ids", "TEXT NOT NULL DEFAULT ''"},
 	{"death_resolved_at_ms", "INTEGER NOT NULL DEFAULT 0"},
+	{"last_engagement_ms", "INTEGER NOT NULL DEFAULT 0"},
 }
 
 // addSessionRecordColumns brings an existing session_record table up to the
@@ -132,6 +137,35 @@ func addSessionRecordColumns(db *sql.DB) error {
 	}
 	if err := statedb.AddColumnsIfMissing(db, "session_record", columns); err != nil {
 		return fmt.Errorf("registry: %w", err)
+	}
+	return nil
+}
+
+// seedLastEngagementFromLastTurnEnd gives a record written before the
+// engagement clock existed the best evidence there is: its own last turn end.
+//
+// WITHOUT IT EVERY EXISTING SESSION BECOMES IMMORTAL. The idle cutoff measures
+// from the engagement clock and "every unknown answers none", so a migrated
+// record carrying a zero there would never be reaped — the same never-sleeps
+// failure the second clock exists to fix, merely relocated to the upgrade.
+//
+// IT ERRS TOWARD LOOKING RECENTLY ENGAGED, and that is the safe direction. The
+// seeded instant may have been moved by a keep-alive ping rather than by a
+// person, so it can read as more recent than the truth; the cost of that is a
+// teardown DELAYED by at most one cache lifetime, and the first real turn under
+// the new daemon replaces it with a true engagement instant.
+//
+// IT RUNS ONCE IN EFFECT, not once by bookkeeping: the predicate is
+// `last_engagement_ms = 0 AND last_turn_end_ms > 0`, which a record that has
+// been seeded no longer satisfies. A session that genuinely has no turn end is
+// left at zero, because there is nothing to seed it from and inventing an
+// instant is the one thing the whole policy refuses to do.
+func seedLastEngagementFromLastTurnEnd(db *sql.DB) error {
+	if _, err := db.Exec(
+		`UPDATE session_record SET last_engagement_ms = last_turn_end_ms
+		 WHERE last_engagement_ms = 0 AND last_turn_end_ms > 0`,
+	); err != nil {
+		return fmt.Errorf("registry: seeding last_engagement_ms from last_turn_end_ms: %w", err)
 	}
 	return nil
 }
@@ -151,7 +185,7 @@ func loadState(q querier, logf func(string, ...any)) (map[string]Record, map[Con
 
 	rows, err := q.Query(`SELECT session_id, cwd, model, permission_mode, config_dir, config_dir_override, claude_session_id,
 		created_at, terminal, death_reason, terminal_at, last_seq, newest_clear_or_compact_seq,
-		backfill_state, queued_prompts, last_turn_end_ms, last_turn_end_backfilled, hibernated, hibernation_cause,
+		backfill_state, queued_prompts, last_turn_end_ms, last_turn_end_backfilled, last_engagement_ms, hibernated, hibernation_cause,
 		hibernated_since_ms, hibernation_cutoff_ms, hibernation_elapsed_ms,
 		hibernation_ttl_ms, rewind_previous_vendor_session_id, rewind_retained_leaf_uuid,
 		rewind_dropped_turn_ids, death_resolved_at_ms FROM session_record`)
@@ -168,7 +202,8 @@ func loadState(q querier, logf func(string, ...any)) (map[string]Record, map[Con
 		if err := rows.Scan(&rec.SessionID, &rec.CWD, &rec.Model, &rec.PermissionMode, &rec.ConfigDir,
 			&rec.ConfigDirOverride, &rec.ClaudeSessionID, &rec.CreatedAt, &rec.Terminal, &rec.DeathReason, &rec.TerminalAt,
 			&rec.LastSeq, &rec.NewestClearOrCompactSeq, &rec.BackfillState, &queued,
-			&rec.LastTurnEndMs, &rec.LastTurnEndBackfilled, &rec.Hibernated, &rec.Hibernation.Cause, &rec.Hibernation.SinceMs,
+			&rec.LastTurnEndMs, &rec.LastTurnEndBackfilled, &rec.LastEngagementMs,
+			&rec.Hibernated, &rec.Hibernation.Cause, &rec.Hibernation.SinceMs,
 			&rec.Hibernation.CutoffMs, &rec.Hibernation.ElapsedMs, &rec.Hibernation.TTLMs,
 			&rec.Rewind.PreviousVendorSessionID, &rec.Rewind.RetainedLeafUUID,
 			&rec.Rewind.DroppedTurnIDs, &rec.DeathResolvedAtMs); err != nil {
@@ -270,11 +305,11 @@ func mergeCheckpoint(dst map[ConversationIdentity]ConversationCheckpoint, cp Con
 const sessionRecordInsert = `INSERT OR REPLACE INTO session_record(session_id, cwd, model, permission_mode,
 	config_dir, config_dir_override, claude_session_id, created_at, terminal, death_reason, terminal_at,
 	last_seq, newest_clear_or_compact_seq, backfill_state, queued_prompts,
-	last_turn_end_ms, last_turn_end_backfilled, hibernated, hibernation_cause, hibernated_since_ms,
+	last_turn_end_ms, last_turn_end_backfilled, last_engagement_ms, hibernated, hibernation_cause, hibernated_since_ms,
 	hibernation_cutoff_ms, hibernation_elapsed_ms, hibernation_ttl_ms,
 	rewind_previous_vendor_session_id, rewind_retained_leaf_uuid, rewind_dropped_turn_ids,
 	death_resolved_at_ms)
-	VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 
 func sessionRecordValues(rec Record) ([]any, error) {
 	queued, err := encodeQueuedPrompts(rec.QueuedPrompts)
@@ -285,7 +320,8 @@ func sessionRecordValues(rec Record) ([]any, error) {
 		rec.SessionID, rec.CWD, rec.Model, rec.PermissionMode, rec.ConfigDir,
 		rec.ConfigDirOverride, rec.ClaudeSessionID, rec.CreatedAt, rec.Terminal, rec.DeathReason, rec.TerminalAt,
 		int64(rec.LastSeq), int64(rec.NewestClearOrCompactSeq), rec.BackfillState, queued,
-		rec.LastTurnEndMs, rec.LastTurnEndBackfilled, rec.Hibernated, rec.Hibernation.Cause, rec.Hibernation.SinceMs,
+		rec.LastTurnEndMs, rec.LastTurnEndBackfilled, rec.LastEngagementMs,
+		rec.Hibernated, rec.Hibernation.Cause, rec.Hibernation.SinceMs,
 		rec.Hibernation.CutoffMs, rec.Hibernation.ElapsedMs, rec.Hibernation.TTLMs,
 		rec.Rewind.PreviousVendorSessionID, rec.Rewind.RetainedLeafUUID, rec.Rewind.DroppedTurnIDs,
 		rec.DeathResolvedAtMs,

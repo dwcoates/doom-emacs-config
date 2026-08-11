@@ -25,6 +25,10 @@ type fakeHibernations struct {
 	details map[string]registry.HibernationDetail
 	writes  []registry.HibernationDetail
 	turnEnd map[string]int64
+	// engaged mirrors turnEnd for the ENGAGEMENT clock: it moves only for a turn
+	// TurnEndObserved was told somebody asked for, which is what the idle cutoff
+	// measures.
+	engaged map[string]int64
 	// writeErr, when set, fails every HibernationChanged.
 	writeErr error
 	// writeSeen, when non-nil, receives every attempted HibernationChanged —
@@ -43,6 +47,7 @@ func newFakeHibernations() *fakeHibernations {
 	return &fakeHibernations{
 		details: map[string]registry.HibernationDetail{},
 		turnEnd: map[string]int64{},
+		engaged: map[string]int64{},
 	}
 }
 
@@ -70,11 +75,14 @@ func (f *fakeHibernations) HibernationOf(sessionID string) (registry.Hibernation
 	return d, ok
 }
 
-func (f *fakeHibernations) TurnEndObserved(sessionID string, atMs int64) {
+func (f *fakeHibernations) TurnEndObserved(sessionID string, atMs int64, engagement bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if atMs > f.turnEnd[sessionID] {
 		f.turnEnd[sessionID] = atMs
+	}
+	if engagement && atMs > f.engaged[sessionID] {
+		f.engaged[sessionID] = atMs
 	}
 }
 
@@ -83,6 +91,20 @@ func (f *fakeHibernations) LastTurnEndOf(sessionID string) (int64, bool) {
 	defer f.mu.Unlock()
 	atMs, ok := f.turnEnd[sessionID]
 	return atMs, ok
+}
+
+func (f *fakeHibernations) LastEngagementOf(sessionID string) (int64, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	atMs, ok := f.engaged[sessionID]
+	return atMs, atMs > 0 && ok
+}
+
+// lastEngagement reads the engagement clock back for an assertion.
+func (f *fakeHibernations) lastEngagement(sessionID string) int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.engaged[sessionID]
 }
 
 func (f *fakeHibernations) setAsleep(sessionID string, detail registry.HibernationDetail) {
@@ -154,7 +176,7 @@ func TestHibernateWithCauseReValidatesAgainstTheInjectedClock(t *testing.T) {
 	lastEndMs := time.Now().UnixMilli()
 	const threeHoursMs = int64(3 * 60 * 60 * 1000)
 	m, hib := newClockedHibernationRig(t, func() int64 { return lastEndMs + threeHoursMs })
-	hib.TurnEndObserved("s1", lastEndMs)
+	hib.TurnEndObserved("s1", lastEndMs, true)
 
 	// Act.
 	err := m.HibernateWithCause("ws", registry.HibernationDetail{
@@ -174,7 +196,7 @@ func TestHibernateWithCauseDefaultsToTheWallClock(t *testing.T) {
 	// Arrange — a turn that ended three hours ago in real time.
 	const threeHoursMs = int64(3 * 60 * 60 * 1000)
 	m, hib := newClockedHibernationRig(t, nil)
-	hib.TurnEndObserved("s1", time.Now().UnixMilli()-threeHoursMs)
+	hib.TurnEndObserved("s1", time.Now().UnixMilli()-threeHoursMs, true)
 
 	// Act.
 	if err := m.HibernateWithCause("ws", registry.HibernationDetail{
@@ -251,7 +273,7 @@ func TestHibernateWithCauseRefusesAStaleAutomaticDecision(t *testing.T) {
 	m, _, hib := newHibernationRig(t)
 	const nowMs = int64(10_000_000_000)
 	m.now = func() int64 { return nowMs }
-	hib.TurnEndObserved("s1", nowMs-60_000)
+	hib.TurnEndObserved("s1", nowMs-60_000, true)
 
 	// Act.
 	err := m.HibernateWithCause("ws", registry.HibernationDetail{
@@ -272,7 +294,7 @@ func TestHibernateWithCauseWritesNothingOnAStaleDecision(t *testing.T) {
 	m, _, hib := newHibernationRig(t)
 	const nowMs = int64(10_000_000_000)
 	m.now = func() int64 { return nowMs }
-	hib.TurnEndObserved("s1", nowMs-60_000)
+	hib.TurnEndObserved("s1", nowMs-60_000, true)
 
 	// Act.
 	_ = m.HibernateWithCause("ws", registry.HibernationDetail{
@@ -293,7 +315,7 @@ func TestHibernateWithCauseRecordsTheFreshElapsed(t *testing.T) {
 	m, _, hib := newHibernationRig(t)
 	const nowMs = int64(10_000_000_000)
 	m.now = func() int64 { return nowMs }
-	hib.TurnEndObserved("s1", nowMs-10_800_000)
+	hib.TurnEndObserved("s1", nowMs-10_800_000, true)
 
 	// Act.
 	if err := m.HibernateWithCause("ws", registry.HibernationDetail{
@@ -316,7 +338,7 @@ func TestHibernateWithCauseDoesNotReValidateAForcedCause(t *testing.T) {
 	m, _, hib := newHibernationRig(t)
 	const nowMs = int64(10_000_000_000)
 	m.now = func() int64 { return nowMs }
-	hib.TurnEndObserved("s1", nowMs-1_000)
+	hib.TurnEndObserved("s1", nowMs-1_000, true)
 
 	// Act.
 	err := m.HibernateWithCause("ws", registry.HibernationDetail{Cause: registry.HibernationCauseForced})

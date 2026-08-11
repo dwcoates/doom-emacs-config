@@ -83,7 +83,7 @@ func TestReviveForMergeSurvivesAStaleRecordWhoseFlagReadsAwake(t *testing.T) {
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
 	hib := newFakeHibernations()
 	m.cfg.Hibernations = hib
-	hib.TurnEndObserved("s1", time.Now().Add(-72*time.Hour).UnixMilli())
+	hib.TurnEndObserved("s1", time.Now().Add(-72*time.Hour).UnixMilli(), true)
 	// The staleness transition refuses an unsettled workspace, so the record has
 	// to be settled for the stale sleep to be takeable at all.
 	m.cfg.SSM.(*fakeApplier).setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})

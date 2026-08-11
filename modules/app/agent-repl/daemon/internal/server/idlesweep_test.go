@@ -26,6 +26,22 @@ func sweepWindowKeepAlive(window time.Duration) keepalive.Config {
 	return cfg
 }
 
+// sweptRecord is the registry record the generic idle sweep would evaluate for
+// this session, addressed at the given workspace.
+//
+// It reads the record rather than constructing one so a test measures the same
+// engagement instant production does — including a zero one, which is what sends
+// the gate to the workspace's state log instead.
+func sweptRecord(t *testing.T, h *harness, sessionID, workspace string) registry.Record {
+	t.Helper()
+	rec, ok := h.reg.Get(sessionID)
+	if !ok {
+		t.Fatalf("session %s has no registry record to sweep", sessionID)
+	}
+	rec.CWD = workspace
+	return rec
+}
+
 // sweptPastTheCutoff is a workspace quiet past the reaping cutoff, with a
 // last-turn-end old enough on the REAL clock that the hibernation claim's own
 // fresh re-read agrees with the sweep's decision.
@@ -104,7 +120,7 @@ func TestAWorkspaceQuietBelowTheKeepAlivePolicyCutoffIsHeld(t *testing.T) {
 	quietFor(time.Hour)
 
 	// Act.
-	_, got := h.srv.sweepable(id, "/w", h.srv.now().UnixMilli())
+	_, got := h.srv.sweepable(sweptRecord(t, h, id, "/w"), h.srv.now().UnixMilli())
 
 	// Assert.
 	if got {
@@ -185,7 +201,7 @@ func TestAWorkspaceQuietPastTheWindowIsSweepable(t *testing.T) {
 	quietFor(time.Hour)
 
 	// Act.
-	_, got := h.srv.sweepable(id, "/w", h.srv.now().UnixMilli())
+	_, got := h.srv.sweepable(sweptRecord(t, h, id, "/w"), h.srv.now().UnixMilli())
 
 	// Assert.
 	if !got {
@@ -203,7 +219,7 @@ func TestAWorkspaceQuietInsideTheWindowIsHeld(t *testing.T) {
 	quietFor(7 * time.Minute)
 
 	// Act.
-	_, got := h.srv.sweepable(id, "/w", h.srv.now().UnixMilli())
+	_, got := h.srv.sweepable(sweptRecord(t, h, id, "/w"), h.srv.now().UnixMilli())
 
 	// Assert.
 	if got {
@@ -219,7 +235,7 @@ func TestAWorkspaceWithNoStateAtAllIsHeld(t *testing.T) {
 	quietFor(24 * time.Hour)
 
 	// Act.
-	_, got := h.srv.sweepable(id, "/never-seen", h.srv.now().UnixMilli())
+	_, got := h.srv.sweepable(sweptRecord(t, h, id, "/never-seen"), h.srv.now().UnixMilli())
 
 	// Assert.
 	if got {
@@ -245,7 +261,7 @@ func TestATurnActiveWorkspaceIsHeldHoweverOldItsLogIs(t *testing.T) {
 	quietFor(24 * time.Hour)
 
 	// Act.
-	_, got := h.srv.sweepable(id, "/w", h.srv.now().UnixMilli())
+	_, got := h.srv.sweepable(sweptRecord(t, h, id, "/w"), h.srv.now().UnixMilli())
 
 	// Assert.
 	if got {
