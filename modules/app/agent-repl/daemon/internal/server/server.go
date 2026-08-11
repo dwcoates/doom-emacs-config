@@ -2108,6 +2108,14 @@ func (s *Server) sweepIdle() {
 		// stream is ever going to revisit it. The sweep asks the shim, which
 		// owns the live set, and closes only what the shim says is not running.
 		s.controller.SweepPhantomTasks()
+		// THE SAME ARGUMENT FOR A WORKSPACE THAT NEVER CAME UP AT ALL
+		// (bringupretry.go). A resolved bring-up failure leaves a failure
+		// budget with attempts remaining and NOBODY to spend them: every other
+		// caller of the ladder is a user action or the one-shot boot walk, so a
+		// workspace nobody opens stays unwired forever. This is the only route
+		// that reaches a workspace nobody asks for — the same reason this
+		// sweeper exists at all.
+		s.controller.SweepFailedBringUps()
 	}
 	for _, rec := range s.registry.All() {
 		// THE SWEEP ABANDONS ITS REMAINDER ONCE SHUTDOWN HAS BEGUN, and this is

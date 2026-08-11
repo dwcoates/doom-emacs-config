@@ -81,9 +81,19 @@ func TestGivingUpPublishesTheAccountOnTheStandingFailureCard(t *testing.T) {
 	// YET" when the park became a cooldown: the old wording asserted a
 	// permanence the park no longer has, and a card that tells a user their
 	// workspace is finished when it will retry on its own is the wrong report.
-	last := cards[len(cards)-1]
-	if !strings.Contains(last.GetDetail(), "not being respawned yet") {
-		t.Fatalf("last failure card detail = %q, want it to name the give-up", last.GetDetail())
+	//
+	// The card is found by its CONTENT rather than by being last, because the
+	// exhausted budget now also publishes its own terminal card under a
+	// separate identity (bringupretry.go) and the two are different reports of
+	// the same wall, not competitors for one slot.
+	named := false
+	for _, c := range cards {
+		if strings.Contains(c.GetDetail(), "not being respawned yet") {
+			named = true
+		}
+	}
+	if !named {
+		t.Fatalf("no failure card names the give-up; details = %q", cardDetails(cards))
 	}
 	if !h.log.contains("bring-up GIVING UP") {
 		t.Fatal("the give-up was not logged")
