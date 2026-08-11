@@ -347,8 +347,8 @@ func TestSubmittingAClearAlsoPushesItsInvocationItem(t *testing.T) {
 }
 
 func TestAnOrdinaryPromptPushesNoInvocationItem(t *testing.T) {
-	// Arrange — an ordinary prompt is the user speaking, and it gets its
-	// work and nothing else.
+	// Arrange — an ordinary prompt is the user speaking, and the invocation item
+	// is for commands the daemon recognized, which this is not.
 	h := newQueueHarness(t, nil)
 
 	// Act.
@@ -360,8 +360,8 @@ func TestAnOrdinaryPromptPushesNoInvocationItem(t *testing.T) {
 	if items := h.commandItems(); len(items) != 0 {
 		t.Fatalf("pushed %d session-command item(s) for a prompt, want none", len(items))
 	}
-	if turns := h.userTurns(); len(turns) != 1 {
-		t.Fatalf("pushed %d user turn(s) for a prompt, want 1", len(turns))
+	if turns := h.userTurns(); len(turns) != 0 {
+		t.Fatalf("pushed %d user turn(s) at submit, want none until the durable line arrives", len(turns))
 	}
 }
 
