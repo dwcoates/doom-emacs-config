@@ -188,6 +188,14 @@ const (
 	// stamped the durable last-turn-end to now, so the fresh elapsed is ~0 —
 	// which is the prediction overruling the observation that exists precisely
 	// because the prediction was wrong.
+	// NOTHING PASSES IT TODAY, and that is a statement about the CAUSES rather
+	// than about this distinction. The one observed account was the cold-ping
+	// hibernation, and a cold ping no longer sleeps a session at all — it
+	// declines further pings instead (keepalivecold.go). The arm is kept because
+	// the distinction is the reason the claim's re-measurement is safe: a future
+	// cause that measures rather than predicts must be able to say so, and
+	// discovering that requirement again after a re-measurement has silently
+	// refused every such hibernation is the failure this names.
 	evidenceObserved
 )
 
