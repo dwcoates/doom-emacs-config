@@ -17,13 +17,21 @@
 #   - it records its own exit, so an unexpected death is distinguishable from
 #     the deliberate SIGTERM the test sends.
 #
-# USAGE: async-probe.sh <label> [heartbeat-file]
+# USAGE: async-probe.sh <label> [heartbeat-file] [interval-seconds]
 #   label          names the probe in its log lines (use the workspace name)
 #   heartbeat-file defaults to /tmp/async-probe-<label>.log
+#   interval       defaults to 1 second
+#
+# THE INTERVAL IS THE MEASUREMENT. The continuity proof is that no gap between
+# consecutive ticks exceeds the interval by more than a small tolerance, across
+# a window spanning the bounce. A coarser interval cannot distinguish a brief
+# stall from a scheduling jitter, so 1s is the default and should not be raised
+# without also raising the tolerance the analyzer applies.
 set -u
 
-label="${1:?usage: async-probe.sh <label> [heartbeat-file]}"
+label="${1:?usage: async-probe.sh <label> [heartbeat-file] [interval-seconds]}"
 out="${2:-/tmp/async-probe-${label}.log}"
+interval="${3:-1}"
 
 # The exit record is written by the trap, never by the loop, so a death that did
 # NOT come through a signal leaves no "stopped" line and is therefore visible as
@@ -35,13 +43,13 @@ on_term() {
 trap 'on_term TERM' TERM
 trap 'on_term INT' INT
 
-printf '%s %s started pid=%s\n' "$(date +%H:%M:%S.%N)" "$label" "$$" >>"$out"
+printf '%s %s started pid=%s interval=%s\n' "$(date +%H:%M:%S.%N)" "$label" "$$" "$interval" >>"$out"
 
 # `wait` after a backgrounded sleep rather than a bare `sleep`: a bare sleep is
 # not interruptible by a trap until it returns, which would delay the SIGTERM
 # response by up to a full tick and blur the very measurement this exists for.
 while true; do
   printf '%s %s tick pid=%s\n' "$(date +%H:%M:%S.%N)" "$label" "$$" >>"$out"
-  sleep 2 &
+  sleep "$interval" &
   wait $!
 done
