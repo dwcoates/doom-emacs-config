@@ -635,7 +635,14 @@ func (m *Manager) noteSessionCommand(d *sessionController, requestID string, cmd
 	if !cmd.recognized() || requestID == "" {
 		return
 	}
-	d.consumer.pushSessionCommand(requestID, cmd.command, outcome)
+	// EPHEMERAL EXACTLY WHEN THE DAEMON ANSWERED IT ITSELF. performsLocally is
+	// the routing decision — the daemon PERFORMS this command instead of
+	// handing its text to the shim — so a command it answers alone never
+	// reaches the CLI and the CLI writes no transcript record for it. Everything
+	// else is forwarded, runs in the CLI, and earns a durable record there.
+	// Reading the same fact off the routing predicate rather than off a second
+	// table is what keeps the two from disagreeing.
+	d.consumer.pushSessionCommand(requestID, cmd.command, cmd.performsLocally(), outcome)
 }
 
 // applyLocalSessionCommand performs a session command the daemon owns rather
