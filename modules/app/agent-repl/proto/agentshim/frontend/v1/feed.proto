@@ -148,6 +148,12 @@ message Message {
   // The NAME is retired because this surface is protojson on the wire, where
   // the field name is the wire token.
   reserved "async_bubble";
+  // 35 KEPT its number but was renamed session_command ->
+  // daemon_intercepted_command, because the old name read as a command issued
+  // TO the session rather than one intercepted FROM the user's input. Same
+  // retirement rule as async_bubble: the name is the wire token here, so
+  // "session_command" is retired and must never come back meaning anything.
+  reserved "session_command";
 
   // ---- Feed packaging: identity, lineage, ordering, provenance, resolution ----
 
@@ -205,7 +211,8 @@ message Message {
     // clear or compact is therefore always live.
     agentshim.core.v1.ContextCleared context_cleared = 32;
     agentshim.core.v1.ContextCompacted context_compacted = 33;
-    SessionCommandItem session_command = 35;
+    // A slash command the daemon took out of the user's input.
+    DaemonInterceptedCommandItem daemon_intercepted_command = 35;
     // A piece of detached work. THIS MESSAGE IS THE WORK — its uuid is the
     // work's id, and its lineage is the work's place in the feed.
     //

@@ -20,7 +20,7 @@ import (
 // purple user bubble therefore states something false twice over: that the
 // user said it to the agent, and that the agent received it.
 //
-// WHAT REPLACES THE DETACHED WORK is `frontend.v1.SessionCommandItem`, which carries
+// WHAT REPLACES THE DETACHED WORK is `frontend.v1.DaemonInterceptedCommandItem`, which carries
 // the command's IDENTITY and no text at all. That absence is the whole design:
 // the item has no field a prompt could be put in, so no consumer can render
 // the submitted text and no producer can leak an argument the user typed
@@ -118,8 +118,8 @@ func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsM
 		TsMs:      tsMs,
 		RequestId: requestID,
 		Lineage:   frontend.FeedRowLineage(sessionCommandUUID(requestID)),
-		Payload: &frontendv1.Message_SessionCommand{
-			SessionCommand: &frontendv1.SessionCommandItem{Command: command},
+		Payload: &frontendv1.Message_DaemonInterceptedCommand{
+			DaemonInterceptedCommand: &frontendv1.DaemonInterceptedCommandItem{Command: command},
 		},
 	}
 }
@@ -156,7 +156,7 @@ func (c *consumer) pushSessionCommand(requestID string, command frontendv1.Sessi
 	}
 	c.cmdItems[item.GetUuid()] = item
 	c.mu.Unlock()
-	c.logf("session-controller: session command %s invoked ws=%q session=%s request_id=%s%s — pushed as a SessionCommandItem, NOT as a prompt bubble (a session command is not a prompt, and the item carries no prompt text)",
+	c.logf("session-controller: session command %s invoked ws=%q session=%s request_id=%s%s — pushed as a DaemonInterceptedCommandItem, NOT as a prompt bubble (a session command is not a prompt, and the item carries no prompt text)",
 		command.String(), c.workspace, c.sessionID, requestID, outcome)
 	c.pushLocalItem(item)
 }

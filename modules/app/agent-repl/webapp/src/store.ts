@@ -458,7 +458,7 @@ export function stringField(item: ToolItem, key: string): string {
 }
 
 /**
- * A SESSION COMMAND the user invoked (`frontend.v1.SessionCommandItem`):
+ * A SESSION COMMAND the user invoked (`frontend.v1.DaemonInterceptedCommandItem`):
  * `/model`, `/compact`, `/clear`, and the rest of the closed set the CLI
  * answers itself.
  *

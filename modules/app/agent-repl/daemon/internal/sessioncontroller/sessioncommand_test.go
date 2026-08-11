@@ -15,15 +15,15 @@ import (
 
 // --- helpers ----------------------------------------------------------------
 
-// commandItems are every session_command item the frontend was pushed, in push
+// commandItems are every daemon_intercepted_command item the frontend was pushed, in push
 // order.
-func (h *queueHarness) commandItems() []*frontendv1.SessionCommandItem {
+func (h *queueHarness) commandItems() []*frontendv1.DaemonInterceptedCommandItem {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
-	var out []*frontendv1.SessionCommandItem
+	var out []*frontendv1.DaemonInterceptedCommandItem
 	for _, cd := range h.push.convo {
 		for _, it := range cd.GetMessages() {
-			if sc := it.GetSessionCommand(); sc != nil {
+			if sc := it.GetDaemonInterceptedCommand(); sc != nil {
 				out = append(out, sc)
 			}
 		}
@@ -145,16 +145,16 @@ func TestEverySessionCommandSpecNamesADistinctCommand(t *testing.T) {
 
 func TestTheInvocationItemHasNowhereToPutAPrompt(t *testing.T) {
 	// Arrange — this is THE invariant the whole change rests on. A frontend
-	// cannot render the submitted prompt from a SessionCommandItem because
+	// cannot render the submitted prompt from a DaemonInterceptedCommandItem because
 	// there is no field to read it out of, and no producer can leak an
 	// argument the user typed for the same reason. A field added here would
 	// reopen exactly that, which is why the shape is asserted rather than
 	// assumed.
-	fields := (&frontendv1.SessionCommandItem{}).ProtoReflect().Descriptor().Fields()
+	fields := (&frontendv1.DaemonInterceptedCommandItem{}).ProtoReflect().Descriptor().Fields()
 
 	// Act / Assert.
 	if fields.Len() != 1 {
-		t.Fatalf("SessionCommandItem has %d field(s), want exactly 1 — a second field is somewhere a prompt could ride", fields.Len())
+		t.Fatalf("DaemonInterceptedCommandItem has %d field(s), want exactly 1 — a second field is somewhere a prompt could ride", fields.Len())
 	}
 	f := fields.Get(0)
 	if f.Name() != "command" {

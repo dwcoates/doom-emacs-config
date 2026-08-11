@@ -252,6 +252,23 @@ func (x *SessionCommandSpec) GetTakesArgs() bool {
 // Additive: ONE session command the user invoked, as the feed's record that
 // they invoked it.
 //
+// NAMED FOR WHERE IT WAS INTERCEPTED, not for what it addresses. The former
+// name (SessionCommandItem, arm `session_command`) read as a command issued TO
+// the session, which is backwards: this is a command the daemon took OUT of
+// the user's own input on its way to the agent, either because the daemon
+// answers it itself or because the CLI does. Both readings agreed on the
+// shape and disagreed on the direction, and the direction is the whole point —
+// nothing downstream ever issues one of these.
+//
+// IT IS THE PAYLOAD OF BOTH DURABILITY CLASSES, and carries no mark of which.
+// A command the CLI handled has a transcript record behind it and rides a
+// DURABLE message; a command the daemon answered alone has no record anywhere
+// and rides an EPHEMERAL one. That distinction is stated once, on the carrying
+// Message's `durability` oneof (feed.proto), rather than restated here: a
+// second copy of it is a second chance for the two to disagree, and the
+// invariant that an ephemeral message is never anyone's parent is enforced
+// where lineage lives, not where the command's name lives.
+//
 // WHY IT CARRIES NO TEXT, AND NEVER WILL. `/model` is not something the user
 // SAID to the agent; it is something they DID to the session. Drawing it as a
 // user message claims the agent was asked a question it never
@@ -272,7 +289,7 @@ func (x *SessionCommandSpec) GetTakesArgs() bool {
 // from the file plane; this reports that the user asked, at the instant they
 // asked. The two coexist by design, and a frontend that truncates its feed at
 // a cut drops the matching invocation along with the history it belonged to.
-type SessionCommandItem struct {
+type DaemonInterceptedCommandItem struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The recognized command. Never UNSPECIFIED.
 	Command       SessionCommand `protobuf:"varint,1,opt,name=command,proto3,enum=agentshim.frontend.v1.SessionCommand" json:"command,omitempty"`
@@ -280,20 +297,20 @@ type SessionCommandItem struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SessionCommandItem) Reset() {
-	*x = SessionCommandItem{}
+func (x *DaemonInterceptedCommandItem) Reset() {
+	*x = DaemonInterceptedCommandItem{}
 	mi := &file_agentshim_frontend_v1_slash_menu_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SessionCommandItem) String() string {
+func (x *DaemonInterceptedCommandItem) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SessionCommandItem) ProtoMessage() {}
+func (*DaemonInterceptedCommandItem) ProtoMessage() {}
 
-func (x *SessionCommandItem) ProtoReflect() protoreflect.Message {
+func (x *DaemonInterceptedCommandItem) ProtoReflect() protoreflect.Message {
 	mi := &file_agentshim_frontend_v1_slash_menu_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -305,12 +322,12 @@ func (x *SessionCommandItem) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SessionCommandItem.ProtoReflect.Descriptor instead.
-func (*SessionCommandItem) Descriptor() ([]byte, []int) {
+// Deprecated: Use DaemonInterceptedCommandItem.ProtoReflect.Descriptor instead.
+func (*DaemonInterceptedCommandItem) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_slash_menu_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *SessionCommandItem) GetCommand() SessionCommand {
+func (x *DaemonInterceptedCommandItem) GetCommand() SessionCommand {
 	if x != nil {
 		return x.Command
 	}
@@ -426,8 +443,8 @@ const file_agentshim_frontend_v1_slash_menu_proto_rawDesc = "" +
 	"\x12SessionCommandSpec\x12\x18\n" +
 	"\aliteral\x18\x01 \x01(\tR\aliteral\x12\x1d\n" +
 	"\n" +
-	"takes_args\x18\x02 \x01(\bR\ttakesArgs\"U\n" +
-	"\x12SessionCommandItem\x12?\n" +
+	"takes_args\x18\x02 \x01(\bR\ttakesArgs\"_\n" +
+	"\x1cDaemonInterceptedCommandItem\x12?\n" +
 	"\acommand\x18\x01 \x01(\x0e2%.agentshim.frontend.v1.SessionCommandR\acommand\"T\n" +
 	"\rSkillBodyItem\x12\x1e\n" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12#\n" +
@@ -520,12 +537,12 @@ var file_agentshim_frontend_v1_slash_menu_proto_msgTypes = make([]protoimpl.Mess
 var file_agentshim_frontend_v1_slash_menu_proto_goTypes = []any{
 	(SessionCommand)(0),                   // 0: agentshim.frontend.v1.SessionCommand
 	(*SessionCommandSpec)(nil),            // 1: agentshim.frontend.v1.SessionCommandSpec
-	(*SessionCommandItem)(nil),            // 2: agentshim.frontend.v1.SessionCommandItem
+	(*DaemonInterceptedCommandItem)(nil),  // 2: agentshim.frontend.v1.DaemonInterceptedCommandItem
 	(*SkillBodyItem)(nil),                 // 3: agentshim.frontend.v1.SkillBodyItem
 	(*descriptorpb.EnumValueOptions)(nil), // 4: google.protobuf.EnumValueOptions
 }
 var file_agentshim_frontend_v1_slash_menu_proto_depIdxs = []int32{
-	0, // 0: agentshim.frontend.v1.SessionCommandItem.command:type_name -> agentshim.frontend.v1.SessionCommand
+	0, // 0: agentshim.frontend.v1.DaemonInterceptedCommandItem.command:type_name -> agentshim.frontend.v1.SessionCommand
 	4, // 1: agentshim.frontend.v1.session_command_spec:extendee -> google.protobuf.EnumValueOptions
 	1, // 2: agentshim.frontend.v1.session_command_spec:type_name -> agentshim.frontend.v1.SessionCommandSpec
 	3, // [3:3] is the sub-list for method output_type

@@ -100,6 +100,23 @@ enum SessionCommand {
 // Additive: ONE session command the user invoked, as the feed's record that
 // they invoked it.
 //
+// NAMED FOR WHERE IT WAS INTERCEPTED, not for what it addresses. The former
+// name (SessionCommandItem, arm `session_command`) read as a command issued TO
+// the session, which is backwards: this is a command the daemon took OUT of
+// the user's own input on its way to the agent, either because the daemon
+// answers it itself or because the CLI does. Both readings agreed on the
+// shape and disagreed on the direction, and the direction is the whole point —
+// nothing downstream ever issues one of these.
+//
+// IT IS THE PAYLOAD OF BOTH DURABILITY CLASSES, and carries no mark of which.
+// A command the CLI handled has a transcript record behind it and rides a
+// DURABLE message; a command the daemon answered alone has no record anywhere
+// and rides an EPHEMERAL one. That distinction is stated once, on the carrying
+// Message's `durability` oneof (feed.proto), rather than restated here: a
+// second copy of it is a second chance for the two to disagree, and the
+// invariant that an ephemeral message is never anyone's parent is enforced
+// where lineage lives, not where the command's name lives.
+//
 // WHY IT CARRIES NO TEXT, AND NEVER WILL. `/model` is not something the user
 // SAID to the agent; it is something they DID to the session. Drawing it as a
 // user message claims the agent was asked a question it never
@@ -120,7 +137,7 @@ enum SessionCommand {
 // from the file plane; this reports that the user asked, at the instant they
 // asked. The two coexist by design, and a frontend that truncates its feed at
 // a cut drops the matching invocation along with the history it belonged to.
-message SessionCommandItem {
+message DaemonInterceptedCommandItem {
   // The recognized command. Never UNSPECIFIED.
   SessionCommand command = 1;
 }

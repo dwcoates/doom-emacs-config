@@ -39,34 +39,34 @@ function commandItem(command: SessionCommandItem["command"]): SessionCommandItem
 describe("sessionCommandOf", () => {
   it("reads a prefixed wire value", () => {
     // Arrange + Act + Assert
-    expect(sessionCommandOf("SESSION_COMMAND_MODEL", "SessionCommandItem")).toBe("MODEL");
+    expect(sessionCommandOf("SESSION_COMMAND_MODEL", "DaemonInterceptedCommandItem")).toBe("MODEL");
   });
 
   it("reads a bare value", () => {
     // Arrange + Act + Assert
-    expect(sessionCommandOf("COMPACT", "SessionCommandItem")).toBe("COMPACT");
+    expect(sessionCommandOf("COMPACT", "DaemonInterceptedCommandItem")).toBe("COMPACT");
   });
 
   it("throws on UNSPECIFIED rather than guessing a command", () => {
     // Arrange + Act + Assert — the command IS the item's entire content, so an
     // item that cannot say which one it reports is empty.
-    expect(() => sessionCommandOf("SESSION_COMMAND_UNSPECIFIED", "SessionCommandItem")).toThrow(
+    expect(() => sessionCommandOf("SESSION_COMMAND_UNSPECIFIED", "DaemonInterceptedCommandItem")).toThrow(
       /unrecognized value/,
     );
   });
 
   it("throws on a command this build does not know", () => {
     // Arrange + Act + Assert
-    expect(() => sessionCommandOf("SESSION_COMMAND_TELEPORT", "SessionCommandItem")).toThrow(
+    expect(() => sessionCommandOf("SESSION_COMMAND_TELEPORT", "DaemonInterceptedCommandItem")).toThrow(
       /unrecognized value/,
     );
   });
 });
 
-describe("the sessionCommand arm", () => {
+describe("the daemonInterceptedCommand arm", () => {
   it("maps the command and the envelope uuid", () => {
     // Arrange + Act
-    const items = itemsFrom({ uuid: "m1", sessionCommand: { command: "SESSION_COMMAND_MODEL" } });
+    const items = itemsFrom({ uuid: "m1", daemonInterceptedCommand: { command: "SESSION_COMMAND_MODEL" } });
 
     // Assert
     const expected: SessionCommandItem = { kind: "session-command", uuid: "m1", command: "MODEL" };
@@ -77,7 +77,7 @@ describe("the sessionCommand arm", () => {
     // Arrange — THE invariant: `/model opus` and `/model` are indistinguishable
     // by the time they reach this end, so the argument the user typed cannot
     // reappear in the feed.
-    const items = itemsFrom({ uuid: "m1", sessionCommand: { command: "SESSION_COMMAND_MODEL" } });
+    const items = itemsFrom({ uuid: "m1", daemonInterceptedCommand: { command: "SESSION_COMMAND_MODEL" } });
 
     // Act
     const keys = Object.keys(items[0]);
@@ -88,7 +88,7 @@ describe("the sessionCommand arm", () => {
 
   it("rejects a frame whose command cannot be read", () => {
     // Arrange + Act + Assert
-    expect(() => itemsFrom({ uuid: "m1", sessionCommand: {} })).toThrow(/unrecognized value/);
+    expect(() => itemsFrom({ uuid: "m1", daemonInterceptedCommand: {} })).toThrow(/unrecognized value/);
   });
 });
 
