@@ -611,7 +611,13 @@ export type AdapterLogger = (level: AdapterLogLevel, message: string) => void;
 
 /** A user turn as it ARRIVED, before the store or the renderer saw it. */
 export interface UserTurnReceipt {
-  requestId: string;
+  /**
+   * THE PROMPT'S IDENTITY as it arrived — its record uuid, the only thing that
+   * names a prompt. This used to log the submit's request id, which is empty
+   * for every prompt the real pipeline delivers and therefore distinguished
+   * nothing.
+   */
+  uuid: string;
   /** The delta's `throughSeq` — the daemon's sequence for this batch. */
   seq: number;
   /** Total length of the turn's text blocks. */
@@ -648,7 +654,7 @@ export function userTurnReceipt(effects: AdapterEffect[], lastSeq: number): User
       }
       if (len === 0) continue;
       return {
-        requestId: item.requestId,
+        uuid: item.uuid ?? "",
         seq: effect.throughSeq,
         len,
         live: effect.throughSeq > lastSeq,
@@ -1704,17 +1710,18 @@ function userMessageItems(frame: MessageFrame): {
 }
 
 /**
- * One prompt bubble off a user message. The record's UUID rides along beside
- * the request id because the request id is EMPTY for every prompt the real
- * pipeline delivers (a transcript `UserLine`) and for all replayed history —
- * the uuid is what keeps two such prompts apart in the store (`userTurnKey`).
+ * One prompt bubble off a user message, identified by the record's UUID and by
+ * nothing else. The envelope's `request_id` is deliberately NOT carried onto
+ * the item: it is empty for every prompt the real pipeline delivers and for all
+ * replayed history, so as a key it collapsed unrelated prompts into one bucket.
+ * The uuid is what keeps two prompts apart in the store (`userTurnKey`).
  */
 function userTurn(
   frame: MessageFrame,
   content: ContentBlock[],
   ts: string,
 ): UserTurnItem {
-  const item: UserTurnItem = { kind: "user-turn", requestId: frame.requestId, content, ts };
+  const item: UserTurnItem = { kind: "user-turn", content, ts };
   if (frame.uuid !== "") item.uuid = frame.uuid;
   return item;
 }

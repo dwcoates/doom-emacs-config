@@ -215,53 +215,39 @@ describe("the composer's hibernation gate", () => {
   });
 });
 
-// The prompt bubble is drawn by the webapp on the frame the user hits send,
-// and the daemon's receipt only starts its breath — so the filing, the id it
-// is filed under, and the take-down on a refusal are boot-scope closure state
-// with no importable seam, pinned here against the source.
-// The DISPATCH half of the submit path: `submitPrompt` now offers the prompt
-// to the held-prompt queue first (prompt-queue.ts), and everything below —
-// filing the bubble, the id it is filed under, the take-down on a refusal — is
-// what happens once a prompt actually goes onto the wire, whether it went
-// straight out or was drained out of the queue.
+// THE DISPATCH half of the submit path: `submitPrompt` offers the prompt to the
+// held-prompt queue first (prompt-queue.ts), and everything below is what
+// happens once a prompt actually goes onto the wire, whether it went straight
+// out or was drained out of the queue.
+//
+// NO BUBBLE IS FILED THERE ANY MORE. The webapp used to draw the prompt on the
+// frame the user hit send and reconcile that bubble against the durable line
+// the CLI later wrote, which gave one prompt two identities. A prompt now
+// renders when its record round-trips. These pin that the drawing is gone AND
+// that every failure path it used to sit beside survived it.
 const dispatchPromptAnchor =
   "const dispatchPrompt = (\n    workspace: string,\n    text: string,\n    promptOrigin: PromptOrigin,\n    onRefused?: () => void,\n  ): Promise<void> => {";
 const submitPrompt = blocksAfter(main, dispatchPromptAnchor)[0]!;
 
-describe("the local prompt bubble", () => {
-  it("files the bubble on the one dispatch path every sent prompt goes through", () => {
-    // Assert — a second sending path would be a prompt with no bubble.
+describe("the submit path draws no prompt bubble", () => {
+  it("keeps one dispatch path every sent prompt goes through", () => {
+    // Assert — a second sending path would be a second set of these rules.
     expect(blocksAfter(main, dispatchPromptAnchor)).toHaveLength(1);
-    expect(submitPrompt).toContain("store.addLocalPrompt(requestId, text)");
   });
 
-  it("files it BEFORE waiting on the daemon's answer", () => {
-    // Assert — the whole point: the words are on screen this frame, and the
-    // acknowledgement only starts the breath.
-    const filed = submitPrompt.indexOf("store.addLocalPrompt(");
-    const awaited = submitPrompt.indexOf("return ack.catch");
-    expect(filed).toBeLessThan(awaited);
+  it("files nothing in the feed at submit time", () => {
+    // Assert — the store has no local-prompt seam left to call.
+    expect(submitPrompt).not.toContain("addLocalPrompt");
   });
 
-  it("paints the newly filed bubble rather than waiting for the next frame's cause", () => {
-    // Assert — nothing else would schedule a render until the daemon speaks.
-    expect(submitPrompt).toContain("store.addLocalPrompt(requestId, text)) frames.schedule()");
-  });
-
-  it("files it under the request id the daemon's receipt will carry", () => {
-    // Assert — the id is what reconciles the two onto one bubble; matching on
-    // the prompt's text would be a second, drift-prone identity.
-    expect(submitPrompt).toContain("const { requestId, ack } = dispatcher.submitPrompt(");
-  });
-
-  it("takes the bubble down when the daemon refuses the submit", () => {
-    // Assert — a refused prompt started no turn, and a bubble left standing
-    // would assert that it had.
-    expect(submitPrompt).toContain("store.dropUnackedPrompt(requestId)");
+  it("has no take-down for a bubble it never drew", () => {
+    // Assert — the unacked concept went with the bubble.
+    expect(submitPrompt).not.toContain("dropUnackedPrompt");
   });
 
   it("still surfaces the refusal through the dispatcher's owned failure path", () => {
-    // Assert — taking the bubble down is not a substitute for the failure card.
+    // Assert — THE ERROR PATH SURVIVED THE REMOVAL: the refusal's failure card
+    // is now the only record of a prompt that never ran.
     expect(submitPrompt).toContain("consumeOwnedDispatchFailure(err)");
   });
 
@@ -273,9 +259,9 @@ describe("the local prompt bubble", () => {
 });
 
 // The draft is the half whose loss actually costs the user something: a
-// wrongly-drawn bubble is cosmetic, a silently eaten prompt is not. These pin
-// that the composer gets its words back from the SAME nack that takes the
-// bubble down, and that it never buys them back with a newer draft.
+// wrongly-drawn bubble was cosmetic, a silently eaten prompt is not. These pin
+// that the composer gets its words back from the daemon's nack, and that it
+// never buys them back with a newer draft.
 describe("the refused prompt's draft", () => {
   it("comes back to the composer when the daemon refuses the submit", () => {
     // Assert — a nack means no shim took it and no queue holds it, so the
@@ -283,18 +269,18 @@ describe("the refused prompt's draft", () => {
     expect(composerSubmit).toContain("input.value = text;");
   });
 
-  it("is restored from the same refusal that retracts the bubble", () => {
-    // Assert — one signal drives both halves; a second source of truth about
+  it("is restored from the daemon's own refusal", () => {
+    // Assert — one signal drives the restore; a second source of truth about
     // whether a prompt was delivered is one that can disagree with the first.
     expect(submitPrompt).toContain("onRefused?.()");
   });
 
-  it("comes back even when no bubble was standing to take down", () => {
-    // Assert — the restore sits OUTSIDE the bubble's `if`, so a feed
-    // retraction that finds nothing cannot also swallow the draft.
-    expect(submitPrompt).toContain(
-      "if (store.dropUnackedPrompt(requestId)) frames.schedule();\n      // BEFORE",
-    );
+  it("comes back before the rejection is rethrown", () => {
+    // Assert — a caller that rethrows first would leave the words nowhere.
+    const restored = submitPrompt.indexOf("onRefused?.()");
+    const rethrown = submitPrompt.indexOf("throw err instanceof Error");
+    expect(restored).toBeGreaterThanOrEqual(0);
+    expect(restored).toBeLessThan(rethrown);
   });
 
   it("never overwrites a draft typed since the send", () => {
@@ -359,10 +345,10 @@ describe("the held-prompt queue's wiring", () => {
     expect(promptQueueWiring).toContain("store.state.cwd === workspace");
   });
 
-  it("draws a held prompt as pending rather than acking it", () => {
-    // Assert — filed under the queue entry's own id, which no daemon receipt
-    // can ever reconcile onto.
-    expect(promptQueueWiring).toContain("store.addLocalPrompt(entry.queueId, entry.text)");
+  it("draws no feed item for a held prompt", () => {
+    // Assert — a held prompt has no durable record, so it has no bubble; the
+    // failure card below is what speaks for one that is finally lost.
+    expect(promptQueueWiring).not.toContain("addLocalPrompt");
   });
 
   it("gives a lost held prompt its own failure card", () => {
