@@ -228,7 +228,7 @@ export interface ClickTarget {
  * chip renders only in the session strip, but the vocabulary is shared —
  * a bubble delegation simply never sees its toggle.
  */
-export type TopbarMenu = "agents" | "tasks" | "tokens";
+export type TopbarMenu = "agents" | "tasks" | "tokens" | "warnings";
 
 /** One strip click's meaning: flip a chip's overlay, or reveal a roster row's bubble. */
 export type TopbarClick =
@@ -247,6 +247,7 @@ export function topbarClickAction(target: ClickTarget): TopbarClick | null {
   if (target.closest("[data-agents-toggle]")) return { kind: "toggle", menu: "agents" };
   if (target.closest("[data-tasks-toggle]")) return { kind: "toggle", menu: "tasks" };
   if (target.closest("[data-tokens-toggle]")) return { kind: "toggle", menu: "tokens" };
+  if (target.closest("[data-warnings-toggle]")) return { kind: "toggle", menu: "warnings" };
   const agentId = target.closest(".agent-row")?.getAttribute("data-agent-id");
   if (agentId) return { kind: "reveal", agentId };
   const taskId = target.closest(".task-row")?.getAttribute("data-task-id");

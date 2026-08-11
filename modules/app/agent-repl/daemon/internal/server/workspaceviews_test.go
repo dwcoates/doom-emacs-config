@@ -209,17 +209,46 @@ func TestTheTopbarCarriesTheStatesFenceRatherThanOneOfItsOwn(t *testing.T) {
 	}
 }
 
-func TestTheTopbarShowsTheSettledTurnsAccountingSentence(t *testing.T) {
-	// Arrange — the topbar shows the sentence and never the verdict.
+func TestTheTopbarWarnsWithTheDegradedAccountingSentence(t *testing.T) {
+	// Arrange — a turn whose accounting did not reconcile.
 	progress := fixedProgress{ok: true, view: &frontendv1.ProgressView{
-		Accounting: &frontendv1.FooterAccountingCell{Summary: "5h 1.0%→2.0% (1.0pp)"},
+		Accounting: degradedAccounting("INVALID ACCOUNTING: totals disagree"),
 	}}
 	v, push := newViewPublisher(t, nil, progress, nil)
 	// Act.
 	v.PublishState(liveState())
 	// Assert.
-	if push.topbars[0].GetAccountingLine() != "5h 1.0%→2.0% (1.0pp)" {
-		t.Fatalf("accounting line = %q", push.topbars[0].GetAccountingLine())
+	warnings := push.topbars[0].GetWarnings()
+	if len(warnings) != 1 || warnings[0].GetText() != "INVALID ACCOUNTING: totals disagree" {
+		t.Fatalf("warnings = %v, want the degraded sentence carried verbatim", warnings)
+	}
+}
+
+func TestTheTopbarRaisesNoWarningForAReconciledTurn(t *testing.T) {
+	// Arrange — a turn that reconciled has figures, not a complaint.
+	progress := fixedProgress{ok: true, view: &frontendv1.ProgressView{
+		Accounting: &frontendv1.FooterAccountingCell{
+			Summary: "5h 1.0%→2.0% (1.0pp)",
+			Verdict: &frontendv1.FooterAccountingCell_Complete{Complete: &frontendv1.AccountingComplete{}},
+		},
+	}}
+	v, push := newViewPublisher(t, nil, progress, nil)
+	// Act.
+	v.PublishState(liveState())
+	// Assert.
+	if got := push.topbars[0].GetWarnings(); len(got) != 0 {
+		t.Fatalf("warnings = %v, want none: a settled turn that reconciled is not a warning", got)
+	}
+}
+
+// degradedAccounting is a cell whose verdict did NOT reconcile — the only kind
+// the topbar raises a warning for.
+func degradedAccounting(summary string) *frontendv1.FooterAccountingCell {
+	return &frontendv1.FooterAccountingCell{
+		Summary: summary,
+		Verdict: &frontendv1.FooterAccountingCell_Invalid{
+			Invalid: &frontendv1.AccountingInvalid{Problems: []string{"totals disagree"}},
+		},
 	}
 }
 
@@ -672,19 +701,20 @@ func TestForgettingAWorkspaceDropsItFromTheSnapshot(t *testing.T) {
 type settledProgress struct{ summary string }
 
 func (s *settledProgress) Current(string) (*frontendv1.ProgressView, bool) {
-	return &frontendv1.ProgressView{
-		Accounting: &frontendv1.FooterAccountingCell{Summary: s.summary},
-	}, true
+	if s.summary == "" {
+		return &frontendv1.ProgressView{}, true
+	}
+	return &frontendv1.ProgressView{Accounting: degradedAccounting(s.summary)}, true
 }
 
-func TestASettledAccountingLineRepublishesTheTopbar(t *testing.T) {
+func TestASettledAccountingWarningRepublishesTheTopbar(t *testing.T) {
 	// Arrange — a topbar published while the accounting was still empty.
 	progress := &settledProgress{}
 	v, push, _ := newRepublishingPublisher(t, progress, fixedStates{state: liveState(), found: true})
 	v.PublishState(liveState())
 
 	// Act — the resolver settles the cell and the progress subscription reports it.
-	progress.summary = "5h 1.0%→2.0% (1.0pp)"
+	progress.summary = "INVALID ACCOUNTING: totals disagree"
 	v.RepublishAccounting("/home/u/ws")
 
 	// Assert
@@ -700,12 +730,13 @@ func TestTheRepublishedTopbarCarriesTheSettledSentence(t *testing.T) {
 	v.PublishState(liveState())
 
 	// Act
-	progress.summary = "5h 1.0%→2.0% (1.0pp)"
+	progress.summary = "INVALID ACCOUNTING: totals disagree"
 	v.RepublishAccounting("/home/u/ws")
 
 	// Assert
-	if got := push.topbars[1].GetAccountingLine(); got != "5h 1.0%→2.0% (1.0pp)" {
-		t.Fatalf("republished accounting line = %q, want the settled sentence", got)
+	got := push.topbars[1].GetWarnings()
+	if len(got) != 1 || got[0].GetText() != "INVALID ACCOUNTING: totals disagree" {
+		t.Fatalf("republished warnings = %v, want the settled degraded sentence", got)
 	}
 }
 
@@ -716,20 +747,20 @@ func TestTheRepublishedTopbarReachesTheConnectSnapshot(t *testing.T) {
 	v.PublishState(liveState())
 
 	// Act
-	progress.summary = "5h 1.0%→2.0% (1.0pp)"
+	progress.summary = "INVALID ACCOUNTING: totals disagree"
 	v.RepublishAccounting("/home/u/ws")
 
 	// Assert
 	topbars := v.Topbars()
-	if len(topbars) != 1 || topbars[0].GetAccountingLine() != "5h 1.0%→2.0% (1.0pp)" {
+	if len(topbars) != 1 || len(topbars[0].GetWarnings()) != 1 {
 		t.Fatalf("snapshot topbars = %v, want the retention advanced to the settled sentence", topbars)
 	}
 }
 
-func TestAnUnchangedAccountingLineRepublishesNothing(t *testing.T) {
+func TestAnUnchangedAccountingWarningRepublishesNothing(t *testing.T) {
 	// Arrange — change is judged on the rendered view, so a republication that
 	// moved nothing must stay off the wire.
-	progress := &settledProgress{summary: "5h 1.0%→2.0% (1.0pp)"}
+	progress := &settledProgress{summary: "INVALID ACCOUNTING: totals disagree"}
 	v, push, _ := newRepublishingPublisher(t, progress, fixedStates{state: liveState(), found: true})
 	v.PublishState(liveState())
 
