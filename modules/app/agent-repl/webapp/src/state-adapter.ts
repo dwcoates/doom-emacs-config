@@ -34,7 +34,7 @@
  *   complete fact; permission (core.v1.PermissionItem) →
  *   PermissionItem; systemFailure (SystemFailureItem) → the classified
  *   failure card (F4) — the ApiErrorLine `apiError` arm it superseded is
- *   RETIRED (step 11); sessionCommand (SessionCommandItem) →
+ *   RETIRED (step 11); daemonInterceptedCommand (DaemonInterceptedCommandItem) →
  *   SessionCommandItem — a slash command the CLI answered ITSELF, which is
  *   drawn as a chip rather than as the prompt bubble the daemon withheld for
  *   it. The wire message carries the command enum and NO text, so this end
@@ -1530,7 +1530,7 @@ function itemsFromFrame(frame: MessageFrame): { items: ConversationItem[]; ignor
       return { items: [failureCardItem(frame.payload, frame.uuid)], ignores: [] };
     case "skillBody":
       return { items: [skillBodyToolItem(frame.payload, frame.uuid, tsFromMs(frame.tsMs))], ignores: [] };
-    case "sessionCommand":
+    case "daemonInterceptedCommand":
       // The command enum is the ENTIRE payload — there is no text field on
       // the wire message — so this is everything there is to read.
       return { items: [sessionCommandItem(frame.payload, frame.uuid)], ignores: [] };
@@ -1949,7 +1949,7 @@ function failureCardItem(e: Obj, uuid: string): FailureCardItem {
 }
 
 /**
- * Adopt a `frontend.v1.SessionCommandItem` as the store's item.
+ * Adopt a `frontend.v1.DaemonInterceptedCommandItem` as the store's item.
  *
  * NOTHING BUT THE COMMAND IS READ, because nothing else is there: the wire
  * message has exactly one field, so there is no submitted prompt on this
@@ -1961,7 +1961,7 @@ function failureCardItem(e: Obj, uuid: string): FailureCardItem {
 function sessionCommandItem(e: Obj, uuid: string): SessionCommandItem {
   return {
     kind: "session-command",
-    command: sessionCommandOf(pstr(e, "command"), "SessionCommandItem"),
+    command: sessionCommandOf(pstr(e, "command"), "DaemonInterceptedCommandItem"),
     uuid,
   };
 }

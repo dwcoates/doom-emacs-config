@@ -306,7 +306,7 @@ type Message struct {
 	//	*Message_FailureCard
 	//	*Message_ContextCleared
 	//	*Message_ContextCompacted
-	//	*Message_SessionCommand
+	//	*Message_DaemonInterceptedCommand
 	//	*Message_DetachedWork
 	//	*Message_CompactionSummary
 	Payload       isMessage_Payload `protobuf_oneof:"payload"`
@@ -440,10 +440,10 @@ func (x *Message) GetContextCompacted() *v11.ContextCompacted {
 	return nil
 }
 
-func (x *Message) GetSessionCommand() *SessionCommandItem {
+func (x *Message) GetDaemonInterceptedCommand() *DaemonInterceptedCommandItem {
 	if x != nil {
-		if x, ok := x.Payload.(*Message_SessionCommand); ok {
-			return x.SessionCommand
+		if x, ok := x.Payload.(*Message_DaemonInterceptedCommand); ok {
+			return x.DaemonInterceptedCommand
 		}
 	}
 	return nil
@@ -510,8 +510,9 @@ type Message_ContextCompacted struct {
 	ContextCompacted *v11.ContextCompacted `protobuf:"bytes,33,opt,name=context_compacted,json=contextCompacted,proto3,oneof"`
 }
 
-type Message_SessionCommand struct {
-	SessionCommand *SessionCommandItem `protobuf:"bytes,35,opt,name=session_command,json=sessionCommand,proto3,oneof"`
+type Message_DaemonInterceptedCommand struct {
+	// A slash command the daemon took out of the user's input.
+	DaemonInterceptedCommand *DaemonInterceptedCommandItem `protobuf:"bytes,35,opt,name=daemon_intercepted_command,json=daemonInterceptedCommand,proto3,oneof"`
 }
 
 type Message_DetachedWork struct {
@@ -545,7 +546,7 @@ func (*Message_ContextCleared) isMessage_Payload() {}
 
 func (*Message_ContextCompacted) isMessage_Payload() {}
 
-func (*Message_SessionCommand) isMessage_Payload() {}
+func (*Message_DaemonInterceptedCommand) isMessage_Payload() {}
 
 func (*Message_DetachedWork) isMessage_Payload() {}
 
@@ -986,7 +987,7 @@ const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"session_idR\x05items\"m\n" +
 	"\x0eMessageLineage\x12/\n" +
 	"\x14top_level_message_id\x18\x01 \x01(\tR\x11topLevelMessageId\x12*\n" +
-	"\x11parent_message_id\x18\x02 \x01(\tR\x0fparentMessageId\"\xa5\t\n" +
+	"\x11parent_message_id\x18\x02 \x01(\tR\x0fparentMessageId\"\xd5\t\n" +
 	"\aMessage\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x13\n" +
 	"\x05ts_ms\x18\x02 \x01(\x03R\x04tsMs\x12\x1d\n" +
@@ -1001,13 +1002,13 @@ const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"permission\x12K\n" +
 	"\ffailure_card\x18\x1f \x01(\v2&.agentshim.frontend.v1.FailureCardViewH\x00R\vfailureCard\x12L\n" +
 	"\x0fcontext_cleared\x18  \x01(\v2!.agentshim.core.v1.ContextClearedH\x00R\x0econtextCleared\x12R\n" +
-	"\x11context_compacted\x18! \x01(\v2#.agentshim.core.v1.ContextCompactedH\x00R\x10contextCompacted\x12T\n" +
-	"\x0fsession_command\x18# \x01(\v2).agentshim.frontend.v1.SessionCommandItemH\x00R\x0esessionCommand\x12J\n" +
+	"\x11context_compacted\x18! \x01(\v2#.agentshim.core.v1.ContextCompactedH\x00R\x10contextCompacted\x12s\n" +
+	"\x1adaemon_intercepted_command\x18# \x01(\v23.agentshim.frontend.v1.DaemonInterceptedCommandItemH\x00R\x18daemonInterceptedCommand\x12J\n" +
 	"\rdetached_work\x18& \x01(\v2#.agentshim.frontend.v1.DetachedWorkH\x00R\fdetachedWork\x12]\n" +
 	"\x12compaction_summary\x18' \x01(\v2,.agentshim.frontend.v1.CompactionSummaryItemH\x00R\x11compactionSummaryB\t\n" +
 	"\apayloadJ\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x12\x10\x13J\x04\b\n" +
 	"\x10\vJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10J\x04\b\"\x10#J\x04\b(\x10)J\x04\b$\x10%J\x04\b%\x10&R\tapi_errorR\x10compact_boundaryR\x15compact_boundary_lineR\x11assistant_messageR\btool_useR\vtool_resultR\x0ftool_use_resultR\x06resultR\n" +
-	"skill_bodyR\vusage_stampR\x11token_utilizationR\x0fturn_accountingR\fasync_bubble\"\xf7\x01\n" +
+	"skill_bodyR\vusage_stampR\x11token_utilizationR\x0fturn_accountingR\fasync_bubbleR\x0fsession_command\"\xf7\x01\n" +
 	"\x11DetachedWorkDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x126\n" +
 	"\x06opened\x18\x03 \x03(\v2\x1e.agentshim.frontend.v1.MessageR\x06opened\x12C\n" +
@@ -1055,26 +1056,26 @@ func file_agentshim_frontend_v1_feed_proto_rawDescGZIP() []byte {
 var file_agentshim_frontend_v1_feed_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_agentshim_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_agentshim_frontend_v1_feed_proto_goTypes = []any{
-	(ConversationSource)(0),       // 0: agentshim.frontend.v1.ConversationSource
-	(*ConversationDelta)(nil),     // 1: agentshim.frontend.v1.ConversationDelta
-	(*MessageLineage)(nil),        // 2: agentshim.frontend.v1.MessageLineage
-	(*Message)(nil),               // 3: agentshim.frontend.v1.Message
-	(*DetachedWorkDelta)(nil),     // 4: agentshim.frontend.v1.DetachedWorkDelta
-	(*CompactionSummaryItem)(nil), // 5: agentshim.frontend.v1.CompactionSummaryItem
-	(*TypingDelta)(nil),           // 6: agentshim.frontend.v1.TypingDelta
-	(*TypingCut)(nil),             // 7: agentshim.frontend.v1.TypingCut
-	(*SessionInitView)(nil),       // 8: agentshim.frontend.v1.SessionInitView
-	(*AgentEmission)(nil),         // 9: agentshim.frontend.v1.AgentEmission
-	(*v1.ApiUserMessage)(nil),     // 10: agentshim.data.v1.ApiUserMessage
-	(*v11.PermissionItem)(nil),    // 11: agentshim.core.v1.PermissionItem
-	(*FailureCardView)(nil),       // 12: agentshim.frontend.v1.FailureCardView
-	(*v11.ContextCleared)(nil),    // 13: agentshim.core.v1.ContextCleared
-	(*v11.ContextCompacted)(nil),  // 14: agentshim.core.v1.ContextCompacted
-	(*SessionCommandItem)(nil),    // 15: agentshim.frontend.v1.SessionCommandItem
-	(*DetachedWork)(nil),          // 16: agentshim.frontend.v1.DetachedWork
-	(*DetachedWorkUpdate)(nil),    // 17: agentshim.frontend.v1.DetachedWorkUpdate
-	(*v11.ContentDelta)(nil),      // 18: agentshim.core.v1.ContentDelta
-	(*v1.SystemInit)(nil),         // 19: agentshim.data.v1.SystemInit
+	(ConversationSource)(0),              // 0: agentshim.frontend.v1.ConversationSource
+	(*ConversationDelta)(nil),            // 1: agentshim.frontend.v1.ConversationDelta
+	(*MessageLineage)(nil),               // 2: agentshim.frontend.v1.MessageLineage
+	(*Message)(nil),                      // 3: agentshim.frontend.v1.Message
+	(*DetachedWorkDelta)(nil),            // 4: agentshim.frontend.v1.DetachedWorkDelta
+	(*CompactionSummaryItem)(nil),        // 5: agentshim.frontend.v1.CompactionSummaryItem
+	(*TypingDelta)(nil),                  // 6: agentshim.frontend.v1.TypingDelta
+	(*TypingCut)(nil),                    // 7: agentshim.frontend.v1.TypingCut
+	(*SessionInitView)(nil),              // 8: agentshim.frontend.v1.SessionInitView
+	(*AgentEmission)(nil),                // 9: agentshim.frontend.v1.AgentEmission
+	(*v1.ApiUserMessage)(nil),            // 10: agentshim.data.v1.ApiUserMessage
+	(*v11.PermissionItem)(nil),           // 11: agentshim.core.v1.PermissionItem
+	(*FailureCardView)(nil),              // 12: agentshim.frontend.v1.FailureCardView
+	(*v11.ContextCleared)(nil),           // 13: agentshim.core.v1.ContextCleared
+	(*v11.ContextCompacted)(nil),         // 14: agentshim.core.v1.ContextCompacted
+	(*DaemonInterceptedCommandItem)(nil), // 15: agentshim.frontend.v1.DaemonInterceptedCommandItem
+	(*DetachedWork)(nil),                 // 16: agentshim.frontend.v1.DetachedWork
+	(*DetachedWorkUpdate)(nil),           // 17: agentshim.frontend.v1.DetachedWorkUpdate
+	(*v11.ContentDelta)(nil),             // 18: agentshim.core.v1.ContentDelta
+	(*v1.SystemInit)(nil),                // 19: agentshim.data.v1.SystemInit
 }
 var file_agentshim_frontend_v1_feed_proto_depIdxs = []int32{
 	3,  // 0: agentshim.frontend.v1.ConversationDelta.messages:type_name -> agentshim.frontend.v1.Message
@@ -1086,7 +1087,7 @@ var file_agentshim_frontend_v1_feed_proto_depIdxs = []int32{
 	12, // 6: agentshim.frontend.v1.Message.failure_card:type_name -> agentshim.frontend.v1.FailureCardView
 	13, // 7: agentshim.frontend.v1.Message.context_cleared:type_name -> agentshim.core.v1.ContextCleared
 	14, // 8: agentshim.frontend.v1.Message.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
-	15, // 9: agentshim.frontend.v1.Message.session_command:type_name -> agentshim.frontend.v1.SessionCommandItem
+	15, // 9: agentshim.frontend.v1.Message.daemon_intercepted_command:type_name -> agentshim.frontend.v1.DaemonInterceptedCommandItem
 	16, // 10: agentshim.frontend.v1.Message.detached_work:type_name -> agentshim.frontend.v1.DetachedWork
 	5,  // 11: agentshim.frontend.v1.Message.compaction_summary:type_name -> agentshim.frontend.v1.CompactionSummaryItem
 	3,  // 12: agentshim.frontend.v1.DetachedWorkDelta.opened:type_name -> agentshim.frontend.v1.Message
@@ -1116,7 +1117,7 @@ func file_agentshim_frontend_v1_feed_proto_init() {
 		(*Message_FailureCard)(nil),
 		(*Message_ContextCleared)(nil),
 		(*Message_ContextCompacted)(nil),
-		(*Message_SessionCommand)(nil),
+		(*Message_DaemonInterceptedCommand)(nil),
 		(*Message_DetachedWork)(nil),
 		(*Message_CompactionSummary)(nil),
 	}
