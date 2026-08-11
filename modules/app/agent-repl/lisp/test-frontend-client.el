@@ -566,7 +566,7 @@ cannot offer the daemon different answers for one workspace."
                    (setq ensure-success ok)
                    :pending))
                 ((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (field payload key)
+                 (lambda (field payload key &rest _)
                    (setq sent (list field payload key)) "req-1"))
                 )
         (agent-repl--frontend-send-user-message
@@ -578,13 +578,101 @@ cannot offer the daemon different answers for one workspace."
         (should (equal request "req-1"))
         (should-not (agent-repl--ws-get "ws1" :next-send-origin))))))
 
+;;;; ---- the never-delivered prompt comes back ------------------------------
+
+(defmacro agent-repl-test--with-submit-nack (&rest body)
+  "Run BODY with a `submitPrompt' whose ack the test settles by hand.
+Binds `settle-nack' to a one-argument function that delivers the daemon's
+rejection to whatever `:on-failure' the send registered, and `registered'
+to the request id the transport minted before the frame was written."
+  (declare (indent 0))
+  `(let (on-failure registered)
+     (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                (lambda (_ws ok _fail &optional _purpose) (funcall ok) :pending))
+               ((symbol-function 'agent-repl--uds-send-command)
+                (lambda (_field _payload _key &optional _proc
+                                &rest kw)
+                  (setq on-failure (plist-get kw :on-failure))
+                  (setq registered "r_nack")
+                  (when-let ((reg (plist-get kw :on-registered)))
+                    (funcall reg registered))
+                  registered)))
+       (cl-flet ((settle-nack (err) (funcall on-failure err)))
+         ,@body))))
+
+(ert-deftest agent-repl-test-frontend-send-user-message-nack-names-the-request ()
+  "The nack handler is told WHICH command the daemon refused."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-submit-nack
+      (let (nacked)
+        (agent-repl--frontend-send-user-message
+         "ws1" "hello" "PROMPT_ORIGIN_USER_SENT" #'ignore #'error
+         (lambda (id err) (setq nacked (list id err))))
+        ;; Act
+        (settle-nack "shimclient: no live shim connection")
+        ;; Assert
+        (should (equal nacked '("r_nack" "shimclient: no live shim connection")))))))
+
+(ert-deftest agent-repl-test-frontend-send-user-message-registers-no-nack-hook-without-one ()
+  "A caller with no nack handler registers none, so the shared ack path
+remains the only thing that speaks for the refusal."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-submit-nack
+      ;; Act
+      (agent-repl--frontend-send-user-message
+       "ws1" "hello" "PROMPT_ORIGIN_USER_SENT" #'ignore #'error)
+      ;; Assert
+      (should-not on-failure))))
+
+(ert-deftest agent-repl-test-gui-dispatch-turn-restores-a-prompt-the-daemon-refused ()
+  "A refused `submitPrompt' hands the RAW text back to the user."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-submit-nack
+      (let (restored)
+        (cl-letf (((symbol-function 'agent-repl--frontend-snap-webview-to-tail) #'ignore)
+                  ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
+                  ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
+                  ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore)
+                  ((symbol-function 'agent-repl--restore-undelivered-prompt)
+                   (lambda (ws id raw detail) (setq restored (list ws id raw detail)))))
+          (agent-repl--gui-dispatch-turn
+           "ws1" "META\n\nwrite a test" "write a test" "PROMPT_ORIGIN_USER_SENT")
+          ;; Act
+          (settle-nack "shimclient: no live shim connection")
+          ;; Assert — RAW, never the metaprompt-decorated INPUT.
+          (should (equal restored
+                         '("ws1" "r_nack" "write a test"
+                           "shimclient: no live shim connection"))))))))
+
+(ert-deftest agent-repl-test-gui-dispatch-turn-restores-nothing-for-an-accepted-prompt ()
+  "A prompt the daemon ACKED is the delivered case: a turn that is later cut
+short really ran, so its words are not handed back to be sent twice."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-submit-nack
+      (cl-letf (((symbol-function 'agent-repl--frontend-snap-webview-to-tail) #'ignore)
+                ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
+                ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
+                ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore)
+                ((symbol-function 'agent-repl--restore-undelivered-prompt)
+                 (lambda (&rest _) (error "an accepted prompt must never be restored"))))
+        ;; Act — the send lands and no rejection is ever delivered.
+        (agent-repl--gui-dispatch-turn
+         "ws1" "META\n\nwrite a test" "write a test" "PROMPT_ORIGIN_USER_SENT")
+        ;; Assert
+        (should (equal (agent-repl--ws-get "ws1" :sent-turn)
+                       '(:request-id "r_nack" :raw "write a test")))))))
+
 (ert-deftest agent-repl-test-gui-send-turn-does-not-mark-thinking-on-ensure-failure ()
   "A failed asynchronous ensure leaves all sent-turn state untouched."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
    (agent-repl-test--with-live-link
     (let (failure settled)
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-                 (lambda (_ws _text _origin _ok fail) (setq failure fail) :pending))
+                 (lambda (_ws _text _origin _ok fail &optional _nack) (setq failure fail) :pending))
                 ((symbol-function 'agent-repl--frontend-snap-webview-to-tail)
                  (lambda (&rest _) (error "must not present"))))
         (agent-repl--gui-send-turn "ws1" "prepared" "raw" "PROMPT_ORIGIN_USER_SENT"
@@ -1681,7 +1769,7 @@ the wire would deprive the agent of the directive it must read."
     (let ((sent nil)
           (input (concat (agent-repl--meta-wrap "READ-DIRECTIVE") "\n\nhello")))
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-                 (lambda (_ws text _origin ok _fail)
+                 (lambda (_ws text _origin ok _fail &optional _nack)
                    (setq sent text)
                    (funcall ok "r_1")
                    :pending))
@@ -1767,7 +1855,7 @@ the wire would deprive the agent of the directive it must read."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let (marked)
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-                 (lambda (_ws _text _origin ok _fail) (funcall ok "r_1") :pending))
+                 (lambda (_ws _text _origin ok _fail &optional _nack) (funcall ok "r_1") :pending))
                 ((symbol-function 'agent-repl--frontend-snap-webview-to-tail) #'ignore)
                 ((symbol-function 'agent-repl--mark-ws-thinking)
                  (lambda (_ws) (setq marked t)))
@@ -1786,7 +1874,7 @@ the wire would deprive the agent of the directive it must read."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-               (lambda (_ws _text _origin ok _fail) (funcall ok "r_1") :pending))
+               (lambda (_ws _text _origin ok _fail &optional _nack) (funcall ok "r_1") :pending))
               ((symbol-function 'agent-repl--frontend-snap-webview-to-tail) #'ignore)
               ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
               ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
@@ -1806,7 +1894,7 @@ the wire would deprive the agent of the directive it must read."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let (sent-id)
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-                 (lambda (_ws _text _origin ok _fail) (funcall ok "r_7") :pending))
+                 (lambda (_ws _text _origin ok _fail &optional _nack) (funcall ok "r_7") :pending))
                 ((symbol-function 'agent-repl--frontend-snap-webview-to-tail) #'ignore)
                 ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
@@ -1825,7 +1913,7 @@ the wire would deprive the agent of the directive it must read."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let (detail)
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-                 (lambda (_ws _text _origin _ok fail) (funcall fail "no daemon") :pending)))
+                 (lambda (_ws _text _origin _ok fail &optional _nack) (funcall fail "no daemon") :pending)))
         ;; Act
         (funcall agent-repl-prompt-queue-send-function
                  "ws1" (list :text "prepared" :raw "raw"
@@ -2085,7 +2173,7 @@ wire would be exactly the no-op this command replaces."
   (agent-repl-test--with-ws "ws1" '()
    (agent-repl-test--with-live-link
     (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-               (lambda (_ws _text _origin ok _fail)
+               (lambda (_ws _text _origin ok _fail &optional _nack)
                  (funcall ok "r_9")
                  :pending))
               ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
