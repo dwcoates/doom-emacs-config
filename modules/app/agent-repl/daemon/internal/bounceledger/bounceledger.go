@@ -34,6 +34,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 )
 
 // Disposition is what the OUTGOING daemon intended for a shim.
@@ -220,6 +221,162 @@ func Report(logf func(string, ...any), entries []Entry, holders func(workspace s
 	if tally.Died > 0 {
 		logf("server: bounce accounting FLEET LOSS died=%d of %d — shims this daemon's predecessor promised to preserve are gone; the async work they owned is gone with them",
 			tally.Died, len(sorted))
+	}
+	return tally
+}
+
+// ---------------------------------------------------------------------------
+// THE END-STATE HALF: what actually became of a shim the boot judged PRESERVED.
+//
+// WHY A SECOND VERDICT EXISTS. Judge above rules at BOOT, from the kernel's
+// answer to "who holds this workspace lock right now". That answer was true and
+// useless on 2026-08-10 20:11: all six shims were judged PRESERVED at 20:11:26
+// and all six were killed by this same daemon at 20:12:03, because the bring-up
+// that was supposed to reattach to them could not, treated them as failed
+// bring-ups, and replaced them. A ledger that stops at the boot verdict
+// therefore records a preservation that did not hold — the exact accounting
+// failure this package was written to end, one layer later.
+//
+// So a bounce is closed out with a SECOND verdict, taken after the bring-ups
+// have ruled: ADOPTED (the promise held end to end) or REPLACED (the survivor
+// was ended and a new process took the workspace, with the reason that decided
+// it). A session nothing ruled on is UNSETTLED and never counted as either:
+// silence is not adoption.
+// ---------------------------------------------------------------------------
+
+// The end-state outcomes a bring-up reaches about a preserved shim.
+const (
+	// OutcomeAdopted — the surviving process was reattached to and still serves
+	// the session. This is the only outcome that keeps the promise.
+	OutcomeAdopted = "ADOPTED"
+	// OutcomeReplaced — the survivor was deliberately ended and replaced. It is
+	// a legitimate outcome (an unreachable shim MUST be replaced) and it is NOT
+	// preservation; the reason that decided it travels with it.
+	OutcomeReplaced = "REPLACED"
+	// OutcomeUnsettled — no bring-up ruled on this session during the bounce,
+	// so nothing is claimed about it either way.
+	OutcomeUnsettled = "UNSETTLED"
+)
+
+// Settlement collects the end-state outcomes, keyed by WORKSPACE because that
+// is the identity the bring-up gate owns: it decides between adopting a live
+// holder of a workspace lock and replacing it before any session id is minted.
+//
+// It is written from bring-up goroutines and read by the boot sweep, so it
+// carries its own mutex.
+type Settlement struct {
+	mu       sync.Mutex
+	outcomes map[string]outcome
+}
+
+type outcome struct {
+	verdict string
+	reason  string
+}
+
+// NewSettlement returns an empty settlement.
+func NewSettlement() *Settlement {
+	return &Settlement{outcomes: map[string]outcome{}}
+}
+
+// Adopted records that the workspace's surviving shim was reattached to.
+func (s *Settlement) Adopted(workspace, reason string) {
+	s.record(workspace, OutcomeAdopted, reason)
+}
+
+// Replaced records that the workspace's surviving shim was ended and replaced.
+//
+// The reason is REQUIRED in the same sense a roll's is: a replacement that
+// cannot say why is the silent death this package exists to stop accepting. An
+// empty one is recorded as the omission it is rather than dropped.
+func (s *Settlement) Replaced(workspace, reason string) {
+	if reason == "" {
+		reason = "NO REASON WAS RECORDED — the replacement is real and its cause was not stated, which is itself a defect"
+	}
+	s.record(workspace, OutcomeReplaced, reason)
+}
+
+func (s *Settlement) record(workspace, verdict, reason string) {
+	if s == nil || workspace == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.outcomes == nil {
+		s.outcomes = map[string]outcome{}
+	}
+	// A REPLACEMENT IS NEVER OVERWRITTEN BY AN ADOPTION. A workspace whose
+	// survivor was killed and whose REPLACEMENT then connected has been
+	// replaced, and adopting the new process must not launder that into a
+	// preservation of the old one.
+	if prev, ok := s.outcomes[workspace]; ok && prev.verdict == OutcomeReplaced && verdict == OutcomeAdopted {
+		return
+	}
+	s.outcomes[workspace] = outcome{verdict: verdict, reason: reason}
+}
+
+// Outcome reports the end-state verdict recorded for a workspace. The third
+// result is false when nothing ruled on it.
+func (s *Settlement) Outcome(workspace string) (verdict, reason string, ok bool) {
+	if s == nil {
+		return OutcomeUnsettled, "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	got, ok := s.outcomes[workspace]
+	if !ok {
+		return OutcomeUnsettled, "", false
+	}
+	return got.verdict, got.reason, true
+}
+
+// EndTally counts end-state outcomes over the preserved entries.
+type EndTally struct {
+	Adopted   int
+	Replaced  int
+	Unsettled int
+}
+
+// ReportEnd closes a bounce's accounting: for every entry the OUTGOING daemon
+// meant to preserve, it says what the incoming daemon's bring-up actually did
+// with that process.
+//
+// It deliberately reports only preserved entries: a roll's end state was
+// decided when it was ordered, and Judge already reports it.
+func ReportEnd(logf func(string, ...any), entries []Entry, settlement *Settlement) EndTally {
+	sorted := append([]Entry(nil), entries...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].SessionID < sorted[j].SessionID })
+	var tally EndTally
+	preserved := 0
+	for _, entry := range sorted {
+		if entry.Disposition != DispositionPreserved {
+			continue
+		}
+		preserved++
+		verdict, reason, ruled := settlement.Outcome(entry.Workspace)
+		switch {
+		case !ruled:
+			tally.Unsettled++
+			logf("server: bounce end-state session=%s ws=%q shim_pid=%d verdict=%s — no bring-up ruled on this workspace during the bounce, so whether pid %d was reattached to is unclaimed",
+				entry.SessionID, entry.Workspace, entry.PID, OutcomeUnsettled, entry.PID)
+		case verdict == OutcomeAdopted:
+			tally.Adopted++
+			logf("server: bounce end-state session=%s ws=%q shim_pid=%d verdict=%s — %s",
+				entry.SessionID, entry.Workspace, entry.PID, OutcomeAdopted, reason)
+		default:
+			tally.Replaced++
+			logf("server: bounce end-state session=%s ws=%q shim_pid=%d verdict=%s — PRESERVATION DID NOT HOLD: the ledger judged this pid preserved at boot and this daemon replaced it anyway: %s",
+				entry.SessionID, entry.Workspace, entry.PID, OutcomeReplaced, reason)
+		}
+	}
+	if preserved == 0 {
+		return tally
+	}
+	logf("server: bounce end-state SUMMARY preserved_entries=%d adopted=%d replaced=%d unsettled=%d — a preservation is only real if the same process is still serving the session after bring-up",
+		preserved, tally.Adopted, tally.Replaced, tally.Unsettled)
+	if tally.Replaced > 0 {
+		logf("server: bounce end-state PRESERVATION BROKEN replaced=%d of %d — shims that survived the bounce were killed by THIS daemon's bring-up instead of being reattached to",
+			tally.Replaced, preserved)
 	}
 	return tally
 }
