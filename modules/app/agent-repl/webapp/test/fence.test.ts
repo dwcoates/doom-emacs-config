@@ -157,3 +157,46 @@ describe("the accessors every arm shares", () => {
     expect(fencedFence(breakdown("f7"))).toBe("f7");
   });
 });
+
+describe("telling a superseded push from a foreign one", () => {
+  it("brands a push fenced by a token this page once held as superseded", () => {
+    // Arrange — the page rotated f1 -> f2; a delta composed before the
+    // rotation is still in flight.
+    const retired = new Set(["f1"]);
+    // Act
+    const verdict = admitFenced(topbar("f1"), "f2", retired);
+    // Assert
+    expect(verdict.kind === "discard" && verdict.report.superseded).toBe(true);
+  });
+
+  it("brands a push fenced by a token this page never held as foreign", () => {
+    // Arrange — nothing retired: f1 belongs to a world this page never saw.
+    const retired = new Set<string>();
+    // Act
+    const verdict = admitFenced(topbar("f1"), "f2", retired);
+    // Assert
+    expect(verdict.kind === "discard" && verdict.report.superseded).toBe(false);
+  });
+
+  it("discards a superseded push WHOLE, exactly as it discards a foreign one", () => {
+    // Arrange / Act — superseded says what the discard is evidence of, never
+    // that any part of the push may be adopted.
+    const verdict = admitFenced(topbar("f1"), "f2", new Set(["f1"]));
+    // Assert
+    expect(verdict.kind).toBe("discard");
+  });
+
+  it("brands a superseded discard on its own branch, so the two are countable apart", () => {
+    // Arrange / Act
+    const verdict = admitFenced(topbar("f1"), "f2", new Set(["f1"]));
+    // Assert
+    expect(verdict.kind === "discard" && verdict.report.context.branch).toBe("fence_superseded");
+  });
+
+  it("treats an empty pushed fence as foreign rather than as a retired one", () => {
+    // Arrange — "" is an absent fence, never a token this page held.
+    const verdict = admitFenced(topbar(""), "f2", new Set([""]));
+    // Assert
+    expect(verdict.kind === "discard" && verdict.report.superseded).toBe(false);
+  });
+});

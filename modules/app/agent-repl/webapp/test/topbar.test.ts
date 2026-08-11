@@ -110,6 +110,7 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     shutdownSchedule: null,
     hibernation: null,
     fences: new Map(),
+    retiredFences: new Map(),
     topbars: new Map(),
     tokenBreakdowns: new Map(),
     gates: new Map(),
