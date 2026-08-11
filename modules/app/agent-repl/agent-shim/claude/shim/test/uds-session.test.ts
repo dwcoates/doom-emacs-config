@@ -19,6 +19,7 @@ import net from "node:net";
 import fs from "node:fs";
 import { once } from "node:events";
 import { create } from "@bufbuild/protobuf";
+import { fileURLToPath } from "node:url";
 import { anyPack, anyUnpack } from "@bufbuild/protobuf/wkt";
 import {
   ClaudeStreamMessageSchema,
@@ -4915,5 +4916,36 @@ describe("UdsSession stamps the query it is running", () => {
     const event = sw.batch!.events[0]!;
     expect(event.payload.case).toBe("turnStarted");
     expect(event.queryInstanceId).toBe("turn-query");
+  });
+});
+
+/**
+ * The live-task-set snapshot has exactly ONE spelling.
+ *
+ * Every reader of `liveSdkTaskIds` needs the same detached, deterministically
+ * ordered array, and each used to spell `[...this.liveSdkTaskIds].sort()`
+ * itself across eight sites. A hand-rolled site is the failure this guards:
+ * one that forgot `.sort()` would publish the daemon an unordered set to join
+ * its catalog against, and the drift would show up only as two records of one
+ * instant that refuse to compare equal.
+ */
+describe("UdsSession live-task snapshot: one spelling", () => {
+  it("spells the sorted live-task snapshot only inside its own helper", () => {
+    // Arrange: the session source, read as text — the duplication this guards
+    // against is a source-shape fact, not a runtime one.
+    const source = fs.readFileSync(
+      fileURLToPath(new URL("../src/uds/uds-session.ts", import.meta.url)),
+      "utf8",
+    );
+
+    // Act: find every raw spelling of the snapshot expression.
+    const raw = source
+      .split("\n")
+      .map((line, i) => ({ line, n: i + 1 }))
+      .filter(({ line }) => line.includes("[...this.liveSdkTaskIds].sort()"));
+
+    // Assert: exactly one, and it is the helper's own body.
+    expect(raw.map(({ n }) => n)).toHaveLength(1);
+    expect(raw[0]!.line.trim()).toBe("return [...this.liveSdkTaskIds].sort();");
   });
 });

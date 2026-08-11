@@ -768,7 +768,7 @@ export class UdsSession {
         // the outcome it decides. The ambiguous case "the last agent finished
         // at about the moment the cancel landed, so did we stop it or was it
         // already done?" is unrepresentable rather than merely unlikely.
-        const taskIds = [...this.liveSdkTaskIds].sort();
+        const taskIds = this.sortedLiveTaskIds();
         const query = this.query;
         LOGGER.log({
           agent_repl_session_id: this.deps.sessionId,
@@ -861,7 +861,7 @@ export class UdsSession {
       // event loop is single-threaded and this class owns liveSdkTaskIds, so
       // the array handed back describes the session at one instant and no task
       // can start or end inside the read.
-      liveTaskIds: (): string[] => [...this.liveSdkTaskIds].sort(),
+      liveTaskIds: (): string[] => this.sortedLiveTaskIds(),
     };
     this.control = new ControlDispatch(
       target,
@@ -1477,6 +1477,23 @@ export class UdsSession {
    */
   detachedTaskCount(): number {
     return this.liveSdkTaskIds.size;
+  }
+
+  /**
+   * The live background-task set as a stable, ORDERED array.
+   *
+   * Every reader of liveSdkTaskIds wants the same two things — a snapshot
+   * detached from the mutable Set, and a deterministic order so two records of
+   * one instant compare equal — and each used to spell them itself. One
+   * spelling means a caller cannot accidentally publish the set unsorted, and
+   * the ordering the daemon joins against cannot drift between the handshake's
+   * announcement, the QueryLiveTasks answer, and the log records about them.
+   *
+   * The snapshot is atomic by construction: this event loop is single-threaded
+   * and this class owns the set, so no task can start or end inside the read.
+   */
+  private sortedLiveTaskIds(): string[] {
+    return [...this.liveSdkTaskIds].sort();
   }
 
   /**
@@ -2438,7 +2455,7 @@ export class UdsSession {
           request_id: claimedTurnId,
           turn_id: claimedTurnId,
           live_sdk_task_count: this.liveSdkTaskIds.size,
-          live_sdk_task_ids: [...this.liveSdkTaskIds].sort(),
+          live_sdk_task_ids: this.sortedLiveTaskIds(),
           sdk_task_count: taskCount,
           task_notification_result: taskNotificationResult,
           pending_task_notification_count: this.pendingTaskNotificationQueue.size,
@@ -2607,7 +2624,7 @@ export class UdsSession {
         turn_id: rootTurnId,
         duplicate_terminal_sdk_task_ids: [...duplicates].sort(),
         live_sdk_task_count: this.liveSdkTaskIds.size,
-        live_sdk_task_ids: [...this.liveSdkTaskIds].sort(),
+        live_sdk_task_ids: this.sortedLiveTaskIds(),
         decision: "retain_vendor_message_without_duplicate_task_end",
       }, "SDK repeated a stored terminal task fact; retaining vendor evidence without duplicating lifecycle");
     }
@@ -2637,7 +2654,7 @@ export class UdsSession {
         turn_id: rootTurnId,
         unknown_ended_sdk_task_ids: unknown,
         live_sdk_task_count: this.liveSdkTaskIds.size,
-        live_sdk_task_ids: [...this.liveSdkTaskIds].sort(),
+        live_sdk_task_ids: this.sortedLiveTaskIds(),
         completed_sdk_task_count: this.completedSdkTaskIds.size,
         completed_sdk_task_ids: [...this.completedSdkTaskIds].sort(),
         sdk_type: msg.type,
@@ -2646,7 +2663,7 @@ export class UdsSession {
       }, "SDK emitted TaskEnded for a task this query instance never saw start; containing the accounting gap");
       this.reportDegraded(
         "claude-shim-task-lifecycle",
-        `SDK emitted TaskEnded for unknown task(s) ${JSON.stringify(unknown)}; live tasks ${JSON.stringify([...this.liveSdkTaskIds].sort())}`,
+        `SDK emitted TaskEnded for unknown task(s) ${JSON.stringify(unknown)}; live tasks ${JSON.stringify(this.sortedLiveTaskIds())}`,
         { recovered: true, level: "warn" },
       );
     }
@@ -2707,7 +2724,7 @@ export class UdsSession {
           started_sdk_task_ids: startedTaskIds,
           ended_sdk_task_ids: endedTaskIds,
           live_sdk_task_count: this.liveSdkTaskIds.size,
-          live_sdk_task_ids: [...this.liveSdkTaskIds].sort(),
+          live_sdk_task_ids: this.sortedLiveTaskIds(),
           store_last_seq: ack.lastSeq,
           decision: "commit_sdk_task_lifecycle",
         }, "SDK task lifecycle is durably reflected in root-turn liveness");
@@ -2916,7 +2933,7 @@ export class UdsSession {
       query_instance_id: this.queryInstanceId,
       active_turn_ids: [...this.activeTurnIds],
       live_sdk_task_count: this.liveSdkTaskIds.size,
-      live_sdk_task_ids: [...this.liveSdkTaskIds].sort(),
+      live_sdk_task_ids: this.sortedLiveTaskIds(),
       pending_task_notification_count: this.pendingTaskNotificationQueue.size,
       disarm_reason: reason,
       decision: "disarm_turn_quiet_watchdog",

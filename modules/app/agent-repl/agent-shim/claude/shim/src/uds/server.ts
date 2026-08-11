@@ -57,6 +57,7 @@ import {
   HeartbeatSchema,
   Interrupt,
   InterruptSchema,
+  LiveTaskSetSchema,
   ModelCatalog,
   ModelCatalogSchema,
   Nack,
@@ -162,6 +163,17 @@ export interface SessionServerOptions {
   turnInFlight?: () => boolean;
   /** Ordered turn identities reported on every reattach handshake. */
   activeTurnIds?: () => string[];
+  /**
+   * The live background-task set reported in ShimHello.live_task_set.
+   *
+   * ABSENCE IS NOT EMPTINESS, and that is the whole reason this is optional
+   * rather than defaulted to []. A wired accessor makes every hello carry the
+   * message — no ids meaning "nothing is running", which is the daemon's only
+   * licence to roll this shim mid-async-work. An UNWIRED one omits the message
+   * entirely, saying "this shim does not answer the question" and denying the
+   * daemon that licence. Defaulting to [] here would FORGE the answer.
+   */
+  liveTaskIds?: () => string[];
   /**
    * The VENDOR session id this shim is CURRENTLY filing events under, read
    * fresh for every hello (it rotates mid-stream) and reported in
@@ -531,6 +543,17 @@ export class SessionServer {
       protocolVersion: this.opts.protocolVersion,
       turnInFlight: this.opts.turnInFlight ? this.opts.turnInFlight() : false,
       activeTurnIds: this.opts.activeTurnIds ? this.opts.activeTurnIds() : [],
+      // THE ASYNC HALF OF "am I busy", read fresh for the same reason the turn
+      // ids are: the daemon decides whether to roll this shim from THIS frame,
+      // before any command round-trip is possible.
+      //
+      // The spread is load-bearing. A wired accessor always yields the message
+      // (empty ids = "nothing is running"); an unwired one leaves the field
+      // ABSENT = "I do not answer this", which the daemon must not read as
+      // safe-to-roll. A `?? []` here would turn silence into a false all-clear.
+      ...(this.opts.liveTaskIds === undefined
+        ? {}
+        : { liveTaskSet: create(LiveTaskSetSchema, { taskIds: this.opts.liveTaskIds() }) }),
       // Read fresh on every hello: the vendor rotates this uuid mid-stream,
       // and the whole point of a rotation bounce is that the NEXT hello
       // announces the NEW identity.
