@@ -263,3 +263,39 @@ func TestKeepAlivePolicyReportsAColdCacheOncePerCacheWindow(t *testing.T) {
 		t.Fatalf("cold-cache report anchor = %d, want the decision's own last-turn-end %d", got, rec.LastTurnEndMs)
 	}
 }
+
+// THE GENERIC IDLE SWEEP MAY NOT REAP BELOW THE POLICY'S CUTOFF. Its configured
+// `-idle-timeout` and keepalive.Config.IdleCutoff answer the same question, and
+// the shorter of the two used to hibernate sessions hours early.
+func TestSweepIdleCutoffIsFlooredAtTheKeepAlivePolicyCutoff(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.srv.idleTimeout = time.Hour
+	h.srv.keepAlive = keepalive.DefaultConfig()
+
+	// Act.
+	got := h.srv.sweepIdleCutoff()
+
+	// Assert.
+	if got != keepalive.DefaultIdleCutoff {
+		t.Fatalf("sweepIdleCutoff() = %s, want the policy's %s; a shorter generic sweep reaps sessions the policy would still keep",
+			got, keepalive.DefaultIdleCutoff)
+	}
+}
+
+// THE FLOOR RAISES AND NEVER LOWERS. A deployment that deliberately asks for a
+// LONGER idle timeout keeps it: delaying a teardown is the safe direction.
+func TestSweepIdleCutoffKeepsALongerConfiguredTimeout(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.srv.idleTimeout = keepalive.DefaultIdleCutoff + 24*time.Hour
+	h.srv.keepAlive = keepalive.DefaultConfig()
+
+	// Act.
+	got := h.srv.sweepIdleCutoff()
+
+	// Assert.
+	if got != keepalive.DefaultIdleCutoff+24*time.Hour {
+		t.Fatalf("sweepIdleCutoff() = %s, want the configured %s", got, keepalive.DefaultIdleCutoff+24*time.Hour)
+	}
+}
