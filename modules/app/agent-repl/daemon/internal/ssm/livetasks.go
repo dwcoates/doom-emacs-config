@@ -1,6 +1,7 @@
 package ssm
 
 import (
+	"database/sql"
 	"fmt"
 )
 
@@ -104,4 +105,51 @@ func splitTaskIDs(joined string) []string {
 		}
 	}
 	return out
+}
+
+// WorkItemTerminated answers the bounce manifest's completion question for one
+// work item: did this identity end LEGITIMATELY, with its terminal result
+// actually recorded?
+//
+// IT IS THE HALF THAT SEPARATES A COMPLETION FROM A DEATH. "It is not in the
+// post-bounce set" is equally true of both, so the manifest may not judge on
+// absence alone. Only a durable terminal record licenses COMPLETED.
+//
+// AN UNOBSERVABLE KIND RETURNS AN ERROR RATHER THAN false. A false here would
+// be read as INTERRUPTED — an accusation the evidence does not support — and an
+// error is read as UNKNOWN, which is the honest answer for a plane this ledger
+// does not record terminals on. The SDK query instance is exactly such a plane
+// today: its termination is a QueryLifecycle row in the store, not a row here.
+func (m *Manager) WorkItemTerminated(workspace, kind, id string) (bool, string, error) {
+	if workspace == "" || id == "" {
+		return false, "", fmt.Errorf("ssm: probing a work item's terminal record requires a workspace and an identity")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	switch kind {
+	case "task":
+		var one int
+		err := m.db.QueryRow(`SELECT 1 FROM workspace_state
+			WHERE workspace=? AND state='task_ended' AND task_id=? LIMIT 1`, workspace, id).Scan(&one)
+		if err == sql.ErrNoRows {
+			return false, "no task_ended row was ever recorded for this task id", nil
+		}
+		if err != nil {
+			return false, "", fmt.Errorf("ssm: read task terminal record %q for workspace %q: %w", id, workspace, err)
+		}
+		return true, "a task_ended row is recorded for this task id", nil
+	case "turn":
+		var one int
+		err := m.db.QueryRow(`SELECT 1 FROM turn_lifecycle_claim
+			WHERE workspace=? AND turn_id=? AND end_seq IS NOT NULL LIMIT 1`, workspace, id).Scan(&one)
+		if err == sql.ErrNoRows {
+			return false, "the turn's durable claim carries no end", nil
+		}
+		if err != nil {
+			return false, "", fmt.Errorf("ssm: read turn terminal record %q for workspace %q: %w", id, workspace, err)
+		}
+		return true, "the turn's durable claim is closed", nil
+	default:
+		return false, "", fmt.Errorf("ssm: workspace %q records no terminal for work of kind %q, so item %q cannot be judged completed or interrupted from this ledger", workspace, kind, id)
+	}
 }
