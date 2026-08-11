@@ -164,8 +164,8 @@ func internalResumeRequestIDOfUserMessage(msg *datav1.ApiUserMessage) string {
 // path's evidence, and the body's marker is the evidence that survives on disk;
 // either alone names the re-drive, and neither is trusted to be the only one
 // present.
-func internalResumeRequestIDOfItem(item *frontendv1.ConversationItem) string {
-	um, isUserMessage := item.GetItem().(*frontendv1.ConversationItem_UserMessage)
+func internalResumeRequestIDOfItem(item *frontendv1.Message) string {
+	um, isUserMessage := item.GetPayload().(*frontendv1.Message_UserMessage)
 	if !isUserMessage {
 		return ""
 	}
@@ -184,7 +184,7 @@ func internalResumeRequestIDOfItem(item *frontendv1.ConversationItem) string {
 // conversation, which is the one fact that discharges the owed resumption
 // (sessioncontroller/turnresumption.go) — so the curator reports what it hid
 // rather than the session controller deriving the same thing a second time.
-func dropInternalResumePrompt(items []*frontendv1.ConversationItem) (kept []*frontendv1.ConversationItem, suppressed []string) {
+func dropInternalResumePrompt(items []*frontendv1.Message) (kept []*frontendv1.Message, suppressed []string) {
 	kept = items[:0:0]
 	for _, item := range items {
 		if id := internalResumeRequestIDOfItem(item); id != "" {

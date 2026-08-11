@@ -82,7 +82,7 @@ func beforeAnchorJSON(cursor string, limit int) string {
 // pageTexts is the assistant text of every item the page carried, in order.
 func pageTexts(page *frontendv1.ConversationPage) []string {
 	var out []string
-	for _, item := range page.GetItems() {
+	for _, item := range page.GetMessages() {
 		if text := assistantText(item); text != "" {
 			out = append(out, text)
 		}

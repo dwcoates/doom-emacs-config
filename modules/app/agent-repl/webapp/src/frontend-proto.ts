@@ -815,7 +815,7 @@ export interface DaemonView {
  * emission now, stripped from the response body so a renderer that draws both
  * arms cannot draw it twice.
  */
-export const CONVERSATION_ITEM_ARMS = [
+export const MESSAGE_ARMS = [
   "assistantMessage",
   "thinking",
   "userMessage",
@@ -839,7 +839,7 @@ export const CONVERSATION_ITEM_ARMS = [
   // thousand.
   "asyncBubble",
 ] as const;
-export type ConversationItemArm = (typeof CONVERSATION_ITEM_ARMS)[number];
+export type MessageArm = (typeof MESSAGE_ARMS)[number];
 
 /**
  * `frontend.v1.SessionCommand` — the slash commands the CLI answers ITSELF,
@@ -918,7 +918,7 @@ export type SessionTokenUtilization = GeneratedSessionTokenUtilization;
  * the single selected typed payload arm and its (shape-adopted) value. The
  * state-adapter decomposes `payload` per `arm` into the store's render items.
  */
-export interface ConversationItemFrame {
+export interface MessageFrame {
   uuid: string;
   tsMs: number;
   requestId: string;
@@ -928,7 +928,7 @@ export interface ConversationItemFrame {
    * it loudly rather than assuming a user drove it.
    */
   source: ConversationSource;
-  arm: ConversationItemArm;
+  arm: MessageArm;
   /** The typed data.v1/core.v1 payload, adopted by shape (see file-top §5.1). */
   payload: JsonObject;
   tokenUtilization: TokenUtilization[];
@@ -1191,7 +1191,10 @@ export interface ConversationDelta {
    * arrives only on `WorkspaceState`.
    */
   fence: string;
-  items: ConversationItemFrame[];
+  /**
+   * The conversation additions this push carries, oldest first.
+   */
+  messages: MessageFrame[];
   throughSeq: number;
 }
 
@@ -1211,7 +1214,7 @@ export type PageContinuation =
 /**
  * ONE page of conversation history: the cold open's answer, and load-more's.
  *
- * Its `items` are the SAME `ConversationItemFrame` a `ConversationDelta`
+ * Its `messages` are the SAME `MessageFrame` a `ConversationDelta`
  * carries, which is what lets the feed render paged history with the code that
  * already renders pushed history.
  */
@@ -1223,7 +1226,7 @@ export interface ConversationPage {
    */
   requestId: string;
   /** Oldest first, so a page prepends as a block without being reversed. */
-  items: ConversationItemFrame[];
+  messages: MessageFrame[];
   continuation: PageContinuation;
   /**
    * TAIL PAGES ONLY: the seq this page is current through, which the client
@@ -3279,7 +3282,7 @@ function decodeModelOption(v: unknown, i: number): ModelOption {
 const CONVERSATION_DELTA_KEYS = new Set([
   "workspace",
   "fence",
-  "items",
+  "messages",
   "throughSeq",
 ]);
 function decodeConversationDelta(v: unknown): ConversationDelta {
@@ -3288,10 +3291,10 @@ function decodeConversationDelta(v: unknown): ConversationDelta {
   const cd: ConversationDelta = {
     workspace: str(o, "workspace", "ConversationDelta"),
     fence: str(o, "fence", "ConversationDelta"),
-    items: (o.items === undefined || o.items === null
+    messages: (o.messages === undefined || o.messages === null
       ? []
-      : ensureArray(o.items, "ConversationDelta.items")
-    ).map((item, i) => decodeConversationItem(item, i)),
+      : ensureArray(o.messages, "ConversationDelta.messages")
+    ).map((m, i) => decodeMessage(m, i)),
     throughSeq: num(o, "throughSeq", "ConversationDelta"),
   };
   if (cd.fence === "") {
@@ -3305,7 +3308,7 @@ function decodeConversationDelta(v: unknown): ConversationDelta {
 const CONVERSATION_PAGE_KEYS = new Set([
   "workspace",
   "requestId",
-  "items",
+  "messages",
   "more",
   "start",
   "liveJoinSeq",
@@ -3326,10 +3329,10 @@ function decodeConversationPage(v: unknown): ConversationPage {
   const page: ConversationPage = {
     workspace: str(o, "workspace", "ConversationPage"),
     requestId: str(o, "requestId", "ConversationPage"),
-    items: (o.items === undefined || o.items === null
+    messages: (o.messages === undefined || o.messages === null
       ? []
-      : ensureArray(o.items, "ConversationPage.items")
-    ).map((item, i) => decodeConversationItem(item, i)),
+      : ensureArray(o.messages, "ConversationPage.messages")
+    ).map((m, i) => decodeMessage(m, i)),
     continuation: decodePageContinuation(o),
     liveJoinSeq: num(o, "liveJoinSeq", "ConversationPage"),
     fence: str(o, "fence", "ConversationPage"),
@@ -3377,7 +3380,7 @@ const CONVERSATION_ITEM_ENVELOPE_KEYS = new Set([
   "turnAccounting",
 ]);
 const CONVERSATION_ITEM_ARM_SET: ReadonlySet<string> = new Set(
-  CONVERSATION_ITEM_ARMS,
+  MESSAGE_ARMS,
 );
 
 /** The `AgentEmission` arm key that wraps every agent-produced item. */
@@ -3387,12 +3390,12 @@ const AGENT_EMISSION_ENVELOPE = "agent";
  * `agent-emission.ts` owns the emission unwrap, because a DETACHED agent's
  * emissions are the SAME message and must be read by the same code (see that
  * module's header). Its `AgentEmissionArm` is structurally a subset of
- * `ConversationItemArm`, which the assignment in `decodeConversationItem`
+ * `MessageArm`, which the assignment in `decodeMessage`
  * below type-checks: an emission arm that stopped being a conversation item
  * fails this build rather than reaching the adapter's switch as an unhandled
  * string.
  */
-function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
+function decodeMessage(v: unknown, i: number): MessageFrame {
   const ctx = `ConversationItem[${i}]`;
   const o = ensureObject(v, ctx);
   const keys = Object.keys(o);
@@ -3421,7 +3424,7 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
     );
   }
   const selected: {
-    arm: ConversationItemArm;
+    arm: MessageArm;
     payload: JsonObject;
     thinkingOrigin?: { apiMessageId: string; blockIndex: number };
     spawnedBubbleId?: string;
@@ -3431,11 +3434,11 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
       ? unwrapAgentEmission(o[AGENT_EMISSION_ENVELOPE], `${ctx}.agent`)
       : // Adopt the typed payload by shape (see file-top §5.1 boundary note).
         {
-          arm: armKeys[0] as ConversationItemArm,
+          arm: armKeys[0] as MessageArm,
           payload: ensureObject(o[armKeys[0]], `${ctx}.${armKeys[0]}`),
         };
   const arm = selected.arm;
-  const frame: ConversationItemFrame = {
+  const frame: MessageFrame = {
     uuid: str(o, "uuid", ctx),
     tsMs: num(o, "tsMs", ctx),
     requestId: str(o, "requestId", ctx),

@@ -88,7 +88,7 @@ func pushedUserBubbles(cons *consumer) int {
 	defer p.mu.Unlock()
 	n := 0
 	for _, cd := range p.convo {
-		for _, it := range cd.GetItems() {
+		for _, it := range cd.GetMessages() {
 			if it.GetUserMessage() != nil {
 				n++
 			}

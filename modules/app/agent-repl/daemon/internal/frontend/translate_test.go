@@ -52,7 +52,7 @@ func mustStructT(t *testing.T, m map[string]any) *structpb.Struct {
 	return s
 }
 
-// --- conversationDeltaFromEvent: the typed ConversationItem contract --------
+// --- conversationDeltaFromEvent: the typed Message contract --------
 
 func TestConversationDeltaFromEvent(t *testing.T) {
 	// Reusable typed payloads so want/event share the exact same sub-message.
@@ -104,10 +104,10 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 			},
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", Fence: "s1", ThroughSeq: 7,
-				Items: []*frontendv1.ConversationItem{{
+				Messages: []*frontendv1.Message{{
 					Uuid: "u1", TsMs: producedMs,
 					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Item:   &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: assistantMsg}}}},
+					Payload:   &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: assistantMsg}}}},
 				}},
 			},
 		},
@@ -121,10 +121,10 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 			},
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", Fence: "s1", ThroughSeq: 9,
-				Items: []*frontendv1.ConversationItem{{
+				Messages: []*frontendv1.Message{{
 					Uuid: "u3", TsMs: producedMs,
 					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Item:   &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: toolUseMsg}}}},
+					Payload:   &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: toolUseMsg}}}},
 				}},
 			},
 		},
@@ -138,10 +138,10 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 			},
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", Fence: "s1", ThroughSeq: 10,
-				Items: []*frontendv1.ConversationItem{{
+				Messages: []*frontendv1.Message{{
 					Uuid: "u4", TsMs: producedMs,
 					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Item:   &frontendv1.ConversationItem_UserMessage{UserMessage: toolResultMsg},
+					Payload:   &frontendv1.Message_UserMessage{UserMessage: toolResultMsg},
 				}},
 			},
 		},
@@ -155,10 +155,10 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 			},
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", Fence: "s1", ThroughSeq: 2,
-				Items: []*frontendv1.ConversationItem{{
+				Messages: []*frontendv1.Message{{
 					Uuid: "u5", TsMs: producedMs, RequestId: "req-5",
 					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Item:   &frontendv1.ConversationItem_UserMessage{UserMessage: promptMsg},
+					Payload:   &frontendv1.Message_UserMessage{UserMessage: promptMsg},
 				}},
 			},
 		},
@@ -170,11 +170,11 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 			},
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", Fence: "s1", ThroughSeq: 12,
-				Items: []*frontendv1.ConversationItem{{
+				Messages: []*frontendv1.Message{{
 					Uuid:   "result:s1:12",
 					TsMs:   producedMs,
 					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Item:   &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: resultMsg}}},
+					Payload:   &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: resultMsg}}},
 				}},
 			},
 		},
@@ -275,10 +275,10 @@ func TestConversationDeltaFromEventTranscriptAssistantUsesEnvelopeTs(t *testing.
 	const wantTsMs int64 = 1767323045000
 	want := &frontendv1.ConversationDelta{
 		Workspace: "ws", Fence: "s1", ThroughSeq: 20,
-		Items: []*frontendv1.ConversationItem{{
+		Messages: []*frontendv1.Message{{
 			Uuid: "au1", TsMs: wantTsMs,
 			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-			Item:   &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: msg}}}},
+			Payload:   &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: msg}}}},
 		}},
 	}
 
@@ -316,7 +316,7 @@ func thinkingEmissions(t *testing.T, msg *datav1.ApiAssistantMessage) []*fronten
 		t.Fatalf("conversationDeltaFromEvent: %v", err)
 	}
 	var out []*frontendv1.AgentThinking
-	for _, item := range got.GetItems() {
+	for _, item := range got.GetMessages() {
 		if th := item.GetAgent().GetThinking(); th != nil {
 			out = append(out, th)
 		}
@@ -407,7 +407,7 @@ func TestTheStrippedBodyKeepsTheBlocksTheEmissionsLeftBehind(t *testing.T) {
 
 	// Assert
 	var body *datav1.ApiAssistantMessage
-	for _, item := range got.GetItems() {
+	for _, item := range got.GetMessages() {
 		if r := item.GetAgent().GetResponse(); r != nil {
 			body = r.GetBody()
 		}
@@ -454,7 +454,7 @@ func assistantResponseBodies(t *testing.T, msg *datav1.ApiAssistantMessage) []st
 		t.Fatalf("conversationDeltaFromEvent: %v", err)
 	}
 	var out []string
-	for _, item := range got.GetItems() {
+	for _, item := range got.GetMessages() {
 		r := item.GetAgent().GetResponse()
 		if r == nil {
 			continue
@@ -481,12 +481,12 @@ func userMessageBodies(t *testing.T, msg *datav1.ApiUserMessage) (int, []string)
 		t.Fatalf("conversationDeltaFromEvent: %v", err)
 	}
 	var out []string
-	for _, item := range got.GetItems() {
+	for _, item := range got.GetMessages() {
 		for _, block := range item.GetUserMessage().GetContentBlocks().GetBlocks() {
 			out = append(out, block.GetText().GetText())
 		}
 	}
-	return len(got.GetItems()), out
+	return len(got.GetMessages()), out
 }
 
 func TestAnAssistantBodyThatIsNothingButTheInterruptSentinelIsDropped(t *testing.T) {
@@ -653,7 +653,7 @@ func apiErrorEvent(t *testing.T, uuid string, attempt, max int64) *corev1.Event 
 
 // failureOf returns the single system-failure item in a delta, or nil.
 func failureOf(cd *frontendv1.ConversationDelta) *frontendv1.FailureCardView {
-	for _, it := range cd.GetItems() {
+	for _, it := range cd.GetMessages() {
 		if f := it.GetFailureCard(); f != nil {
 			return f
 		}
@@ -741,8 +741,8 @@ func TestTheFailureCardIsTheOnlyItem(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Assert.
-	if len(got.GetItems()) != 1 || got.GetItems()[0].GetFailureCard() == nil {
-		t.Fatalf("items = %v, want exactly one system_failure item", got.GetItems())
+	if len(got.GetMessages()) != 1 || got.GetMessages()[0].GetFailureCard() == nil {
+		t.Fatalf("items = %v, want exactly one system_failure item", got.GetMessages())
 	}
 }
 
@@ -755,8 +755,8 @@ func TestTheFailureCardUuidIsDerivedFromTheLine(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Assert.
-	if want := FailureUUID("sy2"); got.GetItems()[0].GetUuid() != want {
-		t.Fatalf("card uuid = %q, want %q", got.GetItems()[0].GetUuid(), want)
+	if want := FailureUUID("sy2"); got.GetMessages()[0].GetUuid() != want {
+		t.Fatalf("card uuid = %q, want %q", got.GetMessages()[0].GetUuid(), want)
 	}
 }
 
@@ -781,10 +781,10 @@ func TestMarshalConversationDeltaLowerCamelCase(t *testing.T) {
 	// oneof arm key are exercised.
 	frame := ConversationDeltaFrame(&frontendv1.ConversationDelta{
 		Workspace: "ws", Fence: "s1", ThroughSeq: 5,
-		Items: []*frontendv1.ConversationItem{{
+		Messages: []*frontendv1.Message{{
 			Uuid: "u1", TsMs: producedMs,
 			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-			Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{
+			Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{
 				Content: []*datav1.ContentBlock{
 					{Block: &datav1.ContentBlock_ToolUse{ToolUse: &datav1.ToolUseBlock{Id: "tu_1", Name: "Bash"}}},
 				},
@@ -1421,7 +1421,7 @@ func TestResultUUIDIsTheDedupKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("conversationDeltaFromEvent: %v", err)
 	}
-	if uuid := got.GetItems()[0].GetUuid(); uuid != "result:r-1" {
+	if uuid := got.GetMessages()[0].GetUuid(); uuid != "result:r-1" {
 		t.Fatalf("uuid = %q, want %q", uuid, "result:r-1")
 	}
 }
@@ -1443,7 +1443,7 @@ func TestResultWithoutADedupKeyDerivesAStableUUID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("conversationDeltaFromEvent: %v", err)
 	}
-	if uuid := got.GetItems()[0].GetUuid(); uuid != "result:s1:12" {
+	if uuid := got.GetMessages()[0].GetUuid(); uuid != "result:s1:12" {
 		t.Fatalf("uuid = %q, want %q", uuid, "result:s1:12")
 	}
 }
@@ -1472,9 +1472,9 @@ func TestResultUUIDIsStableAcrossReplaysOfTheSameEvent(t *testing.T) {
 	}
 
 	// Assert.
-	if live.GetItems()[0].GetUuid() != replay.GetItems()[0].GetUuid() {
+	if live.GetMessages()[0].GetUuid() != replay.GetMessages()[0].GetUuid() {
 		t.Fatalf("uuid drifted across replays: live=%q replay=%q",
-			live.GetItems()[0].GetUuid(), replay.GetItems()[0].GetUuid())
+			live.GetMessages()[0].GetUuid(), replay.GetMessages()[0].GetUuid())
 	}
 }
 
@@ -1494,8 +1494,8 @@ func TestResultUUIDsDifferPerTurn(t *testing.T) {
 	second, _, _ := conversationDeltaFromEvent("ws", "s1", at(19))
 
 	// Assert.
-	if first.GetItems()[0].GetUuid() == second.GetItems()[0].GetUuid() {
-		t.Fatalf("two turns share the uuid %q", first.GetItems()[0].GetUuid())
+	if first.GetMessages()[0].GetUuid() == second.GetMessages()[0].GetUuid() {
+		t.Fatalf("two turns share the uuid %q", first.GetMessages()[0].GetUuid())
 	}
 }
 
@@ -1575,7 +1575,7 @@ func TestEveryIdentityLessItemUsesTheSharedDerivation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("conversationDeltaFromEvent: %v", err)
 			}
-			if uuid := got.GetItems()[0].GetUuid(); uuid != tc.want {
+			if uuid := got.GetMessages()[0].GetUuid(); uuid != tc.want {
 				t.Fatalf("uuid = %q, want %q", uuid, tc.want)
 			}
 		})

@@ -99,7 +99,7 @@ func TestE2ESkillBodyReachesTheFrontendAsItsOwnArm(t *testing.T) {
 	store.write(sidecarLineEvent(t, vendorID, metaUserLine("e2e-skill-body", "e2e-skill-result", e2eSkillBody)))
 
 	// Assert
-	item, _ := awaitItem(t, conn, cwd, "the skill body item", func(it *frontendv1.ConversationItem) bool {
+	item, _ := awaitItem(t, conn, cwd, "the skill body item", func(it *frontendv1.Message) bool {
 		return it.GetAgent().GetSkillBody() != nil
 	})
 	if got, want := item.GetAgent().GetSkillBody().GetToolUseId(), toolUseID; got != want {
@@ -131,7 +131,7 @@ func TestE2ESkillBodyNeverReachesTheFrontendAsAUserTurn(t *testing.T) {
 	store.write(sidecarUserLineEvent(t, vendorID, "e2e-real-2", realPrompt))
 
 	// Assert
-	_, before := awaitItem(t, conn, cwd, "the real prompt's user item", func(it *frontendv1.ConversationItem) bool {
+	_, before := awaitItem(t, conn, cwd, "the real prompt's user item", func(it *frontendv1.Message) bool {
 		return it.GetUserMessage().GetContentString() == realPrompt
 	})
 	for _, it := range before {
@@ -158,7 +158,7 @@ func TestE2EANonSkillMetaRecordIsWithheldEntirely(t *testing.T) {
 	store.write(sidecarUserLineEvent(t, vendorID, "e2e-real-3", realPrompt))
 
 	// Assert
-	_, before := awaitItem(t, conn, cwd, "the real prompt's user item", func(it *frontendv1.ConversationItem) bool {
+	_, before := awaitItem(t, conn, cwd, "the real prompt's user item", func(it *frontendv1.Message) bool {
 		return it.GetUserMessage().GetContentString() == realPrompt
 	})
 	for _, it := range before {

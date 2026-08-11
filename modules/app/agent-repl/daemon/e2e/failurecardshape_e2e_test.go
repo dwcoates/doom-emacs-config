@@ -7,7 +7,7 @@
 // number in it").
 //
 // And the resolution rule: "A window-shaped failure is re-sent under the SAME
-// ConversationItem.uuid with a different arm here, and the feed reconciles it
+// Message.uuid with a different arm here, and the feed reconciles it
 // in place. Appending instead would leave the alarm standing beside its own
 // all-clear."
 //
@@ -42,7 +42,7 @@ func TestE2EAWindowShapedFailureResolvesUnderItsOwnUUID(t *testing.T) {
 	store.write(degradedStateEvent(vendorID, component, reason, 7, false))
 
 	// Assert — the opening card, whole.
-	opened, _ := awaitItem(t, conn, cwd, "the opening failure card", func(it *frontendv1.ConversationItem) bool {
+	opened, _ := awaitItem(t, conn, cwd, "the opening failure card", func(it *frontendv1.Message) bool {
 		return it.GetFailureCard() != nil
 	})
 	// FailureKind is ITSELF a oneof over the classified vocabulary
@@ -60,14 +60,14 @@ func TestE2EAWindowShapedFailureResolvesUnderItsOwnUUID(t *testing.T) {
 		t.Errorf("the opening card's lifecycle arm = %T, want FailureCardOpen: a window that has only just opened must invite waiting", card.GetLifecycle())
 	}
 	if opened.GetUuid() == "" {
-		t.Fatal("the failure card arrived with an empty ConversationItem.uuid: nothing can be re-sent under it, so the window can never close in place")
+		t.Fatal("the failure card arrived with an empty Message.uuid: nothing can be re-sent under it, so the window can never close in place")
 	}
 
 	// Act — the window CLOSES.
 	store.write(degradedStateEvent(vendorID, component, reason, 7, true))
 
 	// Assert — the SAME card, resolved.
-	resolved, _ := awaitItem(t, conn, cwd, "the resolved failure card", func(it *frontendv1.ConversationItem) bool {
+	resolved, _ := awaitItem(t, conn, cwd, "the resolved failure card", func(it *frontendv1.Message) bool {
 		return it.GetFailureCard().GetResolved() != nil
 	})
 	if got, want := resolved.GetUuid(), opened.GetUuid(); got != want {

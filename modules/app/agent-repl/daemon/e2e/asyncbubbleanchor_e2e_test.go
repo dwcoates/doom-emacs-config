@@ -1,5 +1,5 @@
 // A detached launch's ANCHOR in the feed: the bubble opens as a top-level
-// ConversationItem on arm 38, addressed to the same id the spawning call
+// Message on arm 38, addressed to the same id the spawning call
 // published and pointed back at that call.
 //
 // The anchor is what lets a frontend draw the bubble attached to its
@@ -35,7 +35,7 @@ func TestE2EALaunchAnchorsItsBubbleInTheFeedWithLiveLiveness(t *testing.T) {
 	store.write(sidecarUserLineEvent(t, vendorID, "e2e-anchor-barrier-line", barrierPrompt))
 
 	// Assert
-	seen := drainUntilItem(t, conn, cwd, "the barrier prompt's user item", func(it *frontendv1.ConversationItem) bool {
+	seen := drainUntilItem(t, conn, cwd, "the barrier prompt's user item", func(it *frontendv1.Message) bool {
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 

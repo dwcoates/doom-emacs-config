@@ -65,7 +65,7 @@ import (
 // exclusion is: a cut's items arrive a few at a time across several deltas, and
 // a line per item would say the same thing repeatedly without saying more.
 func (c *consumer) withholdDaemonContextCut(cd *frontendv1.ConversationDelta) int {
-	withheld := c.withholdItems(cd, func(item *frontendv1.ConversationItem) withholdVerdict {
+	withheld := c.withholdItems(cd, func(item *frontendv1.Message) withholdVerdict {
 		if !daemonturn.IsContextCut(item.GetRequestId()) {
 			return keepItem
 		}
@@ -73,7 +73,7 @@ func (c *consumer) withholdDaemonContextCut(cd *frontendv1.ConversationDelta) in
 	})
 	if withheld > 0 {
 		c.logf("session-controller: daemon context cut items WITHHELD ws=%q session=%s seq=%d withheld=%d remaining=%d — the daemon submitted this cut, so its turn plumbing (the terminal result the feed would draw as a bare duration chip, and any notice the CLI answered with) is excluded from every rendering; the turns stay in the store and the cut's own divider is unaffected",
-			c.workspace, c.sessionID, cd.GetThroughSeq(), withheld, len(cd.GetItems()))
+			c.workspace, c.sessionID, cd.GetThroughSeq(), withheld, len(cd.GetMessages()))
 	}
 	return withheld
 }

@@ -204,7 +204,7 @@ func TestE2EConversationItemsCarryWhoDroveTheirTurn(t *testing.T) {
 
 			// Assert — the turn's items name their driver, and no item on the
 			// workspace leaves the field unset.
-			w.awaitItem(wsDir, "a conversation item stamped "+tc.want.String(), func(item *frontendv1.ConversationItem) bool {
+			w.awaitItem(wsDir, "a conversation item stamped "+tc.want.String(), func(item *frontendv1.Message) bool {
 				return item.GetSource() == tc.want
 			})
 			for _, item := range w.items[wsDir] {

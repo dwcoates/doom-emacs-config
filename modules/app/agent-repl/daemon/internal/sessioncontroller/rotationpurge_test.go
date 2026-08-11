@@ -160,7 +160,7 @@ func TestPostRotationResyncReplaysNoRetiredSpaceItem(t *testing.T) {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
 	for _, cd := range h.push.convo {
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			if item.GetUuid() == "retired" {
 				t.Fatal("the resync replayed an item from the RETIRED seq space")
 			}

@@ -151,7 +151,7 @@ func (r *faultRig) cards() []*frontendv1.FailureCardView {
 	defer r.push.mu.Unlock()
 	var out []*frontendv1.FailureCardView
 	for _, d := range r.push.convo {
-		for _, it := range d.GetItems() {
+		for _, it := range d.GetMessages() {
 			if f := it.GetFailureCard(); f != nil {
 				out = append(out, f)
 			}
@@ -160,14 +160,14 @@ func (r *faultRig) cards() []*frontendv1.FailureCardView {
 	return out
 }
 
-// cardUUIDs returns the ConversationItem uuid of every pushed failure card, in
+// cardUUIDs returns the Message uuid of every pushed failure card, in
 // push order, so a resolve-in-place can be told from an accumulating pair.
 func (r *faultRig) cardUUIDs() []string {
 	r.push.mu.Lock()
 	defer r.push.mu.Unlock()
 	var out []string
 	for _, d := range r.push.convo {
-		for _, it := range d.GetItems() {
+		for _, it := range d.GetMessages() {
 			if it.GetFailureCard() != nil {
 				out = append(out, it.GetUuid())
 			}
@@ -197,7 +197,7 @@ func (r *faultRig) wire() {
 
 // retainedCards returns the consumer's retained failure items — what a resync
 // would replay — as distinct from the full push history.
-func (r *faultRig) retainedCards() []*frontendv1.ConversationItem {
+func (r *faultRig) retainedCards() []*frontendv1.Message {
 	return r.cons.snapshotFailItems()
 }
 

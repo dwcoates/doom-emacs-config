@@ -172,7 +172,7 @@ func pushedItemUUIDs(p *fakePusher) []string {
 	defer p.mu.Unlock()
 	var out []string
 	for _, cd := range p.convo {
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			out = append(out, item.GetUuid())
 		}
 	}
@@ -195,8 +195,8 @@ func compactSummaries(p *fakePusher) []string {
 	defer p.mu.Unlock()
 	var out []string
 	for _, cd := range p.convo {
-		for _, item := range cd.GetItems() {
-			if arm, ok := item.GetItem().(*frontendv1.ConversationItem_ContextCompacted); ok {
+		for _, item := range cd.GetMessages() {
+			if arm, ok := item.GetPayload().(*frontendv1.Message_ContextCompacted); ok {
 				out = append(out, arm.ContextCompacted.GetSummary())
 			}
 		}

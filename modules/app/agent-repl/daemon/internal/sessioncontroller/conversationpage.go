@@ -220,7 +220,7 @@ func clampPageLimit(requested uint32) uint32 {
 // identity is a uuid and not an offset.
 type pageSegment struct {
 	seq   uint64
-	items []*frontendv1.ConversationItem
+	items []*frontendv1.Message
 }
 
 // ConversationPage serves ONE page of a workspace's conversation history.
@@ -465,10 +465,10 @@ func (m *Manager) translateRange(ctx context.Context, workspace, sessionID, gene
 		before := len(capture.deltas)
 		cons.pushConversation(ev, false)
 		for _, cd := range capture.deltas[before:] {
-			if len(cd.GetItems()) == 0 {
+			if len(cd.GetMessages()) == 0 {
 				continue
 			}
-			segments = append(segments, pageSegment{seq: ev.GetSeq(), items: cd.GetItems()})
+			segments = append(segments, pageSegment{seq: ev.GetSeq(), items: cd.GetMessages()})
 			if len(segments) > keep {
 				segments = segments[1:]
 				dropped = true
@@ -531,8 +531,8 @@ func countItems(segments []pageSegment) int {
 }
 
 // flattenItems concatenates the selected segments' items, oldest first.
-func flattenItems(selected []pageSegment) []*frontendv1.ConversationItem {
-	var items []*frontendv1.ConversationItem
+func flattenItems(selected []pageSegment) []*frontendv1.Message {
+	var items []*frontendv1.Message
 	for _, s := range selected {
 		items = append(items, s.items...)
 	}
@@ -550,10 +550,10 @@ func flattenItems(selected []pageSegment) []*frontendv1.ConversationItem {
 // the page that could not match the WorkspaceState the client was holding, so
 // the client byte-compared, disagreed, and discarded the very page it had
 // asked for: the blank feed again, one layer further out.
-func (m *Manager) newPage(workspace, fence string, items []*frontendv1.ConversationItem, continuation pageContinuation, liveJoinSeq uint64) *frontendv1.ConversationPage {
+func (m *Manager) newPage(workspace, fence string, items []*frontendv1.Message, continuation pageContinuation, liveJoinSeq uint64) *frontendv1.ConversationPage {
 	page := &frontendv1.ConversationPage{
 		Workspace:   workspace,
-		Items:       items,
+		Messages:       items,
 		LiveJoinSeq: liveJoinSeq,
 		Fence:       fence,
 	}

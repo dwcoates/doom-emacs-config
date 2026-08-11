@@ -64,7 +64,7 @@ function userItem(item: Record<string, unknown>): Record<string, unknown> {
 /** The store items a single conversation item decomposes into. */
 function itemsFrom(item: Record<string, unknown>): ConversationItem[] {
   const effects = applyOne({
-    conversationDelta: { fence: "s1", workspace: "ws", throughSeq: "9", items: [userItem(item)] },
+    conversationDelta: { fence: "s1", workspace: "ws", throughSeq: "9", messages: [userItem(item)] },
   });
   const conv = effects.find((e) => e.kind === "conversation-items");
   if (conv?.kind !== "conversation-items") throw new Error("no conversation-items effect");
@@ -461,7 +461,7 @@ describe("StateSnapshot mapping", () => {
 describe("ConversationDelta envelope", () => {
   it("carries workspace / fence / throughSeq through", () => {
     const effects = applyOne({
-      conversationDelta: { fence: "s1", workspace: "ws", throughSeq: "42", items: [] },
+      conversationDelta: { fence: "s1", workspace: "ws", throughSeq: "42", messages: [] },
     });
     expect(effects[0]).toMatchObject({ kind: "conversation-items", workspace: "ws", fence: "s1", throughSeq: 42 });
   });
@@ -1122,7 +1122,7 @@ function deltaOf(
   const adapter = new StateAdapter(log);
   return adapter.apply(
     frame({
-      conversationDelta: { fence: "s1", workspace: "/ws", throughSeq: "9", items: [item] },
+      conversationDelta: { fence: "s1", workspace: "/ws", throughSeq: "9", messages: [item] },
     }),
   );
 }
@@ -1234,7 +1234,7 @@ describe("conversation provenance gate", () => {
           fence: "s1",
           workspace: "/ws",
           throughSeq: "9",
-          items: [
+          messages: [
             { ...PROSE, source: "CONVERSATION_SOURCE_MERGE" },
             {
               uuid: "m2",
@@ -1357,7 +1357,7 @@ describe("explicit-ignore path", () => {
       frame({
         conversationDelta: {
           fence: "s1",
-          items: [userItem({ uuid: "m1", toolUseResult: { rawString: "x" } })],
+          messages: [userItem({ uuid: "m1", toolUseResult: { rawString: "x" } })],
         },
       }),
     );
@@ -1379,7 +1379,7 @@ describe("explicit-ignore path", () => {
       frame({
         conversationDelta: {
           fence: "s1",
-          items: [userItem({ uuid: "m1", toolUseResult: { rawString: "x" } })],
+          messages: [userItem({ uuid: "m1", toolUseResult: { rawString: "x" } })],
         },
       }),
     );
@@ -1397,7 +1397,7 @@ describe("explicit-ignore path", () => {
       frame({
         conversationDelta: {
           fence: "s1",
-          items: [
+          messages: [
             userItem({
               uuid: "m1",
               assistantMessage: { content: [{ text: { text: "keep" } }, { image: { source: {} } }] },
@@ -2058,7 +2058,7 @@ describe("async bubble effects", () => {
         workspace: "ws",
         fence: "s1",
         throughSeq: "3",
-        items: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
+        messages: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
       },
     });
 
@@ -2074,7 +2074,7 @@ describe("async bubble effects", () => {
         workspace: "ws",
         fence: "s1",
         throughSeq: "3",
-        items: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
+        messages: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
       },
     });
 
@@ -2086,7 +2086,7 @@ describe("async bubble effects", () => {
   it("emits NO anchored effect for a delta that anchored nothing", () => {
     // Arrange / Act
     const effects = applyOne({
-      conversationDelta: { workspace: "ws", fence: "s1", throughSeq: "3", items: [] },
+      conversationDelta: { workspace: "ws", fence: "s1", throughSeq: "3", messages: [] },
     });
 
     // Assert

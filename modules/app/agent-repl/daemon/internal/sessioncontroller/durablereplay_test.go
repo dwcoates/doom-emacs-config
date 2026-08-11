@@ -279,7 +279,7 @@ func TestADurableReplayStampsMergeProvenanceFromTheLeaseLedger(t *testing.T) {
 	if len(h.push.convo) != 1 {
 		t.Fatalf("pushed %d deltas, want 1", len(h.push.convo))
 	}
-	if got := h.push.convo[0].GetItems()[0].GetSource(); got != frontendv1.ConversationSource_CONVERSATION_SOURCE_MERGE {
+	if got := h.push.convo[0].GetMessages()[0].GetSource(); got != frontendv1.ConversationSource_CONVERSATION_SOURCE_MERGE {
 		t.Fatalf("replayed item source = %v, want CONVERSATION_SOURCE_MERGE", got)
 	}
 }
@@ -298,7 +298,7 @@ func TestADurableReplayStampsUserProvenanceOutsideEveryMergeWindow(t *testing.T)
 	// Assert.
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
-	if got := h.push.convo[0].GetItems()[0].GetSource(); got != frontendv1.ConversationSource_CONVERSATION_SOURCE_USER {
+	if got := h.push.convo[0].GetMessages()[0].GetSource(); got != frontendv1.ConversationSource_CONVERSATION_SOURCE_USER {
 		t.Fatalf("replayed item source = %v, want CONVERSATION_SOURCE_USER", got)
 	}
 }
@@ -447,7 +447,7 @@ func TestADurableReplayWithholdsTheDaemonsOwnKeepAliveTurn(t *testing.T) {
 	if len(h.push.convo) != 1 {
 		t.Fatalf("%d conversation pushes, want the emptied delta still pushed so the replay cursor advances", len(h.push.convo))
 	}
-	if got := len(h.push.convo[0].GetItems()); got != 0 {
+	if got := len(h.push.convo[0].GetMessages()); got != 0 {
 		t.Fatalf("%d items survived the replay, want the ping withheld", got)
 	}
 }
@@ -478,12 +478,12 @@ func seededTerminalCard(t *testing.T) statedb.TerminalFailureCard {
 }
 
 // durableFailureCards returns every failure card the replay pushed.
-func (h *durableHarness) durableFailureCards() []*frontendv1.ConversationItem {
+func (h *durableHarness) durableFailureCards() []*frontendv1.Message {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
-	var out []*frontendv1.ConversationItem
+	var out []*frontendv1.Message
 	for _, cd := range h.push.convo {
-		for _, item := range cd.GetItems() {
+		for _, item := range cd.GetMessages() {
 			if item.GetFailureCard() != nil {
 				out = append(out, item)
 			}

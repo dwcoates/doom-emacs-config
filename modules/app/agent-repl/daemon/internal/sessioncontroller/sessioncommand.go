@@ -111,12 +111,12 @@ func sessionCommandUUID(requestID string) string { return "session-command:" + r
 // It carries the command and nothing else. There is deliberately no `text`
 // parameter to forget to omit: the submitted prompt does not reach this
 // function, so it cannot reach the wire.
-func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsMs int64) *frontendv1.ConversationItem {
-	return &frontendv1.ConversationItem{
+func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsMs int64) *frontendv1.Message {
+	return &frontendv1.Message{
 		Uuid:      sessionCommandUUID(requestID),
 		TsMs:      tsMs,
 		RequestId: requestID,
-		Item: &frontendv1.ConversationItem_SessionCommand{
+		Payload: &frontendv1.Message_SessionCommand{
 			SessionCommand: &frontendv1.SessionCommandItem{Command: command},
 		},
 	}
@@ -147,7 +147,7 @@ func (c *consumer) pushSessionCommand(requestID string, command frontendv1.Sessi
 	item := sessionCommandItem(requestID, command, c.now())
 	c.mu.Lock()
 	if c.cmdItems == nil {
-		c.cmdItems = map[string]*frontendv1.ConversationItem{}
+		c.cmdItems = map[string]*frontendv1.Message{}
 	}
 	if _, seen := c.cmdItems[item.GetUuid()]; !seen {
 		c.cmdOrder = append(c.cmdOrder, item.GetUuid())
@@ -162,10 +162,10 @@ func (c *consumer) pushSessionCommand(requestID string, command frontendv1.Sessi
 // snapshotCommandItems returns the retained invocation items in first-seen
 // order, taken under the lock so a concurrent pushSessionCommand cannot race
 // the read.
-func (c *consumer) snapshotCommandItems() []*frontendv1.ConversationItem {
+func (c *consumer) snapshotCommandItems() []*frontendv1.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := make([]*frontendv1.ConversationItem, 0, len(c.cmdOrder))
+	out := make([]*frontendv1.Message, 0, len(c.cmdOrder))
 	for _, id := range c.cmdOrder {
 		out = append(out, c.cmdItems[id])
 	}

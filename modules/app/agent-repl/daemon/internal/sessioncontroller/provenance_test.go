@@ -55,7 +55,7 @@ func TestStampConversationProvenance(t *testing.T) {
 			c, _ := newProvenanceConsumer(applier)
 			cd := &frontendv1.ConversationDelta{
 				Workspace: "ws",
-				Items:     []*frontendv1.ConversationItem{{Uuid: "u1", TsMs: tt.tsMs}},
+				Messages:     []*frontendv1.Message{{Uuid: "u1", TsMs: tt.tsMs}},
 			}
 
 			// Act.
@@ -65,7 +65,7 @@ func TestStampConversationProvenance(t *testing.T) {
 			if !ok {
 				t.Fatal("stampConversationProvenance refused a placeable delta")
 			}
-			if got := cd.GetItems()[0].GetSource(); got != tt.want {
+			if got := cd.GetMessages()[0].GetSource(); got != tt.want {
 				t.Fatalf("source = %v, want %v", got, tt.want)
 			}
 		})
@@ -78,7 +78,7 @@ func TestStampConversationProvenanceRefusesAnUnplaceableDelta(t *testing.T) {
 	c, push := newProvenanceConsumer(applier)
 	cd := &frontendv1.ConversationDelta{
 		Workspace: "ws",
-		Items:     []*frontendv1.ConversationItem{{Uuid: "u1"}},
+		Messages:     []*frontendv1.Message{{Uuid: "u1"}},
 	}
 
 	// Act.
@@ -88,7 +88,7 @@ func TestStampConversationProvenanceRefusesAnUnplaceableDelta(t *testing.T) {
 	if ok {
 		t.Fatal("stampConversationProvenance accepted a delta whose provenance could not be resolved")
 	}
-	if got := cd.GetItems()[0].GetSource(); got != frontendv1.ConversationSource_CONVERSATION_SOURCE_UNSPECIFIED {
+	if got := cd.GetMessages()[0].GetSource(); got != frontendv1.ConversationSource_CONVERSATION_SOURCE_UNSPECIFIED {
 		t.Fatalf("source = %v, want the item left unstamped", got)
 	}
 	if len(push.convo) != 0 {
@@ -99,7 +99,7 @@ func TestStampConversationProvenanceRefusesAnUnplaceableDelta(t *testing.T) {
 func TestStampConversationProvenanceRefusesANilItem(t *testing.T) {
 	// Arrange.
 	c, _ := newProvenanceConsumer(&fakeApplier{})
-	cd := &frontendv1.ConversationDelta{Workspace: "ws", Items: []*frontendv1.ConversationItem{nil}}
+	cd := &frontendv1.ConversationDelta{Workspace: "ws", Messages: []*frontendv1.Message{nil}}
 
 	// Act.
 	ok := c.stampConversationProvenance(cd)
@@ -132,7 +132,7 @@ func TestPushLocalItemStampsTheLiveLeaseVerdict(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			applier := &fakeApplier{mergeLeases: map[string]bool{"ws": tt.held}}
 			c, push := newProvenanceConsumer(applier)
-			item := &frontendv1.ConversationItem{Uuid: "local-1"}
+			item := &frontendv1.Message{Uuid: "local-1"}
 
 			// Act.
 			c.pushLocalItem(item)
@@ -144,7 +144,7 @@ func TestPushLocalItemStampsTheLiveLeaseVerdict(t *testing.T) {
 			if len(push.convo) != 1 {
 				t.Fatalf("pushed %d delta(s), want 1", len(push.convo))
 			}
-			if got := push.convo[0].GetItems()[0].GetSource(); got != tt.want {
+			if got := push.convo[0].GetMessages()[0].GetSource(); got != tt.want {
 				t.Fatalf("pushed source = %v, want %v", got, tt.want)
 			}
 		})
