@@ -219,9 +219,12 @@ const SPECIAL_TOOLS = new Set([
  * rule in the stylesheet and the fixed-panel decision below (`MemberFold`).
  *
  * A teal card is a whole conversation of its own, and its nested output is not
- * an aside to be opened: it is the card's content. So a teal card's own folds
- * do not fold. They render as fixed panels the reader scrolls, capped at half
- * the viewport by `.fold-fixed > .agent-panel` and shrinking to fit a body too
+ * an aside to be opened: it is the card's content. So NOTHING in a teal card's
+ * nested section folds — not its activity fold, not its async fold, and not
+ * the async bubble its call detached (nor that bubble's own children). They
+ * all render as fixed panels the reader scrolls, capped by
+ * `.fold-fixed > .agent-panel` at the SAME visible-line budget a response or
+ * prompt bubble stops at (`--feed-cap-lines`) and shrinking to fit a body too
  * short to fill that. A grey card (a Workflow's child feed, a generic tool's
  * stream) is unchanged and still folds.
  *
@@ -1177,11 +1180,21 @@ function ToolCard(
  * — never a prompt to go find a plausible candidate. A card with no registry
  * to match against draws nothing, which is the honest state of a page that has
  * received no async push.
+ *
+ * On a TEAL card the bubble is part of the card's always-open nested section,
+ * so it is drawn fixed (no fold, no chevron, no click target) exactly as the
+ * card's own folds are — the card's tool name is the whole decision, read off
+ * the same `ASYNC_TEAL_TOOLS` list `MemberFold` reads.
  */
 function asyncBubbleForCard(item: ToolItem, panels?: PanelContext): string {
   const registry = panels?.asyncBubbles;
   if (registry === undefined) return "";
-  return AsyncBubbleForCall(item.toolUseId, item.spawnedBubbleId, asyncRenderContext(registry, panels));
+  return AsyncBubbleForCall(
+    item.toolUseId,
+    item.spawnedBubbleId,
+    asyncRenderContext(registry, panels),
+    ASYNC_TEAL_TOOLS.has(item.toolName),
+  );
 }
 
 /**

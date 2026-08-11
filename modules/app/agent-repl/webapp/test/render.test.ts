@@ -12,6 +12,7 @@ import {
 } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
 import {
   Actions,
+  ASYNC_TEAL_TOOLS,
   FeedRenderer,
   PanelContext,
   ToolReveal,
@@ -6480,5 +6481,116 @@ describe("a tool card's detached work", () => {
     // Assert — the feed's own .feed-child shell around the feed's own bubble.
     expect(html).toContain("from the detached agent");
     expect(html).toContain('<div class="feed-child">');
+  });
+
+  // --- the teal nested section's guarantees ---------------------------------
+  //
+  // A teal card's nested section is ALWAYS OPEN and has NO fold affordance:
+  // the constituent sub-bubbles are the card's content, not an aside, and the
+  // chevron that used to open them was the unobvious affordance this removes.
+  // The cap and the scrolling are the stylesheet's half (styles.test.ts).
+
+  /**
+   * The guarantees a teal card's nested section must hold: the fixed-panel
+   * class on every fold in it, and no toggle for the reader to collapse it
+   * with. Written as a predicate so the drift guard below can be shown to
+   * FAIL on markup that lacks them, rather than only passing on markup that
+   * happens to have them.
+   */
+  function tealGuaranteesHold(html: string): boolean {
+    return html.includes(FIXED_FOLD_CLASS) && !html.includes("data-panel-toggle");
+  }
+
+  /** A teal card of tool NAME, carrying the bubble its call detached. */
+  function tealCardHtml(name: string, registry: AsyncBubbleRegistry): string {
+    const item = { ...watcher("bg1"), toolName: name, spawnedBubbleId: "b1" };
+    // No id is open: an always-open section must not need one.
+    return renderItem(item, undefined, undefined, panelsWith(registry));
+  }
+
+  it("gives a teal card's detached bubble no fold control at all", () => {
+    // Arrange
+    const registry = registryOf(agentBubble("b1"));
+    // Act
+    const html = tealCardHtml("Task", registry);
+    // Assert — no toggle target, so nothing the reader can collapse.
+    expect(html).not.toContain('data-panel-toggle="bubble:b1"');
+  });
+
+  it("draws a teal card's detached bubble open without any id being open", () => {
+    // Arrange — the body would be absent from a closed foldable panel.
+    const emissions: UnwrappedEmission[] = [
+      {
+        emission: "response",
+        arm: "assistantMessage",
+        payload: { id: "m9", content: [{ text: { text: "from the detached agent" } }] },
+      },
+    ];
+    const registry = registryOf(agentBubble("b1", emissions));
+    // Act
+    const html = tealCardHtml("Task", registry);
+    // Assert
+    expect(html).toContain("from the detached agent");
+  });
+
+  it("carries the fixed-panel class the stylesheet caps and scrolls through", () => {
+    // Arrange
+    const registry = registryOf(agentBubble("b1"));
+    // Act
+    const html = tealCardHtml("Skill", registry);
+    // Assert
+    expect(html).toContain(FIXED_FOLD_CLASS);
+  });
+
+  it("hands the same verdict down to a bubble's own child bubbles", () => {
+    // Arrange — one nested rung left foldable is the unobvious affordance.
+    const child = { ...agentBubble("b2"), parentBubbleId: "b1", label: "nested work" };
+    const registry = registryOf(agentBubble("b1"), child);
+    // Act
+    const html = tealCardHtml("Task", registry);
+    // Assert
+    expect(html).toContain("nested work");
+    expect(html).not.toContain('data-panel-toggle="bubble:b2"');
+  });
+
+  it("holds the guarantees for every kind the renderer washes teal", () => {
+    // Arrange — the drift guard: a kind added to ASYNC_TEAL_TOOLS inherits
+    // always-open and the shared cap, or this fails.
+    const registry = registryOf(agentBubble("b1"));
+    // Act
+    const offenders = [...ASYNC_TEAL_TOOLS].filter(
+      (name) => !tealGuaranteesHold(tealCardHtml(name, registry)),
+    );
+    // Assert
+    expect(offenders).toEqual([]);
+  });
+
+  it("fails that guard for a card that lacks the guarantees", () => {
+    // Arrange — the guard is only worth its comment if it can say no; a grey
+    // card's bubble is exactly the markup it must reject.
+    const registry = registryOf(agentBubble("b1"));
+    const grey = renderItem(
+      { ...watcher("bg1"), toolName: "Bash", spawnedBubbleId: "b1" },
+      undefined,
+      undefined,
+      panelsWith(registry),
+    );
+    // Act / Assert
+    expect(tealGuaranteesHold(grey)).toBe(false);
+  });
+
+  it("leaves a grey card's detached bubble folding exactly as it did", () => {
+    // Arrange
+    const registry = registryOf(agentBubble("b1"));
+    // Act
+    const html = renderItem(
+      { ...watcher("bg1"), toolName: "Bash", spawnedBubbleId: "b1" },
+      undefined,
+      undefined,
+      panelsWith(registry),
+    );
+    // Assert — the click target is still there, and the fold still closed.
+    expect(html).toContain('data-panel-toggle="bubble:b1"');
+    expect(html).not.toContain(FIXED_FOLD_CLASS);
   });
 });
