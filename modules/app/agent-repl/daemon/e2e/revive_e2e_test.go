@@ -366,7 +366,6 @@ func revivedVendorID(t *testing.T, s *keepAliveSession) string {
 		"a conversation identity for the revived session")
 }
 
-
 // --- observing the daemon's own compaction ------------------------------------
 //
 // A CONTEXT CUT THE DAEMON SUBMITTED LEAVES NO RESIDUE IN ANY RENDERING. Its

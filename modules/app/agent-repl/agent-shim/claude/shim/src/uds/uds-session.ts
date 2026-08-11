@@ -560,7 +560,7 @@ export class UdsSession {
    * Which assistant message the SDK is currently streaming. Deltas carry no
    * message identity of their own, so this supplies the one consumers
    * reconcile on — without it every chunk looked like a new message and the
-   * frontend opened a bubble per chunk.
+   * frontend opened a response bubble per chunk.
    */
   private readonly streamMessages = new StreamMessageTracker();
   /**

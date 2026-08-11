@@ -206,7 +206,7 @@ func TestClassifyingAnItemReportsNothingForAnOrdinaryItem(t *testing.T) {
 
 	// Assert
 	if len(got) != 0 {
-		t.Fatal("a user asking in prose for a merge is not a Skill invocation and must open no bubble")
+		t.Fatal("a user asking in prose for a merge is not a Skill invocation and must open no work")
 	}
 }
 
@@ -287,7 +287,7 @@ func TestSkillCallRefusesACallThatNamesNoSkill(t *testing.T) {
 
 	// Assert
 	if ok {
-		t.Fatal("a Skill call naming no skill has nothing to label a bubble with and must not be classified as an invocation")
+		t.Fatal("a Skill call naming no skill has nothing to label a work with and must not be classified as an invocation")
 	}
 }
 

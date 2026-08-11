@@ -12,7 +12,7 @@ import (
 //
 // A preview is retired by the AUTHORITATIVE RECORD of the block it previews.
 // When the query dies mid-block that record can never arrive, so nothing
-// retires it and the bubble spins "streaming input…" for the life of the page
+// retires it and the work spins "streaming input…" for the life of the page
 // with no body. These pin who is cut, when, and — just as importantly — when
 // nothing is.
 // ---------------------------------------------------------------------------
@@ -26,12 +26,12 @@ func cutConsumer() (*consumer, *fakePusher) {
 	return c, push
 }
 
-func cutBubbleIDs(push *fakePusher) []string {
+func cutMessageIDs(push *fakePusher) []string {
 	push.mu.Lock()
 	defer push.mu.Unlock()
 	out := make([]string, 0, len(push.typingCuts))
 	for _, c := range push.typingCuts {
-		out = append(out, c.GetBubbleId())
+		out = append(out, c.GetParentMessageId())
 	}
 	return out
 }
@@ -45,46 +45,46 @@ func TestCuttingRetiresTheTopLevelPreview(t *testing.T) {
 	c.cutOpenPreviews("test")
 
 	// Assert: addressed exactly as the delta that opened it.
-	if got := cutBubbleIDs(push); len(got) != 1 || got[0] != "" {
-		t.Fatalf("cut bubble ids = %q, want one cut addressed to the top-level feed", got)
+	if got := cutMessageIDs(push); len(got) != 1 || got[0] != "" {
+		t.Fatalf("cut work ids = %q, want one cut addressed to the top-level feed", got)
 	}
 }
 
-func TestCuttingRetiresABubbleScopedPreview(t *testing.T) {
-	// Arrange: a preview folded into an async bubble, which is the case that
+func TestCuttingRetiresADetachedWorkScopedPreview(t *testing.T) {
+	// Arrange: a preview folded into an detached work, which is the case that
 	// could never be retired from the feed at all.
 	c, push := cutConsumer()
-	c.notePreviewOpened("bubble-1")
+	c.notePreviewOpened("work-1")
 
 	// Act.
 	c.cutOpenPreviews("test")
 
 	// Assert.
-	if got := cutBubbleIDs(push); len(got) != 1 || got[0] != "bubble-1" {
-		t.Fatalf("cut bubble ids = %q, want one cut addressed to bubble-1", got)
+	if got := cutMessageIDs(push); len(got) != 1 || got[0] != "work-1" {
+		t.Fatalf("cut work ids = %q, want one cut addressed to work-1", got)
 	}
 }
 
 func TestCuttingRetiresEverySurfaceAPreviewWasOpenedOn(t *testing.T) {
-	// Arrange: a session previewing on the feed and inside two bubbles.
+	// Arrange: a session previewing on the feed and inside two work.
 	c, push := cutConsumer()
 	c.notePreviewOpened("")
-	c.notePreviewOpened("bubble-b")
-	c.notePreviewOpened("bubble-a")
+	c.notePreviewOpened("work-b")
+	c.notePreviewOpened("work-a")
 
 	// Act.
 	c.cutOpenPreviews("test")
 
 	// Assert: all three, feed first, then sorted — one teardown's records read
 	// the same way twice.
-	want := []string{"", "bubble-a", "bubble-b"}
-	got := cutBubbleIDs(push)
+	want := []string{"", "work-a", "work-b"}
+	got := cutMessageIDs(push)
 	if len(got) != len(want) {
-		t.Fatalf("cut bubble ids = %q, want %q", got, want)
+		t.Fatalf("cut work ids = %q, want %q", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("cut bubble ids = %q, want %q", got, want)
+			t.Fatalf("cut work ids = %q, want %q", got, want)
 		}
 	}
 }
@@ -97,8 +97,8 @@ func TestCuttingASessionThatNeverPreviewedEmitsNothing(t *testing.T) {
 	c.cutOpenPreviews("test")
 
 	// Assert: a teardown must not push a cut for a preview that never existed.
-	if got := cutBubbleIDs(push); len(got) != 0 {
-		t.Fatalf("cut bubble ids = %q, want none", got)
+	if got := cutMessageIDs(push); len(got) != 0 {
+		t.Fatalf("cut work ids = %q, want none", got)
 	}
 }
 
@@ -114,8 +114,8 @@ func TestASecondCutEmitsNothing(t *testing.T) {
 	c.cutOpenPreviews("second")
 
 	// Assert: exactly the one round.
-	if got := cutBubbleIDs(push); len(got) != 1 {
-		t.Fatalf("cut bubble ids = %q, want only the first teardown's single cut", got)
+	if got := cutMessageIDs(push); len(got) != 1 {
+		t.Fatalf("cut work ids = %q, want only the first teardown's single cut", got)
 	}
 }
 
@@ -124,7 +124,7 @@ func TestASecondCutEmitsNothing(t *testing.T) {
 func TestAnUnexpectedQueryTerminationCutsTheOpenPreview(t *testing.T) {
 	// Arrange: a preview standing when the query dies.
 	c, push := cutConsumer()
-	c.notePreviewOpened("bubble-1")
+	c.notePreviewOpened("work-1")
 	item := &frontendv1.FailureCardView{
 		Kind: &frontendv1.FailureKind{
 			Kind: &frontendv1.FailureKind_QueryTermination{
@@ -140,8 +140,8 @@ func TestAnUnexpectedQueryTerminationCutsTheOpenPreview(t *testing.T) {
 
 	// Assert: the preview is retired rather than left spinning beside the
 	// failure card that explains the session.
-	if got := cutBubbleIDs(push); len(got) != 1 || got[0] != "bubble-1" {
-		t.Fatalf("cut bubble ids = %q, want the open preview retired", got)
+	if got := cutMessageIDs(push); len(got) != 1 || got[0] != "work-1" {
+		t.Fatalf("cut work ids = %q, want the open preview retired", got)
 	}
 }
 
@@ -151,7 +151,7 @@ func TestAnUnexpectedQueryTerminationCutsTheOpenPreview(t *testing.T) {
 func TestAReplayedQueryTerminationCutsNothing(t *testing.T) {
 	// Arrange.
 	c, push := cutConsumer()
-	c.notePreviewOpened("bubble-1")
+	c.notePreviewOpened("work-1")
 	item := &frontendv1.FailureCardView{
 		Kind: &frontendv1.FailureKind{
 			Kind: &frontendv1.FailureKind_QueryTermination{
@@ -166,7 +166,7 @@ func TestAReplayedQueryTerminationCutsNothing(t *testing.T) {
 	c.surfaceUnexpectedQueryTermination(&corev1.Event{}, item, true)
 
 	// Assert.
-	if got := cutBubbleIDs(push); len(got) != 0 {
-		t.Fatalf("cut bubble ids = %q, want none from a replayed termination", got)
+	if got := cutMessageIDs(push); len(got) != 0 {
+		t.Fatalf("cut work ids = %q, want none from a replayed termination", got)
 	}
 }

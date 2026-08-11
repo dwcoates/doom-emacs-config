@@ -106,8 +106,9 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Workspace: "ws", Fence: "s1", ThroughSeq: 7,
 				Messages: []*frontendv1.Message{{
 					Uuid: "u1", TsMs: producedMs,
-					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Payload:   &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: assistantMsg}}}},
+					Lineage: FeedRowLineage("u1"),
+					Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: assistantMsg}}}},
 				}},
 			},
 		},
@@ -123,8 +124,9 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Workspace: "ws", Fence: "s1", ThroughSeq: 9,
 				Messages: []*frontendv1.Message{{
 					Uuid: "u3", TsMs: producedMs,
-					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Payload:   &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: toolUseMsg}}}},
+					Lineage: FeedRowLineage("u3"),
+					Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: toolUseMsg}}}},
 				}},
 			},
 		},
@@ -140,8 +142,9 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Workspace: "ws", Fence: "s1", ThroughSeq: 10,
 				Messages: []*frontendv1.Message{{
 					Uuid: "u4", TsMs: producedMs,
-					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Payload:   &frontendv1.Message_UserMessage{UserMessage: toolResultMsg},
+					Lineage: FeedRowLineage("u4"),
+					Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Payload: &frontendv1.Message_UserMessage{UserMessage: toolResultMsg},
 				}},
 			},
 		},
@@ -157,8 +160,9 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Workspace: "ws", Fence: "s1", ThroughSeq: 2,
 				Messages: []*frontendv1.Message{{
 					Uuid: "u5", TsMs: producedMs, RequestId: "req-5",
-					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Payload:   &frontendv1.Message_UserMessage{UserMessage: promptMsg},
+					Lineage: FeedRowLineage("u5"),
+					Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Payload: &frontendv1.Message_UserMessage{UserMessage: promptMsg},
 				}},
 			},
 		},
@@ -171,10 +175,11 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", Fence: "s1", ThroughSeq: 12,
 				Messages: []*frontendv1.Message{{
-					Uuid:   "result:s1:12",
-					TsMs:   producedMs,
-					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Payload:   &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: resultMsg}}},
+					Uuid:    "result:s1:12",
+					Lineage: FeedRowLineage("result:s1:12"),
+					TsMs:    producedMs,
+					Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: resultMsg}}},
 				}},
 			},
 		},
@@ -277,8 +282,9 @@ func TestConversationDeltaFromEventTranscriptAssistantUsesEnvelopeTs(t *testing.
 		Workspace: "ws", Fence: "s1", ThroughSeq: 20,
 		Messages: []*frontendv1.Message{{
 			Uuid: "au1", TsMs: wantTsMs,
-			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-			Payload:   &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: msg}}}},
+			Lineage: FeedRowLineage("au1"),
+			Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+			Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: msg}}}},
 		}},
 	}
 
@@ -493,7 +499,7 @@ func TestAnAssistantBodyThatIsNothingButTheInterruptSentinelIsDropped(t *testing
 	// Arrange / Act
 	got := assistantResponseBodies(t, textBlocks("[Request interrupted by user]"))
 
-	// Assert: no response emission at all, so no bubble is drawn for it.
+	// Assert: no response emission at all, so no work is drawn for it.
 	if len(got) != 0 {
 		t.Errorf("bodies = %v, want none", got)
 	}
@@ -783,7 +789,8 @@ func TestMarshalConversationDeltaLowerCamelCase(t *testing.T) {
 		Workspace: "ws", Fence: "s1", ThroughSeq: 5,
 		Messages: []*frontendv1.Message{{
 			Uuid: "u1", TsMs: producedMs,
-			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+			Lineage: FeedRowLineage("u1"),
+			Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 			Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{
 				Content: []*datav1.ContentBlock{
 					{Block: &datav1.ContentBlock_ToolUse{ToolUse: &datav1.ToolUseBlock{Id: "tu_1", Name: "Bash"}}},

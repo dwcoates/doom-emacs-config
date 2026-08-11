@@ -32,14 +32,14 @@ import (
 // consumer.pushConversation — the one curation chokepoint every replay route
 // already funnels through (sinks.go). The withhold passes, the clear/compact
 // coalescing, the provenance stamp read from the merge lease's durable ledger,
-// the spawned-bubble stamps: a page gets all of it, because it is literally
+// the spawned-work stamps: a page gets all of it, because it is literally
 // the same code path. What differs is only the SINK. A page's deltas are
 // captured into a buffer instead of being pushed to clients, which is what
 // makes assembling one free of any visible side effect.
 //
 // A second, page-shaped translator was the obvious alternative and is the
 // thing this exists to avoid: two curators that must be kept in agreement
-// forever, whose disagreement shows up as a bubble that renders one way when
+// forever, whose disagreement shows up as a work that renders one way when
 // it is live and another way when it is paged.
 //
 // # Where the events come from, and why the split is the resync's split
@@ -163,10 +163,10 @@ type pageRangeResult struct {
 // an omission:
 //
 //   - ConversationDelta is the page's whole content, and is captured.
-//   - AsyncBubbleDelta is dropped because the connect StateSnapshot already
-//     carries every async bubble the session holds, folded to date
-//     (StateSnapshot.async_bubbles). A page re-pushing them would re-open
-//     bubbles the client already has, and the anchors that address them ride
+//   - DetachedWorkDelta is dropped because the connect StateSnapshot already
+//     carries every detached work the session holds, folded to date
+//     (StateSnapshot.detached_works). A page re-pushing them would re-open
+//     work the client already has, and the anchors that address them ride
 //     the feed plane and so are captured.
 //   - TypingDelta, TaskCatalog, WorkspaceState, SessionInitView, Heartbeat,
 //     Queue and Progress are LIVE state. A history read that moved any of them
@@ -183,15 +183,15 @@ func (p *pageCapture) PushConversationDelta(cd *frontendv1.ConversationDelta) {
 	p.deltas = append(p.deltas, cd)
 }
 
-func (p *pageCapture) PushAsyncBubbleDelta(*frontendv1.AsyncBubbleDelta) {}
-func (p *pageCapture) PushTypingDelta(*frontendv1.TypingDelta)           {}
-func (p *pageCapture) PushTypingCut(*frontendv1.TypingCut)               {}
-func (p *pageCapture) PushTaskCatalog(*frontendv1.TaskCatalog)           {}
-func (p *pageCapture) PushWorkspaceState(*frontendv1.WorkspaceState)     {}
-func (p *pageCapture) PushSessionInitView(*frontendv1.SessionInitView)   {}
-func (p *pageCapture) PushHeartbeatView(*frontendv1.HeartbeatView)       {}
-func (p *pageCapture) PushQueueView(*frontendv1.QueueView)               {}
-func (p *pageCapture) PushProgressView(*frontendv1.ProgressView)         {}
+func (p *pageCapture) PushDetachedWorkDelta(*frontendv1.DetachedWorkDelta) {}
+func (p *pageCapture) PushTypingDelta(*frontendv1.TypingDelta)             {}
+func (p *pageCapture) PushTypingCut(*frontendv1.TypingCut)                 {}
+func (p *pageCapture) PushTaskCatalog(*frontendv1.TaskCatalog)             {}
+func (p *pageCapture) PushWorkspaceState(*frontendv1.WorkspaceState)       {}
+func (p *pageCapture) PushSessionInitView(*frontendv1.SessionInitView)     {}
+func (p *pageCapture) PushHeartbeatView(*frontendv1.HeartbeatView)         {}
+func (p *pageCapture) PushQueueView(*frontendv1.QueueView)                 {}
+func (p *pageCapture) PushProgressView(*frontendv1.ProgressView)           {}
 
 // compile-time proof the capture really is the sink a consumer accepts.
 var _ Pusher = (*pageCapture)(nil)
@@ -553,7 +553,7 @@ func flattenItems(selected []pageSegment) []*frontendv1.Message {
 func (m *Manager) newPage(workspace, fence string, items []*frontendv1.Message, continuation pageContinuation, liveJoinSeq uint64) *frontendv1.ConversationPage {
 	page := &frontendv1.ConversationPage{
 		Workspace:   workspace,
-		Messages:       items,
+		Messages:    items,
 		LiveJoinSeq: liveJoinSeq,
 		Fence:       fence,
 	}

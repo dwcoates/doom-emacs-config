@@ -42,13 +42,13 @@ func assistantLine(uuid, text string, sidechain bool, sourceToolUseID, agentID s
 
 // --- THE ACCEPTANCE CRITERION ----------------------------------------------
 
-func TestADetachedAgentsEmissionReachesItsBubble(t *testing.T) {
+func TestADetachedAgentsEmissionReachesItsDetachedWork(t *testing.T) {
 	c, err := CurateEvent("/ws", "f1", transcriptEvent(t, assistantLine("u1", "subagent speaking", true, "tu_task", "agent_1")))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(c.Detached) != 1 || len(c.Detached[0].Emissions) != 1 {
-		t.Fatalf("a detached agent's response must be routed to its bubble, got %d folds", len(c.Detached))
+		t.Fatalf("a detached agent's response must be routed to its work, got %d folds", len(c.Detached))
 	}
 }
 
@@ -82,7 +82,7 @@ func TestTheMainAgentsEmissionStaysOnTheFeed(t *testing.T) {
 	}
 }
 
-func TestTheMainAgentsEmissionIsNotRoutedToAnyBubble(t *testing.T) {
+func TestTheMainAgentsEmissionIsNotRoutedToAnyDetachedWork(t *testing.T) {
 	c, err := CurateEvent("/ws", "f1", transcriptEvent(t, assistantLine("u1", "main agent speaking", false, "", "")))
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestADetachedFoldCarriesTheSameEmissionTheFeedWouldHave(t *testing.T) {
 	want := top.Feed.GetMessages()[0].GetAgent().GetResponse().GetBody().GetContent()[0].GetText().GetText()
 	got := detached.Detached[0].Emissions[0].GetResponse().GetBody().GetContent()[0].GetText().GetText()
 	if got != want {
-		t.Fatalf("a bubble's emissions come from the same curation the feed uses: want %q, got %q", want, got)
+		t.Fatalf("a work's emissions come from the same curation the feed uses: want %q, got %q", want, got)
 	}
 }
 
@@ -136,7 +136,7 @@ func TestTwoDetachedAgentsFoldSeparately(t *testing.T) {
 	c1, _ := CurateEvent("/ws", "f1", transcriptEvent(t, first))
 	c2, _ := CurateEvent("/ws", "f1", transcriptEvent(t, second))
 	if c1.Detached[0].SourceToolUseID == c2.Detached[0].SourceToolUseID {
-		t.Fatal("two detached agents must not fold into one bubble")
+		t.Fatal("two detached agents must not fold into one work")
 	}
 }
 
@@ -172,7 +172,7 @@ func TestADetachedToolResultFoldsAsAToolResultEmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.Detached[0].Emissions[0].GetToolResult().GetResult().GetToolUseId() != "tu_inner" {
-		t.Fatal("a subagent's tool results belong in its bubble, on the same arm the feed's tool cards use")
+		t.Fatal("a subagent's tool results belong in its work, on the same arm the feed's tool cards use")
 	}
 }
 
@@ -198,7 +198,7 @@ func TestADetachedLaunchPromptIsReportedWithheldRatherThanDroppedSilently(t *tes
 		t.Fatal(err)
 	}
 	if len(c.WithheldDetached) != 1 {
-		t.Fatalf("a bubble quietly missing records looks exactly like a quiet agent; want it reported, got %v", c.WithheldDetached)
+		t.Fatalf("a work quietly missing records looks exactly like a quiet agent; want it reported, got %v", c.WithheldDetached)
 	}
 }
 
@@ -218,7 +218,7 @@ func TestCurateEventHarvestsATopLevelToolName(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.ToolNames["tu_1"] != "Frobnicate" {
-		t.Fatalf("the tool name is the only source for an unclassified bubble's tool_name, got %v", c.ToolNames)
+		t.Fatalf("the tool name is the only source for an unclassified work's tool_name, got %v", c.ToolNames)
 	}
 }
 
@@ -260,7 +260,7 @@ func TestCurateEventLeavesAnAmbiguousOutcomeUncorrelated(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(c.Outcomes) != 0 {
-		t.Fatal("a launch attributed to a guessed call would open a bubble under the wrong card")
+		t.Fatal("a launch attributed to a guessed call would open a work under the wrong card")
 	}
 }
 
@@ -275,7 +275,7 @@ func TestCurateEventMarksAnOutcomeProducedInsideADetachedAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !c.Outcomes[0].FromDetachedAgent {
-		t.Fatal("a detachment launched inside a bubble is a nested dispatch and must be marked as one")
+		t.Fatal("a detachment launched inside a work is a nested dispatch and must be marked as one")
 	}
 }
 
@@ -284,7 +284,7 @@ func TestCurateEventMarksAnOutcomeProducedInsideADetachedAgent(t *testing.T) {
 // A Task dispatch's subagent conversation reaches the daemon on the stream
 // plane, where there is no transcript envelope and the detachment is stated by
 // parent_tool_use_id instead. These assert the split reads it there too:
-// without them a subagent renders inside its bubble off the file plane and at
+// without them a subagent renders inside its work off the file plane and at
 // the top level off the stream plane, which is what shipped.
 
 // streamAssistantEvent wraps a stream-plane assistant message as the store
@@ -320,13 +320,13 @@ func TestAStreamPlaneSubagentEmissionIsNotAFeedItem(t *testing.T) {
 	}
 }
 
-func TestAStreamPlaneSubagentEmissionReachesItsBubble(t *testing.T) {
+func TestAStreamPlaneSubagentEmissionReachesItsDetachedWork(t *testing.T) {
 	c, err := CurateEvent("/ws", "f1", streamAssistantEvent(t, "u1", "subagent speaking", "toolu_launch"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(c.Detached) != 1 || len(c.Detached[0].Emissions) != 1 {
-		t.Fatalf("a subagent's stream-plane output must be routed to its bubble, got %d folds", len(c.Detached))
+		t.Fatalf("a subagent's stream-plane output must be routed to its work, got %d folds", len(c.Detached))
 	}
 }
 
@@ -336,7 +336,7 @@ func TestAStreamPlaneSubagentFoldNamesTheCallThatLaunchedIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := c.Detached[0].SourceToolUseID; got != "toolu_launch" {
-		t.Fatalf("the fold must be addressed by the launching call so it lands in that call's bubble, got %q", got)
+		t.Fatalf("the fold must be addressed by the launching call so it lands in that call's work, got %q", got)
 	}
 }
 
@@ -350,7 +350,7 @@ func TestAStreamPlaneMainAgentEmissionStaysOnTheFeed(t *testing.T) {
 	}
 }
 
-func TestAStreamPlaneMainAgentEmissionIsNotRoutedToAnyBubble(t *testing.T) {
+func TestAStreamPlaneMainAgentEmissionIsNotRoutedToAnyDetachedWork(t *testing.T) {
 	c, err := CurateEvent("/ws", "f1", streamAssistantEvent(t, "u1", "main agent speaking", ""))
 	if err != nil {
 		t.Fatal(err)

@@ -326,7 +326,7 @@ export const scenarios: Scenario[] = [
         { description: "review changes across dimensions" },
         {
           result: ok("Workflow launched in background with ID: wf-review-1"),
-          spawnedBubbleId: "wf-review-1",
+          spawnedMessageId: "wf-review-1",
           asyncSource: {
             source_id: "wf-review-1",
             kind: "workflow",
@@ -399,7 +399,7 @@ export const scenarios: Scenario[] = [
         { command: "./scripts/soak.sh --hours 4", run_in_background: true },
         {
           result: ok("Command running in background with ID: bg-soak-1"),
-          spawnedBubbleId: "bg-soak-1",
+          spawnedMessageId: "bg-soak-1",
           asyncSource: {
             source_id: "bg-soak-1",
             kind: "shell",
@@ -428,7 +428,7 @@ export const scenarios: Scenario[] = [
         { description: "migrate oldApi call sites", run_in_background: true },
         {
           result: ok("Async agent launched. agentId: ag-42, output_file: /tmp/claude-1/s/tasks/ag-42.output"),
-          spawnedBubbleId: "ag-42",
+          spawnedMessageId: "ag-42",
           asyncSource: {
             source_id: "ag-42",
             kind: "agent",
@@ -464,7 +464,7 @@ export const scenarios: Scenario[] = [
         { command: "./scripts/soak.sh", run_in_background: true },
         {
           result: ok("Command running in background with ID: bg-7"),
-          spawnedBubbleId: "bg-7",
+          spawnedMessageId: "bg-7",
           asyncSource: {
             source_id: "bg-7",
             kind: "shell",
@@ -481,7 +481,7 @@ export const scenarios: Scenario[] = [
         { description: "migrate oldApi call sites", run_in_background: true },
         {
           result: ok("Async agent launched. agentId: ag-9, output_file: /tmp/claude-1/s/tasks/ag-9.output"),
-          spawnedBubbleId: "ag-9",
+          spawnedMessageId: "ag-9",
           asyncSource: {
             source_id: "ag-9",
             kind: "agent",
@@ -499,7 +499,7 @@ export const scenarios: Scenario[] = [
           result: ok("Command running in background with ID: bg-old"),
           // The daemon's verdict is what makes this a member; the notification
           // beside it settles the work but no longer establishes its identity.
-          spawnedBubbleId: "bg-old",
+          spawnedMessageId: "bg-old",
           notification: { taskId: "bg-old", status: "completed", text: "prefetch done" },
         },
       ),
@@ -528,7 +528,7 @@ export const scenarios: Scenario[] = [
         { command: "./scripts/soak.sh", run_in_background: true },
         {
           result: ok("Command running in background with ID: bg-11"),
-          spawnedBubbleId: "bg-11",
+          spawnedMessageId: "bg-11",
           asyncSource: {
             source_id: "bg-11",
             kind: "shell",

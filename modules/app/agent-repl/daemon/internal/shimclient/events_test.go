@@ -685,7 +685,7 @@ func TestEventRouting(t *testing.T) {
 			want: "frame",
 		},
 		{
-			// A clear is CONVERSATION content: it renders as its own bubble and
+			// A clear is CONVERSATION content: it renders as its own work and
 			// floors the frontend's replay. Nothing in the SSM's state axes moves
 			// because a conversation's history stopped informing the agent, so it
 			// belongs to the frame sink and not the lifecycle sink.

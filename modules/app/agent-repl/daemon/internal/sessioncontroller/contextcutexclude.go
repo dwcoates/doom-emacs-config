@@ -25,7 +25,7 @@ import (
 // the CLI's "Not enough messages to compact." notice on a compaction that
 // declined. The result rendered as a standalone duration chip — a small grey
 // badge reading nothing but `6s`, attached to nothing, because the turn it
-// closed had no bubble for the chip to sit in and no prompt above it to explain
+// closed had no work for the chip to sit in and no prompt above it to explain
 // what it timed. 139 such turns were in the store when this was written.
 //
 // A TURN THAT IS INVISIBLE LEAVES NO RESIDUE. That is the whole rule, and the

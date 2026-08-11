@@ -9,6 +9,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/frontend"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
 	"claude-repld/internal/storehistory"
@@ -188,8 +189,9 @@ func (m *Manager) serveStandingTerminalCard(workspace, sessionID string, cons *c
 		return false, fmt.Errorf("session-controller: parsing the standing terminal failure card for session %q failed: %w", sessionID, err)
 	}
 	item := &frontendv1.Message{
-		Uuid: rec.UUID,
-		TsMs: rec.AtMs,
+		Uuid:    rec.UUID,
+		TsMs:    rec.AtMs,
+		Lineage: frontend.FeedRowLineage(rec.UUID),
 		Payload: &frontendv1.Message_FailureCard{FailureCard: card},
 	}
 	if !cons.pushReplayedItem(item) {
@@ -287,7 +289,7 @@ func (m *Manager) hydratePersistedAccounting(cons *consumer, sessionID string) e
 // snapshotEchoes beside the permission and failure cards), and those receipts
 // are the very ones this daemon is still holding in memory. The durable record
 // and the retained one describe the same submits there, so serving both would
-// draw each bubble twice.
+// draw each work twice.
 //
 // SUPPRESSION IS BY REQUEST ID FIRST AND BY TEXT SECOND. A durable line that
 // NAMES its request settles the question outright. A transcript UserLine
