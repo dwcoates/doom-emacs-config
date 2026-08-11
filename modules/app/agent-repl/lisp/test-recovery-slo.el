@@ -679,6 +679,23 @@ only there could never be stamped by the reconnect that opened it."
       (should (plist-get (gethash "slo-order" agent-repl--recovery-slo-attempts)
                          :emacs)))))
 
+(ert-deftest agent-repl-test-recovery-slo-lead-batch-stamps-before-the-rest-arrives ()
+  "A LEAD-batch workspace is stamped while later connect batches are in flight.
+This is what makes a workspace\\='s recovery independent of roster size: the
+stamp is per workspace applied, never per whole snapshot decoded."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-lead"
+      (agent-repl-test--with-slo-ws "slo-tail"
+        ;; Arrange: the recovery window is open, nothing has been applied.
+        (agent-repl--recovery-slo-on-restart-announcement (float-time))
+        ;; Act: only the lead batch's workspace has been applied so far.
+        (agent-repl--recovery-slo-note-emacs "slo-lead")
+        ;; Assert: it is stamped, and the workspace still in flight is not.
+        (should (plist-get (gethash "slo-lead" agent-repl--recovery-slo-attempts)
+                           :emacs))
+        (should-not (plist-get (gethash "slo-tail" agent-repl--recovery-slo-attempts)
+                               :emacs))))))
+
 (ert-deftest agent-repl-test-recovery-slo-record-field-set-is-pinned ()
   "The record's field set and order are a contract; this pins them exactly."
   (agent-repl-test--with-slo

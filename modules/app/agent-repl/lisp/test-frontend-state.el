@@ -2102,6 +2102,158 @@ never about lowering the severity."
     ;; Assert
     (should (= failures 2))))
 
+;;;; ---- Batched connect delivery ----------------------------------------
+
+(defun agent-repl-test--batch (index total workspaces)
+  "Return one connect batch plist: batch INDEX of a delivery of TOTAL."
+  (list :workspaceBatchIndex index
+        :workspaceTotal total
+        :workspaces workspaces))
+
+(ert-deftest agent-repl-test-lead-batch-stamps-its-workspaces-before-the-rest-arrive ()
+  "A lead batch\\='s workspace is APPLIED while later batches are still in flight.
+This is the whole point of batching: a workspace\\='s recovery must not wait
+on the apply of every other workspace in the fleet."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
+    (agent-repl--frontend-snapshot-invalidate)
+    ;; Act — only the lead batch of a two-batch delivery has arrived.
+    (agent-repl-test--apply-snapshot
+     (agent-repl-test--batch 0 2 '((:workspace "a" :state "RENDER_STATE_IDLE"))))
+    ;; Assert
+    (should (eq (agent-repl--ws-get "a" :pushed-render-state) :idle))
+    (should (null (agent-repl--ws-get "b" :pushed-render-state)))))
+
+(ert-deftest agent-repl-test-partial-delivery-is-not-reported-complete ()
+  "A view holding half the fleet reports itself PARTIAL, never complete."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "a")
+    (agent-repl--frontend-snapshot-invalidate)
+    ;; Act
+    (agent-repl-test--apply-snapshot
+     (agent-repl-test--batch 0 2 '((:workspace "a" :state "RENDER_STATE_IDLE"))))
+    ;; Assert
+    (should (null (agent-repl--frontend-snapshot-view-complete-p)))))
+
+(ert-deftest agent-repl-test-delivery-converges-on-the-complete-fleet ()
+  "Every workspace of a batched delivery lands, and the view then reads complete."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
+    (agent-repl--frontend-snapshot-invalidate)
+    ;; Act
+    (agent-repl-test--apply-snapshot
+     (agent-repl-test--batch 0 2 '((:workspace "a" :state "RENDER_STATE_IDLE"))))
+    (agent-repl-test--apply-snapshot
+     (agent-repl-test--batch 1 2 '((:workspace "b" :state "RENDER_STATE_IDLE"))))
+    ;; Assert
+    (should (eq (agent-repl--ws-get "b" :pushed-render-state) :idle))
+    (should (agent-repl--frontend-snapshot-view-complete-p))))
+
+(ert-deftest agent-repl-test-snapshot-applied-hook-is-held-until-the-last-batch ()
+  "The reconnect edge fires once, at completion — not on the lead batch."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
+    (agent-repl--frontend-snapshot-invalidate)
+    (let* ((ran 0)
+           (agent-repl-uds-snapshot-applied-functions (list (lambda () (cl-incf ran)))))
+      ;; Act
+      (agent-repl-test--apply-snapshot
+       (agent-repl-test--batch 0 2 '((:workspace "a" :state "RENDER_STATE_IDLE"))))
+      (should (= ran 0))
+      (agent-repl-test--apply-snapshot
+       (agent-repl-test--batch 1 2 '((:workspace "b" :state "RENDER_STATE_IDLE"))))
+      ;; Assert
+      (should (= ran 1)))))
+
+(ert-deftest agent-repl-test-continuation-batch-does-not-clobber-the-lead-roster ()
+  "A continuation carries workspaces only; the wholesale roster survives it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
+    (agent-repl--frontend-snapshot-invalidate)
+    (agent-repl-test--apply-snapshot
+     (append (agent-repl-test--batch 0 2 '((:workspace "a" :state "RENDER_STATE_IDLE")))
+             '(:sessions ((:sessionId "s_a" :workspace "a")))))
+    ;; Act
+    (agent-repl-test--apply-snapshot
+     (agent-repl-test--batch 1 2 '((:workspace "b" :state "RENDER_STATE_IDLE"))))
+    ;; Assert
+    (should (gethash "a" agent-repl--frontend-session-views))))
+
+(ert-deftest agent-repl-test-batch-total-mismatch-refuses-to-complete ()
+  "Batches that disagree about the fleet size abandon the delivery LOUDLY."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
+    (agent-repl--frontend-snapshot-invalidate)
+    (let ((warned 0))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (&rest _) (cl-incf warned))))
+        (agent-repl-test--apply-snapshot
+         (agent-repl-test--batch 0 2 '((:workspace "a" :state "RENDER_STATE_IDLE"))))
+        ;; Act — a continuation that names a different fleet.
+        (agent-repl-test--apply-snapshot
+         (agent-repl-test--batch 1 9 '((:workspace "b" :state "RENDER_STATE_IDLE")))))
+      ;; Assert
+      (should (> warned 0))
+      (should (null (agent-repl--frontend-snapshot-view-complete-p))))))
+
+(ert-deftest agent-repl-test-continuation-without-a-lead-refuses-to-complete ()
+  "A continuation with no lead batch open is loud and leaves the view partial."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "b")
+    (agent-repl--frontend-snapshot-invalidate)
+    (let ((warned 0))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (&rest _) (cl-incf warned))))
+        ;; Act
+        (agent-repl-test--apply-snapshot
+         (agent-repl-test--batch 3 4 '((:workspace "b" :state "RENDER_STATE_IDLE")))))
+      ;; Assert
+      (should (> warned 0))
+      (should (null (agent-repl--frontend-snapshot-view-complete-p))))))
+
+(ert-deftest agent-repl-test-unbatched-snapshot-completes-on-its-own ()
+  "A daemon that sends no batch accounting still yields a COMPLETE view."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "a")
+    (agent-repl--frontend-snapshot-invalidate)
+    ;; Act
+    (agent-repl-test--apply-snapshot
+     '(:workspaces ((:workspace "a" :state "RENDER_STATE_IDLE"))))
+    ;; Assert
+    (should (agent-repl--frontend-snapshot-view-complete-p))))
+
+(ert-deftest agent-repl-test-a-new-link-invalidates-the-previous-complete-view ()
+  "Link open resets completeness: this connection has landed nothing yet."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--apply-snapshot
+     '(:workspaces ((:workspace "a" :state "RENDER_STATE_IDLE"))))
+    (should (agent-repl--frontend-snapshot-view-complete-p))
+    ;; Act
+    (agent-repl--frontend-snapshot-invalidate)
+    ;; Assert
+    (should (null (agent-repl--frontend-snapshot-view-complete-p)))))
+
+(ert-deftest agent-repl-test-snapshot-invalidation-is-subscribed-to-link-open ()
+  "The invalidation is WIRED to the connected hook, not left to a caller."
+  ;; Act / Assert
+  (should (memq #'agent-repl--frontend-snapshot-invalidate
+                agent-repl-uds-connected-functions)))
+
 (ert-deftest agent-repl-test-shutdown-schedule-handler-is-registered ()
   "The lease arm is wired to its handler, not left as unfinished wiring."
   ;; Act / Assert
