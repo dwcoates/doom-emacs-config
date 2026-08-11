@@ -135,6 +135,40 @@ message StateSnapshot {
   // The merge queue as of this connect, so a client joining mid-drain renders
   // the queue without waiting for the next mutation.
   MergeQueueRoster merge_queue_roster = 15;
+
+  // THE BATCHING OF `workspaces` (1) ACROSS ONE CONNECT DELIVERY.
+  //
+  // A connect snapshot at fleet scale carries every workspace, and the host
+  // applies a workspace's state — perspective, bookkeeping, readiness latches —
+  // one workspace at a time. Applying 178 of them costs seconds, and the
+  // recovery clock for the workspace the user is sitting in does not stop until
+  // ITS state has been applied, so a workspace's recovery used to be a function
+  // of how many OTHER workspaces preceded it in this list. Decoding is not the
+  // cost (a 299KB protojson frame decodes in ~3ms in Emacs); the serial
+  // per-workspace apply is.
+  //
+  // So the connect delivery may split `workspaces` across SEVERAL StateSnapshot
+  // frames, delivered back-to-back in one delivery-lock operation, and the host
+  // applies each as it arrives. Every other field on this message belongs to the
+  // LEAD batch (index 0) only — the wholesale rebuilds (sessions, inits) and the
+  // daemon-global views are stated exactly once per connect, as before.
+  //
+  // ORDERING: the lead batch carries every workspace with a live session, most
+  // recently active first, so the workspaces a host cares about most are applied
+  // before any dormant one.
+  //
+  // COMPLETENESS: `workspace_total` is the number of workspaces the WHOLE
+  // delivery will carry, stated identically on every batch. A consumer's view of
+  // the fleet is COMPLETE only once it has applied that many distinct
+  // workspaces; until then it holds a partial view and must say so. A snapshot
+  // that was not batched carries batch_index 0 and workspace_total equal to
+  // len(workspaces), which is the same rule with one batch.
+  //
+  // Additive and zero-safe: a daemon that never batches emits index 0 with
+  // total 0, and a consumer reads an unset total as "this frame is the whole
+  // delivery".
+  int32 workspace_total = 16;
+  int32 workspace_batch_index = 17;
 }
 
 // Frontend→daemon commands (the ONLY inbound frame).
