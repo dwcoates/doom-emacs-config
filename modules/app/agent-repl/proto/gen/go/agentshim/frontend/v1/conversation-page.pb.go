@@ -5,16 +5,16 @@
 // WHAT IT REPLACES, AND WHY. A cold webview had exactly one way to obtain the
 // conversation it renders: ResyncCmd{from_seq: 0}, which replays EVERY store
 // event the session ever produced. The worst workspace observed cost 259,000
-// events and 186MB to draw a screen whose visible tail is about ten items. The
-// replay was not wrong — it was the whole conversation, correctly — it was
+// events and 186MB to draw a screen whose visible tail is about ten messages.
+// The replay was not wrong — it was the whole conversation, correctly — it was
 // simply the wrong QUESTION for a client that is about to show the bottom of
 // it.
 //
-// This asks the right question instead: give me the last N top-level items,
+// This asks the right question instead: give me the last N top-level messages,
 // and give me a handle for the N before those. The daemon walks its event log
 // BACKWARDS from the anchor and assembles complete feed envelopes, so a page
-// item is byte-compatible with a ConversationDelta item and a frontend needs
-// no second renderer for paged history.
+// message is byte-compatible with a ConversationDelta message and a frontend
+// needs no second renderer for paged history.
 //
 // WHAT IT DOES NOT REPLACE. ResyncCmd is untouched, and it stays the LIVE-PAGE
 // path: an incremental from_seq resync is how a client that already holds
@@ -22,10 +22,10 @@
 // full replay. Paging is the COLD-OPEN path only. Nothing here reads or writes
 // the resync's floor, coalescing or fence ladder.
 //
-// TOP-LEVEL ITEMS ARE THE UNIT, AND THE DAEMON OWNS THE BOUNDARY. A limit
-// counts items the feed renders as standalone bubbles or cards. Constituents —
+// TOP-LEVEL MESSAGES ARE THE UNIT, AND THE DAEMON OWNS THE BOUNDARY. A limit
+// counts messages the feed renders as standalone rows. Constituents —
 // a tool call inside the message that issued it, an async bubble's members —
-// travel INSIDE their parent item exactly as ConversationDelta carries them,
+// travel INSIDE their parent message exactly as ConversationDelta carries them,
 // and never count toward the limit. A client therefore cannot compute what a
 // page will cost, and is not asked to: it asks for ten renderable things and
 // receives ten renderable things, whatever they contain.
@@ -163,16 +163,16 @@ func (*ConversationPageCmd_Tail) isConversationPageCmd_Anchor() {}
 
 func (*ConversationPageCmd_Before) isConversationPageCmd_Anchor() {}
 
-// The tail anchor: start at the newest item and walk backwards.
+// The tail anchor: start at the newest message and walk backwards.
 type ConversationPageTail struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// How many top-level items to return.
+	// How many top-level messages to return.
 	//
 	// The daemon CLAMPS it to a ceiling of about 50, and reads 0 as "the daemon
 	// default", about 10. Both are the daemon's numbers rather than the client's
 	// because the cost of a page is a cost only the daemon can see: a client
-	// asking for 5,000 items is asking for the full replay this message exists
-	// to end, and a clamp makes that unrepresentable instead of merely
+	// asking for 5,000 messages is asking for the full replay this message
+	// exists to end, and a clamp makes that unrepresentable instead of merely
 	// discouraged.
 	Limit         uint32 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -280,7 +280,7 @@ func (x *ConversationPageBefore) GetLimit() uint32 {
 
 // One page of conversation history, pushed in answer to a ConversationPageCmd.
 //
-// It is a PUSH rather than a command response because its items are feed
+// It is a PUSH rather than a command response because its messages are feed
 // content, and feed content has exactly one delivery shape in this protocol.
 // The command's own ack is EARLY — it reports that the page was accepted onto
 // the workspace's lane, not that it was assembled — so a slow page cannot look
@@ -294,14 +294,14 @@ type ConversationPage struct {
 	// recent. A client with a load-more in flight and a cold open still settling
 	// has two pages coming, and only the echo distinguishes them.
 	RequestId string `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// The page's items, OLDEST FIRST, as COMPLETE feed envelopes identical in
-	// shape to ConversationDelta.items.
+	// The page's messages, OLDEST FIRST, as COMPLETE feed envelopes identical
+	// in shape to ConversationDelta.messages.
 	//
-	// Identical in shape is the whole point: a frontend renders a paged item
+	// Identical in shape is the whole point: a frontend renders a paged message
 	// with the same code that renders a pushed one, and reconciles it by uuid
 	// against anything it already holds. Oldest-first is the feed's own order,
 	// so a page prepends as a block without being reversed.
-	Items []*ConversationItem `protobuf:"bytes,3,rep,name=items,proto3" json:"items,omitempty"`
+	Messages []*Message `protobuf:"bytes,3,rep,name=messages,proto3" json:"messages,omitempty"`
 	// WHERE THE CONVERSATION CONTINUES above this page, or that it does not.
 	//
 	// A oneof rather than an optional cursor plus a bool: "there is more" and
@@ -317,10 +317,12 @@ type ConversationPage struct {
 	//
 	// The client stores it as its from_seq and subscribes to the live delta
 	// stream from there, so the splice is GAP-FREE BY CONSTRUCTION rather than
-	// by timing: an item the session produced between this page's mint and the
+	// by timing: a message the session produced between this page's mint and
+	// the
 	// client's subscribe is above this seq, so the first resync replays it. A
 	// client that instead joined at "whatever seq the first delta carries" would
-	// lose exactly that item, and would lose it more often the slower the page.
+	// lose exactly that message, and would lose it more often the slower the
+	// page.
 	//
 	// Zero on before pages, which are history and carry no live edge.
 	LiveJoinSeq uint64 `protobuf:"varint,6,opt,name=live_join_seq,json=liveJoinSeq,proto3" json:"live_join_seq,omitempty"`
@@ -378,9 +380,9 @@ func (x *ConversationPage) GetRequestId() string {
 	return ""
 }
 
-func (x *ConversationPage) GetItems() []*ConversationItem {
+func (x *ConversationPage) GetMessages() []*Message {
 	if x != nil {
-		return x.Items
+		return x.Messages
 	}
 	return nil
 }
@@ -545,17 +547,17 @@ const file_agentshim_frontend_v1_conversation_page_proto_rawDesc = "" +
 	"\x05limit\x18\x01 \x01(\rR\x05limit\"F\n" +
 	"\x16ConversationPageBefore\x12\x16\n" +
 	"\x06cursor\x18\x01 \x01(\tR\x06cursor\x12\x14\n" +
-	"\x05limit\x18\x02 \x01(\rR\x05limit\"\xe1\x02\n" +
+	"\x05limit\x18\x02 \x01(\rR\x05limit\"\xe5\x02\n" +
 	"\x10ConversationPage\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x02 \x01(\tR\trequestId\x12=\n" +
-	"\x05items\x18\x03 \x03(\v2'.agentshim.frontend.v1.ConversationItemR\x05items\x12A\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\x12:\n" +
+	"\bmessages\x18\x03 \x03(\v2\x1e.agentshim.frontend.v1.MessageR\bmessages\x12A\n" +
 	"\x04more\x18\x04 \x01(\v2+.agentshim.frontend.v1.ConversationPageMoreH\x00R\x04more\x12D\n" +
 	"\x05start\x18\x05 \x01(\v2,.agentshim.frontend.v1.ConversationPageStartH\x00R\x05start\x12\"\n" +
 	"\rlive_join_seq\x18\x06 \x01(\x04R\vliveJoinSeq\x12\x14\n" +
 	"\x05fence\x18\a \x01(\tR\x05fenceB\x0e\n" +
-	"\fcontinuation\".\n" +
+	"\fcontinuationR\x05items\".\n" +
 	"\x14ConversationPageMore\x12\x16\n" +
 	"\x06cursor\x18\x01 \x01(\tR\x06cursor\"\x17\n" +
 	"\x15ConversationPageStartB2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
@@ -580,12 +582,12 @@ var file_agentshim_frontend_v1_conversation_page_proto_goTypes = []any{
 	(*ConversationPage)(nil),       // 3: agentshim.frontend.v1.ConversationPage
 	(*ConversationPageMore)(nil),   // 4: agentshim.frontend.v1.ConversationPageMore
 	(*ConversationPageStart)(nil),  // 5: agentshim.frontend.v1.ConversationPageStart
-	(*ConversationItem)(nil),       // 6: agentshim.frontend.v1.ConversationItem
+	(*Message)(nil),                // 6: agentshim.frontend.v1.Message
 }
 var file_agentshim_frontend_v1_conversation_page_proto_depIdxs = []int32{
 	1, // 0: agentshim.frontend.v1.ConversationPageCmd.tail:type_name -> agentshim.frontend.v1.ConversationPageTail
 	2, // 1: agentshim.frontend.v1.ConversationPageCmd.before:type_name -> agentshim.frontend.v1.ConversationPageBefore
-	6, // 2: agentshim.frontend.v1.ConversationPage.items:type_name -> agentshim.frontend.v1.ConversationItem
+	6, // 2: agentshim.frontend.v1.ConversationPage.messages:type_name -> agentshim.frontend.v1.Message
 	4, // 3: agentshim.frontend.v1.ConversationPage.more:type_name -> agentshim.frontend.v1.ConversationPageMore
 	5, // 4: agentshim.frontend.v1.ConversationPage.start:type_name -> agentshim.frontend.v1.ConversationPageStart
 	5, // [5:5] is the sub-list for method output_type

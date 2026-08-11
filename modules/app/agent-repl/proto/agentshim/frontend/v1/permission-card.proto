@@ -1,7 +1,7 @@
 // permission-card.proto — The permission card.
 //
 // The request arm is agentshim.core.v1.PermissionItem, carried on
-// ConversationItem in feed.proto; the answer is this package's own command.
+// Message in feed.proto; the answer is this package's own command.
 
 syntax = "proto3";
 

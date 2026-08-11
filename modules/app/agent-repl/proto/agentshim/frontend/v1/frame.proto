@@ -64,7 +64,7 @@ message FrontendFrame {
     WorkspaceRoster workspace_roster = 18;
     ShutdownScheduleView shutdown_schedule = 19;
     // Detached work opening, and typed incremental updates to work already
-    // open. Its own frame rather than more ConversationDelta items, because a
+    // open. Its own frame rather than more ConversationDelta messages, because a
     // detached agent produces at its own rate and must not flood the
     // conversation that dispatched it.
     AsyncBubbleDelta async_bubble_delta = 20;
@@ -86,7 +86,7 @@ message FrontendFrame {
     // RestartPendingView for why it is an edge and never snapshot state.
     RestartPendingView restart_pending = 25;
     // ONE page of conversation history, answering a ConversationPageCmd. It is
-    // a push rather than a command response because its items are feed
+    // a push rather than a command response because its messages are feed
     // content, and the command's ack is early by design — see
     // conversation-page.proto.
     ConversationPage conversation_page = 26;

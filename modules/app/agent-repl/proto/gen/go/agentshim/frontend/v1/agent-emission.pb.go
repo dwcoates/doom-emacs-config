@@ -5,7 +5,7 @@
 // timestamp, no ordering and no provenance, because it is used in two places
 // that stamp those differently —
 //
-//   1. the top-level feed, where ConversationItem (feed.proto) wraps it with
+//   1. the top-level feed, where Message (feed.proto) wraps it with
 //      the session's own identity/ordering/provenance stamps, and
 //   2. a detached agent's bubble, where AsyncAgentUpdate (async-bubble.proto)
 //      wraps it with a bubble id and that bubble's fold accounting.

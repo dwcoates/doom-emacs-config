@@ -1,7 +1,7 @@
 // user-bubble.proto — The user (prompt) bubble.
 //
 // DELIBERATELY DECLARATION-FREE. The user-prompt arm is
-// agentshim.data.v1.ApiUserMessage, carried on ConversationItem in feed.proto,
+// agentshim.data.v1.ApiUserMessage, carried on Message in feed.proto,
 // and this package declares no user-bubble message of its own today. The file
 // exists so the component has a named home the moment it acquires resolved
 // props, rather than acquiring them somewhere else.

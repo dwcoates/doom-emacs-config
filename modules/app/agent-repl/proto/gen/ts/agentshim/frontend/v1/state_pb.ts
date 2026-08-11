@@ -187,7 +187,7 @@ export type WorkspaceState = Message<"agentshim.frontend.v1.WorkspaceState"> & {
   /**
    * Whether merge.Coordinator holds the exclusivity lease on this workspace's
    * shim. While held, USER prompting is blocked (the merge owns the session)
-   * and every conversation item the session produces carries
+   * and every message the session produces carries
    * CONVERSATION_SOURCE_MERGE.
    *
    * @generated from field: bool merge_lease_held = 16;
