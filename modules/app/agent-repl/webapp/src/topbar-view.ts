@@ -80,6 +80,13 @@ export function topbarModelOptionsHtml(view: TopbarView): string {
  * degraded turn put a paragraph of prose across the header. They render as the
  * warning indicator (`topbarWarningsHtml`), which the caller places beside the
  * strip because its dropdown is disclosure state the caller owns.
+ *
+ * NEITHER IS THE SESSION LINE. `sessionLine` is documented on the contract as
+ * the line "shown in the hover/expanded state", and this renderer used to print
+ * it inline anyway — so two opaque correlation ids sat across the header,
+ * meaningless to read and re-measured on every session rotation. It renders as
+ * the ids disclosure (`topbarSessionDisclosureHtml`) now, which is the expanded
+ * state the field always named.
  */
 export function topbarViewHtml(view: TopbarView | null): string {
   if (view === null) return "";
@@ -88,9 +95,6 @@ export function topbarViewHtml(view: TopbarView | null): string {
   ];
   const connectivity = topbarConnectivityHtml(view.connectivity);
   if (connectivity !== "") parts.push(connectivity);
-  if (view.sessionLine !== "") {
-    parts.push(`<span class="topbar-session-line">${escapeHtml(view.sessionLine)}</span>`);
-  }
   parts.push(
     `<select class="topbar-model" data-model-select="1">` +
       (view.modelDisplay === ""
@@ -100,6 +104,44 @@ export function topbarViewHtml(view: TopbarView | null): string {
       `</select>`,
   );
   return `<div class="topbar-view">${parts.join("")}</div>`;
+}
+
+/**
+ * The ids disclosure: the chip that opens the daemon's resolved session line.
+ *
+ * WHY A DISCLOSURE AND NOT STRIP TEXT. `sessionLine` states two opaque
+ * correlation ids ("session s_9cebb553b0bf3924 · conversation 81cb5e3e-…").
+ * They say nothing to a reader, they are the widest and most volatile thing the
+ * strip ever carried, and they are re-measured every time a session rotates —
+ * so drawn inline they made the whole strip reflow for text nobody reads. They
+ * are also LOAD-BEARING for debugging, so they are moved rather than dropped.
+ *
+ * WHY THIS AFFORDANCE. It is the one the warning indicator already established:
+ * the shared `dropdownChipHtml` shell, so the chip is a real keyboard-reachable
+ * `<button>` and dismisses through the same outside-click and Escape handling
+ * as every other topbar dropdown. A `title` tooltip was the alternative and is
+ * worse for the one job these ids have — a tooltip cannot be selected, so it
+ * cannot be pasted into an issue or a log query.
+ *
+ * ABSENCE RENDERS ABSENCE. A workspace between sessions has an empty
+ * `sessionLine`, and an empty line gets NO chip: a control over an identity
+ * that does not exist only invites the click that proves it does not exist.
+ *
+ * THE TEXT IS THE DAEMON'S, verbatim. This renderer escapes it and prints it;
+ * it never splits the line, relabels its halves, or recomposes it from parts.
+ */
+export function topbarSessionDisclosureHtml(view: TopbarView | null, open: boolean): string {
+  if (view === null || view.sessionLine === "") return "";
+  return dropdownChipHtml(
+    "session",
+    "ids",
+    "the daemon's resolved session and conversation identifiers",
+    open,
+    () =>
+      `<ul class="session-overlay" role="menu">` +
+      `<li class="session-row" role="menuitem">${escapeHtml(view.sessionLine)}</li>` +
+      `</ul>`,
+  );
 }
 
 /**
@@ -176,5 +218,33 @@ export function tokensDisclosureHtml(view: TokenBreakdownView | null, open: bool
     "the daemon's resolved token breakdown for this workspace",
     open,
     () => tokenBreakdownViewHtml(view),
+  );
+}
+
+/** Which of the strip's three dropdowns the caller currently holds open. */
+export interface TopbarDisclosures {
+  session: boolean;
+  tokens: boolean;
+  warnings: boolean;
+}
+
+/**
+ * The WHOLE header strip: the resolved identity view and the three chips that
+ * hang off it, in one composition.
+ *
+ * It lives here rather than as three concatenated calls at the paint site so
+ * the strip's contents and their order are one testable fact rather than a
+ * shape nobody can assert on.
+ */
+export function topbarStripHtml(
+  view: TopbarView | null,
+  breakdown: TokenBreakdownView | null,
+  open: TopbarDisclosures,
+): string {
+  return (
+    topbarViewHtml(view) +
+    topbarSessionDisclosureHtml(view, open.session) +
+    tokensDisclosureHtml(breakdown, open.tokens) +
+    topbarWarningsHtml(view, open.warnings)
   );
 }

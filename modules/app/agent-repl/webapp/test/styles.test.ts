@@ -2473,7 +2473,7 @@ describe("tab groups", () => {
 const agentsMenu = blockAfter(css, ".agents-menu");
 const agentsOverlay = blockAfter(css, ".agents-overlay");
 /* Every chip shares one button-reset rule; only the color rule is per-chip. */
-const chipReset = blockAfter(css, ".info-agents, .info-tasks, .info-tokens, .info-warnings {");
+const chipReset = blockAfter(css, ".info-agents, .info-tasks, .info-tokens, .info-warnings, .info-session {");
 const agentsToggle = blockAfter(css, ".info-agents {");
 const runningDot = blockAfter(css, ".agent-dot.agent-starting,");
 const reducedDot = blockAfter(
@@ -3017,19 +3017,19 @@ describe("tokens dropdown styles", () => {
   it("anchors the overlay on the tokens menu that drops it", () => {
     // Arrange / Act — the shared dropdown rule must name the tokens stem.
     // Assert
-    expect(css).toMatch(/\.agents-menu, \.tasks-menu, \.tokens-menu, \.warnings-menu \{/);
+    expect(css).toMatch(/\.agents-menu, \.tasks-menu, \.tokens-menu, \.warnings-menu, \.session-menu \{/);
   });
 
   it("lifts the tokens overlay out of the topbar's flex row", () => {
     // Arrange / Act — the shared overlay rule must name the tokens stem.
     // Assert
-    expect(css).toMatch(/\.agents-overlay, \.tasks-overlay, \.tokens-overlay, \.warnings-overlay \{/);
+    expect(css).toMatch(/\.agents-overlay, \.tasks-overlay, \.tokens-overlay, \.warnings-overlay, \.session-overlay \{/);
   });
 
   it("renders the chip as a pointer target so it reads as pressable", () => {
     // Arrange / Act — the shared chip reset must name the tokens chip.
     // Assert
-    expect(css).toMatch(/\.info-agents, \.info-tasks, \.info-tokens, \.info-warnings \{/);
+    expect(css).toMatch(/\.info-agents, \.info-tasks, \.info-tokens, \.info-warnings, \.info-session \{/);
     expect(chipReset).toMatch(/cursor:\s*pointer/);
   });
 
@@ -4078,5 +4078,31 @@ describe("warning indicator styles", () => {
     // Arrange / Act — clipping a warning hides the half that says what broke.
     // Assert
     expect(warningRow).toMatch(/white-space:\s*normal/);
+  });
+});
+
+/* The ids dropdown, which replaced the strip's inline session line. */
+const sessionToggle = blockAfter(css, "\n.info-session {");
+const sessionRow = blockAfter(css, ".session-overlay .session-row");
+
+describe("ids dropdown styles", () => {
+  it("keeps the chip quiet, as debugging material rather than strip news", () => {
+    // Arrange / Act — a loud chip here would be the noise the ids were moved
+    // out of the strip to end.
+    // Assert
+    expect(sessionToggle).toMatch(/color:\s*var\(--muted\)/);
+  });
+
+  it("makes the ids selectable, so they can be pasted into an issue or a query", () => {
+    // Arrange / Act — this is the whole reason the ids are a dropdown and not a
+    // `title` tooltip, which cannot be selected.
+    // Assert
+    expect(sessionRow).toMatch(/user-select:\s*text/);
+  });
+
+  it("wraps an id rather than clipping it", () => {
+    // Arrange / Act — a half-copied identifier is worse than none.
+    // Assert
+    expect(sessionRow).toMatch(/overflow-wrap:\s*anywhere/);
   });
 });
