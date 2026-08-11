@@ -309,6 +309,23 @@ export class TailFollow {
   }
 
   /**
+   * Move the box BY delta without changing the follow decision — a backfill
+   * that grew the feed above the viewport shifting the view by exactly that
+   * growth, so what the reader is looking at does not move.
+   *
+   * RELATIVE, where `place` is absolute, because the growth is only ever known
+   * as a difference. Expressing it as "read the position, add, write it back"
+   * at the call site would read one box and write another the moment the two
+   * ever differ; keeping the whole arithmetic inside the owner makes them the
+   * same box by construction.
+   */
+  shift(delta: number): void {
+    this.sync();
+    this.box.scrollTop += delta;
+    this.lastTop = this.box.scrollTop;
+  }
+
+  /**
    * Stop following: the user deliberately opened content to read (a nested view
    * inside a bubble), so streaming output must not pull the view off it. Only a
    * return to the tail, or an explicit `park`, resumes following.
