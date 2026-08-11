@@ -35,6 +35,7 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/ssm"
 )
@@ -162,12 +163,20 @@ func (m *Manager) currentShimBuild() string {
 // shimclient's read loop: tearing that connection down from inside its own
 // dispatch would be stopping the thing calling us.
 //
-// activeTurnIDs and turnInFlight are the shim's OWN account of what it was
-// doing when it reattached, straight off the hello. They are what separates the
-// two paths, and they are read from the hello rather than from the daemon's
-// turn latch on purpose: the latch describes what this daemon has observed, and
+// THE HELLO IS THE WHOLE ACCOUNT of what the shim was doing when it reattached,
+// so it is passed whole rather than unpacked into a growing parameter list. Its
+// busy-ness fields are read from the hello rather than from the daemon's own
+// turn latch on purpose: the latch describes what THIS daemon has observed, and
 // a daemon that has just come back has observed nothing yet.
-func (m *Manager) refreshStaleShim(workspace, sessionID, reported string, turnInFlight bool, activeTurnIDs []string) bool {
+//
+// There are TWO KINDS OF BUSY and both defer. turn_in_flight/active_turn_ids
+// describe an SDK turn; live_task_set describes DETACHED background work — a
+// spawned agent, a long-lived shell — which is not a turn and which used to be
+// invisible here. A shim doing real async work therefore looked perfectly idle
+// at exactly the instant this function decided whether to kill it.
+func (m *Manager) refreshStaleShim(workspace, sessionID string, hello *corev1.ShimHello) bool {
+	reported := hello.GetBuildSha()
+	turnInFlight, activeTurnIDs := hello.GetTurnInFlight(), hello.GetActiveTurnIds()
 	want := m.currentShimBuild()
 	if want == "" || reported == "" {
 		m.noteUnknownBuild(workspace, sessionID, reported, want)
@@ -228,7 +237,32 @@ func (m *Manager) refreshStaleShim(workspace, sessionID, reported string, turnIn
 		// every caller of it.
 		return false
 	}
-	m.logf("session-controller: STALE SHIM session=%s ws=%q build=%s current=%s — this shim survived a deploy and is running superseded code, and it reattached SETTLED; bouncing it onto the current bundle now",
+	// THE ASYNC FORK. A shim with no turn running can still be doing the user's
+	// work — a detached agent, a background shell — and killing it is exactly
+	// as destructive as killing a turn. The set is read from the hello for the
+	// same reason the turn ids are: this decision is taken BEFORE any command
+	// round-trip is possible, so a shim that must be asked cannot be asked yet.
+	switch async := classifyAnnouncedAsyncWork(hello); async.verdict {
+	case asyncWorkLive:
+		m.armStaleRefreshAtBoundary(workspace, sessionID, generationID, reported, want, activeTurnIDs)
+		m.logf("session-controller: STALE SHIM REATTACHED WITH LIVE ASYNC WORK ws=%q session=%s generation=%s build=%s current=%s live_task_ids=%v branch=arm_async — no turn is running, but this shim is still doing the user's work detached from one; the refresh is armed and fires the moment that work drains",
+			workspace, sessionID, generationID, reported, want, async.taskIDs)
+		// FALSE for the turn fork's reason: the shim keeps its readiness because
+		// it is still serving work.
+		return false
+	case asyncWorkUnanswered:
+		// SILENCE IS NOT AN ALL-CLEAR. This shim does not put the set on its
+		// hello, so nothing here has established that a roll is safe. It is
+		// armed rather than rolled, and the connection — which IS live now,
+		// unlike at the moment of this decision — is asked to turn the silence
+		// into an answer (asyncrefresh.go).
+		m.armStaleRefreshAtBoundary(workspace, sessionID, generationID, reported, want, activeTurnIDs)
+		m.logf("session-controller: STALE SHIM ANNOUNCED NO ASYNC ANSWER ws=%q session=%s generation=%s build=%s current=%s branch=arm_async_unanswered — the hello carries no live-task set at all, which is a shim that does not answer the question rather than a session with nothing running; the roll is deferred and the live connection is asked to resolve it",
+			workspace, sessionID, generationID, reported, want)
+		go m.resolveAnnouncedAsyncSilence(workspace, sessionID, generationID)
+		return false
+	}
+	m.logf("session-controller: STALE SHIM session=%s ws=%q build=%s current=%s — this shim survived a deploy and is running superseded code, and it reattached SETTLED with an empty live-task set; bouncing it onto the current bundle now",
 		sessionID, workspace, reported, want)
 	refresh := m.registerBuildRefresh(source, sessionID)
 	// The error is not dropped here: runStaleRefresh reports it three ways
