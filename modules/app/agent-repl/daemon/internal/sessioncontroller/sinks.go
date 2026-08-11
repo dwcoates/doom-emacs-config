@@ -438,7 +438,18 @@ type consumer struct {
 	// incarnation. A delayed edge from a retired consumer is rejected by the
 	// SSM instead of repainting its replacement.
 	generationID string
-	push         Pusher
+	// servesHistory marks a consumer built to translate a HISTORY read rather
+	// than to drive a live session. Such a consumer holds no controller
+	// generation, so it stamps the published fence below rather than composing
+	// one — see consumer.fence.
+	servesHistory bool
+	// publishedFence is the workspace's AUTHORITATIVE WorkspaceState fence,
+	// handed down by the history admission ladder to a consumer that serves a
+	// read and therefore runs under no controller generation of its own. Empty
+	// on a live consumer, which composes its fence from the two identities
+	// above — see consumer.fence.
+	publishedFence string
+	push           Pusher
 	ssm          StateApplier
 	// prog is the progress-footer resolver, fed the same stream as the SSM.
 	// Never nil (noopProgress stands in), so the feed sites stay unconditional.

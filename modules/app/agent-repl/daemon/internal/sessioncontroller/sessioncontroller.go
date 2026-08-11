@@ -2250,7 +2250,7 @@ func (m *Manager) ResyncForFence(workspace, echoedFence string, fromSeq uint64) 
 		// serving it.
 		return m.resyncFromController(admission.controller, fromSeq, admission.sessionID, admission.generationID)
 	}
-	return m.resyncFromDurableHistory(workspace, fromSeq)
+	return m.resyncFromDurableHistory(workspace, fromSeq, admission.fence)
 }
 
 // resyncFromController performs the replay only after its caller selected the

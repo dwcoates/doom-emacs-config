@@ -78,6 +78,7 @@ function state(items: ConversationItem[]): StoreState {
     shutdownSchedule: null,
     hibernation: null,
     fences: new Map(),
+    retiredFences: new Map(),
     topbars: new Map(),
     tokenBreakdowns: new Map(),
     gates: new Map(),

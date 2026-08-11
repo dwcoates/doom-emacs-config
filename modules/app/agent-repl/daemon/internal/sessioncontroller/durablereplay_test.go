@@ -610,3 +610,65 @@ func TestAFailedUnwiredStampFailsTheResync(t *testing.T) {
 		t.Fatal("the resync succeeded without stamping the unwired truth; the failure must reach the CommandAck")
 	}
 }
+
+// --- the fence a durable replay stamps --------------------------------------
+
+// pushedFences is every fence the replay stamped on a conversation delta.
+func (h *durableHarness) pushedFences() []string {
+	h.push.mu.Lock()
+	defer h.push.mu.Unlock()
+	out := make([]string, 0, len(h.push.convo))
+	for _, cd := range h.push.convo {
+		out = append(out, cd.GetFence())
+	}
+	return out
+}
+
+// A durable replay serves a request the admission ladder admitted against the
+// workspace's PUBLISHED fence, so every push it makes must carry that same
+// token. It used to compose one from a generation the replay consumer does not
+// have — `Fence(session, "")`, the token "s1|" — which no WorkspaceState ever
+// published, so the client's fence gate discarded every push whole and the page
+// resynced forever to refill what it had just thrown away.
+func TestADurableReplayStampsTheWorkspacesPublishedFence(t *testing.T) {
+	tests := []struct {
+		name      string
+		published string
+		want      string
+	}{
+		{
+			name:      "a workspace whose state still names a generation",
+			published: "s1|cg_7e4f",
+			want:      "s1|cg_7e4f",
+		},
+		{
+			name:      "an unwired workspace publishing an absent fence",
+			published: "",
+			want:      "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange — the store holds one event, and the workspace's
+			// authoritative state publishes the fence under test.
+			history := &durableHistorySpy{events: []*corev1.Event{durableAssistantEvent(t, 1, "u1", 1_000)}}
+			h := newDurableHarness(t, history)
+			h.applier.setCurrent("ws", &frontendv1.WorkspaceState{
+				Workspace: "ws",
+				SessionId: "s1",
+				Fence:     tc.published,
+			})
+
+			// Act.
+			if err := h.m.Resync("ws", 0); err != nil {
+				t.Fatalf("Resync: %v", err)
+			}
+
+			// Assert — the replay's pushes carry the published token verbatim.
+			got := h.pushedFences()
+			if len(got) != 1 || got[0] != tc.want {
+				t.Fatalf("pushed fences = %q, want one push carrying %q", got, tc.want)
+			}
+		})
+	}
+}

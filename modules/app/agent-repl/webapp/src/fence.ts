@@ -129,6 +129,23 @@ export function fencedFence(view: FencedView): string {
 export interface StaleFenceReport {
   message: string;
   context: ClientLogContext;
+  /**
+   * Whether the push is merely SUPERSEDED — fenced by a token this page itself
+   * held earlier for this workspace — rather than foreign.
+   *
+   * BOTH ARE DISCARDED WHOLE; this says nothing about adoption. What it settles
+   * is what the discard is EVIDENCE OF. A superseded push was composed before a
+   * rotation this page has already seen and is a normal race with it: the
+   * daemon is already producing the successor, and the correctly-fenced push is
+   * on its way. A FOREIGN one carries a token this page has never held, which
+   * means this end and the producer disagree about which world they are in —
+   * the condition that is worth a warning and worth asking for state about.
+   *
+   * Treating the two alike is what closed the ~2Hz loop: every discard read as
+   * "I am missing data", every discard armed a resync, and the resync's own
+   * replay produced more mismatched pushes.
+   */
+  superseded: boolean;
 }
 
 /**
@@ -149,11 +166,18 @@ export type FenceVerdict =
  * CURRENTFENCE is the store's current `WorkspaceState.fence` for the workspace
  * — the authoritative answer — and `""` means the store holds no ruling yet.
  */
-export function admitFenced(view: FencedView, currentFence: string): FenceVerdict {
+export function admitFenced(
+  view: FencedView,
+  currentFence: string,
+  retiredFences: ReadonlySet<string> = EMPTY_RETIRED,
+): FenceVerdict {
   const pushed = fencedFence(view);
   if (currentFence !== "" && pushed === currentFence) return { kind: "adopt", view };
-  return { kind: "discard", report: staleFenceReport(view, currentFence) };
+  return { kind: "discard", report: staleFenceReport(view, currentFence, retiredFences) };
 }
+
+/** The default for a caller that keeps no history of what it has held. */
+const EMPTY_RETIRED: ReadonlySet<string> = new Set<string>();
 
 /**
  * The record for one discarded push.
@@ -163,23 +187,39 @@ export function admitFenced(view: FencedView, currentFence: string): FenceVerdic
  * summarized them ("stale") would leave a reader unable to tell a rotation from
  * a client that never adopted a WorkspaceState at all.
  */
-function staleFenceReport(view: FencedView, currentFence: string): StaleFenceReport {
+function staleFenceReport(
+  view: FencedView,
+  currentFence: string,
+  retiredFences: ReadonlySet<string>,
+): StaleFenceReport {
   const workspace = fencedWorkspace(view);
   const pushed = fencedFence(view);
   const held = currentFence === "" ? "none" : currentFence;
+  // SUPERSEDED IS DECIDED BY MEMBERSHIP, never by reading the token. The page
+  // knows which fences it has held because it held them; that is the whole
+  // rule, and it keeps the token as opaque here as everywhere else. A fence
+  // this page never adopted is FOREIGN however much of it resembles the
+  // current one.
+  const superseded = pushed !== "" && retiredFences.has(pushed);
+  const verdict = superseded ? "superseded" : "foreign";
   return {
     message:
       `stale fenced view discarded whole: ${view.case} for workspace=${workspace} ` +
       `carried fence=${pushed} while the workspace's current fence is ${held} ` +
-      `(no part of it was adopted)`,
+      `(no part of it was adopted; the push is ${verdict})`,
     context: {
       operation: "fence.stale-view",
       workspace,
       view: view.case,
       pushed_fence: pushed,
       current_fence: currentFence,
-      branch: currentFence === "" ? "no_current_fence" : "fence_mismatch",
+      branch: superseded
+        ? "fence_superseded"
+        : currentFence === ""
+          ? "no_current_fence"
+          : "fence_mismatch",
       cause: "a fenced push must match the workspace's current WorkspaceState fence byte-wise",
     },
+    superseded,
   };
 }

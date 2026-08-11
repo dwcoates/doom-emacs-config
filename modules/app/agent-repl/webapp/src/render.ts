@@ -81,7 +81,16 @@ import { findTreeRegion, looksLikeIntendedTree, renderTreeHtml } from "./metapro
 import { AsyncSource, ModelInfo, QueuedItem } from "./protocol.js";
 import { previewFromInput } from "./permission-preview.js";
 import { navTokensForItem } from "./nav.js";
-import { freezeOnScroll, freezeOnToggle, isPinnedToBottom, parkAtTail, revealNode } from "./scroll.js";
+import type { FeedAnchor } from "./scroll.js";
+import {
+  captureFeedAnchor,
+  freezeOnScroll,
+  freezeOnToggle,
+  isPinnedToBottom,
+  parkAtTail,
+  restoreFeedAnchor,
+  revealNode,
+} from "./scroll.js";
 import { blocksToText, userTurnText } from "./turn.js";
 import { clearOrCompactKey, itemsFromClearOrCompact } from "./clear-compact.js";
 import { gnsFolds } from "./gns.js";
@@ -3896,7 +3905,15 @@ export class FeedRenderer {
     // reconciling would reuse stale elements from above it, out of position.
     const items = itemsFromClearOrCompact(state.items);
     const boundary = clearOrCompactKey(items);
+    // The place to put the reader back at, sampled only when this render is
+    // about to discard the elements they were reading.
+    let rebuildAnchor: FeedAnchor | null = null;
     if (boundary !== this.lastClearOrCompactKey) {
+      // THE READER'S PLACE, SAMPLED BEFORE THE ELEMENTS GO. A rebuild that did
+      // not do this dropped the reader wherever the new layout happened to put
+      // them — the "jerk and reset" a resync produced even when it re-delivered
+      // byte-identical history. Restored after the rebuild below.
+      rebuildAnchor = this.captureAnchor();
       this.container.innerHTML = "";
       this.nodes.clear();
       // Every watched node just went with the feed. What the rebuild mounts
@@ -4014,9 +4031,28 @@ export class FeedRenderer {
         this.nodes.delete(key);
       }
     }
+    // THE ANCHOR OUTRANKS NOTHING AND IS OUTRANKED BY THE TAIL RULE. A reader
+    // following the tail is put back at the tail (the anchor says so itself);
+    // a reader who had scrolled up is put back where they were reading, which
+    // is what a rebuild used to destroy.
+    if (rebuildAnchor !== null) restoreFeedAnchor(this.container, rebuildAnchor);
     if (toTail) {
       parkAtTail(this.container);
     }
     this.actions.onRendered?.();
+  }
+
+  /**
+   * Sample the reader's place from the CURRENTLY MOUNTED items.
+   *
+   * It reads the mounted elements rather than the state, because what an anchor
+   * has to survive is those elements being discarded — and their order and
+   * offsets are the only record of what was actually on screen.
+   */
+  private captureAnchor(): FeedAnchor | null {
+    const items: { key: string; offsetTop: number }[] = [];
+    for (const [key, entry] of this.nodes) items.push({ key, offsetTop: entry.el.offsetTop });
+    items.sort((a, b) => a.offsetTop - b.offsetTop);
+    return captureFeedAnchor(this.container, items);
   }
 }
