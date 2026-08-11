@@ -77,6 +77,8 @@ func kindFor(t Type) *frontendv1.FailureKind {
 		return &frontendv1.FailureKind{Kind: &frontendv1.FailureKind_HistoryRepullInFlight{HistoryRepullInFlight: &frontendv1.FailureHistoryRepullInFlight{}}}
 	case TypeHistoryReplayTruncated:
 		return &frontendv1.FailureKind{Kind: &frontendv1.FailureKind_HistoryReplayTruncated{HistoryReplayTruncated: &frontendv1.FailureHistoryReplayTruncated{}}}
+	case TypeReplayMarkRetired:
+		return &frontendv1.FailureKind{Kind: &frontendv1.FailureKind_ReplayMarkRetired{ReplayMarkRetired: &frontendv1.FailureReplayMarkRetired{}}}
 	case TypeInterruptUndelivered:
 		return &frontendv1.FailureKind{Kind: &frontendv1.FailureKind_InterruptUndelivered{InterruptUndelivered: &frontendv1.FailureInterruptUndelivered{}}}
 	case TypeQueueEntrySessionUnwired:
@@ -193,6 +195,8 @@ func TypeOf(kind *frontendv1.FailureKind) (Type, bool) {
 		return TypeHistoryRepullInFlight, true
 	case *frontendv1.FailureKind_HistoryReplayTruncated:
 		return TypeHistoryReplayTruncated, true
+	case *frontendv1.FailureKind_ReplayMarkRetired:
+		return TypeReplayMarkRetired, true
 	case *frontendv1.FailureKind_InterruptUndelivered:
 		return TypeInterruptUndelivered, true
 	case *frontendv1.FailureKind_QueueEntryUnwired:
