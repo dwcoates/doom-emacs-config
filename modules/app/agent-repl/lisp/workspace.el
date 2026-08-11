@@ -334,7 +334,40 @@ The workspace renderers (tab-bar, picker) and project-state poller
 filter that shape out entirely, so the log line is a producer
 diagnostic rather than a user-visible-bug warning.  Includes a
 caller trace so the producer can be identified without first turning
-debug logging on."
+debug logging on.
+
+A `:project-dir' write for one of persp-mode's OWN perspectives is
+REFUSED — see the body."
+  (if (and (eq key :project-dir)
+           (agent-repl--pseudo-workspace-name-p ws))
+      ;; A BUILT-IN PERSPECTIVE MAY NEVER CLAIM A DIRECTORY.  "none" and
+      ;; Doom's "main" are persp-mode's own perspectives, and every reader in
+      ;; this file already documents them as live entries that intentionally
+      ;; own no `:project-dir'.  A write is what made that documentation
+      ;; false: the live registry on 2026-08-11 held
+      ;; `main' -> ".../marcos-pr-remediation/" and
+      ;; `none' -> ".../slack-cee-ceac-integration-shj/" — the trailing-slash
+      ;; shape of a captured `default-directory'.  A pseudo holding a
+      ;; directory is LOG-ROUTABLE, so it shadowed the real workspace at that
+      ;; path: 60 of 60 `recovery-slo:' records in each of those two
+      ;; workspaces' durable logs named the perspective, and neither
+      ;; workspace had ever produced a record of its own.
+      ;;
+      ;; Refused at the WRITE rather than screened at every read, so the
+      ;; shadowing entry never exists to be screened.  Loud rather than
+      ;; silent, and the caller trace names the producer.  Deliberately not a
+      ;; signal: `agent-repl--ws-current-log-name' documents how a signalling
+      ;; persp hook takes `doom-init-ui-hook' down with it, and a rejected
+      ;; registration must not be able to do that.
+      (agent-repl--do-log
+       nil
+       "ws-put: REFUSED :project-dir on persp-mode pseudo-perspective ws=%s val=%S — a built-in perspective owns no workspace directory, and one that did would shadow the real workspace at that path in every dir-keyed lookup and every durable log sink. caller-trace=%s"
+       (list ws val (or (ignore-errors (agent-repl--ws-put-caller-trace))
+                        "<trace-failed>")))
+    (agent-repl--ws-put-1 ws key val)))
+
+(defun agent-repl--ws-put-1 (ws key val)
+  "Commit KEY to VAL for WS.  See `agent-repl--ws-put', the only caller."
   (let* ((existing (gethash ws agent-repl--workspaces))
          (stub-create (and (null existing) (not (eq key :project-dir))))
          (old-value (plist-get existing key)))

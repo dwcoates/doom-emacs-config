@@ -1033,3 +1033,67 @@ that pressure for resolution the record does not report."
 
 (provide 'test-recovery-slo)
 ;;; test-recovery-slo.el ends here
+
+;;;; ---- Tests: persp-mode's built-ins are not workspaces and are not measured ----
+
+(ert-deftest agent-repl-test-recovery-slo-pseudo-perspective-is-not-armed ()
+  "\"main\" is a persp-mode perspective; it has no recovery to measure.
+Measured 2026-08-11: it WAS armed, breached every bounce, and was
+force-recovered — a page-and-session conjunction asked of something that has
+neither."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "main"
+      ;; Arrange — eligibility would otherwise say YES, so only the class screen
+      ;; can be what keeps it out.
+      (let ((+workspaces-main "main"))
+        (cl-letf (((symbol-function 'agent-repl--frontend-precreate-refusal)
+                   (lambda (_ws) :already-mounted)))
+          ;; Act
+          (agent-repl--recovery-slo-on-link-down)
+          ;; Assert
+          (should-not (gethash "main" agent-repl--recovery-slo-attempts)))))))
+
+(ert-deftest agent-repl-test-recovery-slo-pseudo-perspective-exclusion-is-stated ()
+  "The non-measurement is recorded, never a silent skip."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "main"
+      ;; Arrange
+      (let ((+workspaces-main "main"))
+        (cl-letf (((symbol-function 'agent-repl--frontend-precreate-refusal)
+                   (lambda (_ws) :already-mounted)))
+          ;; Act
+          (agent-repl--recovery-slo-on-link-down)
+          ;; Assert
+          (should (member "recovery-slo: ws=main outcome=not-measured \
+reason=pseudo-workspace"
+                          (mapcar #'cdr agent-repl-test--slo-logs))))))))
+
+(ert-deftest agent-repl-test-recovery-slo-pseudo-screen-precedes-eligibility ()
+  "The class question is answered before the eligibility source is asked.
+Asking first would attribute a perspective's non-measurement to a page
+refusal, which is a different fact about a different thing."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "main"
+      ;; Arrange
+      (let ((+workspaces-main "main")
+            (asked nil))
+        (cl-letf (((symbol-function 'agent-repl--frontend-precreate-refusal)
+                   (lambda (_ws) (setq asked t) nil)))
+          ;; Act
+          (let ((reason (agent-repl--recovery-slo-exclusion "main")))
+            ;; Assert
+            (should (eq :pseudo-workspace reason))
+            (should-not asked)))))))
+
+(ert-deftest agent-repl-test-recovery-slo-real-workspace-is-still-armed ()
+  "The class screen is scoped to the built-ins and excludes nothing else."
+  (agent-repl-test--with-slo
+    (agent-repl-test--with-slo-ws "slo-real-ws"
+      ;; Arrange
+      (let ((+workspaces-main "main"))
+        (cl-letf (((symbol-function 'agent-repl--frontend-precreate-refusal)
+                   (lambda (_ws) :already-mounted)))
+          ;; Act
+          (agent-repl--recovery-slo-on-link-down)
+          ;; Assert
+          (should (gethash "slo-real-ws" agent-repl--recovery-slo-attempts)))))))
