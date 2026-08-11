@@ -8,6 +8,7 @@ import {
   AsyncBubbleCard,
   AsyncBubbleForCall,
   AsyncBubbleForest,
+  BubbleTyping,
   bubbleFoldId,
   bubbleLabel,
   earlierEntriesNotice,
@@ -705,5 +706,63 @@ describe("AsyncBubbleForest", () => {
     const html = AsyncBubbleForest(ctxFor(registry));
 
     expect(html).toContain("parent gone not delivered");
+  });
+});
+
+/**
+ * THE BUBBLE-SCOPED LIVE TYPING PREVIEW reaching the page.
+ *
+ * The user's complaint was consecutive empty "streaming input…" bubbles that
+ * never populated. The cure has two halves and this is the second: the daemon
+ * relays the delta addressed to the bubble instead of refusing it, and the
+ * bubble draws it. A relay nothing renders is the same silence as no relay.
+ */
+describe("BubbleTyping", () => {
+  it("draws the preview standing against the bubble", () => {
+    // Arrange
+    const registry = seeded(bubble({ id: "b1", kind: agentKind }));
+    registry.applyTyping("b1", "msg-1", 0, "reading the file");
+
+    // Act
+    const html = BubbleTyping(bubble({ id: "b1", kind: agentKind }), ctxFor(registry));
+
+    // Assert
+    expect(html).toContain("reading the file");
+  });
+
+  it("draws nothing for a bubble with no preview standing", () => {
+    // Arrange
+    const registry = seeded(bubble({ id: "b1", kind: agentKind }));
+
+    // Act
+    const html = BubbleTyping(bubble({ id: "b1", kind: agentKind }), ctxFor(registry));
+
+    // Assert
+    expect(html).toBe("");
+  });
+
+  it("escapes the relayed text rather than trusting it as markup", () => {
+    // Arrange
+    const registry = seeded(bubble({ id: "b1", kind: agentKind }));
+    registry.applyTyping("b1", "msg-1", 0, "<script>x</script>");
+
+    // Act
+    const html = BubbleTyping(bubble({ id: "b1", kind: agentKind }), ctxFor(registry));
+
+    // Assert
+    expect(html).not.toContain("<script>");
+  });
+
+  it("puts the preview inside the bubble's own card", () => {
+    // Arrange — inside the card is the whole point: the record that retires it
+    // lands there too.
+    const registry = seeded(bubble({ id: "b1", kind: agentKind }));
+    registry.applyTyping("b1", "msg-1", 0, "reading the file");
+
+    // Act
+    const html = AsyncBubbleCard(bubble({ id: "b1", kind: agentKind }), ctxFor(registry, [bubbleFoldId("b1")]));
+
+    // Assert
+    expect(html).toContain("reading the file");
   });
 });

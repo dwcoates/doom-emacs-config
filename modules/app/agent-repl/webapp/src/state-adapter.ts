@@ -279,6 +279,20 @@ interface TypingRevealBase {
   /** The block's ordinal within that message, as the API numbered it. */
   blockIndex: number;
   delta: string;
+  /**
+   * WHERE THIS PREVIEW BELONGS, and therefore WHAT RETIRES IT.
+   *
+   * Empty — the ordinary case — means the top-level feed: the preview opens
+   * there and `streaming.ts` retires it when the authoritative record of the
+   * same block lands there.
+   *
+   * Set names the `AsyncBubble` the previewed record is being FOLDED into. The
+   * preview must open inside that bubble and must never touch the feed: the
+   * record it previews will never arrive on the feed, so a top-level preview
+   * of it could never be retired and would spin "streaming input..." with no
+   * body for the life of the page.
+   */
+  bubbleId: string;
 }
 
 /** A valid live prose delta. */
@@ -982,6 +996,7 @@ export class StateAdapter {
       messageId: td.uuid,
       blockIndex: td.blockIndex,
       delta: td.delta,
+      bubbleId: td.bubbleId,
     };
     const value = td.kind === "input_json"
       ? { ...base, kind: td.kind, ...(td.toolUseId === undefined ? {} : { toolUseId: td.toolUseId }) }

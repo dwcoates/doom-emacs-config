@@ -991,7 +991,7 @@ func TestTypingDeltaFromContentDelta(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := TypingDeltaFromContentDelta("ws", "s1", tc.cd)
+			got := TypingDeltaFromContentDelta("ws", "s1", "", tc.cd)
 			if !proto.Equal(got, tc.want) {
 				t.Errorf("mismatch\n got: %v\nwant: %v", got, tc.want)
 			}

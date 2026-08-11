@@ -1270,6 +1270,16 @@ export interface TypingDelta {
   estimatedTokens: number;
   /** Stable owner for an `input_json` chunk, when that oneof arm is set. */
   toolUseId?: string;
+  /**
+   * WHERE THIS PREVIEW BELONGS, and therefore WHAT RETIRES IT.
+   *
+   * Empty — the ordinary case — means the top-level feed, retired by the
+   * authoritative record of the same block landing there. Set means the
+   * preview belongs INSIDE that `AsyncBubble` and must never touch the feed:
+   * its record is folded into the bubble and would never arrive to retire a
+   * top-level preview, leaving a card spinning "streaming input..." forever.
+   */
+  bubbleId: string;
 }
 
 /**
@@ -5038,7 +5048,7 @@ function decodeQueueClassification(o: JsonObject): {
   };
 }
 
-const TYPING_DELTA_KEYS = new Set(["workspace", "fence", "delta"]);
+const TYPING_DELTA_KEYS = new Set(["workspace", "fence", "delta", "bubbleId"]);
 const CONTENT_DELTA_KEYS = new Set([
   "uuid",
   "blockIndex",
@@ -5084,6 +5094,9 @@ function decodeTypingDelta(v: unknown): TypingDelta {
     kind: CONTENT_DELTA_ARM_KIND[armKey],
     delta: str(d, armKey, "TypingDelta.delta"),
     estimatedTokens: num(d, "estimatedTokens", "TypingDelta.delta"),
+    // proto3 omits an empty string, and empty is the ordinary case: this
+    // preview belongs on the top-level feed.
+    bubbleId: str(o, "bubbleId", "TypingDelta"),
   };
   if (td.uuid === "") {
     throw new Error(

@@ -524,7 +524,25 @@ type TypingDelta struct {
 	// The daemon mints it and is the only thing that can read meaning into it.
 	// A client that learned to decode it would be depending on a fact this
 	// contract does not offer, and the token's composition is free to change.
-	Fence         string `protobuf:"bytes,4,opt,name=fence,proto3" json:"fence,omitempty"`
+	Fence string `protobuf:"bytes,4,opt,name=fence,proto3" json:"fence,omitempty"`
+	// WHERE THIS PREVIEW BELONGS, and therefore WHAT WILL RETIRE IT.
+	//
+	// Empty — the ordinary case — means the top-level feed: the preview opens
+	// there and is retired by the authoritative record of the same block
+	// landing there.
+	//
+	// Set means the preview belongs INSIDE the named `AsyncBubble` and must
+	// never be opened on the top-level feed, because the record it previews is
+	// being folded into that bubble and will never land on the feed at all. A
+	// top-level preview of it could therefore never be retired, and would spin
+	// "streaming input…" with no body for the life of the page. It is retired
+	// instead by the bubble's OWN authoritative record — the next
+	// `AsyncBubbleUpdate` addressed to this id.
+	//
+	// The daemon knows which of the two it is BEFORE the preview goes out (it
+	// is the same fold decision, made in the same place), so no preview it
+	// cannot retire is ever created. This is provenance, not a timeout.
+	BubbleId      string `protobuf:"bytes,5,opt,name=bubble_id,json=bubbleId,proto3" json:"bubble_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -576,6 +594,13 @@ func (x *TypingDelta) GetDelta() *v11.ContentDelta {
 func (x *TypingDelta) GetFence() string {
 	if x != nil {
 		return x.Fence
+	}
+	return ""
+}
+
+func (x *TypingDelta) GetBubbleId() string {
+	if x != nil {
+		return x.BubbleId
 	}
 	return ""
 }
@@ -687,11 +712,12 @@ const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"\x15CompactionSummaryItem\x12\x18\n" +
 	"\asummary\x18\x01 \x01(\tR\asummary\x12&\n" +
 	"\x0fcompacted_at_ms\x18\x02 \x01(\x03R\rcompactedAtMs\x124\n" +
-	"\x16expensive_input_tokens\x18\x03 \x01(\x03R\x14expensiveInputTokens\"\x8a\x01\n" +
+	"\x16expensive_input_tokens\x18\x03 \x01(\x03R\x14expensiveInputTokens\"\xa7\x01\n" +
 	"\vTypingDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x125\n" +
 	"\x05delta\x18\x03 \x01(\v2\x1f.agentshim.core.v1.ContentDeltaR\x05delta\x12\x14\n" +
-	"\x05fence\x18\x04 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03R\n" +
+	"\x05fence\x18\x04 \x01(\tR\x05fence\x12\x1b\n" +
+	"\tbubble_id\x18\x05 \x01(\tR\bbubbleIdJ\x04\b\x02\x10\x03R\n" +
 	"session_id\"\x8a\x01\n" +
 	"\x0fSessionInitView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x121\n" +

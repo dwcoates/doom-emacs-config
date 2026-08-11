@@ -78,7 +78,7 @@ func TestStreamContractTypingPassthrough(t *testing.T) {
 		seen++
 
 		// Act: hand the daemon exactly the ContentDelta the shim emitted.
-		got := TypingDeltaFromContentDelta(fx.Workspace, fx.SessionID, want.GetDelta())
+		got := TypingDeltaFromContentDelta(fx.Workspace, fx.SessionID, "", want.GetDelta())
 
 		// Assert
 		if !proto.Equal(got, want) {
@@ -102,7 +102,7 @@ func TestStreamContractTypingKeepsMessageID(t *testing.T) {
 			continue
 		}
 		// Act
-		got := TypingDeltaFromContentDelta(fx.Workspace, fx.SessionID, td.GetDelta())
+		got := TypingDeltaFromContentDelta(fx.Workspace, fx.SessionID, "", td.GetDelta())
 		// Assert
 		if got.GetDelta().GetUuid() != fx.MessageID {
 			t.Errorf("delta uuid = %q, want the streamed message id %q", got.GetDelta().GetUuid(), fx.MessageID)
@@ -245,7 +245,7 @@ func TestStreamContractOneStreamCarriesOneFence(t *testing.T) {
 		// Act / Assert: the typing hop.
 		if td := frame.GetTypingDelta(); td != nil {
 			seenTyping++
-			got := TypingDeltaFromContentDelta(fx.Workspace, fence, td.GetDelta())
+			got := TypingDeltaFromContentDelta(fx.Workspace, fence, "", td.GetDelta())
 			if got.GetFence() != fence {
 				t.Errorf("typing frame fence = %q, want %q", got.GetFence(), fence)
 			}
