@@ -849,6 +849,19 @@ type sessionController struct {
 	// the next ping's turn end as though it were that ping's own. Read and
 	// written only under Manager.mu (keepalivecold.go).
 	keepAlivePing *keepAlivePingMeasurement
+	// cacheProvenCold is the verdict of a keep-alive ping that came back having
+	// paid for the whole conversation, nil until one does (keepalivecold.go).
+	//
+	// IT IS WHAT REPLACED A HIBERNATION. A cold ping used to sleep the session
+	// outright, hours before the idle cutoff, on the argument that the cache it
+	// was refreshing is gone — which is a reason to STOP SPENDING on the cache
+	// and not a reason to tear the session down. The latch declines every later
+	// ping instead, so the finding costs the user nothing further and the session
+	// stays up until the cutoff reaps it.
+	//
+	// IT IS CLEARED BY REAL WORK, because real work rebuilds the prefix this
+	// verdict was about (submitPromptAs). Read and written only under Manager.mu.
+	cacheProvenCold *coldCacheVerdict
 	// drivenTurns names every turn THIS generation has a driver for: one it
 	// submitted itself, or one the returning shim positively announced as in
 	// flight at the handshake. It is the undriven-turn watchdog's whole
@@ -1535,6 +1548,14 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	leaseScheduleID, _ := m.heldSchedule()
 
 	m.mu.Lock()
+	// REAL WORK RETIRES A COLD-CACHE VERDICT. The verdict is a fact about a
+	// prefix nobody was using; a prompt is somebody using it, and the turn it is
+	// about to run rebuilds the cache the keep-alive was declining to pay for.
+	// The ping's OWN submitter is excluded: a ping cannot clear the finding its
+	// predecessor made about it (keepalivecold.go).
+	if who != submitterKeepAlive {
+		m.retireColdCacheVerdictLocked(d, "prompt:"+who.String())
+	}
 	entry, queued, err := m.queueSubmitLocked(d, requestID, text, permissionMode, promptOrigin, leaseScheduleID)
 	if err != nil {
 		// A REFUSED submit is refused whole: nothing was queued, nothing is
