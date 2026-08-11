@@ -2142,7 +2142,29 @@ export class ConversationStore {
     return true;
   }
 
+  /**
+   * Apply one ephemeral live-typing preview to the surface it belongs on.
+   *
+   * A PREVIEW IS RETIRED WHERE IT OPENS, so the surface is not a free choice.
+   * `reveal.bubbleId` is the daemon's statement of where the previewed record
+   * is bound: empty means the top-level feed, where `applyStreamDelta`
+   * reconciles it against the authoritative record; set means the record is
+   * being FOLDED into that async bubble and will never reach the feed at all,
+   * so a top-level preview of it could never be retired and would spin
+   * "streaming input..." with no body for the life of the page.
+   *
+   * The scoped branch therefore never touches `state.items`, which is the
+   * invariant that keeps a preview from outliving its window.
+   */
   private applyTyping(reveal: TypingReveal | import("./state-adapter.js").UnidentifiedToolInputReveal): boolean {
+    if (reveal.bubbleId !== "") {
+      return this.asyncBubbles.applyTyping(
+        reveal.bubbleId,
+        reveal.messageId,
+        reveal.blockIndex,
+        reveal.delta,
+      );
+    }
     const delta: Parameters<typeof applyStreamDelta>[1] =
       reveal.kind === "input_json"
         ? { ...reveal, toolUseId: reveal.toolUseId! }

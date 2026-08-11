@@ -230,13 +230,18 @@ func WorkspaceRosterFrame(r *frontendv1.WorkspaceRoster) *frontendv1.FrontendFra
 // round-trip. It is a faithful passthrough — the curation of what streams lives
 // upstream (the shim only emits deltas worth previewing), so this layer never
 // re-types the delta into per-arm strings.
-func TypingDeltaFromContentDelta(workspace, fence string, cd *corev1.ContentDelta) *frontendv1.TypingDelta {
+// bubbleID scopes the preview: empty relays it onto the top-level feed, and a
+// set id relays it INSIDE that async bubble, where the bubble's own
+// authoritative record retires it. See TypingDelta.bubble_id in feed.proto and
+// sessioncontroller/foldedtyping.go for which of the two a delta is.
+func TypingDeltaFromContentDelta(workspace, fence, bubbleID string, cd *corev1.ContentDelta) *frontendv1.TypingDelta {
 	if cd == nil {
 		return nil
 	}
 	return &frontendv1.TypingDelta{
 		Workspace: workspace,
 		Fence:     fence,
+		BubbleId:  bubbleID,
 		Delta:     cd,
 	}
 }

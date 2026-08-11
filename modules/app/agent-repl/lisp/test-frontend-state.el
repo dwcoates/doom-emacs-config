@@ -793,6 +793,111 @@ daemon no longer knows."
       (should (gethash "/current"
                        agent-repl--frontend-workspace-state-views)))))
 
+;;;; ---- The connect snapshot's recovery-SLO evidence ---------------------
+;;
+;; A `StateSnapshot' carries no top-level `workspace', so the dispatch point
+;; that stamps the wire signal for a live `workspaceState' has nothing to
+;; attribute on this arm and used to stamp NOTHING — while the very same
+;; records went on to stamp the emacs signal one by one.  That is the
+;; `wire_ms=-1 emacs_ms=2320' pair a real bounce produced.  These tests pin the
+;; attribution and the ORDER the lead batch applies in, which is what the
+;; emacs stamp's latency is made of.
+
+(defmacro agent-repl-test--with-slo-attempts (workspaces &rest body)
+  "Run BODY with an open recovery attempt for each of WORKSPACES."
+  (declare (indent 1))
+  `(let ((agent-repl--recovery-slo-attempts (make-hash-table :test 'equal)))
+     (dolist (ws ,workspaces)
+       (puthash ws (list :started-at (float-time) :answerable-at (float-time))
+                agent-repl--recovery-slo-attempts))
+     ,@body))
+
+(defun agent-repl-test--slo-wire-stamped-p (ws)
+  "Return non-nil when WS's open attempt carries a wire stamp."
+  (plist-get (gethash ws agent-repl--recovery-slo-attempts) :wire))
+
+(ert-deftest agent-repl-test-snapshot-attributes-wire-to-its-workspace-records ()
+  "The snapshot arm stamps wire for a workspace its `:workspaces' names."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1" "/tmp/ws1")
+    (agent-repl-test--with-slo-attempts '("ws1")
+      ;; Act
+      (agent-repl-test--apply-snapshot
+       '(:workspaces ((:workspace "/tmp/ws1" :state "RENDER_STATE_IDLE"))))
+      ;; Assert
+      (should (agent-repl-test--slo-wire-stamped-p "ws1")))))
+
+(ert-deftest agent-repl-test-snapshot-attributes-wire-to-a-workspace-with-no-typing ()
+  "A workspace that never typed still gets wire evidence from the snapshot.
+The regression this pins: wire evidence used to come from whatever arm
+arrived first, which in practice was a `typingDelta'.  This snapshot carries
+no typing of any kind."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "quiet" "/tmp/quiet")
+    (agent-repl-test--with-slo-attempts '("quiet")
+      ;; Act
+      (agent-repl-test--apply-snapshot
+       '(:workspaces ((:workspace "/tmp/quiet" :state "RENDER_STATE_IDLE"))))
+      ;; Assert
+      (should (agent-repl-test--slo-wire-stamped-p "quiet")))))
+
+(ert-deftest agent-repl-test-snapshot-attributes-wire-to-its-session-records ()
+  "The snapshot arm stamps wire for a workspace only its `:sessions' names."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "sonly" "/tmp/sonly")
+    (agent-repl-test--with-slo-attempts '("sonly")
+      ;; Act
+      (agent-repl-test--apply-snapshot
+       '(:workspaces nil
+         :sessions ((:sessionId "s_1" :workspace "/tmp/sonly"))))
+      ;; Assert
+      (should (agent-repl-test--slo-wire-stamped-p "sonly")))))
+
+(ert-deftest agent-repl-test-snapshot-wire-precedes-the-emacs-stamp ()
+  "A record's wire stamp lands before its own apply stamps emacs."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1" "/tmp/ws1")
+    (agent-repl-test--with-slo-attempts '("ws1")
+      (let ((order nil))
+        (cl-letf (((symbol-function 'agent-repl--recovery-slo-note-emacs)
+                   (lambda (ws) (push (cons 'emacs ws) order))))
+          ;; Act
+          (agent-repl-test--apply-snapshot
+           '(:workspaces ((:workspace "/tmp/ws1" :state "RENDER_STATE_IDLE"))))
+          ;; Assert — wire was already stamped when the emacs stamp ran.
+          (should (equal order '((emacs . "ws1"))))
+          (should (agent-repl-test--slo-wire-stamped-p "ws1")))))))
+
+(ert-deftest agent-repl-test-snapshot-lead-applies-workspaces-before-the-rosters ()
+  "The lead batch applies per-workspace state BEFORE the wholesale rebuilds.
+The emacs signal is stamped when a workspace's own state has been stored, so
+queueing the lead batch's workspaces behind the whole fleet's session views
+and SystemInits — both of which scale with the ROSTER — is what moved
+`emacs_ms' from milliseconds to seconds."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1" "/tmp/ws1")
+    (agent-repl-test--register-ws "other" "/tmp/other")
+    (let ((order nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-apply-session-view)
+                 (lambda (_v) (push 'session-view order)))
+                ((symbol-function 'agent-repl--frontend-apply-session-init)
+                 (lambda (_v) (push 'session-init order)))
+                ((symbol-function 'agent-repl--recovery-slo-note-emacs)
+                 (lambda (_ws) (push 'workspace-state order))))
+        ;; Act
+        (agent-repl-test--apply-snapshot
+         '(:workspaces ((:workspace "/tmp/ws1" :state "RENDER_STATE_IDLE"))
+           :sessions ((:sessionId "s_1" :workspace "/tmp/other"))
+           :inits ((:workspace "/tmp/other" :init (:model "m")))))
+        ;; Assert
+        (should (equal (nreverse order)
+                       '(workspace-state session-view session-init)))))))
+
 (ert-deftest agent-repl-test-apply-snapshot-applies-daemon-view ()
   "A snapshot's `:daemon' member routes into the boot-id note (give-up reset)."
   ;; Arrange

@@ -305,10 +305,35 @@ export function AsyncBubbleCard(
     foldClass: `async-fold ${bubbleKindClass(bubble)}`,
     tickerClass: "async-ticker",
     ticker: `${arc}<span class="agent-dot agent-${dot}" aria-hidden="true">●</span> ${escapeHtml(face)}`,
-    body: () => `${bubbleBody(bubble, ctx)}${children}`,
+    body: () => `${bubbleBody(bubble, ctx)}${BubbleTyping(bubble, ctx)}${children}`,
     open,
     fixed,
   });
+}
+
+/**
+ * The bubble's LIVE TYPING preview, or "" when it has none standing.
+ *
+ * Drawn at the bubble's tail, after everything the bubble has authoritatively
+ * said, because that is what it is: the next thing being said, not yet
+ * recorded. It is deliberately NOT part of `bubbleBody` — the body renders the
+ * bubble's transcript, and a preview is not transcript.
+ *
+ * It disappears on its own. The registry retires a preview the moment the
+ * bubble's own authoritative record lands (`AsyncBubbleRegistry.applyDelta`),
+ * so this needs no timer and makes no guess about whether the stream is still
+ * alive: it draws whatever is standing, and something else is responsible for
+ * nothing standing.
+ */
+export function BubbleTyping(bubble: AsyncBubble, ctx: AsyncRenderContext): string {
+  const typing = ctx.registry.typingFor(bubble.id);
+  if (typing === null || typing.text === "") return "";
+  return (
+    `<div class="async-typing" data-bubble-typing="${escapeHtml(bubble.id)}">` +
+    `<span class="tool-spinner" aria-hidden="true"></span>` +
+    `<span class="async-typing-text">${escapeHtml(typing.text)}</span>` +
+    `</div>`
+  );
 }
 
 /**

@@ -190,6 +190,24 @@ message TypingDelta {
   // A client that learned to decode it would be depending on a fact this
   // contract does not offer, and the token's composition is free to change.
   string fence = 4;
+  // WHERE THIS PREVIEW BELONGS, and therefore WHAT WILL RETIRE IT.
+  //
+  // Empty — the ordinary case — means the top-level feed: the preview opens
+  // there and is retired by the authoritative record of the same block
+  // landing there.
+  //
+  // Set means the preview belongs INSIDE the named `AsyncBubble` and must
+  // never be opened on the top-level feed, because the record it previews is
+  // being folded into that bubble and will never land on the feed at all. A
+  // top-level preview of it could therefore never be retired, and would spin
+  // "streaming input…" with no body for the life of the page. It is retired
+  // instead by the bubble's OWN authoritative record — the next
+  // `AsyncBubbleUpdate` addressed to this id.
+  //
+  // The daemon knows which of the two it is BEFORE the preview goes out (it
+  // is the same fold decision, made in the same place), so no preview it
+  // cannot retire is ever created. This is provenance, not a timeout.
+  string bubble_id = 5;
 }
 
 // The session's retained SystemInit (slash commands, tools, skills, model

@@ -584,3 +584,113 @@ describe("the spawn tree", () => {
     expect(registry.roots()).toEqual([]);
   });
 });
+
+/**
+ * BUBBLE-SCOPED LIVE TYPING.
+ *
+ * A preview is retired by the authoritative record of the same block landing on
+ * the SAME SURFACE. While a window is open the daemon folds the session's
+ * records into a bubble, so a preview of one of them opened on the TOP-LEVEL
+ * FEED could never be retired — it would spin "streaming input…" with no body
+ * for the life of the page. These previews therefore live on the bubble, and
+ * the bubble's own next authoritative record retires them.
+ */
+describe("AsyncBubbleRegistry — bubble-scoped live typing", () => {
+  it("holds a preview against the bubble it was addressed to", () => {
+    // Arrange
+    const registry = seeded(agentBubble("b1"));
+
+    // Act
+    registry.applyTyping("b1", "msg-1", 0, "look");
+
+    // Assert
+    expect(registry.typingFor("b1")).toEqual({ messageId: "msg-1", blockIndex: 0, text: "look" });
+  });
+
+  it("appends a further chunk of the SAME block", () => {
+    // Arrange
+    const registry = seeded(agentBubble("b1"));
+    registry.applyTyping("b1", "msg-1", 0, "look");
+
+    // Act
+    registry.applyTyping("b1", "msg-1", 0, "ing at");
+
+    // Assert
+    expect(registry.typingFor("b1")?.text).toBe("looking at");
+  });
+
+  it("replaces the preview when a NEW block starts", () => {
+    // Arrange — running two blocks' text together would draw prose the model
+    // never emitted.
+    const registry = seeded(agentBubble("b1"));
+    registry.applyTyping("b1", "msg-1", 0, "first");
+
+    // Act
+    registry.applyTyping("b1", "msg-1", 1, "second");
+
+    // Assert
+    expect(registry.typingFor("b1")).toEqual({ messageId: "msg-1", blockIndex: 1, text: "second" });
+  });
+
+  it("keeps two bubbles' previews apart", () => {
+    // Arrange
+    const registry = seeded(agentBubble("b1"), agentBubble("b2"));
+
+    // Act
+    registry.applyTyping("b1", "msg-1", 0, "one");
+    registry.applyTyping("b2", "msg-2", 0, "two");
+
+    // Assert
+    expect(registry.typingFor("b2")?.text).toBe("two");
+  });
+
+  it("drops a preview addressed to a bubble it does not hold", () => {
+    // Arrange — nothing could ever retire it.
+    const registry = seeded(agentBubble("b1"));
+
+    // Act
+    const changed = registry.applyTyping("gone", "msg-1", 0, "orphan");
+
+    // Assert
+    expect(changed).toBe(false);
+  });
+
+  it("retires the preview when the bubble's own record lands", () => {
+    // Arrange — THE CURE. The authoritative content the preview stood in for
+    // has arrived, on the same surface the preview opened on.
+    const registry = seeded(agentBubble("b1"));
+    registry.applyTyping("b1", "msg-1", 0, "look");
+
+    // Act
+    registry.applyDelta(push([], [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]));
+
+    // Assert
+    expect(registry.typingFor("b1")).toBeNull();
+  });
+
+  it("leaves another bubble's preview standing when one bubble's record lands", () => {
+    // Arrange
+    const registry = seeded(agentBubble("b1"), agentBubble("b2"));
+    registry.applyTyping("b1", "msg-1", 0, "one");
+    registry.applyTyping("b2", "msg-2", 0, "two");
+
+    // Act
+    registry.applyDelta(push([], [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]));
+
+    // Assert
+    expect(registry.typingFor("b2")?.text).toBe("two");
+  });
+
+  it("drops every standing preview when a snapshot is adopted", () => {
+    // Arrange — the snapshot is authoritative about content, so a retained
+    // preview is one nothing will ever come back to retire.
+    const registry = seeded(agentBubble("b1"));
+    registry.applyTyping("b1", "msg-1", 0, "look");
+
+    // Act
+    registry.adoptSnapshot([agentBubble("b1")]);
+
+    // Assert
+    expect(registry.typingFor("b1")).toBeNull();
+  });
+});

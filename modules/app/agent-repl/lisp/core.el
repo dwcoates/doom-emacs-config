@@ -2283,12 +2283,38 @@ Lazily computes and caches the value on first invocation."
                       cache-hit agent-repl-git-branch))
   (message "agent-repl loaded on branch: %s" agent-repl-git-branch))
 
+(defvar agent-repl--path-canonical-cache nil
+  "A `let'-bound memo table for `agent-repl--path-canonical', or nil.
+
+nil — the default everywhere — means NO memoization: every call asks the
+filesystem, which is the only honest answer for a path that may have moved
+since it was last resolved.
+
+A caller that is about to resolve the SAME handful of paths hundreds of
+times inside one uninterruptible operation binds a fresh hash table here
+for exactly the length of that operation.  `file-truename' is a syscall per
+path component, and resolving a daemon path to a workspace name scans every
+live workspace and canonicalizes each one's `:project-dir'
+\(`agent-repl--ws-dir-owner'), so a connect snapshot that resolves R records
+against W workspaces costs R*W of them.
+
+The table is per-operation and never global: a retained cache would outlive
+the no-yield guarantee that makes it correct and start answering with a
+path's history instead of its state.")
+
 (defun agent-repl--path-canonical (path)
   "Return a canonical, stable string for PATH suitable for hashing.
 Expands tildes and symlinks via `file-truename', then strips any
 trailing slash via `directory-file-name' so that the same directory
-always produces the same hash."
-  (directory-file-name (file-truename path)))
+always produces the same hash.
+
+Memoized through `agent-repl--path-canonical-cache' when a caller has bound
+one; see that variable for the scope a memo is valid in."
+  (if (null agent-repl--path-canonical-cache)
+      (directory-file-name (file-truename path))
+    (or (gethash path agent-repl--path-canonical-cache)
+        (puthash path (directory-file-name (file-truename path))
+                 agent-repl--path-canonical-cache))))
 
 (defun agent-repl--workspace-id ()
   "Return a short identifier for the current git workspace.
