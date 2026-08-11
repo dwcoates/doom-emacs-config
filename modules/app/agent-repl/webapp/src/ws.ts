@@ -352,7 +352,18 @@ export class WsClient {
   }
 
   private scheduleReconnect(): void {
-    const delay = this.backoff[Math.min(this.attempts, this.backoff.length - 1)];
+    // THE FIRST RETRY IS IMMEDIATE, and every later one rides the ladder.
+    //
+    // Measured on a live daemon bounce: six webviews all closed on
+    // code=1001 server_shutdown and all re-dialled at close+251ms — the
+    // schedule's first rung, to the millisecond, across every workspace.
+    // That uniformity is the tell that the delay was the page's own clock and
+    // not anything about the daemon. A backoff exists to stop a page hammering
+    // a host that keeps refusing; it has no work to do before the FIRST
+    // attempt, which has no failure behind it to back off from. The socket
+    // that just closed is the evidence, and a dial that fails simply enters
+    // the ladder at rung zero exactly as before.
+    const delay = this.attempts === 0 ? 0 : this.backoff[Math.min(this.attempts - 1, this.backoff.length - 1)];
     this.attempts++;
     const epoch = this.epoch;
     log("info", "websocket reconnect scheduled", {
