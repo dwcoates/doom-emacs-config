@@ -70,7 +70,7 @@ interface Flow {
   send(items: readonly WireItem[]): void;
   /**
    * Fold a DAEMON-COMPOSED delta — `through_seq: 0`, the shape every seq-less
-   * daemon push has (permission cards, failure cards, prompt receipts).
+   * daemon push has (permission cards, failure cards, ephemeral cards).
    */
   sendLocal(items: readonly WireItem[]): void;
   /** The prompt bubbles currently on screen. */
