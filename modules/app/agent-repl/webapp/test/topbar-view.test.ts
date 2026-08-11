@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   tokensDisclosureHtml,
   topbarSessionDisclosureHtml,
+  topbarStripHtml,
   topbarWarningsHtml,
   WARNING_GLYPH,
   topbarConnectivityHtml,
@@ -291,6 +292,77 @@ describe("the ids disclosure", () => {
     const html = topbarSessionDisclosureHtml(view({ sessionLine: "<img src=x>" }), true);
     // Assert
     expect(html).not.toContain("<img");
+  });
+});
+
+// --- the composed strip, whose ORDER and reserved slot are the geometry -----
+
+describe("the composed strip", () => {
+  const CLOSED = { session: false, tokens: false, warnings: false };
+  const BREAKDOWN: TokenBreakdownView = {
+    workspace: "/ws",
+    fence: "f1",
+    sections: [
+      { label: "session", rows: [{ label: "input", tokens: 10, sharePermille: 1000, emphasized: true, depth: 0 }] },
+    ],
+  };
+
+  it("puts the title first, so the strip's leading content is its most stable", () => {
+    // Arrange / Act
+    const html = topbarStripHtml(view(), BREAKDOWN, CLOSED);
+    // Assert
+    expect(html.indexOf("topbar-title")).toBeLessThan(html.indexOf("session-menu"));
+  });
+
+  it("puts the warning slot LAST, after every constant-width chip", () => {
+    // Arrange / Act — the indicator is the one element that comes and goes with
+    // ordinary state, so nothing constant may sit behind it.
+    const html = topbarStripHtml(view(), BREAKDOWN, CLOSED);
+    // Assert
+    expect(html.indexOf("tokens-menu")).toBeLessThan(html.indexOf("topbar-warning-slot"));
+  });
+
+  it("reserves the warning slot even when nothing is warned about", () => {
+    // Arrange / Act — the slot holds the width so a warning arriving does not
+    // re-measure the strip and shove the title.
+    const html = topbarStripHtml(view({ warnings: [] }), BREAKDOWN, CLOSED);
+    // Assert
+    expect(html).toContain('<span class="topbar-warning-slot">');
+  });
+
+  it("still draws NO warning control inside the reserved slot", () => {
+    // Arrange / Act — reserving geometry is not rendering an idle control.
+    const html = topbarStripHtml(view({ warnings: [] }), BREAKDOWN, CLOSED);
+    // Assert
+    expect(html).not.toContain("data-warnings-toggle");
+  });
+
+  it("draws the warning control in the slot once the daemon raises one", () => {
+    // Arrange / Act
+    const html = topbarStripHtml(
+      view({ warnings: [{ text: "totals disagree", warning: { kind: "accounting" } }] }),
+      BREAKDOWN,
+      CLOSED,
+    );
+    // Assert
+    expect(html).toContain("data-warnings-toggle");
+  });
+
+  it("renders only the reserved slot for a workspace with no published views", () => {
+    // Arrange / Act — absence renders absence, geometry aside.
+    const html = topbarStripHtml(null, null, CLOSED);
+    // Assert
+    expect(html).toBe('<span class="topbar-warning-slot"></span>');
+  });
+
+  it("opens the ids dropdown the caller says is open", () => {
+    // Arrange / Act — disclosure is the caller's state, held across re-renders.
+    const html = topbarStripHtml(view({ sessionLine: "session s_1" }), BREAKDOWN, {
+      ...CLOSED,
+      session: true,
+    });
+    // Assert
+    expect(html).toContain("session s_1");
   });
 });
 

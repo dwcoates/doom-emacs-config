@@ -934,7 +934,56 @@ body::after {
 /* The remediation notice sits immediately right of the alarm dot. */
 #remediation { color: var(--remediation); }
 
-#session-info { margin-left: auto; }
+/* THE IDENTITY STRIP, right-anchored against the pickers.
+   Its own leading content — the workspace title — therefore sits wherever the
+   strip's TOTAL width puts it, so anything to the right of the title that
+   re-measures drags the title sideways with it. That is what made the header
+   jump on every push: the session and conversation ids used to live here, and
+   they are long, proportional-width and re-minted on every session rotation.
+   They are a dropdown now (`.session-menu`), and the three rules below hold the
+   width of everything else that is allowed to change. */
+#session-info {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* The connectivity glyph is a different CHARACTER per state ("●", "◌", "✕",
+   …), and those characters do not share an advance width. Boxed at a fixed
+   width and centred in it, so a session going from connecting to connected
+   changes the mark and nothing else. */
+.topbar-connectivity {
+  display: inline-block;
+  width: 1.25em;
+  text-align: center;
+}
+
+/* THE RESERVED WARNING SLOT. The warning indicator is the one element that
+   appears and vanishes with ordinary state, and un-reserved it would re-measure
+   the strip — shoving the title — every time a warning was raised or cleared.
+   The slot holds its width whether or not the chip is inside it. Reserving
+   geometry is NOT rendering an idle control: the chip itself is still absent
+   (see topbarWarningsHtml), so there is nothing to click and no count to read;
+   only the space stays put. */
+.topbar-warning-slot {
+  display: inline-flex;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  /* min-, not a hard width: a chip that outgrew its slot must overflow the
+     reservation rather than be clipped, because a half-drawn warning control is
+     worse than a shifted one. Sized past the widest ordinary chip so the
+     reservation is what actually governs. */
+  min-width: 3.2rem;
+}
+
+/* The strip's own row. The parts are emitted with no whitespace between them
+   (the renderer joins them with ""), so the spacing is the layout's to give. */
+.topbar-view {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
 
 /* The datapoint strip's value colors, shared by BOTH renderings of the
    strip: the header's #session-info and each subagent bubble's
@@ -1003,7 +1052,12 @@ body::after {
    daemon has raised a warning, so it never sits idle in the run. */
 .info-warnings { color: var(--err); }
 .info-warnings:hover { text-decoration: underline; }
+/* Tabular figures and a reserved digit box, so a second warning arriving widens
+   nothing: the count is the strip's only number that changes on its own. */
 .topbar-warning-count {
+  display: inline-block;
+  min-width: 1ch;
+  text-align: right;
   font-variant-numeric: tabular-nums;
   margin-left: 0.15rem;
 }
