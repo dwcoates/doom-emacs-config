@@ -643,14 +643,13 @@ describe("assistantMessage arm", () => {
 describe("userMessage arm", () => {
   it("maps a string user message to a user-turn item", () => {
     const items = itemsFrom({ uuid: "m1", requestId: "r1", userMessage: { contentString: "hi there" } });
-    const expected: UserTurnItem = { kind: "user-turn", requestId: "r1", uuid: "m1", content: [{ type: "text", text: "hi there" }], ts: "" };
+    const expected: UserTurnItem = { kind: "user-turn", uuid: "m1", content: [{ type: "text", text: "hi there" }], ts: "" };
     expect(items).toEqual([expected]);
   });
 
   it("splits tool_result blocks into tool items and text into one user-turn", () => {
     const items = itemsFrom({
       uuid: "m1",
-      requestId: "r1",
       userMessage: {
         contentBlocks: { blocks: [{ toolResult: { toolUseId: "tu1", contentString: "done" } }, { text: { text: "and more" } }] },
       },
@@ -666,14 +665,13 @@ describe("userMessage arm", () => {
       resultTs: "",
       result: { isError: false, content: "done" },
     };
-    const turn: UserTurnItem = { kind: "user-turn", requestId: "r1", uuid: "m1", content: [{ type: "text", text: "and more" }], ts: "" };
+    const turn: UserTurnItem = { kind: "user-turn", uuid: "m1", content: [{ type: "text", text: "and more" }], ts: "" };
     expect(items).toEqual([tool, turn]);
   });
 
   it("emits no user-turn for a pure tool-result feedback message", () => {
     const items = itemsFrom({
       uuid: "m1",
-      requestId: "r1",
       userMessage: { contentBlocks: { blocks: [{ toolResult: { toolUseId: "tu1", contentString: "done" } }] } },
     });
     expect(items).toHaveLength(1);
@@ -1777,17 +1775,17 @@ describe("userTurnReceipt (ingest-time arrival receipt)", () => {
     return { kind: "conversation-items", workspace: "ws", fence: "s1", throughSeq, items };
   }
 
-  function turn(requestId: string, text: string): UserTurnItem {
-    return { kind: "user-turn", requestId, content: [{ type: "text", text }], ts: "" };
+  function turn(uuid: string, text: string): UserTurnItem {
+    return { kind: "user-turn", uuid, content: [{ type: "text", text }], ts: "" };
   }
 
-  it("reports a live user turn with its request id, seq and text length", () => {
+  it("reports a live user turn with its uuid, seq and text length", () => {
     // Arrange — the delta advances past what the store already holds.
-    const effects = [delta(7, [turn("req-1", "hello there")])];
+    const effects = [delta(7, [turn("u-1", "hello there")])];
     // Act
     const receipt = userTurnReceipt(effects, 6);
     // Assert
-    expect(receipt).toEqual({ requestId: "req-1", seq: 7, len: 11, live: true });
+    expect(receipt).toEqual({ uuid: "u-1", seq: 7, len: 11, live: true });
   });
 
   it("marks a replayed turn not live, so the caller can withhold the forward", () => {
@@ -1821,7 +1819,6 @@ describe("userTurnReceipt (ingest-time arrival receipt)", () => {
     // Arrange — a turn whose prose arrived as two blocks.
     const item: UserTurnItem = {
       kind: "user-turn",
-      requestId: "req-1",
       content: [
         { type: "text", text: "abc" },
         { type: "text", text: "de" },
@@ -1838,7 +1835,6 @@ describe("userTurnReceipt (ingest-time arrival receipt)", () => {
     // Arrange — an image block carries no prompt text to time.
     const item: UserTurnItem = {
       kind: "user-turn",
-      requestId: "req-1",
       content: [{ type: "image", source: {} }, { type: "text", text: "abcd" }],
       ts: "",
     };
@@ -1852,12 +1848,12 @@ describe("userTurnReceipt (ingest-time arrival receipt)", () => {
     // Arrange — an ignore effect sits ahead of the delta in the batch.
     const effects: AdapterEffect[] = [
       { kind: "ignored", shape: "commandAck" },
-      delta(7, [turn("req-1", "hey")]),
+      delta(7, [turn("u-1", "hey")]),
     ];
     // Act
     const receipt = userTurnReceipt(effects, 6);
     // Assert
-    expect(receipt?.requestId).toBe("req-1");
+    expect(receipt?.uuid).toBe("u-1");
   });
 });
 

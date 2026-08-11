@@ -258,9 +258,9 @@ export class ModelSelectionRejectedError extends Error {
  */
 export interface SubmittedPrompt {
   /**
-   * The correlation id the `SubmitPromptCmd` went out under, and the id the
-   * daemon's prompt receipt comes back carrying. EMPTY only when no command
-   * was sent at all, which is the one case with no bubble to file.
+   * The correlation id the `SubmitPromptCmd` went out under. EMPTY only when
+   * no command was sent at all. It names a SUBMIT, never a prompt: no feed
+   * item is ever keyed on it.
    */
   requestId: string;
   /** Resolves on the daemon's `CommandAck`; rejects on any refusal. */
@@ -489,12 +489,11 @@ export class CommandDispatcher {
    * Submit one prompt, handing back the ACK PROMISE and the REQUEST ID the
    * command went out under.
    *
-   * The id is returned — alone among the ack-correlated commands — because the
-   * prompt is the one command whose consequence the frontend draws before the
-   * daemon answers: the local prompt bubble is filed under this id, and the
-   * daemon's receipt for the same submit carries it back, which is what lets
-   * the two reconcile onto one bubble instead of being matched by their text
-   * (see `Store.addLocalPrompt`).
+   * The id is returned so a caller can name THIS submit in a log or a fault
+   * report. It is NOT a prompt identity and nothing renders off it: the feed
+   * draws a prompt only when its durable record round-trips, under that
+   * record's uuid (see `userTurnKey`). Filing a bubble under this id is
+   * exactly the two-identity defect that was removed.
    */
   submitPrompt(
     workspace: string,

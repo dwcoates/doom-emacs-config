@@ -345,7 +345,6 @@ describe("SECTION_CLASSES", () => {
     // bubble is.
     const item: UserTurnItem = {
       kind: "user-turn",
-      requestId: "r1",
       content: [{ type: "text", text: "a prompt" }],
       ts: "2026-05-24T10:00:00.000Z",
     };

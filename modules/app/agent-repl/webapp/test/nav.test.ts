@@ -44,7 +44,6 @@ const key = (over: Partial<NavKeyEvent> = {}): NavKeyEvent => ({
 
 const userTurn = (): UserTurnItem => ({
   kind: "user-turn",
-  requestId: "r1",
   content: [{ type: "text", text: "hi" }],
   ts: "",
 });

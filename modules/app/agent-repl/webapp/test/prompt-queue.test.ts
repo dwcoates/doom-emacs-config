@@ -8,8 +8,6 @@ const WS = "/w/one";
 
 interface Harness {
   queue: PromptQueue;
-  echoed: string[];
-  retracted: string[];
   submitted: string[];
   failures: Array<{ text: string; reason: string }>;
   deadlines: Array<{ fn: () => void; ms: number }>;
@@ -21,8 +19,6 @@ interface Harness {
 }
 
 function harness(options: { autoSubmit?: boolean; revivalBoundMs?: number } = {}): Harness {
-  const echoed: string[] = [];
-  const retracted: string[] = [];
   const submitted: string[] = [];
   const failures: Array<{ text: string; reason: string }> = [];
   const deadlines: Array<{ fn: () => void; ms: number }> = [];
@@ -34,8 +30,6 @@ function harness(options: { autoSubmit?: boolean; revivalBoundMs?: number } = {}
   const queue = new PromptQueue({
     linkDown: () => linkDown,
     revived: () => revived,
-    echo: (e: QueuedPrompt) => echoed.push(e.text),
-    retract: (e: QueuedPrompt) => retracted.push(e.text),
     submit: (e: QueuedPrompt) => {
       submitted.push(e.text);
       if (options.autoSubmit !== false) return Promise.resolve();
@@ -53,8 +47,6 @@ function harness(options: { autoSubmit?: boolean; revivalBoundMs?: number } = {}
 
   return {
     queue,
-    echoed,
-    retracted,
     submitted,
     failures,
     deadlines,
@@ -115,13 +107,15 @@ describe("PromptQueue.offer", () => {
     expect(taken).toBe(false);
   });
 
-  it("draws the held prompt as pending", () => {
-    // Arrange
+  it("files no feed item for the held prompt", () => {
+    // Arrange — a held prompt used to be drawn as a pending bubble. A prompt
+    // renders when it round-trips through the SDK and never before, so the
+    // queue has nothing to draw with.
     const h = harness();
     // Act
     h.queue.offer(WS, "first", PromptOrigin.WEBAPP_USER_SENT);
-    // Assert
-    expect(h.echoed).toEqual(["first"]);
+    // Assert — it is held, and only held.
+    expect(h.queue.pending(WS).map((e) => e.text)).toEqual(["first"]);
   });
 
   it("keeps a workspace's held prompts in submission order", () => {
@@ -167,17 +161,6 @@ describe("PromptQueue.drain", () => {
     await h.queue.drain(WS);
     // Assert
     expect(h.submitted).toEqual(["first", "second"]);
-  });
-
-  it("takes each drained prompt's pending bubble down", async () => {
-    // Arrange
-    const h = harness();
-    h.queue.offer(WS, "first", PromptOrigin.WEBAPP_USER_SENT);
-    h.setRevived(true);
-    // Act
-    await h.queue.drain(WS);
-    // Assert
-    expect(h.retracted).toEqual(["first"]);
   });
 
   it("empties the queue after a full drain", async () => {
@@ -311,18 +294,6 @@ describe("PromptQueue revival bound", () => {
     await Promise.resolve();
     // Assert
     expect(h.failures[0]?.reason).toContain("did not come back within 60s");
-  });
-
-  it("takes the expired prompt's pending bubble down", async () => {
-    // Arrange
-    const h = harness({ revivalBoundMs: 60_000 });
-    h.queue.offer(WS, "first", PromptOrigin.WEBAPP_USER_SENT);
-    h.advance(60_000);
-    // Act
-    h.deadlines[0]?.fn();
-    await Promise.resolve();
-    // Assert
-    expect(h.retracted).toEqual(["first"]);
   });
 
   it("leaves a younger held prompt alone when an older one expires", async () => {

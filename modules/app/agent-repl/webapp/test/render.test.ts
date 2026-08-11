@@ -67,7 +67,6 @@ import {
   TextItem,
   ThinkingItem,
   ToolItem,
-  userTurnRequestKey,
 } from "../src/store.js";
 import { ReanchorBox, TailFollow } from "../src/scroll.js";
 
@@ -91,21 +90,21 @@ function userTurnAt(
   hour: number,
   minute: number,
   text = "do the thing",
-  requestId = "r1",
+  uuid = "u1",
 ): ConversationItem {
   return {
     kind: "user-turn",
-    requestId,
+    uuid,
     content: [{ type: "text", text }],
     ts: new Date(2026, 4, 24, hour, minute).toISOString(),
   };
 }
 
 /** A merge-failure remediation user-turn: origin "merge", carrying the hidden directive. */
-function mergeTurn(directive = "SECRET rebase directive", requestId = "m1"): ConversationItem {
+function mergeTurn(directive = "SECRET rebase directive", uuid = "m1"): ConversationItem {
   return {
     kind: "user-turn",
-    requestId,
+    uuid,
     content: [{ type: "text", text: directive }],
     ts: new Date(2026, 4, 24, 9, 0).toISOString(),
     origin: "merge",
@@ -719,29 +718,9 @@ describe("renderItem", () => {
     clock.mockRestore();
   });
 
-  it("draws a prompt the daemon has not acknowledged as an ordinary bubble", () => {
-    // Arrange — the webapp's own bubble for a submit still in flight.
-    const item = { ...userTurnAt(14, 32, "do the thing"), unacked: true } as ConversationItem;
-    // Act
-    const html = renderItem(item);
-    // Assert — the words are there on the frame the user hit send.
-    expect(html).toContain("<pre>do the thing</pre>");
-    expect(html).toContain('class="bubble user unacked"');
-  });
-
-  it("holds an unacknowledged prompt bubble still", () => {
-    // Arrange — the wave means the daemon has the prompt, so a bubble it has
-    // not answered yet must not carry one.
-    const item = { ...userTurnAt(14, 32, "do the thing"), unacked: true } as ConversationItem;
-    // Act
-    const el = htmlToElement(renderItem(item)).querySelector<HTMLElement>(".bubble.user");
-    // Assert — no phase to seek, so no delay is stamped either.
-    expect(el?.getAttribute("style")).toBeNull();
-  });
-
-  it("starts the wave on the bubble the daemon's receipt replaced it with", () => {
-    // Arrange — the receipt carries no unacked marking (store.mergeItem
-    // whole-item replaces the local bubble with it).
+  it("draws every prompt bubble with the wave, there being no unacked class", () => {
+    // Arrange — a prompt only reaches the feed with its durable line, so every
+    // bubble is one the daemon has already spoken for.
     const item = userTurnAt(14, 32, "do the thing");
     // Act
     const el = htmlToElement(renderItem(item)).querySelector<HTMLElement>(".bubble.user");
@@ -3201,10 +3180,10 @@ describe("TextStream chess-game markers", () => {
 });
 
 describe("lastUserTurnId", () => {
-  /** A user turn carrying the given request id. */
-  const turn = (requestId: string): ConversationItem => ({
+  /** A user turn carrying the given record uuid. */
+  const turn = (uuid: string): ConversationItem => ({
     kind: "user-turn",
-    requestId,
+    uuid,
     content: [{ type: "text", text: "hi" }],
     ts: new Date(2026, 4, 24, 10, 0).toISOString(),
   });
@@ -3221,7 +3200,6 @@ describe("lastUserTurnId", () => {
   /** A user turn off the transcript file plane: a uuid, and NO request id. */
   const transcriptTurn = (uuid: string): ConversationItem => ({
     kind: "user-turn",
-    requestId: "",
     uuid,
     content: [{ type: "text", text: "hi" }],
     ts: new Date(2026, 4, 24, 10, 0).toISOString(),
@@ -3229,12 +3207,12 @@ describe("lastUserTurnId", () => {
 
   it("returns the newest user turn's identity", () => {
     // Arrange + Act + Assert
-    expect(lastUserTurnId([turn("r1"), text("b1"), turn("r2")])).toBe("user-turn:req:r2");
+    expect(lastUserTurnId([turn("u1"), text("b1"), turn("u2")])).toBe("user-turn:uuid:u2");
   });
 
   it("returns the user turn's id across the items answering it", () => {
     // Arrange — a send stays the newest user turn under its own replies.
-    expect(lastUserTurnId([turn("r1"), text("b1"), text("b2")])).toBe("user-turn:req:r1");
+    expect(lastUserTurnId([turn("u1"), text("b1"), text("b2")])).toBe("user-turn:uuid:u1");
   });
 
   it("distinguishes two request-id-less transcript turns by their uuids", () => {
@@ -4936,8 +4914,8 @@ describe("async-quiescence border (the invariant)", () => {
 
   it("amber-borders a prompt bubble hosting a tools-only turn's live async", () => {
     // Arrange — the projection hosts the survivor under the prompt's IDENTITY,
-    // which for a still-provisional prompt is its request key.
-    const host = userTurnRequestKey("r1");
+    // which is its record uuid and nothing else.
+    const host = "user-turn:uuid:u1";
     const panels: PanelContext = {
       children: new Map(),
       isOpen: () => false,
@@ -4950,20 +4928,6 @@ describe("async-quiescence border (the invariant)", () => {
     expect(html).toContain(`data-panel-toggle="member:${host}:w1"`);
   });
 
-  it("keeps the amber border on a prompt bubble the daemon has not acknowledged", () => {
-    // Arrange — live async and acknowledgement are independent facts, and the
-    // one class list has to carry both without either dropping the other.
-    const panels: PanelContext = {
-      children: new Map(),
-      isOpen: () => false,
-      watchers: new Map([[userTurnRequestKey("r1"), [watcher()]]]),
-    };
-    const item = { ...userTurnAt(9, 0), unacked: true } as ConversationItem;
-    // Act
-    const html = renderItem(item, undefined, undefined, panels);
-    // Assert
-    expect(html).toContain(`class="bubble user async-live unacked"`);
-  });
 });
 
 // --- gns-sockets fold (in a final-response bubble) ------------------------------
@@ -6002,7 +5966,7 @@ describe("FeedRenderer: fresh user turn logs a rendering receipt", () => {
     expect(record(lines[0])).toMatchObject({
       level: "info",
       operation: "webapp.render.user-turn",
-      message: "feed: user turn rendering request_id=r1 key=user-turn:req:r1 last=true",
+      message: "feed: user turn rendering key=user-turn:uuid:u1 last=true",
     });
   });
 
@@ -6017,7 +5981,7 @@ describe("FeedRenderer: fresh user turn logs a rendering receipt", () => {
     expect(record(lines[0])).toMatchObject({
       level: "info",
       operation: "webapp.render.user-turn",
-      message: "feed: user turn rendering request_id=r1 key=user-turn:req:r1 last=false",
+      message: "feed: user turn rendering key=user-turn:uuid:u1 last=false",
     });
   });
 
