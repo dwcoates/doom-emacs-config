@@ -154,6 +154,55 @@ describe("SessionServer handshake", () => {
     expect(hello.queryCreatedSeq).toBe(41n);
   });
 
+  it("announces the live background-task set it was given", async () => {
+    // Arrange: a shim whose accessor reports two detached tasks running.
+    const { server, socketPath } = harness({}, { liveTaskIds: () => ["agent-b", "agent-a"] });
+    track(server);
+    const daemon = acceptShim(socketPath);
+    listeners.push(daemon.close);
+
+    // Act
+    await server.connect();
+    const hello = await (await daemon.next()).next(ShimHelloSchema);
+
+    // Assert: the ids ride the handshake, so the daemon's roll decision — which
+    // is taken from this frame — can see async work a turn field cannot express.
+    expect(hello.liveTaskSet?.taskIds).toEqual(["agent-b", "agent-a"]);
+  });
+
+  it("announces an EMPTY live task set as a present message, not an absent one", async () => {
+    // Arrange: a shim that answers the question and has nothing running.
+    const { server, socketPath } = harness({}, { liveTaskIds: () => [] });
+    track(server);
+    const daemon = acceptShim(socketPath);
+    listeners.push(daemon.close);
+
+    // Act
+    await server.connect();
+    const hello = await (await daemon.next()).next(ShimHelloSchema);
+
+    // Assert: PRESENT and empty. This is the daemon's only licence to roll the
+    // shim, and it is a different fact from the shim never having answered.
+    expect(hello.liveTaskSet).toBeDefined();
+    expect(hello.liveTaskSet?.taskIds).toEqual([]);
+  });
+
+  it("omits the live task set entirely when nothing answers the question", async () => {
+    // Arrange: no accessor wired — the shape of a bundle built before the field.
+    const { server, socketPath } = harness();
+    track(server);
+    const daemon = acceptShim(socketPath);
+    listeners.push(daemon.close);
+
+    // Act
+    await server.connect();
+    const hello = await (await daemon.next()).next(ShimHelloSchema);
+
+    // Assert: ABSENT, never an empty stand-in. Forging "nothing is running"
+    // here would hand the daemon a licence to kill live async work.
+    expect(hello.liveTaskSet).toBeUndefined();
+  });
+
   it("reannounces the stable query identity and runtime snapshot after a reconnect", async () => {
     const runtime = create(QueryRuntimeIdentitySchema, { vendorSessionId: "vendor-1", effectiveModel: "opus" });
     const { server, socketPath } = harness({}, {
