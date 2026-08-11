@@ -1208,11 +1208,19 @@ func main() {
 	// fleet loss once passed for a healthy restart.
 	srv.RecordBounce = func(rolled bool, cause string) error {
 		entries := make([]bounceledger.Entry, 0, 8)
+		// THE WORK HALF OF THE SAME WITNESS. The ledger above records which
+		// PROCESS each session is handed over with; this records which named
+		// TURNS, TASKS and QUERIES were in flight inside it, so the next boot
+		// can say what the bounce did to each item rather than only to each pid
+		// (server/inflightmanifest.go).
+		bounceWorkspaces := make(map[string]string, 8)
 		for sessionID, pid := range controller.LiveShimPIDs() {
 			rec, ok := sessionRegistry.Get(sessionID)
 			if !ok || rec.CWD == "" {
 				continue
 			}
+			bounceWorkspaces[sessionID] = rec.CWD
+			_ = pid
 			entry := bounceledger.Entry{
 				SessionID:   sessionID,
 				Workspace:   rec.CWD,
@@ -1225,6 +1233,12 @@ func main() {
 			}
 			entries = append(entries, entry)
 		}
+		// The manifest is written BEFORE the ledger, so a daemon that dies
+		// between the two still leaves the work account behind: a bounce with a
+		// ledger and no manifest reads as one that interrupted nothing, and
+		// that false clean bill is the exact thing being denied here.
+		server.RecordBounceStart(legacyLog, bounceWorkspaces, controller,
+			fmt.Sprintf("bounce-%d", time.Now().UnixNano()), cause)
 		return bounceledger.Write(bounceLedgerPath, entries)
 	}
 	// Only now can a creation job invoke the daemon's real session path.  The
@@ -1436,12 +1450,18 @@ func main() {
 		finish := phases.Deferred("boot-sweep")
 		defer finish(nil)
 		(&server.BootSweeper{
-			Reg:        sessionRegistry,
-			Connected:  shimListener.Connected,
-			Held:       sessionlock.Held,
-			Ensurer:    controller,
-			Logf:       legacyLog,
-			Unwired:    bootSweepVerdicts.Route,
+			Reg:       sessionRegistry,
+			Connected: shimListener.Connected,
+			Held:      sessionlock.Held,
+			Ensurer:   controller,
+			Logf:      legacyLog,
+			Unwired:   bootSweepVerdicts.Route,
+			// The work half of the bounce accounting: the controller answers
+			// what is in flight NOW, the SSM answers whether a vanished item
+			// ever recorded a terminal result, and only the two together can
+			// tell a completion from a death.
+			InFlight:   controller,
+			Terminals:  ssmMgr,
 			Ledger:     predecessorBounce,
 			Holders:    sessionlock.WorkspaceLockHolders,
 			Settlement: bounceSettlement,

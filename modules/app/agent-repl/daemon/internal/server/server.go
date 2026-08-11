@@ -2436,8 +2436,22 @@ func (s *Server) applyKeepAlivePolicy(rec registry.Record, nowMs int64) (owned b
 // It reports the MEASURED idleness alongside the verdict, so the hibernation
 // account records the figure this gate acted on rather than one re-derived from
 // a clock that has since moved.
+//
+// THE WORK GATE IS THE IN-FLIGHT SET, NOT `turn_active`. It used to be
+// `st.GetTurnActive()` alone, which is a statement about TURNS and about nothing
+// else — so an IDLE_ASYNC workspace, whose turn ended while a spawned agent or a
+// detached shell kept running, satisfied it and was SIGTERMed with its async work
+// still in flight. The sweeper now asks the one daemon authority
+// (sessioncontroller.Manager.InFlight), which answers over turns, live background
+// tasks and the SDK query carrying them, and whose UNKNOWN blocks exactly as a
+// non-empty answer does.
 func (s *Server) sweepable(sessionID, workspace string, nowMs int64) (idleMs int64, ok bool) {
-	st, found, err := s.ssm.Current(workspace)
+	// THE STATE READ STAYS, even though the in-flight authority below performs
+	// its own. It is this gate's own account of an unreadable or unknown
+	// workspace, in the words the idle sweep's records already use, and dropping
+	// it would lose the distinction between "the sweeper could not read the
+	// state" and "the sweeper was told there is work".
+	_, found, err := s.ssm.Current(workspace)
 	if err != nil {
 		s.logf("session %s: idle sweep state read (ws %s): %v", sessionID, workspace, err)
 		return 0, false
@@ -2447,7 +2461,9 @@ func (s *Server) sweepable(sessionID, workspace string, nowMs int64) (idleMs int
 			sessionID, workspace)
 		return 0, false
 	}
-	if st.GetTurnActive() {
+	if blocked, why := s.controller.InFlight(workspace).Blocks(); blocked {
+		s.logf("session %s: idle sweep HELD (ws %s): %s — a bounce must not interrupt this workspace's work",
+			sessionID, workspace, why)
 		return 0, false
 	}
 	atMs, dated, err := s.ssm.LastActivityMs(workspace)
