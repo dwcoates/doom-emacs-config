@@ -445,3 +445,91 @@ func TestConnectedSurfacesAnUnprobeableConnectionWithoutEvictingIt(t *testing.T)
 		t.Fatal("an unprobeable connection was silently evicted as dead")
 	}
 }
+
+// TestBothConnectionIndexesShareOneProbe asserts the EXTRACTED SHAPE rather
+// than either index's behaviour on its own: a hand-rolled second probe loop
+// would be free to disagree with the first about the same process, and the
+// disagreement would surface as a shim adopted by one caller and killed by
+// another. Every case is stated once and run against both indexes.
+func TestBothConnectionIndexesShareOneProbe(t *testing.T) {
+	// Arrange
+	tests := []struct {
+		name  string
+		index connectionIndex
+		// claim moves the dialled-in connection into the index under test.
+		claim bool
+	}{
+		{name: "parked", index: parkedIndex, claim: false},
+		{name: "claimed", index: claimedIndex, claim: true},
+	}
+	cases := []struct {
+		name string
+		// kill closes the shim's socket before the probe.
+		kill bool
+		want bool
+	}{
+		{name: "a live peer answers connected", kill: false, want: true},
+		{name: "a dead peer answers disconnected", kill: true, want: false},
+	}
+
+	for _, tt := range tests {
+		for _, tc := range cases {
+			t.Run(tt.name+"/"+tc.name, func(t *testing.T) {
+				// Arrange
+				s, path := serve(t)
+				shim := dialAsShim(t, path, "s_abc")
+				waitConnected(t, s, "s_abc")
+				if tt.claim {
+					if _, err := s.Next(context.Background(), "s_abc"); err != nil {
+						t.Fatalf("Next: %v", err)
+					}
+				}
+				if tc.kill {
+					if err := shim.Close(); err != nil {
+						t.Fatalf("closing the shim peer: %v", err)
+					}
+				}
+
+				// Act
+				got, err := s.connectedIn(tt.index, "s_abc")
+
+				// Assert
+				if err != nil {
+					t.Fatalf("connectedIn(%s): %v", tt.index.name, err)
+				}
+				if got != tc.want {
+					t.Fatalf("connectedIn(%s) = %v, want %v", tt.index.name, got, tc.want)
+				}
+			})
+		}
+	}
+}
+
+// TestARetiredEntryIsRemovedFromItsIndex: the probe is not read-only. An entry
+// whose peer is gone is retired by the probe that found it, so no later reader
+// can be served the corpse.
+func TestARetiredEntryIsRemovedFromItsIndex(t *testing.T) {
+	// Arrange
+	s, path := serve(t)
+	shim := dialAsShim(t, path, "s_abc")
+	waitConnected(t, s, "s_abc")
+	if _, err := s.Next(context.Background(), "s_abc"); err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if err := shim.Close(); err != nil {
+		t.Fatalf("closing the shim peer: %v", err)
+	}
+
+	// Act
+	if _, err := s.connectedIn(claimedIndex, "s_abc"); err != nil {
+		t.Fatalf("connectedIn(claimed): %v", err)
+	}
+
+	// Assert
+	s.mu.Lock()
+	_, held := s.claimed["s_abc"]
+	s.mu.Unlock()
+	if held {
+		t.Fatal("the claim record survived the probe that proved its peer gone")
+	}
+}
