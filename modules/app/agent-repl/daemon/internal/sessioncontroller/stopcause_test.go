@@ -39,6 +39,7 @@ func TestEachStopCauseReachesTheShimAsItsOwnAttribution(t *testing.T) {
 		{"account switch", StopCauseAccountSwitch(), "hibernate", "account_switch"},
 		{"bring-up failed", StopCauseBringUpFailed(), "bringup_failed", "bringup_failure"},
 		{"controller exit", StopCauseControllerExit(), "session_controller_exit", "session_controller_exit"},
+		{"rewind restart", StopCauseRewindRestart(), "rewind_restart", "rewind_restart"},
 		{"superseded record", StopCauseSessionDeleted().supersededRecord(), "hibernate_session_superseded", "session_stop_superseded_record"},
 	}
 	for _, tc := range cases {
@@ -85,7 +86,7 @@ func TestEveryStopCauseConstructorIsRendered(t *testing.T) {
 		StopCauseMergedTeardown(), StopCauseHardRestartLive(),
 		StopCauseHardRestartOrphan(), StopCauseDrainExecution(), StopCauseDaemonShutdown(),
 		StopCauseSessionDeleted(), StopCauseSessionSuperseded(), StopCauseAccountSwitch(),
-		StopCauseBringUpFailed(), StopCauseControllerExit(),
+		StopCauseBringUpFailed(), StopCauseControllerExit(), StopCauseRewindRestart(),
 	}
 
 	// Act / Assert.
@@ -212,5 +213,39 @@ func TestTheRetainedSpawnerRefusesOffFunnelStops(t *testing.T) {
 	}
 	if got := spawner.stoppedSessions(); len(got) != 0 {
 		t.Fatalf("an off-funnel stop reached the real spawner: %v", got)
+	}
+}
+
+// A REWIND IS NOT A HIBERNATION, AND ITS STOP MUST NOT SAY IT IS. The rewind's
+// mid-sequence stop was issued as StopCauseHibernateIdleSweep, so the shim was
+// told the idle sweeper had put it to sleep and every rewind became a false
+// positive for anything that counts, logs or greps hibernations — which is the
+// exact diagnosis a hibernation record exists to serve.
+func TestARewindRestartIsNotAttributedToAHibernation(t *testing.T) {
+	// Arrange.
+	cause := StopCauseRewindRestart()
+
+	// Act.
+	stop := cause.stop()
+
+	// Assert.
+	if stop.Initiator == StopCauseHibernateIdleSweep().stop().Initiator {
+		t.Fatalf("a rewind restart is attributed to %q, the idle sweeper's own initiator; nothing sleeps in a rewind", stop.Initiator)
+	}
+}
+
+// AND ITS FUNNEL TOKEN IS ITS OWN. The token travels to the SSM's stale-turn
+// close, so a rewind sharing the `hibernate` path would make a rewound
+// workspace indistinguishable from a slept one in the state log too.
+func TestARewindRestartCarriesItsOwnFunnelToken(t *testing.T) {
+	// Arrange.
+	cause := StopCauseRewindRestart()
+
+	// Act.
+	got := cause.path()
+
+	// Assert.
+	if got != "rewind_restart" {
+		t.Fatalf("rewind restart path = %q, want %q", got, "rewind_restart")
 	}
 }

@@ -153,7 +153,7 @@ func (m *Manager) rewindKeepAliveTurns(ctx context.Context, workspace, sessionID
 
 	// STOP THE SHIM. The CLI holds the transcript open; copying from under a
 	// live writer risks a half-written trailing line.
-	stopErr := m.stopSessionController(workspace, sessionID, StopCauseHibernateIdleSweep())
+	stopErr := m.stopSessionController(workspace, sessionID, StopCauseRewindRestart())
 	releaseSettled()
 	if stopErr != nil {
 		return "", fmt.Errorf("session-controller: rewind ws=%q session=%s: stopping the shim: %w", workspace, sessionID, stopErr)

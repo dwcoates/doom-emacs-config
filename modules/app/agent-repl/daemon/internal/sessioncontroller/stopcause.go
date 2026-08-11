@@ -64,6 +64,7 @@ const (
 	causeAccountSwitch
 	causeBringUpFailed
 	causeControllerExit
+	causeRewindRestart
 	// causeSupersededRecord is INTERNAL: a session-scoped stop that reached a
 	// record a different live session has since replaced. It refines whichever
 	// cause the caller supplied rather than replacing it, so the record still
@@ -147,6 +148,11 @@ var stopCauseTable = map[stopCauseID]stopCauseRendering{
 		initiator: "bringup_failure",
 		reason:    "the bring-up never wired, so the shim it spawned was stopped rather than left racing the retry",
 	},
+	causeRewindRestart: {
+		path:      "rewind_restart",
+		initiator: "rewind_restart",
+		reason:    "a conversation rewind stopped the shim so the transcript could be copied from under no live writer, and respawns it on the truncated copy",
+	},
 	causeControllerExit: {
 		path:      "session_controller_exit",
 		initiator: "session_controller_exit",
@@ -219,6 +225,23 @@ func StopCauseBringUpFailed() StopCause { return StopCause{id: causeBringUpFaile
 
 // StopCauseControllerExit — a session controller's run loop ended on its own.
 func StopCauseControllerExit() StopCause { return StopCause{id: causeControllerExit} }
+
+// StopCauseRewindRestart — a conversation rewind stopped the shim mid-sequence
+// and will respawn it on the truncated transcript (rewind.go).
+//
+// IT IS NOT A HIBERNATION AND MUST NOT BE LABELLED AS ONE. The stop used to be
+// issued as StopCauseHibernateIdleSweep, which told the shim it was being put to
+// sleep by the idle sweeper and made every rewind a false positive for anything
+// that counts, logs or greps hibernations — poisoning the one diagnosis a
+// hibernation record exists to serve. Nothing sleeps here: the shim comes back
+// four steps later on the rewound conversation, and the held prompt is delivered
+// on top of it.
+//
+// THE SETTLED HIBERNATION LEASE IS STILL BORROWED, and legitimately so: the
+// rewind and a real hibernation both need "no turn is live", and one lease
+// serving both is what makes them mutually exclusive. Only the stop CAUSE was
+// wrong.
+func StopCauseRewindRestart() StopCause { return StopCause{id: causeRewindRestart} }
 
 // causesOwingTurnResumption is the set of stops after which an interrupted
 // turn is still OWED.
