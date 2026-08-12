@@ -4,8 +4,16 @@ The agent-shim protocol definitions. The `.proto` files ARE the contract,
 including behavioral semantics as normative comments. Two packages:
 `agentshim.core.v1` (envelope, lifecycle, control plane, store plumbing) and
 `agentshim.frontend.v1` (the daemon→frontend resolved surface, protojson on
-the wire). A third, `agentshim.conversation.v1`, is being written now — see
-`FROZEN-conversation-v1.md`.
+the wire), and `agentshim.conversation.v1` (the vendor-agnostic conversation
+model the producers write and the store persists).
+
+`conversation.v1` is specified in `FROZEN-conversation-v1.md` and is nine
+files: `entry.proto` (the record and its three-way cut), `message.proto`,
+`content.proto`, `payloads.proto`, `bookkeeping.proto`, `unsupported.proto`,
+`ephemeral.proto` (the one message that is never written), plus the two shared
+vocabularies that moved down from `frontend.v1` — `tokens.proto` and
+`commands.proto`. Both moved because a DURABLE record names them, and a stored
+record cannot depend on the daemon's resolved output surface.
 
 ## `agentshim.data.v1` was DELETED
 

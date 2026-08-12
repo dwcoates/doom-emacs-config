@@ -1,0 +1,281 @@
+// payloads.proto — the bodies of the MessageEntry payload arms.
+//
+// Every message here is DURABLE. The one ephemeral payload, ContentArriving,
+// lives in ephemeral.proto so that "nothing in this file is ever written" is a
+// fact about a file rather than a rule spread across records.
+
+syntax = "proto3";
+
+package agentshim.conversation.v1;
+
+import "agentshim/conversation/v1/commands.proto";
+import "agentshim/conversation/v1/content.proto";
+import "agentshim/conversation/v1/tokens.proto";
+
+option go_package = "agentrepl/proto/agentshim/conversation/v1;conversationv1";
+
+// Something a person typed. The opening of a turn.
+message UserSaid {
+  // What they typed, and anything they attached. NOT a bare TextBlock: a person
+  // pastes images, and a single block could not hold one alongside their words.
+  UserContent content = 1;
+}
+
+// One response from the agent.
+message AgentSaid {
+  // The response entire: prose, reasoning, and tool calls, in order.
+  AgentContent content = 1;
+  // What this response cost, in the ONE canonical token shape. Carried because
+  // it is evidence about THIS message; the footer's aggregate figures are
+  // resolved by the daemon from many of these and are not this.
+  TokenUsage usage = 2;
+  // The model that produced it, since a conversation can span models and the
+  // cost of a message is not readable without knowing which. It sits beside the
+  // usage rather than inside it because it describes the RESPONSE, not the
+  // counters.
+  string model = 3;
+  // Why the agent stopped. A oneof rather than a string because the set is
+  // closed and a client branches on it.
+  StopReason stop_reason = 4;
+}
+
+// A tool the agent called has returned.
+//
+// An UPDATE arm rather than a content block, carrying the message_id of the
+// message that made the call, so the result folds onto the tool card without a
+// correlation pass and costs no page slot.
+//
+// The vendor delivers these inside user-role records. That is a transport
+// accident of its API, and this shape is where it stops.
+message ToolReturned {
+  // The call this answers, which the agent supplied when it made the call.
+  string tool_call_id = 1;
+  // What the tool returned, for the reader.
+  ToolResultContent content = 2;
+  // The tool FAILED. A separate fact from empty content, because a tool that
+  // returned nothing and a tool that errored are different things to render.
+  bool is_error = 3;
+}
+
+// Why an agent response ended where it did.
+message StopReason {
+  oneof reason {
+    // The agent finished speaking.
+    StopEndTurn end_turn = 1;
+    // The agent called a tool and is waiting for it.
+    StopToolCall tool_call = 2;
+    // The response hit its length ceiling.
+    StopMaxTokens max_tokens = 3;
+    // Something interrupted it.
+    StopInterrupted interrupted = 4;
+    // The vendor gave a reason we do not model.
+    StopUnsupported unsupported = 5;
+  }
+}
+
+// The agent had nothing further to say.
+message StopEndTurn {}
+
+// The agent stopped to wait for a tool it called.
+message StopToolCall {}
+
+// The response was truncated at its output ceiling.
+message StopMaxTokens {}
+
+// The response was cut short by something outside it.
+message StopInterrupted {}
+
+// A stop reason this schema does not model.
+message StopUnsupported {
+  // What the vendor called it, so a later schema knows what to add.
+  string reason = 1;
+}
+
+// A permission the agent asked for.
+message PermissionAsked {
+  // What the agent wants to do, so the user can answer knowing what they allow.
+  ToolCallBlock requested = 1;
+}
+
+// The answer to a permission the agent asked for.
+message PermissionAnswered {
+  oneof answer {
+    PermissionAllowed allowed = 1;
+    PermissionDenied denied = 2;
+    // The question went away without an answer — the turn ended, the session
+    // stopped. Distinct from denial, which is a decision the user made.
+    PermissionAbandoned abandoned = 3;
+  }
+}
+
+// The user allowed the call.
+message PermissionAllowed {
+  // The user allowed this kind of call from now on, not just this one.
+  bool for_session = 1;
+}
+
+// The user refused the call.
+message PermissionDenied {
+  // What the user said when denying, which the agent reads as feedback.
+  string reason = 1;
+}
+
+// Nobody ever answered, and the question is no longer live.
+message PermissionAbandoned {}
+
+// Something went wrong, stated as a card the user reads and acts on.
+message FailureRaised {
+  // What went wrong, in the user's terms rather than the system's.
+  string summary = 1;
+  // The underlying detail, for someone who wants it. Held apart from the
+  // summary so a client can show one without the other.
+  string detail = 2;
+  // Whether anything can be done about it, resolved by the producer rather than
+  // guessed by a renderer from the text.
+  FailureRecovery recovery = 3;
+}
+
+// What, if anything, the user can do about a failure.
+message FailureRecovery {
+  oneof recovery {
+    // It will retry itself; the user does nothing.
+    RecoveryAutomatic automatic = 1;
+    // The user must act.
+    RecoveryUserAction user_action = 2;
+    // Nothing can be done; the work is lost.
+    RecoveryNone none = 3;
+  }
+}
+
+// The system recovers on its own and the user need not act.
+message RecoveryAutomatic {}
+
+// The user has to do something before this can proceed.
+message RecoveryUserAction {
+  // The action to take, stated by the producer so a client never invents one.
+  string action = 1;
+}
+
+// Unrecoverable. Said plainly rather than dressed as a retry that will not help.
+message RecoveryNone {}
+
+// The conversation was cut here, and the reader must see where.
+message ContextCut {
+  oneof cut {
+    // Everything before this was discarded outright.
+    ContextCleared cleared = 1;
+    // Everything before this was summarized into what follows.
+    ContextCompacted compacted = 2;
+  }
+}
+
+// History was discarded with nothing left in its place.
+message ContextCleared {}
+
+// History was replaced by a summary of itself.
+message ContextCompacted {
+  // The summary that replaced the history, which the feed shows in its place so
+  // the cut is not a hole. AgentContent because the summary is the agent's own
+  // prose about what it is discarding.
+  AgentContent summary = 1;
+  // What the context measured before and after, so a reader can see what the
+  // compaction bought rather than being told it happened.
+  int64 tokens_before = 2;
+  int64 tokens_after = 3;
+}
+
+// A slash command the DAEMON answered instead of the agent.
+message DaemonAnsweredCommand {
+  // WHICH command, and nothing else. There is deliberately no text field: the
+  // argument a user typed after a command must never reach a surface that
+  // renders it.
+  SessionCommand command = 1;
+}
+
+// Work that DETACHED from the turn and now runs alongside it.
+message DetachedWorkStarted {
+  // The tool call that spawned it. Every detachment originates from one, and
+  // this is what draws the line from the card back to the call.
+  string origin_tool_call_id = 1;
+  // What to call it in the feed, resolved by the producer.
+  string label = 2;
+  // What kind of thing detached, which decides how its output is read.
+  DetachedWorkKind kind = 3;
+}
+
+// What kind of work detached.
+message DetachedWorkKind {
+  oneof kind {
+    // A subagent: a whole conversation happening elsewhere.
+    DetachedAgent agent = 1;
+    // A background shell command.
+    DetachedShell shell = 2;
+    // A workflow with its own journal.
+    DetachedWorkflow workflow = 3;
+    // We could not tell, which is stated rather than guessed.
+    DetachedUnclassified unclassified = 4;
+  }
+}
+
+// A subagent running its own conversation.
+message DetachedAgent {}
+
+// A shell command running in the background.
+message DetachedShell {}
+
+// A workflow with its own journal of steps.
+message DetachedWorkflow {}
+
+// Detached work we could not classify. Stated rather than defaulted into one of
+// the known kinds, because a wrong kind renders wrong output confidently.
+message DetachedUnclassified {
+  // The tool we could not classify, so the card can still name it.
+  string tool_name = 1;
+}
+
+// Output accumulating into detached work already open.
+message DetachedWorkProgressed {
+  // Output since the last record, appended in seq order. A DELTA rather than
+  // the whole spool, because the whole spool re-sent on every update is how a
+  // long-running shell costs more to watch than to run.
+  string output = 1;
+}
+
+// Detached work reached an end.
+message DetachedWorkEnded {
+  oneof outcome {
+    DetachedSucceeded succeeded = 1;
+    DetachedFailed failed = 2;
+    // It was stopped on purpose.
+    DetachedCancelled cancelled = 3;
+    // We stopped hearing from it. DISTINCT from failure: we do not know that it
+    // failed, only that we cannot see it any more.
+    DetachedLost lost = 4;
+  }
+}
+
+// It finished and did what it was asked.
+message DetachedSucceeded {
+  // What it reported on the way out, for the card's collapsed line.
+  string summary = 1;
+}
+
+// It finished and did not.
+message DetachedFailed {
+  // What went wrong, for the card's collapsed line.
+  string summary = 1;
+}
+
+// Someone stopped it deliberately.
+message DetachedCancelled {}
+
+// We lost sight of it.
+//
+// A SEPARATE OUTCOME FROM FAILURE, deliberately. Folding it into failure would
+// have this system assert something it did not observe: that the work died.
+message DetachedLost {
+  // How we concluded it: the file vanished, it went silent, a sweep found it.
+  // Carried so "we watched it exit" is distinguishable from "we stopped
+  // hearing from it".
+  string inference = 1;
+}

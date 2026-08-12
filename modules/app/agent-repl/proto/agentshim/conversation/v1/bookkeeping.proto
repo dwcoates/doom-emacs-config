@@ -1,0 +1,182 @@
+// bookkeeping.proto — facts ABOUT the session, which render as nothing.
+//
+// The distinction from message.proto is content versus evidence. A message is
+// something the conversation CONSISTS OF; bookkeeping is a fact ABOUT it. If
+// you printed the conversation to read it, none of this would appear.
+
+syntax = "proto3";
+
+package agentshim.conversation.v1;
+
+import "agentshim/conversation/v1/tokens.proto";
+
+option go_package = "agentrepl/proto/agentshim/conversation/v1;conversationv1";
+
+// A fact about the session that renders as nothing.
+//
+// THERE IS NO MESSAGE ID ANYWHERE IN THIS MESSAGE. A page is ten messages, so a
+// boundary that could name one would silently spend a slot and the user would
+// see a short page with nothing logged. Here it has nowhere to put one.
+//
+// IT IS STILL RETRIEVED, just never COUNTED: the session state machine,
+// accounting and the turn ledger read these by SEQ RANGE, which is a different
+// query with a different shape from a page.
+//
+// THE FRONTEND NEVER SEES THESE. Bookkeeping reaches a client only after the
+// daemon has resolved it into a view, which is what makes it evidence rather
+// than content.
+message BookkeepingEntry {
+  oneof kind {
+    // The session began, with the configuration it began under.
+    SessionBegan session_began = 1;
+    // The session ended.
+    SessionEnded session_ended = 2;
+
+    // A turn began. Every turn produces one, so an owner here would make every
+    // turn in the conversation a phantom page slot.
+    TurnBegan turn_began = 3;
+    // A turn ended, and how.
+    TurnEnded turn_ended = 4;
+
+    // Something is alive and working. It reports liveness, never content.
+    Heartbeat heartbeat = 5;
+
+    // How long a response took, retained for analysis on replay. It measures
+    // the conversation rather than participating in it.
+    ResponseTiming response_timing = 6;
+
+    // A diagnostic about the READER rather than the read. Consumers must never
+    // render it as conversation material.
+    ProducerDiagnostic producer_diagnostic = 7;
+
+    // The vendor's session identity changed, with what it changed from. Kept so
+    // a rotated id is reconciled with the conversation it continues rather than
+    // appearing as a new one.
+    SessionIdentityChanged session_identity_changed = 8;
+
+    // A usage measurement taken at a turn boundary. Evidence the daemon
+    // resolves into the figure a footer shows; the raw measurement never
+    // reaches a client.
+    UsageObserved usage_observed = 9;
+  }
+}
+
+// The session began.
+message SessionBegan {
+  // The model it started under. A conversation can span models, so this is the
+  // starting point rather than the answer for every message in it.
+  string model = 1;
+  // The working directory it started in, which is what makes a relative path in
+  // a later tool call resolvable.
+  string cwd = 2;
+}
+
+// The session ended, and how.
+message SessionEnded {
+  oneof reason {
+    SessionEndedNormally normally = 1;
+    SessionEndedByError by_error = 2;
+    // The harness went away underneath it.
+    SessionEndedByShutdown by_shutdown = 3;
+  }
+}
+
+// It closed the way it was supposed to.
+message SessionEndedNormally {}
+
+// It closed because something failed.
+message SessionEndedByError {
+  // What failed, so the end is investigable rather than merely recorded.
+  string detail = 1;
+}
+
+// The process hosting it went away.
+message SessionEndedByShutdown {}
+
+// A turn began.
+message TurnBegan {
+  // The submission this turn answers, so a turn can be tied to the prompt that
+  // caused it without a correlation pass.
+  string turn_id = 1;
+}
+
+// A turn ended, and how it ended.
+message TurnEnded {
+  // The turn this closes. An end can close only the turn it names, so a late
+  // boundary cannot close whatever happens to be open.
+  string turn_id = 1;
+
+  oneof outcome {
+    // The turn completed on its own.
+    TurnCompleted completed = 2;
+    // The user stopped it. An ACCUSATION the evidence must support: only a
+    // user-commanded stop the producer saw acknowledged sets this.
+    TurnInterrupted interrupted = 3;
+    // It stopped and we do not know why. Distinct from interrupted, which
+    // claims a cause.
+    //
+    // THIS ARM EXISTS SO A SYNTHESIZED CLOSE HAS SOMEWHERE HONEST TO GO. A
+    // daemon that cannot see why a turn stopped previously wrote `completed`,
+    // which is a claim it had no evidence for and which then replayed forever.
+    TurnEndedUnexplained unexplained = 4;
+  }
+}
+
+// It ran to its own end.
+message TurnCompleted {}
+
+// A user-commanded stop ended it, and the producer saw that stop acknowledged.
+message TurnInterrupted {}
+
+// It stopped for a reason nobody observed.
+message TurnEndedUnexplained {
+  // How the close was arrived at — which sweep, which timeout, which teardown.
+  // Carried so an inference is readable as one.
+  string inference = 1;
+}
+
+// Something is alive and working.
+message Heartbeat {
+  // What is alive, so a footer can say which work is still running. IDENTITIES
+  // rather than a count, because a count cannot be reconciled against what a
+  // feed is showing and a set can.
+  repeated string live_work_ids = 1;
+}
+
+// How long a response took. It measures the conversation rather than
+// participating in it, which is why it is bookkeeping despite naming a message.
+message ResponseTiming {
+  // Which message was timed. NOT a lineage pointer and never used as one — a
+  // page cannot reach this entry, so this can never spend a slot.
+  string message_id = 1;
+  // Time to the first token, which is what a user experiences as latency.
+  int64 first_token_ms = 2;
+  // Time to the last, which is what the work actually cost.
+  int64 total_ms = 3;
+}
+
+// A diagnostic about the READER rather than the read.
+message ProducerDiagnostic {
+  // What the producer was doing when it had something to say.
+  string operation = 1;
+  // What it had to say. Never rendered as conversation material.
+  string detail = 2;
+}
+
+// The vendor rotated the session's identity.
+message SessionIdentityChanged {
+  // What it was before, so the conversation it continues can be found.
+  string previous_session_id = 1;
+  // Why it rotated, as far as the producer could tell.
+  string reason = 2;
+}
+
+// A usage measurement taken at a turn boundary.
+message UsageObserved {
+  // The turn this measurement was taken at the boundary of.
+  string turn_id = 1;
+  // The measurement, in the same canonical shape a response carries, so a turn
+  // total and a message cost are the same units and can be compared without a
+  // conversion nobody would remember to write.
+  TokenUsage usage = 2;
+}

@@ -1,10 +1,20 @@
 // tokens.proto — SHARED VOCABULARY: the one canonical token shape.
+//
+// MOVED HERE FROM agentshim.frontend.v1, unchanged. It says below that the shim
+// translates vendor usage into this shape at the boundary and stops there — and
+// that boundary is this package. A durable record carrying what a response cost
+// cannot depend on the daemon's resolved output surface, so the shape lives at
+// the producer's layer and frontend.v1 imports it.
+//
+// The alternative — a second usage message in this package — is the drift this
+// move exists to prevent. There is exactly one place this system states what a
+// request cost.
 
 syntax = "proto3";
 
-package agentshim.frontend.v1;
+package agentshim.conversation.v1;
 
-option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+option go_package = "agentrepl/proto/agentshim/conversation/v1;conversationv1";
 
 // THE ONE CANONICAL TOKEN SHAPE, and the only representation in which this
 // system states what a request cost.
