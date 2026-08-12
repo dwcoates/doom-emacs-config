@@ -88,14 +88,13 @@ export interface PromptQueueDeps {
    * drain gate; see the module comment on why reconnect is not enough.
    */
   revived: (workspace: string) => boolean;
-  /** Draw ENTRY in the feed as visibly pending. Never an ack. */
-  echo: (entry: QueuedPrompt) => void;
-  /**
-   * Take ENTRY's pending bubble back down. Run when the entry leaves the queue
-   * for either reason: the real submit files its own bubble under the real
-   * request id, and an expired entry is replaced by its failure card.
-   */
-  retract: (entry: QueuedPrompt) => void;
+  // RETIRED: `echo` and `retract` stood here. A held prompt was drawn in the
+  // feed as a pending bubble the instant it was typed and taken back down when
+  // it left the queue. That bubble was the optimistic prompt render under
+  // another name — a feed item for a prompt no durable record existed for —
+  // and it is gone with the rest of it: a prompt renders when it round-trips
+  // through the SDK. A held prompt that is never sent still gets its own
+  // account, through `fail` below.
   /** Send ENTRY as a real `SubmitPromptCmd`; rejects exactly as the ack does. */
   submit: (entry: QueuedPrompt) => Promise<void>;
   /** Surface ENTRY's own honest failure. One call per lost prompt. */
@@ -154,7 +153,6 @@ export class PromptQueue {
     const queue = held ?? [];
     if (held === undefined) this.queues.set(workspace, queue);
     queue.push(entry);
-    this.deps.echo(entry);
     // The deadline is armed per entry, not per queue: each held prompt owes the
     // user an answer within the bound counted from ITS OWN submission, and a
     // single queue-wide timer armed by the first entry would leave a later one
@@ -199,10 +197,6 @@ export class PromptQueue {
         const entry = queue[0];
         if (entry === undefined) break;
         queue.shift();
-        // The pending bubble comes down FIRST: the submit below files its own
-        // bubble under the real request id, and leaving this one standing would
-        // show the same prompt twice.
-        this.deps.retract(entry);
         try {
           await this.deps.submit(entry);
         } catch (err) {
@@ -228,7 +222,6 @@ export class PromptQueue {
       const entry = queue[0];
       if (entry === undefined || entry.queuedAtMs > deadlineAt) break;
       queue.shift();
-      this.deps.retract(entry);
       this.deps.fail(
         entry,
         `the session did not come back within ${Math.round(this.boundMs / 1000)}s; ` +

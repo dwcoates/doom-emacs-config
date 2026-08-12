@@ -1344,18 +1344,6 @@ pre {
   background-repeat: no-repeat;
   animation: bubble-wave 3.2s linear infinite;
 }
-/* A prompt the webapp has drawn but the daemon has not yet acknowledged rests
-   as a plain fill. The bubble appears the instant the user hits send — that is
-   the whole point of minting it locally — and the wave above is what the
-   daemon's receipt adds to it, so the motion starting is the acknowledgement
-   itself rather than an ornament that happens to arrive with it. The band is
-   dropped outright rather than merely paused: a paused wave would park a
-   static shadow across the fill, which says "working" just as loudly as a
-   moving one. The render emits no `animation-delay` for such a bubble either. */
-.bubble.user.unacked {
-  animation: none;
-  background-image: none;
-}
 /* Left to right, entering fully off the left edge and leaving fully off the
    right. Percentages in `background-position` measure the image's travel
    across the leftover (container − image), which is NEGATIVE for an image
@@ -2752,15 +2740,14 @@ pre {
      runs, the footer moves, the answer arrives), so it simply stops here
      rather than slowing, as the spinner and footer breath above do for signals
      nothing else restates. A reader in this mode therefore cannot tell an
-     unacked bubble from an acknowledged one, and loses nothing that the rest
-     of the feed does not say. Stopping rather than re-timing also keeps the
+     bubble with the wave from one without, and loses nothing that the rest of
+     the feed does not say. Stopping rather than re-timing also keeps the
      period a single constant: the negative `animation-delay` each bubble
      renders with is computed against one `BUBBLE_WAVE_PERIOD_MS`, and a
      reduced motion override that merely LENGTHENED the pass would leave that
-     delay seeking to the wrong phase here. The gradient goes with it, exactly
-     as it does for an unacked bubble: a stopped wave would otherwise park a
-     static shadow band across the fill. The body needs no entry — it never
-     had an animation of its own. */
+     delay seeking to the wrong phase here. The gradient goes with it: a
+     stopped wave would otherwise park a static shadow band across the fill.
+     The body needs no entry — it never had an animation of its own. */
   .bubble.user {
     animation: none;
     background-image: none;

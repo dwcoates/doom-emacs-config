@@ -7,6 +7,7 @@ import {
   stringField,
   topLevelUsage,
   RETIRED_FENCE_MEMORY,
+  userTurnKey,
   type ConversationItem,
   type ResultItem,
   type StoreState,
@@ -1126,24 +1127,24 @@ describe("ingest conversation-items", () => {
 // The connect resync replays history over the same socket that carries live
 // pushes, so arrival order interleaves low-seq history with high-seq live
 // frames. The feed is ordered by each delta's through-seq, not by arrival —
-// the bug this pins: a prompt echo landing mid-replay stranded wherever the
+// the bug this pins: a live prompt landing mid-replay stranded wherever the
 // replay happened to be, permanently.
 
 describe("feed order under replay/live interleave", () => {
-  function userTurnItem(requestId: string): ConversationItem {
-    return { kind: "user-turn", requestId, content: [{ type: "text", text: "hi" }], ts: TS };
+  function userTurnItem(uuid: string): ConversationItem {
+    return { kind: "user-turn", uuid, content: [{ type: "text", text: "hi" }], ts: TS };
   }
 
   /**
    * A prompt as the REAL pipeline delivers it: a transcript user line, whose
-   * request id is empty and whose only identity is the record uuid.
+   * only identity is the record uuid.
    */
   function transcriptTurn(uuid: string, text: string): ConversationItem {
-    return { kind: "user-turn", requestId: "", uuid, content: [{ type: "text", text }], ts: TS };
+    return { kind: "user-turn", uuid, content: [{ type: "text", text }], ts: TS };
   }
 
   it("slots a replayed item above a live item that arrived first", () => {
-    // Arrange — the live prompt echo (seq 100) beats the replay to the socket.
+    // Arrange — the live prompt (seq 100) beats the replay to the socket.
     const store = new ConversationStore();
     store.ingest([itemsEffect([userTurnItem("live")], 100)]);
     // Act — a history item (seq 5) arrives late.
@@ -1152,7 +1153,7 @@ describe("feed order under replay/live interleave", () => {
     expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
   });
 
-  it("leaves a prompt echo last once a mid-replay burst completes", () => {
+  it("leaves a live prompt last once a mid-replay burst completes", () => {
     // Arrange / Act — replay chunk, then the echo, then the rest of the replay.
     const store = new ConversationStore();
     store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0", messageId: "mh1" })], 5)]);
@@ -1169,7 +1170,7 @@ describe("feed order under replay/live interleave", () => {
     // Arrange — history up to seq 10.
     const store = new ConversationStore();
     store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0" })], 10)]);
-    // Act — a daemon-composed delta (through-seq 0: a prompt receipt, a
+    // Act — a daemon-composed delta (through-seq 0: an ephemeral card, a
     // permission card, a failure card — none of them store facts).
     store.ingest([itemsEffect([userTurnItem("r1")], 0)]);
     // Assert — it describes what is happening NOW, so it belongs at the tail;
@@ -1177,13 +1178,13 @@ describe("feed order under replay/live interleave", () => {
     expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
   });
 
-  it("leaves a seq-less item where it landed when its durable twin arrives", () => {
-    // Arrange — history, then the daemon's seq-less prompt receipt.
+  it("leaves a seq-less item where it landed when its ranked redelivery arrives", () => {
+    // Arrange — history, then a seq-less daemon push of the prompt.
     const store = new ConversationStore();
     store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0" })], 10)]);
-    store.ingest([itemsEffect([userTurnItem("r1")], 0)]);
-    // Act — the durable transcript line, stamped with the same request id.
-    store.ingest([itemsEffect([userTurnItem("r1")], 11)]);
+    store.ingest([itemsEffect([userTurnItem("u1")], 0)]);
+    // Act — the same record, redelivered with a store seq of its own.
+    store.ingest([itemsEffect([userTurnItem("u1")], 11)]);
     // Assert — one bubble, still at the tail: a redelivery replaces content,
     // never position.
     expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
@@ -3047,194 +3048,18 @@ describe("a stale async push", () => {
   });
 });
 
-// --- the local prompt bubble -------------------------------------------------
+// --- a prompt renders only after its round trip -----------------------------
 //
-// The webapp files its own bubble for a submit the daemon has not answered yet,
-// so the user's words appear on the frame they hit send rather than one round
-// trip later. The daemon's receipt for the same request id then supersedes it,
-// and that supersession is what the breath renders off (`UserTurnItem.unacked`).
+// The webapp used to file its own bubble at submit, keyed on the request id,
+// and reconcile it against the durable line the CLI later wrote. That gave one
+// prompt two identities and drew it twice. There is no local bubble any more:
+// a prompt reaches the feed when its record round-trips, keyed on that record's
+// uuid and on nothing else.
 
-describe("addLocalPrompt", () => {
-  /** The daemon's receipt for a submit: same request id, no unacked marking. */
-  function receipt(requestId: string, text: string): ConversationItem {
-    return {
-      kind: "user-turn",
-      requestId,
-      uuid: `prompt-echo:${requestId}`,
-      content: [{ type: "text", text }],
-      ts: TS,
-    };
-  }
-
-  it("files the submitted prompt as an unacked bubble", () => {
-    // Arrange
-    const store = new ConversationStore();
-    // Act
-    store.addLocalPrompt("r1", "hello");
-    // Assert
-    expect(store.state.items).toHaveLength(1);
-    const item = store.state.items[0] as Extract<ConversationItem, { kind: "user-turn" }>;
-    expect(item.kind).toBe("user-turn");
-    expect(item.requestId).toBe("r1");
-    expect(item.unacked).toBe(true);
-  });
-
-  it("carries the prompt text the submit sent", () => {
-    // Arrange
-    const store = new ConversationStore();
-    // Act
-    store.addLocalPrompt("r1", "hello");
-    // Assert
-    const item = store.state.items[0] as Extract<ConversationItem, { kind: "user-turn" }>;
-    expect(item.content).toEqual([{ type: "text", text: "hello" }]);
-  });
-
-  it("stamps the bubble from the store's clock", () => {
-    // Arrange — an injected clock, so the stamp is the store's and not the wall's.
-    const store = new ConversationStore(() => {}, () => 1700000000000);
-    // Act
-    store.addLocalPrompt("r1", "hello");
-    // Assert
-    const item = store.state.items[0] as Extract<ConversationItem, { kind: "user-turn" }>;
-    expect(item.ts).toBe(new Date(1700000000000).toISOString());
-  });
-
-  it("ranks the bubble at the feed tail", () => {
-    // Arrange — history up to seq 10.
-    const store = new ConversationStore();
-    store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0" })], 10)]);
-    // Act
-    store.addLocalPrompt("r1", "hello");
-    // Assert — a prompt just sent belongs below everything already there.
-    expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
-  });
-
-  it("reports a visible change", () => {
-    // Arrange
-    const store = new ConversationStore();
-    // Act / Assert — the caller schedules a render off this.
-    expect(store.addLocalPrompt("r1", "hello")).toBe(true);
-  });
-
-  it("refuses a prompt with no request id to key its receipt on", () => {
-    // Arrange — a bubble filed under no id could never be superseded.
-    const store = new ConversationStore();
-    // Act / Assert
-    expect(() => store.addLocalPrompt("", "hello")).toThrow(/request id/);
-  });
-
-  it("drops the unacked marking when the daemon's receipt lands", () => {
-    // Arrange
-    const store = new ConversationStore();
-    store.addLocalPrompt("r1", "hello");
-    // Act
-    store.ingest([itemsEffect([receipt("r1", "hello")], 0)]);
-    // Assert — one bubble, now acknowledged: this is what starts the breath.
-    expect(store.state.items).toHaveLength(1);
-    const item = store.state.items[0] as Extract<ConversationItem, { kind: "user-turn" }>;
-    expect(item.unacked).toBeUndefined();
-  });
-
-  it("keeps the acknowledged bubble where the local one already sat", () => {
-    // Arrange — history, the local bubble, then a later item above nothing.
-    const store = new ConversationStore();
-    store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0" })], 10)]);
-    store.addLocalPrompt("r1", "hello");
-    // Act — the receipt arrives with a real seq of its own.
-    store.ingest([itemsEffect([receipt("r1", "hello")], 11)]);
-    // Assert — replaced in place, never re-ranked.
-    expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
-  });
-
-  it("keeps two concurrent submits on their own bubbles", () => {
-    // Arrange / Act — two prompts sent before either is acknowledged.
-    const store = new ConversationStore();
-    store.addLocalPrompt("r1", "first");
-    store.addLocalPrompt("r2", "second");
-    // Assert
-    expect(store.state.items).toHaveLength(2);
-  });
-});
-
-describe("dropUnackedPrompt", () => {
-  it("removes the bubble for a refused submit", () => {
-    // Arrange
-    const store = new ConversationStore();
-    store.addLocalPrompt("r1", "hello");
-    // Act — the daemon refused the command, so no turn ever started.
-    const dropped = store.dropUnackedPrompt("r1");
-    // Assert
-    expect(dropped).toBe(true);
-    expect(store.state.items).toEqual([]);
-  });
-
-  it("leaves an already-acknowledged bubble standing", () => {
-    // Arrange — the receipt landed, so the prompt demonstrably reached the daemon.
-    const store = new ConversationStore();
-    store.addLocalPrompt("r1", "hello");
-    store.ingest([
-      itemsEffect(
-        [
-          {
-            kind: "user-turn",
-            requestId: "r1",
-            uuid: "prompt-echo:r1",
-            content: [{ type: "text", text: "hello" }],
-            ts: TS,
-          },
-        ],
-        0,
-      ),
-    ]);
-    // Act — a late refusal must not take down a prompt the daemon has.
-    const dropped = store.dropUnackedPrompt("r1");
-    // Assert
-    expect(dropped).toBe(false);
-    expect(store.state.items).toHaveLength(1);
-  });
-
-  it("leaves another submit's bubble alone", () => {
-    // Arrange
-    const store = new ConversationStore();
-    store.addLocalPrompt("r1", "first");
-    store.addLocalPrompt("r2", "second");
-    // Act
-    store.dropUnackedPrompt("r1");
-    // Assert
-    const item = store.state.items[0] as Extract<ConversationItem, { kind: "user-turn" }>;
-    expect(store.state.items).toHaveLength(1);
-    expect(item.requestId).toBe("r2");
-  });
-
-  it("reports no removal when nothing was standing", () => {
-    // Arrange — a refusal for a submit whose bubble was never filed.
-    const store = new ConversationStore();
-    // Act / Assert
-    expect(store.dropUnackedPrompt("r1")).toBe(false);
-  });
-});
-
-// --- a prompt's identity ----------------------------------------------------
-//
-// A prompt is PROVISIONAL until the daemon supplies a uuid for it, and
-// IDENTIFIED forever after. Adoption is the one transition, and the request id
-// is only ever the token that carries a bubble across it.
-//
-// The defect these pin: the request id came FIRST in the key, so a prompt filed
-// locally keyed `req:<id>` while the SAME prompt replayed from history keyed
-// `uuid:<uuid>` — a replay carries no request id, since no submit of this
-// daemon's is outstanding for it. Two keys, no match, and the user's own prompt
-// appeared twice.
-
-describe("a prompt adopts the daemon's uuid as its identity", () => {
-  /** The prompt as the transcript delivers it once attribution has stamped it. */
-  function attributedLine(requestId: string, uuid: string, text: string): ConversationItem {
-    return { kind: "user-turn", requestId, uuid, content: [{ type: "text", text }], ts: TS };
-  }
-
-  /** The SAME prompt on a replay: its record uuid, and no request id at all. */
-  function replayedLine(uuid: string, text: string): ConversationItem {
-    return { kind: "user-turn", requestId: "", uuid, content: [{ type: "text", text }], ts: TS };
+describe("a prompt reaches the feed only with its durable line", () => {
+  /** The prompt as the transcript delivers it: its record uuid, nothing else. */
+  function durableLine(uuid: string, text: string): ConversationItem {
+    return { kind: "user-turn", uuid, content: [{ type: "text", text }], ts: TS };
   }
 
   /** Every user turn in the feed, which is what a duplicate shows up in. */
@@ -3242,73 +3067,83 @@ describe("a prompt adopts the daemon's uuid as its identity", () => {
     return store.state.items.filter((i) => i.kind === "user-turn");
   }
 
-  it("keys the prompt on the uuid once the daemon supplies one", () => {
-    // Arrange
+  it("shows no bubble before the durable line arrives", () => {
+    // Arrange — a store the page has submitted a prompt through; nothing the
+    // submit can call files a feed item any more.
     const store = new ConversationStore();
-    store.addLocalPrompt("r1", "hello");
-    // Act
-    store.ingest([itemsEffect([attributedLine("r1", "u-1", "hello")], 10)]);
-    // Assert — one bubble, now identified.
-    expect(prompts(store)).toHaveLength(1);
-    expect(prompts(store)[0].uuid).toBe("u-1");
+
+    // Act — nothing to do: the submit path has no store call at all.
+
+    // Assert
+    expect(prompts(store)).toHaveLength(0);
   });
 
-  it("clears the unacked marking when the provisional bubble adopts", () => {
+  it("shows exactly one bubble once the durable line arrives", () => {
     // Arrange
     const store = new ConversationStore();
-    store.addLocalPrompt("r1", "hello");
-    // Act
-    store.ingest([itemsEffect([attributedLine("r1", "u-1", "hello")], 10)]);
-    // Assert — the acknowledgement IS the daemon's delivery superseding it.
-    expect(prompts(store)[0].unacked).toBeUndefined();
-  });
 
-  it("reconciles a later replay onto the adopted bubble instead of duplicating it", () => {
-    // Arrange — the whole defect, end to end: file locally, adopt, then replay.
-    const store = new ConversationStore();
-    store.addLocalPrompt("r1", "hello");
-    store.ingest([itemsEffect([attributedLine("r1", "u-1", "hello")], 10)]);
-    // Act — a resync replays the same prompt, carrying no request id.
-    store.ingest([itemsEffect([replayedLine("u-1", "hello")], 10)]);
+    // Act
+    store.ingest([itemsEffect([durableLine("u-1", "hello")], 10)]);
+
     // Assert
     expect(prompts(store)).toHaveLength(1);
   });
 
-  it("keeps the provisional bubble's rank through the adoption", () => {
-    // Arrange — a prompt filed at the live tail, above nothing.
+  it("reconciles a replay of the same line onto the standing bubble", () => {
+    // Arrange — the line, then a resync replaying it.
     const store = new ConversationStore();
-    store.ingest([itemsEffect([textItem({ blockId: "b1", uuid: "t-1" })], 400)]);
-    store.addLocalPrompt("r1", "hello");
-    // Act
-    store.ingest([itemsEffect([attributedLine("r1", "u-1", "hello")], 401)]);
-    // Assert — a redelivery replaces content, never position.
-    expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
-  });
+    store.ingest([itemsEffect([durableLine("u-1", "hello")], 10)]);
 
-  it("collapses onto a uuid-keyed copy that reached the feed first", () => {
-    // Arrange — THE RACE: a replay beats the attributed line, so a uuid-keyed
-    // copy is already standing when the provisional bubble is asked to adopt.
-    const store = new ConversationStore();
-    store.addLocalPrompt("r1", "hello");
-    store.ingest([itemsEffect([replayedLine("u-1", "hello")], 10)]);
-    expect(prompts(store)).toHaveLength(2);
-    // Act — the attributed line names both identities at once.
-    store.ingest([itemsEffect([attributedLine("r1", "u-1", "hello")], 10)]);
-    // Assert — collapsed onto the standing copy, not made its twin. Adopting
-    // without collapsing would MOVE the duplicate rather than remove it.
+    // Act
+    store.ingest([itemsEffect([durableLine("u-1", "hello")], 10)]);
+
+    // Assert
     expect(prompts(store)).toHaveLength(1);
-    expect(prompts(store)[0].uuid).toBe("u-1");
   });
 
-  it("still appends a second prompt that shares neither identity", () => {
-    // Arrange — the guard against over-collapsing: two real prompts of the same
-    // text are two prompts, and "continue" repeats constantly in this workflow.
+  it("keeps two replayed prompts apart when neither carries a request id", () => {
+    // Arrange — THE COLLAPSE DEFECT: the key used to fall back to the request
+    // id, which is empty for every prompt the real pipeline delivers, so two
+    // such prompts shared one key and one bubble.
     const store = new ConversationStore();
-    store.ingest([itemsEffect([replayedLine("u-1", "continue")], 10)]);
+    store.ingest([itemsEffect([durableLine("u-1", "continue")], 10)]);
+
     // Act
-    store.ingest([itemsEffect([replayedLine("u-2", "continue")], 11)]);
+    store.ingest([itemsEffect([durableLine("u-2", "continue")], 11)]);
+
     // Assert
     expect(prompts(store)).toHaveLength(2);
+  });
+
+  it("gives a prompt with no record no key to be reconciled on", () => {
+    // Arrange — a fixture turn, minted without a record.
+    const item: Extract<ConversationItem, { kind: "user-turn" }> = {
+      kind: "user-turn",
+      content: [{ type: "text", text: "hello" }],
+      ts: TS,
+    };
+
+    // Act
+    const key = userTurnKey(item);
+
+    // Assert — null, never a shared empty-string key.
+    expect(key).toBeNull();
+  });
+
+  it("keys an identified prompt on its uuid", () => {
+    // Arrange
+    const item: Extract<ConversationItem, { kind: "user-turn" }> = {
+      kind: "user-turn",
+      uuid: "u-1",
+      content: [{ type: "text", text: "hello" }],
+      ts: TS,
+    };
+
+    // Act
+    const key = userTurnKey(item);
+
+    // Assert
+    expect(key).toBe("user-turn:uuid:u-1");
   });
 });
 

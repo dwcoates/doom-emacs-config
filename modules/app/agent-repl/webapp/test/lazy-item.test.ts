@@ -65,7 +65,6 @@ describe("isHeavyItem: which items are worth standing in for", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "user-turn",
-      requestId: "r1",
       content: [{ type: "text", text: "do the thing" }],
       ts: TS,
     };
@@ -77,7 +76,6 @@ describe("isHeavyItem: which items are worth standing in for", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "user-turn",
-      requestId: "r1",
       content: [{ type: "text", text: "resolve" }],
       ts: TS,
       origin: "merge",
@@ -117,7 +115,6 @@ describe("itemPlainText: the text a placeholder stands in with", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "user-turn",
-      requestId: "r1",
       content: [{ type: "text", text: "do the thing" }],
       ts: TS,
     };
