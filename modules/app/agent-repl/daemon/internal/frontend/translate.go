@@ -607,7 +607,6 @@ func contextClearedItems(cc *corev1.ContextCleared, ev *corev1.Event) []*fronten
 	return []*frontendv1.Message{{
 		Uuid: eventDerivedUUID(ev, "clear"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
 		Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Lineage: FeedRowLineage(eventDerivedUUID(ev, "clear")),
 		Payload: &frontendv1.Message_ContextCleared{ContextCleared: cc},
 	}}
 }
@@ -629,7 +628,6 @@ func contextCompactedItems(cc *corev1.ContextCompacted, ev *corev1.Event) []*fro
 	return []*frontendv1.Message{{
 		Uuid: eventDerivedUUID(ev, "compact"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
 		Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Lineage: FeedRowLineage(eventDerivedUUID(ev, "compact")),
 		Payload: &frontendv1.Message_ContextCompacted{ContextCompacted: cc},
 	}}
 }
@@ -841,7 +839,6 @@ func systemLineItems(sl *datav1.SystemLine, tsMs int64, requestID string) []*fro
 		return []*frontendv1.Message{{
 			Uuid: FailureUUID(uuid), TsMs: tsMs, RequestId: requestID,
 			Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-			Lineage: FeedRowLineage(FailureUUID(uuid)),
 			Payload: &frontendv1.Message_FailureCard{FailureCard: failure},
 		}}
 	default:
@@ -948,8 +945,7 @@ func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1
 			// Each emission needs its own address, derived from the message's so
 			// it is stable across a resync rather than freshly minted per push.
 			Uuid: fmt.Sprintf("%s#thinking:%d", uuid, i), TsMs: tsMs, RequestId: requestID,
-			Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-			Lineage: FeedRowLineage(fmt.Sprintf("%s#thinking:%d", uuid, i)),
+			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 			Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 				Emission: &frontendv1.AgentEmission_Thinking{
 					// The daemon did the stripping, so the daemon states where the
@@ -974,8 +970,7 @@ func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1
 	}
 	return append(items, &frontendv1.Message{
 		Uuid: uuid, TsMs: tsMs, RequestId: requestID,
-		Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Lineage: FeedRowLineage(uuid),
+		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 		Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 			Emission: &frontendv1.AgentEmission_Response{
 				Response: &frontendv1.AgentResponse{Body: body},
@@ -1035,7 +1030,6 @@ func userMessageItem(uuid string, tsMs int64, requestID string, msg *datav1.ApiU
 	return []*frontendv1.Message{{
 		Uuid: uuid, TsMs: tsMs, RequestId: requestID,
 		Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Lineage: FeedRowLineage(uuid),
 		Payload: &frontendv1.Message_UserMessage{UserMessage: msg},
 	}}
 }
@@ -1097,8 +1091,7 @@ func resultItems(r *datav1.ResultMessage, ev *corev1.Event) []*frontendv1.Messag
 	}
 	return []*frontendv1.Message{{
 		Uuid: eventDerivedUUID(ev, "result"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
-		Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Lineage: FeedRowLineage(eventDerivedUUID(ev, "result")),
+		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 		Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 			Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: r},
 		}},

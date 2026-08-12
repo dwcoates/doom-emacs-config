@@ -3146,3 +3146,63 @@ func TestResolvedSystemFailureCardTakesTheInfoChannel(t *testing.T) {
 		t.Fatalf("info = %v, want the settled card recorded at info", logs.info)
 	}
 }
+
+// --- every daemon-composed message states its durability class --------------
+
+// TestAPermissionItemStatesTheDurableArm pins the contract's own reading:
+// permissions are explicitly NOT in the ephemeral class, because Claude asks
+// for them through canUseTool and they are a real conversational fact.
+func TestAPermissionItemStatesTheDurableArm(t *testing.T) {
+	// Arrange.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	c.pushPermission(permissionItem(&corev1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}, corev1.PermissionItem_RESOLUTION_PENDING, ""))
+
+	// Assert.
+	push.mu.Lock()
+	defer push.mu.Unlock()
+	item := push.convo[0].GetMessages()[0]
+	if item.GetDurable() == nil {
+		t.Fatalf("durability arm = %T, want the durable arm on a permission", item.GetDurability())
+	}
+}
+
+// TestAFailureCardStatesTheDurableArm: the card is re-derived from the store
+// event that caused it on every replay, so a record for it exists.
+func TestAFailureCardStatesTheDurableArm(t *testing.T) {
+	// Arrange.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	c.pushFailure("failure-1", errclass.Card(errclass.TypeSessionShimDied, "the shim died"))
+
+	// Assert.
+	push.mu.Lock()
+	defer push.mu.Unlock()
+	item := push.convo[0].GetMessages()[0]
+	if item.GetDurable() == nil {
+		t.Fatalf("durability arm = %T, want the durable arm on a failure card", item.GetDurability())
+	}
+}
+
+// TestAnUnclassifiableFailureCardIsWithheldRatherThanPushed keeps the refusal
+// from being repaired: an unclassified card on the wire cannot be told apart
+// later from a durable one the store lost.
+func TestAnUnclassifiableFailureCardIsWithheldRatherThanPushed(t *testing.T) {
+	// Arrange — a blank uuid has no root to name, so the constructor refuses.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	c.pushFailure("", errclass.Card(errclass.TypeSessionShimDied, "the shim died"))
+
+	// Assert.
+	push.mu.Lock()
+	defer push.mu.Unlock()
+	if len(push.convo) != 0 {
+		t.Fatalf("pushed %d delta(s) for an unclassifiable card, want 0 — it is withheld loudly, never published unclassified", len(push.convo))
+	}
+}
