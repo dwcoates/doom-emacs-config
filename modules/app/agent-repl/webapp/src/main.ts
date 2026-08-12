@@ -119,7 +119,7 @@ import { StateAdapter, userTurnReceipt } from "./state-adapter.js";
 import { CommandDispatcher, ModelSelectionRejectedError, surfaceRefusal } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
 import { ConversationPager } from "./conversation-pager.js";
-import { loadMoreView, paintLoadMore } from "./load-more.js";
+import { loadMoreView, paintLoadMore, NEXT_PAGE_ANCHOR } from "./load-more.js";
 import { BackgroundRecovery, windowRecoveryTimerHost } from "./background-recovery.js";
 import {
   RestartWindow,
@@ -1427,19 +1427,21 @@ async function boot(): Promise<void> {
     paintLoadMore(
       loadMoreHost,
       loadMoreView({
-        cursor: store.state.paging.cursor,
-        reachedStart: store.state.paging.reachedStart,
+        // THE CONTINUATION ONEOF AND NOTHING ELSE decides whether the control
+        // is offered at all; `loading`/`givenUp` decide only pressability.
+        continuation: store.state.paging.continuation,
         loading: pagerView.loading,
         givenUp: pagerView.givenUp,
       }),
       () => {
-        const cursor = store.state.paging.cursor;
-        if (cursor === null) return;
+        // A `more` arm is a FACT, not a handle: the click issues a positionless
+        // next-page request, and this end names no place in the history.
+        if (store.state.paging.continuation?.case !== "more") return;
         // A click at the ceiling is the user saying "try again", so the
         // failure history is discharged before the request is built. Without
         // it the retry wording would offer an action the backoff then refuses.
         if (pager.view.givenUp) pager.retryNow();
-        void pager.loadMore(cursor).catch(consumeOwnedDispatchFailure);
+        void pager.loadMore(NEXT_PAGE_ANCHOR).catch(consumeOwnedDispatchFailure);
         frames.schedule();
       },
     );
