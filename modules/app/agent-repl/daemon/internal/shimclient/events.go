@@ -55,6 +55,10 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 			c.dispatchReplayEvent(m)
 		case *corev1.ReplayDone:
 			c.dispatchReplayDone(m)
+		// THE BOUNDED PAGE. Its failure arm is the *corev1.Nack case above,
+		// which carries this page's own request id — see messagepage.go.
+		case *corev1.MessagePage:
+			c.resolveMessagePage(ac, m)
 		case *corev1.Heartbeat:
 			// Liveness only (already recorded via markRecv). No reply: our own
 			// heartbeatSender covers the reverse direction.

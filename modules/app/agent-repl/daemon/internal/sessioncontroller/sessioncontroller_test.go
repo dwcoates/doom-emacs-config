@@ -3,6 +3,7 @@ package sessioncontroller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"reflect"
 	"runtime"
@@ -492,6 +493,15 @@ func TestManagerSetModelRejectsSyntheticBeforeSessionLookup(t *testing.T) {
 // a scripted stand-in.
 func (c *fakeClient) Replay(_ context.Context, _, _ uint64, _ uint32, _ func(*corev1.Event)) (shimclient.ReplayResult, error) {
 	return shimclient.ReplayResult{}, nil
+}
+
+// MessagePage is the shim-mediated bounded page read. The default fake REFUSES
+// it rather than serving an empty page: an empty page is a claim about the
+// conversation, and a fixture that made that claim by accident would hide
+// exactly the confusion this arm exists to prevent. The page-specific harness
+// (livepage_test.go) swaps in a scripted stand-in.
+func (c *fakeClient) MessagePage(_ context.Context, _ shimclient.MessagePageAnchor) (*corev1.MessagePage, error) {
+	return nil, fmt.Errorf("fakeClient: no bounded message page is scripted for this session")
 }
 
 // promptTexts returns a copy of the prompts the session controller sent, safe to read while
