@@ -1285,6 +1285,49 @@ export interface ConversationPage {
   fence: string;
 }
 
+/**
+ * Where a `ConversationHistoryPage` says the conversation continues above it.
+ *
+ * `more` is EMPTY on purpose: under the positionless contract "there is more"
+ * is a FACT the client acts on by sending `NextPageCmd`, not a handle it
+ * stores. The cursor that used to live here is precisely the position the
+ * client no longer holds.
+ */
+export type HistoryContinuation = { case: "more" } | { case: "start" };
+
+/**
+ * ONE page of conversation history, from the positionless two-verb contract.
+ *
+ * Its `messages` are the SAME `MessageFrame` a `ConversationDelta` carries —
+ * COMPLETE feed envelopes, identical in shape — precisely so a paged message
+ * renders through the code that already renders a pushed one. A second
+ * rendering path would be the defect.
+ *
+ * The ten slots are the page size, and it is a property of the TYPE: a
+ * producer holding an eleventh message has nowhere to put it. ABSENT slots
+ * mean a SHORT page, which at the top of a conversation is the NORMAL case and
+ * never an error.
+ */
+export interface ConversationHistoryPage {
+  workspace: string;
+  /**
+   * The requesting command's id, echoed. It is what lets a client apply only
+   * the page it AWAITS and DISCARD one it no longer does — which is what makes
+   * a page in flight across a generation change harmless with no fence at all.
+   */
+  requestId: string;
+  /** Oldest first, so a page prepends as a block without being reversed. */
+  messages: MessageFrame[];
+  continuation: HistoryContinuation;
+  /**
+   * FIRST PAGES ONLY: the seq this page is current THROUGH, so the client
+   * splices onto the live push stream gap-free BY CONSTRUCTION rather than by
+   * timing. An OUTPUT — never echoed back in any command. Zero on next pages,
+   * which are history and carry no live edge.
+   */
+  liveJoinSeq: number;
+}
+
 /** The content-delta kinds a `TypingDelta`'s embedded `ContentDelta` may set. */
 export const CONTENT_DELTA_KINDS = [
   "text",
@@ -2303,6 +2346,7 @@ export type FrontendFrame = {
     | { case: "mergeQueueRoster"; value: MergeQueueRoster }
     | { case: "restartPending"; value: RestartPendingView }
     | { case: "conversationPage"; value: ConversationPage }
+    | { case: "conversationHistoryPage"; value: ConversationHistoryPage }
     | { case: "unknownArm"; value: UnknownFrameArm };
 };
 
@@ -2505,6 +2549,13 @@ const FRAME_DECODERS: ReadonlyMap<
     (v: unknown) => ({
       case: "conversationPage" as const,
       value: decodeConversationPage(v),
+    }),
+  ],
+  [
+    "conversationHistoryPage",
+    (v: unknown) => ({
+      case: "conversationHistoryPage" as const,
+      value: decodeConversationHistoryPage(v),
     }),
   ],
   [
@@ -3392,6 +3443,103 @@ function decodeConversationPage(v: unknown): ConversationPage {
     );
   }
   return page;
+}
+
+/** The ten slot spellings, in the order a producer fills them. */
+const HISTORY_PAGE_SLOTS = [
+  "message1",
+  "message2",
+  "message3",
+  "message4",
+  "message5",
+  "message6",
+  "message7",
+  "message8",
+  "message9",
+  "message10",
+] as const;
+
+const CONVERSATION_HISTORY_PAGE_KEYS = new Set<string>([
+  "workspace",
+  "requestId",
+  ...HISTORY_PAGE_SLOTS,
+  "more",
+  "start",
+  "liveJoinSeq",
+]);
+
+/**
+ * Decode one positionless history page.
+ *
+ * A SHORT PAGE IS NOT AN ERROR. Absent slots are how the contract spells "the
+ * conversation has fewer than ten messages left above here", and at the top of
+ * a conversation that is the normal case. Slots are read in order and the
+ * absent ones simply contribute nothing.
+ *
+ * THE CONTINUATION IS REQUIRED, for the reason the old page's was: a page with
+ * neither arm would render a load-more that can never retire and can never
+ * advance, so it is refused here rather than handed to the feed.
+ *
+ * THE REQUEST ID IS REQUIRED. Correlation is the whole staleness story under
+ * this contract — there is no fence — so a page that cannot be correlated is a
+ * page nothing may adopt.
+ */
+function decodeConversationHistoryPage(v: unknown): ConversationHistoryPage {
+  const o = ensureObject(v, "ConversationHistoryPage");
+  rejectUnknown(o, CONVERSATION_HISTORY_PAGE_KEYS, "ConversationHistoryPage");
+  const messages: MessageFrame[] = [];
+  for (const slot of HISTORY_PAGE_SLOTS) {
+    const raw = o[slot];
+    if (raw === undefined || raw === null) continue;
+    messages.push(decodeMessage(raw, `ConversationHistoryPage.${slot}`));
+  }
+  const page: ConversationHistoryPage = {
+    workspace: str(o, "workspace", "ConversationHistoryPage"),
+    requestId: str(o, "requestId", "ConversationHistoryPage"),
+    messages,
+    continuation: decodeHistoryContinuation(o),
+    liveJoinSeq: num(o, "liveJoinSeq", "ConversationHistoryPage"),
+  };
+  if (page.requestId === "") {
+    throw new Error(
+      "frontend-proto: ConversationHistoryPage missing required `request_id`, so it cannot be correlated with the request it answers",
+    );
+  }
+  return page;
+}
+
+const HISTORY_CONTINUATION_KEYS = new Set<string>([]);
+
+function decodeHistoryContinuation(o: JsonObject): HistoryContinuation {
+  const hasMore = o.more !== undefined && o.more !== null;
+  const hasStart = o.start !== undefined && o.start !== null;
+  if (hasMore && hasStart) {
+    throw new Error(
+      "frontend-proto: ConversationHistoryPage set both `more` and `start`, which are one oneof",
+    );
+  }
+  if (hasMore) {
+    // EMPTY BY CONTRACT: "there is more" is a fact, not a handle. A field here
+    // would be a position the client holds, which is exactly what this design
+    // removed, so an unexpected one fails rather than being quietly ignored.
+    rejectUnknown(
+      ensureObject(o.more, "ConversationHistoryPage.more"),
+      HISTORY_CONTINUATION_KEYS,
+      "ConversationHistoryPage.more",
+    );
+    return { case: "more" };
+  }
+  if (hasStart) {
+    rejectUnknown(
+      ensureObject(o.start, "ConversationHistoryPage.start"),
+      HISTORY_CONTINUATION_KEYS,
+      "ConversationHistoryPage.start",
+    );
+    return { case: "start" };
+  }
+  throw new Error(
+    "frontend-proto: ConversationHistoryPage set neither `more` nor `start`; a page with no continuation would render a load-more that can never retire",
+  );
 }
 
 const PAGE_MORE_KEYS = new Set(["cursor"]);
