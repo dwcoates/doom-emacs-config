@@ -178,13 +178,49 @@ func buildShimStore(t *testing.T) string {
 	return bin
 }
 
+// shimStoreProc is one running shim-store, RESTARTABLE on the same socket and
+// the same database. A deploy bounces the store under live shims
+// (`launchctl kickstart -k gui/501/com.agentrepl.shim-store`), so a test that
+// wants to prove a session survives one needs the real thing: the process
+// dies, the socket goes away, and a replacement binds the same path over the
+// same events database.
+type shimStoreProc struct {
+	t    *testing.T
+	bin  string
+	sock string
+	db   string
+	log  string
+	// pid and exited belong to the CURRENT process; a bounce replaces both.
+	pid    int
+	exited *childExit
+}
+
 // startShimStore launches the store on a temp socket and waits for it to
 // listen. It is torn down at test end.
-func startShimStore(t *testing.T, bin, sock string) {
+func startShimStore(t *testing.T, bin, sock string) *shimStoreProc {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "events.db")
-	logPath := filepath.Join(t.TempDir(), "shim-store.log")
-	cmd := exec.Command(bin, "-socket", sock, "-db", dbPath, "-log", logPath)
+	s := &shimStoreProc{
+		t:    t,
+		bin:  bin,
+		sock: sock,
+		// Held on the struct rather than derived per launch, because a bounced
+		// store that came up on a FRESH database would prove nothing about the
+		// durability of anything written before it.
+		db:  filepath.Join(t.TempDir(), "events.db"),
+		log: filepath.Join(t.TempDir(), "shim-store.log"),
+	}
+	// Registered once, before the first launch, so it reaps whichever process
+	// is current when the test ends.
+	t.Cleanup(s.kill)
+	s.launch()
+	return s
+}
+
+// launch starts one store process and waits for its own readiness record.
+func (s *shimStoreProc) launch() {
+	t := s.t
+	t.Helper()
+	cmd := exec.Command(s.bin, "-socket", s.sock, "-db", s.db, "-log", s.log)
 	// Its own process group, so the reaper can kill the store AND anything it
 	// spawns as one unit rather than leaving grandchildren behind.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -212,21 +248,38 @@ func startShimStore(t *testing.T, bin, sock string) {
 	// retains one immutable outcome behind a closed-channel latch, so readiness
 	// and cleanup can both observe an early exit without consuming each other's
 	// only copy and deadlocking the test teardown.
-	exited := observeChildExit(cmd.Wait)
-	t.Cleanup(func() {
-		// Kill the GROUP, matching what the reaper would have done, then drop
-		// the registration so the end-of-run sweep cannot signal a recycled pid.
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		_ = exited.wait()
-		unregisterChild(cmd.Process.Pid)
-	})
+	s.pid = cmd.Process.Pid
+	s.exited = observeChildExit(cmd.Wait)
 	select {
 	case <-ready:
-	case <-exited.done:
-		t.Fatalf("shim-store exited before it began listening on %s: %v", sock, exited.err)
+	case <-s.exited.done:
+		t.Fatalf("shim-store exited before it began listening on %s: %v", s.sock, s.exited.err)
 	case <-time.After(frameTimeout):
-		t.Fatalf("shim-store never reported listening on %s", sock)
+		t.Fatalf("shim-store never reported listening on %s", s.sock)
 	}
+}
+
+// kill stops the current store process and waits for it to be gone, so a
+// relaunch cannot race a socket the old process still owns.
+func (s *shimStoreProc) kill() {
+	if s.pid == 0 {
+		return
+	}
+	// Kill the GROUP, matching what the reaper would have done, then drop
+	// the registration so the end-of-run sweep cannot signal a recycled pid.
+	_ = syscall.Kill(-s.pid, syscall.SIGKILL)
+	_ = s.exited.wait()
+	unregisterChild(s.pid)
+	s.pid = 0
+	s.exited = nil
+}
+
+// bounce restarts the store on the same socket and database — the deploy step
+// that used to take live sessions down with it.
+func (s *shimStoreProc) bounce() {
+	s.t.Helper()
+	s.kill()
+	s.launch()
 }
 
 // childExit is a replayable process-exit outcome. Closing done publishes err
@@ -571,6 +624,9 @@ type e2eHarness struct {
 	// with withGatedKeepAlivePing. Creating it is how a test ENDS the keep-alive
 	// ping it arranged to still be running.
 	pingGate string
+	// store is THE shim-store this harness's shims write to, exposed so a test
+	// can bounce it the way a deploy does — under live sessions.
+	store *shimStoreProc
 }
 
 // releasePingGate lets a parked keep-alive ping finish its turn the ordinary
@@ -850,7 +906,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		t.Setenv("AGENT_REPL_FAKE_TURN_GATE_TEXT", keepAlivePingText)
 	}
 	shimSock := isolatedShimSocket(t, sockDir)
-	startShimStore(t, storeBin, storeSock)
+	storeProc := startShimStore(t, storeBin, storeSock)
 
 	// ONE state store, as production opens it: the registry's identity tables
 	// and the SSM's state log share a database and a connection.
@@ -1119,7 +1175,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	h := &e2eHarness{ts: ts, stateDB: stateStore, geometry: geometryStore, merges: mergeBinding, shimSpawns: spawnCount.Load, vendors: vendors, clock: clock, pingGate: pingGate}
+	h := &e2eHarness{ts: ts, stateDB: stateStore, geometry: geometryStore, merges: mergeBinding, shimSpawns: spawnCount.Load, vendors: vendors, clock: clock, pingGate: pingGate, store: storeProc}
 	if sweepTicks != nil {
 		h.sweepIdle = sweepTicks
 	}

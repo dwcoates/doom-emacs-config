@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import net from "node:net";
 import { create } from "@bufbuild/protobuf";
-import { StoreClient } from "../src/uds/store-client.js";
+import { StoreClient, StoreWriteDeferredError } from "../src/uds/store-client.js";
 import {
   DegradedState,
   Event,
@@ -1005,10 +1005,30 @@ describe("StoreClient durable write hold across a store bounce", () => {
     read.mockRestore();
   });
 
-  it("fails a held write when the client is SEALED for shutdown", async () => {
+  it("DEFERS a held write that reached the spill journal when the client is SEALED", async () => {
     // Arrange: the hold's premise is that the link comes back and we deliver.
-    // That is false for a process on its way out, and waiting anyway is how an
-    // orderly shutdown hangs on an unreachable store.
+    // That is false for a process on its way out — but the record IS on disk,
+    // so the honest answer is "not delivered by this shim", not "lost".
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await holdingClient(store, {});
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+    const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await until(() => client.heldWriteCount() === 1, "batch held for the relink");
+
+    // Act
+    client.seal();
+
+    // Assert
+    await expect(writeP).rejects.toThrow(StoreWriteDeferredError);
+    expect(client.heldWriteCount()).toBe(0);
+  });
+
+  it("reports NO dropped-count degradation for a held write it merely deferred", async () => {
+    // Arrange: a DegradedState carrying a loss count for events that are
+    // fsynced on disk is a fabricated hole in the session's history — the
+    // false alarm the deferred/lost split exists to stop.
     const store = await fakeStore();
     stores.push(store);
     const degradations: DegradedState[] = [];
@@ -1020,11 +1040,35 @@ describe("StoreClient durable write hold across a store bounce", () => {
 
     // Act
     client.seal();
+    await expect(writeP).rejects.toThrow(StoreWriteDeferredError);
 
-    // Assert: the sad path, unchanged, and nothing left waiting.
+    // Assert
+    expect(degradations.some((d) => d.droppedCount > 0n)).toBe(false);
+  });
+
+  it("still FAILS a held write whose spill journal refused it when the client is SEALED", async () => {
+    // Arrange: an unwritable journal (disk full, EIO) downgrades the hold to
+    // memory-only, so nothing will ever replay this batch. That is genuine
+    // loss and must keep reaching the session's fatal missing-receipt path.
+    const store = await fakeStore();
+    stores.push(store);
+    const degradations: DegradedState[] = [];
+    const append = vi.spyOn(SpillJournal.prototype, "append").mockImplementation(() => {
+      throw new Error("ENOSPC");
+    });
+    const client = await holdingClient(store, {}, (d) => degradations.push(d));
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+    const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await until(() => client.heldWriteCount() === 1, "batch held for the relink");
+
+    // Act
+    client.seal();
+
+    // Assert: the sad path, unchanged, for a batch that really is gone.
     await expect(writeP).rejects.toThrow(/write on a down connection/);
     expect(degradations.some((d) => d.droppedCount === 1n && d.recovered === false)).toBe(true);
-    expect(client.heldWriteCount()).toBe(0);
+    append.mockRestore();
   });
 
   it("still delivers over a LIVE link after the client is sealed", async () => {
@@ -1044,8 +1088,9 @@ describe("StoreClient durable write hold across a store bounce", () => {
     await expect(ackP).resolves.toMatchObject({ lastSeq: 1n });
   });
 
-  it("fails a held write on a deliberate close rather than leaving it unsettled", async () => {
-    // Arrange: teardown is final, so a held batch will never reach the store.
+  it("settles a held write on a deliberate close rather than leaving it unsettled", async () => {
+    // Arrange: teardown is final, so a held batch will never reach the store
+    // through THIS client — but its spilled record outlives the process.
     const store = await fakeStore();
     stores.push(store);
     const client = await holdingClient(store, {});
@@ -1056,7 +1101,7 @@ describe("StoreClient durable write hold across a store bounce", () => {
 
     // Act / Assert
     client.close();
-    await expect(writeP).rejects.toThrow(/write on a down connection/);
+    await expect(writeP).rejects.toThrow(StoreWriteDeferredError);
   });
 });
 
