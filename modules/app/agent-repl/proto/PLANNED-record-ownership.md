@@ -128,7 +128,32 @@ rows below the anchor, in a store that has rows below the anchor" LOUD.**
     if key == "" { key = "agent:" + env.AgentID }
     ```
     Turning that key into an owning message needs the record that SPAWNED the
-    agent — a different record, usually in a different file.
+    agent — a different record, usually in a different file. It is held in
+    `detachedWorkStore`, whose own header calls it "ONE SESSION'S open work" —
+    so it is per-SESSION state, not privileged daemon knowledge, and the sidecar
+    already tails per session.
+
+15. **`logical_parent_uuid` is UNWIRED, not dead — do not delete it.** Read from
+    a real `compact_boundary` line on disk:
+    ```
+    type              = system
+    subtype           = compact_boundary
+    uuid              = 5e68a55d-03ec-4999-9380-920c80b54d2c
+    parentUuid        = None
+    logicalParentUuid = 60d447f4-c78e-49d0-ab38-fbabac5bd386
+    ```
+    `parent_uuid` is EMPTY at a compaction — the physical chain is cut — and
+    `logical_parent_uuid` is the only pointer back across the cut. Deleting it
+    would make pre-compaction history unreachable by any parent walk.
+
+16. **The frontend does not know bookkeeping, with one exception that is itself
+    a defect.** `TurnStarted`, `HeartbeatProgress` and `QueryLifecycle` appear in
+    the webapp only in COMMENTS or as a frontend-declared error shape
+    (`TelemetryRecordMissingQueryLifecycleSchema`). The exception is
+    `AccountUsageObservation`, genuinely imported and used at
+    `frontend-proto.ts:1035` as `usageAtStart?: AccountUsageObservation` — a raw
+    measurement crossing to the client rather than a figure the daemon resolved,
+    which is the figma→idl violation the contract already forbids.
 
 ---
 
@@ -183,22 +208,110 @@ message Event {
   int64 produced_at_ms = 6;
   string dedup_key = 7;
 
+  // THE TEST THAT DECIDES THESE ARMS, in one question: if you PRINTED the
+  // conversation to read it, would this appear?
+  //
+  //   yes                      -> message
+  //   no, but we understand it -> bookkeeping
+  //   we could not tell        -> unsupported
+  //
+  // Put another way: a MESSAGE is something the conversation CONSISTS OF, and
+  // BOOKKEEPING is a fact ABOUT the conversation. Content versus evidence.
+  //
+  // The reverse readings are the useful ones. Something is NOT a message when
+  // nothing in the feed would be missing had it never arrived. Something is NOT
+  // bookkeeping when a reader scrolling back would notice a hole where it
+  // should have been.
   oneof entry {
-    // A conversation message: the thing the feed draws and a page counts.
-    // Carries its own lineage, so nesting is expressed rather than inferred.
-    Message message = 40;
+    // A record BELONGING to a conversation message — the thing the feed draws
+    // and a page counts.
+    //
+    // It has an identity the user could point at, it accumulates over several
+    // records that share that identity, and it is what "ten messages" counts.
+    // `context_cleared` and `degraded_state` are messages by this test: a
+    // reader must see WHERE the conversation was cut, and a failure card is a
+    // thing the user reads and acts on.
+    MessageEntry message = 40;
 
     // A fact ABOUT the session rather than a part of the conversation. We
-    // understand it completely and it renders as nothing.
+    // understand it completely and nothing in the feed corresponds to it.
+    //
+    // It is not uncounted because it is unimportant — it drives the footer, the
+    // SSM, accounting and the turn ledger. It is uncounted because it is not IN
+    // the transcript: you cannot point at a turn boundary. `session_rewound`
+    // and `turn_claim_bridge` are bookkeeping by this test — they explain an id
+    // change and correlate a ledger, and neither leaves a hole when absent.
     //
     // Separated from `message` rather than filtered out of it, so a turn
     // boundary has no field capable of naming a message and therefore cannot
-    // become a phantom page slot.
+    // become a phantom page slot. Misfiling one is not a wrong value — it is an
+    // unbuildable record.
+    //
+    // THE FRONTEND NEVER SEES THESE. Bookkeeping reaches the client only after
+    // the daemon has resolved it into a view, which is what makes it evidence
+    // rather than content.
     BookkeepingEntry bookkeeping = 41;
 
-    // Something we will not render, preserved verbatim so the decision is
-    // reversible.
+    // Something we could not place, preserved verbatim so the decision is
+    // reversible. The printing test cannot be applied to it — that is what
+    // makes it unsupported rather than either arm above.
     UnsupportedEntry unsupported = 42;
+  }
+}
+
+// One record BELONGING to one message. Several of these share a message_id and
+// fold, in seq order, into the single thing the feed draws.
+//
+// THE THREE IDS ARE THE SAME ON EVERY RECORD, whatever its payload does with
+// the message. That is deliberate: "opens", "updates" and "composes" stop being
+// three record SHAPES and become three payloads. An earlier draft split them
+// into ComposingRecord and MessageRecord, which put the ids at two different
+// levels and made `task_ended` — a record that closes a message rather than
+// making one — sit in the arm named for identity.
+message MessageEntry {
+  // The message this record belongs to. Records sharing it fold together, so a
+  // consumer needs no correlation pass to attach an update to what it updates.
+  string message_id = 1;
+
+  // The feed row that message belongs to, and the value a page groups by.
+  //
+  // EQUALS message_id when the message is itself a feed row; names the
+  // containing message when nested, so a subagent and everything inside it
+  // share one value and therefore one slot. Denormalized on purpose: it is
+  // derivable by walking parents, and storing it is precisely why a page of ten
+  // messages costs one indexed pass. It MUST equal the root of the parent
+  // chain; a write that disagrees is corruption, not a variant.
+  string top_level_message_id = 2;
+
+  // The message immediately containing this one — ONE HOP, never the root.
+  //
+  // EMPTY means the message sits directly in the feed, in which case
+  // top_level_message_id is its own id. Absence is the fact itself, not a
+  // placeholder: a message whose parent could not be resolved is a producer
+  // fault.
+  //
+  // AT A COMPACTION BOUNDARY the on-disk `parent_uuid` is empty and
+  // `logical_parent_uuid` carries the only pointer back across the cut, so the
+  // producer resolves this from the latter in that case. Reading only the
+  // physical chain would make pre-compaction history unreachable.
+  string parent_message_id = 3;
+
+  oneof payload {
+    // Records that OPEN the message they name.
+    AgentEmission                agent                      = 10;
+    ApiUserMessage               user_message               = 11;
+    PermissionItem               permission                 = 12;
+    FailureCardView              failure_card               = 13;
+    ContextCleared               context_cleared            = 14;
+    ContextCompacted             context_compacted          = 15;
+    DaemonInterceptedCommandItem daemon_intercepted_command = 16;
+    CompactionSummaryItem        compaction_summary         = 17;
+    DetachedWork                 detached_work              = 18;
+
+    // Records that UPDATE a message already opened. They carry the same
+    // message_id, so attaching them needs no correlation and costs no slot.
+    DetachedWorkProgress         detached_work_progress     = 19;
+    DetachedWorkEnded            detached_work_ended        = 20;
   }
 }
 
@@ -348,27 +461,47 @@ behaving as though it were shorter.
    only view resolutions.
 8. **Two converters is NOT a drift risk** (finding 12). Withdrawn as an
    objection.
+9. **`ComposingRecord` and `MessageRecord` collapse into one `MessageEntry`.**
+   Every record belonging to a message carries the same three ids; what it does
+   with the message is a property of its payload.
+10. **The package SPLITS rather than being renamed.**
+    - `agentshim.conversation.v1` — the shared data model: `Message`, lineage,
+      durability, the payload arms. Written by shim and sidecar, persisted by
+      the store, read by daemon and webapp.
+    - `agentshim.frontend.v1` KEEPS only genuine view resolutions — topbar,
+      footer, sidebar, tokens-menu, gate-revival, merge.
+11. **`logical_parent_uuid` STAYS**, and lineage resolution falls back to it
+    when `parent_uuid` is empty at a compaction boundary (finding 15).
+12. **`UnsupportedEntry`'s payloads are deliberately unspecified.** They exist
+    for posterity and debugging; if one is ever needed, its shape is expanded
+    then. Not a blocking question.
 
 ---
 
 ## Part 6 — Open
 
 1. **Sidechain lineage at the producer.** The sidecar must resolve
-   `SourceToolUseID` / `agent_id` to the owning message. That needs per-session
-   state it does not keep today, and the spawning record may be in another file.
-2. **`parent_uuid` versus `logical_parent_uuid`.** Nothing reads the latter.
-   The narrow question is whether, after a compaction, the chain points through
-   the boundary or across it — which decides whether pre-compaction history stays
-   reachable by parent walking.
-3. **The package name and its file layout**, given finding 7 above.
-4. **What `VendorSpecificEntry` and `UnknownEntry` actually carry.** Probably the
-   shape `UnknownRecord` already has — `discriminator`, which field it came from,
-   the raw `Struct`, and the parent type — but not yet specified.
-5. **Does `data.v1` survive at all**, as the producers' private model, or is it
-   replaced by direct parsing?
-6. **The `task_*` / `turn_*` naming hazard.** They differ by two letters, sit in
-   adjacent arms, and mean opposite things for paging. Proposed rename to
-   `detached_work_*`. Cheapest now, while the wire is already breaking.
+   `SourceToolUseID` / `agent_id` to the owning message. It has the inputs — it
+   tails both the main transcript and the subagent files — but does not
+   correlate them today. Relocating `detachedWorkStore`'s per-session indexes is
+   the work.
+2. **Has any OTHER session-scoped correlation the same property?** The boundary
+   is documented — construction lives in `internal/frontend` and is per-record,
+   session routing lives in `sessioncontroller` — but `sessioncontroller` has
+   not been swept exhaustively. Detached work may not be the only one.
+3. **Does `data.v1` survive at all**, as the producers' private parsing model,
+   or is it replaced by direct parsing?
+4. **The `task_*` / `turn_*` naming hazard.** They differ by two letters, sit in
+   adjacent arms, and mean OPPOSITE things for paging — a turn must never own a
+   message, detached work always does. Proposed rename to `detached_work_*`,
+   matching the `DetachedWork` payload arm that already exists. Cheapest now,
+   while the wire is already breaking.
+5. **`AccountUsageObservation` reaching the webapp** (finding 16). It should
+   become a daemon-resolved figure, which is a small figma→idl fix that this
+   wave makes natural.
+6. **SEQUENCING.** How we get from here to there without a long window where
+   nothing renders. Deferred by agreement until the requirements and
+   architecture are settled.
 
 ---
 
