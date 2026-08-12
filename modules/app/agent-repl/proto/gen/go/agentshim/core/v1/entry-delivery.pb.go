@@ -33,11 +33,11 @@ const (
 // One conversation record arriving at the daemon, by whichever route brought
 // it.
 //
-// THE TWO ROUTES ARE REAL AND DIFFERENT. A durable record is written to the
-// store, assigned a position, and forwarded from there; a live record bypasses
-// the store entirely and is handed straight over. There is no `retention` field
-// anywhere in the system saying which is which — the route IS the fact, and
-// this oneof is where it is stated.
+// THE TWO ROUTES ARE REAL AND DIFFERENT. A stored record was written, assigned
+// a position, and forwarded from there; a live record was handed straight over
+// and the store never saw it. Nothing anywhere declares which a record IS —
+// what the store holds is what got stored, and this oneof says which route
+// brought this one.
 type EntryDelivery struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Delivery:
@@ -183,13 +183,11 @@ func (x *StoredEntryDelivery) GetEntry() *v1.ExternalEntry {
 	return nil
 }
 
-// A record delivered live, which the store will never hold.
+// A record handed straight to the daemon, which the store never saw.
 //
-// NO POSITION FIELD, and that absence is the contract. The two records that
-// arrive this way — ContentArriving (a message still being typed) and Heartbeat
-// (something is alive) — exist to be seen once. A consumer REPLACES a live
-// preview with the durable record of the same content when the file plane
-// delivers it whole, rather than appending beside it.
+// NO POSITION FIELD, and that absence is the contract. A record that never
+// reached the store has no position, so there is no slot for one to be put in
+// wrongly and no way for a consumer to advance a resume cursor on it.
 type LiveEntryDelivery struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The record's external half. It never had an internal half either: nothing

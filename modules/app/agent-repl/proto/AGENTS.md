@@ -7,13 +7,12 @@ including behavioral semantics as normative comments. Two packages:
 the wire), and `agentshim.conversation.v1` (the vendor-agnostic conversation
 model the producers write and the store persists).
 
-`conversation.v1` is specified in `FROZEN-conversation-v1.md`: eight files in
-the shared package — `external.proto`, `message.proto`, `content.proto`, `payloads.proto`, `bookkeeping.proto`,
-`ephemeral.proto` (the one message that is never written), plus the two shared
-vocabularies that moved down from `frontend.v1` — `tokens.proto` and
-`commands.proto` — and two more in `agentshim.conversation.internal.v1`
-(`entry.proto`, `unsupported.proto`). Both moved because a DURABLE record names
-them, and a stored record cannot depend on the daemon's resolved output surface.
+`conversation.v1` is specified in `FROZEN-conversation-v1.md`: six files in the
+shared package — `external.proto`, `message.proto`, `content.proto`,
+`payloads.proto`, `bookkeeping.proto`, and `tokens.proto`, the shared vocabulary
+that moved down from `frontend.v1` — plus two in
+`agentshim.conversation.internal.v1` (`entry.proto`, `unsupported.proto`). It moved because a DURABLE record names it, and a stored record cannot
+depend on the daemon's resolved output surface.
 
 ## `conversation.v1` import discipline — the daemon gets `external.proto` only
 

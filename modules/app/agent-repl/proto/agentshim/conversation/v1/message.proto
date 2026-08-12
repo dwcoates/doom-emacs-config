@@ -7,7 +7,6 @@ syntax = "proto3";
 
 package agentshim.conversation.v1;
 
-import "agentshim/conversation/v1/ephemeral.proto";
 import "agentshim/conversation/v1/payloads.proto";
 
 option go_package = "agentrepl/proto/agentshim/conversation/v1;conversationv1";
@@ -38,23 +37,31 @@ message MessageEntry {
   // not a variant.
   string top_level_message_id = 2;
 
-  // The message immediately containing this one — ONE HOP, never the root.
+  // Where this message sits: at the root of the feed, or inside another
+  // message.
   //
-  // EMPTY means the message sits directly in the feed, in which case
-  // top_level_message_id is its own id. Absence is the fact itself, not a
-  // placeholder: a message whose parent could not be resolved is a producer
-  // fault, never a blank.
+  // A oneof rather than a string, and that is the whole point. As a string,
+  // EMPTY meant two different things — "this is a feed row" and "the producer
+  // could not resolve a parent" — and only the first is legal. At a context
+  // compaction the vendor's physical parent chain is cut, the boundary line
+  // carries no parent, and a separate logical pointer holds the only link back
+  // across it. A producer that reads only the physical chain resolves nothing,
+  // and with a string it would emit an empty value indistinguishable from a
+  // legitimate root — so pre-compaction history becomes unreachable by any walk
+  // and the boundary renders as a new top-level row, with nothing detecting it.
   //
-  // AT A CONTEXT COMPACTION the vendor's physical parent chain is CUT — the
-  // boundary line carries no parent — and a separate logical pointer holds the
-  // only link back across it. The producer resolves this field from that
-  // pointer in that case; reading only the physical chain would make
-  // pre-compaction history unreachable by any walk.
-  string parent_message_id = 3;
+  // Here an unresolved parent has no legal record to occupy. The producer must
+  // state which case it is, or fail.
+  MessageParent parent = 5;
 
   // Who this message is FROM, resolved by the producer rather than inferred by
   // a reader from which payload arm is set.
   MessageAuthor author = 4;
+
+  // 3 was parent_message_id, a bare string whose empty value meant both "feed
+  // row" and "unresolved". Replaced by `parent` (5), a oneof.
+  reserved 3;
+  reserved "parent_message_id";
 
   // 15 was daemon_answered_command. It was UNBUILDABLE: only the daemon can
   // observe a command it answered itself, and the daemon has no store write
@@ -122,12 +129,37 @@ message MessageEntry {
 
     // ---- Records that COMPOSE a message, arriving before it is whole ----
 
-    // A fragment of content still arriving. EPHEMERAL by retention, so it is
-    // delivered live and never stored: the durable record of the same content
-    // is the completed message the file plane writes. Defined in
-    // ephemeral.proto, apart from every durable body.
+    // A fragment of content still arriving, handed straight to the daemon by
+    // the stream plane. The completed message the file plane writes later
+    // REPLACES the preview rather than appending beside it.
     ContentArriving content_arriving = 30;
   }
+}
+
+// Where a message sits in the feed.
+//
+// Two arms, no third. There is deliberately no "unknown" — a producer that
+// cannot resolve a parent has nothing legal to emit and must fail loudly rather
+// than pick the arm that looks harmless.
+message MessageParent {
+  oneof parent {
+    // The message sits directly in the feed. `top_level_message_id` is its own
+    // id.
+    MessageParentRoot root = 1;
+    // The message sits inside another one.
+    MessageParentInside inside = 2;
+  }
+}
+
+// A feed row: nothing contains this message.
+message MessageParentRoot {}
+
+// Contained by another message.
+message MessageParentInside {
+  // The message immediately containing this one — one hop, never the root.
+  // Walk `top_level_message_id` for the root; it is stored precisely so no
+  // reader has to walk this.
+  string message_id = 1;
 }
 
 // Who a message is from.

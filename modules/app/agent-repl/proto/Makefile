@@ -12,7 +12,6 @@ PROTOS := \
   agentshim/core/v1/entry-delivery.proto \
   agentshim/conversation/v1/tokens.proto \
   agentshim/conversation/v1/content.proto \
-  agentshim/conversation/v1/ephemeral.proto \
   agentshim/conversation/v1/payloads.proto \
   agentshim/conversation/v1/bookkeeping.proto \
   agentshim/conversation/v1/message.proto \

@@ -86,14 +86,35 @@ message InternalEntry {
   // disagree; nothing downstream sees it.
   Plane plane = 1;
 
-  // The key that makes a re-read idempotent. Both producers re-read their
-  // sources after a restart, so the same record can arrive twice; the store
-  // keeps the first. Empty means the store derives one from the record's own
-  // identity.
+  // The CROSS-PLANE identity: the key that lets the store recognize when the
+  // shim and the sidecar have each reported the same underlying fact, so it
+  // keeps one row instead of two.
   //
-  // Purely the store's concern. A record's IDENTITY downstream is
-  // MessageEntry.message_id, which is a different thing and always was.
+  // It is load-bearing and measured to be so. In the live store both planes
+  // populate it in the same namespaces (`uuid:`, `tur:`), and the two planes'
+  // surviving keys intersect in exactly zero rows — which is what a working
+  // collapse looks like, since the loser was refused and only one plane's row
+  // remains per key. Tens of thousands of twins have been collapsed.
+  //
+  // Empty is legal and means the record has no cross-plane twin, which is true
+  // of most of what each producer writes.
   string dedup_key = 2;
+
+  // The STABLE WRITE IDENTITY, minted once by the producer when the record is
+  // first handed to a store write, and never regenerated — not for a retry, not
+  // for a replay after the store bounced underneath the producer.
+  //
+  // A DIFFERENT JOB FROM dedup_key, and neither substitutes for the other.
+  // dedup_key collapses two producers' views of one fact; this one recognizes
+  // ONE producer's re-delivery of ONE record. A batch that reached the store
+  // but whose ack was lost has to be replayed, because from the producer's side
+  // an unacked batch and a never-delivered batch are indistinguishable. Without
+  // this the store writes it twice; with it the replay is a no-op.
+  //
+  // Empty means the producer supplied no write identity, and such a record is
+  // not replay-idempotent. The store enforces uniqueness only over non-empty
+  // values.
+  string write_id = 3;
 
   // Set when there is nothing to hand the daemon: a record we could not place.
   //

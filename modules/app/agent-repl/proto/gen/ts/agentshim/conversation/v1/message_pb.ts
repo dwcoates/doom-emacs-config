@@ -9,9 +9,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { ContentArriving } from "./ephemeral_pb";
-import { file_agentshim_conversation_v1_ephemeral } from "./ephemeral_pb";
-import type { AgentSaid, ContextCut, DetachedWorkEnded, DetachedWorkProgressed, DetachedWorkStarted, FailureRaised, PermissionAnswered, PermissionAsked, SkillBodyResolved, ToolReturned, UserSaid } from "./payloads_pb";
+import type { AgentSaid, ContentArriving, ContextCut, DetachedWorkEnded, DetachedWorkProgressed, DetachedWorkStarted, FailureRaised, PermissionAnswered, PermissionAsked, SkillBodyResolved, ToolReturned, UserSaid } from "./payloads_pb";
 import { file_agentshim_conversation_v1_payloads } from "./payloads_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -19,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/conversation/v1/message.proto.
  */
 export const file_agentshim_conversation_v1_message: GenFile = /*@__PURE__*/
-  fileDesc("CidhZ2VudHNoaW0vY29udmVyc2F0aW9uL3YxL21lc3NhZ2UucHJvdG8SGWFnZW50c2hpbS5jb252ZXJzYXRpb24udjEimQgKDE1lc3NhZ2VFbnRyeRISCgptZXNzYWdlX2lkGAEgASgJEhwKFHRvcF9sZXZlbF9tZXNzYWdlX2lkGAIgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAMgASgJEjgKBmF1dGhvchgEIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuTWVzc2FnZUF1dGhvchI4Cgl1c2VyX3NhaWQYCiABKAsyIy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlVzZXJTYWlkSAASOgoKYWdlbnRfc2FpZBgLIAEoCzIkLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQWdlbnRTYWlkSAASRgoQcGVybWlzc2lvbl9hc2tlZBgMIAEoCzIqLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuUGVybWlzc2lvbkFza2VkSAASQgoOZmFpbHVyZV9yYWlzZWQYDSABKAsyKC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkZhaWx1cmVSYWlzZWRIABI8Cgtjb250ZXh0X2N1dBgOIAEoCzIlLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQ29udGV4dEN1dEgAEk8KFWRldGFjaGVkX3dvcmtfc3RhcnRlZBgQIAEoCzIuLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZEgAElUKGGRldGFjaGVkX3dvcmtfcHJvZ3Jlc3NlZBgUIAEoCzIxLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrUHJvZ3Jlc3NlZEgAEksKE2RldGFjaGVkX3dvcmtfZW5kZWQYFSABKAsyLC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0VuZGVkSAASTAoTcGVybWlzc2lvbl9hbnN3ZXJlZBgWIAEoCzItLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuUGVybWlzc2lvbkFuc3dlcmVkSAASQAoNdG9vbF9yZXR1cm5lZBgXIAEoCzInLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVG9vbFJldHVybmVkSAASSwoTc2tpbGxfYm9keV9yZXNvbHZlZBgYIAEoCzIsLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuU2tpbGxCb2R5UmVzb2x2ZWRIABJGChBjb250ZW50X2Fycml2aW5nGB4gASgLMiouYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5Db250ZW50QXJyaXZpbmdIAEIJCgdwYXlsb2FkSgQIDxAQUhdkYWVtb25fYW5zd2VyZWRfY29tbWFuZCLhAQoNTWVzc2FnZUF1dGhvchI1CgR1c2VyGAEgASgLMiUuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5BdXRob3JVc2VySAASNwoFYWdlbnQYAiABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkF1dGhvckFnZW50SAASSAoOZGV0YWNoZWRfYWdlbnQYAyABKAsyLi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkF1dGhvckRldGFjaGVkQWdlbnRIAEIICgZhdXRob3JKBAgEEAVSBmRhZW1vbiIMCgpBdXRob3JVc2VyIg0KC0F1dGhvckFnZW50IjcKE0F1dGhvckRldGFjaGVkQWdlbnQSIAoYZGV0YWNoZWRfd29ya19tZXNzYWdlX2lkGAEgASgJQjpaOGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_agentshim_conversation_v1_ephemeral, file_agentshim_conversation_v1_payloads]);
+  fileDesc("CidhZ2VudHNoaW0vY29udmVyc2F0aW9uL3YxL21lc3NhZ2UucHJvdG8SGWFnZW50c2hpbS5jb252ZXJzYXRpb24udjEi0QgKDE1lc3NhZ2VFbnRyeRISCgptZXNzYWdlX2lkGAEgASgJEhwKFHRvcF9sZXZlbF9tZXNzYWdlX2lkGAIgASgJEjgKBnBhcmVudBgFIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuTWVzc2FnZVBhcmVudBI4CgZhdXRob3IYBCABKAsyKC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VBdXRob3ISOAoJdXNlcl9zYWlkGAogASgLMiMuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZEgAEjoKCmFnZW50X3NhaWQYCyABKAsyJC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkFnZW50U2FpZEgAEkYKEHBlcm1pc3Npb25fYXNrZWQYDCABKAsyKi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25Bc2tlZEgAEkIKDmZhaWx1cmVfcmFpc2VkGA0gASgLMiguYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5GYWlsdXJlUmFpc2VkSAASPAoLY29udGV4dF9jdXQYDiABKAsyJS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkNvbnRleHRDdXRIABJPChVkZXRhY2hlZF93b3JrX3N0YXJ0ZWQYECABKAsyLi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya1N0YXJ0ZWRIABJVChhkZXRhY2hlZF93b3JrX3Byb2dyZXNzZWQYFCABKAsyMS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya1Byb2dyZXNzZWRIABJLChNkZXRhY2hlZF93b3JrX2VuZGVkGBUgASgLMiwuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEgAEkwKE3Blcm1pc3Npb25fYW5zd2VyZWQYFiABKAsyLS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BbnN3ZXJlZEgAEkAKDXRvb2xfcmV0dXJuZWQYFyABKAsyJy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlRvb2xSZXR1cm5lZEgAEksKE3NraWxsX2JvZHlfcmVzb2x2ZWQYGCABKAsyLC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlNraWxsQm9keVJlc29sdmVkSAASRgoQY29udGVudF9hcnJpdmluZxgeIAEoCzIqLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQ29udGVudEFycml2aW5nSABCCQoHcGF5bG9hZEoECAMQBEoECA8QEFIRcGFyZW50X21lc3NhZ2VfaWRSF2RhZW1vbl9hbnN3ZXJlZF9jb21tYW5kIpkBCg1NZXNzYWdlUGFyZW50EjwKBHJvb3QYASABKAsyLC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLk1lc3NhZ2VQYXJlbnRSb290SAASQAoGaW5zaWRlGAIgASgLMi4uYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5NZXNzYWdlUGFyZW50SW5zaWRlSABCCAoGcGFyZW50IhMKEU1lc3NhZ2VQYXJlbnRSb290IikKE01lc3NhZ2VQYXJlbnRJbnNpZGUSEgoKbWVzc2FnZV9pZBgBIAEoCSLhAQoNTWVzc2FnZUF1dGhvchI1CgR1c2VyGAEgASgLMiUuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5BdXRob3JVc2VySAASNwoFYWdlbnQYAiABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkF1dGhvckFnZW50SAASSAoOZGV0YWNoZWRfYWdlbnQYAyABKAsyLi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkF1dGhvckRldGFjaGVkQWdlbnRIAEIICgZhdXRob3JKBAgEEAVSBmRhZW1vbiIMCgpBdXRob3JVc2VyIg0KC0F1dGhvckFnZW50IjcKE0F1dGhvckRldGFjaGVkQWdlbnQSIAoYZGV0YWNoZWRfd29ya19tZXNzYWdlX2lkGAEgASgJQjpaOGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_agentshim_conversation_v1_payloads]);
 
 /**
  * One record BELONGING to one message. Several of these share a message_id and
@@ -60,22 +58,25 @@ export type MessageEntry = Message<"agentshim.conversation.v1.MessageEntry"> & {
   topLevelMessageId: string;
 
   /**
-   * The message immediately containing this one — ONE HOP, never the root.
+   * Where this message sits: at the root of the feed, or inside another
+   * message.
    *
-   * EMPTY means the message sits directly in the feed, in which case
-   * top_level_message_id is its own id. Absence is the fact itself, not a
-   * placeholder: a message whose parent could not be resolved is a producer
-   * fault, never a blank.
+   * A oneof rather than a string, and that is the whole point. As a string,
+   * EMPTY meant two different things — "this is a feed row" and "the producer
+   * could not resolve a parent" — and only the first is legal. At a context
+   * compaction the vendor's physical parent chain is cut, the boundary line
+   * carries no parent, and a separate logical pointer holds the only link back
+   * across it. A producer that reads only the physical chain resolves nothing,
+   * and with a string it would emit an empty value indistinguishable from a
+   * legitimate root — so pre-compaction history becomes unreachable by any walk
+   * and the boundary renders as a new top-level row, with nothing detecting it.
    *
-   * AT A CONTEXT COMPACTION the vendor's physical parent chain is CUT — the
-   * boundary line carries no parent — and a separate logical pointer holds the
-   * only link back across it. The producer resolves this field from that
-   * pointer in that case; reading only the physical chain would make
-   * pre-compaction history unreachable by any walk.
+   * Here an unresolved parent has no legal record to occupy. The producer must
+   * state which case it is, or fail.
    *
-   * @generated from field: string parent_message_id = 3;
+   * @generated from field: agentshim.conversation.v1.MessageParent parent = 5;
    */
-  parentMessageId: string;
+  parent?: MessageParent | undefined;
 
   /**
    * Who this message is FROM, resolved by the producer rather than inferred by
@@ -197,10 +198,9 @@ export type MessageEntry = Message<"agentshim.conversation.v1.MessageEntry"> & {
     case: "skillBodyResolved";
   } | {
     /**
-     * A fragment of content still arriving. EPHEMERAL by retention, so it is
-     * delivered live and never stored: the durable record of the same content
-     * is the completed message the file plane writes. Defined in
-     * ephemeral.proto, apart from every durable body.
+     * A fragment of content still arriving, handed straight to the daemon by
+     * the stream plane. The completed message the file plane writes later
+     * REPLACES the preview rather than appending beside it.
      *
      * @generated from field: agentshim.conversation.v1.ContentArriving content_arriving = 30;
      */
@@ -215,6 +215,84 @@ export type MessageEntry = Message<"agentshim.conversation.v1.MessageEntry"> & {
  */
 export const MessageEntrySchema: GenMessage<MessageEntry> = /*@__PURE__*/
   messageDesc(file_agentshim_conversation_v1_message, 0);
+
+/**
+ * Where a message sits in the feed.
+ *
+ * Two arms, no third. There is deliberately no "unknown" — a producer that
+ * cannot resolve a parent has nothing legal to emit and must fail loudly rather
+ * than pick the arm that looks harmless.
+ *
+ * @generated from message agentshim.conversation.v1.MessageParent
+ */
+export type MessageParent = Message<"agentshim.conversation.v1.MessageParent"> & {
+  /**
+   * @generated from oneof agentshim.conversation.v1.MessageParent.parent
+   */
+  parent: {
+    /**
+     * The message sits directly in the feed. `top_level_message_id` is its own
+     * id.
+     *
+     * @generated from field: agentshim.conversation.v1.MessageParentRoot root = 1;
+     */
+    value: MessageParentRoot;
+    case: "root";
+  } | {
+    /**
+     * The message sits inside another one.
+     *
+     * @generated from field: agentshim.conversation.v1.MessageParentInside inside = 2;
+     */
+    value: MessageParentInside;
+    case: "inside";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.MessageParent.
+ * Use `create(MessageParentSchema)` to create a new message.
+ */
+export const MessageParentSchema: GenMessage<MessageParent> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_message, 1);
+
+/**
+ * A feed row: nothing contains this message.
+ *
+ * @generated from message agentshim.conversation.v1.MessageParentRoot
+ */
+export type MessageParentRoot = Message<"agentshim.conversation.v1.MessageParentRoot"> & {
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.MessageParentRoot.
+ * Use `create(MessageParentRootSchema)` to create a new message.
+ */
+export const MessageParentRootSchema: GenMessage<MessageParentRoot> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_message, 2);
+
+/**
+ * Contained by another message.
+ *
+ * @generated from message agentshim.conversation.v1.MessageParentInside
+ */
+export type MessageParentInside = Message<"agentshim.conversation.v1.MessageParentInside"> & {
+  /**
+   * The message immediately containing this one — one hop, never the root.
+   * Walk `top_level_message_id` for the root; it is stored precisely so no
+   * reader has to walk this.
+   *
+   * @generated from field: string message_id = 1;
+   */
+  messageId: string;
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.MessageParentInside.
+ * Use `create(MessageParentInsideSchema)` to create a new message.
+ */
+export const MessageParentInsideSchema: GenMessage<MessageParentInside> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_message, 3);
 
 /**
  * Who a message is from.
@@ -262,7 +340,7 @@ export type MessageAuthor = Message<"agentshim.conversation.v1.MessageAuthor"> &
  * Use `create(MessageAuthorSchema)` to create a new message.
  */
 export const MessageAuthorSchema: GenMessage<MessageAuthor> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_message, 1);
+  messageDesc(file_agentshim_conversation_v1_message, 4);
 
 /**
  * A person, typing into the session.
@@ -277,7 +355,7 @@ export type AuthorUser = Message<"agentshim.conversation.v1.AuthorUser"> & {
  * Use `create(AuthorUserSchema)` to create a new message.
  */
 export const AuthorUserSchema: GenMessage<AuthorUser> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_message, 2);
+  messageDesc(file_agentshim_conversation_v1_message, 5);
 
 /**
  * The agent, speaking in the main conversation.
@@ -292,7 +370,7 @@ export type AuthorAgent = Message<"agentshim.conversation.v1.AuthorAgent"> & {
  * Use `create(AuthorAgentSchema)` to create a new message.
  */
 export const AuthorAgentSchema: GenMessage<AuthorAgent> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_message, 3);
+  messageDesc(file_agentshim_conversation_v1_message, 6);
 
 /**
  * A subagent, speaking inside its own detached conversation.
@@ -314,5 +392,5 @@ export type AuthorDetachedAgent = Message<"agentshim.conversation.v1.AuthorDetac
  * Use `create(AuthorDetachedAgentSchema)` to create a new message.
  */
 export const AuthorDetachedAgentSchema: GenMessage<AuthorDetachedAgent> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_message, 4);
+  messageDesc(file_agentshim_conversation_v1_message, 7);
 
