@@ -131,6 +131,7 @@ import {
   FooterPhaseSchema,
 } from "../../proto/gen/ts/agentshim/frontend/v1/footer_pb";
 import { fromJson, toJson, type JsonValue } from "@bufbuild/protobuf";
+import { historyContinuation, type HistoryContinuation } from "./load-more.js";
 import {
   FAILURE_CARD_LIFECYCLE_ARM,
   FAILURE_KIND_SIDE,
@@ -1240,17 +1241,19 @@ export interface ConversationDelta {
 }
 
 /**
- * Where a `ConversationPage` says the conversation continues above it.
+ * Where a `ConversationHistoryPage` says the conversation continues above it.
  *
- * `more` carries the opaque cursor that reads the page before this one;
- * `start` says this page reaches the conversation's beginning, and the
- * load-more affordance retires. Exactly one is set — the daemon never sends a
- * page with neither, and a page arriving with neither is refused at the decode
- * rather than rendered as an endless load-more.
+ * `more` is EMPTY on purpose: under this contract "there is more" is a FACT
+ * the client acts on by calling `NextPageCmd`, not a handle it stores. The
+ * cursor that used to live here is precisely the position the client no longer
+ * holds. `start` says this page reaches the conversation's beginning, and the
+ * load-more affordance retires.
+ *
+ * Exactly one is set. A page arriving with neither — or with both — is refused
+ * at the decode rather than defaulted to either answer (see
+ * {@link historyContinuation}).
  */
-export type PageContinuation =
-  | { case: "more"; cursor: string }
-  | { case: "start" };
+export type PageContinuation = HistoryContinuation;
 
 /**
  * ONE page of conversation history: the cold open's answer, and load-more's.
@@ -3394,27 +3397,29 @@ function decodeConversationPage(v: unknown): ConversationPage {
   return page;
 }
 
-const PAGE_MORE_KEYS = new Set(["cursor"]);
+/**
+ * `HistoryHasMore` is EMPTY, so the arm carries no keys at all — an arm that
+ * arrived with any would be a position the client is not supposed to hold.
+ */
+const PAGE_MORE_KEYS = new Set<string>([]);
+const PAGE_START_KEYS = new Set<string>([]);
 
+/**
+ * Resolve the continuation oneof.
+ *
+ * The DECISION is `historyContinuation`'s and lives with the affordance it
+ * drives, because "is there anything older" has exactly one owner. This adds
+ * only the shape checks the decode boundary owes: each arm is an object, and
+ * neither carries a field this contract deleted.
+ */
 function decodePageContinuation(o: JsonObject): PageContinuation {
-  const hasMore = o.more !== undefined && o.more !== null;
-  const hasStart = o.start !== undefined && o.start !== null;
-  if (hasMore && hasStart) {
-    throw new Error("frontend-proto: ConversationPage set both `more` and `start`, which are one oneof");
+  if (o.more !== undefined && o.more !== null) {
+    rejectUnknown(ensureObject(o.more, "ConversationPage.more"), PAGE_MORE_KEYS, "ConversationPage.more");
   }
-  if (hasMore) {
-    const more = ensureObject(o.more, "ConversationPage.more");
-    rejectUnknown(more, PAGE_MORE_KEYS, "ConversationPage.more");
-    const cursor = str(more, "cursor", "ConversationPage.more");
-    if (cursor === "") {
-      throw new Error("frontend-proto: ConversationPage.more carried no cursor, so load-more could never advance");
-    }
-    return { case: "more", cursor };
+  if (o.start !== undefined && o.start !== null) {
+    rejectUnknown(ensureObject(o.start, "ConversationPage.start"), PAGE_START_KEYS, "ConversationPage.start");
   }
-  if (hasStart) return { case: "start" };
-  throw new Error(
-    "frontend-proto: ConversationPage set neither `more` nor `start`; a page with no continuation would render a load-more that can never retire",
-  );
+  return historyContinuation({ more: o.more, start: o.start });
 }
 
 const MESSAGE_ENVELOPE_KEYS = new Set([
