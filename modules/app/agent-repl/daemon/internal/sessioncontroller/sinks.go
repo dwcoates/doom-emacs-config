@@ -3434,7 +3434,7 @@ func (c *consumer) snapshotPermItems() []*frontendv1.Message {
 // and carry lineage that contradicts it.
 func permissionItem(req *corev1.PermissionRequest, res corev1.PermissionItem_Resolution, denyMessage string) *frontendv1.Message {
 	return &frontendv1.Message{
-		Uuid:    req.GetRequestId(),
+		Uuid: req.GetRequestId(),
 		Payload: &frontendv1.Message_Permission{Permission: &corev1.PermissionItem{
 			Request:     req,
 			Resolution:  res,
