@@ -294,9 +294,14 @@ message MessagePage {
   StoredMessage message_9 = 10;
   StoredMessage message_10 = 11;
 
-  // The seq to anchor the NEXT request at: the oldest seq this page covers.
-  // Returned so a caller never computes a position of its own — it copies back
-  // a value the serving side minted.
+  // The seq to anchor the NEXT request at: the seq at which the LAST selected
+  // message was ENCOUNTERED by the backward scan — the position the scan
+  // actually walked TO. Returned so a caller never computes a position of its
+  // own; it copies back a value the serving side minted.
+  //
+  // NOT the oldest seq this page covers. A message that starts early and ends
+  // late owns records far below the rest of the page, and anchoring there
+  // would SKIP every message in between. See the correction below.
   uint64 last_page_seq = 12;
 
   // WHETHER older history remains — never how much, never where.
@@ -334,6 +339,35 @@ message HistoryAtRetainedFloor {}
 ```
 
 Next free tag: **15**.
+
+**CORRECTION, applied 2026-08-11 during implementation.** `last_page_seq` was
+originally specified as "the oldest seq this page covers", and the store
+implemented it literally: the MINIMUM seq over every record on the page.
+
+That silently skips history. Messages are SELECTED by scanning seq descending
+and taking the first ten distinct owners, but a single message's records can
+span a wide seq range — detached work that starts early and ends late owns
+records across most of a session. One such message on a page drags the minimum
+far below the other nine. The next page anchors `before_seq` at that depth, and
+every message between it and the rest of the page is never visited and never
+delivered, with nothing in the reply saying so.
+
+`last_page_seq` is now the seq at which the TENTH (that is, the last) selected
+owner was ENCOUNTERED during the descending scan — the owner's own anchor
+position. That is the position the scan actually walked to, so the next page
+resumes exactly at the next row the scan would have read: no gap.
+
+No overlap either, and it needs one more rule to hold. A long-lived message's
+remaining records still lie below the anchor, so a later scan meets them again.
+An owner that ALSO owns a record at or above the anchor is therefore REJECTED
+rather than selected: an earlier page's scan necessarily passed through that
+record and served the message whole. The reader's within-page "skip an owner
+already seen" rule and this across-page rule are the same rule at two scopes.
+
+Unchanged by this correction: the page size, the ten discrete slots, the
+distinct-owner selection rule, and the `boundary` oneof's meaning —
+`HistoryAtRetainedFloor` still reports the oldest RETAINED record, which is the
+store's own fact and not the conversation's beginning.
 
 ---
 
