@@ -157,6 +157,17 @@ func ClassifyRecordDerived(items []*frontendv1.Message) ([]*frontendv1.Message, 
 		}
 		out = append(out, classified)
 	}
+	// THE DENORMALIZED OWNER IS CHECKED AGAINST THE PARENT CHAIN BEFORE THE
+	// BATCH LEAVES. The constructors above cannot produce a disagreement, but
+	// the passthrough above them can: a message that arrived ALREADY classified
+	// (the harness's local_command record is the standing case) carries lineage
+	// its own producer wrote, and nothing here had a chance to refuse it. This
+	// is that chance, and a disagreement is refused rather than delivered
+	// because a stored owner that contradicts containment is wrong forever and
+	// invisible to every page query.
+	if err := VerifyOwnershipRoots(out); err != nil {
+		return nil, fmt.Errorf("frontend: a record-derived message's top_level_message_id does not equal the root of its parent chain, so the whole delta is refused rather than written with an owner that is corruption: %w", err)
+	}
 	return out, nil
 }
 
