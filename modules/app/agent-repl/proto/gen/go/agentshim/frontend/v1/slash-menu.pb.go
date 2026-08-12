@@ -10,7 +10,6 @@
 package frontendv1
 
 import (
-	v1 "agentrepl/proto/agentshim/conversation/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -68,7 +67,7 @@ const (
 type DaemonInterceptedCommandItem struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The recognized command. Never UNSPECIFIED.
-	Command       v1.SessionCommand `protobuf:"varint,1,opt,name=command,proto3,enum=agentshim.conversation.v1.SessionCommand" json:"command,omitempty"`
+	Command       SessionCommand `protobuf:"varint,1,opt,name=command,proto3,enum=agentshim.frontend.v1.SessionCommand" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -103,11 +102,11 @@ func (*DaemonInterceptedCommandItem) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_slash_menu_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *DaemonInterceptedCommandItem) GetCommand() v1.SessionCommand {
+func (x *DaemonInterceptedCommandItem) GetCommand() SessionCommand {
 	if x != nil {
 		return x.Command
 	}
-	return v1.SessionCommand(0)
+	return SessionCommand_SESSION_COMMAND_UNSPECIFIED
 }
 
 // Additive: the launched skill's own SKILL.md body, addressed to the Skill
@@ -198,9 +197,9 @@ var File_agentshim_frontend_v1_slash_menu_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_slash_menu_proto_rawDesc = "" +
 	"\n" +
-	"&agentshim/frontend/v1/slash-menu.proto\x12\x15agentshim.frontend.v1\x1a(agentshim/conversation/v1/commands.proto\"c\n" +
-	"\x1cDaemonInterceptedCommandItem\x12C\n" +
-	"\acommand\x18\x01 \x01(\x0e2).agentshim.conversation.v1.SessionCommandR\acommand\"T\n" +
+	"&agentshim/frontend/v1/slash-menu.proto\x12\x15agentshim.frontend.v1\x1a$agentshim/frontend/v1/commands.proto\"_\n" +
+	"\x1cDaemonInterceptedCommandItem\x12?\n" +
+	"\acommand\x18\x01 \x01(\x0e2%.agentshim.frontend.v1.SessionCommandR\acommand\"T\n" +
 	"\rSkillBodyItem\x12\x1e\n" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12#\n" +
 	"\rbody_markdown\x18\x02 \x01(\tR\fbodyMarkdownB2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
@@ -221,10 +220,10 @@ var file_agentshim_frontend_v1_slash_menu_proto_msgTypes = make([]protoimpl.Mess
 var file_agentshim_frontend_v1_slash_menu_proto_goTypes = []any{
 	(*DaemonInterceptedCommandItem)(nil), // 0: agentshim.frontend.v1.DaemonInterceptedCommandItem
 	(*SkillBodyItem)(nil),                // 1: agentshim.frontend.v1.SkillBodyItem
-	(v1.SessionCommand)(0),               // 2: agentshim.conversation.v1.SessionCommand
+	(SessionCommand)(0),                  // 2: agentshim.frontend.v1.SessionCommand
 }
 var file_agentshim_frontend_v1_slash_menu_proto_depIdxs = []int32{
-	2, // 0: agentshim.frontend.v1.DaemonInterceptedCommandItem.command:type_name -> agentshim.conversation.v1.SessionCommand
+	2, // 0: agentshim.frontend.v1.DaemonInterceptedCommandItem.command:type_name -> agentshim.frontend.v1.SessionCommand
 	1, // [1:1] is the sub-list for method output_type
 	1, // [1:1] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
@@ -237,6 +236,7 @@ func file_agentshim_frontend_v1_slash_menu_proto_init() {
 	if File_agentshim_frontend_v1_slash_menu_proto != nil {
 		return
 	}
+	file_agentshim_frontend_v1_commands_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
