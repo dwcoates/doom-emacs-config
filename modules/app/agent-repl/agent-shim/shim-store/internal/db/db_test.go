@@ -355,6 +355,64 @@ func TestMigrateUpgradesAVersion1DatabaseToWriteIdentity(t *testing.T) {
 	}
 }
 
+func TestMigrateUpgradesAVersion1DatabaseToMessageOwnership(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "events.db")
+	openRawV1(t, path)
+
+	// Act
+	d, err := Open(path, logging.New(io.Discard, io.Discard, false))
+
+	// Assert: the page query's column is present on a migrated database.
+	if err != nil {
+		t.Fatalf("Open on a v1 database: %v", err)
+	}
+	defer d.Close()
+	if _, err := d.sql.Exec(`SELECT top_level_message_id FROM event LIMIT 1`); err != nil {
+		t.Fatalf("ownership column absent after migration: %v", err)
+	}
+}
+
+func TestMigrateLeavesAPreUpgradeRowUnowned(t *testing.T) {
+	// Arrange: a row written before the ownership column existed. It must
+	// migrate to SQL NULL and not to an empty string, because an empty string
+	// is a value that sorts into the page query's DISTINCT owners.
+	path := filepath.Join(t.TempDir(), "events.db")
+	openRawV1(t, path)
+	preUpgrade := persistentCore("s1")
+	preUpgrade.Seq = 1
+	blob, err := proto.Marshal(preUpgrade)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	dsn := "file:" + path + "?" + url.Values{"_pragma": {"journal_mode(WAL)"}}.Encode()
+	raw, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("raw open: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO event (session_id, seq, plane, class, kind, produced_at, payload)
+	  VALUES ('s1', 1, 0, 1, 'SessionStarted', 0, ?)`, blob); err != nil {
+		t.Fatalf("seeding a pre-upgrade row: %v", err)
+	}
+	raw.Close()
+
+	// Act
+	d, err := Open(path, logging.New(io.Discard, io.Discard, false))
+	if err != nil {
+		t.Fatalf("Open on a v1 database: %v", err)
+	}
+	defer d.Close()
+
+	// Assert
+	var owned int
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM event WHERE top_level_message_id IS NOT NULL`).Scan(&owned); err != nil {
+		t.Fatalf("counting owned rows: %v", err)
+	}
+	if owned != 0 {
+		t.Fatalf("%d pre-upgrade rows carry ownership, want 0", owned)
+	}
+}
+
 func TestMigratePreservesRowsWrittenBeforeTheUpgrade(t *testing.T) {
 	// Arrange: a v1 database carrying a real event row.
 	path := filepath.Join(t.TempDir(), "events.db")
