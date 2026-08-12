@@ -10,29 +10,21 @@
 // construction, so a violating message cannot be built and then noticed; a check
 // applied afterwards is a check something can skip."
 //
-// So the seam under test is the constructor pair, and the assertion is that it
+// So the seam under test is the constructor set, and the assertion is that it
 // returns an error rather than a message.
 //
-// WHY THE PARENT IS A MESSAGE AND NOT AN ID. The rule being enforced is about
-// the parent's CLASS, and a bare id does not carry one. A constructor handed
-// only a string could not tell an ephemeral parent from a durable one, so the
-// refusal would have to happen somewhere that could — which is the "checked
-// afterwards" the contract rules out.
+// WHY THE PARENT IS A MESSAGE AND NOT AN ID, in NewDurableChild. The rule being
+// enforced is about the parent's CLASS, and a bare id does not carry one. A
+// constructor handed only a string could not tell an ephemeral parent from a
+// durable one, so the refusal would have to happen somewhere that could — which
+// is the "checked afterwards" the contract rules out.
 //
-// THE SEAM THIS FILE REQUIRES, verbatim, in claude-repld/internal/frontend
-// beside FeedRowLineage (which these two subsume for the classes they build):
-//
-//	// NewDurableMessage builds a message a store record exists for. parent is
-//	// the containing message, nil for a feed row. Refuses an ephemeral parent.
-//	func NewDurableMessage(uuid string, parent *frontendv1.Message) (*frontendv1.Message, error)
-//
-//	// NewEphemeralMessage builds a message no store record exists for and none
-//	// ever will. parent must be nil: an ephemeral message is ALWAYS a feed row.
-//	func NewEphemeralMessage(uuid string, parent *frontendv1.Message) (*frontendv1.Message, error)
-//
-// Until both land this package does not build, which is the intended signal:
-// the refusal has no other place it can be asserted without becoming the
-// after-the-fact check the contract forbids.
+// WHY THE EPHEMERAL CONSTRUCTOR TAKES NO PARENT AT ALL. This file was authored
+// against a proposed pair that both took a parent, and the seam that landed goes
+// further: NewEphemeralFeedRow has no parameter through which a parent can be
+// named, so rule 1 is unrepresentable rather than refused. Rule 3 survives as a
+// refusal because a caller can still hand in a BODY that already carries a
+// lineage, and that is the shape test 6 drives.
 package e2e
 
 import (
@@ -42,6 +34,22 @@ import (
 
 	"claude-repld/internal/frontend"
 )
+
+// durabilityTestBody returns the minimum message body the constructors accept:
+// an identity and a payload arm, with the lineage left for the constructor to
+// write. The payload is the intercepted-command item because it is the arm this
+// contract's own ephemeral construction site uses; nothing here turns on which
+// arm it is, only that one is set.
+func durabilityTestBody(uuid string) *frontendv1.Message {
+	return &frontendv1.Message{
+		Uuid: uuid,
+		Payload: &frontendv1.Message_DaemonInterceptedCommand{
+			DaemonInterceptedCommand: &frontendv1.DaemonInterceptedCommandItem{
+				Command: frontendv1.SessionCommand_SESSION_COMMAND_MODEL,
+			},
+		},
+	}
+}
 
 // --- 5. a durable child may not name an ephemeral parent --------------------
 
@@ -55,13 +63,13 @@ import (
 func TestDurableChildMayNotNameAnEphemeralParent(t *testing.T) {
 	// Arrange — an ephemeral feed row, which is the only shape an ephemeral
 	// message is allowed to take.
-	parent, err := frontend.NewEphemeralMessage("ephemeral-parent", nil)
+	parent, err := frontend.NewEphemeralFeedRow(durabilityTestBody("ephemeral-parent"))
 	if err != nil {
 		t.Fatalf("constructing an ephemeral feed row: %v, want it accepted (empty parent, self-referential root)", err)
 	}
 
 	// Act
-	child, err := frontend.NewDurableMessage("durable-child", parent)
+	child, err := frontend.NewDurableChild(parent, durabilityTestBody("durable-child"))
 
 	// Assert
 	if err == nil {
@@ -83,9 +91,15 @@ func TestDurableChildMayNotNameAnEphemeralParent(t *testing.T) {
 // a reader has every reason to expect a message. An ephemeral message is
 // ALWAYS a feed row: empty parent_message_id, top_level_message_id equal to its
 // own id.
+//
+// The attempt is made the only way the seam still allows it — a body handed in
+// with the parent already written into its lineage. A constructor that silently
+// overwrote that lineage would pass this test's first assertion and still hide
+// the producer that believed it was attaching the card, which is why the
+// constructor refuses instead of correcting.
 func TestEphemeralMessageMayNotNameADurableParent(t *testing.T) {
 	// Arrange — a durable feed row.
-	parent, err := frontend.NewDurableMessage("durable-parent", nil)
+	parent, err := frontend.NewDurableFeedRow(durabilityTestBody("durable-parent"))
 	if err != nil {
 		t.Fatalf("constructing a durable feed row: %v, want it accepted", err)
 	}
@@ -94,12 +108,18 @@ func TestEphemeralMessageMayNotNameADurableParent(t *testing.T) {
 			parent.GetLineage().GetTopLevelMessageId(), parent.GetUuid())
 	}
 
+	attaching := durabilityTestBody("ephemeral-child")
+	attaching.Lineage = &frontendv1.MessageLineage{
+		TopLevelMessageId: parent.GetUuid(),
+		ParentMessageId:   parent.GetUuid(),
+	}
+
 	// Act
-	child, err := frontend.NewEphemeralMessage("ephemeral-child", parent)
+	child, err := frontend.NewEphemeralFeedRow(attaching)
 
 	// Assert
 	if err == nil {
-		t.Fatalf("constructing an ephemeral child of a durable parent returned message %v and no error, want a refusal — the card would attach itself into a paged conversation it will simply vanish from",
+		t.Fatalf("constructing an ephemeral message that names a durable parent returned message %v and no error, want a refusal — the card would attach itself into a paged conversation it will simply vanish from",
 			child)
 	}
 	if child != nil {
@@ -115,7 +135,7 @@ func TestEphemeralMessageMayNotNameADurableParent(t *testing.T) {
 // parent, self-referential root.
 func TestEphemeralMessageIsAlwaysAFeedRow(t *testing.T) {
 	// Arrange & Act
-	m, err := frontend.NewEphemeralMessage("ephemeral-row", nil)
+	m, err := frontend.NewEphemeralFeedRow(durabilityTestBody("ephemeral-row"))
 
 	// Assert
 	if err != nil {
@@ -132,8 +152,12 @@ func TestEphemeralMessageIsAlwaysAFeedRow(t *testing.T) {
 	}
 }
 
-// The two constructors' signatures are pinned here, so a seam that grew a
-// second message type or dropped the error return fails at compile time rather
-// than in whatever goes on to publish the message.
-var _ func(string, *frontendv1.Message) (*frontendv1.Message, error) = frontend.NewEphemeralMessage
-var _ func(string, *frontendv1.Message) (*frontendv1.Message, error) = frontend.NewDurableMessage
+// The constructors' signatures are pinned here, so a seam that grew a second
+// message type or dropped the error return fails at compile time rather than in
+// whatever goes on to publish the message.
+//
+// NewEphemeralFeedRow's ABSENT parent parameter is itself part of what is
+// pinned: a signature that grew one would make rule 1 representable again.
+var _ func(*frontendv1.Message) (*frontendv1.Message, error) = frontend.NewEphemeralFeedRow
+var _ func(*frontendv1.Message) (*frontendv1.Message, error) = frontend.NewDurableFeedRow
+var _ func(*frontendv1.Message, *frontendv1.Message) (*frontendv1.Message, error) = frontend.NewDurableChild

@@ -234,9 +234,16 @@ func TestE2ECompactCommandSurvivesAReload(t *testing.T) {
 
 // TestE2EModelCommandDoesNotSurviveAReload covers contract Part 5 test 2.
 //
-// `/model` is in the ephemeral class permanently (contract Part 4): nothing
-// durable can exist for it, so what a reconnecting frontend gets is a RE-PUSH
-// from the daemon's own retention rather than a replay of a record.
+// `/model <name>` is in the ephemeral class: the daemon performs it itself and
+// the CLI never sees it, so nothing durable can exist for it and what a
+// reconnecting frontend gets is a RE-PUSH from the daemon's own retention
+// rather than a replay of a record.
+//
+// THE ARGUMENT FORM IS NOT INCIDENTAL. Contract Part 4 named `/model` flatly,
+// which the code does not bear out: BARE `/model` is forwarded to the CLI, so
+// the CLI writes a Shape A record and the invocation is DURABLE. What decides
+// the class is who answered the command, exactly as Part 3 says, and for this
+// command that turns on whether an argument followed it.
 //
 // The two halves are both asserted because either alone is satisfiable by a
 // defect. An item that survives the reload but is marked durable is a lie about
@@ -251,7 +258,7 @@ func TestE2EModelCommandDoesNotSurviveAReload(t *testing.T) {
 	tail := tailStore(t, vendorID)
 
 	// Act
-	writeCmd(t, live, slashSubmitJSON("r-model", "/model"))
+	writeCmd(t, live, slashSubmitJSON("r-model", "/model opus"))
 	model, _ := awaitItem(t, live, cwd, "the /model intercepted-command message",
 		slashIsCommand(frontendv1.SessionCommand_SESSION_COMMAND_MODEL))
 
@@ -305,7 +312,7 @@ func TestE2EEphemeralMessageIsAbsentFromTheStoreAndThatIsCorrect(t *testing.T) {
 	tail := tailStore(t, vendorID)
 
 	// Act
-	writeCmd(t, live, slashSubmitJSON("r-model-query", "/model"))
+	writeCmd(t, live, slashSubmitJSON("r-model-query", "/model opus"))
 	model, _ := awaitItem(t, live, cwd, "the /model intercepted-command message",
 		slashIsCommand(frontendv1.SessionCommand_SESSION_COMMAND_MODEL))
 
@@ -500,23 +507,26 @@ func TestE2EHumanPromptQuotingAMachineryTagStaysAPrompt(t *testing.T) {
 // happened to arrive in submit order fails here.
 //
 // THE PAIR CROSSES THE DURABILITY CLASSES ON PURPOSE. `/compact` is CLI-handled
-// and durable; `/model` is daemon-handled and ephemeral. Both are Shape A on
-// disk (contract Part 1), and identity must hold across the classes, not only
-// within one — a correlation that works because both commands took the same
-// path has not been tested at all.
+// and durable; `/model <name>` is daemon-handled and ephemeral. Identity must
+// hold ACROSS the classes, not only within one — a correlation that works
+// because both commands took the same path has not been tested at all.
+//
+// Only the durable one has a CLI record to invert, which is the point: the
+// ephemeral item is pushed at submit and the durable record lands afterwards,
+// so the two arrive by different routes in an order neither chose.
 func TestE2ETwoSlashCommandsDoNotSwapIdentities(t *testing.T) {
 	// Arrange
 	h := newUDSHarness(t)
 	cwd := t.TempDir()
 	_, live, vendorID, store := liveSession(t, h, cwd)
 
-	// Act — two commands issued back to back, with the CLI's record for the
-	// SECOND submit written first. That inversion is the arrangement a
-	// positional correlation gets wrong and an identity-based one does not.
+	// Act — two commands issued back to back. The daemon-handled one is
+	// answered and pushed at submit; the CLI-handled one's record arrives on the
+	// file plane afterwards, so the two land by different routes in an order
+	// neither of them chose. A positional correlation gets that wrong and an
+	// identity-based one does not.
 	writeCmd(t, live, slashSubmitJSON("r-cmd-compact", "/compact"))
-	writeCmd(t, live, slashSubmitJSON("r-cmd-model", "/model"))
-	store.write(slashShapeAEvent(t, vendorID, "e2e-slash-pair-model", "e2e-prompt-pair-model",
-		slashShapeAContent("/model")))
+	writeCmd(t, live, slashSubmitJSON("r-cmd-model", "/model opus"))
 	store.write(slashShapeAEvent(t, vendorID, "e2e-slash-pair-compact", "e2e-prompt-pair-compact",
 		slashShapeAContent("/compact")))
 	store.write(sidecarCompactEvent(vendorID, "e2e-slash-pair-sentinel", "sentinel"))

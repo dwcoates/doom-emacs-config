@@ -95,7 +95,24 @@ commands, which is Part 3.
   `/compact` and `/clear` additionally produce first-class `Event` arms
   (`ContextCleared`, `ContextCompacted`). These become **DURABLE** messages.
 - **Daemon-handled commands** never reach the CLI, so nothing durable can exist.
-  `/model` and its siblings stay **EPHEMERAL**, permanently.
+  These stay **EPHEMERAL**, permanently.
+
+**CORRECTION, applied 2026-08-11 during implementation.** This part originally
+read "`/model` and its siblings stay EPHEMERAL, permanently", and the code does
+not bear that out. The class is decided by WHO ANSWERED the command, which for
+`/model` turns on whether an argument followed it:
+
+- `/model <name>` is performed by the daemon through `Manager.SetModel` and
+  never reaches the CLI. **EPHEMERAL.**
+- Bare `/model` is FORWARDED to the CLI, which answers it and writes a Shape A
+  record. **DURABLE.**
+
+This is not a change of rule, it is the same rule stated precisely: the
+predicate is `performsLocally()` at the dispatch site, and naming commands
+instead of the predicate produced a list that disagreed with the routing. Part 1
+observing a Shape A record for `/model` and Part 4 calling `/model` permanently
+ephemeral could not both be true, and this is which one survives. Part 5 test 2
+therefore drives `/model <name>`.
 
 ### Outbound classification replaces discarding
 
@@ -126,9 +143,23 @@ over a durable `TaskStarted`, and that stays durable.
 
 ### Membership, exhaustively
 
-- Daemon-handled commands Claude never sees (`/model` and siblings).
+- Daemon-handled commands Claude never sees — the ones `performsLocally()`
+  answers, which is `/model <name>` and its siblings but NOT the bare forms the
+  daemon forwards (see the correction in Part 3).
 - Shape B system/local_command records.
-- Daemon-synthesized failure cards (e.g. `startFailedCardUUID`).
+
+**CORRECTION, applied 2026-08-11 during implementation.** This list originally
+also carried "daemon-synthesized failure cards (e.g. `startFailedCardUUID`)".
+It is wrong, and by this part's own definition:
+`publishTerminalStartFailure` calls `persistTerminalStartFailure` BEFORE
+pushing, and that function's comment states the durable record is the source of
+truth for every later reader. A durable record exists, so the card is DURABLE.
+
+The example was drawn from "the daemon minted its id", which this part
+explicitly rejects as the test. Whether a record exists is the only test, and a
+daemon-synthesized card that the daemon also persists passes it. A
+daemon-synthesized card that is NOT persisted would be ephemeral; none is known
+in the current tree.
 
 ### NOT members
 
