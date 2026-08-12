@@ -441,8 +441,7 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	// submitted turn's own identity on the wire (promptdispatch.go), and the
 	// durable turn ledger refuses a second start under a name it already holds.
 	// A session hibernated and compact-revived twice would otherwise submit its
-	// second compaction under the first one's name — the same collision the
-	// durable prompt receipt, keyed by request id, would already have taken.
+	// second compaction under the first one's name.
 	// The session id stays in the id so a log line still says which session's
 	// revival it belongs to without a lookup.
 	cutRequestID, err := newReviveCutRequestID(cut.requestIDPrefix, sessionID)

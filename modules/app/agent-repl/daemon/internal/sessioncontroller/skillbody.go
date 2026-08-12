@@ -170,8 +170,8 @@ func (s *skillCorrelator) reset() {
 // than adding a second one. The correlator is cumulative for the same reason —
 // a re-pull of old events finds the chain it already learned.
 //
-// Runs BEFORE attribution (promptecho.go), like withholdMachinery and for the
-// same reason: a record nobody typed must never claim a real prompt's receipt.
+// Runs with the other user-record curators, like withholdMachinery and for the
+// same reason: a record nobody typed must never reach the feed as a prompt.
 func (c *consumer) curateMetaRecords(cd *frontendv1.ConversationDelta, envs map[string]frontend.RecordEnvelope) asyncPush {
 	var push asyncPush
 	items := cd.GetMessages()

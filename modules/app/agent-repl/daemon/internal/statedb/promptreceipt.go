@@ -5,34 +5,23 @@ import (
 	"fmt"
 )
 
-// This file is the DURABLE half of the prompt receipt (see the session
-// controller's promptecho.go for the in-memory half it backs).
+// This file owns the `prompt_receipt` table, which now holds exactly ONE kind
+// of row: the interrupted-turn resumption.
 //
-// WHAT A RECEIPT IS. When a user submits a prompt, the daemon immediately
-// pushes a ConversationDelta carrying the prompt text keyed by the frontend
-// command's request id, so the user's own work appears without waiting for
-// the vendor's durable transcript to echo it back. That receipt used to live
-// ONLY in daemon memory.
-//
-// THE GAP IT CLOSES. A prompt accepted and not yet durable when the daemon dies
-// vanished without trace: the shim-store never received the turn, so the
-// durable replay had nothing to serve, and the in-memory receipt died with the
-// process. The user had seen their prompt on screen and, after a reconnect, saw
-// no evidence it was ever sent. A receipt the user saw must never be
-// unrecoverable, which is what this table guarantees.
+// THE ROW THE TABLE IS NAMED AFTER IS GONE. It used to also carry a prompt
+// RECEIPT — durable evidence of a prompt the daemon had accepted so the user's
+// own words could be drawn before the vendor's transcript echoed them back. A
+// prompt now renders when it round-trips through the SDK and not before, so
+// there is no second identity for one prompt and nothing for a receipt to stand
+// in for. The table keeps its name because the rows below still live in it and
+// renaming a durable table buys nothing.
 //
 // WHY IT LIVES IN THE SHARED STATE STORE rather than the shim-store. The
 // shim-store is the vendor conversation's record and its contract is
-// deliberately tiny (schema, seq, dedup, fan-out). A receipt is a DAEMON fact
-// about a submit the daemon itself made — the same kind of fact as the SSM's
-// state log and the merge lease ledger, which share this database for exactly
-// that reason.
-//
-// WHY A ROW IS DELETED RATHER THAN TOMBSTONED. A retired receipt has been
-// superseded by the transcript's own copy of the prompt, which is durable, in
-// its real place, at its real seq. Keeping the receipt past that point would
-// serve a daemon-local duplicate of something the conversation already holds,
-// and the row's whole purpose is "evidence not yet in the conversation".
+// deliberately tiny (schema, seq, dedup, fan-out). What this table holds is a
+// DAEMON fact about work the daemon itself owes — the same kind of fact as the
+// SSM's state log and the merge lease ledger, which share this database for
+// exactly that reason.
 
 // THE SECOND KIND OF ROW: A PENDING RESUMPTION.
 //
@@ -48,14 +37,13 @@ import (
 // of fact the table already holds: durable evidence of a submit whose work is
 // not yet in the conversation.
 //
-// IT IS NOT A RECEIPT, AND THE SCHEMA IS WHAT KEEPS THEM APART. A receipt
-// exists to be RENDERED — Outstanding serves it to the durable replay, which
-// pushes it as the user's own prompt bubble. A resumption row must never be
-// rendered anywhere: there is no second prompt from the user, and the re-drive
-// text (when one is needed at all) is a daemon-internal instruction the user
-// never wrote. Outstanding therefore serves only rows with an EMPTY
-// resumption_state, which makes a resumption row unrenderable by construction
-// rather than by every reader remembering to filter it out.
+// IT IS NOT A PROMPT, AND NO QUERY HERE CAN MAKE IT ONE. A resumption row must
+// never be rendered anywhere: there is no second prompt from the user, and the
+// re-drive text is a daemon-internal instruction the user never wrote. Every
+// query below is scoped to the resumption states and returns the row to the
+// re-drive machinery alone, so there is no path from this table into the feed
+// at all — which is stronger than the filter that used to keep the two row
+// kinds apart, because the renderable kind no longer exists.
 //
 // EXACTLY-ONCE IS LEVEL-TRIGGERED OFF THIS ROW, never off an in-memory flag: a
 // bounce during a resumption must not double-submit, and the only thing that
@@ -82,10 +70,11 @@ import (
 type PromptReceiptResumption string
 
 const (
-	// ResumptionNone is an ordinary prompt receipt: durable evidence of a
-	// prompt the user submitted, awaiting its own durable transcript line.
-	// This is the empty string so every row written before resumptions existed
-	// reads as one, which is what they are.
+	// ResumptionNone is a row that is no resumption at all. It is the empty
+	// string because that is what the column defaults to, and it survives as a
+	// named constant so the queries below can say which rows they exclude:
+	// rows written by an older binary as prompt receipts, a kind nothing
+	// produces any more.
 	ResumptionNone PromptReceiptResumption = ""
 	// ResumptionPending is a turn interrupted by a teardown and owed a
 	// re-drive by whichever daemon next wires the session.
@@ -127,25 +116,7 @@ type PendingResumption struct {
 	DeliveryStartedAtMs int64
 }
 
-// PromptReceipt is ONE accepted prompt the daemon durably recorded before
-// pushing its receipt bubble.
-type PromptReceipt struct {
-	// RequestID is the frontend command's own request id — the identity the
-	// frontend keys the prompt bubble on, and the identity the durable
-	// transcript line is stamped with when it arrives.
-	RequestID string
-	// Workspace is the workspace whose session the prompt was submitted to.
-	Workspace string
-	// Text is the prompt as the user typed it.
-	Text string
-	// AcceptedAtMs is the instant the daemon committed to submitting the
-	// prompt. It is the item timestamp the receipt is pushed under, live and
-	// replayed alike, so a merge window that contains it reaches the same
-	// provenance verdict both times.
-	AcceptedAtMs int64
-}
-
-// PromptReceipts is the prompt-receipt table's owner.
+// PromptReceipts is the prompt_receipt table's owner.
 type PromptReceipts struct{ db *sql.DB }
 
 // NewPromptReceipts installs the prompt_receipt table on the shared state
@@ -199,8 +170,7 @@ func NewPromptReceipts(db *sql.DB) (*PromptReceipts, error) {
 // interrupted without this row is a turn nobody will ever pick up, which is the
 // exact loss this record exists to prevent.
 //
-// Re-recording under the same request id OVERWRITES, for the same reason
-// Record does: the request id is the re-drive's identity, so a second write
+// Re-recording under the same request id OVERWRITES: the request id is the re-drive's identity, so a second write
 // under it is the same re-drive being re-recorded rather than a second one.
 //
 // IT CANNOT UN-CLAIM A ROW A RE-DRIVE ALREADY TOOK. A retried teardown that
@@ -338,6 +308,34 @@ func (s *PromptReceipts) ClaimResumptionForDelivery(requestID string, atMs int64
 	return n > 0, nil
 }
 
+// DischargeResumptionsThrough discards every resumption a workspace still
+// carries from at or before throughMs, claimed or not, and reports how many
+// went.
+//
+// IT IS THE CONTEXT CUT'S DISCHARGE. A clear or a compaction throws away the
+// history the interrupted turn belonged to, so re-driving that turn afterwards
+// would ask the model to continue work the conversation no longer contains.
+//
+// SCOPED TO THE RESUMPTION STATES, exactly as DischargeResumption is, so a row
+// an older binary left behind as a prompt receipt is never swept by it.
+func (s *PromptReceipts) DischargeResumptionsThrough(workspace string, throughMs int64) (int, error) {
+	if workspace == "" {
+		return 0, fmt.Errorf("statedb: cannot discharge resumptions for an empty workspace")
+	}
+	res, err := s.db.Exec(
+		`DELETE FROM prompt_receipt
+		  WHERE workspace = ? AND interrupted_at_ms <= ? AND resumption_state IN (?,?)`,
+		workspace, throughMs, string(ResumptionPending), string(ResumptionDelivering))
+	if err != nil {
+		return 0, fmt.Errorf("statedb: discharge resumptions for workspace %q through %d: %w", workspace, throughMs, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("statedb: discharge resumptions for workspace %q through %d: %w", workspace, throughMs, err)
+	}
+	return int(n), nil
+}
+
 // DischargeResumption discards one resumption row, claimed or not, reporting
 // whether one was there.
 //
@@ -353,10 +351,8 @@ func (s *PromptReceipts) ClaimResumptionForDelivery(requestID string, atMs int64
 // an error may have been run anyway; neither answers whether the instruction is
 // in the conversation. The conversation does.
 //
-// AN ORDINARY RECEIPT IS NEVER TOUCHED HERE — the delete is scoped to the
-// resumption states — because a receipt is a different row kind sharing the
-// table, and retiring one through this path would discard a prompt the user
-// really typed.
+// THE DELETE IS SCOPED TO THE RESUMPTION STATES, so a row an older binary left
+// behind as a prompt receipt is never swept away by a resumption's discharge.
 //
 // Discharging a resumption that is already gone is a no-op with a nil error:
 // the two callers can legitimately race, and the loser is not a failure.
@@ -375,108 +371,4 @@ func (s *PromptReceipts) DischargeResumption(requestID string) (bool, error) {
 		return false, fmt.Errorf("statedb: discharge resumption %q: %w", requestID, err)
 	}
 	return n > 0, nil
-}
-
-// Record persists one accepted prompt. It MUST complete before the receipt
-// work is pushed, so a receipt the user saw always implies a durable record.
-//
-// A re-record under the same request id OVERWRITES rather than failing: the
-// request id is the submit's identity, so a second write under it is the same
-// submit being re-accepted (a queued prompt re-delivered, a retried command),
-// and refusing it would fail a submit over bookkeeping the row already agrees
-// with. Any OTHER database failure is returned to the caller, which fails the
-// submit — an unwritable state store is not a condition to carry on through.
-func (s *PromptReceipts) Record(r PromptReceipt) error {
-	if r.RequestID == "" {
-		return fmt.Errorf("statedb: prompt receipt for workspace %q has no request id to key it on", r.Workspace)
-	}
-	if r.Workspace == "" {
-		return fmt.Errorf("statedb: prompt receipt %q has no workspace", r.RequestID)
-	}
-	_, err := s.db.Exec(
-		`INSERT INTO prompt_receipt(request_id, workspace, text, accepted_at_ms) VALUES (?,?,?,?)
-		 ON CONFLICT(request_id) DO UPDATE SET
-		     workspace = excluded.workspace,
-		     text = excluded.text,
-		     accepted_at_ms = excluded.accepted_at_ms`,
-		r.RequestID, r.Workspace, r.Text, r.AcceptedAtMs)
-	if err != nil {
-		return fmt.Errorf("statedb: record prompt receipt %q for workspace %q: %w", r.RequestID, r.Workspace, err)
-	}
-	return nil
-}
-
-// Retire discards the receipt for requestID, reporting whether one was
-// outstanding. Retiring a receipt that is already gone is a no-op with a nil
-// error: the retirement points are several (the durable line arriving live, a
-// replay finding the prompt already in the store, a submit that failed after
-// acceptance) and any of them may legitimately run second.
-func (s *PromptReceipts) Retire(requestID string) (bool, error) {
-	if requestID == "" {
-		return false, fmt.Errorf("statedb: cannot retire a prompt receipt with no request id")
-	}
-	res, err := s.db.Exec(`DELETE FROM prompt_receipt WHERE request_id = ?`, requestID)
-	if err != nil {
-		return false, fmt.Errorf("statedb: retire prompt receipt %q: %w", requestID, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("statedb: retire prompt receipt %q: %w", requestID, err)
-	}
-	return n > 0, nil
-}
-
-// RetireWorkspace discards every receipt for a workspace accepted at or before
-// throughMs, reporting how many went.
-//
-// It is the CONTEXT CUT's retirement: a clear or a compaction discards the
-// history below it, and a receipt for a prompt from below that line has been
-// discarded along with the prompt. Replaying it would put pre-cut text back
-// above a floor that exists to hide exactly that.
-func (s *PromptReceipts) RetireWorkspace(workspace string, throughMs int64) (int, error) {
-	if workspace == "" {
-		return 0, fmt.Errorf("statedb: cannot retire prompt receipts for an empty workspace")
-	}
-	res, err := s.db.Exec(
-		`DELETE FROM prompt_receipt WHERE workspace = ? AND accepted_at_ms <= ?`, workspace, throughMs)
-	if err != nil {
-		return 0, fmt.Errorf("statedb: retire prompt receipts for workspace %q through %d: %w", workspace, throughMs, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("statedb: retire prompt receipts for workspace %q through %d: %w", workspace, throughMs, err)
-	}
-	return int(n), nil
-}
-
-// Outstanding lists a workspace's un-retired receipts, OLDEST FIRST — submit
-// order, which is the order they are replayed in.
-//
-// A PENDING RESUMPTION IS NOT A RECEIPT AND IS NEVER SERVED HERE. This is the
-// filter that makes a re-drive invisible: the durable replay is the only path
-// by which a row in this table becomes a rendered prompt bubble, so a row this
-// query cannot return is a row no client can render — in a live push, a connect
-// snapshot, a resync replay or a store re-pull alike. The invisibility is a
-// property of the query rather than of every reader remembering to check.
-func (s *PromptReceipts) Outstanding(workspace string) ([]PromptReceipt, error) {
-	rows, err := s.db.Query(
-		`SELECT request_id, workspace, text, accepted_at_ms FROM prompt_receipt
-		 WHERE workspace = ? AND resumption_state = ?
-		 ORDER BY accepted_at_ms, request_id`, workspace, string(ResumptionNone))
-	if err != nil {
-		return nil, fmt.Errorf("statedb: read prompt receipts for workspace %q: %w", workspace, err)
-	}
-	defer rows.Close()
-	var out []PromptReceipt
-	for rows.Next() {
-		var r PromptReceipt
-		if err := rows.Scan(&r.RequestID, &r.Workspace, &r.Text, &r.AcceptedAtMs); err != nil {
-			return nil, fmt.Errorf("statedb: scan prompt receipt for workspace %q: %w", workspace, err)
-		}
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("statedb: iterate prompt receipts for workspace %q: %w", workspace, err)
-	}
-	return out, nil
 }
