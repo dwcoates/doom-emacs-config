@@ -28,10 +28,13 @@ import (
 // --- harness ---------------------------------------------------------------
 
 type harness struct {
-	srv  *Server
-	db   *db.DB
-	path string
-	done <-chan struct{}
+	srv *Server
+	db  *db.DB
+	// dbPath is the event database's own path, so a test can open a second
+	// raw handle and seed columns whose production writer is owned elsewhere.
+	dbPath string
+	path   string
+	done   <-chan struct{}
 }
 
 // start brings up a server on a short UDS path (macOS sun_path limit) with the
@@ -45,7 +48,8 @@ func start(t *testing.T, buffer int, log *logging.Logger) *harness {
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	sockPath := filepath.Join(dir, "s")
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "events.db"), log.With(logging.Fields{Component: "db"}))
+	dbPath := filepath.Join(t.TempDir(), "events.db")
+	database, err := db.Open(dbPath, log.With(logging.Fields{Component: "db"}))
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -65,7 +69,7 @@ func start(t *testing.T, buffer int, log *logging.Logger) *harness {
 		_ = srv.Close()
 		<-done
 	})
-	return &harness{srv: srv, db: database, path: sockPath, done: done}
+	return &harness{srv: srv, db: database, dbPath: dbPath, path: sockPath, done: done}
 }
 
 func testLogger() *logging.Logger { return logging.New(io.Discard, io.Discard, false) }
