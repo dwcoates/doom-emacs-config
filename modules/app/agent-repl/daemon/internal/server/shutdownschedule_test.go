@@ -8,6 +8,7 @@ import (
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/inflight"
 	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/statedb"
 )
@@ -143,11 +144,18 @@ func (f *fakeEvidence) failConnected(sessionID string, err error) {
 	f.connectedErr[sessionID] = err
 }
 
-func (f *fakeHoldSource) DrainHolds(sessioncontroller.LiveTaskCounter) []sessioncontroller.DrainHold {
+func (f *fakeHoldSource) DrainHolds(sessioncontroller.LiveTaskSource) []sessioncontroller.DrainHold {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.holdsRead++
 	return append([]sessioncontroller.DrainHold(nil), f.holds...)
+}
+
+// LiveTaskSet is the fleet's identified live-task answer. The engine only
+// passes the source through to DrainHolds, so the fake reports the honest
+// unknown rather than inventing an empty set.
+func (f *fakeHoldSource) LiveTaskSet(workspace string) inflight.Set {
+	return inflight.Unanswered(workspace, "the fake hold source resolves no live tasks")
 }
 
 func (f *fakeHoldSource) BindShutdownLease(l sessioncontroller.ShutdownLease) error {
@@ -203,11 +211,13 @@ func (f *fakeHoldSource) boundLease() sessioncontroller.ShutdownLease {
 	return f.bound
 }
 
-// fakeTaskCounter answers the live-task half of a hold. The engine only passes
+// fakeTaskSource answers the live-task half of a hold. The engine only passes
 // it through to DrainHolds, so the fake need do nothing else.
-type fakeTaskCounter struct{}
+type fakeTaskSource struct{}
 
-func (fakeTaskCounter) LiveTasks(string) (int64, bool) { return 0, false }
+func (fakeTaskSource) LiveTaskSet(workspace string) inflight.Set {
+	return inflight.Unanswered(workspace, "the fake live-task source resolves nothing")
+}
 
 // schedulerHarness is a ShutdownScheduler over controllable doubles.
 type schedulerHarness struct {
@@ -236,7 +246,7 @@ func newSchedulerHarness(t *testing.T) *schedulerHarness {
 		stopped:  make(chan struct{}),
 	}
 	s, err := NewShutdownScheduler(ShutdownSchedulerConfig{
-		Store: h.store, Holds: h.holds, Evidence: h.evidence, LiveTasks: fakeTaskCounter{},
+		Store: h.store, Holds: h.holds, Evidence: h.evidence, LiveTasks: fakeTaskSource{},
 		Broadcast: func(v *frontendv1.ShutdownScheduleView) {
 			h.mu.Lock()
 			h.views = append(h.views, v)
@@ -298,6 +308,15 @@ func (h *schedulerHarness) log() string {
 	return strings.Join(h.logLines, "\n")
 }
 
+// liveTasks builds the identified live-task set a hold carries.
+func liveTasks(workspace string, ids ...string) inflight.Set {
+	items := make([]inflight.Item, 0, len(ids))
+	for _, id := range ids {
+		items = append(items, inflight.Item{Kind: inflight.KindTask, ID: id})
+	}
+	return inflight.MustAnswered(workspace, items...)
+}
+
 // oneHold is a workspace holding the drain with a turn in flight.
 func oneHold() sessioncontroller.DrainHold {
 	return sessioncontroller.DrainHold{Workspace: "/ws/a", SessionID: "s1", TurnActive: true, TurnID: "t_1"}
@@ -310,7 +329,7 @@ func TestNewShutdownSchedulerRequiresEachDependency(t *testing.T) {
 	full := func() ShutdownSchedulerConfig {
 		return ShutdownSchedulerConfig{
 			Store: &fakeScheduleStore{}, Holds: &fakeHoldSource{}, Evidence: newFakeEvidence(),
-			LiveTasks: fakeTaskCounter{},
+			LiveTasks: fakeTaskSource{},
 			Broadcast: func(*frontendv1.ShutdownScheduleView) {}, Shutdown: func(bool, sessioncontroller.StopCause) {},
 		}
 	}
@@ -322,7 +341,7 @@ func TestNewShutdownSchedulerRequiresEachDependency(t *testing.T) {
 		{"no store", func(c *ShutdownSchedulerConfig) { c.Store = nil }, "durable store"},
 		{"no holds", func(c *ShutdownSchedulerConfig) { c.Holds = nil }, "drain-hold source"},
 		{"no evidence", func(c *ShutdownSchedulerConfig) { c.Evidence = nil }, "drain-evidence source"},
-		{"no live tasks", func(c *ShutdownSchedulerConfig) { c.LiveTasks = nil }, "live-task counter"},
+		{"no live tasks", func(c *ShutdownSchedulerConfig) { c.LiveTasks = nil }, "live-task source"},
 		{"no broadcast", func(c *ShutdownSchedulerConfig) { c.Broadcast = nil }, "broadcast func"},
 		{"no shutdown", func(c *ShutdownSchedulerConfig) { c.Shutdown = nil }, "graceful-shutdown func"},
 	}
@@ -364,7 +383,7 @@ func TestConstructionFailsWhenTheFleetRefusesTheBinding(t *testing.T) {
 	// Act.
 	_, err := NewShutdownScheduler(ShutdownSchedulerConfig{
 		Store: &fakeScheduleStore{}, Holds: holds, Evidence: newFakeEvidence(),
-		LiveTasks: fakeTaskCounter{},
+		LiveTasks: fakeTaskSource{},
 		Broadcast: func(*frontendv1.ShutdownScheduleView) {}, Shutdown: func(bool, sessioncontroller.StopCause) {},
 	})
 
@@ -836,7 +855,7 @@ func TestAnUnchangedHoldsListDoesNotRebroadcast(t *testing.T) {
 func TestAChangedHoldsListRebroadcasts(t *testing.T) {
 	// Arrange.
 	h := newSchedulerHarness(t)
-	h.holds.set(oneHold(), sessioncontroller.DrainHold{Workspace: "/ws/b", SessionID: "s2", LiveTasks: 2})
+	h.holds.set(oneHold(), sessioncontroller.DrainHold{Workspace: "/ws/b", SessionID: "s2", LiveTasks: liveTasks("/ws/b", "task-1", "task-2")})
 	if _, err := h.s.Schedule(false, "cause"); err != nil {
 		t.Fatalf("Schedule: %v", err)
 	}
@@ -904,7 +923,7 @@ func TestATurnOnlyHoldSetsOnlyTheTurnArm(t *testing.T) {
 
 func TestATaskOnlyHoldSetsOnlyTheTasksArm(t *testing.T) {
 	// Arrange.
-	holds := []sessioncontroller.DrainHold{{Workspace: "/ws/a", SessionID: "s1", LiveTasks: 3}}
+	holds := []sessioncontroller.DrainHold{{Workspace: "/ws/a", SessionID: "s1", LiveTasks: liveTasks("/ws/a", "task-1", "task-2", "task-3")}}
 
 	// Act.
 	got := holdViews(holds)
@@ -918,7 +937,7 @@ func TestATaskOnlyHoldSetsOnlyTheTasksArm(t *testing.T) {
 func TestAHoldWithBothFactsSetsBothArms(t *testing.T) {
 	// Siblings, not alternatives.
 	// Arrange.
-	holds := []sessioncontroller.DrainHold{{Workspace: "/ws/a", SessionID: "s1", TurnActive: true, TurnID: "t_1", LiveTasks: 2}}
+	holds := []sessioncontroller.DrainHold{{Workspace: "/ws/a", SessionID: "s1", TurnActive: true, TurnID: "t_1", LiveTasks: liveTasks("/ws/a", "task-1", "task-2")}}
 
 	// Act.
 	got := holdViews(holds)

@@ -89,6 +89,39 @@ func (m *Manager) InFlight(workspace string) inflight.Set {
 	return set
 }
 
+// LiveTaskSet is the TASK plane of InFlight, on its own, for the one consumer
+// that must not read the other two: the scheduled-shutdown drain.
+//
+// WHY THE PLANE IS TAKEN ALONE. The drain already reports its turn separately —
+// TurnActive and TurnID exist precisely so a turn this daemon ADOPTED, running
+// under no id this process ever saw, still holds — and folding the turn plane
+// in here would make an adopted turn poison the task answer into UNKNOWN, which
+// would say nothing about background work at all. The query plane is likewise
+// excluded: it is the vehicle the work runs inside, not work of its own.
+//
+// THE MISS SURVIVES, in the same shape InFlight gives it. A workspace the SSM
+// holds no resolved state for is UNANSWERED, never an empty set: "runs no
+// background task" and "nobody ever told this resolver about this workspace"
+// are different facts, and a consumer that could not tell them apart would read
+// silence as quiet.
+func (m *Manager) LiveTaskSet(workspace string) inflight.Set {
+	if workspace == "" {
+		return inflight.Unanswered(workspace, "the live background-task set was asked for with no workspace, so no evidence could be gathered")
+	}
+	_, found, err := m.cfg.SSM.Current(workspace)
+	if err != nil {
+		set := inflight.Unanswered(workspace, fmt.Sprintf("the resolved workspace state could not be read: %v", err))
+		m.logf("session-controller: live-task set UNKNOWN ws=%q — %s", workspace, set.Reason())
+		return set
+	}
+	if !found {
+		set := inflight.Unanswered(workspace, "the SSM holds no resolved state for this workspace, so what it is running in the background is unobserved rather than nothing")
+		m.logf("session-controller: live-task set UNKNOWN ws=%q — %s", workspace, set.Reason())
+		return set
+	}
+	return m.inFlightTasks(workspace)
+}
+
 // inFlightTurns names the workspace's open turn claims.
 //
 // A TURN IN FLIGHT UNDER NO RESOLVABLE IDENTITY IS UNKNOWN, not a member with a
