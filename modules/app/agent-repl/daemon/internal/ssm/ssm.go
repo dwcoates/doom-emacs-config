@@ -372,6 +372,11 @@ func (m *Manager) warm() error {
 	if err := m.repairPersistedOrphanTaskEndsLocked(); err != nil {
 		return err
 	}
+	// No frontend connection survives a daemon bounce, so no stored reading
+	// position can still name a reader that exists. See readerposition.go.
+	if err := m.clearConversationReaderPositionsLocked(); err != nil {
+		return err
+	}
 	// Before any workspace resolves, so the first restored WorkspaceState
 	// already carries merge_lease_held rather than a frame that says the
 	// workspace is open to prompts it will then refuse.

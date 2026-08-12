@@ -327,6 +327,16 @@ type Resyncer interface {
 	// separate port would be a second thing to wire, and a daemon that wired one
 	// and not the other would answer half of a frontend's history needs.
 	ConversationPage(ctx context.Context, workspace, echoedFence string, anchor sessioncontroller.PageAnchor) (*frontendv1.ConversationPage, error)
+	// FirstConversationHistoryPage and NextConversationHistoryPage are
+	// conversation-history.proto's two verbs, and they ride this same port for
+	// the same reason the older page does: one authority answers "give this
+	// frontend the conversation", under one identity ladder.
+	//
+	// NEITHER TAKES A FENCE, and that is the contract rather than an omission.
+	// The daemon owns the reader's position, so it detects a generation change
+	// itself; nothing is handed to the client to be handed back.
+	FirstConversationHistoryPage(ctx context.Context, reader, workspace string) (*frontendv1.ConversationHistoryPage, error)
+	NextConversationHistoryPage(ctx context.Context, reader, workspace string) (*frontendv1.ConversationHistoryPage, error)
 }
 
 // SessionCreateDeleter is the daemon-core session-lifecycle surface behind the
@@ -1520,6 +1530,41 @@ func (h *commandHandler) ConversationPage(ctx context.Context, workspace, reques
 	if err != nil {
 		h.logf("frontend cmd: conversation_page ws=%s request_id=%s fence=%q anchor=%s FAILED: %v",
 			workspace, requestID, cmd.GetFence(), pageAnchorKind(anchor), err)
+		return nil, classifyStaleFenceResync(err)
+	}
+	return page, nil
+}
+
+// FirstPage serves the most recent page of history and resets this reader's
+// position to it.
+func (h *commandHandler) FirstPage(ctx context.Context, reader, workspace, requestID string, _ *frontendv1.FirstPageCmd) (*frontendv1.ConversationHistoryPage, error) {
+	if h.resyncer == nil {
+		h.logf("frontend cmd: first_page ws=%s reader=%s request_id=%s FAILED — no resyncer is wired, so the conversation history page cannot be served at all",
+			workspace, reader, requestID)
+		return nil, fmt.Errorf("frontend cmd: first_page ws=%s request_id=%s: no resyncer wired for the conversation history page", workspace, requestID)
+	}
+	h.logf("frontend cmd: first_page ws=%s reader=%s request_id=%s", workspace, reader, requestID)
+	page, err := h.resyncer.FirstConversationHistoryPage(ctx, reader, workspace)
+	if err != nil {
+		h.logf("frontend cmd: first_page ws=%s reader=%s request_id=%s FAILED: %v", workspace, reader, requestID, err)
+		return nil, classifyStaleFenceResync(err)
+	}
+	return page, nil
+}
+
+// NextPage serves the page immediately older than the last one served to this
+// reader, and REFUSES a reader that has no position rather than answering with
+// the tail.
+func (h *commandHandler) NextPage(ctx context.Context, reader, workspace, requestID string, _ *frontendv1.NextPageCmd) (*frontendv1.ConversationHistoryPage, error) {
+	if h.resyncer == nil {
+		h.logf("frontend cmd: next_page ws=%s reader=%s request_id=%s FAILED — no resyncer is wired, so the conversation history page cannot be served at all",
+			workspace, reader, requestID)
+		return nil, fmt.Errorf("frontend cmd: next_page ws=%s request_id=%s: no resyncer wired for the conversation history page", workspace, requestID)
+	}
+	h.logf("frontend cmd: next_page ws=%s reader=%s request_id=%s", workspace, reader, requestID)
+	page, err := h.resyncer.NextConversationHistoryPage(ctx, reader, workspace)
+	if err != nil {
+		h.logf("frontend cmd: next_page ws=%s reader=%s request_id=%s REFUSED: %v", workspace, reader, requestID, err)
 		return nil, classifyStaleFenceResync(err)
 	}
 	return page, nil

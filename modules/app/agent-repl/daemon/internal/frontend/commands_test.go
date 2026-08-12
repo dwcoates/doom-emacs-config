@@ -29,9 +29,15 @@ type mockHandler struct {
 	// worth being able to arrange.
 	page *frontendv1.ConversationPage
 
+	// historyPage is the ConversationHistoryPage the positionless verbs serve.
+	historyPage *frontendv1.ConversationHistoryPage
+
 	lastWorkspace string
 	lastRequestID string
 	lastResyncSeq uint64
+	// lastReader is the reading identity the transport minted, recorded so a
+	// test can prove it reached the handler rather than being defaulted.
+	lastReader string
 }
 
 func (m *mockHandler) WorkspaceMaterialized(_ context.Context, ws, rid string, _ *frontendv1.WorkspaceMaterializedCmd) error {
@@ -85,6 +91,20 @@ func (m *mockHandler) ConversationPage(_ context.Context, ws, rid string, _ *fro
 		return nil, m.err
 	}
 	return m.page, nil
+}
+func (m *mockHandler) FirstPage(_ context.Context, reader, ws, rid string, _ *frontendv1.FirstPageCmd) (*frontendv1.ConversationHistoryPage, error) {
+	m.called, m.lastReader, m.lastWorkspace, m.lastRequestID = "first_page", reader, ws, rid
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.historyPage, nil
+}
+func (m *mockHandler) NextPage(_ context.Context, reader, ws, rid string, _ *frontendv1.NextPageCmd) (*frontendv1.ConversationHistoryPage, error) {
+	m.called, m.lastReader, m.lastWorkspace, m.lastRequestID = "next_page", reader, ws, rid
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.historyPage, nil
 }
 func (m *mockHandler) CreateSession(_ context.Context, ws, rid string, _ *frontendv1.CreateSessionCmd) (string, error) {
 	m.called, m.lastWorkspace, m.lastRequestID = "create_session", ws, rid

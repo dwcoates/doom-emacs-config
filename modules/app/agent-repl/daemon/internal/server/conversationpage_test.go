@@ -28,8 +28,11 @@ type recordingPager struct {
 	// rather than a pair reconstructed from it.
 	gotFence  string
 	gotAnchor sessioncontroller.PageAnchor
-	page      *frontendv1.ConversationPage
-	err       error
+	// gotReader is the reading identity the positionless verbs carried.
+	gotReader   string
+	page        *frontendv1.ConversationPage
+	historyPage *frontendv1.ConversationHistoryPage
+	err         error
 }
 
 func (recordingPager) ResyncForFence(string, string, uint64) error { return nil }
@@ -40,6 +43,25 @@ func (p *recordingPager) ConversationPage(_ context.Context, workspace, echoedFe
 		return nil, p.err
 	}
 	return p.page, nil
+}
+
+// firstConversationHistoryPage / nextConversationHistoryPage record what the
+// positionless verbs asked for, including the READER — the identity that
+// selects the position the client is forbidden to name.
+func (p *recordingPager) FirstConversationHistoryPage(_ context.Context, reader, workspace string) (*frontendv1.ConversationHistoryPage, error) {
+	p.gotWorkspace, p.gotReader = workspace, reader
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.historyPage, nil
+}
+
+func (p *recordingPager) NextConversationHistoryPage(_ context.Context, reader, workspace string) (*frontendv1.ConversationHistoryPage, error) {
+	p.gotWorkspace, p.gotReader = workspace, reader
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.historyPage, nil
 }
 
 func tailPageRequest(limit uint32, fence string) *frontendv1.ConversationPageCmd {

@@ -136,6 +136,61 @@ type PageAnchor struct {
 	Limit uint32
 }
 
+// pageBound is the RESOLVED upper end of one page assembly, and it is the
+// daemon's own value in every case.
+//
+// It exists because two surfaces now ask for a page and they name its bound
+// differently: the older ConversationPageCmd carries an opaque cursor the
+// client holds, while conversation-history.proto's NextPageCmd carries NOTHING
+// and the bound comes from the reader position the daemon persisted. Resolving
+// both to this one shape is what lets the windowed backwards walk below stay a
+// single implementation — the alternative is a second walk that can disagree
+// with the first about where a page starts.
+type pageBound struct {
+	// name identifies the bound in the log, so a record says WHICH surface and
+	// WHICH verb produced the read.
+	name string
+	// tail selects the newest end of the conversation. When set, upper is
+	// UNBOUNDED (zero) — see assemblePage.
+	tail bool
+	// upper is the EXCLUSIVE upper bound this page walks back from. Ignored
+	// when tail is set.
+	upper uint64
+}
+
+// pageBoundResolver resolves the bound once the session whose seq space it is
+// expressed in is known.
+//
+// It is a function rather than a value because the older surface's bound is an
+// opaque cursor that can only be decoded against a specific session, and that
+// session is resolved inside the route selection. A resolver that refuses is a
+// REFUSED PAGE, never a re-anchored tail read.
+type pageBoundResolver func(sessionID string) (pageBound, error)
+
+// pageOutcome is one assembled page BEFORE it is shaped for any particular
+// wire message.
+//
+// Two wire shapes are built from it — the older ConversationPage and
+// conversation-history.proto's ConversationHistoryPage — and it carries what
+// each needs without either shape leaking into the walk.
+type pageOutcome struct {
+	// items are the page's top-level messages, OLDEST FIRST.
+	items []*frontendv1.Message
+	// reachedStart reports that this page reaches the conversation's beginning.
+	reachedStart bool
+	// cursor is the older surface's opaque continuation token. Empty when
+	// reachedStart, and unused by the positionless surface.
+	cursor string
+	// liveJoinSeq is the seq this page is current THROUGH, set only for a tail
+	// (first) page.
+	liveJoinSeq uint64
+	// nextBeforeSeq is the EXCLUSIVE upper bound the NEXT page continues from.
+	// It is the daemon's own position record, and it is set even when this page
+	// reached the start — a reader that asks again is then answered with the
+	// start page rather than being refused for a place it does hold.
+	nextBeforeSeq uint64
+}
+
 // pageRangeReader replays one bounded seq range, oldest first.
 //
 // The two routes a page can be served from — the shim's ReplayRequest and the
@@ -246,37 +301,63 @@ func (m *Manager) ConversationPage(ctx context.Context, workspace, echoedFence s
 	if err != nil {
 		return nil, err
 	}
-	if admission.route == historyRouteLiveController {
-		return m.pageFromController(ctx, admission.controller, admission.fence, anchor, limit)
+	outcome, err := m.servePage(ctx, admission, workspace, anchorBoundResolver(anchor), limit)
+	if err != nil {
+		return nil, err
 	}
-	return m.pageFromDurableHistory(ctx, workspace, admission.generationID, admission.fence, anchor, limit)
+	return m.newPage(workspace, admission.fence, outcome), nil
+}
+
+// servePage is the ROUTE SWITCH every page surface shares: a workspace with a
+// live controller is read through its shim, an unwired one from durable
+// history, and no surface gets to choose differently.
+func (m *Manager) servePage(ctx context.Context, admission historyAdmission, workspace string, resolve pageBoundResolver, limit uint32) (pageOutcome, error) {
+	if admission.route == historyRouteLiveController {
+		return m.pageFromController(ctx, admission.controller, resolve, limit)
+	}
+	return m.pageFromDurableHistory(ctx, workspace, admission.generationID, resolve, limit)
+}
+
+// anchorBoundResolver resolves the OLDER surface's anchor: a tail arm, or an
+// opaque cursor decoded against the session it names.
+func anchorBoundResolver(anchor PageAnchor) pageBoundResolver {
+	return func(sessionID string) (pageBound, error) {
+		if anchor.Tail {
+			return pageBound{name: "tail", tail: true}, nil
+		}
+		cursor, err := decodePageCursor(anchor.Cursor, sessionID)
+		if err != nil {
+			return pageBound{}, err
+		}
+		return pageBound{name: "before", upper: cursor.beforeSeq}, nil
+	}
 }
 
 // pageFromController serves a page for a workspace with a live session
 // controller, reading the range THROUGH THE SHIM.
-func (m *Manager) pageFromController(ctx context.Context, d *sessionController, fence string, anchor PageAnchor, limit uint32) (*frontendv1.ConversationPage, error) {
+func (m *Manager) pageFromController(ctx context.Context, d *sessionController, resolve pageBoundResolver, limit uint32) (pageOutcome, error) {
 	read := func(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (pageRangeResult, error) {
 		res, err := d.client.Replay(ctx, fromSeq, toSeq, maxEvents, onEvent)
 		return pageRangeResult{Delivered: res.Delivered, Truncated: res.Truncated, Reason: res.Reason}, err
 	}
-	return m.assemblePage(ctx, d.workspace, d.sessionID, d.generationID, fence, m.lastSeenSeq(d), anchor, limit, "shim", read)
+	return m.assemblePage(ctx, d.workspace, d.sessionID, d.generationID, m.lastSeenSeq(d), resolve, limit, "shim", read)
 }
 
 // pageFromDurableHistory serves a page for a workspace with NO live session
 // controller, straight from the store.
-func (m *Manager) pageFromDurableHistory(ctx context.Context, workspace, generationID, fence string, anchor PageAnchor, limit uint32) (*frontendv1.ConversationPage, error) {
+func (m *Manager) pageFromDurableHistory(ctx context.Context, workspace, generationID string, resolve pageBoundResolver, limit uint32) (pageOutcome, error) {
 	if m.cfg.DurableHistory == nil {
-		return nil, fmt.Errorf("session-controller: conversation page for unwired ws %q cannot be served: no durable history source is wired", workspace)
+		return pageOutcome{}, fmt.Errorf("session-controller: conversation page for unwired ws %q cannot be served: no durable history source is wired", workspace)
 	}
 	sessionID, ok := m.cfg.Locator.Locate(workspace)
 	if !ok {
-		return nil, fmt.Errorf("session-controller: conversation page for unwired ws %q cannot be served: %w", workspace, errclass.ErrNoLiveSessionController)
+		return pageOutcome{}, fmt.Errorf("session-controller: conversation page for unwired ws %q cannot be served: %w", workspace, errclass.ErrNoLiveSessionController)
 	}
 	read := func(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (pageRangeResult, error) {
 		res, err := m.cfg.DurableHistory.ReplayHistory(ctx, workspace, sessionID, fromSeq, toSeq, maxEvents, onEvent)
 		return pageRangeResult{Delivered: res.Delivered, Truncated: res.Truncated, Reason: res.Reason}, err
 	}
-	return m.assemblePage(ctx, workspace, sessionID, generationID, fence, m.cfg.SeqStore.LastSeq(sessionID), anchor, limit, "shim-store", read)
+	return m.assemblePage(ctx, workspace, sessionID, generationID, m.cfg.SeqStore.LastSeq(sessionID), resolve, limit, "shim-store", read)
 }
 
 // assemblePage is the windowed backwards walk both routes share.
@@ -284,8 +365,13 @@ func (m *Manager) pageFromDurableHistory(ctx context.Context, workspace, generat
 // lastSeen is the daemon's high-water mark for this conversation, and it is a
 // HINT rather than an authority. See the tail anchor below for why that
 // distinction is load-bearing.
-func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, generationID, fence string, lastSeen uint64, anchor PageAnchor, limit uint32, source string, read pageRangeReader) (*frontendv1.ConversationPage, error) {
+func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, generationID string, lastSeen uint64, resolve pageBoundResolver, limit uint32, source string, read pageRangeReader) (pageOutcome, error) {
 	logf := dlog.Tag(dlog.Logf(m.logf), "ws", workspace, "session", sessionID, "source", source)
+	bound, err := resolve(sessionID)
+	if err != nil {
+		logf("session-controller: conversation page REFUSED ws=%q session=%s decision=unresolvable_bound: %v", workspace, sessionID, err)
+		return pageOutcome{}, err
+	}
 	// The EXCLUSIVE upper bound this page walks back from. ZERO MEANS
 	// UNBOUNDED, which is what a tail anchor always is.
 	//
@@ -302,16 +388,9 @@ func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, genera
 	// READING FROM. The upper bound stays open, so whatever the store actually
 	// holds above the mark is served too, and a mark that is stale or absent
 	// costs a wider read rather than a wrong answer.
-	var upper uint64
-	if anchor.Tail {
+	upper := bound.upper
+	if bound.tail {
 		upper = 0
-	} else {
-		cursor, err := decodePageCursor(anchor.Cursor, sessionID)
-		if err != nil {
-			logf("session-controller: conversation page REFUSED ws=%q session=%s decision=unreadable_cursor: %v", workspace, sessionID, err)
-			return nil, err
-		}
-		upper = cursor.beforeSeq
 	}
 	// The resync's floor, applied identically: the newest clear or compaction,
 	// INCLUSIVE of that event itself. A client mark of 0 is passed because a
@@ -323,10 +402,13 @@ func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, genera
 	// compaction, which is the conversation's beginning as far as any frontend
 	// is concerned. A TAIL anchor is never in this position — its bound is
 	// open, and the floor is where its walk STARTS rather than where it ends.
-	if !anchor.Tail && upper <= floor {
+	if !bound.tail && upper <= floor {
 		logf("session-controller: conversation page reaches the START ws=%q session=%s upper=%d floor=%d decision=anchor_at_or_below_floor",
 			workspace, sessionID, upper, floor)
-		return m.newPage(workspace, fence, nil, pageContinuation{reachedStart: true}, 0), nil
+		// The position the NEXT request continues from stays where it was: a
+		// reader parked at the start asks again and is answered with the start
+		// again, rather than being refused for a place it demonstrably holds.
+		return pageOutcome{reachedStart: true, nextBeforeSeq: upper}, nil
 	}
 
 	// WHERE THE BACKWARDS WALK STARTS ITS FIRST WINDOW.
@@ -339,7 +421,7 @@ func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, genera
 	// one full pass, bounded in MEMORY by the rolling buffer below, and logged
 	// so it is never mistaken for the ordinary case.
 	walkFrom := upper
-	if anchor.Tail {
+	if bound.tail {
 		walkFrom = lastSeen + 1
 		if walkFrom <= floor {
 			logf("session-controller: conversation page has NO high-water hint ws=%q session=%s last_seen_seq=%d floor=%d decision=scan_from_floor — this daemon never consumed this conversation, so the tail is found by one pass from the floor rather than by trusting a mark that says nothing about what the store holds",
@@ -366,7 +448,7 @@ func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, genera
 		segments, droppedOlder, err = m.translateRange(ctx, workspace, sessionID, generationID, lower, upper, limit, read)
 		if err != nil {
 			logf("session-controller: conversation page FAILED ws=%q session=%s lower=%d upper=%d: %v", workspace, sessionID, lower, upper, err)
-			return nil, err
+			return pageOutcome{}, err
 		}
 		lowerRead = lower
 		scanned = walkFrom - lower
@@ -391,16 +473,20 @@ func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, genera
 	// whenever it stopped before reaching the floor. Reaching the floor with
 	// nothing left behind is the one case that is genuinely the beginning.
 	reachedStart := atFloor && !olderRemain && !droppedOlder
+	// THE POSITION THE NEXT PAGE CONTINUES FROM, computed whether or not this
+	// page reached the start. The older surface mints it into an opaque cursor
+	// the client holds; the positionless surface persists it as the daemon's
+	// own record of where this reader is.
+	nextBefore := oldestSeq
+	if nextBefore == 0 {
+		// Nothing was selected at all, so the next page continues from the
+		// lowest seq this walk actually read rather than from an item
+		// boundary that does not exist.
+		nextBefore = lowerRead
+	}
 	var cursor string
 	if !reachedStart {
-		before := oldestSeq
-		if before == 0 {
-			// Nothing was selected at all, so the next page continues from the
-			// lowest seq this walk actually read rather than from an item
-			// boundary that does not exist.
-			before = lowerRead
-		}
-		cursor = encodePageCursor(pageCursor{sessionID: sessionID, beforeSeq: before})
+		cursor = encodePageCursor(pageCursor{sessionID: sessionID, beforeSeq: nextBefore})
 	}
 	// live_join_seq is TAIL ONLY, and it is the newest seq this page is
 	// current through: the client stores it as its from_seq, and because a
@@ -408,13 +494,19 @@ func (m *Manager) assemblePage(ctx context.Context, workspace, sessionID, genera
 	// after the page was minted is above it and is replayed. The splice is
 	// gap-free by construction rather than by timing.
 	var liveJoinSeq uint64
-	if anchor.Tail && len(selected) > 0 {
+	if bound.tail && len(selected) > 0 {
 		liveJoinSeq = selected[len(selected)-1].seq
 	}
 	items := flattenItems(selected)
 	logf("session-controller: conversation page SERVED ws=%q session=%s anchor=%s limit=%d items=%d segments=%d scanned=%d floor=%d upper=%d continuation=%s live_join_seq=%d",
-		workspace, sessionID, pageAnchorName(anchor), limit, len(items), len(selected), scanned, floor, upper, continuationName(reachedStart), liveJoinSeq)
-	return m.newPage(workspace, fence, items, pageContinuation{reachedStart: reachedStart, cursor: cursor}, liveJoinSeq), nil
+		workspace, sessionID, bound.name, limit, len(items), len(selected), scanned, floor, upper, continuationName(reachedStart), liveJoinSeq)
+	return pageOutcome{
+		items:         items,
+		reachedStart:  reachedStart,
+		cursor:        cursor,
+		liveJoinSeq:   liveJoinSeq,
+		nextBeforeSeq: nextBefore,
+	}, nil
 }
 
 // translateRange reads one seq range and returns what it curated to, oldest
@@ -550,27 +642,19 @@ func flattenItems(selected []pageSegment) []*frontendv1.Message {
 // the page that could not match the WorkspaceState the client was holding, so
 // the client byte-compared, disagreed, and discarded the very page it had
 // asked for: the blank feed again, one layer further out.
-func (m *Manager) newPage(workspace, fence string, items []*frontendv1.Message, continuation pageContinuation, liveJoinSeq uint64) *frontendv1.ConversationPage {
+func (m *Manager) newPage(workspace, fence string, outcome pageOutcome) *frontendv1.ConversationPage {
 	page := &frontendv1.ConversationPage{
 		Workspace:   workspace,
-		Messages:    items,
-		LiveJoinSeq: liveJoinSeq,
+		Messages:    outcome.items,
+		LiveJoinSeq: outcome.liveJoinSeq,
 		Fence:       fence,
 	}
-	if continuation.reachedStart {
+	if outcome.reachedStart {
 		page.Continuation = &frontendv1.ConversationPage_Start{Start: &frontendv1.ConversationPageStart{}}
 		return page
 	}
-	page.Continuation = &frontendv1.ConversationPage_More{More: &frontendv1.ConversationPageMore{Cursor: continuation.cursor}}
+	page.Continuation = &frontendv1.ConversationPage_More{More: &frontendv1.ConversationPageMore{Cursor: outcome.cursor}}
 	return page
-}
-
-// pageContinuation is the resolved answer to "is there more above this page",
-// passed as ONE value so the two halves cannot be set inconsistently: a start
-// arm never carries a cursor, and a more arm always does.
-type pageContinuation struct {
-	reachedStart bool
-	cursor       string
 }
 
 // pageAnchorName names the anchor for the log line.
