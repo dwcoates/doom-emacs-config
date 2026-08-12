@@ -286,6 +286,12 @@ func (nopHandler) Resync(context.Context, string, string, *frontendv1.ResyncCmd)
 func (nopHandler) ConversationPage(context.Context, string, string, *frontendv1.ConversationPageCmd) (*frontendv1.ConversationPage, error) {
 	return &frontendv1.ConversationPage{}, nil
 }
+func (nopHandler) FirstPage(context.Context, string, string, string, *frontendv1.FirstPageCmd) (*frontendv1.ConversationHistoryPage, error) {
+	return &frontendv1.ConversationHistoryPage{}, nil
+}
+func (nopHandler) NextPage(context.Context, string, string, string, *frontendv1.NextPageCmd) (*frontendv1.ConversationHistoryPage, error) {
+	return &frontendv1.ConversationHistoryPage{}, nil
+}
 func (nopHandler) CreateSession(context.Context, string, string, *frontendv1.CreateSessionCmd) (string, error) {
 	return "", nil
 }

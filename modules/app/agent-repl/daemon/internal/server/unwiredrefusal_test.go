@@ -38,6 +38,14 @@ func (noPages) ConversationPage(context.Context, string, string, sessioncontroll
 	return nil, errors.New("this fake serves no conversation pages")
 }
 
+func (noPages) FirstConversationHistoryPage(context.Context, string, string) (*frontendv1.ConversationHistoryPage, error) {
+	return nil, errors.New("this fake serves no conversation history pages")
+}
+
+func (noPages) NextConversationHistoryPage(context.Context, string, string) (*frontendv1.ConversationHistoryPage, error) {
+	return nil, errors.New("this fake serves no conversation history pages")
+}
+
 // unwiredResyncer refuses with the no-live-controller sentinel, exactly as
 // sessioncontroller does for a workspace that has not been brought up.
 type unwiredResyncer struct{ noPages }
