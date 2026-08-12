@@ -1189,6 +1189,9 @@ export class ConversationStore {
         case "conversation-page":
           changed = this.applyConversationPage(effect) || changed;
           break;
+        case "conversation-history-page":
+          changed = this.applyConversationHistoryPage(effect) || changed;
+          break;
         case "typing":
           changed = this.applyTyping(effect.value) || changed;
           break;
@@ -1874,6 +1877,109 @@ export class ConversationStore {
     // position, not whether this page looked short: `start` retires the
     // affordance because the daemon read to the floor, and `more` offers it
     // because the daemon says older history remains.
+    this.state.paging.continuation = page.continuation;
+    return true;
+  }
+
+  /**
+   * Record that a POSITIONLESS history request went out.
+   *
+   * The VERB is remembered here because the page cannot carry it and must not:
+   * where a page's items rank (at the live edge for a first page, below
+   * everything held for a next page) is a property of what was ASKED, and the
+   * request is the only place that is known for certain.
+   */
+  noteHistoryPageRequested(requestId: string, verb: "first" | "next"): void {
+    this.state.paging.inFlight = {
+      requestId,
+      anchor: verb === "first" ? "tail" : "before",
+      // NO FENCE UNDER THIS CONTRACT. The daemon owns the reader's position and
+      // drops it across a generation change, so a page in flight across one is
+      // handled by the request-id correlation below rather than by an echoed
+      // fence. Spelled empty rather than omitted so the shared record keeps one
+      // shape.
+      fence: "",
+    };
+  }
+
+  /**
+   * Apply ONE positionless history page.
+   *
+   * TWO RULINGS, and each refuses rather than defaults:
+   *
+   *  1. THE CORRELATION. A page whose request id is not the one outstanding is
+   *     an answer to a request this client has already abandoned — the case a
+   *     generation change produces — and is DISCARDED WHOLE. That correlation
+   *     is what makes a page in flight across such a change harmless with no
+   *     fence at all.
+   *  2. THE RANK. A first page's items rank at the seq the page is current
+   *     through; a next page's rank BELOW everything the feed already holds.
+   *
+   * THE LIVE SPLICE, FIRST PAGES ONLY. A first page moves `lastSeq` to
+   * `liveJoinSeq`, which is what the next resync asks from. Because that
+   * resync is INCLUSIVE of the mark, anything produced between the page's mint
+   * and the subscribe is above it and is replayed: gap-free BY CONSTRUCTION
+   * rather than by timing. `liveJoinSeq` is zero on a next page, and a next
+   * page never touches the mark.
+   *
+   * A SHORT PAGE IS NOT AN ERROR: fewer than ten messages is the normal case at
+   * the top of a conversation, and an EMPTY page is the normal case for a fresh
+   * workspace. Neither is refused — a first page still adopts its live mark.
+   */
+  private applyConversationHistoryPage(
+    page: Extract<AdapterEffect, { kind: "conversation-history-page" }>,
+  ): boolean {
+    const request = this.state.paging.inFlight;
+    if (request === null || request.requestId !== page.requestId) {
+      this.log(
+        "warn",
+        "store: conversation history page answers a request this client is not holding; DISCARDED whole",
+        {
+          operation: "store.history-page-uncorrelated",
+          context: {
+            page_request_id: page.requestId,
+            outstanding_request_id: request?.requestId ?? "none",
+            items: page.items.length,
+          },
+        },
+      );
+      return false;
+    }
+    this.state.paging.inFlight = null;
+    const isFirst = request.anchor === "tail";
+    const rank = isFirst ? page.liveJoinSeq : this.oldestFeedRank() - 1;
+    for (const item of page.items) {
+      this.mergeItem(item, rank);
+      if (item.kind === "result") this.adoptResultUsage(item);
+    }
+    // A paged async-bubble anchor reaches the registry through the registry's
+    // own entry point, stamped with the workspace's LIVE fence: the page has
+    // already been proven current by the correlation above, and inventing a
+    // fence the store does not hold would be a claim nothing backs.
+    if (page.anchored.length > 0) {
+      const routed = this.applyAsyncBubbleDelta({
+        workspace: page.workspace,
+        opened: page.anchored,
+        updates: [],
+        throughSeq: page.liveJoinSeq,
+        fence: this.state.fences.get(page.workspace) ?? "",
+      });
+      if (!routed.ok) {
+        this.log("error", "store: history page's detached-work anchors were rejected whole", {
+          operation: "store.history-page-anchors-rejected",
+          context: { page_request_id: page.requestId, anchors: page.anchored.length },
+        });
+      }
+    }
+    if (isFirst && page.liveJoinSeq > this.state.lastSeq) {
+      this.state.lastSeq = page.liveJoinSeq;
+    }
+    // THE CONTINUATION IS ADOPTED WHOLE, on every page and not only on `start`.
+    // It is the only thing that decides whether the load-more affordance is
+    // offered, so a page that reported `more` must be able to re-arm it after a
+    // page that reported `start` — and neither arm is inferred from anything
+    // else here, because the daemon established this by reading to the floor
+    // and this end has no second way to know it.
     this.state.paging.continuation = page.continuation;
     return true;
   }
