@@ -34,8 +34,9 @@
  *   complete fact; permission (core.v1.PermissionItem) →
  *   PermissionItem; systemFailure (SystemFailureItem) → the classified
  *   failure card (F4) — the ApiErrorLine `apiError` arm it superseded is
- *   RETIRED (step 11); daemonInterceptedCommand (DaemonInterceptedCommandItem) →
- *   SessionCommandItem — a slash command the CLI answered ITSELF, which is
+ *   RETIRED (step 11); daemonInterceptedCommand (frontend.v1.DaemonInterceptedCommandItem)
+ *   → the store's DaemonInterceptedCommandItem — a slash command the daemon
+ *   intercepted from what the user typed, which is
  *   drawn as a chip rather than as the prompt bubble the daemon withheld for
  *   it. The wire message carries the command enum and NO text, so this end
  *   cannot put the submitted prompt back on screen.
@@ -63,7 +64,7 @@ import type {
   FailureCardItem,
   PermissionItem,
   ResultItem,
-  SessionCommandItem,
+  DaemonInterceptedCommandItem,
   TextItem,
   ThinkingItem,
   ToolItem,
@@ -1539,7 +1540,7 @@ function itemsFromFrame(frame: MessageFrame): { items: ConversationItem[]; ignor
     case "daemonInterceptedCommand":
       // The command enum is the ENTIRE payload — there is no text field on
       // the wire message — so this is everything there is to read.
-      return { items: [sessionCommandItem(frame.payload, frame.uuid)], ignores: [] };
+      return { items: [daemonInterceptedCommandItem(frame.payload, frame.uuid)], ignores: [] };
     case "detachedWork":
       // UNREACHABLE by construction: `conversationEffects` lifts every frame
       // carrying decoded detached work onto the async seam before it gets here,
@@ -1965,9 +1966,9 @@ function failureCardItem(e: Obj, uuid: string): FailureCardItem {
  * whole content, and a guessed one would tell the user they ran something
  * they did not.
  */
-function sessionCommandItem(e: Obj, uuid: string): SessionCommandItem {
+function daemonInterceptedCommandItem(e: Obj, uuid: string): DaemonInterceptedCommandItem {
   return {
-    kind: "session-command",
+    kind: "daemon-intercepted-command",
     command: sessionCommandOf(pstr(e, "command"), "DaemonInterceptedCommandItem"),
     uuid,
   };

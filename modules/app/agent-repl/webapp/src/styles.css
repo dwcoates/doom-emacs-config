@@ -2103,7 +2103,7 @@ pre {
   margin-right: auto;
 }
 
-/* --- the session-command chip ---------------------------------------------
+/* --- the daemon-intercepted-command chip ---------------------------------------------
    A slash command the CLI answered ITSELF (/model, /compact, /clear, …),
    drawn as a small centered pill.
 
@@ -2115,14 +2115,14 @@ pre {
    proper carries on above and below it undisturbed.
 
    It carries no argument and no prompt text, because the wire item carries
-   none: `frontend.v1.SessionCommandItem` has exactly one field, the command
+   none: `frontend.v1.DaemonInterceptedCommandItem` has exactly one field, the command
    enum, and the name below is derived from it. */
-.session-command {
+.daemon-intercepted-command {
   display: flex;
   justify-content: center;
   margin: 0.4rem 0;
 }
-.session-command-name {
+.daemon-intercepted-command-name {
   padding: 0.1rem 0.55rem;
   border: 1px solid var(--border);
   border-radius: 999px;
