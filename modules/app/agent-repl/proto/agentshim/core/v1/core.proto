@@ -293,7 +293,6 @@ message Event {
     // Records lifecycle facts for one SDK query invocation.
     QueryLifecycle query_lifecycle = 26;
     // Records a subscription-usage measurement at a turn boundary.
-    AccountUsageObservation account_usage_observation = 27;
     // Durable record that the shim rewound the vendor conversation to an
     // earlier point by transcript truncation. See SessionRewound.
     SessionRewound session_rewound = 28;
@@ -584,98 +583,6 @@ message QueryStartupFailure {
   string cause = 1;
 }
 
-// Records one attempt to measure subscription usage at a turn boundary.
-message AccountUsageObservation {
-  // Identifies the query serving the turn.
-  string query_instance_id = 1;
-
-  // Identifies the turn whose boundary was measured.
-  string turn_id = 2;
-
-  // Gives the exact turn-boundary time independently of sampling latency.
-  int64 boundary_at_ms = 3;
-
-  // Gives the time at which the usage response was received.
-  int64 observed_at_ms = 4;
-
-  // Gives the elapsed time required to obtain the usage response.
-  int64 sample_latency_ms = 5;
-
-  // Gives the subscription type reported by the usage service.
-  string subscription_type = 6;
-
-  // Identifies the measured turn boundary.
-  oneof boundary {
-    // Marks the boundary immediately before prompt submission.
-    TurnStartUsageBoundary turn_start = 10;
-
-    // Marks the boundary after the terminal result is received.
-    TurnEndUsageBoundary turn_end = 11;
-  }
-
-  // Contains either the measurement or its explicit failure.
-  oneof outcome {
-    // Contains the account-usage measurement.
-    AccountUsageAvailable available = 20;
-
-    // Explains why the measurement could not be obtained.
-    AccountUsageUnavailable unavailable = 21;
-  }
-}
-
-// Marks an observation taken immediately before prompt submission.
-message TurnStartUsageBoundary {}
-
-// Marks an observation taken after the terminal result is received.
-message TurnEndUsageBoundary {}
-
-// Contains subscription-usage windows returned by the usage service.
-message AccountUsageAvailable {
-  // Contains utilization of the rolling five-hour window.
-  UsageWindow five_hour = 1;
-}
-
-// Describes utilization and reset time for one account-usage window.
-message UsageWindow {
-  // Gives utilization as a percentage from zero through one hundred.
-  double utilization_percent = 1;
-
-  // Gives the Unix epoch time at which the window resets.
-  int64 resets_at_ms = 2;
-}
-
-// Explains why an account-usage measurement could not be obtained.
-message AccountUsageUnavailable {
-  // Identifies the failure without collapsing distinct conditions.
-  oneof reason {
-    // Indicates that the account-usage API was unavailable.
-    UsageServiceUnavailable service_unavailable = 1;
-
-    // Indicates that the response omitted the five-hour window.
-    FiveHourWindowUnavailable window_unavailable = 2;
-
-    // Indicates that the response omitted utilization.
-    UtilizationUnavailable utilization_unavailable = 3;
-
-    // Records a transport, parsing, or SDK error.
-    UsageSamplingFailure sampling_failure = 4;
-  }
-}
-
-// Marks unavailability of the account-usage API.
-message UsageServiceUnavailable {}
-
-// Marks absence of the five-hour window.
-message FiveHourWindowUnavailable {}
-
-// Marks absence of utilization within the five-hour window.
-message UtilizationUnavailable {}
-
-// Records an error encountered while sampling account usage.
-message UsageSamplingFailure {
-  // Gives the complete error diagnostic.
-  string cause = 1;
-}
 
 // CLEAR and COMPACT are the two ways a conversation's history stops informing
 // the agent, and both are first-class Event payloads rather than vendor

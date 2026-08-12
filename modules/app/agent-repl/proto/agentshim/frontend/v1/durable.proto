@@ -26,6 +26,7 @@ package agentshim.frontend.v1;
 
 import "agentshim/core/v1/core.proto";
 
+import "agentshim/conversation/v1/bookkeeping.proto";
 import "agentshim/conversation/v1/tokens.proto";
 import "google/protobuf/struct.proto";
 
@@ -468,10 +469,10 @@ message TurnAccounting {
   TurnAccountingTiming timing = 4;
 
   // Contains the account-usage sample taken before prompt submission.
-  agentshim.core.v1.AccountUsageObservation usage_at_start = 5;
+  agentshim.conversation.v1.AccountUsageObservation usage_at_start = 5;
 
   // Contains the account-usage sample taken after the terminal result.
-  agentshim.core.v1.AccountUsageObservation usage_at_end = 6;
+  agentshim.conversation.v1.AccountUsageObservation usage_at_end = 6;
 
   // Contains every response-level token record, including subagents.
   repeated TokenUtilization responses = 7;
