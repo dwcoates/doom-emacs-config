@@ -147,14 +147,34 @@ type InternalEntry struct {
 	// Producers still record who saw what, for reconciliation when two accounts
 	// disagree; nothing downstream sees it.
 	Plane *Plane `protobuf:"bytes,1,opt,name=plane,proto3" json:"plane,omitempty"`
-	// The key that makes a re-read idempotent. Both producers re-read their
-	// sources after a restart, so the same record can arrive twice; the store
-	// keeps the first. Empty means the store derives one from the record's own
-	// identity.
+	// The CROSS-PLANE identity: the key that lets the store recognize when the
+	// shim and the sidecar have each reported the same underlying fact, so it
+	// keeps one row instead of two.
 	//
-	// Purely the store's concern. A record's IDENTITY downstream is
-	// MessageEntry.message_id, which is a different thing and always was.
+	// It is load-bearing and measured to be so. In the live store both planes
+	// populate it in the same namespaces (`uuid:`, `tur:`), and the two planes'
+	// surviving keys intersect in exactly zero rows — which is what a working
+	// collapse looks like, since the loser was refused and only one plane's row
+	// remains per key. Tens of thousands of twins have been collapsed.
+	//
+	// Empty is legal and means the record has no cross-plane twin, which is true
+	// of most of what each producer writes.
 	DedupKey string `protobuf:"bytes,2,opt,name=dedup_key,json=dedupKey,proto3" json:"dedup_key,omitempty"`
+	// The STABLE WRITE IDENTITY, minted once by the producer when the record is
+	// first handed to a store write, and never regenerated — not for a retry, not
+	// for a replay after the store bounced underneath the producer.
+	//
+	// A DIFFERENT JOB FROM dedup_key, and neither substitutes for the other.
+	// dedup_key collapses two producers' views of one fact; this one recognizes
+	// ONE producer's re-delivery of ONE record. A batch that reached the store
+	// but whose ack was lost has to be replayed, because from the producer's side
+	// an unacked batch and a never-delivered batch are indistinguishable. Without
+	// this the store writes it twice; with it the replay is a no-op.
+	//
+	// Empty means the producer supplied no write identity, and such a record is
+	// not replay-idempotent. The store enforces uniqueness only over non-empty
+	// values.
+	WriteId string `protobuf:"bytes,3,opt,name=write_id,json=writeId,proto3" json:"write_id,omitempty"`
 	// Set when there is nothing to hand the daemon: a record we could not place.
 	//
 	// UNSET on every ordinary record — this is not a category every entry falls
@@ -219,6 +239,13 @@ func (x *InternalEntry) GetPlane() *Plane {
 func (x *InternalEntry) GetDedupKey() string {
 	if x != nil {
 		return x.DedupKey
+	}
+	return ""
+}
+
+func (x *InternalEntry) GetWriteId() string {
+	if x != nil {
+		return x.WriteId
 	}
 	return ""
 }
@@ -459,10 +486,11 @@ const file_agentshim_conversation_internal_v1_entry_proto_rawDesc = "" +
 	".agentshim/conversation/internal/v1/entry.proto\x12\"agentshim.conversation.internal.v1\x1a(agentshim/conversation/v1/external.proto\x1a4agentshim/conversation/internal/v1/unsupported.proto\"\x9c\x01\n" +
 	"\x05Entry\x12M\n" +
 	"\binternal\x18\x01 \x01(\v21.agentshim.conversation.internal.v1.InternalEntryR\binternal\x12D\n" +
-	"\bexternal\x18\x02 \x01(\v2(.agentshim.conversation.v1.ExternalEntryR\bexternal\"\xff\x02\n" +
+	"\bexternal\x18\x02 \x01(\v2(.agentshim.conversation.v1.ExternalEntryR\bexternal\"\x9a\x03\n" +
 	"\rInternalEntry\x12?\n" +
 	"\x05plane\x18\x01 \x01(\v2).agentshim.conversation.internal.v1.PlaneR\x05plane\x12\x1b\n" +
-	"\tdedup_key\x18\x02 \x01(\tR\bdedupKey\x12b\n" +
+	"\tdedup_key\x18\x02 \x01(\tR\bdedupKey\x12\x19\n" +
+	"\bwrite_id\x18\x03 \x01(\tR\awriteId\x12b\n" +
 	"\x0fvendor_specific\x18\n" +
 	" \x01(\v27.agentshim.conversation.internal.v1.VendorSpecificEntryH\x00R\x0evendorSpecific\x12L\n" +
 	"\aunknown\x18\v \x01(\v20.agentshim.conversation.internal.v1.UnknownEntryH\x00R\aunknown\x12O\n" +

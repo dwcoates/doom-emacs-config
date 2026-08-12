@@ -51,19 +51,22 @@ type MessageEntry struct {
 	// equal the root of the parent chain; a write that disagrees is corruption,
 	// not a variant.
 	TopLevelMessageId string `protobuf:"bytes,2,opt,name=top_level_message_id,json=topLevelMessageId,proto3" json:"top_level_message_id,omitempty"`
-	// The message immediately containing this one — ONE HOP, never the root.
+	// Where this message sits: at the root of the feed, or inside another
+	// message.
 	//
-	// EMPTY means the message sits directly in the feed, in which case
-	// top_level_message_id is its own id. Absence is the fact itself, not a
-	// placeholder: a message whose parent could not be resolved is a producer
-	// fault, never a blank.
+	// A oneof rather than a string, and that is the whole point. As a string,
+	// EMPTY meant two different things — "this is a feed row" and "the producer
+	// could not resolve a parent" — and only the first is legal. At a context
+	// compaction the vendor's physical parent chain is cut, the boundary line
+	// carries no parent, and a separate logical pointer holds the only link back
+	// across it. A producer that reads only the physical chain resolves nothing,
+	// and with a string it would emit an empty value indistinguishable from a
+	// legitimate root — so pre-compaction history becomes unreachable by any walk
+	// and the boundary renders as a new top-level row, with nothing detecting it.
 	//
-	// AT A CONTEXT COMPACTION the vendor's physical parent chain is CUT — the
-	// boundary line carries no parent — and a separate logical pointer holds the
-	// only link back across it. The producer resolves this field from that
-	// pointer in that case; reading only the physical chain would make
-	// pre-compaction history unreachable by any walk.
-	ParentMessageId string `protobuf:"bytes,3,opt,name=parent_message_id,json=parentMessageId,proto3" json:"parent_message_id,omitempty"`
+	// Here an unresolved parent has no legal record to occupy. The producer must
+	// state which case it is, or fail.
+	Parent *MessageParent `protobuf:"bytes,5,opt,name=parent,proto3" json:"parent,omitempty"`
 	// Who this message is FROM, resolved by the producer rather than inferred by
 	// a reader from which payload arm is set.
 	Author *MessageAuthor `protobuf:"bytes,4,opt,name=author,proto3" json:"author,omitempty"`
@@ -134,11 +137,11 @@ func (x *MessageEntry) GetTopLevelMessageId() string {
 	return ""
 }
 
-func (x *MessageEntry) GetParentMessageId() string {
+func (x *MessageEntry) GetParent() *MessageParent {
 	if x != nil {
-		return x.ParentMessageId
+		return x.Parent
 	}
-	return ""
+	return nil
 }
 
 func (x *MessageEntry) GetAuthor() *MessageAuthor {
@@ -336,10 +339,9 @@ type MessageEntry_SkillBodyResolved struct {
 }
 
 type MessageEntry_ContentArriving struct {
-	// A fragment of content still arriving. EPHEMERAL by retention, so it is
-	// delivered live and never stored: the durable record of the same content
-	// is the completed message the file plane writes. Defined in
-	// ephemeral.proto, apart from every durable body.
+	// A fragment of content still arriving, handed straight to the daemon by
+	// the stream plane. The completed message the file plane writes later
+	// REPLACES the preview rather than appending beside it.
 	ContentArriving *ContentArriving `protobuf:"bytes,30,opt,name=content_arriving,json=contentArriving,proto3,oneof"`
 }
 
@@ -367,6 +369,181 @@ func (*MessageEntry_SkillBodyResolved) isMessageEntry_Payload() {}
 
 func (*MessageEntry_ContentArriving) isMessageEntry_Payload() {}
 
+// Where a message sits in the feed.
+//
+// Two arms, no third. There is deliberately no "unknown" — a producer that
+// cannot resolve a parent has nothing legal to emit and must fail loudly rather
+// than pick the arm that looks harmless.
+type MessageParent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Parent:
+	//
+	//	*MessageParent_Root
+	//	*MessageParent_Inside
+	Parent        isMessageParent_Parent `protobuf_oneof:"parent"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MessageParent) Reset() {
+	*x = MessageParent{}
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MessageParent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MessageParent) ProtoMessage() {}
+
+func (x *MessageParent) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MessageParent.ProtoReflect.Descriptor instead.
+func (*MessageParent) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_message_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *MessageParent) GetParent() isMessageParent_Parent {
+	if x != nil {
+		return x.Parent
+	}
+	return nil
+}
+
+func (x *MessageParent) GetRoot() *MessageParentRoot {
+	if x != nil {
+		if x, ok := x.Parent.(*MessageParent_Root); ok {
+			return x.Root
+		}
+	}
+	return nil
+}
+
+func (x *MessageParent) GetInside() *MessageParentInside {
+	if x != nil {
+		if x, ok := x.Parent.(*MessageParent_Inside); ok {
+			return x.Inside
+		}
+	}
+	return nil
+}
+
+type isMessageParent_Parent interface {
+	isMessageParent_Parent()
+}
+
+type MessageParent_Root struct {
+	// The message sits directly in the feed. `top_level_message_id` is its own
+	// id.
+	Root *MessageParentRoot `protobuf:"bytes,1,opt,name=root,proto3,oneof"`
+}
+
+type MessageParent_Inside struct {
+	// The message sits inside another one.
+	Inside *MessageParentInside `protobuf:"bytes,2,opt,name=inside,proto3,oneof"`
+}
+
+func (*MessageParent_Root) isMessageParent_Parent() {}
+
+func (*MessageParent_Inside) isMessageParent_Parent() {}
+
+// A feed row: nothing contains this message.
+type MessageParentRoot struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MessageParentRoot) Reset() {
+	*x = MessageParentRoot{}
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MessageParentRoot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MessageParentRoot) ProtoMessage() {}
+
+func (x *MessageParentRoot) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MessageParentRoot.ProtoReflect.Descriptor instead.
+func (*MessageParentRoot) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_message_proto_rawDescGZIP(), []int{2}
+}
+
+// Contained by another message.
+type MessageParentInside struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The message immediately containing this one — one hop, never the root.
+	// Walk `top_level_message_id` for the root; it is stored precisely so no
+	// reader has to walk this.
+	MessageId     string `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MessageParentInside) Reset() {
+	*x = MessageParentInside{}
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MessageParentInside) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MessageParentInside) ProtoMessage() {}
+
+func (x *MessageParentInside) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MessageParentInside.ProtoReflect.Descriptor instead.
+func (*MessageParentInside) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_message_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *MessageParentInside) GetMessageId() string {
+	if x != nil {
+		return x.MessageId
+	}
+	return ""
+}
+
 // Who a message is from.
 //
 // RESOLVED BY THE PRODUCER, never inferred by a reader from which payload arm
@@ -387,7 +564,7 @@ type MessageAuthor struct {
 
 func (x *MessageAuthor) Reset() {
 	*x = MessageAuthor{}
-	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[1]
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -399,7 +576,7 @@ func (x *MessageAuthor) String() string {
 func (*MessageAuthor) ProtoMessage() {}
 
 func (x *MessageAuthor) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[1]
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -412,7 +589,7 @@ func (x *MessageAuthor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageAuthor.ProtoReflect.Descriptor instead.
 func (*MessageAuthor) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_message_proto_rawDescGZIP(), []int{1}
+	return file_agentshim_conversation_v1_message_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *MessageAuthor) GetAuthor() isMessageAuthor_Author {
@@ -483,7 +660,7 @@ type AuthorUser struct {
 
 func (x *AuthorUser) Reset() {
 	*x = AuthorUser{}
-	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[2]
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -495,7 +672,7 @@ func (x *AuthorUser) String() string {
 func (*AuthorUser) ProtoMessage() {}
 
 func (x *AuthorUser) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[2]
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -508,7 +685,7 @@ func (x *AuthorUser) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorUser.ProtoReflect.Descriptor instead.
 func (*AuthorUser) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_message_proto_rawDescGZIP(), []int{2}
+	return file_agentshim_conversation_v1_message_proto_rawDescGZIP(), []int{5}
 }
 
 // The agent, speaking in the main conversation.
@@ -520,7 +697,7 @@ type AuthorAgent struct {
 
 func (x *AuthorAgent) Reset() {
 	*x = AuthorAgent{}
-	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[3]
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -532,7 +709,7 @@ func (x *AuthorAgent) String() string {
 func (*AuthorAgent) ProtoMessage() {}
 
 func (x *AuthorAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[3]
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -545,7 +722,7 @@ func (x *AuthorAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorAgent.ProtoReflect.Descriptor instead.
 func (*AuthorAgent) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_message_proto_rawDescGZIP(), []int{3}
+	return file_agentshim_conversation_v1_message_proto_rawDescGZIP(), []int{6}
 }
 
 // A subagent, speaking inside its own detached conversation.
@@ -560,7 +737,7 @@ type AuthorDetachedAgent struct {
 
 func (x *AuthorDetachedAgent) Reset() {
 	*x = AuthorDetachedAgent{}
-	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[4]
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -572,7 +749,7 @@ func (x *AuthorDetachedAgent) String() string {
 func (*AuthorDetachedAgent) ProtoMessage() {}
 
 func (x *AuthorDetachedAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[4]
+	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -585,7 +762,7 @@ func (x *AuthorDetachedAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorDetachedAgent.ProtoReflect.Descriptor instead.
 func (*AuthorDetachedAgent) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_message_proto_rawDescGZIP(), []int{4}
+	return file_agentshim_conversation_v1_message_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AuthorDetachedAgent) GetDetachedWorkMessageId() string {
@@ -599,13 +776,13 @@ var File_agentshim_conversation_v1_message_proto protoreflect.FileDescriptor
 
 const file_agentshim_conversation_v1_message_proto_rawDesc = "" +
 	"\n" +
-	"'agentshim/conversation/v1/message.proto\x12\x19agentshim.conversation.v1\x1a)agentshim/conversation/v1/ephemeral.proto\x1a(agentshim/conversation/v1/payloads.proto\"\x97\n" +
+	"'agentshim/conversation/v1/message.proto\x12\x19agentshim.conversation.v1\x1a(agentshim/conversation/v1/payloads.proto\"\xc6\n" +
 	"\n" +
 	"\fMessageEntry\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12/\n" +
-	"\x14top_level_message_id\x18\x02 \x01(\tR\x11topLevelMessageId\x12*\n" +
-	"\x11parent_message_id\x18\x03 \x01(\tR\x0fparentMessageId\x12@\n" +
+	"\x14top_level_message_id\x18\x02 \x01(\tR\x11topLevelMessageId\x12@\n" +
+	"\x06parent\x18\x05 \x01(\v2(.agentshim.conversation.v1.MessageParentR\x06parent\x12@\n" +
 	"\x06author\x18\x04 \x01(\v2(.agentshim.conversation.v1.MessageAuthorR\x06author\x12B\n" +
 	"\tuser_said\x18\n" +
 	" \x01(\v2#.agentshim.conversation.v1.UserSaidH\x00R\buserSaid\x12E\n" +
@@ -622,7 +799,15 @@ const file_agentshim_conversation_v1_message_proto_rawDesc = "" +
 	"\rtool_returned\x18\x17 \x01(\v2'.agentshim.conversation.v1.ToolReturnedH\x00R\ftoolReturned\x12^\n" +
 	"\x13skill_body_resolved\x18\x18 \x01(\v2,.agentshim.conversation.v1.SkillBodyResolvedH\x00R\x11skillBodyResolved\x12W\n" +
 	"\x10content_arriving\x18\x1e \x01(\v2*.agentshim.conversation.v1.ContentArrivingH\x00R\x0fcontentArrivingB\t\n" +
-	"\apayloadJ\x04\b\x0f\x10\x10R\x17daemon_answered_command\"\xfd\x01\n" +
+	"\apayloadJ\x04\b\x03\x10\x04J\x04\b\x0f\x10\x10R\x11parent_message_idR\x17daemon_answered_command\"\xa7\x01\n" +
+	"\rMessageParent\x12B\n" +
+	"\x04root\x18\x01 \x01(\v2,.agentshim.conversation.v1.MessageParentRootH\x00R\x04root\x12H\n" +
+	"\x06inside\x18\x02 \x01(\v2..agentshim.conversation.v1.MessageParentInsideH\x00R\x06insideB\b\n" +
+	"\x06parent\"\x13\n" +
+	"\x11MessageParentRoot\"4\n" +
+	"\x13MessageParentInside\x12\x1d\n" +
+	"\n" +
+	"message_id\x18\x01 \x01(\tR\tmessageId\"\xfd\x01\n" +
 	"\rMessageAuthor\x12;\n" +
 	"\x04user\x18\x01 \x01(\v2%.agentshim.conversation.v1.AuthorUserH\x00R\x04user\x12>\n" +
 	"\x05agent\x18\x02 \x01(\v2&.agentshim.conversation.v1.AuthorAgentH\x00R\x05agent\x12W\n" +
@@ -646,48 +831,54 @@ func file_agentshim_conversation_v1_message_proto_rawDescGZIP() []byte {
 	return file_agentshim_conversation_v1_message_proto_rawDescData
 }
 
-var file_agentshim_conversation_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_agentshim_conversation_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_agentshim_conversation_v1_message_proto_goTypes = []any{
 	(*MessageEntry)(nil),           // 0: agentshim.conversation.v1.MessageEntry
-	(*MessageAuthor)(nil),          // 1: agentshim.conversation.v1.MessageAuthor
-	(*AuthorUser)(nil),             // 2: agentshim.conversation.v1.AuthorUser
-	(*AuthorAgent)(nil),            // 3: agentshim.conversation.v1.AuthorAgent
-	(*AuthorDetachedAgent)(nil),    // 4: agentshim.conversation.v1.AuthorDetachedAgent
-	(*UserSaid)(nil),               // 5: agentshim.conversation.v1.UserSaid
-	(*AgentSaid)(nil),              // 6: agentshim.conversation.v1.AgentSaid
-	(*PermissionAsked)(nil),        // 7: agentshim.conversation.v1.PermissionAsked
-	(*FailureRaised)(nil),          // 8: agentshim.conversation.v1.FailureRaised
-	(*ContextCut)(nil),             // 9: agentshim.conversation.v1.ContextCut
-	(*DetachedWorkStarted)(nil),    // 10: agentshim.conversation.v1.DetachedWorkStarted
-	(*DetachedWorkProgressed)(nil), // 11: agentshim.conversation.v1.DetachedWorkProgressed
-	(*DetachedWorkEnded)(nil),      // 12: agentshim.conversation.v1.DetachedWorkEnded
-	(*PermissionAnswered)(nil),     // 13: agentshim.conversation.v1.PermissionAnswered
-	(*ToolReturned)(nil),           // 14: agentshim.conversation.v1.ToolReturned
-	(*SkillBodyResolved)(nil),      // 15: agentshim.conversation.v1.SkillBodyResolved
-	(*ContentArriving)(nil),        // 16: agentshim.conversation.v1.ContentArriving
+	(*MessageParent)(nil),          // 1: agentshim.conversation.v1.MessageParent
+	(*MessageParentRoot)(nil),      // 2: agentshim.conversation.v1.MessageParentRoot
+	(*MessageParentInside)(nil),    // 3: agentshim.conversation.v1.MessageParentInside
+	(*MessageAuthor)(nil),          // 4: agentshim.conversation.v1.MessageAuthor
+	(*AuthorUser)(nil),             // 5: agentshim.conversation.v1.AuthorUser
+	(*AuthorAgent)(nil),            // 6: agentshim.conversation.v1.AuthorAgent
+	(*AuthorDetachedAgent)(nil),    // 7: agentshim.conversation.v1.AuthorDetachedAgent
+	(*UserSaid)(nil),               // 8: agentshim.conversation.v1.UserSaid
+	(*AgentSaid)(nil),              // 9: agentshim.conversation.v1.AgentSaid
+	(*PermissionAsked)(nil),        // 10: agentshim.conversation.v1.PermissionAsked
+	(*FailureRaised)(nil),          // 11: agentshim.conversation.v1.FailureRaised
+	(*ContextCut)(nil),             // 12: agentshim.conversation.v1.ContextCut
+	(*DetachedWorkStarted)(nil),    // 13: agentshim.conversation.v1.DetachedWorkStarted
+	(*DetachedWorkProgressed)(nil), // 14: agentshim.conversation.v1.DetachedWorkProgressed
+	(*DetachedWorkEnded)(nil),      // 15: agentshim.conversation.v1.DetachedWorkEnded
+	(*PermissionAnswered)(nil),     // 16: agentshim.conversation.v1.PermissionAnswered
+	(*ToolReturned)(nil),           // 17: agentshim.conversation.v1.ToolReturned
+	(*SkillBodyResolved)(nil),      // 18: agentshim.conversation.v1.SkillBodyResolved
+	(*ContentArriving)(nil),        // 19: agentshim.conversation.v1.ContentArriving
 }
 var file_agentshim_conversation_v1_message_proto_depIdxs = []int32{
-	1,  // 0: agentshim.conversation.v1.MessageEntry.author:type_name -> agentshim.conversation.v1.MessageAuthor
-	5,  // 1: agentshim.conversation.v1.MessageEntry.user_said:type_name -> agentshim.conversation.v1.UserSaid
-	6,  // 2: agentshim.conversation.v1.MessageEntry.agent_said:type_name -> agentshim.conversation.v1.AgentSaid
-	7,  // 3: agentshim.conversation.v1.MessageEntry.permission_asked:type_name -> agentshim.conversation.v1.PermissionAsked
-	8,  // 4: agentshim.conversation.v1.MessageEntry.failure_raised:type_name -> agentshim.conversation.v1.FailureRaised
-	9,  // 5: agentshim.conversation.v1.MessageEntry.context_cut:type_name -> agentshim.conversation.v1.ContextCut
-	10, // 6: agentshim.conversation.v1.MessageEntry.detached_work_started:type_name -> agentshim.conversation.v1.DetachedWorkStarted
-	11, // 7: agentshim.conversation.v1.MessageEntry.detached_work_progressed:type_name -> agentshim.conversation.v1.DetachedWorkProgressed
-	12, // 8: agentshim.conversation.v1.MessageEntry.detached_work_ended:type_name -> agentshim.conversation.v1.DetachedWorkEnded
-	13, // 9: agentshim.conversation.v1.MessageEntry.permission_answered:type_name -> agentshim.conversation.v1.PermissionAnswered
-	14, // 10: agentshim.conversation.v1.MessageEntry.tool_returned:type_name -> agentshim.conversation.v1.ToolReturned
-	15, // 11: agentshim.conversation.v1.MessageEntry.skill_body_resolved:type_name -> agentshim.conversation.v1.SkillBodyResolved
-	16, // 12: agentshim.conversation.v1.MessageEntry.content_arriving:type_name -> agentshim.conversation.v1.ContentArriving
-	2,  // 13: agentshim.conversation.v1.MessageAuthor.user:type_name -> agentshim.conversation.v1.AuthorUser
-	3,  // 14: agentshim.conversation.v1.MessageAuthor.agent:type_name -> agentshim.conversation.v1.AuthorAgent
-	4,  // 15: agentshim.conversation.v1.MessageAuthor.detached_agent:type_name -> agentshim.conversation.v1.AuthorDetachedAgent
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	1,  // 0: agentshim.conversation.v1.MessageEntry.parent:type_name -> agentshim.conversation.v1.MessageParent
+	4,  // 1: agentshim.conversation.v1.MessageEntry.author:type_name -> agentshim.conversation.v1.MessageAuthor
+	8,  // 2: agentshim.conversation.v1.MessageEntry.user_said:type_name -> agentshim.conversation.v1.UserSaid
+	9,  // 3: agentshim.conversation.v1.MessageEntry.agent_said:type_name -> agentshim.conversation.v1.AgentSaid
+	10, // 4: agentshim.conversation.v1.MessageEntry.permission_asked:type_name -> agentshim.conversation.v1.PermissionAsked
+	11, // 5: agentshim.conversation.v1.MessageEntry.failure_raised:type_name -> agentshim.conversation.v1.FailureRaised
+	12, // 6: agentshim.conversation.v1.MessageEntry.context_cut:type_name -> agentshim.conversation.v1.ContextCut
+	13, // 7: agentshim.conversation.v1.MessageEntry.detached_work_started:type_name -> agentshim.conversation.v1.DetachedWorkStarted
+	14, // 8: agentshim.conversation.v1.MessageEntry.detached_work_progressed:type_name -> agentshim.conversation.v1.DetachedWorkProgressed
+	15, // 9: agentshim.conversation.v1.MessageEntry.detached_work_ended:type_name -> agentshim.conversation.v1.DetachedWorkEnded
+	16, // 10: agentshim.conversation.v1.MessageEntry.permission_answered:type_name -> agentshim.conversation.v1.PermissionAnswered
+	17, // 11: agentshim.conversation.v1.MessageEntry.tool_returned:type_name -> agentshim.conversation.v1.ToolReturned
+	18, // 12: agentshim.conversation.v1.MessageEntry.skill_body_resolved:type_name -> agentshim.conversation.v1.SkillBodyResolved
+	19, // 13: agentshim.conversation.v1.MessageEntry.content_arriving:type_name -> agentshim.conversation.v1.ContentArriving
+	2,  // 14: agentshim.conversation.v1.MessageParent.root:type_name -> agentshim.conversation.v1.MessageParentRoot
+	3,  // 15: agentshim.conversation.v1.MessageParent.inside:type_name -> agentshim.conversation.v1.MessageParentInside
+	5,  // 16: agentshim.conversation.v1.MessageAuthor.user:type_name -> agentshim.conversation.v1.AuthorUser
+	6,  // 17: agentshim.conversation.v1.MessageAuthor.agent:type_name -> agentshim.conversation.v1.AuthorAgent
+	7,  // 18: agentshim.conversation.v1.MessageAuthor.detached_agent:type_name -> agentshim.conversation.v1.AuthorDetachedAgent
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_conversation_v1_message_proto_init() }
@@ -695,7 +886,6 @@ func file_agentshim_conversation_v1_message_proto_init() {
 	if File_agentshim_conversation_v1_message_proto != nil {
 		return
 	}
-	file_agentshim_conversation_v1_ephemeral_proto_init()
 	file_agentshim_conversation_v1_payloads_proto_init()
 	file_agentshim_conversation_v1_message_proto_msgTypes[0].OneofWrappers = []any{
 		(*MessageEntry_UserSaid)(nil),
@@ -712,6 +902,10 @@ func file_agentshim_conversation_v1_message_proto_init() {
 		(*MessageEntry_ContentArriving)(nil),
 	}
 	file_agentshim_conversation_v1_message_proto_msgTypes[1].OneofWrappers = []any{
+		(*MessageParent_Root)(nil),
+		(*MessageParent_Inside)(nil),
+	}
+	file_agentshim_conversation_v1_message_proto_msgTypes[4].OneofWrappers = []any{
 		(*MessageAuthor_User)(nil),
 		(*MessageAuthor_Agent)(nil),
 		(*MessageAuthor_DetachedAgent)(nil),
@@ -722,7 +916,7 @@ func file_agentshim_conversation_v1_message_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_conversation_v1_message_proto_rawDesc), len(file_agentshim_conversation_v1_message_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -54,7 +54,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/conversation/internal/v1/entry.proto.
  */
 export const file_agentshim_conversation_internal_v1_entry: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHNoaW0vY29udmVyc2F0aW9uL2ludGVybmFsL3YxL2VudHJ5LnByb3RvEiJhZ2VudHNoaW0uY29udmVyc2F0aW9uLmludGVybmFsLnYxIogBCgVFbnRyeRJDCghpbnRlcm5hbBgBIAEoCzIxLmFnZW50c2hpbS5jb252ZXJzYXRpb24uaW50ZXJuYWwudjEuSW50ZXJuYWxFbnRyeRI6CghleHRlcm5hbBgCIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRXh0ZXJuYWxFbnRyeSLLAgoNSW50ZXJuYWxFbnRyeRI4CgVwbGFuZRgBIAEoCzIpLmFnZW50c2hpbS5jb252ZXJzYXRpb24uaW50ZXJuYWwudjEuUGxhbmUSEQoJZGVkdXBfa2V5GAIgASgJElIKD3ZlbmRvcl9zcGVjaWZpYxgKIAEoCzI3LmFnZW50c2hpbS5jb252ZXJzYXRpb24uaW50ZXJuYWwudjEuVmVuZG9yU3BlY2lmaWNFbnRyeUgAEkMKB3Vua25vd24YCyABKAsyMC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLmludGVybmFsLnYxLlVua25vd25FbnRyeUgAEkUKCHVucGFyc2VkGAwgASgLMjEuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi5pbnRlcm5hbC52MS5VbnBhcnNlZEVudHJ5SABCDQoLdW5jb252ZXJ0ZWQikgEKBVBsYW5lEkEKBnN0cmVhbRgBIAEoCzIvLmFnZW50c2hpbS5jb252ZXJzYXRpb24uaW50ZXJuYWwudjEuUGxhbmVTdHJlYW1IABI9CgRmaWxlGAIgASgLMi0uYWdlbnRzaGltLmNvbnZlcnNhdGlvbi5pbnRlcm5hbC52MS5QbGFuZUZpbGVIAEIHCgVwbGFuZSINCgtQbGFuZVN0cmVhbSILCglQbGFuZUZpbGVCS1pJYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9jb252ZXJzYXRpb24vaW50ZXJuYWwvdjE7Y29udmVyc2F0aW9uaW50ZXJuYWx2MWIGcHJvdG8z", [file_agentshim_conversation_v1_external, file_agentshim_conversation_internal_v1_unsupported]);
+  fileDesc("Ci5hZ2VudHNoaW0vY29udmVyc2F0aW9uL2ludGVybmFsL3YxL2VudHJ5LnByb3RvEiJhZ2VudHNoaW0uY29udmVyc2F0aW9uLmludGVybmFsLnYxIogBCgVFbnRyeRJDCghpbnRlcm5hbBgBIAEoCzIxLmFnZW50c2hpbS5jb252ZXJzYXRpb24uaW50ZXJuYWwudjEuSW50ZXJuYWxFbnRyeRI6CghleHRlcm5hbBgCIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRXh0ZXJuYWxFbnRyeSLdAgoNSW50ZXJuYWxFbnRyeRI4CgVwbGFuZRgBIAEoCzIpLmFnZW50c2hpbS5jb252ZXJzYXRpb24uaW50ZXJuYWwudjEuUGxhbmUSEQoJZGVkdXBfa2V5GAIgASgJEhAKCHdyaXRlX2lkGAMgASgJElIKD3ZlbmRvcl9zcGVjaWZpYxgKIAEoCzI3LmFnZW50c2hpbS5jb252ZXJzYXRpb24uaW50ZXJuYWwudjEuVmVuZG9yU3BlY2lmaWNFbnRyeUgAEkMKB3Vua25vd24YCyABKAsyMC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLmludGVybmFsLnYxLlVua25vd25FbnRyeUgAEkUKCHVucGFyc2VkGAwgASgLMjEuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi5pbnRlcm5hbC52MS5VbnBhcnNlZEVudHJ5SABCDQoLdW5jb252ZXJ0ZWQikgEKBVBsYW5lEkEKBnN0cmVhbRgBIAEoCzIvLmFnZW50c2hpbS5jb252ZXJzYXRpb24uaW50ZXJuYWwudjEuUGxhbmVTdHJlYW1IABI9CgRmaWxlGAIgASgLMi0uYWdlbnRzaGltLmNvbnZlcnNhdGlvbi5pbnRlcm5hbC52MS5QbGFuZUZpbGVIAEIHCgVwbGFuZSINCgtQbGFuZVN0cmVhbSILCglQbGFuZUZpbGVCS1pJYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9jb252ZXJzYXRpb24vaW50ZXJuYWwvdjE7Y29udmVyc2F0aW9uaW50ZXJuYWx2MWIGcHJvdG8z", [file_agentshim_conversation_v1_external, file_agentshim_conversation_internal_v1_unsupported]);
 
 /**
  * One record as the STORE holds it: the half that may leave, and the half that
@@ -123,17 +123,42 @@ export type InternalEntry = Message<"agentshim.conversation.internal.v1.Internal
   plane?: Plane | undefined;
 
   /**
-   * The key that makes a re-read idempotent. Both producers re-read their
-   * sources after a restart, so the same record can arrive twice; the store
-   * keeps the first. Empty means the store derives one from the record's own
-   * identity.
+   * The CROSS-PLANE identity: the key that lets the store recognize when the
+   * shim and the sidecar have each reported the same underlying fact, so it
+   * keeps one row instead of two.
    *
-   * Purely the store's concern. A record's IDENTITY downstream is
-   * MessageEntry.message_id, which is a different thing and always was.
+   * It is load-bearing and measured to be so. In the live store both planes
+   * populate it in the same namespaces (`uuid:`, `tur:`), and the two planes'
+   * surviving keys intersect in exactly zero rows — which is what a working
+   * collapse looks like, since the loser was refused and only one plane's row
+   * remains per key. Tens of thousands of twins have been collapsed.
+   *
+   * Empty is legal and means the record has no cross-plane twin, which is true
+   * of most of what each producer writes.
    *
    * @generated from field: string dedup_key = 2;
    */
   dedupKey: string;
+
+  /**
+   * The STABLE WRITE IDENTITY, minted once by the producer when the record is
+   * first handed to a store write, and never regenerated — not for a retry, not
+   * for a replay after the store bounced underneath the producer.
+   *
+   * A DIFFERENT JOB FROM dedup_key, and neither substitutes for the other.
+   * dedup_key collapses two producers' views of one fact; this one recognizes
+   * ONE producer's re-delivery of ONE record. A batch that reached the store
+   * but whose ack was lost has to be replayed, because from the producer's side
+   * an unacked batch and a never-delivered batch are indistinguishable. Without
+   * this the store writes it twice; with it the replay is a no-op.
+   *
+   * Empty means the producer supplied no write identity, and such a record is
+   * not replay-idempotent. The store enforces uniqueness only over non-empty
+   * values.
+   *
+   * @generated from field: string write_id = 3;
+   */
+  writeId: string;
 
   /**
    * Set when there is nothing to hand the daemon: a record we could not place.
