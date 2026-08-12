@@ -11,7 +11,6 @@ PROTOS := \
   agentshim/core/v1/message-page.proto \
   agentshim/core/v1/entry-delivery.proto \
   agentshim/conversation/v1/tokens.proto \
-  agentshim/conversation/v1/commands.proto \
   agentshim/conversation/v1/content.proto \
   agentshim/conversation/v1/ephemeral.proto \
   agentshim/conversation/v1/payloads.proto \
@@ -22,6 +21,7 @@ PROTOS := \
   agentshim/conversation/internal/v1/entry.proto \
   agentshim/frontend/v1/agent-emission.proto \
   agentshim/frontend/v1/agent-response.proto \
+  agentshim/frontend/v1/commands.proto \
   agentshim/frontend/v1/conversation-history.proto \
   agentshim/frontend/v1/conversation-page.proto \
   agentshim/frontend/v1/detached-work.proto \

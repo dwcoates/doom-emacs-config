@@ -31,8 +31,7 @@
 package frontendv1
 
 import (
-	v1 "agentrepl/proto/agentshim/conversation/v1"
-	v11 "agentrepl/proto/agentshim/core/v1"
+	v1 "agentrepl/proto/agentshim/core/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -4064,7 +4063,7 @@ type FailureQueueEntryUninterruptibleTurn struct {
 	// Which queued entry, so the card addresses the right row.
 	EntryId string `protobuf:"bytes,1,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
 	// The cut that is running, so the card can name what the prompt is behind.
-	Command       v1.SessionCommand `protobuf:"varint,2,opt,name=command,proto3,enum=agentshim.conversation.v1.SessionCommand" json:"command,omitempty"`
+	Command       SessionCommand `protobuf:"varint,2,opt,name=command,proto3,enum=agentshim.frontend.v1.SessionCommand" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4106,11 +4105,11 @@ func (x *FailureQueueEntryUninterruptibleTurn) GetEntryId() string {
 	return ""
 }
 
-func (x *FailureQueueEntryUninterruptibleTurn) GetCommand() v1.SessionCommand {
+func (x *FailureQueueEntryUninterruptibleTurn) GetCommand() SessionCommand {
 	if x != nil {
 		return x.Command
 	}
-	return v1.SessionCommand(0)
+	return SessionCommand_SESSION_COMMAND_UNSPECIFIED
 }
 
 // The connection to the daemon dropped and the frontend is reconnecting.
@@ -4627,7 +4626,7 @@ func (x *QueryTerminationFailure) GetVendorSessionId() string {
 	return ""
 }
 
-func (x *QueryTerminationFailure) GetVendorSessionIdentityUnavailable() *v11.VendorSessionIdentityUnavailable {
+func (x *QueryTerminationFailure) GetVendorSessionIdentityUnavailable() *v1.VendorSessionIdentityUnavailable {
 	if x != nil {
 		if x, ok := x.VendorIdentity.(*QueryTerminationFailure_VendorSessionIdentityUnavailable); ok {
 			return x.VendorSessionIdentityUnavailable
@@ -4650,7 +4649,7 @@ func (x *QueryTerminationFailure) GetReason() isQueryTerminationFailure_Reason {
 	return nil
 }
 
-func (x *QueryTerminationFailure) GetUnexpectedEof() *v11.UnexpectedQueryEof {
+func (x *QueryTerminationFailure) GetUnexpectedEof() *v1.UnexpectedQueryEof {
 	if x != nil {
 		if x, ok := x.Reason.(*QueryTerminationFailure_UnexpectedEof); ok {
 			return x.UnexpectedEof
@@ -4659,7 +4658,7 @@ func (x *QueryTerminationFailure) GetUnexpectedEof() *v11.UnexpectedQueryEof {
 	return nil
 }
 
-func (x *QueryTerminationFailure) GetIteratorFailure() *v11.QueryIteratorFailure {
+func (x *QueryTerminationFailure) GetIteratorFailure() *v1.QueryIteratorFailure {
 	if x != nil {
 		if x, ok := x.Reason.(*QueryTerminationFailure_IteratorFailure); ok {
 			return x.IteratorFailure
@@ -4668,7 +4667,7 @@ func (x *QueryTerminationFailure) GetIteratorFailure() *v11.QueryIteratorFailure
 	return nil
 }
 
-func (x *QueryTerminationFailure) GetStartupFailure() *v11.QueryStartupFailure {
+func (x *QueryTerminationFailure) GetStartupFailure() *v1.QueryStartupFailure {
 	if x != nil {
 		if x, ok := x.Reason.(*QueryTerminationFailure_StartupFailure); ok {
 			return x.StartupFailure
@@ -4688,7 +4687,7 @@ type QueryTerminationFailure_VendorSessionId struct {
 
 type QueryTerminationFailure_VendorSessionIdentityUnavailable struct {
 	// Records that the query ended before the SDK exposed a vendor session.
-	VendorSessionIdentityUnavailable *v11.VendorSessionIdentityUnavailable `protobuf:"bytes,5,opt,name=vendor_session_identity_unavailable,json=vendorSessionIdentityUnavailable,proto3,oneof"`
+	VendorSessionIdentityUnavailable *v1.VendorSessionIdentityUnavailable `protobuf:"bytes,5,opt,name=vendor_session_identity_unavailable,json=vendorSessionIdentityUnavailable,proto3,oneof"`
 }
 
 func (*QueryTerminationFailure_VendorSessionId) isQueryTerminationFailure_VendorIdentity() {}
@@ -4702,17 +4701,17 @@ type isQueryTerminationFailure_Reason interface {
 
 type QueryTerminationFailure_UnexpectedEof struct {
 	// The SDK iterator ended without an intentional shim shutdown.
-	UnexpectedEof *v11.UnexpectedQueryEof `protobuf:"bytes,10,opt,name=unexpected_eof,json=unexpectedEof,proto3,oneof"`
+	UnexpectedEof *v1.UnexpectedQueryEof `protobuf:"bytes,10,opt,name=unexpected_eof,json=unexpectedEof,proto3,oneof"`
 }
 
 type QueryTerminationFailure_IteratorFailure struct {
 	// The SDK iterator threw an error, including its complete cause.
-	IteratorFailure *v11.QueryIteratorFailure `protobuf:"bytes,11,opt,name=iterator_failure,json=iteratorFailure,proto3,oneof"`
+	IteratorFailure *v1.QueryIteratorFailure `protobuf:"bytes,11,opt,name=iterator_failure,json=iteratorFailure,proto3,oneof"`
 }
 
 type QueryTerminationFailure_StartupFailure struct {
 	// Query initialization failed, including its complete cause.
-	StartupFailure *v11.QueryStartupFailure `protobuf:"bytes,12,opt,name=startup_failure,json=startupFailure,proto3,oneof"`
+	StartupFailure *v1.QueryStartupFailure `protobuf:"bytes,12,opt,name=startup_failure,json=startupFailure,proto3,oneof"`
 }
 
 func (*QueryTerminationFailure_UnexpectedEof) isQueryTerminationFailure_Reason() {}
@@ -5152,7 +5151,7 @@ var File_agentshim_frontend_v1_errors_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_errors_proto_rawDesc = "" +
 	"\n" +
-	"\"agentshim/frontend/v1/errors.proto\x12\x15agentshim.frontend.v1\x1a(agentshim/conversation/v1/commands.proto\x1a\x1cagentshim/core/v1/core.proto\"\x8e\x01\n" +
+	"\"agentshim/frontend/v1/errors.proto\x12\x15agentshim.frontend.v1\x1a$agentshim/frontend/v1/commands.proto\x1a\x1cagentshim/core/v1/core.proto\"\x8e\x01\n" +
 	"\x14VendorFailureContext\x12*\n" +
 	"\x11claude_session_id\x18\x01 \x01(\tR\x0fclaudeSessionId\x12$\n" +
 	"\x0eapi_request_id\x18\x02 \x01(\tR\fapiRequestId\x12$\n" +
@@ -5374,10 +5373,10 @@ const file_agentshim_frontend_v1_errors_proto_rawDesc = "" +
 	" FailurePromptRefusedByMergeState\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\tR\x05state\"-\n" +
 	"\x13FailureTurnUndriven\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x86\x01\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x82\x01\n" +
 	"$FailureQueueEntryUninterruptibleTurn\x12\x19\n" +
-	"\bentry_id\x18\x01 \x01(\tR\aentryId\x12C\n" +
-	"\acommand\x18\x02 \x01(\x0e2).agentshim.conversation.v1.SessionCommandR\acommand\"\\\n" +
+	"\bentry_id\x18\x01 \x01(\tR\aentryId\x12?\n" +
+	"\acommand\x18\x02 \x01(\x0e2%.agentshim.frontend.v1.SessionCommandR\acommand\"\\\n" +
 	"\x18FailureDaemonUnreachable\x12\x1d\n" +
 	"\n" +
 	"close_code\x18\x01 \x01(\x05R\tcloseCode\x12!\n" +
@@ -5519,11 +5518,11 @@ var file_agentshim_frontend_v1_errors_proto_goTypes = []any{
 	(*SessionResumeFailureTranscriptUnavailable)(nil), // 68: agentshim.frontend.v1.SessionResumeFailureTranscriptUnavailable
 	(*SessionResumeFailureIdentityMismatch)(nil),      // 69: agentshim.frontend.v1.SessionResumeFailureIdentityMismatch
 	(*SessionResumeFailureBringUpFailure)(nil),        // 70: agentshim.frontend.v1.SessionResumeFailureBringUpFailure
-	(v1.SessionCommand)(0),                            // 71: agentshim.conversation.v1.SessionCommand
-	(*v11.VendorSessionIdentityUnavailable)(nil),      // 72: agentshim.core.v1.VendorSessionIdentityUnavailable
-	(*v11.UnexpectedQueryEof)(nil),                    // 73: agentshim.core.v1.UnexpectedQueryEof
-	(*v11.QueryIteratorFailure)(nil),                  // 74: agentshim.core.v1.QueryIteratorFailure
-	(*v11.QueryStartupFailure)(nil),                   // 75: agentshim.core.v1.QueryStartupFailure
+	(SessionCommand)(0),                               // 71: agentshim.frontend.v1.SessionCommand
+	(*v1.VendorSessionIdentityUnavailable)(nil),       // 72: agentshim.core.v1.VendorSessionIdentityUnavailable
+	(*v1.UnexpectedQueryEof)(nil),                     // 73: agentshim.core.v1.UnexpectedQueryEof
+	(*v1.QueryIteratorFailure)(nil),                   // 74: agentshim.core.v1.QueryIteratorFailure
+	(*v1.QueryStartupFailure)(nil),                    // 75: agentshim.core.v1.QueryStartupFailure
 }
 var file_agentshim_frontend_v1_errors_proto_depIdxs = []int32{
 	2,  // 0: agentshim.frontend.v1.FailureKind.shim_not_connected:type_name -> agentshim.frontend.v1.FailureShimNotConnected
@@ -5607,7 +5606,7 @@ var file_agentshim_frontend_v1_errors_proto_depIdxs = []int32{
 	0,  // 78: agentshim.frontend.v1.FailureApiExecutionError.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
 	0,  // 79: agentshim.frontend.v1.FailureApiRefusal.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
 	0,  // 80: agentshim.frontend.v1.FailureApiTurnFailed.vendor:type_name -> agentshim.frontend.v1.VendorFailureContext
-	71, // 81: agentshim.frontend.v1.FailureQueueEntryUninterruptibleTurn.command:type_name -> agentshim.conversation.v1.SessionCommand
+	71, // 81: agentshim.frontend.v1.FailureQueueEntryUninterruptibleTurn.command:type_name -> agentshim.frontend.v1.SessionCommand
 	72, // 82: agentshim.frontend.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> agentshim.core.v1.VendorSessionIdentityUnavailable
 	73, // 83: agentshim.frontend.v1.QueryTerminationFailure.unexpected_eof:type_name -> agentshim.core.v1.UnexpectedQueryEof
 	74, // 84: agentshim.frontend.v1.QueryTerminationFailure.iterator_failure:type_name -> agentshim.core.v1.QueryIteratorFailure
@@ -5630,6 +5629,7 @@ func file_agentshim_frontend_v1_errors_proto_init() {
 	if File_agentshim_frontend_v1_errors_proto != nil {
 		return
 	}
+	file_agentshim_frontend_v1_commands_proto_init()
 	file_agentshim_frontend_v1_errors_proto_msgTypes[1].OneofWrappers = []any{
 		(*FailureKind_ShimNotConnected)(nil),
 		(*FailureKind_ShimRejected)(nil),

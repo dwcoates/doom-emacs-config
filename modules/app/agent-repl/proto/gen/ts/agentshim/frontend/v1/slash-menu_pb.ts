@@ -7,15 +7,15 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { SessionCommand } from "../../conversation/v1/commands_pb";
-import { file_agentshim_conversation_v1_commands } from "../../conversation/v1/commands_pb";
+import type { SessionCommand } from "./commands_pb";
+import { file_agentshim_frontend_v1_commands } from "./commands_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentshim/frontend/v1/slash-menu.proto.
  */
 export const file_agentshim_frontend_v1_slash_menu: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHNoaW0vZnJvbnRlbmQvdjEvc2xhc2gtbWVudS5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIloKHERhZW1vbkludGVyY2VwdGVkQ29tbWFuZEl0ZW0SOgoHY29tbWFuZBgBIAEoDjIpLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbW1hbmQiOwoNU2tpbGxCb2R5SXRlbRITCgt0b29sX3VzZV9pZBgBIAEoCRIVCg1ib2R5X21hcmtkb3duGAIgASgJQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_agentshim_conversation_v1_commands]);
+  fileDesc("CiZhZ2VudHNoaW0vZnJvbnRlbmQvdjEvc2xhc2gtbWVudS5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIlYKHERhZW1vbkludGVyY2VwdGVkQ29tbWFuZEl0ZW0SNgoHY29tbWFuZBgBIAEoDjIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5TZXNzaW9uQ29tbWFuZCI7Cg1Ta2lsbEJvZHlJdGVtEhMKC3Rvb2xfdXNlX2lkGAEgASgJEhUKDWJvZHlfbWFya2Rvd24YAiABKAlCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_agentshim_frontend_v1_commands]);
 
 /**
  * Additive: ONE session command the user invoked, as the feed's record that
@@ -65,7 +65,7 @@ export type DaemonInterceptedCommandItem = Message<"agentshim.frontend.v1.Daemon
   /**
    * The recognized command. Never UNSPECIFIED.
    *
-   * @generated from field: agentshim.conversation.v1.SessionCommand command = 1;
+   * @generated from field: agentshim.frontend.v1.SessionCommand command = 1;
    */
   command: SessionCommand;
 };

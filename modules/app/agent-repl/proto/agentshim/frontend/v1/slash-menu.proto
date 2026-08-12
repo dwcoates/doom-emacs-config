@@ -5,7 +5,7 @@ syntax = "proto3";
 
 package agentshim.frontend.v1;
 
-import "agentshim/conversation/v1/commands.proto";
+import "agentshim/frontend/v1/commands.proto";
 
 option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 
@@ -57,7 +57,7 @@ option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 // a cut drops the matching invocation along with the history it belonged to.
 message DaemonInterceptedCommandItem {
   // The recognized command. Never UNSPECIFIED.
-  agentshim.conversation.v1.SessionCommand command = 1;
+  SessionCommand command = 1;
 }
 
 // Additive: the launched skill's own SKILL.md body, addressed to the Skill
