@@ -53,6 +53,7 @@ import { isEphemeral, toEphemeralEvent, toPersistentEvent, StreamMessageTracker 
 import { ControlDispatch, ModelSelectionError, type SdkControlTarget, type ToolPermissionResult } from "./control.js";
 import { SessionServer, type SessionServerHandlers } from "./server.js";
 import { StoreClient, StoreWriteDeferredError, type ReplayOutcome } from "./store-client.js";
+import { HEAD_ANCHOR, type PageAnchor } from "./message-page.js";
 import { envelopeIs, unpackAs, type Any } from "./framing.js";
 import { ClaudeStreamMessageSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
 import { QueueOp, TranscriptLineSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
@@ -90,6 +91,8 @@ import {
   PromptOrigin,
   ReplayDoneSchema,
   InterruptOutcome,
+  MessagePage,
+  MessagePageRequest,
   ReplayRequest,
   SessionSource,
   SessionStartedSchema,
@@ -265,6 +268,12 @@ export interface UdsSessionDeps {
    * writes back to back. Default 5000ms; tests shorten it.
    */
   replayIdleMs?: number;
+  /**
+   * How long a daemon-issued message page waits for the store's answer. A
+   * FAILURE bound, not a pace: the page is ONE bounded round-trip against an
+   * indexed read. Default 5000ms; tests shorten it.
+   */
+  messagePageTimeoutMs?: number;
   /**
    * How long a turn this session ACKED as interrupted may stay open waiting for
    * the SDK's own terminal result before the session closes it itself.
@@ -552,6 +561,8 @@ export class UdsSession {
   private pumpStarted = false;
   /** Idle bound for a bounded replay's store subscription (see deps). */
   private readonly replayIdleMs: number;
+  /** Failure bound for a daemon-issued message page (see deps). */
+  private readonly messagePageTimeoutMs: number;
   /** Grace an acked-interrupted turn gets to receive its SDK terminal (see deps). */
   private readonly interruptTerminalGraceMs: number;
   /** Quiet window an open turn gets before its query is judged dead (see deps). */
@@ -603,6 +614,7 @@ export class UdsSession {
       this.queryIdentity = { case: "fresh-unconfirmed" };
     }
     this.replayIdleMs = deps.replayIdleMs ?? 5000;
+    this.messagePageTimeoutMs = deps.messagePageTimeoutMs ?? 5000;
     this.interruptTerminalGraceMs = deps.interruptTerminalGraceMs ?? 15000;
     this.turnQuietGraceMs = deps.turnQuietGraceMs ?? 600000;
     this.lastSdkActivityMs = this.now();
@@ -898,6 +910,7 @@ export class UdsSession {
       onQueryLiveTasks: (m) => this.control.handleQueryLiveTasks(m),
       onPermissionResponse: (m) => this.control.handlePermissionResponse(m),
       onReplayRequest: (m) => void this.serveReplay(m),
+      onMessagePageRequest: (m) => void this.serveMessagePage(m),
       onHealthCheck: (m) => this.health(m),
       // THE BRING-UP GATE'S WIRING STAGE. The DaemonHello carries the
       // from_seq this session's standing store subscription is to be opened
@@ -1049,6 +1062,50 @@ export class UdsSession {
       delivered: BigInt(outcome.delivered),
     }));
     LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: req.requestId, delivered: outcome.delivered, truncated: outcome.truncated, reason: outcome.reason }, "completed daemon replay request");
+  }
+
+  /**
+   * Serve ONE bounded, backward-anchored message page for the daemon.
+   *
+   * A PASS-THROUGH. The daemon's anchor is carried to the store verbatim and
+   * the store's `MessagePage` comes back UNCHANGED but for the `request_id`,
+   * which is re-stamped with the daemon's so the daemon correlates the page
+   * with the request IT made. No StoredMessage is opened: arriving WHOLE is the
+   * property that removes the correlation, and re-chunking one here would put
+   * it back. The ten slots are the TYPE's, so nothing here can widen the page.
+   *
+   * THE DAEMON CANNOT DIAL THE STORE ITSELF while a shim is up — that is the
+   * side door it forbids — so this hop is what puts a live workspace on the
+   * bounded path instead of the windowed backwards walk.
+   *
+   * EVERY failure becomes a Nack, never an empty page: an empty page is
+   * indistinguishable from a conversation with no history.
+   */
+  private async serveMessagePage(req: MessagePageRequest): Promise<void> {
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: req.requestId, anchor: req.anchor.case }, "serving daemon message page request");
+    let anchor: PageAnchor;
+    switch (req.anchor.case) {
+      case "head":
+        anchor = HEAD_ANCHOR;
+        break;
+      case "beforeSeq":
+        anchor = { kind: "before", lastPageSeq: req.anchor.value };
+        break;
+      default:
+        // NO DEFAULT ANCHOR. Defaulting an unset anchor to the head would turn
+        // a daemon bug into a silent tail read.
+        this.server.failMessagePage(req.requestId, "message page request carries no anchor");
+        return;
+    }
+    let page: MessagePage;
+    try {
+      page = await this.store.fetchMessagePage(anchor, this.messagePageTimeoutMs);
+    } catch (err) {
+      this.server.failMessagePage(req.requestId, `message page failed: ${errMsg(err)}`);
+      return;
+    }
+    this.server.sendMessagePage({ ...page, requestId: req.requestId });
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: req.requestId, last_page_seq: page.lastPageSeq }, "completed daemon message page request");
   }
 
   /**

@@ -115,6 +115,7 @@ import {
   Heartbeat,
   HeartbeatSchema,
   MessagePage,
+  MessagePageRequest,
   MessagePageRequestSchema,
   MessagePageSchema,
   StoreWriteAck,
@@ -2022,7 +2023,18 @@ export class StoreClient {
           },
           COMPONENT,
         );
-        conn.send(MessagePageRequestSchema, messagePageRequest(requestId, anchor));
+        // storeKey, NOT opts.sessionId: the store routes every hop by the
+        // VENDOR session id, which is also what the standing subscription and
+        // every write are keyed by. It rotates, so it is read here rather than
+        // captured once.
+        let request: MessagePageRequest;
+        try {
+          request = messagePageRequest(requestId, this.storeKey, anchor);
+        } catch (err) {
+          fail(err instanceof Error ? err.message : String(err));
+          return;
+        }
+        conn.send(MessagePageRequestSchema, request);
         LOGGER.log({ ...logCtx, timeout_ms: timeoutMs }, `requested one bounded message page (standing subscription untouched)`);
         timer = setTimeout(() => fail(`no MessagePage within ${timeoutMs}ms`), timeoutMs);
         timer.unref?.();

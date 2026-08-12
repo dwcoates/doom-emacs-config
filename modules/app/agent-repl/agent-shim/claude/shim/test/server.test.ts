@@ -14,6 +14,9 @@ import {
   HealthCheckSchema,
   HealthStatusSchema,
   InterruptSchema,
+  MessagePageHeadSchema,
+  MessagePageRequestSchema,
+  MessagePageSchema,
   NackSchema,
   PermissionRequestSchema,
   PermissionResponseSchema,
@@ -30,6 +33,7 @@ import type {
   CancelDetachedAgents,
   DaemonHello,
   Interrupt,
+  MessagePageRequest,
   PermissionResponse,
   ReplayRequest,
   SubmitPrompt,
@@ -44,6 +48,7 @@ interface Calls {
   /** Every DaemonHello the bring-up gate handed to onDaemonConnected. */
   hellos: DaemonHello[];
   replays: ReplayRequest[];
+  pageRequests: MessagePageRequest[];
   connected: number;
   disconnected: number;
 }
@@ -57,7 +62,7 @@ function harness(
   calls: Calls;
 } {
   const socketPath = tmpSocketPath();
-  const calls: Calls = { prompts: [], interrupts: [], cancelDetached: [], perms: [], hellos: [], replays: [], connected: 0, disconnected: 0 };
+  const calls: Calls = { prompts: [], interrupts: [], cancelDetached: [], perms: [], hellos: [], replays: [], pageRequests: [], connected: 0, disconnected: 0 };
   const handlers: SessionServerHandlers = {
     onSubmitPrompt: (m): Receipt => {
       calls.prompts.push(m);
@@ -76,6 +81,7 @@ function harness(
         onQueryLiveTasks: (m) => create(AckSchema, { requestId: m.requestId, liveTaskSet: create(LiveTaskSetSchema, { taskIds: [] }) }),
     onPermissionResponse: (m) => calls.perms.push(m),
     onReplayRequest: (m) => calls.replays.push(m),
+    onMessagePageRequest: (m) => calls.pageRequests.push(m),
     onHealthCheck: (m) => create(HealthStatusSchema, {
       requestId: m.requestId,
       healthy: true,
@@ -576,6 +582,110 @@ describe("SessionServer disconnect tolerance", () => {
   // covered there (shimlisten: reconnect supersedes the parked connection).
 });
 
+describe("SessionServer message page lifetime is its connection's", () => {
+  // A page request is a question ONE daemon connection asked, exactly as a
+  // replay is, so a connection that never asked must never receive its answer.
+
+  it("answers a page on the connection that asked for it", async () => {
+    // Arrange
+    const { server, socketPath, calls } = harness();
+    track(server);
+    const peer = await handshake(server, socketPath);
+    await until(() => server.isConnected());
+    peer.send(MessagePageRequestSchema, create(MessagePageRequestSchema, {
+      requestId: "p-live",
+      sessionId: "vendor-uuid",
+      anchor: { case: "head", value: create(MessagePageHeadSchema, {}) },
+    }));
+    await until(() => calls.pageRequests.length === 1, "the page request to arrive");
+
+    // Act
+    server.sendMessagePage(create(MessagePageSchema, { requestId: "p-live", lastPageSeq: 8n }));
+
+    // Assert
+    expect((await peer.next(MessagePageSchema)).requestId).toBe("p-live");
+  });
+
+  it("reports a page failure as a Nack rather than an empty page", async () => {
+    // Arrange
+    const { server, socketPath, calls } = harness();
+    track(server);
+    const peer = await handshake(server, socketPath);
+    await until(() => server.isConnected());
+    peer.send(MessagePageRequestSchema, create(MessagePageRequestSchema, {
+      requestId: "p-fail",
+      sessionId: "vendor-uuid",
+      anchor: { case: "head", value: create(MessagePageHeadSchema, {}) },
+    }));
+    await until(() => calls.pageRequests.length === 1, "the page request to arrive");
+
+    // Act
+    server.failMessagePage("p-fail", "store closed the page connection before answering");
+
+    // Assert: an empty page would be indistinguishable from a conversation
+    // with no history.
+    const nack = await peer.next(NackSchema);
+    expect(nack.requestId).toBe("p-fail");
+    expect(nack.reason).toMatch(/store closed/);
+  });
+
+  it("never writes a superseded connection's page to the new connection", async () => {
+    // Arrange — the request arrives, its connection dies, a new one handshakes.
+    const { server, socketPath, calls } = harness({}, { reconnectMinMs: 1 });
+    track(server);
+    const daemon = acceptShim(socketPath);
+    listeners.push(daemon.close);
+    await server.connect();
+    const peer1 = await daemon.next();
+    await peer1.next(ShimHelloSchema);
+    peer1.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
+    await until(() => server.isConnected());
+    peer1.send(MessagePageRequestSchema, create(MessagePageRequestSchema, {
+      requestId: "p-stale",
+      sessionId: "vendor-uuid",
+      anchor: { case: "head", value: create(MessagePageHeadSchema, {}) },
+    }));
+    await until(() => calls.pageRequests.length === 1, "the page request to arrive");
+    peer1.destroy();
+    const peer2 = await daemon.next();
+    await peer2.next(ShimHelloSchema);
+    peer2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
+    await until(() => calls.connected === 2, "the reattach handshake");
+    const records = persistedRecords();
+
+    // Act — the store's answer lands after the asking connection is gone.
+    server.sendMessagePage(create(MessagePageSchema, { requestId: "p-stale" }));
+
+    // Assert
+    const dropped = records().filter((r) => String(r.message).includes("SUPERSEDED daemon connection"));
+    expect(dropped).toHaveLength(1);
+  });
+
+  it("records every page request stranded by a connection teardown", async () => {
+    // Arrange
+    const { server, socketPath, calls } = harness({}, { reconnectMinMs: 1 });
+    track(server);
+    const peer = await handshake(server, socketPath);
+    await until(() => server.isConnected());
+    peer.send(MessagePageRequestSchema, create(MessagePageRequestSchema, {
+      requestId: "p-stranded",
+      sessionId: "vendor-uuid",
+      anchor: { case: "head", value: create(MessagePageHeadSchema, {}) },
+    }));
+    await until(() => calls.pageRequests.length === 1, "the page request to arrive");
+    const records = persistedRecords();
+
+    // Act
+    peer.destroy();
+    await until(() => calls.disconnected === 1, "the teardown");
+
+    // Assert
+    const stranded = records().filter((r) => String(r.message).includes("in-flight message page request(s)"));
+    expect(stranded).toHaveLength(1);
+    expect((stranded[0].context as Record<string, unknown>).request_ids).toEqual(["p-stranded"]);
+  });
+});
+
 describe("SessionServer replay lifetime is its connection's", () => {
   // A ReplayRequest is a question ONE daemon connection asked. When that
   // connection dies the question dies with it — the daemon retires it on
@@ -679,6 +789,7 @@ describe("SessionServer vendor session rotation bounce", () => {
         onQueryLiveTasks: (m) => create(AckSchema, { requestId: m.requestId, liveTaskSet: create(LiveTaskSetSchema, { taskIds: [] }) }),
         onPermissionResponse: () => {},
         onReplayRequest: () => {},
+        onMessagePageRequest: () => {},
         onHealthCheck: (m) => create(HealthStatusSchema, { requestId: m.requestId, healthy: true, component: "test-shim" }),
         onDaemonConnected: () => built.calls.connected++,
         onDaemonDisconnected: () => built.calls.disconnected++,
