@@ -1,0 +1,42 @@
+// ephemeral.proto — the one thing in this package that is never written.
+//
+// ITS OWN FILE ON PURPOSE, so "nothing in here ever touches the store" is a
+// fact about the FILE rather than a rule spread across records. It previously
+// sat among the durable payload bodies, which is exactly how its retention went
+// unexamined.
+
+syntax = "proto3";
+
+package agentshim.conversation.v1;
+
+option go_package = "agentrepl/proto/agentshim/conversation/v1;conversationv1";
+
+// A fragment of a message still arriving, delivered live and never stored.
+//
+// THE ONLY EPHEMERAL MESSAGE IN THIS PACKAGE. It bypasses the store rather than
+// being written and filtered out later, so there is no path by which a typing
+// delta reaches a page. The durable record of the same content is the completed
+// message the file plane writes afterwards, and a consumer REPLACES the preview
+// with it rather than appending beside it.
+//
+// Persisting these was never on the table: a single response produces thousands
+// of fragments of one message that arrives whole moments later.
+message ContentArriving {
+  // Which block of the message this extends. The index into the settled
+  // message's content, so two reasoning fragments from one response land on
+  // their own previews rather than both on the first.
+  uint32 block_index = 1;
+
+  // What is arriving. Which arm is set says which KIND of block is being
+  // extended, so a preview never has to guess what it is showing.
+  oneof fragment {
+    // Prose, as the agent writes it.
+    string text = 2;
+    // Reasoning, as the agent reasons.
+    string thinking = 3;
+    // Tool arguments, arriving as the agent composes them. A string because it
+    // is INCOMPLETE JSON until the last fragment lands; typing it as Struct
+    // would claim it parses when it does not yet.
+    string arguments_json = 4;
+  }
+}

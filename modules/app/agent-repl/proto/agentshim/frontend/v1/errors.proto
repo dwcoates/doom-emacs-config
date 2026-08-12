@@ -26,6 +26,7 @@ syntax = "proto3";
 
 package agentshim.frontend.v1;
 
+import "agentshim/conversation/v1/commands.proto";
 import "agentshim/core/v1/core.proto";
 import "agentshim/frontend/v1/slash-menu.proto";
 
@@ -696,7 +697,7 @@ message FailureQueueEntryUninterruptibleTurn {
   // Which queued entry, so the card addresses the right row.
   string entry_id = 1;
   // The cut that is running, so the card can name what the prompt is behind.
-  SessionCommand command = 2;
+  agentshim.conversation.v1.SessionCommand command = 2;
 }
 
 // The connection to the daemon dropped and the frontend is reconnecting.

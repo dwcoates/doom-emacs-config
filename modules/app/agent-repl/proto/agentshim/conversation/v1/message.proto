@@ -1,0 +1,160 @@
+// message.proto — records that BELONG to a conversation message.
+//
+// The unit a page counts is a message, not a record. Several records share one
+// message_id and fold, in seq order, into the single thing the feed draws.
+
+syntax = "proto3";
+
+package agentshim.conversation.v1;
+
+import "agentshim/conversation/v1/ephemeral.proto";
+import "agentshim/conversation/v1/payloads.proto";
+
+option go_package = "agentrepl/proto/agentshim/conversation/v1;conversationv1";
+
+// One record BELONGING to one message. Several of these share a message_id and
+// fold, in seq order, into the single thing the feed draws.
+//
+// THE THREE IDS ARE THE SAME ON EVERY RECORD, whatever its payload does with
+// the message. That is deliberate: "opens", "updates" and "composes" stop being
+// three record SHAPES and become three payloads. An earlier draft split them
+// into a composing shape and a message shape, which put the ids at two
+// different levels and left the record that CLOSES a message sitting in the arm
+// named for identity.
+message MessageEntry {
+  // The message this record belongs to. Records sharing it fold together, so a
+  // consumer needs no correlation pass to attach an update to what it updates.
+  string message_id = 1;
+
+  // The feed row that message belongs to, and the value a page groups by.
+  //
+  // EQUALS message_id when the message is itself a feed row; names the
+  // containing message when nested, so a subagent and everything inside it
+  // share one value and therefore one page slot.
+  //
+  // Denormalized on purpose: it is derivable by walking parents, and storing it
+  // is precisely why a page of ten messages costs one indexed pass. It MUST
+  // equal the root of the parent chain; a write that disagrees is corruption,
+  // not a variant.
+  string top_level_message_id = 2;
+
+  // The message immediately containing this one — ONE HOP, never the root.
+  //
+  // EMPTY means the message sits directly in the feed, in which case
+  // top_level_message_id is its own id. Absence is the fact itself, not a
+  // placeholder: a message whose parent could not be resolved is a producer
+  // fault, never a blank.
+  //
+  // AT A CONTEXT COMPACTION the vendor's physical parent chain is CUT — the
+  // boundary line carries no parent — and a separate logical pointer holds the
+  // only link back across it. The producer resolves this field from that
+  // pointer in that case; reading only the physical chain would make
+  // pre-compaction history unreachable by any walk.
+  string parent_message_id = 3;
+
+  // Who this message is FROM, resolved by the producer rather than inferred by
+  // a reader from which payload arm is set.
+  MessageAuthor author = 4;
+
+  // What this record says about the message it belongs to. The three groups
+  // below are a reading aid, not a schema distinction: every arm carries the
+  // same ids, so the group an arm sits in changes nothing about the record.
+  oneof payload {
+    // ---- Records that OPEN the message they name ----
+
+    // Something a person typed. The opening of a turn.
+    UserSaid user_said = 10;
+
+    // Something the agent said: its content blocks, and the usage its response
+    // reported.
+    AgentSaid agent_said = 11;
+
+    // A permission the agent ASKED FOR. It is a message because the agent
+    // really did ask and the user really does answer — it is a conversational
+    // act, not a dialog the daemon invented.
+    PermissionAsked permission_asked = 12;
+
+    // Something went wrong, stated as a card the user reads and acts on.
+    FailureRaised failure_raised = 13;
+
+    // The conversation was CUT here. It is a message because a reader must see
+    // where, rather than merely finding the history shorter than they left it.
+    ContextCut context_cut = 14;
+
+    // A slash command the DAEMON answered instead of the agent. It carries the
+    // command's identity and no text at all: there is no field an argument
+    // could ride in, so no surface can leak what the user typed after it.
+    DaemonAnsweredCommand daemon_answered_command = 15;
+
+    // Work that DETACHED from the turn and now runs alongside it — a subagent,
+    // a background shell, a workflow. It is a feed row naming itself, so a page
+    // of ten rows is ten bounded things rather than ten trees.
+    DetachedWorkStarted detached_work_started = 16;
+
+    // ---- Records that UPDATE a message already opened ----
+    // They carry the same message_id, so attaching them needs no correlation
+    // and costs no additional page slot.
+
+    // Output accumulating into detached work already open.
+    DetachedWorkProgressed detached_work_progressed = 20;
+
+    // Detached work reached an end, with the outcome it reached.
+    DetachedWorkEnded detached_work_ended = 21;
+
+    // The user answered a permission the agent asked for.
+    PermissionAnswered permission_answered = 22;
+
+    // A tool the agent called returned. It carries the message_id of the
+    // message that MADE the call, so the result folds onto that tool card.
+    //
+    // `author` therefore stays the AGENT on this record: the field says who the
+    // MESSAGE is from, and the message is the agent's response. The vendor
+    // files tool results under user-role records, which is the accident this
+    // arm exists to not inherit.
+    ToolReturned tool_returned = 23;
+
+    // ---- Records that COMPOSE a message, arriving before it is whole ----
+
+    // A fragment of content still arriving. EPHEMERAL by retention, so it is
+    // delivered live and never stored: the durable record of the same content
+    // is the completed message the file plane writes. Defined in
+    // ephemeral.proto, apart from every durable body.
+    ContentArriving content_arriving = 30;
+  }
+}
+
+// Who a message is from.
+//
+// RESOLVED BY THE PRODUCER, never inferred by a reader from which payload arm
+// is set. The two are not the same question: a ToolReturned record is authored
+// by the agent whose message it updates, and an arm-based inference would
+// attribute it to whoever the vendor happened to file it under.
+message MessageAuthor {
+  oneof author {
+    // A person.
+    AuthorUser user = 1;
+    // The agent, in the main conversation.
+    AuthorAgent agent = 2;
+    // A detached agent — a subagent — speaking inside its own work.
+    AuthorDetachedAgent detached_agent = 3;
+    // The daemon itself, for things it answered or synthesized. Held apart so a
+    // card the daemon wrote is never mistaken for something the agent said.
+    AuthorDaemon daemon = 4;
+  }
+}
+
+// A person, typing into the session.
+message AuthorUser {}
+
+// The agent, speaking in the main conversation.
+message AuthorAgent {}
+
+// A subagent, speaking inside its own detached conversation.
+message AuthorDetachedAgent {
+  // The detached work this agent is running as, so its emissions can be routed
+  // to the card without a second correlation.
+  string detached_work_message_id = 1;
+}
+
+// The daemon, for a card it wrote or a command it answered itself.
+message AuthorDaemon {}

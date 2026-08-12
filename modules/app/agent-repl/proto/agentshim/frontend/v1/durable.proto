@@ -26,7 +26,7 @@ package agentshim.frontend.v1;
 
 import "agentshim/core/v1/core.proto";
 import "agentshim/data/v1/tools.proto";
-import "agentshim/frontend/v1/tokens.proto";
+import "agentshim/conversation/v1/tokens.proto";
 import "google/protobuf/struct.proto";
 
 option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
@@ -361,9 +361,9 @@ message SessionTokenUtilization {
   // paid. This aggregate is rebuilt from durable records on every read and is
   // itself never persisted, which is what lets it carry the canonical shape at
   // all — the persisted record types cannot (see VendorTokenUsage).
-  TokenUsage all_agents_tokens = 6;
+  agentshim.conversation.v1.TokenUsage all_agents_tokens = 6;
   // The canonical economics of `main_agent`, resolved by the daemon.
-  TokenUsage main_agent_tokens = 7;
+  agentshim.conversation.v1.TokenUsage main_agent_tokens = 7;
 }
 
 // Cumulative usage attributed to one dispatched subagent invocation.
@@ -376,7 +376,7 @@ message AgentTokenUtilization {
   repeated ModelTokenUtilization models = 3;
   // The canonical economics of `totals`, resolved by the daemon. Same reasoning
   // as SessionTokenUtilization.all_agents_tokens.
-  TokenUsage tokens = 4;
+  agentshim.conversation.v1.TokenUsage tokens = 4;
 }
 
 // Cumulative usage served by one model.

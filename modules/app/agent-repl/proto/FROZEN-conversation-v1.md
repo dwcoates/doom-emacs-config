@@ -260,11 +260,21 @@ message MessageEntry {
     // The user answered a permission the agent asked for.
     PermissionAnswered permission_answered = 22;
 
+    // A tool the agent called returned. It carries the message_id of the
+    // message that MADE the call, so the result folds onto that tool card.
+    //
+    // `author` therefore stays the AGENT on this record: the field says who the
+    // MESSAGE is from, and the message is the agent's response. The vendor
+    // files tool results under user-role records, which is the accident this
+    // arm exists to not inherit.
+    ToolReturned tool_returned = 23;
+
     // ---- Records that COMPOSE a message, arriving before it is whole ----
 
     // A fragment of content still arriving. EPHEMERAL by retention, so it is
     // delivered live and never stored: the durable record of the same content
-    // is the completed message the file plane writes.
+    // is the completed message the file plane writes. Defined in
+    // ephemeral.proto, apart from every durable body.
     ContentArriving content_arriving = 30;
   }
 }
@@ -298,18 +308,46 @@ message AuthorDaemon {}
 ## `content.proto` — the neutral content model
 
 ```proto
-// What was actually said, as an ordered sequence of blocks.
+// THE BLOCK SET IS NARROWED PER SITE, and there is no shared `Content`.
+//
+// One union with every block arm would make a user message carrying reasoning,
+// or a tool result carrying a tool call, representable and meaningless. Three
+// unions, each holding only what can legitimately appear where it appears, make
+// those unbuildable instead of merely wrong. The cost is a duplicated arm list;
+// the repo's own rule is duplicate over share, because mutual exclusivity is
+// worth more than deduplication.
 //
 // NEUTRAL BY DESIGN. The vendor's own content model has seventeen block kinds
 // named for its API surface — MCP tool use, server tool use, web search result,
 // code execution result, container upload. Those are all the same two facts
 // wearing different names: a tool was CALLED, and a tool RETURNED. This models
 // the facts and lets the tool's own name carry the rest.
-message Content {
-  repeated ContentBlock blocks = 1;
+
+// What a PERSON said. No reasoning and no tool calls, because a person produces
+// neither.
+message UserContent {
+  repeated UserContentBlock blocks = 1;
 }
 
-message ContentBlock {
+message UserContentBlock {
+  oneof block {
+    // Words the person typed.
+    TextBlock text = 1;
+    // An image they pasted or attached.
+    ImageBlock image = 2;
+    // A block whose kind we do not model. It renders as nothing and is kept so
+    // the decision is reversible.
+    UnsupportedBlock unsupported = 3;
+  }
+}
+
+// What the AGENT said in one response: prose, the reasoning behind it, and the
+// tools it decided to call, in the order it produced them.
+message AgentContent {
+  repeated AgentContentBlock blocks = 1;
+}
+
+message AgentContentBlock {
   oneof block {
     // Words meant for the reader.
     TextBlock text = 1;
@@ -318,14 +356,27 @@ message ContentBlock {
     ThinkingBlock thinking = 2;
     // The agent called a tool.
     ToolCallBlock tool_call = 3;
-    // A tool returned.
-    ToolResultBlock tool_result = 4;
-    // An image, by reference rather than by value: the bytes belong on disk,
-    // not in a conversation record that gets replayed.
-    ImageBlock image = 5;
-    // A block whose kind we do not model. It renders as nothing and is kept so
-    // the decision is reversible.
-    UnsupportedBlock unsupported = 6;
+    // A block whose kind we do not model.
+    UnsupportedBlock unsupported = 4;
+  }
+}
+
+// What a TOOL returned. Narrow like UserContent and separate from it on
+// purpose: the vendor delivers tool results inside user-role records, and
+// reusing the user's own union here would preserve that accident in a schema
+// built to erase it. A tool result is not something a person said.
+message ToolResultContent {
+  repeated ToolResultContentBlock blocks = 1;
+}
+
+message ToolResultContentBlock {
+  oneof block {
+    // The tool's textual output.
+    TextBlock text = 1;
+    // An image the tool produced — a screenshot, a rendered chart.
+    ImageBlock image = 2;
+    // A block whose kind we do not model.
+    UnsupportedBlock unsupported = 3;
   }
 }
 
@@ -356,15 +407,10 @@ message ToolCallBlock {
   google.protobuf.Struct arguments = 3;
 }
 
-message ToolResultBlock {
-  // The call this answers.
-  string tool_call_id = 1;
-  // What the tool returned, for the reader.
-  Content content = 2;
-  // The tool FAILED. A separate fact from empty content, because a tool that
-  // returned nothing and a tool that errored are different things to render.
-  bool is_error = 3;
-}
+// A tool returning is NOT a block. It is `ToolReturned` in payloads.proto, an
+// UPDATE arm on the message that made the call. Modeling it as a block would
+// have required an author to own it, and the only author on offer was the user
+// — who did not run the tool.
 
 message ImageBlock {
   // Where the image lives. A path or URL rather than bytes: a conversation
@@ -388,31 +434,42 @@ message UnsupportedBlock {
 
 ```proto
 message UserSaid {
-  //FIXME: should this just be a TextBlock? 
-  Content content = 1;
+  // What they typed, and anything they attached. NOT a bare TextBlock: a person
+  // pastes images, and a single block could not hold one alongside their words.
+  UserContent content = 1;
 }
 
 message AgentSaid {
-  // FIXME: same here, should this be more specific message? 
-  Content content = 1;
-  // What this response cost, as the vendor reported it. Carried because it is
-  // evidence about THIS message; the footer's aggregate figures are resolved by
-  // the daemon and are not this.
-  ResponseUsage usage = 2;
+  // The response entire: prose, reasoning, and tool calls, in order.
+  AgentContent content = 1;
+  // What this response cost, in the ONE canonical token shape. Carried because
+  // it is evidence about THIS message; the footer's aggregate figures are
+  // resolved by the daemon from many of these and are not this.
+  TokenUsage usage = 2;
+  // The model that produced it, since a conversation can span models and the
+  // cost of a message is not readable without knowing which. It sits beside the
+  // usage rather than inside it because it describes the RESPONSE, not the
+  // counters.
+  string model = 3;
   // Why the agent stopped. A oneof rather than a string because the set is
   // closed and a client branches on it.
-  StopReason stop_reason = 3;
+  StopReason stop_reason = 4;
 }
 
-// FIXME: dont we have a TokenUsage message that should be reused here? or at least used to compose this message? 
-message ResponseUsage {
-  int64 input_tokens = 1;
-  int64 output_tokens = 2;
-  int64 cache_read_tokens = 3;
-  int64 cache_write_tokens = 4;
-  // The model that produced it, since a conversation can span models and the
-  // cost of a message is not readable without knowing which.
-  string model = 5;
+// A tool the agent called has returned. An UPDATE arm rather than a block,
+// carrying the message_id of the message that made the call, so the result
+// folds onto the tool card without a correlation pass and costs no page slot.
+//
+// The vendor delivers these inside user-role records. That is a transport
+// accident of its API, and this shape is where it stops.
+message ToolReturned {
+  // The call this answers, which the agent supplied when it made the call.
+  string tool_call_id = 1;
+  // What the tool returned, for the reader.
+  ToolResultContent content = 2;
+  // The tool FAILED. A separate fact from empty content, because a tool that
+  // returned nothing and a tool that errored are different things to render.
+  bool is_error = 3;
 }
 
 message StopReason {
@@ -494,8 +551,9 @@ message ContextCut {
 message ContextCleared {}
 message ContextCompacted {
   // The summary that replaced the history, which the feed shows in its place so
-  // the cut is not a hole.
-  Content summary = 1;
+  // the cut is not a hole. AgentContent because the summary is the agent's own
+  // prose about what it is discarding.
+  AgentContent summary = 1;
   int64 tokens_before = 2;
   int64 tokens_after = 3;
 }
@@ -563,14 +621,111 @@ message DetachedLost {
   string inference = 1;
 }
 
-// FIXME: should this be in content.proto?
+```
+
+---
+
+## `tokens.proto` — the one canonical token shape
+
+Moved here from `agentshim.frontend.v1`, unchanged. Its own comment already says
+the shim translates vendor usage into it at the boundary and stops there — and
+that boundary is now this package. `frontend.v1` imports it rather than defining
+it, so there is exactly one place this system states what a request cost.
+
+```proto
+// THE ONE CANONICAL TOKEN SHAPE, and the only representation in which this
+// system states what a request cost.
+//
+// IT IS ORGANIZED BY ECONOMICS, NOT BY THE VENDOR'S FIELD NAMES. The vendor
+// reports three disjoint input counters whose names describe WHERE the tokens
+// went, not what they were charged, and reading any one of them as "the cost"
+// is the mistake this shape makes unrepresentable.
+//
+// THE EXPENSIVE SUM IS STRUCTURAL HERE: it is `input_misses` — both of its
+// fields, together, because both missed the cache — rather than an addition a
+// reader has to know to perform. That is the whole reason for the nesting.
+//
+// RATES ARE NOT STORED. The cache-hit / cache-write / fresh-input partition is
+// three quotients over these same counters, so it is DERIVED at the point of
+// use by the daemon (`internal/tokenusage`) and never persisted alongside the
+// counters it is computed from.
+message TokenUsage {
+  // What the prompt cache served: the cheap bucket.
+  TokenCacheHits input_hits = 1;
+  // What the prompt cache did not serve: the expensive buckets, together.
+  TokenCacheMisses input_misses = 2;
+  // Generated tokens, including extended thinking where the API includes it.
+  // There is no output cache, so this is a plain total with no partition.
+  uint64 output_tokens = 3;
+}
+
+// The prompt input this request did not have to process, because the prompt
+// cache already held it.
+message TokenCacheHits {
+  // Prompt-prefix tokens served from the prompt cache (vendor
+  // `cache_read_input_tokens`). Billed at the cache-read rate.
+  uint64 read = 1;
+}
+
+// The prompt input this request processed fresh, split by whether processing it
+// also placed it in the cache. BOTH FIELDS ARE EXPENSIVE and their sum is the
+// figure every cost judgment in this system reads.
+message TokenCacheMisses {
+  // Tokens processed fresh that entered the cache as they were processed
+  // (vendor `cache_creation_input_tokens`). Billed at 1.25x the base input rate
+  // — the base price plus the cache-write premium.
+  uint64 written = 1;
+  // Tokens processed fresh that never entered the cache at all (vendor
+  // `input_tokens`). Billed at the base input rate.
+  uint64 unwritten = 2;
+}
+```
+
+---
+
+## `commands.proto` — the closed session-command set
+
+Moved here from `agentshim.frontend.v1`'s `slash-menu.proto`, unchanged, for the
+same reason `tokens.proto` moved: `DaemonAnsweredCommand` is a durable record
+that names one of these, and a stored record cannot depend on the daemon's
+resolved output surface. The MENU that renders the set is a frontend concern;
+the set is not. `slash-menu.proto`, `errors.proto` and `prompt-queue.proto` now
+import it.
+
+The 30 enum values and the `SessionCommandSpec` option that carries each
+command's literal are byte-for-byte what they were — see the file itself rather
+than a second copy here. This is one of the few enums the repo permits: the
+forbidden case is a STATE enum, and a command identity is not a state of
+anything.
+
+---
+
+## `ephemeral.proto` — the one thing that is never written
+
+Its own file, so "nothing in here ever touches the store" is a fact about the
+FILE rather than a rule spread across records. It was buried among the durable
+payload bodies, which is exactly how its retention went unexamined.
+
+```proto
+// A fragment of a message still arriving, delivered live and never stored.
+//
+// THE ONLY EPHEMERAL MESSAGE IN THIS PACKAGE. It bypasses the store rather than
+// being written and filtered out later, so there is no path by which a typing
+// delta reaches a page. The durable record of the same content is the completed
+// message the file plane writes afterwards, and a consumer REPLACES the preview
+// with it rather than appending beside it.
+//
+// Persisting these was never on the table: a single response produces thousands
+// of fragments of one message that arrives whole moments later.
 message ContentArriving {
   // Which block of the message this extends.
   uint32 block_index = 1;
   oneof fragment {
     string text = 2;
     string thinking = 3;
-    // Tool arguments, arriving as the agent composes them.
+    // Tool arguments, arriving as the agent composes them. A string because it
+    // is INCOMPLETE JSON until the last fragment lands; typing it as Struct
+    // would claim it parses when it does not yet.
     string arguments_json = 4;
   }
 }
@@ -686,8 +841,12 @@ message SessionIdentityChanged {
 }
 
 message UsageObserved {
+  // The turn this measurement was taken at the boundary of.
   string turn_id = 1;
-  ResponseUsage usage = 2;
+  // The measurement, in the same canonical shape a response carries, so a turn
+  // total and a message cost are the same units and can be compared without a
+  // conversion nobody would remember to write.
+  TokenUsage usage = 2;
 }
 ```
 
