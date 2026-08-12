@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"google.golang.org/protobuf/proto"
+
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
@@ -282,19 +284,43 @@ func withheldReason(it *frontendv1.Message) string {
 // each is the message the transcript already distinguishes, so nothing here
 // depends on their order of arrival, and a replay re-derives the same answer
 // for the same record rather than a different one for a different position.
-func asInterceptedCommand(it *frontendv1.Message, command frontendv1.SessionCommand) {
-	it.Payload = &frontendv1.Message_DaemonInterceptedCommand{
+// THE CLASS IS WRITTEN BY THE CONSTRUCTOR, NEVER BY HAND. Shape A has a
+// transcript record behind it and is DURABLE; shape B is ruled out of the
+// durable set by the contract and is EPHEMERAL. Neither arm is assigned here,
+// because the class and the lineage that class requires are one act: an
+// ephemeral message is always a feed row, never a parent and never names one,
+// and frontend.NewEphemeralFeedRow writes that lineage itself rather than
+// trusting this file to remember it. A refusal is returned to the caller so it
+// can WITHHOLD the item — a message with no durability arm is malformed, and
+// shipping one is indistinguishable to a later reader from a durable message
+// the store lost.
+func asInterceptedCommand(it *frontendv1.Message, command frontendv1.SessionCommand, shape machineryShape) error {
+	body := proto.Clone(it).(*frontendv1.Message)
+	body.Payload = &frontendv1.Message_DaemonInterceptedCommand{
 		DaemonInterceptedCommand: &frontendv1.DaemonInterceptedCommandItem{Command: command},
 	}
-	// TODO(slash-ephemeral-constructor): set the message's `durability` arm here
-	// — DURABLE for shape A, which has a transcript record behind it, EPHEMERAL
-	// for shape B, which the contract rules out of the durable set. Neither arm
-	// is set from this file on purpose: the ephemeral side must go through the
-	// REFUSING ephemeral constructor that enforces the lineage rules (an
-	// ephemeral message is always a feed row, is never a parent, and never names
-	// a durable parent), and that constructor is owned by the sibling scope that
-	// introduces it. Constructing either arm by hand here would be the second
-	// construction path those rules exist to prevent.
+
+	var (
+		classified *frontendv1.Message
+		err        error
+	)
+	switch shape {
+	case shapeAUserRecord:
+		classified, err = frontend.NewDurableFeedRow(body)
+	case shapeBLocalCommand:
+		classified, err = frontend.NewEphemeralFeedRow(body)
+	default:
+		return fmt.Errorf("sessioncontroller: intercepted-command classification refused uuid=%s command=%s: shape %s is not a machinery shape, so there is no durability class to state for it", it.GetUuid(), command.String(), shape)
+	}
+	if err != nil {
+		return err
+	}
+
+	// The curated item is REWRITTEN in place rather than swapped, because the
+	// delta holds this pointer and the identity being preserved is the point.
+	proto.Reset(it)
+	proto.Merge(it, classified)
+	return nil
 }
 
 // classifyMachinery turns the CLI's slash-command bookkeeping records into the
@@ -335,7 +361,10 @@ func (c *consumer) classifyMachinery(cd *frontendv1.ConversationDelta, envs map[
 				return withholdItem(fmt.Sprintf("session-controller: slash-command machinery WITHHELD UNNAMED ws=%q session=%s seq=%d uuid=%s shape=%s prompt_id=%q — the record is the CLI's own slash-command bookkeeping but carries no <command-name> tag, so there is no command identity to classify it as; an UNSPECIFIED command is a malformed frame, so the item is withheld rather than pushed half-stated",
 					c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), shape, env.PromptID))
 			}
-			asInterceptedCommand(it, command)
+			if err := asInterceptedCommand(it, command, shape); err != nil {
+				return withholdItem(fmt.Sprintf("session-controller: slash-command machinery WITHHELD UNCLASSIFIED ws=%q session=%s seq=%d uuid=%s shape=%s command=%s prompt_id=%q — the durability constructor REFUSED this record, so no class could be stated for it; an unclassified message on the wire cannot be told apart from a durable one the store lost, so the item is withheld rather than pushed classless: %v",
+					c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), shape, command.String(), env.PromptID, err))
+			}
 			c.logf("session-controller: slash-command machinery CLASSIFIED ws=%q session=%s seq=%d uuid=%s shape=%s command=%s prompt_id=%q — the CLI's own record of a command it ran, delivered as a DaemonInterceptedCommandItem on the record's own identity rather than as a prompt bubble full of markup nobody typed",
 				c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), shape, command.String(), env.PromptID)
 			return keepItem
