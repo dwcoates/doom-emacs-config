@@ -83,6 +83,7 @@ type MessageEntry struct {
 	//	*MessageEntry_DetachedWorkEnded
 	//	*MessageEntry_PermissionAnswered
 	//	*MessageEntry_ToolReturned
+	//	*MessageEntry_SkillBodyResolved
 	//	*MessageEntry_ContentArriving
 	Payload       isMessageEntry_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
@@ -244,6 +245,15 @@ func (x *MessageEntry) GetToolReturned() *ToolReturned {
 	return nil
 }
 
+func (x *MessageEntry) GetSkillBodyResolved() *SkillBodyResolved {
+	if x != nil {
+		if x, ok := x.Payload.(*MessageEntry_SkillBodyResolved); ok {
+			return x.SkillBodyResolved
+		}
+	}
+	return nil
+}
+
 func (x *MessageEntry) GetContentArriving() *ContentArriving {
 	if x != nil {
 		if x, ok := x.Payload.(*MessageEntry_ContentArriving); ok {
@@ -319,6 +329,12 @@ type MessageEntry_ToolReturned struct {
 	ToolReturned *ToolReturned `protobuf:"bytes,23,opt,name=tool_returned,json=toolReturned,proto3,oneof"`
 }
 
+type MessageEntry_SkillBodyResolved struct {
+	// A skill file's contents, resolved onto the skill's own message. Replaces
+	// whole rather than appending.
+	SkillBodyResolved *SkillBodyResolved `protobuf:"bytes,24,opt,name=skill_body_resolved,json=skillBodyResolved,proto3,oneof"`
+}
+
 type MessageEntry_ContentArriving struct {
 	// A fragment of content still arriving. EPHEMERAL by retention, so it is
 	// delivered live and never stored: the durable record of the same content
@@ -346,6 +362,8 @@ func (*MessageEntry_DetachedWorkEnded) isMessageEntry_Payload() {}
 func (*MessageEntry_PermissionAnswered) isMessageEntry_Payload() {}
 
 func (*MessageEntry_ToolReturned) isMessageEntry_Payload() {}
+
+func (*MessageEntry_SkillBodyResolved) isMessageEntry_Payload() {}
 
 func (*MessageEntry_ContentArriving) isMessageEntry_Payload() {}
 
@@ -581,7 +599,8 @@ var File_agentshim_conversation_v1_message_proto protoreflect.FileDescriptor
 
 const file_agentshim_conversation_v1_message_proto_rawDesc = "" +
 	"\n" +
-	"'agentshim/conversation/v1/message.proto\x12\x19agentshim.conversation.v1\x1a)agentshim/conversation/v1/ephemeral.proto\x1a(agentshim/conversation/v1/payloads.proto\"\xb7\t\n" +
+	"'agentshim/conversation/v1/message.proto\x12\x19agentshim.conversation.v1\x1a)agentshim/conversation/v1/ephemeral.proto\x1a(agentshim/conversation/v1/payloads.proto\"\x97\n" +
+	"\n" +
 	"\fMessageEntry\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12/\n" +
@@ -600,7 +619,8 @@ const file_agentshim_conversation_v1_message_proto_rawDesc = "" +
 	"\x18detached_work_progressed\x18\x14 \x01(\v21.agentshim.conversation.v1.DetachedWorkProgressedH\x00R\x16detachedWorkProgressed\x12^\n" +
 	"\x13detached_work_ended\x18\x15 \x01(\v2,.agentshim.conversation.v1.DetachedWorkEndedH\x00R\x11detachedWorkEnded\x12`\n" +
 	"\x13permission_answered\x18\x16 \x01(\v2-.agentshim.conversation.v1.PermissionAnsweredH\x00R\x12permissionAnswered\x12N\n" +
-	"\rtool_returned\x18\x17 \x01(\v2'.agentshim.conversation.v1.ToolReturnedH\x00R\ftoolReturned\x12W\n" +
+	"\rtool_returned\x18\x17 \x01(\v2'.agentshim.conversation.v1.ToolReturnedH\x00R\ftoolReturned\x12^\n" +
+	"\x13skill_body_resolved\x18\x18 \x01(\v2,.agentshim.conversation.v1.SkillBodyResolvedH\x00R\x11skillBodyResolved\x12W\n" +
 	"\x10content_arriving\x18\x1e \x01(\v2*.agentshim.conversation.v1.ContentArrivingH\x00R\x0fcontentArrivingB\t\n" +
 	"\apayloadJ\x04\b\x0f\x10\x10R\x17daemon_answered_command\"\xfd\x01\n" +
 	"\rMessageAuthor\x12;\n" +
@@ -643,7 +663,8 @@ var file_agentshim_conversation_v1_message_proto_goTypes = []any{
 	(*DetachedWorkEnded)(nil),      // 12: agentshim.conversation.v1.DetachedWorkEnded
 	(*PermissionAnswered)(nil),     // 13: agentshim.conversation.v1.PermissionAnswered
 	(*ToolReturned)(nil),           // 14: agentshim.conversation.v1.ToolReturned
-	(*ContentArriving)(nil),        // 15: agentshim.conversation.v1.ContentArriving
+	(*SkillBodyResolved)(nil),      // 15: agentshim.conversation.v1.SkillBodyResolved
+	(*ContentArriving)(nil),        // 16: agentshim.conversation.v1.ContentArriving
 }
 var file_agentshim_conversation_v1_message_proto_depIdxs = []int32{
 	1,  // 0: agentshim.conversation.v1.MessageEntry.author:type_name -> agentshim.conversation.v1.MessageAuthor
@@ -657,15 +678,16 @@ var file_agentshim_conversation_v1_message_proto_depIdxs = []int32{
 	12, // 8: agentshim.conversation.v1.MessageEntry.detached_work_ended:type_name -> agentshim.conversation.v1.DetachedWorkEnded
 	13, // 9: agentshim.conversation.v1.MessageEntry.permission_answered:type_name -> agentshim.conversation.v1.PermissionAnswered
 	14, // 10: agentshim.conversation.v1.MessageEntry.tool_returned:type_name -> agentshim.conversation.v1.ToolReturned
-	15, // 11: agentshim.conversation.v1.MessageEntry.content_arriving:type_name -> agentshim.conversation.v1.ContentArriving
-	2,  // 12: agentshim.conversation.v1.MessageAuthor.user:type_name -> agentshim.conversation.v1.AuthorUser
-	3,  // 13: agentshim.conversation.v1.MessageAuthor.agent:type_name -> agentshim.conversation.v1.AuthorAgent
-	4,  // 14: agentshim.conversation.v1.MessageAuthor.detached_agent:type_name -> agentshim.conversation.v1.AuthorDetachedAgent
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	15, // 11: agentshim.conversation.v1.MessageEntry.skill_body_resolved:type_name -> agentshim.conversation.v1.SkillBodyResolved
+	16, // 12: agentshim.conversation.v1.MessageEntry.content_arriving:type_name -> agentshim.conversation.v1.ContentArriving
+	2,  // 13: agentshim.conversation.v1.MessageAuthor.user:type_name -> agentshim.conversation.v1.AuthorUser
+	3,  // 14: agentshim.conversation.v1.MessageAuthor.agent:type_name -> agentshim.conversation.v1.AuthorAgent
+	4,  // 15: agentshim.conversation.v1.MessageAuthor.detached_agent:type_name -> agentshim.conversation.v1.AuthorDetachedAgent
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_conversation_v1_message_proto_init() }
@@ -686,6 +708,7 @@ func file_agentshim_conversation_v1_message_proto_init() {
 		(*MessageEntry_DetachedWorkEnded)(nil),
 		(*MessageEntry_PermissionAnswered)(nil),
 		(*MessageEntry_ToolReturned)(nil),
+		(*MessageEntry_SkillBodyResolved)(nil),
 		(*MessageEntry_ContentArriving)(nil),
 	}
 	file_agentshim_conversation_v1_message_proto_msgTypes[1].OneofWrappers = []any{

@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/conversation/v1/payloads.proto.
  */
 export const file_agentshim_conversation_v1_payloads: GenFile = /*@__PURE__*/
-  fileDesc("CihhZ2VudHNoaW0vY29udmVyc2F0aW9uL3YxL3BheWxvYWRzLnByb3RvEhlhZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxIkMKCFVzZXJTYWlkEjcKB2NvbnRlbnQYASABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50IsYBCglBZ2VudFNhaWQSOAoHY29udGVudBgBIAEoCzInLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQWdlbnRDb250ZW50EjQKBXVzYWdlGAIgASgLMiUuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5Ub2tlblVzYWdlEg0KBW1vZGVsGAMgASgJEjoKC3N0b3BfcmVhc29uGAQgASgLMiUuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wUmVhc29uInUKDFRvb2xSZXR1cm5lZBIUCgx0b29sX2NhbGxfaWQYASABKAkSPQoHY29udGVudBgCIAEoCzIsLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVG9vbFJlc3VsdENvbnRlbnQSEAoIaXNfZXJyb3IYAyABKAgi1gIKClN0b3BSZWFzb24SOgoIZW5kX3R1cm4YASABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlN0b3BFbmRUdXJuSAASPAoJdG9vbF9jYWxsGAIgASgLMicuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wVG9vbENhbGxIABI+CgptYXhfdG9rZW5zGAMgASgLMiguYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wTWF4VG9rZW5zSAASQQoLaW50ZXJydXB0ZWQYBCABKAsyKi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlN0b3BJbnRlcnJ1cHRlZEgAEkEKC3Vuc3VwcG9ydGVkGAUgASgLMiouYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wVW5zdXBwb3J0ZWRIAEIICgZyZWFzb24iDQoLU3RvcEVuZFR1cm4iDgoMU3RvcFRvb2xDYWxsIg8KDVN0b3BNYXhUb2tlbnMiEQoPU3RvcEludGVycnVwdGVkIiEKD1N0b3BVbnN1cHBvcnRlZBIOCgZyZWFzb24YASABKAkiTgoPUGVybWlzc2lvbkFza2VkEjsKCXJlcXVlc3RlZBgBIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVG9vbENhbGxCbG9jayLjAQoSUGVybWlzc2lvbkFuc3dlcmVkEj8KB2FsbG93ZWQYASABKAsyLC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BbGxvd2VkSAASPQoGZGVuaWVkGAIgASgLMisuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uRGVuaWVkSAASQwoJYWJhbmRvbmVkGAMgASgLMi4uYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uQWJhbmRvbmVkSABCCAoGYW5zd2VyIigKEVBlcm1pc3Npb25BbGxvd2VkEhMKC2Zvcl9zZXNzaW9uGAEgASgIIiIKEFBlcm1pc3Npb25EZW5pZWQSDgoGcmVhc29uGAEgASgJIhUKE1Blcm1pc3Npb25BYmFuZG9uZWQiRQoNRmFpbHVyZVJhaXNlZBIPCgdzdW1tYXJ5GAEgASgJEg4KBmRldGFpbBgCIAEoCRITCgtyZXRyeV9pbl9tcxgDIAEoAyKTAQoKQ29udGV4dEN1dBI8CgdjbGVhcmVkGAEgASgLMikuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q2xlYXJlZEgAEkAKCWNvbXBhY3RlZBgCIAEoCzIrLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQ29udGV4dENvbXBhY3RlZEgAQgUKA2N1dCIQCg5Db250ZXh0Q2xlYXJlZCJ5ChBDb250ZXh0Q29tcGFjdGVkEjgKB3N1bW1hcnkYASABKAsyJy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkFnZW50Q29udGVudBIVCg10b2tlbnNfYmVmb3JlGAIgASgDEhQKDHRva2Vuc19hZnRlchgDIAEoAyJ8ChNEZXRhY2hlZFdvcmtTdGFydGVkEhsKE29yaWdpbl90b29sX2NhbGxfaWQYASABKAkSDQoFbGFiZWwYAiABKAkSOQoEa2luZBgDIAEoCzIrLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZCKaAgoQRGV0YWNoZWRXb3JrS2luZBI5CgVhZ2VudBgBIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRBZ2VudEgAEjkKBXNoZWxsGAIgASgLMiguYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFNoZWxsSAASPwoId29ya2Zsb3cYAyABKAsyKy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya2Zsb3dIABJHCgx1bmNsYXNzaWZpZWQYBCABKAsyLy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkVW5jbGFzc2lmaWVkSABCBgoEa2luZCIPCg1EZXRhY2hlZEFnZW50Ig8KDURldGFjaGVkU2hlbGwiEgoQRGV0YWNoZWRXb3JrZmxvdyIpChREZXRhY2hlZFVuY2xhc3NpZmllZBIRCgl0b29sX25hbWUYASABKAkiKAoWRGV0YWNoZWRXb3JrUHJvZ3Jlc3NlZBIOCgZvdXRwdXQYASABKAkimgIKEURldGFjaGVkV29ya0VuZGVkEkEKCXN1Y2NlZWRlZBgBIAEoCzIsLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRTdWNjZWVkZWRIABI7CgZmYWlsZWQYAiABKAsyKS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkRmFpbGVkSAASQQoJY2FuY2VsbGVkGAMgASgLMiwuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZENhbmNlbGxlZEgAEjcKBGxvc3QYBCABKAsyJy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkTG9zdEgAQgkKB291dGNvbWUiJAoRRGV0YWNoZWRTdWNjZWVkZWQSDwoHc3VtbWFyeRgBIAEoCSIhCg5EZXRhY2hlZEZhaWxlZBIPCgdzdW1tYXJ5GAEgASgJIhMKEURldGFjaGVkQ2FuY2VsbGVkIiEKDERldGFjaGVkTG9zdBIRCglpbmZlcmVuY2UYASABKAlCOlo4YWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_agentshim_conversation_v1_content, file_agentshim_conversation_v1_tokens]);
+  fileDesc("CihhZ2VudHNoaW0vY29udmVyc2F0aW9uL3YxL3BheWxvYWRzLnByb3RvEhlhZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxIkMKCFVzZXJTYWlkEjcKB2NvbnRlbnQYASABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50IsYBCglBZ2VudFNhaWQSOAoHY29udGVudBgBIAEoCzInLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQWdlbnRDb250ZW50EjQKBXVzYWdlGAIgASgLMiUuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5Ub2tlblVzYWdlEg0KBW1vZGVsGAMgASgJEjoKC3N0b3BfcmVhc29uGAQgASgLMiUuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wUmVhc29uInUKDFRvb2xSZXR1cm5lZBIUCgx0b29sX2NhbGxfaWQYASABKAkSPQoHY29udGVudBgCIAEoCzIsLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVG9vbFJlc3VsdENvbnRlbnQSEAoIaXNfZXJyb3IYAyABKAgi1gIKClN0b3BSZWFzb24SOgoIZW5kX3R1cm4YASABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlN0b3BFbmRUdXJuSAASPAoJdG9vbF9jYWxsGAIgASgLMicuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wVG9vbENhbGxIABI+CgptYXhfdG9rZW5zGAMgASgLMiguYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wTWF4VG9rZW5zSAASQQoLaW50ZXJydXB0ZWQYBCABKAsyKi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlN0b3BJbnRlcnJ1cHRlZEgAEkEKC3Vuc3VwcG9ydGVkGAUgASgLMiouYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wVW5zdXBwb3J0ZWRIAEIICgZyZWFzb24iDQoLU3RvcEVuZFR1cm4iDgoMU3RvcFRvb2xDYWxsIg8KDVN0b3BNYXhUb2tlbnMiEQoPU3RvcEludGVycnVwdGVkIiEKD1N0b3BVbnN1cHBvcnRlZBIOCgZyZWFzb24YASABKAkiTgoPUGVybWlzc2lvbkFza2VkEjsKCXJlcXVlc3RlZBgBIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVG9vbENhbGxCbG9jayLjAQoSUGVybWlzc2lvbkFuc3dlcmVkEj8KB2FsbG93ZWQYASABKAsyLC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BbGxvd2VkSAASPQoGZGVuaWVkGAIgASgLMisuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uRGVuaWVkSAASQwoJYWJhbmRvbmVkGAMgASgLMi4uYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uQWJhbmRvbmVkSABCCAoGYW5zd2VyIigKEVBlcm1pc3Npb25BbGxvd2VkEhMKC2Zvcl9zZXNzaW9uGAEgASgIIiIKEFBlcm1pc3Npb25EZW5pZWQSDgoGcmVhc29uGAEgASgJIhUKE1Blcm1pc3Npb25BYmFuZG9uZWQiRQoNRmFpbHVyZVJhaXNlZBIPCgdzdW1tYXJ5GAEgASgJEg4KBmRldGFpbBgCIAEoCRITCgtyZXRyeV9pbl9tcxgDIAEoAyKTAQoKQ29udGV4dEN1dBI8CgdjbGVhcmVkGAEgASgLMikuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q2xlYXJlZEgAEkAKCWNvbXBhY3RlZBgCIAEoCzIrLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQ29udGV4dENvbXBhY3RlZEgAQgUKA2N1dCIQCg5Db250ZXh0Q2xlYXJlZCJ5ChBDb250ZXh0Q29tcGFjdGVkEjgKB3N1bW1hcnkYASABKAsyJy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkFnZW50Q29udGVudBIVCg10b2tlbnNfYmVmb3JlGAIgASgDEhQKDHRva2Vuc19hZnRlchgDIAEoAyJ8ChNEZXRhY2hlZFdvcmtTdGFydGVkEhsKE29yaWdpbl90b29sX2NhbGxfaWQYASABKAkSDQoFbGFiZWwYAiABKAkSOQoEa2luZBgDIAEoCzIrLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZCKQAwoQRGV0YWNoZWRXb3JrS2luZBI5CgVhZ2VudBgBIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRBZ2VudEgAEjkKBXNoZWxsGAIgASgLMiguYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFNoZWxsSAASPwoId29ya2Zsb3cYAyABKAsyKy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya2Zsb3dIABJHCgx1bmNsYXNzaWZpZWQYBCABKAsyLy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkVW5jbGFzc2lmaWVkSAASOQoFc2tpbGwYBSABKAsyKC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkU2tpbGxIABI5CgVtZXJnZRgGIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRNZXJnZUgAQgYKBGtpbmQiDwoNRGV0YWNoZWRBZ2VudCIPCg1EZXRhY2hlZFNoZWxsIhIKEERldGFjaGVkV29ya2Zsb3ciMQoNRGV0YWNoZWRTa2lsbBISCgpza2lsbF9uYW1lGAEgASgJEgwKBGFyZ3MYAiABKAkiDwoNRGV0YWNoZWRNZXJnZSIpChREZXRhY2hlZFVuY2xhc3NpZmllZBIRCgl0b29sX25hbWUYASABKAkiIQoRU2tpbGxCb2R5UmVzb2x2ZWQSDAoEYm9keRgBIAEoCSIoChZEZXRhY2hlZFdvcmtQcm9ncmVzc2VkEg4KBm91dHB1dBgBIAEoCSKaAgoRRGV0YWNoZWRXb3JrRW5kZWQSQQoJc3VjY2VlZGVkGAEgASgLMiwuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFN1Y2NlZWRlZEgAEjsKBmZhaWxlZBgCIAEoCzIpLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRGYWlsZWRIABJBCgljYW5jZWxsZWQYAyABKAsyLC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkQ2FuY2VsbGVkSAASNwoEbG9zdBgEIAEoCzInLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRMb3N0SABCCQoHb3V0Y29tZSIkChFEZXRhY2hlZFN1Y2NlZWRlZBIPCgdzdW1tYXJ5GAEgASgJIiEKDkRldGFjaGVkRmFpbGVkEg8KB3N1bW1hcnkYASABKAkiEwoRRGV0YWNoZWRDYW5jZWxsZWQiIQoMRGV0YWNoZWRMb3N0EhEKCWluZmVyZW5jZRgBIAEoCUI6WjhhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_agentshim_conversation_v1_content, file_agentshim_conversation_v1_tokens]);
 
 /**
  * Something a person typed. The opening of a turn.
@@ -571,6 +571,12 @@ export const DetachedWorkStartedSchema: GenMessage<DetachedWorkStarted> = /*@__P
 /**
  * What kind of work detached.
  *
+ * SIX ARMS, matching what the daemon already resolves (frontend.v1's
+ * DetachedWork). An earlier draft had four and silently dropped `merge` and
+ * `skill`, which is how a contract quietly deletes a feature: a merge-driven
+ * turn and a skill invocation would both have arrived as `unclassified` and
+ * rendered as a nameless spool.
+ *
  * @generated from message agentshim.conversation.v1.DetachedWorkKind
  */
 export type DetachedWorkKind = Message<"agentshim.conversation.v1.DetachedWorkKind"> & {
@@ -609,6 +615,27 @@ export type DetachedWorkKind = Message<"agentshim.conversation.v1.DetachedWorkKi
      */
     value: DetachedUnclassified;
     case: "unclassified";
+  } | {
+    /**
+     * A skill invocation. It owns its own window rather than rendering flat, so
+     * every record the skill produces names this message as its
+     * top_level_message_id and needs no correlation to find its card.
+     *
+     * @generated from field: agentshim.conversation.v1.DetachedSkill skill = 5;
+     */
+    value: DetachedSkill;
+    case: "skill";
+  } | {
+    /**
+     * A merge run: the conversation a merge drives through the workspace's OWN
+     * session. NO TOOL SPAWNS IT — the daemon opens it when it classifies the
+     * merge skill's invocation — so its origin_tool_call_id is empty, which is
+     * the one detachment for which that is not a producer fault.
+     *
+     * @generated from field: agentshim.conversation.v1.DetachedMerge merge = 6;
+     */
+    value: DetachedMerge;
+    case: "merge";
   } | { case: undefined; value?: undefined };
 };
 
@@ -665,6 +692,53 @@ export const DetachedWorkflowSchema: GenMessage<DetachedWorkflow> = /*@__PURE__*
   messageDesc(file_agentshim_conversation_v1_payloads, 22);
 
 /**
+ * A skill invocation, which owns its own window.
+ *
+ * `merge` is the one skill with an arm of its own; every other skill arrives
+ * here. The distinction is not cosmetic — a merge run drives the workspace's
+ * own session and carries no skill file to show.
+ *
+ * @generated from message agentshim.conversation.v1.DetachedSkill
+ */
+export type DetachedSkill = Message<"agentshim.conversation.v1.DetachedSkill"> & {
+  /**
+   * The skill's name as invoked, verbatim (e.g. "create-or-update-workspace").
+   *
+   * @generated from field: string skill_name = 1;
+   */
+  skillName: string;
+
+  /**
+   * The invocation's arguments, verbatim; empty when none were given.
+   *
+   * @generated from field: string args = 2;
+   */
+  args: string;
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.DetachedSkill.
+ * Use `create(DetachedSkillSchema)` to create a new message.
+ */
+export const DetachedSkillSchema: GenMessage<DetachedSkill> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_payloads, 23);
+
+/**
+ * A merge run, driving the workspace's own session.
+ *
+ * @generated from message agentshim.conversation.v1.DetachedMerge
+ */
+export type DetachedMerge = Message<"agentshim.conversation.v1.DetachedMerge"> & {
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.DetachedMerge.
+ * Use `create(DetachedMergeSchema)` to create a new message.
+ */
+export const DetachedMergeSchema: GenMessage<DetachedMerge> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_payloads, 24);
+
+/**
  * Detached work we could not classify. Stated rather than defaulted into one of
  * the known kinds, because a wrong kind renders wrong output confidently.
  *
@@ -684,7 +758,42 @@ export type DetachedUnclassified = Message<"agentshim.conversation.v1.DetachedUn
  * Use `create(DetachedUnclassifiedSchema)` to create a new message.
  */
 export const DetachedUnclassifiedSchema: GenMessage<DetachedUnclassified> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 23);
+  messageDesc(file_agentshim_conversation_v1_payloads, 25);
+
+/**
+ * A skill file's contents, delivered as the SKILL's own body.
+ *
+ * AN UPDATE, not part of DetachedWorkStarted, because the harness writes the
+ * body as a SEPARATE transcript record — a `user` line flagged isMeta — which
+ * the producer reads after the call that opened the work.
+ *
+ * IT REPLACES WHOLE rather than appending, unlike DetachedWorkProgressed. The
+ * body is delivered once, and a re-read overwrites with the same bytes instead
+ * of doubling them.
+ *
+ * It carries the SKILL MESSAGE's own message_id, which is what makes the old
+ * daemon-side correlation unnecessary: the record states which skill it belongs
+ * to instead of a reader reconstructing it by walking a chain through isMeta
+ * records.
+ *
+ * @generated from message agentshim.conversation.v1.SkillBodyResolved
+ */
+export type SkillBodyResolved = Message<"agentshim.conversation.v1.SkillBodyResolved"> & {
+  /**
+   * The skill file's contents, verbatim markdown. A skill IS a markdown
+   * document, so it is carried and rendered as one.
+   *
+   * @generated from field: string body = 1;
+   */
+  body: string;
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.SkillBodyResolved.
+ * Use `create(SkillBodyResolvedSchema)` to create a new message.
+ */
+export const SkillBodyResolvedSchema: GenMessage<SkillBodyResolved> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_payloads, 26);
 
 /**
  * Output accumulating into detached work already open.
@@ -707,7 +816,7 @@ export type DetachedWorkProgressed = Message<"agentshim.conversation.v1.Detached
  * Use `create(DetachedWorkProgressedSchema)` to create a new message.
  */
 export const DetachedWorkProgressedSchema: GenMessage<DetachedWorkProgressed> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 24);
+  messageDesc(file_agentshim_conversation_v1_payloads, 27);
 
 /**
  * Detached work reached an end.
@@ -755,7 +864,7 @@ export type DetachedWorkEnded = Message<"agentshim.conversation.v1.DetachedWorkE
  * Use `create(DetachedWorkEndedSchema)` to create a new message.
  */
 export const DetachedWorkEndedSchema: GenMessage<DetachedWorkEnded> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 25);
+  messageDesc(file_agentshim_conversation_v1_payloads, 28);
 
 /**
  * It finished and did what it was asked.
@@ -776,7 +885,7 @@ export type DetachedSucceeded = Message<"agentshim.conversation.v1.DetachedSucce
  * Use `create(DetachedSucceededSchema)` to create a new message.
  */
 export const DetachedSucceededSchema: GenMessage<DetachedSucceeded> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 26);
+  messageDesc(file_agentshim_conversation_v1_payloads, 29);
 
 /**
  * It finished and did not.
@@ -797,7 +906,7 @@ export type DetachedFailed = Message<"agentshim.conversation.v1.DetachedFailed">
  * Use `create(DetachedFailedSchema)` to create a new message.
  */
 export const DetachedFailedSchema: GenMessage<DetachedFailed> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 27);
+  messageDesc(file_agentshim_conversation_v1_payloads, 30);
 
 /**
  * Someone stopped it deliberately.
@@ -812,7 +921,7 @@ export type DetachedCancelled = Message<"agentshim.conversation.v1.DetachedCance
  * Use `create(DetachedCancelledSchema)` to create a new message.
  */
 export const DetachedCancelledSchema: GenMessage<DetachedCancelled> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 28);
+  messageDesc(file_agentshim_conversation_v1_payloads, 31);
 
 /**
  * We lost sight of it.
@@ -838,5 +947,5 @@ export type DetachedLost = Message<"agentshim.conversation.v1.DetachedLost"> & {
  * Use `create(DetachedLostSchema)` to create a new message.
  */
 export const DetachedLostSchema: GenMessage<DetachedLost> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 29);
+  messageDesc(file_agentshim_conversation_v1_payloads, 32);
 
