@@ -4,6 +4,7 @@ import {
   PIN_PX,
   SECTION_CLASSES,
   captureFeedAnchor,
+  feedTopChanged,
   restoreFeedAnchor,
   type AnchorBox,
   inEdgeZone,
@@ -898,5 +899,66 @@ describe("the tail-follow decision has exactly one owner", () => {
     const offenders = others.filter(([, src]) => /\bparkAtTail\b/.test(src));
     // Assert
     expect(offenders.map(([p]) => p)).toEqual([]);
+  });
+});
+
+describe("a load-more prepend does not jump the viewport", () => {
+  /** A scroll box whose items are at fixed offsets, mounted by key. */
+  const box = (over: Partial<AnchorBox> & { offsets?: Record<string, number> } = {}): AnchorBox => {
+    const offsets = over.offsets ?? {};
+    return {
+      scrollTop: over.scrollTop ?? 0,
+      scrollHeight: over.scrollHeight ?? 1000,
+      clientHeight: over.clientHeight ?? 200,
+      querySelector: (selector: string) => {
+        const key = /\[data-key="(.*)"\]/.exec(selector)?.[1] ?? "";
+        const offsetTop = offsets[key];
+        return offsetTop === undefined ? null : { offsetTop };
+      },
+    };
+  };
+
+  it("preserves the reading position across a prepend of older messages", () => {
+    // Arrange — the reader sits 300px down, looking at `b` 20px below the
+    // viewport top. A page of ten older messages then lands ABOVE everything,
+    // pushing `b` down by 800px. The reader asked for MORE of what they had,
+    // not to be moved off it.
+    const before = box({ scrollTop: 300 });
+    const anchor = captureFeedAnchor(
+      before,
+      [
+        { key: "a", offsetTop: 100 },
+        { key: "b", offsetTop: 320 },
+      ],
+      false,
+    );
+    const after = box({ scrollTop: 300, scrollHeight: 1800, offsets: { b: 1120 } });
+    // Act
+    restoreFeedAnchor(after, anchor, new TailFollow(after));
+    // Assert — `b` sits at exactly the same 20px from the viewport top.
+    expect(after.scrollTop).toBe(1100);
+  });
+
+  it("a NEW item at the feed's top is what says content was inserted above", () => {
+    // Arrange / Act / Assert
+    expect(feedTopChanged("older-1", "b-tail")).toBe(true);
+  });
+
+  it("an unchanged top item is NOT a prepend, whatever the feed's height did", () => {
+    // Arrange — a card expanding or a deferred item settling grows the feed
+    // without inserting anything above the reader; compensating those would
+    // move the reader instead.
+    // Act / Assert
+    expect(feedTopChanged("b-tail", "b-tail")).toBe(false);
+  });
+
+  it("an empty feed BEFORE the render has no reading position to preserve", () => {
+    // Arrange / Act / Assert
+    expect(feedTopChanged(null, "b-tail")).toBe(false);
+  });
+
+  it("an empty feed AFTER the render has no anchor item to restore", () => {
+    // Arrange / Act / Assert
+    expect(feedTopChanged("b-tail", null)).toBe(false);
   });
 });
