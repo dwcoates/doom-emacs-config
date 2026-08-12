@@ -79,7 +79,9 @@ import {
   SessionStatus,
   UNSUPPORTED_SHAPES,
   type ConversationDelta,
+  type ConversationHistoryPage,
   type ConversationPage,
+  type HistoryContinuation,
   type PageContinuation,
   type MessageArm,
   type MessageFrame,
@@ -526,6 +528,31 @@ export type AdapterEffect =
       continuation: PageContinuation;
       liveJoinSeq: number;
     }
+  /**
+   * ONE positionless history page, forwarded WHOLE.
+   *
+   * Its items are projected by the SAME `projectItems` a pushed
+   * `ConversationDelta` goes through, so a paged message and a pushed one
+   * reach the feed as the same thing. What the adapter cannot answer — WHERE
+   * the items rank, and WHETHER this client still awaits the request — is the
+   * store's, so the page reaches it intact.
+   */
+  | {
+      kind: "conversation-history-page";
+      workspace: string;
+      /** The request this page answers, which the store correlates on. */
+      requestId: string;
+      items: ConversationItem[];
+      /**
+       * Feed-anchored detached-work bubbles this page carried. They reach the
+       * registry through the store, which is the only place that holds the
+       * workspace's live fence to stamp them with.
+       */
+      anchored: AsyncBubble[];
+      continuation: HistoryContinuation;
+      /** Non-zero on FIRST pages only: the live-splice mark. */
+      liveJoinSeq: number;
+    }
   | { kind: "typing"; value: TypingReveal | UnidentifiedToolInputReveal }
   // A preview the daemon opened and can no longer retire. Addressed exactly
   // as the delta that opened it: empty parentMessageId for the top-level feed.
@@ -813,6 +840,8 @@ export class StateAdapter {
         return [];
       case "conversationPage":
         return this.conversationPageEffects(frame.frame.value);
+      case "conversationHistoryPage":
+        return this.conversationHistoryPageEffects(frame.frame.value);
       // A NEWER DAEMON'S ARM THIS BUNDLE PREDATES (frontend-proto.ts,
       // UnknownFrameArm). It moves no state by definition — nothing here can
       // know what it means — so it is tallied like every other shape this
@@ -1187,6 +1216,42 @@ export class StateAdapter {
               },
             },
           ]),
+      ...ignored,
+    ];
+  }
+
+  /**
+   * One POSITIONLESS history page, forwarded whole.
+   *
+   * Its messages go through the SAME `projectItems` a pushed
+   * `ConversationDelta`'s do — that is the whole point of the slots being
+   * complete feed envelopes — so there is exactly one projection and exactly
+   * one renderer for paged and pushed messages alike.
+   *
+   * A SHORT PAGE IS NOT AN ERROR here either: fewer than ten messages simply
+   * projects to fewer items.
+   */
+  private conversationHistoryPageEffects(page: ConversationHistoryPage): AdapterEffect[] {
+    this.log(
+      "debug",
+      `state-adapter: conversation history page workspace=${page.workspace} request_id=${page.requestId} ` +
+        `messages=${page.messages.length} continuation=${page.continuation.case} ` +
+        `live_join_seq=${String(page.liveJoinSeq)}`,
+    );
+    const { items, ignored, anchored } = this.projectItems(
+      page.messages,
+      `workspace=${page.workspace} history_page_request_id=${page.requestId}`,
+    );
+    return [
+      {
+        kind: "conversation-history-page",
+        workspace: page.workspace,
+        requestId: page.requestId,
+        items,
+        anchored,
+        continuation: page.continuation,
+        liveJoinSeq: page.liveJoinSeq,
+      },
       ...ignored,
     ];
   }
