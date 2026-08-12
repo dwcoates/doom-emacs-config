@@ -119,7 +119,8 @@ import { StateAdapter, userTurnReceipt } from "./state-adapter.js";
 import { CommandDispatcher, ModelSelectionRejectedError, surfaceRefusal } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
 import { ConversationPager } from "./conversation-pager.js";
-import { loadMoreView, paintLoadMore, NEXT_PAGE_ANCHOR } from "./load-more.js";
+import { HistoryPager } from "./history-pager.js";
+import { loadMoreView, paintLoadMore } from "./load-more.js";
 import { BackgroundRecovery, windowRecoveryTimerHost } from "./background-recovery.js";
 import {
   RestartWindow,
@@ -336,6 +337,10 @@ async function boot(): Promise<void> {
     // load-more it belongs to would stay in flight forever and every later
     // click would be dropped as a duplicate.
     onLateRefusal: (requestId, error) => {
+      // Either pager may own this request id; each ignores an id that is not
+      // its own, and a refused NEXT page is answered by HistoryPager with a
+      // FirstPageCmd rather than a retry or a full replay.
+      historyPager.observeRefusal(requestId, error);
       pager.observeRefusal(requestId, error);
       store.forgetPageRequest(requestId);
       frames.schedule();
@@ -434,6 +439,29 @@ async function boot(): Promise<void> {
     },
   });
 
+  // THE POSITIONLESS HISTORY PATH: the cold open, the reconnect, and paging
+  // back. It supersedes the pager above for the COLD OPEN — the client no
+  // longer names a position of any kind — while the older cursor path stays
+  // compiled and reachable until the contract's ordering constraint (tail page
+  // works BEFORE the old doors close) is discharged by a later branch.
+  const historyPager = new HistoryPager({
+    workspace: () => store.state.cwd,
+    send: (verb, workspace) => {
+      const sent = verb === "first" ? dispatcher.firstPage(workspace) : dispatcher.nextPage(workspace);
+      // The store is told WHICH VERB was asked BEFORE the answer can arrive:
+      // the page carries no anchor and must not, so the request is the only
+      // moment where its items' rank is knowable.
+      store.noteHistoryPageRequested(sent.requestId, verb);
+      return sent;
+    },
+    log: (level, message) => clog(level, message),
+    onGiveUp: (failures, cause) => {
+      if (store.addFailure(daemonUnreachableFailure(0, `conversation history page unanswered ${failures}x: ${cause}`))) {
+        frames.schedule();
+      }
+    },
+  });
+
   const connectResync = new ConnectResync({
     // THE COLD OPEN IS A PAGE, NOT A FULL REPLAY.
     //
@@ -459,7 +487,7 @@ async function boot(): Promise<void> {
     // that second half, and it lands on this same tail path.
     resync: (snapshot) =>
       snapshot.fromSeq === 0
-        ? pager.openTail()
+        ? historyPager.openFirst()
         : dispatcher.resync(snapshot.workspace, snapshot),
     // THE MARK IS VOID: REPLACE THE CONVERSATION, DO NOT EXTEND IT.
     //
@@ -485,7 +513,7 @@ async function boot(): Promise<void> {
       // ConversationPager owns and logs every refusal of its own requests, and
       // surfaces the ceiling through `onGiveUp` above; this consumes the
       // already-owned rejection rather than writing a duplicate record.
-      void pager.openTail().catch(consumeOwnedDispatchFailure);
+      void historyPager.openFirst().catch(consumeOwnedDispatchFailure);
       return true;
     },
     log: (level, message) => clog(level, message),
@@ -1440,8 +1468,8 @@ async function boot(): Promise<void> {
         // A click at the ceiling is the user saying "try again", so the
         // failure history is discharged before the request is built. Without
         // it the retry wording would offer an action the backoff then refuses.
-        if (pager.view.givenUp) pager.retryNow();
-        void pager.loadMore(NEXT_PAGE_ANCHOR).catch(consumeOwnedDispatchFailure);
+        if (historyPager.view.givenUp) historyPager.retryNow();
+        void historyPager.next().catch(consumeOwnedDispatchFailure);
         frames.schedule();
       },
     );
@@ -1926,6 +1954,14 @@ async function boot(): Promise<void> {
           }
           pager.observePage(effect.requestId);
         }
+        // THE HISTORY PAGE'S OWN SETTLE. Read after ingest for the reason the
+        // page above is: the store is what ruled on it, and a page it discarded
+        // as uncorrelated must not settle a request this client still awaits.
+        for (const effect of effects) {
+          if (effect.kind !== "conversation-history-page") continue;
+          dispatcher.forgetPageRequest(effect.requestId);
+          historyPager.observePage(effect.requestId);
+        }
         if (effects.some((effect) => effect.kind === "workspace-state")) {
           if (store.state.renderState === null) {
             throw new Error("workspace-state ingestion completed without a render state");
@@ -2045,6 +2081,7 @@ async function boot(): Promise<void> {
           // gone and can never settle; holding it would block this
           // connection's cold open forever.
           pager.reset();
+          historyPager.reset();
           if (store.state.renderState === null) {
             throw new Error("websocket reported current before WorkspaceState adoption");
           }

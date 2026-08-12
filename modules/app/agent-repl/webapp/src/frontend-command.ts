@@ -31,6 +31,8 @@ import {
   MERGE_DEQUEUE_ANSWER,
   PROMPT_ORIGIN_WEBAPP_CARD_ACTION,
   PROMPT_ORIGIN_WEBAPP_USER_SENT,
+  FIRST_PAGE_FIELD,
+  NEXT_PAGE_FIELD,
   PAGE_ANCHOR_ARM,
   PAGE_BEFORE_FIELD,
   PAGE_CMD_FIELD,
@@ -172,6 +174,37 @@ export interface ConversationPageBody {
   /** 0 = the daemon's default; the daemon clamps its own ceiling. */
   limit: number;
   fence: string;
+}
+
+/**
+ * FirstPageCmd — ask for the MOST RECENT page, resetting this reader's
+ * daemon-held position to it.
+ *
+ * The cold open, the reconnect, and the whole recovery story: a client that
+ * bounced, rotated its seq space, lost its place, or had a NextPageCmd refused
+ * sends this and starts from the bottom.
+ *
+ * IT CARRIES NO POSITION and cannot: there is no field for one. The workspace
+ * selects WHICH position the daemon resets, never where it resets it to.
+ */
+export interface FirstPageBody {
+  case: "firstPage";
+  workspace: string;
+}
+
+/**
+ * NextPageCmd — ask for the page IMMEDIATELY OLDER than the last one served to
+ * this reader.
+ *
+ * IT CARRIES NO POSITION, and that absence is the design: the daemon owns the
+ * reader's position, and even an opaque cursor would be a position the client
+ * holds. From a reader with no established position it is REFUSED rather than
+ * answered with the tail, and a client answers that refusal with a
+ * {@link FirstPageBody} — never a retry of this, and never a full replay.
+ */
+export interface NextPageBody {
+  case: "nextPage";
+  workspace: string;
 }
 
 /** The `ClientLogLevel` enum values, as their canonical protojson names. */
@@ -328,6 +361,8 @@ export type FrontendCommandBody =
   | DeleteSessionBody
   | ResyncBody
   | ConversationPageBody
+  | FirstPageBody
+  | NextPageBody
   | ClientLogBody
   | QueueForceBody
   | QueueAcceptBody
@@ -410,6 +445,13 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
             };
       return { ...anchor, [PAGE_CMD_FIELD.fence]: b.fence };
     }
+    // BOTH HISTORY VERBS ENCODE THE WORKSPACE AND NOTHING ELSE. There is no
+    // seq, no offset, no cursor and no fence to emit, because the client holds
+    // no position — the daemon does.
+    case "firstPage":
+      return { [FIRST_PAGE_FIELD.workspace]: b.workspace };
+    case "nextPage":
+      return { [NEXT_PAGE_FIELD.workspace]: b.workspace };
     case "clientLog": {
       // An enum renders as its proto NAME in canonical protojson.
       const arm: Record<string, unknown> = {
