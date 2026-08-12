@@ -113,24 +113,26 @@ func sessionCommandUUID(requestID string) string { return "session-command:" + r
 // parameter to forget to omit: the submitted prompt does not reach this
 // function, so it cannot reach the wire.
 //
-// THE DURABILITY ARM IS AN INPUT, NOT A DERIVATION. Whether a record for this
-// invocation exists is a fact about WHO ANSWERED the command — the CLI, which
-// writes a transcript record for it, or the daemon alone, which writes nothing
-// anywhere — and that is known at the dispatch site and nowhere else. Reading
-// it back off the command enum here would be a second copy of the routing
-// decision, free to disagree with the routing itself.
+// IT IS ALWAYS EPHEMERAL, AND THERE IS NO PARAMETER TO SAY OTHERWISE. This
+// function is now reached only for a command the DAEMON answered itself
+// (noteSessionCommand), which by definition never reached the CLI and left no
+// transcript record anywhere, so no durable account of it can exist. A
+// CLI-handled command's account comes from the record the CLI wrote, and
+// nothing here produces a second one — with no durable arm reachable from this
+// constructor, a daemon-produced twin of a stored invocation cannot be built at
+// all, which is a stronger guarantee than a caller passing the right flag.
 //
-// THE ARM IS STATED THROUGH THE CONSTRUCTORS, never assigned here. Each of them
-// writes the class and the lineage that class requires in ONE act, so an item
-// cannot claim a class and carry lineage that contradicts it. A hand-assigned
-// arm beside a hand-written lineage is two statements of one fact, which is one
-// more than can be kept true.
+// THE ARM IS STATED THROUGH THE CONSTRUCTOR, never assigned here. It writes the
+// class and the lineage that class requires in ONE act, so an item cannot claim
+// a class and carry lineage that contradicts it. A hand-assigned arm beside a
+// hand-written lineage is two statements of one fact, which is one more than can
+// be kept true.
 //
 // IT RETURNS AN ERROR because the constructors refuse rather than repair, and
 // the caller's job on a refusal is to keep the unclassified item OFF the wire:
 // an item with no durability arm would later read as "the store lost this",
 // which is the exact confusion the class exists to end.
-func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsMs int64, ephemeral bool) (*frontendv1.Message, error) {
+func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsMs int64) (*frontendv1.Message, error) {
 	body := &frontendv1.Message{
 		Uuid:      sessionCommandUUID(requestID),
 		TsMs:      tsMs,
@@ -139,36 +141,30 @@ func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsM
 			DaemonInterceptedCommand: &frontendv1.DaemonInterceptedCommandItem{Command: command},
 		},
 	}
-	if ephemeral {
-		return frontend.NewEphemeralFeedRow(body)
-	}
-	return frontend.NewDurableFeedRow(body)
+	return frontend.NewEphemeralFeedRow(body)
 }
 
 // pushSessionCommand retains and pushes the invocation item for one recognized
 // session command.
 //
-// RETENTION IS CONDITIONAL ON THE EPHEMERAL ARM, and on nothing else. The
-// branch reads the item's own durability oneof rather than inferring the class
-// from the command, the payload kind or who called: the arm IS the claim that
-// no record exists, and a second reading of that claim is a second chance to
-// get it wrong.
+// EVERY INVOCATION THAT REACHES HERE IS EPHEMERAL, so every one is retained.
+// The caller (noteSessionCommand) admits only the commands the daemon answered
+// alone: those reached no CLI and left no transcript record, so this item is the
+// ONLY account of the invocation a frontend will ever get. It is retained and
+// replayed on the same footing as a permission item and a failure card, and for
+// the same reason — it carries no store seq, so no from_seq a resync names
+// could ever cover it. Losing it on a reconnect would leave the feed silent
+// about why the session's model changed.
 //
-// An EPHEMERAL invocation — one the daemon answered alone, which therefore
-// reached no CLI and left no transcript record — is retained and replayed, on
-// the same footing as a permission item and a failure card and for the same
-// reason: it carries no store seq, so no from_seq a resync names could ever
-// cover it, and it is the ONLY account of the invocation a frontend will ever
-// get. Losing it on a reconnect would leave the feed silent about why the
-// session's model changed.
+// A DURABLE invocation never gets here at all. The CLI wrote a record for it,
+// the store serves that record on reconnect, and machinery.go turns it into the
+// one item drawn for it. Producing a second here would make one invocation
+// arrive from two sources at once and draw it twice.
 //
-// A DURABLE invocation is NOT retained. The CLI wrote a record for it, so the
-// store serves it on reconnect; retaining it here would make one invocation
-// arrive from two sources at once and draw it twice. Its account comes from the
-// store, which is the single source that can also be paged.
-//
-// The live push happens either way: retention decides what a RECONNECT
-// replays, never whether the frontend sees the invocation when it happens.
+// THE RETENTION CHECK STILL READS THE ITEM'S OWN ARM rather than assuming the
+// class the caller intended. The constructor is what states the class, and a
+// retention decision made on anything other than the stated arm is a second
+// reading of one fact.
 //
 // outcome is what the daemon RESOLVED the command to, for the log only. It is
 // empty for every command that resolves to nothing, and it never reaches the
@@ -179,8 +175,8 @@ func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsM
 // invoked" could not tell what the session was switched TO, or that a switch
 // was the reason the picker disagreed with the session — the one line about the
 // command named no model at all.
-func (c *consumer) pushSessionCommand(requestID string, command frontendv1.SessionCommand, ephemeral bool, outcome string) {
-	item, err := sessionCommandItem(requestID, command, c.now(), ephemeral)
+func (c *consumer) pushSessionCommand(requestID string, command frontendv1.SessionCommand, outcome string) {
+	item, err := sessionCommandItem(requestID, command, c.now())
 	if err != nil {
 		// THE ITEM IS WITHHELD, LOUDLY. The constructor refuses rather than
 		// repairs, and pushing the unclassified item anyway would put a message
@@ -189,8 +185,8 @@ func (c *consumer) pushSessionCommand(requestID string, command frontendv1.Sessi
 		// reported in full instead, with the command and request that produced
 		// it, because the refusal is a daemon defect and not a user-visible
 		// condition anything downstream can act on.
-		c.warn("session-controller: session command %s NOT pushed ws=%q session=%s request_id=%s ephemeral=%t — the message constructor refused it, so no DaemonInterceptedCommandItem could be classified and none is delivered: %v",
-			command.String(), c.workspace, c.sessionID, requestID, ephemeral, err)
+		c.warn("session-controller: session command %s NOT pushed ws=%q session=%s request_id=%s — the message constructor refused it, so no DaemonInterceptedCommandItem could be classified and none is delivered: %v",
+			command.String(), c.workspace, c.sessionID, requestID, err)
 		return
 	}
 	retained := item.GetEphemeral() != nil

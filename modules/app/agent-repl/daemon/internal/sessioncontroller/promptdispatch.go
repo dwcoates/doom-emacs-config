@@ -475,8 +475,29 @@ func (m *Manager) notePromptDelivered(d *sessionController, requestID string) {
 }
 
 // noteSessionCommand pushes the invocation item for a recognized session
-// command the daemon just handed to a shim, and does nothing at all for an
-// ordinary prompt.
+// command THE DAEMON ANSWERED ITSELF, and does nothing at all for an ordinary
+// prompt or for a command the CLI answers.
+//
+// THIS IS THE SINGLE-PRODUCER CUT, and it is the whole reason the function
+// still exists. A CLI-handled command has TWO things that could account for it:
+// this push, and the CLI's own transcript record, which machinery.go classifies
+// into a DaemonInterceptedCommandItem under the record's own uuid. Two producers
+// for one invocation draw it twice the moment both accounts are in front of a
+// frontend at once — which a reload does, because the store replays the record
+// while the daemon pushes its own item live.
+//
+// The contract already names which of the two survives: "A DURABLE invocation
+// is NOT retained... Its account comes from the store, which is the single
+// source that can also be paged." A source that cannot be paged cannot be the
+// account of a message that can. So the daemon does not produce one at all for
+// a command the CLI answers, and the duplication is unrepresentable rather than
+// de-duplicated downstream — a de-duplication is a second authority, free to
+// disagree with the first about which copy is the real one.
+//
+// What remains here is EXACTLY the set with no other producer: the commands
+// performsLocally answers, which never reach the CLI and leave no record
+// anywhere. Those are ephemeral by construction (sessionCommandItem), and this
+// push is the only account of them a frontend will ever get.
 //
 // Takes the CLASSIFICATION rather than the text, which is what keeps the
 // recognition in one place — and, here, is also what keeps the text off the
@@ -492,14 +513,19 @@ func (m *Manager) noteSessionCommand(d *sessionController, requestID string, cmd
 	if !cmd.recognized() || requestID == "" {
 		return
 	}
-	// EPHEMERAL EXACTLY WHEN THE DAEMON ANSWERED IT ITSELF. performsLocally is
-	// the routing decision — the daemon PERFORMS this command instead of
-	// handing its text to the shim — so a command it answers alone never
-	// reaches the CLI and the CLI writes no transcript record for it. Everything
-	// else is forwarded, runs in the CLI, and earns a durable record there.
-	// Reading the same fact off the routing predicate rather than off a second
-	// table is what keeps the two from disagreeing.
-	d.consumer.pushSessionCommand(requestID, cmd.command, cmd.performsLocally(), outcome)
+	// THE PRODUCER IS CHOSEN BY THE ROUTING DECISION, not by a second table.
+	// performsLocally is that decision — the daemon PERFORMS this command
+	// instead of handing its text to the shim — so a command it answers alone
+	// never reaches the CLI and no transcript record for it will ever exist.
+	// Everything else is forwarded, runs in the CLI, and is accounted for by
+	// the record the CLI writes; producing an item here for one of those would
+	// be the second account this cut exists to remove.
+	if !cmd.performsLocally() {
+		m.logf("session-controller: session command %s FORWARDED, no daemon item pushed ws=%q session=%s request_id=%q — the CLI answers this command and writes its own transcript record, which is the single producer of its feed account; a daemon item beside that record would draw one invocation twice on every reload",
+			cmd.command.String(), d.workspace, d.sessionID, requestID)
+		return
+	}
+	d.consumer.pushSessionCommand(requestID, cmd.command, outcome)
 }
 
 // applyLocalSessionCommand performs a session command the daemon owns rather
