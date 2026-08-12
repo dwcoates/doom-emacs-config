@@ -130,17 +130,28 @@ func (c *consumer) pushAsync(push asyncPush, ev *corev1.Event) {
 		}
 		c.warn("session-controller: ASYNC DETACHMENT FAULT session=%s ws=%q seq=%d card_uuid=%s — %s",
 			c.sessionID, c.workspace, ev.GetSeq(), fault.UUID, fault.Detail)
+		// THE CARD IS DURABLE. It is derived from the store event whose
+		// detachment could not be attributed, so every replay of that event
+		// re-derives it under the same uuid — a record for it exists.
+		item, err := frontend.NewDurableFeedRow(&frontendv1.Message{
+			Uuid:    fault.UUID,
+			TsMs:    c.asyncInstant(ev),
+			Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+			Payload: &frontendv1.Message_FailureCard{FailureCard: fault.Card},
+		})
+		if err != nil {
+			// WITHHELD, LOUDLY. The fault itself is already on the record above;
+			// what is withheld is only the unclassifiable card, which would
+			// otherwise reach a frontend with no durability arm at all.
+			c.warn("session-controller: ASYNC DETACHMENT FAULT CARD NOT DRAWN session=%s ws=%q seq=%d card_uuid=%s — the message constructor refused it: %v",
+				c.sessionID, c.workspace, ev.GetSeq(), fault.UUID, err)
+			continue
+		}
 		c.push.PushConversationDelta(&frontendv1.ConversationDelta{
 			Workspace:  c.workspace,
 			Fence:      c.fence(),
 			ThroughSeq: ev.GetSeq(),
-			Messages: []*frontendv1.Message{{
-				Uuid:    fault.UUID,
-				TsMs:    c.asyncInstant(ev),
-				Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-				Lineage: frontend.FeedRowLineage(fault.UUID),
-				Payload: &frontendv1.Message_FailureCard{FailureCard: fault.Card},
-			}},
+			Messages:   []*frontendv1.Message{item},
 		})
 	}
 	if len(push.Opened) == 0 && len(push.Updates) == 0 {
