@@ -212,9 +212,16 @@ type MessagePage struct {
 	Message_8  *StoredMessage         `protobuf:"bytes,9,opt,name=message_8,json=message8,proto3" json:"message_8,omitempty"`
 	Message_9  *StoredMessage         `protobuf:"bytes,10,opt,name=message_9,json=message9,proto3" json:"message_9,omitempty"`
 	Message_10 *StoredMessage         `protobuf:"bytes,11,opt,name=message_10,json=message10,proto3" json:"message_10,omitempty"`
-	// The seq to anchor the NEXT request at: the oldest seq this page covers.
-	// Returned so a caller never computes a position of its own — it copies back
-	// a value the serving side minted.
+	// The seq to anchor the NEXT request at: the seq at which the LAST selected
+	// message was ENCOUNTERED by the backward scan — the position the scan
+	// actually walked TO. Returned so a caller never computes a position of its
+	// own; it copies back a value the serving side minted.
+	//
+	// NOT the oldest seq this page covers. A message that starts early and ends
+	// late owns records far below the rest of the page, and anchoring there
+	// would SKIP every message in between. A message already served is not
+	// served again: an owner that also owns a record at or above the anchor is
+	// rejected, so its remaining records below the anchor cannot resurrect it.
 	LastPageSeq uint64 `protobuf:"varint,12,opt,name=last_page_seq,json=lastPageSeq,proto3" json:"last_page_seq,omitempty"`
 	// WHETHER older history remains — never how much, never where.
 	//
