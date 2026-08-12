@@ -525,8 +525,14 @@ func TestE2ETwoSlashCommandsDoNotSwapIdentities(t *testing.T) {
 	// file plane afterwards, so the two land by different routes in an order
 	// neither of them chose. A positional correlation gets that wrong and an
 	// identity-based one does not.
-	writeCmd(t, live, slashSubmitJSON("r-cmd-compact", "/compact"))
+	//
+	// THE DAEMON-HANDLED ONE GOES FIRST, and that ordering is load-bearing for
+	// the arrangement rather than for the assertion. `/compact` opens a turn,
+	// and the prompt queue forms while a turn is running — issued second, the
+	// `/model` submit is QUEUED behind that turn and never dispatched, so the
+	// test would fail having never made the pair it is about.
 	writeCmd(t, live, slashSubmitJSON("r-cmd-model", "/model opus"))
+	writeCmd(t, live, slashSubmitJSON("r-cmd-compact", "/compact"))
 	store.write(slashShapeAEvent(t, vendorID, "e2e-slash-pair-compact", "e2e-prompt-pair-compact",
 		slashShapeAContent("/compact")))
 	store.write(sidecarCompactEvent(vendorID, "e2e-slash-pair-sentinel", "sentinel"))
