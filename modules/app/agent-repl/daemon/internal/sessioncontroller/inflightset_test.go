@@ -288,3 +288,82 @@ func TestHibernationIsGrantedForAWorkspaceHoldingNothing(t *testing.T) {
 	}
 	release()
 }
+
+// TestLiveTaskSetIsAnsweredEmptyForAQuietWorkspace covers the arm that licenses
+// a drain to stop waiting on background work.
+func TestLiveTaskSetIsAnsweredEmptyForAQuietWorkspace(t *testing.T) {
+	// Arrange
+	h := inflightHarness(t)
+
+	// Act
+	got := h.m.LiveTaskSet("ws")
+
+	// Assert
+	if !got.Known() || len(got.Items()) != 0 {
+		t.Fatalf("LiveTaskSet = %s, want an answered empty set", got.Summary())
+	}
+}
+
+// TestLiveTaskSetSeparatesAnUnknownWorkspaceFromAQuietOne is the miss
+// distinction the old (count, ok) pair drew and the set must keep drawing: a
+// workspace nothing has ever reported on is UNKNOWN, not empty.
+func TestLiveTaskSetSeparatesAnUnknownWorkspaceFromAQuietOne(t *testing.T) {
+	// Arrange
+	h := inflightHarness(t)
+
+	// Act
+	got := h.m.LiveTaskSet("ws-never-seen")
+
+	// Assert
+	if got.Known() {
+		t.Fatalf("LiveTaskSet = %s for an unheard-of workspace, want the UNKNOWN arm", got.Summary())
+	}
+}
+
+// TestLiveTaskSetNamesTheLiveTasks covers the identities a hold reports.
+func TestLiveTaskSetNamesTheLiveTasks(t *testing.T) {
+	// Arrange
+	h := inflightHarness(t)
+	h.applier.setLiveTasks(0, "task-1")
+
+	// Act
+	got := h.m.LiveTaskSet("ws")
+
+	// Assert
+	if !got.Has(inflight.Item{Kind: inflight.KindTask, ID: "task-1"}) {
+		t.Fatalf("LiveTaskSet = %s, want the live task named", got.Summary())
+	}
+}
+
+// TestLiveTaskSetIsUnknownWhenALiveStartCarriedNoIdentity covers the poisoning
+// rule: work is running that cannot be named, so the honest answer about the
+// SET is that it is not known.
+func TestLiveTaskSetIsUnknownWhenALiveStartCarriedNoIdentity(t *testing.T) {
+	// Arrange
+	h := inflightHarness(t)
+	h.applier.setLiveTasks(1, "task-1")
+
+	// Act
+	got := h.m.LiveTaskSet("ws")
+
+	// Assert
+	if got.Known() {
+		t.Fatalf("LiveTaskSet = %s under an anonymous live start, want the UNKNOWN arm", got.Summary())
+	}
+}
+
+// TestLiveTaskSetIsUnknownWhenTheResolvedStateCannotBeRead covers the read
+// failure, which must surface as UNKNOWN rather than as an empty set.
+func TestLiveTaskSetIsUnknownWhenTheResolvedStateCannotBeRead(t *testing.T) {
+	// Arrange
+	h := inflightHarness(t)
+	h.applier.setCurrentErr(errors.New("state store is gone"))
+
+	// Act
+	got := h.m.LiveTaskSet("ws")
+
+	// Assert
+	if got.Known() || !strings.Contains(got.Reason(), "state store is gone") {
+		t.Fatalf("LiveTaskSet = %s, want UNKNOWN carrying the read failure", got.Summary())
+	}
+}

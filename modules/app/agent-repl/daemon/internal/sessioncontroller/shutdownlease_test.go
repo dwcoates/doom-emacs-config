@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"claude-repld/internal/inflight"
 	"claude-repld/internal/statedb"
 )
 
@@ -214,18 +215,34 @@ func (f *fakeHoldStore) count() int {
 	return len(f.rows)
 }
 
-// fakeTaskCounter answers the live-task half of a drain hold.
-type fakeTaskCounter struct {
-	counts map[string]int64
-	known  bool
+// fakeTaskSource answers the live-task half of a drain hold with an IDENTIFIED
+// set. A workspace it holds no entry for is UNANSWERED, never answered-empty:
+// "runs no background task" and "never heard of this workspace" are different
+// facts and the fake must be able to express both.
+type fakeTaskSource struct {
+	sets map[string]inflight.Set
 }
 
-func (f fakeTaskCounter) LiveTasks(workspace string) (int64, bool) {
-	n, ok := f.counts[workspace]
-	if !ok {
-		return 0, f.known
+func (f fakeTaskSource) LiveTaskSet(workspace string) inflight.Set {
+	if set, ok := f.sets[workspace]; ok {
+		return set
 	}
-	return n, true
+	return inflight.Unanswered(workspace, "the fake live-task source has never heard of this workspace")
+}
+
+// noLiveTasks is the answered-empty arm for the harness's workspace: asked, and
+// nothing is running.
+func noLiveTasks() fakeTaskSource {
+	return fakeTaskSource{sets: map[string]inflight.Set{"ws": inflight.MustAnswered("ws")}}
+}
+
+// namedLiveTasks is the answered arm carrying identities.
+func namedLiveTasks(ids ...string) fakeTaskSource {
+	items := make([]inflight.Item, 0, len(ids))
+	for _, id := range ids {
+		items = append(items, inflight.Item{Kind: inflight.KindTask, ID: id})
+	}
+	return fakeTaskSource{sets: map[string]inflight.Set{"ws": inflight.MustAnswered("ws", items...)}}
 }
 
 // leaseHarness is a queueHarness with a drain lease and a durable hold store
@@ -933,7 +950,7 @@ func TestASessionWithNeitherATurnNorTasksHoldsNothing(t *testing.T) {
 	h := newLeaseHarness(t)
 
 	// Act.
-	holds := h.m.DrainHolds(fakeTaskCounter{counts: map[string]int64{}})
+	holds := h.m.DrainHolds(noLiveTasks())
 
 	// Assert.
 	if len(holds) != 0 {
@@ -947,7 +964,7 @@ func TestAnInFlightTurnHoldsTheDrain(t *testing.T) {
 	h.turn(true)
 
 	// Act.
-	holds := h.m.DrainHolds(fakeTaskCounter{counts: map[string]int64{}})
+	holds := h.m.DrainHolds(noLiveTasks())
 
 	// Assert.
 	if len(holds) != 1 || !holds[0].TurnActive {
@@ -960,11 +977,68 @@ func TestLiveBackgroundTasksHoldTheDrainWithNoTurnRunning(t *testing.T) {
 	h := newLeaseHarness(t)
 
 	// Act.
-	holds := h.m.DrainHolds(fakeTaskCounter{counts: map[string]int64{"ws": 3}})
+	holds := h.m.DrainHolds(namedLiveTasks("task-1", "task-2", "task-3"))
 
 	// Assert.
-	if len(holds) != 1 || holds[0].LiveTasks != 3 || holds[0].TurnActive {
+	if len(holds) != 1 || len(holds[0].LiveTasks.Items()) != 3 || holds[0].TurnActive {
 		t.Fatalf("DrainHolds = %+v, want one task-only hold of 3", holds)
+	}
+}
+
+// TestAHoldNamesTheLiveTasksItIsWaitingOn is the whole reason the hold carries a
+// set: a drain that holds must say WHAT it waits on, not how many.
+func TestAHoldNamesTheLiveTasksItIsWaitingOn(t *testing.T) {
+	// Arrange.
+	h := newLeaseHarness(t)
+
+	// Act.
+	holds := h.m.DrainHolds(namedLiveTasks("task-a", "task-b"))
+
+	// Assert.
+	if len(holds) != 1 {
+		t.Fatalf("DrainHolds = %+v, want one hold", holds)
+	}
+	for _, id := range []string{"task-a", "task-b"} {
+		if !holds[0].LiveTasks.Has(inflight.Item{Kind: inflight.KindTask, ID: id}) {
+			t.Fatalf("hold live tasks = %s, want %q named", holds[0].LiveTasks.Summary(), id)
+		}
+	}
+}
+
+// TestAQuiescentHoldsEmptySetIsNotAnUnknownOne pins the miss distinction the
+// interrupt confirm gate also depends on: a workspace that runs nothing and a
+// workspace nobody has heard of are different answers, and the set keeps them
+// apart rather than flattening both to an empty slice.
+func TestAQuiescentWorkspacesEmptySetIsNotAnUnknownOne(t *testing.T) {
+	// Arrange.
+	src := noLiveTasks()
+
+	// Act.
+	known := src.LiveTaskSet("ws")
+	unknown := src.LiveTaskSet("ws-never-seen")
+
+	// Assert.
+	if !known.Known() || len(known.Items()) != 0 {
+		t.Fatalf("live tasks for a quiet workspace = %s, want an answered empty set", known.Summary())
+	}
+	if unknown.Known() {
+		t.Fatalf("live tasks for an unheard-of workspace = %s, want the UNKNOWN arm", unknown.Summary())
+	}
+}
+
+// TestAnUnknownLiveTaskSetIsNotATaskHold pins that the reroute did not change
+// WHEN the drain holds: an unknown set held nothing when it was an unknown
+// count, and holds nothing now.
+func TestAnUnknownLiveTaskSetIsNotATaskHold(t *testing.T) {
+	// Arrange.
+	h := newLeaseHarness(t)
+
+	// Act.
+	holds := h.m.DrainHolds(fakeTaskSource{})
+
+	// Assert.
+	if len(holds) != 0 {
+		t.Fatalf("DrainHolds = %+v, want no hold from an unknown live-task set", holds)
 	}
 }
 
@@ -975,10 +1049,10 @@ func TestATurnAndLiveTasksAreBothReportedOnOneHold(t *testing.T) {
 	h.turn(true)
 
 	// Act.
-	holds := h.m.DrainHolds(fakeTaskCounter{counts: map[string]int64{"ws": 2}})
+	holds := h.m.DrainHolds(namedLiveTasks("task-1", "task-2"))
 
 	// Assert.
-	if len(holds) != 1 || !holds[0].TurnActive || holds[0].LiveTasks != 2 {
+	if len(holds) != 1 || !holds[0].TurnActive || len(holds[0].LiveTasks.Items()) != 2 {
 		t.Fatalf("DrainHolds = %+v, want one hold carrying both facts", holds)
 	}
 }
@@ -990,7 +1064,7 @@ func TestAHoldNamesTheTurnItIsWaitingOn(t *testing.T) {
 	h.turn(true)
 
 	// Act.
-	holds := h.m.DrainHolds(fakeTaskCounter{counts: map[string]int64{}})
+	holds := h.m.DrainHolds(noLiveTasks())
 
 	// Assert.
 	if len(holds) != 1 || holds[0].TurnID != "t_42" {
@@ -1005,7 +1079,7 @@ func TestAnAdoptedTurnHoldsTheDrainWithNoTurnID(t *testing.T) {
 	h.turn(true)
 
 	// Act.
-	holds := h.m.DrainHolds(fakeTaskCounter{counts: map[string]int64{}})
+	holds := h.m.DrainHolds(noLiveTasks())
 
 	// Assert.
 	if len(holds) != 1 || !holds[0].TurnActive || holds[0].TurnID != "" {
