@@ -1,18 +1,34 @@
 # proto/
 
 The agent-shim protocol definitions. The `.proto` files ARE the contract,
-including behavioral semantics as normative comments. Three packages:
-`agentshim.core.v1` (envelope, lifecycle, control plane, store plumbing),
-`agentshim.data.v1` (the full-fidelity data vocabulary: stream messages,
-transcript lines, tool shapes, journal records), `agentshim.frontend.v1`
-(the daemon→frontend resolved surface, protojson on the wire).
+including behavioral semantics as normative comments. Two packages:
+`agentshim.core.v1` (envelope, lifecycle, control plane, store plumbing) and
+`agentshim.frontend.v1` (the daemon→frontend resolved surface, protojson on
+the wire). A third, `agentshim.conversation.v1`, is being written now — see
+`FROZEN-conversation-v1.md`.
+
+## `agentshim.data.v1` was DELETED
+
+`data.v1` held a direct transliteration of the Claude SDK's JSONL: 267
+messages whose names, arms, and fields were the vendor's own surface wearing a
+protobuf hat. Nothing in the system was better off for it — a vendor shape
+crossing the wire only moves the vendor knowledge downstream to the daemon and
+the webapp, which is exactly where it must not live.
+
+The replacement inverts the direction. The shim and the sidecar convert the
+vendor's output to a vendor-AGNOSTIC model at the point of production, the
+store persists only that model, and the daemon and webapp never learn a vendor
+name. Anything a producer cannot convert is persisted as an explicit
+unsupported arm rather than as raw vendor material. The contract is written
+out in full in `FROZEN-conversation-v1.md`.
 
 ## The schema is TREATED as vendor-agnostic
 
-The `agentshim.data.v1` shapes were derived from the Claude harness, so the
-schema is not FACTUALLY vendor-agnostic — but it is BELIEVED and TREATED as
+The retired `data.v1` shapes were derived from the Claude harness, so the
+schema was not FACTUALLY vendor-agnostic — but it was BELIEVED and TREATED as
 vendor-agnostic everywhere: no consumer may special-case a vendor, and new
 code is written against the schema as if any vendor's shim could produce it.
+`conversation.v1` makes that belief structural instead of aspirational.
 
 **Remediation strategy for adding a new vendor (e.g. codex):** when a new
 vendor's reality does not fit the schema, RESOLVE the incongruity by revising
@@ -23,8 +39,8 @@ repo-root AGENTS.md wire-protocol rule).
 
 ## Which package does a new message go in?
 
-`core.v1` / `data.v1` are SHIM-WIRE packages: they describe what a vendor
-produced. `frontend.v1` is the daemon's resolved surface. Most frontend
+`core.v1` / `conversation.v1` are SHIM-WIRE packages: they describe what a
+vendor produced. `frontend.v1` is the daemon's resolved surface. Most frontend
 messages compose shim material, which makes the boundary easy to blur.
 
 The test is **is there vendor material under it?** — not which component sends
