@@ -28,10 +28,17 @@
 // generates into ONE Go package, so `entry.proto` and `external.proto` sitting
 // side by side in agentshim.conversation.v1 would both land in
 // `conversationv1` — and a daemon that imported the external half would get
-// `Plane` and `dedup_key` in the same namespace, for free. A separate package
-// is a separate Go import path and a separate TypeScript module, so the
-// boundary a reviewer would otherwise have to enforce by attention is enforced
-// by the compiler instead.
+// `Plane` in the same namespace, for free. A separate package is a separate Go
+// import path and a separate TypeScript module.
+//
+// IT IS NOT NAMED `internal`, AND THAT WAS A REAL BUG. An earlier draft called
+// it agentshim.conversation.internal.v1, which put Go's `internal/` keyword in
+// the generated import path — and that keyword means "importable only from code
+// rooted at the parent directory", which here is the generated proto tree
+// itself. So the shim, the sidecar AND the store were all locked out of the
+// type they exist to write. The keyword enforced the exact opposite of the
+// intent, and enforced it so completely that nothing compiled far enough to
+// notice.
 //
 // check-conversation-isolation.sh refuses the import at codegen time, so the
 // violation is a build failure rather than a review note.
@@ -42,9 +49,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: agentshim/conversation/internal/v1/entry.proto
+// source: agentshim/conversation/shimside/v1/entry.proto
 
-package conversationinternalv1
+package conversationshimsidev1
 
 import (
 	v1 "agentrepl/proto/agentshim/conversation/v1"
@@ -90,7 +97,7 @@ type Entry struct {
 
 func (x *Entry) Reset() {
 	*x = Entry{}
-	mi := &file_agentshim_conversation_internal_v1_entry_proto_msgTypes[0]
+	mi := &file_agentshim_conversation_shimside_v1_entry_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -102,7 +109,7 @@ func (x *Entry) String() string {
 func (*Entry) ProtoMessage() {}
 
 func (x *Entry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_internal_v1_entry_proto_msgTypes[0]
+	mi := &file_agentshim_conversation_shimside_v1_entry_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -115,7 +122,7 @@ func (x *Entry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Entry.ProtoReflect.Descriptor instead.
 func (*Entry) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_internal_v1_entry_proto_rawDescGZIP(), []int{0}
+	return file_agentshim_conversation_shimside_v1_entry_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Entry) GetInternal() *InternalEntry {
@@ -147,19 +154,6 @@ type InternalEntry struct {
 	// Producers still record who saw what, for reconciliation when two accounts
 	// disagree; nothing downstream sees it.
 	Plane *Plane `protobuf:"bytes,1,opt,name=plane,proto3" json:"plane,omitempty"`
-	// The CROSS-PLANE identity: the key that lets the store recognize when the
-	// shim and the sidecar have each reported the same underlying fact, so it
-	// keeps one row instead of two.
-	//
-	// It is load-bearing and measured to be so. In the live store both planes
-	// populate it in the same namespaces (`uuid:`, `tur:`), and the two planes'
-	// surviving keys intersect in exactly zero rows — which is what a working
-	// collapse looks like, since the loser was refused and only one plane's row
-	// remains per key. Tens of thousands of twins have been collapsed.
-	//
-	// Empty is legal and means the record has no cross-plane twin, which is true
-	// of most of what each producer writes.
-	DedupKey string `protobuf:"bytes,2,opt,name=dedup_key,json=dedupKey,proto3" json:"dedup_key,omitempty"`
 	// The STABLE WRITE IDENTITY, minted once by the producer when the record is
 	// first handed to a store write, and never regenerated — not for a retry, not
 	// for a replay after the store bounced underneath the producer.
@@ -201,7 +195,7 @@ type InternalEntry struct {
 
 func (x *InternalEntry) Reset() {
 	*x = InternalEntry{}
-	mi := &file_agentshim_conversation_internal_v1_entry_proto_msgTypes[1]
+	mi := &file_agentshim_conversation_shimside_v1_entry_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -213,7 +207,7 @@ func (x *InternalEntry) String() string {
 func (*InternalEntry) ProtoMessage() {}
 
 func (x *InternalEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_internal_v1_entry_proto_msgTypes[1]
+	mi := &file_agentshim_conversation_shimside_v1_entry_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -226,7 +220,7 @@ func (x *InternalEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InternalEntry.ProtoReflect.Descriptor instead.
 func (*InternalEntry) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_internal_v1_entry_proto_rawDescGZIP(), []int{1}
+	return file_agentshim_conversation_shimside_v1_entry_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *InternalEntry) GetPlane() *Plane {
@@ -234,13 +228,6 @@ func (x *InternalEntry) GetPlane() *Plane {
 		return x.Plane
 	}
 	return nil
-}
-
-func (x *InternalEntry) GetDedupKey() string {
-	if x != nil {
-		return x.DedupKey
-	}
-	return ""
 }
 
 func (x *InternalEntry) GetWriteId() string {
@@ -331,7 +318,7 @@ type Plane struct {
 
 func (x *Plane) Reset() {
 	*x = Plane{}
-	mi := &file_agentshim_conversation_internal_v1_entry_proto_msgTypes[2]
+	mi := &file_agentshim_conversation_shimside_v1_entry_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -343,7 +330,7 @@ func (x *Plane) String() string {
 func (*Plane) ProtoMessage() {}
 
 func (x *Plane) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_internal_v1_entry_proto_msgTypes[2]
+	mi := &file_agentshim_conversation_shimside_v1_entry_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -356,7 +343,7 @@ func (x *Plane) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Plane.ProtoReflect.Descriptor instead.
 func (*Plane) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_internal_v1_entry_proto_rawDescGZIP(), []int{2}
+	return file_agentshim_conversation_shimside_v1_entry_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Plane) GetPlane() isPlane_Plane {
@@ -414,7 +401,7 @@ type PlaneStream struct {
 
 func (x *PlaneStream) Reset() {
 	*x = PlaneStream{}
-	mi := &file_agentshim_conversation_internal_v1_entry_proto_msgTypes[3]
+	mi := &file_agentshim_conversation_shimside_v1_entry_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -426,7 +413,7 @@ func (x *PlaneStream) String() string {
 func (*PlaneStream) ProtoMessage() {}
 
 func (x *PlaneStream) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_internal_v1_entry_proto_msgTypes[3]
+	mi := &file_agentshim_conversation_shimside_v1_entry_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -439,7 +426,7 @@ func (x *PlaneStream) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlaneStream.ProtoReflect.Descriptor instead.
 func (*PlaneStream) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_internal_v1_entry_proto_rawDescGZIP(), []int{3}
+	return file_agentshim_conversation_shimside_v1_entry_proto_rawDescGZIP(), []int{3}
 }
 
 // Read by the sidecar from what the vendor wrote to disk.
@@ -451,7 +438,7 @@ type PlaneFile struct {
 
 func (x *PlaneFile) Reset() {
 	*x = PlaneFile{}
-	mi := &file_agentshim_conversation_internal_v1_entry_proto_msgTypes[4]
+	mi := &file_agentshim_conversation_shimside_v1_entry_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -463,7 +450,7 @@ func (x *PlaneFile) String() string {
 func (*PlaneFile) ProtoMessage() {}
 
 func (x *PlaneFile) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_internal_v1_entry_proto_msgTypes[4]
+	mi := &file_agentshim_conversation_shimside_v1_entry_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -476,66 +463,65 @@ func (x *PlaneFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlaneFile.ProtoReflect.Descriptor instead.
 func (*PlaneFile) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_internal_v1_entry_proto_rawDescGZIP(), []int{4}
+	return file_agentshim_conversation_shimside_v1_entry_proto_rawDescGZIP(), []int{4}
 }
 
-var File_agentshim_conversation_internal_v1_entry_proto protoreflect.FileDescriptor
+var File_agentshim_conversation_shimside_v1_entry_proto protoreflect.FileDescriptor
 
-const file_agentshim_conversation_internal_v1_entry_proto_rawDesc = "" +
+const file_agentshim_conversation_shimside_v1_entry_proto_rawDesc = "" +
 	"\n" +
-	".agentshim/conversation/internal/v1/entry.proto\x12\"agentshim.conversation.internal.v1\x1a(agentshim/conversation/v1/external.proto\x1a4agentshim/conversation/internal/v1/unsupported.proto\"\x9c\x01\n" +
+	".agentshim/conversation/shimside/v1/entry.proto\x12\"agentshim.conversation.shimside.v1\x1a(agentshim/conversation/v1/external.proto\x1a4agentshim/conversation/shimside/v1/unsupported.proto\"\x9c\x01\n" +
 	"\x05Entry\x12M\n" +
-	"\binternal\x18\x01 \x01(\v21.agentshim.conversation.internal.v1.InternalEntryR\binternal\x12D\n" +
-	"\bexternal\x18\x02 \x01(\v2(.agentshim.conversation.v1.ExternalEntryR\bexternal\"\x9a\x03\n" +
+	"\binternal\x18\x01 \x01(\v21.agentshim.conversation.shimside.v1.InternalEntryR\binternal\x12D\n" +
+	"\bexternal\x18\x02 \x01(\v2(.agentshim.conversation.v1.ExternalEntryR\bexternal\"\x8e\x03\n" +
 	"\rInternalEntry\x12?\n" +
-	"\x05plane\x18\x01 \x01(\v2).agentshim.conversation.internal.v1.PlaneR\x05plane\x12\x1b\n" +
-	"\tdedup_key\x18\x02 \x01(\tR\bdedupKey\x12\x19\n" +
+	"\x05plane\x18\x01 \x01(\v2).agentshim.conversation.shimside.v1.PlaneR\x05plane\x12\x19\n" +
 	"\bwrite_id\x18\x03 \x01(\tR\awriteId\x12b\n" +
 	"\x0fvendor_specific\x18\n" +
-	" \x01(\v27.agentshim.conversation.internal.v1.VendorSpecificEntryH\x00R\x0evendorSpecific\x12L\n" +
-	"\aunknown\x18\v \x01(\v20.agentshim.conversation.internal.v1.UnknownEntryH\x00R\aunknown\x12O\n" +
-	"\bunparsed\x18\f \x01(\v21.agentshim.conversation.internal.v1.UnparsedEntryH\x00R\bunparsedB\r\n" +
-	"\vunconverted\"\xa0\x01\n" +
+	" \x01(\v27.agentshim.conversation.shimside.v1.VendorSpecificEntryH\x00R\x0evendorSpecific\x12L\n" +
+	"\aunknown\x18\v \x01(\v20.agentshim.conversation.shimside.v1.UnknownEntryH\x00R\aunknown\x12O\n" +
+	"\bunparsed\x18\f \x01(\v21.agentshim.conversation.shimside.v1.UnparsedEntryH\x00R\bunparsedB\r\n" +
+	"\vunconvertedJ\x04\b\x02\x10\x03R\tdedup_key\"\xa0\x01\n" +
 	"\x05Plane\x12I\n" +
-	"\x06stream\x18\x01 \x01(\v2/.agentshim.conversation.internal.v1.PlaneStreamH\x00R\x06stream\x12C\n" +
-	"\x04file\x18\x02 \x01(\v2-.agentshim.conversation.internal.v1.PlaneFileH\x00R\x04fileB\a\n" +
+	"\x06stream\x18\x01 \x01(\v2/.agentshim.conversation.shimside.v1.PlaneStreamH\x00R\x06stream\x12C\n" +
+	"\x04file\x18\x02 \x01(\v2-.agentshim.conversation.shimside.v1.PlaneFileH\x00R\x04fileB\a\n" +
 	"\x05plane\"\r\n" +
 	"\vPlaneStream\"\v\n" +
-	"\tPlaneFileBKZIagentrepl/proto/agentshim/conversation/internal/v1;conversationinternalv1b\x06proto3"
+	"\tPlaneFileBKZIagentrepl/proto/agentshim/conversation/shimside/v1;conversationshimsidev1b\x06proto3"
 
 var (
-	file_agentshim_conversation_internal_v1_entry_proto_rawDescOnce sync.Once
-	file_agentshim_conversation_internal_v1_entry_proto_rawDescData []byte
+	file_agentshim_conversation_shimside_v1_entry_proto_rawDescOnce sync.Once
+	file_agentshim_conversation_shimside_v1_entry_proto_rawDescData []byte
 )
 
-func file_agentshim_conversation_internal_v1_entry_proto_rawDescGZIP() []byte {
-	file_agentshim_conversation_internal_v1_entry_proto_rawDescOnce.Do(func() {
-		file_agentshim_conversation_internal_v1_entry_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_agentshim_conversation_internal_v1_entry_proto_rawDesc), len(file_agentshim_conversation_internal_v1_entry_proto_rawDesc)))
+func file_agentshim_conversation_shimside_v1_entry_proto_rawDescGZIP() []byte {
+	file_agentshim_conversation_shimside_v1_entry_proto_rawDescOnce.Do(func() {
+		file_agentshim_conversation_shimside_v1_entry_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_agentshim_conversation_shimside_v1_entry_proto_rawDesc), len(file_agentshim_conversation_shimside_v1_entry_proto_rawDesc)))
 	})
-	return file_agentshim_conversation_internal_v1_entry_proto_rawDescData
+	return file_agentshim_conversation_shimside_v1_entry_proto_rawDescData
 }
 
-var file_agentshim_conversation_internal_v1_entry_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
-var file_agentshim_conversation_internal_v1_entry_proto_goTypes = []any{
-	(*Entry)(nil),               // 0: agentshim.conversation.internal.v1.Entry
-	(*InternalEntry)(nil),       // 1: agentshim.conversation.internal.v1.InternalEntry
-	(*Plane)(nil),               // 2: agentshim.conversation.internal.v1.Plane
-	(*PlaneStream)(nil),         // 3: agentshim.conversation.internal.v1.PlaneStream
-	(*PlaneFile)(nil),           // 4: agentshim.conversation.internal.v1.PlaneFile
+var file_agentshim_conversation_shimside_v1_entry_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_agentshim_conversation_shimside_v1_entry_proto_goTypes = []any{
+	(*Entry)(nil),               // 0: agentshim.conversation.shimside.v1.Entry
+	(*InternalEntry)(nil),       // 1: agentshim.conversation.shimside.v1.InternalEntry
+	(*Plane)(nil),               // 2: agentshim.conversation.shimside.v1.Plane
+	(*PlaneStream)(nil),         // 3: agentshim.conversation.shimside.v1.PlaneStream
+	(*PlaneFile)(nil),           // 4: agentshim.conversation.shimside.v1.PlaneFile
 	(*v1.ExternalEntry)(nil),    // 5: agentshim.conversation.v1.ExternalEntry
-	(*VendorSpecificEntry)(nil), // 6: agentshim.conversation.internal.v1.VendorSpecificEntry
-	(*UnknownEntry)(nil),        // 7: agentshim.conversation.internal.v1.UnknownEntry
-	(*UnparsedEntry)(nil),       // 8: agentshim.conversation.internal.v1.UnparsedEntry
+	(*VendorSpecificEntry)(nil), // 6: agentshim.conversation.shimside.v1.VendorSpecificEntry
+	(*UnknownEntry)(nil),        // 7: agentshim.conversation.shimside.v1.UnknownEntry
+	(*UnparsedEntry)(nil),       // 8: agentshim.conversation.shimside.v1.UnparsedEntry
 }
-var file_agentshim_conversation_internal_v1_entry_proto_depIdxs = []int32{
-	1, // 0: agentshim.conversation.internal.v1.Entry.internal:type_name -> agentshim.conversation.internal.v1.InternalEntry
-	5, // 1: agentshim.conversation.internal.v1.Entry.external:type_name -> agentshim.conversation.v1.ExternalEntry
-	2, // 2: agentshim.conversation.internal.v1.InternalEntry.plane:type_name -> agentshim.conversation.internal.v1.Plane
-	6, // 3: agentshim.conversation.internal.v1.InternalEntry.vendor_specific:type_name -> agentshim.conversation.internal.v1.VendorSpecificEntry
-	7, // 4: agentshim.conversation.internal.v1.InternalEntry.unknown:type_name -> agentshim.conversation.internal.v1.UnknownEntry
-	8, // 5: agentshim.conversation.internal.v1.InternalEntry.unparsed:type_name -> agentshim.conversation.internal.v1.UnparsedEntry
-	3, // 6: agentshim.conversation.internal.v1.Plane.stream:type_name -> agentshim.conversation.internal.v1.PlaneStream
-	4, // 7: agentshim.conversation.internal.v1.Plane.file:type_name -> agentshim.conversation.internal.v1.PlaneFile
+var file_agentshim_conversation_shimside_v1_entry_proto_depIdxs = []int32{
+	1, // 0: agentshim.conversation.shimside.v1.Entry.internal:type_name -> agentshim.conversation.shimside.v1.InternalEntry
+	5, // 1: agentshim.conversation.shimside.v1.Entry.external:type_name -> agentshim.conversation.v1.ExternalEntry
+	2, // 2: agentshim.conversation.shimside.v1.InternalEntry.plane:type_name -> agentshim.conversation.shimside.v1.Plane
+	6, // 3: agentshim.conversation.shimside.v1.InternalEntry.vendor_specific:type_name -> agentshim.conversation.shimside.v1.VendorSpecificEntry
+	7, // 4: agentshim.conversation.shimside.v1.InternalEntry.unknown:type_name -> agentshim.conversation.shimside.v1.UnknownEntry
+	8, // 5: agentshim.conversation.shimside.v1.InternalEntry.unparsed:type_name -> agentshim.conversation.shimside.v1.UnparsedEntry
+	3, // 6: agentshim.conversation.shimside.v1.Plane.stream:type_name -> agentshim.conversation.shimside.v1.PlaneStream
+	4, // 7: agentshim.conversation.shimside.v1.Plane.file:type_name -> agentshim.conversation.shimside.v1.PlaneFile
 	8, // [8:8] is the sub-list for method output_type
 	8, // [8:8] is the sub-list for method input_type
 	8, // [8:8] is the sub-list for extension type_name
@@ -543,18 +529,18 @@ var file_agentshim_conversation_internal_v1_entry_proto_depIdxs = []int32{
 	0, // [0:8] is the sub-list for field type_name
 }
 
-func init() { file_agentshim_conversation_internal_v1_entry_proto_init() }
-func file_agentshim_conversation_internal_v1_entry_proto_init() {
-	if File_agentshim_conversation_internal_v1_entry_proto != nil {
+func init() { file_agentshim_conversation_shimside_v1_entry_proto_init() }
+func file_agentshim_conversation_shimside_v1_entry_proto_init() {
+	if File_agentshim_conversation_shimside_v1_entry_proto != nil {
 		return
 	}
-	file_agentshim_conversation_internal_v1_unsupported_proto_init()
-	file_agentshim_conversation_internal_v1_entry_proto_msgTypes[1].OneofWrappers = []any{
+	file_agentshim_conversation_shimside_v1_unsupported_proto_init()
+	file_agentshim_conversation_shimside_v1_entry_proto_msgTypes[1].OneofWrappers = []any{
 		(*InternalEntry_VendorSpecific)(nil),
 		(*InternalEntry_Unknown)(nil),
 		(*InternalEntry_Unparsed)(nil),
 	}
-	file_agentshim_conversation_internal_v1_entry_proto_msgTypes[2].OneofWrappers = []any{
+	file_agentshim_conversation_shimside_v1_entry_proto_msgTypes[2].OneofWrappers = []any{
 		(*Plane_Stream)(nil),
 		(*Plane_File)(nil),
 	}
@@ -562,17 +548,17 @@ func file_agentshim_conversation_internal_v1_entry_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_conversation_internal_v1_entry_proto_rawDesc), len(file_agentshim_conversation_internal_v1_entry_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_conversation_shimside_v1_entry_proto_rawDesc), len(file_agentshim_conversation_shimside_v1_entry_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_agentshim_conversation_internal_v1_entry_proto_goTypes,
-		DependencyIndexes: file_agentshim_conversation_internal_v1_entry_proto_depIdxs,
-		MessageInfos:      file_agentshim_conversation_internal_v1_entry_proto_msgTypes,
+		GoTypes:           file_agentshim_conversation_shimside_v1_entry_proto_goTypes,
+		DependencyIndexes: file_agentshim_conversation_shimside_v1_entry_proto_depIdxs,
+		MessageInfos:      file_agentshim_conversation_shimside_v1_entry_proto_msgTypes,
 	}.Build()
-	File_agentshim_conversation_internal_v1_entry_proto = out.File
-	file_agentshim_conversation_internal_v1_entry_proto_goTypes = nil
-	file_agentshim_conversation_internal_v1_entry_proto_depIdxs = nil
+	File_agentshim_conversation_shimside_v1_entry_proto = out.File
+	file_agentshim_conversation_shimside_v1_entry_proto_goTypes = nil
+	file_agentshim_conversation_shimside_v1_entry_proto_depIdxs = nil
 }

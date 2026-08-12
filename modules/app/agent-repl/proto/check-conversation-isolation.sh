@@ -18,12 +18,20 @@
 # WHY A SEPARATE PACKAGE RATHER THAN A SEPARATE FILE. Every file in one proto
 # package generates into ONE Go package. entry.proto and external.proto sitting
 # side by side in agentshim.conversation.v1 would both land in `conversationv1`,
-# and a daemon importing the external half would get Plane and dedup_key in the
-# same namespace for free — the file split would enforce nothing at all in Go.
-# TypeScript would have honored it (one module per file); Go would not. So the
-# internal half is its own proto package, hence its own Go import path and its
-# own TS module, and this gate checks the one thing left: that nobody imports it
-# from a runtime that has no business with it.
+# and a daemon importing the external half would get Plane in the same namespace
+# for free — the file split would enforce nothing at all in Go. TypeScript would
+# have honored it (one module per file); Go would not. So the shim-side half is
+# its own proto package, hence its own Go import path and its own TS module, and
+# this gate checks the one thing left: that nobody imports it from a runtime
+# that has no business with it.
+#
+# WHY THE PACKAGE IS NOT CALLED `internal`. It was, briefly, and that was a bug
+# this gate could not catch. Go's `internal/` path element means "importable
+# only from code rooted at the parent directory" — which for a generated proto
+# tree is the tree itself, so the shim, the sidecar AND the store were locked
+# out of the type they exist to write. The keyword enforced the opposite of the
+# intent, and enforced it so completely that nothing compiled far enough for
+# this gate to ever fire.
 #
 # WHAT IT REFUSES: any file under a FORBIDDEN ROOT that imports the internal
 # package, in .proto, .go or .ts form. The forbidden roots are the consumer-side
@@ -47,8 +55,8 @@ ROOT="${1:-$(cd "$THIS_DIR/.." && pwd)}"
 
 # The proto package, and the Go import path its bindings generate into. Both
 # forms are checked because a Go file names the import path, not the package.
-PROTO_PKG="agentshim/conversation/internal/v1"
-GO_PKG="agentrepl/proto/agentshim/conversation/internal/v1"
+PROTO_PKG="agentshim/conversation/shimside/v1"
+GO_PKG="agentrepl/proto/agentshim/conversation/shimside/v1"
 
 if [ ! -d "$ROOT" ]; then
     printf 'conversation-isolation: root %s does not exist\n' "$ROOT" >&2
@@ -118,7 +126,7 @@ violations="$(
         if (index(code, go_pkg) > 0 || index(code, proto_pkg) > 0) {
             name = FILENAME
             sub("^" root, "", name)
-            printf "%s:%d: IMPORTS the conversation-internal package\n", name, FNR
+            printf "%s:%d: IMPORTS the conversation-shimside package\n", name, FNR
         }
     }
     END { exit 0 }

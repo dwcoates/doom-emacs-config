@@ -16,8 +16,9 @@ PROTOS := \
   agentshim/conversation/v1/bookkeeping.proto \
   agentshim/conversation/v1/message.proto \
   agentshim/conversation/v1/external.proto \
-  agentshim/conversation/internal/v1/unsupported.proto \
-  agentshim/conversation/internal/v1/entry.proto \
+  agentshim/conversation/shimside/v1/unsupported.proto \
+  agentshim/conversation/shimside/v1/entry.proto \
+  agentshim/conversation/shimside/v1/write.proto \
   agentshim/frontend/v1/agent-emission.proto \
   agentshim/frontend/v1/agent-response.proto \
   agentshim/frontend/v1/commands.proto \
