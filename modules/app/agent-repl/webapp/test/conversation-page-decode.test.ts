@@ -5,9 +5,10 @@ import { decodeFrontendFrame } from "../src/frontend-proto.js";
  * THE PAGE DECODER REFUSES WHAT A RENDERER COULD NOT ACT ON.
  *
  * A page's continuation is the whole of the load-more contract: `more` says
- * where to ask next, `start` retires the affordance. A page carrying neither
- * would render a button that can never advance and can never retire, so it is
- * rejected here rather than handed to the feed.
+ * older history remains, `start` retires the affordance. A page carrying
+ * neither is rejected here rather than defaulted to either answer — defaulting
+ * to `more` gives an affordance that can never succeed, and defaulting to
+ * `start` silently hides the rest of a conversation.
  */
 
 const page = (over: Record<string, unknown> = {}): string =>
@@ -33,13 +34,14 @@ describe("decoding a ConversationPage frame", () => {
     expect(frame.frame.value.continuation).toEqual({ case: "start" });
   });
 
-  it("reads the more arm's cursor verbatim", () => {
-    // Arrange — opaque: this end stores and returns it, never parses it.
+  it("reads the EMPTY more arm as older history remaining", () => {
+    // Arrange — HistoryHasMore carries nothing: "there is more" is a fact the
+    // client acts on by calling NextPageCmd, not a handle it stores.
     // Act
-    const frame = decodeFrontendFrame(page({ start: undefined, more: { cursor: "cp1-OPAQUE" } }));
+    const frame = decodeFrontendFrame(page({ start: undefined, more: {} }));
     // Assert
     if (frame.frame.case !== "conversationPage") throw new Error("wrong arm");
-    expect(frame.frame.value.continuation).toEqual({ case: "more", cursor: "cp1-OPAQUE" });
+    expect(frame.frame.value.continuation).toEqual({ case: "more" });
   });
 
   it("carries live_join_seq as a number the store can rank by", () => {
@@ -54,20 +56,23 @@ describe("decoding a ConversationPage frame", () => {
   it("refuses a page carrying NEITHER continuation arm", () => {
     // Arrange — it would render a load-more that can never retire.
     // Act / Assert
-    expect(() => decodeFrontendFrame(page({ start: undefined }))).toThrow(/neither `more` nor `start`/);
+    expect(() => decodeFrontendFrame(page({ start: undefined }))).toThrow(
+      /NEITHER `more` nor `start`/,
+    );
   });
 
   it("refuses a page carrying BOTH continuation arms", () => {
     // Arrange — they are one oneof; both set means the frame is malformed.
     // Act / Assert
-    expect(() => decodeFrontendFrame(page({ more: { cursor: "c" } }))).toThrow(/both `more` and `start`/);
+    expect(() => decodeFrontendFrame(page({ more: {} }))).toThrow(/both `more` and `start`/);
   });
 
-  it("refuses a more arm with an empty cursor", () => {
-    // Arrange — load-more could never advance on it.
+  it("refuses a more arm carrying a cursor, which is a position this client does not hold", () => {
+    // Arrange — HistoryHasMore is empty by construction; a field on it would
+    // be exactly the position the contract removed.
     // Act / Assert
-    expect(() => decodeFrontendFrame(page({ start: undefined, more: { cursor: "" } }))).toThrow(
-      /no cursor/,
+    expect(() => decodeFrontendFrame(page({ start: undefined, more: { cursor: "c" } }))).toThrow(
+      /unrecognized field/,
     );
   });
 

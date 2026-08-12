@@ -31,6 +31,7 @@ import type {
   WorkspaceGateView,
 } from "./frontend-proto.js";
 import { admitFenced, type FencedComponentView, type FencedView } from "./fence.js";
+import { historyContinuation, type HistoryContinuation } from "./load-more.js";
 
 /**
  * How many retired fences a workspace remembers.
@@ -492,15 +493,18 @@ export interface InFlightPage {
 /**
  * The feed's history-paging state.
  *
- * `cursor` is the daemon's opaque continuation token, never parsed here.
- * `reachedStart` is set once a page reports it reached the conversation's
- * beginning, and it is what RETIRES the load-more affordance — a fact
- * established by the daemon reading to the floor, not inferred from an empty
- * page.
+ * `continuation` is the ONLY thing the load-more affordance reads: the
+ * `continuation` oneof the last adopted page carried, verbatim. `more` means
+ * older history remains and the affordance is available; `start` means the
+ * daemon read to the floor and the affordance retires. Null means no page has
+ * been adopted yet, which is silence rather than "there is more".
+ *
+ * THE CLIENT HOLDS NO POSITION. There is no cursor here, because under this
+ * contract "there is more" is a fact the client acts on by calling
+ * `NextPageCmd`, not a handle it stores.
  */
 export interface ConversationPaging {
-  cursor: string | null;
-  reachedStart: boolean;
+  continuation: HistoryContinuation | null;
   inFlight: InFlightPage | null;
   /**
    * The request id of the last page DISCARDED for a stale fence, or null.
@@ -752,7 +756,7 @@ function initialState(): StoreState {
     costUsd: null,
     taskSummary: null,
     lastSeq: 0,
-    paging: { cursor: null, reachedStart: false, inFlight: null, staleFenceRequestId: null },
+    paging: { continuation: null, inFlight: null, staleFenceRequestId: null },
     renderState: null,
     sessionConnectivity: null,
     sessionStatus: null,
@@ -1118,16 +1122,14 @@ export class ConversationStore {
   rebaseSeqSpace(): void {
     this.state.items = [];
     this.state.lastSeq = 0;
-    // THE PAGING CURSOR IS RANKED IN THE RETIRED SPACE TOO. It is the daemon's
-    // handle on a position in a conversation that is gone, and `reachedStart`
-    // is a fact established about that same conversation. Left standing, the
-    // load-more affordance would either be retired over a feed that has just
-    // been emptied, or would splice the retired conversation's older history
-    // in underneath the new space's items. The in-flight record is left alone
-    // deliberately: a page already asked for still has an answer coming, and
-    // the correlation check is what discards it.
-    this.state.paging.cursor = null;
-    this.state.paging.reachedStart = false;
+    // THE CONTINUATION IS A FACT ABOUT THE RETIRED CONVERSATION. Left
+    // standing, the load-more affordance would either be retired over a feed
+    // that has just been emptied (a `start` established about a conversation
+    // that is gone), or would offer to page back into history the new space
+    // does not have (a `more` about the same). The in-flight record is left
+    // alone deliberately: a page already asked for still has an answer coming,
+    // and the correlation check is what discards it.
+    this.state.paging.continuation = null;
   }
 
   /**
@@ -1868,12 +1870,11 @@ export class ConversationStore {
     if (request.anchor === "tail" && page.liveJoinSeq > this.state.lastSeq) {
       this.state.lastSeq = page.liveJoinSeq;
     }
-    if (page.continuation.case === "start") {
-      this.state.paging.reachedStart = true;
-      this.state.paging.cursor = null;
-    } else {
-      this.state.paging.cursor = page.continuation.cursor;
-    }
+    // THE AFFORDANCE'S ONLY INPUT, adopted verbatim. Not a count, not a scroll
+    // position, not whether this page looked short: `start` retires the
+    // affordance because the daemon read to the floor, and `more` offers it
+    // because the daemon says older history remains.
+    this.state.paging.continuation = page.continuation;
     return true;
   }
 
