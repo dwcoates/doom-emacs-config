@@ -106,9 +106,10 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Workspace: "ws", Fence: "s1", ThroughSeq: 7,
 				Messages: []*frontendv1.Message{{
 					Uuid: "u1", TsMs: producedMs,
-					Lineage: FeedRowLineage("u1"),
-					Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: assistantMsg}}}},
+					Lineage:    FeedRowLineage("u1"),
+					Durability: &frontendv1.Message_Durable{Durable: &frontendv1.MessageDurable{}},
+					Source:     frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Payload:    &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: assistantMsg}}}},
 				}},
 			},
 		},
@@ -124,9 +125,10 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Workspace: "ws", Fence: "s1", ThroughSeq: 9,
 				Messages: []*frontendv1.Message{{
 					Uuid: "u3", TsMs: producedMs,
-					Lineage: FeedRowLineage("u3"),
-					Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: toolUseMsg}}}},
+					Lineage:    FeedRowLineage("u3"),
+					Durability: &frontendv1.Message_Durable{Durable: &frontendv1.MessageDurable{}},
+					Source:     frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Payload:    &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: toolUseMsg}}}},
 				}},
 			},
 		},
@@ -142,9 +144,10 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Workspace: "ws", Fence: "s1", ThroughSeq: 10,
 				Messages: []*frontendv1.Message{{
 					Uuid: "u4", TsMs: producedMs,
-					Lineage: FeedRowLineage("u4"),
-					Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Payload: &frontendv1.Message_UserMessage{UserMessage: toolResultMsg},
+					Lineage:    FeedRowLineage("u4"),
+					Durability: &frontendv1.Message_Durable{Durable: &frontendv1.MessageDurable{}},
+					Source:     frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Payload:    &frontendv1.Message_UserMessage{UserMessage: toolResultMsg},
 				}},
 			},
 		},
@@ -160,9 +163,10 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Workspace: "ws", Fence: "s1", ThroughSeq: 2,
 				Messages: []*frontendv1.Message{{
 					Uuid: "u5", TsMs: producedMs, RequestId: "req-5",
-					Lineage: FeedRowLineage("u5"),
-					Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Payload: &frontendv1.Message_UserMessage{UserMessage: promptMsg},
+					Lineage:    FeedRowLineage("u5"),
+					Durability: &frontendv1.Message_Durable{Durable: &frontendv1.MessageDurable{}},
+					Source:     frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Payload:    &frontendv1.Message_UserMessage{UserMessage: promptMsg},
 				}},
 			},
 		},
@@ -175,11 +179,12 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", Fence: "s1", ThroughSeq: 12,
 				Messages: []*frontendv1.Message{{
-					Uuid:    "result:s1:12",
-					Lineage: FeedRowLineage("result:s1:12"),
-					TsMs:    producedMs,
-					Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-					Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: resultMsg}}},
+					Uuid:       "result:s1:12",
+					Lineage:    FeedRowLineage("result:s1:12"),
+					Durability: &frontendv1.Message_Durable{Durable: &frontendv1.MessageDurable{}},
+					TsMs:       producedMs,
+					Source:     frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Payload:    &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: resultMsg}}},
 				}},
 			},
 		},
@@ -282,9 +287,10 @@ func TestConversationDeltaFromEventTranscriptAssistantUsesEnvelopeTs(t *testing.
 		Workspace: "ws", Fence: "s1", ThroughSeq: 20,
 		Messages: []*frontendv1.Message{{
 			Uuid: "au1", TsMs: wantTsMs,
-			Lineage: FeedRowLineage("au1"),
-			Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-			Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: msg}}}},
+			Lineage:    FeedRowLineage("au1"),
+			Durability: &frontendv1.Message_Durable{Durable: &frontendv1.MessageDurable{}},
+			Source:     frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+			Payload:    &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: msg}}}},
 		}},
 	}
 
@@ -1586,5 +1592,86 @@ func TestEveryIdentityLessItemUsesTheSharedDerivation(t *testing.T) {
 				t.Fatalf("uuid = %q, want %q", uuid, tc.want)
 			}
 		})
+	}
+}
+
+// --- every curated message states its durability class ----------------------
+
+// TestAnOrdinaryPromptStatesTheDurableArm is the defect: an ordinary user
+// prompt reached a frontend with NEITHER arm set, which the contract calls
+// malformed — a reader cannot tell "no record exists" from "the record was not
+// found". A prompt becomes a message on the FILE plane, where the CLI wrote a
+// record for it, so it is durable.
+func TestAnOrdinaryPromptStatesTheDurableArm(t *testing.T) {
+	// Arrange.
+	ev := &corev1.Event{
+		SessionId: "s1", Seq: 21, ProducedAtMs: producedMs,
+		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
+			Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
+				Envelope: &datav1.LineEnvelope{Uuid: "pu1"},
+				Message:  &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentString{ContentString: "hi there"}},
+			}},
+		})},
+	}
+
+	// Act.
+	got, _, err := conversationDeltaFromEvent("ws", "s1", ev)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("conversationDeltaFromEvent: %v", err)
+	}
+	if got.GetMessages()[0].GetDurable() == nil {
+		t.Fatalf("durability arm = %T, want the durable arm — the prompt exists because the CLI wrote a record for it", got.GetMessages()[0].GetDurability())
+	}
+}
+
+// TestALocalCommandRecordStatesTheEphemeralArm is the one curated shape the
+// contract puts in the ephemeral class: the harness's system/local_command
+// record carries no promptId and the user ruled it out of the durable set.
+func TestALocalCommandRecordStatesTheEphemeralArm(t *testing.T) {
+	// Arrange.
+	ev := &corev1.Event{
+		SessionId: "s1", Seq: 22, ProducedAtMs: producedMs,
+		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
+			Line: &datav1.TranscriptLine_System{System: &datav1.SystemLine{
+				Envelope: &datav1.LineEnvelope{Uuid: "lc1", IsMeta: true},
+				Subtype:  &datav1.SystemLine_LocalCommand{LocalCommand: &datav1.LocalCommandLine{Content: "Context low"}},
+			}},
+		})},
+	}
+
+	// Act.
+	got, _, err := conversationDeltaFromEvent("ws", "s1", ev)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("conversationDeltaFromEvent: %v", err)
+	}
+	if got.GetMessages()[0].GetEphemeral() == nil {
+		t.Fatalf("durability arm = %T, want the ephemeral arm for a system/local_command record", got.GetMessages()[0].GetDurability())
+	}
+}
+
+// TestACategoryCRecordAcquiresNoLineageAndNoDurabilityArm keeps the
+// classification from manufacturing feed rows. A session_started renders as
+// NOTHING and is not a message at all (FROZEN-message-lineage Part 3); giving
+// one a class would put a phantom row in the feed and shorten a page.
+func TestACategoryCRecordAcquiresNoLineageAndNoDurabilityArm(t *testing.T) {
+	// Arrange.
+	ev := &corev1.Event{
+		SessionId: "s1", Seq: 23, ProducedAtMs: producedMs,
+		Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}},
+	}
+
+	// Act.
+	got, _, err := conversationDeltaFromEvent("ws", "s1", ev)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("conversationDeltaFromEvent: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("a category-C record curated to %d message(s), want none — it is not a message and has no class to state", len(got.GetMessages()))
 	}
 }
