@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -19,7 +21,7 @@ func TestOwnerResolutionPrefersExactNormalizedOutputPath(t *testing.T) {
 		t.Fatal("did not record live task owner")
 	}
 	got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/slug/runtime/tasks/./b1.output", "b1"))
-	if !got.Resolved() || got.Outcome != OwnerResolvedPath || got.SessionID != "S1" || got.OutputPath != path {
+	if !got.Resolved() || got.Outcome != OwnerResolvedPath || got.SessionID != "S1" || got.OutputPath != normalizeOwnerOutputPath(path) {
 		t.Fatalf("resolution = %+v, want exact path S1", got)
 	}
 }
@@ -174,5 +176,103 @@ func TestOwnerResolutionRejectsMalformedSpoolTarget(t *testing.T) {
 	}
 	if lines := linesContaining(read(), "rejected invalid spool target"); len(lines) != 1 {
 		t.Fatalf("invalid resolution logs = %v, want one", lines)
+	}
+}
+
+// symlinkedSpoolDir returns two spellings of one tasks directory: the real one
+// and one reached through a symlinked ancestor, mirroring macOS /tmp.
+func symlinkedSpoolDir(t *testing.T) (real string, linked string) {
+	t.Helper()
+	base := t.TempDir()
+	real = filepath.Join(base, "private", "runtime", "tasks")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatalf("mkdir spool dir: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(base, "private"), filepath.Join(base, "link")); err != nil {
+		t.Fatalf("symlink spool root: %v", err)
+	}
+	return real, filepath.Join(base, "link", "runtime", "tasks")
+}
+
+func TestOwnerResolutionResolvesSymlinkedSpellingOfRecordedPath(t *testing.T) {
+	s, _ := ownerSidecar(t)
+	realDir, linkedDir := symlinkedSpoolDir(t)
+	recorded := filepath.Join(realDir, "b1.output")
+	if !s.noteTaskOwner("b1", "S1", recorded, OwnerSourceLiveLaunch) {
+		t.Fatal("did not record live task owner")
+	}
+
+	got := s.resolveOwnerResult(ownerTarget(filepath.Join(linkedDir, "b1.output"), "b1"))
+
+	if !got.Resolved() || got.SessionID != "S1" {
+		t.Fatalf("resolution = %+v, want S1 resolved through symlinked spelling", got)
+	}
+}
+
+func TestOwnerResolutionResolvesTaskOnlyAssociationAcrossSymlinkedSpellings(t *testing.T) {
+	s, read := ownerSidecar(t)
+	realDir, linkedDir := symlinkedSpoolDir(t)
+	s.owners["b1"] = "S1"
+	s.ownerSource["b1"] = OwnerSourceDurableOpenTask
+	s.ownerTaskOutput["b1"] = normalizeOwnerOutputPath(filepath.Join(realDir, "b1.output"))
+
+	got := s.resolveOwnerResult(ownerTarget(filepath.Join(linkedDir, "b1.output"), "b1"))
+
+	if got.Outcome != OwnerResolvedTask || got.SessionID != "S1" {
+		t.Fatalf("resolution = %+v, want task association across symlinked spellings", got)
+	}
+	if lines := linesContaining(read(), "different authoritative output path"); len(lines) != 0 {
+		t.Fatalf("conflict logs = %v, want none", lines)
+	}
+}
+
+func TestNormalizeOwnerOutputPathResolvesSymlinkForMissingSpoolFile(t *testing.T) {
+	realDir, linkedDir := symlinkedSpoolDir(t)
+
+	got := normalizeOwnerOutputPath(filepath.Join(linkedDir, "not-created-yet.output"))
+
+	if want := normalizeOwnerOutputPath(realDir) + "/not-created-yet.output"; got != want {
+		t.Fatalf("normalized = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeOwnerOutputPathKeepsFullyMissingPath(t *testing.T) {
+	want := "/agent-repl-absent-root/runtime/tasks/b1.output"
+
+	if got := normalizeOwnerOutputPath(want); got != want {
+		t.Fatalf("normalized = %q, want %q unchanged", got, want)
+	}
+}
+
+func TestOwnerResolutionStillRejectsGenuinelyDifferentAuthoritativePath(t *testing.T) {
+	s, read := ownerSidecar(t)
+	realDir, _ := symlinkedSpoolDir(t)
+	s.owners["b1"] = "S1"
+	s.ownerSource["b1"] = OwnerSourceDurableOpenTask
+	s.ownerTaskOutput["b1"] = normalizeOwnerOutputPath(filepath.Join(realDir, "b1.output"))
+
+	got := s.resolveOwnerResult(ownerTarget(filepath.Join(realDir, "other.output"), "b1"))
+
+	if got.Outcome != OwnerUnresolvedConflict || got.Resolved() {
+		t.Fatalf("resolution = %+v, want conflict for a genuinely different file", got)
+	}
+	if lines := linesContaining(read(), "different authoritative output path"); len(lines) != 1 {
+		t.Fatalf("conflict logs = %v, want one", lines)
+	}
+}
+
+func TestOwnerResolutionStillRejectsTwoSessionsClaimingOneTaskAcrossSymlinkedSpellings(t *testing.T) {
+	s, read := ownerSidecar(t)
+	realDir, linkedDir := symlinkedSpoolDir(t)
+	s.noteTaskOwner("b1", "S1", filepath.Join(realDir, "b1.output"), OwnerSourceLiveLaunch)
+	s.noteTaskOwner("b1", "S2", filepath.Join(linkedDir, "b1.output"), OwnerSourceLiveLaunch)
+
+	got := s.resolveOwnerResult(ownerTarget(filepath.Join(realDir, "b1.output"), "b1"))
+
+	if got.Outcome != OwnerUnresolvedConflict || got.Resolved() {
+		t.Fatalf("resolution = %+v, want conflict for two sessions claiming one task", got)
+	}
+	if lines := linesContaining(read(), "CONFLICTING owner"); len(lines) != 1 {
+		t.Fatalf("conflict logs = %v, want one", lines)
 	}
 }
