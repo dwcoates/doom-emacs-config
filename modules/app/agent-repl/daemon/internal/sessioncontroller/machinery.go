@@ -58,21 +58,49 @@ var slashCommandMachineryPrefixes = []string{
 	"<local-command-stdout>",
 }
 
-// isSlashCommandMachineryText reports whether one user-record body is the CLI's
-// slash-command bookkeeping rather than a prompt.
+// machineryOpenTag returns the envelope tag a text OPENS with, after leading
+// whitespace, or "" when it opens with none.
 //
-// HEAD ONLY, after leading whitespace. A record the CLI synthesizes OPENS with
-// its envelope tag; a human prompt that merely quotes or discusses one of these
-// tags mid-sentence ("what does <command-name> mean?") is a real prompt and
-// must reach the feed untouched. Matching anywhere in the body would swallow it.
-func isSlashCommandMachineryText(content string) bool {
+// HEAD ONLY. A record the CLI synthesizes OPENS with its envelope tag; a human
+// prompt that merely quotes or discusses one of these tags mid-sentence ("what
+// does <command-name> mean?") is a real prompt and must reach the feed
+// untouched. Matching anywhere in the body would swallow it.
+func machineryOpenTag(content string) string {
 	head := strings.TrimLeft(content, " \t\r\n")
 	for _, prefix := range slashCommandMachineryPrefixes {
 		if strings.HasPrefix(head, prefix) {
-			return true
+			return prefix
 		}
 	}
-	return false
+	return ""
+}
+
+// closingTagFor turns an opening envelope tag into the closing tag that must
+// balance it: `<command-name>` into `</command-name>`.
+func closingTagFor(open string) string {
+	return "</" + strings.TrimPrefix(open, "<")
+}
+
+// isSlashCommandMachineryText reports whether one user-record body is the CLI's
+// slash-command bookkeeping rather than a prompt.
+//
+// AN OPENING TAG IS NOT ENOUGH; IT MUST BE CLOSED. The CLI writes BALANCED
+// markup — every `<command-name>` it emits has its `</command-name>`, every
+// caveat and stdout block is wrapped on both sides — because the whole point of
+// the wrapper is that the model can find where the synthetic content ends. A
+// human, by contrast, types the tag as a SUBJECT: "<command-name> keeps showing
+// up in my transcript, why?" opens with the tag and never closes it, because
+// there is nothing to close around.
+//
+// Balance is therefore the machinery-ness test, and it is deliberately made
+// BEFORE any question of which command the record names. Treating "opens with a
+// tag" as machinery and then withholding whatever could not be named collapsed
+// two different verdicts into one: a genuine stdout-only record with no
+// <command-name> (machinery, correctly withheld) and a human prompt that merely
+// starts with the words (not machinery at all, and destroyed by the withhold).
+func isSlashCommandMachineryText(content string) bool {
+	open := machineryOpenTag(content)
+	return open != "" && strings.Contains(content, closingTagFor(open))
 }
 
 // userRecordHead returns the leading text of a user record, or "" when the item
@@ -138,18 +166,22 @@ func userRecordBody(it *frontendv1.Message) string {
 //
 // SHAPE A ONLY. This is the content-head test, which is all shape A leaves
 // behind; shape B is decided by machineryShapeOf before this is ever consulted.
+//
+// THE OPEN IS READ FROM THE HEAD, THE CLOSE FROM THE WHOLE BODY. The head is
+// what decides whether the record OPENS as machinery, and widening that read
+// would re-open the swallowing this file exists to prevent. The balancing close
+// is looked for across every block, because a caveat wrapper can open in the
+// first block and close in a later one, and demanding both inside the first
+// block would unclassify exactly the multi-block records that need classifying.
 func machineryEnvelope(it *frontendv1.Message) string {
-	head := userRecordHead(it)
-	if !isSlashCommandMachineryText(head) {
+	open := machineryOpenTag(userRecordHead(it))
+	if open == "" {
 		return ""
 	}
-	trimmed := strings.TrimLeft(head, " \t\r\n")
-	for _, prefix := range slashCommandMachineryPrefixes {
-		if strings.HasPrefix(trimmed, prefix) {
-			return prefix
-		}
+	if !strings.Contains(userRecordBody(it), closingTagFor(open)) {
+		return ""
 	}
-	return ""
+	return open
 }
 
 // machineryShape names WHICH of the CLI's two synthetic record shapes an item
