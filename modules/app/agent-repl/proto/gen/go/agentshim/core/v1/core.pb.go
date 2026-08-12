@@ -2312,7 +2312,23 @@ func (x *QueryRuntimeObserved) GetIdentity() *QueryRuntimeIdentity {
 	return nil
 }
 
-// Identifies configuration capable of affecting usage, caching, or latency.
+// The identity and configuration of ONE query() invocation, holding only what
+// could have been DIFFERENT for this particular query.
+//
+// WHAT BELONGS HERE IS EXACTLY WHAT VARIES. A shim process serves many queries,
+// and the facts fixed for its whole lifetime — which CLI binary it drives, which
+// credential it authenticates with — are stated ONCE per session on
+// conversation.v1's SessionBegan. Restating them per query would make two
+// spellings of one fact, and nothing in the system compares them, so the second
+// spelling could drift indefinitely without anyone noticing.
+//
+// The fields that remain earn their place by genuinely varying between
+// invocations: effective_model is the model the SDK actually resolved (which
+// differs from the requested one, and changes on a mid-session model switch),
+// fast_mode_state and fast_mode_reason move when /fast is toggled mid-session,
+// and the five fingerprints are per-query by construction. That is the whole
+// point of the record — a settled turn must be answerable, from itself alone,
+// about every configuration that could have made it behave differently.
 type QueryRuntimeIdentity struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Gives the vendor session identifier reported after initialization.
@@ -2321,14 +2337,8 @@ type QueryRuntimeIdentity struct {
 	EffectiveModel string `protobuf:"bytes,2,opt,name=effective_model,json=effectiveModel,proto3" json:"effective_model,omitempty"`
 	// Gives the Claude Agent SDK package version.
 	SdkVersion string `protobuf:"bytes,3,opt,name=sdk_version,json=sdkVersion,proto3" json:"sdk_version,omitempty"`
-	// Gives the Claude Code version used by the SDK.
-	ClaudeCodeVersion string `protobuf:"bytes,4,opt,name=claude_code_version,json=claudeCodeVersion,proto3" json:"claude_code_version,omitempty"`
 	// Gives the shim build commit.
 	ShimBuildSha string `protobuf:"bytes,5,opt,name=shim_build_sha,json=shimBuildSha,proto3" json:"shim_build_sha,omitempty"`
-	// Gives the non-secret authentication-source description.
-	AuthSource string `protobuf:"bytes,6,opt,name=auth_source,json=authSource,proto3" json:"auth_source,omitempty"`
-	// Gives the subscription type reported by the usage service.
-	SubscriptionType string `protobuf:"bytes,7,opt,name=subscription_type,json=subscriptionType,proto3" json:"subscription_type,omitempty"`
 	// Gives the reported fast-mode state.
 	FastModeState string `protobuf:"bytes,8,opt,name=fast_mode_state,json=fastModeState,proto3" json:"fast_mode_state,omitempty"`
 	// Gives the explanation associated with the fast-mode state.
@@ -2398,30 +2408,9 @@ func (x *QueryRuntimeIdentity) GetSdkVersion() string {
 	return ""
 }
 
-func (x *QueryRuntimeIdentity) GetClaudeCodeVersion() string {
-	if x != nil {
-		return x.ClaudeCodeVersion
-	}
-	return ""
-}
-
 func (x *QueryRuntimeIdentity) GetShimBuildSha() string {
 	if x != nil {
 		return x.ShimBuildSha
-	}
-	return ""
-}
-
-func (x *QueryRuntimeIdentity) GetAuthSource() string {
-	if x != nil {
-		return x.AuthSource
-	}
-	return ""
-}
-
-func (x *QueryRuntimeIdentity) GetSubscriptionType() string {
-	if x != nil {
-		return x.SubscriptionType
 	}
 	return ""
 }
@@ -6350,17 +6339,13 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\fResumedQuery\x12=\n" +
 	"\x1brequested_vendor_session_id\x18\x01 \x01(\tR\x18requestedVendorSessionId\"[\n" +
 	"\x14QueryRuntimeObserved\x12C\n" +
-	"\bidentity\x18\x01 \x01(\v2'.agentshim.core.v1.QueryRuntimeIdentityR\bidentity\"\xe2\x05\n" +
+	"\bidentity\x18\x01 \x01(\v2'.agentshim.core.v1.QueryRuntimeIdentityR\bidentity\"\xab\x05\n" +
 	"\x14QueryRuntimeIdentity\x12*\n" +
 	"\x11vendor_session_id\x18\x01 \x01(\tR\x0fvendorSessionId\x12'\n" +
 	"\x0feffective_model\x18\x02 \x01(\tR\x0eeffectiveModel\x12\x1f\n" +
 	"\vsdk_version\x18\x03 \x01(\tR\n" +
-	"sdkVersion\x12.\n" +
-	"\x13claude_code_version\x18\x04 \x01(\tR\x11claudeCodeVersion\x12$\n" +
-	"\x0eshim_build_sha\x18\x05 \x01(\tR\fshimBuildSha\x12\x1f\n" +
-	"\vauth_source\x18\x06 \x01(\tR\n" +
-	"authSource\x12+\n" +
-	"\x11subscription_type\x18\a \x01(\tR\x10subscriptionType\x12&\n" +
+	"sdkVersion\x12$\n" +
+	"\x0eshim_build_sha\x18\x05 \x01(\tR\fshimBuildSha\x12&\n" +
 	"\x0ffast_mode_state\x18\b \x01(\tR\rfastModeState\x12(\n" +
 	"\x10fast_mode_reason\x18\t \x01(\tR\x0efastModeReason\x12S\n" +
 	"\x11effective_options\x18\n" +
@@ -6368,7 +6353,7 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\bsettings\x18\v \x01(\v2&.agentshim.core.v1.EvidenceFingerprintR\bsettings\x12<\n" +
 	"\x05tools\x18\f \x01(\v2&.agentshim.core.v1.EvidenceFingerprintR\x05tools\x128\n" +
 	"\x03mcp\x18\r \x01(\v2&.agentshim.core.v1.EvidenceFingerprintR\x03mcp\x12M\n" +
-	"\x0econtext_prefix\x18\x0e \x01(\v2&.agentshim.core.v1.EvidenceFingerprintR\rcontextPrefix\"\x8a\x01\n" +
+	"\x0econtext_prefix\x18\x0e \x01(\v2&.agentshim.core.v1.EvidenceFingerprintR\rcontextPrefixJ\x04\b\x04\x10\x05J\x04\b\x06\x10\aJ\x04\b\a\x10\bR\x13claude_code_versionR\vauth_sourceR\x11subscription_type\"\x8a\x01\n" +
 	"\x13EvidenceFingerprint\x12\x18\n" +
 	"\x06sha256\x18\x01 \x01(\tH\x00R\x06sha256\x12M\n" +
 	"\vunavailable\x18\x02 \x01(\v2).agentshim.core.v1.FingerprintUnavailableH\x00R\vunavailableB\n" +

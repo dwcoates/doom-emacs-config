@@ -468,7 +468,23 @@ message QueryRuntimeObserved {
   QueryRuntimeIdentity identity = 1;
 }
 
-// Identifies configuration capable of affecting usage, caching, or latency.
+// The identity and configuration of ONE query() invocation, holding only what
+// could have been DIFFERENT for this particular query.
+//
+// WHAT BELONGS HERE IS EXACTLY WHAT VARIES. A shim process serves many queries,
+// and the facts fixed for its whole lifetime — which CLI binary it drives, which
+// credential it authenticates with — are stated ONCE per session on
+// conversation.v1's SessionBegan. Restating them per query would make two
+// spellings of one fact, and nothing in the system compares them, so the second
+// spelling could drift indefinitely without anyone noticing.
+//
+// The fields that remain earn their place by genuinely varying between
+// invocations: effective_model is the model the SDK actually resolved (which
+// differs from the requested one, and changes on a mid-session model switch),
+// fast_mode_state and fast_mode_reason move when /fast is toggled mid-session,
+// and the five fingerprints are per-query by construction. That is the whole
+// point of the record — a settled turn must be answerable, from itself alone,
+// about every configuration that could have made it behave differently.
 message QueryRuntimeIdentity {
   // Gives the vendor session identifier reported after initialization.
   string vendor_session_id = 1;
@@ -479,17 +495,31 @@ message QueryRuntimeIdentity {
   // Gives the Claude Agent SDK package version.
   string sdk_version = 3;
 
-  // Gives the Claude Code version used by the SDK.
-  string claude_code_version = 4;
-
   // Gives the shim build commit.
   string shim_build_sha = 5;
 
-  // Gives the non-secret authentication-source description.
-  string auth_source = 6;
-
-  // Gives the subscription type reported by the usage service.
-  string subscription_type = 7;
+  // RETIRED, because each of these was a per-query spelling of a fact that is
+  // fixed for the whole shim process and already stated once per session.
+  //
+  // - claude_code_version (4) restated SessionBegan.agent_version. A shim
+  //   process drives one CLI binary for its lifetime; it cannot differ between
+  //   two query() calls it serves.
+  // - auth_source (6) restated SessionBegan.auth (SessionAuth). Credential
+  //   resolution happens at process start from the environment, so every query
+  //   in a process reported the identical string.
+  // - subscription_type (7) was never populated at all — the producer wrote the
+  //   empty string deliberately, because the subscription type is reported by
+  //   the usage service and already rides every AccountUsageObservation, at
+  //   both of a turn's boundaries. Blocking initialization on a usage
+  //   round-trip to duplicate it here bought the ledger nothing.
+  //
+  // THE NAMES ARE RESERVED ALONGSIDE THE NUMBERS because this surface travels
+  // as protojson, where the field NAME is the wire token. A retired name coming
+  // back meaning something else would be silently misread by any peer still
+  // speaking the old spelling — a class of break that a reserved number alone
+  // does not prevent.
+  reserved 4, 6, 7;
+  reserved "claude_code_version", "auth_source", "subscription_type";
 
   // Gives the reported fast-mode state.
   string fast_mode_state = 8;
