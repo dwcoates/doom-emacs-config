@@ -1,28 +1,37 @@
-// A prompt the user submitted, whose turn NEVER became durable, still reaches
-// the frontend after the daemon that accepted it has died.
+// What a successor daemon serves after the daemon that accepted a prompt died
+// before the turn ever became durable.
 //
-// THE DEFECT THIS PINS. The receipt bubble the daemon pushes at submit lived
-// only in daemon memory. If the daemon died before the vendor's transcript
-// carried the prompt, the shim-store had no copy of the turn and the receipt
-// died with the process, so a reconnecting frontend saw NO EVIDENCE the prompt
-// was ever sent — indistinguishable from never having typed it. The durable
-// replay added for unwired workspaces (durableresync_e2e_test.go) closed the
-// case where the turn DID become durable; this file covers the one where it
-// did not.
+// WHAT THIS FILE USED TO PIN, AND WHAT REPLACED IT. It asserted that the
+// daemon's own prompt RECEIPT survived the crash in the state store and was
+// replayed to a reconnecting frontend, so the user still saw evidence the
+// prompt had been sent. FROZEN-slash-command-durability.md Part 2 removes
+// prompt receipts entirely: a prompt renders when its durable line round-trips
+// through the SDK and never before, because the standing-in bubble was a second
+// identity for one prompt and reconciling the two produced the duplicate
+// bubbles. There is therefore no receipt left to replay, and this file now pins
+// the behaviour that replaced it — the successor serves exactly what is
+// DURABLE, and invents nothing for the prompt that never got there.
+//
+// THE ACCEPTED CONSEQUENCE, STATED SO IT IS NOT MISTAKEN FOR AN OVERSIGHT. A
+// prompt accepted by a shim that then died without writing anything leaves no
+// trace in the conversation at all. That is the deliberate trade of Part 2: in
+// the real system the CLI writes the durable user line as soon as it takes the
+// prompt, so the window is the crash window between accept and that write, and
+// the alternative is the two-identity problem for every prompt ever submitted.
 //
 // WHY IT STANDS UP TWO DAEMON HALVES. The claim is about a fact crossing a
 // process boundary: half A accepts the prompt and dies, half B — a genuinely
 // separate Manager, frontend server, and session-state manager over the SAME
 // state store — is asked for the conversation. A single-process test could
-// only observe the in-memory receipt it is supposed to be doing without.
+// observe in-memory state instead of what actually survived.
 //
 // WHY THE SHIM IS A GO FAKE HERE. What the test needs is a shim that ACCEPTS a
-// prompt and then dies without ever writing the turn anywhere — which is the
-// crash the receipt exists for. The real offline shim answers every prompt
-// promptly and files the turn in the store, so it produces the opposite of the
-// condition under test. The fake speaks the real length-prefixed protocol over
-// the real listener, so the daemon's accept path, its state edges, and its
-// durable receipt write are all exercised for real; only the vendor behind it
+// prompt and then dies without ever writing the turn anywhere — the one window
+// in which no durable line for a submitted prompt can ever exist. The real
+// offline shim answers every prompt promptly and files the turn in the store,
+// so it produces the opposite of the condition under test. The fake speaks the
+// real length-prefixed protocol over the real listener, so the daemon's accept
+// path and its state edges are exercised for real; only the vendor behind it
 // is scripted.
 //
 // Shares e2e_test.go's package and reuses its helpers READ-ONLY (buildShimStore,
@@ -146,8 +155,8 @@ func (w *receiptWorld) openState(t *testing.T) (*sql.DB, *registry.Registry) {
 // acceptOnceShim is a shim that completes the real handshake, ACKS exactly one
 // prompt, and then dies without producing a single event.
 //
-// It is the crash the durable receipt exists for, made deterministic: the
-// prompt genuinely reached a shim (so the daemon's accept is honest), and the
+// It makes the no-durable-line window deterministic: the prompt
+// genuinely reached a shim (so the daemon's accept is honest), and the
 // conversation genuinely never received it (so nothing durable can ever carry
 // it).
 type acceptOnceShim struct {
@@ -293,8 +302,9 @@ func (w *receiptWorld) submitThenDie(t *testing.T, requestID, text string) {
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
 		TurnAccountings:   newTestTurnAccountingStore(),
-		// THE WHOLE POINT: the durable half of the receipt, written at
-		// acceptance into the state store this half is about to stop owning.
+		// The prompt-receipt store is still wired because it is now the
+		// interrupted-turn resumption ledger; nothing in it stands in for a
+		// prompt, which is what this file asserts.
 		PromptReceipts:  promptReceipts,
 		DaemonVersion:   "0.1.0-e2e",
 		ProtocolVersion: "1",
@@ -405,8 +415,8 @@ func (w *receiptWorld) restart(t *testing.T) *bouncedFrontend {
 	progressMgr := progress.New(progress.Options{Logf: t.Logf})
 	t.Cleanup(func() { _ = progressMgr.Close() })
 	seqStore := server.NewRegistrySeqStore(reg, t.Logf)
-	// A read must never start a session: the receipt has to come from the
-	// record, not from bringing the vendor back to ask it.
+	// A read must never start a session: the replay has to come from what is
+	// on disk, not from bringing the vendor back to ask it.
 	refuseSpawn := func(sessionID string, _ server.CreateOpts) (server.ShimHandle, error) {
 		return server.ShimHandle{}, fmt.Errorf("e2e: the bounced half tried to spawn a shim for %s", sessionID)
 	}
@@ -545,7 +555,15 @@ func promptDetachedWork(items []*frontendv1.Message) []*frontendv1.Message {
 
 // --- tests ------------------------------------------------------------------
 
-func TestAPromptWhoseTurnNeverBecameDurableSurvivesTheDaemonThatAcceptedIt(t *testing.T) {
+// TestAPromptWithNoDurableLineIsNotSynthesizedByTheSuccessorDaemon is the
+// Part 2 regression guard across a process boundary: the successor may not
+// invent a bubble for a prompt no record exists for.
+//
+// It is the inversion of the receipt claim this file used to make, and it is
+// the stronger guard of the two against the duplicate-bubble defect: a
+// synthetic bubble here would be a second identity for a prompt whose real
+// line may still arrive later from the vendor's transcript.
+func TestAPromptWithNoDurableLineIsNotSynthesizedByTheSuccessorDaemon(t *testing.T) {
 	// Arrange — the prompt reached a shim, the shim died without producing
 	// anything, and the daemon that accepted it is gone.
 	w := newReceiptWorld(t)
@@ -557,22 +575,19 @@ func TestAPromptWhoseTurnNeverBecameDurableSurvivesTheDaemonThatAcceptedIt(t *te
 	items := f.resyncItems(t, conn, state, w.workspace, "e2e-receipt-resync-1")
 
 	// Assert.
-	work := promptDetachedWork(items)
-	if len(work) != 1 {
-		t.Fatalf("prompt bubbles = %d, want the receipt for the accepted prompt", len(work))
-	}
-	if got := work[0].GetUserMessage().GetContentString(); got != "the prompt nobody kept" {
-		t.Fatalf("replayed prompt = %q, want the submitted text", got)
-	}
-	if got := work[0].GetRequestId(); got != "e2e-receipt-1" {
-		t.Fatalf("replayed prompt request id = %q, want the submit's own id", got)
+	for _, it := range promptDetachedWork(items) {
+		t.Errorf("the successor served a prompt bubble uuid=%q request_id=%q content=%q for a turn no record exists for — a prompt renders when its durable line round-trips and never before",
+			it.GetUuid(), it.GetRequestId(), it.GetUserMessage().GetContentString())
 	}
 }
 
-func TestAReplayedReceiptArrivesBesideTheStoredConversation(t *testing.T) {
-	// Arrange — a workspace with real stored history AND an outstanding
-	// receipt gets both, with the receipt last: the prompt it stands for is
-	// the most recent thing that happened.
+// TestTheStoredConversationReplaysIntactAfterTheAcceptingDaemonDies keeps the
+// half of the old "beside the stored conversation" claim that survives: what is
+// DURABLE is served in full by the successor, and the lost prompt neither
+// suppresses it nor appends itself to it.
+func TestTheStoredConversationReplaysIntactAfterTheAcceptingDaemonDies(t *testing.T) {
+	// Arrange — a workspace with real stored history whose next prompt was
+	// accepted by a daemon that then died.
 	w := newReceiptWorld(t)
 	producer := dialStoreProducer(t)
 	producer.write(storedAssistantEvent(t, w.vendorSessionID, "u-1", "an earlier reply"))
@@ -583,33 +598,17 @@ func TestAReplayedReceiptArrivesBesideTheStoredConversation(t *testing.T) {
 	// Act.
 	items := f.resyncItems(t, conn, state, w.workspace, "e2e-receipt-resync-2")
 
-	// Assert.
-	if len(items) < 2 {
-		t.Fatalf("replayed %d items, want the stored reply and the receipt", len(items))
+	// Assert — the stored reply is there, and nothing was appended for the
+	// prompt that never became durable.
+	if len(items) == 0 {
+		t.Fatal("the replay carried nothing at all, want the stored reply")
 	}
 	last := items[len(items)-1]
-	if last.GetRequestId() != "e2e-receipt-2" {
-		t.Fatalf("last replayed item request id = %q, want the receipt after the stored history", last.GetRequestId())
+	if last.GetRequestId() == "e2e-receipt-2" {
+		t.Errorf("the replay ended with an item claiming the lost submit's request id %q — nothing durable carries it", last.GetRequestId())
 	}
-}
-
-func TestAReplayedReceiptIsServedOnceAcrossTwoResyncs(t *testing.T) {
-	// Arrange — the record is retired by the conversation carrying the prompt,
-	// not by having been read, so a second reconnect must see it exactly once
-	// too rather than twice or not at all.
-	w := newReceiptWorld(t)
-	w.submitThenDie(t, "e2e-receipt-3", "the prompt nobody kept")
-	f := w.restart(t)
-	conn, state := f.dial(t, w.workspace)
-	if got := len(promptDetachedWork(f.resyncItems(t, conn, state, w.workspace, "e2e-receipt-resync-3a"))); got != 1 {
-		t.Fatalf("first resync served %d prompt bubbles, want 1", got)
-	}
-
-	// Act.
-	items := f.resyncItems(t, conn, state, w.workspace, "e2e-receipt-resync-3b")
-
-	// Assert.
-	if got := len(promptDetachedWork(items)); got != 1 {
-		t.Fatalf("second resync served %d prompt bubbles, want 1", got)
+	for _, it := range promptDetachedWork(items) {
+		t.Errorf("the replay carried a prompt bubble uuid=%q content=%q beside the stored history, want only what the store holds",
+			it.GetUuid(), it.GetUserMessage().GetContentString())
 	}
 }
