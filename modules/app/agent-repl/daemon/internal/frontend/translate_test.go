@@ -1675,3 +1675,38 @@ func TestACategoryCRecordAcquiresNoLineageAndNoDurabilityArm(t *testing.T) {
 		t.Fatalf("a category-C record curated to %d message(s), want none — it is not a message and has no class to state", len(got.GetMessages()))
 	}
 }
+
+// TestCurationOfACategoryCEventYieldsNothing covers the deliberate silence: a
+// turn boundary is not a message, so it curates to no conversation content and
+// therefore to no ownership.
+func TestCurationOfACategoryCEventYieldsNothing(t *testing.T) {
+	// Arrange.
+	ev := &corev1.Event{Seq: 4, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t1"}}}
+
+	// Act.
+	delta, _, err := conversationDeltaFromEvent("ws", "f", ev)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("curating a classified category-C event: %v", err)
+	}
+	if delta != nil {
+		t.Fatal("a turn boundary produced conversation content; it renders as nothing")
+	}
+}
+
+// TestCurationOfAnEventWithNoPayloadArmIsRefused covers the arm that fell off
+// the end of the switch: it is refused rather than silently curated to nothing,
+// because that silence is how a message-bearing kind vanishes from the feed.
+func TestCurationOfAnEventWithNoPayloadArmIsRefused(t *testing.T) {
+	// Arrange.
+	ev := &corev1.Event{Seq: 5, SessionId: "s1"}
+
+	// Act.
+	_, _, err := conversationDeltaFromEvent("ws", "f", ev)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("an event with no payload arm curated to nothing silently instead of being refused")
+	}
+}
