@@ -9,10 +9,16 @@ compiler can check rather than a convention a reviewer has to hold.
 | package | holds | importable by |
 |---|---|---|
 | **agentshim** | shim-side internals: which plane observed a record, the store's write identity, anything a producer could not convert | shim, sidecar, store ONLY |
-| **conversation** | the shared conversation model — `MessageEntry`, `BookkeepingEntry` and their payloads | everyone |
+| **conversation** | what the shim generates and routes to the webapp through the daemon — `MessageEntry`, `BookkeepingEntry` and their payloads | everyone |
 | **protocol** | what traverses the daemon↔shim boundary, and ONLY that boundary, in both directions: handshakes, commands, receipts, health, replay and page requests, and the delivery envelopes that carry conversation records with their position | shim, daemon |
-| **frontend** | what reaches a frontend client: daemon-synthesized views, and the conversation records the daemon forwards | daemon, webapp |
+| **frontend** | what reaches a frontend client. COMPOSED of `conversation` messages the daemon forwards, and ALSO of novel messages the daemon synthesizes — topbar, sidebar, footer, and the rest | daemon, webapp |
 | **state** | daemon-internal only: what no other service uses, including the schema the daemon marshals into its own SQLite store | daemon |
+
+**A package is named for its purpose, not its owner.** `state` holds state and
+the daemon owns it; `protocol` describes a wire both ends speak. Naming either
+for the daemon would have said who it belongs to while leaving what it holds to
+be inferred — and in `protocol`'s case would have been actively wrong, since the
+shim produces on it too.
 
 Store↔sidecar traffic — the cursor messages — is `agentshim`, not `protocol`:
 it never crosses the daemon boundary, which is the only boundary `protocol`
