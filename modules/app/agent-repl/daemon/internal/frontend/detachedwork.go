@@ -183,17 +183,19 @@ type DetachedWorkSpec struct {
 	// exists but could not be found — would quietly open work whose origin
 	// points nowhere instead of raising the fault it is.
 	NoSpawningCall bool
-	// ParentMessageID is the detached-work MESSAGE this one is contained by,
-	// empty when this work sits directly in the feed. Detached agents dispatch
-	// detached agents, so the containment tree is real — but it is now the ONE
-	// message tree (MessageLineage.parent_message_id) rather than a second tree
-	// walking only detached work.
-	ParentMessageID string
-	// ParentTopLevelMessageID is the feed row the PARENT ultimately belongs to,
-	// copied down so this message's own top_level_message_id is a value rather
-	// than a walk. Required exactly when ParentMessageID is set, and refused
-	// otherwise: half a lineage is the drift this pairing exists to prevent.
-	ParentTopLevelMessageID string
+	// Parent is the MESSAGE this work is contained by, nil when the work sits
+	// directly in the feed. Detached agents dispatch detached agents, so the
+	// containment tree is real — but it is the ONE message tree
+	// (MessageLineage.parent_message_id) rather than a second tree walking only
+	// detached work.
+	//
+	// IT IS THE MESSAGE, NOT ITS ID, for the same reason NewDurableChild takes
+	// one: an id cannot be asked what its durability class or its root is, so a
+	// spec carrying ids could name a parent whose class makes this child
+	// unreachable and nothing could tell. Carrying the message also removes the
+	// half-lineage case entirely — a parent and its root arrive together or not
+	// at all, so there is no pairing left to keep in step.
+	Parent *frontendv1.Message
 	// Label is the face the collapsed fold shows. Empty is allowed and means
 	// the daemon had no label; the client then shows the id.
 	Label string
@@ -278,16 +280,12 @@ func OpenDetachedWork(spec DetachedWorkSpec) (*frontendv1.Message, error) {
 	if spec.Workspace == "" {
 		return nil, fmt.Errorf("frontend: detached work refused for task %q — it named no workspace, which is the only routing key a snapshot has; workspace-less work would be delivered to every scoped client", spec.TaskID)
 	}
-	// HALF A LINEAGE IS REFUSED. A parent without its root would leave
-	// top_level_message_id to be derived by a walk, and a root without a parent
-	// would assert containment nobody named. Both are producer faults, so both
-	// are named rather than filled in.
-	if spec.ParentMessageID == "" && spec.ParentTopLevelMessageID != "" {
-		return nil, fmt.Errorf("frontend: detached work refused for task %q — it named top-level message %q while naming no parent, and a message with no parent IS its own top-level row", spec.TaskID, spec.ParentTopLevelMessageID)
-	}
-	if spec.ParentMessageID != "" && spec.ParentTopLevelMessageID == "" {
-		return nil, fmt.Errorf("frontend: detached work refused for task %q — it named parent message %q but no top-level row for it, and deriving the root by walking parents is the unbounded traversal lineage exists to remove", spec.TaskID, spec.ParentMessageID)
-	}
+	// HALF A LINEAGE IS NO LONGER REPRESENTABLE. The parent arrives as the
+	// message itself, so its root comes with it; the refusals that used to
+	// police a parent-without-root and a root-without-parent are now the shape
+	// of the field. What a bad parent still needs policing for — an ephemeral
+	// one, an unclassified one, one with no root of its own — is checked by
+	// NewDurableChild below, which is the single place that rule lives.
 	id := mintDetachedWorkID(spec.TaskID)
 	w := &frontendv1.DetachedWork{
 		Workspace:       spec.Workspace,
@@ -334,26 +332,30 @@ func OpenDetachedWork(spec DetachedWorkSpec) (*frontendv1.Message, error) {
 			Fold:      &frontendv1.DetachedWorkFold{TailCap: StreamItemCap},
 		}}
 	}
-	// LINEAGE, RESOLVED HERE AND NOWHERE ELSE. Contained work copies its
-	// parent's root down; uncontained work IS a feed row and names itself, which
-	// is what keeps a page of ten messages ten bounded things.
-	lineage := FeedRowLineage(id)
-	if spec.ParentMessageID != "" {
-		lineage = &frontendv1.MessageLineage{
-			TopLevelMessageId: spec.ParentTopLevelMessageID,
-			ParentMessageId:   spec.ParentMessageID,
-		}
-	}
-	return &frontendv1.Message{
+	body := &frontendv1.Message{
 		Uuid: id,
 		TsMs: spec.StartedAtMs,
 		// The launch FOLLOWED FROM a user turn, which is what
 		// CONVERSATION_SOURCE_USER states (feed.proto ConversationSource);
 		// UNSPECIFIED is a malformed frame a receiver must reject.
 		Source:  frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Lineage: lineage,
 		Payload: &frontendv1.Message_DetachedWork{DetachedWork: w},
-	}, nil
+	}
+	// LINEAGE AND CLASS, STATED IN ONE ACT. Contained work copies its parent's
+	// root down; uncontained work IS a feed row and names itself, which is what
+	// keeps a page of ten messages ten bounded things. Both go through the
+	// durability constructors rather than writing the lineage here, so the work
+	// cannot leave with a class its lineage contradicts — nor, as it used to,
+	// with no class at all.
+	//
+	// IT IS DURABLE EITHER WAY. Detached work is opened over a TaskStarted the
+	// store holds, so a record for it exists and a reload serves it again. The
+	// contract names this case explicitly: the daemon minting the id is not what
+	// decides the class, and "detached-work:" + taskID stays durable.
+	if spec.Parent != nil {
+		return NewDurableChild(spec.Parent, body)
+	}
+	return NewDurableFeedRow(body)
 }
 
 // DetachedWorkKind reports detached work's resolved kind by reading its arm

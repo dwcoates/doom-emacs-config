@@ -3076,7 +3076,21 @@ func (c *consumer) ringFloor() (uint64, bool) {
 // A same-uuid push REPLACES the retained item, tracking the resolution
 // lifecycle (PENDING -> ALLOWED/DENIED/ABANDONED). This is the S8 permission
 // surface pushed through the NORMAL retained pusher path so resync replays it.
-func (c *consumer) pushPermission(item *frontendv1.Message) {
+func (c *consumer) pushPermission(body *frontendv1.Message) {
+	// THE PERMISSION IS DURABLE, and the contract says so by name: permissions
+	// are explicitly NOT in the ephemeral class, because Claude asks for them
+	// through canUseTool and they are a real conversational fact. The record is
+	// the shim's to write (a later wave); the CLASS is not conditional on that
+	// work having landed, because the class states what the message IS, not
+	// which producer has caught up.
+	item, err := frontend.NewDurableFeedRow(body)
+	if err != nil {
+		// WITHHELD, LOUDLY, and not repaired: an unclassified permission on the
+		// wire cannot be told apart later from a durable one the store lost.
+		c.warn("session-controller: permission item NOT pushed session=%s uuid=%s — the message constructor refused it, so no classified item could be built and none is delivered: %v",
+			c.sessionID, body.GetUuid(), err)
+		return
+	}
 	c.mu.Lock()
 	if c.permItems == nil {
 		c.permItems = map[string]*frontendv1.Message{}
@@ -3147,7 +3161,9 @@ func (c *consumer) pushReplayedItem(item *frontendv1.Message) bool {
 // the settled card rather than re-opening an alarm about something that
 // already ended.
 func (c *consumer) pushFailure(uuid string, failure *frontendv1.FailureCardView) {
-	c.retainFailure(uuid, failure)
+	if !c.retainFailure(uuid, failure) {
+		return
+	}
 	// THE TWO EDGES ARE NOT THE SAME NEWS, and recording both at warn made the
 	// good one as loud as the bad one: every store bounce that resolved itself
 	// still left a "system failure ... resolved=true" warn per session, which is
@@ -3173,16 +3189,27 @@ func (c *consumer) pushFailure(uuid string, failure *frontendv1.FailureCardView)
 // successor wired is ordinary progress, and routing that through pushFailure
 // would put a second, differently-worded record on the same edge — the very
 // double-record shape the replayed pair already had.
-func (c *consumer) retainFailure(uuid string, failure *frontendv1.FailureCardView) {
+func (c *consumer) retainFailure(uuid string, failure *frontendv1.FailureCardView) bool {
 	// The ENVELOPE is the card's only address now. It used to be repeated onto
 	// the failure itself so an out-of-feed surface could name the card; the
 	// contract carries that address as FailureCardRef instead, so there is one
 	// copy of it and nothing to keep in step with the envelope.
-	item := &frontendv1.Message{
+	//
+	// THE CARD IS DURABLE, stated through the constructor. It is re-derived from
+	// the store event that caused it on every replay, so a record for it exists
+	// and a reload produces it again — which is the durable arm's whole claim.
+	item, err := frontend.NewDurableFeedRow(&frontendv1.Message{
 		Uuid:    uuid,
 		TsMs:    c.now(),
-		Lineage: frontend.FeedRowLineage(uuid),
 		Payload: &frontendv1.Message_FailureCard{FailureCard: failure},
+	})
+	if err != nil {
+		// WITHHELD, LOUDLY, and the caller pushes nothing: an unclassified card
+		// on the wire cannot be told apart later from a durable one the store
+		// lost, which is the confusion the class exists to end.
+		c.warn("session-controller: failure card NOT retained session=%s uuid=%s type=%s — the message constructor refused it, so no classified card could be built and none is delivered: %v",
+			c.sessionID, uuid, failureType(failure), err)
+		return false
 	}
 
 	c.mu.Lock()
@@ -3199,6 +3226,7 @@ func (c *consumer) retainFailure(uuid string, failure *frontendv1.FailureCardVie
 	// is unconditional here rather than conditional on the caller.
 	delete(c.withheldCards, uuid)
 	c.mu.Unlock()
+	return true
 }
 
 // retainedFailure reads back the retained Message for uuid under the
@@ -3219,7 +3247,9 @@ func (c *consumer) retainedFailure(uuid string) *frontendv1.Message {
 // row is durable, so it came back at every boot and never had a closing edge,
 // which misrepresents a session that is working.
 func (c *consumer) pushWithheldFailure(uuid string, failure *frontendv1.FailureCardView) {
-	c.retainFailure(uuid, failure)
+	if !c.retainFailure(uuid, failure) {
+		return
+	}
 	c.logf("session-controller: system failure session=%s uuid=%s type=%s resolved=%v origin=withheld_replay: %s",
 		c.sessionID, uuid, failureType(failure), errclass.IsResolved(failure), failure.GetDetail())
 	c.mu.Lock()
@@ -3297,7 +3327,9 @@ func (c *consumer) settleRetainedCard(uuid string, failure *frontendv1.FailureCa
 	}
 	resolved := proto.Clone(failure).(*frontendv1.FailureCardView)
 	errclass.Resolve(resolved, c.now())
-	c.retainFailure(uuid, resolved)
+	if !c.retainFailure(uuid, resolved) {
+		return
+	}
 	c.logf("session-controller: %s card RESOLVED session=%s uuid=%s type=%s resolved_at_ms=%d reason=%s decision=%s",
 		label, c.sessionID, uuid, failureType(resolved), errclass.ResolvedAtMs(resolved), reason, decision)
 	c.pushLocalItem(c.retainedFailure(uuid))
@@ -3393,13 +3425,16 @@ func (c *consumer) snapshotPermItems() []*frontendv1.Message {
 	return out
 }
 
-// permissionItem composes a permission Message: the request plus its
+// permissionItem composes a permission Message BODY: the request plus its
 // resolution, keyed by the request_id as the item uuid (the reconciliation key
 // frontends replace on). denyMessage is set only on RESOLUTION_DENIED.
+//
+// It states neither lineage nor durability. Both are written in one act by the
+// constructor pushPermission routes through, so the item cannot claim a class
+// and carry lineage that contradicts it.
 func permissionItem(req *corev1.PermissionRequest, res corev1.PermissionItem_Resolution, denyMessage string) *frontendv1.Message {
 	return &frontendv1.Message{
 		Uuid:    req.GetRequestId(),
-		Lineage: frontend.FeedRowLineage(req.GetRequestId()),
 		Payload: &frontendv1.Message_Permission{Permission: &corev1.PermissionItem{
 			Request:     req,
 			Resolution:  res,

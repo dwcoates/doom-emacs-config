@@ -228,11 +228,24 @@ func (m *Manager) withdrawTerminalStartFailure(workspace, sessionID string) {
 // the other, and both carry one rendering under one identity.
 func (m *Manager) publishTerminalStartFailure(workspace, sessionID string, cause error) {
 	card := m.terminalStartFailureCard(cause)
-	item := &frontendv1.Message{
+	// THE CARD IS DURABLE, and by this contract's own test rather than by who
+	// minted the id: persistTerminalStartFailure below writes the record BEFORE
+	// anything is pushed, and that record is the source of truth for every later
+	// reader. A record exists, so the class is durable — the daemon having
+	// synthesized the card is explicitly not what decides it.
+	item, err := frontend.NewDurableFeedRow(&frontendv1.Message{
 		Uuid:    startFailedCardUUID(sessionID),
 		TsMs:    m.now(),
-		Lineage: frontend.FeedRowLineage(startFailedCardUUID(sessionID)),
 		Payload: &frontendv1.Message_FailureCard{FailureCard: card},
+	})
+	if err != nil {
+		// NEITHER PERSISTED NOR PUSHED, and reported in full. An unclassified
+		// card is not repaired into a durable one: the refusal names a daemon
+		// defect, and writing the record for a message that could not be built
+		// would leave the store holding an account nothing can render.
+		m.errorf("session-controller: terminal bring-up failure card for ws=%q session=%s could NOT be classified and is neither recorded nor published; the cause is recorded here only: cause=%v refusal=%v",
+			workspace, sessionID, cause, err)
+		return
 	}
 	// PERSISTED BEFORE PUSHED, and before the Push nil-check refuses: a daemon
 	// with no frontend attached still owes the record, and a card the store

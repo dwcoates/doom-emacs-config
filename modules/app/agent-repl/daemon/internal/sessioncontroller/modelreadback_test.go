@@ -295,9 +295,9 @@ func TestTheModelCommandLogNamesTheRecordsPriorValue(t *testing.T) {
 	}
 }
 
-func TestAnOrdinarySessionCommandLogCarriesNoModelOutcome(t *testing.T) {
-	// Arrange — a command that resolves to nothing must not pad its line with
-	// empty model fields that read as a model change that did not happen.
+func TestAForwardedSessionCommandLogsWhyNoDaemonItemWasProduced(t *testing.T) {
+	// Arrange — the daemon now produces no item for a command the CLI answers,
+	// and an absence with no line behind it reads as a command that was dropped.
 	log := &logCapture{}
 	h := newQueueHarnessWithPusher(t, nil, nil, log.logf)
 
@@ -307,8 +307,8 @@ func TestAnOrdinarySessionCommandLogCarriesNoModelOutcome(t *testing.T) {
 	}
 
 	// Assert.
-	lines := logLinesMatching(log, "session command SESSION_COMMAND_COST invoked")
-	if len(lines) != 1 || strings.Contains(lines[0], "resolved_model") {
-		t.Fatalf("invocation log = %v, want no model outcome for a command that resolves none", lines)
+	lines := logLinesMatching(log, "session command SESSION_COMMAND_COST FORWARDED, no daemon item pushed")
+	if len(lines) != 1 {
+		t.Fatalf("forwarded log = %v, want exactly one line stating the CLI's record is the single producer", lines)
 	}
 }
