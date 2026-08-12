@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -204,4 +206,41 @@ func TestHeldReadinessRejectsNegativeThresholdLoudly(t *testing.T) {
 		}
 	}()
 	l.Readiness(-1, now)
+}
+
+func TestHeldLifecycleAcceptsOwnerPathUnderSymlinkedSpelling(t *testing.T) {
+	base := t.TempDir()
+	realDir := filepath.Join(base, "private", "tasks")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatalf("mkdir spool dir: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(base, "private"), filepath.Join(base, "link")); err != nil {
+		t.Fatalf("symlink spool root: %v", err)
+	}
+	now := time.UnixMilli(1_000_000)
+	target := HeldTarget{Path: filepath.Join(base, "link", "tasks", "b1.output"), Root: base, TaskID: "b1", ModTime: now}
+	owner := OwnerResolution{SessionID: "S1", TaskID: "b1", OutputPath: filepath.Join(realDir, "b1.output"), Source: OwnerSourceLiveLaunch, Outcome: OwnerResolvedPath}
+	l, _ := heldLifecycle(t)
+
+	decision, err := l.Observe(target, owner, heldEvidence(target.ModTime, true), now)
+
+	if err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	if decision.State != HeldStateResolved || decision.SessionID != "S1" {
+		t.Fatalf("decision = %+v, want resolved S1 across symlinked spelling", decision)
+	}
+}
+
+func TestHeldLifecycleStillRejectsOwnerPathForDifferentFile(t *testing.T) {
+	now := time.UnixMilli(1_000_000)
+	target := heldTarget("b1", now)
+	owner := OwnerResolution{SessionID: "S1", TaskID: "b1", OutputPath: "/tmp/claude-501/project/runtime/tasks/other.output", Outcome: OwnerResolvedPath}
+	l, _ := heldLifecycle(t)
+
+	_, err := l.Observe(target, owner, heldEvidence(target.ModTime, true), now)
+
+	if err == nil || !strings.Contains(err.Error(), "does not identify observed task and output path") {
+		t.Fatalf("err = %v, want mismatched owner output path rejection", err)
+	}
 }
