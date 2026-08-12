@@ -360,6 +360,13 @@ func (c *Client) sendAwaitReceipt(ctx context.Context, msg protoControl, originR
 		if res.nack != nil {
 			return nil, res.nack, nil
 		}
+		if res.ack == nil {
+			// Neither an Ack, a Nack, nor a lost link. The waiter map is keyed by
+			// request id and a page's answer rides the same struct, so a receipt
+			// with no Ack in it means this exchange was answered by something that
+			// is not its receipt. Surfaced rather than returned as a success.
+			return nil, nil, fmt.Errorf("shimclient: control request request_id=%s was answered by something that is neither an Ack nor a Nack", reqID)
+		}
 		c.logf("control request request_id=%s origin_request_id=%q acked outcome=%s", reqID, originRequestID, res.ack.GetInterruptOutcome())
 		return res.ack, nil, nil
 	}
