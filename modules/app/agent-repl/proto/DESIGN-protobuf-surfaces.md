@@ -10,9 +10,13 @@ compiler can check rather than a convention a reviewer has to hold.
 |---|---|---|
 | **agentshim** | shim-side internals: which plane observed a record, the store's write identity, anything a producer could not convert | shim, sidecar, store ONLY |
 | **conversation** | the shared conversation model — `MessageEntry`, `BookkeepingEntry` and their payloads | everyone |
-| **protocol** | the daemon↔shim wire, both directions: handshakes, commands, receipts, health, replay and page requests, and the delivery envelopes that carry conversation records with their position | shim, sidecar, store, daemon |
+| **protocol** | what traverses the daemon↔shim boundary, and ONLY that boundary, in both directions: handshakes, commands, receipts, health, replay and page requests, and the delivery envelopes that carry conversation records with their position | shim, daemon |
 | **frontend** | what reaches a frontend client: daemon-synthesized views, and the conversation records the daemon forwards | daemon, webapp |
-| **state** | the daemon's persisted state schema — what it marshals into its own SQLite store | daemon |
+| **state** | daemon-internal only: what no other service uses, including the schema the daemon marshals into its own SQLite store | daemon |
+
+Store↔sidecar traffic — the cursor messages — is `agentshim`, not `protocol`:
+it never crosses the daemon boundary, which is the only boundary `protocol`
+describes.
 
 `state` also lets `check-durable-isolation.sh` be deleted: that gate exists only
 because the daemon's persistence layer currently sits inside `frontend/v1` while
