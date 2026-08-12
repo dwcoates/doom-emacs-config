@@ -16,7 +16,7 @@ import (
 
 // SchemaVersion is the current schema_meta version. Bump it and append a step
 // to migrationSteps for any schema change.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // DB wraps the SQLite handle plus the store's logger.
 type DB struct {
@@ -173,6 +173,16 @@ var migrationSteps = []migrationStep{
 CREATE UNIQUE INDEX IF NOT EXISTS event_write_id
   ON event(session_id, write_id) WHERE write_id IS NOT NULL;`,
 		reason: "the producer's stable per-event write identity, which is what makes a replayed batch a no-op instead of a duplicate row",
+	},
+	{
+		to:   3,
+		name: "event.top_level_message_id",
+		ddl: `ALTER TABLE event ADD COLUMN top_level_message_id TEXT;
+CREATE INDEX IF NOT EXISTS event_message_page
+  ON event(session_id, seq DESC) WHERE top_level_message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS event_message_owner
+  ON event(session_id, top_level_message_id, seq) WHERE top_level_message_id IS NOT NULL;`,
+		reason: "the denormalized owning message, so a page of ten messages is one indexed backward pass instead of a parent walk",
 	},
 }
 
