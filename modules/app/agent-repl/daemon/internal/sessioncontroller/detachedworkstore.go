@@ -276,16 +276,18 @@ func (s *detachedWorkStore) resolveAgentDetachedWorkLocked(fold frontend.Detache
 	if taskID == "" {
 		taskID = fold.SourceToolUseID
 	}
-	parent, parentTop := s.parentLineageLocked(s.parentByToolUse[fold.SourceToolUseID])
+	parent, err := s.parentMessageLocked(s.parentByToolUse[fold.SourceToolUseID])
+	if err != nil {
+		return nil, false, err
+	}
 	b, err := frontend.OpenDetachedWork(frontend.DetachedWorkSpec{
-		TaskID:                  taskID,
-		Workspace:               s.workspace,
-		Kind:                    frontend.DetachAgent,
-		OriginToolUseID:         fold.SourceToolUseID,
-		ParentMessageID:         parent,
-		ParentTopLevelMessageID: parentTop,
-		Label:                   s.toolNames[fold.SourceToolUseID],
-		StartedAtMs:             atMs,
+		TaskID:          taskID,
+		Workspace:       s.workspace,
+		Kind:            frontend.DetachAgent,
+		OriginToolUseID: fold.SourceToolUseID,
+		Parent:          parent,
+		Label:           s.toolNames[fold.SourceToolUseID],
+		StartedAtMs:     atMs,
 	})
 	if err != nil {
 		return nil, false, err
@@ -369,10 +371,14 @@ func (s *detachedWorkStore) openFromOutcomeLocked(o frontend.ToolOutcome, spec f
 	spec.Workspace = s.workspace
 	if o.FromDetachedAgent {
 		if parent := s.lookupLocked(o.SourceToolUseID, o.AgentID); parent != nil {
-			spec.ParentMessageID, spec.ParentTopLevelMessageID = s.parentLineageLocked(parent.GetUuid())
+			spec.Parent = parent
 		}
-	} else if parent := s.parentByToolUse[o.ToolUseID]; parent != "" {
-		spec.ParentMessageID, spec.ParentTopLevelMessageID = s.parentLineageLocked(parent)
+	} else if parentID := s.parentByToolUse[o.ToolUseID]; parentID != "" {
+		parent, err := s.parentMessageLocked(parentID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		spec.Parent = parent
 	}
 	// AN UNRECOGNIZED TOOL IS THE EXPLICIT unclassified ARM, not a fault and
 	// not a silent shell. The launch evidence says work detached; the tool
@@ -581,16 +587,18 @@ func (s *detachedWorkStore) observeTaskStarted(ts *corev1.TaskStarted, atMs int6
 		s.idByTask[ts.GetTaskId()] = b.GetUuid()
 		return asyncPush{}, nil
 	}
-	parent, parentTop := s.parentLineageLocked(s.parentByToolUse[ts.GetToolUseId()])
+	parent, err := s.parentMessageLocked(s.parentByToolUse[ts.GetToolUseId()])
+	if err != nil {
+		return asyncPush{Faults: []asyncFault{*s.faultLocked(ts.GetTaskId(), err.Error())}}, nil
+	}
 	spec := frontend.DetachedWorkSpec{
-		TaskID:                  ts.GetTaskId(),
-		Workspace:               s.workspace,
-		Kind:                    frontend.DetachKindFromTaskKind(ts.GetKind()),
-		OriginToolUseID:         ts.GetToolUseId(),
-		ParentMessageID:         parent,
-		ParentTopLevelMessageID: parentTop,
-		Label:                   ts.GetDescription(),
-		StartedAtMs:             atMs,
+		TaskID:          ts.GetTaskId(),
+		Workspace:       s.workspace,
+		Kind:            frontend.DetachKindFromTaskKind(ts.GetKind()),
+		OriginToolUseID: ts.GetToolUseId(),
+		Parent:          parent,
+		Label:           ts.GetDescription(),
+		StartedAtMs:     atMs,
 	}
 	if spec.Kind == frontend.DetachUnresolved {
 		name := s.toolNames[ts.GetToolUseId()]
@@ -667,26 +675,29 @@ func (s *detachedWorkStore) openAnnouncementBornLocked(ts *corev1.TaskStarted, a
 
 // --- store internals -------------------------------------------------------
 
-// parentLineageLocked resolves BOTH halves of a nested detachment's lineage from
-// the id of the message that contains it: the parent pointer itself, and the
-// feed row that parent ultimately belongs to.
+// parentMessageLocked resolves a nested detachment's containing MESSAGE from the
+// id of the message that contains it.
 //
-// THE ROOT IS COPIED DOWN, NEVER WALKED. The parent already holds its own
-// top_level_message_id, so a child reads one value rather than following pointers
-// to the end — which is the unbounded traversal the denormalized field exists to
-// remove.
+// THE MESSAGE, NOT ITS LINEAGE. The child inherits the parent's root from the
+// parent itself, so the root is copied down rather than walked — the unbounded
+// traversal the denormalized field exists to remove — and the parent's
+// durability class travels with it, which is what lets NewDurableChild refuse a
+// parent whose class would make the child unreachable.
 //
-// An EMPTY parent id means the work sits directly in the feed, and BOTH halves
-// come back empty so OpenDetachedWork makes the lineage self-referential. A
-// parent id the store does not hold comes back with an empty root, which
-// OpenDetachedWork REFUSES by name: the daemon claimed containment it cannot
-// substantiate, and quietly promoting the work to a feed row would assert a tree
-// position nobody stated.
-func (s *detachedWorkStore) parentLineageLocked(parentID string) (parent, topLevel string) {
+// An EMPTY parent id means the work sits directly in the feed: nil comes back
+// and OpenDetachedWork makes the message a feed row. A parent id the store does
+// NOT hold is REFUSED by name rather than resolved to nil: the daemon claimed
+// containment it cannot substantiate, and quietly promoting the work to a feed
+// row would assert a tree position nobody stated.
+func (s *detachedWorkStore) parentMessageLocked(parentID string) (*frontendv1.Message, error) {
 	if parentID == "" {
-		return "", ""
+		return nil, nil
 	}
-	return parentID, s.byID[parentID].GetLineage().GetTopLevelMessageId()
+	parent := s.byID[parentID]
+	if parent == nil {
+		return nil, fmt.Errorf("session-controller: detached work claims containment by message %q, which this store does not hold; the work is refused rather than quietly promoted to a feed row it was never said to be", parentID)
+	}
+	return parent, nil
 }
 
 // lookupLocked resolves a work by either handle, the launching call first.
