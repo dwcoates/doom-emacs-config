@@ -114,6 +114,52 @@ func NewDurableFeedRow(body *frontendv1.Message) (*frontendv1.Message, error) {
 	return out, nil
 }
 
+// ClassifyRecordDerived states the durability class of every message curated
+// from a RECORD — a transcript line the CLI wrote, or an event the store holds
+// — and is the single chokepoint the curation path passes through.
+//
+// WHY EVERY ONE OF THEM IS DURABLE. The contract's test for the class is
+// whether a record exists, and nothing else: "A message is EPHEMERAL when no
+// durable record exists for it, and never because the daemon minted its id."
+// Everything reaching here EXISTS BECAUSE a record did — a prompt, an agent
+// response, a reasoning block, a turn result, a clear, a compaction, a failure
+// card read off a system line. The store serves each of them again on the next
+// reload, which is exactly what the durable arm claims.
+//
+// WHY IT IS A CHOKEPOINT AND NOT A PARAMETER ON EACH CURATOR. The curators
+// build a dozen shapes and every one of them shares one answer, so asking each
+// to state it separately is a dozen chances to forget — and a message that
+// reaches a frontend with no arm at all is malformed by the contract: a reader
+// cannot tell "no record exists" from "the record was not found", which is the
+// confusion the class exists to end.
+//
+// AN ALREADY-CLASSIFIED MESSAGE PASSES THROUGH UNTOUCHED. The one curated shape
+// that is NOT durable — the harness's `system`/`local_command` record, which
+// the contract puts in the ephemeral class — is classified at its own producer,
+// which is the only place that knows the shape. Re-deciding it here would be a
+// second authority over one fact, and the two would be free to disagree.
+//
+// A REFUSAL FAILS THE WHOLE DELTA rather than dropping the offending message.
+// The refusal is a daemon defect, and a delta silently short one message is a
+// conversation with a hole in it that nothing downstream can attribute; the
+// error travels the curation path's existing error channel to the caller that
+// can report it.
+func ClassifyRecordDerived(items []*frontendv1.Message) ([]*frontendv1.Message, error) {
+	out := make([]*frontendv1.Message, 0, len(items))
+	for _, it := range items {
+		if it.GetDurability() != nil {
+			out = append(out, it)
+			continue
+		}
+		classified, err := NewDurableFeedRow(it)
+		if err != nil {
+			return nil, fmt.Errorf("frontend: a record-derived message could not be classified, so the whole delta is refused rather than served one message short: %w", err)
+		}
+		out = append(out, classified)
+	}
+	return out, nil
+}
+
 // NewDurableChild classifies one message DURABLE and seats it INSIDE parent,
 // which is the single place rule 2 is enforced.
 //
