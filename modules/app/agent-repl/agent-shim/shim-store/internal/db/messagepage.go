@@ -44,10 +44,24 @@ const MessagePageSize = 10
 // new owner reads exactly the rows the page needs and not one row more —
 // SQLite is never asked to visit the session's older history at all, which a
 // GROUP BY over the whole session would force it to do.
-const ownerSelectSQL = `SELECT top_level_message_id
+const ownerSelectSQL = `SELECT top_level_message_id, seq
   FROM event
   WHERE session_id = ? AND seq < ? AND top_level_message_id IS NOT NULL
   ORDER BY seq DESC`
+
+// ownerAboveAnchorSQL asks whether a candidate owner ALSO owns a record at or
+// above the anchor — that is, whether the descending scan of an earlier page
+// already passed through it and therefore already served it whole.
+//
+// This is what makes "no message twice" hold ACROSS pages and not merely
+// within one. A page's records are selected by owner, so a long-lived message
+// keeps records far below the position the scan stopped at; meeting one of
+// those tendrils on a later page must not resurrect the message. It reads
+// event_message_owner (session_id, top_level_message_id, seq), so the check is
+// one index seek per candidate owner rather than a scan.
+const ownerAboveAnchorSQL = `SELECT 1 FROM event
+  WHERE session_id = ? AND top_level_message_id = ? AND seq >= ?
+  LIMIT 1`
 
 // MessagePage answers one MessagePageRequest: at most ten messages, newest
 // first, each carrying every durable record composing it.
@@ -78,7 +92,7 @@ func (d *DB) MessagePage(ctx context.Context, req *corev1.MessagePageRequest) (*
 	var records int64
 	defer func() { d.observeQuery(StatementMessagePage, "event", sessionID, started, records) }()
 
-	owners, err := d.pageOwners(ctx, sessionID, anchor)
+	owners, stoppedAt, err := d.pageOwners(ctx, sessionID, anchor, MessagePageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +106,7 @@ func (d *DB) MessagePage(ctx context.Context, req *corev1.MessagePageRequest) (*
 		return page, nil
 	}
 
-	messages, oldestSeq, recordCount, err := d.messagesFor(ctx, sessionID, owners)
+	messages, recordCount, err := d.messagesFor(ctx, sessionID, owners)
 	if err != nil {
 		return nil, err
 	}
@@ -102,25 +116,37 @@ func (d *DB) MessagePage(ctx context.Context, req *corev1.MessagePageRequest) (*
 			return nil, d.queryError("message-page", "event", sessionID, err)
 		}
 	}
-	// last_page_seq is the OLDEST seq this page covers, minted here so a caller
-	// never computes a position of its own — the next request copies it back
-	// verbatim. Because it is the minimum over every record of every message on
-	// this page, a continuation anchored at `seq < last_page_seq` cannot
-	// re-select any message already served: overlap is impossible by
-	// construction rather than by the caller's arithmetic.
-	page.LastPageSeq = oldestSeq
+	// last_page_seq is the seq at which the LAST selected owner was ENCOUNTERED
+	// by the descending scan — the position the scan actually walked TO — minted
+	// here so a caller never computes a position of its own.
+	//
+	// NOT the minimum seq over the page's records. A message that starts early
+	// and ends late owns records far below the rest of the page, and anchoring
+	// the next page at that depth would silently SKIP every message in between:
+	// the scan never visited them and the caller is never told. Anchoring at the
+	// position the scan stopped at makes the next page resume exactly where this
+	// one ended, so consecutive pages partition the history with no gap. The
+	// tendrils of a long-lived message still lie below that anchor, and
+	// pageOwners rejects them because their owner also owns a record at or above
+	// the anchor — so there is no overlap either.
+	page.LastPageSeq = stoppedAt
 
-	more, err := d.ownedRecordExistsBelow(ctx, sessionID, oldestSeq)
+	// WHETHER older history remains is asked in the page's own vocabulary: run
+	// the same selection below the anchor for a single owner. A bare "an owned
+	// record exists below" would answer yes to a delivered message's tendril and
+	// hand the caller a "load earlier" affordance that resolves to nothing.
+	below, _, err := d.pageOwners(ctx, sessionID, stoppedAt, 1)
 	if err != nil {
 		return nil, err
 	}
+	more := len(below) > 0
 	if more {
 		page.Boundary = &corev1.MessagePage_More{More: &corev1.HistoryRemainsBelow{}}
 	} else {
 		page.Boundary = &corev1.MessagePage_Floor{Floor: &corev1.HistoryAtRetainedFloor{}}
 	}
 	d.log.Log(fields, "message page served anchor=%d messages=%d records=%d last_page_seq=%d more=%t",
-		anchor, len(messages), recordCount, oldestSeq, more)
+		anchor, len(messages), recordCount, stoppedAt, more)
 	return page, nil
 }
 
@@ -150,44 +176,82 @@ func (d *DB) resolveAnchor(req *corev1.MessagePageRequest) (uint64, error) {
 	}
 }
 
-// pageOwners runs the bounded backward pass: at most ten owning message ids,
-// newest first.
-func (d *DB) pageOwners(ctx context.Context, sessionID string, anchor uint64) ([]string, error) {
+// pageOwners runs the bounded backward pass: at most `limit` owning message
+// ids, newest first, plus the seq at which the LAST of them was encountered.
+//
+// That second value is the page's anchor for its continuation. It is the
+// position the scan walked TO, so a continuation reading `seq < it` resumes at
+// the very next row the scan would have read. Any owner encountered ABOVE it
+// is on this page or on an earlier one; any owner whose newest record lies
+// below it is on the next one. Nothing between them exists to be skipped.
+//
+// An owner that ALSO owns a record at or above the anchor is REJECTED rather
+// than selected: an earlier page's scan necessarily passed through that record
+// and served the message whole, and serving it again would repeat a message
+// the caller already renders. The rejection is per DISTINCT candidate, so its
+// cost is bounded by how many messages straddle the anchor, not by how many
+// records they own.
+func (d *DB) pageOwners(ctx context.Context, sessionID string, anchor uint64, limit int) ([]string, uint64, error) {
 	rows, err := d.sql.QueryContext(ctx, ownerSelectSQL, sessionID, anchor)
 	if err != nil {
-		return nil, d.queryError("message-page-owners", "event", sessionID,
+		return nil, 0, d.queryError("message-page-owners", "event", sessionID,
 			fmt.Errorf("shim-store query: message page owners (session=%q anchor=%d): %w", sessionID, anchor, err))
 	}
 	defer rows.Close()
 	var owners []string
-	seen := make(map[string]bool, MessagePageSize)
-	for len(owners) < MessagePageSize && rows.Next() {
+	var stoppedAt uint64
+	seen := make(map[string]bool, limit)
+	for len(owners) < limit && rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, d.queryError("message-page-owners-scan", "event", sessionID,
+		var seq uint64
+		if err := rows.Scan(&id, &seq); err != nil {
+			return nil, 0, d.queryError("message-page-owners-scan", "event", sessionID,
 				fmt.Errorf("shim-store query: scanning message page owner (session=%q anchor=%d): %w", sessionID, anchor, err))
 		}
 		if seen[id] {
 			continue
 		}
 		seen[id] = true
+		served, err := d.ownerServedAbove(ctx, sessionID, id, anchor)
+		if err != nil {
+			return nil, 0, err
+		}
+		if served {
+			continue
+		}
 		owners = append(owners, id)
+		stoppedAt = seq
 	}
 	// rows.Err() after an EARLY BREAK still reports a scan that failed
 	// mid-stream, so the page is never assembled from a truncated read that
 	// looked like a satisfied limit.
 	if err := rows.Err(); err != nil {
-		return nil, d.queryError("message-page-owners-iterate", "event", sessionID,
+		return nil, 0, d.queryError("message-page-owners-iterate", "event", sessionID,
 			fmt.Errorf("shim-store query: iterating message page owners (session=%q anchor=%d): %w", sessionID, anchor, err))
 	}
-	return owners, nil
+	return owners, stoppedAt, nil
+}
+
+// ownerServedAbove reports whether this owner owns a record at or above the
+// anchor, which means an earlier page already delivered it whole.
+func (d *DB) ownerServedAbove(ctx context.Context, sessionID, owner string, anchor uint64) (bool, error) {
+	var one int
+	row := d.sql.QueryRowContext(ctx, ownerAboveAnchorSQL, sessionID, owner, anchor)
+	switch err := row.Scan(&one); {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	default:
+		return false, d.queryError("message-page-owner-served", "event", sessionID,
+			fmt.Errorf("shim-store query: message page owner already served (session=%q owner=%q anchor=%d): %w", sessionID, owner, anchor, err))
+	}
 }
 
 // messagesFor loads every record owned by the selected messages, in one
 // indexed pass, and assembles them newest message first with each message's
-// records oldest first. It also reports the oldest seq the page covers and how
-// many records it carries.
-func (d *DB) messagesFor(ctx context.Context, sessionID string, owners []string) ([]*corev1.StoredMessage, uint64, int64, error) {
+// records oldest first. It also reports how many records the page carries.
+func (d *DB) messagesFor(ctx context.Context, sessionID string, owners []string) ([]*corev1.StoredMessage, int64, error) {
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(owners)), ",")
 	query := `SELECT top_level_message_id, seq, payload FROM event
 	  WHERE session_id = ? AND top_level_message_id IN (` + placeholders + `)
@@ -199,7 +263,7 @@ func (d *DB) messagesFor(ctx context.Context, sessionID string, owners []string)
 	}
 	rows, err := d.sql.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, 0, 0, d.queryError("message-page-records", "event", sessionID,
+		return nil, 0, d.queryError("message-page-records", "event", sessionID,
 			fmt.Errorf("shim-store query: message page records (session=%q messages=%d): %w", sessionID, len(owners), err))
 	}
 	defer rows.Close()
@@ -208,63 +272,37 @@ func (d *DB) messagesFor(ctx context.Context, sessionID string, owners []string)
 	for _, o := range owners {
 		byOwner[o] = &corev1.StoredMessage{MessageId: o}
 	}
-	var oldestSeq uint64
 	var count int64
 	for rows.Next() {
 		var owner string
 		var seq uint64
 		var blob []byte
 		if err := rows.Scan(&owner, &seq, &blob); err != nil {
-			return nil, 0, 0, d.queryError("message-page-records-scan", "event", sessionID,
+			return nil, 0, d.queryError("message-page-records-scan", "event", sessionID,
 				fmt.Errorf("shim-store query: scanning message page record (session=%q): %w", sessionID, err))
 		}
 		ev := &corev1.Event{}
 		if err := proto.Unmarshal(blob, ev); err != nil {
-			return nil, 0, 0, d.queryError("message-page-records-unmarshal", "event", sessionID,
+			return nil, 0, d.queryError("message-page-records-unmarshal", "event", sessionID,
 				fmt.Errorf("shim-store query: unmarshaling message page record (session=%q seq=%d): %w", sessionID, seq, err))
 		}
 		msg, ok := byOwner[owner]
 		if !ok {
-			return nil, 0, 0, d.queryError("message-page-records", "event", sessionID,
+			return nil, 0, d.queryError("message-page-records", "event", sessionID,
 				fmt.Errorf("shim-store query: message page record names unselected owner (session=%q seq=%d owner=%q)", sessionID, seq, owner))
 		}
 		msg.Records = append(msg.Records, ev)
-		if oldestSeq == 0 || seq < oldestSeq {
-			oldestSeq = seq
-		}
 		count++
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, 0, d.queryError("message-page-records-iterate", "event", sessionID,
+		return nil, 0, d.queryError("message-page-records-iterate", "event", sessionID,
 			fmt.Errorf("shim-store query: iterating message page records (session=%q): %w", sessionID, err))
 	}
 	out := make([]*corev1.StoredMessage, 0, len(owners))
 	for _, o := range owners {
 		out = append(out, byOwner[o])
 	}
-	return out, oldestSeq, count, nil
-}
-
-// ownedRecordExistsBelow answers WHETHER older history remains — never how
-// much and never where. It asks only about OWNED records: a session boundary
-// or a heartbeat sitting below the page is not a message, and reporting it as
-// remaining history would hand the caller a "load earlier" affordance that
-// resolves to nothing.
-func (d *DB) ownedRecordExistsBelow(ctx context.Context, sessionID string, seq uint64) (bool, error) {
-	var one int
-	row := d.sql.QueryRowContext(ctx,
-		`SELECT 1 FROM event
-		   WHERE session_id = ? AND seq < ? AND top_level_message_id IS NOT NULL
-		   LIMIT 1`, sessionID, seq)
-	switch err := row.Scan(&one); {
-	case err == nil:
-		return true, nil
-	case errors.Is(err, sql.ErrNoRows):
-		return false, nil
-	default:
-		return false, d.queryError("message-page-boundary", "event", sessionID,
-			fmt.Errorf("shim-store query: message page boundary (session=%q below_seq=%d): %w", sessionID, seq, err))
-	}
+	return out, count, nil
 }
 
 // setPageSlot writes one message into its numbered slot. Slots are filled from

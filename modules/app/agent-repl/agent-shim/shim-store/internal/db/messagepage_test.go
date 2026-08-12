@@ -235,21 +235,148 @@ func TestMessagePageHeadResolvesWithoutTheCallerNamingASeq(t *testing.T) {
 	}
 }
 
-func TestMessagePageMintsLastPageSeqAsTheOldestSeqItCovers(t *testing.T) {
-	// Arrange
+func TestMessagePageMintsLastPageSeqAsThePositionTheScanStoppedAt(t *testing.T) {
+	// Arrange: a message whose records straddle a newer one, so the seq the
+	// scan stopped at and the oldest seq the page covers are DIFFERENT values.
 	d := openTemp(t)
-	oldest := seedOwned(t, d, "s1", "m1")
-	seedOwned(t, d, "s1", "m2")
+	deep := seedOwned(t, d, "s1", "wide")
+	stopped := seedOwned(t, d, "s1", "wide")
+	seedOwned(t, d, "s1", "recent")
 
 	// Act
 	page, err := d.MessagePage(context.Background(), headRequest("s1"))
 
-	// Assert
+	// Assert: last_page_seq is where the last selected owner was ENCOUNTERED,
+	// never the minimum seq over the page's records.
 	if err != nil {
 		t.Fatalf("MessagePage: %v", err)
 	}
-	if page.GetLastPageSeq() != oldest {
-		t.Fatalf("last_page_seq=%d, want %d", page.GetLastPageSeq(), oldest)
+	if page.GetLastPageSeq() != stopped {
+		t.Fatalf("last_page_seq=%d, want the scan's stopping position %d (deep record was %d)",
+			page.GetLastPageSeq(), stopped, deep)
+	}
+}
+
+func TestMessagePageDoesNotSkipMessagesBeneathAWideSpanningMessage(t *testing.T) {
+	// Arrange: a detached message that starts early and ends late owns a
+	// record beneath every other message in the session. Anchoring the next
+	// page at that depth would swallow the entire history between.
+	d := openTemp(t)
+	seedOwned(t, d, "s1", "wide")
+	var buried []string
+	for i := range 12 {
+		id := fmt.Sprintf("m%02d", i)
+		seedOwned(t, d, "s1", id)
+		buried = append(buried, id)
+	}
+	seedOwned(t, d, "s1", "wide")
+
+	// Act: page the head, then continue below it.
+	first, err := d.MessagePage(context.Background(), headRequest("s1"))
+	if err != nil {
+		t.Fatalf("MessagePage head: %v", err)
+	}
+	second, err := d.MessagePage(context.Background(), &corev1.MessagePageRequest{
+		RequestId: "r2",
+		SessionId: "s1",
+		Anchor:    &corev1.MessagePageRequest_BeforeSeq{BeforeSeq: first.GetLastPageSeq()},
+	})
+
+	// Assert: every buried message is delivered by one of the two pages.
+	if err != nil {
+		t.Fatalf("MessagePage before_seq: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, id := range append(messageIDs(first), messageIDs(second)...) {
+		seen[id] = true
+	}
+	for _, id := range buried {
+		if !seen[id] {
+			t.Fatalf("message %q was skipped beneath the wide-spanning message", id)
+		}
+	}
+}
+
+func TestMessagePageDoesNotRedeliverAWideSpanningMessage(t *testing.T) {
+	// Arrange: the wide message's tendril sits below where the first page's
+	// scan stopped, so the next page's scan meets it again.
+	d := openTemp(t)
+	seedOwned(t, d, "s1", "wide")
+	for i := range 12 {
+		seedOwned(t, d, "s1", fmt.Sprintf("m%02d", i))
+	}
+	seedOwned(t, d, "s1", "wide")
+	first, err := d.MessagePage(context.Background(), headRequest("s1"))
+	if err != nil {
+		t.Fatalf("MessagePage head: %v", err)
+	}
+
+	// Act
+	second, err := d.MessagePage(context.Background(), &corev1.MessagePageRequest{
+		RequestId: "r2",
+		SessionId: "s1",
+		Anchor:    &corev1.MessagePageRequest_BeforeSeq{BeforeSeq: first.GetLastPageSeq()},
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("MessagePage before_seq: %v", err)
+	}
+	for _, id := range messageIDs(second) {
+		if id == "wide" {
+			t.Fatalf("the wide-spanning message was delivered twice: page1=%v page2=%v",
+				messageIDs(first), messageIDs(second))
+		}
+	}
+}
+
+func TestMessagePageInterleavedHistoryPartitionsAcrossEveryPage(t *testing.T) {
+	// Arrange: a long history whose messages interleave — every message owns a
+	// record early and a record late — walked page by page to the floor.
+	d := openTemp(t)
+	var all []string
+	for i := range 25 {
+		id := fmt.Sprintf("m%02d", i)
+		seedOwned(t, d, "s1", id)
+		all = append(all, id)
+	}
+	for _, id := range all {
+		seedOwned(t, d, "s1", id)
+	}
+
+	// Act: page until the store reports the retained floor.
+	seen := map[string]int{}
+	req := headRequest("s1")
+	for {
+		page, err := d.MessagePage(context.Background(), req)
+		if err != nil {
+			t.Fatalf("MessagePage: %v", err)
+		}
+		for _, id := range messageIDs(page) {
+			seen[id]++
+		}
+		if page.GetFloor() != nil {
+			break
+		}
+		req = &corev1.MessagePageRequest{
+			RequestId: "rN",
+			SessionId: "s1",
+			Anchor:    &corev1.MessagePageRequest_BeforeSeq{BeforeSeq: page.GetLastPageSeq()},
+		}
+	}
+
+	// Assert: every message exactly once — no gap, no overlap.
+	for _, id := range all {
+		switch seen[id] {
+		case 1:
+		case 0:
+			t.Fatalf("message %q fell in a gap between pages", id)
+		default:
+			t.Fatalf("message %q was delivered %d times", id, seen[id])
+		}
+	}
+	if len(seen) != len(all) {
+		t.Fatalf("paging carried %d distinct messages, want %d", len(seen), len(all))
 	}
 }
 
@@ -454,18 +581,11 @@ func TestMessagePageSurfacesACorruptRecord(t *testing.T) {
 	}
 }
 
-func TestMessagePageOwnerSelectRunsOnItsIndexWithNoSort(t *testing.T) {
-	// Arrange: the page's cost claim is that owner selection is ONE indexed
-	// backward pass. A temp b-tree in the plan means SQLite materialized and
-	// sorted the session's history first, which is the unbounded scan the
-	// whole contract exists to remove.
-	d := openTemp(t)
-	for i := range 40 {
-		seedOwned(t, d, "s1", fmt.Sprintf("m%02d", i))
-	}
-
-	// Act
-	rows, err := d.sql.Query("EXPLAIN QUERY PLAN "+ownerSelectSQL, "s1", uint64(1<<62))
+// queryPlan returns EXPLAIN QUERY PLAN's details for one statement, joined so
+// a test can assert on the whole plan at once.
+func queryPlan(t *testing.T, d *DB, sql string, args ...any) string {
+	t.Helper()
+	rows, err := d.sql.Query("EXPLAIN QUERY PLAN "+sql, args...)
 	if err != nil {
 		t.Fatalf("EXPLAIN QUERY PLAN: %v", err)
 	}
@@ -482,14 +602,49 @@ func TestMessagePageOwnerSelectRunsOnItsIndexWithNoSort(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterating plan: %v", err)
 	}
+	return strings.Join(plan, " | ")
+}
+
+func TestMessagePageOwnerSelectRunsOnItsIndexWithNoSort(t *testing.T) {
+	// Arrange: the page's cost claim is that owner selection is ONE indexed
+	// backward pass. A temp b-tree in the plan means SQLite materialized and
+	// sorted the session's history first, which is the unbounded scan the
+	// whole contract exists to remove.
+	d := openTemp(t)
+	for i := range 40 {
+		seedOwned(t, d, "s1", fmt.Sprintf("m%02d", i))
+	}
+
+	// Act
+	plan := queryPlan(t, d, ownerSelectSQL, "s1", uint64(1<<62))
 
 	// Assert
-	joined := strings.Join(plan, " | ")
-	if !strings.Contains(joined, "event_message_page") {
-		t.Fatalf("owner selection plan does not use event_message_page: %s", joined)
+	if !strings.Contains(plan, "event_message_page") {
+		t.Fatalf("owner selection plan does not use event_message_page: %s", plan)
 	}
-	if strings.Contains(joined, "TEMP B-TREE") {
-		t.Fatalf("owner selection plan sorts instead of walking the index: %s", joined)
+	if strings.Contains(plan, "TEMP B-TREE") {
+		t.Fatalf("owner selection plan sorts instead of walking the index: %s", plan)
+	}
+}
+
+func TestMessagePageAlreadyServedCheckRunsOnItsOwnerIndex(t *testing.T) {
+	// Arrange: the across-page no-repeat check runs once per candidate owner,
+	// so it must be an index seek. A scan or a sort here would restore the
+	// whole-history visit the page contract exists to remove.
+	d := openTemp(t)
+	for i := range 40 {
+		seedOwned(t, d, "s1", fmt.Sprintf("m%02d", i))
+	}
+
+	// Act
+	plan := queryPlan(t, d, ownerAboveAnchorSQL, "s1", "m01", uint64(1))
+
+	// Assert
+	if !strings.Contains(plan, "event_message_owner") {
+		t.Fatalf("already-served check does not use event_message_owner: %s", plan)
+	}
+	if strings.Contains(plan, "TEMP B-TREE") {
+		t.Fatalf("already-served check sorts instead of seeking the index: %s", plan)
 	}
 }
 
