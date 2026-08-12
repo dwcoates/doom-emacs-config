@@ -7,13 +7,36 @@ including behavioral semantics as normative comments. Two packages:
 the wire), and `agentshim.conversation.v1` (the vendor-agnostic conversation
 model the producers write and the store persists).
 
-`conversation.v1` is specified in `FROZEN-conversation-v1.md` and is nine
-files: `entry.proto` (the record and its three-way cut), `message.proto`,
-`content.proto`, `payloads.proto`, `bookkeeping.proto`, `unsupported.proto`,
-`ephemeral.proto` (the one message that is never written), plus the two shared
-vocabularies that moved down from `frontend.v1` — `tokens.proto` and
-`commands.proto`. Both moved because a DURABLE record names them, and a stored
-record cannot depend on the daemon's resolved output surface.
+`conversation.v1` is specified in `FROZEN-conversation-v1.md` and is ten files:
+`entry.proto` (the stored record and its internal half), `external.proto`,
+`message.proto`, `content.proto`, `payloads.proto`, `bookkeeping.proto`,
+`unsupported.proto`, `ephemeral.proto` (the one message that is never written),
+plus the two shared vocabularies that moved down from `frontend.v1` —
+`tokens.proto` and `commands.proto`. Both moved because a DURABLE record names
+them, and a stored record cannot depend on the daemon's resolved output surface.
+
+## `conversation.v1` import discipline — the daemon gets `external.proto` only
+
+A stored record has two halves. `ExternalEntry` may cross the shim→daemon wire;
+`InternalEntry` — which observation plane produced the record, the store's dedup
+key, and anything the producer could not convert — may not.
+
+**No daemon source file may import `conversation/v1/entry.proto` or
+`conversation/v1/unsupported.proto`.** Everything the daemon is entitled to see
+is reachable from `external.proto`, whose import closure is exactly eight files
+and includes neither. This is why a daemon read of `plane` does not compile
+rather than merely being discouraged; the previous design published the shim's
+observation plane to the daemon, which then made turn-authority decisions from a
+shim implementation detail instead of from the record's own meaning.
+
+The store's `seq` is NOT in this package. A position is the store's addressing,
+so it rides `core/v1/entry-delivery.proto`, whose `stored`/`live` oneof also
+replaces the old `retention` field: a live record has no field to put a position
+in, so nothing can advance a resume cursor past a position the store never
+assigned.
+
+This discipline deserves a repository gate alongside `check-durable-isolation.sh`
+and `bin/check-external-boundaries.sh`; it is not gated yet.
 
 ## `agentshim.data.v1` was DELETED
 

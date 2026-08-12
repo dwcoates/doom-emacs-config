@@ -1,135 +1,134 @@
-// entry.proto — the durable record, and the cut that decides what can be shown.
+// entry.proto — the stored record, and the half of it that never leaves.
 //
 // PACKAGE CONTRACT: agentshim.conversation.v1 is the VENDOR-AGNOSTIC model of a
 // conversation. The shim and the sidecar convert their vendor's output into it
 // at the point of production; the store persists only this; the daemon and the
 // webapp consume only this and never learn a vendor's name. Anything a producer
-// cannot convert lands as an explicit unsupported arm rather than as raw vendor
+// cannot convert lands as an explicit internal arm rather than as raw vendor
 // material, so eager conversion at the edge costs no fidelity.
 //
 // This package REPLACES agentshim.data.v1, which was a direct transliteration
 // of Claude's JSONL and SDK stream — 267 messages whose names and arms were the
 // vendor's own API surface, which meant every consumer that read one had to
 // know the vendor to understand it.
+//
+// ============================ IMPORT DISCIPLINE ============================
+//
+// THE DAEMON MUST NEVER IMPORT THIS FILE, nor unsupported.proto.
+//
+// Everything the daemon is entitled to see is in external.proto. This file
+// holds the shim-side half: which observation plane produced a record, the key
+// the store deduped it on, and the records we could not convert at all. Those
+// are implementation details of the shim, the sidecar and the store, and the
+// daemon was previously reading them to make decisions it should have made from
+// a record's own meaning.
+//
+// The enforcement is the import graph, not a convention. A daemon source file
+// that reads `plane` does not compile, because the type is not in its build.
+// This is worth a repository gate alongside check-external-boundaries.sh.
+//
+// ==========================================================================
 
 syntax = "proto3";
 
 package agentshim.conversation.v1;
 
-import "agentshim/conversation/v1/bookkeeping.proto";
-import "agentshim/conversation/v1/message.proto";
+import "agentshim/conversation/v1/external.proto";
 import "agentshim/conversation/v1/unsupported.proto";
 
 option go_package = "agentrepl/proto/agentshim/conversation/v1;conversationv1";
 
-// One durable record, whose FIRST question is not "what kind of thing is this"
-// but "can we render it at all".
+// One record as the STORE holds it: the half that may leave, and the half that
+// may not.
 //
-// The split is binary at the top for a reason: a page query selects the
-// `message` arm and nothing else, so an entry we cannot render has no path into
-// a page. That is not a rule the query applies — it is the only arm it can name.
+// A PRODUCT, NOT A SUM. Both fields can be set on one record and usually are —
+// this is not a choice between an internal record and an external one. Every
+// stored record has an internal half (at minimum, which producer observed it);
+// records that are eligible to reach the daemon also have an external half.
+//
+// A RECORD WITH NO EXTERNAL HALF IS THE UNRENDERABLE CASE. Something we could
+// not convert is stored whole and has simply nothing to hand over — not an arm
+// the daemon must remember to skip, but no external field set at all. That is
+// what makes "an unconvertible record cannot reach a page" a fact about the
+// record's shape rather than a rule a query applies.
 message Entry {
-  // Which conversation this belongs to. The vendor's session identity, which is
-  // the only thing every producer and the store already agree on.
-  string session_id = 1;
+  // What stays behind. Written to the store, never forwarded.
+  InternalEntry internal = 1;
 
-  // The store's own monotonic position, assigned at write. Readers order by it
-  // and anchor pages by it; producers never supply it.
-  uint64 seq = 2;
-
-  // WHICH PRODUCER observed this, for attribution and nothing else. It does not
-  // change how an entry is read — an entry means the same thing whichever plane
-  // carried it — but when two accounts disagree, this is what says who said
-  // what.
+  // What may be forwarded. The daemon receives exactly this, carried by the
+  // delivery envelope in agentshim.core.v1 — a field access, not a conversion.
   //
-  // UNDER REVIEW. The standing objection is that the daemon has no business
-  // knowing this, that the four checks currently reading it all say "this arm
-  // may only come from this producer", and that putting the producer in the ARM
-  // would delete the field and the checks together. Frozen as-is pending that
-  // review; see PLANNED-record-ownership.md.
-  Plane plane = 3;
+  // UNSET means the record is unrenderable and has no path to the daemon.
+  ExternalEntry external = 2;
+}
 
-  // Whether this entry is retained at all. EPHEMERAL entries bypass the store
-  // entirely and are never replayed: live-typing deltas and liveness signals
-  // exist to be seen once, and persisting them would store millions of
-  // fragments of a message the file plane will deliver whole.
+// The half of a record that never crosses the shim→daemon wire.
+//
+// Everything here is an implementation detail of the shim, the sidecar or the
+// store. The daemon's build does not include this type, so none of it can be
+// read downstream by accident.
+message InternalEntry {
+  // WHICH PRODUCER observed this. Attribution, and the shim's own business.
   //
-  // UNDER REVIEW alongside `plane`: ContentArriving is the only ephemeral arm
-  // in the package, so this field and that arm are two authorities on one fact.
-  Retention retention = 4;
-
-  // The producer's wall clock at observation, in unix millis. Distinct from
-  // `seq`, which orders; this one is what a reader DISPLAYS, and the two can
-  // legitimately disagree when a producer is catching up on history.
-  int64 produced_at_ms = 5;
+  // The daemon used to read this to decide whether a turn boundary was
+  // authoritative — an abstraction leak, because "is this boundary
+  // authoritative" is a property of the BOUNDARY and belongs in its own arm.
+  // Producers still record who saw what, for reconciliation when two accounts
+  // disagree; nothing downstream sees it.
+  Plane plane = 1;
 
   // The key that makes a re-read idempotent. Both producers re-read their
   // sources after a restart, so the same record can arrive twice; the store
-  // keeps the first. Empty means the store derives one from the entry's own
+  // keeps the first. Empty means the store derives one from the record's own
   // identity.
-  string dedup_key = 6;
-
-  // THE TEST THAT DECIDES THESE ARMS, in one question: if you PRINTED the
-  // conversation to read it, would this appear?
   //
-  //   yes                      -> message
-  //   no, but we understand it -> bookkeeping
-  //   we could not tell        -> unsupported
-  //
-  // Put another way: a MESSAGE is something the conversation CONSISTS OF, and
-  // BOOKKEEPING is a fact ABOUT the conversation. Content versus evidence.
-  //
-  // The reverse readings are the useful ones. Something is NOT a message when
-  // nothing in the feed would be missing had it never arrived. Something is NOT
-  // bookkeeping when a reader scrolling back would notice a hole where it
-  // should have been.
-  oneof entry {
-    // A record BELONGING to a conversation message — the thing the feed draws
-    // and a page counts.
-    //
-    // It has an identity the user could point at, it accumulates over several
-    // records that share that identity, and it is what "ten messages" counts.
-    // A context cut and a failure card are messages by this test: a reader must
-    // see WHERE the conversation was cut, and a failure card is a thing the
-    // user reads and acts on.
-    MessageEntry message = 40;
+  // Purely the store's concern. A record's IDENTITY downstream is
+  // MessageEntry.message_id, which is a different thing and always was.
+  string dedup_key = 2;
 
-    // A fact ABOUT the session rather than a part of the conversation. We
-    // understand it completely and nothing in the feed corresponds to it.
-    //
-    // It is not uncounted because it is unimportant — it drives the footer, the
-    // session state machine, accounting and the turn ledger. It is uncounted
-    // because it is not IN the transcript: you cannot point at a turn boundary.
-    //
-    // Separated from `message` rather than filtered out of it, so a turn
-    // boundary has no field capable of naming a message and therefore cannot
-    // become a phantom page slot. Misfiling one is not a wrong value — it is an
-    // unbuildable record.
-    //
-    // THE FRONTEND NEVER SEES THESE. Bookkeeping reaches a client only after
-    // the daemon has resolved it into a view, which is what makes it evidence
-    // rather than content.
-    BookkeepingEntry bookkeeping = 41;
+  // Set when there is nothing to hand the daemon: a record we could not place.
+  //
+  // UNSET on every ordinary record — this is not a category every entry falls
+  // into, it is the residue. These arms were previously wrapped in an
+  // `UnsupportedEntry` that sat as a third arm beside message and bookkeeping,
+  // which put a thing nobody can render in the same list as the two things
+  // everybody renders. Unwrapping it here says what it always meant:
+  // unsupported IS internal.
+  //
+  // THIS IS WHAT MAKES EAGER CONVERSION SAFE. Converting vendor output to the
+  // neutral model at the edge would be a lossy bet if anything unconvertible
+  // were dropped. It is not dropped: it lands durably and whole, so the
+  // decision to not model it stays reversible from stored data.
+  oneof unconverted {
+    // A fact specific to one vendor, understood but not carried into a
+    // vendor-agnostic feed. The follow-up is a CONVERTER, if it turns out to be
+    // portable after all.
+    VendorSpecificEntry vendor_specific = 10;
 
-    // Something we could not place, preserved verbatim so the decision is
-    // reversible. The printing test cannot be applied to it — that is what
-    // makes it unsupported rather than either arm above.
-    UnsupportedEntry unsupported = 42;
+    // A record we PARSED but do not MODEL. The follow-up is a MODEL.
+    UnknownEntry unknown = 11;
+
+    // A record we could not PARSE at all — a failure rather than a gap.
+    UnparsedEntry unparsed = 12;
   }
 }
 
-// Which producer observed an entry.
+// Which producer observed a record.
+//
+// TWO ARMS, NOT THREE. An earlier draft had a `synthetic` arm for the daemon
+// stating something it inferred. The daemon has no store write path at all —
+// every StoreWrite producer is the shim, the sidecar, or the store itself, and
+// daemon-synthesized turn closes live in the daemon's own statedb — so that arm
+// named a producer that cannot exist here.
 message Plane {
   oneof plane {
     // The shim, watching the SDK as it runs. First to know, and the only source
-    // for anything that has not been written to disk yet.
+    // for anything that has not been written to disk yet. Authoritative for
+    // session and turn LIFECYCLE.
     PlaneStream stream = 1;
     // The sidecar, reading what the vendor wrote to disk. Authoritative for
-    // conversation content, because it is what the vendor itself recorded.
+    // conversation CONTENT, because it is what the vendor itself recorded.
     PlaneFile file = 2;
-    // The daemon, stating something it inferred rather than observed. Held
-    // apart so an inference can never be mistaken for a reading.
-    PlaneSynthetic synthetic = 3;
   }
 }
 
@@ -138,24 +137,3 @@ message PlaneStream {}
 
 // Read by the sidecar from what the vendor wrote to disk.
 message PlaneFile {}
-
-// Inferred by the daemon rather than observed by anyone.
-message PlaneSynthetic {}
-
-// Whether an entry is retained.
-message Retention {
-  oneof retention {
-    // Written, replayed, and pageable.
-    RetentionDurable durable = 1;
-    // Delivered live and never stored. It bypasses the store entirely rather
-    // than being written and filtered, so there is no path by which a delta
-    // reaches a page.
-    RetentionEphemeral ephemeral = 2;
-  }
-}
-
-// Written to the store, replayed on reconnect, and reachable by a page query.
-message RetentionDurable {}
-
-// Delivered live to whoever is watching and never written anywhere.
-message RetentionEphemeral {}

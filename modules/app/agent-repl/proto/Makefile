@@ -9,6 +9,7 @@
 PROTOS := \
   agentshim/core/v1/core.proto \
   agentshim/core/v1/message-page.proto \
+  agentshim/core/v1/entry-delivery.proto \
   agentshim/conversation/v1/tokens.proto \
   agentshim/conversation/v1/commands.proto \
   agentshim/conversation/v1/content.proto \
@@ -17,6 +18,7 @@ PROTOS := \
   agentshim/conversation/v1/bookkeeping.proto \
   agentshim/conversation/v1/unsupported.proto \
   agentshim/conversation/v1/message.proto \
+  agentshim/conversation/v1/external.proto \
   agentshim/conversation/v1/entry.proto \
   agentshim/frontend/v1/agent-emission.proto \
   agentshim/frontend/v1/agent-response.proto \

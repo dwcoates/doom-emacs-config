@@ -1,0 +1,60 @@
+// entry-delivery.proto — how a conversation record reaches the daemon, and
+// where its store position lives.
+//
+// TRANSPORT, NOT MODEL. agentshim.conversation.v1 describes what a conversation
+// IS; this describes how one of its records arrives. The store's `seq` lives
+// here for the same reason ReplayRequest and Subscribe do: a position is the
+// store's addressing, not a fact about a conversation.
+
+syntax = "proto3";
+
+package agentshim.core.v1;
+
+import "agentshim/conversation/v1/external.proto";
+
+option go_package = "agentrepl/proto/agentshim/core/v1;corev1";
+
+// One conversation record arriving at the daemon, by whichever route brought
+// it.
+//
+// THE TWO ROUTES ARE REAL AND DIFFERENT. A durable record is written to the
+// store, assigned a position, and forwarded from there; a live record bypasses
+// the store entirely and is handed straight over. There is no `retention` field
+// anywhere in the system saying which is which — the route IS the fact, and
+// this oneof is where it is stated.
+message EntryDelivery {
+  oneof delivery {
+    // Written, positioned, and forwarded from the store.
+    StoredEntryDelivery stored = 1;
+    // Handed over live, never written.
+    LiveEntryDelivery live = 2;
+  }
+}
+
+// A record the store holds, delivered with the position it holds it at.
+message StoredEntryDelivery {
+  // The store's own monotonic position, assigned at write. Readers order by it,
+  // anchor pages by it, and resume from it; producers never supply it.
+  //
+  // ADVANCING A RESUME CURSOR IS ONLY EVER DONE FROM THIS ARM. That is the
+  // whole point of the split: a live record has no field to put a position in,
+  // so it cannot carry one, so a consumer cannot advance past a position the
+  // store never assigned and then resume from a seq that does not exist.
+  uint64 seq = 1;
+
+  // The record's external half, verbatim as the store holds it.
+  agentshim.conversation.v1.ExternalEntry entry = 2;
+}
+
+// A record delivered live, which the store will never hold.
+//
+// NO POSITION FIELD, and that absence is the contract. The two records that
+// arrive this way — ContentArriving (a message still being typed) and Heartbeat
+// (something is alive) — exist to be seen once. A consumer REPLACES a live
+// preview with the durable record of the same content when the file plane
+// delivers it whole, rather than appending beside it.
+message LiveEntryDelivery {
+  // The record's external half. It never had an internal half either: nothing
+  // wrote it, so nothing deduped it or recorded which plane stored it.
+  agentshim.conversation.v1.ExternalEntry entry = 1;
+}
