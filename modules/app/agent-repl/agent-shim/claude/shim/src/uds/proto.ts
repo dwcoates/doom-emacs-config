@@ -7,3 +7,4 @@
  * one place to update if the generated tree ever moves.
  */
 export * from "../../../../../proto/gen/ts/agentshim/core/v1/core_pb.js";
+export * from "../../../../../proto/gen/ts/agentshim/core/v1/message-page_pb.js";
