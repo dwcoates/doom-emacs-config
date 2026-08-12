@@ -52,7 +52,7 @@ type BookkeepingEntry struct {
 	//	*BookkeepingEntry_ResponseTiming
 	//	*BookkeepingEntry_ProducerDiagnostic
 	//	*BookkeepingEntry_SessionIdentityChanged
-	//	*BookkeepingEntry_UsageObserved
+	//	*BookkeepingEntry_AccountUsageObservation
 	Kind          isBookkeepingEntry_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -167,10 +167,10 @@ func (x *BookkeepingEntry) GetSessionIdentityChanged() *SessionIdentityChanged {
 	return nil
 }
 
-func (x *BookkeepingEntry) GetUsageObserved() *UsageObserved {
+func (x *BookkeepingEntry) GetAccountUsageObservation() *AccountUsageObservation {
 	if x != nil {
-		if x, ok := x.Kind.(*BookkeepingEntry_UsageObserved); ok {
-			return x.UsageObserved
+		if x, ok := x.Kind.(*BookkeepingEntry_AccountUsageObservation); ok {
+			return x.AccountUsageObservation
 		}
 	}
 	return nil
@@ -225,11 +225,17 @@ type BookkeepingEntry_SessionIdentityChanged struct {
 	SessionIdentityChanged *SessionIdentityChanged `protobuf:"bytes,8,opt,name=session_identity_changed,json=sessionIdentityChanged,proto3,oneof"`
 }
 
-type BookkeepingEntry_UsageObserved struct {
-	// A usage measurement taken at a turn boundary. Evidence the daemon
-	// resolves into the figure a footer shows; the raw measurement never
-	// reaches a client.
-	UsageObserved *UsageObserved `protobuf:"bytes,9,opt,name=usage_observed,json=usageObserved,proto3,oneof"`
+type BookkeepingEntry_AccountUsageObservation struct {
+	// An attempt to measure SUBSCRIPTION usage at a turn boundary — the
+	// account's rate-limit window, not this turn's token cost. Evidence the
+	// daemon resolves into the figure a footer shows; the raw measurement
+	// never reaches a client.
+	//
+	// Moved down from core.v1, which is transport. The shim probes the usage
+	// service and emits this alongside TurnStarted, so it is producer-observed,
+	// durable, and a fact ABOUT the session — bookkeeping by this file's own
+	// test.
+	AccountUsageObservation *AccountUsageObservation `protobuf:"bytes,9,opt,name=account_usage_observation,json=accountUsageObservation,proto3,oneof"`
 }
 
 func (*BookkeepingEntry_SessionBegan) isBookkeepingEntry_Kind() {}
@@ -248,7 +254,7 @@ func (*BookkeepingEntry_ProducerDiagnostic) isBookkeepingEntry_Kind() {}
 
 func (*BookkeepingEntry_SessionIdentityChanged) isBookkeepingEntry_Kind() {}
 
-func (*BookkeepingEntry_UsageObserved) isBookkeepingEntry_Kind() {}
+func (*BookkeepingEntry_AccountUsageObservation) isBookkeepingEntry_Kind() {}
 
 // The session began, with the configuration it began under.
 //
@@ -1751,33 +1757,53 @@ func (x *SessionIdentityChanged) GetReason() string {
 	return ""
 }
 
-// A usage measurement taken at a turn boundary.
-type UsageObserved struct {
+// Records one attempt to measure subscription usage at a turn boundary.
+type AccountUsageObservation struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The turn this measurement was taken at the boundary of.
-	TurnId string `protobuf:"bytes,1,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
-	// The measurement, in the same canonical shape a response carries, so a turn
-	// total and a message cost are the same units and can be compared without a
-	// conversion nobody would remember to write.
-	Usage         *TokenUsage `protobuf:"bytes,2,opt,name=usage,proto3" json:"usage,omitempty"`
+	// Identifies the query serving the turn.
+	QueryInstanceId string `protobuf:"bytes,1,opt,name=query_instance_id,json=queryInstanceId,proto3" json:"query_instance_id,omitempty"`
+	// Identifies the turn whose boundary was measured.
+	TurnId string `protobuf:"bytes,2,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
+	// Gives the exact turn-boundary time independently of sampling latency.
+	BoundaryAtMs int64 `protobuf:"varint,3,opt,name=boundary_at_ms,json=boundaryAtMs,proto3" json:"boundary_at_ms,omitempty"`
+	// Gives the time at which the usage response was received.
+	ObservedAtMs int64 `protobuf:"varint,4,opt,name=observed_at_ms,json=observedAtMs,proto3" json:"observed_at_ms,omitempty"`
+	// Gives the elapsed time required to obtain the usage response.
+	SampleLatencyMs int64 `protobuf:"varint,5,opt,name=sample_latency_ms,json=sampleLatencyMs,proto3" json:"sample_latency_ms,omitempty"`
+	// Gives the subscription type reported by the usage service.
+	SubscriptionType string `protobuf:"bytes,6,opt,name=subscription_type,json=subscriptionType,proto3" json:"subscription_type,omitempty"`
+	// Identifies the measured turn boundary.
+	//
+	// Types that are valid to be assigned to Boundary:
+	//
+	//	*AccountUsageObservation_TurnStart
+	//	*AccountUsageObservation_TurnEnd
+	Boundary isAccountUsageObservation_Boundary `protobuf_oneof:"boundary"`
+	// Contains either the measurement or its explicit failure.
+	//
+	// Types that are valid to be assigned to Outcome:
+	//
+	//	*AccountUsageObservation_Available
+	//	*AccountUsageObservation_Unavailable
+	Outcome       isAccountUsageObservation_Outcome `protobuf_oneof:"outcome"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *UsageObserved) Reset() {
-	*x = UsageObserved{}
+func (x *AccountUsageObservation) Reset() {
+	*x = AccountUsageObservation{}
 	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *UsageObserved) String() string {
+func (x *AccountUsageObservation) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*UsageObserved) ProtoMessage() {}
+func (*AccountUsageObservation) ProtoMessage() {}
 
-func (x *UsageObserved) ProtoReflect() protoreflect.Message {
+func (x *AccountUsageObservation) ProtoReflect() protoreflect.Message {
 	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1789,30 +1815,597 @@ func (x *UsageObserved) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use UsageObserved.ProtoReflect.Descriptor instead.
-func (*UsageObserved) Descriptor() ([]byte, []int) {
+// Deprecated: Use AccountUsageObservation.ProtoReflect.Descriptor instead.
+func (*AccountUsageObservation) Descriptor() ([]byte, []int) {
 	return file_agentshim_conversation_v1_bookkeeping_proto_rawDescGZIP(), []int{26}
 }
 
-func (x *UsageObserved) GetTurnId() string {
+func (x *AccountUsageObservation) GetQueryInstanceId() string {
+	if x != nil {
+		return x.QueryInstanceId
+	}
+	return ""
+}
+
+func (x *AccountUsageObservation) GetTurnId() string {
 	if x != nil {
 		return x.TurnId
 	}
 	return ""
 }
 
-func (x *UsageObserved) GetUsage() *TokenUsage {
+func (x *AccountUsageObservation) GetBoundaryAtMs() int64 {
 	if x != nil {
-		return x.Usage
+		return x.BoundaryAtMs
+	}
+	return 0
+}
+
+func (x *AccountUsageObservation) GetObservedAtMs() int64 {
+	if x != nil {
+		return x.ObservedAtMs
+	}
+	return 0
+}
+
+func (x *AccountUsageObservation) GetSampleLatencyMs() int64 {
+	if x != nil {
+		return x.SampleLatencyMs
+	}
+	return 0
+}
+
+func (x *AccountUsageObservation) GetSubscriptionType() string {
+	if x != nil {
+		return x.SubscriptionType
+	}
+	return ""
+}
+
+func (x *AccountUsageObservation) GetBoundary() isAccountUsageObservation_Boundary {
+	if x != nil {
+		return x.Boundary
 	}
 	return nil
+}
+
+func (x *AccountUsageObservation) GetTurnStart() *TurnStartUsageBoundary {
+	if x != nil {
+		if x, ok := x.Boundary.(*AccountUsageObservation_TurnStart); ok {
+			return x.TurnStart
+		}
+	}
+	return nil
+}
+
+func (x *AccountUsageObservation) GetTurnEnd() *TurnEndUsageBoundary {
+	if x != nil {
+		if x, ok := x.Boundary.(*AccountUsageObservation_TurnEnd); ok {
+			return x.TurnEnd
+		}
+	}
+	return nil
+}
+
+func (x *AccountUsageObservation) GetOutcome() isAccountUsageObservation_Outcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return nil
+}
+
+func (x *AccountUsageObservation) GetAvailable() *AccountUsageAvailable {
+	if x != nil {
+		if x, ok := x.Outcome.(*AccountUsageObservation_Available); ok {
+			return x.Available
+		}
+	}
+	return nil
+}
+
+func (x *AccountUsageObservation) GetUnavailable() *AccountUsageUnavailable {
+	if x != nil {
+		if x, ok := x.Outcome.(*AccountUsageObservation_Unavailable); ok {
+			return x.Unavailable
+		}
+	}
+	return nil
+}
+
+type isAccountUsageObservation_Boundary interface {
+	isAccountUsageObservation_Boundary()
+}
+
+type AccountUsageObservation_TurnStart struct {
+	// Marks the boundary immediately before prompt submission.
+	TurnStart *TurnStartUsageBoundary `protobuf:"bytes,10,opt,name=turn_start,json=turnStart,proto3,oneof"`
+}
+
+type AccountUsageObservation_TurnEnd struct {
+	// Marks the boundary after the terminal result is received.
+	TurnEnd *TurnEndUsageBoundary `protobuf:"bytes,11,opt,name=turn_end,json=turnEnd,proto3,oneof"`
+}
+
+func (*AccountUsageObservation_TurnStart) isAccountUsageObservation_Boundary() {}
+
+func (*AccountUsageObservation_TurnEnd) isAccountUsageObservation_Boundary() {}
+
+type isAccountUsageObservation_Outcome interface {
+	isAccountUsageObservation_Outcome()
+}
+
+type AccountUsageObservation_Available struct {
+	// Contains the account-usage measurement.
+	Available *AccountUsageAvailable `protobuf:"bytes,20,opt,name=available,proto3,oneof"`
+}
+
+type AccountUsageObservation_Unavailable struct {
+	// Explains why the measurement could not be obtained.
+	Unavailable *AccountUsageUnavailable `protobuf:"bytes,21,opt,name=unavailable,proto3,oneof"`
+}
+
+func (*AccountUsageObservation_Available) isAccountUsageObservation_Outcome() {}
+
+func (*AccountUsageObservation_Unavailable) isAccountUsageObservation_Outcome() {}
+
+// Marks an observation taken immediately before prompt submission.
+type TurnStartUsageBoundary struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TurnStartUsageBoundary) Reset() {
+	*x = TurnStartUsageBoundary{}
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TurnStartUsageBoundary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TurnStartUsageBoundary) ProtoMessage() {}
+
+func (x *TurnStartUsageBoundary) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TurnStartUsageBoundary.ProtoReflect.Descriptor instead.
+func (*TurnStartUsageBoundary) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_bookkeeping_proto_rawDescGZIP(), []int{27}
+}
+
+// Marks an observation taken after the terminal result is received.
+type TurnEndUsageBoundary struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TurnEndUsageBoundary) Reset() {
+	*x = TurnEndUsageBoundary{}
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TurnEndUsageBoundary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TurnEndUsageBoundary) ProtoMessage() {}
+
+func (x *TurnEndUsageBoundary) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TurnEndUsageBoundary.ProtoReflect.Descriptor instead.
+func (*TurnEndUsageBoundary) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_bookkeeping_proto_rawDescGZIP(), []int{28}
+}
+
+// Contains subscription-usage windows returned by the usage service.
+type AccountUsageAvailable struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Contains utilization of the rolling five-hour window.
+	FiveHour      *UsageWindow `protobuf:"bytes,1,opt,name=five_hour,json=fiveHour,proto3" json:"five_hour,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccountUsageAvailable) Reset() {
+	*x = AccountUsageAvailable{}
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccountUsageAvailable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccountUsageAvailable) ProtoMessage() {}
+
+func (x *AccountUsageAvailable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccountUsageAvailable.ProtoReflect.Descriptor instead.
+func (*AccountUsageAvailable) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_bookkeeping_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *AccountUsageAvailable) GetFiveHour() *UsageWindow {
+	if x != nil {
+		return x.FiveHour
+	}
+	return nil
+}
+
+// Describes utilization and reset time for one account-usage window.
+type UsageWindow struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Gives utilization as a percentage from zero through one hundred.
+	UtilizationPercent float64 `protobuf:"fixed64,1,opt,name=utilization_percent,json=utilizationPercent,proto3" json:"utilization_percent,omitempty"`
+	// Gives the Unix epoch time at which the window resets.
+	ResetsAtMs    int64 `protobuf:"varint,2,opt,name=resets_at_ms,json=resetsAtMs,proto3" json:"resets_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UsageWindow) Reset() {
+	*x = UsageWindow{}
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UsageWindow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UsageWindow) ProtoMessage() {}
+
+func (x *UsageWindow) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UsageWindow.ProtoReflect.Descriptor instead.
+func (*UsageWindow) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_bookkeeping_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *UsageWindow) GetUtilizationPercent() float64 {
+	if x != nil {
+		return x.UtilizationPercent
+	}
+	return 0
+}
+
+func (x *UsageWindow) GetResetsAtMs() int64 {
+	if x != nil {
+		return x.ResetsAtMs
+	}
+	return 0
+}
+
+// Explains why an account-usage measurement could not be obtained.
+type AccountUsageUnavailable struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Identifies the failure without collapsing distinct conditions.
+	//
+	// Types that are valid to be assigned to Reason:
+	//
+	//	*AccountUsageUnavailable_ServiceUnavailable
+	//	*AccountUsageUnavailable_WindowUnavailable
+	//	*AccountUsageUnavailable_UtilizationUnavailable
+	//	*AccountUsageUnavailable_SamplingFailure
+	Reason        isAccountUsageUnavailable_Reason `protobuf_oneof:"reason"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccountUsageUnavailable) Reset() {
+	*x = AccountUsageUnavailable{}
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccountUsageUnavailable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccountUsageUnavailable) ProtoMessage() {}
+
+func (x *AccountUsageUnavailable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccountUsageUnavailable.ProtoReflect.Descriptor instead.
+func (*AccountUsageUnavailable) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_bookkeeping_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *AccountUsageUnavailable) GetReason() isAccountUsageUnavailable_Reason {
+	if x != nil {
+		return x.Reason
+	}
+	return nil
+}
+
+func (x *AccountUsageUnavailable) GetServiceUnavailable() *UsageServiceUnavailable {
+	if x != nil {
+		if x, ok := x.Reason.(*AccountUsageUnavailable_ServiceUnavailable); ok {
+			return x.ServiceUnavailable
+		}
+	}
+	return nil
+}
+
+func (x *AccountUsageUnavailable) GetWindowUnavailable() *FiveHourWindowUnavailable {
+	if x != nil {
+		if x, ok := x.Reason.(*AccountUsageUnavailable_WindowUnavailable); ok {
+			return x.WindowUnavailable
+		}
+	}
+	return nil
+}
+
+func (x *AccountUsageUnavailable) GetUtilizationUnavailable() *UtilizationUnavailable {
+	if x != nil {
+		if x, ok := x.Reason.(*AccountUsageUnavailable_UtilizationUnavailable); ok {
+			return x.UtilizationUnavailable
+		}
+	}
+	return nil
+}
+
+func (x *AccountUsageUnavailable) GetSamplingFailure() *UsageSamplingFailure {
+	if x != nil {
+		if x, ok := x.Reason.(*AccountUsageUnavailable_SamplingFailure); ok {
+			return x.SamplingFailure
+		}
+	}
+	return nil
+}
+
+type isAccountUsageUnavailable_Reason interface {
+	isAccountUsageUnavailable_Reason()
+}
+
+type AccountUsageUnavailable_ServiceUnavailable struct {
+	// Indicates that the account-usage API was unavailable.
+	ServiceUnavailable *UsageServiceUnavailable `protobuf:"bytes,1,opt,name=service_unavailable,json=serviceUnavailable,proto3,oneof"`
+}
+
+type AccountUsageUnavailable_WindowUnavailable struct {
+	// Indicates that the response omitted the five-hour window.
+	WindowUnavailable *FiveHourWindowUnavailable `protobuf:"bytes,2,opt,name=window_unavailable,json=windowUnavailable,proto3,oneof"`
+}
+
+type AccountUsageUnavailable_UtilizationUnavailable struct {
+	// Indicates that the response omitted utilization.
+	UtilizationUnavailable *UtilizationUnavailable `protobuf:"bytes,3,opt,name=utilization_unavailable,json=utilizationUnavailable,proto3,oneof"`
+}
+
+type AccountUsageUnavailable_SamplingFailure struct {
+	// Records a transport, parsing, or SDK error.
+	SamplingFailure *UsageSamplingFailure `protobuf:"bytes,4,opt,name=sampling_failure,json=samplingFailure,proto3,oneof"`
+}
+
+func (*AccountUsageUnavailable_ServiceUnavailable) isAccountUsageUnavailable_Reason() {}
+
+func (*AccountUsageUnavailable_WindowUnavailable) isAccountUsageUnavailable_Reason() {}
+
+func (*AccountUsageUnavailable_UtilizationUnavailable) isAccountUsageUnavailable_Reason() {}
+
+func (*AccountUsageUnavailable_SamplingFailure) isAccountUsageUnavailable_Reason() {}
+
+// Marks unavailability of the account-usage API.
+type UsageServiceUnavailable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UsageServiceUnavailable) Reset() {
+	*x = UsageServiceUnavailable{}
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UsageServiceUnavailable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UsageServiceUnavailable) ProtoMessage() {}
+
+func (x *UsageServiceUnavailable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UsageServiceUnavailable.ProtoReflect.Descriptor instead.
+func (*UsageServiceUnavailable) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_bookkeeping_proto_rawDescGZIP(), []int{32}
+}
+
+// Marks absence of the five-hour window.
+type FiveHourWindowUnavailable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FiveHourWindowUnavailable) Reset() {
+	*x = FiveHourWindowUnavailable{}
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FiveHourWindowUnavailable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FiveHourWindowUnavailable) ProtoMessage() {}
+
+func (x *FiveHourWindowUnavailable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FiveHourWindowUnavailable.ProtoReflect.Descriptor instead.
+func (*FiveHourWindowUnavailable) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_bookkeeping_proto_rawDescGZIP(), []int{33}
+}
+
+// Marks absence of utilization within the five-hour window.
+type UtilizationUnavailable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UtilizationUnavailable) Reset() {
+	*x = UtilizationUnavailable{}
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UtilizationUnavailable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UtilizationUnavailable) ProtoMessage() {}
+
+func (x *UtilizationUnavailable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UtilizationUnavailable.ProtoReflect.Descriptor instead.
+func (*UtilizationUnavailable) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_bookkeeping_proto_rawDescGZIP(), []int{34}
+}
+
+// Records an error encountered while sampling account usage.
+type UsageSamplingFailure struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Gives the complete error diagnostic.
+	Cause         string `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UsageSamplingFailure) Reset() {
+	*x = UsageSamplingFailure{}
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UsageSamplingFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UsageSamplingFailure) ProtoMessage() {}
+
+func (x *UsageSamplingFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UsageSamplingFailure.ProtoReflect.Descriptor instead.
+func (*UsageSamplingFailure) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_bookkeeping_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *UsageSamplingFailure) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
 }
 
 var File_agentshim_conversation_v1_bookkeeping_proto protoreflect.FileDescriptor
 
 const file_agentshim_conversation_v1_bookkeeping_proto_rawDesc = "" +
 	"\n" +
-	"+agentshim/conversation/v1/bookkeeping.proto\x12\x19agentshim.conversation.v1\x1a&agentshim/conversation/v1/tokens.proto\"\x88\x06\n" +
+	"+agentshim/conversation/v1/bookkeeping.proto\x12\x19agentshim.conversation.v1\"\xa7\x06\n" +
 	"\x10BookkeepingEntry\x12N\n" +
 	"\rsession_began\x18\x01 \x01(\v2'.agentshim.conversation.v1.SessionBeganH\x00R\fsessionBegan\x12N\n" +
 	"\rsession_ended\x18\x02 \x01(\v2'.agentshim.conversation.v1.SessionEndedH\x00R\fsessionEnded\x12E\n" +
@@ -1823,8 +2416,8 @@ const file_agentshim_conversation_v1_bookkeeping_proto_rawDesc = "" +
 	"\theartbeat\x18\x05 \x01(\v2$.agentshim.conversation.v1.HeartbeatH\x00R\theartbeat\x12T\n" +
 	"\x0fresponse_timing\x18\x06 \x01(\v2).agentshim.conversation.v1.ResponseTimingH\x00R\x0eresponseTiming\x12`\n" +
 	"\x13producer_diagnostic\x18\a \x01(\v2-.agentshim.conversation.v1.ProducerDiagnosticH\x00R\x12producerDiagnostic\x12m\n" +
-	"\x18session_identity_changed\x18\b \x01(\v21.agentshim.conversation.v1.SessionIdentityChangedH\x00R\x16sessionIdentityChanged\x12Q\n" +
-	"\x0eusage_observed\x18\t \x01(\v2(.agentshim.conversation.v1.UsageObservedH\x00R\rusageObservedB\x06\n" +
+	"\x18session_identity_changed\x18\b \x01(\v21.agentshim.conversation.v1.SessionIdentityChangedH\x00R\x16sessionIdentityChanged\x12p\n" +
+	"\x19account_usage_observation\x18\t \x01(\v22.agentshim.conversation.v1.AccountUsageObservationH\x00R\x17accountUsageObservationB\x06\n" +
 	"\x04kind\"\xe7\x03\n" +
 	"\fSessionBegan\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x10\n" +
@@ -1903,10 +2496,42 @@ const file_agentshim_conversation_v1_bookkeeping_proto_rawDesc = "" +
 	"\x06detail\x18\x02 \x01(\tR\x06detail\"`\n" +
 	"\x16SessionIdentityChanged\x12.\n" +
 	"\x13previous_session_id\x18\x01 \x01(\tR\x11previousSessionId\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"e\n" +
-	"\rUsageObserved\x12\x17\n" +
-	"\aturn_id\x18\x01 \x01(\tR\x06turnId\x12;\n" +
-	"\x05usage\x18\x02 \x01(\v2%.agentshim.conversation.v1.TokenUsageR\x05usageB:Z8agentrepl/proto/agentshim/conversation/v1;conversationv1b\x06proto3"
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xe6\x04\n" +
+	"\x17AccountUsageObservation\x12*\n" +
+	"\x11query_instance_id\x18\x01 \x01(\tR\x0fqueryInstanceId\x12\x17\n" +
+	"\aturn_id\x18\x02 \x01(\tR\x06turnId\x12$\n" +
+	"\x0eboundary_at_ms\x18\x03 \x01(\x03R\fboundaryAtMs\x12$\n" +
+	"\x0eobserved_at_ms\x18\x04 \x01(\x03R\fobservedAtMs\x12*\n" +
+	"\x11sample_latency_ms\x18\x05 \x01(\x03R\x0fsampleLatencyMs\x12+\n" +
+	"\x11subscription_type\x18\x06 \x01(\tR\x10subscriptionType\x12R\n" +
+	"\n" +
+	"turn_start\x18\n" +
+	" \x01(\v21.agentshim.conversation.v1.TurnStartUsageBoundaryH\x00R\tturnStart\x12L\n" +
+	"\bturn_end\x18\v \x01(\v2/.agentshim.conversation.v1.TurnEndUsageBoundaryH\x00R\aturnEnd\x12P\n" +
+	"\tavailable\x18\x14 \x01(\v20.agentshim.conversation.v1.AccountUsageAvailableH\x01R\tavailable\x12V\n" +
+	"\vunavailable\x18\x15 \x01(\v22.agentshim.conversation.v1.AccountUsageUnavailableH\x01R\vunavailableB\n" +
+	"\n" +
+	"\bboundaryB\t\n" +
+	"\aoutcome\"\x18\n" +
+	"\x16TurnStartUsageBoundary\"\x16\n" +
+	"\x14TurnEndUsageBoundary\"\\\n" +
+	"\x15AccountUsageAvailable\x12C\n" +
+	"\tfive_hour\x18\x01 \x01(\v2&.agentshim.conversation.v1.UsageWindowR\bfiveHour\"`\n" +
+	"\vUsageWindow\x12/\n" +
+	"\x13utilization_percent\x18\x01 \x01(\x01R\x12utilizationPercent\x12 \n" +
+	"\fresets_at_ms\x18\x02 \x01(\x03R\n" +
+	"resetsAtMs\"\xbd\x03\n" +
+	"\x17AccountUsageUnavailable\x12e\n" +
+	"\x13service_unavailable\x18\x01 \x01(\v22.agentshim.conversation.v1.UsageServiceUnavailableH\x00R\x12serviceUnavailable\x12e\n" +
+	"\x12window_unavailable\x18\x02 \x01(\v24.agentshim.conversation.v1.FiveHourWindowUnavailableH\x00R\x11windowUnavailable\x12l\n" +
+	"\x17utilization_unavailable\x18\x03 \x01(\v21.agentshim.conversation.v1.UtilizationUnavailableH\x00R\x16utilizationUnavailable\x12\\\n" +
+	"\x10sampling_failure\x18\x04 \x01(\v2/.agentshim.conversation.v1.UsageSamplingFailureH\x00R\x0fsamplingFailureB\b\n" +
+	"\x06reason\"\x19\n" +
+	"\x17UsageServiceUnavailable\"\x1b\n" +
+	"\x19FiveHourWindowUnavailable\"\x18\n" +
+	"\x16UtilizationUnavailable\",\n" +
+	"\x14UsageSamplingFailure\x12\x14\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05causeB:Z8agentrepl/proto/agentshim/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_agentshim_conversation_v1_bookkeeping_proto_rawDescOnce sync.Once
@@ -1920,36 +2545,44 @@ func file_agentshim_conversation_v1_bookkeeping_proto_rawDescGZIP() []byte {
 	return file_agentshim_conversation_v1_bookkeeping_proto_rawDescData
 }
 
-var file_agentshim_conversation_v1_bookkeeping_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_agentshim_conversation_v1_bookkeeping_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_agentshim_conversation_v1_bookkeeping_proto_goTypes = []any{
-	(*BookkeepingEntry)(nil),       // 0: agentshim.conversation.v1.BookkeepingEntry
-	(*SessionBegan)(nil),           // 1: agentshim.conversation.v1.SessionBegan
-	(*SessionAuth)(nil),            // 2: agentshim.conversation.v1.SessionAuth
-	(*AuthSubscription)(nil),       // 3: agentshim.conversation.v1.AuthSubscription
-	(*AuthApiKey)(nil),             // 4: agentshim.conversation.v1.AuthApiKey
-	(*FastMode)(nil),               // 5: agentshim.conversation.v1.FastMode
-	(*FastModeOn)(nil),             // 6: agentshim.conversation.v1.FastModeOn
-	(*FastModeOff)(nil),            // 7: agentshim.conversation.v1.FastModeOff
-	(*SessionMcpServer)(nil),       // 8: agentshim.conversation.v1.SessionMcpServer
-	(*McpServerHealth)(nil),        // 9: agentshim.conversation.v1.McpServerHealth
-	(*McpServerConnected)(nil),     // 10: agentshim.conversation.v1.McpServerConnected
-	(*McpServerFailed)(nil),        // 11: agentshim.conversation.v1.McpServerFailed
-	(*SessionPlugin)(nil),          // 12: agentshim.conversation.v1.SessionPlugin
-	(*SessionEnded)(nil),           // 13: agentshim.conversation.v1.SessionEnded
-	(*SessionEndedNormally)(nil),   // 14: agentshim.conversation.v1.SessionEndedNormally
-	(*SessionEndedByError)(nil),    // 15: agentshim.conversation.v1.SessionEndedByError
-	(*SessionEndedByShutdown)(nil), // 16: agentshim.conversation.v1.SessionEndedByShutdown
-	(*TurnBegan)(nil),              // 17: agentshim.conversation.v1.TurnBegan
-	(*TurnEnded)(nil),              // 18: agentshim.conversation.v1.TurnEnded
-	(*TurnCompleted)(nil),          // 19: agentshim.conversation.v1.TurnCompleted
-	(*TurnInterrupted)(nil),        // 20: agentshim.conversation.v1.TurnInterrupted
-	(*TurnEndedUnexplained)(nil),   // 21: agentshim.conversation.v1.TurnEndedUnexplained
-	(*Heartbeat)(nil),              // 22: agentshim.conversation.v1.Heartbeat
-	(*ResponseTiming)(nil),         // 23: agentshim.conversation.v1.ResponseTiming
-	(*ProducerDiagnostic)(nil),     // 24: agentshim.conversation.v1.ProducerDiagnostic
-	(*SessionIdentityChanged)(nil), // 25: agentshim.conversation.v1.SessionIdentityChanged
-	(*UsageObserved)(nil),          // 26: agentshim.conversation.v1.UsageObserved
-	(*TokenUsage)(nil),             // 27: agentshim.conversation.v1.TokenUsage
+	(*BookkeepingEntry)(nil),          // 0: agentshim.conversation.v1.BookkeepingEntry
+	(*SessionBegan)(nil),              // 1: agentshim.conversation.v1.SessionBegan
+	(*SessionAuth)(nil),               // 2: agentshim.conversation.v1.SessionAuth
+	(*AuthSubscription)(nil),          // 3: agentshim.conversation.v1.AuthSubscription
+	(*AuthApiKey)(nil),                // 4: agentshim.conversation.v1.AuthApiKey
+	(*FastMode)(nil),                  // 5: agentshim.conversation.v1.FastMode
+	(*FastModeOn)(nil),                // 6: agentshim.conversation.v1.FastModeOn
+	(*FastModeOff)(nil),               // 7: agentshim.conversation.v1.FastModeOff
+	(*SessionMcpServer)(nil),          // 8: agentshim.conversation.v1.SessionMcpServer
+	(*McpServerHealth)(nil),           // 9: agentshim.conversation.v1.McpServerHealth
+	(*McpServerConnected)(nil),        // 10: agentshim.conversation.v1.McpServerConnected
+	(*McpServerFailed)(nil),           // 11: agentshim.conversation.v1.McpServerFailed
+	(*SessionPlugin)(nil),             // 12: agentshim.conversation.v1.SessionPlugin
+	(*SessionEnded)(nil),              // 13: agentshim.conversation.v1.SessionEnded
+	(*SessionEndedNormally)(nil),      // 14: agentshim.conversation.v1.SessionEndedNormally
+	(*SessionEndedByError)(nil),       // 15: agentshim.conversation.v1.SessionEndedByError
+	(*SessionEndedByShutdown)(nil),    // 16: agentshim.conversation.v1.SessionEndedByShutdown
+	(*TurnBegan)(nil),                 // 17: agentshim.conversation.v1.TurnBegan
+	(*TurnEnded)(nil),                 // 18: agentshim.conversation.v1.TurnEnded
+	(*TurnCompleted)(nil),             // 19: agentshim.conversation.v1.TurnCompleted
+	(*TurnInterrupted)(nil),           // 20: agentshim.conversation.v1.TurnInterrupted
+	(*TurnEndedUnexplained)(nil),      // 21: agentshim.conversation.v1.TurnEndedUnexplained
+	(*Heartbeat)(nil),                 // 22: agentshim.conversation.v1.Heartbeat
+	(*ResponseTiming)(nil),            // 23: agentshim.conversation.v1.ResponseTiming
+	(*ProducerDiagnostic)(nil),        // 24: agentshim.conversation.v1.ProducerDiagnostic
+	(*SessionIdentityChanged)(nil),    // 25: agentshim.conversation.v1.SessionIdentityChanged
+	(*AccountUsageObservation)(nil),   // 26: agentshim.conversation.v1.AccountUsageObservation
+	(*TurnStartUsageBoundary)(nil),    // 27: agentshim.conversation.v1.TurnStartUsageBoundary
+	(*TurnEndUsageBoundary)(nil),      // 28: agentshim.conversation.v1.TurnEndUsageBoundary
+	(*AccountUsageAvailable)(nil),     // 29: agentshim.conversation.v1.AccountUsageAvailable
+	(*UsageWindow)(nil),               // 30: agentshim.conversation.v1.UsageWindow
+	(*AccountUsageUnavailable)(nil),   // 31: agentshim.conversation.v1.AccountUsageUnavailable
+	(*UsageServiceUnavailable)(nil),   // 32: agentshim.conversation.v1.UsageServiceUnavailable
+	(*FiveHourWindowUnavailable)(nil), // 33: agentshim.conversation.v1.FiveHourWindowUnavailable
+	(*UtilizationUnavailable)(nil),    // 34: agentshim.conversation.v1.UtilizationUnavailable
+	(*UsageSamplingFailure)(nil),      // 35: agentshim.conversation.v1.UsageSamplingFailure
 }
 var file_agentshim_conversation_v1_bookkeeping_proto_depIdxs = []int32{
 	1,  // 0: agentshim.conversation.v1.BookkeepingEntry.session_began:type_name -> agentshim.conversation.v1.SessionBegan
@@ -1960,7 +2593,7 @@ var file_agentshim_conversation_v1_bookkeeping_proto_depIdxs = []int32{
 	23, // 5: agentshim.conversation.v1.BookkeepingEntry.response_timing:type_name -> agentshim.conversation.v1.ResponseTiming
 	24, // 6: agentshim.conversation.v1.BookkeepingEntry.producer_diagnostic:type_name -> agentshim.conversation.v1.ProducerDiagnostic
 	25, // 7: agentshim.conversation.v1.BookkeepingEntry.session_identity_changed:type_name -> agentshim.conversation.v1.SessionIdentityChanged
-	26, // 8: agentshim.conversation.v1.BookkeepingEntry.usage_observed:type_name -> agentshim.conversation.v1.UsageObserved
+	26, // 8: agentshim.conversation.v1.BookkeepingEntry.account_usage_observation:type_name -> agentshim.conversation.v1.AccountUsageObservation
 	2,  // 9: agentshim.conversation.v1.SessionBegan.auth:type_name -> agentshim.conversation.v1.SessionAuth
 	5,  // 10: agentshim.conversation.v1.SessionBegan.fast_mode:type_name -> agentshim.conversation.v1.FastMode
 	8,  // 11: agentshim.conversation.v1.SessionBegan.mcp_servers:type_name -> agentshim.conversation.v1.SessionMcpServer
@@ -1978,12 +2611,20 @@ var file_agentshim_conversation_v1_bookkeeping_proto_depIdxs = []int32{
 	19, // 23: agentshim.conversation.v1.TurnEnded.completed:type_name -> agentshim.conversation.v1.TurnCompleted
 	20, // 24: agentshim.conversation.v1.TurnEnded.interrupted:type_name -> agentshim.conversation.v1.TurnInterrupted
 	21, // 25: agentshim.conversation.v1.TurnEnded.unexplained:type_name -> agentshim.conversation.v1.TurnEndedUnexplained
-	27, // 26: agentshim.conversation.v1.UsageObserved.usage:type_name -> agentshim.conversation.v1.TokenUsage
-	27, // [27:27] is the sub-list for method output_type
-	27, // [27:27] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	27, // 26: agentshim.conversation.v1.AccountUsageObservation.turn_start:type_name -> agentshim.conversation.v1.TurnStartUsageBoundary
+	28, // 27: agentshim.conversation.v1.AccountUsageObservation.turn_end:type_name -> agentshim.conversation.v1.TurnEndUsageBoundary
+	29, // 28: agentshim.conversation.v1.AccountUsageObservation.available:type_name -> agentshim.conversation.v1.AccountUsageAvailable
+	31, // 29: agentshim.conversation.v1.AccountUsageObservation.unavailable:type_name -> agentshim.conversation.v1.AccountUsageUnavailable
+	30, // 30: agentshim.conversation.v1.AccountUsageAvailable.five_hour:type_name -> agentshim.conversation.v1.UsageWindow
+	32, // 31: agentshim.conversation.v1.AccountUsageUnavailable.service_unavailable:type_name -> agentshim.conversation.v1.UsageServiceUnavailable
+	33, // 32: agentshim.conversation.v1.AccountUsageUnavailable.window_unavailable:type_name -> agentshim.conversation.v1.FiveHourWindowUnavailable
+	34, // 33: agentshim.conversation.v1.AccountUsageUnavailable.utilization_unavailable:type_name -> agentshim.conversation.v1.UtilizationUnavailable
+	35, // 34: agentshim.conversation.v1.AccountUsageUnavailable.sampling_failure:type_name -> agentshim.conversation.v1.UsageSamplingFailure
+	35, // [35:35] is the sub-list for method output_type
+	35, // [35:35] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_conversation_v1_bookkeeping_proto_init() }
@@ -1991,7 +2632,6 @@ func file_agentshim_conversation_v1_bookkeeping_proto_init() {
 	if File_agentshim_conversation_v1_bookkeeping_proto != nil {
 		return
 	}
-	file_agentshim_conversation_v1_tokens_proto_init()
 	file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[0].OneofWrappers = []any{
 		(*BookkeepingEntry_SessionBegan)(nil),
 		(*BookkeepingEntry_SessionEnded)(nil),
@@ -2001,7 +2641,7 @@ func file_agentshim_conversation_v1_bookkeeping_proto_init() {
 		(*BookkeepingEntry_ResponseTiming)(nil),
 		(*BookkeepingEntry_ProducerDiagnostic)(nil),
 		(*BookkeepingEntry_SessionIdentityChanged)(nil),
-		(*BookkeepingEntry_UsageObserved)(nil),
+		(*BookkeepingEntry_AccountUsageObservation)(nil),
 	}
 	file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[2].OneofWrappers = []any{
 		(*SessionAuth_Subscription)(nil),
@@ -2025,13 +2665,25 @@ func file_agentshim_conversation_v1_bookkeeping_proto_init() {
 		(*TurnEnded_Interrupted)(nil),
 		(*TurnEnded_Unexplained)(nil),
 	}
+	file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[26].OneofWrappers = []any{
+		(*AccountUsageObservation_TurnStart)(nil),
+		(*AccountUsageObservation_TurnEnd)(nil),
+		(*AccountUsageObservation_Available)(nil),
+		(*AccountUsageObservation_Unavailable)(nil),
+	}
+	file_agentshim_conversation_v1_bookkeeping_proto_msgTypes[31].OneofWrappers = []any{
+		(*AccountUsageUnavailable_ServiceUnavailable)(nil),
+		(*AccountUsageUnavailable_WindowUnavailable)(nil),
+		(*AccountUsageUnavailable_UtilizationUnavailable)(nil),
+		(*AccountUsageUnavailable_SamplingFailure)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_conversation_v1_bookkeeping_proto_rawDesc), len(file_agentshim_conversation_v1_bookkeeping_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   36,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

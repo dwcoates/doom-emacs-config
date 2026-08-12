@@ -2309,9 +2309,9 @@ type TurnAccounting struct {
 	// Contains exact wall-clock and elapsed timing measurements.
 	Timing *TurnAccountingTiming `protobuf:"bytes,4,opt,name=timing,proto3" json:"timing,omitempty"`
 	// Contains the account-usage sample taken before prompt submission.
-	UsageAtStart *v11.AccountUsageObservation `protobuf:"bytes,5,opt,name=usage_at_start,json=usageAtStart,proto3" json:"usage_at_start,omitempty"`
+	UsageAtStart *v1.AccountUsageObservation `protobuf:"bytes,5,opt,name=usage_at_start,json=usageAtStart,proto3" json:"usage_at_start,omitempty"`
 	// Contains the account-usage sample taken after the terminal result.
-	UsageAtEnd *v11.AccountUsageObservation `protobuf:"bytes,6,opt,name=usage_at_end,json=usageAtEnd,proto3" json:"usage_at_end,omitempty"`
+	UsageAtEnd *v1.AccountUsageObservation `protobuf:"bytes,6,opt,name=usage_at_end,json=usageAtEnd,proto3" json:"usage_at_end,omitempty"`
 	// Contains every response-level token record, including subagents.
 	Responses []*TokenUtilization `protobuf:"bytes,7,rep,name=responses,proto3" json:"responses,omitempty"`
 	// Compares response-level records with terminal result totals.
@@ -2385,14 +2385,14 @@ func (x *TurnAccounting) GetTiming() *TurnAccountingTiming {
 	return nil
 }
 
-func (x *TurnAccounting) GetUsageAtStart() *v11.AccountUsageObservation {
+func (x *TurnAccounting) GetUsageAtStart() *v1.AccountUsageObservation {
 	if x != nil {
 		return x.UsageAtStart
 	}
 	return nil
 }
 
-func (x *TurnAccounting) GetUsageAtEnd() *v11.AccountUsageObservation {
+func (x *TurnAccounting) GetUsageAtEnd() *v1.AccountUsageObservation {
 	if x != nil {
 		return x.UsageAtEnd
 	}
@@ -3476,7 +3476,7 @@ var File_agentshim_frontend_v1_durable_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_durable_proto_rawDesc = "" +
 	"\n" +
-	"#agentshim/frontend/v1/durable.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a&agentshim/conversation/v1/tokens.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xcc\x04\n" +
+	"#agentshim/frontend/v1/durable.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a+agentshim/conversation/v1/bookkeeping.proto\x1a&agentshim/conversation/v1/tokens.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xcc\x04\n" +
 	"\x10TokenUtilization\x121\n" +
 	"\x15agent_repl_session_id\x18\x01 \x01(\tR\x12agentReplSessionId\x12*\n" +
 	"\x11claude_session_id\x18\x02 \x01(\tR\x0fclaudeSessionId\x12 \n" +
@@ -3640,14 +3640,14 @@ const file_agentshim_frontend_v1_durable_proto_rawDesc = "" +
 	"%responses_without_generation_duration\x18\x04 \x01(\x03R\"responsesWithoutGenerationDuration\x12=\n" +
 	"\x1ctotal_time_to_first_token_ms\x18\x05 \x01(\x03R\x17totalTimeToFirstTokenMs\x12I\n" +
 	"\"responses_with_time_to_first_token\x18\x06 \x01(\x03R\x1dresponsesWithTimeToFirstToken\x12O\n" +
-	"%responses_without_time_to_first_token\x18\a \x01(\x03R responsesWithoutTimeToFirstToken\"\xbf\x05\n" +
+	"%responses_without_time_to_first_token\x18\a \x01(\x03R responsesWithoutTimeToFirstToken\"\xcf\x05\n" +
 	"\x0eTurnAccounting\x12\x17\n" +
 	"\aturn_id\x18\x01 \x01(\tR\x06turnId\x12*\n" +
 	"\x11query_instance_id\x18\x02 \x01(\tR\x0fqueryInstanceId\x12A\n" +
 	"\aruntime\x18\x03 \x01(\v2'.agentshim.core.v1.QueryRuntimeIdentityR\aruntime\x12C\n" +
-	"\x06timing\x18\x04 \x01(\v2+.agentshim.frontend.v1.TurnAccountingTimingR\x06timing\x12P\n" +
-	"\x0eusage_at_start\x18\x05 \x01(\v2*.agentshim.core.v1.AccountUsageObservationR\fusageAtStart\x12L\n" +
-	"\fusage_at_end\x18\x06 \x01(\v2*.agentshim.core.v1.AccountUsageObservationR\n" +
+	"\x06timing\x18\x04 \x01(\v2+.agentshim.frontend.v1.TurnAccountingTimingR\x06timing\x12X\n" +
+	"\x0eusage_at_start\x18\x05 \x01(\v22.agentshim.conversation.v1.AccountUsageObservationR\fusageAtStart\x12T\n" +
+	"\fusage_at_end\x18\x06 \x01(\v22.agentshim.conversation.v1.AccountUsageObservationR\n" +
 	"usageAtEnd\x12E\n" +
 	"\tresponses\x18\a \x03(\v2'.agentshim.frontend.v1.TokenUtilizationR\tresponses\x12W\n" +
 	"\x0ereconciliation\x18\b \x01(\v2/.agentshim.frontend.v1.TokenUsageReconciliationR\x0ereconciliation\x12K\n" +
@@ -3769,7 +3769,7 @@ var file_agentshim_frontend_v1_durable_proto_goTypes = []any{
 	(*structpb.Struct)(nil),                                // 44: google.protobuf.Struct
 	(*v1.TokenUsage)(nil),                                  // 45: agentshim.conversation.v1.TokenUsage
 	(*v11.QueryRuntimeIdentity)(nil),                       // 46: agentshim.core.v1.QueryRuntimeIdentity
-	(*v11.AccountUsageObservation)(nil),                    // 47: agentshim.core.v1.AccountUsageObservation
+	(*v1.AccountUsageObservation)(nil),                     // 47: agentshim.conversation.v1.AccountUsageObservation
 }
 var file_agentshim_frontend_v1_durable_proto_depIdxs = []int32{
 	1,  // 0: agentshim.frontend.v1.TokenUtilization.main_agent:type_name -> agentshim.frontend.v1.TokenUtilizationMainAgent
@@ -3819,8 +3819,8 @@ var file_agentshim_frontend_v1_durable_proto_depIdxs = []int32{
 	26, // 44: agentshim.frontend.v1.TokenUsageTotals.timing:type_name -> agentshim.frontend.v1.TokenTimingTotals
 	46, // 45: agentshim.frontend.v1.TurnAccounting.runtime:type_name -> agentshim.core.v1.QueryRuntimeIdentity
 	28, // 46: agentshim.frontend.v1.TurnAccounting.timing:type_name -> agentshim.frontend.v1.TurnAccountingTiming
-	47, // 47: agentshim.frontend.v1.TurnAccounting.usage_at_start:type_name -> agentshim.core.v1.AccountUsageObservation
-	47, // 48: agentshim.frontend.v1.TurnAccounting.usage_at_end:type_name -> agentshim.core.v1.AccountUsageObservation
+	47, // 47: agentshim.frontend.v1.TurnAccounting.usage_at_start:type_name -> agentshim.conversation.v1.AccountUsageObservation
+	47, // 48: agentshim.frontend.v1.TurnAccounting.usage_at_end:type_name -> agentshim.conversation.v1.AccountUsageObservation
 	0,  // 49: agentshim.frontend.v1.TurnAccounting.responses:type_name -> agentshim.frontend.v1.TokenUtilization
 	29, // 50: agentshim.frontend.v1.TurnAccounting.reconciliation:type_name -> agentshim.frontend.v1.TokenUsageReconciliation
 	30, // 51: agentshim.frontend.v1.TurnAccounting.complete:type_name -> agentshim.frontend.v1.TurnAccountingComplete
