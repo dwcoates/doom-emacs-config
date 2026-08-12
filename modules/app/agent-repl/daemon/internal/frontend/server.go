@@ -1028,7 +1028,12 @@ func (s *Server) dispatchClientCommand(cl *client, cmd *frontendv1.FrontendComma
 		s.warn("frontend: host-only command rejected kind=%s request_id=%s", cl.kind, cmd.GetRequestId())
 		return failAck(s.logf, cmd.GetRequestId(), err), nil
 	}
-	return DispatchWithResponse(context.Background(), s.logf, s.handler, s, cmd)
+	// THE READING IDENTITY IS STAMPED HERE, at the one place that holds both
+	// the connection and the command. It is minted from the connection rather
+	// than read off the wire (reader.go), so no client can name another's
+	// conversation position.
+	ctx := ContextWithReader(context.Background(), connectionReader(cl.id))
+	return DispatchWithResponse(ctx, s.logf, s.handler, s, cmd)
 }
 
 // ---------------------------------------------------------------------------

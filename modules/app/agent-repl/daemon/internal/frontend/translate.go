@@ -129,6 +129,17 @@ func ConversationPageFrame(p *frontendv1.ConversationPage) *frontendv1.FrontendF
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_ConversationPage{ConversationPage: p}}
 }
 
+// ConversationHistoryPageFrame wraps a ConversationHistoryPage.
+//
+// Like the older page frame, it is addressed to the ONE connection that asked:
+// it echoes that request's id, and no other client is waiting on it. The echo
+// is also what lets a client DISCARD a page it is no longer awaiting, which is
+// how a page in flight across a generation change is handled — there is no
+// fence on this surface, by design.
+func ConversationHistoryPageFrame(p *frontendv1.ConversationHistoryPage) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_ConversationHistoryPage{ConversationHistoryPage: p}}
+}
+
 // TypingDeltaFrame wraps a TypingDelta.
 func TypingDeltaFrame(t *frontendv1.TypingDelta) *frontendv1.FrontendFrame {
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_TypingDelta{TypingDelta: t}}
