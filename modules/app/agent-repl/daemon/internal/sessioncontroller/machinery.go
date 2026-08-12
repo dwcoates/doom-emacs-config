@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"google.golang.org/protobuf/proto"
+
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
@@ -58,21 +60,49 @@ var slashCommandMachineryPrefixes = []string{
 	"<local-command-stdout>",
 }
 
-// isSlashCommandMachineryText reports whether one user-record body is the CLI's
-// slash-command bookkeeping rather than a prompt.
+// machineryOpenTag returns the envelope tag a text OPENS with, after leading
+// whitespace, or "" when it opens with none.
 //
-// HEAD ONLY, after leading whitespace. A record the CLI synthesizes OPENS with
-// its envelope tag; a human prompt that merely quotes or discusses one of these
-// tags mid-sentence ("what does <command-name> mean?") is a real prompt and
-// must reach the feed untouched. Matching anywhere in the body would swallow it.
-func isSlashCommandMachineryText(content string) bool {
+// HEAD ONLY. A record the CLI synthesizes OPENS with its envelope tag; a human
+// prompt that merely quotes or discusses one of these tags mid-sentence ("what
+// does <command-name> mean?") is a real prompt and must reach the feed
+// untouched. Matching anywhere in the body would swallow it.
+func machineryOpenTag(content string) string {
 	head := strings.TrimLeft(content, " \t\r\n")
 	for _, prefix := range slashCommandMachineryPrefixes {
 		if strings.HasPrefix(head, prefix) {
-			return true
+			return prefix
 		}
 	}
-	return false
+	return ""
+}
+
+// closingTagFor turns an opening envelope tag into the closing tag that must
+// balance it: `<command-name>` into `</command-name>`.
+func closingTagFor(open string) string {
+	return "</" + strings.TrimPrefix(open, "<")
+}
+
+// isSlashCommandMachineryText reports whether one user-record body is the CLI's
+// slash-command bookkeeping rather than a prompt.
+//
+// AN OPENING TAG IS NOT ENOUGH; IT MUST BE CLOSED. The CLI writes BALANCED
+// markup — every `<command-name>` it emits has its `</command-name>`, every
+// caveat and stdout block is wrapped on both sides — because the whole point of
+// the wrapper is that the model can find where the synthetic content ends. A
+// human, by contrast, types the tag as a SUBJECT: "<command-name> keeps showing
+// up in my transcript, why?" opens with the tag and never closes it, because
+// there is nothing to close around.
+//
+// Balance is therefore the machinery-ness test, and it is deliberately made
+// BEFORE any question of which command the record names. Treating "opens with a
+// tag" as machinery and then withholding whatever could not be named collapsed
+// two different verdicts into one: a genuine stdout-only record with no
+// <command-name> (machinery, correctly withheld) and a human prompt that merely
+// starts with the words (not machinery at all, and destroyed by the withhold).
+func isSlashCommandMachineryText(content string) bool {
+	open := machineryOpenTag(content)
+	return open != "" && strings.Contains(content, closingTagFor(open))
 }
 
 // userRecordHead returns the leading text of a user record, or "" when the item
@@ -138,18 +168,22 @@ func userRecordBody(it *frontendv1.Message) string {
 //
 // SHAPE A ONLY. This is the content-head test, which is all shape A leaves
 // behind; shape B is decided by machineryShapeOf before this is ever consulted.
+//
+// THE OPEN IS READ FROM THE HEAD, THE CLOSE FROM THE WHOLE BODY. The head is
+// what decides whether the record OPENS as machinery, and widening that read
+// would re-open the swallowing this file exists to prevent. The balancing close
+// is looked for across every block, because a caveat wrapper can open in the
+// first block and close in a later one, and demanding both inside the first
+// block would unclassify exactly the multi-block records that need classifying.
 func machineryEnvelope(it *frontendv1.Message) string {
-	head := userRecordHead(it)
-	if !isSlashCommandMachineryText(head) {
+	open := machineryOpenTag(userRecordHead(it))
+	if open == "" {
 		return ""
 	}
-	trimmed := strings.TrimLeft(head, " \t\r\n")
-	for _, prefix := range slashCommandMachineryPrefixes {
-		if strings.HasPrefix(trimmed, prefix) {
-			return prefix
-		}
+	if !strings.Contains(userRecordBody(it), closingTagFor(open)) {
+		return ""
 	}
-	return ""
+	return open
 }
 
 // machineryShape names WHICH of the CLI's two synthetic record shapes an item
@@ -250,19 +284,43 @@ func withheldReason(it *frontendv1.Message) string {
 // each is the message the transcript already distinguishes, so nothing here
 // depends on their order of arrival, and a replay re-derives the same answer
 // for the same record rather than a different one for a different position.
-func asInterceptedCommand(it *frontendv1.Message, command frontendv1.SessionCommand) {
-	it.Payload = &frontendv1.Message_DaemonInterceptedCommand{
+// THE CLASS IS WRITTEN BY THE CONSTRUCTOR, NEVER BY HAND. Shape A has a
+// transcript record behind it and is DURABLE; shape B is ruled out of the
+// durable set by the contract and is EPHEMERAL. Neither arm is assigned here,
+// because the class and the lineage that class requires are one act: an
+// ephemeral message is always a feed row, never a parent and never names one,
+// and frontend.NewEphemeralFeedRow writes that lineage itself rather than
+// trusting this file to remember it. A refusal is returned to the caller so it
+// can WITHHOLD the item — a message with no durability arm is malformed, and
+// shipping one is indistinguishable to a later reader from a durable message
+// the store lost.
+func asInterceptedCommand(it *frontendv1.Message, command frontendv1.SessionCommand, shape machineryShape) error {
+	body := proto.Clone(it).(*frontendv1.Message)
+	body.Payload = &frontendv1.Message_DaemonInterceptedCommand{
 		DaemonInterceptedCommand: &frontendv1.DaemonInterceptedCommandItem{Command: command},
 	}
-	// TODO(slash-ephemeral-constructor): set the message's `durability` arm here
-	// — DURABLE for shape A, which has a transcript record behind it, EPHEMERAL
-	// for shape B, which the contract rules out of the durable set. Neither arm
-	// is set from this file on purpose: the ephemeral side must go through the
-	// REFUSING ephemeral constructor that enforces the lineage rules (an
-	// ephemeral message is always a feed row, is never a parent, and never names
-	// a durable parent), and that constructor is owned by the sibling scope that
-	// introduces it. Constructing either arm by hand here would be the second
-	// construction path those rules exist to prevent.
+
+	var (
+		classified *frontendv1.Message
+		err        error
+	)
+	switch shape {
+	case shapeAUserRecord:
+		classified, err = frontend.NewDurableFeedRow(body)
+	case shapeBLocalCommand:
+		classified, err = frontend.NewEphemeralFeedRow(body)
+	default:
+		return fmt.Errorf("sessioncontroller: intercepted-command classification refused uuid=%s command=%s: shape %s is not a machinery shape, so there is no durability class to state for it", it.GetUuid(), command.String(), shape)
+	}
+	if err != nil {
+		return err
+	}
+
+	// The curated item is REWRITTEN in place rather than swapped, because the
+	// delta holds this pointer and the identity being preserved is the point.
+	proto.Reset(it)
+	proto.Merge(it, classified)
+	return nil
 }
 
 // classifyMachinery turns the CLI's slash-command bookkeeping records into the
@@ -303,7 +361,10 @@ func (c *consumer) classifyMachinery(cd *frontendv1.ConversationDelta, envs map[
 				return withholdItem(fmt.Sprintf("session-controller: slash-command machinery WITHHELD UNNAMED ws=%q session=%s seq=%d uuid=%s shape=%s prompt_id=%q — the record is the CLI's own slash-command bookkeeping but carries no <command-name> tag, so there is no command identity to classify it as; an UNSPECIFIED command is a malformed frame, so the item is withheld rather than pushed half-stated",
 					c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), shape, env.PromptID))
 			}
-			asInterceptedCommand(it, command)
+			if err := asInterceptedCommand(it, command, shape); err != nil {
+				return withholdItem(fmt.Sprintf("session-controller: slash-command machinery WITHHELD UNCLASSIFIED ws=%q session=%s seq=%d uuid=%s shape=%s command=%s prompt_id=%q — the durability constructor REFUSED this record, so no class could be stated for it; an unclassified message on the wire cannot be told apart from a durable one the store lost, so the item is withheld rather than pushed classless: %v",
+					c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), shape, command.String(), env.PromptID, err))
+			}
 			c.logf("session-controller: slash-command machinery CLASSIFIED ws=%q session=%s seq=%d uuid=%s shape=%s command=%s prompt_id=%q — the CLI's own record of a command it ran, delivered as a DaemonInterceptedCommandItem on the record's own identity rather than as a prompt bubble full of markup nobody typed",
 				c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), shape, command.String(), env.PromptID)
 			return keepItem
