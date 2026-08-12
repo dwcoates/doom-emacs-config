@@ -437,10 +437,10 @@ function Bubble(cls: string, body: string, ts: string, meta = "", style = ""): s
  * A soft shadow wave crosses its background left to right — saying the DAEMON
  * HAS THE PROMPT, and nothing about the turn's state beyond that (the orange
  * `working…` tail row carries progress). The bubble and its text hold one
- * static size throughout. A bubble this webapp minted for its own submit is
- * drawn the instant the user hits send and stays plain until the daemon's
- * receipt supersedes it (`UserTurnItem.unacked`), so the wave starting IS the
- * acknowledgement rather than an ornament beside it.
+ * static size throughout. EVERY prompt bubble carries the wave, because every
+ * prompt bubble is a durable line that already round-tripped: the page draws
+ * no bubble for a prompt the daemon has not spoken for, so there is no
+ * unacknowledged state left for the wave to distinguish.
  *
  * The animation itself is the stylesheet's (`.bubble.user`); what this
  * function must supply is the PHASE. The feed rebuilds bubble markup
@@ -448,10 +448,8 @@ function Bubble(cls: string, body: string, ts: string, meta = "", style = ""): s
  * would jump the wave back to the left edge. The inline negative
  * `animation-delay` seeks the new node to where the page-global wave already
  * was, which makes a rebuild indistinguishable from a node that was never
- * replaced — and makes the unacked→acked swap, which rebuilds the bubble,
- * start the wave mid-pass with everything else on the page instead of alone at
- * 0%. This is the ONLY construction site of a `.bubble.user`, so stamping it
- * here covers every render path that produces one.
+ * replaced. This is the ONLY construction site of a `.bubble.user`, so
+ * stamping it here covers every render path that produces one.
  */
 function UserTurn(item: UserTurnItem, panels?: PanelContext): string {
   // A tools-only turn hosts its live async on its own prompt bubble (see
@@ -466,17 +464,13 @@ function UserTurn(item: UserTurnItem, panels?: PanelContext): string {
   // a key here.
   const host = userTurnKey(item);
   const stateCls = host !== null && hasLiveAsync(host, panels) ? " async-live" : "";
-  // The unacked marking and the missing delay are ONE decision, made here
-  // once: the class is what the stylesheet suppresses the animation with, and
-  // seeking an animation that is not running would say nothing anyway.
-  const ackCls = item.unacked === true ? " unacked" : "";
-  const wave = item.unacked === true ? "" : bubbleWaveStyle();
+  const wave = bubbleWaveStyle();
   const catalog = host === null ? "" : AsyncCatalog(host, panels);
   // The prompt is shown verbatim, EXCEPT for markdown fenced code blocks,
   // which render as the same highlighted card the agent's own fences get
   // (see renderPromptBody). A fence-free prompt keeps its plain <pre>.
   const body = `${renderPromptBody(userTurnText(item))}${catalog}`;
-  return Bubble(`bubble user${stateCls}${ackCls}`, body, item.ts, "", wave);
+  return Bubble(`bubble user${stateCls}`, body, item.ts, "", wave);
 }
 
 /** The fixed body of the Merge status card (see `MergeCard`). */
@@ -2622,15 +2616,6 @@ export function lastUserTurnId(items: readonly ConversationItem[]): string | nul
   return null;
 }
 
-/** The newest user turn ITEM in the feed, or null when there is none. */
-export function lastUserTurnItem(items: readonly ConversationItem[]): UserTurnItem | null {
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i];
-    if (item.kind === "user-turn") return item;
-  }
-  return null;
-}
-
 // --- consecutive-run tab groups -------------------------------------------------
 
 /** One slot of the grouped feed: a lone item or a consecutive-run group. */
@@ -3884,14 +3869,13 @@ export class FeedRenderer {
       // turn the previous one had not seen. `last` reports whether it ranks
       // at the feed tail — the position a just-sent prompt must land at, and
       // the newest user turn IS the tail exactly when the tail item is one.
-      // `request_id` stays on the line even though it is empty for every
-      // transcript-borne prompt: KEY is the identity that actually
-      // distinguishes them, and the pair is what pins the attribution gap.
+      // KEY is the prompt's identity and the only thing that distinguishes two
+      // prompts; the submit's request id used to ride this line too and said
+      // nothing, being empty for every transcript-borne prompt.
       const tail = state.items[state.items.length - 1];
-      const turn = lastUserTurnItem(state.items);
       log(
         "info",
-        `feed: user turn rendering request_id=${turn?.requestId ?? ""} key=${turnId} last=${
+        `feed: user turn rendering key=${turnId} last=${
           tail !== undefined && tail.kind === "user-turn"
         }`,
         { operation: "webapp.render.user-turn" },
