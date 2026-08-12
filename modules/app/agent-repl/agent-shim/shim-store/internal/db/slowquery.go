@@ -36,6 +36,7 @@ const (
 	StatementListCursors  = "list_cursors"
 	StatementCursor       = "cursor"
 	StatementIngest       = "ingest"
+	StatementMessagePage  = "message_page"
 )
 
 // SlowQueryFromEnv resolves the slow-query threshold from the environment.
