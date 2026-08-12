@@ -133,7 +133,7 @@ func TestOpenDetachedWorkStatesTheTailCapOnAnItemCountedFold(t *testing.T) {
 func TestOpenDetachedWorkCarriesTheParentPointerForANestedDispatch(t *testing.T) {
 	b, err := OpenDetachedWork(DetachedWorkSpec{
 		TaskID: "t2", Workspace: "/ws", Kind: DetachAgent, OriginToolUseID: "tu2",
-		ParentMessageID: "detached-work:t1", ParentTopLevelMessageID: "detached-work:t1",
+		Parent: openKind(t, DetachAgent),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1106,9 +1106,17 @@ func TestOpenDetachedWorkMakesUncontainedWorkItsOwnRoot(t *testing.T) {
 
 func TestOpenDetachedWorkCopiesTheParentsRootDown(t *testing.T) {
 	// Arrange, Act: work contained by work that is itself contained.
+	grandparent := openKind(t, DetachAgent)
+	parent, err := OpenDetachedWork(DetachedWorkSpec{
+		TaskID: "t2", Workspace: "/ws", Kind: DetachAgent, OriginToolUseID: "tu2",
+		Parent: grandparent,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	b, err := OpenDetachedWork(DetachedWorkSpec{
 		TaskID: "t3", Workspace: "/ws", Kind: DetachAgent, OriginToolUseID: "tu3",
-		ParentMessageID: "detached-work:t2", ParentTopLevelMessageID: "detached-work:t1",
+		Parent: parent,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1121,28 +1129,56 @@ func TestOpenDetachedWorkCopiesTheParentsRootDown(t *testing.T) {
 	}
 }
 
-func TestOpenDetachedWorkRefusesARootWithNoParent(t *testing.T) {
-	// Arrange, Act
+func TestOpenDetachedWorkRefusesAParentWithNoRoot(t *testing.T) {
+	// Arrange — a parent whose own root is empty gives the child nothing to
+	// inherit, and the child would be invisible to the page query that selects
+	// by it. The half-lineage pairing this used to police is now unrepresentable:
+	// the parent arrives as a message, so its root arrives with it.
+	rootless := openKind(t, DetachAgent)
+	rootless.Lineage = &frontendv1.MessageLineage{}
+
+	// Act.
 	_, err := OpenDetachedWork(DetachedWorkSpec{
 		TaskID: "t2", Workspace: "/ws", Kind: DetachAgent, OriginToolUseID: "tu2",
-		ParentTopLevelMessageID: "detached-work:t1",
+		Parent: rootless,
 	})
 
-	// Assert
+	// Assert.
 	if err == nil {
-		t.Fatal("a message with no parent IS its own top-level row, so naming a different root asserts containment nobody stated and must be refused")
+		t.Fatal("a parent with no root leaves the child no top_level_message_id to inherit, so it must be refused rather than written invisible")
 	}
 }
 
-func TestOpenDetachedWorkRefusesAParentWithNoRoot(t *testing.T) {
-	// Arrange, Act
-	_, err := OpenDetachedWork(DetachedWorkSpec{
+func TestOpenDetachedWorkRefusesAnEphemeralParent(t *testing.T) {
+	// Arrange — an ephemeral parent has no store record, so this work's
+	// top_level_message_id would name a feed row no page query can return: the
+	// work would be stored and permanently unreachable.
+	ephemeral, err := NewEphemeralFeedRow(commandBody("session-command:req-1"))
+	if err != nil {
+		t.Fatalf("NewEphemeralFeedRow = err %v, want an ephemeral parent to test against", err)
+	}
+
+	// Act.
+	_, err = OpenDetachedWork(DetachedWorkSpec{
 		TaskID: "t2", Workspace: "/ws", Kind: DetachAgent, OriginToolUseID: "tu2",
-		ParentMessageID: "detached-work:t1",
+		Parent: ephemeral,
 	})
 
-	// Assert
+	// Assert.
 	if err == nil {
-		t.Fatal("a parent with no root would leave top_level_message_id to be derived by a walk, which is the unbounded traversal lineage exists to remove, and must be refused")
+		t.Fatal("detached work seated inside an ephemeral parent is unreachable by every page query and must be refused")
+	}
+}
+
+// TestOpenDetachedWorkStatesTheDurableArm pins that detached work leaves with a
+// class. It is opened over a TaskStarted the store holds, so a record for it
+// exists — the daemon minting its id is explicitly NOT what decides the class.
+func TestOpenDetachedWorkStatesTheDurableArm(t *testing.T) {
+	// Arrange, Act.
+	b := openKind(t, DetachAgent)
+
+	// Assert.
+	if b.GetDurable() == nil {
+		t.Fatalf("durability arm = %T, want the durable arm set", b.GetDurability())
 	}
 }

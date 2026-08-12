@@ -228,11 +228,15 @@ func (s *detachedWorkStore) readoptWindowLocked(originToolUseID string, kind fro
 // yet (classification runs before the fold that indexes it).
 func (s *detachedWorkStore) openWindowLocked(spec frontend.DetachedWorkSpec) (*frontendv1.Message, *asyncFault, error) {
 	spec.Workspace = s.workspace
+	parentID := s.parentByToolUse[spec.OriginToolUseID]
 	if parent := s.innermostWindowLocked(); parent != nil {
-		spec.ParentMessageID, spec.ParentTopLevelMessageID = s.parentLineageLocked(parent.messageID)
-	} else {
-		spec.ParentMessageID, spec.ParentTopLevelMessageID = s.parentLineageLocked(s.parentByToolUse[spec.OriginToolUseID])
+		parentID = parent.messageID
 	}
+	parent, err := s.parentMessageLocked(parentID)
+	if err != nil {
+		return nil, s.faultLocked(spec.OriginToolUseID, err.Error()), nil
+	}
+	spec.Parent = parent
 	b, err := frontend.OpenDetachedWork(spec)
 	if err != nil {
 		return nil, s.faultLocked(spec.OriginToolUseID, err.Error()), nil
@@ -240,7 +244,7 @@ func (s *detachedWorkStore) openWindowLocked(spec frontend.DetachedWorkSpec) (*f
 	s.adoptLocked(b, spec.OriginToolUseID, spec.OriginToolUseID)
 	s.windows = append(s.windows, asyncWindow{messageID: b.GetUuid(), origin: spec.OriginToolUseID, kind: spec.Kind})
 	s.logf("session-controller: %s window OPENED work=%s ws=%s origin_tool_use_id=%s parent_message_id=%q label=%q started_at_ms=%d depth=%d — every emission of this session folds here until the user's next prompt or an interrupt",
-		spec.Kind, b.GetUuid(), s.workspace, spec.OriginToolUseID, spec.ParentMessageID, spec.Label, spec.StartedAtMs, len(s.windows))
+		spec.Kind, b.GetUuid(), s.workspace, spec.OriginToolUseID, spec.Parent.GetUuid(), spec.Label, spec.StartedAtMs, len(s.windows))
 	return b, nil, nil
 }
 
