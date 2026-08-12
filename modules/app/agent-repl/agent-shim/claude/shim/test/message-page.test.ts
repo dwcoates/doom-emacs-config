@@ -111,7 +111,7 @@ function storedMessage(id: string, recordSeqs: number[]) {
 describe("messagePageRequest", () => {
   it("names no seq for a head anchor", () => {
     // Arrange / Act
-    const req = messagePageRequest("req-1", HEAD_ANCHOR);
+    const req = messagePageRequest("req-1", "vendor-uuid", HEAD_ANCHOR);
 
     // Assert: the head arm carries an EMPTY message, so there is no field on
     // this request that could hold a caller-authored position.
@@ -124,10 +124,25 @@ describe("messagePageRequest", () => {
     const page = create(MessagePageSchema, { requestId: "req-1", lastPageSeq: 90210n });
 
     // Act
-    const req = messagePageRequest("req-2", continueBelow(page));
+    const req = messagePageRequest("req-2", "vendor-uuid", continueBelow(page));
 
     // Assert: verbatim — not decremented, not computed.
     expect(req.anchor).toEqual({ case: "beforeSeq", value: 90210n });
+  });
+
+  it("carries the vendor session id the store routes by", () => {
+    // Arrange / Act
+    const req = messagePageRequest("req-3", "vendor-uuid", HEAD_ANCHOR);
+
+    // Assert: the store holds every live session in one database, so a page
+    // request that named no session could not be answered at all.
+    expect(req.sessionId).toBe("vendor-uuid");
+  });
+
+  it("refuses to build a request with no session to route by", () => {
+    // Arrange / Act / Assert: an unroutable request never travels, because a
+    // store refusal is far less legible than this.
+    expect(() => messagePageRequest("req-4", "", HEAD_ANCHOR)).toThrow(/vendor session id/);
   });
 });
 
@@ -235,6 +250,33 @@ describe("StoreClient.fetchMessagePage", () => {
 
     // Assert
     expect(req.anchor.case).toBe("head");
+  });
+
+  it("routes the request by the vendor session id the store is keyed on", async () => {
+    // Arrange: the store key is the VENDOR id, which differs from the shim's
+    // own session id.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = new StoreClient({
+      spillDir: tmpSpillDir(),
+      socketPath: store.socketPath,
+      sessionId: "sess-1",
+      storeSessionId: "vendor-uuid",
+      producer: "claude-shim:sess-1",
+      heartbeatIntervalMs: 0,
+    });
+    clients.push(client);
+    await client.connect();
+    await until(() => store.conns.length >= 1);
+
+    // Act
+    const pending = client.fetchMessagePage(HEAD_ANCHOR, 2000);
+    const { peer, req } = await pageExchange(store);
+    peer.send(MessagePageSchema, create(MessagePageSchema, { requestId: req.requestId }));
+    await pending;
+
+    // Assert
+    expect(req.sessionId).toBe("vendor-uuid");
   });
 
   it("sends the received page's last_page_seq as the continuation anchor", async () => {
