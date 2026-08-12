@@ -54,6 +54,17 @@ message Entry {
   // change how an entry is read — an entry means the same thing whichever plane
   // carried it — but when two accounts disagree, this is what says who said
   // what.
+  // FIXME: why is Plane in Entry? might be useful within shim+store+sidecar,
+  //        i'll grant that, but it seems like my resulting inuition is that
+  //        MessageEntry+BookkeepingEntry should be the only things making it
+  //        over the wire into the daemon (e.g., the daemon has no need to know
+  //        about plane, dedup_key, etc. Let's vet that idea. if it's true, then
+  //        we should really have agentshim.internal and agentshim.external, and
+  //        external should have a message like Entry that contains a oneof
+  //        containing message+bookkeeping, and internal contains everything
+  //        else (including UnsupportedEntry, and thus the oneof in Entry looks
+  //        like `oneof entry { ExternalEntry external = 1; InternalEntry
+  //        internal = 2 }`
   Plane plane = 3;
 
   // Whether this entry is retained at all. EPHEMERAL entries bypass the store
@@ -552,6 +563,7 @@ message DetachedLost {
   string inference = 1;
 }
 
+// FIXME: should this be in content.proto?
 message ContentArriving {
   // Which block of the message this extends.
   uint32 block_index = 1;
