@@ -16,10 +16,10 @@ PROTOS := \
   agentshim/conversation/v1/ephemeral.proto \
   agentshim/conversation/v1/payloads.proto \
   agentshim/conversation/v1/bookkeeping.proto \
-  agentshim/conversation/v1/unsupported.proto \
   agentshim/conversation/v1/message.proto \
   agentshim/conversation/v1/external.proto \
-  agentshim/conversation/v1/entry.proto \
+  agentshim/conversation/internal/v1/unsupported.proto \
+  agentshim/conversation/internal/v1/entry.proto \
   agentshim/frontend/v1/agent-emission.proto \
   agentshim/frontend/v1/agent-response.proto \
   agentshim/frontend/v1/conversation-history.proto \
@@ -49,9 +49,12 @@ PROTOS := \
 # self-tests can drive the REAL targets against a fixture tree; the default is
 # the schema tree this Makefile generates from.
 COMPONENT_DIR ?= agentshim/frontend/v1
+# The tree I7 scans for forbidden imports. Overridable so the codegen-gate
+# self-test can point it at its own fixture root.
+ISOLATION_ROOT ?= ..
 DURABLE_SCHEMA ?= durable.proto
 
-.PHONY: all go ts lint codegen-gate durable-isolation test-check-durable-isolation test-check-generated check-generated validate coverage clean
+.PHONY: all go ts lint codegen-gate durable-isolation conversation-isolation test-check-durable-isolation test-check-conversation-isolation test-check-generated check-generated validate coverage clean
 
 all: go ts
 
@@ -60,7 +63,7 @@ all: go ts
 # schema that has already drifted must not be able to produce bindings by any
 # Makefile route, so `go`, `ts`, `all`, and `lint` all depend on this rather
 # than on `lint` alone. New structural gates are added here, once.
-codegen-gate: durable-isolation
+codegen-gate: durable-isolation conversation-isolation
 
 go: codegen-gate
 	mkdir -p gen/go
@@ -89,6 +92,18 @@ durable-isolation:
 test-check-durable-isolation:
 	./test-check-durable-isolation.sh
 
+# INVARIANT I7. agentshim.conversation.internal.v1 is the half of a stored
+# record that never crosses the shim wire — the observation plane, the store's
+# dedup key, and anything the producer could not convert. No daemon or webapp
+# source may import it. It is a separate PACKAGE rather than a separate file
+# precisely so the boundary is a Go import path and a TS module rather than a
+# convention; this gate refuses the one remaining way to cross it.
+conversation-isolation:
+	./check-conversation-isolation.sh $(ISOLATION_ROOT)
+
+test-check-conversation-isolation:
+	./test-check-conversation-isolation.sh
+
 # Regenerate and compare with the exact pre-generation bytes. Comparing with
 # HEAD rejects a correct uncommitted schema edit, which makes the pre-commit
 # validation gate impossible to satisfy.
@@ -104,7 +119,7 @@ test-check-generated:
 	./test-check-generated.sh
 
 # Validate both the source schema and the checked-in Go/TS generated artifacts.
-validate: lint test-check-durable-isolation test-check-generated check-generated
+validate: lint test-check-durable-isolation test-check-conversation-isolation test-check-generated check-generated
 
 # Generated stubs are dependencies, not coverage subjects.  Each consumer's
 # own coverage configuration scopes measurement to handwritten package source.

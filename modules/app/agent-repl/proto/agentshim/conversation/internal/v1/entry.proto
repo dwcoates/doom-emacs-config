@@ -14,29 +14,38 @@
 //
 // ============================ IMPORT DISCIPLINE ============================
 //
-// THE DAEMON MUST NEVER IMPORT THIS FILE, nor unsupported.proto.
+// THE DAEMON MUST NEVER IMPORT THIS PACKAGE.
 //
-// Everything the daemon is entitled to see is in external.proto. This file
-// holds the shim-side half: which observation plane produced a record, the key
-// the store deduped it on, and the records we could not convert at all. Those
-// are implementation details of the shim, the sidecar and the store, and the
-// daemon was previously reading them to make decisions it should have made from
-// a record's own meaning.
+// Everything the daemon is entitled to see is agentshim.conversation.v1. This
+// package holds the shim-side half: which observation plane produced a record,
+// the key the store deduped it on, and the records we could not convert at all.
+// Those are implementation details of the shim, the sidecar and the store, and
+// the daemon was previously reading them to make decisions it should have made
+// from a record's own meaning.
 //
-// The enforcement is the import graph, not a convention. A daemon source file
-// that reads `plane` does not compile, because the type is not in its build.
-// This is worth a repository gate alongside check-external-boundaries.sh.
+// IT IS A SEPARATE PROTO PACKAGE, NOT MERELY A SEPARATE FILE, and that is the
+// whole reason the discipline is real. Every file in one proto package
+// generates into ONE Go package, so `entry.proto` and `external.proto` sitting
+// side by side in agentshim.conversation.v1 would both land in
+// `conversationv1` — and a daemon that imported the external half would get
+// `Plane` and `dedup_key` in the same namespace, for free. A separate package
+// is a separate Go import path and a separate TypeScript module, so the
+// boundary a reviewer would otherwise have to enforce by attention is enforced
+// by the compiler instead.
+//
+// check-conversation-isolation.sh refuses the import at codegen time, so the
+// violation is a build failure rather than a review note.
 //
 // ==========================================================================
 
 syntax = "proto3";
 
-package agentshim.conversation.v1;
+package agentshim.conversation.internal.v1;
 
 import "agentshim/conversation/v1/external.proto";
-import "agentshim/conversation/v1/unsupported.proto";
+import "agentshim/conversation/internal/v1/unsupported.proto";
 
-option go_package = "agentrepl/proto/agentshim/conversation/v1;conversationv1";
+option go_package = "agentrepl/proto/agentshim/conversation/internal/v1;conversationinternalv1";
 
 // One record as the STORE holds it: the half that may leave, and the half that
 // may not.
@@ -59,7 +68,7 @@ message Entry {
   // delivery envelope in agentshim.core.v1 — a field access, not a conversion.
   //
   // UNSET means the record is unrenderable and has no path to the daemon.
-  ExternalEntry external = 2;
+  agentshim.conversation.v1.ExternalEntry external = 2;
 }
 
 // The half of a record that never crosses the shim→daemon wire.
