@@ -572,6 +572,40 @@ export class CommandDispatcher {
     return { requestId: sent.requestId, ack: sent.ack };
   }
 
+  /**
+   * Ask for the MOST RECENT page and reset this reader's daemon-held position.
+   *
+   * The acceptance/answer split is the page path's: this promise reports only
+   * that the daemon TOOK the request; the page itself arrives as a pushed
+   * `ConversationHistoryPage` carrying the returned request id.
+   */
+  firstPage(workspace: string): SentConversationPage {
+    log("info", "command dispatcher requesting the first (most recent) history page", {
+      operation: "command-dispatch.first-page",
+      context: { workspace, decision: "dispatch" },
+    });
+    const sent = this.dispatchIdentified(workspace, { case: "firstPage", workspace });
+    this.pageRequests.add(sent.requestId);
+    return { requestId: sent.requestId, ack: sent.ack };
+  }
+
+  /**
+   * Ask for the page immediately OLDER than the last one served to this reader.
+   *
+   * It carries no position — the daemon holds it. A REFUSAL means the daemon
+   * dropped that position, and the caller's answer is {@link firstPage}, never
+   * a retry of this.
+   */
+  nextPage(workspace: string): SentConversationPage {
+    log("info", "command dispatcher requesting the next (older) history page", {
+      operation: "command-dispatch.next-page",
+      context: { workspace, decision: "dispatch" },
+    });
+    const sent = this.dispatchIdentified(workspace, { case: "nextPage", workspace });
+    this.pageRequests.add(sent.requestId);
+    return { requestId: sent.requestId, ack: sent.ack };
+  }
+
   deleteSession(sessionId: string): Promise<void> {
     return this.dispatch("", { case: "deleteSession", sessionId });
   }
