@@ -562,7 +562,12 @@ type activeConn struct {
 type ackResult struct {
 	ack  *corev1.Ack  // non-nil on success; carries the interrupt outcome
 	nack *corev1.Nack // non-nil = Nack; nil = Ack
-	err  error        // connection lost etc.
+	// page is the success arm of a MessagePageRequest, whose answer is a
+	// MessagePage rather than an Ack. It rides this struct because the page and
+	// its Nack share ONE request id, so they must share one waiter (see
+	// messagepage.go).
+	page *corev1.MessagePage
+	err  error // connection lost etc.
 }
 
 // New constructs a Client, applying defaults for any zero-value Config field.

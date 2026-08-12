@@ -261,6 +261,14 @@ type sessionClient interface {
 	// different type from live Events, which is what keeps replayed history
 	// out of the SSM/task/progress planes structurally (repull.go).
 	Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (shimclient.ReplayResult, error)
+	// MessagePage asks the shim for ONE bounded, backward-anchored page of
+	// messages. It is how a LIVE workspace's history is read (livepage.go): the
+	// shim passes the request to the store, so the daemon never dials the store
+	// around a session's own transport.
+	//
+	// EVERY failure is an error — the shim reports one as a Nack bearing the
+	// page's request id — and none of them is an empty page.
+	MessagePage(ctx context.Context, anchor shimclient.MessagePageAnchor) (*corev1.MessagePage, error)
 }
 
 // Config assembles a Manager. Every collaborator is injected so the session controller is
