@@ -8,7 +8,6 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/ssm"
-	"claude-repld/internal/statedb"
 )
 
 // This file is the daemon's whole reading of a submitted prompt: the one place
@@ -70,19 +69,6 @@ func (c sessionCommand) recognized() bool {
 func (c sessionCommand) clear() bool {
 	return c.command == frontendv1.SessionCommand_SESSION_COMMAND_CLEAR
 }
-
-// echoes reports whether the prompt earns a receipt bubble in the frontend.
-//
-// A recognized command earns none. `/model` is not something the user SAID to
-// the agent, it is something they DID to the session — the CLI answers it
-// locally and the model never sees it — so a purple bubble reading "/model"
-// claims a question was asked that nobody received. `/clear` is worse still:
-// the cut already draws its own divider exactly where it happened, and the
-// work sits ABOVE that divider, in the region the clear exists to discard.
-//
-// What the frontend gets instead is the invocation item (pushSessionCommand),
-// which carries the command's identity and no text at all.
-func (c sessionCommand) echoes() bool { return !c.recognized() }
 
 // performsLocally reports whether the daemon PERFORMS this command itself
 // instead of handing its text to the shim as a prompt.
@@ -235,32 +221,20 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// conflict-resolution submit on a state the merge axis rightly owns. The
 	// turn itself is still claimed durably, by the shim's own TurnStarted.
 	//
-	// THE TWO GATES ARE SEPARATE, and separating them is what lets a session
-	// command be honest on both axes at once. `claimsTurn` decides whether the
-	// shim is about to be busy; `echoes` decides whether the user said something.
-	// A `/model` is the first without being the second, and collapsing the two
-	// (as one gate did) forced a choice between a green workspace over a running
-	// command and a purple bubble for a prompt nobody wrote. `echoes` implies
-	// `claimsTurn` by construction — an ordinary prompt is both — so the receipt
-	// below always sits inside a claimed turn.
-	// THE KEEP-ALIVE PING EARNS NO DETACHED WORK AND MINTS NO RECEIPT, for the reason
-	// `/model` does not: the user did not say it. It is conversation PLUMBING —
-	// the daemon refreshing a cache — and a purple bubble reading "respond with
-	// only a '.'" would claim a question the user never asked and would replay
-	// as one across every reconnect, since the receipt is durable.
+	// A SESSION COMMAND IS NOT A PROMPT ANYBODY TYPED, and `claimsTurn` is the
+	// only question left to ask about it. Nothing is drawn for the text: the
+	// feed's whole account of a `/model` is the invocation item below, and a
+	// prompt the user really typed is drawn by the durable line the SDK
+	// round-trips it into, never by the daemon ahead of that line.
+	// THE KEEP-ALIVE PING EARNS NO DETACHED WORK, for the reason `/model` does
+	// not: the user did not say it. It is conversation PLUMBING — the daemon
+	// refreshing a cache — and the withholding of its vendor line is what keeps
+	// it out of the feed (keepalivewindow).
 	//
 	// It DOES claim the turn. The shim really is occupied for the length of the
 	// ping, and a workspace that stayed green through it would be lying about a
 	// session that is busy — the same split `/model` makes.
 	claimsTurn := cmd.claimsTurn() && who != submitterMergeLeaseHolder
-	// A TURN RESUMPTION ECHOES NOTHING, for the keep-alive's reason and one
-	// stronger. The user wrote no prompt: this text is the daemon's own
-	// instruction to continue work a bounce interrupted, and a receipt for it
-	// would be durable evidence of a prompt that was never submitted by anyone
-	// — replayed on every reconnect, indistinguishable downstream from a real
-	// one (turnresumption.go).
-	echoes := cmd.echoes() && who != submitterMergeLeaseHolder && who != submitterKeepAlive &&
-		who != submitterTurnResumption
 
 	// WHETHER THIS TURN COUNTS AS ENGAGEMENT IS DECLARED HERE, at the one funnel
 	// every prompt path reaches, and read back at the turn's own end
@@ -268,8 +242,8 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// at this line; nothing downstream ever has to decide whether a turn "looked
 	// like" a keep-alive ping from its text, its duration, or the clock.
 	//
-	// IT IS DECLARED BEFORE THE SUBMIT for the durable receipt's reason: the
-	// turn's end can only be reached through a submit, so a fact recorded ahead
+	// IT IS DECLARED BEFORE THE SUBMIT: the turn's end can only be reached
+	// through a submit, so a fact recorded ahead
 	// of the submit is one no boundary can arrive before. A prompt that then
 	// fails to submit leaves a mark for a turn that never ran, which is
 	// harmless — turn ids are unique, so nothing else will ever match it — and
@@ -280,7 +254,6 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 
 	accepted := false
 	var turnBefore turnRecord
-	var acceptedAtMs int64
 	if claimsTurn {
 		before, err := m.notePromptAccepted(d, requestID, who.admission())
 		if err != nil {
@@ -292,37 +265,6 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 			return err
 		}
 		accepted, turnBefore = true, before
-	}
-
-	// THE DURABLE RECEIPT is written only for a prompt that EARNS A DETACHED WORK. Its
-	// sole purpose is replaying that work across a daemon bounce, so recording
-	// one for a session command would resurrect exactly the "/model" work this
-	// whole path exists to withhold — and would resurrect it from durable
-	// storage, where nothing downstream could tell it from a real prompt.
-	if echoes {
-		// THE DURABLE RECEIPT, PART OF THE ACCEPTANCE ITSELF and therefore
-		// ahead of BOTH the submit and the pushed work.
-		//
-		// The ordering is the guarantee. A receipt the user saw must never be
-		// unrecoverable, so the record cannot come after the push; and a prompt
-		// this daemon handed to a shim must never be lost, so it cannot come
-		// after the submit either. Writing it here puts the durable evidence
-		// ahead of everything that could make the prompt real to anyone else,
-		// which makes "the user saw a work for a prompt with no record" and
-		// "a shim is running a prompt with no record" both unrepresentable
-		// rather than merely improbable.
-		//
-		// The window it opens instead is the honest one: a record for a prompt
-		// whose submit then FAILS. That is closed on the failure path
-		// (retractPromptAccepted), and a daemon that dies inside it replays a
-		// receipt for a prompt the user genuinely typed and the daemon
-		// genuinely accepted — which is the truth, and the strictly safer of
-		// the two ways to be wrong.
-		acceptedAtMs = m.now()
-		if err := m.recordPromptReceipt(d, requestID, text, acceptedAtMs); err != nil {
-			m.retractPromptAccepted(d, requestID, turnBefore, err)
-			return err
-		}
 	}
 
 	// THE SUBMITTED PROMPT CARRIES THE ID THE DAEMON ALREADY KEYED IT BY.
@@ -337,38 +279,20 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// client used to mint its own id here, so the ping's end boundary named a
 	// turn nothing was keyed by: the match at the boundary never fired, the
 	// window never closed, and the pings rendered as the user's own prompts.
-	// THE SUBMIT, AND THE ECHO SLOT IT FILLS, UNDER ONE MUTUAL EXCLUSION.
+	// THE SUBMIT, UNDER THE SESSION'S OWN MUTUAL EXCLUSION.
 	//
-	// The echo queue is read POSITIONALLY: attribution gives a transcript line
-	// the oldest outstanding receipt, because a UserLine carries no request id
-	// of its own. That reading is only sound if the queue's order is the order
-	// the prompts reached the SDK, and it used to be neither guaranteed nor
-	// even attempted — the echo was enqueued twenty-nine lines after the
-	// submit, with nothing excluding the other three paths that funnel here
-	// from interleaving in the gap. Two concurrent submits could enqueue B's
-	// receipt ahead of A's while the SDK had taken A first, and A's line would
-	// then be stamped with B's request id: two prompts swapping identities,
-	// with no error anywhere.
+	// Four paths funnel here (the immediate submit, the queue's drain, an
+	// interject's head jump, a merge's own submit), so two prompts really can be
+	// handed to one shim at once. Holding the submit lock across SubmitPrompt is
+	// what makes "prompts reach one session's shim in the order they were
+	// submitted" a construction rather than a hope — and the order they reach the
+	// SDK in is the order the durable lines that RENDER them come back in.
 	//
-	// Taking the slot and performing the submit under the session's submit lock
-	// orders them BY CONSTRUCTION. Nothing here depends on how long a submit
-	// takes, on how promptly the echo follows it, or on which goroutine won a
-	// race (sessionController.submitMu documents the lock order).
-	//
-	// THE PUBLICATION STAYS OUTSIDE, and must: it reaches the frontend server,
-	// and a session that serialized its submits behind a frontend push would
-	// deadlock the moment that push blocked.
-	//
-	// A REFUSED PROMPT STILL DRAWS NO BUBBLE. That used to be free — the echo
-	// simply came after a submit that never returned successfully — and is now
-	// paid for explicitly: the reservation is retracted on the failure path
-	// below, beside the accepted edge and the durable receipt it was written
-	// with, and nothing was ever published for it.
-	var reserved *promptEcho
+	// Nothing daemon-local is published for the prompt here. The user's words
+	// reach the feed when the transcript carries them, so a refused submit draws
+	// nothing by construction rather than by a retraction that has to be
+	// remembered.
 	d.submitMu.Lock()
-	if echoes && requestID != "" {
-		reserved = d.consumer.reserveEcho(requestID, text, acceptedAtMs)
-	}
 	// THE DRIVE RECORD, TAKEN BEFORE THE SUBMIT (undriventurn.go). The shim
 	// adopts requestID as the turn_id, so this is the identity the ledger claim
 	// will carry — and it must be on record BEFORE the submit that produces it,
@@ -379,13 +303,6 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	d.submitMu.Unlock()
 	if submitErr != nil {
 		err := submitErr
-		// THE SLOT GOES BACK. Left standing it would be claimed by the next
-		// transcript line to arrive — attributing some other prompt's line to
-		// this refused submit — and it would replay a bubble for a prompt no
-		// session ever received.
-		if reserved != nil {
-			d.consumer.retractEcho(requestID)
-		}
 		m.forgetTurnDriven(d, requestID)
 		m.forgetMachineTurn(d, requestID)
 		if accepted {
@@ -406,17 +323,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 		m.notePromptDelivered(d, requestID)
 	}
 
-	// THE RECEIPT, only after every frontend has been synchronously offered the
-	// accepted prompt's `thinking` state, and only once the shim has actually
-	// TAKEN the prompt. It closes the transcript-latency gap, but never at the
-	// cost of a green prompt bubble — and never at the cost of a work for a
-	// prompt no session received, which is why it stays behind the submit while
-	// the state edge moved ahead of it: a state edge can be retracted, a
-	// conversation item the frontend has already drawn cannot.
-	if reserved != nil {
-		d.consumer.publishEcho(reserved)
-	}
-
+	// THE INVOCATION ITEM, on the same terms a prompt's own render now follows:
 	// THE INVOCATION ITEM, in the receipt's place and on the receipt's terms:
 	// after the submit, so nothing is drawn for a command no session took.
 	//
@@ -499,47 +406,6 @@ func (m *Manager) notePromptAccepted(d *sessionController, requestID string, adm
 	return turnBefore, nil
 }
 
-// recordPromptReceipt persists the durable evidence that this daemon accepted
-// one user prompt, BEFORE the prompt reaches a shim or its work reaches a
-// frontend.
-//
-// A caller with no request id behind it (an internal re-submit, a harness)
-// records nothing, exactly as it pushes nothing: the record is keyed by the
-// identity the frontend reconciles the work on, and a minted id would name a
-// work nothing could ever claim.
-//
-// A WRITE FAILURE FAILS THE SUBMIT. This is a write to the same state store the
-// accepted edge just wrote to, so a failure here is a state store that cannot
-// be written — the condition under which every durable claim the daemon makes
-// is already void. Carrying on would submit a prompt the daemon has no record
-// of, which is precisely the loss this whole mechanism exists to end, so the
-// caller retracts the accepted edge and fails the frontend command instead.
-func (m *Manager) recordPromptReceipt(d *sessionController, requestID, text string, acceptedAtMs int64) error {
-	if requestID == "" {
-		return nil
-	}
-	if m.cfg.PromptReceipts == nil {
-		m.logf("session-controller: durable prompt receipt NOT recorded ws=%s session=%s request_id=%q accepted_at_ms=%d — no PromptReceiptStore is wired, so this prompt cannot be replayed if the daemon dies before its turn becomes durable",
-			d.workspace, d.sessionID, requestID, acceptedAtMs)
-		return nil
-	}
-	if err := m.cfg.PromptReceipts.Record(statedb.PromptReceipt{
-		RequestID:    requestID,
-		Workspace:    d.workspace,
-		Text:         text,
-		AcceptedAtMs: acceptedAtMs,
-	}); err != nil {
-		err = fmt.Errorf("session-controller: recording the durable prompt receipt for workspace %q session %q request %q failed before submitting: %w",
-			d.workspace, d.sessionID, requestID, err)
-		m.logf("session-controller: durable prompt receipt record FAILED ws=%s session=%s request_id=%q accepted_at_ms=%d len=%d prompt_submitted=false: %v",
-			d.workspace, d.sessionID, requestID, acceptedAtMs, len(text), err)
-		return err
-	}
-	m.logf("session-controller: durable prompt receipt recorded ws=%s session=%s request_id=%q accepted_at_ms=%d len=%d next=shim_submit_then_prompt_echo",
-		d.workspace, d.sessionID, requestID, acceptedAtMs, len(text))
-	return nil
-}
-
 // retractPromptAccepted undoes notePromptAccepted for a submit the shim
 // refused, restoring the queue latch, withdrawing the published `thinking`, and
 // closing the footer clock.
@@ -565,15 +431,6 @@ func (m *Manager) retractPromptAccepted(d *sessionController, requestID string, 
 	m.mu.Lock()
 	d.noteTurnRestoreLocked(turnBefore)
 	m.mu.Unlock()
-
-	// The durable receipt goes with the edge it was written beside. It was
-	// recorded on the daemon's INTENT to submit, and that intent has now been
-	// falsified, so replaying a work for it after a bounce would testify to a
-	// prompt no session ever received. This is the one window the accept-time
-	// write opens, and this is where it closes.
-	if requestID != "" {
-		d.consumer.retireDurableReceipt(requestID, "submit_failed_after_acceptance")
-	}
 
 	publish := func(state *frontendv1.WorkspaceState) {
 		d.consumer.push.PushWorkspaceState(state)

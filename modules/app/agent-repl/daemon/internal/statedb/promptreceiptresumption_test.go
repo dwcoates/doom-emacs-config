@@ -45,50 +45,6 @@ func TestARecordedResumptionIsOwedByItsWorkspace(t *testing.T) {
 	}
 }
 
-func TestAPendingResumptionIsNeverServedAsAReceipt(t *testing.T) {
-	// Arrange — this is the invisibility guarantee. Outstanding is the ONLY
-	// path by which a row in this table becomes a rendered prompt bubble, so a
-	// resumption it cannot return is a resumption no client can render.
-	receipts, _ := openReceipts(t)
-
-	// Act.
-	if err := receipts.RecordPendingResumption(pending()); err != nil {
-		t.Fatalf("RecordPendingResumption: %v", err)
-	}
-
-	// Assert.
-	got, err := receipts.Outstanding("/ws")
-	if err != nil {
-		t.Fatalf("Outstanding: %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("outstanding = %+v, want no renderable receipt for a resumption row", got)
-	}
-}
-
-func TestAnOrdinaryReceiptIsStillServedAlongsideAResumption(t *testing.T) {
-	// Arrange — the resumption filter must exclude resumptions and nothing
-	// else, or hiding the re-drive would also hide the user's own prompt.
-	receipts, _ := openReceipts(t)
-	if err := receipts.Record(PromptReceipt{RequestID: "r-1", Workspace: "/ws", Text: "hello", AcceptedAtMs: 1_000}); err != nil {
-		t.Fatalf("Record: %v", err)
-	}
-	if err := receipts.RecordPendingResumption(pending()); err != nil {
-		t.Fatalf("RecordPendingResumption: %v", err)
-	}
-
-	// Act.
-	got, err := receipts.Outstanding("/ws")
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Outstanding: %v", err)
-	}
-	if len(got) != 1 || got[0].RequestID != "r-1" {
-		t.Fatalf("outstanding = %+v, want only the user's own receipt", got)
-	}
-}
-
 func TestAResumptionSurvivesReopeningTheStore(t *testing.T) {
 	// Arrange — the whole point is surviving the bounce that interrupted the
 	// turn, so the row has to be on disk rather than in a connection.
@@ -281,33 +237,6 @@ func TestDischargingTheSameResumptionTwiceIsANoOpRatherThanAnError(t *testing.T)
 	}
 }
 
-func TestDischargingDoesNotTouchAnOrdinaryReceiptSharingTheRequestID(t *testing.T) {
-	// Arrange — a discharge is scoped to resumption rows, so it can never
-	// delete the user's own durable prompt evidence.
-	receipts, _ := openReceipts(t)
-	if err := receipts.Record(PromptReceipt{RequestID: "r-1", Workspace: "/ws", Text: "hello", AcceptedAtMs: 1_000}); err != nil {
-		t.Fatalf("Record: %v", err)
-	}
-
-	// Act.
-	discharged, err := receipts.DischargeResumption("r-1")
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("DischargeResumption: %v", err)
-	}
-	if discharged {
-		t.Fatal("discharged = true, want false: r-1 is a receipt, not a resumption")
-	}
-	got, err := receipts.Outstanding("/ws")
-	if err != nil {
-		t.Fatalf("Outstanding: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("outstanding = %+v, want the user's receipt untouched", got)
-	}
-}
-
 func TestDischargingWithNoRequestIDIsRefused(t *testing.T) {
 	// Arrange.
 	receipts, _ := openReceipts(t)
@@ -335,7 +264,7 @@ func TestReadingResumptionsForAnEmptyWorkspaceIsRefused(t *testing.T) {
 	}
 }
 
-func TestAContextCutRetiresAResumptionBelowIt(t *testing.T) {
+func TestAContextCutDischargesAResumptionBelowIt(t *testing.T) {
 	// Arrange — a clear or compaction discards the history the interrupted
 	// turn belonged to, so re-driving it would put pre-cut work back above a
 	// floor that exists to hide exactly that.
@@ -345,11 +274,11 @@ func TestAContextCutRetiresAResumptionBelowIt(t *testing.T) {
 	}
 
 	// Act.
-	n, err := receipts.RetireWorkspace("/ws", 5_000)
+	n, err := receipts.DischargeResumptionsThrough("/ws", 5_000)
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("RetireWorkspace: %v", err)
+		t.Fatalf("DischargeResumptionsThrough: %v", err)
 	}
 	if n != 1 {
 		t.Fatalf("retired = %d, want the resumption below the cut retired", n)
@@ -379,4 +308,38 @@ func TestAnUnreadableResumptionTableSurfacesItsCause(t *testing.T) {
 		t.Fatalf("err = %v, want the read failure surfaced", err)
 	}
 	var _ *sql.DB = db
+}
+
+func TestAContextCutLeavesAResumptionAboveItOwed(t *testing.T) {
+	// Arrange — the sweep is bounded by the cut's instant, so work interrupted
+	// after the cut is still owed.
+	receipts, _ := openReceipts(t)
+	if err := receipts.RecordPendingResumption(pending()); err != nil {
+		t.Fatalf("RecordPendingResumption: %v", err)
+	}
+
+	// Act.
+	n, err := receipts.DischargeResumptionsThrough("/ws", 1_000)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("DischargeResumptionsThrough: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("discharged = %d, want the resumption above the cut left alone", n)
+	}
+}
+
+func TestDischargingResumptionsForAnEmptyWorkspaceIsRefused(t *testing.T) {
+	// Arrange — an empty workspace is never a defaulted match; the sweep must
+	// not discharge every workspace's owed turns at once.
+	receipts, _ := openReceipts(t)
+
+	// Act.
+	_, err := receipts.DischargeResumptionsThrough("", 5_000)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "empty workspace") {
+		t.Fatalf("err = %v, want a refusal naming the empty workspace", err)
+	}
 }
