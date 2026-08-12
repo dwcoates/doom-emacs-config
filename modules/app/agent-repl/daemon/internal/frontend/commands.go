@@ -69,6 +69,21 @@ type CommandHandler interface {
 	// construction defect and is refused by the caller, because a client cannot
 	// tell an absent page from an empty conversation.
 	ConversationPage(ctx context.Context, workspace, requestID string, cmd *frontendv1.ConversationPageCmd) (*frontendv1.ConversationPage, error)
+	// FirstPage serves the MOST RECENT page of conversation history and RESETS
+	// this reader's position to it (conversation-history.proto). It is the cold
+	// open and the whole recovery story: a client that bounced, rotated its seq
+	// space, or was refused a next page calls this.
+	//
+	// reader names WHO is reading. It is minted by the transport from the
+	// connection and is never a wire field, because the position it selects is
+	// the one thing the client is forbidden to name.
+	FirstPage(ctx context.Context, reader, workspace, requestID string, cmd *frontendv1.FirstPageCmd) (*frontendv1.ConversationHistoryPage, error)
+	// NextPage serves the page immediately OLDER than the last one served to
+	// this reader. The command carries NO POSITION at all, and from a reader
+	// with none established it is REFUSED rather than answered with the tail —
+	// defaulting would turn a client bug into a silent tail read, and "I have no
+	// position" already has its own verb.
+	NextPage(ctx context.Context, reader, workspace, requestID string, cmd *frontendv1.NextPageCmd) (*frontendv1.ConversationHistoryPage, error)
 	// CreateSession brings up a session for the command's cwd (the UDS
 	// replacement for POST /sessions). The daemon delivers the resulting
 	// session identity via a pushed SessionView; the ack carries only ok/error.
@@ -212,6 +227,29 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 			page.RequestId = reqID
 			response = ConversationPageFrame(page)
 		}
+	case *frontendv1.FrontendCommand_FirstPage:
+		var page *frontendv1.ConversationHistoryPage
+		page, err = dispatchHistoryPage(ctx, ws, reqID, "first_page", func(reader string) (*frontendv1.ConversationHistoryPage, error) {
+			return h.FirstPage(ctx, reader, ws, reqID, c.FirstPage)
+		})
+		if err == nil {
+			// The request_id echo is stamped HERE, at the one place that knows
+			// both the page and the command it answers. It is the whole
+			// mechanism by which a page in flight across a transition is
+			// discarded, so a page carrying the wrong one would be applied to
+			// the request it is not the answer to.
+			page.RequestId = reqID
+			response = ConversationHistoryPageFrame(page)
+		}
+	case *frontendv1.FrontendCommand_NextPage:
+		var page *frontendv1.ConversationHistoryPage
+		page, err = dispatchHistoryPage(ctx, ws, reqID, "next_page", func(reader string) (*frontendv1.ConversationHistoryPage, error) {
+			return h.NextPage(ctx, reader, ws, reqID, c.NextPage)
+		})
+		if err == nil {
+			page.RequestId = reqID
+			response = ConversationHistoryPageFrame(page)
+		}
 	case *frontendv1.FrontendCommand_CreateSession:
 		observedClaudeSessionID, err = h.CreateSession(ctx, ws, reqID, c.CreateSession)
 	case *frontendv1.FrontendCommand_DeleteSession:
@@ -302,6 +340,33 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 		ObservedClaudeSessionId: observedClaudeSessionID,
 		DetachedCancel:          detachedCancel,
 	}, response
+}
+
+// dispatchHistoryPage runs one positionless history verb: it resolves the
+// READER from the context, refuses loudly when the transport supplied none, and
+// refuses an absent page the same way the older surface does.
+//
+// Both verbs go through it so the two refusals cannot drift, and so neither arm
+// can be written to default a missing reader to anything.
+func dispatchHistoryPage(ctx context.Context, workspace, requestID, verb string, serve func(reader string) (*frontendv1.ConversationHistoryPage, error)) (*frontendv1.ConversationHistoryPage, error) {
+	reader, ok := ReaderFrom(ctx)
+	if !ok {
+		// A position is per reader per workspace. Serving without one would
+		// file this reader's place under the empty key, where the next
+		// unidentified reader would inherit it.
+		return nil, fmt.Errorf("frontend: %s ws=%q request_id=%s carries no reader identity, and a conversation reading position is per reader per workspace", verb, workspace, requestID)
+	}
+	page, err := serve(reader)
+	if err != nil {
+		return nil, err
+	}
+	if page == nil {
+		// Never a silently absent page: a client cannot tell one from an empty
+		// conversation, and that ambiguity is the blank-feed bug this
+		// protocol's whole history has been spent closing.
+		return nil, fmt.Errorf("frontend: %s ws=%q request_id=%s produced no page and no error", verb, workspace, requestID)
+	}
+	return page, nil
 }
 
 // InterruptConfirmRequired is the interrupt gate's CHALLENGE, carried on the

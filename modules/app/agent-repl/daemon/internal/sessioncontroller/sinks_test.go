@@ -155,6 +155,12 @@ func lastPermissionDenyMessage(p *fakePusher, uuid string) string {
 
 // fakeApplier records applied events and optionally returns an error.
 type fakeApplier struct {
+	// readerPositions is the SSM's per-reader-per-workspace conversation
+	// reading position (historypage_test.go). It is lazily created so every
+	// existing harness keeps working without arranging one.
+	readerPositions *fakePositions
+	positionsOnce   sync.Once
+
 	applied []*corev1.Event
 	// boundaries are the turn boundaries that reached the ONE boundary door
 	// (ApplyTurnBoundary), which is where a turn now touches state at all.
