@@ -1661,7 +1661,7 @@ func TestACategoryCRecordAcquiresNoLineageAndNoDurabilityArm(t *testing.T) {
 	// Arrange.
 	ev := &corev1.Event{
 		SessionId: "s1", Seq: 23, ProducedAtMs: producedMs,
-		Payload:   &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}},
+		Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}},
 	}
 
 	// Act.
