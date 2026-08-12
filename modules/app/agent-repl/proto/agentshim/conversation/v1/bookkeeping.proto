@@ -61,14 +61,133 @@ message BookkeepingEntry {
   }
 }
 
-// The session began.
+// The session began, with the configuration it began under.
+//
+// THESE ARE THE FACTS THE /status PANEL IS RESOLVED FROM. They were previously
+// read off the vendor's own init record, which the daemon retained whole and
+// pushed to the client as a lenient JSON object — so the client ended up
+// deriving every value the user saw. The producer states neutral facts here,
+// the daemon resolves them into rows, the panel prints them.
+//
+// EVERY FIELD IS THE STARTING POINT, not the standing answer. A session can
+// switch model, gain an MCP server, or reload skills mid-run; those are their
+// own later records, and reading this message as current state is wrong.
 message SessionBegan {
   // The model it started under. A conversation can span models, so this is the
   // starting point rather than the answer for every message in it.
   string model = 1;
+
   // The working directory it started in, which is what makes a relative path in
   // a later tool call resolvable.
   string cwd = 2;
+
+  // The agent CLI's own version, as it reported itself. Carried because a
+  // transcript read months later is unreadable without knowing what wrote it.
+  string agent_version = 3;
+
+  // How the session is authenticated.
+  SessionAuth auth = 4;
+
+  // The named output style in force, empty when the CLI reported none.
+  string output_style = 5;
+
+  // Whether the session started in the vendor's accelerated mode.
+  FastMode fast_mode = 6;
+
+  // What the session started with available. NAMES ONLY, because the panel
+  // counts them and a reader wants to know what was reachable — the full
+  // definition of a skill or a subagent is not conversation material.
+  repeated string skills = 10;
+  repeated string subagents = 11;
+
+  // The MCP servers configured, and whether each one came up.
+  repeated SessionMcpServer mcp_servers = 12;
+
+  // The plugins loaded.
+  repeated SessionPlugin plugins = 13;
+
+  // The memory files in scope, by path. A list rather than the vendor's
+  // name→path map: nothing renders the names, and a map invites a consumer to
+  // look one up by a key this schema does not promise.
+  repeated string memory_paths = 14;
+}
+
+// How a session is authenticated.
+//
+// A oneof rather than the vendor's enum, because the two cases are genuinely
+// different things rather than two values of one thing — and because the
+// vendor's "none" meant a subscription login, which is the kind of value that
+// gets read as "unauthenticated" by the next person to touch it.
+message SessionAuth {
+  oneof auth {
+    // A logged-in account. No key is involved.
+    AuthSubscription subscription = 1;
+    // An API key, and where it was found.
+    AuthApiKey api_key = 2;
+  }
+}
+
+// Authenticated as a logged-in account.
+message AuthSubscription {}
+
+// Authenticated with an API key.
+message AuthApiKey {
+  // Where the key came from — an environment variable, a helper, a config
+  // file — as the producer resolved it. Shown to the user, so they can tell
+  // which credential is in play without guessing.
+  string source = 1;
+}
+
+// Whether the vendor's accelerated mode is on.
+message FastMode {
+  oneof state {
+    FastModeOn on = 1;
+    FastModeOff off = 2;
+  }
+}
+
+// Accelerated mode is active.
+message FastModeOn {}
+
+// Accelerated mode is not active.
+message FastModeOff {
+  // WHY it is off, when the producer knows. Carried so the state is explicable
+  // rather than a bare flag the user cannot act on. Empty when simply not
+  // enabled.
+  string reason = 1;
+}
+
+// One MCP server the session was configured with.
+message SessionMcpServer {
+  // The server as configured, which is what a reader recognizes it by.
+  string name = 1;
+  // Whether it came up.
+  McpServerHealth health = 2;
+}
+
+// Whether an MCP server is usable.
+message McpServerHealth {
+  oneof health {
+    McpServerConnected connected = 1;
+    McpServerFailed failed = 2;
+  }
+}
+
+// The server connected and its tools are available.
+message McpServerConnected {}
+
+// The server did not come up.
+message McpServerFailed {
+  // What went wrong, so a failed server is diagnosable rather than merely
+  // absent from a count.
+  string error = 1;
+}
+
+// One plugin the session loaded.
+message SessionPlugin {
+  string name = 1;
+  // The version, empty when the plugin did not report one.
+  string version = 2;
 }
 
 // The session ended, and how.

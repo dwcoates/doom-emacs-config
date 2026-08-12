@@ -25,7 +25,7 @@
 package frontendv1
 
 import (
-	v1 "agentrepl/proto/agentshim/data/v1"
+	v1 "agentrepl/proto/agentshim/conversation/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -152,7 +152,7 @@ func (x *AgentEmission) GetSkillBody() *SkillBodyItem {
 	return nil
 }
 
-func (x *AgentEmission) GetTurnResult() *v1.ResultMessage {
+func (x *AgentEmission) GetTurnResult() *v1.DetachedWorkEnded {
 	if x != nil {
 		if x, ok := x.Emission.(*AgentEmission_TurnResult); ok {
 			return x.TurnResult
@@ -213,7 +213,7 @@ type AgentEmission_TurnResult struct {
 	// A turn's ACCOUNTING VERDICT is a different thing and is not here: it is
 	// the session's ledger rather than the agent's utterance, and it reaches a
 	// frontend resolved, on FooterAccountingCell.
-	TurnResult *v1.ResultMessage `protobuf:"bytes,7,opt,name=turn_result,json=turnResult,proto3,oneof"`
+	TurnResult *v1.DetachedWorkEnded `protobuf:"bytes,7,opt,name=turn_result,json=turnResult,proto3,oneof"`
 }
 
 func (*AgentEmission_Response) isAgentEmission_Emission() {}
@@ -234,7 +234,7 @@ var File_agentshim_frontend_v1_agent_emission_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_agent_emission_proto_rawDesc = "" +
 	"\n" +
-	"*agentshim/frontend/v1/agent-emission.proto\x12\x15agentshim.frontend.v1\x1a\x1eagentshim/data/v1/stream.proto\x1a*agentshim/frontend/v1/agent-response.proto\x1a&agentshim/frontend/v1/slash-menu.proto\x1a%agentshim/frontend/v1/tool-call.proto\"\x8d\x04\n" +
+	"*agentshim/frontend/v1/agent-emission.proto\x12\x15agentshim.frontend.v1\x1a(agentshim/conversation/v1/payloads.proto\x1a*agentshim/frontend/v1/agent-response.proto\x1a&agentshim/frontend/v1/slash-menu.proto\x1a%agentshim/frontend/v1/tool-call.proto\"\x99\x04\n" +
 	"\rAgentEmission\x12B\n" +
 	"\bresponse\x18\x01 \x01(\v2$.agentshim.frontend.v1.AgentResponseH\x00R\bresponse\x12B\n" +
 	"\bthinking\x18\x02 \x01(\v2$.agentshim.frontend.v1.AgentThinkingH\x00R\bthinking\x12C\n" +
@@ -243,8 +243,8 @@ const file_agentshim_frontend_v1_agent_emission_proto_rawDesc = "" +
 	"toolResult\x12L\n" +
 	"\ftool_outcome\x18\x05 \x01(\v2'.agentshim.frontend.v1.AgentToolOutcomeH\x00R\vtoolOutcome\x12E\n" +
 	"\n" +
-	"skill_body\x18\x06 \x01(\v2$.agentshim.frontend.v1.SkillBodyItemH\x00R\tskillBody\x12C\n" +
-	"\vturn_result\x18\a \x01(\v2 .agentshim.data.v1.ResultMessageH\x00R\n" +
+	"skill_body\x18\x06 \x01(\v2$.agentshim.frontend.v1.SkillBodyItemH\x00R\tskillBody\x12O\n" +
+	"\vturn_result\x18\a \x01(\v2,.agentshim.conversation.v1.DetachedWorkEndedH\x00R\n" +
 	"turnResultB\n" +
 	"\n" +
 	"\bemissionB2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
@@ -263,14 +263,14 @@ func file_agentshim_frontend_v1_agent_emission_proto_rawDescGZIP() []byte {
 
 var file_agentshim_frontend_v1_agent_emission_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_agentshim_frontend_v1_agent_emission_proto_goTypes = []any{
-	(*AgentEmission)(nil),    // 0: agentshim.frontend.v1.AgentEmission
-	(*AgentResponse)(nil),    // 1: agentshim.frontend.v1.AgentResponse
-	(*AgentThinking)(nil),    // 2: agentshim.frontend.v1.AgentThinking
-	(*AgentToolCall)(nil),    // 3: agentshim.frontend.v1.AgentToolCall
-	(*AgentToolResult)(nil),  // 4: agentshim.frontend.v1.AgentToolResult
-	(*AgentToolOutcome)(nil), // 5: agentshim.frontend.v1.AgentToolOutcome
-	(*SkillBodyItem)(nil),    // 6: agentshim.frontend.v1.SkillBodyItem
-	(*v1.ResultMessage)(nil), // 7: agentshim.data.v1.ResultMessage
+	(*AgentEmission)(nil),        // 0: agentshim.frontend.v1.AgentEmission
+	(*AgentResponse)(nil),        // 1: agentshim.frontend.v1.AgentResponse
+	(*AgentThinking)(nil),        // 2: agentshim.frontend.v1.AgentThinking
+	(*AgentToolCall)(nil),        // 3: agentshim.frontend.v1.AgentToolCall
+	(*AgentToolResult)(nil),      // 4: agentshim.frontend.v1.AgentToolResult
+	(*AgentToolOutcome)(nil),     // 5: agentshim.frontend.v1.AgentToolOutcome
+	(*SkillBodyItem)(nil),        // 6: agentshim.frontend.v1.SkillBodyItem
+	(*v1.DetachedWorkEnded)(nil), // 7: agentshim.conversation.v1.DetachedWorkEnded
 }
 var file_agentshim_frontend_v1_agent_emission_proto_depIdxs = []int32{
 	1, // 0: agentshim.frontend.v1.AgentEmission.response:type_name -> agentshim.frontend.v1.AgentResponse
@@ -279,7 +279,7 @@ var file_agentshim_frontend_v1_agent_emission_proto_depIdxs = []int32{
 	4, // 3: agentshim.frontend.v1.AgentEmission.tool_result:type_name -> agentshim.frontend.v1.AgentToolResult
 	5, // 4: agentshim.frontend.v1.AgentEmission.tool_outcome:type_name -> agentshim.frontend.v1.AgentToolOutcome
 	6, // 5: agentshim.frontend.v1.AgentEmission.skill_body:type_name -> agentshim.frontend.v1.SkillBodyItem
-	7, // 6: agentshim.frontend.v1.AgentEmission.turn_result:type_name -> agentshim.data.v1.ResultMessage
+	7, // 6: agentshim.frontend.v1.AgentEmission.turn_result:type_name -> agentshim.conversation.v1.DetachedWorkEnded
 	7, // [7:7] is the sub-list for method output_type
 	7, // [7:7] is the sub-list for method input_type
 	7, // [7:7] is the sub-list for extension type_name

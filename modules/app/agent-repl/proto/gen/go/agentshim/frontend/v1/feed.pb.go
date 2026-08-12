@@ -15,8 +15,8 @@
 package frontendv1
 
 import (
+	v1 "agentrepl/proto/agentshim/conversation/v1"
 	v11 "agentrepl/proto/agentshim/core/v1"
-	v1 "agentrepl/proto/agentshim/data/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -559,7 +559,7 @@ func (x *Message) GetAgent() *AgentEmission {
 	return nil
 }
 
-func (x *Message) GetUserMessage() *v1.ApiUserMessage {
+func (x *Message) GetUserMessage() *v1.UserContent {
 	if x != nil {
 		if x, ok := x.Payload.(*Message_UserMessage); ok {
 			return x.UserMessage
@@ -665,7 +665,7 @@ type Message_Agent struct {
 
 type Message_UserMessage struct {
 	// The user's own prompt.
-	UserMessage *v1.ApiUserMessage `protobuf:"bytes,11,opt,name=user_message,json=userMessage,proto3,oneof"`
+	UserMessage *v1.UserContent `protobuf:"bytes,11,opt,name=user_message,json=userMessage,proto3,oneof"`
 }
 
 type Message_Permission struct {
@@ -1089,13 +1089,31 @@ func (x *TypingCut) GetFence() string {
 	return ""
 }
 
-// The session's retained SystemInit (slash commands, tools, skills, model
-// list), pushed on attach and included in StateSnapshot (S9). Replaces the
-// Emacs GET /commands HTTP menu source.
+// The /status panel, RESOLVED: the rows it draws, already labelled and already
+// stringified.
+//
+// IT USED TO CARRY THE VENDOR'S INIT RECORD WHOLE, as a lenient JSON object the
+// panel read field by field, and every value the user actually saw was computed
+// client-side: the auth word from an enum name, the fast-mode word from a state
+// string, plugin labels from name+version pairs, three of the rows from
+// `.length` of an array, and the memory row from joining a map's values. That
+// is five derivations in the renderer, which is five places the panel's answer
+// can disagree with the daemon's.
+//
+// The daemon resolves them now. `SessionBegan` (conversation.v1) carries the
+// neutral facts the producer observed; the daemon turns those into rows; the
+// panel prints them.
 type SessionInitView struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	Init      *v1.SystemInit         `protobuf:"bytes,3,opt,name=init,proto3" json:"init,omitempty"`
+	// The panel's rows, in render order. EMPTY means no init has landed yet,
+	// which the panel draws as the rows it owns and nothing more — absence
+	// rendering absence, rather than a spinner standing in for a fact.
+	//
+	// The panel splices its own rows (account, model, permission mode) ahead of
+	// these, because those come from sources that move independently of an init
+	// and are already resolved elsewhere.
+	Rows []*SessionInitRow `protobuf:"bytes,5,rep,name=rows,proto3" json:"rows,omitempty"`
 	// The workspace's staleness FENCE at the moment the daemon produced this
 	// push: an opaque token the client compares BYTE-WISE against the fence on
 	// the workspace's current WorkspaceState, and never parses, splits or
@@ -1147,9 +1165,9 @@ func (x *SessionInitView) GetWorkspace() string {
 	return ""
 }
 
-func (x *SessionInitView) GetInit() *v1.SystemInit {
+func (x *SessionInitView) GetRows() []*SessionInitRow {
 	if x != nil {
-		return x.Init
+		return x.Rows
 	}
 	return nil
 }
@@ -1161,11 +1179,72 @@ func (x *SessionInitView) GetFence() string {
 	return ""
 }
 
+// One row of the /status panel: a label and the value beside it.
+//
+// A STRING VALUE ON PURPOSE. Every row the panel draws is a word or a phrase —
+// a count, a joined list, a version, a resolved auth word — so typing the value
+// as anything richer would only invite a renderer to reformat it, which is the
+// derivation this message exists to remove. The daemon decided what it says.
+type SessionInitRow struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The row's label, as shown: "Version", "Working directory", "Auth".
+	Label string `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
+	// The value, as shown. Never empty — the daemon OMITS a row it has no value
+	// for rather than pushing a blank one, so absence renders as absence.
+	Value         string `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionInitRow) Reset() {
+	*x = SessionInitRow{}
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionInitRow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionInitRow) ProtoMessage() {}
+
+func (x *SessionInitRow) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_feed_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionInitRow.ProtoReflect.Descriptor instead.
+func (*SessionInitRow) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_feed_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SessionInitRow) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *SessionInitRow) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
 var File_agentshim_frontend_v1_feed_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"\n" +
-	" agentshim/frontend/v1/feed.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a\x1eagentshim/data/v1/stream.proto\x1a\x1dagentshim/data/v1/tools.proto\x1a*agentshim/frontend/v1/agent-emission.proto\x1a)agentshim/frontend/v1/detached-work.proto\x1a(agentshim/frontend/v1/failure-card.proto\x1a&agentshim/frontend/v1/slash-menu.proto\"\xbd\x01\n" +
+	" agentshim/frontend/v1/feed.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a'agentshim/conversation/v1/content.proto\x1a*agentshim/frontend/v1/agent-emission.proto\x1a)agentshim/frontend/v1/detached-work.proto\x1a(agentshim/frontend/v1/failure-card.proto\x1a&agentshim/frontend/v1/slash-menu.proto\"\xbd\x01\n" +
 	"\x11ConversationDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12:\n" +
 	"\bmessages\x18\x03 \x03(\v2\x1e.agentshim.frontend.v1.MessageR\bmessages\x12\x1f\n" +
@@ -1177,7 +1256,7 @@ const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"\x14top_level_message_id\x18\x01 \x01(\tR\x11topLevelMessageId\x12*\n" +
 	"\x11parent_message_id\x18\x02 \x01(\tR\x0fparentMessageId\"\x10\n" +
 	"\x0eMessageDurable\"\x12\n" +
-	"\x10MessageEphemeral\"\xef\n" +
+	"\x10MessageEphemeral\"\xf4\n" +
 	"\n" +
 	"\aMessage\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x13\n" +
@@ -1188,8 +1267,8 @@ const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"\alineage\x18\x06 \x01(\v2%.agentshim.frontend.v1.MessageLineageR\alineage\x12A\n" +
 	"\adurable\x18\a \x01(\v2%.agentshim.frontend.v1.MessageDurableH\x00R\adurable\x12G\n" +
 	"\tephemeral\x18\b \x01(\v2'.agentshim.frontend.v1.MessageEphemeralH\x00R\tephemeral\x12<\n" +
-	"\x05agent\x18\x05 \x01(\v2$.agentshim.frontend.v1.AgentEmissionH\x01R\x05agent\x12F\n" +
-	"\fuser_message\x18\v \x01(\v2!.agentshim.data.v1.ApiUserMessageH\x01R\vuserMessage\x12C\n" +
+	"\x05agent\x18\x05 \x01(\v2$.agentshim.frontend.v1.AgentEmissionH\x01R\x05agent\x12K\n" +
+	"\fuser_message\x18\v \x01(\v2&.agentshim.conversation.v1.UserContentH\x01R\vuserMessage\x12C\n" +
 	"\n" +
 	"permission\x18\x1e \x01(\v2!.agentshim.core.v1.PermissionItemH\x01R\n" +
 	"permission\x12K\n" +
@@ -1225,12 +1304,15 @@ const file_agentshim_frontend_v1_feed_proto_rawDesc = "" +
 	"\tTypingCut\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12*\n" +
 	"\x11parent_message_id\x18\x02 \x01(\tR\x0fparentMessageId\x12\x14\n" +
-	"\x05fence\x18\x03 \x01(\tR\x05fenceR\tbubble_id\"\x8a\x01\n" +
+	"\x05fence\x18\x03 \x01(\tR\x05fenceR\tbubble_id\"\x9e\x01\n" +
 	"\x0fSessionInitView\x12\x1c\n" +
-	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x121\n" +
-	"\x04init\x18\x03 \x01(\v2\x1d.agentshim.data.v1.SystemInitR\x04init\x12\x14\n" +
-	"\x05fence\x18\x04 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03R\n" +
-	"session_id*v\n" +
+	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x129\n" +
+	"\x04rows\x18\x05 \x03(\v2%.agentshim.frontend.v1.SessionInitRowR\x04rows\x12\x14\n" +
+	"\x05fence\x18\x04 \x01(\tR\x05fenceJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\n" +
+	"session_idR\x04init\"<\n" +
+	"\x0eSessionInitRow\x12\x14\n" +
+	"\x05label\x18\x01 \x01(\tR\x05label\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value*v\n" +
 	"\x12ConversationSource\x12#\n" +
 	"\x1fCONVERSATION_SOURCE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18CONVERSATION_SOURCE_USER\x10\x01\x12\x1d\n" +
@@ -1249,7 +1331,7 @@ func file_agentshim_frontend_v1_feed_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_frontend_v1_feed_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentshim_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_agentshim_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_agentshim_frontend_v1_feed_proto_goTypes = []any{
 	(ConversationSource)(0),              // 0: agentshim.frontend.v1.ConversationSource
 	(*ConversationDelta)(nil),            // 1: agentshim.frontend.v1.ConversationDelta
@@ -1262,17 +1344,17 @@ var file_agentshim_frontend_v1_feed_proto_goTypes = []any{
 	(*TypingDelta)(nil),                  // 8: agentshim.frontend.v1.TypingDelta
 	(*TypingCut)(nil),                    // 9: agentshim.frontend.v1.TypingCut
 	(*SessionInitView)(nil),              // 10: agentshim.frontend.v1.SessionInitView
-	(*AgentEmission)(nil),                // 11: agentshim.frontend.v1.AgentEmission
-	(*v1.ApiUserMessage)(nil),            // 12: agentshim.data.v1.ApiUserMessage
-	(*v11.PermissionItem)(nil),           // 13: agentshim.core.v1.PermissionItem
-	(*FailureCardView)(nil),              // 14: agentshim.frontend.v1.FailureCardView
-	(*v11.ContextCleared)(nil),           // 15: agentshim.core.v1.ContextCleared
-	(*v11.ContextCompacted)(nil),         // 16: agentshim.core.v1.ContextCompacted
-	(*DaemonInterceptedCommandItem)(nil), // 17: agentshim.frontend.v1.DaemonInterceptedCommandItem
-	(*DetachedWork)(nil),                 // 18: agentshim.frontend.v1.DetachedWork
-	(*DetachedWorkUpdate)(nil),           // 19: agentshim.frontend.v1.DetachedWorkUpdate
-	(*v11.ContentDelta)(nil),             // 20: agentshim.core.v1.ContentDelta
-	(*v1.SystemInit)(nil),                // 21: agentshim.data.v1.SystemInit
+	(*SessionInitRow)(nil),               // 11: agentshim.frontend.v1.SessionInitRow
+	(*AgentEmission)(nil),                // 12: agentshim.frontend.v1.AgentEmission
+	(*v1.UserContent)(nil),               // 13: agentshim.conversation.v1.UserContent
+	(*v11.PermissionItem)(nil),           // 14: agentshim.core.v1.PermissionItem
+	(*FailureCardView)(nil),              // 15: agentshim.frontend.v1.FailureCardView
+	(*v11.ContextCleared)(nil),           // 16: agentshim.core.v1.ContextCleared
+	(*v11.ContextCompacted)(nil),         // 17: agentshim.core.v1.ContextCompacted
+	(*DaemonInterceptedCommandItem)(nil), // 18: agentshim.frontend.v1.DaemonInterceptedCommandItem
+	(*DetachedWork)(nil),                 // 19: agentshim.frontend.v1.DetachedWork
+	(*DetachedWorkUpdate)(nil),           // 20: agentshim.frontend.v1.DetachedWorkUpdate
+	(*v11.ContentDelta)(nil),             // 21: agentshim.core.v1.ContentDelta
 }
 var file_agentshim_frontend_v1_feed_proto_depIdxs = []int32{
 	5,  // 0: agentshim.frontend.v1.ConversationDelta.messages:type_name -> agentshim.frontend.v1.Message
@@ -1280,19 +1362,19 @@ var file_agentshim_frontend_v1_feed_proto_depIdxs = []int32{
 	2,  // 2: agentshim.frontend.v1.Message.lineage:type_name -> agentshim.frontend.v1.MessageLineage
 	3,  // 3: agentshim.frontend.v1.Message.durable:type_name -> agentshim.frontend.v1.MessageDurable
 	4,  // 4: agentshim.frontend.v1.Message.ephemeral:type_name -> agentshim.frontend.v1.MessageEphemeral
-	11, // 5: agentshim.frontend.v1.Message.agent:type_name -> agentshim.frontend.v1.AgentEmission
-	12, // 6: agentshim.frontend.v1.Message.user_message:type_name -> agentshim.data.v1.ApiUserMessage
-	13, // 7: agentshim.frontend.v1.Message.permission:type_name -> agentshim.core.v1.PermissionItem
-	14, // 8: agentshim.frontend.v1.Message.failure_card:type_name -> agentshim.frontend.v1.FailureCardView
-	15, // 9: agentshim.frontend.v1.Message.context_cleared:type_name -> agentshim.core.v1.ContextCleared
-	16, // 10: agentshim.frontend.v1.Message.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
-	17, // 11: agentshim.frontend.v1.Message.daemon_intercepted_command:type_name -> agentshim.frontend.v1.DaemonInterceptedCommandItem
-	18, // 12: agentshim.frontend.v1.Message.detached_work:type_name -> agentshim.frontend.v1.DetachedWork
+	12, // 5: agentshim.frontend.v1.Message.agent:type_name -> agentshim.frontend.v1.AgentEmission
+	13, // 6: agentshim.frontend.v1.Message.user_message:type_name -> agentshim.conversation.v1.UserContent
+	14, // 7: agentshim.frontend.v1.Message.permission:type_name -> agentshim.core.v1.PermissionItem
+	15, // 8: agentshim.frontend.v1.Message.failure_card:type_name -> agentshim.frontend.v1.FailureCardView
+	16, // 9: agentshim.frontend.v1.Message.context_cleared:type_name -> agentshim.core.v1.ContextCleared
+	17, // 10: agentshim.frontend.v1.Message.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
+	18, // 11: agentshim.frontend.v1.Message.daemon_intercepted_command:type_name -> agentshim.frontend.v1.DaemonInterceptedCommandItem
+	19, // 12: agentshim.frontend.v1.Message.detached_work:type_name -> agentshim.frontend.v1.DetachedWork
 	7,  // 13: agentshim.frontend.v1.Message.compaction_summary:type_name -> agentshim.frontend.v1.CompactionSummaryItem
 	5,  // 14: agentshim.frontend.v1.DetachedWorkDelta.opened:type_name -> agentshim.frontend.v1.Message
-	19, // 15: agentshim.frontend.v1.DetachedWorkDelta.updates:type_name -> agentshim.frontend.v1.DetachedWorkUpdate
-	20, // 16: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
-	21, // 17: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
+	20, // 15: agentshim.frontend.v1.DetachedWorkDelta.updates:type_name -> agentshim.frontend.v1.DetachedWorkUpdate
+	21, // 16: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
+	11, // 17: agentshim.frontend.v1.SessionInitView.rows:type_name -> agentshim.frontend.v1.SessionInitRow
 	18, // [18:18] is the sub-list for method output_type
 	18, // [18:18] is the sub-list for method input_type
 	18, // [18:18] is the sub-list for extension type_name
@@ -1328,7 +1410,7 @@ func file_agentshim_frontend_v1_feed_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_feed_proto_rawDesc), len(file_agentshim_frontend_v1_feed_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

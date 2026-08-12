@@ -9,7 +9,8 @@ syntax = "proto3";
 
 package agentshim.frontend.v1;
 
-import "agentshim/data/v1/tools.proto";
+import "agentshim/conversation/v1/content.proto";
+import "agentshim/conversation/v1/payloads.proto";
 
 option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 
@@ -23,7 +24,7 @@ message AgentToolCall {
   reserved "spawned_bubble_id";
 
   // The call the agent made, verbatim durable evidence.
-  agentshim.data.v1.ToolUseBlock call = 1;
+  agentshim.conversation.v1.ToolCallBlock call = 1;
   // THE DETACHMENT VERDICT. Non-empty exactly when this call detached work, and
   // then equal to the uuid of the Message that work IS (payload arm
   // `detached_work`).
@@ -55,20 +56,32 @@ message AgentToolCall {
 message AgentToolResult {
   // The result block, verbatim durable evidence. Carries its own
   // tool_use_id, which is the card's reconciliation identity.
-  agentshim.data.v1.ToolResultBlock result = 1;
+  agentshim.conversation.v1.ToolResultContent result = 1;
 }
 
-// A tool's TYPED outcome, and the subagent/task chip:
-// agentshim.data.v1.ToolUseResult's oneof carries AgentAsyncLaunch,
-// AgentResult, TaskOutputResult, TaskStopResult and WorkflowLaunchResult, so
-// the chip's facts are the outcome's facts.
+// A tool's TYPED outcome, and the subagent/task chip.
+//
+// It used to carry `data.v1.ToolUseResult`, whose oneof held AgentAsyncLaunch,
+// AgentResult, TaskOutputResult, TaskStopResult and WorkflowLaunchResult —
+// five vendor-named shapes for two facts: work detached, and work reached an
+// end. conversation.v1 models those directly, so the chip's facts are now the
+// detachment's own facts rather than a vendor union the frontend destructures.
 message AgentToolOutcome {
   // 3 KEPT its number but was renamed spawned_bubble_id -> spawned_message_id,
   // for the same reason AgentToolCall's did. The NAME is retired.
   reserved "spawned_bubble_id";
 
-  // The typed outcome, verbatim durable evidence.
-  agentshim.data.v1.ToolUseResult structured = 1;
+  // The outcome, in the neutral detached-work vocabulary.
+  //
+  // A oneof rather than one field, because a launch and an ending are
+  // different facts and a chip renders them differently. Absent when the call
+  // returned ordinarily and detached nothing.
+  oneof outcome {
+    // Work detached and is now running alongside the turn.
+    agentshim.conversation.v1.DetachedWorkStarted started = 1;
+    // Detached work reached an end, with the outcome it reached.
+    agentshim.conversation.v1.DetachedWorkEnded ended = 4;
+  }
   // The tool_use id this outcome belongs to. Carried explicitly because
   // ToolUseResult has no correlation id of its own: on disk it is associated
   // with its tool_result line POSITIONALLY, and a positional association does

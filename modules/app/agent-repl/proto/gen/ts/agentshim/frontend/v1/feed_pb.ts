@@ -14,10 +14,8 @@ import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2"
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { ContentDelta, ContextCleared, ContextCompacted, PermissionItem } from "../../core/v1/core_pb";
 import { file_agentshim_core_v1_core } from "../../core/v1/core_pb";
-import type { SystemInit } from "../../data/v1/stream_pb";
-import { file_agentshim_data_v1_stream } from "../../data/v1/stream_pb";
-import type { ApiUserMessage } from "../../data/v1/tools_pb";
-import { file_agentshim_data_v1_tools } from "../../data/v1/tools_pb";
+import type { UserContent } from "../../conversation/v1/content_pb";
+import { file_agentshim_conversation_v1_content } from "../../conversation/v1/content_pb";
 import type { AgentEmission } from "./agent-emission_pb";
 import { file_agentshim_frontend_v1_agent_emission } from "./agent-emission_pb";
 import type { DetachedWork, DetachedWorkUpdate } from "./detached-work_pb";
@@ -32,7 +30,7 @@ import type { Message as Message$1 } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/feed.proto.
  */
 export const file_agentshim_frontend_v1_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZmVlZC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIpUBChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSMAoIbWVzc2FnZXMYAyADKAsyHi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZRITCgt0aHJvdWdoX3NlcRgEIAEoBBINCgVmZW5jZRgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZFIFaXRlbXMiSQoOTWVzc2FnZUxpbmVhZ2USHAoUdG9wX2xldmVsX21lc3NhZ2VfaWQYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAkiEAoOTWVzc2FnZUR1cmFibGUiEgoQTWVzc2FnZUVwaGVtZXJhbCKpCQoHTWVzc2FnZRIMCgR1dWlkGAEgASgJEg0KBXRzX21zGAIgASgDEhIKCnJlcXVlc3RfaWQYAyABKAkSOQoGc291cmNlGAQgASgOMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblNvdXJjZRI2CgdsaW5lYWdlGAYgASgLMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lc3NhZ2VMaW5lYWdlEjgKB2R1cmFibGUYByABKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZUR1cmFibGVIABI8CgllcGhlbWVyYWwYCCABKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZUVwaGVtZXJhbEgAEjUKBWFnZW50GAUgASgLMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFnZW50RW1pc3Npb25IARI5Cgx1c2VyX21lc3NhZ2UYCyABKAsyIS5hZ2VudHNoaW0uZGF0YS52MS5BcGlVc2VyTWVzc2FnZUgBEjcKCnBlcm1pc3Npb24YHiABKAsyIS5hZ2VudHNoaW0uY29yZS52MS5QZXJtaXNzaW9uSXRlbUgBEj4KDGZhaWx1cmVfY2FyZBgfIAEoCzImLmFnZW50c2hpbS5mcm9udGVuZC52MS5GYWlsdXJlQ2FyZFZpZXdIARI8Cg9jb250ZXh0X2NsZWFyZWQYICABKAsyIS5hZ2VudHNoaW0uY29yZS52MS5Db250ZXh0Q2xlYXJlZEgBEkAKEWNvbnRleHRfY29tcGFjdGVkGCEgASgLMiMuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENvbXBhY3RlZEgBElkKGmRhZW1vbl9pbnRlcmNlcHRlZF9jb21tYW5kGCMgASgLMjMuYWdlbnRzaGltLmZyb250ZW5kLnYxLkRhZW1vbkludGVyY2VwdGVkQ29tbWFuZEl0ZW1IARI8Cg1kZXRhY2hlZF93b3JrGCYgASgLMiMuYWdlbnRzaGltLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya0gBEkoKEmNvbXBhY3Rpb25fc3VtbWFyeRgnIAEoCzIsLmFnZW50c2hpbS5mcm9udGVuZC52MS5Db21wYWN0aW9uU3VtbWFyeUl0ZW1IAUIMCgpkdXJhYmlsaXR5QgkKB3BheWxvYWRKBAgQEBFKBAgREBJKBAgSEBNKBAgKEAtKBAgMEA1KBAgNEA5KBAgOEA9KBAgPEBBKBAgiECNKBAgoEClKBAgkECVKBAglECZSCWFwaV9lcnJvclIQY29tcGFjdF9ib3VuZGFyeVIVY29tcGFjdF9ib3VuZGFyeV9saW5lUhFhc3Npc3RhbnRfbWVzc2FnZVIIdG9vbF91c2VSC3Rvb2xfcmVzdWx0Ug90b29sX3VzZV9yZXN1bHRSBnJlc3VsdFIKc2tpbGxfYm9keVILdXNhZ2Vfc3RhbXBSEXRva2VuX3V0aWxpemF0aW9uUg90dXJuX2FjY291bnRpbmdSDGFzeW5jX2J1YmJsZVIPc2Vzc2lvbl9jb21tYW5kIsgBChFEZXRhY2hlZFdvcmtEZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSLgoGb3BlbmVkGAMgAygLMh4uYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lc3NhZ2USOgoHdXBkYXRlcxgEIAMoCzIpLmFnZW50c2hpbS5mcm9udGVuZC52MS5EZXRhY2hlZFdvcmtVcGRhdGUSEwoLdGhyb3VnaF9zZXEYBSABKAQSDQoFZmVuY2UYBiABKAlKBAgCEANSCnNlc3Npb25faWQiYQoVQ29tcGFjdGlvblN1bW1hcnlJdGVtEg8KB3N1bW1hcnkYASABKAkSFwoPY29tcGFjdGVkX2F0X21zGAIgASgDEh4KFmV4cGVuc2l2ZV9pbnB1dF90b2tlbnMYAyABKAMilwEKC1R5cGluZ0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIuCgVkZWx0YRgDIAEoCzIfLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRlbnREZWx0YRINCgVmZW5jZRgEIAEoCRIZChFwYXJlbnRfbWVzc2FnZV9pZBgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZFIJYnViYmxlX2lkIlMKCVR5cGluZ0N1dBIRCgl3b3Jrc3BhY2UYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAkSDQoFZmVuY2UYAyABKAlSCWJ1YmJsZV9pZCJyCg9TZXNzaW9uSW5pdFZpZXcSEQoJd29ya3NwYWNlGAEgASgJEisKBGluaXQYAyABKAsyHS5hZ2VudHNoaW0uZGF0YS52MS5TeXN0ZW1Jbml0Eg0KBWZlbmNlGAQgASgJSgQIAhADUgpzZXNzaW9uX2lkKnYKEkNvbnZlcnNhdGlvblNvdXJjZRIjCh9DT05WRVJTQVRJT05fU09VUkNFX1VOU1BFQ0lGSUVEEAASHAoYQ09OVkVSU0FUSU9OX1NPVVJDRV9VU0VSEAESHQoZQ09OVkVSU0FUSU9OX1NPVVJDRV9NRVJHRRACQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_agentshim_core_v1_core, file_agentshim_data_v1_stream, file_agentshim_data_v1_tools, file_agentshim_frontend_v1_agent_emission, file_agentshim_frontend_v1_detached_work, file_agentshim_frontend_v1_failure_card, file_agentshim_frontend_v1_slash_menu]);
+  fileDesc("CiBhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZmVlZC5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIpUBChFDb252ZXJzYXRpb25EZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSMAoIbWVzc2FnZXMYAyADKAsyHi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZRITCgt0aHJvdWdoX3NlcRgEIAEoBBINCgVmZW5jZRgFIAEoCUoECAIQA1IKc2Vzc2lvbl9pZFIFaXRlbXMiSQoOTWVzc2FnZUxpbmVhZ2USHAoUdG9wX2xldmVsX21lc3NhZ2VfaWQYASABKAkSGQoRcGFyZW50X21lc3NhZ2VfaWQYAiABKAkiEAoOTWVzc2FnZUR1cmFibGUiEgoQTWVzc2FnZUVwaGVtZXJhbCKuCQoHTWVzc2FnZRIMCgR1dWlkGAEgASgJEg0KBXRzX21zGAIgASgDEhIKCnJlcXVlc3RfaWQYAyABKAkSOQoGc291cmNlGAQgASgOMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvblNvdXJjZRI2CgdsaW5lYWdlGAYgASgLMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLk1lc3NhZ2VMaW5lYWdlEjgKB2R1cmFibGUYByABKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZUR1cmFibGVIABI8CgllcGhlbWVyYWwYCCABKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZUVwaGVtZXJhbEgAEjUKBWFnZW50GAUgASgLMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFnZW50RW1pc3Npb25IARI+Cgx1c2VyX21lc3NhZ2UYCyABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50SAESNwoKcGVybWlzc2lvbhgeIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLlBlcm1pc3Npb25JdGVtSAESPgoMZmFpbHVyZV9jYXJkGB8gASgLMiYuYWdlbnRzaGltLmZyb250ZW5kLnYxLkZhaWx1cmVDYXJkVmlld0gBEjwKD2NvbnRleHRfY2xlYXJlZBggIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDbGVhcmVkSAESQAoRY29udGV4dF9jb21wYWN0ZWQYISABKAsyIy5hZ2VudHNoaW0uY29yZS52MS5Db250ZXh0Q29tcGFjdGVkSAESWQoaZGFlbW9uX2ludGVyY2VwdGVkX2NvbW1hbmQYIyABKAsyMy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuRGFlbW9uSW50ZXJjZXB0ZWRDb21tYW5kSXRlbUgBEjwKDWRldGFjaGVkX3dvcmsYJiABKAsyIy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuRGV0YWNoZWRXb3JrSAESSgoSY29tcGFjdGlvbl9zdW1tYXJ5GCcgASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbXBhY3Rpb25TdW1tYXJ5SXRlbUgBQgwKCmR1cmFiaWxpdHlCCQoHcGF5bG9hZEoECBAQEUoECBEQEkoECBIQE0oECAoQC0oECAwQDUoECA0QDkoECA4QD0oECA8QEEoECCIQI0oECCgQKUoECCQQJUoECCUQJlIJYXBpX2Vycm9yUhBjb21wYWN0X2JvdW5kYXJ5UhVjb21wYWN0X2JvdW5kYXJ5X2xpbmVSEWFzc2lzdGFudF9tZXNzYWdlUgh0b29sX3VzZVILdG9vbF9yZXN1bHRSD3Rvb2xfdXNlX3Jlc3VsdFIGcmVzdWx0Ugpza2lsbF9ib2R5Ugt1c2FnZV9zdGFtcFIRdG9rZW5fdXRpbGl6YXRpb25SD3R1cm5fYWNjb3VudGluZ1IMYXN5bmNfYnViYmxlUg9zZXNzaW9uX2NvbW1hbmQiyAEKEURldGFjaGVkV29ya0RlbHRhEhEKCXdvcmtzcGFjZRgBIAEoCRIuCgZvcGVuZWQYAyADKAsyHi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVzc2FnZRI6Cgd1cGRhdGVzGAQgAygLMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLkRldGFjaGVkV29ya1VwZGF0ZRITCgt0aHJvdWdoX3NlcRgFIAEoBBINCgVmZW5jZRgGIAEoCUoECAIQA1IKc2Vzc2lvbl9pZCJhChVDb21wYWN0aW9uU3VtbWFyeUl0ZW0SDwoHc3VtbWFyeRgBIAEoCRIXCg9jb21wYWN0ZWRfYXRfbXMYAiABKAMSHgoWZXhwZW5zaXZlX2lucHV0X3Rva2VucxgDIAEoAyKXAQoLVHlwaW5nRGVsdGESEQoJd29ya3NwYWNlGAEgASgJEi4KBWRlbHRhGAMgASgLMh8uYWdlbnRzaGltLmNvcmUudjEuQ29udGVudERlbHRhEg0KBWZlbmNlGAQgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAUgASgJSgQIAhADUgpzZXNzaW9uX2lkUglidWJibGVfaWQiUwoJVHlwaW5nQ3V0EhEKCXdvcmtzcGFjZRgBIAEoCRIZChFwYXJlbnRfbWVzc2FnZV9pZBgCIAEoCRINCgVmZW5jZRgDIAEoCVIJYnViYmxlX2lkIoYBCg9TZXNzaW9uSW5pdFZpZXcSEQoJd29ya3NwYWNlGAEgASgJEjMKBHJvd3MYBSADKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvbkluaXRSb3cSDQoFZmVuY2UYBCABKAlKBAgCEANKBAgDEARSCnNlc3Npb25faWRSBGluaXQiLgoOU2Vzc2lvbkluaXRSb3cSDQoFbGFiZWwYASABKAkSDQoFdmFsdWUYAiABKAkqdgoSQ29udmVyc2F0aW9uU291cmNlEiMKH0NPTlZFUlNBVElPTl9TT1VSQ0VfVU5TUEVDSUZJRUQQABIcChhDT05WRVJTQVRJT05fU09VUkNFX1VTRVIQARIdChlDT05WRVJTQVRJT05fU09VUkNFX01FUkdFEAJCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_agentshim_core_v1_core, file_agentshim_conversation_v1_content, file_agentshim_frontend_v1_agent_emission, file_agentshim_frontend_v1_detached_work, file_agentshim_frontend_v1_failure_card, file_agentshim_frontend_v1_slash_menu]);
 
 /**
  * Complete (store-round-tripped) conversation additions, composed from the
@@ -338,9 +336,9 @@ export type Message = Message$1<"agentshim.frontend.v1.Message"> & {
     /**
      * The user's own prompt.
      *
-     * @generated from field: agentshim.data.v1.ApiUserMessage user_message = 11;
+     * @generated from field: agentshim.conversation.v1.UserContent user_message = 11;
      */
-    value: ApiUserMessage;
+    value: UserContent;
     case: "userMessage";
   } | {
     /**
@@ -649,9 +647,20 @@ export const TypingCutSchema: GenMessage<TypingCut> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_feed, 8);
 
 /**
- * The session's retained SystemInit (slash commands, tools, skills, model
- * list), pushed on attach and included in StateSnapshot (S9). Replaces the
- * Emacs GET /commands HTTP menu source.
+ * The /status panel, RESOLVED: the rows it draws, already labelled and already
+ * stringified.
+ *
+ * IT USED TO CARRY THE VENDOR'S INIT RECORD WHOLE, as a lenient JSON object the
+ * panel read field by field, and every value the user actually saw was computed
+ * client-side: the auth word from an enum name, the fast-mode word from a state
+ * string, plugin labels from name+version pairs, three of the rows from
+ * `.length` of an array, and the memory row from joining a map's values. That
+ * is five derivations in the renderer, which is five places the panel's answer
+ * can disagree with the daemon's.
+ *
+ * The daemon resolves them now. `SessionBegan` (conversation.v1) carries the
+ * neutral facts the producer observed; the daemon turns those into rows; the
+ * panel prints them.
  *
  * @generated from message agentshim.frontend.v1.SessionInitView
  */
@@ -662,9 +671,17 @@ export type SessionInitView = Message$1<"agentshim.frontend.v1.SessionInitView">
   workspace: string;
 
   /**
-   * @generated from field: agentshim.data.v1.SystemInit init = 3;
+   * The panel's rows, in render order. EMPTY means no init has landed yet,
+   * which the panel draws as the rows it owns and nothing more — absence
+   * rendering absence, rather than a spinner standing in for a fact.
+   *
+   * The panel splices its own rows (account, model, permission mode) ahead of
+   * these, because those come from sources that move independently of an init
+   * and are already resolved elsewhere.
+   *
+   * @generated from field: repeated agentshim.frontend.v1.SessionInitRow rows = 5;
    */
-  init?: SystemInit | undefined;
+  rows: SessionInitRow[];
 
   /**
    * The workspace's staleness FENCE at the moment the daemon produced this
@@ -688,6 +705,40 @@ export type SessionInitView = Message$1<"agentshim.frontend.v1.SessionInitView">
  */
 export const SessionInitViewSchema: GenMessage<SessionInitView> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_feed, 9);
+
+/**
+ * One row of the /status panel: a label and the value beside it.
+ *
+ * A STRING VALUE ON PURPOSE. Every row the panel draws is a word or a phrase —
+ * a count, a joined list, a version, a resolved auth word — so typing the value
+ * as anything richer would only invite a renderer to reformat it, which is the
+ * derivation this message exists to remove. The daemon decided what it says.
+ *
+ * @generated from message agentshim.frontend.v1.SessionInitRow
+ */
+export type SessionInitRow = Message$1<"agentshim.frontend.v1.SessionInitRow"> & {
+  /**
+   * The row's label, as shown: "Version", "Working directory", "Auth".
+   *
+   * @generated from field: string label = 1;
+   */
+  label: string;
+
+  /**
+   * The value, as shown. Never empty — the daemon OMITS a row it has no value
+   * for rather than pushing a blank one, so absence renders as absence.
+   *
+   * @generated from field: string value = 2;
+   */
+  value: string;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.SessionInitRow.
+ * Use `create(SessionInitRowSchema)` to create a new message.
+ */
+export const SessionInitRowSchema: GenMessage<SessionInitRow> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_feed, 10);
 
 /**
  * WHO drove the turn that produced a message.

@@ -5,76 +5,17 @@
 // @generated from file agentshim/frontend/v1/slash-menu.proto (package agentshim.frontend.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenEnum, GenExtension, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, extDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { EnumValueOptions } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_descriptor } from "@bufbuild/protobuf/wkt";
+import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { SessionCommand } from "../../conversation/v1/commands_pb";
+import { file_agentshim_conversation_v1_commands } from "../../conversation/v1/commands_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentshim/frontend/v1/slash-menu.proto.
  */
 export const file_agentshim_frontend_v1_slash_menu: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHNoaW0vZnJvbnRlbmQvdjEvc2xhc2gtbWVudS5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIjkKElNlc3Npb25Db21tYW5kU3BlYxIPCgdsaXRlcmFsGAEgASgJEhIKCnRha2VzX2FyZ3MYAiABKAgiVgocRGFlbW9uSW50ZXJjZXB0ZWRDb21tYW5kSXRlbRI2Cgdjb21tYW5kGAEgASgOMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLlNlc3Npb25Db21tYW5kIjsKDVNraWxsQm9keUl0ZW0SEwoLdG9vbF91c2VfaWQYASABKAkSFQoNYm9keV9tYXJrZG93bhgCIAEoCSrzCgoOU2Vzc2lvbkNvbW1hbmQSHwobU0VTU0lPTl9DT01NQU5EX1VOU1BFQ0lGSUVEEAASJwoVU0VTU0lPTl9DT01NQU5EX0NMRUFSEAEaDJKmHQgKBi9jbGVhchItChdTRVNTSU9OX0NPTU1BTkRfQ09NUEFDVBACGhCSph0MCggvY29tcGFjdBABEikKFVNFU1NJT05fQ09NTUFORF9NT0RFTBADGg6Sph0KCgYvbW9kZWwQARIlChRTRVNTSU9OX0NPTU1BTkRfQ09TVBAEGguSph0HCgUvY29zdBInChVTRVNTSU9OX0NPTU1BTkRfVVNBR0UQBRoMkqYdCAoGL3VzYWdlEikKFlNFU1NJT05fQ09NTUFORF9TVEFUVVMQBhoNkqYdCQoHL3N0YXR1cxIrChdTRVNTSU9OX0NPTU1BTkRfQ09OVEVYVBAHGg6Sph0KCggvY29udGV4dBIpChZTRVNTSU9OX0NPTU1BTkRfQ09ORklHEAgaDZKmHQkKBy9jb25maWcSJQoUU0VTU0lPTl9DT01NQU5EX0hFTFAQCRoLkqYdBwoFL2hlbHASKQoWU0VTU0lPTl9DT01NQU5EX0RPQ1RPUhAKGg2Sph0JCgcvZG9jdG9yEicKFVNFU1NJT05fQ09NTUFORF9MT0dJThALGgySph0ICgYvbG9naW4SKQoWU0VTU0lPTl9DT01NQU5EX0xPR09VVBAMGg2Sph0JCgcvbG9nb3V0EikKFlNFU1NJT05fQ09NTUFORF9NRU1PUlkQDRoNkqYdCQoHL21lbW9yeRIzChtTRVNTSU9OX0NPTU1BTkRfUEVSTUlTU0lPTlMQDhoSkqYdDgoML3Blcm1pc3Npb25zEikKFlNFU1NJT05fQ09NTUFORF9BR0VOVFMQDxoNkqYdCQoHL2FnZW50cxIjChNTRVNTSU9OX0NPTU1BTkRfTUNQEBAaCpKmHQYKBC9tY3ASJwoVU0VTU0lPTl9DT01NQU5EX0hPT0tTEBEaDJKmHQgKBi9ob29rcxI3ChxTRVNTSU9OX0NPTU1BTkRfT1VUUFVUX1NUWUxFEBIaFZKmHREKDS9vdXRwdXQtc3R5bGUQARI3Ch1TRVNTSU9OX0NPTU1BTkRfUkVMRUFTRV9OT1RFUxATGhSSph0QCg4vcmVsZWFzZS1ub3RlcxInChVTRVNTSU9OX0NPTU1BTkRfVE9ET1MQFBoMkqYdCAoGL3RvZG9zEisKFlNFU1NJT05fQ09NTUFORF9FWFBPUlQQFRoPkqYdCwoHL2V4cG9ydBABEi0KF1NFU1NJT05fQ09NTUFORF9BRERfRElSEBYaEJKmHQwKCC9hZGQtZGlyEAESKwoWU0VTU0lPTl9DT01NQU5EX1JFU1VNRRAXGg+Sph0LCgcvcmVzdW1lEAESJQoUU0VTU0lPTl9DT01NQU5EX0VYSVQQGBoLkqYdBwoFL2V4aXQSPQogU0VTU0lPTl9DT01NQU5EX1BSSVZBQ1lfU0VUVElOR1MQGRoXkqYdEwoRL3ByaXZhY3ktc2V0dGluZ3MSMQoaU0VTU0lPTl9DT01NQU5EX1NUQVRVU0xJTkUQGhoRkqYdDQoLL3N0YXR1c2xpbmUSOQoeU0VTU0lPTl9DT01NQU5EX1RFUk1JTkFMX1NFVFVQEBsaFZKmHREKDy90ZXJtaW5hbC1zZXR1cBIjChNTRVNTSU9OX0NPTU1BTkRfVklNEBwaCpKmHQYKBC92aW0SKQoWU0VTU0lPTl9DT01NQU5EX1JFV0lORBAdGg2Sph0JCgcvcmV3aW5kEiMKE1NFU1NJT05fQ09NTUFORF9CVUcQHhoKkqYdBgoEL2J1ZzqAAQoUc2Vzc2lvbl9jb21tYW5kX3NwZWMSIS5nb29nbGUucHJvdG9idWYuRW51bVZhbHVlT3B0aW9ucxji1AMgASgLMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLlNlc3Npb25Db21tYW5kU3BlY1ISc2Vzc2lvbkNvbW1hbmRTcGVjQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_google_protobuf_descriptor]);
-
-/**
- * A slash command the CLI answers ITSELF, rather than a prompt for the agent.
- *
- * THE CLOSED SET IS THE POINT. The daemon recognizes a submitted prompt as one
- * of these before it forwards it (sessioncontroller/sessioncommand.go), and a
- * recognized command earns NO user message — so the set of things that can
- * suppress one is exactly the set of names below, fixed on the wire and
- * reviewable in one place. A command that is not here is a prompt, and a
- * prompt is always drawn.
- *
- * A custom command (a skill, a project command) is deliberately absent and
- * always will be: those EXPAND into a prompt for the agent, so the text the
- * user typed really is the turn's opening and really does belong in the feed.
- * Everything about a session command that is a FACT rather than an event: how
- * it is spelled, and whether text after the name belongs to it.
- *
- * Carried as an enum-value OPTION below rather than as traffic, because no
- * frame carries these facts and every process needs the same answer to them —
- * the daemon to recognize a submitted prompt, the webapp to complete and to
- * label one. The three hand-written copies this replaces (the daemon's
- * recognition table, the webapp's SESSION_COMMANDS list, the webapp's
- * SESSION_COMMAND_LABELS table) had nothing comparing them, so they drifted:
- * each was correct on its own and none of them agreed.
- *
- * @generated from message agentshim.frontend.v1.SessionCommandSpec
- */
-export type SessionCommandSpec = Message<"agentshim.frontend.v1.SessionCommandSpec"> & {
-  /**
-   * The command as the user TYPES it, leading slash included — and also the
-   * form a reader is shown. One field for both so a corrected spelling cannot
-   * land in the recognizer while the webapp chip keeps rendering the old one.
-   *
-   * @generated from field: string literal = 1;
-   */
-  literal: string;
-
-  /**
-   * Whether text following the name is an ARGUMENT to this command rather
-   * than prose the user wrote.
-   *
-   * FALSE IS THE DEFAULT AND FALSE IS THE SAFE SIDE. A command that takes no
-   * argument is recognized only as an ENTIRE prompt, so "/status of the build"
-   * stays a prompt and keeps its user message. Marking a command that takes
-   * none as taking some is the one way this table can swallow something a user
-   * genuinely meant to say to the agent — an unrecoverable loss, since a
-   * suppressed prompt is never recovered later.
-   *
-   * @generated from field: bool takes_args = 2;
-   */
-  takesArgs: boolean;
-};
-
-/**
- * Describes the message agentshim.frontend.v1.SessionCommandSpec.
- * Use `create(SessionCommandSpecSchema)` to create a new message.
- */
-export const SessionCommandSpecSchema: GenMessage<SessionCommandSpec> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_slash_menu, 0);
+  fileDesc("CiZhZ2VudHNoaW0vZnJvbnRlbmQvdjEvc2xhc2gtbWVudS5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIloKHERhZW1vbkludGVyY2VwdGVkQ29tbWFuZEl0ZW0SOgoHY29tbWFuZBgBIAEoDjIpLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbW1hbmQiOwoNU2tpbGxCb2R5SXRlbRITCgt0b29sX3VzZV9pZBgBIAEoCRIVCg1ib2R5X21hcmtkb3duGAIgASgJQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_agentshim_conversation_v1_commands]);
 
 /**
  * Additive: ONE session command the user invoked, as the feed's record that
@@ -124,7 +65,7 @@ export type DaemonInterceptedCommandItem = Message<"agentshim.frontend.v1.Daemon
   /**
    * The recognized command. Never UNSPECIFIED.
    *
-   * @generated from field: agentshim.frontend.v1.SessionCommand command = 1;
+   * @generated from field: agentshim.conversation.v1.SessionCommand command = 1;
    */
   command: SessionCommand;
 };
@@ -134,7 +75,7 @@ export type DaemonInterceptedCommandItem = Message<"agentshim.frontend.v1.Daemon
  * Use `create(DaemonInterceptedCommandItemSchema)` to create a new message.
  */
 export const DaemonInterceptedCommandItemSchema: GenMessage<DaemonInterceptedCommandItem> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_slash_menu, 1);
+  messageDesc(file_agentshim_frontend_v1_slash_menu, 0);
 
 /**
  * Additive: the launched skill's own SKILL.md body, addressed to the Skill
@@ -191,183 +132,5 @@ export type SkillBodyItem = Message<"agentshim.frontend.v1.SkillBodyItem"> & {
  * Use `create(SkillBodyItemSchema)` to create a new message.
  */
 export const SkillBodyItemSchema: GenMessage<SkillBodyItem> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_slash_menu, 2);
-
-/**
- * @generated from enum agentshim.frontend.v1.SessionCommand
- */
-export enum SessionCommand {
-  /**
-   * Never set by the daemon. A receiver seeing UNSPECIFIED is looking at a
-   * malformed frame and must reject it loudly rather than pick a command.
-   *
-   * It carries NO spec, deliberately: it names no command, so there is no
-   * literal to spell and nothing a recognizer could ever match it against.
-   *
-   * @generated from enum value: SESSION_COMMAND_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_CLEAR = 1;
-   */
-  CLEAR = 1,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_COMPACT = 2;
-   */
-  COMPACT = 2,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_MODEL = 3;
-   */
-  MODEL = 3,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_COST = 4;
-   */
-  COST = 4,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_USAGE = 5;
-   */
-  USAGE = 5,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_STATUS = 6;
-   */
-  STATUS = 6,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_CONTEXT = 7;
-   */
-  CONTEXT = 7,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_CONFIG = 8;
-   */
-  CONFIG = 8,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_HELP = 9;
-   */
-  HELP = 9,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_DOCTOR = 10;
-   */
-  DOCTOR = 10,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_LOGIN = 11;
-   */
-  LOGIN = 11,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_LOGOUT = 12;
-   */
-  LOGOUT = 12,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_MEMORY = 13;
-   */
-  MEMORY = 13,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_PERMISSIONS = 14;
-   */
-  PERMISSIONS = 14,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_AGENTS = 15;
-   */
-  AGENTS = 15,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_MCP = 16;
-   */
-  MCP = 16,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_HOOKS = 17;
-   */
-  HOOKS = 17,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_OUTPUT_STYLE = 18;
-   */
-  OUTPUT_STYLE = 18,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_RELEASE_NOTES = 19;
-   */
-  RELEASE_NOTES = 19,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_TODOS = 20;
-   */
-  TODOS = 20,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_EXPORT = 21;
-   */
-  EXPORT = 21,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_ADD_DIR = 22;
-   */
-  ADD_DIR = 22,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_RESUME = 23;
-   */
-  RESUME = 23,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_EXIT = 24;
-   */
-  EXIT = 24,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_PRIVACY_SETTINGS = 25;
-   */
-  PRIVACY_SETTINGS = 25,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_STATUSLINE = 26;
-   */
-  STATUSLINE = 26,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_TERMINAL_SETUP = 27;
-   */
-  TERMINAL_SETUP = 27,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_VIM = 28;
-   */
-  VIM = 28,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_REWIND = 29;
-   */
-  REWIND = 29,
-
-  /**
-   * @generated from enum value: SESSION_COMMAND_BUG = 30;
-   */
-  BUG = 30,
-}
-
-/**
- * Describes the enum agentshim.frontend.v1.SessionCommand.
- */
-export const SessionCommandSchema: GenEnum<SessionCommand> = /*@__PURE__*/
-  enumDesc(file_agentshim_frontend_v1_slash_menu, 0);
-
-/**
- * @generated from extension: agentshim.frontend.v1.SessionCommandSpec session_command_spec = 60002;
- */
-export const session_command_spec: GenExtension<EnumValueOptions, SessionCommandSpec> = /*@__PURE__*/
-  extDesc(file_agentshim_frontend_v1_slash_menu, 0);
+  messageDesc(file_agentshim_frontend_v1_slash_menu, 1);
 

@@ -14,7 +14,7 @@
 package frontendv1
 
 import (
-	v1 "agentrepl/proto/agentshim/data/v1"
+	v1 "agentrepl/proto/agentshim/conversation/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -33,7 +33,7 @@ const (
 type AgentToolCall struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The call the agent made, verbatim durable evidence.
-	Call *v1.ToolUseBlock `protobuf:"bytes,1,opt,name=call,proto3" json:"call,omitempty"`
+	Call *v1.ToolCallBlock `protobuf:"bytes,1,opt,name=call,proto3" json:"call,omitempty"`
 	// THE DETACHMENT VERDICT. Non-empty exactly when this call detached work, and
 	// then equal to the uuid of the Message that work IS (payload arm
 	// `detached_work`).
@@ -93,7 +93,7 @@ func (*AgentToolCall) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_tool_call_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *AgentToolCall) GetCall() *v1.ToolUseBlock {
+func (x *AgentToolCall) GetCall() *v1.ToolCallBlock {
 	if x != nil {
 		return x.Call
 	}
@@ -112,7 +112,7 @@ type AgentToolResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The result block, verbatim durable evidence. Carries its own
 	// tool_use_id, which is the card's reconciliation identity.
-	Result        *v1.ToolResultBlock `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Result        *v1.ToolResultContent `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -147,21 +147,33 @@ func (*AgentToolResult) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_tool_call_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *AgentToolResult) GetResult() *v1.ToolResultBlock {
+func (x *AgentToolResult) GetResult() *v1.ToolResultContent {
 	if x != nil {
 		return x.Result
 	}
 	return nil
 }
 
-// A tool's TYPED outcome, and the subagent/task chip:
-// agentshim.data.v1.ToolUseResult's oneof carries AgentAsyncLaunch,
-// AgentResult, TaskOutputResult, TaskStopResult and WorkflowLaunchResult, so
-// the chip's facts are the outcome's facts.
+// A tool's TYPED outcome, and the subagent/task chip.
+//
+// It used to carry `data.v1.ToolUseResult`, whose oneof held AgentAsyncLaunch,
+// AgentResult, TaskOutputResult, TaskStopResult and WorkflowLaunchResult —
+// five vendor-named shapes for two facts: work detached, and work reached an
+// end. conversation.v1 models those directly, so the chip's facts are now the
+// detachment's own facts rather than a vendor union the frontend destructures.
 type AgentToolOutcome struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The typed outcome, verbatim durable evidence.
-	Structured *v1.ToolUseResult `protobuf:"bytes,1,opt,name=structured,proto3" json:"structured,omitempty"`
+	// The outcome, in the neutral detached-work vocabulary.
+	//
+	// A oneof rather than one field, because a launch and an ending are
+	// different facts and a chip renders them differently. Absent when the call
+	// returned ordinarily and detached nothing.
+	//
+	// Types that are valid to be assigned to Outcome:
+	//
+	//	*AgentToolOutcome_Started
+	//	*AgentToolOutcome_Ended
+	Outcome isAgentToolOutcome_Outcome `protobuf_oneof:"outcome"`
 	// The tool_use id this outcome belongs to. Carried explicitly because
 	// ToolUseResult has no correlation id of its own: on disk it is associated
 	// with its tool_result line POSITIONALLY, and a positional association does
@@ -208,9 +220,27 @@ func (*AgentToolOutcome) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_tool_call_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *AgentToolOutcome) GetStructured() *v1.ToolUseResult {
+func (x *AgentToolOutcome) GetOutcome() isAgentToolOutcome_Outcome {
 	if x != nil {
-		return x.Structured
+		return x.Outcome
+	}
+	return nil
+}
+
+func (x *AgentToolOutcome) GetStarted() *v1.DetachedWorkStarted {
+	if x != nil {
+		if x, ok := x.Outcome.(*AgentToolOutcome_Started); ok {
+			return x.Started
+		}
+	}
+	return nil
+}
+
+func (x *AgentToolOutcome) GetEnded() *v1.DetachedWorkEnded {
+	if x != nil {
+		if x, ok := x.Outcome.(*AgentToolOutcome_Ended); ok {
+			return x.Ended
+		}
 	}
 	return nil
 }
@@ -228,6 +258,24 @@ func (x *AgentToolOutcome) GetSpawnedMessageId() string {
 	}
 	return ""
 }
+
+type isAgentToolOutcome_Outcome interface {
+	isAgentToolOutcome_Outcome()
+}
+
+type AgentToolOutcome_Started struct {
+	// Work detached and is now running alongside the turn.
+	Started *v1.DetachedWorkStarted `protobuf:"bytes,1,opt,name=started,proto3,oneof"`
+}
+
+type AgentToolOutcome_Ended struct {
+	// Detached work reached an end, with the outcome it reached.
+	Ended *v1.DetachedWorkEnded `protobuf:"bytes,4,opt,name=ended,proto3,oneof"`
+}
+
+func (*AgentToolOutcome_Started) isAgentToolOutcome_Outcome() {}
+
+func (*AgentToolOutcome_Ended) isAgentToolOutcome_Outcome() {}
 
 // One dispatched background task, as the catalog reports it.
 type TaskEntry struct {
@@ -958,18 +1006,18 @@ var File_agentshim_frontend_v1_tool_call_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_tool_call_proto_rawDesc = "" +
 	"\n" +
-	"%agentshim/frontend/v1/tool-call.proto\x12\x15agentshim.frontend.v1\x1a\x1dagentshim/data/v1/tools.proto\"\x85\x01\n" +
-	"\rAgentToolCall\x123\n" +
-	"\x04call\x18\x01 \x01(\v2\x1f.agentshim.data.v1.ToolUseBlockR\x04call\x12,\n" +
-	"\x12spawned_message_id\x18\x02 \x01(\tR\x10spawnedMessageIdR\x11spawned_bubble_id\"M\n" +
-	"\x0fAgentToolResult\x12:\n" +
-	"\x06result\x18\x01 \x01(\v2\".agentshim.data.v1.ToolResultBlockR\x06result\"\xb5\x01\n" +
-	"\x10AgentToolOutcome\x12@\n" +
-	"\n" +
-	"structured\x18\x01 \x01(\v2 .agentshim.data.v1.ToolUseResultR\n" +
-	"structured\x12\x1e\n" +
+	"%agentshim/frontend/v1/tool-call.proto\x12\x15agentshim.frontend.v1\x1a'agentshim/conversation/v1/content.proto\x1a(agentshim/conversation/v1/payloads.proto\"\x8e\x01\n" +
+	"\rAgentToolCall\x12<\n" +
+	"\x04call\x18\x01 \x01(\v2(.agentshim.conversation.v1.ToolCallBlockR\x04call\x12,\n" +
+	"\x12spawned_message_id\x18\x02 \x01(\tR\x10spawnedMessageIdR\x11spawned_bubble_id\"W\n" +
+	"\x0fAgentToolResult\x12D\n" +
+	"\x06result\x18\x01 \x01(\v2,.agentshim.conversation.v1.ToolResultContentR\x06result\"\x90\x02\n" +
+	"\x10AgentToolOutcome\x12J\n" +
+	"\astarted\x18\x01 \x01(\v2..agentshim.conversation.v1.DetachedWorkStartedH\x00R\astarted\x12D\n" +
+	"\x05ended\x18\x04 \x01(\v2,.agentshim.conversation.v1.DetachedWorkEndedH\x00R\x05ended\x12\x1e\n" +
 	"\vtool_use_id\x18\x02 \x01(\tR\ttoolUseId\x12,\n" +
-	"\x12spawned_message_id\x18\x03 \x01(\tR\x10spawnedMessageIdR\x11spawned_bubble_id\"\xf6\x06\n" +
+	"\x12spawned_message_id\x18\x03 \x01(\tR\x10spawnedMessageIdB\t\n" +
+	"\aoutcomeR\x11spawned_bubble_id\"\xf6\x06\n" +
 	"\tTaskEntry\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12\x1f\n" +
@@ -1021,51 +1069,57 @@ func file_agentshim_frontend_v1_tool_call_proto_rawDescGZIP() []byte {
 
 var file_agentshim_frontend_v1_tool_call_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentshim_frontend_v1_tool_call_proto_goTypes = []any{
-	(*AgentToolCall)(nil),        // 0: agentshim.frontend.v1.AgentToolCall
-	(*AgentToolResult)(nil),      // 1: agentshim.frontend.v1.AgentToolResult
-	(*AgentToolOutcome)(nil),     // 2: agentshim.frontend.v1.AgentToolOutcome
-	(*TaskEntry)(nil),            // 3: agentshim.frontend.v1.TaskEntry
-	(*TaskKindAgent)(nil),        // 4: agentshim.frontend.v1.TaskKindAgent
-	(*TaskKindWorkflow)(nil),     // 5: agentshim.frontend.v1.TaskKindWorkflow
-	(*TaskKindShell)(nil),        // 6: agentshim.frontend.v1.TaskKindShell
-	(*TaskKindUnclassified)(nil), // 7: agentshim.frontend.v1.TaskKindUnclassified
-	(*TaskStatusRunning)(nil),    // 8: agentshim.frontend.v1.TaskStatusRunning
-	(*TaskStatusDone)(nil),       // 9: agentshim.frontend.v1.TaskStatusDone
-	(*TaskStatusError)(nil),      // 10: agentshim.frontend.v1.TaskStatusError
-	(*TaskStatusKilled)(nil),     // 11: agentshim.frontend.v1.TaskStatusKilled
-	(*TaskStatusStopped)(nil),    // 12: agentshim.frontend.v1.TaskStatusStopped
-	(*TaskStatusLost)(nil),       // 13: agentshim.frontend.v1.TaskStatusLost
-	(*TaskCatalog)(nil),          // 14: agentshim.frontend.v1.TaskCatalog
-	(*v1.ToolUseBlock)(nil),      // 15: agentshim.data.v1.ToolUseBlock
-	(*v1.ToolResultBlock)(nil),   // 16: agentshim.data.v1.ToolResultBlock
-	(*v1.ToolUseResult)(nil),     // 17: agentshim.data.v1.ToolUseResult
+	(*AgentToolCall)(nil),          // 0: agentshim.frontend.v1.AgentToolCall
+	(*AgentToolResult)(nil),        // 1: agentshim.frontend.v1.AgentToolResult
+	(*AgentToolOutcome)(nil),       // 2: agentshim.frontend.v1.AgentToolOutcome
+	(*TaskEntry)(nil),              // 3: agentshim.frontend.v1.TaskEntry
+	(*TaskKindAgent)(nil),          // 4: agentshim.frontend.v1.TaskKindAgent
+	(*TaskKindWorkflow)(nil),       // 5: agentshim.frontend.v1.TaskKindWorkflow
+	(*TaskKindShell)(nil),          // 6: agentshim.frontend.v1.TaskKindShell
+	(*TaskKindUnclassified)(nil),   // 7: agentshim.frontend.v1.TaskKindUnclassified
+	(*TaskStatusRunning)(nil),      // 8: agentshim.frontend.v1.TaskStatusRunning
+	(*TaskStatusDone)(nil),         // 9: agentshim.frontend.v1.TaskStatusDone
+	(*TaskStatusError)(nil),        // 10: agentshim.frontend.v1.TaskStatusError
+	(*TaskStatusKilled)(nil),       // 11: agentshim.frontend.v1.TaskStatusKilled
+	(*TaskStatusStopped)(nil),      // 12: agentshim.frontend.v1.TaskStatusStopped
+	(*TaskStatusLost)(nil),         // 13: agentshim.frontend.v1.TaskStatusLost
+	(*TaskCatalog)(nil),            // 14: agentshim.frontend.v1.TaskCatalog
+	(*v1.ToolCallBlock)(nil),       // 15: agentshim.conversation.v1.ToolCallBlock
+	(*v1.ToolResultContent)(nil),   // 16: agentshim.conversation.v1.ToolResultContent
+	(*v1.DetachedWorkStarted)(nil), // 17: agentshim.conversation.v1.DetachedWorkStarted
+	(*v1.DetachedWorkEnded)(nil),   // 18: agentshim.conversation.v1.DetachedWorkEnded
 }
 var file_agentshim_frontend_v1_tool_call_proto_depIdxs = []int32{
-	15, // 0: agentshim.frontend.v1.AgentToolCall.call:type_name -> agentshim.data.v1.ToolUseBlock
-	16, // 1: agentshim.frontend.v1.AgentToolResult.result:type_name -> agentshim.data.v1.ToolResultBlock
-	17, // 2: agentshim.frontend.v1.AgentToolOutcome.structured:type_name -> agentshim.data.v1.ToolUseResult
-	4,  // 3: agentshim.frontend.v1.TaskEntry.agent:type_name -> agentshim.frontend.v1.TaskKindAgent
-	5,  // 4: agentshim.frontend.v1.TaskEntry.workflow:type_name -> agentshim.frontend.v1.TaskKindWorkflow
-	6,  // 5: agentshim.frontend.v1.TaskEntry.shell:type_name -> agentshim.frontend.v1.TaskKindShell
-	7,  // 6: agentshim.frontend.v1.TaskEntry.unclassified:type_name -> agentshim.frontend.v1.TaskKindUnclassified
-	8,  // 7: agentshim.frontend.v1.TaskEntry.running:type_name -> agentshim.frontend.v1.TaskStatusRunning
-	9,  // 8: agentshim.frontend.v1.TaskEntry.done:type_name -> agentshim.frontend.v1.TaskStatusDone
-	10, // 9: agentshim.frontend.v1.TaskEntry.error:type_name -> agentshim.frontend.v1.TaskStatusError
-	11, // 10: agentshim.frontend.v1.TaskEntry.killed:type_name -> agentshim.frontend.v1.TaskStatusKilled
-	12, // 11: agentshim.frontend.v1.TaskEntry.stopped:type_name -> agentshim.frontend.v1.TaskStatusStopped
-	13, // 12: agentshim.frontend.v1.TaskEntry.lost:type_name -> agentshim.frontend.v1.TaskStatusLost
-	3,  // 13: agentshim.frontend.v1.TaskCatalog.tasks:type_name -> agentshim.frontend.v1.TaskEntry
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	15, // 0: agentshim.frontend.v1.AgentToolCall.call:type_name -> agentshim.conversation.v1.ToolCallBlock
+	16, // 1: agentshim.frontend.v1.AgentToolResult.result:type_name -> agentshim.conversation.v1.ToolResultContent
+	17, // 2: agentshim.frontend.v1.AgentToolOutcome.started:type_name -> agentshim.conversation.v1.DetachedWorkStarted
+	18, // 3: agentshim.frontend.v1.AgentToolOutcome.ended:type_name -> agentshim.conversation.v1.DetachedWorkEnded
+	4,  // 4: agentshim.frontend.v1.TaskEntry.agent:type_name -> agentshim.frontend.v1.TaskKindAgent
+	5,  // 5: agentshim.frontend.v1.TaskEntry.workflow:type_name -> agentshim.frontend.v1.TaskKindWorkflow
+	6,  // 6: agentshim.frontend.v1.TaskEntry.shell:type_name -> agentshim.frontend.v1.TaskKindShell
+	7,  // 7: agentshim.frontend.v1.TaskEntry.unclassified:type_name -> agentshim.frontend.v1.TaskKindUnclassified
+	8,  // 8: agentshim.frontend.v1.TaskEntry.running:type_name -> agentshim.frontend.v1.TaskStatusRunning
+	9,  // 9: agentshim.frontend.v1.TaskEntry.done:type_name -> agentshim.frontend.v1.TaskStatusDone
+	10, // 10: agentshim.frontend.v1.TaskEntry.error:type_name -> agentshim.frontend.v1.TaskStatusError
+	11, // 11: agentshim.frontend.v1.TaskEntry.killed:type_name -> agentshim.frontend.v1.TaskStatusKilled
+	12, // 12: agentshim.frontend.v1.TaskEntry.stopped:type_name -> agentshim.frontend.v1.TaskStatusStopped
+	13, // 13: agentshim.frontend.v1.TaskEntry.lost:type_name -> agentshim.frontend.v1.TaskStatusLost
+	3,  // 14: agentshim.frontend.v1.TaskCatalog.tasks:type_name -> agentshim.frontend.v1.TaskEntry
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_tool_call_proto_init() }
 func file_agentshim_frontend_v1_tool_call_proto_init() {
 	if File_agentshim_frontend_v1_tool_call_proto != nil {
 		return
+	}
+	file_agentshim_frontend_v1_tool_call_proto_msgTypes[2].OneofWrappers = []any{
+		(*AgentToolOutcome_Started)(nil),
+		(*AgentToolOutcome_Ended)(nil),
 	}
 	file_agentshim_frontend_v1_tool_call_proto_msgTypes[3].OneofWrappers = []any{
 		(*TaskEntry_Agent)(nil),
