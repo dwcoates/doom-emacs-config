@@ -377,10 +377,12 @@ message UnsupportedBlock {
 
 ```proto
 message UserSaid {
+  //FIXME: should this just be a TextBlock? 
   Content content = 1;
 }
 
 message AgentSaid {
+  // FIXME: same here, should this be more specific message? 
   Content content = 1;
   // What this response cost, as the vendor reported it. Carried because it is
   // evidence about THIS message; the footer's aggregate figures are resolved by
@@ -391,6 +393,7 @@ message AgentSaid {
   StopReason stop_reason = 3;
 }
 
+// FIXME: dont we have a TokenUsage message that should be reused here? or at least used to compose this message? 
 message ResponseUsage {
   int64 input_tokens = 1;
   int64 output_tokens = 2;
