@@ -81,6 +81,12 @@ type MessagePageSource interface {
 	MessagePage(ctx context.Context, workspace, sessionID string, anchor storehistory.PageAnchor) (*corev1.MessagePage, error)
 }
 
+// messagePageFetch reads ONE bounded page for an anchor. It is the only thing
+// the two routes differ by: the unwired one dials the store, the live one asks
+// the shim, and everything downstream — the anchor, the curation, the boundary
+// ruling and the position copied verbatim — is the code below, once.
+type messagePageFetch func(ctx context.Context, anchor storehistory.PageAnchor) (*corev1.MessagePage, error)
+
 // pageFromStorePage serves one history page from the store's bounded page read.
 func (m *Manager) pageFromStorePage(ctx context.Context, workspace, generationID string, resolve pageBoundResolver, first bool) (pageOutcome, error) {
 	if m.cfg.MessagePages == nil {
@@ -90,7 +96,20 @@ func (m *Manager) pageFromStorePage(ctx context.Context, workspace, generationID
 	if !ok {
 		return pageOutcome{}, fmt.Errorf("session-controller: conversation history page for unwired ws %q cannot be served: %w", workspace, errclass.ErrNoLiveSessionController)
 	}
-	logf := dlog.Tag(dlog.Logf(m.logf), "ws", workspace, "session", sessionID, "source", "store-page")
+	fetch := func(ctx context.Context, anchor storehistory.PageAnchor) (*corev1.MessagePage, error) {
+		return m.cfg.MessagePages.MessagePage(ctx, workspace, sessionID, anchor)
+	}
+	return m.pageFromMessagePage(ctx, workspace, sessionID, generationID, "store-page", m.cfg.SeqStore.LastSeq(sessionID), fetch, resolve, first)
+}
+
+// pageFromMessagePage is the bounded-page body BOTH routes share.
+//
+// lastSeen is the daemon's high-water mark for this conversation, used for one
+// thing only: resolving the replay floor that decides whether this page reached
+// the conversation's BEGINNING. It never bounds the read — the anchor does that,
+// and the anchor is the wire's.
+func (m *Manager) pageFromMessagePage(ctx context.Context, workspace, sessionID, generationID, source string, lastSeen uint64, fetch messagePageFetch, resolve pageBoundResolver, first bool) (pageOutcome, error) {
+	logf := dlog.Tag(dlog.Logf(m.logf), "ws", workspace, "session", sessionID, "source", source)
 	bound, err := resolve(sessionID)
 	if err != nil {
 		logf("session-controller: history page REFUSED ws=%q session=%s decision=unresolvable_bound: %v", workspace, sessionID, err)
@@ -106,7 +125,7 @@ func (m *Manager) pageFromStorePage(ctx context.Context, workspace, generationID
 	if !bound.tail {
 		anchor.BeforeSeq = bound.upper
 	}
-	page, err := m.cfg.MessagePages.MessagePage(ctx, workspace, sessionID, anchor)
+	page, err := fetch(ctx, anchor)
 	if err != nil {
 		// LOUD. An empty page is a claim about the conversation; a failed read
 		// is a claim about the store, and a client cannot tell them apart.
@@ -132,7 +151,6 @@ func (m *Manager) pageFromStorePage(ctx context.Context, workspace, generationID
 
 	// THE DAEMON'S OWN KNOWLEDGE OF A BEGINNING, and the only thing that mints
 	// one. The store's retained-floor arm is deliberately not consulted here.
-	lastSeen := m.cfg.SeqStore.LastSeq(sessionID)
 	floor := m.replayFloorAt(workspace, sessionID, lastSeen, 0)
 	reachedStart := page.GetLastPageSeq() <= startSeq(floor)
 	// live_join_seq is FIRST PAGES ONLY: the newest seq this page is current
