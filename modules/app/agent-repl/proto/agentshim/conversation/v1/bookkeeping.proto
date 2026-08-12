@@ -8,8 +8,6 @@ syntax = "proto3";
 
 package agentshim.conversation.v1;
 
-import "agentshim/conversation/v1/tokens.proto";
-
 option go_package = "agentrepl/proto/agentshim/conversation/v1;conversationv1";
 
 // A fact about the session that renders as nothing.
@@ -54,10 +52,16 @@ message BookkeepingEntry {
     // appearing as a new one.
     SessionIdentityChanged session_identity_changed = 8;
 
-    // A usage measurement taken at a turn boundary. Evidence the daemon
-    // resolves into the figure a footer shows; the raw measurement never
-    // reaches a client.
-    UsageObserved usage_observed = 9;
+    // An attempt to measure SUBSCRIPTION usage at a turn boundary — the
+    // account's rate-limit window, not this turn's token cost. Evidence the
+    // daemon resolves into the figure a footer shows; the raw measurement
+    // never reaches a client.
+    //
+    // Moved down from core.v1, which is transport. The shim probes the usage
+    // service and emits this alongside TurnStarted, so it is producer-observed,
+    // durable, and a fact ABOUT the session — bookkeeping by this file's own
+    // test.
+    AccountUsageObservation account_usage_observation = 9;
   }
 }
 
@@ -290,12 +294,106 @@ message SessionIdentityChanged {
   string reason = 2;
 }
 
-// A usage measurement taken at a turn boundary.
-message UsageObserved {
-  // The turn this measurement was taken at the boundary of.
-  string turn_id = 1;
-  // The measurement, in the same canonical shape a response carries, so a turn
-  // total and a message cost are the same units and can be compared without a
-  // conversion nobody would remember to write.
-  TokenUsage usage = 2;
+// UsageObserved was here, as {turn_id, TokenUsage}. It was UNBUILDABLE, and for
+// the same reason daemon_answered_command was: TokenUsage is a per-RESPONSE
+// cost that AgentSaid already carries, so a TURN's figure is the SUM over many
+// responses — an aggregation performed by sessioncontroller's accounting
+// reducer, in the daemon, which writes no entries. The turn total stays a
+// daemon aggregation on frontend.v1.TurnAccounting, where it already lived.
+//
+// What a producer actually observes at a turn boundary is the account's usage
+// window, below.
+
+// Records one attempt to measure subscription usage at a turn boundary.
+message AccountUsageObservation {
+  // Identifies the query serving the turn.
+  string query_instance_id = 1;
+
+  // Identifies the turn whose boundary was measured.
+  string turn_id = 2;
+
+  // Gives the exact turn-boundary time independently of sampling latency.
+  int64 boundary_at_ms = 3;
+
+  // Gives the time at which the usage response was received.
+  int64 observed_at_ms = 4;
+
+  // Gives the elapsed time required to obtain the usage response.
+  int64 sample_latency_ms = 5;
+
+  // Gives the subscription type reported by the usage service.
+  string subscription_type = 6;
+
+  // Identifies the measured turn boundary.
+  oneof boundary {
+    // Marks the boundary immediately before prompt submission.
+    TurnStartUsageBoundary turn_start = 10;
+
+    // Marks the boundary after the terminal result is received.
+    TurnEndUsageBoundary turn_end = 11;
+  }
+
+  // Contains either the measurement or its explicit failure.
+  oneof outcome {
+    // Contains the account-usage measurement.
+    AccountUsageAvailable available = 20;
+
+    // Explains why the measurement could not be obtained.
+    AccountUsageUnavailable unavailable = 21;
+  }
 }
+
+// Marks an observation taken immediately before prompt submission.
+message TurnStartUsageBoundary {}
+
+// Marks an observation taken after the terminal result is received.
+message TurnEndUsageBoundary {}
+
+// Contains subscription-usage windows returned by the usage service.
+message AccountUsageAvailable {
+  // Contains utilization of the rolling five-hour window.
+  UsageWindow five_hour = 1;
+}
+
+// Describes utilization and reset time for one account-usage window.
+message UsageWindow {
+  // Gives utilization as a percentage from zero through one hundred.
+  double utilization_percent = 1;
+
+  // Gives the Unix epoch time at which the window resets.
+  int64 resets_at_ms = 2;
+}
+
+// Explains why an account-usage measurement could not be obtained.
+message AccountUsageUnavailable {
+  // Identifies the failure without collapsing distinct conditions.
+  oneof reason {
+    // Indicates that the account-usage API was unavailable.
+    UsageServiceUnavailable service_unavailable = 1;
+
+    // Indicates that the response omitted the five-hour window.
+    FiveHourWindowUnavailable window_unavailable = 2;
+
+    // Indicates that the response omitted utilization.
+    UtilizationUnavailable utilization_unavailable = 3;
+
+    // Records a transport, parsing, or SDK error.
+    UsageSamplingFailure sampling_failure = 4;
+  }
+}
+
+// Marks unavailability of the account-usage API.
+message UsageServiceUnavailable {}
+
+// Marks absence of the five-hour window.
+message FiveHourWindowUnavailable {}
+
+// Marks absence of utilization within the five-hour window.
+message UtilizationUnavailable {}
+
+// Records an error encountered while sampling account usage.
+message UsageSamplingFailure {
+  // Gives the complete error diagnostic.
+  string cause = 1;
+}
+

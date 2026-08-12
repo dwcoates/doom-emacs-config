@@ -10,15 +10,13 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { TokenUsage } from "./tokens_pb";
-import { file_agentshim_conversation_v1_tokens } from "./tokens_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentshim/conversation/v1/bookkeeping.proto.
  */
 export const file_agentshim_conversation_v1_bookkeeping: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHNoaW0vY29udmVyc2F0aW9uL3YxL2Jvb2trZWVwaW5nLnByb3RvEhlhZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxIoAFChBCb29ra2VlcGluZ0VudHJ5EkAKDXNlc3Npb25fYmVnYW4YASABKAsyJy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlNlc3Npb25CZWdhbkgAEkAKDXNlc3Npb25fZW5kZWQYAiABKAsyJy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlNlc3Npb25FbmRlZEgAEjoKCnR1cm5fYmVnYW4YAyABKAsyJC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlR1cm5CZWdhbkgAEjoKCnR1cm5fZW5kZWQYBCABKAsyJC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlR1cm5FbmRlZEgAEjkKCWhlYXJ0YmVhdBgFIAEoCzIkLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuSGVhcnRiZWF0SAASRAoPcmVzcG9uc2VfdGltaW5nGAYgASgLMikuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5SZXNwb25zZVRpbWluZ0gAEkwKE3Byb2R1Y2VyX2RpYWdub3N0aWMYByABKAsyLS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlByb2R1Y2VyRGlhZ25vc3RpY0gAElUKGHNlc3Npb25faWRlbnRpdHlfY2hhbmdlZBgIIAEoCzIxLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbklkZW50aXR5Q2hhbmdlZEgAEkIKDnVzYWdlX29ic2VydmVkGAkgASgLMiguYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5Vc2FnZU9ic2VydmVkSABCBgoEa2luZCL7AgoMU2Vzc2lvbkJlZ2FuEg0KBW1vZGVsGAEgASgJEgsKA2N3ZBgCIAEoCRIVCg1hZ2VudF92ZXJzaW9uGAMgASgJEjQKBGF1dGgYBCABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlNlc3Npb25BdXRoEhQKDG91dHB1dF9zdHlsZRgFIAEoCRI2CglmYXN0X21vZGUYBiABKAsyIy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkZhc3RNb2RlEg4KBnNraWxscxgKIAMoCRIRCglzdWJhZ2VudHMYCyADKAkSQAoLbWNwX3NlcnZlcnMYDCADKAsyKy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlNlc3Npb25NY3BTZXJ2ZXISOQoHcGx1Z2lucxgNIAMoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuU2Vzc2lvblBsdWdpbhIUCgxtZW1vcnlfcGF0aHMYDiADKAkilAEKC1Nlc3Npb25BdXRoEkMKDHN1YnNjcmlwdGlvbhgBIAEoCzIrLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQXV0aFN1YnNjcmlwdGlvbkgAEjgKB2FwaV9rZXkYAiABKAsyJS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkF1dGhBcGlLZXlIAEIGCgRhdXRoIhIKEEF1dGhTdWJzY3JpcHRpb24iHAoKQXV0aEFwaUtleRIOCgZzb3VyY2UYASABKAkifwoIRmFzdE1vZGUSMwoCb24YASABKAsyJS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkZhc3RNb2RlT25IABI1CgNvZmYYAiABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkZhc3RNb2RlT2ZmSABCBwoFc3RhdGUiDAoKRmFzdE1vZGVPbiIdCgtGYXN0TW9kZU9mZhIOCgZyZWFzb24YASABKAkiXAoQU2Vzc2lvbk1jcFNlcnZlchIMCgRuYW1lGAEgASgJEjoKBmhlYWx0aBgCIAEoCzIqLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuTWNwU2VydmVySGVhbHRoIp0BCg9NY3BTZXJ2ZXJIZWFsdGgSQgoJY29ubmVjdGVkGAEgASgLMi0uYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5NY3BTZXJ2ZXJDb25uZWN0ZWRIABI8CgZmYWlsZWQYAiABKAsyKi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLk1jcFNlcnZlckZhaWxlZEgAQggKBmhlYWx0aCIUChJNY3BTZXJ2ZXJDb25uZWN0ZWQiIAoPTWNwU2VydmVyRmFpbGVkEg0KBWVycm9yGAEgASgJIi4KDVNlc3Npb25QbHVnaW4SDAoEbmFtZRgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJIusBCgxTZXNzaW9uRW5kZWQSQwoIbm9ybWFsbHkYASABKAsyLy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlNlc3Npb25FbmRlZE5vcm1hbGx5SAASQgoIYnlfZXJyb3IYAiABKAsyLi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlNlc3Npb25FbmRlZEJ5RXJyb3JIABJICgtieV9zaHV0ZG93bhgDIAEoCzIxLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkVuZGVkQnlTaHV0ZG93bkgAQggKBnJlYXNvbiIWChRTZXNzaW9uRW5kZWROb3JtYWxseSIlChNTZXNzaW9uRW5kZWRCeUVycm9yEg4KBmRldGFpbBgBIAEoCSIYChZTZXNzaW9uRW5kZWRCeVNodXRkb3duIhwKCVR1cm5CZWdhbhIPCgd0dXJuX2lkGAEgASgJIvEBCglUdXJuRW5kZWQSDwoHdHVybl9pZBgBIAEoCRI9Cgljb21wbGV0ZWQYAiABKAsyKC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlR1cm5Db21wbGV0ZWRIABJBCgtpbnRlcnJ1cHRlZBgDIAEoCzIqLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVHVybkludGVycnVwdGVkSAASRgoLdW5leHBsYWluZWQYBCABKAsyLy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlR1cm5FbmRlZFVuZXhwbGFpbmVkSABCCQoHb3V0Y29tZSIPCg1UdXJuQ29tcGxldGVkIhEKD1R1cm5JbnRlcnJ1cHRlZCIpChRUdXJuRW5kZWRVbmV4cGxhaW5lZBIRCglpbmZlcmVuY2UYASABKAkiIgoJSGVhcnRiZWF0EhUKDWxpdmVfd29ya19pZHMYASADKAkiTgoOUmVzcG9uc2VUaW1pbmcSEgoKbWVzc2FnZV9pZBgBIAEoCRIWCg5maXJzdF90b2tlbl9tcxgCIAEoAxIQCgh0b3RhbF9tcxgDIAEoAyI3ChJQcm9kdWNlckRpYWdub3N0aWMSEQoJb3BlcmF0aW9uGAEgASgJEg4KBmRldGFpbBgCIAEoCSJFChZTZXNzaW9uSWRlbnRpdHlDaGFuZ2VkEhsKE3ByZXZpb3VzX3Nlc3Npb25faWQYASABKAkSDgoGcmVhc29uGAIgASgJIlYKDVVzYWdlT2JzZXJ2ZWQSDwoHdHVybl9pZBgBIAEoCRI0CgV1c2FnZRgCIAEoCzIlLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVG9rZW5Vc2FnZUI6WjhhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_agentshim_conversation_v1_tokens]);
+  fileDesc("CithZ2VudHNoaW0vY29udmVyc2F0aW9uL3YxL2Jvb2trZWVwaW5nLnByb3RvEhlhZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxIpUFChBCb29ra2VlcGluZ0VudHJ5EkAKDXNlc3Npb25fYmVnYW4YASABKAsyJy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlNlc3Npb25CZWdhbkgAEkAKDXNlc3Npb25fZW5kZWQYAiABKAsyJy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlNlc3Npb25FbmRlZEgAEjoKCnR1cm5fYmVnYW4YAyABKAsyJC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlR1cm5CZWdhbkgAEjoKCnR1cm5fZW5kZWQYBCABKAsyJC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlR1cm5FbmRlZEgAEjkKCWhlYXJ0YmVhdBgFIAEoCzIkLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuSGVhcnRiZWF0SAASRAoPcmVzcG9uc2VfdGltaW5nGAYgASgLMikuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5SZXNwb25zZVRpbWluZ0gAEkwKE3Byb2R1Y2VyX2RpYWdub3N0aWMYByABKAsyLS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlByb2R1Y2VyRGlhZ25vc3RpY0gAElUKGHNlc3Npb25faWRlbnRpdHlfY2hhbmdlZBgIIAEoCzIxLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbklkZW50aXR5Q2hhbmdlZEgAElcKGWFjY291bnRfdXNhZ2Vfb2JzZXJ2YXRpb24YCSABKAsyMi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkFjY291bnRVc2FnZU9ic2VydmF0aW9uSABCBgoEa2luZCL7AgoMU2Vzc2lvbkJlZ2FuEg0KBW1vZGVsGAEgASgJEgsKA2N3ZBgCIAEoCRIVCg1hZ2VudF92ZXJzaW9uGAMgASgJEjQKBGF1dGgYBCABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlNlc3Npb25BdXRoEhQKDG91dHB1dF9zdHlsZRgFIAEoCRI2CglmYXN0X21vZGUYBiABKAsyIy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkZhc3RNb2RlEg4KBnNraWxscxgKIAMoCRIRCglzdWJhZ2VudHMYCyADKAkSQAoLbWNwX3NlcnZlcnMYDCADKAsyKy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlNlc3Npb25NY3BTZXJ2ZXISOQoHcGx1Z2lucxgNIAMoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuU2Vzc2lvblBsdWdpbhIUCgxtZW1vcnlfcGF0aHMYDiADKAkilAEKC1Nlc3Npb25BdXRoEkMKDHN1YnNjcmlwdGlvbhgBIAEoCzIrLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQXV0aFN1YnNjcmlwdGlvbkgAEjgKB2FwaV9rZXkYAiABKAsyJS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkF1dGhBcGlLZXlIAEIGCgRhdXRoIhIKEEF1dGhTdWJzY3JpcHRpb24iHAoKQXV0aEFwaUtleRIOCgZzb3VyY2UYASABKAkifwoIRmFzdE1vZGUSMwoCb24YASABKAsyJS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkZhc3RNb2RlT25IABI1CgNvZmYYAiABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkZhc3RNb2RlT2ZmSABCBwoFc3RhdGUiDAoKRmFzdE1vZGVPbiIdCgtGYXN0TW9kZU9mZhIOCgZyZWFzb24YASABKAkiXAoQU2Vzc2lvbk1jcFNlcnZlchIMCgRuYW1lGAEgASgJEjoKBmhlYWx0aBgCIAEoCzIqLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuTWNwU2VydmVySGVhbHRoIp0BCg9NY3BTZXJ2ZXJIZWFsdGgSQgoJY29ubmVjdGVkGAEgASgLMi0uYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5NY3BTZXJ2ZXJDb25uZWN0ZWRIABI8CgZmYWlsZWQYAiABKAsyKi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLk1jcFNlcnZlckZhaWxlZEgAQggKBmhlYWx0aCIUChJNY3BTZXJ2ZXJDb25uZWN0ZWQiIAoPTWNwU2VydmVyRmFpbGVkEg0KBWVycm9yGAEgASgJIi4KDVNlc3Npb25QbHVnaW4SDAoEbmFtZRgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJIusBCgxTZXNzaW9uRW5kZWQSQwoIbm9ybWFsbHkYASABKAsyLy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlNlc3Npb25FbmRlZE5vcm1hbGx5SAASQgoIYnlfZXJyb3IYAiABKAsyLi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlNlc3Npb25FbmRlZEJ5RXJyb3JIABJICgtieV9zaHV0ZG93bhgDIAEoCzIxLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkVuZGVkQnlTaHV0ZG93bkgAQggKBnJlYXNvbiIWChRTZXNzaW9uRW5kZWROb3JtYWxseSIlChNTZXNzaW9uRW5kZWRCeUVycm9yEg4KBmRldGFpbBgBIAEoCSIYChZTZXNzaW9uRW5kZWRCeVNodXRkb3duIhwKCVR1cm5CZWdhbhIPCgd0dXJuX2lkGAEgASgJIvEBCglUdXJuRW5kZWQSDwoHdHVybl9pZBgBIAEoCRI9Cgljb21wbGV0ZWQYAiABKAsyKC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlR1cm5Db21wbGV0ZWRIABJBCgtpbnRlcnJ1cHRlZBgDIAEoCzIqLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVHVybkludGVycnVwdGVkSAASRgoLdW5leHBsYWluZWQYBCABKAsyLy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlR1cm5FbmRlZFVuZXhwbGFpbmVkSABCCQoHb3V0Y29tZSIPCg1UdXJuQ29tcGxldGVkIhEKD1R1cm5JbnRlcnJ1cHRlZCIpChRUdXJuRW5kZWRVbmV4cGxhaW5lZBIRCglpbmZlcmVuY2UYASABKAkiIgoJSGVhcnRiZWF0EhUKDWxpdmVfd29ya19pZHMYASADKAkiTgoOUmVzcG9uc2VUaW1pbmcSEgoKbWVzc2FnZV9pZBgBIAEoCRIWCg5maXJzdF90b2tlbl9tcxgCIAEoAxIQCgh0b3RhbF9tcxgDIAEoAyI3ChJQcm9kdWNlckRpYWdub3N0aWMSEQoJb3BlcmF0aW9uGAEgASgJEg4KBmRldGFpbBgCIAEoCSJFChZTZXNzaW9uSWRlbnRpdHlDaGFuZ2VkEhsKE3ByZXZpb3VzX3Nlc3Npb25faWQYASABKAkSDgoGcmVhc29uGAIgASgJIuIDChdBY2NvdW50VXNhZ2VPYnNlcnZhdGlvbhIZChFxdWVyeV9pbnN0YW5jZV9pZBgBIAEoCRIPCgd0dXJuX2lkGAIgASgJEhYKDmJvdW5kYXJ5X2F0X21zGAMgASgDEhYKDm9ic2VydmVkX2F0X21zGAQgASgDEhkKEXNhbXBsZV9sYXRlbmN5X21zGAUgASgDEhkKEXN1YnNjcmlwdGlvbl90eXBlGAYgASgJEkcKCnR1cm5fc3RhcnQYCiABKAsyMS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlR1cm5TdGFydFVzYWdlQm91bmRhcnlIABJDCgh0dXJuX2VuZBgLIAEoCzIvLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVHVybkVuZFVzYWdlQm91bmRhcnlIABJFCglhdmFpbGFibGUYFCABKAsyMC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkFjY291bnRVc2FnZUF2YWlsYWJsZUgBEkkKC3VuYXZhaWxhYmxlGBUgASgLMjIuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5BY2NvdW50VXNhZ2VVbmF2YWlsYWJsZUgBQgoKCGJvdW5kYXJ5QgkKB291dGNvbWUiGAoWVHVyblN0YXJ0VXNhZ2VCb3VuZGFyeSIWChRUdXJuRW5kVXNhZ2VCb3VuZGFyeSJSChVBY2NvdW50VXNhZ2VBdmFpbGFibGUSOQoJZml2ZV9ob3VyGAEgASgLMiYuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5Vc2FnZVdpbmRvdyJACgtVc2FnZVdpbmRvdxIbChN1dGlsaXphdGlvbl9wZXJjZW50GAEgASgBEhQKDHJlc2V0c19hdF9tcxgCIAEoAyLtAgoXQWNjb3VudFVzYWdlVW5hdmFpbGFibGUSUQoTc2VydmljZV91bmF2YWlsYWJsZRgBIAEoCzIyLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVXNhZ2VTZXJ2aWNlVW5hdmFpbGFibGVIABJSChJ3aW5kb3dfdW5hdmFpbGFibGUYAiABKAsyNC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkZpdmVIb3VyV2luZG93VW5hdmFpbGFibGVIABJUChd1dGlsaXphdGlvbl91bmF2YWlsYWJsZRgDIAEoCzIxLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVXRpbGl6YXRpb25VbmF2YWlsYWJsZUgAEksKEHNhbXBsaW5nX2ZhaWx1cmUYBCABKAsyLy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlVzYWdlU2FtcGxpbmdGYWlsdXJlSABCCAoGcmVhc29uIhkKF1VzYWdlU2VydmljZVVuYXZhaWxhYmxlIhsKGUZpdmVIb3VyV2luZG93VW5hdmFpbGFibGUiGAoWVXRpbGl6YXRpb25VbmF2YWlsYWJsZSIlChRVc2FnZVNhbXBsaW5nRmFpbHVyZRINCgVjYXVzZRgBIAEoCUI6WjhhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z");
 
 /**
  * A fact about the session that renders as nothing.
@@ -112,14 +110,20 @@ export type BookkeepingEntry = Message<"agentshim.conversation.v1.BookkeepingEnt
     case: "sessionIdentityChanged";
   } | {
     /**
-     * A usage measurement taken at a turn boundary. Evidence the daemon
-     * resolves into the figure a footer shows; the raw measurement never
-     * reaches a client.
+     * An attempt to measure SUBSCRIPTION usage at a turn boundary — the
+     * account's rate-limit window, not this turn's token cost. Evidence the
+     * daemon resolves into the figure a footer shows; the raw measurement
+     * never reaches a client.
      *
-     * @generated from field: agentshim.conversation.v1.UsageObserved usage_observed = 9;
+     * Moved down from core.v1, which is transport. The shim probes the usage
+     * service and emits this alongside TurnStarted, so it is producer-observed,
+     * durable, and a fact ABOUT the session — bookkeeping by this file's own
+     * test.
+     *
+     * @generated from field: agentshim.conversation.v1.AccountUsageObservation account_usage_observation = 9;
      */
-    value: UsageObserved;
-    case: "usageObserved";
+    value: AccountUsageObservation;
+    case: "accountUsageObservation";
   } | { case: undefined; value?: undefined };
 };
 
@@ -843,32 +847,302 @@ export const SessionIdentityChangedSchema: GenMessage<SessionIdentityChanged> = 
   messageDesc(file_agentshim_conversation_v1_bookkeeping, 25);
 
 /**
- * A usage measurement taken at a turn boundary.
+ * Records one attempt to measure subscription usage at a turn boundary.
  *
- * @generated from message agentshim.conversation.v1.UsageObserved
+ * @generated from message agentshim.conversation.v1.AccountUsageObservation
  */
-export type UsageObserved = Message<"agentshim.conversation.v1.UsageObserved"> & {
+export type AccountUsageObservation = Message<"agentshim.conversation.v1.AccountUsageObservation"> & {
   /**
-   * The turn this measurement was taken at the boundary of.
+   * Identifies the query serving the turn.
    *
-   * @generated from field: string turn_id = 1;
+   * @generated from field: string query_instance_id = 1;
+   */
+  queryInstanceId: string;
+
+  /**
+   * Identifies the turn whose boundary was measured.
+   *
+   * @generated from field: string turn_id = 2;
    */
   turnId: string;
 
   /**
-   * The measurement, in the same canonical shape a response carries, so a turn
-   * total and a message cost are the same units and can be compared without a
-   * conversion nobody would remember to write.
+   * Gives the exact turn-boundary time independently of sampling latency.
    *
-   * @generated from field: agentshim.conversation.v1.TokenUsage usage = 2;
+   * @generated from field: int64 boundary_at_ms = 3;
    */
-  usage?: TokenUsage | undefined;
+  boundaryAtMs: bigint;
+
+  /**
+   * Gives the time at which the usage response was received.
+   *
+   * @generated from field: int64 observed_at_ms = 4;
+   */
+  observedAtMs: bigint;
+
+  /**
+   * Gives the elapsed time required to obtain the usage response.
+   *
+   * @generated from field: int64 sample_latency_ms = 5;
+   */
+  sampleLatencyMs: bigint;
+
+  /**
+   * Gives the subscription type reported by the usage service.
+   *
+   * @generated from field: string subscription_type = 6;
+   */
+  subscriptionType: string;
+
+  /**
+   * Identifies the measured turn boundary.
+   *
+   * @generated from oneof agentshim.conversation.v1.AccountUsageObservation.boundary
+   */
+  boundary: {
+    /**
+     * Marks the boundary immediately before prompt submission.
+     *
+     * @generated from field: agentshim.conversation.v1.TurnStartUsageBoundary turn_start = 10;
+     */
+    value: TurnStartUsageBoundary;
+    case: "turnStart";
+  } | {
+    /**
+     * Marks the boundary after the terminal result is received.
+     *
+     * @generated from field: agentshim.conversation.v1.TurnEndUsageBoundary turn_end = 11;
+     */
+    value: TurnEndUsageBoundary;
+    case: "turnEnd";
+  } | { case: undefined; value?: undefined };
+
+  /**
+   * Contains either the measurement or its explicit failure.
+   *
+   * @generated from oneof agentshim.conversation.v1.AccountUsageObservation.outcome
+   */
+  outcome: {
+    /**
+     * Contains the account-usage measurement.
+     *
+     * @generated from field: agentshim.conversation.v1.AccountUsageAvailable available = 20;
+     */
+    value: AccountUsageAvailable;
+    case: "available";
+  } | {
+    /**
+     * Explains why the measurement could not be obtained.
+     *
+     * @generated from field: agentshim.conversation.v1.AccountUsageUnavailable unavailable = 21;
+     */
+    value: AccountUsageUnavailable;
+    case: "unavailable";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
- * Describes the message agentshim.conversation.v1.UsageObserved.
- * Use `create(UsageObservedSchema)` to create a new message.
+ * Describes the message agentshim.conversation.v1.AccountUsageObservation.
+ * Use `create(AccountUsageObservationSchema)` to create a new message.
  */
-export const UsageObservedSchema: GenMessage<UsageObserved> = /*@__PURE__*/
+export const AccountUsageObservationSchema: GenMessage<AccountUsageObservation> = /*@__PURE__*/
   messageDesc(file_agentshim_conversation_v1_bookkeeping, 26);
+
+/**
+ * Marks an observation taken immediately before prompt submission.
+ *
+ * @generated from message agentshim.conversation.v1.TurnStartUsageBoundary
+ */
+export type TurnStartUsageBoundary = Message<"agentshim.conversation.v1.TurnStartUsageBoundary"> & {
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.TurnStartUsageBoundary.
+ * Use `create(TurnStartUsageBoundarySchema)` to create a new message.
+ */
+export const TurnStartUsageBoundarySchema: GenMessage<TurnStartUsageBoundary> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_bookkeeping, 27);
+
+/**
+ * Marks an observation taken after the terminal result is received.
+ *
+ * @generated from message agentshim.conversation.v1.TurnEndUsageBoundary
+ */
+export type TurnEndUsageBoundary = Message<"agentshim.conversation.v1.TurnEndUsageBoundary"> & {
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.TurnEndUsageBoundary.
+ * Use `create(TurnEndUsageBoundarySchema)` to create a new message.
+ */
+export const TurnEndUsageBoundarySchema: GenMessage<TurnEndUsageBoundary> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_bookkeeping, 28);
+
+/**
+ * Contains subscription-usage windows returned by the usage service.
+ *
+ * @generated from message agentshim.conversation.v1.AccountUsageAvailable
+ */
+export type AccountUsageAvailable = Message<"agentshim.conversation.v1.AccountUsageAvailable"> & {
+  /**
+   * Contains utilization of the rolling five-hour window.
+   *
+   * @generated from field: agentshim.conversation.v1.UsageWindow five_hour = 1;
+   */
+  fiveHour?: UsageWindow | undefined;
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.AccountUsageAvailable.
+ * Use `create(AccountUsageAvailableSchema)` to create a new message.
+ */
+export const AccountUsageAvailableSchema: GenMessage<AccountUsageAvailable> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_bookkeeping, 29);
+
+/**
+ * Describes utilization and reset time for one account-usage window.
+ *
+ * @generated from message agentshim.conversation.v1.UsageWindow
+ */
+export type UsageWindow = Message<"agentshim.conversation.v1.UsageWindow"> & {
+  /**
+   * Gives utilization as a percentage from zero through one hundred.
+   *
+   * @generated from field: double utilization_percent = 1;
+   */
+  utilizationPercent: number;
+
+  /**
+   * Gives the Unix epoch time at which the window resets.
+   *
+   * @generated from field: int64 resets_at_ms = 2;
+   */
+  resetsAtMs: bigint;
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.UsageWindow.
+ * Use `create(UsageWindowSchema)` to create a new message.
+ */
+export const UsageWindowSchema: GenMessage<UsageWindow> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_bookkeeping, 30);
+
+/**
+ * Explains why an account-usage measurement could not be obtained.
+ *
+ * @generated from message agentshim.conversation.v1.AccountUsageUnavailable
+ */
+export type AccountUsageUnavailable = Message<"agentshim.conversation.v1.AccountUsageUnavailable"> & {
+  /**
+   * Identifies the failure without collapsing distinct conditions.
+   *
+   * @generated from oneof agentshim.conversation.v1.AccountUsageUnavailable.reason
+   */
+  reason: {
+    /**
+     * Indicates that the account-usage API was unavailable.
+     *
+     * @generated from field: agentshim.conversation.v1.UsageServiceUnavailable service_unavailable = 1;
+     */
+    value: UsageServiceUnavailable;
+    case: "serviceUnavailable";
+  } | {
+    /**
+     * Indicates that the response omitted the five-hour window.
+     *
+     * @generated from field: agentshim.conversation.v1.FiveHourWindowUnavailable window_unavailable = 2;
+     */
+    value: FiveHourWindowUnavailable;
+    case: "windowUnavailable";
+  } | {
+    /**
+     * Indicates that the response omitted utilization.
+     *
+     * @generated from field: agentshim.conversation.v1.UtilizationUnavailable utilization_unavailable = 3;
+     */
+    value: UtilizationUnavailable;
+    case: "utilizationUnavailable";
+  } | {
+    /**
+     * Records a transport, parsing, or SDK error.
+     *
+     * @generated from field: agentshim.conversation.v1.UsageSamplingFailure sampling_failure = 4;
+     */
+    value: UsageSamplingFailure;
+    case: "samplingFailure";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.AccountUsageUnavailable.
+ * Use `create(AccountUsageUnavailableSchema)` to create a new message.
+ */
+export const AccountUsageUnavailableSchema: GenMessage<AccountUsageUnavailable> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_bookkeeping, 31);
+
+/**
+ * Marks unavailability of the account-usage API.
+ *
+ * @generated from message agentshim.conversation.v1.UsageServiceUnavailable
+ */
+export type UsageServiceUnavailable = Message<"agentshim.conversation.v1.UsageServiceUnavailable"> & {
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.UsageServiceUnavailable.
+ * Use `create(UsageServiceUnavailableSchema)` to create a new message.
+ */
+export const UsageServiceUnavailableSchema: GenMessage<UsageServiceUnavailable> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_bookkeeping, 32);
+
+/**
+ * Marks absence of the five-hour window.
+ *
+ * @generated from message agentshim.conversation.v1.FiveHourWindowUnavailable
+ */
+export type FiveHourWindowUnavailable = Message<"agentshim.conversation.v1.FiveHourWindowUnavailable"> & {
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.FiveHourWindowUnavailable.
+ * Use `create(FiveHourWindowUnavailableSchema)` to create a new message.
+ */
+export const FiveHourWindowUnavailableSchema: GenMessage<FiveHourWindowUnavailable> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_bookkeeping, 33);
+
+/**
+ * Marks absence of utilization within the five-hour window.
+ *
+ * @generated from message agentshim.conversation.v1.UtilizationUnavailable
+ */
+export type UtilizationUnavailable = Message<"agentshim.conversation.v1.UtilizationUnavailable"> & {
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.UtilizationUnavailable.
+ * Use `create(UtilizationUnavailableSchema)` to create a new message.
+ */
+export const UtilizationUnavailableSchema: GenMessage<UtilizationUnavailable> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_bookkeeping, 34);
+
+/**
+ * Records an error encountered while sampling account usage.
+ *
+ * @generated from message agentshim.conversation.v1.UsageSamplingFailure
+ */
+export type UsageSamplingFailure = Message<"agentshim.conversation.v1.UsageSamplingFailure"> & {
+  /**
+   * Gives the complete error diagnostic.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentshim.conversation.v1.UsageSamplingFailure.
+ * Use `create(UsageSamplingFailureSchema)` to create a new message.
+ */
+export const UsageSamplingFailureSchema: GenMessage<UsageSamplingFailure> = /*@__PURE__*/
+  messageDesc(file_agentshim_conversation_v1_bookkeeping, 35);
 
