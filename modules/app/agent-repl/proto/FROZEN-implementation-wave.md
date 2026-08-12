@@ -198,3 +198,82 @@ Writes tests against the frozen contract. Runs nothing. See its prescription.
    STOP and surface it. Do not improvise.** An uncovered case is the same kind
    of event as a contract deviation, and guessing is how a local decision
    becomes a cross-system disagreement.
+
+---
+
+# ROUND 2 — what the first dispatch found, and what was settled
+
+All six agents ran. Two produced work (webapp, e2e); four stopped on the escape
+hatch. Every one of them was right to. The freeze specified RECORDS and never
+specified how a record MOVES, and four agents independently found the same hole.
+
+## The runtime was stopped and the store destroyed
+
+Before any further work: `shim-store` and `shim-claude-sidecar` were unloaded
+from launchd and killed, and `~/.cache/agent-repl/store/events.db` (~11 GB) was
+deleted. Emacs and the daemon were already down.
+
+The store's contents were becoming a source of confusion — they describe the OLD
+schema and are evidence of what must be REMOVED, not of what must exist. Nothing
+is to be inferred from them again. Both launchd agents stay unloaded until the
+wave lands.
+
+## Settled
+
+1. **Transport is split the way the record is split.** The write path
+   (`EntryBatch{repeated Entry, CursorState cursor_advance}` +
+   `StoreEntryWrite{producer, batch}`) lives in the shim-side package, which the
+   daemon does not import. The read path stays in `core.v1` and repoints from
+   `Event` to `ExternalEntry`: `ReplayEvent`, `StoredMessage.records`,
+   `Subscribe`.
+
+2. **The shim-side package is renamed off Go's `internal/` keyword.** Verified by
+   compile: a package under `.../a/internal/b` is importable only from code
+   rooted at `.../a/`, which is the generated proto tree itself — so the shim,
+   the sidecar AND the store were all locked out of the type they exist to
+   write. The keyword enforced the opposite of the intent. Exclusion comes from
+   `check-conversation-isolation.sh`, which is what it was written for.
+
+3. **The shim writes NO `MessageEntry` records.** Not a preference — the SDK
+   stream carries no `parent_uuid`, every `MessageEntry` requires lineage, and
+   `MessageParent` has no "unknown" arm, so the shim has nothing legal to emit.
+   Two accepted consequences: content becomes durable only once the CLI flushes
+   to disk and the sidecar reads it (the old design wrote it from both planes
+   for latency), and —
+
+4. **`dedup_key` is dropped.** Its only job was collapsing cross-plane twins,
+   and with the shim out of the content business there are no twins. The store
+   evidence that appeared to justify keeping it described the OLD overlap.
+   `write_id` stays: one producer re-delivering one record after a store bounce
+   is a different problem and still real.
+
+5. **Permissions become durable.** `PermissionAsked` / `PermissionAnswered` stay
+   as `MessageEntry` arms. They were previously `core.v1.PermissionItem`, pushed
+   to the frontend and never stored.
+
+6. **Forgotten fields are restored, not redesigned.** `FailureRaised` regains
+   `http_status`, `request_id`, `attempts` and network-down — without them
+   `frontend.v1.FailureApiRequestFailed` is populated by nothing and every vendor
+   failure classifies as `api.request_failed`. `AgentToolResult` regains
+   `tool_call_id` and `is_error`, which lived inside the old block type and fell
+   out of the type when it was repointed.
+
+7. **Permission mode is modeled neutrally on `SessionBegan`.** Every agent CLI
+   has a notion of what it may do unattended, so this is not vendor-specific and
+   needs no exception. It closes a fail-OPEN gap: the ungated-session warning
+   used to OR in the CLI's own reported mode, catching a settings-borne
+   escalation the daemon's registry never sees.
+
+8. **No general vendor-visible escape hatch on `ExternalEntry`.** Every defect in
+   this round was something carried loosely whose loss went unnoticed until an
+   agent tripped on it. A vendor bag is where the next one hides. If a case
+   appears that genuinely cannot be modeled, it gets added then, with the case
+   in hand.
+
+## Deletion is not optional and not deferred
+
+Every protobuf this refactor obsoletes is DELETED from the canonical `.proto`
+files — not marked deprecated, not left for later, not merely noted in a
+planning document. A retired message that still compiles is a message something
+will still be written against.
+
