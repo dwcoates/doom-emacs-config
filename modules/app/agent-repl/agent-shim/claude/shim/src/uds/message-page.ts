@@ -48,16 +48,38 @@ export function continueBelow(page: MessagePage): PageAnchor {
   return { kind: "before", lastPageSeq: page.lastPageSeq };
 }
 
-/** Build the request for `anchor`, tagged with `requestId` for correlation. */
-export function messagePageRequest(requestId: string, anchor: PageAnchor): MessagePageRequest {
+/**
+ * Build the request for `anchor`, tagged with `requestId` for correlation and
+ * routed by `sessionId`.
+ *
+ * `sessionId` is the VENDOR session id, exactly as `Subscribe` carries it. The
+ * store holds every live session in one database and scopes seq, dedup and
+ * fan-out by it, so a request that named no session could not be answered at
+ * all. It is a ROUTING key and never a position: it says WHICH history is
+ * read, and nothing about where in that history the read starts.
+ *
+ * An EMPTY session id THROWS rather than travelling. The store would refuse it,
+ * and a refusal arriving as a failed page is far less legible than the caller
+ * discovering here that it does not yet know which conversation it is reading.
+ */
+export function messagePageRequest(
+  requestId: string,
+  sessionId: string,
+  anchor: PageAnchor,
+): MessagePageRequest {
+  if (sessionId === "") {
+    throw new Error("message page request requires a vendor session id to route by");
+  }
   if (anchor.kind === "head") {
     return create(MessagePageRequestSchema, {
       requestId,
+      sessionId,
       anchor: { case: "head", value: create(MessagePageHeadSchema, {}) },
     });
   }
   return create(MessagePageRequestSchema, {
     requestId,
+    sessionId,
     anchor: { case: "beforeSeq", value: anchor.lastPageSeq },
   });
 }
