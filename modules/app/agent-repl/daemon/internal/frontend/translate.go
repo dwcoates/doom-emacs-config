@@ -424,10 +424,38 @@ func conversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*fro
 	case *corev1.Event_ContextCompacted:
 		items = contextCompactedItems(p.ContextCompacted, ev)
 	default:
-		// Not a conversation-bearing payload. Task-lifecycle events
-		// (TaskStarted/TaskEnded) deliberately route nothing here — they flow
-		// via TaskCatalog (the webapp has no `task` conversation kind).
-		return nil, nil, nil
+		// EVERY OTHER KIND IS CLASSIFIED, NEVER DEFAULTED. A bare `default`
+		// returning "no conversation content" answers on behalf of kinds that
+		// do not exist yet, and being wrong is silent in both directions: a
+		// message-bearing kind swallowed here vanishes from the feed with no
+		// error, and a non-message kind given an owner becomes a phantom page
+		// slot. So the answer comes from the total A/B/C classification
+		// (recordcategory.go), whose own init() refuses to start a binary in
+		// which any payload arm is unclassified.
+		category, err := CategorizeRecord(ev)
+		if err != nil {
+			return nil, nil, err
+		}
+		switch category {
+		case RecordCategoryNotAMessage:
+			// Category C: renders as NOTHING and carries no ownership. This is
+			// the only silent-by-design answer, and it is reached only for a
+			// kind someone classified deliberately.
+			return nil, nil, nil
+		case RecordCategoryIsMessage, RecordCategoryComposesMessage:
+			// Category A and B kinds that reach here are curated by ANOTHER
+			// route and are not this curator's to build: task lifecycle and
+			// task progress flow through the detached-work apparatus
+			// (detachedwork.go / detachedpublish.go), a content delta is the
+			// ephemeral typing preview (sessioncontroller/sinks.go), and a
+			// degraded report becomes a failure card on the shim client's path.
+			// They contribute nothing to a ConversationDelta, and saying so by
+			// category rather than by falling off the end of a switch keeps the
+			// silence attributable.
+			return nil, nil, nil
+		default:
+			return nil, nil, fmt.Errorf("frontend: conversation curation refused seq=%d category=%s: the event's payload arm has no curation route and no category that explains its absence, so serving an empty delta would drop conversation content silently", ev.GetSeq(), category)
+		}
 	}
 	// THE DAEMON'S OWN RE-DRIVE HAS NO PROMPT, and it is dropped one level up,
 	// in CurateEvent — the one exported route from an event to conversation
