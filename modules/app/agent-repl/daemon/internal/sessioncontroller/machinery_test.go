@@ -458,3 +458,68 @@ func TestTwoCloseTogetherCommandsKeepTheirOwnIdentities(t *testing.T) {
 		t.Errorf("classified command for u-clear = %v, want CLEAR", got["u-clear"])
 	}
 }
+
+// blockUserTranscriptEvent is a user transcript line whose body arrives as
+// content BLOCKS — the shape the real file plane produces for a typed prompt,
+// as opposed to the single content string a hand-simplified fixture uses.
+func blockUserTranscriptEvent(t *testing.T, seq uint64, uuid, promptID string, texts ...string) *corev1.Event {
+	t.Helper()
+	blocks := make([]*datav1.ContentBlock, 0, len(texts))
+	for _, txt := range texts {
+		blocks = append(blocks, &datav1.ContentBlock{
+			Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: txt}},
+		})
+	}
+	a, err := anypb.New(&datav1.TranscriptLine{
+		Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
+			Envelope: &datav1.LineEnvelope{Uuid: uuid, PromptId: promptID},
+			Message: &datav1.ApiUserMessage{
+				Content: &datav1.ApiUserMessage_ContentBlocks{
+					ContentBlocks: &datav1.ApiContentBlocks{Blocks: blocks},
+				},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("anypb.New: %v", err)
+	}
+	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+}
+
+func TestAHumanPromptOpeningWithAnUnclosedMachineryTagStaysAPrompt(t *testing.T) {
+	// Arrange: the user asks ABOUT the tag and starts the sentence with it, so
+	// the head opens with machinery markup that is never closed. An opening tag
+	// alone is not machinery-ness, and treating it as such destroyed the prompt.
+	h := newQueueHarness(t, nil)
+	prose := "<command-name> keeps showing up in my transcript, what writes it?"
+
+	// Act
+	h.controller().consumer.Consume(blockUserTranscriptEvent(t, 12, "u-human", "prompt-1", prose))
+
+	// Assert
+	if got := h.classifiedCommands(); len(got) != 0 {
+		t.Fatalf("classified %d command(s) from a human prompt, want none", len(got))
+	}
+	turns := h.userTurns()
+	if len(turns) != 1 || turns[0].item.GetUuid() != "u-human" {
+		t.Fatalf("pushed %d user turn(s), want the human prompt untouched", len(turns))
+	}
+}
+
+func TestAMachineryRecordSpanningBlocksIsStillClassified(t *testing.T) {
+	// Arrange: a caveat wrapper that opens in the first block and closes in the
+	// second — the balance test must read the whole body, not just the head.
+	h := newQueueHarness(t, nil)
+
+	// Act
+	h.controller().consumer.Consume(blockUserTranscriptEvent(t, 12, "u-split", "prompt-1",
+		"<local-command-caveat>Caveat: the messages below",
+		"were generated while running local commands.</local-command-caveat>",
+		"<command-name>/compact</command-name>"))
+
+	// Assert
+	got := h.classifiedCommands()
+	if got["u-split"] != frontendv1.SessionCommand_SESSION_COMMAND_COMPACT {
+		t.Errorf("classified command for u-split = %v, want COMPACT", got["u-split"])
+	}
+}
