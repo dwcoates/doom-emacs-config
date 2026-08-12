@@ -9,11 +9,6 @@
 PROTOS := \
   agentshim/core/v1/core.proto \
   agentshim/core/v1/message-page.proto \
-  agentshim/data/v1/unknown.proto \
-  agentshim/data/v1/tools.proto \
-  agentshim/data/v1/stream.proto \
-  agentshim/data/v1/transcript.proto \
-  agentshim/data/v1/journal.proto \
   agentshim/frontend/v1/agent-emission.proto \
   agentshim/frontend/v1/agent-response.proto \
   agentshim/frontend/v1/conversation-history.proto \
