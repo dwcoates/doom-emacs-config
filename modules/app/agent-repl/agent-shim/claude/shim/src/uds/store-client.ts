@@ -101,6 +101,8 @@ import { create, toBinary } from "@bufbuild/protobuf";
 import { MessageConn, envelopeType, unpackAs } from "./framing.js";
 import type { Any } from "./framing.js";
 import { bindLog } from "./log.js";
+import { messagePageRequest, pageBoundary, pageMessages } from "./message-page.js";
+import type { PageAnchor } from "./message-page.js";
 import { SpillJournal } from "./store-spill.js";
 import {
   DegradedState,
@@ -112,6 +114,9 @@ import {
   HealthStatusSchema,
   Heartbeat,
   HeartbeatSchema,
+  MessagePage,
+  MessagePageRequestSchema,
+  MessagePageSchema,
   StoreWriteAck,
   StoreWriteAckSchema,
   StoreWriteSchema,
@@ -1928,6 +1933,99 @@ export class StoreClient {
         LOGGER.log({ operation: "shim.store-client.replay", agent_repl_session_id: this.opts.sessionId, claude_session_id: this.storeKey, store_key: this.storeKey, from_seq: opts.fromSeq, to_seq: opts.toSeq, max_events: opts.maxEvents, idle_ms: opts.idleMs },
           `opened throwaway replay subscription (standing subscription untouched)`);
         armIdle();
+      });
+    });
+  }
+
+  /**
+   * Fetch ONE bounded, backward-anchored page of messages from the store.
+   *
+   * THE VERB `Subscribe` AND `ReplayRequest` COULD NOT SPEAK. Both read forward
+   * from a lower bound, so a reader wanting recent history had to guess a
+   * `from_seq` low enough to cover it — a guess that cannot be computed when
+   * one message owns hundreds of records, and the origin of the unbounded scan.
+   * {@link HEAD_ANCHOR} asks for the newest page WITHOUT naming a seq;
+   * {@link continueBelow} walks below a page already received by copying its
+   * `last_page_seq` verbatim.
+   *
+   * NEITHER OLD DOOR IS TOUCHED. `Subscribe` and `replay` are unchanged: the
+   * page must WORK before the unbounded doors close.
+   *
+   * A THROWAWAY CONNECTION, exactly as {@link replay} uses, and for the same
+   * reason: `subConn` is the daemon's live tail and its position belongs to the
+   * daemon. `this.subConn` is neither read nor written below.
+   *
+   * EVERY failure REJECTS — dial failure, connection close, timeout. None is
+   * absorbed into an empty page, because an empty page is a claim about the
+   * conversation and a failure is a claim about the link.
+   */
+  fetchMessagePage(anchor: PageAnchor, timeoutMs: number): Promise<MessagePage> {
+    return new Promise<MessagePage>((resolve, reject) => {
+      const requestId = randomUUID();
+      const startedAt = Date.now();
+      const logCtx = {
+        operation: "shim.store-client.message-page",
+        agent_repl_session_id: this.opts.sessionId,
+        claude_session_id: this.storeKey,
+        store_key: this.storeKey,
+        request_id: requestId,
+        anchor: anchor.kind,
+        before_seq: anchor.kind === "before" ? anchor.lastPageSeq : undefined,
+      };
+      let settled = false;
+      let conn: MessageConn | null = null;
+      let timer: NodeJS.Timeout | null = null;
+
+      const fail = (reason: string): void => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        conn?.close();
+        LOGGER.log({ ...logCtx, level: "error", elapsed_ms: Date.now() - startedAt, reason }, `message page FAILED: ${reason}`);
+        reject(new Error(`store-client: message page failed: ${reason}`));
+      };
+      const succeed = (page: MessagePage): void => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        conn?.close();
+        LOGGER.log({ ...logCtx, elapsed_ms: Date.now() - startedAt, messages: pageMessages(page).length, last_page_seq: page.lastPageSeq, boundary: pageBoundary(page) }, `message page served`);
+        resolve(page);
+      };
+
+      const socket = net.connect(this.opts.socketPath);
+      const onDialError = (err: Error) => fail(`cannot open page connection: ${err.message}`);
+      socket.once("error", onDialError);
+      socket.once("connect", () => {
+        socket.removeListener("error", onDialError);
+        conn = new MessageConn(
+          socket,
+          {
+            onMessage: (msg) => {
+              // Routing is by Any type URL, not by an envelope arm: the store
+              // UDS surface is type-discriminated, so anything else on this
+              // connection (heartbeats) is simply not this page.
+              const page = unpackAs(msg, MessagePageSchema);
+              if (!page) return;
+              // A page for a request this call is not awaiting is DISCARDED,
+              // never applied: request_id is what correlates a page with the
+              // request that asked for it.
+              if (page.requestId !== requestId) {
+                LOGGER.log({ ...logCtx, level: "warn", page_request_id: page.requestId }, `discarded a MessagePage for a different request_id`);
+                return;
+              }
+              succeed(page);
+            },
+            // MessageConn owns the causal framing error; this owns only the
+            // fact that the page will never arrive.
+            onClose: (err) => fail(err ? "page connection lost after a framing failure" : "store closed the page connection before answering"),
+          },
+          COMPONENT,
+        );
+        conn.send(MessagePageRequestSchema, messagePageRequest(requestId, anchor));
+        LOGGER.log({ ...logCtx, timeout_ms: timeoutMs }, `requested one bounded message page (standing subscription untouched)`);
+        timer = setTimeout(() => fail(`no MessagePage within ${timeoutMs}ms`), timeoutMs);
+        timer.unref?.();
       });
     });
   }
