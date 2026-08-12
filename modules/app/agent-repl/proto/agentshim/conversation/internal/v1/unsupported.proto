@@ -1,6 +1,6 @@
 // unsupported.proto — the bodies of the records we could not place.
 //
-// SHIM-SIDE. THE DAEMON MUST NEVER IMPORT THIS FILE. These are carried by
+// SHIM-SIDE. THE DAEMON MUST NEVER IMPORT THIS PACKAGE. These are carried by
 // InternalEntry.unconverted (entry.proto) and have no external half, so nothing
 // here has a path to the daemon or to a page.
 //
@@ -15,11 +15,11 @@
 
 syntax = "proto3";
 
-package agentshim.conversation.v1;
+package agentshim.conversation.internal.v1;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "agentrepl/proto/agentshim/conversation/v1;conversationv1";
+option go_package = "agentrepl/proto/agentshim/conversation/internal/v1;conversationinternalv1";
 
 // Something one vendor does that no vendor-agnostic feed can show.
 //

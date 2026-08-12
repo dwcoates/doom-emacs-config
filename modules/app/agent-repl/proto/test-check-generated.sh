@@ -17,6 +17,14 @@ printf 'syntax = "proto3";\n' >"$FIXTURE/fixture.proto"
 # which keeps this test about staleness detection and leaves the gate's own
 # behavior to test-check-durable-isolation.sh.
 cp "$THIS_DIR/check-durable-isolation.sh" "$FIXTURE/check-durable-isolation.sh"
+# Both structural gates hang off codegen-gate, so both must be present or the
+# fixture's `make` fails for a reason that has nothing to do with staleness.
+# I7's gate is pointed at the fixture root, which has no daemon or webapp tree
+# — hence the FORBIDDEN_ROOTS stub below, which keeps it from reporting a setup
+# failure while leaving its real behavior to its own self-test.
+cp "$THIS_DIR/check-conversation-isolation.sh" "$FIXTURE/check-conversation-isolation.sh"
+mkdir -p "$FIXTURE/daemon"
+printf 'package daemon\n' >"$FIXTURE/daemon/stub.go"
 cat >"$FIXTURE/component/durable.proto" <<'EOF'
 syntax = "proto3";
 package agentshim.frontend.v1;
@@ -59,13 +67,13 @@ chmod +x "$STUBS/protoc" "$STUBS/npx" "$STUBS/protoc-gen-es"
 
 PATH="$STUBS:/usr/bin:/bin" \
     PROTO_TEST_PLUGIN="$STUBS/protoc-gen-es" \
-    make -C "$FIXTURE" check-generated PROTOS=fixture.proto COMPONENT_DIR=component >/dev/null
+    make -C "$FIXTURE" check-generated PROTOS=fixture.proto COMPONENT_DIR=component ISOLATION_ROOT=. >/dev/null
 
 set +e
 PATH="$STUBS:/usr/bin:/bin" \
     PROTO_TEST_PLUGIN="$STUBS/protoc-gen-es" \
     PROTO_TEST_OUTPUT=changed \
-    make -C "$FIXTURE" check-generated PROTOS=fixture.proto COMPONENT_DIR=component >/dev/null 2>&1
+    make -C "$FIXTURE" check-generated PROTOS=fixture.proto COMPONENT_DIR=component ISOLATION_ROOT=. >/dev/null 2>&1
 rc=$?
 set -e
 

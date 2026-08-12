@@ -7,12 +7,12 @@ including behavioral semantics as normative comments. Two packages:
 the wire), and `agentshim.conversation.v1` (the vendor-agnostic conversation
 model the producers write and the store persists).
 
-`conversation.v1` is specified in `FROZEN-conversation-v1.md` and is ten files:
-`entry.proto` (the stored record and its internal half), `external.proto`,
-`message.proto`, `content.proto`, `payloads.proto`, `bookkeeping.proto`,
-`unsupported.proto`, `ephemeral.proto` (the one message that is never written),
-plus the two shared vocabularies that moved down from `frontend.v1` —
-`tokens.proto` and `commands.proto`. Both moved because a DURABLE record names
+`conversation.v1` is specified in `FROZEN-conversation-v1.md`: eight files in
+the shared package — `external.proto`, `message.proto`, `content.proto`, `payloads.proto`, `bookkeeping.proto`,
+`ephemeral.proto` (the one message that is never written), plus the two shared
+vocabularies that moved down from `frontend.v1` — `tokens.proto` and
+`commands.proto` — and two more in `agentshim.conversation.internal.v1`
+(`entry.proto`, `unsupported.proto`). Both moved because a DURABLE record names
 them, and a stored record cannot depend on the daemon's resolved output surface.
 
 ## `conversation.v1` import discipline — the daemon gets `external.proto` only
@@ -21,13 +21,18 @@ A stored record has two halves. `ExternalEntry` may cross the shim→daemon wire
 `InternalEntry` — which observation plane produced the record, the store's dedup
 key, and anything the producer could not convert — may not.
 
-**No daemon source file may import `conversation/v1/entry.proto` or
-`conversation/v1/unsupported.proto`.** Everything the daemon is entitled to see
-is reachable from `external.proto`, whose import closure is exactly eight files
-and includes neither. This is why a daemon read of `plane` does not compile
-rather than merely being discouraged; the previous design published the shim's
-observation plane to the daemon, which then made turn-authority decisions from a
-shim implementation detail instead of from the record's own meaning.
+The internal half is its own PROTO PACKAGE, `agentshim.conversation.internal.v1`
+(`entry.proto`, `unsupported.proto`), not merely its own file. That distinction
+is the whole enforcement: every file in one proto package generates into ONE Go
+package, so an `entry.proto` sitting beside `external.proto` in
+`agentshim.conversation.v1` would put `Plane` and `dedup_key` in `conversationv1`
+alongside everything the daemon legitimately imports — free for the taking. A
+separate package is a separate Go import path and a separate TS module.
+
+**No daemon or webapp source may import `agentshim.conversation.internal.v1`.**
+The producers and the store import it freely; it is theirs. `make
+conversation-isolation` (invariant I7) refuses the import at codegen time, in
+.go, .ts and .proto form, with prose deliberately exempt.
 
 The store's `seq` is NOT in this package. A position is the store's addressing,
 so it rides `core/v1/entry-delivery.proto`, whose `stored`/`live` oneof also
@@ -35,8 +40,11 @@ replaces the old `retention` field: a live record has no field to put a position
 in, so nothing can advance a resume cursor past a position the store never
 assigned.
 
-This discipline deserves a repository gate alongside `check-durable-isolation.sh`
-and `bin/check-external-boundaries.sh`; it is not gated yet.
+Both gates hang off `codegen-gate`, which `make go`, `make ts` and `make lint`
+all require, so no Makefile route can emit bindings for a tree that has drifted.
+Each has a self-test (`make test-check-conversation-isolation`) that drives the
+real script against fixtures in both directions — a gate nobody has watched fail
+is not a gate.
 
 ## `agentshim.data.v1` was DELETED
 
