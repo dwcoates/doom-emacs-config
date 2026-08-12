@@ -548,8 +548,26 @@ func TestE2ETwoSlashCommandsDoNotSwapIdentities(t *testing.T) {
 	if len(models) != 1 {
 		t.Fatalf("saw %d /model intercepted-command messages, want exactly 1", len(models))
 	}
-	if got := compacts[0].GetRequestId(); got != "r-cmd-compact" {
-		t.Errorf("the /compact message names request id %q, want %q — the two commands swapped identities", got, "r-cmd-compact")
+	// EACH CLASS IS IDENTIFIED BY THE HANDLE ITS OWN PRODUCER CARRIES, and they
+	// are deliberately different handles.
+	//
+	// The durable one is the CLI's record, classified: the daemon produces no
+	// item for a forwarded command at all, so there is no daemon request id on
+	// it and an empty one is the CORRECT reading rather than a lost value. Its
+	// identity is the record's own uuid, which is what a page query returns it
+	// by. Stamping a request id onto it would mean correlating the CLI's
+	// promptId back to a submit — the prompt-identity correlation contract
+	// Part 2 removed, and the thing whose two-identity failure started all of
+	// this.
+	//
+	// The ephemeral one has no record to be identified by, so the submit that
+	// caused it IS its identity.
+	if got := compacts[0].GetUuid(); got != "e2e-slash-pair-compact" {
+		t.Errorf("the /compact message has uuid %q, want the uuid of the record that produced it, %q — the two commands swapped identities",
+			got, "e2e-slash-pair-compact")
+	}
+	if got := compacts[0].GetRequestId(); got != "" {
+		t.Errorf("the /compact message names request id %q, want empty — a forwarded command's account comes from the CLI's record, and a request id on it would mean a second producer had run", got)
 	}
 	if got := models[0].GetRequestId(); got != "r-cmd-model" {
 		t.Errorf("the /model message names request id %q, want %q — the two commands swapped identities", got, "r-cmd-model")
