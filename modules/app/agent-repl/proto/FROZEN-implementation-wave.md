@@ -277,3 +277,45 @@ files — not marked deprecated, not left for later, not merely noted in a
 planning document. A retired message that still compiles is a message something
 will still be written against.
 
+
+---
+
+# LANDED CHANGES — the running record
+
+Each entry is a change already applied to the canonical `.proto` files. The
+schema on disk is the contract; this is the record of WHY, which the schema
+cannot hold. Written by the orchestrator as each change lands, so a decision
+settled early in a long conversation is not lost by the time it matters.
+
+## `QueryRuntimeIdentity` stops restating process-fixed facts
+
+**What changed.** Removed `claude_code_version`, `auth_source` and
+`subscription_type` from `core.v1.QueryRuntimeIdentity`, reserving both the
+numbers and the names. Everything that can genuinely differ between two
+`query()` calls stays: `vendor_session_id`, `effective_model`, `sdk_version`,
+`shim_build_sha`, `fast_mode_state`, `fast_mode_reason`, and all five
+`EvidenceFingerprint` fields.
+
+**Why.** `SessionBegan` already states the CLI version, the auth source and the
+fast-mode posture once per session. Two spellings of one fact, in one package,
+with nothing comparing them, is a second authority that diverges silently — a
+disagreement between them would produce a wrong `/status` panel or a wrong cost
+attribution with no error anywhere.
+
+The cut was made per FIELD rather than as a blanket rule, because the blanket
+version was wrong: `/fast` toggles fast mode mid-session and a model switch
+creates a new query with a different `effective_model`, so those genuinely vary
+per query and had to stay. Verified against the shim's emission code rather than
+against the reasoning — and the code corrected one of the three:
+`subscription_type` was never populated at all (hardcoded empty), and its real
+home is `AccountUsageObservation`, which samples it at both turn boundaries. It
+was dead surface, not duplicated surface.
+
+**Architectural consequence, accepted.** `claude_code_version` and the auth
+source now require a join against `SessionBegan` rather than being present on
+the evidence record itself. That weakens `QueryRuntimeIdentity` as a
+self-contained forensic artifact, which is a real cost and the strongest
+argument that was raised against the change. It was accepted because both values
+are constant for a shim process, so the join has exactly one answer and cannot
+be ambiguous — and because the five fingerprints, which are what the record
+exists for, remain per-query and self-contained.
