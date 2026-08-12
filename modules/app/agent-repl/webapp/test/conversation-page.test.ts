@@ -48,7 +48,7 @@ function textItem(blockId: string, text: string): TextItem {
 function pageEffect(over: {
   requestId: string;
   items: ConversationItem[];
-  continuation?: { case: "more"; cursor: string } | { case: "start" };
+  continuation?: { case: "more" } | { case: "start" };
   liveJoinSeq?: number;
   fence?: string;
 }): AdapterEffect {
@@ -89,7 +89,7 @@ describe("the cold-open tail page", () => {
       pageEffect({
         requestId: "r-1",
         items: [textItem("a", "18"), textItem("b", "19"), textItem("c", "20")],
-        continuation: { case: "more", cursor: "cp1-A" },
+        continuation: { case: "more" },
         liveJoinSeq: 20,
       }),
     ]);
@@ -131,7 +131,7 @@ describe("the cold-open tail page", () => {
     // Assert
     expect(store.state.items).toHaveLength(0);
     expect(store.state.lastSeq).toBe(0);
-    expect(store.state.paging.reachedStart).toBe(true);
+    expect(store.state.paging.continuation).toEqual({ case: "start" });
   });
 });
 
@@ -146,7 +146,7 @@ describe("load-more", () => {
       pageEffect({
         requestId: "r-1",
         items: [textItem("c", "20")],
-        continuation: { case: "more", cursor: "cp1-A" },
+        continuation: { case: "more" },
         liveJoinSeq: 20,
       }),
     ]);
@@ -156,7 +156,7 @@ describe("load-more", () => {
       pageEffect({
         requestId: "r-2",
         items: [textItem("a", "18"), textItem("b", "19")],
-        continuation: { case: "more", cursor: "cp1-B" },
+        continuation: { case: "more" },
       }),
     ]);
     // Assert — history reads in conversation order, not arrival order.
@@ -168,11 +168,11 @@ describe("load-more", () => {
     const store = armedStore();
     store.notePageRequested({ requestId: "r-1", anchor: "tail", fence: "f1" });
     store.ingest([
-      pageEffect({ requestId: "r-1", items: [textItem("c", "3")], continuation: { case: "more", cursor: "A" }, liveJoinSeq: 3 }),
+      pageEffect({ requestId: "r-1", items: [textItem("c", "3")], continuation: { case: "more" }, liveJoinSeq: 3 }),
     ]);
     store.notePageRequested({ requestId: "r-2", anchor: "before", fence: "f1" });
     store.ingest([
-      pageEffect({ requestId: "r-2", items: [textItem("b", "2")], continuation: { case: "more", cursor: "B" } }),
+      pageEffect({ requestId: "r-2", items: [textItem("b", "2")], continuation: { case: "more" } }),
     ]);
     // Act
     store.notePageRequested({ requestId: "r-3", anchor: "before", fence: "f1" });
@@ -186,7 +186,7 @@ describe("load-more", () => {
     // next resync re-replay everything above it.
     const store = armedStore();
     store.notePageRequested({ requestId: "r-1", anchor: "tail", fence: "f1" });
-    store.ingest([pageEffect({ requestId: "r-1", items: [textItem("c", "20")], liveJoinSeq: 20, continuation: { case: "more", cursor: "A" } })]);
+    store.ingest([pageEffect({ requestId: "r-1", items: [textItem("c", "20")], liveJoinSeq: 20, continuation: { case: "more" } })]);
     // Act
     store.notePageRequested({ requestId: "r-2", anchor: "before", fence: "f1" });
     store.ingest([pageEffect({ requestId: "r-2", items: [textItem("b", "19")], continuation: { case: "start" } })]);
@@ -194,29 +194,57 @@ describe("load-more", () => {
     expect(store.state.lastSeq).toBe(20);
   });
 
-  it("the continuation cursor is retained verbatim for the next request", () => {
-    // Arrange — opaque: this end stores and returns it, never parses it.
+  it("HistoryHasMore is adopted as the affordance's only input", () => {
+    // Arrange — the arm is EMPTY: a fact the client acts on by calling
+    // NextPageCmd, never a position it stores.
     const store = armedStore();
     store.notePageRequested({ requestId: "r-1", anchor: "tail", fence: "f1" });
     // Act
-    store.ingest([
-      pageEffect({ requestId: "r-1", items: [], continuation: { case: "more", cursor: "cp1-OPAQUE" } }),
-    ]);
+    store.ingest([pageEffect({ requestId: "r-1", items: [], continuation: { case: "more" } })]);
     // Assert
-    expect(store.state.paging.cursor).toBe("cp1-OPAQUE");
+    expect(store.state.paging.continuation).toEqual({ case: "more" });
   });
 
-  it("the conversation's beginning RETIRES the cursor", () => {
+  it("the conversation's beginning RETIRES the affordance", () => {
     // Arrange
     const store = armedStore();
     store.notePageRequested({ requestId: "r-1", anchor: "tail", fence: "f1" });
-    store.ingest([pageEffect({ requestId: "r-1", items: [], continuation: { case: "more", cursor: "A" } })]);
+    store.ingest([pageEffect({ requestId: "r-1", items: [], continuation: { case: "more" } })]);
     // Act
     store.notePageRequested({ requestId: "r-2", anchor: "before", fence: "f1" });
     store.ingest([pageEffect({ requestId: "r-2", items: [], continuation: { case: "start" } })]);
     // Assert
-    expect(store.state.paging.reachedStart).toBe(true);
-    expect(store.state.paging.cursor).toBeNull();
+    expect(store.state.paging.continuation).toEqual({ case: "start" });
+  });
+
+  it("a SHORT page alone neither offers nor retires the affordance", () => {
+    // Arrange — the symptom this replaces was an affordance derived from
+    // something other than the daemon's answer. A one-message page carrying
+    // `start` retires it, however short a page of ten slots it looks.
+    const store = armedStore();
+    store.notePageRequested({ requestId: "r-1", anchor: "tail", fence: "f1" });
+    // Act
+    store.ingest([
+      pageEffect({
+        requestId: "r-1",
+        items: [textItem("b1", "only one")],
+        continuation: { case: "start" },
+      }),
+    ]);
+    // Assert
+    expect(store.state.paging.continuation).toEqual({ case: "start" });
+  });
+
+  it("a FULL page carrying `start` still retires the affordance", () => {
+    // Arrange — the converse: a page that fills every slot proves nothing
+    // about whether history remains, and only the oneof answers that.
+    const store = armedStore();
+    store.notePageRequested({ requestId: "r-1", anchor: "tail", fence: "f1" });
+    const items = Array.from({ length: 10 }, (_, i) => textItem(`b${i}`, `m${i}`));
+    // Act
+    store.ingest([pageEffect({ requestId: "r-1", items, continuation: { case: "start" } })]);
+    // Assert
+    expect(store.state.paging.continuation).toEqual({ case: "start" });
   });
 });
 
@@ -312,35 +340,39 @@ describe("re-anchoring after a retired replay mark", () => {
     expect(store.state.lastSeq).toBe(12);
   });
 
-  it("drops the retired conversation's load-more cursor", () => {
-    // Arrange — the cursor is the daemon's handle on a position in a
-    // conversation that is gone.
+  it("drops the retired conversation's `more`, which was about a conversation that is gone", () => {
+    // Arrange
     const store = armedStore();
     store.notePageRequested({ requestId: "r-1", anchor: "tail", fence: "f1" });
     store.ingest([
       pageEffect({
         requestId: "r-1",
         items: [textItem("b-old", "old one")],
-        continuation: { case: "more", cursor: "c-retired" },
+        continuation: { case: "more" },
         liveJoinSeq: 1060,
       }),
     ]);
     // Act
     store.rebaseSeqSpace();
     // Assert
-    expect(store.state.paging.cursor).toBeNull();
+    expect(store.state.paging.continuation).toBeNull();
   });
 
   it("un-retires the load-more affordance the retired conversation had spent", () => {
-    // Arrange — `reachedStart` is a fact established about the OLD conversation.
+    // Arrange — `start` is a fact established about the OLD conversation.
     const store = armedStore();
     store.notePageRequested({ requestId: "r-1", anchor: "tail", fence: "f1" });
     store.ingest([
-      pageEffect({ requestId: "r-1", items: [textItem("b-old", "old one")], liveJoinSeq: 1060 }),
+      pageEffect({
+        requestId: "r-1",
+        items: [textItem("b-old", "old one")],
+        continuation: { case: "start" },
+        liveJoinSeq: 1060,
+      }),
     ]);
     // Act
     store.rebaseSeqSpace();
     // Assert
-    expect(store.state.paging.reachedStart).toBe(false);
+    expect(store.state.paging.continuation).toBeNull();
   });
 });
