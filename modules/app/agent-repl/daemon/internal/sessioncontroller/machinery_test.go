@@ -459,6 +459,80 @@ func TestTwoCloseTogetherCommandsKeepTheirOwnIdentities(t *testing.T) {
 	}
 }
 
+// classifiedItem returns the classified DaemonInterceptedCommandItem message
+// pushed on the conversation plane under uuid, or nil when none was.
+//
+// The whole MESSAGE rather than just its command, because the durability arm is
+// what these tests are about and the command alone cannot state it.
+func (h *queueHarness) classifiedItem(uuid string) *frontendv1.Message {
+	h.push.mu.Lock()
+	defer h.push.mu.Unlock()
+	for _, cd := range h.push.convo {
+		for _, it := range cd.GetMessages() {
+			if it.GetUuid() == uuid && it.GetDaemonInterceptedCommand() != nil {
+				return it
+			}
+		}
+	}
+	return nil
+}
+
+func TestAClassifiedShapeAIsDurable(t *testing.T) {
+	// Arrange: shape A has a transcript record behind it, so it must CLAIM one.
+	h := newQueueHarness(t, nil)
+
+	// Act
+	h.controller().consumer.Consume(shapeAPromptEvent(t, 12, "u-a", "prompt-1", compactMachinery))
+
+	// Assert
+	it := h.classifiedItem("u-a")
+	if it == nil {
+		t.Fatal("no classified item for u-a")
+	}
+	if it.GetDurable() == nil {
+		t.Errorf("classified shape A durability arm = %v, want DURABLE — the CLI wrote a transcript record for it", it.GetDurability())
+	}
+}
+
+func TestAClassifiedShapeBIsEphemeral(t *testing.T) {
+	// Arrange: shape B carries no promptId and the contract rules it out of the
+	// durable set, so it must claim NO record.
+	h := newQueueHarness(t, nil)
+
+	// Act
+	h.controller().consumer.Consume(shapeBLocalCommandEvent(t, 12, "u-b", "<command-name>/context</command-name>"))
+
+	// Assert
+	it := h.classifiedItem("u-b")
+	if it == nil {
+		t.Fatal("no classified item for u-b")
+	}
+	if it.GetEphemeral() == nil {
+		t.Errorf("classified shape B durability arm = %v, want EPHEMERAL", it.GetDurability())
+	}
+}
+
+func TestAClassifiedEphemeralCommandIsAFeedRow(t *testing.T) {
+	// Arrange: rule 1 — an ephemeral message is ALWAYS a feed row, and the
+	// constructor is what makes that true of a classified record too.
+	h := newQueueHarness(t, nil)
+
+	// Act
+	h.controller().consumer.Consume(shapeBLocalCommandEvent(t, 12, "u-b", "<command-name>/context</command-name>"))
+
+	// Assert
+	it := h.classifiedItem("u-b")
+	if it == nil {
+		t.Fatal("no classified item for u-b")
+	}
+	if got := it.GetLineage().GetParentMessageId(); got != "" {
+		t.Errorf("ephemeral classified item parent_message_id = %q, want none", got)
+	}
+	if got := it.GetLineage().GetTopLevelMessageId(); got != "u-b" {
+		t.Errorf("ephemeral classified item top_level_message_id = %q, want its own uuid", got)
+	}
+}
+
 // blockUserTranscriptEvent is a user transcript line whose body arrives as
 // content BLOCKS — the shape the real file plane produces for a typed prompt,
 // as opposed to the single content string a hand-simplified fixture uses.
