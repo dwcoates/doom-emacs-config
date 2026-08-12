@@ -162,19 +162,17 @@ func (m *Manager) historyPage(ctx context.Context, reader, workspace string, fir
 //     store can now answer the question this surface actually asks: the newest
 //     ten MESSAGES, resolved by the store itself. The forward windowed scan is
 //     gone from this route entirely.
-//   - A workspace with a LIVE session controller is still served THROUGH THE
-//     SHIM by the windowed backwards walk. The shim exposes no page verb to the
-//     daemon yet, and dialling the store directly while a shim is up would be
-//     serving history through a side door — a fallback that masks a shim outage
-//     instead of surfacing it (repull.go's header). That route becomes bounded
-//     when the shim carries MessagePageRequest, not by the daemon going around
-//     it.
+//   - A workspace with a LIVE session controller is served THROUGH THE SHIM,
+//     and now by the SAME bounded page (livepage.go). The shim carries
+//     MessagePageRequest and passes it to the store, so the live route no longer
+//     needs the windowed walk — and it still never dials the store itself, which
+//     would be the side door repull.go's header forbids.
 //
 // BOTH ROUTES CURATE THROUGH consumer.pushConversation, so which one served a
 // page is invisible in the page.
 func (m *Manager) serveHistoryPage(ctx context.Context, admission historyAdmission, workspace string, resolve pageBoundResolver, first bool) (pageOutcome, error) {
 	if admission.route == historyRouteLiveController {
-		return m.pageFromController(ctx, admission.controller, resolve, historyPageSlots)
+		return m.pageFromControllerPage(ctx, admission.controller, admission.generationID, resolve, first)
 	}
 	return m.pageFromStorePage(ctx, workspace, admission.generationID, resolve, first)
 }
