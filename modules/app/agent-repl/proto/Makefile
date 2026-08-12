@@ -9,6 +9,15 @@
 PROTOS := \
   agentshim/core/v1/core.proto \
   agentshim/core/v1/message-page.proto \
+  agentshim/conversation/v1/tokens.proto \
+  agentshim/conversation/v1/commands.proto \
+  agentshim/conversation/v1/content.proto \
+  agentshim/conversation/v1/ephemeral.proto \
+  agentshim/conversation/v1/payloads.proto \
+  agentshim/conversation/v1/bookkeeping.proto \
+  agentshim/conversation/v1/unsupported.proto \
+  agentshim/conversation/v1/message.proto \
+  agentshim/conversation/v1/entry.proto \
   agentshim/frontend/v1/agent-emission.proto \
   agentshim/frontend/v1/agent-response.proto \
   agentshim/frontend/v1/conversation-history.proto \
@@ -30,7 +39,6 @@ PROTOS := \
   agentshim/frontend/v1/slash-menu.proto \
   agentshim/frontend/v1/state.proto \
   agentshim/frontend/v1/tokens-menu.proto \
-  agentshim/frontend/v1/tokens.proto \
   agentshim/frontend/v1/tool-call.proto \
   agentshim/frontend/v1/topbar.proto \
   agentshim/frontend/v1/user-message.proto

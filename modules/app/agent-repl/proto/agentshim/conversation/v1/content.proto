@@ -1,0 +1,145 @@
+// content.proto — the neutral content model.
+//
+// NEUTRAL BY DESIGN. The vendor's own content model has seventeen block kinds
+// named for its API surface — MCP tool use, server tool use, web search result,
+// code execution result, container upload. Those are all the same two facts
+// wearing different names: a tool was CALLED, and a tool RETURNED. This models
+// the facts and lets the tool's own name carry the rest.
+//
+// THE BLOCK SET IS NARROWED PER SITE, and there is deliberately no shared
+// `Content`. One union with every arm would make a user message carrying
+// reasoning, or a tool result carrying a tool call, representable and
+// meaningless. Three unions, each holding only what can legitimately appear
+// where it appears, make those unbuildable instead of merely wrong. The cost is
+// a duplicated arm list; the repo's rule is duplicate over share, because
+// mutual exclusivity is worth more than deduplication.
+
+syntax = "proto3";
+
+package agentshim.conversation.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/agentshim/conversation/v1;conversationv1";
+
+// What a PERSON said, as an ordered sequence of blocks. No reasoning and no
+// tool calls, because a person produces neither.
+message UserContent {
+  // In the order the person composed them, which is the order they are shown.
+  repeated UserContentBlock blocks = 1;
+}
+
+// One block of what a person said.
+message UserContentBlock {
+  oneof block {
+    // Words the person typed.
+    TextBlock text = 1;
+    // An image they pasted or attached.
+    ImageBlock image = 2;
+    // A block whose kind we do not model. It renders as nothing and is kept so
+    // the decision is reversible.
+    UnsupportedBlock unsupported = 3;
+  }
+}
+
+// What the AGENT said in one response: prose, the reasoning behind it, and the
+// tools it decided to call, in the order it produced them.
+message AgentContent {
+  // In production order, which is what makes "it thought, then said this, then
+  // called that" readable without a second ordering field.
+  repeated AgentContentBlock blocks = 1;
+}
+
+// One block of an agent response.
+message AgentContentBlock {
+  oneof block {
+    // Words meant for the reader.
+    TextBlock text = 1;
+    // Reasoning the agent showed. Held apart from text because a client may
+    // legitimately collapse or hide it, and cannot do that if it is text.
+    ThinkingBlock thinking = 2;
+    // The agent called a tool.
+    ToolCallBlock tool_call = 3;
+    // A block whose kind we do not model.
+    UnsupportedBlock unsupported = 4;
+  }
+}
+
+// What a TOOL returned.
+//
+// Narrow like UserContent and separate from it on purpose: the vendor delivers
+// tool results inside user-role records, and reusing the user's own union here
+// would preserve that accident in a schema built to erase it. A tool result is
+// not something a person said.
+message ToolResultContent {
+  // In the order the tool produced them.
+  repeated ToolResultContentBlock blocks = 1;
+}
+
+// One block of a tool's output.
+message ToolResultContentBlock {
+  oneof block {
+    // The tool's textual output.
+    TextBlock text = 1;
+    // An image the tool produced — a screenshot, a rendered chart.
+    ImageBlock image = 2;
+    // A block whose kind we do not model.
+    UnsupportedBlock unsupported = 3;
+  }
+}
+
+// Words meant to be read as they are.
+message TextBlock {
+  // The text, verbatim. Markdown is a rendering choice a client makes; nothing
+  // here declares a format, because the producer does not know one.
+  string text = 1;
+}
+
+// Reasoning the agent showed on its way to an answer.
+message ThinkingBlock {
+  // The reasoning itself. May be empty when the vendor redacted it, which is
+  // different from the agent not having reasoned — see `redacted`.
+  string text = 1;
+  // The vendor withheld the content. Stated rather than left as empty text, so
+  // a client can say "reasoning was hidden" instead of showing nothing.
+  bool redacted = 2;
+}
+
+// The agent decided to call a tool.
+message ToolCallBlock {
+  // The id the RESULT will name. This is the only correlation between a call
+  // and its result, and it comes from the vendor.
+  string tool_call_id = 1;
+  // The tool as the agent named it — `Bash`, `Read`, an MCP tool's full name.
+  // A plain string because the set is open: MCP servers add tools at runtime,
+  // so an enum here would be wrong within a day.
+  string tool_name = 2;
+  // The arguments, as the agent supplied them. Structured rather than a string
+  // because a client renders fields, and re-parsing a string to find them is a
+  // second parser that can disagree with the first.
+  google.protobuf.Struct arguments = 3;
+}
+
+// A tool returning is NOT a block. It is `ToolReturned` in payloads.proto, an
+// UPDATE arm on the message that made the call. Modeling it as a block would
+// have required an author to own it, and the only author on offer was the user
+// — who did not run the tool.
+
+// An image, carried by REFERENCE rather than by value.
+message ImageBlock {
+  // Where the image lives. A path or URL rather than bytes: a conversation
+  // record is replayed many times, and inlining megabytes into something
+  // replayed is how a feed becomes slow.
+  string source = 1;
+  // The MIME type, so a client knows what it is fetching before it fetches it.
+  string media_type = 2;
+}
+
+// A block whose kind this schema does not model, kept whole so the decision to
+// not model it stays reversible from stored data.
+message UnsupportedBlock {
+  // What the vendor called it, so a later schema knows what to model.
+  string kind = 1;
+  // The block entire and verbatim, so nothing is lost by not understanding it.
+  google.protobuf.Struct raw = 2;
+}
