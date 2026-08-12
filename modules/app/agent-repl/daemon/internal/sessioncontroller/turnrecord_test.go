@@ -236,7 +236,7 @@ func TestAnAcceptedHoldIsNamedFromTheDurableTurnLedger(t *testing.T) {
 	h.applier.setDurableTurns("t_42")
 
 	// Act.
-	holds := h.m.DrainHolds(fakeTaskCounter{counts: map[string]int64{}})
+	holds := h.m.DrainHolds(noLiveTasks())
 
 	// Assert.
 	if len(holds) != 1 || holds[0].TurnID != "t_42" {
@@ -257,7 +257,7 @@ func TestAnAcceptedHoldStandsWhenTheLedgerCannotBeRead(t *testing.T) {
 	h.applier.setActiveTurnIDsErr(errors.New("state store is gone"))
 
 	// Act.
-	holds := h.m.DrainHolds(fakeTaskCounter{counts: map[string]int64{}})
+	holds := h.m.DrainHolds(noLiveTasks())
 
 	// Assert.
 	if len(holds) != 1 || !holds[0].TurnActive || holds[0].TurnID != "" {
@@ -278,7 +278,7 @@ func TestAnAdoptedHoldBroadcastsTheDeliberateEmptyID(t *testing.T) {
 	h.applier.setDurableTurns("t_42")
 
 	// Act.
-	holds := h.m.DrainHolds(fakeTaskCounter{counts: map[string]int64{}})
+	holds := h.m.DrainHolds(noLiveTasks())
 
 	// Assert.
 	if len(holds) != 1 || !holds[0].TurnActive || holds[0].TurnID != "" {

@@ -8,6 +8,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/inflight"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
@@ -70,20 +71,47 @@ type ShutdownLease interface {
 // unambiguously holds the drain, but no id for it was ever seen by this
 // process. Collapsing the two would make that turn read as no turn at all,
 // which is the one reading that lets a bounce cut live work.
+//
+// LiveTasks IS A SET, NOT A COUNT, and that is the whole point of this field. A
+// count can only ever say HOW MANY, so a drain that holds and is asked WHAT it
+// is waiting on answers with a number and the investigation stops there. Worse,
+// two counts that disagree cannot be reconciled, while two identified sets can
+// be diffed. This repo learned that on process survival: a PID COUNT stayed
+// constant across a bounce while a shim had in fact died and been replaced, and
+// only diffing the PID SETS revealed it. A drain reporting "3 live tasks"
+// before and after cannot tell you it is the same three.
+//
+// THE SET'S OWN ARMS CARRY THE MISS. An answered-empty set ("this workspace has
+// no live tasks") and an unanswered one ("nothing has ever told this resolver
+// about this workspace") are different facts and stay different facts; they are
+// never both flattened to an empty slice.
 type DrainHold struct {
 	Workspace  string
 	SessionID  string
 	TurnActive bool
 	TurnID     string
-	LiveTasks  int64
+	LiveTasks  inflight.Set
 }
 
-// LiveTaskCounter reports a workspace's live background-task count and whether
-// the workspace is known at all. Satisfied by *progress.Manager, the authority
-// that already folds the count for the progress footer — so the drain and the
-// footer answer with the same number instead of two derivations of it.
-type LiveTaskCounter interface {
-	LiveTasks(workspace string) (int64, bool)
+// Equal reports whether two holds say the same thing, including the IDENTITIES
+// of the live tasks rather than merely how many there are. DrainHold stopped
+// being a comparable struct when its live tasks became a set, and a hold
+// compare that ignored the members would be the count bug wearing a set's
+// clothes.
+func (h DrainHold) Equal(other DrainHold) bool {
+	return h.Workspace == other.Workspace &&
+		h.SessionID == other.SessionID &&
+		h.TurnActive == other.TurnActive &&
+		h.TurnID == other.TurnID &&
+		h.LiveTasks.Equal(other.LiveTasks)
+}
+
+// LiveTaskSource names a workspace's live background tasks, or says it cannot.
+// Satisfied by *sessioncontroller.Manager itself, whose InFlight resolver is
+// THE daemon's identified in-flight authority — so the drain adopts that
+// verdict instead of standing up a second derivation of what is running.
+type LiveTaskSource interface {
+	LiveTaskSet(workspace string) inflight.Set
 }
 
 // ShutdownHoldStore is the durable ledger of prompts parked by the lease.
@@ -179,7 +207,7 @@ func (m *Manager) noteDrainActivity() {
 // A session with neither a turn nor live tasks contributes NOTHING: the holds
 // list is the complete answer to "what is the bounce waiting on", and a session
 // that is waiting on nothing is not an answer to it.
-func (m *Manager) DrainHolds(tasks LiveTaskCounter) []DrainHold {
+func (m *Manager) DrainHolds(tasks LiveTaskSource) []DrainHold {
 	type live struct {
 		workspace, sessionID string
 		turn                 turnRecord
@@ -193,14 +221,25 @@ func (m *Manager) DrainHolds(tasks LiveTaskCounter) []DrainHold {
 
 	out := make([]DrainHold, 0, len(sessions))
 	for _, s := range sessions {
-		var liveTasks int64
+		// THE LIVE TASKS ARE NAMED, NOT COUNTED, and the two arms of the set
+		// are kept apart all the way into the hold: an answered-empty set is
+		// "this workspace runs no background task", an unanswered one is "no
+		// one could say", and only the first is evidence of quiet.
+		liveTasks := inflight.Unanswered(s.workspace, "the drain was derived with no live-task source, so what this workspace is running in the background was never asked")
 		if tasks != nil {
-			if n, known := tasks.LiveTasks(s.workspace); known {
-				liveTasks = n
-			}
+			liveTasks = tasks.LiveTaskSet(s.workspace)
 		}
-		if !s.turn.active() && liveTasks <= 0 {
+		// WHEN THE DRAIN HOLDS IS UNCHANGED. Only a set that is both answered
+		// and non-empty is a task hold, exactly as only a positive count was
+		// before: an unknown set held nothing then and holds nothing now, so
+		// this reroute changes WHAT a hold reports, never WHETHER it exists.
+		heldByTasks := liveTasks.Known() && len(liveTasks.Items()) > 0
+		if !s.turn.active() && !heldByTasks {
 			continue
+		}
+		if heldByTasks {
+			m.logf("session-controller: drain hold ws=%q session=%s turn_active=%v — live background work: %s",
+				s.workspace, s.sessionID, s.turn.active(), liveTasks.Summary())
 		}
 		// THE HOLD IS NAMED HERE, off the record's PROVENANCE rather than off
 		// whether some string happens to be empty. Each phase can honestly answer
