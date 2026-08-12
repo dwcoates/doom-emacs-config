@@ -38,6 +38,7 @@ import {
 } from "./framing.js";
 import type { Any } from "./framing.js";
 import { bindLog } from "./log.js";
+import { pageMessages } from "./message-page.js";
 import { shimBuildSha } from "../build-identity.js";
 import {
   Ack,
@@ -57,6 +58,10 @@ import {
   HeartbeatSchema,
   Interrupt,
   InterruptSchema,
+  MessagePage,
+  MessagePageRequest,
+  MessagePageRequestSchema,
+  MessagePageSchema,
   LiveTaskSetSchema,
   ModelCatalog,
   ModelCatalogSchema,
@@ -130,6 +135,19 @@ export interface SessionServerHandlers {
    * standing store subscription.
    */
   onReplayRequest(msg: ReplayRequest): void;
+  /**
+   * Serve ONE bounded, backward-anchored page of messages
+   * (`message-page.proto` MessagePageRequest) from the store.
+   *
+   * A PASS-THROUGH, not a translation. The shim issues the daemon's request to
+   * the store and hands the store's `MessagePage` back unchanged: a
+   * StoredMessage arrives WHOLE, and re-chunking or re-correlating one here
+   * would reintroduce exactly the correlation this shape removes.
+   *
+   * It exists because dialing the store directly while a shim is up is the
+   * side door the daemon forbids itself — so the shim must carry the verb.
+   */
+  onMessagePageRequest(msg: MessagePageRequest): void;
   /** Return a correlated readiness assertion for this live shim session. */
   onHealthCheck(msg: HealthCheck): Promise<HealthStatus> | HealthStatus;
   /**
@@ -222,6 +240,14 @@ export class SessionServer {
    * checkable rather than assumed.
    */
   private readonly replayConns = new Map<string, MessageConn>();
+  /**
+   * The connection each in-flight page request arrived on, for the same reason
+   * {@link replayConns} exists: the page answers the question ONE connection
+   * asked, and a connection that never asked must not receive it. A superseded
+   * connection's page is dropped rather than rerouted — the daemon re-issues
+   * what it still wants after the next ShimReady.
+   */
+  private readonly pageConns = new Map<string, MessageConn>();
 
   constructor(
     private readonly opts: SessionServerOptions,
@@ -416,6 +442,57 @@ export class SessionServer {
   }
 
   /**
+   * Hand ONE store-minted page back to the daemon that asked for it.
+   *
+   * The page is written VERBATIM — its `request_id` is the daemon's own, its
+   * ten slots are the store's, and no StoredMessage on it is touched. The ten
+   * slots are a property of the TYPE, so nothing here could widen the page even
+   * if it tried.
+   */
+  sendMessagePage(page: MessagePage): void {
+    const live = this.pageIsLive(page.requestId, { messages: pageMessages(page).length });
+    this.pageConns.delete(page.requestId);
+    if (!live) return;
+    this.conn!.send(MessagePageSchema, page);
+  }
+
+  /**
+   * Report that a page request CANNOT be answered, as a Nack naming the reason.
+   *
+   * DELIBERATELY NOT AN EMPTY PAGE. An empty page is indistinguishable from a
+   * conversation with no history, so a store failure that returned one would
+   * become a silent lie about the conversation. Every failure — dial, close,
+   * timeout, framing, mismatched id — arrives here instead.
+   */
+  failMessagePage(requestId: string, reason: string): void {
+    const live = this.pageIsLive(requestId, { reason });
+    this.pageConns.delete(requestId);
+    if (!live) return;
+    LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, request_id: requestId, reason },
+      `message page FAILED for the daemon: ${reason}`);
+    this.conn!.send(NackSchema, create(NackSchema, { requestId, reason }));
+  }
+
+  /**
+   * Whether requestId's page may still write to the CURRENT connection — the
+   * same rule {@link replayIsLive} applies, for the same reason.
+   */
+  private pageIsLive(requestId: string, detail: Record<string, unknown>): boolean {
+    const origin = this.pageConns.get(requestId);
+    if (!this.isConnected()) {
+      LOGGER.log({ ...detail, agent_repl_session_id: this.opts.sessionId, request_id: requestId },
+        `no daemon attached; message page frame dropped — the daemon re-issues the request it still wants after the next ShimReady`);
+      return false;
+    }
+    if (origin !== this.conn) {
+      LOGGER.log({ ...detail, agent_repl_session_id: this.opts.sessionId, request_id: requestId },
+        `message page belongs to a SUPERSEDED daemon connection; dropped rather than written to the current one, which never asked this question`);
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Whether requestId's replay may still write to the CURRENT connection.
    *
    * False covers both ways a replay can be stranded, and says which: no daemon
@@ -512,6 +589,7 @@ export class SessionServer {
     }
     this.handshaked = false;
     this.replayConns.clear();
+    this.pageConns.clear();
     LOGGER.log({ agent_repl_session_id: this.opts.sessionId }, "daemon UDS connection closed");
     return Promise.resolve();
   }
@@ -637,6 +715,16 @@ export class SessionServer {
       LOGGER.log({ agent_repl_session_id: this.opts.sessionId, request_id: replay.requestId, from_seq: replay.fromSeq, to_seq: replay.toSeq },
         `daemon requested a bounded history replay`);
       this.handlers.onReplayRequest(replay);
+      return;
+    }
+    const pageReq = unpackAs(msg, MessagePageRequestSchema);
+    if (pageReq) {
+      // Bound to THIS connection before the handler can answer, exactly as a
+      // replay is: the page may only ever answer the connection that asked it.
+      this.pageConns.set(pageReq.requestId, this.conn!);
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, request_id: pageReq.requestId, anchor: pageReq.anchor.case },
+        `daemon requested one bounded message page`);
+      this.handlers.onMessagePageRequest(pageReq);
       return;
     }
     const health = unpackAs(msg, HealthCheckSchema);
@@ -769,6 +857,14 @@ export class SessionServer {
     if (stranded.length > 0) {
       LOGGER.log({ agent_repl_session_id: this.opts.sessionId, request_ids: stranded },
         `daemon connection closed under ${stranded.length} in-flight replay request(s); each is retired with the connection and re-issued by the daemon after the next ShimReady`);
+    }
+    // In-flight page requests are retired for the same reason and on the same
+    // terms: the question died with the connection that asked it.
+    const strandedPages = [...this.pageConns.keys()];
+    this.pageConns.clear();
+    if (strandedPages.length > 0) {
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, request_ids: strandedPages },
+        `daemon connection closed under ${strandedPages.length} in-flight message page request(s); each is retired with the connection and re-issued by the daemon after the next ShimReady`);
     }
     if (err) {
       // MessageConn owns and already recorded the causal transport failure.

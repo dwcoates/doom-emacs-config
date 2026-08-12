@@ -107,6 +107,7 @@ describe("daemon reattach with from_seq continuation", () => {
         onQueryLiveTasks: (m) => create(AckSchema, { requestId: m.requestId, liveTaskSet: create(LiveTaskSetSchema, { taskIds: [] }) }),
         onPermissionResponse: () => {},
         onReplayRequest: () => {},
+        onMessagePageRequest: () => {},
         onHealthCheck: (m) => create(HealthStatusSchema, {
           requestId: m.requestId,
           healthy: true,

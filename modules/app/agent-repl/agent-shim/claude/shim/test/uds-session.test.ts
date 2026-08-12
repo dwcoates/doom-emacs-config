@@ -76,7 +76,11 @@ import {
   FilePlaneDiagnosticSchema,
   CancelDetachedAgentsSchema,
   InterruptSchema,
+  MessagePageHeadSchema,
+  MessagePageRequestSchema,
+  MessagePageSchema,
   NackSchema,
+  StoredMessageSchema,
   PermissionDecision,
   InterruptOutcome,
   PermissionRequestSchema,
@@ -399,6 +403,8 @@ async function rig(
     sessionSource?: SessionSource;
     storeSessionId?: string;
     replayIdleMs?: number;
+    /** Failure bound for a daemon-issued message page. */
+    messagePageTimeoutMs?: number;
     /** Grace an acked-interrupted turn gets for the SDK's own terminal. */
     interruptTerminalGraceMs?: number;
     /** Quiet window an open turn gets before its query is judged dead. */
@@ -454,6 +460,7 @@ async function rig(
     // that report without waiting out the real budget.
     storeRelinkReportAfterMs: 0,
     ...(opts.replayIdleMs !== undefined ? { replayIdleMs: opts.replayIdleMs } : {}),
+    ...(opts.messagePageTimeoutMs !== undefined ? { messagePageTimeoutMs: opts.messagePageTimeoutMs } : {}),
     ...(opts.interruptTerminalGraceMs !== undefined ? { interruptTerminalGraceMs: opts.interruptTerminalGraceMs } : {}),
     ...(opts.turnQuietGraceMs !== undefined ? { turnQuietGraceMs: opts.turnQuietGraceMs } : {}),
     ...(opts.nowMs !== undefined ? { nowMs: opts.nowMs } : {}),
@@ -4346,6 +4353,150 @@ describe("UdsSession store subscription key", () => {
     await until(() => store.count() > initialConnections, "resubscribed under the vendor uuid");
     const resub = await store.latest().next(SubscribeSchema);
     expect(resub.sessionId).toBe("96a0baaf-652a-4bb1-9450-e8292c595d33");
+  });
+});
+
+describe("UdsSession daemon-facing message page (message-page.proto)", () => {
+  // The daemon may NOT dial the store while a shim is up — that is the side
+  // door it forbids itself — so the bounded page has to travel through here.
+
+  it("round-trips a daemon page request to the store and back", async () => {
+    // Arrange
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", messagePageTimeoutMs: 2000 });
+
+    // Act
+    daemon.send(MessagePageRequestSchema, create(MessagePageRequestSchema, {
+      requestId: "p1",
+      anchor: { case: "head", value: create(MessagePageHeadSchema, {}) },
+    }));
+    await until(() => store.count() >= 3);
+    const pageConn = store.latest();
+    const storeReq = await pageConn.next(MessagePageRequestSchema);
+    pageConn.send(MessagePageSchema, create(MessagePageSchema, {
+      requestId: storeReq.requestId,
+      lastPageSeq: 77n,
+    }));
+    const page = await daemon.next(MessagePageSchema);
+
+    // Assert: the DAEMON's request_id comes back, so it correlates the page
+    // with the request it made rather than with whichever was most recent.
+    expect(page.requestId).toBe("p1");
+    expect(page.lastPageSeq).toBe(77n);
+  });
+
+  it("routes the daemon's page request by the vendor session id", async () => {
+    // Arrange
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", messagePageTimeoutMs: 2000 });
+
+    // Act
+    daemon.send(MessagePageRequestSchema, create(MessagePageRequestSchema, {
+      requestId: "p-route",
+      anchor: { case: "head", value: create(MessagePageHeadSchema, {}) },
+    }));
+    await until(() => store.count() >= 3);
+    const storeReq = await store.latest().next(MessagePageRequestSchema);
+
+    // Assert
+    expect(storeReq.sessionId).toBe("vendor-uuid");
+  });
+
+  it("carries the daemon's before_seq anchor to the store verbatim", async () => {
+    // Arrange
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", messagePageTimeoutMs: 2000 });
+
+    // Act
+    daemon.send(MessagePageRequestSchema, create(MessagePageRequestSchema, {
+      requestId: "p-before",
+      anchor: { case: "beforeSeq", value: 4242n },
+    }));
+    await until(() => store.count() >= 3);
+    const storeReq = await store.latest().next(MessagePageRequestSchema);
+
+    // Assert: a position the serving side minted, neither recomputed nor
+    // decremented on the way through.
+    expect(storeReq.anchor).toEqual({ case: "beforeSeq", value: 4242n });
+  });
+
+  it("passes a StoredMessage owning many records through whole", async () => {
+    // Arrange: one message owning far more records than a page could ever
+    // carry as separate slots.
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", messagePageTimeoutMs: 2000 });
+    const records = Array.from({ length: 50 }, (_, i) =>
+      create(EventSchema, { sessionId: "vendor-uuid", seq: BigInt(i + 1) }));
+    const whole = create(StoredMessageSchema, { messageId: "m-wide", records });
+
+    // Act
+    daemon.send(MessagePageRequestSchema, create(MessagePageRequestSchema, {
+      requestId: "p-whole",
+      anchor: { case: "head", value: create(MessagePageHeadSchema, {}) },
+    }));
+    await until(() => store.count() >= 3);
+    const pageConn = store.latest();
+    const storeReq = await pageConn.next(MessagePageRequestSchema);
+    pageConn.send(MessagePageSchema, create(MessagePageSchema, {
+      requestId: storeReq.requestId,
+      message1: whole,
+    }));
+    const page = await daemon.next(MessagePageSchema);
+
+    // Assert: arriving WHOLE is the property that removes the correlation, so
+    // the shim never re-chunks or re-correlates it.
+    expect(page.message1).toEqual(whole);
+  });
+
+  it("discards a store page whose request_id it is not awaiting", async () => {
+    // Arrange
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", messagePageTimeoutMs: 2000 });
+    daemon.send(MessagePageRequestSchema, create(MessagePageRequestSchema, {
+      requestId: "p-stale",
+      anchor: { case: "head", value: create(MessagePageHeadSchema, {}) },
+    }));
+    await until(() => store.count() >= 3);
+    const pageConn = store.latest();
+    const storeReq = await pageConn.next(MessagePageRequestSchema);
+
+    // Act: a page for a request nobody is awaiting, then the awaited one.
+    pageConn.send(MessagePageSchema, create(MessagePageSchema, { requestId: "not-mine", lastPageSeq: 5n }));
+    pageConn.send(MessagePageSchema, create(MessagePageSchema, { requestId: storeReq.requestId, lastPageSeq: 9n }));
+    const page = await daemon.next(MessagePageSchema);
+
+    // Assert: the stale page never reached the daemon.
+    expect(page.lastPageSeq).toBe(9n);
+  });
+
+  it("nacks rather than answering an empty page when the store fails", async () => {
+    // Arrange: the store accepts the page connection and then dies on it.
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", messagePageTimeoutMs: 2000 });
+    daemon.send(MessagePageRequestSchema, create(MessagePageRequestSchema, {
+      requestId: "p-fail",
+      anchor: { case: "head", value: create(MessagePageHeadSchema, {}) },
+    }));
+    await until(() => store.count() >= 3);
+    const pageConn = store.latest();
+    await pageConn.next(MessagePageRequestSchema);
+
+    // Act
+    pageConn.destroy();
+    const nack = await daemon.next(NackSchema);
+
+    // Assert: an empty page is indistinguishable from a conversation with no
+    // history, so the failure is named instead.
+    expect(nack.requestId).toBe("p-fail");
+    expect(nack.reason).toMatch(/message page failed/);
+  });
+
+  it("nacks a page request that carries no anchor at all", async () => {
+    // Arrange
+    const { daemon } = await rig({ storeSessionId: "vendor-uuid", messagePageTimeoutMs: 2000 });
+
+    // Act
+    daemon.send(MessagePageRequestSchema, create(MessagePageRequestSchema, { requestId: "p-anchorless" }));
+    const nack = await daemon.next(NackSchema);
+
+    // Assert: defaulting an unset anchor to the head would turn a daemon bug
+    // into a silent tail read.
+    expect(nack.requestId).toBe("p-anchorless");
+    expect(nack.reason).toMatch(/no anchor/);
   });
 });
 
