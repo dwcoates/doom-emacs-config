@@ -1,13 +1,21 @@
-// The daemon-authored prompt receipt, end to end over the REAL processes: a
-// frontend submits, and the daemon pushes the prompt bubble ITSELF — before any
-// store-planed frame of the turn that submit starts.
+// NOTHING renders a prompt before its round trip, end to end over the REAL
+// processes: a frontend submits, and no prompt bubble for that submit reaches
+// the socket ahead of the turn's first store-planed frame.
+//
+// WHAT THIS FILE USED TO ASSERT, AND WHY IT IS INVERTED. It used to pin the
+// daemon-authored prompt RECEIPT arriving before any store-planed frame of the
+// turn — the receipt existed precisely to fill the window the round trip leaves
+// empty. FROZEN-slash-command-durability.md Part 2 removes prompt receipts
+// entirely: a prompt renders when its durable line round-trips through the SDK,
+// never before, because an instant render is a second identity for one prompt
+// and reconciling the two is what produced the duplicate bubbles. The ordering
+// claim survives with its sign flipped, and that is what is asserted here.
 //
 // WHY THIS IS AN E2E RATHER THAN A UNIT TEST. The claim is about ORDER ACROSS
-// PROCESSES: the receipt is composed by the daemon at submit, while everything
-// else in the turn travels prompt → shim → store → seq → back to the daemon.
-// Only the real chain can say which of those reaches the socket first, and that
-// order is the entire point of the receipt — it exists to fill the window the
-// round trip leaves empty.
+// PROCESSES: anything daemon-composed at submit would reach the socket
+// immediately, while everything else in the turn travels prompt → shim → store
+// → seq → back to the daemon. Only the real chain can say which of those
+// reaches the socket first.
 //
 // Shares e2e_test.go's package and reuses its helpers READ-ONLY (newUDSHarness,
 // createSession, dial, readFrame, writeCmd, frameTimeout) plus
@@ -45,10 +53,14 @@ func firstStorePlanedDelta(t *testing.T, conn *websocket.Conn, workspace string)
 	return nil
 }
 
-// TestE2EThePromptReceiptPrecedesTheTurnsFirstStoreFrame is the ordering claim
-// itself: the work the daemon authored arrives before anything the store
-// stamped for that turn.
-func TestE2EThePromptReceiptPrecedesTheTurnsFirstStoreFrame(t *testing.T) {
+// TestE2ENoPromptBubblePrecedesTheTurnsFirstStoreFrame is the ordering claim,
+// inverted by contract Part 2: nothing the daemon composed at submit stands in
+// for the prompt ahead of anything the store stamped for that turn.
+//
+// The store-planed delta is the synchronization point, not a duration: it is
+// the first frame of the turn that came back through the store, so every frame
+// the submit alone could have drawn has necessarily already arrived by then.
+func TestE2ENoPromptBubblePrecedesTheTurnsFirstStoreFrame(t *testing.T) {
 	// Arrange
 	h := newUDSHarness(t)
 	cwd := t.TempDir()
@@ -57,21 +69,17 @@ func TestE2EThePromptReceiptPrecedesTheTurnsFirstStoreFrame(t *testing.T) {
 	// Act
 	writeCmd(t, live, `{"requestId":"r-echo","submitPrompt":{"text":"the prompt itself","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
-	// Assert — the receipt is among the seq-less deltas that precede the
-	// turn's first store-planed one, keyed on the submit's own request id.
-	found := false
+	// Assert — no user message for this submit is among the seq-less deltas
+	// that precede the turn's first store-planed one.
 	for _, cd := range firstStorePlanedDelta(t, live, cwd) {
 		for _, item := range cd.GetMessages() {
-			if item.GetRequestId() != "r-echo" || item.GetUserMessage() == nil {
+			if item.GetUserMessage() == nil {
 				continue
 			}
-			found = true
-			if got := item.GetUserMessage().GetContentString(); got != "the prompt itself" {
-				t.Errorf("receipt text = %q, want the submitted prompt", got)
+			if item.GetRequestId() == "r-echo" || item.GetUserMessage().GetContentString() == "the prompt itself" {
+				t.Errorf("a prompt bubble uuid=%q request_id=%q reached the frontend BEFORE the turn's first store-planed frame — the optimistic render Part 2 removed is back, and reconciling it against the durable line is what produced the duplicate bubbles",
+					item.GetUuid(), item.GetRequestId())
 			}
 		}
-	}
-	if !found {
-		t.Fatal("no prompt receipt arrived before the turn's first store-planed frame")
 	}
 }
