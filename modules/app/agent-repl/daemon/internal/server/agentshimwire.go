@@ -800,8 +800,12 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		scheduler, err = NewShutdownScheduler(ShutdownSchedulerConfig{
 			Store:     cfg.ShutdownSchedules,
 			Holds:     cfg.DrainHolds,
-			Evidence:  cfg.DrainEvidence,
-			LiveTasks: cfg.Progress,
+			Evidence: cfg.DrainEvidence,
+			// THE SAME FLEET ANSWERS BOTH. The drain's live tasks come from the
+			// hold source's own identified in-flight resolver, not from the
+			// progress footer's count, so there is one derivation of what a
+			// workspace is running rather than two that can disagree.
+			LiveTasks: cfg.DrainHolds,
 			Broadcast: srv.PushShutdownSchedule,
 			// THE SAME graceful teardown the ordinary shutdown command runs.
 			// A parallel path would be a second definition of what an orderly

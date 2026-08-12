@@ -12,6 +12,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/inflight"
 	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/statedb"
 )
@@ -50,7 +51,7 @@ type ShutdownScheduler struct {
 	store     ShutdownScheduleStore
 	holds     DrainHoldSource
 	evidence  DrainEvidenceSource
-	tasks     sessioncontroller.LiveTaskCounter
+	tasks     sessioncontroller.LiveTaskSource
 	broadcast func(*frontendv1.ShutdownScheduleView)
 	shutdown  func(stopShims bool, cause sessioncontroller.StopCause)
 	logf      dlog.Logf
@@ -107,7 +108,12 @@ type ShutdownScheduleStore interface {
 // prompt queue acts on — the drain reads the same fact rather than a second
 // derivation of it.
 type DrainHoldSource interface {
-	DrainHolds(tasks sessioncontroller.LiveTaskCounter) []sessioncontroller.DrainHold
+	DrainHolds(tasks sessioncontroller.LiveTaskSource) []sessioncontroller.DrainHold
+	// LiveTaskSet names one workspace's live background tasks. It lives on this
+	// interface because the fleet that owns the observed turn boundary also owns
+	// the daemon's identified in-flight resolver, so the drain reads WHAT is
+	// running from the same authority rather than a second derivation of it.
+	LiveTaskSet(workspace string) inflight.Set
 	// BindShutdownLease binds this engine to the fleet. Called by the engine's
 	// own constructor.
 	BindShutdownLease(l sessioncontroller.ShutdownLease) error
@@ -134,7 +140,7 @@ type ShutdownSchedulerConfig struct {
 	// from. Required: without it Restore would judge quiescence against a fleet
 	// that has not been wired yet and bounce the daemon over live turns.
 	Evidence  DrainEvidenceSource
-	LiveTasks sessioncontroller.LiveTaskCounter
+	LiveTasks sessioncontroller.LiveTaskSource
 	Broadcast func(*frontendv1.ShutdownScheduleView)
 	Shutdown  func(stopShims bool, cause sessioncontroller.StopCause)
 	Logf      dlog.Logf
@@ -161,7 +167,7 @@ func NewShutdownScheduler(cfg ShutdownSchedulerConfig) (*ShutdownScheduler, erro
 	case cfg.Evidence == nil:
 		return nil, fmt.Errorf("server: the shutdown scheduler needs a drain-evidence source; without one a lease restored mid-drain would judge quiescence against a fleet that has not been wired yet, see zero holds, and bounce the daemon over every surviving mid-turn shim")
 	case cfg.LiveTasks == nil:
-		return nil, fmt.Errorf("server: the shutdown scheduler needs a live-task counter; without one a workspace running background tasks would read as quiescent")
+		return nil, fmt.Errorf("server: the shutdown scheduler needs a live-task source; without one a workspace running background tasks would read as quiescent")
 	case cfg.Broadcast == nil:
 		return nil, fmt.Errorf("server: the shutdown scheduler needs a broadcast func; an unbroadcast lease is invisible to every client it blocks")
 	case cfg.Shutdown == nil:
@@ -260,7 +266,8 @@ func (s *ShutdownScheduler) viewLocked(holds []sessioncontroller.DrainHold) *fro
 func holdViews(holds []sessioncontroller.DrainHold) []*frontendv1.ShutdownHold {
 	out := make([]*frontendv1.ShutdownHold, 0, len(holds))
 	for _, h := range holds {
-		if !h.TurnActive && h.LiveTasks <= 0 {
+		tasks := h.LiveTasks.Items()
+		if !h.TurnActive && len(tasks) == 0 {
 			continue
 		}
 		v := &frontendv1.ShutdownHold{Workspace: h.Workspace, SessionId: h.SessionID}
@@ -270,8 +277,15 @@ func holdViews(holds []sessioncontroller.DrainHold) []*frontendv1.ShutdownHold {
 			// the id is what names it when this process knows the name.
 			v.Turn = &frontendv1.ShutdownHoldTurn{TurnId: h.TurnID}
 		}
-		if h.LiveTasks > 0 {
-			v.Tasks = &frontendv1.ShutdownHoldTasks{Count: int32(h.LiveTasks)}
+		if len(tasks) > 0 {
+			// THE WIRE STILL CARRIES A COUNT because ShutdownHoldTasks is a
+			// frozen proto message with one field, and no schema change belongs
+			// in this reroute. The count is now DERIVED from the identified set
+			// rather than adopted from a second resolver, and the identities
+			// themselves reach the log line below, so the question "which three?"
+			// has an answer on the daemon side even where the wire has room only
+			// for "three".
+			v.Tasks = &frontendv1.ShutdownHoldTasks{Count: int32(len(tasks))}
 		}
 		out = append(out, v)
 	}
@@ -624,6 +638,10 @@ func (s *ShutdownScheduler) resolveUnresolved(trigger string, holds []sessioncon
 		// what an ADOPTED turn broadcasts — and that is precisely this case.
 		out = append(out, sessioncontroller.DrainHold{
 			Workspace: rs.Workspace, SessionID: rs.SessionID, TurnActive: true,
+			// AND ITS LIVE TASKS ARE UNKNOWN, said out loud. Nobody has talked
+			// to this session, so its background work is unobserved rather than
+			// absent, and the unanswered arm is the only honest way to say so.
+			LiveTasks: inflight.Unanswered(rs.Workspace, "this session has not wired, so nothing has reported what background work it is running"),
 		})
 	}
 	s.mu.Unlock()
@@ -649,7 +667,7 @@ func sameHolds(a, b []sessioncontroller.DrainHold) bool {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		if !a[i].Equal(b[i]) {
 			return false
 		}
 	}
@@ -661,8 +679,12 @@ func sameHolds(a, b []sessioncontroller.DrainHold) bool {
 func describeHolds(holds []sessioncontroller.DrainHold) string {
 	parts := make([]string, 0, len(holds))
 	for _, h := range holds {
-		parts = append(parts, fmt.Sprintf("ws=%q session=%s turn=%q live_tasks=%d",
-			h.Workspace, h.SessionID, h.TurnID, h.LiveTasks))
+		// THE TASKS ARE NAMED HERE, not counted. A drain that holds must say
+		// WHAT it is waiting on: "3 live tasks" reads identically before and
+		// after a bounce that replaced all three, and Summary() prints the
+		// count only as a prefix to the identities it summarizes.
+		parts = append(parts, fmt.Sprintf("ws=%q session=%s turn=%q live_tasks=%s",
+			h.Workspace, h.SessionID, h.TurnID, h.LiveTasks.Summary()))
 	}
 	return "[" + strings.Join(parts, " | ") + "]"
 }
