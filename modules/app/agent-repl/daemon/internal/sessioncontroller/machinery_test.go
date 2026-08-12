@@ -458,3 +458,142 @@ func TestTwoCloseTogetherCommandsKeepTheirOwnIdentities(t *testing.T) {
 		t.Errorf("classified command for u-clear = %v, want CLEAR", got["u-clear"])
 	}
 }
+
+// classifiedItem returns the classified DaemonInterceptedCommandItem message
+// pushed on the conversation plane under uuid, or nil when none was.
+//
+// The whole MESSAGE rather than just its command, because the durability arm is
+// what these tests are about and the command alone cannot state it.
+func (h *queueHarness) classifiedItem(uuid string) *frontendv1.Message {
+	h.push.mu.Lock()
+	defer h.push.mu.Unlock()
+	for _, cd := range h.push.convo {
+		for _, it := range cd.GetMessages() {
+			if it.GetUuid() == uuid && it.GetDaemonInterceptedCommand() != nil {
+				return it
+			}
+		}
+	}
+	return nil
+}
+
+func TestAClassifiedShapeAIsDurable(t *testing.T) {
+	// Arrange: shape A has a transcript record behind it, so it must CLAIM one.
+	h := newQueueHarness(t, nil)
+
+	// Act
+	h.controller().consumer.Consume(shapeAPromptEvent(t, 12, "u-a", "prompt-1", compactMachinery))
+
+	// Assert
+	it := h.classifiedItem("u-a")
+	if it == nil {
+		t.Fatal("no classified item for u-a")
+	}
+	if it.GetDurable() == nil {
+		t.Errorf("classified shape A durability arm = %v, want DURABLE — the CLI wrote a transcript record for it", it.GetDurability())
+	}
+}
+
+func TestAClassifiedShapeBIsEphemeral(t *testing.T) {
+	// Arrange: shape B carries no promptId and the contract rules it out of the
+	// durable set, so it must claim NO record.
+	h := newQueueHarness(t, nil)
+
+	// Act
+	h.controller().consumer.Consume(shapeBLocalCommandEvent(t, 12, "u-b", "<command-name>/context</command-name>"))
+
+	// Assert
+	it := h.classifiedItem("u-b")
+	if it == nil {
+		t.Fatal("no classified item for u-b")
+	}
+	if it.GetEphemeral() == nil {
+		t.Errorf("classified shape B durability arm = %v, want EPHEMERAL", it.GetDurability())
+	}
+}
+
+func TestAClassifiedEphemeralCommandIsAFeedRow(t *testing.T) {
+	// Arrange: rule 1 — an ephemeral message is ALWAYS a feed row, and the
+	// constructor is what makes that true of a classified record too.
+	h := newQueueHarness(t, nil)
+
+	// Act
+	h.controller().consumer.Consume(shapeBLocalCommandEvent(t, 12, "u-b", "<command-name>/context</command-name>"))
+
+	// Assert
+	it := h.classifiedItem("u-b")
+	if it == nil {
+		t.Fatal("no classified item for u-b")
+	}
+	if got := it.GetLineage().GetParentMessageId(); got != "" {
+		t.Errorf("ephemeral classified item parent_message_id = %q, want none", got)
+	}
+	if got := it.GetLineage().GetTopLevelMessageId(); got != "u-b" {
+		t.Errorf("ephemeral classified item top_level_message_id = %q, want its own uuid", got)
+	}
+}
+
+// blockUserTranscriptEvent is a user transcript line whose body arrives as
+// content BLOCKS — the shape the real file plane produces for a typed prompt,
+// as opposed to the single content string a hand-simplified fixture uses.
+func blockUserTranscriptEvent(t *testing.T, seq uint64, uuid, promptID string, texts ...string) *corev1.Event {
+	t.Helper()
+	blocks := make([]*datav1.ContentBlock, 0, len(texts))
+	for _, txt := range texts {
+		blocks = append(blocks, &datav1.ContentBlock{
+			Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: txt}},
+		})
+	}
+	a, err := anypb.New(&datav1.TranscriptLine{
+		Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
+			Envelope: &datav1.LineEnvelope{Uuid: uuid, PromptId: promptID},
+			Message: &datav1.ApiUserMessage{
+				Content: &datav1.ApiUserMessage_ContentBlocks{
+					ContentBlocks: &datav1.ApiContentBlocks{Blocks: blocks},
+				},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("anypb.New: %v", err)
+	}
+	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+}
+
+func TestAHumanPromptOpeningWithAnUnclosedMachineryTagStaysAPrompt(t *testing.T) {
+	// Arrange: the user asks ABOUT the tag and starts the sentence with it, so
+	// the head opens with machinery markup that is never closed. An opening tag
+	// alone is not machinery-ness, and treating it as such destroyed the prompt.
+	h := newQueueHarness(t, nil)
+	prose := "<command-name> keeps showing up in my transcript, what writes it?"
+
+	// Act
+	h.controller().consumer.Consume(blockUserTranscriptEvent(t, 12, "u-human", "prompt-1", prose))
+
+	// Assert
+	if got := h.classifiedCommands(); len(got) != 0 {
+		t.Fatalf("classified %d command(s) from a human prompt, want none", len(got))
+	}
+	turns := h.userTurns()
+	if len(turns) != 1 || turns[0].item.GetUuid() != "u-human" {
+		t.Fatalf("pushed %d user turn(s), want the human prompt untouched", len(turns))
+	}
+}
+
+func TestAMachineryRecordSpanningBlocksIsStillClassified(t *testing.T) {
+	// Arrange: a caveat wrapper that opens in the first block and closes in the
+	// second — the balance test must read the whole body, not just the head.
+	h := newQueueHarness(t, nil)
+
+	// Act
+	h.controller().consumer.Consume(blockUserTranscriptEvent(t, 12, "u-split", "prompt-1",
+		"<local-command-caveat>Caveat: the messages below",
+		"were generated while running local commands.</local-command-caveat>",
+		"<command-name>/compact</command-name>"))
+
+	// Assert
+	got := h.classifiedCommands()
+	if got["u-split"] != frontendv1.SessionCommand_SESSION_COMMAND_COMPACT {
+		t.Errorf("classified command for u-split = %v, want COMPACT", got["u-split"])
+	}
+}
