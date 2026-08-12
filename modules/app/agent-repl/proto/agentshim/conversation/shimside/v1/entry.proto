@@ -28,10 +28,17 @@
 // generates into ONE Go package, so `entry.proto` and `external.proto` sitting
 // side by side in agentshim.conversation.v1 would both land in
 // `conversationv1` — and a daemon that imported the external half would get
-// `Plane` and `dedup_key` in the same namespace, for free. A separate package
-// is a separate Go import path and a separate TypeScript module, so the
-// boundary a reviewer would otherwise have to enforce by attention is enforced
-// by the compiler instead.
+// `Plane` in the same namespace, for free. A separate package is a separate Go
+// import path and a separate TypeScript module.
+//
+// IT IS NOT NAMED `internal`, AND THAT WAS A REAL BUG. An earlier draft called
+// it agentshim.conversation.internal.v1, which put Go's `internal/` keyword in
+// the generated import path — and that keyword means "importable only from code
+// rooted at the parent directory", which here is the generated proto tree
+// itself. So the shim, the sidecar AND the store were all locked out of the
+// type they exist to write. The keyword enforced the exact opposite of the
+// intent, and enforced it so completely that nothing compiled far enough to
+// notice.
 //
 // check-conversation-isolation.sh refuses the import at codegen time, so the
 // violation is a build failure rather than a review note.
@@ -40,12 +47,12 @@
 
 syntax = "proto3";
 
-package agentshim.conversation.internal.v1;
+package agentshim.conversation.shimside.v1;
 
 import "agentshim/conversation/v1/external.proto";
-import "agentshim/conversation/internal/v1/unsupported.proto";
+import "agentshim/conversation/shimside/v1/unsupported.proto";
 
-option go_package = "agentrepl/proto/agentshim/conversation/internal/v1;conversationinternalv1";
+option go_package = "agentrepl/proto/agentshim/conversation/shimside/v1;conversationshimsidev1";
 
 // One record as the STORE holds it: the half that may leave, and the half that
 // may not.
@@ -86,19 +93,20 @@ message InternalEntry {
   // disagree; nothing downstream sees it.
   Plane plane = 1;
 
-  // The CROSS-PLANE identity: the key that lets the store recognize when the
-  // shim and the sidecar have each reported the same underlying fact, so it
-  // keeps one row instead of two.
+  // 2 was dedup_key, the CROSS-PLANE identity that collapsed two producers'
+  // views of one fact into one row. It is gone because the fact it collapsed no
+  // longer occurs: the shim used to write conversation content live (115,990
+  // rows in the retired store) and the sidecar wrote the same content later
+  // from disk, so the twins were real and constant. The shim no longer writes
+  // MessageEntry records at all — it cannot, having no parent pointer on the
+  // SDK stream — so there is nothing left to collapse.
   //
-  // It is load-bearing and measured to be so. In the live store both planes
-  // populate it in the same namespaces (`uuid:`, `tur:`), and the two planes'
-  // surviving keys intersect in exactly zero rows — which is what a working
-  // collapse looks like, since the loser was refused and only one plane's row
-  // remains per key. Tens of thousands of twins have been collapsed.
-  //
-  // Empty is legal and means the record has no cross-plane twin, which is true
-  // of most of what each producer writes.
-  string dedup_key = 2;
+  // The cost of that, accepted deliberately: content is durable only once the
+  // CLI flushes to disk and the sidecar reads it. The old design bought latency
+  // by writing from both planes, and this is the price of the lineage the new
+  // one requires.
+  reserved 2;
+  reserved "dedup_key";
 
   // The STABLE WRITE IDENTITY, minted once by the producer when the record is
   // first handed to a store write, and never regenerated — not for a retry, not
