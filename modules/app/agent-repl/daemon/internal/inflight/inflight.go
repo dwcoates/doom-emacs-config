@@ -245,6 +245,33 @@ func (s Set) OfKind(kind Kind) []Item {
 	return out
 }
 
+// Equal reports whether two sets are the same answer about the same
+// workspace: the same arm, the same reason on the unknown arm, and the same
+// member IDENTITIES on the answered one.
+//
+// IT IS THE THING A COUNT COULD NEVER DO. Two equal counts across a bounce are
+// consistent with every member having died and been replaced; two sets compare
+// equal only when the very same items are still there. Detail is deliberately
+// excluded — it is free text for a human, and a changed detail must not read as
+// a different item.
+func (s Set) Equal(other Set) bool {
+	if s.workspace != other.workspace || s.answered != other.answered {
+		return false
+	}
+	if !s.answered {
+		return s.reason == other.reason
+	}
+	if len(s.items) != len(other.items) {
+		return false
+	}
+	for i := range s.items {
+		if s.items[i].Key() != other.items[i].Key() {
+			return false
+		}
+	}
+	return true
+}
+
 // Blocks is THE consumer-facing verdict: may an operation that would interrupt
 // this workspace's work proceed?
 //

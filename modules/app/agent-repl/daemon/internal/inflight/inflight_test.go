@@ -256,3 +256,49 @@ func TestOfKindFiltersToOnePlane(t *testing.T) {
 		t.Fatalf("OfKind(task) = %v, want two members", got)
 	}
 }
+
+// TestEqualSeparatesAnEmptyAnswerFromAnUnknownOne pins the distinction the
+// drain hold depends on: a workspace with nothing running is not the same
+// answer as a workspace nobody could answer for.
+func TestEqualSeparatesAnEmptyAnswerFromAnUnknownOne(t *testing.T) {
+	// Arrange
+	empty := MustAnswered("/w")
+	unknown := Unanswered("/w", "nobody could say")
+	// Act / Assert
+	if empty.Equal(unknown) {
+		t.Fatal("Equal() = true for an answered-empty set against an unanswered one")
+	}
+}
+
+// TestEqualIsTrueForTheSameIdentities covers the no-change compare a drain
+// re-read makes.
+func TestEqualIsTrueForTheSameIdentities(t *testing.T) {
+	// Arrange
+	a := MustAnswered("/w", Item{Kind: KindTask, ID: "t1", Detail: "first look"})
+	b := MustAnswered("/w", Item{Kind: KindTask, ID: "t1", Detail: "second look"})
+	// Act / Assert
+	if !a.Equal(b) {
+		t.Fatal("Equal() = false for the same identity under a changed detail")
+	}
+}
+
+// TestEqualIsFalseWhenTheMembersWereReplaced is the lesson a count cannot
+// teach: same size, different things running.
+func TestEqualIsFalseWhenTheMembersWereReplaced(t *testing.T) {
+	// Arrange
+	before := MustAnswered("/w", Item{Kind: KindTask, ID: "t1"})
+	after := MustAnswered("/w", Item{Kind: KindTask, ID: "t2"})
+	// Act / Assert
+	if before.Equal(after) {
+		t.Fatal("Equal() = true across a replaced member; the count matched but the identity did not")
+	}
+}
+
+// TestEqualIsFalseAcrossWorkspaces covers one workspace's answer being read as
+// another's.
+func TestEqualIsFalseAcrossWorkspaces(t *testing.T) {
+	// Arrange / Act / Assert
+	if MustAnswered("/ws/a").Equal(MustAnswered("/ws/b")) {
+		t.Fatal("Equal() = true across two different workspaces")
+	}
+}
