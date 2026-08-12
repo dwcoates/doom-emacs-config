@@ -51,6 +51,15 @@ const (
 type MessagePageRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// WHICH conversation the page is read from — the VENDOR session id, exactly
+	// as Subscribe carries it.
+	//
+	// The store holds every live session in one database and scopes seq, dedup
+	// and fan-out by this id, so a page request that did not name it could not
+	// be answered at all: there is no "the" conversation from the store's side.
+	// It is a ROUTING key, never a position — it says which history to read, and
+	// says nothing about where in that history the read starts.
+	SessionId string `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	// Types that are valid to be assigned to Anchor:
 	//
 	//	*MessagePageRequest_Head
@@ -93,6 +102,13 @@ func (*MessagePageRequest) Descriptor() ([]byte, []int) {
 func (x *MessagePageRequest) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
+	}
+	return ""
+}
+
+func (x *MessagePageRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
 	}
 	return ""
 }
@@ -515,10 +531,12 @@ var File_agentshim_core_v1_message_page_proto protoreflect.FileDescriptor
 
 const file_agentshim_core_v1_message_page_proto_rawDesc = "" +
 	"\n" +
-	"$agentshim/core/v1/message-page.proto\x12\x11agentshim.core.v1\x1a\x1cagentshim/core/v1/core.proto\"\x98\x01\n" +
+	"$agentshim/core/v1/message-page.proto\x12\x11agentshim.core.v1\x1a\x1cagentshim/core/v1/core.proto\"\xb7\x01\n" +
 	"\x12MessagePageRequest\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x128\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x128\n" +
 	"\x04head\x18\x02 \x01(\v2\".agentshim.core.v1.MessagePageHeadH\x00R\x04head\x12\x1f\n" +
 	"\n" +
 	"before_seq\x18\x03 \x01(\x04H\x00R\tbeforeSeqB\b\n" +

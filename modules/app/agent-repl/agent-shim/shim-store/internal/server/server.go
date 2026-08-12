@@ -289,13 +289,17 @@ func (s *Server) handleConn(conn net.Conn) {
 	case *corev1.CursorQuery:
 		s.log.Log(logging.Fields{Operation: "classify-connection", Subscriber: peer}, "classified cursor query file_id=%q", m.GetFileId())
 		s.serveCursorQuery(conn, m)
+	case *corev1.MessagePageRequest:
+		s.log.Log(logging.Fields{Operation: "classify-connection", Session: m.GetSessionId(), Subscriber: peer, RequestID: m.GetRequestId()},
+			"classified message page request")
+		s.serveMessagePage(conn, m)
 	case *corev1.HealthCheck:
 		s.serveHealth(conn, m)
 		s.log.Log(logging.Fields{Operation: "producer-preamble", Subscriber: peer, RequestID: m.GetRequestId()}, "connection opened with health check; awaiting first StoreWrite")
 		s.serveProducerPreamble(conn)
 	default:
 		s.log.Log(logging.Fields{Operation: "classify-connection", Subscriber: peer, Level: "error"},
-			"protocol frame is %T; expected StoreWrite, Heartbeat, Subscribe, CursorQuery, or HealthCheck", m)
+			"protocol frame is %T; expected StoreWrite, Heartbeat, Subscribe, CursorQuery, MessagePageRequest, or HealthCheck", m)
 	}
 }
 
@@ -357,6 +361,41 @@ func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
 	}); err != nil {
 		s.log.Log(logging.Fields{Operation: "cursor-query-reply", Subscriber: peer, Level: "error"}, "protocol cursor reply write failed: %v", err)
 	}
+}
+
+// serveMessagePage answers one MessagePageRequest with exactly one MessagePage
+// frame and then the connection is done.
+//
+// ONE REQUEST, ONE BOUNDED REPLY, never a stream. This is the read Subscribe
+// and ReplayRequest cannot express: both walk FORWARD from a lower bound, so a
+// reader wanting recent history had to guess a from_seq low enough to cover it
+// — and since one message owns arbitrarily many records that guess cannot be
+// computed. Here the caller names no position at all on a cold open, and names
+// only a seq the store itself minted on a continuation.
+//
+// This door is ADDITIVE. Subscribe and ReplayRequest keep working exactly as
+// they did: the bounded tail read has to demonstrably work before the old ones
+// close, and closing them first would trade a slow feed for an empty one.
+func (s *Server) serveMessagePage(conn net.Conn, req *corev1.MessagePageRequest) {
+	peer := conn.RemoteAddr().String()
+	fields := logging.Fields{Operation: "message-page", Session: req.GetSessionId(), Subscriber: peer, RequestID: req.GetRequestId()}
+	s.log.LogVerbose(fields, "processing message page request")
+	page, err := s.db.MessagePage(context.Background(), req)
+	if err != nil {
+		// The db layer already logged this error with its own context; the
+		// caller is answered with silence-then-close rather than a
+		// half-truthful page, because a page missing messages is
+		// indistinguishable from the top of the conversation.
+		s.log.Log(logging.Fields{Operation: "message-page", Session: req.GetSessionId(), Subscriber: peer, RequestID: req.GetRequestId(), Level: "error"},
+			"message page refused: %v", err)
+		return
+	}
+	if err := wire.WriteAny(conn, page); err != nil {
+		s.log.Log(logging.Fields{Operation: "message-page-reply", Session: req.GetSessionId(), Subscriber: peer, RequestID: req.GetRequestId(), Level: "error"},
+			"protocol message page reply write failed: %v", err)
+		return
+	}
+	s.log.Log(fields, "message page delivered last_page_seq=%d", page.GetLastPageSeq())
 }
 
 // ---- producer side --------------------------------------------------------
