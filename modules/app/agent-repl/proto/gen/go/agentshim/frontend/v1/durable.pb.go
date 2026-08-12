@@ -29,8 +29,8 @@
 package frontendv1
 
 import (
+	v1 "agentrepl/proto/agentshim/conversation/v1"
 	v11 "agentrepl/proto/agentshim/core/v1"
-	v1 "agentrepl/proto/agentshim/data/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -445,7 +445,7 @@ type VendorTokenUsage struct {
 	// them. Every populated key must also be logged loudly.
 	UnmodeledUsage *structpb.Struct `protobuf:"bytes,15,opt,name=unmodeled_usage,json=unmodeledUsage,proto3" json:"unmodeled_usage,omitempty"`
 	// Complete API usage payload preserved without frontend normalization.
-	RawUsage      *v1.ApiUsage `protobuf:"bytes,16,opt,name=raw_usage,json=rawUsage,proto3" json:"raw_usage,omitempty"`
+	RawUsage      *v1.TokenUsage `protobuf:"bytes,16,opt,name=raw_usage,json=rawUsage,proto3" json:"raw_usage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -585,7 +585,7 @@ func (x *VendorTokenUsage) GetUnmodeledUsage() *structpb.Struct {
 	return nil
 }
 
-func (x *VendorTokenUsage) GetRawUsage() *v1.ApiUsage {
+func (x *VendorTokenUsage) GetRawUsage() *v1.TokenUsage {
 	if x != nil {
 		return x.RawUsage
 	}
@@ -1809,9 +1809,9 @@ type SessionTokenUtilization struct {
 	// paid. This aggregate is rebuilt from durable records on every read and is
 	// itself never persisted, which is what lets it carry the canonical shape at
 	// all — the persisted record types cannot (see VendorTokenUsage).
-	AllAgentsTokens *TokenUsage `protobuf:"bytes,6,opt,name=all_agents_tokens,json=allAgentsTokens,proto3" json:"all_agents_tokens,omitempty"`
+	AllAgentsTokens *v1.TokenUsage `protobuf:"bytes,6,opt,name=all_agents_tokens,json=allAgentsTokens,proto3" json:"all_agents_tokens,omitempty"`
 	// The canonical economics of `main_agent`, resolved by the daemon.
-	MainAgentTokens *TokenUsage `protobuf:"bytes,7,opt,name=main_agent_tokens,json=mainAgentTokens,proto3" json:"main_agent_tokens,omitempty"`
+	MainAgentTokens *v1.TokenUsage `protobuf:"bytes,7,opt,name=main_agent_tokens,json=mainAgentTokens,proto3" json:"main_agent_tokens,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1881,14 +1881,14 @@ func (x *SessionTokenUtilization) GetUngroupedSubagentResponses() []*TokenUtiliz
 	return nil
 }
 
-func (x *SessionTokenUtilization) GetAllAgentsTokens() *TokenUsage {
+func (x *SessionTokenUtilization) GetAllAgentsTokens() *v1.TokenUsage {
 	if x != nil {
 		return x.AllAgentsTokens
 	}
 	return nil
 }
 
-func (x *SessionTokenUtilization) GetMainAgentTokens() *TokenUsage {
+func (x *SessionTokenUtilization) GetMainAgentTokens() *v1.TokenUsage {
 	if x != nil {
 		return x.MainAgentTokens
 	}
@@ -1906,7 +1906,7 @@ type AgentTokenUtilization struct {
 	Models []*ModelTokenUtilization `protobuf:"bytes,3,rep,name=models,proto3" json:"models,omitempty"`
 	// The canonical economics of `totals`, resolved by the daemon. Same reasoning
 	// as SessionTokenUtilization.all_agents_tokens.
-	Tokens        *TokenUsage `protobuf:"bytes,4,opt,name=tokens,proto3" json:"tokens,omitempty"`
+	Tokens        *v1.TokenUsage `protobuf:"bytes,4,opt,name=tokens,proto3" json:"tokens,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1962,7 +1962,7 @@ func (x *AgentTokenUtilization) GetModels() []*ModelTokenUtilization {
 	return nil
 }
 
-func (x *AgentTokenUtilization) GetTokens() *TokenUsage {
+func (x *AgentTokenUtilization) GetTokens() *v1.TokenUsage {
 	if x != nil {
 		return x.Tokens
 	}
@@ -3476,7 +3476,7 @@ var File_agentshim_frontend_v1_durable_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_durable_proto_rawDesc = "" +
 	"\n" +
-	"#agentshim/frontend/v1/durable.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a\x1dagentshim/data/v1/tools.proto\x1a\"agentshim/frontend/v1/tokens.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xcc\x04\n" +
+	"#agentshim/frontend/v1/durable.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a&agentshim/conversation/v1/tokens.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xcc\x04\n" +
 	"\x10TokenUtilization\x121\n" +
 	"\x15agent_repl_session_id\x18\x01 \x01(\tR\x12agentReplSessionId\x12*\n" +
 	"\x11claude_session_id\x18\x02 \x01(\tR\x0fclaudeSessionId\x12 \n" +
@@ -3504,7 +3504,7 @@ const file_agentshim_frontend_v1_durable_proto_rawDesc = "" +
 	"\x16time_to_first_token_ms\x18\x01 \x01(\x03H\x00R\x12timeToFirstTokenMs\x88\x01\x01\x12F\n" +
 	"\x1doutput_generation_duration_ms\x18\x02 \x01(\x03H\x01R\x1aoutputGenerationDurationMs\x88\x01\x01B\x19\n" +
 	"\x17_time_to_first_token_msB \n" +
-	"\x1e_output_generation_duration_ms\"\xd0\a\n" +
+	"\x1e_output_generation_duration_ms\"\xda\a\n" +
 	"\x10VendorTokenUsage\x12!\n" +
 	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens\x125\n" +
@@ -3524,8 +3524,8 @@ const file_agentshim_frontend_v1_durable_proto_rawDesc = "" +
 	"\vcache_rates\x18\r \x01(\v2&.agentshim.frontend.v1.TokenCacheRatesR\n" +
 	"cacheRates\x12@\n" +
 	"\x0ffallback_credit\x18\x0e \x01(\v2\x17.google.protobuf.StructR\x0efallbackCredit\x12@\n" +
-	"\x0funmodeled_usage\x18\x0f \x01(\v2\x17.google.protobuf.StructR\x0eunmodeledUsage\x128\n" +
-	"\traw_usage\x18\x10 \x01(\v2\x1b.agentshim.data.v1.ApiUsageR\brawUsage\"\x8a\x01\n" +
+	"\x0funmodeled_usage\x18\x0f \x01(\v2\x17.google.protobuf.StructR\x0eunmodeledUsage\x12B\n" +
+	"\traw_usage\x18\x10 \x01(\v2%.agentshim.conversation.v1.TokenUsageR\brawUsage\"\x8a\x01\n" +
 	"\x12TokenCacheCreation\x129\n" +
 	"\x19ephemeral_5m_input_tokens\x18\x01 \x01(\x03R\x16ephemeral5mInputTokens\x129\n" +
 	"\x19ephemeral_1h_input_tokens\x18\x02 \x01(\x03R\x16ephemeral1hInputTokens\"r\n" +
@@ -3593,7 +3593,7 @@ const file_agentshim_frontend_v1_durable_proto_rawDesc = "" +
 	"#TokenCacheDiagnosticMessagesChanged\x129\n" +
 	"\x19cache_missed_input_tokens\x18\x01 \x01(\x03R\x16cacheMissedInputTokens\"0\n" +
 	".TokenCacheDiagnosticPreviousMessageUnavailable\",\n" +
-	"*TokenCacheDiagnosticDiagnosticsUnavailable\"\xc4\x04\n" +
+	"*TokenCacheDiagnosticDiagnosticsUnavailable\"\xcc\x04\n" +
 	"\x17SessionTokenUtilization\x12F\n" +
 	"\n" +
 	"all_agents\x18\x01 \x01(\v2'.agentshim.frontend.v1.TokenUsageTotalsR\tallAgents\x12F\n" +
@@ -3601,14 +3601,14 @@ const file_agentshim_frontend_v1_durable_proto_rawDesc = "" +
 	"main_agent\x18\x02 \x01(\v2'.agentshim.frontend.v1.TokenUsageTotalsR\tmainAgent\x12J\n" +
 	"\tsubagents\x18\x03 \x03(\v2,.agentshim.frontend.v1.AgentTokenUtilizationR\tsubagents\x12D\n" +
 	"\x06models\x18\x04 \x03(\v2,.agentshim.frontend.v1.ModelTokenUtilizationR\x06models\x12i\n" +
-	"\x1cungrouped_subagent_responses\x18\x05 \x03(\v2'.agentshim.frontend.v1.TokenUtilizationR\x1aungroupedSubagentResponses\x12M\n" +
-	"\x11all_agents_tokens\x18\x06 \x01(\v2!.agentshim.frontend.v1.TokenUsageR\x0fallAgentsTokens\x12M\n" +
-	"\x11main_agent_tokens\x18\a \x01(\v2!.agentshim.frontend.v1.TokenUsageR\x0fmainAgentTokens\"\xa0\x02\n" +
+	"\x1cungrouped_subagent_responses\x18\x05 \x03(\v2'.agentshim.frontend.v1.TokenUtilizationR\x1aungroupedSubagentResponses\x12Q\n" +
+	"\x11all_agents_tokens\x18\x06 \x01(\v2%.agentshim.conversation.v1.TokenUsageR\x0fallAgentsTokens\x12Q\n" +
+	"\x11main_agent_tokens\x18\a \x01(\v2%.agentshim.conversation.v1.TokenUsageR\x0fmainAgentTokens\"\xa4\x02\n" +
 	"\x15AgentTokenUtilization\x12E\n" +
 	"\x05agent\x18\x01 \x01(\v2/.agentshim.frontend.v1.TokenUtilizationSubagentR\x05agent\x12?\n" +
 	"\x06totals\x18\x02 \x01(\v2'.agentshim.frontend.v1.TokenUsageTotalsR\x06totals\x12D\n" +
-	"\x06models\x18\x03 \x03(\v2,.agentshim.frontend.v1.ModelTokenUtilizationR\x06models\x129\n" +
-	"\x06tokens\x18\x04 \x01(\v2!.agentshim.frontend.v1.TokenUsageR\x06tokens\"\x91\x03\n" +
+	"\x06models\x18\x03 \x03(\v2,.agentshim.frontend.v1.ModelTokenUtilizationR\x06models\x12=\n" +
+	"\x06tokens\x18\x04 \x01(\v2%.agentshim.conversation.v1.TokenUsageR\x06tokens\"\x91\x03\n" +
 	"\x15ModelTokenUtilization\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12,\n" +
 	"\x0fcanonical_model\x18\x02 \x01(\tH\x00R\x0ecanonicalModel\x88\x01\x01\x12\x1f\n" +
@@ -3767,10 +3767,9 @@ var file_agentshim_frontend_v1_durable_proto_goTypes = []any{
 	(*TelemetryRecordMissingResponseUsage)(nil),            // 42: agentshim.frontend.v1.TelemetryRecordMissingResponseUsage
 	(*TelemetryRecordMissingPersistenceReceipt)(nil),       // 43: agentshim.frontend.v1.TelemetryRecordMissingPersistenceReceipt
 	(*structpb.Struct)(nil),                                // 44: google.protobuf.Struct
-	(*v1.ApiUsage)(nil),                                    // 45: agentshim.data.v1.ApiUsage
-	(*TokenUsage)(nil),                                     // 46: agentshim.frontend.v1.TokenUsage
-	(*v11.QueryRuntimeIdentity)(nil),                       // 47: agentshim.core.v1.QueryRuntimeIdentity
-	(*v11.AccountUsageObservation)(nil),                    // 48: agentshim.core.v1.AccountUsageObservation
+	(*v1.TokenUsage)(nil),                                  // 45: agentshim.conversation.v1.TokenUsage
+	(*v11.QueryRuntimeIdentity)(nil),                       // 46: agentshim.core.v1.QueryRuntimeIdentity
+	(*v11.AccountUsageObservation)(nil),                    // 47: agentshim.core.v1.AccountUsageObservation
 }
 var file_agentshim_frontend_v1_durable_proto_depIdxs = []int32{
 	1,  // 0: agentshim.frontend.v1.TokenUtilization.main_agent:type_name -> agentshim.frontend.v1.TokenUtilizationMainAgent
@@ -3785,7 +3784,7 @@ var file_agentshim_frontend_v1_durable_proto_depIdxs = []int32{
 	8,  // 9: agentshim.frontend.v1.VendorTokenUsage.cache_rates:type_name -> agentshim.frontend.v1.TokenCacheRates
 	44, // 10: agentshim.frontend.v1.VendorTokenUsage.fallback_credit:type_name -> google.protobuf.Struct
 	44, // 11: agentshim.frontend.v1.VendorTokenUsage.unmodeled_usage:type_name -> google.protobuf.Struct
-	45, // 12: agentshim.frontend.v1.VendorTokenUsage.raw_usage:type_name -> agentshim.data.v1.ApiUsage
+	45, // 12: agentshim.frontend.v1.VendorTokenUsage.raw_usage:type_name -> agentshim.conversation.v1.TokenUsage
 	10, // 13: agentshim.frontend.v1.TokenUsageIteration.sampling:type_name -> agentshim.frontend.v1.TokenUsageIterationSampling
 	11, // 14: agentshim.frontend.v1.TokenUsageIteration.compaction:type_name -> agentshim.frontend.v1.TokenUsageIterationCompaction
 	12, // 15: agentshim.frontend.v1.TokenUsageIteration.advisor:type_name -> agentshim.frontend.v1.TokenUsageIterationAdvisor
@@ -3806,22 +3805,22 @@ var file_agentshim_frontend_v1_durable_proto_depIdxs = []int32{
 	23, // 30: agentshim.frontend.v1.SessionTokenUtilization.subagents:type_name -> agentshim.frontend.v1.AgentTokenUtilization
 	24, // 31: agentshim.frontend.v1.SessionTokenUtilization.models:type_name -> agentshim.frontend.v1.ModelTokenUtilization
 	0,  // 32: agentshim.frontend.v1.SessionTokenUtilization.ungrouped_subagent_responses:type_name -> agentshim.frontend.v1.TokenUtilization
-	46, // 33: agentshim.frontend.v1.SessionTokenUtilization.all_agents_tokens:type_name -> agentshim.frontend.v1.TokenUsage
-	46, // 34: agentshim.frontend.v1.SessionTokenUtilization.main_agent_tokens:type_name -> agentshim.frontend.v1.TokenUsage
+	45, // 33: agentshim.frontend.v1.SessionTokenUtilization.all_agents_tokens:type_name -> agentshim.conversation.v1.TokenUsage
+	45, // 34: agentshim.frontend.v1.SessionTokenUtilization.main_agent_tokens:type_name -> agentshim.conversation.v1.TokenUsage
 	2,  // 35: agentshim.frontend.v1.AgentTokenUtilization.agent:type_name -> agentshim.frontend.v1.TokenUtilizationSubagent
 	25, // 36: agentshim.frontend.v1.AgentTokenUtilization.totals:type_name -> agentshim.frontend.v1.TokenUsageTotals
 	24, // 37: agentshim.frontend.v1.AgentTokenUtilization.models:type_name -> agentshim.frontend.v1.ModelTokenUtilization
-	46, // 38: agentshim.frontend.v1.AgentTokenUtilization.tokens:type_name -> agentshim.frontend.v1.TokenUsage
+	45, // 38: agentshim.frontend.v1.AgentTokenUtilization.tokens:type_name -> agentshim.conversation.v1.TokenUsage
 	25, // 39: agentshim.frontend.v1.ModelTokenUtilization.totals:type_name -> agentshim.frontend.v1.TokenUsageTotals
 	5,  // 40: agentshim.frontend.v1.TokenUsageTotals.cache_creation:type_name -> agentshim.frontend.v1.TokenCacheCreation
 	6,  // 41: agentshim.frontend.v1.TokenUsageTotals.server_tool_use:type_name -> agentshim.frontend.v1.TokenServerToolUse
 	7,  // 42: agentshim.frontend.v1.TokenUsageTotals.output_details:type_name -> agentshim.frontend.v1.TokenOutputDetails
 	8,  // 43: agentshim.frontend.v1.TokenUsageTotals.cache_rates:type_name -> agentshim.frontend.v1.TokenCacheRates
 	26, // 44: agentshim.frontend.v1.TokenUsageTotals.timing:type_name -> agentshim.frontend.v1.TokenTimingTotals
-	47, // 45: agentshim.frontend.v1.TurnAccounting.runtime:type_name -> agentshim.core.v1.QueryRuntimeIdentity
+	46, // 45: agentshim.frontend.v1.TurnAccounting.runtime:type_name -> agentshim.core.v1.QueryRuntimeIdentity
 	28, // 46: agentshim.frontend.v1.TurnAccounting.timing:type_name -> agentshim.frontend.v1.TurnAccountingTiming
-	48, // 47: agentshim.frontend.v1.TurnAccounting.usage_at_start:type_name -> agentshim.core.v1.AccountUsageObservation
-	48, // 48: agentshim.frontend.v1.TurnAccounting.usage_at_end:type_name -> agentshim.core.v1.AccountUsageObservation
+	47, // 47: agentshim.frontend.v1.TurnAccounting.usage_at_start:type_name -> agentshim.core.v1.AccountUsageObservation
+	47, // 48: agentshim.frontend.v1.TurnAccounting.usage_at_end:type_name -> agentshim.core.v1.AccountUsageObservation
 	0,  // 49: agentshim.frontend.v1.TurnAccounting.responses:type_name -> agentshim.frontend.v1.TokenUtilization
 	29, // 50: agentshim.frontend.v1.TurnAccounting.reconciliation:type_name -> agentshim.frontend.v1.TokenUsageReconciliation
 	30, // 51: agentshim.frontend.v1.TurnAccounting.complete:type_name -> agentshim.frontend.v1.TurnAccountingComplete
@@ -3855,7 +3854,6 @@ func file_agentshim_frontend_v1_durable_proto_init() {
 	if File_agentshim_frontend_v1_durable_proto != nil {
 		return
 	}
-	file_agentshim_frontend_v1_tokens_proto_init()
 	file_agentshim_frontend_v1_durable_proto_msgTypes[0].OneofWrappers = []any{
 		(*TokenUtilization_MainAgent)(nil),
 		(*TokenUtilization_Subagent)(nil),

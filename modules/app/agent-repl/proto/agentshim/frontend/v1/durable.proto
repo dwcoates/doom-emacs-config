@@ -25,7 +25,7 @@ syntax = "proto3";
 package agentshim.frontend.v1;
 
 import "agentshim/core/v1/core.proto";
-import "agentshim/data/v1/tools.proto";
+
 import "agentshim/conversation/v1/tokens.proto";
 import "google/protobuf/struct.proto";
 
@@ -149,7 +149,7 @@ message VendorTokenUsage {
   // them. Every populated key must also be logged loudly.
   google.protobuf.Struct unmodeled_usage = 15;
   // Complete API usage payload preserved without frontend normalization.
-  agentshim.data.v1.ApiUsage raw_usage = 16;
+  agentshim.conversation.v1.TokenUsage raw_usage = 16;
 }
 
 // Cache-creation tokens split by the prompt-cache TTL used for billing.

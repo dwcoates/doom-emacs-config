@@ -6,7 +6,7 @@ syntax = "proto3";
 
 package agentshim.frontend.v1;
 
-import "agentshim/data/v1/tools.proto";
+import "agentshim/conversation/v1/content.proto";
 
 option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 
@@ -25,7 +25,7 @@ message AgentResponse {
   //
   // The carve-out applies UNIFORMLY: top-level feed and detached-agent fold
   // alike. There is no path on which this field carries thinking.
-  agentshim.data.v1.ApiAssistantMessage body = 1;
+  agentshim.conversation.v1.AgentContent body = 1;
   // The resolved figures this response is stamped with. Absent when the
   // response carried no usage record — never fabricated as zeros.
   ResponseUsageStamp usage_stamp = 2;
@@ -36,7 +36,7 @@ message AgentResponse {
 // content block of the response it precedes.
 message AgentThinking {
   // The reasoning block, verbatim durable evidence (text + signature).
-  agentshim.data.v1.ThinkingBlock body = 1;
+  agentshim.conversation.v1.ThinkingBlock body = 1;
   // The API message this block was stripped from, verbatim. A live preview is
   // keyed by the message id its typing deltas carried; this is the resolved
   // fact that lets the settled block replace its preview instead of appending

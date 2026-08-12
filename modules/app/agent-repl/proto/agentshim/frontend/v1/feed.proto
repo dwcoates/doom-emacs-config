@@ -11,8 +11,7 @@ syntax = "proto3";
 package agentshim.frontend.v1;
 
 import "agentshim/core/v1/core.proto";
-import "agentshim/data/v1/stream.proto";
-import "agentshim/data/v1/tools.proto";
+import "agentshim/conversation/v1/content.proto";
 import "agentshim/frontend/v1/agent-emission.proto";
 import "agentshim/frontend/v1/detached-work.proto";
 import "agentshim/frontend/v1/failure-card.proto";
@@ -270,7 +269,7 @@ message Message {
     // ---- Non-agent payloads: things the agent did not emit ----
 
     // The user's own prompt.
-    agentshim.data.v1.ApiUserMessage user_message = 11;
+    agentshim.conversation.v1.UserContent user_message = 11;
     // A permission request. Agent-CAUSED but not agent-emitted: it is a
     // question addressed to the user and answered by a command
     // (PermissionAnswerCmd), so it is an interaction, not an utterance, and
@@ -437,17 +436,40 @@ message TypingCut {
   string fence = 3;
 }
 
-// The session's retained SystemInit (slash commands, tools, skills, model
-// list), pushed on attach and included in StateSnapshot (S9). Replaces the
-// Emacs GET /commands HTTP menu source.
+// The /status panel, RESOLVED: the rows it draws, already labelled and already
+// stringified.
+//
+// IT USED TO CARRY THE VENDOR'S INIT RECORD WHOLE, as a lenient JSON object the
+// panel read field by field, and every value the user actually saw was computed
+// client-side: the auth word from an enum name, the fast-mode word from a state
+// string, plugin labels from name+version pairs, three of the rows from
+// `.length` of an array, and the memory row from joining a map's values. That
+// is five derivations in the renderer, which is five places the panel's answer
+// can disagree with the daemon's.
+//
+// The daemon resolves them now. `SessionBegan` (conversation.v1) carries the
+// neutral facts the producer observed; the daemon turns those into rows; the
+// panel prints them.
 message SessionInitView {
   // 2 was session_id. A frontend has no session vocabulary: the only question
   // it ever asked of that field was "is this push still current", which the
   // fence answers without naming what rotated.
   reserved 2;
   reserved "session_id";
+  // 3 was `init`, the vendor's whole init record. The NAME is retired with it:
+  // nothing on this surface carries a vendor payload any more.
+  reserved 3;
+  reserved "init";
   string workspace = 1;
-  agentshim.data.v1.SystemInit init = 3;
+
+  // The panel's rows, in render order. EMPTY means no init has landed yet,
+  // which the panel draws as the rows it owns and nothing more — absence
+  // rendering absence, rather than a spinner standing in for a fact.
+  //
+  // The panel splices its own rows (account, model, permission mode) ahead of
+  // these, because those come from sources that move independently of an init
+  // and are already resolved elsewhere.
+  repeated SessionInitRow rows = 5;
   // The workspace's staleness FENCE at the moment the daemon produced this
   // push: an opaque token the client compares BYTE-WISE against the fence on
   // the workspace's current WorkspaceState, and never parses, splits or
@@ -458,4 +480,18 @@ message SessionInitView {
   // A client that learned to decode it would be depending on a fact this
   // contract does not offer, and the token's composition is free to change.
   string fence = 4;
+}
+
+// One row of the /status panel: a label and the value beside it.
+//
+// A STRING VALUE ON PURPOSE. Every row the panel draws is a word or a phrase —
+// a count, a joined list, a version, a resolved auth word — so typing the value
+// as anything richer would only invite a renderer to reformat it, which is the
+// derivation this message exists to remove. The daemon decided what it says.
+message SessionInitRow {
+  // The row's label, as shown: "Version", "Working directory", "Auth".
+  string label = 1;
+  // The value, as shown. Never empty — the daemon OMITS a row it has no value
+  // for rather than pushing a blank one, so absence renders as absence.
+  string value = 2;
 }

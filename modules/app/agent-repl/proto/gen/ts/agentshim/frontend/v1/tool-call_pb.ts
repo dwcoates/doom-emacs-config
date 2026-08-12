@@ -11,15 +11,17 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { ToolResultBlock, ToolUseBlock, ToolUseResult } from "../../data/v1/tools_pb";
-import { file_agentshim_data_v1_tools } from "../../data/v1/tools_pb";
+import type { ToolCallBlock, ToolResultContent } from "../../conversation/v1/content_pb";
+import { file_agentshim_conversation_v1_content } from "../../conversation/v1/content_pb";
+import type { DetachedWorkEnded, DetachedWorkStarted } from "../../conversation/v1/payloads_pb";
+import { file_agentshim_conversation_v1_payloads } from "../../conversation/v1/payloads_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentshim/frontend/v1/tool-call.proto.
  */
 export const file_agentshim_frontend_v1_tool_call: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHNoaW0vZnJvbnRlbmQvdjEvdG9vbC1jYWxsLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEibQoNQWdlbnRUb29sQ2FsbBItCgRjYWxsGAEgASgLMh8uYWdlbnRzaGltLmRhdGEudjEuVG9vbFVzZUJsb2NrEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgCIAEoCVIRc3Bhd25lZF9idWJibGVfaWQiRQoPQWdlbnRUb29sUmVzdWx0EjIKBnJlc3VsdBgBIAEoCzIiLmFnZW50c2hpbS5kYXRhLnYxLlRvb2xSZXN1bHRCbG9jayKMAQoQQWdlbnRUb29sT3V0Y29tZRI0CgpzdHJ1Y3R1cmVkGAEgASgLMiAuYWdlbnRzaGltLmRhdGEudjEuVG9vbFVzZVJlc3VsdBITCgt0b29sX3VzZV9pZBgCIAEoCRIaChJzcGF3bmVkX21lc3NhZ2VfaWQYAyABKAlSEXNwYXduZWRfYnViYmxlX2lkIuoFCglUYXNrRW50cnkSDwoHdGFza19pZBgBIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCRITCgtvdXRwdXRfcGF0aBgFIAEoCRIVCg1zdGFydGVkX2F0X21zGAYgASgDEhMKC2VuZGVkX2F0X21zGAcgASgDEjUKBWFnZW50GAogASgLMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLlRhc2tLaW5kQWdlbnRIABI7Cgh3b3JrZmxvdxgLIAEoCzInLmFnZW50c2hpbS5mcm9udGVuZC52MS5UYXNrS2luZFdvcmtmbG93SAASNQoFc2hlbGwYDCABKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuVGFza0tpbmRTaGVsbEgAEkMKDHVuY2xhc3NpZmllZBgNIAEoCzIrLmFnZW50c2hpbS5mcm9udGVuZC52MS5UYXNrS2luZFVuY2xhc3NpZmllZEgAEjsKB3J1bm5pbmcYFCABKAsyKC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuVGFza1N0YXR1c1J1bm5pbmdIARI1CgRkb25lGBUgASgLMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNEb25lSAESNwoFZXJyb3IYFiABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuVGFza1N0YXR1c0Vycm9ySAESOQoGa2lsbGVkGBcgASgLMicuYWdlbnRzaGltLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNLaWxsZWRIARI7CgdzdG9wcGVkGBggASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNTdG9wcGVkSAESNQoEbG9zdBgZIAEoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5UYXNrU3RhdHVzTG9zdEgBQgYKBGtpbmRCCAoGc3RhdHVzSgQIAhADSgQIBBAFUgRraW5kUgZzdGF0dXMiDwoNVGFza0tpbmRBZ2VudCISChBUYXNrS2luZFdvcmtmbG93Ig8KDVRhc2tLaW5kU2hlbGwiKQoUVGFza0tpbmRVbmNsYXNzaWZpZWQSEQoJdG9vbF9uYW1lGAEgASgJIhMKEVRhc2tTdGF0dXNSdW5uaW5nIhAKDlRhc2tTdGF0dXNEb25lIhEKD1Rhc2tTdGF0dXNFcnJvciISChBUYXNrU3RhdHVzS2lsbGVkIhMKEVRhc2tTdGF0dXNTdG9wcGVkIhAKDlRhc2tTdGF0dXNMb3N0InIKC1Rhc2tDYXRhbG9nEhEKCXdvcmtzcGFjZRgBIAEoCRIvCgV0YXNrcxgDIAMoCzIgLmFnZW50c2hpbS5mcm9udGVuZC52MS5UYXNrRW50cnkSDQoFZmVuY2UYBCABKAlKBAgCEANSCnNlc3Npb25faWRCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_agentshim_data_v1_tools]);
+  fileDesc("CiVhZ2VudHNoaW0vZnJvbnRlbmQvdjEvdG9vbC1jYWxsLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEidgoNQWdlbnRUb29sQ2FsbBI2CgRjYWxsGAEgASgLMiguYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5Ub29sQ2FsbEJsb2NrEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgCIAEoCVIRc3Bhd25lZF9idWJibGVfaWQiTwoPQWdlbnRUb29sUmVzdWx0EjwKBnJlc3VsdBgBIAEoCzIsLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVG9vbFJlc3VsdENvbnRlbnQi4wEKEEFnZW50VG9vbE91dGNvbWUSQQoHc3RhcnRlZBgBIAEoCzIuLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZEgAEj0KBWVuZGVkGAQgASgLMiwuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEgAEhMKC3Rvb2xfdXNlX2lkGAIgASgJEhoKEnNwYXduZWRfbWVzc2FnZV9pZBgDIAEoCUIJCgdvdXRjb21lUhFzcGF3bmVkX2J1YmJsZV9pZCLqBQoJVGFza0VudHJ5Eg8KB3Rhc2tfaWQYASABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkSEwoLb3V0cHV0X3BhdGgYBSABKAkSFQoNc3RhcnRlZF9hdF9tcxgGIAEoAxITCgtlbmRlZF9hdF9tcxgHIAEoAxI1CgVhZ2VudBgKIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5UYXNrS2luZEFnZW50SAASOwoId29ya2Zsb3cYCyABKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuVGFza0tpbmRXb3JrZmxvd0gAEjUKBXNoZWxsGAwgASgLMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLlRhc2tLaW5kU2hlbGxIABJDCgx1bmNsYXNzaWZpZWQYDSABKAsyKy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuVGFza0tpbmRVbmNsYXNzaWZpZWRIABI7CgdydW5uaW5nGBQgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNSdW5uaW5nSAESNQoEZG9uZRgVIAEoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5UYXNrU3RhdHVzRG9uZUgBEjcKBWVycm9yGBYgASgLMiYuYWdlbnRzaGltLmZyb250ZW5kLnYxLlRhc2tTdGF0dXNFcnJvckgBEjkKBmtpbGxlZBgXIAEoCzInLmFnZW50c2hpbS5mcm9udGVuZC52MS5UYXNrU3RhdHVzS2lsbGVkSAESOwoHc3RvcHBlZBgYIAEoCzIoLmFnZW50c2hpbS5mcm9udGVuZC52MS5UYXNrU3RhdHVzU3RvcHBlZEgBEjUKBGxvc3QYGSABKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuVGFza1N0YXR1c0xvc3RIAUIGCgRraW5kQggKBnN0YXR1c0oECAIQA0oECAQQBVIEa2luZFIGc3RhdHVzIg8KDVRhc2tLaW5kQWdlbnQiEgoQVGFza0tpbmRXb3JrZmxvdyIPCg1UYXNrS2luZFNoZWxsIikKFFRhc2tLaW5kVW5jbGFzc2lmaWVkEhEKCXRvb2xfbmFtZRgBIAEoCSITChFUYXNrU3RhdHVzUnVubmluZyIQCg5UYXNrU3RhdHVzRG9uZSIRCg9UYXNrU3RhdHVzRXJyb3IiEgoQVGFza1N0YXR1c0tpbGxlZCITChFUYXNrU3RhdHVzU3RvcHBlZCIQCg5UYXNrU3RhdHVzTG9zdCJyCgtUYXNrQ2F0YWxvZxIRCgl3b3Jrc3BhY2UYASABKAkSLwoFdGFza3MYAyADKAsyIC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuVGFza0VudHJ5Eg0KBWZlbmNlGAQgASgJSgQIAhADUgpzZXNzaW9uX2lkQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_agentshim_conversation_v1_content, file_agentshim_conversation_v1_payloads]);
 
 /**
  * The tool card's header: one tool invocation.
@@ -30,9 +32,9 @@ export type AgentToolCall = Message<"agentshim.frontend.v1.AgentToolCall"> & {
   /**
    * The call the agent made, verbatim durable evidence.
    *
-   * @generated from field: agentshim.data.v1.ToolUseBlock call = 1;
+   * @generated from field: agentshim.conversation.v1.ToolCallBlock call = 1;
    */
-  call?: ToolUseBlock | undefined;
+  call?: ToolCallBlock | undefined;
 
   /**
    * THE DETACHMENT VERDICT. Non-empty exactly when this call detached work, and
@@ -82,9 +84,9 @@ export type AgentToolResult = Message<"agentshim.frontend.v1.AgentToolResult"> &
    * The result block, verbatim durable evidence. Carries its own
    * tool_use_id, which is the card's reconciliation identity.
    *
-   * @generated from field: agentshim.data.v1.ToolResultBlock result = 1;
+   * @generated from field: agentshim.conversation.v1.ToolResultContent result = 1;
    */
-  result?: ToolResultBlock | undefined;
+  result?: ToolResultContent | undefined;
 };
 
 /**
@@ -95,20 +97,43 @@ export const AgentToolResultSchema: GenMessage<AgentToolResult> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_tool_call, 1);
 
 /**
- * A tool's TYPED outcome, and the subagent/task chip:
- * agentshim.data.v1.ToolUseResult's oneof carries AgentAsyncLaunch,
- * AgentResult, TaskOutputResult, TaskStopResult and WorkflowLaunchResult, so
- * the chip's facts are the outcome's facts.
+ * A tool's TYPED outcome, and the subagent/task chip.
+ *
+ * It used to carry `data.v1.ToolUseResult`, whose oneof held AgentAsyncLaunch,
+ * AgentResult, TaskOutputResult, TaskStopResult and WorkflowLaunchResult —
+ * five vendor-named shapes for two facts: work detached, and work reached an
+ * end. conversation.v1 models those directly, so the chip's facts are now the
+ * detachment's own facts rather than a vendor union the frontend destructures.
  *
  * @generated from message agentshim.frontend.v1.AgentToolOutcome
  */
 export type AgentToolOutcome = Message<"agentshim.frontend.v1.AgentToolOutcome"> & {
   /**
-   * The typed outcome, verbatim durable evidence.
+   * The outcome, in the neutral detached-work vocabulary.
    *
-   * @generated from field: agentshim.data.v1.ToolUseResult structured = 1;
+   * A oneof rather than one field, because a launch and an ending are
+   * different facts and a chip renders them differently. Absent when the call
+   * returned ordinarily and detached nothing.
+   *
+   * @generated from oneof agentshim.frontend.v1.AgentToolOutcome.outcome
    */
-  structured?: ToolUseResult | undefined;
+  outcome: {
+    /**
+     * Work detached and is now running alongside the turn.
+     *
+     * @generated from field: agentshim.conversation.v1.DetachedWorkStarted started = 1;
+     */
+    value: DetachedWorkStarted;
+    case: "started";
+  } | {
+    /**
+     * Detached work reached an end, with the outcome it reached.
+     *
+     * @generated from field: agentshim.conversation.v1.DetachedWorkEnded ended = 4;
+     */
+    value: DetachedWorkEnded;
+    case: "ended";
+  } | { case: undefined; value?: undefined };
 
   /**
    * The tool_use id this outcome belongs to. Carried explicitly because

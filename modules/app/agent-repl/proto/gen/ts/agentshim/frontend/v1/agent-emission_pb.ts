@@ -22,8 +22,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { ResultMessage } from "../../data/v1/stream_pb";
-import { file_agentshim_data_v1_stream } from "../../data/v1/stream_pb";
+import type { DetachedWorkEnded } from "../../conversation/v1/payloads_pb";
+import { file_agentshim_conversation_v1_payloads } from "../../conversation/v1/payloads_pb";
 import type { AgentResponse, AgentThinking } from "./agent-response_pb";
 import { file_agentshim_frontend_v1_agent_response } from "./agent-response_pb";
 import type { SkillBodyItem } from "./slash-menu_pb";
@@ -36,7 +36,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/agent-emission.proto.
  */
 export const file_agentshim_frontend_v1_agent_emission: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHNoaW0vZnJvbnRlbmQvdjEvYWdlbnQtZW1pc3Npb24ucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSK/AwoNQWdlbnRFbWlzc2lvbhI4CghyZXNwb25zZRgBIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudFJlc3BvbnNlSAASOAoIdGhpbmtpbmcYAiABKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQWdlbnRUaGlua2luZ0gAEjkKCXRvb2xfY2FsbBgDIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudFRvb2xDYWxsSAASPQoLdG9vbF9yZXN1bHQYBCABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQWdlbnRUb29sUmVzdWx0SAASPwoMdG9vbF9vdXRjb21lGAUgASgLMicuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFnZW50VG9vbE91dGNvbWVIABI6Cgpza2lsbF9ib2R5GAYgASgLMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLlNraWxsQm9keUl0ZW1IABI3Cgt0dXJuX3Jlc3VsdBgHIAEoCzIgLmFnZW50c2hpbS5kYXRhLnYxLlJlc3VsdE1lc3NhZ2VIAEIKCghlbWlzc2lvbkIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_data_v1_stream, file_agentshim_frontend_v1_agent_response, file_agentshim_frontend_v1_slash_menu, file_agentshim_frontend_v1_tool_call]);
+  fileDesc("CiphZ2VudHNoaW0vZnJvbnRlbmQvdjEvYWdlbnQtZW1pc3Npb24ucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSLLAwoNQWdlbnRFbWlzc2lvbhI4CghyZXNwb25zZRgBIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudFJlc3BvbnNlSAASOAoIdGhpbmtpbmcYAiABKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQWdlbnRUaGlua2luZ0gAEjkKCXRvb2xfY2FsbBgDIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudFRvb2xDYWxsSAASPQoLdG9vbF9yZXN1bHQYBCABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQWdlbnRUb29sUmVzdWx0SAASPwoMdG9vbF9vdXRjb21lGAUgASgLMicuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFnZW50VG9vbE91dGNvbWVIABI6Cgpza2lsbF9ib2R5GAYgASgLMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLlNraWxsQm9keUl0ZW1IABJDCgt0dXJuX3Jlc3VsdBgHIAEoCzIsLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrRW5kZWRIAEIKCghlbWlzc2lvbkIyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_conversation_v1_payloads, file_agentshim_frontend_v1_agent_response, file_agentshim_frontend_v1_slash_menu, file_agentshim_frontend_v1_tool_call]);
 
 /**
  * One thing an agent produced.
@@ -119,9 +119,9 @@ export type AgentEmission = Message<"agentshim.frontend.v1.AgentEmission"> & {
      * the session's ledger rather than the agent's utterance, and it reaches a
      * frontend resolved, on FooterAccountingCell.
      *
-     * @generated from field: agentshim.data.v1.ResultMessage turn_result = 7;
+     * @generated from field: agentshim.conversation.v1.DetachedWorkEnded turn_result = 7;
      */
-    value: ResultMessage;
+    value: DetachedWorkEnded;
     case: "turnResult";
   } | { case: undefined; value?: undefined };
 };
