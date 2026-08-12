@@ -831,17 +831,33 @@ func (*PermissionAbandoned) Descriptor() ([]byte, []int) {
 	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{13}
 }
 
-// Something went wrong, stated as a card the user reads and acts on.
+// A failure the PRODUCER OBSERVED and the vendor RECORDED.
+//
+// NARROW ON PURPOSE, and the narrowing is the point. A failure card the daemon
+// SYNTHESIZED — a session that never started, a store write the shim rejected —
+// is not this: nothing observed it and no transcript holds it, so it has no
+// producer and cannot be an entry at all. That is `frontend.v1.FailureCardView`,
+// which the daemon mints and pushes.
+//
+// What lands here is the other kind: the vendor's own recorded error, which the
+// CLI writes to its transcript and the sidecar reads back. It is durable
+// because the vendor made it durable, and a reader scrolling back must see that
+// the turn failed rather than find it merely absent.
+//
+// NO RECOVERY CLASSIFICATION HERE. Whether anything can be done about a failure
+// is the daemon's judgement (`internal/errclass`), and it reaches a client
+// already resolved on FailureCardView. A producer stating it too would be a
+// second authority on one question, and the two would disagree.
 type FailureRaised struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// What went wrong, in the user's terms rather than the system's.
+	// What went wrong, as the vendor reported it.
 	Summary string `protobuf:"bytes,1,opt,name=summary,proto3" json:"summary,omitempty"`
 	// The underlying detail, for someone who wants it. Held apart from the
 	// summary so a client can show one without the other.
 	Detail string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
-	// Whether anything can be done about it, resolved by the producer rather than
-	// guessed by a renderer from the text.
-	Recovery      *FailureRecovery `protobuf:"bytes,3,opt,name=recovery,proto3" json:"recovery,omitempty"`
+	// How long the vendor said it would wait before retrying, in millis. Zero
+	// means it said nothing — NOT that it will retry immediately.
+	RetryInMs     int64 `protobuf:"varint,3,opt,name=retry_in_ms,json=retryInMs,proto3" json:"retry_in_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -890,233 +906,11 @@ func (x *FailureRaised) GetDetail() string {
 	return ""
 }
 
-func (x *FailureRaised) GetRecovery() *FailureRecovery {
+func (x *FailureRaised) GetRetryInMs() int64 {
 	if x != nil {
-		return x.Recovery
+		return x.RetryInMs
 	}
-	return nil
-}
-
-// What, if anything, the user can do about a failure.
-type FailureRecovery struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Recovery:
-	//
-	//	*FailureRecovery_Automatic
-	//	*FailureRecovery_UserAction
-	//	*FailureRecovery_None
-	Recovery      isFailureRecovery_Recovery `protobuf_oneof:"recovery"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FailureRecovery) Reset() {
-	*x = FailureRecovery{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[15]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FailureRecovery) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FailureRecovery) ProtoMessage() {}
-
-func (x *FailureRecovery) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[15]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FailureRecovery.ProtoReflect.Descriptor instead.
-func (*FailureRecovery) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{15}
-}
-
-func (x *FailureRecovery) GetRecovery() isFailureRecovery_Recovery {
-	if x != nil {
-		return x.Recovery
-	}
-	return nil
-}
-
-func (x *FailureRecovery) GetAutomatic() *RecoveryAutomatic {
-	if x != nil {
-		if x, ok := x.Recovery.(*FailureRecovery_Automatic); ok {
-			return x.Automatic
-		}
-	}
-	return nil
-}
-
-func (x *FailureRecovery) GetUserAction() *RecoveryUserAction {
-	if x != nil {
-		if x, ok := x.Recovery.(*FailureRecovery_UserAction); ok {
-			return x.UserAction
-		}
-	}
-	return nil
-}
-
-func (x *FailureRecovery) GetNone() *RecoveryNone {
-	if x != nil {
-		if x, ok := x.Recovery.(*FailureRecovery_None); ok {
-			return x.None
-		}
-	}
-	return nil
-}
-
-type isFailureRecovery_Recovery interface {
-	isFailureRecovery_Recovery()
-}
-
-type FailureRecovery_Automatic struct {
-	// It will retry itself; the user does nothing.
-	Automatic *RecoveryAutomatic `protobuf:"bytes,1,opt,name=automatic,proto3,oneof"`
-}
-
-type FailureRecovery_UserAction struct {
-	// The user must act.
-	UserAction *RecoveryUserAction `protobuf:"bytes,2,opt,name=user_action,json=userAction,proto3,oneof"`
-}
-
-type FailureRecovery_None struct {
-	// Nothing can be done; the work is lost.
-	None *RecoveryNone `protobuf:"bytes,3,opt,name=none,proto3,oneof"`
-}
-
-func (*FailureRecovery_Automatic) isFailureRecovery_Recovery() {}
-
-func (*FailureRecovery_UserAction) isFailureRecovery_Recovery() {}
-
-func (*FailureRecovery_None) isFailureRecovery_Recovery() {}
-
-// The system recovers on its own and the user need not act.
-type RecoveryAutomatic struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RecoveryAutomatic) Reset() {
-	*x = RecoveryAutomatic{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[16]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RecoveryAutomatic) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RecoveryAutomatic) ProtoMessage() {}
-
-func (x *RecoveryAutomatic) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[16]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RecoveryAutomatic.ProtoReflect.Descriptor instead.
-func (*RecoveryAutomatic) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{16}
-}
-
-// The user has to do something before this can proceed.
-type RecoveryUserAction struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The action to take, stated by the producer so a client never invents one.
-	Action        string `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RecoveryUserAction) Reset() {
-	*x = RecoveryUserAction{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[17]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RecoveryUserAction) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RecoveryUserAction) ProtoMessage() {}
-
-func (x *RecoveryUserAction) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[17]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RecoveryUserAction.ProtoReflect.Descriptor instead.
-func (*RecoveryUserAction) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{17}
-}
-
-func (x *RecoveryUserAction) GetAction() string {
-	if x != nil {
-		return x.Action
-	}
-	return ""
-}
-
-// Unrecoverable. Said plainly rather than dressed as a retry that will not help.
-type RecoveryNone struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RecoveryNone) Reset() {
-	*x = RecoveryNone{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[18]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RecoveryNone) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RecoveryNone) ProtoMessage() {}
-
-func (x *RecoveryNone) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[18]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RecoveryNone.ProtoReflect.Descriptor instead.
-func (*RecoveryNone) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{18}
+	return 0
 }
 
 // The conversation was cut here, and the reader must see where.
@@ -1133,7 +927,7 @@ type ContextCut struct {
 
 func (x *ContextCut) Reset() {
 	*x = ContextCut{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[19]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1145,7 +939,7 @@ func (x *ContextCut) String() string {
 func (*ContextCut) ProtoMessage() {}
 
 func (x *ContextCut) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[19]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1158,7 +952,7 @@ func (x *ContextCut) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextCut.ProtoReflect.Descriptor instead.
 func (*ContextCut) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{19}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ContextCut) GetCut() isContextCut_Cut {
@@ -1213,7 +1007,7 @@ type ContextCleared struct {
 
 func (x *ContextCleared) Reset() {
 	*x = ContextCleared{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[20]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1225,7 +1019,7 @@ func (x *ContextCleared) String() string {
 func (*ContextCleared) ProtoMessage() {}
 
 func (x *ContextCleared) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[20]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1238,7 +1032,7 @@ func (x *ContextCleared) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextCleared.ProtoReflect.Descriptor instead.
 func (*ContextCleared) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{20}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{16}
 }
 
 // History was replaced by a summary of itself.
@@ -1258,7 +1052,7 @@ type ContextCompacted struct {
 
 func (x *ContextCompacted) Reset() {
 	*x = ContextCompacted{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[21]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1270,7 +1064,7 @@ func (x *ContextCompacted) String() string {
 func (*ContextCompacted) ProtoMessage() {}
 
 func (x *ContextCompacted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[21]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1283,7 +1077,7 @@ func (x *ContextCompacted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextCompacted.ProtoReflect.Descriptor instead.
 func (*ContextCompacted) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{21}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ContextCompacted) GetSummary() *AgentContent {
@@ -1307,54 +1101,6 @@ func (x *ContextCompacted) GetTokensAfter() int64 {
 	return 0
 }
 
-// A slash command the DAEMON answered instead of the agent.
-type DaemonAnsweredCommand struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// WHICH command, and nothing else. There is deliberately no text field: the
-	// argument a user typed after a command must never reach a surface that
-	// renders it.
-	Command       SessionCommand `protobuf:"varint,1,opt,name=command,proto3,enum=agentshim.conversation.v1.SessionCommand" json:"command,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DaemonAnsweredCommand) Reset() {
-	*x = DaemonAnsweredCommand{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[22]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DaemonAnsweredCommand) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DaemonAnsweredCommand) ProtoMessage() {}
-
-func (x *DaemonAnsweredCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[22]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DaemonAnsweredCommand.ProtoReflect.Descriptor instead.
-func (*DaemonAnsweredCommand) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{22}
-}
-
-func (x *DaemonAnsweredCommand) GetCommand() SessionCommand {
-	if x != nil {
-		return x.Command
-	}
-	return SessionCommand_SESSION_COMMAND_UNSPECIFIED
-}
-
 // Work that DETACHED from the turn and now runs alongside it.
 type DetachedWorkStarted struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1371,7 +1117,7 @@ type DetachedWorkStarted struct {
 
 func (x *DetachedWorkStarted) Reset() {
 	*x = DetachedWorkStarted{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[23]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1383,7 +1129,7 @@ func (x *DetachedWorkStarted) String() string {
 func (*DetachedWorkStarted) ProtoMessage() {}
 
 func (x *DetachedWorkStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[23]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1396,7 +1142,7 @@ func (x *DetachedWorkStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkStarted.ProtoReflect.Descriptor instead.
 func (*DetachedWorkStarted) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{23}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DetachedWorkStarted) GetOriginToolCallId() string {
@@ -1436,7 +1182,7 @@ type DetachedWorkKind struct {
 
 func (x *DetachedWorkKind) Reset() {
 	*x = DetachedWorkKind{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[24]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1448,7 +1194,7 @@ func (x *DetachedWorkKind) String() string {
 func (*DetachedWorkKind) ProtoMessage() {}
 
 func (x *DetachedWorkKind) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[24]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1461,7 +1207,7 @@ func (x *DetachedWorkKind) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkKind.ProtoReflect.Descriptor instead.
 func (*DetachedWorkKind) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{24}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DetachedWorkKind) GetKind() isDetachedWorkKind_Kind {
@@ -1548,7 +1294,7 @@ type DetachedAgent struct {
 
 func (x *DetachedAgent) Reset() {
 	*x = DetachedAgent{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[25]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1560,7 +1306,7 @@ func (x *DetachedAgent) String() string {
 func (*DetachedAgent) ProtoMessage() {}
 
 func (x *DetachedAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[25]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1573,7 +1319,7 @@ func (x *DetachedAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedAgent.ProtoReflect.Descriptor instead.
 func (*DetachedAgent) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{25}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{20}
 }
 
 // A shell command running in the background.
@@ -1585,7 +1331,7 @@ type DetachedShell struct {
 
 func (x *DetachedShell) Reset() {
 	*x = DetachedShell{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[26]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1597,7 +1343,7 @@ func (x *DetachedShell) String() string {
 func (*DetachedShell) ProtoMessage() {}
 
 func (x *DetachedShell) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[26]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1610,7 +1356,7 @@ func (x *DetachedShell) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedShell.ProtoReflect.Descriptor instead.
 func (*DetachedShell) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{26}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{21}
 }
 
 // A workflow with its own journal of steps.
@@ -1622,7 +1368,7 @@ type DetachedWorkflow struct {
 
 func (x *DetachedWorkflow) Reset() {
 	*x = DetachedWorkflow{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[27]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1634,7 +1380,7 @@ func (x *DetachedWorkflow) String() string {
 func (*DetachedWorkflow) ProtoMessage() {}
 
 func (x *DetachedWorkflow) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[27]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1647,7 +1393,7 @@ func (x *DetachedWorkflow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkflow.ProtoReflect.Descriptor instead.
 func (*DetachedWorkflow) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{27}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{22}
 }
 
 // Detached work we could not classify. Stated rather than defaulted into one of
@@ -1662,7 +1408,7 @@ type DetachedUnclassified struct {
 
 func (x *DetachedUnclassified) Reset() {
 	*x = DetachedUnclassified{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[28]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1674,7 +1420,7 @@ func (x *DetachedUnclassified) String() string {
 func (*DetachedUnclassified) ProtoMessage() {}
 
 func (x *DetachedUnclassified) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[28]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1687,7 +1433,7 @@ func (x *DetachedUnclassified) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedUnclassified.ProtoReflect.Descriptor instead.
 func (*DetachedUnclassified) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{28}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DetachedUnclassified) GetToolName() string {
@@ -1710,7 +1456,7 @@ type DetachedWorkProgressed struct {
 
 func (x *DetachedWorkProgressed) Reset() {
 	*x = DetachedWorkProgressed{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[29]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1722,7 +1468,7 @@ func (x *DetachedWorkProgressed) String() string {
 func (*DetachedWorkProgressed) ProtoMessage() {}
 
 func (x *DetachedWorkProgressed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[29]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1735,7 +1481,7 @@ func (x *DetachedWorkProgressed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkProgressed.ProtoReflect.Descriptor instead.
 func (*DetachedWorkProgressed) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{29}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *DetachedWorkProgressed) GetOutput() string {
@@ -1761,7 +1507,7 @@ type DetachedWorkEnded struct {
 
 func (x *DetachedWorkEnded) Reset() {
 	*x = DetachedWorkEnded{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[30]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1773,7 +1519,7 @@ func (x *DetachedWorkEnded) String() string {
 func (*DetachedWorkEnded) ProtoMessage() {}
 
 func (x *DetachedWorkEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[30]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1786,7 +1532,7 @@ func (x *DetachedWorkEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkEnded.ProtoReflect.Descriptor instead.
 func (*DetachedWorkEnded) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{30}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *DetachedWorkEnded) GetOutcome() isDetachedWorkEnded_Outcome {
@@ -1874,7 +1620,7 @@ type DetachedSucceeded struct {
 
 func (x *DetachedSucceeded) Reset() {
 	*x = DetachedSucceeded{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[31]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1886,7 +1632,7 @@ func (x *DetachedSucceeded) String() string {
 func (*DetachedSucceeded) ProtoMessage() {}
 
 func (x *DetachedSucceeded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[31]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1899,7 +1645,7 @@ func (x *DetachedSucceeded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedSucceeded.ProtoReflect.Descriptor instead.
 func (*DetachedSucceeded) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{31}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *DetachedSucceeded) GetSummary() string {
@@ -1920,7 +1666,7 @@ type DetachedFailed struct {
 
 func (x *DetachedFailed) Reset() {
 	*x = DetachedFailed{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[32]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1932,7 +1678,7 @@ func (x *DetachedFailed) String() string {
 func (*DetachedFailed) ProtoMessage() {}
 
 func (x *DetachedFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[32]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1945,7 +1691,7 @@ func (x *DetachedFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedFailed.ProtoReflect.Descriptor instead.
 func (*DetachedFailed) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{32}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *DetachedFailed) GetSummary() string {
@@ -1964,7 +1710,7 @@ type DetachedCancelled struct {
 
 func (x *DetachedCancelled) Reset() {
 	*x = DetachedCancelled{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[33]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1976,7 +1722,7 @@ func (x *DetachedCancelled) String() string {
 func (*DetachedCancelled) ProtoMessage() {}
 
 func (x *DetachedCancelled) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[33]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1989,7 +1735,7 @@ func (x *DetachedCancelled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedCancelled.ProtoReflect.Descriptor instead.
 func (*DetachedCancelled) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{33}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{28}
 }
 
 // We lost sight of it.
@@ -2008,7 +1754,7 @@ type DetachedLost struct {
 
 func (x *DetachedLost) Reset() {
 	*x = DetachedLost{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[34]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2020,7 +1766,7 @@ func (x *DetachedLost) String() string {
 func (*DetachedLost) ProtoMessage() {}
 
 func (x *DetachedLost) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[34]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2033,7 +1779,7 @@ func (x *DetachedLost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedLost.ProtoReflect.Descriptor instead.
 func (*DetachedLost) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{34}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *DetachedLost) GetInference() string {
@@ -2047,7 +1793,7 @@ var File_agentshim_conversation_v1_payloads_proto protoreflect.FileDescriptor
 
 const file_agentshim_conversation_v1_payloads_proto_rawDesc = "" +
 	"\n" +
-	"(agentshim/conversation/v1/payloads.proto\x12\x19agentshim.conversation.v1\x1a(agentshim/conversation/v1/commands.proto\x1a'agentshim/conversation/v1/content.proto\x1a&agentshim/conversation/v1/tokens.proto\"L\n" +
+	"(agentshim/conversation/v1/payloads.proto\x12\x19agentshim.conversation.v1\x1a'agentshim/conversation/v1/content.proto\x1a&agentshim/conversation/v1/tokens.proto\"L\n" +
 	"\bUserSaid\x12@\n" +
 	"\acontent\x18\x01 \x01(\v2&.agentshim.conversation.v1.UserContentR\acontent\"\xe9\x01\n" +
 	"\tAgentSaid\x12A\n" +
@@ -2088,22 +1834,11 @@ const file_agentshim_conversation_v1_payloads_proto_rawDesc = "" +
 	"forSession\"*\n" +
 	"\x10PermissionDenied\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x15\n" +
-	"\x13PermissionAbandoned\"\x89\x01\n" +
+	"\x13PermissionAbandoned\"a\n" +
 	"\rFailureRaised\x12\x18\n" +
 	"\asummary\x18\x01 \x01(\tR\asummary\x12\x16\n" +
-	"\x06detail\x18\x02 \x01(\tR\x06detail\x12F\n" +
-	"\brecovery\x18\x03 \x01(\v2*.agentshim.conversation.v1.FailureRecoveryR\brecovery\"\xfc\x01\n" +
-	"\x0fFailureRecovery\x12L\n" +
-	"\tautomatic\x18\x01 \x01(\v2,.agentshim.conversation.v1.RecoveryAutomaticH\x00R\tautomatic\x12P\n" +
-	"\vuser_action\x18\x02 \x01(\v2-.agentshim.conversation.v1.RecoveryUserActionH\x00R\n" +
-	"userAction\x12=\n" +
-	"\x04none\x18\x03 \x01(\v2'.agentshim.conversation.v1.RecoveryNoneH\x00R\x04noneB\n" +
-	"\n" +
-	"\brecovery\"\x13\n" +
-	"\x11RecoveryAutomatic\",\n" +
-	"\x12RecoveryUserAction\x12\x16\n" +
-	"\x06action\x18\x01 \x01(\tR\x06action\"\x0e\n" +
-	"\fRecoveryNone\"\xa7\x01\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail\x12\x1e\n" +
+	"\vretry_in_ms\x18\x03 \x01(\x03R\tretryInMs\"\xa7\x01\n" +
 	"\n" +
 	"ContextCut\x12E\n" +
 	"\acleared\x18\x01 \x01(\v2).agentshim.conversation.v1.ContextClearedH\x00R\acleared\x12K\n" +
@@ -2113,9 +1848,7 @@ const file_agentshim_conversation_v1_payloads_proto_rawDesc = "" +
 	"\x10ContextCompacted\x12A\n" +
 	"\asummary\x18\x01 \x01(\v2'.agentshim.conversation.v1.AgentContentR\asummary\x12#\n" +
 	"\rtokens_before\x18\x02 \x01(\x03R\ftokensBefore\x12!\n" +
-	"\ftokens_after\x18\x03 \x01(\x03R\vtokensAfter\"\\\n" +
-	"\x15DaemonAnsweredCommand\x12C\n" +
-	"\acommand\x18\x01 \x01(\x0e2).agentshim.conversation.v1.SessionCommandR\acommand\"\x9b\x01\n" +
+	"\ftokens_after\x18\x03 \x01(\x03R\vtokensAfter\"\x9b\x01\n" +
 	"\x13DetachedWorkStarted\x12-\n" +
 	"\x13origin_tool_call_id\x18\x01 \x01(\tR\x10originToolCallId\x12\x14\n" +
 	"\x05label\x18\x02 \x01(\tR\x05label\x12?\n" +
@@ -2159,7 +1892,7 @@ func file_agentshim_conversation_v1_payloads_proto_rawDescGZIP() []byte {
 	return file_agentshim_conversation_v1_payloads_proto_rawDescData
 }
 
-var file_agentshim_conversation_v1_payloads_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_agentshim_conversation_v1_payloads_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_agentshim_conversation_v1_payloads_proto_goTypes = []any{
 	(*UserSaid)(nil),               // 0: agentshim.conversation.v1.UserSaid
 	(*AgentSaid)(nil),              // 1: agentshim.conversation.v1.AgentSaid
@@ -2176,70 +1909,59 @@ var file_agentshim_conversation_v1_payloads_proto_goTypes = []any{
 	(*PermissionDenied)(nil),       // 12: agentshim.conversation.v1.PermissionDenied
 	(*PermissionAbandoned)(nil),    // 13: agentshim.conversation.v1.PermissionAbandoned
 	(*FailureRaised)(nil),          // 14: agentshim.conversation.v1.FailureRaised
-	(*FailureRecovery)(nil),        // 15: agentshim.conversation.v1.FailureRecovery
-	(*RecoveryAutomatic)(nil),      // 16: agentshim.conversation.v1.RecoveryAutomatic
-	(*RecoveryUserAction)(nil),     // 17: agentshim.conversation.v1.RecoveryUserAction
-	(*RecoveryNone)(nil),           // 18: agentshim.conversation.v1.RecoveryNone
-	(*ContextCut)(nil),             // 19: agentshim.conversation.v1.ContextCut
-	(*ContextCleared)(nil),         // 20: agentshim.conversation.v1.ContextCleared
-	(*ContextCompacted)(nil),       // 21: agentshim.conversation.v1.ContextCompacted
-	(*DaemonAnsweredCommand)(nil),  // 22: agentshim.conversation.v1.DaemonAnsweredCommand
-	(*DetachedWorkStarted)(nil),    // 23: agentshim.conversation.v1.DetachedWorkStarted
-	(*DetachedWorkKind)(nil),       // 24: agentshim.conversation.v1.DetachedWorkKind
-	(*DetachedAgent)(nil),          // 25: agentshim.conversation.v1.DetachedAgent
-	(*DetachedShell)(nil),          // 26: agentshim.conversation.v1.DetachedShell
-	(*DetachedWorkflow)(nil),       // 27: agentshim.conversation.v1.DetachedWorkflow
-	(*DetachedUnclassified)(nil),   // 28: agentshim.conversation.v1.DetachedUnclassified
-	(*DetachedWorkProgressed)(nil), // 29: agentshim.conversation.v1.DetachedWorkProgressed
-	(*DetachedWorkEnded)(nil),      // 30: agentshim.conversation.v1.DetachedWorkEnded
-	(*DetachedSucceeded)(nil),      // 31: agentshim.conversation.v1.DetachedSucceeded
-	(*DetachedFailed)(nil),         // 32: agentshim.conversation.v1.DetachedFailed
-	(*DetachedCancelled)(nil),      // 33: agentshim.conversation.v1.DetachedCancelled
-	(*DetachedLost)(nil),           // 34: agentshim.conversation.v1.DetachedLost
-	(*UserContent)(nil),            // 35: agentshim.conversation.v1.UserContent
-	(*AgentContent)(nil),           // 36: agentshim.conversation.v1.AgentContent
-	(*TokenUsage)(nil),             // 37: agentshim.conversation.v1.TokenUsage
-	(*ToolResultContent)(nil),      // 38: agentshim.conversation.v1.ToolResultContent
-	(*ToolCallBlock)(nil),          // 39: agentshim.conversation.v1.ToolCallBlock
-	(SessionCommand)(0),            // 40: agentshim.conversation.v1.SessionCommand
+	(*ContextCut)(nil),             // 15: agentshim.conversation.v1.ContextCut
+	(*ContextCleared)(nil),         // 16: agentshim.conversation.v1.ContextCleared
+	(*ContextCompacted)(nil),       // 17: agentshim.conversation.v1.ContextCompacted
+	(*DetachedWorkStarted)(nil),    // 18: agentshim.conversation.v1.DetachedWorkStarted
+	(*DetachedWorkKind)(nil),       // 19: agentshim.conversation.v1.DetachedWorkKind
+	(*DetachedAgent)(nil),          // 20: agentshim.conversation.v1.DetachedAgent
+	(*DetachedShell)(nil),          // 21: agentshim.conversation.v1.DetachedShell
+	(*DetachedWorkflow)(nil),       // 22: agentshim.conversation.v1.DetachedWorkflow
+	(*DetachedUnclassified)(nil),   // 23: agentshim.conversation.v1.DetachedUnclassified
+	(*DetachedWorkProgressed)(nil), // 24: agentshim.conversation.v1.DetachedWorkProgressed
+	(*DetachedWorkEnded)(nil),      // 25: agentshim.conversation.v1.DetachedWorkEnded
+	(*DetachedSucceeded)(nil),      // 26: agentshim.conversation.v1.DetachedSucceeded
+	(*DetachedFailed)(nil),         // 27: agentshim.conversation.v1.DetachedFailed
+	(*DetachedCancelled)(nil),      // 28: agentshim.conversation.v1.DetachedCancelled
+	(*DetachedLost)(nil),           // 29: agentshim.conversation.v1.DetachedLost
+	(*UserContent)(nil),            // 30: agentshim.conversation.v1.UserContent
+	(*AgentContent)(nil),           // 31: agentshim.conversation.v1.AgentContent
+	(*TokenUsage)(nil),             // 32: agentshim.conversation.v1.TokenUsage
+	(*ToolResultContent)(nil),      // 33: agentshim.conversation.v1.ToolResultContent
+	(*ToolCallBlock)(nil),          // 34: agentshim.conversation.v1.ToolCallBlock
 }
 var file_agentshim_conversation_v1_payloads_proto_depIdxs = []int32{
-	35, // 0: agentshim.conversation.v1.UserSaid.content:type_name -> agentshim.conversation.v1.UserContent
-	36, // 1: agentshim.conversation.v1.AgentSaid.content:type_name -> agentshim.conversation.v1.AgentContent
-	37, // 2: agentshim.conversation.v1.AgentSaid.usage:type_name -> agentshim.conversation.v1.TokenUsage
+	30, // 0: agentshim.conversation.v1.UserSaid.content:type_name -> agentshim.conversation.v1.UserContent
+	31, // 1: agentshim.conversation.v1.AgentSaid.content:type_name -> agentshim.conversation.v1.AgentContent
+	32, // 2: agentshim.conversation.v1.AgentSaid.usage:type_name -> agentshim.conversation.v1.TokenUsage
 	3,  // 3: agentshim.conversation.v1.AgentSaid.stop_reason:type_name -> agentshim.conversation.v1.StopReason
-	38, // 4: agentshim.conversation.v1.ToolReturned.content:type_name -> agentshim.conversation.v1.ToolResultContent
+	33, // 4: agentshim.conversation.v1.ToolReturned.content:type_name -> agentshim.conversation.v1.ToolResultContent
 	4,  // 5: agentshim.conversation.v1.StopReason.end_turn:type_name -> agentshim.conversation.v1.StopEndTurn
 	5,  // 6: agentshim.conversation.v1.StopReason.tool_call:type_name -> agentshim.conversation.v1.StopToolCall
 	6,  // 7: agentshim.conversation.v1.StopReason.max_tokens:type_name -> agentshim.conversation.v1.StopMaxTokens
 	7,  // 8: agentshim.conversation.v1.StopReason.interrupted:type_name -> agentshim.conversation.v1.StopInterrupted
 	8,  // 9: agentshim.conversation.v1.StopReason.unsupported:type_name -> agentshim.conversation.v1.StopUnsupported
-	39, // 10: agentshim.conversation.v1.PermissionAsked.requested:type_name -> agentshim.conversation.v1.ToolCallBlock
+	34, // 10: agentshim.conversation.v1.PermissionAsked.requested:type_name -> agentshim.conversation.v1.ToolCallBlock
 	11, // 11: agentshim.conversation.v1.PermissionAnswered.allowed:type_name -> agentshim.conversation.v1.PermissionAllowed
 	12, // 12: agentshim.conversation.v1.PermissionAnswered.denied:type_name -> agentshim.conversation.v1.PermissionDenied
 	13, // 13: agentshim.conversation.v1.PermissionAnswered.abandoned:type_name -> agentshim.conversation.v1.PermissionAbandoned
-	15, // 14: agentshim.conversation.v1.FailureRaised.recovery:type_name -> agentshim.conversation.v1.FailureRecovery
-	16, // 15: agentshim.conversation.v1.FailureRecovery.automatic:type_name -> agentshim.conversation.v1.RecoveryAutomatic
-	17, // 16: agentshim.conversation.v1.FailureRecovery.user_action:type_name -> agentshim.conversation.v1.RecoveryUserAction
-	18, // 17: agentshim.conversation.v1.FailureRecovery.none:type_name -> agentshim.conversation.v1.RecoveryNone
-	20, // 18: agentshim.conversation.v1.ContextCut.cleared:type_name -> agentshim.conversation.v1.ContextCleared
-	21, // 19: agentshim.conversation.v1.ContextCut.compacted:type_name -> agentshim.conversation.v1.ContextCompacted
-	36, // 20: agentshim.conversation.v1.ContextCompacted.summary:type_name -> agentshim.conversation.v1.AgentContent
-	40, // 21: agentshim.conversation.v1.DaemonAnsweredCommand.command:type_name -> agentshim.conversation.v1.SessionCommand
-	24, // 22: agentshim.conversation.v1.DetachedWorkStarted.kind:type_name -> agentshim.conversation.v1.DetachedWorkKind
-	25, // 23: agentshim.conversation.v1.DetachedWorkKind.agent:type_name -> agentshim.conversation.v1.DetachedAgent
-	26, // 24: agentshim.conversation.v1.DetachedWorkKind.shell:type_name -> agentshim.conversation.v1.DetachedShell
-	27, // 25: agentshim.conversation.v1.DetachedWorkKind.workflow:type_name -> agentshim.conversation.v1.DetachedWorkflow
-	28, // 26: agentshim.conversation.v1.DetachedWorkKind.unclassified:type_name -> agentshim.conversation.v1.DetachedUnclassified
-	31, // 27: agentshim.conversation.v1.DetachedWorkEnded.succeeded:type_name -> agentshim.conversation.v1.DetachedSucceeded
-	32, // 28: agentshim.conversation.v1.DetachedWorkEnded.failed:type_name -> agentshim.conversation.v1.DetachedFailed
-	33, // 29: agentshim.conversation.v1.DetachedWorkEnded.cancelled:type_name -> agentshim.conversation.v1.DetachedCancelled
-	34, // 30: agentshim.conversation.v1.DetachedWorkEnded.lost:type_name -> agentshim.conversation.v1.DetachedLost
-	31, // [31:31] is the sub-list for method output_type
-	31, // [31:31] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	16, // 14: agentshim.conversation.v1.ContextCut.cleared:type_name -> agentshim.conversation.v1.ContextCleared
+	17, // 15: agentshim.conversation.v1.ContextCut.compacted:type_name -> agentshim.conversation.v1.ContextCompacted
+	31, // 16: agentshim.conversation.v1.ContextCompacted.summary:type_name -> agentshim.conversation.v1.AgentContent
+	19, // 17: agentshim.conversation.v1.DetachedWorkStarted.kind:type_name -> agentshim.conversation.v1.DetachedWorkKind
+	20, // 18: agentshim.conversation.v1.DetachedWorkKind.agent:type_name -> agentshim.conversation.v1.DetachedAgent
+	21, // 19: agentshim.conversation.v1.DetachedWorkKind.shell:type_name -> agentshim.conversation.v1.DetachedShell
+	22, // 20: agentshim.conversation.v1.DetachedWorkKind.workflow:type_name -> agentshim.conversation.v1.DetachedWorkflow
+	23, // 21: agentshim.conversation.v1.DetachedWorkKind.unclassified:type_name -> agentshim.conversation.v1.DetachedUnclassified
+	26, // 22: agentshim.conversation.v1.DetachedWorkEnded.succeeded:type_name -> agentshim.conversation.v1.DetachedSucceeded
+	27, // 23: agentshim.conversation.v1.DetachedWorkEnded.failed:type_name -> agentshim.conversation.v1.DetachedFailed
+	28, // 24: agentshim.conversation.v1.DetachedWorkEnded.cancelled:type_name -> agentshim.conversation.v1.DetachedCancelled
+	29, // 25: agentshim.conversation.v1.DetachedWorkEnded.lost:type_name -> agentshim.conversation.v1.DetachedLost
+	26, // [26:26] is the sub-list for method output_type
+	26, // [26:26] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_conversation_v1_payloads_proto_init() }
@@ -2247,7 +1969,6 @@ func file_agentshim_conversation_v1_payloads_proto_init() {
 	if File_agentshim_conversation_v1_payloads_proto != nil {
 		return
 	}
-	file_agentshim_conversation_v1_commands_proto_init()
 	file_agentshim_conversation_v1_content_proto_init()
 	file_agentshim_conversation_v1_tokens_proto_init()
 	file_agentshim_conversation_v1_payloads_proto_msgTypes[3].OneofWrappers = []any{
@@ -2263,21 +1984,16 @@ func file_agentshim_conversation_v1_payloads_proto_init() {
 		(*PermissionAnswered_Abandoned)(nil),
 	}
 	file_agentshim_conversation_v1_payloads_proto_msgTypes[15].OneofWrappers = []any{
-		(*FailureRecovery_Automatic)(nil),
-		(*FailureRecovery_UserAction)(nil),
-		(*FailureRecovery_None)(nil),
-	}
-	file_agentshim_conversation_v1_payloads_proto_msgTypes[19].OneofWrappers = []any{
 		(*ContextCut_Cleared)(nil),
 		(*ContextCut_Compacted)(nil),
 	}
-	file_agentshim_conversation_v1_payloads_proto_msgTypes[24].OneofWrappers = []any{
+	file_agentshim_conversation_v1_payloads_proto_msgTypes[19].OneofWrappers = []any{
 		(*DetachedWorkKind_Agent)(nil),
 		(*DetachedWorkKind_Shell)(nil),
 		(*DetachedWorkKind_Workflow)(nil),
 		(*DetachedWorkKind_Unclassified)(nil),
 	}
-	file_agentshim_conversation_v1_payloads_proto_msgTypes[30].OneofWrappers = []any{
+	file_agentshim_conversation_v1_payloads_proto_msgTypes[25].OneofWrappers = []any{
 		(*DetachedWorkEnded_Succeeded)(nil),
 		(*DetachedWorkEnded_Failed)(nil),
 		(*DetachedWorkEnded_Cancelled)(nil),
@@ -2289,7 +2005,7 @@ func file_agentshim_conversation_v1_payloads_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_conversation_v1_payloads_proto_rawDesc), len(file_agentshim_conversation_v1_payloads_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   35,
+			NumMessages:   30,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

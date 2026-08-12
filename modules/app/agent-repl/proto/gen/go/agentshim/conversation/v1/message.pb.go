@@ -78,7 +78,6 @@ type MessageEntry struct {
 	//	*MessageEntry_PermissionAsked
 	//	*MessageEntry_FailureRaised
 	//	*MessageEntry_ContextCut
-	//	*MessageEntry_DaemonAnsweredCommand
 	//	*MessageEntry_DetachedWorkStarted
 	//	*MessageEntry_DetachedWorkProgressed
 	//	*MessageEntry_DetachedWorkEnded
@@ -200,15 +199,6 @@ func (x *MessageEntry) GetContextCut() *ContextCut {
 	return nil
 }
 
-func (x *MessageEntry) GetDaemonAnsweredCommand() *DaemonAnsweredCommand {
-	if x != nil {
-		if x, ok := x.Payload.(*MessageEntry_DaemonAnsweredCommand); ok {
-			return x.DaemonAnsweredCommand
-		}
-	}
-	return nil
-}
-
 func (x *MessageEntry) GetDetachedWorkStarted() *DetachedWorkStarted {
 	if x != nil {
 		if x, ok := x.Payload.(*MessageEntry_DetachedWorkStarted); ok {
@@ -296,13 +286,6 @@ type MessageEntry_ContextCut struct {
 	ContextCut *ContextCut `protobuf:"bytes,14,opt,name=context_cut,json=contextCut,proto3,oneof"`
 }
 
-type MessageEntry_DaemonAnsweredCommand struct {
-	// A slash command the DAEMON answered instead of the agent. It carries the
-	// command's identity and no text at all: there is no field an argument
-	// could ride in, so no surface can leak what the user typed after it.
-	DaemonAnsweredCommand *DaemonAnsweredCommand `protobuf:"bytes,15,opt,name=daemon_answered_command,json=daemonAnsweredCommand,proto3,oneof"`
-}
-
 type MessageEntry_DetachedWorkStarted struct {
 	// Work that DETACHED from the turn and now runs alongside it — a subagent,
 	// a background shell, a workflow. It is a feed row naming itself, so a page
@@ -354,8 +337,6 @@ func (*MessageEntry_FailureRaised) isMessageEntry_Payload() {}
 
 func (*MessageEntry_ContextCut) isMessageEntry_Payload() {}
 
-func (*MessageEntry_DaemonAnsweredCommand) isMessageEntry_Payload() {}
-
 func (*MessageEntry_DetachedWorkStarted) isMessageEntry_Payload() {}
 
 func (*MessageEntry_DetachedWorkProgressed) isMessageEntry_Payload() {}
@@ -381,7 +362,6 @@ type MessageAuthor struct {
 	//	*MessageAuthor_User
 	//	*MessageAuthor_Agent
 	//	*MessageAuthor_DetachedAgent
-	//	*MessageAuthor_Daemon
 	Author        isMessageAuthor_Author `protobuf_oneof:"author"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -451,15 +431,6 @@ func (x *MessageAuthor) GetDetachedAgent() *AuthorDetachedAgent {
 	return nil
 }
 
-func (x *MessageAuthor) GetDaemon() *AuthorDaemon {
-	if x != nil {
-		if x, ok := x.Author.(*MessageAuthor_Daemon); ok {
-			return x.Daemon
-		}
-	}
-	return nil
-}
-
 type isMessageAuthor_Author interface {
 	isMessageAuthor_Author()
 }
@@ -479,19 +450,11 @@ type MessageAuthor_DetachedAgent struct {
 	DetachedAgent *AuthorDetachedAgent `protobuf:"bytes,3,opt,name=detached_agent,json=detachedAgent,proto3,oneof"`
 }
 
-type MessageAuthor_Daemon struct {
-	// The daemon itself, for things it answered or synthesized. Held apart so a
-	// card the daemon wrote is never mistaken for something the agent said.
-	Daemon *AuthorDaemon `protobuf:"bytes,4,opt,name=daemon,proto3,oneof"`
-}
-
 func (*MessageAuthor_User) isMessageAuthor_Author() {}
 
 func (*MessageAuthor_Agent) isMessageAuthor_Author() {}
 
 func (*MessageAuthor_DetachedAgent) isMessageAuthor_Author() {}
-
-func (*MessageAuthor_Daemon) isMessageAuthor_Author() {}
 
 // A person, typing into the session.
 type AuthorUser struct {
@@ -614,49 +577,11 @@ func (x *AuthorDetachedAgent) GetDetachedWorkMessageId() string {
 	return ""
 }
 
-// The daemon, for a card it wrote or a command it answered itself.
-type AuthorDaemon struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AuthorDaemon) Reset() {
-	*x = AuthorDaemon{}
-	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AuthorDaemon) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AuthorDaemon) ProtoMessage() {}
-
-func (x *AuthorDaemon) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_message_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AuthorDaemon.ProtoReflect.Descriptor instead.
-func (*AuthorDaemon) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_message_proto_rawDescGZIP(), []int{5}
-}
-
 var File_agentshim_conversation_v1_message_proto protoreflect.FileDescriptor
 
 const file_agentshim_conversation_v1_message_proto_rawDesc = "" +
 	"\n" +
-	"'agentshim/conversation/v1/message.proto\x12\x19agentshim.conversation.v1\x1a)agentshim/conversation/v1/ephemeral.proto\x1a(agentshim/conversation/v1/payloads.proto\"\x84\n" +
-	"\n" +
+	"'agentshim/conversation/v1/message.proto\x12\x19agentshim.conversation.v1\x1a)agentshim/conversation/v1/ephemeral.proto\x1a(agentshim/conversation/v1/payloads.proto\"\xb7\t\n" +
 	"\fMessageEntry\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12/\n" +
@@ -670,27 +595,24 @@ const file_agentshim_conversation_v1_message_proto_rawDesc = "" +
 	"\x10permission_asked\x18\f \x01(\v2*.agentshim.conversation.v1.PermissionAskedH\x00R\x0fpermissionAsked\x12Q\n" +
 	"\x0efailure_raised\x18\r \x01(\v2(.agentshim.conversation.v1.FailureRaisedH\x00R\rfailureRaised\x12H\n" +
 	"\vcontext_cut\x18\x0e \x01(\v2%.agentshim.conversation.v1.ContextCutH\x00R\n" +
-	"contextCut\x12j\n" +
-	"\x17daemon_answered_command\x18\x0f \x01(\v20.agentshim.conversation.v1.DaemonAnsweredCommandH\x00R\x15daemonAnsweredCommand\x12d\n" +
+	"contextCut\x12d\n" +
 	"\x15detached_work_started\x18\x10 \x01(\v2..agentshim.conversation.v1.DetachedWorkStartedH\x00R\x13detachedWorkStarted\x12m\n" +
 	"\x18detached_work_progressed\x18\x14 \x01(\v21.agentshim.conversation.v1.DetachedWorkProgressedH\x00R\x16detachedWorkProgressed\x12^\n" +
 	"\x13detached_work_ended\x18\x15 \x01(\v2,.agentshim.conversation.v1.DetachedWorkEndedH\x00R\x11detachedWorkEnded\x12`\n" +
 	"\x13permission_answered\x18\x16 \x01(\v2-.agentshim.conversation.v1.PermissionAnsweredH\x00R\x12permissionAnswered\x12N\n" +
 	"\rtool_returned\x18\x17 \x01(\v2'.agentshim.conversation.v1.ToolReturnedH\x00R\ftoolReturned\x12W\n" +
 	"\x10content_arriving\x18\x1e \x01(\v2*.agentshim.conversation.v1.ContentArrivingH\x00R\x0fcontentArrivingB\t\n" +
-	"\apayload\"\xb2\x02\n" +
+	"\apayloadJ\x04\b\x0f\x10\x10R\x17daemon_answered_command\"\xfd\x01\n" +
 	"\rMessageAuthor\x12;\n" +
 	"\x04user\x18\x01 \x01(\v2%.agentshim.conversation.v1.AuthorUserH\x00R\x04user\x12>\n" +
 	"\x05agent\x18\x02 \x01(\v2&.agentshim.conversation.v1.AuthorAgentH\x00R\x05agent\x12W\n" +
-	"\x0edetached_agent\x18\x03 \x01(\v2..agentshim.conversation.v1.AuthorDetachedAgentH\x00R\rdetachedAgent\x12A\n" +
-	"\x06daemon\x18\x04 \x01(\v2'.agentshim.conversation.v1.AuthorDaemonH\x00R\x06daemonB\b\n" +
-	"\x06author\"\f\n" +
+	"\x0edetached_agent\x18\x03 \x01(\v2..agentshim.conversation.v1.AuthorDetachedAgentH\x00R\rdetachedAgentB\b\n" +
+	"\x06authorJ\x04\b\x04\x10\x05R\x06daemon\"\f\n" +
 	"\n" +
 	"AuthorUser\"\r\n" +
 	"\vAuthorAgent\"N\n" +
 	"\x13AuthorDetachedAgent\x127\n" +
-	"\x18detached_work_message_id\x18\x01 \x01(\tR\x15detachedWorkMessageId\"\x0e\n" +
-	"\fAuthorDaemonB:Z8agentrepl/proto/agentshim/conversation/v1;conversationv1b\x06proto3"
+	"\x18detached_work_message_id\x18\x01 \x01(\tR\x15detachedWorkMessageIdB:Z8agentrepl/proto/agentshim/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_agentshim_conversation_v1_message_proto_rawDescOnce sync.Once
@@ -704,50 +626,46 @@ func file_agentshim_conversation_v1_message_proto_rawDescGZIP() []byte {
 	return file_agentshim_conversation_v1_message_proto_rawDescData
 }
 
-var file_agentshim_conversation_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_agentshim_conversation_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_agentshim_conversation_v1_message_proto_goTypes = []any{
 	(*MessageEntry)(nil),           // 0: agentshim.conversation.v1.MessageEntry
 	(*MessageAuthor)(nil),          // 1: agentshim.conversation.v1.MessageAuthor
 	(*AuthorUser)(nil),             // 2: agentshim.conversation.v1.AuthorUser
 	(*AuthorAgent)(nil),            // 3: agentshim.conversation.v1.AuthorAgent
 	(*AuthorDetachedAgent)(nil),    // 4: agentshim.conversation.v1.AuthorDetachedAgent
-	(*AuthorDaemon)(nil),           // 5: agentshim.conversation.v1.AuthorDaemon
-	(*UserSaid)(nil),               // 6: agentshim.conversation.v1.UserSaid
-	(*AgentSaid)(nil),              // 7: agentshim.conversation.v1.AgentSaid
-	(*PermissionAsked)(nil),        // 8: agentshim.conversation.v1.PermissionAsked
-	(*FailureRaised)(nil),          // 9: agentshim.conversation.v1.FailureRaised
-	(*ContextCut)(nil),             // 10: agentshim.conversation.v1.ContextCut
-	(*DaemonAnsweredCommand)(nil),  // 11: agentshim.conversation.v1.DaemonAnsweredCommand
-	(*DetachedWorkStarted)(nil),    // 12: agentshim.conversation.v1.DetachedWorkStarted
-	(*DetachedWorkProgressed)(nil), // 13: agentshim.conversation.v1.DetachedWorkProgressed
-	(*DetachedWorkEnded)(nil),      // 14: agentshim.conversation.v1.DetachedWorkEnded
-	(*PermissionAnswered)(nil),     // 15: agentshim.conversation.v1.PermissionAnswered
-	(*ToolReturned)(nil),           // 16: agentshim.conversation.v1.ToolReturned
-	(*ContentArriving)(nil),        // 17: agentshim.conversation.v1.ContentArriving
+	(*UserSaid)(nil),               // 5: agentshim.conversation.v1.UserSaid
+	(*AgentSaid)(nil),              // 6: agentshim.conversation.v1.AgentSaid
+	(*PermissionAsked)(nil),        // 7: agentshim.conversation.v1.PermissionAsked
+	(*FailureRaised)(nil),          // 8: agentshim.conversation.v1.FailureRaised
+	(*ContextCut)(nil),             // 9: agentshim.conversation.v1.ContextCut
+	(*DetachedWorkStarted)(nil),    // 10: agentshim.conversation.v1.DetachedWorkStarted
+	(*DetachedWorkProgressed)(nil), // 11: agentshim.conversation.v1.DetachedWorkProgressed
+	(*DetachedWorkEnded)(nil),      // 12: agentshim.conversation.v1.DetachedWorkEnded
+	(*PermissionAnswered)(nil),     // 13: agentshim.conversation.v1.PermissionAnswered
+	(*ToolReturned)(nil),           // 14: agentshim.conversation.v1.ToolReturned
+	(*ContentArriving)(nil),        // 15: agentshim.conversation.v1.ContentArriving
 }
 var file_agentshim_conversation_v1_message_proto_depIdxs = []int32{
 	1,  // 0: agentshim.conversation.v1.MessageEntry.author:type_name -> agentshim.conversation.v1.MessageAuthor
-	6,  // 1: agentshim.conversation.v1.MessageEntry.user_said:type_name -> agentshim.conversation.v1.UserSaid
-	7,  // 2: agentshim.conversation.v1.MessageEntry.agent_said:type_name -> agentshim.conversation.v1.AgentSaid
-	8,  // 3: agentshim.conversation.v1.MessageEntry.permission_asked:type_name -> agentshim.conversation.v1.PermissionAsked
-	9,  // 4: agentshim.conversation.v1.MessageEntry.failure_raised:type_name -> agentshim.conversation.v1.FailureRaised
-	10, // 5: agentshim.conversation.v1.MessageEntry.context_cut:type_name -> agentshim.conversation.v1.ContextCut
-	11, // 6: agentshim.conversation.v1.MessageEntry.daemon_answered_command:type_name -> agentshim.conversation.v1.DaemonAnsweredCommand
-	12, // 7: agentshim.conversation.v1.MessageEntry.detached_work_started:type_name -> agentshim.conversation.v1.DetachedWorkStarted
-	13, // 8: agentshim.conversation.v1.MessageEntry.detached_work_progressed:type_name -> agentshim.conversation.v1.DetachedWorkProgressed
-	14, // 9: agentshim.conversation.v1.MessageEntry.detached_work_ended:type_name -> agentshim.conversation.v1.DetachedWorkEnded
-	15, // 10: agentshim.conversation.v1.MessageEntry.permission_answered:type_name -> agentshim.conversation.v1.PermissionAnswered
-	16, // 11: agentshim.conversation.v1.MessageEntry.tool_returned:type_name -> agentshim.conversation.v1.ToolReturned
-	17, // 12: agentshim.conversation.v1.MessageEntry.content_arriving:type_name -> agentshim.conversation.v1.ContentArriving
-	2,  // 13: agentshim.conversation.v1.MessageAuthor.user:type_name -> agentshim.conversation.v1.AuthorUser
-	3,  // 14: agentshim.conversation.v1.MessageAuthor.agent:type_name -> agentshim.conversation.v1.AuthorAgent
-	4,  // 15: agentshim.conversation.v1.MessageAuthor.detached_agent:type_name -> agentshim.conversation.v1.AuthorDetachedAgent
-	5,  // 16: agentshim.conversation.v1.MessageAuthor.daemon:type_name -> agentshim.conversation.v1.AuthorDaemon
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	5,  // 1: agentshim.conversation.v1.MessageEntry.user_said:type_name -> agentshim.conversation.v1.UserSaid
+	6,  // 2: agentshim.conversation.v1.MessageEntry.agent_said:type_name -> agentshim.conversation.v1.AgentSaid
+	7,  // 3: agentshim.conversation.v1.MessageEntry.permission_asked:type_name -> agentshim.conversation.v1.PermissionAsked
+	8,  // 4: agentshim.conversation.v1.MessageEntry.failure_raised:type_name -> agentshim.conversation.v1.FailureRaised
+	9,  // 5: agentshim.conversation.v1.MessageEntry.context_cut:type_name -> agentshim.conversation.v1.ContextCut
+	10, // 6: agentshim.conversation.v1.MessageEntry.detached_work_started:type_name -> agentshim.conversation.v1.DetachedWorkStarted
+	11, // 7: agentshim.conversation.v1.MessageEntry.detached_work_progressed:type_name -> agentshim.conversation.v1.DetachedWorkProgressed
+	12, // 8: agentshim.conversation.v1.MessageEntry.detached_work_ended:type_name -> agentshim.conversation.v1.DetachedWorkEnded
+	13, // 9: agentshim.conversation.v1.MessageEntry.permission_answered:type_name -> agentshim.conversation.v1.PermissionAnswered
+	14, // 10: agentshim.conversation.v1.MessageEntry.tool_returned:type_name -> agentshim.conversation.v1.ToolReturned
+	15, // 11: agentshim.conversation.v1.MessageEntry.content_arriving:type_name -> agentshim.conversation.v1.ContentArriving
+	2,  // 12: agentshim.conversation.v1.MessageAuthor.user:type_name -> agentshim.conversation.v1.AuthorUser
+	3,  // 13: agentshim.conversation.v1.MessageAuthor.agent:type_name -> agentshim.conversation.v1.AuthorAgent
+	4,  // 14: agentshim.conversation.v1.MessageAuthor.detached_agent:type_name -> agentshim.conversation.v1.AuthorDetachedAgent
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_conversation_v1_message_proto_init() }
@@ -763,7 +681,6 @@ func file_agentshim_conversation_v1_message_proto_init() {
 		(*MessageEntry_PermissionAsked)(nil),
 		(*MessageEntry_FailureRaised)(nil),
 		(*MessageEntry_ContextCut)(nil),
-		(*MessageEntry_DaemonAnsweredCommand)(nil),
 		(*MessageEntry_DetachedWorkStarted)(nil),
 		(*MessageEntry_DetachedWorkProgressed)(nil),
 		(*MessageEntry_DetachedWorkEnded)(nil),
@@ -775,7 +692,6 @@ func file_agentshim_conversation_v1_message_proto_init() {
 		(*MessageAuthor_User)(nil),
 		(*MessageAuthor_Agent)(nil),
 		(*MessageAuthor_DetachedAgent)(nil),
-		(*MessageAuthor_Daemon)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -783,7 +699,7 @@ func file_agentshim_conversation_v1_message_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_conversation_v1_message_proto_rawDesc), len(file_agentshim_conversation_v1_message_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

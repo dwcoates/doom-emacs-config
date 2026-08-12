@@ -15,9 +15,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: agentshim/conversation/v1/commands.proto
+// source: agentshim/frontend/v1/commands.proto
 
-package conversationv1
+package frontendv1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -169,11 +169,11 @@ func (x SessionCommand) String() string {
 }
 
 func (SessionCommand) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_conversation_v1_commands_proto_enumTypes[0].Descriptor()
+	return file_agentshim_frontend_v1_commands_proto_enumTypes[0].Descriptor()
 }
 
 func (SessionCommand) Type() protoreflect.EnumType {
-	return &file_agentshim_conversation_v1_commands_proto_enumTypes[0]
+	return &file_agentshim_frontend_v1_commands_proto_enumTypes[0]
 }
 
 func (x SessionCommand) Number() protoreflect.EnumNumber {
@@ -182,7 +182,7 @@ func (x SessionCommand) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SessionCommand.Descriptor instead.
 func (SessionCommand) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_commands_proto_rawDescGZIP(), []int{0}
+	return file_agentshim_frontend_v1_commands_proto_rawDescGZIP(), []int{0}
 }
 
 // Everything about a session command that is a FACT rather than an event: how
@@ -217,7 +217,7 @@ type SessionCommandSpec struct {
 
 func (x *SessionCommandSpec) Reset() {
 	*x = SessionCommandSpec{}
-	mi := &file_agentshim_conversation_v1_commands_proto_msgTypes[0]
+	mi := &file_agentshim_frontend_v1_commands_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -229,7 +229,7 @@ func (x *SessionCommandSpec) String() string {
 func (*SessionCommandSpec) ProtoMessage() {}
 
 func (x *SessionCommandSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_commands_proto_msgTypes[0]
+	mi := &file_agentshim_frontend_v1_commands_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -242,7 +242,7 @@ func (x *SessionCommandSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionCommandSpec.ProtoReflect.Descriptor instead.
 func (*SessionCommandSpec) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_commands_proto_rawDescGZIP(), []int{0}
+	return file_agentshim_frontend_v1_commands_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *SessionCommandSpec) GetLiteral() string {
@@ -259,28 +259,28 @@ func (x *SessionCommandSpec) GetTakesArgs() bool {
 	return false
 }
 
-var file_agentshim_conversation_v1_commands_proto_extTypes = []protoimpl.ExtensionInfo{
+var file_agentshim_frontend_v1_commands_proto_extTypes = []protoimpl.ExtensionInfo{
 	{
 		ExtendedType:  (*descriptorpb.EnumValueOptions)(nil),
 		ExtensionType: (*SessionCommandSpec)(nil),
 		Field:         60002,
-		Name:          "agentshim.conversation.v1.session_command_spec",
+		Name:          "agentshim.frontend.v1.session_command_spec",
 		Tag:           "bytes,60002,opt,name=session_command_spec",
-		Filename:      "agentshim/conversation/v1/commands.proto",
+		Filename:      "agentshim/frontend/v1/commands.proto",
 	},
 }
 
 // Extension fields to descriptorpb.EnumValueOptions.
 var (
-	// optional agentshim.conversation.v1.SessionCommandSpec session_command_spec = 60002;
-	E_SessionCommandSpec = &file_agentshim_conversation_v1_commands_proto_extTypes[0]
+	// optional agentshim.frontend.v1.SessionCommandSpec session_command_spec = 60002;
+	E_SessionCommandSpec = &file_agentshim_frontend_v1_commands_proto_extTypes[0]
 )
 
-var File_agentshim_conversation_v1_commands_proto protoreflect.FileDescriptor
+var File_agentshim_frontend_v1_commands_proto protoreflect.FileDescriptor
 
-const file_agentshim_conversation_v1_commands_proto_rawDesc = "" +
+const file_agentshim_frontend_v1_commands_proto_rawDesc = "" +
 	"\n" +
-	"(agentshim/conversation/v1/commands.proto\x12\x19agentshim.conversation.v1\x1a google/protobuf/descriptor.proto\"M\n" +
+	"$agentshim/frontend/v1/commands.proto\x12\x15agentshim.frontend.v1\x1a google/protobuf/descriptor.proto\"M\n" +
 	"\x12SessionCommandSpec\x12\x18\n" +
 	"\aliteral\x18\x01 \x01(\tR\aliteral\x12\x1d\n" +
 	"\n" +
@@ -353,31 +353,31 @@ const file_agentshim_conversation_v1_commands_proto_rawDesc = "" +
 	"\a/rewind\x12#\n" +
 	"\x13SESSION_COMMAND_BUG\x10\x1e\x1a\n" +
 	"\x92\xa6\x1d\x06\n" +
-	"\x04/bug:\x84\x01\n" +
-	"\x14session_command_spec\x12!.google.protobuf.EnumValueOptions\x18\xe2\xd4\x03 \x01(\v2-.agentshim.conversation.v1.SessionCommandSpecR\x12sessionCommandSpecB:Z8agentrepl/proto/agentshim/conversation/v1;conversationv1b\x06proto3"
+	"\x04/bug:\x80\x01\n" +
+	"\x14session_command_spec\x12!.google.protobuf.EnumValueOptions\x18\xe2\xd4\x03 \x01(\v2).agentshim.frontend.v1.SessionCommandSpecR\x12sessionCommandSpecB2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
 
 var (
-	file_agentshim_conversation_v1_commands_proto_rawDescOnce sync.Once
-	file_agentshim_conversation_v1_commands_proto_rawDescData []byte
+	file_agentshim_frontend_v1_commands_proto_rawDescOnce sync.Once
+	file_agentshim_frontend_v1_commands_proto_rawDescData []byte
 )
 
-func file_agentshim_conversation_v1_commands_proto_rawDescGZIP() []byte {
-	file_agentshim_conversation_v1_commands_proto_rawDescOnce.Do(func() {
-		file_agentshim_conversation_v1_commands_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_agentshim_conversation_v1_commands_proto_rawDesc), len(file_agentshim_conversation_v1_commands_proto_rawDesc)))
+func file_agentshim_frontend_v1_commands_proto_rawDescGZIP() []byte {
+	file_agentshim_frontend_v1_commands_proto_rawDescOnce.Do(func() {
+		file_agentshim_frontend_v1_commands_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_commands_proto_rawDesc), len(file_agentshim_frontend_v1_commands_proto_rawDesc)))
 	})
-	return file_agentshim_conversation_v1_commands_proto_rawDescData
+	return file_agentshim_frontend_v1_commands_proto_rawDescData
 }
 
-var file_agentshim_conversation_v1_commands_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentshim_conversation_v1_commands_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
-var file_agentshim_conversation_v1_commands_proto_goTypes = []any{
-	(SessionCommand)(0),                   // 0: agentshim.conversation.v1.SessionCommand
-	(*SessionCommandSpec)(nil),            // 1: agentshim.conversation.v1.SessionCommandSpec
+var file_agentshim_frontend_v1_commands_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_agentshim_frontend_v1_commands_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_agentshim_frontend_v1_commands_proto_goTypes = []any{
+	(SessionCommand)(0),                   // 0: agentshim.frontend.v1.SessionCommand
+	(*SessionCommandSpec)(nil),            // 1: agentshim.frontend.v1.SessionCommandSpec
 	(*descriptorpb.EnumValueOptions)(nil), // 2: google.protobuf.EnumValueOptions
 }
-var file_agentshim_conversation_v1_commands_proto_depIdxs = []int32{
-	2, // 0: agentshim.conversation.v1.session_command_spec:extendee -> google.protobuf.EnumValueOptions
-	1, // 1: agentshim.conversation.v1.session_command_spec:type_name -> agentshim.conversation.v1.SessionCommandSpec
+var file_agentshim_frontend_v1_commands_proto_depIdxs = []int32{
+	2, // 0: agentshim.frontend.v1.session_command_spec:extendee -> google.protobuf.EnumValueOptions
+	1, // 1: agentshim.frontend.v1.session_command_spec:type_name -> agentshim.frontend.v1.SessionCommandSpec
 	2, // [2:2] is the sub-list for method output_type
 	2, // [2:2] is the sub-list for method input_type
 	1, // [1:2] is the sub-list for extension type_name
@@ -385,28 +385,28 @@ var file_agentshim_conversation_v1_commands_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_agentshim_conversation_v1_commands_proto_init() }
-func file_agentshim_conversation_v1_commands_proto_init() {
-	if File_agentshim_conversation_v1_commands_proto != nil {
+func init() { file_agentshim_frontend_v1_commands_proto_init() }
+func file_agentshim_frontend_v1_commands_proto_init() {
+	if File_agentshim_frontend_v1_commands_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_conversation_v1_commands_proto_rawDesc), len(file_agentshim_conversation_v1_commands_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_commands_proto_rawDesc), len(file_agentshim_frontend_v1_commands_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   1,
 			NumExtensions: 1,
 			NumServices:   0,
 		},
-		GoTypes:           file_agentshim_conversation_v1_commands_proto_goTypes,
-		DependencyIndexes: file_agentshim_conversation_v1_commands_proto_depIdxs,
-		EnumInfos:         file_agentshim_conversation_v1_commands_proto_enumTypes,
-		MessageInfos:      file_agentshim_conversation_v1_commands_proto_msgTypes,
-		ExtensionInfos:    file_agentshim_conversation_v1_commands_proto_extTypes,
+		GoTypes:           file_agentshim_frontend_v1_commands_proto_goTypes,
+		DependencyIndexes: file_agentshim_frontend_v1_commands_proto_depIdxs,
+		EnumInfos:         file_agentshim_frontend_v1_commands_proto_enumTypes,
+		MessageInfos:      file_agentshim_frontend_v1_commands_proto_msgTypes,
+		ExtensionInfos:    file_agentshim_frontend_v1_commands_proto_extTypes,
 	}.Build()
-	File_agentshim_conversation_v1_commands_proto = out.File
-	file_agentshim_conversation_v1_commands_proto_goTypes = nil
-	file_agentshim_conversation_v1_commands_proto_depIdxs = nil
+	File_agentshim_frontend_v1_commands_proto = out.File
+	file_agentshim_frontend_v1_commands_proto_goTypes = nil
+	file_agentshim_frontend_v1_commands_proto_depIdxs = nil
 }

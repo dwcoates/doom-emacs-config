@@ -8,7 +8,6 @@ syntax = "proto3";
 
 package agentshim.conversation.v1;
 
-import "agentshim/conversation/v1/commands.proto";
 import "agentshim/conversation/v1/content.proto";
 import "agentshim/conversation/v1/tokens.proto";
 
@@ -123,41 +122,33 @@ message PermissionDenied {
 // Nobody ever answered, and the question is no longer live.
 message PermissionAbandoned {}
 
-// Something went wrong, stated as a card the user reads and acts on.
+// A failure the PRODUCER OBSERVED and the vendor RECORDED.
+//
+// NARROW ON PURPOSE, and the narrowing is the point. A failure card the daemon
+// SYNTHESIZED — a session that never started, a store write the shim rejected —
+// is not this: nothing observed it and no transcript holds it, so it has no
+// producer and cannot be an entry at all. That is `frontend.v1.FailureCardView`,
+// which the daemon mints and pushes.
+//
+// What lands here is the other kind: the vendor's own recorded error, which the
+// CLI writes to its transcript and the sidecar reads back. It is durable
+// because the vendor made it durable, and a reader scrolling back must see that
+// the turn failed rather than find it merely absent.
+//
+// NO RECOVERY CLASSIFICATION HERE. Whether anything can be done about a failure
+// is the daemon's judgement (`internal/errclass`), and it reaches a client
+// already resolved on FailureCardView. A producer stating it too would be a
+// second authority on one question, and the two would disagree.
 message FailureRaised {
-  // What went wrong, in the user's terms rather than the system's.
+  // What went wrong, as the vendor reported it.
   string summary = 1;
   // The underlying detail, for someone who wants it. Held apart from the
   // summary so a client can show one without the other.
   string detail = 2;
-  // Whether anything can be done about it, resolved by the producer rather than
-  // guessed by a renderer from the text.
-  FailureRecovery recovery = 3;
+  // How long the vendor said it would wait before retrying, in millis. Zero
+  // means it said nothing — NOT that it will retry immediately.
+  int64 retry_in_ms = 3;
 }
-
-// What, if anything, the user can do about a failure.
-message FailureRecovery {
-  oneof recovery {
-    // It will retry itself; the user does nothing.
-    RecoveryAutomatic automatic = 1;
-    // The user must act.
-    RecoveryUserAction user_action = 2;
-    // Nothing can be done; the work is lost.
-    RecoveryNone none = 3;
-  }
-}
-
-// The system recovers on its own and the user need not act.
-message RecoveryAutomatic {}
-
-// The user has to do something before this can proceed.
-message RecoveryUserAction {
-  // The action to take, stated by the producer so a client never invents one.
-  string action = 1;
-}
-
-// Unrecoverable. Said plainly rather than dressed as a retry that will not help.
-message RecoveryNone {}
 
 // The conversation was cut here, and the reader must see where.
 message ContextCut {
@@ -182,14 +173,6 @@ message ContextCompacted {
   // compaction bought rather than being told it happened.
   int64 tokens_before = 2;
   int64 tokens_after = 3;
-}
-
-// A slash command the DAEMON answered instead of the agent.
-message DaemonAnsweredCommand {
-  // WHICH command, and nothing else. There is deliberately no text field: the
-  // argument a user typed after a command must never reach a surface that
-  // renders it.
-  SessionCommand command = 1;
 }
 
 // Work that DETACHED from the turn and now runs alongside it.

@@ -56,6 +56,14 @@ message MessageEntry {
   // a reader from which payload arm is set.
   MessageAuthor author = 4;
 
+  // 15 was daemon_answered_command. It was UNBUILDABLE: only the daemon can
+  // observe a command it answered itself, and the daemon has no store write
+  // path — so the arm named a record nothing could ever produce. It belongs on
+  // the frontend surface, where frontend.v1.DaemonInterceptedCommandItem
+  // already carries it as a message the daemon mints and pushes.
+  reserved 15;
+  reserved "daemon_answered_command";
+
   // What this record says about the message it belongs to. The three groups
   // below are a reading aid, not a schema distinction: every arm carries the
   // same ids, so the group an arm sits in changes nothing about the record.
@@ -80,11 +88,6 @@ message MessageEntry {
     // The conversation was CUT here. It is a message because a reader must see
     // where, rather than merely finding the history shorter than they left it.
     ContextCut context_cut = 14;
-
-    // A slash command the DAEMON answered instead of the agent. It carries the
-    // command's identity and no text at all: there is no field an argument
-    // could ride in, so no surface can leak what the user typed after it.
-    DaemonAnsweredCommand daemon_answered_command = 15;
 
     // Work that DETACHED from the turn and now runs alongside it — a subagent,
     // a background shell, a workflow. It is a feed row naming itself, so a page
@@ -137,10 +140,14 @@ message MessageAuthor {
     AuthorAgent agent = 2;
     // A detached agent — a subagent — speaking inside its own work.
     AuthorDetachedAgent detached_agent = 3;
-    // The daemon itself, for things it answered or synthesized. Held apart so a
-    // card the daemon wrote is never mistaken for something the agent said.
-    AuthorDaemon daemon = 4;
   }
+
+  // 4 was `daemon`, for things the daemon answered or synthesized. It went for
+  // the same reason daemon_answered_command did: the daemon writes no entries,
+  // so no record in this package can have it as an author. Everything it would
+  // have covered is minted on the frontend surface instead.
+  reserved 4;
+  reserved "daemon";
 }
 
 // A person, typing into the session.
@@ -155,6 +162,3 @@ message AuthorDetachedAgent {
   // to the card without a second correlation.
   string detached_work_message_id = 1;
 }
-
-// The daemon, for a card it wrote or a command it answered itself.
-message AuthorDaemon {}

@@ -4,7 +4,7 @@ syntax = "proto3";
 
 package agentshim.frontend.v1;
 
-import "agentshim/conversation/v1/commands.proto";
+import "agentshim/frontend/v1/commands.proto";
 import "agentshim/core/v1/core.proto";
 
 option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
@@ -153,7 +153,7 @@ message QueueClassificationUninterruptibleTurn {
   // Which cut is running, so the card can name it. Never UNSPECIFIED: the arm
   // is set only when the daemon recognized the running prompt as one of the
   // two, and an arm that could not say which would explain nothing.
-  agentshim.conversation.v1.SessionCommand command = 1;
+  SessionCommand command = 1;
 }
 
 // The classifier could not be believed (it answered with neither token, or

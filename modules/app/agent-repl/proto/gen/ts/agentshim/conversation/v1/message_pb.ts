@@ -11,7 +11,7 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { ContentArriving } from "./ephemeral_pb";
 import { file_agentshim_conversation_v1_ephemeral } from "./ephemeral_pb";
-import type { AgentSaid, ContextCut, DaemonAnsweredCommand, DetachedWorkEnded, DetachedWorkProgressed, DetachedWorkStarted, FailureRaised, PermissionAnswered, PermissionAsked, ToolReturned, UserSaid } from "./payloads_pb";
+import type { AgentSaid, ContextCut, DetachedWorkEnded, DetachedWorkProgressed, DetachedWorkStarted, FailureRaised, PermissionAnswered, PermissionAsked, ToolReturned, UserSaid } from "./payloads_pb";
 import { file_agentshim_conversation_v1_payloads } from "./payloads_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/conversation/v1/message.proto.
  */
 export const file_agentshim_conversation_v1_message: GenFile = /*@__PURE__*/
-  fileDesc("CidhZ2VudHNoaW0vY29udmVyc2F0aW9uL3YxL21lc3NhZ2UucHJvdG8SGWFnZW50c2hpbS5jb252ZXJzYXRpb24udjEigggKDE1lc3NhZ2VFbnRyeRISCgptZXNzYWdlX2lkGAEgASgJEhwKFHRvcF9sZXZlbF9tZXNzYWdlX2lkGAIgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAMgASgJEjgKBmF1dGhvchgEIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuTWVzc2FnZUF1dGhvchI4Cgl1c2VyX3NhaWQYCiABKAsyIy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlVzZXJTYWlkSAASOgoKYWdlbnRfc2FpZBgLIAEoCzIkLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQWdlbnRTYWlkSAASRgoQcGVybWlzc2lvbl9hc2tlZBgMIAEoCzIqLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuUGVybWlzc2lvbkFza2VkSAASQgoOZmFpbHVyZV9yYWlzZWQYDSABKAsyKC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkZhaWx1cmVSYWlzZWRIABI8Cgtjb250ZXh0X2N1dBgOIAEoCzIlLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQ29udGV4dEN1dEgAElMKF2RhZW1vbl9hbnN3ZXJlZF9jb21tYW5kGA8gASgLMjAuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EYWVtb25BbnN3ZXJlZENvbW1hbmRIABJPChVkZXRhY2hlZF93b3JrX3N0YXJ0ZWQYECABKAsyLi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya1N0YXJ0ZWRIABJVChhkZXRhY2hlZF93b3JrX3Byb2dyZXNzZWQYFCABKAsyMS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya1Byb2dyZXNzZWRIABJLChNkZXRhY2hlZF93b3JrX2VuZGVkGBUgASgLMiwuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtFbmRlZEgAEkwKE3Blcm1pc3Npb25fYW5zd2VyZWQYFiABKAsyLS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BbnN3ZXJlZEgAEkAKDXRvb2xfcmV0dXJuZWQYFyABKAsyJy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlRvb2xSZXR1cm5lZEgAEkYKEGNvbnRlbnRfYXJyaXZpbmcYHiABKAsyKi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkNvbnRlbnRBcnJpdmluZ0gAQgkKB3BheWxvYWQijgIKDU1lc3NhZ2VBdXRob3ISNQoEdXNlchgBIAEoCzIlLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQXV0aG9yVXNlckgAEjcKBWFnZW50GAIgASgLMiYuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5BdXRob3JBZ2VudEgAEkgKDmRldGFjaGVkX2FnZW50GAMgASgLMi4uYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5BdXRob3JEZXRhY2hlZEFnZW50SAASOQoGZGFlbW9uGAQgASgLMicuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5BdXRob3JEYWVtb25IAEIICgZhdXRob3IiDAoKQXV0aG9yVXNlciINCgtBdXRob3JBZ2VudCI3ChNBdXRob3JEZXRhY2hlZEFnZW50EiAKGGRldGFjaGVkX3dvcmtfbWVzc2FnZV9pZBgBIAEoCSIOCgxBdXRob3JEYWVtb25COlo4YWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_agentshim_conversation_v1_ephemeral, file_agentshim_conversation_v1_payloads]);
+  fileDesc("CidhZ2VudHNoaW0vY29udmVyc2F0aW9uL3YxL21lc3NhZ2UucHJvdG8SGWFnZW50c2hpbS5jb252ZXJzYXRpb24udjEizAcKDE1lc3NhZ2VFbnRyeRISCgptZXNzYWdlX2lkGAEgASgJEhwKFHRvcF9sZXZlbF9tZXNzYWdlX2lkGAIgASgJEhkKEXBhcmVudF9tZXNzYWdlX2lkGAMgASgJEjgKBmF1dGhvchgEIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuTWVzc2FnZUF1dGhvchI4Cgl1c2VyX3NhaWQYCiABKAsyIy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlVzZXJTYWlkSAASOgoKYWdlbnRfc2FpZBgLIAEoCzIkLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQWdlbnRTYWlkSAASRgoQcGVybWlzc2lvbl9hc2tlZBgMIAEoCzIqLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuUGVybWlzc2lvbkFza2VkSAASQgoOZmFpbHVyZV9yYWlzZWQYDSABKAsyKC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkZhaWx1cmVSYWlzZWRIABI8Cgtjb250ZXh0X2N1dBgOIAEoCzIlLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQ29udGV4dEN1dEgAEk8KFWRldGFjaGVkX3dvcmtfc3RhcnRlZBgQIAEoCzIuLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrU3RhcnRlZEgAElUKGGRldGFjaGVkX3dvcmtfcHJvZ3Jlc3NlZBgUIAEoCzIxLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrUHJvZ3Jlc3NlZEgAEksKE2RldGFjaGVkX3dvcmtfZW5kZWQYFSABKAsyLC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0VuZGVkSAASTAoTcGVybWlzc2lvbl9hbnN3ZXJlZBgWIAEoCzItLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuUGVybWlzc2lvbkFuc3dlcmVkSAASQAoNdG9vbF9yZXR1cm5lZBgXIAEoCzInLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVG9vbFJldHVybmVkSAASRgoQY29udGVudF9hcnJpdmluZxgeIAEoCzIqLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQ29udGVudEFycml2aW5nSABCCQoHcGF5bG9hZEoECA8QEFIXZGFlbW9uX2Fuc3dlcmVkX2NvbW1hbmQi4QEKDU1lc3NhZ2VBdXRob3ISNQoEdXNlchgBIAEoCzIlLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQXV0aG9yVXNlckgAEjcKBWFnZW50GAIgASgLMiYuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5BdXRob3JBZ2VudEgAEkgKDmRldGFjaGVkX2FnZW50GAMgASgLMi4uYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5BdXRob3JEZXRhY2hlZEFnZW50SABCCAoGYXV0aG9ySgQIBBAFUgZkYWVtb24iDAoKQXV0aG9yVXNlciINCgtBdXRob3JBZ2VudCI3ChNBdXRob3JEZXRhY2hlZEFnZW50EiAKGGRldGFjaGVkX3dvcmtfbWVzc2FnZV9pZBgBIAEoCUI6WjhhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_agentshim_conversation_v1_ephemeral, file_agentshim_conversation_v1_payloads]);
 
 /**
  * One record BELONGING to one message. Several of these share a message_id and
@@ -140,16 +140,6 @@ export type MessageEntry = Message<"agentshim.conversation.v1.MessageEntry"> & {
     case: "contextCut";
   } | {
     /**
-     * A slash command the DAEMON answered instead of the agent. It carries the
-     * command's identity and no text at all: there is no field an argument
-     * could ride in, so no surface can leak what the user typed after it.
-     *
-     * @generated from field: agentshim.conversation.v1.DaemonAnsweredCommand daemon_answered_command = 15;
-     */
-    value: DaemonAnsweredCommand;
-    case: "daemonAnsweredCommand";
-  } | {
-    /**
      * Work that DETACHED from the turn and now runs alongside it — a subagent,
      * a background shell, a workflow. It is a feed row naming itself, so a page
      * of ten rows is ten bounded things rather than ten trees.
@@ -255,15 +245,6 @@ export type MessageAuthor = Message<"agentshim.conversation.v1.MessageAuthor"> &
      */
     value: AuthorDetachedAgent;
     case: "detachedAgent";
-  } | {
-    /**
-     * The daemon itself, for things it answered or synthesized. Held apart so a
-     * card the daemon wrote is never mistaken for something the agent said.
-     *
-     * @generated from field: agentshim.conversation.v1.AuthorDaemon daemon = 4;
-     */
-    value: AuthorDaemon;
-    case: "daemon";
   } | { case: undefined; value?: undefined };
 };
 
@@ -325,19 +306,4 @@ export type AuthorDetachedAgent = Message<"agentshim.conversation.v1.AuthorDetac
  */
 export const AuthorDetachedAgentSchema: GenMessage<AuthorDetachedAgent> = /*@__PURE__*/
   messageDesc(file_agentshim_conversation_v1_message, 4);
-
-/**
- * The daemon, for a card it wrote or a command it answered itself.
- *
- * @generated from message agentshim.conversation.v1.AuthorDaemon
- */
-export type AuthorDaemon = Message<"agentshim.conversation.v1.AuthorDaemon"> & {
-};
-
-/**
- * Describes the message agentshim.conversation.v1.AuthorDaemon.
- * Use `create(AuthorDaemonSchema)` to create a new message.
- */
-export const AuthorDaemonSchema: GenMessage<AuthorDaemon> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_message, 5);
 

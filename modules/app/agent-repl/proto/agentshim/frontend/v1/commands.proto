@@ -13,11 +13,11 @@
 
 syntax = "proto3";
 
-package agentshim.conversation.v1;
+package agentshim.frontend.v1;
 
 import "google/protobuf/descriptor.proto";
 
-option go_package = "agentrepl/proto/agentshim/conversation/v1;conversationv1";
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 
 // Everything about a session command that is a FACT rather than an event: how
 // it is spelled, and whether text after the name belongs to it.

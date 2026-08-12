@@ -10,8 +10,6 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { SessionCommand } from "./commands_pb";
-import { file_agentshim_conversation_v1_commands } from "./commands_pb";
 import type { AgentContent, ToolCallBlock, ToolResultContent, UserContent } from "./content_pb";
 import { file_agentshim_conversation_v1_content } from "./content_pb";
 import type { TokenUsage } from "./tokens_pb";
@@ -22,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/conversation/v1/payloads.proto.
  */
 export const file_agentshim_conversation_v1_payloads: GenFile = /*@__PURE__*/
-  fileDesc("CihhZ2VudHNoaW0vY29udmVyc2F0aW9uL3YxL3BheWxvYWRzLnByb3RvEhlhZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxIkMKCFVzZXJTYWlkEjcKB2NvbnRlbnQYASABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50IsYBCglBZ2VudFNhaWQSOAoHY29udGVudBgBIAEoCzInLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQWdlbnRDb250ZW50EjQKBXVzYWdlGAIgASgLMiUuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5Ub2tlblVzYWdlEg0KBW1vZGVsGAMgASgJEjoKC3N0b3BfcmVhc29uGAQgASgLMiUuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wUmVhc29uInUKDFRvb2xSZXR1cm5lZBIUCgx0b29sX2NhbGxfaWQYASABKAkSPQoHY29udGVudBgCIAEoCzIsLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVG9vbFJlc3VsdENvbnRlbnQSEAoIaXNfZXJyb3IYAyABKAgi1gIKClN0b3BSZWFzb24SOgoIZW5kX3R1cm4YASABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlN0b3BFbmRUdXJuSAASPAoJdG9vbF9jYWxsGAIgASgLMicuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wVG9vbENhbGxIABI+CgptYXhfdG9rZW5zGAMgASgLMiguYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wTWF4VG9rZW5zSAASQQoLaW50ZXJydXB0ZWQYBCABKAsyKi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlN0b3BJbnRlcnJ1cHRlZEgAEkEKC3Vuc3VwcG9ydGVkGAUgASgLMiouYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wVW5zdXBwb3J0ZWRIAEIICgZyZWFzb24iDQoLU3RvcEVuZFR1cm4iDgoMU3RvcFRvb2xDYWxsIg8KDVN0b3BNYXhUb2tlbnMiEQoPU3RvcEludGVycnVwdGVkIiEKD1N0b3BVbnN1cHBvcnRlZBIOCgZyZWFzb24YASABKAkiTgoPUGVybWlzc2lvbkFza2VkEjsKCXJlcXVlc3RlZBgBIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVG9vbENhbGxCbG9jayLjAQoSUGVybWlzc2lvbkFuc3dlcmVkEj8KB2FsbG93ZWQYASABKAsyLC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BbGxvd2VkSAASPQoGZGVuaWVkGAIgASgLMisuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uRGVuaWVkSAASQwoJYWJhbmRvbmVkGAMgASgLMi4uYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uQWJhbmRvbmVkSABCCAoGYW5zd2VyIigKEVBlcm1pc3Npb25BbGxvd2VkEhMKC2Zvcl9zZXNzaW9uGAEgASgIIiIKEFBlcm1pc3Npb25EZW5pZWQSDgoGcmVhc29uGAEgASgJIhUKE1Blcm1pc3Npb25BYmFuZG9uZWQibgoNRmFpbHVyZVJhaXNlZBIPCgdzdW1tYXJ5GAEgASgJEg4KBmRldGFpbBgCIAEoCRI8CghyZWNvdmVyeRgDIAEoCzIqLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRmFpbHVyZVJlY292ZXJ5It8BCg9GYWlsdXJlUmVjb3ZlcnkSQQoJYXV0b21hdGljGAEgASgLMiwuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5SZWNvdmVyeUF1dG9tYXRpY0gAEkQKC3VzZXJfYWN0aW9uGAIgASgLMi0uYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5SZWNvdmVyeVVzZXJBY3Rpb25IABI3CgRub25lGAMgASgLMicuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5SZWNvdmVyeU5vbmVIAEIKCghyZWNvdmVyeSITChFSZWNvdmVyeUF1dG9tYXRpYyIkChJSZWNvdmVyeVVzZXJBY3Rpb24SDgoGYWN0aW9uGAEgASgJIg4KDFJlY292ZXJ5Tm9uZSKTAQoKQ29udGV4dEN1dBI8CgdjbGVhcmVkGAEgASgLMikuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q2xlYXJlZEgAEkAKCWNvbXBhY3RlZBgCIAEoCzIrLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQ29udGV4dENvbXBhY3RlZEgAQgUKA2N1dCIQCg5Db250ZXh0Q2xlYXJlZCJ5ChBDb250ZXh0Q29tcGFjdGVkEjgKB3N1bW1hcnkYASABKAsyJy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkFnZW50Q29udGVudBIVCg10b2tlbnNfYmVmb3JlGAIgASgDEhQKDHRva2Vuc19hZnRlchgDIAEoAyJTChVEYWVtb25BbnN3ZXJlZENvbW1hbmQSOgoHY29tbWFuZBgBIAEoDjIpLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbW1hbmQifAoTRGV0YWNoZWRXb3JrU3RhcnRlZBIbChNvcmlnaW5fdG9vbF9jYWxsX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEjkKBGtpbmQYAyABKAsyKy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0tpbmQimgIKEERldGFjaGVkV29ya0tpbmQSOQoFYWdlbnQYASABKAsyKC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkQWdlbnRIABI5CgVzaGVsbBgCIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRTaGVsbEgAEj8KCHdvcmtmbG93GAMgASgLMisuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtmbG93SAASRwoMdW5jbGFzc2lmaWVkGAQgASgLMi8uYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFVuY2xhc3NpZmllZEgAQgYKBGtpbmQiDwoNRGV0YWNoZWRBZ2VudCIPCg1EZXRhY2hlZFNoZWxsIhIKEERldGFjaGVkV29ya2Zsb3ciKQoURGV0YWNoZWRVbmNsYXNzaWZpZWQSEQoJdG9vbF9uYW1lGAEgASgJIigKFkRldGFjaGVkV29ya1Byb2dyZXNzZWQSDgoGb3V0cHV0GAEgASgJIpoCChFEZXRhY2hlZFdvcmtFbmRlZBJBCglzdWNjZWVkZWQYASABKAsyLC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkU3VjY2VlZGVkSAASOwoGZmFpbGVkGAIgASgLMikuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZEZhaWxlZEgAEkEKCWNhbmNlbGxlZBgDIAEoCzIsLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRDYW5jZWxsZWRIABI3CgRsb3N0GAQgASgLMicuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZExvc3RIAEIJCgdvdXRjb21lIiQKEURldGFjaGVkU3VjY2VlZGVkEg8KB3N1bW1hcnkYASABKAkiIQoORGV0YWNoZWRGYWlsZWQSDwoHc3VtbWFyeRgBIAEoCSITChFEZXRhY2hlZENhbmNlbGxlZCIhCgxEZXRhY2hlZExvc3QSEQoJaW5mZXJlbmNlGAEgASgJQjpaOGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_agentshim_conversation_v1_commands, file_agentshim_conversation_v1_content, file_agentshim_conversation_v1_tokens]);
+  fileDesc("CihhZ2VudHNoaW0vY29udmVyc2F0aW9uL3YxL3BheWxvYWRzLnByb3RvEhlhZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxIkMKCFVzZXJTYWlkEjcKB2NvbnRlbnQYASABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50IsYBCglBZ2VudFNhaWQSOAoHY29udGVudBgBIAEoCzInLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQWdlbnRDb250ZW50EjQKBXVzYWdlGAIgASgLMiUuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5Ub2tlblVzYWdlEg0KBW1vZGVsGAMgASgJEjoKC3N0b3BfcmVhc29uGAQgASgLMiUuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wUmVhc29uInUKDFRvb2xSZXR1cm5lZBIUCgx0b29sX2NhbGxfaWQYASABKAkSPQoHY29udGVudBgCIAEoCzIsLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVG9vbFJlc3VsdENvbnRlbnQSEAoIaXNfZXJyb3IYAyABKAgi1gIKClN0b3BSZWFzb24SOgoIZW5kX3R1cm4YASABKAsyJi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlN0b3BFbmRUdXJuSAASPAoJdG9vbF9jYWxsGAIgASgLMicuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wVG9vbENhbGxIABI+CgptYXhfdG9rZW5zGAMgASgLMiguYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wTWF4VG9rZW5zSAASQQoLaW50ZXJydXB0ZWQYBCABKAsyKi5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlN0b3BJbnRlcnJ1cHRlZEgAEkEKC3Vuc3VwcG9ydGVkGAUgASgLMiouYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5TdG9wVW5zdXBwb3J0ZWRIAEIICgZyZWFzb24iDQoLU3RvcEVuZFR1cm4iDgoMU3RvcFRvb2xDYWxsIg8KDVN0b3BNYXhUb2tlbnMiEQoPU3RvcEludGVycnVwdGVkIiEKD1N0b3BVbnN1cHBvcnRlZBIOCgZyZWFzb24YASABKAkiTgoPUGVybWlzc2lvbkFza2VkEjsKCXJlcXVlc3RlZBgBIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVG9vbENhbGxCbG9jayLjAQoSUGVybWlzc2lvbkFuc3dlcmVkEj8KB2FsbG93ZWQYASABKAsyLC5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLlBlcm1pc3Npb25BbGxvd2VkSAASPQoGZGVuaWVkGAIgASgLMisuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uRGVuaWVkSAASQwoJYWJhbmRvbmVkGAMgASgLMi4uYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5QZXJtaXNzaW9uQWJhbmRvbmVkSABCCAoGYW5zd2VyIigKEVBlcm1pc3Npb25BbGxvd2VkEhMKC2Zvcl9zZXNzaW9uGAEgASgIIiIKEFBlcm1pc3Npb25EZW5pZWQSDgoGcmVhc29uGAEgASgJIhUKE1Blcm1pc3Npb25BYmFuZG9uZWQiRQoNRmFpbHVyZVJhaXNlZBIPCgdzdW1tYXJ5GAEgASgJEg4KBmRldGFpbBgCIAEoCRITCgtyZXRyeV9pbl9tcxgDIAEoAyKTAQoKQ29udGV4dEN1dBI8CgdjbGVhcmVkGAEgASgLMikuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q2xlYXJlZEgAEkAKCWNvbXBhY3RlZBgCIAEoCzIrLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuQ29udGV4dENvbXBhY3RlZEgAQgUKA2N1dCIQCg5Db250ZXh0Q2xlYXJlZCJ5ChBDb250ZXh0Q29tcGFjdGVkEjgKB3N1bW1hcnkYASABKAsyJy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkFnZW50Q29udGVudBIVCg10b2tlbnNfYmVmb3JlGAIgASgDEhQKDHRva2Vuc19hZnRlchgDIAEoAyJ8ChNEZXRhY2hlZFdvcmtTdGFydGVkEhsKE29yaWdpbl90b29sX2NhbGxfaWQYASABKAkSDQoFbGFiZWwYAiABKAkSOQoEa2luZBgDIAEoCzIrLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZCKaAgoQRGV0YWNoZWRXb3JrS2luZBI5CgVhZ2VudBgBIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRBZ2VudEgAEjkKBXNoZWxsGAIgASgLMiguYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFNoZWxsSAASPwoId29ya2Zsb3cYAyABKAsyKy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya2Zsb3dIABJHCgx1bmNsYXNzaWZpZWQYBCABKAsyLy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkVW5jbGFzc2lmaWVkSABCBgoEa2luZCIPCg1EZXRhY2hlZEFnZW50Ig8KDURldGFjaGVkU2hlbGwiEgoQRGV0YWNoZWRXb3JrZmxvdyIpChREZXRhY2hlZFVuY2xhc3NpZmllZBIRCgl0b29sX25hbWUYASABKAkiKAoWRGV0YWNoZWRXb3JrUHJvZ3Jlc3NlZBIOCgZvdXRwdXQYASABKAkimgIKEURldGFjaGVkV29ya0VuZGVkEkEKCXN1Y2NlZWRlZBgBIAEoCzIsLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRTdWNjZWVkZWRIABI7CgZmYWlsZWQYAiABKAsyKS5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkRmFpbGVkSAASQQoJY2FuY2VsbGVkGAMgASgLMiwuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZENhbmNlbGxlZEgAEjcKBGxvc3QYBCABKAsyJy5hZ2VudHNoaW0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkTG9zdEgAQgkKB291dGNvbWUiJAoRRGV0YWNoZWRTdWNjZWVkZWQSDwoHc3VtbWFyeRgBIAEoCSIhCg5EZXRhY2hlZEZhaWxlZBIPCgdzdW1tYXJ5GAEgASgJIhMKEURldGFjaGVkQ2FuY2VsbGVkIiEKDERldGFjaGVkTG9zdBIRCglpbmZlcmVuY2UYASABKAlCOlo4YWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_agentshim_conversation_v1_content, file_agentshim_conversation_v1_tokens]);
 
 /**
  * Something a person typed. The opening of a turn.
@@ -396,13 +394,29 @@ export const PermissionAbandonedSchema: GenMessage<PermissionAbandoned> = /*@__P
   messageDesc(file_agentshim_conversation_v1_payloads, 13);
 
 /**
- * Something went wrong, stated as a card the user reads and acts on.
+ * A failure the PRODUCER OBSERVED and the vendor RECORDED.
+ *
+ * NARROW ON PURPOSE, and the narrowing is the point. A failure card the daemon
+ * SYNTHESIZED — a session that never started, a store write the shim rejected —
+ * is not this: nothing observed it and no transcript holds it, so it has no
+ * producer and cannot be an entry at all. That is `frontend.v1.FailureCardView`,
+ * which the daemon mints and pushes.
+ *
+ * What lands here is the other kind: the vendor's own recorded error, which the
+ * CLI writes to its transcript and the sidecar reads back. It is durable
+ * because the vendor made it durable, and a reader scrolling back must see that
+ * the turn failed rather than find it merely absent.
+ *
+ * NO RECOVERY CLASSIFICATION HERE. Whether anything can be done about a failure
+ * is the daemon's judgement (`internal/errclass`), and it reaches a client
+ * already resolved on FailureCardView. A producer stating it too would be a
+ * second authority on one question, and the two would disagree.
  *
  * @generated from message agentshim.conversation.v1.FailureRaised
  */
 export type FailureRaised = Message<"agentshim.conversation.v1.FailureRaised"> & {
   /**
-   * What went wrong, in the user's terms rather than the system's.
+   * What went wrong, as the vendor reported it.
    *
    * @generated from field: string summary = 1;
    */
@@ -417,12 +431,12 @@ export type FailureRaised = Message<"agentshim.conversation.v1.FailureRaised"> &
   detail: string;
 
   /**
-   * Whether anything can be done about it, resolved by the producer rather than
-   * guessed by a renderer from the text.
+   * How long the vendor said it would wait before retrying, in millis. Zero
+   * means it said nothing — NOT that it will retry immediately.
    *
-   * @generated from field: agentshim.conversation.v1.FailureRecovery recovery = 3;
+   * @generated from field: int64 retry_in_ms = 3;
    */
-  recovery?: FailureRecovery | undefined;
+  retryInMs: bigint;
 };
 
 /**
@@ -431,100 +445,6 @@ export type FailureRaised = Message<"agentshim.conversation.v1.FailureRaised"> &
  */
 export const FailureRaisedSchema: GenMessage<FailureRaised> = /*@__PURE__*/
   messageDesc(file_agentshim_conversation_v1_payloads, 14);
-
-/**
- * What, if anything, the user can do about a failure.
- *
- * @generated from message agentshim.conversation.v1.FailureRecovery
- */
-export type FailureRecovery = Message<"agentshim.conversation.v1.FailureRecovery"> & {
-  /**
-   * @generated from oneof agentshim.conversation.v1.FailureRecovery.recovery
-   */
-  recovery: {
-    /**
-     * It will retry itself; the user does nothing.
-     *
-     * @generated from field: agentshim.conversation.v1.RecoveryAutomatic automatic = 1;
-     */
-    value: RecoveryAutomatic;
-    case: "automatic";
-  } | {
-    /**
-     * The user must act.
-     *
-     * @generated from field: agentshim.conversation.v1.RecoveryUserAction user_action = 2;
-     */
-    value: RecoveryUserAction;
-    case: "userAction";
-  } | {
-    /**
-     * Nothing can be done; the work is lost.
-     *
-     * @generated from field: agentshim.conversation.v1.RecoveryNone none = 3;
-     */
-    value: RecoveryNone;
-    case: "none";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message agentshim.conversation.v1.FailureRecovery.
- * Use `create(FailureRecoverySchema)` to create a new message.
- */
-export const FailureRecoverySchema: GenMessage<FailureRecovery> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 15);
-
-/**
- * The system recovers on its own and the user need not act.
- *
- * @generated from message agentshim.conversation.v1.RecoveryAutomatic
- */
-export type RecoveryAutomatic = Message<"agentshim.conversation.v1.RecoveryAutomatic"> & {
-};
-
-/**
- * Describes the message agentshim.conversation.v1.RecoveryAutomatic.
- * Use `create(RecoveryAutomaticSchema)` to create a new message.
- */
-export const RecoveryAutomaticSchema: GenMessage<RecoveryAutomatic> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 16);
-
-/**
- * The user has to do something before this can proceed.
- *
- * @generated from message agentshim.conversation.v1.RecoveryUserAction
- */
-export type RecoveryUserAction = Message<"agentshim.conversation.v1.RecoveryUserAction"> & {
-  /**
-   * The action to take, stated by the producer so a client never invents one.
-   *
-   * @generated from field: string action = 1;
-   */
-  action: string;
-};
-
-/**
- * Describes the message agentshim.conversation.v1.RecoveryUserAction.
- * Use `create(RecoveryUserActionSchema)` to create a new message.
- */
-export const RecoveryUserActionSchema: GenMessage<RecoveryUserAction> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 17);
-
-/**
- * Unrecoverable. Said plainly rather than dressed as a retry that will not help.
- *
- * @generated from message agentshim.conversation.v1.RecoveryNone
- */
-export type RecoveryNone = Message<"agentshim.conversation.v1.RecoveryNone"> & {
-};
-
-/**
- * Describes the message agentshim.conversation.v1.RecoveryNone.
- * Use `create(RecoveryNoneSchema)` to create a new message.
- */
-export const RecoveryNoneSchema: GenMessage<RecoveryNone> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 18);
 
 /**
  * The conversation was cut here, and the reader must see where.
@@ -559,7 +479,7 @@ export type ContextCut = Message<"agentshim.conversation.v1.ContextCut"> & {
  * Use `create(ContextCutSchema)` to create a new message.
  */
 export const ContextCutSchema: GenMessage<ContextCut> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 19);
+  messageDesc(file_agentshim_conversation_v1_payloads, 15);
 
 /**
  * History was discarded with nothing left in its place.
@@ -574,7 +494,7 @@ export type ContextCleared = Message<"agentshim.conversation.v1.ContextCleared">
  * Use `create(ContextClearedSchema)` to create a new message.
  */
 export const ContextClearedSchema: GenMessage<ContextCleared> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 20);
+  messageDesc(file_agentshim_conversation_v1_payloads, 16);
 
 /**
  * History was replaced by a summary of itself.
@@ -610,30 +530,7 @@ export type ContextCompacted = Message<"agentshim.conversation.v1.ContextCompact
  * Use `create(ContextCompactedSchema)` to create a new message.
  */
 export const ContextCompactedSchema: GenMessage<ContextCompacted> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 21);
-
-/**
- * A slash command the DAEMON answered instead of the agent.
- *
- * @generated from message agentshim.conversation.v1.DaemonAnsweredCommand
- */
-export type DaemonAnsweredCommand = Message<"agentshim.conversation.v1.DaemonAnsweredCommand"> & {
-  /**
-   * WHICH command, and nothing else. There is deliberately no text field: the
-   * argument a user typed after a command must never reach a surface that
-   * renders it.
-   *
-   * @generated from field: agentshim.conversation.v1.SessionCommand command = 1;
-   */
-  command: SessionCommand;
-};
-
-/**
- * Describes the message agentshim.conversation.v1.DaemonAnsweredCommand.
- * Use `create(DaemonAnsweredCommandSchema)` to create a new message.
- */
-export const DaemonAnsweredCommandSchema: GenMessage<DaemonAnsweredCommand> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 22);
+  messageDesc(file_agentshim_conversation_v1_payloads, 17);
 
 /**
  * Work that DETACHED from the turn and now runs alongside it.
@@ -669,7 +566,7 @@ export type DetachedWorkStarted = Message<"agentshim.conversation.v1.DetachedWor
  * Use `create(DetachedWorkStartedSchema)` to create a new message.
  */
 export const DetachedWorkStartedSchema: GenMessage<DetachedWorkStarted> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 23);
+  messageDesc(file_agentshim_conversation_v1_payloads, 18);
 
 /**
  * What kind of work detached.
@@ -720,7 +617,7 @@ export type DetachedWorkKind = Message<"agentshim.conversation.v1.DetachedWorkKi
  * Use `create(DetachedWorkKindSchema)` to create a new message.
  */
 export const DetachedWorkKindSchema: GenMessage<DetachedWorkKind> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 24);
+  messageDesc(file_agentshim_conversation_v1_payloads, 19);
 
 /**
  * A subagent running its own conversation.
@@ -735,7 +632,7 @@ export type DetachedAgent = Message<"agentshim.conversation.v1.DetachedAgent"> &
  * Use `create(DetachedAgentSchema)` to create a new message.
  */
 export const DetachedAgentSchema: GenMessage<DetachedAgent> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 25);
+  messageDesc(file_agentshim_conversation_v1_payloads, 20);
 
 /**
  * A shell command running in the background.
@@ -750,7 +647,7 @@ export type DetachedShell = Message<"agentshim.conversation.v1.DetachedShell"> &
  * Use `create(DetachedShellSchema)` to create a new message.
  */
 export const DetachedShellSchema: GenMessage<DetachedShell> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 26);
+  messageDesc(file_agentshim_conversation_v1_payloads, 21);
 
 /**
  * A workflow with its own journal of steps.
@@ -765,7 +662,7 @@ export type DetachedWorkflow = Message<"agentshim.conversation.v1.DetachedWorkfl
  * Use `create(DetachedWorkflowSchema)` to create a new message.
  */
 export const DetachedWorkflowSchema: GenMessage<DetachedWorkflow> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 27);
+  messageDesc(file_agentshim_conversation_v1_payloads, 22);
 
 /**
  * Detached work we could not classify. Stated rather than defaulted into one of
@@ -787,7 +684,7 @@ export type DetachedUnclassified = Message<"agentshim.conversation.v1.DetachedUn
  * Use `create(DetachedUnclassifiedSchema)` to create a new message.
  */
 export const DetachedUnclassifiedSchema: GenMessage<DetachedUnclassified> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 28);
+  messageDesc(file_agentshim_conversation_v1_payloads, 23);
 
 /**
  * Output accumulating into detached work already open.
@@ -810,7 +707,7 @@ export type DetachedWorkProgressed = Message<"agentshim.conversation.v1.Detached
  * Use `create(DetachedWorkProgressedSchema)` to create a new message.
  */
 export const DetachedWorkProgressedSchema: GenMessage<DetachedWorkProgressed> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 29);
+  messageDesc(file_agentshim_conversation_v1_payloads, 24);
 
 /**
  * Detached work reached an end.
@@ -858,7 +755,7 @@ export type DetachedWorkEnded = Message<"agentshim.conversation.v1.DetachedWorkE
  * Use `create(DetachedWorkEndedSchema)` to create a new message.
  */
 export const DetachedWorkEndedSchema: GenMessage<DetachedWorkEnded> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 30);
+  messageDesc(file_agentshim_conversation_v1_payloads, 25);
 
 /**
  * It finished and did what it was asked.
@@ -879,7 +776,7 @@ export type DetachedSucceeded = Message<"agentshim.conversation.v1.DetachedSucce
  * Use `create(DetachedSucceededSchema)` to create a new message.
  */
 export const DetachedSucceededSchema: GenMessage<DetachedSucceeded> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 31);
+  messageDesc(file_agentshim_conversation_v1_payloads, 26);
 
 /**
  * It finished and did not.
@@ -900,7 +797,7 @@ export type DetachedFailed = Message<"agentshim.conversation.v1.DetachedFailed">
  * Use `create(DetachedFailedSchema)` to create a new message.
  */
 export const DetachedFailedSchema: GenMessage<DetachedFailed> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 32);
+  messageDesc(file_agentshim_conversation_v1_payloads, 27);
 
 /**
  * Someone stopped it deliberately.
@@ -915,7 +812,7 @@ export type DetachedCancelled = Message<"agentshim.conversation.v1.DetachedCance
  * Use `create(DetachedCancelledSchema)` to create a new message.
  */
 export const DetachedCancelledSchema: GenMessage<DetachedCancelled> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 33);
+  messageDesc(file_agentshim_conversation_v1_payloads, 28);
 
 /**
  * We lost sight of it.
@@ -941,5 +838,5 @@ export type DetachedLost = Message<"agentshim.conversation.v1.DetachedLost"> & {
  * Use `create(DetachedLostSchema)` to create a new message.
  */
 export const DetachedLostSchema: GenMessage<DetachedLost> = /*@__PURE__*/
-  messageDesc(file_agentshim_conversation_v1_payloads, 34);
+  messageDesc(file_agentshim_conversation_v1_payloads, 29);
 
