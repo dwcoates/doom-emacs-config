@@ -51,6 +51,10 @@ import type {
   ConversationPageTail as GeneratedConversationPageTail,
 } from "../../proto/gen/ts/agentshim/frontend/v1/conversation-page_pb";
 import type {
+  FirstPageCmd as GeneratedFirstPageCmd,
+  NextPageCmd as GeneratedNextPageCmd,
+} from "../../proto/gen/ts/agentshim/frontend/v1/conversation-history_pb";
+import type {
   HibernationDetail as GeneratedHibernationDetail,
   ReviveCompactFirst as GeneratedReviveCompactFirst,
   ReviveSessionCmd as GeneratedReviveSessionCmd,
@@ -133,6 +137,8 @@ export const COMMAND_ARM = {
   deleteSession: "deleteSession",
   resync: "resync",
   conversationPage: "conversationPage",
+  firstPage: "firstPage",
+  nextPage: "nextPage",
   clientLog: "clientLog",
   queueForce: "queueForce",
   queueAccept: "queueAccept",
@@ -210,6 +216,26 @@ export const RESYNC_FIELD = {
 export const PAGE_CMD_FIELD = {
   fence: "fence",
 } as const satisfies Record<"fence", FieldKeys<GeneratedConversationPageCmd>>;
+
+/**
+ * `FirstPageCmd`'s ONLY field, and deliberately its only one.
+ *
+ * Bound to the generated message so that a position field ADDED to the wire
+ * would surface here rather than tempt this encoder to fill one. The client
+ * cannot name a position: the workspace selects WHICH reader position the
+ * daemon resets, and nothing says WHERE.
+ */
+export const FIRST_PAGE_FIELD = {
+  workspace: "workspace",
+} as const satisfies Record<FieldKeys<GeneratedFirstPageCmd>, FieldKeys<GeneratedFirstPageCmd>>;
+
+/**
+ * `NextPageCmd`'s ONLY field. The absence of everything else IS the contract —
+ * the daemon owns the reader's position, so a next page carries none.
+ */
+export const NEXT_PAGE_FIELD = {
+  workspace: "workspace",
+} as const satisfies Record<FieldKeys<GeneratedNextPageCmd>, FieldKeys<GeneratedNextPageCmd>>;
 
 /** The anchor oneof's arm keys, checked against the generated oneof. */
 export const PAGE_ANCHOR_ARM = {
