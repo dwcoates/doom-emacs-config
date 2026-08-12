@@ -1167,6 +1167,12 @@ func (x *DetachedWorkStarted) GetKind() *DetachedWorkKind {
 }
 
 // What kind of work detached.
+//
+// SIX ARMS, matching what the daemon already resolves (frontend.v1's
+// DetachedWork). An earlier draft had four and silently dropped `merge` and
+// `skill`, which is how a contract quietly deletes a feature: a merge-driven
+// turn and a skill invocation would both have arrived as `unclassified` and
+// rendered as a nameless spool.
 type DetachedWorkKind struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Kind:
@@ -1175,6 +1181,8 @@ type DetachedWorkKind struct {
 	//	*DetachedWorkKind_Shell
 	//	*DetachedWorkKind_Workflow
 	//	*DetachedWorkKind_Unclassified
+	//	*DetachedWorkKind_Skill
+	//	*DetachedWorkKind_Merge
 	Kind          isDetachedWorkKind_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1253,6 +1261,24 @@ func (x *DetachedWorkKind) GetUnclassified() *DetachedUnclassified {
 	return nil
 }
 
+func (x *DetachedWorkKind) GetSkill() *DetachedSkill {
+	if x != nil {
+		if x, ok := x.Kind.(*DetachedWorkKind_Skill); ok {
+			return x.Skill
+		}
+	}
+	return nil
+}
+
+func (x *DetachedWorkKind) GetMerge() *DetachedMerge {
+	if x != nil {
+		if x, ok := x.Kind.(*DetachedWorkKind_Merge); ok {
+			return x.Merge
+		}
+	}
+	return nil
+}
+
 type isDetachedWorkKind_Kind interface {
 	isDetachedWorkKind_Kind()
 }
@@ -1277,6 +1303,21 @@ type DetachedWorkKind_Unclassified struct {
 	Unclassified *DetachedUnclassified `protobuf:"bytes,4,opt,name=unclassified,proto3,oneof"`
 }
 
+type DetachedWorkKind_Skill struct {
+	// A skill invocation. It owns its own window rather than rendering flat, so
+	// every record the skill produces names this message as its
+	// top_level_message_id and needs no correlation to find its card.
+	Skill *DetachedSkill `protobuf:"bytes,5,opt,name=skill,proto3,oneof"`
+}
+
+type DetachedWorkKind_Merge struct {
+	// A merge run: the conversation a merge drives through the workspace's OWN
+	// session. NO TOOL SPAWNS IT — the daemon opens it when it classifies the
+	// merge skill's invocation — so its origin_tool_call_id is empty, which is
+	// the one detachment for which that is not a producer fault.
+	Merge *DetachedMerge `protobuf:"bytes,6,opt,name=merge,proto3,oneof"`
+}
+
 func (*DetachedWorkKind_Agent) isDetachedWorkKind_Kind() {}
 
 func (*DetachedWorkKind_Shell) isDetachedWorkKind_Kind() {}
@@ -1284,6 +1325,10 @@ func (*DetachedWorkKind_Shell) isDetachedWorkKind_Kind() {}
 func (*DetachedWorkKind_Workflow) isDetachedWorkKind_Kind() {}
 
 func (*DetachedWorkKind_Unclassified) isDetachedWorkKind_Kind() {}
+
+func (*DetachedWorkKind_Skill) isDetachedWorkKind_Kind() {}
+
+func (*DetachedWorkKind_Merge) isDetachedWorkKind_Kind() {}
 
 // A subagent running its own conversation.
 type DetachedAgent struct {
@@ -1396,6 +1441,102 @@ func (*DetachedWorkflow) Descriptor() ([]byte, []int) {
 	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{22}
 }
 
+// A skill invocation, which owns its own window.
+//
+// `merge` is the one skill with an arm of its own; every other skill arrives
+// here. The distinction is not cosmetic — a merge run drives the workspace's
+// own session and carries no skill file to show.
+type DetachedSkill struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The skill's name as invoked, verbatim (e.g. "create-or-update-workspace").
+	SkillName string `protobuf:"bytes,1,opt,name=skill_name,json=skillName,proto3" json:"skill_name,omitempty"`
+	// The invocation's arguments, verbatim; empty when none were given.
+	Args          string `protobuf:"bytes,2,opt,name=args,proto3" json:"args,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DetachedSkill) Reset() {
+	*x = DetachedSkill{}
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DetachedSkill) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DetachedSkill) ProtoMessage() {}
+
+func (x *DetachedSkill) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DetachedSkill.ProtoReflect.Descriptor instead.
+func (*DetachedSkill) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *DetachedSkill) GetSkillName() string {
+	if x != nil {
+		return x.SkillName
+	}
+	return ""
+}
+
+func (x *DetachedSkill) GetArgs() string {
+	if x != nil {
+		return x.Args
+	}
+	return ""
+}
+
+// A merge run, driving the workspace's own session.
+type DetachedMerge struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DetachedMerge) Reset() {
+	*x = DetachedMerge{}
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DetachedMerge) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DetachedMerge) ProtoMessage() {}
+
+func (x *DetachedMerge) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DetachedMerge.ProtoReflect.Descriptor instead.
+func (*DetachedMerge) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{24}
+}
+
 // Detached work we could not classify. Stated rather than defaulted into one of
 // the known kinds, because a wrong kind renders wrong output confidently.
 type DetachedUnclassified struct {
@@ -1408,7 +1549,7 @@ type DetachedUnclassified struct {
 
 func (x *DetachedUnclassified) Reset() {
 	*x = DetachedUnclassified{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[23]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1420,7 +1561,7 @@ func (x *DetachedUnclassified) String() string {
 func (*DetachedUnclassified) ProtoMessage() {}
 
 func (x *DetachedUnclassified) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[23]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1433,12 +1574,72 @@ func (x *DetachedUnclassified) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedUnclassified.ProtoReflect.Descriptor instead.
 func (*DetachedUnclassified) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{23}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *DetachedUnclassified) GetToolName() string {
 	if x != nil {
 		return x.ToolName
+	}
+	return ""
+}
+
+// A skill file's contents, delivered as the SKILL's own body.
+//
+// AN UPDATE, not part of DetachedWorkStarted, because the harness writes the
+// body as a SEPARATE transcript record — a `user` line flagged isMeta — which
+// the producer reads after the call that opened the work.
+//
+// IT REPLACES WHOLE rather than appending, unlike DetachedWorkProgressed. The
+// body is delivered once, and a re-read overwrites with the same bytes instead
+// of doubling them.
+//
+// It carries the SKILL MESSAGE's own message_id, which is what makes the old
+// daemon-side correlation unnecessary: the record states which skill it belongs
+// to instead of a reader reconstructing it by walking a chain through isMeta
+// records.
+type SkillBodyResolved struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The skill file's contents, verbatim markdown. A skill IS a markdown
+	// document, so it is carried and rendered as one.
+	Body          string `protobuf:"bytes,1,opt,name=body,proto3" json:"body,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SkillBodyResolved) Reset() {
+	*x = SkillBodyResolved{}
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SkillBodyResolved) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SkillBodyResolved) ProtoMessage() {}
+
+func (x *SkillBodyResolved) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SkillBodyResolved.ProtoReflect.Descriptor instead.
+func (*SkillBodyResolved) Descriptor() ([]byte, []int) {
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *SkillBodyResolved) GetBody() string {
+	if x != nil {
+		return x.Body
 	}
 	return ""
 }
@@ -1456,7 +1657,7 @@ type DetachedWorkProgressed struct {
 
 func (x *DetachedWorkProgressed) Reset() {
 	*x = DetachedWorkProgressed{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[24]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1468,7 +1669,7 @@ func (x *DetachedWorkProgressed) String() string {
 func (*DetachedWorkProgressed) ProtoMessage() {}
 
 func (x *DetachedWorkProgressed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[24]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1481,7 +1682,7 @@ func (x *DetachedWorkProgressed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkProgressed.ProtoReflect.Descriptor instead.
 func (*DetachedWorkProgressed) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{24}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *DetachedWorkProgressed) GetOutput() string {
@@ -1507,7 +1708,7 @@ type DetachedWorkEnded struct {
 
 func (x *DetachedWorkEnded) Reset() {
 	*x = DetachedWorkEnded{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[25]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1519,7 +1720,7 @@ func (x *DetachedWorkEnded) String() string {
 func (*DetachedWorkEnded) ProtoMessage() {}
 
 func (x *DetachedWorkEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[25]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1532,7 +1733,7 @@ func (x *DetachedWorkEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkEnded.ProtoReflect.Descriptor instead.
 func (*DetachedWorkEnded) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{25}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *DetachedWorkEnded) GetOutcome() isDetachedWorkEnded_Outcome {
@@ -1620,7 +1821,7 @@ type DetachedSucceeded struct {
 
 func (x *DetachedSucceeded) Reset() {
 	*x = DetachedSucceeded{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[26]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1632,7 +1833,7 @@ func (x *DetachedSucceeded) String() string {
 func (*DetachedSucceeded) ProtoMessage() {}
 
 func (x *DetachedSucceeded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[26]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1645,7 +1846,7 @@ func (x *DetachedSucceeded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedSucceeded.ProtoReflect.Descriptor instead.
 func (*DetachedSucceeded) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{26}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *DetachedSucceeded) GetSummary() string {
@@ -1666,7 +1867,7 @@ type DetachedFailed struct {
 
 func (x *DetachedFailed) Reset() {
 	*x = DetachedFailed{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[27]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1678,7 +1879,7 @@ func (x *DetachedFailed) String() string {
 func (*DetachedFailed) ProtoMessage() {}
 
 func (x *DetachedFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[27]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1691,7 +1892,7 @@ func (x *DetachedFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedFailed.ProtoReflect.Descriptor instead.
 func (*DetachedFailed) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{27}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *DetachedFailed) GetSummary() string {
@@ -1710,7 +1911,7 @@ type DetachedCancelled struct {
 
 func (x *DetachedCancelled) Reset() {
 	*x = DetachedCancelled{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[28]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1722,7 +1923,7 @@ func (x *DetachedCancelled) String() string {
 func (*DetachedCancelled) ProtoMessage() {}
 
 func (x *DetachedCancelled) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[28]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1735,7 +1936,7 @@ func (x *DetachedCancelled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedCancelled.ProtoReflect.Descriptor instead.
 func (*DetachedCancelled) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{28}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{31}
 }
 
 // We lost sight of it.
@@ -1754,7 +1955,7 @@ type DetachedLost struct {
 
 func (x *DetachedLost) Reset() {
 	*x = DetachedLost{}
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[29]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1766,7 +1967,7 @@ func (x *DetachedLost) String() string {
 func (*DetachedLost) ProtoMessage() {}
 
 func (x *DetachedLost) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[29]
+	mi := &file_agentshim_conversation_v1_payloads_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1779,7 +1980,7 @@ func (x *DetachedLost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedLost.ProtoReflect.Descriptor instead.
 func (*DetachedLost) Descriptor() ([]byte, []int) {
-	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{29}
+	return file_agentshim_conversation_v1_payloads_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *DetachedLost) GetInference() string {
@@ -1852,18 +2053,27 @@ const file_agentshim_conversation_v1_payloads_proto_rawDesc = "" +
 	"\x13DetachedWorkStarted\x12-\n" +
 	"\x13origin_tool_call_id\x18\x01 \x01(\tR\x10originToolCallId\x12\x14\n" +
 	"\x05label\x18\x02 \x01(\tR\x05label\x12?\n" +
-	"\x04kind\x18\x03 \x01(\v2+.agentshim.conversation.v1.DetachedWorkKindR\x04kind\"\xc0\x02\n" +
+	"\x04kind\x18\x03 \x01(\v2+.agentshim.conversation.v1.DetachedWorkKindR\x04kind\"\xc4\x03\n" +
 	"\x10DetachedWorkKind\x12@\n" +
 	"\x05agent\x18\x01 \x01(\v2(.agentshim.conversation.v1.DetachedAgentH\x00R\x05agent\x12@\n" +
 	"\x05shell\x18\x02 \x01(\v2(.agentshim.conversation.v1.DetachedShellH\x00R\x05shell\x12I\n" +
 	"\bworkflow\x18\x03 \x01(\v2+.agentshim.conversation.v1.DetachedWorkflowH\x00R\bworkflow\x12U\n" +
-	"\funclassified\x18\x04 \x01(\v2/.agentshim.conversation.v1.DetachedUnclassifiedH\x00R\funclassifiedB\x06\n" +
+	"\funclassified\x18\x04 \x01(\v2/.agentshim.conversation.v1.DetachedUnclassifiedH\x00R\funclassified\x12@\n" +
+	"\x05skill\x18\x05 \x01(\v2(.agentshim.conversation.v1.DetachedSkillH\x00R\x05skill\x12@\n" +
+	"\x05merge\x18\x06 \x01(\v2(.agentshim.conversation.v1.DetachedMergeH\x00R\x05mergeB\x06\n" +
 	"\x04kind\"\x0f\n" +
 	"\rDetachedAgent\"\x0f\n" +
 	"\rDetachedShell\"\x12\n" +
-	"\x10DetachedWorkflow\"3\n" +
+	"\x10DetachedWorkflow\"B\n" +
+	"\rDetachedSkill\x12\x1d\n" +
+	"\n" +
+	"skill_name\x18\x01 \x01(\tR\tskillName\x12\x12\n" +
+	"\x04args\x18\x02 \x01(\tR\x04args\"\x0f\n" +
+	"\rDetachedMerge\"3\n" +
 	"\x14DetachedUnclassified\x12\x1b\n" +
-	"\ttool_name\x18\x01 \x01(\tR\btoolName\"0\n" +
+	"\ttool_name\x18\x01 \x01(\tR\btoolName\"'\n" +
+	"\x11SkillBodyResolved\x12\x12\n" +
+	"\x04body\x18\x01 \x01(\tR\x04body\"0\n" +
 	"\x16DetachedWorkProgressed\x12\x16\n" +
 	"\x06output\x18\x01 \x01(\tR\x06output\"\xbe\x02\n" +
 	"\x11DetachedWorkEnded\x12L\n" +
@@ -1892,7 +2102,7 @@ func file_agentshim_conversation_v1_payloads_proto_rawDescGZIP() []byte {
 	return file_agentshim_conversation_v1_payloads_proto_rawDescData
 }
 
-var file_agentshim_conversation_v1_payloads_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_agentshim_conversation_v1_payloads_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_agentshim_conversation_v1_payloads_proto_goTypes = []any{
 	(*UserSaid)(nil),               // 0: agentshim.conversation.v1.UserSaid
 	(*AgentSaid)(nil),              // 1: agentshim.conversation.v1.AgentSaid
@@ -1917,51 +2127,56 @@ var file_agentshim_conversation_v1_payloads_proto_goTypes = []any{
 	(*DetachedAgent)(nil),          // 20: agentshim.conversation.v1.DetachedAgent
 	(*DetachedShell)(nil),          // 21: agentshim.conversation.v1.DetachedShell
 	(*DetachedWorkflow)(nil),       // 22: agentshim.conversation.v1.DetachedWorkflow
-	(*DetachedUnclassified)(nil),   // 23: agentshim.conversation.v1.DetachedUnclassified
-	(*DetachedWorkProgressed)(nil), // 24: agentshim.conversation.v1.DetachedWorkProgressed
-	(*DetachedWorkEnded)(nil),      // 25: agentshim.conversation.v1.DetachedWorkEnded
-	(*DetachedSucceeded)(nil),      // 26: agentshim.conversation.v1.DetachedSucceeded
-	(*DetachedFailed)(nil),         // 27: agentshim.conversation.v1.DetachedFailed
-	(*DetachedCancelled)(nil),      // 28: agentshim.conversation.v1.DetachedCancelled
-	(*DetachedLost)(nil),           // 29: agentshim.conversation.v1.DetachedLost
-	(*UserContent)(nil),            // 30: agentshim.conversation.v1.UserContent
-	(*AgentContent)(nil),           // 31: agentshim.conversation.v1.AgentContent
-	(*TokenUsage)(nil),             // 32: agentshim.conversation.v1.TokenUsage
-	(*ToolResultContent)(nil),      // 33: agentshim.conversation.v1.ToolResultContent
-	(*ToolCallBlock)(nil),          // 34: agentshim.conversation.v1.ToolCallBlock
+	(*DetachedSkill)(nil),          // 23: agentshim.conversation.v1.DetachedSkill
+	(*DetachedMerge)(nil),          // 24: agentshim.conversation.v1.DetachedMerge
+	(*DetachedUnclassified)(nil),   // 25: agentshim.conversation.v1.DetachedUnclassified
+	(*SkillBodyResolved)(nil),      // 26: agentshim.conversation.v1.SkillBodyResolved
+	(*DetachedWorkProgressed)(nil), // 27: agentshim.conversation.v1.DetachedWorkProgressed
+	(*DetachedWorkEnded)(nil),      // 28: agentshim.conversation.v1.DetachedWorkEnded
+	(*DetachedSucceeded)(nil),      // 29: agentshim.conversation.v1.DetachedSucceeded
+	(*DetachedFailed)(nil),         // 30: agentshim.conversation.v1.DetachedFailed
+	(*DetachedCancelled)(nil),      // 31: agentshim.conversation.v1.DetachedCancelled
+	(*DetachedLost)(nil),           // 32: agentshim.conversation.v1.DetachedLost
+	(*UserContent)(nil),            // 33: agentshim.conversation.v1.UserContent
+	(*AgentContent)(nil),           // 34: agentshim.conversation.v1.AgentContent
+	(*TokenUsage)(nil),             // 35: agentshim.conversation.v1.TokenUsage
+	(*ToolResultContent)(nil),      // 36: agentshim.conversation.v1.ToolResultContent
+	(*ToolCallBlock)(nil),          // 37: agentshim.conversation.v1.ToolCallBlock
 }
 var file_agentshim_conversation_v1_payloads_proto_depIdxs = []int32{
-	30, // 0: agentshim.conversation.v1.UserSaid.content:type_name -> agentshim.conversation.v1.UserContent
-	31, // 1: agentshim.conversation.v1.AgentSaid.content:type_name -> agentshim.conversation.v1.AgentContent
-	32, // 2: agentshim.conversation.v1.AgentSaid.usage:type_name -> agentshim.conversation.v1.TokenUsage
+	33, // 0: agentshim.conversation.v1.UserSaid.content:type_name -> agentshim.conversation.v1.UserContent
+	34, // 1: agentshim.conversation.v1.AgentSaid.content:type_name -> agentshim.conversation.v1.AgentContent
+	35, // 2: agentshim.conversation.v1.AgentSaid.usage:type_name -> agentshim.conversation.v1.TokenUsage
 	3,  // 3: agentshim.conversation.v1.AgentSaid.stop_reason:type_name -> agentshim.conversation.v1.StopReason
-	33, // 4: agentshim.conversation.v1.ToolReturned.content:type_name -> agentshim.conversation.v1.ToolResultContent
+	36, // 4: agentshim.conversation.v1.ToolReturned.content:type_name -> agentshim.conversation.v1.ToolResultContent
 	4,  // 5: agentshim.conversation.v1.StopReason.end_turn:type_name -> agentshim.conversation.v1.StopEndTurn
 	5,  // 6: agentshim.conversation.v1.StopReason.tool_call:type_name -> agentshim.conversation.v1.StopToolCall
 	6,  // 7: agentshim.conversation.v1.StopReason.max_tokens:type_name -> agentshim.conversation.v1.StopMaxTokens
 	7,  // 8: agentshim.conversation.v1.StopReason.interrupted:type_name -> agentshim.conversation.v1.StopInterrupted
 	8,  // 9: agentshim.conversation.v1.StopReason.unsupported:type_name -> agentshim.conversation.v1.StopUnsupported
-	34, // 10: agentshim.conversation.v1.PermissionAsked.requested:type_name -> agentshim.conversation.v1.ToolCallBlock
+	37, // 10: agentshim.conversation.v1.PermissionAsked.requested:type_name -> agentshim.conversation.v1.ToolCallBlock
 	11, // 11: agentshim.conversation.v1.PermissionAnswered.allowed:type_name -> agentshim.conversation.v1.PermissionAllowed
 	12, // 12: agentshim.conversation.v1.PermissionAnswered.denied:type_name -> agentshim.conversation.v1.PermissionDenied
 	13, // 13: agentshim.conversation.v1.PermissionAnswered.abandoned:type_name -> agentshim.conversation.v1.PermissionAbandoned
 	16, // 14: agentshim.conversation.v1.ContextCut.cleared:type_name -> agentshim.conversation.v1.ContextCleared
 	17, // 15: agentshim.conversation.v1.ContextCut.compacted:type_name -> agentshim.conversation.v1.ContextCompacted
-	31, // 16: agentshim.conversation.v1.ContextCompacted.summary:type_name -> agentshim.conversation.v1.AgentContent
+	34, // 16: agentshim.conversation.v1.ContextCompacted.summary:type_name -> agentshim.conversation.v1.AgentContent
 	19, // 17: agentshim.conversation.v1.DetachedWorkStarted.kind:type_name -> agentshim.conversation.v1.DetachedWorkKind
 	20, // 18: agentshim.conversation.v1.DetachedWorkKind.agent:type_name -> agentshim.conversation.v1.DetachedAgent
 	21, // 19: agentshim.conversation.v1.DetachedWorkKind.shell:type_name -> agentshim.conversation.v1.DetachedShell
 	22, // 20: agentshim.conversation.v1.DetachedWorkKind.workflow:type_name -> agentshim.conversation.v1.DetachedWorkflow
-	23, // 21: agentshim.conversation.v1.DetachedWorkKind.unclassified:type_name -> agentshim.conversation.v1.DetachedUnclassified
-	26, // 22: agentshim.conversation.v1.DetachedWorkEnded.succeeded:type_name -> agentshim.conversation.v1.DetachedSucceeded
-	27, // 23: agentshim.conversation.v1.DetachedWorkEnded.failed:type_name -> agentshim.conversation.v1.DetachedFailed
-	28, // 24: agentshim.conversation.v1.DetachedWorkEnded.cancelled:type_name -> agentshim.conversation.v1.DetachedCancelled
-	29, // 25: agentshim.conversation.v1.DetachedWorkEnded.lost:type_name -> agentshim.conversation.v1.DetachedLost
-	26, // [26:26] is the sub-list for method output_type
-	26, // [26:26] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	25, // 21: agentshim.conversation.v1.DetachedWorkKind.unclassified:type_name -> agentshim.conversation.v1.DetachedUnclassified
+	23, // 22: agentshim.conversation.v1.DetachedWorkKind.skill:type_name -> agentshim.conversation.v1.DetachedSkill
+	24, // 23: agentshim.conversation.v1.DetachedWorkKind.merge:type_name -> agentshim.conversation.v1.DetachedMerge
+	29, // 24: agentshim.conversation.v1.DetachedWorkEnded.succeeded:type_name -> agentshim.conversation.v1.DetachedSucceeded
+	30, // 25: agentshim.conversation.v1.DetachedWorkEnded.failed:type_name -> agentshim.conversation.v1.DetachedFailed
+	31, // 26: agentshim.conversation.v1.DetachedWorkEnded.cancelled:type_name -> agentshim.conversation.v1.DetachedCancelled
+	32, // 27: agentshim.conversation.v1.DetachedWorkEnded.lost:type_name -> agentshim.conversation.v1.DetachedLost
+	28, // [28:28] is the sub-list for method output_type
+	28, // [28:28] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_conversation_v1_payloads_proto_init() }
@@ -1992,8 +2207,10 @@ func file_agentshim_conversation_v1_payloads_proto_init() {
 		(*DetachedWorkKind_Shell)(nil),
 		(*DetachedWorkKind_Workflow)(nil),
 		(*DetachedWorkKind_Unclassified)(nil),
+		(*DetachedWorkKind_Skill)(nil),
+		(*DetachedWorkKind_Merge)(nil),
 	}
-	file_agentshim_conversation_v1_payloads_proto_msgTypes[25].OneofWrappers = []any{
+	file_agentshim_conversation_v1_payloads_proto_msgTypes[28].OneofWrappers = []any{
 		(*DetachedWorkEnded_Succeeded)(nil),
 		(*DetachedWorkEnded_Failed)(nil),
 		(*DetachedWorkEnded_Cancelled)(nil),
@@ -2005,7 +2222,7 @@ func file_agentshim_conversation_v1_payloads_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_conversation_v1_payloads_proto_rawDesc), len(file_agentshim_conversation_v1_payloads_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   30,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
