@@ -1725,7 +1725,11 @@ func TestTokenUtilizationModelRejectionDegradesAccountingWithoutWithholdingConve
 			name:  "live whitespace model",
 			plane: corev1.Plane_PLANE_STREAM,
 			event: func(t *testing.T) *corev1.Event {
-				ev := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{
+				// The uuid is the item's identity, and a curated message
+				// without one can state no durability class: its feed row would
+				// root at nothing. The SDK stamps one on every stream message;
+				// the fixture states it for the same reason.
+				ev := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Uuid: "live-assistant", Message: &datav1.ApiAssistantMessage{
 					Id:      "live-message",
 					Model:   " \t\n",
 					Usage:   &datav1.ApiUsage{InputTokens: 1},

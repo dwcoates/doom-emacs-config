@@ -436,6 +436,18 @@ func conversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*fro
 	if len(items) == 0 {
 		return nil, nil, nil
 	}
+	// EVERY CURATED MESSAGE STATES ITS CLASS BEFORE IT LEAVES, and this is the
+	// one place it happens. Each message above exists because a RECORD does —
+	// a transcript line or a store event — so each is durable, and the single
+	// exception (the harness's local_command record) arrives already classified
+	// ephemeral by its own producer. A message reaching a frontend with no arm
+	// is malformed by the contract, so the refusal fails the delta rather than
+	// serving it one message short.
+	classified, err := ClassifyRecordDerived(items)
+	if err != nil {
+		return nil, nil, err
+	}
+	items = classified
 	return &frontendv1.ConversationDelta{
 		Workspace:  workspace,
 		Fence:      fence,
@@ -572,8 +584,7 @@ func conversationItemsFromVendor(a *anypb.Any, ev *corev1.Event) ([]*frontendv1.
 	case *datav1.ResultMessage:
 		return resultItems(m, ev), nil, nil
 	case *datav1.TranscriptLine:
-		items, envs := transcriptLineItems(m, producedAtMs, requestID)
-		return items, envs, nil
+		return transcriptLineItems(m, producedAtMs, requestID)
 	default:
 		return nil, nil, nil // known data.v1 message, not rendered as conversation
 	}
@@ -653,25 +664,28 @@ func eventDerivedUUID(ev *corev1.Event, kind string) string {
 
 // transcriptLineItems curates the conversation-bearing on-disk line types, and
 // returns the RecordEnvelope of each item it produced alongside them.
-func transcriptLineItems(tl *datav1.TranscriptLine, producedAtMs int64, requestID string) ([]*frontendv1.Message, map[string]RecordEnvelope) {
+func transcriptLineItems(tl *datav1.TranscriptLine, producedAtMs int64, requestID string) ([]*frontendv1.Message, map[string]RecordEnvelope, error) {
 	switch line := tl.GetLine().(type) {
 	case *datav1.TranscriptLine_Assistant:
 		al := line.Assistant
 		env := al.GetEnvelope()
 		items := assistantMessageItem(env.GetUuid(), transcriptTsMs(env, producedAtMs), requestID, al.GetMessage())
-		return items, recordEnvelopes(items, env)
+		return items, recordEnvelopes(items, env), nil
 	case *datav1.TranscriptLine_User:
 		ul := line.User
 		env := ul.GetEnvelope()
 		items := userMessageItem(env.GetUuid(), transcriptTsMs(env, producedAtMs), requestID, ul.GetMessage())
-		return items, recordEnvelopes(items, env)
+		return items, recordEnvelopes(items, env), nil
 	case *datav1.TranscriptLine_System:
 		if line.System.GetLocalCommand() != nil {
+			// The one line whose curation can REFUSE: it is classified
+			// ephemeral at its producer, and a refusal there travels out here
+			// rather than being absorbed into an unclassified item.
 			return localCommandItems(line.System, producedAtMs, requestID)
 		}
-		return systemLineItems(line.System, producedAtMs, requestID), nil
+		return systemLineItems(line.System, producedAtMs, requestID), nil, nil
 	default:
-		return nil, nil // non-conversational metadata line
+		return nil, nil, nil // non-conversational metadata line
 	}
 }
 
@@ -700,7 +714,15 @@ func recordEnvelopes(items []*frontendv1.Message, env *datav1.LineEnvelope) map[
 // feed's account of that; without an item there is nothing for that classifier
 // to see. The user_message arm carries the body only as far as that classifier,
 // which replaces the payload with the command's identity.
-func localCommandItems(sl *datav1.SystemLine, producedAtMs int64, requestID string) ([]*frontendv1.Message, map[string]RecordEnvelope) {
+// IT IS THE ONE CURATED SHAPE THAT IS EPHEMERAL, and it says so here rather
+// than at the delta's chokepoint, because this is the only place that knows the
+// shape at all: by the time the message is in the delta the envelope is gone.
+// The contract puts it in the class by name — "Shape B records are EPHEMERAL,
+// per Part 4, since they carry no promptId and the user has ruled them out of
+// the durable set" — and the ephemeral constructor writes the feed-row lineage
+// the class requires in the same act, so the item cannot claim the class and
+// carry lineage that contradicts it.
+func localCommandItems(sl *datav1.SystemLine, producedAtMs int64, requestID string) ([]*frontendv1.Message, map[string]RecordEnvelope, error) {
 	env := sl.GetEnvelope()
 	items := userMessageItem(env.GetUuid(), transcriptTsMs(env, producedAtMs), requestID, &datav1.ApiUserMessage{
 		Content: &datav1.ApiUserMessage_ContentString{ContentString: sl.GetLocalCommand().GetContent()},
@@ -710,7 +732,18 @@ func localCommandItems(sl *datav1.SystemLine, producedAtMs int64, requestID stri
 		re.LocalCommandSubtype = true
 		envs[uuid] = re
 	}
-	return items, envs
+	ephemeral := make([]*frontendv1.Message, 0, len(items))
+	for _, it := range items {
+		// THE REFUSAL IS RETURNED, never repaired and never published
+		// unclassified: an item with no durability arm reads later as a durable
+		// message the store lost, which is the exact confusion the class ends.
+		classified, err := NewEphemeralFeedRow(it)
+		if err != nil {
+			return nil, nil, fmt.Errorf("frontend: the harness's local_command record uuid=%s could not be classified ephemeral, so it is withheld rather than served with no durability class: %w", it.GetUuid(), err)
+		}
+		ephemeral = append(ephemeral, classified)
+	}
+	return ephemeral, envs, nil
 }
 
 // streamDetachmentEnvelopes is the STREAM plane's answer to recordEnvelopes:

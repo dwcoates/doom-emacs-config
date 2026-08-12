@@ -242,3 +242,69 @@ func TestNewEphemeralFeedRowDoesNotMutateTheCallerBody(t *testing.T) {
 		t.Fatalf("the caller's body had lineage written into it, want it left untouched")
 	}
 }
+
+// --- ClassifyRecordDerived: the curation chokepoint -------------------------
+
+// TestClassifyRecordDerivedStatesTheDurableArm is the defect this chokepoint
+// closes: a curated message that reaches a frontend with NO durability class is
+// malformed by the contract, because a reader cannot tell "no record exists"
+// from "the record was not found".
+func TestClassifyRecordDerivedStatesTheDurableArm(t *testing.T) {
+	// Arrange.
+	body := commandBody("u1")
+
+	// Act.
+	got, err := ClassifyRecordDerived([]*frontendv1.Message{body})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClassifyRecordDerived = err %v, want a classified message", err)
+	}
+	if got[0].GetDurable() == nil {
+		t.Fatalf("durability arm = %T, want the durable arm set", got[0].GetDurability())
+	}
+}
+
+// TestClassifyRecordDerivedLeavesAnEphemeralMessageAlone keeps the chokepoint
+// from becoming a SECOND authority over the class: the harness's local_command
+// record is classified at its own producer, which is the only place that knows
+// the shape.
+func TestClassifyRecordDerivedLeavesAnEphemeralMessageAlone(t *testing.T) {
+	// Arrange.
+	already, err := NewEphemeralFeedRow(commandBody("u2"))
+	if err != nil {
+		t.Fatalf("NewEphemeralFeedRow = err %v, want an ephemeral message to test against", err)
+	}
+
+	// Act.
+	got, err := ClassifyRecordDerived([]*frontendv1.Message{already})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClassifyRecordDerived = err %v, want the already-classified message through untouched", err)
+	}
+	if got[0].GetEphemeral() == nil {
+		t.Fatalf("durability arm = %T, want the ephemeral arm preserved", got[0].GetDurability())
+	}
+}
+
+// TestClassifyRecordDerivedRefusesRatherThanServingAMessageShort keeps a
+// refusal from silently becoming a hole in the conversation: the whole delta
+// fails so the caller can report it, rather than one message vanishing where
+// nothing downstream can attribute the loss.
+func TestClassifyRecordDerivedRefusesRatherThanServingAMessageShort(t *testing.T) {
+	// Arrange — a body with no uuid cannot root a feed row, so the constructor
+	// refuses it.
+	bad := commandBody("")
+
+	// Act.
+	got, err := ClassifyRecordDerived([]*frontendv1.Message{commandBody("u3"), bad})
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("ClassifyRecordDerived = %+v, want a refusal naming the unclassifiable message", got)
+	}
+	if got != nil {
+		t.Fatalf("ClassifyRecordDerived returned %d message(s) beside its refusal, want none", len(got))
+	}
+}
