@@ -85,6 +85,7 @@ import type { FeedAnchor } from "./scroll.js";
 import {
   TailFollow,
   captureFeedAnchor,
+  feedTopChanged,
   restoreFeedAnchor,
   revealNode,
 } from "./scroll.js";
@@ -3927,10 +3928,25 @@ export class FeedRenderer {
     this.syncWatcherPolls(watchers, panels);
     const finals = finalResponses(visible);
     const seen = new Set<string>();
+    // A PREPEND MUST NOT JUMP THE VIEWPORT. A load-more page lands entirely
+    // above what the reader is looking at, so the feed grows above the
+    // viewport and the same scrollTop then shows different content. Ordinary
+    // scroll-anchoring: sample the reader's place BEFORE the insert and put
+    // them back after, using the same anchor a rebuild uses. Detected by the
+    // top item CHANGING rather than by the feed growing, since growth happens
+    // for reasons — an expanding card, a settling deferred item — that must
+    // move nothing.
+    const entries = [...groupFeed(top)];
+    if (rebuildAnchor === null) {
+      const topKeyBefore =
+        (this.container.firstElementChild as HTMLElement | null)?.dataset.key ?? null;
+      const topKeyAfter = entries.length > 0 ? this.entryKey(entries[0]) : null;
+      if (feedTopChanged(topKeyBefore, topKeyAfter)) rebuildAnchor = this.captureAnchor();
+    }
     // Walks the container as the desired order is emitted, so each node can be
     // slotted at its rank. `null` means "next goes at the very front".
     let prevNode: ChildNode | null = null;
-    for (const feedEntry of groupFeed(top)) {
+    for (const feedEntry of entries) {
       const key = this.entryKey(feedEntry);
       seen.add(key);
       const html = this.entryHtml(feedEntry, finals, panels);
