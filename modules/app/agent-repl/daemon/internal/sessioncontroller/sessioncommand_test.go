@@ -328,10 +328,10 @@ func TestSubmittingAModelCommandStillClaimsTheTurn(t *testing.T) {
 	}
 }
 
-func TestSubmittingAClearAlsoPushesItsInvocationItem(t *testing.T) {
-	// Arrange — every recognized command is reported the same way. The clear's
-	// own item is later dropped with the history its cut hides, which is the
-	// cut's doing rather than a hole in the reporting.
+func TestSubmittingAClearProducesNoDaemonItem(t *testing.T) {
+	// Arrange — `/clear` is forwarded, so the CLI answers it and writes its own
+	// record. That record is the single producer of the clear's feed account,
+	// exactly as it is for every other command the daemon does not answer.
 	h := newQueueHarness(t, nil)
 
 	// Act.
@@ -340,9 +340,8 @@ func TestSubmittingAClearAlsoPushesItsInvocationItem(t *testing.T) {
 	}
 
 	// Assert.
-	items := h.commandItems()
-	if len(items) != 1 || items[0].GetCommand() != frontendv1.SessionCommand_SESSION_COMMAND_CLEAR {
-		t.Fatalf("session-command items = %v, want one CLEAR", items)
+	if items := h.commandItems(); len(items) != 0 {
+		t.Fatalf("session-command items = %v, want none — the CLI's own record accounts for a forwarded clear", items)
 	}
 }
 
@@ -404,8 +403,8 @@ func TestARepeatedInvocationUnderOneRequestIdReplacesTheRetainedItem(t *testing.
 	c := h.controller().consumer
 
 	// Act.
-	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, true, "")
-	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, true, "")
+	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, "")
+	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, "")
 
 	// Assert.
 	if got := len(c.snapshotCommandItems()); got != 1 {
@@ -413,49 +412,60 @@ func TestARepeatedInvocationUnderOneRequestIdReplacesTheRetainedItem(t *testing.
 	}
 }
 
-func TestADurableInvocationIsNotRetainedForReplay(t *testing.T) {
-	// Arrange — the CLI handled this command and wrote a record for it, so the
-	// store serves it on reconnect; a retained copy would draw it twice.
+// TestACliHandledCommandProducesNoDaemonItem is the single-producer cut. The CLI
+// answers `/compact` and writes its own transcript record for it, which
+// machinery.go classifies into the one item drawn for the invocation. A daemon
+// item beside that record is a SECOND producer, and a reload — which replays the
+// record while the daemon pushes live — draws the command twice.
+func TestACliHandledCommandProducesNoDaemonItem(t *testing.T) {
+	// Arrange.
 	h := newQueueHarness(t, nil)
-	c := h.controller().consumer
 
 	// Act.
-	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_COST, false, "")
+	if err := h.submitAs("r1", "/compact"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
 
 	// Assert.
-	if got := len(c.snapshotCommandItems()); got != 0 {
-		t.Fatalf("retained %d durable invocation item(s), want 0 (the store is their one source)", got)
+	if items := h.commandItems(); len(items) != 0 {
+		t.Fatalf("the daemon produced %d item(s) for a CLI-handled command, want 0 — its account comes from the record the CLI wrote, which is the single source that can also be paged", len(items))
 	}
 }
 
-func TestADurableInvocationIsStillPushedLive(t *testing.T) {
-	// Arrange — retention decides what a RECONNECT replays, never whether the
-	// frontend sees the invocation when it happens.
+// TestACliHandledCommandRetainsNothingForReplay is the retention half of the
+// same cut: with no item produced there is nothing to replay, so a resync
+// cannot re-push a twin of the record the store already serves.
+func TestACliHandledCommandRetainsNothingForReplay(t *testing.T) {
+	// Arrange.
 	h := newQueueHarness(t, nil)
-	c := h.controller().consumer
+	if err := h.submitAs("r1", "/compact"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
 
 	// Act.
-	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_COST, false, "")
+	h.controller().consumer.resync(0)
 
 	// Assert.
-	if items := h.commandItems(); len(items) != 1 {
-		t.Fatalf("pushed %d durable invocation item(s) live, want 1", len(items))
+	if items := h.commandItems(); len(items) != 0 {
+		t.Fatalf("saw %d daemon item(s) for a CLI-handled command after a replay, want 0", len(items))
 	}
 }
 
-func TestADurableInvocationIsNotRePushedByAResync(t *testing.T) {
-	// Arrange — the duplicate-item failure mode: one command arriving from both
-	// the store and daemon retention.
+// TestADaemonHandledCommandProducesExactlyOneItem is the other side: nothing
+// else will ever account for `/model <name>`, because it never reaches the CLI,
+// so the daemon must produce exactly one item for it.
+func TestADaemonHandledCommandProducesExactlyOneItem(t *testing.T) {
+	// Arrange.
 	h := newQueueHarness(t, nil)
-	c := h.controller().consumer
-	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_COST, false, "")
 
 	// Act.
-	c.resync(0)
+	if err := h.submitAs("r1", "/model opus"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
 
 	// Assert.
 	if items := h.commandItems(); len(items) != 1 {
-		t.Fatalf("saw %d durable invocation item(s) after a replay, want 1 (the live push alone)", len(items))
+		t.Fatalf("the daemon produced %d item(s) for a command it answered itself, want exactly 1", len(items))
 	}
 }
 
@@ -464,7 +474,7 @@ func TestAContextCutDropsTheRetainedEphemeralInvocationItems(t *testing.T) {
 	// in a feed the cut exists to open. Nothing else floors an ephemeral one.
 	h := newQueueHarness(t, nil)
 	c := h.controller().consumer
-	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, true, "")
+	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, "")
 
 	// Act.
 	c.Consume(clearEvent(7, "u-clear"))
@@ -484,7 +494,7 @@ func TestTheInvocationItemIsEphemeral(t *testing.T) {
 	requestID := "r1"
 
 	// Act.
-	item, err := sessionCommandItem(requestID, frontendv1.SessionCommand_SESSION_COMMAND_MODEL, 7, true)
+	item, err := sessionCommandItem(requestID, frontendv1.SessionCommand_SESSION_COMMAND_MODEL, 7)
 
 	// Assert.
 	if err != nil {
@@ -503,7 +513,7 @@ func TestTheInvocationItemIsAFeedRow(t *testing.T) {
 	requestID := "r1"
 
 	// Act.
-	item, err := sessionCommandItem(requestID, frontendv1.SessionCommand_SESSION_COMMAND_MODEL, 7, true)
+	item, err := sessionCommandItem(requestID, frontendv1.SessionCommand_SESSION_COMMAND_MODEL, 7)
 
 	// Assert.
 	if err != nil {
