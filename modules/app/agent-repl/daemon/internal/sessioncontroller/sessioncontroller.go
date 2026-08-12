@@ -297,6 +297,11 @@ type Config struct {
 	// the quiet empty feed it used to be: a frontend cannot tell silence from
 	// an empty conversation, so the daemon must say which one it means.
 	DurableHistory DurableHistorySource
+	// MessagePages serves the BOUNDED, BACKWARD-ANCHORED page read the
+	// positionless history surface is built on (storepage.go). Nil makes a
+	// history page for an unwired workspace a LOUD refusal rather than a quiet
+	// relapse into the unbounded forward scan the page exists to end.
+	MessagePages MessagePageSource
 	// PromptReceipts persists the interrupted-turn resumptions the
 	// prompt_receipt table holds: the record a teardown writes for a turn it is
 	// about to interrupt, and the successor daemon discharges once the re-drive

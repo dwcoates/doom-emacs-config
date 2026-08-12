@@ -128,7 +128,7 @@ func (m *Manager) historyPage(ctx context.Context, reader, workspace string, fir
 	if err != nil {
 		return nil, err
 	}
-	outcome, err := m.servePage(ctx, admission, workspace, resolve, historyPageSlots)
+	outcome, err := m.serveHistoryPage(ctx, admission, workspace, resolve, first)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +152,31 @@ func (m *Manager) historyPage(ctx context.Context, reader, workspace string, fir
 	m.logf("session-controller: %s SERVED ws=%q reader=%q generation=%q messages=%d continuation=%s live_join_seq=%d next_before_seq=%d",
 		verb, workspace, reader, admission.generationID, len(outcome.items), continuationName(outcome.reachedStart), page.GetLiveJoinSeq(), outcome.nextBeforeSeq)
 	return page, nil
+}
+
+// serveHistoryPage is the ROUTE SWITCH the positionless surface uses, and it
+// differs from the older surface's (servePage) in exactly one place.
+//
+//   - An UNWIRED workspace is served from the STORE'S BOUNDED PAGE
+//     (storepage.go). There is no shim, the store is the only route, and the
+//     store can now answer the question this surface actually asks: the newest
+//     ten MESSAGES, resolved by the store itself. The forward windowed scan is
+//     gone from this route entirely.
+//   - A workspace with a LIVE session controller is still served THROUGH THE
+//     SHIM by the windowed backwards walk. The shim exposes no page verb to the
+//     daemon yet, and dialling the store directly while a shim is up would be
+//     serving history through a side door — a fallback that masks a shim outage
+//     instead of surfacing it (repull.go's header). That route becomes bounded
+//     when the shim carries MessagePageRequest, not by the daemon going around
+//     it.
+//
+// BOTH ROUTES CURATE THROUGH consumer.pushConversation, so which one served a
+// page is invisible in the page.
+func (m *Manager) serveHistoryPage(ctx context.Context, admission historyAdmission, workspace string, resolve pageBoundResolver, first bool) (pageOutcome, error) {
+	if admission.route == historyRouteLiveController {
+		return m.pageFromController(ctx, admission.controller, resolve, historyPageSlots)
+	}
+	return m.pageFromStorePage(ctx, workspace, admission.generationID, resolve, first)
 }
 
 // historyPageBound resolves where this verb's read is anchored — and, for a

@@ -860,6 +860,9 @@ func main() {
 		SeqStore:             seqStore,
 		ClearCompactStore:    seqStore,
 		DurableHistory:       durableHistory,
+		// The SAME reader serves the bounded, backward-anchored page: one
+		// store socket, one vendor-session resolution, two verbs on it.
+		MessagePages: durableHistory,
 		PromptReceipts:       promptReceipts,
 		TerminalFailureCards: terminalFailureCards,
 		TurnAccountings:      turnAccountings,

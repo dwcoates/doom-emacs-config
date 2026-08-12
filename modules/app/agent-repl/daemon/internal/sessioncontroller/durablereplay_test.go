@@ -93,7 +93,11 @@ type durableHarness struct {
 	receipts *fakeReceiptStore
 	// cards is the durable ledger of standing terminal failure cards a durable
 	// replay serves from.
-	cards  *fakeTerminalCardStore
+	cards *fakeTerminalCardStore
+	// pages is the STORE'S BOUNDED PAGE the positionless history surface reads
+	// through (storepage.go). It is built over the same canned events the
+	// replay spy holds, so both routes describe one conversation.
+	pages  *messagePageSpy
 	logMu  *sync.Mutex
 	logged *[]string
 }
@@ -112,8 +116,11 @@ func newDurableHarness(t *testing.T, history DurableHistorySource) *durableHarne
 		logMu:    &mu,
 		logged:   &logged,
 	}
+	var pages MessagePageSource
 	if spy, ok := history.(*durableHistorySpy); ok {
 		h.history = spy
+		h.pages = &messagePageSpy{events: spy.events}
+		pages = h.pages
 	}
 	m, err := New(Config{
 		Push:                 h.push,
@@ -124,6 +131,7 @@ func newDurableHarness(t *testing.T, history DurableHistorySource) *durableHarne
 		ClearCompactStore:    h.floors,
 		TurnAccountings:      emptyTurnAccountingStore{},
 		DurableHistory:       history,
+		MessagePages:         pages,
 		PromptReceipts:       h.receipts,
 		TerminalFailureCards: h.cards,
 		ProtocolVersion:      "1",
