@@ -5,6 +5,7 @@ syntax = "proto3";
 
 package agentshim.frontend.v1;
 
+import "agentshim/frontend/v1/conversation-history.proto";
 import "agentshim/frontend/v1/conversation-page.proto";
 import "agentshim/frontend/v1/errors.proto";
 import "agentshim/frontend/v1/failure-card.proto";
@@ -97,6 +98,14 @@ message FrontendFrame {
     // it is an EDGE and never snapshot state: a cut describes the end of one
     // preview, and a client that connects afterwards has no preview to retire.
     TypingCut typing_cut = 27;
+    // ONE page of conversation history under the positionless contract,
+    // answering a FirstPageCmd or a NextPageCmd. A push for the same reason
+    // `conversation_page` above is one — its messages are feed content, and
+    // feed content has exactly one delivery shape in this protocol — and a
+    // DISTINCT frame from it because the two contracts answer different
+    // questions: this one's reader holds no position and echoes nothing back.
+    // See conversation-history.proto.
+    ConversationHistoryPage conversation_history_page = 28;
   }
 }
 
@@ -222,6 +231,14 @@ message FrontendCommand {
     // from it. It does not replace `resync` above, which stays the live-page
     // path — see conversation-page.proto.
     ConversationPageCmd conversation_page = 35;
+    // The positionless history verbs. `first_page` resets this reader's
+    // daemon-held position to the newest page; `next_page` walks it one page
+    // older and carries NO position of its own, so a reader without an
+    // established one is refused rather than silently served the tail. They do
+    // not replace `resync` above, and they will retire `conversation_page`
+    // once every frontend has moved — see conversation-history.proto.
+    FirstPageCmd first_page = 36;
+    NextPageCmd next_page = 37;
   }
 }
 
