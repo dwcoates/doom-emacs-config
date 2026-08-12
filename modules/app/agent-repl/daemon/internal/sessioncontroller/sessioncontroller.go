@@ -297,18 +297,17 @@ type Config struct {
 	// the quiet empty feed it used to be: a frontend cannot tell silence from
 	// an empty conversation, so the daemon must say which one it means.
 	DurableHistory DurableHistorySource
-	// PromptReceipts persists the DURABLE half of every prompt receipt: the
-	// record written at acceptance, before the receipt bubble is pushed, and
-	// retired once the conversation itself carries the prompt (promptecho.go,
-	// durablereplay.go).
+	// PromptReceipts persists the interrupted-turn resumptions the
+	// prompt_receipt table holds: the record a teardown writes for a turn it is
+	// about to interrupt, and the successor daemon discharges once the re-drive
+	// it owes has demonstrably landed (turnresumption.go).
 	//
-	// Nil is a session controller with the durable receipt guarantee OFF — a
-	// focused harness that does not exercise it. Production always wires one,
-	// and every site that would have written or read a record says out loud
-	// that it did not, so the absence is never mistaken for "there were no
-	// receipts". It is deliberately not Required: a Manager built without one
-	// still serves prompts correctly, it merely cannot testify to a prompt
-	// across its own death.
+	// Nil is a session controller with the resumption guarantee OFF — a focused
+	// harness that does not exercise it. Production always wires one, and every
+	// site that would have written or read a record says out loud that it did
+	// not, so the absence is never mistaken for "nothing was owed". It is
+	// deliberately not Required: a Manager built without one still serves
+	// prompts correctly, it merely drops the work a bounce interrupts.
 	PromptReceipts PromptReceiptStore
 	// TerminalFailureCards persists the STANDING failure card of a session
 	// whose bring-up is terminally fenced (vanishedresume.go), so a client that
@@ -767,23 +766,22 @@ type sessionController struct {
 	// answer. This copy is written under the same mutex the resolver reads it
 	// under, which is the whole of its justification.
 	queryInstanceID string
-	// submitMu SERIALIZES THIS SESSION'S PROMPT SUBMITS, and with them the
-	// reservation of each prompt's echo slot (promptecho.go).
+	// submitMu SERIALIZES THIS SESSION'S PROMPT SUBMITS.
 	//
-	// It exists because the echo queue's ORDER is load-bearing: attribution
-	// hands a transcript line the oldest outstanding receipt, so a queue whose
-	// order differs from the order the prompts reached the SDK stamps one
-	// prompt's line with another prompt's request id — two prompts swapping
-	// identities, silently. Four paths funnel into forwardPrompt (the immediate
-	// submit, the queue's drain, an interject's head jump, a merge's own
-	// submit) and the held-prompt queue serializes only ITSELF, so two of them
-	// really can run at once.
+	// It exists because the ORDER prompts reach the SDK in is load-bearing: it
+	// is the order the durable lines that render them come back in, so two
+	// prompts submitted close together read as each other's if the submits can
+	// interleave. Four paths funnel into forwardPrompt (the immediate submit,
+	// the queue's drain, an interject's head jump, a merge's own submit) and the
+	// held-prompt queue serializes only ITSELF, so two of them really can run at
+	// once.
 	//
 	// Holding it across the submit — the whole of SubmitPrompt, including its
 	// ack wait — is the point rather than a cost: it is what makes "prompts
 	// reach one session's shim in submit order and come back in the same order"
-	// a construction instead of an assumption claimOldestEcho was already
-	// quietly resting on.
+	// a construction instead of an assumption. The durable lines that RENDER the
+	// prompts arrive in that same order, so the ordering is what keeps two
+	// prompts issued close together from reading as each other's.
 	//
 	// LOCK ORDER: submitMu is taken BEFORE Manager.mu and never after it, and
 	// every caller of forwardPrompt already reaches it with Manager.mu
@@ -793,8 +791,8 @@ type sessionController struct {
 	// goroutine, a queue-delivery goroutine, or a timer.
 	submitMu sync.Mutex
 	client   sessionClient
-	consumer        *consumer
-	cancel          context.CancelFunc
+	consumer *consumer
+	cancel   context.CancelFunc
 	// controllerRegistrationRelease relinquishes the SSM-owned reservation
 	// that excludes hibernation until this generation reaches operational or
 	// exits. The closure is idempotent.
@@ -1381,10 +1379,9 @@ func (m *Manager) persistVendorSessionID(sessionID, csid string) {
 // forwarded at all: the daemon queues it (E4) and this returns nil, because
 // the command was accepted — it was accepted into the queue. The queue's own
 // pushed QueueView is what tells the frontend where the prompt went.
-// requestID is the frontend command's own id. It is what the daemon's prompt
-// RECEIPT is keyed on (promptecho.go), what the durable transcript line is
-// later stamped with, and the authoritative turn id used for terminal
-// accounting. It must therefore be nonempty before any session state changes.
+// requestID is the frontend command's own id. It is the identity the submitted
+// turn carries on the wire (promptdispatch.go) and the authoritative turn id
+// used for terminal accounting. It must therefore be nonempty before any session state changes.
 func (m *Manager) SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) error {
 	if strings.TrimSpace(requestID) == "" {
 		return fmt.Errorf("session-controller: submit prompt for workspace %q needs a non-empty request id", workspace)
@@ -3039,8 +3036,8 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	cons.warnf = m.warnf
 	cons.historicalUsageStore = m.cfg.HistoricalUsage
 	cons.generationID = generationID
-	// The durable receipt ledger. Bound before Run, so no durable user line can
-	// reach attributeUserTurn — the retirement point — with this unset.
+	// The interrupted-turn resumption ledger. Bound before Run, so no curated
+	// conversation delta can reach the discharge point with this unset.
 	cons.receipts = m.cfg.PromptReceipts
 	// The keep-alive exclusion's evidence. Bound before Run, so no conversation
 	// item can reach the curation block with the ledger unset and be rendered

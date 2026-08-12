@@ -469,16 +469,16 @@ func main() {
 		}
 	}()
 
-	// The durable half of every prompt receipt, in the same store the state log
+	// The interrupted-turn resumption ledger, in the same store the state log
 	// and the merge lease ledger live in. A daemon that cannot install it cannot
-	// promise a submitted prompt survives its own death, and starting anyway
-	// would make that promise silently false.
+	// promise that a turn its own bounce interrupts is ever picked back up, and
+	// starting anyway would make that promise silently false.
 	promptReceipts, err := statedb.NewPromptReceipts(stateStore)
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: open prompt receipt store: %v", err)
 	}
 	// The durable half of a terminally fenced session's failure card, in the
-	// same store. FATAL on failure for the prompt receipts' reason exactly: a
+	// same store. FATAL on failure for the resumption ledger's reason exactly: a
 	// daemon that cannot install it cannot promise that a session it refuses to
 	// bring up ever explains itself to a client that connects later, and
 	// starting anyway would make that promise silently false.
@@ -486,7 +486,7 @@ func main() {
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: open terminal failure card store: %v", err)
 	}
-	// The keep-alive window ledger. FATAL on failure for the prompt receipts'
+	// The keep-alive window ledger. FATAL on failure for the resumption ledger's
 	// reason inverted: without it the daemon cannot tell its own cache pings
 	// from the user's prompts, and would render machine-generated turns as
 	// conversation.
