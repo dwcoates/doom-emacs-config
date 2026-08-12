@@ -431,6 +431,87 @@ describe("Message lineage: what contains a message", () => {
   });
 });
 
+// THE EPHEMERAL CLASS: whether a durable record for this message exists at
+// all. The arms are empty, so membership IS the fact, and the lineage rules
+// are the class's shape rather than advice about it — an ephemeral message is
+// always a feed row, because one attached into a paged conversation would
+// simply vanish out of the middle of it.
+describe("Message durability: whether a store record exists", () => {
+  function decodeOne(fields: Record<string, unknown>) {
+    const m: Record<string, unknown> = { ...CONV_DELTA.messages[0], ...fields };
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [m] } });
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
+    return frame.frame.value.messages[0];
+  }
+
+  it("reads the durable arm as the durable class", () => {
+    // Arrange / Act
+    const msg = decodeOne({ durable: {} });
+
+    // Assert — the arm being set is the entire claim; it carries no fields.
+    expect(msg.durability).toBe("durable");
+  });
+
+  it("reads the ephemeral arm as the ephemeral class", () => {
+    // Arrange / Act
+    const msg = decodeOne({ ephemeral: {} });
+
+    // Assert
+    expect(msg.durability).toBe("ephemeral");
+  });
+
+  it("leaves the class ABSENT rather than assuming a record exists", () => {
+    // Arrange / Act — a producer that stated no class.
+    const msg = decodeOne({});
+
+    // Assert — defaulting to durable would let a message claim a record it
+    // does not have, which is exactly the lie the oneof exists to prevent.
+    expect("durability" in msg).toBe(false);
+  });
+
+  it("refuses a message claiming both classes at once", () => {
+    // Arrange / Act / Assert
+    expect(() => decodeOne({ durable: {}, ephemeral: {} })).toThrow(/one oneof/);
+  });
+
+  it("accepts an ephemeral message that is its own feed row", () => {
+    // Arrange / Act
+    const msg = decodeOne({
+      ephemeral: {},
+      lineage: { topLevelMessageId: "u1", parentMessageId: "" },
+    });
+
+    // Assert — self-referential top level, no parent: the only shape it has.
+    expect(msg.durability).toBe("ephemeral");
+  });
+
+  it("refuses an ephemeral message that names a parent", () => {
+    // Arrange / Act / Assert — it would attach into a conversation it will
+    // vanish from, leaving a hole where a reader expects a message.
+    expect(() =>
+      decodeOne({ ephemeral: {}, lineage: { topLevelMessageId: "root", parentMessageId: "mid" } }),
+    ).toThrow(/always a feed row/);
+  });
+
+  it("refuses an ephemeral message whose top level is not itself", () => {
+    // Arrange / Act / Assert — it would sort into another row's page.
+    expect(() =>
+      decodeOne({ ephemeral: {}, lineage: { topLevelMessageId: "other", parentMessageId: "" } }),
+    ).toThrow(/its own feed row/);
+  });
+
+  it("leaves a durable message's nested lineage alone", () => {
+    // Arrange / Act — containment is ordinary for a message with a record.
+    const msg = decodeOne({
+      durable: {},
+      lineage: { topLevelMessageId: "root", parentMessageId: "mid" },
+    });
+
+    // Assert
+    expect(msg.lineage).toEqual({ topLevelMessageId: "root", parentMessageId: "mid" });
+  });
+});
+
 describe("ConversationItem token utilization", () => {
   it("preserves every modeled response usage field and raw payload", () => {
     const frame = decode({ conversationDelta: { ...CONV_DELTA, messages: [{ ...CONV_DELTA.messages[0], tokenUtilization: [TOKEN_UTILIZATION] }] } });

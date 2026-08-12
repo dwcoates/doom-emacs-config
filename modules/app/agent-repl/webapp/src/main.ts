@@ -536,21 +536,19 @@ async function boot(): Promise<void> {
    * SessionView reports it in force, so a failed submit does not silently
    * drop the user's choice.
    *
-   * THE BUBBLE IS FILED HERE, not on the daemon's answer. The words appear in
-   * the feed on this frame; the daemon's receipt for the same request id then
-   * replaces this bubble with its own, and THAT is what starts the breath (see
-   * `Store.addLocalPrompt`). A refused submit takes the bubble back down,
-   * because the refusal's failure card is the only honest record of a prompt
-   * that never ran.
+   * NO BUBBLE IS FILED HERE. The prompt reaches the feed when its record
+   * round-trips through the SDK and never before, so the words appear one
+   * round trip after send. That is the accepted cost of one prompt having one
+   * identity: the page used to mint a bubble on this frame under the request
+   * id, and reconciling it against the durable line the CLI later wrote is
+   * where the duplicate bubbles came from.
    *
-   * ONREFUSED IS THE OTHER HALF OF THAT SAME RETRACTION, and it matters more
-   * than the bubble does. The daemon acks this command once the shim has taken
+   * ONREFUSED SURVIVED THAT REMOVAL UNCHANGED, and it always mattered more
+   * than the bubble did. The daemon acks this command once the shim has taken
    * the prompt, and acks it too once it has durably QUEUED it behind a running
    * turn; it nacks only when neither happened, so a nack means the words are
-   * still owed to whoever typed them. A wrongly-drawn bubble is cosmetic;
-   * silently eating a draft is not. The composer passes a restore here, and
-   * the two halves are deliberately independent — the restore runs whether or
-   * not a bubble was standing to take down.
+   * still owed to whoever typed them. A wrongly-drawn bubble was cosmetic;
+   * silently eating a draft is not, so the composer passes a restore here.
    */
   const dispatchPrompt = (
     workspace: string,
@@ -558,20 +556,16 @@ async function boot(): Promise<void> {
     promptOrigin: PromptOrigin,
     onRefused?: () => void,
   ): Promise<void> => {
-    const { requestId, ack } = dispatcher.submitPrompt(
+    const { ack } = dispatcher.submitPrompt(
       workspace,
       text,
       promptOrigin,
       pendingMode.outbound,
     );
-    // No id means no command left the page — there is no submit to draw, and
-    // the rejection below is the whole story.
-    if (requestId !== "" && store.addLocalPrompt(requestId, text)) frames.schedule();
     return ack.catch((err: unknown) => {
-      if (store.dropUnackedPrompt(requestId)) frames.schedule();
-      // BEFORE the rethrow, and outside the bubble's `if`: the words come back
-      // even when there was no bubble to take down, because the draft is the
-      // thing whose loss actually costs the user something.
+      // BEFORE the rethrow: the words come back to whoever typed them, which
+      // is the thing whose loss actually costs the user something. This is the
+      // whole user-visible retraction now that no bubble is drawn at submit.
       onRefused?.();
       // RE-THROWN, unlike before: the held-prompt queue is a caller that must
       // learn a drained prompt was refused, because it owes that prompt its own
@@ -609,15 +603,6 @@ async function boot(): Promise<void> {
       store.state.cwd === workspace &&
       store.state.hibernation === null &&
       drainableRenderState(store.state.renderState),
-    // A held prompt shows up in the feed the instant it is typed, keyed on the
-    // queue entry rather than any request id — nothing has been sent, so there
-    // is no receipt that could ever reconcile onto this bubble.
-    echo: (entry: QueuedPrompt) => {
-      if (store.addLocalPrompt(entry.queueId, entry.text)) frames.schedule();
-    },
-    retract: (entry: QueuedPrompt) => {
-      if (store.dropUnackedPrompt(entry.queueId)) frames.schedule();
-    },
     submit: (entry: QueuedPrompt) => dispatchPrompt(entry.workspace, entry.text, entry.promptOrigin),
     fail: (entry: QueuedPrompt, reason: string) => {
       clog("error", `held prompt was never sent: ${reason}`, {
@@ -1798,7 +1783,7 @@ async function boot(): Promise<void> {
         // the forward budget the live line needs.
         const receipt = userTurnReceipt(effects, store.state.lastSeq);
         if (receipt !== null) {
-          const line = `feed: user turn received request_id=${receipt.requestId} seq=${receipt.seq} len=${receipt.len} live=${receipt.live}`;
+          const line = `feed: user turn received uuid=${receipt.uuid} seq=${receipt.seq} len=${receipt.len} live=${receipt.live}`;
           if (receipt.live) clog("info", line);
           else log("info", line, { operation: "webapp.main.user-turn-receipt", localOnly: true });
         }

@@ -8,13 +8,13 @@
  * "detached nothing". One edge per test (AAA).
  */
 import { describe, expect, it } from "vitest";
-import { ConversationItem, ToolItem, userTurnRequestKey } from "../src/store.js";
+import { ConversationItem, ToolItem } from "../src/store.js";
 import { asyncByBubble, isWatcher, watcherRef, type AsyncClassification } from "../src/watchers.js";
 
-function userTurn(requestId = "u1"): ConversationItem {
+function userTurn(uuid = "u1"): ConversationItem {
   return {
     kind: "user-turn",
-    requestId,
+    uuid,
     content: [{ type: "text", text: "go" }],
     ts: "2026-05-24T10:00:00.000Z",
   } as unknown as ConversationItem;
@@ -202,27 +202,27 @@ describe("asyncByBubble", () => {
     const items = [userTurn("u7"), watcher, result()];
     // Act
     const byBubble = asyncByBubble(items);
-    // Assert — the prompt bubble is the host, under the prompt's own IDENTITY
-    // rather than its bare request id. Keying on the raw id put every prompt
+    // Assert — the prompt bubble is the host, under the prompt's own IDENTITY,
+    // which is its record uuid. Keying on the bare request id put every prompt
     // the real pipeline delivers (request id "") in one shared bucket.
-    expect(byBubble.get(userTurnRequestKey("u7"))).toEqual([watcher]);
+    expect(byBubble.get("user-turn:uuid:u7")).toEqual([watcher]);
   });
 
-  it("gives an unattributed prompt no host bucket at all", () => {
-    // Arrange — the real pipeline delivers every prompt with an EMPTY request
-    // id, and this one has no uuid either, so it has no identity to host under.
+  it("gives an unidentified prompt no host bucket at all", () => {
+    // Arrange — a fixture turn minted with no record, so it has no identity to
+    // host under.
     const watcher = spawner("t1", "b-1");
     const items = [userTurn(""), watcher, result()];
     // Act
     const byBubble = asyncByBubble(items);
-    // Assert — an absent host is ABSENT. `??` only skips null/undefined, so ""
-    // used to pass the guard and become a real Map key.
+    // Assert — an absent host is ABSENT. `??` only skips null/undefined, so an
+    // empty-string key used to pass the guard and become a real Map key.
     expect(byBubble.has("")).toBe(false);
     expect(byBubble.size).toBe(0);
   });
 
-  it("keeps two unattributed prompts out of one shared bucket", () => {
-    // Arrange — two tools-only turns, both with an empty request id. Sharing a
+  it("keeps two unidentified prompts out of one shared bucket", () => {
+    // Arrange — two tools-only turns, neither carrying a record. Sharing a
     // bucket rendered each one's amber badges on the other.
     const first = spawner("t1", "b-1");
     const second = spawner("t2", "b-2");

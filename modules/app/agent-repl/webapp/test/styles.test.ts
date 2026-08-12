@@ -1764,7 +1764,6 @@ describe("thinking spinner", () => {
 
 const waveUserBubble = blockAfter(css, ".bubble.user {");
 const bubbleWaveKeyframes = blockAfter(css, "@keyframes bubble-wave {");
-const unackedBubble = blockAfter(css, ".bubble.user.unacked {");
 const reducedBubbleWave = blockAfter(
   blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
   ".bubble.user {",
@@ -1947,25 +1946,12 @@ describe("prompt bubble thinking wave", () => {
     expect(reducedBubbleWave).toMatch(/background-image:\s*none/);
   });
 
-  it("holds a prompt the daemon has not acknowledged still", () => {
-    // Arrange / Act — the wave says the daemon has the prompt, so the bubble
-    // the webapp mints for its own submit must not carry one until the
-    // daemon's receipt supersedes it.
-    // Assert
-    expect(unackedBubble).toMatch(/animation:\s*none/);
-  });
-
-  it("leaves an unacknowledged prompt a plain fill, with no parked band on it", () => {
-    // Arrange / Act — same reason as the reduced-motion case above.
-    // Assert
-    expect(unackedBubble).toMatch(/background-image:\s*none/);
-  });
-
-  it("suppresses the wave only for the unacknowledged bubble", () => {
-    // Arrange — the suppression rule must not reach an ordinary prompt
-    // bubble, which would stop every wave in the feed.
+  it("carries no unacked suppression rule at all", () => {
+    // Arrange — the webapp no longer draws a prompt the daemon has not spoken
+    // for, so there is no unacknowledged bubble for a rule to suppress. A rule
+    // left behind would be a selector nothing can ever match.
     // Act / Assert
-    expect(css).toContain(".bubble.user.unacked {");
+    expect(css).not.toContain(".bubble.user.unacked");
   });
 });
 
