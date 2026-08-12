@@ -8,15 +8,15 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { ApiAssistantMessage, ThinkingBlock } from "../../data/v1/tools_pb";
-import { file_agentshim_data_v1_tools } from "../../data/v1/tools_pb";
+import type { AgentContent, ThinkingBlock } from "../../conversation/v1/content_pb";
+import { file_agentshim_conversation_v1_content } from "../../conversation/v1/content_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentshim/frontend/v1/agent-response.proto.
  */
 export const file_agentshim_frontend_v1_agent_response: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHNoaW0vZnJvbnRlbmQvdjEvYWdlbnQtcmVzcG9uc2UucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSKFAQoNQWdlbnRSZXNwb25zZRI0CgRib2R5GAEgASgLMiYuYWdlbnRzaGltLmRhdGEudjEuQXBpQXNzaXN0YW50TWVzc2FnZRI+Cgt1c2FnZV9zdGFtcBgCIAEoCzIpLmFnZW50c2hpbS5mcm9udGVuZC52MS5SZXNwb25zZVVzYWdlU3RhbXAibAoNQWdlbnRUaGlua2luZxIuCgRib2R5GAEgASgLMiAuYWdlbnRzaGltLmRhdGEudjEuVGhpbmtpbmdCbG9jaxIWCg5hcGlfbWVzc2FnZV9pZBgCIAEoCRITCgtibG9ja19pbmRleBgDIAEoBSJ1ChJSZXNwb25zZVVzYWdlU3RhbXASHgoWZXhwZW5zaXZlX2lucHV0X3Rva2VucxgBIAEoAxIZChFjYWNoZV9yZWFkX3Rva2VucxgCIAEoAxIVCg1vdXRwdXRfdG9rZW5zGAMgASgDEg0KBW1vZGVsGAQgASgJQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_agentshim_data_v1_tools]);
+  fileDesc("CiphZ2VudHNoaW0vZnJvbnRlbmQvdjEvYWdlbnQtcmVzcG9uc2UucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSKGAQoNQWdlbnRSZXNwb25zZRI1CgRib2R5GAEgASgLMicuYWdlbnRzaGltLmNvbnZlcnNhdGlvbi52MS5BZ2VudENvbnRlbnQSPgoLdXNhZ2Vfc3RhbXAYAiABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUmVzcG9uc2VVc2FnZVN0YW1wInQKDUFnZW50VGhpbmtpbmcSNgoEYm9keRgBIAEoCzIoLmFnZW50c2hpbS5jb252ZXJzYXRpb24udjEuVGhpbmtpbmdCbG9jaxIWCg5hcGlfbWVzc2FnZV9pZBgCIAEoCRITCgtibG9ja19pbmRleBgDIAEoBSJ1ChJSZXNwb25zZVVzYWdlU3RhbXASHgoWZXhwZW5zaXZlX2lucHV0X3Rva2VucxgBIAEoAxIZChFjYWNoZV9yZWFkX3Rva2VucxgCIAEoAxIVCg1vdXRwdXRfdG9rZW5zGAMgASgDEg0KBW1vZGVsGAQgASgJQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_agentshim_conversation_v1_content]);
 
 /**
  * The assistant's spoken turn: one response, with the figures it is stamped
@@ -39,9 +39,9 @@ export type AgentResponse = Message<"agentshim.frontend.v1.AgentResponse"> & {
    * The carve-out applies UNIFORMLY: top-level feed and detached-agent fold
    * alike. There is no path on which this field carries thinking.
    *
-   * @generated from field: agentshim.data.v1.ApiAssistantMessage body = 1;
+   * @generated from field: agentshim.conversation.v1.AgentContent body = 1;
    */
-  body?: ApiAssistantMessage | undefined;
+  body?: AgentContent | undefined;
 
   /**
    * The resolved figures this response is stamped with. Absent when the
@@ -70,7 +70,7 @@ export type AgentThinking = Message<"agentshim.frontend.v1.AgentThinking"> & {
   /**
    * The reasoning block, verbatim durable evidence (text + signature).
    *
-   * @generated from field: agentshim.data.v1.ThinkingBlock body = 1;
+   * @generated from field: agentshim.conversation.v1.ThinkingBlock body = 1;
    */
   body?: ThinkingBlock | undefined;
 

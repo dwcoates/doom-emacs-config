@@ -6,7 +6,6 @@ package agentshim.frontend.v1;
 
 import "agentshim/conversation/v1/commands.proto";
 import "agentshim/core/v1/core.proto";
-import "agentshim/frontend/v1/slash-menu.proto";
 
 option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 

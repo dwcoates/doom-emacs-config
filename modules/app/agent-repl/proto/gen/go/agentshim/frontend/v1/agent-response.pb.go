@@ -11,7 +11,7 @@
 package frontendv1
 
 import (
-	v1 "agentrepl/proto/agentshim/data/v1"
+	v1 "agentrepl/proto/agentshim/conversation/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -42,7 +42,7 @@ type AgentResponse struct {
 	//
 	// The carve-out applies UNIFORMLY: top-level feed and detached-agent fold
 	// alike. There is no path on which this field carries thinking.
-	Body *v1.ApiAssistantMessage `protobuf:"bytes,1,opt,name=body,proto3" json:"body,omitempty"`
+	Body *v1.AgentContent `protobuf:"bytes,1,opt,name=body,proto3" json:"body,omitempty"`
 	// The resolved figures this response is stamped with. Absent when the
 	// response carried no usage record — never fabricated as zeros.
 	UsageStamp    *ResponseUsageStamp `protobuf:"bytes,2,opt,name=usage_stamp,json=usageStamp,proto3" json:"usage_stamp,omitempty"`
@@ -80,7 +80,7 @@ func (*AgentResponse) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_agent_response_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *AgentResponse) GetBody() *v1.ApiAssistantMessage {
+func (x *AgentResponse) GetBody() *v1.AgentContent {
 	if x != nil {
 		return x.Body
 	}
@@ -248,13 +248,13 @@ var File_agentshim_frontend_v1_agent_response_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_agent_response_proto_rawDesc = "" +
 	"\n" +
-	"*agentshim/frontend/v1/agent-response.proto\x12\x15agentshim.frontend.v1\x1a\x1dagentshim/data/v1/tools.proto\"\x97\x01\n" +
-	"\rAgentResponse\x12:\n" +
-	"\x04body\x18\x01 \x01(\v2&.agentshim.data.v1.ApiAssistantMessageR\x04body\x12J\n" +
+	"*agentshim/frontend/v1/agent-response.proto\x12\x15agentshim.frontend.v1\x1a'agentshim/conversation/v1/content.proto\"\x98\x01\n" +
+	"\rAgentResponse\x12;\n" +
+	"\x04body\x18\x01 \x01(\v2'.agentshim.conversation.v1.AgentContentR\x04body\x12J\n" +
 	"\vusage_stamp\x18\x02 \x01(\v2).agentshim.frontend.v1.ResponseUsageStampR\n" +
-	"usageStamp\"\x8c\x01\n" +
-	"\rAgentThinking\x124\n" +
-	"\x04body\x18\x01 \x01(\v2 .agentshim.data.v1.ThinkingBlockR\x04body\x12$\n" +
+	"usageStamp\"\x94\x01\n" +
+	"\rAgentThinking\x12<\n" +
+	"\x04body\x18\x01 \x01(\v2(.agentshim.conversation.v1.ThinkingBlockR\x04body\x12$\n" +
 	"\x0eapi_message_id\x18\x02 \x01(\tR\fapiMessageId\x12\x1f\n" +
 	"\vblock_index\x18\x03 \x01(\x05R\n" +
 	"blockIndex\"\xb1\x01\n" +
@@ -278,16 +278,16 @@ func file_agentshim_frontend_v1_agent_response_proto_rawDescGZIP() []byte {
 
 var file_agentshim_frontend_v1_agent_response_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_agentshim_frontend_v1_agent_response_proto_goTypes = []any{
-	(*AgentResponse)(nil),          // 0: agentshim.frontend.v1.AgentResponse
-	(*AgentThinking)(nil),          // 1: agentshim.frontend.v1.AgentThinking
-	(*ResponseUsageStamp)(nil),     // 2: agentshim.frontend.v1.ResponseUsageStamp
-	(*v1.ApiAssistantMessage)(nil), // 3: agentshim.data.v1.ApiAssistantMessage
-	(*v1.ThinkingBlock)(nil),       // 4: agentshim.data.v1.ThinkingBlock
+	(*AgentResponse)(nil),      // 0: agentshim.frontend.v1.AgentResponse
+	(*AgentThinking)(nil),      // 1: agentshim.frontend.v1.AgentThinking
+	(*ResponseUsageStamp)(nil), // 2: agentshim.frontend.v1.ResponseUsageStamp
+	(*v1.AgentContent)(nil),    // 3: agentshim.conversation.v1.AgentContent
+	(*v1.ThinkingBlock)(nil),   // 4: agentshim.conversation.v1.ThinkingBlock
 }
 var file_agentshim_frontend_v1_agent_response_proto_depIdxs = []int32{
-	3, // 0: agentshim.frontend.v1.AgentResponse.body:type_name -> agentshim.data.v1.ApiAssistantMessage
+	3, // 0: agentshim.frontend.v1.AgentResponse.body:type_name -> agentshim.conversation.v1.AgentContent
 	2, // 1: agentshim.frontend.v1.AgentResponse.usage_stamp:type_name -> agentshim.frontend.v1.ResponseUsageStamp
-	4, // 2: agentshim.frontend.v1.AgentThinking.body:type_name -> agentshim.data.v1.ThinkingBlock
+	4, // 2: agentshim.frontend.v1.AgentThinking.body:type_name -> agentshim.conversation.v1.ThinkingBlock
 	3, // [3:3] is the sub-list for method output_type
 	3, // [3:3] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name

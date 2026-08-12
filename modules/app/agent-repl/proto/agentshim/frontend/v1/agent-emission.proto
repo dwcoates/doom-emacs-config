@@ -20,7 +20,7 @@ syntax = "proto3";
 
 package agentshim.frontend.v1;
 
-import "agentshim/data/v1/stream.proto";
+import "agentshim/conversation/v1/payloads.proto";
 import "agentshim/frontend/v1/agent-response.proto";
 import "agentshim/frontend/v1/slash-menu.proto";
 import "agentshim/frontend/v1/tool-call.proto";
@@ -63,6 +63,6 @@ message AgentEmission {
     // A turn's ACCOUNTING VERDICT is a different thing and is not here: it is
     // the session's ledger rather than the agent's utterance, and it reaches a
     // frontend resolved, on FooterAccountingCell.
-    agentshim.data.v1.ResultMessage turn_result = 7;
+    agentshim.conversation.v1.DetachedWorkEnded turn_result = 7;
   }
 }

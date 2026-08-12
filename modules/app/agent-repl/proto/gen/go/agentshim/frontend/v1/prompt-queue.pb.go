@@ -9,6 +9,7 @@
 package frontendv1
 
 import (
+	v11 "agentrepl/proto/agentshim/conversation/v1"
 	v1 "agentrepl/proto/agentshim/core/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -605,7 +606,7 @@ type QueueClassificationUninterruptibleTurn struct {
 	// Which cut is running, so the card can name it. Never UNSPECIFIED: the arm
 	// is set only when the daemon recognized the running prompt as one of the
 	// two, and an arm that could not say which would explain nothing.
-	Command       SessionCommand `protobuf:"varint,1,opt,name=command,proto3,enum=agentshim.frontend.v1.SessionCommand" json:"command,omitempty"`
+	Command       v11.SessionCommand `protobuf:"varint,1,opt,name=command,proto3,enum=agentshim.conversation.v1.SessionCommand" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -640,11 +641,11 @@ func (*QueueClassificationUninterruptibleTurn) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *QueueClassificationUninterruptibleTurn) GetCommand() SessionCommand {
+func (x *QueueClassificationUninterruptibleTurn) GetCommand() v11.SessionCommand {
 	if x != nil {
 		return x.Command
 	}
-	return SessionCommand_SESSION_COMMAND_UNSPECIFIED
+	return v11.SessionCommand(0)
 }
 
 // The classifier could not be believed (it answered with neither token, or
@@ -1358,7 +1359,7 @@ var File_agentshim_frontend_v1_prompt_queue_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_prompt_queue_proto_rawDesc = "" +
 	"\n" +
-	"(agentshim/frontend/v1/prompt-queue.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a&agentshim/frontend/v1/slash-menu.proto\"\x94\x01\n" +
+	"(agentshim/frontend/v1/prompt-queue.proto\x12\x15agentshim.frontend.v1\x1a(agentshim/conversation/v1/commands.proto\x1a\x1cagentshim/core/v1/core.proto\"\x94\x01\n" +
 	"\x0fSubmitPromptCmd\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12'\n" +
 	"\x0fpermission_mode\x18\x02 \x01(\tR\x0epermissionMode\x12D\n" +
@@ -1381,9 +1382,9 @@ const file_agentshim_frontend_v1_prompt_queue_proto_rawDesc = "" +
 	"\trationale\x18\x01 \x01(\tR\trationale\"S\n" +
 	"\x17QueueClassificationHold\x12\x1c\n" +
 	"\trationale\x18\x01 \x01(\tR\trationale\x12\x1a\n" +
-	"\baccepted\x18\x02 \x01(\bR\baccepted\"i\n" +
-	"&QueueClassificationUninterruptibleTurn\x12?\n" +
-	"\acommand\x18\x01 \x01(\x0e2%.agentshim.frontend.v1.SessionCommandR\acommand\"2\n" +
+	"\baccepted\x18\x02 \x01(\bR\baccepted\"m\n" +
+	"&QueueClassificationUninterruptibleTurn\x12C\n" +
+	"\acommand\x18\x01 \x01(\x0e2).agentshim.conversation.v1.SessionCommandR\acommand\"2\n" +
 	"\x18QueueClassificationError\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"\xa3\a\n" +
 	"\n" +
@@ -1461,14 +1462,14 @@ var file_agentshim_frontend_v1_prompt_queue_proto_goTypes = []any{
 	(*QueueAcceptCmd)(nil),                         // 19: agentshim.frontend.v1.QueueAcceptCmd
 	(*QueueCancelCmd)(nil),                         // 20: agentshim.frontend.v1.QueueCancelCmd
 	(v1.PromptOrigin)(0),                           // 21: agentshim.core.v1.PromptOrigin
-	(SessionCommand)(0),                            // 22: agentshim.frontend.v1.SessionCommand
+	(v11.SessionCommand)(0),                        // 22: agentshim.conversation.v1.SessionCommand
 }
 var file_agentshim_frontend_v1_prompt_queue_proto_depIdxs = []int32{
 	21, // 0: agentshim.frontend.v1.SubmitPromptCmd.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
 	4,  // 1: agentshim.frontend.v1.DetachedCancelOutcome.cancelled:type_name -> agentshim.frontend.v1.DetachedAgentsCancelled
 	5,  // 2: agentshim.frontend.v1.DetachedCancelOutcome.nothing_running:type_name -> agentshim.frontend.v1.NoDetachedAgentsRunning
 	6,  // 3: agentshim.frontend.v1.DetachedCancelOutcome.unsupported:type_name -> agentshim.frontend.v1.DetachedCancelUnsupported
-	22, // 4: agentshim.frontend.v1.QueueClassificationUninterruptibleTurn.command:type_name -> agentshim.frontend.v1.SessionCommand
+	22, // 4: agentshim.frontend.v1.QueueClassificationUninterruptibleTurn.command:type_name -> agentshim.conversation.v1.SessionCommand
 	7,  // 5: agentshim.frontend.v1.QueueEntry.pending:type_name -> agentshim.frontend.v1.QueueClassificationPending
 	8,  // 6: agentshim.frontend.v1.QueueEntry.interject:type_name -> agentshim.frontend.v1.QueueClassificationInterject
 	9,  // 7: agentshim.frontend.v1.QueueEntry.hold_for_turn_end:type_name -> agentshim.frontend.v1.QueueClassificationHold
@@ -1491,7 +1492,6 @@ func file_agentshim_frontend_v1_prompt_queue_proto_init() {
 	if File_agentshim_frontend_v1_prompt_queue_proto != nil {
 		return
 	}
-	file_agentshim_frontend_v1_slash_menu_proto_init()
 	file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[3].OneofWrappers = []any{
 		(*DetachedCancelOutcome_Cancelled)(nil),
 		(*DetachedCancelOutcome_NothingRunning)(nil),
