@@ -210,11 +210,14 @@ func (c *consumer) curateMetaRecords(cd *frontendv1.ConversationDelta, envs map[
 			}
 			c.logf("session-controller: skill body ATTACHED to its card ws=%q session=%s seq=%d uuid=%s tool_use_id=%s len=%d",
 				c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), toolUseID, len(text))
-			kept = append(kept, &frontendv1.Message{
+			// THE CARD IS DURABLE, and it says so through the constructor. It
+			// re-payloads a record the CLI wrote and the store holds, under
+			// that record's own uuid, so a reload serves it again — which is
+			// precisely the claim the durable arm makes.
+			card, err := frontend.NewDurableFeedRow(&frontendv1.Message{
 				Uuid:      it.GetUuid(),
 				TsMs:      it.GetTsMs(),
 				RequestId: it.GetRequestId(),
-				Lineage:   frontend.FeedRowLineage(it.GetUuid()),
 				Payload: &frontendv1.Message_Agent{Agent: &frontendv1.AgentEmission{
 					Emission: &frontendv1.AgentEmission_SkillBody{SkillBody: &frontendv1.SkillBodyItem{
 						ToolUseId:    toolUseID,
@@ -222,6 +225,16 @@ func (c *consumer) curateMetaRecords(cd *frontendv1.ConversationDelta, envs map[
 					}},
 				}},
 			})
+			if err != nil {
+				// WITHHELD, LOUDLY. An item with no durability arm reads later
+				// as a durable message the store lost, so the card is kept off
+				// the feed and the refusal reported in full rather than
+				// repaired or published unclassified.
+				c.warn("session-controller: skill body card NOT drawn ws=%q session=%s seq=%d uuid=%s tool_use_id=%s — the message constructor refused it, so no classified card could be built and none is delivered: %v",
+					c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), toolUseID, err)
+				continue
+			}
+			kept = append(kept, card)
 			continue
 		}
 		c.logf("session-controller: user turn WITHHELD as harness meta record ws=%q session=%s seq=%d uuid=%s parent=%s skill=%q head=%q — the harness flagged this record isMeta, meaning it wrote it FOR THE MODEL rather than a person typing it; the store keeps it, the conversation feed does not",

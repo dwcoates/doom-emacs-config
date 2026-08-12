@@ -161,11 +161,16 @@ func (m *Manager) serveStandingTerminalCard(workspace, sessionID string, cons *c
 		logf("session-controller: standing terminal failure card UNPARSEABLE session=%s: %v — the resync is failed rather than served without it", sessionID, err)
 		return false, fmt.Errorf("session-controller: parsing the standing terminal failure card for session %q failed: %w", sessionID, err)
 	}
-	item := &frontendv1.Message{
+	// DURABLE BY ORIGIN: this card is being read back OUT of the store, so the
+	// record whose existence the arm claims is the very row it came from.
+	item, err := frontend.NewDurableFeedRow(&frontendv1.Message{
 		Uuid:    rec.UUID,
 		TsMs:    rec.AtMs,
-		Lineage: frontend.FeedRowLineage(rec.UUID),
 		Payload: &frontendv1.Message_FailureCard{FailureCard: card},
+	})
+	if err != nil {
+		logf("session-controller: standing terminal failure card UNCLASSIFIABLE session=%s uuid=%s: %v — the resync is failed rather than served an item with no durability class", sessionID, rec.UUID, err)
+		return true, fmt.Errorf("session-controller: the standing terminal failure card for session %q could not be classified: %w", sessionID, err)
 	}
 	if !cons.pushReplayedItem(item) {
 		logf("session-controller: standing terminal failure card NOT PUSHED session=%s uuid=%s — its provenance could not be resolved (see the refusal above)", sessionID, rec.UUID)
