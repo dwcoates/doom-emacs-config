@@ -84,6 +84,19 @@ func migrate(db *sql.DB, logf dlog.Logf) error {
 		-- token. Measured on a synthetic fleet of 161 workspaces x 141 rows
 		-- (the live store's shape): 756ms -> 335ms for one full-fleet resolve.
 		CREATE INDEX IF NOT EXISTS workspace_state_axis ON workspace_state(workspace, state, at);
+		-- ONE FRONTEND READER'S PLACE in one workspace's conversation history,
+		-- the position conversation-history.proto forbids the client to hold.
+		-- Keyed per reader per workspace, carrying the controller generation it
+		-- was established under so a rotation invalidates it without any value
+		-- crossing the wire. See readerposition.go.
+		CREATE TABLE IF NOT EXISTS conversation_reader_position (
+			reader        TEXT    NOT NULL,
+			workspace     TEXT    NOT NULL,
+			generation_id TEXT    NOT NULL,
+			before_seq    INTEGER NOT NULL,
+			at            INTEGER NOT NULL,
+			PRIMARY KEY (reader, workspace)
+		);
 		CREATE TABLE IF NOT EXISTS turn_lifecycle_claim (
 			claim_id             INTEGER PRIMARY KEY AUTOINCREMENT,
 			workspace            TEXT    NOT NULL,
