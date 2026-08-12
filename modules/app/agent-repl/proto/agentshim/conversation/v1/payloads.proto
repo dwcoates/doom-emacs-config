@@ -1,8 +1,4 @@
 // payloads.proto — the bodies of the MessageEntry payload arms.
-//
-// Every message here is DURABLE. The one ephemeral payload, ContentArriving,
-// lives in ephemeral.proto so that "nothing in this file is ever written" is a
-// fact about a file rather than a rule spread across records.
 
 syntax = "proto3";
 
@@ -311,4 +307,31 @@ message DetachedLost {
   // Carried so "we watched it exit" is distinguishable from "we stopped
   // hearing from it".
   string inference = 1;
+}
+
+// A fragment of a message still arriving.
+//
+// The stream plane hands these straight to the daemon as they are typed; the
+// file plane writes the completed message afterwards. A consumer REPLACES the
+// preview with the settled message rather than appending beside it, matching on
+// message_id — which is why both producers must derive that id from the same
+// vendor value.
+message ContentArriving {
+  // Which block of the message this extends. The index into the settled
+  // message's content, so two reasoning fragments from one response land on
+  // their own previews rather than both on the first.
+  uint32 block_index = 1;
+
+  // What is arriving. Which arm is set says which KIND of block is being
+  // extended, so a preview never has to guess what it is showing.
+  oneof fragment {
+    // Prose, as the agent writes it.
+    string text = 2;
+    // Reasoning, as the agent reasons.
+    string thinking = 3;
+    // Tool arguments, arriving as the agent composes them. A string because it
+    // is INCOMPLETE JSON until the last fragment lands; typing it as Struct
+    // would claim it parses when it does not yet.
+    string arguments_json = 4;
+  }
 }
