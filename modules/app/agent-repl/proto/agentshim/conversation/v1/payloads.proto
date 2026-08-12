@@ -187,6 +187,12 @@ message DetachedWorkStarted {
 }
 
 // What kind of work detached.
+//
+// SIX ARMS, matching what the daemon already resolves (frontend.v1's
+// DetachedWork). An earlier draft had four and silently dropped `merge` and
+// `skill`, which is how a contract quietly deletes a feature: a merge-driven
+// turn and a skill invocation would both have arrived as `unclassified` and
+// rendered as a nameless spool.
 message DetachedWorkKind {
   oneof kind {
     // A subagent: a whole conversation happening elsewhere.
@@ -197,6 +203,15 @@ message DetachedWorkKind {
     DetachedWorkflow workflow = 3;
     // We could not tell, which is stated rather than guessed.
     DetachedUnclassified unclassified = 4;
+    // A skill invocation. It owns its own window rather than rendering flat, so
+    // every record the skill produces names this message as its
+    // top_level_message_id and needs no correlation to find its card.
+    DetachedSkill skill = 5;
+    // A merge run: the conversation a merge drives through the workspace's OWN
+    // session. NO TOOL SPAWNS IT — the daemon opens it when it classifies the
+    // merge skill's invocation — so its origin_tool_call_id is empty, which is
+    // the one detachment for which that is not a producer fault.
+    DetachedMerge merge = 6;
   }
 }
 
@@ -209,11 +224,46 @@ message DetachedShell {}
 // A workflow with its own journal of steps.
 message DetachedWorkflow {}
 
+// A skill invocation, which owns its own window.
+//
+// `merge` is the one skill with an arm of its own; every other skill arrives
+// here. The distinction is not cosmetic — a merge run drives the workspace's
+// own session and carries no skill file to show.
+message DetachedSkill {
+  // The skill's name as invoked, verbatim (e.g. "create-or-update-workspace").
+  string skill_name = 1;
+  // The invocation's arguments, verbatim; empty when none were given.
+  string args = 2;
+}
+
+// A merge run, driving the workspace's own session.
+message DetachedMerge {}
+
 // Detached work we could not classify. Stated rather than defaulted into one of
 // the known kinds, because a wrong kind renders wrong output confidently.
 message DetachedUnclassified {
   // The tool we could not classify, so the card can still name it.
   string tool_name = 1;
+}
+
+// A skill file's contents, delivered as the SKILL's own body.
+//
+// AN UPDATE, not part of DetachedWorkStarted, because the harness writes the
+// body as a SEPARATE transcript record — a `user` line flagged isMeta — which
+// the producer reads after the call that opened the work.
+//
+// IT REPLACES WHOLE rather than appending, unlike DetachedWorkProgressed. The
+// body is delivered once, and a re-read overwrites with the same bytes instead
+// of doubling them.
+//
+// It carries the SKILL MESSAGE's own message_id, which is what makes the old
+// daemon-side correlation unnecessary: the record states which skill it belongs
+// to instead of a reader reconstructing it by walking a chain through isMeta
+// records.
+message SkillBodyResolved {
+  // The skill file's contents, verbatim markdown. A skill IS a markdown
+  // document, so it is carried and rendered as one.
+  string body = 1;
 }
 
 // Output accumulating into detached work already open.

@@ -116,6 +116,10 @@ message MessageEntry {
     // arm exists to not inherit.
     ToolReturned tool_returned = 23;
 
+    // A skill file's contents, resolved onto the skill's own message. Replaces
+    // whole rather than appending.
+    SkillBodyResolved skill_body_resolved = 24;
+
     // ---- Records that COMPOSE a message, arriving before it is whole ----
 
     // A fragment of content still arriving. EPHEMERAL by retention, so it is
