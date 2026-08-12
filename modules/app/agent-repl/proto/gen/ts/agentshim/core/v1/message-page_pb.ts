@@ -176,9 +176,16 @@ export type MessagePage = Message<"agentshim.core.v1.MessagePage"> & {
   message10?: StoredMessage | undefined;
 
   /**
-   * The seq to anchor the NEXT request at: the oldest seq this page covers.
-   * Returned so a caller never computes a position of its own — it copies back
-   * a value the serving side minted.
+   * The seq to anchor the NEXT request at: the seq at which the LAST selected
+   * message was ENCOUNTERED by the backward scan — the position the scan
+   * actually walked TO. Returned so a caller never computes a position of its
+   * own; it copies back a value the serving side minted.
+   *
+   * NOT the oldest seq this page covers. A message that starts early and ends
+   * late owns records far below the rest of the page, and anchoring there
+   * would SKIP every message in between. A message already served is not
+   * served again: an owner that also owns a record at or above the anchor is
+   * rejected, so its remaining records below the anchor cannot resurrect it.
    *
    * @generated from field: uint64 last_page_seq = 12;
    */
