@@ -200,7 +200,10 @@ func validateHeldInput(target HeldTarget, owner OwnerResolution, evidence HeldEv
 	if target.ModTime.After(now) {
 		return fmt.Errorf("spool stat modtime is in the future")
 	}
-	if owner.TaskID != target.TaskID || owner.OutputPath != target.Path {
+	// Both sides are compared under owner-path identity so that two spellings of
+	// one file (a symlinked ancestor such as macOS /tmp -> /private/tmp) are not
+	// mistaken for two files. A genuinely different path still fails here.
+	if owner.TaskID != target.TaskID || normalizeOwnerOutputPath(owner.OutputPath) != normalizeOwnerOutputPath(target.Path) {
 		return fmt.Errorf("owner resolution does not identify observed task and output path")
 	}
 	if owner.Outcome == OwnerUnresolvedInvalid {

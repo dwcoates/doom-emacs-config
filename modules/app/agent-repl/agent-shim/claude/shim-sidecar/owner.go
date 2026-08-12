@@ -59,11 +59,37 @@ type ownerRecord struct {
 	source     OwnerSource
 }
 
+// normalizeOwnerOutputPath produces the identity under which an owner output
+// path is recorded and compared. Two spellings of one file — notably macOS's
+// /tmp symlink onto /private/tmp — must collapse to one key, so symlinks are
+// resolved rather than merely cleaned.
+//
+// A spool is observed both before and after it exists, and filepath.EvalSymlinks
+// fails on a missing path, so resolution walks up to the deepest existing
+// ancestor, resolves that, and rejoins the not-yet-created suffix. When nothing
+// on the path exists the cleaned path is returned unchanged; normalization never
+// fails and never drops a path.
 func normalizeOwnerOutputPath(path string) string {
 	if path == "" {
 		return ""
 	}
-	return filepath.Clean(path)
+	cleaned := filepath.Clean(path)
+	var suffix []string
+	current := cleaned
+	for {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return resolved
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return cleaned
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
+	}
 }
 
 // resolveOwnerResult resolves only a target's explicit session, an exact
