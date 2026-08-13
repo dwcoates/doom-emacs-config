@@ -70,9 +70,8 @@ message DetachedWork {
   int64 started_at_ms = 5;
   // Live or settled, and with what outcome. See DetachedWorkLiveness.
   DetachedWorkLiveness liveness = 6;
-  // WHAT KIND of work this is, carrying that kind's content as folded so far.
-  // Newly opened work carries an empty body; work arriving in a reconnect
-  // snapshot carries everything the daemon has folded to date.
+  // WHAT KIND of work this is. The arm TYPES the work; it does not carry the
+  // work's accumulated content — see the paging note below.
   //
   // Skill invocations detach: the daemon intercepts the Skill call and opens
   // detached work, because what follows a skill is a whole conversation rather
@@ -80,12 +79,19 @@ message DetachedWork {
   // merge run is a distinct thing to render; every other skill arrives as
   // `skill`.
   //
+  // CONTAINED CONTENT IS NOT CARRIED HERE. A detached agent's conversation, a
+  // merge run's, a skill window's, a workflow's steps — none of it rides inside
+  // these arms any more. It is reached by PAGING: frontend.v1.PageScopeInside
+  // naming THIS message's id walks the records whose parent is
+  // conversation.v1.MessageParentInside it, at any depth, with the same command
+  // and renderer the feed uses. That is why nothing here caps or drops it. The
+  // inline form had to cap, the cap had no fetch path, and the dropped entries
+  // sat in the store unreachable.
+  //
   // WHICH kind this is, is stated exactly once — by `started.kind`, the
   // producer's own record. The arms below no longer re-spell any of the
-  // producer's content: each keeps ONLY what the daemon itself produced, its
-  // fold and the emissions it folded together. This oneof's arm must always
-  // agree with `started.kind`. Note the two are named differently: `journal`
-  // here is `workflow` there.
+  // producer's content. This oneof's arm must always agree with `started.kind`.
+  // Note the two are named differently: `journal` here is `workflow` there.
   oneof kind {
     DetachedWorkAgent agent = 10;
     DetachedWorkJournal journal = 11;
@@ -104,16 +110,16 @@ message DetachedWork {
 
 // A detached agent: a whole conversation happening elsewhere.
 message DetachedWorkAgent {
-  // The agent's conversation so far, in emission order, in EXACTLY the
-  // vocabulary the top-level feed uses. A frontend's renderer for a response, a
-  // thinking block or a tool card is the same code in both places.
-  //
-  // TODO(respelling): repeated frontend.v1.AgentEmission may be redundant with
-  // conversation.v1.MessageEntry records whose parent is MessageParentInside
-  // this work; needs a ruling before removal.
-  repeated AgentEmission emissions = 1;
-  // Tail-cap accounting for `emissions`. See DetachedWorkFold.
-  DetachedWorkFold fold = 2;
+  // 1 was `emissions` and 2 was `fold`: the agent's conversation carried inline
+  // as a repeated field, and the tail cap a repeated field forced. Both existed
+  // only because contained content could not be paged. It can now — the
+  // agent's conversation is conversation.v1.MessageEntry records whose parent
+  // is MessageParentInside this message, reached with frontend.v1.PageScopeInside
+  // — so the inline copy is the second spelling and the cap is a limitation
+  // that no longer exists. Reserved by number AND by name because this surface
+  // is protojson on the wire, where the field NAME is the wire token.
+  reserved 1, 2;
+  reserved "emissions", "fold";
 }
 
 // A merge run: the conversation a merge drives through this workspace's own
@@ -126,17 +132,13 @@ message DetachedWorkAgent {
 // window between that classification and the user taking the session back —
 // not a join key.
 message DetachedWorkMerge {
-  // The merge conversation so far, in emission order, in EXACTLY the
-  // vocabulary the top-level feed uses (the same shape as
-  // DetachedWorkAgent.emissions, deliberately: a frontend's renderer for a
-  // response, a thinking block or a tool card is the same code here).
-  //
-  // TODO(respelling): repeated frontend.v1.AgentEmission may be redundant with
-  // conversation.v1.MessageEntry records whose parent is MessageParentInside
-  // this work; needs a ruling before removal.
-  repeated AgentEmission emissions = 1;
-  // Tail-cap accounting for `emissions`. See DetachedWorkFold.
-  DetachedWorkFold fold = 2;
+  // 1 was `emissions` and 2 was `fold`: as on DetachedWorkAgent. The merge
+  // run's conversation is records parented inside this message and is paged
+  // with frontend.v1.PageScopeInside, so neither the inline copy nor its cap
+  // has anything left to do. Reserved by number AND by name because this
+  // surface is protojson on the wire, where the field NAME is the wire token.
+  reserved 1, 2;
+  reserved "emissions", "fold";
 }
 
 // A skill invocation as detached work: the invocation card the feed used to
@@ -157,16 +159,12 @@ message DetachedWorkSkill {
   // wire token.
   reserved 1, 2, 3;
   reserved "skill_name", "args", "body";
-
-  // The window's conversation so far, in emission order, in EXACTLY the
-  // vocabulary the top-level feed uses.
-  //
-  // TODO(respelling): repeated frontend.v1.AgentEmission may be redundant with
-  // conversation.v1.MessageEntry records whose parent is MessageParentInside
-  // this work; needs a ruling before removal.
-  repeated AgentEmission emissions = 4;
-  // Tail-cap accounting for `emissions`. See DetachedWorkFold.
-  DetachedWorkFold fold = 5;
+  // 4 was `emissions` and 5 was `fold`: as on DetachedWorkAgent. The window's
+  // conversation is records parented inside this message and is paged with
+  // frontend.v1.PageScopeInside, so the inline copy and its tail cap are both
+  // retired.
+  reserved 4, 5;
+  reserved "emissions", "fold";
 }
 
 // A Workflow run's journal: the step log a Workflow launch writes.
@@ -184,9 +182,12 @@ message DetachedWorkJournal {
   // the field NAME is the wire token.
   reserved 1;
   reserved "rows";
-
-  // Tail-cap accounting for the folded steps. See DetachedWorkFold.
-  DetachedWorkFold fold = 2;
+  // 2 was `fold`: the tail cap on the folded steps. The steps are records
+  // parented inside this message and are paged with frontend.v1.PageScopeInside,
+  // so a run's earlier steps are reachable rather than dropped and there is
+  // nothing left to cap.
+  reserved 2;
+  reserved "fold";
 }
 
 // A backgrounded shell command: an opaque byte spool with a command line.
@@ -319,28 +320,13 @@ message DetachedWorkOutcomeKilled {
   string reason = 1;
 }
 
-// Tail-cap accounting for detached work whose folded content is capped.
-//
-// The cap is a resolved daemon fact rather than per-frontend policy, so that
-// two frontends cannot silently disagree about what the user is being shown:
-// a fold that drops its oldest entries and says nothing is indistinguishable
-// from a complete one.
-//
-// IT IS PAYLOAD STATE OF ONE MESSAGE, not a record about several. The cap
-// describes how much of THIS message's accumulated content is being shown; the
-// entries it drops were never messages and dropping them removes no feed row.
-//
-// It applies to the item-counted kinds (an agent's emissions, a workflow's
-// rows). A byte spool has no items to count and carries none of this — see
-// DetachedWorkOutputSpool.
-message DetachedWorkFold {
-  // How many entries were dropped off the FRONT to honour the cap. 0 means
-  // the fold is complete and no "earlier entries" notice is drawn.
-  int64 dropped_before = 1;
-  // The cap the daemon applied, so a notice can name it and so a complete
-  // fold is distinguishable from one capped at exactly the limit.
-  int32 tail_cap = 2;
-}
+// DetachedWorkFold is GONE. It was tail-cap accounting — how many entries were
+// dropped off the front, and the cap that dropped them — and it existed only
+// because inline repeated content ships whole or not at all. A cap with no
+// fetch path meant the dropped entries were in the store and unreachable.
+// Contained content is paged now (frontend.v1.PageScopeInside), so nothing is
+// capped and nothing is dropped; a client that wants earlier entries asks for
+// them.
 
 // One incremental push to ONE MESSAGE'S detached-work payload: the message id
 // routes it, the arm types it.
@@ -401,10 +387,11 @@ message DetachedWorkAgentUpdate {
   // These are EMISSIONS APPENDED TO ONE MESSAGE, not messages of their own: a
   // detached agent's thousand lines are a thousand additions to one feed row.
   repeated AgentEmission emissions = 1;
-  // The message's fold accounting AFTER applying this update. Restated rather
-  // than deltaed: it is small, and a dropped-count that drifts is worse than
-  // one that is re-sent.
-  DetachedWorkFold fold = 2;
+  // 2 was `fold`: the message's tail-cap accounting after applying this update,
+  // restated on every push. It went with DetachedWorkFold — there is no cap to
+  // restate once contained content is paged rather than carried inline.
+  reserved 2;
+  reserved "fold";
 }
 
 // One incremental push to a skill message. Body resolution and emission
@@ -441,8 +428,10 @@ message DetachedWorkJournalUpdate {
   // THE PRODUCER'S OWN STEP RECORD, carried unchanged: the daemon batches which
   // steps it forwards, it does not restate what a step said.
   repeated conversation.v1.WorkflowStep rows = 1;
-  // The message's fold accounting after applying this update.
-  DetachedWorkFold fold = 2;
+  // 2 was `fold`: as on DetachedWorkAgentUpdate — tail-cap accounting that went
+  // with DetachedWorkFold.
+  reserved 2;
+  reserved "fold";
 }
 
 // New bytes on a spool: an APPEND TO ONE MESSAGE'S PAYLOAD.
