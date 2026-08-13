@@ -9,9 +9,9 @@
 # both directions — the clean tree must pass, and each spelling of the violation
 # must fail.
 #
-# It follows test-check-durable-isolation.sh: a scratch fixture, the real script
-# under test, and no dependence on the repository's own sources, so a real
-# import landing or being removed can never quietly change what this asserts.
+# The shape is a scratch fixture, the real script under test, and no dependence
+# on the repository's own sources, so a real import landing or being removed can
+# never quietly change what this asserts.
 #
 # EVERY ROW RUNS. Failures are collected and reported together rather than
 # aborting on the first, because the rows are independent spellings of one rule.
@@ -33,19 +33,19 @@ newFixture() {
     cat >"$root/daemon/internal/frontend/translate.go" <<'EOF'
 package frontend
 
-import conversationv1 "agentrepl/proto/agentshim/conversation/v1"
+import protocolv1 "agentrepl/proto/protocol/v1"
 
-func Render(e *conversationv1.ExternalEntry) string { return e.GetSessionId() }
+func Render(e *protocolv1.ExternalEntry) string { return e.GetSessionId() }
 EOF
     cat >"$root/webapp/src/store.ts" <<'EOF'
-import type { ExternalEntry } from "../proto/agentshim/conversation/v1/external_pb.js";
+import type { ExternalEntry } from "../proto/protocol/v1/external_pb.js";
 export const sid = (e: ExternalEntry): string => e.sessionId;
 EOF
     # The producer's import is legitimate and must NEVER be reported.
     cat >"$root/agent-shim/claude/shim-sidecar/write.go" <<'EOF'
 package sidecar
 
-import internalv1 "agentrepl/proto/agentshim/conversation/shimside/v1"
+import internalv1 "agentrepl/proto/agentshim/v1"
 
 func New() *internalv1.Entry { return &internalv1.Entry{} }
 EOF
@@ -73,7 +73,7 @@ root="$(newFixture go-import)"
 cat >>"$root/daemon/internal/frontend/plane.go" <<'EOF'
 package frontend
 
-import internalv1 "agentrepl/proto/agentshim/conversation/shimside/v1"
+import internalv1 "agentrepl/proto/agentshim/v1"
 
 func Plane(e *internalv1.Entry) any { return e.GetInternal().GetPlane() }
 EOF
@@ -81,7 +81,7 @@ expect 1 "a daemon Go file importing the shim-side package is refused" "$root"
 
 root="$(newFixture ts-import)"
 cat >>"$root/webapp/src/plane.ts" <<'EOF'
-import type { Entry } from "../proto/agentshim/conversation/shimside/v1/entry_pb.js";
+import type { Entry } from "../proto/agentshim/v1/entry_pb.js";
 export const plane = (e: Entry): unknown => e.internal?.plane;
 EOF
 expect 1 "a webapp TypeScript file importing the shim-side package is refused" "$root"
@@ -89,8 +89,8 @@ expect 1 "a webapp TypeScript file importing the shim-side package is refused" "
 root="$(newFixture proto-import)"
 cat >>"$root/daemon/leak.proto" <<'EOF'
 syntax = "proto3";
-package agentshim.frontend.v1;
-import "agentshim/conversation/shimside/v1/entry.proto";
+package frontend.v1;
+import "agentshim/v1/entry.proto";
 EOF
 expect 1 "a daemon-side proto importing the shim-side package is refused" "$root"
 
@@ -101,9 +101,9 @@ root="$(newFixture prose-only)"
 cat >>"$root/daemon/internal/frontend/note.go" <<'EOF'
 package frontend
 
-// The observation plane lives in agentrepl/proto/agentshim/conversation/shimside/v1
+// The observation plane lives in agentrepl/proto/agentshim/v1
 // and is deliberately unreachable from here: read the fact off the record it
-// belongs to instead. See agentshim/conversation/shimside/v1/entry.proto.
+// belongs to instead. See agentshim/v1/entry.proto.
 func Note() {}
 EOF
 expect 0 "a daemon file that only mentions the shim-side package in prose is accepted" "$root"
@@ -114,7 +114,7 @@ package frontend
 
 /*
 Historical note: this used to import
-agentrepl/proto/agentshim/conversation/shimside/v1
+agentrepl/proto/agentshim/v1
 before the split.
 */
 func Block() {}

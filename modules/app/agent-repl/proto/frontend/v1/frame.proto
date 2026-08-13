@@ -1,0 +1,338 @@
+// frame.proto — TRANSPORT: the outbound frame envelope, the connect snapshot, the inbound
+// command envelope, and the command ack.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+import "frontend/v1/conversation-history.proto";
+import "frontend/v1/conversation-page.proto";
+import "frontend/v1/errors.proto";
+import "frontend/v1/failure-card.proto";
+import "frontend/v1/feed.proto";
+import "frontend/v1/footer.proto";
+import "frontend/v1/gate-revival.proto";
+import "frontend/v1/host.proto";
+import "frontend/v1/lifecycle.proto";
+import "frontend/v1/merge.proto";
+import "frontend/v1/permission-card.proto";
+import "frontend/v1/prompt-queue.proto";
+import "frontend/v1/sidebar.proto";
+import "frontend/v1/state.proto";
+import "frontend/v1/tokens-menu.proto";
+import "frontend/v1/tool-call.proto";
+import "frontend/v1/topbar.proto";
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+message FrontendFrame {
+  // 8 was degraded_notice (DegradedNotice): RETIRED (step 11). Stage 2
+  // replaced it with a self-resolving failure card in the conversation
+  // (F4); both frontends have shipped their readers.
+  reserved 8;
+  reserved "degraded_notice";
+  // 20 KEPT its number but was renamed async_bubble_delta -> detached_work_delta
+  // when the bubble became a Message payload. The NAME is retired because this
+  // surface is protojson on the wire, where the field name is the wire token.
+  reserved "async_bubble_delta";
+  oneof frame {
+    StateSnapshot snapshot = 1;
+    // THE authority on which session owns a workspace, whether it arrives on
+    // its own or inside `snapshot`.
+    WorkspaceState workspace_state = 2;
+    // A catalog entry for ONE session, live or retired. Never a workspace's
+    // live identity (see SessionView). HOST SURFACE: never delivered to a GUI
+    // client, exactly as StateSnapshot.sessions is stripped.
+    SessionView session_view = 3;
+    ConversationDelta conversation_delta = 4;
+    TypingDelta typing_delta = 5;
+    TaskCatalog task_catalog = 6;
+    CommandAck command_ack = 7;
+    DaemonView daemon_view = 9;
+    SessionInitView session_init = 10;
+    HeartbeatView heartbeat = 11;
+    QueueView queue = 12;
+    ProgressView progress = 13;
+    // Host-only durable workspace lifecycle notification.  The daemon emits
+    // this only after the worktree and waiting shim are healthy; Emacs then
+    // materializes its perspective and acknowledges it.
+    WorkspaceAvailable workspace_available = 14;
+    // Host-only durable UI action sourced by the daemon-owned JSON inbox.
+    HostAction host_action = 15;
+    DaemonHealthView daemon_health = 16;
+    SessionHealthView session_health = 17;
+    // The workspace roster, the sidebar's entire model, previously delivered
+    // by Emacs script-injection per webview. Emacs remains the single author;
+    // the daemon retains the latest roster, includes it in every connect
+    // snapshot, and rebroadcasts on change.
+    WorkspaceRoster workspace_roster = 18;
+    ShutdownScheduleView shutdown_schedule = 19;
+    // Detached work opening as WHOLE MESSAGES, and typed incremental UPDATES to
+    // messages already open. Its own frame rather than more ConversationDelta
+    // messages, because a detached agent produces at its own rate and must not
+    // flood the conversation that dispatched it.
+    DetachedWorkDelta detached_work_delta = 20;
+    // One workspace's topbar, fully resolved. Pushed whenever any fact the
+    // topbar renders changes.
+    TopbarView topbar = 21;
+    // One workspace's token-breakdown menu, fully resolved. Pushed whenever
+    // the figures change.
+    TokenBreakdownView token_breakdown = 22;
+    // One workspace's revival gate, resolved and fenced. Pushed on every gate
+    // transition (hibernate, revival start, revival settle).
+    WorkspaceGateView workspace_gate = 23;
+    // The WHOLE merge queue, pushed complete on every queue mutation. Never a
+    // delta: the roster IS the drain order.
+    MergeQueueRoster merge_queue_roster = 24;
+    // The daemon is going down ON PURPOSE, pushed to every gui_stream client
+    // and to the Emacs UDS host immediately before teardown. It exists so a
+    // deliberate bounce stops being indistinguishable from a crash; see
+    // RestartPendingView for why it is an edge and never snapshot state.
+    RestartPendingView restart_pending = 25;
+    // ONE page of conversation history, answering a ConversationPageCmd. It is
+    // a push rather than a command response because its messages are feed
+    // content, and the command's ack is early by design — see
+    // conversation-page.proto.
+    ConversationPage conversation_page = 26;
+    // A preview the daemon opened and can no longer retire. Like TypingDelta
+    // it is an EDGE and never snapshot state: a cut describes the end of one
+    // preview, and a client that connects afterwards has no preview to retire.
+    TypingCut typing_cut = 27;
+    // ONE page of conversation history under the positionless contract,
+    // answering a FirstPageCmd or a NextPageCmd. A push for the same reason
+    // `conversation_page` above is one — its messages are feed content, and
+    // feed content has exactly one delivery shape in this protocol — and a
+    // DISTINCT frame from it because the two contracts answer different
+    // questions: this one's reader holds no position and echoes nothing back.
+    // See conversation-history.proto.
+    ConversationHistoryPage conversation_history_page = 28;
+  }
+}
+
+// Full resync on (re)connect: current state of every workspace + open tasks.
+//
+// IDENTITY AUTHORITY: `workspaces` below is the only place in this snapshot a
+// consumer may read a workspace's live session identity from. The per-session
+// and per-task repeated fields are CATALOGS — they include retired and
+// superseded entries by design, and their order carries no authority — so
+// folding them onto a store must never move a workspace's session binding.
+message StateSnapshot {
+  // 11 KEPT its number but was renamed async_bubbles -> detached_work, and its
+  // type changed from a parallel bubble type to Message. The NAME is retired.
+  reserved "async_bubbles";
+  // THE authoritative rulings, one per workspace. Sole source of session
+  // ownership for everything in this snapshot.
+  repeated WorkspaceState workspaces = 1;
+  // The session catalog, live and retired alike. Read for per-session facts,
+  // never for a workspace's identity (see SessionView). HOST SURFACE:
+  // frontend.Server strips it from every GUI client, exactly as it strips the
+  // host-only fields below — a rendering frontend's chrome arrives as the
+  // resolved component views (12-14) instead.
+  repeated SessionView sessions = 2;
+  repeated TaskCatalog catalogs = 3;
+  DaemonView daemon = 4;
+  repeated SessionInitView inits = 5;
+  repeated QueueView queues = 6;
+  repeated ProgressView progress = 7;
+  // Host-only durable work.  frontend.Server strips both fields from every
+  // GUI client, regardless of observer/painter role.
+  repeated WorkspaceAvailable workspace_available = 8;
+  repeated HostAction host_actions = 9;
+  // The daemon-global lease state as of this connect, so a client joining
+  // mid-drain renders the banner without waiting for the next edge.
+  ShutdownScheduleView shutdown_schedule = 10;
+  // Every piece of detached work the session still holds, folded to date, as
+  // WHOLE MESSAGES — the same envelopes DetachedWorkDelta.opened carries — so a
+  // reconnecting client resumes a running detached agent rather than starting
+  // its fold over. Each carries its own DetachedWorkFold accounting, so the
+  // client also knows exactly what it is NOT being shown.
+  repeated Message detached_work = 11;
+  // The resolved component views, one per workspace, so a connecting client
+  // draws its chrome without waiting for each view's first push.
+  repeated TopbarView topbars = 12;
+  repeated TokenBreakdownView token_breakdowns = 13;
+  repeated WorkspaceGateView workspace_gates = 14;
+  // The merge queue as of this connect, so a client joining mid-drain renders
+  // the queue without waiting for the next mutation.
+  MergeQueueRoster merge_queue_roster = 15;
+
+  // THE BATCHING OF `workspaces` (1) ACROSS ONE CONNECT DELIVERY.
+  //
+  // A connect snapshot at fleet scale carries every workspace, and the host
+  // applies a workspace's state — perspective, bookkeeping, readiness latches —
+  // one workspace at a time. Applying 178 of them costs seconds, and the
+  // recovery clock for the workspace the user is sitting in does not stop until
+  // ITS state has been applied, so a workspace's recovery used to be a function
+  // of how many OTHER workspaces preceded it in this list. Decoding is not the
+  // cost (a 299KB protojson frame decodes in ~3ms in Emacs); the serial
+  // per-workspace apply is.
+  //
+  // So the connect delivery may split `workspaces` across SEVERAL StateSnapshot
+  // frames, delivered back-to-back in one delivery-lock operation, and the host
+  // applies each as it arrives. Every other field on this message belongs to the
+  // LEAD batch (index 0) only — the wholesale rebuilds (sessions, inits) and the
+  // daemon-global views are stated exactly once per connect, as before.
+  //
+  // ORDERING: the lead batch carries every workspace with a live session, most
+  // recently active first, so the workspaces a host cares about most are applied
+  // before any dormant one.
+  //
+  // COMPLETENESS: `workspace_total` is the number of workspaces the WHOLE
+  // delivery will carry, stated identically on every batch. A consumer's view of
+  // the fleet is COMPLETE only once it has applied that many distinct
+  // workspaces; until then it holds a partial view and must say so. A snapshot
+  // that was not batched carries batch_index 0 and workspace_total equal to
+  // len(workspaces), which is the same rule with one batch.
+  //
+  // Additive and zero-safe: a daemon that never batches emits index 0 with
+  // total 0, and a consumer reads an unset total as "this frame is the whole
+  // delivery".
+  int32 workspace_total = 16;
+  int32 workspace_batch_index = 17;
+}
+
+// Frontend→daemon commands (the ONLY inbound frame).
+message FrontendCommand {
+  string request_id = 1;
+  string workspace = 2;
+  oneof command {
+    SubmitPromptCmd submit_prompt = 3;
+    InterruptCmd interrupt = 4;
+    PermissionAnswerCmd permission_answer = 5;
+    MergeWorkspaceCmd merge_workspace = 6;
+    CloseWorkspaceCmd close_workspace = 7;
+    OpenWorkspaceCmd open_workspace = 8;
+    ResyncCmd resync = 9;
+    CreateSessionCmd create_session = 10;
+    DeleteSessionCmd delete_session = 11;
+    ShutdownCmd shutdown = 12;
+    ClientLogCmd client_log = 13;
+    QueueForceCmd queue_force = 14;
+    QueueAcceptCmd queue_accept = 15;
+    QueueCancelCmd queue_cancel = 16;
+    CreateWorkspaceCmd create_workspace = 18;
+    WorkspaceMaterializedCmd workspace_materialized = 19;
+    HostActionCompletedCmd host_action_completed = 20;
+    DaemonHealthCmd daemon_health = 21;
+    SessionHealthCmd session_health = 22;
+    RestartSessionCmd restart_session = 23;
+    SetModelCmd set_model = 24;
+    PublishWorkspaceRosterCmd publish_workspace_roster = 25;
+    ScheduleShutdownCmd schedule_shutdown = 26;
+    CancelScheduledShutdownCmd cancel_scheduled_shutdown = 27;
+    HibernateWorkspaceCmd hibernate_workspace = 28;
+    ReviveSessionCmd revive_session = 29;
+    PauseMergeQueueCmd pause_merge_queue = 30;
+    ResumeMergeQueueCmd resume_merge_queue = 31;
+    EvictMergeCmd evict_merge = 32;
+    AnswerMergeDequeueCmd answer_merge_dequeue = 33;
+    CancelDetachedAgentsCmd cancel_detached_agents = 34;
+    // The COLD-OPEN history request, and the load-more that walks backwards
+    // from it. It does not replace `resync` above, which stays the live-page
+    // path — see conversation-page.proto.
+    ConversationPageCmd conversation_page = 35;
+    // The positionless history verbs. `first_page` resets this reader's
+    // daemon-held position to the newest page; `next_page` walks it one page
+    // older and carries NO position of its own, so a reader without an
+    // established one is refused rather than silently served the tail. They do
+    // not replace `resync` above, and they will retire `conversation_page`
+    // once every frontend has moved — see conversation-history.proto.
+    FirstPageCmd first_page = 36;
+    NextPageCmd next_page = 37;
+  }
+}
+
+// (The retired PaintAckCmd rode the command oneof at field 17, with its
+// PaintOutcome enum beside it: a frontend's attestation that it had drawn a
+// workspace's history and its render state, which the daemon required before
+// it would resolve that workspace green and before it would forward the state
+// to Emacs.
+//
+// It is GONE, and so is the whole viewer-based attestation model behind it. A
+// workspace's color is CONNECTION TRUTH: blue means no live backend session,
+// and every non-blue color is a guarantee that the session substrate is fully
+// wired. What a viewer has or has not drawn says nothing about that, so it can
+// no longer hold a workspace blue or hold a state back from Emacs.
+//
+// Deleted rather than reserved, following this repo's established style for
+// retired frontend surface — the same treatment InterruptCmd.hard and
+// ContextCompacted.result received — because no live frontend commitment
+// survives the same change.)
+
+message CommandAck {
+  string request_id = 1;
+  bool ok = 2;
+  string error = 3;
+  // The CLASSIFIED account of a refusal, superseding the free
+  // string above.
+  //
+  // `error` was an err.Error() funnel: every handler failure, every Nack
+  // reason, every truncated replay arrived as raw Go text that Emacs echoed
+  // verbatim and the webapp did not render at all. This is that same failure
+  // run through the daemon's one classifier, so both frontends can show a
+  // refusal as a failure card instead of as a log line or as nothing.
+  // Unset when ok is true.
+  FailureKind failure = 4;
+  // The feed card this refusal was filed under, when it produced one, so the
+  // client can offer to reveal it instead of restating the account inline.
+  FailureCardRef failure_card = 20;
+  // The interrupt confirmation CHALLENGE. Not a failure and
+  // not an error: the command was understood and deliberately not performed,
+  // because no turn was live and stopping live subagents deserves an
+  // explicit yes. Set with ok=false and `failure` unset; the client asks the
+  // user and resends InterruptCmd{confirm_agents: true}.
+  InterruptConfirmRequired interrupt_confirm_required = 5;
+  // Present only for CancelDetachedAgentsCmd: WHAT the cancel did, relayed
+  // from the shim. Set on BOTH the success ack (the `cancelled` arm) and the
+  // refusal (`nothing_running` / `unsupported` alongside ok=false), so a
+  // client never has to read a refusal's meaning out of `error` text.
+  DetachedCancelOutcome detached_cancel = 8;
+  // Present only for SetModelCmd.  It is the shim-confirmed current model on
+  // both success and rejection, so a frontend never needs an optimistic model
+  // state or a local recovery guess.
+  string selected_model = 6;
+
+  // Present only for CreateSessionCmd, and FOR OBSERVABILITY ONLY: the vendor
+  // conversation uuid the created session actually landed on, so a client can
+  // attribute its logs from its very first line instead of waiting for the
+  // first pushed SessionView.
+  //
+  // A CLIENT MUST NOT PERSIST THIS OR FEED IT BACK. It is an observation of
+  // daemon state at one instant, not a durable fact: the uuid ROTATES (a
+  // /clear or a compact starts a new vendor conversation and resets the
+  // cursors with it), so a stored copy is wrong from the next rotation
+  // onward. The steady-state source is the pushed SessionView, which tracks
+  // rotations; this field only covers the gap before the first push.
+  //
+  // Feeding it back is what this whole change removed — see ResumeMode. The
+  // rule is not enforceable from here, so it is also enforced where it
+  // matters: the Emacs frontend has no persistence path that can reach a
+  // vendor uuid, and a test asserts its state file never contains one.
+  string observed_claude_session_id = 7;
+}
+
+// The challenge payload: what the interrupt would actually stop, so the
+// client can render a concrete question ("interrupt 3 running subagents?")
+// rather than a bare are-you-sure.
+message InterruptConfirmRequired {
+  int64 live_tasks = 1;
+}
+
+message ResyncCmd {
+  // 2/3 were session_id and controller_generation_id: two identities a client
+  // had to copy, hold and send back in agreement. The fence is the one token
+  // that answers the only question they were asked together.
+  reserved 2, 3;
+  reserved "session_id", "controller_generation_id";
+  uint64 from_seq = 1;
+  // The fence ECHO: the exact fence the client held when it decided to ask
+  // for this replay, copied byte-for-byte from the WorkspaceState it was
+  // reading at that moment.
+  //
+  // It must be captured AT DECISION TIME, not read from current state when
+  // the transport sends, or a delayed request silently rebinds itself to a
+  // newer generation and asks for a replay nobody wanted. The daemon compares
+  // it against the workspace's live fence and REFUSES the command before
+  // replaying anything when they differ.
+  string fence = 4;
+}

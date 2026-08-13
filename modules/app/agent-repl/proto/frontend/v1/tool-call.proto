@@ -1,0 +1,195 @@
+// tool-call.proto — The tool card: the call, its raw result, its typed
+// outcome, and the async task catalog its dispatched-agent rows render from.
+//
+// The card is also where the daemon publishes its DETACHMENT CLASSIFICATION
+// verdict: whether a call detached work, and which MESSAGE that work is.
+//
+
+syntax = "proto3";
+
+package frontend.v1;
+
+import "conversation/v1/content.proto";
+import "conversation/v1/payloads.proto";
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// The tool card's header: one tool invocation.
+message AgentToolCall {
+  // 2 KEPT its number but was renamed spawned_bubble_id -> spawned_message_id
+  // when detached work stopped having an id space of its own. The NAME is
+  // retired because this surface is protojson on the wire, where the field name
+  // is the wire token: "spawned_bubble_id" must never come back meaning
+  // something else.
+  reserved "spawned_bubble_id";
+
+  // The call the agent made, verbatim durable evidence.
+  conversation.v1.ToolCallBlock call = 1;
+  // THE DETACHMENT VERDICT. Non-empty exactly when this call detached work, and
+  // then equal to the uuid of the Message that work IS (payload arm
+  // `detached_work`).
+  //
+  // A POINTER IN ONE ID SPACE, NOT A BRIDGE BETWEEN TWO. It used to translate a
+  // message id into a separate bubble id; now both ends are message ids, so it
+  // states which message this call produced and nothing has to be reconciled.
+  //
+  // PROVENANCE, NEVER CONTAINMENT. The named message is a feed row in its own
+  // right, and a frontend that read this as "that message lives inside this
+  // card" would nest an unbounded thing inside a bounded one. Containment is
+  // MessageLineage's alone (feed.proto).
+  //
+  // The daemon owns the classification and publishes only its answer, so that
+  // frontends MATCH an id rather than deriving one. Deriving it is not
+  // reproducible across frontends — the evidence is a mix of structured tool
+  // metadata, completion notifications and free-text result prose — and two
+  // frontends deriving it independently would eventually disagree about which
+  // message an update belongs to.
+  //
+  // Empty means "this call detached nothing", and that is the ONLY reading of
+  // empty. A call whose detachment the daemon cannot classify is a daemon
+  // fault, surfaced as a failure card, never silently rendered as a
+  // synchronous call.
+  string spawned_message_id = 2;
+}
+
+// The tool card's body: a tool's raw return value.
+message AgentToolResult {
+  // The result block, verbatim durable evidence. Carries its own
+  // tool_use_id, which is the card's reconciliation identity.
+  conversation.v1.ToolResultContent result = 1;
+}
+
+// A tool's TYPED outcome, and the subagent/task chip.
+//
+// It used to carry `data.v1.ToolUseResult`, whose oneof held AgentAsyncLaunch,
+// AgentResult, TaskOutputResult, TaskStopResult and WorkflowLaunchResult —
+// five vendor-named shapes for two facts: work detached, and work reached an
+// end. conversation.v1 models those directly, so the chip's facts are now the
+// detachment's own facts rather than a vendor union the frontend destructures.
+message AgentToolOutcome {
+  // 3 KEPT its number but was renamed spawned_bubble_id -> spawned_message_id,
+  // for the same reason AgentToolCall's did. The NAME is retired.
+  reserved "spawned_bubble_id";
+
+  // The outcome, in the neutral detached-work vocabulary.
+  //
+  // A oneof rather than one field, because a launch and an ending are
+  // different facts and a chip renders them differently. Absent when the call
+  // returned ordinarily and detached nothing.
+  oneof outcome {
+    // Work detached and is now running alongside the turn.
+    conversation.v1.DetachedWorkStarted started = 1;
+    // Detached work reached an end, with the outcome it reached.
+    conversation.v1.DetachedWorkEnded ended = 4;
+  }
+  // The tool_use id this outcome belongs to. Carried explicitly because
+  // ToolUseResult has no correlation id of its own: on disk it is associated
+  // with its tool_result line POSITIONALLY, and a positional association does
+  // not survive being pushed as an independent emission.
+  string tool_use_id = 2;
+  // THE DETACHMENT VERDICT, same contract as AgentToolCall.spawned_message_id.
+  // It appears on both messages because the structured outcome is where the
+  // detachment becomes knowable, while the call is where a frontend needs the
+  // answer first — the card is drawn before its outcome lands. The two are the
+  // same string whenever both are set; the daemon resolves the id once and
+  // stamps it on both.
+  string spawned_message_id = 3;
+}
+
+// One dispatched background task, as the catalog reports it.
+message TaskEntry {
+  // 2 was kind and 4 was status, both free strings ("agent", "running", ...):
+  // states carried as text, so an unrecognized word rendered as whatever the
+  // client's string comparison fell through to. Both are oneofs below, so an
+  // unfamiliar kind or status fails to match instead of silently rendering as
+  // something else.
+  reserved 2, 4;
+  reserved "kind", "status";
+  string task_id = 1;
+  string description = 3;
+  string output_path = 5;
+  int64 started_at_ms = 6;
+  int64 ended_at_ms = 7;   // 0 = still open
+  // WHAT KIND of work the task is; the set arm IS the kind. The vocabulary
+  // mirrors DetachedWork's kind arms: the catalog and the detached-work message
+  // describe the same dispatched work from two vantage points and must never
+  // disagree on what it is.
+  oneof kind {
+    TaskKindAgent agent = 10;
+    TaskKindWorkflow workflow = 11;
+    TaskKindShell shell = 12;
+    TaskKindUnclassified unclassified = 13;
+  }
+  // The task's lifecycle; the set arm IS the status. Never unset on a wire
+  // entry: an entry with no arm here is a malformed frame and is rejected
+  // loudly rather than drawn as running.
+  oneof status {
+    TaskStatusRunning running = 20;
+    TaskStatusDone done = 21;
+    TaskStatusError error = 22;
+    TaskStatusKilled killed = 23;
+    TaskStatusStopped stopped = 24;
+    TaskStatusLost lost = 25;
+  }
+}
+
+// The task is a dispatched subagent.
+message TaskKindAgent {}
+
+// The task is a Workflow run.
+message TaskKindWorkflow {}
+
+// The task is a backgrounded shell command.
+message TaskKindShell {}
+
+// The task's spawning tool is one the daemon does not recognize. Mirrors
+// DetachedWorkUnclassified: named rather than guessed into another kind.
+message TaskKindUnclassified {
+  // The tool that spawned the work, verbatim as the agent named it.
+  string tool_name = 1;
+}
+
+// The task statuses. Each is EMPTY BY DESIGN — being set is the entire
+// assertion; the detail of HOW a task ended lives on its detached-work
+// message's settled outcome, and the catalog does not carry a second copy to
+// disagree with it.
+
+// The task is still running.
+message TaskStatusRunning {}
+
+// The task finished successfully.
+message TaskStatusDone {}
+
+// The task finished by failing.
+message TaskStatusError {}
+
+// The task was stopped from outside before it finished.
+message TaskStatusKilled {}
+
+// The task was stopped deliberately through its own stop affordance.
+message TaskStatusStopped {}
+
+// The daemon lost track of the task — a restart or a vanished process left
+// its ending unobserved. An honest absence, distinct from every observed
+// ending.
+message TaskStatusLost {}
+
+message TaskCatalog {
+  // 2 was session_id. A frontend has no session vocabulary: the only question
+  // it ever asked of that field was "is this push still current", which the
+  // fence answers without naming what rotated.
+  reserved 2;
+  reserved "session_id";
+  string workspace = 1;
+  repeated TaskEntry tasks = 3;
+  // The workspace's staleness FENCE at the moment the daemon produced this
+  // push: an opaque token the client compares BYTE-WISE against the fence on
+  // the workspace's current WorkspaceState, and never parses, splits or
+  // interprets. Equal means current; different means stale, and a stale push
+  // is discarded whole rather than partially adopted.
+  //
+  // The daemon mints it and is the only thing that can read meaning into it.
+  // A client that learned to decode it would be depending on a fact this
+  // contract does not offer, and the token's composition is free to change.
+  string fence = 4;
+}

@@ -1,0 +1,58 @@
+// entry-delivery.proto — how a conversation record reaches the daemon, and
+// where its store position lives.
+//
+// TRANSPORT, NOT MODEL. conversation.v1 describes what a conversation
+// IS; this describes how one of its records arrives. The store's `seq` lives
+// here for the same reason ReplayRequest and Subscribe do: a position is the
+// store's addressing, not a fact about a conversation.
+
+syntax = "proto3";
+
+package protocol.v1;
+
+import "protocol/v1/external.proto";
+
+option go_package = "agentrepl/proto/protocol/v1;protocolv1";
+
+// One conversation record arriving at the daemon, by whichever route brought
+// it.
+//
+// THE TWO ROUTES ARE REAL AND DIFFERENT. A stored record was written, assigned
+// a position, and forwarded from there; a live record was handed straight over
+// and the store never saw it. Nothing anywhere declares which a record IS —
+// what the store holds is what got stored, and this oneof says which route
+// brought this one.
+message EntryDelivery {
+  oneof delivery {
+    // Written, positioned, and forwarded from the store.
+    StoredEntryDelivery stored = 1;
+    // Handed over live, never written.
+    LiveEntryDelivery live = 2;
+  }
+}
+
+// A record the store holds, delivered with the position it holds it at.
+message StoredEntryDelivery {
+  // The store's own monotonic position, assigned at write. Readers order by it,
+  // anchor pages by it, and resume from it; producers never supply it.
+  //
+  // ADVANCING A RESUME CURSOR IS ONLY EVER DONE FROM THIS ARM. That is the
+  // whole point of the split: a live record has no field to put a position in,
+  // so it cannot carry one, so a consumer cannot advance past a position the
+  // store never assigned and then resume from a seq that does not exist.
+  uint64 seq = 1;
+
+  // The record's external half, verbatim as the store holds it.
+  protocol.v1.ExternalEntry entry = 2;
+}
+
+// A record handed straight to the daemon, which the store never saw.
+//
+// NO POSITION FIELD, and that absence is the contract. A record that never
+// reached the store has no position, so there is no slot for one to be put in
+// wrongly and no way for a consumer to advance a resume cursor on it.
+message LiveEntryDelivery {
+  // The record's external half. It never had an internal half either: nothing
+  // wrote it, so nothing deduped it or recorded which plane stored it.
+  protocol.v1.ExternalEntry entry = 1;
+}

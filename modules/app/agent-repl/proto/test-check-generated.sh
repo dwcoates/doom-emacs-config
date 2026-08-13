@@ -13,28 +13,16 @@ printf 'syntax = "proto3";\n' >"$FIXTURE/fixture.proto"
 
 # The fixture carries the structural gate too, because `go` and `ts` require it:
 # codegen is gated, so a fixture that omitted the gate would be testing a
-# Makefile the repository does not have. The component tree it scans is clean,
-# which keeps this test about staleness detection and leaves the gate's own
-# behavior to test-check-durable-isolation.sh.
-cp "$THIS_DIR/check-durable-isolation.sh" "$FIXTURE/check-durable-isolation.sh"
-# Both structural gates hang off codegen-gate, so both must be present or the
-# fixture's `make` fails for a reason that has nothing to do with staleness.
-# I7's gate is pointed at the fixture root, which has no daemon or webapp tree
-# — hence the FORBIDDEN_ROOTS stub below, which keeps it from reporting a setup
-# failure while leaving its real behavior to its own self-test.
+# Makefile the repository does not have. I7's gate is pointed at the fixture
+# root, which has no daemon or webapp tree — hence the stub below, which keeps it
+# from reporting a setup failure while leaving its real behavior to its own
+# self-test.
 cp "$THIS_DIR/check-conversation-isolation.sh" "$FIXTURE/check-conversation-isolation.sh"
 mkdir -p "$FIXTURE/daemon"
 printf 'package daemon\n' >"$FIXTURE/daemon/stub.go"
-cat >"$FIXTURE/component/durable.proto" <<'EOF'
-syntax = "proto3";
-package agentshim.frontend.v1;
-message DurableRecord {
-  int64 input_tokens = 1;
-}
-EOF
 cat >"$FIXTURE/component/clean.proto" <<'EOF'
 syntax = "proto3";
-package agentshim.frontend.v1;
+package frontend.v1;
 message CleanView {
   int64 total = 1;
 }
