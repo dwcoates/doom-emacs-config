@@ -108,19 +108,19 @@ message SessionBegan {
   // What the session started with available. NAMES ONLY, because the panel
   // counts them and a reader wants to know what was reachable — the full
   // definition of a skill or a subagent is not conversation material.
-  repeated string skills = 10;
-  repeated string subagents = 11;
+  repeated string skills = 7;
+  repeated string subagents = 8;
 
   // The MCP servers configured, and whether each one came up.
-  repeated SessionMcpServer mcp_servers = 12;
+  repeated SessionMcpServer mcp_servers = 9;
 
   // The plugins loaded.
-  repeated SessionPlugin plugins = 13;
+  repeated SessionPlugin plugins = 10;
 
   // The memory files in scope, by path. A list rather than the vendor's
   // name→path map: nothing renders the names, and a map invites a consumer to
   // look one up by a key this schema does not promise.
-  repeated string memory_paths = 14;
+  repeated string memory_paths = 11;
 }
 
 // How a session is authenticated.
@@ -369,19 +369,19 @@ message AccountUsageObservation {
   // Identifies the measured turn boundary.
   oneof boundary {
     // Marks the boundary immediately before prompt submission.
-    TurnStartUsageBoundary turn_start = 10;
+    TurnStartUsageBoundary turn_start = 7;
 
     // Marks the boundary after the terminal result is received.
-    TurnEndUsageBoundary turn_end = 11;
+    TurnEndUsageBoundary turn_end = 8;
   }
 
   // Contains either the measurement or its explicit failure.
   oneof outcome {
     // Contains the account-usage measurement.
-    AccountUsageAvailable available = 20;
+    AccountUsageAvailable available = 9;
 
     // Explains why the measurement could not be obtained.
-    AccountUsageUnavailable unavailable = 21;
+    AccountUsageUnavailable unavailable = 10;
   }
 }
 
