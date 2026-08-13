@@ -54,33 +54,33 @@ message WorkspaceRoster {
   //
   // Opaque to every reader: nothing compares boot_ids for order, derives a time
   // from one, or parses one. Equality is the only question ever asked of it.
-  string boot_id = 7;
+  string boot_id = 2;
 
   // The active grouping. The SET ARM IS THE GROUPING — there is no separate
   // mode enum to disagree with the payload, and the rows of the inactive
   // grouping are simply absent rather than carried and ignored.
   oneof view {
     // Group by repository: the default, one section per repo.
-    RosterRepositoryView repository = 2;
+    RosterRepositoryView repository = 3;
     // Group by task: one section per task, workspaces filed under the task
     // they serve.
-    RosterTaskView task = 3;
+    RosterTaskView task = 4;
   }
 
   // Workspaces whose merge has settled, hoisted out of the grouping above and
   // rendered under BOTH views. Hoisted because a merged workspace's repo or
   // task is no longer the interesting fact about it — that it is done is.
-  RosterSection recently_merged = 4;
+  RosterSection recently_merged = 5;
 
   // Absolute worktree dir of the current workspace, empty when there is none.
   // The dir is the identity: this is compared against RosterRow.dir, never
   // against a display name, which is not unique.
-  string current_dir = 5;
+  string current_dir = 6;
 
   // Absolute worktree dir the keyboard-navigation cursor rests on, empty when
   // there is none. Distinct from current_dir on purpose: the cursor moves
   // through the roster without switching workspaces.
-  string nav_dir = 6;
+  string nav_dir = 7;
 }
 
 // The repository grouping's sections, in the order they render.
@@ -195,71 +195,71 @@ message RosterRow {
     // A prompt is committed and not yet acked by the shim.
     RosterRowStatusSubmitting submitting = 3;
     // A turn is in flight.
-    RosterRowStatusThinking thinking = 6;
+    RosterRowStatusThinking thinking = 4;
     // The conversation is being cleared.
-    RosterRowStatusClearing clearing = 7;
+    RosterRowStatusClearing clearing = 5;
     // The context is being compacted.
-    RosterRowStatusCompacting compacting = 8;
+    RosterRowStatusCompacting compacting = 6;
     // A tool-permission request is waiting on the user.
-    RosterRowStatusPermission permission = 9;
+    RosterRowStatusPermission permission = 7;
     // The turn finished and its response is unread.
-    RosterRowStatusDone done = 10;
+    RosterRowStatusDone done = 8;
     // The turn was interrupted by the user.
-    RosterRowStatusInterrupted interrupted = 11;
+    RosterRowStatusInterrupted interrupted = 9;
     // Live, proven usable, and idle. Emacs maps BOTH its idle and ready render
     // states here — the sidebar draws them identically.
-    RosterRowStatusReady ready = 12;
+    RosterRowStatusReady ready = 10;
     // No foreground turn, but detached work is still running.
-    RosterRowStatusIdleAsync idle_async = 13;
+    RosterRowStatusIdleAsync idle_async = 11;
     // Blocked on the vendor or the account, not on agent-repl.
-    RosterRowStatusVendorBlocked vendor_blocked = 14;
+    RosterRowStatusVendorBlocked vendor_blocked = 12;
     // Starting up; the route is not yet proven.
-    RosterRowStatusInit init = 15;
+    RosterRowStatusInit init = 13;
     // The session's backing process is gone but the workspace is recoverable.
-    RosterRowStatusSevered severed = 16;
+    RosterRowStatusSevered severed = 14;
     // Deliberately parked, resumable on demand.
-    RosterRowStatusHibernated hibernated = 17;
+    RosterRowStatusHibernated hibernated = 15;
     // Startup failed outright.
-    RosterRowStatusStartFailed start_failed = 18;
+    RosterRowStatusStartFailed start_failed = 16;
     // Running, but with a compromised route.
-    RosterRowStatusDegraded degraded = 19;
+    RosterRowStatusDegraded degraded = 17;
     // Terminal: no live session backs the workspace.
-    RosterRowStatusDead dead = 20;
+    RosterRowStatusDead dead = 18;
 
     // The merge pipeline. These render a recycle glyph rather than a lifecycle
     // dot, except merged, which is settled and files under recently_merged.
     // The first instant of a merge, before anything durable exists for it.
-    RosterRowStatusMergeEnqueuing merge_enqueuing = 21;
+    RosterRowStatusMergeEnqueuing merge_enqueuing = 19;
     // A merge is actively running.
-    RosterRowStatusMerging merging = 22;
+    RosterRowStatusMerging merging = 20;
     // Enqueued behind another workspace's merge.
-    RosterRowStatusMergeQueued merge_queued = 23;
+    RosterRowStatusMergeQueued merge_queued = 21;
     // The merge stopped on a conflict awaiting resolution.
-    RosterRowStatusMergeConflict merge_conflict = 24;
+    RosterRowStatusMergeConflict merge_conflict = 22;
     // The merge failed outright.
-    RosterRowStatusMergeFailed merge_failed = 25;
+    RosterRowStatusMergeFailed merge_failed = 23;
     // The merge settled successfully.
-    RosterRowStatusMerged merged = 26;
+    RosterRowStatusMerged merged = 24;
 
     // Registered and open, but Emacs holds no render status for it (tombstoned
     // or not yet born). Distinct from an unset oneof: "the author looked and
     // there is none" is an assertion, where an unset oneof is the absence of
     // one.
-    RosterRowStatusNone none = 27;
+    RosterRowStatusNone none = 25;
     // Registered in the roster but with no open perspective, so no live session
     // whose lifecycle a dot could report. Drawn as a question mark. Dominates
     // every render state: a perspective-less workspace is inactive whatever its
     // session once was.
-    RosterRowStatusInactive inactive = 28;
+    RosterRowStatusInactive inactive = 26;
   }
 
   // Whether this row is the current workspace. Redundant with a dir comparison
   // against WorkspaceRoster.current_dir and deliberately so: the author
   // resolves it once, so no client can compute it differently.
-  bool current = 4;
+  bool current = 27;
 
   // Nested workspaces (a spawned family under its parent), in render order.
-  repeated RosterRow children = 5;
+  repeated RosterRow children = 28;
 
   // Field numbers 6-28 belong to the status oneof above. The display fields
   // below continue from 29 and are ADDITIVE: every one is optional with a

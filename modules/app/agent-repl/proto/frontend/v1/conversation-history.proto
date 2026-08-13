@@ -136,15 +136,12 @@ message ConversationHistoryPage {
   // and so it can DISCARD a page it is no longer awaiting.
   string request_id = 2;
 
-  reserved 3, 4, 5, 6, 7, 8, 9, 10, 11, 12;
-  reserved "message_1", "message_2", "message_3", "message_4", "message_5",
-      "message_6", "message_7", "message_8", "message_9", "message_10";
 
   // Messages OLDEST FIRST, as COMPLETE feed envelopes identical in shape to
   // ConversationDelta's — so a frontend renders a paged message with the same
   // code that renders a pushed one. Fewer than the daemon's ceiling means a
   // short page, which at the top of a conversation is the normal case.
-  repeated Message messages = 18;
+  repeated Message messages = 3;
 
   // WHETHER the conversation continues above this page — never WHERE.
   //
@@ -156,17 +153,17 @@ message ConversationHistoryPage {
     // more" is a FACT the client acts on by calling NextPageCmd, not a handle
     // it stores. The cursor that used to live here is precisely the position
     // the client no longer holds.
-    HistoryHasMore more = 13;
+    HistoryHasMore more = 4;
     // This page reaches the conversation's beginning; the client retires its
     // load-more affordance.
-    HistoryAtStart start = 14;
+    HistoryAtStart start = 5;
   }
 
   // FIRST PAGES ONLY: the seq this page is current THROUGH, so the client
   // splices onto the live push stream gap-free BY CONSTRUCTION rather than by
   // timing. An OUTPUT the client never echoes back — it rides no request.
   // Zero on next pages, which are history and carry no live edge.
-  uint64 live_join_seq = 15;
+  uint64 live_join_seq = 6;
 
   // WHICH CONTAINER this page walks, STATED rather than left to be inferred,
   // so a client can never mistake a page of a subagent's insides for a page of
@@ -176,7 +173,7 @@ message ConversationHistoryPage {
   // with the `parent` each returned record carries, it is how a client VERIFIES
   // that the page it got is the page it asked for: the echo proves what was
   // ASKED, the per-record parent proves what was RECEIVED.
-  PageScope scope = 16;
+  PageScope scope = 7;
   // The containers this page's scope sits inside, OUTERMOST FIRST. Empty when
   // the scope is the feed.
   //
@@ -186,7 +183,7 @@ message ConversationHistoryPage {
   // one `parent` hop at a time would cost a round trip per level to learn what
   // the resolver already knew. It cannot disagree with the parent chain because
   // it is derived from that chain in the same pass.
-  repeated string ancestor_message_ids = 17;
+  repeated string ancestor_message_ids = 8;
 }
 
 // Older history remains; call NextPageCmd.

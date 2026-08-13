@@ -63,132 +63,132 @@ message FailureKind {
     // the account is implicated and no amount of waiting or re-authenticating
     // helps. This side of the vocabulary resolves the workspace BLUE. ----
     // The agent process is not connected.
-    FailureShimNotConnected shim_not_connected = 10;
+    FailureShimNotConnected shim_not_connected = 1;
     // The agent process received the request and refused it.
-    FailureShimRejected shim_rejected = 11;
+    FailureShimRejected shim_rejected = 2;
     // The agent process never acknowledged the request within its window.
-    FailureShimAckTimeout shim_ack_timeout = 12;
+    FailureShimAckTimeout shim_ack_timeout = 3;
     // The agent process speaks a different protocol version than the daemon.
-    FailureShimVersionMismatch shim_version_mismatch = 13;
+    FailureShimVersionMismatch shim_version_mismatch = 4;
     // The agent process's event stream went backwards.
-    FailureShimSeqRegression shim_seq_regression = 14;
+    FailureShimSeqRegression shim_seq_regression = 5;
     // No traffic is arriving from the agent process.
-    FailureShimDegraded shim_degraded = 15;
+    FailureShimDegraded shim_degraded = 6;
     // The agent process could not write to the store, so conversation is being dropped rather than persisted.
-    FailureShimStoreWriteRejected shim_store_write_rejected = 16;
+    FailureShimStoreWriteRejected shim_store_write_rejected = 7;
     // The agent sdk query ended unexpectedly — the session is alive but the thing that drives it stopped.
-    FailureQueryTermination query_termination = 17;
+    FailureQueryTermination query_termination = 8;
     // No agent process was ever started for this workspace, so there is nothing to talk to yet.
-    FailureShimNotSpawned shim_not_spawned = 18;
+    FailureShimNotSpawned shim_not_spawned = 9;
     // The agent process connected but never finished wiring up, so it is present without being usable.
-    FailureShimHandshakeIncomplete shim_handshake_incomplete = 19;
+    FailureShimHandshakeIncomplete shim_handshake_incomplete = 10;
     // The agent process reported itself unhealthy — a self-diagnosis, not an inference from silence.
-    FailureShimUnhealthy shim_unhealthy = 20;
+    FailureShimUnhealthy shim_unhealthy = 11;
     // Bring-up did not finish connecting in time.
-    FailureSessionNotEstablished session_not_established = 21;
+    FailureSessionNotEstablished session_not_established = 12;
     // The command addressed something this workspace no longer runs.
-    FailureWorkspaceNotLive workspace_not_live = 22;
+    FailureWorkspaceNotLive workspace_not_live = 13;
     // The workspace's session was deleted deliberately.
-    FailureSessionDeleted session_deleted = 23;
+    FailureSessionDeleted session_deleted = 14;
     // A new session took over this workspace, so the previous one was stopped.
-    FailureSessionSuperseded session_superseded = 24;
+    FailureSessionSuperseded session_superseded = 15;
     // This view is behind: the workspace's live connection changed under it, and the replay it asked for would have come from a generation it never saw.
-    FailureReconnectSuperseded reconnect_superseded = 25;
+    FailureReconnectSuperseded reconnect_superseded = 16;
     // The agent process exited.
-    FailureSessionShimDied session_shim_died = 26;
+    FailureSessionShimDied session_shim_died = 17;
     // The session could not be started at all.
-    FailureSessionStartFailed session_start_failed = 27;
+    FailureSessionStartFailed session_start_failed = 18;
     // The vendor conversation could not be resumed without breaking continuity.
-    FailureSessionResumeFailed session_resume_failed = 28;
+    FailureSessionResumeFailed session_resume_failed = 19;
     // This workspace has a vendor conversation that could not be reached, and a blank one will not be started in its place.
-    FailureConversationUnresumable conversation_unresumable = 29;
+    FailureConversationUnresumable conversation_unresumable = 20;
     // The client asked for a resume mode the daemon no longer supports.
-    FailureResumeModeRetired resume_mode_retired = 30;
+    FailureResumeModeRetired resume_mode_retired = 21;
     // The session ended for a reason the daemon could not classify.
-    FailureSessionEndedUnclassified session_ended_unclassified = 31;
+    FailureSessionEndedUnclassified session_ended_unclassified = 22;
     // A history re-pull is already running, so a second one was refused.
-    FailureHistoryRepullInFlight history_repull_in_flight = 32;
+    FailureHistoryRepullInFlight history_repull_in_flight = 23;
     // The history re-pull ended before it reached the live window, so what is on screen has a gap in it.
-    FailureHistoryReplayTruncated history_replay_truncated = 33;
+    FailureHistoryReplayTruncated history_replay_truncated = 24;
     // The stop could not be delivered, so the turn is still running.
-    FailureInterruptUndelivered interrupt_undelivered = 34;
+    FailureInterruptUndelivered interrupt_undelivered = 25;
     // The queued prompt has no attached agent process yet, so it cannot run.
-    FailureQueueEntryUnwired queue_entry_unwired = 35;
+    FailureQueueEntryUnwired queue_entry_unwired = 26;
     // The queued prompt is waiting on a cache keep-alive response and cannot be forced ahead of it.
-    FailureQueueEntryKeepAliveHeld queue_entry_keep_alive_held = 36;
+    FailureQueueEntryKeepAliveHeld queue_entry_keep_alive_held = 27;
     // The workspace is hibernated; a revival decision is required before prompts are accepted.
-    FailureSessionHibernated session_hibernated = 37;
+    FailureSessionHibernated session_hibernated = 28;
     // A cache keep-alive window could not be closed, so new conversation is withheld until it is repaired.
-    FailureKeepAliveWindowUnclosed keep_alive_window_unclosed = 38;
+    FailureKeepAliveWindowUnclosed keep_alive_window_unclosed = 29;
     // A cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation.
-    FailureKeepAliveWindowInverted keep_alive_window_inverted = 39;
+    FailureKeepAliveWindowInverted keep_alive_window_inverted = 30;
     // A compaction re-read the whole conversation at the uncached rate instead of from the prompt cache — the exact cost compaction exists to avoid.
-    FailureCompactionColdRead compaction_cold_read = 40;
+    FailureCompactionColdRead compaction_cold_read = 31;
     // A browser log record arrived against a workspace state that had already moved on, so it was not recorded.
-    FailureClientLogIdentityStale client_log_identity_stale = 41;
+    FailureClientLogIdentityStale client_log_identity_stale = 32;
     // Agent-repl's own machinery failed in a way it could not classify.
-    FailureInternalUnclassified internal_unclassified = 42;
+    FailureInternalUnclassified internal_unclassified = 33;
 
     // ---- VENDOR failures: the SDK or the vendor backend refused or concluded the
     // work. Releasing it needs a human or the vendor, never a retry. This side
     // of the vocabulary resolves the workspace PURPLE. ----
     // Authentication failed.
-    FailureApiAuthenticationFailed api_authentication_failed = 43;
+    FailureApiAuthenticationFailed api_authentication_failed = 34;
     // A billing problem stopped the request.
-    FailureApiBillingError api_billing_error = 44;
+    FailureApiBillingError api_billing_error = 35;
     // The account is rate limited.
-    FailureApiRateLimit api_rate_limit = 45;
+    FailureApiRateLimit api_rate_limit = 36;
     // The vendor rejected the request as invalid.
-    FailureApiInvalidRequest api_invalid_request = 46;
+    FailureApiInvalidRequest api_invalid_request = 37;
     // The vendor returned a server error.
-    FailureApiServerError api_server_error = 47;
+    FailureApiServerError api_server_error = 38;
     // The vendor is overloaded.
-    FailureApiOverloaded api_overloaded = 48;
+    FailureApiOverloaded api_overloaded = 39;
     // This organization is not allowed to use the api.
-    FailureApiOAuthOrgNotAllowed api_oauth_org_not_allowed = 49;
+    FailureApiOAuthOrgNotAllowed api_oauth_org_not_allowed = 40;
     // The requested model does not exist.
-    FailureApiModelNotFound api_model_not_found = 50;
+    FailureApiModelNotFound api_model_not_found = 41;
     // The network never reached the vendor.
-    FailureApiNetworkDown api_network_down = 51;
+    FailureApiNetworkDown api_network_down = 42;
     // The vendor request failed for a reason with no more specific kind.
-    FailureApiRequestFailed api_request_failed = 52;
+    FailureApiRequestFailed api_request_failed = 43;
     // The vendor failed for a reason the daemon could not classify.
-    FailureApiUnknown api_unknown = 53;
+    FailureApiUnknown api_unknown = 44;
     // The response hit the output-token ceiling.
-    FailureApiMaxOutputTokens api_max_output_tokens = 54;
+    FailureApiMaxOutputTokens api_max_output_tokens = 45;
     // The turn hit its maximum-turns limit.
-    FailureApiMaxTurns api_max_turns = 55;
+    FailureApiMaxTurns api_max_turns = 46;
     // The turn hit its budget limit.
-    FailureApiMaxBudget api_max_budget = 56;
+    FailureApiMaxBudget api_max_budget = 47;
     // The turn aborted during execution.
-    FailureApiExecutionError api_execution_error = 57;
+    FailureApiExecutionError api_execution_error = 48;
     // The model refused the request.
-    FailureApiRefusal api_refusal = 58;
+    FailureApiRefusal api_refusal = 49;
     // The turn ended abnormally for a reason with no more specific kind.
-    FailureApiTurnFailed api_turn_failed = 59;
+    FailureApiTurnFailed api_turn_failed = 50;
 
     // ---- MACHINERY, continued. ----
     // The daemon refused a user prompt because the workspace's merge machinery holds the session.
-    FailurePromptRefusedByMergeState prompt_refused_by_merge_state = 60;
+    FailurePromptRefusedByMergeState prompt_refused_by_merge_state = 51;
     // The queued prompt is waiting behind a context cut, which is never interrupted, so it cannot be forced ahead of it.
-    FailureQueueEntryUninterruptibleTurn queue_entry_uninterruptible_turn = 61;
+    FailureQueueEntryUninterruptibleTurn queue_entry_uninterruptible_turn = 52;
     // A turn stood bound with nothing driving it, so the daemon closed it rather than leaving the workspace thinking forever.
-    FailureTurnUndriven turn_undriven = 62;
+    FailureTurnUndriven turn_undriven = 53;
     // The replay mark the client asked from counts in a store seq space the vendor session retired, so no delta above it exists and the client must re-anchor from the conversation's tail.
-    FailureReplayMarkRetired replay_mark_retired = 63;
+    FailureReplayMarkRetired replay_mark_retired = 54;
 
     // ---- CLIENT-LOCAL failures: the one part of this vocabulary a frontend
     // mints itself. See the note on FailureKind. All resolve BLUE, because a
     // frontend can only ever observe its own machinery failing.
     // The daemon never sets one of these arms.
-    FailureDaemonUnreachable daemon_unreachable = 100;
-    FailureWorkspaceGone workspace_gone = 101;
-    FailureBootFailed boot_failed = 102;
-    FailureControlPlaneFailed control_plane_failed = 103;
-    FailureFrameUndecodable frame_undecodable = 104;
-    FailureStaleBundle stale_bundle = 105;
-    FailureCommandUnsent command_unsent = 106;
-    FailureCommandRejectionUnclassified command_rejection_unclassified = 107;
+    FailureDaemonUnreachable daemon_unreachable = 55;
+    FailureWorkspaceGone workspace_gone = 56;
+    FailureBootFailed boot_failed = 57;
+    FailureControlPlaneFailed control_plane_failed = 58;
+    FailureFrameUndecodable frame_undecodable = 59;
+    FailureStaleBundle stale_bundle = 60;
+    FailureCommandUnsent command_unsent = 61;
+    FailureCommandRejectionUnclassified command_rejection_unclassified = 62;
   }
 }
 
@@ -679,10 +679,6 @@ message FailurePromptRefusedByMergeState {
   string state = 1;
 }
 
-// The queued prompt is waiting behind a context cut, which is never
-// interrupted, so it cannot be forced ahead of it.
-//
-// Resolves the workspace BLUE.
 // A turn stood bound with nothing driving it, so the daemon closed it rather
 // than leaving the workspace thinking forever.
 //
@@ -692,6 +688,10 @@ message FailureTurnUndriven {
   string reason = 1;
 }
 
+// The queued prompt is waiting behind a context cut, which is never
+// interrupted, so it cannot be forced ahead of it.
+//
+// Resolves the workspace BLUE.
 message FailureQueueEntryUninterruptibleTurn {
   // Which queued entry, so the card addresses the right row.
   string entry_id = 1;
@@ -792,24 +792,23 @@ message FailureCommandRejectionUnclassified {
 // This message repeats the durable lifecycle record's identity and uses the
 // same typed reason messages, allowing a frontend to diagnose the termination
 // without reconstructing evidence from generic failure prose.
+//
+// THE ONLY IDENTITIES ON THIS RECORD ARE ONES A CARD CAN SHOW: the query
+// invocation that died, and the VENDOR conversation it was driving. An
+// agent-repl session identity is deliberately absent — a rendering frontend
+// has no vocabulary for one, so it could only carry it, never use it.
 message QueryTerminationFailure {
-  // 1 was agent_repl_session_id: session identity a rendering frontend has no
-  // vocabulary for. What it needs from this record is the VENDOR conversation
-  // below, which is content it can show.
-  reserved 1;
-  reserved "agent_repl_session_id";
-
   // The unique query() invocation that terminated.
-  string query_instance_id = 2;
+  string query_instance_id = 1;
 
   // Identifies the vendor conversation when query initialization exposed it,
   // or states explicitly that termination preceded vendor identity discovery.
   oneof vendor_identity {
     // The non-empty authoritative Claude conversation UUID for the query.
-    string vendor_session_id = 3;
+    string vendor_session_id = 2;
 
     // Records that the query ended before the SDK exposed a vendor session.
-    protocol.v1.VendorSessionIdentityUnavailable vendor_session_identity_unavailable = 5;
+    protocol.v1.VendorSessionIdentityUnavailable vendor_session_identity_unavailable = 3;
   }
 
   // The Unix epoch time at which the termination was observed.
@@ -818,50 +817,50 @@ message QueryTerminationFailure {
   // Identifies the unexpected termination condition without a status enum.
   oneof reason {
     // The SDK iterator ended without an intentional shim shutdown.
-    protocol.v1.UnexpectedQueryEof unexpected_eof = 10;
+    protocol.v1.UnexpectedQueryEof unexpected_eof = 5;
 
     // The SDK iterator threw an error, including its complete cause.
-    protocol.v1.QueryIteratorFailure iterator_failure = 11;
+    protocol.v1.QueryIteratorFailure iterator_failure = 6;
 
     // Query initialization failed, including its complete cause.
-    protocol.v1.QueryStartupFailure startup_failure = 12;
+    protocol.v1.QueryStartupFailure startup_failure = 7;
   }
 }
 
 // Machine-readable evidence that a requested Claude conversation could not
 // be resumed without violating conversation continuity.
+//
+// It names the VENDOR conversation and nothing else, for the same reason
+// QueryTerminationFailure does: the vendor conversation is what the card
+// shows, and an agent-repl session identity is a vocabulary a rendering
+// frontend does not have.
 message SessionResumeFailure {
-  // 1 was agent_repl_session_id: session identity, removed for the same reason
-  // as on QueryTerminationFailure. The vendor conversation below stays,
-  // because it is what the card shows.
-  reserved 1;
-  reserved "agent_repl_session_id";
   // The exact Claude conversation UUID that must remain authoritative.
-  string claude_session_id = 2;
+  string claude_session_id = 1;
   // The working directory used to locate the Claude transcript.
-  string cwd = 3;
+  string cwd = 2;
   // The configured Claude account root. Empty means the daemon's inherited
   // Claude configuration root supplies the value.
-  string config_dir = 4;
+  string config_dir = 3;
   // The absolute Claude configuration root used for transcript lookup.
-  string resolved_config_dir = 5;
+  string resolved_config_dir = 4;
   // Identifies the operation whose continuity requirement could not be met.
   oneof attempt {
     // A frontend requested a session that continues a durable conversation.
-    SessionResumeFailureCreate create = 10;
+    SessionResumeFailureCreate create = 5;
     // A durable agent-repl session required shim reconstruction.
-    SessionResumeFailureAutomaticRestore automatic_restore = 11;
+    SessionResumeFailureAutomaticRestore automatic_restore = 6;
   }
   // Identifies the concrete continuity invariant that prevented restoration.
   oneof cause {
     // No readable transcript exists for the authoritative Claude UUID.
-    SessionResumeFailureTranscriptUnavailable transcript_unavailable = 20;
+    SessionResumeFailureTranscriptUnavailable transcript_unavailable = 7;
     // A recovery attempt proposed a different Claude UUID or a fresh session.
-    SessionResumeFailureIdentityMismatch identity_mismatch = 21;
+    SessionResumeFailureIdentityMismatch identity_mismatch = 8;
     // The exact resumed SDK query terminated before becoming driveable.
-    QueryTerminationFailure query_termination = 22;
+    QueryTerminationFailure query_termination = 9;
     // Bring-up failed before exact query-termination evidence was available.
-    SessionResumeFailureBringUpFailure bring_up_failure = 23;
+    SessionResumeFailureBringUpFailure bring_up_failure = 10;
   }
 }
 

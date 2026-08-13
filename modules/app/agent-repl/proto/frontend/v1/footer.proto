@@ -77,16 +77,9 @@ message InterruptWindow {
 }
 
 message ProgressView {
-  // 13/17 were error_summary/error_item_uuid (string): RETIRED (step 11).
-  // `failure` below (F4) is the sole reader-facing account now; its own
-  // item_uuid absorbed error_item_uuid's addressing job.
-  reserved 13, 17;
-  reserved "error_summary", "error_item_uuid";
-  // 2 was session_id, documented as correlation-only and never adopted as an
-  // identity. Correlation is exactly what the fence does, without naming a
-  // session.
-  reserved 2;
-  reserved "session_id";
+  // WHICH WORKSPACE this footer belongs to, and the only addressing this view
+  // carries. It names no session: correlation is exactly what the fence below
+  // does, and it does it without handing a renderer a session vocabulary.
   string workspace = 1;
   // The workspace's staleness FENCE at the moment the daemon produced this
   // push: an opaque token the client compares BYTE-WISE against the fence on
@@ -97,7 +90,7 @@ message ProgressView {
   // The daemon mints it and is the only thing that can read meaning into it.
   // A client that learned to decode it would be depending on a fact this
   // contract does not offer, and the token's composition is free to change.
-  string fence = 25;
+  string fence = 2;
 
   // DEPRECATED (F5), and no longer populated by the resolver.
   //
@@ -151,7 +144,7 @@ message ProgressView {
   // under the session's name — a reader saw "91% of your session" for a number
   // that was really the week's, and had no way to tell the two apart.
   RateLimitWindow rate_limited = 12;          // rate_limit_type "five_hour"
-  RateLimitWindow rate_limited_weekly = 21;   // rate_limit_type "seven_day*"
+  RateLimitWindow rate_limited_weekly = 13;   // rate_limit_type "seven_day*"
 
   // The session itself reporting it is parked on the USER
   // (data.SessionStateChanged state="requires_action").
@@ -161,21 +154,22 @@ message ProgressView {
   // here, and it exists because it carries a fact the daemon cannot otherwise
   // see: the session can be blocked on an interaction the daemon holds no
   // count for, so `pending_permissions` alone under-reports "waiting on you".
-  ProgressWindow blocked = 18;
+  ProgressWindow blocked = 14;
 
   // See InterruptWindow. Ack-opened, next-turn-cleared.
-  InterruptWindow interrupt = 20;
+  InterruptWindow interrupt = 15;
 
-  // The CLASSIFIED error state (F4), superseding the free-string
-  // error_summary/error_item_uuid (RETIRED, step 11) — this failure's own
-  // item_uuid absorbed error_item_uuid's addressing job.
+  // The CLASSIFIED error state (F4), and the sole reader-facing account of a
+  // failure on this footer. It carries its own addressing, so nothing else
+  // here needs a second field to point at the failure with.
   //
-  // The footer used to render daemon-authored prose in a hardcoded red that
-  // no other surface consulted; carrying the classified failure instead lets
-  // it take its color from the same table the card and the workspace do.
+  // TYPED RATHER THAN PROSE, because prose has to be colored by whoever renders
+  // it: a footer handed daemon-authored text can only pick a hardcoded red no
+  // other surface consulted. Carrying the classified failure lets the row take
+  // its color from the same table the card and the workspace do.
   // Persists until the next turn starts, when it clears; set from a terminal
   // ApiErrorLine (retries exhausted) or an errored turn end.
-  FooterFailureRow failure = 19;
+  FooterFailureRow failure = 16;
 
   // Set when a turn's UNCACHED input cost crossed the alert threshold — the
   // loud "this prompt re-ingested context" signal. Rendered red in the center
@@ -184,27 +178,27 @@ message ProgressView {
   // only footer surface native Emacs owns. Persists until the next turn
   // starts, like `failure`. Unset means the last turn was cache-efficient,
   // which is the only reading of absence.
-  ContextCostAlert expensive_turn = 22;
+  ContextCostAlert expensive_turn = 17;
 
   // Counts (ephemeral, session-scoped):
-  int64 pending_permissions = 14;
-  int64 queue_depth = 15;
-  int64 live_task_count = 16;
+  int64 pending_permissions = 18;
+  int64 queue_depth = 19;
+  int64 live_task_count = 20;
 
   // The phase word, resolved: exactly what the footer's
   // phase cell renders. Replaces the client-side RenderState→word/tone/
   // breathing table. The footer's own copy of the phase fact
   // (duplicate-don't-share): WorkspaceState remains the authority for state;
   // this is its footer projection.
-  FooterPhase phase = 23;
+  FooterPhase phase = 21;
   // The merge chip, resolved: exactly the text and tooltip
   // the chip renders, or absent when no merge run is publishing. The footer's
   // own projection of MergeStatus (which other surfaces keep reading for their
   // own projections).
-  FooterMergeChip merge_chip = 24;
+  FooterMergeChip merge_chip = 22;
   // The turn-accounting cell, resolved: the composed summary and the verdict
   // that classes it. Absent when no turn has settled yet.
-  FooterAccountingCell accounting = 26;
+  FooterAccountingCell accounting = 23;
 }
 
 // One turn's excessive expensive-input observation. Computed daemon-side from
@@ -290,9 +284,9 @@ message FooterAccountingCell {
   // verdict and the evidence it implies arrive together and a client cannot
   // render "invalid" with nothing to say about why.
   oneof verdict {
-    AccountingComplete complete = 10;
-    AccountingIncomplete incomplete = 11;
-    AccountingInvalid invalid = 12;
+    AccountingComplete complete = 2;
+    AccountingIncomplete incomplete = 3;
+    AccountingInvalid invalid = 4;
   }
 }
 

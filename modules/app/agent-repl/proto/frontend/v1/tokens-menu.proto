@@ -9,15 +9,14 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // The token-breakdown menu, fully resolved. Sections and rows arrive in
 // display order; the client renders exactly this tree.
 message TokenBreakdownView {
-  // 2 was session_id. A frontend has no session vocabulary: the only question
-  // it ever asked of that field was "is this push still current", which the
-  // fence answers without naming what rotated.
-  reserved 2;
-  reserved "session_id";
-  // The workspace/session this breakdown describes.
+  // WORKSPACE-ADDRESSED, never session-addressed. A frontend has no session
+  // vocabulary; the only currency question it ever asks is "is this push still
+  // current", which the fence below answers without naming what rotated.
+  //
+  // The workspace this breakdown describes.
   string workspace = 1;
   // Menu sections, in display order (e.g. "this turn", "session", per-model).
-  repeated TokenBreakdownSection sections = 3;
+  repeated TokenBreakdownSection sections = 2;
   // The workspace's staleness FENCE at the moment the daemon produced this
   // push: an opaque token the client compares BYTE-WISE against the fence on
   // the workspace's current WorkspaceState, and never parses, splits or
@@ -27,7 +26,7 @@ message TokenBreakdownView {
   // The daemon mints it and is the only thing that can read meaning into it.
   // A client that learned to decode it would be depending on a fact this
   // contract does not offer, and the token's composition is free to change.
-  string fence = 4;
+  string fence = 3;
 }
 
 // One titled section of the breakdown menu.

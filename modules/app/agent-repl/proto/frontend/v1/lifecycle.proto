@@ -36,9 +36,12 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // nothing and a frontend saying "start fresh" were the same wire value.
 //
 // They are now different values, which is the whole point of this enum.
-// FRESH IS NOT CALLER-EXPRESSIBLE. Tag 2 was RESUME_MODE_FRESH: "begin a NEW
-// conversation even though a resumable one exists". It is retired, not
-// renamed. A workspace's conversation is not replaceable by a caller — no
+// FRESH IS NOT CALLER-EXPRESSIBLE. The only intents on this wire are CONTINUE
+// (this workspace's conversation, whichever one that is) and EXPLICIT (one
+// named conversation a human chose). "Begin a NEW conversation even though a
+// resumable one exists" is not among them, and never will be.
+//
+// A workspace's conversation is not replaceable by a caller — no
 // frontend, no user command, no automatic recovery may abandon one — because
 // the abandonment is silent and irreversible while every alternative (resume,
 // restore from backup, or a loud refusal) is recoverable. A fresh conversation
@@ -46,8 +49,6 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // that proof is the daemon's to mint from its own durable evidence, never a
 // caller's to assert. The wire therefore has no way to ask for it.
 enum ResumeMode {
-  reserved 2;
-  reserved "RESUME_MODE_FRESH";
 
   // Unset. Treated as RESUME_MODE_CONTINUE so an older or simpler caller gets
   // the safe behavior: continuing an existing conversation is recoverable,
@@ -63,14 +64,14 @@ enum ResumeMode {
   // Reserved for a human choosing from among conversations (a picker, a fork)
   // — never for ordinary restore, which is what CONTINUE is for. A caller that
   // reaches for this at boot is reintroducing the pointer.
-  RESUME_MODE_EXPLICIT = 3;
+  RESUME_MODE_EXPLICIT = 2;
 }
 
 message CreateSessionCmd {
   string cwd = 1;
-  string permission_mode = 3;
-  string config_dir = 4;
-  bool fake = 6;                        // test harness sessions
+  string permission_mode = 2;
+  string config_dir = 3;
+  bool fake = 4;                        // test harness sessions
   // The caller's DELIBERATE consent to create a session with NO permission
   // gate. Required whenever permission_mode names a mode that shadows the
   // shim's canUseTool callback in the fail-OPEN direction
@@ -84,7 +85,7 @@ message CreateSessionCmd {
   // a create-time consent only: a session already registered in that mode
   // still rehydrates after a daemon restart, since refusing there would
   // silently change a live session's posture.
-  bool allow_ungated = 7;
+  bool allow_ungated = 5;
 
   // The model this session should START on, empty to accept the shim's own
   // default.  A caller that has a remembered selection would otherwise have to
@@ -95,17 +96,17 @@ message CreateSessionCmd {
   // the same SetModel path a later change takes, once the shim is wired, and
   // still publishes only the shim-confirmed selection.  A rejected model fails
   // the create rather than silently leaving the session on another one.
-  string model = 8;
+  string model = 6;
 
   // Which conversation to land on. See ResumeMode: this is intent, and the
   // daemon does the resolving.
-  ResumeMode resume_mode = 9;
+  ResumeMode resume_mode = 7;
 
   // The conversation to land on, and ONLY meaningful under
   // RESUME_MODE_EXPLICIT. The daemon rejects a create that sets this under any
   // other mode rather than quietly ignoring it, because a caller that filled
   // this in believes it is steering and must be told it is not.
-  string explicit_claude_session_id = 10;
+  string explicit_claude_session_id = 8;
 }
 
 // Session teardown over UDS (replaces DELETE /sessions/{id}).
