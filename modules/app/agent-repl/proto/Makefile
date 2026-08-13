@@ -26,7 +26,6 @@ PROTOS := \
   frontend/v1/feed.proto \
   frontend/v1/topbar.proto \
   frontend/v1/sidebar.proto \
-  frontend/v1/state.proto \
   frontend/v1/footer.proto \
   frontend/v1/frame.proto \
   state/v1/durable.proto
