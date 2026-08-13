@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/shimclient"
@@ -30,7 +30,7 @@ type replayClient struct {
 	calls [][2]uint64
 	// caps records the max_events each request carried.
 	caps   []uint32
-	events []*corev1.Event
+	events []*protocolv1.Event
 	result shimclient.ReplayResult
 	err    error
 	// queuedErrs are per-call errors, popped one per Replay before `err` takes
@@ -115,7 +115,7 @@ func (t *manualRepullTimer) fire() {
 	}
 }
 
-func (c *replayClient) Replay(_ context.Context, from, to uint64, maxEvents uint32, onEvent func(*corev1.Event)) (shimclient.ReplayResult, error) {
+func (c *replayClient) Replay(_ context.Context, from, to uint64, maxEvents uint32, onEvent func(*protocolv1.Event)) (shimclient.ReplayResult, error) {
 	c.mu.Lock()
 	c.calls = append(c.calls, [2]uint64{from, to})
 	c.caps = append(c.caps, maxEvents)
@@ -307,7 +307,7 @@ func (h *repullHarness) controller(t *testing.T) *sessionController {
 }
 
 // assistantEvent is a vendor event carrying one renderable assistant message.
-func assistantEvent(t *testing.T, seq uint64, uuid string) *corev1.Event {
+func assistantEvent(t *testing.T, seq uint64, uuid string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.ClaudeStreamMessage{
 		Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
@@ -320,7 +320,7 @@ func assistantEvent(t *testing.T, seq uint64, uuid string) *corev1.Event {
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // --- tests ------------------------------------------------------------------
@@ -394,7 +394,7 @@ func TestEmptyRingTakesItsFloorFromTheDurableHighWaterMark(t *testing.T) {
 
 func TestReplayedEventsReachConversation(t *testing.T) {
 	// Arrange
-	client := &replayClient{events: []*corev1.Event{assistantEvent(t, 3, "old")}}
+	client := &replayClient{events: []*protocolv1.Event{assistantEvent(t, 3, "old")}}
 	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 9)
 	// Act
@@ -415,7 +415,7 @@ func TestConnectedRepullAttachesHistoricalAccountingByPersistedTurnIdentityWhile
 	result := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}}})
 	result.Seq = 3
 	result.RequestId = "T1"
-	client := &replayClient{events: []*corev1.Event{result}}
+	client := &replayClient{events: []*protocolv1.Event{result}}
 	h := newRepullHarness(t, client)
 	want := &statev1.TurnAccounting{TurnId: "T1", QueryInstanceId: "query-1", Verdict: &statev1.TurnAccounting_Complete{Complete: &statev1.TurnAccountingComplete{}}}
 	h.m.cfg.TurnAccountings = replayTurnAccountingStore{accountings: []*statev1.TurnAccounting{want}}
@@ -447,8 +447,8 @@ func TestConnectedRepullAttachesHistoricalAccountingByPersistedTurnIdentityWhile
 func TestReplayedEventsNeverReachTheSSM(t *testing.T) {
 	// Arrange — the SSM consumed this history once already; re-applying it is
 	// what drives live_task_count into impossible values.
-	client := &replayClient{events: []*corev1.Event{
-		{SessionId: "vendor-uuid", Seq: 3, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "t1"}}},
+	client := &replayClient{events: []*protocolv1.Event{
+		{SessionId: "vendor-uuid", Seq: 3, Payload: &protocolv1.Event_TaskEnded{TaskEnded: &protocolv1.TaskEnded{TaskId: "t1"}}},
 		assistantEvent(t, 4, "old"),
 	}}
 	h := newRepullHarness(t, client)
@@ -465,7 +465,7 @@ func TestReplayedEventsNeverReachTheSSM(t *testing.T) {
 
 func TestReplayedEventsNeverReachTheProgressResolver(t *testing.T) {
 	// Arrange
-	client := &replayClient{events: []*corev1.Event{assistantEvent(t, 3, "old")}}
+	client := &replayClient{events: []*protocolv1.Event{assistantEvent(t, 3, "old")}}
 	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 9)
 	// Act
@@ -480,8 +480,8 @@ func TestReplayedEventsNeverReachTheProgressResolver(t *testing.T) {
 
 func TestReplayedEventsNeverRebuildTheTaskCatalog(t *testing.T) {
 	// Arrange — a historical task lifecycle must not repopulate the roster.
-	client := &replayClient{events: []*corev1.Event{
-		{SessionId: "vendor-uuid", Seq: 3, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "t1"}}},
+	client := &replayClient{events: []*protocolv1.Event{
+		{SessionId: "vendor-uuid", Seq: 3, Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "t1"}}},
 	}}
 	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 9)
@@ -500,7 +500,7 @@ func TestReplayedEventsNeverRebuildTheTaskCatalog(t *testing.T) {
 func TestReplayedEventsNeverEnterTheRetainedRing(t *testing.T) {
 	// Arrange — back-filling the live window would drift the floor under the
 	// next request.
-	client := &replayClient{events: []*corev1.Event{assistantEvent(t, 3, "old")}}
+	client := &replayClient{events: []*protocolv1.Event{assistantEvent(t, 3, "old")}}
 	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 9)
 	// Act
@@ -687,7 +687,7 @@ func TestTruncatedReplayNamesTheShimsReason(t *testing.T) {
 func TestReplayFailureSurfacesToTheCaller(t *testing.T) {
 	// Arrange
 	client := &replayClient{
-		events: []*corev1.Event{assistantEvent(t, 3, "old")},
+		events: []*protocolv1.Event{assistantEvent(t, 3, "old")},
 		err:    errors.New("shim went away"),
 	}
 	logs := &logCapture{}
@@ -829,7 +829,7 @@ func TestStoreCoveredGapIsServedWithNoLiveShim(t *testing.T) {
 	// Arrange — the session has NO live shim connection, and the whole gap is
 	// at or below the store's high-water mark.
 	client := &replayClient{err: shimclient.ErrReplayNotConnected}
-	store := &durableHistorySpy{events: []*corev1.Event{assistantEvent(t, 1136, "stored")}}
+	store := &durableHistorySpy{events: []*protocolv1.Event{assistantEvent(t, 1136, "stored")}}
 	h := newRepullHarnessWithStore(t, client, store, nil)
 	h.seq.SetLastSeq("s1", 1172)
 
@@ -850,7 +850,7 @@ func TestStoreCoveredGapIsServedWithNoLiveShim(t *testing.T) {
 func TestStoreServedGapNamesTheStoreAsItsSource(t *testing.T) {
 	// Arrange — which route served which range must be readable from the log.
 	client := &replayClient{}
-	store := &durableHistorySpy{events: []*corev1.Event{assistantEvent(t, 1136, "stored")}}
+	store := &durableHistorySpy{events: []*protocolv1.Event{assistantEvent(t, 1136, "stored")}}
 	logs := &logCapture{}
 	h := newRepullHarnessWithStore(t, client, store, logs.logf)
 	h.seq.SetLastSeq("s1", 1172)

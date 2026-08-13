@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/ssm"
 
@@ -134,10 +134,10 @@ func TestStreamContractRecordKeepsEnvelopeUUID(t *testing.T) {
 			// the record itself is rebuilt from whichever arm the item carries.
 			envelopeUUID, _, _ := strings.Cut(item.GetUuid(), "#")
 			// Act: rebuild the event the shim delivered and translate it.
-			ev := &corev1.Event{
+			ev := &protocolv1.Event{
 				SessionId:    fx.SessionID,
 				ProducedAtMs: producedMs,
-				Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.AssistantMessage{
+				Payload: &protocolv1.Event_Vendor{Vendor: mustAny(t, &datav1.AssistantMessage{
 					Uuid:    envelopeUUID,
 					Message: recordBodyFor(t, item, fx.MessageID),
 				})},
@@ -194,10 +194,10 @@ func TestStreamContractThinkingNamesThePreviewItSettlesOnto(t *testing.T) {
 			}
 			seen++
 			envelopeUUID, _, _ := strings.Cut(item.GetUuid(), "#")
-			ev := &corev1.Event{
+			ev := &protocolv1.Event{
 				SessionId:    fx.SessionID,
 				ProducedAtMs: producedMs,
-				Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.AssistantMessage{
+				Payload: &protocolv1.Event_Vendor{Vendor: mustAny(t, &datav1.AssistantMessage{
 					Uuid:    envelopeUUID,
 					Message: recordBodyFor(t, item, fx.MessageID),
 				})},
@@ -258,10 +258,10 @@ func TestStreamContractOneStreamCarriesOneFence(t *testing.T) {
 		for _, item := range cd.GetMessages() {
 			seenConversation++
 			envelopeUUID, _, _ := strings.Cut(item.GetUuid(), "#")
-			ev := &corev1.Event{
+			ev := &protocolv1.Event{
 				SessionId:    fx.SessionID,
 				ProducedAtMs: producedMs,
-				Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.AssistantMessage{
+				Payload: &protocolv1.Event_Vendor{Vendor: mustAny(t, &datav1.AssistantMessage{
 					Uuid:    envelopeUUID,
 					Message: recordBodyFor(t, item, fx.MessageID),
 				})},

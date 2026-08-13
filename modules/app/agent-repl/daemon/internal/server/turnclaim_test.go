@@ -3,8 +3,8 @@ package server
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // A DELETE MID-TURN LEAVES NOBODY TO END THE TURN. The shim is stopped, so the
@@ -16,12 +16,12 @@ func TestDeleteSessionReleasesTheWorkspacesTurnClaim(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	id := createSession(t, h, `{"cwd":"/w","model":"m"}`)
-	turn := &corev1.Event{
+	turn := &protocolv1.Event{
 		SessionId: id,
 		Seq:       2,
-		Plane:     corev1.Plane_PLANE_STREAM,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
 		RequestId: "turn-1",
-		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn-1"}},
+		Payload:   &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "turn-1"}},
 	}
 	markControllerOperational(t, h, "/w")
 	if _, err := h.ssm.ApplyTurnBoundary("/w", id, "", turn); err != nil {

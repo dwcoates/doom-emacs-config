@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/progress"
@@ -177,16 +177,16 @@ func newInterruptFlowRig(t *testing.T) *interruptFlowRig {
 func (r *interruptFlowRig) apply(payload any) {
 	r.t.Helper()
 	r.seq++
-	ev := &corev1.Event{SessionId: interruptFlowSessionID, Seq: r.seq, ProducedAtMs: interruptFlowNowMs}
+	ev := &protocolv1.Event{SessionId: interruptFlowSessionID, Seq: r.seq, ProducedAtMs: interruptFlowNowMs}
 	switch p := payload.(type) {
-	case *corev1.SessionStarted:
-		ev.Payload = &corev1.Event_SessionStarted{SessionStarted: p}
-	case *corev1.TurnStarted:
-		ev.Plane = corev1.Plane_PLANE_STREAM
-		ev.Payload = &corev1.Event_TurnStarted{TurnStarted: p}
-	case *corev1.TurnEnded:
-		ev.Plane = corev1.Plane_PLANE_STREAM
-		ev.Payload = &corev1.Event_TurnEnded{TurnEnded: p}
+	case *protocolv1.SessionStarted:
+		ev.Payload = &protocolv1.Event_SessionStarted{SessionStarted: p}
+	case *protocolv1.TurnStarted:
+		ev.Plane = protocolv1.Plane_PLANE_STREAM
+		ev.Payload = &protocolv1.Event_TurnStarted{TurnStarted: p}
+	case *protocolv1.TurnEnded:
+		ev.Plane = protocolv1.Plane_PLANE_STREAM
+		ev.Payload = &protocolv1.Event_TurnEnded{TurnEnded: p}
 	default:
 		r.t.Fatalf("interruptFlowRig.apply: unsupported payload %T", payload)
 	}
@@ -201,14 +201,14 @@ func (r *interruptFlowRig) apply(payload any) {
 // started session and a settled backfill.
 func (r *interruptFlowRig) settleReady() {
 	r.t.Helper()
-	r.apply(&corev1.SessionStarted{Model: "test-model", Cwd: interruptFlowWorkspace})
+	r.apply(&protocolv1.SessionStarted{Model: "test-model", Cwd: interruptFlowWorkspace})
 	d, err := r.m.existing(interruptFlowWorkspace)
 	if err != nil {
 		r.t.Fatalf("existing controller: %v", err)
 	}
 	r.m.onConnectedForGeneration(
 		interruptFlowWorkspace, interruptFlowSessionID, d.generationID,
-		&corev1.ShimHello{SessionId: interruptFlowSessionID},
+		&protocolv1.ShimHello{SessionId: interruptFlowSessionID},
 	)
 	if err := r.ssm.ApplyBackfillState(interruptFlowWorkspace, BackfillDone); err != nil {
 		r.t.Fatalf("apply backfill done: %v", err)
@@ -216,7 +216,7 @@ func (r *interruptFlowRig) settleReady() {
 }
 
 // ackWith arms the fake shim's interrupt ack with a specific outcome.
-func (r *interruptFlowRig) ackWith(outcome corev1.InterruptOutcome) {
+func (r *interruptFlowRig) ackWith(outcome protocolv1.InterruptOutcome) {
 	r.client.mu.Lock()
 	r.client.interruptOutcome = outcome
 	r.client.mu.Unlock()
@@ -371,9 +371,9 @@ func TestAnInterruptedTurnIsReportedThenSupersededAcrossBothFanouts(t *testing.T
 	// Arrange — a settled workspace with a turn in flight.
 	rig := newInterruptFlowRig(t)
 	rig.settleReady()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 	rig.waitState(frontendv1.RenderState_RENDER_STATE_THINKING)
-	rig.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+	rig.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 
 	// Act — the user stops it, the stopped turn ends, and a new one begins.
 	if err := rig.interrupt(); err != nil {
@@ -382,12 +382,12 @@ func TestAnInterruptedTurnIsReportedThenSupersededAcrossBothFanouts(t *testing.T
 	opened := rig.waitView("the interrupt window to open", func(v *frontendv1.ProgressView) bool {
 		return v.GetInterrupt().GetActive()
 	})
-	rig.apply(&corev1.TurnEnded{StopReason: "aborted"})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "aborted"})
 	stopped := rig.waitState(frontendv1.RenderState_RENDER_STATE_INTERRUPTED)
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 
 	// Assert — the window carried the ack's own verdict...
-	if got := opened.GetInterrupt().GetOutcome(); got != corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+	if got := opened.GetInterrupt().GetOutcome(); got != protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
 		t.Fatalf("window outcome = %s, want INTERRUPTED", got)
 	}
 	if got := opened.GetInterrupt().GetSinceMs(); got != interruptFlowNowMs {
@@ -416,16 +416,16 @@ func TestASettledInterruptReadsTheSameLiveAndFromTheConnectSnapshot(t *testing.T
 	// Arrange — a stop that settled: the window open and the turn painted.
 	rig := newInterruptFlowRig(t)
 	rig.settleReady()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 	rig.waitState(frontendv1.RenderState_RENDER_STATE_THINKING)
-	rig.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+	rig.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 	if err := rig.interrupt(); err != nil {
 		t.Fatalf("interrupt: %v", err)
 	}
 	rig.waitView("the interrupt window to open", func(v *frontendv1.ProgressView) bool {
 		return v.GetInterrupt().GetActive()
 	})
-	rig.apply(&corev1.TurnEnded{StopReason: "aborted"})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "aborted"})
 	liveState := rig.waitState(frontendv1.RenderState_RENDER_STATE_INTERRUPTED)
 	liveView := rig.lastView()
 
@@ -477,9 +477,9 @@ func TestAnAlreadyCompleteStopNeverRepaintsTheCleanTurn(t *testing.T) {
 	// Arrange — a turn the daemon still believes is live.
 	rig := newInterruptFlowRig(t)
 	rig.settleReady()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 	rig.waitState(frontendv1.RenderState_RENDER_STATE_THINKING)
-	rig.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	rig.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 
 	// Act — the stop lands too late, then the turn's own clean end arrives.
 	if err := rig.interrupt(); err != nil {
@@ -488,11 +488,11 @@ func TestAnAlreadyCompleteStopNeverRepaintsTheCleanTurn(t *testing.T) {
 	view := rig.waitView("the interrupt window to open", func(v *frontendv1.ProgressView) bool {
 		return v.GetInterrupt().GetActive()
 	})
-	rig.apply(&corev1.TurnEnded{StopReason: "end_turn"})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "end_turn"})
 	rig.waitState(frontendv1.RenderState_RENDER_STATE_DONE)
 
 	// Assert — the window reports the near-miss...
-	if got := view.GetInterrupt().GetOutcome(); got != corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
+	if got := view.GetInterrupt().GetOutcome(); got != protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
 		t.Fatalf("window outcome = %s, want ALREADY_COMPLETE", got)
 	}
 	// ...and no pushed state ever claimed the turn was interrupted.
@@ -515,7 +515,7 @@ func TestAnInterjectsStopReachesEveryFrontendSurface(t *testing.T) {
 	// Arrange — a running turn with a prompt held behind it.
 	rig := newInterruptFlowRig(t)
 	rig.settleReady()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 	rig.waitState(frontendv1.RenderState_RENDER_STATE_THINKING)
 	if err := rig.submit("later"); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -529,7 +529,7 @@ func TestAnInterjectsStopReachesEveryFrontendSurface(t *testing.T) {
 	}
 	waitFor(t, "the interject's stop to reach the shim", func() bool { return rig.client.interruptCount() == 1 })
 	waitForSettled(t, "the interject's stop to pause the queue", func() bool { return rig.paused() })
-	rig.apply(&corev1.TurnEnded{StopReason: "aborted"})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "aborted"})
 
 	// Assert — the prompt that caused the stop was delivered as the paused
 	// queue's head jump...
@@ -569,7 +569,7 @@ func TestAPausedQueueRunsTheNewPromptAloneThenDrainsInOrder(t *testing.T) {
 	// Arrange — a running turn with two prompts held behind it.
 	rig := newInterruptFlowRig(t)
 	rig.settleReady()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 	rig.waitState(frontendv1.RenderState_RENDER_STATE_THINKING)
 	if err := rig.submit("first"); err != nil {
 		t.Fatalf("submit first: %v", err)
@@ -578,13 +578,13 @@ func TestAPausedQueueRunsTheNewPromptAloneThenDrainsInOrder(t *testing.T) {
 		t.Fatalf("submit second: %v", err)
 	}
 	waitFor(t, "both prompts queued", func() bool { return len(rig.entryTexts()) == 2 })
-	rig.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+	rig.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 
 	// Act — the user stops the turn, it ends, and they type something new.
 	if err := rig.interrupt(); err != nil {
 		t.Fatalf("interrupt: %v", err)
 	}
-	rig.apply(&corev1.TurnEnded{StopReason: "aborted"})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "aborted"})
 	rig.waitState(frontendv1.RenderState_RENDER_STATE_INTERRUPTED)
 	heldDuringPause := interruptFlowQueueTexts(rig.push)
 	if err := rig.submit("urgent"); err != nil {
@@ -601,13 +601,13 @@ func TestAPausedQueueRunsTheNewPromptAloneThenDrainsInOrder(t *testing.T) {
 	}
 
 	// Act — the lone run finishes cleanly, and each retained prompt in turn.
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.TurnEnded{StopReason: "end_turn"})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "end_turn"})
 	waitFor(t, "the first retained prompt to be delivered", func() bool {
 		return len(rig.client.promptTexts()) == 2
 	})
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.TurnEnded{StopReason: "end_turn"})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "end_turn"})
 
 	// Assert — the drain resumed in the original order and emptied the row.
 	waitFor(t, "the second retained prompt to be delivered", func() bool {
@@ -633,9 +633,9 @@ func TestAnUndeliverableStopOpensAFailedWindowAndStillErrors(t *testing.T) {
 	// Arrange — a turn in flight and a shim that cannot deliver the stop.
 	rig := newInterruptFlowRig(t)
 	rig.settleReady()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 	rig.waitState(frontendv1.RenderState_RENDER_STATE_THINKING)
-	rig.ackWith(corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
+	rig.ackWith(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
 
 	// Act.
 	err := rig.interrupt()
@@ -648,7 +648,7 @@ func TestAnUndeliverableStopOpensAFailedWindowAndStillErrors(t *testing.T) {
 	view := rig.waitView("the failed interrupt window", func(v *frontendv1.ProgressView) bool {
 		return v.GetInterrupt().GetActive()
 	})
-	if got := view.GetInterrupt().GetOutcome(); got != corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED {
+	if got := view.GetInterrupt().GetOutcome(); got != protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED {
 		t.Fatalf("window outcome = %s, want FAILED", got)
 	}
 	if rig.paused() {

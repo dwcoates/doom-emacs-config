@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/frontend"
 )
@@ -19,9 +19,9 @@ import (
 // stop, and the refusals.
 
 // cancelledOutcome is a shim verdict naming the tasks it stopped.
-func cancelledOutcome(taskIDs ...string) *corev1.DetachedCancelOutcome {
-	return &corev1.DetachedCancelOutcome{Outcome: &corev1.DetachedCancelOutcome_Cancelled{
-		Cancelled: &corev1.DetachedAgentsCancelled{TaskIds: taskIDs},
+func cancelledOutcome(taskIDs ...string) *protocolv1.DetachedCancelOutcome {
+	return &protocolv1.DetachedCancelOutcome{Outcome: &protocolv1.DetachedCancelOutcome_Cancelled{
+		Cancelled: &protocolv1.DetachedAgentsCancelled{TaskIds: taskIDs},
 	}}
 }
 
@@ -41,8 +41,8 @@ func liveManagerWithDetachedAgent(t *testing.T, taskID string) (*Manager, func()
 	if !ok {
 		t.Fatalf("consumer pusher = %T, want *fakePusher", d.consumer.push)
 	}
-	if _, err := d.consumer.work.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: taskID, Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_" + taskID, Description: "fan out",
+	if _, err := d.consumer.work.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: taskID, Kind: protocolv1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_" + taskID, Description: "fan out",
 	}, 10); err != nil {
 		t.Fatalf("observeTaskStarted: %v", err)
 	}
@@ -111,8 +111,8 @@ func TestCancelDetachedAgentsSettlesTheStoppedAgentsDetachedWork(t *testing.T) {
 func TestCancelDetachedAgentsSettlesNothingWhenNothingWasRunning(t *testing.T) {
 	// Arrange: the shim answers that it had nothing detached.
 	m, lastClient, push := liveManagerWithDetachedAgent(t, "task_1")
-	lastClient().detachedCancelOutcome = &corev1.DetachedCancelOutcome{
-		Outcome: &corev1.DetachedCancelOutcome_NothingRunning{NothingRunning: &corev1.NoDetachedAgentsRunning{}},
+	lastClient().detachedCancelOutcome = &protocolv1.DetachedCancelOutcome{
+		Outcome: &protocolv1.DetachedCancelOutcome_NothingRunning{NothingRunning: &protocolv1.NoDetachedAgentsRunning{}},
 	}
 	push.mu.Lock()
 	before := len(push.work)
@@ -168,8 +168,8 @@ func TestCancelDetachedAgentsSettlesOnlyTheAgentsTheShimStopped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("existing: %v", err)
 	}
-	if _, err := d.consumer.work.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: "task_2", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_task_2",
+	if _, err := d.consumer.work.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: "task_2", Kind: protocolv1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_task_2",
 	}, 10); err != nil {
 		t.Fatalf("observeTaskStarted: %v", err)
 	}
@@ -221,8 +221,8 @@ func TestADetachedCancelSettlementRefusalIsNotAnUpdate(t *testing.T) {
 	// Arrange: a verdict with no terminal status and no exit code, which
 	// SettleDetachedWork refuses rather than resolving to a confident "done".
 	s := newDetachedWorkStore("/ws", nil)
-	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
+	if _, err := s.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
 	}, 10); err != nil {
 		t.Fatal(err)
 	}

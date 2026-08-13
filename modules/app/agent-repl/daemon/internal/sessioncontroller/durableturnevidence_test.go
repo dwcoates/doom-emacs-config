@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // THE STORE'S RECORD OUTRANKS ANY PROCESS'S MEMORY. These cover the read that
@@ -17,7 +17,7 @@ func TestDurableTurnEndsNamesTheStoredTerminal(t *testing.T) {
 	// Arrange — the turn finished while the daemon was away, so its TurnEnded
 	// sits in the store above the daemon's last-delivered seq.
 	h := newDurableHarness(t, &durableHistorySpy{
-		events: []*corev1.Event{turnEndEvent(corev1.Plane_PLANE_STREAM, 7, "turn-finished")},
+		events: []*protocolv1.Event{turnEndEvent(protocolv1.Plane_PLANE_STREAM, 7, "turn-finished")},
 	})
 
 	// Act.
@@ -35,7 +35,7 @@ func TestDurableTurnEndsNamesTheStoredTerminal(t *testing.T) {
 func TestDurableTurnEndsReportsNothingForAnUnendedTurn(t *testing.T) {
 	// Arrange — the store holds the turn's START and no end: it was cut.
 	h := newDurableHarness(t, &durableHistorySpy{
-		events: []*corev1.Event{turnStartEvent(corev1.Plane_PLANE_STREAM, 7, "turn-cut")},
+		events: []*protocolv1.Event{turnStartEvent(protocolv1.Plane_PLANE_STREAM, 7, "turn-cut")},
 	})
 
 	// Act.
@@ -54,7 +54,7 @@ func TestDurableTurnEndsIgnoresATerminalForAnotherTurn(t *testing.T) {
 	// Arrange — a stored end that names a DIFFERENT turn proves nothing about
 	// the standing claim.
 	h := newDurableHarness(t, &durableHistorySpy{
-		events: []*corev1.Event{turnEndEvent(corev1.Plane_PLANE_STREAM, 7, "turn-other")},
+		events: []*protocolv1.Event{turnEndEvent(protocolv1.Plane_PLANE_STREAM, 7, "turn-other")},
 	})
 
 	// Act.
@@ -105,7 +105,7 @@ func TestDurableTurnEndsReadsFromTheDaemonsOwnLastSeenSeq(t *testing.T) {
 func TestDurableTurnEndsRefusesATruncatedScan(t *testing.T) {
 	// Arrange — a capped read leaves ends UNSEEN, and unseen is not absent.
 	h := newDurableHarness(t, &durableHistorySpy{
-		events:    []*corev1.Event{turnStartEvent(corev1.Plane_PLANE_STREAM, 7, "turn-standing")},
+		events:    []*protocolv1.Event{turnStartEvent(protocolv1.Plane_PLANE_STREAM, 7, "turn-standing")},
 		truncated: "max_events",
 	})
 

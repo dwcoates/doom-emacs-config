@@ -3,7 +3,7 @@ package sessioncontroller
 import (
 	"context"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/storehistory"
@@ -44,7 +44,7 @@ import (
 // pageFromControllerPage serves one history page for a workspace with a LIVE
 // session controller, reading the bounded page THROUGH THE SHIM.
 func (m *Manager) pageFromControllerPage(ctx context.Context, d *sessionController, generationID string, resolve pageBoundResolver, first bool) (pageOutcome, error) {
-	fetch := func(ctx context.Context, anchor storehistory.PageAnchor) (*corev1.MessagePage, error) {
+	fetch := func(ctx context.Context, anchor storehistory.PageAnchor) (*protocolv1.MessagePage, error) {
 		// The anchor crosses the package boundary unchanged: a head arm that
 		// names nothing, or a before_seq the STORE minted and this daemon kept.
 		// Nothing is computed here, which is the point.

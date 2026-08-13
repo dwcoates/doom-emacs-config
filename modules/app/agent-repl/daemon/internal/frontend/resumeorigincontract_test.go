@@ -3,8 +3,8 @@ package frontend
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -48,9 +48,9 @@ func TestAnOriginUnawareReaderKeepsTheRestOfATurnStarted(t *testing.T) {
 	// store holds it. Reading it back through a decoder that has no NAME for 30
 	// is what an older binary does; proto3's open enums make that a number it
 	// carries rather than a frame it rejects.
-	started := &corev1.TurnStarted{
+	started := &protocolv1.TurnStarted{
 		TurnId:       "t-1",
-		PromptOrigin: corev1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART,
+		PromptOrigin: protocolv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART,
 	}
 	blob, err := proto.Marshal(started)
 	if err != nil {
@@ -58,7 +58,7 @@ func TestAnOriginUnawareReaderKeepsTheRestOfATurnStarted(t *testing.T) {
 	}
 
 	// Act.
-	back := &corev1.TurnStarted{}
+	back := &protocolv1.TurnStarted{}
 	if err := proto.Unmarshal(blob, back); err != nil {
 		t.Fatalf("unmarshal TurnStarted: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestTheNewOriginIsNotTheKeepAliveExclusion(t *testing.T) {
 	// user is owed, so conflating the two would delete the work.
 
 	// Act, Assert.
-	if corev1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART == corev1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE {
+	if protocolv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART == protocolv1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE {
 		t.Fatal("the re-drive origin must not be the keep-alive's, whose turns are excluded wholesale")
 	}
 }
@@ -105,7 +105,7 @@ func TestAReDrivenTurnsOutputCuratesRegardlessOfOrigin(t *testing.T) {
 
 // storedAssistantEvent is one vendor assistant message under the re-drive's
 // request id — the continuation, which must survive.
-func storedAssistantEvent(t *testing.T, uuid, requestID string) *corev1.Event {
+func storedAssistantEvent(t *testing.T, uuid, requestID string) *protocolv1.Event {
 	t.Helper()
 	vendor, err := anypb.New(&datav1.AssistantMessage{
 		Uuid: uuid,
@@ -118,11 +118,11 @@ func storedAssistantEvent(t *testing.T, uuid, requestID string) *corev1.Event {
 	if err != nil {
 		t.Fatalf("pack vendor assistant message: %v", err)
 	}
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId:    "s1",
 		Seq:          11,
 		ProducedAtMs: 1_700_000_000_001,
 		RequestId:    requestID,
-		Payload:      &corev1.Event_Vendor{Vendor: vendor},
+		Payload:      &protocolv1.Event_Vendor{Vendor: vendor},
 	}
 }

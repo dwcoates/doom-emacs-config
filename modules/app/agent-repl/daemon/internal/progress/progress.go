@@ -39,9 +39,9 @@ import (
 	"sync"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/dlog"
@@ -158,7 +158,7 @@ type workspaceProgress struct {
 	// cold" alarm — the ping paid full freight, meaning the cache it was sent
 	// to refresh had already expired.
 	turnID     string
-	turnOrigin corev1.PromptOrigin
+	turnOrigin protocolv1.PromptOrigin
 	// lastTurnEndAtMs is when the previous turn in this workspace ended, as
 	// observed by THIS daemon process. It exists for the expensive-turn alert,
 	// which is otherwise unable to say why the prompt cache missed: the gap
@@ -334,7 +334,7 @@ func (m *Manager) NoteTurnRejected(workspace, sessionID string) {
 // not a user asking for the turn to stop), and it reaches this resolver from
 // nowhere: sessioncontroller's interject calls the shim client directly, while the
 // frontend command's Interrupt is the sole caller here.
-func (m *Manager) NoteInterrupt(workspace, sessionID string, outcome corev1.InterruptOutcome) {
+func (m *Manager) NoteInterrupt(workspace, sessionID string, outcome protocolv1.InterruptOutcome) {
 	if workspace == "" {
 		m.logf("progress: NoteInterrupt with no workspace (session=%s outcome=%s); ignoring", sessionID, outcome)
 		return
@@ -465,7 +465,7 @@ func (m *Manager) SetCounts(workspace string, pendingPermissions, queueDepth int
 //
 // A nil event, an empty workspace or an empty session id is a programmer error,
 // surfaced loudly.
-func (m *Manager) Apply(workspace, sessionID string, ev *corev1.Event) error {
+func (m *Manager) Apply(workspace, sessionID string, ev *protocolv1.Event) error {
 	if ev == nil {
 		return fmt.Errorf("progress: Apply got a nil event")
 	}
@@ -495,7 +495,7 @@ func (m *Manager) Apply(workspace, sessionID string, ev *corev1.Event) error {
 	}
 
 	switch p := ev.GetPayload().(type) {
-	case *corev1.Event_TurnStarted:
+	case *protocolv1.Event_TurnStarted:
 		if m.openTurnLocked(wp, at) {
 			m.pushLocked(workspace, wp)
 		}
@@ -509,12 +509,12 @@ func (m *Manager) Apply(workspace, sessionID string, ev *corev1.Event) error {
 		// misattribute that result's cost.
 		wp.turnID = p.TurnStarted.GetTurnId()
 		wp.turnOrigin = p.TurnStarted.GetPromptOrigin()
-	case *corev1.Event_TurnEnded:
+	case *protocolv1.Event_TurnEnded:
 		m.closeTurnLocked(wp, p.TurnEnded, at)
 		m.pushLocked(workspace, wp)
-	case *corev1.Event_MessageLatency:
+	case *protocolv1.Event_MessageLatency:
 		m.applyLatencyLocked(workspace, wp, p.MessageLatency)
-	case *corev1.Event_Vendor:
+	case *protocolv1.Event_Vendor:
 		if err := m.applyVendorLocked(workspace, wp, p.Vendor, at); err != nil {
 			return err
 		}
@@ -544,7 +544,7 @@ func (m *Manager) Apply(workspace, sessionID string, ev *corev1.Event) error {
 // one), so a zero arriving anyway is a producer bug rather than absence — but
 // it is still refused rather than allowed to blank a figure already standing,
 // which is the EPHEMERAL contract's absence-tolerance.
-func (m *Manager) applyLatencyLocked(workspace string, wp *workspaceProgress, ml *corev1.MessageLatency) {
+func (m *Manager) applyLatencyLocked(workspace string, wp *workspaceProgress, ml *protocolv1.MessageLatency) {
 	next := ml.GetTtftMs()
 	if next <= 0 {
 		m.logf("progress: MessageLatency with no usable ttft ws=%s uuid=%s ttft=%d; ignored",
@@ -889,7 +889,7 @@ func (m *Manager) applyResultCostLocked(workspace string, wp *workspaceProgress,
 		return
 	}
 	wp.view.ExpensiveTurn = alert
-	if wp.turnOrigin == corev1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE {
+	if wp.turnOrigin == protocolv1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE {
 		m.logf("progress: CACHE KEEP-ALIVE CAME BACK COLD ws=%s turn_id=%s uncached_input_tokens=%d threshold=%d — the ping is a dozen tokens of prompt and it paid for the whole conversation, so the cache it was sent to refresh had already expired; the keep-alive bought nothing for this turn; %s",
 			workspace, wp.turnID, uncached, m.uncachedAlertTokens, cacheAgeEvidence(wp, atMs))
 	} else {
@@ -996,7 +996,7 @@ func (m *Manager) openTurnLocked(wp *workspaceProgress, atMs int64) bool {
 // conversation instead of surviving only until the next turn overwrites them.
 // The footer reads `--` between turns for the same reason the clock does —
 // there is no turn in flight for it to report on.
-func (m *Manager) closeTurnLocked(wp *workspaceProgress, te *corev1.TurnEnded, atMs int64) {
+func (m *Manager) closeTurnLocked(wp *workspaceProgress, te *protocolv1.TurnEnded, atMs int64) {
 	wp.turnOpen = false
 	wp.lastTurnEndAtMs = atMs
 	wp.view.TurnStartedAtMs = 0

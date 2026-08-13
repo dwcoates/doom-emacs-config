@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
@@ -213,9 +213,9 @@ func raceAssertNoSessionFrame(t *testing.T, shim *AgentShim) {
 
 func raceApplyCost(t *testing.T, prog *progress.Manager) {
 	t.Helper()
-	if err := prog.Apply(raceWorkspace, raceSession, &corev1.Event{
+	if err := prog.Apply(raceWorkspace, raceSession, &protocolv1.Event{
 		SessionId: raceSession, ProducedAtMs: 1,
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "pre-materialization-turn"}},
+		Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "pre-materialization-turn"}},
 	}); err != nil {
 		t.Fatalf("start pending turn: %v", err)
 	}
@@ -223,7 +223,7 @@ func raceApplyCost(t *testing.T, prog *progress.Manager) {
 	if err != nil {
 		t.Fatalf("encode cost result: %v", err)
 	}
-	if err := prog.Apply(raceWorkspace, raceSession, &corev1.Event{SessionId: raceSession, ProducedAtMs: 2, Payload: &corev1.Event_Vendor{Vendor: any}}); err != nil {
+	if err := prog.Apply(raceWorkspace, raceSession, &protocolv1.Event{SessionId: raceSession, ProducedAtMs: 2, Payload: &protocolv1.Event_Vendor{Vendor: any}}); err != nil {
 		t.Fatalf("apply pending cost: %v", err)
 	}
 }

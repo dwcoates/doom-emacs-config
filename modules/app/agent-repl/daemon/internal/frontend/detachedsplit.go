@@ -19,9 +19,9 @@
 package frontend
 
 import (
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // Curation is one event's whole verdict: what lands in the top-level feed, what
@@ -131,7 +131,7 @@ type ToolOutcome struct {
 // and is routed to that agent's fold; everything else is the main conversation
 // and stays on the feed delta. Nothing reaches a frontend as a top-level item
 // without passing this partition.
-func CurateEvent(workspace, fence string, ev *corev1.Event) (Curation, error) {
+func CurateEvent(workspace, fence string, ev *protocolv1.Event) (Curation, error) {
 	cd, envs, err := conversationDeltaFromEvent(workspace, fence, ev)
 	if err != nil || cd == nil {
 		return Curation{}, err
@@ -206,7 +206,7 @@ func CurateEvent(workspace, fence string, ev *corev1.Event) (Curation, error) {
 // and the outcome is left uncorrelated rather than attributed to a guess — a
 // launch attributed to the wrong call would open a work under the wrong card
 // and stamp the wrong tool's id on it.
-func toolOutcomes(ev *corev1.Event) []ToolOutcome {
+func toolOutcomes(ev *protocolv1.Event) []ToolOutcome {
 	vendor := ev.GetVendor()
 	if vendor == nil {
 		return nil

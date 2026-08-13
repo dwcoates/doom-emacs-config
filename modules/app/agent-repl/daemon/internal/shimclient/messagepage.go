@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // THE BOUNDED, BACKWARD-ANCHORED READ, ASKED OF THE SHIM
-// (agentshim/core/v1/message-page.proto).
+// (protocol/v1/message-page.proto).
 //
 // # Why it goes through the shim at all
 //
@@ -79,18 +79,18 @@ type MessagePageAnchor struct {
 // id.
 //
 // EVERY failure is an error and none of them is an empty page.
-func (c *Client) MessagePage(ctx context.Context, anchor MessagePageAnchor) (*corev1.MessagePage, error) {
+func (c *Client) MessagePage(ctx context.Context, anchor MessagePageAnchor) (*protocolv1.MessagePage, error) {
 	ac := c.currentConn()
 	if ac == nil {
 		return nil, fmt.Errorf("%w (session %s)", ErrMessagePageNotConnected, c.cfg.SessionID)
 	}
 
 	requestID := newMessagePageID()
-	req := &corev1.MessagePageRequest{RequestId: requestID}
+	req := &protocolv1.MessagePageRequest{RequestId: requestID}
 	if anchor.Head {
-		req.Anchor = &corev1.MessagePageRequest_Head{Head: &corev1.MessagePageHead{}}
+		req.Anchor = &protocolv1.MessagePageRequest_Head{Head: &protocolv1.MessagePageHead{}}
 	} else {
-		req.Anchor = &corev1.MessagePageRequest_BeforeSeq{BeforeSeq: anchor.BeforeSeq}
+		req.Anchor = &protocolv1.MessagePageRequest_BeforeSeq{BeforeSeq: anchor.BeforeSeq}
 	}
 
 	ch := make(chan ackResult, 1)
@@ -137,7 +137,7 @@ func (c *Client) MessagePage(ctx context.Context, anchor MessagePageAnchor) (*co
 // resolveMessagePage delivers a page to the request its id names. A page with
 // no waiter is a late answer to a request this daemon already gave up on: it is
 // loud-logged and dropped, never applied.
-func (c *Client) resolveMessagePage(ac *activeConn, page *corev1.MessagePage) {
+func (c *Client) resolveMessagePage(ac *activeConn, page *protocolv1.MessagePage) {
 	if !ac.deliver(page.GetRequestId(), ackResult{page: page}) {
 		c.logf("received MessagePage for unknown request_id=%s (stray or late); dropped", page.GetRequestId())
 	}

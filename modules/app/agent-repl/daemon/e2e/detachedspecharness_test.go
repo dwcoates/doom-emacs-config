@@ -27,9 +27,9 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -41,18 +41,18 @@ import (
 // file plane, PERSISTENT, no dedup key (the store derives its own uuid: key).
 // Same envelope sidecarLineEvent builds; named separately only so this file's
 // fixtures read as one set.
-func vendorLineEvent(t *testing.T, vendorSessionID string, line *datav1.TranscriptLine) *corev1.Event {
+func vendorLineEvent(t *testing.T, vendorSessionID string, line *datav1.TranscriptLine) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(line)
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId:    vendorSessionID,
-		Plane:        corev1.Plane_PLANE_FILE,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:        protocolv1.Plane_PLANE_FILE,
+		Class:        protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		ProducedAtMs: time.Now().UnixMilli(),
-		Payload:      &corev1.Event_Vendor{Vendor: a},
+		Payload:      &protocolv1.Event_Vendor{Vendor: a},
 	}
 }
 
@@ -150,13 +150,13 @@ func sidechainResponseLine(uuid, parentUUID, sourceToolUseID, agentID, text stri
 // (agent-shim/claude/shim/src/uds/uds-session.ts): STREAM plane, PERSISTENT,
 // carrying DegradedState. recovered=true is the window's CLOSING report, and
 // the daemon re-sends the same card under the same uuid with the resolved arm.
-func degradedStateEvent(vendorSessionID, component, reason string, droppedCount uint64, recovered bool) *corev1.Event {
-	return &corev1.Event{
+func degradedStateEvent(vendorSessionID, component, reason string, droppedCount uint64, recovered bool) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId:    vendorSessionID,
-		Plane:        corev1.Plane_PLANE_STREAM,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:        protocolv1.Plane_PLANE_STREAM,
+		Class:        protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		ProducedAtMs: time.Now().UnixMilli(),
-		Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
+		Payload: &protocolv1.Event_DegradedState{DegradedState: &protocolv1.DegradedState{
 			Component:    component,
 			Reason:       reason,
 			DroppedCount: droppedCount,

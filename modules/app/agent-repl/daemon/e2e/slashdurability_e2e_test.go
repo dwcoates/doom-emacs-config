@@ -36,9 +36,9 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -61,7 +61,7 @@ func slashShapeAContent(literal string) string {
 // carries it, and nothing downstream has ever called GetPromptId. Test 10 is
 // the reason it is populated here rather than left empty — identity, not
 // arrival order, is what must keep two close-together commands apart.
-func slashShapeAEvent(t *testing.T, vendorSessionID, lineUUID, promptID, content string) *corev1.Event {
+func slashShapeAEvent(t *testing.T, vendorSessionID, lineUUID, promptID, content string) *protocolv1.Event {
 	t.Helper()
 	return slashVendorEvent(t, vendorSessionID, &datav1.TranscriptLine{
 		Line: &datav1.TranscriptLine_User{User: &datav1.UserLine{
@@ -81,7 +81,7 @@ func slashShapeAEvent(t *testing.T, vendorSessionID, lineUUID, promptID, content
 // The ENVELOPE is the classification signal here, not the content head. That
 // distinction is the whole of test 8, and it is why this constructor takes the
 // content as a parameter rather than baking a machinery-shaped one in.
-func slashShapeBEvent(t *testing.T, vendorSessionID, lineUUID, content string) *corev1.Event {
+func slashShapeBEvent(t *testing.T, vendorSessionID, lineUUID, content string) *protocolv1.Event {
 	t.Helper()
 	return slashVendorEvent(t, vendorSessionID, &datav1.TranscriptLine{
 		Line: &datav1.TranscriptLine_System{System: &datav1.SystemLine{
@@ -96,18 +96,18 @@ func slashShapeBEvent(t *testing.T, vendorSessionID, lineUUID, content string) *
 // slashVendorEvent wraps one transcript line the way handler.vendorEvent does:
 // file plane, PERSISTENT class, and NO dedup key, because the store derives its
 // own `uuid:` key for a vendor line.
-func slashVendorEvent(t *testing.T, vendorSessionID string, line *datav1.TranscriptLine) *corev1.Event {
+func slashVendorEvent(t *testing.T, vendorSessionID string, line *datav1.TranscriptLine) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(line)
 	if err != nil {
 		t.Fatalf("anypb.New(TranscriptLine): %v", err)
 	}
-	return &corev1.Event{
+	return &protocolv1.Event{
 		SessionId:    vendorSessionID,
-		Plane:        corev1.Plane_PLANE_FILE,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:        protocolv1.Plane_PLANE_FILE,
+		Class:        protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		ProducedAtMs: time.Now().UnixMilli(),
-		Payload:      &corev1.Event_Vendor{Vendor: a},
+		Payload:      &protocolv1.Event_Vendor{Vendor: a},
 	}
 }
 
@@ -118,7 +118,7 @@ func slashVendorEvent(t *testing.T, vendorSessionID string, line *datav1.Transcr
 // states that a durable message's own uuid IS its record's key, so a durable
 // message must be findable in the store under exactly that string. Test 4 is
 // that check, and test 3 is its converse for an ephemeral id.
-func slashLineUUID(ev *corev1.Event) string {
+func slashLineUUID(ev *protocolv1.Event) string {
 	vendor := ev.GetVendor()
 	if vendor == nil {
 		return ""
@@ -280,13 +280,13 @@ func TestE2EModelCommandDoesNotSurviveAReload(t *testing.T) {
 	// outrunning it.
 	store.write(sidecarCompactEvent(vendorID, "e2e-slash-model-sentinel", "sentinel"))
 	tail.awaitSentinel(t, "the sentinel compaction",
-		func(ev *corev1.Event) string {
+		func(ev *protocolv1.Event) string {
 			if slashLineUUID(ev) == model.GetUuid() {
 				return fmt.Sprintf("a durable record was written under the ephemeral /model message's id %q; an ephemeral message is one for which nothing was ever written", model.GetUuid())
 			}
 			return ""
 		},
-		func(ev *corev1.Event) bool { return ev.GetContextCompacted() != nil })
+		func(ev *protocolv1.Event) bool { return ev.GetContextCompacted() != nil })
 }
 
 // --- 3. an ephemeral message never appears in a store page query ------------
@@ -324,13 +324,13 @@ func TestE2EEphemeralMessageIsAbsentFromTheStoreAndThatIsCorrect(t *testing.T) {
 	// And the query over durable records really does return nothing for it.
 	store.write(sidecarCompactEvent(vendorID, "e2e-slash-ephemeral-sentinel", "sentinel"))
 	tail.awaitSentinel(t, "the sentinel compaction",
-		func(ev *corev1.Event) string {
+		func(ev *protocolv1.Event) string {
 			if slashLineUUID(ev) == model.GetUuid() {
 				return fmt.Sprintf("the store holds a durable record under ephemeral message id %q", model.GetUuid())
 			}
 			return ""
 		},
-		func(ev *corev1.Event) bool { return ev.GetContextCompacted() != nil })
+		func(ev *protocolv1.Event) bool { return ev.GetContextCompacted() != nil })
 }
 
 // --- 4. a durable message absent from the store is a LOUD failure -----------
@@ -366,7 +366,7 @@ func TestE2EDurableMessageMissingFromTheStoreIsALoudFailure(t *testing.T) {
 		t.Fatalf("the /compact message is %s, want durable — the CLI wrote a transcript record for it, so the message must claim that record", slashDurabilityOf(compact))
 	}
 	tail.await(t, fmt.Sprintf("the store record backing durable message %q", compact.GetUuid()),
-		func(ev *corev1.Event) bool { return slashLineUUID(ev) == compact.GetUuid() })
+		func(ev *protocolv1.Event) bool { return slashLineUUID(ev) == compact.GetUuid() })
 }
 
 // --- 7. a prompt renders ONLY after its round trip --------------------------

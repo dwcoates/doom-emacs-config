@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/errclass"
@@ -217,7 +217,7 @@ func TestE2EHistoricalUsageIsExplicitlyUntimedAndDeduplicated(t *testing.T) {
 // sidecarAssistantUsageEvent represents a completed file-plane transcript
 // record. It has no stream-plane message_start, so it is the historical case
 // that must retain usage without inventing a generation duration.
-func sidecarAssistantUsageEvent(t *testing.T, vendorSessionID, lineUUID, messageID, agentID string) *corev1.Event {
+func sidecarAssistantUsageEvent(t *testing.T, vendorSessionID, lineUUID, messageID, agentID string) *protocolv1.Event {
 	t.Helper()
 	cacheCreation, err := structpb.NewStruct(map[string]any{"ephemeral_5m_input_tokens": 25, "ephemeral_1h_input_tokens": 50})
 	if err != nil {
@@ -238,7 +238,7 @@ func sidecarAssistantUsageEvent(t *testing.T, vendorSessionID, lineUUID, message
 	if err != nil {
 		t.Fatalf("encode historical assistant transcript line: %v", err)
 	}
-	return &corev1.Event{SessionId: vendorSessionID, Plane: corev1.Plane_PLANE_FILE, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, ProducedAtMs: time.Now().UnixMilli(), Payload: &corev1.Event_Vendor{Vendor: payload}}
+	return &protocolv1.Event{SessionId: vendorSessionID, Plane: protocolv1.Plane_PLANE_FILE, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, ProducedAtMs: time.Now().UnixMilli(), Payload: &protocolv1.Event_Vendor{Vendor: payload}}
 }
 
 // TestE2ESessionViewAggregatesTimedAndUntimedActors verifies that SessionView

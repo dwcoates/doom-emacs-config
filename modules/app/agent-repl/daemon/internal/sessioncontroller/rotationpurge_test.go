@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/ssm"
@@ -57,12 +57,12 @@ func (f *fakeClearCompactStore) resetForRotation(sessionID string) {
 // shim's re-handshake drives, so the reconciliation is exercised on its real
 // trigger rather than by poking fields.
 func (h *repullHarness) rotate(previous, next string) {
-	h.m.onHandshake("ws", "s1", &corev1.ShimHello{
+	h.m.onHandshake("ws", "s1", &protocolv1.ShimHello{
 		SessionId: "s1", Vendor: "claude", ShimVersion: "test", ProtocolVersion: "1",
 		VendorSessionId: previous,
 		QueryInstanceId: "query-repull",
 	})
-	h.m.onHandshake("ws", "s1", &corev1.ShimHello{
+	h.m.onHandshake("ws", "s1", &protocolv1.ShimHello{
 		SessionId: "s1", Vendor: "claude", ShimVersion: "test", ProtocolVersion: "1",
 		VendorSessionId: next,
 		QueryInstanceId: "query-repull",
@@ -272,7 +272,7 @@ func TestAReArmedResyncIsServedWhenTheShimReattaches(t *testing.T) {
 	_ = h.m.Resync("ws", 0)
 
 	// Act
-	h.m.onConnected("ws", "s1", &corev1.ShimHello{SessionId: "s1"})
+	h.m.onConnected("ws", "s1", &protocolv1.ShimHello{SessionId: "s1"})
 
 	// Assert
 	waitFor(t, "the re-armed resync to reach the shim", func() bool { return client.callCount() == 2 })

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // The curation contract for the two first-class context cuts, at the seam the
@@ -24,13 +24,13 @@ func TestAClearAndACompactionAtTheSamePositionGetDistinctIDs(t *testing.T) {
 		sessionID string
 		seq       uint64
 	}{sessionID: "s1", seq: 41}
-	clear := &corev1.Event{
+	clear := &protocolv1.Event{
 		SessionId: position.sessionID, Seq: position.seq,
-		Payload: &corev1.Event_ContextCleared{ContextCleared: &corev1.ContextCleared{}},
+		Payload: &protocolv1.Event_ContextCleared{ContextCleared: &protocolv1.ContextCleared{}},
 	}
-	compact := &corev1.Event{
+	compact := &protocolv1.Event{
 		SessionId: position.sessionID, Seq: position.seq,
-		Payload: &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{}},
+		Payload: &protocolv1.Event_ContextCompacted{ContextCompacted: &protocolv1.ContextCompacted{}},
 	}
 
 	// Act.

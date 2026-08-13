@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/workspace/merge"
 )
@@ -38,7 +38,7 @@ func TestMergeResolutionReturnsWhenItsOwnTurnEnds(t *testing.T) {
 
 	// Act.
 	go func() {
-		done <- h.m.SubmitMergePromptAwaitingTurn(context.Background(), "ws", "req-1", "resolve it", "", corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
+		done <- h.m.SubmitMergePromptAwaitingTurn(context.Background(), "ws", "req-1", "resolve it", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
 	}()
 	<-submitted
 	d := h.controller()
@@ -57,7 +57,7 @@ func TestMergeResolutionIgnoresAnotherTurnsEnd(t *testing.T) {
 	submitted := submitHook(h)
 	done := make(chan error, 1)
 	go func() {
-		done <- h.m.SubmitMergePromptAwaitingTurn(context.Background(), "ws", "req-1", "resolve it", "", corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
+		done <- h.m.SubmitMergePromptAwaitingTurn(context.Background(), "ws", "req-1", "resolve it", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
 	}()
 	<-submitted
 	d := h.controller()
@@ -85,7 +85,7 @@ func TestMergeResolutionIgnoresATurnThatStartedBeforeItArmed(t *testing.T) {
 	submitted := submitHook(h)
 	done := make(chan error, 1)
 	go func() {
-		done <- h.m.SubmitMergePromptAwaitingTurn(context.Background(), "ws", "req-1", "resolve it", "", corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
+		done <- h.m.SubmitMergePromptAwaitingTurn(context.Background(), "ws", "req-1", "resolve it", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
 	}()
 	<-submitted
 	d := h.controller()
@@ -111,7 +111,7 @@ func TestMergeResolutionWithNoLiveSessionIsAnError(t *testing.T) {
 	m := &Manager{logf: func(string, ...any) {}}
 
 	// Act.
-	err := m.SubmitMergePromptAwaitingTurn(context.Background(), "ws", "req-1", "resolve it", "", corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
+	err := m.SubmitMergePromptAwaitingTurn(context.Background(), "ws", "req-1", "resolve it", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
 
 	// Assert.
 	if err == nil {
@@ -127,7 +127,7 @@ func TestMergeResolutionSurfacesASubmitRefusal(t *testing.T) {
 	h := newQueueHarness(t, nil)
 
 	// Act.
-	err := h.m.SubmitMergePromptAwaitingTurn(context.Background(), "ws", "req-1", "resolve it", "", corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
+	err := h.m.SubmitMergePromptAwaitingTurn(context.Background(), "ws", "req-1", "resolve it", "", protocolv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
 
 	// Assert — the refusal is surfaced, and no waiter is left behind.
 	if err == nil {

@@ -5,8 +5,8 @@ import (
 	"sort"
 	"sync"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/inflight"
 	"claude-repld/internal/registry"
@@ -402,7 +402,7 @@ func (m *Manager) noteTurnLiveness(d *sessionController, l ssm.TurnLiveness) {
 // later, never interrupt for it", which is exactly the promise the lease makes.
 // The rationale stays empty because no classifier produced one; the frontend
 // renders the lease work off shutdownHoldScheduleID instead.
-func newParkedEntry(id, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin, queuedAtMs int64) *queueEntry {
+func newParkedEntry(id, requestID, text, permissionMode string, promptOrigin protocolv1.PromptOrigin, queuedAtMs int64) *queueEntry {
 	return &queueEntry{
 		id:             id,
 		requestID:      requestID,
@@ -849,7 +849,7 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 	// only its valid neighbors would make the restore partially succeed while
 	// silently abandoning the invariant violation.
 	for _, row := range rows {
-		if err := validatePromptOrigin(corev1.PromptOrigin(row.PromptOrigin)); err != nil {
+		if err := validatePromptOrigin(protocolv1.PromptOrigin(row.PromptOrigin)); err != nil {
 			m.logf("session-controller: drain-held prompt restore FAILED ws=%q session=%s entry=%s prompt_origin=%d error=%v — no rows from this durable snapshot are being replayed",
 				d.workspace, d.sessionID, row.EntryID, row.PromptOrigin, err)
 			return
@@ -877,7 +877,7 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 			tombstoned = append(tombstoned, row.EntryID)
 			continue
 		}
-		e := newParkedEntry(row.EntryID, row.RequestID, row.Text, row.PermissionMode, corev1.PromptOrigin(row.PromptOrigin), row.QueuedAtMs)
+		e := newParkedEntry(row.EntryID, row.RequestID, row.Text, row.PermissionMode, protocolv1.PromptOrigin(row.PromptOrigin), row.QueuedAtMs)
 		e.drainRowPending = true
 		if held && row.ScheduleID == liveSchedule {
 			e.shutdownHoldScheduleID = row.ScheduleID

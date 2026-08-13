@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/shimclient"
 
@@ -20,7 +20,7 @@ import (
 
 // statusEvent is a vendor stream-plane StatusMessage — the ticker the vendor
 // opens and closes a compaction with.
-func statusEvent(t *testing.T, seq uint64, status string) *corev1.Event {
+func statusEvent(t *testing.T, seq uint64, status string) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.ClaudeStreamMessage{
 		Msg: &datav1.ClaudeStreamMessage_Status{Status: &datav1.StatusMessage{Status: status}},
@@ -28,7 +28,7 @@ func statusEvent(t *testing.T, seq uint64, status string) *corev1.Event {
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "vendor-uuid", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // newCutConsumer builds a consumer over a recording applier.
@@ -95,7 +95,7 @@ func TestAVendorEventWithNoStatusMovesNoAxis(t *testing.T) {
 func TestTheFirstClassCutEventsCloseTheirAxes(t *testing.T) {
 	tests := []struct {
 		name     string
-		ev       *corev1.Event
+		ev       *protocolv1.Event
 		wantAxis string
 	}{
 		{

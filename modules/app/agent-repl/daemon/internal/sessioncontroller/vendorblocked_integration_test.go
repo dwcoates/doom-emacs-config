@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/ssm"
@@ -102,16 +102,16 @@ func newVendorBlockedRig(t *testing.T) *vendorBlockedRig {
 func (r *vendorBlockedRig) apply(payload any) {
 	r.t.Helper()
 	r.seq++
-	ev := &corev1.Event{SessionId: vendorBlockedSessionID, Seq: r.seq}
+	ev := &protocolv1.Event{SessionId: vendorBlockedSessionID, Seq: r.seq}
 	switch p := payload.(type) {
-	case *corev1.SessionStarted:
-		ev.Payload = &corev1.Event_SessionStarted{SessionStarted: p}
-	case *corev1.TurnStarted:
-		ev.Plane = corev1.Plane_PLANE_STREAM
-		ev.Payload = &corev1.Event_TurnStarted{TurnStarted: p}
-	case *corev1.TurnEnded:
-		ev.Plane = corev1.Plane_PLANE_STREAM
-		ev.Payload = &corev1.Event_TurnEnded{TurnEnded: p}
+	case *protocolv1.SessionStarted:
+		ev.Payload = &protocolv1.Event_SessionStarted{SessionStarted: p}
+	case *protocolv1.TurnStarted:
+		ev.Plane = protocolv1.Plane_PLANE_STREAM
+		ev.Payload = &protocolv1.Event_TurnStarted{TurnStarted: p}
+	case *protocolv1.TurnEnded:
+		ev.Plane = protocolv1.Plane_PLANE_STREAM
+		ev.Payload = &protocolv1.Event_TurnEnded{TurnEnded: p}
 	default:
 		r.t.Fatalf("vendorBlockedRig.apply: unsupported payload %T", payload)
 	}
@@ -141,14 +141,14 @@ func (r *vendorBlockedRig) state() frontendv1.RenderState {
 // settleReady brings the workspace up to a resolved, non-blue baseline.
 func (r *vendorBlockedRig) settleReady() {
 	r.t.Helper()
-	r.apply(&corev1.SessionStarted{Model: "test-model", Cwd: vendorBlockedWorkspace})
+	r.apply(&protocolv1.SessionStarted{Model: "test-model", Cwd: vendorBlockedWorkspace})
 	d, err := r.m.existing(vendorBlockedWorkspace)
 	if err != nil {
 		r.t.Fatalf("existing controller: %v", err)
 	}
 	r.m.onConnectedForGeneration(
 		vendorBlockedWorkspace, vendorBlockedSessionID, d.generationID,
-		&corev1.ShimHello{SessionId: vendorBlockedSessionID},
+		&protocolv1.ShimHello{SessionId: vendorBlockedSessionID},
 	)
 	if err := r.mgr.ApplyBackfillState(vendorBlockedWorkspace, BackfillDone); err != nil {
 		r.t.Fatalf("apply backfill done: %v", err)
@@ -159,16 +159,16 @@ func TestAVendorBlockedWorkspaceStillAcceptsTheNextPrompt(t *testing.T) {
 	// Arrange — a turn the vendor refused.
 	rig := newVendorBlockedRig(t)
 	rig.settleReady()
-	rig.apply(&corev1.TurnStarted{})
+	rig.apply(&protocolv1.TurnStarted{})
 
 	// Act — the block is reported, the user retries anyway, and the retry
 	// succeeds.
-	rig.apply(&corev1.TurnEnded{StopReason: "authentication_failed", IsError: true})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "authentication_failed", IsError: true})
 	blocked := rig.state()
 	submitErr := rig.m.SubmitPrompt(context.Background(), vendorBlockedWorkspace, "vendor-blocked-request", "try again", "", testPromptOrigin)
 	delivered := rig.client.promptTexts()
-	rig.apply(&corev1.TurnStarted{})
-	rig.apply(&corev1.TurnEnded{StopReason: "end_turn"})
+	rig.apply(&protocolv1.TurnStarted{})
+	rig.apply(&protocolv1.TurnEnded{StopReason: "end_turn"})
 
 	// Assert — purple was reported, it never gated the prompt, and the clean
 	// turn superseded it wholesale.

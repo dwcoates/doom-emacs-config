@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // capture returns a logf that records every line, so the LOUDNESS of a
@@ -230,7 +230,7 @@ func TestCommandIsAlwaysTheLocalSide(t *testing.T) {
 func TestInterruptErrorFailedIsAFailure(t *testing.T) {
 	// Arrange.
 	// Act.
-	got := InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
+	got := InterruptError(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED)
 	// Assert.
 	if !errors.Is(got, ErrInterruptUndelivered) {
 		t.Fatalf("InterruptError(FAILED) = %v, want ErrInterruptUndelivered", got)
@@ -241,7 +241,7 @@ func TestInterruptErrorFailedClassifiesAsUndelivered(t *testing.T) {
 	// Arrange: the outcome routed through the ONE command door.
 	logf, _ := capture()
 	// Act.
-	got := Command(logf, InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED))
+	got := Command(logf, InterruptError(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED))
 	// Assert.
 	if TypeName(got) != string(TypeInterruptUndelivered) {
 		t.Fatalf("error_type = %q, want %q", TypeName(got), TypeInterruptUndelivered)
@@ -252,7 +252,7 @@ func TestInterruptErrorAlreadyCompleteIsQuietSuccess(t *testing.T) {
 	// Arrange: the outcome that exists precisely so a stop landing on a
 	// finished turn stops being painted as a failed stop.
 	// Act.
-	got := InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
+	got := InterruptError(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE)
 	// Assert.
 	if got != nil {
 		t.Fatalf("InterruptError(ALREADY_COMPLETE) = %v, want nil; the user asked for the turn to be over and it already is", got)
@@ -262,7 +262,7 @@ func TestInterruptErrorAlreadyCompleteIsQuietSuccess(t *testing.T) {
 func TestInterruptErrorInterruptedIsQuietSuccess(t *testing.T) {
 	// Arrange.
 	// Act.
-	got := InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
+	got := InterruptError(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 	// Assert.
 	if got != nil {
 		t.Fatalf("InterruptError(INTERRUPTED) = %v, want nil", got)
@@ -273,7 +273,7 @@ func TestInterruptErrorUnspecifiedIsQuietSuccess(t *testing.T) {
 	// Arrange: every non-interrupt command acks with UNSPECIFIED, so treating
 	// it as a failure would fail every command in the tree.
 	// Act.
-	got := InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED)
+	got := InterruptError(protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED)
 	// Assert.
 	if got != nil {
 		t.Fatalf("InterruptError(UNSPECIFIED) = %v, want nil", got)
@@ -434,7 +434,7 @@ func TestTurnEndClassifiesEachBlockingStopReason(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			te := &corev1.TurnEnded{StopReason: tc.stop}
+			te := &protocolv1.TurnEnded{StopReason: tc.stop}
 			// Act.
 			got := TurnEnd(te)
 			// Assert.
@@ -450,7 +450,7 @@ func TestTurnEndClassifiesEachBlockingStopReason(t *testing.T) {
 
 func TestTurnEndReturnsNilForACleanConclusion(t *testing.T) {
 	// Arrange.
-	te := &corev1.TurnEnded{StopReason: "end_turn"}
+	te := &protocolv1.TurnEnded{StopReason: "end_turn"}
 	// Act.
 	got := TurnEnd(te)
 	// Assert.
@@ -462,7 +462,7 @@ func TestTurnEndReturnsNilForACleanConclusion(t *testing.T) {
 func TestTurnEndReturnsNilForAUserInterrupt(t *testing.T) {
 	// Arrange: `aborted` is a conclusion the user themselves asked for, so it
 	// is not a failure — the same carve-out the SSM makes.
-	te := &corev1.TurnEnded{StopReason: "aborted", IsError: true}
+	te := &protocolv1.TurnEnded{StopReason: "aborted", IsError: true}
 	// Act.
 	got := TurnEnd(te)
 	// Assert.
@@ -474,7 +474,7 @@ func TestTurnEndReturnsNilForAUserInterrupt(t *testing.T) {
 func TestTurnEndClassifiesAnUnrecognizedErrorEndAsTurnFailed(t *testing.T) {
 	// Arrange: an is_error end whose reason is not in the known family. The
 	// SSM still blocks on it, so it must still get a name.
-	te := &corev1.TurnEnded{StopReason: "something_new", IsError: true}
+	te := &protocolv1.TurnEnded{StopReason: "something_new", IsError: true}
 	// Act.
 	got := TurnEnd(te)
 	// Assert.
@@ -485,7 +485,7 @@ func TestTurnEndClassifiesAnUnrecognizedErrorEndAsTurnFailed(t *testing.T) {
 
 func TestTurnEndKeepsTheStopReasonAsEvidence(t *testing.T) {
 	// Arrange.
-	te := &corev1.TurnEnded{StopReason: "refusal"}
+	te := &protocolv1.TurnEnded{StopReason: "refusal"}
 	// Act.
 	got := TurnEnd(te)
 	// Assert.
@@ -772,7 +772,7 @@ func TestAnApiErrorWithNoRequestIdCarriesNoVendorContext(t *testing.T) {
 
 func TestAnUnnamedTurnEndCarriesTheVendorsStopReason(t *testing.T) {
 	// Arrange.
-	te := &corev1.TurnEnded{StopReason: "something_new", IsError: true}
+	te := &protocolv1.TurnEnded{StopReason: "something_new", IsError: true}
 	// Act.
 	card := TurnEnd(te)
 	// Assert.

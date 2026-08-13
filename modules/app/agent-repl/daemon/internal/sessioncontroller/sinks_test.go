@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/errclass"
@@ -120,10 +120,10 @@ func (p *fakePusher) conversationDeltas() []*frontendv1.ConversationDelta {
 
 // permissionResolutions extracts, in push order, the resolution of every
 // permission Message keyed by uuid across the recorded deltas.
-func (p *fakePusher) permissionResolutions(uuid string) []corev1.PermissionItem_Resolution {
+func (p *fakePusher) permissionResolutions(uuid string) []protocolv1.PermissionItem_Resolution {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	var out []corev1.PermissionItem_Resolution
+	var out []protocolv1.PermissionItem_Resolution
 	for _, d := range p.convo {
 		for _, it := range d.GetMessages() {
 			if it.GetUuid() == uuid {
@@ -162,15 +162,15 @@ type fakeApplier struct {
 	readerPositions *fakePositions
 	positionsOnce   sync.Once
 
-	applied []*corev1.Event
+	applied []*protocolv1.Event
 	// boundaries are the turn boundaries that reached the ONE boundary door
 	// (ApplyTurnBoundary), which is where a turn now touches state at all.
-	boundaries []*corev1.Event
+	boundaries []*protocolv1.Event
 	err        error
 	turns      []string
 	starts     map[string]uint64
 	ends       map[string]uint64
-	bridges    []*corev1.Event
+	bridges    []*protocolv1.Event
 	bridgeErr  error
 	// reconciled records one entry per ReconcileTasks call, as
 	// (sessionID, liveTaskIDs).
@@ -205,7 +205,7 @@ type fakeApplier struct {
 	alreadyCompleteDid bool
 	alreadyCompleteErr error
 	// onApply observes each event at the instant the SSM is fed it. See Apply.
-	onApply func(*corev1.Event)
+	onApply func(*protocolv1.Event)
 	// activeTurnIDsErr fails the durable turn-claim READ, which is what a drain
 	// hold falls back from when it cannot name the turn it is waiting on.
 	activeTurnIDsErr error
@@ -975,7 +975,7 @@ type reconcileCall struct {
 	taskIDs   []string
 }
 
-func (a *fakeApplier) Apply(ev *corev1.Event) error {
+func (a *fakeApplier) Apply(ev *protocolv1.Event) error {
 	// THE ACCEPT-TO-CONSUMPTION SEAM. The SSM apply is where a boundary stops
 	// being the daemon's private business: it resolves the workspace state and
 	// publishes it, which is the first moment any frontend can observe that a
@@ -994,7 +994,7 @@ func (a *fakeApplier) Apply(ev *corev1.Event) error {
 // SSM: it moves the fake ledger and reports the turn liveness that ledger
 // implies, so the consumer under test reads liveness from the same place
 // production does.
-func (a *fakeApplier) ApplyTurnBoundary(workspace, claimant, liveQueryID string, ev *corev1.Event) (ssm.TurnBoundary, error) {
+func (a *fakeApplier) ApplyTurnBoundary(workspace, claimant, liveQueryID string, ev *protocolv1.Event) (ssm.TurnBoundary, error) {
 	before, after, replayed, err := a.resolveTurnLifecycle(workspace, claimant, liveQueryID, ev)
 	if err == nil {
 		a.reconcMutex.Lock()
@@ -1009,7 +1009,7 @@ func (a *fakeApplier) ApplyTurnBoundary(workspace, claimant, liveQueryID string,
 	}, err
 }
 
-func (a *fakeApplier) resolveTurnLifecycle(_ string, _ string, _ string, ev *corev1.Event) (before, after []string, replayed bool, err error) {
+func (a *fakeApplier) resolveTurnLifecycle(_ string, _ string, _ string, ev *protocolv1.Event) (before, after []string, replayed bool, err error) {
 	a.reconcMutex.Lock()
 	defer a.reconcMutex.Unlock()
 	if a.starts == nil {
@@ -1020,7 +1020,7 @@ func (a *fakeApplier) resolveTurnLifecycle(_ string, _ string, _ string, ev *cor
 	id := turnID(ev)
 	key := fmt.Sprintf("%s:%d", id, ev.GetSeq())
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_TurnStarted:
+	case *protocolv1.Event_TurnStarted:
 		if prior, ok := a.starts[key]; ok && prior == ev.GetSeq() {
 			return before, before, true, nil
 		}
@@ -1034,7 +1034,7 @@ func (a *fakeApplier) resolveTurnLifecycle(_ string, _ string, _ string, ev *cor
 		}
 		a.starts[key] = ev.GetSeq()
 		a.turns = append(a.turns, id)
-	case *corev1.Event_TurnEnded:
+	case *protocolv1.Event_TurnEnded:
 		if prior, ok := a.ends[key]; ok && prior == ev.GetSeq() {
 			return before, before, true, nil
 		}
@@ -1055,7 +1055,7 @@ func (a *fakeApplier) resolveTurnLifecycle(_ string, _ string, _ string, ev *cor
 	return before, append([]string(nil), a.turns...), false, nil
 }
 
-func (a *fakeApplier) ResolveTurnClaimBridge(_ string, _ string, ev *corev1.Event) (bool, error) {
+func (a *fakeApplier) ResolveTurnClaimBridge(_ string, _ string, ev *protocolv1.Event) (bool, error) {
 	a.reconcMutex.Lock()
 	defer a.reconcMutex.Unlock()
 	a.bridges = append(a.bridges, ev)
@@ -1277,13 +1277,13 @@ func TestTurnClaimBridgeTouchesOnlyDurableLedgerAndAccountingCorrelation(t *test
 		func(string, ...any) {}, nil,
 		func(bool, int64) { turnNotifications++ }, nil, nil, nil,
 	)
-	bridge := &corev1.Event{
+	bridge := &protocolv1.Event{
 		SessionId: "vendor-new",
 		Seq:       2,
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
+		Class:     protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		RequestId: "turn-1",
-		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+		Payload: &protocolv1.Event_TurnClaimBridge{TurnClaimBridge: &protocolv1.TurnClaimBridge{
 			TurnId: "turn-1", PreviousSessionId: "vendor-old",
 		}},
 	}
@@ -1327,7 +1327,7 @@ func TestTurnClaimBridgeTouchesOnlyDurableLedgerAndAccountingCorrelation(t *test
 // fakeProgress records what the consumer folds into the progress resolver.
 type fakeProgress struct {
 	mu         sync.Mutex
-	applied    []*corev1.Event
+	applied    []*protocolv1.Event
 	workspaces []string
 	err        error
 	// sessionIDs records the CANONICAL session id fed alongside each applied
@@ -1349,10 +1349,10 @@ type fakeProgress struct {
 type interruptNote struct {
 	workspace string
 	sessionID string
-	outcome   corev1.InterruptOutcome
+	outcome   protocolv1.InterruptOutcome
 }
 
-func (p *fakeProgress) Apply(workspace, sessionID string, ev *corev1.Event) error {
+func (p *fakeProgress) Apply(workspace, sessionID string, ev *protocolv1.Event) error {
 	p.workspaces = append(p.workspaces, workspace)
 	p.sessionIDs = append(p.sessionIDs, sessionID)
 	p.applied = append(p.applied, ev)
@@ -1378,7 +1378,7 @@ func (p *fakeProgress) turnRejectionNotes() []interruptNote {
 	return append([]interruptNote(nil), p.turnRejections...)
 }
 
-func (p *fakeProgress) NoteInterrupt(workspace, sessionID string, outcome corev1.InterruptOutcome) {
+func (p *fakeProgress) NoteInterrupt(workspace, sessionID string, outcome protocolv1.InterruptOutcome) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.interrupts = append(p.interrupts, interruptNote{workspace: workspace, sessionID: sessionID, outcome: outcome})
@@ -1447,10 +1447,10 @@ func TestLifecycleEventsReachTheProgressResolver(t *testing.T) {
 	prog := &fakeProgress{}
 	c := newProgressConsumer(prog)
 	// Act — the lifecycle plane carries the turn boundaries the footer clocks.
-	c.Apply(&corev1.Event{
+	c.Apply(&protocolv1.Event{
 		SessionId: "s1",
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
+		Plane:     protocolv1.Plane_PLANE_STREAM,
+		Payload:   &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}},
 	})
 	// Assert
 	if len(prog.applied) != 1 {
@@ -1470,10 +1470,10 @@ func TestProgressIsFedTheDaemonSessionIdNotTheEventsVendorId(t *testing.T) {
 	prog := &fakeProgress{}
 	c := newProgressConsumer(prog)
 	// Act — a store event filed under the vendor conversation uuid.
-	c.Apply(&corev1.Event{
+	c.Apply(&protocolv1.Event{
 		SessionId: "f59e9d4b-a7c1-4b5f-baec-981de8aa872c",
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
+		Plane:     protocolv1.Plane_PLANE_STREAM,
+		Payload:   &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}},
 	})
 	// Assert
 	if len(prog.sessionIDs) != 1 {
@@ -1489,9 +1489,9 @@ func TestDataEventsReachTheProgressResolver(t *testing.T) {
 	prog := &fakeProgress{}
 	c := newProgressConsumer(prog)
 	// Act — the data plane carries the tickers and windows.
-	c.Consume(&corev1.Event{
+	c.Consume(&protocolv1.Event{
 		SessionId: "s1",
-		Payload:   &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "u1"}},
+		Payload:   &protocolv1.Event_ContentDelta{ContentDelta: &protocolv1.ContentDelta{Uuid: "u1"}},
 	})
 	// Assert
 	if len(prog.applied) != 1 {
@@ -1504,9 +1504,9 @@ func TestMessageLatencyReachesTheProgressResolver(t *testing.T) {
 	prog := &fakeProgress{}
 	c := newProgressConsumer(prog)
 	// Act — the ttft relay is a progress fact and nothing else.
-	c.Consume(&corev1.Event{
+	c.Consume(&protocolv1.Event{
 		SessionId: "s1",
-		Payload:   &corev1.Event_MessageLatency{MessageLatency: &corev1.MessageLatency{Uuid: "m1", TtftMs: 865}},
+		Payload:   &protocolv1.Event_MessageLatency{MessageLatency: &protocolv1.MessageLatency{Uuid: "m1", TtftMs: 865}},
 	})
 	// Assert
 	if len(prog.applied) != 1 {
@@ -1519,9 +1519,9 @@ func TestMessageLatencyPushesNoConversationFrame(t *testing.T) {
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 	// Act
-	c.Consume(&corev1.Event{
+	c.Consume(&protocolv1.Event{
 		SessionId: "s1",
-		Payload:   &corev1.Event_MessageLatency{MessageLatency: &corev1.MessageLatency{Uuid: "m1", TtftMs: 865}},
+		Payload:   &protocolv1.Event_MessageLatency{MessageLatency: &protocolv1.MessageLatency{Uuid: "m1", TtftMs: 865}},
 	})
 	// Assert
 	if n := len(push.typing) + len(push.convo) + len(push.heartbeats); n != 0 {
@@ -1539,23 +1539,23 @@ func backfillConsumer(states *[]string) *consumer {
 }
 
 // transcriptEvent wraps a file-plane TranscriptLine as a vendor event.
-func transcriptEvent(t *testing.T) *corev1.Event {
+func transcriptEvent(t *testing.T) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.TranscriptLine{})
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "s1", Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "s1", Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 // streamEventOf wraps a stream-plane ClaudeStreamMessage as a vendor event.
-func streamEventOf(t *testing.T) *corev1.Event {
+func streamEventOf(t *testing.T) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(&datav1.ClaudeStreamMessage{})
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "s1", Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "s1", Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 func TestFilePlaneEventMarksTheBackfillDone(t *testing.T) {
@@ -1602,9 +1602,9 @@ func TestSidecarUnparsedEventMarksTheBackfillFailed(t *testing.T) {
 	var states []string
 	c := backfillConsumer(&states)
 	// Act — the one sidecar read failure that reaches the daemon durably.
-	c.Consume(&corev1.Event{
+	c.Consume(&protocolv1.Event{
 		SessionId: "s1",
-		Payload: &corev1.Event_Unparsed{Unparsed: &corev1.UnparsedEvent{
+		Payload: &protocolv1.Event_Unparsed{Unparsed: &protocolv1.UnparsedEvent{
 			Producer: sidecarProducer, SourcePath: "/p/u.jsonl", ByteOffset: 42, Error: "bad json",
 		}},
 	})
@@ -1620,9 +1620,9 @@ func TestAnUnparsedEventFromTheSHIMIsNotABackfillFailure(t *testing.T) {
 	var states []string
 	c := backfillConsumer(&states)
 	// Act
-	c.Consume(&corev1.Event{
+	c.Consume(&protocolv1.Event{
 		SessionId: "s1",
-		Payload: &corev1.Event_Unparsed{Unparsed: &corev1.UnparsedEvent{
+		Payload: &protocolv1.Event_Unparsed{Unparsed: &protocolv1.UnparsedEvent{
 			Producer: "claude-shim", Error: "bad json",
 		}},
 	})
@@ -1636,9 +1636,9 @@ func TestBackfillFailedIsTerminalForTheSession(t *testing.T) {
 	// Arrange — a transcript the sidecar could not fully read.
 	var states []string
 	c := backfillConsumer(&states)
-	c.Consume(&corev1.Event{
+	c.Consume(&protocolv1.Event{
 		SessionId: "s1",
-		Payload: &corev1.Event_Unparsed{Unparsed: &corev1.UnparsedEvent{
+		Payload: &protocolv1.Event_Unparsed{Unparsed: &protocolv1.UnparsedEvent{
 			Producer: sidecarProducer, Error: "bad json",
 		}},
 	})
@@ -1658,9 +1658,9 @@ func TestProgressFoldFailureDoesNotStopTheStream(t *testing.T) {
 	c := newConsumer("ws", "s1", push, &fakeApplier{}, prog, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	// Act
-	c.Consume(&corev1.Event{
+	c.Consume(&protocolv1.Event{
 		SessionId: "s1",
-		Payload:   &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "u1", Delta: &corev1.ContentDelta_Text{Text: "hi"}}},
+		Payload:   &protocolv1.Event_ContentDelta{ContentDelta: &protocolv1.ContentDelta{Uuid: "u1", Delta: &protocolv1.ContentDelta_Text{Text: "hi"}}},
 	})
 	// Assert — the footer degrading is not a reason to stop delivering
 	// conversation, so the typing relay still went out.
@@ -1675,9 +1675,9 @@ func TestConsumeContentDeltaPushesTyping(t *testing.T) {
 	c := newTestConsumer(push, &fakeApplier{})
 
 	// Act.
-	c.Consume(&corev1.Event{
+	c.Consume(&protocolv1.Event{
 		SessionId: "s1",
-		Payload:   &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "u1", Delta: &corev1.ContentDelta_Text{Text: "hi"}}},
+		Payload:   &protocolv1.Event_ContentDelta{ContentDelta: &protocolv1.ContentDelta{Uuid: "u1", Delta: &protocolv1.ContentDelta_Text{Text: "hi"}}},
 	})
 
 	// Assert: the ContentDelta is embedded in the TypingDelta unchanged (S9).
@@ -1694,9 +1694,9 @@ func TestResyncReplaysLatestPermissionItem(t *testing.T) {
 	// Arrange: a permission goes pending then allowed on the same request_id.
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
-	req := &corev1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}
-	c.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_PENDING, ""))
-	c.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_ALLOWED, ""))
+	req := &protocolv1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}
+	c.pushPermission(permissionItem(req, protocolv1.PermissionItem_RESOLUTION_PENDING, ""))
+	c.pushPermission(permissionItem(req, protocolv1.PermissionItem_RESOLUTION_ALLOWED, ""))
 	push.mu.Lock()
 	push.convo = nil // drop the live pushes; only the resync replay should remain
 	push.mu.Unlock()
@@ -1706,7 +1706,7 @@ func TestResyncReplaysLatestPermissionItem(t *testing.T) {
 
 	// Assert: exactly one replay carrying the LATEST resolution (allowed).
 	got := push.permissionResolutions("r1")
-	if len(got) != 1 || got[0] != corev1.PermissionItem_RESOLUTION_ALLOWED {
+	if len(got) != 1 || got[0] != protocolv1.PermissionItem_RESOLUTION_ALLOWED {
 		t.Fatalf("resync replay resolutions = %v, want [ALLOWED]", got)
 	}
 }
@@ -1718,9 +1718,9 @@ func TestConsumeHeartbeatProgressPushesHeartbeatView(t *testing.T) {
 	c := newTestConsumer(push, &fakeApplier{})
 
 	// Act.
-	c.Consume(&corev1.Event{
+	c.Consume(&protocolv1.Event{
 		SessionId: "s1",
-		Payload:   &corev1.Event_HeartbeatProgress{HeartbeatProgress: &corev1.HeartbeatProgress{ToolUseId: "tu1", ElapsedSeconds: 12}},
+		Payload:   &protocolv1.Event_HeartbeatProgress{HeartbeatProgress: &protocolv1.HeartbeatProgress{ToolUseId: "tu1", ElapsedSeconds: 12}},
 	})
 
 	// Assert.
@@ -1736,9 +1736,9 @@ func TestConsumeHeartbeatProgressEmbedsProgressUnchanged(t *testing.T) {
 	c := newTestConsumer(push, &fakeApplier{})
 
 	// Act.
-	c.Consume(&corev1.Event{
+	c.Consume(&protocolv1.Event{
 		SessionId: "s1",
-		Payload: &corev1.Event_HeartbeatProgress{HeartbeatProgress: &corev1.HeartbeatProgress{
+		Payload: &protocolv1.Event_HeartbeatProgress{HeartbeatProgress: &protocolv1.HeartbeatProgress{
 			ToolUseId:       "tu1",
 			ToolName:        "Bash",
 			ParentToolUseId: "tu0",
@@ -1761,9 +1761,9 @@ func TestConsumeHeartbeatProgressStampsWorkspaceAndSession(t *testing.T) {
 	c := newTestConsumer(push, &fakeApplier{})
 
 	// Act.
-	c.Consume(&corev1.Event{
+	c.Consume(&protocolv1.Event{
 		SessionId: "s1",
-		Payload:   &corev1.Event_HeartbeatProgress{HeartbeatProgress: &corev1.HeartbeatProgress{ToolUseId: "tu1"}},
+		Payload:   &protocolv1.Event_HeartbeatProgress{HeartbeatProgress: &protocolv1.HeartbeatProgress{ToolUseId: "tu1"}},
 	})
 
 	// Assert.
@@ -1780,9 +1780,9 @@ func TestConsumeHeartbeatProgressPushesNothingForNilProgress(t *testing.T) {
 	c := newTestConsumer(push, &fakeApplier{})
 
 	// Act.
-	c.Consume(&corev1.Event{
+	c.Consume(&protocolv1.Event{
 		SessionId: "s1",
-		Payload:   &corev1.Event_HeartbeatProgress{HeartbeatProgress: nil},
+		Payload:   &protocolv1.Event_HeartbeatProgress{HeartbeatProgress: nil},
 	})
 
 	// Assert.
@@ -1807,7 +1807,7 @@ func TestConsumeVendorPushesConversationDeltaWithThroughSeq(t *testing.T) {
 	}
 
 	// Act.
-	c.Consume(&corev1.Event{SessionId: "s1", Seq: 9, Payload: &corev1.Event_Vendor{Vendor: any}})
+	c.Consume(&protocolv1.Event{SessionId: "s1", Seq: 9, Payload: &protocolv1.Event_Vendor{Vendor: any}})
 
 	// Assert.
 	if len(push.convo) != 1 {
@@ -1825,7 +1825,7 @@ func TestApplyForwardsToSSMAndRefreshesTaskCatalogOnTaskEvents(t *testing.T) {
 	c := newTestConsumer(push, applier)
 
 	// Act.
-	c.Apply(&corev1.Event{SessionId: "s1", Seq: 1, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "t1"}}})
+	c.Apply(&protocolv1.Event{SessionId: "s1", Seq: 1, Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "t1"}}})
 
 	// Assert.
 	if len(applier.applied) != 1 {
@@ -1841,10 +1841,10 @@ func TestApplyTaskProgressReachesSSMAndRingWithoutPushingCatalog(t *testing.T) {
 	push := &fakePusher{}
 	applier := &fakeApplier{}
 	c := newTestConsumer(push, applier)
-	progress := &corev1.Event{
+	progress := &protocolv1.Event{
 		SessionId: "s1",
 		Seq:       2,
-		Payload: &corev1.Event_TaskProgress{TaskProgress: &corev1.TaskProgress{
+		Payload: &protocolv1.Event_TaskProgress{TaskProgress: &protocolv1.TaskProgress{
 			TaskId: "t1",
 		}},
 	}
@@ -1872,7 +1872,7 @@ func TestApplyNonTaskEventDoesNotPushCatalog(t *testing.T) {
 	c := newTestConsumer(push, &fakeApplier{})
 
 	// Act.
-	c.Apply(&corev1.Event{SessionId: "s1", Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}})
+	c.Apply(&protocolv1.Event{SessionId: "s1", Seq: 1, Plane: protocolv1.Plane_PLANE_STREAM, Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}}})
 
 	// Assert.
 	if len(push.catalog) != 0 {
@@ -1891,8 +1891,8 @@ func TestApplyRejectsFileTurnEndBeforeQueueAndStateConsumers(t *testing.T) {
 		func(active bool, _ int64) { boundaries = append(boundaries, active) },
 		nil, nil, nil,
 	)
-	c.Apply(turnStartEvent(corev1.Plane_PLANE_STREAM, 12885, "turn-new"))
-	c.Apply(turnEndEvent(corev1.Plane_PLANE_FILE, 12891, ""))
+	c.Apply(turnStartEvent(protocolv1.Plane_PLANE_STREAM, 12885, "turn-new"))
+	c.Apply(turnEndEvent(protocolv1.Plane_PLANE_FILE, 12891, ""))
 
 	// A turn boundary reaches state through ApplyTurnBoundary and nowhere else,
 	// so that is where the accepted one is counted. The file-plane end never got
@@ -1919,19 +1919,19 @@ func TestApplyRejectsFileTurnEndBeforeQueueAndStateConsumers(t *testing.T) {
 func TestApplyScopesATurnStartConflictToTheTurn(t *testing.T) {
 	tests := []struct {
 		name        string
-		second      *corev1.Event
+		second      *protocolv1.Event
 		wantScoped  bool
 		wantRefused bool
 	}{
 		{
 			name:        "a second start claims a turn identity that is still open",
-			second:      turnStartEvent(corev1.Plane_PLANE_STREAM, 2, "turn-1"),
+			second:      turnStartEvent(protocolv1.Plane_PLANE_STREAM, 2, "turn-1"),
 			wantScoped:  true,
 			wantRefused: true,
 		},
 		{
 			name:        "an end names a turn the ledger never opened",
-			second:      turnEndEvent(corev1.Plane_PLANE_STREAM, 2, "turn-other"),
+			second:      turnEndEvent(protocolv1.Plane_PLANE_STREAM, 2, "turn-other"),
 			wantScoped:  false,
 			wantRefused: true,
 		},
@@ -1940,7 +1940,7 @@ func TestApplyScopesATurnStartConflictToTheTurn(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, nil)
-			if err := c.Apply(turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "turn-1")); err != nil {
+			if err := c.Apply(turnStartEvent(protocolv1.Plane_PLANE_STREAM, 1, "turn-1")); err != nil {
 				t.Fatalf("first start: %v", err)
 			}
 
@@ -1960,14 +1960,14 @@ func TestApplyScopesATurnStartConflictToTheTurn(t *testing.T) {
 
 func TestApplyFiresOnSessionStarted(t *testing.T) {
 	// Arrange.
-	var seen *corev1.SessionStarted
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, func(ss *corev1.SessionStarted) { seen = ss }, nil, nil, nil, nil)
+	var seen *protocolv1.SessionStarted
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, func(ss *protocolv1.SessionStarted) { seen = ss }, nil, nil, nil, nil)
 
 	// Act.
-	c.Apply(&corev1.Event{SessionId: "s1", Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{Source: corev1.SessionSource_SESSION_SOURCE_RESUME}}})
+	c.Apply(&protocolv1.Event{SessionId: "s1", Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{Source: protocolv1.SessionSource_SESSION_SOURCE_RESUME}}})
 
 	// Assert.
-	if seen == nil || seen.GetSource() != corev1.SessionSource_SESSION_SOURCE_RESUME {
+	if seen == nil || seen.GetSource() != protocolv1.SessionSource_SESSION_SOURCE_RESUME {
 		t.Fatal("onSessionStarted must fire with the SessionStarted payload")
 	}
 }
@@ -2012,7 +2012,7 @@ func TestDegradedStateBecomesAFailureCard(t *testing.T) {
 	c := newTestConsumer(push, &fakeApplier{})
 
 	// Act.
-	c.Degraded("s1", nil, &corev1.DegradedState{Component: "store", Reason: "down"})
+	c.Degraded("s1", nil, &protocolv1.DegradedState{Component: "store", Reason: "down"})
 
 	// Assert.
 	got := failureItems(push)
@@ -2030,7 +2030,7 @@ func TestDegradedStateCardCarriesTheDroppedCount(t *testing.T) {
 	c := newTestConsumer(push, &fakeApplier{})
 
 	// Act.
-	c.Degraded("s1", nil, &corev1.DegradedState{Component: "store", Reason: "down", DroppedCount: 12})
+	c.Degraded("s1", nil, &protocolv1.DegradedState{Component: "store", Reason: "down", DroppedCount: 12})
 
 	// Assert.
 	if got := failureItems(push)[0].GetDetail(); !strings.Contains(got, "dropped=12") {
@@ -2185,7 +2185,7 @@ func TestResyncReplaysRetainedConversationDeltas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	c.Consume(&corev1.Event{SessionId: "s1", Seq: 5, Payload: &corev1.Event_Vendor{Vendor: any}})
+	c.Consume(&protocolv1.Event{SessionId: "s1", Seq: 5, Payload: &protocolv1.Event_Vendor{Vendor: any}})
 
 	// Act.
 	c.resync(0)
@@ -2200,7 +2200,7 @@ func TestResyncRespectsFromSeq(t *testing.T) {
 	// Arrange.
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
-	mk := func(seq uint64) *corev1.Event {
+	mk := func(seq uint64) *protocolv1.Event {
 		a, err := anypb.New(&datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
 			Uuid:    "u",
 			Message: &datav1.ApiAssistantMessage{Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "x"}}}}},
@@ -2208,7 +2208,7 @@ func TestResyncRespectsFromSeq(t *testing.T) {
 		if err != nil {
 			t.Fatalf("anypb.New: %v", err)
 		}
-		return &corev1.Event{SessionId: "s1", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+		return &protocolv1.Event{SessionId: "s1", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 	}
 	c.retain(mk(3))
 	c.retain(mk(7))
@@ -2229,8 +2229,8 @@ func TestResyncReportsTheRingFloor(t *testing.T) {
 	// Arrange — the oldest retained seq is what the ring replay could cover.
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
-	c.retain(&corev1.Event{SessionId: "s1", Seq: 6108})
-	c.retain(&corev1.Event{SessionId: "s1", Seq: 7117})
+	c.retain(&protocolv1.Event{SessionId: "s1", Seq: 6108})
+	c.retain(&protocolv1.Event{SessionId: "s1", Seq: 7117})
 
 	// Act.
 	floor, haveFloor := c.resync(0)
@@ -2259,8 +2259,8 @@ func TestResyncIgnoresSeqlessItemsWhenReportingTheFloor(t *testing.T) {
 	// Arrange — a daemon-composed permission item carries no store seq, so it
 	// says nothing about how far back the ring reaches.
 	c := newTestConsumer(&fakePusher{}, &fakeApplier{})
-	c.retain(&corev1.Event{SessionId: "s1", Seq: 0})
-	c.retain(&corev1.Event{SessionId: "s1", Seq: 42})
+	c.retain(&protocolv1.Event{SessionId: "s1", Seq: 0})
+	c.retain(&protocolv1.Event{SessionId: "s1", Seq: 42})
 
 	// Act.
 	floor, haveFloor := c.resync(0)
@@ -2272,23 +2272,23 @@ func TestResyncIgnoresSeqlessItemsWhenReportingTheFloor(t *testing.T) {
 }
 
 // vendorEvent wraps a ClaudeStreamMessage as a vendor core Event.
-func vendorEvent(t *testing.T, csm *datav1.ClaudeStreamMessage, seq uint64) *corev1.Event {
+func vendorEvent(t *testing.T, csm *datav1.ClaudeStreamMessage, seq uint64) *protocolv1.Event {
 	t.Helper()
 	a, err := anypb.New(csm)
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "s1", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "s1", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
-func initEvent(t *testing.T, seq uint64, commands ...string) *corev1.Event {
+func initEvent(t *testing.T, seq uint64, commands ...string) *protocolv1.Event {
 	t.Helper()
 	return vendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_SystemInit{
 		SystemInit: &datav1.SystemInit{Model: "opus", SlashCommands: commands},
 	}}, seq)
 }
 
-func commandsChangedEvent(t *testing.T, seq uint64, names ...string) *corev1.Event {
+func commandsChangedEvent(t *testing.T, seq uint64, names ...string) *protocolv1.Event {
 	t.Helper()
 	cmds := make([]*datav1.SlashCommandRef, 0, len(names))
 	for _, n := range names {
@@ -2369,7 +2369,7 @@ func TestCommandsChangedBeforeInitPushesNothing(t *testing.T) {
 // --- BackgroundTasksChanged: the authoritative live-task set ----------------
 
 // backgroundTasksEvent wraps a live-set snapshot as a vendor core Event.
-func backgroundTasksEvent(t *testing.T, seq uint64, taskIDs ...string) *corev1.Event {
+func backgroundTasksEvent(t *testing.T, seq uint64, taskIDs ...string) *protocolv1.Event {
 	t.Helper()
 	refs := make([]*datav1.BackgroundTaskRef, 0, len(taskIDs))
 	for _, id := range taskIDs {
@@ -2383,7 +2383,7 @@ func backgroundTasksEvent(t *testing.T, seq uint64, taskIDs ...string) *corev1.E
 	if err != nil {
 		t.Fatalf("anypb.New: %v", err)
 	}
-	return &corev1.Event{SessionId: "s1", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+	return &protocolv1.Event{SessionId: "s1", Seq: seq, Payload: &protocolv1.Event_Vendor{Vendor: a}}
 }
 
 func TestBackgroundTasksChangedReconcilesTheSSM(t *testing.T) {
@@ -2426,9 +2426,9 @@ func TestBackgroundTasksChangedRepublishesTheTaskCatalog(t *testing.T) {
 	// Arrange — a ghost the roster is still showing as running.
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
-	c.Apply(&corev1.Event{
+	c.Apply(&protocolv1.Event{
 		SessionId: "s1", Seq: 1, ProducedAtMs: 100,
-		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "ghost", Kind: corev1.TaskKind_TASK_KIND_AGENT}},
+		Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "ghost", Kind: protocolv1.TaskKind_TASK_KIND_AGENT}},
 	})
 	push.mu.Lock()
 	push.catalog = nil
@@ -2563,7 +2563,7 @@ func TestSessionEndedReportsTheDeath(t *testing.T) {
 	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, func() { ended++ })
 
 	// Act.
-	c.Apply(&corev1.Event{Payload: &corev1.Event_SessionEnded{SessionEnded: &corev1.SessionEnded{}}})
+	c.Apply(&protocolv1.Event{Payload: &protocolv1.Event_SessionEnded{SessionEnded: &protocolv1.SessionEnded{}}})
 
 	// Assert.
 	if ended != 1 {
@@ -2577,7 +2577,7 @@ func TestATurnEndDoesNotReportADeath(t *testing.T) {
 	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, func() { ended++ })
 
 	// Act.
-	c.Apply(&corev1.Event{Plane: corev1.Plane_PLANE_STREAM, Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}}})
+	c.Apply(&protocolv1.Event{Plane: protocolv1.Plane_PLANE_STREAM, Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{}}})
 
 	// Assert.
 	if ended != 0 {
@@ -2701,13 +2701,13 @@ func TestTurnClaimBridgeEscalatesOnlyConflictsWithLiveClaims(t *testing.T) {
 				func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
 				nil, nil, nil, nil, nil,
 			)
-			bridge := &corev1.Event{
+			bridge := &protocolv1.Event{
 				SessionId: "vendor-new",
 				Seq:       6,
-				Plane:     corev1.Plane_PLANE_STREAM,
-				Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+				Plane:     protocolv1.Plane_PLANE_STREAM,
+				Class:     protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 				RequestId: "daemon-prompt-2-d41297f08566",
-				Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+				Payload: &protocolv1.Event_TurnClaimBridge{TurnClaimBridge: &protocolv1.TurnClaimBridge{
 					TurnId: "daemon-prompt-2-d41297f08566", PreviousSessionId: "vendor-old",
 				}},
 			}
@@ -2742,13 +2742,13 @@ func TestDeadClaimBridgeRefusalIsStillRecordedLoudly(t *testing.T) {
 		func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
 		nil, nil, nil, nil, nil,
 	)
-	bridge := &corev1.Event{
+	bridge := &protocolv1.Event{
 		SessionId: "vendor-new",
 		Seq:       6,
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
+		Class:     protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		RequestId: "daemon-prompt-2-d41297f08566",
-		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+		Payload: &protocolv1.Event_TurnClaimBridge{TurnClaimBridge: &protocolv1.TurnClaimBridge{
 			TurnId: "daemon-prompt-2-d41297f08566", PreviousSessionId: "vendor-old",
 		}},
 	}
@@ -2797,13 +2797,13 @@ func TestDeadClaimBridgeStillCorrelatesForTheUsageThatFollows(t *testing.T) {
 		"ws", "s1", &fakePusher{}, applier, &fakeProgress{}, newFakeClearCompactStore(), emptyTurnAccountingStore{},
 		func(string, ...any) {}, nil, nil, nil, nil, nil,
 	)
-	bridge := &corev1.Event{
+	bridge := &protocolv1.Event{
 		SessionId: "vendor-new",
 		Seq:       6,
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:     protocolv1.Plane_PLANE_STREAM,
+		Class:     protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		RequestId: turnID,
-		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+		Payload: &protocolv1.Event_TurnClaimBridge{TurnClaimBridge: &protocolv1.TurnClaimBridge{
 			TurnId: turnID, PreviousSessionId: "vendor-old",
 		}},
 	}
@@ -2835,11 +2835,11 @@ func TestDeadClaimBridgeWritesNoDurableRow(t *testing.T) {
 	)
 
 	// Act.
-	_ = c.ApplyTurnClaimBridge(&corev1.Event{
+	_ = c.ApplyTurnClaimBridge(&protocolv1.Event{
 		SessionId: "vendor-new", Seq: 6,
-		Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
 		RequestId: turnID,
-		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+		Payload: &protocolv1.Event_TurnClaimBridge{TurnClaimBridge: &protocolv1.TurnClaimBridge{
 			TurnId: turnID, PreviousSessionId: "vendor-old",
 		}},
 	})
@@ -2853,7 +2853,7 @@ func TestDeadClaimBridgeWritesNoDurableRow(t *testing.T) {
 
 // terminalResultEvent is a vendor result the consumer retains against an open
 // turn, which is what pendingTerminal holds.
-func terminalResultEvent(t *testing.T, seq uint64) *corev1.Event {
+func terminalResultEvent(t *testing.T, seq uint64) *protocolv1.Event {
 	t.Helper()
 	return vendorEvent(t, &datav1.ClaudeStreamMessage{
 		Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}},
@@ -3030,11 +3030,11 @@ func degradedAccountingConsumer(logs *levelSplitLogs) *consumer {
 func runTerminalSettlementFailure(t *testing.T, c *consumer) {
 	t.Helper()
 	c.accountingStore = failingTurnAccountingStore{err: errors.New("disk unavailable")}
-	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 1, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "t"}}}); err != nil {
 		t.Fatal(err)
 	}
 	c.Consume(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}}}))
-	if err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 2, Plane: protocolv1.Plane_PLANE_STREAM, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t"}}}); err != nil {
 		t.Fatalf("Apply error = %v, want the turn boundary accepted despite the settlement failure", err)
 	}
 }
@@ -3090,7 +3090,7 @@ func TestUnknownUsageObservationDegradationTakesTheWarnChannel(t *testing.T) {
 	c.accounting.queryID = "q"
 
 	// Act.
-	if err := c.Apply(&corev1.Event{Seq: 9, RequestId: "t-missing", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t-missing", true)}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 9, RequestId: "t-missing", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t-missing", true)}}); err != nil {
 		t.Fatalf("Apply error = %v, want the event still applied", err)
 	}
 
@@ -3107,7 +3107,7 @@ func TestRejectedAccountingObservationTakesTheWarnChannel(t *testing.T) {
 	c.accounting.queryID = "q"
 
 	// Act.
-	if err := c.Apply(&corev1.Event{Seq: 9, RequestId: "t-missing", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t-missing", true)}}); err != nil {
+	if err := c.Apply(&protocolv1.Event{Seq: 9, RequestId: "t-missing", Payload: &protocolv1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t-missing", true)}}); err != nil {
 		t.Fatalf("Apply error = %v, want the event still applied", err)
 	}
 
@@ -3165,7 +3165,7 @@ func TestAPermissionItemStatesTheDurableArm(t *testing.T) {
 	c := newTestConsumer(push, &fakeApplier{})
 
 	// Act.
-	c.pushPermission(permissionItem(&corev1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}, corev1.PermissionItem_RESOLUTION_PENDING, ""))
+	c.pushPermission(permissionItem(&protocolv1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}, protocolv1.PermissionItem_RESOLUTION_PENDING, ""))
 
 	// Assert.
 	push.mu.Lock()
