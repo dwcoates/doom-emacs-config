@@ -1,10 +1,14 @@
 // footer.proto — The consolidated progress footer.
+//
+// It also carries prompt intake and the daemon-held prompt queue, which the
+// footer's composer owns.
 
 syntax = "proto3";
 
 package frontend.v1;
 
 import "protocol/v1/core.proto";
+import "frontend/v1/commands.proto";
 import "frontend/v1/feed.proto";
 import "frontend/v1/state.proto";
 
@@ -314,4 +318,294 @@ message AccountingInvalid {
   // client renders the strings and parses nothing. Never empty when this arm
   // is set.
   repeated string problems = 1;
+}
+
+// ==========================================================================
+// Prompt intake: submission, interrupt, and the daemon-held queue of prompts awaiting delivery.
+// ==========================================================================
+
+message SubmitPromptCmd {
+  string text = 1;
+  string permission_mode = 2;
+  // Required origin selected by the concrete frontend send site. The daemon
+  // rejects UNSPECIFIED rather than guessing which UI or automation acted.
+  protocol.v1.PromptOrigin prompt_origin = 3;
+}
+
+// Stop the running turn. Interrupting a LIVE TURN never asks for
+// confirmation. When no turn is live but subagent tasks are, the daemon
+// refuses with CommandAck.interrupt_confirm_required and performs the
+// interrupt only on a resend carrying confirm_agents=true — stopping working
+// subagents is the one interrupt worth a deliberate second keystroke.
+message InterruptCmd {
+  bool confirm_agents = 1;
+}
+
+// Cancel the workspace session's DETACHED background agents: the subagent,
+// shell and workflow tasks still working after the turn that launched them
+// has ended.
+//
+// WHY IT IS ITS OWN COMMAND RATHER THAN A FLAG ON InterruptCmd. An interrupt
+// stops the TURN. The state this command exists for — main turn over,
+// detached agents still running — is precisely the state in which there is no
+// turn to stop, so an interrupt sent into it is a guaranteed no-op that the
+// shim answers ALREADY_COMPLETE. The one state that raised the interrupt's
+// "cancel the running subagents?" question was the one state its answer could
+// not act on; this command is what that yes now sends.
+//
+// IT CARRIES NO CONFIRMATION ECHO, unlike InterruptCmd.confirm_agents. There
+// is nothing here to confirm: the command's ONLY effect is stopping detached
+// agents, so sending it IS the deliberate second keystroke that flag exists to
+// require. A frontend asks its user before it sends, never after.
+//
+// The session is the command envelope's `workspace`; the command has no
+// fields of its own.
+message CancelDetachedAgentsCmd {}
+
+// What a CancelDetachedAgentsCmd did, carried on the command's ack.
+//
+// It is the SHIM's verdict relayed, not a daemon re-derivation — see
+// protocol.v1.DetachedCancelOutcome for why only the shim can answer
+// "what was running when this landed?" without racing task end.
+//
+// A ONEOF OF MESSAGES, never a bool: "did it work" cannot distinguish a stop
+// that reached three agents from a session that had nothing to stop from a
+// session that could not be asked, and a frontend renders those three
+// differently.
+message DetachedCancelOutcome {
+  oneof outcome {
+    DetachedAgentsCancelled cancelled = 1;
+    protocol.v1.NoDetachedAgentsRunning nothing_running = 2;
+    protocol.v1.DetachedCancelUnsupported unsupported = 3;
+  }
+}
+
+// Detached work was running and the stop reached every agent counted here.
+//
+// TODO(respelling): this shares a name with protocol.v1.DetachedAgentsCancelled
+// but NOT its contents — that one carries `repeated string task_ids`, this one
+// carries `count`, which has no counterpart there. It was therefore not
+// collapsed into protocol.v1's, and DetachedCancelOutcome above stays declared
+// here for the same reason: its `cancelled` arm must reference this message.
+message DetachedAgentsCancelled {
+  // How many detached agents were stopped. A COUNT rather than the shim's
+  // task ids: a task id is daemon-internal bookkeeping a frontend has no
+  // vocabulary for, and what a frontend renders is "cancelled 3 agents". The
+  // ids stay on the shim-wire arm, where the daemon uses them to settle
+  // exactly those agents' detached-work messages.
+  int64 count = 1;
+}
+
+// TWO OF THE THREE ARMS ABOVE NAME protocol.v1's MESSAGES DIRECTLY. "Nothing
+// was running" and "this shim cannot be asked" are shim-wire facts the daemon
+// forwards unchanged, so this package keeps no second copy of them to drift
+// against the originals.
+//
+// THE DAEMON STILL REFUSES ON THE `nothing_running` ARM (the ack carries
+// ok=false alongside it): a cancel that stopped nothing is a keystroke that did
+// nothing, and reporting it as success is how a stop that silently missed looks
+// exactly like a stop that worked.
+
+
+// ---------------------------------------------------------------------------
+// The daemon-held prompt queue (E4).
+//
+// A prompt submitted while the session's turn is already running is NOT
+// forwarded. The daemon holds it, asks a classifier whether it is the sort of
+// thing the agent should hear NOW rather than after the turn, and either
+// interjects it (interrupt, then submit once the turn has actually ended) or
+// leaves it to be delivered FIFO when the turn ends on its own.
+//
+// EVERY message here is frontend surface, not shim wire. A queued prompt is an
+// artifact of the DAEMON's decision to hold it back — the vendor never saw it
+// and has no message for it — and the queue commands are a user-facing
+// representation of an interject, whose MECHANISM (Interrupt then SubmitPrompt)
+// is what actually crosses the shim UDS. See agent-shim/AGENTS.md, which uses
+// this feature as its worked example of the boundary.
+// ---------------------------------------------------------------------------
+
+// The classifier is still running: the entry is queued and undecided.
+message QueueClassificationPending {}
+
+// Deliver NOW: interrupt the running turn and submit once it has ended.
+message QueueClassificationInterject {
+  // The classifier's stated reason. Free text for display; never parsed.
+  string rationale = 1;
+}
+
+// Deliver when the turn ends on its own; do not interrupt for it.
+message QueueClassificationHold {
+  // The classifier's stated reason. Free text for display; never parsed.
+  string rationale = 1;
+  // Set by QueueAcceptCmd: the user has seen and confirmed this hold. View
+  // state only — it changes nothing about when the entry is delivered. It
+  // lives on this arm because confirming a hold is the ONLY thing
+  // QueueAcceptCmd does; no other verdict has anything to accept.
+  bool accepted = 2;
+}
+
+// NOTHING CLASSIFIED THIS ENTRY, because the turn in front of it is a CONTEXT
+// CUT — `/compact` or `/clear` — and a context cut is never interrupted for a
+// queued prompt.
+//
+// It is a verdict rather than a `hold` arm because the entry is NOT held by
+// anything other than the running turn: it is delivered by the ordinary
+// turn-end drain, in order, exactly as a HOLD verdict is. What it does not have
+// is a classifier behind it. A compaction reads the whole conversation and a
+// clear discards it; interrupting either one spends that cost for nothing and
+// leaves the context in the state the cut was supposed to change, so there is
+// no question left for a model to answer and no model call is spent asking it.
+//
+// THERE IS NO FORCE-THROUGH. QueueForceCmd is refused on one of these for the
+// reason the keep-alive and revival holds refuse it: the force's mechanism is
+// an interrupt, and the interrupt is precisely what must not happen. A user who
+// genuinely wants the cut stopped still has the interrupt command itself, which
+// says what it does.
+message QueueClassificationUninterruptibleTurn {
+  // Which cut is running, so the card can name it. Never UNSPECIFIED: the arm
+  // is set only when the daemon recognized the running prompt as one of the
+  // two, and an arm that could not say which would explain nothing.
+  SessionCommand command = 1;
+}
+
+// The classifier could not be believed (it answered with neither token, or
+// both). Surfaced as its own arm rather than silently defaulted to one of
+// the real verdicts: a frontend must be able to see that nothing decided
+// this. Delivery falls back to the ordinary turn-end drain, so an
+// unclassifiable prompt is delayed, never dropped.
+message QueueClassificationError {
+  // The failure detail. Free text for display; never parsed.
+  string detail = 1;
+}
+
+// One prompt the daemon is holding.
+message QueueEntry {
+  // THE VERDICT IS ONE ONEOF, never a plain enum with loose companion fields
+  // beside it. Each verdict's own facts — a rationale, an acceptance — live on
+  // the arm that owns them, so a rationale cannot arrive with no verdict to
+  // explain and an acceptance cannot be set on an entry no classifier held.
+  string id = 1;
+  string text = 2;
+  int64 queued_at_ms = 3;
+  // What the classifier decided, the arm being set IS the verdict. Never
+  // unset on a wire entry: an entry with no arm here is a malformed frame and
+  // is rejected loudly rather than rendered as pending.
+  oneof classification {
+    QueueClassificationPending pending = 4;
+    QueueClassificationInterject interject = 5;
+    QueueClassificationHold hold_for_turn_end = 6;
+    QueueClassificationError error = 7;
+    // No classifier ran and none will: the turn in front of this entry is a
+    // context cut, which is never interrupted. Delivery is the ordinary
+    // turn-end drain's, so this arm changes WHO decided rather than WHEN the
+    // prompt runs.
+    QueueClassificationUninterruptibleTurn uninterruptible_turn = 8;
+  }
+  // WHAT is holding this entry, when something other than a running turn is.
+  //
+  // An entry is held by at most one thing at a time: a drain lease, a
+  // keep-alive turn and a pending revival are mutually exclusive session
+  // conditions, and an entry held by two of them at once would have two
+  // different sets of exits and two different states to render. Stating them
+  // as arms makes that impossible to express rather than merely unlikely.
+  //
+  // No arm set means the entry is held by the ordinary case — a turn is
+  // running — and the classifier decides when it is delivered.
+  oneof hold {
+    // Held by a scheduled shutdown's drain lease. The classifier NEVER runs
+    // on such an entry: the only exits are the user's explicit QueueForceCmd
+    // (deliver now, further delaying the bounce), QueueCancelCmd, or delivery
+    // after the bounce completes. Held entries are durable and survive the
+    // daemon swap, so such a prompt is delayed, never lost. A frontend
+    // renders a dedicated lease explanation from this arm instead of the
+    // classification.
+    QueueEntryShutdownHold shutdown = 9;
+    // Held because a cache keep-alive turn is in flight. The classifier NEVER
+    // runs on such an entry and there is NO force-through: the keep-alive must
+    // complete before the rewind-and-submit can run, so the only exits are
+    // delivery when the ping's turn ends (the daemon rewinds, then submits
+    // this entry) or QueueCancelCmd. A frontend renders a dedicated "waiting
+    // on a keep-alive response" explanation from this arm instead of the
+    // classification.
+    QueueEntryKeepAliveHold keep_alive = 10;
+    // Held because a compact-first revival's compaction is still pending. Like
+    // the other two holds, the classifier NEVER runs on such an entry and
+    // there is NO force-through: the exits are delivery once the compaction
+    // lands and the gate opens, a loud drop when the revival fails or expires
+    // (a session still asleep can never deliver, so a retained entry would be
+    // a leak, not a delay), or QueueCancelCmd. A frontend renders a dedicated
+    // "waiting on the revival's compaction" explanation from this arm instead
+    // of the classification.
+    QueueEntryRevivalHold revival = 11;
+    // Held because the session's shim is being restarted onto the current
+    // build at the turn boundary (automatic stale-shim refresh). Like the
+    // other holds, the classifier never runs on such an entry; the exit is
+    // delivery the moment the restarted shim reports ready.
+    QueueEntryBuildRefreshHold build_refresh = 12;
+  }
+}
+
+// A scheduled shutdown's drain lease, holding a queue entry.
+message QueueEntryShutdownHold {
+  // The schedule holding this entry, joining the entry to the
+  // ShutdownScheduleView it should explain.
+  string schedule_id = 1;
+}
+
+// The keep-alive turn holding a queue entry.
+message QueueEntryKeepAliveHold {
+  // turn_id of the in-flight keep-alive turn, joining the entry to the turn
+  // whose completion releases it.
+  string turn_id = 1;
+}
+
+// The pending compact-first revival holding a queue entry.
+// DELIBERATELY EMPTY: the arm's presence is the whole fact it carries. A
+// revival is a WORKSPACE-level event and the entry already rides its
+// workspace's queue, so naming a session here would join the entry to nothing
+// the client could not already reach.
+message QueueEntryRevivalHold {
+}
+
+// The entry waits for its session's shim to restart onto the current build
+// at the turn boundary (automatic stale-shim refresh). Delivered in order
+// the moment the restarted shim reports ready.
+message QueueEntryBuildRefreshHold {}
+
+// The session's queue, pushed on EVERY change and carried in StateSnapshot.
+// An empty entries list is a meaningful value (the queue drained, or the
+// session died), not an absent one.
+message QueueView {
+  // WORKSPACE-ADDRESSED, never session-addressed. A frontend has no session
+  // vocabulary; the only currency question it ever asks is "is this push still
+  // current", which the fence below answers without naming what rotated.
+  string workspace = 1;
+  repeated QueueEntry entries = 2;
+  // The workspace's staleness FENCE at the moment the daemon produced this
+  // push: an opaque token the client compares BYTE-WISE against the fence on
+  // the workspace's current WorkspaceState, and never parses, splits or
+  // interprets. Equal means current; different means stale, and a stale push
+  // is discarded whole rather than partially adopted.
+  //
+  // The daemon mints it and is the only thing that can read meaning into it.
+  // A client that learned to decode it would be depending on a fact this
+  // contract does not offer, and the token's composition is free to change.
+  string fence = 3;
+}
+
+// Deliver this entry NOW — the user overriding the classifier, or not waiting
+// for it. Runs exactly the same interject sequence an INTERJECT verdict does.
+message QueueForceCmd {
+  string entry_id = 1;
+}
+
+// Confirm a HOLD entry. View state only: the entry is still delivered by the
+// ordinary turn-end drain, on the same schedule it already had.
+message QueueAcceptCmd {
+  string entry_id = 1;
+}
+
+// Drop an entry. It is never delivered.
+message QueueCancelCmd {
+  string entry_id = 1;
 }
