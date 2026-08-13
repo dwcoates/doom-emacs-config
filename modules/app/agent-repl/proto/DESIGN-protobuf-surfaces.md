@@ -112,21 +112,36 @@ could compute.
 So `frontend` is composed of both, and the line between them is whether the fact
 was already known to the producer.
 
-### Two consequences, accepted
+### Two consequences that were recorded as accepted, and did not hold
 
-**1. `daemon/internal/frontend/translate.go` goes.** It existed to neutralize a
-VENDOR shape before a client could see it. The producers now convert at the
-edge, so there is no vendor shape left to neutralize and the layer is ceremony —
-decoding one neutral shape and re-encoding it as another. Synthesis stays;
-translation does not.
+Both were written here as settled before anything implemented against them. The
+daemon wave then checked them against the frozen schema and neither survives in
+the form recorded. Kept visible rather than quietly rewritten, because the error
+in both is the same one: a consequence was derived from the passthrough PRINCIPLE
+without checking whether the schema actually admits it.
 
-**2. `frontend`'s feed envelope shrinks.** `Message` carries
-`MessageLineage{top_level_message_id, parent_message_id}`, a durability oneof and
-`ConversationSource`; `MessageEntry` already carries `message_id`,
-`top_level_message_id`, `parent` and `author`. Under passthrough that envelope is
-a second spelling of the same facts, and it reintroduces the empty-string
-ambiguity `MessageParent` was made a oneof to remove. What survives is only what
-the daemon genuinely adds.
+**1. `translate.go` goes — WRONG AS STATED.** The claim was that translation is
+now ceremony, since producers convert at the edge and no vendor shape is left to
+neutralize. But `frontend.v1.Message`'s payload oneof has NO arm that can carry a
+`conversation.v1.MessageEntry`. Its arms are `AgentEmission`, `UserContent`,
+`FailureCardView`, `DaemonInterceptedCommandItem`, `DetachedWork` and
+`CompactionSummaryItem`. So the daemon must still re-encode `MessageEntry`
+payloads into `AgentEmission`.
+
+What is true is narrower: **translation stopped being VENDOR translation.** It
+did not stop existing. Whether the feed should gain a `MessageEntry` arm — making
+passthrough literal — or keep re-encoding is an open question, not a settled one.
+
+**2. The feed envelope shrinks — NOT IMPLEMENTED, AND PARTLY WRONG.**
+`feed.proto` still declares `lineage`, `source` and the `durability` oneof. The
+shrink was recorded here as landed and was never applied anywhere.
+
+It is also not wholly desirable. `lineage` and `source` do restate what
+`MessageEntry` carries. **`durability` does not, and cannot.** There is no
+`conversation.v1` counterpart, because every `MessageEntry` exists for the reason
+that a producer wrote it — ephemerality is a fact about the FEED, not about the
+record. Drop it and a page missing an ephemeral card becomes indistinguishable
+from a page that lost a durable one, which is data loss reported as normal.
 
 ## Implementation and integration status
 
