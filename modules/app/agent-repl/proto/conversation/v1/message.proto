@@ -108,6 +108,13 @@ message MessageEntry {
     // Output accumulating into detached work already open.
     DetachedWorkProgressed detached_work_progressed = 20;
 
+    // A journal step observed in detached workflow work already open. It
+    // carries the message_id of the detached work it belongs to, exactly as
+    // detached_work_progressed does, so it folds onto that card without
+    // correlation. Structured rather than folded into the progress string,
+    // because the producer read it structured.
+    WorkflowStepObserved workflow_step_observed = 25;
+
     // Detached work reached an end, with the outcome it reached.
     DetachedWorkEnded detached_work_ended = 21;
 
