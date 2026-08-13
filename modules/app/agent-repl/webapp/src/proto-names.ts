@@ -44,34 +44,34 @@
 import type {
   FrontendCommand as GeneratedFrontendCommand,
   ResyncCmd as GeneratedResyncCmd,
-} from "../../proto/gen/ts/agentshim/frontend/v1/frame_pb";
+} from "../../proto/gen/ts/frontend/v1/frame_pb";
 import type {
   ConversationPageBefore as GeneratedConversationPageBefore,
   ConversationPageCmd as GeneratedConversationPageCmd,
   ConversationPageTail as GeneratedConversationPageTail,
-} from "../../proto/gen/ts/agentshim/frontend/v1/conversation-page_pb";
+} from "../../proto/gen/ts/frontend/v1/conversation-page_pb";
 import type {
   FirstPageCmd as GeneratedFirstPageCmd,
   NextPageCmd as GeneratedNextPageCmd,
-} from "../../proto/gen/ts/agentshim/frontend/v1/conversation-history_pb";
+} from "../../proto/gen/ts/frontend/v1/conversation-history_pb";
 import type {
   HibernationDetail as GeneratedHibernationDetail,
   ReviveCompactFirst as GeneratedReviveCompactFirst,
   ReviveSessionCmd as GeneratedReviveSessionCmd,
   WorkspaceGateView as GeneratedWorkspaceGateView,
-} from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
-import { CompactionScope as GeneratedCompactionScope } from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
-import type { AnswerMergeDequeueCmd as GeneratedAnswerMergeDequeueCmd } from "../../proto/gen/ts/agentshim/frontend/v1/merge_pb";
-import type { FailureKind as GeneratedFailureKind } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
-import type { FailureCardView as GeneratedFailureCardView } from "../../proto/gen/ts/agentshim/frontend/v1/failure-card_pb";
+} from "../../proto/gen/ts/frontend/v1/gate-revival_pb";
+import { CompactionScope as GeneratedCompactionScope } from "../../proto/gen/ts/frontend/v1/gate-revival_pb";
+import type { AnswerMergeDequeueCmd as GeneratedAnswerMergeDequeueCmd } from "../../proto/gen/ts/frontend/v1/merge_pb";
+import type { FailureKind as GeneratedFailureKind } from "../../proto/gen/ts/frontend/v1/errors_pb";
+import type { FailureCardView as GeneratedFailureCardView } from "../../proto/gen/ts/frontend/v1/failure-card_pb";
 import type {
   QueueEntry as GeneratedQueueEntry,
   QueueEntryKeepAliveHold as GeneratedQueueEntryKeepAliveHold,
   QueueEntryRevivalHold as GeneratedQueueEntryRevivalHold,
   QueueEntryBuildRefreshHold as GeneratedQueueEntryBuildRefreshHold,
   QueueClassificationUninterruptibleTurn as GeneratedQueueClassificationUninterruptibleTurn,
-} from "../../proto/gen/ts/agentshim/frontend/v1/prompt-queue_pb";
-import { PromptOrigin as GeneratedPromptOrigin } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
+} from "../../proto/gen/ts/frontend/v1/prompt-queue_pb";
+import { PromptOrigin as GeneratedPromptOrigin } from "../../proto/gen/ts/protocol/v1/core_pb";
 
 /** A generated oneof's arm keys, with protobuf-es's "nothing set" arm dropped. */
 type ArmKeys<Oneof extends { case: string | undefined }> = Exclude<Oneof["case"], undefined>;

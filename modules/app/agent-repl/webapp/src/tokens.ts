@@ -25,11 +25,11 @@ import {
   type SessionTokenUtilization,
   type TokenUsageTotals,
   type TokenUtilization as GeneratedTokenUtilization,
-} from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
+} from "../../proto/gen/ts/frontend/v1/durable_pb";
 import {
   TokenUsageSchema,
   type TokenUsage as CanonicalTokenUsage,
-} from "../../proto/gen/ts/agentshim/frontend/v1/tokens_pb";
+} from "../../proto/gen/ts/conversation/v1/tokens_pb";
 
 /** Everything the dropdown knows how to break down. */
 export interface TokenMenuData {

@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { FailureKindSchema } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
+import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/errors_pb";
 import fixtureRaw from "../../proto/vocab/render-colors.json?raw";
 import {
   CONNECTIVITY_WINDOW_KINDS,

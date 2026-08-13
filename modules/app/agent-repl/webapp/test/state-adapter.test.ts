@@ -8,8 +8,8 @@ import { failureSide } from "../src/failure-card.js";
 import { create } from "@bufbuild/protobuf";
 import {
   QueryTerminationFailureSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
-import { QueryStartupFailureSchema } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
+} from "../../proto/gen/ts/frontend/v1/errors_pb";
+import { QueryStartupFailureSchema } from "../../proto/gen/ts/protocol/v1/core_pb";
 import { decodeFrontendFrame } from "../src/frontend-proto.js";
 import {
   StateAdapter,

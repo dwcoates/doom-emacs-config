@@ -16,7 +16,7 @@ import {
 import {
   SessionCommand,
   SessionCommandSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/slash-menu_pb";
+} from "../../proto/gen/ts/frontend/v1/slash-menu_pb";
 
 describe("sessionCommandSpecs", () => {
   const cases: ReadonlyArray<{
