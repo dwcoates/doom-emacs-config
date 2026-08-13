@@ -52,61 +52,86 @@ message MessageEntry {
   //
   // Here an unresolved parent has no legal record to occupy. The producer must
   // state which case it is, or fail.
+  //
+  // FIXME: I dont think anything is gained by having this not be a simple `optional string parent_message_id`
+  //        with unset meaning "root level" 
   MessageParent parent = 3;
 
   // Who this message is FROM, resolved by the producer rather than inferred by
   // a reader from which payload arm is set.
   MessageAuthor author = 4;
 
-  // What this record says about the message it belongs to. The three groups
-  // below are a reading aid, not a schema distinction: every arm carries the
-  // same ids, so the group an arm sits in changes nothing about the record.
+  // What this record says about the message it belongs to. See MessagePayload,
+  // which holds the arms themselves; extracting them changes nothing about what
+  // this record means, only about who else can name the same set.
+  MessagePayload payload = 5;
+}
+
+// WHAT A RECORD CAN SAY, as a type rather than as a oneof buried in
+// MessageEntry.
+//
+// A `oneof` IS NOT A TYPE and cannot be imported: proto3 offers no way to name
+// `MessageEntry.payload` from another file. That left any surface needing the
+// same payload vocabulary with different stamps exactly two options — import
+// MessageEntry whole, inheriting identity and ordering stamps it wanted to set
+// itself, or write the arms out again. Writing them out again is the mechanical
+// origin of every agent-output re-spelling on frontend.v1, and this extraction
+// is what removes the pressure that produced them.
+//
+// It is PURE ENABLEMENT. MessageEntry embeds this and keeps exactly the
+// semantics it had; nothing about a durable record's meaning moves with the
+// arms, and the extraction commits to nothing about what any other surface
+// chooses to carry.
+message MessagePayload {
+  // The three groups below are a reading aid, not a schema distinction: every
+  // arm is carried by a record with the same ids, so the group an arm sits in
+  // changes nothing about the record.
   oneof payload {
     // ---- Records that OPEN the message they name ----
 
     // Something a person typed. The opening of a turn.
-    UserSaid user_said = 5;
+    UserSaid user_said = 1;
 
     // Something the agent said: its content blocks, and the usage its response
     // reported.
-    AgentSaid agent_said = 6;
+    AgentSaid agent_said = 2;
 
     // A permission the agent ASKED FOR. It is a message because the agent
     // really did ask and the user really does answer — it is a conversational
     // act, not a dialog the daemon invented.
-    PermissionAsked permission_asked = 7;
+    PermissionAsked permission_asked = 3;
 
     // Something went wrong, stated as a card the user reads and acts on.
-    FailureRaised failure_raised = 8;
+    FailureRaised failure_raised = 4;
 
     // The conversation was CUT here. It is a message because a reader must see
     // where, rather than merely finding the history shorter than they left it.
-    ContextCut context_cut = 9;
+    ContextCut context_cut = 5;
 
     // Work that DETACHED from the turn and now runs alongside it — a subagent,
     // a background shell, a workflow. It is a feed row naming itself, so a page
     // of ten rows is ten bounded things rather than ten trees.
-    DetachedWorkStarted detached_work_started = 10;
+    DetachedWorkStarted detached_work_started = 6;
 
     // ---- Records that UPDATE a message already opened ----
     // They carry the same message_id, so attaching them needs no correlation
     // and costs no additional page slot.
 
     // Output accumulating into detached work already open.
-    DetachedWorkProgressed detached_work_progressed = 11;
+    DetachedWorkProgressed detached_work_progressed = 7;
 
     // A journal step observed in detached workflow work already open. It
     // carries the message_id of the detached work it belongs to, exactly as
     // detached_work_progressed does, so it folds onto that card without
     // correlation. Structured rather than folded into the progress string,
     // because the producer read it structured.
-    WorkflowStepObserved workflow_step_observed = 12;
+    WorkflowStepObserved workflow_step_observed = 8;
 
     // Detached work reached an end, with the outcome it reached.
-    DetachedWorkEnded detached_work_ended = 13;
+    DetachedWorkEnded detached_work_ended = 9;
 
     // The user answered a permission the agent asked for.
-    PermissionAnswered permission_answered = 14;
+    PermissionAnswered permission_answered = 10;
 
     // A tool the agent called returned. It carries the message_id of the
     // message that MADE the call, so the result folds onto that tool card.
@@ -115,18 +140,18 @@ message MessageEntry {
     // MESSAGE is from, and the message is the agent's response. The vendor
     // files tool results under user-role records, which is the accident this
     // arm exists to not inherit.
-    ToolReturned tool_returned = 15;
+    ToolReturned tool_returned = 11;
 
     // A skill file's contents, resolved onto the skill's own message. Replaces
     // whole rather than appending.
-    SkillBodyResolved skill_body_resolved = 16;
+    SkillBodyResolved skill_body_resolved = 12;
 
     // ---- Records that COMPOSE a message, arriving before it is whole ----
 
     // A fragment of content still arriving, handed straight to the daemon by
     // the stream plane. The completed message the file plane writes later
     // REPLACES the preview rather than appending beside it.
-    ContentArriving content_arriving = 17;
+    ContentArriving content_arriving = 13;
   }
 }
 
