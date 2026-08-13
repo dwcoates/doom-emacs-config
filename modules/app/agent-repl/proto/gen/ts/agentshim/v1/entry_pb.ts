@@ -51,17 +51,18 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import { file_google_protobuf_struct } from "@bufbuild/protobuf/wkt";
 import type { ExternalEntry } from "../../protocol/v1/external_pb";
 import { file_protocol_v1_external } from "../../protocol/v1/external_pb";
 import type { UnknownEntry, UnparsedEntry, VendorSpecificEntry } from "./unsupported_pb";
 import { file_agentshim_v1_unsupported } from "./unsupported_pb";
-import type { Message } from "@bufbuild/protobuf";
+import type { JsonObject, Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentshim/v1/entry.proto.
  */
 export const file_agentshim_v1_entry: GenFile = /*@__PURE__*/
-  fileDesc("ChhhZ2VudHNoaW0vdjEvZW50cnkucHJvdG8SDGFnZW50c2hpbS52MSJkCgVFbnRyeRItCghpbnRlcm5hbBgBIAEoCzIbLmFnZW50c2hpbS52MS5JbnRlcm5hbEVudHJ5EiwKCGV4dGVybmFsGAIgASgLMhoucHJvdG9jb2wudjEuRXh0ZXJuYWxFbnRyeSKDAgoNSW50ZXJuYWxFbnRyeRIiCgVwbGFuZRgBIAEoCzITLmFnZW50c2hpbS52MS5QbGFuZRIQCgh3cml0ZV9pZBgDIAEoCRI8Cg92ZW5kb3Jfc3BlY2lmaWMYCiABKAsyIS5hZ2VudHNoaW0udjEuVmVuZG9yU3BlY2lmaWNFbnRyeUgAEi0KB3Vua25vd24YCyABKAsyGi5hZ2VudHNoaW0udjEuVW5rbm93bkVudHJ5SAASLwoIdW5wYXJzZWQYDCABKAsyGy5hZ2VudHNoaW0udjEuVW5wYXJzZWRFbnRyeUgAQg0KC3VuY29udmVydGVkSgQIAhADUglkZWR1cF9rZXkiZgoFUGxhbmUSKwoGc3RyZWFtGAEgASgLMhkuYWdlbnRzaGltLnYxLlBsYW5lU3RyZWFtSAASJwoEZmlsZRgCIAEoCzIXLmFnZW50c2hpbS52MS5QbGFuZUZpbGVIAEIHCgVwbGFuZSINCgtQbGFuZVN0cmVhbSILCglQbGFuZUZpbGVCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS92MTthZ2VudHNoaW12MWIGcHJvdG8z", [file_protocol_v1_external, file_agentshim_v1_unsupported]);
+  fileDesc("ChhhZ2VudHNoaW0vdjEvZW50cnkucHJvdG8SDGFnZW50c2hpbS52MSJkCgVFbnRyeRItCghpbnRlcm5hbBgBIAEoCzIbLmFnZW50c2hpbS52MS5JbnRlcm5hbEVudHJ5EiwKCGV4dGVybmFsGAIgASgLMhoucHJvdG9jb2wudjEuRXh0ZXJuYWxFbnRyeSKzAgoNSW50ZXJuYWxFbnRyeRIiCgVwbGFuZRgBIAEoCzITLmFnZW50c2hpbS52MS5QbGFuZRIQCgh3cml0ZV9pZBgDIAEoCRIuCg1zb3VyY2VfcmVjb3JkGAQgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBI8Cg92ZW5kb3Jfc3BlY2lmaWMYCiABKAsyIS5hZ2VudHNoaW0udjEuVmVuZG9yU3BlY2lmaWNFbnRyeUgAEi0KB3Vua25vd24YCyABKAsyGi5hZ2VudHNoaW0udjEuVW5rbm93bkVudHJ5SAASLwoIdW5wYXJzZWQYDCABKAsyGy5hZ2VudHNoaW0udjEuVW5wYXJzZWRFbnRyeUgAQg0KC3VuY29udmVydGVkSgQIAhADUglkZWR1cF9rZXkiZgoFUGxhbmUSKwoGc3RyZWFtGAEgASgLMhkuYWdlbnRzaGltLnYxLlBsYW5lU3RyZWFtSAASJwoEZmlsZRgCIAEoCzIXLmFnZW50c2hpbS52MS5QbGFuZUZpbGVIAEIHCgVwbGFuZSINCgtQbGFuZVN0cmVhbSILCglQbGFuZUZpbGVCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS92MTthZ2VudHNoaW12MWIGcHJvdG8z", [file_google_protobuf_struct, file_protocol_v1_external, file_agentshim_v1_unsupported]);
 
 /**
  * One record as the STORE holds it: the half that may leave, and the half that
@@ -148,6 +149,28 @@ export type InternalEntry = Message<"agentshim.v1.InternalEntry"> & {
    * @generated from field: string write_id = 3;
    */
   writeId: string;
+
+  /**
+   * THE PRODUCER'S SOURCE RECORD, kept whole when converting it to `external`
+   * dropped structure.
+   *
+   * NOT the same job as `unconverted` below, and the two are not alternatives.
+   * `unconverted` is for a record with NOTHING renderable; this is for one that
+   * renders fine and is ALSO more than its rendering. A workflow journal line
+   * becomes a single DetachedWorkProgressed string, so every other key in the
+   * source object had nowhere to go — the record was durably less than what was
+   * on disk.
+   *
+   * SHIM-SIDE, WHICH IS WHY IT IS SAFE. Vendor-shaped material in the internal
+   * half is structurally unreachable from the daemon (check-conversation-
+   * isolation.sh), so keeping it whole costs no vendor-agnosticism downstream.
+   * That is exactly what makes eager conversion at the edge a reversible bet.
+   *
+   * UNSET when the conversion was faithful. It is not a copy of every record.
+   *
+   * @generated from field: google.protobuf.Struct source_record = 4;
+   */
+  sourceRecord?: JsonObject | undefined;
 
   /**
    * Set when there is nothing to hand the daemon: a record we could not place.
