@@ -1,6 +1,13 @@
 /**
  * The shim's half of the BOUNDED, BACKWARD-ANCHORED page read
- * (`agentshim/core/v1/message-page.proto`).
+ * (`protocol/v1/message-page.proto`).
+ *
+ * WHAT A PAGE CARRIES IS `protocol.v1.ExternalEntry` — the half of a record
+ * eligible to cross the shim wire, which is the right half by construction: a
+ * page is read BY a consumer, and the internal half exists precisely so a
+ * consumer cannot read it. The store's position stays on the page itself
+ * (`last_page_seq`, `before_seq`), because paging is addressing and addressing
+ * is the store's; the record carries none of its own.
  *
  * WHAT THIS ADDS THAT THE OLD VOCABULARY COULD NOT SAY. `Subscribe` and
  * `ReplayRequest` both read FORWARD FROM A LOWER BOUND, so neither can express
