@@ -244,9 +244,9 @@ message WorkflowStep {
   // something else. THE SET ARM IS THE STATE; there is no separate status value
   // to fall out of step with it.
   oneof status {
-    WorkflowStepRunning running = 10;
-    WorkflowStepDone done = 11;
-    WorkflowStepFailed failed = 12;
+    WorkflowStepRunning running = 3;
+    WorkflowStepDone done = 4;
+    WorkflowStepFailed failed = 5;
   }
 }
 
