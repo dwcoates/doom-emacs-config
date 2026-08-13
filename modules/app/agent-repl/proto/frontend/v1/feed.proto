@@ -1,0 +1,507 @@
+// feed.proto — The conversation feed container: the Message envelope, its
+// lineage, and the deltas that carry it.
+//
+// Message is feed packaging — identity, lineage, ordering, provenance and
+// resolution stamps — wrapped around a payload. Agent-produced payloads are a
+// single AgentEmission arm (agent-emission.proto); everything the agent did
+// not emit keeps an arm of its own.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+import "conversation/v1/content.proto";
+import "frontend/v1/agent-emission.proto";
+import "frontend/v1/detached-work.proto";
+import "frontend/v1/failure-card.proto";
+import "frontend/v1/slash-menu.proto";
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// Complete (store-round-tripped) conversation additions, composed from the
+// typed agent payloads (S9). daemon/internal/frontend/translate.go CURATES
+// which payloads are pushed but never re-types them — frontends render,
+// never interpret.
+message ConversationDelta {
+  // 2 was session_id. A frontend has no session vocabulary: the only question
+  // it ever asked of that field was "is this push still current", which the
+  // fence answers without naming what rotated.
+  reserved 2;
+  reserved "session_id";
+  // 3 KEPT its number but was renamed items -> messages when ConversationItem
+  // became Message. The name is reserved because this surface is protojson on
+  // the wire, where the FIELD NAME is the wire token: "items" is retired and
+  // must never come back meaning something else.
+  reserved "items";
+  string workspace = 1;
+  // The conversation additions this push carries, oldest first. Each is a
+  // complete feed envelope the frontend renders without further resolution.
+  repeated Message messages = 3;
+  uint64 through_seq = 4;  // frontends persist this for reconnect resync
+  // The workspace's staleness FENCE at the moment the daemon produced this
+  // push: an opaque token the client compares BYTE-WISE against the fence on
+  // the workspace's current WorkspaceState, and never parses, splits or
+  // interprets. Equal means current; different means stale, and a stale push
+  // is discarded whole rather than partially adopted.
+  //
+  // The daemon mints it and is the only thing that can read meaning into it.
+  // A client that learned to decode it would be depending on a fact this
+  // contract does not offer, and the token's composition is free to change.
+  string fence = 5;
+}
+
+// WHO drove the turn that produced a message.
+//
+// The merge coordinator borrows a workspace's own shim to resolve a merge
+// conflict (the session holding the full context of the work is the one best
+// equipped to resolve it), so a session can emit a full turn the user never
+// prompted. That provenance is a durable FACT recorded on every message, not a
+// rendering hint: frontends decide independently what to do with it, and the
+// decision can change without another wire change.
+enum ConversationSource {
+  // Never set by the daemon. proto3 reserves 0 for "the field was not
+  // populated", and every message the daemon builds sets one of the arms below,
+  // so a receiver seeing UNSPECIFIED is looking at a malformed frame and must
+  // reject it loudly rather than assume USER.
+  CONVERSATION_SOURCE_UNSPECIFIED = 0;
+  // An ordinary turn: the user prompted it, or it followed from one.
+  CONVERSATION_SOURCE_USER = 1;
+  // A turn merge.Coordinator drove under its lease (conflict resolution).
+  CONVERSATION_SOURCE_MERGE = 2;
+}
+
+// The two containment facts every message carries, in one message so no
+// producer can supply half of them and no consumer can read them from two
+// different shapes.
+//
+// SPAWN IS NOT CONTAINMENT. A message whose work was started by another
+// message's tool call is NOT thereby contained by it: provenance lives on
+// origin_tool_use_id, and lineage lives here. Conflating them is what made
+// "is a top-level bubble a top-level message" unanswerable.
+message MessageLineage {
+  // The feed row this message ultimately belongs to — the ancestor whose own
+  // parent is the feed itself.
+  //
+  // ALWAYS SET, including on a top-level message, where it equals that
+  // message's own id. It is never empty and never inferred: a reader that had
+  // to walk parent pointers to find the root would be performing the unbounded
+  // traversal this field exists to remove, and a page query would stop being a
+  // single indexed pass.
+  //
+  // DENORMALIZED ON PURPOSE. It is derivable by walking parent_message_id to
+  // its end, and storing it anyway is the entire reason a page of ten messages
+  // costs one query. The cost is that it can drift: it MUST equal the root of
+  // the parent chain, and a write that disagrees is CORRUPTION, not a variant.
+  string top_level_message_id = 1;
+
+  // The message immediately containing this one — ONE HOP, never the root.
+  //
+  // EMPTY means this message sits directly in the feed, in which case
+  // top_level_message_id is this message's own id. Absence is the fact itself,
+  // not a placeholder for an unknown: a message whose parent could not be
+  // resolved is a producer fault, never an empty pointer.
+  string parent_message_id = 2;
+}
+
+// The durable class: a store record exists for this message.
+//
+// EMPTY ON PURPOSE. The message's own uuid is the record's key, so there is
+// nothing to carry that the envelope does not already say; a field here would
+// be a second address for a row already addressable, and the two could
+// disagree. The arm being SET is the entire claim.
+//
+// The claim it makes is checkable and must be checked: a durable message the
+// store cannot produce is corruption, and reporting it as an ordinary miss is
+// how a lost conversation looks like an empty one.
+message MessageDurable {}
+
+// The ephemeral class: no store record exists for this message, and none ever
+// will — not because a write failed or has not landed yet, but because there
+// was never anything to write.
+//
+// MEMBERSHIP IS DECIDED BY WHETHER CLAUDE EVER SAW THE THING, never by who
+// minted the id. A slash command the daemon answers alone (`/model` and its
+// siblings) never reaches the CLI, so the CLI writes nothing; a
+// system/local_command record is ruled out of the durable set; a failure card
+// the daemon synthesized describes a session that failed to start, so there is
+// no transcript for it to live in. Conversely a daemon-MINTED id over a real
+// TaskStarted is durable, because the record exists.
+//
+// THE LINEAGE RULES ARE THIS CLASS'S SHAPE, not advice about it. An ephemeral
+// message is ALWAYS a feed row — empty parent_message_id, top_level_message_id
+// equal to its own id — and it is NEVER at either end of a containment edge
+// crossing the classes:
+//
+//   - It may not be a parent. A durable child naming an ephemeral root would
+//     be unreachable by any store query, since a store record can only name
+//     ids that exist in the store.
+//   - It may not name a durable parent. Otherwise an ephemeral card attaches
+//     itself into a paged conversation that it will simply vanish from,
+//     leaving a hole where a reader has every reason to expect a message.
+//
+// Those are refused at construction, so a violating message cannot be built
+// and then noticed; a check applied afterwards is a check something can skip.
+message MessageEphemeral {}
+
+// One curated conversation addition: FEED PACKAGING wrapped around a payload.
+//
+// The packaging is what the feed knows about a message regardless of what the
+// message is — its identity, its lineage, its place in the order, who drove
+// it, and the figures resolved against it. The payload is the message itself.
+//
+// Agent-produced payloads are ONE arm, AgentEmission, which is also the
+// vocabulary a detached agent's output arrives in (detached-work.proto).
+// Everything the agent did not emit — the user's own prompt, the daemon's
+// failure cards, session-level events — keeps an arm of its own, because
+// folding those into AgentEmission would make that message's name untrue.
+//
+// Consumers reconcile by uuid (permission items use the permission request_id
+// as their uuid).
+message Message {
+  // 18 was api_error (ApiErrorLine). A terminal line now curates to
+  // system_failure below only; a mid-backoff line curates to no message at all
+  // (the retrying window covers it).
+  // 16/17 were compact_boundary/compact_boundary_line, retired in favour of
+  // context_compacted, which carries one coalesced compaction instead of two
+  // plane-shaped halves. Reserved so the wire numbers can never be reused.
+  reserved 16, 17, 18;
+  reserved "api_error", "compact_boundary", "compact_boundary_line";
+  // 10, 12, 13, 14, 15 and 34 were agent-output arms (assistant_message,
+  // tool_use, tool_result, tool_use_result, result, skill_body). They are arms
+  // of AgentEmission, reached through `agent` below. 40 was usage_stamp, which
+  // now rides AgentResponse, the message it stamps.
+  reserved 10, 12, 13, 14, 15, 34, 40;
+  reserved "assistant_message", "tool_use", "tool_result", "tool_use_result",
+      "result", "skill_body", "usage_stamp";
+  // 36/37 were token_utilization and turn_accounting: persistence records
+  // carried verbatim to a renderer that had to digest them itself. The
+  // figures they were read for are resolved elsewhere — a response's stamp on
+  // AgentResponse, a turn's verdict on FooterAccountingCell, session and
+  // per-model economics on TokenBreakdownView. Nothing on this message
+  // replaces them, because the feed rendered none of it directly.
+  reserved 36, 37;
+  reserved "token_utilization", "turn_accounting";
+  // 38 KEPT its number but was renamed async_bubble -> detached_work when the
+  // bubble stopped being a parallel type and became this message's payload.
+  // The NAME is retired because this surface is protojson on the wire, where
+  // the field name is the wire token.
+  reserved "async_bubble";
+  // 35 KEPT its number but was renamed session_command ->
+  // daemon_intercepted_command, because the old name read as a command issued
+  // TO the session rather than one intercepted FROM the user's input. Same
+  // retirement rule as async_bubble: the name is the wire token here, so
+  // "session_command" is retired and must never come back meaning anything.
+  reserved "session_command";
+
+  // ---- Feed packaging: identity, lineage, ordering, provenance, resolution ----
+
+  string uuid = 1;
+  int64 ts_ms = 2;
+  string request_id = 3;  // vendor API request correlation, "" when absent
+  // Provenance. ALWAYS set (see ConversationSource): persisted with the message
+  // so a resync or transcript replay reproduces the same verdict instead of
+  // re-deriving it from state that has since moved on.
+  ConversationSource source = 4;
+  // WHAT CONTAINS THIS MESSAGE. Always present — see MessageLineage, whose
+  // top_level_message_id is never empty and is self-referential on a feed row.
+  //
+  // It sits in the PACKAGING half rather than inside any payload arm because
+  // containment is a fact about the message regardless of what the message is,
+  // and because a per-arm copy is a per-arm chance to disagree. It is a low
+  // tag for the same reason uuid and source are: this is what the feed knows
+  // before it knows what it is looking at.
+  //
+  // THIS IS THE ONLY PLACE LINEAGE LIVES on this contract. Records that are
+  // not messages — turn and session boundaries, heartbeats, latency samples,
+  // claim bridges, query lifecycle, usage observations, rewinds, file-plane
+  // diagnostics — are protocol.v1.Envelope payloads and are NOT Messages,
+  // so they have no field here to populate. That is deliberate and structural:
+  // if such a record could carry a top_level_message_id it would become a
+  // phantom feed row, and a page of ten "messages" would silently deliver
+  // several turn boundaries and a short screen. Do not lift this field onto
+  // Envelope, and do not model an unowned record as an empty MessageLineage.
+  MessageLineage lineage = 6;
+
+  // WHETHER A DURABLE RECORD FOR THIS MESSAGE EXISTS AT ALL. Always set: a
+  // message with neither arm is malformed and is rejected loudly rather than
+  // assumed durable, exactly as an UNSPECIFIED source is.
+  //
+  // WHY THIS IS AN ARM AND NOT A BOOLEAN. A `bool ephemeral` would let a
+  // message that HAS a record claim it has none, and a message that has none
+  // claim a record — two lies the type could tell. Here the class is the set
+  // arm, so the two are mutually exclusive by construction and neither can be
+  // half-stated. It is also why the arms carry no fields: the fact IS the
+  // membership, and any field on either arm would be a second, weaker place
+  // for the same claim to be made differently.
+  //
+  // WHY IT IS STATED AT ALL, rather than discovered by looking. Without it,
+  // "no durable record exists for this message" is indistinguishable from "the
+  // record was not found" — a page missing an ephemeral card looks exactly
+  // like a page that LOST a durable one, and the second is data loss reported
+  // as normal. Stating the class turns the absence into a property a reader
+  // can check, so a durable message missing from the store stays a loud
+  // failure while an ephemeral one missing from it is simply correct.
+  //
+  // IT IS PACKAGING, NOT PAYLOAD, and sits beside lineage for the same reason:
+  // it is a fact about the message whatever the message is, and a per-arm copy
+  // would be a per-arm chance to disagree. It also constrains lineage directly
+  // — see MessageEphemeral — which only works while the two are siblings on
+  // one envelope rather than facts held in two places.
+  oneof durability {
+    // A record for this message exists in the store, so it can be paged,
+    // replayed and reloaded. Everything the CLI wrote a transcript record for
+    // is this, INCLUDING the daemon-minted "detached-work:" ids, whose
+    // durability comes from the TaskStarted behind them and not from who
+    // chose the id.
+    MessageDurable durable = 7;
+    // No record for this message exists ANYWHERE, and none ever will.
+    MessageEphemeral ephemeral = 8;
+  }
+
+  // ---- Payload ----
+
+  oneof payload {
+    // EVERYTHING the agent produced, in the one vocabulary that also carries
+    // a detached agent's output (AsyncAgentUpdate). See AgentEmission.
+    AgentEmission agent = 5;
+
+    // ---- Non-agent payloads: things the agent did not emit ----
+
+    // The user's own prompt.
+    conversation.v1.UserContent user_message = 11;
+    // 30 was `permission` and 32/33 were `context_cleared`/`context_compacted`.
+    // All three are retired with the core.v1 payloads they carried, and NOTHING
+    // REPLACES THEM — see the reservations at the foot of this message and the
+    // gap note in DESIGN-protobuf-surfaces.md.
+    FailureCardView failure_card = 31;
+    // A slash command the daemon took out of the user's input. Both
+    // durability classes ride this arm; which one a given command is, is
+    // stated by `durability` above and never inferred from the command.
+    DaemonInterceptedCommandItem daemon_intercepted_command = 35;
+    // A piece of detached work. THIS MESSAGE IS THE WORK — its uuid is the
+    // work's id, and its lineage is the work's place in the feed.
+    //
+    // What rides here is the work's state as of this delivery; everything it
+    // produces afterwards arrives as DetachedWorkUpdate addressed to THIS
+    // message's uuid, on DetachedWorkDelta rather than as a stream of new feed
+    // messages. A detached agent emitting a thousand lines must not insert a
+    // thousand rows into the conversation it was dispatched from — those lines
+    // are this message's payload, not messages of their own.
+    DetachedWork detached_work = 38;
+    // The purple-washed summary block a compaction leaves behind. Its own arm
+    // so that the wash is a stated kind rather than an inference.
+    CompactionSummaryItem compaction_summary = 39;
+  }
+
+  // RETIRED PAYLOAD ARMS. Reserved at message level because a `reserved`
+  // statement is not legal inside a `oneof`, and reserved by NAME as well as by
+  // number because this surface is protojson on the wire, where the field name
+  // IS the wire token.
+  //
+  // - 30 `permission` carried protocol.v1.PermissionItem: the daemon-composed
+  //   request-plus-resolution a client renders and answers. It was declared on
+  //   the shim-wire package and went with the record layer. A permission request
+  //   is still a MESSAGE by this feed's own test, so its absence is a hole.
+  // - 32/33 `context_cleared`/`context_compacted` carried the core.v1 payloads
+  //   verbatim. A context cut is a message by conversation.v1's test — a reader
+  //   scrolling back would notice where the conversation was cut — but no arm
+  //   here names one yet.
+  reserved 30, 32, 33;
+  reserved "permission", "context_cleared", "context_compacted";
+}
+
+// The detached-work push: MESSAGES that opened, and UPDATES to messages already
+// open.
+//
+// TWO ARMS BECAUSE THERE ARE TWO KINDS OF THING, and conflating them is what
+// made "how many messages is this" unanswerable. A message is a thing the feed
+// CONTAINS — it has a uuid, lineage, a timestamp, and it costs a page slot. An
+// update is a change to a message the feed already contains — it is addressed by
+// that message's id, carries no identity of its own, and costs nothing. A byte
+// append is the second kind, always: a shell producing a megabyte of output
+// changes one message many times, it does not produce thousands of messages.
+//
+// It is a SEPARATE FRAME from ConversationDelta because detached work produces
+// at its own rate: folding its updates into the conversation push would let one
+// chatty agent pace the feed of the conversation that dispatched it.
+message DetachedWorkDelta {
+  string workspace = 1;
+  // 2 was session_id. A frontend has no session vocabulary: the only question
+  // it ever asked of that field was "is this push still current", which the
+  // fence answers without naming what rotated.
+  reserved 2;
+  reserved "session_id";
+  // WHOLE MESSAGES: detached work opening for the first time, or restated in
+  // full after a resync. Complete feed envelopes, identical in shape to the ones
+  // ConversationDelta carries, so a frontend renders detached work with the same
+  // code that renders everything else and reconciles it by the same uuid.
+  //
+  // A message the receiver already holds is REPLACED by this copy — the daemon
+  // restating it in full, never a second message.
+  //
+  // Each carries payload arm `detached_work`; a message arriving here with any
+  // other payload is a daemon bug and is rejected rather than rendered.
+  repeated Message opened = 3;
+  // UPDATES to messages already open, in order. Each names its target message by
+  // id and mutates that message's payload; none of them is a message.
+  repeated DetachedWorkUpdate updates = 4;
+  // Frontends persist this for reconnect resync.
+  uint64 through_seq = 5;
+  // The workspace's staleness FENCE at the moment the daemon produced this
+  // push: an opaque token the client compares BYTE-WISE against the fence on
+  // the workspace's current WorkspaceState, and never parses, splits or
+  // interprets. Equal means current; different means stale, and a stale push
+  // is discarded whole rather than partially adopted.
+  //
+  // The daemon mints it and is the only thing that can read meaning into it.
+  // A client that learned to decode it would be depending on a fact this
+  // contract does not offer, and the token's composition is free to change.
+  string fence = 6;
+}
+
+// The compaction summary: the summary the daemon records after a compaction.
+message CompactionSummaryItem {
+  // The summary text, verbatim (markdown).
+  string summary = 1;
+  // When the compaction completed, unix millis.
+  int64 compacted_at_ms = 2;
+  // The resolved expensive-input cost of producing this summary (canonical
+  // derivation), so the summary can carry its own cost note; -1 when the
+  // result's usage was unavailable (never fabricated as 0).
+  int64 expensive_input_tokens = 3;
+}
+
+// Ephemeral live-typing relay (never persisted, never in snapshots).
+message TypingDelta {
+  // 2 was session_id. A frontend has no session vocabulary: the only question
+  // it ever asked of that field was "is this push still current", which the
+  // fence answers without naming what rotated.
+  reserved 2;
+  reserved "session_id";
+  string workspace = 1;
+  // 3 WAS `delta`, carrying the retired protocol.v1.ContentDelta — the live
+  // typing preview this whole message exists to relay. NOTHING REPLACES IT: the
+  // content model moved to conversation.v1 and arrives on EntryDelivery's `live`
+  // arm, but no frontend-side spelling of a typing preview exists. TypingDelta
+  // is therefore left carrying a workspace and a fence and no content. See the
+  // gap note.
+  reserved 3;
+  reserved "delta";
+  // The workspace's staleness FENCE at the moment the daemon produced this
+  // push: an opaque token the client compares BYTE-WISE against the fence on
+  // the workspace's current WorkspaceState, and never parses, splits or
+  // interprets. Equal means current; different means stale, and a stale push
+  // is discarded whole rather than partially adopted.
+  //
+  // The daemon mints it and is the only thing that can read meaning into it.
+  // A client that learned to decode it would be depending on a fact this
+  // contract does not offer, and the token's composition is free to change.
+  string fence = 4;
+  // 5 KEPT its number but was renamed bubble_id -> parent_message_id when
+  // detached work stopped having an id space of its own. The NAME is retired
+  // because this surface is protojson on the wire.
+  reserved "bubble_id";
+  // WHERE THIS PREVIEW BELONGS, and therefore WHAT WILL RETIRE IT.
+  //
+  // Empty — the ordinary case — means the top-level feed: the preview opens
+  // there and is retired by the authoritative record of the same block
+  // landing there.
+  //
+  // Set means the preview belongs INSIDE the named MESSAGE — detached work
+  // whose payload is folding this record — and must never be opened on the
+  // top-level feed, because the record it previews will never land there at
+  // all. A top-level preview of it could therefore never be retired, and would
+  // spin "streaming input…" with no body for the life of the page. It is
+  // retired instead by that message's OWN authoritative record — the next
+  // `DetachedWorkUpdate` addressed to this id.
+  //
+  // The daemon knows which of the two it is BEFORE the preview goes out (it
+  // is the same fold decision, made in the same place), so no preview it
+  // cannot retire is ever created. This is provenance, not a timeout.
+  string parent_message_id = 5;
+}
+
+// The daemon's statement that a preview it opened will NEVER be completed.
+//
+// A preview is retired by the authoritative record of the block it previews.
+// When that record can no longer arrive — the session died, the shim rolled,
+// the query was torn down mid-block — nothing retires it, and the preview
+// spins "streaming input…" for the life of the page with no body.
+//
+// A CUT IS A FACT THE DAEMON OWNS, NOT A TIMEOUT THE CLIENT GUESSES. The
+// daemon learns the stream ended without its record; the client cannot
+// distinguish that from a slow block, and any client-side deadline would be
+// wrong for exactly the long tool calls users care most about watching.
+message TypingCut {
+  // 2 KEPT its number but was renamed bubble_id -> parent_message_id, for the
+  // same reason TypingDelta's did. The NAME is retired.
+  reserved "bubble_id";
+  string workspace = 1;
+  // The preview being retired, addressed exactly as the delta that opened it:
+  // empty for the top-level feed, or the id of the MESSAGE whose detached work
+  // it was folded into.
+  string parent_message_id = 2;
+  // The workspace's staleness FENCE, compared byte-wise and never parsed,
+  // identically to every other push. A stale cut is discarded whole.
+  string fence = 3;
+}
+
+// The /status panel, RESOLVED: the rows it draws, already labelled and already
+// stringified.
+//
+// IT USED TO CARRY THE VENDOR'S INIT RECORD WHOLE, as a lenient JSON object the
+// panel read field by field, and every value the user actually saw was computed
+// client-side: the auth word from an enum name, the fast-mode word from a state
+// string, plugin labels from name+version pairs, three of the rows from
+// `.length` of an array, and the memory row from joining a map's values. That
+// is five derivations in the renderer, which is five places the panel's answer
+// can disagree with the daemon's.
+//
+// The daemon resolves them now. `SessionBegan` (conversation.v1) carries the
+// neutral facts the producer observed; the daemon turns those into rows; the
+// panel prints them.
+message SessionInitView {
+  // 2 was session_id. A frontend has no session vocabulary: the only question
+  // it ever asked of that field was "is this push still current", which the
+  // fence answers without naming what rotated.
+  reserved 2;
+  reserved "session_id";
+  // 3 was `init`, the vendor's whole init record. The NAME is retired with it:
+  // nothing on this surface carries a vendor payload any more.
+  reserved 3;
+  reserved "init";
+  string workspace = 1;
+
+  // The panel's rows, in render order. EMPTY means no init has landed yet,
+  // which the panel draws as the rows it owns and nothing more — absence
+  // rendering absence, rather than a spinner standing in for a fact.
+  //
+  // The panel splices its own rows (account, model, permission mode) ahead of
+  // these, because those come from sources that move independently of an init
+  // and are already resolved elsewhere.
+  repeated SessionInitRow rows = 5;
+  // The workspace's staleness FENCE at the moment the daemon produced this
+  // push: an opaque token the client compares BYTE-WISE against the fence on
+  // the workspace's current WorkspaceState, and never parses, splits or
+  // interprets. Equal means current; different means stale, and a stale push
+  // is discarded whole rather than partially adopted.
+  //
+  // The daemon mints it and is the only thing that can read meaning into it.
+  // A client that learned to decode it would be depending on a fact this
+  // contract does not offer, and the token's composition is free to change.
+  string fence = 4;
+}
+
+// One row of the /status panel: a label and the value beside it.
+//
+// A STRING VALUE ON PURPOSE. Every row the panel draws is a word or a phrase —
+// a count, a joined list, a version, a resolved auth word — so typing the value
+// as anything richer would only invite a renderer to reformat it, which is the
+// derivation this message exists to remove. The daemon decided what it says.
+message SessionInitRow {
+  // The row's label, as shown: "Version", "Working directory", "Auth".
+  string label = 1;
+  // The value, as shown. Never empty — the daemon OMITS a row it has no value
+  // for rather than pushing a blank one, so absence renders as absence.
+  string value = 2;
+}
