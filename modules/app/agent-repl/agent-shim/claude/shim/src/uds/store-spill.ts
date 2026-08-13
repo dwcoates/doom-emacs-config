@@ -11,19 +11,25 @@
  * fact about the filesystem instead: whatever kills the shim, the batches are
  * still on disk and the next shim for this workspace replays them.
  *
- * WHY REPLAYING IT IS SAFE. Every event carries a stable `write_id` minted once
- * by the producer (core.proto Event.write_id), and the store enforces a unique
- * (session_id, write_id). A batch replayed from here after it already landed is
- * absorbed as a no-op rather than written a second time, so the journal never
- * has to know whether a record made it — it only has to not lose one. That is
- * the whole reason the aggressive replay this file enables is not a duplication
- * bug.
+ * WHY REPLAYING IT IS SAFE. Every record carries a stable `write_id` minted
+ * once by the producer (agentshim.v1's InternalEntry.write_id), and the store
+ * enforces a unique (session_id, write_id). A batch replayed from here after it
+ * already landed is absorbed as a no-op rather than written a second time, so
+ * the journal never has to know whether a record made it — it only has to not
+ * lose one. That is the whole reason the aggressive replay this file enables is
+ * not a duplication bug.
  *
  * THE FORMAT is a header (`ARSP` + a u32 version) followed by length-prefixed
- * serialized `EventBatch` records: a u32 big-endian byte count, then that many
- * bytes. Every append is fsync'd before it is reported as held, because a hold
- * that is only in the page cache is exactly the guarantee this file exists to
- * stop making.
+ * serialized `agentshim.v1.EntryBatch` records: a u32 big-endian byte count,
+ * then that many bytes. Every append is fsync'd before it is reported as held,
+ * because a hold that is only in the page cache is exactly the guarantee this
+ * file exists to stop making.
+ *
+ * THE VERSION IS 2 BECAUSE THE RECORD TYPE CHANGED. Version 1 held the retired
+ * `EventBatch`, whose field 1 was also a repeated message — so an old journal
+ * decoded as an EntryBatch would PARTIALLY succeed and replay garbage into the
+ * store rather than failing. Bumping the version makes a stale journal
+ * quarantine loudly, which is the only honest reading of one.
  *
  * A TORN TAIL is expected, not corruption: a shim killed mid-append leaves a
  * partial record. It was never fsync'd, so it was never acknowledged as held
@@ -35,20 +41,20 @@ import fs from "node:fs";
 import path from "node:path";
 import { fromBinary, toBinary } from "@bufbuild/protobuf";
 import { bindLog } from "./log.js";
-import { Event, EventBatchSchema, EventSchema } from "./proto.js";
+import { Entry, EntryBatchSchema, EntrySchema } from "./proto.js";
 
 const COMPONENT = "shim-store-spill";
 const LOGGER = bindLog({ component: COMPONENT, operation: "shim.store-spill.journal" });
 
 /** File magic, so a foreign file is never parsed as a journal. */
 const MAGIC = Buffer.from("ARSP", "ascii");
-const FORMAT_VERSION = 1;
+const FORMAT_VERSION = 2;
 const HEADER_BYTES = MAGIC.length + 4;
 const LENGTH_BYTES = 4;
 
 /** One recovered batch and the offset just past the record it came from. */
 interface ParsedRecord {
-  events: Event[];
+  entries: Entry[];
   end: number;
 }
 
@@ -109,8 +115,8 @@ export class SpillJournal {
    * Append one batch and FSYNC it. Returns only once the record is on stable
    * storage, because the caller reports the batch as held on this return.
    */
-  append(events: Event[]): void {
-    const body = toBinary(EventBatchSchema, { $typeName: "agentshim.core.v1.EventBatch", events, cursorAdvance: undefined });
+  append(entries: Entry[]): void {
+    const body = toBinary(EntryBatchSchema, { $typeName: "agentshim.v1.EntryBatch", entries, cursorAdvance: undefined });
     const record = Buffer.alloc(LENGTH_BYTES + body.length);
     record.writeUInt32BE(body.length, 0);
     Buffer.from(body).copy(record, LENGTH_BYTES);
@@ -125,7 +131,7 @@ export class SpillJournal {
    * A trailing partial record is truncated away and reported: it was never
    * fsync'd, so no caller was ever told it was held.
    */
-  read(): Event[][] {
+  read(): Entry[][] {
     const buf = fs.readFileSync(this.journalPath);
     if (buf.length === 0) {
       this.writeHeader();
@@ -140,12 +146,12 @@ export class SpillJournal {
       this.quarantineForeignFile(`format version ${version} is not this shim's ${FORMAT_VERSION}`);
       return [];
     }
-    const batches: Event[][] = [];
+    const batches: Entry[][] = [];
     let offset = HEADER_BYTES;
     while (offset < buf.length) {
       const parsed = this.parseRecord(buf, offset);
       if (parsed === null) break;
-      batches.push(parsed.events);
+      batches.push(parsed.entries);
       offset = parsed.end;
     }
     if (offset !== buf.length) {
@@ -194,8 +200,8 @@ export class SpillJournal {
     // NOT a torn tail — the bytes are all there and they are wrong. Report it
     // and stop, so the records after it are not read through a bad offset.
     try {
-      const batch = fromBinary(EventBatchSchema, buf.subarray(start, end));
-      return { events: batch.events.map((e) => fromBinary(EventSchema, toBinary(EventSchema, e))), end };
+      const batch = fromBinary(EntryBatchSchema, buf.subarray(start, end));
+      return { entries: batch.entries.map((e) => fromBinary(EntrySchema, toBinary(EntrySchema, e))), end };
     } catch (err) {
       LOGGER.log({
         level: "error",
