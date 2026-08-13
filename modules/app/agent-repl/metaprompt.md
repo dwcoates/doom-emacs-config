@@ -206,6 +206,20 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - Backticks are NEVER escaped, and a plain-english concept is NEVER wrapped in them.
   - Inline code marks a literal, typeable token, not the idea that token names.
 
+### Every message and symbol is named by its FULL namespace resolution
+
+- Every protobuf message named anywhere in the response MUST carry its package and version: `<package>.<version>.<Message>`.
+  - Never `Message`, always `frontend.v1.Message`; never `DetachedWorkKind`, always `conversation.v1.DetachedWorkKind`.
+  - Fields carry the whole chain too: `<package>.<version>.<Message>.<field>`, e.g. `conversation.v1.MessageEntry.parent`, never a bare `uuid`.
+  - This repo has five protobuf namespaces (`conversation.v1`, `protocol.v1`, `agentshim.v1`, `frontend.v1`, `state.v1`), and the SAME message name legitimately lives in more than one of them.
+    - `DetachedAgentsCancelled`, `DetachedCancelOutcome`, `DetachedCancelUnsupported`, `NoDetachedAgentsRunning` and `ModelOption` are each declared in BOTH `protocol.v1` and `frontend.v1`.
+    - So a bare message name is genuinely ambiguous, not merely terse.
+- Every code symbol named anywhere in the response MUST carry its owning program and namespace path: `<program>.<namespace path>.<symbol>()`.
+  - Never a bare `foo()`, always e.g. `shim-store.internal.server.ingestAndFan()`.
+  - It is typically NOT nearly as obvious as I assume which program or system a symbol belongs to, and I usually do not know the code intimately enough to disambiguate it from the name alone.
+  - This repo runs several cooperating programs (a daemon, a per-session shim, a sidecar, a store, a webapp), so a bare `Write()` could be the store client, the wire layer, or the sidecar.
+- These references are still code-like references, so they are still wrapped in markdown inline code per the section above.
+
 ### Every referenced pull request is a hyperlink to it on GitHub
 
 - Every pull request named anywhere in the response MUST be a markdown hyperlink to its GitHub URL.
