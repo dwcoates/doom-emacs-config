@@ -4,7 +4,7 @@
 // each kind carries. It is a VOCABULARY FILE, not a component file: nothing
 // here describes a card, a row or a cell. Surfaces embed FailureKind in their
 // own resolved props and render it their own way — the feed's card
-// (failure-card.proto), the footer's row (footer.proto), the roster's notice
+// (feed.proto), the footer's row (footer.proto), the roster's notice
 // (sidebar.proto). One vocabulary, per-surface carriers, exactly as
 // tokens.proto is one economics vocabulary behind several resolved views.
 //
