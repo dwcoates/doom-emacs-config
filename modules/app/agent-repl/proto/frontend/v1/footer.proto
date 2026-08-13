@@ -8,7 +8,7 @@ syntax = "proto3";
 package frontend.v1;
 
 import "protocol/v1/core.proto";
-import "frontend/v1/commands.proto";
+import "frontend/v1/shared.proto";
 import "frontend/v1/feed.proto";
 import "frontend/v1/state.proto";
 

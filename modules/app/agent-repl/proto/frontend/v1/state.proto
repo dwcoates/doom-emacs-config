@@ -6,8 +6,7 @@ syntax = "proto3";
 package frontend.v1;
 
 import "frontend/v1/feed.proto";
-import "frontend/v1/gate-revival.proto";
-import "frontend/v1/merge.proto";
+import "frontend/v1/shared.proto";
 import "protocol/v1/core.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
