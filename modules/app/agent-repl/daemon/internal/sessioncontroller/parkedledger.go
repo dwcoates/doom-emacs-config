@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
@@ -107,7 +107,7 @@ func (m *Manager) MaterializeShutdownHolds() (int, error) {
 		// empty rationale are decided in newParkedEntry and nowhere else, so
 		// the boot ledger and the ShimReady replay cannot disagree about what a
 		// parked prompt is.
-		promptOrigin := corev1.PromptOrigin(row.PromptOrigin)
+		promptOrigin := protocolv1.PromptOrigin(row.PromptOrigin)
 		if err := validatePromptOrigin(promptOrigin); err != nil {
 			m.mu.Unlock()
 			return 0, fmt.Errorf("session-controller: materializing parked prompt %s for workspace %q: %w", row.EntryID, row.Workspace, err)

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 
 	"claude-repld/internal/dlog"
@@ -47,43 +47,43 @@ func (s *memSeqStore) SetLastSeq(id string, seq uint64) {
 // chanState / chanFrame capture routed events on buffered channels so tests
 // synchronize on delivery instead of sleeping.
 type chanState struct {
-	ch  chan *corev1.Event
+	ch  chan *protocolv1.Event
 	err error
 }
 
-func newChanState() *chanState { return &chanState{ch: make(chan *corev1.Event, 256)} }
-func (s *chanState) Apply(ev *corev1.Event) error {
+func newChanState() *chanState { return &chanState{ch: make(chan *protocolv1.Event, 256)} }
+func (s *chanState) Apply(ev *protocolv1.Event) error {
 	s.ch <- ev
 	return s.err
 }
 
 type chanTurnClaims struct {
-	ch  chan *corev1.Event
+	ch  chan *protocolv1.Event
 	err error
 }
 
 func newChanTurnClaims() *chanTurnClaims {
-	return &chanTurnClaims{ch: make(chan *corev1.Event, 256)}
+	return &chanTurnClaims{ch: make(chan *protocolv1.Event, 256)}
 }
 
-func (s *chanTurnClaims) ApplyTurnClaimBridge(ev *corev1.Event) error {
+func (s *chanTurnClaims) ApplyTurnClaimBridge(ev *protocolv1.Event) error {
 	s.ch <- ev
 	return s.err
 }
 
 type chanFrame struct {
-	ch  chan *corev1.Event
+	ch  chan *protocolv1.Event
 	err error
 }
 
-func newChanFrame() *chanFrame { return &chanFrame{ch: make(chan *corev1.Event, 256)} }
-func (f *chanFrame) Consume(ev *corev1.Event) error {
+func newChanFrame() *chanFrame { return &chanFrame{ch: make(chan *protocolv1.Event, 256)} }
+func (f *chanFrame) Consume(ev *protocolv1.Event) error {
 	f.ch <- ev
 	return f.err
 }
 
 type chanDegraded struct {
-	ds        chan *corev1.DegradedState
+	ds        chan *protocolv1.DegradedState
 	degraded  chan string
 	recovered chan struct{}
 	// disposition is the verdict this fake reporter hands back, which is what
@@ -93,13 +93,13 @@ type chanDegraded struct {
 
 func newChanDegraded() *chanDegraded {
 	return &chanDegraded{
-		ds:        make(chan *corev1.DegradedState, 16),
+		ds:        make(chan *protocolv1.DegradedState, 16),
 		degraded:  make(chan string, 16),
 		recovered: make(chan struct{}, 16),
 	}
 }
 
-func (d *chanDegraded) Degraded(_ string, _ *corev1.Event, ds *corev1.DegradedState) Disposition {
+func (d *chanDegraded) Degraded(_ string, _ *protocolv1.Event, ds *protocolv1.DegradedState) Disposition {
 	d.ds <- ds
 	return d.disposition
 }
@@ -107,9 +107,9 @@ func (d *chanDegraded) ConnectionDegraded(_, reason string) { d.degraded <- reas
 func (d *chanDegraded) ConnectionRecovered(_ string)        { d.recovered <- struct{}{} }
 
 // funcPerm adapts a func to PermissionHandler.
-type funcPerm func(sessionID string, req *corev1.PermissionRequest) *corev1.PermissionResponse
+type funcPerm func(sessionID string, req *protocolv1.PermissionRequest) *protocolv1.PermissionResponse
 
-func (f funcPerm) HandlePermission(id string, req *corev1.PermissionRequest) *corev1.PermissionResponse {
+func (f funcPerm) HandlePermission(id string, req *protocolv1.PermissionRequest) *protocolv1.PermissionResponse {
 	return f(id, req)
 }
 
@@ -130,8 +130,8 @@ func newHarness() *harness {
 		claims: newChanTurnClaims(),
 		frame:  newChanFrame(),
 		deg:    newChanDegraded(),
-		perm: funcPerm(func(_ string, req *corev1.PermissionRequest) *corev1.PermissionResponse {
-			return &corev1.PermissionResponse{RequestId: req.GetRequestId(), Decision: corev1.PermissionDecision_PERMISSION_DECISION_ALLOW}
+		perm: funcPerm(func(_ string, req *protocolv1.PermissionRequest) *protocolv1.PermissionResponse {
+			return &protocolv1.PermissionResponse{RequestId: req.GetRequestId(), Decision: protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW}
 		}),
 	}
 }
@@ -170,7 +170,7 @@ func (h *harness) config(t *testing.T, sessionID, path string) Config {
 // downstream of the handshake is byte-for-byte what production sees.
 type dialSource struct{ path string }
 
-func (d dialSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.ShimHello, error) {
+func (d dialSource) Next(ctx context.Context, _ string) (net.Conn, *protocolv1.ShimHello, error) {
 	var dl net.Dialer
 	conn, err := dl.DialContext(ctx, "unix", d.path)
 	if err != nil {
@@ -191,7 +191,7 @@ func (d dialSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.ShimH
 		conn.Close()
 		return nil, nil, err
 	}
-	hello, ok := msg.(*corev1.ShimHello)
+	hello, ok := msg.(*protocolv1.ShimHello)
 	if !ok {
 		conn.Close()
 		return nil, nil, fmt.Errorf("fake shim opened with %T, want ShimHello", msg)
@@ -260,9 +260,9 @@ func mustWriteMsg(t *testing.T, conn net.Conn, msg proto.Message) {
 //
 // Acking is what makes this a usable session: nothing else releases
 // AwaitReady, so a fake that skipped it would hang every caller.
-func fakeServerHandshake(t *testing.T, conn net.Conn, sessionID, protoVer string, turnInFlight bool) *corev1.DaemonHello {
+func fakeServerHandshake(t *testing.T, conn net.Conn, sessionID, protoVer string, turnInFlight bool) *protocolv1.DaemonHello {
 	t.Helper()
-	mustWriteMsg(t, conn, &corev1.ShimHello{
+	mustWriteMsg(t, conn, &protocolv1.ShimHello{
 		SessionId:       sessionID,
 		Vendor:          "claude",
 		ShimVersion:     "test-shim",
@@ -273,16 +273,16 @@ func fakeServerHandshake(t *testing.T, conn net.Conn, sessionID, protoVer string
 	if err != nil {
 		t.Fatalf("shim reading DaemonHello: %v", err)
 	}
-	dh, ok := m.(*corev1.DaemonHello)
+	dh, ok := m.(*protocolv1.DaemonHello)
 	if !ok {
 		t.Fatalf("shim expected DaemonHello, got %T", m)
 	}
-	mustWriteMsg(t, conn, &corev1.ShimReady{SessionId: sessionID, FromSeq: dh.GetFromSeq()})
+	mustWriteMsg(t, conn, &protocolv1.ShimReady{SessionId: sessionID, FromSeq: dh.GetFromSeq()})
 	return dh
 }
 
 // recvEvent waits for one event on ch or fails.
-func recvEvent(t *testing.T, ch chan *corev1.Event) *corev1.Event {
+func recvEvent(t *testing.T, ch chan *protocolv1.Event) *protocolv1.Event {
 	t.Helper()
 	select {
 	case ev := <-ch:
@@ -300,9 +300,9 @@ func recvEvent(t *testing.T, ch chan *corev1.Event) *corev1.Event {
 func TestHandshakeHappyPath(t *testing.T) {
 	// Arrange
 	h := newHarness()
-	gotHello := make(chan *corev1.DaemonHello, 1)
+	gotHello := make(chan *protocolv1.DaemonHello, 1)
 	path := startFakeShim(t, func(conn net.Conn) {
-		mustWriteMsg(t, conn, &corev1.ShimHello{
+		mustWriteMsg(t, conn, &protocolv1.ShimHello{
 			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
 			ProtocolVersion: "1", TurnInFlight: true,
 		})
@@ -311,27 +311,27 @@ func TestHandshakeHappyPath(t *testing.T) {
 			t.Errorf("read DaemonHello: %v", err)
 			return
 		}
-		dh, ok := m.(*corev1.DaemonHello)
+		dh, ok := m.(*protocolv1.DaemonHello)
 		if !ok {
 			t.Errorf("expected DaemonHello, got %T", m)
 			return
 		}
 		gotHello <- dh
-		mustWriteMsg(t, conn, &corev1.ShimReady{SessionId: "sess-1", FromSeq: dh.GetFromSeq()})
+		mustWriteMsg(t, conn, &protocolv1.ShimReady{SessionId: "sess-1", FromSeq: dh.GetFromSeq()})
 		// Hold the connection open.
 		_, _ = wire.ReadAny(conn)
 	})
 
 	cfg := h.config(t, "sess-1", path)
-	connected := make(chan *corev1.ShimHello, 1)
-	cfg.OnConnected = func(hello *corev1.ShimHello) bool { connected <- hello; return false }
+	connected := make(chan *protocolv1.ShimHello, 1)
+	cfg.OnConnected = func(hello *protocolv1.ShimHello) bool { connected <- hello; return false }
 	c := New(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() { errCh <- c.Run(ctx) }()
 
 	// Act
-	var hello *corev1.ShimHello
+	var hello *protocolv1.ShimHello
 	select {
 	case hello = <-connected:
 	case <-time.After(2 * time.Second):
@@ -360,7 +360,7 @@ func TestHandshakeVersionMismatchIsTerminal(t *testing.T) {
 	// Arrange: shim announces an incompatible protocol version.
 	h := newHarness()
 	path := startFakeShim(t, func(conn net.Conn) {
-		mustWriteMsg(t, conn, &corev1.ShimHello{
+		mustWriteMsg(t, conn, &protocolv1.ShimHello{
 			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
 			ProtocolVersion: "99",
 		})
@@ -456,14 +456,14 @@ func TestReconnectUsesVolatileCursorWhileDurableTurnCursorIsPinned(t *testing.T)
 		mu.Unlock()
 		dh := fakeServerHandshake(t, conn, "agent-session", "1", n == 2)
 		if n == 1 {
-			mustWriteMsg(t, conn, &corev1.Event{SessionId: "vendor-session", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{VendorSessionId: "vendor-session"}}})
-			mustWriteMsg(t, conn, &corev1.Event{SessionId: "vendor-session", Seq: 2, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn"}}})
-			mustWriteMsg(t, conn, &corev1.Event{SessionId: "vendor-session", Seq: 3, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_Vendor{Vendor: &anypb.Any{}}})
+			mustWriteMsg(t, conn, &protocolv1.Event{SessionId: "vendor-session", Seq: 1, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{VendorSessionId: "vendor-session"}}})
+			mustWriteMsg(t, conn, &protocolv1.Event{SessionId: "vendor-session", Seq: 2, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "turn"}}})
+			mustWriteMsg(t, conn, &protocolv1.Event{SessionId: "vendor-session", Seq: 3, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &protocolv1.Event_Vendor{Vendor: &anypb.Any{}}})
 			conn.Close()
 			return
 		}
 		secondFrom <- dh.GetFromSeq()
-		mustWriteMsg(t, conn, &corev1.Event{SessionId: "vendor-session", Seq: 4, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "turn"}}})
+		mustWriteMsg(t, conn, &protocolv1.Event{SessionId: "vendor-session", Seq: 4, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "turn"}}})
 		_, _ = wire.ReadAny(conn)
 	})
 	c := New(h.config(t, "agent-session", path))
@@ -542,7 +542,7 @@ func silentThenTalkativeShim(t *testing.T, sessionID string, resume <-chan struc
 	return func(conn net.Conn) {
 		_ = fakeServerHandshake(t, conn, sessionID, "1", false)
 		<-resume
-		mustWriteMsg(t, conn, &corev1.ConnectionHeartbeat{SentAtMs: time.Now().UnixMilli()})
+		mustWriteMsg(t, conn, &protocolv1.ConnectionHeartbeat{SentAtMs: time.Now().UnixMilli()})
 		_, _ = wire.ReadAny(conn) // block; the connection outlives the test's asserts
 	}
 }
@@ -625,13 +625,13 @@ func TestHeartbeatDegradeIsReportedOnceAcrossTheSilentWindow(t *testing.T) {
 }
 
 // persistentTurnEnd builds a PERSISTENT TurnEnded event at seq.
-func persistentTurnEnd(session string, seq uint64) *corev1.Event {
-	return &corev1.Event{
+func persistentTurnEnd(session string, seq uint64) *protocolv1.Event {
+	return &protocolv1.Event{
 		SessionId: session,
 		Seq:       seq,
-		Plane:     corev1.Plane_PLANE_STREAM,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Payload:   &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{StopReason: "end_turn"}},
+		Plane:     protocolv1.Plane_PLANE_STREAM,
+		Class:     protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
+		Payload:   &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{StopReason: "end_turn"}},
 	}
 }
 
@@ -682,17 +682,17 @@ func TestShimReadyRetirementNeverPublishesReadiness(t *testing.T) {
 	c := New(Config{
 		SessionID: "s1",
 		Logf:      shimclientTestLogf(t),
-		OnConnected: func(*corev1.ShimHello) bool {
+		OnConnected: func(*protocolv1.ShimHello) bool {
 			retirementObserved <- struct{}{}
 			return true
 		},
 	})
-	ac := &activeConn{hello: &corev1.ShimHello{SessionId: "s1"}}
+	ac := &activeConn{hello: &protocolv1.ShimHello{SessionId: "s1"}}
 	c.mu.Lock()
 	c.active = ac
 	c.mu.Unlock()
 
-	c.dispatchShimReady(ac, &corev1.ShimReady{SessionId: "s1"})
+	c.dispatchShimReady(ac, &protocolv1.ShimReady{SessionId: "s1"})
 	select {
 	case <-retirementObserved:
 	default:

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // costHarness is a harness whose Manager carries an exact alert threshold.
@@ -27,11 +27,11 @@ func newCostHarness(t *testing.T, threshold int64) *costHarness {
 }
 
 // startTurn opens a turn with an id and an origin, then drops the push.
-func (h *costHarness) startTurn(turnID string, origin corev1.PromptOrigin) {
+func (h *costHarness) startTurn(turnID string, origin protocolv1.PromptOrigin) {
 	h.t.Helper()
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId: testSID, ProducedAtMs: atMs,
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{
+		Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{
 			TurnId: turnID, PromptOrigin: origin,
 		}},
 	})
@@ -70,7 +70,7 @@ func (h *costHarness) alert() *frontendv1.ContextCostAlert {
 func TestExpensiveTurnCountsCacheCreationAsUncached(t *testing.T) {
 	// Arrange.
 	h := newCostHarness(t, 1_000)
-	h.startTurn("t1", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	h.startTurn("t1", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Act: raw input alone is trivial; the re-ingest is all cache creation.
 	h.result(12, 50_000)
@@ -86,7 +86,7 @@ func TestExpensiveTurnCountsCacheCreationAsUncached(t *testing.T) {
 func TestExpensiveTurnSilentBelowTheThreshold(t *testing.T) {
 	// Arrange.
 	h := newCostHarness(t, 20_000)
-	h.startTurn("t1", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	h.startTurn("t1", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Act.
 	h.result(100, 900)
@@ -105,13 +105,13 @@ func TestExpensiveTurnSilentBelowTheThreshold(t *testing.T) {
 func TestExpensiveTurnCarriesTheKeepAliveOrigin(t *testing.T) {
 	// Arrange.
 	h := newCostHarness(t, 1_000)
-	h.startTurn("ka_1", corev1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE)
+	h.startTurn("ka_1", protocolv1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE)
 
 	// Act.
 	h.result(0, 80_000)
 
 	// Assert.
-	if got := h.alert().GetPromptOrigin(); got != corev1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE {
+	if got := h.alert().GetPromptOrigin(); got != protocolv1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE {
 		t.Fatalf("prompt_origin = %s, want CACHE_KEEP_ALIVE; the cold-ping alarm IS the origin", got)
 	}
 }
@@ -121,7 +121,7 @@ func TestExpensiveTurnCarriesTheKeepAliveOrigin(t *testing.T) {
 func TestExpensiveTurnNamesItsTurn(t *testing.T) {
 	// Arrange.
 	h := newCostHarness(t, 1_000)
-	h.startTurn("t-42", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	h.startTurn("t-42", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Act.
 	h.result(0, 9_000)
@@ -137,7 +137,7 @@ func TestExpensiveTurnNamesItsTurn(t *testing.T) {
 func TestExpensiveTurnCarriesTheThreshold(t *testing.T) {
 	// Arrange.
 	h := newCostHarness(t, 1_234)
-	h.startTurn("t1", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	h.startTurn("t1", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Act.
 	h.result(0, 9_000)
@@ -154,16 +154,16 @@ func TestExpensiveTurnCarriesTheThreshold(t *testing.T) {
 func TestExpensiveTurnClearsOnTheNextTurnStart(t *testing.T) {
 	// Arrange.
 	h := newCostHarness(t, 1_000)
-	h.startTurn("t1", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	h.startTurn("t1", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 	h.result(0, 9_000)
 	h.alert()
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId: testSID, ProducedAtMs: atMs,
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t1"}},
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "t1"}},
 	})
 
 	// Act.
-	h.startTurn("t2", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	h.startTurn("t2", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert.
 	view, _ := h.m.Current(testWS)
@@ -176,7 +176,7 @@ func TestExpensiveTurnClearsOnTheNextTurnStart(t *testing.T) {
 func TestExpensiveTurnIgnoresAResultWithNoUsage(t *testing.T) {
 	// Arrange.
 	h := newCostHarness(t, 1_000)
-	h.startTurn("t1", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	h.startTurn("t1", protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Act.
 	h.apply(streamEvent(t, &datav1.ClaudeStreamMessage{
@@ -228,10 +228,10 @@ func (h *loggedCostHarness) alertLine() string {
 // startTurnAt opens a turn stamped at the given producer time.
 func (h *loggedCostHarness) startTurnAt(turnID string, at int64) {
 	h.t.Helper()
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId: testSID, ProducedAtMs: at,
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{
-			TurnId: turnID, PromptOrigin: corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+		Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{
+			TurnId: turnID, PromptOrigin: protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
 		}},
 	})
 	h.drain()
@@ -240,9 +240,9 @@ func (h *loggedCostHarness) startTurnAt(turnID string, at int64) {
 // endTurnAt closes a turn stamped at the given producer time.
 func (h *loggedCostHarness) endTurnAt(turnID string, at int64) {
 	h.t.Helper()
-	h.apply(&corev1.Event{
+	h.apply(&protocolv1.Event{
 		SessionId: testSID, ProducedAtMs: at,
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: turnID}},
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: turnID}},
 	})
 	h.drain()
 }

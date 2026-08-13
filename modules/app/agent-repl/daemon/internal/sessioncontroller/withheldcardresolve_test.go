@@ -3,8 +3,8 @@ package sessioncontroller
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/errclass"
 )
@@ -64,7 +64,7 @@ func TestAWithheldDegradationCardResolvesWhenTheLiveQueryWires(t *testing.T) {
 	h := withheldCardHarness(t)
 
 	// Act — the bring-up gate closes.
-	h.m.onConnected("ws", "s1", &corev1.ShimHello{})
+	h.m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Assert.
 	if got := resolvedFailureCards(h); len(got) != 1 {
@@ -83,7 +83,7 @@ func TestAResolvedWithheldCardKeepsItsIdentityAndDetail(t *testing.T) {
 	want := opened[len(opened)-1]
 
 	// Act.
-	h.m.onConnected("ws", "s1", &corev1.ShimHello{})
+	h.m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Assert.
 	got := resolvedFailureCards(h)
@@ -105,7 +105,7 @@ func TestAResolvedWithheldCardIsStillTheUnexpectedTerminationCard(t *testing.T) 
 	h := withheldCardHarness(t)
 
 	// Act.
-	h.m.onConnected("ws", "s1", &corev1.ShimHello{})
+	h.m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Assert.
 	got := resolvedFailureCards(h)
@@ -120,7 +120,7 @@ func TestTheWithheldCardResolutionNamesItsReason(t *testing.T) {
 	h := withheldCardHarness(t)
 
 	// Act.
-	h.m.onConnected("ws", "s1", &corev1.ShimHello{})
+	h.m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Assert.
 	if !h.log.contains("withheld degradation card RESOLVED") ||
@@ -136,7 +136,7 @@ func TestTheWithheldCardResolutionRecordStaysOnTheInfoChannel(t *testing.T) {
 	h := withheldCardHarness(t)
 
 	// Act.
-	h.m.onConnected("ws", "s1", &corev1.ShimHello{})
+	h.m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Assert.
 	if h.warn.contains("withheld degradation card RESOLVED") {
@@ -148,10 +148,10 @@ func TestAWithheldCardResolvesOnlyOnce(t *testing.T) {
 	// Arrange — a second gate close (a reattach) must not re-settle a card that
 	// is already settled, or the feed would gain a duplicate on every reconnect.
 	h := withheldCardHarness(t)
-	h.m.onConnected("ws", "s1", &corev1.ShimHello{})
+	h.m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Act.
-	h.m.onConnected("ws", "s1", &corev1.ShimHello{})
+	h.m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Assert.
 	if got := h.log.count("withheld degradation card RESOLVED"); got != 1 {
@@ -169,7 +169,7 @@ func TestALiveDegradationCardIsNotResolvedByTheGate(t *testing.T) {
 	reportDegradation(t, h, live)
 
 	// Act.
-	h.m.onConnected("ws", "s1", &corev1.ShimHello{})
+	h.m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Assert.
 	if got := resolvedFailureCards(h); len(got) != 0 {
@@ -192,7 +192,7 @@ func TestALiveDegradationOnTheSameCardCancelsTheWithheldResolution(t *testing.T)
 	reportDegradation(t, h, live)
 
 	// Act.
-	h.m.onConnected("ws", "s1", &corev1.ShimHello{})
+	h.m.onConnected("ws", "s1", &protocolv1.ShimHello{})
 
 	// Assert.
 	if got := resolvedFailureCards(h); len(got) != 0 {
@@ -207,7 +207,7 @@ func TestAStaleShimReadyResolvesNoWithheldCard(t *testing.T) {
 	h := withheldCardHarness(t)
 
 	// Act.
-	h.m.onConnectedForGeneration("ws", "s1", "g_retired", &corev1.ShimHello{SessionId: "s1"})
+	h.m.onConnectedForGeneration("ws", "s1", "g_retired", &protocolv1.ShimHello{SessionId: "s1"})
 
 	// Assert.
 	if got := resolvedFailureCards(h); len(got) != 0 {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // THE SUBMITTER DECIDES, AND IT DECIDES AT THE SUBMIT. Only the daemon's own two
@@ -81,7 +81,7 @@ func TestAUserTurnsEndMovesTheEngagementClock(t *testing.T) {
 	// Arrange.
 	m, _, hib, _, _ := coldPingRig(t)
 	if err := m.SubmitPrompt(context.Background(), "ws", "req_user", "hello", "",
-		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	d := controllerFor(t, m)

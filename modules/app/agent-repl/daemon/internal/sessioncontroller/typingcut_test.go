@@ -3,8 +3,8 @@ package sessioncontroller
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ func TestAnUnexpectedQueryTerminationCutsTheOpenPreview(t *testing.T) {
 	}
 
 	// Act: the LIVE arm.
-	c.surfaceUnexpectedQueryTermination(&corev1.Event{}, item, false)
+	c.surfaceUnexpectedQueryTermination(&protocolv1.Event{}, item, false)
 
 	// Assert: the preview is retired rather than left spinning beside the
 	// failure card that explains the session.
@@ -163,7 +163,7 @@ func TestAReplayedQueryTerminationCutsNothing(t *testing.T) {
 	}
 
 	// Act: the HISTORICAL arm.
-	c.surfaceUnexpectedQueryTermination(&corev1.Event{}, item, true)
+	c.surfaceUnexpectedQueryTermination(&protocolv1.Event{}, item, true)
 
 	// Assert.
 	if got := cutMessageIDs(push); len(got) != 0 {

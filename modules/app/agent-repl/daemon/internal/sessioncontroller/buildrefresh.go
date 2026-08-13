@@ -35,7 +35,7 @@ import (
 	"context"
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/ssm"
 )
@@ -174,7 +174,7 @@ func (m *Manager) currentShimBuild() string {
 // spawned agent, a long-lived shell — which is not a turn and which used to be
 // invisible here. A shim doing real async work therefore looked perfectly idle
 // at exactly the instant this function decided whether to kill it.
-func (m *Manager) refreshStaleShim(workspace, sessionID string, hello *corev1.ShimHello) bool {
+func (m *Manager) refreshStaleShim(workspace, sessionID string, hello *protocolv1.ShimHello) bool {
 	reported := hello.GetBuildSha()
 	turnInFlight, activeTurnIDs := hello.GetTurnInFlight(), hello.GetActiveTurnIds()
 	want := m.currentShimBuild()

@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // healthResult is the correlated answer to one HealthCheck.  It has its own
 // waiter map because a HealthStatus is not an Ack: an unhealthy answer is a
 // valid, useful assertion rather than a control-plane failure.
 type healthResult struct {
-	status *corev1.HealthStatus
+	status *protocolv1.HealthStatus
 	err    error
 }
 
@@ -20,7 +20,7 @@ type healthResult struct {
 // responsibility boundary.  It never dials or starts a shim: an absent active
 // connection is reported as ErrNotConnected, because session health is only
 // true for a live handshaked daemon-to-shim connection.
-func (c *Client) Health(ctx context.Context, requestID string) (*corev1.HealthStatus, error) {
+func (c *Client) Health(ctx context.Context, requestID string) (*protocolv1.HealthStatus, error) {
 	if requestID == "" {
 		return nil, fmt.Errorf("shimclient: health requires a non-empty request_id")
 	}
@@ -43,7 +43,7 @@ func (c *Client) Health(ctx context.Context, requestID string) (*corev1.HealthSt
 		ac.pendMu.Unlock()
 	}()
 
-	if err := ac.writeMsg(&corev1.HealthCheck{RequestId: requestID}); err != nil {
+	if err := ac.writeMsg(&protocolv1.HealthCheck{RequestId: requestID}); err != nil {
 		return nil, fmt.Errorf("shimclient: send HealthCheck request_id=%s: %w", requestID, err)
 	}
 	c.logf("health check sent request_id=%s", requestID)
@@ -67,7 +67,7 @@ func (c *Client) Health(ctx context.Context, requestID string) (*corev1.HealthSt
 // resolveHealth delivers a HealthStatus only to the matching outstanding
 // probe.  A mismatched or late status is evidence of a protocol violation and
 // is logged; it can never make another request look healthy.
-func (c *Client) resolveHealth(ac *activeConn, status *corev1.HealthStatus) {
+func (c *Client) resolveHealth(ac *activeConn, status *protocolv1.HealthStatus) {
 	requestID := status.GetRequestId()
 	ac.pendMu.Lock()
 	ch, ok := ac.health[requestID]

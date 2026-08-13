@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 )
 
@@ -32,7 +32,7 @@ func TestABusyShimIsNotTimedOutWhileItIsStillFeedingUs(t *testing.T) {
 	const stall = 60 * time.Millisecond
 	h := newHarness()
 	path := startFakeShim(t, func(conn net.Conn) {
-		mustWriteMsg(t, conn, &corev1.ShimHello{
+		mustWriteMsg(t, conn, &protocolv1.ShimHello{
 			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim", ProtocolVersion: "1",
 		})
 		if _, err := wire.ReadAny(conn); err != nil {
@@ -43,9 +43,9 @@ func TestABusyShimIsNotTimedOutWhileItIsStillFeedingUs(t *testing.T) {
 		defer backlog.Stop()
 		for sent := 0; sent < 24; sent++ {
 			<-backlog.C
-			mustWriteMsg(t, conn, &corev1.ConnectionHeartbeat{SentAtMs: time.Now().UnixMilli()})
+			mustWriteMsg(t, conn, &protocolv1.ConnectionHeartbeat{SentAtMs: time.Now().UnixMilli()})
 		}
-		mustWriteMsg(t, conn, &corev1.ShimReady{SessionId: "sess-1"})
+		mustWriteMsg(t, conn, &protocolv1.ShimReady{SessionId: "sess-1"})
 		_, _ = wire.ReadAny(conn) // hold the connection open
 	})
 	cfg := h.config(t, "sess-1", path)
@@ -79,7 +79,7 @@ func TestASilentShimStillFailsItsBringUp(t *testing.T) {
 	h := newHarness()
 	held := make(chan struct{})
 	path := startFakeShim(t, func(conn net.Conn) {
-		mustWriteMsg(t, conn, &corev1.ShimHello{
+		mustWriteMsg(t, conn, &protocolv1.ShimHello{
 			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim", ProtocolVersion: "1",
 		})
 		if _, err := wire.ReadAny(conn); err != nil {

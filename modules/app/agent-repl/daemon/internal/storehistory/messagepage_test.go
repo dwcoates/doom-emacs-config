@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 )
 
@@ -27,18 +27,18 @@ type fakePageStore struct {
 
 	mu sync.Mutex
 	// requested is the request frame the reader sent.
-	requested *corev1.MessagePageRequest
+	requested *protocolv1.MessagePageRequest
 	// page is the answer, or nil to close without answering.
-	page *corev1.MessagePage
+	page *protocolv1.MessagePage
 	// decoy is written BEFORE the answer, carrying a request id this reader is
 	// not awaiting.
-	decoy *corev1.MessagePage
+	decoy *protocolv1.MessagePage
 	// done releases the server goroutine at the end of the test, so the
 	// connection outlives the read rather than being closed underneath it.
 	done chan struct{}
 }
 
-func newFakePageStore(t *testing.T, page *corev1.MessagePage) *fakePageStore {
+func newFakePageStore(t *testing.T, page *protocolv1.MessagePage) *fakePageStore {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "storepage-")
 	if err != nil {
@@ -68,7 +68,7 @@ func (s *fakePageStore) serve() {
 	if err != nil {
 		return
 	}
-	req, ok := msg.(*corev1.MessagePageRequest)
+	req, ok := msg.(*protocolv1.MessagePageRequest)
 	if !ok {
 		return
 	}
@@ -90,7 +90,7 @@ func (s *fakePageStore) serve() {
 	<-done
 }
 
-func (s *fakePageStore) request() *corev1.MessagePageRequest {
+func (s *fakePageStore) request() *protocolv1.MessagePageRequest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.requested
@@ -100,7 +100,7 @@ func TestAMessagePageRequestNamesTheVendorSession(t *testing.T) {
 	// Arrange — the store keys its seq space on the VENDOR uuid, so a request
 	// under any other id asks about a conversation the store does not hold.
 	var logged []string
-	store := newFakePageStore(t, &corev1.MessagePage{LastPageSeq: 7})
+	store := newFakePageStore(t, &protocolv1.MessagePage{LastPageSeq: 7})
 	r := newReader(t, store.path(), &logged)
 
 	// Act.
@@ -118,7 +118,7 @@ func TestAHeadAnchorTravelsAsTheHeadArm(t *testing.T) {
 	// Arrange — the head is a fact the STORE resolves; a caller that named a
 	// seq for it would be authoring the position this contract removes.
 	var logged []string
-	store := newFakePageStore(t, &corev1.MessagePage{})
+	store := newFakePageStore(t, &protocolv1.MessagePage{})
 	r := newReader(t, store.path(), &logged)
 
 	// Act.
@@ -127,7 +127,7 @@ func TestAHeadAnchorTravelsAsTheHeadArm(t *testing.T) {
 	}
 
 	// Assert.
-	if _, ok := store.request().GetAnchor().(*corev1.MessagePageRequest_Head); !ok {
+	if _, ok := store.request().GetAnchor().(*protocolv1.MessagePageRequest_Head); !ok {
 		t.Fatalf("anchor = %T, want the head arm", store.request().GetAnchor())
 	}
 }
@@ -136,7 +136,7 @@ func TestABeforeSeqAnchorTravelsVerbatim(t *testing.T) {
 	// Arrange — a continuation copies a prior page's last_page_seq exactly. Any
 	// arithmetic on it here would be a position of the caller's own.
 	var logged []string
-	store := newFakePageStore(t, &corev1.MessagePage{})
+	store := newFakePageStore(t, &protocolv1.MessagePage{})
 	r := newReader(t, store.path(), &logged)
 
 	// Act.
@@ -145,7 +145,7 @@ func TestABeforeSeqAnchorTravelsVerbatim(t *testing.T) {
 	}
 
 	// Assert.
-	before, ok := store.request().GetAnchor().(*corev1.MessagePageRequest_BeforeSeq)
+	before, ok := store.request().GetAnchor().(*protocolv1.MessagePageRequest_BeforeSeq)
 	if !ok {
 		t.Fatalf("anchor = %T, want the before_seq arm", store.request().GetAnchor())
 	}
@@ -178,7 +178,7 @@ func TestAMessagePageForASessionWithNoVendorUUIDIsRefused(t *testing.T) {
 	// Arrange — with no vendor uuid there is no key the store's seq space is
 	// under, so the history cannot be located at all.
 	var logged []string
-	store := newFakePageStore(t, &corev1.MessagePage{})
+	store := newFakePageStore(t, &protocolv1.MessagePage{})
 	r := newReader(t, store.path(), &logged)
 	r.Vendor = func(string) (string, bool) { return "", false }
 
@@ -210,8 +210,8 @@ func TestAMessagePageForAnotherRequestIdIsDiscarded(t *testing.T) {
 	// Arrange — request_id is what correlates a page with the request that
 	// asked for it, so a page for another request is never applied.
 	var logged []string
-	store := newFakePageStore(t, &corev1.MessagePage{LastPageSeq: 9})
-	store.decoy = &corev1.MessagePage{RequestId: "somebody-else", LastPageSeq: 111}
+	store := newFakePageStore(t, &protocolv1.MessagePage{LastPageSeq: 9})
+	store.decoy = &protocolv1.MessagePage{RequestId: "somebody-else", LastPageSeq: 111}
 
 	r := newReader(t, store.path(), &logged)
 

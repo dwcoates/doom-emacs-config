@@ -36,9 +36,9 @@ import (
 	"syscall"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/dlog"
@@ -145,7 +145,7 @@ type SessionRegistrar interface {
 // ModelCatalogRegistrar receives the live SDK's model menu. It is separate
 // from SessionRegistrar because query capability is not transcript identity.
 type ModelCatalogRegistrar interface {
-	SessionModelCatalogObserved(sessionID string, models []*corev1.ModelOption) error
+	SessionModelCatalogObserved(sessionID string, models []*protocolv1.ModelOption) error
 }
 
 // TerminalAccountingObserver receives the durable terminal-accounting edge.
@@ -206,7 +206,7 @@ type SessionLocator interface {
 // FileDiagnosticPersister owns workspace-specific sidecar diagnostics after
 // the session controller resolves the session to its authoritative workspace.
 type FileDiagnosticPersister interface {
-	PersistFileDiagnostic(workspace, agentReplSessionID string, ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error
+	PersistFileDiagnostic(workspace, agentReplSessionID string, ev *protocolv1.Event, diagnostic *protocolv1.FilePlaneDiagnostic) error
 }
 
 // sessionClient is the slice of *shimclient.Client the session controller drives. An
@@ -217,12 +217,12 @@ type sessionClient interface {
 	// Health proves the already handshaked shim's own dependency boundary.
 	// It MUST NOT cause a lazy bring-up; session readiness is false until the
 	// existing live session controller can answer this probe.
-	Health(ctx context.Context, requestID string) (*corev1.HealthStatus, error)
+	Health(ctx context.Context, requestID string) (*protocolv1.HealthStatus, error)
 	// SubmitPrompt hands one prompt to the shim under requestID, which the
 	// shim adopts as the turn_id of every boundary the prompt produces. A
 	// caller whose own bookkeeping is keyed by that identity — the keep-alive
 	// ping — passes it; an empty id is minted by the client.
-	SubmitPrompt(ctx context.Context, requestID, text, origin, permissionMode string, promptOrigin corev1.PromptOrigin) error
+	SubmitPrompt(ctx context.Context, requestID, text, origin, permissionMode string, promptOrigin protocolv1.PromptOrigin) error
 	// Interrupt returns the shim's own verdict on what the stop did, which is
 	// the only place that verdict is observable.
 	//
@@ -230,7 +230,7 @@ type sessionClient interface {
 	// vocabulary, and travels only so the log can correlate the exchange back
 	// to it: the wire carries a daemon-minted control id that appears nowhere
 	// in any caller's records.
-	Interrupt(ctx context.Context, originRequestID string) (corev1.InterruptOutcome, error)
+	Interrupt(ctx context.Context, originRequestID string) (protocolv1.InterruptOutcome, error)
 	// CancelDetachedAgents stops the session's DETACHED background agents and
 	// returns the shim's own typed verdict on what it stopped, which — like
 	// Interrupt's — is observable nowhere else.
@@ -238,7 +238,7 @@ type sessionClient interface {
 	// A DIFFERENT OPERATION FROM Interrupt, not a variant of it: an interrupt
 	// ends the turn, and detached agents have outlived their turn by
 	// definition, so the interrupt reaches none of them.
-	CancelDetachedAgents(ctx context.Context, originRequestID string) (*corev1.DetachedCancelOutcome, error)
+	CancelDetachedAgents(ctx context.Context, originRequestID string) (*protocolv1.DetachedCancelOutcome, error)
 	// UnpinAccountingTurn releases the durable-cursor hold a turn's start took,
 	// for a turn the daemon closed WITHOUT a TurnEnded. Only a stream TurnEnded
 	// releases a pin otherwise, so a synthesized close would freeze the cursor
@@ -261,7 +261,7 @@ type sessionClient interface {
 	// it to onEvent. Its events arrive over the wire as ReplayEvent, a
 	// different type from live Events, which is what keeps replayed history
 	// out of the SSM/task/progress planes structurally (repull.go).
-	Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*corev1.Event)) (shimclient.ReplayResult, error)
+	Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents uint32, onEvent func(*protocolv1.Event)) (shimclient.ReplayResult, error)
 	// MessagePage asks the shim for ONE bounded, backward-anchored page of
 	// messages. It is how a LIVE workspace's history is read (livepage.go): the
 	// shim passes the request to the store, so the daemon never dials the store
@@ -269,7 +269,7 @@ type sessionClient interface {
 	//
 	// EVERY failure is an error — the shim reports one as a Nack bearing the
 	// page's request id — and none of them is an empty page.
-	MessagePage(ctx context.Context, anchor shimclient.MessagePageAnchor) (*corev1.MessagePage, error)
+	MessagePage(ctx context.Context, anchor shimclient.MessagePageAnchor) (*protocolv1.MessagePage, error)
 }
 
 // Config assembles a Manager. Every collaborator is injected so the session controller is
@@ -1103,7 +1103,7 @@ type fileDiagnosticSink struct {
 	agentReplSessionID string
 }
 
-func (s fileDiagnosticSink) PersistFileDiagnostic(ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error {
+func (s fileDiagnosticSink) PersistFileDiagnostic(ev *protocolv1.Event, diagnostic *protocolv1.FilePlaneDiagnostic) error {
 	if s.persister == nil {
 		return fmt.Errorf("session-controller: file-plane diagnostic persister is not wired for workspace %q", s.workspace)
 	}
@@ -1396,7 +1396,7 @@ func (m *Manager) persistVendorSessionID(sessionID, csid string) {
 // requestID is the frontend command's own id. It is the identity the submitted
 // turn carries on the wire (promptdispatch.go) and the authoritative turn id
 // used for terminal accounting. It must therefore be nonempty before any session state changes.
-func (m *Manager) SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) error {
+func (m *Manager) SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin protocolv1.PromptOrigin) error {
 	if strings.TrimSpace(requestID) == "" {
 		return fmt.Errorf("session-controller: submit prompt for workspace %q needs a non-empty request id", workspace)
 	}
@@ -1496,10 +1496,10 @@ func (m *Manager) SubmitWorkspaceInitialPrompt(ctx context.Context, workspace, j
 		return fmt.Errorf("session-controller: workspace initial prompt needs a job id")
 	}
 	return m.submitPrompt(ctx, workspace, "workspace-create:"+jobID, text, permissionMode, "workspace-create:"+jobID,
-		corev1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED)
+		protocolv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED)
 }
 
-func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, permissionMode, origin string, promptOrigin corev1.PromptOrigin) error {
+func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, permissionMode, origin string, promptOrigin protocolv1.PromptOrigin) error {
 	_, err := m.submitPromptAs(ctx, workspace, requestID, text, permissionMode, origin, promptOrigin, submitterUser, leavesParkedPermissions)
 	return err
 }
@@ -1552,7 +1552,7 @@ func (p promptDisposition) String() string {
 // the lease or the hibernation gate turns away changes nothing, and declining a
 // question on behalf of a prompt that is then refused would answer for the user
 // while leaving them nothing to show for it.
-func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text, permissionMode, origin string, promptOrigin corev1.PromptOrigin, who submitter, supersedes permissionSupersession) (promptDisposition, error) {
+func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text, permissionMode, origin string, promptOrigin protocolv1.PromptOrigin, who submitter, supersedes permissionSupersession) (promptDisposition, error) {
 	if err := validatePromptOrigin(promptOrigin); err != nil {
 		m.logf("session-controller: prompt REFUSED ws=%q request_id=%s origin=%q prompt_origin=%d error=%v — no session or queue state was touched", workspace, requestID, origin, promptOrigin, err)
 		return promptDisposition{}, err
@@ -1831,7 +1831,7 @@ func (d *sessionController) modelObservationNow() registry.ModelObservation {
 // SessionView, so one shim cannot alter another workspace's picker.
 type modelCatalogReporter struct{ m *Manager }
 
-func (r modelCatalogReporter) ModelCatalog(sessionID string, catalog *corev1.ModelCatalog) error {
+func (r modelCatalogReporter) ModelCatalog(sessionID string, catalog *protocolv1.ModelCatalog) error {
 	if catalog.GetSessionId() != sessionID {
 		return fmt.Errorf("session-controller: refusing model catalog frame_session=%s expected_session=%s", catalog.GetSessionId(), sessionID)
 	}
@@ -1963,7 +1963,7 @@ func (m *Manager) Interrupt(ctx context.Context, workspace, requestID string) er
 // is actually running. It is bounded at one re-aim: a session that supersedes
 // its own turns faster than a stop can be delivered has a different problem,
 // and the second failure is reported rather than chased.
-func (m *Manager) stopTurn(ctx context.Context, d *sessionController, requestID string) (corev1.InterruptOutcome, error) {
+func (m *Manager) stopTurn(ctx context.Context, d *sessionController, requestID string) (protocolv1.InterruptOutcome, error) {
 	outcome, err := m.stopTurnOnce(ctx, d, requestID)
 	if !errors.Is(err, ssm.ErrSettledTurnSuperseded) {
 		return outcome, err
@@ -1973,7 +1973,7 @@ func (m *Manager) stopTurn(ctx context.Context, d *sessionController, requestID 
 	return m.stopTurnOnce(ctx, d, requestID)
 }
 
-func (m *Manager) stopTurnOnce(ctx context.Context, d *sessionController, requestID string) (corev1.InterruptOutcome, error) {
+func (m *Manager) stopTurnOnce(ctx context.Context, d *sessionController, requestID string) (protocolv1.InterruptOutcome, error) {
 	workspace := d.workspace
 	outcome, err := d.client.Interrupt(ctx, requestID)
 	if err != nil {
@@ -1986,7 +1986,7 @@ func (m *Manager) stopTurnOnce(ctx context.Context, d *sessionController, reques
 		if errors.Is(err, shimclient.ErrDeliveredUnacked) {
 			m.noteUnackedInterrupt(d, requestID, err)
 		}
-		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, err
+		return protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, err
 	}
 	// The shim acknowledged the stop, which means it has already force-denied
 	// every canUseTool it had parked. The daemon's own rendezvous follows it
@@ -2089,13 +2089,13 @@ func (m *Manager) recoverSessionControllerForInterrupt(ctx context.Context, work
 // two statements earlier leaves a head jump as the queue's only deliverable and
 // a bare stop has none. That is the whole reason it is safe to run on BOTH
 // paths, which is what makes them one path.
-func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.InterruptOutcome) error {
+func (m *Manager) noteUserInterrupt(d *sessionController, outcome protocolv1.InterruptOutcome) error {
 	// ALREADY_COMPLETE is a shim-side assertion that no foreground turn
 	// exists. Its durable TurnEnded can still be traversing the store while
 	// this control Ack arrives. Reconcile the SSM FIRST and publish the footer
 	// window only after that succeeds; reversing these calls is the exact race
 	// that rendered "already finished" beside `thinking`.
-	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
+	if outcome == protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
 		publish := func(state *frontendv1.WorkspaceState) {
 			d.consumer.push.PushWorkspaceState(state)
 		}
@@ -2141,7 +2141,7 @@ func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.Interru
 		d.consumer.settleWindowsOnInterrupt(fmt.Sprintf("user interrupt (%s)", outcome))
 	}
 
-	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+	if outcome == protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
 		if err := m.cfg.SSM.MarkTurnInterrupted(d.workspace); err != nil {
 			// Loud, never swallowed: the turn's end will report `done` instead
 			// of `interrupted`, and this line is the only account of why.
@@ -2161,7 +2161,7 @@ func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.Interru
 	m.logf("session-controller: queue PAUSED by a user interrupt ws=%s session=%s outcome=%s held=%d (every entry retained; a newly submitted prompt runs alone and its clean end resumes the drain)",
 		d.workspace, d.sessionID, outcome, held)
 
-	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
+	if outcome == protocolv1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
 		// Synthesized, exactly as releasePhantomTurn's is: the Ack says the turn
 		// is over but names no instant, so now is the only one the daemon can
 		// honestly claim. It runs AFTER the pause above, which is what stops it
@@ -2214,7 +2214,7 @@ func (m *Manager) TurnActive(workspace string) (bool, error) {
 // Each failure carries the LINK it stopped at as a sentinel (ErrNoLiveSessionController,
 // ErrShimNotReady, or the shimclient sentinels the round-trip returns), which
 // is what lets a create nack name the deepest hop rather than the whole path.
-func (m *Manager) Health(ctx context.Context, workspace, sessionID, requestID string) (*corev1.HealthStatus, error) {
+func (m *Manager) Health(ctx context.Context, workspace, sessionID, requestID string) (*protocolv1.HealthStatus, error) {
 	if workspace == "" {
 		return nil, fmt.Errorf("session-controller: health requires a workspace")
 	}
@@ -2237,7 +2237,7 @@ func (m *Manager) Health(ctx context.Context, workspace, sessionID, requestID st
 	// probe transfers to the replacement at the instant ownership moves,
 	// independent of the source transport's later teardown.
 	type healthAnswer struct {
-		status *corev1.HealthStatus
+		status *protocolv1.HealthStatus
 		err    error
 	}
 	sourceCtx, cancelSource := context.WithCancel(ctx)
@@ -2248,7 +2248,7 @@ func (m *Manager) Health(ctx context.Context, workspace, sessionID, requestID st
 		sourceAnswer <- healthAnswer{status: status, err: err}
 	}()
 
-	var status *corev1.HealthStatus
+	var status *protocolv1.HealthStatus
 	var sourceErr error
 	select {
 	case answer := <-sourceAnswer:
@@ -2270,7 +2270,7 @@ func (m *Manager) Health(ctx context.Context, workspace, sessionID, requestID st
 	return m.healthController(ctx, replacement, requestID)
 }
 
-func (m *Manager) healthController(ctx context.Context, d *sessionController, requestID string) (*corev1.HealthStatus, error) {
+func (m *Manager) healthController(ctx context.Context, d *sessionController, requestID string) (*protocolv1.HealthStatus, error) {
 	workspace, sessionID := d.workspace, d.sessionID
 	if err := d.client.AwaitReady(ctx); err != nil {
 		// BOTH causes stay in the chain: the link (which hop is pending) and the
@@ -3020,7 +3020,7 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		buildRefreshStarted:           make(chan struct{}),
 		controllerRegistrationRelease: releaseRegistration,
 	}
-	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.cfg.ClearCompactStore, m.cfg.TurnAccountings, m.logf, func(ss *corev1.SessionStarted) {
+	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.cfg.ClearCompactStore, m.cfg.TurnAccountings, m.logf, func(ss *protocolv1.SessionStarted) {
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
 	}, func(active bool, atMs int64) {
 		m.onTurnBoundary(d, active, atMs)
@@ -3142,7 +3142,7 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	cons.onQueryTermination = func(detail *frontendv1.QueryTerminationFailure) {
 		m.noteBringUpTermination(d, detail)
 	}
-	cons.onDegraded = func(ds *corev1.DegradedState) { m.noteBringUpFault(d, ds) }
+	cons.onDegraded = func(ds *protocolv1.DegradedState) { m.noteBringUpFault(d, ds) }
 	// Bound BEFORE Run, because the first thing a reattaching shim does is say
 	// hello — and that hello is where a turn is judged cut or completed. A probe
 	// bound any later would be nil at the one moment it decides anything.
@@ -3194,10 +3194,10 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		FileDiagnostics: fileDiagnosticSink{persister: m.cfg.FileDiagnostics, workspace: workspace, agentReplSessionID: sessionID},
 		Degraded:        cons,
 		Permissions:     ph,
-		OnHandshake: func(hello *corev1.ShimHello) error {
+		OnHandshake: func(hello *protocolv1.ShimHello) error {
 			return m.onHandshakeForGeneration(workspace, sessionID, generationID, hello)
 		},
-		OnConnected: func(hello *corev1.ShimHello) bool {
+		OnConnected: func(hello *protocolv1.ShimHello) bool {
 			return m.onConnectedForGeneration(workspace, sessionID, generationID, hello)
 		},
 		OnLinkLost: func(cause error) { m.onLinkLostForGeneration(workspace, sessionID, generationID, cause) },
@@ -3520,7 +3520,7 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 //     any more.)
 //   - sessionController.metaCwd / backfill / systemInit / queue entries — carry no seq at
 //     all; a rotation does not change what they describe.
-func (m *Manager) onHandshakeForGeneration(workspace, sessionID, generationID string, hello *corev1.ShimHello) error {
+func (m *Manager) onHandshakeForGeneration(workspace, sessionID, generationID string, hello *protocolv1.ShimHello) error {
 	m.mu.Lock()
 	d, ok := m.byWS[workspace]
 	m.mu.Unlock()
@@ -3604,7 +3604,7 @@ func (m *Manager) onHandshakeForGeneration(workspace, sessionID, generationID st
 	return nil
 }
 
-func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHello) error {
+func (m *Manager) onHandshake(workspace, sessionID string, hello *protocolv1.ShimHello) error {
 	return m.onHandshakeForGeneration(
 		workspace, sessionID, m.currentControllerGeneration(workspace, sessionID), hello,
 	)
@@ -3615,7 +3615,7 @@ func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHel
 // edge. Sending it through onTurnBoundary would drain a queued prompt every
 // time an already-idle shim reconnected; merely assigning it leaves the next
 // real boundary as the sole drain trigger.
-func (m *Manager) reconcileTurnSnapshot(d *sessionController, active bool, hello *corev1.ShimHello) {
+func (m *Manager) reconcileTurnSnapshot(d *sessionController, active bool, hello *protocolv1.ShimHello) {
 	m.mu.Lock()
 	// THE SHIM'S OWN ANNOUNCEMENT IS A DRIVE RECORD (undriventurn.go). A turn a
 	// live shim positively names as in flight has a process behind it, whichever
@@ -3706,7 +3706,7 @@ func (m *Manager) clearTurnOnRotation(workspace, sessionID, previous, next strin
 // replays events from last_seen_seq on Subscribe, so the SSM re-derives turn
 // state from the replayed TurnStarted; this hook loud-logs the observation so a
 // reconciliation gap is visible rather than silent.
-func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID string, hello *corev1.ShimHello) bool {
+func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID string, hello *protocolv1.ShimHello) bool {
 	m.mu.Lock()
 	d, ok := m.byWS[workspace]
 	current := ok && d.sessionID == sessionID && d.generationID == generationID
@@ -3802,7 +3802,7 @@ func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID st
 	return false
 }
 
-func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHello) {
+func (m *Manager) onConnected(workspace, sessionID string, hello *protocolv1.ShimHello) {
 	_ = m.onConnectedForGeneration(
 		workspace, sessionID, m.currentControllerGeneration(workspace, sessionID), hello,
 	)
@@ -3853,7 +3853,7 @@ func (h permHandler) permsChanged() {
 	}
 }
 
-func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRequest) *corev1.PermissionResponse {
+func (h permHandler) HandlePermission(sessionID string, req *protocolv1.PermissionRequest) *protocolv1.PermissionResponse {
 	// A RE-SENT REQUEST THIS DAEMON ALREADY ANSWERED. The shim re-sends every
 	// unanswered ask on reattach, so a request_id whose decision is still in
 	// the registry's memory means the answer was recorded here but its
@@ -3876,7 +3876,7 @@ func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRe
 	// the retained-ring pusher so a resync replays it (S8). It supersedes the
 	// earlier WorkspaceState-only decision but does NOT replace the PERMISSION
 	// render-state, which stays alongside.
-	h.cons.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_PENDING, ""))
+	h.cons.pushPermission(permissionItem(req, protocolv1.PermissionItem_RESOLUTION_PENDING, ""))
 	// THE PERMISSION RENDER-STATE IS NOT PUSHED FROM HERE. A hand-built
 	// WorkspaceState carrying only a render state is a frame that cannot say
 	// its session connectivity, status, controller generation or revision, and
@@ -3901,10 +3901,10 @@ func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRe
 	if resp == nil {
 		// Teardown abandoned the request (no response sent; the shim re-asks on
 		// reattach). Push the ABANDONED resolution on the same uuid.
-		h.cons.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_ABANDONED, ""))
+		h.cons.pushPermission(permissionItem(req, protocolv1.PermissionItem_RESOLUTION_ABANDONED, ""))
 		return nil
 	}
-	if resp.GetDecision() == corev1.PermissionDecision_PERMISSION_DECISION_DENY {
+	if resp.GetDecision() == protocolv1.PermissionDecision_PERMISSION_DECISION_DENY {
 		// A DECLINE IS RECORDED HERE AND DELIVERED BY THE STOP. Nothing is
 		// returned to the shim: the interrupt that every decline carries
 		// force-denies this very round-trip on the shim's own side
@@ -3917,9 +3917,9 @@ func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRe
 		// over by the time this returns.
 		h.logf("session-controller: permission DECLINED ws=%s session=%s request_id=%s — no response is sent to the shim; the stop that accompanies the decline releases and ends the turn",
 			h.cons.workspace, sessionID, req.GetRequestId())
-		h.cons.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_DENIED, resp.GetDenyMessage()))
+		h.cons.pushPermission(permissionItem(req, protocolv1.PermissionItem_RESOLUTION_DENIED, resp.GetDenyMessage()))
 		return nil
 	}
-	h.cons.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_ALLOWED, ""))
+	h.cons.pushPermission(permissionItem(req, protocolv1.PermissionItem_RESOLUTION_ALLOWED, ""))
 	return resp
 }

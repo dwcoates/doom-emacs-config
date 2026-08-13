@@ -3,7 +3,7 @@ package sessioncontroller
 import (
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/ssm"
 )
@@ -37,7 +37,7 @@ type TurnClaimSuperseder interface {
 // THE EVENT IS VALIDATED BEFORE IT IS ACTED ON. A rewind naming no predecessor,
 // or naming itself as its own predecessor, describes something that cannot have
 // happened; acting on it would close claims against a lineage that is not real.
-func (c *consumer) ApplySessionRewound(ev *corev1.Event, rewound *corev1.SessionRewound) error {
+func (c *consumer) ApplySessionRewound(ev *protocolv1.Event, rewound *protocolv1.SessionRewound) error {
 	if rewound == nil {
 		return fmt.Errorf("session-controller: SessionRewound session=%s seq=%d carries no payload", c.sessionID, ev.GetSeq())
 	}

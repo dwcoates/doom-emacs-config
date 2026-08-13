@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	statev1 "agentrepl/proto/state/v1"
 
 	"claude-repld/internal/dlog"
@@ -27,7 +27,7 @@ type turnAccountingReducer struct {
 	queryID             string
 	queryCreatedSeq     uint64
 	queryStoreSessionID string
-	runtime             *corev1.QueryRuntimeIdentity
+	runtime             *protocolv1.QueryRuntimeIdentity
 	activeTurnID        string
 	turns               map[string]*accountingTurn
 	latencies           map[string]responseLatency
@@ -74,8 +74,8 @@ type responseLatency struct {
 
 type accountingTurn struct {
 	startedAt         int64
-	startUsage        *corev1.AccountUsageObservation
-	endUsage          *corev1.AccountUsageObservation
+	startUsage        *protocolv1.AccountUsageObservation
+	endUsage          *protocolv1.AccountUsageObservation
 	responses         []*statev1.TokenUtilization
 	result            *datav1.ResultMessage
 	resultAt          int64
@@ -154,7 +154,7 @@ func (r *turnAccountingReducer) isKnownVendorSession(id string) bool {
 // record and observed identity are exactly the durable proof a later
 // historical response needs to be recognized as this conversation's history
 // rather than rejected as evidence about an unrelated one.
-func (r *turnAccountingReducer) recordQueryLifecycleVendorLineage(q *corev1.QueryLifecycle) {
+func (r *turnAccountingReducer) recordQueryLifecycleVendorLineage(q *protocolv1.QueryLifecycle) {
 	if resumed := q.GetCreated().GetResumed(); resumed != nil {
 		r.recordKnownVendorSession(resumed.GetRequestedVendorSessionId())
 	}
@@ -166,7 +166,7 @@ func (r *turnAccountingReducer) recordQueryLifecycleVendorLineage(q *corev1.Quer
 // bindHandshakeIdentity gives a replacement daemon the query facts that its
 // durable cursor may correctly have passed. Validation finishes before the
 // handshake can reconcile a turn or open a store subscription.
-func (r *turnAccountingReducer) bindHandshakeIdentity(hello *corev1.ShimHello) error {
+func (r *turnAccountingReducer) bindHandshakeIdentity(hello *protocolv1.ShimHello) error {
 	queryID := strings.TrimSpace(hello.GetQueryInstanceId())
 	if queryID == "" {
 		return fmt.Errorf("shim hello omitted query_instance_id")
@@ -251,7 +251,7 @@ type liveEvidence struct{ queryID string }
 // admits no history at all. Query-specific resume validation is owned by
 // resumeIdentityTracker, which independently follows every query_instance_id in
 // the durable sequence.
-func (r *turnAccountingReducer) liveEvidenceFor(ev *corev1.Event) (live liveEvidence, historical bool) {
+func (r *turnAccountingReducer) liveEvidenceFor(ev *protocolv1.Event) (live liveEvidence, historical bool) {
 	if r.queryID == "" {
 		return liveEvidence{queryID: r.queryID}, false
 	}
@@ -264,7 +264,7 @@ func (r *turnAccountingReducer) liveEvidenceFor(ev *corev1.Event) (live liveEvid
 // HistoricalQueryLifecycle reports whether a lifecycle row is replayed history,
 // for the consumer's decision log. It is the same classification every other
 // event type now gets, asked by name because the log names it.
-func (r *turnAccountingReducer) HistoricalQueryLifecycle(ev *corev1.Event) (string, bool) {
+func (r *turnAccountingReducer) HistoricalQueryLifecycle(ev *protocolv1.Event) (string, bool) {
 	lifecycle := ev.GetQueryLifecycle()
 	if lifecycle == nil {
 		return "", false
@@ -278,7 +278,7 @@ func (r *turnAccountingReducer) HistoricalQueryLifecycle(ev *corev1.Event) (stri
 // reconnect may construct a fresh consumer in the rotated vendor sequence,
 // where the original TurnStarted is intentionally absent; the bridge is the
 // ordered proof that lets response usage name that live root turn.
-func (r *turnAccountingReducer) observeTurnClaimBridge(ev *corev1.Event) {
+func (r *turnAccountingReducer) observeTurnClaimBridge(ev *protocolv1.Event) {
 	id := ev.GetTurnClaimBridge().GetTurnId()
 	if r.turns[id] == nil {
 		r.turns[id] = &accountingTurn{startedAt: ev.GetProducedAtMs()}
@@ -307,7 +307,7 @@ func (r *turnAccountingReducer) activeTurn() string {
 // conversation delivery. See consumer.degradeAccountingObservation.
 var ErrAccountingQueryIdentityContradiction = errors.New("session-controller: live query lifecycle contradicts its own bound identity")
 
-func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string) error {
+func (r *turnAccountingReducer) observe(ev *protocolv1.Event, daemonSessionID string) error {
 	if q := ev.GetQueryLifecycle(); q != nil {
 		r.recordQueryLifecycleVendorLineage(q)
 		if _, historical := r.HistoricalQueryLifecycle(ev); historical {
@@ -462,7 +462,7 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 // validateAccountUsageObservation takes liveEvidence rather than a bare id so a
 // replayed row cannot reach it: only liveEvidenceFor produces the proof, and it
 // produces none for history.
-func validateAccountUsageObservation(live liveEvidence, requestID string, observation *corev1.AccountUsageObservation) error {
+func validateAccountUsageObservation(live liveEvidence, requestID string, observation *protocolv1.AccountUsageObservation) error {
 	queryID := live.queryID
 	if strings.TrimSpace(queryID) == "" {
 		return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "authoritative query_instance_id is required"}
@@ -492,11 +492,11 @@ func validateAccountUsageObservation(live liveEvidence, requestID string, observ
 		return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: fmt.Sprintf("sample_latency_ms must be nonnegative, got %d", observation.GetSampleLatencyMs())}
 	}
 	switch boundary := observation.GetBoundary().(type) {
-	case *corev1.AccountUsageObservation_TurnStart:
+	case *protocolv1.AccountUsageObservation_TurnStart:
 		if boundary == nil || boundary.TurnStart == nil {
 			return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "turn_start boundary is nil"}
 		}
-	case *corev1.AccountUsageObservation_TurnEnd:
+	case *protocolv1.AccountUsageObservation_TurnEnd:
 		if boundary == nil || boundary.TurnEnd == nil {
 			return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "turn_end boundary is nil"}
 		}
@@ -504,7 +504,7 @@ func validateAccountUsageObservation(live liveEvidence, requestID string, observ
 		return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "boundary is required"}
 	}
 	switch outcome := observation.GetOutcome().(type) {
-	case *corev1.AccountUsageObservation_Available:
+	case *protocolv1.AccountUsageObservation_Available:
 		if outcome == nil || outcome.Available == nil || outcome.Available.GetFiveHour() == nil {
 			return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "available outcome requires five_hour"}
 		}
@@ -515,24 +515,24 @@ func validateAccountUsageObservation(live liveEvidence, requestID string, observ
 		if window.GetResetsAtMs() <= 0 {
 			return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: fmt.Sprintf("available.five_hour.resets_at_ms must be positive, got %d", window.GetResetsAtMs())}
 		}
-	case *corev1.AccountUsageObservation_Unavailable:
+	case *protocolv1.AccountUsageObservation_Unavailable:
 		if outcome == nil || outcome.Unavailable == nil || outcome.Unavailable.GetReason() == nil {
 			return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "unavailable outcome requires a reason"}
 		}
 		switch reason := outcome.Unavailable.GetReason().(type) {
-		case *corev1.AccountUsageUnavailable_ServiceUnavailable:
+		case *protocolv1.AccountUsageUnavailable_ServiceUnavailable:
 			if reason == nil || reason.ServiceUnavailable == nil {
 				return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "unavailable.service_unavailable is nil"}
 			}
-		case *corev1.AccountUsageUnavailable_WindowUnavailable:
+		case *protocolv1.AccountUsageUnavailable_WindowUnavailable:
 			if reason == nil || reason.WindowUnavailable == nil {
 				return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "unavailable.window_unavailable is nil"}
 			}
-		case *corev1.AccountUsageUnavailable_UtilizationUnavailable:
+		case *protocolv1.AccountUsageUnavailable_UtilizationUnavailable:
 			if reason == nil || reason.UtilizationUnavailable == nil {
 				return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "unavailable.utilization_unavailable is nil"}
 			}
-		case *corev1.AccountUsageUnavailable_SamplingFailure:
+		case *protocolv1.AccountUsageUnavailable_SamplingFailure:
 			if reason == nil || reason.SamplingFailure == nil {
 				return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "unavailable.sampling_failure is nil"}
 			}
@@ -548,7 +548,7 @@ func validateAccountUsageObservation(live liveEvidence, requestID string, observ
 	return nil
 }
 
-func (r *turnAccountingReducer) resolve(ended *corev1.Event, settledAt int64) *statev1.TurnAccounting {
+func (r *turnAccountingReducer) resolve(ended *protocolv1.Event, settledAt int64) *statev1.TurnAccounting {
 	return r.resolveTurn(ended.GetTurnEnded().GetTurnId(), settledAt)
 }
 
@@ -776,7 +776,7 @@ type tokenUtilizationObservation struct {
 // lineage at all.
 type knownVendorSessionFunc func(id string) bool
 
-func tokenUtilizationFromEvent(ev *corev1.Event, daemonSessionID string, knownVendorSession knownVendorSessionFunc) (*statev1.TokenUtilization, error) {
+func tokenUtilizationFromEvent(ev *protocolv1.Event, daemonSessionID string, knownVendorSession knownVendorSessionFunc) (*statev1.TokenUtilization, error) {
 	observation, err := tokenUtilizationObservationFromEvent(ev, daemonSessionID, knownVendorSession)
 	if observation == nil || err != nil {
 		return nil, err
@@ -789,7 +789,7 @@ func tokenUtilizationFromEvent(ev *corev1.Event, daemonSessionID string, knownVe
 // transcript responses have stable response/session identity but no reliable
 // enclosing turn or stream timing, so replay may attach them only as explicit
 // historical evidence.
-func tokenUtilizationObservationFromEvent(ev *corev1.Event, daemonSessionID string, knownVendorSession knownVendorSessionFunc) (*tokenUtilizationObservation, error) {
+func tokenUtilizationObservationFromEvent(ev *protocolv1.Event, daemonSessionID string, knownVendorSession knownVendorSessionFunc) (*tokenUtilizationObservation, error) {
 	a := ev.GetVendor()
 	if a == nil {
 		return nil, nil
@@ -1330,7 +1330,7 @@ func runtimeIdentityProblem(queryID string, missing []string) *statev1.TurnAccou
 //     needs no explaining has none. Requiring it unconditionally made "fast
 //     mode is on and working" indistinguishable from missing evidence.
 //     fast_mode_state itself stays required, so the state is never unstated.
-func incompleteRuntimeIdentityPaths(runtime *corev1.QueryRuntimeIdentity) []string {
+func incompleteRuntimeIdentityPaths(runtime *protocolv1.QueryRuntimeIdentity) []string {
 	if runtime == nil {
 		return []string{""}
 	}
@@ -1353,7 +1353,7 @@ func incompleteRuntimeIdentityPaths(runtime *corev1.QueryRuntimeIdentity) []stri
 	}
 	for _, fingerprint := range []struct {
 		path  string
-		value *corev1.EvidenceFingerprint
+		value *protocolv1.EvidenceFingerprint
 	}{
 		{"effective_options", runtime.GetEffectiveOptions()},
 		{"settings", runtime.GetSettings()},
@@ -1378,16 +1378,16 @@ func incompleteRuntimeIdentityPaths(runtime *corev1.QueryRuntimeIdentity) []stri
 // AccountUsageObservation already uses for its boundary samples, and it is read
 // the same way here. A fingerprint that is absent, carries no arm, or carries an
 // empty digest or a causeless unavailability is still unsettled.
-func evidenceFingerprintSettled(f *corev1.EvidenceFingerprint) bool {
+func evidenceFingerprintSettled(f *protocolv1.EvidenceFingerprint) bool {
 	switch evidence := f.GetEvidence().(type) {
-	case *corev1.EvidenceFingerprint_Sha256:
+	case *protocolv1.EvidenceFingerprint_Sha256:
 		return evidence.Sha256 != ""
-	case *corev1.EvidenceFingerprint_Unavailable:
+	case *protocolv1.EvidenceFingerprint_Unavailable:
 		return strings.TrimSpace(evidence.Unavailable.GetCause()) != ""
 	default:
 		return false
 	}
 }
-func invalidTurnAccounting(turnID, queryID string, runtime *corev1.QueryRuntimeIdentity, settledAt int64, problem *statev1.TurnAccountingProblem) *statev1.TurnAccounting {
+func invalidTurnAccounting(turnID, queryID string, runtime *protocolv1.QueryRuntimeIdentity, settledAt int64, problem *statev1.TurnAccountingProblem) *statev1.TurnAccounting {
 	return &statev1.TurnAccounting{TurnId: turnID, QueryInstanceId: queryID, Runtime: runtime, Timing: &statev1.TurnAccountingTiming{AccountingSettledAtMs: settledAt}, Verdict: &statev1.TurnAccounting_Invalid{Invalid: &statev1.TurnAccountingInvalid{Problems: []*statev1.TurnAccountingProblem{problem}}}}
 }

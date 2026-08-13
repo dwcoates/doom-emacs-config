@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 	"agentrepl/wire"
 )
 
@@ -19,13 +19,13 @@ type replayRig struct {
 	h      *harness
 	stop   func()
 	// requests carries each ReplayRequest the fake shim received.
-	requests chan *corev1.ReplayRequest
+	requests chan *protocolv1.ReplayRequest
 }
 
-func newReplayRig(t *testing.T, serve func(conn net.Conn, req *corev1.ReplayRequest)) *replayRig {
+func newReplayRig(t *testing.T, serve func(conn net.Conn, req *protocolv1.ReplayRequest)) *replayRig {
 	t.Helper()
 	h := newHarness()
-	requests := make(chan *corev1.ReplayRequest, 8)
+	requests := make(chan *protocolv1.ReplayRequest, 8)
 	path := startFakeShim(t, func(conn net.Conn) {
 		fakeServerHandshake(t, conn, "s1", "1", false)
 		for {
@@ -33,7 +33,7 @@ func newReplayRig(t *testing.T, serve func(conn net.Conn, req *corev1.ReplayRequ
 			if err != nil {
 				return
 			}
-			req, ok := m.(*corev1.ReplayRequest)
+			req, ok := m.(*protocolv1.ReplayRequest)
 			if !ok {
 				continue // heartbeats and control traffic: not this test's business
 			}
@@ -60,13 +60,13 @@ func newReplayRig(t *testing.T, serve func(conn net.Conn, req *corev1.ReplayRequ
 }
 
 // replayEvent wraps a store event as the shim would send it back.
-func replayEvent(requestID string, seq uint64) *corev1.ReplayEntry {
-	return &corev1.ReplayEntry{
+func replayEvent(requestID string, seq uint64) *protocolv1.ReplayEntry {
+	return &protocolv1.ReplayEntry{
 		RequestId: requestID,
-		Event: &corev1.Event{
+		Event: &protocolv1.Event{
 			SessionId: "vendor-uuid",
 			Seq:       seq,
-			Payload:   &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "historical"}},
+			Payload:   &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{TaskId: "historical"}},
 		},
 	}
 }
@@ -74,11 +74,11 @@ func replayEvent(requestID string, seq uint64) *corev1.ReplayEntry {
 func TestReplaySendsAReplayRequestNotASubscribe(t *testing.T) {
 	// Arrange — a Subscribe would MOVE the standing subscription; the whole
 	// design turns on this being a different message.
-	rig := newReplayRig(t, func(conn net.Conn, req *corev1.ReplayRequest) {
-		mustWriteMsg(t, conn, &corev1.ReplayDone{RequestId: req.GetRequestId()})
+	rig := newReplayRig(t, func(conn net.Conn, req *protocolv1.ReplayRequest) {
+		mustWriteMsg(t, conn, &protocolv1.ReplayDone{RequestId: req.GetRequestId()})
 	})
 	// Act
-	if _, err := rig.client.Replay(context.Background(), 0, 10, 100, func(*corev1.Event) {}); err != nil {
+	if _, err := rig.client.Replay(context.Background(), 0, 10, 100, func(*protocolv1.Event) {}); err != nil {
 		t.Fatalf("Replay: %v", err)
 	}
 	// Assert
@@ -94,14 +94,14 @@ func TestReplaySendsAReplayRequestNotASubscribe(t *testing.T) {
 
 func TestReplayStreamsEventsToTheCallersSink(t *testing.T) {
 	// Arrange
-	rig := newReplayRig(t, func(conn net.Conn, req *corev1.ReplayRequest) {
+	rig := newReplayRig(t, func(conn net.Conn, req *protocolv1.ReplayRequest) {
 		mustWriteMsg(t, conn, replayEvent(req.GetRequestId(), 1))
 		mustWriteMsg(t, conn, replayEvent(req.GetRequestId(), 2))
-		mustWriteMsg(t, conn, &corev1.ReplayDone{RequestId: req.GetRequestId(), Delivered: 2})
+		mustWriteMsg(t, conn, &protocolv1.ReplayDone{RequestId: req.GetRequestId(), Delivered: 2})
 	})
 	var got []uint64
 	// Act
-	res, err := rig.client.Replay(context.Background(), 0, 10, 0, func(ev *corev1.Event) {
+	res, err := rig.client.Replay(context.Background(), 0, 10, 0, func(ev *protocolv1.Event) {
 		got = append(got, ev.GetSeq())
 	})
 	// Assert
@@ -118,12 +118,12 @@ func TestReplayedEventsNeverReachTheStateSink(t *testing.T) {
 	// TaskStarted payload, which on the LIVE path routes to the SSM. Arriving
 	// as a ReplayEvent, the read loop's type switch has nowhere to put it but
 	// the replay registry.
-	rig := newReplayRig(t, func(conn net.Conn, req *corev1.ReplayRequest) {
+	rig := newReplayRig(t, func(conn net.Conn, req *protocolv1.ReplayRequest) {
 		mustWriteMsg(t, conn, replayEvent(req.GetRequestId(), 1))
-		mustWriteMsg(t, conn, &corev1.ReplayDone{RequestId: req.GetRequestId(), Delivered: 1})
+		mustWriteMsg(t, conn, &protocolv1.ReplayDone{RequestId: req.GetRequestId(), Delivered: 1})
 	})
 	// Act
-	if _, err := rig.client.Replay(context.Background(), 0, 10, 0, func(*corev1.Event) {}); err != nil {
+	if _, err := rig.client.Replay(context.Background(), 0, 10, 0, func(*protocolv1.Event) {}); err != nil {
 		t.Fatalf("Replay: %v", err)
 	}
 	// Assert
@@ -138,12 +138,12 @@ func TestReplayedEventsNeverReachTheFrameSink(t *testing.T) {
 	// Arrange — the frame sink is what feeds conversation, progress, and the
 	// retained ring on the live path. Replayed history routes to the caller's
 	// own sink instead, so the session controller can render it WITHOUT the other planes.
-	rig := newReplayRig(t, func(conn net.Conn, req *corev1.ReplayRequest) {
+	rig := newReplayRig(t, func(conn net.Conn, req *protocolv1.ReplayRequest) {
 		mustWriteMsg(t, conn, replayEvent(req.GetRequestId(), 1))
-		mustWriteMsg(t, conn, &corev1.ReplayDone{RequestId: req.GetRequestId(), Delivered: 1})
+		mustWriteMsg(t, conn, &protocolv1.ReplayDone{RequestId: req.GetRequestId(), Delivered: 1})
 	})
 	// Act
-	if _, err := rig.client.Replay(context.Background(), 0, 10, 0, func(*corev1.Event) {}); err != nil {
+	if _, err := rig.client.Replay(context.Background(), 0, 10, 0, func(*protocolv1.Event) {}); err != nil {
 		t.Fatalf("Replay: %v", err)
 	}
 	// Assert
@@ -158,12 +158,12 @@ func TestReplayedEventsNeverAdvanceLastSeenSeq(t *testing.T) {
 	// Arrange — the high-water mark is the daemon's LIVE consumption position.
 	// Advancing it from replayed history would skip live events on the next
 	// reattach.
-	rig := newReplayRig(t, func(conn net.Conn, req *corev1.ReplayRequest) {
+	rig := newReplayRig(t, func(conn net.Conn, req *protocolv1.ReplayRequest) {
 		mustWriteMsg(t, conn, replayEvent(req.GetRequestId(), 9999))
-		mustWriteMsg(t, conn, &corev1.ReplayDone{RequestId: req.GetRequestId(), Delivered: 1})
+		mustWriteMsg(t, conn, &protocolv1.ReplayDone{RequestId: req.GetRequestId(), Delivered: 1})
 	})
 	// Act
-	if _, err := rig.client.Replay(context.Background(), 0, 10, 0, func(*corev1.Event) {}); err != nil {
+	if _, err := rig.client.Replay(context.Background(), 0, 10, 0, func(*protocolv1.Event) {}); err != nil {
 		t.Fatalf("Replay: %v", err)
 	}
 	// Assert
@@ -174,13 +174,13 @@ func TestReplayedEventsNeverAdvanceLastSeenSeq(t *testing.T) {
 
 func TestReplayReportsTruncationFromTheShim(t *testing.T) {
 	// Arrange
-	rig := newReplayRig(t, func(conn net.Conn, req *corev1.ReplayRequest) {
-		mustWriteMsg(t, conn, &corev1.ReplayDone{
+	rig := newReplayRig(t, func(conn net.Conn, req *protocolv1.ReplayRequest) {
+		mustWriteMsg(t, conn, &protocolv1.ReplayDone{
 			RequestId: req.GetRequestId(), Truncated: true, Reason: "hit the cap", Delivered: 5,
 		})
 	})
 	// Act
-	res, err := rig.client.Replay(context.Background(), 0, 10, 0, func(*corev1.Event) {})
+	res, err := rig.client.Replay(context.Background(), 0, 10, 0, func(*protocolv1.Event) {})
 	// Assert
 	if err != nil {
 		t.Fatalf("Replay: %v", err)
@@ -195,7 +195,7 @@ func TestReplayFailsWithNoLiveShimConnection(t *testing.T) {
 	// no second route to its history.
 	c := New(Config{SessionID: "s1", Logf: shimclientTestLogf(t)})
 	// Act
-	_, err := c.Replay(context.Background(), 0, 10, 0, func(*corev1.Event) {})
+	_, err := c.Replay(context.Background(), 0, 10, 0, func(*protocolv1.Event) {})
 	// Assert
 	if !errors.Is(err, ErrReplayNotConnected) {
 		t.Fatalf("err = %v, want ErrReplayNotConnected", err)
@@ -219,7 +219,7 @@ func TestReplayHonorsTheCallersDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	// Act
-	res, err := rig.client.Replay(ctx, 0, 10, 0, func(*corev1.Event) {})
+	res, err := rig.client.Replay(ctx, 0, 10, 0, func(*protocolv1.Event) {})
 	// Assert
 	if err == nil {
 		t.Fatal("an expired replay must report why it stopped")
@@ -235,12 +235,12 @@ func TestReplayPreservesTheCallersActivityTimeoutCause(t *testing.T) {
 	// that evidence to context.Canceled.
 	idleCause := errors.New("history replay idle after delivered=512 first_seq=1 last_seq=512")
 	ctx, cancel := context.WithCancelCause(context.Background())
-	rig := newReplayRig(t, func(_ net.Conn, _ *corev1.ReplayRequest) {
+	rig := newReplayRig(t, func(_ net.Conn, _ *protocolv1.ReplayRequest) {
 		cancel(idleCause)
 	})
 
 	// Act
-	res, err := rig.client.Replay(ctx, 0, 999, 0, func(*corev1.Event) {})
+	res, err := rig.client.Replay(ctx, 0, 999, 0, func(*protocolv1.Event) {})
 
 	// Assert
 	if !errors.Is(err, idleCause) {
@@ -254,11 +254,11 @@ func TestReplayPreservesTheCallersActivityTimeoutCause(t *testing.T) {
 func TestReplayFailsWhenTheShimConnectionDrops(t *testing.T) {
 	// Arrange — a replay whose shim went away is never going to finish;
 	// leaving the caller blocked would be worse than telling it.
-	rig := newReplayRig(t, func(conn net.Conn, _ *corev1.ReplayRequest) {
+	rig := newReplayRig(t, func(conn net.Conn, _ *protocolv1.ReplayRequest) {
 		conn.Close()
 	})
 	// Act
-	res, _ := rig.client.Replay(context.Background(), 0, 10, 0, func(*corev1.Event) {})
+	res, _ := rig.client.Replay(context.Background(), 0, 10, 0, func(*protocolv1.Event) {})
 	// Assert
 	if !res.Truncated || !strings.Contains(res.Reason, "connection closed") {
 		t.Fatalf("result = %+v, want truncated naming the lost connection", res)
@@ -270,11 +270,11 @@ func TestReplayReportsALostLinkAsItsOwnError(t *testing.T) {
 	// rotates its session uuid. Reporting that as the shim's own truncation
 	// verdict is what turned a rotation into a failure card with nothing behind
 	// it, so a lost link is its own error and the caller decides what it means.
-	rig := newReplayRig(t, func(conn net.Conn, _ *corev1.ReplayRequest) {
+	rig := newReplayRig(t, func(conn net.Conn, _ *protocolv1.ReplayRequest) {
 		conn.Close()
 	})
 	// Act
-	_, err := rig.client.Replay(context.Background(), 0, 10, 0, func(*corev1.Event) {})
+	_, err := rig.client.Replay(context.Background(), 0, 10, 0, func(*protocolv1.Event) {})
 	// Assert
 	if !errors.Is(err, ErrReplayLinkLost) {
 		t.Fatalf("err = %v, want ErrReplayLinkLost", err)
@@ -293,9 +293,9 @@ func TestReplayEventForAnUnknownRequestIsDropped(t *testing.T) {
 		mustWriteMsg(t, conn, replayEvent("no-such-request", 42))
 		// A live event AFTER the stray one: its arrival at the state sink is
 		// the synchronization point, so the assertion never races the demux.
-		mustWriteMsg(t, conn, &corev1.Event{
+		mustWriteMsg(t, conn, &protocolv1.Event{
 			SessionId: "vendor-uuid", Seq: 1,
-			Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
+			Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{}},
 		})
 		close(ready)
 		for {

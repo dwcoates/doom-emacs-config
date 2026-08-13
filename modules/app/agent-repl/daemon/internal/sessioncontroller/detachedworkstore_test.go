@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/frontend"
 )
@@ -293,8 +293,8 @@ func TestARetrievalForWorkNoLaunchAnnouncedOpensNothing(t *testing.T) {
 
 func TestTaskStartedOpensADetachedWorkForARecognizedKind(t *testing.T) {
 	s := newDetachedWorkStore("/ws", nil)
-	push, err := s.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL, ToolUseId: "tu_1", Description: "sleep 9",
+	push, err := s.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL, ToolUseId: "tu_1", Description: "sleep 9",
 	}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -316,7 +316,7 @@ func TestAnAnnouncementBornDetachmentOpensADetachedWork(t *testing.T) {
 	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
-	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
+	push, err := s.observeTaskStarted(&protocolv1.TaskStarted{TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL}, 10)
 
 	// Assert
 	if err != nil {
@@ -332,7 +332,7 @@ func TestAnAnnouncementBornDetachmentCarriesAnEmptyOrigin(t *testing.T) {
 	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
-	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
+	push, _ := s.observeTaskStarted(&protocolv1.TaskStarted{TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL}, 10)
 
 	// Assert
 	if got := push.Opened[0].GetDetachedWork().GetOriginToolUseId(); got != "" {
@@ -345,7 +345,7 @@ func TestAnAnnouncementBornDetachmentRaisesNoFault(t *testing.T) {
 	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
-	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
+	push, _ := s.observeTaskStarted(&protocolv1.TaskStarted{TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL}, 10)
 
 	// Assert
 	if len(push.Faults) != 0 {
@@ -358,7 +358,7 @@ func TestAnAnnouncementBornDetachmentTakesItsKindFromItsEvidence(t *testing.T) {
 	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
-	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10)
+	push, _ := s.observeTaskStarted(&protocolv1.TaskStarted{TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL}, 10)
 
 	// Assert
 	if push.Opened[0].GetDetachedWork().GetShell() == nil {
@@ -369,12 +369,12 @@ func TestAnAnnouncementBornDetachmentTakesItsKindFromItsEvidence(t *testing.T) {
 func TestAReAnnouncedAnnouncementBornDetachmentOpensNoTwin(t *testing.T) {
 	// Arrange
 	s := newDetachedWorkStore("/ws", nil)
-	if _, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 10); err != nil {
+	if _, err := s.observeTaskStarted(&protocolv1.TaskStarted{TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL}, 10); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act
-	push, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_SHELL}, 20)
+	push, _ := s.observeTaskStarted(&protocolv1.TaskStarted{TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_SHELL}, 20)
 
 	// Assert
 	if len(push.Opened) != 0 {
@@ -387,7 +387,7 @@ func TestAnAnnouncementBornDetachmentOfNoRecognizableKindStillFaults(t *testing.
 	s := newDetachedWorkStore("/ws", nil)
 
 	// Act
-	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1"}, 10)
+	push, err := s.observeTaskStarted(&protocolv1.TaskStarted{TaskId: "task_1"}, 10)
 
 	// Assert
 	if err != nil {
@@ -404,7 +404,7 @@ func TestAnUnrecognizedToolOpensTheExplicitUnclassifiedArm(t *testing.T) {
 	if _, err := s.observeCuration(frontend.Curation{ToolNames: map[string]string{"tu_1": "Frobnicate"}}, 10); err != nil {
 		t.Fatal(err)
 	}
-	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", ToolUseId: "tu_1"}, 10)
+	push, err := s.observeTaskStarted(&protocolv1.TaskStarted{TaskId: "task_1", ToolUseId: "tu_1"}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,7 +415,7 @@ func TestAnUnrecognizedToolOpensTheExplicitUnclassifiedArm(t *testing.T) {
 
 func TestAnUnrecognizedToolWithNoNameBecomesAFailureCard(t *testing.T) {
 	s := newDetachedWorkStore("/ws", nil)
-	push, err := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1", ToolUseId: "tu_1"}, 10)
+	push, err := s.observeTaskStarted(&protocolv1.TaskStarted{TaskId: "task_1", ToolUseId: "tu_1"}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,8 +426,8 @@ func TestAnUnrecognizedToolWithNoNameBecomesAFailureCard(t *testing.T) {
 
 func TestAFaultCardIsStableAcrossAReplay(t *testing.T) {
 	s := newDetachedWorkStore("/ws", nil)
-	first, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1"}, 10)
-	second, _ := s.observeTaskStarted(&corev1.TaskStarted{TaskId: "task_1"}, 10)
+	first, _ := s.observeTaskStarted(&protocolv1.TaskStarted{TaskId: "task_1"}, 10)
+	second, _ := s.observeTaskStarted(&protocolv1.TaskStarted{TaskId: "task_1"}, 10)
 	if first.Faults[0].UUID != second.Faults[0].UUID {
 		t.Fatal("a card whose uuid moves accumulates a twin per replay")
 	}
@@ -438,8 +438,8 @@ func TestTaskStartedEnrichesADetachedWorkAlreadyOpenedByItsFirstRecord(t *testin
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10); err != nil {
 		t.Fatal(err)
 	}
-	push, err := s.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1", Description: "review the diff",
+	push, err := s.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1", Description: "review the diff",
 	}, 11)
 	if err != nil {
 		t.Fatal(err)
@@ -454,8 +454,8 @@ func TestTaskStartedSuppliesTheLabelADetachedWorkOpenedWithout(t *testing.T) {
 	if _, err := s.observeCuration(frontend.Curation{Detached: []frontend.DetachedFold{detachedFold("tu_1", "agent_1", "hi")}}, 10); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1", Description: "review the diff",
+	if _, err := s.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1", Description: "review the diff",
 	}, 11); err != nil {
 		t.Fatal(err)
 	}
@@ -466,12 +466,12 @@ func TestTaskStartedSuppliesTheLabelADetachedWorkOpenedWithout(t *testing.T) {
 
 func TestTaskEndedSettlesTheDetachmentsDetachedWork(t *testing.T) {
 	s := newDetachedWorkStore("/ws", nil)
-	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
+	if _, err := s.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
 	}, 10); err != nil {
 		t.Fatal(err)
 	}
-	push, err := s.observeTaskEnded(&corev1.TaskEnded{TaskId: "task_1", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}, 11)
+	push, err := s.observeTaskEnded(&protocolv1.TaskEnded{TaskId: "task_1", Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE}, 11)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,7 +482,7 @@ func TestTaskEndedSettlesTheDetachmentsDetachedWork(t *testing.T) {
 
 func TestTaskEndedForATaskThatOpenedNoDetachedWorkIsNotAFailure(t *testing.T) {
 	s := newDetachedWorkStore("/ws", nil)
-	push, err := s.observeTaskEnded(&corev1.TaskEnded{TaskId: "task_x", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}, 11)
+	push, err := s.observeTaskEnded(&protocolv1.TaskEnded{TaskId: "task_x", Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE}, 11)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,8 +505,8 @@ func journalRetrieval(taskID, text string) frontend.ToolOutcome {
 
 func openWorkflow(t *testing.T, s *detachedWorkStore) {
 	t.Helper()
-	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_WORKFLOW, ToolUseId: "tu_1",
+	if _, err := s.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_WORKFLOW, ToolUseId: "tu_1",
 	}, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -622,7 +622,7 @@ func TestRetrievalFactsReadsAKilledAgentAsKilledRatherThanDone(t *testing.T) {
 			TaskId: "task_1", Status: datav1.RawTaskStatus_RAW_TASK_STATUS_KILLED,
 		}},
 	})
-	if verdict == nil || verdict.Status != corev1.TerminalStatus_TERMINAL_STATUS_KILLED {
+	if verdict == nil || verdict.Status != protocolv1.TerminalStatus_TERMINAL_STATUS_KILLED {
 		t.Fatalf("want killed, got %v", verdict)
 	}
 }
@@ -866,12 +866,12 @@ func TestFoldAppendReportsTheJournalBytesHeldBackAsPartial(t *testing.T) {
 func TestSettleRecordNamesTheResolvedOutcomeArm(t *testing.T) {
 	tests := []struct {
 		name   string
-		status corev1.TerminalStatus
+		status protocolv1.TerminalStatus
 		want   string
 	}{
-		{name: "completed work settles done", status: corev1.TerminalStatus_TERMINAL_STATUS_DONE, want: "outcome=done"},
-		{name: "failed work settles error", status: corev1.TerminalStatus_TERMINAL_STATUS_ERROR, want: "outcome=error"},
-		{name: "killed work settles killed", status: corev1.TerminalStatus_TERMINAL_STATUS_KILLED, want: "outcome=killed"},
+		{name: "completed work settles done", status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE, want: "outcome=done"},
+		{name: "failed work settles error", status: protocolv1.TerminalStatus_TERMINAL_STATUS_ERROR, want: "outcome=error"},
+		{name: "killed work settles killed", status: protocolv1.TerminalStatus_TERMINAL_STATUS_KILLED, want: "outcome=killed"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -885,7 +885,7 @@ func TestSettleRecordNamesTheResolvedOutcomeArm(t *testing.T) {
 			}
 
 			// Act
-			if _, err := s.observeTaskEnded(&corev1.TaskEnded{TaskId: "task_1", Status: tc.status}, 20); err != nil {
+			if _, err := s.observeTaskEnded(&protocolv1.TaskEnded{TaskId: "task_1", Status: tc.status}, 20); err != nil {
 				t.Fatal(err)
 			}
 
@@ -939,8 +939,8 @@ func TestSettleRecordReportsNoExitForWorkThatNeverExited(t *testing.T) {
 	}
 
 	// Act
-	if _, err := s.observeTaskEnded(&corev1.TaskEnded{
-		TaskId: "agent_1", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE,
+	if _, err := s.observeTaskEnded(&protocolv1.TaskEnded{
+		TaskId: "agent_1", Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE,
 	}, 20); err != nil {
 		t.Fatal(err)
 	}
@@ -966,8 +966,8 @@ func TestARefusedSettlementWritesNoSettleRecord(t *testing.T) {
 	}
 
 	// Act — an unspecified terminal status resolves no outcome
-	_, err := s.observeTaskEnded(&corev1.TaskEnded{
-		TaskId: "task_1", Status: corev1.TerminalStatus_TERMINAL_STATUS_UNSPECIFIED,
+	_, err := s.observeTaskEnded(&protocolv1.TaskEnded{
+		TaskId: "task_1", Status: protocolv1.TerminalStatus_TERMINAL_STATUS_UNSPECIFIED,
 	}, 20)
 
 	// Assert
@@ -985,8 +985,8 @@ func TestASettlementForATaskThatOpenedNoDetachedWorkWritesNoRecord(t *testing.T)
 	s := newDetachedWorkStore("/ws", rec.logf)
 
 	// Act
-	if _, err := s.observeTaskEnded(&corev1.TaskEnded{
-		TaskId: "task_unknown", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE,
+	if _, err := s.observeTaskEnded(&protocolv1.TaskEnded{
+		TaskId: "task_unknown", Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE,
 	}, 20); err != nil {
 		t.Fatal(err)
 	}
@@ -1007,15 +1007,15 @@ func TestASettlementForATaskThatOpenedNoDetachedWorkWritesNoRecord(t *testing.T)
 func TestCancelledTaskSettlesItsDetachedWork(t *testing.T) {
 	// Arrange: a detached agent with an open work.
 	s := newDetachedWorkStore("/ws", nil)
-	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1", Description: "fan out",
+	if _, err := s.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1", Description: "fan out",
 	}, 10); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act
 	ups, err := s.settleCancelledTasks([]string{"task_1"}, frontend.DetachedVerdict{
-		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20, Reason: "user cancelled",
+		Status: protocolv1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20, Reason: "user cancelled",
 	})
 
 	// Assert
@@ -1033,15 +1033,15 @@ func TestCancelledTaskSettlesItsDetachedWork(t *testing.T) {
 func TestCancelledTaskSettlesToTheKilledArm(t *testing.T) {
 	// Arrange
 	s := newDetachedWorkStore("/ws", nil)
-	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
+	if _, err := s.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
 	}, 10); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act
 	ups, err := s.settleCancelledTasks([]string{"task_1"}, frontend.DetachedVerdict{
-		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20, Reason: "user cancelled",
+		Status: protocolv1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20, Reason: "user cancelled",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1058,8 +1058,8 @@ func TestCancelledTasksSettleEveryNamedDetachedWork(t *testing.T) {
 	// Arrange: two agents, both stopped by one cancel.
 	s := newDetachedWorkStore("/ws", nil)
 	for _, id := range []string{"task_1", "task_2"} {
-		if _, err := s.observeTaskStarted(&corev1.TaskStarted{
-			TaskId: id, Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_" + id,
+		if _, err := s.observeTaskStarted(&protocolv1.TaskStarted{
+			TaskId: id, Kind: protocolv1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_" + id,
 		}, 10); err != nil {
 			t.Fatal(err)
 		}
@@ -1067,7 +1067,7 @@ func TestCancelledTasksSettleEveryNamedDetachedWork(t *testing.T) {
 
 	// Act
 	ups, err := s.settleCancelledTasks([]string{"task_1", "task_2"}, frontend.DetachedVerdict{
-		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20,
+		Status: protocolv1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20,
 	})
 
 	// Assert
@@ -1085,7 +1085,7 @@ func TestACancelledTaskWithNoDetachedWorkReportsNothing(t *testing.T) {
 
 	// Act
 	ups, err := s.settleCancelledTasks([]string{"task_unknown"}, frontend.DetachedVerdict{
-		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20,
+		Status: protocolv1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20,
 	})
 
 	// Assert: not a missing work and not an error — the session may track a
@@ -1101,22 +1101,22 @@ func TestACancelledTaskWithNoDetachedWorkReportsNothing(t *testing.T) {
 func TestALaterTaskEndedMayOverwriteACancelSettlement(t *testing.T) {
 	// Arrange: a work already settled by the cancel's ack.
 	s := newDetachedWorkStore("/ws", nil)
-	if _, err := s.observeTaskStarted(&corev1.TaskStarted{
-		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
+	if _, err := s.observeTaskStarted(&protocolv1.TaskStarted{
+		TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_AGENT, ToolUseId: "tu_1",
 	}, 10); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.settleCancelledTasks([]string{"task_1"}, frontend.DetachedVerdict{
-		Status: corev1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20,
+		Status: protocolv1.TerminalStatus_TERMINAL_STATUS_STOPPED, AtMs: 20,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act: the agent had in fact finished on its own in the instant before the
 	// stop reached it, and the event plane says so.
-	push, err := s.observeTaskEnded(&corev1.TaskEnded{
-		TaskId: "task_1", Kind: corev1.TaskKind_TASK_KIND_AGENT,
-		Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE,
+	push, err := s.observeTaskEnded(&protocolv1.TaskEnded{
+		TaskId: "task_1", Kind: protocolv1.TaskKind_TASK_KIND_AGENT,
+		Status: protocolv1.TerminalStatus_TERMINAL_STATUS_DONE,
 	}, 30)
 
 	// Assert: the event plane carries the truer verdict and is NOT suppressed.

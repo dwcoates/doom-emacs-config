@@ -4,20 +4,20 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 func TestSessionModelCatalogsRejectsMalformedOptions(t *testing.T) {
 	catalogs := NewSessionModelCatalogs()
 	for _, tc := range []struct {
 		name   string
-		models []*corev1.ModelOption
+		models []*protocolv1.ModelOption
 		want   string
 	}{
-		{name: "nil option", models: []*corev1.ModelOption{nil}, want: "nil option"},
-		{name: "empty option", models: []*corev1.ModelOption{{Value: ""}}, want: "empty or <synthetic>"},
-		{name: "synthetic option", models: []*corev1.ModelOption{{Value: "<synthetic>"}}, want: "empty or <synthetic>"},
-		{name: "duplicate option", models: []*corev1.ModelOption{{Value: "opus"}, {Value: "opus"}}, want: "duplicate"},
+		{name: "nil option", models: []*protocolv1.ModelOption{nil}, want: "nil option"},
+		{name: "empty option", models: []*protocolv1.ModelOption{{Value: ""}}, want: "empty or <synthetic>"},
+		{name: "synthetic option", models: []*protocolv1.ModelOption{{Value: "<synthetic>"}}, want: "empty or <synthetic>"},
+		{name: "duplicate option", models: []*protocolv1.ModelOption{{Value: "opus"}, {Value: "opus"}}, want: "duplicate"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := catalogs.Set("s1", tc.models)
@@ -30,7 +30,7 @@ func TestSessionModelCatalogsRejectsMalformedOptions(t *testing.T) {
 
 func TestSessionModelCatalogsNormalizesAndCopiesRealOptions(t *testing.T) {
 	catalogs := NewSessionModelCatalogs()
-	if err := catalogs.Set("s1", []*corev1.ModelOption{{Value: "opus", DisplayName: "Opus", Description: "capable"}}); err != nil {
+	if err := catalogs.Set("s1", []*protocolv1.ModelOption{{Value: "opus", DisplayName: "Opus", Description: "capable"}}); err != nil {
 		t.Fatalf("Set(): %v", err)
 	}
 	got := catalogs.Get("s1")

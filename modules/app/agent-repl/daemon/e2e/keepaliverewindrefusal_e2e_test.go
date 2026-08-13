@@ -35,8 +35,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // --- transcript fixture lines ---------------------------------------------------
@@ -216,7 +216,7 @@ func TestE2EASidechainInterleaveStillDeliversThePrompt(t *testing.T) {
 
 	// Assert — the durable record of the delivery is in the ORIGINAL seq space,
 	// which is the un-rewound conversation.
-	s.store.await(t, "the held prompt's TurnStarted in the un-rewound conversation", func(ev *corev1.Event) bool {
+	s.store.await(t, "the held prompt's TurnStarted in the un-rewound conversation", func(ev *protocolv1.Event) bool {
 		started := userTurnStart(ev)
 		return started != nil && strings.Contains(started.GetPromptPreview(), held.text)
 	})
@@ -239,13 +239,13 @@ func TestE2EARefusedRewindIsAnnouncedRatherThanSwallowed(t *testing.T) {
 	// The held prompt's own turn is the sentinel: it is submitted by the same
 	// step that would have written the record.
 	s.store.awaitSentinel(t, "the held prompt's turn",
-		func(ev *corev1.Event) string {
+		func(ev *protocolv1.Event) string {
 			if ev.GetSessionRewound() != nil {
 				return "a SessionRewound was recorded for a rewind that was refused: the record claims a truncation the vendor transcript never received"
 			}
 			return ""
 		},
-		func(ev *corev1.Event) bool {
+		func(ev *protocolv1.Event) bool {
 			started := userTurnStart(ev)
 			return started != nil && strings.Contains(started.GetPromptPreview(), held.text)
 		})
@@ -309,7 +309,7 @@ func TestE2EAMissingVendorTranscriptRefusesTheRewindRatherThanInventingOne(t *te
 	held := heldByKeepAlivePing(t, s, "no-transcript-to-truncate")
 
 	// Assert — the prompt is still delivered, on the identity it was already on.
-	s.store.await(t, "the held prompt's TurnStarted in the un-rewound conversation", func(ev *corev1.Event) bool {
+	s.store.await(t, "the held prompt's TurnStarted in the un-rewound conversation", func(ev *protocolv1.Event) bool {
 		started := userTurnStart(ev)
 		return started != nil && strings.Contains(started.GetPromptPreview(), held.text)
 	})

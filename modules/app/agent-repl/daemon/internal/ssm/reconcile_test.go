@@ -3,7 +3,7 @@ package ssm
 import (
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 func TestReconcileSweepsGhostStarts(t *testing.T) {
@@ -31,7 +31,7 @@ func TestReconcileSettlesOrphanEndsFromReplayedHistory(t *testing.T) {
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	mustApply(t, m, evSessionStarted("s1", 1))
 	for i, id := range []string{"h1", "h2", "h3"} {
-		mustApply(t, m, evTaskEnded("s1", uint64(2+i), id, corev1.TerminalStatus_TERMINAL_STATUS_DONE))
+		mustApply(t, m, evTaskEnded("s1", uint64(2+i), id, protocolv1.TerminalStatus_TERMINAL_STATUS_DONE))
 	}
 
 	// Act: the session reports nothing running.
@@ -49,7 +49,7 @@ func TestReconcileStopsTheImpossibleCountFromRecurring(t *testing.T) {
 	// Arrange: orphan ends, reconciled once.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	mustApply(t, m, evSessionStarted("s1", 1))
-	mustApply(t, m, evTaskEnded("s1", 2, "h1", corev1.TerminalStatus_TERMINAL_STATUS_DONE))
+	mustApply(t, m, evTaskEnded("s1", 2, "h1", protocolv1.TerminalStatus_TERMINAL_STATUS_DONE))
 	if err := m.ReconcileTasks("s1", nil); err != nil {
 		t.Fatalf("ReconcileTasks: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestReconcileMakesTheCountMatchTheAuthoritativeSetExactly(t *testing.T) {
 	mustApply(t, m, evSessionStarted("s1", 1))
 	mustApply(t, m, evTaskStarted("s1", 2, "live"))
 	mustApply(t, m, evTaskStarted("s1", 3, "ghost"))
-	mustApply(t, m, evTaskEnded("s1", 4, "orphan", corev1.TerminalStatus_TERMINAL_STATUS_DONE))
+	mustApply(t, m, evTaskEnded("s1", 4, "orphan", protocolv1.TerminalStatus_TERMINAL_STATUS_DONE))
 
 	// Act.
 	if err := m.ReconcileTasks("s1", []string{"live", "unseen"}); err != nil {
@@ -127,7 +127,7 @@ func TestReconcileSurfacesAnUnrepresentableRelive(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	mustApply(t, m, evSessionStarted("s1", 1))
 	mustApply(t, m, evTaskStarted("s1", 2, "a1"))
-	mustApply(t, m, evTaskEnded("s1", 3, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE))
+	mustApply(t, m, evTaskEnded("s1", 3, "a1", protocolv1.TerminalStatus_TERMINAL_STATUS_DONE))
 
 	// Act.
 	if err := m.ReconcileTasks("s1", []string{"a1"}); err != nil {

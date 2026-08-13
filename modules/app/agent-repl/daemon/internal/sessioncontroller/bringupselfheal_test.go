@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ func TestABringUpOverAWedgedThinkingStateHealsIt(t *testing.T) {
 	c, applier, _, _ := wedgedBringUpRig(t)
 
 	// Act.
-	if _, _, err := c.reconcileTurnHandshake(&corev1.ShimHello{TurnInFlight: false}); err != nil {
+	if _, _, err := c.reconcileTurnHandshake(&protocolv1.ShimHello{TurnInFlight: false}); err != nil {
 		t.Fatalf("reconcileTurnHandshake: %v", err)
 	}
 
@@ -64,7 +64,7 @@ func TestABringUpSelfHealPublishesTheReDerivedState(t *testing.T) {
 	c, _, push, _ := wedgedBringUpRig(t)
 
 	// Act.
-	if _, _, err := c.reconcileTurnHandshake(&corev1.ShimHello{TurnInFlight: false}); err != nil {
+	if _, _, err := c.reconcileTurnHandshake(&protocolv1.ShimHello{TurnInFlight: false}); err != nil {
 		t.Fatalf("reconcileTurnHandshake: %v", err)
 	}
 
@@ -84,7 +84,7 @@ func TestABringUpSelfHealRecordsWhatItRetired(t *testing.T) {
 	c, _, _, logs := wedgedBringUpRig(t)
 
 	// Act.
-	if _, _, err := c.reconcileTurnHandshake(&corev1.ShimHello{TurnInFlight: false}); err != nil {
+	if _, _, err := c.reconcileTurnHandshake(&protocolv1.ShimHello{TurnInFlight: false}); err != nil {
 		t.Fatalf("reconcileTurnHandshake: %v", err)
 	}
 
@@ -102,7 +102,7 @@ func TestABringUpOverALiveTurnHealsNothing(t *testing.T) {
 	c, applier, _, _ := wedgedBringUpRig(t)
 
 	// Act.
-	if _, _, err := c.reconcileTurnHandshake(&corev1.ShimHello{TurnInFlight: true}); err != nil {
+	if _, _, err := c.reconcileTurnHandshake(&protocolv1.ShimHello{TurnInFlight: true}); err != nil {
 		t.Fatalf("reconcileTurnHandshake: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestABringUpThatSparedAClaimHealsNothing(t *testing.T) {
 	c, applier, _, _ := wedgedBringUpRig(t)
 
 	// Act.
-	if _, _, err := c.reconcileTurnHandshake(&corev1.ShimHello{ActiveTurnIds: []string{"t-spared"}}); err != nil {
+	if _, _, err := c.reconcileTurnHandshake(&protocolv1.ShimHello{ActiveTurnIds: []string{"t-spared"}}); err != nil {
 		t.Fatalf("reconcileTurnHandshake: %v", err)
 	}
 
@@ -143,7 +143,7 @@ func TestAFailedSelfHealStillEstablishesTheSession(t *testing.T) {
 	applier.alreadyCompleteErr = errors.New("state db unwritable")
 
 	// Act.
-	_, _, err := c.reconcileTurnHandshake(&corev1.ShimHello{TurnInFlight: false})
+	_, _, err := c.reconcileTurnHandshake(&protocolv1.ShimHello{TurnInFlight: false})
 
 	// Assert.
 	if err != nil {
@@ -162,7 +162,7 @@ func TestABringUpOverASettledAxisRecordsNoHeal(t *testing.T) {
 	applier.alreadyCompleteDid = false
 
 	// Act.
-	if _, _, err := c.reconcileTurnHandshake(&corev1.ShimHello{TurnInFlight: false}); err != nil {
+	if _, _, err := c.reconcileTurnHandshake(&protocolv1.ShimHello{TurnInFlight: false}); err != nil {
 		t.Fatalf("reconcileTurnHandshake: %v", err)
 	}
 

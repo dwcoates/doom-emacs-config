@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/shimclient"
 )
@@ -117,10 +117,10 @@ func (h *phantomHarness) consumer() *consumer {
 // startTask feeds a TaskStarted, exactly as the shim stream would.
 func (h *phantomHarness) startTask(seq uint64, id string) {
 	h.t.Helper()
-	if err := h.consumer().Apply(&corev1.Event{
+	if err := h.consumer().Apply(&protocolv1.Event{
 		SessionId: "s1", Seq: seq, ProducedAtMs: h.now(),
-		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
-			TaskId: id, Kind: corev1.TaskKind_TASK_KIND_AGENT, Description: id,
+		Payload: &protocolv1.Event_TaskStarted{TaskStarted: &protocolv1.TaskStarted{
+			TaskId: id, Kind: protocolv1.TaskKind_TASK_KIND_AGENT, Description: id,
 		}},
 	}); err != nil {
 		h.t.Fatalf("Apply(task_started %s): %v", id, err)
@@ -131,15 +131,15 @@ func (h *phantomHarness) startTask(seq uint64, id string) {
 // on.
 func (h *phantomHarness) endTurn(seq uint64, turnID string) {
 	h.t.Helper()
-	if err := h.consumer().Apply(&corev1.Event{
-		SessionId: "s1", Seq: seq, ProducedAtMs: h.now(), Plane: corev1.Plane_PLANE_STREAM,
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: turnID}},
+	if err := h.consumer().Apply(&protocolv1.Event{
+		SessionId: "s1", Seq: seq, ProducedAtMs: h.now(), Plane: protocolv1.Plane_PLANE_STREAM,
+		Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: turnID}},
 	}); err != nil {
 		h.t.Fatalf("Apply(turn_started): %v", err)
 	}
-	if err := h.consumer().Apply(&corev1.Event{
-		SessionId: "s1", Seq: seq + 1, ProducedAtMs: h.now(), Plane: corev1.Plane_PLANE_STREAM,
-		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: turnID}},
+	if err := h.consumer().Apply(&protocolv1.Event{
+		SessionId: "s1", Seq: seq + 1, ProducedAtMs: h.now(), Plane: protocolv1.Plane_PLANE_STREAM,
+		Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: turnID}},
 	}); err != nil {
 		h.t.Fatalf("Apply(turn_ended): %v", err)
 	}

@@ -4,14 +4,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 )
 
 func TestApplyRepairsAnOrphanEndOnce(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	mustApply(t, m, evSessionStarted("s1", 1))
 
-	mustApply(t, m, evTaskEnded("s1", 2, "orphan", corev1.TerminalStatus_TERMINAL_STATUS_LOST))
+	mustApply(t, m, evTaskEnded("s1", 2, "orphan", protocolv1.TerminalStatus_TERMINAL_STATUS_LOST))
 	if got := mustCurrent(t, m, "ws1").GetLiveTaskCount(); got != 0 {
 		t.Fatalf("live_task_count after orphan end = %d, want 0", got)
 	}
@@ -19,7 +19,7 @@ func TestApplyRepairsAnOrphanEndOnce(t *testing.T) {
 		t.Fatalf("orphan repair log count = %d, want 1", got)
 	}
 
-	mustApply(t, m, evTaskEnded("s1", 3, "orphan", corev1.TerminalStatus_TERMINAL_STATUS_DONE))
+	mustApply(t, m, evTaskEnded("s1", 3, "orphan", protocolv1.TerminalStatus_TERMINAL_STATUS_DONE))
 	if got := cl.count("repaired orphan task_ended"); got != 1 {
 		t.Fatalf("duplicate terminal edge repeated orphan repair log: count=%d, want 1", got)
 	}
@@ -76,7 +76,7 @@ func TestOpenRepairsPersistedOrphanEndsOnce(t *testing.T) {
 
 func TestApplyRejectsTaskEndWithoutIdentity(t *testing.T) {
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	err := applyTest(m, evTaskEnded("s1", 1, "", corev1.TerminalStatus_TERMINAL_STATUS_LOST))
+	err := applyTest(m, evTaskEnded("s1", 1, "", protocolv1.TerminalStatus_TERMINAL_STATUS_LOST))
 	if err == nil {
 		t.Fatal("TaskEnded without task_id must fail")
 	}

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	protocolv1 "agentrepl/proto/protocol/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
@@ -78,14 +78,14 @@ import (
 // before_seq copied VERBATIM from a page the store minted. There is no arm by
 // which a caller states a position of its own.
 type MessagePageSource interface {
-	MessagePage(ctx context.Context, workspace, sessionID string, anchor storehistory.PageAnchor) (*corev1.MessagePage, error)
+	MessagePage(ctx context.Context, workspace, sessionID string, anchor storehistory.PageAnchor) (*protocolv1.MessagePage, error)
 }
 
 // messagePageFetch reads ONE bounded page for an anchor. It is the only thing
 // the two routes differ by: the unwired one dials the store, the live one asks
 // the shim, and everything downstream — the anchor, the curation, the boundary
 // ruling and the position copied verbatim — is the code below, once.
-type messagePageFetch func(ctx context.Context, anchor storehistory.PageAnchor) (*corev1.MessagePage, error)
+type messagePageFetch func(ctx context.Context, anchor storehistory.PageAnchor) (*protocolv1.MessagePage, error)
 
 // pageFromStorePage serves one history page from the store's bounded page read.
 func (m *Manager) pageFromStorePage(ctx context.Context, workspace, generationID string, resolve pageBoundResolver, first bool) (pageOutcome, error) {
@@ -96,7 +96,7 @@ func (m *Manager) pageFromStorePage(ctx context.Context, workspace, generationID
 	if !ok {
 		return pageOutcome{}, fmt.Errorf("session-controller: conversation history page for unwired ws %q cannot be served: %w", workspace, errclass.ErrNoLiveSessionController)
 	}
-	fetch := func(ctx context.Context, anchor storehistory.PageAnchor) (*corev1.MessagePage, error) {
+	fetch := func(ctx context.Context, anchor storehistory.PageAnchor) (*protocolv1.MessagePage, error) {
 		return m.cfg.MessagePages.MessagePage(ctx, workspace, sessionID, anchor)
 	}
 	return m.pageFromMessagePage(ctx, workspace, sessionID, generationID, "store-page", m.cfg.SeqStore.LastSeq(sessionID), fetch, resolve, first)
@@ -178,7 +178,7 @@ func (m *Manager) pageFromMessagePage(ctx context.Context, workspace, sessionID,
 // The reversal happens here and only here: the page's message slots are read
 // newest first and walked backwards, while each message's own records are
 // already oldest first and are pushed in the order they carry.
-func (m *Manager) curateStorePage(workspace, sessionID, generationID string, page *corev1.MessagePage) ([]*frontendv1.Message, uint64, int, error) {
+func (m *Manager) curateStorePage(workspace, sessionID, generationID string, page *protocolv1.MessagePage) ([]*frontendv1.Message, uint64, int, error) {
 	capture := &pageCapture{}
 	cons := m.historyConsumer(workspace, sessionID, capture)
 	// The generation the curating consumer runs under. It fences the DELTAS the
@@ -221,12 +221,12 @@ func (m *Manager) curateStorePage(workspace, sessionID, generationID string, pag
 // storePageMessages reads the ten discrete slots, NEWEST FIRST, and nothing
 // else. There is no path here by which an eleventh message reaches a consumer,
 // because there is no eleventh field to read.
-func storePageMessages(page *corev1.MessagePage) []*corev1.StoredMessage {
-	slots := []*corev1.StoredMessage{
+func storePageMessages(page *protocolv1.MessagePage) []*protocolv1.StoredMessage {
+	slots := []*protocolv1.StoredMessage{
 		page.GetMessage_1(), page.GetMessage_2(), page.GetMessage_3(), page.GetMessage_4(), page.GetMessage_5(),
 		page.GetMessage_6(), page.GetMessage_7(), page.GetMessage_8(), page.GetMessage_9(), page.GetMessage_10(),
 	}
-	var filled []*corev1.StoredMessage
+	var filled []*protocolv1.StoredMessage
 	for _, slot := range slots {
 		if slot != nil {
 			filled = append(filled, slot)
@@ -237,11 +237,11 @@ func storePageMessages(page *corev1.MessagePage) []*corev1.StoredMessage {
 
 // storePageBoundary reports which boundary arm the store set, keeping the two
 // arms distinct and reporting an UNSET oneof as unset rather than as either.
-func storePageBoundary(page *corev1.MessagePage) (atRetainedFloor bool, set bool) {
+func storePageBoundary(page *protocolv1.MessagePage) (atRetainedFloor bool, set bool) {
 	switch page.GetBoundary().(type) {
-	case *corev1.MessagePage_More:
+	case *protocolv1.MessagePage_More:
 		return false, true
-	case *corev1.MessagePage_Floor:
+	case *protocolv1.MessagePage_Floor:
 		return true, true
 	default:
 		return false, false
@@ -250,7 +250,7 @@ func storePageBoundary(page *corev1.MessagePage) (atRetainedFloor bool, set bool
 
 // storePageBoundaryName names the boundary arm for the log line, so a record
 // says what the STORE claimed alongside what the daemon concluded.
-func storePageBoundaryName(page *corev1.MessagePage) string {
+func storePageBoundaryName(page *protocolv1.MessagePage) string {
 	atFloor, set := storePageBoundary(page)
 	switch {
 	case !set:
