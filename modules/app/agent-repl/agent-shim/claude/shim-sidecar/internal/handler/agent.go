@@ -1,18 +1,26 @@
 package handler
 
 import (
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-// AgentTranscriptHandler reads an agent sidechain transcript (agent-*.jsonl and
-// the a*.output agent spool, which is the same JSONL shape). It REUSES the
-// transcript line parser and emits (§7.2): one TaskProgress per batch (the
-// running record count is the agent task's liveness signal) plus any recursive
-// grandchild launches (nested Agent/Workflow/shell launches inside the sidechain
-// become their own TaskStarted). Parse failures still surface as UnparsedEvents.
+// AgentTranscriptHandler reads a subagent's sidechain transcript, which is the
+// same JSONL shape as a session transcript and is therefore parsed by the same
+// converter.
+//
+// WHAT DIFFERS IS LINEAGE, AND ONLY LINEAGE. Every record it reads sits INSIDE
+// the detached-work card the subagent runs as, so a page of ten feed rows counts
+// the subagent once however long its conversation runs. The card's message id is
+// derived from the task id the discoverer already holds, so nothing has to be
+// correlated with the session transcript that launched it and nothing has to
+// survive a restart for the association to hold.
+//
+// A sidechain can itself launch detached work — a subagent spawning a subagent —
+// and those launches open their own cards through the same path, because the
+// converter reads them off the tool result rather than off the file it is in.
 type AgentTranscriptHandler struct {
 	conv *convert.Converter
 	log  *logging.Bound
@@ -24,37 +32,23 @@ func NewAgentTranscriptHandler(log *logging.Bound) *AgentTranscriptHandler {
 	return &AgentTranscriptHandler{conv: convert.New(log), log: log}
 }
 
-// Handle implements Handler.
-func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1.Event {
-	h.log.With(logging.Context{Operation: "agent-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
-	var out []*corev1.Event
-	sawRecord := false
-	for _, f := range frames {
-		if f.ParseErr != nil {
-			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID, Level: "warn"}).Log("parse failure at offset=%d; the record persists only as an UnparsedEvent and the user reads a structureless work: %v", f.Offset, f.ParseErr)
-			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, f.ParseErr))
+// Handle implements tail.Handler.
+func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*agentshimv1.Entry {
+	h.log.With(logging.Context{Operation: "agent-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
+	var out []*agentshimv1.Entry
+	for i, frame := range frames {
+		at := attribute(ctx, frame.Offset)
+		if frame.ParseErr != nil {
+			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID, Level: "warn"}).
+				Log("parse failure at offset=%d; the record is stored whole with no path to a page: %v", frame.Offset, frame.ParseErr)
+			out = append(out, convert.UnparsedEntry(at, frame.Raw, frame.ParseErr))
 			continue
 		}
-		sawRecord = true
-		line, _, err := h.conv.TranscriptLine(f.Obj)
-		if err != nil {
-			h.log.With(logging.Context{Operation: "convert", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID, Level: "warn"}).Log("conversion failure at offset=%d; the record persists only as an UnparsedEvent and the user reads a structureless work: %v", f.Offset, err)
-			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, err))
-			continue
-		}
-		// Recursive grandchild launches: a sidechain agent can itself launch
-		// detached work.
-		if u := line.GetUser(); u != nil {
-			out = append(out, launchTwins(u.GetToolUseResult(), u.GetEnvelope(), ctx)...)
-		}
+		out = append(out, h.conv.Line(frame.Obj, at, lookahead(frames, i+1))...)
 	}
-	if sawRecord {
-		out = append(out, taskProgressEvent(ctx.SessionID, corev1.Plane_PLANE_FILE, &corev1.TaskProgress{
-			TaskId:          ctx.TaskID,
-			Kind:            corev1.TaskKind_TASK_KIND_AGENT,
-			RecordsObserved: ctx.RecordsObserved,
-		}))
-	}
-	h.log.With(logging.Context{Operation: "agent-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handled frames=%d saw_record=%t events=%d", len(frames), sawRecord, len(out))
+	logUnconverted(h.log, ctx, out)
+	h.log.With(logging.Context{Operation: "agent-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
 }

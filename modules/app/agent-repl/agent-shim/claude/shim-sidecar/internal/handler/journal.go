@@ -1,17 +1,19 @@
 package handler
 
 import (
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	datav1 "agentrepl/proto/agentshim/data/v1"
+	agentshimv1 "agentrepl/proto/agentshim/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-// WorkflowJournalHandler converts workflow journal records (started|result) into
-// vendor file-plane events. The store cannot derive a journal record's dedup key
-// (the run id lives in the file PATH, not the record), so this handler supplies
-// wf:<run_id>:<key>:<type> on the envelope (§6.4).
+// WorkflowJournalHandler reads a workflow run's journal: the steps the run
+// recorded as it executed.
+//
+// The run has a card in the feed, opened by the transcript that launched it, and
+// its journal is what accumulates into that card. The run id lives in the file
+// PATH rather than in any record, which is why the handler supplies it rather
+// than the converter reading it.
 type WorkflowJournalHandler struct {
 	conv *convert.Converter
 	log  *logging.Bound
@@ -23,48 +25,30 @@ func NewWorkflowJournalHandler(log *logging.Bound) *WorkflowJournalHandler {
 	return &WorkflowJournalHandler{conv: convert.New(log), log: log}
 }
 
-// Handle implements Handler.
-func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1.Event {
-	h.log.With(logging.Context{Operation: "journal-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handling frames=%d run_id=%q", len(frames), ctx.RunID)
-	var out []*corev1.Event
-	for _, f := range frames {
-		if f.ParseErr != nil {
-			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID, Level: "warn"}).Log("parse failure at offset=%d; the record persists only as an UnparsedEvent and the user reads a structureless work: %v", f.Offset, f.ParseErr)
-			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, f.ParseErr))
-			continue
-		}
-		rec, extras, err := h.conv.JournalRecord(f.Obj)
-		if err != nil {
-			h.log.With(logging.Context{Operation: "convert", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID, Level: "warn"}).Log("conversion failure at offset=%d; the record persists only as an UnparsedEvent and the user reads a structureless work: %v", f.Offset, err)
-			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, err))
-			continue
-		}
-		key := journalDedupKey(ctx.RunID, journalKey(rec), journalType(rec))
-		if ev := vendorEvent(ctx.SessionID, rec, extras, key, h.log); ev != nil {
-			out = append(out, ev)
-		}
+// Handle implements tail.Handler.
+func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*agentshimv1.Entry {
+	h.log.With(logging.Context{Operation: "journal-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+		LogVerbose("handling frames=%d run_id=%q", len(frames), ctx.RunID)
+	// The run's identity is its run id where the path supplies one, and the task
+	// id otherwise. Both name the same card, because the launch that opened it
+	// used whichever the harness reported.
+	taskID := ctx.RunID
+	if taskID == "" {
+		taskID = ctx.TaskID
 	}
-	h.log.With(logging.Context{Operation: "journal-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handled frames=%d events=%d", len(frames), len(out))
+	var out []*agentshimv1.Entry
+	for _, frame := range frames {
+		at := attribute(ctx, frame.Offset)
+		if frame.ParseErr != nil {
+			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID, Level: "warn"}).
+				Log("parse failure at offset=%d; the record is stored whole with no path to a page: %v", frame.Offset, frame.ParseErr)
+			out = append(out, convert.UnparsedEntry(at, frame.Raw, frame.ParseErr))
+			continue
+		}
+		out = append(out, h.conv.JournalRecord(frame.Obj, at, taskID)...)
+	}
+	logUnconverted(h.log, ctx, out)
+	h.log.With(logging.Context{Operation: "journal-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
-}
-
-func journalKey(rec *datav1.JournalRecord) string {
-	if s := rec.GetStarted(); s != nil {
-		return s.GetKey()
-	}
-	if r := rec.GetResult(); r != nil {
-		return r.GetKey()
-	}
-	return ""
-}
-
-func journalType(rec *datav1.JournalRecord) string {
-	switch {
-	case rec.GetStarted() != nil:
-		return "started"
-	case rec.GetResult() != nil:
-		return "result"
-	default:
-		return ""
-	}
 }
