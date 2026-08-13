@@ -45,7 +45,7 @@ import { TASKS_SPEC, tasksMenuHtml } from "./tasks.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
 import { agentElapsedLabel } from "./topbar.js";
 import { agentUncachedInput, compactTokens, uncachedInputHtml } from "./tokens.js";
-import type { SessionTokenUtilization } from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
+import type { SessionTokenUtilization } from "../../proto/gen/ts/frontend/v1/durable_pb";
 import { AccountingFact, accountingFacts, latestTurnAccounting } from "./turn-accounting.js";
 
 /**

@@ -4,12 +4,12 @@ import { create } from "@bufbuild/protobuf";
 import {
   FailureKindSchema,
   QueryTerminationFailureSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
+} from "../../proto/gen/ts/frontend/v1/errors_pb";
 import {
   QueryIteratorFailureSchema,
   QueryStartupFailureSchema,
   UnexpectedQueryEofSchema,
-} from "../../proto/gen/ts/agentshim/core/v1/core_pb";
+} from "../../proto/gen/ts/protocol/v1/core_pb";
 import {
   Actions,
   ASYNC_TEAL_TOOLS,

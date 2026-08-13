@@ -10,7 +10,7 @@ import {
   VendorTokenUsageSchema,
   type SessionTokenUtilization,
   type TokenUtilization as GeneratedTokenUtilization,
-} from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
+} from "../../proto/gen/ts/frontend/v1/durable_pb";
 import { ApiUsageSchema } from "../../proto/gen/ts/agentshim/data/v1/tools_pb";
 
 /**

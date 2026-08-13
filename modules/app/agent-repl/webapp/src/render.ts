@@ -6,7 +6,7 @@
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
 import { bubbleWaveStyle } from "./breathing.js";
-import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/agentshim/frontend/v1/slash-menu_pb";
+import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/frontend/v1/slash-menu_pb";
 import { sessionCommandSpecs } from "../../proto/ts/schema-literals.js";
 import { STREAM_ITEM_CAP, parseJournal } from "./async-stream.js";
 import { clearLogDedup, log } from "./wslog.js";
@@ -2385,7 +2385,7 @@ function failureEvidenceHtml(kind: import("./frontend-proto.js").FailureKind): s
  * prose here, never as a blank line beside real evidence.
  */
 function queryTerminationFailureHtml(
-  failure: import("../../proto/gen/ts/agentshim/frontend/v1/errors_pb").QueryTerminationFailure,
+  failure: import("../../proto/gen/ts/frontend/v1/errors_pb").QueryTerminationFailure,
 ): string {
   const reason = failure.reason.case === "unexpectedEof"
     ? "unexpected EOF"
@@ -2410,7 +2410,7 @@ function queryTerminationFailureHtml(
  * exactly one attempt and exactly one cause on every decoded record.
  */
 function resumeFailureHtml(
-  failure: import("../../proto/gen/ts/agentshim/frontend/v1/errors_pb").SessionResumeFailure,
+  failure: import("../../proto/gen/ts/frontend/v1/errors_pb").SessionResumeFailure,
 ): string {
   const attempt = failure.attempt.case === "create" ? "session creation" : "automatic restoration";
   if (failure.cause.case === "queryTermination") {

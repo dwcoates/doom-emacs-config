@@ -90,37 +90,37 @@ import {
   type TurnAccountingProblem as GeneratedTurnAccountingProblem,
   type TurnAccountingTiming as GeneratedTurnAccountingTiming,
   type VendorTokenUsage as GeneratedVendorTokenUsage,
-} from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
+} from "../../proto/gen/ts/frontend/v1/durable_pb";
 import {
   FailureKindSchema,
   type FailureKind as GeneratedFailureKind,
   type QueryTerminationFailure as GeneratedQueryTerminationFailure,
   type SessionResumeFailure as GeneratedSessionResumeFailure,
-} from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
+} from "../../proto/gen/ts/frontend/v1/errors_pb";
 import {
   FailureCardRefSchema,
   FailureCardResolvedSchema,
   FailureCardTerminalSchema,
   FailureCardOpenSchema,
   FailureCardViewSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/failure-card_pb";
+} from "../../proto/gen/ts/frontend/v1/failure-card_pb";
 import {
   ModelOptionSchema,
   TopbarAccountingWarningSchema,
   TopbarConnectivitySchema,
   TopbarViewSchema,
   TopbarWarningSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/topbar_pb";
+} from "../../proto/gen/ts/frontend/v1/topbar_pb";
 import {
   TokenBreakdownRowSchema,
   TokenBreakdownSectionSchema,
   TokenBreakdownViewSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/tokens-menu_pb";
+} from "../../proto/gen/ts/frontend/v1/tokens-menu_pb";
 import {
   WorkspaceGateHibernatedSchema,
   WorkspaceGateOpenSchema,
   WorkspaceGateViewSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
+} from "../../proto/gen/ts/frontend/v1/gate-revival_pb";
 import {
   AccountingCompleteSchema,
   AccountingIncompleteSchema,
@@ -129,7 +129,7 @@ import {
   FooterFailureRowSchema,
   FooterMergeChipSchema,
   FooterPhaseSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/footer_pb";
+} from "../../proto/gen/ts/frontend/v1/footer_pb";
 import { fromJson, toJson, type JsonValue } from "@bufbuild/protobuf";
 import { historyContinuation, type HistoryContinuation } from "./load-more.js";
 import {
@@ -154,7 +154,7 @@ import {
   type AsyncBubbleDelta,
   type DetachedWorkPackaging,
 } from "./async-bubble.js";
-import { DetachedWorkDeltaSchema } from "../../proto/gen/ts/agentshim/frontend/v1/feed_pb";
+import { DetachedWorkDeltaSchema } from "../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   unwrapAgentEmission,
   type ResponseUsageStamp,
@@ -185,8 +185,8 @@ import {
   type AccountUsageObservation as GeneratedAccountUsageObservation,
   type EvidenceFingerprint as GeneratedEvidenceFingerprint,
   type QueryRuntimeIdentity as GeneratedQueryRuntimeIdentity,
-} from "../../proto/gen/ts/agentshim/core/v1/core_pb";
-import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/agentshim/frontend/v1/slash-menu_pb";
+} from "../../proto/gen/ts/protocol/v1/core_pb";
+import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/frontend/v1/slash-menu_pb";
 import { selectedModel, type SelectedModel } from "../../proto/ts/schema-literals.js";
 
 // --- enums ------------------------------------------------------------------

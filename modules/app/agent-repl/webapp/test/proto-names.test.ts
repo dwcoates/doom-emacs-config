@@ -13,22 +13,22 @@ import { describe, expect, it } from "vitest";
 
 import {
   FrontendCommandSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/frame_pb";
+} from "../../proto/gen/ts/frontend/v1/frame_pb";
 import {
   CompactionScopeSchema,
   HibernationDetailSchema,
   ReviveCompactFirstSchema,
   ReviveSessionCmdSchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
+} from "../../proto/gen/ts/frontend/v1/gate-revival_pb";
 import {
   QueueEntryKeepAliveHoldSchema,
   QueueEntryRevivalHoldSchema,
   QueueEntrySchema,
-} from "../../proto/gen/ts/agentshim/frontend/v1/prompt-queue_pb";
-import { PromptOriginSchema } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
-import { FailureKindSchema } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
-import { FailureCardViewSchema } from "../../proto/gen/ts/agentshim/frontend/v1/failure-card_pb";
-import { WorkspaceGateViewSchema } from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
+} from "../../proto/gen/ts/frontend/v1/prompt-queue_pb";
+import { PromptOriginSchema } from "../../proto/gen/ts/protocol/v1/core_pb";
+import { FailureKindSchema } from "../../proto/gen/ts/frontend/v1/errors_pb";
+import { FailureCardViewSchema } from "../../proto/gen/ts/frontend/v1/failure-card_pb";
+import { WorkspaceGateViewSchema } from "../../proto/gen/ts/frontend/v1/gate-revival_pb";
 import {
   COMMAND_ARM,
   FAILURE_CARD_LIFECYCLE_ARM,
