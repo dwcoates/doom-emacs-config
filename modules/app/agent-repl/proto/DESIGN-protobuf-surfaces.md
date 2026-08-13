@@ -451,3 +451,58 @@ UDS server ANSWERS `HealthCheck` (`server.ts:730`) and
 probe was clearly intended even though no production daemon code sends one
 today. Moving them would foreclose that. Resolve the bring-up gate's intent
 first.
+
+## The duplication carve-out is INTRA-namespace only
+
+**The rule.** A shared datastructure is IMPORTED from the namespace that owns
+it. It is never re-declared in the consuming namespace, in any form — not as a
+parallel message, not as a parallel oneof, not as a loose scalar standing in for
+a typed identity.
+
+**What the figma→idl carve-out actually licenses.** "Duplicate, don't share"
+says that when TWO UI COMPONENTS render the same fact, each component's message
+carries its own resolved copy rather than the two reading one shared message and
+deriving. That is a statement about component messages WITHIN `frontend.v1`, and
+only about them. It says NOTHING about reusing types from another namespace, and
+it never licensed `frontend.v1` re-spelling `conversation.v1`.
+
+**Why the distinction is the whole point.** The carve-out's cost is bounded: a
+duplicated RESOLVED VALUE is re-resolved on the next publish, so a stale copy
+self-corrects and authority stays with the resolver. A duplicated TYPE has no
+such property — it is a second definition of the same idea, maintained by hand,
+and it diverges silently the moment one side gains an arm. `conversation.v1`'s
+detached-work outcome has four arms; `frontend.v1` re-spelled it with three and
+`TaskStatus` with six. Nothing failed to compile.
+
+**A raw scalar is a re-spelling too.** A `string message_id` in `frontend.v1` is
+a `conversation.v1` identity with its type removed. Message ids are minted by
+the producing plane and belong to `conversation.v1`; a frontend field that holds
+one as a bare string can be assigned any string at all, which is exactly the
+class of error the surfaces exist to make unrepresentable.
+
+The inventory of current violations is in `RESPELLINGS.md`.
+
+## The daemon's plane checks are vestigial and delete — VERIFIED
+
+**Decided.** All 17 daemon references to `Plane` are removed. Gap 12 is closed:
+there is no load-bearing use, which reverses the reading recorded in
+`GAPS-wave-two.md`.
+
+**What the four deciding sites were for.** `turnboundary.go:146`,
+`turnlifecycle.go:192` and `turnclaims.go:201` all enforce one rule — only the
+STREAM plane may move turn state — because the file plane would later re-read
+the same boundary from the transcript and the turn would be counted twice.
+`events.go:426` is the inverse self-consistency check on a file-plane
+diagnostic. The other 13 references are `logf` format arguments.
+
+**Why they are now vestigial.** The twin no longer exists. Verified: the
+sidecar and the store produce NO `TurnBegan`/`TurnEnded` on any path — only the
+shim does (`shim/src/proto/convert.ts:27,58`). There is no second producer left
+to guard against, which is the same fact that justified removing `dedup_key`.
+`events.go:426` is dead twice over, because `FilePlaneDiagnostic` is itself
+retired.
+
+**Why this is not "move the dedup down a layer".** There is no dedup left to
+site anywhere. The planes now divide cleanly — the shim owns lifecycle and
+cannot write conversation content at all, the file plane owns content — so the
+duplicate the daemon was refusing cannot be produced.
