@@ -31,7 +31,6 @@ PROTOS := \
   frontend/v1/host.proto \
   frontend/v1/lifecycle.proto \
   frontend/v1/merge.proto \
-  frontend/v1/prompt-queue.proto \
   frontend/v1/sidebar.proto \
   frontend/v1/state.proto \
   frontend/v1/topbar.proto \
