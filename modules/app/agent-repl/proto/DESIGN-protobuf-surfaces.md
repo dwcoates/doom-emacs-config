@@ -360,3 +360,94 @@ against `SessionBegan` rather than sitting on the evidence record, which weakens
 it as a self-contained forensic artifact. Accepted because both are constant for
 a shim process, so the join has exactly one answer, and because the fingerprints
 — what the record exists for — remain per-query and self-contained.
+
+# WAVE-TWO REMEDIATION DECISIONS
+
+Settled one at a time against `GAPS-wave-two.md`. Each lands in the canonical
+`.proto` files as it settles, not at the end.
+
+## The sidecar's own diagnostics stay durable
+
+**Decided.** Gap 5 is closed as "no change". The sidecar keeps writing its
+store-link outage report through the store, as a `ProducerDiagnostic`.
+
+**Why.** The three alternatives all cost more than the problem. Giving the
+sidecar a daemon-facing wire is real architecture for one message; reviving the
+store's publish-without-persist path rebuilds the very thing the ephemeral class
+was retired to remove; routing the sidecar through the shim inverts the
+topology, because the sidecar is a launchd-managed SINGLETON that reads
+transcripts for sessions with no live shim at all, and its cursor contract is
+with the store rather than with any session.
+
+The sidecar's own total-ingestion mandate also already says everything it reads
+lands in the store, so a record about its read loop is not obviously out of
+place there.
+
+**Accepted cost.** An ingestion outage becomes a durable row in conversation
+history, and workspace health never learns the component was down —
+`DegradedState`'s fault WINDOW cannot be opened by a producer that can only
+report after the fact.
+
+**Correction this supersedes.** Gap 5 was filed as "ephemerality has no
+write-side expression", which was wrong and would have led to the wrong fix. The
+audit found no ephemeral record reaching the store: the shim routes every one
+straight to the daemon (`uds-session.ts:2451`) and returns before any write
+path. Ephemerality needs no write-side expression, because by definition nothing
+ephemeral is ever written. The real finding was narrower — the sidecar has no
+live channel at all.
+
+## A record may be partially convertible
+
+**Decided.** `InternalEntry` gains `google.protobuf.Struct source_record`, set
+when converting a record to its external half dropped structure.
+
+**Why.** `Entry` could carry a rendering OR a verbatim record, never both, so a
+record that renders fine and is ALSO more than its rendering was durably less
+than what was on disk. `journal.go:50` is the worked case: a journal object
+becomes the string `"result build: ok\n"` and every other key is gone. That
+breaks the sidecar's total-ingestion mandate, whose old escape hatch was a raw
+Struct.
+
+It is safe in the INTERNAL half specifically: vendor-shaped material there is
+structurally unreachable from the daemon, which is exactly what makes eager
+conversion at the edge a reversible bet rather than a lossy one. `unconverted`
+keeps its own job — records with nothing renderable at all.
+
+## The vendor's final response usage gets a carrier again
+
+**Decided.** `TokenUsage` gains `output_thinking_tokens`; `BookkeepingEntry`
+gains a `ResponseUsageCorrected` arm keyed by `api_message_id`.
+
+**Why.** `message_start` carries a usage SNAPSHOT — final input and cache
+counters, interim output. The FINAL `output_tokens` arrive on `message_delta`
+and nowhere else the daemon can see. `TokenUsage` rides `AgentSaid`, which is
+file-plane, so the stream plane observes the correct number with no field to put
+it in. One measured turn summed 563 against the result's 4407, with input
+reconciling exactly.
+
+This regression is a REPEAT: commit `1bdeacec5` found and fixed it once, adding
+`vendor_usage` and `api_message_id` to the retired `MessageDeltaEvent`. The
+restructure removed that carrier and replaced it with nothing.
+
+It is a separate RECORD rather than a field on the response because the two
+facts come from different planes at different times — a producer that could only
+state usage on the response would have to withhold the response until the turn
+ended, or restate it, and neither is available to it.
+
+`output_thinking_tokens` is included because the old narrow projection could not
+express `output_tokens_details`, and the earlier fix recorded narrowing as the
+defect rather than the fix.
+
+## The store↔sidecar health traffic stays in `protocol.v1` for now
+
+**Not decided — explained and left.** `ConnectionHeartbeat`, `HealthCheck` and
+`HealthStatus` are misfiled by this design's own routing test: they never cross
+the daemon boundary, which is exactly why the cursor messages moved to
+`agentshim`.
+
+They are NOT moved, because the case is not as clean as the cursors'. The shim's
+UDS server ANSWERS `HealthCheck` (`server.ts:730`) and
+`daemon/internal/shimclient/bringupgate_test.go` references it, so a daemon→shim
+probe was clearly intended even though no production daemon code sends one
+today. Moving them would foreclose that. Resolve the bring-up gate's intent
+first.
