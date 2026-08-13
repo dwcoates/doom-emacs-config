@@ -506,3 +506,67 @@ retired.
 site anywhere. The planes now divide cleanly — the shim owns lifecycle and
 cannot write conversation content at all, the file plane owns content — so the
 duplicate the daemon was refusing cannot be produced.
+
+## Re-spelling, defined — and the extraction that replaces it
+
+**The term.** RE-SPELLING is declaring, in namespace B, a type whose semantic
+content is already declared in namespace A, instead of importing A's.
+
+Four forms, one defect:
+
+- **whole-message** — B re-declares ALL of A's constituents.
+- **partial** — B re-declares SOME of them.
+- **vocabulary** — B re-declares A's oneof arms.
+- **identity** — B holds A's typed identity as a bare scalar.
+
+The test: *could a change to A's meaning leave B compiling and wrong?* If yes,
+it is a re-spelling.
+
+**Two remedies, chosen only by how much the consumer needs.**
+
+- Needs the WHOLE semantic content → import A's message. No split. **This is
+  the common case** — most re-spellings here are not partial-need at all. The
+  consumer needed the same semantics and wrote them out again.
+- Needs a STRICT SEMANTIC SUBSET → the PROVIDER extracts a narrower message and
+  the consumer imports that. The consumer never writes its own copy.
+
+**The split happens at the PROVIDER, and the provider is not the namespace
+holder.** This resembles the Interface Segregation Principle, but ISP assumes
+the provider DECLARES the interface it serves, and that assumption fails here.
+Our namespaces are drawn by SURFACE — who talks to whom — not by who populates.
+`frontend.v1` is named for its CONSUMER; the webapp only reads it, and the
+daemon populates it. So "split at the provider" does NOT mean "split where the
+message is declared". It means split where the fact ORIGINATES, which for every
+conversation fact is `conversation.v1`.
+
+A consumer-named namespace is never the place to declare a new spelling of an
+upstream fact, because nothing on the consuming side produces one.
+
+**The guard against over-segregation**, which is ISP's own failure mode: split
+on a strict SEMANTIC subset, never on a RENDERING subset. A component that
+displays three of five fields still MEANS all five — that is a renderer using
+part of what it was given, not a case for extraction.
+
+**Why the distinction is self-enforcing rather than a matter of taste.** A
+duplicated resolved VALUE is re-resolved on the next publish, so a stale copy
+self-corrects and authority stays with the resolver. A duplicated TYPE has no
+such property: it is a second definition maintained by hand, and it diverges
+silently the moment one side gains an arm. Both divergences in this tree — an
+outcome vocabulary at three different sizes, and `workflow` against `journal` —
+happened with nothing failing to compile.
+
+## Depth is not synthesis
+
+Stated explicitly, because the corrected carve-out is otherwise misread as "a
+component's data must sit at the top level of its own message" — and acting on
+that misreading flattens an embedded import straight back into a re-spelling.
+
+**What matters is not how deep a field is, but HOW MANY MESSAGES a component
+needs.** One message, at any depth, is fine. Two or more SIBLING messages is
+synthesis, and synthesis is what the rule forbids.
+
+In practice the question barely arises, because the component tree and the
+message tree have the same shape. Each component is handed one field and passes
+one of ITS OWN fields to each child: `encompassing(main.encomp)` calls
+`smaller(encomp.smaller_field)`. Every call site is depth-1 relative to what
+that component received. Nobody writes `smaller(main.encomp.smaller_field)`.
