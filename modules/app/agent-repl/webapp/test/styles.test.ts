@@ -1010,17 +1010,9 @@ describe("async catalog badges", () => {
     expect(badge).toMatch(/cursor:\s*pointer/);
   });
 
-  it("sizes the token figure under the label so the label stays the badge's voice", () => {
-    // Arrange / Act — the .async-badge-tokens rule.
-    // Assert
-    expect(blockAfter(css, ".async-badge-tokens")).toMatch(/font-size:\s*0\.7rem/);
-  });
-
-  it("sets no color on the token figure, leaving the heat ramp to color it", () => {
-    // Arrange / Act — a muted grey here would fight the shared `.token-heat`.
-    // Assert
-    expect(blockAfter(css, ".async-badge-tokens")).not.toMatch(/color:/);
-  });
+  // RETIRED: two cases stood here pinning the `.async-badge-tokens` rule. The
+  // badge's token figure was read off `SessionView.token_utilization`, which is
+  // RESERVED with no successor, so neither the figure nor its rule survives.
 });
 
 /* The heat ramp is ONE rule. Every surface that reports an uncached-input
