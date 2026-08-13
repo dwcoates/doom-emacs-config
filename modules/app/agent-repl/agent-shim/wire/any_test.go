@@ -59,8 +59,14 @@ func TestWriteAnyIsByteIdenticalToTheHandRolledSequence(t *testing.T) {
 }
 
 func TestReadAnyDecodesTheHandRolledEncoding(t *testing.T) {
-	// Arrange — the other direction of the same contract: a peer still running
-	// the old code must be readable.
+	// Arrange — the other direction of the same contract.
+	//
+	// This asserts nothing about SCHEMA compatibility, and must not be read as
+	// doing so: what is pinned is that the ENCODING (anypb.New, proto.Marshal,
+	// WriteFrame) decodes through ReadAny, message type held constant. A peer
+	// built against different proto package names produces a type_url this
+	// binary cannot resolve, and TestReadAnyRejectsAnUnknownTypeURL is where
+	// that case is pinned — as a loud failure, which is the intended outcome.
 	var buf bytes.Buffer
 	handRolled(t, &buf, wrapperspb.String("from an older peer"))
 
