@@ -18,6 +18,7 @@ PROTOS := \
   protocol/v1/entry-delivery.proto \
   protocol/v1/external.proto \
   protocol/v1/message-page.proto \
+  agentshim/v1/cursor.proto \
   agentshim/v1/entry.proto \
   agentshim/v1/unsupported.proto \
   agentshim/v1/write.proto \
