@@ -1120,42 +1120,11 @@ message HealthStatus {
 // in a package the daemon imports would hand the daemon `Plane` and `dedup_key`
 // for free. NOTHING REPLACES `StoreWriteAck` — see the gap note.
 
-// shim-claude-sidecar file-cursor state, persisted by the store (§6.2 cursor table).
-message CursorState {
-  string file_id = 1;  // "dev:inode"
-  string path = 2;
-  int64 offset = 3;
-  bytes carry = 4;     // bounded partial-line carry
-}
-
-// Cursor recovery over the socket (§7.3): the sidecar asks the store for its
-// persisted cursors at startup. Empty file_id = all cursors.
-message CursorQuery {
-  string file_id = 1;
-}
-
-message OpenTaskState {
-  // 1 WAS `started`, the `TaskStarted` Event that opened the task, and NOTHING
-  // REPLACES IT. `Event` is retired and detached work is modelled on
-  // frontend.v1 now, so this message is left able to say WHEN a task was last
-  // active but not WHICH task it is — see the gap note. Number and name are
-  // reserved so the slot cannot come back meaning something else.
-  reserved 1;
-  reserved "started";
-  int64 last_activity_at_ms = 2;
-}
-
-message CursorList {
-  repeated CursorState cursors = 1;
-  // Authoritative persisted tasks with no TaskEnded for the same session/task
-  // identity. Returned with an all-cursors startup query so the sidecar
-  // restores liveness and last activity from durable state, not file presence.
-  repeated OpenTaskState open_tasks = 2;
-  // True only when open_tasks was computed by a store that implements the
-  // authoritative lifecycle query. Distinguishes an empty set from an older
-  // store that does not understand field 2.
-  bool open_tasks_authoritative = 3;
-}
+// `CursorState`, `CursorQuery`, `OpenTaskState` and `CursorList` are GONE FROM
+// THIS PACKAGE, unchanged, to `agentshim/v1/cursor.proto`. They are store↔
+// sidecar traffic and never cross the daemon↔shim boundary this package
+// describes; they sat here only because the restructure moved this file
+// wholesale rather than by surface.
 
 // `FilePlaneDiagnostic` and `DiagnosticSourceRuntime` are RETIRED. Both were
 // definitionally plane-specific — the message was valid only on a PERSISTENT
