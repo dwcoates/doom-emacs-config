@@ -372,6 +372,43 @@ re-encodings the daemon built from conversation records.
 `conversation.v1.MessageEntry` at all, so today the re-encoding is forced by
 the schema rather than chosen.
 
+## The shim-store database is nuked, not migrated
+
+`shim-store`'s SQLite database is DISPOSABLE and is to be regarded as EMPTY. A
+schema change deletes the file and recreates it; there are no migrations and no
+backfills, and existing rows go away with the database. This is the same posture
+the frozen durable shapes above take from the other end — `state.v1` replay is
+protected by never changing those messages, not by migrating what was written
+under them.
+
+**The absence of a migration is a DECISION, not an oversight to be helpfully
+corrected.** Two things go wrong when it is left unwritten:
+
+- An agent that assumes the database must be preserved invents migration and
+  backfill work nobody wants and nobody will review. It is worse than wasted
+  effort: migration code asserts a compatibility guarantee this module has never
+  made, and the next reader believes it.
+- A stale database is more expensive than an empty one. Rows written under a
+  retired schema, sitting on disk while new code reads them, produce
+  PLAUSIBLE-LOOKING wrong data rather than a clean failure — nothing announces
+  that the rows are stale, so everyone reading them reasons from data that was
+  never valid under the current contract.
+
+**Say this explicitly in the instructions of any agent that touches the store's
+schema.** An agent working from the code alone sees a `schema_meta(version
+INTEGER)` table and reasonably infers that migrations are expected. Nothing in
+the tree corrects that inference.
+
+The pending case is `shim-store`'s `entry` table gaining a `parent_message_id`
+column, extracted at ingest exactly as `top_level_message_id` already is, plus an
+index `entry(session_id, parent_message_id, seq)` mirroring the existing
+`entry_message_owner`. It exists so `frontend.v1.PageScopeInside` can page a
+nested container in one indexed pass instead of a scan:
+`conversation.v1.MessageEntry.parent` currently lives inside the opaque
+`payload` BLOB, and `top_level_message_id` cannot substitute because a subagent
+and a subagent inside IT share one value. That change ships with no migration and
+no backfill.
+
 ## Committing to master means bouncing what you changed
 
 Every component here is a built artifact, and every running process keeps
