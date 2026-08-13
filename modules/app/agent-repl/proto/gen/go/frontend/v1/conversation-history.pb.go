@@ -56,7 +56,16 @@ type FirstPageCmd struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Which conversation. The daemon's position is per reader PER WORKSPACE, so
 	// this is what selects the position being reset.
-	Workspace     string `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Workspace string `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// WHICH CONTAINER this page walks: the feed, or the inside of one message.
+	// The daemon's position is per reader per workspace PER SCOPE, so this also
+	// selects which position is being reset — opening a subagent does not throw
+	// away where the reader was in the feed.
+	//
+	// Unset is NOT a default. A request that does not state its scope is REFUSED,
+	// never read as the feed: defaulting would answer a client that forgot to
+	// name its container with the whole conversation.
+	Scope         *PageScope `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -98,6 +107,13 @@ func (x *FirstPageCmd) GetWorkspace() string {
 	return ""
 }
 
+func (x *FirstPageCmd) GetScope() *PageScope {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
 // Ask for the page IMMEDIATELY OLDER than the last one served to this reader.
 //
 // IT CARRIES NO POSITION, and that absence is the design. From a reader with no
@@ -105,8 +121,16 @@ func (x *FirstPageCmd) GetWorkspace() string {
 // defaulting would turn a client bug into a silent tail read, and "I have no
 // position" already has its own verb.
 type NextPageCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Workspace     string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// WHICH CONTAINER to walk back through. It names the scope, never a position
+	// within it — the daemon still owns where this reader is inside that scope,
+	// so the no-position rule above is untouched.
+	//
+	// Unset is NOT a default and is REFUSED, exactly as on FirstPageCmd: a
+	// load-more that forgot which container it belongs to must not silently walk
+	// back through the feed instead.
+	Scope         *PageScope `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -146,6 +170,13 @@ func (x *NextPageCmd) GetWorkspace() string {
 		return x.Workspace
 	}
 	return ""
+}
+
+func (x *NextPageCmd) GetScope() *PageScope {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
 }
 
 // AT MOST TEN messages, oldest first.
@@ -451,11 +482,13 @@ var File_frontend_v1_conversation_history_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_conversation_history_proto_rawDesc = "" +
 	"\n" +
-	"&frontend/v1/conversation-history.proto\x12\vfrontend.v1\x1a\x16frontend/v1/feed.proto\",\n" +
+	"&frontend/v1/conversation-history.proto\x12\vfrontend.v1\x1a#frontend/v1/conversation-page.proto\x1a\x16frontend/v1/feed.proto\"Z\n" +
 	"\fFirstPageCmd\x12\x1c\n" +
-	"\tworkspace\x18\x01 \x01(\tR\tworkspace\"+\n" +
+	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12,\n" +
+	"\x05scope\x18\x02 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"Y\n" +
 	"\vNextPageCmd\x12\x1c\n" +
-	"\tworkspace\x18\x01 \x01(\tR\tworkspace\"\xf2\x05\n" +
+	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12,\n" +
+	"\x05scope\x18\x02 \x01(\v2\x16.frontend.v1.PageScopeR\x05scope\"\xf2\x05\n" +
 	"\x17ConversationHistoryPage\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -498,26 +531,29 @@ var file_frontend_v1_conversation_history_proto_goTypes = []any{
 	(*ConversationHistoryPage)(nil), // 2: frontend.v1.ConversationHistoryPage
 	(*HistoryHasMore)(nil),          // 3: frontend.v1.HistoryHasMore
 	(*HistoryAtStart)(nil),          // 4: frontend.v1.HistoryAtStart
-	(*Message)(nil),                 // 5: frontend.v1.Message
+	(*PageScope)(nil),               // 5: frontend.v1.PageScope
+	(*Message)(nil),                 // 6: frontend.v1.Message
 }
 var file_frontend_v1_conversation_history_proto_depIdxs = []int32{
-	5,  // 0: frontend.v1.ConversationHistoryPage.message_1:type_name -> frontend.v1.Message
-	5,  // 1: frontend.v1.ConversationHistoryPage.message_2:type_name -> frontend.v1.Message
-	5,  // 2: frontend.v1.ConversationHistoryPage.message_3:type_name -> frontend.v1.Message
-	5,  // 3: frontend.v1.ConversationHistoryPage.message_4:type_name -> frontend.v1.Message
-	5,  // 4: frontend.v1.ConversationHistoryPage.message_5:type_name -> frontend.v1.Message
-	5,  // 5: frontend.v1.ConversationHistoryPage.message_6:type_name -> frontend.v1.Message
-	5,  // 6: frontend.v1.ConversationHistoryPage.message_7:type_name -> frontend.v1.Message
-	5,  // 7: frontend.v1.ConversationHistoryPage.message_8:type_name -> frontend.v1.Message
-	5,  // 8: frontend.v1.ConversationHistoryPage.message_9:type_name -> frontend.v1.Message
-	5,  // 9: frontend.v1.ConversationHistoryPage.message_10:type_name -> frontend.v1.Message
-	3,  // 10: frontend.v1.ConversationHistoryPage.more:type_name -> frontend.v1.HistoryHasMore
-	4,  // 11: frontend.v1.ConversationHistoryPage.start:type_name -> frontend.v1.HistoryAtStart
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	5,  // 0: frontend.v1.FirstPageCmd.scope:type_name -> frontend.v1.PageScope
+	5,  // 1: frontend.v1.NextPageCmd.scope:type_name -> frontend.v1.PageScope
+	6,  // 2: frontend.v1.ConversationHistoryPage.message_1:type_name -> frontend.v1.Message
+	6,  // 3: frontend.v1.ConversationHistoryPage.message_2:type_name -> frontend.v1.Message
+	6,  // 4: frontend.v1.ConversationHistoryPage.message_3:type_name -> frontend.v1.Message
+	6,  // 5: frontend.v1.ConversationHistoryPage.message_4:type_name -> frontend.v1.Message
+	6,  // 6: frontend.v1.ConversationHistoryPage.message_5:type_name -> frontend.v1.Message
+	6,  // 7: frontend.v1.ConversationHistoryPage.message_6:type_name -> frontend.v1.Message
+	6,  // 8: frontend.v1.ConversationHistoryPage.message_7:type_name -> frontend.v1.Message
+	6,  // 9: frontend.v1.ConversationHistoryPage.message_8:type_name -> frontend.v1.Message
+	6,  // 10: frontend.v1.ConversationHistoryPage.message_9:type_name -> frontend.v1.Message
+	6,  // 11: frontend.v1.ConversationHistoryPage.message_10:type_name -> frontend.v1.Message
+	3,  // 12: frontend.v1.ConversationHistoryPage.more:type_name -> frontend.v1.HistoryHasMore
+	4,  // 13: frontend.v1.ConversationHistoryPage.start:type_name -> frontend.v1.HistoryAtStart
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_conversation_history_proto_init() }
@@ -525,6 +561,7 @@ func file_frontend_v1_conversation_history_proto_init() {
 	if File_frontend_v1_conversation_history_proto != nil {
 		return
 	}
+	file_frontend_v1_conversation_page_proto_init()
 	file_frontend_v1_feed_proto_init()
 	file_frontend_v1_conversation_history_proto_msgTypes[2].OneofWrappers = []any{
 		(*ConversationHistoryPage_More)(nil),
