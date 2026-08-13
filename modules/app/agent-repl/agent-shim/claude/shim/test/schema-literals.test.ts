@@ -14,7 +14,7 @@ import {
   sessionCommandSpecs,
   syntheticModelLiteral,
 } from "../../../../proto/ts/schema-literals.js";
-import { SessionCommand } from "../../../../proto/gen/ts/frontend/v1/commands_pb.js";
+import { SessionCommand } from "../../../../proto/gen/ts/frontend/v1/shared_pb.js";
 
 describe("schema literals from the shim", () => {
   it("reads the model command's literal and argument form", () => {

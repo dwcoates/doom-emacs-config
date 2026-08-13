@@ -4223,7 +4223,7 @@ var File_frontend_v1_feed_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\n" +
-	"\x16frontend/v1/feed.proto\x12\vfrontend.v1\x1a\x1dconversation/v1/content.proto\x1a\x1econversation/v1/payloads.proto\x1a\x1afrontend/v1/commands.proto\x1a\x18frontend/v1/errors.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x9a\x01\n" +
+	"\x16frontend/v1/feed.proto\x12\vfrontend.v1\x1a\x1dconversation/v1/content.proto\x1a\x1econversation/v1/payloads.proto\x1a\x18frontend/v1/shared.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x9a\x01\n" +
 	"\x11ConversationDelta\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x120\n" +
 	"\bmessages\x18\x02 \x03(\v2\x14.frontend.v1.MessageR\bmessages\x12\x1f\n" +
@@ -4586,8 +4586,7 @@ func file_frontend_v1_feed_proto_init() {
 	if File_frontend_v1_feed_proto != nil {
 		return
 	}
-	file_frontend_v1_commands_proto_init()
-	file_frontend_v1_errors_proto_init()
+	file_frontend_v1_shared_proto_init()
 	file_frontend_v1_feed_proto_msgTypes[4].OneofWrappers = []any{
 		(*Message_Durable)(nil),
 		(*Message_Ephemeral)(nil),

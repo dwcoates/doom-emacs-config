@@ -41,7 +41,7 @@ import {
   SessionCommand,
   SessionCommandSchema,
   session_command_spec,
-} from "../gen/ts/frontend/v1/commands_pb.js";
+} from "../gen/ts/frontend/v1/shared_pb.js";
 
 /** One session command's schema facts. */
 export interface SessionCommandSpec {
